@@ -6,7 +6,7 @@ This gate measures coherent standalone provider ownership against the exact
 happen to exist in Darwin libc: a symbol is covered only when a project facade
 claims its Android ABI and semantic state.
 
-The current unique ownership set is 60 imports:
+The current unique ownership set is 73 imports:
 
 | Provider | Imports | Boundary |
 |---|---:|---|
@@ -18,9 +18,10 @@ The current unique ownership set is 60 imports:
 | pthread | 24 | TLS, once, mutex/attributes, condition variables, rwlocks, join/detach |
 | process-state | 3 | immutable environment, properties, and auxv snapshot |
 | phdr | 1 | loader-owned Android ELF program-header snapshots |
+| stdio | 13 | Android FILE tokens, `__sF`, and fixed-register binary I/O |
 
-Coverage by the original ABI classification is A 11/11, B 17/76, C 29/65,
-and D 3/8. The remaining 100 imports stay explicit capability failures. The
+Coverage by the original ABI classification is A 11/11, B 29/76, C 30/65,
+and D 3/8. The remaining 87 imports stay explicit capability failures. The
 largest gaps are Android `FILE`/stdio and locale state, translated numeric and
 formatting routines, additional writable filesystem operations, process
 lifecycle, and raw syscall handling.
