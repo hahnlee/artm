@@ -25,11 +25,12 @@ pthread="$root/tools/android-bionic-pthread-provider/libcxx-pthread-imports.tsv"
 process_state="$root/tools/bionic-process-state-facade/manifests/imports.tsv"
 stdio="$root/tools/bionic-stdio-facade/manifests/imports.tsv"
 locale="$root/tools/bionic-locale-facade/manifests/imports.tsv"
+lifecycle="$root/tools/bionic-dso-lifecycle-facade/manifests/imports.tsv"
 leaf_source="$root/tools/bionic-libc-leaf-facade/src/leaf.c"
 errno_source="$root/tools/bionic-errno-tls/src/errno_tls.c"
 phdr_source="$root/tools/android-dl-iterate-phdr-provider/src/provider.cc"
 
-for file in "$universe" "$allocator" "$filesystem" "$time" "$pthread" "$process_state" "$stdio" "$locale" \
+for file in "$universe" "$allocator" "$filesystem" "$time" "$pthread" "$process_state" "$stdio" "$locale" "$lifecycle" \
             "$leaf_source" "$errno_source" "$phdr_source"; do
   [[ -f "$file" ]] || fail "missing provider manifest: $file"
 done
@@ -50,6 +51,8 @@ done
   fail "stdio import manifest drift"
 [[ "$(sha "$locale")" == "$LOCALE_IMPORTS_SHA256" ]] ||
   fail "locale import manifest drift"
+[[ "$(sha "$lifecycle")" == "$LIFECYCLE_IMPORTS_SHA256" ]] ||
+  fail "DSO lifecycle import manifest drift"
 [[ "$(sha "$leaf_source")" == "$LEAF_PROVIDER_SOURCE_SHA256" ]] ||
   fail "leaf provider source drift"
 [[ "$(sha "$errno_source")" == "$ERRNO_PROVIDER_SOURCE_SHA256" ]] ||
@@ -74,6 +77,7 @@ awk -F '\t' 'NR > 1 && $4 == "supported" { print "pthread\t" $1 }' "$pthread" >>
 awk -F '\t' 'NR > 1 { print "process-state\t" $1 }' "$process_state" >>"$owners"
 awk -F '\t' 'NR > 1 && $4 !~ /^rejected-/ { print "stdio\t" $1 }' "$stdio" >>"$owners"
 awk -F '\t' 'NR > 1 { print "locale\t" $1 }' "$locale" >>"$owners"
+awk -F '\t' '{ print "lifecycle\t" $1 }' "$lifecycle" >>"$owners"
 printf 'phdr\tdl_iterate_phdr\n' >>"$owners"
 
 LC_ALL=C sort -t $'\t' -k2,2 -k1,1 "$owners" -o "$owners"
@@ -103,6 +107,7 @@ allocator	4
 errno	1
 filesystem	13
 leaf	11
+lifecycle	2
 locale	19
 phdr	1
 process-state	3
@@ -121,12 +126,12 @@ cat >"$tmp/expected-class-counts" <<'EOF'
 A	11	11
 B	29	76
 C	49	65
-D	3	8
+D	5	8
 EOF
 diff -u "$tmp/expected-class-counts" "$tmp/class-counts" ||
   fail "capability-class coverage drift"
 
 echo "android35-libcxx-provider-coverage: PASS imports=$universe_count owned=$owned_count duplicate-owners=0"
-echo "providers=leaf:11 allocator:4 errno:1 filesystem:13 time:3 pthread:24 process-state:3 phdr:1 stdio:13 locale:19"
-echo "classes=A:11/11 B:29/76 C:49/65 D:3/8 remaining=68"
+echo "providers=leaf:11 allocator:4 errno:1 filesystem:13 time:3 pthread:24 process-state:3 phdr:1 stdio:13 locale:19 lifecycle:2"
+echo "classes=A:11/11 B:29/76 C:49/65 D:5/8 remaining=66"
 echo "scope=standalone-gates-not-yet-one-runtime-namespace"
