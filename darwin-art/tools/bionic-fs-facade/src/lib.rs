@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 const AT_FDCWD: c_int = -100;
 const O_ACCMODE: c_int = 3;
+const O_RDONLY: c_int = 0;
 const O_WRONLY: c_int = 1;
 const O_RDWR: c_int = 2;
 const O_CREAT: c_int = 64;
@@ -51,6 +52,10 @@ const DARWIN_ELOOP: i32 = 62;
 const AT_SYMLINK_NOFOLLOW: c_int = 0x100;
 const AT_REMOVEDIR: c_int = 0x200;
 const ANDROID_ST_RDONLY: u64 = 0x0001;
+const ANDROID_S_IFCHR: u32 = 0o020000;
+const ANDROID_RANDOM_MODE: u32 = ANDROID_S_IFCHR | 0o666;
+const ANDROID_RANDOM_RDEV: u64 = 0x108;
+const ANDROID_URANDOM_RDEV: u64 = 0x109;
 const PATHCONF_MIN: c_int = 0;
 const PATHCONF_MAX: c_int = 19;
 
@@ -77,6 +82,10 @@ unsafe extern "C" {
         status: *mut HostStatvfs,
         host_errno: *mut c_int,
     ) -> c_int;
+    #[link_name = "kSecRandomDefault"]
+    static SEC_RANDOM_DEFAULT: *const c_void;
+    #[link_name = "SecRandomCopyBytes"]
+    fn sec_random_copy_bytes(random: *const c_void, count: usize, bytes: *mut u8) -> c_int;
 }
 
 #[repr(C)]
@@ -193,22 +202,39 @@ const _: () = assert!(size_of::<AndroidStatvfs>() == 112);
 const _: () = assert!(std::mem::offset_of!(AndroidStatvfs, f_flag) == 72);
 const _: () = assert!(size_of::<HostStatvfs>() == 88);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RandomDeviceKind {
+    Random,
+    Urandom,
+}
+
+enum Descriptor {
+    File(File),
+    Random(RandomDeviceKind),
+}
+
 struct DescriptorTable {
     next: c_int,
-    files: BTreeMap<c_int, File>,
+    free: Vec<c_int>,
+    entries: BTreeMap<c_int, Descriptor>,
 }
 
 impl Default for DescriptorTable {
     fn default() -> Self {
         Self {
             next: 10_000,
-            files: BTreeMap::new(),
+            free: Vec::new(),
+            entries: BTreeMap::new(),
         }
     }
 }
 
 impl DescriptorTable {
-    fn insert(&mut self, file: File) -> Result<c_int, ()> {
+    fn insert(&mut self, descriptor: Descriptor) -> Result<c_int, ()> {
+        if let Some(fd) = self.free.pop() {
+            assert!(self.entries.insert(fd, descriptor).is_none());
+            return Ok(fd);
+        }
         for _ in 0..100_000 {
             let candidate = self.next;
             self.next = if self.next == c_int::MAX {
@@ -216,12 +242,51 @@ impl DescriptorTable {
             } else {
                 self.next + 1
             };
-            if let std::collections::btree_map::Entry::Vacant(entry) = self.files.entry(candidate) {
-                entry.insert(file);
+            if let std::collections::btree_map::Entry::Vacant(entry) = self.entries.entry(candidate)
+            {
+                entry.insert(descriptor);
                 return Ok(candidate);
             }
         }
         Err(())
+    }
+
+    fn close_entry(&mut self, fd: c_int) -> Option<Descriptor> {
+        let descriptor = self.entries.remove(&fd)?;
+        self.free.push(fd);
+        Some(descriptor)
+    }
+
+    fn take(&mut self, fd: c_int) -> Option<Descriptor> {
+        self.entries.remove(&fd)
+    }
+
+    fn restore(&mut self, fd: c_int, descriptor: Descriptor) {
+        assert!(self.entries.insert(fd, descriptor).is_none());
+    }
+
+    fn release(&mut self, fd: c_int) {
+        assert!(!self.entries.contains_key(&fd));
+        self.free.push(fd);
+    }
+}
+
+trait EntropyBackend: Send + Sync {
+    fn fill(&self, bytes: &mut [u8]) -> Result<(), ()>;
+}
+
+struct SecurityEntropy;
+
+impl EntropyBackend for SecurityEntropy {
+    fn fill(&self, bytes: &mut [u8]) -> Result<(), ()> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        // SAFETY: Security.framework accepts this writable slice for its exact
+        // length and does not retain it. The default generator is process-owned.
+        let status =
+            unsafe { sec_random_copy_bytes(SEC_RANDOM_DEFAULT, bytes.len(), bytes.as_mut_ptr()) };
+        if status == 0 { Ok(()) } else { Err(()) }
     }
 }
 
@@ -294,11 +359,21 @@ pub struct Facade {
     cwd: Mutex<Vec<u8>>,
     descriptors: Mutex<DescriptorTable>,
     directories: Mutex<DirectoryTable>,
+    entropy: Arc<dyn EntropyBackend>,
     capability_failure: AtomicBool,
 }
 
 impl Facade {
     pub fn new(root: File, guest_mount: &[u8], cwd: &[u8]) -> Result<Self, &'static str> {
+        Self::new_with_entropy(root, guest_mount, cwd, Arc::new(SecurityEntropy))
+    }
+
+    fn new_with_entropy(
+        root: File,
+        guest_mount: &[u8],
+        cwd: &[u8],
+        entropy: Arc<dyn EntropyBackend>,
+    ) -> Result<Self, &'static str> {
         let mut prefix = MountTable::new();
         prefix
             .add_mount(1, MountKind::Immutable, false, guest_mount)
@@ -324,6 +399,7 @@ impl Facade {
             cwd: Mutex::new(initial_cwd.normalized_path),
             descriptors: Mutex::new(DescriptorTable::default()),
             directories: Mutex::new(DirectoryTable::default()),
+            entropy,
             capability_failure: AtomicBool::new(false),
         })
     }
@@ -408,7 +484,38 @@ impl Facade {
         Ok(())
     }
 
+    fn random_device(path: &[u8]) -> Option<RandomDeviceKind> {
+        match path {
+            b"/dev/random" => Some(RandomDeviceKind::Random),
+            b"/dev/urandom" => Some(RandomDeviceKind::Urandom),
+            _ => None,
+        }
+    }
+
+    fn open_random(&self, kind: RandomDeviceKind, flags: c_int) -> c_int {
+        if flags & O_ACCMODE != O_RDONLY
+            || flags & WRITE_FLAGS != 0
+            || flags & O_TMPFILE == O_TMPFILE
+        {
+            return self.fail(ANDROID_EROFS);
+        }
+        if flags != O_RDONLY {
+            return self.fail(ANDROID_EOPNOTSUPP);
+        }
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability(),
+        };
+        match descriptors.insert(Descriptor::Random(kind)) {
+            Ok(fd) => fd,
+            Err(()) => self.fail(ANDROID_EMFILE),
+        }
+    }
+
     fn open(&self, path: &[u8], flags: c_int) -> c_int {
+        if let Some(kind) = Self::random_device(path) {
+            return self.open_random(kind, flags);
+        }
         if let Err(error) = self.validate_flags(flags) {
             return self.fail(error);
         }
@@ -431,7 +538,7 @@ impl Facade {
             Ok(descriptors) => descriptors,
             Err(_) => return self.fail_capability(),
         };
-        match descriptors.insert(opened.into_file()) {
+        match descriptors.insert(Descriptor::File(opened.into_file())) {
             Ok(fd) => fd,
             Err(()) => self.fail(ANDROID_EMFILE),
         }
@@ -445,10 +552,10 @@ impl Facade {
             Ok(descriptors) => descriptors,
             Err(_) => return self.fail_capability(),
         };
-        if descriptors.files.contains_key(&directory_fd) {
-            self.fail(ANDROID_EOPNOTSUPP)
-        } else {
-            self.fail(ANDROID_EBADF)
+        match descriptors.entries.get(&directory_fd) {
+            Some(Descriptor::Random(_)) => self.fail(ANDROID_ENOTDIR),
+            Some(Descriptor::File(_)) => self.fail(ANDROID_EOPNOTSUPP),
+            None => self.fail(ANDROID_EBADF),
         }
     }
 
@@ -463,7 +570,7 @@ impl Facade {
             Ok(descriptors) => descriptors,
             Err(_) => return self.fail_capability() as isize,
         };
-        let Some(file) = descriptors.files.get_mut(&fd) else {
+        let Some(descriptor) = descriptors.entries.get_mut(&fd) else {
             return self.fail(ANDROID_EBADF) as isize;
         };
         // SAFETY: the guest ABI requires a writable buffer for count bytes. Zero length
@@ -474,22 +581,31 @@ impl Facade {
             buffer.cast::<u8>()
         };
         let bytes = unsafe { slice::from_raw_parts_mut(pointer, count) };
-        match file.read(bytes) {
-            Ok(read) => read as isize,
-            Err(error) => self.fail_io(&error) as isize,
+        match descriptor {
+            Descriptor::File(file) => match file.read(bytes) {
+                Ok(read) => read as isize,
+                Err(error) => self.fail_io(&error) as isize,
+            },
+            Descriptor::Random(_) => match self.entropy.fill(bytes) {
+                Ok(()) => count as isize,
+                Err(()) => self.fail(ANDROID_EIO) as isize,
+            },
         }
     }
 
     fn close(&self, fd: c_int) -> c_int {
-        let file = {
+        let descriptor = {
             let mut descriptors = match self.descriptors.lock() {
                 Ok(descriptors) => descriptors,
                 Err(_) => return self.fail_capability(),
             };
-            let Some(file) = descriptors.files.remove(&fd) else {
+            let Some(descriptor) = descriptors.close_entry(fd) else {
                 return self.fail(ANDROID_EBADF);
             };
-            file
+            descriptor
+        };
+        let Descriptor::File(file) = descriptor else {
+            return 0;
         };
         let raw = file.into_raw_fd();
         // SAFETY: into_raw_fd transfers this one live descriptor to host close.
@@ -509,14 +625,19 @@ impl Facade {
             Ok(descriptors) => descriptors,
             Err(_) => return self.fail_capability(),
         };
-        let Some(file) = descriptors.files.get(&fd) else {
+        let Some(descriptor) = descriptors.entries.get(&fd) else {
             return self.fail(ANDROID_EBADF);
         };
-        let metadata = match file.metadata() {
-            Ok(metadata) => metadata,
-            Err(error) => return self.fail_io(&error),
+        let translated = match descriptor {
+            Descriptor::File(file) => {
+                let metadata = match file.metadata() {
+                    Ok(metadata) => metadata,
+                    Err(error) => return self.fail_io(&error),
+                };
+                metadata_to_android(&metadata)
+            }
+            Descriptor::Random(kind) => random_device_stat(*kind),
         };
-        let translated = metadata_to_android(&metadata);
         // SAFETY: the guest ABI requires a writable 128-byte Android stat object.
         unsafe { status.write(translated) };
         0
@@ -525,6 +646,11 @@ impl Facade {
     unsafe fn stat(&self, path: &[u8], status: *mut AndroidStat, no_follow: bool) -> c_int {
         if status.is_null() {
             return self.fail(ANDROID_EFAULT);
+        }
+        if let Some(kind) = Self::random_device(path) {
+            // SAFETY: the Android ABI requires one writable 128-byte stat object.
+            unsafe { status.write(random_device_stat(kind)) };
+            return 0;
         }
         let resolution = match self.resolve(path) {
             Ok(resolution) => resolution,
@@ -630,7 +756,7 @@ impl Facade {
             Ok(descriptors) => descriptors,
             Err(_) => return self.fail_capability(),
         };
-        if descriptors.files.contains_key(&fd) {
+        if descriptors.entries.contains_key(&fd) {
             self.fail(ANDROID_EROFS)
         } else {
             self.fail(ANDROID_EBADF)
@@ -648,10 +774,10 @@ impl Facade {
                 return Err(ANDROID_EIO);
             }
         };
-        if descriptors.files.contains_key(&directory_fd) {
-            Err(ANDROID_EOPNOTSUPP)
-        } else {
-            Err(ANDROID_EBADF)
+        match descriptors.entries.get(&directory_fd) {
+            Some(Descriptor::Random(_)) => Err(ANDROID_ENOTDIR),
+            Some(Descriptor::File(_)) => Err(ANDROID_EOPNOTSUPP),
+            None => Err(ANDROID_EBADF),
         }
     }
 
@@ -684,9 +810,9 @@ impl Facade {
             Ok(descriptors) => descriptors,
             Err(_) => return self.fail_capability(),
         };
-        if descriptors.files.contains_key(&fd) {
-            // The broker admits only regular files and directories, neither of
-            // which can be a terminal. isatty returns zero and publishes ENOTTY.
+        if descriptors.entries.contains_key(&fd) {
+            // Brokered files, directories, and synthetic random devices are
+            // not terminals. isatty returns zero and publishes ENOTTY.
             Self::set_android_errno(ANDROID_ENOTTY);
             0
         } else {
@@ -853,8 +979,12 @@ impl Facade {
                 return ptr::null_mut();
             }
         };
-        let Some(file) = descriptors.files.get(&fd) else {
+        let Some(descriptor) = descriptors.entries.get(&fd) else {
             self.fail(ANDROID_EBADF);
+            return ptr::null_mut();
+        };
+        let Descriptor::File(file) = descriptor else {
+            self.fail(ANDROID_ENOTDIR);
             return ptr::null_mut();
         };
         match file.metadata() {
@@ -868,10 +998,12 @@ impl Facade {
                 return ptr::null_mut();
             }
         }
-        let file = descriptors
-            .files
-            .remove(&fd)
-            .expect("validated virtual descriptor must remain present under its lock");
+        let Descriptor::File(file) = descriptors
+            .take(fd)
+            .expect("validated virtual descriptor must remain present under its lock")
+        else {
+            unreachable!("validated descriptor kind changed under lock")
+        };
         let raw_fd = file.into_raw_fd();
         let mut host_errno = 0;
         // SAFETY: fdopendir consumes raw_fd only when it returns a stream.
@@ -881,10 +1013,11 @@ impl Facade {
             // SAFETY: failed fdopendir leaves ownership of the still-live descriptor
             // with the caller; restore it under the exact same virtual descriptor.
             let restored = unsafe { File::from_raw_fd(raw_fd) };
-            assert!(descriptors.files.insert(fd, restored).is_none());
+            descriptors.restore(fd, Descriptor::File(restored));
             self.fail_host_errno(host_errno);
             return ptr::null_mut();
         }
+        descriptors.release(fd);
         drop(descriptors);
 
         let mut directories = match self.directories.lock() {
@@ -1049,8 +1182,90 @@ fn metadata_to_android(metadata: &Metadata) -> AndroidStat {
     }
 }
 
+fn random_device_stat(kind: RandomDeviceKind) -> AndroidStat {
+    let (inode, device) = match kind {
+        RandomDeviceKind::Random => (1, ANDROID_RANDOM_RDEV),
+        RandomDeviceKind::Urandom => (2, ANDROID_URANDOM_RDEV),
+    };
+    AndroidStat {
+        st_dev: 0,
+        st_ino: inode,
+        st_mode: ANDROID_RANDOM_MODE,
+        st_nlink: 1,
+        st_uid: 0,
+        st_gid: 0,
+        st_rdev: device,
+        pad1: 0,
+        st_size: 0,
+        st_blksize: 4096,
+        pad2: 0,
+        st_blocks: 0,
+        st_atim: AndroidTimespec::default(),
+        st_mtim: AndroidTimespec::default(),
+        st_ctim: AndroidTimespec::default(),
+        unused4: 0,
+        unused5: 0,
+    }
+}
+
 thread_local! {
     static ACTIVE: RefCell<Option<Arc<Facade>>> = const { RefCell::new(None) };
+}
+
+pub const IOCTL_FD_INFO_ABI_VERSION: u32 = 1;
+pub const IOCTL_FD_OTHER: c_int = 0;
+pub const IOCTL_FD_RANDOM_DEVICE: c_int = 1;
+pub const IOCTL_FD_FOUND: c_int = 0;
+pub const IOCTL_FD_BAD: c_int = 1;
+pub const IOCTL_FD_CAPABILITY_UNAVAILABLE: c_int = 2;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IoctlFdInfo {
+    pub abi_version: u32,
+    pub kind: c_int,
+}
+
+const _: () = assert!(size_of::<IoctlFdInfo>() == 8);
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `info` must point to a writable `DarwinArtBionicIoctlFdInfo`. The callback
+/// must run on a pthread with this filesystem facade activated.
+pub unsafe extern "C" fn darwin_art_bionic_fs_ioctl_fd_lookup(
+    _context: *mut c_void,
+    fd: c_int,
+    info: *mut IoctlFdInfo,
+) -> c_int {
+    if info.is_null() {
+        return IOCTL_FD_CAPABILITY_UNAVAILABLE;
+    }
+    let facade = ACTIVE.with(|active| active.borrow().clone());
+    let Some(facade) = facade else {
+        return IOCTL_FD_CAPABILITY_UNAVAILABLE;
+    };
+    let descriptors = match facade.descriptors.lock() {
+        Ok(descriptors) => descriptors,
+        Err(_) => {
+            facade.capability_failure.store(true, Ordering::Release);
+            return IOCTL_FD_CAPABILITY_UNAVAILABLE;
+        }
+    };
+    let kind = match descriptors.entries.get(&fd) {
+        Some(Descriptor::Random(_)) => IOCTL_FD_RANDOM_DEVICE,
+        Some(Descriptor::File(_)) => IOCTL_FD_OTHER,
+        None => return IOCTL_FD_BAD,
+    };
+    // SAFETY: required by this callback ABI; the ioctl provider passes its
+    // stack-local record and consumes it before releasing the callback lease.
+    unsafe {
+        info.write(IoctlFdInfo {
+            abi_version: IOCTL_FD_INFO_ABI_VERSION,
+            kind,
+        })
+    };
+    IOCTL_FD_FOUND
 }
 
 /// A thread-affine activation scope.
@@ -1498,6 +1713,9 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_utimensat_core(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Barrier, Condvar};
+    use std::thread;
+    use std::time::Duration;
 
     unsafe extern "C" {
         fn __error() -> *mut i32;
@@ -1531,5 +1749,127 @@ mod tests {
             assert_eq!(facade.closedir(directory), 0);
         }
         assert!(facade.directories.lock().unwrap().streams.is_empty());
+    }
+
+    struct BlockingEntropy {
+        state: Mutex<(bool, bool)>,
+        condition: Condvar,
+    }
+
+    impl BlockingEntropy {
+        fn new() -> Self {
+            Self {
+                state: Mutex::new((false, false)),
+                condition: Condvar::new(),
+            }
+        }
+
+        fn wait_until_entered(&self) {
+            let state = self.state.lock().unwrap();
+            drop(
+                self.condition
+                    .wait_while(state, |(entered, _)| !*entered)
+                    .unwrap(),
+            );
+        }
+
+        fn release(&self) {
+            let mut state = self.state.lock().unwrap();
+            state.1 = true;
+            self.condition.notify_all();
+        }
+    }
+
+    impl EntropyBackend for BlockingEntropy {
+        fn fill(&self, bytes: &mut [u8]) -> Result<(), ()> {
+            let mut state = self.state.lock().unwrap();
+            state.0 = true;
+            self.condition.notify_all();
+            state = self
+                .condition
+                .wait_while(state, |(_, release)| !*release)
+                .unwrap();
+            drop(state);
+            bytes.fill(0xa5);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn random_read_serializes_close_and_reuses_descriptor_without_stale_kind() {
+        let entropy = Arc::new(BlockingEntropy::new());
+        let facade = Arc::new(
+            Facade::new_with_entropy(
+                File::open("/").unwrap(),
+                b"/system",
+                b"/system",
+                entropy.clone(),
+            )
+            .unwrap(),
+        );
+        let fd = facade.open(b"/dev/random", O_RDONLY);
+        assert!(fd >= 10_000);
+
+        let reader_facade = facade.clone();
+        let reader = thread::spawn(move || {
+            let mut bytes = [0_u8; 32];
+            // SAFETY: the local output remains writable for the whole call.
+            let result = unsafe { reader_facade.read(fd, bytes.as_mut_ptr().cast(), bytes.len()) };
+            (result, bytes)
+        });
+        entropy.wait_until_entered();
+
+        let close_done = Arc::new(AtomicBool::new(false));
+        let close_facade = facade.clone();
+        let close_done_thread = close_done.clone();
+        let closer = thread::spawn(move || {
+            let result = close_facade.close(fd);
+            close_done_thread.store(true, Ordering::Release);
+            result
+        });
+        thread::sleep(Duration::from_millis(20));
+        assert!(!close_done.load(Ordering::Acquire));
+        entropy.release();
+        let (read, bytes) = reader.join().unwrap();
+        assert_eq!(read, 32);
+        assert_eq!(bytes, [0xa5; 32]);
+        assert_eq!(closer.join().unwrap(), 0);
+
+        let reused = facade.open(b"/dev/urandom", O_RDONLY);
+        assert_eq!(reused, fd);
+        assert_eq!(facade.close(reused), 0);
+    }
+
+    #[test]
+    fn ioctl_kind_lookup_is_atomic_with_close() {
+        let facade =
+            Arc::new(Facade::new(File::open("/").unwrap(), b"/system", b"/system").unwrap());
+        let fd = facade.open(b"/dev/random", O_RDONLY);
+        let barrier = Arc::new(Barrier::new(9));
+        let mut workers = Vec::new();
+        for _ in 0..8 {
+            let worker_facade = facade.clone();
+            let worker_barrier = barrier.clone();
+            workers.push(thread::spawn(move || {
+                let _activation = worker_facade.activate();
+                worker_barrier.wait();
+                for _ in 0..2_000 {
+                    let mut info = IoctlFdInfo::default();
+                    // SAFETY: info remains writable through this synchronous callback.
+                    let status = unsafe {
+                        darwin_art_bionic_fs_ioctl_fd_lookup(ptr::null_mut(), fd, &mut info)
+                    };
+                    assert!(status == IOCTL_FD_FOUND || status == IOCTL_FD_BAD);
+                    if status == IOCTL_FD_FOUND {
+                        assert_eq!(info.kind, IOCTL_FD_RANDOM_DEVICE);
+                    }
+                }
+            }));
+        }
+        barrier.wait();
+        assert_eq!(facade.close(fd), 0);
+        for worker in workers {
+            worker.join().unwrap();
+        }
     }
 }

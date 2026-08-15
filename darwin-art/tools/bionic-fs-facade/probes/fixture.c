@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 
 static int BytesEqual(const char* left, const char* right, size_t count) {
@@ -21,6 +22,13 @@ static int NameEqual(const char* left, const char* right) {
     ++right;
   }
   return *left == *right;
+}
+
+static int AllZero(const uint8_t* bytes, size_t count) {
+  for (size_t index = 0; index < count; ++index) {
+    if (bytes[index] != 0) return 0;
+  }
+  return 1;
 }
 
 __attribute__((visibility("default"))) int
@@ -248,5 +256,66 @@ __attribute__((visibility("default"))) int bionic_fs_fixture_run(void) {
   if (fd < 0 || fstat(fd, &status) != 0 ||
       status.st_size != (off_t)(sizeof(expected) - 1) || close(fd) != 0)
     return 63;
+
+  uint8_t random_first[32] = {0};
+  uint8_t random_second[32] = {0};
+  if (stat("/dev/random", &status) != 0 || !S_ISCHR(status.st_mode) ||
+      status.st_rdev != makedev(1, 8) ||
+      lstat("/dev/urandom", &status) != 0 || !S_ISCHR(status.st_mode) ||
+      status.st_rdev != makedev(1, 9))
+    return 89;
+  int random_fd = open("/dev/random", O_RDONLY);
+  if (random_fd < 10000) return 72;
+  if (fstat(random_fd, &status) != 0 || !S_ISCHR(status.st_mode) ||
+      status.st_size != 0 || status.st_rdev != makedev(1, 8))
+    return 73;
+  if (read(random_fd, random_first, sizeof(random_first)) !=
+          (ssize_t)sizeof(random_first) ||
+      read(random_fd, random_second, sizeof(random_second)) !=
+          (ssize_t)sizeof(random_second) ||
+      AllZero(random_first, sizeof(random_first)) ||
+      AllZero(random_second, sizeof(random_second)) ||
+      BytesEqual((const char*)random_first, (const char*)random_second,
+                 sizeof(random_first)))
+    return 74;
+  if (read(random_fd, NULL, 0) != 0) return 75;
+  errno = 0;
+  if (isatty(random_fd) != 0 || errno != ENOTTY) return 76;
+  errno = 0;
+  if (fdopendir(random_fd) != NULL || errno != ENOTDIR) return 77;
+  errno = 0;
+  if (fchmod(random_fd, 0600) != -1 || errno != EROFS) return 78;
+  errno = 0;
+  if (ftruncate(random_fd, 0) != -1 || errno != EROFS) return 79;
+  if (close(random_fd) != 0) return 80;
+  errno = 0;
+  if (read(random_fd, random_first, sizeof(random_first)) != -1 ||
+      errno != EBADF)
+    return 81;
+
+  int urandom_fd = open("/dev/urandom", O_RDONLY);
+  if (urandom_fd != random_fd) return 82;
+  if (fstat(urandom_fd, &status) != 0 || !S_ISCHR(status.st_mode) ||
+      status.st_rdev != makedev(1, 9) ||
+      read(urandom_fd, random_first, sizeof(random_first)) !=
+          (ssize_t)sizeof(random_first) ||
+      AllZero(random_first, sizeof(random_first)))
+    return 83;
+  if (close(urandom_fd) != 0) return 84;
+
+  errno = 0;
+  if (open("/dev/random", O_RDONLY | O_CLOEXEC) != -1 ||
+      errno != EOPNOTSUPP)
+    return 85;
+  errno = 0;
+  if (open("/dev/random", O_WRONLY) != -1 || errno != EROFS) return 86;
+  errno = 0;
+  if (open("/dev/random/", O_RDONLY) != -1 || errno != EACCES) return 87;
+  errno = 0;
+  if (open("../../dev/random", O_RDONLY) != -1 || errno != EACCES) return 90;
+  errno = 0;
+  if (stat("/dev/random/", &status) != -1 || errno != EACCES) return 91;
+  random_fd = openat(-7, "/dev/random", O_RDONLY);
+  if (random_fd < 10000 || close(random_fd) != 0) return 88;
   return 42;
 }

@@ -57,7 +57,12 @@ fn main() {
     let shims = output_dir.join("shims.o");
     let errno = output_dir.join("errno_tls.o");
     let archive = output_dir.join("libdarwin_art_bionic_fs_shims.a");
-    compile("src/shims.c", &shims, &sdk, &["include"]);
+    compile(
+        "src/shims.c",
+        &shims,
+        &sdk,
+        &["include", "../bionic-ioctl-facade/include"],
+    );
     compile(
         "../bionic-errno-tls/src/errno_tls.c",
         &errno,
@@ -77,6 +82,7 @@ fn main() {
     assert!(status.success(), "ar failed");
     println!("cargo:rustc-link-search=native={}", output_dir.display());
     println!("cargo:rustc-link-lib=static=darwin_art_bionic_fs_shims");
+    println!("cargo:rustc-link-lib=framework=Security");
     if let Ok(sanitizer) = env::var("BIONIC_FS_C_SANITIZER") {
         let runtime_name = match sanitizer.as_str() {
             "address" => "clang_rt.asan_osx_dynamic",
@@ -97,6 +103,7 @@ fn main() {
     for source in [
         "src/shims.c",
         "include/darwin_art_bionic_fs.h",
+        "../bionic-ioctl-facade/include/darwin_art_bionic_ioctl.h",
         "../bionic-errno-tls/src/errno_tls.c",
         "../bionic-errno-tls/include/darwin_art_bionic_errno.h",
         "../bionic-errno-tls/generated/darwin_to_android.inc",

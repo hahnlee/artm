@@ -1,4 +1,8 @@
-use bionic_fs_facade::Facade;
+use bionic_fs_facade::{
+    Facade, IOCTL_FD_BAD, IOCTL_FD_FOUND, IOCTL_FD_INFO_ABI_VERSION, IOCTL_FD_OTHER,
+    IOCTL_FD_RANDOM_DEVICE, IoctlFdInfo, darwin_art_bionic_fs_close_core,
+    darwin_art_bionic_fs_ioctl_fd_lookup, darwin_art_bionic_fs_open_core,
+};
 use darwin_art_elf_loader::{
     LoadedElf, ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver,
 };
@@ -126,6 +130,54 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let root = PathBuf::from(root);
     let facade = Arc::new(Facade::new(File::open(&root)?, b"/system", b"/system")?);
     let _activation = facade.activate();
+    // SAFETY: static C strings satisfy the Android path ABI and the returned
+    // virtual descriptors remain owned by this active facade until close.
+    let random_fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), 0) };
+    if random_fd < 0 {
+        return Err("synthetic /dev/random open failed".into());
+    }
+    let mut info = IoctlFdInfo::default();
+    // SAFETY: info is a writable callback record on this activated pthread.
+    if unsafe { darwin_art_bionic_fs_ioctl_fd_lookup(std::ptr::null_mut(), random_fd, &mut info) }
+        != IOCTL_FD_FOUND
+        || info.abi_version != IOCTL_FD_INFO_ABI_VERSION
+        || info.kind != IOCTL_FD_RANDOM_DEVICE
+    {
+        return Err("random ioctl fd classification drift".into());
+    }
+    if darwin_art_bionic_fs_close_core(random_fd) != 0 {
+        return Err("synthetic /dev/random close failed".into());
+    }
+    // SAFETY: same writable callback record; the closed token must be absent.
+    if unsafe { darwin_art_bionic_fs_ioctl_fd_lookup(std::ptr::null_mut(), random_fd, &mut info) }
+        != IOCTL_FD_BAD
+    {
+        return Err("closed random fd remained classified".into());
+    }
+    // SAFETY: exact synthetic path and fixed-register O_RDONLY form.
+    let urandom_fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/urandom".as_ptr(), 0) };
+    if urandom_fd != random_fd {
+        return Err("closed synthetic descriptor was not safely reused".into());
+    }
+    if darwin_art_bionic_fs_close_core(urandom_fd) != 0 {
+        return Err("synthetic /dev/urandom close failed".into());
+    }
+    // SAFETY: exact brokered path and fixed-register O_RDONLY form.
+    let regular_fd =
+        unsafe { darwin_art_bionic_fs_open_core(c"/system/etc/payload.txt".as_ptr(), 0) };
+    if regular_fd != random_fd {
+        return Err("descriptor reuse across kinds drifted".into());
+    }
+    // SAFETY: same callback record on the active pthread.
+    if unsafe { darwin_art_bionic_fs_ioctl_fd_lookup(std::ptr::null_mut(), regular_fd, &mut info) }
+        != IOCTL_FD_FOUND
+        || info.kind != IOCTL_FD_OTHER
+    {
+        return Err("regular ioctl fd classification drift".into());
+    }
+    if darwin_art_bionic_fs_close_core(regular_fd) != 0 {
+        return Err("brokered descriptor close failed".into());
+    }
     let bytes = fs::read(fixture)?;
     let mut resolver = ClosedResolver;
     let mut image = LoadedElf::load_with_resolver(&bytes, &mut resolver)?;

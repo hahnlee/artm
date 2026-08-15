@@ -24,6 +24,14 @@ coordination with another descriptor provider or with an application that
 manufactures integers. Runtime integration must use one central descriptor
 namespace (or non-overlapping tagged ranges) and reject cross-provider use.
 
+Two exact absolute byte paths are synthetic exceptions to the `/system` mount:
+`/dev/random` and `/dev/urandom`. They never enter the prefix resolver or host
+path broker. `Facade` construction owns a Security.framework
+`SecRandomCopyBytes` backend, and each exact `open(token, O_RDONLY)` creates a
+typed random-device entry containing no host descriptor. Aliases, trailing
+slashes, relative spellings, and every nonzero flag remain outside this policy.
+Closed virtual numbers are reused only after their old typed entry is removed.
+
 The descriptor mutex is intentionally simple. `read` holds the global table
 lock for the entire host read, so a concurrent `close` or another descriptor
 operation is serialized until that read completes. This is the current
@@ -44,7 +52,12 @@ As with virtual fds, another provider must not invent or accept these tokens.
 - `open(path, flags, ...)`: read-only access under the mount root.
 - `openat(AT_FDCWD, path, flags, ...)`: equivalent to `open`; an absolute path
   also ignores `dirfd`, matching the relevant Linux rule.
-- `read`, `close`, and `fstat` for facade-owned virtual descriptors.
+- `read`, `close`, and `fstat` for facade-owned virtual descriptors. Exact-path
+  `stat`/`lstat` and descriptor `fstat` return the same synthetic metadata.
+  Random reads fill the complete requested buffer from the facade-owned secure
+  backend; metadata uses Android character-device modes and Linux
+  `makedev(1,8)`/`makedev(1,9)` identities. `close`, `isatty`, mutation
+  rejection, and `fdopendir` share the same typed descriptor table.
 - `stat` for admitted regular files/directories; the no-follow authorization
   policy means it deliberately does not implement Linux symlink following.
 - `lstat` for admitted non-symlink nodes. A final symlink rejected with host
@@ -123,12 +136,27 @@ deliberately `!Send`/`!Sync`; a compile-fail doctest locks the rule that a guard
 cannot move to a different pthread. Nested activation restores the previous
 `Arc` on the same pthread.
 
+`darwin_art_bionic_fs_ioctl_fd_lookup` is the exact callback accepted by the
+standalone ioctl provider. It classifies random, other, and closed/unknown
+tokens under the descriptor lock without exposing a host fd. Because it uses
+the same pthread-local `ACTIVE` state as every filesystem entrypoint, an ART
+native-created thread without prior activation receives capability-unavailable.
+Runtime integration must either install a process-wide quiescent Facade owner
+or guarantee activation on every guest pthread before enabling ioctl; guessing
+from the numeric fd is forbidden.
+
+Only `open`, `stat`, and `lstat` claim the two exact synthetic paths. Their
+`pathconf`, `realpath`, mutation, and directory-stream forms remain outside the
+synthetic policy and fail through the ordinary mount-containment boundary.
+
 ## Deterministic audit
 
 Run `./audit.sh`. It pins and hashes the NDK r28c API 35 `fcntl.h`, Linux
 `fcntl.h`, `stat.h`, `statvfs.h`, `dirent.h`, `unistd.h`, `stdlib.h`, and
 `stdio.h` inputs, the prefix and broker sources, the Bionic errno translator,
 the OS-constant manifest, and the real libc++ Class-B import classification.
+It also pins LLVM's exact random-device constructor source proving
+`open(token, O_RDONLY)` and the synthetic-device policy manifest.
 Compile-time probes lock every signature, the Android pathconf/`AT_*` numbers,
 and the Android `stat`, `dirent`, and `statvfs` layouts. It then:
 
@@ -139,11 +167,14 @@ and the Android `stat`, `dirent`, and `statvfs` layouts. It then:
    rejection, regular/final/intermediate `readlink` distinctions,
    traversal/symlink policy, virtual-dirfd rejection, pathconf/statvfs
    translation, realpath byte normalization, deterministic mutation rejection,
-   and virtual descriptors at or above 10000;
+   virtual descriptors at or above 10000, secure nonrepeating random reads,
+   random fstat/close/fdopendir/isatty semantics, and descriptor reuse;
 3. differentially compares Android `_PC_2_SYMLINKS`, block size, and translated
    statvfs flags against the same securely opened Darwin object;
 4. proves Darwin host errno is preserved and no unknown translation occurred;
-5. repeats the complete Android ELF boundary with C ASan and UBSan, then runs
+5. stresses close against a blocked random read and ioctl lookup against close,
+   requiring each lookup to observe either the live typed entry or `BAD`;
+6. repeats the complete Android ELF boundary with C ASan and UBSan, then runs
    broker/prefix tests, the activation `!Send` compile-fail test, Clippy, and
    formatting checks using temporary target directories.
 

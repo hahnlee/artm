@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "darwin_art_bionic_ioctl.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -129,6 +131,11 @@ int darwin_art_bionic_utimensat(int directory_fd, const char* path,
                                 int flags);
 
 DarwinArtBionicFsFunction darwin_art_bionic_fs_resolve(const char* import_name);
+
+/* Exact callback for darwin_art_bionic_ioctl_activate. Context is unused;
+ * lookup is routed to this pthread's active filesystem facade. */
+DarwinArtBionicIoctlFdLookupStatus darwin_art_bionic_fs_ioctl_fd_lookup(
+    void* context, int32_t fd, DarwinArtBionicIoctlFdInfo* info);
 
 /* Rust implementation boundary called only by the errno-preserving shims. */
 int darwin_art_bionic_fs_open_core(const char* path, int flags);

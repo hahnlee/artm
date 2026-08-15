@@ -33,6 +33,33 @@ check_hash "$project_root/upstream/android16-os-constants-values.tsv" \
   "$OS_CONSTANTS_VALUES_SHA256"
 check_hash "$project_root/tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv" \
   "$LIBC_IMPORT_MANIFEST_SHA256"
+check_hash "$project_root/tools/bionic-ioctl-facade/include/darwin_art_bionic_ioctl.h" \
+  "$IOCTL_FACADE_HEADER_SHA256"
+check_hash "$script_dir/manifests/synthetic-devices.tsv" \
+  "$SYNTHETIC_DEVICES_SHA256"
+diff -u <(printf '%s\n' \
+  $'/dev/random\trandom-device\tO_RDONLY\tSecRandomCopyBytes\tS_IFCHR|0666\tmakedev(1,8)' \
+  $'/dev/urandom\trandom-device\tO_RDONLY\tSecRandomCopyBytes\tS_IFCHR|0666\tmakedev(1,9)') \
+  <(tail -n +2 "$script_dir/manifests/synthetic-devices.tsv") ||
+  fail 'synthetic device policy drift'
+
+random_source="$project_root/_aosp/bionic-fs-facade/libcxx/src/random.cpp"
+if [[ ! -f "$random_source" ]]; then
+  mkdir -p "$(dirname "$random_source")"
+  curl -fsSL "https://android.googlesource.com/$LLVM_PROJECT/+/$LLVM_REVISION/libcxx/src/random.cpp?format=TEXT" |
+    base64 -D > "$random_source"
+fi
+[[ "$(stat -f %z "$random_source")" == "$LLVM_RANDOM_SOURCE_SIZE" ]] ||
+  fail 'LLVM random.cpp size drift'
+check_hash "$random_source" "$LLVM_RANDOM_SOURCE_SHA256"
+python3 - "$random_source" <<'PY'
+import sys
+text = open(sys.argv[1]).read()
+assert 'random_device::random_device(const string& __token) : __f_(open(__token.c_str(), O_RDONLY))' in text
+assert 'ssize_t s = read(__f_, p, n);' in text
+assert '::ioctl(__f_, RNDGETENTCNT, &ent) < 0' in text
+print('bionic-fs-facade: libc++ random_device source PASS open=token+O_RDONLY')
+PY
 
 symbols=(chdir close closedir fchmod fchmodat fdopendir fstat ftruncate getcwd
          isatty link lstat mkdir open openat opendir pathconf read readdir readlink realpath
@@ -82,7 +109,8 @@ trap cleanup EXIT
 host_cc="$(xcrun --find clang)"
 sdk_root="$(xcrun --sdk macosx --show-sdk-path)"
 host_flags=(-arch arm64 -isysroot "$sdk_root" -std=c17 -O2 -Wall -Wextra
-            -Werror -Wpedantic -I"$script_dir/include")
+            -Werror -Wpedantic -I"$script_dir/include"
+            -I"$project_root/tools/bionic-ioctl-facade/include")
 "$host_cc" "${host_flags[@]}" -c "$script_dir/src/shims.c" \
   -o "$temp_root/shims.o"
 nm -u "$temp_root/shims.o" | sed 's/^[[:space:]]*//' | sort \
@@ -210,6 +238,9 @@ ln -s "$temp_root/outside/secret" "$temp_root/root/etc/outside-link"
 ln -s "$temp_root/outside" "$temp_root/root/etc/outside-dir-link"
 CARGO_TARGET_DIR="$temp_root/cargo-target" cargo run --quiet \
   --manifest-path "$script_dir/Cargo.toml" -- "$fixture" "$temp_root/root"
+nm -gU "$temp_root/cargo-target/debug/bionic-fs-facade" |
+  grep -F ' _darwin_art_bionic_fs_ioctl_fd_lookup' >/dev/null ||
+  fail 'ioctl fd lookup callback missing'
 CARGO_TARGET_DIR="$temp_root/cargo-target" cargo clippy --quiet \
   --all-targets --manifest-path "$script_dir/Cargo.toml" -- -D warnings
 ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 BIONIC_FS_C_SANITIZER=address \
@@ -221,4 +252,4 @@ UBSAN_OPTIONS=halt_on_error=1 BIONIC_FS_C_SANITIZER=undefined \
   --manifest-path "$script_dir/Cargo.toml" -- "$fixture" "$temp_root/root"
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
 
-echo 'bionic-fs-facade: PASS AndroidELF imports=30 read-only path+cwd+DIR+fdopendir stat128/dirent280/statvfs112 pathconf20 mutation=EROFS closed-resolver ASan+UBSan'
+echo 'bionic-fs-facade: PASS AndroidELF libc-imports=29 errno=1 read-only path+cwd+DIR+fdopendir random=Security+typed-fd stat128/dirent280/statvfs112 pathconf20 mutation=EROFS closed-resolver ASan+UBSan'
