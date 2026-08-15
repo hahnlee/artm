@@ -50,7 +50,11 @@ class DarwinMessageQueue {
 };
 
 std::mutex g_system_properties_mutex;
-std::unordered_map<std::string, std::string> g_system_properties;
+std::unordered_map<std::string, std::string> g_system_properties{
+    {"ro.product.cpu.abilist", "arm64-v8a"},
+    {"ro.product.cpu.abilist64", "arm64-v8a"},
+    {"ro.product.cpu.abilist32", ""},
+};
 
 std::optional<std::string> JavaString(JNIEnv* env, jstring value) {
   if (value == nullptr) {
@@ -220,6 +224,26 @@ jboolean SystemPropertiesGetBooleanByHandle(jlong, jboolean default_value) {
   return default_value;
 }
 
+struct DarwinBinderHolder {};
+
+void BinderHolderFinalizer(void* holder) {
+  delete static_cast<DarwinBinderHolder*>(holder);
+}
+
+jlong BinderGetNativeHolder(JNIEnv*, jclass) {
+  return reinterpret_cast<std::uintptr_t>(new DarwinBinderHolder());
+}
+
+jlong BinderGetNativeFinalizer(JNIEnv*, jclass) {
+  return reinterpret_cast<std::uintptr_t>(&BinderHolderFinalizer);
+}
+
+jint BinderGetCallingUid() {
+  // Treat the host bridge as Android's system UID until per-app identities are
+  // introduced with the Binder compatibility layer.
+  return 1000;
+}
+
 void SystemPropertiesSet(JNIEnv* env, jclass, jstring key, jstring value) {
   const std::optional<std::string> name = JavaString(env, key);
   const std::optional<std::string> text = JavaString(env, value);
@@ -293,6 +317,19 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   };
   if (!Register(env, "android/os/SystemClock", system_clock_methods,
                 static_cast<jint>(std::size(system_clock_methods)))) {
+    return false;
+  }
+
+  JNINativeMethod binder_methods[] = {
+      {const_cast<char*>("getNativeBBinderHolder"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&BinderGetNativeHolder)},
+      {const_cast<char*>("getNativeFinalizer"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&BinderGetNativeFinalizer)},
+      {const_cast<char*>("getCallingUid"), const_cast<char*>("()I"),
+       reinterpret_cast<void*>(&BinderGetCallingUid)},
+  };
+  if (!Register(env, "android/os/Binder", binder_methods,
+                static_cast<jint>(std::size(binder_methods)))) {
     return false;
   }
 

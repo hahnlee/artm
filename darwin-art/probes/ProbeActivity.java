@@ -1,10 +1,18 @@
 package dev.darwinart.probe;
 
 import android.app.Activity;
+import android.content.Context;
 import android.os.Bundle;
 
 public final class ProbeActivity extends Activity {
     private int lifecycleValue;
+
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        // The native launcher attaches ContextThemeWrapper non-virtually.
+        // Android's Activity override additionally installs autofill/content
+        // capture clients, which are outside the current window gate.
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

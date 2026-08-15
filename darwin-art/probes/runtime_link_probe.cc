@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
   art::ClassLinker* class_linker = art::Runtime::Current()->GetClassLinker();
   jobject loader_ref =
       class_linker->CreatePathClassLoader(self, app_dex_file_ptrs);
-  art::StackHandleScope<5> hs(self);
+  art::StackHandleScope<6> hs(self);
   art::Handle<art::mirror::ClassLoader> app_loader =
       hs.NewHandle(soa.Decode<art::mirror::ClassLoader>(loader_ref));
   for (const auto& dex_file : app_dex_files) {
@@ -147,12 +147,25 @@ int main(int argc, char** argv) {
     }
     return 21;
   }
+  art::Handle<art::mirror::Class> probe_resources_handle =
+      hs.NewHandle(class_linker->FindClass(
+          self, "Ldev/darwinart/probe/ProbeResources;",
+          sizeof("Ldev/darwinart/probe/ProbeResources;") - 1u, app_loader));
+  if (probe_resources_handle == nullptr || self->IsExceptionPending()) {
+    std::cerr << "ART Android framework: Resources subclass lookup failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 21;
+  }
 
   jclass hello_class = soa.AddLocalReference<jclass>(hello.Get());
   jclass probe_activity_class =
       soa.AddLocalReference<jclass>(probe_activity.Get());
   jclass probe_context_class =
       soa.AddLocalReference<jclass>(probe_context_handle.Get());
+  jclass probe_resources_class =
+      soa.AddLocalReference<jclass>(probe_resources_handle.Get());
   art::Runtime::Current()->StartMinimalForDarwinProbe(self->GetJniEnv());
   if (!darwin_art::RegisterLibcoreNatives(self->GetJniEnv())) {
     std::cerr << "ART Darwin libcore: native registration failed\n";
@@ -214,43 +227,15 @@ int main(int argc, char** argv) {
     return 24;
   }
 
-  // Isolate the minimum lifecycle dependencies before implementing the full
-  // Activity.attach()/PhoneWindow/Instrumentation path. Calling the superclass
-  // non-virtually preserves ContextWrapper's real base-context behavior while
-  // leaving autofill and content capture for their dedicated service bridges.
-  jmethodID probe_context_constructor =
-      probe_context_class == nullptr
-          ? nullptr
-          : env->GetMethodID(probe_context_class, "<init>", "()V");
-  jobject probe_context =
-      probe_context_constructor == nullptr
-          ? nullptr
-          : env->NewObject(probe_context_class, probe_context_constructor);
-  jclass context_theme_wrapper_class =
-      env->FindClass("android/view/ContextThemeWrapper");
-  jmethodID attach_base_context =
-      context_theme_wrapper_class == nullptr
-          ? nullptr
-          : env->GetMethodID(context_theme_wrapper_class, "attachBaseContext",
-                             "(Landroid/content/Context;)V");
-  if (probe_context != nullptr && attach_base_context != nullptr) {
-    env->CallNonvirtualVoidMethod(activity_instance,
-                                  context_theme_wrapper_class,
-                                  attach_base_context, probe_context);
-  }
-  if (probe_context == nullptr || attach_base_context == nullptr ||
-      env->ExceptionCheck()) {
-    std::cerr << "ART Android lifecycle: base Context attachment failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
-    }
-    return 30;
-  }
-
   jclass activity_class = env->GetSuperclass(probe_activity_class);
   jclass activity_info_class =
       env->FindClass("android/content/pm/ActivityInfo");
   jclass application_class = env->FindClass("android/app/Application");
+  jclass intent_class = env->FindClass("android/content/Intent");
+  jclass component_name_class =
+      env->FindClass("android/content/ComponentName");
+  jclass configuration_class =
+      env->FindClass("android/content/res/Configuration");
   jmethodID activity_info_constructor =
       activity_info_class == nullptr
           ? nullptr
@@ -267,46 +252,144 @@ int main(int argc, char** argv) {
       application_constructor == nullptr
           ? nullptr
           : env->NewObject(application_class, application_constructor);
-  jfieldID activity_info_field =
+  jobject probe_resources = probe_resources_class == nullptr
+                                ? nullptr
+                                : env->AllocObject(probe_resources_class);
+  jmethodID probe_context_constructor =
+      probe_context_class == nullptr
+          ? nullptr
+          : env->GetMethodID(probe_context_class, "<init>",
+                             "(Landroid/content/res/Resources;)V");
+  jobject probe_context =
+      probe_context_constructor == nullptr || probe_resources == nullptr
+          ? nullptr
+          : env->NewObject(probe_context_class, probe_context_constructor,
+                           probe_resources);
+  jmethodID intent_constructor = intent_class == nullptr
+                                    ? nullptr
+                                    : env->GetMethodID(intent_class, "<init>", "()V");
+  jmethodID component_name_constructor =
+      component_name_class == nullptr
+          ? nullptr
+          : env->GetMethodID(component_name_class, "<init>",
+                             "(Ljava/lang/String;Ljava/lang/String;)V");
+  jmethodID set_component =
+      intent_class == nullptr
+          ? nullptr
+          : env->GetMethodID(intent_class, "setComponent",
+                             "(Landroid/content/ComponentName;)Landroid/content/Intent;");
+  jmethodID configuration_constructor =
+      configuration_class == nullptr
+          ? nullptr
+          : env->GetMethodID(configuration_class, "<init>", "()V");
+  jstring package_name = env->NewStringUTF("dev.darwinart.probe");
+  jstring class_name = env->NewStringUTF("dev.darwinart.probe.ProbeActivity");
+  jstring title = env->NewStringUTF("Darwin ART Probe");
+  jobject component_name =
+      component_name_constructor == nullptr
+          ? nullptr
+          : env->NewObject(component_name_class, component_name_constructor,
+                           package_name, class_name);
+  jobject intent = intent_constructor == nullptr
+                       ? nullptr
+                       : env->NewObject(intent_class, intent_constructor);
+  jobject configuration =
+      configuration_constructor == nullptr
+          ? nullptr
+          : env->NewObject(configuration_class, configuration_constructor);
+  if (intent != nullptr && set_component != nullptr && component_name != nullptr) {
+    jobject configured_intent =
+        env->CallObjectMethod(intent, set_component, component_name);
+    env->DeleteLocalRef(configured_intent);
+  }
+  static constexpr const char* kActivityAttachSignature =
+      "(Landroid/content/Context;Landroid/app/ActivityThread;"
+      "Landroid/app/Instrumentation;Landroid/os/IBinder;I"
+      "Landroid/app/Application;Landroid/content/Intent;"
+      "Landroid/content/pm/ActivityInfo;Ljava/lang/CharSequence;"
+      "Landroid/app/Activity;Ljava/lang/String;"
+      "Landroid/app/Activity$NonConfigurationInstances;"
+      "Landroid/content/res/Configuration;Ljava/lang/String;"
+      "Lcom/android/internal/app/IVoiceInteractor;Landroid/view/Window;"
+      "Landroid/view/ViewRootImpl$ActivityConfigCallback;"
+      "Landroid/os/IBinder;Landroid/os/IBinder;)V";
+  jmethodID attach_activity =
       activity_class == nullptr
           ? nullptr
-          : env->GetFieldID(activity_class, "mActivityInfo",
-                            "Landroid/content/pm/ActivityInfo;");
-  jfieldID application_field =
-      activity_class == nullptr
-          ? nullptr
-          : env->GetFieldID(activity_class, "mApplication",
-                            "Landroid/app/Application;");
+          : env->GetMethodID(activity_class, "attach", kActivityAttachSignature);
   if (activity_info == nullptr || application == nullptr ||
-      activity_info_field == nullptr || application_field == nullptr) {
-    std::cerr << "ART Android lifecycle: minimal fields unavailable\n";
+      probe_context == nullptr || intent == nullptr || configuration == nullptr ||
+      attach_activity == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Android window: Activity.attach() setup failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
     return 27;
   }
-  env->SetObjectField(activity_instance, activity_info_field, activity_info);
-  env->SetObjectField(activity_instance, application_field, application);
-  jfieldID fragments_field = env->GetFieldID(
-      activity_class, "mFragments", "Landroid/app/FragmentController;");
-  jobject fragments =
-      fragments_field == nullptr
+  jclass context_theme_wrapper_class =
+      env->FindClass("android/view/ContextThemeWrapper");
+  jmethodID attach_base_context =
+      context_theme_wrapper_class == nullptr
           ? nullptr
-          : env->GetObjectField(activity_instance, fragments_field);
-  jclass fragments_class =
-      fragments == nullptr ? nullptr : env->GetObjectClass(fragments);
-  jmethodID attach_fragment_host =
-      fragments_class == nullptr
-          ? nullptr
-          : env->GetMethodID(fragments_class, "attachHost",
-                             "(Landroid/app/Fragment;)V");
-  if (attach_fragment_host == nullptr) {
-    std::cerr << "ART Android lifecycle: FragmentController unavailable\n";
+          : env->GetMethodID(context_theme_wrapper_class, "attachBaseContext",
+                             "(Landroid/content/Context;)V");
+  if (attach_base_context != nullptr) {
+    env->CallNonvirtualVoidMethod(activity_instance,
+                                  context_theme_wrapper_class,
+                                  attach_base_context,
+                                  probe_context);
+  }
+  if (attach_base_context == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Android window: base Context preparation failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
     return 30;
   }
-  env->CallVoidMethod(fragments, attach_fragment_host, nullptr);
+  env->CallNonvirtualVoidMethod(
+      activity_instance,
+      activity_class,
+      attach_activity,
+      probe_context,
+      nullptr,
+      nullptr,
+      nullptr,
+      static_cast<jint>(1),
+      application,
+      intent,
+      activity_info,
+      title,
+      nullptr,
+      nullptr,
+      nullptr,
+      configuration,
+      nullptr,
+      nullptr,
+      nullptr,
+      nullptr,
+      nullptr,
+      nullptr);
   if (env->ExceptionCheck()) {
-    std::cerr
-        << "ART Android lifecycle: FragmentController.attachHost() threw\n"
-        << self->GetException()->Dump() << "\n";
+    std::cerr << "ART Android window: Activity.attach() threw\n"
+              << self->GetException()->Dump() << "\n";
     return 30;
+  }
+  jmethodID get_window =
+      env->GetMethodID(activity_class, "getWindow", "()Landroid/view/Window;");
+  jobject window = get_window == nullptr
+                       ? nullptr
+                       : env->CallObjectMethod(activity_instance, get_window);
+  jclass phone_window_class =
+      env->FindClass("com/android/internal/policy/PhoneWindow");
+  const bool attached_phone_window =
+      window != nullptr && phone_window_class != nullptr &&
+      env->IsInstanceOf(window, phone_window_class);
+  if (!attached_phone_window || env->ExceptionCheck()) {
+    std::cerr << "ART Android window: PhoneWindow attachment failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 31;
   }
   jmethodID probe_on_create =
       env->GetMethodID(probe_activity_class, "probeOnCreate", "()I");
@@ -322,10 +405,21 @@ int main(int argc, char** argv) {
   env->DeleteLocalRef(application);
   env->DeleteLocalRef(activity_info);
   env->DeleteLocalRef(context_theme_wrapper_class);
+  env->DeleteLocalRef(phone_window_class);
+  env->DeleteLocalRef(window);
+  env->DeleteLocalRef(configuration);
+  env->DeleteLocalRef(component_name);
+  env->DeleteLocalRef(intent);
+  env->DeleteLocalRef(title);
+  env->DeleteLocalRef(class_name);
+  env->DeleteLocalRef(package_name);
+  env->DeleteLocalRef(configuration_class);
+  env->DeleteLocalRef(component_name_class);
+  env->DeleteLocalRef(intent_class);
   env->DeleteLocalRef(probe_context);
+  env->DeleteLocalRef(probe_resources);
+  env->DeleteLocalRef(probe_resources_class);
   env->DeleteLocalRef(probe_context_class);
-  env->DeleteLocalRef(fragments_class);
-  env->DeleteLocalRef(fragments);
   env->DeleteLocalRef(application_class);
   env->DeleteLocalRef(activity_info_class);
   env->DeleteLocalRef(activity_class);
@@ -441,6 +535,7 @@ int main(int argc, char** argv) {
             << arraycopy_result.GetI() << "\n"
             << "ART Android framework: ProbeActivity().probeValue()="
             << activity_result << "\n"
+            << "ART Android window: Activity.attach()=PhoneWindow\n"
             << "ART Android lifecycle: Activity.onCreate()=" << lifecycle_result
             << "\n"
             << "ART Darwin launcher: main(String[])=ok\n";

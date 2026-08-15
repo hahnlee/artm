@@ -11,7 +11,8 @@ complete native `Runtime::Create()` probe through Android 16 boot-class-path
 initialization, invokes a generated DEX `main(String[])` in ART's C++
 interpreter, round-trips through JNI into Darwin, and sends Android
 `System.out` through ICU and Darwin `write(2)` without loading Android `.so`
-libraries. It also dispatches the real platform `Activity.onCreate()` using a
+libraries. It also runs Android 16's real `Activity.attach()`, creates a
+`PhoneWindow`, and dispatches the platform `Activity.onCreate()` using a
 minimal host context:
 
 1. verify the native host is ARM64 macOS with 16 KiB pages;
@@ -39,9 +40,10 @@ minimal host context:
     path, backed by host ICU4C and Darwin `write(2)`;
 17. load Android 16's real framework DEX, prepare its main `Looper`, and
     instantiate an app DEX class that directly extends `android.app.Activity`;
-18. attach the minimum Android context/application/fragment host and execute the
-    real platform `Activity.onCreate()` body plus the app override;
-19. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
+18. call the real `Activity.attach()` with a Darwin-backed context and create
+    Android's concrete `PhoneWindow`;
+19. execute the real platform `Activity.onCreate()` body plus the app override;
+20. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
 
 Run it with:
 
@@ -55,14 +57,14 @@ Expected final lines include:
 probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
-build-dex: AOSP DEX: verified=yes version=35 classes=3 methods=21 class[0]=Ldev/darwinart/probe/Hello; class[1]=Ldev/darwinart/probe/ProbeActivity; class[2]=Ldev/darwinart/probe/ProbeContext; corrupt=rejected
+build-dex: AOSP DEX: verified=yes version=35 classes=6 methods=68 ... corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
 build-interpreter-core: AOSP C++ interpreter Mach-O objects=7 archive=...
 build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=209 compiled=0 cached=209 archive=...
 audit-runtime-link: closure complete undefined=0
-probe-runtime-dex: Activity.onCreate() + main(String[]) -> Android PrintStream/ICU -> Darwin write(2)
+probe-runtime-dex: Activity.attach() + PhoneWindow + onCreate() -> Darwin
 probe-park: ART Darwin park: pre-permit=yes wakeups=200 timeout=yes
 ```
 
@@ -116,6 +118,7 @@ Its success lines are `ART Darwin Runtime::Create: ok`,
 `ART runtime native: System.arraycopy()=42`, the Java-emitted
 `Hello from Darwin ART main: 안녕`,
 `ART Android framework: ProbeActivity().probeValue()=42`,
+`ART Android window: Activity.attach()=PhoneWindow`,
 `ART Android lifecycle: Activity.onCreate()=43`, and
 `ART Darwin launcher: main(String[])=ok`.
 The generated app DEX remains separate from the boot class path. The native
@@ -129,10 +132,16 @@ by this gate. The locked Android `core-icu4j` Java code is converted to DEX
 locally; its `NativeConverter` calls host Homebrew ICU4C 78. The framework gate
 uses Darwin-native `MessageQueue` wake/poll primitives and Android's default
 INFO logging threshold. Darwin clocks back `System`/`SystemClock`, and an
-in-process property table backs Android `SystemProperties`. Android's
+in-process property table backs Android `SystemProperties`; its Darwin defaults
+now include the ARM64 ABI properties required by `android.os.Build`. A minimal
+Binder holder/finalizer supports local framework Binder stubs, and the host ICU
+bridge now covers both encoder and decoder paths. The app-only compile stub for
+hidden `IContentProvider` supplies a javac signature and is not emitted into the
+DEX; runtime resolution uses framework.jar's real interface. Android's
 libicu/libjavacore/libopenjdk shared libraries and daemon threads are still not
-loaded. Full `Activity.attach()`, resources, `PhoneWindow`, and the View/window
-backend remain deferred.
+loaded. The current real `Activity.attach()` uses synthetic resources/settings,
+a null `Instrumentation`, and no remote services. Resource-backed DecorView,
+View hierarchy, and the Darwin window backend remain deferred.
 
 Apple ARM64 executables retain the kernel-required 4 GiB `__PAGEZERO`, so ART's
 usual absolute-low-32-bit heap references cannot be used. The Darwin probe
