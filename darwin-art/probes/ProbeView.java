@@ -4,7 +4,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.view.View;
 
-/** First vertical View-to-AppKit rendering probe. */
+/** Activity content rendered through an Android Canvas supplied by DarwinWindow. */
 public final class ProbeView extends View {
     private static final int WIDTH = 640;
     private static final int HEIGHT = 360;
@@ -15,10 +15,8 @@ public final class ProbeView extends View {
         super(context);
     }
 
-    private static native boolean presentFrame(int width, int height, int[] argb);
-
     @Override
-    public void draw(Canvas ignored) {
+    protected void onDraw(Canvas canvas) {
         int[] pixels = new int[WIDTH * HEIGHT];
         fill(pixels, 0, 0, WIDTH, HEIGHT, 0xff111827);
         fill(pixels, 28, 28, WIDTH - 56, HEIGHT - 56, 0xfff8fafc);
@@ -26,7 +24,8 @@ public final class ProbeView extends View {
         fill(pixels, 76, 144, WIDTH - 152, 112, 0xffe2e8f0);
         fill(pixels, 188, 278, WIDTH - 376, 48, 0xff2563eb);
         drawArtMark(pixels, 76, 52, 0xff102a20);
-        presented = presentFrame(WIDTH, HEIGHT, pixels);
+        canvas.drawBitmap(pixels, 0, WIDTH, 0, 0, WIDTH, HEIGHT, true, null);
+        presented = true;
     }
 
     public boolean wasPresented() {
@@ -47,8 +46,7 @@ public final class ProbeView extends View {
 
     private static void drawArtMark(int[] pixels, int left, int top, int color) {
         // A deliberately tiny pixel mark generated inside interpreted Android
-        // code. Canvas/Skia will replace this raw producer after the host window
-        // and frame ABI are proven.
+        // code. Skia/HWUI will replace this software Canvas producer later.
         fill(pixels, left, top + 24, 12, 30, color);
         fill(pixels, left + 12, top + 12, 12, 12, color);
         fill(pixels, left + 24, top + 24, 12, 30, color);

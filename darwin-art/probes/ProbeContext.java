@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.pm.ApplicationInfo;
 import android.content.res.Resources;
+import android.os.Looper;
 
 import java.lang.reflect.Constructor;
 
@@ -32,6 +33,13 @@ public final class ProbeContext extends ContextWrapper {
     }
 
     @Override
+    public Context getApplicationContext() {
+        // PhoneWindow explicitly supports processes without an application
+        // context by using the Activity context directly for its DecorView.
+        return null;
+    }
+
+    @Override
     public ContentResolver getContentResolver() {
         return contentResolver;
     }
@@ -44,6 +52,11 @@ public final class ProbeContext extends ContextWrapper {
     @Override
     public Resources getResources() {
         return resources;
+    }
+
+    @Override
+    public Looper getMainLooper() {
+        return Looper.getMainLooper();
     }
 
     @Override

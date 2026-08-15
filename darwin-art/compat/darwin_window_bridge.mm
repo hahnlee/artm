@@ -86,7 +86,7 @@ bool DarwinPresentArgb(const std::uint32_t* pixels,
                              NSWindowStyleMaskMiniaturizable)
                     backing:NSBackingStoreBuffered
                       defer:NO];
-    window.title = @"Darwin ART · ProbeView.draw()";
+    window.title = @"Darwin ART · Activity.setContentView()";
     window.contentView = [[DarwinArtFrameView alloc] initWithFrame:frame
                                                              image:image];
     [window center];

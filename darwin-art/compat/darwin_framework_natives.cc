@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace {
 
@@ -226,6 +227,17 @@ jboolean SystemPropertiesGetBooleanByHandle(jlong, jboolean default_value) {
 
 struct DarwinBinderHolder {};
 
+struct DarwinRenderNode {
+  explicit DarwinRenderNode(std::string node_name)
+      : name(std::move(node_name)) {}
+
+  std::string name;
+  jint left = 0;
+  jint top = 0;
+  jint right = 0;
+  jint bottom = 0;
+};
+
 void BinderHolderFinalizer(void* holder) {
   delete static_cast<DarwinBinderHolder*>(holder);
 }
@@ -242,6 +254,37 @@ jint BinderGetCallingUid() {
   // Treat the host bridge as Android's system UID until per-app identities are
   // introduced with the Binder compatibility layer.
   return 1000;
+}
+
+void RenderNodeFinalizer(void* render_node) {
+  delete static_cast<DarwinRenderNode*>(render_node);
+}
+
+jlong RenderNodeCreate(JNIEnv* env, jclass, jstring name) {
+  std::optional<std::string> node_name = JavaString(env, name);
+  return reinterpret_cast<std::uintptr_t>(
+      new DarwinRenderNode(node_name.value_or("")));
+}
+
+jlong RenderNodeGetNativeFinalizer(JNIEnv*, jclass) {
+  return reinterpret_cast<std::uintptr_t>(&RenderNodeFinalizer);
+}
+
+jboolean RenderNodeSetLeftTopRightBottom(JNIEnv*, jclass, jlong handle,
+                                         jint left, jint top, jint right,
+                                         jint bottom) {
+  auto* node = reinterpret_cast<DarwinRenderNode*>(
+      static_cast<std::uintptr_t>(handle));
+  if (node == nullptr) {
+    return JNI_FALSE;
+  }
+  const bool changed = node->left != left || node->top != top ||
+                       node->right != right || node->bottom != bottom;
+  node->left = left;
+  node->top = top;
+  node->right = right;
+  node->bottom = bottom;
+  return changed ? JNI_TRUE : JNI_FALSE;
 }
 
 void SystemPropertiesSet(JNIEnv* env, jclass, jstring key, jstring value) {
@@ -330,6 +373,21 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   };
   if (!Register(env, "android/os/Binder", binder_methods,
                 static_cast<jint>(std::size(binder_methods)))) {
+    return false;
+  }
+
+  JNINativeMethod render_node_methods[] = {
+      {const_cast<char*>("nCreate"),
+       const_cast<char*>("(Ljava/lang/String;)J"),
+       reinterpret_cast<void*>(&RenderNodeCreate)},
+      {const_cast<char*>("nGetNativeFinalizer"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&RenderNodeGetNativeFinalizer)},
+      {const_cast<char*>("nSetLeftTopRightBottom"),
+       const_cast<char*>("(JIIII)Z"),
+       reinterpret_cast<void*>(&RenderNodeSetLeftTopRightBottom)},
+  };
+  if (!Register(env, "android/graphics/RenderNode", render_node_methods,
+                static_cast<jint>(std::size(render_node_methods)))) {
     return false;
   }
 

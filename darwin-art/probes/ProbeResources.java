@@ -4,6 +4,7 @@ import android.content.res.AssetManager;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.util.DisplayMetrics;
+import android.util.TypedValue;
 
 @SuppressWarnings("deprecation")
 public final class ProbeResources extends Resources {
@@ -25,6 +26,34 @@ public final class ProbeResources extends Resources {
     @Override
     public boolean getBoolean(int id) {
         return false;
+    }
+
+    @Override
+    public int getDimensionPixelSize(int id) {
+        return 8;
+    }
+
+    @Override
+    public int getColor(int id) {
+        return 0xff2563eb;
+    }
+
+    @Override
+    public int getColor(int id, Theme theme) {
+        return 0xff2563eb;
+    }
+
+    @Override
+    public int getInteger(int id) {
+        // ViewConfiguration's config_overrideHasPermanentMenuKey=false value;
+        // this avoids consulting a remote IWindowManager during the host gate.
+        return 2;
+    }
+
+    @Override
+    public void getValue(int id, TypedValue outValue, boolean resolveRefs) {
+        outValue.type = TypedValue.TYPE_FLOAT;
+        outValue.data = Float.floatToRawIntBits(2.0f);
     }
 
     @Override

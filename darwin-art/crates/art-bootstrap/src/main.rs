@@ -847,7 +847,9 @@ fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(root.join("probes/ProbeContext.java"))
             .arg(root.join("probes/ProbeContentResolver.java"))
             .arg(root.join("probes/ProbeResources.java"))
+            .arg(root.join("probes/ProbeCanvas.java"))
             .arg(root.join("probes/ProbeView.java"))
+            .arg(root.join("probes/DarwinWindow.java"))
             .arg(root.join("probes/compile-stubs/android/content/IContentProvider.java")),
     )?;
 
@@ -856,7 +858,9 @@ fn build_dex_probe(root: &Path) -> Result<()> {
     let context_class = class_dir.join("dev/darwinart/probe/ProbeContext.class");
     let resolver_class = class_dir.join("dev/darwinart/probe/ProbeContentResolver.class");
     let resources_class = class_dir.join("dev/darwinart/probe/ProbeResources.class");
+    let canvas_class = class_dir.join("dev/darwinart/probe/ProbeCanvas.class");
     let view_class = class_dir.join("dev/darwinart/probe/ProbeView.class");
+    let window_class = class_dir.join("dev/darwinart/probe/DarwinWindow.class");
     run_command(
         Command::new(find_d8()?)
             .arg("--lib")
@@ -870,7 +874,9 @@ fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(&context_class)
             .arg(&resolver_class)
             .arg(&resources_class)
-            .arg(&view_class),
+            .arg(&canvas_class)
+            .arg(&view_class)
+            .arg(&window_class),
     )?;
 
     let includes = [
@@ -938,14 +944,16 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=7 methods=75 \
-                    class[0]=Ldev/darwinart/probe/Hello; \
-                    class[1]=Ldev/darwinart/probe/ProbeActivity; \
-                    class[2]=Ldev/darwinart/probe/ProbeContentResolver$$ExternalSyntheticLambda0; \
-                    class[3]=Ldev/darwinart/probe/ProbeContentResolver; \
-                    class[4]=Ldev/darwinart/probe/ProbeContext; \
-                    class[5]=Ldev/darwinart/probe/ProbeResources; \
-                    class[6]=Ldev/darwinart/probe/ProbeView;";
+    let expected = "AOSP DEX: verified=yes version=35 classes=9 methods=164 \
+                    class[0]=Ldev/darwinart/probe/DarwinWindow; \
+                    class[1]=Ldev/darwinart/probe/Hello; \
+                    class[2]=Ldev/darwinart/probe/ProbeActivity; \
+                    class[3]=Ldev/darwinart/probe/ProbeCanvas; \
+                    class[4]=Ldev/darwinart/probe/ProbeContentResolver$$ExternalSyntheticLambda0; \
+                    class[5]=Ldev/darwinart/probe/ProbeContentResolver; \
+                    class[6]=Ldev/darwinart/probe/ProbeContext; \
+                    class[7]=Ldev/darwinart/probe/ProbeResources; \
+                    class[8]=Ldev/darwinart/probe/ProbeView;";
     if output.trim() != expected {
         return Err(format!("unexpected DEX probe output: {output:?}").into());
     }
@@ -2355,17 +2363,21 @@ fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
                     ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
                     ART runtime native: System.arraycopy()=42\n\
                     ART Android framework: ProbeActivity().probeValue()=42\n\
-                    ART Android window: Activity.attach()=PhoneWindow\n\
-                    ART Android view: ProbeView.draw()=640x360\n\
+                    ART Android window: Activity.attach()=DarwinWindow\n\
+                    ART Android view: Activity.setContentView()->View.draw(Canvas)=640x360\n\
                     ART Android lifecycle: Activity.onCreate()=43\n\
                     ART Darwin launcher: main(String[])=ok";
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
     if show_window {
-        println!("probe-window: ProbeView.draw() -> ARGB bridge -> NSWindow");
+        println!(
+            "probe-window: Activity.setContentView() -> View.draw(Canvas) -> NSWindow"
+        );
     } else {
-        println!("probe-runtime-dex: Activity.attach() + PhoneWindow + ProbeView.draw() -> Darwin");
+        println!(
+            "probe-runtime-dex: Activity.attach() + DarwinWindow + View.draw(Canvas) -> Darwin"
+        );
     }
     Ok(())
 }

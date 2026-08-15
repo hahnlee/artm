@@ -17,6 +17,7 @@ public final class ProbeActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setContentView(new ProbeView(this));
         lifecycleValue = 43;
     }
 
