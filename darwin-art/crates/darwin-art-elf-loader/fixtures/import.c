@@ -1,6 +1,8 @@
-extern int fixture_missing_import(void);
+extern int provider_value(void);
+extern int provider_data;
 
-__attribute__((visibility("default"))) int fixture_import(void) {
-    return fixture_missing_import();
+static int (*provider_slot)(void) = provider_value;
+
+__attribute__((visibility("default"))) int imported_value(void) {
+    return provider_value() + provider_slot() + provider_data;
 }
-

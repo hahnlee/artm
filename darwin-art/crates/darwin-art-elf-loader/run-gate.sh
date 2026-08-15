@@ -27,14 +27,28 @@ common_flags=(
   -Wl,-z,common-page-size=16384
 )
 
-"$clang" "${common_flags[@]}" -O0 -Wl,-soname,libdarwin_art_positive.so \
+"$clang" "${common_flags[@]}" -Wl,-soname,libdarwin_art_provider.so \
+  -Wl,--version-script="$crate_root/fixtures/provider.map" \
+  "$crate_root/fixtures/provider.c" -o "$fixture_dir/libdarwin_art_provider.so"
+"$clang" "${common_flags[@]}" -O0 -Wl,-z,norelro \
+  -Wl,-soname,libdarwin_art_positive.so \
   "$crate_root/fixtures/positive.c" -o "$fixture_dir/positive.so"
-"$clang" "${common_flags[@]}" -Wl,-soname,libdarwin_art_import.so \
-  "$crate_root/fixtures/import.c" -o "$fixture_dir/import.so"
-"$clang" "${common_flags[@]}" -Wl,-soname,libdarwin_art_tls.so \
+"$clang" "${common_flags[@]}" -O0 -Wl,-z,now -Wl,-z,norelro \
+  -Wl,-soname,libdarwin_art_import.so "$crate_root/fixtures/import.c" \
+  "$fixture_dir/libdarwin_art_provider.so" -o "$fixture_dir/import.so"
+"$clang" "${common_flags[@]}" -O0 -Wl,-z,now -Wl,-z,norelro \
+  -Wl,-soname,libdarwin_art_weak.so \
+  "$crate_root/fixtures/weak.c" -o "$fixture_dir/weak.so"
+"$clang" "${common_flags[@]}" -O0 -Wl,-z,lazy -Wl,-z,norelro \
+  -Wl,-soname,libdarwin_art_lazy.so "$crate_root/fixtures/import.c" \
+  "$fixture_dir/libdarwin_art_provider.so" -o "$fixture_dir/lazy.so"
+"$clang" "${common_flags[@]}" -O0 -Wl,-z,now -Wl,-z,relro \
+  -Wl,-soname,libdarwin_art_relro.so "$crate_root/fixtures/import.c" \
+  "$fixture_dir/libdarwin_art_provider.so" -o "$fixture_dir/relro.so"
+"$clang" "${common_flags[@]}" -Wl,-z,norelro -Wl,-soname,libdarwin_art_tls.so \
   "$crate_root/fixtures/tls.c" -o "$fixture_dir/tls.so"
 
-for fixture in positive import tls; do
+for fixture in positive import weak lazy relro tls; do
   file "$fixture_dir/$fixture.so" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null
 done
 
@@ -48,11 +62,27 @@ grep -E 'INIT_ARRAYSZ.*16 \(bytes\)' "$fixture_dir/positive.readelf.txt" >/dev/n
 ! grep -E '\(NEEDED\)|R_AARCH64_(JUMP_SLOT|GLOB_DAT)| TLS ' "$fixture_dir/positive.readelf.txt" >/dev/null
 "$nm" -D --defined-only "$fixture_dir/positive.so" | grep -E ' T fixture_value$' >/dev/null
 
-"$readelf" -d -r "$fixture_dir/import.so" > "$fixture_dir/import.readelf.txt"
-grep -E 'R_AARCH64_JUMP_SLOT.*fixture_missing_import' "$fixture_dir/import.readelf.txt" >/dev/null
+"$readelf" -l -d -r -V --dyn-syms "$fixture_dir/import.so" > "$fixture_dir/import.readelf.txt"
+grep -E '\(NEEDED\).*libdarwin_art_provider\.so' "$fixture_dir/import.readelf.txt" >/dev/null
+grep -E 'R_AARCH64_ABS64.*provider_value' "$fixture_dir/import.readelf.txt" >/dev/null
+grep -E 'R_AARCH64_GLOB_DAT.*provider_data' "$fixture_dir/import.readelf.txt" >/dev/null
+grep -E 'R_AARCH64_JUMP_SLOT.*provider_value' "$fixture_dir/import.readelf.txt" >/dev/null
+grep -E 'File: libdarwin_art_provider\.so' "$fixture_dir/import.readelf.txt" >/dev/null
+grep -E 'Name: DARWIN_ART_1' "$fixture_dir/import.readelf.txt" >/dev/null
+grep -E '\(BIND_NOW\)|NOW' "$fixture_dir/import.readelf.txt" >/dev/null
+! grep -E 'GNU_RELRO' "$fixture_dir/import.readelf.txt" >/dev/null
+"$readelf" -d -r --dyn-syms "$fixture_dir/weak.so" > "$fixture_dir/weak.readelf.txt"
+grep -E 'WEAK.*UND.*optional_provider' "$fixture_dir/weak.readelf.txt" >/dev/null
+grep -E 'R_AARCH64_(GLOB_DAT|JUMP_SLOT).*optional_provider' "$fixture_dir/weak.readelf.txt" >/dev/null
+"$readelf" -d -r "$fixture_dir/lazy.so" > "$fixture_dir/lazy.readelf.txt"
+grep -E 'R_AARCH64_JUMP_SLOT.*provider_value' "$fixture_dir/lazy.readelf.txt" >/dev/null
+! grep -E '\(BIND_NOW\)|FLAGS.*NOW' "$fixture_dir/lazy.readelf.txt" >/dev/null
+"$readelf" -l "$fixture_dir/relro.so" > "$fixture_dir/relro.readelf.txt"
+grep -E 'GNU_RELRO' "$fixture_dir/relro.readelf.txt" >/dev/null
 "$readelf" -l "$fixture_dir/tls.so" > "$fixture_dir/tls.readelf.txt"
 grep -E '^  TLS ' "$fixture_dir/tls.readelf.txt" >/dev/null
 
 cargo test --manifest-path "$crate_root/Cargo.toml"
 cargo run --quiet --release --manifest-path "$crate_root/Cargo.toml" --bin elf-loader-gate -- \
-  "$fixture_dir/positive.so" "$fixture_dir/import.so" "$fixture_dir/tls.so"
+  "$fixture_dir/positive.so" "$fixture_dir/import.so" "$fixture_dir/weak.so" \
+  "$fixture_dir/lazy.so" "$fixture_dir/relro.so" "$fixture_dir/tls.so"

@@ -1,6 +1,8 @@
+use std::collections::{HashMap, HashSet};
 use std::error::Error as StdError;
 use std::ffi::{c_int, c_void};
 use std::fmt;
+use std::num::NonZeroUsize;
 use std::ptr::{self, NonNull};
 
 #[cfg(not(target_os = "macos"))]
@@ -20,6 +22,7 @@ const EV_CURRENT: u32 = 1;
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
 const PT_TLS: u32 = 7;
+const PT_GNU_RELRO: u32 = 0x6474_e552;
 const PF_X: u32 = 1;
 const PF_W: u32 = 2;
 const PF_R: u32 = 4;
@@ -69,13 +72,23 @@ const DT_VERDEFNUM: i64 = 0x6fff_fffd;
 const DT_VERNEED: i64 = 0x6fff_fffe;
 const DT_VERNEEDNUM: i64 = 0x6fff_ffff;
 
+const R_AARCH64_ABS64: u32 = 257;
+const R_AARCH64_GLOB_DAT: u32 = 1025;
+const R_AARCH64_JUMP_SLOT: u32 = 1026;
 const R_AARCH64_RELATIVE: u32 = 1027;
+const DF_BIND_NOW: u64 = 0x8;
+const DF_1_NOW: u64 = 0x1;
 const SHN_UNDEF: u16 = 0;
 const STB_GLOBAL: u8 = 1;
 const STB_WEAK: u8 = 2;
 const STT_NOTYPE: u8 = 0;
+const STT_OBJECT: u8 = 1;
 const STT_FUNC: u8 = 2;
 const STT_TLS: u8 = 6;
+const VER_NDX_LOCAL: u16 = 0;
+const VER_NDX_GLOBAL: u16 = 1;
+const VERSYM_HIDDEN: u16 = 0x8000;
+const VER_FLG_WEAK: u16 = 0x2;
 
 const PROT_NONE: c_int = 0;
 const PROT_READ: c_int = 1;
@@ -103,13 +116,12 @@ unsafe extern "C" {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Capability {
     HostArchitecture,
-    NeededLibrary,
     Tls,
-    PltRelocations,
+    Relro,
+    LazyBinding,
     RelRelocations,
     RelrRelocations,
     UnsupportedRelocation { relocation_type: u32, symbol: u32 },
-    UndefinedSymbol(String),
     DynamicInitializer,
     Finalizers,
     PreinitArray,
@@ -117,6 +129,88 @@ pub enum Capability {
     Rpath,
     UnknownDynamicTag(i64),
     MissingSysvHash,
+    SymbolicLookup,
+    VersionDefinitions,
+    DynamicFlags { tag: i64, value: u64 },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResolveError {
+    UnknownSoname(String),
+    VersionMismatch {
+        soname: String,
+        symbol: String,
+        requested: String,
+    },
+    Rejected(String),
+}
+
+impl fmt::Display for ResolveError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownSoname(soname) => write!(formatter, "unknown dependency SONAME: {soname}"),
+            Self::VersionMismatch {
+                soname,
+                symbol,
+                requested,
+            } => write!(
+                formatter,
+                "version mismatch for {symbol}@{requested} from {soname}"
+            ),
+            Self::Rejected(message) => write!(formatter, "resolver rejected symbol: {message}"),
+        }
+    }
+}
+
+impl StdError for ResolveError {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResolvedSymbol {
+    address: NonZeroUsize,
+}
+
+impl ResolvedSymbol {
+    /// Constructs a provider result from a raw host address.
+    ///
+    /// # Safety
+    ///
+    /// The address must have the ABI, object/function kind, alignment, and readable/executable
+    /// lifetime required by every relocation that names it. It must remain valid until every
+    /// `LoadedElf` created with the resolver has been dropped.
+    pub unsafe fn new(address: NonZeroUsize) -> Self {
+        Self { address }
+    }
+
+    pub fn address(self) -> usize {
+        self.address.get()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VersionRequirement<'a> {
+    pub soname: &'a str,
+    pub name: &'a str,
+    pub hidden: bool,
+    pub flags: u16,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SymbolRequest<'a> {
+    pub symbol: &'a str,
+    pub needed_libraries: &'a [String],
+    pub version: Option<VersionRequirement<'a>>,
+}
+
+/// A closed symbol namespace supplied by the caller.
+///
+/// The loader never consults `dlsym`, dyld's global namespace, or the host process. Returning
+/// `Ok(None)` means the symbol is absent. An absent weak undefined symbol resolves to zero; an
+/// absent global undefined symbol fails the load.
+pub trait SymbolResolver {
+    fn resolve(
+        &mut self,
+        request: SymbolRequest<'_>,
+    ) -> Result<Option<ResolvedSymbol>, ResolveError>;
 }
 
 #[derive(Debug)]
@@ -125,11 +219,23 @@ pub enum LoadError {
     Bounds(&'static str),
     Capability(Capability),
     Protection(&'static str),
+    Resolver {
+        symbol: String,
+        source: ResolveError,
+    },
+    UnresolvedSymbol {
+        symbol: String,
+        soname: Option<String>,
+        version: Option<String>,
+    },
     SymbolNotFound(String),
     InvalidSymbol(String),
     InitializersAlreadyRun,
     InitializersNotRun,
-    System { operation: &'static str, code: i32 },
+    System {
+        operation: &'static str,
+        code: i32,
+    },
 }
 
 impl fmt::Display for LoadError {
@@ -141,6 +247,23 @@ impl fmt::Display for LoadError {
                 write!(formatter, "unsupported ELF capability: {capability:?}")
             }
             Self::Protection(message) => write!(formatter, "ELF protection error: {message}"),
+            Self::Resolver { symbol, source } => {
+                write!(formatter, "resolver failed for {symbol}: {source}")
+            }
+            Self::UnresolvedSymbol {
+                symbol,
+                soname,
+                version,
+            } => {
+                write!(formatter, "unresolved strong symbol: {symbol}")?;
+                if let Some(version) = version {
+                    write!(formatter, "@{version}")?;
+                }
+                if let Some(soname) = soname {
+                    write!(formatter, " from {soname}")?;
+                }
+                Ok(())
+            }
             Self::SymbolNotFound(name) => write!(formatter, "dynamic symbol not found: {name}"),
             Self::InvalidSymbol(name) => write!(formatter, "invalid dynamic symbol: {name}"),
             Self::InitializersAlreadyRun => write!(formatter, "DT_INIT_ARRAY already executed"),
@@ -167,6 +290,8 @@ struct ProgramHeader {
 
 #[derive(Default, Debug)]
 struct DynamicInfo {
+    needed_offsets: Vec<u64>,
+    soname_offset: Option<u64>,
     hash: Option<u64>,
     string_table: Option<u64>,
     string_size: Option<u64>,
@@ -176,6 +301,15 @@ struct DynamicInfo {
     rela_size: Option<u64>,
     rela_entry_size: Option<u64>,
     relative_relocation_count: Option<u64>,
+    plt_rela: Option<u64>,
+    plt_rela_size: Option<u64>,
+    plt_relocation_kind: Option<u64>,
+    bind_now_tag: bool,
+    flags: Option<u64>,
+    flags_1: Option<u64>,
+    versym: Option<u64>,
+    verneed: Option<u64>,
+    verneed_count: Option<u64>,
     init_array: Option<u64>,
     init_array_size: Option<u64>,
 }
@@ -196,11 +330,32 @@ pub struct LoadedElf {
     minimum_page: u64,
     loads: Vec<ProgramHeader>,
     dynamic: DynamicInfo,
+    needed_libraries: Vec<String>,
+    soname: Option<String>,
     initializers_run: bool,
+}
+
+#[derive(Default)]
+struct RejectAllResolver;
+
+impl SymbolResolver for RejectAllResolver {
+    fn resolve(
+        &mut self,
+        _request: SymbolRequest<'_>,
+    ) -> Result<Option<ResolvedSymbol>, ResolveError> {
+        Ok(None)
+    }
 }
 
 impl LoadedElf {
     pub fn load(bytes: &[u8]) -> Result<Self, LoadError> {
+        Self::load_with_resolver(bytes, &mut RejectAllResolver)
+    }
+
+    pub fn load_with_resolver(
+        bytes: &[u8],
+        resolver: &mut dyn SymbolResolver,
+    ) -> Result<Self, LoadError> {
         if !cfg!(target_arch = "aarch64") {
             return Err(LoadError::Capability(Capability::HostArchitecture));
         }
@@ -249,13 +404,24 @@ impl LoadedElf {
             minimum_page: parsed.minimum_page,
             loads: parsed.loads,
             dynamic,
+            needed_libraries: Vec::new(),
+            soname: None,
             initializers_run: false,
         };
         std::mem::forget(mapping);
 
-        loaded.validate_symbols_and_apply_relocations()?;
+        loaded.materialize_dynamic_names()?;
+        loaded.validate_symbols_and_apply_relocations(resolver)?;
         loaded.apply_final_protections(parsed.page_size, &parsed.page_protections)?;
         Ok(loaded)
+    }
+
+    pub fn needed_libraries(&self) -> &[String] {
+        &self.needed_libraries
+    }
+
+    pub fn soname(&self) -> Option<&str> {
+        self.soname.as_deref()
     }
 
     pub fn run_initializers(&mut self) -> Result<(), LoadError> {
@@ -305,60 +471,378 @@ impl LoadedElf {
         Ok(unsafe { function() })
     }
 
-    fn validate_symbols_and_apply_relocations(&mut self) -> Result<(), LoadError> {
+    fn materialize_dynamic_names(&mut self) -> Result<(), LoadError> {
+        self.needed_libraries = self
+            .dynamic
+            .needed_offsets
+            .iter()
+            .map(|offset| {
+                u32::try_from(*offset)
+                    .map_err(|_| LoadError::Bounds("DT_NEEDED string offset"))
+                    .and_then(|offset| self.dynamic_string(offset))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.soname = self
+            .dynamic
+            .soname_offset
+            .map(|offset| {
+                u32::try_from(offset)
+                    .map_err(|_| LoadError::Bounds("DT_SONAME string offset"))
+                    .and_then(|offset| self.dynamic_string(offset))
+            })
+            .transpose()?;
+        if self.needed_libraries.iter().any(String::is_empty) {
+            return Err(LoadError::Format("empty DT_NEEDED string"));
+        }
+        if self.soname.as_ref().is_some_and(String::is_empty) {
+            return Err(LoadError::Format("empty DT_SONAME string"));
+        }
+        Ok(())
+    }
+
+    fn validate_symbols_and_apply_relocations(
+        &mut self,
+        resolver: &mut dyn SymbolResolver,
+    ) -> Result<(), LoadError> {
         let symbol_count = self.symbol_count()?;
         for index in 1..symbol_count {
             let symbol = self.dynamic_symbol(index)?;
-            let name = self.dynamic_string(symbol.name_offset)?;
             if symbol.kind == STT_TLS {
                 return Err(LoadError::Capability(Capability::Tls));
             }
-            if symbol.section_index == SHN_UNDEF && !name.is_empty() {
-                return Err(LoadError::Capability(Capability::UndefinedSymbol(name)));
-            }
         }
 
+        let versions = self.parse_version_requirements(symbol_count)?;
+        let mut resolved = HashMap::new();
         let rela_address = self.dynamic.rela.unwrap_or(0);
         let rela_size = self.dynamic.rela_size.unwrap_or(0);
         if (rela_address == 0) != (rela_size == 0) {
             return Err(LoadError::Format("incomplete DT_RELA metadata"));
         }
-        if rela_size == 0 {
-            return Ok(());
+        if rela_size != 0 {
+            self.apply_relocation_table(
+                rela_address,
+                rela_size,
+                false,
+                self.dynamic.relative_relocation_count.unwrap_or(0),
+                symbol_count,
+                &versions,
+                &mut resolved,
+                resolver,
+            )?;
         }
+
+        let plt_address = self.dynamic.plt_rela.unwrap_or(0);
+        let plt_size = self.dynamic.plt_rela_size.unwrap_or(0);
+        if (plt_address == 0) != (plt_size == 0) {
+            return Err(LoadError::Format("incomplete PLT relocation metadata"));
+        }
+        if plt_size != 0 {
+            let rela_end = rela_address
+                .checked_add(rela_size)
+                .ok_or(LoadError::Bounds("DT_RELA range overflow"))?;
+            let plt_end = plt_address
+                .checked_add(plt_size)
+                .ok_or(LoadError::Bounds("DT_JMPREL range overflow"))?;
+            if rela_size != 0 && rela_address < plt_end && plt_address < rela_end {
+                return Err(LoadError::Format("DT_RELA and DT_JMPREL overlap"));
+            }
+            self.apply_relocation_table(
+                plt_address,
+                plt_size,
+                true,
+                0,
+                symbol_count,
+                &versions,
+                &mut resolved,
+                resolver,
+            )?;
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_relocation_table(
+        &mut self,
+        table_address: u64,
+        table_size: u64,
+        plt_only: bool,
+        relative_prefix_count: u64,
+        symbol_count: u32,
+        versions: &HashMap<u16, OwnedVersionRequirement>,
+        resolved: &mut HashMap<u32, usize>,
+        resolver: &mut dyn SymbolResolver,
+    ) -> Result<(), LoadError> {
         let entry_size = self
             .dynamic
             .rela_entry_size
             .unwrap_or(ELF64_RELA_SIZE as u64);
-        if entry_size != ELF64_RELA_SIZE as u64 || rela_size % entry_size != 0 {
-            return Err(LoadError::Format("invalid DT_RELAENT/DT_RELASZ"));
+        if entry_size != ELF64_RELA_SIZE as u64 || table_size % entry_size != 0 {
+            return Err(LoadError::Format(
+                "invalid DT_RELAENT/relocation table size",
+            ));
         }
-        self.require_loaded_range(rela_address, rela_size, Some(PF_R), "DT_RELA")?;
-        for index in 0..(rela_size / entry_size) {
-            let address = rela_address
+        let count = table_size / entry_size;
+        if relative_prefix_count > count {
+            return Err(LoadError::Format("DT_RELACOUNT exceeds DT_RELASZ"));
+        }
+        self.require_loaded_range(table_address, table_size, Some(PF_R), "RELA table")?;
+        for index in 0..count {
+            let address = table_address
                 .checked_add(index * entry_size)
                 .ok_or(LoadError::Bounds("DT_RELA entry overflow"))?;
             let offset = self.read_loaded_u64(address)?;
             let info = self.read_loaded_u64(address + 8)?;
             let addend = self.read_loaded_i64(address + 16)?;
             let relocation_type = info as u32;
-            let symbol = (info >> 32) as u32;
-            if relocation_type != R_AARCH64_RELATIVE || symbol != 0 {
+            let symbol_index = (info >> 32) as u32;
+            if index < relative_prefix_count
+                && (relocation_type != R_AARCH64_RELATIVE || symbol_index != 0)
+            {
+                return Err(LoadError::Format(
+                    "DT_RELACOUNT prefix contains non-relative relocation",
+                ));
+            }
+            if plt_only && relocation_type != R_AARCH64_JUMP_SLOT {
                 return Err(LoadError::Capability(Capability::UnsupportedRelocation {
                     relocation_type,
-                    symbol,
+                    symbol: symbol_index,
                 }));
             }
-            self.require_loaded_range(offset, 8, Some(PF_W), "R_AARCH64_RELATIVE target")?;
-            let value = (self.mapping.as_ptr() as i128)
-                .checked_add(addend as i128 - self.minimum_page as i128)
-                .and_then(|value| usize::try_from(value).ok())
-                .ok_or(LoadError::Bounds("R_AARCH64_RELATIVE value overflow"))?;
+            self.require_loaded_range(offset, 8, Some(PF_W), "RELA target")?;
+            let value = match relocation_type {
+                R_AARCH64_RELATIVE if symbol_index == 0 => self.load_bias_add(addend)?,
+                R_AARCH64_ABS64 | R_AARCH64_GLOB_DAT | R_AARCH64_JUMP_SLOT => {
+                    if symbol_index == 0 && relocation_type != R_AARCH64_ABS64 {
+                        return Err(LoadError::Format(
+                            "GLOB_DAT/JUMP_SLOT relocation has STN_UNDEF symbol index",
+                        ));
+                    }
+                    let symbol_address = self.resolve_relocation_symbol(
+                        symbol_index,
+                        symbol_count,
+                        versions,
+                        resolved,
+                        resolver,
+                    )?;
+                    checked_signed_add(symbol_address, addend, "symbol relocation value")?
+                }
+                _ => {
+                    return Err(LoadError::Capability(Capability::UnsupportedRelocation {
+                        relocation_type,
+                        symbol: symbol_index,
+                    }));
+                }
+            };
             let destination = self.loaded_pointer(offset, 8)?;
             // SAFETY: require_loaded_range proves an aligned-size writable destination.
             unsafe { ptr::write_unaligned(destination.cast::<usize>(), value) };
         }
         Ok(())
+    }
+
+    fn resolve_relocation_symbol(
+        &self,
+        index: u32,
+        symbol_count: u32,
+        versions: &HashMap<u16, OwnedVersionRequirement>,
+        resolved: &mut HashMap<u32, usize>,
+        resolver: &mut dyn SymbolResolver,
+    ) -> Result<usize, LoadError> {
+        if let Some(address) = resolved.get(&index) {
+            return Ok(*address);
+        }
+        if index == 0 {
+            return Ok(0);
+        }
+        if index >= symbol_count {
+            return Err(LoadError::Bounds("relocation symbol index"));
+        }
+        let symbol = self.dynamic_symbol(index)?;
+        if symbol.kind == STT_TLS {
+            return Err(LoadError::Capability(Capability::Tls));
+        }
+        if !matches!(symbol.kind, STT_NOTYPE | STT_OBJECT | STT_FUNC) {
+            return Err(LoadError::InvalidSymbol(format!("dynsym[{index}] type")));
+        }
+        if symbol.section_index != SHN_UNDEF {
+            self.require_loaded_range(symbol.value, symbol.size.max(1), None, "defined symbol")?;
+            let address = self.loaded_pointer(symbol.value, 1)? as usize;
+            resolved.insert(index, address);
+            return Ok(address);
+        }
+        if !matches!(symbol.binding, STB_GLOBAL | STB_WEAK) || symbol.visibility != 0 {
+            return Err(LoadError::InvalidSymbol(format!("dynsym[{index}] binding")));
+        }
+        let name = self.dynamic_string(symbol.name_offset)?;
+        if name.is_empty() {
+            return Err(LoadError::InvalidSymbol(format!(
+                "dynsym[{index}] empty name"
+            )));
+        }
+        let version = self.version_for_symbol(index, versions)?;
+        let request_version = version.map(|(requirement, hidden)| VersionRequirement {
+            soname: &requirement.soname,
+            name: &requirement.name,
+            hidden,
+            flags: requirement.flags,
+        });
+        let result = resolver
+            .resolve(SymbolRequest {
+                symbol: &name,
+                needed_libraries: &self.needed_libraries,
+                version: request_version,
+            })
+            .map_err(|source| LoadError::Resolver {
+                symbol: name.clone(),
+                source,
+            })?;
+        let address = match result {
+            Some(symbol) => symbol.address(),
+            None if symbol.binding == STB_WEAK => 0,
+            None => {
+                return Err(LoadError::UnresolvedSymbol {
+                    symbol: name,
+                    soname: version.map(|(item, _)| item.soname.clone()),
+                    version: version.map(|(item, _)| item.name.clone()),
+                });
+            }
+        };
+        resolved.insert(index, address);
+        Ok(address)
+    }
+
+    fn parse_version_requirements(
+        &self,
+        symbol_count: u32,
+    ) -> Result<HashMap<u16, OwnedVersionRequirement>, LoadError> {
+        let mut result = HashMap::new();
+        let (Some(mut current), Some(count)) = (self.dynamic.verneed, self.dynamic.verneed_count)
+        else {
+            if self.dynamic.verneed.is_some() || self.dynamic.verneed_count.is_some() {
+                return Err(LoadError::Format("incomplete DT_VERNEED metadata"));
+            }
+            if let Some(versym) = self.dynamic.versym {
+                self.require_loaded_range(
+                    versym,
+                    u64::from(symbol_count) * 2,
+                    Some(PF_R),
+                    "DT_VERSYM",
+                )?;
+            }
+            return Ok(result);
+        };
+        let versym = self
+            .dynamic
+            .versym
+            .ok_or(LoadError::Format("DT_VERNEED requires DT_VERSYM"))?;
+        if count == 0 {
+            return Err(LoadError::Format("DT_VERNEEDNUM is zero"));
+        }
+        self.require_loaded_range(versym, u64::from(symbol_count) * 2, Some(PF_R), "DT_VERSYM")?;
+        let mut visited = HashSet::new();
+        for requirement_index in 0..count {
+            if !visited.insert(current) {
+                return Err(LoadError::Format("cyclic DT_VERNEED list"));
+            }
+            self.require_loaded_range(current, 16, Some(PF_R), "Elf64_Verneed")?;
+            let version = self.read_loaded_u16(current)?;
+            let auxiliary_count = self.read_loaded_u16(current + 2)?;
+            let file_offset = self.read_loaded_u32(current + 4)?;
+            let auxiliary_offset = self.read_loaded_u32(current + 8)?;
+            let next_offset = self.read_loaded_u32(current + 12)?;
+            if version != 1 || auxiliary_count == 0 || auxiliary_offset == 0 {
+                return Err(LoadError::Format("invalid Elf64_Verneed header"));
+            }
+            let soname = self.dynamic_string(file_offset)?;
+            if !self.needed_libraries.iter().any(|needed| needed == &soname) {
+                return Err(LoadError::Format(
+                    "Elf64_Verneed file is not present in DT_NEEDED",
+                ));
+            }
+            let mut auxiliary = current
+                .checked_add(u64::from(auxiliary_offset))
+                .ok_or(LoadError::Bounds("Elf64_Vernaux address overflow"))?;
+            for auxiliary_index in 0..auxiliary_count {
+                self.require_loaded_range(auxiliary, 16, Some(PF_R), "Elf64_Vernaux")?;
+                let expected_hash = self.read_loaded_u32(auxiliary)?;
+                let flags = self.read_loaded_u16(auxiliary + 4)?;
+                let raw_other = self.read_loaded_u16(auxiliary + 6)?;
+                let name_offset = self.read_loaded_u32(auxiliary + 8)?;
+                let next = self.read_loaded_u32(auxiliary + 12)?;
+                let index = raw_other & !VERSYM_HIDDEN;
+                if index <= VER_NDX_GLOBAL {
+                    return Err(LoadError::Format("invalid Elf64_Vernaux version index"));
+                }
+                if flags & !VER_FLG_WEAK != 0 {
+                    return Err(LoadError::Format("unsupported Elf64_Vernaux flags"));
+                }
+                let name = self.dynamic_string(name_offset)?;
+                if elf_hash(name.as_bytes()) != expected_hash {
+                    return Err(LoadError::Format("Elf64_Vernaux hash mismatch"));
+                }
+                let requirement = OwnedVersionRequirement {
+                    soname: soname.clone(),
+                    name,
+                    flags,
+                };
+                if result.insert(index, requirement).is_some() {
+                    return Err(LoadError::Format("duplicate version requirement index"));
+                }
+                if auxiliary_index + 1 == auxiliary_count {
+                    if next != 0 {
+                        return Err(LoadError::Format("final Elf64_Vernaux has nonzero next"));
+                    }
+                } else if next == 0 {
+                    return Err(LoadError::Format("truncated Elf64_Vernaux list"));
+                } else {
+                    auxiliary = auxiliary
+                        .checked_add(u64::from(next))
+                        .ok_or(LoadError::Bounds("Elf64_Vernaux next overflow"))?;
+                }
+            }
+            if requirement_index + 1 == count {
+                if next_offset != 0 {
+                    return Err(LoadError::Format("final Elf64_Verneed has nonzero next"));
+                }
+            } else if next_offset == 0 {
+                return Err(LoadError::Format("truncated Elf64_Verneed list"));
+            } else {
+                current = current
+                    .checked_add(u64::from(next_offset))
+                    .ok_or(LoadError::Bounds("Elf64_Verneed next overflow"))?;
+            }
+        }
+        Ok(result)
+    }
+
+    fn version_for_symbol<'a>(
+        &self,
+        symbol_index: u32,
+        requirements: &'a HashMap<u16, OwnedVersionRequirement>,
+    ) -> Result<Option<(&'a OwnedVersionRequirement, bool)>, LoadError> {
+        let Some(table) = self.dynamic.versym else {
+            return Ok(None);
+        };
+        let address = table
+            .checked_add(u64::from(symbol_index) * 2)
+            .ok_or(LoadError::Bounds("DT_VERSYM entry overflow"))?;
+        let raw = self.read_loaded_u16(address)?;
+        let index = raw & !VERSYM_HIDDEN;
+        if matches!(index, VER_NDX_LOCAL | VER_NDX_GLOBAL) {
+            return Ok(None);
+        }
+        let requirement = requirements
+            .get(&index)
+            .ok_or(LoadError::Format("DT_VERSYM index has no DT_VERNEED entry"))?;
+        Ok(Some((requirement, raw & VERSYM_HIDDEN != 0)))
+    }
+
+    fn load_bias_add(&self, addend: i64) -> Result<usize, LoadError> {
+        (self.mapping.as_ptr() as i128)
+            .checked_add(addend as i128 - self.minimum_page as i128)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or(LoadError::Bounds("R_AARCH64_RELATIVE value overflow"))
     }
 
     fn resolve_function(&self, requested: &str) -> Result<usize, LoadError> {
@@ -535,6 +1019,10 @@ impl LoadedElf {
         read_u32(self.loaded_slice(address, 4)?, 0)
     }
 
+    fn read_loaded_u16(&self, address: u64) -> Result<u16, LoadError> {
+        read_u16(self.loaded_slice(address, 2)?, 0)
+    }
+
     fn read_loaded_u64(&self, address: u64) -> Result<u64, LoadError> {
         read_u64(self.loaded_slice(address, 8)?, 0)
     }
@@ -611,6 +1099,13 @@ struct DynamicSymbol {
     size: u64,
 }
 
+#[derive(Clone, Debug)]
+struct OwnedVersionRequirement {
+    soname: String,
+    name: String,
+    flags: u16,
+}
+
 fn parse_image(bytes: &[u8]) -> Result<ParsedImage, LoadError> {
     if bytes.len() < ELF64_EHDR_SIZE || bytes.len() < EI_NIDENT {
         return Err(LoadError::Format("truncated ELF header"));
@@ -669,6 +1164,7 @@ fn parse_image(bytes: &[u8]) -> Result<ParsedImage, LoadError> {
                 }
             }
             PT_TLS => return Err(LoadError::Capability(Capability::Tls)),
+            PT_GNU_RELRO => return Err(LoadError::Capability(Capability::Relro)),
             _ => {}
         }
     }
@@ -844,6 +1340,8 @@ fn parse_dynamic(bytes: &[u8], dynamic: &ProgramHeader) -> Result<DynamicInfo, L
             break;
         }
         match tag {
+            DT_NEEDED => info.needed_offsets.push(value),
+            DT_SONAME => set_once(&mut info.soname_offset, value, "duplicate DT_SONAME")?,
             DT_HASH => set_once(&mut info.hash, value, "duplicate DT_HASH")?,
             DT_STRTAB => set_once(&mut info.string_table, value, "duplicate DT_STRTAB")?,
             DT_STRSZ => set_once(&mut info.string_size, value, "duplicate DT_STRSZ")?,
@@ -857,35 +1355,55 @@ fn parse_dynamic(bytes: &[u8], dynamic: &ProgramHeader) -> Result<DynamicInfo, L
                 value,
                 "duplicate DT_RELACOUNT",
             )?,
+            DT_JMPREL => set_once(&mut info.plt_rela, value, "duplicate DT_JMPREL")?,
+            DT_PLTRELSZ => set_once(&mut info.plt_rela_size, value, "duplicate DT_PLTRELSZ")?,
+            DT_PLTREL => set_once(&mut info.plt_relocation_kind, value, "duplicate DT_PLTREL")?,
+            DT_BIND_NOW => info.bind_now_tag = true,
+            DT_FLAGS => set_once(&mut info.flags, value, "duplicate DT_FLAGS")?,
+            DT_FLAGS_1 => set_once(&mut info.flags_1, value, "duplicate DT_FLAGS_1")?,
+            DT_VERSYM => set_once(&mut info.versym, value, "duplicate DT_VERSYM")?,
+            DT_VERNEED => set_once(&mut info.verneed, value, "duplicate DT_VERNEED")?,
+            DT_VERNEEDNUM => set_once(&mut info.verneed_count, value, "duplicate DT_VERNEEDNUM")?,
             DT_INIT_ARRAY => set_once(&mut info.init_array, value, "duplicate DT_INIT_ARRAY")?,
             DT_INIT_ARRAYSZ => set_once(
                 &mut info.init_array_size,
                 value,
                 "duplicate DT_INIT_ARRAYSZ",
             )?,
-            DT_NEEDED => return Err(LoadError::Capability(Capability::NeededLibrary)),
-            DT_PLTRELSZ | DT_PLTGOT | DT_PLTREL | DT_JMPREL if value != 0 => {
-                return Err(LoadError::Capability(Capability::PltRelocations));
+            DT_PLTGOT | DT_DEBUG | DT_GNU_HASH => {}
+            DT_REL | DT_RELSZ | DT_RELENT => {
+                if value != 0 {
+                    return Err(LoadError::Capability(Capability::RelRelocations));
+                }
             }
-            DT_REL | DT_RELSZ | DT_RELENT if value != 0 => {
-                return Err(LoadError::Capability(Capability::RelRelocations));
+            DT_RELR | DT_RELRSZ | DT_RELRENT => {
+                if value != 0 {
+                    return Err(LoadError::Capability(Capability::RelrRelocations));
+                }
             }
-            DT_RELR | DT_RELRSZ | DT_RELRENT if value != 0 => {
-                return Err(LoadError::Capability(Capability::RelrRelocations));
+            DT_INIT => {
+                if value != 0 {
+                    return Err(LoadError::Capability(Capability::DynamicInitializer));
+                }
             }
-            DT_INIT if value != 0 => {
-                return Err(LoadError::Capability(Capability::DynamicInitializer));
+            DT_FINI | DT_FINI_ARRAY | DT_FINI_ARRAYSZ => {
+                if value != 0 {
+                    return Err(LoadError::Capability(Capability::Finalizers));
+                }
             }
-            DT_FINI | DT_FINI_ARRAY | DT_FINI_ARRAYSZ if value != 0 => {
-                return Err(LoadError::Capability(Capability::Finalizers));
-            }
-            DT_PREINIT_ARRAY | DT_PREINIT_ARRAYSZ if value != 0 => {
-                return Err(LoadError::Capability(Capability::PreinitArray));
+            DT_PREINIT_ARRAY | DT_PREINIT_ARRAYSZ => {
+                if value != 0 {
+                    return Err(LoadError::Capability(Capability::PreinitArray));
+                }
             }
             DT_TEXTREL => return Err(LoadError::Capability(Capability::TextRelocations)),
             DT_RPATH | DT_RUNPATH => return Err(LoadError::Capability(Capability::Rpath)),
-            DT_GNU_HASH | DT_SONAME | DT_SYMBOLIC | DT_DEBUG | DT_BIND_NOW | DT_FLAGS
-            | DT_FLAGS_1 | DT_VERSYM | DT_VERDEF | DT_VERDEFNUM | DT_VERNEED | DT_VERNEEDNUM => {}
+            DT_SYMBOLIC => return Err(LoadError::Capability(Capability::SymbolicLookup)),
+            DT_VERDEF | DT_VERDEFNUM => {
+                if value != 0 {
+                    return Err(LoadError::Capability(Capability::VersionDefinitions));
+                }
+            }
             _ => return Err(LoadError::Capability(Capability::UnknownDynamicTag(tag))),
         }
     }
@@ -911,6 +1429,40 @@ fn validate_dynamic_capabilities(info: &DynamicInfo) -> Result<(), LoadError> {
         if relative_count > relocation_count {
             return Err(LoadError::Format("DT_RELACOUNT exceeds DT_RELASZ"));
         }
+    }
+    let plt_address = info.plt_rela.unwrap_or(0);
+    let plt_size = info.plt_rela_size.unwrap_or(0);
+    if (plt_address == 0) != (plt_size == 0) {
+        return Err(LoadError::Format("incomplete DT_JMPREL/DT_PLTRELSZ"));
+    }
+    if plt_size != 0 {
+        if info.plt_relocation_kind != Some(DT_RELA as u64) {
+            return Err(LoadError::Format("DT_PLTREL is not DT_RELA"));
+        }
+        let now = info.bind_now_tag
+            || info.flags.is_some_and(|flags| flags & DF_BIND_NOW != 0)
+            || info.flags_1.is_some_and(|flags| flags & DF_1_NOW != 0);
+        if !now {
+            return Err(LoadError::Capability(Capability::LazyBinding));
+        }
+    } else if info.plt_relocation_kind.is_some() {
+        return Err(LoadError::Format("DT_PLTREL without DT_JMPREL"));
+    }
+    if let Some(flags) = info.flags
+        && flags & !DF_BIND_NOW != 0
+    {
+        return Err(LoadError::Capability(Capability::DynamicFlags {
+            tag: DT_FLAGS,
+            value: flags,
+        }));
+    }
+    if let Some(flags) = info.flags_1
+        && flags & !DF_1_NOW != 0
+    {
+        return Err(LoadError::Capability(Capability::DynamicFlags {
+            tag: DT_FLAGS_1,
+            value: flags,
+        }));
     }
     Ok(())
 }
@@ -981,6 +1533,26 @@ fn difference_to_usize(value: u64, base: u64) -> Result<usize, LoadError> {
         .checked_sub(base)
         .ok_or(LoadError::Bounds("address below image base"))?;
     to_usize(difference, "address difference")
+}
+
+fn checked_signed_add(base: usize, addend: i64, what: &'static str) -> Result<usize, LoadError> {
+    (base as i128)
+        .checked_add(addend as i128)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or(LoadError::Bounds(what))
+}
+
+fn elf_hash(name: &[u8]) -> u32 {
+    let mut hash = 0_u32;
+    for byte in name {
+        hash = hash.wrapping_shl(4).wrapping_add(u32::from(*byte));
+        let high = hash & 0xf000_0000;
+        if high != 0 {
+            hash ^= high >> 24;
+        }
+        hash &= !high;
+    }
+    hash
 }
 
 fn system_error(operation: &'static str) -> LoadError {
