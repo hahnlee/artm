@@ -1,9 +1,11 @@
-# Bionic read-only filesystem facade gate
+# Bionic immutable filesystem facade gate
 
-This standalone gate connects 13 Class-B Android arm64 libc filesystem imports
-to the Darwin component-walking filesystem broker: `open`, `openat`, `read`,
-`close`, `fstat`, `stat`, `lstat`, `readlink`, `getcwd`, `chdir`, `opendir`,
-`readdir`, and `closedir`. It is not wired into the runtime.
+This standalone gate connects 28 Class-B Android arm64 libc filesystem imports
+to the Darwin component-walking filesystem broker. In addition to the original
+file/path/cwd/DIR set, it owns `fchmod`, `fchmodat`, `ftruncate`, `isatty`,
+`link`, `mkdir`, `pathconf`, `realpath`, `remove`, `rename`, `statvfs`,
+`symlink`, `truncate`, `unlinkat`, and `utimensat`. It is not wired into the
+runtime.
 
 ## Boundary and ownership
 
@@ -11,8 +13,9 @@ The facade is activated with an already-open Darwin directory, mounted at the
 guest byte path `/system`, with guest cwd `/system`. `darwin-art-prefix`
 normalizes guest paths and rejects mount escape; `darwin-art-fs-broker` walks
 each component relative to that directory with no-follow semantics. Symlinks,
-`..` escape, writable operations, special nodes, and paths outside the one
-immutable mount fail closed.
+`..` escape, special nodes, and paths outside the one immutable mount fail
+closed. No writable root or mutation broker is present. Every admitted mutation
+therefore ends in Android `EROFS` without calling a Darwin mutation API.
 
 Guest descriptors are facade-local virtual integers beginning at 10000. A
 Darwin descriptor is retained in the private Rust table and is never returned
@@ -61,6 +64,22 @@ As with virtual fds, another provider must not invent or accept these tokens.
   unknown values become Android `DT_UNKNOWN`.
 - Android arm64 `struct stat` is materialized as the pinned 128-byte Bionic
   layout; it never exposes a Darwin `struct stat`.
+- `isatty` recognizes facade-owned regular-file/directory descriptors and
+  returns zero with Android `ENOTTY`; unknown descriptors return `EBADF`.
+- `pathconf` explicitly maps all 20 Android selector numbers to Darwin semantic
+  constants and calls `fpathconf` on the broker-opened descriptor. Android
+  numbers are never forwarded as Darwin numbers. The audit differentially
+  checks `_PC_2_SYMLINKS`, whose Android and Darwin values differ.
+- `realpath` securely opens the no-follow target, then copies the normalized
+  guest byte path to the caller's Android `PATH_MAX` buffer. Null allocation
+  mode is `EOPNOTSUPP` because allocator ownership remains external.
+- `statvfs` securely opens the object, copies common scalar fields into the
+  pinned 112-byte Android arm64 layout, translates the portable Darwin flags,
+  forces Android `ST_RDONLY`, and zeroes every reserved word.
+- `fchmod`, `ftruncate`, and null-path `utimensat` distinguish facade-owned
+  descriptors (`EROFS`) from unknown descriptors (`EBADF`). Path mutations
+  first pass byte-path containment. The `*at` calls accept only reviewed Android
+  flags and `AT_FDCWD`/absolute paths; no Linux flag is forwarded to Darwin.
 
 The cwd is a verified lexical guest path. Every later relative lookup performs
 a fresh broker walk from the immutable mount root, so containment survives host
@@ -75,10 +94,11 @@ its contents may be replaced by the next `readdir` on that stream. `closedir`
 frees the entry and token after the serialized host close; concurrent or later
 use is the POSIX-undefined caller case and is not made into a tombstone API.
 
-Relative `openat` against a valid facade file descriptor is explicitly
-unsupported and returns Android `EOPNOTSUPP`; an unknown descriptor returns
-`EBADF`. `lseek`, writable/create/truncate/append modes, rename, unlink, socket,
-and every symbol absent from the closed resolver are unsupported capabilities.
+Relative `openat` and mutation `*at` calls against a valid facade file
+descriptor are explicitly unsupported and return Android `EOPNOTSUPP`; an
+unknown descriptor returns `EBADF`. `lseek`, writable/create/truncate/append
+open modes, socket, and every symbol absent from the closed resolver are
+unsupported capabilities.
 `O_DIRECT`, `O_PATH`, and unknown flags return `EOPNOTSUPP`; write intent returns
 `EROFS`. The variadic shims never consume a mode argument because every flag
 combination requiring one is rejected first.
@@ -101,22 +121,27 @@ cannot move to a different pthread. Nested activation restores the previous
 
 ## Deterministic audit
 
-Run `./audit.sh`. It pins and hashes the NDK r28c API 35 `fcntl.h`, `stat.h`,
-`dirent.h`, and `unistd.h` inputs, the prefix and broker sources, the Bionic
-errno translator, the OS-constant manifest, and the real libc++ Class-B import
-classification. Compile-time probes lock every function signature plus the
-Android `stat` and `dirent` field layouts. It then:
+Run `./audit.sh`. It pins and hashes the NDK r28c API 35 `fcntl.h`, Linux
+`fcntl.h`, `stat.h`, `statvfs.h`, `dirent.h`, `unistd.h`, `stdlib.h`, and
+`stdio.h` inputs, the prefix and broker sources, the Bionic errno translator,
+the OS-constant manifest, and the real libc++ Class-B import classification.
+Compile-time probes lock every signature, the Android pathconf/`AT_*` numbers,
+and the Android `stat`, `dirent`, and `statvfs` layouts. It then:
 
 1. cross-compiles a real Android AArch64 ELF fixture whose only undefined
-   symbols are `__errno` and the 13 listed facade imports;
+   symbols are `__errno` and the 28 listed facade imports;
 2. loads it with a closed resolver and exercises content, Android stat/dirent
    layouts, cwd transitions, EOF errno, `ENOENT`, unsupported flags, write
    rejection, regular/final/intermediate `readlink` distinctions,
-   traversal/symlink policy, virtual-dirfd rejection, and virtual descriptors
-   at or above 10000;
-3. proves Darwin host errno is preserved and no unknown translation occurred;
-4. runs broker/prefix tests, the activation `!Send` compile-fail test, Clippy,
-   and formatting checks using a temporary target directory.
+   traversal/symlink policy, virtual-dirfd rejection, pathconf/statvfs
+   translation, realpath byte normalization, deterministic mutation rejection,
+   and virtual descriptors at or above 10000;
+3. differentially compares Android `_PC_2_SYMLINKS`, block size, and translated
+   statvfs flags against the same securely opened Darwin object;
+4. proves Darwin host errno is preserved and no unknown translation occurred;
+5. repeats the complete Android ELF boundary with C ASan and UBSan, then runs
+   broker/prefix tests, the activation `!Send` compile-fail test, Clippy, and
+   formatting checks using temporary target directories.
 
 The gate performs no filesystem writes through the facade. Its test setup is
 temporary host data created by the audit harness.

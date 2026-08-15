@@ -34,6 +34,10 @@ fn compile(source: &str, object: &Path, sdk: &str, includes: &[&str]) {
     for include in includes {
         command.arg(format!("-I{include}"));
     }
+    if let Ok(sanitizer) = env::var("BIONIC_FS_C_SANITIZER") {
+        command.arg(format!("-fsanitize={sanitizer}"));
+        command.arg("-fno-omit-frame-pointer");
+    }
     let status = command
         .args(["-c", source, "-o"])
         .arg(object)
@@ -73,6 +77,23 @@ fn main() {
     assert!(status.success(), "ar failed");
     println!("cargo:rustc-link-search=native={}", output_dir.display());
     println!("cargo:rustc-link-lib=static=darwin_art_bionic_fs_shims");
+    if let Ok(sanitizer) = env::var("BIONIC_FS_C_SANITIZER") {
+        let runtime_name = match sanitizer.as_str() {
+            "address" => "clang_rt.asan_osx_dynamic",
+            "undefined" => "clang_rt.ubsan_osx_dynamic",
+            _ => panic!("unsupported C sanitizer"),
+        };
+        let filename = format!("lib{runtime_name}.dylib");
+        let runtime = output(
+            Command::new("clang").arg(format!("-print-file-name={filename}")),
+            "sanitizer runtime lookup",
+        );
+        let runtime_dir = Path::new(&runtime).parent().expect("sanitizer directory");
+        println!("cargo:rustc-link-search=native={}", runtime_dir.display());
+        println!("cargo:rustc-link-lib=dylib={runtime_name}");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", runtime_dir.display());
+    }
+    println!("cargo:rerun-if-env-changed=BIONIC_FS_C_SANITIZER");
     for source in [
         "src/shims.c",
         "include/darwin_art_bionic_fs.h",

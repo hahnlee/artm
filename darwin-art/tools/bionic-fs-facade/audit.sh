@@ -34,7 +34,13 @@ check_hash "$project_root/upstream/android16-os-constants-values.tsv" \
 check_hash "$project_root/tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv" \
   "$LIBC_IMPORT_MANIFEST_SHA256"
 
-for symbol in chdir close closedir fstat getcwd lstat open openat opendir read readdir readlink stat; do
+symbols=(chdir close closedir fchmod fchmodat fstat ftruncate getcwd isatty link
+         lstat mkdir open openat opendir pathconf read readdir readlink realpath
+         remove rename stat statvfs symlink truncate unlinkat utimensat)
+diff -u <(printf '%s\n' "${symbols[@]}") \
+  <(tail -n +2 "$script_dir/manifests/imports.tsv" | cut -f1) ||
+  fail 'filesystem facade import manifest drift'
+for symbol in "${symbols[@]}"; do
   awk -F '\t' -v wanted="$symbol" '$1==wanted && $2=="FUNC" && $3=="B" {found=1} END{exit !found}' \
     "$project_root/tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv" ||
     fail "libc import classification drift: $symbol"
@@ -48,12 +54,20 @@ readelf="$toolchain/llvm-readelf"
 check_hash "$ndk_root/source.properties" "$NDK_SOURCE_PROPERTIES_SHA256"
 check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/fcntl.h" \
   "$NDK_ANDROID_ARM64_FCNTL_SHA256"
+check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/fcntl.h" \
+  "$NDK_LINUX_FCNTL_SHA256"
 check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/stat.h" \
   "$NDK_SYS_STAT_SHA256"
+check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/statvfs.h" \
+  "$NDK_SYS_STATVFS_SHA256"
 check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/dirent.h" \
   "$NDK_DIRENT_SHA256"
 check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/unistd.h" \
   "$NDK_UNISTD_SHA256"
+check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/stdlib.h" \
+  "$NDK_STDLIB_SHA256"
+check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/stdio.h" \
+  "$NDK_STDIO_SHA256"
 
 temp_root="$(mktemp -d "${TMPDIR:-/tmp}/bionic-fs-facade.XXXXXX")"
 cleanup() {
@@ -79,23 +93,40 @@ _closedir
 _darwin_art_bionic_fs_chdir_core
 _darwin_art_bionic_fs_close_core
 _darwin_art_bionic_fs_closedir_core
+_darwin_art_bionic_fs_fchmod_core
+_darwin_art_bionic_fs_fchmodat_core
 _darwin_art_bionic_fs_fstat_core
+_darwin_art_bionic_fs_ftruncate_core
 _darwin_art_bionic_fs_getcwd_core
+_darwin_art_bionic_fs_isatty_core
+_darwin_art_bionic_fs_link_core
 _darwin_art_bionic_fs_lstat_core
+_darwin_art_bionic_fs_mkdir_core
 _darwin_art_bionic_fs_open_core
 _darwin_art_bionic_fs_openat_core
 _darwin_art_bionic_fs_opendir_core
+_darwin_art_bionic_fs_pathconf_core
 _darwin_art_bionic_fs_read_core
 _darwin_art_bionic_fs_readdir_core
 _darwin_art_bionic_fs_readlink_core
+_darwin_art_bionic_fs_realpath_core
+_darwin_art_bionic_fs_remove_core
+_darwin_art_bionic_fs_rename_core
 _darwin_art_bionic_fs_stat_core
+_darwin_art_bionic_fs_statvfs_core
+_darwin_art_bionic_fs_symlink_core
+_darwin_art_bionic_fs_truncate_core
+_darwin_art_bionic_fs_unlinkat_core
+_darwin_art_bionic_fs_utimensat_core
 _fdopendir
+_fpathconf
+_fstatvfs
 _readdir
 EOF
 diff -u "$temp_root/expected-undefined" "$temp_root/undefined" ||
   fail 'shim dependency drift'
 definitions="$(nm -gU "$temp_root/shims.o")"
-for symbol in chdir close closedir fs_resolve fstat getcwd lstat open openat opendir read readdir readlink stat; do
+for symbol in "${symbols[@]}" fs_resolve; do
   grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
     fail "missing prefixed definition $symbol"
 done
@@ -104,11 +135,11 @@ if awk '$2 ~ /^[TDS]$/ {print $3}' <<<"$definitions" |
   fail 'unprefixed global definition escaped filesystem facade'
 fi
 visibility="$(nm -m "$temp_root/shims.o")"
-for symbol in host_closedir host_fdopendir host_readdir; do
+for symbol in host_closedir host_fdopendir host_fpathconf host_fstatvfs host_readdir; do
   grep -F "private external _darwin_art_bionic_fs_$symbol" <<<"$visibility" >/dev/null ||
     fail "host DIR helper escaped hidden visibility: $symbol"
 done
-if rg -n 'dlopen|dlsym|dyld|NSLookupSymbolInImage|RTLD_|rename|unlink|socket|O_WRONLY[^\n]*accepted|O_RDWR[^\n]*accepted' \
+if rg -n 'dlopen|dlsym|dyld|NSLookupSymbolInImage|RTLD_|socket|O_WRONLY[^\n]*accepted|O_RDWR[^\n]*accepted|(^|[^[:alnum:]_.])(chmod|fchmod|fchmodat|ftruncate|link|mkdir|remove|rename|symlink|truncate|unlink|unlinkat|utimensat)[[:space:]]*\(' \
    "$script_dir/src" "$script_dir/include" "$script_dir/manifests" >/dev/null; then
   fail 'forbidden resolver or writable capability entered facade'
 fi
@@ -136,21 +167,39 @@ __errno
 chdir
 close
 closedir
+fchmod
+fchmodat
 fstat
+ftruncate
 getcwd
+isatty
+link
 lstat
+mkdir
 open
 openat
 opendir
+pathconf
 read
 readdir
 readlink
+realpath
+remove
+rename
 stat
+statvfs
+symlink
+truncate
+unlinkat
+utimensat
 EOF
 diff -u "$temp_root/expected-fixture-undefined" "$temp_root/fixture-undefined" ||
   fail 'Android filesystem ELF import namespace drift'
-grep -E 'GLOBAL DEFAULT +[0-9]+ bionic_fs_fixture_run$' "$temp_root/dynsyms" >/dev/null ||
-  fail 'fixture runner export missing'
+for export in bionic_fs_fixture_pc_2_symlinks bionic_fs_fixture_run \
+  bionic_fs_fixture_statvfs_bsize bionic_fs_fixture_statvfs_flags; do
+  grep -E "GLOBAL DEFAULT +[0-9]+ ${export}$" "$temp_root/dynsyms" >/dev/null ||
+    fail "fixture export missing: $export"
+done
 
 mkdir -p "$temp_root/root/etc" "$temp_root/outside"
 printf '%s' 'brokered-data' >"$temp_root/root/etc/payload.txt"
@@ -160,7 +209,14 @@ ln -s "$temp_root/outside" "$temp_root/root/etc/outside-dir-link"
 CARGO_TARGET_DIR="$temp_root/cargo-target" cargo run --quiet \
   --manifest-path "$script_dir/Cargo.toml" -- "$fixture" "$temp_root/root"
 CARGO_TARGET_DIR="$temp_root/cargo-target" cargo clippy --quiet \
-  --manifest-path "$script_dir/Cargo.toml" -- -D warnings
+  --all-targets --manifest-path "$script_dir/Cargo.toml" -- -D warnings
+ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 BIONIC_FS_C_SANITIZER=address \
+  CARGO_TARGET_DIR="$temp_root/asan-target" \
+  cargo run --quiet --manifest-path "$script_dir/Cargo.toml" -- \
+  "$fixture" "$temp_root/root"
+UBSAN_OPTIONS=halt_on_error=1 BIONIC_FS_C_SANITIZER=undefined \
+  CARGO_TARGET_DIR="$temp_root/ubsan-target" cargo run --quiet \
+  --manifest-path "$script_dir/Cargo.toml" -- "$fixture" "$temp_root/root"
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
 
-echo 'bionic-fs-facade: PASS AndroidELF imports=14 read-only path+cwd+DIR stat128/dirent280 closed-resolver'
+echo 'bionic-fs-facade: PASS AndroidELF imports=29 read-only path+cwd+DIR stat128/dirent280/statvfs112 pathconf20 mutation=EROFS closed-resolver ASan+UBSan'

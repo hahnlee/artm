@@ -8,7 +8,7 @@ use std::ffi::{CStr, c_char, c_int, c_void};
 use std::fs::{File, Metadata};
 use std::io::Read;
 use std::marker::PhantomData;
-use std::os::fd::IntoRawFd;
+use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::fs::MetadataExt;
 use std::ptr;
 use std::rc::Rc;
@@ -43,10 +43,16 @@ const ANDROID_EIO: i32 = 5;
 const ANDROID_ENOTDIR: i32 = 20;
 const ANDROID_EINVAL: i32 = 22;
 const ANDROID_EMFILE: i32 = 24;
+const ANDROID_ENOTTY: i32 = 25;
 const ANDROID_EROFS: i32 = 30;
 const ANDROID_ERANGE: i32 = 34;
 const ANDROID_EOPNOTSUPP: i32 = 95;
 const DARWIN_ELOOP: i32 = 62;
+const AT_SYMLINK_NOFOLLOW: c_int = 0x100;
+const AT_REMOVEDIR: c_int = 0x200;
+const ANDROID_ST_RDONLY: u64 = 0x0001;
+const PATHCONF_MIN: c_int = 0;
+const PATHCONF_MAX: c_int = 19;
 
 unsafe extern "C" {
     fn darwin_art_bionic_errno_store(android_errno: i32);
@@ -60,6 +66,17 @@ unsafe extern "C" {
         host_errno: *mut c_int,
     ) -> c_int;
     fn darwin_art_bionic_fs_host_closedir(directory: *mut c_void, host_errno: *mut c_int) -> c_int;
+    fn darwin_art_bionic_fs_host_fpathconf(
+        fd: c_int,
+        semantic_name: c_int,
+        value: *mut i64,
+        host_errno: *mut c_int,
+    ) -> c_int;
+    fn darwin_art_bionic_fs_host_fstatvfs(
+        fd: c_int,
+        status: *mut HostStatvfs,
+        host_errno: *mut c_int,
+    ) -> c_int;
 }
 
 #[repr(C)]
@@ -138,6 +155,43 @@ impl Default for HostDirent {
 
 const _: () = assert!(size_of::<AndroidDirent>() == 280);
 const _: () = assert!(std::mem::offset_of!(AndroidDirent, d_name) == 19);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AndroidStatvfs {
+    pub f_bsize: u64,
+    pub f_frsize: u64,
+    pub f_blocks: u64,
+    pub f_bfree: u64,
+    pub f_bavail: u64,
+    pub f_files: u64,
+    pub f_ffree: u64,
+    pub f_favail: u64,
+    pub f_fsid: u64,
+    pub f_flag: u64,
+    pub f_namemax: u64,
+    pub reserved: [u32; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+struct HostStatvfs {
+    f_bsize: u64,
+    f_frsize: u64,
+    f_blocks: u64,
+    f_bfree: u64,
+    f_bavail: u64,
+    f_files: u64,
+    f_ffree: u64,
+    f_favail: u64,
+    f_fsid: u64,
+    f_flag: u64,
+    f_namemax: u64,
+}
+
+const _: () = assert!(size_of::<AndroidStatvfs>() == 112);
+const _: () = assert!(std::mem::offset_of!(AndroidStatvfs, f_flag) == 72);
+const _: () = assert!(size_of::<HostStatvfs>() == 88);
 
 struct DescriptorTable {
     next: c_int,
@@ -571,6 +625,183 @@ impl Facade {
         }
     }
 
+    fn reject_fd_mutation(&self, fd: c_int) -> c_int {
+        let descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability(),
+        };
+        if descriptors.files.contains_key(&fd) {
+            self.fail(ANDROID_EROFS)
+        } else {
+            self.fail(ANDROID_EBADF)
+        }
+    }
+
+    fn resolve_at(&self, directory_fd: c_int, path: &[u8]) -> Result<Resolution, c_int> {
+        if directory_fd == AT_FDCWD || path.starts_with(b"/") {
+            return self.resolve(path);
+        }
+        let descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => {
+                self.fail_capability();
+                return Err(ANDROID_EIO);
+            }
+        };
+        if descriptors.files.contains_key(&directory_fd) {
+            Err(ANDROID_EOPNOTSUPP)
+        } else {
+            Err(ANDROID_EBADF)
+        }
+    }
+
+    fn reject_path_mutation(&self, path: &[u8]) -> c_int {
+        match self.resolve(path) {
+            Ok(_) => self.fail(ANDROID_EROFS),
+            Err(error) => self.fail(error),
+        }
+    }
+
+    fn reject_at_path_mutation(&self, directory_fd: c_int, path: &[u8]) -> c_int {
+        match self.resolve_at(directory_fd, path) {
+            Ok(_) => self.fail(ANDROID_EROFS),
+            Err(error) => self.fail(error),
+        }
+    }
+
+    fn reject_two_path_mutation(&self, old_path: &[u8], new_path: &[u8]) -> c_int {
+        if let Err(error) = self.resolve(old_path) {
+            return self.fail(error);
+        }
+        if let Err(error) = self.resolve(new_path) {
+            return self.fail(error);
+        }
+        self.fail(ANDROID_EROFS)
+    }
+
+    fn isatty(&self, fd: c_int) -> c_int {
+        let descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability(),
+        };
+        if descriptors.files.contains_key(&fd) {
+            // The broker admits only regular files and directories, neither of
+            // which can be a terminal. isatty returns zero and publishes ENOTTY.
+            Self::set_android_errno(ANDROID_ENOTTY);
+            0
+        } else {
+            Self::set_android_errno(ANDROID_EBADF);
+            0
+        }
+    }
+
+    fn pathconf(&self, path: &[u8], name: c_int) -> i64 {
+        if !(PATHCONF_MIN..=PATHCONF_MAX).contains(&name) {
+            return self.fail(ANDROID_EINVAL) as i64;
+        }
+        let resolution = match self.resolve(path) {
+            Ok(resolution) => resolution,
+            Err(error) => return self.fail(error) as i64,
+        };
+        let opened = match self.broker.open(&resolution.relative_path) {
+            Ok(opened) => opened,
+            Err(error) => return self.fail_broker(&error) as i64,
+        };
+        let mut value = -1_i64;
+        let mut host_errno = 0;
+        // SAFETY: the opened descriptor and both output cells live through the
+        // call. The helper maps the semantic Android selector explicitly.
+        let result = unsafe {
+            darwin_art_bionic_fs_host_fpathconf(
+                opened.file().as_raw_fd(),
+                name,
+                &mut value,
+                &mut host_errno,
+            )
+        };
+        match result {
+            1 => value,
+            0 => -1,
+            _ => self.fail_host_errno(host_errno) as i64,
+        }
+    }
+
+    unsafe fn realpath(&self, path: &[u8], resolved: *mut c_char) -> *mut c_char {
+        if resolved.is_null() {
+            // Bionic's allocation extension belongs to the coherent allocator
+            // provider and is not guessed by this standalone facade.
+            self.fail(ANDROID_EOPNOTSUPP);
+            return ptr::null_mut();
+        }
+        let resolution = match self.resolve(path) {
+            Ok(resolution) => resolution,
+            Err(error) => {
+                self.fail(error);
+                return ptr::null_mut();
+            }
+        };
+        if let Err(error) = self.broker.open(&resolution.relative_path) {
+            self.fail_broker(&error);
+            return ptr::null_mut();
+        }
+        // The prefix layer pins normalized guest paths to at most 4095 bytes,
+        // matching Android PATH_MAX including the NUL in the caller buffer.
+        unsafe {
+            ptr::copy_nonoverlapping(
+                resolution.normalized_path.as_ptr(),
+                resolved.cast::<u8>(),
+                resolution.normalized_path.len(),
+            );
+            resolved.add(resolution.normalized_path.len()).write(0);
+        }
+        resolved
+    }
+
+    unsafe fn statvfs(&self, path: &[u8], status: *mut AndroidStatvfs) -> c_int {
+        if status.is_null() {
+            return self.fail(ANDROID_EFAULT);
+        }
+        let resolution = match self.resolve(path) {
+            Ok(resolution) => resolution,
+            Err(error) => return self.fail(error),
+        };
+        let opened = match self.broker.open(&resolution.relative_path) {
+            Ok(opened) => opened,
+            Err(error) => return self.fail_broker(&error),
+        };
+        let mut host = HostStatvfs::default();
+        let mut host_errno = 0;
+        // SAFETY: the descriptor and fixed-layout outputs live through the call.
+        if unsafe {
+            darwin_art_bionic_fs_host_fstatvfs(
+                opened.file().as_raw_fd(),
+                &mut host,
+                &mut host_errno,
+            )
+        } != 0
+        {
+            return self.fail_host_errno(host_errno);
+        }
+        let translated = AndroidStatvfs {
+            f_bsize: host.f_bsize,
+            f_frsize: host.f_frsize,
+            f_blocks: host.f_blocks,
+            f_bfree: host.f_bfree,
+            f_bavail: host.f_bavail,
+            f_files: host.f_files,
+            f_ffree: host.f_ffree,
+            f_favail: host.f_favail,
+            f_fsid: host.f_fsid,
+            // The guest mount is immutable even when its provider-local host
+            // filesystem is writable. Only semantically translated bits cross.
+            f_flag: host.f_flag | ANDROID_ST_RDONLY,
+            f_namemax: host.f_namemax,
+            reserved: [0; 6],
+        };
+        unsafe { status.write(translated) };
+        0
+    }
+
     fn opendir(&self, path: &[u8]) -> *mut c_void {
         let resolution = match self.resolve(path) {
             Ok(resolution) => resolution,
@@ -964,6 +1195,244 @@ pub extern "C" fn darwin_art_bionic_fs_readdir_core(directory: *mut c_void) -> *
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_fs_closedir_core(directory: *mut c_void) -> c_int {
     with_active(-1, |facade| facade.closedir(directory))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_fs_fchmod_core(fd: c_int, _mode: u32) -> c_int {
+    with_active(-1, |facade| facade.reject_fd_mutation(fd))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must point to a readable NUL-terminated Android byte path.
+pub unsafe extern "C" fn darwin_art_bionic_fs_fchmodat_core(
+    directory_fd: c_int,
+    path: *const c_char,
+    _mode: u32,
+    flags: c_int,
+) -> c_int {
+    if flags != 0 && flags != AT_SYMLINK_NOFOLLOW {
+        Facade::set_android_errno(ANDROID_EINVAL);
+        return -1;
+    }
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| {
+        facade.reject_at_path_mutation(directory_fd, path)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_fs_ftruncate_core(fd: c_int, _length: i64) -> c_int {
+    with_active(-1, |facade| facade.reject_fd_mutation(fd))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_fs_isatty_core(fd: c_int) -> c_int {
+    with_active(0, |facade| facade.isatty(fd))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// Both paths must point to readable NUL-terminated Android byte paths.
+pub unsafe extern "C" fn darwin_art_bionic_fs_link_core(
+    old_path: *const c_char,
+    new_path: *const c_char,
+) -> c_int {
+    let Some(old_path) = (unsafe { path_bytes(old_path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    let Some(new_path) = (unsafe { path_bytes(new_path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| {
+        facade.reject_two_path_mutation(old_path, new_path)
+    })
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must point to a readable NUL-terminated Android byte path.
+pub unsafe extern "C" fn darwin_art_bionic_fs_mkdir_core(path: *const c_char, _mode: u32) -> c_int {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| facade.reject_path_mutation(path))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must point to a readable NUL-terminated Android byte path.
+pub unsafe extern "C" fn darwin_art_bionic_fs_pathconf_core(
+    path: *const c_char,
+    name: c_int,
+) -> i64 {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| facade.pathconf(path, name))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must be readable and NUL terminated. A non-null `resolved` must be
+/// writable for Android `PATH_MAX` bytes.
+pub unsafe extern "C" fn darwin_art_bionic_fs_realpath_core(
+    path: *const c_char,
+    resolved: *mut c_char,
+) -> *mut c_char {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return ptr::null_mut();
+    };
+    with_active(ptr::null_mut(), |facade| unsafe {
+        facade.realpath(path, resolved)
+    })
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must point to a readable NUL-terminated Android byte path.
+pub unsafe extern "C" fn darwin_art_bionic_fs_remove_core(path: *const c_char) -> c_int {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| facade.reject_path_mutation(path))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// Both paths must point to readable NUL-terminated Android byte paths.
+pub unsafe extern "C" fn darwin_art_bionic_fs_rename_core(
+    old_path: *const c_char,
+    new_path: *const c_char,
+) -> c_int {
+    let Some(old_path) = (unsafe { path_bytes(old_path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    let Some(new_path) = (unsafe { path_bytes(new_path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| {
+        facade.reject_two_path_mutation(old_path, new_path)
+    })
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must be readable and NUL terminated; `status` must point to a
+/// writable 112-byte Android arm64 `struct statvfs`.
+pub unsafe extern "C" fn darwin_art_bionic_fs_statvfs_core(
+    path: *const c_char,
+    status: *mut AndroidStatvfs,
+) -> c_int {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| unsafe { facade.statvfs(path, status) })
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// Both arguments must point to readable NUL-terminated byte strings. The
+/// target is never interpreted because immutable mounts reject link creation.
+pub unsafe extern "C" fn darwin_art_bionic_fs_symlink_core(
+    target: *const c_char,
+    link_path: *const c_char,
+) -> c_int {
+    if (unsafe { path_bytes(target) }).is_none() {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    }
+    let Some(link_path) = (unsafe { path_bytes(link_path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| facade.reject_path_mutation(link_path))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must point to a readable NUL-terminated Android byte path.
+pub unsafe extern "C" fn darwin_art_bionic_fs_truncate_core(
+    path: *const c_char,
+    _length: i64,
+) -> c_int {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| facade.reject_path_mutation(path))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must point to a readable NUL-terminated Android byte path.
+pub unsafe extern "C" fn darwin_art_bionic_fs_unlinkat_core(
+    directory_fd: c_int,
+    path: *const c_char,
+    flags: c_int,
+) -> c_int {
+    if flags != 0 && flags != AT_REMOVEDIR {
+        Facade::set_android_errno(ANDROID_EINVAL);
+        return -1;
+    }
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| {
+        facade.reject_at_path_mutation(directory_fd, path)
+    })
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// A non-null `path` must be readable and NUL terminated. `times` may be null;
+/// otherwise the Android ABI requires two readable timespec records, which are
+/// deliberately not consumed by the immutable-mount rejection.
+pub unsafe extern "C" fn darwin_art_bionic_fs_utimensat_core(
+    directory_fd: c_int,
+    path: *const c_char,
+    _times: *const AndroidTimespec,
+    flags: c_int,
+) -> c_int {
+    if flags != 0 && flags != AT_SYMLINK_NOFOLLOW {
+        Facade::set_android_errno(ANDROID_EINVAL);
+        return -1;
+    }
+    if path.is_null() {
+        return with_active(-1, |facade| facade.reject_fd_mutation(directory_fd));
+    }
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| {
+        facade.reject_at_path_mutation(directory_fd, path)
+    })
 }
 
 #[cfg(test)]

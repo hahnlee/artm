@@ -2,7 +2,10 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 
 static int BytesEqual(const char* left, const char* right, size_t count) {
@@ -18,6 +21,28 @@ static int NameEqual(const char* left, const char* right) {
     ++right;
   }
   return *left == *right;
+}
+
+__attribute__((visibility("default"))) int
+bionic_fs_fixture_pc_2_symlinks(void) {
+  long value = pathconf("/system/etc/payload.txt", _PC_2_SYMLINKS);
+  return value >= -1 && value <= INT32_MAX ? (int)value : INT32_MIN;
+}
+
+__attribute__((visibility("default"))) int bionic_fs_fixture_statvfs_bsize(void) {
+  struct statvfs status;
+  return statvfs("/system/etc/payload.txt", &status) == 0 &&
+                 status.f_bsize <= INT32_MAX
+             ? (int)status.f_bsize
+             : -1;
+}
+
+__attribute__((visibility("default"))) int bionic_fs_fixture_statvfs_flags(void) {
+  struct statvfs status;
+  return statvfs("/system/etc/payload.txt", &status) == 0 &&
+                 status.f_flag <= INT32_MAX
+             ? (int)status.f_flag
+             : -1;
 }
 
 __attribute__((visibility("default"))) int bionic_fs_fixture_run(void) {
@@ -115,5 +140,93 @@ __attribute__((visibility("default"))) int bionic_fs_fixture_run(void) {
   errno = 0;
   if (readlink("etc/outside-dir-link/secret", buffer, sizeof(buffer)) != -1 ||
       errno != ENOTDIR) return 36;
+
+  fd = open("/system/etc/payload.txt", O_RDONLY);
+  if (fd < 0) return 37;
+  errno = 0;
+  if (isatty(fd) != 0 || errno != ENOTTY) return 38;
+  errno = 0;
+  if (isatty(-7) != 0 || errno != EBADF) return 39;
+
+  errno = 991;
+  if (pathconf("/system/etc/payload.txt", _PC_NAME_MAX) <= 0 || errno != 991)
+    return 40;
+  errno = 0;
+  if (pathconf("/system/etc/payload.txt", 999) != -1 || errno != EINVAL)
+    return 41;
+
+  struct statvfs filesystem;
+  if (statvfs("/system/etc/payload.txt", &filesystem) != 0 ||
+      filesystem.f_bsize == 0 || filesystem.f_namemax == 0 ||
+      (filesystem.f_flag & ST_RDONLY) == 0)
+    return 43;
+  for (size_t index = 0; index < 6; ++index) {
+    if (filesystem.__f_reserved[index] != 0) return 44;
+  }
+
+  char resolved[4096];
+  if (realpath("/system/etc/../etc/payload.txt", resolved) != resolved ||
+      !NameEqual(resolved, "/system/etc/payload.txt"))
+    return 45;
+  errno = 0;
+  if (realpath("/system/etc/payload.txt", NULL) != NULL ||
+      errno != EOPNOTSUPP)
+    return 46;
+
+  errno = 0;
+  if (fchmod(fd, 0600) != -1 || errno != EROFS) return 47;
+  errno = 0;
+  if (fchmod(-7, 0600) != -1 || errno != EBADF) return 48;
+  errno = 0;
+  if (ftruncate(fd, 0) != -1 || errno != EROFS) return 49;
+  errno = 0;
+  if (fchmodat(AT_FDCWD, "/system/etc/payload.txt", 0600, 0) != -1 ||
+      errno != EROFS)
+    return 50;
+  errno = 0;
+  if (fchmodat(AT_FDCWD, "/system/etc/payload.txt", 0600, 0x40000000) !=
+          -1 ||
+      errno != EINVAL)
+    return 51;
+  errno = 0;
+  if (link("/system/etc/payload.txt", "/system/etc/hard-link") != -1 ||
+      errno != EROFS)
+    return 52;
+  errno = 0;
+  if (mkdir("/system/etc/new-directory", 0700) != -1 || errno != EROFS)
+    return 53;
+  errno = 0;
+  if (remove("/system/etc/payload.txt") != -1 || errno != EROFS) return 54;
+  errno = 0;
+  if (rename("/system/etc/payload.txt", "/system/etc/renamed") != -1 ||
+      errno != EROFS)
+    return 55;
+  errno = 0;
+  if (symlink("../../outside", "/system/etc/new-link") != -1 ||
+      errno != EROFS)
+    return 56;
+  errno = 0;
+  if (truncate("/system/etc/payload.txt", 0) != -1 || errno != EROFS)
+    return 57;
+  errno = 0;
+  if (unlinkat(AT_FDCWD, "/system/etc/payload.txt", 0) != -1 ||
+      errno != EROFS)
+    return 58;
+  errno = 0;
+  if (utimensat(AT_FDCWD, "/system/etc/payload.txt", NULL,
+                AT_SYMLINK_NOFOLLOW) != -1 ||
+      errno != EROFS)
+    return 59;
+  errno = 0;
+  if (utimensat(fd, NULL, NULL, 0) != -1 || errno != EROFS) return 60;
+  errno = 0;
+  if (mkdir("/outside/new-directory", 0700) != -1 || errno != EACCES)
+    return 61;
+  if (close(fd) != 0) return 62;
+
+  fd = open("/system/etc/payload.txt", O_RDONLY);
+  if (fd < 0 || fstat(fd, &status) != 0 ||
+      status.st_size != (off_t)(sizeof(expected) - 1) || close(fd) != 0)
+    return 63;
   return 42;
 }
