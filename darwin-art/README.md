@@ -11,7 +11,8 @@ complete native `Runtime::Create()` probe through Android 16 boot-class-path
 initialization, invokes a generated DEX `main(String[])` in ART's C++
 interpreter, round-trips through JNI into Darwin, and sends Android
 `System.out` through ICU and Darwin `write(2)` without loading Android `.so`
-libraries:
+libraries. It also dispatches the real platform `Activity.onCreate()` using a
+minimal host context:
 
 1. verify the native host is ARM64 macOS with 16 KiB pages;
 2. fetch revision-locked ART subtrees without Git metadata;
@@ -38,7 +39,9 @@ libraries:
     path, backed by host ICU4C and Darwin `write(2)`;
 17. load Android 16's real framework DEX, prepare its main `Looper`, and
     instantiate an app DEX class that directly extends `android.app.Activity`;
-18. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
+18. attach the minimum Android context/application/fragment host and execute the
+    real platform `Activity.onCreate()` body plus the app override;
+19. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
 
 Run it with:
 
@@ -52,14 +55,14 @@ Expected final lines include:
 probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
-build-dex: AOSP DEX: verified=yes version=35 classes=2 methods=12 class[0]=Ldev/darwinart/probe/Hello; class[1]=Ldev/darwinart/probe/ProbeActivity; corrupt=rejected
+build-dex: AOSP DEX: verified=yes version=35 classes=3 methods=21 class[0]=Ldev/darwinart/probe/Hello; class[1]=Ldev/darwinart/probe/ProbeActivity; class[2]=Ldev/darwinart/probe/ProbeContext; corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
 build-interpreter-core: AOSP C++ interpreter Mach-O objects=7 archive=...
 build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=209 compiled=0 cached=209 archive=...
 audit-runtime-link: closure complete undefined=0
-probe-runtime-dex: Activity constructor + main(String[]) -> Android PrintStream/ICU -> Darwin write(2)
+probe-runtime-dex: Activity.onCreate() + main(String[]) -> Android PrintStream/ICU -> Darwin write(2)
 probe-park: ART Darwin park: pre-permit=yes wakeups=200 timeout=yes
 ```
 
@@ -112,7 +115,8 @@ Its success lines are `ART Darwin Runtime::Create: ok`,
 `ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42`, and
 `ART runtime native: System.arraycopy()=42`, the Java-emitted
 `Hello from Darwin ART main: 안녕`,
-`ART Android framework: ProbeActivity().probeValue()=42`, and
+`ART Android framework: ProbeActivity().probeValue()=42`,
+`ART Android lifecycle: Activity.onCreate()=43`, and
 `ART Darwin launcher: main(String[])=ok`.
 The generated app DEX remains separate from the boot class path. The native
 probe initializes ART's unstarted-runtime
@@ -124,16 +128,20 @@ primitive-bit, ICU-metadata, system-property, and standard-output subset needed
 by this gate. The locked Android `core-icu4j` Java code is converted to DEX
 locally; its `NativeConverter` calls host Homebrew ICU4C 78. The framework gate
 uses Darwin-native `MessageQueue` wake/poll primitives and Android's default
-INFO logging threshold. Android's libicu/libjavacore/libopenjdk shared libraries
-and daemon threads are still not loaded. `Activity` attachment, lifecycle
-dispatch, resources, and the View/window backend remain deferred.
+INFO logging threshold. Darwin clocks back `System`/`SystemClock`, and an
+in-process property table backs Android `SystemProperties`. Android's
+libicu/libjavacore/libopenjdk shared libraries and daemon threads are still not
+loaded. Full `Activity.attach()`, resources, `PhoneWindow`, and the View/window
+backend remain deferred.
 
 Apple ARM64 executables retain the kernel-required 4 GiB `__PAGEZERO`, so ART's
 usual absolute-low-32-bit heap references cannot be used. The Darwin probe
-reserves a separate 4 GiB virtual window beginning at 16 GiB and stores managed
-references as 32-bit offsets from that base. This reserves address space, not
-4 GiB of physical memory. Every object that inlines the reference ABI must be
-compiled through the same Darwin overlay.
+uses a separate 4 GiB representable window beginning at 16 GiB and stores
+managed references as 32-bit offsets from that base. It currently maps only the
+individual ART spaces it needs; it does not reserve or commit the full 4 GiB.
+Every object that inlines the reference ABI must be compiled through the same
+Darwin overlay. A bounded contiguous managed arena is the planned replacement
+for the current per-space allocator.
 
 The Darwin MVP defaults to concurrent mark sweep. Concurrent mark compact stays
 compiled in stop-the-world fallback form because Darwin has neither Linux

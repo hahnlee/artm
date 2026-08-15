@@ -837,11 +837,13 @@ fn build_dex_probe(root: &Path) -> Result<()> {
             .arg("-classpath")
             .arg(find_android_platform_jar()?)
             .arg(root.join("probes/Hello.java"))
-            .arg(root.join("probes/ProbeActivity.java")),
+            .arg(root.join("probes/ProbeActivity.java"))
+            .arg(root.join("probes/ProbeContext.java")),
     )?;
 
     let hello_class = class_dir.join("dev/darwinart/probe/Hello.class");
     let activity_class = class_dir.join("dev/darwinart/probe/ProbeActivity.class");
+    let context_class = class_dir.join("dev/darwinart/probe/ProbeContext.class");
     run_command(
         Command::new(find_d8()?)
             .arg("--lib")
@@ -849,7 +851,8 @@ fn build_dex_probe(root: &Path) -> Result<()> {
             .arg("--output")
             .arg(&dex_dir)
             .arg(&hello_class)
-            .arg(&activity_class),
+            .arg(&activity_class)
+            .arg(&context_class),
     )?;
 
     let includes = [
@@ -917,9 +920,10 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=2 methods=12 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=3 methods=21 \
                     class[0]=Ldev/darwinart/probe/Hello; \
-                    class[1]=Ldev/darwinart/probe/ProbeActivity;";
+                    class[1]=Ldev/darwinart/probe/ProbeActivity; \
+                    class[2]=Ldev/darwinart/probe/ProbeContext;";
     if output.trim() != expected {
         return Err(format!("unexpected DEX probe output: {output:?}").into());
     }
@@ -2311,12 +2315,13 @@ fn probe_runtime_dex(root: &Path) -> Result<()> {
                     ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
                     ART runtime native: System.arraycopy()=42\n\
                     ART Android framework: ProbeActivity().probeValue()=42\n\
+                    ART Android lifecycle: Activity.onCreate()=43\n\
                     ART Darwin launcher: main(String[])=ok";
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
     println!(
-        "probe-runtime-dex: Activity constructor + main(String[]) -> Android PrintStream/ICU -> Darwin write(2)"
+        "probe-runtime-dex: Activity.onCreate() + main(String[]) -> Android PrintStream/ICU -> Darwin write(2)"
     );
     Ok(())
 }

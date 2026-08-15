@@ -76,9 +76,14 @@
       `Looper`, and instantiate an app class extending `android.app.Activity`.
 - [x] Back the first Android framework natives (`MessageQueue` and
       `Log.isLoggable`) with Darwin behavior.
+- [x] Back Android framework clocks and the initial `SystemProperties` surface
+      with Darwin monotonic/continuous/thread clocks and an in-process table.
+- [x] Attach a minimal base `Context`, `Application`, `ActivityInfo`, and
+      platform fragment host, then execute the real `Activity.onCreate()` body.
 - [ ] Register the minimal libcore native method set needed by ordinary Java
       startup without loading Android `.so` libraries.
-- [ ] Attach a minimal real `Activity` and dispatch `onCreate()`.
+- [ ] Replace lifecycle field injection with the complete
+      `Activity.attach()`/`Instrumentation`/`PhoneWindow` path.
 - [ ] Connect the View backend to ProjectGPU and an `NSWindow`.
 
 ## Deferred performance work

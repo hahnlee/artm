@@ -14,6 +14,7 @@
 
 #include <bit>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -260,6 +261,18 @@ jobjectArray SystemSpecialProperties(JNIEnv* env, jclass) {
   return properties;
 }
 
+jlong SystemCurrentTimeMillis(JNIEnv*, jclass) {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
+jlong SystemNanoTime(JNIEnv*, jclass) {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
 jboolean FileDescriptorGetAppend(jint descriptor) {
   const int flags = fcntl(descriptor, F_GETFL);
   return flags >= 0 && (flags & O_APPEND) != 0 ? JNI_TRUE : JNI_FALSE;
@@ -338,6 +351,10 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&IcuGetCldrVersion)},
   };
   JNINativeMethod system_methods[] = {
+      {const_cast<char*>("currentTimeMillis"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&SystemCurrentTimeMillis)},
+      {const_cast<char*>("nanoTime"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&SystemNanoTime)},
       {const_cast<char*>("specialProperties"),
        const_cast<char*>("()[Ljava/lang/String;"),
        reinterpret_cast<void*>(&SystemSpecialProperties)},
@@ -353,7 +370,7 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
          Register(env, "android/system/OsConstants", os_constants_methods, 1) &&
          Register(env, "libcore/io/Linux", linux_methods, 7) &&
          Register(env, "libcore/icu/ICU", icu_methods, 3) &&
-         Register(env, "java/lang/System", system_methods, 1) &&
+         Register(env, "java/lang/System", system_methods, 3) &&
          Register(env, "java/io/FileDescriptor", file_descriptor_methods, 2);
 }
 
