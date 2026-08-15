@@ -1,8 +1,9 @@
 # Bionic read-only filesystem facade gate
 
-This standalone gate connects the Android arm64 libc imports `open`, `openat`,
-`read`, `close`, and `fstat` to the Darwin component-walking filesystem broker.
-It is an inspection/proof module and is not wired into the runtime.
+This standalone gate connects 13 Class-B Android arm64 libc filesystem imports
+to the Darwin component-walking filesystem broker: `open`, `openat`, `read`,
+`close`, `fstat`, `stat`, `lstat`, `readlink`, `getcwd`, `chdir`, `opendir`,
+`readdir`, and `closedir`. It is not wired into the runtime.
 
 ## Boundary and ownership
 
@@ -25,16 +26,56 @@ lock for the entire host read, so a concurrent `close` or another descriptor
 operation is serialized until that read completes. This is the current
 contract, not Linux close/read concurrency emulation.
 
+Directory streams use a second facade-owned side table. The guest `DIR*` is a
+stable opaque token allocation containing only a numeric identity; Darwin
+`DIR*`, its fd, and stream state remain exclusively in the table. The returned
+`struct dirent*` points to a separate translated Android-only buffer. `closedir`
+removes the side-table record and frees both guest allocations because POSIX
+defines every later use of that `DIR*` or entry pointer as undefined. Thus
+memory is proportional to concurrently live streams rather than lifetime open
+count. A 512-cycle stress test requires the active table to return to zero.
+As with virtual fds, another provider must not invent or accept these tokens.
+
 ## Supported calls
 
 - `open(path, flags, ...)`: read-only access under the mount root.
 - `openat(AT_FDCWD, path, flags, ...)`: equivalent to `open`; an absolute path
   also ignores `dirfd`, matching the relevant Linux rule.
 - `read`, `close`, and `fstat` for facade-owned virtual descriptors.
+- `stat` for admitted regular files/directories; the no-follow authorization
+  policy means it deliberately does not implement Linux symlink following.
+- `lstat` for admitted non-symlink nodes. A final symlink rejected with host
+  `ELOOP` becomes `EOPNOTSUPP`, because the broker cannot safely return symlink
+  metadata. `readlink` returns `EINVAL` for securely opened regular files and
+  directories, matching Linux/Bionic, and the same final-symlink capability
+  rejection. Intermediate-component failures retain their broker-translated
+  errno (`ENOTDIR` for the pinned Darwin no-follow walk), rather than being
+  mislabeled as final-link support. Link bytes are never fabricated.
+- `getcwd` copies the guest byte path into caller-owned storage. Null-buffer
+  allocation is `EOPNOTSUPP` because this module does not own the Bionic
+  allocator. `chdir` verifies a directory through the broker and updates one
+  process-wide facade cwd shared by all activated pthreads.
+- `opendir`, `readdir`, and `closedir` translate a private Darwin stream into
+  the pinned Android arm64 280-byte `dirent` layout. Directory names remain
+  uninterpreted bytes. Known Darwin `d_type` values are translated explicitly;
+  unknown values become Android `DT_UNKNOWN`.
 - Android arm64 `struct stat` is materialized as the pinned 128-byte Bionic
   layout; it never exposes a Darwin `struct stat`.
 
-Relative `openat` against a valid facade directory descriptor is explicitly
+The cwd is a verified lexical guest path. Every later relative lookup performs
+a fresh broker walk from the immutable mount root, so containment survives host
+renames, but exact POSIX directory-identity behavior across an external host
+rename is not claimed.
+
+`readdir` and `closedir` hold one global directory-table lock across each host
+operation. They are serialized across all facade streams; a close cannot race
+the corresponding host call. End-of-directory returns null without changing
+Bionic errno. The translated entry buffer remains allocated but, as on Bionic,
+its contents may be replaced by the next `readdir` on that stream. `closedir`
+frees the entry and token after the serialized host close; concurrent or later
+use is the POSIX-undefined caller case and is not made into a tombstone API.
+
+Relative `openat` against a valid facade file descriptor is explicitly
 unsupported and returns Android `EOPNOTSUPP`; an unknown descriptor returns
 `EBADF`. `lseek`, writable/create/truncate/append modes, rename, unlink, socket,
 and every symbol absent from the closed resolver are unsupported capabilities.
@@ -60,15 +101,19 @@ cannot move to a different pthread. Nested activation restores the previous
 
 ## Deterministic audit
 
-Run `./audit.sh`. It pins and hashes the NDK r28c API 35 headers, the prefix and
-broker sources, the Bionic errno translator, the OS-constant manifest, and the
-real libc++ import classification. It then:
+Run `./audit.sh`. It pins and hashes the NDK r28c API 35 `fcntl.h`, `stat.h`,
+`dirent.h`, and `unistd.h` inputs, the prefix and broker sources, the Bionic
+errno translator, the OS-constant manifest, and the real libc++ Class-B import
+classification. Compile-time probes lock every function signature plus the
+Android `stat` and `dirent` field layouts. It then:
 
 1. cross-compiles a real Android AArch64 ELF fixture whose only undefined
-   symbols are `__errno`, `open`, `openat`, `read`, `close`, and `fstat`;
-2. loads it with a closed resolver and exercises content, Android stat layout,
-   `ENOENT`, unsupported flags, write rejection, traversal and symlink escape,
-   virtual-dirfd rejection, and virtual descriptors at or above 10000;
+   symbols are `__errno` and the 13 listed facade imports;
+2. loads it with a closed resolver and exercises content, Android stat/dirent
+   layouts, cwd transitions, EOF errno, `ENOENT`, unsupported flags, write
+   rejection, regular/final/intermediate `readlink` distinctions,
+   traversal/symlink policy, virtual-dirfd rejection, and virtual descriptors
+   at or above 10000;
 3. proves Darwin host errno is preserved and no unknown translation occurred;
 4. runs broker/prefix tests, the activation `!Send` compile-fail test, Clippy,
    and formatting checks using a temporary target directory.

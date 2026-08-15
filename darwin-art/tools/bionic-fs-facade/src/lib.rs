@@ -1,7 +1,7 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 use darwin_art_fs_broker::{BrokerError, ReadOnlyBroker};
-use darwin_art_prefix::{MountKind, MountTable, PrefixError};
+use darwin_art_prefix::{MountKind, MountTable, PrefixError, Resolution};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::{CStr, c_char, c_int, c_void};
@@ -44,13 +44,22 @@ const ANDROID_ENOTDIR: i32 = 20;
 const ANDROID_EINVAL: i32 = 22;
 const ANDROID_EMFILE: i32 = 24;
 const ANDROID_EROFS: i32 = 30;
+const ANDROID_ERANGE: i32 = 34;
 const ANDROID_EOPNOTSUPP: i32 = 95;
+const DARWIN_ELOOP: i32 = 62;
 
 unsafe extern "C" {
     fn darwin_art_bionic_errno_store(android_errno: i32);
     fn darwin_art_bionic_errno_set_from_darwin(darwin_errno: i32) -> c_int;
     #[link_name = "close"]
     fn host_close(fd: c_int) -> c_int;
+    fn darwin_art_bionic_fs_host_fdopendir(fd: c_int, host_errno: *mut c_int) -> *mut c_void;
+    fn darwin_art_bionic_fs_host_readdir(
+        directory: *mut c_void,
+        entry: *mut HostDirent,
+        host_errno: *mut c_int,
+    ) -> c_int;
+    fn darwin_art_bionic_fs_host_closedir(directory: *mut c_void, host_errno: *mut c_int) -> c_int;
 }
 
 #[repr(C)]
@@ -85,6 +94,51 @@ pub struct AndroidStat {
 const _: () = assert!(size_of::<AndroidStat>() == 128);
 const _: () = assert!(size_of::<AndroidTimespec>() == 16);
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct AndroidDirent {
+    pub d_ino: u64,
+    pub d_off: i64,
+    pub d_reclen: u16,
+    pub d_type: u8,
+    pub d_name: [u8; 256],
+}
+
+impl Default for AndroidDirent {
+    fn default() -> Self {
+        Self {
+            d_ino: 0,
+            d_off: 0,
+            d_reclen: 0,
+            d_type: 0,
+            d_name: [0; 256],
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct HostDirent {
+    d_ino: u64,
+    d_name_length: u16,
+    d_type: u8,
+    d_name: [u8; 256],
+}
+
+impl Default for HostDirent {
+    fn default() -> Self {
+        Self {
+            d_ino: 0,
+            d_name_length: 0,
+            d_type: 0,
+            d_name: [0; 256],
+        }
+    }
+}
+
+const _: () = assert!(size_of::<AndroidDirent>() == 280);
+const _: () = assert!(std::mem::offset_of!(AndroidDirent, d_name) == 19);
+
 struct DescriptorTable {
     next: c_int,
     files: BTreeMap<c_int, File>,
@@ -117,11 +171,75 @@ impl DescriptorTable {
     }
 }
 
+#[repr(C)]
+struct DirectoryToken {
+    opaque_id: u64,
+}
+
+struct DirectoryRecord {
+    // Token and translated entry are separate allocations containing no host
+    // descriptor or DIR pointer. Only their addresses cross the guest ABI.
+    _token: Box<DirectoryToken>,
+    host_directory: usize,
+    offset: i64,
+    entry: Box<AndroidDirent>,
+}
+
+impl Drop for DirectoryRecord {
+    fn drop(&mut self) {
+        if self.host_directory != 0 {
+            let mut ignored_errno = 0;
+            // SAFETY: a nonzero stream is owned by this state until this call.
+            unsafe {
+                darwin_art_bionic_fs_host_closedir(
+                    self.host_directory as *mut c_void,
+                    &mut ignored_errno,
+                )
+            };
+            self.host_directory = 0;
+        }
+    }
+}
+
+struct DirectoryTable {
+    // Only live streams are retained. POSIX makes DIR* use after closedir
+    // undefined, so close can reclaim both facade-owned guest allocations.
+    streams: BTreeMap<usize, DirectoryRecord>,
+    next_id: u64,
+}
+
+impl Default for DirectoryTable {
+    fn default() -> Self {
+        Self {
+            streams: BTreeMap::new(),
+            next_id: 1,
+        }
+    }
+}
+
+impl DirectoryTable {
+    fn insert(&mut self, host_directory: *mut c_void) -> *mut c_void {
+        let opaque_id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        let token = Box::new(DirectoryToken { opaque_id });
+        let token_pointer = (&*token as *const DirectoryToken).cast_mut().cast();
+        let state = DirectoryRecord {
+            _token: token,
+            host_directory: host_directory as usize,
+            offset: 0,
+            entry: Box::new(AndroidDirent::default()),
+        };
+        self.streams.insert(token_pointer as usize, state);
+        token_pointer
+    }
+}
+
 pub struct Facade {
     prefix: MountTable,
     broker: ReadOnlyBroker,
-    cwd: Vec<u8>,
+    cwd: Mutex<Vec<u8>>,
     descriptors: Mutex<DescriptorTable>,
+    directories: Mutex<DirectoryTable>,
     capability_failure: AtomicBool,
 }
 
@@ -133,15 +251,25 @@ impl Facade {
             .map_err(|_| "invalid guest mount")?;
         prefix.seal().map_err(|_| "could not seal guest mount")?;
         // Prove cwd belongs to this mount before any guest operation can use it.
-        prefix
+        let initial_cwd = prefix
             .resolve(cwd, b".")
             .map_err(|_| "cwd is outside guest mount")?;
+        if initial_cwd.mount_id != 1 || initial_cwd.writable {
+            return Err("cwd is outside immutable guest mount");
+        }
         let broker = ReadOnlyBroker::from_directory(root).map_err(|_| "invalid mount root")?;
+        let opened_cwd = broker
+            .open(&initial_cwd.relative_path)
+            .map_err(|_| "cwd cannot be securely opened")?;
+        if !opened_cwd.metadata().is_dir() {
+            return Err("cwd is not a directory");
+        }
         Ok(Self {
             prefix,
             broker,
-            cwd: cwd.to_vec(),
+            cwd: Mutex::new(initial_cwd.normalized_path),
             descriptors: Mutex::new(DescriptorTable::default()),
+            directories: Mutex::new(DirectoryTable::default()),
             capability_failure: AtomicBool::new(false),
         })
     }
@@ -193,6 +321,25 @@ impl Facade {
         }
     }
 
+    fn resolve_from(&self, cwd: &[u8], path: &[u8]) -> Result<Resolution, c_int> {
+        match self.prefix.resolve(cwd, path) {
+            Ok(resolution) if resolution.mount_id == 1 && !resolution.writable => Ok(resolution),
+            Ok(_) | Err(PrefixError::NoMount) => Err(ANDROID_EACCES),
+            Err(_) => Err(ANDROID_EINVAL),
+        }
+    }
+
+    fn resolve(&self, path: &[u8]) -> Result<Resolution, c_int> {
+        let cwd = match self.cwd.lock() {
+            Ok(cwd) => cwd.clone(),
+            Err(_) => {
+                self.fail_capability();
+                return Err(ANDROID_EIO);
+            }
+        };
+        self.resolve_from(&cwd, path)
+    }
+
     fn validate_flags(&self, flags: c_int) -> Result<(), c_int> {
         if flags & O_ACCMODE == O_WRONLY
             || flags & O_ACCMODE == O_RDWR
@@ -211,10 +358,9 @@ impl Facade {
         if let Err(error) = self.validate_flags(flags) {
             return self.fail(error);
         }
-        let resolution = match self.prefix.resolve(&self.cwd, path) {
-            Ok(resolution) if resolution.mount_id == 1 && !resolution.writable => resolution,
-            Ok(_) | Err(PrefixError::NoMount) => return self.fail(ANDROID_EACCES),
-            Err(_) => return self.fail(ANDROID_EINVAL),
+        let resolution = match self.resolve(path) {
+            Ok(resolution) => resolution,
+            Err(error) => return self.fail(error),
         };
         let mut relative = resolution.relative_path;
         if resolution.requires_directory && !relative.is_empty() {
@@ -320,6 +466,269 @@ impl Facade {
         // SAFETY: the guest ABI requires a writable 128-byte Android stat object.
         unsafe { status.write(translated) };
         0
+    }
+
+    unsafe fn stat(&self, path: &[u8], status: *mut AndroidStat, no_follow: bool) -> c_int {
+        if status.is_null() {
+            return self.fail(ANDROID_EFAULT);
+        }
+        let resolution = match self.resolve(path) {
+            Ok(resolution) => resolution,
+            Err(error) => return self.fail(error),
+        };
+        let mut relative_path = resolution.relative_path;
+        if resolution.requires_directory && !relative_path.is_empty() {
+            relative_path.push(b'/');
+        }
+        let metadata = match self.broker.stat(&relative_path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                if no_follow && is_final_symlink_rejection(&error, &relative_path) {
+                    return self.fail(ANDROID_EOPNOTSUPP);
+                }
+                return self.fail_broker(&error);
+            }
+        };
+        let translated = metadata_to_android(&metadata);
+        // SAFETY: the guest ABI requires a writable 128-byte Android stat object.
+        unsafe { status.write(translated) };
+        0
+    }
+
+    fn chdir(&self, path: &[u8]) -> c_int {
+        // chdir is process-global in Bionic. Holding this lock through the
+        // authorization walk gives concurrent calls a total update order.
+        let mut cwd = match self.cwd.lock() {
+            Ok(cwd) => cwd,
+            Err(_) => return self.fail_capability(),
+        };
+        let resolution = match self.resolve_from(&cwd, path) {
+            Ok(resolution) => resolution,
+            Err(error) => return self.fail(error),
+        };
+        let opened = match self.broker.open(&resolution.relative_path) {
+            Ok(opened) => opened,
+            Err(error) => return self.fail_broker(&error),
+        };
+        if !opened.metadata().is_dir() {
+            return self.fail(ANDROID_ENOTDIR);
+        }
+        *cwd = resolution.normalized_path;
+        0
+    }
+
+    unsafe fn getcwd(&self, buffer: *mut c_char, size: usize) -> *mut c_char {
+        if buffer.is_null() {
+            // Bionic's allocation extension needs the coherent Bionic allocator,
+            // which this isolated facade deliberately does not own.
+            self.fail(ANDROID_EOPNOTSUPP);
+            return ptr::null_mut();
+        }
+        let cwd = match self.cwd.lock() {
+            Ok(cwd) => cwd,
+            Err(_) => {
+                self.fail_capability();
+                return ptr::null_mut();
+            }
+        };
+        let required = match cwd.len().checked_add(1) {
+            Some(required) => required,
+            None => {
+                self.fail_capability();
+                return ptr::null_mut();
+            }
+        };
+        if size < required {
+            self.fail(ANDROID_ERANGE);
+            return ptr::null_mut();
+        }
+        // SAFETY: the ABI requires buffer to be writable for size bytes; the
+        // checked required length is at most size and includes the trailing NUL.
+        unsafe {
+            ptr::copy_nonoverlapping(cwd.as_ptr(), buffer.cast::<u8>(), cwd.len());
+            buffer.add(cwd.len()).write(0);
+        }
+        buffer
+    }
+
+    fn readlink(&self, path: &[u8], buffer: *mut c_char, size: usize) -> isize {
+        if buffer.is_null() && size != 0 {
+            return self.fail(ANDROID_EFAULT) as isize;
+        }
+        let resolution = match self.resolve(path) {
+            Ok(resolution) => resolution,
+            Err(error) => return self.fail(error) as isize,
+        };
+        match self.broker.open(&resolution.relative_path) {
+            // A securely opened regular file or directory is definitively not
+            // a symlink. Match Linux/Bionic readlink with EINVAL.
+            Ok(_) => self.fail(ANDROID_EINVAL) as isize,
+            Err(error) if is_final_symlink_rejection(&error, &resolution.relative_path) => {
+                // The broker cannot safely return the final link's bytes.
+                self.fail(ANDROID_EOPNOTSUPP) as isize
+            }
+            Err(error) => self.fail_broker(&error) as isize,
+        }
+    }
+
+    fn opendir(&self, path: &[u8]) -> *mut c_void {
+        let resolution = match self.resolve(path) {
+            Ok(resolution) => resolution,
+            Err(error) => {
+                self.fail(error);
+                return ptr::null_mut();
+            }
+        };
+        let opened = match self.broker.open(&resolution.relative_path) {
+            Ok(opened) => opened,
+            Err(error) => {
+                self.fail_broker(&error);
+                return ptr::null_mut();
+            }
+        };
+        if !opened.metadata().is_dir() {
+            self.fail(ANDROID_ENOTDIR);
+            return ptr::null_mut();
+        }
+        let raw_fd = opened.into_file().into_raw_fd();
+        let mut host_errno = 0;
+        // SAFETY: fdopendir takes ownership of raw_fd only on success.
+        let host_directory =
+            unsafe { darwin_art_bionic_fs_host_fdopendir(raw_fd, &mut host_errno) };
+        if host_directory.is_null() {
+            // SAFETY: ownership was not transferred when fdopendir failed.
+            unsafe { host_close(raw_fd) };
+            self.fail_host_errno(host_errno);
+            return ptr::null_mut();
+        }
+        let mut directories = match self.directories.lock() {
+            Ok(directories) => directories,
+            Err(_) => {
+                let mut ignored_errno = 0;
+                // SAFETY: stream ownership has not entered a table yet.
+                unsafe { darwin_art_bionic_fs_host_closedir(host_directory, &mut ignored_errno) };
+                self.fail_capability();
+                return ptr::null_mut();
+            }
+        };
+        directories.insert(host_directory)
+    }
+
+    fn fail_host_errno(&self, host_errno: c_int) -> c_int {
+        if host_errno != 0 {
+            // SAFETY: translation is value-only and preserves Darwin errno.
+            if unsafe { darwin_art_bionic_errno_set_from_darwin(host_errno) } != 0 {
+                return -1;
+            }
+        }
+        self.fail_capability()
+    }
+
+    fn readdir(&self, directory: *mut c_void) -> *mut AndroidDirent {
+        if directory.is_null() {
+            self.fail(ANDROID_EBADF);
+            return ptr::null_mut();
+        }
+        // A single lock serializes readdir/closedir on every facade stream.
+        // Tokens are keys only and are never dereferenced before membership.
+        let mut directories = match self.directories.lock() {
+            Ok(directories) => directories,
+            Err(_) => {
+                self.fail_capability();
+                return ptr::null_mut();
+            }
+        };
+        let Some(state) = directories.streams.get_mut(&(directory as usize)) else {
+            self.fail(ANDROID_EBADF);
+            return ptr::null_mut();
+        };
+        if state.host_directory == 0 {
+            self.fail(ANDROID_EBADF);
+            return ptr::null_mut();
+        }
+        let mut host_entry = HostDirent::default();
+        let mut host_errno = 0;
+        // SAFETY: the table exclusively owns and serializes this live stream.
+        let result = unsafe {
+            darwin_art_bionic_fs_host_readdir(
+                state.host_directory as *mut c_void,
+                &mut host_entry,
+                &mut host_errno,
+            )
+        };
+        if result == 0 {
+            // Bionic readdir leaves errno unchanged at end-of-directory.
+            return ptr::null_mut();
+        }
+        if result < 0 {
+            self.fail_host_errno(host_errno);
+            return ptr::null_mut();
+        }
+        let name_length = usize::from(host_entry.d_name_length);
+        if name_length >= host_entry.d_name.len() {
+            self.fail_capability();
+            return ptr::null_mut();
+        }
+        state.offset = match state.offset.checked_add(1) {
+            Some(offset) => offset,
+            None => {
+                self.fail_capability();
+                return ptr::null_mut();
+            }
+        };
+        let record_length = (19usize + name_length + 1 + 7) & !7;
+        *state.entry = AndroidDirent::default();
+        state.entry.d_ino = host_entry.d_ino;
+        state.entry.d_off = state.offset;
+        state.entry.d_reclen = record_length as u16;
+        state.entry.d_type = android_directory_type(host_entry.d_type);
+        state.entry.d_name[..=name_length].copy_from_slice(&host_entry.d_name[..=name_length]);
+        &raw mut *state.entry
+    }
+
+    fn closedir(&self, directory: *mut c_void) -> c_int {
+        if directory.is_null() {
+            return self.fail(ANDROID_EBADF);
+        }
+        let mut directories = match self.directories.lock() {
+            Ok(directories) => directories,
+            Err(_) => return self.fail_capability(),
+        };
+        let Some(mut state) = directories.streams.remove(&(directory as usize)) else {
+            return self.fail(ANDROID_EBADF);
+        };
+        let host_directory = std::mem::replace(&mut state.host_directory, 0);
+        let mut host_errno = 0;
+        // SAFETY: table ownership is transferred exactly once to closedir.
+        if unsafe {
+            darwin_art_bionic_fs_host_closedir(host_directory as *mut c_void, &mut host_errno)
+        } == 0
+        {
+            0
+        } else {
+            self.fail_host_errno(host_errno)
+        }
+    }
+}
+
+fn is_final_symlink_rejection(error: &BrokerError, relative_path: &[u8]) -> bool {
+    if error.raw_os_error() != Some(DARWIN_ELOOP) || relative_path.is_empty() {
+        return false;
+    }
+    let final_index = relative_path.split(|byte| *byte == b'/').count() - 1;
+    matches!(
+        error,
+        BrokerError::Io {
+            component_index: Some(index),
+            ..
+        } if *index == final_index
+    )
+}
+
+fn android_directory_type(host_type: u8) -> u8 {
+    match host_type {
+        1 | 2 | 4 | 6 | 8 | 10 | 12 | 14 => host_type,
+        _ => 0,
     }
 }
 
@@ -459,6 +868,104 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_fstat_core(
     with_active(-1, |facade| unsafe { facade.fstat(fd, status) })
 }
 
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must be a readable NUL-terminated byte path and `status` must point
+/// to a writable 128-byte Android arm64 `struct stat`.
+pub unsafe extern "C" fn darwin_art_bionic_fs_stat_core(
+    path: *const c_char,
+    status: *mut AndroidStat,
+) -> c_int {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| unsafe { facade.stat(path, status, false) })
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// Same pointer contract as [`darwin_art_bionic_fs_stat_core`]. Symlink
+/// metadata is unsupported by the no-follow broker and fails explicitly.
+pub unsafe extern "C" fn darwin_art_bionic_fs_lstat_core(
+    path: *const c_char,
+    status: *mut AndroidStat,
+) -> c_int {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| unsafe { facade.stat(path, status, true) })
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must be readable and NUL-terminated. For nonzero `size`, `buffer`
+/// must be writable for that many bytes; this broker currently always rejects
+/// the link-content capability.
+pub unsafe extern "C" fn darwin_art_bionic_fs_readlink_core(
+    path: *const c_char,
+    buffer: *mut c_char,
+    size: usize,
+) -> isize {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| facade.readlink(path, buffer, size))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `buffer` must be writable for `size` bytes. Null allocation mode is an
+/// explicit unsupported capability.
+pub unsafe extern "C" fn darwin_art_bionic_fs_getcwd_core(
+    buffer: *mut c_char,
+    size: usize,
+) -> *mut c_char {
+    with_active(ptr::null_mut(), |facade| unsafe {
+        facade.getcwd(buffer, size)
+    })
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must be a readable NUL-terminated byte path.
+pub unsafe extern "C" fn darwin_art_bionic_fs_chdir_core(path: *const c_char) -> c_int {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| facade.chdir(path))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `path` must be a readable NUL-terminated byte path.
+pub unsafe extern "C" fn darwin_art_bionic_fs_opendir_core(path: *const c_char) -> *mut c_void {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return ptr::null_mut();
+    };
+    with_active(ptr::null_mut(), |facade| facade.opendir(path))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_fs_readdir_core(directory: *mut c_void) -> *mut AndroidDirent {
+    with_active(ptr::null_mut(), |facade| facade.readdir(directory))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_fs_closedir_core(directory: *mut c_void) -> c_int {
+    with_active(-1, |facade| facade.closedir(directory))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,5 +991,16 @@ mod tests {
         assert_eq!(unsafe { darwin_art_bionic_errno_load() }, ANDROID_EIO);
         // SAFETY: same pthread-local host errno cell set above.
         assert_eq!(unsafe { *__error() }, 33_002);
+    }
+
+    #[test]
+    fn repeated_opendir_closedir_reclaims_side_table_records() {
+        let facade = Facade::new(File::open("/").unwrap(), b"/system", b"/system").unwrap();
+        for _ in 0..512 {
+            let directory = facade.opendir(b"/system");
+            assert!(!directory.is_null());
+            assert_eq!(facade.closedir(directory), 0);
+        }
+        assert!(facade.directories.lock().unwrap().streams.is_empty());
     }
 }

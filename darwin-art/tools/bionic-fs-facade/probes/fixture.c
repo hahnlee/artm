@@ -1,3 +1,4 @@
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -9,6 +10,14 @@ static int BytesEqual(const char* left, const char* right, size_t count) {
     if (left[index] != right[index]) return 0;
   }
   return 1;
+}
+
+static int NameEqual(const char* left, const char* right) {
+  while (*left == *right && *left != '\0') {
+    ++left;
+    ++right;
+  }
+  return *left == *right;
 }
 
 __attribute__((visibility("default"))) int bionic_fs_fixture_run(void) {
@@ -46,5 +55,65 @@ __attribute__((visibility("default"))) int bionic_fs_fixture_run(void) {
   if (openat(directory, "payload.txt", O_RDONLY) != -1 ||
       errno != EOPNOTSUPP) return 12;
   if (close(directory) != 0) return 13;
+
+  if (stat("/system/etc/payload.txt", &status) != 0 ||
+      !S_ISREG(status.st_mode) ||
+      status.st_size != (off_t)(sizeof(expected) - 1)) return 15;
+  if (lstat("/system/etc/payload.txt", &status) != 0 ||
+      !S_ISREG(status.st_mode)) return 16;
+  errno = 0;
+  if (stat("/system/etc/outside-link", &status) != -1 || errno != ELOOP)
+    return 17;
+  errno = 0;
+  if (lstat("/system/etc/outside-link", &status) != -1 ||
+      errno != EOPNOTSUPP) return 18;
+  errno = 0;
+  if (readlink("/system/etc/outside-link", buffer, sizeof(buffer)) != -1 ||
+      errno != EOPNOTSUPP) return 19;
+
+  char cwd[64];
+  if (getcwd(cwd, sizeof(cwd)) != cwd || !NameEqual(cwd, "/system")) return 20;
+  errno = 0;
+  if (getcwd(cwd, 4) != NULL || errno != ERANGE) return 21;
+  errno = 0;
+  if (getcwd(NULL, 0) != NULL || errno != EOPNOTSUPP) return 22;
+  if (chdir("etc") != 0 || getcwd(cwd, sizeof(cwd)) != cwd ||
+      !NameEqual(cwd, "/system/etc")) return 23;
+  if (stat("payload.txt", &status) != 0 || !S_ISREG(status.st_mode)) return 24;
+  errno = 0;
+  if (chdir("payload.txt") != -1 || errno != ENOTDIR) return 25;
+  if (chdir("..") != 0 || getcwd(cwd, sizeof(cwd)) != cwd ||
+      !NameEqual(cwd, "/system")) return 26;
+
+  DIR* stream = opendir("etc");
+  if (stream == NULL) return 27;
+  int saw_payload = 0;
+  int saw_link = 0;
+  errno = 777;
+  for (;;) {
+    struct dirent* entry = readdir(stream);
+    if (entry == NULL) break;
+    if (entry->d_reclen < 24 || entry->d_reclen > sizeof(struct dirent)) return 28;
+    if (NameEqual(entry->d_name, "payload.txt")) {
+      if (entry->d_type != DT_UNKNOWN && entry->d_type != DT_REG) return 29;
+      saw_payload = 1;
+    }
+    if (NameEqual(entry->d_name, "outside-link")) {
+      if (entry->d_type != DT_UNKNOWN && entry->d_type != DT_LNK) return 30;
+      saw_link = 1;
+    }
+  }
+  if (errno != 777 || !saw_payload || !saw_link) return 31;
+  if (closedir(stream) != 0) return 32;
+  errno = 0;
+  if (opendir("etc/payload.txt") != NULL || errno != ENOTDIR) return 33;
+  errno = 0;
+  if (opendir("etc/outside-link") != NULL || errno != ELOOP) return 34;
+  errno = 0;
+  if (readlink("etc/payload.txt", buffer, sizeof(buffer)) != -1 ||
+      errno != EINVAL) return 35;
+  errno = 0;
+  if (readlink("etc/outside-dir-link/secret", buffer, sizeof(buffer)) != -1 ||
+      errno != ENOTDIR) return 36;
   return 42;
 }

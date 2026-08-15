@@ -34,7 +34,7 @@ check_hash "$project_root/upstream/android16-os-constants-values.tsv" \
 check_hash "$project_root/tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv" \
   "$LIBC_IMPORT_MANIFEST_SHA256"
 
-for symbol in close fstat open openat read; do
+for symbol in chdir close closedir fstat getcwd lstat open openat opendir read readdir readlink stat; do
   awk -F '\t' -v wanted="$symbol" '$1==wanted && $2=="FUNC" && $3=="B" {found=1} END{exit !found}' \
     "$project_root/tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv" ||
     fail "libc import classification drift: $symbol"
@@ -50,6 +50,10 @@ check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include
   "$NDK_ANDROID_ARM64_FCNTL_SHA256"
 check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/stat.h" \
   "$NDK_SYS_STAT_SHA256"
+check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/dirent.h" \
+  "$NDK_DIRENT_SHA256"
+check_hash "$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/unistd.h" \
+  "$NDK_UNISTD_SHA256"
 
 temp_root="$(mktemp -d "${TMPDIR:-/tmp}/bionic-fs-facade.XXXXXX")"
 cleanup() {
@@ -71,16 +75,27 @@ nm -u "$temp_root/shims.o" | sed 's/^[[:space:]]*//' | sort \
   >"$temp_root/undefined"
 cat >"$temp_root/expected-undefined" <<'EOF'
 ___error
+_closedir
+_darwin_art_bionic_fs_chdir_core
 _darwin_art_bionic_fs_close_core
+_darwin_art_bionic_fs_closedir_core
 _darwin_art_bionic_fs_fstat_core
+_darwin_art_bionic_fs_getcwd_core
+_darwin_art_bionic_fs_lstat_core
 _darwin_art_bionic_fs_open_core
 _darwin_art_bionic_fs_openat_core
+_darwin_art_bionic_fs_opendir_core
 _darwin_art_bionic_fs_read_core
+_darwin_art_bionic_fs_readdir_core
+_darwin_art_bionic_fs_readlink_core
+_darwin_art_bionic_fs_stat_core
+_fdopendir
+_readdir
 EOF
 diff -u "$temp_root/expected-undefined" "$temp_root/undefined" ||
   fail 'shim dependency drift'
 definitions="$(nm -gU "$temp_root/shims.o")"
-for symbol in close fs_resolve fstat open openat read; do
+for symbol in chdir close closedir fs_resolve fstat getcwd lstat open openat opendir read readdir readlink stat; do
   grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
     fail "missing prefixed definition $symbol"
 done
@@ -88,7 +103,12 @@ if awk '$2 ~ /^[TDS]$/ {print $3}' <<<"$definitions" |
    grep -Ev '^_darwin_art_bionic_' >/dev/null; then
   fail 'unprefixed global definition escaped filesystem facade'
 fi
-if rg -n 'dlsym|RTLD_|rename|unlink|socket|O_WRONLY[^\n]*accepted|O_RDWR[^\n]*accepted' \
+visibility="$(nm -m "$temp_root/shims.o")"
+for symbol in host_closedir host_fdopendir host_readdir; do
+  grep -F "private external _darwin_art_bionic_fs_$symbol" <<<"$visibility" >/dev/null ||
+    fail "host DIR helper escaped hidden visibility: $symbol"
+done
+if rg -n 'dlopen|dlsym|dyld|NSLookupSymbolInImage|RTLD_|rename|unlink|socket|O_WRONLY[^\n]*accepted|O_RDWR[^\n]*accepted' \
    "$script_dir/src" "$script_dir/include" "$script_dir/manifests" >/dev/null; then
   fail 'forbidden resolver or writable capability entered facade'
 fi
@@ -113,11 +133,19 @@ awk '$7=="UND" && $8!="" {print $8}' "$temp_root/dynsyms" | sort -u \
   >"$temp_root/fixture-undefined"
 cat >"$temp_root/expected-fixture-undefined" <<'EOF'
 __errno
+chdir
 close
+closedir
 fstat
+getcwd
+lstat
 open
 openat
+opendir
 read
+readdir
+readlink
+stat
 EOF
 diff -u "$temp_root/expected-fixture-undefined" "$temp_root/fixture-undefined" ||
   fail 'Android filesystem ELF import namespace drift'
@@ -128,10 +156,11 @@ mkdir -p "$temp_root/root/etc" "$temp_root/outside"
 printf '%s' 'brokered-data' >"$temp_root/root/etc/payload.txt"
 printf '%s' 'outside-secret' >"$temp_root/outside/secret"
 ln -s "$temp_root/outside/secret" "$temp_root/root/etc/outside-link"
+ln -s "$temp_root/outside" "$temp_root/root/etc/outside-dir-link"
 CARGO_TARGET_DIR="$temp_root/cargo-target" cargo run --quiet \
   --manifest-path "$script_dir/Cargo.toml" -- "$fixture" "$temp_root/root"
 CARGO_TARGET_DIR="$temp_root/cargo-target" cargo clippy --quiet \
   --manifest-path "$script_dir/Cargo.toml" -- -D warnings
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
 
-echo 'bionic-fs-facade: PASS AndroidELF imports=6 read-only broker+prefix stat128 errno closed-resolver'
+echo 'bionic-fs-facade: PASS AndroidELF imports=14 read-only path+cwd+DIR stat128/dirent280 closed-resolver'

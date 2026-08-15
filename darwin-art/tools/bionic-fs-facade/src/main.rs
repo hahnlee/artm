@@ -28,11 +28,19 @@ impl ClosedResolver {
     fn lookup(name: &str) -> Option<unsafe extern "C" fn()> {
         let bytes = match name {
             "__errno" => c"__errno",
+            "chdir" => c"chdir",
             "close" => c"close",
+            "closedir" => c"closedir",
             "fstat" => c"fstat",
+            "getcwd" => c"getcwd",
+            "lstat" => c"lstat",
             "open" => c"open",
             "openat" => c"openat",
+            "opendir" => c"opendir",
             "read" => c"read",
+            "readdir" => c"readdir",
+            "readlink" => c"readlink",
+            "stat" => c"stat",
             _ => return None,
         };
         // SAFETY: both closed C resolvers read only the static NUL-terminated name.
@@ -91,9 +99,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if unsafe { *__error() } != 33_001 {
         return Err("filesystem facade changed host errno".into());
     }
-    println!(
-        "bionic-fs-facade: PASS Android ELF open/openat/read/fstat/close mount-root broker errno"
-    );
+    println!("bionic-fs-facade: PASS Android ELF file/path/cwd/DIR mount-root broker errno");
     Ok(())
 }
 

@@ -45,6 +45,21 @@ typedef struct DarwinArtAndroidStat {
   uint32_t __unused5;
 } DarwinArtAndroidStat;
 
+typedef struct DarwinArtAndroidDirent {
+  uint64_t d_ino;
+  int64_t d_off;
+  uint16_t d_reclen;
+  uint8_t d_type;
+  char d_name[256];
+} DarwinArtAndroidDirent;
+
+typedef struct DarwinArtHostDirent {
+  uint64_t d_ino;
+  uint16_t d_name_length;
+  uint8_t d_type;
+  uint8_t d_name[256];
+} DarwinArtHostDirent;
+
 typedef void (*DarwinArtBionicFsFunction)(void);
 
 int darwin_art_bionic_open(const char* path, int flags, ...);
@@ -52,6 +67,15 @@ int darwin_art_bionic_openat(int directory_fd, const char* path, int flags, ...)
 intptr_t darwin_art_bionic_read(int fd, void* buffer, size_t count);
 int darwin_art_bionic_close(int fd);
 int darwin_art_bionic_fstat(int fd, DarwinArtAndroidStat* status);
+int darwin_art_bionic_stat(const char* path, DarwinArtAndroidStat* status);
+int darwin_art_bionic_lstat(const char* path, DarwinArtAndroidStat* status);
+intptr_t darwin_art_bionic_readlink(const char* path, char* buffer,
+                                    size_t size);
+char* darwin_art_bionic_getcwd(char* buffer, size_t size);
+int darwin_art_bionic_chdir(const char* path);
+void* darwin_art_bionic_opendir(const char* path);
+DarwinArtAndroidDirent* darwin_art_bionic_readdir(void* directory);
+int darwin_art_bionic_closedir(void* directory);
 
 DarwinArtBionicFsFunction darwin_art_bionic_fs_resolve(const char* import_name);
 
@@ -62,6 +86,25 @@ int darwin_art_bionic_fs_openat_core(int directory_fd, const char* path,
 intptr_t darwin_art_bionic_fs_read_core(int fd, void* buffer, size_t count);
 int darwin_art_bionic_fs_close_core(int fd);
 int darwin_art_bionic_fs_fstat_core(int fd, DarwinArtAndroidStat* status);
+int darwin_art_bionic_fs_stat_core(const char* path,
+                                   DarwinArtAndroidStat* status);
+int darwin_art_bionic_fs_lstat_core(const char* path,
+                                    DarwinArtAndroidStat* status);
+intptr_t darwin_art_bionic_fs_readlink_core(const char* path, char* buffer,
+                                            size_t size);
+char* darwin_art_bionic_fs_getcwd_core(char* buffer, size_t size);
+int darwin_art_bionic_fs_chdir_core(const char* path);
+void* darwin_art_bionic_fs_opendir_core(const char* path);
+DarwinArtAndroidDirent* darwin_art_bionic_fs_readdir_core(void* directory);
+int darwin_art_bionic_fs_closedir_core(void* directory);
+
+/* Darwin-only helpers. Their opaque stream never crosses the guest facade. */
+__attribute__((visibility("hidden"))) void*
+darwin_art_bionic_fs_host_fdopendir(int fd, int* host_errno);
+__attribute__((visibility("hidden"))) int darwin_art_bionic_fs_host_readdir(
+    void* directory, DarwinArtHostDirent* entry, int* host_errno);
+__attribute__((visibility("hidden"))) int darwin_art_bionic_fs_host_closedir(
+    void* directory, int* host_errno);
 
 #ifdef __cplusplus
 }
