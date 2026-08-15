@@ -101,18 +101,24 @@ local implementation symbols inside one executable `PT_LOAD`:
 
 | Method | Descriptor | ART shorty | ELF value |
 |---|---|---|---:|
-| `nativeAdd` | `(IJI)J` | `JIJI` | `0x44c8` |
-| `nativeSpill` | `(ZBCSIJLjava/lang/Object;FDFDFDFDFFD)J` | `JZBCSIJLFDFDFDFDFFD` | `0x44d4` |
+| `nativeAdd` | `(IJI)J` | `JIJI` | `0x4818` |
+| `nativeSpill` | `(ZBCSIJLjava/lang/Object;FDFDFDFDFFD)J` | `JZBCSIJLFDFDFDFFD` | `0x4824` |
+| `nativeUsesEnv` | `()I` | `I` | `0x491c` |
+| `nativeNarrowStack` | `(IIIIIIZBCSIJLjava/lang/Object;)I` | `IIIIIIIZBCSIJL` | `0x4980` |
+| `nativeEcho` | `(Ljava/lang/Object;)Ljava/lang/Object;` | `LL` | `0x4a0c` |
+| `nativeFloat` | `(F)F` | `FF` | `0x4a14` |
+| `nativeDouble` | `(D)D` | `DD` | `0x4a20` |
+| `nativeVoid` | `()V` | `V` | `0x4a2c` |
 
 The mixed method exhausts both integer and floating register classes, then
 places two 32-bit floats before a 64-bit double on the stack. Darwin compacts
 the floats while Android assigns each an eight-byte slot, so the layouts
-genuinely diverge. The standalone smoke does not claim to implement the final
-PCS code generator; it gives a fake factory these real owned ELF addresses and
-returns fixed-signature Darwin functions. It proves descriptor-to-shorty
-normalization, regular/CriticalNative separation, callable signatures, cache
-reuse, bridged-foreign rejection, exact-generation retirement, and fresh thunk
-creation when the same address is reused.
+genuinely diverge. `nativeNarrowStack` separately forces byte, halfword, word,
+and doubleword values into Darwin's naturally packed tail. The standalone
+registered-native cache smoke still uses fake callable functions to isolate
+ownership and retirement, while the ART runtime gate executes the real
+regular-JNI scalar/reference shorty generator. CriticalNative remains a
+separate, fail-closed capability.
 
 ## Gate
 

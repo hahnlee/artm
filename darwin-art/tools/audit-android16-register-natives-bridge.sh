@@ -154,7 +154,7 @@ spill_value="0x$($elf_nm -n "$fixture_elf" | awk '$3 == "NativeSpill" {print $1}
 [[ "$((add_value))" == "$((FIXTURE_NATIVE_ADD))" ]] || fail "NativeAdd ELF value mismatch"
 [[ "$((spill_value))" == "$((FIXTURE_NATIVE_SPILL))" ]] || fail "NativeSpill ELF value mismatch"
 "$readelf" -lW "$fixture_elf" |
-  grep -E "LOAD +0x000414 +0x0000000000004414 .* R E +0x4000" >/dev/null ||
+  grep -E "LOAD +0x000744 +0x0000000000004744 .* R E +0x4000" >/dev/null ||
   fail "fixture executable PT_LOAD mismatch"
 
 stage="$(mktemp -d "${TMPDIR:-/tmp}/register-natives-bridge.XXXXXX")"

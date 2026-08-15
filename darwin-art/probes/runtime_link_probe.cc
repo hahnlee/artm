@@ -1369,7 +1369,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       return 42;
     }
     std::cout << "ART Android ELF JNI: load+JNI_OnLoad+RegisterNatives="
-                 "installed nativeAdd=42 nativeSpill=digest-ok\n"
+                 "installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n"
               << std::flush;
   }
 
@@ -1463,7 +1463,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
     g_process_state.phase = ProcessPhase::kShutdownFailed;
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
-  if (darwin_art::android_jni::FixtureTrampolineLiveCount() != 0) {
+  if (darwin_art::android_jni::TrampolineLiveCount() != 0) {
     std::cerr << "ART Darwin shutdown: ELF JNI trampolines remain live\n";
     std::lock_guard<std::mutex> lock(g_process_state.mutex);
     g_process_state.phase = ProcessPhase::kShutdownFailed;

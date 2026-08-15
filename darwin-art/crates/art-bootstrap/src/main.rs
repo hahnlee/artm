@@ -1687,7 +1687,7 @@ fn build_elf_jni_dex_probe(root: &Path) -> Result<()> {
             .arg(class_dir.join("darwin/art/nativefixture/NativeFixture.class")),
     )?;
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=305 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=311 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldarwin/art/nativefixture/NativeFixture; \
                     class[2]=Ldev/darwinart/probe/Hello; \
@@ -3352,10 +3352,10 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             "darwin_art_jni_proxy_java_vm",
             "darwin_art_elf_jni_fixture_registration_status",
             "ElfJniOnLoadTrampoline",
-            "CreateFixtureTrampolines",
-            "FixtureTrampolineEntryMask",
-            "IsFixtureTrampolineEntry",
-            "FixtureTrampolineLiveCount",
+            "CreateRegularTrampolines",
+            "TrampolineEntryMask",
+            "IsTrampolineEntry",
+            "TrampolineLiveCount",
         ] {
             if !all_symbols.contains(required) {
                 return Err(
@@ -3726,10 +3726,10 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         "darwin_art_jni_proxy_java_vm",
         "darwin_art_elf_jni_fixture_registration_status",
         "ElfJniOnLoadTrampoline",
-        "CreateFixtureTrampolines",
-        "FixtureTrampolineEntryMask",
-        "IsFixtureTrampolineEntry",
-        "FixtureTrampolineLiveCount",
+        "CreateRegularTrampolines",
+        "TrampolineEntryMask",
+        "IsTrampolineEntry",
+        "TrampolineLiveCount",
     ] {
         if !all_symbols.contains(registrar) {
             return Err(format!("real-graphics Runtime lacks registrar symbol {registrar}").into());
@@ -3929,7 +3929,7 @@ fn probe_runtime_dex_flavor(
     let output = command_output(&mut command)?;
     let expected = if elf_jni {
         "Hello from Darwin ART main: 안녕\n\
-         ART Android ELF JNI: load+JNI_OnLoad+RegisterNatives=installed nativeAdd=42 nativeSpill=digest-ok\n\
+         ART Android ELF JNI: load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
          ART Darwin Runtime::Create: ok\n\
          ART Darwin app ClassLoader: PathClassLoader\n\
          ART Darwin DEX interpreter: Hello.answer()=42\n\
@@ -3957,7 +3957,9 @@ fn probe_runtime_dex_flavor(
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
     if elf_jni {
-        println!("probe-runtime-elf-jni: ART load + proxy JNI_OnLoad + nativeAdd/nativeSpill PASS");
+        println!(
+            "probe-runtime-elf-jni: ART load + regular shorty trampolines + current JNIEnv PASS"
+        );
     } else if button {
         if show_window {
             println!("probe-runtime-button-window: android.widget.Button -> AOSP HWUI -> NSWindow");

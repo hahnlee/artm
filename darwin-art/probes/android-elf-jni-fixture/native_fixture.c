@@ -44,6 +44,56 @@ static jlong NativeSpill(JNIEnv* env, jclass fixture_class, jboolean z, jbyte b,
   return (jlong)digest;
 }
 
+static jint NativeUsesEnv(JNIEnv* env, jclass fixture_class) {
+  (void)fixture_class;
+  if ((*env)->GetVersion(env) != JNI_VERSION_1_6) {
+    return -1;
+  }
+  // This is deliberately invoked after JNI_OnLoad returns. The proxy backend
+  // must obtain the current invocation thread's ART JNIEnv, not retain the
+  // synchronous load thread's JNIEnv.
+  jclass string_class = (*env)->FindClass(env, "java/lang/String");
+  return string_class == NULL ? -2 : 42;
+}
+
+static jint NativeNarrowStack(JNIEnv* env, jclass fixture_class, jint a0,
+                              jint a1, jint a2, jint a3, jint a4, jint a5,
+                              jboolean z, jbyte b, jchar c, jshort s, jint i,
+                              jlong j, jobject reference) {
+  (void)env;
+  (void)fixture_class;
+  return a0 == 10 && a1 == 11 && a2 == 12 && a3 == 13 && a4 == 14 &&
+                 a5 == 15 && z == JNI_TRUE && b == (jbyte)0x81 &&
+                 c == (jchar)0xabcd && s == (jshort)0x8765 &&
+                 i == (jint)0x45678923 &&
+                 j == (jlong)INT64_C(0x2233445566778899) && reference != NULL
+             ? 42
+             : -1;
+}
+
+static jobject NativeEcho(JNIEnv* env, jclass fixture_class, jobject value) {
+  (void)env;
+  (void)fixture_class;
+  return value;
+}
+
+static jfloat NativeFloat(JNIEnv* env, jclass fixture_class, jfloat value) {
+  (void)env;
+  (void)fixture_class;
+  return value + 0.5f;
+}
+
+static jdouble NativeDouble(JNIEnv* env, jclass fixture_class, jdouble value) {
+  (void)env;
+  (void)fixture_class;
+  return value + 0.25;
+}
+
+static void NativeVoid(JNIEnv* env, jclass fixture_class) {
+  (void)env;
+  (void)fixture_class;
+}
+
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
   (void)reserved;
   JNIEnv* env = NULL;
@@ -62,8 +112,16 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
       {"nativeSpill",
        "(ZBCSIJLjava/lang/Object;FDFDFDFDFFD)J",
        (void*)&NativeSpill},
+      {"nativeUsesEnv", "()I", (void*)&NativeUsesEnv},
+      {"nativeNarrowStack", "(IIIIIIZBCSIJLjava/lang/Object;)I",
+       (void*)&NativeNarrowStack},
+      {"nativeEcho", "(Ljava/lang/Object;)Ljava/lang/Object;",
+       (void*)&NativeEcho},
+      {"nativeFloat", "(F)F", (void*)&NativeFloat},
+      {"nativeDouble", "(D)D", (void*)&NativeDouble},
+      {"nativeVoid", "()V", (void*)&NativeVoid},
   };
-  if ((*env)->RegisterNatives(env, fixture_class, methods, 2) != JNI_OK) {
+  if ((*env)->RegisterNatives(env, fixture_class, methods, 8) != JNI_OK) {
     return JNI_ERR;
   }
   return JNI_VERSION_1_6;

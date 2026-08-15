@@ -122,4 +122,4 @@ identity="$stage/darwin_art_elf_jni_fixture_identity.h"
   echo '#endif'
 } > "$identity"
 cp "$identity" "$generated_dir/darwin_art_elf_jni_fixture_identity.h"
-echo "android-elf-jni-fixture: PASS exports=JNI_OnLoad+JNI_OnUnload imports=0 fini=0 relro=0 register=GetEnv+FindClass+RegisterNatives methods=register+spill pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) size=$fixture_size sha256=$fixture_sha"
+echo "android-elf-jni-fixture: PASS exports=JNI_OnLoad+JNI_OnUnload imports=0 fini=0 relro=0 register=GetEnv+FindClass+RegisterNatives methods=8(register+spill+env+narrow+returns) pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) size=$fixture_size sha256=$fixture_sha"

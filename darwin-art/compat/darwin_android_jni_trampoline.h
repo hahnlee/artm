@@ -7,33 +7,38 @@
 
 namespace darwin_art::android_jni {
 
-struct FixtureTrampolineSet;
+struct TrampolineSet;
 
-// Creates exactly the two reviewed fixture thunks and publishes their RX range
-// to NativeBridge pointer classification. The Android targets and proxy JNIEnv
-// must remain alive until DestroyFixtureTrampolines after external quiescence.
-FixtureTrampolineSet* CreateFixtureTrampolines(void* proxy_jni_env,
-                                               void* native_add,
-                                               void* native_spill,
-                                               std::string* error);
+struct TrampolineRequest {
+  void* android_target;
+  const char* shorty;
+  uint32_t entry_mask;
+};
 
-void DestroyFixtureTrampolines(FixtureTrampolineSet* trampolines);
+// Creates regular-JNI Darwin-entry-to-Android thunks. A shorty consists of a
+// return type followed by argument types and supports only scalar/reference
+// JNI types Z/B/C/S/I/J/F/D/L/V (V is return-only). GP and FP argument banks
+// are planned independently. Darwin's naturally packed stack tail is copied
+// into Android AAPCS64's eight-byte argument slots. Aggregates, HFA, varargs,
+// and CriticalNative are outside this API and therefore fail closed.
+// The returned owner must outlive every call; the caller must establish
+// external invocation quiescence before destroying it.
+TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
+                                        const TrampolineRequest* requests,
+                                        size_t request_count,
+                                        std::string* error);
 
-void* FixtureNativeAddEntry(const FixtureTrampolineSet* trampolines);
-void* FixtureNativeSpillEntry(const FixtureTrampolineSet* trampolines);
-uint64_t FixtureTrampolineGeneration(const FixtureTrampolineSet* trampolines);
-size_t FixtureTrampolineLiveCount();
+void DestroyRegularTrampolines(TrampolineSet* trampolines);
 
-constexpr uint32_t kFixtureNativeAddEntryMask = 1u << 0;
-constexpr uint32_t kFixtureNativeSpillEntryMask = 1u << 1;
+size_t TrampolineCount(const TrampolineSet* trampolines);
+void* TrampolineEntry(const TrampolineSet* trampolines, size_t index);
+uint64_t TrampolineGeneration(const TrampolineSet* trampolines);
+size_t TrampolineLiveCount();
 
-// Returns a stable one-bit identity for either callable entry. Repeated
-// classification of one entry cannot be mistaken for observing both thunks.
-uint32_t FixtureTrampolineEntryMask(const void* pointer);
-
-// Returns true only for a published callable entry, not for literals or an
-// arbitrary address elsewhere in the executable allocation.
-bool IsFixtureTrampolineEntry(const void* pointer);
+// Returns the caller-supplied stable identity of a published callable entry,
+// never of a literal or an arbitrary address in the RX allocation.
+uint32_t TrampolineEntryMask(const void* pointer);
+bool IsTrampolineEntry(const void* pointer);
 
 }  // namespace darwin_art::android_jni
 

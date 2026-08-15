@@ -329,14 +329,17 @@ executable-stack/text-relocation requirements, and raw `svc`.
 
 The first ELF image now travels through ART's real native-library ownership
 path. ART runs its Android `JNI_OnLoad` with a proxy JavaVM, accepts its exact
-two-entry `RegisterNatives` table, and installs only W-to-RX Darwin-entry
-thunks—never raw Android function pointers. A register-only native returns 42,
-and a deliberately spilled scalar/reference method passes after its Darwin
-`0/8/12/16` stack tail is repacked to Android `0/8/16/24`. DestroyJavaVM then
-closes the image and returns the executable-page live count to zero. This is a
-fixed two-signature proof: native bodies that call through `JNIEnv`, general
-shorty generation, hardened-runtime JIT policy, `DT_NEEDED`, TLS, and ELF
-finalizers remain explicit gates.
+eight-entry `RegisterNatives` table, and installs only W-to-RX Darwin-entry
+thunks—never raw Android function pointers. The regular-JNI shorty planner
+supports Z/B/C/S/I/J/F/D/L/V scalar/reference arguments and returns, tracks GP
+and FP register banks independently, and repacks Darwin's naturally aligned
+stack tail into Android eight-byte slots. Actual ELF calls cover mixed FP,
+narrow integer stack values, reference/FP/void returns, and post-load proxy
+`GetVersion` plus `FindClass`; the backend obtains the current ART thread's
+JNIEnv instead of retaining the load-time pointer. DestroyJavaVM closes the
+image and returns the executable-page live count to zero. Hardened-runtime JIT
+policy, CriticalNative, aggregate/HFA/varargs calls, broader JNI proxy tables,
+TLS, and ELF finalizers remain explicit gates.
 
 The virtual DSO namespace is closed: unknown SONAMEs, symbols, and GNU versions
 cannot fall back to Darwin globals. Loader-owned `libdl` has its first five
@@ -384,9 +387,10 @@ remain capability failures until the namespace FD and interval owners exist.
    relocations and the closed virtual DSO namespace.
 5. [Complete for one import-free fixture] Call Android `JNI_OnLoad` through
    ART's native-library ownership path and invoke its registered methods.
-6. [Complete for two fixed signatures] Repack a register-only call and a
-   deliberately spilled scalar/reference call. General shorty generation and
-   per-call proxy-JNIEnv binding remain open.
+6. [Complete for regular scalar/reference JNI] Generate per-shorty thunks,
+   repack naturally aligned narrow/FP stack tails into Android eight-byte
+   slots, and resolve proxy calls through the current ART thread's JNIEnv.
+   CriticalNative, aggregates/HFA, and varargs remain fail-closed.
 7. Execute a JNI library that opens an Android-prefix file, starts a pthread,
    allocates TLS, and returns a value to interpreted Java.
 8. Expand the Bionic facade by real application import manifests, preserving a
