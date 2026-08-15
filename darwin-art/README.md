@@ -18,7 +18,9 @@ The app's real `Activity.setContentView(View)` call adds a normally constructed
 View beneath that DecorView. The first vertical graphics slice executes the
 complete software `DecorView -> ViewGroup -> View.draw(Canvas) -> onDraw()`
 traversal, then presents the resulting frame in an independent AppKit
-`NSWindow`:
+`NSWindow`. The runtime is now a process-scoped C ABI dynamic library. A Rust
+host owns its lifecycle and the persistent IOSurface/Metal/AppKit presentation
+surface:
 
 1. verify the native host is ARM64 macOS with 16 KiB pages;
 2. fetch revision-locked ART subtrees without Git metadata;
@@ -26,33 +28,39 @@ traversal, then presents the resulting frame in an independent AppKit
 4. call an ART-style assembly entrypoint from Rust and return through Rust;
 5. compile ART's page-size-agnostic path and verify 16 KiB on Darwin;
 6. build small Mach-O ARM64 `libartbase` and `libdexfile` archives;
-7. compile Java to DEX and verify it with AOSP `DexFileVerifier`;
-8. generate ART's real ARM64 ABI constants and compile context, optimized
+7. build revision-locked AOSP Skia as a CPU-only Mach-O ARM64 archive and
+   pixel-verify real `SkSurface`, `SkCanvas`, `SkPaint`, and `SkPath` output;
+8. compile Java to DEX and verify it with AOSP `DexFileVerifier`;
+9. generate ART's real ARM64 ABI constants and compile context, optimized
    `__memcmp16`, plus quick/JNI/native entrypoint assembly;
-9. compile the C++ switch interpreter and a 209-object Runtime/ClassLinker/GC/
+10. compile the C++ switch interpreter and a 209-object Runtime/ClassLinker/GC/
    quick-entrypoint initialization spine as Mach-O archives;
-10. link the real bootstrap probe with no unresolved native symbols;
-11. create ART successfully with the pinned Android 16 core boot JARs;
-12. load `Hello` from an app-only `PathClassLoader` and execute
+11. link the real bootstrap probe with no unresolved native symbols;
+12. create ART successfully with the pinned Android 16 core boot JARs;
+13. load `Hello` from an app-only `PathClassLoader` and execute
     `Hello.answer()` through `ArtMethod::Invoke`;
-13. register `Hello.hostPageSize()` through JNI and execute
+14. register `Hello.hostPageSize()` through JNI and execute
     `Java -> JNI -> getpagesize() -> Java`, returning `42` from the wrapper;
-14. register ART's complete runtime-native table plus the Darwin libcore subset
+15. register ART's complete runtime-native table plus the Darwin libcore subset
     needed to initialize `System`, then execute AOSP `System.arraycopy()`;
-15. create ART's normal main-thread peer and invoke `public static void
+16. create ART's normal main-thread peer and invoke `public static void
     main(String[])` through JNI;
-16. use Android's real `PrintStream -> CharsetICU -> StreamEncoder -> IoBridge`
+17. use Android's real `PrintStream -> CharsetICU -> StreamEncoder -> IoBridge`
     path, backed by host ICU4C and Darwin `write(2)`;
-17. load Android 16's real framework DEX, prepare its main `Looper`, and
+18. load Android 16's real framework DEX, prepare its main `Looper`, and
     instantiate an app DEX class that directly extends `android.app.Activity`;
-18. call the real `Activity.attach()` with a Darwin-backed context, retain its
+19. call the real `Activity.attach()` with a Darwin-backed context, retain its
     default `PhoneWindow`, and normally construct the framework `DecorView`;
-19. execute the real platform `Activity.onCreate()` body plus the app override,
+20. execute the real platform `Activity.onCreate()` body plus the app override,
     including `Activity.setContentView(new ProbeView(this))`;
-20. run `DecorView.measure/layout/draw()` and the nested base `View.draw(Canvas)`
-    traversal against a Darwin software Canvas, then present its 640x360 frame
-    in an `NSWindow`;
-21. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
+21. run `DecorView.measure/layout/draw()` and the nested base `View.draw(Canvas)`
+    traversal against a Darwin software Canvas, copy its 640x360 frame out of
+    the callback, then present through one persistent IOSurface, Metal texture,
+    `CAMetalLayer`, and `NSWindow`;
+22. draw 120 frames with upstream Skia directly into the mapped IOSurface and
+    present them with zero staging copies;
+23. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts;
+24. shut ART down through the C ABI after every successful runtime probe.
 
 Run it with:
 
@@ -66,13 +74,14 @@ Expected final lines include:
 probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
+build-skia: Skia Darwin raster: 64x64 rowBytes=256 hash=a4bb4cdb0b4779ea ...
 build-dex: AOSP DEX: verified=yes version=35 classes=12 methods=288 ... corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
 build-interpreter-core: AOSP C++ interpreter Mach-O objects=7 archive=...
 build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=209 compiled=0 cached=209 archive=...
-audit-runtime-link: closure complete undefined=0
+audit-runtime-link: C ABI dylib closure complete undefined=0 exports=9
 probe-runtime-dex: Activity.attach() + PhoneWindow + DecorView.draw(Canvas) -> Darwin
 probe-park: ART Darwin park: pre-permit=yes wakeups=200 timeout=yes
 ```
@@ -83,15 +92,38 @@ To keep the native window visible for three seconds, run:
 cargo run -p art-bootstrap -- probe-window
 ```
 
-The current frame producer is deliberately small: `ProbeView.onDraw()` submits
-a Java `0xAARRGGBB` bitmap through the Android `Canvas.drawBitmap()` API. The
-Darwin Canvas implementation stores that software frame, and Objective-C++
-copies it into a Core Graphics image owned by an `NSView`. This proves the real
-`Activity.onCreate() -> PhoneWindow.setContentView() -> DecorView ->
-ViewGroup.dispatchDraw() -> View.draw(Canvas) -> onDraw()` control path. The
-DecorView uses a programmatic `android.R.id.content` root and a minimal resource
-backend; it is not yet the complete framework decor layout. Skia, HWUI,
-zero-copy, input, and production resource parsing remain deferred.
+The current Activity frame producer is deliberately small:
+`ProbeView.onDraw()` submits a Java `0xAARRGGBB` bitmap through Android's
+`Canvas.drawBitmap()` API. The C callback borrows that frame only while ART is
+runnable; Rust makes one tightly packed owned copy, returns across the ART
+boundary, then uploads it into a persistent IOSurface-backed Metal texture.
+The same `NSWindow`, `CAMetalLayer`, IOSurface, texture, and command queue remain
+alive for the session. No frame creates a `CFData`, `CGImage`, window, or
+texture.
+
+This proves the real `Activity.onCreate() -> PhoneWindow.setContentView() ->
+DecorView -> ViewGroup.dispatchDraw() -> View.draw(Canvas) -> onDraw()` control
+path. Separately, `build-skia` maps that same IOSurface and wraps its base address
+with upstream `SkCanvas::MakeRasterDirect`; 120 frames are rasterized and Metal-
+presented with zero staging copies. The two paths are not connected yet:
+Android's `Canvas` is still `ProbeCanvas`, not the upstream HWUI `SkiaCanvas`,
+and the DecorView still uses a programmatic `android.R.id.content` root plus a
+minimal resource backend. The next graphics gate is the full upstream Android
+Canvas/Paint JNI and software HWUI closure, followed by real framework-resource
+parsing. Input and GPU HWUI remain deferred.
+
+The first Android 16 HWUI host compile gate is reproducible with:
+
+```bash
+bash tools/compile-android16-hwui-canvas-gate.sh
+```
+
+It compiles the unmodified upstream `SkiaCanvas.cpp`, `hwui/Canvas.cpp`, Canvas
+JNI, and Paint JNI sources as ARM64 Mach-O objects and records their direct
+undefined-symbol closure. The exact source and dependency revisions are pinned
+under `upstream/`; the ordered module-level closure and current
+`SK_BUILD_FOR_ANDROID_FRAMEWORK` blocker are documented in
+`upstream/android16-hwui-host-closure.md`.
 
 `build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
 depfile for every translation unit; the bootstrapper fingerprints the complete
@@ -110,9 +142,10 @@ ABI. ART's existing Darwin pthread fallback is retained. The monitor patch only
 supports uncontended inflation by the current thread; multithreaded execution is
 blocked until empty-checkpoint wakeups and cross-thread inflation are implemented.
 `LockSupport.park/unpark` now uses ART's pthread-backed mutex/condition variable
-fallback on Darwin and has an executable stress probe. It intentionally spends
-one mutex and condition variable per ART thread; lazy allocation is a later
-memory optimization.
+fallback on Darwin and has an executable stress probe. It shares each ART
+thread's existing wait mutex and condition variable rather than adding another
+pair to `Thread`; this also keeps the upstream `Thread` object layout consistent
+across all runtime archives.
 
 The three production ARM64 entrypoint assembly files now compile as Mach-O and
 remove the `_art_quick_*`/`_art_jni_*` family from the Runtime link closure.
@@ -121,14 +154,20 @@ For this PoC their DWARF CFI directives are emitted into clearly named
 ART's ELF-oriented CFI state machine. Correct Darwin unwind metadata is required
 before exceptions and stack walking through these stubs can be considered safe.
 
-`audit-runtime-link` performs a real `Runtime::Create()` executable link. The
-current native closure is complete; the command fails if any undefined symbol
-or quick/JNI/context assembly regression appears.
+`audit-runtime-link` builds `libdarwin_art_runtime.dylib`, restricts it to the
+nine versioned runtime/surface C ABI exports, and builds the Rust host. The
+current native closure is complete; the command fails if any undefined symbol,
+unexpected export, or quick/JNI/context assembly regression appears. The host
+copies the borrowed frame only after validating dimensions and stride, owns all
+AppKit presentation, destroys its surface, and then requests ART shutdown on
+the same native thread. `DestroyJavaVM` performs the ART thread-list teardown;
+registered application DexFiles remain owned until that teardown is complete.
 
-The linked runtime probe can be executed directly:
+The linked runtime can be executed through its Rust host directly:
 
 ```bash
-_build/runtime-link-probe/runtime-link-probe \
+target/debug/darwin-art-host \
+  _build/runtime-link-probe/libdarwin_art_runtime.dylib \
   _prebuilt/android-16/bootclasspath/core-oj.jar \
   _prebuilt/android-16/bootclasspath/core-libart.jar \
   _prebuilt/android-16/bootclasspath/framework.jar \

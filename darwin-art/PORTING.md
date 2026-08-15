@@ -92,6 +92,26 @@
       traverse the actual `PhoneWindow -> DecorView -> ViewGroup` hierarchy,
       run the base `View.draw(Canvas)` plus `onDraw()`, and display it in an
       AppKit `NSWindow`.
+- [x] Materialize revision-locked Android 16 AOSP Skia without Git history,
+      build its upstream CPU raster core for macOS ARM64 with GPU/PDF/external
+      codecs disabled, and pixel-verify real `SkSurface`, `SkCanvas`, `SkPaint`,
+      and `SkPath` execution.
+- [x] Replace the per-frame Core Graphics snapshot viewer with a persistent
+      `NSWindow`/`CAMetalLayer`/IOSurface/Metal surface and explicit event pump.
+- [x] Map the IOSurface producer memory, draw 120 frames into it with upstream
+      Skia, and Metal-present them with zero staging copies.
+- [x] Export ART as a one-shot process C ABI, launch it from a Rust host, and
+      shut it down after the native surface is released while retaining
+      registered application DexFiles through runtime teardown.
+- [x] Pin the Android 16 HWUI Canvas source identity and compile the first
+      upstream `SkiaCanvas`, `Canvas`, Canvas JNI, and Paint JNI objects as
+      unmodified arm64 Mach-O translation units.
+- [ ] Rebuild Skia and HWUI with the same `SK_BUILD_FOR_ANDROID_FRAMEWORK`
+      contract, including `SkAndroidFrameworkUtils`, so their private Canvas
+      ABI and Android-only virtuals match.
+- [ ] Close the complete upstream Canvas/Paint registrar dependency graph with
+      GraphicsJNI, software `libhwui_static`, Minikin, HarfBuzz, FreeType, ICU,
+      androidfw, and native utility modules; do not substitute per-symbol stubs.
 - [ ] Replace the software `Canvas.drawBitmap()` backend with Skia/HWUI and
       replace the programmatic content root/minimal interpolator parser with
       complete compiled framework-resource support.
