@@ -18,8 +18,8 @@ pthread_mutexattr_destroy	FUNC	LIBC	unsupported	mutex-attributes
 pthread_mutexattr_init	FUNC	LIBC	unsupported	mutex-attributes
 pthread_mutexattr_settype	FUNC	LIBC	unsupported	recursive-errorcheck
 pthread_once	FUNC	LIBC	supported	private-once
-pthread_rwlock_rdlock	FUNC	LIBC	unsupported	rwlock-owner
-pthread_rwlock_unlock	FUNC	LIBC	unsupported	rwlock-owner
-pthread_rwlock_wrlock	FUNC	LIBC	unsupported	rwlock-owner
+pthread_rwlock_rdlock	FUNC	LIBC	supported	rwlock-owner
+pthread_rwlock_unlock	FUNC	LIBC	supported	rwlock-owner
+pthread_rwlock_wrlock	FUNC	LIBC	supported	rwlock-owner
 pthread_self	FUNC	LIBC	supported	thread-identity-token
 pthread_setspecific	FUNC	LIBC	supported	tls-key

@@ -9,7 +9,7 @@ use std::num::NonZeroUsize;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-const EXPECTED: [&str; 16] = [
+const EXPECTED: [&str; 19] = [
     "pthread_cond_broadcast",
     "pthread_cond_destroy",
     "pthread_cond_signal",
@@ -24,6 +24,9 @@ const EXPECTED: [&str; 16] = [
     "pthread_mutex_trylock",
     "pthread_mutex_unlock",
     "pthread_once",
+    "pthread_rwlock_rdlock",
+    "pthread_rwlock_unlock",
+    "pthread_rwlock_wrlock",
     "pthread_self",
     "pthread_setspecific",
 ];
@@ -112,6 +115,7 @@ fn expect_closed_resolver_negatives() -> Result<(), Box<dyn std::error::Error>> 
     let wrong_soname = CString::new("libSystem.B.dylib")?;
     let wrong_version = CString::new("DARWIN")?;
     let unknown = CString::new("pthread_create")?;
+    let unowned_rwlock = CString::new("pthread_rwlock_destroy")?;
     unsafe {
         if !darwin_art_bionic_pthread_resolve(
             wrong_soname.as_ptr(),
@@ -127,6 +131,12 @@ fn expect_closed_resolver_negatives() -> Result<(), Box<dyn std::error::Error>> 
             .is_null()
             || !darwin_art_bionic_pthread_resolve(libc.as_ptr(), unknown.as_ptr(), version.as_ptr())
                 .is_null()
+            || !darwin_art_bionic_pthread_resolve(
+                libc.as_ptr(),
+                unowned_rwlock.as_ptr(),
+                version.as_ptr(),
+            )
+            .is_null()
         {
             return Err("closed resolver accepted a fallback".into());
         }
@@ -225,6 +235,56 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if image.call_exported_i32("pthread_fixture_cond_timedwait")? != 0 {
         return Err("condition CLOCK_MONOTONIC timeout/relock failed".into());
     }
+    if image.call_exported_i32("pthread_fixture_rwlock_recursive_read")? != 0 {
+        return Err("rwlock recursive reader semantics failed".into());
+    }
+    let rw_reader = image.lookup_exported("pthread_fixture_rwlock_reader")?;
+    let mut rw_readers = Vec::new();
+    for _ in 0..4 {
+        rw_readers.push(std::thread::spawn(move || {
+            let function: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(rw_reader) };
+            unsafe { function() }
+        }));
+    }
+    wait_for_count("pthread_fixture_rwlock_reader_entries", 4)?;
+    let rw_writer = image.lookup_exported("pthread_fixture_rwlock_writer")?;
+    let writer = std::thread::spawn(move || {
+        let function: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(rw_writer) };
+        unsafe { function() }
+    });
+    std::thread::sleep(Duration::from_millis(20));
+    if image.call_exported_i32("pthread_fixture_rwlock_writer_entered")? != 0 {
+        return Err("rwlock writer entered while readers were active".into());
+    }
+    if image.call_exported_i32("pthread_fixture_rwlock_release_readers")? != 0 {
+        return Err("rwlock reader release failed".into());
+    }
+    for reader in rw_readers {
+        let result = reader.join().map_err(|_| "rwlock reader panicked")?;
+        if result != 0 {
+            return Err(format!("rwlock reader failed: {result}").into());
+        }
+    }
+    let writer_result = writer.join().map_err(|_| "rwlock writer panicked")?;
+    if writer_result != 0 {
+        return Err(format!("rwlock writer failed: {writer_result}").into());
+    }
+    if image.call_exported_i32("pthread_fixture_rwlock_writer_hold")? != 0 {
+        return Err("rwlock writer hold failed".into());
+    }
+    let wrong_unlock = image.lookup_exported("pthread_fixture_rwlock_wrong_unlock")?;
+    let wrong_result = std::thread::spawn(move || {
+        let function: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(wrong_unlock) };
+        unsafe { function() }
+    })
+    .join()
+    .map_err(|_| "rwlock wrong-owner worker panicked")?;
+    if wrong_result != 0 {
+        return Err(format!("rwlock wrong-owner unlock failed: {wrong_result}").into());
+    }
+    if image.call_exported_i32("pthread_fixture_rwlock_writer_release")? != 0 {
+        return Err("rwlock writer owner could not release".into());
+    }
     let lookup_race = image.lookup_exported("pthread_fixture_mutex_lookup_race")?;
     let destroy_race = image.lookup_exported("pthread_fixture_mutex_destroy_race")?;
     let mut race_threads = Vec::new();
@@ -282,6 +342,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "mutex-normal-private",
         "cond-private",
         "cond-monotonic-clock",
+        "rwlock-private-reader-preferred",
     ] {
         if !capability(supported) {
             return Err(format!("missing capability {supported}").into());
@@ -300,12 +361,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("unsupported capability escaped: {unsupported}").into());
         }
     }
-    println!("android-bionic-pthread-provider: ELF=executed resolver=libc.so@LIBC imports=16");
+    println!("android-bionic-pthread-provider: ELF=executed resolver=libc.so@LIBC imports=19");
     println!(
         "pthread-self=stable+unique tls-destructor=2-pass once=1 mutex=8x2000-contention destroy-lookup=race-safe"
     );
     println!(
         "cond=4-waiters signal=1 broadcast=3 predicate-loop=held monotonic-timeout=110 destroy-wait=EBUSY pshared=ENOTSUP"
+    );
+    println!(
+        "rwlock=4-concurrent-readers writer=blocked-then-progress wrong-unlock=EPERM recursive-read=2 lazy-zero-init reset=idle"
     );
     println!(
         "opaque-layout=side-table no-Darwin-reinterpret stale-key=reuse-alias(Bionic-undefined) unsupported=fork+robust+pshared+PI+recursive+errorcheck"

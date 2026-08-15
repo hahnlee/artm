@@ -22,6 +22,7 @@ static_assert(sizeof(DarwinArtAndroidPthreadKey) == 4);
 static_assert(sizeof(DarwinArtAndroidPthreadOnce) == 4);
 static_assert(sizeof(DarwinArtAndroidPthreadMutex) == 40);
 static_assert(sizeof(DarwinArtAndroidPthreadCond) == 48);
+static_assert(sizeof(DarwinArtAndroidPthreadRwlock) == 56);
 
 constexpr int kAndroidEagain = 11;
 constexpr int kAndroidEnomem = 12;
@@ -38,6 +39,11 @@ constexpr uint32_t kAndroidCondSharedMask = UINT32_C(0x0001);
 constexpr uint32_t kAndroidCondClockMask = UINT32_C(0x0002);
 constexpr uint32_t kAndroidCondCounterStep = UINT32_C(0x0004);
 constexpr uint32_t kAndroidCondDestroyed = UINT32_C(0xdeadc04d);
+constexpr uint32_t kAndroidRwlockPendingReaders = UINT32_C(0x00000001);
+constexpr uint32_t kAndroidRwlockPendingWriters = UINT32_C(0x00000002);
+constexpr uint32_t kAndroidRwlockReaderStep = UINT32_C(0x00000004);
+constexpr uint32_t kAndroidRwlockWriterOwned = UINT32_C(0x80000000);
+constexpr size_t kAndroidRwlockMaxReaders = (UINT32_C(1) << 29) - 1;
 constexpr int32_t kOnceNotStarted = 0;
 constexpr int32_t kOnceUnderway = 1;
 constexpr int32_t kOnceComplete = 2;
@@ -114,6 +120,18 @@ struct CondEntry {
   }
 };
 
+struct RwlockEntry {
+  std::mutex mutex;
+  std::condition_variable readers_condition;
+  std::condition_variable writers_condition;
+  enum class Lifecycle { kAlive, kDestroyed };
+  Lifecycle lifecycle{Lifecycle::kAlive};
+  size_t active_readers{};
+  size_t pending_readers{};
+  size_t pending_writers{};
+  DarwinArtAndroidPthread writer_owner{};
+};
+
 struct ProviderState {
   std::mutex mutex;
   KeySlot key_slots[kAndroidKeySlots];
@@ -124,6 +142,9 @@ struct ProviderState {
       once_controls;
   std::unordered_map<DarwinArtAndroidPthreadCond*, std::shared_ptr<CondEntry>>
       conditions;
+  std::unordered_map<DarwinArtAndroidPthreadRwlock*,
+                     std::shared_ptr<RwlockEntry>>
+      rwlocks;
 };
 
 ProviderState& State() {
@@ -258,6 +279,24 @@ void SetAndroidCondWaiters(DarwinArtAndroidPthreadCond* cond, uint32_t value) {
   std::memcpy(reinterpret_cast<unsigned char*>(cond) + sizeof(uint32_t),
               &value,
               sizeof(value));
+}
+
+void SetAndroidRwlockVisible(DarwinArtAndroidPthreadRwlock* visible,
+                             const RwlockEntry& entry) {
+  uint32_t state = 0;
+  if (entry.writer_owner != 0) {
+    state |= kAndroidRwlockWriterOwned;
+  } else {
+    state |= static_cast<uint32_t>(entry.active_readers) *
+             kAndroidRwlockReaderStep;
+  }
+  if (entry.pending_readers != 0) state |= kAndroidRwlockPendingReaders;
+  if (entry.pending_writers != 0) state |= kAndroidRwlockPendingWriters;
+  const int32_t writer_tid = static_cast<int32_t>(entry.writer_owner);
+  std::memcpy(visible, &state, sizeof(state));
+  std::memcpy(reinterpret_cast<unsigned char*>(visible) + sizeof(state),
+              &writer_tid,
+              sizeof(writer_tid));
 }
 
 std::shared_ptr<MutexEntry> FindOrCreateMutex(
@@ -439,6 +478,39 @@ int CondPulse(DarwinArtAndroidPthreadCond* visible_cond, bool broadcast) {
     if (cond->active_operations == 0) cond->lifecycle_condition.notify_all();
   }
   return AndroidError(result);
+}
+
+std::shared_ptr<RwlockEntry> FindOrCreateRwlock(
+    DarwinArtAndroidPthreadRwlock* rwlock,
+    int* error_out) {
+  if (rwlock == nullptr) {
+    *error_out = kAndroidEinval;
+    return nullptr;
+  }
+  ProviderState& state = State();
+  std::lock_guard<std::mutex> lock(state.mutex);
+  const auto found = state.rwlocks.find(rwlock);
+  if (found != state.rwlocks.end()) {
+    *error_out = 0;
+    return found->second;
+  }
+  const unsigned char* bytes = reinterpret_cast<const unsigned char*>(rwlock);
+  // Bionic's pshared byte is offset 8. This slice accepts only the all-zero
+  // PTHREAD_RWLOCK_INITIALIZER and never fabricates process-shared behavior.
+  if (bytes[8] != 0) {
+    *error_out = kAndroidEnotsup;
+    return nullptr;
+  }
+  for (size_t index = 0; index < sizeof(*rwlock); ++index) {
+    if (bytes[index] != 0) {
+      *error_out = kAndroidEinval;
+      return nullptr;
+    }
+  }
+  auto entry = std::make_shared<RwlockEntry>();
+  state.rwlocks.emplace(rwlock, entry);
+  *error_out = 0;
+  return entry;
 }
 
 template <typename Operation>
@@ -710,6 +782,122 @@ extern "C" int darwin_art_bionic_pthread_cond_destroy(
   return AndroidError(result);
 }
 
+extern "C" int darwin_art_bionic_pthread_rwlock_rdlock(
+    DarwinArtAndroidPthreadRwlock* visible) {
+  int error = 0;
+  std::shared_ptr<RwlockEntry> rwlock = FindOrCreateRwlock(visible, &error);
+  if (rwlock == nullptr) return error;
+  const DarwinArtAndroidPthread self = CurrentThreadToken();
+  std::unique_lock<std::mutex> lock(rwlock->mutex);
+  if (rwlock->lifecycle != RwlockEntry::Lifecycle::kAlive) {
+    return kAndroidEbusy;
+  }
+  if (rwlock->writer_owner == self) return kAndroidEdeadlk;
+  if (rwlock->writer_owner != 0) {
+    ++rwlock->pending_readers;
+    SetAndroidRwlockVisible(visible, *rwlock);
+    rwlock->readers_condition.wait(lock, [&] {
+      return rwlock->lifecycle != RwlockEntry::Lifecycle::kAlive ||
+             rwlock->writer_owner == 0;
+    });
+    --rwlock->pending_readers;
+    if (rwlock->lifecycle != RwlockEntry::Lifecycle::kAlive) {
+      SetAndroidRwlockVisible(visible, *rwlock);
+      return kAndroidEbusy;
+    }
+  }
+  if (rwlock->active_readers == kAndroidRwlockMaxReaders) {
+    SetAndroidRwlockVisible(visible, *rwlock);
+    return kAndroidEagain;
+  }
+  ++rwlock->active_readers;
+  SetAndroidRwlockVisible(visible, *rwlock);
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_rwlock_wrlock(
+    DarwinArtAndroidPthreadRwlock* visible) {
+  int error = 0;
+  std::shared_ptr<RwlockEntry> rwlock = FindOrCreateRwlock(visible, &error);
+  if (rwlock == nullptr) return error;
+  const DarwinArtAndroidPthread self = CurrentThreadToken();
+  std::unique_lock<std::mutex> lock(rwlock->mutex);
+  if (rwlock->lifecycle != RwlockEntry::Lifecycle::kAlive) {
+    return kAndroidEbusy;
+  }
+  if (rwlock->writer_owner == self) return kAndroidEdeadlk;
+  if (rwlock->writer_owner != 0 || rwlock->active_readers != 0) {
+    ++rwlock->pending_writers;
+    SetAndroidRwlockVisible(visible, *rwlock);
+    rwlock->writers_condition.wait(lock, [&] {
+      return rwlock->lifecycle != RwlockEntry::Lifecycle::kAlive ||
+             (rwlock->writer_owner == 0 && rwlock->active_readers == 0);
+    });
+    --rwlock->pending_writers;
+    if (rwlock->lifecycle != RwlockEntry::Lifecycle::kAlive) {
+      SetAndroidRwlockVisible(visible, *rwlock);
+      return kAndroidEbusy;
+    }
+  }
+  rwlock->writer_owner = self;
+  SetAndroidRwlockVisible(visible, *rwlock);
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_rwlock_unlock(
+    DarwinArtAndroidPthreadRwlock* visible) {
+  int error = 0;
+  std::shared_ptr<RwlockEntry> rwlock = FindOrCreateRwlock(visible, &error);
+  if (rwlock == nullptr) return error;
+  const DarwinArtAndroidPthread self = CurrentThreadToken();
+  std::unique_lock<std::mutex> lock(rwlock->mutex);
+  if (rwlock->lifecycle != RwlockEntry::Lifecycle::kAlive) {
+    return kAndroidEbusy;
+  }
+  if (rwlock->writer_owner != 0) {
+    if (rwlock->writer_owner != self) return 1;
+    rwlock->writer_owner = 0;
+  } else if (rwlock->active_readers != 0) {
+    // Pinned Bionic tracks only a global reader count, not reader thread ids.
+    --rwlock->active_readers;
+  } else {
+    return 1;
+  }
+  SetAndroidRwlockVisible(visible, *rwlock);
+  const bool wake_writer =
+      rwlock->writer_owner == 0 && rwlock->active_readers == 0 &&
+      rwlock->pending_writers != 0;
+  const bool wake_readers = rwlock->writer_owner == 0 &&
+                            rwlock->pending_writers == 0 &&
+                            rwlock->pending_readers != 0;
+  lock.unlock();
+  if (wake_writer) {
+    rwlock->writers_condition.notify_one();
+  } else if (wake_readers) {
+    rwlock->readers_condition.notify_all();
+  }
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_rwlock_destroy(
+    DarwinArtAndroidPthreadRwlock* visible) {
+  int error = 0;
+  std::shared_ptr<RwlockEntry> rwlock = FindOrCreateRwlock(visible, &error);
+  if (rwlock == nullptr) return error;
+  std::lock_guard<std::mutex> lock(rwlock->mutex);
+  if (rwlock->lifecycle != RwlockEntry::Lifecycle::kAlive) {
+    return kAndroidEbusy;
+  }
+  if (rwlock->writer_owner != 0 || rwlock->active_readers != 0 ||
+      rwlock->pending_readers != 0 || rwlock->pending_writers != 0) {
+    return kAndroidEbusy;
+  }
+  rwlock->lifecycle = RwlockEntry::Lifecycle::kDestroyed;
+  // Bionic pthread_rwlock_destroy leaves an idle object's zero bytes intact.
+  SetAndroidRwlockVisible(visible, *rwlock);
+  return 0;
+}
+
 extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
                                                     const char* symbol,
                                                     const char* version) {
@@ -737,6 +925,9 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
   RESOLVE(cond_signal);
   RESOLVE(cond_broadcast);
   RESOLVE(cond_destroy);
+  RESOLVE(rwlock_rdlock);
+  RESOLVE(rwlock_wrlock);
+  RESOLVE(rwlock_unlock);
 #undef RESOLVE
   return nullptr;
 }
@@ -761,6 +952,14 @@ extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
       return kAndroidEbusy;
     }
   }
+  for (const auto& [address, entry] : state.rwlocks) {
+    (void)address;
+    std::lock_guard<std::mutex> lifecycle_lock(entry->mutex);
+    if (entry->writer_owner != 0 || entry->active_readers != 0 ||
+        entry->pending_readers != 0 || entry->pending_writers != 0) {
+      return kAndroidEbusy;
+    }
+  }
   ThreadTlsState* current = tls_destructor_state;
   if (current == nullptr) {
     pthread_once(&HostThreadTlsKeyOnce(), &InitializeHostThreadTlsKey);
@@ -780,6 +979,7 @@ extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
   }
   state.mutexes.clear();
   state.conditions.clear();
+  state.rwlocks.clear();
   state.once_controls.clear();
   return 0;
 }
@@ -801,5 +1001,6 @@ extern "C" int darwin_art_bionic_pthread_capability(const char* capability) {
   const std::string_view name(capability);
   return name == "thread-identity-token" || name == "tls-key-destructor" ||
          name == "once-private" || name == "mutex-normal-private" ||
-         name == "cond-private" || name == "cond-monotonic-clock";
+         name == "cond-private" || name == "cond-monotonic-clock" ||
+         name == "rwlock-private-reader-preferred";
 }

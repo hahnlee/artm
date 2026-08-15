@@ -20,6 +20,9 @@ typedef struct DarwinArtAndroidPthreadMutex {
 typedef struct DarwinArtAndroidPthreadCond {
   int32_t opaque[12];
 } DarwinArtAndroidPthreadCond;
+typedef struct DarwinArtAndroidPthreadRwlock {
+  int32_t opaque[14];
+} DarwinArtAndroidPthreadRwlock;
 
 typedef void (*DarwinArtAndroidTlsDestructor)(void* value);
 typedef void (*DarwinArtAndroidOnceRoutine)(void);
@@ -49,6 +52,17 @@ int darwin_art_bionic_pthread_cond_timedwait(
 int darwin_art_bionic_pthread_cond_signal(DarwinArtAndroidPthreadCond* cond);
 int darwin_art_bionic_pthread_cond_broadcast(DarwinArtAndroidPthreadCond* cond);
 int darwin_art_bionic_pthread_cond_destroy(DarwinArtAndroidPthreadCond* cond);
+int darwin_art_bionic_pthread_rwlock_rdlock(
+    DarwinArtAndroidPthreadRwlock* rwlock);
+int darwin_art_bionic_pthread_rwlock_wrlock(
+    DarwinArtAndroidPthreadRwlock* rwlock);
+int darwin_art_bionic_pthread_rwlock_unlock(
+    DarwinArtAndroidPthreadRwlock* rwlock);
+
+// Loader/test teardown API. pthread_rwlock_destroy is intentionally absent
+// from the libc.so resolver because it is not in the pinned libc++ import set.
+int darwin_art_bionic_pthread_rwlock_destroy(
+    DarwinArtAndroidPthreadRwlock* rwlock);
 
 // Closed libc.so/LIBC resolver. Unknown SONAME, version, or symbol is rejected.
 void* darwin_art_bionic_pthread_resolve(const char* soname,

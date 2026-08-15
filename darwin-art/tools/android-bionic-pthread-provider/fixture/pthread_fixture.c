@@ -22,6 +22,8 @@ static pthread_cond_t g_monotonic_cond = PTHREAD_COND_INITIALIZER_MONOTONIC_NP;
 static pthread_cond_t g_pshared_cond = {{1}};
 static pthread_mutex_t g_cond_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_monotonic_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_rwlock_t g_rwlock = PTHREAD_RWLOCK_INITIALIZER;
+static pthread_rwlock_t g_rwlock_pshared = {{0, 0, 1}};
 static _Atomic int g_once_calls;
 static _Atomic int g_worker_slots;
 static _Atomic int g_destructor_calls;
@@ -32,6 +34,12 @@ static _Atomic int g_cond_waiting;
 static _Atomic int g_cond_completed;
 static int g_cond_tickets;
 static int g_cond_broadcast;
+static _Atomic int g_rw_reader_entries;
+static _Atomic int g_rw_active_readers;
+static _Atomic int g_rw_max_readers;
+static _Atomic int g_rw_release_readers;
+static _Atomic int g_rw_writer_entered;
+static int g_rw_value;
 static int g_counter;
 
 static void OnceRoutine(void) {
@@ -63,6 +71,7 @@ __attribute__((visibility("default"))) int pthread_fixture_setup(void) {
   if (pthread_key_create(&g_key, &TlsDestructor) != 0) return -5;
   if (pthread_self() == 0 || pthread_self() != pthread_self()) return -6;
   if (pthread_cond_signal(&g_pshared_cond) != kAndroidEnotsup) return -7;
+  if (pthread_rwlock_rdlock(&g_rwlock_pshared) != kAndroidEnotsup) return -8;
   return 0;
 }
 
@@ -171,6 +180,65 @@ __attribute__((visibility("default"))) int pthread_fixture_cond_timedwait(void) 
   return 0;
 }
 
+__attribute__((visibility("default"))) int pthread_fixture_rwlock_recursive_read(void) {
+  if (pthread_rwlock_rdlock(&g_rwlock) != 0) return -80;
+  if (pthread_rwlock_rdlock(&g_rwlock) != 0) return -81;
+  if (pthread_rwlock_unlock(&g_rwlock) != 0) return -82;
+  if (pthread_rwlock_unlock(&g_rwlock) != 0) return -83;
+  return 0;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_rwlock_reader(void) {
+  if (pthread_rwlock_rdlock(&g_rwlock) != 0) return -84;
+  const int active =
+      atomic_fetch_add_explicit(&g_rw_active_readers, 1, memory_order_acq_rel) + 1;
+  int maximum = atomic_load_explicit(&g_rw_max_readers, memory_order_relaxed);
+  while (active > maximum &&
+         !atomic_compare_exchange_weak_explicit(
+             &g_rw_max_readers, &maximum, active, memory_order_relaxed,
+             memory_order_relaxed)) {
+  }
+  atomic_fetch_add_explicit(&g_rw_reader_entries, 1, memory_order_release);
+  while (atomic_load_explicit(&g_rw_release_readers, memory_order_acquire) == 0) {
+  }
+  atomic_fetch_sub_explicit(&g_rw_active_readers, 1, memory_order_acq_rel);
+  if (pthread_rwlock_unlock(&g_rwlock) != 0) return -85;
+  return 0;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_rwlock_reader_entries(void) {
+  return atomic_load_explicit(&g_rw_reader_entries, memory_order_acquire);
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_rwlock_writer(void) {
+  if (pthread_rwlock_wrlock(&g_rwlock) != 0) return -86;
+  ++g_rw_value;
+  atomic_store_explicit(&g_rw_writer_entered, 1, memory_order_release);
+  if (pthread_rwlock_unlock(&g_rwlock) != 0) return -87;
+  return 0;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_rwlock_writer_entered(void) {
+  return atomic_load_explicit(&g_rw_writer_entered, memory_order_acquire);
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_rwlock_release_readers(void) {
+  atomic_store_explicit(&g_rw_release_readers, 1, memory_order_release);
+  return 0;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_rwlock_writer_hold(void) {
+  return pthread_rwlock_wrlock(&g_rwlock) == 0 ? 0 : -88;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_rwlock_wrong_unlock(void) {
+  return pthread_rwlock_unlock(&g_rwlock) == 1 ? 0 : -89;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_rwlock_writer_release(void) {
+  return pthread_rwlock_unlock(&g_rwlock) == 0 ? 0 : -90;
+}
+
 __attribute__((visibility("default"))) int pthread_fixture_finish(void) {
   if (atomic_load_explicit(&g_worker_slots, memory_order_relaxed) !=
       kThreadCount) {
@@ -218,5 +286,11 @@ __attribute__((visibility("default"))) int pthread_fixture_finish(void) {
   if (pthread_cond_destroy(&g_monotonic_cond) != 0) return -70;
   if (pthread_mutex_destroy(&g_cond_mutex) != 0) return -71;
   if (pthread_mutex_destroy(&g_monotonic_mutex) != 0) return -72;
+  if (atomic_load_explicit(&g_rw_max_readers, memory_order_relaxed) < 2)
+    return -91;
+  if (atomic_load_explicit(&g_rw_writer_entered, memory_order_acquire) != 1 ||
+      g_rw_value != 1)
+    return -92;
+  if (pthread_rwlock_unlock(&g_rwlock) != 1) return -93;
   return 0;
 }

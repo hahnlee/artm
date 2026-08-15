@@ -12,6 +12,15 @@
     pthread_fixture_cond_broadcast;
     pthread_fixture_cond_destroy_busy;
     pthread_fixture_cond_timedwait;
+    pthread_fixture_rwlock_recursive_read;
+    pthread_fixture_rwlock_reader;
+    pthread_fixture_rwlock_reader_entries;
+    pthread_fixture_rwlock_writer;
+    pthread_fixture_rwlock_writer_entered;
+    pthread_fixture_rwlock_release_readers;
+    pthread_fixture_rwlock_writer_hold;
+    pthread_fixture_rwlock_wrong_unlock;
+    pthread_fixture_rwlock_writer_release;
     pthread_fixture_finish;
   local:
     *;
