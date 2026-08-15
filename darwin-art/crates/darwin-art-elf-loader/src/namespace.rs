@@ -156,11 +156,17 @@ impl ClosedElfNamespace {
             builder.objects[index]
                 .staged
                 .image
-                .run_initializers()
+                .run_initializers_for_graph()
                 .map_err(|source| NamespaceError::Load {
                     soname: builder.objects[index].soname.clone(),
                     source,
                 })?;
+        }
+        // Finalization is graph-transactional: no object is armed until every constructor in
+        // dependency order has returned. A structural failure in a later initializer therefore
+        // drops even the already initialized prefix without running a partial finalizer set.
+        for &index in &builder.dependency_order {
+            builder.objects[index].staged.image.arm_finalizers();
         }
 
         let root_index = *builder
@@ -219,9 +225,7 @@ impl LoadedElfGraph {
         &self.inner.initialization_order
     }
 
-    /// Returns the deterministic reverse-constructor mapping teardown order.
-    ///
-    /// ELF finalizers remain unsupported; this describes unmapping only.
+    /// Returns the deterministic reverse-constructor finalization and mapping teardown order.
     pub fn unload_order(&self) -> &[String] {
         &self.inner.unload_order
     }

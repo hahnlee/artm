@@ -324,6 +324,9 @@ struct DynamicInfo {
     verdef_count: Option<u64>,
     init_array: Option<u64>,
     init_array_size: Option<u64>,
+    fini: Option<u64>,
+    fini_array: Option<u64>,
+    fini_array_size: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -345,6 +348,9 @@ pub struct LoadedElf {
     needed_libraries: Vec<String>,
     soname: Option<String>,
     initializers_run: bool,
+    finalizers_armed: bool,
+    finalizers_run: bool,
+    finalizers: Vec<usize>,
 }
 
 struct StagedElf {
@@ -438,6 +444,9 @@ impl LoadedElf {
             needed_libraries: Vec::new(),
             soname: None,
             initializers_run: false,
+            finalizers_armed: false,
+            finalizers_run: false,
+            finalizers: Vec::new(),
         };
         std::mem::forget(mapping);
 
@@ -456,6 +465,8 @@ impl LoadedElf {
         page_protections: &[c_int],
     ) -> Result<(), LoadError> {
         self.validate_symbols_and_apply_relocations(resolver)?;
+        self.validate_initializer_entries()?;
+        self.prepare_finalizers()?;
         self.apply_final_protections(page_size, page_protections)
     }
 
@@ -477,6 +488,14 @@ impl LoadedElf {
     }
 
     pub fn run_initializers(&mut self) -> Result<(), LoadError> {
+        self.run_initializers_internal(true)
+    }
+
+    fn run_initializers_for_graph(&mut self) -> Result<(), LoadError> {
+        self.run_initializers_internal(false)
+    }
+
+    fn run_initializers_internal(&mut self, arm_finalizers: bool) -> Result<(), LoadError> {
         if self.initializers_run {
             return Err(LoadError::InitializersAlreadyRun);
         }
@@ -508,7 +527,89 @@ impl LoadedElf {
             }
         }
         self.initializers_run = true;
+        self.finalizers_armed = arm_finalizers;
         Ok(())
+    }
+
+    fn arm_finalizers(&mut self) {
+        debug_assert!(self.initializers_run);
+        self.finalizers_armed = true;
+    }
+
+    /// Consumes this image, running its finalizers (when initialized) before unmapping it.
+    ///
+    /// Dropping the image has the same lifecycle semantics. The consuming API exists so callers
+    /// can make an intentional unload point explicit without introducing a second owner state.
+    pub fn close(self) {}
+
+    fn validate_initializer_entries(&self) -> Result<(), LoadError> {
+        let address = self.dynamic.init_array.unwrap_or(0);
+        let size = self.dynamic.init_array_size.unwrap_or(0);
+        if (address == 0) != (size == 0) || size % 8 != 0 {
+            return Err(LoadError::Format("invalid DT_INIT_ARRAY pair"));
+        }
+        if size == 0 {
+            return Ok(());
+        }
+        self.require_loaded_range(address, size, None, "DT_INIT_ARRAY")?;
+        for index in 0..(size / 8) {
+            let entry_address = address
+                .checked_add(index * 8)
+                .ok_or(LoadError::Bounds("DT_INIT_ARRAY entry overflow"))?;
+            let pointer = self.read_loaded_u64(entry_address)?;
+            if pointer != 0 && pointer != u64::MAX {
+                self.require_host_executable(pointer, "DT_INIT_ARRAY function")?;
+            }
+        }
+        Ok(())
+    }
+
+    fn prepare_finalizers(&mut self) -> Result<(), LoadError> {
+        let address = self.dynamic.fini_array.unwrap_or(0);
+        let size = self.dynamic.fini_array_size.unwrap_or(0);
+        if (address == 0) != (size == 0) || size % 8 != 0 {
+            return Err(LoadError::Format("invalid DT_FINI_ARRAY pair"));
+        }
+
+        let mut finalizers = Vec::new();
+        if size != 0 {
+            self.require_loaded_range(address, size, None, "DT_FINI_ARRAY")?;
+            for index in (0..(size / 8)).rev() {
+                let entry_address = address
+                    .checked_add(index * 8)
+                    .ok_or(LoadError::Bounds("DT_FINI_ARRAY entry overflow"))?;
+                let pointer = self.read_loaded_u64(entry_address)?;
+                if pointer == 0 || pointer == u64::MAX {
+                    continue;
+                }
+                self.require_host_executable(pointer, "DT_FINI_ARRAY function")?;
+                finalizers.push(
+                    usize::try_from(pointer).map_err(|_| LoadError::Bounds("finalizer pointer"))?,
+                );
+            }
+        }
+
+        if let Some(address) = self.dynamic.fini.filter(|address| *address != 0) {
+            self.require_loaded_range(address, 1, Some(PF_X), "DT_FINI function")?;
+            finalizers.push(self.loaded_pointer(address, 1)? as usize);
+        }
+        self.finalizers = finalizers;
+        Ok(())
+    }
+
+    fn run_finalizers_once(&mut self) {
+        if !self.finalizers_armed || self.finalizers_run {
+            return;
+        }
+        // Mark first: re-entrant teardown must never execute the sequence twice.
+        self.finalizers_run = true;
+        for &pointer in &self.finalizers {
+            // SAFETY: finish_load validated and captured each relocated function pointer while
+            // the image was immutable. The mapping is still live and this loader supports the
+            // no-argument AArch64 finalizer ABI used by Android ELF DSOs.
+            let finalizer: unsafe extern "C" fn() = unsafe { std::mem::transmute(pointer) };
+            unsafe { finalizer() };
+        }
     }
 
     pub fn call_exported_i32(&self, name: &str) -> Result<i32, LoadError> {
@@ -1246,6 +1347,7 @@ impl LoadedElf {
 
 impl Drop for LoadedElf {
     fn drop(&mut self) {
+        self.run_finalizers_once();
         // SAFETY: LoadedElf exclusively owns this complete mmap reservation.
         let result = unsafe { munmap(self.mapping.as_ptr().cast(), self.mapping_size) };
         debug_assert_eq!(result, 0, "munmap failed while dropping LoadedElf");
@@ -1598,6 +1700,13 @@ fn parse_dynamic(bytes: &[u8], dynamic: &ProgramHeader) -> Result<DynamicInfo, L
                 value,
                 "duplicate DT_INIT_ARRAYSZ",
             )?,
+            DT_FINI => set_once(&mut info.fini, value, "duplicate DT_FINI")?,
+            DT_FINI_ARRAY => set_once(&mut info.fini_array, value, "duplicate DT_FINI_ARRAY")?,
+            DT_FINI_ARRAYSZ => set_once(
+                &mut info.fini_array_size,
+                value,
+                "duplicate DT_FINI_ARRAYSZ",
+            )?,
             DT_PLTGOT | DT_DEBUG | DT_GNU_HASH => {}
             DT_REL | DT_RELSZ | DT_RELENT => {
                 if value != 0 {
@@ -1612,11 +1721,6 @@ fn parse_dynamic(bytes: &[u8], dynamic: &ProgramHeader) -> Result<DynamicInfo, L
             DT_INIT => {
                 if value != 0 {
                     return Err(LoadError::Capability(Capability::DynamicInitializer));
-                }
-            }
-            DT_FINI | DT_FINI_ARRAY | DT_FINI_ARRAYSZ => {
-                if value != 0 {
-                    return Err(LoadError::Capability(Capability::Finalizers));
                 }
             }
             DT_PREINIT_ARRAY | DT_PREINIT_ARRAYSZ => {

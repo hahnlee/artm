@@ -12,9 +12,10 @@ those same bytes to `darwin-art-elf-loader`. No Darwin global symbol lookup is
 available.
 
 The accepted image has no `DT_NEEDED`, `DT_FINI`, `DT_FINI_ARRAY`, GNU RELRO,
-TLS, or unsupported relocations. The loader owns one image only; it does not
-recursively load a SONAME dependency graph. ELF finalizers are not implemented,
-so images that require them remain a hard capability error.
+TLS, or unsupported relocations. This ART adapter owns one image only; it does
+not recursively load a SONAME dependency graph. The standalone loader supports
+ordered `DT_FINI_ARRAY`/`DT_FINI` teardown, but this fixture does not exercise
+that path or compose it with Bionic `__cxa_finalize`.
 
 ## ART lifecycle
 
@@ -54,8 +55,9 @@ image together. ART shutdown provides the required external quiescence, then
 the close seam unpublishes/unmaps the thunks before unmapping the ELF image.
 The shutdown acceptance also requires the global live-page count to return to
 zero after `DestroyJavaVM`.
-The fixture's `JNI_OnUnload` is a reviewed no-op; general ELF finalizers remain
-unsupported.
+The fixture's `JNI_OnUnload` is a reviewed no-op. General ART unload still needs
+to order the separate Bionic `__cxa_finalize(dso_handle)` seam before the
+loader-owned ELF finalizer arrays; that orchestration is not claimed here.
 
 Retaining `JavaVMExt::LoadNativeLibrary` also retains its legacy target-SDK
 signal-chain repair call. `darwin_sigchain.cc` therefore provides the real

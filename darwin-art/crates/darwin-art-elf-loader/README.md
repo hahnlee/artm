@@ -5,7 +5,8 @@ Silicon. It reserves one Darwin virtual-address range for an AArch64 `ET_DYN`,
 copies and zero-fills checked `PT_LOAD` segments, applies
 `R_AARCH64_RELATIVE`, `R_AARCH64_ABS64`, `R_AARCH64_GLOB_DAT`, and
 `R_AARCH64_JUMP_SLOT` RELA entries, installs final page protections, executes
-`DT_INIT_ARRAY` once in table order, and calls a defined no-argument export.
+`DT_INIT_ARRAY` once in table order, calls a defined no-argument export, and
+executes `DT_FINI_ARRAY` in reverse table order followed by `DT_FINI` at unload.
 
 Run `./run-gate.sh` on Apple Silicon with Android NDK r28 or newer. The fixtures
 are linked without libc or startup objects. A versioned virtual provider proves
@@ -24,9 +25,9 @@ object and its breadth-first `DT_NEEDED` closure. Versioned requests are pinned
 to their VERNEED provider SONAME and matched against GNU VERDEF/VERSYM exports.
 Constructors run dependency-first (deterministic DFS postorder for a cycle).
 Clones of one loaded graph share an owner, and the final clone close unmaps
-objects in reverse constructor order. Separate `load` calls do not reuse a
-namespace-global `dlopen` cache. Because ELF finalizers remain rejected, the
-reported unload order describes mapping teardown only.
+objects in reverse constructor order, running each object's finalizers before
+its mapping is released. Separate `load` calls do not reuse a namespace-global
+`dlopen` cache. Non-final clones cannot trigger teardown.
 
 The NDK r28c graph fixture loads a parent and two real AArch64 dependencies. It
 also covers missing weak imports, a GNU version mismatch, an accepted two-node
@@ -37,11 +38,27 @@ different from dependency traversal order.
 This is intentionally not a general dynamic linker. PLT relocation is eager and
 requires `DT_BIND_NOW`, `DF_BIND_NOW`, or `DF_1_NOW`; lazy binding is rejected.
 GNU RELRO is also rejected rather than silently weakened. TLS, `DT_REL`,
-`DT_RELR`, other relocation kinds, `DT_INIT`,
-preinit/finalizer arrays, text relocations, symbolic lookup, and RPATH/RUNPATH
-return explicit capability errors. `LoadedElf` owns the complete `mmap`
-reservation and unmaps it on every error path or `Drop`. Resolver-provided
-addresses must remain valid until the image is dropped.
+`DT_RELR`, other relocation kinds, `DT_INIT`, preinit arrays, text relocations,
+symbolic lookup, and RPATH/RUNPATH return explicit capability errors.
+`LoadedElf` owns the complete `mmap` reservation and unmaps it on every error
+path or `Drop`. Resolver-provided addresses must remain valid until the image is
+dropped.
+
+Finalizer metadata and relocated targets are validated before constructors can
+run. An image that was never initialized never runs finalizers; relocation or
+preflight failure therefore tears mappings down silently. `LoadedElf::close`
+and `Drop` share the same exactly-once path. Graph construction completes all
+relocation/finalizer preflight before its dependency-first constructor pass, so
+there is no structurally partially initialized graph. A constructor terminating
+the process or unwinding across its C ABI is outside this loader's recovery
+contract.
+
+This slice calls only ELF `DT_FINI_ARRAY` and `DT_FINI`. Bionic's C++
+`__cxa_atexit`/`__cxa_finalize(dso_handle)` registry is a separate provider seam:
+a composed Bionic lifecycle provider must finalize its DSO registrations before
+the ELF object's arrays run. That orchestration is intentionally not synthesized
+by this loader. ELF TLS remains rejected, including finalizers that would
+require a guest TLS runtime.
 
 Graph exports with default or protected visibility participate in the closed
 dependency scope. Nonzero `SHN_ABS` definitions are rejected explicitly rather

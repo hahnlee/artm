@@ -4,6 +4,7 @@ use darwin_art_elf_loader::{
 use std::env;
 use std::fs;
 use std::num::NonZeroUsize;
+use std::sync::Mutex;
 
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
@@ -12,11 +13,15 @@ const PF_W: u32 = 2;
 const DT_NULL: i64 = 0;
 const DT_NEEDED: i64 = 1;
 const DT_STRTAB: i64 = 5;
+const DT_FINI: i64 = 13;
+const DT_FINI_ARRAYSZ: i64 = 28;
 const DT_VERNEED: i64 = 0x6fff_fffe;
 const PROVIDER_SONAME: &str = "libdarwin_art_provider.so";
 const PROVIDER_VERSION: &str = "DARWIN_ART_1";
+const LIFECYCLE_SONAME: &str = "liblifecycle_sink.so";
 
 static PROVIDER_DATA: i32 = 11;
+static FINALIZER_EVENTS: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 
 unsafe extern "C" fn provider_value() -> i32 {
     77
@@ -24,9 +29,9 @@ unsafe extern "C" fn provider_value() -> i32 {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<_> = env::args_os().collect();
-    if arguments.len() != 7 {
+    if arguments.len() != 8 {
         return Err(
-            "usage: elf-loader-gate POSITIVE.so IMPORT.so WEAK.so LAZY.so RELRO.so TLS.so".into(),
+            "usage: elf-loader-gate POSITIVE.so IMPORT.so WEAK.so LAZY.so RELRO.so TLS.so FINALIZER.so".into(),
         );
     }
     let positive = fs::read(&arguments[1])?;
@@ -35,6 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let lazy = fs::read(&arguments[4])?;
     let relro = fs::read(&arguments[5])?;
     let tls = fs::read(&arguments[6])?;
+    let finalizer = fs::read(&arguments[7])?;
 
     run_positive(&positive)?;
     run_import(&import)?;
@@ -46,12 +52,98 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     expect_capability(&relro, |capability| matches!(capability, Capability::Relro))?;
     expect_capability(&tls, |capability| matches!(capability, Capability::Tls))?;
     run_malformed_matrix(&positive)?;
+    run_finalizer_lifecycle(&finalizer)?;
 
     println!(
         "elf-loader-gate: positive=constructor-order import=ABS64+GLOB_DAT+JUMP_SLOT \
          resolver=closed+versioned weak=zero NOW=required RELRO=reject TLS=reject \
-         wx=reject overflow=reject overlap=reject bounds=reject cleanup=drop"
+         wx=reject overflow=reject overlap=reject bounds=reject \
+         finalizers=array-reverse+DT_FINI exactly-once cleanup=drop"
     );
+    Ok(())
+}
+
+unsafe extern "C" fn lifecycle_record(value: i32) {
+    FINALIZER_EVENTS
+        .lock()
+        .expect("finalizer recorder poisoned")
+        .push(value);
+}
+
+struct LifecycleResolver;
+
+impl SymbolResolver for LifecycleResolver {
+    fn resolve(
+        &mut self,
+        request: SymbolRequest<'_>,
+    ) -> Result<Option<ResolvedSymbol>, ResolveError> {
+        if request.needed_libraries != [LIFECYCLE_SONAME]
+            || request.symbol != "lifecycle_record"
+            || request.version.is_some()
+        {
+            return Err(ResolveError::Rejected(format!(
+                "unexpected lifecycle request: {}",
+                request.symbol
+            )));
+        }
+        let address = NonZeroUsize::new(lifecycle_record as usize)
+            .ok_or_else(|| ResolveError::Rejected("null lifecycle recorder".to_owned()))?;
+        // SAFETY: the recorder has static lifetime and the exact Android AArch64 void(int) ABI.
+        Ok(Some(unsafe { ResolvedSymbol::new(address) }))
+    }
+}
+
+fn run_finalizer_lifecycle(bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    FINALIZER_EVENTS.lock().unwrap().clear();
+    {
+        let mut resolver = LifecycleResolver;
+        let image = LoadedElf::load_with_resolver(bytes, &mut resolver)?;
+        drop(image);
+    }
+    if !FINALIZER_EVENTS.lock().unwrap().is_empty() {
+        return Err("uninitialized image executed finalizers".into());
+    }
+
+    for explicit_close in [true, false] {
+        let mut resolver = LifecycleResolver;
+        let mut image = LoadedElf::load_with_resolver(bytes, &mut resolver)?;
+        image.run_initializers()?;
+        if image.call_exported_i32("finalizer_value")? != 42 {
+            return Err("finalizer fixture export mismatch".into());
+        }
+        if explicit_close {
+            image.close();
+        } else {
+            drop(image);
+        }
+    }
+    if *FINALIZER_EVENTS.lock().unwrap() != [12, 11, 19, 12, 11, 19] {
+        return Err(format!(
+            "standalone finalizer order/exactly-once mismatch: {:?}",
+            *FINALIZER_EVENTS.lock().unwrap()
+        )
+        .into());
+    }
+
+    let mut malformed_size = bytes.to_vec();
+    let size_entry = dynamic_tag_entry(bytes, DT_FINI_ARRAYSZ)?;
+    malformed_size[size_entry + 8..size_entry + 16].copy_from_slice(&7_u64.to_le_bytes());
+    let mut resolver = LifecycleResolver;
+    match LoadedElf::load_with_resolver(&malformed_size, &mut resolver) {
+        Err(LoadError::Format("invalid DT_FINI_ARRAY pair")) => {}
+        Err(error) => return Err(format!("bad FINI_ARRAYSZ returned wrong error: {error}").into()),
+        Ok(_) => return Err("misaligned DT_FINI_ARRAYSZ loaded".into()),
+    }
+
+    let mut malformed_fini = bytes.to_vec();
+    let fini_entry = dynamic_tag_entry(bytes, DT_FINI)?;
+    malformed_fini[fini_entry + 8..fini_entry + 16].copy_from_slice(&u64::MAX.to_le_bytes());
+    let mut resolver = LifecycleResolver;
+    match LoadedElf::load_with_resolver(&malformed_fini, &mut resolver) {
+        Err(LoadError::Bounds("DT_FINI function")) => {}
+        Err(error) => return Err(format!("bad DT_FINI returned wrong error: {error}").into()),
+        Ok(_) => return Err("out-of-range DT_FINI loaded".into()),
+    }
     Ok(())
 }
 
@@ -348,6 +440,11 @@ fn expect_rejected(bytes: &[u8], case: &str) -> Result<(), Box<dyn std::error::E
 }
 
 fn dynamic_tag_value(bytes: &[u8], requested: i64) -> Result<u64, Box<dyn std::error::Error>> {
+    let entry = dynamic_tag_entry(bytes, requested)?;
+    read_u64(bytes, entry + 8)
+}
+
+fn dynamic_tag_entry(bytes: &[u8], requested: i64) -> Result<usize, Box<dyn std::error::Error>> {
     let dynamic_header = *load_program_headers(bytes, Some(PT_DYNAMIC))?
         .first()
         .ok_or("missing PT_DYNAMIC")?;
@@ -359,7 +456,7 @@ fn dynamic_tag_value(bytes: &[u8], requested: i64) -> Result<u64, Box<dyn std::e
             break;
         }
         if tag == requested {
-            return read_u64(bytes, entry + 8);
+            return Ok(entry);
         }
     }
     Err(format!("dynamic tag {requested:#x} missing").into())

@@ -30,6 +30,8 @@ common_flags=(
 "$clang" "${common_flags[@]}" -Wl,-soname,libdarwin_art_provider.so \
   -Wl,--version-script="$crate_root/fixtures/provider.map" \
   "$crate_root/fixtures/provider.c" -o "$fixture_dir/libdarwin_art_provider.so"
+"$clang" "${common_flags[@]}" -Wl,-soname,liblifecycle_sink.so \
+  "$crate_root/fixtures/lifecycle_sink.c" -o "$fixture_dir/liblifecycle_sink.so"
 "$clang" "${common_flags[@]}" -O0 -Wl,-z,norelro \
   -Wl,-soname,libdarwin_art_positive.so \
   "$crate_root/fixtures/positive.c" -o "$fixture_dir/positive.so"
@@ -47,6 +49,10 @@ common_flags=(
   "$fixture_dir/libdarwin_art_provider.so" -o "$fixture_dir/relro.so"
 "$clang" "${common_flags[@]}" -Wl,-z,norelro -Wl,-soname,libdarwin_art_tls.so \
   "$crate_root/fixtures/tls.c" -o "$fixture_dir/tls.so"
+"$clang" "${common_flags[@]}" -O0 -Wl,-z,now -Wl,-z,norelro \
+  -Wl,-soname,libdarwin_art_finalizer.so -Wl,-fini,finalizer_dt_fini \
+  "$crate_root/fixtures/finalizer.c" "$fixture_dir/liblifecycle_sink.so" \
+  -o "$fixture_dir/finalizer.so"
 
 graph_flags=("${common_flags[@]}" -O0 -Wl,-z,now -Wl,-z,norelro)
 "$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_dep_a.so \
@@ -68,6 +74,18 @@ graph_flags=("${common_flags[@]}" -O0 -Wl,-z,now -Wl,-z,norelro)
   -Wl,--defsym,absolute_graph_value=123 -Wl,--export-dynamic-symbol=absolute_graph_value \
   "$crate_root/fixtures/absolute.c" -o "$fixture_dir/libgraph_absolute.so"
 
+"$clang" "${graph_flags[@]}" -Wl,-soname,liblifecycle_dep_a.so \
+  -Wl,-fini,dep_a_dt_fini "$crate_root/fixtures/lifecycle_dep_a.c" \
+  "$fixture_dir/liblifecycle_sink.so" -o "$fixture_dir/liblifecycle_dep_a.so"
+"$clang" "${graph_flags[@]}" -Wl,-soname,liblifecycle_dep_b.so \
+  -Wl,-fini,dep_b_dt_fini "$crate_root/fixtures/lifecycle_dep_b.c" \
+  "$fixture_dir/liblifecycle_dep_a.so" "$fixture_dir/liblifecycle_sink.so" \
+  -o "$fixture_dir/liblifecycle_dep_b.so"
+"$clang" "${graph_flags[@]}" -Wl,-soname,liblifecycle_parent.so \
+  -Wl,-fini,parent_dt_fini "$crate_root/fixtures/lifecycle_parent.c" \
+  "$fixture_dir/liblifecycle_dep_b.so" "$fixture_dir/liblifecycle_sink.so" \
+  -o "$fixture_dir/liblifecycle_parent.so"
+
 "$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_cycle_a.so \
   "$crate_root/fixtures/cycle_a_stub.c" -o "$fixture_dir/libgraph_cycle_a_stub.so"
 "$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_cycle_b.so \
@@ -77,11 +95,14 @@ graph_flags=("${common_flags[@]}" -O0 -Wl,-z,now -Wl,-z,norelro)
   "$crate_root/fixtures/cycle_a.c" "$fixture_dir/libgraph_cycle_b.so" \
   -o "$fixture_dir/libgraph_cycle_a.so"
 
-for fixture in positive import weak lazy relro tls; do
+for fixture in positive import weak lazy relro tls finalizer; do
   file "$fixture_dir/$fixture.so" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null
 done
 for fixture in libgraph_parent libgraph_dep_a libgraph_dep_a_alt \
   libgraph_dep_a_wrong libgraph_dep_b libgraph_absolute libgraph_cycle_a libgraph_cycle_b; do
+  file "$fixture_dir/$fixture.so" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null
+done
+for fixture in liblifecycle_parent liblifecycle_dep_a liblifecycle_dep_b; do
   file "$fixture_dir/$fixture.so" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null
 done
 
@@ -114,6 +135,18 @@ grep -E 'R_AARCH64_JUMP_SLOT.*provider_value' "$fixture_dir/lazy.readelf.txt" >/
 grep -E 'GNU_RELRO' "$fixture_dir/relro.readelf.txt" >/dev/null
 "$readelf" -l "$fixture_dir/tls.so" > "$fixture_dir/tls.readelf.txt"
 grep -E '^  TLS ' "$fixture_dir/tls.readelf.txt" >/dev/null
+"$readelf" -d -r "$fixture_dir/finalizer.so" > "$fixture_dir/finalizer.readelf.txt"
+grep -E '\(FINI\).*0x[0-9a-f]+' "$fixture_dir/finalizer.readelf.txt" >/dev/null
+grep -E 'FINI_ARRAYSZ.*16 \(bytes\)' "$fixture_dir/finalizer.readelf.txt" >/dev/null
+grep -E '\(NEEDED\).*liblifecycle_sink\.so' "$fixture_dir/finalizer.readelf.txt" >/dev/null
+"$nm" -D --defined-only "$fixture_dir/finalizer.so" | \
+  grep -E ' T finalizer_dt_fini$' >/dev/null
+for fixture in liblifecycle_parent liblifecycle_dep_a liblifecycle_dep_b; do
+  "$readelf" -d -r "$fixture_dir/$fixture.so" > "$fixture_dir/$fixture.readelf.txt"
+  grep -E '\(FINI\).*0x[0-9a-f]+' "$fixture_dir/$fixture.readelf.txt" >/dev/null
+  grep -E 'FINI_ARRAYSZ.*16 \(bytes\)' "$fixture_dir/$fixture.readelf.txt" >/dev/null
+  grep -E '\(NEEDED\).*liblifecycle_sink\.so' "$fixture_dir/$fixture.readelf.txt" >/dev/null
+done
 
 "$readelf" -d -r -V --dyn-syms "$fixture_dir/libgraph_parent.so" \
   > "$fixture_dir/graph-parent.readelf.txt"
@@ -135,13 +168,15 @@ grep -E '\(NEEDED\).*libgraph_cycle_a\.so' "$fixture_dir/cycle-b.readelf.txt" >/
 cargo test --manifest-path "$crate_root/Cargo.toml"
 cargo run --quiet --release --manifest-path "$crate_root/Cargo.toml" --bin elf-loader-gate -- \
   "$fixture_dir/positive.so" "$fixture_dir/import.so" "$fixture_dir/weak.so" \
-  "$fixture_dir/lazy.so" "$fixture_dir/relro.so" "$fixture_dir/tls.so"
+  "$fixture_dir/lazy.so" "$fixture_dir/relro.so" "$fixture_dir/tls.so" \
+  "$fixture_dir/finalizer.so"
 cargo run --quiet --release --manifest-path "$crate_root/Cargo.toml" --bin elf-namespace-gate -- \
   "$fixture_dir/libgraph_parent.so" "$fixture_dir/libgraph_dep_a.so" \
   "$fixture_dir/libgraph_dep_a_alt.so" "$fixture_dir/libgraph_dep_a_wrong.so" \
   "$fixture_dir/libgraph_dep_b.so" "$fixture_dir/libgraph_cycle_a.so" \
   "$fixture_dir/libgraph_cycle_b.so" "$fixture_dir/libgraph_parent.so" \
-  "$fixture_dir/libgraph_absolute.so"
+  "$fixture_dir/libgraph_absolute.so" "$fixture_dir/liblifecycle_parent.so" \
+  "$fixture_dir/liblifecycle_dep_a.so" "$fixture_dir/liblifecycle_dep_b.so"
 
 cargo build --quiet --release --manifest-path "$crate_root/Cargo.toml" --lib
 staticlib="$crate_root/target/release/libdarwin_art_elf_loader.a"
