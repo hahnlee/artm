@@ -1,7 +1,9 @@
 use bionic_fs_facade::{
-    Facade, IOCTL_FD_BAD, IOCTL_FD_FOUND, IOCTL_FD_INFO_ABI_VERSION, IOCTL_FD_OTHER,
-    IOCTL_FD_RANDOM_DEVICE, IoctlFdInfo, darwin_art_bionic_fs_close_core,
+    IOCTL_FD_BAD, IOCTL_FD_FOUND, IOCTL_FD_INFO_ABI_VERSION, IOCTL_FD_OTHER,
+    IOCTL_FD_RANDOM_DEVICE, IoctlFdInfo, PROCESS_OWNER_OK, darwin_art_bionic_fs_close_core,
     darwin_art_bionic_fs_ioctl_fd_lookup, darwin_art_bionic_fs_open_core,
+    darwin_art_bionic_fs_process_has_capability_failure, darwin_art_bionic_fs_process_install,
+    darwin_art_bionic_fs_process_uninstall, darwin_art_bionic_fs_read_core,
 };
 use darwin_art_elf_loader::{
     LoadedElf, ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver,
@@ -13,7 +15,16 @@ use std::num::NonZeroUsize;
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
+
+struct ProcessOwnerGuard(bool);
+
+impl Drop for ProcessOwnerGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            let _ = darwin_art_bionic_fs_process_uninstall();
+        }
+    }
+}
 
 unsafe extern "C" {
     fn __error() -> *mut i32;
@@ -128,8 +139,42 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("mount root is not a directory".into());
     }
     let root = PathBuf::from(root);
-    let facade = Arc::new(Facade::new(File::open(&root)?, b"/system", b"/system")?);
-    let _activation = facade.activate();
+    let root_authority = File::open(&root)?;
+    // SAFETY: root_authority and both immutable byte slices remain live until
+    // the synchronous call has duplicated the trusted directory fd.
+    let install_status = unsafe {
+        darwin_art_bionic_fs_process_install(
+            root_authority.as_raw_fd(),
+            b"/system".as_ptr(),
+            b"/system".len(),
+            b"/system".as_ptr(),
+            b"/system".len(),
+        )
+    };
+    if install_status != PROCESS_OWNER_OK {
+        return Err(format!("process owner install failed: {install_status}").into());
+    }
+    let mut process_owner = ProcessOwnerGuard(true);
+    let guest_thread = std::thread::spawn(|| {
+        // SAFETY: static path and local output remain live through each call.
+        let fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), 0) };
+        if fd < 0 {
+            return false;
+        }
+        let mut bytes = [0_u8; 16];
+        let read =
+            unsafe { darwin_art_bionic_fs_read_core(fd, bytes.as_mut_ptr().cast(), bytes.len()) };
+        let mut info = IoctlFdInfo::default();
+        let lookup =
+            unsafe { darwin_art_bionic_fs_ioctl_fd_lookup(std::ptr::null_mut(), fd, &mut info) };
+        read == bytes.len() as isize
+            && lookup == IOCTL_FD_FOUND
+            && info.kind == IOCTL_FD_RANDOM_DEVICE
+            && darwin_art_bionic_fs_close_core(fd) == 0
+    });
+    if !guest_thread.join().map_err(|_| "guest pthread panicked")? {
+        return Err("process-wide guest pthread filesystem access failed".into());
+    }
     // SAFETY: static C strings satisfy the Android path ABI and the returned
     // virtual descriptors remain owned by this active facade until close.
     let random_fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), 0) };
@@ -214,13 +259,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if result != 42 {
         return Err(format!("Android filesystem fixture failed at step {result}").into());
     }
-    if facade.has_capability_failure() {
+    if darwin_art_bionic_fs_process_has_capability_failure() != 0 {
         return Err("facade encountered an untranslatable host capability failure".into());
     }
     // SAFETY: same host-only audit cell set immediately before guest execution.
     if unsafe { *__error() } != 33_001 {
         return Err("filesystem facade changed host errno".into());
     }
+    if darwin_art_bionic_fs_process_uninstall() != PROCESS_OWNER_OK {
+        return Err("process owner uninstall failed".into());
+    }
+    process_owner.0 = false;
     println!(
         "bionic-fs-facade: PASS Android ELF file/path/cwd/DIR+fdopendir mount-root broker errno"
     );

@@ -6,6 +6,10 @@ as an Android ARM64 ELF root with a real two-level sibling graph
 The root exports only `JNI_OnLoad` and `JNI_OnUnload`; the leaf is constructor-
 free so the existing observable child/root lifecycle ordering stays exact.
 
+The root constructor also opens, reads, and closes synthetic `/dev/random`.
+That call sequence proves the process-wide filesystem owner is installed before
+constructors and is visible without a pthread-local activation guard.
+
 `JNI_OnLoad` exercises the reverse ABI boundary through the supplied proxy
 `JavaVM` and `JNIEnv` tables: `GetEnv`, `FindClass`, and `RegisterNatives`. It
 registers eight methods covering mixed scalar/reference/FP stack tails,

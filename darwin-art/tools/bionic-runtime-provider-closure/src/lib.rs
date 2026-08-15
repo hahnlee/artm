@@ -8,6 +8,8 @@ use std::ffi::{c_char, c_void};
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_rust_provider_closure_anchor() -> usize {
     (bionic_fs_facade::darwin_art_bionic_fs_close_core as usize)
+        | (bionic_fs_facade::darwin_art_bionic_fs_process_install as usize)
+        | (bionic_fs_facade::darwin_art_bionic_fs_process_uninstall as usize)
         | (bionic_process_state_facade::darwin_art_bionic_process_getauxval_core as usize)
         | (bionic_stdio_facade::darwin_art_bionic_stdio_fclose_core as usize)
         | (bionic_dso_lifecycle_facade::darwin_art_bionic_dso_cxa_finalize_core as usize)

@@ -5,6 +5,9 @@
 extern int DarwinArtFixtureChildValue(void);
 extern void darwin_art_fixture_record_lifecycle(int phase);
 extern int* __errno(void);
+extern int close(int fd);
+extern int open(const char* path, int flags, ...);
+extern intptr_t read(int fd, void* buffer, size_t count);
 extern size_t strlen(const char* string);
 extern int __cxa_atexit(void (*function)(void*), void* argument, void* dso);
 
@@ -13,6 +16,7 @@ __attribute__((visibility("hidden"))) void* __dso_handle = &__dso_handle;
 static int g_root_initialized;
 static int g_bionic_provider_initialized;
 static int g_cxa_registered;
+static int g_filesystem_initialized;
 
 static void RootCxaFinalize(void* argument) {
   if (argument == &g_cxa_registered) {
@@ -22,9 +26,17 @@ static void RootCxaFinalize(void* argument) {
 
 __attribute__((constructor)) static void RootInitialize(void) {
   static const char provider_probe[] = "bionic";
+  uint8_t random_bytes[16];
   int* bionic_errno = __errno();
+  int random_fd = open("/dev/random", 0);
+  intptr_t random_read =
+      random_fd < 0 ? -1 : read(random_fd, random_bytes, sizeof(random_bytes));
+  int random_close = random_fd < 0 ? -1 : close(random_fd);
+  g_filesystem_initialized =
+      random_read == (intptr_t)sizeof(random_bytes) && random_close == 0;
   if (DarwinArtFixtureChildValue() == 20 && bionic_errno != NULL &&
-      strlen(provider_probe) == sizeof(provider_probe) - 1) {
+      strlen(provider_probe) == sizeof(provider_probe) - 1 &&
+      g_filesystem_initialized == 1) {
     *bionic_errno = 4242;
     g_bionic_provider_initialized = *__errno() == 4242;
     g_root_initialized = 1;
@@ -136,7 +148,7 @@ static void NativeVoid(JNIEnv* env, jclass fixture_class) {
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
   (void)reserved;
   if (g_root_initialized != 1 || g_bionic_provider_initialized != 1 ||
-      g_cxa_registered != 1 ||
+      g_cxa_registered != 1 || g_filesystem_initialized != 1 ||
       DarwinArtFixtureChildValue() != 20) {
     return JNI_ERR;
   }

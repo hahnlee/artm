@@ -8,14 +8,13 @@ use std::ffi::{CStr, c_char, c_int, c_void};
 use std::fs::{File, Metadata};
 use std::io::Read;
 use std::marker::PhantomData;
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
+use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd};
 use std::os::unix::fs::MetadataExt;
 use std::ptr;
 use std::rc::Rc;
 use std::slice;
-use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard};
 
 const AT_FDCWD: c_int = -100;
 const O_ACCMODE: c_int = 3;
@@ -1212,6 +1211,187 @@ thread_local! {
     static ACTIVE: RefCell<Option<Arc<Facade>>> = const { RefCell::new(None) };
 }
 
+pub const PROCESS_OWNER_OK: c_int = 0;
+pub const PROCESS_OWNER_INVALID_ARGUMENT: c_int = 1;
+pub const PROCESS_OWNER_ALREADY_INSTALLED: c_int = 2;
+pub const PROCESS_OWNER_CREATE_FAILED: c_int = 3;
+pub const PROCESS_OWNER_NOT_INSTALLED: c_int = 4;
+pub const PROCESS_OWNER_BUSY: c_int = 5;
+
+#[derive(Default)]
+struct ProcessOwnerState {
+    facade: Option<Arc<Facade>>,
+    installing: bool,
+    draining: bool,
+    in_flight: usize,
+}
+
+struct ProcessOwner {
+    state: Mutex<ProcessOwnerState>,
+    quiescent: Condvar,
+}
+
+static PROCESS_OWNER: LazyLock<ProcessOwner> = LazyLock::new(|| ProcessOwner {
+    state: Mutex::new(ProcessOwnerState::default()),
+    quiescent: Condvar::new(),
+});
+
+fn process_owner_state() -> MutexGuard<'static, ProcessOwnerState> {
+    PROCESS_OWNER.state.lock().unwrap_or_else(|_| {
+        // The phase and in-flight count cannot be reconstructed after a panic
+        // while holding this lifecycle lock.
+        std::process::abort()
+    })
+}
+
+struct ActiveFacade {
+    facade: Arc<Facade>,
+    process_lease: bool,
+}
+
+impl Drop for ActiveFacade {
+    fn drop(&mut self) {
+        if !self.process_lease {
+            return;
+        }
+        let mut state = process_owner_state();
+        assert!(state.in_flight > 0, "process owner lease underflow");
+        state.in_flight -= 1;
+        if state.in_flight == 0 {
+            PROCESS_OWNER.quiescent.notify_all();
+        }
+    }
+}
+
+fn acquire_active() -> Option<ActiveFacade> {
+    if let Some(facade) = ACTIVE.with(|active| active.borrow().clone()) {
+        return Some(ActiveFacade {
+            facade,
+            process_lease: false,
+        });
+    }
+    let mut state = process_owner_state();
+    if state.installing || state.draining {
+        return None;
+    }
+    let facade = state.facade.as_ref()?.clone();
+    state.in_flight = state
+        .in_flight
+        .checked_add(1)
+        .expect("process owner lease count overflow");
+    Some(ActiveFacade {
+        facade,
+        process_lease: true,
+    })
+}
+
+#[cfg(test)]
+fn publish_process_facade(facade: Arc<Facade>) -> c_int {
+    let mut state = process_owner_state();
+    if state.facade.is_some() || state.installing || state.draining {
+        return PROCESS_OWNER_ALREADY_INSTALLED;
+    }
+    state.facade = Some(facade);
+    PROCESS_OWNER_OK
+}
+
+#[unsafe(no_mangle)]
+/// Installs one process-wide facade from a caller-authorized directory fd.
+///
+/// # Safety
+///
+/// Each nonempty byte slice must be readable for its supplied length. The
+/// caller must keep `root_fd` live until this call returns; the facade owns an
+/// immediate duplicate and never consumes the caller's descriptor.
+pub unsafe extern "C" fn darwin_art_bionic_fs_process_install(
+    root_fd: c_int,
+    guest_mount: *const u8,
+    guest_mount_length: usize,
+    cwd: *const u8,
+    cwd_length: usize,
+) -> c_int {
+    if root_fd < 0
+        || guest_mount.is_null()
+        || guest_mount_length == 0
+        || cwd.is_null()
+        || cwd_length == 0
+    {
+        return PROCESS_OWNER_INVALID_ARGUMENT;
+    }
+    {
+        let mut state = process_owner_state();
+        if state.facade.is_some() || state.installing || state.draining {
+            return PROCESS_OWNER_ALREADY_INSTALLED;
+        }
+        state.installing = true;
+    }
+
+    // SAFETY: the descriptor lifetime contract is stated above. Duplication
+    // completes before the caller may reclaim its descriptor.
+    let duplicate = unsafe { BorrowedFd::borrow_raw(root_fd) }.try_clone_to_owned();
+    // SAFETY: non-null and nonempty arguments were validated above.
+    let guest_mount = unsafe { slice::from_raw_parts(guest_mount, guest_mount_length) };
+    // SAFETY: same byte-slice contract as guest_mount.
+    let cwd = unsafe { slice::from_raw_parts(cwd, cwd_length) };
+    let facade = duplicate
+        .ok()
+        .and_then(|fd| Facade::new(File::from(fd), guest_mount, cwd).ok())
+        .map(Arc::new);
+
+    let mut state = process_owner_state();
+    assert!(state.installing, "process owner install reservation lost");
+    state.installing = false;
+    match facade {
+        Some(facade) => {
+            assert!(state.facade.is_none() && !state.draining);
+            state.facade = Some(facade);
+            PROCESS_OWNER.quiescent.notify_all();
+            PROCESS_OWNER_OK
+        }
+        None => {
+            PROCESS_OWNER.quiescent.notify_all();
+            PROCESS_OWNER_CREATE_FAILED
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// Stops new process-owner calls, drains every active guest call, then drops
+/// all facade-owned descriptors and broker authority.
+pub extern "C" fn darwin_art_bionic_fs_process_uninstall() -> c_int {
+    let facade = {
+        let mut state = process_owner_state();
+        if state.installing || state.draining {
+            return PROCESS_OWNER_BUSY;
+        }
+        if state.facade.is_none() {
+            return PROCESS_OWNER_NOT_INSTALLED;
+        }
+        state.draining = true;
+        PROCESS_OWNER.quiescent.notify_all();
+        while state.in_flight != 0 {
+            state = PROCESS_OWNER
+                .quiescent
+                .wait(state)
+                .unwrap_or_else(|_| std::process::abort());
+        }
+        state.facade.take()
+    };
+    drop(facade);
+    let mut state = process_owner_state();
+    assert!(state.facade.is_none() && state.draining && state.in_flight == 0);
+    state.draining = false;
+    PROCESS_OWNER.quiescent.notify_all();
+    PROCESS_OWNER_OK
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_fs_process_has_capability_failure() -> c_int {
+    acquire_active().map_or(-1, |active| {
+        c_int::from(active.facade.has_capability_failure())
+    })
+}
+
 pub const IOCTL_FD_INFO_ABI_VERSION: u32 = 1;
 pub const IOCTL_FD_OTHER: c_int = 0;
 pub const IOCTL_FD_RANDOM_DEVICE: c_int = 1;
@@ -1231,8 +1411,7 @@ const _: () = assert!(size_of::<IoctlFdInfo>() == 8);
 #[unsafe(no_mangle)]
 /// # Safety
 ///
-/// `info` must point to a writable `DarwinArtBionicIoctlFdInfo`. The callback
-/// must run on a pthread with this filesystem facade activated.
+/// `info` must point to a writable `DarwinArtBionicIoctlFdInfo`.
 pub unsafe extern "C" fn darwin_art_bionic_fs_ioctl_fd_lookup(
     _context: *mut c_void,
     fd: c_int,
@@ -1241,14 +1420,16 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_ioctl_fd_lookup(
     if info.is_null() {
         return IOCTL_FD_CAPABILITY_UNAVAILABLE;
     }
-    let facade = ACTIVE.with(|active| active.borrow().clone());
-    let Some(facade) = facade else {
+    let Some(active) = acquire_active() else {
         return IOCTL_FD_CAPABILITY_UNAVAILABLE;
     };
-    let descriptors = match facade.descriptors.lock() {
+    let descriptors = match active.facade.descriptors.lock() {
         Ok(descriptors) => descriptors,
         Err(_) => {
-            facade.capability_failure.store(true, Ordering::Release);
+            active
+                .facade
+                .capability_failure
+                .store(true, Ordering::Release);
             return IOCTL_FD_CAPABILITY_UNAVAILABLE;
         }
     };
@@ -1292,9 +1473,8 @@ impl Drop for Activation {
 }
 
 fn with_active<T>(default: T, operation: impl FnOnce(&Facade) -> T) -> T {
-    let facade = ACTIVE.with(|active| active.borrow().clone());
-    match facade {
-        Some(facade) => operation(&facade),
+    match acquire_active() {
+        Some(active) => operation(&active.facade),
         None => {
             Facade::set_android_errno(ANDROID_EINVAL);
             default
@@ -1717,6 +1897,8 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
+    static PROCESS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     unsafe extern "C" {
         fn __error() -> *mut i32;
         fn darwin_art_bionic_errno_load() -> i32;
@@ -1871,5 +2053,140 @@ mod tests {
         for worker in workers {
             worker.join().unwrap();
         }
+    }
+
+    #[test]
+    fn process_owner_cross_thread_rollback_duplicate_and_quiescent_uninstall() {
+        let _serial = PROCESS_TEST_LOCK.lock().unwrap();
+        assert_eq!(
+            darwin_art_bionic_fs_process_uninstall(),
+            PROCESS_OWNER_NOT_INSTALLED
+        );
+        let root = File::open("/").unwrap();
+        // SAFETY: all byte slices and the borrowed directory fd remain live
+        // through each synchronous installation attempt.
+        assert_eq!(
+            unsafe {
+                darwin_art_bionic_fs_process_install(
+                    root.as_raw_fd(),
+                    b"/".as_ptr(),
+                    1,
+                    ptr::null(),
+                    0,
+                )
+            },
+            PROCESS_OWNER_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            unsafe {
+                darwin_art_bionic_fs_process_install(
+                    root.as_raw_fd(),
+                    b"/".as_ptr(),
+                    1,
+                    b"/darwin-art-missing-process-owner-cwd".as_ptr(),
+                    b"/darwin-art-missing-process-owner-cwd".len(),
+                )
+            },
+            PROCESS_OWNER_CREATE_FAILED
+        );
+        assert_eq!(
+            unsafe {
+                darwin_art_bionic_fs_process_install(
+                    root.as_raw_fd(),
+                    b"/".as_ptr(),
+                    1,
+                    b"/".as_ptr(),
+                    1,
+                )
+            },
+            PROCESS_OWNER_OK
+        );
+        assert_eq!(
+            unsafe {
+                darwin_art_bionic_fs_process_install(
+                    root.as_raw_fd(),
+                    b"/".as_ptr(),
+                    1,
+                    b"/".as_ptr(),
+                    1,
+                )
+            },
+            PROCESS_OWNER_ALREADY_INSTALLED
+        );
+        let worker = thread::spawn(|| {
+            // SAFETY: static paths and local output records remain live for
+            // each call. This pthread has no TLS Activation guard.
+            let fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), O_RDONLY) };
+            assert!(fd >= 10_000);
+            let mut bytes = [0_u8; 16];
+            assert_eq!(
+                unsafe {
+                    darwin_art_bionic_fs_read_core(fd, bytes.as_mut_ptr().cast(), bytes.len())
+                },
+                bytes.len() as isize
+            );
+            let mut info = IoctlFdInfo::default();
+            assert_eq!(
+                unsafe { darwin_art_bionic_fs_ioctl_fd_lookup(ptr::null_mut(), fd, &mut info) },
+                IOCTL_FD_FOUND
+            );
+            assert_eq!(info.kind, IOCTL_FD_RANDOM_DEVICE);
+            assert_eq!(darwin_art_bionic_fs_close_core(fd), 0);
+        });
+        worker.join().unwrap();
+        assert_eq!(darwin_art_bionic_fs_process_has_capability_failure(), 0);
+        assert_eq!(darwin_art_bionic_fs_process_uninstall(), PROCESS_OWNER_OK);
+
+        let entropy = Arc::new(BlockingEntropy::new());
+        let facade = Arc::new(
+            Facade::new_with_entropy(File::open("/").unwrap(), b"/", b"/", entropy.clone())
+                .unwrap(),
+        );
+        assert_eq!(publish_process_facade(facade), PROCESS_OWNER_OK);
+        // SAFETY: static path remains live for the call.
+        let fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), O_RDONLY) };
+        let reader = thread::spawn(move || {
+            let mut bytes = [0_u8; 32];
+            // SAFETY: local output remains writable through the call.
+            unsafe { darwin_art_bionic_fs_read_core(fd, bytes.as_mut_ptr().cast(), bytes.len()) }
+        });
+        entropy.wait_until_entered();
+        let uninstall_done = Arc::new(AtomicBool::new(false));
+        let uninstall_done_thread = uninstall_done.clone();
+        let uninstaller = thread::spawn(move || {
+            let status = darwin_art_bionic_fs_process_uninstall();
+            uninstall_done_thread.store(true, Ordering::Release);
+            status
+        });
+        {
+            let state = process_owner_state();
+            drop(
+                PROCESS_OWNER
+                    .quiescent
+                    .wait_while(state, |state| !state.draining)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            );
+        }
+        assert!(!uninstall_done.load(Ordering::Acquire));
+        assert_eq!(darwin_art_bionic_fs_process_uninstall(), PROCESS_OWNER_BUSY);
+        // New calls fail closed once draining begins; they cannot extend the
+        // lifetime being awaited by uninstall.
+        assert_eq!(
+            unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), O_RDONLY) },
+            -1
+        );
+        entropy.release();
+        assert_eq!(reader.join().unwrap(), 32);
+        assert_eq!(uninstaller.join().unwrap(), PROCESS_OWNER_OK);
+        assert_eq!(darwin_art_bionic_fs_process_has_capability_failure(), -1);
+        let mut info = IoctlFdInfo::default();
+        assert_eq!(
+            unsafe { darwin_art_bionic_fs_ioctl_fd_lookup(ptr::null_mut(), fd, &mut info) },
+            IOCTL_FD_CAPABILITY_UNAVAILABLE
+        );
+        assert_eq!(
+            darwin_art_bionic_fs_process_uninstall(),
+            PROCESS_OWNER_NOT_INSTALLED
+        );
     }
 }

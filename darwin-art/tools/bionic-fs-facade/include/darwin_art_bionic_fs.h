@@ -95,6 +95,28 @@ typedef struct DarwinArtHostStatvfs {
 
 typedef void (*DarwinArtBionicFsFunction)(void);
 
+typedef enum DarwinArtBionicFsProcessOwnerStatus {
+  DARWIN_ART_BIONIC_FS_PROCESS_OWNER_OK = 0,
+  DARWIN_ART_BIONIC_FS_PROCESS_OWNER_INVALID_ARGUMENT = 1,
+  DARWIN_ART_BIONIC_FS_PROCESS_OWNER_ALREADY_INSTALLED = 2,
+  DARWIN_ART_BIONIC_FS_PROCESS_OWNER_CREATE_FAILED = 3,
+  DARWIN_ART_BIONIC_FS_PROCESS_OWNER_NOT_INSTALLED = 4,
+  DARWIN_ART_BIONIC_FS_PROCESS_OWNER_BUSY = 5,
+} DarwinArtBionicFsProcessOwnerStatus;
+
+/* Installs one process-wide owner from an already-authorized Darwin directory
+ * fd. The fd is duplicated; caller ownership is unchanged. Byte paths are not
+ * C strings. A second live owner is rejected rather than aliased. */
+DarwinArtBionicFsProcessOwnerStatus darwin_art_bionic_fs_process_install(
+    int root_fd, const uint8_t* guest_mount, size_t guest_mount_length,
+    const uint8_t* cwd, size_t cwd_length);
+/* Stops admission and waits for all in-flight filesystem and ioctl-lookup
+ * leases before destroying the owner. */
+DarwinArtBionicFsProcessOwnerStatus
+darwin_art_bionic_fs_process_uninstall(void);
+/* Returns one/zero for the live owner and -1 when no owner is available. */
+int darwin_art_bionic_fs_process_has_capability_failure(void);
+
 int darwin_art_bionic_open(const char* path, int flags, ...);
 int darwin_art_bionic_openat(int directory_fd, const char* path, int flags, ...);
 intptr_t darwin_art_bionic_read(int fd, void* buffer, size_t count);
@@ -133,7 +155,8 @@ int darwin_art_bionic_utimensat(int directory_fd, const char* path,
 DarwinArtBionicFsFunction darwin_art_bionic_fs_resolve(const char* import_name);
 
 /* Exact callback for darwin_art_bionic_ioctl_activate. Context is unused;
- * lookup is routed to this pthread's active filesystem facade. */
+ * production lookup uses the process owner; a test-only pthread override wins
+ * when present. */
 DarwinArtBionicIoctlFdLookupStatus darwin_art_bionic_fs_ioctl_fd_lookup(
     void* context, int32_t fd, DarwinArtBionicIoctlFdInfo* info);
 

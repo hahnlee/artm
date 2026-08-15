@@ -1,11 +1,11 @@
 # Bionic immutable filesystem facade gate
 
-This standalone gate connects 29 Class-B Android arm64 libc filesystem imports
+This gate connects 29 Class-B Android arm64 libc filesystem imports
 to the Darwin component-walking filesystem broker. In addition to the original
 file/path/cwd/DIR set, it owns `fchmod`, `fchmodat`, `ftruncate`, `isatty`,
 `link`, `mkdir`, `pathconf`, `realpath`, `remove`, `rename`, `statvfs`,
-`symlink`, `truncate`, `unlinkat`, and `utimensat`. It is not wired into the
-runtime.
+`symlink`, `truncate`, `unlinkat`, and `utimensat`. The standalone runner and
+the ART adapter exercise the same provider.
 
 ## Boundary and ownership
 
@@ -130,20 +130,37 @@ Android `EIO` instead of leaving stale Bionic errno. The embedding boundary
 must stop guest execution when that marker is observed; `EIO` is a fail-closed
 diagnostic, not a claimed semantic translation.
 
-Activation is pthread-local. TLS owns an `Arc<Facade>`, so forgetting the guard
-leaks a reference rather than leaving a dangling pointer. `Activation` is
-deliberately `!Send`/`!Sync`; a compile-fail doctest locks the rule that a guard
-cannot move to a different pthread. Nested activation restores the previous
-`Arc` on the same pthread.
+Production activation is process-wide. The embedding boundary installs one
+`Arc<Facade>` from a caller-authorized, already-open directory fd; the facade
+duplicates that fd before returning and never consumes caller ownership. Every
+guest entrypoint and the ioctl descriptor callback acquires a short lease from
+that same owner. Uninstall first stops admission, waits for all leases to drain,
+then drops the broker, open descriptors, directory streams, and entropy owner.
+Construction failure publishes nothing, a duplicate live install is rejected,
+and calls made during drain fail closed instead of extending teardown.
+
+The ART adapter uses the sibling graph's already-authorized parent dirfd and
+mounts it at guest `/`. Concurrent graphs may share the single owner only when
+their preopened directory device/inode identity matches. Each graph holds one
+runtime lease; only the final graph release, after graph finalizers/unmapping,
+uninstalls the facade. A graph from a different directory authority is rejected
+rather than silently gaining access to the first graph's mount.
+
+The Rust `Activation` API remains a standalone-test-only pthread override. TLS
+owns an `Arc<Facade>`, so forgetting the guard leaks a reference rather than
+leaving a dangling pointer. `Activation` is deliberately `!Send`/`!Sync`; a
+compile-fail doctest locks the rule that a guard cannot move to a different
+pthread. Nested activation restores the previous `Arc` on the same pthread.
+When present it takes precedence over the process owner so isolated tests cannot
+accidentally consume production state.
 
 `darwin_art_bionic_fs_ioctl_fd_lookup` is the exact callback accepted by the
 standalone ioctl provider. It classifies random, other, and closed/unknown
 tokens under the descriptor lock without exposing a host fd. Because it uses
-the same pthread-local `ACTIVE` state as every filesystem entrypoint, an ART
-native-created thread without prior activation receives capability-unavailable.
-Runtime integration must either install a process-wide quiescent Facade owner
-or guarantee activation on every guest pthread before enabling ioctl; guessing
-from the numeric fd is forbidden.
+the same process-owner lease as every filesystem entrypoint, ART-created
+pthreads require no per-thread activation. The ioctl provider's own
+resolver/activation is a separate composition boundary; guessing from the
+numeric fd is forbidden.
 
 Only `open`, `stat`, and `lstat` claim the two exact synthetic paths. Their
 `pathconf`, `realpath`, mutation, and directory-stream forms remain outside the
@@ -173,7 +190,10 @@ and the Android `stat`, `dirent`, and `statvfs` layouts. It then:
    statvfs flags against the same securely opened Darwin object;
 4. proves Darwin host errno is preserved and no unknown translation occurred;
 5. stresses close against a blocked random read and ioctl lookup against close,
-   requiring each lookup to observe either the live typed entry or `BAD`;
+   requiring each lookup to observe either the live typed entry or `BAD`; it
+   also verifies failed-install rollback, duplicate rejection, TLS-free pthread
+   access, drain-time admission rejection, and an uninstall blocked until the
+   in-flight read releases its lease;
 6. repeats the complete Android ELF boundary with C ASan and UBSan, then runs
    broker/prefix tests, the activation `!Send` compile-fail test, Clippy, and
    formatting checks using temporary target directories.

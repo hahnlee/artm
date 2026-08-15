@@ -1386,12 +1386,15 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       (void)android::CloseNativeLibrary(partial_handle, true, &close_error);
       android::NativeLoaderFreeErrorMessage(close_error);
     }
+    const std::string partial_error_text =
+        partial_error == nullptr ? "<none>" : partial_error;
     android::NativeLoaderFreeErrorMessage(partial_error);
     if (!partial_cleanup_ok || env->ExceptionCheck()) {
       std::cerr << "ART Android ELF JNI: partial failure cleanup failed, lifecycle="
                 << darwin_art_elf_jni_fixture_lifecycle_status()
                 << " namespace="
                 << darwin_art_elf_jni_fixture_namespace_lifecycle_status()
+                << " error=" << partial_error_text
                 << "\n";
       return 40;
     }
@@ -1433,7 +1436,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       return 42;
     }
     std::cout << "ART Android ELF JNI: graph=child-first+relocated "
-                 "providers=bind_builtins+__errno+strlen "
+                 "providers=bind_builtins+__errno+strlen+fs-random-ctor "
                  "load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all "
                  "nativeUsesEnv=current stack-repack=ok\n"
               << std::flush;

@@ -36,6 +36,15 @@ exports one reviewed fixed-register `void(int)` lifecycle recorder; unknown
 SONAMEs and symbols fail closed. Both ELF objects have initializer/finalizer
 arrays and no GNU RELRO or TLS. The root's constructor and `NativeAdd` reach a
 real child export through eager `R_AARCH64_JUMP_SLOT` relocation.
+Before any graph constructor runs, the adapter installs a process-wide Bionic
+filesystem owner from that same preopened directory authority. The root
+constructor proves the TLS-free path by opening, reading, and closing synthetic
+`/dev/random`; the synthetic device uses Security.framework entropy and never
+enters the host mount. Every filesystem call and ioctl fd-kind lookup holds a
+short owner lease. Teardown stops new leases and drains in-flight calls only
+after graph finalizers/unmapping. Simultaneously live graphs share the one owner
+only when the trusted directory device/inode identity matches; a different
+authority fails closed.
 
 ## ART lifecycle
 

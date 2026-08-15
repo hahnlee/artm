@@ -1,5 +1,6 @@
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <CommonCrypto/CommonDigest.h>
@@ -10,7 +11,9 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <ostream>
 #include <sstream>
 #include <string>
@@ -26,6 +29,7 @@
 #include "darwin_art_elf_loader.h"
 #include "darwin_art_bionic_builtin_adapters.h"
 #include "darwin_art_bionic_dso_lifecycle.h"
+#include "darwin_art_bionic_fs.h"
 #include "darwin_art_bionic_provider_namespace.h"
 #include "darwin_art_jni_proxy.h"
 #include "nativebridge/native_bridge.h"
@@ -49,8 +53,12 @@ constexpr int kElfClassifiedTrampolines = 1 << 5;
 constexpr int kElfBionicProvidersRouted = 1 << 6;
 constexpr uint32_t kFixtureErrnoRouteMask = 1u << 0;
 constexpr uint32_t kFixtureStrlenRouteMask = 1u << 1;
+constexpr uint32_t kFixtureOpenRouteMask = 1u << 2;
+constexpr uint32_t kFixtureReadRouteMask = 1u << 3;
+constexpr uint32_t kFixtureCloseRouteMask = 1u << 4;
 constexpr uint32_t kFixtureAllProviderRouteMask =
-    kFixtureErrnoRouteMask | kFixtureStrlenRouteMask;
+    kFixtureErrnoRouteMask | kFixtureStrlenRouteMask | kFixtureOpenRouteMask |
+    kFixtureReadRouteMask | kFixtureCloseRouteMask;
 constexpr uint32_t kFixtureNativeAddEntryMask = 1u << 0;
 constexpr uint32_t kFixtureNativeSpillEntryMask = 1u << 1;
 constexpr uint32_t kFixtureNativeUsesEnvEntryMask = 1u << 2;
@@ -104,6 +112,90 @@ struct DiscoveredGraphDeleter {
     darwin_art_elf_discovered_graph_destroy(&graph);
   }
 };
+
+class ScopedFd {
+ public:
+  ScopedFd() = default;
+  explicit ScopedFd(int fd) : fd_(fd) {}
+  ~ScopedFd() {
+    if (fd_ >= 0) close(fd_);
+  }
+  ScopedFd(const ScopedFd&) = delete;
+  ScopedFd& operator=(const ScopedFd&) = delete;
+  ScopedFd(ScopedFd&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
+  ScopedFd& operator=(ScopedFd&& other) noexcept {
+    if (this != &other) {
+      if (fd_ >= 0) close(fd_);
+      fd_ = std::exchange(other.fd_, -1);
+    }
+    return *this;
+  }
+  int get() const { return fd_; }
+
+ private:
+  int fd_ = -1;
+};
+
+struct FilesystemOwnerState {
+  std::mutex mutex;
+  size_t users = 0;
+  dev_t device = 0;
+  ino_t inode = 0;
+};
+
+FilesystemOwnerState g_filesystem_owner;
+
+bool AcquireFilesystemOwner(int directory_fd, std::string* error) {
+  struct stat status {};
+  if (directory_fd < 0 || fstat(directory_fd, &status) != 0 ||
+      !S_ISDIR(status.st_mode)) {
+    *error = "trusted filesystem authority is not a live directory";
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(g_filesystem_owner.mutex);
+  if (g_filesystem_owner.users != 0) {
+    if (g_filesystem_owner.device != status.st_dev ||
+        g_filesystem_owner.inode != status.st_ino) {
+      *error = "another Android ELF graph owns a different filesystem authority";
+      return false;
+    }
+    if (g_filesystem_owner.users == std::numeric_limits<size_t>::max()) {
+      *error = "Bionic filesystem graph-owner count overflow";
+      return false;
+    }
+    ++g_filesystem_owner.users;
+    return true;
+  }
+  constexpr uint8_t kGuestRoot[] = {'/'};
+  const DarwinArtBionicFsProcessOwnerStatus install_status =
+      darwin_art_bionic_fs_process_install(
+          directory_fd, kGuestRoot, std::size(kGuestRoot), kGuestRoot,
+          std::size(kGuestRoot));
+  if (install_status != DARWIN_ART_BIONIC_FS_PROCESS_OWNER_OK) {
+    *error = "Bionic filesystem process-owner install failed: " +
+             std::to_string(static_cast<int>(install_status));
+    return false;
+  }
+  g_filesystem_owner.users = 1;
+  g_filesystem_owner.device = status.st_dev;
+  g_filesystem_owner.inode = status.st_ino;
+  return true;
+}
+
+void ReleaseFilesystemOwner() {
+  std::lock_guard<std::mutex> lock(g_filesystem_owner.mutex);
+  if (g_filesystem_owner.users == 0) std::abort();
+  --g_filesystem_owner.users;
+  if (g_filesystem_owner.users != 0) return;
+  if (darwin_art_bionic_fs_process_uninstall() !=
+      DARWIN_ART_BIONIC_FS_PROCESS_OWNER_OK) {
+    // Continuing could destroy the provider namespace while a guest call
+    // still owns filesystem state. This is an embedding lifecycle invariant.
+    std::abort();
+  }
+  g_filesystem_owner.device = 0;
+  g_filesystem_owner.inode = 0;
+}
 
 std::string Sha256(const uint8_t* bytes, size_t size) {
   std::array<unsigned char, CC_SHA256_DIGEST_LENGTH> digest{};
@@ -162,6 +254,7 @@ struct ElfLibrary {
   DarwinArtElfGraphHandle* graph = nullptr;
   DarwinArtBionicNamespace* provider_namespace = nullptr;
   DarwinArtBionicDsoLifecycleOwner* dso_lifecycle = nullptr;
+  bool filesystem_owner = false;
   uintptr_t jni_on_load = 0;
   uintptr_t jni_on_unload = 0;
   alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)
@@ -175,6 +268,10 @@ void TeardownProviderNamespace(ElfLibrary* library) {
   if (library->dso_lifecycle != nullptr) {
     darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
     library->dso_lifecycle = nullptr;
+  }
+  if (library->filesystem_owner) {
+    ReleaseFilesystemOwner();
+    library->filesystem_owner = false;
   }
   if (library->provider_namespace == nullptr) return;
   const DarwinArtBionicNamespaceStatus status =
@@ -279,6 +376,12 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     route = kFixtureErrnoRouteMask;
   } else if (std::strcmp(request->symbol, "strlen") == 0) {
     route = kFixtureStrlenRouteMask;
+  } else if (std::strcmp(request->symbol, "open") == 0) {
+    route = kFixtureOpenRouteMask;
+  } else if (std::strcmp(request->symbol, "read") == 0) {
+    route = kFixtureReadRouteMask;
+  } else if (std::strcmp(request->symbol, "close") == 0) {
+    route = kFixtureCloseRouteMask;
   }
   if (route != 0 && library->fixture_graph) {
     g_elf_fixture_provider_routes.fetch_or(route, std::memory_order_relaxed);
@@ -671,22 +774,27 @@ void* OpenNativeLibrary(JNIEnv* env,
   int root_is_elf = 0;
   std::string parent_path;
   std::vector<uint8_t> root_component;
+  ScopedFd trusted_directory;
   if (SplitTrustedLibraryPath(path, &parent_path, &root_component)) {
     // The native-loader caller selects this parent directory as trusted host
     // authority. O_NOFOLLOW protects its final component only; this does not
     // claim that its ancestors form a symlink-proof sandbox. The authority
     // must also prevent concurrent mutation of authorized regular files.
-    const int directory_fd = open(parent_path.c_str(),
-                                  O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-    if (directory_fd < 0) {
+    ScopedFd opened_directory(open(parent_path.c_str(),
+                                   O_RDONLY | O_DIRECTORY | O_CLOEXEC |
+                                       O_NOFOLLOW));
+    if (opened_directory.get() < 0) {
       // Preserve dyld handling for non-ELF paths whose parent cannot be
       // delegated as a trusted directory. dyld cannot execute Android ELF.
       discovery_status = DARWIN_ART_ELF_IO;
     } else {
       discovery_status = darwin_art_elf_discover_sibling_graph(
-          directory_fd, root_component.data(), root_component.size(), providers,
-          std::size(providers), &root_is_elf, &discovered_raw, &discovery_error);
-      close(directory_fd);
+          opened_directory.get(), root_component.data(), root_component.size(),
+          providers, std::size(providers), &root_is_elf, &discovered_raw,
+          &discovery_error);
+      if (discovery_status == DARWIN_ART_ELF_OK) {
+        trusted_directory = std::move(opened_directory);
+      }
     }
   }
   std::unique_ptr<DarwinArtElfDiscoveredGraph, DiscoveredGraphDeleter> discovered(
@@ -758,6 +866,13 @@ void* OpenNativeLibrary(JNIEnv* env,
     if (library->fixture_graph) {
       g_elf_fixture_namespace_lifecycle.store(2, std::memory_order_relaxed);
     }
+    if (!AcquireFilesystemOwner(trusted_directory.get(), &error)) {
+      SetNativeLoaderError(error_msg,
+                           "Bionic filesystem setup failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    library->filesystem_owner = true;
     DarwinArtElfLoadOptions options{
         DARWIN_ART_ELF_ABI_VERSION, &ResolveRuntimeProvider, library.get()};
     DarwinArtElfLifecycleCallbacks lifecycle{
@@ -877,6 +992,10 @@ bool CloseNativeLibrary(void* handle, bool needs_native_bridge, char** error_msg
     }
     darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
     library->dso_lifecycle = nullptr;
+    if (library->filesystem_owner) {
+      ReleaseFilesystemOwner();
+      library->filesystem_owner = false;
+    }
     const DarwinArtBionicNamespaceStatus namespace_status =
         darwin_art_bionic_namespace_teardown(library->provider_namespace);
     if (namespace_status != DARWIN_ART_BIONIC_NAMESPACE_OK) {
