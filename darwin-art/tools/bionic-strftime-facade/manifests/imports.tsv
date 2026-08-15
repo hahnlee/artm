@@ -1,0 +1,2 @@
+symbol	kind	category	rationale
+strftime_l	FUNC	C	locale-owned-state
