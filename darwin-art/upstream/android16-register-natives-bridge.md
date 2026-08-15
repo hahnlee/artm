@@ -102,10 +102,12 @@ local implementation symbols inside one executable `PT_LOAD`:
 | Method | Descriptor | ART shorty | ELF value |
 |---|---|---|---:|
 | `nativeAdd` | `(IJI)J` | `JIJI` | `0x44c8` |
-| `nativeSpill` | `(ZBCSIJLjava/lang/Object;FDFDFDFDFD)J` | `JZBCSIJLFDFDFDFDFD` | `0x44d4` |
+| `nativeSpill` | `(ZBCSIJLjava/lang/Object;FDFDFDFDFFD)J` | `JZBCSIJLFDFDFDFDFFD` | `0x44d4` |
 
-The mixed method exhausts both integer and floating register classes and forces
-stack arguments. The standalone smoke does not claim to implement the final
+The mixed method exhausts both integer and floating register classes, then
+places two 32-bit floats before a 64-bit double on the stack. Darwin compacts
+the floats while Android assigns each an eight-byte slot, so the layouts
+genuinely diverge. The standalone smoke does not claim to implement the final
 PCS code generator; it gives a fake factory these real owned ELF addresses and
 returns fixed-signature Darwin functions. It proves descriptor-to-shorty
 normalization, regular/CriticalNative separation, callable signatures, cache

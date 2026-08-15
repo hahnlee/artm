@@ -122,8 +122,9 @@ int64_t SpillThunk(void*,
                    float f3,
                    double d3,
                    float f4,
+                   float f5,
                    double d4) {
-  const float floats[] = {f0, f1, f2, f3, f4};
+  const float floats[] = {f0, f1, f2, f3, f4, f5};
   const double doubles[] = {d0, d1, d2, d3, d4};
   uint64_t digest = UINT64_C(1469598103934665603);
   digest = Mix(digest, z);
@@ -141,6 +142,9 @@ int64_t SpillThunk(void*,
     digest = Mix(digest, float_bits);
     digest = Mix(digest, double_bits);
   }
+  uint32_t final_float_bits = 0;
+  std::memcpy(&final_float_bits, &floats[5], sizeof(final_float_bits));
+  digest = Mix(digest, final_float_bits);
   return static_cast<int64_t>(digest);
 }
 
@@ -198,7 +202,7 @@ void* BuildThunk(void* opaque,
     return owner->generation == 1 ? reinterpret_cast<void*>(&AddThunkA)
                                   : reinterpret_cast<void*>(&AddThunkB);
   }
-  if (address == context->spill && key == "JZBCSIJLFDFDFDFDFD" &&
+  if (address == context->spill && key == "JZBCSIJLFDFDFDFDFFD" &&
       call_type == DARWIN_ART_JNI_CALL_REGULAR) {
     return reinterpret_cast<void*>(&SpillThunk);
   }
@@ -226,9 +230,9 @@ int main(int argc, char** argv) {
 
   const std::string add_shorty = DescriptorToShorty("(IJI)J");
   const std::string spill_shorty = DescriptorToShorty(
-      "(ZBCSIJLjava/lang/Object;FDFDFDFDFD)J");
+      "(ZBCSIJLjava/lang/Object;FDFDFDFDFFD)J");
   Require(add_shorty == "JIJI", "nativeAdd shorty mismatch");
-  Require(spill_shorty == "JZBCSIJLFDFDFDFDFD",
+  Require(spill_shorty == "JZBCSIJLFDFDFDFDFFD",
           "nativeSpill shorty mismatch");
 
   FakeContext context{{UINT64_C(0x415254454c46),
@@ -295,13 +299,13 @@ int main(int argc, char** argv) {
   using SpillFunction = int64_t (*)(void*, void*, uint8_t, int8_t, uint16_t,
                                     int16_t, int32_t, int64_t, void*, float,
                                     double, float, double, float, double, float,
-                                    double, float, double);
+                                    double, float, float, double);
   const uint64_t spill_digest = static_cast<uint64_t>(
       reinterpret_cast<SpillFunction>(const_cast<void*>(spill_callable))(
           nullptr, nullptr, 1, -2, 0x4567, -1234, 0x10203040,
           INT64_C(0x1122334455667788), reinterpret_cast<void*>(0x1234),
           1.25f, -2.5, 3.75f, 4.5, -5.25f, 6.75, 7.125f, -8.875,
-          9.5f, 10.25));
+          9.5f, -11.75f, 10.25));
 
   const void* critical_callable = nullptr;
   Require(darwin_art_resolve_registered_native(
