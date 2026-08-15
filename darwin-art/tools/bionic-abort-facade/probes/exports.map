@@ -1,0 +1,6 @@
+{
+  global:
+    bionic_abort_fixture_message;
+    bionic_abort_fixture_abort;
+  local: *;
+};
