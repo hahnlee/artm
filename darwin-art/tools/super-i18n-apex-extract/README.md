@@ -20,6 +20,11 @@ cargo run --release --manifest-path tools/super-i18n-apex-extract/Cargo.toml -- 
   /tmp/com.android.i18n.apex
 ```
 
+The parser supports both locked API 36 Play Store ARM64 images currently used
+by this project: the ordinary 4 KiB-page image and the `_ps16k` image. Their
+compressed APEX bytes differ, but both contain the same locked `core-icu4j.jar`.
+The acceptance script hashes the complete input image before selecting either
+expected APEX tuple.
+
 The report includes GPT, LP and EROFS versions, logical/physical read counts,
 the selected inode and a built-in SHA-256 of the extracted APEX.
-

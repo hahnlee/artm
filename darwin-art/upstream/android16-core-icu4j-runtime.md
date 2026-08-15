@@ -34,6 +34,10 @@ The accepted binary was pulled from the already-installed SDK package
 whose build fingerprint is locked in the companion lock file. It contains ICU
 76.1 Java code, the complete 11-class JNI registrar target set, and
 `icudt76l.dat` whose hash is identical to the source-built native ICU 76 gate.
+The companion lock also records the ordinary 4 KiB-page Play Store ARM64
+system image. Its compressed APEX size and hash differ from the 16 KiB image,
+while the extracted `core-icu4j.jar` is byte-identical. The offline extractor's
+acceptance gate recognizes only these two complete-image hashes.
 
 The similarly tagged `platform/prebuilts/runtime` ARM64 APEX is not an Android
 16 product runtime artifact. Its own `mainline/update.py` describes these APEX
@@ -56,7 +60,8 @@ adb pull /apex/com.android.i18n/javalib/core-icu4j.jar /tmp/core-icu4j-api36.jar
 tools/audit-android16-core-icu4j-runtime.sh /tmp/core-icu4j-api36.jar
 ```
 
-For an offline extractor, the image is raw GPT. The `super` partition begins
+For offline extraction use `tools/super-i18n-apex-extract`. The image is raw
+GPT. In the locked 16 KiB image the `super` partition begins
 at LBA 4096. LP metadata v10.0 maps logical `system` to one linear extent at
 absolute image byte offset 3,145,728 for 652,832,768 bytes. That extent is
 EROFS, not ext4. The APEX file appears at `/system/apex/com.android.i18n.apex`
