@@ -1,0 +1,5 @@
+{
+  global:
+    bionic_wide_stdio_fixture_run;
+  local: *;
+};
