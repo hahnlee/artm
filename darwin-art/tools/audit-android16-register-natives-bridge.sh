@@ -142,17 +142,26 @@ elf = adapter[elf_start:host_start]
 assert "darwin_art_elf_graph_load(" in elf
 assert "darwin_art_elf_graph_lookup_root(" in adapter
 assert "darwin_art_elf_graph_unload(" in adapter
+assert "darwin_art_bionic_namespace_bind_builtins(" in elf
+assert "darwin_art_bionic_namespace_seal(" in elf
+assert "darwin_art_bionic_namespace_teardown(" in adapter
 assert "darwin_art_elf_load_bytes(" not in adapter
 assert "dlopen(" not in elf and "dlsym(" not in elf
+assert elf.index("darwin_art_bionic_namespace_seal(") < elf.index(
+    "darwin_art_elf_graph_load(")
 assert elf.index("darwin_art_elf_graph_load(") < elf.index("darwin_art_jni_proxy_init(")
 assert elf.index("darwin_art_elf_graph_load(") < elf.index("*needs_native_bridge = true")
 close = adapter[adapter.index("bool CloseNativeLibrary("):
                   adapter.index("void NativeLoaderFreeErrorMessage")]
 assert close.index("DestroyRegularTrampolines") < close.index("darwin_art_elf_graph_unload")
+assert close.index("darwin_art_elf_graph_unload") < close.index(
+    "darwin_art_bionic_namespace_teardown")
 assert "kDarwinArtElfJniHostProviderSoname" in adapter
 assert "lifecycle_status != 123" in probe
 assert "lifecycle_status() != 12345" in probe
-print("register-natives-bridge: local-graph-flow=PASS publish=after-complete no-dyld=ELF")
+assert "lifecycle_status() == 1245" in probe
+assert "namespace_lifecycle_status() == 5" in probe
+print("register-natives-bridge: local-graph-flow=PASS providers=sealed-before-graph teardown=graph-before-namespace publish=after-complete no-dyld=ELF")
 PY
 
 [[ "$(sha "$fixture_root/native_fixture.c")" == "$FIXTURE_C_SHA256" ]] ||
@@ -190,16 +199,18 @@ spill_value="0x$($elf_nm -n "$fixture_elf" | awk '$3 == "NativeSpill" {print $1}
 [[ "$((add_value))" == "$((FIXTURE_NATIVE_ADD))" ]] || fail "NativeAdd ELF value mismatch"
 [[ "$((spill_value))" == "$((FIXTURE_NATIVE_SPILL))" ]] || fail "NativeSpill ELF value mismatch"
 "$readelf" -lW "$fixture_elf" |
-  grep -E "LOAD +0x0008cc +0x00000000000048cc .* R E +0x4000" >/dev/null ||
+  grep -E "LOAD +0x00099c +0x000000000000499c .* R E +0x4000" >/dev/null ||
   fail "fixture executable PT_LOAD mismatch"
 root_dynamic="$("$readelf" -d "$fixture_elf")"
 child_dynamic="$("$readelf" -d "$fixture_child")"
-[[ "$(grep -c '(NEEDED)' <<< "$root_dynamic")" == 2 ]] ||
+[[ "$(grep -c '(NEEDED)' <<< "$root_dynamic")" == 3 ]] ||
   fail "fixture root dependency count drift"
 grep -E '\(NEEDED\).*libdarwin-art-jni-child\.so' <<< "$root_dynamic" >/dev/null ||
   fail "fixture root child dependency drift"
 grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' <<< "$root_dynamic" >/dev/null ||
   fail "fixture root virtual-provider dependency drift"
+grep -E '\(NEEDED\).*libc\.so' <<< "$root_dynamic" >/dev/null ||
+  fail "fixture root Bionic provider dependency drift"
 [[ "$(grep -c '(NEEDED)' <<< "$child_dynamic")" == 1 ]] ||
   fail "fixture child dependency count drift"
 grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' <<< "$child_dynamic" >/dev/null ||
@@ -253,4 +264,4 @@ mkdir -p "$build_dir"
 cp "$stage/libdarwin-art-registered-native-bridge.a" "$build_dir/"
 cp "$stage/registered-native-bridge-smoke" "$build_dir/"
 printf '%s\n' "$output"
-echo "register-natives-bridge: PASS ART=$ART_TAG bridge=v$NATIVE_BRIDGE_POINTER_OWNER_VERSION/v$NATIVE_BRIDGE_CRITICAL_CALL_VERSION runtime-files-modified=0"
+echo "register-natives-bridge: PASS ART=$ART_TAG bridge=v$NATIVE_BRIDGE_POINTER_OWNER_VERSION/v$NATIVE_BRIDGE_CRITICAL_CALL_VERSION ART-graph+Bionic-providers=integrated"

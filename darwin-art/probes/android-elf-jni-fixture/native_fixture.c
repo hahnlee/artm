@@ -1,13 +1,22 @@
 #include <jni.h>
+#include <stddef.h>
 #include <stdint.h>
 
 extern int DarwinArtFixtureChildValue(void);
 extern void darwin_art_fixture_record_lifecycle(int phase);
+extern int* __errno(void);
+extern size_t strlen(const char* string);
 
 static int g_root_initialized;
+static int g_bionic_provider_initialized;
 
 __attribute__((constructor)) static void RootInitialize(void) {
-  if (DarwinArtFixtureChildValue() == 20) {
+  static const char provider_probe[] = "bionic";
+  int* bionic_errno = __errno();
+  if (DarwinArtFixtureChildValue() == 20 && bionic_errno != NULL &&
+      strlen(provider_probe) == sizeof(provider_probe) - 1) {
+    *bionic_errno = 4242;
+    g_bionic_provider_initialized = *__errno() == 4242;
     g_root_initialized = 1;
     darwin_art_fixture_record_lifecycle(2);
   }
@@ -114,7 +123,8 @@ static void NativeVoid(JNIEnv* env, jclass fixture_class) {
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
   (void)reserved;
-  if (g_root_initialized != 1 || DarwinArtFixtureChildValue() != 20) {
+  if (g_root_initialized != 1 || g_bionic_provider_initialized != 1 ||
+      DarwinArtFixtureChildValue() != 20) {
     return JNI_ERR;
   }
   JNIEnv* env = NULL;

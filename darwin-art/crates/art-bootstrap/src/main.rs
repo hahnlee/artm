@@ -3097,6 +3097,11 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
         if real_graphics && adapter_source == "darwin_libcore_natives.cc" {
             adapter_command.arg("-DDARWIN_ART_FULL_LIBCORE_LINUX");
         }
+        if adapter_source == "darwin_runtime_adapters.cc" {
+            adapter_command
+                .arg("-I")
+                .arg(root.join("tools/bionic-provider-namespace/include"));
+        }
         adapter_command
             .arg("-idirafter")
             .arg(&ndk_arch_include)
@@ -3219,6 +3224,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
     let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime.dylib");
     fs::create_dir_all(&build_dir)?;
+    build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
     let includes = [
         root.join("include"),
         root.join("compat"),
@@ -3287,6 +3293,28 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&object)
         .arg(&surface_object)
         .arg(root.join("_build/runtime-bootstrap/libart-runtime-bootstrap-darwin.a"))
+        .arg(
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a",
+            ),
+        )
+        .arg(
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-float-conversion.a",
+            ),
+        )
+        .arg(
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-rust-providers.a",
+            ),
+        )
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            root.join("_build/icu-foundation/libandroidicuinit-darwin.a")
+                .display()
+        ))
+        .arg(root.join("_build/icu-foundation/libicuuc-common-darwin.a"))
+        .arg(root.join("_build/icu-foundation/libicuuc-stubdata-darwin.a"))
         .arg(root.join("crates/darwin-art-elf-loader/target/release/libdarwin_art_elf_loader.a"))
         .arg(root.join("_build/interpreter-core/libart-interpreter-darwin.a"))
         .arg(root.join("_build/runtime-arm64/libart-arm64-darwin.a"))
@@ -3351,6 +3379,9 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             "darwin_art_jni_proxy_java_vm",
             "darwin_art_elf_jni_fixture_registration_status",
             "darwin_art_elf_jni_fixture_lifecycle_status",
+            "darwin_art_elf_jni_fixture_namespace_lifecycle_status",
+            "darwin_art_bionic_namespace_bind_builtins",
+            "darwin_art_bionic_rust_provider_closure_anchor",
             "ElfJniOnLoadTrampoline",
             "CreateRegularTrampolines",
             "TrampolineEntryMask",
@@ -3414,6 +3445,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
 }
 
 fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
+    build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
     build_shell_gate_with_args(
         root,
         "audit-android16-graphics-closure.sh",
@@ -3591,6 +3623,22 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         // archives so the latter extract only additional runtime providers.
         .arg(&graphics_closure)
         .arg(&bootstrap)
+        .arg(
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a",
+            ),
+        )
+        .arg(
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-float-conversion.a",
+            ),
+        )
+        .arg(
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-rust-providers.a",
+            ),
+        )
+        .arg(root.join("_build/icu-foundation/libandroidicuinit-darwin.a"))
         .arg(root.join("crates/darwin-art-elf-loader/target/release/libdarwin_art_elf_loader.a"))
         .arg(&system_natives_archive)
         .arg(&file_descriptor_archive)
@@ -3929,7 +3977,7 @@ fn probe_runtime_dex_flavor(
     let output = command_output(&mut command)?;
     let expected = if elf_jni {
         "Hello from Darwin ART main: 안녕\n\
-         ART Android ELF JNI: graph=child-first+relocated load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
+         ART Android ELF JNI: graph=child-first+relocated providers=bind_builtins+__errno+strlen load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
          ART Darwin Runtime::Create: ok\n\
          ART Darwin app ClassLoader: PathClassLoader\n\
          ART Darwin DEX interpreter: Hello.answer()=42\n\

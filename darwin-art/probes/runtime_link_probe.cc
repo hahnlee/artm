@@ -39,6 +39,19 @@
 
 extern "C" int darwin_art_elf_jni_fixture_registration_status();
 extern "C" int darwin_art_elf_jni_fixture_lifecycle_status();
+extern "C" int darwin_art_elf_jni_fixture_namespace_lifecycle_status();
+
+namespace android {
+extern "C" void* OpenNativeLibrary(JNIEnv* env, int32_t target_sdk_version,
+                                    const char* path, jobject class_loader,
+                                    const char* caller_location,
+                                    jstring library_path,
+                                    bool* needs_native_bridge,
+                                    char** error_msg);
+extern "C" bool CloseNativeLibrary(void* handle, bool needs_native_bridge,
+                                    char** error_msg);
+extern "C" void NativeLoaderFreeErrorMessage(char* message);
+}  // namespace android
 
 static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
 
@@ -1339,6 +1352,28 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   }
 
   if (run_elf_jni_fixture) {
+    char* partial_error = nullptr;
+    void* partial_handle = android::OpenNativeLibrary(
+        env, 35, elf_fixture_path, app_loader_ref, nullptr, nullptr, nullptr,
+        &partial_error);
+    const bool partial_cleanup_ok =
+        partial_handle == nullptr && partial_error != nullptr &&
+        darwin_art_elf_jni_fixture_lifecycle_status() == 1245 &&
+        darwin_art_elf_jni_fixture_namespace_lifecycle_status() == 5;
+    if (partial_handle != nullptr) {
+      char* close_error = nullptr;
+      (void)android::CloseNativeLibrary(partial_handle, true, &close_error);
+      android::NativeLoaderFreeErrorMessage(close_error);
+    }
+    android::NativeLoaderFreeErrorMessage(partial_error);
+    if (!partial_cleanup_ok || env->ExceptionCheck()) {
+      std::cerr << "ART Android ELF JNI: partial failure cleanup failed, lifecycle="
+                << darwin_art_elf_jni_fixture_lifecycle_status()
+                << " namespace="
+                << darwin_art_elf_jni_fixture_namespace_lifecycle_status()
+                << "\n";
+      return 40;
+    }
     std::string load_error;
     bool loaded = false;
     {
@@ -1351,11 +1386,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
         darwin_art_elf_jni_fixture_registration_status();
     const int lifecycle_status =
         darwin_art_elf_jni_fixture_lifecycle_status();
-    if (!loaded || !load_error.empty() || bridge_status != 0x3f ||
-        lifecycle_status != 123 ||
+    const int namespace_status =
+        darwin_art_elf_jni_fixture_namespace_lifecycle_status();
+    if (!loaded || !load_error.empty() || bridge_status != 0x7f ||
+        lifecycle_status != 123 || namespace_status != 3 ||
         env->ExceptionCheck()) {
       std::cerr << "ART Android ELF JNI: load/registration failed, status="
                 << bridge_status << " lifecycle=" << lifecycle_status
+                << " namespace=" << namespace_status
                 << " load_error=" << load_error << "\n";
       return 41;
     }
@@ -1374,6 +1412,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       return 42;
     }
     std::cout << "ART Android ELF JNI: graph=child-first+relocated "
+                 "providers=bind_builtins+__errno+strlen "
                  "load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all "
                  "nativeUsesEnv=current stack-repack=ok\n"
               << std::flush;
@@ -1479,6 +1518,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
       darwin_art_elf_jni_fixture_lifecycle_status() != 12345) {
     std::cerr << "ART Darwin shutdown: ELF JNI graph finalizer order failed, status="
               << darwin_art_elf_jni_fixture_lifecycle_status() << "\n";
+    std::lock_guard<std::mutex> lock(g_process_state.mutex);
+    g_process_state.phase = ProcessPhase::kShutdownFailed;
+    return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+  }
+  if (darwin_art_elf_jni_fixture_registration_status() != 0 &&
+      darwin_art_elf_jni_fixture_namespace_lifecycle_status() != 5) {
+    std::cerr << "ART Darwin shutdown: Bionic namespace teardown order failed, status="
+              << darwin_art_elf_jni_fixture_namespace_lifecycle_status() << "\n";
     std::lock_guard<std::mutex> lock(g_process_state.mutex);
     g_process_state.phase = ProcessPhase::kShutdownFailed;
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;

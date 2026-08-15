@@ -29,7 +29,7 @@ output="$stage/libdarwin-art-jni-fixture.so"
 child="$stage/libdarwin-art-jni-child.so"
 host_provider="$stage/libdarwin-art-jni-host.so"
 
-common_flags=(-std=c17 -O2 -fPIC -fvisibility=hidden -Wall -Wextra -Werror
+common_flags=(-std=c17 -O2 -fPIC -fvisibility=hidden -fno-builtin -Wall -Wextra -Werror
   -shared -nostdlib -fuse-ld=lld -Wl,--build-id=none -Wl,--hash-style=sysv
   -Wl,-z,now -Wl,-z,norelro -Wl,-z,max-page-size=16384)
 
@@ -42,7 +42,7 @@ common_flags=(-std=c17 -O2 -fPIC -fvisibility=hidden -Wall -Wextra -Werror
 "$android_clang" "${common_flags[@]}" \
   -Wl,-soname,libdarwin-art-jni-fixture.so \
   -Wl,--version-script,"$fixture_root/exports.map" \
-  "$fixture_root/native_fixture.c" "$child" "$host_provider" -o "$output"
+  "$fixture_root/native_fixture.c" "$child" "$host_provider" -lc -o "$output"
 
 for elf in "$output" "$child"; do
   file "$elf" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null ||
@@ -62,12 +62,14 @@ root_dynamic="$stage/root.dynamic.txt"
 child_dynamic="$stage/child.dynamic.txt"
 "$readelf" -d -r "$output" > "$root_dynamic"
 "$readelf" -d -r "$child" > "$child_dynamic"
-[[ "$(grep -c '(NEEDED)' "$root_dynamic")" == 2 ]] ||
-  fail "root DT_NEEDED closure is not exactly child+host-provider"
+[[ "$(grep -c '(NEEDED)' "$root_dynamic")" == 3 ]] ||
+  fail "root DT_NEEDED closure is not exactly child+host-provider+libc"
 grep -E '\(NEEDED\).*libdarwin-art-jni-child\.so' "$root_dynamic" >/dev/null ||
   fail "root lost child dependency"
 grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' "$root_dynamic" >/dev/null ||
   fail "root lost explicit virtual provider dependency"
+grep -E '\(NEEDED\).*libc\.so' "$root_dynamic" >/dev/null ||
+  fail "root lost closed Bionic provider dependency"
 [[ "$(grep -c '(NEEDED)' "$child_dynamic")" == 1 ]] ||
   fail "child DT_NEEDED closure is not exactly host-provider"
 grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' "$child_dynamic" >/dev/null ||
@@ -92,6 +94,10 @@ else
 fi
 grep -E 'R_AARCH64_JUMP_SLOT.*(DarwinArtFixtureChildValue|darwin_art_fixture_record_lifecycle)' \
   "$relocations" >/dev/null || fail "graph imports did not produce eager PLT relocations"
+for symbol in __errno strlen; do
+  grep -E "R_AARCH64_JUMP_SLOT.*${symbol}" "$relocations" >/dev/null ||
+    fail "Bionic provider relocation missing: $symbol"
+done
 
 disassembly="$stage/disassembly.txt"
 "$objdump" -d "$output" > "$disassembly"
@@ -164,4 +170,4 @@ identity="$stage/darwin_art_elf_jni_fixture_identity.h"
   echo '#endif'
 } > "$identity"
 cp "$identity" "$generated_dir/darwin_art_elf_jni_fixture_identity.h"
-echo "android-elf-jni-fixture: PASS graph=root+child+virtual-provider ctor=child-first fini=root-first exports=JNI_OnLoad+JNI_OnUnload relro=0 tls=0 register=GetEnv+FindClass+RegisterNatives methods=8(register+spill+env+narrow+returns) pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) root_size=$fixture_size root_sha256=$fixture_sha child_size=$child_size child_sha256=$child_sha"
+echo "android-elf-jni-fixture: PASS graph=root+child+virtual-provider+libc ctor=child-first fini=root-first bionic=__errno+strlen exports=JNI_OnLoad+JNI_OnUnload relro=0 tls=0 register=GetEnv+FindClass+RegisterNatives methods=8(register+spill+env+narrow+returns) pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) root_size=$fixture_size root_sha256=$fixture_sha child_size=$child_size child_sha256=$child_sha"

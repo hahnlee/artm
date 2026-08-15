@@ -2,6 +2,7 @@
 
 #include <CommonCrypto/CommonDigest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -22,6 +23,8 @@
 #include "darwin_android_jni_trampoline.h"
 #include "darwin_art_elf_jni_fixture_identity.h"
 #include "darwin_art_elf_loader.h"
+#include "darwin_art_bionic_builtin_adapters.h"
+#include "darwin_art_bionic_provider_namespace.h"
 #include "darwin_art_jni_proxy.h"
 #include "nativebridge/native_bridge.h"
 #include "nativeloader/native_loader.h"
@@ -41,6 +44,11 @@ constexpr int kElfFoundFixtureClass = 1 << 2;
 constexpr int kElfCapturedRegistration = 1 << 3;
 constexpr int kElfInstalledRegistration = 1 << 4;
 constexpr int kElfClassifiedTrampolines = 1 << 5;
+constexpr int kElfBionicProvidersRouted = 1 << 6;
+constexpr uint32_t kFixtureErrnoRouteMask = 1u << 0;
+constexpr uint32_t kFixtureStrlenRouteMask = 1u << 1;
+constexpr uint32_t kFixtureAllProviderRouteMask =
+    kFixtureErrnoRouteMask | kFixtureStrlenRouteMask;
 constexpr uint32_t kFixtureNativeAddEntryMask = 1u << 0;
 constexpr uint32_t kFixtureNativeSpillEntryMask = 1u << 1;
 constexpr uint32_t kFixtureNativeUsesEnvEntryMask = 1u << 2;
@@ -49,6 +57,10 @@ constexpr uint32_t kFixtureAllEntryMask = 0xffu;
 std::atomic<int> g_elf_fixture_status{0};
 std::atomic<uint32_t> g_elf_classified_trampoline_mask{0};
 std::atomic<int> g_elf_fixture_lifecycle{0};
+std::atomic<uint32_t> g_elf_fixture_provider_routes{0};
+std::atomic<int> g_elf_fixture_namespace_lifecycle{0};
+
+extern "C" uintptr_t darwin_art_bionic_rust_provider_closure_anchor();
 
 void SetNativeLoaderError(char** error_msg, const std::string& message) {
   if (error_msg != nullptr) {
@@ -114,6 +126,7 @@ std::string SiblingPath(const char* root_path, const char* filename) {
 struct ElfLibrary {
   uint64_t magic = kElfLibraryMagic;
   DarwinArtElfGraphHandle* graph = nullptr;
+  DarwinArtBionicNamespace* provider_namespace = nullptr;
   uintptr_t jni_on_load = 0;
   uintptr_t jni_on_unload = 0;
   alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)
@@ -121,6 +134,17 @@ struct ElfLibrary {
   DarwinArtJniProxy* proxy = nullptr;
   darwin_art::android_jni::TrampolineSet* trampolines = nullptr;
 };
+
+void TeardownProviderNamespace(ElfLibrary* library) {
+  if (library == nullptr || library->provider_namespace == nullptr) return;
+  const DarwinArtBionicNamespaceStatus status =
+      darwin_art_bionic_namespace_teardown(library->provider_namespace);
+  if (status == DARWIN_ART_BIONIC_NAMESPACE_OK) {
+    g_elf_fixture_namespace_lifecycle.store(5, std::memory_order_relaxed);
+  }
+  darwin_art_bionic_namespace_destroy(library->provider_namespace);
+  library->provider_namespace = nullptr;
+}
 
 void FixtureRecordLifecycle(int phase) {
   if (phase < 1 || phase > 5) {
@@ -132,29 +156,90 @@ void FixtureRecordLifecycle(int phase) {
       observed, observed * 10 + phase, std::memory_order_relaxed)) {}
 }
 
-DarwinArtElfResolveStatus ResolveFixtureProvider(
-    void*,
+void SetResolverError(DarwinArtElfErrorBuffer* error, const char* message) {
+  if (error == nullptr || message == nullptr) return;
+  const size_t required = std::strlen(message) + 1;
+  error->required = required;
+  if (error->data == nullptr || error->capacity == 0) return;
+  const size_t copied = std::min(required - 1, error->capacity - 1);
+  std::memcpy(error->data, message, copied);
+  error->data[copied] = '\0';
+}
+
+DarwinArtElfResolveStatus ResolveRuntimeProvider(
+    void* context,
     const DarwinArtElfSymbolRequest* request,
     uintptr_t* out_address,
-    DarwinArtElfErrorBuffer*) {
+    DarwinArtElfErrorBuffer* error) {
   if (request == nullptr || out_address == nullptr ||
       request->abi_version != DARWIN_ART_ELF_ABI_VERSION ||
-      request->symbol == nullptr ||
-      std::strcmp(request->symbol, "darwin_art_fixture_record_lifecycle") != 0 ||
-      request->version_soname != nullptr || request->version_name != nullptr) {
+      request->symbol == nullptr) {
     return DARWIN_ART_ELF_RESOLVE_ERROR;
   }
-  bool provider_is_explicit = false;
-  for (size_t index = 0; index < request->needed_library_count; ++index) {
-    const char* soname = request->needed_libraries[index];
-    provider_is_explicit = provider_is_explicit ||
-                           (soname != nullptr &&
-                            std::strcmp(soname, kDarwinArtElfJniHostProviderSoname) == 0);
+  if (std::strcmp(request->symbol, "darwin_art_fixture_record_lifecycle") == 0) {
+    if (request->version_soname != nullptr || request->version_name != nullptr) {
+      SetResolverError(error, "fixture lifecycle provider must be unversioned");
+      return DARWIN_ART_ELF_RESOLVE_ERROR;
+    }
+    bool provider_is_explicit = false;
+    for (size_t index = 0; index < request->needed_library_count; ++index) {
+      const char* soname = request->needed_libraries[index];
+      provider_is_explicit = provider_is_explicit ||
+                             (soname != nullptr &&
+                              std::strcmp(soname,
+                                          kDarwinArtElfJniHostProviderSoname) == 0);
+    }
+    if (!provider_is_explicit) {
+      SetResolverError(error, "fixture lifecycle provider is not explicit");
+      return DARWIN_ART_ELF_RESOLVE_ERROR;
+    }
+    *out_address = reinterpret_cast<uintptr_t>(&FixtureRecordLifecycle);
+    return DARWIN_ART_ELF_RESOLVE_FOUND;
   }
-  if (!provider_is_explicit) {
+
+  auto* library = static_cast<ElfLibrary*>(context);
+  if (library == nullptr || library->provider_namespace == nullptr) {
+    SetResolverError(error, "Bionic provider namespace is unavailable");
     return DARWIN_ART_ELF_RESOLVE_ERROR;
   }
-  *out_address = reinterpret_cast<uintptr_t>(&FixtureRecordLifecycle);
+  const char* provider_soname = request->version_soname;
+  const char* provider_version = request->version_name;
+  if ((provider_soname == nullptr) != (provider_version == nullptr)) {
+    SetResolverError(error, "Bionic symbol version request is incomplete");
+    return DARWIN_ART_ELF_RESOLVE_ERROR;
+  }
+  if (provider_soname == nullptr) {
+    for (size_t index = 0; index < request->needed_library_count; ++index) {
+      const char* soname = request->needed_libraries[index];
+      if (soname != nullptr && std::strcmp(soname, "liblog.so") == 0) {
+        provider_soname = soname;
+        break;
+      }
+    }
+    if (provider_soname == nullptr) {
+      SetResolverError(error, "unversioned Bionic import has no exact provider");
+      return DARWIN_ART_ELF_RESOLVE_ERROR;
+    }
+  }
+  const DarwinArtBionicNamespaceResult result =
+      darwin_art_bionic_namespace_resolve(
+          library->provider_namespace, provider_soname, request->symbol,
+          provider_version);
+  if (result.status != DARWIN_ART_BIONIC_NAMESPACE_OK || result.address == 0) {
+    SetResolverError(error,
+                     darwin_art_bionic_namespace_status_name(result.status));
+    return DARWIN_ART_ELF_RESOLVE_ERROR;
+  }
+  uint32_t route = 0;
+  if (std::strcmp(request->symbol, "__errno") == 0) {
+    route = kFixtureErrnoRouteMask;
+  } else if (std::strcmp(request->symbol, "strlen") == 0) {
+    route = kFixtureStrlenRouteMask;
+  }
+  if (route != 0) {
+    g_elf_fixture_provider_routes.fetch_or(route, std::memory_order_relaxed);
+  }
+  *out_address = result.address;
   return DARWIN_ART_ELF_RESOLVE_FOUND;
 }
 
@@ -547,13 +632,42 @@ void* OpenNativeLibrary(JNIEnv* env,
     }
     auto library = std::make_unique<ElfLibrary>();
     g_elf_fixture_lifecycle.store(0, std::memory_order_relaxed);
+    g_elf_fixture_provider_routes.store(0, std::memory_order_relaxed);
+    g_elf_fixture_namespace_lifecycle.store(0, std::memory_order_relaxed);
+    if (darwin_art_bionic_rust_provider_closure_anchor() == 0) {
+      SetNativeLoaderError(error_msg, "Bionic Rust provider closure is unavailable");
+      return nullptr;
+    }
+    library->provider_namespace = darwin_art_bionic_namespace_create();
+    if (library->provider_namespace == nullptr) {
+      SetNativeLoaderError(error_msg, "Bionic provider namespace allocation failed");
+      return nullptr;
+    }
+    g_elf_fixture_namespace_lifecycle.store(1, std::memory_order_relaxed);
+    DarwinArtBionicNamespaceStatus namespace_status =
+        darwin_art_bionic_namespace_bind_builtins(
+            library->provider_namespace, nullptr);
+    if (namespace_status == DARWIN_ART_BIONIC_NAMESPACE_OK) {
+      namespace_status =
+          darwin_art_bionic_namespace_seal(library->provider_namespace);
+    }
+    if (namespace_status != DARWIN_ART_BIONIC_NAMESPACE_OK) {
+      SetNativeLoaderError(
+          error_msg,
+          std::string("Bionic provider namespace setup failed: ") +
+              darwin_art_bionic_namespace_status_name(namespace_status));
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    g_elf_fixture_namespace_lifecycle.store(2, std::memory_order_relaxed);
     const DarwinArtElfGraphSource sources[] = {
         {kDarwinArtElfJniFixtureSoname, root_bytes.data(), root_bytes.size()},
         {kDarwinArtElfJniChildSoname, child_bytes.data(), child_bytes.size()},
     };
-    const char* providers[] = {kDarwinArtElfJniHostProviderSoname};
+    const char* providers[] = {kDarwinArtElfJniHostProviderSoname, "libc.so",
+                               "libdl.so", "liblog.so"};
     DarwinArtElfLoadOptions options{
-        DARWIN_ART_ELF_ABI_VERSION, &ResolveFixtureProvider, library.get()};
+        DARWIN_ART_ELF_ABI_VERSION, &ResolveRuntimeProvider, library.get()};
     std::array<char, 1024> error_storage{};
     DarwinArtElfErrorBuffer error_buffer{error_storage.data(), error_storage.size(), 0};
     DarwinArtElfStatus status = darwin_art_elf_graph_load(
@@ -562,8 +676,22 @@ void* OpenNativeLibrary(JNIEnv* env,
     if (status != DARWIN_ART_ELF_OK) {
       SetNativeLoaderError(error_msg,
                            "Android ELF graph load failed: " + ElfError(status, error_buffer));
+      TeardownProviderNamespace(library.get());
       return nullptr;
     }
+    if (g_elf_fixture_provider_routes.load(std::memory_order_relaxed) !=
+        kFixtureAllProviderRouteMask) {
+      SetNativeLoaderError(error_msg,
+                           "Android ELF did not route all Bionic provider imports");
+      if (darwin_art_elf_graph_unload(&library->graph, nullptr) ==
+          DARWIN_ART_ELF_OK) {
+        g_elf_fixture_namespace_lifecycle.store(4,
+                                                std::memory_order_relaxed);
+      }
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    g_elf_fixture_namespace_lifecycle.store(3, std::memory_order_relaxed);
     DarwinArtJniBackend backend{library.get(), &ProxyFindClass, &ProxyRegisterNatives,
                                 &ProxyThrowNew};
     library->proxy = darwin_art_jni_proxy_init(
@@ -574,17 +702,28 @@ void* OpenNativeLibrary(JNIEnv* env,
       SetNativeLoaderError(error_msg,
                            library->proxy == nullptr ? "Android JNI proxy initialization failed"
                                                      : "Android ELF lifecycle preflight failed: " + error);
-      darwin_art_elf_graph_unload(&library->graph, nullptr);
+      if (darwin_art_elf_graph_unload(&library->graph, nullptr) ==
+          DARWIN_ART_ELF_OK) {
+        g_elf_fixture_namespace_lifecycle.store(4,
+                                                std::memory_order_relaxed);
+      }
+      TeardownProviderNamespace(library.get());
       return nullptr;
     }
     if (needs_native_bridge == nullptr) {
       SetNativeLoaderError(error_msg, "Android ELF load requires needs_native_bridge ownership");
-      darwin_art_elf_graph_unload(&library->graph, nullptr);
+      if (darwin_art_elf_graph_unload(&library->graph, nullptr) ==
+          DARWIN_ART_ELF_OK) {
+        g_elf_fixture_namespace_lifecycle.store(4,
+                                                std::memory_order_relaxed);
+      }
+      TeardownProviderNamespace(library.get());
       return nullptr;
     }
     *needs_native_bridge = true;
     g_elf_classified_trampoline_mask.store(0, std::memory_order_relaxed);
-    g_elf_fixture_status.store(kElfOpened, std::memory_order_relaxed);
+    g_elf_fixture_status.store(kElfOpened | kElfBionicProvidersRouted,
+                               std::memory_order_relaxed);
     return library.release();
   }
 
@@ -603,18 +742,31 @@ bool CloseNativeLibrary(void* handle, bool needs_native_bridge, char** error_msg
       SetNativeLoaderError(error_msg, "invalid Android ELF NativeBridge handle");
       return false;
     }
-    library->magic = 0;
     darwin_art::android_jni::DestroyRegularTrampolines(library->trampolines);
     library->trampolines = nullptr;
     std::array<char, 1024> storage{};
     DarwinArtElfErrorBuffer error_buffer{storage.data(), storage.size(), 0};
     const DarwinArtElfStatus status =
         darwin_art_elf_graph_unload(&library->graph, &error_buffer);
-    delete library;
     if (status != DARWIN_ART_ELF_OK) {
       SetNativeLoaderError(error_msg, "Android ELF unload failed: " + ElfError(status, error_buffer));
       return false;
     }
+    g_elf_fixture_namespace_lifecycle.store(4, std::memory_order_relaxed);
+    const DarwinArtBionicNamespaceStatus namespace_status =
+        darwin_art_bionic_namespace_teardown(library->provider_namespace);
+    if (namespace_status != DARWIN_ART_BIONIC_NAMESPACE_OK) {
+      SetNativeLoaderError(
+          error_msg,
+          std::string("Bionic provider namespace teardown failed: ") +
+              darwin_art_bionic_namespace_status_name(namespace_status));
+      return false;
+    }
+    darwin_art_bionic_namespace_destroy(library->provider_namespace);
+    library->provider_namespace = nullptr;
+    g_elf_fixture_namespace_lifecycle.store(5, std::memory_order_relaxed);
+    library->magic = 0;
+    delete library;
     return true;
   }
   if (handle == nullptr || dlclose(handle) == 0) {
@@ -642,6 +794,11 @@ extern "C" int darwin_art_elf_jni_fixture_registration_status() {
 
 extern "C" int darwin_art_elf_jni_fixture_lifecycle_status() {
   return android::g_elf_fixture_lifecycle.load(std::memory_order_relaxed);
+}
+
+extern "C" int darwin_art_elf_jni_fixture_namespace_lifecycle_status() {
+  return android::g_elf_fixture_namespace_lifecycle.load(
+      std::memory_order_relaxed);
 }
 
 extern "C" palette_status_t PaletteSchedGetPriority(int32_t, int32_t* java_priority) {
