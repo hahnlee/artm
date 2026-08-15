@@ -1,7 +1,4 @@
-    {"abort", 'D', "bionic-abort-signal-state"},
-    {"android_set_abort_message", 'D', "android-crash-runtime"},
     {"closelog", 'C', "syslog-global-state"},
-    {"fdopendir", 'B', "DIR-layout-fd-ownership"},
     {"fprintf", 'B', "FILE-layout-varargs"},
     {"fputwc", 'B', "FILE-layout-wide-state"},
     {"getwc", 'B', "FILE-layout-wide-state"},

@@ -68,6 +68,8 @@ def main() -> int:
         "tools/bionic-strerror-facade/manifests/imports.tsv")]
     claims += [(name, "wide-integer") for name in names(
         "tools/bionic-wide-integer-facade/manifests/imports.tsv")]
+    claims += [(name, "abort") for name in names(
+        "tools/bionic-abort-facade/manifests/imports.tsv")]
     with (ROOT / "tools/bionic-dso-lifecycle-facade/manifests/imports.tsv").open() as stream:
         claims += [(line.split("\t", 1)[0], "dso-lifecycle")
                    for line in stream if line.strip()]
@@ -104,6 +106,7 @@ def main() -> int:
         "format": "DARWIN_ART_BIONIC_PROVIDER_FORMAT",
         "strerror": "DARWIN_ART_BIONIC_PROVIDER_STRERROR",
         "wide-integer": "DARWIN_ART_BIONIC_PROVIDER_WIDE_INTEGER",
+        "abort": "DARWIN_ART_BIONIC_PROVIDER_ABORT",
         "liblog": "DARWIN_ART_BIONIC_PROVIDER_LIBLOG",
         "dso-lifecycle": "DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE",
     }
@@ -116,7 +119,7 @@ def main() -> int:
         (symbol, row["category"], row["rationale"])
         for symbol, row in universe.items() if symbol not in claimed
     )
-    if len(universe) != 160 or len(claimed) != 137 or len(unsupported) != 23:
+    if len(universe) != 160 or len(claimed) != 140 or len(unsupported) != 20:
         raise SystemExit(
             f"coverage drift: universe={len(universe)} owned={len(claimed)} "
             f"unsupported={len(unsupported)}"

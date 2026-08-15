@@ -23,7 +23,10 @@ extern "C" void *darwin_art_bionic_float_conversion_resolve(const char *,
                                                             const char *);
 extern "C" SymbolFunction darwin_art_bionic_format_resolve(const char *);
 extern "C" SymbolFunction darwin_art_bionic_strerror_resolve(const char *);
-extern "C" void *darwin_art_bionic_wide_integer_resolve(const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_wide_integer_resolve(
+    const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_abort_resolve(const char *, const char *,
+                                                  const char *);
 extern "C" uintptr_t darwin_art_liblog_provider_resolve(const char *,
                                                         const char *);
 extern "C" SymbolFunction darwin_art_bionic_dso_lifecycle_resolve(const char *);
@@ -76,9 +79,22 @@ uintptr_t FloatConversion(void *, const char *soname, const char *symbol,
   return reinterpret_cast<uintptr_t>(
       darwin_art_bionic_float_conversion_resolve(soname, symbol, version));
 }
-uintptr_t Format(void *, const char *, const char *symbol, const char *) { return Address(darwin_art_bionic_format_resolve(symbol)); }
-uintptr_t Strerror(void *, const char *, const char *symbol, const char *) { return Address(darwin_art_bionic_strerror_resolve(symbol)); }
-uintptr_t WideInteger(void *, const char *soname, const char *symbol, const char *version) { return reinterpret_cast<uintptr_t>(darwin_art_bionic_wide_integer_resolve(soname, symbol, version)); }
+uintptr_t Format(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_format_resolve(symbol));
+}
+uintptr_t Strerror(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_strerror_resolve(symbol));
+}
+uintptr_t WideInteger(void *, const char *soname, const char *symbol,
+                      const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_wide_integer_resolve(soname, symbol, version));
+}
+uintptr_t Abort(void *, const char *soname, const char *symbol,
+                const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_abort_resolve(soname, symbol, version));
+}
 uintptr_t Liblog(void *, const char *, const char *symbol,
                  const char *version) {
   return darwin_art_liblog_provider_resolve(symbol, version);
@@ -90,7 +106,8 @@ uintptr_t DsoLifecycle(void *, const char *, const char *symbol, const char *) {
 constexpr DarwinArtBionicProviderResolve kResolvers[] = {
     Leaf,    Allocator,       Errno,  Filesystem,   Time,
     Pthread, ProcessState,    Phdr,   Stdio,        Locale,
-    Numeric, FloatConversion, Format, Strerror, WideInteger, Liblog, DsoLifecycle,
+    Numeric, FloatConversion, Format, Strerror, WideInteger, Abort,
+    Liblog,  DsoLifecycle,
 };
 static_assert(sizeof(kResolvers) / sizeof(kResolvers[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);

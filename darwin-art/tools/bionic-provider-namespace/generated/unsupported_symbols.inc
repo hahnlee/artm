@@ -1,7 +1,4 @@
-    "abort",
-    "android_set_abort_message",
     "closelog",
-    "fdopendir",
     "fprintf",
     "fputwc",
     "getwc",

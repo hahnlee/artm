@@ -37,7 +37,7 @@ constexpr const char *kProviderNames[] = {
     "leaf",    "allocator",        "errno",  "filesystem",    "time",
     "pthread", "process-state",    "phdr",   "stdio",         "locale",
     "numeric", "float-conversion", "format", "strerror", "wide-integer",
-    "liblog", "dso-lifecycle",
+    "abort", "liblog", "dso-lifecycle",
 };
 static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);
@@ -47,6 +47,7 @@ static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
  * Dependants are released before the shared errno/allocator/leaf substrate. */
 constexpr DarwinArtBionicProviderId kReleaseOrder[] = {
     DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE,
+    DARWIN_ART_BIONIC_PROVIDER_ABORT,
     DARWIN_ART_BIONIC_PROVIDER_LIBLOG,
     DARWIN_ART_BIONIC_PROVIDER_NUMERIC,
     DARWIN_ART_BIONIC_PROVIDER_FLOAT_CONVERSION,

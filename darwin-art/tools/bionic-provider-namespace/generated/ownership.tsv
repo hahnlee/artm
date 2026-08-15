@@ -5,6 +5,8 @@ libc.so	__cxa_finalize	LIBC	dso-lifecycle
 libc.so	__errno	LIBC	errno
 libc.so	__sF	LIBC	stdio
 libc.so	__system_property_get	LIBC	process-state
+libc.so	abort	LIBC	abort
+libc.so	android_set_abort_message	LIBC	abort
 libc.so	btowc	LIBC	locale
 libc.so	chdir	LIBC	filesystem
 libc.so	clock_gettime	LIBC	time
@@ -13,6 +15,7 @@ libc.so	closedir	LIBC	filesystem
 libc.so	fchmod	LIBC	filesystem
 libc.so	fchmodat	LIBC	filesystem
 libc.so	fclose	LIBC	stdio
+libc.so	fdopendir	LIBC	filesystem
 libc.so	fflush	LIBC	stdio
 libc.so	fileno	LIBC	stdio
 libc.so	fopen	LIBC	stdio

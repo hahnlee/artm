@@ -39,16 +39,16 @@ for generated in ownership.tsv unsupported-libc.tsv ownership.inc unsupported.in
     fail "generated $generated drift"
 done
 
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 136 ]] ||
-  fail 'expected 136 libc owners'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 139 ]] ||
+  fail 'expected 139 libc owners'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libdl.so"{n++}END{print n+0}')" == 1 ]] ||
   fail 'expected one libdl owner'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="liblog.so"{n++}END{print n+0}')" == 18 ]] ||
   fail 'expected 18 liblog owners'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | cut -f1,2 | sort | uniq -d | wc -l | tr -d ' ')" == 0 ]] ||
   fail 'duplicate SONAME/symbol owners'
-[[ "$(tail -n +2 "$here/generated/unsupported-libc.tsv" | wc -l | tr -d ' ')" == 23 ]] ||
-  fail 'expected 23 exact unsupported imports'
+[[ "$(tail -n +2 "$here/generated/unsupported-libc.tsv" | wc -l | tr -d ' ')" == 20 ]] ||
+  fail 'expected 20 exact unsupported imports'
 
 if rg -n '\b(dlopen|dlsym|dlvsym|NSLookupSymbolInImage|_dyld_)\b' \
     "$here/src" "$here/include"; then
@@ -71,6 +71,7 @@ flags=(-arch arm64 -isysroot "$sdk" -std=c++17 -O2 -Wall -Wextra -Werror
 "$cxx" "${flags[@]}" -c "$here/src/builtin_adapters.cc" -o "$tmp/builtin-adapters.o"
 expected_resolvers="$tmp/expected-resolvers"
 cat >"$expected_resolvers" <<'EOF'
+_darwin_art_bionic_abort_resolve
 _darwin_art_bionic_allocator_resolve
 _darwin_art_bionic_dso_lifecycle_resolve
 _darwin_art_bionic_errno_resolve
@@ -113,4 +114,4 @@ if grep -E '(_dlopen|_dlsym|_dlvsym|_NSLookupSymbolInImage|__dyld_)' <<<"$undefi
   fail 'host loader undefined reference present'
 fi
 
-echo 'bionic-provider-namespace: PASS libc-family=137/160 liblog=18 owned=155 unsupported=23 duplicate-owner=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'
+echo 'bionic-provider-namespace: PASS libc-family=140/160 liblog=18 owned=158 unsupported=20 duplicate-owner=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'
