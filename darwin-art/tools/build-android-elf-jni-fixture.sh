@@ -26,39 +26,72 @@ done
 stage="$(mktemp -d "${TMPDIR:-/tmp}/android-elf-jni-fixture.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 output="$stage/libdarwin-art-jni-fixture.so"
+child="$stage/libdarwin-art-jni-child.so"
+host_provider="$stage/libdarwin-art-jni-host.so"
 
-"$android_clang" -std=c17 -O2 -fPIC -fvisibility=hidden -Wall -Wextra -Werror \
-  -shared -nostdlib -fuse-ld=lld -Wl,--build-id=none -Wl,--hash-style=sysv \
-  -Wl,-z,now -Wl,-z,norelro -Wl,-z,max-page-size=16384 \
+common_flags=(-std=c17 -O2 -fPIC -fvisibility=hidden -Wall -Wextra -Werror
+  -shared -nostdlib -fuse-ld=lld -Wl,--build-id=none -Wl,--hash-style=sysv
+  -Wl,-z,now -Wl,-z,norelro -Wl,-z,max-page-size=16384)
+
+"$android_clang" "${common_flags[@]}" -Wl,-soname,libdarwin-art-jni-host.so \
+  "$fixture_root/host_provider.c" -o "$host_provider"
+"$android_clang" "${common_flags[@]}" \
+  -Wl,-soname,libdarwin-art-jni-child.so \
+  -Wl,--version-script,"$fixture_root/child.exports.map" \
+  "$fixture_root/child.c" "$host_provider" -o "$child"
+"$android_clang" "${common_flags[@]}" \
   -Wl,-soname,libdarwin-art-jni-fixture.so \
   -Wl,--version-script,"$fixture_root/exports.map" \
-  "$fixture_root/native_fixture.c" -o "$output"
+  "$fixture_root/native_fixture.c" "$child" "$host_provider" -o "$output"
 
-file "$output" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null ||
-  fail "output is not AArch64 ELF"
-if "$readelf" -d "$output" | grep -F '(NEEDED)' >/dev/null; then
-  fail "register-only fixture unexpectedly imports a DSO"
-fi
-if "$readelf" -d "$output" | grep -E '\((FINI|FINI_ARRAY)\)' >/dev/null; then
-  fail "first NativeBridge fixture requires unsupported ELF finalizers"
-fi
-if "$readelf" -l "$output" | grep -F 'GNU_RELRO' >/dev/null; then
-  fail "first loader capability requires RELRO to remain disabled"
-fi
+for elf in "$output" "$child"; do
+  file "$elf" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null ||
+    fail "output is not AArch64 ELF: $elf"
+  "$readelf" -l "$elf" | grep -F 'GNU_RELRO' >/dev/null &&
+    fail "graph fixture requires RELRO to remain disabled"
+  "$readelf" -l "$elf" | grep -E '^  TLS ' >/dev/null &&
+    fail "graph fixture unexpectedly uses TLS"
+  "$readelf" -d "$elf" | grep -F 'BIND_NOW' >/dev/null ||
+    fail "graph fixture must request immediate binding"
+  "$readelf" -d "$elf" | grep -F '(INIT_ARRAY)' >/dev/null ||
+    fail "graph fixture lost its constructor"
+  "$readelf" -d "$elf" | grep -F '(FINI_ARRAY)' >/dev/null ||
+    fail "graph fixture lost its finalizer"
+done
+root_dynamic="$stage/root.dynamic.txt"
+child_dynamic="$stage/child.dynamic.txt"
+"$readelf" -d -r "$output" > "$root_dynamic"
+"$readelf" -d -r "$child" > "$child_dynamic"
+[[ "$(grep -c '(NEEDED)' "$root_dynamic")" == 2 ]] ||
+  fail "root DT_NEEDED closure is not exactly child+host-provider"
+grep -E '\(NEEDED\).*libdarwin-art-jni-child\.so' "$root_dynamic" >/dev/null ||
+  fail "root lost child dependency"
+grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' "$root_dynamic" >/dev/null ||
+  fail "root lost explicit virtual provider dependency"
+[[ "$(grep -c '(NEEDED)' "$child_dynamic")" == 1 ]] ||
+  fail "child DT_NEEDED closure is not exactly host-provider"
+grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' "$child_dynamic" >/dev/null ||
+  fail "child lost explicit virtual provider dependency"
+grep -E 'R_AARCH64_JUMP_SLOT.*DarwinArtFixtureChildValue' "$root_dynamic" >/dev/null ||
+  fail "root child-symbol relocation missing"
 [[ "$("$nm" -D --defined-only "$output" | awk '$2 == "T" {print $3}' | paste -sd, -)" == \
    'JNI_OnLoad,JNI_OnUnload' ]] || fail "unexpected dynamic exports"
-"$readelf" -d "$output" | grep -F 'BIND_NOW' >/dev/null ||
-  fail "fixture must request immediate binding"
+[[ "$("$nm" -D --defined-only "$child" | awk '$2 == "T" {print $3}' | paste -sd, -)" == \
+   'DarwinArtFixtureChildValue' ]] || fail "unexpected child dynamic exports"
 
 relocations="$stage/relocations.txt"
 "$readelf" -r "$output" > "$relocations"
-if awk '/R_AARCH64_/ && $3 != "R_AARCH64_RELATIVE" {bad=1} END {exit bad}' "$relocations"; then
+if awk '/R_AARCH64_/ && $3 != "R_AARCH64_RELATIVE" &&
+                         $3 != "R_AARCH64_ABS64" &&
+                         $3 != "R_AARCH64_GLOB_DAT" &&
+                         $3 != "R_AARCH64_JUMP_SLOT" {bad=1}
+        END {exit bad}' "$relocations"; then
   :
 else
   fail "fixture has an unsupported relocation"
 fi
-grep -F 'R_AARCH64_JUMP_SLOT' "$relocations" >/dev/null &&
-  fail "dependency-free fixture must not contain a PLT relocation"
+grep -E 'R_AARCH64_JUMP_SLOT.*(DarwinArtFixtureChildValue|darwin_art_fixture_record_lifecycle)' \
+  "$relocations" >/dev/null || fail "graph imports did not produce eager PLT relocations"
 
 disassembly="$stage/disassembly.txt"
 "$objdump" -d "$output" > "$disassembly"
@@ -98,8 +131,11 @@ darwin_stack_loads="$(grep -Ec '(ldr[[:space:]]+[wx][0-9]+|ldp[[:space:]]+w[0-9]
 
 mkdir -p "$build_dir"
 cp "$output" "$build_dir/libdarwin-art-jni-fixture.so"
+cp "$child" "$build_dir/libdarwin-art-jni-child.so"
 fixture_sha="$(shasum -a 256 "$output" | awk '{print $1}')"
 fixture_size="$(stat -f '%z' "$output")"
+child_sha="$(shasum -a 256 "$child" | awk '{print $1}')"
+child_size="$(stat -f '%z' "$child")"
 generated_dir="$build_dir/generated"
 mkdir -p "$generated_dir"
 identity="$stage/darwin_art_elf_jni_fixture_identity.h"
@@ -109,6 +145,12 @@ identity="$stage/darwin_art_elf_jni_fixture_identity.h"
   echo '#include <stddef.h>'
   echo "inline constexpr size_t kDarwinArtElfJniFixtureSize = ${fixture_size}u;"
   echo "inline constexpr char kDarwinArtElfJniFixtureSha256[] = \"${fixture_sha}\";"
+  echo 'inline constexpr char kDarwinArtElfJniFixtureSoname[] = "libdarwin-art-jni-fixture.so";'
+  echo 'inline constexpr char kDarwinArtElfJniChildFilename[] = "libdarwin-art-jni-child.so";'
+  echo 'inline constexpr char kDarwinArtElfJniChildSoname[] = "libdarwin-art-jni-child.so";'
+  echo "inline constexpr size_t kDarwinArtElfJniChildSize = ${child_size}u;"
+  echo "inline constexpr char kDarwinArtElfJniChildSha256[] = \"${child_sha}\";"
+  echo 'inline constexpr char kDarwinArtElfJniHostProviderSoname[] = "libdarwin-art-jni-host.so";'
   echo 'inline constexpr char kDarwinArtElfJniFixtureSpillSignature[] ='
   echo '    "(ZBCSIJLjava/lang/Object;FDFDFDFDFFD)J";'
   echo 'inline constexpr size_t kDarwinArtElfJniFixtureAndroidRefStackOffset = 0u;'
@@ -122,4 +164,4 @@ identity="$stage/darwin_art_elf_jni_fixture_identity.h"
   echo '#endif'
 } > "$identity"
 cp "$identity" "$generated_dir/darwin_art_elf_jni_fixture_identity.h"
-echo "android-elf-jni-fixture: PASS exports=JNI_OnLoad+JNI_OnUnload imports=0 fini=0 relro=0 register=GetEnv+FindClass+RegisterNatives methods=8(register+spill+env+narrow+returns) pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) size=$fixture_size sha256=$fixture_sha"
+echo "android-elf-jni-fixture: PASS graph=root+child+virtual-provider ctor=child-first fini=root-first exports=JNI_OnLoad+JNI_OnUnload relro=0 tls=0 register=GetEnv+FindClass+RegisterNatives methods=8(register+spill+env+narrow+returns) pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) root_size=$fixture_size root_sha256=$fixture_sha child_size=$child_size child_sha256=$child_sha"

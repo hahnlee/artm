@@ -1,10 +1,14 @@
-use crate::{LoadError, LoadedElf, ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver};
+use crate::{
+    ClosedElfNamespace, LoadError, LoadedElf, LoadedElfGraph, NamespaceError, ResolveError,
+    ResolvedSymbol, SymbolRequest, SymbolResolver,
+};
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::num::NonZeroUsize;
 use std::os::unix::ffi::OsStrExt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::ptr;
+use std::ptr::NonNull;
 use std::sync::{Mutex, MutexGuard};
 use std::{fs::File, io::Read};
 
@@ -70,10 +74,22 @@ pub struct DarwinArtElfHandle {
     image: Mutex<LoadedElf>,
 }
 
+pub struct DarwinArtElfGraphHandle {
+    graph: Mutex<LoadedElfGraph>,
+}
+
+#[repr(C)]
+pub struct DarwinArtElfGraphSource {
+    pub soname: *const c_char,
+    pub bytes: *const u8,
+    pub length: usize,
+}
+
 enum FfiFailure {
     Invalid(&'static str),
     Io(String),
     Load(LoadError),
+    Namespace(NamespaceError),
     Poisoned,
 }
 
@@ -83,19 +99,12 @@ impl FfiFailure {
             Self::Invalid(_) => DarwinArtElfStatus::InvalidArgument,
             Self::Io(_) => DarwinArtElfStatus::Io,
             Self::Poisoned => DarwinArtElfStatus::Poisoned,
-            Self::Load(error) => match error {
-                LoadError::Format(_) => DarwinArtElfStatus::Format,
-                LoadError::Bounds(_) => DarwinArtElfStatus::Bounds,
-                LoadError::Capability(_) => DarwinArtElfStatus::Capability,
-                LoadError::Protection(_) => DarwinArtElfStatus::Protection,
-                LoadError::Resolver { .. } => DarwinArtElfStatus::Resolver,
-                LoadError::UnresolvedSymbol { .. } => DarwinArtElfStatus::UnresolvedSymbol,
-                LoadError::SymbolNotFound(_) => DarwinArtElfStatus::SymbolNotFound,
-                LoadError::InvalidSymbol(_) => DarwinArtElfStatus::InvalidSymbol,
-                LoadError::InitializersAlreadyRun | LoadError::InitializersNotRun => {
-                    DarwinArtElfStatus::Lifecycle
-                }
-                LoadError::System { .. } => DarwinArtElfStatus::System,
+            Self::Load(error) => load_error_status(error),
+            Self::Namespace(error) => match error {
+                NamespaceError::DuplicateSoname(_) => DarwinArtElfStatus::InvalidArgument,
+                NamespaceError::UnknownDependency { .. } => DarwinArtElfStatus::UnresolvedSymbol,
+                NamespaceError::SonameMismatch { .. } => DarwinArtElfStatus::Format,
+                NamespaceError::Load { source, .. } => load_error_status(source),
             },
         }
     }
@@ -105,8 +114,26 @@ impl FfiFailure {
             Self::Invalid(message) => (*message).to_owned(),
             Self::Io(message) => message.clone(),
             Self::Load(error) => error.to_string(),
+            Self::Namespace(error) => error.to_string(),
             Self::Poisoned => "ELF handle state was poisoned by a contained panic".to_owned(),
         }
+    }
+}
+
+fn load_error_status(error: &LoadError) -> DarwinArtElfStatus {
+    match error {
+        LoadError::Format(_) => DarwinArtElfStatus::Format,
+        LoadError::Bounds(_) => DarwinArtElfStatus::Bounds,
+        LoadError::Capability(_) => DarwinArtElfStatus::Capability,
+        LoadError::Protection(_) => DarwinArtElfStatus::Protection,
+        LoadError::Resolver { .. } => DarwinArtElfStatus::Resolver,
+        LoadError::UnresolvedSymbol { .. } => DarwinArtElfStatus::UnresolvedSymbol,
+        LoadError::SymbolNotFound(_) => DarwinArtElfStatus::SymbolNotFound,
+        LoadError::InvalidSymbol(_) => DarwinArtElfStatus::InvalidSymbol,
+        LoadError::InitializersAlreadyRun | LoadError::InitializersNotRun => {
+            DarwinArtElfStatus::Lifecycle
+        }
+        LoadError::System { .. } => DarwinArtElfStatus::System,
     }
 }
 
@@ -314,6 +341,23 @@ fn lock_image(handle: &DarwinArtElfHandle) -> Result<MutexGuard<'_, LoadedElf>, 
     handle.image.lock().map_err(|_| FfiFailure::Poisoned)
 }
 
+fn lock_graph(
+    handle: &DarwinArtElfGraphHandle,
+) -> Result<MutexGuard<'_, LoadedElfGraph>, FfiFailure> {
+    handle.graph.lock().map_err(|_| FfiFailure::Poisoned)
+}
+
+unsafe fn required_utf8(value: *const c_char, field: &'static str) -> Result<String, FfiFailure> {
+    if value.is_null() {
+        return Err(FfiFailure::Invalid(field));
+    }
+    // SAFETY: the caller promises a live NUL-terminated string for this synchronous call.
+    unsafe { CStr::from_ptr(value) }
+        .to_str()
+        .map(str::to_owned)
+        .map_err(|_| FfiFailure::Invalid("ELF graph string is not UTF-8"))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_elf_abi_version() -> u32 {
     ABI_VERSION
@@ -401,6 +445,163 @@ pub unsafe extern "C" fn darwin_art_elf_load_path(
         });
         // SAFETY: out_handle is writable and now owns the Box until unload.
         unsafe { *out_handle = Box::into_raw(handle) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_graph_load(
+    root_soname: *const c_char,
+    sources: *const DarwinArtElfGraphSource,
+    source_count: usize,
+    provider_sonames: *const *const c_char,
+    provider_count: usize,
+    options: *const DarwinArtElfLoadOptions,
+    out_handle: *mut *mut DarwinArtElfGraphHandle,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if out_handle.is_null() {
+            return Err(FfiFailure::Invalid("out_handle is null"));
+        }
+        // SAFETY: validated non-null writable out parameter.
+        unsafe { *out_handle = ptr::null_mut() };
+        if source_count == 0 {
+            return Err(FfiFailure::Invalid("ELF graph has no sources"));
+        }
+        if sources.is_null() {
+            return Err(FfiFailure::Invalid("ELF graph sources are null"));
+        }
+        if source_count > MAX_INPUT_SIZE / std::mem::size_of::<DarwinArtElfGraphSource>() {
+            return Err(FfiFailure::Invalid("ELF graph source count is excessive"));
+        }
+        if provider_count != 0 && provider_sonames.is_null() {
+            return Err(FfiFailure::Invalid("ELF graph providers are null"));
+        }
+        if provider_count > MAX_INPUT_SIZE / std::mem::size_of::<*const c_char>() {
+            return Err(FfiFailure::Invalid("ELF graph provider count is excessive"));
+        }
+        // SAFETY: the C contract supplies source_count readable source records.
+        let sources = unsafe { std::slice::from_raw_parts(sources, source_count) };
+        // SAFETY: the C contract supplies provider_count readable string pointers.
+        let providers = unsafe {
+            std::slice::from_raw_parts(
+                if provider_sonames.is_null() {
+                    NonNull::<*const c_char>::dangling().as_ptr()
+                } else {
+                    provider_sonames
+                },
+                provider_count,
+            )
+        };
+        // SAFETY: validated by required_utf8 for this synchronous call.
+        let root = unsafe { required_utf8(root_soname, "root_soname is null")? };
+        let mut namespace = ClosedElfNamespace::new();
+        let mut total_size = 0_usize;
+        for source in sources {
+            // SAFETY: source strings and byte ranges are borrowed for this synchronous call.
+            let soname = unsafe { required_utf8(source.soname, "source SONAME is null")? };
+            if source.length != 0 && source.bytes.is_null() {
+                return Err(FfiFailure::Invalid(
+                    "source bytes are null for nonzero length",
+                ));
+            }
+            total_size = total_size
+                .checked_add(source.length)
+                .ok_or(FfiFailure::Invalid("ELF graph byte size overflow"))?;
+            if total_size > MAX_INPUT_SIZE {
+                return Err(FfiFailure::Invalid("ELF graph exceeds 1 GiB limit"));
+            }
+            // SAFETY: validated null/length shape and guaranteed readable by the C contract.
+            let bytes = unsafe {
+                std::slice::from_raw_parts(
+                    if source.bytes.is_null() {
+                        NonZeroUsize::MIN.get() as *const u8
+                    } else {
+                        source.bytes
+                    },
+                    source.length,
+                )
+            };
+            namespace
+                .add_elf(soname, bytes)
+                .map_err(FfiFailure::Namespace)?;
+        }
+        for &provider in providers {
+            // SAFETY: provider strings are borrowed for this synchronous call.
+            let provider = unsafe { required_utf8(provider, "provider SONAME is null")? };
+            namespace
+                .add_provider(provider)
+                .map_err(FfiFailure::Namespace)?;
+        }
+
+        let options = options_from_pointer(options)?;
+        let graph = match options.and_then(|options| {
+            options
+                .resolver
+                .map(|callback| (callback, options.resolver_context))
+        }) {
+            Some((callback, context)) => {
+                let mut resolver = CallbackResolver { callback, context };
+                namespace
+                    .load_with_resolver(&root, &mut resolver)
+                    .map_err(FfiFailure::Namespace)?
+            }
+            None => namespace.load(&root).map_err(FfiFailure::Namespace)?,
+        };
+        let handle = Box::new(DarwinArtElfGraphHandle {
+            graph: Mutex::new(graph),
+        });
+        // Publish only after recursive relocation and every constructor has succeeded.
+        unsafe { *out_handle = Box::into_raw(handle) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_graph_lookup_root(
+    handle: *mut DarwinArtElfGraphHandle,
+    name: *const c_char,
+    out_address: *mut usize,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if out_address.is_null() {
+            return Err(FfiFailure::Invalid("out_address is null"));
+        }
+        unsafe { *out_address = 0 };
+        if name.is_null() {
+            return Err(FfiFailure::Invalid("name is null"));
+        }
+        // SAFETY: the C contract requires a live handle and NUL-terminated symbol name.
+        let handle = unsafe { handle.as_ref() }.ok_or(FfiFailure::Invalid("handle is null"))?;
+        let name = unsafe { CStr::from_ptr(name) }
+            .to_str()
+            .map_err(|_| FfiFailure::Invalid("symbol name is not UTF-8"))?;
+        let address = lock_graph(handle)?
+            .lookup_root_exported(name)
+            .map_err(FfiFailure::Load)?;
+        unsafe { *out_address = address };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_graph_unload(
+    handle: *mut *mut DarwinArtElfGraphHandle,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if handle.is_null() {
+            return Err(FfiFailure::Invalid("handle pointer is null"));
+        }
+        let value = unsafe { *handle };
+        if value.is_null() {
+            return Ok(());
+        }
+        // Null before Drop: a contained Rust panic cannot leave a dangling published handle.
+        unsafe { *handle = ptr::null_mut() };
+        drop(unsafe { Box::from_raw(value) });
         Ok(())
     })
 }

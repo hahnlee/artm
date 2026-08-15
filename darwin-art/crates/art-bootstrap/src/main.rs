@@ -203,7 +203,7 @@ fn print_help() {
     println!("  audit-runtime-graphics-link  link ART with the strict Android graphics closure");
     println!("  audit-graphics-closure  verify the 32-archive Android graphics closure");
     println!("  probe-runtime-dex  launch Java main(String[]) with Android stdout");
-    println!("  probe-runtime-elf-jni  invoke fixed Android ELF JNI thunks through ART");
+    println!("  probe-runtime-elf-jni  load a fixed Android ELF graph and JNI thunks through ART");
     println!("  probe-window  display the Android View probe in a native NSWindow");
     println!("  probe-runtime-graphics  draw DecorView through Bitmap-backed AOSP Canvas");
     println!("  probe-runtime-graphics-window  display the real Android Canvas frame in NSWindow");
@@ -3344,13 +3344,13 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         }
         let all_symbols = command_output(Command::new("nm").args(["-aC"]).arg(&runtime_library))?;
         for required in [
-            "darwin_art_elf_load_bytes",
-            "darwin_art_elf_run_initializers",
-            "darwin_art_elf_lookup",
-            "darwin_art_elf_unload",
+            "darwin_art_elf_graph_load",
+            "darwin_art_elf_graph_lookup_root",
+            "darwin_art_elf_graph_unload",
             "darwin_art_jni_proxy_init",
             "darwin_art_jni_proxy_java_vm",
             "darwin_art_elf_jni_fixture_registration_status",
+            "darwin_art_elf_jni_fixture_lifecycle_status",
             "ElfJniOnLoadTrampoline",
             "CreateRegularTrampolines",
             "TrampolineEntryMask",
@@ -3718,13 +3718,13 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         "register_libcore_io_AsynchronousCloseMonitor",
         "async_close_monitor_signal_blocked_threads",
         "JniConstants_FileDescriptor_descriptor",
-        "darwin_art_elf_load_bytes",
-        "darwin_art_elf_run_initializers",
-        "darwin_art_elf_lookup",
-        "darwin_art_elf_unload",
+        "darwin_art_elf_graph_load",
+        "darwin_art_elf_graph_lookup_root",
+        "darwin_art_elf_graph_unload",
         "darwin_art_jni_proxy_init",
         "darwin_art_jni_proxy_java_vm",
         "darwin_art_elf_jni_fixture_registration_status",
+        "darwin_art_elf_jni_fixture_lifecycle_status",
         "ElfJniOnLoadTrampoline",
         "CreateRegularTrampolines",
         "TrampolineEntryMask",
@@ -3929,7 +3929,7 @@ fn probe_runtime_dex_flavor(
     let output = command_output(&mut command)?;
     let expected = if elf_jni {
         "Hello from Darwin ART main: 안녕\n\
-         ART Android ELF JNI: load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
+         ART Android ELF JNI: graph=child-first+relocated load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
          ART Darwin Runtime::Create: ok\n\
          ART Darwin app ClassLoader: PathClassLoader\n\
          ART Darwin DEX interpreter: Hello.answer()=42\n\
@@ -3957,9 +3957,7 @@ fn probe_runtime_dex_flavor(
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
     if elf_jni {
-        println!(
-            "probe-runtime-elf-jni: ART load + regular shorty trampolines + current JNIEnv PASS"
-        );
+        println!("probe-runtime-elf-jni: ART DT_NEEDED graph + JNI + reverse finalizers PASS");
     } else if button {
         if show_window {
             println!("probe-runtime-button-window: android.widget.Button -> AOSP HWUI -> NSWindow");

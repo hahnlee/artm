@@ -1,11 +1,29 @@
 #include <jni.h>
 #include <stdint.h>
 
+extern int DarwinArtFixtureChildValue(void);
+extern void darwin_art_fixture_record_lifecycle(int phase);
+
+static int g_root_initialized;
+
+__attribute__((constructor)) static void RootInitialize(void) {
+  if (DarwinArtFixtureChildValue() == 20) {
+    g_root_initialized = 1;
+    darwin_art_fixture_record_lifecycle(2);
+  }
+}
+
+__attribute__((destructor)) static void RootFinalize(void) {
+  darwin_art_fixture_record_lifecycle(4);
+}
+
 static jlong NativeAdd(JNIEnv* env, jclass fixture_class, jint left,
                        jlong middle, jint right) {
   (void)env;
   (void)fixture_class;
-  return (jlong)left + middle + (jlong)right;
+  return DarwinArtFixtureChildValue() == 20
+             ? (jlong)left + middle + (jlong)right
+             : -1;
 }
 
 static uint64_t Mix(uint64_t digest, uint64_t value) {
@@ -96,6 +114,9 @@ static void NativeVoid(JNIEnv* env, jclass fixture_class) {
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
   (void)reserved;
+  if (g_root_initialized != 1 || DarwinArtFixtureChildValue() != 20) {
+    return JNI_ERR;
+  }
   JNIEnv* env = NULL;
   if ((*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK || env == NULL) {
     return JNI_ERR;
@@ -124,6 +145,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
   if ((*env)->RegisterNatives(env, fixture_class, methods, 8) != JNI_OK) {
     return JNI_ERR;
   }
+  darwin_art_fixture_record_lifecycle(3);
   return JNI_VERSION_1_6;
 }
 

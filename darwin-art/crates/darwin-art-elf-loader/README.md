@@ -72,10 +72,15 @@ repacking trampoline; this gate does not claim general JNI `.so` compatibility.
 
 `include/darwin_art_elf_loader.h` exposes the crate as a static library with
 bytes/path loading, a closed synchronous resolver callback, initializer control,
-export lookup, and explicit unload. Every entrypoint returns a stable structured
-status and optionally fills `DarwinArtElfErrorBuffer`; `required` includes the
-terminating NUL even when the message was truncated. Rust panics are caught at
-every fallible C entrypoint.
+export lookup, and explicit unload. The additive graph ABI accepts an exact root
+SONAME, an in-memory SONAME-to-bytes table, and an explicit virtual-provider
+SONAME set. `graph_load` performs the complete recursive relocation and
+dependency-first constructor transaction before publishing its opaque handle;
+root lookup and dependent-first graph unload use that same owner. There is no C
+ABI path search. Every entrypoint returns a stable structured status and
+optionally fills `DarwinArtElfErrorBuffer`; `required` includes the terminating
+NUL even when the message was truncated. Rust panics are caught at every
+fallible C entrypoint.
 
 Handles are unique and opaque. Init/lookup are internally synchronized and may
 move across ART-attached threads. Unload may also run on another thread, but the
@@ -87,5 +92,6 @@ unload. Because lazy binding is rejected, the callback/context is not retained.
 A NativeBridge open adapter must keep the handle private until initializer and
 preflight success, and unload it privately on failure. Export addresses are
 invalid after unload; callers own their exact ABI. The Objective-C++ smoke
-validates header layout, both load forms, versioned imports, cross-thread
-lookup/unload, lifecycle, structured errors, and idempotent unload.
+validates header layout, both single-image load forms, an atomic three-object
+graph load, versioned imports, cross-thread lookup/unload, lifecycle, structured
+errors, and idempotent unload.

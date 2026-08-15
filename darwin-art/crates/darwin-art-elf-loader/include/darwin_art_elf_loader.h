@@ -67,6 +67,13 @@ typedef struct DarwinArtElfLoadOptions {
 } DarwinArtElfLoadOptions;
 
 typedef struct DarwinArtElfHandle DarwinArtElfHandle;
+typedef struct DarwinArtElfGraphHandle DarwinArtElfGraphHandle;
+
+typedef struct DarwinArtElfGraphSource {
+  const char* soname;
+  const uint8_t* bytes;
+  size_t length;
+} DarwinArtElfGraphSource;
 
 uint32_t darwin_art_elf_abi_version(void);
 const char* darwin_art_elf_status_name(int32_t status);
@@ -82,6 +89,33 @@ DarwinArtElfStatus darwin_art_elf_load_path(
     const char* path,
     const DarwinArtElfLoadOptions* options,
     DarwinArtElfHandle** out_handle,
+    DarwinArtElfErrorBuffer* error);
+
+/*
+ * Atomically maps, eagerly relocates, and dependency-first initializes the
+ * complete recursive graph rooted at root_soname. Every DT_NEEDED SONAME must
+ * be present exactly once in sources or provider_sonames. The returned handle
+ * is published only after the complete graph succeeds.
+ */
+DarwinArtElfStatus darwin_art_elf_graph_load(
+    const char* root_soname,
+    const DarwinArtElfGraphSource* sources,
+    size_t source_count,
+    const char* const* provider_sonames,
+    size_t provider_count,
+    const DarwinArtElfLoadOptions* options,
+    DarwinArtElfGraphHandle** out_handle,
+    DarwinArtElfErrorBuffer* error);
+
+DarwinArtElfStatus darwin_art_elf_graph_lookup_root(
+    DarwinArtElfGraphHandle* handle,
+    const char* name,
+    uintptr_t* out_address,
+    DarwinArtElfErrorBuffer* error);
+
+/* Finalizes dependents before dependencies, then nulls the unique handle. */
+DarwinArtElfStatus darwin_art_elf_graph_unload(
+    DarwinArtElfGraphHandle** handle,
     DarwinArtElfErrorBuffer* error);
 
 DarwinArtElfStatus darwin_art_elf_run_initializers(
@@ -124,6 +158,9 @@ DarwinArtElfStatus darwin_art_elf_unload(
  * - Resolver callbacks must not throw C++/Objective-C exceptions or unwind.
  *   Rust panics originating inside this library are contained and reported as
  *   DARWIN_ART_ELF_PANIC.
+ * - Graph source/provider arrays and strings are borrowed only for graph_load.
+ *   The graph copies source bytes and retains no resolver callback after eager
+ *   relocation. Graph lookup addresses remain borrowed until graph_unload.
  */
 
 #ifdef __cplusplus

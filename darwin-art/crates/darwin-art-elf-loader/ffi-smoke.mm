@@ -15,6 +15,7 @@ static_assert(sizeof(DarwinArtElfErrorBuffer) == 24);
 static_assert(sizeof(DarwinArtElfLoadOptions) == 24);
 static_assert(sizeof(DarwinArtElfSymbolRequest) == 56);
 static_assert(offsetof(DarwinArtElfSymbolRequest, needed_libraries) == 40);
+static_assert(sizeof(DarwinArtElfGraphSource) == 24);
 
 int g_provider_data = 11;
 
@@ -94,8 +95,9 @@ std::vector<uint8_t> Read(const char* path) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 3 || darwin_art_elf_abi_version() != DARWIN_ART_ELF_ABI_VERSION) {
-    std::fprintf(stderr, "usage: ffi-smoke POSITIVE.so IMPORT.so\n");
+  if (argc != 6 || darwin_art_elf_abi_version() != DARWIN_ART_ELF_ABI_VERSION) {
+    std::fprintf(stderr,
+                 "usage: ffi-smoke POSITIVE.so IMPORT.so PARENT.so DEP_A.so DEP_B.so\n");
     return 2;
   }
 
@@ -187,8 +189,49 @@ int main(int argc, char** argv) {
     return Fail("closed-default import rejection", status, error);
   }
 
+  const std::vector<uint8_t> parent = Read(argv[3]);
+  const std::vector<uint8_t> dep_a = Read(argv[4]);
+  const std::vector<uint8_t> dep_b = Read(argv[5]);
+  const DarwinArtElfGraphSource graph_sources[] = {
+      {"libgraph_parent.so", parent.data(), parent.size()},
+      {"libgraph_dep_a.so", dep_a.data(), dep_a.size()},
+      {"libgraph_dep_b.so", dep_b.data(), dep_b.size()},
+  };
+  DarwinArtElfGraphHandle* graph = nullptr;
+  error.Reset();
+  status = darwin_art_elf_graph_load(
+      "libgraph_parent.so", graph_sources, 1, nullptr, 0, nullptr, &graph,
+      &error.value);
+  if (status != DARWIN_ART_ELF_UNRESOLVED_SYMBOL || graph != nullptr ||
+      error.value.required == 0) {
+    return Fail("graph_load(missing-dependency)", status, error);
+  }
+  error.Reset();
+  status = darwin_art_elf_graph_load(
+      "libgraph_parent.so", graph_sources, std::size(graph_sources), nullptr,
+      0, nullptr, &graph, &error.value);
+  if (status != DARWIN_ART_ELF_OK || graph == nullptr) {
+    return Fail("graph_load", status, error);
+  }
+  uintptr_t graph_address = 0;
+  status = darwin_art_elf_graph_lookup_root(
+      graph, "graph_value", &graph_address, &error.value);
+  if (status != DARWIN_ART_ELF_OK ||
+      reinterpret_cast<int (*)(void)>(graph_address)() != 62) {
+    return Fail("graph_lookup_root", status, error);
+  }
+  status = darwin_art_elf_graph_unload(&graph, &error.value);
+  if (status != DARWIN_ART_ELF_OK || graph != nullptr) {
+    return Fail("graph_unload", status, error);
+  }
+  status = darwin_art_elf_graph_unload(&graph, &error.value);
+  if (status != DARWIN_ART_ELF_OK) {
+    return Fail("graph_unload(idempotent)", status, error);
+  }
+
   std::puts(
       "elf-loader-ffi-smoke: bytes=pass path=pass resolver=versioned "
-      "lookup=pass init=lifecycle unload=idempotent thread=cross-thread+quiescent");
+      "lookup=pass init=lifecycle graph=atomic+recursive "
+      "unload=idempotent thread=cross-thread+quiescent");
   return 0;
 }

@@ -48,6 +48,7 @@ constexpr uint32_t kFixtureAllEntryMask = 0xffu;
 
 std::atomic<int> g_elf_fixture_status{0};
 std::atomic<uint32_t> g_elf_classified_trampoline_mask{0};
+std::atomic<int> g_elf_fixture_lifecycle{0};
 
 void SetNativeLoaderError(char** error_msg, const std::string& message) {
   if (error_msg != nullptr) {
@@ -77,33 +78,42 @@ std::string Sha256(const std::vector<uint8_t>& bytes) {
   return result;
 }
 
-bool ReadExactElfFixture(const char* path,
-                         std::vector<uint8_t>* bytes,
-                         std::string* error) {
+bool ReadExactFile(const std::string& path,
+                   size_t expected_size,
+                   const char* expected_sha256,
+                   std::vector<uint8_t>* bytes,
+                   std::string* error) {
   std::ifstream input(path, std::ios::binary | std::ios::ate);
   if (!input) {
-    *error = std::string("cannot open Android ELF library: ") + path;
+    *error = "cannot open Android ELF library: " + path;
     return false;
   }
   const std::streampos length = input.tellg();
-  if (length < 0 || static_cast<uint64_t>(length) != kDarwinArtElfJniFixtureSize) {
-    *error = "Android ELF library is outside the first-fixture capability boundary";
+  if (length < 0 || static_cast<uint64_t>(length) != expected_size) {
+    *error = "Android ELF graph member is outside the fixture capability boundary";
     return false;
   }
   bytes->resize(static_cast<size_t>(length));
   input.seekg(0, std::ios::beg);
   input.read(reinterpret_cast<char*>(bytes->data()),
              static_cast<std::streamsize>(bytes->size()));
-  if (!input || Sha256(*bytes) != kDarwinArtElfJniFixtureSha256) {
-    *error = "Android ELF fixture identity/hash mismatch";
+  if (!input || Sha256(*bytes) != expected_sha256) {
+    *error = "Android ELF graph member identity/hash mismatch";
     return false;
   }
   return true;
 }
 
+std::string SiblingPath(const char* root_path, const char* filename) {
+  std::string path(root_path == nullptr ? "" : root_path);
+  const size_t slash = path.find_last_of('/');
+  return slash == std::string::npos ? std::string(filename)
+                                    : path.substr(0, slash + 1) + filename;
+}
+
 struct ElfLibrary {
   uint64_t magic = kElfLibraryMagic;
-  DarwinArtElfHandle* image = nullptr;
+  DarwinArtElfGraphHandle* graph = nullptr;
   uintptr_t jni_on_load = 0;
   uintptr_t jni_on_unload = 0;
   alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)
@@ -111,6 +121,42 @@ struct ElfLibrary {
   DarwinArtJniProxy* proxy = nullptr;
   darwin_art::android_jni::TrampolineSet* trampolines = nullptr;
 };
+
+void FixtureRecordLifecycle(int phase) {
+  if (phase < 1 || phase > 5) {
+    g_elf_fixture_lifecycle.store(-phase, std::memory_order_relaxed);
+    return;
+  }
+  int observed = g_elf_fixture_lifecycle.load(std::memory_order_relaxed);
+  while (!g_elf_fixture_lifecycle.compare_exchange_weak(
+      observed, observed * 10 + phase, std::memory_order_relaxed)) {}
+}
+
+DarwinArtElfResolveStatus ResolveFixtureProvider(
+    void*,
+    const DarwinArtElfSymbolRequest* request,
+    uintptr_t* out_address,
+    DarwinArtElfErrorBuffer*) {
+  if (request == nullptr || out_address == nullptr ||
+      request->abi_version != DARWIN_ART_ELF_ABI_VERSION ||
+      request->symbol == nullptr ||
+      std::strcmp(request->symbol, "darwin_art_fixture_record_lifecycle") != 0 ||
+      request->version_soname != nullptr || request->version_name != nullptr) {
+    return DARWIN_ART_ELF_RESOLVE_ERROR;
+  }
+  bool provider_is_explicit = false;
+  for (size_t index = 0; index < request->needed_library_count; ++index) {
+    const char* soname = request->needed_libraries[index];
+    provider_is_explicit = provider_is_explicit ||
+                           (soname != nullptr &&
+                            std::strcmp(soname, kDarwinArtElfJniHostProviderSoname) == 0);
+  }
+  if (!provider_is_explicit) {
+    return DARWIN_ART_ELF_RESOLVE_ERROR;
+  }
+  *out_address = reinterpret_cast<uintptr_t>(&FixtureRecordLifecycle);
+  return DARWIN_ART_ELF_RESOLVE_FOUND;
+}
 
 ElfLibrary* AsElfLibrary(void* handle) {
   auto* library = static_cast<ElfLibrary*>(handle);
@@ -397,7 +443,7 @@ bool LookupElfSymbol(ElfLibrary* library,
   std::array<char, 1024> storage{};
   DarwinArtElfErrorBuffer error_buffer{storage.data(), storage.size(), 0};
   const DarwinArtElfStatus status =
-      darwin_art_elf_lookup(library->image, name, address, &error_buffer);
+      darwin_art_elf_graph_lookup_root(library->graph, name, address, &error_buffer);
   if (status == DARWIN_ART_ELF_OK) {
     return true;
   }
@@ -485,28 +531,37 @@ void* OpenNativeLibrary(JNIEnv* env,
     }
   }
   if (is_elf) {
-    std::vector<uint8_t> bytes;
+    std::vector<uint8_t> root_bytes;
+    std::vector<uint8_t> child_bytes;
     std::string error;
-    if (env == nullptr || !ReadExactElfFixture(path, &bytes, &error)) {
+    const std::string child_path =
+        SiblingPath(path, kDarwinArtElfJniChildFilename);
+    if (env == nullptr ||
+        !ReadExactFile(path, kDarwinArtElfJniFixtureSize,
+                       kDarwinArtElfJniFixtureSha256, &root_bytes, &error) ||
+        !ReadExactFile(child_path, kDarwinArtElfJniChildSize,
+                       kDarwinArtElfJniChildSha256, &child_bytes, &error)) {
       SetNativeLoaderError(error_msg,
                            env == nullptr ? "Android ELF load requires a live JNIEnv" : error);
       return nullptr;
     }
     auto library = std::make_unique<ElfLibrary>();
-    DarwinArtElfLoadOptions options{DARWIN_ART_ELF_ABI_VERSION, nullptr, nullptr};
+    g_elf_fixture_lifecycle.store(0, std::memory_order_relaxed);
+    const DarwinArtElfGraphSource sources[] = {
+        {kDarwinArtElfJniFixtureSoname, root_bytes.data(), root_bytes.size()},
+        {kDarwinArtElfJniChildSoname, child_bytes.data(), child_bytes.size()},
+    };
+    const char* providers[] = {kDarwinArtElfJniHostProviderSoname};
+    DarwinArtElfLoadOptions options{
+        DARWIN_ART_ELF_ABI_VERSION, &ResolveFixtureProvider, library.get()};
     std::array<char, 1024> error_storage{};
     DarwinArtElfErrorBuffer error_buffer{error_storage.data(), error_storage.size(), 0};
-    DarwinArtElfStatus status = darwin_art_elf_load_bytes(
-        bytes.data(), bytes.size(), &options, &library->image, &error_buffer);
-    if (status != DARWIN_ART_ELF_OK) {
-      SetNativeLoaderError(error_msg, "Android ELF load failed: " + ElfError(status, error_buffer));
-      return nullptr;
-    }
-    status = darwin_art_elf_run_initializers(library->image, &error_buffer);
+    DarwinArtElfStatus status = darwin_art_elf_graph_load(
+        kDarwinArtElfJniFixtureSoname, sources, std::size(sources), providers,
+        std::size(providers), &options, &library->graph, &error_buffer);
     if (status != DARWIN_ART_ELF_OK) {
       SetNativeLoaderError(error_msg,
-                           "Android ELF initialization failed: " + ElfError(status, error_buffer));
-      darwin_art_elf_unload(&library->image, nullptr);
+                           "Android ELF graph load failed: " + ElfError(status, error_buffer));
       return nullptr;
     }
     DarwinArtJniBackend backend{library.get(), &ProxyFindClass, &ProxyRegisterNatives,
@@ -519,12 +574,12 @@ void* OpenNativeLibrary(JNIEnv* env,
       SetNativeLoaderError(error_msg,
                            library->proxy == nullptr ? "Android JNI proxy initialization failed"
                                                      : "Android ELF lifecycle preflight failed: " + error);
-      darwin_art_elf_unload(&library->image, nullptr);
+      darwin_art_elf_graph_unload(&library->graph, nullptr);
       return nullptr;
     }
     if (needs_native_bridge == nullptr) {
       SetNativeLoaderError(error_msg, "Android ELF load requires needs_native_bridge ownership");
-      darwin_art_elf_unload(&library->image, nullptr);
+      darwin_art_elf_graph_unload(&library->graph, nullptr);
       return nullptr;
     }
     *needs_native_bridge = true;
@@ -554,7 +609,7 @@ bool CloseNativeLibrary(void* handle, bool needs_native_bridge, char** error_msg
     std::array<char, 1024> storage{};
     DarwinArtElfErrorBuffer error_buffer{storage.data(), storage.size(), 0};
     const DarwinArtElfStatus status =
-        darwin_art_elf_unload(&library->image, &error_buffer);
+        darwin_art_elf_graph_unload(&library->graph, &error_buffer);
     delete library;
     if (status != DARWIN_ART_ELF_OK) {
       SetNativeLoaderError(error_msg, "Android ELF unload failed: " + ElfError(status, error_buffer));
@@ -583,6 +638,10 @@ void ResetNativeLoader() {}
 
 extern "C" int darwin_art_elf_jni_fixture_registration_status() {
   return android::g_elf_fixture_status.load(std::memory_order_relaxed);
+}
+
+extern "C" int darwin_art_elf_jni_fixture_lifecycle_status() {
+  return android::g_elf_fixture_lifecycle.load(std::memory_order_relaxed);
 }
 
 extern "C" palette_status_t PaletteSchedGetPriority(int32_t, int32_t* java_priority) {

@@ -38,6 +38,7 @@
 #include "well_known_classes.h"
 
 extern "C" int darwin_art_elf_jni_fixture_registration_status();
+extern "C" int darwin_art_elf_jni_fixture_lifecycle_status();
 
 static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
 
@@ -1348,10 +1349,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     }
     const int bridge_status =
         darwin_art_elf_jni_fixture_registration_status();
+    const int lifecycle_status =
+        darwin_art_elf_jni_fixture_lifecycle_status();
     if (!loaded || !load_error.empty() || bridge_status != 0x3f ||
+        lifecycle_status != 123 ||
         env->ExceptionCheck()) {
       std::cerr << "ART Android ELF JNI: load/registration failed, status="
-                << bridge_status << " load_error=" << load_error << "\n";
+                << bridge_status << " lifecycle=" << lifecycle_status
+                << " load_error=" << load_error << "\n";
       return 41;
     }
     jmethodID run_acceptance = env->GetStaticMethodID(
@@ -1368,8 +1373,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       }
       return 42;
     }
-    std::cout << "ART Android ELF JNI: load+JNI_OnLoad+RegisterNatives="
-                 "installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n"
+    std::cout << "ART Android ELF JNI: graph=child-first+relocated "
+                 "load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all "
+                 "nativeUsesEnv=current stack-repack=ok\n"
               << std::flush;
   }
 
@@ -1465,6 +1471,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
   }
   if (darwin_art::android_jni::TrampolineLiveCount() != 0) {
     std::cerr << "ART Darwin shutdown: ELF JNI trampolines remain live\n";
+    std::lock_guard<std::mutex> lock(g_process_state.mutex);
+    g_process_state.phase = ProcessPhase::kShutdownFailed;
+    return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+  }
+  if (darwin_art_elf_jni_fixture_registration_status() != 0 &&
+      darwin_art_elf_jni_fixture_lifecycle_status() != 12345) {
+    std::cerr << "ART Darwin shutdown: ELF JNI graph finalizer order failed, status="
+              << darwin_art_elf_jni_fixture_lifecycle_status() << "\n";
     std::lock_guard<std::mutex> lock(g_process_state.mutex);
     g_process_state.phase = ProcessPhase::kShutdownFailed;
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;

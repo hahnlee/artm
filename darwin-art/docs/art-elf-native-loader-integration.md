@@ -5,24 +5,27 @@ Android `.so` compatibility.
 
 ## Accepted image
 
-`tools/build-android-elf-jni-fixture.sh` builds one import-free AArch64
-`ET_DYN` fixture and generates an identity header from its exact byte length
-and SHA-256. The runtime reads the file once, verifies that identity, and gives
-those same bytes to `darwin-art-elf-loader`. No Darwin global symbol lookup is
-available.
+`tools/build-android-elf-jni-fixture.sh` builds a root and child AArch64
+`ET_DYN` graph and generates an identity header from both exact byte lengths and
+SHA-256 values. The adapter reads the requested root and one fixed-name sibling,
+verifies both identities, and supplies those bytes under their exact embedded
+SONAMEs. It never searches a guest path or Darwin's global symbol namespace.
 
-The accepted image has no `DT_NEEDED`, `DT_FINI`, `DT_FINI_ARRAY`, GNU RELRO,
-TLS, or unsupported relocations. This ART adapter owns one image only; it does
-not recursively load a SONAME dependency graph. The standalone loader supports
-ordered `DT_FINI_ARRAY`/`DT_FINI` teardown, but this fixture does not exercise
-that path or compose it with Bionic `__cxa_finalize`.
+The root has exactly two `DT_NEEDED` entries: the real child and one explicit
+virtual host-provider SONAME. The child needs only that provider. The provider
+exports one reviewed fixed-register `void(int)` lifecycle recorder; unknown
+SONAMEs and symbols fail closed. Both ELF objects have initializer/finalizer
+arrays and no GNU RELRO or TLS. The root's constructor and `NativeAdd` reach a
+real child export through eager `R_AARCH64_JUMP_SLOT` relocation.
 
 ## ART lifecycle
 
 `JavaVMExt::LoadNativeLibrary` calls the Darwin `OpenNativeLibrary` seam. Mach-O
 libraries keep their existing `dlopen`/`dlclose` ownership. The hash-locked ELF
-fixture instead receives a private Rust loader handle, runs its init array, and
-is published only after lifecycle-symbol and JNI-proxy preflight. It is tagged
+fixture instead receives a private Rust graph handle. The C ABI stages the
+complete closure, resolves it only against graph scope plus the explicit
+provider, and runs every constructor before returning the still-private handle.
+The adapter publishes only after lifecycle-symbol and JNI-proxy preflight. It is tagged
 `needs_native_bridge=true`; close dispatch is therefore atomic between the ELF
 handle and the raw dyld handle.
 
@@ -51,10 +54,14 @@ Registration is transactional at this boundary. Every thunk must exist and
 ART must register the complete table before the backend returns `JNI_OK`. A
 failure unregisters the exact fixture class, unpublishes the generation, and
 unmaps the page. On success the `ElfLibrary` owns the executable page and ELF
-image together. ART shutdown provides the required external quiescence, then
-the close seam unpublishes/unmaps the thunks before unmapping the ELF image.
+graph together. ART shutdown provides the required external quiescence, then
+the close seam unpublishes/unmaps the thunks before finalizing the root and then
+the child, each before its mapping is released.
 The shutdown acceptance also requires the global live-page count to return to
-zero after `DestroyJavaVM`.
+zero after `DestroyJavaVM`. The host recorder observes the exact sequence child
+constructor → root constructor → `JNI_OnLoad` → root finalizer → child
+finalizer. Thus constructor order, child relocation, actual JNI registration,
+and reverse graph finalization are one real ART process gate.
 The fixture's `JNI_OnUnload` is a reviewed no-op. General ART unload still needs
 to order the separate Bionic `__cxa_finalize(dso_handle)` seam before the
 loader-owned ELF finalizer arrays; that orchestration is not claimed here.
@@ -73,9 +80,12 @@ it becomes the next action and the dispatcher is restored at the front.
    `RegisterNatives` table reached: complete.
 4. Regular-JNI scalar/reference shorty generation, actual ART registration,
    narrow and FP stack repacking, and Z/B/C/S/I/J/F/D/L/V return paths:
-   complete for the dependency-free fixture.
-5. Arbitrary libraries, CriticalNative, recursive `DT_NEEDED` namespaces, and
-   complete JNI proxy tables: incomplete.
+   complete for the graph root.
+5. The reviewed recursive `DT_NEEDED` root+child graph, explicit provider,
+   transactional constructors, and reverse finalizers: complete.
+6. Arbitrary dependency discovery, CriticalNative, Bionic
+   `__cxa_finalize(dso_handle)` composition, and complete JNI proxy/provider
+   tables: incomplete.
 
 Stage 4 explicitly repacks the two calling conventions. The fixture gate
 compiles and disassembles the same source for both targets: Android uses

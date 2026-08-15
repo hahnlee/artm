@@ -8,6 +8,7 @@ source_root="$project_root/_aosp/art-register-natives-bridge"
 bridge_root="$project_root/tools/android-register-natives-bridge"
 fixture_root="$project_root/probes/android-elf-jni-fixture"
 fixture_elf="$project_root/_build/android-elf-jni-fixture/libdarwin-art-jni-fixture.so"
+fixture_child="$project_root/_build/android-elf-jni-fixture/libdarwin-art-jni-child.so"
 build_dir="$project_root/_build/register-natives-bridge"
 
 fail() { echo "register-natives-bridge: $*" >&2; exit 3; }
@@ -127,8 +128,41 @@ assert header.index("getTrampolineForFunctionPointer") < header.index(
 print("register-natives-bridge: upstream-flow=PASS darwin-current=raw-pointer-bypass")
 PY
 
+python3 - "$project_root" <<'PY'
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+adapter = (root / "compat/darwin_runtime_adapters.cc").read_text()
+probe = (root / "probes/runtime_link_probe.cc").read_text()
+open_start = adapter.index("void* OpenNativeLibrary(")
+elf_start = adapter.index("if (is_elf) {", open_start)
+host_start = adapter.index("void* handle =", elf_start)
+elf = adapter[elf_start:host_start]
+assert "darwin_art_elf_graph_load(" in elf
+assert "darwin_art_elf_graph_lookup_root(" in adapter
+assert "darwin_art_elf_graph_unload(" in adapter
+assert "darwin_art_elf_load_bytes(" not in adapter
+assert "dlopen(" not in elf and "dlsym(" not in elf
+assert elf.index("darwin_art_elf_graph_load(") < elf.index("darwin_art_jni_proxy_init(")
+assert elf.index("darwin_art_elf_graph_load(") < elf.index("*needs_native_bridge = true")
+close = adapter[adapter.index("bool CloseNativeLibrary("):
+                  adapter.index("void NativeLoaderFreeErrorMessage")]
+assert close.index("DestroyRegularTrampolines") < close.index("darwin_art_elf_graph_unload")
+assert "kDarwinArtElfJniHostProviderSoname" in adapter
+assert "lifecycle_status != 123" in probe
+assert "lifecycle_status() != 12345" in probe
+print("register-natives-bridge: local-graph-flow=PASS publish=after-complete no-dyld=ELF")
+PY
+
 [[ "$(sha "$fixture_root/native_fixture.c")" == "$FIXTURE_C_SHA256" ]] ||
   fail "fixture C source SHA mismatch"
+[[ "$(sha "$fixture_root/child.c")" == "$FIXTURE_CHILD_C_SHA256" ]] ||
+  fail "fixture child C source SHA mismatch"
+[[ "$(sha "$fixture_root/host_provider.c")" == "$FIXTURE_HOST_PROVIDER_C_SHA256" ]] ||
+  fail "fixture host-provider C source SHA mismatch"
+[[ "$(sha "$fixture_root/child.exports.map")" == "$FIXTURE_CHILD_MAP_SHA256" ]] ||
+  fail "fixture child export map SHA mismatch"
 [[ "$(sha "$fixture_root/NativeFixture.java")" == "$FIXTURE_JAVA_SHA256" ]] ||
   fail "fixture Java source SHA mismatch"
 grep -F "{\"nativeAdd\", \"$FIXTURE_ADD_DESCRIPTOR\"" "$fixture_root/native_fixture.c" >/dev/null ||
@@ -141,6 +175,8 @@ ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}" \
 [[ -f "$fixture_elf" ]] || missing "$fixture_elf"
 [[ "$(sha "$fixture_elf")" == "$FIXTURE_ELF_SHA256" ]] ||
   fail "fixture ELF SHA mismatch"
+[[ -f "$fixture_child" && "$(sha "$fixture_child")" == "$FIXTURE_CHILD_ELF_SHA256" ]] ||
+  fail "fixture child ELF SHA mismatch"
 
 ndk="${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}/ndk/$NDK_REVISION"
 toolchain="$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin"
@@ -154,8 +190,20 @@ spill_value="0x$($elf_nm -n "$fixture_elf" | awk '$3 == "NativeSpill" {print $1}
 [[ "$((add_value))" == "$((FIXTURE_NATIVE_ADD))" ]] || fail "NativeAdd ELF value mismatch"
 [[ "$((spill_value))" == "$((FIXTURE_NATIVE_SPILL))" ]] || fail "NativeSpill ELF value mismatch"
 "$readelf" -lW "$fixture_elf" |
-  grep -E "LOAD +0x000744 +0x0000000000004744 .* R E +0x4000" >/dev/null ||
+  grep -E "LOAD +0x0008cc +0x00000000000048cc .* R E +0x4000" >/dev/null ||
   fail "fixture executable PT_LOAD mismatch"
+root_dynamic="$("$readelf" -d "$fixture_elf")"
+child_dynamic="$("$readelf" -d "$fixture_child")"
+[[ "$(grep -c '(NEEDED)' <<< "$root_dynamic")" == 2 ]] ||
+  fail "fixture root dependency count drift"
+grep -E '\(NEEDED\).*libdarwin-art-jni-child\.so' <<< "$root_dynamic" >/dev/null ||
+  fail "fixture root child dependency drift"
+grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' <<< "$root_dynamic" >/dev/null ||
+  fail "fixture root virtual-provider dependency drift"
+[[ "$(grep -c '(NEEDED)' <<< "$child_dynamic")" == 1 ]] ||
+  fail "fixture child dependency count drift"
+grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' <<< "$child_dynamic" >/dev/null ||
+  fail "fixture child virtual-provider dependency drift"
 
 stage="$(mktemp -d "${TMPDIR:-/tmp}/register-natives-bridge.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
