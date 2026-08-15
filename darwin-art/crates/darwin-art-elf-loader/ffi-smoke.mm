@@ -13,6 +13,7 @@ namespace {
 static_assert(sizeof(DarwinArtElfStatus) == sizeof(int32_t));
 static_assert(sizeof(DarwinArtElfErrorBuffer) == 24);
 static_assert(sizeof(DarwinArtElfLoadOptions) == 24);
+static_assert(sizeof(DarwinArtElfLifecycleCallbacks) == 32);
 static_assert(sizeof(DarwinArtElfSymbolRequest) == 56);
 static_assert(offsetof(DarwinArtElfSymbolRequest, needed_libraries) == 40);
 static_assert(sizeof(DarwinArtElfGraphSource) == 24);

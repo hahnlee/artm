@@ -190,7 +190,8 @@ xcrun clang++ -std=c++17 -arch arm64 -Wall -Wextra -Werror \
 file "$fixture_dir/ffi-smoke" | grep -F 'Mach-O 64-bit executable arm64' >/dev/null
 for symbol in darwin_art_elf_load_bytes darwin_art_elf_load_path \
   darwin_art_elf_run_initializers darwin_art_elf_lookup darwin_art_elf_unload \
-  darwin_art_elf_graph_load darwin_art_elf_graph_lookup_root \
+  darwin_art_elf_graph_load darwin_art_elf_graph_load_with_lifecycle \
+  darwin_art_elf_graph_lookup_root \
   darwin_art_elf_graph_unload; do
   nm -gU "$fixture_dir/ffi-smoke" | grep -E " _${symbol}$" >/dev/null
 done

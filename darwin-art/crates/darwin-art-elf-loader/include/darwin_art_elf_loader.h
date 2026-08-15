@@ -66,6 +66,19 @@ typedef struct DarwinArtElfLoadOptions {
   void* resolver_context;
 } DarwinArtElfLoadOptions;
 
+typedef int (*DarwinArtElfPublishImageCallback)(void* context,
+                                                uintptr_t start,
+                                                uintptr_t end);
+typedef int (*DarwinArtElfFinalizeImageCallback)(void* context,
+                                                 uintptr_t start,
+                                                 uintptr_t end);
+typedef struct DarwinArtElfLifecycleCallbacks {
+  uint32_t abi_version;
+  DarwinArtElfPublishImageCallback publish_image;
+  DarwinArtElfFinalizeImageCallback finalize_image;
+  void* context;
+} DarwinArtElfLifecycleCallbacks;
+
 typedef struct DarwinArtElfHandle DarwinArtElfHandle;
 typedef struct DarwinArtElfGraphHandle DarwinArtElfGraphHandle;
 
@@ -104,6 +117,23 @@ DarwinArtElfStatus darwin_art_elf_graph_load(
     const char* const* provider_sonames,
     size_t provider_count,
     const DarwinArtElfLoadOptions* options,
+    DarwinArtElfGraphHandle** out_handle,
+    DarwinArtElfErrorBuffer* error);
+
+/*
+ * Graph load with per-image Bionic destructor ownership. Every reservation is
+ * published after relocation and before constructors. finalize_image is called
+ * dependent-first, while the image is live, before DT_FINI_ARRAY/DT_FINI and
+ * unmapping. The callback record and context must outlive the graph.
+ */
+DarwinArtElfStatus darwin_art_elf_graph_load_with_lifecycle(
+    const char* root_soname,
+    const DarwinArtElfGraphSource* sources,
+    size_t source_count,
+    const char* const* provider_sonames,
+    size_t provider_count,
+    const DarwinArtElfLoadOptions* options,
+    const DarwinArtElfLifecycleCallbacks* lifecycle,
     DarwinArtElfGraphHandle** out_handle,
     DarwinArtElfErrorBuffer* error);
 

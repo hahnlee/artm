@@ -1,6 +1,6 @@
 use crate::{
-    ClosedElfNamespace, LoadError, LoadedElf, LoadedElfGraph, NamespaceError, ResolveError,
-    ResolvedSymbol, SymbolRequest, SymbolResolver,
+    ClosedElfNamespace, DsoLifecycle, LoadError, LoadedElf, LoadedElfGraph, NamespaceError,
+    ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver,
 };
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::num::NonZeroUsize;
@@ -9,6 +9,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::ptr;
 use std::ptr::NonNull;
+use std::sync::Arc;
 use std::sync::{Mutex, MutexGuard};
 use std::{fs::File, io::Read};
 
@@ -70,6 +71,58 @@ pub struct DarwinArtElfLoadOptions {
     pub resolver_context: *mut c_void,
 }
 
+pub type DarwinArtElfPublishImageCallback =
+    unsafe extern "C" fn(context: *mut c_void, start: usize, end: usize) -> i32;
+pub type DarwinArtElfFinalizeImageCallback =
+    unsafe extern "C" fn(context: *mut c_void, start: usize, end: usize) -> i32;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct DarwinArtElfLifecycleCallbacks {
+    pub abi_version: u32,
+    pub publish_image: Option<DarwinArtElfPublishImageCallback>,
+    pub finalize_image: Option<DarwinArtElfFinalizeImageCallback>,
+    pub context: *mut c_void,
+}
+
+struct CallbackDsoLifecycle {
+    publish: DarwinArtElfPublishImageCallback,
+    finalize: DarwinArtElfFinalizeImageCallback,
+    context: usize,
+}
+
+// SAFETY: the embedding contract requires the callback context to remain live and permits calls
+// from any graph owner thread until the final graph clone is destroyed.
+unsafe impl Send for CallbackDsoLifecycle {}
+unsafe impl Sync for CallbackDsoLifecycle {}
+
+impl DsoLifecycle for CallbackDsoLifecycle {
+    fn publish_image(&self, range: std::ops::Range<usize>) -> Result<(), String> {
+        // SAFETY: callbacks and context were validated and are retained by this owner.
+        let status = unsafe { (self.publish)(self.context as *mut c_void, range.start, range.end) };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "image lifecycle publish callback failed with status {status}"
+            ))
+        }
+    }
+
+    fn finalize_image(&self, range: std::ops::Range<usize>) -> Result<(), String> {
+        // SAFETY: the callback/context lifetime contract extends through synchronous teardown.
+        let status =
+            unsafe { (self.finalize)(self.context as *mut c_void, range.start, range.end) };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "image lifecycle finalize callback failed with status {status}"
+            ))
+        }
+    }
+}
+
 pub struct DarwinArtElfHandle {
     image: Mutex<LoadedElf>,
 }
@@ -105,6 +158,7 @@ impl FfiFailure {
                 NamespaceError::UnknownDependency { .. } => DarwinArtElfStatus::UnresolvedSymbol,
                 NamespaceError::SonameMismatch { .. } => DarwinArtElfStatus::Format,
                 NamespaceError::Load { source, .. } => load_error_status(source),
+                NamespaceError::Lifecycle { .. } => DarwinArtElfStatus::Lifecycle,
             },
         }
     }
@@ -460,6 +514,33 @@ pub unsafe extern "C" fn darwin_art_elf_graph_load(
     out_handle: *mut *mut DarwinArtElfGraphHandle,
     error: *mut DarwinArtElfErrorBuffer,
 ) -> DarwinArtElfStatus {
+    unsafe {
+        darwin_art_elf_graph_load_with_lifecycle(
+            root_soname,
+            sources,
+            source_count,
+            provider_sonames,
+            provider_count,
+            options,
+            ptr::null(),
+            out_handle,
+            error,
+        )
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_graph_load_with_lifecycle(
+    root_soname: *const c_char,
+    sources: *const DarwinArtElfGraphSource,
+    source_count: usize,
+    provider_sonames: *const *const c_char,
+    provider_count: usize,
+    options: *const DarwinArtElfLoadOptions,
+    lifecycle: *const DarwinArtElfLifecycleCallbacks,
+    out_handle: *mut *mut DarwinArtElfGraphHandle,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
     ffi_call(error, || {
         if out_handle.is_null() {
             return Err(FfiFailure::Invalid("out_handle is null"));
@@ -535,6 +616,28 @@ pub unsafe extern "C" fn darwin_art_elf_graph_load(
                 .map_err(FfiFailure::Namespace)?;
         }
 
+        let lifecycle: Option<Arc<dyn DsoLifecycle>> = if lifecycle.is_null() {
+            None
+        } else {
+            // SAFETY: the C contract supplies one readable lifecycle callback record.
+            let lifecycle = unsafe { &*lifecycle };
+            if lifecycle.abi_version != ABI_VERSION {
+                return Err(FfiFailure::Invalid(
+                    "lifecycle callback ABI version mismatch",
+                ));
+            }
+            let publish = lifecycle
+                .publish_image
+                .ok_or(FfiFailure::Invalid("publish_image callback is null"))?;
+            let finalize = lifecycle
+                .finalize_image
+                .ok_or(FfiFailure::Invalid("finalize_image callback is null"))?;
+            Some(Arc::new(CallbackDsoLifecycle {
+                publish,
+                finalize,
+                context: lifecycle.context as usize,
+            }))
+        };
         let options = options_from_pointer(options)?;
         let graph = match options.and_then(|options| {
             options
@@ -544,10 +647,15 @@ pub unsafe extern "C" fn darwin_art_elf_graph_load(
             Some((callback, context)) => {
                 let mut resolver = CallbackResolver { callback, context };
                 namespace
-                    .load_with_resolver(&root, &mut resolver)
+                    .load_with_resolver_and_lifecycle(&root, &mut resolver, lifecycle)
                     .map_err(FfiFailure::Namespace)?
             }
-            None => namespace.load(&root).map_err(FfiFailure::Namespace)?,
+            None => {
+                let mut resolver = crate::RejectAllResolver;
+                namespace
+                    .load_with_resolver_and_lifecycle(&root, &mut resolver, lifecycle)
+                    .map_err(FfiFailure::Namespace)?
+            }
         };
         let handle = Box::new(DarwinArtElfGraphHandle {
             graph: Mutex::new(graph),

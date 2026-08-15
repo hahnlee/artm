@@ -53,12 +53,13 @@ there is no structurally partially initialized graph. A constructor terminating
 the process or unwinding across its C ABI is outside this loader's recovery
 contract.
 
-This slice calls only ELF `DT_FINI_ARRAY` and `DT_FINI`. Bionic's C++
-`__cxa_atexit`/`__cxa_finalize(dso_handle)` registry is a separate provider seam:
-a composed Bionic lifecycle provider must finalize its DSO registrations before
-the ELF object's arrays run. That orchestration is intentionally not synthesized
-by this loader. ELF TLS remains rejected, including finalizers that would
-require a guest TLS runtime.
+The additive per-image lifecycle seam composes Bionic C++
+`__cxa_atexit`/`__cxa_finalize(dso_handle)` with ELF finalization. The graph
+publishes every mmap reservation after full relocation and before constructors.
+Dependent-first teardown drains and quiesces that image's callbacks before its
+`DT_FINI_ARRAY` and `DT_FINI`; callback failure is fail-stop before unmap. No
+global `finalize(NULL)` is used. ELF TLS remains rejected, including finalizers
+that would require a guest TLS runtime.
 
 Graph exports with default or protected visibility participate in the closed
 dependency scope. Nonzero `SHN_ABS` definitions are rejected explicitly rather

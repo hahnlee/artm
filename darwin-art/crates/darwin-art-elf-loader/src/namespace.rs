@@ -1,6 +1,6 @@
 use super::{
-    ExportedSymbol, LoadError, LoadedElf, RejectAllResolver, ResolveError, ResolvedSymbol,
-    STB_GLOBAL, StagedElf, SymbolRequest, SymbolResolver, VersionRequirement,
+    DsoLifecycle, ExportedSymbol, LoadError, LoadedElf, RejectAllResolver, ResolveError,
+    ResolvedSymbol, STB_GLOBAL, StagedElf, SymbolRequest, SymbolResolver, VersionRequirement,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error as StdError;
@@ -33,6 +33,10 @@ pub enum NamespaceError {
         soname: String,
         source: LoadError,
     },
+    Lifecycle {
+        soname: String,
+        message: String,
+    },
 }
 
 impl fmt::Display for NamespaceError {
@@ -56,6 +60,12 @@ impl fmt::Display for NamespaceError {
                 embedded
             ),
             Self::Load { soname, source } => write!(formatter, "failed to load {soname}: {source}"),
+            Self::Lifecycle { soname, message } => {
+                write!(
+                    formatter,
+                    "failed to publish lifecycle for {soname}: {message}"
+                )
+            }
         }
     }
 }
@@ -117,6 +127,15 @@ impl ClosedElfNamespace {
         root: &str,
         external: &mut dyn SymbolResolver,
     ) -> Result<LoadedElfGraph, NamespaceError> {
+        self.load_with_resolver_and_lifecycle(root, external, None)
+    }
+
+    pub fn load_with_resolver_and_lifecycle(
+        &self,
+        root: &str,
+        external: &mut dyn SymbolResolver,
+        lifecycle: Option<Arc<dyn DsoLifecycle>>,
+    ) -> Result<LoadedElfGraph, NamespaceError> {
         let mut builder = GraphBuilder::default();
         if self.providers.contains(root) {
             return Err(NamespaceError::SonameMismatch {
@@ -150,6 +169,22 @@ impl ClosedElfNamespace {
                     soname: builder.objects[index].soname.clone(),
                     source,
                 })?;
+        }
+
+        // Publish every live reservation only after the full graph has relocated, but before
+        // the first constructor can register an image-local `__dso_handle`. Attached lifecycle
+        // owners are dropped transactionally if a later publication or constructor fails.
+        if let Some(lifecycle) = lifecycle {
+            for &index in &builder.dependency_order {
+                builder.objects[index]
+                    .staged
+                    .image
+                    .publish_dso_lifecycle(Arc::clone(&lifecycle))
+                    .map_err(|message| NamespaceError::Lifecycle {
+                        soname: builder.objects[index].soname.clone(),
+                        message,
+                    })?;
+            }
         }
 
         for &index in &builder.dependency_order {

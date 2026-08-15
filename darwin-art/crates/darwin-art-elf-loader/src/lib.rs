@@ -3,7 +3,9 @@ use std::error::Error as StdError;
 use std::ffi::{c_int, c_void};
 use std::fmt;
 use std::num::NonZeroUsize;
+use std::ops::Range;
 use std::ptr::{self, NonNull};
+use std::sync::Arc;
 
 mod ffi;
 mod namespace;
@@ -351,6 +353,18 @@ pub struct LoadedElf {
     finalizers_armed: bool,
     finalizers_run: bool,
     finalizers: Vec<usize>,
+    dso_lifecycle: Option<Arc<dyn DsoLifecycle>>,
+}
+
+/// Per-image lifecycle boundary for Bionic `__cxa_atexit` registrations.
+///
+/// A graph publishes the complete, unique mmap reservation before running any
+/// constructor. Teardown is called while that reservation is still executable,
+/// before ELF fini entries and `munmap`. Implementations must synchronously
+/// drain callbacks and stop admitting registrations before returning.
+pub trait DsoLifecycle: Send + Sync {
+    fn publish_image(&self, range: Range<usize>) -> Result<(), String>;
+    fn finalize_image(&self, range: Range<usize>) -> Result<(), String>;
 }
 
 struct StagedElf {
@@ -447,6 +461,7 @@ impl LoadedElf {
             finalizers_armed: false,
             finalizers_run: false,
             finalizers: Vec::new(),
+            dso_lifecycle: None,
         };
         std::mem::forget(mapping);
 
@@ -534,6 +549,17 @@ impl LoadedElf {
     fn arm_finalizers(&mut self) {
         debug_assert!(self.initializers_run);
         self.finalizers_armed = true;
+    }
+
+    fn mapping_range(&self) -> Range<usize> {
+        let start = self.mapping.as_ptr() as usize;
+        start..start + self.mapping_size
+    }
+
+    fn publish_dso_lifecycle(&mut self, lifecycle: Arc<dyn DsoLifecycle>) -> Result<(), String> {
+        lifecycle.publish_image(self.mapping_range())?;
+        self.dso_lifecycle = Some(lifecycle);
+        Ok(())
     }
 
     /// Consumes this image, running its finalizers (when initialized) before unmapping it.
@@ -1347,6 +1373,12 @@ impl LoadedElf {
 
 impl Drop for LoadedElf {
     fn drop(&mut self) {
+        if let Some(lifecycle) = self.dso_lifecycle.take() {
+            if lifecycle.finalize_image(self.mapping_range()).is_err() {
+                // Continuing could unmap code that still owns live callbacks.
+                std::process::abort();
+            }
+        }
         self.run_finalizers_once();
         // SAFETY: LoadedElf exclusively owns this complete mmap reservation.
         let result = unsafe { munmap(self.mapping.as_ptr().cast(), self.mapping_size) };

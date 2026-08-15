@@ -1,11 +1,13 @@
 use darwin_art_elf_loader::{
-    Capability, ClosedElfNamespace, LoadError, NamespaceError, ResolveError, ResolvedSymbol,
-    SymbolRequest, SymbolResolver,
+    Capability, ClosedElfNamespace, DsoLifecycle, LoadError, NamespaceError, ResolveError,
+    ResolvedSymbol, SymbolRequest, SymbolResolver,
 };
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::num::NonZeroUsize;
-use std::sync::Mutex;
+use std::ops::Range;
+use std::sync::{Arc, Mutex};
 
 const PARENT: &str = "libgraph_parent.so";
 const DEP_A: &str = "libgraph_dep_a.so";
@@ -125,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "elf-namespace-gate: recursive=parent+2deps scope=BFS version=GNU weak=zero \
          constructors=dependency-first cycle=accepted isolation=same-SONAME \
          provider=explicit rollback=RAII owner=Arc-clone close=last \
-         finalizers=dependent-first+array-reverse+DT_FINI mapping-unload=reverse \
+         finalizers=dso-callbacks-before-dependent-first+array-reverse+DT_FINI mapping-unload=reverse \
          protected=supported ABS=reject closed=no-dyld"
     );
     Ok(())
@@ -139,6 +141,32 @@ unsafe extern "C" fn lifecycle_record(value: i32) {
 }
 
 struct LifecycleProvider;
+
+#[derive(Default)]
+struct ImageLifecycleRecorder {
+    ids: Mutex<HashMap<usize, i32>>,
+}
+
+impl DsoLifecycle for ImageLifecycleRecorder {
+    fn publish_image(&self, range: Range<usize>) -> Result<(), String> {
+        let mut ids = self.ids.lock().map_err(|_| "image recorder poisoned")?;
+        let id = i32::try_from(ids.len() + 1).map_err(|_| "image id overflow")?;
+        ids.insert(range.start, id);
+        LIFECYCLE_EVENTS.lock().unwrap().push(500 + id);
+        Ok(())
+    }
+
+    fn finalize_image(&self, range: Range<usize>) -> Result<(), String> {
+        let id = self
+            .ids
+            .lock()
+            .map_err(|_| "image recorder poisoned")?
+            .remove(&range.start)
+            .ok_or_else(|| "image was not published".to_owned())?;
+        LIFECYCLE_EVENTS.lock().unwrap().push(400 + id);
+        Ok(())
+    }
+}
 
 impl SymbolResolver for LifecycleProvider {
     fn resolve(
@@ -186,10 +214,15 @@ fn run_lifecycle_graph(
     }
 
     for explicit_close in [true, false] {
-        let event_count_before_load = LIFECYCLE_EVENTS.lock().unwrap().len();
         let namespace = make_lifecycle_graph(parent, dep_a, dep_b)?;
         let mut provider = LifecycleProvider;
-        let graph = namespace.load_with_resolver(LIFECYCLE_PARENT, &mut provider)?;
+        let lifecycle: Arc<dyn DsoLifecycle> = Arc::new(ImageLifecycleRecorder::default());
+        let graph = namespace.load_with_resolver_and_lifecycle(
+            LIFECYCLE_PARENT,
+            &mut provider,
+            Some(lifecycle),
+        )?;
+        let event_count_after_load = LIFECYCLE_EVENTS.lock().unwrap().len();
         if graph.initialization_order() != [LIFECYCLE_DEP_A, LIFECYCLE_DEP_B, LIFECYCLE_PARENT]
             || graph.unload_order() != [LIFECYCLE_PARENT, LIFECYCLE_DEP_B, LIFECYCLE_DEP_A]
             || graph.call_root_exported_i32("lifecycle_graph_value")? != 30
@@ -198,7 +231,7 @@ fn run_lifecycle_graph(
         }
         let retained = graph.clone();
         graph.close();
-        if LIFECYCLE_EVENTS.lock().unwrap().len() != event_count_before_load {
+        if LIFECYCLE_EVENTS.lock().unwrap().len() != event_count_after_load {
             return Err("non-final graph clone executed finalizers".into());
         }
         if explicit_close {
@@ -208,7 +241,9 @@ fn run_lifecycle_graph(
         }
     }
 
-    let once = [302, 301, 309, 202, 201, 209, 102, 101, 109];
+    let once = [
+        501, 502, 503, 403, 302, 301, 309, 402, 202, 201, 209, 401, 102, 101, 109,
+    ];
     let expected: Vec<_> = once.into_iter().chain(once).collect();
     if *LIFECYCLE_EVENTS.lock().unwrap() != expected {
         return Err(format!(
