@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<familyset version="23">
+    <family name="sans-serif">
+        <font weight="400" style="normal" postScriptName="Roboto-Regular">
+            Roboto-Regular.ttf
+        </font>
+    </family>
+    <alias name="serif" to="sans-serif" weight="400" />
+    <alias name="monospace" to="sans-serif" weight="400" />
+</familyset>
