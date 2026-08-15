@@ -209,14 +209,15 @@ particular Android ARM64 `wchar_t` ordering is unsigned, unlike Darwin's signed
 type, so `wmemcmp` implements the Bionic ordering rather than forwarding to
 the host.
 
-The independently executable providers currently own 60/160 imports with no
-duplicate owner: A 11/11, B 17/76, C 29/65, and D 3/8. This includes allocator
+The independently executable providers currently own 73/160 imports with no
+duplicate owner: A 11/11, B 29/76, C 30/65, and D 3/8. This includes allocator
 and Bionic errno ownership, the read-only filesystem/virtual-FD slice, clocks
 and sleep, all 24 pthread imports plus the provider-owned create seam, immutable
-environment/property/auxv state, and loader-owned program-header iteration.
+environment/property/auxv state, loader-owned program-header iteration, and a
+fixed-register binary stdio slice with guest `FILE` tokens and `__sF`.
 The coverage audit deliberately labels these as standalone gates: composing
 them into one loader namespace with shared lifetime and teardown is still an
-open integration boundary, and the remaining 100 imports remain hard
+open integration boundary, and the remaining 87 imports remain hard
 capability failures.
 
 ## Prior art and the boundary we adopt
@@ -347,11 +348,14 @@ filesystem facade owns byte paths, virtual descriptors, Android `stat` and
 interruptible sleep. The pthread provider now owns all 24 libc++ imports and a
 coherent create/join/detach token lifecycle without exposing Darwin
 `pthread_t`. Process state comes from an immutable Android environment,
-property, and auxv snapshot rather than host globals. Together these
-standalone gates cover 60/160 libc imports with duplicate ownership rejected by
-`tools/audit-android35-libcxx-provider-coverage.sh`. Stdio/`FILE`, locale,
-formatting, wider writable filesystem operations, and one composed runtime
-resolver remain open gates.
+property, and auxv snapshot rather than host globals. The binary stdio slice
+owns Android `FILE` tokens, permanent `__sF`, and 12 fixed-register operations
+without exposing Darwin `FILE*`; formatted varargs and wide stdio are still
+rejected. Together these standalone gates cover 73/160 libc imports with
+duplicate ownership rejected by
+`tools/audit-android35-libcxx-provider-coverage.sh`. Locale, formatting, wider
+writable filesystem operations, and one composed runtime resolver remain open
+gates.
 
 ## Ordered implementation after the Button gate
 
