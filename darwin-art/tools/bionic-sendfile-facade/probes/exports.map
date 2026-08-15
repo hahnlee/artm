@@ -1,0 +1,4 @@
+{
+  global: sendfile_fixture;
+  local: *;
+};
