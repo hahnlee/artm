@@ -1,0 +1,2 @@
+symbol	kind	class	owner
+syscall	FUNC	D	linux-syscall-number-ABI

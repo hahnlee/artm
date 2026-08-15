@@ -1,0 +1,7 @@
+scope	result	reason
+unknown-syscall-number	ENOSYS	no raw Darwin syscall forwarding
+futex-non-private-or-other-operation	EINVAL	only observed WAIT_PRIVATE and WAKE_PRIVATE
+futex-wait-null-timeout	EINVAL	pinned libcxx always supplies a relative timespec
+futex-wake-count-other-than-1-or-INT_MAX	EINVAL	only observed wake counts
+futex-more-than-257-live-addresses	EAGAIN	fixed provider side-table capacity policy
+rt_sigprocmask-other-form	EINVAL	only libunwind invalid-how readability probe
