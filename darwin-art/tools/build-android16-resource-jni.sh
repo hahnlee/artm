@@ -263,9 +263,10 @@ if [[ "$undefined_count" != "$UNDEFINED_SYMBOL_COUNT" ||
   exit 3
 fi
 
+"$script_dir/build-android16-nativehelper-device-foundation.sh" >/dev/null
 provider_archives=(
   "$project_root/_build/androidfw-foundation/libandroidfw-darwin.a"
-  "$project_root/_build/nativehelper-foundation/libnativehelper_jvm.a"
+  "$project_root/_build/nativehelper-device-foundation/libnativehelper-device-darwin.a"
   "$project_root/_build/graphics-foundations/libutils-darwin.a"
   "$project_root/_build/graphics-foundations/libutils-binder-darwin.a"
   "$project_root/_build/graphics-foundations/libcutils-darwin.a"

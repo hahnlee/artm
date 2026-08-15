@@ -102,7 +102,7 @@ resource_archive="$project_root/_build/resource-jni-foundation/libandroid-resour
 [[ -f "$resource_archive" ]] || fail "resource JNI archive missing"
 provider_archives=(
   "$project_root/_build/androidfw-foundation/libandroidfw-darwin.a"
-  "$project_root/_build/nativehelper-foundation/libnativehelper_jvm.a"
+  "$project_root/_build/nativehelper-device-foundation/libnativehelper-device-darwin.a"
   "$project_root/_build/graphics-foundations/libutils-darwin.a"
   "$project_root/_build/graphics-foundations/libutils-binder-darwin.a"
   "$project_root/_build/graphics-foundations/libcutils-darwin.a"

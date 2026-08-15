@@ -26,7 +26,8 @@ stubbed.
 
 ## Provider closure
 
-After linking the existing module-complete androidfw, nativehelper, utils,
+After linking the existing module-complete androidfw, ART/device-layout
+nativehelper (`java.io.FileDescriptor.descriptor:I`), utils,
 cutils, log, libbase, ZIP/incfs, ICU, PNG, and zlib providers, the only
 non-system unresolved symbol is:
 
