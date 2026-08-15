@@ -1,5 +1,7 @@
 #include "libcore_darwin_linux.h"
 
+#include "AsynchronousCloseMonitor.h"
+
 #include <fcntl.h>
 #include <pthread.h>
 #include <pwd.h>
@@ -264,6 +266,25 @@ void DarwinUnsupported(JNIEnv* env, const char* operation) {
   ThrowErrno(env, operation, ENOTSUP);
 }
 
+template <typename Operation>
+ssize_t RunInterruptibleIo(int fd, Operation operation, bool* was_signaled) {
+  for (;;) {
+    AsynchronousCloseMonitor monitor(fd);
+    const ssize_t result = operation();
+    const int saved_errno = errno;
+    if (monitor.wasSignaled()) {
+      *was_signaled = true;
+      errno = EINTR;
+      return -1;
+    }
+    if (result != -1 || saved_errno != EINTR) {
+      *was_signaled = false;
+      errno = saved_errno;
+      return result;
+    }
+  }
+}
+
 jlong DarwinLinuxSysconf(JNIEnv* env, jobject, jint name) {
   // POSIX permits -1 with errno left at zero for an indeterminate value.
   errno = 0;
@@ -399,12 +420,20 @@ jint DarwinLinuxWriteBytes(JNIEnv* env, jobject, jobject java_fd,
   if (bytes == nullptr) {
     return -1;
   }
-  const ssize_t result =
-      Write(jniGetFDFromFileDescriptor(env, java_fd), bytes,
-            static_cast<size_t>(byte_count));
+  const int fd = jniGetFDFromFileDescriptor(env, java_fd);
+  bool was_signaled = false;
+  const ssize_t result = RunInterruptibleIo(
+      fd,
+      [&] { return write(fd, bytes, static_cast<size_t>(byte_count)); },
+      &was_signaled);
   const int saved_errno = errno;
   if (array_elements != nullptr) {
     env->ReleaseByteArrayElements(array, array_elements, JNI_ABORT);
+  }
+  if (was_signaled) {
+    jniThrowException(env, "java/io/InterruptedIOException",
+                      "write interrupted by close() on another thread");
+    return -1;
   }
   if (result == -1) {
     ThrowErrno(env, "write", saved_errno);
@@ -553,13 +582,23 @@ jint DarwinLinuxReadBytes(JNIEnv* env, jobject, jobject java_fd,
     return -1;
   }
 
-  const ssize_t result =
-      Read(jniGetFDFromFileDescriptor(env, java_fd),
-           static_cast<char*>(bytes) + byte_offset,
-           static_cast<size_t>(byte_count));
+  const int fd = jniGetFDFromFileDescriptor(env, java_fd);
+  bool was_signaled = false;
+  const ssize_t result = RunInterruptibleIo(
+      fd,
+      [&] {
+        return read(fd, static_cast<char*>(bytes) + byte_offset,
+                    static_cast<size_t>(byte_count));
+      },
+      &was_signaled);
   const int saved_errno = errno;
   if (array != nullptr) {
     env->ReleaseByteArrayElements(array, static_cast<jbyte*>(bytes), 0);
+  }
+  if (was_signaled) {
+    jniThrowException(env, "java/io/InterruptedIOException",
+                      "read interrupted by close() on another thread");
+    return -1;
   }
   if (result == -1) {
     ThrowErrno(env, "read", saved_errno);
