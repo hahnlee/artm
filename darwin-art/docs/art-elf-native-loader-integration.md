@@ -31,14 +31,31 @@ never sees ART's real function tables. The proxy implements only the fixture's
 `GetEnv`, `FindClass`, and `RegisterNatives` path. Its backend `JNIEnv*` is valid
 only during synchronous `JNI_OnLoad` and is cleared immediately afterward.
 
-The fixture reaches its source-derived two-entry registration table, but the
-backend intentionally returns `JNI_ERR`. It does not pass Android-PCS function
-pointers to ART and installs no native method. Consequently ART reports the
-failed `JNI_OnLoad` and keeps the `SharedLibrary`/ELF handle resident, as its
-normal failure policy requires. Runtime shutdown destroys that ART owner and
-calls the ELF close seam. A failed load is not advertised as unload-complete
-JNI: the fixture has no finalizers, and the general `JNI_OnUnload`/ELF-finalizer
-contract is still open.
+The backend accepts exactly the fixture's two reviewed signatures. It creates
+one cache-owned executable page while writable, emits the two thunks, flushes
+the instruction cache, changes the page to read/execute, and publishes its
+generation/range. `NativeBridgeIsNativeBridgeFunctionPointer` recognizes only
+the two callable entries, never a literal or arbitrary address in that range.
+Its source-derived entry mask distinguishes add from spill, so duplicate
+classification of one address cannot satisfy the two-entry acceptance gate.
+Only those Darwin-entry thunks are passed to ART `RegisterNatives`; raw ELF
+function pointers are never installed.
+
+No global `ART_TARGET_ANDROID` change is needed. ART's registration path still
+asks `NativeBridgeIsNativeBridgeFunctionPointer` about both installed pointers;
+the non-Android Darwin branch then retains each already-repacked Darwin entry
+as the method target. The observed two-entry mask is part of runtime acceptance.
+
+Registration is transactional at this boundary. Both thunks must exist and
+ART must register the complete table before the backend returns `JNI_OK`. A
+failure unregisters the exact fixture class, unpublishes the generation, and
+unmaps the page. On success the `ElfLibrary` owns the executable page and ELF
+image together. ART shutdown provides the required external quiescence, then
+the close seam unpublishes/unmaps the thunks before unmapping the ELF image.
+The shutdown acceptance also requires the global live-page count to return to
+zero after `DestroyJavaVM`.
+The fixture's `JNI_OnUnload` is a reviewed no-op; general ELF finalizers remain
+unsupported.
 
 Retaining `JavaVMExt::LoadNativeLibrary` also retains its legacy target-SDK
 signal-chain repair call. `darwin_sigchain.cc` therefore provides the real
@@ -51,13 +68,27 @@ it becomes the next action and the dispatcher is restored at the front.
 2. ART open with `needs_native_bridge=true` and atomic ELF-vs-Mach-O ownership:
    complete.
 3. Proxy `JavaVM/JNIEnv` → real ELF `JNI_OnLoad` → `FindClass` → complete
-   two-method `RegisterNatives` table reached, followed by explicit `JNI_ERR`:
-   complete.
-4. Per-shorty Android-to-Darwin function-pointer trampolines, actual ART native
-   registration, `nativeAdd`, and the stack-spilling `nativeSpill` call:
-   incomplete.
+   two-method `RegisterNatives` table reached: complete.
+4. Fixed-shorty Darwin-entry-to-Android function-pointer trampolines, actual ART native
+   registration, `nativeAdd == 42`, and the stack-spilling `nativeSpill`
+   digest: complete for the two fixed fixture signatures.
+5. General shorty parsing/code generation, arbitrary libraries, recursive
+   `DT_NEEDED` namespaces, and complete JNI proxy tables: incomplete.
 
-Stage 4 must repack the two calling conventions explicitly. The fixture gate
-locks the Android spill layout to reference `sp+0`, `f4` `sp+8`, `f5` `sp+16`,
-and `d4` `sp+24`; Darwin packs the corresponding tail at offsets 0, 8, 12, and
-16. Raw pointer registration is forbidden.
+Stage 4 explicitly repacks the two calling conventions. The fixture gate
+compiles and disassembles the same source for both targets: Android uses
+reference `sp+0`, `f4` `sp+8`, `f5` `sp+16`, and `d4` `sp+24`; Darwin uses
+offsets 0, 8, 12, and 16. The spill thunk preserves x1-x7/v0-v7, substitutes
+x0 with the proxy `JNIEnv`, and moves only that stack tail into four Android
+8-byte slots. This fixed seam must not be described as generic `.so` support.
+
+Both fixture native bodies intentionally ignore their `JNIEnv*`. The proxy
+object substituted into x0 remains alive with the image, but its load-thread
+ART backend is cleared after `JNI_OnLoad`. A general native body that calls
+through `JNIEnv*` therefore remains unsupported until every invocation binds a
+thread-current ART environment to a per-call proxy.
+
+The executable page currently uses Darwin's anonymous RW mapping followed by
+an irreversible transition to RX. This is W^X and passes the development
+binary gate on Apple Silicon, but hardened-runtime deployment still needs an
+explicit `MAP_JIT`/code-signing entitlement policy and acceptance test.

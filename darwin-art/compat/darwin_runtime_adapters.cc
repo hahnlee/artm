@@ -18,6 +18,7 @@
 #include "intrinsics_enum.h"
 #include "intrinsics_list.h"
 #include "hprof/hprof.h"
+#include "darwin_android_jni_trampoline.h"
 #include "darwin_art_elf_jni_fixture_identity.h"
 #include "darwin_art_elf_loader.h"
 #include "darwin_art_jni_proxy.h"
@@ -36,8 +37,11 @@ constexpr int kElfOpened = 1 << 0;
 constexpr int kElfOnLoadCalled = 1 << 1;
 constexpr int kElfFoundFixtureClass = 1 << 2;
 constexpr int kElfCapturedRegistration = 1 << 3;
+constexpr int kElfInstalledRegistration = 1 << 4;
+constexpr int kElfClassifiedTrampolines = 1 << 5;
 
 std::atomic<int> g_elf_fixture_status{0};
+std::atomic<uint32_t> g_elf_classified_trampoline_mask{0};
 
 void SetNativeLoaderError(char** error_msg, const std::string& message) {
   if (error_msg != nullptr) {
@@ -100,6 +104,7 @@ struct ElfLibrary {
   alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)
       std::array<unsigned char, DARWIN_ART_JNI_PROXY_STORAGE_SIZE> proxy_storage{};
   DarwinArtJniProxy* proxy = nullptr;
+  darwin_art::android_jni::FixtureTrampolineSet* trampolines = nullptr;
 };
 
 ElfLibrary* AsElfLibrary(void* handle) {
@@ -128,9 +133,10 @@ int32_t ProxyRegisterNatives(void* context,
   if (library == nullptr || clazz == nullptr || methods == nullptr || count != 2) {
     return DARWIN_ART_JNI_ERR;
   }
-  // Do not register Android-PCS function pointers directly with ART. This first
-  // vertical slice proves that the real ELF JNI_OnLoad reached its complete
-  // registration table; a per-shorty NativeBridge trampoline owns invocation.
+  if (library->trampolines != nullptr || library->proxy == nullptr ||
+      library->art_env == nullptr) {
+    return DARWIN_ART_JNI_ERR;
+  }
   constexpr std::array<std::pair<const char*, const char*>, 2> kExpected = {{
       {"nativeAdd", "(IJI)J"},
       {"nativeSpill", kDarwinArtElfJniFixtureSpillSignature},
@@ -142,12 +148,78 @@ int32_t ProxyRegisterNatives(void* context,
         std::strcmp(methods[index].signature, kExpected[index].second) != 0) {
       return DARWIN_ART_JNI_ERR;
     }
+    if (library->art_env->GetStaticMethodID(
+            static_cast<jclass>(clazz), kExpected[index].first,
+            kExpected[index].second) == nullptr) {
+      return DARWIN_ART_JNI_ERR;
+    }
   }
   g_elf_fixture_status.fetch_or(kElfCapturedRegistration, std::memory_order_relaxed);
-  // Capturing the table proves the lifecycle path but does not make Android
-  // function pointers callable under Darwin PCS. Reject JNI_OnLoad until the
-  // per-shorty bridge can hand ART real Darwin trampolines.
-  return DARWIN_ART_JNI_ERR;
+  JavaVM* proxy_vm =
+      static_cast<JavaVM*>(darwin_art_jni_proxy_java_vm(library->proxy));
+  void* proxy_env = nullptr;
+  if (proxy_vm == nullptr ||
+      proxy_vm->GetEnv(&proxy_env, JNI_VERSION_1_6) != JNI_OK ||
+      proxy_env == nullptr) {
+    return DARWIN_ART_JNI_ERR;
+  }
+  std::string trampoline_error;
+  auto* trampolines = darwin_art::android_jni::CreateFixtureTrampolines(
+      proxy_env, methods[0].function, methods[1].function, &trampoline_error);
+  if (trampolines == nullptr) {
+    return DARWIN_ART_JNI_ERR;
+  }
+  void* native_add_entry =
+      darwin_art::android_jni::FixtureNativeAddEntry(trampolines);
+  void* native_spill_entry =
+      darwin_art::android_jni::FixtureNativeSpillEntry(trampolines);
+  const auto* native_add_bytes = static_cast<const uint8_t*>(native_add_entry);
+  if (darwin_art::android_jni::FixtureTrampolineGeneration(trampolines) == 0 ||
+      !darwin_art::android_jni::IsFixtureTrampolineEntry(native_add_entry) ||
+      !darwin_art::android_jni::IsFixtureTrampolineEntry(native_spill_entry) ||
+      darwin_art::android_jni::IsFixtureTrampolineEntry(native_add_bytes + 4) ||
+      darwin_art::android_jni::FixtureTrampolineEntryMask(native_add_entry) !=
+          darwin_art::android_jni::kFixtureNativeAddEntryMask ||
+      darwin_art::android_jni::FixtureTrampolineEntryMask(native_spill_entry) !=
+          darwin_art::android_jni::kFixtureNativeSpillEntryMask ||
+      darwin_art::android_jni::FixtureTrampolineEntryMask(native_add_bytes + 4) != 0) {
+    darwin_art::android_jni::DestroyFixtureTrampolines(trampolines);
+    return DARWIN_ART_JNI_ERR;
+  }
+  JNINativeMethod bridged_methods[] = {
+      {const_cast<char*>(kExpected[0].first),
+       const_cast<char*>(kExpected[0].second),
+       native_add_entry},
+      {const_cast<char*>(kExpected[1].first),
+       const_cast<char*>(kExpected[1].second),
+       native_spill_entry},
+  };
+  const jint status = library->art_env->RegisterNatives(
+      static_cast<jclass>(clazz), bridged_methods, std::size(bridged_methods));
+  if (status != JNI_OK) {
+    jthrowable registration_failure = library->art_env->ExceptionOccurred();
+    if (registration_failure != nullptr) {
+      library->art_env->ExceptionClear();
+    }
+    library->art_env->UnregisterNatives(static_cast<jclass>(clazz));
+    jthrowable rollback_failure = library->art_env->ExceptionOccurred();
+    if (rollback_failure != nullptr) {
+      library->art_env->ExceptionClear();
+    }
+    darwin_art::android_jni::DestroyFixtureTrampolines(trampolines);
+    if (registration_failure != nullptr) {
+      library->art_env->Throw(registration_failure);
+      library->art_env->DeleteLocalRef(registration_failure);
+    } else if (rollback_failure != nullptr) {
+      library->art_env->Throw(rollback_failure);
+    }
+    library->art_env->DeleteLocalRef(rollback_failure);
+    return DARWIN_ART_JNI_ERR;
+  }
+  library->trampolines = trampolines;
+  g_elf_fixture_status.fetch_or(kElfInstalledRegistration,
+                                std::memory_order_relaxed);
+  return DARWIN_ART_JNI_OK;
 }
 
 int32_t ProxyThrowNew(void* context, void* clazz, const char* message) {
@@ -252,8 +324,19 @@ void* NativeBridgeGetTrampoline2(void* handle,
   return nullptr;
 }
 
-bool NativeBridgeIsNativeBridgeFunctionPointer(const void*) {
-  return false;
+bool NativeBridgeIsNativeBridgeFunctionPointer(const void* pointer) {
+  const uint32_t entry_mask =
+      darwin_art::android_jni::FixtureTrampolineEntryMask(pointer);
+  const uint32_t observed =
+      g_elf_classified_trampoline_mask.fetch_or(entry_mask,
+                                                std::memory_order_relaxed) |
+      entry_mask;
+  if (observed == (darwin_art::android_jni::kFixtureNativeAddEntryMask |
+                   darwin_art::android_jni::kFixtureNativeSpillEntryMask)) {
+    g_elf_fixture_status.fetch_or(kElfClassifiedTrampolines,
+                                  std::memory_order_relaxed);
+  }
+  return entry_mask != 0;
 }
 
 void* OpenNativeLibrary(JNIEnv* env,
@@ -320,6 +403,7 @@ void* OpenNativeLibrary(JNIEnv* env,
       return nullptr;
     }
     *needs_native_bridge = true;
+    g_elf_classified_trampoline_mask.store(0, std::memory_order_relaxed);
     g_elf_fixture_status.store(kElfOpened, std::memory_order_relaxed);
     return library.release();
   }
@@ -340,6 +424,8 @@ bool CloseNativeLibrary(void* handle, bool needs_native_bridge, char** error_msg
       return false;
     }
     library->magic = 0;
+    darwin_art::android_jni::DestroyFixtureTrampolines(library->trampolines);
+    library->trampolines = nullptr;
     std::array<char, 1024> storage{};
     DarwinArtElfErrorBuffer error_buffer{storage.data(), storage.size(), 0};
     const DarwinArtElfStatus status =

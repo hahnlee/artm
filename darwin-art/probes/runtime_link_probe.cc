@@ -18,6 +18,7 @@
 #include "class_linker.h"
 #include "cmdline_types.h"
 #include "darwin_art/darwin_art.h"
+#include "darwin_android_jni_trampoline.h"
 #include "darwin_framework_natives.h"
 #include "darwin_icu_natives.h"
 #include "darwin_libcore_natives.h"
@@ -1347,17 +1348,28 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     }
     const int bridge_status =
         darwin_art_elf_jni_fixture_registration_status();
-    const bool expected_capability_failure =
-        !loaded && load_error.find("JNI_OnLoad") != std::string::npos &&
-        bridge_status == 0x0f;
-    if (!expected_capability_failure || env->ExceptionCheck()) {
-      std::cerr << "ART Android ELF JNI: expected registration trampoline "
-                   "capability failure, status="
+    if (!loaded || !load_error.empty() || bridge_status != 0x3f ||
+        env->ExceptionCheck()) {
+      std::cerr << "ART Android ELF JNI: load/registration failed, status="
                 << bridge_status << " load_error=" << load_error << "\n";
       return 41;
     }
+    jmethodID run_acceptance = env->GetStaticMethodID(
+        native_fixture_class, "runAcceptance", "()I");
+    const jint acceptance =
+        run_acceptance == nullptr
+            ? -3
+            : env->CallStaticIntMethod(native_fixture_class, run_acceptance);
+    if (acceptance != 42 || env->ExceptionCheck()) {
+      std::cerr << "ART Android ELF JNI: nativeAdd/nativeSpill failed, result="
+                << acceptance << "\n";
+      if (self->IsExceptionPending()) {
+        std::cerr << self->GetException()->Dump() << "\n";
+      }
+      return 42;
+    }
     std::cout << "ART Android ELF JNI: load+JNI_OnLoad+RegisterNatives="
-                 "reached native-call=blocked-pcs-function-pointer\n"
+                 "installed nativeAdd=42 nativeSpill=digest-ok\n"
               << std::flush;
   }
 
@@ -1447,6 +1459,12 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
   // this call: its Thread object is owned by the destroyed Runtime.
   const jint destroy_result = java_vm->DestroyJavaVM();
   if (destroy_result != JNI_OK) {
+    std::lock_guard<std::mutex> lock(g_process_state.mutex);
+    g_process_state.phase = ProcessPhase::kShutdownFailed;
+    return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+  }
+  if (darwin_art::android_jni::FixtureTrampolineLiveCount() != 0) {
+    std::cerr << "ART Darwin shutdown: ELF JNI trampolines remain live\n";
     std::lock_guard<std::mutex> lock(g_process_state.mutex);
     g_process_state.phase = ProcessPhase::kShutdownFailed;
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
