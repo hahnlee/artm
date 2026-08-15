@@ -18,6 +18,9 @@ distractors remain in the independent SIMD bank.
 It also executes `swprintf@LIBC` with Android wchar32 output,
 `ioctl@LIBC(RNDGETENTCNT)` through the process filesystem owner, and
 `strftime_l@LIBC` against the runtime's deterministic fixed-offset UTC owner.
+The writable `/data` overlay is exercised with `O_CREAT|O_TRUNC`, null-offset
+and explicit-offset `sendfile@LIBC` calls, then close/reopen/read verification
+of both destination files.
 
 `JNI_OnLoad` exercises the reverse ABI boundary through the supplied proxy
 `JavaVM` and `JNIEnv` tables: `GetEnv`, `FindClass`, and `RegisterNatives`. It

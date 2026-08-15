@@ -32,6 +32,7 @@
 #include "darwin_art_bionic_fs.h"
 #include "darwin_art_bionic_ioctl.h"
 #include "darwin_art_bionic_provider_namespace.h"
+#include "darwin_art_bionic_sendfile.h"
 #include "darwin_art_bionic_stdio.h"
 #include "darwin_art_bionic_strftime.h"
 #include "darwin_art_jni_proxy.h"
@@ -42,6 +43,11 @@
 #include "runtime_image.h"
 #include "thread.h"
 #include "unwindstack/AndroidUnwinder.h"
+
+extern "C" DarwinArtBionicSendfileTransferStatus
+darwin_art_bionic_fs_sendfile_transfer(
+    void* context, const DarwinArtBionicSendfileRequest* request,
+    DarwinArtBionicSendfileResult* result);
 
 namespace android {
 namespace {
@@ -64,11 +70,13 @@ constexpr uint32_t kFixtureVsscanfRouteMask = 1u << 6;
 constexpr uint32_t kFixtureSwprintfRouteMask = 1u << 7;
 constexpr uint32_t kFixtureIoctlRouteMask = 1u << 8;
 constexpr uint32_t kFixtureStrftimeRouteMask = 1u << 9;
+constexpr uint32_t kFixtureSendfileRouteMask = 1u << 10;
 constexpr uint32_t kFixtureAllProviderRouteMask =
     kFixtureErrnoRouteMask | kFixtureStrlenRouteMask | kFixtureOpenRouteMask |
     kFixtureReadRouteMask | kFixtureCloseRouteMask | kFixtureScanfRouteMask |
     kFixtureVsscanfRouteMask | kFixtureSwprintfRouteMask |
-    kFixtureIoctlRouteMask | kFixtureStrftimeRouteMask;
+    kFixtureIoctlRouteMask | kFixtureStrftimeRouteMask |
+    kFixtureSendfileRouteMask;
 constexpr uint32_t kFixtureNativeAddEntryMask = 1u << 0;
 constexpr uint32_t kFixtureNativeSpillEntryMask = 1u << 1;
 constexpr uint32_t kFixtureNativeUsesEnvEntryMask = 1u << 2;
@@ -228,6 +236,7 @@ struct SingletonOwnerState {
 
 SingletonOwnerState g_ioctl_owner;
 SingletonOwnerState g_strftime_owner;
+SingletonOwnerState g_sendfile_owner;
 
 bool AcquireIoctlOwner(std::string* error) {
   std::lock_guard<std::mutex> lock(g_ioctl_owner.mutex);
@@ -294,6 +303,39 @@ void ReleaseStrftimeOwner() {
   }
 }
 
+bool AcquireSendfileOwner(std::string* error) {
+  std::lock_guard<std::mutex> lock(g_sendfile_owner.mutex);
+  if (g_sendfile_owner.users != 0) {
+    if (g_sendfile_owner.users == std::numeric_limits<size_t>::max()) {
+      *error = "Bionic sendfile graph-owner count overflow";
+      return false;
+    }
+    ++g_sendfile_owner.users;
+    return true;
+  }
+  const DarwinArtBionicSendfileLifecycleStatus status =
+      darwin_art_bionic_sendfile_activate(
+          &darwin_art_bionic_fs_sendfile_transfer, nullptr);
+  if (status != DARWIN_ART_BIONIC_SENDFILE_LIFECYCLE_OK) {
+    *error = "Bionic sendfile process-owner activation failed: " +
+             std::to_string(static_cast<int>(status));
+    return false;
+  }
+  g_sendfile_owner.users = 1;
+  return true;
+}
+
+void ReleaseSendfileOwner() {
+  std::lock_guard<std::mutex> lock(g_sendfile_owner.mutex);
+  if (g_sendfile_owner.users == 0) std::abort();
+  --g_sendfile_owner.users;
+  if (g_sendfile_owner.users != 0) return;
+  if (darwin_art_bionic_sendfile_deactivate() !=
+      DARWIN_ART_BIONIC_SENDFILE_LIFECYCLE_OK) {
+    std::abort();
+  }
+}
+
 std::string Sha256(const uint8_t* bytes, size_t size) {
   std::array<unsigned char, CC_SHA256_DIGEST_LENGTH> digest{};
   CC_SHA256(bytes, static_cast<CC_LONG>(size), digest.data());
@@ -355,6 +397,7 @@ struct ElfLibrary {
   bool stdio_owner = false;
   bool ioctl_owner = false;
   bool strftime_owner = false;
+  bool sendfile_owner = false;
   uintptr_t jni_on_load = 0;
   uintptr_t jni_on_unload = 0;
   alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)
@@ -372,6 +415,10 @@ void TeardownProviderNamespace(ElfLibrary* library) {
   if (library->strftime_owner) {
     ReleaseStrftimeOwner();
     library->strftime_owner = false;
+  }
+  if (library->sendfile_owner) {
+    ReleaseSendfileOwner();
+    library->sendfile_owner = false;
   }
   if (library->ioctl_owner) {
     ReleaseIoctlOwner();
@@ -504,6 +551,8 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     route = kFixtureIoctlRouteMask;
   } else if (std::strcmp(request->symbol, "strftime_l") == 0) {
     route = kFixtureStrftimeRouteMask;
+  } else if (std::strcmp(request->symbol, "sendfile") == 0) {
+    route = kFixtureSendfileRouteMask;
   }
   if (route != 0 && library->fixture_graph) {
     g_elf_fixture_provider_routes.fetch_or(route, std::memory_order_relaxed);
@@ -995,6 +1044,13 @@ void* OpenNativeLibrary(JNIEnv* env,
       return nullptr;
     }
     library->filesystem_owner = true;
+    if (!AcquireSendfileOwner(&error)) {
+      SetNativeLoaderError(error_msg,
+                           "Bionic sendfile setup failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    library->sendfile_owner = true;
     if (!AcquireIoctlOwner(&error)) {
       SetNativeLoaderError(error_msg, "Bionic ioctl setup failed: " + error);
       TeardownProviderNamespace(library.get());
@@ -1136,6 +1192,10 @@ bool CloseNativeLibrary(void* handle, bool needs_native_bridge, char** error_msg
     if (library->strftime_owner) {
       ReleaseStrftimeOwner();
       library->strftime_owner = false;
+    }
+    if (library->sendfile_owner) {
+      ReleaseSendfileOwner();
+      library->sendfile_owner = false;
     }
     if (library->ioctl_owner) {
       ReleaseIoctlOwner();

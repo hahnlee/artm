@@ -25,9 +25,9 @@ constexpr Expected kExpected[] = {
 #include "ownership.inc"
 };
 
-constexpr const char *kUnsupported[] = {
+constexpr std::array<const char *, 0> kUnsupported = {{
 #include "unsupported_symbols.inc"
-};
+}};
 
 struct Shared {
   std::mutex mutex;
@@ -112,12 +112,11 @@ DarwinArtBionicNamespace *Build(Context *contexts, Shared *shared) {
 } // namespace
 
 int main() {
-  Check(darwin_art_bionic_namespace_owned_count() == 177, "owned count");
-  Check(darwin_art_bionic_namespace_unsupported_libc_count() == 1,
+  Check(darwin_art_bionic_namespace_owned_count() == 178, "owned count");
+  Check(darwin_art_bionic_namespace_unsupported_libc_count() == 0,
         "unsupported count");
-  Check(sizeof(kExpected) / sizeof(kExpected[0]) == 177, "fixture count");
-  Check(sizeof(kUnsupported) / sizeof(kUnsupported[0]) == 1,
-        "unsupported fixture count");
+  Check(sizeof(kExpected) / sizeof(kExpected[0]) == 178, "fixture count");
+  Check(kUnsupported.empty(), "unsupported fixture count");
 
   {
     Shared partial_shared;
@@ -268,6 +267,7 @@ int main() {
       DARWIN_ART_BIONIC_PROVIDER_SWPRINTF,
       DARWIN_ART_BIONIC_PROVIDER_IOCTL,
       DARWIN_ART_BIONIC_PROVIDER_STRFTIME,
+      DARWIN_ART_BIONIC_PROVIDER_SENDFILE,
       DARWIN_ART_BIONIC_PROVIDER_LIBLOG,
       DARWIN_ART_BIONIC_PROVIDER_NUMERIC,
       DARWIN_ART_BIONIC_PROVIDER_BINARY128_CONVERSION,
@@ -301,8 +301,8 @@ int main() {
   darwin_art_bionic_namespace_destroy(instance);
 
   std::fprintf(stderr,
-               "bionic-provider-namespace: PASS libc-family=159/160 liblog=18 "
-               "owned=177 unsupported=1 duplicate-owner=0 threads=12 "
+               "bionic-provider-namespace: PASS libc-family=160/160 liblog=18 "
+               "owned=178 unsupported=0 duplicate-owner=0 threads=12 "
                "teardown=ordered+quiescent host-fallback=denied\n");
   return 0;
 }

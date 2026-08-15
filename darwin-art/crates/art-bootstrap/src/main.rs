@@ -3420,6 +3420,10 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             "darwin_art_bionic_ioctl_resolve",
             "darwin_art_bionic_ioctl_activate",
             "darwin_art_bionic_ioctl_deactivate",
+            "darwin_art_bionic_sendfile_resolve",
+            "darwin_art_bionic_sendfile_activate",
+            "darwin_art_bionic_sendfile_deactivate",
+            "darwin_art_bionic_sendfile",
             "darwin_art_bionic_strftime_resolve",
             "darwin_art_bionic_strftime_activate",
             "darwin_art_bionic_strftime_deactivate",
@@ -3845,6 +3849,10 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         "darwin_art_bionic_ioctl_resolve",
         "darwin_art_bionic_ioctl_activate",
         "darwin_art_bionic_ioctl_deactivate",
+        "darwin_art_bionic_sendfile_resolve",
+        "darwin_art_bionic_sendfile_activate",
+        "darwin_art_bionic_sendfile_deactivate",
+        "darwin_art_bionic_sendfile",
         "darwin_art_bionic_strftime_resolve",
         "darwin_art_bionic_strftime_activate",
         "darwin_art_bionic_strftime_deactivate",
@@ -4064,7 +4072,7 @@ fn probe_runtime_dex_flavor(
     let output = command_output(&mut command)?;
     let expected = if elf_jni {
         "Hello from Darwin ART main: 안녕\n\
-         ART Android ELF JNI: graph=child-first+relocated providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+swprintf+ioctl+strftime load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
+         ART Android ELF JNI: graph=child-first+relocated providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+swprintf+ioctl+strftime+sendfile load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
          ART Darwin Runtime::Create: ok\n\
          ART Darwin app ClassLoader: PathClassLoader\n\
          ART Darwin DEX interpreter: Hello.answer()=42\n\

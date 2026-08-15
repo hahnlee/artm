@@ -25,13 +25,13 @@ constexpr Ownership kOwnership[] = {
 #include "ownership.inc"
 };
 
-constexpr Unsupported kUnsupported[] = {
-#include "unsupported.inc"
-};
-
 constexpr size_t kUnsupportedLibcCount =
 #include "unsupported_count.inc"
     ;
+
+constexpr std::array<Unsupported, kUnsupportedLibcCount> kUnsupported = {{
+#include "unsupported.inc"
+}};
 
 constexpr const char *kProviderNames[] = {
     "leaf",    "allocator",        "errno",  "filesystem",    "time",
@@ -44,6 +44,7 @@ constexpr const char *kProviderNames[] = {
     "swprintf",
     "ioctl",
     "strftime",
+    "sendfile",
 };
 static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);
@@ -59,6 +60,7 @@ constexpr DarwinArtBionicProviderId kReleaseOrder[] = {
     DARWIN_ART_BIONIC_PROVIDER_SWPRINTF,
     DARWIN_ART_BIONIC_PROVIDER_IOCTL,
     DARWIN_ART_BIONIC_PROVIDER_STRFTIME,
+    DARWIN_ART_BIONIC_PROVIDER_SENDFILE,
     DARWIN_ART_BIONIC_PROVIDER_LIBLOG,
     DARWIN_ART_BIONIC_PROVIDER_NUMERIC,
     DARWIN_ART_BIONIC_PROVIDER_BINARY128_CONVERSION,
@@ -292,7 +294,7 @@ extern "C" int darwin_art_bionic_namespace_unsupported_libc(
     return 0;
   }
   size_t first = 0;
-  size_t count = sizeof(kUnsupported) / sizeof(kUnsupported[0]);
+  size_t count = kUnsupported.size();
   while (count != 0) {
     const size_t step = count / 2;
     const size_t current = first + step;
@@ -304,7 +306,7 @@ extern "C" int darwin_art_bionic_namespace_unsupported_libc(
       count = step;
     }
   }
-  if (first == sizeof(kUnsupported) / sizeof(kUnsupported[0]) ||
+  if (first == kUnsupported.size() ||
       std::strcmp(kUnsupported[first].symbol, symbol) != 0) {
     return 0;
   }

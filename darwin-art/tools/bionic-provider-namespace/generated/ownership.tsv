@@ -103,6 +103,7 @@ libc.so	realloc	LIBC	allocator
 libc.so	realpath	LIBC	filesystem
 libc.so	remove	LIBC	filesystem
 libc.so	rename	LIBC	filesystem
+libc.so	sendfile	LIBC	sendfile
 libc.so	setlocale	LIBC	locale
 libc.so	snprintf	LIBC	format
 libc.so	sscanf	LIBC	scanf

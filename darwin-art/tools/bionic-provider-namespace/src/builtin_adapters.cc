@@ -25,6 +25,8 @@ extern "C" void *darwin_art_bionic_ioctl_resolve(
     const char *, const char *, const char *);
 extern "C" void *darwin_art_bionic_strftime_resolve(
     const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_sendfile_resolve(
+    const char *, const char *, const char *);
 extern "C" void *darwin_art_bionic_locale_resolve(const char *, const char *,
                                                   const char *);
 extern "C" SymbolFunction darwin_art_bionic_numeric_resolve(const char *);
@@ -111,6 +113,11 @@ uintptr_t Strftime(void *, const char *soname, const char *symbol,
   return reinterpret_cast<uintptr_t>(
       darwin_art_bionic_strftime_resolve(soname, symbol, version));
 }
+uintptr_t Sendfile(void *, const char *soname, const char *symbol,
+                   const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_sendfile_resolve(soname, symbol, version));
+}
 uintptr_t Locale(void *, const char *soname, const char *symbol,
                  const char *version) {
   return reinterpret_cast<uintptr_t>(
@@ -182,6 +189,7 @@ constexpr DarwinArtBionicProviderResolve kResolvers[] = {
     Swprintf,
     Ioctl,
     Strftime,
+    Sendfile,
 };
 static_assert(sizeof(kResolvers) / sizeof(kResolvers[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);

@@ -102,6 +102,7 @@
     {"libc.so", "realpath", "LIBC", DARWIN_ART_BIONIC_PROVIDER_FILESYSTEM},
     {"libc.so", "remove", "LIBC", DARWIN_ART_BIONIC_PROVIDER_FILESYSTEM},
     {"libc.so", "rename", "LIBC", DARWIN_ART_BIONIC_PROVIDER_FILESYSTEM},
+    {"libc.so", "sendfile", "LIBC", DARWIN_ART_BIONIC_PROVIDER_SENDFILE},
     {"libc.so", "setlocale", "LIBC", DARWIN_ART_BIONIC_PROVIDER_LOCALE},
     {"libc.so", "snprintf", "LIBC", DARWIN_ART_BIONIC_PROVIDER_FORMAT},
     {"libc.so", "sscanf", "LIBC", DARWIN_ART_BIONIC_PROVIDER_SCANF},

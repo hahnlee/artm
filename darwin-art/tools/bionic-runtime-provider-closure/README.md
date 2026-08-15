@@ -6,11 +6,10 @@ it combines the existing C, C++, and Rust provider archives so
 `darwin_art_bionic_namespace_bind_builtins` can bind every manifest owner to
 its actual resolver.
 
-The current closure contains twenty-eight providers and resolves 177 exact routes:
-159 of the pinned Android 35 arm64 `libc++_shared.so` libc-family imports plus
-all 18 public `liblog.so` exports. The remaining libc import stays an explicit
-capability failures. Unknown SONAMEs, symbols, or GNU versions never fall back
-to dyld or host `dlsym`.
+The current closure contains twenty-nine providers and resolves 178 exact routes:
+all 160 pinned Android 35 arm64 `libc++_shared.so` libc-family imports plus
+all 18 public `liblog.so` exports. Unknown SONAMEs, symbols, or GNU versions
+never fall back to dyld or host `dlsym`.
 
 Run:
 
@@ -21,7 +20,7 @@ tools/build-bionic-runtime-provider-closure.sh
 The gate builds one Rust static archive for the stateful filesystem,
 process-state, stdio, and DSO-lifecycle owners; one native archive for the
 remaining providers (including Bionic abort/message state and the provider-only
-wide-float, wide-stdio, scanf, swprintf, ioctl, and strftime owners) and
+wide-float, wide-stdio, scanf, swprintf, ioctl, strftime, and sendfile owners) and
 namespace; and the pinned AOSP gdtoa float-conversion
 archive. The wide-float owner reuses the one allocator, gdtoa/errno, and ICU
 closure already present; it embeds none of those providers. The gate then links a real arm64
@@ -61,6 +60,8 @@ kind through the process filesystem owner. The strftime owner is activated
 with an immutable fixed-offset UTC timezone until a product timezone owner is
 available. Both drain in-flight calls after guest finalizers. The swprintf
 owner reuses the existing formatter, errno, allocator, and gdtoa providers.
+The sendfile owner delegates only to the process filesystem callback and
+drains before that filesystem owner is uninstalled.
 
 The syscall owner contributes the one variadic `syscall@LIBC` entry and its
 exact libc++ gettid/futex/libunwind-probe dispatcher. It reuses the closure's

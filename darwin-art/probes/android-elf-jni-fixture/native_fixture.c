@@ -10,6 +10,8 @@ extern int close(int fd);
 extern int ioctl(int fd, int request, ...);
 extern int open(const char* path, int flags, ...);
 extern intptr_t read(int fd, void* buffer, size_t count);
+extern intptr_t sendfile(int output_fd, int input_fd, int64_t* offset,
+                         size_t count);
 extern int sscanf(const char* input, const char* format, ...);
 extern size_t strlen(const char* string);
 extern int vsscanf(const char* input, const char* format, va_list arguments);
@@ -42,6 +44,7 @@ static int g_scanf_initialized;
 static int g_swprintf_initialized;
 static int g_ioctl_initialized;
 static int g_strftime_initialized;
+static int g_sendfile_initialized;
 
 typedef struct {
   uint64_t words[2];
@@ -122,11 +125,68 @@ __attribute__((constructor)) static void RootInitialize(void) {
   for (size_t index = 0; index < sizeof(time_expected); ++index) {
     g_strftime_initialized &= time_output[index] == time_expected[index];
   }
+  enum {
+    kAndroidOWriteOnly = 1,
+    kAndroidOCreate = 64,
+    kAndroidOTruncate = 512,
+  };
+  char sendfile_expected[10] = {0};
+  int source_probe = open("/libdarwin-art-jni-child.so", 0);
+  intptr_t source_probe_count =
+      source_probe < 0
+          ? -1
+          : read(source_probe, sendfile_expected, sizeof(sendfile_expected));
+  int source_probe_close = source_probe < 0 ? -1 : close(source_probe);
+  int source = open("/libdarwin-art-jni-child.so", 0);
+  int output = open("/data/sendfile-output",
+                    kAndroidOWriteOnly | kAndroidOCreate | kAndroidOTruncate,
+                    0600);
+  intptr_t current_copy =
+      source < 0 || output < 0 ? -1 : sendfile(output, source, NULL, 4);
+  int offset_output = open("/data/sendfile-offset",
+                           kAndroidOWriteOnly | kAndroidOCreate |
+                               kAndroidOTruncate,
+                           0600);
+  int64_t explicit_offset = 2;
+  intptr_t explicit_copy =
+      source < 0 || offset_output < 0
+          ? -1
+          : sendfile(offset_output, source, &explicit_offset, 3);
+  intptr_t current_tail =
+      source < 0 || output < 0 ? -1 : sendfile(output, source, NULL, 6);
+  int close_source = source < 0 ? -1 : close(source);
+  int close_output = output < 0 ? -1 : close(output);
+  int close_offset_output =
+      offset_output < 0 ? -1 : close(offset_output);
+  char output_bytes[10] = {0};
+  char offset_bytes[3] = {0};
+  int output_read = open("/data/sendfile-output", 0);
+  int offset_read = open("/data/sendfile-offset", 0);
+  intptr_t output_count =
+      output_read < 0 ? -1 : read(output_read, output_bytes,
+                                  sizeof(output_bytes));
+  intptr_t offset_count =
+      offset_read < 0 ? -1 : read(offset_read, offset_bytes,
+                                  sizeof(offset_bytes));
+  int close_output_read = output_read < 0 ? -1 : close(output_read);
+  int close_offset_read = offset_read < 0 ? -1 : close(offset_read);
+  g_sendfile_initialized =
+      source_probe_count == (intptr_t)sizeof(sendfile_expected) &&
+      source_probe_close == 0 && current_copy == 4 && explicit_copy == 3 &&
+      explicit_offset == 5 && current_tail == 6 && close_source == 0 &&
+      close_output == 0 && close_offset_output == 0 && output_count == 10 &&
+      offset_count == 3 && close_output_read == 0 && close_offset_read == 0;
+  for (size_t index = 0; index < sizeof(output_bytes); ++index) {
+    g_sendfile_initialized &= output_bytes[index] == sendfile_expected[index];
+  }
+  for (size_t index = 0; index < sizeof(offset_bytes); ++index) {
+    g_sendfile_initialized &= offset_bytes[index] == sendfile_expected[index + 2];
+  }
   if (DarwinArtFixtureChildValue() == 20 && bionic_errno != NULL &&
       strlen(provider_probe) == sizeof(provider_probe) - 1 &&
       g_filesystem_initialized == 1 && g_scanf_initialized == 1 &&
       g_swprintf_initialized == 1 && g_ioctl_initialized == 1 &&
-      g_strftime_initialized == 1) {
+      g_strftime_initialized == 1 && g_sendfile_initialized == 1) {
     *bionic_errno = 4242;
     g_bionic_provider_initialized = *__errno() == 4242;
     g_root_initialized = 1;
@@ -241,6 +301,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
       g_cxa_registered != 1 || g_filesystem_initialized != 1 ||
       g_scanf_initialized != 1 || g_swprintf_initialized != 1 ||
       g_ioctl_initialized != 1 || g_strftime_initialized != 1 ||
+      g_sendfile_initialized != 1 ||
       DarwinArtFixtureChildValue() != 20) {
     return JNI_ERR;
   }

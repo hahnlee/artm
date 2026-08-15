@@ -6,8 +6,8 @@ This gate measures coherent standalone provider ownership against the exact
 happen to exist in Darwin libc: a symbol is covered only when a project facade
 claims its Android ABI and semantic state.
 
-The current composed namespace owns 159 libc-family imports plus 18 liblog
-routes through twenty-eight providers:
+The current composed namespace owns all 160 libc-family imports plus 18 liblog
+routes through twenty-nine providers:
 
 | Provider | Imports | Boundary |
 |---|---:|---|
@@ -25,6 +25,7 @@ routes through twenty-eight providers:
 | swprintf | 1 | Android wchar32 output and AAPCS64 variadic floating input |
 | ioctl | 1 | Linux request decoding over the virtual FD owner |
 | strftime | 1 | Bionic C-locale formatting with fixed-offset timezone state |
+| sendfile | 1 | virtual-FD transfer with Linux offset and errno semantics |
 | locale | 31 | ICU 76 locale, multibyte, and wide-character semantics |
 | numeric | 6 | narrow integer conversion |
 | float-conversion | 2 | renamed AOSP gdtoa `strtod`/`strtof` |
@@ -40,9 +41,8 @@ routes through twenty-eight providers:
 | syscall | 1 | exact libc++ gettid/futex/libunwind-probe dispatch without raw host syscalls |
 | lifecycle | 2 | Bionic DSO finalizer ownership |
 
-Coverage by the original ABI classification is A 11/11, B 75/76, C 65/65,
-and D 8/8. The remaining import, `sendfile`, stays an explicit capability
-failure.
+Coverage by the original ABI classification is A 11/11, B 76/76, C 65/65,
+and D 8/8. No pinned libc++ libc-family import remains unsupported.
 Binary128 conversions return raw IEEE bits through Android's q0 ABI and never
 reinterpret Darwin's binary64 `long double`.
 

@@ -134,6 +134,11 @@ icu_root="$root/_aosp/external/icu-graphics"
 "$cc" -arch arm64 -isysroot "$sdk" \
   -c "$root/tools/bionic-ioctl-facade/src/aapcs64_entry.S" \
   -o "$objects/ioctl-entry.o"
+"$cxx" "${cxxflags[@]}" \
+  -I"$root/tools/bionic-sendfile-facade/include" \
+  -I"$root/tools/bionic-errno-tls/include" \
+  -c "$root/tools/bionic-sendfile-facade/src/sendfile.cc" \
+  -o "$objects/sendfile.o"
 strftime_source="$root/_aosp/bionic-strftime-facade/platform/bionic/libc/tzcode/strftime.c"
 [[ -f "$strftime_source" ]] || {
   echo 'bionic-runtime-provider-closure: run tools/bionic-strftime-facade/audit.sh to materialize pinned strftime.c' >&2
@@ -223,6 +228,7 @@ native="$build/libdarwin-art-bionic-native-providers.a"
   "$objects/swprintf.o" "$objects/swprintf-entry.o" \
   "$objects/swprintf-gdtoa.o" \
   "$objects/ioctl.o" "$objects/ioctl-entry.o" \
+  "$objects/sendfile.o" \
   "$objects/strftime.o" "$objects/strftime-upstream.o" \
   "$objects/format.o" "$objects/format-entry.o" \
   "$objects/formatted-stdio.o" "$objects/formatted-stdio-entry.o" \
@@ -267,6 +273,7 @@ _darwin_art_bionic_numeric_resolve
 _darwin_art_bionic_process_state_resolve
 _darwin_art_bionic_pthread_resolve
 _darwin_art_bionic_scanf_resolve
+_darwin_art_bionic_sendfile_resolve
 _darwin_art_bionic_strftime_resolve
 _darwin_art_bionic_stdio_resolve
 _darwin_art_bionic_strerror_resolve
@@ -327,6 +334,10 @@ for symbol in _darwin_art_bionic_malloc_result _darwin_art_bionic_free \
               _darwin_art_bionic_ioctl_activate \
               _darwin_art_bionic_ioctl_deactivate \
               _darwin_art_bionic_ioctl \
+              _darwin_art_bionic_sendfile_resolve \
+              _darwin_art_bionic_sendfile_activate \
+              _darwin_art_bionic_sendfile_deactivate \
+              _darwin_art_bionic_sendfile \
               _darwin_art_bionic_strftime_resolve \
               _darwin_art_bionic_strftime_activate \
               _darwin_art_bionic_strftime_deactivate \
@@ -351,4 +362,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=28 bind_builtins=sealed routes=177 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=29 bind_builtins=sealed routes=178 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'
