@@ -1,7 +1,10 @@
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Read;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -879,7 +882,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=1 methods=3 class[0]=Ldev/darwinart/probe/Hello;";
+    let expected = "AOSP DEX: verified=yes version=35 classes=1 methods=5 class[0]=Ldev/darwinart/probe/Hello;";
     if output.trim() != expected {
         return Err(format!("unexpected DEX probe output: {output:?}").into());
     }
@@ -1483,10 +1486,6 @@ fn build_interpreter_core(root: &Path) -> Result<()> {
 }
 
 fn build_runtime_bootstrap(root: &Path) -> Result<()> {
-    // Bump when compiler flags, shared headers, or Darwin patches change. The
-    // pinned AOSP sources are immutable; a stable key lets newly added closure
-    // files compile without rebuilding every previously verified object.
-    const COMPILE_CACHE_KEY: &str = "android16-darwin-runtime-v9-soong-zero-init-d8-reference-abi";
     let artbase = root.join("_aosp/art/libartbase");
     let patched_artbase = root.join("_build/foundation/patched-source/libartbase");
     let cmdline = root.join("_aosp/art/cmdline");
@@ -1529,9 +1528,6 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
     let patched_source_dir = build_dir.join("patched-source");
     let patched_runtime = patched_source_dir.join("runtime");
     let object_dir = build_dir.join("objects");
-    let cache_key_path = build_dir.join("compile-cache-key");
-    let cache_valid =
-        fs::read_to_string(&cache_key_path).is_ok_and(|key| key.trim() == COMPILE_CACHE_KEY);
     fs::create_dir_all(&patched_runtime)?;
     fs::create_dir_all(&object_dir)?;
     fs::create_dir_all(&runtime_generated_dir)?;
@@ -1583,6 +1579,7 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         runtime.join("runtime_common.cc"),
         patched_runtime.join("runtime_common.cc"),
     )?;
+    fs::copy(runtime.join("runtime.h"), patched_runtime.join("runtime.h"))?;
     fs::copy(runtime.join("thread.cc"), patched_runtime.join("thread.cc"))?;
     fs::copy(runtime.join("thread.h"), patched_runtime.join("thread.h"))?;
     fs::copy(
@@ -1636,6 +1633,7 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         "patches/art/0024-darwin-arm64-ucontext-dump.patch",
         "patches/art/0025-darwin-morecore-diagnostics.patch",
         "patches/art/0027-darwin-string-abi-overlay.patch",
+        "patches/art/0028-darwin-minimal-runtime-start.patch",
     ] {
         run_command(
             Command::new("patch")
@@ -1888,22 +1886,39 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         fs::write(&operator_source, command_output(&mut generate)?)?;
     }
 
+    let compiler_identity = format!(
+        "{}macOS {} ({})",
+        command_output(Command::new("clang++").arg("--version"))?,
+        command_output(Command::new("sw_vers").arg("-productVersion"))?.trim(),
+        command_output(Command::new("sw_vers").arg("-buildVersion"))?.trim()
+    );
+    let file_hash_cache_path = build_dir.join("file-hashes.cache");
+    let mut file_hash_cache = FileHashCache::load(&file_hash_cache_path)?;
     let mut objects = Vec::new();
+    let mut compiled_objects = 0usize;
+    let mut cached_objects = 0usize;
     let operator_object = object_dir.join("generated_operator_out.cc.o");
-    if !cache_valid || !operator_object.is_file() {
-        run_command(
-            runtime_bootstrap_cpp_command(&includes)
-                .arg("-idirafter")
-                .arg(&ndk_arch_include)
-                .arg("-idirafter")
-                .arg(&ndk_include)
-                .arg("-Wno-macro-redefined")
-                .arg("-c")
-                .arg(&operator_source)
-                .arg("-o")
-                .arg(&operator_object),
-        )?;
-    }
+    let mut operator_command = runtime_bootstrap_cpp_command(&includes);
+    operator_command
+        .arg("-idirafter")
+        .arg(&ndk_arch_include)
+        .arg("-idirafter")
+        .arg(&ndk_include)
+        .arg("-Wno-macro-redefined")
+        .arg("-c")
+        .arg(&operator_source)
+        .arg("-o")
+        .arg(&operator_object);
+    record_cache_result(
+        compile_with_dependency_cache(
+            &mut operator_command,
+            &operator_object,
+            &compiler_identity,
+            &mut file_hash_cache,
+        )?,
+        &mut compiled_objects,
+        &mut cached_objects,
+    );
     objects.push(operator_object);
 
     for profile_source in [
@@ -1912,20 +1927,27 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
     ] {
         let profile_object =
             object_dir.join(format!("libprofile_{}.o", profile_source.replace('/', "_")));
-        if !cache_valid || !profile_object.is_file() {
-            run_command(
-                runtime_bootstrap_cpp_command(&includes)
-                    .arg("-idirafter")
-                    .arg(&ndk_arch_include)
-                    .arg("-idirafter")
-                    .arg(&ndk_include)
-                    .arg("-Wno-macro-redefined")
-                    .arg("-c")
-                    .arg(libprofile.join(profile_source))
-                    .arg("-o")
-                    .arg(&profile_object),
-            )?;
-        }
+        let mut profile_command = runtime_bootstrap_cpp_command(&includes);
+        profile_command
+            .arg("-idirafter")
+            .arg(&ndk_arch_include)
+            .arg("-idirafter")
+            .arg(&ndk_include)
+            .arg("-Wno-macro-redefined")
+            .arg("-c")
+            .arg(libprofile.join(profile_source))
+            .arg("-o")
+            .arg(&profile_object);
+        record_cache_result(
+            compile_with_dependency_cache(
+                &mut profile_command,
+                &profile_object,
+                &compiler_identity,
+                &mut file_hash_cache,
+            )?,
+            &mut compiled_objects,
+            &mut cached_objects,
+        );
         objects.push(profile_object);
     }
     for adapter_source in [
@@ -1934,18 +1956,27 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         "fault_handler_arm64_darwin.cc",
     ] {
         let adapter_object = object_dir.join(format!("{adapter_source}.o"));
-        run_command(
-            runtime_bootstrap_cpp_command(&includes)
-                .arg("-idirafter")
-                .arg(&ndk_arch_include)
-                .arg("-idirafter")
-                .arg(&ndk_include)
-                .arg("-Wno-macro-redefined")
-                .arg("-c")
-                .arg(root.join("compat").join(adapter_source))
-                .arg("-o")
-                .arg(&adapter_object),
-        )?;
+        let mut adapter_command = runtime_bootstrap_cpp_command(&includes);
+        adapter_command
+            .arg("-idirafter")
+            .arg(&ndk_arch_include)
+            .arg("-idirafter")
+            .arg(&ndk_include)
+            .arg("-Wno-macro-redefined")
+            .arg("-c")
+            .arg(root.join("compat").join(adapter_source))
+            .arg("-o")
+            .arg(&adapter_object);
+        record_cache_result(
+            compile_with_dependency_cache(
+                &mut adapter_command,
+                &adapter_object,
+                &compiler_identity,
+                &mut file_hash_cache,
+            )?,
+            &mut compiled_objects,
+            &mut cached_objects,
+        );
         objects.push(adapter_object);
     }
     for source in sources {
@@ -1973,35 +2004,29 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         } else {
             runtime.join(source)
         };
-        if cache_valid
-            && object.is_file()
-            && !matches!(
-                source,
-                "nterp_helpers.cc"
-                    | "class_linker.cc"
-                    | "gc/heap.cc"
-                    | "entrypoints/quick/quick_alloc_entrypoints.cc"
-                    | "runtime_common.cc"
-                    | "gc/space/malloc_space.cc"
-            )
-        {
-            objects.push(object);
-            continue;
-        }
-        run_command(
-            runtime_bootstrap_cpp_command(&includes)
-                // Darwin has no system <elf.h>. The NDK copy is used as a
-                // lowest-priority, headers-only definition of the Android ELF ABI.
-                .arg("-idirafter")
-                .arg(&ndk_arch_include)
-                .arg("-idirafter")
-                .arg(&ndk_include)
-                .arg("-Wno-macro-redefined")
-                .arg("-c")
-                .arg(source_path)
-                .arg("-o")
-                .arg(&object),
-        )?;
+        let mut compile_command = runtime_bootstrap_cpp_command(&includes);
+        compile_command
+            // Darwin has no system <elf.h>. The NDK copy is used as a
+            // lowest-priority, headers-only definition of the Android ELF ABI.
+            .arg("-idirafter")
+            .arg(&ndk_arch_include)
+            .arg("-idirafter")
+            .arg(&ndk_include)
+            .arg("-Wno-macro-redefined")
+            .arg("-c")
+            .arg(source_path)
+            .arg("-o")
+            .arg(&object);
+        record_cache_result(
+            compile_with_dependency_cache(
+                &mut compile_command,
+                &object,
+                &compiler_identity,
+                &mut file_hash_cache,
+            )?,
+            &mut compiled_objects,
+            &mut cached_objects,
+        );
         let kind = command_output(Command::new("file").arg(&object))?;
         if !kind.contains("Mach-O 64-bit object arm64") {
             return Err(format!("unexpected Runtime object format: {kind}").into());
@@ -2013,12 +2038,14 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
     if !symbols.contains("_ZN3art7Runtime6Create") {
         return Err("compiled Runtime object does not export Runtime::Create".into());
     }
+    file_hash_cache.save(&file_hash_cache_path)?;
     let archive = build_dir.join("libart-runtime-bootstrap-darwin.a");
     create_archive(&archive, &objects)?;
-    fs::write(cache_key_path, format!("{COMPILE_CACHE_KEY}\n"))?;
     println!(
-        "build-runtime-bootstrap: ART runtime initialization spine Mach-O objects={} archive={}",
+        "build-runtime-bootstrap: ART runtime initialization spine Mach-O objects={} compiled={} cached={} archive={}",
         objects.len(),
+        compiled_objects,
+        cached_objects,
         archive.display()
     );
     Ok(())
@@ -2160,11 +2187,14 @@ fn probe_runtime_dex(root: &Path) -> Result<()> {
     )?;
     let expected = "ART Darwin Runtime::Create: ok\n\
                     ART Darwin app ClassLoader: PathClassLoader\n\
-                    ART Darwin DEX interpreter: Hello.answer()=42";
+                    ART Darwin DEX interpreter: Hello.answer()=42\n\
+                    ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42";
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
-    println!("probe-runtime-dex: PathClassLoader -> ART interpreter -> Hello.answer()=42");
+    println!(
+        "probe-runtime-dex: PathClassLoader -> interpreter -> JNI -> Darwin -> nativeRoundTrip()=42"
+    );
     Ok(())
 }
 
@@ -2309,6 +2339,207 @@ fn compile_cpp(source: &Path, object_dir: &Path, includes: &[&Path]) -> Result<P
     Ok(object)
 }
 
+fn record_cache_result(compiled: bool, compiled_objects: &mut usize, cached_objects: &mut usize) {
+    if compiled {
+        *compiled_objects += 1;
+    } else {
+        *cached_objects += 1;
+    }
+}
+
+fn compile_with_dependency_cache(
+    command: &mut Command,
+    object: &Path,
+    compiler_identity: &str,
+    file_hash_cache: &mut FileHashCache,
+) -> Result<bool> {
+    let depfile = object.with_extension("o.d");
+    let fingerprint = object.with_extension("o.fingerprint");
+    command.arg("-MMD").arg("-MF").arg(&depfile);
+    let command_description = describe_command(command);
+
+    if object.is_file()
+        && depfile.is_file()
+        && fingerprint.is_file()
+        && let Some(current) = dependency_fingerprint(
+            &depfile,
+            &command_description,
+            compiler_identity,
+            file_hash_cache,
+        )?
+        && fs::read_to_string(&fingerprint).is_ok_and(|cached| cached == current)
+    {
+        return Ok(false);
+    }
+
+    run_command(command)?;
+    let current = dependency_fingerprint(
+        &depfile,
+        &command_description,
+        compiler_identity,
+        file_hash_cache,
+    )?
+    .ok_or_else(|| {
+        format!(
+            "compiler did not produce a usable dependency file for {}",
+            object.display()
+        )
+    })?;
+    fs::write(fingerprint, current)?;
+    Ok(true)
+}
+
+fn dependency_fingerprint(
+    depfile: &Path,
+    command_description: &str,
+    compiler_identity: &str,
+    file_hash_cache: &mut FileHashCache,
+) -> Result<Option<String>> {
+    let Ok(depfile_text) = fs::read_to_string(depfile) else {
+        return Ok(None);
+    };
+    let normalized = depfile_text.replace("\\\r\n", " ").replace("\\\n", " ");
+    let Some((_, dependency_text)) = normalized.split_once(':') else {
+        return Ok(None);
+    };
+    let mut dependencies = parse_makefile_words(dependency_text)
+        .into_iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    dependencies.sort();
+    dependencies.dedup();
+    if dependencies.is_empty() || dependencies.iter().any(|path| !path.is_file()) {
+        return Ok(None);
+    }
+
+    let mut dependency_hashes = String::new();
+    for dependency in &dependencies {
+        dependency_hashes.push_str(file_hash_cache.hash(dependency)?);
+        dependency_hashes.push_str("  ");
+        dependency_hashes.push_str(&dependency.to_string_lossy());
+        dependency_hashes.push('\n');
+    }
+    Ok(Some(format!(
+        "cache-format=1\ncompiler={compiler_identity}\ncommand={command_description}\n{dependency_hashes}"
+    )))
+}
+
+#[derive(Default)]
+struct FileHashCache {
+    entries: BTreeMap<String, FileHashEntry>,
+}
+
+struct FileHashEntry {
+    metadata: String,
+    sha256: String,
+}
+
+impl FileHashCache {
+    fn load(path: &Path) -> Result<Self> {
+        let Ok(contents) = fs::read_to_string(path) else {
+            return Ok(Self::default());
+        };
+        let mut entries = BTreeMap::new();
+        for line in contents.lines() {
+            let mut fields = line.splitn(3, '\t');
+            let (Some(path), Some(metadata), Some(sha256)) =
+                (fields.next(), fields.next(), fields.next())
+            else {
+                continue;
+            };
+            entries.insert(
+                path.to_owned(),
+                FileHashEntry {
+                    metadata: metadata.to_owned(),
+                    sha256: sha256.to_owned(),
+                },
+            );
+        }
+        Ok(Self { entries })
+    }
+
+    fn hash(&mut self, path: &Path) -> Result<&str> {
+        let path_key = path.to_string_lossy().into_owned();
+        let metadata = fs::metadata(path)?;
+        let metadata_key = format!(
+            "{}:{}:{}:{}:{}:{}:{}",
+            metadata.dev(),
+            metadata.ino(),
+            metadata.size(),
+            metadata.mtime(),
+            metadata.mtime_nsec(),
+            metadata.ctime(),
+            metadata.ctime_nsec()
+        );
+        let cache_hit = self
+            .entries
+            .get(&path_key)
+            .is_some_and(|entry| entry.metadata == metadata_key);
+        if !cache_hit {
+            let mut file = fs::File::open(path)?;
+            let mut digest = Sha256::new();
+            let mut buffer = [0_u8; 64 * 1024];
+            loop {
+                let count = file.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                digest.update(&buffer[..count]);
+            }
+            let sha256 = format!("{:x}", digest.finalize());
+            self.entries.insert(
+                path_key.clone(),
+                FileHashEntry {
+                    metadata: metadata_key,
+                    sha256,
+                },
+            );
+        }
+        Ok(&self.entries[&path_key].sha256)
+    }
+
+    fn save(&self, path: &Path) -> Result<()> {
+        let mut contents = String::new();
+        for (path, entry) in &self.entries {
+            contents.push_str(path);
+            contents.push('\t');
+            contents.push_str(&entry.metadata);
+            contents.push('\t');
+            contents.push_str(&entry.sha256);
+            contents.push('\n');
+        }
+        fs::write(path, contents)?;
+        Ok(())
+    }
+}
+
+fn parse_makefile_words(input: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut escaped = false;
+    for character in input.chars() {
+        if escaped {
+            word.push(character);
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character.is_whitespace() {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+        } else {
+            word.push(character);
+        }
+    }
+    if escaped {
+        word.push('\\');
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
 fn create_archive(archive: &Path, objects: &[PathBuf]) -> Result<()> {
     let mut command = Command::new("ar");
     command.arg("rcs").arg(archive);
@@ -2400,4 +2631,17 @@ fn describe_command(command: &Command) -> String {
         .collect::<Vec<_>>()
         .join(" ");
     format!("{program} {args}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_makefile_words;
+
+    #[test]
+    fn parses_escaped_makefile_dependency_paths() {
+        assert_eq!(
+            parse_makefile_words(" source.cc include/header.h path\\ with\\ spaces/header.h "),
+            ["source.cc", "include/header.h", "path with spaces/header.h"]
+        );
+    }
 }

@@ -48,13 +48,17 @@
 - [x] Execute `Hello.answer()` from DEX through the C++ switch interpreter.
 - [x] Keep application DEX off the boot class path and load it through an ART
       `PathClassLoader` created by the native bootstrap probe.
+- [x] Execute interpreted Java through ART's generic JNI trampoline into a
+      registered Darwin function and return the result to Java.
 
 ## G3 — Android-facing runtime
 
 - [x] Extract and verify matching Android 16 core-oj/core-libart DEX inputs.
 - [x] Load the verified core-oj/core-libart DEX files into `ClassLinker`.
 - [x] Load a generated app DEX into its own `PathClassLoader` and execute it.
-- [ ] Add the minimal Java/JNI native method surface.
+- [x] Add the first explicit Java/JNI native method (`hostPageSize`).
+- [ ] Register the minimal libcore native method set needed by ordinary Java
+      startup without loading Android `.so` libraries.
 - [ ] Launch a minimal `Activity` compatibility class.
 - [ ] Connect the View backend to ProjectGPU and an `NSWindow`.
 

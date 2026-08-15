@@ -8,7 +8,8 @@ integration, launcher, and eventually the Android ELF compatibility loader.
 
 The current gate is intentionally smaller than `dalvikvm`. It links and runs a
 complete native `Runtime::Create()` probe through Android 16 boot-class-path
-initialization and executes a generated DEX method in ART's C++ interpreter:
+initialization, executes a generated DEX method in ART's C++ interpreter, and
+round-trips from interpreted Java through JNI into a Darwin function:
 
 1. verify the native host is ARM64 macOS with 16 KiB pages;
 2. fetch revision-locked ART subtrees without Git metadata;
@@ -25,7 +26,9 @@ initialization and executes a generated DEX method in ART's C++ interpreter:
 11. create ART successfully with the pinned Android 16 core boot JARs;
 12. load `Hello` from an app-only `PathClassLoader` and execute
     `Hello.answer()` through `ArtMethod::Invoke`;
-13. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
+13. register `Hello.hostPageSize()` through JNI and execute
+    `Java -> JNI -> getpagesize() -> Java`, returning `42` from the wrapper;
+14. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
 
 Run it with:
 
@@ -39,16 +42,24 @@ Expected final lines include:
 probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
-build-dex: AOSP DEX: verified=yes version=35 classes=1 methods=3 class[0]=Ldev/darwinart/probe/Hello; corrupt=rejected
+build-dex: AOSP DEX: verified=yes version=35 classes=1 methods=5 class[0]=Ldev/darwinart/probe/Hello; corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
 build-interpreter-core: AOSP C++ interpreter Mach-O objects=7 archive=...
-build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=166 archive=...
+build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=166 compiled=0 cached=166 archive=...
 audit-runtime-link: closure complete undefined=0
-probe-runtime-dex: PathClassLoader -> ART interpreter -> Hello.answer()=42
+probe-runtime-dex: PathClassLoader -> interpreter -> JNI -> Darwin -> nativeRoundTrip()=42
 probe-park: ART Darwin park: pre-permit=yes wakeups=200 timeout=yes
 ```
+
+`build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
+depfile for every translation unit; the bootstrapper fingerprints the complete
+compile command, compiler/macOS identity, and SHA-256 of every referenced source
+and project header. File hashes are memoized using Darwin inode and timestamp
+metadata, so an unchanged warm build avoids rereading common AOSP headers. A
+source-only edit rebuilds only the objects whose depfiles contain that source.
+All cache files remain under ignored `_build/` paths.
 
 `build-dex` requires Homebrew OpenJDK 17 headers and an Android SDK build-tools
 installation containing `d8`. It generates the test DEX locally; no APK or
@@ -85,11 +96,14 @@ _build/runtime-link-probe/runtime-link-probe \
 
 Its success lines are `ART Darwin Runtime::Create: ok`,
 `ART Darwin app ClassLoader: PathClassLoader`, and
-`ART Darwin DEX interpreter: Hello.answer()=42`. The generated DEX remains
-separate from the boot class path. The native probe initializes ART's
+`ART Darwin DEX interpreter: Hello.answer()=42`, followed by
+`ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42`. The generated DEX
+remains separate from the boot class path. The native probe initializes ART's
 unstarted-runtime handlers, constructs a `PathClassLoader`, registers the DEX,
-and executes the method without starting Android daemon threads. Normal Java
-launcher startup and the full runtime native-method surface remain deferred.
+then enables a probe-only minimal-start gate for normal JNI dispatch. It does
+not load Android's libicu/libjavacore/libopenjdk JNI libraries or start daemon
+threads. Normal Java launcher startup and the full runtime native-method
+surface remain deferred.
 
 Apple ARM64 executables retain the kernel-required 4 GiB `__PAGEZERO`, so ART's
 usual absolute-low-32-bit heap references cannot be used. The Darwin probe

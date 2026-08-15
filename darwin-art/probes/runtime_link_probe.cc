@@ -1,5 +1,6 @@
 #include <iostream>
 #include <mach-o/dyld.h>
+#include <unistd.h>
 #include <memory>
 #include <string>
 #include <utility>
@@ -22,6 +23,10 @@
 #include "thread-current-inl.h"
 #include "well_known_classes.h"
 
+static jint HostPageSize(JNIEnv*, jclass) {
+  return getpagesize();
+}
+
 int main(int argc, char** argv) {
   if (argc != 4) {
     std::cerr << "usage: runtime-link-probe CORE_OJ_JAR CORE_LIBART_JAR CLASSES_DEX\n";
@@ -43,7 +48,7 @@ int main(int argc, char** argv) {
   // directly constructed RuntimeArgumentMap leaves this key at zero, which
   // MallocSpace interprets as zero capacity rather than "unlimited".
   options.Set(art::RuntimeArgumentMap::HeapGrowthLimit,
-              art::MemoryKiB(256 * 1024 * 1024));
+              art::MemoryKiB(64 * 1024 * 1024));
   art::LogVerbosity verbosity{};
   verbosity.heap = true;
   options.Set(art::RuntimeArgumentMap::Verbose, verbosity);
@@ -100,26 +105,62 @@ int main(int argc, char** argv) {
     return 5;
   }
 
+  jclass hello_class = soa.AddLocalReference<jclass>(hello.Get());
+  JNINativeMethod native_method{
+      const_cast<char*>("hostPageSize"),
+      const_cast<char*>("()I"),
+      reinterpret_cast<void*>(&HostPageSize),
+  };
+  if (self->GetJniEnv()->RegisterNatives(hello_class, &native_method, 1) != JNI_OK) {
+    std::cerr << "ART Darwin JNI: RegisterNatives failed\n";
+    return 6;
+  }
+  if (!class_linker->EnsureInitialized(self, hello, true, true)) {
+    std::cerr << "ART Darwin JNI: Hello initialization failed\n";
+    return 7;
+  }
+  art::Runtime::Current()->StartMinimalForDarwinProbe();
+
   art::ArtMethod* answer =
       hello->FindClassMethod("answer", "()I", art::kRuntimePointerSize);
   if (answer == nullptr) {
     std::cerr << "ART Darwin DEX: answer()I lookup failed\n";
-    return 6;
+    return 8;
   }
 
   art::JValue result;
   answer->Invoke(self, /* args= */ nullptr, /* args_size= */ 0u, &result, "I");
   if (self->IsExceptionPending()) {
     std::cerr << "ART Darwin DEX: answer()I threw\n";
-    return 7;
+    return 9;
   }
   if (result.GetI() != 42) {
     std::cerr << "ART Darwin DEX: expected 42, got " << result.GetI() << "\n";
-    return 8;
+    return 10;
+  }
+
+  art::ArtMethod* native_round_trip =
+      hello->FindClassMethod("nativeRoundTrip", "()I", art::kRuntimePointerSize);
+  if (native_round_trip == nullptr) {
+    std::cerr << "ART Darwin JNI: nativeRoundTrip()I lookup failed\n";
+    return 11;
+  }
+  art::JValue native_result;
+  native_round_trip->Invoke(
+      self, /* args= */ nullptr, /* args_size= */ 0u, &native_result, "I");
+  if (self->IsExceptionPending()) {
+    std::cerr << "ART Darwin JNI: nativeRoundTrip()I threw\n";
+    return 12;
+  }
+  if (native_result.GetI() != 42) {
+    std::cerr << "ART Darwin JNI: expected 42, got " << native_result.GetI() << "\n";
+    return 13;
   }
 
   std::cout << "ART Darwin Runtime::Create: ok\n"
             << "ART Darwin app ClassLoader: PathClassLoader\n"
-            << "ART Darwin DEX interpreter: Hello.answer()=" << result.GetI() << "\n";
+            << "ART Darwin DEX interpreter: Hello.answer()=" << result.GetI() << "\n"
+            << "ART Darwin JNI: hostPageSize()=" << getpagesize()
+            << " nativeRoundTrip()=" << native_result.GetI() << "\n";
   return 0;
 }

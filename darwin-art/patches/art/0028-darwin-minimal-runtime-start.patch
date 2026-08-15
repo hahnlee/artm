@@ -1,0 +1,20 @@
+diff --git a/runtime/runtime.h b/runtime/runtime.h
+--- a/runtime/runtime.h
++++ b/runtime/runtime.h
+@@ -269,6 +269,16 @@ class EXPORT Runtime {
+     return started_;
+   }
+ 
++#if defined(__APPLE__)
++  // Enable normal managed/native dispatch without loading Android's libcore
++  // JNI libraries or starting daemon threads. The Darwin bootstrap must
++  // initialize its required classes and register native methods first.
++  void StartMinimalForDarwinProbe() {
++    CHECK(!started_);
++    started_ = true;
++  }
++#endif
++
+   bool IsFinishedStarting() const {
+     return finished_starting_;
+   }
