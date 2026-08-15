@@ -61,6 +61,10 @@ files=(
   libc/bionic/pthread_self.cpp
   libc/bionic/pthread_cond.cpp
   libc/bionic/pthread_rwlock.cpp
+  libc/bionic/pthread_create.cpp
+  libc/bionic/pthread_join.cpp
+  libc/bionic/pthread_detach.cpp
+  libc/bionic/pthread_internal.h
 )
 hashes=(
   "$BIONIC_PTHREAD_ONCE_CPP_SHA256"
@@ -69,6 +73,10 @@ hashes=(
   "$BIONIC_PTHREAD_SELF_CPP_SHA256"
   "$BIONIC_PTHREAD_COND_CPP_SHA256"
   "$BIONIC_PTHREAD_RWLOCK_CPP_SHA256"
+  "$BIONIC_PTHREAD_CREATE_CPP_SHA256"
+  "$BIONIC_PTHREAD_JOIN_CPP_SHA256"
+  "$BIONIC_PTHREAD_DETACH_CPP_SHA256"
+  "$BIONIC_PTHREAD_INTERNAL_H_SHA256"
 )
 [[ "${#files[@]}" == "$LOCKED_BIONIC_SOURCE_COUNT" ]] ||
   fail "locked Bionic source count mismatch"
@@ -105,6 +113,10 @@ key = (root / "libc/bionic/pthread_key.cpp").read_text()
 self_source = (root / "libc/bionic/pthread_self.cpp").read_text()
 cond = (root / "libc/bionic/pthread_cond.cpp").read_text()
 rwlock = (root / "libc/bionic/pthread_rwlock.cpp").read_text()
+create = (root / "libc/bionic/pthread_create.cpp").read_text()
+join = (root / "libc/bionic/pthread_join.cpp").read_text()
+detach = (root / "libc/bionic/pthread_detach.cpp").read_text()
+internal = (root / "libc/bionic/pthread_internal.h").read_text()
 
 assert "typedef long pthread_t;" in types
 assert "typedef int pthread_key_t;" in types
@@ -153,13 +165,41 @@ assert "*attr = -1" in mutex
 assert "type < PTHREAD_MUTEX_NORMAL || type > PTHREAD_MUTEX_ERRORCHECK" in mutex
 assert "case PTHREAD_MUTEX_RECURSIVE" in mutex
 assert "case PTHREAD_MUTEX_ERRORCHECK" in mutex
-print("bionic-pthread-provider: upstream-layout=PASS sources=6 cond=48-byte rwlock=56-byte")
+assert "*thread_out = __pthread_internal_add(thread)" in create
+assert "thread->startup_handshake_lock.unlock()" in create
+assert "t == pthread_self()" in join and "return EDEADLK;" in join
+assert "return ESRCH;" in join and "return ESRCH;" in detach
+assert "THREAD_EXITED_NOT_JOINED" in join and "THREAD_DETACHED" in detach
+assert "return pthread_join(t, nullptr)" in detach
+for state in ("THREAD_NOT_JOINED", "THREAD_EXITED_NOT_JOINED", "THREAD_JOINED", "THREAD_DETACHED"):
+    assert state in internal
+print("bionic-pthread-provider: upstream-layout=PASS sources=10 lifecycle=create+join+detach")
 PY
 
 [[ "$(sha "$module_root/fixture/pthread_fixture.c")" == "$FIXTURE_C_SHA256" ]] ||
   fail "fixture source SHA mismatch"
 [[ "$(sha "$module_root/fixture/exports.map")" == "$FIXTURE_EXPORTS_SHA256" ]] ||
   fail "fixture exports SHA mismatch"
+
+python3 - "$module_root/src/provider.cc" <<'PY'
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text()
+start = source.index('extern "C" int darwin_art_bionic_pthread_create(')
+end = source.index('extern "C" int darwin_art_bionic_pthread_join(', start)
+create = source[start:end]
+host_create = create.index("pthread_create(&entry->host")
+assert create.index("std::make_shared<ThreadEntry>()") < host_create
+assert create.index("state.threads.emplace") < host_create
+assert create.index("new (std::nothrow)") < host_create
+assert "catch (const std::bad_alloc&)" in create
+assert "RemoveThreadEntry(entry);" in create
+find_start = source.index("std::shared_ptr<ThreadEntry> FindThreadEntry(")
+find_end = source.index("std::atomic<uint64_t>& NextThreadToken()", find_start)
+assert "entry->published ? entry : nullptr" in source[find_start:find_end]
+print("bionic-pthread-provider: create-failure-atomicity=PASS allocation-before-host publish-gated rollback=owned")
+PY
 
 cxx="$(xcrun --find clang++)"
 ar="$(xcrun --find ar)"
@@ -180,6 +220,7 @@ if "$host_nm" -gU "$stage/provider.o" | awk '{print $3}' |
   fail "unprefixed pthread definition escaped provider"
 fi
 for symbol in self key_create key_delete getspecific setspecific once \
+              create join detach \
               mutexattr_init mutexattr_destroy mutexattr_settype \
               mutex_init mutex_lock mutex_trylock mutex_unlock mutex_destroy \
               cond_wait cond_timedwait cond_signal cond_broadcast cond_destroy \
@@ -209,9 +250,12 @@ file "$fixture" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null
   sort -u > "$stage/fixture-imports.txt"
 awk -F '\t' '$4=="supported"{print $1}' "$module_root/libcxx-pthread-imports.tsv" |
   sort -u > "$stage/supported-imports.txt"
-diff -u "$stage/supported-imports.txt" "$stage/fixture-imports.txt" ||
+cp "$stage/supported-imports.txt" "$stage/fixture-expected-imports.txt"
+printf '%s\n' pthread_create >> "$stage/fixture-expected-imports.txt"
+sort -u "$stage/fixture-expected-imports.txt" -o "$stage/fixture-expected-imports.txt"
+diff -u "$stage/fixture-expected-imports.txt" "$stage/fixture-imports.txt" ||
   fail "fixture does not execute exact supported import set"
-[[ "$($elf_nm -D --defined-only "$fixture" | awk '$2=="T"{n++}END{print n+0}')" == 25 ]] ||
+[[ "$($elf_nm -D --defined-only "$fixture" | awk '$2=="T"{n++}END{print n+0}')" == 31 ]] ||
   fail "fixture export count mismatch"
 
 export DARWIN_ART_PTHREAD_PROVIDER_LIBDIR="$stage"
@@ -219,7 +263,7 @@ export CARGO_TARGET_DIR="$stage/cargo-target"
 cargo build --quiet --manifest-path "$runner_root/Cargo.toml"
 runner="$CARGO_TARGET_DIR/debug/android-bionic-pthread-provider-runner"
 output="$("$runner" "$fixture")"
-grep -F 'ELF=executed resolver=libc.so@LIBC imports=22' <<< "$output" >/dev/null ||
+grep -F 'ELF=executed resolver=libc.so@LIBC imports=24/24 extra-owner=pthread_create' <<< "$output" >/dev/null ||
   fail "closed resolver execution failed"
 grep -F 'tls-destructor=2-pass once=1 mutex=8x2000-contention' <<< "$output" >/dev/null ||
   fail "thread/TLS/once/mutex E2E failed"
@@ -231,7 +275,9 @@ grep -F 'cond=4-waiters signal=1 broadcast=3 predicate-loop=held monotonic-timeo
   fail "condition variable Android ELF E2E failed"
 grep -F 'rwlock=4-concurrent-readers writer=blocked-then-progress wrong-unlock=EPERM recursive-read=2 lazy-zero-init reset=idle' <<< "$output" >/dev/null ||
   fail "rwlock Android ELF E2E failed"
-grep -F 'no-Darwin-reinterpret stale-key=reuse-alias(Bionic-undefined) unsupported=fork+robust+pshared+PI+thread-lifecycle' <<< "$output" >/dev/null ||
+grep -F 'thread-lifecycle=create+join+detach token=provider-owned result=roundtrip foreign=ESRCH self-join=EDEADLK race=one-winner target-clean=reset' <<< "$output" >/dev/null ||
+  fail "thread lifecycle Android ELF E2E failed"
+grep -F 'no-Darwin-reinterpret stale-key=reuse-alias(Bionic-undefined) unsupported=fork+robust+pshared+PI+thread-attrs' <<< "$output" >/dev/null ||
   fail "capability matrix failed"
 
 "$cxx" "${host_flags[@]}" -fsanitize=address,undefined \
@@ -270,6 +316,15 @@ mutex_attr_stress_output="$("$stage/mutex-attr-stress")"
 grep -F 'rounds=100 normal+recursive+errorcheck recursive-depth=2 self=EDEADLK wrong-owner=EPERM held-destroy=EBUSY destroyed-attr=EINVAL pshared+PI=ENOTSUP ASan=clean' <<< "$mutex_attr_stress_output" >/dev/null ||
   fail "mutex attribute sanitizer stress failed"
 
+[[ "$(sha "$module_root/thread_lifecycle_stress.cc")" == "$THREAD_LIFECYCLE_STRESS_SHA256" ]] ||
+  fail "thread lifecycle stress source SHA mismatch"
+"$cxx" "${host_flags[@]}" -fsanitize=address,undefined \
+  "$module_root/src/provider.cc" "$module_root/thread_lifecycle_stress.cc" \
+  -o "$stage/thread-lifecycle-stress"
+thread_lifecycle_stress_output="$("$stage/thread-lifecycle-stress")"
+grep -F 'rounds=100 create+join+detach result=roundtrip self=EDEADLK foreign=ESRCH join-vs-detach=one-winner detached-clean=quiescent target-clean=reset ASan=clean' <<< "$thread_lifecycle_stress_output" >/dev/null ||
+  fail "thread lifecycle sanitizer stress failed"
+
 mkdir -p "$build_dir"
 cp "$stage/libdarwin-art-bionic-pthread.a" "$build_dir/"
 cp "$fixture" "$build_dir/"
@@ -279,4 +334,5 @@ printf '%s\n' "$tls_stress_output"
 printf '%s\n' "$cond_stress_output"
 printf '%s\n' "$rwlock_stress_output"
 printf '%s\n' "$mutex_attr_stress_output"
-echo "bionic-pthread-provider: PASS imports=22/24 ELF=Android-arm64 host=Darwin-arm64 runtime-files-modified=0"
+printf '%s\n' "$thread_lifecycle_stress_output"
+echo "bionic-pthread-provider: PASS imports=24/24 extra-owner=create ELF=Android-arm64 host=Darwin-arm64 runtime-files-modified=0"

@@ -4,9 +4,9 @@ pthread_cond_destroy	FUNC	LIBC	supported	condition-variable-owner
 pthread_cond_signal	FUNC	LIBC	supported	condition-variable-owner
 pthread_cond_timedwait	FUNC	LIBC	supported	condition-variable-clock
 pthread_cond_wait	FUNC	LIBC	supported	condition-variable-owner
-pthread_detach	FUNC	LIBC	unsupported	thread-lifecycle
+pthread_detach	FUNC	LIBC	supported	thread-lifecycle
 pthread_getspecific	FUNC	LIBC	supported	tls-key
-pthread_join	FUNC	LIBC	unsupported	thread-lifecycle
+pthread_join	FUNC	LIBC	supported	thread-lifecycle
 pthread_key_create	FUNC	LIBC	supported	tls-key
 pthread_key_delete	FUNC	LIBC	supported	tls-key
 pthread_mutex_destroy	FUNC	LIBC	supported	private-normal-mutex

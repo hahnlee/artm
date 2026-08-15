@@ -25,6 +25,7 @@ static_assert(sizeof(DarwinArtAndroidPthreadMutex) == 40);
 static_assert(sizeof(DarwinArtAndroidPthreadCond) == 48);
 static_assert(sizeof(DarwinArtAndroidPthreadRwlock) == 56);
 
+constexpr int kAndroidEsrch = 3;
 constexpr int kAndroidEagain = 11;
 constexpr int kAndroidEnomem = 12;
 constexpr int kAndroidEbusy = 16;
@@ -64,7 +65,7 @@ int AndroidError(int error) {
   if (error == EDEADLK) return kAndroidEdeadlk;
   if (error == ETIMEDOUT) return kAndroidEtimedout;
   if (error == EPERM) return 1;
-  if (error == ESRCH) return 3;
+  if (error == ESRCH) return kAndroidEsrch;
   if (error == ENOTSUP) return kAndroidEnotsup;
   return kAndroidEinval;
 }
@@ -141,6 +142,26 @@ struct RwlockEntry {
   DarwinArtAndroidPthread writer_owner{};
 };
 
+struct ThreadEntry {
+  enum class JoinState {
+    kNotJoined,
+    kExitedNotJoined,
+    kJoined,
+    kDetached,
+  };
+  std::mutex mutex;
+  std::condition_variable startup_condition;
+  DarwinArtAndroidPthread token{};
+  pthread_t host{};
+  bool published{};
+  bool host_exited{};
+  bool host_detached{};
+  JoinState join_state{JoinState::kNotJoined};
+  DarwinArtAndroidThreadRoutine routine{};
+  void* argument{};
+  void* return_value{};
+};
+
 struct ProviderState {
   std::mutex mutex;
   KeySlot key_slots[kAndroidKeySlots];
@@ -154,6 +175,8 @@ struct ProviderState {
   std::unordered_map<DarwinArtAndroidPthreadRwlock*,
                      std::shared_ptr<RwlockEntry>>
       rwlocks;
+  std::unordered_map<DarwinArtAndroidPthread, std::shared_ptr<ThreadEntry>>
+      threads;
 };
 
 ProviderState& State() {
@@ -163,10 +186,34 @@ ProviderState& State() {
   return *state;
 }
 
+void RemoveThreadEntry(const std::shared_ptr<ThreadEntry>& entry) {
+  ProviderState& state = State();
+  std::lock_guard<std::mutex> lock(state.mutex);
+  const auto found = state.threads.find(entry->token);
+  if (found != state.threads.end() && found->second.get() == entry.get()) {
+    state.threads.erase(found);
+  }
+}
+
+std::shared_ptr<ThreadEntry> FindThreadEntry(DarwinArtAndroidPthread token) {
+  ProviderState& state = State();
+  std::shared_ptr<ThreadEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    const auto found = state.threads.find(token);
+    if (found == state.threads.end()) return nullptr;
+    entry = found->second;
+  }
+  std::lock_guard<std::mutex> lock(entry->mutex);
+  return entry->published ? entry : nullptr;
+}
+
 std::atomic<uint64_t>& NextThreadToken() {
   static std::atomic<uint64_t> value{1};
   return value;
 }
+
+thread_local uint64_t current_thread_token = 0;
 
 pthread_key_t& HostThreadTlsKey() {
   static pthread_key_t key{};
@@ -178,14 +225,69 @@ pthread_once_t& HostThreadTlsKeyOnce() {
   return once;
 }
 
+pthread_key_t& OwnedThreadCleanupKey() {
+  static pthread_key_t key{};
+  return key;
+}
+
+pthread_once_t& OwnedThreadCleanupKeyOnce() {
+  static pthread_once_t once = PTHREAD_ONCE_INIT;
+  return once;
+}
+
 thread_local ThreadTlsState* tls_destructor_state = nullptr;
 
 void HostThreadTlsDestructor(void* opaque);
+
+void OwnedThreadCleanup(void* opaque) {
+  auto* owner = static_cast<std::shared_ptr<ThreadEntry>*>(opaque);
+  std::shared_ptr<ThreadEntry> entry = *owner;
+  delete owner;
+  bool remove = false;
+  {
+    std::lock_guard<std::mutex> lock(entry->mutex);
+    entry->host_exited = true;
+    remove = entry->join_state == ThreadEntry::JoinState::kDetached &&
+             entry->host_detached;
+  }
+  if (remove) RemoveThreadEntry(entry);
+}
+
+void InitializeOwnedThreadCleanupKey() {
+  const int result =
+      pthread_key_create(&OwnedThreadCleanupKey(), &OwnedThreadCleanup);
+  if (result != 0) std::abort();
+}
 
 void InitializeHostThreadTlsKey() {
   const int result =
       pthread_key_create(&HostThreadTlsKey(), &HostThreadTlsDestructor);
   if (result != 0) std::abort();
+}
+
+void* HostOwnedThreadStart(void* opaque) {
+  std::unique_ptr<std::shared_ptr<ThreadEntry>> owner(
+      static_cast<std::shared_ptr<ThreadEntry>*>(opaque));
+  std::shared_ptr<ThreadEntry> entry = *owner;
+  pthread_once(&OwnedThreadCleanupKeyOnce(), &InitializeOwnedThreadCleanupKey);
+  if (pthread_setspecific(OwnedThreadCleanupKey(), owner.get()) != 0) {
+    std::abort();
+  }
+  owner.release();
+  {
+    std::unique_lock<std::mutex> lock(entry->mutex);
+    while (!entry->published) entry->startup_condition.wait(lock);
+  }
+  current_thread_token = static_cast<uint64_t>(entry->token);
+  void* result = entry->routine(entry->argument);
+  {
+    std::lock_guard<std::mutex> lock(entry->mutex);
+    entry->return_value = result;
+    if (entry->join_state == ThreadEntry::JoinState::kNotJoined) {
+      entry->join_state = ThreadEntry::JoinState::kExitedNotJoined;
+    }
+  }
+  return result;
 }
 
 ThreadTlsState* GetThreadTlsState(bool create) {
@@ -207,9 +309,11 @@ ThreadTlsState* GetThreadTlsState(bool create) {
 }
 
 DarwinArtAndroidPthread CurrentThreadToken() {
-  static thread_local const uint64_t token =
-      NextThreadToken().fetch_add(1, std::memory_order_relaxed);
-  return static_cast<DarwinArtAndroidPthread>(token);
+  if (current_thread_token == 0) {
+    current_thread_token =
+        NextThreadToken().fetch_add(1, std::memory_order_relaxed);
+  }
+  return static_cast<DarwinArtAndroidPthread>(current_thread_token);
 }
 
 bool DecodeKey(DarwinArtAndroidPthreadKey key, uint32_t* slot_out) {
@@ -621,6 +725,124 @@ extern "C" DarwinArtAndroidPthread darwin_art_bionic_pthread_self(void) {
   return CurrentThreadToken();
 }
 
+extern "C" int darwin_art_bionic_pthread_create(
+    DarwinArtAndroidPthread* thread,
+    const void* android_attributes,
+    DarwinArtAndroidThreadRoutine routine,
+    void* argument) {
+  if (thread == nullptr || routine == nullptr) return kAndroidEinval;
+  if (android_attributes != nullptr) return kAndroidEnotsup;
+  std::shared_ptr<ThreadEntry> entry;
+  try {
+    entry = std::make_shared<ThreadEntry>();
+  } catch (const std::bad_alloc&) {
+    return kAndroidEnomem;
+  } catch (...) {
+    return kAndroidEagain;
+  }
+  entry->routine = routine;
+  entry->argument = argument;
+  auto* owner =
+      new (std::nothrow) std::shared_ptr<ThreadEntry>(entry);
+  if (owner == nullptr) return kAndroidEnomem;
+  try {
+    ProviderState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    for (;;) {
+      const uint64_t raw_token =
+          NextThreadToken().fetch_add(1, std::memory_order_relaxed);
+      if (raw_token == 0) continue;
+      entry->token = static_cast<DarwinArtAndroidPthread>(raw_token);
+      const auto [position, inserted] =
+          state.threads.emplace(entry->token, entry);
+      (void)position;
+      if (inserted) break;
+    }
+  } catch (const std::bad_alloc&) {
+    delete owner;
+    return kAndroidEnomem;
+  } catch (...) {
+    delete owner;
+    return kAndroidEagain;
+  }
+  const int result =
+      pthread_create(&entry->host, nullptr, &HostOwnedThreadStart, owner);
+  if (result != 0) {
+    RemoveThreadEntry(entry);
+    delete owner;
+    return AndroidError(result);
+  }
+  {
+    std::lock_guard<std::mutex> lock(entry->mutex);
+    *thread = entry->token;
+    entry->published = true;
+  }
+  entry->startup_condition.notify_one();
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_join(
+    DarwinArtAndroidPthread token,
+    void** return_value) {
+  if (token == CurrentThreadToken()) return kAndroidEdeadlk;
+  std::shared_ptr<ThreadEntry> entry = FindThreadEntry(token);
+  if (entry == nullptr) return kAndroidEsrch;
+  {
+    std::lock_guard<std::mutex> lock(entry->mutex);
+    if (entry->join_state == ThreadEntry::JoinState::kDetached ||
+        entry->join_state == ThreadEntry::JoinState::kJoined) {
+      return kAndroidEinval;
+    }
+    entry->join_state = ThreadEntry::JoinState::kJoined;
+  }
+  void* host_return = nullptr;
+  const int result = pthread_join(entry->host, &host_return);
+  if (result != 0) return AndroidError(result);
+  if (return_value != nullptr) *return_value = host_return;
+  RemoveThreadEntry(entry);
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_detach(
+    DarwinArtAndroidPthread token) {
+  std::shared_ptr<ThreadEntry> entry = FindThreadEntry(token);
+  if (entry == nullptr) return kAndroidEsrch;
+  bool collect_exited = false;
+  {
+    std::lock_guard<std::mutex> lock(entry->mutex);
+    if (entry->join_state == ThreadEntry::JoinState::kNotJoined) {
+      entry->join_state = ThreadEntry::JoinState::kDetached;
+    } else if (entry->join_state ==
+               ThreadEntry::JoinState::kExitedNotJoined) {
+      entry->join_state = ThreadEntry::JoinState::kJoined;
+      collect_exited = true;
+    } else {
+      return kAndroidEinval;
+    }
+  }
+  if (collect_exited) {
+    const int result = pthread_join(entry->host, nullptr);
+    if (result != 0) return AndroidError(result);
+    RemoveThreadEntry(entry);
+    return 0;
+  }
+  const int result = pthread_detach(entry->host);
+  bool remove = false;
+  {
+    std::lock_guard<std::mutex> lock(entry->mutex);
+    if (result == 0) {
+      entry->host_detached = true;
+      remove = entry->host_exited;
+    } else {
+      entry->join_state = entry->host_exited
+                              ? ThreadEntry::JoinState::kExitedNotJoined
+                              : ThreadEntry::JoinState::kNotJoined;
+    }
+  }
+  if (remove) RemoveThreadEntry(entry);
+  return AndroidError(result);
+}
+
 extern "C" int darwin_art_bionic_pthread_key_create(
     DarwinArtAndroidPthreadKey* key,
     DarwinArtAndroidTlsDestructor destructor) {
@@ -1020,6 +1242,9 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
   if (std::string_view(symbol) == "pthread_" #name)                         \
     return reinterpret_cast<void*>(&darwin_art_bionic_pthread_##name)
   RESOLVE(self);
+  RESOLVE(create);
+  RESOLVE(join);
+  RESOLVE(detach);
   RESOLVE(key_create);
   RESOLVE(key_delete);
   RESOLVE(getspecific);
@@ -1048,6 +1273,7 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
 extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
   ProviderState& state = State();
   std::lock_guard<std::mutex> lock(state.mutex);
+  if (!state.threads.empty()) return kAndroidEbusy;
   for (const KeySlot& slot : state.key_slots) {
     if (slot.active != nullptr) return kAndroidEbusy;
   }
@@ -1117,5 +1343,6 @@ extern "C" int darwin_art_bionic_pthread_capability(const char* capability) {
          name == "mutex-recursive-private" ||
          name == "mutex-errorcheck-private" ||
          name == "cond-private" || name == "cond-monotonic-clock" ||
-         name == "rwlock-private-reader-preferred";
+         name == "rwlock-private-reader-preferred" ||
+         name == "thread-create-join-detach-owner";
 }

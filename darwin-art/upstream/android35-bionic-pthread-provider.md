@@ -2,7 +2,7 @@
 
 This module is derived from the SHA-locked NDK r28c/API 35 arm64
 `libc++_shared.so`. That ELF imports 24 `pthread_*` functions from
-`libc.so@LIBC`; this coherent slice owns 22 of them:
+`libc.so@LIBC`; this coherent slice owns all 24 of them:
 
 ```text
 pthread_self
@@ -13,10 +13,14 @@ pthread_mutex_init / lock / trylock / unlock / destroy
 pthread_mutexattr_init / destroy / settype
 pthread_cond_wait / timedwait / signal / broadcast / destroy
 pthread_rwlock_rdlock / wrlock / unlock
+pthread_join / pthread_detach
 ```
 
-Only `pthread_join` and `pthread_detach` remain unsupported. A
-resolver can therefore never mistake this slice for complete pthread support.
+Because those last two functions require a coherent owner for `pthread_t`, the
+provider additionally owns `pthread_create`. It is not counted among the 24
+source-derived libc++ imports; it is the explicit lifecycle seam that issues
+the only tokens accepted by join/detach. The Android ELF fixture imports and
+executes all 24 libc++ functions plus this one extra owner symbol.
 
 ## Object and state boundary
 
@@ -30,6 +34,25 @@ different representations. None of these Android values is cast to a Darwin
 
 - `pthread_self` returns a process-unique, thread-local 64-bit Android token. It
   is stable on one thread and never exposes Darwin's `pthread_t`.
+- `pthread_create` creates a separate host thread but publishes only a provider-
+  issued 64-bit Android token. The child waits on a startup handshake until the
+  token is present in the provider table and written to the caller, preserving
+  the pinned Bionic publication order. Join/detach lookup that table; an
+  arbitrary or expired token returns Android `ESRCH` and is never cast to
+  Darwin `pthread_t`. Each entry follows Bionic's four states: not joined,
+  exited-not-joined, joined, and detached. Join claims the entry before waiting;
+  detach either detaches a running host thread or joins an already-exited one
+  to perform the cleanup that Bionic would do. Concurrent join-versus-detach is
+  serialized so exactly one can claim the token. A detached entry is not
+  removed until both host exit and successful host detach are observed, making
+  provider reset a real target-quiescence check. This slice accepts only null
+  create attributes; non-null storage returns `ENOTSUP` rather than being
+  interpreted as a Darwin attribute object.
+  Entry allocation, owner allocation, and token-map insertion all complete
+  before Darwin `pthread_create` is called. Allocation failures return Android
+  `ENOMEM`/`EAGAIN`; host-create failure removes the unpublished map entry and
+  frees its owner. Lookup rejects unpublished entries, so no failure path can
+  expose an uninitialized host handle or strand a child on the startup gate.
 - TLS keys use an Android high-bit/index key and one provider-global Darwin TLS
   key. Each participating host thread owns one fixed 128-slot value table;
   Android keys and values are never reinterpreted as Darwin pthread objects.
@@ -92,8 +115,9 @@ The singleton provider owns these tables for the process and must outlive every
 loaded Android image. Its root state is intentionally process-lifetime so late
 Darwin TLS destructors cannot access a destroyed C++ static. Participating
 thread tables remain registered until their one host destructor runs. A
-quiescent reset succeeds only with no active Android keys and no foreign thread
-table; it detaches and frees the caller's table. Mutex tombstones and completed-once entries remain bounded
+quiescent reset succeeds only with no owned thread handles, active Android keys,
+or foreign thread table; it detaches and frees the caller's table. Mutex
+tombstones and completed-once entries remain bounded
 by Android object addresses until the loader's provider-reset/process-exit
 boundary. Key generation prevents deleted-slot stale TLS values;
 object-address tombstones prevent use-after-destroy from silently constructing
@@ -107,8 +131,10 @@ Darwin errno numbers (`EAGAIN=11`, `EDEADLK=35`, `ENOTSUP=95`,
 
 Fork while once initialization is underway, robust mutexes, process-shared
 mutexes/conditions/rwlocks, priority inheritance, condition attributes/explicit initialization, cancellation cleanup,
-rwlock attributes/explicit initialization, timed/try rwlocks, and thread create/join/
-detach are not implemented. Mutex NORMAL/RECURSIVE/ERRORCHECK attributes are
+rwlock attributes/explicit initialization, timed/try rwlocks, and non-null
+thread-create attributes are not implemented. Thread create/join/detach itself
+is implemented only as one atomic provider-owned lifecycle module. Mutex
+NORMAL/RECURSIVE/ERRORCHECK attributes are
 implemented; their pshared/PI bits and pshared condition/rwlock flags return
 `ENOTSUP`, while the related setter resolver symbols
 are absent. POSIX makes destroying a condition with waiters undefined; this
@@ -117,9 +143,9 @@ beneath a blocked Android thread. There is no unprefixed interposition or
 Darwin `dlsym` fallback.
 
 The only Android-to-Darwin callback signatures exercised here are `void()` for
-once and `void(void*)` for TLS destruction. Both are fixed, register-only ARM64
-signatures already covered by the dual-PCS proof. This does not claim arbitrary
-callback ABI compatibility.
+once, `void(void*)` for TLS destruction, and `void*(void*)` for a thread start
+routine. All are fixed, register-only ARM64 signatures already covered by the
+dual-PCS proof. This does not claim arbitrary callback ABI compatibility.
 
 ## End-to-end gate
 
@@ -131,10 +157,12 @@ The gate:
 
 1. re-derives all 24 pthread imports and their `LIBC` versions from the pinned
    `libc++_shared.so`;
-2. sparsely materializes six exact Bionic implementation files without Git;
+2. sparsely materializes ten exact Bionic implementation files without Git,
+   including create, join, detach, and their state definition;
 3. builds a Darwin arm64 provider archive and an NDK AArch64 ELF fixture;
 4. loads that ELF with `darwin-art-elf-loader` and an exact `libc.so@LIBC`
-   resolver, then actually executes all 22 imports;
+   resolver, then actually executes all 24 imports plus the explicit create
+   lifecycle owner;
 5. runs eight Darwin threads through the same loaded Android image, checks
    stable/unique thread tokens, two-pass TLS destructors, once-only execution,
    16,000 contended mutex increments, and concurrent destroy-versus-lookup;
@@ -157,6 +185,11 @@ The gate:
 10. initializes NORMAL/RECURSIVE/ERRORCHECK attributes in Android ELF code,
    proves recursive depth, errorcheck self-lock `EDEADLK`, foreign unlock
    `EPERM`, destroyed-attribute `EINVAL`, and pshared/PI `ENOTSUP`. A 100-round
-   ASan/UBSan stress repeats the same lifecycle including held-destroy `EBUSY`.
+   ASan/UBSan stress repeats the same lifecycle including held-destroy `EBUSY`;
+11. runs provider-created Android ELF thread routines through return-value join,
+   running and already-exited detach, self-join `EDEADLK`, foreign-token `ESRCH`,
+   and concurrent join-versus-detach. A separate 100-round ASan/UBSan stress
+   proves exactly one lifecycle winner and requires a successful quiescent reset
+   after every detached target exits.
 
 Artifacts are written to `_build/bionic-pthread-provider`.

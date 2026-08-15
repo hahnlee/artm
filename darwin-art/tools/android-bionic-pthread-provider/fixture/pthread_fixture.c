@@ -7,6 +7,7 @@ enum {
   kIterations = 2000,
   kCondWaiters = 4,
   kAndroidEperm = 1,
+  kAndroidEsrch = 3,
   kAndroidEbusy = 16,
   kAndroidEinval = 22,
   kAndroidEdeadlk = 35,
@@ -46,6 +47,11 @@ static _Atomic int g_rw_release_readers;
 static _Atomic int g_rw_writer_entered;
 static int g_rw_value;
 static int g_counter;
+static _Atomic int g_detached_release;
+static _Atomic int g_detached_done;
+static _Atomic int g_fast_done;
+static pthread_t g_lifecycle_race_thread;
+static _Atomic int g_lifecycle_race_release;
 
 static void OnceRoutine(void) {
   atomic_fetch_add_explicit(&g_once_calls, 1, memory_order_relaxed);
@@ -62,6 +68,29 @@ static void TlsDestructor(void* value) {
     atomic_fetch_add_explicit(&g_destructor_second_passes, 1,
                               memory_order_relaxed);
   }
+}
+
+static void* ReturnArgument(void* argument) { return argument; }
+
+static void* DetachedRoutine(void* argument) {
+  (void)argument;
+  while (atomic_load_explicit(&g_detached_release, memory_order_acquire) == 0) {
+  }
+  atomic_store_explicit(&g_detached_done, 1, memory_order_release);
+  return (void*)(uintptr_t)0xd37a;
+}
+
+static void* FastRoutine(void* argument) {
+  atomic_store_explicit(&g_fast_done, 1, memory_order_release);
+  return argument;
+}
+
+static void* LifecycleRaceRoutine(void* argument) {
+  (void)argument;
+  while (atomic_load_explicit(&g_lifecycle_race_release,
+                              memory_order_acquire) == 0) {
+  }
+  return (void*)(uintptr_t)0xface;
 }
 
 __attribute__((visibility("default"))) int pthread_fixture_setup(void) {
@@ -120,6 +149,57 @@ __attribute__((visibility("default"))) int pthread_fixture_errorcheck_wrong_unlo
 
 __attribute__((visibility("default"))) int pthread_fixture_errorcheck_release(void) {
   return pthread_mutex_unlock(&g_errorcheck_mutex) == 0 ? 0 : -103;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_lifecycle_basic(void) {
+  pthread_t thread;
+  void* result = 0;
+  if (pthread_create(&thread, 0, &ReturnArgument, (void*)(uintptr_t)0x12345678) !=
+          0 ||
+      thread == pthread_self() || pthread_join(thread, &result) != 0 ||
+      (uintptr_t)result != 0x12345678)
+    return -110;
+  if (pthread_join(thread, 0) != kAndroidEsrch) return -111;
+  if (pthread_join(pthread_self(), 0) != kAndroidEdeadlk) return -112;
+  if (pthread_join((pthread_t)0x7ffffffffffffffeL, 0) != kAndroidEsrch ||
+      pthread_detach((pthread_t)0x7ffffffffffffffeL) != kAndroidEsrch)
+    return -113;
+
+  if (pthread_create(&thread, 0, &DetachedRoutine, 0) != 0 ||
+      pthread_detach(thread) != 0 || pthread_join(thread, 0) != kAndroidEinval)
+    return -114;
+  atomic_store_explicit(&g_detached_release, 1, memory_order_release);
+
+  atomic_store_explicit(&g_fast_done, 0, memory_order_relaxed);
+  if (pthread_create(&thread, 0, &FastRoutine, (void*)(uintptr_t)0xf457) != 0)
+    return -115;
+  while (atomic_load_explicit(&g_fast_done, memory_order_acquire) == 0) {
+  }
+  if (pthread_detach(thread) != 0 || pthread_detach(thread) != kAndroidEsrch)
+    return -116;
+  return 0;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_lifecycle_detached_done(void) {
+  return atomic_load_explicit(&g_detached_done, memory_order_acquire);
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_lifecycle_race_setup(void) {
+  atomic_store_explicit(&g_lifecycle_race_release, 0, memory_order_relaxed);
+  return pthread_create(&g_lifecycle_race_thread, 0, &LifecycleRaceRoutine, 0);
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_lifecycle_race_join(void) {
+  return pthread_join(g_lifecycle_race_thread, 0);
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_lifecycle_race_detach(void) {
+  return pthread_detach(g_lifecycle_race_thread);
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_lifecycle_race_release(void) {
+  atomic_store_explicit(&g_lifecycle_race_release, 1, memory_order_release);
+  return 0;
 }
 
 __attribute__((visibility("default"))) int pthread_fixture_worker(void) {

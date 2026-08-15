@@ -9,15 +9,18 @@ use std::num::NonZeroUsize;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-const EXPECTED: [&str; 22] = [
+const EXPECTED: [&str; 25] = [
     "pthread_cond_broadcast",
     "pthread_cond_destroy",
     "pthread_cond_signal",
     "pthread_cond_timedwait",
     "pthread_cond_wait",
+    "pthread_create",
+    "pthread_detach",
     "pthread_getspecific",
     "pthread_key_create",
     "pthread_key_delete",
+    "pthread_join",
     "pthread_mutex_destroy",
     "pthread_mutex_init",
     "pthread_mutex_lock",
@@ -117,7 +120,7 @@ fn expect_closed_resolver_negatives() -> Result<(), Box<dyn std::error::Error>> 
     let version = CString::new("LIBC")?;
     let wrong_soname = CString::new("libSystem.B.dylib")?;
     let wrong_version = CString::new("DARWIN")?;
-    let unknown = CString::new("pthread_create")?;
+    let unknown = CString::new("pthread_cancel")?;
     let unowned_rwlock = CString::new("pthread_rwlock_destroy")?;
     unsafe {
         if !darwin_art_bionic_pthread_resolve(
@@ -145,6 +148,26 @@ fn expect_closed_resolver_negatives() -> Result<(), Box<dyn std::error::Error>> 
         }
     }
     Ok(())
+}
+
+fn wait_for_exported_count(
+    image: &LoadedElf,
+    symbol: &str,
+    expected: i32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let address = image.lookup_exported(symbol)?;
+    let function: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(address) };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let value = unsafe { function() };
+        if value == expected {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("{symbol} remained {value}, expected {expected}").into());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -182,6 +205,41 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if image.call_exported_i32("pthread_fixture_errorcheck_release")? != 0 {
         return Err("errorcheck owner release failed".into());
     }
+    if image.call_exported_i32("pthread_fixture_lifecycle_basic")? != 0 {
+        return Err("Android create/join/detach lifecycle basic path failed".into());
+    }
+    wait_for_exported_count(&image, "pthread_fixture_lifecycle_detached_done", 1)?;
+    if image.call_exported_i32("pthread_fixture_lifecycle_race_setup")? != 0 {
+        return Err("lifecycle join/detach race setup failed".into());
+    }
+    let race_join = image.lookup_exported("pthread_fixture_lifecycle_race_join")?;
+    let race_detach = image.lookup_exported("pthread_fixture_lifecycle_race_detach")?;
+    let join_thread = std::thread::spawn(move || {
+        let function: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(race_join) };
+        unsafe { function() }
+    });
+    let detach_thread = std::thread::spawn(move || {
+        let function: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(race_detach) };
+        unsafe { function() }
+    });
+    std::thread::sleep(Duration::from_millis(10));
+    if image.call_exported_i32("pthread_fixture_lifecycle_race_release")? != 0 {
+        return Err("lifecycle race target release failed".into());
+    }
+    let join_result = join_thread
+        .join()
+        .map_err(|_| "lifecycle join caller panicked")?;
+    let detach_result = detach_thread
+        .join()
+        .map_err(|_| "lifecycle detach caller panicked")?;
+    let successes = usize::from(join_result == 0) + usize::from(detach_result == 0);
+    let valid_loser = |result: i32| result == 0 || result == 3 || result == 22;
+    if successes != 1 || !valid_loser(join_result) || !valid_loser(detach_result) {
+        return Err(format!(
+            "join/detach race mismatch: join={join_result} detach={detach_result}"
+        )
+        .into());
+    }
     if resolver.requested != EXPECTED.into_iter().map(str::to_owned).collect() {
         return Err(format!("resolver import set mismatch: {:?}", resolver.requested).into());
     }
@@ -213,22 +271,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             unsafe { function() }
         }));
     }
-    let wait_for_count = |symbol: &str, expected: i32| -> Result<(), Box<dyn std::error::Error>> {
-        let address = image.lookup_exported(symbol)?;
-        let function: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(address) };
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let value = unsafe { function() };
-            if value == expected {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err(format!("{symbol} remained {value}, expected {expected}").into());
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    };
-    wait_for_count("pthread_fixture_cond_waiting", 4)?;
+    wait_for_exported_count(&image, "pthread_fixture_cond_waiting", 4)?;
     if image.call_exported_i32("pthread_fixture_cond_spurious_signal")? != 0 {
         return Err("condition predicate-loop signal failed".into());
     }
@@ -242,7 +285,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if image.call_exported_i32("pthread_fixture_cond_signal_one")? != 0 {
         return Err("condition signal failed".into());
     }
-    wait_for_count("pthread_fixture_cond_completed", 1)?;
+    wait_for_exported_count(&image, "pthread_fixture_cond_completed", 1)?;
     if image.call_exported_i32("pthread_fixture_cond_broadcast")? != 0 {
         return Err("condition broadcast failed".into());
     }
@@ -266,7 +309,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             unsafe { function() }
         }));
     }
-    wait_for_count("pthread_fixture_rwlock_reader_entries", 4)?;
+    wait_for_exported_count(&image, "pthread_fixture_rwlock_reader_entries", 4)?;
     let rw_writer = image.lookup_exported("pthread_fixture_rwlock_writer")?;
     let writer = std::thread::spawn(move || {
         let function: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(rw_writer) };
@@ -332,8 +375,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("Android fixture finish failed: {finish}").into());
     }
     drop(image);
-    if unsafe { darwin_art_bionic_pthread_provider_reset() } != 0 {
-        return Err("provider retained a live key or mutex".into());
+    let reset_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let reset = unsafe { darwin_art_bionic_pthread_provider_reset() };
+        if reset == 0 {
+            break;
+        }
+        if reset != 16 || Instant::now() >= reset_deadline {
+            return Err(format!("provider reset failed after lifecycle cleanup: {reset}").into());
+        }
+        std::thread::sleep(Duration::from_millis(1));
     }
     // Bionic exposes only valid-bit|slot. Its generation is internal key-data
     // state, so use of a deleted integer key is POSIX-undefined and aliases a
@@ -365,6 +416,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "cond-private",
         "cond-monotonic-clock",
         "rwlock-private-reader-preferred",
+        "thread-create-join-detach-owner",
     ] {
         if !capability(supported) {
             return Err(format!("missing capability {supported}").into());
@@ -383,7 +435,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("unsupported capability escaped: {unsupported}").into());
         }
     }
-    println!("android-bionic-pthread-provider: ELF=executed resolver=libc.so@LIBC imports=22");
+    println!("android-bionic-pthread-provider: ELF=executed resolver=libc.so@LIBC imports=24/24 extra-owner=pthread_create");
     println!(
         "pthread-self=stable+unique tls-destructor=2-pass once=1 mutex=8x2000-contention destroy-lookup=race-safe"
     );
@@ -397,7 +449,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "rwlock=4-concurrent-readers writer=blocked-then-progress wrong-unlock=EPERM recursive-read=2 lazy-zero-init reset=idle"
     );
     println!(
-        "opaque-layout=side-table no-Darwin-reinterpret stale-key=reuse-alias(Bionic-undefined) unsupported=fork+robust+pshared+PI+thread-lifecycle"
+        "thread-lifecycle=create+join+detach token=provider-owned result=roundtrip foreign=ESRCH self-join=EDEADLK race=one-winner target-clean=reset"
+    );
+    println!(
+        "opaque-layout=side-table no-Darwin-reinterpret stale-key=reuse-alias(Bionic-undefined) unsupported=fork+robust+pshared+PI+thread-attrs"
     );
     Ok(())
 }

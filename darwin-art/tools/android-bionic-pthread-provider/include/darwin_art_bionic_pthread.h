@@ -27,8 +27,19 @@ typedef struct DarwinArtAndroidPthreadRwlock {
 
 typedef void (*DarwinArtAndroidTlsDestructor)(void* value);
 typedef void (*DarwinArtAndroidOnceRoutine)(void);
+typedef void* (*DarwinArtAndroidThreadRoutine)(void* argument);
 
 DarwinArtAndroidPthread darwin_art_bionic_pthread_self(void);
+// Coherent lifecycle owner seam. Only null attributes are currently accepted;
+// returned tokens are the sole valid inputs to join/detach.
+int darwin_art_bionic_pthread_create(
+    DarwinArtAndroidPthread* thread,
+    const void* android_attributes,
+    DarwinArtAndroidThreadRoutine routine,
+    void* argument);
+int darwin_art_bionic_pthread_join(DarwinArtAndroidPthread thread,
+                                   void** return_value);
+int darwin_art_bionic_pthread_detach(DarwinArtAndroidPthread thread);
 int darwin_art_bionic_pthread_key_create(
     DarwinArtAndroidPthreadKey* key,
     DarwinArtAndroidTlsDestructor destructor);
@@ -77,8 +88,9 @@ void* darwin_art_bionic_pthread_resolve(const char* soname,
                                         const char* symbol,
                                         const char* version);
 
-// Test/process-shutdown boundary. It succeeds only when no TLS keys or live
-// mutexes remain; once entries may be discarded after all consumers stop.
+// Test/process-shutdown boundary. It succeeds only when no owned thread,
+// TLS-key, or live synchronization object remains; once entries may be
+// discarded after all consumers stop.
 int darwin_art_bionic_pthread_provider_reset(void);
 size_t darwin_art_bionic_pthread_provider_retired_cell_count(void);
 
