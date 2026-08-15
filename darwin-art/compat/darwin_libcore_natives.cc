@@ -8,6 +8,7 @@ void register_libcore_io_AsynchronousCloseMonitor(JNIEnv* env);
 extern "C" void register_java_io_UnixFileSystem(JNIEnv* env);
 extern "C" void register_java_io_FileDescriptor(JNIEnv* env);
 extern "C" void register_java_io_FileInputStream(JNIEnv* env);
+extern "C" void register_java_sun_nio_fs_UnixNativeDispatcher(JNIEnv* env);
 extern "C" void register_sun_nio_ch_IOUtil(JNIEnv* env);
 extern "C" void register_sun_nio_ch_FileChannelImpl(JNIEnv* env);
 extern "C" void register_sun_nio_ch_FileDispatcherImpl(JNIEnv* env);
@@ -729,6 +730,14 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
     return Register(env, "java/io/FileDescriptor", file_descriptor_methods, 2);
 #endif
   };
+  const auto register_unix_native_dispatcher = [&]() {
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+    register_java_sun_nio_fs_UnixNativeDispatcher(env);
+    return !env->ExceptionCheck();
+#else
+    return true;
+#endif
+  };
   const auto register_libcore_memory = [&]() {
 #if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
     // StartMinimal has already registered ART's complementary seven array
@@ -753,6 +762,7 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
          register_os_constants() &&
          register_linux() &&
          register_file_descriptor() &&
+         register_unix_native_dispatcher() &&
          register_openjdk_file_mapping() &&
          register_libcore_memory() &&
          Register(env, "libcore/icu/ICU", icu_methods, 3);
