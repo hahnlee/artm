@@ -47,6 +47,10 @@ fn run() -> Result<()> {
         "build-graphics-codec-modules" => {
             build_shell_gate(&root, "build-android16-codec-foundation.sh")
         }
+        "build-libbase" => build_shell_gate(&root, "build-android16-libbase-foundation.sh"),
+        "build-icu-runtime-adapters" => {
+            build_shell_gate(&root, "build-android16-icu-runtime-adapters.sh")
+        }
         "build-graphics-foundations" => {
             build_shell_gate(&root, "build-android16-graphics-foundations.sh")
         }
@@ -74,9 +78,13 @@ fn run() -> Result<()> {
         "build-runtime-arm64" => build_runtime_arm64(&root),
         "build-interpreter-core" => build_interpreter_core(&root),
         "build-runtime-bootstrap" => build_runtime_bootstrap(&root),
+        "build-runtime-graphics-bootstrap" => build_runtime_graphics_bootstrap(&root),
         "audit-runtime-link" => audit_runtime_link(&root),
+        "audit-runtime-graphics-link" => audit_runtime_graphics_link(&root),
+        "audit-graphics-closure" => build_shell_gate(&root, "audit-android16-graphics-closure.sh"),
         "probe-runtime-dex" => probe_runtime_dex(&root, false),
         "probe-window" => probe_runtime_dex(&root, true),
+        "probe-runtime-graphics" => probe_runtime_graphics(&root),
         "verify-bootclasspath" => verify_bootclasspath(&root),
         "all" => {
             doctor()?;
@@ -125,6 +133,8 @@ fn print_help() {
     println!("  build-hostgraphics  build Android's Darwin native-window host module");
     println!("  build-skia-hwui  build the CoreText-free framework Skia closure");
     println!("  build-graphics-codec-modules  build image_io/JPEG/UltraHDR modules");
+    println!("  build-libbase  build the complete Android host libbase provider");
+    println!("  build-icu-runtime-adapters  verify ART adapters against Android ICU 76");
     println!("  build-graphics-foundations  build Darwin liblog/libcutils archives");
     println!("  build-nativehelper  build Darwin nativehelper host archives");
     println!("  build-ui-types  build the Darwin Android libui-types archive");
@@ -142,9 +152,15 @@ fn print_help() {
     println!("  build-runtime-arm64  generate ABI constants and compile ARM64 context");
     println!("  build-interpreter-core  compile ART's C++ interpreter implementation");
     println!("  build-runtime-bootstrap  compile ART Runtime initialization for Darwin");
+    println!(
+        "  build-runtime-graphics-bootstrap  compile the isolated real-graphics Runtime flavor"
+    );
     println!("  audit-runtime-link  measure the remaining Runtime::Create link closure");
+    println!("  audit-runtime-graphics-link  link ART with the strict Android graphics closure");
+    println!("  audit-graphics-closure  verify the 32-archive Android graphics closure");
     println!("  probe-runtime-dex  launch Java main(String[]) with Android stdout");
     println!("  probe-window  display the Android View probe in a native NSWindow");
+    println!("  probe-runtime-graphics  draw DecorView through Bitmap-backed AOSP Canvas");
     println!("  verify-bootclasspath  verify extracted Android 16 core DEX files");
     println!("  all        run every check and probe");
 }
@@ -263,6 +279,22 @@ fn sync_sources(root: &Path) -> Result<()> {
         "_aosp/libnativehelper-full",
         "Android.bp",
         lock_value(&lock, "LIBNATIVEHELPER_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_file(
+        root,
+        "platform/libcore",
+        lock_value(&lock, "LIBCORE_REVISION")?,
+        "ojluni/src/main/native/Android.bp",
+        "_aosp/libcore/ojluni/src/main/native/Android.bp",
+        lock_value(&lock, "LIBCORE_OPENJDK_NATIVE_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_file(
+        root,
+        "platform/libcore",
+        lock_value(&lock, "LIBCORE_REVISION")?,
+        "ojluni/src/main/native/Math.c",
+        "_aosp/libcore/ojluni/src/main/native/Math.c",
+        lock_value(&lock, "LIBCORE_OPENJDK_MATH_SHA256")?,
     )?;
     materialize_archive(
         root,
@@ -651,6 +683,30 @@ fn sync_sources(root: &Path) -> Result<()> {
         "mainline/i18n/sdk/java/core-icu4j.jar",
         "_prebuilt/android-16/bootclasspath/core-icu4j.jar",
         lock_value(&lock, "CORE_ICU4J_SHA256")?,
+    )?;
+    materialize_file(
+        root,
+        "platform/prebuilts/runtime",
+        lock_value(&lock, "RUNTIME_PREBUILTS_REVISION")?,
+        "mainline/i18n/apex/com.android.i18n-arm64.apex",
+        "_prebuilt/android-16/i18n/com.android.i18n-arm64.apex",
+        lock_value(&lock, "I18N_ARM64_APEX_SHA256")?,
+    )?;
+    materialize_file(
+        root,
+        "platform/external/icu",
+        lock_value(&lock, "GRAPHICS_ICU_REVISION")?,
+        "android_icu4j/libcore_bridge/src/java/com/android/i18n/util/ATrace.java",
+        "_aosp/external/icu-runtime-bridge/com/android/i18n/util/ATrace.java",
+        lock_value(&lock, "ICU_ATRACE_JAVA_SHA256")?,
+    )?;
+    materialize_file(
+        root,
+        "platform/external/icu",
+        lock_value(&lock, "GRAPHICS_ICU_REVISION")?,
+        "android_icu4j/libcore_bridge/src/java/com/android/icu/util/UResourceBundleNative.java",
+        "_aosp/external/icu-runtime-bridge/com/android/icu/util/UResourceBundleNative.java",
+        lock_value(&lock, "ICU_URESOURCE_BUNDLE_NATIVE_JAVA_SHA256")?,
     )?;
     Ok(())
 }
@@ -1508,7 +1564,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=12 methods=288 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=12 methods=293 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldev/darwinart/probe/Hello; \
                     class[2]=Ldev/darwinart/probe/ProbeActivity; \
@@ -2136,6 +2192,14 @@ fn build_interpreter_core(root: &Path) -> Result<()> {
 }
 
 fn build_runtime_bootstrap(root: &Path) -> Result<()> {
+    build_runtime_bootstrap_flavor(root, false)
+}
+
+fn build_runtime_graphics_bootstrap(root: &Path) -> Result<()> {
+    build_runtime_bootstrap_flavor(root, true)
+}
+
+fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()> {
     let artbase = root.join("_aosp/art/libartbase");
     let patched_artbase = root.join("_build/foundation/patched-source/libartbase");
     let cmdline = root.join("_aosp/art/cmdline");
@@ -2167,6 +2231,14 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
     let sigchain = root.join("_aosp/art/sigchainlib");
     let unwindstack_include = root.join("_aosp/system/unwinding/libunwindstack/include");
     let compat = root.join("compat");
+    let graphics_registration_include = root.join("_build/android-graphics-jni/generated");
+    let android_icu_include = root.join("_aosp/external/icu-graphics/libandroidicuinit/include");
+    let android_graphics_apex_include = root.join("_aosp/frameworks/base/libs/hwui/apex/include");
+    let aosp_fmt_include = root.join("_aosp/external/fmtlib/include");
+    let libcutils_include = root.join("_aosp/system/core/libcutils/include");
+    let liblog_include = root.join("_aosp/system/logging/liblog/include");
+    let nativehelper_full_include = root.join("_aosp/libnativehelper-full/include");
+    let openjdk_math_source = root.join("_aosp/libcore/ojluni/src/main/native/Math.c");
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
 
     if !generated_dir.join("asm_defines.h").exists() {
@@ -2174,8 +2246,19 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
             "generated ART ABI constants are missing; run `build-runtime-arm64` first".into(),
         );
     }
+    if !openjdk_math_source.is_file() {
+        return Err(format!(
+            "Android libcore Math source is missing: {}; run `art-bootstrap sync` first",
+            openjdk_math_source.display()
+        )
+        .into());
+    }
 
-    let build_dir = root.join("_build/runtime-bootstrap");
+    let build_dir = root.join(if real_graphics {
+        "_build/runtime-graphics-bootstrap"
+    } else {
+        "_build/runtime-bootstrap"
+    });
     let runtime_generated_dir = build_dir.join("generated");
     let patched_source_dir = build_dir.join("patched-source");
     let patched_runtime = patched_source_dir.join("runtime");
@@ -2226,6 +2309,15 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
     fs::copy(
         runtime.join("entrypoints/quick/callee_save_frame.h"),
         patched_runtime.join("entrypoints/quick/callee_save_frame.h"),
+    )?;
+    fs::copy(
+        runtime.join("entrypoints/quick/quick_trampoline_entrypoints.cc"),
+        patched_runtime.join("entrypoints/quick/quick_trampoline_entrypoints.cc"),
+    )?;
+    fs::create_dir_all(patched_runtime.join("arch/arm64"))?;
+    fs::copy(
+        runtime.join("arch/arm64/jni_frame_arm64.h"),
+        patched_runtime.join("arch/arm64/jni_frame_arm64.h"),
     )?;
     fs::copy(
         runtime.join("runtime_common.cc"),
@@ -2286,6 +2378,7 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         "patches/art/0025-darwin-morecore-diagnostics.patch",
         "patches/art/0027-darwin-string-abi-overlay.patch",
         "patches/art/0028-darwin-minimal-runtime-start.patch",
+        "patches/art/0029-darwin-arm64-native-stack-pcs.patch",
     ] {
         run_command(
             Command::new("patch")
@@ -2295,7 +2388,7 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         )?;
     }
 
-    let includes = [
+    let mut includes = vec![
         compat.as_path(),
         generated_dir.as_path(),
         generator.as_path(),
@@ -2330,6 +2423,27 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         Path::new("/opt/homebrew/opt/icu4c@78/include"),
         Path::new("/opt/homebrew/include"),
     ];
+    if real_graphics {
+        let generated_registration =
+            graphics_registration_include.join("darwin_android_graphics_registration.h");
+        if !generated_registration.is_file() {
+            return Err(format!(
+                "generated Android graphics registration header is missing: {}; run `build-android-graphics-jni` first",
+                generated_registration.display()
+            )
+            .into());
+        }
+        if !android_icu_include
+            .join("androidicuinit/android_icu_init.h")
+            .is_file()
+        {
+            return Err("Android ICU init headers are missing; run `build-icu` first".into());
+        }
+        includes.insert(0, graphics_registration_include.as_path());
+        includes.insert(1, android_icu_include.as_path());
+        includes.insert(2, android_graphics_apex_include.as_path());
+        includes.insert(3, aosp_fmt_include.as_path());
+    }
     let sources = [
         "fault_handler.cc",
         "interpreter/mterp/nterp.cc",
@@ -2644,16 +2758,91 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         );
         objects.push(profile_object);
     }
+    if real_graphics {
+        // The default foundation archive was compiled against the developer
+        // machine's fmt headers. Recompile the only fmt-using libartbase TU in
+        // this isolated flavor so ART and module-complete AOSP libbase share
+        // the pinned fmt ABI without a Homebrew fmt provider.
+        let os_linux_object = object_dir.join("artbase_os_linux_aosp_fmt.cc.o");
+        let mut os_linux_command = runtime_cpp_command(&includes);
+        os_linux_command
+            .arg("-c")
+            .arg(artbase.join("base/os_linux.cc"))
+            .arg("-o")
+            .arg(&os_linux_object);
+        record_cache_result(
+            compile_with_dependency_cache(
+                &mut os_linux_command,
+                &os_linux_object,
+                &compiler_identity,
+                &mut file_hash_cache,
+            )?,
+            &mut compiled_objects,
+            &mut cached_objects,
+        );
+    }
+    // Compile Android 16 libcore's complete java.lang.Math native table as C.
+    // Keeping this TU unchanged preserves AOSP's FastNative ABI and avoids a
+    // Darwin-specific reimplementation of its 23 libm entry points.
+    let openjdk_math_object = object_dir.join("libcore_openjdk_Math.c.o");
+    let mut openjdk_math_command = Command::new("clang");
+    openjdk_math_command
+        .args([
+            "-std=gnu11",
+            "-O2",
+            "-DNDEBUG",
+            "-ftrivial-auto-var-init=zero",
+            "-ffunction-sections",
+            "-fdata-sections",
+        ])
+        .arg(format!("-I{}", android_jni_include.display()))
+        .arg(format!("-I{}", nativehelper_full_include.display()))
+        .arg(format!("-I{}", nativehelper_platform_headers.display()))
+        .arg(format!("-I{}", liblog_include.display()))
+        .arg("-c")
+        .arg(&openjdk_math_source)
+        .arg("-o")
+        .arg(&openjdk_math_object);
+    record_cache_result(
+        compile_with_dependency_cache(
+            &mut openjdk_math_command,
+            &openjdk_math_object,
+            &compiler_identity,
+            &mut file_hash_cache,
+        )?,
+        &mut compiled_objects,
+        &mut cached_objects,
+    );
+    objects.push(openjdk_math_object);
     for adapter_source in [
         "darwin_framework_natives.cc",
         "darwin_icu_natives.cc",
+        "darwin_icu_jni_bridge.cc",
         "darwin_libcore_natives.cc",
         "darwin_runtime_adapters.cc",
         "darwin_sigchain.cc",
         "fault_handler_arm64_darwin.cc",
     ] {
+        if (real_graphics
+            && matches!(
+                adapter_source,
+                "darwin_icu_natives.cc" | "darwin_libcore_natives.cc"
+            ))
+            || (!real_graphics && adapter_source == "darwin_icu_jni_bridge.cc")
+        {
+            continue;
+        }
         let adapter_object = object_dir.join(format!("{adapter_source}.o"));
         let mut adapter_command = runtime_bootstrap_cpp_command(&includes);
+        if real_graphics && adapter_source == "darwin_framework_natives.cc" {
+            adapter_command
+                .arg("-DDARWIN_ART_REAL_GRAPHICS")
+                .arg("-I")
+                .arg(&libcutils_include);
+        }
+        if real_graphics && adapter_source == "darwin_icu_jni_bridge.cc" {
+            adapter_command.arg("-I").arg(root.join("include"));
+        }
         adapter_command
             .arg("-idirafter")
             .arg(&ndk_arch_include)
@@ -2690,6 +2879,7 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
                 | "gc/collector/mark_compact.cc"
                 | "gc/space/malloc_space.cc"
                 | "entrypoints/quick/quick_alloc_entrypoints.cc"
+                | "entrypoints/quick/quick_trampoline_entrypoints.cc"
                 | "runtime_common.cc"
                 | "oat/oat_file.cc"
                 | "exec_utils.cc"
@@ -2702,6 +2892,15 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
             runtime.join(source)
         };
         let mut compile_command = runtime_bootstrap_cpp_command(&includes);
+        if matches!(
+            source,
+            "entrypoints/jni/jni_entrypoints.cc" | "oat/jni_stub_hash_map.cc"
+        ) {
+            // These two upstream TUs include the arm64 frame header through a
+            // source-relative path. Select the Darwin PCS overlay before that
+            // include guard can lock in Android's AAPCS64 stack layout.
+            compile_command.args(["-include", "arch/arm64/jni_frame_arm64.h"]);
+        }
         compile_command
             // Darwin has no system <elf.h>. The NDK copy is used as a
             // lowest-priority, headers-only definition of the Android ELF ABI.
@@ -2736,10 +2935,19 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         return Err("compiled Runtime object does not export Runtime::Create".into());
     }
     file_hash_cache.save(&file_hash_cache_path)?;
-    let archive = build_dir.join("libart-runtime-bootstrap-darwin.a");
+    let archive = build_dir.join(if real_graphics {
+        "libart-runtime-graphics-bootstrap-darwin.a"
+    } else {
+        "libart-runtime-bootstrap-darwin.a"
+    });
     create_archive(&archive, &objects)?;
     println!(
-        "build-runtime-bootstrap: ART runtime initialization spine Mach-O objects={} compiled={} cached={} archive={}",
+        "{}: ART runtime initialization spine Mach-O objects={} compiled={} cached={} archive={}",
+        if real_graphics {
+            "build-runtime-graphics-bootstrap"
+        } else {
+            "build-runtime-bootstrap"
+        },
         objects.len(),
         compiled_objects,
         cached_objects,
@@ -2833,6 +3041,8 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(root.join("_build/foundation/libartbase-darwin.a"))
         .arg(root.join("_build/foundation/libandroid-base-darwin.a"))
         .arg(root.join("_build/foundation/libziparchive-darwin.a"))
+        .arg(root.join("_build/nativehelper-foundation/libnativehelper_jvm.a"))
+        .arg(root.join("_build/graphics-foundations/liblog-darwin.a"))
         .args([
             "-L/opt/homebrew/lib",
             "-L/opt/homebrew/opt/icu4c@78/lib",
@@ -2925,6 +3135,243 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
+    build_shell_gate(root, "audit-android16-graphics-closure.sh")?;
+
+    let runtime = root.join("_aosp/art/runtime");
+    let build_dir = root.join("_build/runtime-graphics-link-probe");
+    let object = build_dir.join("darwin_art_runtime.cc.o");
+    let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
+    let runtime_library = build_dir.join("libdarwin_art_runtime_graphics.dylib");
+    let graphics_closure = root.join("_build/graphics-closure-audit/android16-graphics-closure.o");
+    let bootstrap =
+        root.join("_build/runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a");
+    let icu_adapter_dir = root.join("_build/icu-runtime-adapters");
+    let libcore_adapter = icu_adapter_dir.join("darwin_libcore_natives.o");
+    let icu_jni_archive = root.join("_build/icu-jni-foundation/libicu-jni-darwin.a");
+    for input in [
+        &graphics_closure,
+        &bootstrap,
+        &libcore_adapter,
+        &icu_jni_archive,
+    ] {
+        if !input.is_file() {
+            return Err(format!(
+                "real-graphics runtime input is missing: {}",
+                input.display()
+            )
+            .into());
+        }
+    }
+    let icu_jni_members = command_output(Command::new("ar").arg("-t").arg(&icu_jni_archive))?
+        .lines()
+        .filter(|member| *member != "__.SYMDEF")
+        .count();
+    if icu_jni_members != 15 {
+        return Err(format!(
+            "module-complete Android ICU JNI archive has {icu_jni_members} members, expected 15"
+        )
+        .into());
+    }
+
+    fs::create_dir_all(&build_dir)?;
+    let includes = [
+        root.join("include"),
+        root.join("compat"),
+        root.join("_build/runtime-arm64/generated"),
+        root.join("_build/runtime-graphics-bootstrap/patched-source/runtime"),
+        root.join("_build/runtime-core/patched-source/runtime"),
+        root.join("_build/foundation/patched-source/libartbase"),
+        root.join("_aosp/art/libartbase"),
+        root.join("_aosp/art/cmdline"),
+        root.join("_aosp/art/libdexfile"),
+        root.join("_aosp/art/libelffile"),
+        root.join("_aosp/art/libprofile"),
+        runtime.clone(),
+        runtime.join("base"),
+        runtime.join("arch/arm64"),
+        root.join("_aosp/art/libartpalette/include"),
+        root.join("_aosp/system/libbase/include"),
+        root.join("_aosp/external/tinyxml2"),
+        root.join("_aosp/libnativehelper/include_jni"),
+        root.join("_aosp/libnativehelper/header_only_include"),
+        root.join("_aosp/libnativehelper/platform_header_only_include"),
+        root.join("_aosp/external/dlmalloc"),
+        PathBuf::from("/opt/homebrew/include"),
+    ];
+    let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+    let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
+    // Keep the process probe flavor-neutral. The linked compatibility object is
+    // the sole owner of DARWIN_ART_REAL_GRAPHICS and chooses the real backend.
+    run_command(
+        runtime_cpp_command(&include_refs)
+            .args(["-include", "mirror/object_reference.h"])
+            .arg("-idirafter")
+            .arg(ndk_arch_include)
+            .arg("-idirafter")
+            .arg(ndk_include)
+            .arg("-Wno-macro-redefined")
+            .arg("-c")
+            .arg(root.join("probes/runtime_link_probe.cc"))
+            .arg("-o")
+            .arg(&object),
+    )?;
+    run_command(
+        Command::new("clang++")
+            .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
+            .arg(root.join("compat/darwin_surface_bridge.mm"))
+            .arg("-I")
+            .arg(root.join("compat"))
+            .arg("-I")
+            .arg(root.join("include"))
+            .arg("-o")
+            .arg(&surface_object),
+    )?;
+
+    let link_map = build_dir.join("runtime-graphics-link.map");
+    let mut linker = Command::new("clang++");
+    linker
+        .arg("-dynamiclib")
+        .arg("-Wl,-install_name,@rpath/libdarwin_art_runtime_graphics.dylib")
+        .arg("-Wl,-exported_symbol,_darwin_art_run_process")
+        .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_update")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_map_producer")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_unmap_producer")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_present")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
+        .arg("-Wl,-dead_strip")
+        .arg(format!("-Wl,-map,{}", link_map.display()))
+        .arg(&object)
+        .arg(&surface_object)
+        // This is the already-audited force/normal composition of all 32
+        // graphics archives. Place its fixed definitions before ART's normal
+        // archives so the latter extract only additional runtime providers.
+        .arg(&graphics_closure)
+        .arg(&bootstrap)
+        .arg(root.join("_build/interpreter-core/libart-interpreter-darwin.a"))
+        .arg(root.join("_build/runtime-arm64/libart-arm64-darwin.a"))
+        .arg(root.join("_build/runtime-core/libart-core-darwin.a"))
+        .arg(root.join("_build/runtime-platform/libart-platform-darwin.a"))
+        .arg(root.join("_build/dex-probe/libdexfile-darwin.a"))
+        .arg(root.join("_build/runtime-graphics-bootstrap/objects/artbase_os_linux_aosp_fmt.cc.o"))
+        .arg(root.join("_build/foundation/libartbase-darwin.a"))
+        .arg(root.join("_build/ziparchive-incfs/libziparchive-for-incfs-darwin.a"))
+        .arg(root.join("_build/graphics-foundations/liblog-darwin.a"))
+        .arg(&libcore_adapter)
+        .arg(format!("-Wl,-force_load,{}", icu_jni_archive.display()))
+        // ld64 does not rescan archives that appeared before this new force-
+        // loaded root. Re-supply libicu_jni's normal module providers in the
+        // Android.bp dependency order.
+        .arg(root.join("_build/nativehelper-foundation/libnativehelper_jvm.a"))
+        .arg(root.join("_build/graphics-foundations/libcutils-darwin.a"))
+        .arg(root.join("_build/graphics-foundations/liblog-darwin.a"))
+        .arg(root.join("_build/icu-foundation/libicui18n-darwin.a"))
+        .arg(root.join("_build/icu-foundation/libicuuc-common-darwin.a"))
+        .arg(root.join("_build/libbase-foundation/libandroid-base-darwin.a"))
+        .args([
+            "-L/opt/homebrew/lib",
+            "-llz4",
+            "-lz",
+            "-framework",
+            "CoreFoundation",
+            "-framework",
+            "CoreGraphics",
+            "-framework",
+            "ImageIO",
+            "-framework",
+            "Foundation",
+            "-framework",
+            "AppKit",
+            "-framework",
+            "IOSurface",
+            "-framework",
+            "Metal",
+            "-framework",
+            "QuartzCore",
+            "-o",
+        ])
+        .arg(&runtime_library);
+    let description = describe_command(&linker);
+    let output = linker.output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8(output.stderr)?;
+        fs::write(build_dir.join("link.err"), &stderr)?;
+        return Err(format!("real-graphics Runtime link failed: {description}\n{stderr}").into());
+    }
+
+    let global_symbols = command_output(Command::new("nm").args(["-gU"]).arg(&runtime_library))?;
+    for required in [
+        "_darwin_art_run_process",
+        "_darwin_art_shutdown_process",
+        "_darwin_art_surface_create",
+        "_darwin_art_surface_update",
+        "_darwin_art_surface_map_producer",
+        "_darwin_art_surface_unmap_producer",
+        "_darwin_art_surface_present",
+        "_darwin_art_surface_pump_events",
+        "_darwin_art_surface_destroy",
+    ] {
+        if !global_symbols.contains(required) {
+            return Err(format!("real-graphics Runtime lacks required symbol {required}").into());
+        }
+    }
+    let all_symbols = command_output(Command::new("nm").arg(&runtime_library))?;
+    for registrar in [
+        "_init_android_graphics",
+        "_register_android_graphics_classes",
+    ] {
+        if !all_symbols.contains(registrar) {
+            return Err(format!("real-graphics Runtime lacks registrar symbol {registrar}").into());
+        }
+    }
+    for forbidden in ["DarwinPaint", "DarwinRenderNode", "ProbeCanvas"] {
+        if all_symbols.contains(forbidden) {
+            return Err(format!("real-graphics Runtime contains fake symbol {forbidden}").into());
+        }
+    }
+    let has_icu78 = all_symbols.lines().any(|line| {
+        line.split_whitespace().last().is_some_and(|symbol| {
+            !symbol.starts_with("_OUTLINED_FUNCTION_") && symbol.ends_with("_78")
+        })
+    });
+    let has_icu76 = all_symbols.lines().any(|line| {
+        line.split_whitespace().last().is_some_and(|symbol| {
+            !symbol.starts_with("_OUTLINED_FUNCTION_") && symbol.ends_with("_76")
+        })
+    });
+    if has_icu78 || !has_icu76 {
+        return Err("real-graphics Runtime did not retain a pure AOSP ICU76 ABI".into());
+    }
+    let registration_header = fs::read_to_string(
+        root.join("_build/android-graphics-jni/generated/darwin_android_graphics_registration.h"),
+    )?;
+    if !registration_header.contains("kNativeClassCount = 51") {
+        return Err("real-graphics registrar is not the verified 51-class set".into());
+    }
+    let dependencies = command_output(Command::new("otool").arg("-L").arg(&runtime_library))?;
+    for forbidden in ["CoreText", "libicu", "libfmt", "libfreetype"] {
+        if dependencies.contains(forbidden) {
+            return Err(format!("forbidden real-graphics host dependency: {forbidden}").into());
+        }
+    }
+    let link_map_contents = fs::read_to_string(&link_map)?;
+    if link_map_contents.contains("/opt/homebrew/opt/icu")
+        || link_map_contents.contains("/opt/homebrew/Cellar/icu")
+        || link_map_contents.contains("/opt/homebrew/opt/fmt")
+        || link_map_contents.contains("/opt/homebrew/Cellar/fmt")
+    {
+        return Err("real-graphics link map consumed a Homebrew ICU/fmt provider".into());
+    }
+    build_runtime_host(root)?;
+    println!(
+        "audit-runtime-graphics-link: closure complete registrar=51 fake-symbols=0 host-icu=0 host-fmt=0 CoreText=0"
+    );
+    Ok(())
+}
+
 fn build_runtime_host(root: &Path) -> Result<()> {
     let status = Command::new("cargo")
         .args(["build", "-p", "darwin-art-host"])
@@ -2941,13 +3388,29 @@ fn build_runtime_host(root: &Path) -> Result<()> {
 }
 
 fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
-    prepare_icu_bootclasspath(root)?;
+    probe_runtime_dex_flavor(root, show_window, false)
+}
+
+fn probe_runtime_graphics(root: &Path) -> Result<()> {
+    probe_runtime_dex_flavor(root, false, true)
+}
+
+fn probe_runtime_dex_flavor(root: &Path, show_window: bool, real_graphics: bool) -> Result<()> {
+    let core_icu4j = if real_graphics {
+        prepare_icu_runtime_bootclasspath(root)?
+    } else {
+        prepare_icu_bootclasspath(root)?;
+        root.join("_build/bootclasspath/core-icu4j.jar")
+    };
     let executable = root.join("target/debug/darwin-art-host");
-    let runtime_library = root.join("_build/runtime-link-probe/libdarwin_art_runtime.dylib");
+    let runtime_library = root.join(if real_graphics {
+        "_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib"
+    } else {
+        "_build/runtime-link-probe/libdarwin_art_runtime.dylib"
+    });
     let core_oj = root.join("_prebuilt/android-16/bootclasspath/core-oj.jar");
     let core_libart = root.join("_prebuilt/android-16/bootclasspath/core-libart.jar");
     let framework = root.join("_prebuilt/android-16/bootclasspath/framework.jar");
-    let core_icu4j = root.join("_build/bootclasspath/core-icu4j.jar");
     let classes_dex = root.join("_build/dex-probe/dex/classes.dex");
     for input in [
         &executable,
@@ -2978,6 +3441,24 @@ fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
         .arg(&framework)
         .arg(&core_icu4j)
         .arg(&classes_dex);
+    if real_graphics {
+        let icu_runtime = root.join("_build/icu-runtime-adapters/runtime");
+        let i18n_root = icu_runtime.join("i18n");
+        let data_root = icu_runtime.join("data");
+        let tzdata_root = icu_runtime.join("tzdata");
+        let icu_data = i18n_root.join("etc/icu/icudt76l.dat");
+        if !icu_data.is_file() {
+            return Err(format!(
+                "Android ICU76 runtime data is missing: {}; run `build-icu-runtime-adapters` first",
+                icu_data.display()
+            )
+            .into());
+        }
+        command
+            .env("ANDROID_I18N_ROOT", &i18n_root)
+            .env("ANDROID_DATA", &data_root)
+            .env("ANDROID_TZDATA_ROOT", &tzdata_root);
+    }
     let output = command_output(&mut command)?;
     let expected = "Hello from Darwin ART main: 안녕\n\
                     ART Darwin Runtime::Create: ok\n\
@@ -2993,7 +3474,11 @@ fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
-    if show_window {
+    if real_graphics {
+        println!(
+            "probe-runtime-graphics: Bitmap-backed Canvas -> DecorView.draw() -> frame -> shutdown"
+        );
+    } else if show_window {
         println!("probe-window: PhoneWindow -> DecorView.draw(Canvas) -> NSWindow");
     } else {
         println!(
@@ -3049,6 +3534,125 @@ fn prepare_icu_bootclasspath(root: &Path) -> Result<()> {
         return Err(format!("unexpected core-icu4j DEX summary: {summary:?}").into());
     }
     Ok(())
+}
+
+fn prepare_icu_runtime_bootclasspath(root: &Path) -> Result<PathBuf> {
+    let source_lock = read_lock(root)?;
+    let apex = root.join("_prebuilt/android-16/i18n/com.android.i18n-arm64.apex");
+    if !apex.is_file() {
+        return Err(format!(
+            "{} is missing; run `art-bootstrap sync` first",
+            apex.display()
+        )
+        .into());
+    }
+    verify_sha256(&apex, lock_value(&source_lock, "I18N_ARM64_APEX_SHA256")?)?;
+
+    let build_dir = root.join("_build/bootclasspath/core-icu4j-apex");
+    let extracted = root.join("_build/bootclasspath/core-icu4j-apex.jar");
+    let classes_dir = build_dir.join("runtime-bridge-classes");
+    let bridge_jar = build_dir.join("runtime-bridge.jar");
+    let output = root.join("_build/bootclasspath/core-icu4j-apex-reconciled.jar");
+    fs::create_dir_all(&build_dir)?;
+    if !extracted.is_file() {
+        run_command(
+            Command::new("cargo")
+                .args(["run", "--quiet", "--manifest-path"])
+                .arg(root.join("tools/apex-ext2-extract/Cargo.toml"))
+                .arg("--")
+                .arg(&apex)
+                .arg(&extracted),
+        )?;
+    }
+    verify_sha256(
+        &extracted,
+        lock_value(&source_lock, "I18N_CORE_ICU4J_SHA256")?,
+    )?;
+    let bridge_sources = [
+        (
+            root.join("_aosp/external/icu-runtime-bridge/com/android/i18n/util/ATrace.java"),
+            "ICU_ATRACE_JAVA_SHA256",
+        ),
+        (
+            root.join(
+                "_aosp/external/icu-runtime-bridge/com/android/icu/util/UResourceBundleNative.java",
+            ),
+            "ICU_URESOURCE_BUNDLE_NATIVE_JAVA_SHA256",
+        ),
+    ];
+    for (source, key) in &bridge_sources {
+        if !source.is_file() {
+            return Err(format!(
+                "{} is missing; run `art-bootstrap sync` first",
+                source.display()
+            )
+            .into());
+        }
+        verify_sha256(source, lock_value(&source_lock, key)?)?;
+    }
+    if !output.is_file() {
+        fs::create_dir_all(&classes_dir)?;
+        let mut javac = Command::new("javac");
+        javac.args(["--release", "17", "-d"]).arg(&classes_dir);
+        for (source, _) in &bridge_sources {
+            javac.arg(source);
+        }
+        run_command(&mut javac)?;
+        run_command(
+            Command::new("jar")
+                .args(["cf"])
+                .arg(&bridge_jar)
+                .arg("-C")
+                .arg(&classes_dir)
+                .arg("."),
+        )?;
+        run_command(
+            Command::new(find_d8()?)
+                .args(["--min-api", "36", "--output"])
+                .arg(&output)
+                .arg(&extracted)
+                .arg(&bridge_jar),
+        )?;
+    }
+    run_command(
+        Command::new("unzip")
+            .args(["-o", "-q"])
+            .arg(&output)
+            .arg("classes.dex")
+            .arg("-d")
+            .arg(&build_dir),
+    )?;
+    let dex = build_dir.join("classes.dex");
+    let dexdump = find_d8()?.with_file_name("dexdump");
+    let class_inventory = command_output(Command::new(&dexdump).args(["-l", "plain"]).arg(&dex))?;
+    for registrar_target in [
+        "Lcom/android/icu/text/TimeZoneNamesNative;",
+        "Lcom/android/i18n/timezone/internal/Memory;",
+        "Lcom/android/i18n/util/ATrace;",
+        "Lcom/android/i18n/util/Log;",
+        "Lcom/android/icu/util/CaseMapperNative;",
+        "Lcom/android/icu/util/Icu4cMetadata;",
+        "Lcom/android/icu/util/LocaleNative;",
+        "Lcom/android/icu/util/UResourceBundleNative;",
+        "Lcom/android/icu/util/regex/PatternNative;",
+        "Lcom/android/icu/util/regex/MatcherNative;",
+        "Lcom/android/icu/charset/NativeConverter;",
+    ] {
+        let descriptor = format!("Class descriptor  : '{registrar_target}'");
+        if !class_inventory.contains(&descriptor) {
+            return Err(
+                format!("runtime core-icu4j lacks registrar target {registrar_target}").into(),
+            );
+        }
+    }
+    let probe = root.join("_build/dex-probe/dex-probe");
+    let summary = command_output(Command::new(&probe).arg("--summary").arg(&dex))?;
+    let expected = "AOSP DEX: verified=yes version=39 classes=1598 methods=14998 \
+                    class[0]=Landroid/icu/impl/Assert;";
+    if summary.trim() != expected {
+        return Err(format!("unexpected runtime core-icu4j DEX summary: {summary:?}").into());
+    }
+    Ok(output)
 }
 
 fn find_ndk_headers() -> Result<(PathBuf, PathBuf)> {
@@ -3468,6 +4072,12 @@ fn parse_makefile_words(input: &str) -> Vec<String> {
 }
 
 fn create_archive(archive: &Path, objects: &[PathBuf]) -> Result<()> {
+    // `ar r` replaces members with matching names but leaves every stale member
+    // whose name disappeared from the new object list. Build flavors with a
+    // different module composition must therefore publish from an empty archive.
+    if archive.exists() {
+        fs::remove_file(archive)?;
+    }
     let mut command = Command::new("ar");
     command.arg("rcs").arg(archive);
     for object in objects {

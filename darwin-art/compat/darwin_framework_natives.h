@@ -12,6 +12,8 @@ enum class FrameworkGraphicsBackend {
 };
 
 FrameworkGraphicsBackend GetFrameworkGraphicsBackend();
+bool InitializeFrameworkGraphicsRuntime();
+void ShutdownFrameworkGraphicsRuntime();
 bool RegisterFrameworkNatives(JNIEnv* env);
 bool RegisterFrameworkGraphicsNatives(JNIEnv* env);
 

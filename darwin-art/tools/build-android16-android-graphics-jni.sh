@@ -10,6 +10,7 @@ patched_hwui="$build_dir/patched-hwui"
 object_dir="$build_dir/objects"
 lock_file="$project_root/upstream/android16-android-graphics-jni.lock"
 critical_patch="$project_root/patches/frameworks-base/0001-darwin-android-critical-jni-abi.patch"
+lazy_native_window_patch="$project_root/patches/frameworks-base/0002-darwin-lazy-native-window-jni.patch"
 mode=full
 
 usage() {
@@ -59,8 +60,10 @@ verify_hash "$source_hwui/apex/LayoutlibLoader.cpp" "$LAYOUTLIB_LOADER_SHA256"
 verify_hash "$source_hwui/apex/jni_runtime.cpp" "$JNI_RUNTIME_SHA256"
 verify_hash "$source_hwui/jni/graphics_jni_helpers.h" "$GRAPHICS_JNI_HELPERS_UNPATCHED_SHA256"
 verify_hash "$source_hwui/jni/PathIterator.cpp" "$PATH_ITERATOR_UNPATCHED_SHA256"
+verify_hash "$source_hwui/jni/android_graphics_HardwareRenderer.cpp" "$HARDWARE_RENDERER_UNPATCHED_SHA256"
 verify_hash "$source_hwui/platform/darwin/utils/SharedLib.cpp" "$DARWIN_SHARED_LIB_SHA256"
 verify_hash "$critical_patch" "$CRITICAL_JNI_PATCH_SHA256"
+verify_hash "$lazy_native_window_patch" "$LAZY_NATIVE_WINDOW_PATCH_SHA256"
 
 mkdir -p "$build_dir" "$object_dir"
 sources_file="$build_dir/android-graphics-jni-sources.txt"
@@ -185,7 +188,9 @@ if [[ -d "$patched_hwui" ]]; then
 fi
 cp -R "$source_hwui" "$patched_hwui"
 patch -s -d "$patched_hwui" -p1 < "$critical_patch"
+patch -s -d "$patched_hwui" -p1 < "$lazy_native_window_patch"
 verify_hash "$patched_hwui/jni/graphics_jni_helpers.h" "$GRAPHICS_JNI_HELPERS_PATCHED_SHA256"
+verify_hash "$patched_hwui/jni/android_graphics_HardwareRenderer.cpp" "$HARDWARE_RENDERER_PATCHED_SHA256"
 python3 - "$patched_hwui/jni/PathIterator.cpp" <<'PY'
 import sys
 from pathlib import Path
@@ -334,7 +339,12 @@ while IFS= read -r relative_source; do
   object_name="${relative_source//\//_}"
   object="$object_dir/${object_name%.cpp}.o"
   echo "android-graphics-jni: compile $relative_source"
-  "$cxx" "${common_flags[@]}" -c "$patched_hwui/$relative_source" -o "$object"
+  if [[ "$relative_source" == jni/android_graphics_HardwareRenderer.cpp ]]; then
+    "$cxx" "${common_flags[@]}" -DDARWIN_ART_LAZY_NATIVE_WINDOW_JNI \
+      -c "$patched_hwui/$relative_source" -o "$object"
+  else
+    "$cxx" "${common_flags[@]}" -c "$patched_hwui/$relative_source" -o "$object"
+  fi
   objects+=("$object")
 done < "$sources_file"
 darwin_shared_object="$object_dir/platform_darwin_utils_SharedLib.o"

@@ -15,12 +15,13 @@ libraries. It also runs Android 16's real `Activity.attach()`, retains the
 framework-created `PhoneWindow`, constructs its real `DecorView`, and executes
 the platform and app `Activity.onCreate()` bodies using a minimal host context.
 The app's real `Activity.setContentView(View)` call adds a normally constructed
-View beneath that DecorView. The first vertical graphics slice executes the
-complete software `DecorView -> ViewGroup -> View.draw(Canvas) -> onDraw()`
-traversal, then presents the resulting frame in an independent AppKit
-`NSWindow`. The runtime is now a process-scoped C ABI dynamic library. A Rust
-host owns its lifecycle and the persistent IOSurface/Metal/AppKit presentation
-surface:
+View beneath that DecorView. The real-graphics vertical slice registers the
+complete 51-class Android graphics native map and executes `DecorView ->
+ViewGroup -> View.draw(android.graphics.Canvas) -> HWUI SkiaCanvas -> Skia
+raster -> Bitmap.getPixels()`. The resulting frame is presented in an
+independent AppKit `NSWindow`. The runtime is now a process-scoped C ABI dynamic
+library. A Rust host owns its lifecycle and the persistent
+IOSurface/Metal/AppKit presentation surface:
 
 1. verify the native host is ARM64 macOS with 16 KiB pages;
 2. fetch revision-locked ART subtrees without Git metadata;
@@ -33,7 +34,7 @@ surface:
 8. compile Java to DEX and verify it with AOSP `DexFileVerifier`;
 9. generate ART's real ARM64 ABI constants and compile context, optimized
    `__memcmp16`, plus quick/JNI/native entrypoint assembly;
-10. compile the C++ switch interpreter and a 209-object Runtime/ClassLinker/GC/
+10. compile the C++ switch interpreter and a 210-object Runtime/ClassLinker/GC/
    quick-entrypoint initialization spine as Mach-O archives;
 11. link the real bootstrap probe with no unresolved native symbols;
 12. create ART successfully with the pinned Android 16 core boot JARs;
@@ -54,9 +55,10 @@ surface:
 20. execute the real platform `Activity.onCreate()` body plus the app override,
     including `Activity.setContentView(new ProbeView(this))`;
 21. run `DecorView.measure/layout/draw()` and the nested base `View.draw(Canvas)`
-    traversal against a Darwin software Canvas, copy its 640x360 frame out of
-    the callback, then present through one persistent IOSurface, Metal texture,
-    `CAMetalLayer`, and `NSWindow`;
+    traversal against Android's real Bitmap-backed HWUI `SkiaCanvas`, verify
+    its 640x360 frame through upstream `Bitmap.getPixels()`, then present it
+    through one persistent IOSurface, Metal texture, `CAMetalLayer`, and
+    `NSWindow`;
 22. draw 120 frames with upstream Skia directly into the mapped IOSurface and
     present them with zero staging copies;
 23. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts;
@@ -75,14 +77,15 @@ probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
 build-skia: Skia Darwin raster: 64x64 rowBytes=256 hash=a4bb4cdb0b4779ea Skia Android framework utils: base-canvas=same surface=same reset-clip=64x64 ...
-build-dex: AOSP DEX: verified=yes version=35 classes=12 methods=288 ... corrupt=rejected
+build-dex: AOSP DEX: verified=yes version=35 classes=12 methods=293 ... corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
 build-interpreter-core: AOSP C++ interpreter Mach-O objects=7 archive=...
-build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=209 compiled=0 cached=209 archive=...
+build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=210 compiled=0 cached=210 archive=...
 audit-runtime-link: C ABI dylib closure complete undefined=0 exports=9
 probe-runtime-dex: Activity.attach() + PhoneWindow + DecorView.draw(Canvas) -> Darwin
+probe-runtime-graphics: Android Canvas 640x360 pixels=230400 colors=6 opaque=230400 hash=44d122c296a3e065
 probe-park: ART Darwin park: pre-permit=yes wakeups=200 timeout=yes
 ```
 
@@ -92,25 +95,27 @@ To keep the native window visible for three seconds, run:
 cargo run -p art-bootstrap -- probe-window
 ```
 
-The current Activity frame producer is deliberately small:
-`ProbeView.onDraw()` submits a Java `0xAARRGGBB` bitmap through Android's
-`Canvas.drawBitmap()` API. The C callback borrows that frame only while ART is
-runnable; Rust makes one tightly packed owned copy, returns across the ART
-boundary, then uploads it into a persistent IOSurface-backed Metal texture.
-The same `NSWindow`, `CAMetalLayer`, IOSurface, texture, and command queue remain
-alive for the session. No frame creates a `CFData`, `CGImage`, window, or
-texture.
+The current Activity scene is deliberately small: `ProbeView.onDraw()` submits
+a Java `0xAARRGGBB` bitmap through the real Android `Canvas.drawBitmap()` JNI
+path. Android's upstream HWUI `SkiaCanvas` rasterizes into a real mutable
+`Bitmap`; upstream `Bitmap.getPixels()` exports the result. The C callback
+borrows that frame only while ART is runnable; Rust makes one tightly packed
+owned copy, returns across the ART boundary, then uploads it into a persistent
+IOSurface-backed Metal texture. The same `NSWindow`, `CAMetalLayer`, IOSurface,
+texture, and command queue remain alive for the session. No frame creates a
+`CFData`, `CGImage`, window, or texture.
 
 This proves the real `Activity.onCreate() -> PhoneWindow.setContentView() ->
-DecorView -> ViewGroup.dispatchDraw() -> View.draw(Canvas) -> onDraw()` control
-path. Separately, `build-skia` maps that same IOSurface and wraps its base address
-with upstream `SkCanvas::MakeRasterDirect`; 120 frames are rasterized and Metal-
-presented with zero staging copies. The two paths are not connected yet:
-Android's `Canvas` is still `ProbeCanvas`, not the upstream HWUI `SkiaCanvas`,
-and the DecorView still uses a programmatic `android.R.id.content` root plus a
-minimal resource backend. The next graphics gate is the full upstream Android
-Canvas/Paint JNI and software HWUI closure, followed by real framework-resource
-parsing. Input and GPU HWUI remain deferred.
+DecorView -> ViewGroup.dispatchDraw() -> View.draw(Canvas) -> HWUI/Skia ->
+Bitmap` path. The Rust acceptance requires all 230,400 pixels to be opaque, an
+exact six-color distribution, hash `44d122c296a3e065`, and clean ART shutdown.
+Separately, `build-skia` maps the IOSurface and wraps its base address with
+upstream `SkCanvas::MakeRasterDirect`; 120 frames are rasterized and
+Metal-presented with zero staging copies. The remaining presentation step is to
+replace the Bitmap/readback copy with direct IOSurface backing. The DecorView
+also still uses a programmatic `android.R.id.content` root plus a minimal
+resource backend. Real framework-resource parsing, input, and GPU HWUI remain
+deferred.
 
 The first Android 16 HWUI host compile gate is reproducible with:
 
@@ -136,9 +141,9 @@ by module-complete host builds: all 60 common GraphicsJNI translation units plus
 the Darwin host TU, the 51-entry Layoutlib registrar in `jni_runtime.cpp`
 dependency order, all 81 Darwin `libhwui_static` core/host members, the five
 APEX-common graphics TUs, and the 36-member Darwin `libandroidfw` composition.
-These are real upstream module archives, but they are not linked into the ART
-runtime yet. Their provider modules are built below; the remaining step is a
-single strict force-load closure plus the AOSP ICU runtime adapter transition.
+These real upstream module archives now form the strict force-loaded graphics
+closure used by `probe-runtime-graphics`. The audit rejects unresolved provider
+symbols, fake Paint/RenderNode implementations, host ICU/fmt, and CoreText.
 
 The first platform foundation modules are also real Android.bp-derived ARM64
 archives rather than symbol stubs:
@@ -161,6 +166,11 @@ cargo run -p art-bootstrap -- build-minikin
 cargo run -p art-bootstrap -- build-skia-text
 cargo run -p art-bootstrap -- build-icu
 cargo run -p art-bootstrap -- probe-minikin-shaping
+cargo run -p art-bootstrap -- build-runtime-graphics-bootstrap
+cargo run -p art-bootstrap -- audit-runtime-graphics-link
+cargo run -p art-bootstrap -- probe-runtime-graphics
+bash tools/verify-real-graphics-rust-host.sh \
+  _build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib
 ```
 
 `liblog-darwin.a` contains all eight Darwin-host sources and resolves the two
@@ -200,15 +210,17 @@ libhardware headers; HWUI adds about 2.2 MiB including the exact upstream
 `sysprop_cpp` generator. The generated 51-class property is derived by filtering
 Layoutlib's supported map through Android's authoritative `jni_runtime.cpp`
 registration order, so an empty or dependency-misordered registrar cannot pass.
-The runtime already has an atomic real-graphics build mode: it removes the fake
-Paint/RenderNode registrations and uses Bitmap creation, a real bitmap-backed
-Canvas, `DecorView.draw`, and `Bitmap.getPixels`. That mode intentionally remains
-unlinked until every module provider is present; the default ProbeCanvas path
-continues to pass end to end.
+The runtime's atomic real-graphics mode removes the fake Paint/RenderNode
+registrations and uses Bitmap creation, a real bitmap-backed Canvas,
+`DecorView.draw`, and `Bitmap.getPixels`. It links and passes end to end while
+the default ProbeCanvas path remains as a regression baseline.
+The bootstrap also compiles Android 16 libcore's revision-locked `Math.c`
+unchanged, including its complete 23-entry FastNative table, instead of
+reimplementing those methods as Darwin wrappers.
 
 The next provider layer is also module-complete. `libhostgraphics` supplies the
 five Android host native-window/display sources. The HWUI-specific framework
-Skia archive contains 521 members, consumes the pinned AOSP FreeType/libpng/zlib
+Skia archive contains 523 members, consumes the pinned AOSP FreeType/libpng/zlib
 archives, includes the empty font-manager and sharing serialization members
 required by whole-static HWUI, and has no CoreText or Homebrew import. The codec
 gate builds six image_io/JPEG/UltraHDR archives (116 members) and executes a

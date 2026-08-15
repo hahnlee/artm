@@ -14,14 +14,10 @@
 #include <utility>
 
 #if defined(DARWIN_ART_REAL_GRAPHICS)
-#include "darwin_android_graphics_registration.h"
+#include <android/graphics/jni_runtime.h>
+#include <androidicuinit/android_icu_init.h>
 
-// These are the upstream libandroid_runtime entry points from
-// frameworks/base/libs/hwui/apex/jni_runtime.cpp. Deliberately do not provide
-// weak or fallback definitions: enabling the real backend must fail at link
-// time until the complete graphics registrar archive is present.
-void init_android_graphics();
-int register_android_graphics_classes(JNIEnv* env);
+#include "darwin_android_graphics_registration.h"
 #endif
 
 namespace {
@@ -511,6 +507,24 @@ FrameworkGraphicsBackend GetFrameworkGraphicsBackend() {
   return FrameworkGraphicsBackend::kAndroidGraphics;
 #else
   return FrameworkGraphicsBackend::kProbeCanvas;
+#endif
+}
+
+bool InitializeFrameworkGraphicsRuntime() {
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+  // This must run before ART initializes java.lang.System. Its static
+  // initializer publishes ICU/Unicode/CLDR versions and rejects a null CLDR
+  // value, while AOSP ICU on Darwin requires explicit external-data setup.
+  android_icu_init();
+#endif
+  return true;
+}
+
+void ShutdownFrameworkGraphicsRuntime() {
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+  // The ICU JNI unload hook runs first and calls u_cleanup(); release the
+  // external Android ICU data mapping only after no ICU consumer remains.
+  android_icu_cleanup();
 #endif
 }
 

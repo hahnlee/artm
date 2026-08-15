@@ -1,0 +1,74 @@
+diff --git a/jni/android_graphics_HardwareRenderer.cpp b/jni/android_graphics_HardwareRenderer.cpp
+--- a/jni/android_graphics_HardwareRenderer.cpp
++++ b/jni/android_graphics_HardwareRenderer.cpp
+@@ -116,6 +116,22 @@
+ typedef ANativeWindow* (*ANW_fromSurface)(JNIEnv* env, jobject surface);
+ ANW_fromSurface fromSurface;
+
++#if defined(DARWIN_ART_LAZY_NATIVE_WINDOW_JNI)
++static ANW_fromSurface requireFromSurface() {
++    static ANW_fromSurface resolved = []() {
++        void* handle = SharedLib::openSharedLib("libandroid_runtime");
++        LOG_ALWAYS_FATAL_IF(handle == nullptr,
++                            "libandroid_runtime.dylib is unavailable for hardware Surface use");
++        auto* symbol = reinterpret_cast<ANW_fromSurface>(
++                SharedLib::getSymbol(handle, "ANativeWindow_fromSurface"));
++        LOG_ALWAYS_FATAL_IF(symbol == nullptr,
++                            "ANativeWindow_fromSurface is unavailable for hardware Surface use");
++        return symbol;
++    }();
++    return resolved;
++}
++#endif
++
+ class FrameCommitWrapper : public LightRefBase<FrameCommitWrapper> {
+ public:
+     explicit FrameCommitWrapper(JNIEnv* env, jobject jobject) {
+@@ -202,7 +218,11 @@
+     RenderProxy* proxy = reinterpret_cast<RenderProxy*>(proxyPtr);
+     ANativeWindow* window = nullptr;
+     if (jsurface) {
++#if defined(DARWIN_ART_LAZY_NATIVE_WINDOW_JNI)
++        window = requireFromSurface()(env, jsurface);
++#else
+         window = fromSurface(env, jsurface);
++#endif
+     }
+     bool enableTimeout = true;
+     if (discardBuffer) {
+@@ -711,12 +731,19 @@
+                                                           jobject jsurface, jint left, jint top,
+                                                           jint right, jint bottom,
+                                                           jobject jCopyRequest) {
++#if defined(DARWIN_ART_LAZY_NATIVE_WINDOW_JNI)
++    ANW_fromSurface localFromSurface = requireFromSurface();
++#endif
+     JavaVM* vm = nullptr;
+     LOG_ALWAYS_FATAL_IF(env->GetJavaVM(&vm) != JNI_OK, "Unable to get Java VM");
+     auto copyRequest = std::make_shared<CopyRequestAdapter>(
+             vm, env->NewGlobalRef(jCopyRequest),
+             ::android::uirenderer::Rect(left, top, right, bottom));
++#if defined(DARWIN_ART_LAZY_NATIVE_WINDOW_JNI)
++    ANativeWindow* window = localFromSurface(env, jsurface);
++#else
+     ANativeWindow* window = fromSurface(env, jsurface);
++#endif
+     RenderProxy::copySurfaceInto(window, std::move(copyRequest));
+     ANativeWindow_release(window);
+ }
+@@ -1130,6 +1157,7 @@
+     gCopyRequest.getDestinationBitmap =
+             GetMethodIDOrDie(env, copyRequest, "getDestinationBitmap", "(II)J");
+
++#if !defined(DARWIN_ART_LAZY_NATIVE_WINDOW_JNI)
+ #ifdef __ANDROID__
+     void* handle_ = SharedLib::openSharedLib("libandroid");
+ #else
+@@ -1138,6 +1166,7 @@
+     fromSurface = (ANW_fromSurface)SharedLib::getSymbol(handle_, "ANativeWindow_fromSurface");
+     LOG_ALWAYS_FATAL_IF(fromSurface == nullptr,
+                         "Failed to find required symbol ANativeWindow_fromSurface!");
++#endif
+
+     return RegisterMethodsOrDie(env, kClassPathName, gMethods, NELEM(gMethods));
+ }

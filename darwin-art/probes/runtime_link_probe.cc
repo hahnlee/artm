@@ -20,6 +20,7 @@
 #include "darwin_framework_natives.h"
 #include "darwin_icu_natives.h"
 #include "darwin_libcore_natives.h"
+#include "darwin_openjdk_natives.h"
 #include "dex/art_dex_file_loader.h"
 #include "handle_scope-inl.h"
 #include "interpreter/unstarted_runtime.h"
@@ -34,6 +35,55 @@
 #include "well_known_classes.h"
 
 static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
+
+static jlong NativePackedIntegerStack(JNIEnv*, jclass, jint a0, jint a1,
+                                      jint a2, jint a3, jint a4, jint a5,
+                                      jint spilled, jlong wide, jint tail0,
+                                      jint tail1) {
+  return a0 == 10 && a1 == 11 && a2 == 12 && a3 == 13 && a4 == 14 &&
+                 a5 == 15 && spilled == 0x10203040 &&
+                 wide == INT64_C(0x1122334455667788) &&
+                 tail0 == 0x50607080 && tail1 == 0x12345678
+             ? static_cast<jlong>(UINT64_C(0x13579bdf2468ace0))
+             : -1;
+}
+
+static jlong NativePackedFloatingStack(JNIEnv*, jclass, jfloat a0, jfloat a1,
+                                       jfloat a2, jfloat a3, jfloat a4,
+                                       jfloat a5, jfloat a6, jfloat a7,
+                                       jfloat spilled, jdouble wide) {
+  return a0 == 1.0f && a1 == 2.0f && a2 == 3.0f && a3 == 4.0f &&
+                 a4 == 5.0f && a5 == 6.0f && a6 == 7.0f && a7 == 8.0f &&
+                 spilled == 9.5f && wide == 10.25
+             ? static_cast<jlong>(UINT64_C(0x02468ace13579bdf))
+             : -1;
+}
+
+static jlong NativePackedReferenceStack(JNIEnv*, jclass, jint a0, jint a1,
+                                        jint a2, jint a3, jint a4, jint a5,
+                                        jint spilled, jobject reference,
+                                        jint tail) {
+  return a0 == 20 && a1 == 21 && a2 == 22 && a3 == 23 && a4 == 24 &&
+                 a5 == 25 && spilled == 0x23456701 && reference != nullptr &&
+                 tail == 0x34567812
+             ? static_cast<jlong>(UINT64_C(0x55aa55aa33cc33cc))
+             : -1;
+}
+
+static jlong NativePackedNarrowStack(JNIEnv*, jclass, jint a0, jint a1,
+                                     jint a2, jint a3, jint a4, jint a5,
+                                     jboolean bool_value, jbyte byte_value,
+                                     jchar char_value, jshort short_value,
+                                     jint int_value, jlong long_value) {
+  const bool valid =
+      a0 == 30 && a1 == 31 && a2 == 32 && a3 == 33 && a4 == 34 && a5 == 35 &&
+      bool_value == JNI_TRUE && static_cast<std::uint8_t>(byte_value) == 0x81 &&
+      char_value == 0xabcd &&
+      static_cast<std::uint16_t>(short_value) == 0x8765 &&
+      int_value == 0x45678923 &&
+      long_value == INT64_C(0x2233445566778899);
+  return valid ? static_cast<jlong>(UINT64_C(0x1122aabb3344ccdd)) : -1;
+}
 
 static std::size_t g_frame_width = 0;
 static std::size_t g_frame_height = 0;
@@ -407,6 +457,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   g_frame_width = 0;
   g_frame_height = 0;
 
+  if (!darwin_art::InitializeFrameworkGraphicsRuntime()) {
+    std::cerr << "ART Darwin graphics: runtime initialization failed\n";
+    return 36;
+  }
+
   std::string boot_class_path =
       std::string(config->core_oj_jar) + ":" + config->core_libart_jar + ":" +
       config->framework_jar + ":" + config->core_icu4j_jar;
@@ -595,6 +650,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   if (!darwin_art::RegisterLibcoreNatives(self->GetJniEnv())) {
     std::cerr << "ART Darwin libcore: native registration failed\n";
     return 17;
+  }
+  register_java_lang_Math(self->GetJniEnv());
+  if (self->GetJniEnv()->ExceptionCheck()) {
+    std::cerr << "ART Darwin OpenJDK: Math native registration failed\n";
+    return 37;
   }
   if (!darwin_art::RegisterIcuCharsetNatives(self->GetJniEnv())) {
     std::cerr << "ART Darwin ICU: charset native registration failed\n";
@@ -1102,13 +1162,24 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 29;
   }
 
-  JNINativeMethod native_method{
-      const_cast<char*>("hostPageSize"),
-      const_cast<char*>("()I"),
-      reinterpret_cast<void*>(&HostPageSize),
+  JNINativeMethod native_methods[]{
+      {const_cast<char*>("hostPageSize"), const_cast<char*>("()I"),
+       reinterpret_cast<void*>(&HostPageSize)},
+      {const_cast<char*>("nativePackedIntegerStack"),
+       const_cast<char*>("(IIIIIIIJII)J"),
+       reinterpret_cast<void*>(&NativePackedIntegerStack)},
+      {const_cast<char*>("nativePackedFloatingStack"),
+       const_cast<char*>("(FFFFFFFFFD)J"),
+       reinterpret_cast<void*>(&NativePackedFloatingStack)},
+      {const_cast<char*>("nativePackedReferenceStack"),
+       const_cast<char*>("(IIIIIIILjava/lang/Object;I)J"),
+       reinterpret_cast<void*>(&NativePackedReferenceStack)},
+      {const_cast<char*>("nativePackedNarrowStack"),
+       const_cast<char*>("(IIIIIIZBCSIJ)J"),
+       reinterpret_cast<void*>(&NativePackedNarrowStack)},
   };
-  if (self->GetJniEnv()->RegisterNatives(hello_class, &native_method, 1) !=
-      JNI_OK) {
+  if (self->GetJniEnv()->RegisterNatives(
+          hello_class, native_methods, std::size(native_methods)) != JNI_OK) {
     std::cerr << "ART Darwin JNI: RegisterNatives failed\n";
     return 6;
   }
@@ -1151,6 +1222,21 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     std::cerr << "ART Darwin JNI: expected 42, got " << native_result.GetI()
               << "\n";
     return 13;
+  }
+
+  art::ArtMethod* native_stack_pcs = hello->FindClassMethod(
+      "nativeStackPcsRoundTrip", "()I", art::kRuntimePointerSize);
+  if (native_stack_pcs == nullptr) {
+    std::cerr << "ART Darwin JNI PCS: nativeStackPcsRoundTrip()I lookup failed\n";
+    return 34;
+  }
+  art::JValue native_stack_pcs_result;
+  native_stack_pcs->Invoke(self, /* args= */ nullptr, /* args_size= */ 0u,
+                           &native_stack_pcs_result, "I");
+  if (self->IsExceptionPending() || native_stack_pcs_result.GetI() != 42) {
+    std::cerr << "ART Darwin JNI PCS: packed stack argument matrix failed result="
+              << native_stack_pcs_result.GetI() << "\n";
+    return 35;
   }
 
   art::ArtMethod* runtime_native_arraycopy = hello->FindClassMethod(
@@ -1272,6 +1358,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
 
+  darwin_art::ShutdownIcuCharsetNatives();
+  darwin_art::ShutdownFrameworkGraphicsRuntime();
   g_process_state.app_dex_files.clear();
   {
     std::lock_guard<std::mutex> lock(g_process_state.mutex);

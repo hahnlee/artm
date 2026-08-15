@@ -134,28 +134,38 @@
 - [x] Build the complete Darwin host `libandroidfw` composition: 34 common
       sources plus whole-static PathUtils and incfs map support.
 - [x] Build the complete five-source Darwin `libhostgraphics` module and a
-      521-member HWUI framework Skia archive with the required sharing/font
+      523-member HWUI framework Skia archive with the required sharing/font
       members and no CoreText or Homebrew dependency.
 - [x] Build module-complete image_io/JPEG/UltraHDR archives (116 members total)
       and execute a real JPEG encode/decode plus UltraHDR scanner smoke.
 - [x] Build Android.bp's six-member `libziparchive_for_incfs` variant separately
       from the older INCFS-disabled ART bootstrap archive.
-- [ ] Close the complete upstream Canvas/Paint registrar dependency graph with
+- [x] Close the complete upstream Canvas/Paint registrar dependency graph with
       GraphicsJNI, software `libhwui_static`, Minikin, HarfBuzz, FreeType, ICU,
       androidfw, and native utility modules; do not substitute per-symbol stubs.
 - [x] Make the runtime's real-graphics mode atomically exclude Darwin
       Paint/RenderNode handles, configure the source-derived registrar only
       after minimal System initialization, and prepare the Bitmap-backed Canvas
       render path without changing the default probe backend.
-- [ ] Register the complete graphics native map atomically after libcore/System
+- [x] Register the complete graphics native map atomically after libcore/System
       initialization, then replace `ProbeCanvas` with a real `Bitmap`-backed
       `Canvas` before attempting direct IOSurface backing.
-- [ ] Replace the software `Canvas.drawBitmap()` backend with Skia/HWUI and
-      replace the programmatic content root/minimal interpolator parser with
-      complete compiled framework-resource support.
+- [x] Port Generic JNI and CriticalNative frame sizing to Darwin ARM64's native
+      stack PCS (`Z/B=1`, `C/S=2`, `I/F=4`, `J/D/reference=8`), verify mixed
+      register spills, and run upstream `Bitmap.getPixels()` without a graphics
+      workaround.
+- [x] Replace the temporary Darwin `java.lang.Math` wrappers with Android 16
+      libcore's unchanged `Math.c` and complete 23-entry FastNative table.
+- [ ] Replace the Java `int[]` test scene and Bitmap readback with ordinary
+      Android Paint/text widgets and direct IOSurface backing; replace the
+      programmatic content root/minimal interpolator parser with complete
+      compiled framework-resource support.
 
 ## Deferred performance work
 
 - Darwin `MAP_JIT` and write-protect transitions.
 - ARM64 quick compiler/JIT and signal-driven implicit checks.
+- Apply the Darwin ARM64 native stack PCS to ART compiler/JIT/AOT JNI call
+  backends; the current sparse port validates the interpreter/generic runtime
+  path and CriticalNative frame sizing.
 - APK ELF loader, Bionic ABI surface, and JNI `.so` support.

@@ -420,4 +420,6 @@ bool RegisterIcuCharsetNatives(JNIEnv* env) {
                   static_cast<jint>(std::size(methods)));
 }
 
+void ShutdownIcuCharsetNatives() {}
+
 }  // namespace darwin_art
