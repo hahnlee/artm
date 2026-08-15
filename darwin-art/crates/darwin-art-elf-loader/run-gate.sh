@@ -12,6 +12,10 @@ if [[ -z "$ndk_root" ]]; then
   ndk_root="$(find "$sdk_root/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
 fi
 [[ -d "$ndk_root" ]] || { echo "elf-loader-gate: Android NDK not found" >&2; exit 1; }
+[[ "$(basename "$ndk_root")" == 28.2.13676358 ]] || {
+  echo "elf-loader-gate: Android NDK revision is not pinned r28c: $ndk_root" >&2
+  exit 1
+}
 
 clang="$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android35-clang"
 [[ -x "$clang" ]] || { echo "elf-loader-gate: NDK AArch64 clang missing: $clang" >&2; exit 1; }
@@ -73,6 +77,19 @@ graph_flags=("${common_flags[@]}" -O0 -Wl,-z,now -Wl,-z,norelro)
 "$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_absolute.so \
   -Wl,--defsym,absolute_graph_value=123 -Wl,--export-dynamic-symbol=absolute_graph_value \
   "$crate_root/fixtures/absolute.c" -o "$fixture_dir/libgraph_absolute.so"
+
+libcxx="$ndk_root/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+[[ -f "$libcxx" ]] || { echo "elf-loader-gate: pinned libc++_shared.so missing" >&2; exit 1; }
+[[ "$(shasum -a 256 "$libcxx" | awk '{print $1}')" == \
+   ab4e6c71b96b851de45a8a9bd86369e7dbc2130a44b3b4520564be94847910f2 ]] || {
+  echo "elf-loader-gate: pinned r28c libc++_shared.so hash drift" >&2
+  exit 1
+}
+cp "$libcxx" "$fixture_dir/libc++_shared.so"
+"$clang" "${graph_flags[@]}" -Wl,-soname,liblibcxx_discovery_root.so \
+  "$crate_root/fixtures/libcxx_discovery_root.c" \
+  -Wl,--no-as-needed "$fixture_dir/libc++_shared.so" -Wl,--as-needed \
+  -o "$fixture_dir/liblibcxx_discovery_root.so"
 
 "$clang" "${graph_flags[@]}" -Wl,-soname,liblifecycle_dep_a.so \
   -Wl,-fini,dep_a_dt_fini "$crate_root/fixtures/lifecycle_dep_a.c" \
@@ -189,6 +206,11 @@ xcrun clang++ -std=c++17 -arch arm64 -Wall -Wextra -Werror \
   -o "$fixture_dir/ffi-smoke"
 file "$fixture_dir/ffi-smoke" | grep -F 'Mach-O 64-bit executable arm64' >/dev/null
 for symbol in darwin_art_elf_load_bytes darwin_art_elf_load_path \
+  darwin_art_elf_inspect_bytes darwin_art_elf_inspection_soname \
+  darwin_art_elf_inspection_needed_count darwin_art_elf_inspection_needed_at \
+  darwin_art_elf_inspection_destroy darwin_art_elf_discover_sibling_graph \
+  darwin_art_elf_discovered_graph_root_soname \
+  darwin_art_elf_discovered_graph_sources darwin_art_elf_discovered_graph_destroy \
   darwin_art_elf_run_initializers darwin_art_elf_lookup darwin_art_elf_unload \
   darwin_art_elf_graph_load darwin_art_elf_graph_load_with_lifecycle \
   darwin_art_elf_graph_lookup_root \
@@ -197,4 +219,17 @@ for symbol in darwin_art_elf_load_bytes darwin_art_elf_load_path \
 done
 "$fixture_dir/ffi-smoke" "$fixture_dir/positive.so" "$fixture_dir/import.so" \
   "$fixture_dir/libgraph_parent.so" "$fixture_dir/libgraph_dep_a.so" \
-  "$fixture_dir/libgraph_dep_b.so"
+  "$fixture_dir/libgraph_dep_b.so" "$fixture_dir/liblibcxx_discovery_root.so" \
+  "$fixture_dir/libc++_shared.so"
+xcrun clang++ -std=c++17 -arch arm64 -Wall -Wextra -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  -I "$crate_root/include" "$crate_root/ffi-smoke.mm" "$staticlib" \
+  -framework Security -framework CoreFoundation -liconv \
+  -o "$fixture_dir/ffi-smoke-sanitized"
+ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1 \
+  "$fixture_dir/ffi-smoke-sanitized" \
+  "$fixture_dir/positive.so" "$fixture_dir/import.so" \
+  "$fixture_dir/libgraph_parent.so" "$fixture_dir/libgraph_dep_a.so" \
+  "$fixture_dir/libgraph_dep_b.so" "$fixture_dir/liblibcxx_discovery_root.so" \
+  "$fixture_dir/libc++_shared.so" >/dev/null

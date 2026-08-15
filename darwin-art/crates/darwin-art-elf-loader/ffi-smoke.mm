@@ -1,8 +1,13 @@
 #include "darwin_art_elf_loader.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <cstdio>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <thread>
@@ -93,12 +98,71 @@ std::vector<uint8_t> Read(const char* path) {
   return std::vector<uint8_t>(std::istreambuf_iterator<char>(stream), {});
 }
 
+void Write(const std::filesystem::path& path, const std::vector<uint8_t>& bytes) {
+  std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+  stream.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
+bool DiscoverExpected(const std::filesystem::path& directory,
+                      const std::string& root,
+                      const char* const* providers,
+                      size_t provider_count,
+                      DarwinArtElfStatus expected_status,
+                      int expected_root_is_elf,
+                      const char* error_substring,
+                      size_t expected_count) {
+  const int fd = open(directory.c_str(),
+                      O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) return false;
+  ErrorStorage error;
+  DarwinArtElfDiscoveredGraph* graph = nullptr;
+  int root_is_elf = -1;
+  const DarwinArtElfStatus status = darwin_art_elf_discover_sibling_graph(
+      fd, reinterpret_cast<const uint8_t*>(root.data()), root.size(), providers,
+      provider_count, &root_is_elf, &graph, &error.value);
+  close(fd);
+  if (status != expected_status || root_is_elf != expected_root_is_elf) {
+    Fail("negative discovery", status, error);
+    std::fprintf(stderr, "root-is-elf=%d expected=%d status-expected=%d\n",
+                 root_is_elf, expected_root_is_elf, expected_status);
+    darwin_art_elf_discovered_graph_destroy(&graph);
+    return false;
+  }
+  if (error_substring != nullptr &&
+      std::strstr(error.bytes, error_substring) == nullptr) {
+    std::fprintf(stderr, "discovery error lacks expected text '%s': %s\n",
+                 error_substring, error.bytes);
+    darwin_art_elf_discovered_graph_destroy(&graph);
+    return false;
+  }
+  if (status != DARWIN_ART_ELF_OK) {
+    if (graph != nullptr) {
+      std::fprintf(stderr, "failed discovery published a graph\n");
+      darwin_art_elf_discovered_graph_destroy(&graph);
+      return false;
+    }
+    return true;
+  }
+  const DarwinArtElfGraphSource* sources = nullptr;
+  size_t count = 0;
+  error.Reset();
+  if (darwin_art_elf_discovered_graph_sources(graph, &sources, &count,
+                                               &error.value) !=
+          DARWIN_ART_ELF_OK ||
+      sources == nullptr || count != expected_count) {
+    darwin_art_elf_discovered_graph_destroy(&graph);
+    return false;
+  }
+  darwin_art_elf_discovered_graph_destroy(&graph);
+  return graph == nullptr;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 6 || darwin_art_elf_abi_version() != DARWIN_ART_ELF_ABI_VERSION) {
+  if (argc != 8 || darwin_art_elf_abi_version() != DARWIN_ART_ELF_ABI_VERSION) {
     std::fprintf(stderr,
-                 "usage: ffi-smoke POSITIVE.so IMPORT.so PARENT.so DEP_A.so DEP_B.so\n");
+                 "usage: ffi-smoke POSITIVE.so IMPORT.so PARENT.so DEP_A.so DEP_B.so LIBCXX_ROOT.so LIBCXX.so\n");
     return 2;
   }
 
@@ -193,11 +257,231 @@ int main(int argc, char** argv) {
   const std::vector<uint8_t> parent = Read(argv[3]);
   const std::vector<uint8_t> dep_a = Read(argv[4]);
   const std::vector<uint8_t> dep_b = Read(argv[5]);
+  DarwinArtElfInspection* inspection = nullptr;
+  error.Reset();
+  status = darwin_art_elf_inspect_bytes(parent.data(), parent.size(), &inspection,
+                                        &error.value);
+  if (status != DARWIN_ART_ELF_OK || inspection == nullptr) {
+    return Fail("inspect_bytes", status, error);
+  }
+  const char* inspected_soname = nullptr;
+  size_t inspected_needed_count = 0;
+  status = darwin_art_elf_inspection_soname(inspection, &inspected_soname,
+                                             &error.value);
+  if (status != DARWIN_ART_ELF_OK || inspected_soname == nullptr ||
+      std::strcmp(inspected_soname, "libgraph_parent.so") != 0) {
+    return Fail("inspection_soname", status, error);
+  }
+  status = darwin_art_elf_inspection_needed_count(
+      inspection, &inspected_needed_count, &error.value);
+  if (status != DARWIN_ART_ELF_OK || inspected_needed_count != 2) {
+    return Fail("inspection_needed_count", status, error);
+  }
+  darwin_art_elf_inspection_destroy(&inspection);
+  if (inspection != nullptr) {
+    std::fprintf(stderr, "inspection destroy did not clear ownership\n");
+    return 1;
+  }
   const DarwinArtElfGraphSource graph_sources[] = {
       {"libgraph_parent.so", parent.data(), parent.size()},
       {"libgraph_dep_a.so", dep_a.data(), dep_a.size()},
       {"libgraph_dep_b.so", dep_b.data(), dep_b.size()},
   };
+  std::string parent_path(argv[3]);
+  const size_t parent_slash = parent_path.find_last_of('/');
+  const std::string parent_directory =
+      parent_slash == std::string::npos ? "." : parent_path.substr(0, parent_slash);
+  const std::string parent_component =
+      parent_slash == std::string::npos ? parent_path : parent_path.substr(parent_slash + 1);
+  const int directory_fd =
+      open(parent_directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (directory_fd < 0) {
+    std::perror("open discovery directory");
+    return 1;
+  }
+  DarwinArtElfDiscoveredGraph* discovered = nullptr;
+  int root_is_elf = 0;
+  error.Reset();
+  status = darwin_art_elf_discover_sibling_graph(
+      directory_fd, reinterpret_cast<const uint8_t*>(parent_component.data()),
+      parent_component.size(), nullptr, 0, &root_is_elf, &discovered,
+      &error.value);
+  close(directory_fd);
+  if (status != DARWIN_ART_ELF_OK || root_is_elf != 1 || discovered == nullptr) {
+    return Fail("discover_sibling_graph", status, error);
+  }
+  const char* discovered_root = nullptr;
+  const DarwinArtElfGraphSource* discovered_sources = nullptr;
+  size_t discovered_count = 0;
+  status = darwin_art_elf_discovered_graph_root_soname(
+      discovered, &discovered_root, &error.value);
+  if (status != DARWIN_ART_ELF_OK || discovered_root == nullptr ||
+      std::strcmp(discovered_root, "libgraph_parent.so") != 0) {
+    return Fail("discovered_graph_root_soname", status, error);
+  }
+  status = darwin_art_elf_discovered_graph_sources(
+      discovered, &discovered_sources, &discovered_count, &error.value);
+  if (status != DARWIN_ART_ELF_OK || discovered_sources == nullptr ||
+      discovered_count != 3) {
+    return Fail("discovered_graph_sources", status, error);
+  }
+  darwin_art_elf_discovered_graph_destroy(&discovered);
+  if (discovered != nullptr) {
+    std::fprintf(stderr, "discovery destroy did not clear ownership\n");
+    return 1;
+  }
+
+  char temporary_template[] = "/tmp/darwin-art-discovery.XXXXXX";
+  const char* temporary_name = mkdtemp(temporary_template);
+  if (temporary_name == nullptr) {
+    std::perror("mkdtemp");
+    return 1;
+  }
+  const std::filesystem::path temporary(temporary_name);
+  struct TemporaryCleanup {
+    std::filesystem::path path;
+    ~TemporaryCleanup() { std::filesystem::remove_all(path); }
+  } cleanup{temporary};
+  auto reset_directory = [&] {
+    std::filesystem::remove_all(temporary);
+    std::filesystem::create_directory(temporary);
+    std::filesystem::copy_file(argv[3], temporary / "libgraph_parent.so");
+    std::filesystem::copy_file(argv[5], temporary / "libgraph_dep_b.so");
+  };
+  auto replace_needed = [&](std::vector<uint8_t>* bytes,
+                            const std::vector<uint8_t>& replacement) {
+    constexpr char kNeedle[] = "libgraph_dep_a.so";
+    if (replacement.size() > sizeof(kNeedle) - 1) {
+      return false;
+    }
+    bool replaced = false;
+    auto position = bytes->begin();
+    while (position != bytes->end()) {
+      auto found = std::search(position, bytes->end(), std::begin(kNeedle),
+                               std::end(kNeedle) - 1);
+      if (found == bytes->end()) break;
+      std::copy(replacement.begin(), replacement.end(), found);
+      position = found + sizeof(kNeedle) - 1;
+      replaced = true;
+    }
+    return replaced;
+  };
+
+  reset_directory();
+  Write(temporary / "libgraph_dep_a.so", dep_b);
+  if (!DiscoverExpected(temporary, "libgraph_parent.so", nullptr, 0,
+                        DARWIN_ART_ELF_FORMAT, 1,
+                        "does not exactly match requested sibling", 0)) {
+    return 1;
+  }
+
+  reset_directory();
+  if (!DiscoverExpected(temporary, "libgraph_parent.so", nullptr, 0,
+                        DARWIN_ART_ELF_IO, 1, "component open failed", 0)) {
+    return 1;
+  }
+
+  reset_directory();
+  std::filesystem::create_symlink(argv[4], temporary / "libgraph_dep_a.so");
+  if (!DiscoverExpected(temporary, "libgraph_parent.so", nullptr, 0,
+                        DARWIN_ART_ELF_IO, 1, "component open failed", 0)) {
+    return 1;
+  }
+
+  if (!DiscoverExpected(temporary, "../libgraph_parent.so", nullptr, 0,
+                        DARWIN_ART_ELF_INVALID_ARGUMENT, 0,
+                        "root ELF filename must be one nonempty byte component", 0)) {
+    return 1;
+  }
+
+  reset_directory();
+  std::vector<uint8_t> invalid_utf8_parent = parent;
+  if (!replace_needed(&invalid_utf8_parent, {0xff, 'x', 0})) return 1;
+  Write(temporary / "libgraph_parent.so", invalid_utf8_parent);
+  if (!DiscoverExpected(temporary, "libgraph_parent.so", nullptr, 0,
+                        DARWIN_ART_ELF_FORMAT, 1,
+                        "dependency filename is not UTF-8", 0)) {
+    return 1;
+  }
+
+  reset_directory();
+  std::vector<uint8_t> path_parent = parent;
+  if (!replace_needed(&path_parent, {'.', '.', '/', 'x', 0})) return 1;
+  Write(temporary / "libgraph_parent.so", path_parent);
+  if (!DiscoverExpected(temporary, "libgraph_parent.so", nullptr, 0,
+                        DARWIN_ART_ELF_INVALID_ARGUMENT, 1,
+                        "dependency filename must be one nonempty byte component", 0)) {
+    return 1;
+  }
+
+  reset_directory();
+  std::vector<uint8_t> libm_parent = parent;
+  if (!replace_needed(&libm_parent, {'l', 'i', 'b', 'm', '.', 's', 'o', 0})) return 1;
+  DarwinArtElfInspection* libm_inspection = nullptr;
+  error.Reset();
+  if (darwin_art_elf_inspect_bytes(libm_parent.data(), libm_parent.size(),
+                                   &libm_inspection, &error.value) !=
+      DARWIN_ART_ELF_OK) {
+    return 1;
+  }
+  bool inspected_libm = false;
+  for (size_t index = 0; index < 2; ++index) {
+    const char* needed = nullptr;
+    if (darwin_art_elf_inspection_needed_at(libm_inspection, index, &needed,
+                                            &error.value) !=
+        DARWIN_ART_ELF_OK) {
+      return 1;
+    }
+    inspected_libm = inspected_libm ||
+                     (needed != nullptr && std::strcmp(needed, "libm.so") == 0);
+  }
+  darwin_art_elf_inspection_destroy(&libm_inspection);
+  if (!inspected_libm) {
+    std::fprintf(stderr, "libm provider mutation did not reach DT_NEEDED\n");
+    return 1;
+  }
+  Write(temporary / "libgraph_parent.so", libm_parent);
+  std::filesystem::copy_file(argv[4], temporary / "libgraph_dep_a.so");
+  std::filesystem::create_symlink("/dev/null", temporary / "libm.so");
+  const char* libm_provider[] = {"libm.so"};
+  if (!DiscoverExpected(temporary, "libgraph_parent.so", libm_provider, 1,
+                        DARWIN_ART_ELF_OK, 1, nullptr, 3)) {
+    return 1;
+  }
+
+  reset_directory();
+  std::filesystem::resize_file(temporary / "libgraph_parent.so",
+                               64u * 1024u * 1024u + 1u);
+  if (!DiscoverExpected(temporary, "libgraph_parent.so", nullptr, 0,
+                        DARWIN_ART_ELF_BOUNDS, 1, "file cap", 0)) {
+    return 1;
+  }
+
+  const std::filesystem::path real_directory = temporary / "real";
+  std::filesystem::remove_all(temporary);
+  std::filesystem::create_directories(real_directory);
+  std::filesystem::create_directory_symlink(real_directory, temporary / "alias");
+  const int symlink_directory_fd = open((temporary / "alias").c_str(),
+                                        O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+  if (symlink_directory_fd >= 0) {
+    close(symlink_directory_fd);
+    std::fprintf(stderr, "trusted parent symlink was followed\n");
+    return 1;
+  }
+
+  std::filesystem::remove_all(temporary);
+  std::filesystem::create_directory(temporary);
+  std::filesystem::copy_file(argv[6], temporary / "liblibcxx_discovery_root.so");
+  std::filesystem::copy_file(argv[7], temporary / "libc++_shared.so");
+  for (const char* provider : {"libc.so", "libdl.so", "libm.so"}) {
+    std::filesystem::create_symlink("/dev/null", temporary / provider);
+  }
+  const char* libcxx_providers[] = {"libc.so", "libdl.so", "libm.so"};
+  if (!DiscoverExpected(temporary, "liblibcxx_discovery_root.so",
+                        libcxx_providers, std::size(libcxx_providers),
+                        DARWIN_ART_ELF_OK, 1, nullptr, 2)) {
+    return 1;
+  }
   DarwinArtElfGraphHandle* graph = nullptr;
   error.Reset();
   status = darwin_art_elf_graph_load(
@@ -233,6 +517,7 @@ int main(int argc, char** argv) {
   std::puts(
       "elf-loader-ffi-smoke: bytes=pass path=pass resolver=versioned "
       "lookup=pass init=lifecycle graph=atomic+recursive "
+      "discovery=bytes+recursive+zero-provider+libcxx-r28c+fail-closed+caps+no-follow "
       "unload=idempotent thread=cross-thread+quiescent");
   return 0;
 }

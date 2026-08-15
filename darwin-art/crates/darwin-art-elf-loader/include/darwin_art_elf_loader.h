@@ -81,6 +81,8 @@ typedef struct DarwinArtElfLifecycleCallbacks {
 
 typedef struct DarwinArtElfHandle DarwinArtElfHandle;
 typedef struct DarwinArtElfGraphHandle DarwinArtElfGraphHandle;
+typedef struct DarwinArtElfInspection DarwinArtElfInspection;
+typedef struct DarwinArtElfDiscoveredGraph DarwinArtElfDiscoveredGraph;
 
 typedef struct DarwinArtElfGraphSource {
   const char* soname;
@@ -90,6 +92,74 @@ typedef struct DarwinArtElfGraphSource {
 
 uint32_t darwin_art_elf_abi_version(void);
 const char* darwin_art_elf_status_name(int32_t status);
+
+/*
+ * Pure byte inspection: parses Android arm64 ELF identity and DT_NEEDED without
+ * mapping, relocating, or executing the image. Returned strings are opaque byte
+ * strings terminated for C and remain borrowed until inspection_destroy.
+ */
+DarwinArtElfStatus darwin_art_elf_inspect_bytes(
+    const uint8_t* bytes,
+    size_t length,
+    DarwinArtElfInspection** out_inspection,
+    DarwinArtElfErrorBuffer* error);
+DarwinArtElfStatus darwin_art_elf_inspection_soname(
+    const DarwinArtElfInspection* inspection,
+    const char** out_soname,
+    DarwinArtElfErrorBuffer* error);
+DarwinArtElfStatus darwin_art_elf_inspection_needed_count(
+    const DarwinArtElfInspection* inspection,
+    size_t* out_count,
+    DarwinArtElfErrorBuffer* error);
+DarwinArtElfStatus darwin_art_elf_inspection_needed_at(
+    const DarwinArtElfInspection* inspection,
+    size_t index,
+    const char** out_soname,
+    DarwinArtElfErrorBuffer* error);
+void darwin_art_elf_inspection_destroy(DarwinArtElfInspection** inspection);
+
+/*
+ * Discovers a closed recursive graph below one caller-selected, already-open
+ * directory fd. The root and every non-provider DT_NEEDED value are exact byte
+ * components opened by the no-follow filesystem broker. Absolute/path-like
+ * names, symlinks, non-regular nodes, and embedded SONAME mismatch fail closed.
+ * Limits are fixed at 64 files, 64 MiB per file, 256 MiB total, and 255 bytes
+ * per component. Provider SONAMEs are never looked up on disk. RPATH/RUNPATH,
+ * dyld, and alternative path fallback are not consulted.
+ * Filename walking itself is byte-preserving, but the current closed namespace
+ * requires embedded SONAME/DT_NEEDED keys to be UTF-8 and rejects other bytes
+ * with a format error after component-policy validation.
+ *
+ * The directory fd is borrowed and duplicated synchronously. Source pointers
+ * remain borrowed from the discovered graph until graph_destroy; graph_load
+ * copies their bytes and therefore may outlive the discovery handle.
+ * out_root_is_elf is set after the first four bytes are read from the same
+ * authorized root descriptor, even when a later cap/read/parse step fails; it
+ * lets the host preserve non-ELF dyld behavior without masking ELF failures.
+ * The caller owns selection of this trusted directory and must prevent writes
+ * to graph files during discovery; same-descriptor fstat/read removes pathname
+ * reopen races but cannot make a concurrently mutated inode immutable.
+ */
+DarwinArtElfStatus darwin_art_elf_discover_sibling_graph(
+    int library_directory_fd,
+    const uint8_t* root_component,
+    size_t root_component_length,
+    const char* const* provider_sonames,
+    size_t provider_count,
+    int* out_root_is_elf,
+    DarwinArtElfDiscoveredGraph** out_graph,
+    DarwinArtElfErrorBuffer* error);
+DarwinArtElfStatus darwin_art_elf_discovered_graph_root_soname(
+    const DarwinArtElfDiscoveredGraph* graph,
+    const char** out_soname,
+    DarwinArtElfErrorBuffer* error);
+DarwinArtElfStatus darwin_art_elf_discovered_graph_sources(
+    const DarwinArtElfDiscoveredGraph* graph,
+    const DarwinArtElfGraphSource** out_sources,
+    size_t* out_count,
+    DarwinArtElfErrorBuffer* error);
+void darwin_art_elf_discovered_graph_destroy(
+    DarwinArtElfDiscoveredGraph** graph);
 
 DarwinArtElfStatus darwin_art_elf_load_bytes(
     const uint8_t* bytes,

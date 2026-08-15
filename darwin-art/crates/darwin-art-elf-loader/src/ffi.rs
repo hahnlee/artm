@@ -1,9 +1,12 @@
 use crate::{
     ClosedElfNamespace, DsoLifecycle, LoadError, LoadedElf, LoadedElfGraph, NamespaceError,
-    ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver,
+    ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver, inspect_elf_metadata,
 };
+use darwin_art_fs_broker::ReadOnlyBroker;
+use std::collections::{HashSet, VecDeque};
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::num::NonZeroUsize;
+use std::os::fd::FromRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
@@ -15,6 +18,14 @@ use std::{fs::File, io::Read};
 
 const ABI_VERSION: u32 = 1;
 const MAX_INPUT_SIZE: usize = 1024 * 1024 * 1024;
+const MAX_DISCOVERY_FILES: usize = 64;
+const MAX_DISCOVERY_FILE_SIZE: usize = 64 * 1024 * 1024;
+const MAX_DISCOVERY_TOTAL_SIZE: usize = 256 * 1024 * 1024;
+const MAX_DISCOVERY_COMPONENT_SIZE: usize = 255;
+
+unsafe extern "C" {
+    fn dup(fd: i32) -> i32;
+}
 
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -138,8 +149,23 @@ pub struct DarwinArtElfGraphSource {
     pub length: usize,
 }
 
+pub struct DarwinArtElfInspection {
+    soname: Option<CString>,
+    needed: Vec<CString>,
+}
+
+pub struct DarwinArtElfDiscoveredGraph {
+    root_soname: CString,
+    _names: Vec<CString>,
+    _bytes: Vec<Vec<u8>>,
+    sources: Vec<DarwinArtElfGraphSource>,
+}
+
 enum FfiFailure {
     Invalid(&'static str),
+    InvalidOwned(String),
+    Bounds(String),
+    Format(String),
     Io(String),
     Load(LoadError),
     Namespace(NamespaceError),
@@ -149,7 +175,9 @@ enum FfiFailure {
 impl FfiFailure {
     fn status(&self) -> DarwinArtElfStatus {
         match self {
-            Self::Invalid(_) => DarwinArtElfStatus::InvalidArgument,
+            Self::Invalid(_) | Self::InvalidOwned(_) => DarwinArtElfStatus::InvalidArgument,
+            Self::Bounds(_) => DarwinArtElfStatus::Bounds,
+            Self::Format(_) => DarwinArtElfStatus::Format,
             Self::Io(_) => DarwinArtElfStatus::Io,
             Self::Poisoned => DarwinArtElfStatus::Poisoned,
             Self::Load(error) => load_error_status(error),
@@ -166,7 +194,10 @@ impl FfiFailure {
     fn message(&self) -> String {
         match self {
             Self::Invalid(message) => (*message).to_owned(),
-            Self::Io(message) => message.clone(),
+            Self::InvalidOwned(message)
+            | Self::Bounds(message)
+            | Self::Format(message)
+            | Self::Io(message) => message.clone(),
             Self::Load(error) => error.to_string(),
             Self::Namespace(error) => error.to_string(),
             Self::Poisoned => "ELF handle state was poisoned by a contained panic".to_owned(),
@@ -258,6 +289,218 @@ fn ffi_call(
             DarwinArtElfStatus::Panic
         }
     }
+}
+
+fn cstring_from_dynamic(bytes: Vec<u8>, what: &'static str) -> Result<CString, FfiFailure> {
+    CString::new(bytes).map_err(|_| FfiFailure::Format(format!("{what} contains embedded NUL")))
+}
+
+fn inspection_from_bytes(bytes: &[u8]) -> Result<DarwinArtElfInspection, FfiFailure> {
+    let metadata = inspect_elf_metadata(bytes).map_err(FfiFailure::Load)?;
+    let soname = metadata
+        .soname
+        .map(|name| cstring_from_dynamic(name, "DT_SONAME"))
+        .transpose()?;
+    let needed = metadata
+        .needed_libraries
+        .into_iter()
+        .map(|name| cstring_from_dynamic(name, "DT_NEEDED"))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(DarwinArtElfInspection { soname, needed })
+}
+
+fn validate_discovery_component(bytes: &[u8], what: &str) -> Result<(), FfiFailure> {
+    let invalid = bytes.is_empty()
+        || bytes.len() > MAX_DISCOVERY_COMPONENT_SIZE
+        || bytes.contains(&0)
+        || bytes.contains(&b'/')
+        || bytes == b"."
+        || bytes == b"..";
+    if invalid {
+        return Err(FfiFailure::InvalidOwned(format!(
+            "{what} must be one nonempty byte component without NUL, slash, dot, or dot-dot and at most {MAX_DISCOVERY_COMPONENT_SIZE} bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn read_discovery_file(
+    broker: &ReadOnlyBroker,
+    component: &[u8],
+    root_is_elf: Option<&mut bool>,
+) -> Result<Vec<u8>, FfiFailure> {
+    validate_discovery_component(component, "ELF graph filename")?;
+    let opened = broker.open(component).map_err(|error| {
+        FfiFailure::Io(format!("secure ELF graph component open failed: {error}"))
+    })?;
+    if !opened.metadata().is_file() {
+        return Err(FfiFailure::InvalidOwned(
+            "ELF graph component is not a regular file".to_owned(),
+        ));
+    }
+    let declared = usize::try_from(opened.metadata().len()).map_err(|_| {
+        FfiFailure::Bounds("ELF graph component size does not fit usize".to_owned())
+    })?;
+    let mut file = opened.into_file();
+    let mut bytes = Vec::with_capacity(4);
+    while bytes.len() < 4 {
+        let mut prefix = [0_u8; 4];
+        let read = file
+            .read(&mut prefix[..4 - bytes.len()])
+            .map_err(|error| FfiFailure::Io(format!("secure ELF graph read failed: {error}")))?;
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&prefix[..read]);
+    }
+    if let Some(root_is_elf) = root_is_elf {
+        *root_is_elf = bytes.as_slice() == b"\x7fELF";
+    }
+    if declared == 0 || declared > MAX_DISCOVERY_FILE_SIZE {
+        return Err(FfiFailure::Bounds(format!(
+            "ELF graph component is outside the 1..={MAX_DISCOVERY_FILE_SIZE} byte file cap"
+        )));
+    }
+    bytes.reserve_exact(declared.saturating_sub(bytes.len()));
+    let mut file = file.take((MAX_DISCOVERY_FILE_SIZE + 1 - bytes.len()) as u64);
+    file.read_to_end(&mut bytes)
+        .map_err(|error| FfiFailure::Io(format!("secure ELF graph read failed: {error}")))?;
+    if bytes.len() != declared {
+        return Err(FfiFailure::Io(
+            "ELF graph component changed size while its authorized descriptor was read".to_owned(),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn discover_sibling_graph(
+    directory_fd: i32,
+    root_component: &[u8],
+    providers: HashSet<Vec<u8>>,
+    root_is_elf: &mut bool,
+) -> Result<DarwinArtElfDiscoveredGraph, FfiFailure> {
+    validate_discovery_component(root_component, "root ELF filename")?;
+    if directory_fd < 0 {
+        return Err(FfiFailure::Invalid("library directory fd is negative"));
+    }
+    // SAFETY: dup creates an independently owned descriptor or returns -1.
+    let duplicated = unsafe { dup(directory_fd) };
+    if duplicated < 0 {
+        return Err(FfiFailure::Io(
+            "could not duplicate trusted library directory fd".to_owned(),
+        ));
+    }
+    // SAFETY: duplicated is a fresh descriptor now uniquely owned by File.
+    let directory = unsafe { File::from_raw_fd(duplicated) };
+    let broker = ReadOnlyBroker::from_directory(directory)
+        .map_err(|error| FfiFailure::Io(format!("invalid trusted library directory: {error}")))?;
+
+    let mut queue = VecDeque::from([(root_component.to_vec(), None::<Vec<u8>>)]);
+    let mut queued = HashSet::from([root_component.to_vec()]);
+    let mut discovered_sonames = HashSet::<Vec<u8>>::new();
+    let mut names = Vec::<CString>::new();
+    let mut graph_bytes = Vec::<Vec<u8>>::new();
+    let mut total_size = 0_usize;
+    let mut root_soname = None::<CString>;
+
+    let mut first_component = true;
+    while let Some((component, expected_soname)) = queue.pop_front() {
+        if let Some(expected) = expected_soname.as_ref()
+            && discovered_sonames.contains(expected)
+        {
+            continue;
+        }
+        if graph_bytes.len() >= MAX_DISCOVERY_FILES {
+            return Err(FfiFailure::Bounds(format!(
+                "ELF sibling graph exceeds the {MAX_DISCOVERY_FILES}-file cap"
+            )));
+        }
+        let bytes = read_discovery_file(
+            &broker,
+            &component,
+            first_component.then_some(&mut *root_is_elf),
+        )?;
+        if first_component {
+            first_component = false;
+            if !*root_is_elf {
+                return Err(FfiFailure::Format("invalid ELF: bad magic".to_owned()));
+            }
+        }
+        total_size = total_size
+            .checked_add(bytes.len())
+            .ok_or_else(|| FfiFailure::Bounds("ELF graph total size overflow".to_owned()))?;
+        if total_size > MAX_DISCOVERY_TOTAL_SIZE {
+            return Err(FfiFailure::Bounds(format!(
+                "ELF sibling graph exceeds the {MAX_DISCOVERY_TOTAL_SIZE}-byte total cap"
+            )));
+        }
+        let metadata = inspect_elf_metadata(&bytes).map_err(FfiFailure::Load)?;
+        let embedded = metadata
+            .soname
+            .ok_or_else(|| FfiFailure::Format("ELF graph member lacks DT_SONAME".to_owned()))?;
+        validate_discovery_component(&embedded, "embedded DT_SONAME")?;
+        if providers.contains(&embedded) {
+            return Err(FfiFailure::Format(
+                "real ELF graph member collides with a builtin provider SONAME".to_owned(),
+            ));
+        }
+        if let Some(expected) = expected_soname.as_ref()
+            && embedded != *expected
+        {
+            return Err(FfiFailure::Format(format!(
+                "dependency embedded DT_SONAME does not exactly match requested sibling {}",
+                String::from_utf8_lossy(expected)
+            )));
+        }
+        if !discovered_sonames.insert(embedded.clone()) {
+            return Err(FfiFailure::Format(
+                "two graph paths produced the same embedded DT_SONAME".to_owned(),
+            ));
+        }
+        std::str::from_utf8(&embedded).map_err(|_| {
+            FfiFailure::Format(
+                "embedded DT_SONAME is not UTF-8; the closed graph namespace cannot key it"
+                    .to_owned(),
+            )
+        })?;
+        let name = cstring_from_dynamic(embedded.clone(), "DT_SONAME")?;
+        if root_soname.is_none() {
+            root_soname = Some(name.clone());
+        }
+        names.push(name);
+        graph_bytes.push(bytes);
+
+        for needed in metadata.needed_libraries {
+            validate_discovery_component(&needed, "DT_NEEDED dependency filename")?;
+            if providers.contains(&needed) || discovered_sonames.contains(&needed) {
+                continue;
+            }
+            std::str::from_utf8(&needed).map_err(|_| {
+                FfiFailure::Format(
+                    "DT_NEEDED dependency filename is not UTF-8; the closed graph namespace cannot key it"
+                        .to_owned(),
+                )
+            })?;
+            if queued.insert(needed.clone()) {
+                queue.push_back((needed.clone(), Some(needed)));
+            }
+        }
+    }
+
+    let mut sources = Vec::with_capacity(names.len());
+    for (name, bytes) in names.iter().zip(&graph_bytes) {
+        sources.push(DarwinArtElfGraphSource {
+            soname: name.as_ptr(),
+            bytes: bytes.as_ptr(),
+            length: bytes.len(),
+        });
+    }
+    Ok(DarwinArtElfDiscoveredGraph {
+        root_soname: root_soname.expect("nonempty discovery has one root"),
+        _names: names,
+        _bytes: graph_bytes,
+        sources,
+    })
 }
 
 struct CallbackResolver {
@@ -415,6 +658,231 @@ unsafe fn required_utf8(value: *const c_char, field: &'static str) -> Result<Str
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_elf_abi_version() -> u32 {
     ABI_VERSION
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_inspect_bytes(
+    bytes: *const u8,
+    length: usize,
+    out_inspection: *mut *mut DarwinArtElfInspection,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if out_inspection.is_null() {
+            return Err(FfiFailure::Invalid("out_inspection is null"));
+        }
+        // SAFETY: validated writable out pointer.
+        unsafe { *out_inspection = ptr::null_mut() };
+        if bytes.is_null() || length == 0 {
+            return Err(FfiFailure::Invalid(
+                "ELF inspection bytes are null or empty",
+            ));
+        }
+        if length > MAX_INPUT_SIZE {
+            return Err(FfiFailure::Bounds(
+                "ELF inspection exceeds the 1 GiB input cap".to_owned(),
+            ));
+        }
+        // SAFETY: the C contract supplies length readable bytes for this synchronous call.
+        let input = unsafe { std::slice::from_raw_parts(bytes, length) };
+        let inspection = inspection_from_bytes(input)?;
+        // SAFETY: ownership of the new opaque handle is returned to the caller.
+        unsafe { *out_inspection = Box::into_raw(Box::new(inspection)) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_inspection_soname(
+    inspection: *const DarwinArtElfInspection,
+    out_soname: *mut *const c_char,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if out_soname.is_null() {
+            return Err(FfiFailure::Invalid("out_soname is null"));
+        }
+        // SAFETY: validated writable output and caller-owned live inspection handle.
+        unsafe { *out_soname = ptr::null() };
+        let inspection =
+            unsafe { inspection.as_ref() }.ok_or(FfiFailure::Invalid("inspection is null"))?;
+        unsafe {
+            *out_soname = inspection
+                .soname
+                .as_ref()
+                .map_or(ptr::null(), |name| name.as_ptr())
+        };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_inspection_needed_count(
+    inspection: *const DarwinArtElfInspection,
+    out_count: *mut usize,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if out_count.is_null() {
+            return Err(FfiFailure::Invalid("out_count is null"));
+        }
+        unsafe { *out_count = 0 };
+        let inspection =
+            unsafe { inspection.as_ref() }.ok_or(FfiFailure::Invalid("inspection is null"))?;
+        unsafe { *out_count = inspection.needed.len() };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_inspection_needed_at(
+    inspection: *const DarwinArtElfInspection,
+    index: usize,
+    out_soname: *mut *const c_char,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if out_soname.is_null() {
+            return Err(FfiFailure::Invalid("out_soname is null"));
+        }
+        unsafe { *out_soname = ptr::null() };
+        let inspection =
+            unsafe { inspection.as_ref() }.ok_or(FfiFailure::Invalid("inspection is null"))?;
+        let needed = inspection
+            .needed
+            .get(index)
+            .ok_or(FfiFailure::Invalid("DT_NEEDED index is out of range"))?;
+        unsafe { *out_soname = needed.as_ptr() };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_inspection_destroy(
+    inspection: *mut *mut DarwinArtElfInspection,
+) {
+    if inspection.is_null() {
+        return;
+    }
+    // SAFETY: the caller supplies the unique pointer-to-handle returned by inspect_bytes.
+    let value = unsafe { *inspection };
+    unsafe { *inspection = ptr::null_mut() };
+    if !value.is_null() {
+        drop(unsafe { Box::from_raw(value) });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_discover_sibling_graph(
+    library_directory_fd: i32,
+    root_component: *const u8,
+    root_component_length: usize,
+    provider_sonames: *const *const c_char,
+    provider_count: usize,
+    out_root_is_elf: *mut i32,
+    out_graph: *mut *mut DarwinArtElfDiscoveredGraph,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if out_root_is_elf.is_null() || out_graph.is_null() {
+            return Err(FfiFailure::Invalid("discovery outputs are null"));
+        }
+        unsafe {
+            *out_root_is_elf = 0;
+            *out_graph = ptr::null_mut();
+        }
+        if root_component.is_null() {
+            return Err(FfiFailure::Invalid("root_component is null"));
+        }
+        if provider_count > MAX_DISCOVERY_FILES
+            || (provider_count != 0 && provider_sonames.is_null())
+        {
+            return Err(FfiFailure::Invalid("provider array shape is invalid"));
+        }
+        // SAFETY: root component bytes and provider pointer array are borrowed synchronously.
+        let root = unsafe { std::slice::from_raw_parts(root_component, root_component_length) };
+        let provider_pointers: &[*const c_char] = if provider_count == 0 {
+            &[]
+        } else {
+            // SAFETY: nonzero provider_count requires this many readable pointers above.
+            unsafe { std::slice::from_raw_parts(provider_sonames, provider_count) }
+        };
+        let mut providers = HashSet::with_capacity(provider_count);
+        for &provider in provider_pointers {
+            if provider.is_null() {
+                return Err(FfiFailure::Invalid("provider SONAME is null"));
+            }
+            let bytes = unsafe { CStr::from_ptr(provider) }.to_bytes().to_vec();
+            validate_discovery_component(&bytes, "provider SONAME")?;
+            if !providers.insert(bytes) {
+                return Err(FfiFailure::Invalid("duplicate provider SONAME"));
+            }
+        }
+        let mut root_is_elf = false;
+        let result =
+            discover_sibling_graph(library_directory_fd, root, providers, &mut root_is_elf);
+        unsafe { *out_root_is_elf = i32::from(root_is_elf) };
+        let graph = result?;
+        unsafe { *out_graph = Box::into_raw(Box::new(graph)) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_discovered_graph_root_soname(
+    graph: *const DarwinArtElfDiscoveredGraph,
+    out_soname: *mut *const c_char,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if out_soname.is_null() {
+            return Err(FfiFailure::Invalid("out_soname is null"));
+        }
+        unsafe { *out_soname = ptr::null() };
+        let graph =
+            unsafe { graph.as_ref() }.ok_or(FfiFailure::Invalid("discovered graph is null"))?;
+        unsafe { *out_soname = graph.root_soname.as_ptr() };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_discovered_graph_sources(
+    graph: *const DarwinArtElfDiscoveredGraph,
+    out_sources: *mut *const DarwinArtElfGraphSource,
+    out_count: *mut usize,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if out_sources.is_null() || out_count.is_null() {
+            return Err(FfiFailure::Invalid("discovered source outputs are null"));
+        }
+        unsafe {
+            *out_sources = ptr::null();
+            *out_count = 0;
+        }
+        let graph =
+            unsafe { graph.as_ref() }.ok_or(FfiFailure::Invalid("discovered graph is null"))?;
+        unsafe {
+            *out_sources = graph.sources.as_ptr();
+            *out_count = graph.sources.len();
+        }
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_discovered_graph_destroy(
+    graph: *mut *mut DarwinArtElfDiscoveredGraph,
+) {
+    if graph.is_null() {
+        return;
+    }
+    let value = unsafe { *graph };
+    unsafe { *graph = ptr::null_mut() };
+    if !value.is_null() {
+        drop(unsafe { Box::from_raw(value) });
+    }
 }
 
 #[unsafe(no_mangle)]

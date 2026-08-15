@@ -17,6 +17,7 @@ name = "elf-namespace-gate"
 path = "src/bin/namespace_gate.rs"
 
 [dependencies]
+darwin-art-fs-broker = { path = "../darwin-art-fs-broker" }
 
 # Keep this experimental loader independently buildable until its public API is
 # ready to join the repository workspace.

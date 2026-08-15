@@ -12,6 +12,95 @@ mod namespace;
 
 pub use namespace::{ClosedElfNamespace, LoadedElfGraph, NamespaceError};
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ElfMetadata {
+    pub soname: Option<Vec<u8>>,
+    pub needed_libraries: Vec<Vec<u8>>,
+}
+
+/// Parses one Android arm64 ET_DYN image without relocating it or running guest code.
+///
+/// This path parses file bytes only: it does not reserve address space, relocate, or run guest code.
+pub fn inspect_elf_metadata(bytes: &[u8]) -> Result<ElfMetadata, LoadError> {
+    let parsed = parse_image_with_policy(bytes, true)?;
+    let dynamic = parse_dynamic_with_policy(bytes, &parsed.dynamic, true)?;
+    let needed_libraries = dynamic
+        .needed_offsets
+        .iter()
+        .map(|offset| dynamic_string_bytes(bytes, &parsed.loads, &dynamic, *offset))
+        .collect::<Result<Vec<_>, _>>()?;
+    let soname = dynamic
+        .soname_offset
+        .map(|offset| dynamic_string_bytes(bytes, &parsed.loads, &dynamic, offset))
+        .transpose()?;
+    if needed_libraries.iter().any(Vec::is_empty) {
+        return Err(LoadError::Format("empty DT_NEEDED string"));
+    }
+    if soname.as_ref().is_some_and(Vec::is_empty) {
+        return Err(LoadError::Format("empty DT_SONAME string"));
+    }
+    Ok(ElfMetadata {
+        soname,
+        needed_libraries,
+    })
+}
+
+fn dynamic_string_bytes(
+    bytes: &[u8],
+    loads: &[ProgramHeader],
+    dynamic: &DynamicInfo,
+    offset: u64,
+) -> Result<Vec<u8>, LoadError> {
+    let table = dynamic
+        .string_table
+        .ok_or(LoadError::Format("missing DT_STRTAB"))?;
+    let size = dynamic
+        .string_size
+        .ok_or(LoadError::Format("missing DT_STRSZ"))?;
+    if offset >= size {
+        return Err(LoadError::Bounds("dynamic string offset"));
+    }
+    let address = table
+        .checked_add(offset)
+        .ok_or(LoadError::Bounds("dynamic string address overflow"))?;
+    let remaining = size - offset;
+    let end = address
+        .checked_add(remaining)
+        .ok_or(LoadError::Bounds("dynamic string range overflow"))?;
+    let load = loads
+        .iter()
+        .find(|load| {
+            load.flags & PF_R != 0
+                && address >= load.virtual_address
+                && load
+                    .virtual_address
+                    .checked_add(load.file_size)
+                    .is_some_and(|load_end| end <= load_end)
+        })
+        .ok_or(LoadError::Bounds(
+            "dynamic string table is not file-backed readable data",
+        ))?;
+    let file_offset = load
+        .offset
+        .checked_add(
+            address
+                .checked_sub(load.virtual_address)
+                .ok_or(LoadError::Bounds("dynamic string file mapping"))?,
+        )
+        .ok_or(LoadError::Bounds("dynamic string file offset overflow"))?;
+    let data = checked_slice(
+        bytes,
+        to_usize(file_offset, "dynamic string file offset")?,
+        to_usize(remaining, "dynamic string size")?,
+        "dynamic string file range",
+    )?;
+    let terminator = data
+        .iter()
+        .position(|byte| *byte == 0)
+        .ok_or(LoadError::Format("unterminated dynamic string"))?;
+    Ok(data[..terminator].to_vec())
+}
+
 #[cfg(not(target_os = "macos"))]
 compile_error!("darwin-art-elf-loader supports only macOS hosts");
 
@@ -1467,6 +1556,13 @@ struct ExportedSymbol {
 }
 
 fn parse_image(bytes: &[u8]) -> Result<ParsedImage, LoadError> {
+    parse_image_with_policy(bytes, false)
+}
+
+fn parse_image_with_policy(
+    bytes: &[u8],
+    metadata_only: bool,
+) -> Result<ParsedImage, LoadError> {
     if bytes.len() < ELF64_EHDR_SIZE || bytes.len() < EI_NIDENT {
         return Err(LoadError::Format("truncated ELF header"));
     }
@@ -1523,8 +1619,10 @@ fn parse_image(bytes: &[u8]) -> Result<ParsedImage, LoadError> {
                     return Err(LoadError::Format("multiple PT_DYNAMIC segments"));
                 }
             }
-            PT_TLS => return Err(LoadError::Capability(Capability::Tls)),
-            PT_GNU_RELRO => return Err(LoadError::Capability(Capability::Relro)),
+            PT_TLS if !metadata_only => return Err(LoadError::Capability(Capability::Tls)),
+            PT_GNU_RELRO if !metadata_only => {
+                return Err(LoadError::Capability(Capability::Relro));
+            }
             _ => {}
         }
     }
@@ -1684,6 +1782,14 @@ fn validate_dynamic_segment(
 }
 
 fn parse_dynamic(bytes: &[u8], dynamic: &ProgramHeader) -> Result<DynamicInfo, LoadError> {
+    parse_dynamic_with_policy(bytes, dynamic, false)
+}
+
+fn parse_dynamic_with_policy(
+    bytes: &[u8],
+    dynamic: &ProgramHeader,
+    metadata_only: bool,
+) -> Result<DynamicInfo, LoadError> {
     let data = checked_slice(
         bytes,
         to_usize(dynamic.offset, "PT_DYNAMIC offset")?,
@@ -1741,28 +1847,35 @@ fn parse_dynamic(bytes: &[u8], dynamic: &ProgramHeader) -> Result<DynamicInfo, L
             )?,
             DT_PLTGOT | DT_DEBUG | DT_GNU_HASH => {}
             DT_REL | DT_RELSZ | DT_RELENT => {
-                if value != 0 {
+                if value != 0 && !metadata_only {
                     return Err(LoadError::Capability(Capability::RelRelocations));
                 }
             }
             DT_RELR | DT_RELRSZ | DT_RELRENT => {
-                if value != 0 {
+                if value != 0 && !metadata_only {
                     return Err(LoadError::Capability(Capability::RelrRelocations));
                 }
             }
             DT_INIT => {
-                if value != 0 {
+                if value != 0 && !metadata_only {
                     return Err(LoadError::Capability(Capability::DynamicInitializer));
                 }
             }
             DT_PREINIT_ARRAY | DT_PREINIT_ARRAYSZ => {
-                if value != 0 {
+                if value != 0 && !metadata_only {
                     return Err(LoadError::Capability(Capability::PreinitArray));
                 }
             }
-            DT_TEXTREL => return Err(LoadError::Capability(Capability::TextRelocations)),
-            DT_RPATH | DT_RUNPATH => return Err(LoadError::Capability(Capability::Rpath)),
-            DT_SYMBOLIC => return Err(LoadError::Capability(Capability::SymbolicLookup)),
+            DT_TEXTREL if !metadata_only => {
+                return Err(LoadError::Capability(Capability::TextRelocations));
+            }
+            DT_RPATH | DT_RUNPATH if !metadata_only => {
+                return Err(LoadError::Capability(Capability::Rpath));
+            }
+            DT_SYMBOLIC if !metadata_only => {
+                return Err(LoadError::Capability(Capability::SymbolicLookup));
+            }
+            _ if metadata_only => {}
             _ => return Err(LoadError::Capability(Capability::UnknownDynamicTag(tag))),
         }
     }
