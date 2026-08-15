@@ -11,7 +11,8 @@ diff --git a/runtime/thread.h b/runtime/thread.h
 +  Mutex* park_mutex_ DEFAULT_MUTEX_ACQUIRED_AFTER;
 +  ConditionVariable* park_cond_ GUARDED_BY(park_mutex_);
 +#endif
-+   // Debug disable read barrier count, only is checked for debug builds and only in the runtime.
++
+   // Debug disable read barrier count, only is checked for debug builds and only in the runtime.
    uint8_t debug_disallow_read_barrier_ = 0;
 diff --git a/runtime/thread.cc b/runtime/thread.cc
 --- a/runtime/thread.cc

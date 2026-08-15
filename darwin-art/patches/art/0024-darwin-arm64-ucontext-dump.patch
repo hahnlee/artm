@@ -7,7 +7,8 @@ diff --git a/runtime/runtime_common.cc b/runtime/runtime_common.cc
 +#if defined(__APPLE__) && defined(__aarch64__)
 +#include <mach/arm/thread_status.h>
 +#endif
-+ #include <signal.h>
++
+ #include <signal.h>
  
  #include <cinttypes>
 @@ -147,7 +151,19 @@ struct UContext {

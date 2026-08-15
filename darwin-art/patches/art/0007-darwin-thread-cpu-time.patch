@@ -8,7 +8,8 @@ diff --git a/runtime/thread.cc b/runtime/thread.cc
 +#if defined(__APPLE__)
 +#include <mach/mach.h>
 +#endif
-+ #include <algorithm>
++
+ #include <algorithm>
  #include <atomic>
  #include <bitset>
 @@ -1487,8 +1491,11 @@ uint64_t Thread::GetCpuMicroTime() const {

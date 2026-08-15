@@ -6,7 +6,8 @@ diff --git a/libartbase/base/mem_map.cc b/libartbase/base/mem_map.cc
  
 -#include "mem_map.h"
 +#include "base/mem_map.h"
-++#if defined(__APPLE__)
++
++#if defined(__APPLE__)
 +#include <mach/mach.h>
 +#include <mach/mach_vm.h>
 +#endif

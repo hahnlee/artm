@@ -15,7 +15,8 @@ diff --git a/libartbase/base/globals.h b/libartbase/base/globals.h
 +#endif
 +static constexpr uintptr_t kArtCompressedReferenceLimit =
 +    kArtCompressedReferenceBase + 4ULL * GB;
-+ // Runtime sizes.
++
+ // Runtime sizes.
  static constexpr size_t kBitsPerByte = 8;
 diff --git a/libartbase/base/mem_map.cc b/libartbase/base/mem_map.cc
 --- a/libartbase/base/mem_map.cc
