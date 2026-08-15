@@ -9,9 +9,7 @@ getwc	B	FILE-layout-wide-state
 ioctl	B	linux-request-constants-varargs
 openlog	C	syslog-global-state
 sendfile	B	off_t-kernel-errno
-snprintf	B	varargs-format-long-double
 sscanf	B	varargs-format-long-double
-strerror_r	B	errno-number-semantics
 strftime_l	C	locale-owned-state
 strtold	B	long-double-errno-locale
 strtold_l	B	long-double-locale-handle-errno
@@ -19,14 +17,8 @@ swprintf	B	wide-varargs-long-double
 syscall	D	linux-syscall-number-ABI
 syslog	C	syslog-global-varargs-state
 ungetwc	B	FILE-layout-wide-state
-vasprintf	B	va_list-allocator-format
 vfprintf	B	FILE-layout-va_list-format
-vsnprintf	B	va_list-format-long-double
 vsscanf	B	va_list-format-long-double
 wcstod	B	wide-locale-errno-number
 wcstof	B	wide-locale-errno-number
-wcstol	B	wide-locale-errno-integer
 wcstold	B	wide-long-double-locale-errno
-wcstoll	B	wide-locale-errno-integer
-wcstoul	B	wide-locale-errno-integer
-wcstoull	B	wide-locale-errno-integer

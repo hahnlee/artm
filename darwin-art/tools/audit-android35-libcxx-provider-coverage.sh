@@ -27,12 +27,15 @@ stdio="$root/tools/bionic-stdio-facade/manifests/imports.tsv"
 locale="$root/tools/bionic-locale-facade/manifests/imports.tsv"
 numeric="$root/tools/bionic-numeric-facade/manifests/imports.tsv"
 float_conversion="$root/tools/bionic-float-conversion-facade/manifests/imports.tsv"
+format="$root/tools/bionic-format-facade/manifests/imports.tsv"
+strerror="$root/tools/bionic-strerror-facade/manifests/imports.tsv"
+wide_integer="$root/tools/bionic-wide-integer-facade/manifests/imports.tsv"
 lifecycle="$root/tools/bionic-dso-lifecycle-facade/manifests/imports.tsv"
 leaf_source="$root/tools/bionic-libc-leaf-facade/src/leaf.c"
 errno_source="$root/tools/bionic-errno-tls/src/errno_tls.c"
 phdr_source="$root/tools/android-dl-iterate-phdr-provider/src/provider.cc"
 
-for file in "$universe" "$allocator" "$filesystem" "$time" "$pthread" "$process_state" "$stdio" "$locale" "$numeric" "$float_conversion" "$lifecycle" \
+for file in "$universe" "$allocator" "$filesystem" "$time" "$pthread" "$process_state" "$stdio" "$locale" "$numeric" "$float_conversion" "$format" "$strerror" "$wide_integer" "$lifecycle" \
             "$leaf_source" "$errno_source" "$phdr_source"; do
   [[ -f "$file" ]] || fail "missing provider manifest: $file"
 done
@@ -57,6 +60,9 @@ done
   fail "numeric import manifest drift"
 [[ "$(sha "$float_conversion")" == "$FLOAT_CONVERSION_IMPORTS_SHA256" ]] ||
   fail "float conversion import manifest drift"
+[[ "$(sha "$format")" == "$FORMAT_IMPORTS_SHA256" ]] || fail "format import manifest drift"
+[[ "$(sha "$strerror")" == "$STRERROR_IMPORTS_SHA256" ]] || fail "strerror import manifest drift"
+[[ "$(sha "$wide_integer")" == "$WIDE_INTEGER_IMPORTS_SHA256" ]] || fail "wide integer import manifest drift"
 [[ "$(sha "$lifecycle")" == "$LIFECYCLE_IMPORTS_SHA256" ]] ||
   fail "DSO lifecycle import manifest drift"
 [[ "$(sha "$leaf_source")" == "$LEAF_PROVIDER_SOURCE_SHA256" ]] ||
@@ -85,6 +91,9 @@ awk -F '\t' 'NR > 1 && $4 !~ /^rejected-/ { print "stdio\t" $1 }' "$stdio" >>"$o
 awk -F '\t' 'NR > 1 { print "locale\t" $1 }' "$locale" >>"$owners"
 awk -F '\t' 'NR > 1 { print "numeric\t" $1 }' "$numeric" >>"$owners"
 awk -F '\t' 'NR > 1 { print "float-conversion\t" $1 }' "$float_conversion" >>"$owners"
+awk -F '\t' 'NR > 1 && $2 == "supported" { print "format\t" $1 }' "$format" >>"$owners"
+awk -F '\t' 'NR > 1 { print "strerror\t" $1 }' "$strerror" >>"$owners"
+awk -F '\t' 'NR > 1 { print "wide-integer\t" $1 }' "$wide_integer" >>"$owners"
 awk -F '\t' '{ print "lifecycle\t" $1 }' "$lifecycle" >>"$owners"
 printf 'phdr\tdl_iterate_phdr\n' >>"$owners"
 
@@ -115,6 +124,7 @@ allocator	4
 errno	1
 filesystem	28
 float-conversion	2
+format	3
 leaf	11
 lifecycle	2
 locale	31
@@ -123,7 +133,9 @@ phdr	1
 process-state	3
 pthread	24
 stdio	13
+strerror	1
 time	3
+wide-integer	4
 EOF
 diff -u "$tmp/expected-provider-counts" "$tmp/provider-counts" ||
   fail "provider ownership counts drift"
@@ -134,7 +146,7 @@ awk -F '\t' 'NR == FNR { owned[$2] = 1; next }
   "$owners" "$universe" | LC_ALL=C sort >"$tmp/class-counts"
 cat >"$tmp/expected-class-counts" <<'EOF'
 A	11	11
-B	52	76
+B	60	76
 C	61	65
 D	5	8
 EOF
@@ -142,6 +154,6 @@ diff -u "$tmp/expected-class-counts" "$tmp/class-counts" ||
   fail "capability-class coverage drift"
 
 echo "android35-libcxx-provider-coverage: PASS imports=$universe_count owned=$owned_count duplicate-owners=0"
-echo "providers=leaf:11 allocator:4 errno:1 filesystem:28 time:3 pthread:24 process-state:3 phdr:1 stdio:13 locale:31 numeric:6 float-conversion:2 lifecycle:2"
-echo "classes=A:11/11 B:52/76 C:61/65 D:5/8 remaining=31"
+echo "providers=leaf:11 allocator:4 errno:1 filesystem:28 time:3 pthread:24 process-state:3 phdr:1 stdio:13 locale:31 numeric:6 float-conversion:2 format:3 strerror:1 wide-integer:4 lifecycle:2"
+echo "classes=A:11/11 B:60/76 C:61/65 D:5/8 remaining=23"
 echo "scope=composed-namespace-integrated-into-ART-ELF-resolver"
