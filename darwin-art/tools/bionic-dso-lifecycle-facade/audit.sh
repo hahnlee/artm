@@ -67,6 +67,7 @@ source = (root / 'libc/bionic/atexit.cpp').read_text()
 crt = (root / 'libc/arch-common/bionic/crtbegin_so.c').read_text()
 assert 'g_array.append_entry({.fn = func, .arg = arg, .dso = dso})' in source
 assert 'const AtexitEntry entry = g_array.extract_entry(i);' in source
+assert '(dso != nullptr && g_array[i].dso != dso)' in source
 assert 'atexit_unlock();\n    entry.fn(entry.arg);\n    atexit_lock();' in source
 assert 'if (g_array.total_appends() != total_appends) goto restart;' in source
 assert 'if (dso != nullptr)' in source and '__libc_stdio_cleanup();' in source
@@ -155,4 +156,4 @@ CARGO_TARGET_DIR="$tmp/target" cargo clippy --quiet --all-targets \
   --manifest-path "$dir/Cargo.toml" -- -D warnings
 cargo fmt --manifest-path "$dir/Cargo.toml" -- --check
 clean
-echo 'bionic-dso-lifecycle-facade: PASS imports=2 AndroidELF LIFO callbacks=64-exactly-once range-lazy-admit=exactly-once hooks=2-calls/2-hooks unpublish=busy-drain-success C-boundary=ASan+UBSan target-clean'
+echo 'bionic-dso-lifecycle-facade: PASS imports=2 AndroidELF LIFO global-interowner-LIFO global-reentrant callbacks=64-exactly-once range-lazy-admit=exactly-once hooks=3-global-cleanups unpublish=busy-drain-success C-boundary=ASan+UBSan target-clean'

@@ -208,10 +208,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if unsafe { register_reentrant() } != 42 {
         return Err("reentrant callback registration failed".into());
     }
-    unsafe { finalize_main() };
+    unsafe { finalize_global() };
     expect_log(log_count, log_at, &[7, 8])?;
-    if lifecycle.registration_count(main_dso)? != 0 {
-        return Err("reentrant registration was not drained".into());
+    if lifecycle.registration_count(main_dso)? != 0 || STDIO_CLEANUPS.load(Ordering::Acquire) != 3 {
+        return Err("global reentrant registration was not drained".into());
     }
     if unsafe { register_null() } != -1 || lifecycle.registration_count(main_dso)? != 0 {
         return Err("null __cxa_atexit callback was not rejected atomically".into());
@@ -315,7 +315,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     drop(image);
     println!(
         "bionic-dso-lifecycle-facade: PASS exact-triples lifo \
-         atfork-hook=2-calls/2-hooks stdio-hook=2-calls/2-hooks reentrant \
+         atfork-hook=2-calls/2-hooks stdio-hook=3-calls/3-hooks global-reentrant \
          concurrent-callbacks=64-exactly-once range-lazy-admit=exactly-once \
          unpublish=busy-drain-success"
     );

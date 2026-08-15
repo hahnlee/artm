@@ -33,9 +33,14 @@ sequence:
 
 Independent ART graph owners may coexist. A process registry routes each call
 by its disjoint live image ranges; it does not select a single current owner.
+Only one standalone process-global owner may be active; multiple active owners
+are reserved for range-backed image ownership.
 Production image owners reject null-handle registrations, so graph teardown
-never strands process-global callbacks. The standalone AOSP-semantics harness
-retains `finalize(NULL)` only for source differential coverage.
+never strands process-global callbacks. This registration policy is separate
+from `finalize(NULL)`: global finalize drains registrations from every active
+owner in process-wide registration-sequence LIFO order, including registrations
+created by a callback. The standalone AOSP-semantics owner additionally accepts
+null-handle registrations and owns the one post-drain stdio cleanup hook.
 
 The Android-to-Darwin registration call contains only three pointer-class
 arguments (`x0`-`x2`), and the reverse destructor call contains one (`x0`).
@@ -45,7 +50,7 @@ aggregate, HFA, or stack-spilled calls.
 
 `audit.sh` builds a real Android AArch64 ELF with exactly the two imports. It
 verifies exact triples, range-backed lazy handle admission, multiple concurrent
-owners, null rejection for image owners, per-DSO and global LIFO order,
+owners, null rejection for image owners, process-global inter-owner LIFO order,
 recursive finalization, callback-created registrations, concurrent
 register/finalize races, cleanup hooks, and rejection of unmap while an Android
 callback is executing. A separate host C boundary harness runs the prefixed shim

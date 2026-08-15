@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::{c_int, c_void};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, RwLock};
 
 pub type Destructor = unsafe extern "C" fn(*mut c_void);
@@ -26,6 +27,7 @@ struct Entry {
     function: Destructor,
     argument: usize,
     dso: usize,
+    sequence: u64,
 }
 
 struct PublishedImage {
@@ -41,7 +43,6 @@ struct State {
     published: HashSet<usize>,
     images: Vec<PublishedImage>,
     active_callbacks: HashMap<usize, usize>,
-    finalize_depth: u32,
 }
 
 pub struct Lifecycle {
@@ -52,6 +53,8 @@ pub struct Lifecycle {
 }
 
 static ACTIVE: OnceLock<RwLock<Vec<Arc<Lifecycle>>>> = OnceLock::new();
+static ENTRY_COORDINATOR: Mutex<()> = Mutex::new(());
+static NEXT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 fn active_slot() -> &'static RwLock<Vec<Arc<Lifecycle>>> {
     ACTIVE.get_or_init(|| RwLock::new(Vec::new()))
@@ -82,6 +85,9 @@ impl Lifecycle {
             .map_err(|_| "activation lock poisoned")?;
         if active.iter().any(|current| Arc::ptr_eq(current, self)) {
             return Err("DSO lifecycle provider is already active");
+        }
+        if self.allow_global && active.iter().any(|current| current.allow_global) {
+            return Err("process-global DSO lifecycle provider is already active");
         }
         active
             .try_reserve(1)
@@ -267,6 +273,9 @@ impl Lifecycle {
             return -1;
         };
         let dso = dso as usize;
+        let Ok(_coordinator) = ENTRY_COORDINATOR.lock() else {
+            return -1;
+        };
         let Ok(mut state) = self.state.lock() else {
             return -1;
         };
@@ -294,10 +303,18 @@ impl Lifecycle {
         if state.entries.try_reserve(1).is_err() {
             return -1;
         }
+        let Ok(sequence) =
+            NEXT_SEQUENCE.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+                next.checked_add(1)
+            })
+        else {
+            return -1;
+        };
         state.entries.push(Some(Entry {
             function,
             argument: argument as usize,
             dso,
+            sequence,
         }));
         0
     }
@@ -318,44 +335,56 @@ impl Lifecycle {
     }
 
     fn finalize_matching(&self, matches: impl Fn(Entry) -> bool) {
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        state.finalize_depth = state.finalize_depth.saturating_add(1);
-
         loop {
-            let index = state
-                .entries
-                .iter()
-                .rposition(|slot| slot.is_some_and(&matches));
-            let Some(index) = index else {
-                state.finalize_depth = state.finalize_depth.saturating_sub(1);
-                if state.finalize_depth == 0 {
-                    state.entries.retain(Option::is_some);
-                }
+            let Some(entry) = self.take_latest_matching(&matches) else {
                 break;
             };
-            let entry = state.entries[index]
-                .take()
-                .expect("selected lifecycle entry must be present");
-            *state.active_callbacks.entry(entry.dso).or_insert(0) += 1;
-            drop(state);
 
             // SAFETY: the loader published the DSO while its executable mapping was alive.
             // The one-pointer callback uses x0 in both Android and Darwin arm64 PCS.
             unsafe { (entry.function)(entry.argument as *mut c_void) };
 
-            let Ok(locked) = self.state.lock() else {
-                return;
-            };
-            state = locked;
-            if let Some(active) = state.active_callbacks.get_mut(&entry.dso) {
-                *active -= 1;
-                if *active == 0 {
-                    state.active_callbacks.remove(&entry.dso);
-                    self.quiesced.notify_all();
-                }
-            }
+            self.complete_callback(entry.dso);
+        }
+
+        let Ok(_coordinator) = ENTRY_COORDINATOR.lock() else {
+            std::process::abort();
+        };
+        let Ok(mut state) = self.state.lock() else {
+            std::process::abort();
+        };
+        state.entries.retain(Option::is_some);
+    }
+
+    fn take_latest_matching(&self, matches: &impl Fn(Entry) -> bool) -> Option<Entry> {
+        let Ok(_coordinator) = ENTRY_COORDINATOR.lock() else {
+            std::process::abort();
+        };
+        let Ok(mut state) = self.state.lock() else {
+            std::process::abort();
+        };
+        let index = state
+            .entries
+            .iter()
+            .rposition(|slot| slot.is_some_and(matches))?;
+        let entry = state.entries[index]
+            .take()
+            .expect("selected lifecycle entry must be present");
+        *state.active_callbacks.entry(entry.dso).or_insert(0) += 1;
+        Some(entry)
+    }
+
+    fn complete_callback(&self, dso: usize) {
+        let Ok(mut state) = self.state.lock() else {
+            std::process::abort();
+        };
+        let Some(active) = state.active_callbacks.get_mut(&dso) else {
+            std::process::abort();
+        };
+        *active -= 1;
+        if *active == 0 {
+            state.active_callbacks.remove(&dso);
+            self.quiesced.notify_all();
         }
     }
 }
@@ -385,6 +414,58 @@ fn active_lifecycles() -> Vec<Arc<Lifecycle>> {
     active.clone()
 }
 
+fn take_latest_global() -> Option<(Arc<Lifecycle>, Entry)> {
+    let Ok(_coordinator) = ENTRY_COORDINATOR.lock() else {
+        std::process::abort();
+    };
+    let lifecycles = active_lifecycles();
+    let mut selected: Option<(Arc<Lifecycle>, usize, u64)> = None;
+    for lifecycle in lifecycles {
+        let Ok(state) = lifecycle.state.lock() else {
+            std::process::abort();
+        };
+        for (index, entry) in state.entries.iter().enumerate() {
+            let Some(entry) = entry else { continue };
+            if selected
+                .as_ref()
+                .is_none_or(|(_, _, sequence)| entry.sequence > *sequence)
+            {
+                selected = Some((Arc::clone(&lifecycle), index, entry.sequence));
+            }
+        }
+    }
+    let (lifecycle, index, sequence) = selected?;
+    let entry = {
+        let Ok(mut state) = lifecycle.state.lock() else {
+            std::process::abort();
+        };
+        let entry = state.entries[index]
+            .take()
+            .expect("globally selected lifecycle entry must be present");
+        assert_eq!(entry.sequence, sequence);
+        *state.active_callbacks.entry(entry.dso).or_insert(0) += 1;
+        entry
+    };
+    Some((lifecycle, entry))
+}
+
+fn finalize_all_active() {
+    while let Some((lifecycle, entry)) = take_latest_global() {
+        // SAFETY: the owning loader mapping remains published while its callback is active.
+        unsafe { (entry.function)(entry.argument as *mut c_void) };
+        lifecycle.complete_callback(entry.dso);
+    }
+
+    if let Some(cleanup) = active_lifecycles()
+        .into_iter()
+        .find(|lifecycle| lifecycle.allow_global)
+        .and_then(|lifecycle| lifecycle.hooks.stdio_cleanup)
+    {
+        // SAFETY: the provider-owned hook has fixed no-argument PCS and process lifetime.
+        unsafe { cleanup() };
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_dso_cxa_atexit_core(
     function: Option<Destructor>,
@@ -407,10 +488,12 @@ pub extern "C" fn darwin_art_bionic_dso_cxa_atexit_core(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_dso_cxa_finalize_core(dso: *mut c_void) {
+    if dso.is_null() {
+        finalize_all_active();
+        return;
+    }
     for lifecycle in active_lifecycles() {
-        if (dso.is_null() && lifecycle.allow_global)
-            || (!dso.is_null() && lifecycle.owns_handle(dso as usize))
-        {
+        if lifecycle.owns_handle(dso as usize) {
             lifecycle.finalize(dso);
         }
     }
@@ -493,6 +576,7 @@ mod tests {
     use std::sync::Mutex;
 
     static LOG: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+    static TEST_SERIAL: Mutex<()> = Mutex::new(());
     static ARGUMENT_ONE: u8 = 1;
     static ARGUMENT_TWO: u8 = 2;
 
@@ -502,6 +586,7 @@ mod tests {
 
     #[test]
     fn routes_concurrent_image_owners_and_rejects_null_registrations() {
+        let _serial = TEST_SERIAL.lock().unwrap();
         LOG.lock().unwrap().clear();
         let first = Arc::new(Lifecycle::new_image_owner());
         let second = Arc::new(Lifecycle::new_image_owner());
@@ -552,5 +637,60 @@ mod tests {
         assert!(second.is_quiescent());
         drop(second_activation);
         drop(first_activation);
+    }
+
+    #[test]
+    fn null_finalize_drains_interleaved_image_owners_in_global_lifo_order() {
+        let _serial = TEST_SERIAL.lock().unwrap();
+        LOG.lock().unwrap().clear();
+        let first = Arc::new(Lifecycle::new_image_owner());
+        let second = Arc::new(Lifecycle::new_image_owner());
+        let first_activation = first.activate().unwrap();
+        let second_activation = second.activate().unwrap();
+        first.publish_image(0x1000, 0x2000).unwrap();
+        second.publish_image(0x3000, 0x4000).unwrap();
+
+        for (argument, dso) in [(1, 0x1100), (2, 0x3100), (3, 0x1100), (4, 0x3100)] {
+            assert_eq!(
+                darwin_art_bionic_dso_cxa_atexit_core(
+                    Some(record),
+                    argument as *mut c_void,
+                    dso as *mut c_void,
+                ),
+                0
+            );
+        }
+        assert_eq!(
+            darwin_art_bionic_dso_cxa_atexit_core(
+                Some(record),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ),
+            -1
+        );
+
+        darwin_art_bionic_dso_cxa_finalize_core(std::ptr::null_mut());
+        assert_eq!(*LOG.lock().unwrap(), [4, 3, 2, 1]);
+        assert_eq!(first.registration_count(0).unwrap(), 0);
+        assert_eq!(second.registration_count(0).unwrap(), 0);
+
+        first.finalize_image(0x1000, 0x2000).unwrap();
+        second.finalize_image(0x3000, 0x4000).unwrap();
+        assert!(first.is_quiescent());
+        assert!(second.is_quiescent());
+        drop(second_activation);
+        drop(first_activation);
+    }
+
+    #[test]
+    fn permits_multiple_image_owners_but_only_one_global_owner() {
+        let _serial = TEST_SERIAL.lock().unwrap();
+        let first = Arc::new(Lifecycle::new(Hooks::default()));
+        let second = Arc::new(Lifecycle::new(Hooks::default()));
+        let activation = first.activate().unwrap();
+        assert!(second.activate().is_err());
+        drop(activation);
+        let second_activation = second.activate().unwrap();
+        drop(second_activation);
     }
 }
