@@ -8,7 +8,7 @@ created.
 
 The initial Darwin capability slice implements real `open`, `fstat`,
 `readBytes`, `writeBytes`, `close`, `mmap`, `munmap`, `sysconf`, `getenv`,
-`getpwuid`, `stat`, and `uname` behavior plus all seven upstream
+`getpwuid`, `stat`, `uname`, `strerror`, and `strsignal` behavior plus all seven upstream
 CriticalNative identity calls. Android/Linux open and mmap flags are translated
 explicitly. Every remaining method is present in the registrar and fails with
 `android.system.ErrnoException(ENOTSUP)` through a generated per-method wrapper;
@@ -28,7 +28,12 @@ Apple arm64 managed/native ABI.
 
 The managed gate also checks a real environment lookup, a temporary-file
 write/stat size roundtrip, and the Android compatibility projection returned by
-`uname`. That projection deliberately reports `sysname=Linux` and
+`uname`. It additionally verifies that `strerror(EINVAL)` and
+`strsignal(SIGTERM)` return non-empty Darwin libc descriptions through their
+exact upstream JNI signatures. Darwin's XSI `strerror_r` and `strsignal_r`
+interfaces use private buffers; `strsignal` is consulted only when
+`strsignal_r` rejects a signal, and Darwin guarantees that fallback storage is
+unique to the calling thread. The `uname` projection deliberately reports `sysname=Linux` and
 `machine=aarch64`: framework and package ABI selection must observe the Android
 runtime contract, while Darwin release/version remain available in the other
 `StructUtsname` fields for diagnostics.

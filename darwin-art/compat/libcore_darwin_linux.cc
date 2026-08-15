@@ -3,13 +3,17 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <pwd.h>
+#include <signal.h>
 #include <sys/mman.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
+#include <array>
 #include <cerrno>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <vector>
 
@@ -323,6 +327,32 @@ jobject DarwinLinuxUname(JNIEnv* env, jobject) {
   return MakeStructUtsname(env, host);
 }
 
+jstring DarwinLinuxStrerror(JNIEnv* env, jobject, jint error_number) {
+  // Darwin exposes the XSI/POSIX int-returning strerror_r, unlike the
+  // pointer-returning GNU/Bionic interface used by the upstream default path.
+  // A private buffer preserves strerror's thread-safety across NewStringUTF.
+  std::array<char, BUFSIZ> buffer {};
+  const int result = strerror_r(error_number, buffer.data(), buffer.size());
+  if (result != 0 && buffer[0] == '\0') {
+    // Match upstream's POSIX strerror_r fallback: strerror never converts an
+    // unknown errno into an exception or a null Java result.
+    std::snprintf(buffer.data(), buffer.size(), "Unknown error %d",
+                  error_number);
+  }
+  return env->NewStringUTF(buffer.data());
+}
+
+jstring DarwinLinuxStrsignal(JNIEnv* env, jobject, jint signal_number) {
+  std::array<char, BUFSIZ> buffer {};
+  if (strsignal_r(signal_number, buffer.data(), buffer.size()) == 0) {
+    return env->NewStringUTF(buffer.data());
+  }
+  // On Darwin strsignal storage is unique to the calling thread. This keeps
+  // the upstream libc result for invalid signals without inventing a message.
+  const char* message = strsignal(signal_number);
+  return message == nullptr ? nullptr : env->NewStringUTF(message);
+}
+
 jint DarwinLinuxWriteBytes(JNIEnv* env, jobject, jobject java_fd,
                            jobject java_bytes, jint byte_offset,
                            jint byte_count) {
@@ -405,6 +435,12 @@ jboolean AbiSmokeBoolean(JNIEnv* env, jobject, jstring, jint) {
 }
 jlong AbiSmokeAvailableProcessors(JNIEnv* env, jobject receiver) {
   return DarwinLinuxSysconf(env, receiver, _SC_NPROCESSORS_CONF);
+}
+jstring AbiSmokeStrerror(JNIEnv* env, jobject receiver, jint error_number) {
+  return DarwinLinuxStrerror(env, receiver, error_number);
+}
+jstring AbiSmokeStrsignal(JNIEnv* env, jobject receiver, jint signal_number) {
+  return DarwinLinuxStrsignal(env, receiver, signal_number);
 }
 jint AbiSmokeWriteFile(JNIEnv* env, jobject, jstring java_path,
                        jbyteArray java_bytes) {
@@ -610,6 +646,12 @@ JNINativeMethod kAbiSmokeMethods[] = {
     {const_cast<char*>("unameView"),
      const_cast<char*>("()Landroid/system/StructUtsname;"),
      reinterpret_cast<void*>(&DarwinLinuxUname)},
+    {const_cast<char*>("errorMessage"),
+     const_cast<char*>("(I)Ljava/lang/String;"),
+     reinterpret_cast<void*>(&AbiSmokeStrerror)},
+    {const_cast<char*>("signalMessage"),
+     const_cast<char*>("(I)Ljava/lang/String;"),
+     reinterpret_cast<void*>(&AbiSmokeStrsignal)},
 };
 #endif
 

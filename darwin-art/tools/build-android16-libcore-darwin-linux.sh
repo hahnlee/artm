@@ -131,6 +131,7 @@ my %supported = (
   sysconf => 'DarwinLinuxSysconf',
   getenv => 'DarwinLinuxGetenv', getpwuid => 'DarwinLinuxGetpwuid',
   stat => 'DarwinLinuxStat', uname => 'DarwinLinuxUname',
+  strerror => 'DarwinLinuxStrerror', strsignal => 'DarwinLinuxStrsignal',
   writeBytes => 'DarwinLinuxWriteBytes',
 );
 my ($index, $regular_count, $critical_count, $unsupported_count) = (0, 0, 0, 0);
@@ -348,6 +349,8 @@ public final class LibcoreDarwinAbiSmoke {
     private native StructStat statPath(String path) throws ErrnoException;
     private native int writeFile(String path, byte[] bytes) throws ErrnoException;
     private native StructUtsname unameView() throws ErrnoException;
+    private native String errorMessage(int errorNumber);
+    private native String signalMessage(int signalNumber);
 
     private interface Invocation {
         void run() throws ErrnoException;
@@ -400,8 +403,16 @@ public final class LibcoreDarwinAbiSmoke {
                 || !"aarch64".equals(uname.machine)) {
             throw new AssertionError("uname compatibility projection failed");
         }
-        System.out.println("managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP) processors="
-                + processors);
+        String invalidArgument = smoke.errorMessage(22);
+        if (invalidArgument == null || invalidArgument.isEmpty()) {
+            throw new AssertionError("strerror(EINVAL)=" + invalidArgument);
+        }
+        String terminationSignal = smoke.signalMessage(15);
+        if (terminationSignal == null || terminationSignal.isEmpty()) {
+            throw new AssertionError("strsignal(SIGTERM)=" + terminationSignal);
+        }
+        System.out.println("managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP)"
+                + " strerror(EINVAL)=pass strsignal(SIGTERM)=pass processors=" + processors);
     }
 }
 JAVA
@@ -414,7 +425,7 @@ javac --release 17 -encoding UTF-8 -d "$java_classes" \
 managed_abi_output="$(DARWIN_ART_MANAGED_SMOKE=present java -cp "$java_classes" \
   dev.darwinart.probe.LibcoreDarwinAbiSmoke "$abi_library")"
 [[ "$managed_abi_output" == \
-   'managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP) processors='* ]] ||
+   'managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP) strerror(EINVAL)=pass strsignal(SIGTERM)=pass processors='* ]] ||
   fail "managed ABI smoke output mismatch: $managed_abi_output"
 managed_processors="${managed_abi_output##*=}"
 [[ "$managed_processors" =~ ^[1-9][0-9]*$ ]] ||
@@ -425,4 +436,4 @@ mkdir -p "$build_dir"
 cp "$archive" "$build_dir/libcore-darwin-linux.a"
 cp "$smoke" "$build_dir/libcore-darwin-linux-smoke"
 
-echo "libcore-darwin-linux: methods=$method_count regular=$supported_regular critical=$supported_critical enotsup=$unsupported_count fixed-abi=$unsupported_count managed=V/I/J/L/Z+getenv/stat/write/uname managed-processors=$managed_processors archive=Mach-O-arm64 $smoke_output"
+echo "libcore-darwin-linux: methods=$method_count regular=$supported_regular critical=$supported_critical enotsup=$unsupported_count fixed-abi=$unsupported_count managed=V/I/J/L/Z+getenv/stat/write/uname/strerror/strsignal managed-processors=$managed_processors archive=Mach-O-arm64 $smoke_output"
