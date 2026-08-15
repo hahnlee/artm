@@ -1358,7 +1358,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
         &partial_error);
     const bool partial_cleanup_ok =
         partial_handle == nullptr && partial_error != nullptr &&
-        darwin_art_elf_jni_fixture_lifecycle_status() == 1245 &&
+        darwin_art_elf_jni_fixture_lifecycle_status() == 124567 &&
         darwin_art_elf_jni_fixture_namespace_lifecycle_status() == 5;
     if (partial_handle != nullptr) {
       char* close_error = nullptr;
@@ -1515,7 +1515,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
   if (darwin_art_elf_jni_fixture_registration_status() != 0 &&
-      darwin_art_elf_jni_fixture_lifecycle_status() != 12345) {
+      darwin_art_elf_jni_fixture_lifecycle_status() != 1234567) {
     std::cerr << "ART Darwin shutdown: ELF JNI graph finalizer order failed, status="
               << darwin_art_elf_jni_fixture_lifecycle_status() << "\n";
     std::lock_guard<std::mutex> lock(g_process_state.mutex);

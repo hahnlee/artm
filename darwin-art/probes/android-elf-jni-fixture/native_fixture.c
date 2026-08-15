@@ -6,9 +6,19 @@ extern int DarwinArtFixtureChildValue(void);
 extern void darwin_art_fixture_record_lifecycle(int phase);
 extern int* __errno(void);
 extern size_t strlen(const char* string);
+extern int __cxa_atexit(void (*function)(void*), void* argument, void* dso);
+
+__attribute__((visibility("hidden"))) void* __dso_handle = &__dso_handle;
 
 static int g_root_initialized;
 static int g_bionic_provider_initialized;
+static int g_cxa_registered;
+
+static void RootCxaFinalize(void* argument) {
+  if (argument == &g_cxa_registered) {
+    darwin_art_fixture_record_lifecycle(4);
+  }
+}
 
 __attribute__((constructor)) static void RootInitialize(void) {
   static const char provider_probe[] = "bionic";
@@ -18,12 +28,14 @@ __attribute__((constructor)) static void RootInitialize(void) {
     *bionic_errno = 4242;
     g_bionic_provider_initialized = *__errno() == 4242;
     g_root_initialized = 1;
+    g_cxa_registered =
+        __cxa_atexit(&RootCxaFinalize, &g_cxa_registered, __dso_handle) == 0;
     darwin_art_fixture_record_lifecycle(2);
   }
 }
 
 __attribute__((destructor)) static void RootFinalize(void) {
-  darwin_art_fixture_record_lifecycle(4);
+  darwin_art_fixture_record_lifecycle(5);
 }
 
 static jlong NativeAdd(JNIEnv* env, jclass fixture_class, jint left,
@@ -124,6 +136,7 @@ static void NativeVoid(JNIEnv* env, jclass fixture_class) {
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
   (void)reserved;
   if (g_root_initialized != 1 || g_bionic_provider_initialized != 1 ||
+      g_cxa_registered != 1 ||
       DarwinArtFixtureChildValue() != 20) {
     return JNI_ERR;
   }

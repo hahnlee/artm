@@ -38,7 +38,7 @@ common_flags=(-std=c17 -O2 -fPIC -fvisibility=hidden -fno-builtin -Wall -Wextra 
 "$android_clang" "${common_flags[@]}" \
   -Wl,-soname,libdarwin-art-jni-child.so \
   -Wl,--version-script,"$fixture_root/child.exports.map" \
-  "$fixture_root/child.c" "$host_provider" -o "$child"
+  "$fixture_root/child.c" "$host_provider" -lc -o "$child"
 "$android_clang" "${common_flags[@]}" \
   -Wl,-soname,libdarwin-art-jni-fixture.so \
   -Wl,--version-script,"$fixture_root/exports.map" \
@@ -70,10 +70,12 @@ grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' "$root_dynamic" >/dev/null ||
   fail "root lost explicit virtual provider dependency"
 grep -E '\(NEEDED\).*libc\.so' "$root_dynamic" >/dev/null ||
   fail "root lost closed Bionic provider dependency"
-[[ "$(grep -c '(NEEDED)' "$child_dynamic")" == 1 ]] ||
-  fail "child DT_NEEDED closure is not exactly host-provider"
+[[ "$(grep -c '(NEEDED)' "$child_dynamic")" == 2 ]] ||
+  fail "child DT_NEEDED closure is not exactly host-provider+libc"
 grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' "$child_dynamic" >/dev/null ||
   fail "child lost explicit virtual provider dependency"
+grep -E '\(NEEDED\).*libc\.so' "$child_dynamic" >/dev/null ||
+  fail "child lost Bionic lifecycle provider dependency"
 grep -E 'R_AARCH64_JUMP_SLOT.*DarwinArtFixtureChildValue' "$root_dynamic" >/dev/null ||
   fail "root child-symbol relocation missing"
 [[ "$("$nm" -D --defined-only "$output" | awk '$2 == "T" {print $3}' | paste -sd, -)" == \
@@ -97,6 +99,15 @@ grep -E 'R_AARCH64_JUMP_SLOT.*(DarwinArtFixtureChildValue|darwin_art_fixture_rec
 for symbol in __errno strlen; do
   grep -E "R_AARCH64_JUMP_SLOT.*${symbol}" "$relocations" >/dev/null ||
     fail "Bionic provider relocation missing: $symbol"
+done
+for dynamic in "$root_dynamic" "$child_dynamic"; do
+  grep -E 'R_AARCH64_JUMP_SLOT.*__cxa_atexit' "$dynamic" >/dev/null ||
+    fail "Bionic per-DSO lifecycle relocation missing: $dynamic"
+done
+for elf in "$output" "$child"; do
+  "$readelf" --dyn-syms --wide "$elf" |
+    awk '$7 != "UND" && $8 == "__dso_handle" { found=1 } END { exit found }' ||
+    fail "__dso_handle escaped into the dynamic symbol table: $elf"
 done
 
 disassembly="$stage/disassembly.txt"
@@ -170,4 +181,4 @@ identity="$stage/darwin_art_elf_jni_fixture_identity.h"
   echo '#endif'
 } > "$identity"
 cp "$identity" "$generated_dir/darwin_art_elf_jni_fixture_identity.h"
-echo "android-elf-jni-fixture: PASS graph=root+child+virtual-provider+libc ctor=child-first fini=root-first bionic=__errno+strlen exports=JNI_OnLoad+JNI_OnUnload relro=0 tls=0 register=GetEnv+FindClass+RegisterNatives methods=8(register+spill+env+narrow+returns) pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) root_size=$fixture_size root_sha256=$fixture_sha child_size=$child_size child_sha256=$child_sha"
+echo "android-elf-jni-fixture: PASS graph=root+child+virtual-provider+libc ctor=child-first cxa=root-first-before-fini fini=root-first bionic=__errno+strlen+__cxa_atexit dso-handle=local exports=JNI_OnLoad+JNI_OnUnload relro=0 tls=0 register=GetEnv+FindClass+RegisterNatives methods=8(register+spill+env+narrow+returns) pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) root_size=$fixture_size root_sha256=$fixture_sha child_size=$child_size child_sha256=$child_sha"

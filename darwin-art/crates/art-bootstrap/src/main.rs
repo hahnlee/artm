@@ -3100,7 +3100,9 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
         if adapter_source == "darwin_runtime_adapters.cc" {
             adapter_command
                 .arg("-I")
-                .arg(root.join("tools/bionic-provider-namespace/include"));
+                .arg(root.join("tools/bionic-provider-namespace/include"))
+                .arg("-I")
+                .arg(root.join("tools/bionic-dso-lifecycle-facade/include"));
         }
         adapter_command
             .arg("-idirafter")

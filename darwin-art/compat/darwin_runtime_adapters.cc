@@ -24,6 +24,7 @@
 #include "darwin_art_elf_jni_fixture_identity.h"
 #include "darwin_art_elf_loader.h"
 #include "darwin_art_bionic_builtin_adapters.h"
+#include "darwin_art_bionic_dso_lifecycle.h"
 #include "darwin_art_bionic_provider_namespace.h"
 #include "darwin_art_jni_proxy.h"
 #include "nativebridge/native_bridge.h"
@@ -127,6 +128,7 @@ struct ElfLibrary {
   uint64_t magic = kElfLibraryMagic;
   DarwinArtElfGraphHandle* graph = nullptr;
   DarwinArtBionicNamespace* provider_namespace = nullptr;
+  DarwinArtBionicDsoLifecycleOwner* dso_lifecycle = nullptr;
   uintptr_t jni_on_load = 0;
   uintptr_t jni_on_unload = 0;
   alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)
@@ -136,7 +138,12 @@ struct ElfLibrary {
 };
 
 void TeardownProviderNamespace(ElfLibrary* library) {
-  if (library == nullptr || library->provider_namespace == nullptr) return;
+  if (library == nullptr) return;
+  if (library->dso_lifecycle != nullptr) {
+    darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
+    library->dso_lifecycle = nullptr;
+  }
+  if (library->provider_namespace == nullptr) return;
   const DarwinArtBionicNamespaceStatus status =
       darwin_art_bionic_namespace_teardown(library->provider_namespace);
   if (status == DARWIN_ART_BIONIC_NAMESPACE_OK) {
@@ -147,7 +154,7 @@ void TeardownProviderNamespace(ElfLibrary* library) {
 }
 
 void FixtureRecordLifecycle(int phase) {
-  if (phase < 1 || phase > 5) {
+  if (phase < 1 || phase > 7) {
     g_elf_fixture_lifecycle.store(-phase, std::memory_order_relaxed);
     return;
   }
@@ -638,9 +645,17 @@ void* OpenNativeLibrary(JNIEnv* env,
       SetNativeLoaderError(error_msg, "Bionic Rust provider closure is unavailable");
       return nullptr;
     }
+    library->dso_lifecycle =
+        darwin_art_bionic_dso_lifecycle_owner_create();
+    if (library->dso_lifecycle == nullptr) {
+      SetNativeLoaderError(error_msg,
+                           "Bionic DSO lifecycle activation failed");
+      return nullptr;
+    }
     library->provider_namespace = darwin_art_bionic_namespace_create();
     if (library->provider_namespace == nullptr) {
       SetNativeLoaderError(error_msg, "Bionic provider namespace allocation failed");
+      TeardownProviderNamespace(library.get());
       return nullptr;
     }
     g_elf_fixture_namespace_lifecycle.store(1, std::memory_order_relaxed);
@@ -668,11 +683,17 @@ void* OpenNativeLibrary(JNIEnv* env,
                                "libdl.so", "liblog.so"};
     DarwinArtElfLoadOptions options{
         DARWIN_ART_ELF_ABI_VERSION, &ResolveRuntimeProvider, library.get()};
+    DarwinArtElfLifecycleCallbacks lifecycle{
+        DARWIN_ART_ELF_ABI_VERSION,
+        &darwin_art_bionic_dso_lifecycle_publish_image,
+        &darwin_art_bionic_dso_lifecycle_finalize_image,
+        library->dso_lifecycle};
     std::array<char, 1024> error_storage{};
     DarwinArtElfErrorBuffer error_buffer{error_storage.data(), error_storage.size(), 0};
-    DarwinArtElfStatus status = darwin_art_elf_graph_load(
+    DarwinArtElfStatus status = darwin_art_elf_graph_load_with_lifecycle(
         kDarwinArtElfJniFixtureSoname, sources, std::size(sources), providers,
-        std::size(providers), &options, &library->graph, &error_buffer);
+        std::size(providers), &options, &lifecycle, &library->graph,
+        &error_buffer);
     if (status != DARWIN_ART_ELF_OK) {
       SetNativeLoaderError(error_msg,
                            "Android ELF graph load failed: " + ElfError(status, error_buffer));
@@ -753,6 +774,8 @@ bool CloseNativeLibrary(void* handle, bool needs_native_bridge, char** error_msg
       return false;
     }
     g_elf_fixture_namespace_lifecycle.store(4, std::memory_order_relaxed);
+    darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
+    library->dso_lifecycle = nullptr;
     const DarwinArtBionicNamespaceStatus namespace_status =
         darwin_art_bionic_namespace_teardown(library->provider_namespace);
     if (namespace_status != DARWIN_ART_BIONIC_NAMESPACE_OK) {

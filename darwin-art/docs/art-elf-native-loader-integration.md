@@ -59,12 +59,17 @@ the close seam unpublishes/unmaps the thunks before finalizing the root and then
 the child, each before its mapping is released.
 The shutdown acceptance also requires the global live-page count to return to
 zero after `DestroyJavaVM`. The host recorder observes the exact sequence child
-constructor → root constructor → `JNI_OnLoad` → root finalizer → child
-finalizer. Thus constructor order, child relocation, actual JNI registration,
-and reverse graph finalization are one real ART process gate.
-The fixture's `JNI_OnUnload` is a reviewed no-op. General ART unload still needs
-to order the separate Bionic `__cxa_finalize(dso_handle)` seam before the
-loader-owned ELF finalizer arrays; that orchestration is not claimed here.
+constructor → root constructor → `JNI_OnLoad` → root C++ callback →
+root ELF finalizer → child C++ callback → child ELF finalizer. Thus
+constructor order, child relocation, actual JNI registration, and reverse graph
+finalization are one real ART process gate.
+The fixture's `JNI_OnUnload` is a reviewed no-op. Both root and child define a
+hidden/local `__dso_handle`, register an observable callback through the Bionic
+`__cxa_atexit` provider, and keep that handle out of `.dynsym`. The graph
+publishes each live range before constructors. Unload observes root callback →
+root ELF finalizer → child callback → child ELF finalizer, then unmaps. The
+provider rejects null-handle registrations for graph owners and routes
+simultaneously live owners by disjoint image ranges.
 
 Retaining `JavaVMExt::LoadNativeLibrary` also retains its legacy target-SDK
 signal-chain repair call. `darwin_sigchain.cc` therefore provides the real
@@ -83,9 +88,8 @@ it becomes the next action and the dispatcher is restored at the front.
    complete for the graph root.
 5. The reviewed recursive `DT_NEEDED` root+child graph, explicit provider,
    transactional constructors, and reverse finalizers: complete.
-6. Arbitrary dependency discovery, CriticalNative, Bionic
-   `__cxa_finalize(dso_handle)` composition, and complete JNI proxy/provider
-   tables: incomplete.
+6. Arbitrary dependency discovery, CriticalNative, and complete JNI
+   proxy/provider tables: incomplete.
 
 Stage 4 explicitly repacks the two calling conventions. The fixture gate
 compiles and disassembles the same source for both targets: Android uses
