@@ -3938,7 +3938,9 @@ fn prepare_icu_runtime_bootclasspath(root: &Path) -> Result<PathBuf> {
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::copy(source, &output)?;
+    if source != output {
+        fs::copy(source, &output)?;
+    }
     Ok(output)
 }
 fn find_ndk_headers() -> Result<(PathBuf, PathBuf)> {
