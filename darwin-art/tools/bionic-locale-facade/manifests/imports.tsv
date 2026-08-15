@@ -2,6 +2,16 @@ symbol	kind	version	owner
 __ctype_get_mb_cur_max	FUNC	LIBC	locale-state
 btowc	FUNC	LIBC	utf8-multibyte
 freelocale	FUNC	LIBC	locale-state
+iswalpha_l	FUNC	LIBC	Android-ICU76-Unicode-property
+iswblank_l	FUNC	LIBC	Android-ICU76-Unicode-property
+iswcntrl_l	FUNC	LIBC	Android-ICU76-Unicode-property
+iswdigit_l	FUNC	LIBC	Android-ICU76-Unicode-property
+iswlower_l	FUNC	LIBC	Android-ICU76-Unicode-property
+iswprint_l	FUNC	LIBC	Android-ICU76-Unicode-property
+iswpunct_l	FUNC	LIBC	Android-ICU76-Unicode-property
+iswspace_l	FUNC	LIBC	Android-ICU76-Unicode-property
+iswupper_l	FUNC	LIBC	Android-ICU76-Unicode-property
+iswxdigit_l	FUNC	LIBC	Android-ICU76-Unicode-property
 localeconv	FUNC	LIBC	locale-state
 mbrlen	FUNC	LIBC	utf8-multibyte
 mbrtowc	FUNC	LIBC	utf8-multibyte
@@ -12,6 +22,8 @@ newlocale	FUNC	LIBC	locale-state
 setlocale	FUNC	LIBC	locale-state
 strcoll_l	FUNC	LIBC	C-collation
 strxfrm_l	FUNC	LIBC	C-collation
+towlower_l	FUNC	LIBC	Android-ICU76-Unicode-mapping
+towupper_l	FUNC	LIBC	Android-ICU76-Unicode-mapping
 uselocale	FUNC	LIBC	locale-thread-state
 wcrtomb	FUNC	LIBC	utf8-multibyte
 wcscoll_l	FUNC	LIBC	C-collation

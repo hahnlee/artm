@@ -13,6 +13,13 @@ check_hash() { [[ "$(sha "$1")" == "$2" ]] || fail "hash mismatch: $1"; }
 
 master="$project_root/tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv"
 errno_root="$project_root/tools/bionic-errno-tls"
+icu_lock="$project_root/upstream/android16-icu-foundation.lock"
+icu_root="$project_root/_aosp/external/icu-graphics"
+icu_foundation="$project_root/_build/icu-foundation"
+icu_common="$icu_foundation/libicuuc-common-darwin.a"
+icu_stubdata="$icu_foundation/libicuuc-stubdata-darwin.a"
+icu_init="$icu_foundation/libandroidicuinit-darwin.a"
+icu_data="$icu_foundation/runtime/i18n/etc/icu/$ICU_DATA_FILE"
 check_hash "$master" "$LIBC_IMPORT_MANIFEST_SHA256"
 check_hash "$script_dir/upstream-sources.tsv" "$BIONIC_SOURCE_MANIFEST_SHA256"
 check_hash "$script_dir/manifests/locale-cluster.tsv" "$LOCALE_CLUSTER_SHA256"
@@ -20,12 +27,23 @@ check_hash "$script_dir/manifests/imports.tsv" "$LOCALE_IMPORTS_SHA256"
 check_hash "$errno_root/sources.lock" "$BIONIC_ERRNO_LOCK_SHA256"
 check_hash "$errno_root/src/errno_tls.c" "$BIONIC_ERRNO_SOURCE_SHA256"
 check_hash "$errno_root/generated/darwin_to_android.inc" "$BIONIC_ERRNO_MAPPING_SHA256"
+check_hash "$icu_lock" "$ICU_FOUNDATION_LOCK_SHA256"
+check_hash "$icu_root/icu4c/source/common/unicode/uvernum.h" "$ICU_UVERNUM_SHA256"
+check_hash "$icu_root/icu4c/source/common/unicode/uchar.h" "$ICU_UCHAR_SHA256"
+check_hash "$icu_root/libandroidicuinit/include/androidicuinit/android_icu_init.h" "$ICU_INIT_HEADER_SHA256"
+check_hash "$icu_common" "$ICU_COMMON_ARCHIVE_SHA256"
+check_hash "$icu_stubdata" "$ICU_STUBDATA_ARCHIVE_SHA256"
+check_hash "$icu_init" "$ICU_INIT_ARCHIVE_SHA256"
+check_hash "$icu_data" "$ICU_DATA_SHA256"
+[[ "$(stat -f %z "$icu_data")" == "$ICU_DATA_SIZE" ]] || fail 'ICU data size drift'
+[[ "$(awk '$1=="#define" && $2=="U_ICU_VERSION" {gsub(/"/, "", $3); print $3}' "$icu_root/icu4c/source/common/unicode/uvernum.h")" == "$ICU_LIBRARY_VERSION" ]] || fail 'ICU header version drift'
 check_hash "$script_dir/include/darwin_art_bionic_locale.h" "$HEADER_SHA256"
 check_hash "$script_dir/src/provider.cc" "$PROVIDER_SHA256"
 check_hash "$script_dir/probes/fixture.c" "$FIXTURE_SHA256"
 check_hash "$script_dir/probes/exports.map" "$EXPORTS_SHA256"
 check_hash "$script_dir/probes/abi.c" "$ABI_SHA256"
 check_hash "$script_dir/probes/stress.cc" "$STRESS_SHA256"
+check_hash "$script_dir/probes/icu_differential.cc" "$ICU_DIFFERENTIAL_SHA256"
 
 temp_root="$(mktemp -d "${TMPDIR:-/tmp}/bionic-locale-facade.XXXXXX")"
 cleanup() {
@@ -98,7 +116,14 @@ assert 'LC_GLOBAL_LOCALE' in locale and 'get_current_locale_ptr' in locale
 assert 'c32 < lower_bound' in decode and 'c32 >= 0xd800 && c32 <= 0xdfff' in decode
 assert 'c32 > 0x10ffff' in decode and 'BIONIC_MULTIBYTE_RESULT_INCOMPLETE_SEQUENCE' in decode
 assert '(c32 & ~0x1fffff) == 0' in encode
-assert '__find_icu_symbol' in wctype and 'UCHAR_ALPHABETIC' in wctype
+assert '__find_icu_symbol' in wctype
+for property_name in ('UCHAR_ALPHABETIC', 'UCHAR_POSIX_BLANK',
+                      'UCHAR_LOWERCASE', 'UCHAR_POSIX_PRINT',
+                      'UCHAR_WHITE_SPACE', 'UCHAR_UPPERCASE',
+                      'UCHAR_POSIX_XDIGIT'):
+    assert property_name in wctype
+for api_name in ('u_charType', 'u_isdigit', 'u_ispunct', 'u_tolower', 'u_toupper'):
+    assert f'__find_icu_symbol("{api_name}")' in wctype
 assert 'towlower_l' in wctype and 'towupper_l' in wctype
 assert 'Just call strftime, as only the C locale is supported' in strftime
 assert 'tzset();' in strftime
@@ -106,7 +131,13 @@ assert 'return (strcmp(s1, s2));' in strcoll
 assert 'return (strlcpy(dst, src, n));' in strxfrm
 assert 'return (wcscmp(s1, s2));' in wcscoll
 assert 'return wcslcpy(dest, src, n);' in wcsxfrm
-print('bionic-locale-facade: upstream=PASS sources=21 supported=19 unsupported=ICU12+tzcode1')
+for name in ('iswalpha_l', 'iswblank_l', 'iswcntrl_l', 'iswdigit_l',
+             'iswlower_l', 'iswprint_l', 'iswpunct_l', 'iswspace_l',
+             'iswupper_l', 'iswxdigit_l'):
+    assert f'int {name}(wint_t c, locale_t)' in wctype
+assert 'return u_tolower ? u_tolower(wc)' in wctype
+assert 'return u_toupper ? u_toupper(wc)' in wctype
+print('bionic-locale-facade: upstream=PASS sources=21 supported=31 unsupported=tzcode1 wide-owner=Android-ICU76')
 PY
 
 ndk_root="${ANDROID_NDK_ROOT:-$HOME/Library/Android/sdk/ndk/$NDK_REVISION}"
@@ -131,7 +162,11 @@ host_cc="$(xcrun --find clang)"
 host_cxx="$(xcrun --find clang++)"
 host_flags=(-arch arm64 -isysroot "$sdk" -O2 -Wall -Wextra -Werror -fno-builtin)
 "$host_cxx" "${host_flags[@]}" -std=c++20 -fvisibility=hidden \
-  -I"$script_dir/include" -c "$script_dir/src/provider.cc" \
+  -DANDROID -I"$script_dir/include" \
+  -I"$icu_root/android_icu4c/include" \
+  -I"$icu_root/icu4c/source/common" \
+  -I"$icu_root/libandroidicuinit/include" \
+  -c "$script_dir/src/provider.cc" \
   -o "$temp_root/provider.o"
 file "$temp_root/provider.o" | grep -F 'Mach-O 64-bit object arm64' >/dev/null ||
   fail 'provider is not Darwin arm64'
@@ -144,12 +179,19 @@ if rg -n 'dlsym|dlopen|dyld|RTLD_|setlocale\(' "$script_dir/src/provider.cc" |
   fail 'host dynamic/global locale fallback entered provider'
 fi
 definitions="$(nm -gU "$temp_root/provider.o")"
+undefined_icu="$(nm -u "$temp_root/provider.o" | awk '{print $NF}' | grep -E '^(_u_(charType|isdigit|ispunct|hasBinaryProperty|tolower|toupper|getVersion)_76|__Z16android_icu_initv|__Z25android_icu_is_registeredv)$' | sort -u)"
+[[ "$(printf '%s\n' "$undefined_icu" | sed '/^$/d' | wc -l | tr -d ' ')" == 9 ]] ||
+  fail 'provider ICU 76 static ABI dependency drift'
 while IFS=$'\t' read -r symbol _; do
   [[ "$symbol" != "symbol" ]] || continue
   grep -F " _darwin_art_bionic_$symbol" <<< "$definitions" >/dev/null ||
     fail "missing prefixed locale definition: $symbol"
 done < "$script_dir/manifests/imports.tsv"
 ar rcs "$temp_root/libdarwin-art-bionic-locale.a" "$temp_root/provider.o"
+
+"$host_cc" "${host_flags[@]}" -std=c17 \
+  -I"$errno_root/include" -I"$errno_root/generated" \
+  -c "$errno_root/src/errno_tls.c" -o "$temp_root/errno-plain.o"
 
 fixture="$temp_root/libbionic_locale_fixture.so"
 "$android_cc" -std=c17 -O2 -fno-builtin -fPIC -fno-stack-protector \
@@ -170,24 +212,61 @@ printf '%s\n' __errno >> "$temp_root/expected-imports"
 sort -u "$temp_root/expected-imports" -o "$temp_root/expected-imports"
 diff -u "$temp_root/expected-imports" "$temp_root/fixture-imports" ||
   fail 'Android ELF locale import namespace drift'
-[[ "$($elf_nm -D --defined-only "$fixture" | awk '$2=="T"{n++}END{print n+0}')" == 4 ]] ||
+[[ "$($elf_nm -D --defined-only "$fixture" | awk '$2=="T"{n++}END{print n+0}')" == 5 ]] ||
   fail 'fixture export count drift'
 
 "$host_cc" "${host_flags[@]}" -std=c17 -fsanitize=address,undefined \
   -I"$errno_root/include" -I"$errno_root/generated" \
   -c "$errno_root/src/errno_tls.c" -o "$temp_root/errno.o"
 "$host_cxx" "${host_flags[@]}" -std=c++20 -fsanitize=address,undefined \
-  -I"$script_dir/include" -c "$script_dir/src/provider.cc" \
+  -DANDROID -I"$script_dir/include" \
+  -I"$icu_root/android_icu4c/include" \
+  -I"$icu_root/icu4c/source/common" \
+  -I"$icu_root/libandroidicuinit/include" \
+  -c "$script_dir/src/provider.cc" \
   -o "$temp_root/provider-asan.o"
 "$host_cxx" "${host_flags[@]}" -std=c++20 -fsanitize=address,undefined \
   -I"$script_dir/include" "$script_dir/probes/stress.cc" \
-  "$temp_root/provider-asan.o" "$temp_root/errno.o" -o "$temp_root/stress"
-stress_output="$("$temp_root/stress")"
-grep -F 'threads=8 rounds=100 handles=0 UTF-8-invalid+incomplete state=thread-local ASan+UBSan=clean' <<< "$stress_output" >/dev/null ||
+  "$temp_root/provider-asan.o" "$temp_root/errno.o" \
+  -Wl,-force_load,"$icu_init" "$icu_common" "$icu_stubdata" \
+  -o "$temp_root/stress"
+
+runtime_root="$temp_root/runtime"
+mkdir -p "$runtime_root/data" "$runtime_root/tzdata" "$runtime_root/i18n/etc/icu"
+ln -s "$icu_data" "$runtime_root/i18n/etc/icu/$ICU_DATA_FILE"
+run_with_icu() {
+  ANDROID_DATA="$runtime_root/data" \
+  ANDROID_TZDATA_ROOT="$runtime_root/tzdata" \
+  ANDROID_I18N_ROOT="$runtime_root/i18n" "$@"
+}
+
+stress_output="$(run_with_icu "$temp_root/stress")"
+grep -F 'threads=8 rounds=100 handles=0 UTF-8-invalid+incomplete ICU76-wide=concurrent state=thread-local ASan+UBSan=clean' <<< "$stress_output" >/dev/null ||
   fail 'locale sanitizer stress failed'
 
-CARGO_TARGET_DIR="$temp_root/cargo-target" cargo run --quiet \
+"$host_cxx" "${host_flags[@]}" -std=c++20 -DANDROID \
+  -I"$script_dir/include" -I"$icu_root/android_icu4c/include" \
+  -I"$icu_root/icu4c/source/common" \
+  -I"$icu_root/libandroidicuinit/include" \
+  "$script_dir/probes/icu_differential.cc" "$temp_root/provider.o" \
+  "$temp_root/errno-plain.o" -Wl,-force_load,"$icu_init" \
+  "$icu_common" "$icu_stubdata" -o "$temp_root/icu-differential"
+differential_output="$(run_with_icu "$temp_root/icu-differential")"
+grep -F 'PASS ICU=76.1 codepoints=34 locales=null+global+invalid Bionic-_l=locale-ignored' <<< "$differential_output" >/dev/null ||
+  fail 'ICU differential gate failed'
+
+for executable in "$temp_root/stress" "$temp_root/icu-differential"; do
+  if otool -L "$executable" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/dev/null; then
+    fail "host or dynamic ICU dependency escaped: $executable"
+  fi
+done
+
+run_with_icu env CARGO_TARGET_DIR="$temp_root/cargo-target" cargo run --quiet \
   --manifest-path "$script_dir/Cargo.toml" -- "$fixture"
+if otool -L "$temp_root/cargo-target/debug/bionic-locale-facade" |
+   grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/dev/null; then
+  fail 'Rust Android ELF gate acquired host or dynamic ICU'
+fi
 CARGO_TARGET_DIR="$temp_root/cargo-target" cargo clippy --quiet \
   --manifest-path "$script_dir/Cargo.toml" -- -D warnings
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
@@ -197,4 +276,5 @@ mkdir -p "$build_dir"
 cp "$temp_root/libdarwin-art-bionic-locale.a" "$build_dir/"
 cp "$fixture" "$build_dir/"
 printf '%s\n' "$stress_output"
-echo 'bionic-locale-facade: PASS cluster=32 supported=19 unsupported=13 AndroidELF=19+errno host-global-locale=0'
+printf '%s\n' "$differential_output"
+echo 'bionic-locale-facade: PASS cluster=32 supported=31 unsupported=1 AndroidELF=31+errno ICU=76.1 static-data host-global-locale=0'

@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#include <wctype.h>
 
 static int StringEquals(const char* left, const char* right) {
   while (*left == *right && *left != '\0') {
@@ -145,6 +146,46 @@ __attribute__((visibility("default"))) int bionic_locale_fixture_collation(void)
   return 42;
 }
 
+__attribute__((visibility("default"))) int bionic_locale_fixture_wctype(void) {
+  volatile uintptr_t raw_null = 0;
+  locale_t null_locale = (locale_t)raw_null;
+  locale_t invalid_locale = (locale_t)(uintptr_t)0x12345678U;
+  if (!iswalpha_l(L'A', null_locale) ||
+      !iswupper_l(L'A', LC_GLOBAL_LOCALE) ||
+      iswlower_l(L'A', invalid_locale) || towlower_l(L'A', invalid_locale) != L'a')
+    return 60;
+  if (!iswalpha_l((wint_t)0x03b1, invalid_locale) ||
+      !iswlower_l((wint_t)0x03b1, invalid_locale) ||
+      towupper_l((wint_t)0x03b1, invalid_locale) != (wint_t)0x0391)
+    return 61;
+  if (!iswblank_l(L'\t', null_locale) ||
+      !iswcntrl_l(L'\n', null_locale) ||
+      !iswdigit_l((wint_t)0x0660, null_locale) ||
+      !iswprint_l((wint_t)0x1f600, null_locale) ||
+      !iswpunct_l((wint_t)0x2014, null_locale) ||
+      !iswspace_l((wint_t)0x2003, null_locale) ||
+      !iswxdigit_l((wint_t)0xff21, null_locale))
+    return 62;
+  if (!iswupper_l((wint_t)0x10400, null_locale) ||
+      towlower_l((wint_t)0x10400, null_locale) != (wint_t)0x10428)
+    return 63;
+
+  const wint_t invalid[] = {WEOF, (wint_t)0xd800, (wint_t)0xfdd0,
+                            (wint_t)0x110000, (wint_t)0x80000000U};
+  for (size_t index = 0; index < sizeof(invalid) / sizeof(invalid[0]); ++index) {
+    const wint_t value = invalid[index];
+    if (iswalpha_l(value, invalid_locale) || iswblank_l(value, invalid_locale) ||
+        iswcntrl_l(value, invalid_locale) || iswdigit_l(value, invalid_locale) ||
+        iswlower_l(value, invalid_locale) || iswprint_l(value, invalid_locale) ||
+        iswpunct_l(value, invalid_locale) || iswspace_l(value, invalid_locale) ||
+        iswupper_l(value, invalid_locale) || iswxdigit_l(value, invalid_locale) ||
+        towlower_l(value, invalid_locale) != value ||
+        towupper_l(value, invalid_locale) != value)
+      return 64;
+  }
+  return 42;
+}
+
 __attribute__((visibility("default"))) int bionic_locale_fixture_thread(int utf8) {
   locale_t locale = newlocale(LC_ALL_MASK, utf8 ? "C.UTF-8" : "C", 0);
   if (locale == 0 || uselocale(locale) != LC_GLOBAL_LOCALE) return 50;
@@ -156,6 +197,9 @@ __attribute__((visibility("default"))) int bionic_locale_fixture_thread(int utf8
       mbrtowc(&output, "\x9f\x98\x80", 3, 0) != 3 ||
       (uint32_t)output != 0x1f600)
     return 52;
+  if (!iswalpha_l((wint_t)0x03b1, locale) ||
+      towupper_l((wint_t)0x03b1, locale) != (wint_t)0x0391)
+    return 54;
   if (uselocale(LC_GLOBAL_LOCALE) != locale) return 53;
   freelocale(locale);
   return 42;

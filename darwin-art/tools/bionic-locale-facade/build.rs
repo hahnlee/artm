@@ -28,6 +28,11 @@ fn main() {
     assert_eq!(env::var("CARGO_CFG_TARGET_OS").as_deref(), Ok("macos"));
     assert_eq!(env::var("CARGO_CFG_TARGET_ARCH").as_deref(), Ok("aarch64"));
     let output_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set"));
+    let manifest_dir =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set"));
+    let project_root = manifest_dir.join("../..");
+    let icu_root = project_root.join("_aosp/external/icu-graphics");
+    let icu_foundation = project_root.join("_build/icu-foundation");
     let sdk = output(
         Command::new("xcrun").args(["--sdk", "macosx", "--show-sdk-path"]),
         "macOS SDK lookup",
@@ -49,11 +54,16 @@ fn main() {
                 "-Werror",
                 "-fno-builtin",
                 "-fvisibility=hidden",
+                "-DANDROID",
                 "-Iinclude",
-                "-c",
-                "src/provider.cc",
-                "-o",
+                "-I",
             ])
+            .arg(icu_root.join("android_icu4c/include"))
+            .arg("-I")
+            .arg(icu_root.join("icu4c/source/common"))
+            .arg("-I")
+            .arg(icu_root.join("libandroidicuinit/include"))
+            .args(["-c", "src/provider.cc", "-o"])
             .arg(&provider),
         "locale provider compile",
     );
@@ -88,6 +98,16 @@ fn main() {
     );
     println!("cargo:rustc-link-search=native={}", output_dir.display());
     println!("cargo:rustc-link-lib=static=darwin_art_bionic_locale");
+    println!(
+        "cargo:rustc-link-search=native={}",
+        icu_foundation.display()
+    );
+    println!(
+        "cargo:rustc-link-arg=-Wl,-force_load,{}",
+        icu_foundation.join("libandroidicuinit-darwin.a").display()
+    );
+    println!("cargo:rustc-link-lib=static=icuuc-common-darwin");
+    println!("cargo:rustc-link-lib=static=icuuc-stubdata-darwin");
     println!("cargo:rustc-link-lib=c++");
     for source in [
         "src/provider.cc",
@@ -95,8 +115,17 @@ fn main() {
         "../bionic-errno-tls/src/errno_tls.c",
         "../bionic-errno-tls/include/darwin_art_bionic_errno.h",
         "../bionic-errno-tls/generated/darwin_to_android.inc",
+        "../../upstream/android16-icu-foundation.lock",
     ] {
         println!("cargo:rerun-if-changed={source}");
+    }
+    for source in [
+        icu_foundation.join("libicuuc-common-darwin.a"),
+        icu_foundation.join("libicuuc-stubdata-darwin.a"),
+        icu_foundation.join("libandroidicuinit-darwin.a"),
+        icu_foundation.join("runtime/i18n/etc/icu/icudt76l.dat"),
+    ] {
+        println!("cargo:rerun-if-changed={}", source.display());
     }
 }
 

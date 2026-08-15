@@ -48,6 +48,17 @@ int RunWorker(int index) {
         darwin_art_bionic_wcrtomb(encoded, 0xd800, &state) != 3) {
       return 4;
     }
+    for (int iteration = 0; iteration < 100; ++iteration) {
+      if (darwin_art_bionic_iswalpha_l(0x03b1, locale) == 0 ||
+          darwin_art_bionic_iswlower_l(0x03b1, locale) == 0 ||
+          darwin_art_bionic_iswupper_l(0x03b1, locale) != 0 ||
+          darwin_art_bionic_towupper_l(0x03b1, locale) != 0x0391 ||
+          darwin_art_bionic_iswprint_l(0x1f600, locale) == 0 ||
+          darwin_art_bionic_iswalpha_l(UINT32_MAX, locale) != 0 ||
+          darwin_art_bionic_towlower_l(UINT32_MAX, locale) != UINT32_MAX) {
+        return 6;
+      }
+    }
     if (darwin_art_bionic_uselocale(
             reinterpret_cast<DarwinArtAndroidLocale>(UINTPTR_MAX)) != locale) {
       return 5;
@@ -75,6 +86,6 @@ int main() {
       darwin_art_bionic_locale_test_host_state_is_preserved() == 0) {
     return 1;
   }
-  std::puts("bionic-locale-stress: PASS threads=8 rounds=100 handles=0 UTF-8-invalid+incomplete state=thread-local ASan+UBSan=clean");
+  std::puts("bionic-locale-stress: PASS threads=8 rounds=100 handles=0 UTF-8-invalid+incomplete ICU76-wide=concurrent state=thread-local ASan+UBSan=clean");
   return 0;
 }

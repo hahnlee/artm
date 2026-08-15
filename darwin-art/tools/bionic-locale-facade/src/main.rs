@@ -8,10 +8,20 @@ use std::fs;
 use std::num::NonZeroUsize;
 use std::process::ExitCode;
 
-const LOCALE_IMPORTS: [&str; 19] = [
+const LOCALE_IMPORTS: [&str; 31] = [
     "__ctype_get_mb_cur_max",
     "btowc",
     "freelocale",
+    "iswalpha_l",
+    "iswblank_l",
+    "iswcntrl_l",
+    "iswdigit_l",
+    "iswlower_l",
+    "iswprint_l",
+    "iswpunct_l",
+    "iswspace_l",
+    "iswupper_l",
+    "iswxdigit_l",
     "localeconv",
     "mbrlen",
     "mbrtowc",
@@ -22,6 +32,8 @@ const LOCALE_IMPORTS: [&str; 19] = [
     "setlocale",
     "strcoll_l",
     "strxfrm_l",
+    "towlower_l",
+    "towupper_l",
     "uselocale",
     "wcrtomb",
     "wcscoll_l",
@@ -125,6 +137,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         ("bionic_locale_fixture_basic", 42),
         ("bionic_locale_fixture_multibyte", 42),
         ("bionic_locale_fixture_collation", 42),
+        ("bionic_locale_fixture_wctype", 42),
     ] {
         let result = image.call_exported_i32(symbol)?;
         if result != expected {
@@ -172,22 +185,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "en_US.UTF-8",
         "utf8-mbstate8",
         "C-collation",
+        "Unicode-wide-ctype",
+        "Android-ICU-76.1",
     ] {
         if !capability(supported)? {
             return Err(format!("missing locale capability {supported}").into());
         }
     }
-    for unsupported in [
-        "Unicode-wide-ctype",
-        "tzcode-strftime",
-        "host-global-setlocale",
-    ] {
+    for unsupported in ["tzcode-strftime", "host-global-setlocale"] {
         if capability(unsupported)? {
             return Err(format!("unsupported locale capability escaped: {unsupported}").into());
         }
     }
     println!(
-        "bionic-locale-facade: PASS AndroidELF imports=19+errno locale=C+POSIX+C.UTF-8 thread-local UTF-8-state collate=C host-errno+fenv=preserved"
+        "bionic-locale-facade: PASS AndroidELF imports=31+errno locale=C+POSIX+C.UTF-8 thread-local UTF-8-state collate=C wide=Android-ICU-76.1 host-errno+fenv=preserved"
     );
     Ok(())
 }

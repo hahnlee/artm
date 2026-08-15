@@ -45,6 +45,26 @@ typedef struct DarwinArtAndroidLconv {
 size_t darwin_art_bionic___ctype_get_mb_cur_max(void);
 uint32_t darwin_art_bionic_btowc(int byte);
 void darwin_art_bionic_freelocale(DarwinArtAndroidLocale locale);
+int darwin_art_bionic_iswalpha_l(uint32_t code_point,
+                                 DarwinArtAndroidLocale locale);
+int darwin_art_bionic_iswblank_l(uint32_t code_point,
+                                 DarwinArtAndroidLocale locale);
+int darwin_art_bionic_iswcntrl_l(uint32_t code_point,
+                                 DarwinArtAndroidLocale locale);
+int darwin_art_bionic_iswdigit_l(uint32_t code_point,
+                                 DarwinArtAndroidLocale locale);
+int darwin_art_bionic_iswlower_l(uint32_t code_point,
+                                 DarwinArtAndroidLocale locale);
+int darwin_art_bionic_iswprint_l(uint32_t code_point,
+                                 DarwinArtAndroidLocale locale);
+int darwin_art_bionic_iswpunct_l(uint32_t code_point,
+                                 DarwinArtAndroidLocale locale);
+int darwin_art_bionic_iswspace_l(uint32_t code_point,
+                                 DarwinArtAndroidLocale locale);
+int darwin_art_bionic_iswupper_l(uint32_t code_point,
+                                 DarwinArtAndroidLocale locale);
+int darwin_art_bionic_iswxdigit_l(uint32_t code_point,
+                                  DarwinArtAndroidLocale locale);
 DarwinArtAndroidLconv* darwin_art_bionic_localeconv(void);
 size_t darwin_art_bionic_mbrlen(const char* source,
                                 size_t length,
@@ -77,6 +97,10 @@ size_t darwin_art_bionic_strxfrm_l(char* destination,
                                   const char* source,
                                   size_t length,
                                   DarwinArtAndroidLocale locale);
+uint32_t darwin_art_bionic_towlower_l(uint32_t code_point,
+                                      DarwinArtAndroidLocale locale);
+uint32_t darwin_art_bionic_towupper_l(uint32_t code_point,
+                                      DarwinArtAndroidLocale locale);
 DarwinArtAndroidLocale darwin_art_bionic_uselocale(
     DarwinArtAndroidLocale locale);
 size_t darwin_art_bionic_wcrtomb(char* destination,

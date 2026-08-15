@@ -1,6 +1,7 @@
 #include <locale.h>
 #include <stddef.h>
 #include <wchar.h>
+#include <wctype.h>
 
 _Static_assert(sizeof(locale_t) == 8, "Android arm64 locale_t drift");
 _Static_assert(sizeof(mbstate_t) == 8, "Android arm64 mbstate_t drift");
@@ -12,7 +13,25 @@ _Static_assert(LC_ALL_MASK == 0x1fbf, "Android locale mask drift");
 static size_t (*mbrtowc_signature)(wchar_t*, const char*, size_t, mbstate_t*) =
     mbrtowc;
 static locale_t (*newlocale_signature)(int, const char*, locale_t) = newlocale;
+static int (*iswalpha_l_signature)(wint_t, locale_t) = iswalpha_l;
+static int (*iswblank_l_signature)(wint_t, locale_t) = iswblank_l;
+static int (*iswcntrl_l_signature)(wint_t, locale_t) = iswcntrl_l;
+static int (*iswdigit_l_signature)(wint_t, locale_t) = iswdigit_l;
+static int (*iswlower_l_signature)(wint_t, locale_t) = iswlower_l;
+static int (*iswprint_l_signature)(wint_t, locale_t) = iswprint_l;
+static int (*iswpunct_l_signature)(wint_t, locale_t) = iswpunct_l;
+static int (*iswspace_l_signature)(wint_t, locale_t) = iswspace_l;
+static int (*iswupper_l_signature)(wint_t, locale_t) = iswupper_l;
+static int (*iswxdigit_l_signature)(wint_t, locale_t) = iswxdigit_l;
+static wint_t (*towlower_l_signature)(wint_t, locale_t) = towlower_l;
+static wint_t (*towupper_l_signature)(wint_t, locale_t) = towupper_l;
 
 int main(void) {
-  return mbrtowc_signature == 0 || newlocale_signature == 0;
+  return mbrtowc_signature == 0 || newlocale_signature == 0 ||
+         iswalpha_l_signature == 0 || iswblank_l_signature == 0 ||
+         iswcntrl_l_signature == 0 || iswdigit_l_signature == 0 ||
+         iswlower_l_signature == 0 || iswprint_l_signature == 0 ||
+         iswpunct_l_signature == 0 || iswspace_l_signature == 0 ||
+         iswupper_l_signature == 0 || iswxdigit_l_signature == 0 ||
+         towlower_l_signature == 0 || towupper_l_signature == 0;
 }

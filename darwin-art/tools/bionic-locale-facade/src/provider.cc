@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <climits>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -14,7 +15,12 @@
 #include <string_view>
 #include <unordered_map>
 
+#include <androidicuinit/android_icu_init.h>
+#include <unicode/uchar.h>
+#include <unicode/uversion.h>
+
 extern "C" void darwin_art_bionic_errno_store(int32_t android_errno);
+extern bool android_icu_is_registered();
 
 namespace {
 
@@ -34,6 +40,9 @@ constexpr size_t kIllegal = static_cast<size_t>(-1);
 constexpr size_t kIncomplete = static_cast<size_t>(-2);
 constexpr uint32_t kAndroidWeof = UINT32_MAX;
 constexpr int kEof = -1;
+
+static_assert(U_ICU_VERSION_MAJOR_NUM == 76);
+static_assert(U_ICU_VERSION_MINOR_NUM == 1);
 
 struct HostStateGuard {
   int saved_errno{errno};
@@ -82,6 +91,21 @@ DarwinArtAndroidLocale GlobalLocale() {
 }
 
 void SetAndroidErrno(int value) { darwin_art_bionic_errno_store(value); }
+
+void EnsureAndroidIcu76() {
+  static std::once_flag once;
+  std::call_once(once, [] {
+    if (!android_icu_is_registered()) android_icu_init();
+    if (!android_icu_is_registered()) std::abort();
+    UVersionInfo version{};
+    u_getVersion(version);
+    if (version[0] != 76 || version[1] != 1) std::abort();
+  });
+}
+
+UChar32 IcuCodePoint(uint32_t code_point) {
+  return static_cast<UChar32>(code_point);
+}
 
 bool IsSupportedLocale(const char* name) {
   return std::strcmp(name, "") == 0 || std::strcmp(name, "C") == 0 ||
@@ -303,6 +327,86 @@ extern "C" void darwin_art_bionic_freelocale(
   ProviderState& state = State();
   std::lock_guard<std::mutex> lock(state.mutex);
   state.locales.erase(locale);
+}
+
+extern "C" int darwin_art_bionic_iswalpha_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  EnsureAndroidIcu76();
+  return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_ALPHABETIC);
+}
+
+extern "C" int darwin_art_bionic_iswblank_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  EnsureAndroidIcu76();
+  return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_POSIX_BLANK);
+}
+
+extern "C" int darwin_art_bionic_iswcntrl_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  EnsureAndroidIcu76();
+  return u_charType(IcuCodePoint(code_point)) == U_CONTROL_CHAR;
+}
+
+extern "C" int darwin_art_bionic_iswdigit_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  EnsureAndroidIcu76();
+  return u_isdigit(IcuCodePoint(code_point));
+}
+
+extern "C" int darwin_art_bionic_iswlower_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  EnsureAndroidIcu76();
+  return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_LOWERCASE);
+}
+
+extern "C" int darwin_art_bionic_iswprint_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  EnsureAndroidIcu76();
+  return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_POSIX_PRINT);
+}
+
+extern "C" int darwin_art_bionic_iswpunct_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  EnsureAndroidIcu76();
+  return u_ispunct(IcuCodePoint(code_point));
+}
+
+extern "C" int darwin_art_bionic_iswspace_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  EnsureAndroidIcu76();
+  return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_WHITE_SPACE);
+}
+
+extern "C" int darwin_art_bionic_iswupper_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  EnsureAndroidIcu76();
+  return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_UPPERCASE);
+}
+
+extern "C" int darwin_art_bionic_iswxdigit_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  EnsureAndroidIcu76();
+  return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_POSIX_XDIGIT);
 }
 
 extern "C" DarwinArtAndroidLocale darwin_art_bionic_uselocale(
@@ -567,6 +671,30 @@ extern "C" size_t darwin_art_bionic_strxfrm_l(
   return source_length;
 }
 
+extern "C" uint32_t darwin_art_bionic_towlower_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  if (code_point < 0x80) {
+    return code_point >= 'A' && code_point <= 'Z' ? code_point | 0x20
+                                                  : code_point;
+  }
+  EnsureAndroidIcu76();
+  return static_cast<uint32_t>(u_tolower(IcuCodePoint(code_point)));
+}
+
+extern "C" uint32_t darwin_art_bionic_towupper_l(
+    uint32_t code_point,
+    DarwinArtAndroidLocale /*locale*/) {
+  HostStateGuard guard;
+  if (code_point < 0x80) {
+    return code_point >= 'a' && code_point <= 'z' ? code_point ^ 0x20
+                                                  : code_point;
+  }
+  EnsureAndroidIcu76();
+  return static_cast<uint32_t>(u_toupper(IcuCodePoint(code_point)));
+}
+
 extern "C" int darwin_art_bionic_wcscoll_l(
     const uint32_t* left,
     const uint32_t* right,
@@ -604,6 +732,16 @@ extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
   RESOLVE(__ctype_get_mb_cur_max);
   RESOLVE(btowc);
   RESOLVE(freelocale);
+  RESOLVE(iswalpha_l);
+  RESOLVE(iswblank_l);
+  RESOLVE(iswcntrl_l);
+  RESOLVE(iswdigit_l);
+  RESOLVE(iswlower_l);
+  RESOLVE(iswprint_l);
+  RESOLVE(iswpunct_l);
+  RESOLVE(iswspace_l);
+  RESOLVE(iswupper_l);
+  RESOLVE(iswxdigit_l);
   RESOLVE(localeconv);
   RESOLVE(mbrlen);
   RESOLVE(mbrtowc);
@@ -614,6 +752,8 @@ extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
   RESOLVE(setlocale);
   RESOLVE(strcoll_l);
   RESOLVE(strxfrm_l);
+  RESOLVE(towlower_l);
+  RESOLVE(towupper_l);
   RESOLVE(uselocale);
   RESOLVE(wcrtomb);
   RESOLVE(wcscoll_l);
@@ -630,7 +770,8 @@ extern "C" int darwin_art_bionic_locale_capability(
   const std::string_view name(capability);
   return name == "C" || name == "POSIX" || name == "C.UTF-8" ||
          name == "en_US.UTF-8" || name == "utf8-mbstate8" ||
-         name == "C-collation";
+         name == "C-collation" || name == "Unicode-wide-ctype" ||
+         name == "Android-ICU-76.1";
 }
 
 extern "C" size_t darwin_art_bionic_locale_live_handle_count(void) {
