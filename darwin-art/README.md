@@ -125,9 +125,11 @@ also still uses a programmatic `android.R.id.content` root plus a minimal
 Android-visible OS constants, UnixFileSystem, and ART OpenJDK VM service
 owners. The Button probe now passes the complete Android 16 `FileInputStream`,
 `FileChannelImpl`, `FileDispatcherImpl`, `IOUtil`, and `NativeThread` owners,
-plus the complementary ART/libcore `libcore.io.Memory` owners. It maps the
-pinned Android font data and currently stops at the next complete-owner
-boundary, `sun.nio.fs.UnixNativeDispatcher.init()`.
+the complementary ART/libcore `libcore.io.Memory` owners, the 47-entry
+`UnixNativeDispatcher`, the complete libcore half of `java.lang.System`, and
+Darwin `lseek`. With a source-coherent ICU76 Java/native/data set it maps the
+pinned Android font data, constructs a real `android.widget.Button`, renders
+through HWUI/Minikin/Skia, exports a frame, and shuts ART down cleanly.
 Compiled framework-resource inflation, input, and GPU HWUI remain deferred.
 
 The first Tier-1 native-library admission gate is also available:

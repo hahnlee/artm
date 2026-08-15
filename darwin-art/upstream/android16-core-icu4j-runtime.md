@@ -38,10 +38,11 @@ whose build fingerprint is locked in the companion lock file. It contains ICU
 The similarly tagged `platform/prebuilts/runtime` ARM64 APEX is not an Android
 16 product runtime artifact. Its own `mainline/update.py` describes these APEX
 files as ART chroot-test inputs and says architecture APEX updates are skipped
-by default when no CI source is configured. That file contains ICU 68.2,
-`icudt68l.dat`, 1,598 classes and 14,998 methods. Adding two ICU 76 bridge
-classes cannot reconcile its remaining 633 ICU 68 source units, resources,
-version constants, native contracts, or data with ICU 76.
+by default when no CI source is configured. That APEX contains ICU 68.2,
+`icudt68l.dat`, 1,596 classes and 14,991 methods, and lacks `ATrace` and
+`UResourceBundleNative`. The current two-source overlay produces 1,598 classes
+and 14,998 methods, but cannot reconcile the remaining 633 ICU 68 source
+units, resources, version constants, native contracts, or data with ICU 76.
 
 ## Materialization
 

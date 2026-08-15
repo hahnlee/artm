@@ -88,6 +88,11 @@ awk '/android.icu.util.VersionInfo.<clinit>/{found=1} found{print} found && /cat
   "$stage/disassembly" > "$clinit"
 grep -E "const/16 v[0-9]+, #int $CORE_ICU4J_ICU_MAJOR //" "$clinit" >/dev/null ||
   fail_gate "VersionInfo does not initialize ICU major $CORE_ICU4J_ICU_MAJOR"
+grep -F "const/4 v0, #int $CORE_ICU4J_ICU_MINOR //" "$clinit" >/dev/null ||
+  fail_gate "VersionInfo does not initialize ICU minor $CORE_ICU4J_ICU_MINOR"
+grep -F 'invoke-static {v2, v0, v1, v1}, Landroid/icu/util/VersionInfo;.getInstance:(IIII)' \
+  "$clinit" >/dev/null ||
+  fail_gate "VersionInfo ICU tuple is not $CORE_ICU4J_ICU_MAJOR.$CORE_ICU4J_ICU_MINOR"
 grep -F 'UNICODE_16_0:Landroid/icu/util/VersionInfo;' "$clinit" >/dev/null ||
   fail_gate "VersionInfo does not initialize Unicode 16.0"
 grep -F 'ICU_VERSION:Landroid/icu/util/VersionInfo;' "$clinit" >/dev/null ||

@@ -169,7 +169,7 @@
 - [x] Replace partial Android constant/filesystem owners with complete,
       source-derived Android 16 registrations while keeping Android/Linux
       numeric values visible above the Darwin syscall boundary.
-- [ ] Render a real `android.widget.Button` using the pinned Android font
+- [x] Render a real `android.widget.Button` using the pinned Android font
       configuration, Darwin filesystem/NIO providers, HWUI/Minikin, and Skia.
 - [ ] Create a Wine-prefix-like, case-sensitive Android root for `/system`,
       `/product`, `/apex`, package-private `/data`, and brokered shared storage.

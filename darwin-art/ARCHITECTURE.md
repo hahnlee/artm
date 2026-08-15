@@ -253,18 +253,20 @@ process-global signal disposition during runtime shutdown.
 The real `android.widget.Button` vertical slice now parses the pinned Android
 font configuration and passes the complete Android 16 `FileInputStream`,
 `IOUtil`, `FileChannelImpl`, `FileDispatcherImpl`, and `NativeThread` owners.
-It also passes the complete scalar/bulk `libcore.io.Memory` owner. Its first
-missing owner is now `sun.nio.fs.UnixNativeDispatcher`, reached when ICU opens
-its boot-class-path resources through `java.nio.file`. Native application ELF
-is not loaded yet, but the inspection-only ARM64 ELF capability classifier is
-complete: it reports dependencies, imports/exports, TLS, RELRO, relocations,
-constructors, executable-stack/text-relocation requirements, and raw `svc`.
+It also passes the complete scalar/bulk `libcore.io.Memory` owner, the full
+`UnixNativeDispatcher` and libcore `System` owners, real Darwin `lseek`, and a
+coherent ICU76 Java/native/data runtime. The result is a real Button frame and
+clean ART shutdown. Native application ELF is not loaded yet, but the
+inspection-only ARM64 ELF capability classifier is complete: it reports
+dependencies, versioned imports/exports, TLS, RELRO, relocations, constructors,
+executable-stack/text-relocation requirements, and raw `svc`.
 
 ## Ordered implementation after the Button gate
 
-1. Complete the existing byte-oriented prefix router with a component-walking
-   directory-FD broker. The router has a tested Rust/C ABI, but is deliberately
-   not an authorization boundary until symlink and rename races are contained.
+1. Connect the completed byte-oriented prefix router to the read-only
+   component-walking directory-FD broker. The broker rejects intermediate and
+   leaf symlinks and binds stat/read to the authorized descriptor; writable
+   operations and contained Android symlink semantics remain separate gates.
 2. Route `libcore.io.Linux` file/path methods through it; populate a real
    `/system`, `/product`, `/apex`, and package-private `/data` prefix.
 3. Extend the completed inspection-only ARM64 ELF parser into an APK-wide
