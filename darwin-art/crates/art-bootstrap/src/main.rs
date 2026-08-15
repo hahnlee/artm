@@ -34,6 +34,13 @@ fn run() -> Result<()> {
         "build-foundation" => build_foundation(&root),
         "build-skia" => build_skia(&root),
         "build-hwui-canvas" => build_shell_gate(&root, "compile-android16-hwui-canvas-gate.sh"),
+        "build-android-graphics-jni" => build_shell_gate_with_args(
+            &root,
+            "build-android16-android-graphics-jni.sh",
+            &["--object-audit"],
+        ),
+        "build-hwui-static" => build_shell_gate(&root, "build-android16-hwui-static-foundation.sh"),
+        "build-androidfw" => build_shell_gate(&root, "build-android16-androidfw-foundation.sh"),
         "build-graphics-foundations" => {
             build_shell_gate(&root, "build-android16-graphics-foundations.sh")
         }
@@ -105,6 +112,9 @@ fn print_help() {
     println!("  build-foundation  build and execute the minimal libartbase archive");
     println!("  build-skia  build upstream Skia CPU raster core and pixel smoke test");
     println!("  build-hwui-canvas  compile the first upstream HWUI Canvas/Paint gate");
+    println!("  build-android-graphics-jni  compile the complete Android GraphicsJNI host module");
+    println!("  build-hwui-static  compile the complete Android HWUI host core module");
+    println!("  build-androidfw  build the complete Android resource framework archive");
     println!("  build-graphics-foundations  build Darwin liblog/libcutils archives");
     println!("  build-nativehelper  build Darwin nativehelper host archives");
     println!("  build-ui-types  build the Darwin Android libui-types archive");
