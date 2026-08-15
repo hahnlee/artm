@@ -1,6 +1,7 @@
 package dev.darwinart.probe;
 
 import java.io.File;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,10 +20,19 @@ final class FontBootstrap {
             Map<String, File> updatedFonts = new LinkedHashMap<>();
             updatedFonts.put("Roboto-Regular", new File(roboto));
 
-            Method readConfig = systemFonts.getMethod(
-                    "getSystemFontConfigForTesting",
-                    String.class, Map.class, long.class, int.class);
-            Object config = readConfig.invoke(null, fontsXml, updatedFonts, 0L, 0);
+            Method readConfig = systemFonts.getDeclaredMethod(
+                    "getSystemFontConfigInternal",
+                    String.class,
+                    String.class,
+                    String.class,
+                    String.class,
+                    Map.class,
+                    long.class,
+                    int.class);
+            readConfig.setAccessible(true);
+            String fontDirectory = new File(roboto).getParent() + File.separator;
+            Object config = readConfig.invoke(
+                    null, fontsXml, fontDirectory, null, null, updatedFonts, 0L, 0);
 
             Method buildFallback = systemFonts.getMethod("buildSystemFallback", fontConfig);
             Object fallback = buildFallback.invoke(null, config);
@@ -33,6 +43,15 @@ final class FontBootstrap {
             Class<?> typeface = Class.forName("android.graphics.Typeface");
             Method installMap = typeface.getMethod("setSystemFontMap", Map.class);
             installMap.invoke(null, typefaces);
+        } catch (InvocationTargetException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new IllegalStateException("Android system font bootstrap failed", cause);
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException("Could not initialize Android system fonts", error);
         }

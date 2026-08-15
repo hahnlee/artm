@@ -1,5 +1,13 @@
 #include "darwin_libcore_natives.h"
 
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+#include "darwin_os_constants.h"
+#include "libcore_darwin_linux.h"
+
+void register_libcore_io_AsynchronousCloseMonitor(JNIEnv* env);
+extern "C" void register_java_io_UnixFileSystem(JNIEnv* env);
+#endif
+
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
@@ -44,6 +52,7 @@ jdouble LongBitsToDouble(JNIEnv*, jclass, jlong bits) {
   return std::bit_cast<double>(static_cast<std::int64_t>(bits));
 }
 
+#if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
 void UnixFileSystemInitIds(JNIEnv*, jclass) {}
 
 jint UnixFileSystemGetBooleanAttributes(JNIEnv* env, jobject, jstring path) {
@@ -72,6 +81,7 @@ jint UnixFileSystemGetBooleanAttributes(JNIEnv* env, jobject, jstring path) {
   env->ReleaseStringUTFChars(path, utf_path);
   return attributes;
 }
+#endif
 
 jint CharacterDigit(JNIEnv*, jclass, jint code_point, jint radix) {
   return u_digit(code_point, radix);
@@ -180,6 +190,7 @@ jint CharacterToUpperCase(JNIEnv*, jclass, jint code_point) {
   return u_toupper(code_point);
 }
 
+#if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
 void OsConstantsInitConstants(JNIEnv* env, jclass klass) {
   jfieldID processors =
       env->GetStaticFieldID(klass, "_SC_NPROCESSORS_CONF", "I");
@@ -187,6 +198,7 @@ void OsConstantsInitConstants(JNIEnv* env, jclass klass) {
     env->SetStaticIntField(klass, processors, _SC_NPROCESSORS_CONF);
   }
 }
+#endif
 
 jlong LinuxSysconf(JNIEnv*, jobject, jint name) {
   return static_cast<jlong>(sysconf(name));
@@ -502,6 +514,7 @@ bool Register(JNIEnv* env, const char* class_name,
 namespace darwin_art {
 
 bool RegisterLibcoreNatives(JNIEnv* env) {
+#if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
   JNINativeMethod unix_file_system_methods[] = {
       {const_cast<char*>("initIDs"), const_cast<char*>("()V"),
        reinterpret_cast<void*>(&UnixFileSystemInitIds)},
@@ -513,6 +526,12 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
                 static_cast<jint>(std::size(unix_file_system_methods)))) {
     return false;
   }
+#else
+  register_java_io_UnixFileSystem(env);
+  if (env->ExceptionCheck()) {
+    return false;
+  }
+#endif
 
   JNINativeMethod character_methods[] = {
       {const_cast<char*>("digitImpl"), const_cast<char*>("(II)I"),
@@ -578,10 +597,13 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
       {const_cast<char*>("longBitsToDouble"), const_cast<char*>("(J)D"),
        reinterpret_cast<void*>(&LongBitsToDouble)},
   };
+#if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
   JNINativeMethod os_constants_methods[] = {
       {const_cast<char*>("initConstants"), const_cast<char*>("()V"),
        reinterpret_cast<void*>(&OsConstantsInitConstants)},
   };
+#endif
+#if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
   JNINativeMethod linux_methods[] = {
       {const_cast<char*>("getenv"),
        const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
@@ -605,6 +627,7 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
        const_cast<char*>("(Ljava/io/FileDescriptor;Ljava/lang/Object;II)I"),
        reinterpret_cast<void*>(&LinuxWriteBytes)},
   };
+#endif
   JNINativeMethod icu_methods[] = {
       {const_cast<char*>("getIcuVersion"),
        const_cast<char*>("()Ljava/lang/String;"),
@@ -631,13 +654,35 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
       {const_cast<char*>("isSocket"), const_cast<char*>("(I)Z"),
        reinterpret_cast<void*>(&FileDescriptorIsSocket)},
   };
+  const auto register_linux = [&]() {
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+    // Android's Register.cpp initializes the asynchronous-close signal owner
+    // immediately before libcore.io.Linux. Keep that order so every supported
+    // blocking Darwin syscall can install a live monitor before Java closes it.
+    register_libcore_io_AsynchronousCloseMonitor(env);
+    if (env->ExceptionCheck()) {
+      return false;
+    }
+    return libcore_darwin::RegisterLinuxNatives(env);
+#else
+    return Register(env, "libcore/io/Linux", linux_methods,
+                    static_cast<jint>(std::size(linux_methods)));
+#endif
+  };
+  const auto register_os_constants = [&]() {
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+    register_android_system_OsConstants(env);
+    return !env->ExceptionCheck();
+#else
+    return Register(env, "android/system/OsConstants", os_constants_methods, 1);
+#endif
+  };
   return Register(env, "java/lang/Character", character_methods,
                   static_cast<jint>(std::size(character_methods))) &&
          Register(env, "java/lang/Float", float_methods, 2) &&
          Register(env, "java/lang/Double", double_methods, 2) &&
-         Register(env, "android/system/OsConstants", os_constants_methods, 1) &&
-         Register(env, "libcore/io/Linux", linux_methods,
-                  static_cast<jint>(std::size(linux_methods))) &&
+         register_os_constants() &&
+         register_linux() &&
          Register(env, "libcore/icu/ICU", icu_methods, 3) &&
          Register(env, "java/lang/System", system_methods, 3) &&
          Register(env, "java/io/FileDescriptor", file_descriptor_methods, 2);

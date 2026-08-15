@@ -121,8 +121,11 @@ upstream `SkCanvas::MakeRasterDirect`; 120 frames are rasterized and
 Metal-presented with zero staging copies. The remaining presentation step is to
 replace the Bitmap/readback copy with direct IOSurface backing. The DecorView
 also still uses a programmatic `android.R.id.content` root plus a minimal
-resource backend. Real framework-resource parsing, input, and GPU HWUI remain
-deferred.
+`Resources` object. The runtime now uses the full Android 16 resource JNI,
+Android-visible OS constants, UnixFileSystem, and ART OpenJDK VM service
+owners. The Button probe opens the pinned Android font XML and currently stops
+at the next complete-owner boundary, `java.io.FileInputStream.available0`.
+Compiled framework-resource inflation, input, and GPU HWUI remain deferred.
 
 The first Android 16 HWUI host compile gate is reproducible with:
 
@@ -303,10 +306,11 @@ probe initializes ART's unstarted-runtime
 handlers, constructs a `PathClassLoader`, registers the DEX, then enables a
 probe-only minimal-start gate. This gate registers ART's complete runtime-native
 table, initializes intrinsics, creates the normal main `Thread` peer, and runs
-root class initializers. Darwin adapters provide the POSIX, file-descriptor,
-primitive-bit, ICU-metadata, system-property, and standard-output subset needed
-by this gate. The locked Android `core-icu4j` Java code is converted to DEX
-locally; its `NativeConverter` calls host Homebrew ICU4C 78. The framework gate
+root class initializers. The real-graphics flavor now owns the complete Android
+16 `libcore.io.Linux`, `OsConstants`, `UnixFileSystem`, ICU JNI, resource JNI,
+and ART `libopenjdkjvm` registrations needed by this path. The installed
+Android `core-icu4j` artifact is converted to DEX locally and calls the pinned,
+statically linked AOSP ICU 76 implementation; no host ICU dylib is used. The framework gate
 uses Darwin-native `MessageQueue` wake/poll primitives and Android's default
 INFO logging threshold. Darwin clocks back `System`/`SystemClock`, and an
 in-process property table backs Android `SystemProperties`; its Darwin defaults
@@ -315,14 +319,16 @@ Binder holder/finalizer supports local framework Binder stubs, and the host ICU
 bridge now covers both encoder and decoder paths. The app-only compile stub for
 hidden `IContentProvider` supplies a javac signature and is not emitted into the
 DEX; runtime resolution uses framework.jar's real interface. Android's
-libicu/libjavacore/libopenjdk shared libraries and daemon threads are still not
-loaded. The current real `Activity.attach()` uses a minimal AssetManager/resource
-backend, a null `Instrumentation`, and no remote services. It constructs and
+libjavacore/libopenjdk shared libraries and daemon threads are still not loaded
+as Android ELF DSOs. The current real `Activity.attach()` uses upstream
+AssetManager/ApkAssets native owners but still constructs a programmatic probe
+`Resources`, a null `Instrumentation`, and no remote services. It constructs and
 retains the framework `PhoneWindow`; the launcher normally constructs its
 `DecorView` and installs a programmatic content root because the complete
 compiled `framework-res.apk` parser is not ported yet. The content `View` is
-normally constructed and traversed. Android Skia/HWUI, full decor resources,
-input dispatch, and incremental frame scheduling remain deferred.
+normally constructed and traversed through Android Skia/HWUI CPU raster. Full
+decor resources, input dispatch, GPU HWUI, and incremental frame scheduling
+remain deferred.
 
 Apple ARM64 executables retain the kernel-required 4 GiB `__PAGEZERO`, so ART's
 usual absolute-low-32-bit heap references cannot be used. The Darwin probe

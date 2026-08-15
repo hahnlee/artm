@@ -108,6 +108,7 @@ struct ProcessState {
   bool owner_thread_valid = false;
   JavaVM* java_vm = nullptr;
   art::Thread* art_thread = nullptr;
+  bool resource_runtime_installed = false;
   std::vector<std::unique_ptr<const art::DexFile>> app_dex_files;
 };
 
@@ -131,6 +132,13 @@ static void RecordCreatedRuntime(art::Thread* art_thread) {
   g_process_state.java_vm = reinterpret_cast<JavaVM*>(
       art::Runtime::Current()->GetJavaVM());
   g_process_state.art_thread = art_thread;
+}
+
+static void RecordResourceRuntimeInstalled() {
+  std::lock_guard<std::mutex> lock(g_process_state.mutex);
+  CHECK(g_process_state.phase == ProcessPhase::kRunning);
+  CHECK(!g_process_state.resource_runtime_installed);
+  g_process_state.resource_runtime_installed = true;
 }
 
 static void FinishProcessRun() {
@@ -665,6 +673,15 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 26;
   }
   art::Runtime::Current()->FinishMinimalForDarwinProbe();
+  if (!darwin_art::InstallFrameworkResourceRuntime(self->GetJniEnv())) {
+    std::cerr << "ART Darwin resources: AndroidRuntime ownership install failed\n";
+    return 38;
+  }
+  RecordResourceRuntimeInstalled();
+  if (!darwin_art::RegisterFrameworkResourceNatives(self->GetJniEnv())) {
+    std::cerr << "ART Darwin resources: native registration failed\n";
+    return 39;
+  }
   if (!darwin_art::RegisterFrameworkGraphicsNatives(self->GetJniEnv())) {
     std::cerr << "ART Darwin graphics: native registration failed\n";
     return 35;
@@ -785,6 +802,16 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? nullptr
           : env->NewObject(probe_resources_class, probe_resources_constructor,
                            asset_manager);
+  if (activity_info == nullptr || application == nullptr ||
+      asset_manager == nullptr || empty_apk_assets == nullptr ||
+      apk_assets_field == nullptr || probe_resources == nullptr ||
+      env->ExceptionCheck()) {
+    std::cerr << "ART Android resources: bootstrap construction failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 27;
+  }
   jobject package_manager =
       package_manager_class == nullptr
           ? nullptr
@@ -957,6 +984,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 31;
   }
   env->CallVoidMethod(activity_instance, set_activity_theme, probe_theme);
+  if (env->ExceptionCheck()) {
+    std::cerr << "ART Android window: Activity.setTheme() threw\n"
+              << self->GetException()->Dump() << "\n";
+    return 31;
+  }
 
   // A detached hierarchy should observe accessibility as disabled until the
   // Darwin service bridge exists. Seed the framework singleton without
@@ -1297,6 +1329,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
   JavaVM* java_vm = nullptr;
   art::Thread* art_thread = nullptr;
+  bool resource_runtime_installed = false;
   {
     std::lock_guard<std::mutex> lock(g_process_state.mutex);
     switch (g_process_state.phase) {
@@ -1322,6 +1355,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
     g_process_state.phase = ProcessPhase::kShuttingDown;
     java_vm = g_process_state.java_vm;
     art_thread = g_process_state.art_thread;
+    resource_runtime_installed = g_process_state.resource_runtime_installed;
   }
 
   CHECK(java_vm != nullptr);
@@ -1342,6 +1376,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
         std::cerr << "ART Darwin shutdown: global reference cleanup threw: "
                   << art_thread->GetException()->Dump() << "\n";
         art_thread->ClearException();
+      }
+      if (resource_runtime_installed &&
+          !darwin_art::ShutdownFrameworkResourceRuntime(
+              art_thread->GetJniEnv())) {
+        std::cerr << "ART Darwin shutdown: AndroidRuntime ownership uninstall failed\n";
+        std::lock_guard<std::mutex> lock(g_process_state.mutex);
+        g_process_state.phase = ProcessPhase::kShutdownFailed;
+        return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
       }
     }
     CHECK_EQ(art_thread->GetState(), art::ThreadState::kNative);
@@ -1365,6 +1407,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
     std::lock_guard<std::mutex> lock(g_process_state.mutex);
     g_process_state.java_vm = nullptr;
     g_process_state.art_thread = nullptr;
+    g_process_state.resource_runtime_installed = false;
     g_process_state.phase = ProcessPhase::kShutdownComplete;
   }
   return 0;

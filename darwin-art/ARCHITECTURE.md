@@ -242,13 +242,16 @@ Completed foundations include the Darwin ARM64 ART interpreter/runtime,
 Android framework boot, real `Activity`/`PhoneWindow`/`DecorView`, Android 16
 GraphicsJNI/HWUI/Skia software rendering, IOSurface/Metal presentation, ICU,
 Minikin/HarfBuzz/FreeType text foundations, resource JNI, AndroidRuntime
-ownership, and a complete registered `libcore.io.Linux` method table with an
-incrementally implemented Darwin backend.
+ownership, all 568 Android-visible `OsConstants`, the complete 12-entry
+`java.io.UnixFileSystem` owner, ART's complete `libopenjdkjvm` provider, and a
+complete registered `libcore.io.Linux` method table with an incrementally
+implemented Darwin backend.
 
-The current vertical slice is replacing partial platform owners required by a
-real `android.widget.Button`: Android constants, filesystem, NIO mapping,
-system-font configuration, and framework resources. Native application ELF is
-not loaded yet.
+The real `android.widget.Button` vertical slice now opens the pinned Android
+font configuration and reaches KXml parsing. Its first missing owner is the
+complete Android 16 `java.io.FileInputStream` native table (`available0` is the
+first observed call), followed by the bounded OpenJDK NIO mapping cluster.
+Native application ELF is not loaded yet.
 
 ## Ordered implementation after the Button gate
 

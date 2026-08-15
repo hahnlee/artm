@@ -17,7 +17,16 @@
 #include <android/graphics/jni_runtime.h>
 #include <androidicuinit/android_icu_init.h>
 
+#include "darwin_art/android_runtime_host.h"
 #include "darwin_android_graphics_registration.h"
+
+namespace android {
+extern int register_android_util_Log(JNIEnv* env);
+extern int register_android_content_AssetManager(JNIEnv* env);
+extern int register_android_content_StringBlock(JNIEnv* env);
+extern int register_android_content_XmlBlock(JNIEnv* env);
+extern int register_android_content_res_ApkAssets(JNIEnv* env);
+}  // namespace android
 #endif
 
 namespace {
@@ -528,6 +537,26 @@ void ShutdownFrameworkGraphicsRuntime() {
 #endif
 }
 
+bool InstallFrameworkResourceRuntime(JNIEnv* env) {
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+  return darwin_art_android_runtime_install(env) ==
+         DARWIN_ART_ANDROID_RUNTIME_OK;
+#else
+  (void)env;
+  return true;
+#endif
+}
+
+bool ShutdownFrameworkResourceRuntime(JNIEnv* env) {
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+  return darwin_art_android_runtime_uninstall(env) ==
+         DARWIN_ART_ANDROID_RUNTIME_OK;
+#else
+  (void)env;
+  return true;
+#endif
+}
+
 bool RegisterFrameworkNatives(JNIEnv* env) {
   JNINativeMethod message_queue_methods[] = {
       {const_cast<char*>("nativeInit"), const_cast<char*>("()J"),
@@ -549,6 +578,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
     return false;
   }
 
+#if !defined(DARWIN_ART_REAL_GRAPHICS)
   JNINativeMethod log_methods[] = {
       {const_cast<char*>("isLoggable"),
        const_cast<char*>("(Ljava/lang/String;I)Z"),
@@ -562,6 +592,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
                 static_cast<jint>(std::size(log_methods)))) {
     return false;
   }
+#endif
 
   JNINativeMethod trace_methods[] = {
       {const_cast<char*>("nativeIsTagEnabled"), const_cast<char*>("(J)Z"),
@@ -642,6 +673,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   }
 #endif
 
+#if !defined(DARWIN_ART_REAL_GRAPHICS)
   JNINativeMethod asset_manager_methods[] = {
       {const_cast<char*>("nativeCreate"), const_cast<char*>("()J"),
        reinterpret_cast<void*>(&AssetManagerCreate)},
@@ -694,6 +726,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
                 static_cast<jint>(std::size(asset_manager_methods)))) {
     return false;
   }
+#endif
 
   JNINativeMethod system_properties_methods[] = {
       {const_cast<char*>("native_get"),
@@ -737,6 +770,25 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   }
 
   return true;
+}
+
+bool RegisterFrameworkResourceNatives(JNIEnv* env) {
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+  // Preserve AndroidRuntime.cpp's ownership and registration order. These four
+  // tables replace the temporary AssetManager table as one atomic resource
+  // subsystem; mixing either AssetManager native-handle representation would
+  // make Theme/ApkAssets jlong values type-unsafe.
+  return android::register_android_util_Log(env) >= 0 &&
+         android::register_android_content_AssetManager(env) >= 0 &&
+         android::register_android_content_StringBlock(env) >= 0 &&
+         android::register_android_content_XmlBlock(env) >= 0 &&
+         android::register_android_content_res_ApkAssets(env) >= 0;
+#else
+  // The baseline probe registered its deliberately small AssetManager table in
+  // RegisterFrameworkNatives().
+  (void)env;
+  return true;
+#endif
 }
 
 bool RegisterFrameworkGraphicsNatives(JNIEnv* env) {
