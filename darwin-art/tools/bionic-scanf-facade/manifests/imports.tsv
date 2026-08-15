@@ -1,0 +1,3 @@
+symbol	type	class	implementation
+sscanf	FUNC	B	AAPCS64-capture+string-reader
+vsscanf	FUNC	B	Android-va_list32+string-reader
