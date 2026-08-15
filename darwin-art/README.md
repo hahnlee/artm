@@ -167,8 +167,10 @@ stack tail into Android's eight-byte slots. A native method invoked after
 `JNI_OnLoad` calls proxy `GetVersion` and `FindClass` using the current ART
 thread's `JNIEnv`, not a retained load-time pointer. Aggregates, HFA, variadic
 calls, CriticalNative, the rest of the JNI table, hardened-runtime `MAP_JIT`,
-and wiring the standalone `DT_NEEDED` graph into ART remain explicit work; ELF
-TLS and finalizers are still rejected.
+and wiring the standalone `DT_NEEDED` graph into ART remain explicit work. ELF
+TLS is still rejected. The standalone loader runs `DT_FINI_ARRAY` in reverse
+order followed by `DT_FINI` exactly once; ART integration with the separate
+Bionic `__cxa_finalize` lifecycle remains explicit work.
 
 Its final line is:
 

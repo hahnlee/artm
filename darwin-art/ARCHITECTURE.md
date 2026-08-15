@@ -209,17 +209,18 @@ particular Android ARM64 `wchar_t` ordering is unsigned, unlike Darwin's signed
 type, so `wmemcmp` implements the Bionic ordering rather than forwarding to
 the host.
 
-The independently executable providers currently own 94/160 imports with no
-duplicate owner: A 11/11, B 29/76, C 49/65, and D 5/8. This includes allocator
+The independently executable providers currently own 112/160 imports with no
+duplicate owner: A 11/11, B 35/76, C 61/65, and D 5/8. This includes allocator
 and Bionic errno ownership, the read-only filesystem/virtual-FD slice, clocks
 and sleep, all 24 pthread imports plus the provider-owned create seam, immutable
 environment/property/auxv state, loader-owned program-header iteration, and a
 fixed-register binary stdio slice with guest `FILE` tokens and `__sF`, and the
 locale/multibyte slice with guest `locale_t`, `mbstate_t`, and unsigned wchar32,
-plus Bionic-owned `__cxa_atexit`/`__cxa_finalize` registration state.
+ICU-backed wide classification, integer parsing, plus Bionic-owned
+`__cxa_atexit`/`__cxa_finalize` registration state.
 The coverage audit deliberately labels these as standalone gates: composing
 them into one loader namespace with shared lifetime and teardown is still an
-open integration boundary, and the remaining 66 imports remain hard
+open integration boundary, and the remaining 48 imports remain hard
 capability failures.
 
 ## Prior art and the boundary we adopt
@@ -340,7 +341,10 @@ narrow integer stack values, reference/FP/void returns, and post-load proxy
 JNIEnv instead of retaining the load-time pointer. DestroyJavaVM closes the
 image and returns the executable-page live count to zero. Hardened-runtime JIT
 policy, CriticalNative, aggregate/HFA/varargs calls, broader JNI proxy tables,
-TLS, and ELF finalizers remain explicit gates.
+TLS, and ART composition of ELF/Bionic finalization remain explicit gates. The
+standalone loader runs `DT_FINI_ARRAY` in reverse order followed by `DT_FINI`,
+exactly once after successful initialization, and a recursive graph finalizes
+dependents before dependencies when its last owner closes.
 
 The virtual DSO namespace is closed: unknown SONAMEs, symbols, and GNU versions
 cannot fall back to Darwin globals. Loader-owned `libdl` has its first five
@@ -357,21 +361,23 @@ coherent create/join/detach token lifecycle without exposing Darwin
 property, and auxv snapshot rather than host globals. The binary stdio slice
 owns Android `FILE` tokens, permanent `__sF`, and 12 fixed-register operations
 without exposing Darwin `FILE*`; formatted varargs and wide stdio are still
-rejected. The locale provider adds 19 fixed-register functions without using
-Darwin's process-global locale or reinterpreting its `wchar_t`. Together these
-standalone gates cover 94/160 libc imports with
-duplicate ownership rejected by
-`tools/audit-android35-libcxx-provider-coverage.sh`. ICU-backed wide character
-classification, formatting, wider
-writable filesystem operations, and one composed runtime resolver remain open
-gates.
+rejected. The locale provider adds 31 fixed-register functions without using
+Darwin's process-global locale or reinterpreting its `wchar_t`; wide
+classification and case conversion use pinned static Android ICU 76.1. The
+integer parser owns the six `strto*` imports with AOSP base, prefix, overflow,
+locale-ignore, and Bionic errno behavior. Together these standalone gates
+cover 112/160 libc imports with duplicate ownership rejected by
+`tools/audit-android35-libcxx-provider-coverage.sh`. Wide-character formatting,
+floating-point conversion, wider writable filesystem operations, and one
+composed runtime resolver remain open gates.
 
 The Bionic DSO lifecycle provider owns destructor registration independently
 of Darwin's C++ runtime. It preserves each function/argument/DSO triple,
 drains per-DSO and process-global entries in LIFO order exactly once, and
 supports reentrant registration while callbacks run. Its loader contract is
-publish, finalize until quiescent, unpublish, then unmap; the ELF graph still
-needs to wire that contract to its finalizer teardown.
+publish, finalize until quiescent, unpublish, then unmap. The standalone ELF
+loader owns static fini ordering, but does not implicitly merge this separate
+`__cxa_finalize(dso_handle)` seam; ART still needs to compose the two.
 
 A separate virtual-memory facade serves DSOs beyond the pinned libc++ import
 set. Its first closed slice owns anonymous private whole mappings for
