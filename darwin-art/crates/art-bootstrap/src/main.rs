@@ -32,6 +32,7 @@ fn run() -> Result<()> {
         "probe-asm" => probe_asm(&root),
         "probe-pagesize" => probe_page_size(&root),
         "build-foundation" => build_foundation(&root),
+        "build-skia" => build_skia(&root),
         "build-dex" => build_dex_probe(&root),
         "build-runtime-platform" => build_runtime_platform(&root),
         "build-runtime-core" => build_runtime_core(&root),
@@ -48,6 +49,7 @@ fn run() -> Result<()> {
             sync_sources(&root)?;
             probe_asm(&root)?;
             probe_page_size(&root)?;
+            build_skia(&root)?;
             build_dex_probe(&root)?;
             build_runtime_platform(&root)?;
             build_runtime_core(&root)?;
@@ -80,6 +82,7 @@ fn print_help() {
     println!("  probe-asm  compile and execute an ART-derived Mach-O ARM64 entrypoint");
     println!("  probe-pagesize  compile ART's dynamic page-size path for Darwin");
     println!("  build-foundation  build and execute the minimal libartbase archive");
+    println!("  build-skia  build upstream Skia CPU raster core and pixel smoke test");
     println!("  build-dex  compile AOSP libdexfile and parse a generated classes.dex");
     println!("  build-runtime-platform  compile ART host platform sources as Mach-O");
     println!("  build-runtime-core  apply Darwin monitor patches and compile runtime core");
@@ -132,6 +135,16 @@ fn doctor() -> Result<()> {
 fn sync_sources(root: &Path) -> Result<()> {
     let lock = read_lock(root)?;
     let revision = lock_value(&lock, "ART_REVISION")?;
+    materialize_archive(
+        root,
+        "platform/external/skia",
+        lock_value(&lock, "SKIA_REVISION")?,
+        "external-skia",
+        "",
+        "_aosp/external/skia",
+        "BUILD.gn",
+        lock_value(&lock, "SKIA_BUILD_GN_SHA256")?,
+    )?;
     materialize_archive(
         root,
         "platform/art",
@@ -805,6 +818,159 @@ fn build_foundation(root: &Path) -> Result<()> {
         return Err(format!("unexpected foundation probe output: {output:?}").into());
     }
     println!("build-foundation: {}", output.trim());
+    Ok(())
+}
+
+fn build_skia(root: &Path) -> Result<()> {
+    const EXPECTED_OUTPUT: &str = "Skia Darwin raster: 64x64 rowBytes=256 hash=a4bb4cdb0b4779ea";
+    const EXPECTED_IOSURFACE_OUTPUT: &str = "darwin-skia-surface: direct-iosurface frames=120 staging-copies=0 \
+         final-hash=b32235958413af5e sequence-hash=5fd4ea042fd71d4e";
+
+    let lock = read_lock(root)?;
+    let skia = root.join("_aosp/external/skia");
+    if !skia.join("BUILD.gn").is_file() {
+        return Err("Skia source is missing; run `art-bootstrap sync` first".into());
+    }
+    let source_revision = fs::read_to_string(skia.join(".source-revision"))?;
+    if source_revision.trim() != lock_value(&lock, "SKIA_REVISION")? {
+        return Err("materialized Skia revision does not match sources.lock".into());
+    }
+
+    let gn = skia.join("bin/gn");
+    if !gn.is_file() {
+        run_command(
+            Command::new("python3")
+                .arg("bin/fetch-gn")
+                .current_dir(&skia),
+        )?;
+    }
+    verify_sha256(&gn, lock_value(&lock, "SKIA_GN_DARWIN_ARM64_SHA256")?)?;
+
+    let ninja = skia.join("third_party/ninja/ninja");
+    if !ninja.is_file() {
+        run_command(
+            Command::new("python3")
+                .arg("bin/fetch-ninja")
+                .current_dir(&skia),
+        )?;
+    }
+    verify_sha256(&ninja, lock_value(&lock, "SKIA_NINJA_DARWIN_ARM64_SHA256")?)?;
+
+    let build_dir = root.join("_build/skia");
+    fs::create_dir_all(&build_dir)?;
+    let compat = root.join("compat");
+    let gn_args = format!(
+        "is_official_build=true is_debug=false target_cpu=\"arm64\" \
+         skia_enable_gpu=false skia_enable_graphite=false skia_enable_pdf=false \
+         skia_enable_skottie=false skia_enable_svg=false skia_enable_precompile=false \
+         skia_enable_tools=false skia_enable_fontmgr_empty=true skia_use_expat=false \
+         skia_use_fonthost_mac=false skia_use_freetype=false skia_use_fontconfig=false \
+         skia_use_harfbuzz=false skia_use_icu=false skia_use_perfetto=false \
+         skia_use_gl=false skia_use_metal=false skia_use_vulkan=false \
+         skia_use_libjpeg_turbo_decode=false skia_use_libjpeg_turbo_encode=false \
+         skia_use_no_jpeg_encode=true skia_use_libpng_decode=false \
+         skia_use_libpng_encode=false skia_use_no_png_encode=true \
+         skia_use_libwebp_decode=false skia_use_libwebp_encode=false \
+         skia_use_no_webp_encode=true skia_use_wuffs=false skia_use_piex=false \
+         skia_use_xps=false skia_use_zlib=false skia_use_dng_sdk=false \
+         skia_use_libheif=false skia_use_crabbyavif=false skia_use_libjxl_decode=false \
+         skia_use_libavif=false skia_use_bidi=false skia_use_libgrapheme=false \
+         skia_build_rust_targets=false extra_cflags=[\"-I{}\"]",
+        compat.display()
+    );
+    run_command(
+        Command::new(&gn)
+            .arg("gen")
+            .arg(&build_dir)
+            .arg(format!("--args={gn_args}"))
+            .current_dir(&skia),
+    )?;
+    run_command(
+        Command::new(&ninja)
+            .arg("-C")
+            .arg(&build_dir)
+            .arg("skia")
+            .current_dir(&skia),
+    )?;
+
+    let skia_archive = build_dir.join("libskia.a");
+    let skcms_archive = build_dir.join("libskcms.a");
+    for archive in [&skia_archive, &skcms_archive] {
+        if !archive.is_file() {
+            return Err(format!("Skia archive is missing: {}", archive.display()).into());
+        }
+    }
+
+    let smoke = build_dir.join("skia-raster-smoke");
+    run_command(
+        Command::new("clang++")
+            .args(["-std=c++20", "-O2", "-DNDEBUG"])
+            .arg(format!("-I{}", compat.display()))
+            .arg(format!("-I{}", skia.display()))
+            .arg(root.join("probes/skia_raster_smoke.cc"))
+            .arg(&skia_archive)
+            .arg(&skcms_archive)
+            .args(["-framework", "CoreGraphics", "-framework", "CoreFoundation"])
+            .arg("-o")
+            .arg(&smoke),
+    )?;
+    let kind = command_output(Command::new("file").arg(&smoke))?;
+    if !kind.contains("Mach-O 64-bit executable arm64") {
+        return Err(format!("unexpected Skia smoke format: {kind}").into());
+    }
+    let output = command_output(&mut Command::new(&smoke))?;
+    if output.trim() != EXPECTED_OUTPUT {
+        return Err(format!("unexpected Skia raster output: {output:?}").into());
+    }
+
+    let surface_smoke = build_dir.join("darwin-skia-surface-smoke");
+    run_command(
+        Command::new("clang++")
+            .args([
+                "-std=c++20",
+                "-O2",
+                "-DNDEBUG",
+                "-fobjc-arc",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+            ])
+            .arg(format!("-I{}", compat.display()))
+            .arg(format!("-I{}", skia.display()))
+            .arg(root.join("compat/darwin_surface_bridge.mm"))
+            .arg(root.join("probes/darwin_skia_surface_smoke.mm"))
+            .arg(&skia_archive)
+            .arg(&skcms_archive)
+            .args([
+                "-framework",
+                "AppKit",
+                "-framework",
+                "CoreGraphics",
+                "-framework",
+                "CoreFoundation",
+                "-framework",
+                "IOSurface",
+                "-framework",
+                "Metal",
+                "-framework",
+                "QuartzCore",
+                "-o",
+            ])
+            .arg(&surface_smoke),
+    )?;
+    let iosurface_output =
+        command_output(Command::new(&surface_smoke).env("DARWIN_ART_SURFACE_HEADLESS", "1"))?;
+    if iosurface_output.trim() != EXPECTED_IOSURFACE_OUTPUT {
+        return Err(
+            format!("unexpected direct Skia IOSurface output: {iosurface_output:?}").into(),
+        );
+    }
+    println!(
+        "build-skia: {} archive_bytes={} {}",
+        output.trim(),
+        fs::metadata(&skia_archive)?.len(),
+        iosurface_output.trim()
+    );
     Ok(())
 }
 
@@ -2223,11 +2389,12 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
 
     let runtime = root.join("_aosp/art/runtime");
     let build_dir = root.join("_build/runtime-link-probe");
-    let object = build_dir.join("runtime_link_probe.cc.o");
-    let window_object = build_dir.join("darwin_window_bridge.mm.o");
-    let executable = build_dir.join("runtime-link-probe");
+    let object = build_dir.join("darwin_art_runtime.cc.o");
+    let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
+    let runtime_library = build_dir.join("libdarwin_art_runtime.dylib");
     fs::create_dir_all(&build_dir)?;
     let includes = [
+        root.join("include"),
         root.join("compat"),
         root.join("_build/runtime-arm64/generated"),
         root.join("_build/runtime-bootstrap/patched-source/runtime"),
@@ -2268,18 +2435,31 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
     run_command(
         Command::new("clang++")
             .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
-            .arg(root.join("compat/darwin_window_bridge.mm"))
+            .arg(root.join("compat/darwin_surface_bridge.mm"))
             .arg("-I")
             .arg(root.join("compat"))
+            .arg("-I")
+            .arg(root.join("include"))
             .arg("-o")
-            .arg(&window_object),
+            .arg(&surface_object),
     )?;
 
     let mut linker = Command::new("clang++");
     linker
+        .arg("-dynamiclib")
+        .arg("-Wl,-install_name,@rpath/libdarwin_art_runtime.dylib")
+        .arg("-Wl,-exported_symbol,_darwin_art_run_process")
+        .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_update")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_map_producer")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_unmap_producer")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_present")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-dead_strip")
         .arg(&object)
-        .arg(&window_object)
+        .arg(&surface_object)
         .arg(root.join("_build/runtime-bootstrap/libart-runtime-bootstrap-darwin.a"))
         .arg(root.join("_build/interpreter-core/libart-interpreter-darwin.a"))
         .arg(root.join("_build/runtime-arm64/libart-arm64-darwin.a"))
@@ -2301,14 +2481,38 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             "-framework",
             "AppKit",
             "-framework",
-            "CoreGraphics",
+            "IOSurface",
+            "-framework",
+            "Metal",
+            "-framework",
+            "QuartzCore",
             "-o",
         ])
-        .arg(&executable);
+        .arg(&runtime_library);
     let description = describe_command(&linker);
     let output = linker.output()?;
     if output.status.success() {
-        println!("audit-runtime-link: closure complete undefined=0");
+        let symbols = command_output(Command::new("nm").args(["-gU"]).arg(&runtime_library))?;
+        for required in [
+            "_darwin_art_run_process",
+            "_darwin_art_shutdown_process",
+            "_darwin_art_surface_create",
+            "_darwin_art_surface_update",
+            "_darwin_art_surface_map_producer",
+            "_darwin_art_surface_unmap_producer",
+            "_darwin_art_surface_present",
+            "_darwin_art_surface_pump_events",
+            "_darwin_art_surface_destroy",
+        ] {
+            if !symbols.contains(required) {
+                return Err(format!(
+                    "runtime C ABI library does not export required symbol {required}"
+                )
+                .into());
+            }
+        }
+        build_runtime_host(root)?;
+        println!("audit-runtime-link: C ABI dylib closure complete undefined=0 exports=9");
         return Ok(());
     }
 
@@ -2357,9 +2561,25 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn build_runtime_host(root: &Path) -> Result<()> {
+    let status = Command::new("cargo")
+        .args(["build", "-p", "darwin-art-host"])
+        .current_dir(root)
+        .status()?;
+    if !status.success() {
+        return Err("failed to build the Rust darwin-art-host launcher".into());
+    }
+    let executable = root.join("target/debug/darwin-art-host");
+    if !executable.is_file() {
+        return Err(format!("Rust runtime host is missing: {}", executable.display()).into());
+    }
+    Ok(())
+}
+
 fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
     prepare_icu_bootclasspath(root)?;
-    let executable = root.join("_build/runtime-link-probe/runtime-link-probe");
+    let executable = root.join("target/debug/darwin-art-host");
+    let runtime_library = root.join("_build/runtime-link-probe/libdarwin_art_runtime.dylib");
     let core_oj = root.join("_prebuilt/android-16/bootclasspath/core-oj.jar");
     let core_libart = root.join("_prebuilt/android-16/bootclasspath/core-libart.jar");
     let framework = root.join("_prebuilt/android-16/bootclasspath/framework.jar");
@@ -2367,6 +2587,7 @@ fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
     let classes_dex = root.join("_build/dex-probe/dex/classes.dex");
     for input in [
         &executable,
+        &runtime_library,
         &core_oj,
         &core_libart,
         &framework,
@@ -2383,15 +2604,16 @@ fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
     }
 
     let mut command = Command::new(&executable);
+    if show_window {
+        command.args(["--window-seconds", "3"]);
+    }
     command
+        .arg(&runtime_library)
         .arg(&core_oj)
         .arg(&core_libart)
         .arg(&framework)
         .arg(&core_icu4j)
         .arg(&classes_dex);
-    if show_window {
-        command.env("DARWIN_ART_WINDOW_SECONDS", "3");
-    }
     let output = command_output(&mut command)?;
     let expected = "Hello from Darwin ART main: 안녕\n\
                     ART Darwin Runtime::Create: ok\n\

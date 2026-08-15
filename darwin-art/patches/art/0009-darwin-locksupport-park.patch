@@ -1,19 +1,3 @@
-diff --git a/runtime/thread.h b/runtime/thread.h
---- a/runtime/thread.h
-+++ b/runtime/thread.h
-@@ -2443,5 +2443,12 @@ class EXPORT Thread {
-   // Pointer to the monitor lock we're currently waiting on or null if not waiting.
-   Monitor* wait_monitor_ GUARDED_BY(wait_mutex_);
- 
-+#if defined(__APPLE__)
-+  // Darwin has no futex. Keep LockSupport's permit state machine, but sleep on
-+  // a per-thread pthread-backed ART condition variable.
-+  Mutex* park_mutex_ DEFAULT_MUTEX_ACQUIRED_AFTER;
-+  ConditionVariable* park_cond_ GUARDED_BY(park_mutex_);
-+#endif
-+
-   // Debug disable read barrier count, only is checked for debug builds and only in the runtime.
-   uint8_t debug_disallow_read_barrier_ = 0;
 diff --git a/runtime/thread.cc b/runtime/thread.cc
 --- a/runtime/thread.cc
 +++ b/runtime/thread.cc
@@ -37,15 +21,15 @@ diff --git a/runtime/thread.cc b/runtime/thread.cc
 +    if (!is_absolute && time == 0) {
 +      ScopedThreadSuspension sts(this, ThreadState::kWaiting);
 +      DCHECK_EQ(NumberOfHeldMutexes(), 0u);
-+      MutexLock mu(this, *park_mutex_);
++      MutexLock mu(this, *wait_mutex_);
 +      if (tls32_.park_state_.load(std::memory_order_relaxed) == kNoPermitWaiterWaiting) {
-+        park_cond_->Wait(this);
++        wait_cond_->Wait(this);
 +      }
 +      tls32_.park_state_.store(kNoPermit, std::memory_order_relaxed);
 +    } else if (time > 0) {
 +      ScopedThreadSuspension sts(this, ThreadState::kTimedWaiting);
 +      DCHECK_EQ(NumberOfHeldMutexes(), 0u);
-+      MutexLock mu(this, *park_mutex_);
++      MutexLock mu(this, *wait_mutex_);
 +      if (tls32_.park_state_.load(std::memory_order_relaxed) == kNoPermitWaiterWaiting) {
 +        int64_t wait_ms;
 +        int32_t wait_ns;
@@ -65,12 +49,12 @@ diff --git a/runtime/thread.cc b/runtime/thread.cc
 +          wait_ns = static_cast<int32_t>(time % INT64_C(1000000));
 +        }
 +        if (!timed_out) {
-+          timed_out = park_cond_->TimedWait(this, wait_ms, wait_ns);
++          timed_out = wait_cond_->TimedWait(this, wait_ms, wait_ns);
 +        }
 +      }
 +      tls32_.park_state_.store(kNoPermit, std::memory_order_relaxed);
 +    } else {
-+      MutexLock mu(this, *park_mutex_);
++      MutexLock mu(this, *wait_mutex_);
 +      tls32_.park_state_.store(kNoPermit, std::memory_order_relaxed);
 +    }
 +    Runtime::Current()->GetRuntimeCallbacks()->ThreadParkFinished(timed_out);
@@ -91,31 +75,12 @@ diff --git a/runtime/thread.cc b/runtime/thread.cc
 -  UNIMPLEMENTED(WARNING);
 +#elif defined(__APPLE__)
 +  Thread* self = Thread::Current();
-+  MutexLock mu(self, *park_mutex_);
++  MutexLock mu(self, *wait_mutex_);
 +  if (tls32_.park_state_.exchange(kPermitAvailable, std::memory_order_relaxed) ==
 +      kNoPermitWaiterWaiting) {
-+    park_cond_->Signal(self);
++    wait_cond_->Signal(self);
 +  }
 +#else
 +  UNIMPLEMENTED(FATAL);
  #endif
  }
-@@ -2559,4 +2609,8 @@ Thread::Thread(bool daemon)
-   wait_mutex_ = new Mutex("a thread wait mutex", LockLevel::kThreadWaitLock);
-   wait_cond_ = new ConditionVariable("a thread wait condition variable", *wait_mutex_);
-+#if defined(__APPLE__)
-+  park_mutex_ = new Mutex("a thread park mutex", LockLevel::kThreadWaitLock);
-+  park_cond_ = new ConditionVariable("a thread park condition variable", *park_mutex_);
-+#endif
-   tlsPtr_.mutator_lock = Locks::mutator_lock_;
-   DCHECK(tlsPtr_.mutator_lock != nullptr);
-@@ -2745,5 +2799,9 @@ Thread::~Thread() {
- 
-   delete wait_cond_;
-   delete wait_mutex_;
-+#if defined(__APPLE__)
-+  delete park_cond_;
-+  delete park_mutex_;
-+#endif
- 
-   if (initialized) {

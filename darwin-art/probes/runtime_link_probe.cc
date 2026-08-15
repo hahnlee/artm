@@ -1,9 +1,11 @@
 #include <mach-o/dyld.h>
+#include <pthread.h>
 #include <unistd.h>
 
-#include <cstdlib>
+#include <cstdint>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -14,10 +16,10 @@
 #include "base/logging.h"
 #include "class_linker.h"
 #include "cmdline_types.h"
+#include "darwin_art/darwin_art.h"
 #include "darwin_framework_natives.h"
 #include "darwin_icu_natives.h"
 #include "darwin_libcore_natives.h"
-#include "darwin_window_bridge.h"
 #include "dex/art_dex_file_loader.h"
 #include "handle_scope-inl.h"
 #include "interpreter/unstarted_runtime.h"
@@ -36,16 +38,115 @@ static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
 static std::size_t g_frame_width = 0;
 static std::size_t g_frame_height = 0;
 static jclass g_probe_canvas_class = nullptr;
+static void* g_host_context = nullptr;
+static darwin_art_frame_callback_t g_frame_callback = nullptr;
 
-static double WindowVisibleSeconds() {
-  const char* value = std::getenv("DARWIN_ART_WINDOW_SECONDS");
-  if (value == nullptr) {
-    return 0.0;
+enum class ProcessPhase {
+  kNeverStarted,
+  kRunning,
+  kAwaitingShutdown,
+  kShuttingDown,
+  kShutdownComplete,
+  kCreateFailed,
+  kShutdownFailed,
+};
+
+struct ProcessState {
+  std::mutex mutex;
+  ProcessPhase phase = ProcessPhase::kNeverStarted;
+  pthread_t owner_thread{};
+  bool owner_thread_valid = false;
+  JavaVM* java_vm = nullptr;
+  art::Thread* art_thread = nullptr;
+  std::vector<std::unique_ptr<const art::DexFile>> app_dex_files;
+};
+
+static ProcessState g_process_state;
+
+static bool BeginProcessRun() {
+  std::lock_guard<std::mutex> lock(g_process_state.mutex);
+  if (g_process_state.phase != ProcessPhase::kNeverStarted) {
+    return false;
   }
-  char* end = nullptr;
-  const double seconds = std::strtod(value, &end);
-  return end == value || seconds < 0.0 || seconds > 30.0 ? 0.0 : seconds;
+  g_process_state.phase = ProcessPhase::kRunning;
+  g_process_state.owner_thread = pthread_self();
+  g_process_state.owner_thread_valid = true;
+  return true;
 }
+
+static void RecordCreatedRuntime(art::Thread* art_thread) {
+  std::lock_guard<std::mutex> lock(g_process_state.mutex);
+  CHECK(g_process_state.phase == ProcessPhase::kRunning);
+  CHECK(art::Runtime::Current() != nullptr);
+  g_process_state.java_vm = reinterpret_cast<JavaVM*>(
+      art::Runtime::Current()->GetJavaVM());
+  g_process_state.art_thread = art_thread;
+}
+
+static void FinishProcessRun() {
+  std::lock_guard<std::mutex> lock(g_process_state.mutex);
+  CHECK(g_process_state.phase == ProcessPhase::kRunning);
+  g_process_state.phase = g_process_state.java_vm == nullptr
+                              ? ProcessPhase::kCreateFailed
+                              : ProcessPhase::kAwaitingShutdown;
+}
+
+// darwin_art_run_process is deliberately a one-shot process ABI for now. ART's
+// Runtime::Create() leaves its main thread runnable, which is appropriate for
+// the monolithic probe but not for returning to an arbitrary native host. Keep
+// this guard outside the managed-work lambda so every normal exit first
+// destroys ScopedObjectAccess/StackHandleScope and only then releases the
+// mutator lock by returning the ART thread to kNative.
+class ScopedProcessRunBoundary final {
+ public:
+  ScopedProcessRunBoundary() = default;
+
+  ~ScopedProcessRunBoundary() {
+    g_host_context = nullptr;
+    g_frame_callback = nullptr;
+
+    if (art_thread_ == nullptr) {
+      FinishProcessRun();
+      return;
+    }
+    CHECK_EQ(art::Thread::Current(), art_thread_);
+    const art::ThreadState state = art_thread_->GetState();
+    if (state == art::ThreadState::kRunnable) {
+      art_thread_->TransitionFromRunnableToSuspended(
+          art::ThreadState::kNative);
+    } else {
+      CHECK_EQ(state, art::ThreadState::kNative);
+    }
+    FinishProcessRun();
+  }
+
+  void SetArtThread(art::Thread* art_thread) {
+    DCHECK(art_thread_ == nullptr);
+    DCHECK(art_thread != nullptr);
+    art_thread_ = art_thread;
+  }
+
+ private:
+  art::Thread* art_thread_ = nullptr;
+};
+
+class ScopedJniLocalFrame final {
+ public:
+  explicit ScopedJniLocalFrame(JNIEnv* env)
+      : env_(env), pushed_(env != nullptr && env->PushLocalFrame(256) == JNI_OK) {}
+
+  ~ScopedJniLocalFrame() {
+    if (pushed_) {
+      env_->PopLocalFrame(nullptr);
+    }
+  }
+
+  bool IsValid() const { return pushed_; }
+
+ private:
+  JNIEnv* env_;
+  bool pushed_;
+};
 
 static jboolean PresentFrame(JNIEnv* env, jclass, jint width, jint height,
                              jintArray argb) {
@@ -63,10 +164,13 @@ static jboolean PresentFrame(JNIEnv* env, jclass, jint width, jint height,
   if (env->ExceptionCheck()) {
     return JNI_FALSE;
   }
-  const bool presented = DarwinPresentArgb(
-      reinterpret_cast<const std::uint32_t*>(pixels.data()),
-      static_cast<std::size_t>(width), static_cast<std::size_t>(height),
-      WindowVisibleSeconds());
+  const bool presented =
+      g_frame_callback == nullptr ||
+      g_frame_callback(g_host_context,
+                       reinterpret_cast<const std::uint32_t*>(pixels.data()),
+                       static_cast<std::uint32_t>(width),
+                       static_cast<std::uint32_t>(height),
+                       static_cast<std::size_t>(width) * sizeof(std::uint32_t)) != 0;
   if (presented) {
     g_frame_width = static_cast<std::size_t>(width);
     g_frame_height = static_cast<std::size_t>(height);
@@ -166,20 +270,53 @@ static jboolean PresentContent(JNIEnv* env, jclass, jobject view, jint width,
   return presented;
 }
 
-int main(int argc, char** argv) {
-  // Darwin's malloc zones can claim the fixed compressed-reference window
-  // while RuntimeArgumentMap is being assembled. Reserve ART's bounded arena
-  // before the launcher performs its first heap allocation.
-  art::MemMap::Init();
-
-  if (argc != 6) {
-    std::cerr << "usage: runtime-link-probe CORE_OJ_JAR CORE_LIBART_JAR "
-                 "FRAMEWORK_JAR CORE_ICU4J_JAR CLASSES_DEX\n";
+extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
+    const darwin_art_process_config_t* config,
+    darwin_art_process_result_t* run_result) {
+  if (config == nullptr || run_result == nullptr ||
+      config->struct_size < sizeof(darwin_art_process_config_t) ||
+      run_result->struct_size < sizeof(darwin_art_process_result_t) ||
+      config->abi_version != DARWIN_ART_ABI_VERSION ||
+      run_result->abi_version != DARWIN_ART_ABI_VERSION ||
+      config->core_oj_jar == nullptr || config->core_libart_jar == nullptr ||
+      config->framework_jar == nullptr || config->core_icu4j_jar == nullptr ||
+      config->app_dex == nullptr) {
+    std::cerr << "darwin_art_run_process: invalid ABI/configuration\n";
     return 64;
   }
 
+  const uint64_t heap_initial = config->heap_initial_bytes == 0
+                                    ? 64u * 1024u * 1024u
+                                    : config->heap_initial_bytes;
+  const uint64_t heap_maximum = config->heap_maximum_bytes == 0
+                                    ? 64u * 1024u * 1024u
+                                    : config->heap_maximum_bytes;
+  if (heap_initial > heap_maximum || heap_maximum > 256u * 1024u * 1024u) {
+    std::cerr << "darwin_art_run_process: invalid heap bounds\n";
+    return 65;
+  }
+
+  if (!BeginProcessRun()) {
+    std::cerr << "darwin_art_run_process: process already started\n";
+    return DARWIN_ART_STATUS_PROCESS_ALREADY_STARTED;
+  }
+  ScopedProcessRunBoundary process_boundary;
+
+  // Darwin's malloc zones can claim the fixed compressed-reference window
+  // while RuntimeArgumentMap is being assembled. Reserve ART's bounded arena
+  // after the one-shot process gate, but before the launcher performs its first
+  // heap allocation. MemMap::Init itself is process-global and not safe for
+  // concurrent callers.
+  art::MemMap::Init();
+
+  g_host_context = config->host_context;
+  g_frame_callback = config->frame_callback;
+  g_frame_width = 0;
+  g_frame_height = 0;
+
   std::string boot_class_path =
-      std::string(argv[1]) + ":" + argv[2] + ":" + argv[3] + ":" + argv[4];
+      std::string(config->core_oj_jar) + ":" + config->core_libart_jar + ":" +
+      config->framework_jar + ":" + config->core_icu4j_jar;
   std::cerr << "Mach-O slide: 0x" << std::hex << _dyld_get_image_vmaddr_slide(0)
             << std::dec << "\n";
   art::Locks::Init();
@@ -194,9 +331,9 @@ int main(int argc, char** argv) {
   // directly constructed RuntimeArgumentMap leaves this key at zero, which
   // MallocSpace interprets as zero capacity rather than "unlimited".
   options.Set(art::RuntimeArgumentMap::HeapGrowthLimit,
-              art::MemoryKiB(64 * 1024 * 1024));
+              art::MemoryKiB(heap_initial));
   options.Set(art::RuntimeArgumentMap::MemoryMaximumSize,
-              art::MemoryKiB(64 * 1024 * 1024));
+              art::MemoryKiB(heap_maximum));
   art::LogVerbosity verbosity{};
   verbosity.heap = true;
   options.Set(art::RuntimeArgumentMap::Verbose, verbosity);
@@ -206,18 +343,29 @@ int main(int argc, char** argv) {
   }
 
   art::Thread* self = art::Thread::Current();
+  RecordCreatedRuntime(self);
   if (self == nullptr) {
     std::cerr << "ART Darwin DEX: no current thread\n";
     return 2;
   }
 
+  process_boundary.SetArtThread(self);
+  return [&]() -> int32_t {
+
   art::interpreter::UnstartedRuntime::Initialize();
   art::ScopedObjectAccess soa(self);
+  ScopedJniLocalFrame local_frame(self->GetJniEnv());
+  if (!local_frame.IsValid()) {
+    std::cerr << "ART Darwin JNI: local frame allocation failed\n";
+    return 34;
+  }
   art::WellKnownClasses::Init(self->GetJniEnv());
 
-  std::vector<std::unique_ptr<const art::DexFile>> app_dex_files;
+  std::vector<std::unique_ptr<const art::DexFile>>& app_dex_files =
+      g_process_state.app_dex_files;
+  CHECK(app_dex_files.empty());
   std::string dex_error;
-  art::ArtDexFileLoader dex_loader(argv[5]);
+  art::ArtDexFileLoader dex_loader(config->app_dex);
   if (!dex_loader.Open(/* verify= */ true,
                        /* verify_checksum= */ true, &dex_error,
                        &app_dex_files)) {
@@ -840,8 +988,6 @@ int main(int argc, char** argv) {
   env->DeleteLocalRef(activity_info_class);
   env->DeleteLocalRef(activity_class);
   env->DeleteLocalRef(activity_instance);
-  env->DeleteGlobalRef(g_probe_canvas_class);
-  g_probe_canvas_class = nullptr;
   if (lifecycle_result != 43) {
     std::cerr << "ART Android lifecycle: expected 43, got " << lifecycle_result
               << "\n";
@@ -943,22 +1089,87 @@ int main(int argc, char** argv) {
     return 19;
   }
 
-  std::cout << "ART Darwin Runtime::Create: ok\n"
-            << "ART Darwin app ClassLoader: PathClassLoader\n"
-            << "ART Darwin DEX interpreter: Hello.answer()=" << result.GetI()
-            << "\n"
-            << "ART Darwin JNI: hostPageSize()=" << getpagesize()
-            << " nativeRoundTrip()=" << native_result.GetI() << "\n"
-            << "ART runtime native: System.arraycopy()="
-            << arraycopy_result.GetI() << "\n"
-            << "ART Android framework: ProbeActivity().probeValue()="
-            << activity_result << "\n"
-            << "ART Android window: Activity.attach()=PhoneWindow+DecorView\n"
-            << "ART Android view: Activity.setContentView()->DecorView.draw(Canvas)="
-            << g_frame_width << "x"
-            << g_frame_height << "\n"
-            << "ART Android lifecycle: Activity.onCreate()=" << lifecycle_result
-            << "\n"
-            << "ART Darwin launcher: main(String[])=ok\n";
+  run_result->hello_answer = result.GetI();
+  run_result->native_round_trip = native_result.GetI();
+  run_result->arraycopy_result = arraycopy_result.GetI();
+  run_result->activity_probe_result = activity_result;
+  run_result->lifecycle_result = lifecycle_result;
+  run_result->frame_width = static_cast<uint32_t>(g_frame_width);
+  run_result->frame_height = static_cast<uint32_t>(g_frame_height);
+  return 0;
+  }();
+}
+
+extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
+  JavaVM* java_vm = nullptr;
+  art::Thread* art_thread = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_process_state.mutex);
+    switch (g_process_state.phase) {
+      case ProcessPhase::kShutdownComplete:
+        return DARWIN_ART_STATUS_SHUTDOWN_ALREADY_COMPLETED;
+      case ProcessPhase::kShutdownFailed:
+        return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+      case ProcessPhase::kNeverStarted:
+      case ProcessPhase::kCreateFailed:
+      case ProcessPhase::kRunning:
+      case ProcessPhase::kShuttingDown:
+        return DARWIN_ART_STATUS_SHUTDOWN_NOT_READY;
+      case ProcessPhase::kAwaitingShutdown:
+        break;
+    }
+
+    if (!g_process_state.owner_thread_valid ||
+        pthread_equal(g_process_state.owner_thread, pthread_self()) == 0 ||
+        (g_process_state.art_thread != nullptr &&
+         art::Thread::Current() != g_process_state.art_thread)) {
+      return DARWIN_ART_STATUS_SHUTDOWN_WRONG_THREAD;
+    }
+    g_process_state.phase = ProcessPhase::kShuttingDown;
+    java_vm = g_process_state.java_vm;
+    art_thread = g_process_state.art_thread;
+  }
+
+  CHECK(java_vm != nullptr);
+  if (art_thread != nullptr) {
+    CHECK_EQ(art_thread->GetState(), art::ThreadState::kNative);
+    {
+      art::ScopedObjectAccess soa(art_thread);
+      if (art_thread->IsExceptionPending()) {
+        std::cerr << "ART Darwin shutdown: clearing pending exception: "
+                  << art_thread->GetException()->Dump() << "\n";
+        art_thread->ClearException();
+      }
+      if (g_probe_canvas_class != nullptr) {
+        art_thread->GetJniEnv()->DeleteGlobalRef(g_probe_canvas_class);
+        g_probe_canvas_class = nullptr;
+      }
+      if (art_thread->IsExceptionPending()) {
+        std::cerr << "ART Darwin shutdown: global reference cleanup threw: "
+                  << art_thread->GetException()->Dump() << "\n";
+        art_thread->ClearException();
+      }
+    }
+    CHECK_EQ(art_thread->GetState(), art::ThreadState::kNative);
+  }
+
+  // DestroyJavaVM deletes Runtime::Current(). Registered DexFile pointers must
+  // remain valid through ClassLinker/Heap teardown, so release their owning
+  // storage only after this returns successfully. Do not touch art_thread after
+  // this call: its Thread object is owned by the destroyed Runtime.
+  const jint destroy_result = java_vm->DestroyJavaVM();
+  if (destroy_result != JNI_OK) {
+    std::lock_guard<std::mutex> lock(g_process_state.mutex);
+    g_process_state.phase = ProcessPhase::kShutdownFailed;
+    return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+  }
+
+  g_process_state.app_dex_files.clear();
+  {
+    std::lock_guard<std::mutex> lock(g_process_state.mutex);
+    g_process_state.java_vm = nullptr;
+    g_process_state.art_thread = nullptr;
+    g_process_state.phase = ProcessPhase::kShutdownComplete;
+  }
   return 0;
 }
