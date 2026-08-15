@@ -55,8 +55,14 @@ fn run() -> Result<()> {
         "build-file-input-stream" => {
             build_shell_gate(&root, "build-android16-file-input-stream-darwin.sh")
         }
+        "build-file-descriptor" => {
+            build_shell_gate(&root, "build-android16-file-descriptor-darwin.sh")
+        }
         "build-openjdk-nio-mapping" => {
             build_shell_gate(&root, "build-android16-openjdk-nio-mapping.sh")
+        }
+        "build-libcore-memory" => {
+            build_shell_gate(&root, "build-android16-libcore-memory-darwin.sh")
         }
         "build-ziparchive-incfs" => build_shell_gate(&root, "build-android16-ziparchive-incfs.sh"),
         "build-hostgraphics" => build_shell_gate(&root, "build-android16-hostgraphics.sh"),
@@ -3282,7 +3288,9 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
     build_shell_gate(root, "build-android16-unix-filesystem-darwin.sh")?;
     build_shell_gate(root, "build-android16-openjdkjvm-darwin.sh")?;
     build_shell_gate(root, "build-android16-file-input-stream-darwin.sh")?;
+    build_shell_gate(root, "build-android16-file-descriptor-darwin.sh")?;
     build_shell_gate(root, "build-android16-openjdk-nio-mapping.sh")?;
+    build_shell_gate(root, "build-android16-libcore-memory-darwin.sh")?;
     build_shell_gate(root, "build-android16-android-util-log.sh")?;
 
     let runtime = root.join("_aosp/art/runtime");
@@ -3303,9 +3311,15 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
     let openjdkjvm_archive = root.join("_build/openjdkjvm-darwin/libopenjdkjvm-darwin.a");
     let file_input_stream_archive =
         root.join("_build/file-input-stream-darwin/libopenjdk-file-input-stream-darwin.a");
+    let file_descriptor_archive =
+        root.join("_build/file-descriptor-darwin/libopenjdk-file-descriptor-darwin.a");
     let openjdk_nio_dir = root.join("_build/openjdk-nio-mapping");
     let openjdk_nio_mapping_archive = openjdk_nio_dir.join("libopenjdk-nio-mapping-darwin.a");
     let openjdk_nio_support_archive = openjdk_nio_dir.join("libopenjdk-nio-support-darwin.a");
+    let libcore_memory_dir = root.join("_build/libcore-memory");
+    let libcore_memory_archive = libcore_memory_dir.join("libcore-memory-art-runtime-darwin.a");
+    let libcore_jni_constants_archive =
+        libcore_memory_dir.join("libcore-jni-constants-art-runtime-darwin.a");
     let asynchronous_close_dir = root.join("_build/asynchronous-close-monitor");
     let asynchronous_close_registrar =
         asynchronous_close_dir.join("libcore-io-asynchronous-close-monitor-registrar-darwin.a");
@@ -3325,8 +3339,11 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         &unix_filesystem_archive,
         &openjdkjvm_archive,
         &file_input_stream_archive,
+        &file_descriptor_archive,
         &openjdk_nio_mapping_archive,
         &openjdk_nio_support_archive,
+        &libcore_memory_archive,
+        &libcore_jni_constants_archive,
         &asynchronous_close_registrar,
         &asynchronous_close_backend,
         &resource_jni_archive,
@@ -3429,9 +3446,12 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         // archives so the latter extract only additional runtime providers.
         .arg(&graphics_closure)
         .arg(&bootstrap)
+        .arg(&file_descriptor_archive)
         .arg(&file_input_stream_archive)
         .arg(&openjdk_nio_mapping_archive)
         .arg(&openjdk_nio_support_archive)
+        .arg(&libcore_memory_archive)
+        .arg(&libcore_jni_constants_archive)
         .arg(&unix_filesystem_archive)
         .arg(&openjdkjvm_archive)
         .arg(&os_constants_archive)
@@ -3534,10 +3554,14 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         "register_android_system_OsConstants",
         "register_java_io_UnixFileSystem",
         "register_java_io_FileInputStream",
+        "register_java_io_FileDescriptor",
         "register_sun_nio_ch_IOUtil",
         "register_sun_nio_ch_FileChannelImpl",
         "register_sun_nio_ch_FileDispatcherImpl",
         "register_sun_nio_ch_NativeThread",
+        "darwin_art_restore_sun_nio_ch_NativeThread_signal",
+        "register_libcore_io_Memory",
+        "DarwinArtLibcoreJniConstants::GetPrimitiveByteArrayClass",
         "JVM_GetLastErrorString",
         "register_libcore_io_AsynchronousCloseMonitor",
         "async_close_monitor_signal_blocked_threads",
@@ -3557,6 +3581,8 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         "JniConstants_FileDescriptor_fd",
         "UnixFileSystemInitIds",
         "UnixFileSystemGetBooleanAttributes",
+        "FileDescriptorGetAppend",
+        "FileDescriptorIsSocket",
     ] {
         if all_symbols.contains(forbidden) {
             return Err(format!("real-graphics Runtime contains fake symbol {forbidden}").into());

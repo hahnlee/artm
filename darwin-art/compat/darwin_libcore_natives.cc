@@ -6,11 +6,19 @@
 
 void register_libcore_io_AsynchronousCloseMonitor(JNIEnv* env);
 extern "C" void register_java_io_UnixFileSystem(JNIEnv* env);
+extern "C" void register_java_io_FileDescriptor(JNIEnv* env);
 extern "C" void register_java_io_FileInputStream(JNIEnv* env);
 extern "C" void register_sun_nio_ch_IOUtil(JNIEnv* env);
 extern "C" void register_sun_nio_ch_FileChannelImpl(JNIEnv* env);
 extern "C" void register_sun_nio_ch_FileDispatcherImpl(JNIEnv* env);
 extern "C" void register_sun_nio_ch_NativeThread(JNIEnv* env);
+extern "C" int darwin_art_restore_sun_nio_ch_NativeThread_signal();
+void register_libcore_io_Memory(JNIEnv* env);
+
+class DarwinArtLibcoreJniConstants {
+ public:
+  static void Initialize(JNIEnv* env);
+};
 #endif
 
 #include <fcntl.h>
@@ -489,6 +497,7 @@ jlong SystemNanoTime(JNIEnv*, jclass) {
       .count();
 }
 
+#if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
 jboolean FileDescriptorGetAppend(jint descriptor) {
   const int flags = fcntl(descriptor, F_GETFL);
   return flags >= 0 && (flags & O_APPEND) != 0 ? JNI_TRUE : JNI_FALSE;
@@ -501,6 +510,7 @@ jboolean FileDescriptorIsSocket(jint descriptor) {
              ? JNI_TRUE
              : JNI_FALSE;
 }
+#endif
 
 bool Register(JNIEnv* env, const char* class_name,
               const JNINativeMethod* methods, jint method_count) {
@@ -653,12 +663,14 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
        const_cast<char*>("()[Ljava/lang/String;"),
        reinterpret_cast<void*>(&SystemSpecialProperties)},
   };
+#if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
   JNINativeMethod file_descriptor_methods[] = {
       {const_cast<char*>("getAppend"), const_cast<char*>("(I)Z"),
        reinterpret_cast<void*>(&FileDescriptorGetAppend)},
       {const_cast<char*>("isSocket"), const_cast<char*>("(I)Z"),
        reinterpret_cast<void*>(&FileDescriptorIsSocket)},
   };
+#endif
   const auto register_linux = [&]() {
 #if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
     // Android's Register.cpp initializes the asynchronous-close signal owner
@@ -709,16 +721,49 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
     return true;
 #endif
   };
+  const auto register_file_descriptor = [&]() {
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+    register_java_io_FileDescriptor(env);
+    return !env->ExceptionCheck();
+#else
+    return Register(env, "java/io/FileDescriptor", file_descriptor_methods, 2);
+#endif
+  };
+  const auto register_libcore_memory = [&]() {
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+    // StartMinimal has already registered ART's complementary seven array
+    // methods. Android libjavacore owns the disjoint scalar/bulk eighteen.
+    register_libcore_io_Memory(env);
+    if (env->ExceptionCheck()) {
+      return false;
+    }
+    DarwinArtLibcoreJniConstants::Initialize(env);
+    return !env->ExceptionCheck();
+#else
+    return true;
+#endif
+  };
   return Register(env, "java/lang/Character", character_methods,
                   static_cast<jint>(std::size(character_methods))) &&
          Register(env, "java/lang/Float", float_methods, 2) &&
          Register(env, "java/lang/Double", double_methods, 2) &&
+         // Android's OpenJDK OnLoad registers System before owners whose
+         // FindClass/GetFieldID paths may initialize java.io or NIO classes.
+         Register(env, "java/lang/System", system_methods, 3) &&
          register_os_constants() &&
          register_linux() &&
-         Register(env, "java/io/FileDescriptor", file_descriptor_methods, 2) &&
+         register_file_descriptor() &&
          register_openjdk_file_mapping() &&
-         Register(env, "libcore/icu/ICU", icu_methods, 3) &&
-         Register(env, "java/lang/System", system_methods, 3);
+         register_libcore_memory() &&
+         Register(env, "libcore/icu/ICU", icu_methods, 3);
+}
+
+bool ShutdownLibcoreNatives() {
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+  return darwin_art_restore_sun_nio_ch_NativeThread_signal() == 0;
+#else
+  return true;
+#endif
 }
 
 }  // namespace darwin_art

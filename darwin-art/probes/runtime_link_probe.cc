@@ -1377,6 +1377,12 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
                   << art_thread->GetException()->Dump() << "\n";
         art_thread->ClearException();
       }
+      if (!darwin_art::ShutdownLibcoreNatives()) {
+        std::cerr << "ART Darwin shutdown: libcore host state restore failed\n";
+        std::lock_guard<std::mutex> lock(g_process_state.mutex);
+        g_process_state.phase = ProcessPhase::kShutdownFailed;
+        return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+      }
       if (resource_runtime_installed &&
           !darwin_art::ShutdownFrameworkResourceRuntime(
               art_thread->GetJniEnv())) {

@@ -6,6 +6,7 @@
 namespace darwin_art {
 
 bool RegisterLibcoreNatives(JNIEnv* env);
+bool ShutdownLibcoreNatives();
 
 }  // namespace darwin_art
 
