@@ -1,0 +1,3 @@
+symbol	kind	class	owner
+strtod	FUNC	B	AOSP-gdtoa-binary64
+strtof	FUNC	B	AOSP-gdtoa-binary32
