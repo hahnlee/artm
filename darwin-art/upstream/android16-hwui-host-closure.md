@@ -59,7 +59,8 @@ persistent IOSurface bridge until a Darwin HWUI pipeline exists.
 ## Darwin compile findings
 
 The four direct Android 16 translation units compile unmodified as arm64 Mach-O
-objects with Apple's Clang. The reproducible command is
+objects with Apple's Clang. This is a source/host compile proof, not yet a safe
+ART registration build. The reproducible command is
 `tools/compile-android16-hwui-canvas-gate.sh`; it intentionally performs an
 object compile rather than pretending that the full registration table is
 already link-closed.
@@ -79,12 +80,28 @@ Without the same definition on both sides, Android-private Skia API is absent:
 - `SkAndroidFrameworkUtils` is not declared or compiled;
 - Android's extra Canvas virtuals differ, leaving `RecordingCanvas` abstract.
 
-The current `_build/skia/libskia.a` was generated without that definition and
-therefore cannot be used to link this gate. Rebuild it with
-`-DSK_BUILD_FOR_ANDROID_FRAMEWORK` and include Skia's Android framework source
-closure (including `src/android/SkAndroidFrameworkUtils.cpp`) before attempting
-the full link. This is an ABI/build-configuration requirement, not a symbol to
-replace with a Darwin stub.
+`_build/skia/libskia.a` now uses that definition and its executable gate calls
+the implementations from `src/android/SkAndroidFrameworkUtils.cpp`. This is an
+ABI/build-configuration requirement, not a symbol to replace with a Darwin
+stub.
+
+There is a second, independent ABI choice in `jni/graphics_jni_helpers.h`.
+Because this target is not `__ANDROID__`, the unmodified host branch expands
+`CRITICAL_JNI_PARAMS` to `JNIEnv*, jclass`. Android framework DEX retains its
+`@CriticalNative` annotations, so ART calls those functions without the two JNI
+parameters. Defining `__ANDROID__` globally would also select unrelated Android
+platform/GPU behavior. The compile gate now applies the locked
+`0001-darwin-android-critical-jni-abi.patch` only to a disposable build copy and
+defines `DARWIN_ART_ANDROID_CRITICAL_JNI_ABI`; representative Canvas/Paint
+symbols are rejected if their demangled signatures contain the host JNI
+parameters. It also uses `-fno-rtti` to match the GN Skia archive rather than
+inventing a `SkDrawable` typeinfo symbol.
+
+With those ABI fixes, the four direct objects have 278 unique undefined symbols.
+The framework Skia archive defines 149, Apple runtime libraries own 56, and the
+remaining Android-owned groups are HWUI core (48), graphics JNI (17), Minikin
+(11), and liblog (2). These are progress counts only: every archive adds a new
+transitive module closure, so a decreasing number is not a link-complete gate.
 
 The compile gate also avoids adding `compat/` as a normal angle-bracket include
 directory. Doing so intercepts `<unistd.h>` with the Darwin compatibility
@@ -96,10 +113,13 @@ overlay and conflicts with AOSP `utils/Compat.h`'s `lseek64`. It uses
 
 1. Materialize and checksum the exact `libs/hwui` subtree.
 2. Compile the four direct translation units without modifying their JNI tables.
-3. Add upstream dependency projects at the locked revisions as missing headers
+3. Preserve the checked Android critical-native/no-RTTI ABI contract across all
+   subsequent HWUI and graphics JNI translation units.
+4. Add upstream dependency projects at the locked revisions as missing headers
    and symbols are encountered.
-4. Link every native referenced by `register_android_graphics_Canvas()` and
+5. Link every native referenced by `register_android_graphics_Canvas()` and
    `register_android_graphics_Paint()`.
-5. Register those upstream functions in ART and delete `ProbeCanvas` and the
+6. Register the complete upstream graphics map in ART and delete `ProbeCanvas`
+   and the
    Darwin Paint implementation only after the complete registration/link audit
    passes.

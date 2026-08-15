@@ -147,6 +147,16 @@ fn sync_sources(root: &Path) -> Result<()> {
     )?;
     materialize_archive(
         root,
+        "platform/system/core",
+        lock_value(&lock, "SYSTEM_CORE_REVISION")?,
+        "system-core-libcutils-include",
+        "libcutils/include",
+        "_aosp/system/core/libcutils/include",
+        "cutils/trace.h",
+        lock_value(&lock, "LIBCUTILS_TRACE_HEADER_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
         "platform/art",
         revision,
         "art-runtime",
@@ -463,6 +473,19 @@ fn materialize_archive(
     if marker.exists() && fs::read_to_string(&marker)?.trim() == revision {
         println!(
             "sync: source already materialized at {}",
+            source_dir.display()
+        );
+        return Ok(());
+    }
+    if source_dir.exists() && !marker.exists() {
+        // Older local gates materialized a few source subtrees before the
+        // provenance marker became mandatory. Adopt only a tree whose pinned
+        // verification file already matches; arbitrary or modified source is
+        // still rejected by the checksum.
+        verify_sha256(&source_dir.join(verification_file), expected_source_sha)?;
+        fs::write(&marker, format!("{revision}\n"))?;
+        println!(
+            "sync: adopted checksum-matched locked source at {}",
             source_dir.display()
         );
         return Ok(());
@@ -823,6 +846,8 @@ fn build_foundation(root: &Path) -> Result<()> {
 
 fn build_skia(root: &Path) -> Result<()> {
     const EXPECTED_OUTPUT: &str = "Skia Darwin raster: 64x64 rowBytes=256 hash=a4bb4cdb0b4779ea";
+    const EXPECTED_FRAMEWORK_OUTPUT: &str =
+        "Skia Android framework utils: base-canvas=same surface=same reset-clip=64x64";
     const EXPECTED_IOSURFACE_OUTPUT: &str = "darwin-skia-surface: direct-iosurface frames=120 staging-copies=0 \
          final-hash=b32235958413af5e sequence-hash=5fd4ea042fd71d4e";
 
@@ -835,6 +860,15 @@ fn build_skia(root: &Path) -> Result<()> {
     if source_revision.trim() != lock_value(&lock, "SKIA_REVISION")? {
         return Err("materialized Skia revision does not match sources.lock".into());
     }
+    let libcutils_include = root.join("_aosp/system/core/libcutils/include");
+    let libcutils_revision = fs::read_to_string(libcutils_include.join(".source-revision"))?;
+    if libcutils_revision.trim() != lock_value(&lock, "SYSTEM_CORE_REVISION")? {
+        return Err("materialized libcutils headers do not match sources.lock".into());
+    }
+    verify_sha256(
+        &libcutils_include.join("cutils/trace.h"),
+        lock_value(&lock, "LIBCUTILS_TRACE_HEADER_SHA256")?,
+    )?;
 
     let gn = skia.join("bin/gn");
     if !gn.is_file() {
@@ -866,6 +900,7 @@ fn build_skia(root: &Path) -> Result<()> {
          skia_enable_tools=false skia_enable_fontmgr_empty=true skia_use_expat=false \
          skia_use_fonthost_mac=false skia_use_freetype=false skia_use_fontconfig=false \
          skia_use_harfbuzz=false skia_use_icu=false skia_use_perfetto=false \
+         skia_disable_tracing=false \
          skia_use_gl=false skia_use_metal=false skia_use_vulkan=false \
          skia_use_libjpeg_turbo_decode=false skia_use_libjpeg_turbo_encode=false \
          skia_use_no_jpeg_encode=true skia_use_libpng_decode=false \
@@ -875,8 +910,10 @@ fn build_skia(root: &Path) -> Result<()> {
          skia_use_xps=false skia_use_zlib=false skia_use_dng_sdk=false \
          skia_use_libheif=false skia_use_crabbyavif=false skia_use_libjxl_decode=false \
          skia_use_libavif=false skia_use_bidi=false skia_use_libgrapheme=false \
-         skia_build_rust_targets=false extra_cflags=[\"-I{}\"]",
-        compat.display()
+        skia_build_rust_targets=false \
+         extra_cflags=[\"-I{}\",\"-I{}\",\"-DSK_BUILD_FOR_ANDROID_FRAMEWORK\"]",
+        compat.display(),
+        libcutils_include.display()
     );
     run_command(
         Command::new(&gn)
@@ -901,10 +938,53 @@ fn build_skia(root: &Path) -> Result<()> {
         }
     }
 
+    let skia_symbols = command_output(Command::new("nm").args(["-gU"]).arg(&skia_archive))?;
+    for symbol in [
+        "__ZN23SkAndroidFrameworkUtils20getBaseWrappedCanvasEP8SkCanvas",
+        "__ZN23SkAndroidFrameworkUtils20getSurfaceFromCanvasEP8SkCanvas",
+        "__ZN23SkAndroidFrameworkUtils9ResetClipEP8SkCanvas",
+    ] {
+        if !skia_symbols.contains(symbol) {
+            return Err(
+                format!("Skia archive is missing Android framework symbol {symbol}").into(),
+            );
+        }
+    }
+
+    let framework_smoke = build_dir.join("skia-android-framework-smoke");
+    run_command(
+        Command::new("clang++")
+            .args([
+                "-std=c++20",
+                "-O2",
+                "-DNDEBUG",
+                "-DSK_BUILD_FOR_ANDROID_FRAMEWORK",
+            ])
+            .arg(format!("-I{}", compat.display()))
+            .arg(format!("-I{}", skia.display()))
+            .arg(root.join("probes/skia_android_framework_smoke.cc"))
+            .arg(&skia_archive)
+            .arg(&skcms_archive)
+            .args(["-framework", "CoreGraphics", "-framework", "CoreFoundation"])
+            .arg("-o")
+            .arg(&framework_smoke),
+    )?;
+    let framework_output = command_output(&mut Command::new(&framework_smoke))?;
+    if framework_output.trim() != EXPECTED_FRAMEWORK_OUTPUT {
+        return Err(
+            format!("unexpected Skia Android framework output: {framework_output:?}").into(),
+        );
+    }
+
     let smoke = build_dir.join("skia-raster-smoke");
     run_command(
         Command::new("clang++")
-            .args(["-std=c++20", "-O2", "-DNDEBUG"])
+            .args([
+                "-std=c++20",
+                "-O2",
+                "-DNDEBUG",
+                "-DSK_BUILD_FOR_ANDROID_FRAMEWORK",
+            ])
             .arg(format!("-I{}", compat.display()))
             .arg(format!("-I{}", skia.display()))
             .arg(root.join("probes/skia_raster_smoke.cc"))
@@ -930,6 +1010,7 @@ fn build_skia(root: &Path) -> Result<()> {
                 "-std=c++20",
                 "-O2",
                 "-DNDEBUG",
+                "-DSK_BUILD_FOR_ANDROID_FRAMEWORK",
                 "-fobjc-arc",
                 "-Wall",
                 "-Wextra",
@@ -966,8 +1047,9 @@ fn build_skia(root: &Path) -> Result<()> {
         );
     }
     println!(
-        "build-skia: {} archive_bytes={} {}",
+        "build-skia: {} {} archive_bytes={} {}",
         output.trim(),
+        framework_output.trim(),
         fs::metadata(&skia_archive)?.len(),
         iosurface_output.trim()
     );

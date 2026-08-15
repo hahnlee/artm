@@ -74,7 +74,7 @@ Expected final lines include:
 probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
-build-skia: Skia Darwin raster: 64x64 rowBytes=256 hash=a4bb4cdb0b4779ea ...
+build-skia: Skia Darwin raster: 64x64 rowBytes=256 hash=a4bb4cdb0b4779ea Skia Android framework utils: base-canvas=same surface=same reset-clip=64x64 ...
 build-dex: AOSP DEX: verified=yes version=35 classes=12 methods=288 ... corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
@@ -122,8 +122,18 @@ It compiles the unmodified upstream `SkiaCanvas.cpp`, `hwui/Canvas.cpp`, Canvas
 JNI, and Paint JNI sources as ARM64 Mach-O objects and records their direct
 undefined-symbol closure. The exact source and dependency revisions are pinned
 under `upstream/`; the ordered module-level closure and current
-`SK_BUILD_FOR_ANDROID_FRAMEWORK` blocker are documented in
+registrar closure are documented in
 `upstream/android16-hwui-host-closure.md`.
+
+Skia itself now builds with `SK_BUILD_FOR_ANDROID_FRAMEWORK`; an executable gate
+calls the real `SkAndroidFrameworkUtils` surface, wrapped-canvas, and clip-reset
+operations while preserving the existing raster and direct-IOSurface golden
+hashes. A narrow locked patch now keeps Darwin's host platform branches while
+selecting Android's `@CriticalNative` function signatures and Skia's no-RTTI
+contract; representative Canvas/Paint symbols are checked to contain no
+`JNIEnv*` or `jclass` parameters. The four JNI/HWUI objects are still compile
+proofs rather than safe ART registrars because their complete module dependency
+and registration closure is not linked yet.
 
 `build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
 depfile for every translation unit; the bootstrapper fingerprints the complete

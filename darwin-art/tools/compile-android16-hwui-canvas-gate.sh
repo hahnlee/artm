@@ -5,6 +5,9 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 project_root="$(cd "$script_dir/.." && pwd)"
 aosp_root="$project_root/_aosp"
 output_dir="$project_root/_build/hwui-canvas-gate"
+source_hwui="$aosp_root/frameworks/base/libs/hwui"
+patched_hwui="$output_dir/patched-hwui"
+critical_jni_patch="$project_root/patches/frameworks-base/0001-darwin-android-critical-jni-abi.patch"
 
 "$script_dir/materialize-android16-hwui.sh"
 
@@ -52,13 +55,23 @@ fi
 # Invoke the system driver rather than the toolchain binary returned by
 # `xcrun --find`: the driver supplies the active macOS SDK's libc++ headers.
 cxx="$(command -v clang++)"
-hwui="$aosp_root/frameworks/base/libs/hwui"
+
+# Keep the checksum-verified materialization immutable. The Darwin calling-ABI
+# patch is deliberately applied only to a disposable build copy so it cannot
+# hide source drift in materialize-android16-hwui.sh.
+mkdir -p "$output_dir"
+rm -rf -- "$patched_hwui"
+cp -R "$source_hwui" "$patched_hwui"
+patch -d "$patched_hwui" -p1 < "$critical_jni_patch"
+hwui="$patched_hwui"
 
 common_flags=(
   -std=c++23
   -arch arm64
   -fPIC
+  -fno-rtti
   -fvisibility=hidden
+  -DDARWIN_ART_ANDROID_CRITICAL_JNI_ABI
   -DHWUI_NULL_GPU
   -DSK_BUILD_FOR_ANDROID_FRAMEWORK
   '-D__INTRODUCED_IN(n)='
@@ -126,6 +139,26 @@ nm -gU "$output_dir/jni_android_graphics_Canvas.cpp.o" | \
   grep 'register_android_graphics_Canvas' >/dev/null
 nm -gU "$output_dir/jni_Paint.cpp.o" | \
   grep 'register_android_graphics_Paint' >/dev/null
+
+# These methods are representative @CriticalNative entries. They must use the
+# Android ABI even though the surrounding HWUI implementation selects Darwin's
+# host platform branches. A host ABI object would demangle with leading
+# `_JNIEnv*, _jclass*` parameters and would be unsafe for ART to call.
+canvas_symbols="$(nm -aC "$output_dir/jni_android_graphics_Canvas.cpp.o")"
+paint_symbols="$(nm -aC "$output_dir/jni_Paint.cpp.o")"
+grep -F 'android::CanvasJNI::getWidth(long long)' <<<"$canvas_symbols" >/dev/null
+grep -F 'android::PaintGlue::setFlags(long long, int)' <<<"$paint_symbols" >/dev/null
+if grep -F 'android::CanvasJNI::getWidth(_JNIEnv*, _jclass*' \
+    <<<"$canvas_symbols" >/dev/null; then
+  echo "compile-hwui-canvas: Canvas critical native uses host JNI ABI" >&2
+  exit 1
+fi
+if grep -F 'android::PaintGlue::setFlags(_JNIEnv*, _jclass*' \
+    <<<"$paint_symbols" >/dev/null; then
+  echo "compile-hwui-canvas: Paint critical native uses host JNI ABI" >&2
+  exit 1
+fi
+echo "compile-hwui-canvas: critical-jni-abi=android"
 
 # Preserve the exact direct-object link closure for the next module-level gate.
 # Platform C/C++ runtime symbols remain in this list by design.

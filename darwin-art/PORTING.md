@@ -106,12 +106,18 @@
 - [x] Pin the Android 16 HWUI Canvas source identity and compile the first
       upstream `SkiaCanvas`, `Canvas`, Canvas JNI, and Paint JNI objects as
       unmodified arm64 Mach-O translation units.
-- [ ] Rebuild Skia and HWUI with the same `SK_BUILD_FOR_ANDROID_FRAMEWORK`
-      contract, including `SkAndroidFrameworkUtils`, so their private Canvas
-      ABI and Android-only virtuals match.
+- [x] Rebuild Skia with `SK_BUILD_FOR_ANDROID_FRAMEWORK`, include and execute
+      `SkAndroidFrameworkUtils`, and keep the raster/IOSurface golden hashes
+      stable under the Android-private Canvas ABI.
+- [x] Build the first HWUI objects for the Darwin host platform while selecting
+      Android's `@CriticalNative` calling convention through a narrow locked
+      patch, without defining `__ANDROID__`, and match Skia's no-RTTI contract.
 - [ ] Close the complete upstream Canvas/Paint registrar dependency graph with
       GraphicsJNI, software `libhwui_static`, Minikin, HarfBuzz, FreeType, ICU,
       androidfw, and native utility modules; do not substitute per-symbol stubs.
+- [ ] Register the complete graphics native map atomically after libcore/System
+      initialization, then replace `ProbeCanvas` with a real `Bitmap`-backed
+      `Canvas` before attempting direct IOSurface backing.
 - [ ] Replace the software `Canvas.drawBitmap()` backend with Skia/HWUI and
       replace the programmatic content root/minimal interpolator parser with
       complete compiled framework-resource support.
