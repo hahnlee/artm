@@ -156,8 +156,11 @@
       workaround.
 - [x] Replace the temporary Darwin `java.lang.Math` wrappers with Android 16
       libcore's unchanged `Math.c` and complete 23-entry FastNative table.
-- [ ] Replace the Java `int[]` test scene and Bitmap readback with ordinary
-      Android Paint/text widgets and direct IOSurface backing; replace the
+- [x] Replace the Java `int[]` test scene with ordinary Android `Paint` and
+      upstream `Canvas.drawColor()`/`drawRect()` raster while preserving the
+      exact six-color frame hash.
+- [ ] Replace the programmatic Paint scene and Bitmap readback with ordinary
+      Android text widgets/Button and direct IOSurface backing; replace the
       programmatic content root/minimal interpolator parser with complete
       compiled framework-resource support.
 

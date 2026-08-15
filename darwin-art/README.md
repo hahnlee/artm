@@ -77,7 +77,7 @@ probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
 build-skia: Skia Darwin raster: 64x64 rowBytes=256 hash=a4bb4cdb0b4779ea Skia Android framework utils: base-canvas=same surface=same reset-clip=64x64 ...
-build-dex: AOSP DEX: verified=yes version=35 classes=12 methods=293 ... corrupt=rejected
+build-dex: AOSP DEX: verified=yes version=35 classes=12 methods=301 ... corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
@@ -95,10 +95,10 @@ To keep the native window visible for three seconds, run:
 cargo run -p art-bootstrap -- probe-window
 ```
 
-The current Activity scene is deliberately small: `ProbeView.onDraw()` submits
-a Java `0xAARRGGBB` bitmap through the real Android `Canvas.drawBitmap()` JNI
-path. Android's upstream HWUI `SkiaCanvas` rasterizes into a real mutable
-`Bitmap`; upstream `Bitmap.getPixels()` exports the result. The C callback
+The current Activity scene is deliberately small: `ProbeView.onDraw()` creates
+a normal Android `Paint` and issues `Canvas.drawColor()`/`drawRect()` calls.
+Android's upstream Paint JNI and HWUI `SkiaCanvas` rasterize those primitives
+into a real mutable `Bitmap`; upstream `Bitmap.getPixels()` exports the result. The C callback
 borrows that frame only while ART is runnable; Rust makes one tightly packed
 owned copy, returns across the ART boundary, then uploads it into a persistent
 IOSurface-backed Metal texture. The same `NSWindow`, `CAMetalLayer`, IOSurface,
@@ -107,7 +107,7 @@ texture, and command queue remain alive for the session. No frame creates a
 
 This proves the real `Activity.onCreate() -> PhoneWindow.setContentView() ->
 DecorView -> ViewGroup.dispatchDraw() -> View.draw(Canvas) -> HWUI/Skia ->
-Bitmap` path. The Rust acceptance requires all 230,400 pixels to be opaque, an
+Paint -> Bitmap` path. The Rust acceptance requires all 230,400 pixels to be opaque, an
 exact six-color distribution, hash `44d122c296a3e065`, and clean ART shutdown.
 Separately, `build-skia` maps the IOSurface and wraps its base address with
 upstream `SkCanvas::MakeRasterDirect`; 120 frames are rasterized and
