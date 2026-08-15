@@ -146,6 +146,7 @@ cargo run -p art-bootstrap -- build-ui-types
 cargo run -p art-bootstrap -- build-graphics-codecs
 cargo run -p art-bootstrap -- build-harfbuzz
 cargo run -p art-bootstrap -- build-minikin
+cargo run -p art-bootstrap -- build-skia-text
 ```
 
 `liblog-darwin.a` contains all eight Darwin-host sources and resolves the two
@@ -169,6 +170,10 @@ The next two gates compile all 53 Android HarfBuzz translation units and all
 31 Minikin translation units. Their remaining unresolved closure is kept
 visible; the next required module is the pinned Android ICU host build and its
 data image, not a local symbol shim.
+`build-skia-text` keeps the no-font baseline untouched and produces a separate
+Skia archive wired to the pinned AOSP FreeType/libpng/zlib archives. Its actual
+Roboto `Click` raster is locked at five glyphs, 1,097 ink pixels, and pixel hash
+`1f94df6816828ca2`; the final binary has no Homebrew or CoreText dependency.
 
 `build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
 depfile for every translation unit; the bootstrapper fingerprints the complete

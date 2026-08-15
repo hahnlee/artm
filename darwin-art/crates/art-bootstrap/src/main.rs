@@ -48,6 +48,7 @@ fn run() -> Result<()> {
             &["--archive-only"],
         ),
         "build-minikin" => build_shell_gate(&root, "build-android16-minikin-foundation.sh"),
+        "build-skia-text" => build_shell_gate(&root, "build-android16-skia-text-raster.sh"),
         "check-text-shaping" => build_shell_gate(&root, "check-android16-text-shaping-inputs.sh"),
         "build-dex" => build_dex_probe(&root),
         "build-runtime-platform" => build_runtime_platform(&root),
@@ -106,6 +107,7 @@ fn print_help() {
     println!("  build-graphics-codecs  build Darwin zlib/libpng/FreeType archives");
     println!("  build-harfbuzz  build the complete Darwin HarfBuzz archive");
     println!("  build-minikin  build the complete Darwin Minikin archive");
+    println!("  build-skia-text  raster pinned Roboto through AOSP FreeType and Skia");
     println!("  check-text-shaping  audit the full shaping and raster input closure");
     println!("  build-dex  compile AOSP libdexfile and parse a generated classes.dex");
     println!("  build-runtime-platform  compile ART host platform sources as Mach-O");
