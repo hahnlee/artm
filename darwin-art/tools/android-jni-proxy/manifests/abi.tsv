@@ -1,0 +1,8 @@
+entry	table	slot	android_signature	pcs	status
+JNI_OnLoad	export	-	jint(JavaVM*,void*)	direct-register-only	fixture-entry
+GetVersion	JNIEnv	4	jint(JNIEnv*)	direct-register-only	implemented
+FindClass	JNIEnv	6	jclass(JNIEnv*,const-char*)	direct-register-only	implemented
+ThrowNew	JNIEnv	14	jint(JNIEnv*,jclass,const-char*)	direct-register-only	implemented
+RegisterNatives	JNIEnv	215	jint(JNIEnv*,jclass,const-JNINativeMethod*,jint)	direct-register-only	implemented
+ExceptionCheck	JNIEnv	228	jboolean(JNIEnv*)	direct-register-only	implemented
+GetEnv	JavaVM	6	jint(JavaVM*,void**,jint)	direct-register-only	implemented

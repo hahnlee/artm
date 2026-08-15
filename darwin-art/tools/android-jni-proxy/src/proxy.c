@@ -1,0 +1,134 @@
+#include "darwin_art_jni_proxy.h"
+#include "jni_slots.h"
+
+#include <stdint.h>
+#include <string.h>
+
+typedef void (*RawJniSlot)(void);
+
+typedef struct ProxyEnvHandle {
+  const RawJniSlot* functions;
+  struct DarwinArtJniProxy* owner;
+} ProxyEnvHandle;
+
+typedef struct ProxyVmHandle {
+  const RawJniSlot* functions;
+  struct DarwinArtJniProxy* owner;
+} ProxyVmHandle;
+
+struct DarwinArtJniProxy {
+  uint64_t magic;
+  DarwinArtJniBackend backend;
+  ProxyEnvHandle env;
+  ProxyVmHandle vm;
+  uint8_t exception_pending;
+};
+
+static const uint64_t kProxyMagic = UINT64_C(0x4a4e4950524f5859);
+
+_Static_assert(sizeof(void*) == 8, "Android 16 arm64 JNI requires 64-bit pointers");
+_Static_assert(sizeof(RawJniSlot) == 8,
+               "Android 16 arm64 JNI requires 64-bit function pointers");
+_Static_assert(sizeof(int32_t) == 4, "JNI jint is 32-bit");
+_Static_assert(sizeof(DarwinArtJniNativeMethod) == 24,
+               "JNINativeMethod must remain three pointers");
+_Static_assert(_Alignof(DarwinArtJniNativeMethod) == 8,
+               "JNINativeMethod arm64 alignment drift");
+_Static_assert(sizeof(struct DarwinArtJniProxy) <= DARWIN_ART_JNI_PROXY_STORAGE_SIZE,
+               "public proxy storage is too small");
+_Static_assert(_Alignof(struct DarwinArtJniProxy) <=
+                   DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT,
+               "public proxy storage alignment is too small");
+
+static struct DarwinArtJniProxy* EnvOwner(void* raw_env) {
+  ProxyEnvHandle* env = (ProxyEnvHandle*)raw_env;
+  if (env == NULL || env->owner == NULL || env->owner->magic != kProxyMagic)
+    return NULL;
+  return env->owner;
+}
+
+static struct DarwinArtJniProxy* VmOwner(void* raw_vm) {
+  ProxyVmHandle* vm = (ProxyVmHandle*)raw_vm;
+  if (vm == NULL || vm->owner == NULL || vm->owner->magic != kProxyMagic)
+    return NULL;
+  return vm->owner;
+}
+
+static int32_t ProxyGetVersion(void* raw_env) {
+  return EnvOwner(raw_env) == NULL ? 0 : DARWIN_ART_JNI_VERSION_1_6;
+}
+
+static void* ProxyFindClass(void* raw_env, const char* name) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  if (proxy == NULL || name == NULL) return NULL;
+  return proxy->backend.find_class(proxy->backend.context, name);
+}
+
+static int32_t ProxyThrowNew(void* raw_env, void* clazz, const char* message) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  if (proxy == NULL || clazz == NULL || message == NULL) return DARWIN_ART_JNI_ERR;
+  const int32_t result =
+      proxy->backend.throw_new(proxy->backend.context, clazz, message);
+  if (result == DARWIN_ART_JNI_OK) proxy->exception_pending = 1;
+  return result;
+}
+
+static int32_t ProxyRegisterNatives(void* raw_env, void* clazz,
+                                    const DarwinArtJniNativeMethod* methods,
+                                    int32_t count) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  if (proxy == NULL || clazz == NULL || methods == NULL || count < 0)
+    return DARWIN_ART_JNI_ERR;
+  return proxy->backend.register_natives(proxy->backend.context, clazz, methods,
+                                          count);
+}
+
+static uint8_t ProxyExceptionCheck(void* raw_env) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  return proxy == NULL ? 1 : proxy->exception_pending;
+}
+
+static int32_t ProxyGetEnv(void* raw_vm, void** output, int32_t version) {
+  struct DarwinArtJniProxy* proxy = VmOwner(raw_vm);
+  if (output == NULL) return DARWIN_ART_JNI_ERR;
+  *output = NULL;
+  if (proxy == NULL) return DARWIN_ART_JNI_ERR;
+  if (version != DARWIN_ART_JNI_VERSION_1_6) return DARWIN_ART_JNI_EVERSION;
+  *output = &proxy->env;
+  return DARWIN_ART_JNI_OK;
+}
+
+static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
+    [DARWIN_ART_JNI_SLOT_GetVersion] = (RawJniSlot)ProxyGetVersion,
+    [DARWIN_ART_JNI_SLOT_FindClass] = (RawJniSlot)ProxyFindClass,
+    [DARWIN_ART_JNI_SLOT_ThrowNew] = (RawJniSlot)ProxyThrowNew,
+    [DARWIN_ART_JNI_SLOT_RegisterNatives] = (RawJniSlot)ProxyRegisterNatives,
+    [DARWIN_ART_JNI_SLOT_ExceptionCheck] = (RawJniSlot)ProxyExceptionCheck,
+};
+
+static const RawJniSlot kInvokeTable[DARWIN_ART_JNI_INVOKE_SLOT_COUNT] = {
+    [DARWIN_ART_JNI_INVOKE_SLOT_GetEnv] = (RawJniSlot)ProxyGetEnv,
+};
+
+DarwinArtJniProxy* darwin_art_jni_proxy_init(void* storage, size_t storage_size,
+                                             const DarwinArtJniBackend* backend) {
+  if (storage == NULL || storage_size < sizeof(struct DarwinArtJniProxy) ||
+      (uintptr_t)storage % _Alignof(struct DarwinArtJniProxy) != 0 ||
+      backend == NULL || backend->find_class == NULL ||
+      backend->register_natives == NULL || backend->throw_new == NULL)
+    return NULL;
+  struct DarwinArtJniProxy* proxy = (struct DarwinArtJniProxy*)storage;
+  memset(proxy, 0, sizeof(*proxy));
+  proxy->backend = *backend;
+  proxy->env.functions = kNativeTable;
+  proxy->env.owner = proxy;
+  proxy->vm.functions = kInvokeTable;
+  proxy->vm.owner = proxy;
+  proxy->magic = kProxyMagic;
+  return proxy;
+}
+
+void* darwin_art_jni_proxy_java_vm(DarwinArtJniProxy* proxy) {
+  if (proxy == NULL || proxy->magic != kProxyMagic) return NULL;
+  return &proxy->vm;
+}
