@@ -144,4 +144,4 @@ diff -u "$tmp/expected-class-counts" "$tmp/class-counts" ||
 echo "android35-libcxx-provider-coverage: PASS imports=$universe_count owned=$owned_count duplicate-owners=0"
 echo "providers=leaf:11 allocator:4 errno:1 filesystem:28 time:3 pthread:24 process-state:3 phdr:1 stdio:13 locale:31 numeric:6 float-conversion:2 lifecycle:2"
 echo "classes=A:11/11 B:52/76 C:61/65 D:5/8 remaining=31"
-echo "scope=standalone-gates-not-yet-one-runtime-namespace"
+echo "scope=composed-namespace-integrated-into-ART-ELF-resolver"
