@@ -245,14 +245,20 @@ Minikin/HarfBuzz/FreeType text foundations, resource JNI, AndroidRuntime
 ownership, all 568 Android-visible `OsConstants`, the complete 12-entry
 `java.io.UnixFileSystem` owner, ART's complete `libopenjdkjvm` provider, and a
 complete registered `libcore.io.Linux` method table with an incrementally
-implemented Darwin backend.
+implemented Darwin backend. Complete Android 16 owners for `FileDescriptor`,
+`FileInputStream`, the read-only NIO mapping path, and the ART/libcore split
+`libcore.io.Memory` table are integrated as well. The NIO port restores the
+process-global signal disposition during runtime shutdown.
 
 The real `android.widget.Button` vertical slice now parses the pinned Android
 font configuration and passes the complete Android 16 `FileInputStream`,
 `IOUtil`, `FileChannelImpl`, `FileDispatcherImpl`, and `NativeThread` owners.
-Its first missing owner is now the complete `libcore.io.Memory` native table,
-reached by ICU through the mapped font data. Native application ELF is not
-loaded yet.
+It also passes the complete scalar/bulk `libcore.io.Memory` owner. Its first
+missing owner is now `sun.nio.fs.UnixNativeDispatcher`, reached when ICU opens
+its boot-class-path resources through `java.nio.file`. Native application ELF
+is not loaded yet, but the inspection-only ARM64 ELF capability classifier is
+complete: it reports dependencies, imports/exports, TLS, RELRO, relocations,
+constructors, executable-stack/text-relocation requirements, and raw `svc`.
 
 ## Ordered implementation after the Button gate
 
@@ -261,7 +267,8 @@ loaded yet.
    not an authorization boundary until symlink and rename races are contained.
 2. Route `libcore.io.Linux` file/path methods through it; populate a real
    `/system`, `/product`, `/apex`, and package-private `/data` prefix.
-3. Add an inspection-only ARM64 ELF parser and APK native-capability report.
+3. Extend the completed inspection-only ARM64 ELF parser into an APK-wide
+   native-capability report and dependency graph.
 4. Map a trivial Android NDK ELF library, apply relocations, run constructors,
    and call `JNI_OnLoad` without Linux or a VM.
 5. Provide the first virtual DSOs: `libdl`, `liblog`, and a narrow but coherent

@@ -125,9 +125,23 @@ also still uses a programmatic `android.R.id.content` root plus a minimal
 Android-visible OS constants, UnixFileSystem, and ART OpenJDK VM service
 owners. The Button probe now passes the complete Android 16 `FileInputStream`,
 `FileChannelImpl`, `FileDispatcherImpl`, `IOUtil`, and `NativeThread` owners,
-maps the pinned Android font data, and currently stops at the next
-complete-owner boundary, `libcore.io.Memory.peekByte(long)`.
+plus the complementary ART/libcore `libcore.io.Memory` owners. It maps the
+pinned Android font data and currently stops at the next complete-owner
+boundary, `sun.nio.fs.UnixNativeDispatcher.init()`.
 Compiled framework-resource inflation, input, and GPU HWUI remain deferred.
+
+The first Tier-1 native-library admission gate is also available:
+
+```bash
+cargo run --manifest-path tools/android-arm64-so-inspect/Cargo.toml -- path/to/libfoo.so
+```
+
+It does not map or execute untrusted code. It strictly parses Android ARM64
+ELF metadata and emits a capability report covering dependencies, symbols,
+TLS, RELRO, relocations, constructors, executable-stack/text-relocation
+requirements, and raw `svc` instructions. Linuxulator-derived manifests are
+used only as an independent semantic oracle; no FreeBSD kernel code is linked
+into the Darwin runtime.
 
 The first Android 16 HWUI host compile gate is reproducible with:
 

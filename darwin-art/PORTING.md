@@ -175,8 +175,9 @@
       `/product`, `/apex`, package-private `/data`, and brokered shared storage.
 - [ ] Route every supported libcore path operation through one mount-aware path
       resolver; never expose host `/Users/...` paths to Android code.
-- [ ] Inspect APK ARM64 ELF dependencies, relocations, TLS, imports, executable
-      memory, and raw `svc` use before selecting a backend.
+- [x] Add a strict inspection-only Android ARM64 ELF gate for dependencies,
+      symbols, relocations, TLS, executable-memory requirements, constructors,
+      and raw `svc`; APK-wide aggregation and loader execution remain pending.
 - [ ] Map and relocate the first Android ARM64 ELF `.so` directly on Apple
       Silicon and execute its constructors plus `JNI_OnLoad` without a VM.
 - [ ] Provide coherent virtual `libdl`, `liblog`, and Bionic `libc` facades for
