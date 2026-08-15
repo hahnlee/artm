@@ -4,6 +4,13 @@ Experimental Apple Silicon port of Android Runtime. ART remains C++/ARM64
 assembly and is compiled as Mach-O. Rust owns the bootstrap tooling, Darwin
 integration, launcher, and eventually the Android ELF compatibility loader.
 
+The product boundary and post-Button roadmap are defined in
+[`ARCHITECTURE.md`](ARCHITECTURE.md). The central rule is Android-observable
+semantics over macOS mechanisms: a Wine-prefix-like Android filesystem,
+directly mapped ARM64 ELF, and a Bionic ABI facade. Mainstream Tier 1 includes
+ordinary third-party JNI `.so` libraries; Java-only execution is a bootstrap
+gate, not the intended application compatibility boundary.
+
 ## Current gate
 
 The current gate is intentionally smaller than `dalvikvm`. It links and runs a

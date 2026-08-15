@@ -164,6 +164,34 @@
       programmatic content root/minimal interpolator parser with complete
       compiled framework-resource support.
 
+## G4 — Android namespace and mainstream native libraries
+
+- [ ] Replace partial Android constant/filesystem owners with complete,
+      source-derived Android 16 registrations while keeping Android/Linux
+      numeric values visible above the Darwin syscall boundary.
+- [ ] Render a real `android.widget.Button` using the pinned Android font
+      configuration, Darwin filesystem/NIO providers, HWUI/Minikin, and Skia.
+- [ ] Create a Wine-prefix-like, case-sensitive Android root for `/system`,
+      `/product`, `/apex`, package-private `/data`, and brokered shared storage.
+- [ ] Route every supported libcore path operation through one mount-aware path
+      resolver; never expose host `/Users/...` paths to Android code.
+- [ ] Inspect APK ARM64 ELF dependencies, relocations, TLS, imports, executable
+      memory, and raw `svc` use before selecting a backend.
+- [ ] Map and relocate the first Android ARM64 ELF `.so` directly on Apple
+      Silicon and execute its constructors plus `JNI_OnLoad` without a VM.
+- [ ] Provide coherent virtual `libdl`, `liblog`, and Bionic `libc` facades for
+      file, memory, string, errno, and Android-prefix path behavior.
+- [ ] Execute a realistic Tier-1 JNI library through `Java -> JNI -> Android
+      ELF -> Bionic facade -> Darwin`, including pthread and TLS behavior.
+- [ ] Add capability-based VM fallback for direct Linux syscalls,
+      kernel-specific ioctls, anti-cheat, DRM, and other kernel-coupled code.
+
+Tier 1 is not Java-only. Ordinary applications commonly contain native
+analytics, database, compression, crypto, image, or vendor SDKs. The presence
+of `.so` files is therefore normal; tiering is based on required ABI and kernel
+capabilities. See `ARCHITECTURE.md` for the filesystem, ELF loader, Bionic
+facade, syscall policy, and complete tier definitions.
+
 ## Deferred performance work
 
 - Darwin `MAP_JIT` and write-protect transitions.
@@ -171,4 +199,4 @@
 - Apply the Darwin ARM64 native stack PCS to ART compiler/JIT/AOT JNI call
   backends; the current sparse port validates the interpreter/generic runtime
   path and CriticalNative frame sizing.
-- APK ELF loader, Bionic ABI surface, and JNI `.so` support.
+- GPU-native game paths beyond the Tier-1 ELF/Bionic work tracked in G4.
