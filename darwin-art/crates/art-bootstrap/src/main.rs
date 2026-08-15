@@ -41,6 +41,12 @@ fn run() -> Result<()> {
         ),
         "build-hwui-static" => build_shell_gate(&root, "build-android16-hwui-static-foundation.sh"),
         "build-androidfw" => build_shell_gate(&root, "build-android16-androidfw-foundation.sh"),
+        "build-ziparchive-incfs" => build_shell_gate(&root, "build-android16-ziparchive-incfs.sh"),
+        "build-hostgraphics" => build_shell_gate(&root, "build-android16-hostgraphics.sh"),
+        "build-skia-hwui" => build_shell_gate(&root, "build-android16-skia-hwui-force-load.sh"),
+        "build-graphics-codec-modules" => {
+            build_shell_gate(&root, "build-android16-codec-foundation.sh")
+        }
         "build-graphics-foundations" => {
             build_shell_gate(&root, "build-android16-graphics-foundations.sh")
         }
@@ -115,6 +121,10 @@ fn print_help() {
     println!("  build-android-graphics-jni  compile the complete Android GraphicsJNI host module");
     println!("  build-hwui-static  compile the complete Android HWUI host core module");
     println!("  build-androidfw  build the complete Android resource framework archive");
+    println!("  build-ziparchive-incfs  build Android's incremental ZIP archive variant");
+    println!("  build-hostgraphics  build Android's Darwin native-window host module");
+    println!("  build-skia-hwui  build the CoreText-free framework Skia closure");
+    println!("  build-graphics-codec-modules  build image_io/JPEG/UltraHDR modules");
     println!("  build-graphics-foundations  build Darwin liblog/libcutils archives");
     println!("  build-nativehelper  build Darwin nativehelper host archives");
     println!("  build-ui-types  build the Darwin Android libui-types archive");

@@ -133,6 +133,13 @@
       five-member APEX-common archive without duplicating GraphicsJNI.
 - [x] Build the complete Darwin host `libandroidfw` composition: 34 common
       sources plus whole-static PathUtils and incfs map support.
+- [x] Build the complete five-source Darwin `libhostgraphics` module and a
+      521-member HWUI framework Skia archive with the required sharing/font
+      members and no CoreText or Homebrew dependency.
+- [x] Build module-complete image_io/JPEG/UltraHDR archives (116 members total)
+      and execute a real JPEG encode/decode plus UltraHDR scanner smoke.
+- [x] Build Android.bp's six-member `libziparchive_for_incfs` variant separately
+      from the older INCFS-disabled ART bootstrap archive.
 - [ ] Close the complete upstream Canvas/Paint registrar dependency graph with
       GraphicsJNI, software `libhwui_static`, Minikin, HarfBuzz, FreeType, ICU,
       androidfw, and native utility modules; do not substitute per-symbol stubs.

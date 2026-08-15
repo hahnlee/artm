@@ -137,8 +137,8 @@ the Darwin host TU, the 51-entry Layoutlib registrar in `jni_runtime.cpp`
 dependency order, all 81 Darwin `libhwui_static` core/host members, the five
 APEX-common graphics TUs, and the 36-member Darwin `libandroidfw` composition.
 These are real upstream module archives, but they are not linked into the ART
-runtime yet because the remaining hostgraphics/image/JPEG/UltraHDR and Skia
-source-selection closure must be completed first.
+runtime yet. Their provider modules are built below; the remaining step is a
+single strict force-load closure plus the AOSP ICU runtime adapter transition.
 
 The first platform foundation modules are also real Android.bp-derived ARM64
 archives rather than symbol stubs:
@@ -148,6 +148,10 @@ cargo run -p art-bootstrap -- build-hwui-canvas
 cargo run -p art-bootstrap -- build-android-graphics-jni
 cargo run -p art-bootstrap -- build-hwui-static
 cargo run -p art-bootstrap -- build-androidfw
+cargo run -p art-bootstrap -- build-hostgraphics
+cargo run -p art-bootstrap -- build-skia-hwui
+cargo run -p art-bootstrap -- build-graphics-codec-modules
+cargo run -p art-bootstrap -- build-ziparchive-incfs
 cargo run -p art-bootstrap -- build-graphics-foundations
 cargo run -p art-bootstrap -- build-nativehelper
 cargo run -p art-bootstrap -- build-ui-types
@@ -201,6 +205,17 @@ Paint/RenderNode registrations and uses Bitmap creation, a real bitmap-backed
 Canvas, `DecorView.draw`, and `Bitmap.getPixels`. That mode intentionally remains
 unlinked until every module provider is present; the default ProbeCanvas path
 continues to pass end to end.
+
+The next provider layer is also module-complete. `libhostgraphics` supplies the
+five Android host native-window/display sources. The HWUI-specific framework
+Skia archive contains 521 members, consumes the pinned AOSP FreeType/libpng/zlib
+archives, includes the empty font-manager and sharing serialization members
+required by whole-static HWUI, and has no CoreText or Homebrew import. The codec
+gate builds six image_io/JPEG/UltraHDR archives (116 members) and executes a
+real ARM64 JPEG encode/decode plus UltraHDR scan. A separate six-member
+`libziparchive_for_incfs` gate preserves Android.bp's callback-disabled variant
+and verifies a ZIP writer/reader round trip; it is not conflated with the older
+INCFS-disabled bootstrap archive.
 
 `build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
 depfile for every translation unit; the bootstrapper fingerprints the complete
