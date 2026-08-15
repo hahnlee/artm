@@ -85,6 +85,7 @@ fn run() -> Result<()> {
         "probe-runtime-dex" => probe_runtime_dex(&root, false),
         "probe-window" => probe_runtime_dex(&root, true),
         "probe-runtime-graphics" => probe_runtime_graphics(&root),
+        "probe-runtime-graphics-window" => probe_runtime_graphics_window(&root),
         "verify-bootclasspath" => verify_bootclasspath(&root),
         "all" => {
             doctor()?;
@@ -161,6 +162,7 @@ fn print_help() {
     println!("  probe-runtime-dex  launch Java main(String[]) with Android stdout");
     println!("  probe-window  display the Android View probe in a native NSWindow");
     println!("  probe-runtime-graphics  draw DecorView through Bitmap-backed AOSP Canvas");
+    println!("  probe-runtime-graphics-window  display the real Android Canvas frame in NSWindow");
     println!("  verify-bootclasspath  verify extracted Android 16 core DEX files");
     println!("  all        run every check and probe");
 }
@@ -3395,6 +3397,10 @@ fn probe_runtime_graphics(root: &Path) -> Result<()> {
     probe_runtime_dex_flavor(root, false, true)
 }
 
+fn probe_runtime_graphics_window(root: &Path) -> Result<()> {
+    probe_runtime_dex_flavor(root, true, true)
+}
+
 fn probe_runtime_dex_flavor(root: &Path, show_window: bool, real_graphics: bool) -> Result<()> {
     let core_icu4j = if real_graphics {
         prepare_icu_runtime_bootclasspath(root)?
@@ -3475,9 +3481,15 @@ fn probe_runtime_dex_flavor(root: &Path, show_window: bool, real_graphics: bool)
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
     if real_graphics {
-        println!(
-            "probe-runtime-graphics: Bitmap-backed Canvas -> DecorView.draw() -> frame -> shutdown"
-        );
+        if show_window {
+            println!(
+                "probe-runtime-graphics-window: Bitmap-backed Canvas -> DecorView.draw() -> NSWindow"
+            );
+        } else {
+            println!(
+                "probe-runtime-graphics: Bitmap-backed Canvas -> DecorView.draw() -> frame -> shutdown"
+            );
+        }
     } else if show_window {
         println!("probe-window: PhoneWindow -> DecorView.draw(Canvas) -> NSWindow");
     } else {

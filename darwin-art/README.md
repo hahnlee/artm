@@ -169,6 +169,7 @@ cargo run -p art-bootstrap -- probe-minikin-shaping
 cargo run -p art-bootstrap -- build-runtime-graphics-bootstrap
 cargo run -p art-bootstrap -- audit-runtime-graphics-link
 cargo run -p art-bootstrap -- probe-runtime-graphics
+cargo run -p art-bootstrap -- probe-runtime-graphics-window
 bash tools/verify-real-graphics-rust-host.sh \
   _build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib
 ```
