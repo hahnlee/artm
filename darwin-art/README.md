@@ -143,6 +143,9 @@ cargo run -p art-bootstrap -- build-hwui-canvas
 cargo run -p art-bootstrap -- build-graphics-foundations
 cargo run -p art-bootstrap -- build-nativehelper
 cargo run -p art-bootstrap -- build-ui-types
+cargo run -p art-bootstrap -- build-graphics-codecs
+cargo run -p art-bootstrap -- build-harfbuzz
+cargo run -p art-bootstrap -- build-minikin
 ```
 
 `liblog-darwin.a` contains all eight Darwin-host sources and resolves the two
@@ -158,6 +161,14 @@ ART's VM implementation.
 Binder support archive (19 objects total). `libui-types.a` adds the complete
 four-source host module for Android `ColorSpace`, `Rect`, `Region`, and
 `Transform` types.
+The graphics codec gate builds Android's complete Darwin ARM64 selections for
+zlib (19 sources), libpng (18 sources), and FreeType (26 sources). These are
+the pinned raster-font dependencies needed before enabling Skia's FreeType
+font manager; they do not use Homebrew libraries or replacement symbols.
+The next two gates compile all 53 Android HarfBuzz translation units and all
+31 Minikin translation units. Their remaining unresolved closure is kept
+visible; the next required module is the pinned Android ICU host build and its
+data image, not a local symbol shim.
 
 `build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
 depfile for every translation unit; the bootstrapper fingerprints the complete

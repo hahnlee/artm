@@ -117,6 +117,10 @@
       members and the real JNI/log definitions required by the graphics closure.
 - [x] Build Android.bp-complete Darwin host archives for `libutils` (including
       its whole-static Binder support module) and `libui-types`.
+- [x] Build Android.bp-complete Darwin ARM64 archives for zlib, libpng, and
+      FreeType as the native glyph-raster dependency chain.
+- [x] Build Android.bp-complete Darwin ARM64 archives for HarfBuzz (53 objects)
+      and Minikin (31 objects), retaining the real ICU dependency closure.
 - [ ] Close the complete upstream Canvas/Paint registrar dependency graph with
       GraphicsJNI, software `libhwui_static`, Minikin, HarfBuzz, FreeType, ICU,
       androidfw, and native utility modules; do not substitute per-symbol stubs.

@@ -41,6 +41,14 @@ fn run() -> Result<()> {
             build_shell_gate(&root, "build-android16-nativehelper-foundation.sh")
         }
         "build-ui-types" => build_shell_gate(&root, "build-android16-ui-types-foundation.sh"),
+        "build-graphics-codecs" => build_shell_gate(&root, "build-android16-graphics-codecs.sh"),
+        "build-harfbuzz" => build_shell_gate_with_args(
+            &root,
+            "build-android16-harfbuzz-foundation.sh",
+            &["--archive-only"],
+        ),
+        "build-minikin" => build_shell_gate(&root, "build-android16-minikin-foundation.sh"),
+        "check-text-shaping" => build_shell_gate(&root, "check-android16-text-shaping-inputs.sh"),
         "build-dex" => build_dex_probe(&root),
         "build-runtime-platform" => build_runtime_platform(&root),
         "build-runtime-core" => build_runtime_core(&root),
@@ -95,6 +103,10 @@ fn print_help() {
     println!("  build-graphics-foundations  build Darwin liblog/libcutils archives");
     println!("  build-nativehelper  build Darwin nativehelper host archives");
     println!("  build-ui-types  build the Darwin Android libui-types archive");
+    println!("  build-graphics-codecs  build Darwin zlib/libpng/FreeType archives");
+    println!("  build-harfbuzz  build the complete Darwin HarfBuzz archive");
+    println!("  build-minikin  build the complete Darwin Minikin archive");
+    println!("  check-text-shaping  audit the full shaping and raster input closure");
     println!("  build-dex  compile AOSP libdexfile and parse a generated classes.dex");
     println!("  build-runtime-platform  compile ART host platform sources as Mach-O");
     println!("  build-runtime-core  apply Darwin monitor patches and compile runtime core");
@@ -110,11 +122,20 @@ fn print_help() {
 }
 
 fn build_shell_gate(root: &Path, script: &str) -> Result<()> {
+    build_shell_gate_with_args(root, script, &[])
+}
+
+fn build_shell_gate_with_args(root: &Path, script: &str, args: &[&str]) -> Result<()> {
     let script = root.join("tools").join(script);
     if !script.is_file() {
         return Err(format!("build gate script is missing: {}", script.display()).into());
     }
-    run_command(Command::new("bash").arg(script).current_dir(root))
+    run_command(
+        Command::new("bash")
+            .arg(script)
+            .args(args)
+            .current_dir(root),
+    )
 }
 
 fn doctor() -> Result<()> {
@@ -254,6 +275,64 @@ fn sync_sources(root: &Path) -> Result<()> {
         "_aosp/frameworks/native/libs/math",
         "Android.bp",
         lock_value(&lock, "FRAMEWORKS_NATIVE_MATH_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/external/zlib",
+        lock_value(&lock, "ZLIB_REVISION")?,
+        "external-zlib",
+        "",
+        "_aosp/external/zlib",
+        "Android.bp",
+        lock_value(&lock, "ZLIB_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/external/libpng",
+        lock_value(&lock, "LIBPNG_REVISION")?,
+        "external-libpng",
+        "",
+        "_aosp/external/libpng",
+        "Android.bp",
+        lock_value(&lock, "LIBPNG_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/external/freetype",
+        lock_value(&lock, "FREETYPE_REVISION")?,
+        "external-freetype",
+        "",
+        "_aosp/external/freetype",
+        "Android.bp",
+        lock_value(&lock, "FREETYPE_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_file(
+        root,
+        "platform/external/harfbuzz_ng",
+        lock_value(&lock, "HARFBUZZ_NG_REVISION")?,
+        "Android.bp",
+        "_aosp/external/harfbuzz_ng/Android.bp",
+        lock_value(&lock, "HARFBUZZ_NG_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/external/harfbuzz_ng",
+        lock_value(&lock, "HARFBUZZ_NG_REVISION")?,
+        "external-harfbuzz-src",
+        "src",
+        "_aosp/external/harfbuzz_ng/src",
+        "hb.h",
+        lock_value(&lock, "HARFBUZZ_NG_HB_HEADER_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/frameworks/minikin",
+        lock_value(&lock, "MINIKIN_REVISION")?,
+        "frameworks-minikin",
+        "",
+        "_aosp/frameworks/minikin",
+        "Android.bp",
+        lock_value(&lock, "MINIKIN_ANDROID_BP_SHA256")?,
     )?;
     materialize_archive(
         root,
