@@ -1,6 +1,7 @@
 use darwin_art_elf_loader::{
     Capability, LoadError, LoadedElf, ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver,
 };
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -20,16 +21,21 @@ const DT_STRTAB: i64 = 5;
 const DT_FINI: i64 = 13;
 const DT_FINI_ARRAYSZ: i64 = 28;
 const DT_VERNEED: i64 = 0x6fff_fffe;
+const DT_GNU_HASH: i64 = 0x6fff_fef5;
+const DT_AARCH64_BTI_PLT: i64 = 0x7000_0001;
 const PROVIDER_SONAME: &str = "libdarwin_art_provider.so";
 const PROVIDER_VERSION: &str = "DARWIN_ART_1";
 const LIFECYCLE_SONAME: &str = "liblifecycle_sink.so";
 
 static PROVIDER_DATA: i32 = 11;
+static LIBCXX_OBJECT_STORAGE: usize = 0;
 static FINALIZER_EVENTS: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 
 unsafe extern "C" fn provider_value() -> i32 {
     77
 }
+
+unsafe extern "C" fn libcxx_placeholder() {}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<_> = env::args_os().collect();
@@ -45,9 +51,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = image.call_exported_i32("relro_write_attempt")?;
         return Err("PT_GNU_RELRO page remained writable".into());
     }
-    if arguments.len() != 8 {
+    if arguments.len() != 9 {
         return Err(
-            "usage: elf-loader-gate POSITIVE.so IMPORT.so WEAK.so LAZY.so RELRO.so TLS.so FINALIZER.so".into(),
+            "usage: elf-loader-gate POSITIVE.so IMPORT.so WEAK.so LAZY.so RELRO.so TLS.so FINALIZER.so LIBCXX.so".into(),
         );
     }
     let positive = fs::read(&arguments[1])?;
@@ -57,6 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let relro = fs::read(&arguments[5])?;
     let tls = fs::read(&arguments[6])?;
     let finalizer = fs::read(&arguments[7])?;
+    let libcxx = fs::read(&arguments[8])?;
 
     run_positive(&positive)?;
     run_import(&import)?;
@@ -69,13 +76,120 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     expect_capability(&tls, |capability| matches!(capability, Capability::Tls))?;
     run_malformed_matrix(&positive)?;
     run_finalizer_lifecycle(&finalizer)?;
+    run_aarch64_bti_plt(&libcxx)?;
 
     println!(
         "elf-loader-gate: positive=constructor-order import=ABS64+GLOB_DAT+JUMP_SLOT \
          resolver=closed+versioned weak=zero NOW=required RELRO=read-only TLS=reject \
          wx=reject overflow=reject overlap=reject bounds=reject \
-         finalizers=array-reverse+DT_FINI exactly-once cleanup=drop"
+         finalizers=array-reverse+DT_FINI exactly-once cleanup=drop \
+         DT_AARCH64_BTI_PLT=zero-presence real-libcxx=relocated-without-init"
     );
+    Ok(())
+}
+
+#[derive(Default)]
+struct LibcxxStructuralResolver {
+    requests: HashSet<String>,
+    weak_thread_atexit_requests: usize,
+}
+
+impl SymbolResolver for LibcxxStructuralResolver {
+    fn resolve(
+        &mut self,
+        request: SymbolRequest<'_>,
+    ) -> Result<Option<ResolvedSymbol>, ResolveError> {
+        if request.needed_libraries != ["libc.so", "libm.so", "libdl.so"] {
+            return Err(ResolveError::Rejected(format!(
+                "unexpected libc++ dependency list: {:?}",
+                request.needed_libraries
+            )));
+        }
+        if request.symbol == "__cxa_thread_atexit_impl" && request.version.is_none() {
+            self.weak_thread_atexit_requests += 1;
+            return Ok(None);
+        }
+        let version = request.version.ok_or_else(|| {
+            ResolveError::Rejected(format!("unversioned libc++ import: {}", request.symbol))
+        })?;
+        let expected_soname = if request.symbol == "dl_iterate_phdr" {
+            "libdl.so"
+        } else {
+            "libc.so"
+        };
+        if version.soname != expected_soname
+            || version.name != "LIBC"
+            || version.hidden
+            || version.flags != 0
+        {
+            return Err(ResolveError::Rejected(format!(
+                "unexpected libc++ import version: {} from {}@{} hidden={} flags={}",
+                request.symbol, version.soname, version.name, version.hidden, version.flags
+            )));
+        }
+        if !self.requests.insert(request.symbol.to_owned()) {
+            return Err(ResolveError::Rejected(format!(
+                "duplicate libc++ resolver request: {}",
+                request.symbol
+            )));
+        }
+        let address = if request.symbol == "stderr" {
+            (&raw const LIBCXX_OBJECT_STORAGE).cast::<u8>() as usize
+        } else {
+            libcxx_placeholder as usize
+        };
+        let address = NonZeroUsize::new(address)
+            .ok_or_else(|| ResolveError::Rejected("null structural provider".to_owned()))?;
+        // SAFETY: this gate deliberately does not run libc++ initializers or code. The static
+        // addresses remain valid until the image is dropped and suffice to prove eager
+        // relocation, GNU version routing, final protection, and export parsing.
+        Ok(Some(unsafe { ResolvedSymbol::new(address) }))
+    }
+}
+
+fn run_aarch64_bti_plt(bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    if dynamic_tag_value(bytes, DT_AARCH64_BTI_PLT)? != 0 {
+        return Err("real libc++ DT_AARCH64_BTI_PLT value drifted".into());
+    }
+    let mut resolver = LibcxxStructuralResolver::default();
+    let image = LoadedElf::load_with_resolver(bytes, &mut resolver)?;
+    if image.soname() != Some("libc++_shared.so")
+        || image.needed_libraries() != ["libc.so", "libm.so", "libdl.so"]
+        || resolver.requests.len() != 160
+        || resolver.weak_thread_atexit_requests != 1
+        || image.lookup_exported("_Znwm").is_err()
+    {
+        return Err(format!(
+            "real libc++ structural load mismatch: soname={:?} needed={:?} requests={} weak-thread-atexit={}",
+            image.soname(),
+            image.needed_libraries(),
+            resolver.requests.len(),
+            resolver.weak_thread_atexit_requests
+        )
+        .into());
+    }
+    drop(image);
+
+    let mut nonzero = bytes.to_vec();
+    let bti = dynamic_tag_entry(bytes, DT_AARCH64_BTI_PLT)?;
+    nonzero[bti + 8..bti + 16].copy_from_slice(&1_u64.to_le_bytes());
+    let mut resolver = LibcxxStructuralResolver::default();
+    match LoadedElf::load_with_resolver(&nonzero, &mut resolver) {
+        Err(LoadError::Capability(Capability::DynamicFlags { tag, value }))
+            if tag == DT_AARCH64_BTI_PLT && value == 1 => {}
+        Err(error) => return Err(format!("nonzero BTI_PLT returned wrong error: {error}").into()),
+        Ok(_) => return Err("nonzero DT_AARCH64_BTI_PLT loaded".into()),
+    }
+
+    let mut duplicate = bytes.to_vec();
+    let spare = dynamic_tag_entry(bytes, DT_GNU_HASH)?;
+    duplicate[spare..spare + 8].copy_from_slice(&DT_AARCH64_BTI_PLT.to_le_bytes());
+    let mut resolver = LibcxxStructuralResolver::default();
+    match LoadedElf::load_with_resolver(&duplicate, &mut resolver) {
+        Err(LoadError::Format("duplicate DT_AARCH64_BTI_PLT")) => {}
+        Err(error) => return Err(format!("duplicate BTI_PLT returned wrong error: {error}").into()),
+        Ok(_) => return Err("duplicate DT_AARCH64_BTI_PLT loaded".into()),
+    }
     Ok(())
 }
 

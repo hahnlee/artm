@@ -167,6 +167,10 @@ const DT_VERDEF: i64 = 0x6fff_fffc;
 const DT_VERDEFNUM: i64 = 0x6fff_fffd;
 const DT_VERNEED: i64 = 0x6fff_fffe;
 const DT_VERNEEDNUM: i64 = 0x6fff_ffff;
+// AArch64 ELF uses this zero-valued presence tag to state that PLT entries are
+// compatible with Branch Target Identification. It does not request the
+// loader to enable a process feature or rewrite the PLT.
+const DT_AARCH64_BTI_PLT: i64 = 0x7000_0001;
 
 const R_AARCH64_ABS64: u32 = 257;
 const R_AARCH64_GLOB_DAT: u32 = 1025;
@@ -418,6 +422,7 @@ struct DynamicInfo {
     fini: Option<u64>,
     fini_array: Option<u64>,
     fini_array_size: Option<u64>,
+    aarch64_bti_plt: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -1887,6 +1892,11 @@ fn parse_dynamic_with_policy(
                 value,
                 "duplicate DT_FINI_ARRAYSZ",
             )?,
+            DT_AARCH64_BTI_PLT => set_once(
+                &mut info.aarch64_bti_plt,
+                value,
+                "duplicate DT_AARCH64_BTI_PLT",
+            )?,
             DT_PLTGOT | DT_DEBUG | DT_GNU_HASH => {}
             DT_REL | DT_RELSZ | DT_RELENT => {
                 if value != 0 && !metadata_only {
@@ -1928,6 +1938,12 @@ fn parse_dynamic_with_policy(
 }
 
 fn validate_dynamic_capabilities(info: &DynamicInfo) -> Result<(), LoadError> {
+    if let Some(value) = info.aarch64_bti_plt.filter(|value| *value != 0) {
+        return Err(LoadError::Capability(Capability::DynamicFlags {
+            tag: DT_AARCH64_BTI_PLT,
+            value,
+        }));
+    }
     if info.hash.is_none() {
         return Err(LoadError::Capability(Capability::MissingSysvHash));
     }

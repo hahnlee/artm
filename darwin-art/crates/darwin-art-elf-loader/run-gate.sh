@@ -186,7 +186,7 @@ cargo test --manifest-path "$crate_root/Cargo.toml"
 cargo run --quiet --release --manifest-path "$crate_root/Cargo.toml" --bin elf-loader-gate -- \
   "$fixture_dir/positive.so" "$fixture_dir/import.so" "$fixture_dir/weak.so" \
   "$fixture_dir/lazy.so" "$fixture_dir/relro.so" "$fixture_dir/tls.so" \
-  "$fixture_dir/finalizer.so"
+  "$fixture_dir/finalizer.so" "$fixture_dir/libc++_shared.so"
 cargo run --quiet --release --manifest-path "$crate_root/Cargo.toml" --bin elf-namespace-gate -- \
   "$fixture_dir/libgraph_parent.so" "$fixture_dir/libgraph_dep_a.so" \
   "$fixture_dir/libgraph_dep_a_alt.so" "$fixture_dir/libgraph_dep_a_wrong.so" \
