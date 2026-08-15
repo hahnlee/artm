@@ -150,8 +150,9 @@ for symbol in bionic_dso_fixture_main_handle bionic_dso_fixture_register_triples
 done
 
 CARGO_TARGET_DIR="$tmp/target" cargo run --quiet --manifest-path "$dir/Cargo.toml" -- "$fixture"
+CARGO_TARGET_DIR="$tmp/target" cargo test --quiet --manifest-path "$dir/Cargo.toml"
 CARGO_TARGET_DIR="$tmp/target" cargo clippy --quiet --all-targets \
   --manifest-path "$dir/Cargo.toml" -- -D warnings
 cargo fmt --manifest-path "$dir/Cargo.toml" -- --check
 clean
-echo 'bionic-dso-lifecycle-facade: PASS imports=2 AndroidELF LIFO callbacks=64-exactly-once hooks=2-calls/2-hooks unpublish=busy-drain-success C-boundary=ASan+UBSan target-clean'
+echo 'bionic-dso-lifecycle-facade: PASS imports=2 AndroidELF LIFO callbacks=64-exactly-once range-lazy-admit=exactly-once hooks=2-calls/2-hooks unpublish=busy-drain-success C-boundary=ASan+UBSan target-clean'

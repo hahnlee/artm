@@ -283,6 +283,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("registration through an unpublished DSO did not fail closed".into());
     }
     lifecycle.try_unpublish(other_dso)?;
+
+    // The production loader publishes a mapping range, not the hidden/local
+    // `__dso_handle`. Admission therefore happens lazily on the first guest
+    // registration and range teardown discovers/drains the exact handle.
+    unsafe { reset() };
+    let range_start = main_dso.min(other_dso) - 1;
+    let range_end = main_dso.max(other_dso) + 1;
+    lifecycle.publish_image(range_start, range_end)?;
+    if unsafe { register_triples() } != 42 {
+        return Err("range-backed lazy DSO handle admission failed".into());
+    }
+    lifecycle.finalize_image(range_start, range_end)?;
+    expect_log(log_count, log_at, &[3, 2, 1])?;
+    if lifecycle.registration_count(main_dso)? != 0
+        || lifecycle.finalize_image(range_start, range_end).is_ok()
+        || unsafe { register_after_unpublish() } != -1
+    {
+        return Err("range teardown was not quiescent and exactly once".into());
+    }
     if lifecycle.registration_count(0)? != 0 || lifecycle.active_callback_count(0)? != 0 {
         return Err("provider did not reach unload quiescence".into());
     }
@@ -297,7 +316,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "bionic-dso-lifecycle-facade: PASS exact-triples lifo \
          atfork-hook=2-calls/2-hooks stdio-hook=2-calls/2-hooks reentrant \
-         concurrent-callbacks=64-exactly-once unpublish=busy-drain-success"
+         concurrent-callbacks=64-exactly-once range-lazy-admit=exactly-once \
+         unpublish=busy-drain-success"
     );
     Ok(())
 }
