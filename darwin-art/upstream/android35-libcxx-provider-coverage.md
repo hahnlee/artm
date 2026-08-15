@@ -6,7 +6,7 @@ This gate measures coherent standalone provider ownership against the exact
 happen to exist in Darwin libc: a symbol is covered only when a project facade
 claims its Android ABI and semantic state.
 
-The current composed namespace owns 148 imports through twenty-two providers
+The current composed namespace owns 151 imports through twenty-three providers
 (including the distinct liblog owner):
 
 | Provider | Imports | Boundary |
@@ -28,15 +28,16 @@ The current composed namespace owns 148 imports through twenty-two providers
 | strerror | 1 | Bionic errno message ownership |
 | wide-integer | 4 | unsigned Android wchar32 integer conversion |
 | wide-float | 2 | ICU whitespace plus AOSP gdtoa `wcstod`/`wcstof` |
+| binary128-conversion | 3 | Android AAPCS64 q0 `strtold`/`strtold_l`/`wcstold` |
 | abort | 2 | Bionic abort/message state |
 | syslog | 3 | Android variadic capture, Bionic state, and AOSP liblog routing |
 | syscall | 1 | exact libc++ gettid/futex/libunwind-probe dispatch without raw host syscalls |
 | lifecycle | 2 | Bionic DSO finalizer ownership |
 
-Coverage by the original ABI classification is A 11/11, B 65/76, C 64/65,
-and D 8/8. The remaining 12 imports stay explicit capability failures. In
-particular, `wcstold` remains rejected because Android arm64 uses binary128
-while Darwin arm64 uses binary64 for `long double`.
+Coverage by the original ABI classification is A 11/11, B 68/76, C 64/65,
+and D 8/8. The remaining 9 imports stay explicit capability failures.
+Binary128 conversions return raw IEEE bits through Android's q0 ABI and never
+reinterpret Darwin's binary64 `long double`.
 
 These manifests feed the generated closed provider namespace used by ART's ELF
 graph resolver. The runtime closure still requires exactly one allocator,
@@ -47,6 +48,8 @@ owners.
 The syscall archive owns only the exact Android `syscall@LIBC` entry and
 reuses the namespace's Bionic errno semantics; unknown numbers and forms stay
 fail-closed rather than forwarding to Darwin's syscall ABI.
+The binary128 archive is ordered before allocator, existing gdtoa/errno, and
+ICU providers and introduces no duplicate owner for those dependencies.
 
 Run `tools/audit-android35-libcxx-provider-coverage.sh`. It hash-locks every
 input manifest, rejects providers outside the actual libc++ import set,

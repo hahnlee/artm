@@ -39,16 +39,16 @@ for generated in ownership.tsv unsupported-libc.tsv ownership.inc unsupported.in
     fail "generated $generated drift"
 done
 
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 147 ]] ||
-  fail 'expected 147 libc owners'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 150 ]] ||
+  fail 'expected 150 libc owners'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libdl.so"{n++}END{print n+0}')" == 1 ]] ||
   fail 'expected one libdl owner'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="liblog.so"{n++}END{print n+0}')" == 18 ]] ||
   fail 'expected 18 liblog owners'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | cut -f1,2 | sort | uniq -d | wc -l | tr -d ' ')" == 0 ]] ||
   fail 'duplicate SONAME/symbol owners'
-[[ "$(tail -n +2 "$here/generated/unsupported-libc.tsv" | wc -l | tr -d ' ')" == 12 ]] ||
-  fail 'expected 12 exact unsupported imports'
+[[ "$(tail -n +2 "$here/generated/unsupported-libc.tsv" | wc -l | tr -d ' ')" == 9 ]] ||
+  fail 'expected 9 exact unsupported imports'
 
 if rg -n '\b(dlopen|dlsym|dlvsym|NSLookupSymbolInImage|_dyld_)\b' \
     "$here/src" "$here/include"; then
@@ -73,6 +73,7 @@ expected_resolvers="$tmp/expected-resolvers"
 cat >"$expected_resolvers" <<'EOF'
 _darwin_art_bionic_abort_resolve
 _darwin_art_bionic_allocator_resolve
+_darwin_art_bionic_binary128_conversion_resolve
 _darwin_art_bionic_dso_lifecycle_resolve
 _darwin_art_bionic_errno_resolve
 _darwin_art_bionic_float_conversion_resolve
@@ -118,4 +119,4 @@ if grep -E '(_dlopen|_dlsym|_dlvsym|_NSLookupSymbolInImage|__dyld_)' <<<"$undefi
   fail 'host loader undefined reference present'
 fi
 
-echo 'bionic-provider-namespace: PASS libc-family=148/160 liblog=18 owned=166 unsupported=12 duplicate-owner=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'
+echo 'bionic-provider-namespace: PASS libc-family=151/160 liblog=18 owned=169 unsupported=9 duplicate-owner=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'

@@ -3295,6 +3295,13 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&object)
         .arg(&surface_object)
         .arg(root.join("_build/runtime-bootstrap/libart-runtime-bootstrap-darwin.a"))
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-binary128-conversion.a"
+            )
+            .display()
+        ))
         .arg(
             root.join(
                 "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a",
@@ -3383,6 +3390,10 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             "darwin_art_elf_jni_fixture_lifecycle_status",
             "darwin_art_elf_jni_fixture_namespace_lifecycle_status",
             "darwin_art_bionic_namespace_bind_builtins",
+            "darwin_art_bionic_binary128_conversion_resolve",
+            "darwin_art_bionic_strtold",
+            "darwin_art_bionic_strtold_l",
+            "darwin_art_bionic_wcstold",
             "darwin_art_bionic_syslog_resolve",
             "darwin_art_bionic_syscall_resolve",
             "darwin_art_bionic_formatted_stdio_resolve",
@@ -3629,6 +3640,13 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         // archives so the latter extract only additional runtime providers.
         .arg(&graphics_closure)
         .arg(&bootstrap)
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-binary128-conversion.a"
+            )
+            .display()
+        ))
         .arg(
             root.join(
                 "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a",
@@ -3780,6 +3798,10 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         "darwin_art_elf_jni_fixture_registration_status",
         "darwin_art_elf_jni_fixture_lifecycle_status",
         "darwin_art_bionic_namespace_bind_builtins",
+        "darwin_art_bionic_binary128_conversion_resolve",
+        "darwin_art_bionic_strtold",
+        "darwin_art_bionic_strtold_l",
+        "darwin_art_bionic_wcstold",
         "darwin_art_bionic_syslog_resolve",
         "darwin_art_bionic_syscall_resolve",
         "darwin_art_bionic_formatted_stdio_resolve",

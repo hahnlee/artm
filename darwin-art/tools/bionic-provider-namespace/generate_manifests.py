@@ -72,6 +72,8 @@ def main() -> int:
         "tools/bionic-wide-integer-facade/manifests/imports.tsv")]
     claims += [(name, "wide-float") for name in names(
         "tools/bionic-wide-float-facade/manifests/imports.tsv")]
+    claims += [(name, "binary128-conversion") for name in names(
+        "tools/bionic-binary128-conversion-facade/manifests/imports.tsv")]
     claims += [(name, "abort") for name in names(
         "tools/bionic-abort-facade/manifests/imports.tsv")]
     claims += [(name, "syslog") for name in names(
@@ -115,6 +117,7 @@ def main() -> int:
         "strerror": "DARWIN_ART_BIONIC_PROVIDER_STRERROR",
         "wide-integer": "DARWIN_ART_BIONIC_PROVIDER_WIDE_INTEGER",
         "wide-float": "DARWIN_ART_BIONIC_PROVIDER_WIDE_FLOAT",
+        "binary128-conversion": "DARWIN_ART_BIONIC_PROVIDER_BINARY128_CONVERSION",
         "abort": "DARWIN_ART_BIONIC_PROVIDER_ABORT",
         "liblog": "DARWIN_ART_BIONIC_PROVIDER_LIBLOG",
         "dso-lifecycle": "DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE",
@@ -131,7 +134,7 @@ def main() -> int:
         (symbol, row["category"], row["rationale"])
         for symbol, row in universe.items() if symbol not in claimed
     )
-    if len(universe) != 160 or len(claimed) != 148 or len(unsupported) != 12:
+    if len(universe) != 160 or len(claimed) != 151 or len(unsupported) != 9:
         raise SystemExit(
             f"coverage drift: universe={len(universe)} owned={len(claimed)} "
             f"unsupported={len(unsupported)}"

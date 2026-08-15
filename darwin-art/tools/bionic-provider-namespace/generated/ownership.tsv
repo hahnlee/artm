@@ -112,6 +112,8 @@ libc.so	strncmp	LIBC	leaf
 libc.so	strtod	LIBC	float-conversion
 libc.so	strtof	LIBC	float-conversion
 libc.so	strtol	LIBC	numeric
+libc.so	strtold	LIBC	binary128-conversion
+libc.so	strtold_l	LIBC	binary128-conversion
 libc.so	strtoll	LIBC	numeric
 libc.so	strtoll_l	LIBC	numeric
 libc.so	strtoul	LIBC	numeric
@@ -139,6 +141,7 @@ libc.so	wcsnrtombs	LIBC	locale
 libc.so	wcstod	LIBC	wide-float
 libc.so	wcstof	LIBC	wide-float
 libc.so	wcstol	LIBC	wide-integer
+libc.so	wcstold	LIBC	binary128-conversion
 libc.so	wcstoll	LIBC	wide-integer
 libc.so	wcstoul	LIBC	wide-integer
 libc.so	wcstoull	LIBC	wide-integer

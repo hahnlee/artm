@@ -41,6 +41,17 @@ float_source="$(find "$float_target/release/build" \
 }
 cp "$float_source" "$build/libdarwin-art-bionic-float-conversion.a"
 
+binary128_target="$build/binary128-target"
+CARGO_TARGET_DIR="$binary128_target" cargo build --quiet --release \
+  --manifest-path "$root/tools/bionic-binary128-conversion-facade/Cargo.toml"
+binary128_source="$(find "$binary128_target/release/build" \
+  -path '*/out/libdarwin_art_bionic_binary128_conversion.a' -print -quit)"
+[[ -n "$binary128_source" && -f "$binary128_source" ]] || {
+  echo 'bionic-runtime-provider-closure: binary128 provider archive missing' >&2
+  exit 2
+}
+cp "$binary128_source" "$build/libdarwin-art-bionic-binary128-conversion.a"
+
 cflags=(-arch arm64 -isysroot "$sdk" -O2 -Wall -Wextra -Werror -Wpedantic)
 cxxflags=(-arch arm64 -isysroot "$sdk" -std=c++20 -O2 -Wall -Wextra -Werror)
 
@@ -149,13 +160,15 @@ native="$build/libdarwin-art-bionic-native-providers.a"
   "$objects/builtin_adapters.o"
 
 float="$build/libdarwin-art-bionic-float-conversion.a"
+binary128="$build/libdarwin-art-bionic-binary128-conversion.a"
 icu="$root/_build/icu-foundation"
 smoke="$build/full-link-smoke"
 "$cxx" "${cxxflags[@]}" \
   -I"$root/tools/bionic-provider-namespace/include" \
   -I"$root/tools/bionic-provider-namespace/generated" \
   -I"$root/_aosp/system/logging/liblog/include" \
-  "$module/full_link_smoke.cc" "$native" "$float" "$rust" \
+  "$module/full_link_smoke.cc" -Wl,-force_load,"$binary128" \
+  "$native" "$float" "$rust" \
   -Wl,-force_load,"$icu/libandroidicuinit-darwin.a" \
   "$icu/libicuuc-common-darwin.a" "$icu/libicuuc-stubdata-darwin.a" \
   "$root/_build/graphics-foundations/liblog-darwin.a" \
@@ -163,10 +176,11 @@ smoke="$build/full-link-smoke"
 
 "$smoke"
 symbols="$build/provider-resolvers.txt"
-nm -gU "$native" "$float" "$rust" > "$build/all-symbols.txt" 2>/dev/null
+nm -gU "$native" "$binary128" "$float" "$rust" > "$build/all-symbols.txt" 2>/dev/null
 cat > "$symbols" <<'EOF'
 _darwin_art_bionic_abort_resolve
 _darwin_art_bionic_allocator_resolve
+_darwin_art_bionic_binary128_conversion_resolve
 _darwin_art_bionic_dso_lifecycle_resolve
 _darwin_art_bionic_errno_resolve
 _darwin_art_bionic_float_conversion_resolve
@@ -194,7 +208,7 @@ while IFS= read -r symbol; do
     exit 2
   }
 done < "$symbols"
-nm -gU "$native" "$float" "$rust" 2>/dev/null |
+nm -gU "$native" "$binary128" "$float" "$rust" 2>/dev/null |
   awk '$2 ~ /^[TDS]$/ && $3 ~ /^_darwin_art_/ {print $3}' |
   sort | uniq -d > "$build/duplicate-provider-definitions.txt"
 [[ ! -s "$build/duplicate-provider-definitions.txt" ]] || {
@@ -202,7 +216,7 @@ nm -gU "$native" "$float" "$rust" 2>/dev/null |
   echo 'bionic-runtime-provider-closure: duplicate provider definitions' >&2
   exit 2
 }
-nm -gU "$native" "$float" "$rust" \
+nm -gU "$native" "$binary128" "$float" "$rust" \
   "$icu/libandroidicuinit-darwin.a" "$icu/libicuuc-common-darwin.a" \
   "$icu/libicuuc-stubdata-darwin.a" \
   "$root/_build/graphics-foundations/liblog-darwin.a" \
@@ -218,7 +232,10 @@ for symbol in _darwin_art_bionic_malloc_result _darwin_art_bionic_free \
               _darwin_art_bionic_syscall_resolve _darwin_art_bionic_syscall \
               _darwin_art_liblog_provider_resolve ___android_log_write \
               _darwin_art_bionic_wide_float_resolve __Z16android_icu_initv \
-              _u_hasBinaryProperty_76; do
+              _u_hasBinaryProperty_76 \
+              _darwin_art_bionic_binary128_conversion_resolve \
+              _darwin_art_bionic_strtold _darwin_art_bionic_strtold_l \
+              _darwin_art_bionic_wcstold _darwin_art_aosp_strtorQ; do
   [[ "$(grep -Ec " [TDS] ${symbol}$" "$build/ownership-symbols.txt")" == 1 ]] || {
     echo "bionic-runtime-provider-closure: non-unique provider $symbol" >&2
     exit 2
@@ -228,4 +245,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=22 bind_builtins=sealed routes=166 Rust+C+C++=linked duplicate-provider=0 host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=23 bind_builtins=sealed routes=169 Rust+C+C++=linked duplicate-provider=0 host-fallback=0'

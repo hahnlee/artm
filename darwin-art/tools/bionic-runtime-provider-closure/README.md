@@ -6,9 +6,9 @@ it combines the existing C, C++, and Rust provider archives so
 `darwin_art_bionic_namespace_bind_builtins` can bind every manifest owner to
 its actual resolver.
 
-The current closure contains twenty-two providers and resolves 166 exact routes:
-148 of the pinned Android 35 arm64 `libc++_shared.so` libc-family imports plus
-all 18 public `liblog.so` exports. The remaining 12 libc imports stay explicit
+The current closure contains twenty-three providers and resolves 169 exact routes:
+151 of the pinned Android 35 arm64 `libc++_shared.so` libc-family imports plus
+all 18 public `liblog.so` exports. The remaining 9 libc imports stay explicit
 capability failures. Unknown SONAMEs, symbols, or GNU versions never fall back
 to dyld or host `dlsym`.
 
@@ -40,6 +40,12 @@ The formatted-stdio owner contributes only `fprintf`, `vfprintf`, and their
 closed resolver. It composes the existing bounded Android `va_list` formatter
 with the existing provider-local Android `FILE`/`fwrite` core; the link audit
 requires exactly one format, stdio, allocator, and errno definition.
+
+The binary128 conversion archive owns `strtold`, `strtold_l`, and `wcstold`
+through Android AAPCS64 q0-return entries. It is linked before the
+allocator/native archive, then the existing gdtoa/errno float archive, then
+static ICU. It embeds no duplicate allocator, common gdtoa, errno, or ICU
+owner.
 
 The syscall owner contributes the one variadic `syscall@LIBC` entry and its
 exact libc++ gettid/futex/libunwind-probe dispatcher. It reuses the closure's

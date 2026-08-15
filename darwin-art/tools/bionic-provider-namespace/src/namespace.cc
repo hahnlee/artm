@@ -38,7 +38,7 @@ constexpr const char *kProviderNames[] = {
     "pthread", "process-state",    "phdr",   "stdio",         "locale",
     "numeric", "float-conversion", "format", "strerror", "wide-integer",
     "abort", "liblog", "dso-lifecycle", "wide-float", "syslog",
-    "formatted-stdio", "syscall",
+    "formatted-stdio", "syscall", "binary128-conversion",
 };
 static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);
@@ -53,6 +53,7 @@ constexpr DarwinArtBionicProviderId kReleaseOrder[] = {
     DARWIN_ART_BIONIC_PROVIDER_SYSCALL,
     DARWIN_ART_BIONIC_PROVIDER_LIBLOG,
     DARWIN_ART_BIONIC_PROVIDER_NUMERIC,
+    DARWIN_ART_BIONIC_PROVIDER_BINARY128_CONVERSION,
     DARWIN_ART_BIONIC_PROVIDER_WIDE_FLOAT,
     DARWIN_ART_BIONIC_PROVIDER_FLOAT_CONVERSION,
     DARWIN_ART_BIONIC_PROVIDER_WIDE_INTEGER,

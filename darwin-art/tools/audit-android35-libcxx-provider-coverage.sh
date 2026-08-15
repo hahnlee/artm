@@ -32,6 +32,7 @@ formatted_stdio="$root/tools/bionic-formatted-stdio-facade/manifests/imports.tsv
 strerror="$root/tools/bionic-strerror-facade/manifests/imports.tsv"
 wide_integer="$root/tools/bionic-wide-integer-facade/manifests/imports.tsv"
 wide_float="$root/tools/bionic-wide-float-facade/manifests/imports.tsv"
+binary128_conversion="$root/tools/bionic-binary128-conversion-facade/manifests/imports.tsv"
 abort_provider="$root/tools/bionic-abort-facade/manifests/imports.tsv"
 syslog="$root/tools/bionic-syslog-facade/manifests/imports.tsv"
 syscall_provider="$root/tools/bionic-syscall-facade/manifests/imports.tsv"
@@ -40,7 +41,7 @@ leaf_source="$root/tools/bionic-libc-leaf-facade/src/leaf.c"
 errno_source="$root/tools/bionic-errno-tls/src/errno_tls.c"
 phdr_source="$root/tools/android-dl-iterate-phdr-provider/src/provider.cc"
 
-for file in "$universe" "$allocator" "$filesystem" "$time" "$pthread" "$process_state" "$stdio" "$locale" "$numeric" "$float_conversion" "$format" "$formatted_stdio" "$strerror" "$wide_integer" "$wide_float" "$abort_provider" "$syslog" "$syscall_provider" "$lifecycle" \
+for file in "$universe" "$allocator" "$filesystem" "$time" "$pthread" "$process_state" "$stdio" "$locale" "$numeric" "$float_conversion" "$format" "$formatted_stdio" "$strerror" "$wide_integer" "$wide_float" "$binary128_conversion" "$abort_provider" "$syslog" "$syscall_provider" "$lifecycle" \
             "$leaf_source" "$errno_source" "$phdr_source"; do
   [[ -f "$file" ]] || fail "missing provider manifest: $file"
 done
@@ -71,6 +72,8 @@ done
 [[ "$(sha "$strerror")" == "$STRERROR_IMPORTS_SHA256" ]] || fail "strerror import manifest drift"
 [[ "$(sha "$wide_integer")" == "$WIDE_INTEGER_IMPORTS_SHA256" ]] || fail "wide integer import manifest drift"
 [[ "$(sha "$wide_float")" == "$WIDE_FLOAT_IMPORTS_SHA256" ]] || fail "wide float import manifest drift"
+[[ "$(sha "$binary128_conversion")" == "$BINARY128_CONVERSION_IMPORTS_SHA256" ]] ||
+  fail "binary128 conversion import manifest drift"
 [[ "$(sha "$abort_provider")" == "$ABORT_IMPORTS_SHA256" ]] || fail "abort import manifest drift"
 [[ "$(sha "$syslog")" == "$SYSLOG_IMPORTS_SHA256" ]] || fail "syslog import manifest drift"
 [[ "$(sha "$syscall_provider")" == "$SYSCALL_IMPORTS_SHA256" ]] ||
@@ -108,6 +111,7 @@ awk -F '\t' 'NR > 1 { print "formatted-stdio\t" $1 }' "$formatted_stdio" >>"$own
 awk -F '\t' 'NR > 1 { print "strerror\t" $1 }' "$strerror" >>"$owners"
 awk -F '\t' 'NR > 1 { print "wide-integer\t" $1 }' "$wide_integer" >>"$owners"
 awk -F '\t' 'NR > 1 { print "wide-float\t" $1 }' "$wide_float" >>"$owners"
+awk -F '\t' 'NR > 1 { print "binary128-conversion\t" $1 }' "$binary128_conversion" >>"$owners"
 awk -F '\t' 'NR > 1 { print "abort\t" $1 }' "$abort_provider" >>"$owners"
 awk -F '\t' 'NR > 1 { print "syslog\t" $1 }' "$syslog" >>"$owners"
 awk -F '\t' 'NR > 1 { print "syscall\t" $1 }' "$syscall_provider" >>"$owners"
@@ -139,6 +143,7 @@ awk -F '\t' '{ count[$1]++ } END { for (owner in count) print owner "\t" count[o
 cat >"$tmp/expected-provider-counts" <<'EOF'
 abort	2
 allocator	4
+binary128-conversion	3
 errno	1
 filesystem	29
 float-conversion	2
@@ -168,7 +173,7 @@ awk -F '\t' 'NR == FNR { owned[$2] = 1; next }
   "$owners" "$universe" | LC_ALL=C sort >"$tmp/class-counts"
 cat >"$tmp/expected-class-counts" <<'EOF'
 A	11	11
-B	65	76
+B	68	76
 C	64	65
 D	8	8
 EOF
@@ -176,6 +181,6 @@ diff -u "$tmp/expected-class-counts" "$tmp/class-counts" ||
   fail "capability-class coverage drift"
 
 echo "android35-libcxx-provider-coverage: PASS imports=$universe_count owned=$owned_count duplicate-owners=0"
-echo "providers=leaf:11 allocator:4 errno:1 filesystem:29 time:3 pthread:24 process-state:3 phdr:1 stdio:13 locale:31 numeric:6 float-conversion:2 format:3 formatted-stdio:2 strerror:1 wide-integer:4 wide-float:2 abort:2 syslog:3 syscall:1 lifecycle:2"
-echo "classes=A:11/11 B:65/76 C:64/65 D:8/8 remaining=12"
+echo "providers=leaf:11 allocator:4 errno:1 filesystem:29 time:3 pthread:24 process-state:3 phdr:1 stdio:13 locale:31 numeric:6 float-conversion:2 binary128-conversion:3 format:3 formatted-stdio:2 strerror:1 wide-integer:4 wide-float:2 abort:2 syslog:3 syscall:1 lifecycle:2"
+echo "classes=A:11/11 B:68/76 C:64/65 D:8/8 remaining=9"
 echo "scope=composed-namespace-integrated-into-ART-ELF-resolver"

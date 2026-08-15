@@ -27,6 +27,8 @@ extern "C" void *darwin_art_bionic_wide_integer_resolve(
     const char *, const char *, const char *);
 extern "C" void *darwin_art_bionic_wide_float_resolve(
     const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_binary128_conversion_resolve(
+    const char *, const char *, const char *);
 extern "C" void *darwin_art_bionic_abort_resolve(const char *, const char *,
                                                   const char *);
 extern "C" uintptr_t darwin_art_liblog_provider_resolve(const char *,
@@ -103,6 +105,11 @@ uintptr_t WideFloat(void *, const char *soname, const char *symbol,
   return reinterpret_cast<uintptr_t>(
       darwin_art_bionic_wide_float_resolve(soname, symbol, version));
 }
+uintptr_t Binary128Conversion(void *, const char *soname, const char *symbol,
+                              const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_binary128_conversion_resolve(soname, symbol, version));
+}
 uintptr_t Abort(void *, const char *soname, const char *symbol,
                 const char *version) {
   return reinterpret_cast<uintptr_t>(
@@ -134,6 +141,7 @@ constexpr DarwinArtBionicProviderResolve kResolvers[] = {
     Pthread, ProcessState,    Phdr,   Stdio,        Locale,
     Numeric, FloatConversion, Format, Strerror, WideInteger, Abort,
     Liblog,  DsoLifecycle, WideFloat, Syslog, FormattedStdio, Syscall,
+    Binary128Conversion,
 };
 static_assert(sizeof(kResolvers) / sizeof(kResolvers[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);

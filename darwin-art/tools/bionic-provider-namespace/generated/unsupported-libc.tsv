@@ -5,9 +5,6 @@ ioctl	B	linux-request-constants-varargs
 sendfile	B	off_t-kernel-errno
 sscanf	B	varargs-format-long-double
 strftime_l	C	locale-owned-state
-strtold	B	long-double-errno-locale
-strtold_l	B	long-double-locale-handle-errno
 swprintf	B	wide-varargs-long-double
 ungetwc	B	FILE-layout-wide-state
 vsscanf	B	va_list-format-long-double
-wcstold	B	wide-long-double-locale-errno
