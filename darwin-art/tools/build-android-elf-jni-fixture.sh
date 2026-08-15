@@ -12,11 +12,12 @@ toolchain="$ndk/toolchains/llvm/prebuilt/darwin-x86_64"
 android_clang="$toolchain/bin/aarch64-linux-android35-clang"
 readelf="$toolchain/bin/llvm-readelf"
 nm="$toolchain/bin/llvm-nm"
+objdump="$toolchain/bin/llvm-objdump"
 
 fail() { echo "android-elf-jni-fixture: $*" >&2; exit 3; }
 missing() { echo "android-elf-jni-fixture: missing $*" >&2; exit 2; }
 
-for tool in "$android_clang" "$readelf" "$nm"; do
+for tool in "$android_clang" "$readelf" "$nm" "$objdump"; do
   [[ -x "$tool" ]] || missing "$tool"
 done
 
@@ -36,6 +37,12 @@ file "$output" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null 
 if "$readelf" -d "$output" | grep -F '(NEEDED)' >/dev/null; then
   fail "register-only fixture unexpectedly imports a DSO"
 fi
+if "$readelf" -d "$output" | grep -E '\((FINI|FINI_ARRAY)\)' >/dev/null; then
+  fail "first NativeBridge fixture requires unsupported ELF finalizers"
+fi
+if "$readelf" -l "$output" | grep -F 'GNU_RELRO' >/dev/null; then
+  fail "first loader capability requires RELRO to remain disabled"
+fi
 [[ "$("$nm" -D --defined-only "$output" | awk '$2 == "T" {print $3}' | paste -sd, -)" == \
    'JNI_OnLoad,JNI_OnUnload' ]] || fail "unexpected dynamic exports"
 "$readelf" -d "$output" | grep -F 'BIND_NOW' >/dev/null ||
@@ -51,6 +58,43 @@ fi
 grep -F 'R_AARCH64_JUMP_SLOT' "$relocations" >/dev/null &&
   fail "dependency-free fixture must not contain a PLT relocation"
 
+disassembly="$stage/disassembly.txt"
+"$objdump" -d "$output" > "$disassembly"
+spill_disassembly="$stage/native-spill-disassembly.txt"
+sed -n '/<NativeSpill>:/,/^$/p' "$disassembly" > "$spill_disassembly"
+[[ -s "$spill_disassembly" ]] || fail "NativeSpill was not retained for PCS audit"
+grep -Eq 'ldr[[:space:]]+x[0-9]+, \[sp\]$' "$spill_disassembly" ||
+  fail "NativeSpill Android PCS reference is not at sp+0"
+grep -Eq 'ldr[[:space:]]+w[0-9]+, \[sp, #0x8\]$' "$spill_disassembly" ||
+  fail "NativeSpill Android PCS f4 is not at sp+8"
+grep -Eq 'ldr[[:space:]]+w[0-9]+, \[sp, #0x10\]$' "$spill_disassembly" ||
+  fail "NativeSpill Android PCS f5 is not at sp+16"
+grep -Eq 'ldr[[:space:]]+x[0-9]+, \[sp, #0x18\]$' "$spill_disassembly" ||
+  fail "NativeSpill Android PCS d4 is not at sp+24"
+spill_stack_loads="$(grep -Ec 'ldr[[:space:]]+[wx][0-9]+, \[sp(, #[^]]+)?\]$' "$spill_disassembly")"
+[[ "$spill_stack_loads" == 4 ]] ||
+  fail "NativeSpill has $spill_stack_loads stack loads, expected exactly 4"
+
 mkdir -p "$build_dir"
 cp "$output" "$build_dir/libdarwin-art-jni-fixture.so"
-echo "android-elf-jni-fixture: PASS exports=JNI_OnLoad+JNI_OnUnload imports=0 register=GetEnv+FindClass+RegisterNatives methods=register+spill"
+fixture_sha="$(shasum -a 256 "$output" | awk '{print $1}')"
+fixture_size="$(stat -f '%z' "$output")"
+generated_dir="$build_dir/generated"
+mkdir -p "$generated_dir"
+identity="$stage/darwin_art_elf_jni_fixture_identity.h"
+{
+  echo '#ifndef DARWIN_ART_ELF_JNI_FIXTURE_IDENTITY_H_'
+  echo '#define DARWIN_ART_ELF_JNI_FIXTURE_IDENTITY_H_'
+  echo '#include <stddef.h>'
+  echo "inline constexpr size_t kDarwinArtElfJniFixtureSize = ${fixture_size}u;"
+  echo "inline constexpr char kDarwinArtElfJniFixtureSha256[] = \"${fixture_sha}\";"
+  echo 'inline constexpr char kDarwinArtElfJniFixtureSpillSignature[] ='
+  echo '    "(ZBCSIJLjava/lang/Object;FDFDFDFDFFD)J";'
+  echo 'inline constexpr size_t kDarwinArtElfJniFixtureAndroidRefStackOffset = 0u;'
+  echo 'inline constexpr size_t kDarwinArtElfJniFixtureAndroidF4StackOffset = 8u;'
+  echo 'inline constexpr size_t kDarwinArtElfJniFixtureAndroidF5StackOffset = 16u;'
+  echo 'inline constexpr size_t kDarwinArtElfJniFixtureAndroidD4StackOffset = 24u;'
+  echo '#endif'
+} > "$identity"
+cp "$identity" "$generated_dir/darwin_art_elf_jni_fixture_identity.h"
+echo "android-elf-jni-fixture: PASS exports=JNI_OnLoad+JNI_OnUnload imports=0 fini=0 relro=0 register=GetEnv+FindClass+RegisterNatives methods=register+spill pcs=ref@0,f4@8,f5@16,d4@24 size=$fixture_size sha256=$fixture_sha"

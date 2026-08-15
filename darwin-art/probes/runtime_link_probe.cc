@@ -2,6 +2,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -24,6 +25,7 @@
 #include "dex/art_dex_file_loader.h"
 #include "handle_scope-inl.h"
 #include "interpreter/unstarted_runtime.h"
+#include "jni/java_vm_ext.h"
 #include "jvalue.h"
 #include "mirror/class-inl.h"
 #include "mirror/class_loader.h"
@@ -33,6 +35,8 @@
 #include "scoped_thread_state_change-inl.h"
 #include "thread-current-inl.h"
 #include "well_known_classes.h"
+
+extern "C" int darwin_art_elf_jni_fixture_registration_status();
 
 static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
 
@@ -452,6 +456,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return DARWIN_ART_STATUS_PROCESS_ALREADY_STARTED;
   }
   ScopedProcessRunBoundary process_boundary;
+  const char* elf_fixture_path =
+      std::getenv("DARWIN_ART_ANDROID_ELF_JNI_FIXTURE");
+  const bool run_elf_jni_fixture =
+      elf_fixture_path != nullptr && elf_fixture_path[0] != '\0';
 
   // Darwin's malloc zones can claim the fixed compressed-reference window
   // while RuntimeArgumentMap is being assembled. Reserve ART's bounded arena
@@ -540,6 +548,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   art::StackHandleScope<12> hs(self);
   art::Handle<art::mirror::ClassLoader> app_loader =
       hs.NewHandle(soa.Decode<art::mirror::ClassLoader>(loader_ref));
+  jobject app_loader_ref = soa.AddLocalReference<jobject>(app_loader.Get());
   for (const auto& dex_file : app_dex_files) {
     if (class_linker->RegisterDexFile(*dex_file, app_loader.Get()) == nullptr) {
       std::cerr << "ART Darwin DEX: registration failed\n";
@@ -617,7 +626,15 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                               "Ldev/darwinart/probe/ProbePackageManager;",
                               sizeof("Ldev/darwinart/probe/ProbePackageManager;") - 1u,
                               app_loader));
+  art::MutableHandle<art::mirror::Class> native_fixture_handle(
+      hs.NewHandle<art::mirror::Class>(nullptr));
+  if (run_elf_jni_fixture) {
+    native_fixture_handle.Assign(class_linker->FindClass(
+        self, "Ldarwin/art/nativefixture/NativeFixture;",
+        sizeof("Ldarwin/art/nativefixture/NativeFixture;") - 1u, app_loader));
+  }
   if (content_root_handle == nullptr || package_manager_handle == nullptr ||
+      (run_elf_jni_fixture && native_fixture_handle == nullptr) ||
       self->IsExceptionPending()) {
     std::cerr << "ART Android window: Darwin Canvas/Window lookup failed\n";
     if (self->IsExceptionPending()) {
@@ -654,6 +671,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       soa.AddLocalReference<jclass>(content_root_handle.Get());
   jclass package_manager_class =
       soa.AddLocalReference<jclass>(package_manager_handle.Get());
+  jclass native_fixture_class =
+      run_elf_jni_fixture
+          ? soa.AddLocalReference<jclass>(native_fixture_handle.Get())
+          : nullptr;
   art::Runtime::Current()->StartMinimalForDarwinProbe(self->GetJniEnv());
   if (!darwin_art::RegisterLibcoreNatives(self->GetJniEnv())) {
     std::cerr << "ART Darwin libcore: native registration failed\n";
@@ -1313,6 +1334,31 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
               << self->GetException()->Dump() << "\n";
     env->ExceptionDescribe();
     return 19;
+  }
+
+  if (run_elf_jni_fixture) {
+    std::string load_error;
+    bool loaded = false;
+    {
+      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
+      loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
+          env, elf_fixture_path, app_loader_ref, native_fixture_class,
+          &load_error);
+    }
+    const int bridge_status =
+        darwin_art_elf_jni_fixture_registration_status();
+    const bool expected_capability_failure =
+        !loaded && load_error.find("JNI_OnLoad") != std::string::npos &&
+        bridge_status == 0x0f;
+    if (!expected_capability_failure || env->ExceptionCheck()) {
+      std::cerr << "ART Android ELF JNI: expected registration trampoline "
+                   "capability failure, status="
+                << bridge_status << " load_error=" << load_error << "\n";
+      return 41;
+    }
+    std::cout << "ART Android ELF JNI: load+JNI_OnLoad+RegisterNatives="
+                 "reached native-call=blocked-pcs-function-pointer\n"
+              << std::flush;
   }
 
   run_result->hello_answer = result.GetI();

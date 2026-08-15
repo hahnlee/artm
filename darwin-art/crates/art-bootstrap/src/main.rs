@@ -101,6 +101,7 @@ fn run() -> Result<()> {
         }
         "check-text-shaping" => build_shell_gate(&root, "check-android16-text-shaping-inputs.sh"),
         "build-dex" => build_dex_probe(&root),
+        "build-elf-jni-dex" => build_elf_jni_dex_probe(&root),
         "build-button-dex" => build_button_dex_probe(&root),
         "build-runtime-platform" => build_runtime_platform(&root),
         "build-runtime-core" => build_runtime_core(&root),
@@ -113,6 +114,7 @@ fn run() -> Result<()> {
         "audit-runtime-graphics-link" => audit_runtime_graphics_link(&root),
         "audit-graphics-closure" => build_shell_gate(&root, "audit-android16-graphics-closure.sh"),
         "probe-runtime-dex" => probe_runtime_dex(&root, false),
+        "probe-runtime-elf-jni" => probe_runtime_elf_jni(&root),
         "probe-window" => probe_runtime_dex(&root, true),
         "probe-runtime-graphics" => probe_runtime_graphics(&root),
         "probe-runtime-graphics-window" => probe_runtime_graphics_window(&root),
@@ -186,6 +188,7 @@ fn print_help() {
     println!("  probe-minikin-shaping  run real Minikin/HarfBuzz/ICU shaping cases");
     println!("  check-text-shaping  audit the full shaping and raster input closure");
     println!("  build-dex  compile AOSP libdexfile and parse a generated classes.dex");
+    println!("  build-elf-jni-dex  add the isolated Android ELF JNI fixture class");
     println!("  build-button-dex  compile the isolated real android.widget.Button probe");
     println!("  build-runtime-platform  compile ART host platform sources as Mach-O");
     println!("  build-runtime-core  apply Darwin monitor patches and compile runtime core");
@@ -200,6 +203,7 @@ fn print_help() {
     println!("  audit-runtime-graphics-link  link ART with the strict Android graphics closure");
     println!("  audit-graphics-closure  verify the 32-archive Android graphics closure");
     println!("  probe-runtime-dex  launch Java main(String[]) with Android stdout");
+    println!("  probe-runtime-elf-jni  reach Android ELF JNI registration through ART");
     println!("  probe-window  display the Android View probe in a native NSWindow");
     println!("  probe-runtime-graphics  draw DecorView through Bitmap-backed AOSP Canvas");
     println!("  probe-runtime-graphics-window  display the real Android Canvas frame in NSWindow");
@@ -1646,6 +1650,64 @@ fn build_dex_probe(root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn build_elf_jni_dex_probe(root: &Path) -> Result<()> {
+    let baseline_dex = root.join("_build/dex-probe/dex/classes.dex");
+    let dex_probe = root.join("_build/dex-probe/dex-probe");
+    for input in [&baseline_dex, &dex_probe] {
+        if !input.is_file() {
+            return Err(format!(
+                "ELF JNI DEX baseline is missing: {}; run `build-dex` first",
+                input.display()
+            )
+            .into());
+        }
+    }
+    let build_dir = root.join("_build/elf-jni-dex");
+    let class_dir = build_dir.join("classes");
+    let dex_dir = build_dir.join("dex");
+    fs::create_dir_all(&class_dir)?;
+    fs::create_dir_all(&dex_dir)?;
+    run_command(
+        Command::new("javac")
+            .args(["--release", "8", "-encoding", "UTF-8", "-d"])
+            .arg(&class_dir)
+            .arg(root.join("probes/android-elf-jni-fixture/NativeFixture.java")),
+    )?;
+    let classes_dex = dex_dir.join("classes.dex");
+    if classes_dex.is_file() {
+        fs::remove_file(&classes_dex)?;
+    }
+    run_command(
+        Command::new(find_d8()?)
+            .arg("--lib")
+            .arg(find_android_platform_jar()?)
+            .arg("--output")
+            .arg(&dex_dir)
+            .arg(&baseline_dex)
+            .arg(class_dir.join("darwin/art/nativefixture/NativeFixture.class")),
+    )?;
+    let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
+    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=304 \
+                    class[0]=Landroid/test/mock/MockPackageManager; \
+                    class[1]=Ldarwin/art/nativefixture/NativeFixture; \
+                    class[2]=Ldev/darwinart/probe/Hello; \
+                    class[3]=Ldev/darwinart/probe/ProbeActivity; \
+                    class[4]=Ldev/darwinart/probe/ProbeCanvas; \
+                    class[5]=Ldev/darwinart/probe/ProbeContentResolver$$ExternalSyntheticLambda0; \
+                    class[6]=Ldev/darwinart/probe/ProbeContentResolver; \
+                    class[7]=Ldev/darwinart/probe/ProbeContentRoot; \
+                    class[8]=Ldev/darwinart/probe/ProbeContext; \
+                    class[9]=Ldev/darwinart/probe/ProbePackageManager; \
+                    class[10]=Ldev/darwinart/probe/ProbeResources; \
+                    class[11]=Ldev/darwinart/probe/ProbeView; \
+                    class[12]=Ldev/darwinart/probe/ProbeXmlResourceParser;";
+    if output.trim() != expected {
+        return Err(format!("unexpected ELF JNI DEX probe output: {output:?}").into());
+    }
+    println!("build-elf-jni-dex: {}", output.trim());
+    Ok(())
+}
+
 fn build_button_dex_probe(root: &Path) -> Result<()> {
     // Rebuild the baseline first: the Button flavor intentionally reuses the
     // launcher/context/resource test classes, but replaces only Activity/View
@@ -2334,6 +2396,12 @@ fn build_runtime_graphics_bootstrap(root: &Path) -> Result<()> {
 }
 
 fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()> {
+    build_shell_gate(root, "build-android-elf-jni-fixture.sh")?;
+    run_command(
+        Command::new("cargo")
+            .args(["build", "--release", "--lib", "--manifest-path"])
+            .arg(root.join("crates/darwin-art-elf-loader/Cargo.toml")),
+    )?;
     let artbase = root.join("_aosp/art/libartbase");
     let patched_artbase = root.join("_build/foundation/patched-source/libartbase");
     let cmdline = root.join("_aosp/art/cmdline");
@@ -2375,6 +2443,10 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
     let libcutils_include = root.join("_aosp/system/core/libcutils/include");
     let liblog_include = root.join("_aosp/system/logging/liblog/include");
     let nativehelper_full_include = root.join("_aosp/libnativehelper-full/include");
+    let elf_loader_include = root.join("crates/darwin-art-elf-loader/include");
+    let jni_proxy_include = root.join("tools/android-jni-proxy/include");
+    let jni_proxy_generated = root.join("tools/android-jni-proxy/generated");
+    let elf_fixture_generated = root.join("_build/android-elf-jni-fixture/generated");
     let openjdk_math_source = root.join("_aosp/libcore/ojluni/src/main/native/Math.c");
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
 
@@ -2528,6 +2600,9 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
     let mut includes = vec![
         public_include.as_path(),
         compat.as_path(),
+        elf_fixture_generated.as_path(),
+        elf_loader_include.as_path(),
+        jni_proxy_include.as_path(),
         generated_dir.as_path(),
         generator.as_path(),
         patched_runtime.as_path(),
@@ -2952,6 +3027,37 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
         &mut cached_objects,
     );
     objects.push(openjdk_math_object);
+    let jni_proxy_object = object_dir.join("darwin_art_jni_proxy.c.o");
+    let mut jni_proxy_command = Command::new("clang");
+    jni_proxy_command
+        .args([
+            "-std=c17",
+            "-O2",
+            "-DNDEBUG",
+            "-fvisibility=hidden",
+            "-ffunction-sections",
+            "-fdata-sections",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+        ])
+        .arg(format!("-I{}", jni_proxy_include.display()))
+        .arg(format!("-I{}", jni_proxy_generated.display()))
+        .arg("-c")
+        .arg(root.join("tools/android-jni-proxy/src/proxy.c"))
+        .arg("-o")
+        .arg(&jni_proxy_object);
+    record_cache_result(
+        compile_with_dependency_cache(
+            &mut jni_proxy_command,
+            &jni_proxy_object,
+            &compiler_identity,
+            &mut file_hash_cache,
+        )?,
+        &mut compiled_objects,
+        &mut cached_objects,
+    );
+    objects.push(jni_proxy_object);
     for adapter_source in [
         "darwin_framework_natives.cc",
         "darwin_icu_natives.cc",
@@ -3180,6 +3286,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&object)
         .arg(&surface_object)
         .arg(root.join("_build/runtime-bootstrap/libart-runtime-bootstrap-darwin.a"))
+        .arg(root.join("crates/darwin-art-elf-loader/target/release/libdarwin_art_elf_loader.a"))
         .arg(root.join("_build/interpreter-core/libart-interpreter-darwin.a"))
         .arg(root.join("_build/runtime-arm64/libart-arm64-darwin.a"))
         .arg(root.join("_build/runtime-core/libart-core-darwin.a"))
@@ -3207,6 +3314,8 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             "Metal",
             "-framework",
             "QuartzCore",
+            "-framework",
+            "Security",
             "-o",
         ])
         .arg(&runtime_library);
@@ -3230,6 +3339,23 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
                     "runtime C ABI library does not export required symbol {required}"
                 )
                 .into());
+            }
+        }
+        let all_symbols = command_output(Command::new("nm").args(["-aC"]).arg(&runtime_library))?;
+        for required in [
+            "darwin_art_elf_load_bytes",
+            "darwin_art_elf_run_initializers",
+            "darwin_art_elf_lookup",
+            "darwin_art_elf_unload",
+            "darwin_art_jni_proxy_init",
+            "darwin_art_jni_proxy_java_vm",
+            "darwin_art_elf_jni_fixture_registration_status",
+            "ElfJniOnLoadTrampoline",
+        ] {
+            if !all_symbols.contains(required) {
+                return Err(
+                    format!("runtime ELF JNI bridge lacks required symbol {required}").into(),
+                );
             }
         }
         build_runtime_host(root)?;
@@ -3460,6 +3586,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         // archives so the latter extract only additional runtime providers.
         .arg(&graphics_closure)
         .arg(&bootstrap)
+        .arg(root.join("crates/darwin-art-elf-loader/target/release/libdarwin_art_elf_loader.a"))
         .arg(&system_natives_archive)
         .arg(&file_descriptor_archive)
         .arg(&unix_native_dispatcher_archive)
@@ -3528,6 +3655,8 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
             "Metal",
             "-framework",
             "QuartzCore",
+            "-framework",
+            "Security",
             "-o",
         ])
         .arg(&runtime_library);
@@ -3584,6 +3713,14 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         "register_libcore_io_AsynchronousCloseMonitor",
         "async_close_monitor_signal_blocked_threads",
         "JniConstants_FileDescriptor_descriptor",
+        "darwin_art_elf_load_bytes",
+        "darwin_art_elf_run_initializers",
+        "darwin_art_elf_lookup",
+        "darwin_art_elf_unload",
+        "darwin_art_jni_proxy_init",
+        "darwin_art_jni_proxy_java_vm",
+        "darwin_art_elf_jni_fixture_registration_status",
+        "ElfJniOnLoadTrampoline",
     ] {
         if !all_symbols.contains(registrar) {
             return Err(format!("real-graphics Runtime lacks registrar symbol {registrar}").into());
@@ -3662,19 +3799,24 @@ fn build_runtime_host(root: &Path) -> Result<()> {
 }
 
 fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
-    probe_runtime_dex_flavor(root, show_window, false, false)
+    probe_runtime_dex_flavor(root, show_window, false, false, false)
+}
+
+fn probe_runtime_elf_jni(root: &Path) -> Result<()> {
+    build_elf_jni_dex_probe(root)?;
+    probe_runtime_dex_flavor(root, false, false, false, true)
 }
 
 fn probe_runtime_graphics(root: &Path) -> Result<()> {
-    probe_runtime_dex_flavor(root, false, true, false)
+    probe_runtime_dex_flavor(root, false, true, false, false)
 }
 
 fn probe_runtime_graphics_window(root: &Path) -> Result<()> {
-    probe_runtime_dex_flavor(root, true, true, false)
+    probe_runtime_dex_flavor(root, true, true, false, false)
 }
 
 fn probe_runtime_button(root: &Path, show_window: bool) -> Result<()> {
-    probe_runtime_dex_flavor(root, show_window, true, true)
+    probe_runtime_dex_flavor(root, show_window, true, true, false)
 }
 
 fn probe_runtime_dex_flavor(
@@ -3682,6 +3824,7 @@ fn probe_runtime_dex_flavor(
     show_window: bool,
     real_graphics: bool,
     button: bool,
+    elf_jni: bool,
 ) -> Result<()> {
     let core_icu4j = if real_graphics {
         prepare_icu_runtime_bootclasspath(root)?
@@ -3698,7 +3841,9 @@ fn probe_runtime_dex_flavor(
     let core_oj = root.join("_prebuilt/android-16/bootclasspath/core-oj.jar");
     let core_libart = root.join("_prebuilt/android-16/bootclasspath/core-libart.jar");
     let framework = root.join("_prebuilt/android-16/bootclasspath/framework.jar");
-    let classes_dex = root.join(if button {
+    let classes_dex = root.join(if elf_jni {
+        "_build/elf-jni-dex/dex/classes.dex"
+    } else if button {
         "_build/button-dex/dex/classes.dex"
     } else {
         "_build/dex-probe/dex/classes.dex"
@@ -3762,8 +3907,32 @@ fn probe_runtime_dex_flavor(
                 .env("DARWIN_ART_TEST_FONT", roboto);
         }
     }
+    if elf_jni {
+        build_shell_gate(root, "build-android-elf-jni-fixture.sh")?;
+        let fixture = root.join("_build/android-elf-jni-fixture/libdarwin-art-jni-fixture.so");
+        if !fixture.is_file() {
+            return Err(
+                format!("Android ELF JNI fixture is missing: {}", fixture.display()).into(),
+            );
+        }
+        command.env("DARWIN_ART_ANDROID_ELF_JNI_FIXTURE", fixture);
+    }
     let output = command_output(&mut command)?;
-    let expected = "Hello from Darwin ART main: 안녕\n\
+    let expected = if elf_jni {
+        "Hello from Darwin ART main: 안녕\n\
+         ART Android ELF JNI: load+JNI_OnLoad+RegisterNatives=reached native-call=blocked-pcs-function-pointer\n\
+         ART Darwin Runtime::Create: ok\n\
+         ART Darwin app ClassLoader: PathClassLoader\n\
+         ART Darwin DEX interpreter: Hello.answer()=42\n\
+         ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
+         ART runtime native: System.arraycopy()=42\n\
+         ART Android framework: ProbeActivity().probeValue()=42\n\
+         ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
+         ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
+         ART Android lifecycle: Activity.onCreate()=43\n\
+         ART Darwin launcher: main(String[])=ok"
+    } else {
+        "Hello from Darwin ART main: 안녕\n\
                     ART Darwin Runtime::Create: ok\n\
                     ART Darwin app ClassLoader: PathClassLoader\n\
                     ART Darwin DEX interpreter: Hello.answer()=42\n\
@@ -3773,11 +3942,16 @@ fn probe_runtime_dex_flavor(
                     ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
                     ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
                     ART Android lifecycle: Activity.onCreate()=43\n\
-                    ART Darwin launcher: main(String[])=ok";
+                    ART Darwin launcher: main(String[])=ok"
+    };
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
-    if button {
+    if elf_jni {
+        println!(
+            "probe-runtime-elf-jni: ART load + proxy JNI_OnLoad + registration reached; invocation blocked"
+        );
+    } else if button {
         if show_window {
             println!("probe-runtime-button-window: android.widget.Button -> AOSP HWUI -> NSWindow");
         } else {

@@ -66,4 +66,32 @@ extern "C" void RemoveSpecialSignalHandlerFn(
   }
 }
 
+extern "C" void EnsureFrontOfChain(int signal_number) {
+  if (signal_number <= 0 || signal_number >= NSIG) {
+    return;
+  }
+  SignalSlot& slot = g_signal_slots[signal_number];
+  if (!slot.installed) {
+    return;
+  }
+  struct sigaction current {};
+  if (sigaction(signal_number, nullptr, &current) != 0) {
+    return;
+  }
+  const bool dispatcher_is_current =
+      (current.sa_flags & SA_SIGINFO) != 0 &&
+      current.sa_sigaction == DarwinSignalDispatcher;
+  if (dispatcher_is_current) {
+    return;
+  }
+  // Match AOSP sigchain's ownership repair: retain an application-installed
+  // replacement as the next action, then put ART's dispatcher back in front.
+  slot.previous = current;
+  struct sigaction dispatcher {};
+  dispatcher.sa_sigaction = DarwinSignalDispatcher;
+  dispatcher.sa_mask = slot.special.sc_mask;
+  dispatcher.sa_flags = SA_SIGINFO | SA_RESTART;
+  sigaction(signal_number, &dispatcher, nullptr);
+}
+
 }  // namespace art
