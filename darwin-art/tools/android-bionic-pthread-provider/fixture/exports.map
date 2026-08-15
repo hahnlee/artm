@@ -4,6 +4,14 @@
     pthread_fixture_worker;
     pthread_fixture_mutex_lookup_race;
     pthread_fixture_mutex_destroy_race;
+    pthread_fixture_cond_waiter;
+    pthread_fixture_cond_waiting;
+    pthread_fixture_cond_completed;
+    pthread_fixture_cond_spurious_signal;
+    pthread_fixture_cond_signal_one;
+    pthread_fixture_cond_broadcast;
+    pthread_fixture_cond_destroy_busy;
+    pthread_fixture_cond_timedwait;
     pthread_fixture_finish;
   local:
     *;

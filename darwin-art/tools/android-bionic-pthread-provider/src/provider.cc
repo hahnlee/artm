@@ -3,6 +3,7 @@
 #include <pthread.h>
 
 #include <atomic>
+#include <climits>
 #include <condition_variable>
 #include <cstdlib>
 #include <cstdint>
@@ -20,6 +21,7 @@ static_assert(sizeof(DarwinArtAndroidPthread) == 8);
 static_assert(sizeof(DarwinArtAndroidPthreadKey) == 4);
 static_assert(sizeof(DarwinArtAndroidPthreadOnce) == 4);
 static_assert(sizeof(DarwinArtAndroidPthreadMutex) == 40);
+static_assert(sizeof(DarwinArtAndroidPthreadCond) == 48);
 
 constexpr int kAndroidEagain = 11;
 constexpr int kAndroidEnomem = 12;
@@ -27,10 +29,15 @@ constexpr int kAndroidEbusy = 16;
 constexpr int kAndroidEinval = 22;
 constexpr int kAndroidEdeadlk = 35;
 constexpr int kAndroidEnotsup = 95;
+constexpr int kAndroidEtimedout = 110;
 constexpr uint32_t kAndroidKeyValid = UINT32_C(0x80000000);
 constexpr uint32_t kAndroidKeySlots = 128;
 constexpr int kAndroidDestructorIterations = 4;
 constexpr uint16_t kAndroidMutexDestroyed = UINT16_C(0xffff);
+constexpr uint32_t kAndroidCondSharedMask = UINT32_C(0x0001);
+constexpr uint32_t kAndroidCondClockMask = UINT32_C(0x0002);
+constexpr uint32_t kAndroidCondCounterStep = UINT32_C(0x0004);
+constexpr uint32_t kAndroidCondDestroyed = UINT32_C(0xdeadc04d);
 constexpr int32_t kOnceNotStarted = 0;
 constexpr int32_t kOnceUnderway = 1;
 constexpr int32_t kOnceComplete = 2;
@@ -42,6 +49,7 @@ int AndroidError(int error) {
   if (error == ENOMEM) return kAndroidEnomem;
   if (error == EAGAIN) return kAndroidEagain;
   if (error == EDEADLK) return kAndroidEdeadlk;
+  if (error == ETIMEDOUT) return kAndroidEtimedout;
   if (error == EPERM) return 1;
   if (error == ESRCH) return 3;
   if (error == ENOTSUP) return kAndroidEnotsup;
@@ -90,6 +98,22 @@ struct OnceEntry {
   int state{kOnceNotStarted};
 };
 
+struct CondEntry {
+  pthread_cond_t host{};
+  std::mutex lifecycle_mutex;
+  std::condition_variable lifecycle_condition;
+  enum class Lifecycle { kAlive, kDestroying, kDestroyed };
+  Lifecycle lifecycle{Lifecycle::kAlive};
+  size_t active_operations{};
+  size_t waiters{};
+  bool monotonic{};
+  bool host_initialized{};
+
+  ~CondEntry() {
+    if (host_initialized) pthread_cond_destroy(&host);
+  }
+};
+
 struct ProviderState {
   std::mutex mutex;
   KeySlot key_slots[kAndroidKeySlots];
@@ -98,6 +122,8 @@ struct ProviderState {
       mutexes;
   std::unordered_map<DarwinArtAndroidPthreadOnce*, std::shared_ptr<OnceEntry>>
       once_controls;
+  std::unordered_map<DarwinArtAndroidPthreadCond*, std::shared_ptr<CondEntry>>
+      conditions;
 };
 
 ProviderState& State() {
@@ -218,6 +244,22 @@ void SetAndroidMutexState(DarwinArtAndroidPthreadMutex* mutex, uint16_t value) {
   std::memcpy(mutex, &value, sizeof(value));
 }
 
+uint32_t AndroidCondState(const DarwinArtAndroidPthreadCond* cond) {
+  uint32_t value = 0;
+  std::memcpy(&value, cond, sizeof(value));
+  return value;
+}
+
+void SetAndroidCondState(DarwinArtAndroidPthreadCond* cond, uint32_t value) {
+  std::memcpy(cond, &value, sizeof(value));
+}
+
+void SetAndroidCondWaiters(DarwinArtAndroidPthreadCond* cond, uint32_t value) {
+  std::memcpy(reinterpret_cast<unsigned char*>(cond) + sizeof(uint32_t),
+              &value,
+              sizeof(value));
+}
+
 std::shared_ptr<MutexEntry> FindOrCreateMutex(
     DarwinArtAndroidPthreadMutex* mutex,
     int* error_out) {
@@ -253,6 +295,150 @@ std::shared_ptr<MutexEntry> FindOrCreateMutex(
   state.mutexes.emplace(mutex, entry);
   *error_out = 0;
   return entry;
+}
+
+std::shared_ptr<CondEntry> FindOrCreateCond(
+    DarwinArtAndroidPthreadCond* cond,
+    int* error_out) {
+  if (cond == nullptr) {
+    *error_out = kAndroidEinval;
+    return nullptr;
+  }
+  ProviderState& state = State();
+  std::lock_guard<std::mutex> lock(state.mutex);
+  const auto found = state.conditions.find(cond);
+  if (found != state.conditions.end()) {
+    *error_out = 0;
+    return found->second;
+  }
+  const uint32_t visible = AndroidCondState(cond);
+  if (visible == kAndroidCondDestroyed) {
+    *error_out = kAndroidEbusy;
+    return nullptr;
+  }
+  if ((visible & kAndroidCondSharedMask) != 0) {
+    *error_out = kAndroidEnotsup;
+    return nullptr;
+  }
+  if ((visible & ~(kAndroidCondSharedMask | kAndroidCondClockMask)) != 0) {
+    *error_out = kAndroidEinval;
+    return nullptr;
+  }
+  const unsigned char* bytes = reinterpret_cast<const unsigned char*>(cond);
+  for (size_t index = sizeof(uint32_t); index < sizeof(*cond); ++index) {
+    if (bytes[index] != 0) {
+      *error_out = kAndroidEinval;
+      return nullptr;
+    }
+  }
+  auto entry = std::make_shared<CondEntry>();
+  const int result = pthread_cond_init(&entry->host, nullptr);
+  if (result != 0) {
+    *error_out = AndroidError(result);
+    return nullptr;
+  }
+  entry->host_initialized = true;
+  entry->monotonic = (visible & kAndroidCondClockMask) != 0;
+  state.conditions.emplace(cond, entry);
+  *error_out = 0;
+  return entry;
+}
+
+int BeginCondWait(const std::shared_ptr<CondEntry>& cond,
+                  const std::shared_ptr<MutexEntry>& mutex) {
+  std::scoped_lock lock(cond->lifecycle_mutex, mutex->lifecycle_mutex);
+  if (cond->lifecycle != CondEntry::Lifecycle::kAlive ||
+      mutex->lifecycle != MutexEntry::Lifecycle::kAlive) {
+    return kAndroidEbusy;
+  }
+  ++cond->active_operations;
+  ++cond->waiters;
+  ++mutex->active_operations;
+  return 0;
+}
+
+void EndCondWait(DarwinArtAndroidPthreadCond* visible_cond,
+                 const std::shared_ptr<CondEntry>& cond,
+                 const std::shared_ptr<MutexEntry>& mutex) {
+  std::scoped_lock lock(cond->lifecycle_mutex, mutex->lifecycle_mutex);
+  --cond->active_operations;
+  --cond->waiters;
+  --mutex->active_operations;
+  SetAndroidCondWaiters(visible_cond, static_cast<uint32_t>(cond->waiters));
+  cond->lifecycle_condition.notify_all();
+  mutex->lifecycle_condition.notify_all();
+}
+
+timespec MonotonicRelativeTimeout(const timespec& absolute) {
+  timespec now{};
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  timespec relative{};
+  relative.tv_sec = absolute.tv_sec - now.tv_sec;
+  relative.tv_nsec = absolute.tv_nsec - now.tv_nsec;
+  if (relative.tv_nsec < 0) {
+    --relative.tv_sec;
+    relative.tv_nsec += 1000000000L;
+  }
+  if (relative.tv_sec < 0) return timespec{0, 0};
+  return relative;
+}
+
+int CondWait(DarwinArtAndroidPthreadCond* visible_cond,
+             DarwinArtAndroidPthreadMutex* visible_mutex,
+             const timespec* absolute_timeout) {
+  if (absolute_timeout != nullptr &&
+      (absolute_timeout->tv_sec < 0 || absolute_timeout->tv_nsec < 0 ||
+       absolute_timeout->tv_nsec >= 1000000000L)) {
+    return kAndroidEinval;
+  }
+  int error = 0;
+  std::shared_ptr<CondEntry> cond = FindOrCreateCond(visible_cond, &error);
+  if (cond == nullptr) return error;
+  std::shared_ptr<MutexEntry> mutex = FindOrCreateMutex(visible_mutex, &error);
+  if (mutex == nullptr) return error;
+  error = BeginCondWait(cond, mutex);
+  if (error != 0) return error;
+  {
+    std::lock_guard<std::mutex> lock(cond->lifecycle_mutex);
+    SetAndroidCondWaiters(visible_cond, static_cast<uint32_t>(cond->waiters));
+  }
+  int result = 0;
+  if (absolute_timeout == nullptr) {
+    result = pthread_cond_wait(&cond->host, &mutex->host);
+  } else if (cond->monotonic) {
+    const timespec relative = MonotonicRelativeTimeout(*absolute_timeout);
+    result = pthread_cond_timedwait_relative_np(
+        &cond->host, &mutex->host, &relative);
+  } else {
+    result = pthread_cond_timedwait(
+        &cond->host, &mutex->host, absolute_timeout);
+  }
+  EndCondWait(visible_cond, cond, mutex);
+  return AndroidError(result);
+}
+
+int CondPulse(DarwinArtAndroidPthreadCond* visible_cond, bool broadcast) {
+  int error = 0;
+  std::shared_ptr<CondEntry> cond = FindOrCreateCond(visible_cond, &error);
+  if (cond == nullptr) return error;
+  {
+    std::lock_guard<std::mutex> lock(cond->lifecycle_mutex);
+    if (cond->lifecycle != CondEntry::Lifecycle::kAlive) return kAndroidEbusy;
+    ++cond->active_operations;
+    if (cond->waiters != 0) {
+      SetAndroidCondState(
+          visible_cond,
+          AndroidCondState(visible_cond) + kAndroidCondCounterStep);
+    }
+  }
+  const int result = broadcast ? pthread_cond_broadcast(&cond->host)
+                               : pthread_cond_signal(&cond->host);
+  {
+    std::lock_guard<std::mutex> lock(cond->lifecycle_mutex);
+    --cond->active_operations;
+    if (cond->active_operations == 0) cond->lifecycle_condition.notify_all();
+  }
+  return AndroidError(result);
 }
 
 template <typename Operation>
@@ -473,6 +659,57 @@ extern "C" int darwin_art_bionic_pthread_mutex_destroy(
   return AndroidError(result);
 }
 
+extern "C" int darwin_art_bionic_pthread_cond_wait(
+    DarwinArtAndroidPthreadCond* cond,
+    DarwinArtAndroidPthreadMutex* mutex) {
+  return CondWait(cond, mutex, nullptr);
+}
+
+extern "C" int darwin_art_bionic_pthread_cond_timedwait(
+    DarwinArtAndroidPthreadCond* cond,
+    DarwinArtAndroidPthreadMutex* mutex,
+    const timespec* absolute_timeout) {
+  return CondWait(cond, mutex, absolute_timeout);
+}
+
+extern "C" int darwin_art_bionic_pthread_cond_signal(
+    DarwinArtAndroidPthreadCond* cond) {
+  return CondPulse(cond, false);
+}
+
+extern "C" int darwin_art_bionic_pthread_cond_broadcast(
+    DarwinArtAndroidPthreadCond* cond) {
+  return CondPulse(cond, true);
+}
+
+extern "C" int darwin_art_bionic_pthread_cond_destroy(
+    DarwinArtAndroidPthreadCond* visible_cond) {
+  int error = 0;
+  std::shared_ptr<CondEntry> cond = FindOrCreateCond(visible_cond, &error);
+  if (cond == nullptr) return error;
+  std::unique_lock<std::mutex> lock(cond->lifecycle_mutex);
+  if (cond->lifecycle != CondEntry::Lifecycle::kAlive) return kAndroidEbusy;
+  // POSIX makes destruction with waiters undefined and Bionic does not detect
+  // it. The facade defines a safe Android-errno failure instead of destroying
+  // host storage beneath a blocked Android thread.
+  if (cond->active_operations != 0 || cond->waiters != 0) return kAndroidEbusy;
+  cond->lifecycle = CondEntry::Lifecycle::kDestroying;
+  lock.unlock();
+  const int result = pthread_cond_destroy(&cond->host);
+  lock.lock();
+  if (result == 0) {
+    cond->host_initialized = false;
+    cond->lifecycle = CondEntry::Lifecycle::kDestroyed;
+    SetAndroidCondState(visible_cond, kAndroidCondDestroyed);
+    SetAndroidCondWaiters(visible_cond, 0);
+  } else {
+    cond->lifecycle = CondEntry::Lifecycle::kAlive;
+  }
+  lock.unlock();
+  cond->lifecycle_condition.notify_all();
+  return AndroidError(result);
+}
+
 extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
                                                     const char* symbol,
                                                     const char* version) {
@@ -495,6 +732,11 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
   RESOLVE(mutex_trylock);
   RESOLVE(mutex_unlock);
   RESOLVE(mutex_destroy);
+  RESOLVE(cond_wait);
+  RESOLVE(cond_timedwait);
+  RESOLVE(cond_signal);
+  RESOLVE(cond_broadcast);
+  RESOLVE(cond_destroy);
 #undef RESOLVE
   return nullptr;
 }
@@ -509,6 +751,13 @@ extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
     (void)address;
     std::lock_guard<std::mutex> lifecycle_lock(entry->lifecycle_mutex);
     if (entry->lifecycle != MutexEntry::Lifecycle::kDestroyed) {
+      return kAndroidEbusy;
+    }
+  }
+  for (const auto& [address, entry] : state.conditions) {
+    (void)address;
+    std::lock_guard<std::mutex> lifecycle_lock(entry->lifecycle_mutex);
+    if (entry->lifecycle != CondEntry::Lifecycle::kDestroyed) {
       return kAndroidEbusy;
     }
   }
@@ -530,6 +779,7 @@ extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
     delete current;
   }
   state.mutexes.clear();
+  state.conditions.clear();
   state.once_controls.clear();
   return 0;
 }
@@ -550,5 +800,6 @@ extern "C" int darwin_art_bionic_pthread_capability(const char* capability) {
   if (capability == nullptr) return 0;
   const std::string_view name(capability);
   return name == "thread-identity-token" || name == "tls-key-destructor" ||
-         name == "once-private" || name == "mutex-normal-private";
+         name == "once-private" || name == "mutex-normal-private" ||
+         name == "cond-private" || name == "cond-monotonic-clock";
 }

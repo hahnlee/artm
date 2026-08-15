@@ -2,7 +2,7 @@
 
 This module is derived from the SHA-locked NDK r28c/API 35 arm64
 `libc++_shared.so`. That ELF imports 24 `pthread_*` functions from
-`libc.so@LIBC`; the first coherent slice owns 11 of them:
+`libc.so@LIBC`; this coherent slice owns 16 of them:
 
 ```text
 pthread_self
@@ -10,17 +10,20 @@ pthread_key_create / pthread_key_delete
 pthread_getspecific / pthread_setspecific
 pthread_once
 pthread_mutex_init / lock / trylock / unlock / destroy
+pthread_cond_wait / timedwait / signal / broadcast / destroy
 ```
 
-The remaining 13 imports are retained in the manifest as unsupported. A
+The remaining 8 imports are retained in the manifest as unsupported. A
 resolver can therefore never mistake this slice for complete pthread support.
 
 ## Object and state boundary
 
 Android arm64 exposes `pthread_t` as an eight-byte `long`, key and once controls
-as four-byte integers, and mutex storage as 40 opaque bytes. Darwin uses
+as four-byte integers, mutex storage as 40 opaque bytes, and condition storage
+as 48 opaque bytes aligned to four bytes. Darwin uses
 different representations. None of these Android values is cast to a Darwin
-`pthread_t`, `pthread_key_t`, `pthread_once_t`, or `pthread_mutex_t`.
+`pthread_t`, `pthread_key_t`, `pthread_once_t`, `pthread_mutex_t`, or
+`pthread_cond_t`.
 
 - `pthread_self` returns a process-unique, thread-local 64-bit Android token. It
   is stable on one thread and never exposes Darwin's `pthread_t`.
@@ -47,6 +50,17 @@ different representations. None of these Android values is cast to a Darwin
   in a side table. The Android 40-byte storage remains Android-formatted and is
   marked `0xffff` only after successful destruction, matching Bionic's visible
   destroyed state.
+- Static process-private condition variables own independent Darwin condition
+  objects in a side table. The pinned Bionic state word is preserved:
+  `shared=0x1`, `monotonic=0x2`, counter step `0x4`, and destroyed marker
+  `0xdeadc04d`. The zero initializer uses realtime; the monotonic initializer
+  uses bit 1. `timedwait` accepts Android absolute deadlines. Realtime can be
+  passed directly because both systems use the Unix epoch; monotonic deadlines
+  are converted at the call boundary to Darwin's relative monotonic wait API.
+  Cond and mutex lifecycle leases are acquired together before the host wait,
+  so the host primitive atomically releases/reacquires the exact mutex owner
+  while neither side-table entry can be destroyed. Spurious wakeups remain
+  allowed and the Android fixture verifies the required predicate loop.
 
 The singleton provider owns these tables for the process and must outlive every
 loaded Android image. Its root state is intentionally process-lifetime so late
@@ -57,18 +71,23 @@ table; it detaches and frees the caller's table. Mutex tombstones and completed-
 by Android object addresses until the loader's provider-reset/process-exit
 boundary. Key generation prevents deleted-slot stale TLS values;
 object-address tombstones prevent use-after-destroy from silently constructing
-a new mutex. A per-entry lifecycle lock serializes lookup operations with
+a new mutex or condition. Per-entry lifecycle locks serialize operations with
 destroy; destroy waits for in-flight provider calls and reopens the entry if the
 host reports `EBUSY`. Pthread errors are returned as Android/Linux numbers rather than
-Darwin errno numbers (`EAGAIN=11`, `EDEADLK=35`, `ENOTSUP=95`).
+Darwin errno numbers (`EAGAIN=11`, `EDEADLK=35`, `ENOTSUP=95`,
+`ETIMEDOUT=110`).
 
 ## Deliberate capability failures
 
 Fork while once initialization is underway, robust mutexes, process-shared
-objects, priority inheritance, recursive/error-check mutex attributes,
-cancellation cleanup, condition variables, rwlocks, and thread create/join/
+mutexes/conditions, priority inheritance, recursive/error-check mutex
+attributes, condition attributes/explicit initialization, cancellation cleanup,
+rwlocks, and thread create/join/
 detach are not implemented. Non-null mutex attributes return Android `ENOTSUP`;
-their resolver symbols are absent. There is no unprefixed interposition or
+the pshared condition flag also returns `ENOTSUP`, and those resolver symbols
+are absent. POSIX makes destroying a condition with waiters undefined; this
+provider deliberately returns Android `EBUSY` to avoid freeing host storage
+beneath a blocked Android thread. There is no unprefixed interposition or
 Darwin `dlsym` fallback.
 
 The only Android-to-Darwin callback signatures exercised here are `void()` for
@@ -86,10 +105,10 @@ The gate:
 
 1. re-derives all 24 pthread imports and their `LIBC` versions from the pinned
    `libc++_shared.so`;
-2. sparsely materializes four exact Bionic implementation files without Git;
+2. sparsely materializes five exact Bionic implementation files without Git;
 3. builds a Darwin arm64 provider archive and an NDK AArch64 ELF fixture;
 4. loads that ELF with `darwin-art-elf-loader` and an exact `libc.so@LIBC`
-   resolver, then actually executes all 11 imports;
+   resolver, then actually executes all 16 imports;
 5. runs eight Darwin threads through the same loaded Android image, checks
    stable/unique thread tokens, two-pass TLS destructors, once-only execution,
    16,000 contended mutex increments, and concurrent destroy-versus-lookup;
@@ -98,6 +117,10 @@ The gate:
 7. runs an ASan/UBSan eight-thread delete-versus-get/set stress plus 10,000
    same-thread create/set/delete cycles. The live-value count remains one—not
    10,000—and returns to zero at quiescent reset, proving bounded fixed-slot
-   ownership without per-key host destructor races or ownership cycles.
+   ownership without per-key host destructor races or ownership cycles;
+8. runs four Android ELF waiters through a predicate-loop wake, one signal,
+   broadcast, monotonic absolute timeout, mutex reacquisition, pshared rejection,
+   and destroy-with-waiter `EBUSY`, then runs 100 ASan/UBSan rounds with eight
+   waiters racing the safe destroy boundary.
 
 Artifacts are written to `_build/bionic-pthread-provider`.

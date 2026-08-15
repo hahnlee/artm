@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,9 @@ typedef int32_t DarwinArtAndroidPthreadOnce;
 typedef struct DarwinArtAndroidPthreadMutex {
   int32_t opaque[10];
 } DarwinArtAndroidPthreadMutex;
+typedef struct DarwinArtAndroidPthreadCond {
+  int32_t opaque[12];
+} DarwinArtAndroidPthreadCond;
 
 typedef void (*DarwinArtAndroidTlsDestructor)(void* value);
 typedef void (*DarwinArtAndroidOnceRoutine)(void);
@@ -36,6 +40,15 @@ int darwin_art_bionic_pthread_mutex_lock(DarwinArtAndroidPthreadMutex* mutex);
 int darwin_art_bionic_pthread_mutex_trylock(DarwinArtAndroidPthreadMutex* mutex);
 int darwin_art_bionic_pthread_mutex_unlock(DarwinArtAndroidPthreadMutex* mutex);
 int darwin_art_bionic_pthread_mutex_destroy(DarwinArtAndroidPthreadMutex* mutex);
+int darwin_art_bionic_pthread_cond_wait(DarwinArtAndroidPthreadCond* cond,
+                                        DarwinArtAndroidPthreadMutex* mutex);
+int darwin_art_bionic_pthread_cond_timedwait(
+    DarwinArtAndroidPthreadCond* cond,
+    DarwinArtAndroidPthreadMutex* mutex,
+    const struct timespec* absolute_timeout);
+int darwin_art_bionic_pthread_cond_signal(DarwinArtAndroidPthreadCond* cond);
+int darwin_art_bionic_pthread_cond_broadcast(DarwinArtAndroidPthreadCond* cond);
+int darwin_art_bionic_pthread_cond_destroy(DarwinArtAndroidPthreadCond* cond);
 
 // Closed libc.so/LIBC resolver. Unknown SONAME, version, or symbol is rejected.
 void* darwin_art_bionic_pthread_resolve(const char* soname,

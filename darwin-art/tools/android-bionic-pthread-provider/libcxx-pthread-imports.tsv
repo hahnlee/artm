@@ -1,9 +1,9 @@
 symbol	kind	version	status	capability
-pthread_cond_broadcast	FUNC	LIBC	unsupported	condition-variable-owner
-pthread_cond_destroy	FUNC	LIBC	unsupported	condition-variable-owner
-pthread_cond_signal	FUNC	LIBC	unsupported	condition-variable-owner
-pthread_cond_timedwait	FUNC	LIBC	unsupported	condition-variable-clock
-pthread_cond_wait	FUNC	LIBC	unsupported	condition-variable-owner
+pthread_cond_broadcast	FUNC	LIBC	supported	condition-variable-owner
+pthread_cond_destroy	FUNC	LIBC	supported	condition-variable-owner
+pthread_cond_signal	FUNC	LIBC	supported	condition-variable-owner
+pthread_cond_timedwait	FUNC	LIBC	supported	condition-variable-clock
+pthread_cond_wait	FUNC	LIBC	supported	condition-variable-owner
 pthread_detach	FUNC	LIBC	unsupported	thread-lifecycle
 pthread_getspecific	FUNC	LIBC	supported	tls-key
 pthread_join	FUNC	LIBC	unsupported	thread-lifecycle

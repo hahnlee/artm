@@ -5,9 +5,11 @@
 enum {
   kThreadCount = 8,
   kIterations = 2000,
+  kCondWaiters = 4,
   kAndroidEbusy = 16,
   kAndroidEinval = 22,
   kAndroidEnotsup = 95,
+  kAndroidEtimedout = 110,
 };
 
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
@@ -15,12 +17,21 @@ static pthread_mutex_t g_static_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_destroy_race_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_explicit_mutex;
 static pthread_key_t g_key;
+static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_monotonic_cond = PTHREAD_COND_INITIALIZER_MONOTONIC_NP;
+static pthread_cond_t g_pshared_cond = {{1}};
+static pthread_mutex_t g_cond_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_monotonic_mutex = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic int g_once_calls;
 static _Atomic int g_worker_slots;
 static _Atomic int g_destructor_calls;
 static _Atomic int g_destructor_second_passes;
 static _Atomic int g_destroy_race_complete;
 static _Atomic long g_thread_tokens[kThreadCount];
+static _Atomic int g_cond_waiting;
+static _Atomic int g_cond_completed;
+static int g_cond_tickets;
+static int g_cond_broadcast;
 static int g_counter;
 
 static void OnceRoutine(void) {
@@ -51,6 +62,7 @@ __attribute__((visibility("default"))) int pthread_fixture_setup(void) {
   if (pthread_mutex_unlock(&g_explicit_mutex) != 0) return -4;
   if (pthread_key_create(&g_key, &TlsDestructor) != 0) return -5;
   if (pthread_self() == 0 || pthread_self() != pthread_self()) return -6;
+  if (pthread_cond_signal(&g_pshared_cond) != kAndroidEnotsup) return -7;
   return 0;
 }
 
@@ -100,6 +112,65 @@ __attribute__((visibility("default"))) int pthread_fixture_mutex_destroy_race(vo
   return -43;
 }
 
+__attribute__((visibility("default"))) int pthread_fixture_cond_waiter(void) {
+  if (pthread_mutex_lock(&g_cond_mutex) != 0) return -50;
+  atomic_fetch_add_explicit(&g_cond_waiting, 1, memory_order_release);
+  while (g_cond_tickets == 0 && !g_cond_broadcast) {
+    if (pthread_cond_wait(&g_cond, &g_cond_mutex) != 0) return -51;
+  }
+  if (g_cond_tickets != 0) --g_cond_tickets;
+  atomic_fetch_add_explicit(&g_cond_completed, 1, memory_order_release);
+  if (pthread_mutex_unlock(&g_cond_mutex) != 0) return -52;
+  return 0;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_cond_waiting(void) {
+  return atomic_load_explicit(&g_cond_waiting, memory_order_acquire);
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_cond_completed(void) {
+  return atomic_load_explicit(&g_cond_completed, memory_order_acquire);
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_cond_spurious_signal(void) {
+  if (pthread_mutex_lock(&g_cond_mutex) != 0) return -53;
+  const int result = pthread_cond_signal(&g_cond);
+  if (pthread_mutex_unlock(&g_cond_mutex) != 0) return -54;
+  return result == 0 ? 0 : -55;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_cond_signal_one(void) {
+  if (pthread_mutex_lock(&g_cond_mutex) != 0) return -56;
+  ++g_cond_tickets;
+  const int result = pthread_cond_signal(&g_cond);
+  if (pthread_mutex_unlock(&g_cond_mutex) != 0) return -57;
+  return result == 0 ? 0 : -58;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_cond_broadcast(void) {
+  if (pthread_mutex_lock(&g_cond_mutex) != 0) return -59;
+  g_cond_broadcast = 1;
+  const int result = pthread_cond_broadcast(&g_cond);
+  if (pthread_mutex_unlock(&g_cond_mutex) != 0) return -60;
+  return result == 0 ? 0 : -61;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_cond_destroy_busy(void) {
+  return pthread_cond_destroy(&g_cond) == kAndroidEbusy ? 0 : -62;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_cond_timedwait(void) {
+  const struct timespec absolute_monotonic_past = {0, 0};
+  if (pthread_mutex_lock(&g_monotonic_mutex) != 0) return -63;
+  if (pthread_cond_timedwait(&g_monotonic_cond, &g_monotonic_mutex,
+                             &absolute_monotonic_past) != kAndroidEtimedout) {
+    return -64;
+  }
+  if (pthread_mutex_trylock(&g_monotonic_mutex) != kAndroidEbusy) return -65;
+  if (pthread_mutex_unlock(&g_monotonic_mutex) != 0) return -66;
+  return 0;
+}
+
 __attribute__((visibility("default"))) int pthread_fixture_finish(void) {
   if (atomic_load_explicit(&g_worker_slots, memory_order_relaxed) !=
       kThreadCount) {
@@ -136,5 +207,16 @@ __attribute__((visibility("default"))) int pthread_fixture_finish(void) {
   if (pthread_key_delete(g_key) != 0) return -31;
   if (pthread_getspecific(g_key) != 0) return -32;
   if (pthread_key_delete(g_key) != kAndroidEinval) return -33;
+  if (atomic_load_explicit(&g_cond_waiting, memory_order_acquire) !=
+          kCondWaiters ||
+      atomic_load_explicit(&g_cond_completed, memory_order_acquire) !=
+          kCondWaiters) {
+    return -67;
+  }
+  if (pthread_cond_destroy(&g_cond) != 0) return -68;
+  if (pthread_cond_destroy(&g_cond) != kAndroidEbusy) return -69;
+  if (pthread_cond_destroy(&g_monotonic_cond) != 0) return -70;
+  if (pthread_mutex_destroy(&g_cond_mutex) != 0) return -71;
+  if (pthread_mutex_destroy(&g_monotonic_mutex) != 0) return -72;
   return 0;
 }

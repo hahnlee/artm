@@ -7,8 +7,14 @@ use std::ffi::{c_char, c_int, c_void, CString};
 use std::fs;
 use std::num::NonZeroUsize;
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
-const EXPECTED: [&str; 11] = [
+const EXPECTED: [&str; 16] = [
+    "pthread_cond_broadcast",
+    "pthread_cond_destroy",
+    "pthread_cond_signal",
+    "pthread_cond_timedwait",
+    "pthread_cond_wait",
     "pthread_getspecific",
     "pthread_key_create",
     "pthread_key_delete",
@@ -55,11 +61,13 @@ impl SymbolResolver for ClosedResolver {
                 request.needed_libraries.join(","),
             ));
         }
-        let version = request.version.ok_or_else(|| ResolveError::VersionMismatch {
-            soname: "libc.so".to_owned(),
-            symbol: request.symbol.to_owned(),
-            requested: "<unversioned>".to_owned(),
-        })?;
+        let version = request
+            .version
+            .ok_or_else(|| ResolveError::VersionMismatch {
+                soname: "libc.so".to_owned(),
+                symbol: request.symbol.to_owned(),
+                requested: "<unversioned>".to_owned(),
+            })?;
         if version.soname != "libc.so"
             || version.name != "LIBC"
             || version.hidden
@@ -117,12 +125,8 @@ fn expect_closed_resolver_negatives() -> Result<(), Box<dyn std::error::Error>> 
                 wrong_version.as_ptr(),
             )
             .is_null()
-            || !darwin_art_bionic_pthread_resolve(
-                libc.as_ptr(),
-                unknown.as_ptr(),
-                version.as_ptr(),
-            )
-            .is_null()
+            || !darwin_art_bionic_pthread_resolve(libc.as_ptr(), unknown.as_ptr(), version.as_ptr())
+                .is_null()
         {
             return Err("closed resolver accepted a fallback".into());
         }
@@ -170,6 +174,57 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("Android fixture worker failed: {result}").into());
         }
     }
+    let cond_waiter = image.lookup_exported("pthread_fixture_cond_waiter")?;
+    let mut cond_threads = Vec::new();
+    for _ in 0..4 {
+        cond_threads.push(std::thread::spawn(move || {
+            let function: unsafe extern "C" fn() -> i32 =
+                unsafe { std::mem::transmute(cond_waiter) };
+            unsafe { function() }
+        }));
+    }
+    let wait_for_count = |symbol: &str, expected: i32| -> Result<(), Box<dyn std::error::Error>> {
+        let address = image.lookup_exported(symbol)?;
+        let function: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(address) };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let value = unsafe { function() };
+            if value == expected {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(format!("{symbol} remained {value}, expected {expected}").into());
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    wait_for_count("pthread_fixture_cond_waiting", 4)?;
+    if image.call_exported_i32("pthread_fixture_cond_spurious_signal")? != 0 {
+        return Err("condition predicate-loop signal failed".into());
+    }
+    std::thread::sleep(Duration::from_millis(20));
+    if image.call_exported_i32("pthread_fixture_cond_completed")? != 0 {
+        return Err("condition waiter escaped without predicate".into());
+    }
+    if image.call_exported_i32("pthread_fixture_cond_destroy_busy")? != 0 {
+        return Err("condition destroy/wait race policy failed".into());
+    }
+    if image.call_exported_i32("pthread_fixture_cond_signal_one")? != 0 {
+        return Err("condition signal failed".into());
+    }
+    wait_for_count("pthread_fixture_cond_completed", 1)?;
+    if image.call_exported_i32("pthread_fixture_cond_broadcast")? != 0 {
+        return Err("condition broadcast failed".into());
+    }
+    for thread in cond_threads {
+        let result = thread.join().map_err(|_| "condition waiter panicked")?;
+        if result != 0 {
+            return Err(format!("condition waiter failed: {result}").into());
+        }
+    }
+    if image.call_exported_i32("pthread_fixture_cond_timedwait")? != 0 {
+        return Err("condition CLOCK_MONOTONIC timeout/relock failed".into());
+    }
     let lookup_race = image.lookup_exported("pthread_fixture_mutex_lookup_race")?;
     let destroy_race = image.lookup_exported("pthread_fixture_mutex_destroy_race")?;
     let mut race_threads = Vec::new();
@@ -181,12 +236,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }));
     }
     race_threads.push(std::thread::spawn(move || {
-        let function: unsafe extern "C" fn() -> i32 =
-            unsafe { std::mem::transmute(destroy_race) };
+        let function: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(destroy_race) };
         unsafe { function() }
     }));
     for thread in race_threads {
-        let result = thread.join().map_err(|_| "destroy/lookup race worker panicked")?;
+        let result = thread
+            .join()
+            .map_err(|_| "destroy/lookup race worker panicked")?;
         if result != 0 {
             return Err(format!("destroy/lookup race failed: {result}").into());
         }
@@ -210,10 +266,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             || darwin_art_bionic_pthread_key_delete(stale_key) != 0
             || darwin_art_bionic_pthread_key_create(&mut reused_key, None) != 0
             || stale_key != reused_key
-            || darwin_art_bionic_pthread_setspecific(
-                stale_key,
-                0x1234usize as *const c_void,
-            ) != 0
+            || darwin_art_bionic_pthread_setspecific(stale_key, 0x1234usize as *const c_void) != 0
             || darwin_art_bionic_pthread_getspecific(reused_key) as usize != 0x1234
             || darwin_art_bionic_pthread_setspecific(reused_key, std::ptr::null()) != 0
             || darwin_art_bionic_pthread_key_delete(reused_key) != 0
@@ -227,6 +280,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "tls-key-destructor",
         "once-private",
         "mutex-normal-private",
+        "cond-private",
+        "cond-monotonic-clock",
     ] {
         if !capability(supported) {
             return Err(format!("missing capability {supported}").into());
@@ -245,11 +300,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("unsupported capability escaped: {unsupported}").into());
         }
     }
-    println!(
-        "android-bionic-pthread-provider: ELF=executed resolver=libc.so@LIBC imports=11"
-    );
+    println!("android-bionic-pthread-provider: ELF=executed resolver=libc.so@LIBC imports=16");
     println!(
         "pthread-self=stable+unique tls-destructor=2-pass once=1 mutex=8x2000-contention destroy-lookup=race-safe"
+    );
+    println!(
+        "cond=4-waiters signal=1 broadcast=3 predicate-loop=held monotonic-timeout=110 destroy-wait=EBUSY pshared=ENOTSUP"
     );
     println!(
         "opaque-layout=side-table no-Darwin-reinterpret stale-key=reuse-alias(Bionic-undefined) unsupported=fork+robust+pshared+PI+recursive+errorcheck"
