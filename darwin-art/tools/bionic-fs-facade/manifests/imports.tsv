@@ -1,0 +1,6 @@
+symbol	android_signature	pcs	capability
+close	int(int)	direct-register-only	virtual-fd-only
+fstat	int(int,struct-stat*)	direct-register-only	translated-android-stat
+open	int(const-char*,int,...)	direct-fixed-registers	read-only-no-vararg-consumption
+openat	int(int,const-char*,int,...)	direct-fixed-registers	AT_FDCWD-only
+read	ssize_t(int,void*,size_t)	direct-register-only	virtual-fd-only
