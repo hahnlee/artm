@@ -50,9 +50,14 @@ units, resources, version constants, native contracts, or data with ICU 76.
 
 ## Materialization
 
-The gate deliberately requires a pre-extracted jar and retains neither the
-2.95 GB system image nor the 37.6 MB APEX in this repository. The quickest
-one-time extraction uses the installed AVD:
+The gate retains neither the multi-gigabyte system image nor the 37.6 MB APEX
+in this repository. `art-bootstrap` first accepts
+`DARWIN_ART_CORE_ICU4J_JAR`, then the ignored local prebuilt path, and finally
+extracts the artifact automatically from either locked API 36 Play Store ARM64
+system image installed under the Android SDK. A nonstandard image path can be
+selected with `DARWIN_ART_ANDROID16_SYSTEM_IMAGE`.
+
+Pulling from a running AVD remains an equivalent one-time route:
 
 ```sh
 emulator -avd darwin_art_api36 -no-window -no-audio -no-snapshot
@@ -60,7 +65,8 @@ adb pull /apex/com.android.i18n/javalib/core-icu4j.jar /tmp/core-icu4j-api36.jar
 tools/audit-android16-core-icu4j-runtime.sh /tmp/core-icu4j-api36.jar
 ```
 
-For offline extraction use `tools/super-i18n-apex-extract`. The image is raw
+For offline extraction `art-bootstrap` invokes
+`tools/super-i18n-apex-extract` followed by `tools/apex-ext2-extract`. The image is raw
 GPT. In the locked 16 KiB image the `super` partition begins
 at LBA 4096. LP metadata v10.0 maps logical `system` to one linear extent at
 absolute image byte offset 3,145,728 for 652,832,768 bytes. That extent is
