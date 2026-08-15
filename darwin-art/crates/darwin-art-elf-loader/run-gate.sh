@@ -48,7 +48,40 @@ common_flags=(
 "$clang" "${common_flags[@]}" -Wl,-z,norelro -Wl,-soname,libdarwin_art_tls.so \
   "$crate_root/fixtures/tls.c" -o "$fixture_dir/tls.so"
 
+graph_flags=("${common_flags[@]}" -O0 -Wl,-z,now -Wl,-z,norelro)
+"$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_dep_a.so \
+  -Wl,--version-script="$crate_root/fixtures/graph_dep_a.map" \
+  "$crate_root/fixtures/graph_dep_a.c" -o "$fixture_dir/libgraph_dep_a.so"
+"$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_dep_a.so \
+  -Wl,--version-script="$crate_root/fixtures/graph_dep_a.map" \
+  "$crate_root/fixtures/graph_dep_a_alt.c" -o "$fixture_dir/libgraph_dep_a_alt.so"
+"$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_dep_a.so \
+  -Wl,--version-script="$crate_root/fixtures/graph_dep_a_wrong.map" \
+  "$crate_root/fixtures/graph_dep_a.c" -o "$fixture_dir/libgraph_dep_a_wrong.so"
+"$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_dep_b.so \
+  "$crate_root/fixtures/graph_dep_b.c" "$fixture_dir/libgraph_dep_a.so" \
+  -o "$fixture_dir/libgraph_dep_b.so"
+"$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_parent.so \
+  "$crate_root/fixtures/graph_parent.c" "$fixture_dir/libgraph_dep_b.so" \
+  "$fixture_dir/libgraph_dep_a.so" -o "$fixture_dir/libgraph_parent.so"
+"$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_absolute.so \
+  -Wl,--defsym,absolute_graph_value=123 -Wl,--export-dynamic-symbol=absolute_graph_value \
+  "$crate_root/fixtures/absolute.c" -o "$fixture_dir/libgraph_absolute.so"
+
+"$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_cycle_a.so \
+  "$crate_root/fixtures/cycle_a_stub.c" -o "$fixture_dir/libgraph_cycle_a_stub.so"
+"$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_cycle_b.so \
+  "$crate_root/fixtures/cycle_b.c" "$fixture_dir/libgraph_cycle_a_stub.so" \
+  -o "$fixture_dir/libgraph_cycle_b.so"
+"$clang" "${graph_flags[@]}" -Wl,-soname,libgraph_cycle_a.so \
+  "$crate_root/fixtures/cycle_a.c" "$fixture_dir/libgraph_cycle_b.so" \
+  -o "$fixture_dir/libgraph_cycle_a.so"
+
 for fixture in positive import weak lazy relro tls; do
+  file "$fixture_dir/$fixture.so" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null
+done
+for fixture in libgraph_parent libgraph_dep_a libgraph_dep_a_alt \
+  libgraph_dep_a_wrong libgraph_dep_b libgraph_absolute libgraph_cycle_a libgraph_cycle_b; do
   file "$fixture_dir/$fixture.so" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null
 done
 
@@ -82,10 +115,33 @@ grep -E 'GNU_RELRO' "$fixture_dir/relro.readelf.txt" >/dev/null
 "$readelf" -l "$fixture_dir/tls.so" > "$fixture_dir/tls.readelf.txt"
 grep -E '^  TLS ' "$fixture_dir/tls.readelf.txt" >/dev/null
 
+"$readelf" -d -r -V --dyn-syms "$fixture_dir/libgraph_parent.so" \
+  > "$fixture_dir/graph-parent.readelf.txt"
+[[ "$(grep -c '(NEEDED)' "$fixture_dir/graph-parent.readelf.txt")" == 2 ]]
+grep -E '\(NEEDED\).*libgraph_dep_b\.so' "$fixture_dir/graph-parent.readelf.txt" >/dev/null
+grep -E '\(NEEDED\).*libgraph_dep_a\.so' "$fixture_dir/graph-parent.readelf.txt" >/dev/null
+grep -E 'WEAK.*UND.*optional_graph_value' "$fixture_dir/graph-parent.readelf.txt" >/dev/null
+grep -E 'File: libgraph_dep_a\.so' "$fixture_dir/graph-parent.readelf.txt" >/dev/null
+grep -E 'Name: GRAPH_1' "$fixture_dir/graph-parent.readelf.txt" >/dev/null
+"$readelf" --dyn-syms "$fixture_dir/libgraph_dep_b.so" > "$fixture_dir/graph-dep-b.readelf.txt"
+grep -E 'GLOBAL +PROTECTED.*dep_b_value' "$fixture_dir/graph-dep-b.readelf.txt" >/dev/null
+"$readelf" --dyn-syms "$fixture_dir/libgraph_absolute.so" > "$fixture_dir/graph-absolute.readelf.txt"
+grep -E 'GLOBAL +DEFAULT +ABS absolute_graph_value' "$fixture_dir/graph-absolute.readelf.txt" >/dev/null
+"$readelf" -d "$fixture_dir/libgraph_cycle_a.so" > "$fixture_dir/cycle-a.readelf.txt"
+"$readelf" -d "$fixture_dir/libgraph_cycle_b.so" > "$fixture_dir/cycle-b.readelf.txt"
+grep -E '\(NEEDED\).*libgraph_cycle_b\.so' "$fixture_dir/cycle-a.readelf.txt" >/dev/null
+grep -E '\(NEEDED\).*libgraph_cycle_a\.so' "$fixture_dir/cycle-b.readelf.txt" >/dev/null
+
 cargo test --manifest-path "$crate_root/Cargo.toml"
 cargo run --quiet --release --manifest-path "$crate_root/Cargo.toml" --bin elf-loader-gate -- \
   "$fixture_dir/positive.so" "$fixture_dir/import.so" "$fixture_dir/weak.so" \
   "$fixture_dir/lazy.so" "$fixture_dir/relro.so" "$fixture_dir/tls.so"
+cargo run --quiet --release --manifest-path "$crate_root/Cargo.toml" --bin elf-namespace-gate -- \
+  "$fixture_dir/libgraph_parent.so" "$fixture_dir/libgraph_dep_a.so" \
+  "$fixture_dir/libgraph_dep_a_alt.so" "$fixture_dir/libgraph_dep_a_wrong.so" \
+  "$fixture_dir/libgraph_dep_b.so" "$fixture_dir/libgraph_cycle_a.so" \
+  "$fixture_dir/libgraph_cycle_b.so" "$fixture_dir/libgraph_parent.so" \
+  "$fixture_dir/libgraph_absolute.so"
 
 cargo build --quiet --release --manifest-path "$crate_root/Cargo.toml" --lib
 staticlib="$crate_root/target/release/libdarwin_art_elf_loader.a"

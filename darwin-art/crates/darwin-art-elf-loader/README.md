@@ -15,14 +15,37 @@ the caller's `SymbolResolver`; the loader never calls `dlopen`, `dlsym`, or dyld
 version, flags, hidden bit, and provider SONAME are passed to the resolver.
 Missing weak undefined symbols resolve to zero; missing strong symbols fail.
 
+`ClosedElfNamespace` adds a recursive graph layer without introducing path
+search. Each ELF byte source is registered under its exact embedded
+`DT_SONAME`; an optional caller-owned `SymbolResolver` is the only non-ELF
+provider source. All objects are staged before relocation, so dependency cycles
+can resolve against already mapped peers. Lookup is limited to the requesting
+object and its breadth-first `DT_NEEDED` closure. Versioned requests are pinned
+to their VERNEED provider SONAME and matched against GNU VERDEF/VERSYM exports.
+Constructors run dependency-first (deterministic DFS postorder for a cycle).
+Clones of one loaded graph share an owner, and the final clone close unmaps
+objects in reverse constructor order. Separate `load` calls do not reuse a
+namespace-global `dlopen` cache. Because ELF finalizers remain rejected, the
+reported unload order describes mapping teardown only.
+
+The NDK r28c graph fixture loads a parent and two real AArch64 dependencies. It
+also covers missing weak imports, a GNU version mismatch, an accepted two-node
+cycle, unknown dependency rollback, and two independent namespaces containing
+different bytes under the same SONAME. Source insertion order is deliberately
+different from dependency traversal order.
+
 This is intentionally not a general dynamic linker. PLT relocation is eager and
 requires `DT_BIND_NOW`, `DF_BIND_NOW`, or `DF_1_NOW`; lazy binding is rejected.
 GNU RELRO is also rejected rather than silently weakened. TLS, `DT_REL`,
-`DT_RELR`, version definitions, other relocation kinds, `DT_INIT`,
+`DT_RELR`, other relocation kinds, `DT_INIT`,
 preinit/finalizer arrays, text relocations, symbolic lookup, and RPATH/RUNPATH
 return explicit capability errors. `LoadedElf` owns the complete `mmap`
 reservation and unmaps it on every error path or `Drop`. Resolver-provided
 addresses must remain valid until the image is dropped.
+
+Graph exports with default or protected visibility participate in the closed
+dependency scope. Nonzero `SHN_ABS` definitions are rejected explicitly rather
+than being mistaken for mapping-relative addresses.
 
 The fixtures use only the no-argument AArch64 procedure-call subset. Android JNI
 functions with spilled arguments still need a per-shorty Darwin-to-Android PCS

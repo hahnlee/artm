@@ -6,6 +6,9 @@ use std::num::NonZeroUsize;
 use std::ptr::{self, NonNull};
 
 mod ffi;
+mod namespace;
+
+pub use namespace::{ClosedElfNamespace, LoadedElfGraph, NamespaceError};
 
 #[cfg(not(target_os = "macos"))]
 compile_error!("darwin-art-elf-loader supports only macOS hosts");
@@ -81,15 +84,19 @@ const R_AARCH64_RELATIVE: u32 = 1027;
 const DF_BIND_NOW: u64 = 0x8;
 const DF_1_NOW: u64 = 0x1;
 const SHN_UNDEF: u16 = 0;
+const SHN_ABS: u16 = 0xfff1;
 const STB_GLOBAL: u8 = 1;
 const STB_WEAK: u8 = 2;
 const STT_NOTYPE: u8 = 0;
 const STT_OBJECT: u8 = 1;
 const STT_FUNC: u8 = 2;
 const STT_TLS: u8 = 6;
+const STV_DEFAULT: u8 = 0;
+const STV_PROTECTED: u8 = 3;
 const VER_NDX_LOCAL: u16 = 0;
 const VER_NDX_GLOBAL: u16 = 1;
 const VERSYM_HIDDEN: u16 = 0x8000;
+const VER_FLG_BASE: u16 = 0x1;
 const VER_FLG_WEAK: u16 = 0x2;
 
 const PROT_NONE: c_int = 0;
@@ -133,6 +140,7 @@ pub enum Capability {
     MissingSysvHash,
     SymbolicLookup,
     VersionDefinitions,
+    AbsoluteSymbolDefinition,
     DynamicFlags { tag: i64, value: u64 },
 }
 
@@ -312,6 +320,8 @@ struct DynamicInfo {
     versym: Option<u64>,
     verneed: Option<u64>,
     verneed_count: Option<u64>,
+    verdef: Option<u64>,
+    verdef_count: Option<u64>,
     init_array: Option<u64>,
     init_array_size: Option<u64>,
 }
@@ -335,6 +345,12 @@ pub struct LoadedElf {
     needed_libraries: Vec<String>,
     soname: Option<String>,
     initializers_run: bool,
+}
+
+struct StagedElf {
+    image: LoadedElf,
+    page_size: usize,
+    page_protections: Vec<c_int>,
 }
 
 // SAFETY: LoadedElf exclusively owns an mmap reservation with no thread-affine host resource.
@@ -363,6 +379,14 @@ impl LoadedElf {
         bytes: &[u8],
         resolver: &mut dyn SymbolResolver,
     ) -> Result<Self, LoadError> {
+        let mut staged = Self::stage(bytes)?;
+        staged
+            .image
+            .finish_load(resolver, staged.page_size, &staged.page_protections)?;
+        Ok(staged.image)
+    }
+
+    fn stage(bytes: &[u8]) -> Result<StagedElf, LoadError> {
         if !cfg!(target_arch = "aarch64") {
             return Err(LoadError::Capability(Capability::HostArchitecture));
         }
@@ -418,9 +442,21 @@ impl LoadedElf {
         std::mem::forget(mapping);
 
         loaded.materialize_dynamic_names()?;
-        loaded.validate_symbols_and_apply_relocations(resolver)?;
-        loaded.apply_final_protections(parsed.page_size, &parsed.page_protections)?;
-        Ok(loaded)
+        Ok(StagedElf {
+            image: loaded,
+            page_size: parsed.page_size,
+            page_protections: parsed.page_protections,
+        })
+    }
+
+    fn finish_load(
+        &mut self,
+        resolver: &mut dyn SymbolResolver,
+        page_size: usize,
+        page_protections: &[c_int],
+    ) -> Result<(), LoadError> {
+        self.validate_symbols_and_apply_relocations(resolver)?;
+        self.apply_final_protections(page_size, page_protections)
     }
 
     pub fn needed_libraries(&self) -> &[String] {
@@ -528,6 +564,9 @@ impl LoadedElf {
             }
         }
 
+        // Validate provider-side GNU version metadata even when this image is loaded outside a
+        // graph and therefore does not need an export catalog.
+        self.parse_version_definitions(symbol_count)?;
         let versions = self.parse_version_requirements(symbol_count)?;
         let mut resolved = HashMap::new();
         let rela_address = self.dynamic.rela.unwrap_or(0);
@@ -682,6 +721,9 @@ impl LoadedElf {
             return Err(LoadError::InvalidSymbol(format!("dynsym[{index}] type")));
         }
         if symbol.section_index != SHN_UNDEF {
+            if symbol.section_index == SHN_ABS {
+                return Err(LoadError::Capability(Capability::AbsoluteSymbolDefinition));
+            }
             self.require_loaded_range(symbol.value, symbol.size.max(1), None, "defined symbol")?;
             let address = self.loaded_pointer(symbol.value, 1)? as usize;
             resolved.insert(index, address);
@@ -870,10 +912,13 @@ impl LoadedElf {
             if symbol.section_index == SHN_UNDEF
                 || !matches!(symbol.kind, STT_FUNC | STT_NOTYPE)
                 || !matches!(symbol.binding, STB_GLOBAL | STB_WEAK)
-                || symbol.visibility != 0
+                || !matches!(symbol.visibility, STV_DEFAULT | STV_PROTECTED)
                 || symbol.value == 0
             {
                 return Err(LoadError::InvalidSymbol(requested.to_owned()));
+            }
+            if symbol.section_index == SHN_ABS {
+                return Err(LoadError::Capability(Capability::AbsoluteSymbolDefinition));
             }
             self.require_loaded_range(
                 symbol.value,
@@ -885,6 +930,157 @@ impl LoadedElf {
             return Ok(pointer);
         }
         Err(LoadError::SymbolNotFound(requested.to_owned()))
+    }
+
+    fn exported_symbols(&self) -> Result<Vec<ExportedSymbol>, LoadError> {
+        let count = self.symbol_count()?;
+        let versions = self.parse_version_definitions(count)?;
+        let mut result = Vec::new();
+        for index in 1..count {
+            let symbol = self.dynamic_symbol(index)?;
+            if symbol.section_index == SHN_UNDEF
+                || !matches!(symbol.kind, STT_NOTYPE | STT_OBJECT | STT_FUNC)
+                || !matches!(symbol.binding, STB_GLOBAL | STB_WEAK)
+                || !matches!(symbol.visibility, STV_DEFAULT | STV_PROTECTED)
+                || symbol.value == 0
+            {
+                continue;
+            }
+            if symbol.section_index == SHN_ABS {
+                return Err(LoadError::Capability(Capability::AbsoluteSymbolDefinition));
+            }
+            self.require_loaded_range(symbol.value, symbol.size.max(1), None, "exported symbol")?;
+            let name = self.dynamic_string(symbol.name_offset)?;
+            if name.is_empty() {
+                continue;
+            }
+            let (version, hidden) = self.definition_for_symbol(index, &versions)?;
+            result.push(ExportedSymbol {
+                name,
+                address: self.loaded_pointer(symbol.value, 1)? as usize,
+                binding: symbol.binding,
+                version: version.map(|item| item.name.clone()),
+                version_hidden: hidden,
+            });
+        }
+        Ok(result)
+    }
+
+    fn parse_version_definitions(
+        &self,
+        symbol_count: u32,
+    ) -> Result<HashMap<u16, OwnedVersionDefinition>, LoadError> {
+        let Some(mut current) = self.dynamic.verdef else {
+            if self.dynamic.verdef_count.is_some() {
+                return Err(LoadError::Format("incomplete DT_VERDEF metadata"));
+            }
+            return Ok(HashMap::new());
+        };
+        let count = self
+            .dynamic
+            .verdef_count
+            .ok_or(LoadError::Format("incomplete DT_VERDEF metadata"))?;
+        let versym = self
+            .dynamic
+            .versym
+            .ok_or(LoadError::Format("DT_VERDEF requires DT_VERSYM"))?;
+        if count == 0 {
+            return Err(LoadError::Format("DT_VERDEFNUM is zero"));
+        }
+        self.require_loaded_range(versym, u64::from(symbol_count) * 2, Some(PF_R), "DT_VERSYM")?;
+        let mut result = HashMap::new();
+        let mut visited = HashSet::new();
+        for definition_index in 0..count {
+            if !visited.insert(current) {
+                return Err(LoadError::Format("cyclic DT_VERDEF list"));
+            }
+            self.require_loaded_range(current, 20, Some(PF_R), "Elf64_Verdef")?;
+            let version = self.read_loaded_u16(current)?;
+            let flags = self.read_loaded_u16(current + 2)?;
+            let index = self.read_loaded_u16(current + 4)? & !VERSYM_HIDDEN;
+            let auxiliary_count = self.read_loaded_u16(current + 6)?;
+            let expected_hash = self.read_loaded_u32(current + 8)?;
+            let auxiliary_offset = self.read_loaded_u32(current + 12)?;
+            let next_offset = self.read_loaded_u32(current + 16)?;
+            if version != 1
+                || index == VER_NDX_LOCAL
+                || (index == VER_NDX_GLOBAL && flags & VER_FLG_BASE == 0)
+                || auxiliary_count == 0
+                || auxiliary_offset == 0
+            {
+                return Err(LoadError::Format("invalid Elf64_Verdef header"));
+            }
+            if flags & !(VER_FLG_BASE | VER_FLG_WEAK) != 0 {
+                return Err(LoadError::Format("unsupported Elf64_Verdef flags"));
+            }
+            let mut auxiliary = current
+                .checked_add(u64::from(auxiliary_offset))
+                .ok_or(LoadError::Bounds("Elf64_Verdaux address overflow"))?;
+            let mut definition_name = None;
+            for auxiliary_index in 0..auxiliary_count {
+                self.require_loaded_range(auxiliary, 8, Some(PF_R), "Elf64_Verdaux")?;
+                let name = self.dynamic_string(self.read_loaded_u32(auxiliary)?)?;
+                let next = self.read_loaded_u32(auxiliary + 4)?;
+                if auxiliary_index == 0 {
+                    definition_name = Some(name);
+                }
+                if auxiliary_index + 1 == auxiliary_count {
+                    if next != 0 {
+                        return Err(LoadError::Format("final Elf64_Verdaux has nonzero next"));
+                    }
+                } else if next == 0 {
+                    return Err(LoadError::Format("truncated Elf64_Verdaux list"));
+                } else {
+                    auxiliary = auxiliary
+                        .checked_add(u64::from(next))
+                        .ok_or(LoadError::Bounds("Elf64_Verdaux next overflow"))?;
+                }
+            }
+            let name = definition_name.expect("nonzero Verdaux count");
+            if elf_hash(name.as_bytes()) != expected_hash {
+                return Err(LoadError::Format("Elf64_Verdef hash mismatch"));
+            }
+            if result
+                .insert(index, OwnedVersionDefinition { name })
+                .is_some()
+            {
+                return Err(LoadError::Format("duplicate version definition index"));
+            }
+            if definition_index + 1 == count {
+                if next_offset != 0 {
+                    return Err(LoadError::Format("final Elf64_Verdef has nonzero next"));
+                }
+            } else if next_offset == 0 {
+                return Err(LoadError::Format("truncated Elf64_Verdef list"));
+            } else {
+                current = current
+                    .checked_add(u64::from(next_offset))
+                    .ok_or(LoadError::Bounds("Elf64_Verdef next overflow"))?;
+            }
+        }
+        Ok(result)
+    }
+
+    fn definition_for_symbol<'a>(
+        &self,
+        symbol_index: u32,
+        definitions: &'a HashMap<u16, OwnedVersionDefinition>,
+    ) -> Result<(Option<&'a OwnedVersionDefinition>, bool), LoadError> {
+        let Some(table) = self.dynamic.versym else {
+            return Ok((None, false));
+        };
+        let address = table
+            .checked_add(u64::from(symbol_index) * 2)
+            .ok_or(LoadError::Bounds("DT_VERSYM entry overflow"))?;
+        let raw = self.read_loaded_u16(address)?;
+        let index = raw & !VERSYM_HIDDEN;
+        if matches!(index, VER_NDX_LOCAL | VER_NDX_GLOBAL) {
+            return Ok((None, raw & VERSYM_HIDDEN != 0));
+        }
+        let definition = definitions
+            .get(&index)
+            .ok_or(LoadError::Format("DT_VERSYM index has no DT_VERDEF entry"))?;
+        Ok((Some(definition), raw & VERSYM_HIDDEN != 0))
     }
 
     fn symbol_count(&self) -> Result<u32, LoadError> {
@@ -1120,6 +1316,20 @@ struct OwnedVersionRequirement {
     soname: String,
     name: String,
     flags: u16,
+}
+
+#[derive(Clone, Debug)]
+struct OwnedVersionDefinition {
+    name: String,
+}
+
+#[derive(Clone, Debug)]
+struct ExportedSymbol {
+    name: String,
+    address: usize,
+    binding: u8,
+    version: Option<String>,
+    version_hidden: bool,
 }
 
 fn parse_image(bytes: &[u8]) -> Result<ParsedImage, LoadError> {
@@ -1380,6 +1590,8 @@ fn parse_dynamic(bytes: &[u8], dynamic: &ProgramHeader) -> Result<DynamicInfo, L
             DT_VERSYM => set_once(&mut info.versym, value, "duplicate DT_VERSYM")?,
             DT_VERNEED => set_once(&mut info.verneed, value, "duplicate DT_VERNEED")?,
             DT_VERNEEDNUM => set_once(&mut info.verneed_count, value, "duplicate DT_VERNEEDNUM")?,
+            DT_VERDEF => set_once(&mut info.verdef, value, "duplicate DT_VERDEF")?,
+            DT_VERDEFNUM => set_once(&mut info.verdef_count, value, "duplicate DT_VERDEFNUM")?,
             DT_INIT_ARRAY => set_once(&mut info.init_array, value, "duplicate DT_INIT_ARRAY")?,
             DT_INIT_ARRAYSZ => set_once(
                 &mut info.init_array_size,
@@ -1415,11 +1627,6 @@ fn parse_dynamic(bytes: &[u8], dynamic: &ProgramHeader) -> Result<DynamicInfo, L
             DT_TEXTREL => return Err(LoadError::Capability(Capability::TextRelocations)),
             DT_RPATH | DT_RUNPATH => return Err(LoadError::Capability(Capability::Rpath)),
             DT_SYMBOLIC => return Err(LoadError::Capability(Capability::SymbolicLookup)),
-            DT_VERDEF | DT_VERDEFNUM => {
-                if value != 0 {
-                    return Err(LoadError::Capability(Capability::VersionDefinitions));
-                }
-            }
             _ => return Err(LoadError::Capability(Capability::UnknownDynamicTag(tag))),
         }
     }

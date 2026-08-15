@@ -12,6 +12,10 @@ crate-type = ["rlib", "staticlib"]
 name = "elf-loader-gate"
 path = "src/bin/gate.rs"
 
+[[bin]]
+name = "elf-namespace-gate"
+path = "src/bin/namespace_gate.rs"
+
 [dependencies]
 
 # Keep this experimental loader independently buildable until its public API is
