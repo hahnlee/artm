@@ -1,4 +1,4 @@
-# Bionic immutable filesystem facade gate
+# Bionic filesystem facade gate
 
 This gate connects 29 Class-B Android arm64 libc filesystem imports
 to the Darwin component-walking filesystem broker. In addition to the original
@@ -9,13 +9,25 @@ the ART adapter exercise the same provider.
 
 ## Boundary and ownership
 
-The facade is activated with an already-open Darwin directory, mounted at the
-guest byte path `/system`, with guest cwd `/system`. `darwin-art-prefix`
+The facade is activated with an already-open Darwin directory, mounted as an
+immutable guest root (the standalone gate uses `/system`), plus a private
+in-memory writable mount at `/data`. `darwin-art-prefix`
 normalizes guest paths and rejects mount escape; `darwin-art-fs-broker` walks
 each component relative to that directory with no-follow semantics. Symlinks,
-`..` escape, special nodes, and paths outside the one immutable mount fail
-closed. No writable root or mutation broker is present. Every admitted mutation
-therefore ends in Android `EROFS` without calling a Darwin mutation API.
+`..` escape, special nodes, and paths outside these mounts fail closed. The
+`/data` overlay contains only facade-owned directories and byte-vector regular
+files; it grants no new host authority. The immutable mount, link creation, and
+unimplemented mutations still end in Android `EROFS` without calling a Darwin
+mutation API.
+
+The overlay is the Wine-like guest prefix slice needed by libc++
+`filesystem::copy_file`. It supports persistent in-process nodes, `mkdir`,
+`O_RDONLY`, and `O_WRONLY|O_CREAT|O_TRUNC` opens, plus `fchmod`, `ftruncate`,
+`fstat`, `read`, and close. The separate sendfile provider calls
+`darwin_art_bionic_fs_sendfile_transfer`, which copies at most 64 KiB per call
+between virtual descriptors. Null offsets advance the input position; explicit
+offsets leave it unchanged and advance only the caller's `off_t`. Neither path
+calls Darwin `sendfile`, exposes a host fd, or uses a raw syscall.
 
 Guest descriptors are facade-local virtual integers beginning at 10000. A
 Darwin descriptor is retained in the private Rust table and is never returned
@@ -116,9 +128,10 @@ descriptor are explicitly unsupported and return Android `EOPNOTSUPP`; an
 unknown descriptor returns `EBADF`. `lseek`, writable/create/truncate/append
 open modes, socket, and every symbol absent from the closed resolver are
 unsupported capabilities.
-`O_DIRECT`, `O_PATH`, and unknown flags return `EOPNOTSUPP`; write intent returns
-`EROFS`. The variadic shims never consume a mode argument because every flag
-combination requiring one is rejected first.
+`O_DIRECT`, `O_PATH`, and unknown flags return `EOPNOTSUPP`; write intent outside
+`/data` returns `EROFS`. The variadic shims do not consume a mode argument;
+overlay nodes use a private default mode until the source-driven `fchmod` step
+updates it.
 
 ## Errno and activation contracts
 
@@ -198,5 +211,7 @@ and the Android `stat`, `dirent`, and `statvfs` layouts. It then:
    broker/prefix tests, the activation `!Send` compile-fail test, Clippy, and
    formatting checks using temporary target directories.
 
-The gate performs no filesystem writes through the facade. Its test setup is
-temporary host data created by the audit harness.
+The gate performs no host filesystem writes through the facade. It additionally
+copies the immutable payload into `/data` through the virtual sendfile callback
+and has the Android ELF reopen, read, truncate, and stat the persistent node.
+All host test setup remains temporary audit-harness data.

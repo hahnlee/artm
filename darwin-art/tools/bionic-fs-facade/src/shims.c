@@ -33,16 +33,18 @@ _Static_assert(DT_UNKNOWN == 0 && DT_FIFO == 1 && DT_CHR == 2 && DT_DIR == 4 &&
                    DT_SOCK == 12 && DT_WHT == 14,
                "Darwin directory type values drifted from explicit translator");
 
-int darwin_art_bionic_open(const char* path, int flags, ...) {
+int darwin_art_bionic_open(const char* path, int flags, uint32_t mode) {
   const int saved_host_errno = errno;
-  const int result = darwin_art_bionic_fs_open_core(path, flags);
+  const int result = darwin_art_bionic_fs_open_core(path, flags, mode);
   errno = saved_host_errno;
   return result;
 }
 
-int darwin_art_bionic_openat(int directory_fd, const char* path, int flags, ...) {
+int darwin_art_bionic_openat(int directory_fd, const char* path, int flags,
+                             uint32_t mode) {
   const int saved_host_errno = errno;
-  const int result = darwin_art_bionic_fs_openat_core(directory_fd, path, flags);
+  const int result =
+      darwin_art_bionic_fs_openat_core(directory_fd, path, flags, mode);
   errno = saved_host_errno;
   return result;
 }

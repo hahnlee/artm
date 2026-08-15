@@ -67,6 +67,37 @@ __attribute__((visibility("default"))) int bionic_fs_fixture_run(void) {
       !BytesEqual(buffer, expected, sizeof(expected) - 1)) return 3;
   if (close(fd) != 0) return 4;
 
+  fd = open("/data/libcxx-copy", O_RDONLY);
+  if (fd < 10000 || fstat(fd, &status) != 0 || !S_ISREG(status.st_mode) ||
+      (status.st_mode & 0777) != 0644 ||
+      status.st_size != (off_t)(sizeof(expected) - 1)) return 101;
+  for (size_t index = 0; index < sizeof(buffer); ++index) buffer[index] = 0;
+  if (read(fd, buffer, sizeof(expected) - 1) !=
+          (ssize_t)(sizeof(expected) - 1) ||
+      !BytesEqual(buffer, expected, sizeof(expected) - 1) || close(fd) != 0)
+    return 102;
+  if (mkdir("/data/guest", 0750) != 0) return 103;
+  if (stat("/data/guest", &status) != 0 || !S_ISDIR(status.st_mode) ||
+      (status.st_mode & 0777) != 0750)
+    return 108;
+  errno = 0;
+  if (mkdir("/data/guest", 0750) != -1 || errno != EEXIST) return 104;
+  fd = open("/data/guest/empty", O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  if (fd < 10000 || fstat(fd, &status) != 0 ||
+      (status.st_mode & 0777) != 0600 || fchmod(fd, 0640) != 0 ||
+      ftruncate(fd, 2) != 0 ||
+      fstat(fd, &status) != 0 || status.st_size != 2 || close(fd) != 0)
+    return 105;
+  fd = open("/data/guest/empty", O_RDONLY);
+  buffer[0] = 1;
+  buffer[1] = 1;
+  if (fd < 10000 || read(fd, buffer, 2) != 2 || buffer[0] != 0 ||
+      buffer[1] != 0 || close(fd) != 0)
+    return 106;
+  errno = 0;
+  if (symlink("target", "/data/guest/link") != -1 || errno != EROFS)
+    return 107;
+
   fd = openat(AT_FDCWD, "etc/payload.txt", O_RDONLY);
   if (fd < 0 || close(fd) != 0) return 5;
 

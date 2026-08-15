@@ -1,9 +1,11 @@
 use bionic_fs_facade::{
     IOCTL_FD_BAD, IOCTL_FD_FOUND, IOCTL_FD_INFO_ABI_VERSION, IOCTL_FD_OTHER,
-    IOCTL_FD_RANDOM_DEVICE, IoctlFdInfo, PROCESS_OWNER_OK, darwin_art_bionic_fs_close_core,
+    IOCTL_FD_RANDOM_DEVICE, IoctlFdInfo, PROCESS_OWNER_OK, SENDFILE_ABI_VERSION,
+    SENDFILE_TRANSFER_OK, SendfileRequest, SendfileResult, darwin_art_bionic_fs_close_core,
     darwin_art_bionic_fs_ioctl_fd_lookup, darwin_art_bionic_fs_open_core,
     darwin_art_bionic_fs_process_has_capability_failure, darwin_art_bionic_fs_process_install,
     darwin_art_bionic_fs_process_uninstall, darwin_art_bionic_fs_read_core,
+    darwin_art_bionic_fs_sendfile_transfer,
 };
 use darwin_art_elf_loader::{
     LoadedElf, ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver,
@@ -157,7 +159,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut process_owner = ProcessOwnerGuard(true);
     let guest_thread = std::thread::spawn(|| {
         // SAFETY: static path and local output remain live through each call.
-        let fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), 0) };
+        let fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), 0, 0) };
         if fd < 0 {
             return false;
         }
@@ -177,7 +179,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     // SAFETY: static C strings satisfy the Android path ABI and the returned
     // virtual descriptors remain owned by this active facade until close.
-    let random_fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), 0) };
+    let random_fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), 0, 0) };
     if random_fd < 0 {
         return Err("synthetic /dev/random open failed".into());
     }
@@ -200,7 +202,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("closed random fd remained classified".into());
     }
     // SAFETY: exact synthetic path and fixed-register O_RDONLY form.
-    let urandom_fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/urandom".as_ptr(), 0) };
+    let urandom_fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/urandom".as_ptr(), 0, 0) };
     if urandom_fd != random_fd {
         return Err("closed synthetic descriptor was not safely reused".into());
     }
@@ -209,7 +211,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     // SAFETY: exact brokered path and fixed-register O_RDONLY form.
     let regular_fd =
-        unsafe { darwin_art_bionic_fs_open_core(c"/system/etc/payload.txt".as_ptr(), 0) };
+        unsafe { darwin_art_bionic_fs_open_core(c"/system/etc/payload.txt".as_ptr(), 0, 0) };
     if regular_fd != random_fd {
         return Err("descriptor reuse across kinds drifted".into());
     }
@@ -220,8 +222,35 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("regular ioctl fd classification drift".into());
     }
-    if darwin_art_bionic_fs_close_core(regular_fd) != 0 {
-        return Err("brokered descriptor close failed".into());
+    // libc++ copy_file opens this private-prefix output and supplies the exact
+    // exact out/in/null-offset/remaining shape through the sendfile seam.
+    let output_fd = unsafe {
+        darwin_art_bionic_fs_open_core(c"/data/libcxx-copy".as_ptr(), 1 | 64 | 512, 0o644)
+    };
+    if output_fd < 0 {
+        return Err("private /data output open failed".into());
+    }
+    let request = SendfileRequest {
+        abi_version: SENDFILE_ABI_VERSION,
+        output_fd,
+        input_fd: regular_fd,
+        has_explicit_offset: 0,
+        offset: 0,
+        count: 128,
+    };
+    let mut transfer = SendfileResult::default();
+    if unsafe {
+        darwin_art_bionic_fs_sendfile_transfer(std::ptr::null_mut(), &request, &mut transfer)
+    } != SENDFILE_TRANSFER_OK
+        || transfer.transferred != 13
+        || transfer.android_errno != 0
+    {
+        return Err("private /data sendfile transfer failed".into());
+    }
+    if darwin_art_bionic_fs_close_core(output_fd) != 0
+        || darwin_art_bionic_fs_close_core(regular_fd) != 0
+    {
+        return Err("brokered copy descriptors close failed".into());
     }
     let bytes = fs::read(fixture)?;
     let mut resolver = ClosedResolver;

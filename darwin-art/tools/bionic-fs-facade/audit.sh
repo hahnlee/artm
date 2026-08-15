@@ -168,9 +168,9 @@ for symbol in host_closedir host_fdopendir host_fpathconf host_fstatvfs host_rea
   grep -F "private external _darwin_art_bionic_fs_$symbol" <<<"$visibility" >/dev/null ||
     fail "host DIR helper escaped hidden visibility: $symbol"
 done
-if rg -n 'dlopen|dlsym|dyld|NSLookupSymbolInImage|RTLD_|socket|O_WRONLY[^\n]*accepted|O_RDWR[^\n]*accepted|(^|[^[:alnum:]_.])(chmod|fchmod|fchmodat|ftruncate|link|mkdir|remove|rename|symlink|truncate|unlink|unlinkat|utimensat)[[:space:]]*\(' \
+if rg -n 'dlopen|dlsym|dyld|NSLookupSymbolInImage|RTLD_|socket|(^|[^[:alnum:]_.])(sendfile|syscall)[[:space:]]*\(' \
    "$script_dir/src" "$script_dir/include" "$script_dir/manifests" >/dev/null; then
-  fail 'forbidden resolver or writable capability entered facade'
+  fail 'forbidden resolver, host sendfile, or raw syscall entered facade'
 fi
 
 CARGO_TARGET_DIR="$temp_root/cargo-target" cargo test --quiet \
@@ -241,6 +241,9 @@ CARGO_TARGET_DIR="$temp_root/cargo-target" cargo run --quiet \
 nm -gU "$temp_root/cargo-target/debug/bionic-fs-facade" |
   grep -F ' _darwin_art_bionic_fs_ioctl_fd_lookup' >/dev/null ||
   fail 'ioctl fd lookup callback missing'
+nm -gU "$temp_root/cargo-target/debug/bionic-fs-facade" |
+  grep -F ' _darwin_art_bionic_fs_sendfile_transfer' >/dev/null ||
+  fail 'sendfile transfer callback missing'
 for symbol in process_install process_uninstall process_has_capability_failure; do
   nm -gU "$temp_root/cargo-target/debug/bionic-fs-facade" |
     grep -F " _darwin_art_bionic_fs_${symbol}" >/dev/null ||
@@ -257,4 +260,4 @@ UBSAN_OPTIONS=halt_on_error=1 BIONIC_FS_C_SANITIZER=undefined \
   --manifest-path "$script_dir/Cargo.toml" -- "$fixture" "$temp_root/root"
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
 
-echo 'bionic-fs-facade: PASS AndroidELF libc-imports=29 errno=1 read-only path+cwd+DIR+fdopendir random=Security+typed-fd owner=process-wide+quiescent+TLS-test-override stat128/dirent280/statvfs112 pathconf20 mutation=EROFS closed-resolver ASan+UBSan'
+echo 'bionic-fs-facade: PASS AndroidELF libc-imports=29 errno=1 immutable-root+private-/data path+cwd+DIR+fdopendir random=Security+typed-fd sendfile=virtual-copy owner=process-wide+quiescent stat128/dirent280/statvfs112 closed-resolver ASan+UBSan'

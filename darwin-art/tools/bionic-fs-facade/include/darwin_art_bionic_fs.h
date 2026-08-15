@@ -117,8 +117,11 @@ darwin_art_bionic_fs_process_uninstall(void);
 /* Returns one/zero for the live owner and -1 when no owner is available. */
 int darwin_art_bionic_fs_process_has_capability_failure(void);
 
-int darwin_art_bionic_open(const char* path, int flags, ...);
-int darwin_art_bionic_openat(int directory_fd, const char* path, int flags, ...);
+/* Fixed-register forms intentionally capture the Android AAPCS64 mode slot.
+ * Calls without O_CREAT leave mode unspecified and the implementation ignores it. */
+int darwin_art_bionic_open(const char* path, int flags, uint32_t mode);
+int darwin_art_bionic_openat(int directory_fd, const char* path, int flags,
+                             uint32_t mode);
 intptr_t darwin_art_bionic_read(int fd, void* buffer, size_t count);
 int darwin_art_bionic_close(int fd);
 int darwin_art_bionic_fstat(int fd, DarwinArtAndroidStat* status);
@@ -161,9 +164,9 @@ DarwinArtBionicIoctlFdLookupStatus darwin_art_bionic_fs_ioctl_fd_lookup(
     void* context, int32_t fd, DarwinArtBionicIoctlFdInfo* info);
 
 /* Rust implementation boundary called only by the errno-preserving shims. */
-int darwin_art_bionic_fs_open_core(const char* path, int flags);
+int darwin_art_bionic_fs_open_core(const char* path, int flags, uint32_t mode);
 int darwin_art_bionic_fs_openat_core(int directory_fd, const char* path,
-                                     int flags);
+                                     int flags, uint32_t mode);
 intptr_t darwin_art_bionic_fs_read_core(int fd, void* buffer, size_t count);
 int darwin_art_bionic_fs_close_core(int fd);
 int darwin_art_bionic_fs_fstat_core(int fd, DarwinArtAndroidStat* status);

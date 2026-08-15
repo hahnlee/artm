@@ -9,6 +9,7 @@ use std::fs::{File, Metadata};
 use std::io::Read;
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd};
+use std::os::unix::fs::FileExt;
 use std::os::unix::fs::MetadataExt;
 use std::ptr;
 use std::rc::Rc;
@@ -40,7 +41,10 @@ const ANDROID_EBADF: i32 = 9;
 const ANDROID_EACCES: i32 = 13;
 const ANDROID_EFAULT: i32 = 14;
 const ANDROID_EIO: i32 = 5;
+const ANDROID_ENOENT: i32 = 2;
+const ANDROID_EEXIST: i32 = 17;
 const ANDROID_ENOTDIR: i32 = 20;
+const ANDROID_EISDIR: i32 = 21;
 const ANDROID_EINVAL: i32 = 22;
 const ANDROID_EMFILE: i32 = 24;
 const ANDROID_ENOTTY: i32 = 25;
@@ -52,6 +56,8 @@ const AT_SYMLINK_NOFOLLOW: c_int = 0x100;
 const AT_REMOVEDIR: c_int = 0x200;
 const ANDROID_ST_RDONLY: u64 = 0x0001;
 const ANDROID_S_IFCHR: u32 = 0o020000;
+const ANDROID_S_IFDIR: u32 = 0o040000;
+const ANDROID_S_IFREG: u32 = 0o100000;
 const ANDROID_RANDOM_MODE: u32 = ANDROID_S_IFCHR | 0o666;
 const ANDROID_RANDOM_RDEV: u64 = 0x108;
 const ANDROID_URANDOM_RDEV: u64 = 0x109;
@@ -210,6 +216,53 @@ enum RandomDeviceKind {
 enum Descriptor {
     File(File),
     Random(RandomDeviceKind),
+    Overlay(OverlayDescriptor),
+}
+
+struct OverlayFile {
+    inode: u64,
+    mode: u32,
+    data: Vec<u8>,
+}
+
+#[derive(Clone, Copy)]
+struct OverlayDirectory {
+    inode: u64,
+    mode: u32,
+}
+
+enum OverlayEntry {
+    File(Arc<Mutex<OverlayFile>>),
+    Directory(OverlayDirectory),
+}
+
+struct OverlayState {
+    entries: BTreeMap<Vec<u8>, OverlayEntry>,
+    next_inode: u64,
+}
+
+impl Default for OverlayState {
+    fn default() -> Self {
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            Vec::new(),
+            OverlayEntry::Directory(OverlayDirectory {
+                inode: 1,
+                mode: ANDROID_S_IFDIR | 0o700,
+            }),
+        );
+        Self {
+            entries,
+            next_inode: 2,
+        }
+    }
+}
+
+struct OverlayDescriptor {
+    node: Arc<Mutex<OverlayFile>>,
+    offset: u64,
+    readable: bool,
+    writable: bool,
 }
 
 struct DescriptorTable {
@@ -357,6 +410,7 @@ pub struct Facade {
     broker: ReadOnlyBroker,
     cwd: Mutex<Vec<u8>>,
     descriptors: Mutex<DescriptorTable>,
+    overlay: Mutex<OverlayState>,
     directories: Mutex<DirectoryTable>,
     entropy: Arc<dyn EntropyBackend>,
     capability_failure: AtomicBool,
@@ -377,6 +431,9 @@ impl Facade {
         prefix
             .add_mount(1, MountKind::Immutable, false, guest_mount)
             .map_err(|_| "invalid guest mount")?;
+        prefix
+            .add_mount(2, MountKind::Private, true, b"/data")
+            .map_err(|_| "invalid private data mount")?;
         prefix.seal().map_err(|_| "could not seal guest mount")?;
         // Prove cwd belongs to this mount before any guest operation can use it.
         let initial_cwd = prefix
@@ -397,6 +454,7 @@ impl Facade {
             broker,
             cwd: Mutex::new(initial_cwd.normalized_path),
             descriptors: Mutex::new(DescriptorTable::default()),
+            overlay: Mutex::new(OverlayState::default()),
             directories: Mutex::new(DirectoryTable::default()),
             entropy,
             capability_failure: AtomicBool::new(false),
@@ -452,7 +510,12 @@ impl Facade {
 
     fn resolve_from(&self, cwd: &[u8], path: &[u8]) -> Result<Resolution, c_int> {
         match self.prefix.resolve(cwd, path) {
-            Ok(resolution) if resolution.mount_id == 1 && !resolution.writable => Ok(resolution),
+            Ok(resolution)
+                if (resolution.mount_id == 1 && !resolution.writable)
+                    || (resolution.mount_id == 2 && resolution.writable) =>
+            {
+                Ok(resolution)
+            }
             Ok(_) | Err(PrefixError::NoMount) => Err(ANDROID_EACCES),
             Err(_) => Err(ANDROID_EINVAL),
         }
@@ -469,7 +532,7 @@ impl Facade {
         self.resolve_from(&cwd, path)
     }
 
-    fn validate_flags(&self, flags: c_int) -> Result<(), c_int> {
+    fn validate_immutable_flags(&self, flags: c_int) -> Result<(), c_int> {
         if flags & O_ACCMODE == O_WRONLY
             || flags & O_ACCMODE == O_RDWR
             || flags & WRITE_FLAGS != 0
@@ -479,6 +542,34 @@ impl Facade {
         }
         if flags & !ACCEPTED_FLAGS != 0 {
             return Err(ANDROID_EOPNOTSUPP);
+        }
+        Ok(())
+    }
+
+    fn overlay_parent(path: &[u8]) -> &[u8] {
+        path.iter()
+            .rposition(|byte| *byte == b'/')
+            .map_or(b"".as_slice(), |index| &path[..index])
+    }
+
+    fn validate_overlay_flags(&self, flags: c_int) -> Result<(), c_int> {
+        let access = flags & O_ACCMODE;
+        if access != O_RDONLY && access != O_WRONLY {
+            return Err(ANDROID_EOPNOTSUPP);
+        }
+        if flags & (O_APPEND | O_DSYNC | O_SYNC) != 0
+            || flags & O_TMPFILE == O_TMPFILE
+            || flags & O_DIRECTORY != 0
+        {
+            return Err(ANDROID_EOPNOTSUPP);
+        }
+        let accepted =
+            O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_NOFOLLOW | O_LARGEFILE | O_CLOEXEC;
+        if flags & !accepted != 0 {
+            return Err(ANDROID_EOPNOTSUPP);
+        }
+        if access == O_RDONLY && flags & (O_CREAT | O_EXCL | O_TRUNC) != 0 {
+            return Err(ANDROID_EINVAL);
         }
         Ok(())
     }
@@ -511,17 +602,25 @@ impl Facade {
         }
     }
 
+    #[cfg(test)]
     fn open(&self, path: &[u8], flags: c_int) -> c_int {
+        self.open_with_mode(path, flags, 0o600)
+    }
+
+    fn open_with_mode(&self, path: &[u8], flags: c_int, mode: u32) -> c_int {
         if let Some(kind) = Self::random_device(path) {
             return self.open_random(kind, flags);
-        }
-        if let Err(error) = self.validate_flags(flags) {
-            return self.fail(error);
         }
         let resolution = match self.resolve(path) {
             Ok(resolution) => resolution,
             Err(error) => return self.fail(error),
         };
+        if resolution.mount_id == 2 {
+            return self.open_overlay(resolution, flags, mode);
+        }
+        if let Err(error) = self.validate_immutable_flags(flags) {
+            return self.fail(error);
+        }
         let mut relative = resolution.relative_path;
         if resolution.requires_directory && !relative.is_empty() {
             relative.push(b'/');
@@ -543,9 +642,75 @@ impl Facade {
         }
     }
 
-    fn openat(&self, directory_fd: c_int, path: &[u8], flags: c_int) -> c_int {
+    fn open_overlay(&self, resolution: Resolution, flags: c_int, mode: u32) -> c_int {
+        if resolution.requires_directory || resolution.relative_path.is_empty() {
+            return self.fail(ANDROID_EISDIR);
+        }
+        if let Err(error) = self.validate_overlay_flags(flags) {
+            return self.fail(error);
+        }
+        let access = flags & O_ACCMODE;
+        let mut overlay = match self.overlay.lock() {
+            Ok(overlay) => overlay,
+            Err(_) => return self.fail_capability(),
+        };
+        let parent = Self::overlay_parent(&resolution.relative_path);
+        if !matches!(
+            overlay.entries.get(parent),
+            Some(OverlayEntry::Directory(_))
+        ) {
+            return self.fail(ANDROID_ENOENT);
+        }
+        let existing = overlay.entries.get(&resolution.relative_path);
+        if flags & O_CREAT != 0 && flags & O_EXCL != 0 && existing.is_some() {
+            return self.fail(ANDROID_EEXIST);
+        }
+        let node = match existing {
+            Some(OverlayEntry::File(node)) => Arc::clone(node),
+            Some(OverlayEntry::Directory(_)) => return self.fail(ANDROID_EISDIR),
+            None if flags & O_CREAT == 0 => return self.fail(ANDROID_ENOENT),
+            None => {
+                let inode = overlay.next_inode;
+                overlay.next_inode = overlay.next_inode.saturating_add(1);
+                let node = Arc::new(Mutex::new(OverlayFile {
+                    inode,
+                    mode: ANDROID_S_IFREG | (mode & 0o7777),
+                    data: Vec::new(),
+                }));
+                overlay.entries.insert(
+                    resolution.relative_path.clone(),
+                    OverlayEntry::File(Arc::clone(&node)),
+                );
+                node
+            }
+        };
+        if flags & O_TRUNC != 0 {
+            let mut file = match node.lock() {
+                Ok(file) => file,
+                Err(_) => return self.fail_capability(),
+            };
+            file.data.clear();
+        }
+        drop(overlay);
+        let descriptor = Descriptor::Overlay(OverlayDescriptor {
+            node,
+            offset: 0,
+            readable: access == O_RDONLY,
+            writable: access == O_WRONLY,
+        });
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability(),
+        };
+        match descriptors.insert(descriptor) {
+            Ok(fd) => fd,
+            Err(()) => self.fail(ANDROID_EMFILE),
+        }
+    }
+
+    fn openat_with_mode(&self, directory_fd: c_int, path: &[u8], flags: c_int, mode: u32) -> c_int {
         if directory_fd == AT_FDCWD || path.starts_with(b"/") {
-            return self.open(path, flags);
+            return self.open_with_mode(path, flags, mode);
         }
         let descriptors = match self.descriptors.lock() {
             Ok(descriptors) => descriptors,
@@ -554,6 +719,7 @@ impl Facade {
         match descriptors.entries.get(&directory_fd) {
             Some(Descriptor::Random(_)) => self.fail(ANDROID_ENOTDIR),
             Some(Descriptor::File(_)) => self.fail(ANDROID_EOPNOTSUPP),
+            Some(Descriptor::Overlay(_)) => self.fail(ANDROID_ENOTDIR),
             None => self.fail(ANDROID_EBADF),
         }
     }
@@ -589,6 +755,23 @@ impl Facade {
                 Ok(()) => count as isize,
                 Err(()) => self.fail(ANDROID_EIO) as isize,
             },
+            Descriptor::Overlay(descriptor) => {
+                if !descriptor.readable {
+                    return self.fail(ANDROID_EBADF) as isize;
+                }
+                let file = match descriptor.node.lock() {
+                    Ok(file) => file,
+                    Err(_) => return self.fail_capability() as isize,
+                };
+                let start = usize::try_from(descriptor.offset).unwrap_or(usize::MAX);
+                let available = file.data.len().saturating_sub(start);
+                let copied = available.min(bytes.len());
+                if copied != 0 {
+                    bytes[..copied].copy_from_slice(&file.data[start..start + copied]);
+                    descriptor.offset += copied as u64;
+                }
+                copied as isize
+            }
         }
     }
 
@@ -636,6 +819,13 @@ impl Facade {
                 metadata_to_android(&metadata)
             }
             Descriptor::Random(kind) => random_device_stat(*kind),
+            Descriptor::Overlay(descriptor) => {
+                let file = match descriptor.node.lock() {
+                    Ok(file) => file,
+                    Err(_) => return self.fail_capability(),
+                };
+                overlay_file_stat(&file)
+            }
         };
         // SAFETY: the guest ABI requires a writable 128-byte Android stat object.
         unsafe { status.write(translated) };
@@ -655,6 +845,25 @@ impl Facade {
             Ok(resolution) => resolution,
             Err(error) => return self.fail(error),
         };
+        if resolution.mount_id == 2 {
+            let overlay = match self.overlay.lock() {
+                Ok(overlay) => overlay,
+                Err(_) => return self.fail_capability(),
+            };
+            let translated = match overlay.entries.get(&resolution.relative_path) {
+                Some(OverlayEntry::File(node)) => {
+                    let file = match node.lock() {
+                        Ok(file) => file,
+                        Err(_) => return self.fail_capability(),
+                    };
+                    overlay_file_stat(&file)
+                }
+                Some(OverlayEntry::Directory(directory)) => overlay_directory_stat(*directory),
+                None => return self.fail(ANDROID_ENOENT),
+            };
+            unsafe { status.write(translated) };
+            return 0;
+        }
         let mut relative_path = resolution.relative_path;
         if resolution.requires_directory && !relative_path.is_empty() {
             relative_path.push(b'/');
@@ -762,6 +971,90 @@ impl Facade {
         }
     }
 
+    fn fchmod(&self, fd: c_int, mode: u32) -> c_int {
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability(),
+        };
+        match descriptors.entries.get_mut(&fd) {
+            Some(Descriptor::Overlay(descriptor)) if descriptor.writable => {
+                let mut file = match descriptor.node.lock() {
+                    Ok(file) => file,
+                    Err(_) => return self.fail_capability(),
+                };
+                file.mode = ANDROID_S_IFREG | (mode & 0o7777);
+                0
+            }
+            Some(Descriptor::Overlay(_)) => self.fail(ANDROID_EBADF),
+            Some(_) => self.fail(ANDROID_EROFS),
+            None => self.fail(ANDROID_EBADF),
+        }
+    }
+
+    fn ftruncate(&self, fd: c_int, length: i64) -> c_int {
+        if length < 0 {
+            return self.fail(ANDROID_EINVAL);
+        }
+        let Ok(length) = usize::try_from(length) else {
+            return self.fail(ANDROID_EINVAL);
+        };
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability(),
+        };
+        match descriptors.entries.get_mut(&fd) {
+            Some(Descriptor::Overlay(descriptor)) if descriptor.writable => {
+                let mut file = match descriptor.node.lock() {
+                    Ok(file) => file,
+                    Err(_) => return self.fail_capability(),
+                };
+                file.data.resize(length, 0);
+                0
+            }
+            Some(Descriptor::Overlay(_)) => self.fail(ANDROID_EBADF),
+            Some(_) => self.fail(ANDROID_EROFS),
+            None => self.fail(ANDROID_EBADF),
+        }
+    }
+
+    fn mkdir(&self, path: &[u8], mode: u32) -> c_int {
+        let resolution = match self.resolve(path) {
+            Ok(resolution) => resolution,
+            Err(error) => return self.fail(error),
+        };
+        if resolution.mount_id != 2 {
+            return self.fail(ANDROID_EROFS);
+        }
+        if resolution.relative_path.is_empty() {
+            return self.fail(ANDROID_EEXIST);
+        }
+        let mut overlay = match self.overlay.lock() {
+            Ok(overlay) => overlay,
+            Err(_) => return self.fail_capability(),
+        };
+        if overlay.entries.contains_key(&resolution.relative_path) {
+            return self.fail(ANDROID_EEXIST);
+        }
+        if !matches!(
+            overlay
+                .entries
+                .get(Self::overlay_parent(&resolution.relative_path)),
+            Some(OverlayEntry::Directory(_))
+        ) {
+            return self.fail(ANDROID_ENOENT);
+        }
+        let inode = overlay.next_inode;
+        overlay.next_inode = overlay.next_inode.saturating_add(1);
+        overlay.entries.insert(
+            resolution.relative_path,
+            OverlayEntry::Directory(OverlayDirectory {
+                inode,
+                mode: ANDROID_S_IFDIR | (mode & 0o7777),
+            }),
+        );
+        0
+    }
+
     fn resolve_at(&self, directory_fd: c_int, path: &[u8]) -> Result<Resolution, c_int> {
         if directory_fd == AT_FDCWD || path.starts_with(b"/") {
             return self.resolve(path);
@@ -776,6 +1069,7 @@ impl Facade {
         match descriptors.entries.get(&directory_fd) {
             Some(Descriptor::Random(_)) => Err(ANDROID_ENOTDIR),
             Some(Descriptor::File(_)) => Err(ANDROID_EOPNOTSUPP),
+            Some(Descriptor::Overlay(_)) => Err(ANDROID_ENOTDIR),
             None => Err(ANDROID_EBADF),
         }
     }
@@ -982,6 +1276,10 @@ impl Facade {
             self.fail(ANDROID_EBADF);
             return ptr::null_mut();
         };
+        if matches!(descriptor, Descriptor::Overlay(_)) {
+            self.fail(ANDROID_ENOTDIR);
+            return ptr::null_mut();
+        }
         let Descriptor::File(file) = descriptor else {
             self.fail(ANDROID_ENOTDIR);
             return ptr::null_mut();
@@ -1127,6 +1425,120 @@ impl Facade {
             self.fail_host_errno(host_errno)
         }
     }
+
+    fn sendfile_transfer(&self, request: &SendfileRequest, result: &mut SendfileResult) -> c_int {
+        *result = SendfileResult {
+            abi_version: SENDFILE_ABI_VERSION,
+            android_errno: 0,
+            transferred: -1,
+            next_offset: request.offset,
+        };
+        if request.abi_version != SENDFILE_ABI_VERSION
+            || request.has_explicit_offset > 1
+            || (request.has_explicit_offset != 0 && request.offset < 0)
+            || request.output_fd == request.input_fd
+        {
+            result.android_errno = ANDROID_EINVAL;
+            return SENDFILE_TRANSFER_OK;
+        }
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => {
+                self.capability_failure.store(true, Ordering::Release);
+                return SENDFILE_TRANSFER_UNAVAILABLE;
+            }
+        };
+        if !descriptors.entries.contains_key(&request.input_fd)
+            || !descriptors.entries.contains_key(&request.output_fd)
+        {
+            return SENDFILE_TRANSFER_BAD_FD;
+        }
+        let Some(mut output) = descriptors.take(request.output_fd) else {
+            return SENDFILE_TRANSFER_BAD_FD;
+        };
+        let transfer_result = (|| {
+            let Descriptor::Overlay(output_descriptor) = &mut output else {
+                return Err(ANDROID_EROFS);
+            };
+            if !output_descriptor.writable {
+                return Err(ANDROID_EBADF);
+            }
+            let mut output_file = output_descriptor.node.lock().map_err(|_| ANDROID_EIO)?;
+            let input = descriptors
+                .entries
+                .get_mut(&request.input_fd)
+                .ok_or(ANDROID_EBADF)?;
+            if let Descriptor::Overlay(input_descriptor) = input
+                && Arc::ptr_eq(&input_descriptor.node, &output_descriptor.node)
+            {
+                return Err(ANDROID_EINVAL);
+            }
+            let wanted = request.count.min(64 * 1024);
+            let mut bytes = vec![0_u8; wanted];
+            let read = match input {
+                Descriptor::File(file) if request.has_explicit_offset != 0 => file
+                    .read_at(&mut bytes, request.offset as u64)
+                    .map_err(|_| ANDROID_EIO)?,
+                Descriptor::File(file) => file.read(&mut bytes).map_err(|_| ANDROID_EIO)?,
+                Descriptor::Overlay(input_descriptor) => {
+                    if !input_descriptor.readable {
+                        return Err(ANDROID_EBADF);
+                    }
+                    let input_file = input_descriptor.node.lock().map_err(|_| ANDROID_EIO)?;
+                    let offset = if request.has_explicit_offset != 0 {
+                        request.offset as u64
+                    } else {
+                        input_descriptor.offset
+                    };
+                    let start = usize::try_from(offset).unwrap_or(usize::MAX);
+                    let copied = input_file.data.len().saturating_sub(start).min(bytes.len());
+                    if copied != 0 {
+                        bytes[..copied].copy_from_slice(&input_file.data[start..start + copied]);
+                    }
+                    drop(input_file);
+                    if request.has_explicit_offset == 0 {
+                        input_descriptor.offset += copied as u64;
+                    }
+                    copied
+                }
+                Descriptor::Random(_) => return Err(ANDROID_EINVAL),
+            };
+            bytes.truncate(read);
+            let output_start =
+                usize::try_from(output_descriptor.offset).map_err(|_| ANDROID_EINVAL)?;
+            let output_end = output_start
+                .checked_add(bytes.len())
+                .ok_or(ANDROID_EINVAL)?;
+            if output_file.data.len() < output_end {
+                output_file.data.resize(output_end, 0);
+            }
+            output_file.data[output_start..output_end].copy_from_slice(&bytes);
+            output_descriptor.offset += bytes.len() as u64;
+            Ok(bytes.len())
+        })();
+        descriptors.restore(request.output_fd, output);
+        match transfer_result {
+            Ok(transferred) => {
+                result.transferred = transferred as isize;
+                result.next_offset = match request.offset.checked_add(transferred as i64) {
+                    Some(offset) => offset,
+                    None => {
+                        result.transferred = -1;
+                        result.android_errno = ANDROID_EINVAL;
+                        request.offset
+                    }
+                };
+                SENDFILE_TRANSFER_OK
+            }
+            Err(error) => {
+                if error == ANDROID_EIO {
+                    self.capability_failure.store(true, Ordering::Release);
+                }
+                result.android_errno = error;
+                SENDFILE_TRANSFER_OK
+            }
+        }
+    }
 }
 
 fn is_final_symlink_rejection(error: &BrokerError, relative_path: &[u8]) -> bool {
@@ -1194,6 +1606,51 @@ fn random_device_stat(kind: RandomDeviceKind) -> AndroidStat {
         st_uid: 0,
         st_gid: 0,
         st_rdev: device,
+        pad1: 0,
+        st_size: 0,
+        st_blksize: 4096,
+        pad2: 0,
+        st_blocks: 0,
+        st_atim: AndroidTimespec::default(),
+        st_mtim: AndroidTimespec::default(),
+        st_ctim: AndroidTimespec::default(),
+        unused4: 0,
+        unused5: 0,
+    }
+}
+
+fn overlay_file_stat(file: &OverlayFile) -> AndroidStat {
+    let size = file.data.len() as i64;
+    AndroidStat {
+        st_dev: 2,
+        st_ino: file.inode,
+        st_mode: file.mode,
+        st_nlink: 1,
+        st_uid: 0,
+        st_gid: 0,
+        st_rdev: 0,
+        pad1: 0,
+        st_size: size,
+        st_blksize: 4096,
+        pad2: 0,
+        st_blocks: (size + 511) / 512,
+        st_atim: AndroidTimespec::default(),
+        st_mtim: AndroidTimespec::default(),
+        st_ctim: AndroidTimespec::default(),
+        unused4: 0,
+        unused5: 0,
+    }
+}
+
+fn overlay_directory_stat(directory: OverlayDirectory) -> AndroidStat {
+    AndroidStat {
+        st_dev: 2,
+        st_ino: directory.inode,
+        st_mode: directory.mode,
+        st_nlink: 1,
+        st_uid: 0,
+        st_gid: 0,
+        st_rdev: 0,
         pad1: 0,
         st_size: 0,
         st_blksize: 4096,
@@ -1399,6 +1856,34 @@ pub const IOCTL_FD_FOUND: c_int = 0;
 pub const IOCTL_FD_BAD: c_int = 1;
 pub const IOCTL_FD_CAPABILITY_UNAVAILABLE: c_int = 2;
 
+pub const SENDFILE_ABI_VERSION: u32 = 1;
+pub const SENDFILE_TRANSFER_OK: c_int = 0;
+pub const SENDFILE_TRANSFER_BAD_FD: c_int = 1;
+pub const SENDFILE_TRANSFER_UNAVAILABLE: c_int = 2;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SendfileRequest {
+    pub abi_version: u32,
+    pub output_fd: c_int,
+    pub input_fd: c_int,
+    pub has_explicit_offset: u32,
+    pub offset: i64,
+    pub count: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SendfileResult {
+    pub abi_version: u32,
+    pub android_errno: c_int,
+    pub transferred: isize,
+    pub next_offset: i64,
+}
+
+const _: () = assert!(size_of::<SendfileRequest>() == 32);
+const _: () = assert!(size_of::<SendfileResult>() == 24);
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct IoctlFdInfo {
@@ -1435,7 +1920,7 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_ioctl_fd_lookup(
     };
     let kind = match descriptors.entries.get(&fd) {
         Some(Descriptor::Random(_)) => IOCTL_FD_RANDOM_DEVICE,
-        Some(Descriptor::File(_)) => IOCTL_FD_OTHER,
+        Some(Descriptor::File(_) | Descriptor::Overlay(_)) => IOCTL_FD_OTHER,
         None => return IOCTL_FD_BAD,
     };
     // SAFETY: required by this callback ABI; the ioctl provider passes its
@@ -1447,6 +1932,31 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_ioctl_fd_lookup(
         })
     };
     IOCTL_FD_FOUND
+}
+
+#[unsafe(no_mangle)]
+/// Atomic transfer callback for the standalone sendfile provider.
+///
+/// # Safety
+///
+/// `request` must be readable and `result` writable for their complete ABI
+/// records. The sendfile provider retains neither pointer after this call.
+pub unsafe extern "C" fn darwin_art_bionic_fs_sendfile_transfer(
+    _context: *mut c_void,
+    request: *const SendfileRequest,
+    result: *mut SendfileResult,
+) -> c_int {
+    if request.is_null() || result.is_null() {
+        return SENDFILE_TRANSFER_UNAVAILABLE;
+    }
+    let Some(active) = acquire_active() else {
+        return SENDFILE_TRANSFER_UNAVAILABLE;
+    };
+    // SAFETY: required by the callback ABI and consumed synchronously.
+    let request = unsafe { &*request };
+    // SAFETY: same callback lifetime contract as request.
+    let result = unsafe { &mut *result };
+    active.facade.sendfile_transfer(request, result)
 }
 
 /// A thread-affine activation scope.
@@ -1497,12 +2007,13 @@ unsafe fn path_bytes<'a>(path: *const c_char) -> Option<&'a [u8]> {
 pub unsafe extern "C" fn darwin_art_bionic_fs_open_core(
     path: *const c_char,
     flags: c_int,
+    mode: u32,
 ) -> c_int {
     let Some(path) = (unsafe { path_bytes(path) }) else {
         Facade::set_android_errno(ANDROID_EFAULT);
         return -1;
     };
-    with_active(-1, |facade| facade.open(path, flags))
+    with_active(-1, |facade| facade.open_with_mode(path, flags, mode))
 }
 
 #[unsafe(no_mangle)]
@@ -1513,12 +2024,15 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_openat_core(
     directory_fd: c_int,
     path: *const c_char,
     flags: c_int,
+    mode: u32,
 ) -> c_int {
     let Some(path) = (unsafe { path_bytes(path) }) else {
         Facade::set_android_errno(ANDROID_EFAULT);
         return -1;
     };
-    with_active(-1, |facade| facade.openat(directory_fd, path, flags))
+    with_active(-1, |facade| {
+        facade.openat_with_mode(directory_fd, path, flags, mode)
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -1654,7 +2168,7 @@ pub extern "C" fn darwin_art_bionic_fs_closedir_core(directory: *mut c_void) -> 
 
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_fs_fchmod_core(fd: c_int, _mode: u32) -> c_int {
-    with_active(-1, |facade| facade.reject_fd_mutation(fd))
+    with_active(-1, |facade| facade.fchmod(fd, _mode))
 }
 
 #[unsafe(no_mangle)]
@@ -1682,7 +2196,7 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_fchmodat_core(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_fs_ftruncate_core(fd: c_int, _length: i64) -> c_int {
-    with_active(-1, |facade| facade.reject_fd_mutation(fd))
+    with_active(-1, |facade| facade.ftruncate(fd, _length))
 }
 
 #[unsafe(no_mangle)]
@@ -1720,7 +2234,7 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_mkdir_core(path: *const c_char, _m
         Facade::set_android_errno(ANDROID_EFAULT);
         return -1;
     };
-    with_active(-1, |facade| facade.reject_path_mutation(path))
+    with_active(-1, |facade| facade.mkdir(path, _mode))
 }
 
 #[unsafe(no_mangle)]
@@ -2056,6 +2570,82 @@ mod tests {
     }
 
     #[test]
+    fn private_data_overlay_persists_and_sendfile_preserves_offset_rules() {
+        let project = File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/../..")).unwrap();
+        let facade = Facade::new(project, b"/", b"/").unwrap();
+        assert_eq!(facade.mkdir(b"/data/cache", 0o755), 0);
+        let input = facade.open(b"/Cargo.toml", O_RDONLY);
+        let output = facade.open(b"/data/cache/copy", O_WRONLY | O_CREAT | O_TRUNC);
+        assert!(input >= 10_000 && output >= 10_000);
+
+        let mut result = SendfileResult::default();
+        let request = SendfileRequest {
+            abi_version: SENDFILE_ABI_VERSION,
+            output_fd: output,
+            input_fd: input,
+            has_explicit_offset: 0,
+            offset: 0,
+            count: 5,
+        };
+        assert_eq!(
+            facade.sendfile_transfer(&request, &mut result),
+            SENDFILE_TRANSFER_OK
+        );
+        assert_eq!(result.transferred, 5);
+        assert_eq!(facade.close(output), 0);
+
+        let persisted = facade.open(b"/data/cache/copy", O_RDONLY);
+        let mut first = [0_u8; 5];
+        assert_eq!(
+            unsafe { facade.read(persisted, first.as_mut_ptr().cast(), 5) },
+            5
+        );
+        assert_eq!(&first, b"[work");
+        assert_eq!(facade.close(persisted), 0);
+
+        let offset_output = facade.open(b"/data/offset", O_WRONLY | O_CREAT | O_TRUNC);
+        let explicit = SendfileRequest {
+            output_fd: offset_output,
+            has_explicit_offset: 1,
+            offset: 1,
+            count: 3,
+            ..request
+        };
+        assert_eq!(
+            facade.sendfile_transfer(&explicit, &mut result),
+            SENDFILE_TRANSFER_OK
+        );
+        assert_eq!((result.transferred, result.next_offset), (3, 4));
+        let current = SendfileRequest {
+            output_fd: offset_output,
+            count: 1,
+            ..request
+        };
+        assert_eq!(
+            facade.sendfile_transfer(&current, &mut result),
+            SENDFILE_TRANSFER_OK
+        );
+        assert_eq!(result.transferred, 1);
+        assert_eq!(facade.close(offset_output), 0);
+        let offset_copy = facade.open(b"/data/offset", O_RDONLY);
+        let mut bytes = [0_u8; 4];
+        assert_eq!(
+            unsafe { facade.read(offset_copy, bytes.as_mut_ptr().cast(), 4) },
+            4
+        );
+        assert_eq!(&bytes, b"wors");
+        assert_eq!(facade.close(offset_copy), 0);
+
+        let truncate = facade.open(b"/data/cache/copy", O_WRONLY | O_TRUNC);
+        assert_eq!(facade.ftruncate(truncate, 2), 0);
+        let mut status = AndroidStat::default();
+        assert_eq!(unsafe { facade.fstat(truncate, &mut status) }, 0);
+        assert_eq!(status.st_size, 2);
+        assert_eq!(facade.close(truncate), 0);
+        assert_eq!(facade.open(b"/Cargo.toml", O_WRONLY | O_TRUNC), -1);
+    }
+
+    #[test]
     fn process_owner_cross_thread_rollback_duplicate_and_quiescent_uninstall() {
         let _serial = PROCESS_TEST_LOCK.lock().unwrap();
         assert_eq!(
@@ -2116,7 +2706,8 @@ mod tests {
         let worker = thread::spawn(|| {
             // SAFETY: static paths and local output records remain live for
             // each call. This pthread has no TLS Activation guard.
-            let fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), O_RDONLY) };
+            let fd =
+                unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), O_RDONLY, 0) };
             assert!(fd >= 10_000);
             let mut bytes = [0_u8; 16];
             assert_eq!(
@@ -2144,7 +2735,7 @@ mod tests {
         );
         assert_eq!(publish_process_facade(facade), PROCESS_OWNER_OK);
         // SAFETY: static path remains live for the call.
-        let fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), O_RDONLY) };
+        let fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), O_RDONLY, 0) };
         let reader = thread::spawn(move || {
             let mut bytes = [0_u8; 32];
             // SAFETY: local output remains writable through the call.
@@ -2172,7 +2763,7 @@ mod tests {
         // New calls fail closed once draining begins; they cannot extend the
         // lifetime being awaited by uninstall.
         assert_eq!(
-            unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), O_RDONLY) },
+            unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), O_RDONLY, 0) },
             -1
         );
         entropy.release();
