@@ -15,6 +15,4 @@
     {"ungetwc", 'B', "FILE-layout-wide-state"},
     {"vfprintf", 'B', "FILE-layout-va_list-format"},
     {"vsscanf", 'B', "va_list-format-long-double"},
-    {"wcstod", 'B', "wide-locale-errno-number"},
-    {"wcstof", 'B', "wide-locale-errno-number"},
     {"wcstold", 'B', "wide-long-double-locale-errno"},

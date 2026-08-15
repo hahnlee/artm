@@ -15,6 +15,4 @@
     "ungetwc",
     "vfprintf",
     "vsscanf",
-    "wcstod",
-    "wcstof",
     "wcstold",

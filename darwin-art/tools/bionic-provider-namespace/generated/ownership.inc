@@ -129,6 +129,8 @@
     {"libc.so", "wcscoll_l", "LIBC", DARWIN_ART_BIONIC_PROVIDER_LOCALE},
     {"libc.so", "wcslen", "LIBC", DARWIN_ART_BIONIC_PROVIDER_LEAF},
     {"libc.so", "wcsnrtombs", "LIBC", DARWIN_ART_BIONIC_PROVIDER_LOCALE},
+    {"libc.so", "wcstod", "LIBC", DARWIN_ART_BIONIC_PROVIDER_WIDE_FLOAT},
+    {"libc.so", "wcstof", "LIBC", DARWIN_ART_BIONIC_PROVIDER_WIDE_FLOAT},
     {"libc.so", "wcstol", "LIBC", DARWIN_ART_BIONIC_PROVIDER_WIDE_INTEGER},
     {"libc.so", "wcstoll", "LIBC", DARWIN_ART_BIONIC_PROVIDER_WIDE_INTEGER},
     {"libc.so", "wcstoul", "LIBC", DARWIN_ART_BIONIC_PROVIDER_WIDE_INTEGER},

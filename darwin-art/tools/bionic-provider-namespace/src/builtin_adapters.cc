@@ -25,6 +25,8 @@ extern "C" SymbolFunction darwin_art_bionic_format_resolve(const char *);
 extern "C" SymbolFunction darwin_art_bionic_strerror_resolve(const char *);
 extern "C" void *darwin_art_bionic_wide_integer_resolve(
     const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_wide_float_resolve(
+    const char *, const char *, const char *);
 extern "C" void *darwin_art_bionic_abort_resolve(const char *, const char *,
                                                   const char *);
 extern "C" uintptr_t darwin_art_liblog_provider_resolve(const char *,
@@ -90,6 +92,11 @@ uintptr_t WideInteger(void *, const char *soname, const char *symbol,
   return reinterpret_cast<uintptr_t>(
       darwin_art_bionic_wide_integer_resolve(soname, symbol, version));
 }
+uintptr_t WideFloat(void *, const char *soname, const char *symbol,
+                    const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_wide_float_resolve(soname, symbol, version));
+}
 uintptr_t Abort(void *, const char *soname, const char *symbol,
                 const char *version) {
   return reinterpret_cast<uintptr_t>(
@@ -107,7 +114,7 @@ constexpr DarwinArtBionicProviderResolve kResolvers[] = {
     Leaf,    Allocator,       Errno,  Filesystem,   Time,
     Pthread, ProcessState,    Phdr,   Stdio,        Locale,
     Numeric, FloatConversion, Format, Strerror, WideInteger, Abort,
-    Liblog,  DsoLifecycle,
+    Liblog,  DsoLifecycle, WideFloat,
 };
 static_assert(sizeof(kResolvers) / sizeof(kResolvers[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);

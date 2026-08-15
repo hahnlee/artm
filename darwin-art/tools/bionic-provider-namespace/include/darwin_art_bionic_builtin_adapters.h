@@ -12,7 +12,7 @@ typedef struct DarwinArtBionicProviderReleaseHooks {
   DarwinArtBionicProviderRelease release[DARWIN_ART_BIONIC_PROVIDER_COUNT];
 } DarwinArtBionicProviderReleaseHooks;
 
-/* Binds adapters for the existing thirteen provider resolver entrypoints.
+/* Binds adapters for all generated provider resolver entrypoints.
  * Linking this object intentionally requires every standalone provider. */
 DarwinArtBionicNamespaceStatus darwin_art_bionic_namespace_bind_builtins(
     DarwinArtBionicNamespace *namespace_instance,

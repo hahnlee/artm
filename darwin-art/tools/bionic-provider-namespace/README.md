@@ -2,20 +2,21 @@
 
 This integration seam composes the standalone Bionic providers into one exact
 SONAME/symbol/version namespace without modifying their implementations. The
-generated ownership table covers 140 of the pinned NDK r28c API-35 arm64
+generated ownership table covers 142 of the pinned NDK r28c API-35 arm64
 `libc++_shared.so`'s 160 libc-family `@LIBC` imports and all 18
-unversioned `liblog.so` exports. The other 20 libc imports remain explicit in
+unversioned `liblog.so` exports. The other 18 libc imports remain explicit in
 `generated/unsupported-libc.tsv`; they are capability errors, not candidates
 for a Darwin symbol with the same name.
 
 The owners are leaf, allocator, Bionic errno TLS, filesystem, time, pthread,
 immutable process state, loader program headers, stdio, locale/ICU, integer
-numeric parsing, AOSP gdtoa float conversion, wide integer conversion, Bionic
-abort/message state, liblog, and DSO lifecycle.
+numeric parsing, AOSP gdtoa float conversion, wide integer conversion,
+ICU/AOSP-gdtoa wide floating conversion, Bionic abort/message state, liblog,
+and DSO lifecycle.
 `generate_manifests.py` derives the
 table directly from those provider manifests and the canonical 160-import
 classification. It refuses a duplicate owner or a symbol outside that pinned
-universe. 139 imports are owned by `libc.so`; loader-owned
+universe. 141 imports are owned by `libc.so`; loader-owned
 `dl_iterate_phdr` is owned by `libdl.so`, matching that provider's actual
 contract and libc++'s `DT_NEEDED`. Both accept only `LIBC`; `liblog.so` accepts
 only an absent or empty version.
@@ -38,7 +39,7 @@ resolution is still admitted; release hooks only drop provider-owned host
 state. Bionic errno is deliberately released last.
 
 Provider APIs have several resolver signatures, so `builtin_adapters.cc`
-supplies typed adapters and intentionally leaves exactly eighteen resolver
+supplies typed adapters and intentionally leaves exactly nineteen resolver
 entrypoints undefined until the embedding binary links every provider. The
 runtime provider closure now supplies those definitions, and ART's ELF graph
 resolver binds and seals this namespace before mapping guest code. Optional
@@ -49,9 +50,9 @@ after namespace composition.
 
 Run `tools/bionic-provider-namespace/audit.sh`. It regenerates and diffs every
 table, re-derives all 160 libc imports from the hash-pinned real NDK ELF,
-checks 158 unique `(SONAME, symbol)` owners and all 20 unsupported libc
+checks 160 unique `(SONAME, symbol)` routes and all 18 unsupported libc
 imports, rejects wrong SONAMEs and versions, performs 12-thread lookup stress,
-routes all 158 entries through the typed adapters with exact per-provider
+routes all 160 entries through the typed adapters with exact per-provider
 counts (including the distinct `libdl.so` contract),
 proves teardown waits for a blocked resolver and releases every provider once
 in order, scans for host-loader escape hatches, and repeats the C++ boundary

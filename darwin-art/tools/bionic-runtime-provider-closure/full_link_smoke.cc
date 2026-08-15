@@ -51,7 +51,7 @@ int main() {
   }
   darwin_art_bionic_namespace_destroy(instance);
   std::fprintf(stderr,
-               "bionic-runtime-provider-closure: PASS bind_builtins=18 "
-               "routes=158 actual-resolvers=yes\n");
+               "bionic-runtime-provider-closure: PASS bind_builtins=19 "
+               "routes=160 actual-resolvers=yes\n");
   return 0;
 }

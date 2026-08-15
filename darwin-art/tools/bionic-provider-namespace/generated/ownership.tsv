@@ -130,6 +130,8 @@ libc.so	wcrtomb	LIBC	locale
 libc.so	wcscoll_l	LIBC	locale
 libc.so	wcslen	LIBC	leaf
 libc.so	wcsnrtombs	LIBC	locale
+libc.so	wcstod	LIBC	wide-float
+libc.so	wcstof	LIBC	wide-float
 libc.so	wcstol	LIBC	wide-integer
 libc.so	wcstoll	LIBC	wide-integer
 libc.so	wcstoul	LIBC	wide-integer
