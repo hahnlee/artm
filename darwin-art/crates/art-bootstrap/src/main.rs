@@ -3928,139 +3928,19 @@ fn materialize_api36_core_icu4j(root: &Path) -> Result<PathBuf> {
 }
 
 fn prepare_icu_runtime_bootclasspath(root: &Path) -> Result<PathBuf> {
-    let api36_source = materialize_api36_core_icu4j(root)?;
-    if api36_source.is_file() {
-        run_command(
-            Command::new("bash")
-                .arg(root.join("tools/audit-android16-core-icu4j-runtime.sh"))
-                .arg(&api36_source),
-        )?;
-        let output = root.join("_build/bootclasspath/core-icu4j-api36.jar");
-        if let Some(parent) = output.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(&api36_source, &output)?;
-        return Ok(output);
-    }
-
-    let source_lock = read_lock(root)?;
-    let apex = root.join("_prebuilt/android-16/i18n/com.android.i18n-arm64.apex");
-    if !apex.is_file() {
-        return Err(format!(
-            "{} is missing; run `art-bootstrap sync` first",
-            apex.display()
-        )
-        .into());
-    }
-    verify_sha256(&apex, lock_value(&source_lock, "I18N_ARM64_APEX_SHA256")?)?;
-
-    let build_dir = root.join("_build/bootclasspath/core-icu4j-apex");
-    let extracted = root.join("_build/bootclasspath/core-icu4j-apex.jar");
-    let classes_dir = build_dir.join("runtime-bridge-classes");
-    let bridge_jar = build_dir.join("runtime-bridge.jar");
-    let output = root.join("_build/bootclasspath/core-icu4j-apex-reconciled.jar");
-    fs::create_dir_all(&build_dir)?;
-    if !extracted.is_file() {
-        run_command(
-            Command::new("cargo")
-                .args(["run", "--quiet", "--manifest-path"])
-                .arg(root.join("tools/apex-ext2-extract/Cargo.toml"))
-                .arg("--")
-                .arg(&apex)
-                .arg(&extracted),
-        )?;
-    }
-    verify_sha256(
-        &extracted,
-        lock_value(&source_lock, "I18N_CORE_ICU4J_SHA256")?,
-    )?;
-    let bridge_sources = [
-        (
-            root.join("_aosp/external/icu-runtime-bridge/com/android/i18n/util/ATrace.java"),
-            "ICU_ATRACE_JAVA_SHA256",
-        ),
-        (
-            root.join(
-                "_aosp/external/icu-runtime-bridge/com/android/icu/util/UResourceBundleNative.java",
-            ),
-            "ICU_URESOURCE_BUNDLE_NATIVE_JAVA_SHA256",
-        ),
-    ];
-    for (source, key) in &bridge_sources {
-        if !source.is_file() {
-            return Err(format!(
-                "{} is missing; run `art-bootstrap sync` first",
-                source.display()
-            )
-            .into());
-        }
-        verify_sha256(source, lock_value(&source_lock, key)?)?;
-    }
-    if !output.is_file() {
-        fs::create_dir_all(&classes_dir)?;
-        let mut javac = Command::new("javac");
-        javac.args(["--release", "17", "-d"]).arg(&classes_dir);
-        for (source, _) in &bridge_sources {
-            javac.arg(source);
-        }
-        run_command(&mut javac)?;
-        run_command(
-            Command::new("jar")
-                .args(["cf"])
-                .arg(&bridge_jar)
-                .arg("-C")
-                .arg(&classes_dir)
-                .arg("."),
-        )?;
-        run_command(
-            Command::new(find_d8()?)
-                .args(["--min-api", "36", "--output"])
-                .arg(&output)
-                .arg(&extracted)
-                .arg(&bridge_jar),
-        )?;
-    }
+    let source = materialize_api36_core_icu4j(root)?;
     run_command(
-        Command::new("unzip")
-            .args(["-o", "-q"])
-            .arg(&output)
-            .arg("classes.dex")
-            .arg("-d")
-            .arg(&build_dir),
+        Command::new("bash")
+            .arg(root.join("tools/audit-android16-core-icu4j-runtime.sh"))
+            .arg(&source),
     )?;
-    let dex = build_dir.join("classes.dex");
-    let dexdump = find_d8()?.with_file_name("dexdump");
-    let class_inventory = command_output(Command::new(&dexdump).args(["-l", "plain"]).arg(&dex))?;
-    for registrar_target in [
-        "Lcom/android/icu/text/TimeZoneNamesNative;",
-        "Lcom/android/i18n/timezone/internal/Memory;",
-        "Lcom/android/i18n/util/ATrace;",
-        "Lcom/android/i18n/util/Log;",
-        "Lcom/android/icu/util/CaseMapperNative;",
-        "Lcom/android/icu/util/Icu4cMetadata;",
-        "Lcom/android/icu/util/LocaleNative;",
-        "Lcom/android/icu/util/UResourceBundleNative;",
-        "Lcom/android/icu/util/regex/PatternNative;",
-        "Lcom/android/icu/util/regex/MatcherNative;",
-        "Lcom/android/icu/charset/NativeConverter;",
-    ] {
-        let descriptor = format!("Class descriptor  : '{registrar_target}'");
-        if !class_inventory.contains(&descriptor) {
-            return Err(
-                format!("runtime core-icu4j lacks registrar target {registrar_target}").into(),
-            );
-        }
+    let output = root.join("_build/bootclasspath/core-icu4j-api36.jar");
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)?;
     }
-    let probe = root.join("_build/dex-probe/dex-probe");
-    let summary = command_output(Command::new(&probe).arg("--summary").arg(&dex))?;
-    let expected = "AOSP DEX: verified=yes version=39 classes=1795 methods=16316 \
-                    class[0]=Landroid/icu/impl/Assert;";
-    if summary.trim() != expected {
-        return Err(format!("unexpected runtime core-icu4j DEX summary: {summary:?}").into());
-    }
+    fs::copy(source, &output)?;
     Ok(output)
 }
-
 fn find_ndk_headers() -> Result<(PathBuf, PathBuf)> {
     let mut ndk_roots = Vec::new();
     for variable in ["ANDROID_NDK_HOME", "ANDROID_NDK_ROOT"] {
