@@ -87,7 +87,7 @@ fn print_help() {
     println!("  build-interpreter-core  compile ART's C++ interpreter implementation");
     println!("  build-runtime-bootstrap  compile ART Runtime initialization for Darwin");
     println!("  audit-runtime-link  measure the remaining Runtime::Create link closure");
-    println!("  probe-runtime-dex  execute Hello.answer() from DEX in ART's interpreter");
+    println!("  probe-runtime-dex  launch Java main(String[]) with Android stdout");
     println!("  verify-bootclasspath  verify extracted Android 16 core DEX files");
     println!("  all        run every check and probe");
 }
@@ -110,6 +110,15 @@ fn doctor() -> Result<()> {
 
     if page_size != 16 * 1024 {
         return Err(format!("expected a 16 KiB page size, found {page_size}").into());
+    }
+    for dependency in [
+        "/opt/homebrew/opt/icu4c@78/include/unicode/ucnv.h",
+        "/opt/homebrew/opt/icu4c@78/lib/libicui18n.dylib",
+        "/opt/homebrew/opt/icu4c@78/lib/libicuuc.dylib",
+    ] {
+        if !Path::new(dependency).is_file() {
+            return Err(format!("Homebrew icu4c@78 dependency is missing: {dependency}").into());
+        }
     }
 
     let clang = command_output(Command::new("clang").arg("--version"))?;
@@ -329,6 +338,14 @@ fn sync_sources(root: &Path) -> Result<()> {
         "Android.bp",
         lock_value(&lock, "LIBZIPARCHIVE_ANDROID_BP_SHA256")?,
     )?;
+    materialize_file(
+        root,
+        "platform/prebuilts/runtime",
+        lock_value(&lock, "RUNTIME_PREBUILTS_REVISION")?,
+        "mainline/i18n/sdk/java/core-icu4j.jar",
+        "_prebuilt/android-16/bootclasspath/core-icu4j.jar",
+        lock_value(&lock, "CORE_ICU4J_SHA256")?,
+    )?;
     Ok(())
 }
 
@@ -382,6 +399,7 @@ fn materialize_file(
     fs::create_dir_all(parent)?;
     fs::write(&destination, decoded.stdout)?;
     verify_sha256(&destination, expected_sha)?;
+    fs::remove_file(&encoded)?;
     println!(
         "sync: materialized locked file at {}",
         destination.display()
@@ -814,7 +832,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     run_command(
         Command::new("javac")
-            .args(["--release", "8", "-d"])
+            .args(["--release", "8", "-encoding", "UTF-8", "-d"])
             .arg(&class_dir)
             .arg(root.join("probes/Hello.java")),
     )?;
@@ -892,7 +910,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=1 methods=7 class[0]=Ldev/darwinart/probe/Hello;";
+    let expected = "AOSP DEX: verified=yes version=35 classes=1 methods=9 class[0]=Ldev/darwinart/probe/Hello;";
     if output.trim() != expected {
         return Err(format!("unexpected DEX probe output: {output:?}").into());
     }
@@ -1687,6 +1705,7 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         nativehelper_headers.as_path(),
         nativehelper_platform_headers.as_path(),
         dlmalloc.as_path(),
+        Path::new("/opt/homebrew/opt/icu4c@78/include"),
         Path::new("/opt/homebrew/include"),
     ];
     let sources = [
@@ -2004,6 +2023,7 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         objects.push(profile_object);
     }
     for adapter_source in [
+        "darwin_icu_natives.cc",
         "darwin_libcore_natives.cc",
         "darwin_runtime_adapters.cc",
         "darwin_sigchain.cc",
@@ -2165,7 +2185,17 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(root.join("_build/foundation/libartbase-darwin.a"))
         .arg(root.join("_build/foundation/libandroid-base-darwin.a"))
         .arg(root.join("_build/foundation/libziparchive-darwin.a"))
-        .args(["-L/opt/homebrew/lib", "-lfmt", "-llz4", "-lz", "-o"])
+        .args([
+            "-L/opt/homebrew/lib",
+            "-L/opt/homebrew/opt/icu4c@78/lib",
+            "-lfmt",
+            "-llz4",
+            "-licui18n",
+            "-licuuc",
+            "-licudata",
+            "-lz",
+            "-o",
+        ])
         .arg(&executable);
     let description = describe_command(&linker);
     let output = linker.output()?;
@@ -2220,11 +2250,19 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
 }
 
 fn probe_runtime_dex(root: &Path) -> Result<()> {
+    prepare_icu_bootclasspath(root)?;
     let executable = root.join("_build/runtime-link-probe/runtime-link-probe");
     let core_oj = root.join("_prebuilt/android-16/bootclasspath/core-oj.jar");
     let core_libart = root.join("_prebuilt/android-16/bootclasspath/core-libart.jar");
+    let core_icu4j = root.join("_build/bootclasspath/core-icu4j.jar");
     let classes_dex = root.join("_build/dex-probe/dex/classes.dex");
-    for input in [&executable, &core_oj, &core_libart, &classes_dex] {
+    for input in [
+        &executable,
+        &core_oj,
+        &core_libart,
+        &core_icu4j,
+        &classes_dex,
+    ] {
         if !input.is_file() {
             return Err(format!(
                 "runtime DEX probe input is missing: {}; run `art-bootstrap all` first",
@@ -2238,17 +2276,68 @@ fn probe_runtime_dex(root: &Path) -> Result<()> {
         Command::new(&executable)
             .arg(&core_oj)
             .arg(&core_libart)
+            .arg(&core_icu4j)
             .arg(&classes_dex),
     )?;
-    let expected = "ART Darwin Runtime::Create: ok\n\
+    let expected = "Hello from Darwin ART main: 안녕\n\
+                    ART Darwin Runtime::Create: ok\n\
                     ART Darwin app ClassLoader: PathClassLoader\n\
                     ART Darwin DEX interpreter: Hello.answer()=42\n\
                     ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
-                    ART runtime native: System.arraycopy()=42";
+                    ART runtime native: System.arraycopy()=42\n\
+                    ART Darwin launcher: main(String[])=ok";
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
-    println!("probe-runtime-dex: PathClassLoader -> System init -> AOSP System.arraycopy()=42");
+    println!("probe-runtime-dex: main(String[]) -> Android PrintStream/ICU -> Darwin write(2)");
+    Ok(())
+}
+
+fn prepare_icu_bootclasspath(root: &Path) -> Result<()> {
+    let source_lock = read_lock(root)?;
+    let source = root.join("_prebuilt/android-16/bootclasspath/core-icu4j.jar");
+    if !source.is_file() {
+        return Err(format!(
+            "{} is missing; run `art-bootstrap sync` first",
+            source.display()
+        )
+        .into());
+    }
+    verify_sha256(&source, lock_value(&source_lock, "CORE_ICU4J_SHA256")?)?;
+
+    let build_dir = root.join("_build/bootclasspath/core-icu4j");
+    let output = root.join("_build/bootclasspath/core-icu4j.jar");
+    fs::create_dir_all(&build_dir)?;
+    if !output.is_file() {
+        run_command(
+            Command::new(find_d8()?)
+                .args(["--min-api", "36", "--output"])
+                .arg(&output)
+                .arg(&source),
+        )?;
+    }
+    run_command(
+        Command::new("unzip")
+            .args(["-o", "-q"])
+            .arg(&output)
+            .arg("classes.dex")
+            .arg("-d")
+            .arg(&build_dir),
+    )?;
+    let probe = root.join("_build/dex-probe/dex-probe");
+    if !probe.is_file() {
+        return Err("DEX probe is missing; run `build-dex` first".into());
+    }
+    let summary = command_output(
+        Command::new(&probe)
+            .arg("--summary")
+            .arg(build_dir.join("classes.dex")),
+    )?;
+    let expected = "AOSP DEX: verified=yes version=39 classes=1596 methods=14990 \
+                    class[0]=Landroid/icu/impl/Assert;";
+    if summary.trim() != expected {
+        return Err(format!("unexpected core-icu4j DEX summary: {summary:?}").into());
+    }
     Ok(())
 }
 
@@ -2352,6 +2441,16 @@ fn verify_bootclasspath(root: &Path) -> Result<()> {
         }
         println!("verify-bootclasspath: {name} {}", output.trim());
     }
+    let icu_source = prebuilt.join("core-icu4j.jar");
+    let expected_icu_size: u64 = lock_value(&manifest, "CORE_ICU4J_SOURCE_SIZE")?.parse()?;
+    if fs::metadata(&icu_source)?.len() != expected_icu_size {
+        return Err(format!("size mismatch for {}", icu_source.display()).into());
+    }
+    prepare_icu_bootclasspath(root)?;
+    println!(
+        "verify-bootclasspath: core-icu4j AOSP DEX: verified=yes version=39 \
+         classes=1596 methods=14990 class[0]=Landroid/icu/impl/Assert;"
+    );
     Ok(())
 }
 

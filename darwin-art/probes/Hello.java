@@ -3,6 +3,10 @@ package dev.darwinart.probe;
 public final class Hello {
     public static native int hostPageSize();
 
+    public static void main(String[] args) {
+        System.out.println(args[0]);
+    }
+
     public static int answer() {
         return 42;
     }

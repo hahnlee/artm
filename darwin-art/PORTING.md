@@ -53,17 +53,25 @@
 - [x] Compile and register ART's complete runtime-native source table.
 - [x] Run early root class initialization and initialize ART intrinsics in the
       Darwin minimal-start path.
+- [x] Initialize ART's main `ThreadGroup`/`Thread` peer without starting daemon
+      services, enabling `ThreadLocal` and Android `BlockGuard` paths.
 
 ## G3 — Android-facing runtime
 
 - [x] Extract and verify matching Android 16 core-oj/core-libart DEX inputs.
-- [x] Load the verified core-oj/core-libart DEX files into `ClassLinker`.
+- [x] Fetch the locked Android 16 `core-icu4j` class JAR without Git history,
+      convert it to DEX locally, and verify it with AOSP `DexFileVerifier`.
+- [x] Load the verified core-oj/core-libart/core-icu4j DEX files into
+      `ClassLinker`.
 - [x] Load a generated app DEX into its own `PathClassLoader` and execute it.
 - [x] Add the first explicit Java/JNI native method (`hostPageSize`).
 - [x] Initialize `java.lang.System` with a Darwin subset of libcore natives for
       primitive bit conversion, `sysconf`, user/environment/`uname`, ICU
       metadata, special properties, and standard file descriptors.
 - [x] Execute AOSP's native `System.arraycopy()` from interpreted app DEX.
+- [x] Invoke an app's conventional `public static void main(String[])` via JNI.
+- [x] Route Android `System.out.println` through `PrintStream`, Android
+      `CharsetICU`, host ICU4C conversion, `IoBridge`, and Darwin `write(2)`.
 - [ ] Register the minimal libcore native method set needed by ordinary Java
       startup without loading Android `.so` libraries.
 - [ ] Launch a minimal `Activity` compatibility class.

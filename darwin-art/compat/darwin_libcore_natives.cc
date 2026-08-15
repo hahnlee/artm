@@ -1,18 +1,24 @@
 #include "darwin_libcore_natives.h"
 
-#include <bit>
-#include <cstdlib>
-#include <cstdint>
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
 #include <pwd.h>
-#include <string>
-#include <sys/utsname.h>
 #include <sys/socket.h>
+#include <sys/utsname.h>
+#include <unicode/uchar.h>
+#include <unicode/ulocdata.h>
+#include <unicode/uversion.h>
 #include <unistd.h>
-#include <vector>
 #include <zlib.h>
+
+#include <bit>
+#include <cerrno>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -33,7 +39,8 @@ jdouble LongBitsToDouble(JNIEnv*, jclass, jlong bits) {
 }
 
 void OsConstantsInitConstants(JNIEnv* env, jclass klass) {
-  jfieldID processors = env->GetStaticFieldID(klass, "_SC_NPROCESSORS_CONF", "I");
+  jfieldID processors =
+      env->GetStaticFieldID(klass, "_SC_NPROCESSORS_CONF", "I");
   if (processors != nullptr) {
     env->SetStaticIntField(klass, processors, _SC_NPROCESSORS_CONF);
   }
@@ -61,17 +68,17 @@ jint LinuxNativeGettid() {
   return pthread_threadid_np(nullptr, &tid) == 0 ? static_cast<jint>(tid) : -1;
 }
 
-jint LinuxNativeGetuid() {
-  return static_cast<jint>(getuid());
-}
+jint LinuxNativeGetuid() { return static_cast<jint>(getuid()); }
 
 jobject LinuxGetpwuid(JNIEnv* env, jobject, jint uid) {
   long configured_size = sysconf(_SC_GETPW_R_SIZE_MAX);
-  std::size_t buffer_size = configured_size > 0 ? static_cast<std::size_t>(configured_size) : 16384;
+  std::size_t buffer_size =
+      configured_size > 0 ? static_cast<std::size_t>(configured_size) : 16384;
   std::vector<char> buffer(buffer_size);
   passwd entry{};
   passwd* result = nullptr;
-  if (getpwuid_r(static_cast<uid_t>(uid), &entry, buffer.data(), buffer.size(), &result) != 0 ||
+  if (getpwuid_r(static_cast<uid_t>(uid), &entry, buffer.data(), buffer.size(),
+                 &result) != 0 ||
       result == nullptr) {
     return nullptr;
   }
@@ -81,23 +88,21 @@ jobject LinuxGetpwuid(JNIEnv* env, jobject, jint uid) {
     return nullptr;
   }
   jmethodID constructor = env->GetMethodID(
-      struct_passwd,
-      "<init>",
+      struct_passwd, "<init>",
       "(Ljava/lang/String;IILjava/lang/String;Ljava/lang/String;)V");
   if (constructor == nullptr) {
     env->DeleteLocalRef(struct_passwd);
     return nullptr;
   }
-  jstring name = env->NewStringUTF(entry.pw_name == nullptr ? "" : entry.pw_name);
-  jstring directory = env->NewStringUTF(entry.pw_dir == nullptr ? "" : entry.pw_dir);
-  jstring shell = env->NewStringUTF(entry.pw_shell == nullptr ? "" : entry.pw_shell);
-  jobject value = env->NewObject(struct_passwd,
-                                 constructor,
-                                 name,
-                                 static_cast<jint>(entry.pw_uid),
-                                 static_cast<jint>(entry.pw_gid),
-                                 directory,
-                                 shell);
+  jstring name =
+      env->NewStringUTF(entry.pw_name == nullptr ? "" : entry.pw_name);
+  jstring directory =
+      env->NewStringUTF(entry.pw_dir == nullptr ? "" : entry.pw_dir);
+  jstring shell =
+      env->NewStringUTF(entry.pw_shell == nullptr ? "" : entry.pw_shell);
+  jobject value = env->NewObject(
+      struct_passwd, constructor, name, static_cast<jint>(entry.pw_uid),
+      static_cast<jint>(entry.pw_gid), directory, shell);
   env->DeleteLocalRef(name);
   env->DeleteLocalRef(directory);
   env->DeleteLocalRef(shell);
@@ -114,10 +119,10 @@ jobject LinuxUname(JNIEnv* env, jobject) {
   if (struct_utsname == nullptr) {
     return nullptr;
   }
-  jmethodID constructor = env->GetMethodID(
-      struct_utsname,
-      "<init>",
-      "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+  jmethodID constructor =
+      env->GetMethodID(struct_utsname, "<init>",
+                       "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/"
+                       "String;Ljava/lang/String;Ljava/lang/String;)V");
   if (constructor == nullptr) {
     env->DeleteLocalRef(struct_utsname);
     return nullptr;
@@ -129,8 +134,8 @@ jobject LinuxUname(JNIEnv* env, jobject) {
   jstring release = env->NewStringUTF(host.release);
   jstring version = env->NewStringUTF(host.version);
   jstring machine = env->NewStringUTF("aarch64");
-  jobject value =
-      env->NewObject(struct_utsname, constructor, sysname, nodename, release, version, machine);
+  jobject value = env->NewObject(struct_utsname, constructor, sysname, nodename,
+                                 release, version, machine);
   env->DeleteLocalRef(sysname);
   env->DeleteLocalRef(nodename);
   env->DeleteLocalRef(release);
@@ -140,16 +145,84 @@ jobject LinuxUname(JNIEnv* env, jobject) {
   return value;
 }
 
+jint LinuxWriteBytes(JNIEnv* env, jobject, jobject file_descriptor,
+                     jobject buffer, jint offset, jint byte_count) {
+  if (file_descriptor == nullptr || buffer == nullptr || offset < 0 ||
+      byte_count < 0) {
+    return -1;
+  }
+  jclass descriptor_class = env->GetObjectClass(file_descriptor);
+  jfieldID descriptor_field =
+      env->GetFieldID(descriptor_class, "descriptor", "I");
+  const jint descriptor =
+      descriptor_field == nullptr
+          ? -1
+          : env->GetIntField(file_descriptor, descriptor_field);
+  env->DeleteLocalRef(descriptor_class);
+  if (descriptor < 0) {
+    return -1;
+  }
+
+  const void* bytes = nullptr;
+  jbyteArray byte_array = nullptr;
+  jbyte* array_elements = nullptr;
+  jclass byte_array_class = env->FindClass("[B");
+  if (byte_array_class != nullptr &&
+      env->IsInstanceOf(buffer, byte_array_class)) {
+    byte_array = reinterpret_cast<jbyteArray>(buffer);
+    const jsize length = env->GetArrayLength(byte_array);
+    if (offset > length || byte_count > length - offset) {
+      env->DeleteLocalRef(byte_array_class);
+      return -1;
+    }
+    array_elements = env->GetByteArrayElements(byte_array, nullptr);
+    bytes = array_elements == nullptr ? nullptr : array_elements + offset;
+  } else {
+    void* direct = env->GetDirectBufferAddress(buffer);
+    const jlong capacity = env->GetDirectBufferCapacity(buffer);
+    if (direct != nullptr && offset <= capacity &&
+        byte_count <= capacity - offset) {
+      bytes = static_cast<const std::byte*>(direct) + offset;
+    }
+  }
+  env->DeleteLocalRef(byte_array_class);
+  if (bytes == nullptr) {
+    return -1;
+  }
+
+  ssize_t written;
+  do {
+    written = write(descriptor, bytes, static_cast<std::size_t>(byte_count));
+  } while (written < 0 && errno == EINTR);
+  if (array_elements != nullptr) {
+    env->ReleaseByteArrayElements(byte_array, array_elements, JNI_ABORT);
+  }
+  return written < 0 ? -1 : static_cast<jint>(written);
+}
+
+jstring IcuVersionString(JNIEnv* env, const UVersionInfo version) {
+  char text[U_MAX_VERSION_STRING_LENGTH];
+  u_versionToString(version, text);
+  return env->NewStringUTF(text);
+}
+
 jstring IcuGetIcuVersion(JNIEnv* env, jclass) {
-  return env->NewStringUTF("76.1");
+  UVersionInfo version;
+  u_getVersion(version);
+  return IcuVersionString(env, version);
 }
 
 jstring IcuGetUnicodeVersion(JNIEnv* env, jclass) {
-  return env->NewStringUTF("16.0");
+  UVersionInfo version;
+  u_getUnicodeVersion(version);
+  return IcuVersionString(env, version);
 }
 
 jstring IcuGetCldrVersion(JNIEnv* env, jclass) {
-  return env->NewStringUTF("46");
+  UVersionInfo version;
+  UErrorCode status = U_ZERO_ERROR;
+  ulocdata_getCLDRVersion(version, &status);
+  return U_SUCCESS(status) ? IcuVersionString(env, version) : nullptr;
 }
 
 jobjectArray SystemSpecialProperties(JNIEnv* env, jclass) {
@@ -170,7 +243,8 @@ jobjectArray SystemSpecialProperties(JNIEnv* env, jclass) {
       std::string("user.dir=") + (directory == nullptr ? "/" : directory),
       std::string("android.zlib.version=") + ZLIB_VERSION,
       "android.openssl.version=Darwin Security.framework",
-      std::string("java.library.path=") + (library_path == nullptr ? "" : library_path),
+      std::string("java.library.path=") +
+          (library_path == nullptr ? "" : library_path),
   };
   for (jsize index = 0; index < 4; ++index) {
     jstring value = env->NewStringUTF(values[index].c_str());
@@ -194,19 +268,19 @@ jboolean FileDescriptorGetAppend(jint descriptor) {
 jboolean FileDescriptorIsSocket(jint descriptor) {
   int socket_type = 0;
   socklen_t length = sizeof(socket_type);
-  return getsockopt(descriptor, SOL_SOCKET, SO_TYPE, &socket_type, &length) == 0 ? JNI_TRUE
-                                                                               : JNI_FALSE;
+  return getsockopt(descriptor, SOL_SOCKET, SO_TYPE, &socket_type, &length) == 0
+             ? JNI_TRUE
+             : JNI_FALSE;
 }
 
-bool Register(JNIEnv* env,
-              const char* class_name,
-              const JNINativeMethod* methods,
-              jint method_count) {
+bool Register(JNIEnv* env, const char* class_name,
+              const JNINativeMethod* methods, jint method_count) {
   jclass klass = env->FindClass(class_name);
   if (klass == nullptr) {
     return false;
   }
-  const bool registered = env->RegisterNatives(klass, methods, method_count) == JNI_OK;
+  const bool registered =
+      env->RegisterNatives(klass, methods, method_count) == JNI_OK;
   env->DeleteLocalRef(klass);
   return registered;
 }
@@ -217,24 +291,19 @@ namespace darwin_art {
 
 bool RegisterLibcoreNatives(JNIEnv* env) {
   JNINativeMethod float_methods[] = {
-      {const_cast<char*>("floatToRawIntBits"),
-       const_cast<char*>("(F)I"),
+      {const_cast<char*>("floatToRawIntBits"), const_cast<char*>("(F)I"),
        reinterpret_cast<void*>(&FloatToRawIntBits)},
-      {const_cast<char*>("intBitsToFloat"),
-       const_cast<char*>("(I)F"),
+      {const_cast<char*>("intBitsToFloat"), const_cast<char*>("(I)F"),
        reinterpret_cast<void*>(&IntBitsToFloat)},
   };
   JNINativeMethod double_methods[] = {
-      {const_cast<char*>("doubleToRawLongBits"),
-       const_cast<char*>("(D)J"),
+      {const_cast<char*>("doubleToRawLongBits"), const_cast<char*>("(D)J"),
        reinterpret_cast<void*>(&DoubleToRawLongBits)},
-      {const_cast<char*>("longBitsToDouble"),
-       const_cast<char*>("(J)D"),
+      {const_cast<char*>("longBitsToDouble"), const_cast<char*>("(J)D"),
        reinterpret_cast<void*>(&LongBitsToDouble)},
   };
   JNINativeMethod os_constants_methods[] = {
-      {const_cast<char*>("initConstants"),
-       const_cast<char*>("()V"),
+      {const_cast<char*>("initConstants"), const_cast<char*>("()V"),
        reinterpret_cast<void*>(&OsConstantsInitConstants)},
   };
   JNINativeMethod linux_methods[] = {
@@ -244,18 +313,18 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
       {const_cast<char*>("getpwuid"),
        const_cast<char*>("(I)Landroid/system/StructPasswd;"),
        reinterpret_cast<void*>(&LinuxGetpwuid)},
-      {const_cast<char*>("nativeGettid"),
-       const_cast<char*>("()I"),
+      {const_cast<char*>("nativeGettid"), const_cast<char*>("()I"),
        reinterpret_cast<void*>(&LinuxNativeGettid)},
-      {const_cast<char*>("nativeGetuid"),
-       const_cast<char*>("()I"),
+      {const_cast<char*>("nativeGetuid"), const_cast<char*>("()I"),
        reinterpret_cast<void*>(&LinuxNativeGetuid)},
-      {const_cast<char*>("sysconf"),
-       const_cast<char*>("(I)J"),
+      {const_cast<char*>("sysconf"), const_cast<char*>("(I)J"),
        reinterpret_cast<void*>(&LinuxSysconf)},
       {const_cast<char*>("uname"),
        const_cast<char*>("()Landroid/system/StructUtsname;"),
        reinterpret_cast<void*>(&LinuxUname)},
+      {const_cast<char*>("writeBytes"),
+       const_cast<char*>("(Ljava/io/FileDescriptor;Ljava/lang/Object;II)I"),
+       reinterpret_cast<void*>(&LinuxWriteBytes)},
   };
   JNINativeMethod icu_methods[] = {
       {const_cast<char*>("getIcuVersion"),
@@ -274,17 +343,15 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&SystemSpecialProperties)},
   };
   JNINativeMethod file_descriptor_methods[] = {
-      {const_cast<char*>("getAppend"),
-       const_cast<char*>("(I)Z"),
+      {const_cast<char*>("getAppend"), const_cast<char*>("(I)Z"),
        reinterpret_cast<void*>(&FileDescriptorGetAppend)},
-      {const_cast<char*>("isSocket"),
-       const_cast<char*>("(I)Z"),
+      {const_cast<char*>("isSocket"), const_cast<char*>("(I)Z"),
        reinterpret_cast<void*>(&FileDescriptorIsSocket)},
   };
   return Register(env, "java/lang/Float", float_methods, 2) &&
          Register(env, "java/lang/Double", double_methods, 2) &&
          Register(env, "android/system/OsConstants", os_constants_methods, 1) &&
-         Register(env, "libcore/io/Linux", linux_methods, 6) &&
+         Register(env, "libcore/io/Linux", linux_methods, 7) &&
          Register(env, "libcore/icu/ICU", icu_methods, 3) &&
          Register(env, "java/lang/System", system_methods, 1) &&
          Register(env, "java/io/FileDescriptor", file_descriptor_methods, 2);

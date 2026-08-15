@@ -1,6 +1,7 @@
-# Local runtime inputs extracted from the Android 16 / API 36 ARM64 ps16k
-# Google APIs Play Store system image. The JARs themselves stay ignored in
-# _prebuilt/; this manifest makes accidental version drift visible.
+# Core runtime inputs come from the Android 16 / API 36 ARM64 ps16k Google APIs
+# Play Store system image. core-icu4j is a revision-locked AOSP runtime prebuilt
+# converted to DEX locally. All JARs stay ignored; this manifest makes version
+# drift visible.
 ANDROID_RELEASE=16
 ANDROID_SDK=36
 ANDROID_ABI=arm64-v8a
@@ -15,3 +16,7 @@ CORE_LIBART_SHA256=199dca2c6e183b6e6c6106984cf04927d14a4882d96c7deb47de13f5d0724
 CORE_LIBART_DEX_VERSION=039
 CORE_LIBART_CLASSES=543
 CORE_LIBART_METHODS=5453
+CORE_ICU4J_SOURCE_SIZE=2992455
+CORE_ICU4J_DEX_VERSION=039
+CORE_ICU4J_CLASSES=1596
+CORE_ICU4J_METHODS=14990
