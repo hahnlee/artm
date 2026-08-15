@@ -6,9 +6,12 @@
 
 #include "intrinsics_enum.h"
 #include "intrinsics_list.h"
+#include "hprof/hprof.h"
 #include "nativebridge/native_bridge.h"
 #include "nativeloader/native_loader.h"
+#include "odr_statslog/odr_statslog.h"
 #include "palette/palette.h"
+#include "runtime_image.h"
 #include "unwindstack/AndroidUnwinder.h"
 
 namespace android {
@@ -18,6 +21,12 @@ bool LoadNativeBridge(const char* library, const NativeBridgeRuntimeCallbacks*) 
   // An empty name means that ART explicitly requested no translation bridge.
   return library == nullptr || library[0] == '\0';
 }
+
+bool PreInitializeNativeBridge(const char*, const char*) { return true; }
+void PreZygoteForkNativeBridge() {}
+bool InitializeNativeBridge(JNIEnv*, const char*) { return true; }
+bool NativeBridgeInitialized() { return false; }
+uint32_t NativeBridgeGetVersion() { return 0; }
 
 void UnloadNativeBridge() {}
 
@@ -76,6 +85,21 @@ extern "C" palette_status_t PaletteSchedGetPriority(int32_t, int32_t* java_prior
   return PALETTE_STATUS_OK;
 }
 
+extern "C" palette_status_t PaletteSchedSetPriority(int32_t, int32_t) {
+  return PALETTE_STATUS_OK;
+}
+
+extern "C" palette_status_t PaletteWriteCrashThreadStacks(const char*, size_t) {
+  return PALETTE_STATUS_NOT_SUPPORTED;
+}
+
+extern "C" palette_status_t PaletteDebugStoreGetString(char* result, size_t max_size) {
+  if (result != nullptr && max_size != 0) {
+    result[0] = '\0';
+  }
+  return PALETTE_STATUS_NOT_SUPPORTED;
+}
+
 extern "C" palette_status_t PaletteTraceEnabled(bool* enabled) {
   if (enabled == nullptr) {
     return PALETTE_STATUS_INVALID_ARGUMENT;
@@ -113,6 +137,23 @@ extern "C" void* __hwasan_tag_pointer(const volatile void* pointer, unsigned cha
 extern "C" void __hwasan_handle_longjmp(const void*) {}
 
 namespace art {
+namespace hprof {
+void DumpHeap(const char*, int, bool) {}
+}  // namespace hprof
+
+std::string RuntimeImage::GetRuntimeImagePath(const std::string&) { return {}; }
+
+bool RuntimeImage::WriteImageToDisk(std::string* error_msg) {
+  if (error_msg != nullptr) {
+    *error_msg = "runtime images are not supported on Darwin";
+  }
+  return false;
+}
+
+namespace odrefresh {
+bool UploadStatsIfAvailable(std::string*) { return true; }
+}  // namespace odrefresh
+
 std::ostream& operator<<(std::ostream& stream, const Intrinsics& intrinsic) {
   switch (intrinsic) {
     case Intrinsics::kNone:
@@ -124,6 +165,8 @@ std::ostream& operator<<(std::ostream& stream, const Intrinsics& intrinsic) {
   return stream << "Intrinsics[" << static_cast<int>(intrinsic) << "]";
 }
 }  // namespace art
+
+extern "C" void SkipAddSignalHandler(bool) {}
 
 namespace unwindstack {
 bool AndroidLocalUnwinder::InternalInitialize(ErrorData&) {

@@ -291,6 +291,16 @@ fn sync_sources(root: &Path) -> Result<()> {
     )?;
     materialize_archive(
         root,
+        "platform/libnativehelper",
+        lock_value(&lock, "LIBNATIVEHELPER_REVISION")?,
+        "libnativehelper-platform-header-only",
+        "include_platform_header_only",
+        "_aosp/libnativehelper/platform_header_only_include",
+        "nativehelper/jni_macros.h",
+        lock_value(&lock, "LIBNATIVEHELPER_JNI_MACROS_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
         "platform/external/dlmalloc",
         lock_value(&lock, "DLMALLOC_REVISION")?,
         "external-dlmalloc",
@@ -882,7 +892,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=1 methods=5 class[0]=Ldev/darwinart/probe/Hello;";
+    let expected = "AOSP DEX: verified=yes version=35 classes=1 methods=7 class[0]=Ldev/darwinart/probe/Hello;";
     if output.trim() != expected {
         return Err(format!("unexpected DEX probe output: {output:?}").into());
     }
@@ -1510,6 +1520,8 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
     let tinyxml2 = root.join("_aosp/external/tinyxml2");
     let android_jni_include = root.join("_aosp/libnativehelper/include_jni");
     let nativehelper_headers = root.join("_aosp/libnativehelper/header_only_include");
+    let nativehelper_platform_headers =
+        root.join("_aosp/libnativehelper/platform_header_only_include");
     let dlmalloc = root.join("_aosp/external/dlmalloc");
     let odrefresh_include = root.join("_aosp/art/odrefresh/include");
     let sigchain = root.join("_aosp/art/sigchainlib");
@@ -1673,6 +1685,7 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         tinyxml2.as_path(),
         android_jni_include.as_path(),
         nativehelper_headers.as_path(),
+        nativehelper_platform_headers.as_path(),
         dlmalloc.as_path(),
         Path::new("/opt/homebrew/include"),
     ];
@@ -1734,12 +1747,16 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         "jit/debugger_interface.cc",
         "metrics/reporter.cc",
         "monitor_pool.cc",
+        "non_debuggable_classes.cc",
         "nterp_helpers.cc",
         "oat/image.cc",
         "oat/oat.cc",
         "oat/oat_file.cc",
+        "oat/oat_file_assistant.cc",
+        "oat/oat_file_assistant_context.cc",
         "oat/oat_quick_method_header.cc",
         "oat/stack_map.cc",
+        "oat/sdc_file.cc",
         "object_lock.cc",
         "quick_exception_handler.cc",
         "reference_table.cc",
@@ -1833,9 +1850,45 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         "mirror/class.cc",
         "mirror/dex_cache.cc",
         "mirror/object.cc",
+        "mirror/stack_frame_info.cc",
+        "mirror/stack_trace_element.cc",
         "mirror/string.cc",
         "mirror/throwable.cc",
+        "native/dalvik_system_BaseDexClassLoader.cc",
+        "native/dalvik_system_DexFile.cc",
+        "native/dalvik_system_VMDebug.cc",
+        "native/dalvik_system_VMRuntime.cc",
+        "native/dalvik_system_VMStack.cc",
+        "native/dalvik_system_ZygoteHooks.cc",
+        "native/java_lang_Class.cc",
+        "native/java_lang_Object.cc",
+        "native/java_lang_StackStreamFactory.cc",
+        "native/java_lang_String.cc",
+        "native/java_lang_StringFactory.cc",
+        "native/java_lang_System.cc",
+        "native/java_lang_Thread.cc",
+        "native/java_lang_Throwable.cc",
+        "native/java_lang_VMClassLoader.cc",
+        "native/java_lang_invoke_MethodHandle.cc",
+        "native/java_lang_invoke_MethodHandleImpl.cc",
+        "native/java_lang_ref_FinalizerReference.cc",
+        "native/java_lang_ref_Reference.cc",
+        "native/java_lang_reflect_Array.cc",
+        "native/java_lang_reflect_Constructor.cc",
+        "native/java_lang_reflect_Executable.cc",
+        "native/java_lang_reflect_Field.cc",
+        "native/java_lang_reflect_Method.cc",
+        "native/java_lang_reflect_Parameter.cc",
+        "native/java_lang_reflect_Proxy.cc",
+        "native/java_util_concurrent_atomic_AtomicLong.cc",
+        "native/jdk_internal_misc_Unsafe.cc",
+        "native/libcore_io_Memory.cc",
+        "native/libcore_util_CharsetUtils.cc",
+        "native/org_apache_harmony_dalvik_ddmc_DdmServer.cc",
+        "native/org_apache_harmony_dalvik_ddmc_DdmVmInternal.cc",
+        "native/sun_misc_Unsafe.cc",
         "runtime_common.cc",
+        "runtime_intrinsics.cc",
         "well_known_classes.cc",
     ];
     // Soong generates this translation unit from ART's enum declarations. Use
@@ -1951,6 +2004,7 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         objects.push(profile_object);
     }
     for adapter_source in [
+        "darwin_libcore_natives.cc",
         "darwin_runtime_adapters.cc",
         "darwin_sigchain.cc",
         "fault_handler_arm64_darwin.cc",
@@ -2078,6 +2132,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         root.join("_aosp/external/tinyxml2"),
         root.join("_aosp/libnativehelper/include_jni"),
         root.join("_aosp/libnativehelper/header_only_include"),
+        root.join("_aosp/libnativehelper/platform_header_only_include"),
         root.join("_aosp/external/dlmalloc"),
         PathBuf::from("/opt/homebrew/include"),
     ];
@@ -2188,13 +2243,12 @@ fn probe_runtime_dex(root: &Path) -> Result<()> {
     let expected = "ART Darwin Runtime::Create: ok\n\
                     ART Darwin app ClassLoader: PathClassLoader\n\
                     ART Darwin DEX interpreter: Hello.answer()=42\n\
-                    ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42";
+                    ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
+                    ART runtime native: System.arraycopy()=42";
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
-    println!(
-        "probe-runtime-dex: PathClassLoader -> interpreter -> JNI -> Darwin -> nativeRoundTrip()=42"
-    );
+    println!("probe-runtime-dex: PathClassLoader -> System init -> AOSP System.arraycopy()=42");
     Ok(())
 }
 

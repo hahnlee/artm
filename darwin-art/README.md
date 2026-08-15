@@ -8,8 +8,9 @@ integration, launcher, and eventually the Android ELF compatibility loader.
 
 The current gate is intentionally smaller than `dalvikvm`. It links and runs a
 complete native `Runtime::Create()` probe through Android 16 boot-class-path
-initialization, executes a generated DEX method in ART's C++ interpreter, and
-round-trips from interpreted Java through JNI into a Darwin function:
+initialization, executes a generated DEX method in ART's C++ interpreter,
+round-trips through JNI into Darwin, and initializes `java.lang.System` without
+loading Android `.so` libraries:
 
 1. verify the native host is ARM64 macOS with 16 KiB pages;
 2. fetch revision-locked ART subtrees without Git metadata;
@@ -20,7 +21,7 @@ round-trips from interpreted Java through JNI into a Darwin function:
 7. compile Java to DEX and verify it with AOSP `DexFileVerifier`;
 8. generate ART's real ARM64 ABI constants and compile context, optimized
    `__memcmp16`, plus quick/JNI/native entrypoint assembly;
-9. compile the C++ switch interpreter and a 166-object Runtime/ClassLinker/GC/
+9. compile the C++ switch interpreter and a 207-object Runtime/ClassLinker/GC/
    quick-entrypoint initialization spine as Mach-O archives;
 10. link the real bootstrap probe with no unresolved native symbols;
 11. create ART successfully with the pinned Android 16 core boot JARs;
@@ -28,7 +29,9 @@ round-trips from interpreted Java through JNI into a Darwin function:
     `Hello.answer()` through `ArtMethod::Invoke`;
 13. register `Hello.hostPageSize()` through JNI and execute
     `Java -> JNI -> getpagesize() -> Java`, returning `42` from the wrapper;
-14. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
+14. register ART's complete runtime-native table plus the Darwin libcore subset
+    needed to initialize `System`, then execute AOSP `System.arraycopy()`;
+15. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
 
 Run it with:
 
@@ -42,14 +45,14 @@ Expected final lines include:
 probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
-build-dex: AOSP DEX: verified=yes version=35 classes=1 methods=5 class[0]=Ldev/darwinart/probe/Hello; corrupt=rejected
+build-dex: AOSP DEX: verified=yes version=35 classes=1 methods=7 class[0]=Ldev/darwinart/probe/Hello; corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
 build-interpreter-core: AOSP C++ interpreter Mach-O objects=7 archive=...
-build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=166 compiled=0 cached=166 archive=...
+build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=207 compiled=0 cached=207 archive=...
 audit-runtime-link: closure complete undefined=0
-probe-runtime-dex: PathClassLoader -> interpreter -> JNI -> Darwin -> nativeRoundTrip()=42
+probe-runtime-dex: PathClassLoader -> System init -> AOSP System.arraycopy()=42
 probe-park: ART Darwin park: pre-permit=yes wakeups=200 timeout=yes
 ```
 
@@ -97,13 +100,16 @@ _build/runtime-link-probe/runtime-link-probe \
 Its success lines are `ART Darwin Runtime::Create: ok`,
 `ART Darwin app ClassLoader: PathClassLoader`, and
 `ART Darwin DEX interpreter: Hello.answer()=42`, followed by
-`ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42`. The generated DEX
-remains separate from the boot class path. The native probe initializes ART's
-unstarted-runtime handlers, constructs a `PathClassLoader`, registers the DEX,
-then enables a probe-only minimal-start gate for normal JNI dispatch. It does
-not load Android's libicu/libjavacore/libopenjdk JNI libraries or start daemon
-threads. Normal Java launcher startup and the full runtime native-method
-surface remain deferred.
+`ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42`, and
+`ART runtime native: System.arraycopy()=42`. The generated DEX remains separate
+from the boot class path. The native probe initializes ART's unstarted-runtime
+handlers, constructs a `PathClassLoader`, registers the DEX, then enables a
+probe-only minimal-start gate. This gate registers ART's complete runtime-native
+table and initializes intrinsics. A Darwin libcore adapter provides the small
+POSIX, file-descriptor, primitive-bit, ICU-metadata, and system-property subset
+needed by `java.lang.System`. Android's libicu/libjavacore/libopenjdk shared
+libraries and daemon threads are still not loaded. The remaining libcore native
+surface and normal Java launcher startup remain deferred.
 
 Apple ARM64 executables retain the kernel-required 4 GiB `__PAGEZERO`, so ART's
 usual absolute-low-32-bit heap references cannot be used. The Darwin probe

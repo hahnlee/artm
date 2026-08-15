@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "class_linker.h"
 #include "cmdline_types.h"
+#include "darwin_libcore_natives.h"
 #include "dex/art_dex_file_loader.h"
 #include "handle_scope-inl.h"
 #include "interpreter/unstarted_runtime.h"
@@ -48,6 +49,8 @@ int main(int argc, char** argv) {
   // directly constructed RuntimeArgumentMap leaves this key at zero, which
   // MallocSpace interprets as zero capacity rather than "unlimited".
   options.Set(art::RuntimeArgumentMap::HeapGrowthLimit,
+              art::MemoryKiB(64 * 1024 * 1024));
+  options.Set(art::RuntimeArgumentMap::MemoryMaximumSize,
               art::MemoryKiB(64 * 1024 * 1024));
   art::LogVerbosity verbosity{};
   verbosity.heap = true;
@@ -106,6 +109,11 @@ int main(int argc, char** argv) {
   }
 
   jclass hello_class = soa.AddLocalReference<jclass>(hello.Get());
+  art::Runtime::Current()->StartMinimalForDarwinProbe(self->GetJniEnv());
+  if (!darwin_art::RegisterLibcoreNatives(self->GetJniEnv())) {
+    std::cerr << "ART Darwin libcore: native registration failed\n";
+    return 17;
+  }
   JNINativeMethod native_method{
       const_cast<char*>("hostPageSize"),
       const_cast<char*>("()I"),
@@ -119,8 +127,6 @@ int main(int argc, char** argv) {
     std::cerr << "ART Darwin JNI: Hello initialization failed\n";
     return 7;
   }
-  art::Runtime::Current()->StartMinimalForDarwinProbe();
-
   art::ArtMethod* answer =
       hello->FindClassMethod("answer", "()I", art::kRuntimePointerSize);
   if (answer == nullptr) {
@@ -157,10 +163,29 @@ int main(int argc, char** argv) {
     return 13;
   }
 
+  art::ArtMethod* runtime_native_arraycopy =
+      hello->FindClassMethod("runtimeNativeArraycopy", "()I", art::kRuntimePointerSize);
+  if (runtime_native_arraycopy == nullptr) {
+    std::cerr << "ART runtime native: runtimeNativeArraycopy()I lookup failed\n";
+    return 14;
+  }
+  art::JValue arraycopy_result;
+  runtime_native_arraycopy->Invoke(
+      self, /* args= */ nullptr, /* args_size= */ 0u, &arraycopy_result, "I");
+  if (self->IsExceptionPending()) {
+    std::cerr << "ART runtime native: runtimeNativeArraycopy()I threw\n";
+    return 15;
+  }
+  if (arraycopy_result.GetI() != 42) {
+    std::cerr << "ART runtime native: expected 42, got " << arraycopy_result.GetI() << "\n";
+    return 16;
+  }
+
   std::cout << "ART Darwin Runtime::Create: ok\n"
             << "ART Darwin app ClassLoader: PathClassLoader\n"
             << "ART Darwin DEX interpreter: Hello.answer()=" << result.GetI() << "\n"
             << "ART Darwin JNI: hostPageSize()=" << getpagesize()
-            << " nativeRoundTrip()=" << native_result.GetI() << "\n";
+            << " nativeRoundTrip()=" << native_result.GetI() << "\n"
+            << "ART runtime native: System.arraycopy()=" << arraycopy_result.GetI() << "\n";
   return 0;
 }
