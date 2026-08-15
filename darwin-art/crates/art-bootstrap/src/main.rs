@@ -40,7 +40,8 @@ fn run() -> Result<()> {
         "build-interpreter-core" => build_interpreter_core(&root),
         "build-runtime-bootstrap" => build_runtime_bootstrap(&root),
         "audit-runtime-link" => audit_runtime_link(&root),
-        "probe-runtime-dex" => probe_runtime_dex(&root),
+        "probe-runtime-dex" => probe_runtime_dex(&root, false),
+        "probe-window" => probe_runtime_dex(&root, true),
         "verify-bootclasspath" => verify_bootclasspath(&root),
         "all" => {
             doctor()?;
@@ -54,7 +55,7 @@ fn run() -> Result<()> {
             build_interpreter_core(&root)?;
             build_runtime_bootstrap(&root)?;
             audit_runtime_link(&root)?;
-            probe_runtime_dex(&root)?;
+            probe_runtime_dex(&root, false)?;
             probe_park(&root)
         }
         "help" | "--help" | "-h" => {
@@ -88,6 +89,7 @@ fn print_help() {
     println!("  build-runtime-bootstrap  compile ART Runtime initialization for Darwin");
     println!("  audit-runtime-link  measure the remaining Runtime::Create link closure");
     println!("  probe-runtime-dex  launch Java main(String[]) with Android stdout");
+    println!("  probe-window  display the Android View probe in a native NSWindow");
     println!("  verify-bootclasspath  verify extracted Android 16 core DEX files");
     println!("  all        run every check and probe");
 }
@@ -845,6 +847,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(root.join("probes/ProbeContext.java"))
             .arg(root.join("probes/ProbeContentResolver.java"))
             .arg(root.join("probes/ProbeResources.java"))
+            .arg(root.join("probes/ProbeView.java"))
             .arg(root.join("probes/compile-stubs/android/content/IContentProvider.java")),
     )?;
 
@@ -853,6 +856,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
     let context_class = class_dir.join("dev/darwinart/probe/ProbeContext.class");
     let resolver_class = class_dir.join("dev/darwinart/probe/ProbeContentResolver.class");
     let resources_class = class_dir.join("dev/darwinart/probe/ProbeResources.class");
+    let view_class = class_dir.join("dev/darwinart/probe/ProbeView.class");
     run_command(
         Command::new(find_d8()?)
             .arg("--lib")
@@ -865,7 +869,8 @@ fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(&activity_class)
             .arg(&context_class)
             .arg(&resolver_class)
-            .arg(&resources_class),
+            .arg(&resources_class)
+            .arg(&view_class),
     )?;
 
     let includes = [
@@ -933,13 +938,14 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=6 methods=68 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=7 methods=75 \
                     class[0]=Ldev/darwinart/probe/Hello; \
                     class[1]=Ldev/darwinart/probe/ProbeActivity; \
                     class[2]=Ldev/darwinart/probe/ProbeContentResolver$$ExternalSyntheticLambda0; \
                     class[3]=Ldev/darwinart/probe/ProbeContentResolver; \
                     class[4]=Ldev/darwinart/probe/ProbeContext; \
-                    class[5]=Ldev/darwinart/probe/ProbeResources;";
+                    class[5]=Ldev/darwinart/probe/ProbeResources; \
+                    class[6]=Ldev/darwinart/probe/ProbeView;";
     if output.trim() != expected {
         return Err(format!("unexpected DEX probe output: {output:?}").into());
     }
@@ -2173,6 +2179,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
     let runtime = root.join("_aosp/art/runtime");
     let build_dir = root.join("_build/runtime-link-probe");
     let object = build_dir.join("runtime_link_probe.cc.o");
+    let window_object = build_dir.join("darwin_window_bridge.mm.o");
     let executable = build_dir.join("runtime-link-probe");
     fs::create_dir_all(&build_dir)?;
     let includes = [
@@ -2213,11 +2220,21 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             .arg("-o")
             .arg(&object),
     )?;
+    run_command(
+        Command::new("clang++")
+            .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
+            .arg(root.join("compat/darwin_window_bridge.mm"))
+            .arg("-I")
+            .arg(root.join("compat"))
+            .arg("-o")
+            .arg(&window_object),
+    )?;
 
     let mut linker = Command::new("clang++");
     linker
         .arg("-Wl,-dead_strip")
         .arg(&object)
+        .arg(&window_object)
         .arg(root.join("_build/runtime-bootstrap/libart-runtime-bootstrap-darwin.a"))
         .arg(root.join("_build/interpreter-core/libart-interpreter-darwin.a"))
         .arg(root.join("_build/runtime-arm64/libart-arm64-darwin.a"))
@@ -2236,6 +2253,10 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             "-licuuc",
             "-licudata",
             "-lz",
+            "-framework",
+            "AppKit",
+            "-framework",
+            "CoreGraphics",
             "-o",
         ])
         .arg(&executable);
@@ -2291,7 +2312,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn probe_runtime_dex(root: &Path) -> Result<()> {
+fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
     prepare_icu_bootclasspath(root)?;
     let executable = root.join("_build/runtime-link-probe/runtime-link-probe");
     let core_oj = root.join("_prebuilt/android-16/bootclasspath/core-oj.jar");
@@ -2316,14 +2337,17 @@ fn probe_runtime_dex(root: &Path) -> Result<()> {
         }
     }
 
-    let output = command_output(
-        Command::new(&executable)
-            .arg(&core_oj)
-            .arg(&core_libart)
-            .arg(&framework)
-            .arg(&core_icu4j)
-            .arg(&classes_dex),
-    )?;
+    let mut command = Command::new(&executable);
+    command
+        .arg(&core_oj)
+        .arg(&core_libart)
+        .arg(&framework)
+        .arg(&core_icu4j)
+        .arg(&classes_dex);
+    if show_window {
+        command.env("DARWIN_ART_WINDOW_SECONDS", "3");
+    }
+    let output = command_output(&mut command)?;
     let expected = "Hello from Darwin ART main: 안녕\n\
                     ART Darwin Runtime::Create: ok\n\
                     ART Darwin app ClassLoader: PathClassLoader\n\
@@ -2332,12 +2356,17 @@ fn probe_runtime_dex(root: &Path) -> Result<()> {
                     ART runtime native: System.arraycopy()=42\n\
                     ART Android framework: ProbeActivity().probeValue()=42\n\
                     ART Android window: Activity.attach()=PhoneWindow\n\
+                    ART Android view: ProbeView.draw()=640x360\n\
                     ART Android lifecycle: Activity.onCreate()=43\n\
                     ART Darwin launcher: main(String[])=ok";
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
-    println!("probe-runtime-dex: Activity.attach() + PhoneWindow + onCreate() -> Darwin");
+    if show_window {
+        println!("probe-window: ProbeView.draw() -> ARGB bridge -> NSWindow");
+    } else {
+        println!("probe-runtime-dex: Activity.attach() + PhoneWindow + ProbeView.draw() -> Darwin");
+    }
     Ok(())
 }
 

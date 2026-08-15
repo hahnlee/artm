@@ -13,7 +13,9 @@ interpreter, round-trips through JNI into Darwin, and sends Android
 `System.out` through ICU and Darwin `write(2)` without loading Android `.so`
 libraries. It also runs Android 16's real `Activity.attach()`, creates a
 `PhoneWindow`, and dispatches the platform `Activity.onCreate()` using a
-minimal host context:
+minimal host context. Its first vertical graphics slice also dispatches an
+Android `View.draw(Canvas)` override, transfers a Java-produced ARGB frame over
+JNI, and displays it in an independent AppKit `NSWindow`:
 
 1. verify the native host is ARM64 macOS with 16 KiB pages;
 2. fetch revision-locked ART subtrees without Git metadata;
@@ -43,7 +45,9 @@ minimal host context:
 18. call the real `Activity.attach()` with a Darwin-backed context and create
     Android's concrete `PhoneWindow`;
 19. execute the real platform `Activity.onCreate()` body plus the app override;
-20. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
+20. dispatch `ProbeView.draw(Canvas)` and present its 640x360 ARGB frame in a
+    native `NSWindow`;
+21. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
 
 Run it with:
 
@@ -57,16 +61,28 @@ Expected final lines include:
 probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
-build-dex: AOSP DEX: verified=yes version=35 classes=6 methods=68 ... corrupt=rejected
+build-dex: AOSP DEX: verified=yes version=35 classes=7 methods=75 ... corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
 build-interpreter-core: AOSP C++ interpreter Mach-O objects=7 archive=...
 build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=209 compiled=0 cached=209 archive=...
 audit-runtime-link: closure complete undefined=0
-probe-runtime-dex: Activity.attach() + PhoneWindow + onCreate() -> Darwin
+probe-runtime-dex: Activity.attach() + PhoneWindow + ProbeView.draw() -> Darwin
 probe-park: ART Darwin park: pre-permit=yes wakeups=200 timeout=yes
 ```
+
+To keep the native window visible for three seconds, run:
+
+```bash
+cargo run -p art-bootstrap -- probe-window
+```
+
+The current frame producer is deliberately small: interpreted Java fills a
+`0xAARRGGBB` array inside a `View.draw(Canvas)` override, and Objective-C++
+copies it into a Core Graphics image owned by an `NSView`. This proves the
+ART/app DEX/JNI/AppKit lifecycle and pixel-format boundary. It is not yet an
+Android Canvas, HWUI, Skia, zero-copy, or `PhoneWindow`/`DecorView` render path.
 
 `build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
 depfile for every translation unit; the bootstrapper fingerprints the complete
@@ -119,6 +135,7 @@ Its success lines are `ART Darwin Runtime::Create: ok`,
 `Hello from Darwin ART main: 안녕`,
 `ART Android framework: ProbeActivity().probeValue()=42`,
 `ART Android window: Activity.attach()=PhoneWindow`,
+`ART Android view: ProbeView.draw()=640x360`,
 `ART Android lifecycle: Activity.onCreate()=43`, and
 `ART Darwin launcher: main(String[])=ok`.
 The generated app DEX remains separate from the boot class path. The native
@@ -140,8 +157,10 @@ hidden `IContentProvider` supplies a javac signature and is not emitted into the
 DEX; runtime resolution uses framework.jar's real interface. Android's
 libicu/libjavacore/libopenjdk shared libraries and daemon threads are still not
 loaded. The current real `Activity.attach()` uses synthetic resources/settings,
-a null `Instrumentation`, and no remote services. Resource-backed DecorView,
-View hierarchy, and the Darwin window backend remain deferred.
+a null `Instrumentation`, and no remote services. The first AppKit window
+backend exists, but resource-backed `DecorView`, a normal constructed View
+hierarchy, Android Canvas/Skia, and incremental frame scheduling remain
+deferred.
 
 Apple ARM64 executables retain the kernel-required 4 GiB `__PAGEZERO`, so ART's
 usual absolute-low-32-bit heap references cannot be used. The Darwin probe

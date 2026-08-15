@@ -88,7 +88,10 @@
       startup without loading Android `.so` libraries.
 - [ ] Replace the null `Instrumentation` and synthetic resources/settings with
       the complete application/runtime service path.
-- [ ] Connect the View backend to ProjectGPU and an `NSWindow`.
+- [x] Dispatch an Android `View.draw(Canvas)` override, transfer a Java ARGB
+      frame through JNI, and display it in a native AppKit `NSWindow`.
+- [ ] Replace the probe raster with Android Canvas/Skia and connect a normal
+      `PhoneWindow`/`DecorView` hierarchy to the host window backend.
 
 ## Deferred performance work
 

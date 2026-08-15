@@ -1,6 +1,7 @@
 #include <mach-o/dyld.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -16,6 +17,7 @@
 #include "darwin_framework_natives.h"
 #include "darwin_icu_natives.h"
 #include "darwin_libcore_natives.h"
+#include "darwin_window_bridge.h"
 #include "dex/art_dex_file_loader.h"
 #include "handle_scope-inl.h"
 #include "interpreter/unstarted_runtime.h"
@@ -30,6 +32,46 @@
 #include "well_known_classes.h"
 
 static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
+
+static std::size_t g_frame_width = 0;
+static std::size_t g_frame_height = 0;
+
+static double WindowVisibleSeconds() {
+  const char* value = std::getenv("DARWIN_ART_WINDOW_SECONDS");
+  if (value == nullptr) {
+    return 0.0;
+  }
+  char* end = nullptr;
+  const double seconds = std::strtod(value, &end);
+  return end == value || seconds < 0.0 || seconds > 30.0 ? 0.0 : seconds;
+}
+
+static jboolean PresentFrame(JNIEnv* env, jclass, jint width, jint height,
+                             jintArray argb) {
+  if (width <= 0 || height <= 0 || width > 4096 || height > 4096 ||
+      argb == nullptr) {
+    return JNI_FALSE;
+  }
+  const std::size_t pixel_count =
+      static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+  if (env->GetArrayLength(argb) != static_cast<jsize>(pixel_count)) {
+    return JNI_FALSE;
+  }
+  std::vector<jint> pixels(pixel_count);
+  env->GetIntArrayRegion(argb, 0, static_cast<jsize>(pixel_count), pixels.data());
+  if (env->ExceptionCheck()) {
+    return JNI_FALSE;
+  }
+  const bool presented = DarwinPresentArgb(
+      reinterpret_cast<const std::uint32_t*>(pixels.data()),
+      static_cast<std::size_t>(width), static_cast<std::size_t>(height),
+      WindowVisibleSeconds());
+  if (presented) {
+    g_frame_width = static_cast<std::size_t>(width);
+    g_frame_height = static_cast<std::size_t>(height);
+  }
+  return presented ? JNI_TRUE : JNI_FALSE;
+}
 
 int main(int argc, char** argv) {
   // Darwin's malloc zones can claim the fixed compressed-reference window
@@ -98,7 +140,7 @@ int main(int argc, char** argv) {
   art::ClassLinker* class_linker = art::Runtime::Current()->GetClassLinker();
   jobject loader_ref =
       class_linker->CreatePathClassLoader(self, app_dex_file_ptrs);
-  art::StackHandleScope<6> hs(self);
+  art::StackHandleScope<7> hs(self);
   art::Handle<art::mirror::ClassLoader> app_loader =
       hs.NewHandle(soa.Decode<art::mirror::ClassLoader>(loader_ref));
   for (const auto& dex_file : app_dex_files) {
@@ -158,6 +200,17 @@ int main(int argc, char** argv) {
     }
     return 21;
   }
+  art::Handle<art::mirror::Class> probe_view_handle = hs.NewHandle(
+      class_linker->FindClass(self, "Ldev/darwinart/probe/ProbeView;",
+                              sizeof("Ldev/darwinart/probe/ProbeView;") - 1u,
+                              app_loader));
+  if (probe_view_handle == nullptr || self->IsExceptionPending()) {
+    std::cerr << "ART Android view: ProbeView lookup failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 21;
+  }
 
   jclass hello_class = soa.AddLocalReference<jclass>(hello.Get());
   jclass probe_activity_class =
@@ -166,6 +219,8 @@ int main(int argc, char** argv) {
       soa.AddLocalReference<jclass>(probe_context_handle.Get());
   jclass probe_resources_class =
       soa.AddLocalReference<jclass>(probe_resources_handle.Get());
+  jclass probe_view_class =
+      soa.AddLocalReference<jclass>(probe_view_handle.Get());
   art::Runtime::Current()->StartMinimalForDarwinProbe(self->GetJniEnv());
   if (!darwin_art::RegisterLibcoreNatives(self->GetJniEnv())) {
     std::cerr << "ART Darwin libcore: native registration failed\n";
@@ -182,6 +237,19 @@ int main(int argc, char** argv) {
   art::Runtime::Current()->FinishMinimalForDarwinProbe();
 
   JNIEnv* env = self->GetJniEnv();
+  JNINativeMethod present_method{
+      const_cast<char*>("presentFrame"),
+      const_cast<char*>("(II[I)Z"),
+      reinterpret_cast<void*>(&PresentFrame),
+  };
+  if (env->RegisterNatives(probe_view_class, &present_method, 1) != JNI_OK ||
+      !class_linker->EnsureInitialized(self, probe_view_handle, true, true)) {
+    std::cerr << "ART Android view: ProbeView native setup failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 32;
+  }
   jclass looper_class = env->FindClass("android/os/Looper");
   jmethodID prepare_main_looper =
       looper_class == nullptr
@@ -391,6 +459,30 @@ int main(int argc, char** argv) {
     }
     return 31;
   }
+  // The first screen gate intentionally bypasses View's resource-heavy
+  // constructor. The allocated object still dispatches the real virtual
+  // View.draw(Canvas) entrypoint to ProbeView, while the pixel producer is a
+  // temporary Java ARGB raster that will be replaced by Canvas/Skia.
+  jobject probe_view = env->AllocObject(probe_view_class);
+  jmethodID draw_view =
+      env->GetMethodID(probe_view_class, "draw", "(Landroid/graphics/Canvas;)V");
+  jmethodID was_presented =
+      env->GetMethodID(probe_view_class, "wasPresented", "()Z");
+  if (probe_view != nullptr && draw_view != nullptr) {
+    env->CallVoidMethod(probe_view, draw_view, nullptr);
+  }
+  const jboolean view_presented =
+      probe_view == nullptr || was_presented == nullptr || env->ExceptionCheck()
+          ? JNI_FALSE
+          : env->CallBooleanMethod(probe_view, was_presented);
+  if (view_presented != JNI_TRUE || g_frame_width != 640 ||
+      g_frame_height != 360 || env->ExceptionCheck()) {
+    std::cerr << "ART Android view: ProbeView.draw() presentation failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 33;
+  }
   jmethodID probe_on_create =
       env->GetMethodID(probe_activity_class, "probeOnCreate", "()I");
   jint lifecycle_result =
@@ -407,6 +499,7 @@ int main(int argc, char** argv) {
   env->DeleteLocalRef(context_theme_wrapper_class);
   env->DeleteLocalRef(phone_window_class);
   env->DeleteLocalRef(window);
+  env->DeleteLocalRef(probe_view);
   env->DeleteLocalRef(configuration);
   env->DeleteLocalRef(component_name);
   env->DeleteLocalRef(intent);
@@ -419,6 +512,7 @@ int main(int argc, char** argv) {
   env->DeleteLocalRef(probe_context);
   env->DeleteLocalRef(probe_resources);
   env->DeleteLocalRef(probe_resources_class);
+  env->DeleteLocalRef(probe_view_class);
   env->DeleteLocalRef(probe_context_class);
   env->DeleteLocalRef(application_class);
   env->DeleteLocalRef(activity_info_class);
@@ -536,6 +630,8 @@ int main(int argc, char** argv) {
             << "ART Android framework: ProbeActivity().probeValue()="
             << activity_result << "\n"
             << "ART Android window: Activity.attach()=PhoneWindow\n"
+            << "ART Android view: ProbeView.draw()=" << g_frame_width << "x"
+            << g_frame_height << "\n"
             << "ART Android lifecycle: Activity.onCreate()=" << lifecycle_result
             << "\n"
             << "ART Darwin launcher: main(String[])=ok\n";
