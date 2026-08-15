@@ -143,6 +143,32 @@ Rust is suitable for parsing, validation, dependency policy, and the mount
 namespace. C/C++ and small ARM64 assembly thunks own varargs, TLS, unwind, and
 ABI entrypoints where exact Bionic layout is required.
 
+### Dual ARM64 calling conventions
+
+Identical instruction sets do not imply an identical C ABI. Android ELF uses
+the AArch64 Procedure Call Standard used by the NDK; Apple ARM64 compilers use
+Darwin's stack-argument packing rules. Register-only calls commonly agree, but
+spilled integer arguments do not. This project already requires Darwin packing
+when ART invokes its Mach-O framework JNI implementations, while an Android ELF
+JNI implementation expects Android packing.
+
+Native integration therefore has two explicit thunk directions:
+
+1. `ART -> Android ELF native`: ART's native-library handle is marked for the
+   compatibility bridge. `NativeBridgeGetTrampoline2` uses the method shorty
+   and JNI call type to select or generate a Darwin-to-Android call thunk.
+2. `Android ELF -> JNIEnv/JavaVM`: the library receives proxy JNI invoke
+   tables whose Android-ABI entry thunks repack arguments, substitute the real
+   ART environment/VM pointer, and call the Darwin-ABI implementation. Passing
+   ART's Mach-O `JNIEnv` table directly is forbidden even though simple JNI
+   calls may appear to work.
+
+The same rule applies to virtual DSO functions: public entrypoints must accept
+the Android ABI and cross into prefixed Darwin implementations through a
+reviewed thunk where their signatures can spill or use varargs. `JNI_OnLoad`
+itself has only two pointer arguments and is a useful first execution gate, but
+it does not prove general JNI calling-convention compatibility.
+
 ### Virtual Android DSOs
 
 Normal NDK libraries import Bionic and Android libraries rather than issuing a
@@ -272,14 +298,16 @@ executable-stack/text-relocation requirements, and raw `svc`.
 3. Extend the completed inspection-only ARM64 ELF parser into an APK-wide
    native-capability report and dependency graph.
 4. Map a trivial Android NDK ELF library, apply relocations, run constructors,
-   and call `JNI_OnLoad` without Linux or a VM.
+   and call its register-only `JNI_OnLoad` without Linux or a VM.
 5. Provide the first virtual DSOs: `libdl`, `liblog`, and a narrow but coherent
    Bionic `libc` file/memory/string surface.
-6. Execute a JNI library that opens an Android-prefix file, starts a pthread,
+6. Generate the dual-PCS ART-to-native and proxy-JNIEnv thunk tables, then
+   execute a JNI library with deliberately spilled scalar/reference arguments.
+7. Execute a JNI library that opens an Android-prefix file, starts a pthread,
    allocates TLS, and returns a value to interpreted Java.
-7. Expand the Bionic facade by real application import manifests, preserving a
+8. Expand the Bionic facade by real application import manifests, preserving a
    strict unsupported-symbol report instead of adding per-symbol success stubs.
-8. Add the VM fallback selector for raw-syscall and kernel-coupled binaries.
+9. Add the VM fallback selector for raw-syscall and kernel-coupled binaries.
 
 This order makes Tier 1 include realistic third-party native libraries before
 the graphics stack expands to games.

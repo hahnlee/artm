@@ -180,6 +180,9 @@
       and raw `svc`; APK-wide aggregation and loader execution remain pending.
 - [ ] Map and relocate the first Android ARM64 ELF `.so` directly on Apple
       Silicon and execute its constructors plus `JNI_OnLoad` without a VM.
+- [ ] Generate both ARM64 PCS boundaries: Darwin ART calls into Android-ABI JNI
+      methods, and Android code calls a proxy `JNIEnv`/`JavaVM` table rather
+      than the incompatible Mach-O function table directly.
 - [ ] Provide coherent virtual `libdl`, `liblog`, and Bionic `libc` facades for
       file, memory, string, errno, and Android-prefix path behavior.
 - [ ] Execute a realistic Tier-1 JNI library through `Java -> JNI -> Android
