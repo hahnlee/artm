@@ -118,6 +118,7 @@
     {"libc.so", "strtoull_l", "LIBC", DARWIN_ART_BIONIC_PROVIDER_NUMERIC},
     {"libc.so", "strxfrm_l", "LIBC", DARWIN_ART_BIONIC_PROVIDER_LOCALE},
     {"libc.so", "symlink", "LIBC", DARWIN_ART_BIONIC_PROVIDER_FILESYSTEM},
+    {"libc.so", "syscall", "LIBC", DARWIN_ART_BIONIC_PROVIDER_SYSCALL},
     {"libc.so", "sysconf", "LIBC", DARWIN_ART_BIONIC_PROVIDER_TIME},
     {"libc.so", "syslog", "LIBC", DARWIN_ART_BIONIC_PROVIDER_SYSLOG},
     {"libc.so", "towlower_l", "LIBC", DARWIN_ART_BIONIC_PROVIDER_LOCALE},

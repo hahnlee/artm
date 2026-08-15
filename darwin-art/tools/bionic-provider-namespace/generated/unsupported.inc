@@ -7,7 +7,6 @@
     {"strtold", 'B', "long-double-errno-locale"},
     {"strtold_l", 'B', "long-double-locale-handle-errno"},
     {"swprintf", 'B', "wide-varargs-long-double"},
-    {"syscall", 'D', "linux-syscall-number-ABI"},
     {"ungetwc", 'B', "FILE-layout-wide-state"},
     {"vsscanf", 'B', "va_list-format-long-double"},
     {"wcstold", 'B', "wide-long-double-locale-errno"},

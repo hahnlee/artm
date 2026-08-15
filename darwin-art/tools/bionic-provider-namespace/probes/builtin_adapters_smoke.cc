@@ -136,6 +136,12 @@ extern "C" SymbolFunction darwin_art_bionic_formatted_stdio_resolve(
       Triple(DARWIN_ART_BIONIC_PROVIDER_FORMATTED_STDIO, "libc.so", soname,
              symbol, version));
 }
+extern "C" SymbolFunction darwin_art_bionic_syscall_resolve(
+    const char *soname, const char *symbol, const char *version) {
+  return reinterpret_cast<SymbolFunction>(
+      Triple(DARWIN_ART_BIONIC_PROVIDER_SYSCALL, "libc.so", soname, symbol,
+             version));
+}
 
 int main() {
   DarwinArtBionicNamespace *instance = darwin_art_bionic_namespace_create();
@@ -154,7 +160,7 @@ int main() {
       return 11;
   }
   constexpr size_t kExpectedCalls[] = {11, 4,  1,  29, 3, 24, 3, 1, 13, 31, 6,
-                                       2,  3,  1,  4,  2, 18, 2, 2, 3,  2};
+                                       2,  3,  1,  4,  2, 18, 2, 2, 3,  2, 1};
   for (size_t index = 0; index < calls.size(); ++index) {
     if (calls[index] != kExpectedCalls[index])
       return 12;
@@ -163,7 +169,7 @@ int main() {
       DARWIN_ART_BIONIC_NAMESPACE_OK)
     return 13;
   darwin_art_bionic_namespace_destroy(instance);
-  std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=21 "
-                       "routes=165 libdl-soname=exact\n");
+  std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=22 "
+                       "routes=166 libdl-soname=exact\n");
   return 0;
 }

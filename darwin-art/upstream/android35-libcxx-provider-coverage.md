@@ -6,7 +6,7 @@ This gate measures coherent standalone provider ownership against the exact
 happen to exist in Darwin libc: a symbol is covered only when a project facade
 claims its Android ABI and semantic state.
 
-The current composed namespace owns 147 imports through twenty-one providers
+The current composed namespace owns 148 imports through twenty-two providers
 (including the distinct liblog owner):
 
 | Provider | Imports | Boundary |
@@ -30,10 +30,11 @@ The current composed namespace owns 147 imports through twenty-one providers
 | wide-float | 2 | ICU whitespace plus AOSP gdtoa `wcstod`/`wcstof` |
 | abort | 2 | Bionic abort/message state |
 | syslog | 3 | Android variadic capture, Bionic state, and AOSP liblog routing |
+| syscall | 1 | exact libc++ gettid/futex/libunwind-probe dispatch without raw host syscalls |
 | lifecycle | 2 | Bionic DSO finalizer ownership |
 
 Coverage by the original ABI classification is A 11/11, B 65/76, C 64/65,
-and D 7/8. The remaining 13 imports stay explicit capability failures. In
+and D 8/8. The remaining 12 imports stay explicit capability failures. In
 particular, `wcstold` remains rejected because Android arm64 uses binary128
 while Darwin arm64 uses binary64 for `long double`.
 
@@ -43,6 +44,9 @@ errno/gdtoa, and ICU owner; the wide-float archive contains none of those
 dependencies itself. The formatted-stdio archive likewise owns only
 `fprintf`/`vfprintf` and reuses the one format, stdio, allocator, and errno
 owners.
+The syscall archive owns only the exact Android `syscall@LIBC` entry and
+reuses the namespace's Bionic errno semantics; unknown numbers and forms stay
+fail-closed rather than forwarding to Darwin's syscall ABI.
 
 Run `tools/audit-android35-libcxx-provider-coverage.sh`. It hash-locks every
 input manifest, rejects providers outside the actual libc++ import set,

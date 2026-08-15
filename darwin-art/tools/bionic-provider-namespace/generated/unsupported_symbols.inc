@@ -7,7 +7,6 @@
     "strtold",
     "strtold_l",
     "swprintf",
-    "syscall",
     "ungetwc",
     "vsscanf",
     "wcstold",

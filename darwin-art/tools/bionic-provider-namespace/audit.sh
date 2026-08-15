@@ -39,16 +39,16 @@ for generated in ownership.tsv unsupported-libc.tsv ownership.inc unsupported.in
     fail "generated $generated drift"
 done
 
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 146 ]] ||
-  fail 'expected 146 libc owners'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 147 ]] ||
+  fail 'expected 147 libc owners'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libdl.so"{n++}END{print n+0}')" == 1 ]] ||
   fail 'expected one libdl owner'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="liblog.so"{n++}END{print n+0}')" == 18 ]] ||
   fail 'expected 18 liblog owners'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | cut -f1,2 | sort | uniq -d | wc -l | tr -d ' ')" == 0 ]] ||
   fail 'duplicate SONAME/symbol owners'
-[[ "$(tail -n +2 "$here/generated/unsupported-libc.tsv" | wc -l | tr -d ' ')" == 13 ]] ||
-  fail 'expected 13 exact unsupported imports'
+[[ "$(tail -n +2 "$here/generated/unsupported-libc.tsv" | wc -l | tr -d ' ')" == 12 ]] ||
+  fail 'expected 12 exact unsupported imports'
 
 if rg -n '\b(dlopen|dlsym|dlvsym|NSLookupSymbolInImage|_dyld_)\b' \
     "$here/src" "$here/include"; then
@@ -87,6 +87,7 @@ _darwin_art_bionic_process_state_resolve
 _darwin_art_bionic_pthread_resolve
 _darwin_art_bionic_stdio_resolve
 _darwin_art_bionic_strerror_resolve
+_darwin_art_bionic_syscall_resolve
 _darwin_art_bionic_syslog_resolve
 _darwin_art_bionic_time_resolve
 _darwin_art_bionic_wide_float_resolve
@@ -117,4 +118,4 @@ if grep -E '(_dlopen|_dlsym|_dlvsym|_NSLookupSymbolInImage|__dyld_)' <<<"$undefi
   fail 'host loader undefined reference present'
 fi
 
-echo 'bionic-provider-namespace: PASS libc-family=147/160 liblog=18 owned=165 unsupported=13 duplicate-owner=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'
+echo 'bionic-provider-namespace: PASS libc-family=148/160 liblog=18 owned=166 unsupported=12 duplicate-owner=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'

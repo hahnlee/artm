@@ -96,6 +96,12 @@ icu_root="$root/_aosp/external/icu-graphics"
   -c "$root/tools/bionic-syslog-facade/src/syslog.cc" -o "$objects/syslog.o"
 "$cc" -arch arm64 -isysroot "$sdk" \
   -c "$root/tools/bionic-syslog-facade/src/aapcs64_entry.S" -o "$objects/syslog-entry.o"
+"$cxx" "${cxxflags[@]}" \
+  -I"$root/tools/bionic-syscall-facade/include" \
+  -I"$root/tools/bionic-errno-tls/include" \
+  -c "$root/tools/bionic-syscall-facade/src/syscall.cc" -o "$objects/syscall.o"
+"$cc" -arch arm64 -isysroot "$sdk" \
+  -c "$root/tools/bionic-syscall-facade/src/aapcs64_entry.S" -o "$objects/syscall-entry.o"
 "$cc" "${cflags[@]}" -std=c17 -fno-builtin \
   -I"$root/tools/bionic-strerror-facade/include" \
   -I"$root/tools/bionic-strerror-facade/generated" \
@@ -136,6 +142,7 @@ native="$build/libdarwin-art-bionic-native-providers.a"
   "$objects/numeric.o" "$objects/format.o" "$objects/format-entry.o" \
   "$objects/formatted-stdio.o" "$objects/formatted-stdio-entry.o" \
   "$objects/syslog.o" "$objects/syslog-entry.o" \
+  "$objects/syscall.o" "$objects/syscall-entry.o" \
   "$objects/strerror.o" "$objects/wide-integer.o" "$objects/wide-float.o" \
   "$objects/abort.o" \
   "$objects/liblog.o" "$objects/namespace.o" \
@@ -174,6 +181,7 @@ _darwin_art_bionic_pthread_resolve
 _darwin_art_bionic_stdio_resolve
 _darwin_art_bionic_strerror_resolve
 _darwin_art_bionic_syslog_resolve
+_darwin_art_bionic_syscall_resolve
 _darwin_art_bionic_time_resolve
 _darwin_art_bionic_wide_float_resolve
 _darwin_art_bionic_wide_integer_resolve
@@ -207,6 +215,7 @@ for symbol in _darwin_art_bionic_malloc_result _darwin_art_bionic_free \
               _darwin_art_bionic_fprintf _darwin_art_bionic_vfprintf \
               _darwin_art_bionic_stdio_fwrite_core \
               _darwin_art_bionic_syslog_resolve \
+              _darwin_art_bionic_syscall_resolve _darwin_art_bionic_syscall \
               _darwin_art_liblog_provider_resolve ___android_log_write \
               _darwin_art_bionic_wide_float_resolve __Z16android_icu_initv \
               _u_hasBinaryProperty_76; do
@@ -219,4 +228,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=21 bind_builtins=sealed routes=165 Rust+C+C++=linked duplicate-provider=0 host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=22 bind_builtins=sealed routes=166 Rust+C+C++=linked duplicate-provider=0 host-fallback=0'

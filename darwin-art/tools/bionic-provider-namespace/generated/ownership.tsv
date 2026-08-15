@@ -119,6 +119,7 @@ libc.so	strtoull	LIBC	numeric
 libc.so	strtoull_l	LIBC	numeric
 libc.so	strxfrm_l	LIBC	locale
 libc.so	symlink	LIBC	filesystem
+libc.so	syscall	LIBC	syscall
 libc.so	sysconf	LIBC	time
 libc.so	syslog	LIBC	syslog
 libc.so	towlower_l	LIBC	locale

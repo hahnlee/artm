@@ -6,9 +6,9 @@ it combines the existing C, C++, and Rust provider archives so
 `darwin_art_bionic_namespace_bind_builtins` can bind every manifest owner to
 its actual resolver.
 
-The current closure contains twenty-one providers and resolves 165 exact routes:
-147 of the pinned Android 35 arm64 `libc++_shared.so` libc-family imports plus
-all 18 public `liblog.so` exports. The remaining 13 libc imports stay explicit
+The current closure contains twenty-two providers and resolves 166 exact routes:
+148 of the pinned Android 35 arm64 `libc++_shared.so` libc-family imports plus
+all 18 public `liblog.so` exports. The remaining 12 libc imports stay explicit
 capability failures. Unknown SONAMEs, symbols, or GNU versions never fall back
 to dyld or host `dlsym`.
 
@@ -40,6 +40,10 @@ The formatted-stdio owner contributes only `fprintf`, `vfprintf`, and their
 closed resolver. It composes the existing bounded Android `va_list` formatter
 with the existing provider-local Android `FILE`/`fwrite` core; the link audit
 requires exactly one format, stdio, allocator, and errno definition.
+
+The syscall owner contributes the one variadic `syscall@LIBC` entry and its
+exact libc++ gettid/futex/libunwind-probe dispatcher. It reuses the closure's
+Bionic errno owner and never forwards Linux syscall numbers to Darwin.
 
 The embedding lifetime is strict: create, bind all providers, seal, load and
 run guest DSOs, run guest static and `__cxa_finalize` teardown, unload the ELF
