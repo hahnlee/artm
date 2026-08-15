@@ -282,10 +282,19 @@ font configuration and passes the complete Android 16 `FileInputStream`,
 It also passes the complete scalar/bulk `libcore.io.Memory` owner, the full
 `UnixNativeDispatcher` and libcore `System` owners, real Darwin `lseek`, and a
 coherent ICU76 Java/native/data runtime. The result is a real Button frame and
-clean ART shutdown. Native application ELF is not loaded yet, but the
-inspection-only ARM64 ELF capability classifier is complete: it reports
-dependencies, versioned imports/exports, TLS, RELRO, relocations, constructors,
+clean ART shutdown. The first import-free Android ARM64 `ET_DYN` now maps
+directly into the Darwin process, applies two `R_AARCH64_RELATIVE` relocations,
+runs a two-entry initializer array in order, and executes an exported function.
+Unsupported imports, TLS, W+X mappings, and relocations fail as capabilities
+rather than falling through to dyld. The inspection classifier additionally
+reports dependencies, versioned imports/exports, TLS, RELRO,
 executable-stack/text-relocation requirements, and raw `svc`.
+
+The virtual DSO namespace is closed: unknown SONAMEs, symbols, and GNU versions
+cannot fall back to Darwin globals. Loader-owned `libdl` has its first five
+public APIs, while all 18 API-35 `liblog` exports resolve to and execute the
+pinned AOSP Darwin liblog implementation. Bionic libc, imported relocations,
+TLS, and ART native-library integration are still open gates.
 
 ## Ordered implementation after the Button gate
 
@@ -297,10 +306,11 @@ executable-stack/text-relocation requirements, and raw `svc`.
    `/system`, `/product`, `/apex`, and package-private `/data` prefix.
 3. Extend the completed inspection-only ARM64 ELF parser into an APK-wide
    native-capability report and dependency graph.
-4. Map a trivial Android NDK ELF library, apply relocations, run constructors,
-   and call its register-only `JNI_OnLoad` without Linux or a VM.
-5. Provide the first virtual DSOs: `libdl`, `liblog`, and a narrow but coherent
-   Bionic `libc` file/memory/string surface.
+4. Extend the passing import-free ELF execution slice with version-aware
+   imported relocations and the closed virtual DSO namespace.
+5. Call a register-only `JNI_OnLoad` through ART's native-library ownership
+   path, then add a narrow but coherent Bionic `libc` file/memory/string
+   surface.
 6. Generate the dual-PCS ART-to-native and proxy-JNIEnv thunk tables, then
    execute a JNI library with deliberately spilled scalar/reference arguments.
 7. Execute a JNI library that opens an Android-prefix file, starts a pthread,

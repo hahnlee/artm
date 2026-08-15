@@ -178,13 +178,17 @@
 - [x] Add a strict inspection-only Android ARM64 ELF gate for dependencies,
       symbols, relocations, TLS, executable-memory requirements, constructors,
       and raw `svc`; APK-wide aggregation and loader execution remain pending.
-- [ ] Map and relocate the first Android ARM64 ELF `.so` directly on Apple
-      Silicon and execute its constructors plus `JNI_OnLoad` without a VM.
+- [x] Map an import-free Android ARM64 ELF `.so` directly on Apple Silicon,
+      apply checked `R_AARCH64_RELATIVE` relocations, run its constructors, and
+      execute a no-argument export; imported symbols and `JNI_OnLoad` are the
+      next loader gates.
 - [ ] Generate both ARM64 PCS boundaries: Darwin ART calls into Android-ABI JNI
       methods, and Android code calls a proxy `JNIEnv`/`JavaVM` table rather
       than the incompatible Mach-O function table directly.
 - [ ] Provide coherent virtual `libdl`, `liblog`, and Bionic `libc` facades for
-      file, memory, string, errno, and Android-prefix path behavior.
+      file, memory, string, errno, and Android-prefix path behavior. The closed
+      `libdl` policy and executable 18-symbol AOSP `liblog` provider pass; libc
+      and loader composition remain pending.
 - [ ] Execute a realistic Tier-1 JNI library through `Java -> JNI -> Android
       ELF -> Bionic facade -> Darwin`, including pthread and TLS behavior.
 - [ ] Add capability-based VM fallback for direct Linux syscalls,
