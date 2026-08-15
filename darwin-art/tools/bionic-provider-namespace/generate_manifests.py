@@ -53,6 +53,12 @@ def main() -> int:
     claims += [(row["symbol"], "stdio") for row in rows(
         "tools/bionic-stdio-facade/manifests/imports.tsv"
     ) if not row["policy"].startswith("rejected-")]
+    claims += [(name, "wide-stdio") for name in names(
+        "tools/bionic-wide-stdio-facade/manifests/imports.tsv"
+    )]
+    claims += [(name, "scanf") for name in names(
+        "tools/bionic-scanf-facade/manifests/imports.tsv"
+    )]
     claims += [(name, "locale") for name in names(
         "tools/bionic-locale-facade/manifests/imports.tsv"
     )]
@@ -110,6 +116,8 @@ def main() -> int:
         "process-state": "DARWIN_ART_BIONIC_PROVIDER_PROCESS_STATE",
         "phdr": "DARWIN_ART_BIONIC_PROVIDER_PHDR",
         "stdio": "DARWIN_ART_BIONIC_PROVIDER_STDIO",
+        "wide-stdio": "DARWIN_ART_BIONIC_PROVIDER_WIDE_STDIO",
+        "scanf": "DARWIN_ART_BIONIC_PROVIDER_SCANF",
         "locale": "DARWIN_ART_BIONIC_PROVIDER_LOCALE",
         "numeric": "DARWIN_ART_BIONIC_PROVIDER_NUMERIC",
         "float-conversion": "DARWIN_ART_BIONIC_PROVIDER_FLOAT_CONVERSION",
@@ -134,7 +142,7 @@ def main() -> int:
         (symbol, row["category"], row["rationale"])
         for symbol, row in universe.items() if symbol not in claimed
     )
-    if len(universe) != 160 or len(claimed) != 151 or len(unsupported) != 9:
+    if len(universe) != 160 or len(claimed) != 156 or len(unsupported) != 4:
         raise SystemExit(
             f"coverage drift: universe={len(universe)} owned={len(claimed)} "
             f"unsupported={len(unsupported)}"

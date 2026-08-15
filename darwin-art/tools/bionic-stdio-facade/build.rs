@@ -1,4 +1,5 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -55,6 +56,7 @@ fn main() {
         ],
     );
     let archive = out.join("libbionic_stdio.a");
+    let _ = fs::remove_file(&archive);
     assert!(
         Command::new("ar")
             .arg("rcs")
@@ -71,6 +73,7 @@ fn main() {
         let runtime_name = match sanitizer.as_str() {
             "address" => "clang_rt.asan_osx_dynamic",
             "undefined" => "clang_rt.ubsan_osx_dynamic",
+            "thread" => "clang_rt.tsan_osx_dynamic",
             _ => panic!("unsupported C sanitizer"),
         };
         let runtime_file = format!("lib{runtime_name}.dylib");

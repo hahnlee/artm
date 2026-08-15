@@ -13,7 +13,7 @@ lifetime, while operations require an active provider. Dynamic `fopen` tokens
 are freed by `fclose`; stale use is never dereferenced and returns `EBADF` until
 allocator reuse, after which POSIX stale-FILE use remains undefined.
 
-Supported imports are `fopen`, `fclose`, `fflush`, `fileno`, `fread`, `fwrite`,
+Supported central imports are `fopen`, `fclose`, `fflush`, `fileno`, `fread`, `fwrite`,
 `fseek`, `fseeko`, `ftello`, `fputc`, `getc`, and one-byte `ungetc`. Paths and
 modes are byte strings. This vertical slice uses explicit in-memory file
 snapshots and private writable streams, so it cannot expose host paths, FILEs,
@@ -31,18 +31,32 @@ reference to that central open-file description so `FILE` buffering, fd close,
 and dup semantics have one owner; these local virtual fds must never be passed
 to the current filesystem provider.
 
-`fprintf`/`vfprintf` and all formatted varargs, wide, locale, `wchar_t`, and
-long-double functions are deliberately absent from the resolver. Android and
-Darwin PCS/`va_list`/wide layouts are not assumed compatible. The exact accepted
-and rejected libc++ imports are in `manifests/imports.tsv`.
+`fprintf`/`vfprintf` and all formatted varargs remain absent from the central
+resolver. The separately pinned wide-stdio owner supplies `fputwc`, `getwc`,
+and `ungetwc`; it never reinterprets Android `FILE` or `wchar_t` as a Darwin
+type. Activation installs an explicit callback ABI into that owner. One
+exclusive central stream lease is held for each complete wide call, so byte
+operations, another wide conversion, close, and seek cannot interleave with a
+partial UTF-8 sequence. The exact central classification remains in
+`manifests/imports.tsv`; generated namespace ownership assigns the three wide
+imports only to `wide-stdio`.
+
+Close first acquires the exclusive lease, drains a current wide operation,
+forgets the wide side-table state, and only then removes and frees the 152-byte
+token. Seek performs reset under the same exclusive lease before changing the
+cursor. Process uninstall rejects new leases, drains all current leases,
+forgets every live token, and only then uninstalls the wide callback table.
+This ordering prevents stale `mbstate_t` and pushback from surviving allocator
+address reuse. Runtime users call the refcounted process install/uninstall C
+ABI; standalone probes use the same activation path.
 
 The global table lock serializes each operation including concurrent close/use.
 Whichever acquires it before close completes; later calls return `EBADF` without
 dereferencing the freed token. The gate runs this contract from real Android
-AArch64 code. The C ABI shims and errno provider run the same E2E under Apple
-Clang ASan and UBSan; the ownership core is safe Rust with checked arithmetic,
-Clippy, formatting, exact imports, source-pinned ABI probes, and target-clean
-checks. Rust's distributed ASan runtime is not claimed by this gate.
+AArch64 code, including UTF-8 wide I/O and concurrent get/seek/close. The
+C/C++ boundary runs the same E2E under ASan, UBSan, and TSan; the ownership
+core remains safe Rust with checked arithmetic. Clippy, formatting, exact
+imports, source-pinned ABI probes, and target-clean checks complete the gate.
 Allocation exhaustion inside the safe Rust backing store is not translated to
 Android `ENOMEM`; the fixed 16 MiB cap bounds individual stream growth, but a
 future central filesystem owner must provide fallible allocation/accounting.

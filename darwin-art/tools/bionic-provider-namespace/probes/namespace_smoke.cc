@@ -112,11 +112,11 @@ DarwinArtBionicNamespace *Build(Context *contexts, Shared *shared) {
 } // namespace
 
 int main() {
-  Check(darwin_art_bionic_namespace_owned_count() == 169, "owned count");
-  Check(darwin_art_bionic_namespace_unsupported_libc_count() == 9,
+  Check(darwin_art_bionic_namespace_owned_count() == 174, "owned count");
+  Check(darwin_art_bionic_namespace_unsupported_libc_count() == 4,
         "unsupported count");
-  Check(sizeof(kExpected) / sizeof(kExpected[0]) == 169, "fixture count");
-  Check(sizeof(kUnsupported) / sizeof(kUnsupported[0]) == 9,
+  Check(sizeof(kExpected) / sizeof(kExpected[0]) == 174, "fixture count");
+  Check(sizeof(kUnsupported) / sizeof(kUnsupported[0]) == 4,
         "unsupported fixture count");
 
   {
@@ -272,6 +272,8 @@ int main() {
       DARWIN_ART_BIONIC_PROVIDER_FLOAT_CONVERSION,
       DARWIN_ART_BIONIC_PROVIDER_WIDE_INTEGER,
       DARWIN_ART_BIONIC_PROVIDER_STRERROR,
+      DARWIN_ART_BIONIC_PROVIDER_WIDE_STDIO,
+      DARWIN_ART_BIONIC_PROVIDER_SCANF,
       DARWIN_ART_BIONIC_PROVIDER_FORMATTED_STDIO,
       DARWIN_ART_BIONIC_PROVIDER_FORMAT,
       DARWIN_ART_BIONIC_PROVIDER_LOCALE,
@@ -296,8 +298,8 @@ int main() {
   darwin_art_bionic_namespace_destroy(instance);
 
   std::fprintf(stderr,
-               "bionic-provider-namespace: PASS libc-family=151/160 liblog=18 "
-               "owned=169 unsupported=9 duplicate-owner=0 threads=12 "
+               "bionic-provider-namespace: PASS libc-family=156/160 liblog=18 "
+               "owned=174 unsupported=4 duplicate-owner=0 threads=12 "
                "teardown=ordered+quiescent host-fallback=denied\n");
   return 0;
 }

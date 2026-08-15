@@ -18,6 +18,15 @@ CARGO_TARGET_DIR="$cargo_target" cargo build --quiet --release \
 cp "$cargo_target/release/libbionic_runtime_provider_closure.a" \
   "$build/libdarwin-art-bionic-rust-providers.a"
 rust="$build/libdarwin-art-bionic-rust-providers.a"
+# The production Rust closure must retain only unresolved wide/locale/ICU
+# edges. Test-only Cargo integration archives are forbidden here because they
+# would duplicate the process-wide ICU provider objects below.
+if nm -gU "$rust" 2>/dev/null |
+   awk '$2 ~ /^[TDS]$/ {print $3}' |
+   grep -E '^(_u_.*_76|__Z16android_icu_initv|_darwin_art_bionic_(fputwc|getwc|ungetwc|wide_stdio_resolve))$' >/dev/null; then
+  echo 'bionic-runtime-provider-closure: Rust archive embedded wide/ICU provider definitions' >&2
+  exit 2
+fi
 # The standalone Rust facade builds each embed its own test-local errno object.
 # The composed runtime owns errno once through the gdtoa archive, so remove all
 # bundled copies before the closure is published.
@@ -78,9 +87,27 @@ icu_root="$root/_aosp/external/icu-graphics"
   -I"$icu_root/icu4c/source/common" \
   -I"$icu_root/libandroidicuinit/include" \
   -c "$root/tools/bionic-locale-facade/src/provider.cc" -o "$objects/locale.o"
+"$cxx" "${cxxflags[@]}" -fno-builtin -fvisibility=hidden \
+  -I"$root/tools/bionic-wide-stdio-facade/include" \
+  -I"$root/tools/bionic-locale-facade/include" \
+  -c "$root/tools/bionic-wide-stdio-facade/src/provider.cc" \
+  -o "$objects/wide-stdio.o"
+"$cc" "${cflags[@]}" -std=c17 -fno-builtin \
+  -I"$root/tools/bionic-wide-stdio-facade/include" \
+  -c "$root/tools/bionic-wide-stdio-facade/src/shims.c" \
+  -o "$objects/wide-stdio-shims.o"
 "$cc" "${cflags[@]}" -std=c17 -fno-builtin \
   -I"$root/tools/bionic-numeric-facade/include" \
   -c "$root/tools/bionic-numeric-facade/src/provider.c" -o "$objects/numeric.o"
+"$cxx" "${cxxflags[@]}" -fno-builtin -fvisibility=hidden \
+  -I"$root/tools/bionic-scanf-facade/include" \
+  -I"$root/tools/bionic-numeric-facade/include" \
+  -I"$root/tools/bionic-float-conversion-facade/include" \
+  -I"$root/tools/bionic-errno-tls/include" \
+  -c "$root/tools/bionic-scanf-facade/src/scanf.cc" -o "$objects/scanf.o"
+"$cc" -arch arm64 -isysroot "$sdk" \
+  -c "$root/tools/bionic-scanf-facade/src/aapcs64_entry.S" \
+  -o "$objects/scanf-entry.o"
 "$cxx" "${cxxflags[@]}" \
   -I"$root/tools/bionic-format-facade/include" \
   -I"$root/tools/bionic-libc-allocator-facade/include" \
@@ -150,7 +177,9 @@ native="$build/libdarwin-art-bionic-native-providers.a"
 "$ar" rcs "$native" \
   "$objects/leaf.o" "$objects/allocator.o" "$objects/time.o" \
   "$objects/pthread.o" "$objects/phdr.o" "$objects/locale.o" \
-  "$objects/numeric.o" "$objects/format.o" "$objects/format-entry.o" \
+  "$objects/wide-stdio.o" "$objects/wide-stdio-shims.o" \
+  "$objects/numeric.o" "$objects/scanf.o" "$objects/scanf-entry.o" \
+  "$objects/format.o" "$objects/format-entry.o" \
   "$objects/formatted-stdio.o" "$objects/formatted-stdio-entry.o" \
   "$objects/syslog.o" "$objects/syslog-entry.o" \
   "$objects/syscall.o" "$objects/syscall-entry.o" \
@@ -192,6 +221,7 @@ _darwin_art_bionic_locale_resolve
 _darwin_art_bionic_numeric_resolve
 _darwin_art_bionic_process_state_resolve
 _darwin_art_bionic_pthread_resolve
+_darwin_art_bionic_scanf_resolve
 _darwin_art_bionic_stdio_resolve
 _darwin_art_bionic_strerror_resolve
 _darwin_art_bionic_syslog_resolve
@@ -199,6 +229,7 @@ _darwin_art_bionic_syscall_resolve
 _darwin_art_bionic_time_resolve
 _darwin_art_bionic_wide_float_resolve
 _darwin_art_bionic_wide_integer_resolve
+_darwin_art_bionic_wide_stdio_resolve
 _darwin_art_dl_phdr_resolve
 _darwin_art_liblog_provider_resolve
 EOF
@@ -221,13 +252,29 @@ nm -gU "$native" "$binary128" "$float" "$rust" \
   "$icu/libicuuc-stubdata-darwin.a" \
   "$root/_build/graphics-foundations/liblog-darwin.a" \
   > "$build/ownership-symbols.txt" 2>/dev/null
+awk '$2 ~ /^[TDS]$/ && ($3 ~ /^_u_.*_76$/ || $3 == "__Z16android_icu_initv") {print $3}' \
+  "$build/ownership-symbols.txt" | sort | uniq -d > "$build/duplicate-icu-definitions.txt"
+[[ ! -s "$build/duplicate-icu-definitions.txt" ]] || {
+  cat "$build/duplicate-icu-definitions.txt" >&2
+  echo 'bionic-runtime-provider-closure: duplicate ICU provider definitions' >&2
+  exit 2
+}
 for symbol in _darwin_art_bionic_malloc_result _darwin_art_bionic_free \
               _darwin_art_bionic_strtod _darwin_art_bionic_strtof \
               _darwin_art_bionic___errno _darwin_art_bionic_errno_store \
               _darwin_art_bionic_format_resolve \
               _darwin_art_bionic_formatted_stdio_resolve \
               _darwin_art_bionic_fprintf _darwin_art_bionic_vfprintf \
+              _darwin_art_bionic_fs_process_install \
+              _darwin_art_bionic_fs_process_uninstall \
+              _darwin_art_bionic_stdio_process_install \
+              _darwin_art_bionic_stdio_process_uninstall \
               _darwin_art_bionic_stdio_fwrite_core \
+              _darwin_art_bionic_scanf_resolve \
+              _darwin_art_bionic_sscanf _darwin_art_bionic_vsscanf \
+              _darwin_art_bionic_wide_stdio_resolve \
+              _darwin_art_bionic_fputwc _darwin_art_bionic_getwc \
+              _darwin_art_bionic_ungetwc \
               _darwin_art_bionic_syslog_resolve \
               _darwin_art_bionic_syscall_resolve _darwin_art_bionic_syscall \
               _darwin_art_liblog_provider_resolve ___android_log_write \
@@ -245,4 +292,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=23 bind_builtins=sealed routes=169 Rust+C+C++=linked duplicate-provider=0 host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=25 bind_builtins=sealed routes=174 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'

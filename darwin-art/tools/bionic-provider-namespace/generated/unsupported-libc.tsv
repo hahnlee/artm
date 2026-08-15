@@ -1,10 +1,5 @@
 symbol	class	reason
-fputwc	B	FILE-layout-wide-state
-getwc	B	FILE-layout-wide-state
 ioctl	B	linux-request-constants-varargs
 sendfile	B	off_t-kernel-errno
-sscanf	B	varargs-format-long-double
 strftime_l	C	locale-owned-state
 swprintf	B	wide-varargs-long-double
-ungetwc	B	FILE-layout-wide-state
-vsscanf	B	va_list-format-long-double

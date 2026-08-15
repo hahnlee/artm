@@ -7,9 +7,9 @@ fail(){ echo "bionic-stdio-facade: $1" >&2;exit 2; }
 source "$dir/sources.lock"
 sha(){ shasum -a 256 "$1"|awk '{print $1}'; }; check(){ [[ "$(sha "$1")" == "$2" ]]||fail "hash: $1"; }
 clean(){
- [[ -z "$(find "$dir" -type d -name target -print -quit)" ]]||fail 'local target exists'
- git -C "$root" diff --check -- tools/bionic-stdio-facade||fail 'tracked diff check'
- git -C "$root" diff --cached --check -- tools/bionic-stdio-facade||fail 'staged diff check'
+ [[ -z "$(find "$dir" "$root/tools/bionic-stdio-wide-integration" -type d -name target -print -quit)" ]]||fail 'local target exists'
+ git -C "$root" diff --check -- tools/bionic-stdio-facade tools/bionic-stdio-wide-integration||fail 'tracked diff check'
+ git -C "$root" diff --cached --check -- tools/bionic-stdio-facade tools/bionic-stdio-wide-integration||fail 'staged diff check'
  while IFS= read -r -d '' file;do
   set +e
   whitespace="$(git -C "$root" diff --no-index --check /dev/null "$file" 2>&1)"
@@ -17,7 +17,7 @@ clean(){
   set -e
   [[ -z "$whitespace" ]]||fail "untracked whitespace: $file: $whitespace"
   [[ $status -le 1 ]]||fail "could not diff-check untracked file: $file"
- done < <(git -C "$root" ls-files --others --exclude-standard -z -- tools/bionic-stdio-facade)
+ done < <(git -C "$root" ls-files --others --exclude-standard -z -- tools/bionic-stdio-facade tools/bionic-stdio-wide-integration)
 }
 clean
 imports="$root/tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv";check "$imports" "$LIBC_IMPORT_MANIFEST_SHA256"
@@ -26,6 +26,10 @@ awk -F '\t' 'NR==FNR{if(FNR>1){if($1 in declared)exit 2;declared[$1]=$2 FS $3;n+
 awk -F '\t' '$1=="__sF"&&$2=="OBJECT"&&$3=="C"{f=1}END{exit !f}' "$imports"||fail 'import __sF OBJECT C'
 for s in fclose fflush fileno fopen fputc fread fseek fseeko ftello fwrite getc ungetc;do awk -F '\t' -v s="$s" '$1==s&&$2=="FUNC"&&$3=="B"{f=1}END{exit !f}' "$imports"||fail "import $s FUNC B";done
 for s in fprintf vfprintf fputwc getwc ungetwc;do awk -F '\t' -v s="$s" '$1==s&&$2=="FUNC"&&$3=="B"{f=1}END{exit !f}' "$imports"||fail "reject import $s FUNC B";done
+wide="$root/tools/bionic-wide-stdio-facade"
+wide_imports_sha="$(awk -F= '$1=="IMPORTS_SHA256"{print $2}' "$wide/sources.lock")"
+[[ "$(sha "$wide/manifests/imports.tsv")" == "$wide_imports_sha" ]]||fail 'wide stdio manifest drift'
+for s in fputwc getwc ungetwc;do awk -F '\t' -v s="$s" '$1==s&&$2=="FUNC"&&$3=="LIBC"{f=1}END{exit !f}' "$wide/manifests/imports.tsv"||fail "wide owner import $s";done
 check "$root/tools/bionic-errno-tls/sources.lock" "$BIONIC_ERRNO_LOCK_SHA256";check "$root/tools/bionic-errno-tls/src/errno_tls.c" "$BIONIC_ERRNO_SOURCE_SHA256";check "$root/tools/bionic-errno-tls/generated/darwin_to_android.inc" "$BIONIC_ERRNO_MAPPING_SHA256"
 ndk="${ANDROID_NDK_ROOT:-$HOME/Library/Android/sdk/ndk/$NDK_REVISION}";inc="$ndk/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include";tc="$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin";cc="$tc/aarch64-linux-android35-clang";re="$tc/llvm-readelf"
 check "$ndk/source.properties" "$NDK_SOURCE_PROPERTIES_SHA256";check "$inc/stdio.h" "$NDK_STDIO_SHA256";check "$inc/bits/struct_file.h" "$NDK_STRUCT_FILE_SHA256"
@@ -57,19 +61,25 @@ fflush
 fileno
 fopen
 fputc
+fputwc
 fread
 fseek
 fseeko
 ftello
 fwrite
 getc
+getwc
 ungetc
+ungetwc
 EOF
 diff -u "$tmp/ie" "$tmp/iu"||fail 'fixture imports'
-for s in bionic_stdio_fixture_basic bionic_stdio_fixture_race_setup bionic_stdio_fixture_race_write bionic_stdio_fixture_race_close bionic_stdio_fixture_race_after;do awk -v s="$s" '$7!="UND"&&$8==s{f=1}END{exit !f}' "$tmp/d"||fail "fixture export $s";done
-CARGO_TARGET_DIR="$tmp/normal" cargo run --quiet --manifest-path "$dir/Cargo.toml" -- "$fixture"
-CARGO_TARGET_DIR="$tmp/normal" cargo clippy --quiet --manifest-path "$dir/Cargo.toml" -- -D warnings
-BIONIC_STDIO_C_SANITIZER=address CARGO_TARGET_DIR="$tmp/asan" cargo run --quiet --manifest-path "$dir/Cargo.toml" -- "$fixture"
-UBSAN_OPTIONS=halt_on_error=1 BIONIC_STDIO_C_SANITIZER=undefined CARGO_TARGET_DIR="$tmp/ubsan" cargo run --quiet --manifest-path "$dir/Cargo.toml" -- "$fixture"
-cargo fmt --manifest-path "$dir/Cargo.toml" -- --check;clean
-echo 'bionic-stdio-facade: PASS imports=14 FILE152 __sF binary-stdio race C-ASan C-UBSan target-clean'
+for s in bionic_stdio_fixture_basic bionic_stdio_fixture_race_setup bionic_stdio_fixture_race_write bionic_stdio_fixture_race_close bionic_stdio_fixture_race_after bionic_stdio_fixture_wide_race_setup bionic_stdio_fixture_wide_race_get bionic_stdio_fixture_wide_race_seek bionic_stdio_fixture_wide_race_close bionic_stdio_fixture_wide_race_after;do awk -v s="$s" '$7!="UND"&&$8==s{f=1}END{exit !f}' "$tmp/d"||fail "fixture export $s";done
+integration="$root/tools/bionic-stdio-wide-integration/Cargo.toml"
+CARGO_TARGET_DIR="$tmp/normal" cargo run --quiet --manifest-path "$integration" -- "$fixture"
+CARGO_TARGET_DIR="$tmp/normal" cargo clippy --quiet --all-targets --manifest-path "$integration" -- -D warnings
+BIONIC_STDIO_C_SANITIZER=address CARGO_TARGET_DIR="$tmp/asan" cargo run --quiet --manifest-path "$integration" -- "$fixture"
+UBSAN_OPTIONS=halt_on_error=1 BIONIC_STDIO_C_SANITIZER=undefined CARGO_TARGET_DIR="$tmp/ubsan" cargo run --quiet --manifest-path "$integration" -- "$fixture"
+BIONIC_STDIO_C_SANITIZER=thread CARGO_TARGET_DIR="$tmp/tsan" cargo run --quiet --manifest-path "$integration" -- "$fixture"
+cargo fmt --manifest-path "$dir/Cargo.toml" -- --check
+cargo fmt --manifest-path "$integration" -- --check;clean
+echo 'bionic-stdio-facade: PASS imports=17 FILE152 __sF binary+wide lease close/seek/reset+reuse C-ASan C-UBSan C-TSan target-clean'

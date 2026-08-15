@@ -39,6 +39,8 @@ constexpr const char *kProviderNames[] = {
     "numeric", "float-conversion", "format", "strerror", "wide-integer",
     "abort", "liblog", "dso-lifecycle", "wide-float", "syslog",
     "formatted-stdio", "syscall", "binary128-conversion",
+    "wide-stdio",
+    "scanf",
 };
 static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);
@@ -58,6 +60,8 @@ constexpr DarwinArtBionicProviderId kReleaseOrder[] = {
     DARWIN_ART_BIONIC_PROVIDER_FLOAT_CONVERSION,
     DARWIN_ART_BIONIC_PROVIDER_WIDE_INTEGER,
     DARWIN_ART_BIONIC_PROVIDER_STRERROR,
+    DARWIN_ART_BIONIC_PROVIDER_WIDE_STDIO,
+    DARWIN_ART_BIONIC_PROVIDER_SCANF,
     DARWIN_ART_BIONIC_PROVIDER_FORMATTED_STDIO,
     DARWIN_ART_BIONIC_PROVIDER_FORMAT,
     DARWIN_ART_BIONIC_PROVIDER_LOCALE,

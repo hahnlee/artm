@@ -12,6 +12,11 @@ unsafe extern "C" {
     fn __error() -> *mut i32;
     fn darwin_art_bionic_stdio_resolve(n: *const c_char) -> Option<unsafe extern "C" fn()>;
     fn darwin_art_bionic_errno_resolve(n: *const c_char) -> Option<unsafe extern "C" fn()>;
+    fn darwin_art_bionic_wide_stdio_resolve(
+        soname: *const c_char,
+        symbol: *const c_char,
+        version: *const c_char,
+    ) -> Option<unsafe extern "C" fn()>;
     static mut darwin_art_bionic___sF: [u8; 456];
 }
 struct Resolver;
@@ -30,18 +35,28 @@ impl SymbolResolver for Resolver {
                 "fileno" => c"fileno",
                 "fopen" => c"fopen",
                 "fputc" => c"fputc",
+                "fputwc" => c"fputwc",
                 "fread" => c"fread",
                 "fseek" => c"fseek",
                 "fseeko" => c"fseeko",
                 "ftello" => c"ftello",
                 "fwrite" => c"fwrite",
                 "getc" => c"getc",
+                "getwc" => c"getwc",
                 "ungetc" => c"ungetc",
+                "ungetwc" => c"ungetwc",
                 _ => return Ok(None),
             };
             unsafe {
                 darwin_art_bionic_stdio_resolve(n.as_ptr())
                     .or_else(|| darwin_art_bionic_errno_resolve(n.as_ptr()))
+                    .or_else(|| {
+                        darwin_art_bionic_wide_stdio_resolve(
+                            c"libc.so".as_ptr(),
+                            n.as_ptr(),
+                            c"LIBC".as_ptr(),
+                        )
+                    })
             }
             .map(|f| f as usize)
         };
@@ -55,10 +70,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         b"input".to_vec(),
     )?);
     let _activation = provider.activate()?;
-    for rejected in [c"fprintf", c"vfprintf", c"fputwc", c"getwc", c"ungetwc"] {
+    for rejected in [c"fprintf", c"vfprintf"] {
         // SAFETY: resolver reads only the static NUL-terminated name.
         if unsafe { darwin_art_bionic_stdio_resolve(rejected.as_ptr()) }.is_some() {
-            return Err("formatted/wide stdio escaped resolver rejection".into());
+            return Err("formatted stdio escaped central resolver rejection".into());
         }
     }
     let bytes = fs::read(fixture)?;
@@ -107,7 +122,49 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if image.call_exported_i32("bionic_stdio_fixture_race_after")? != 42 {
         return Err("race lifetime".into());
     }
-    println!("bionic-stdio-facade: PASS binary FILE tokens __sF concurrent-close");
+    if image.call_exported_i32("bionic_stdio_fixture_wide_race_setup")? != 42 {
+        return Err("wide race setup".into());
+    }
+    let wide_get: unsafe extern "C" fn() -> i32 = unsafe {
+        std::mem::transmute(image.lookup_exported("bionic_stdio_fixture_wide_race_get")?)
+    };
+    let wide_seek: unsafe extern "C" fn() -> i32 = unsafe {
+        std::mem::transmute(image.lookup_exported("bionic_stdio_fixture_wide_race_seek")?)
+    };
+    let wide_close: unsafe extern "C" fn() -> i32 = unsafe {
+        std::mem::transmute(image.lookup_exported("bionic_stdio_fixture_wide_race_close")?)
+    };
+    std::thread::scope(|scope| {
+        let mut workers = Vec::new();
+        for _ in 0..5 {
+            workers.push(scope.spawn(move || {
+                for _ in 0..1000 {
+                    if unsafe { wide_get() } != 42 {
+                        return false;
+                    }
+                }
+                true
+            }));
+        }
+        for _ in 0..2 {
+            workers.push(scope.spawn(move || {
+                for _ in 0..1000 {
+                    if unsafe { wide_seek() } != 42 {
+                        return false;
+                    }
+                }
+                true
+            }));
+        }
+        workers.push(scope.spawn(move || unsafe { wide_close() } == 42));
+        for worker in workers {
+            assert!(worker.join().expect("wide stdio worker"));
+        }
+    });
+    if image.call_exported_i32("bionic_stdio_fixture_wide_race_after")? != 42 {
+        return Err("wide race lifetime".into());
+    }
+    println!("bionic-stdio-facade: PASS binary+wide FILE tokens __sF concurrent-close seek-reset");
     Ok(())
 }
 fn main() -> ExitCode {

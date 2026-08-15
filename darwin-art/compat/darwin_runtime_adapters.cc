@@ -31,6 +31,7 @@
 #include "darwin_art_bionic_dso_lifecycle.h"
 #include "darwin_art_bionic_fs.h"
 #include "darwin_art_bionic_provider_namespace.h"
+#include "darwin_art_bionic_stdio.h"
 #include "darwin_art_jni_proxy.h"
 #include "nativebridge/native_bridge.h"
 #include "nativeloader/native_loader.h"
@@ -56,9 +57,12 @@ constexpr uint32_t kFixtureStrlenRouteMask = 1u << 1;
 constexpr uint32_t kFixtureOpenRouteMask = 1u << 2;
 constexpr uint32_t kFixtureReadRouteMask = 1u << 3;
 constexpr uint32_t kFixtureCloseRouteMask = 1u << 4;
+constexpr uint32_t kFixtureScanfRouteMask = 1u << 5;
+constexpr uint32_t kFixtureVsscanfRouteMask = 1u << 6;
 constexpr uint32_t kFixtureAllProviderRouteMask =
     kFixtureErrnoRouteMask | kFixtureStrlenRouteMask | kFixtureOpenRouteMask |
-    kFixtureReadRouteMask | kFixtureCloseRouteMask;
+    kFixtureReadRouteMask | kFixtureCloseRouteMask | kFixtureScanfRouteMask |
+    kFixtureVsscanfRouteMask;
 constexpr uint32_t kFixtureNativeAddEntryMask = 1u << 0;
 constexpr uint32_t kFixtureNativeSpillEntryMask = 1u << 1;
 constexpr uint32_t kFixtureNativeUsesEnvEntryMask = 1u << 2;
@@ -197,6 +201,20 @@ void ReleaseFilesystemOwner() {
   g_filesystem_owner.inode = 0;
 }
 
+bool AcquireStdioOwner(std::string* error) {
+  if (darwin_art_bionic_stdio_process_install() == 0) return true;
+  *error = "Bionic stdio process-owner install failed";
+  return false;
+}
+
+void ReleaseStdioOwner() {
+  if (darwin_art_bionic_stdio_process_uninstall() != 0) {
+    // Guest finalizers have already drained. Failure here means the central
+    // FILE/wide-state lifetime contract was violated, so continuing is unsafe.
+    std::abort();
+  }
+}
+
 std::string Sha256(const uint8_t* bytes, size_t size) {
   std::array<unsigned char, CC_SHA256_DIGEST_LENGTH> digest{};
   CC_SHA256(bytes, static_cast<CC_LONG>(size), digest.data());
@@ -255,6 +273,7 @@ struct ElfLibrary {
   DarwinArtBionicNamespace* provider_namespace = nullptr;
   DarwinArtBionicDsoLifecycleOwner* dso_lifecycle = nullptr;
   bool filesystem_owner = false;
+  bool stdio_owner = false;
   uintptr_t jni_on_load = 0;
   uintptr_t jni_on_unload = 0;
   alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)
@@ -272,6 +291,10 @@ void TeardownProviderNamespace(ElfLibrary* library) {
   if (library->filesystem_owner) {
     ReleaseFilesystemOwner();
     library->filesystem_owner = false;
+  }
+  if (library->stdio_owner) {
+    ReleaseStdioOwner();
+    library->stdio_owner = false;
   }
   if (library->provider_namespace == nullptr) return;
   const DarwinArtBionicNamespaceStatus status =
@@ -382,6 +405,10 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     route = kFixtureReadRouteMask;
   } else if (std::strcmp(request->symbol, "close") == 0) {
     route = kFixtureCloseRouteMask;
+  } else if (std::strcmp(request->symbol, "sscanf") == 0) {
+    route = kFixtureScanfRouteMask;
+  } else if (std::strcmp(request->symbol, "vsscanf") == 0) {
+    route = kFixtureVsscanfRouteMask;
   }
   if (route != 0 && library->fixture_graph) {
     g_elf_fixture_provider_routes.fetch_or(route, std::memory_order_relaxed);
@@ -873,6 +900,12 @@ void* OpenNativeLibrary(JNIEnv* env,
       return nullptr;
     }
     library->filesystem_owner = true;
+    if (!AcquireStdioOwner(&error)) {
+      SetNativeLoaderError(error_msg, "Bionic stdio setup failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    library->stdio_owner = true;
     DarwinArtElfLoadOptions options{
         DARWIN_ART_ELF_ABI_VERSION, &ResolveRuntimeProvider, library.get()};
     DarwinArtElfLifecycleCallbacks lifecycle{
@@ -995,6 +1028,10 @@ bool CloseNativeLibrary(void* handle, bool needs_native_bridge, char** error_msg
     if (library->filesystem_owner) {
       ReleaseFilesystemOwner();
       library->filesystem_owner = false;
+    }
+    if (library->stdio_owner) {
+      ReleaseStdioOwner();
+      library->stdio_owner = false;
     }
     const DarwinArtBionicNamespaceStatus namespace_status =
         darwin_art_bionic_namespace_teardown(library->provider_namespace);

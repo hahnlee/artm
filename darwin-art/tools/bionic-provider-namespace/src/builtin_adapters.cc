@@ -15,6 +15,10 @@ extern "C" SymbolFunction darwin_art_bionic_process_state_resolve(const char *);
 extern "C" void *darwin_art_dl_phdr_resolve(const char *, const char *,
                                             const char *);
 extern "C" SymbolFunction darwin_art_bionic_stdio_resolve(const char *);
+extern "C" void *darwin_art_bionic_wide_stdio_resolve(
+    const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_scanf_resolve(
+    const char *, const char *, const char *);
 extern "C" void *darwin_art_bionic_locale_resolve(const char *, const char *,
                                                   const char *);
 extern "C" SymbolFunction darwin_art_bionic_numeric_resolve(const char *);
@@ -75,6 +79,16 @@ uintptr_t Phdr(void *, const char *soname, const char *symbol,
 }
 uintptr_t Stdio(void *, const char *, const char *symbol, const char *) {
   return Address(darwin_art_bionic_stdio_resolve(symbol));
+}
+uintptr_t WideStdio(void *, const char *soname, const char *symbol,
+                    const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_wide_stdio_resolve(soname, symbol, version));
+}
+uintptr_t Scanf(void *, const char *soname, const char *symbol,
+                const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_scanf_resolve(soname, symbol, version));
 }
 uintptr_t Locale(void *, const char *soname, const char *symbol,
                  const char *version) {
@@ -142,6 +156,8 @@ constexpr DarwinArtBionicProviderResolve kResolvers[] = {
     Numeric, FloatConversion, Format, Strerror, WideInteger, Abort,
     Liblog,  DsoLifecycle, WideFloat, Syslog, FormattedStdio, Syscall,
     Binary128Conversion,
+    WideStdio,
+    Scanf,
 };
 static_assert(sizeof(kResolvers) / sizeof(kResolvers[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);

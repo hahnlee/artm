@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -8,7 +9,9 @@ extern int* __errno(void);
 extern int close(int fd);
 extern int open(const char* path, int flags, ...);
 extern intptr_t read(int fd, void* buffer, size_t count);
+extern int sscanf(const char* input, const char* format, ...);
 extern size_t strlen(const char* string);
+extern int vsscanf(const char* input, const char* format, va_list arguments);
 extern int __cxa_atexit(void (*function)(void*), void* argument, void* dso);
 
 __attribute__((visibility("hidden"))) void* __dso_handle = &__dso_handle;
@@ -17,6 +20,21 @@ static int g_root_initialized;
 static int g_bionic_provider_initialized;
 static int g_cxa_registered;
 static int g_filesystem_initialized;
+static int g_scanf_initialized;
+
+typedef struct {
+  uint64_t words[2];
+} FixtureBinary128;
+_Static_assert(sizeof(FixtureBinary128) == 16, "binary128 storage required");
+
+__attribute__((noinline)) static int FixtureVsscanf(const char* input,
+                                                    const char* format, ...) {
+  va_list arguments;
+  va_start(arguments, format);
+  int result = vsscanf(input, format, arguments);
+  va_end(arguments);
+  return result;
+}
 
 static void RootCxaFinalize(void* argument) {
   if (argument == &g_cxa_registered) {
@@ -34,9 +52,23 @@ __attribute__((constructor)) static void RootInitialize(void) {
   int random_close = random_fd < 0 ? -1 : close(random_fd);
   g_filesystem_initialized =
       random_read == (intptr_t)sizeof(random_bytes) && random_close == 0;
+  FixtureBinary128 binary128 = {0};
+  int values[8] = {0};
+  const char* binary128_format = "%Lf";
+  int scalar_count = sscanf("1.5", binary128_format, &binary128);
+  int list_count = FixtureVsscanf(
+      "1 2 3 4 5 6 7 8", "%d %d %d %d %d %d %d %d", 1.0, &values[0],
+      2.0, &values[1], 3.0, &values[2], 4.0, &values[3], 5.0, &values[4],
+      6.0, &values[5], 7.0, &values[6], 8.0, &values[7]);
+  g_scanf_initialized =
+      scalar_count == 1 && binary128.words[0] == 0 &&
+      binary128.words[1] == UINT64_C(0x3fff800000000000) && list_count == 8;
+  for (int index = 0; index < 8; ++index) {
+    g_scanf_initialized &= values[index] == index + 1;
+  }
   if (DarwinArtFixtureChildValue() == 20 && bionic_errno != NULL &&
       strlen(provider_probe) == sizeof(provider_probe) - 1 &&
-      g_filesystem_initialized == 1) {
+      g_filesystem_initialized == 1 && g_scanf_initialized == 1) {
     *bionic_errno = 4242;
     g_bionic_provider_initialized = *__errno() == 4242;
     g_root_initialized = 1;
@@ -149,6 +181,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
   (void)reserved;
   if (g_root_initialized != 1 || g_bionic_provider_initialized != 1 ||
       g_cxa_registered != 1 || g_filesystem_initialized != 1 ||
+      g_scanf_initialized != 1 ||
       DarwinArtFixtureChildValue() != 20) {
     return JNI_ERR;
   }

@@ -3,11 +3,19 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct __attribute__((aligned(8))) DarwinArtAndroidFile {
   unsigned char opaque[152];
 } DarwinArtAndroidFile;
 extern DarwinArtAndroidFile darwin_art_bionic___sF[3];
 typedef void (*DarwinArtBionicStdioFunction)(void);
+
+/* Process-scoped central owner used by the runtime. Calls are refcounted. */
+int darwin_art_bionic_stdio_process_install(void);
+int darwin_art_bionic_stdio_process_uninstall(void);
 
 DarwinArtAndroidFile* darwin_art_bionic_fopen(const char*, const char*);
 int darwin_art_bionic_fclose(DarwinArtAndroidFile*);
@@ -34,4 +42,9 @@ int64_t darwin_art_bionic_stdio_ftello_core(DarwinArtAndroidFile*);
 int darwin_art_bionic_stdio_fputc_core(int, DarwinArtAndroidFile*);
 int darwin_art_bionic_stdio_getc_core(DarwinArtAndroidFile*);
 int darwin_art_bionic_stdio_ungetc_core(int, DarwinArtAndroidFile*);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

@@ -10,6 +10,11 @@ The root constructor also opens, reads, and closes synthetic `/dev/random`.
 That call sequence proves the process-wide filesystem owner is installed before
 constructors and is visible without a pthread-local activation guard.
 
+The same constructor calls the versioned `sscanf@LIBC` and `vsscanf@LIBC`
+routes. It checks raw IEEE binary128 `%Lf` output and an Android 32-byte
+`va_list` whose pointer arguments spill after the GP register bank while FP
+distractors remain in the independent SIMD bank.
+
 `JNI_OnLoad` exercises the reverse ABI boundary through the supplied proxy
 `JavaVM` and `JNIEnv` tables: `GetEnv`, `FindClass`, and `RegisterNatives`. It
 registers eight methods covering mixed scalar/reference/FP stack tails,

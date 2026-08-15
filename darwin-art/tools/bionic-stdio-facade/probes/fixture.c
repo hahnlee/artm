@@ -2,9 +2,11 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <wchar.h>
 
 extern FILE __sF[];
 static FILE* gRace;
+static FILE* gWideRace;
 static int Equal(const unsigned char* a,const unsigned char* b,size_t n){for(size_t i=0;i<n;i++)if(a[i]!=b[i])return 0;return 1;}
 
 __attribute__((visibility("default"))) int bionic_stdio_fixture_basic(void){
@@ -30,9 +32,24 @@ __attribute__((visibility("default"))) int bionic_stdio_fixture_basic(void){
  errno=0;if(fopen("/system/input.bin","q")!=NULL||errno!=EINVAL)return 19;
  errno=0;if(fopen("","w")!=NULL||errno!=ENOENT)return 20;
  errno=0;if(fopen("/missing","rb")!=NULL||errno!=ENOENT)return 24;
+ FILE* wi=fopen("/system/input.bin","rb");if(wi==NULL)return 25;
+ if(getwc(wi)!=L'a'||(uint32_t)ungetwc((wint_t)0x1f642,wi)!=0x1f642||
+    (uint32_t)getwc(wi)!=0x1f642||getwc(wi)!=L'b')return 26;
+ if(fclose(wi)!=0)return 27;
+ FILE* wo=fopen("/wide-output.bin","w+b");if(wo==NULL)return 28;
+ if((uint32_t)fputwc((wchar_t)0x1f600,wo)!=0x1f600||
+    fseeko(wo,0,SEEK_SET)!=0||(uint32_t)getwc(wo)!=0x1f600)return 29;
+ if(ungetwc(L'X',wo)!=L'X'||fputwc(L'Y',wo)!=L'Y'||
+    fseeko(wo,0,SEEK_SET)!=0||(uint32_t)getwc(wo)!=0x1f600||
+    getwc(wo)!=L'Y'||fclose(wo)!=0)return 30;
  return 42;
 }
 __attribute__((visibility("default"))) int bionic_stdio_fixture_race_setup(void){gRace=fopen("/race","wb");return gRace?42:20;}
 __attribute__((visibility("default"))) int bionic_stdio_fixture_race_write(void){int r=fputc('r',gRace);if(r=='r')return 42;if(r==EOF&&errno==EBADF)return 42;return 21;}
 __attribute__((visibility("default"))) int bionic_stdio_fixture_race_close(void){return fclose(gRace)==0?42:22;}
 __attribute__((visibility("default"))) int bionic_stdio_fixture_race_after(void){errno=0;return fputc('x',gRace)==EOF&&errno==EBADF?42:23;}
+__attribute__((visibility("default"))) int bionic_stdio_fixture_wide_race_setup(void){gWideRace=fopen("/system/input.bin","rb");return gWideRace?42:31;}
+__attribute__((visibility("default"))) int bionic_stdio_fixture_wide_race_get(void){errno=0;wint_t r=getwc(gWideRace);return r!=WEOF||(errno==0||errno==EBADF)?42:32;}
+__attribute__((visibility("default"))) int bionic_stdio_fixture_wide_race_seek(void){errno=0;int r=fseeko(gWideRace,0,SEEK_SET);return r==0||(r==-1&&errno==EBADF)?42:33;}
+__attribute__((visibility("default"))) int bionic_stdio_fixture_wide_race_close(void){return fclose(gWideRace)==0?42:34;}
+__attribute__((visibility("default"))) int bionic_stdio_fixture_wide_race_after(void){errno=0;return getwc(gWideRace)==WEOF&&errno==EBADF?42:35;}

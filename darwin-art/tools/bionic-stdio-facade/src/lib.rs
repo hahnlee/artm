@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::ptr;
 use std::slice;
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, RwLock};
 
 const EOF: i32 = -1;
 const EBADF: i32 = 9;
@@ -21,6 +21,31 @@ pub struct AndroidFile {
 unsafe extern "C" {
     static mut darwin_art_bionic___sF: [AndroidFile; 3];
     fn darwin_art_bionic_errno_store(value: i32);
+    fn darwin_art_bionic_wide_stdio_install(
+        backend: *const WideStdioBackend,
+    ) -> *mut WideStdioActivation;
+    fn darwin_art_bionic_wide_stdio_uninstall(activation: *mut *mut WideStdioActivation) -> c_int;
+    fn darwin_art_bionic_wide_stdio_reset(file: *mut AndroidFile) -> c_int;
+    fn darwin_art_bionic_wide_stdio_forget(file: *mut AndroidFile) -> c_int;
+}
+
+#[repr(C)]
+struct WideStdioActivation {
+    _private: [u8; 0],
+}
+
+#[repr(C)]
+struct WideStdioBackend {
+    abi_version: u32,
+    struct_size: u32,
+    context: *mut c_void,
+    acquire: extern "C" fn(*mut c_void, *mut AndroidFile, *mut *mut c_void) -> c_int,
+    release: extern "C" fn(*mut c_void, *mut c_void),
+    orient_wide: extern "C" fn(*mut c_void, *mut c_void) -> c_int,
+    read_byte: extern "C" fn(*mut c_void, *mut c_void, *mut u8) -> c_int,
+    write_bytes: extern "C" fn(*mut c_void, *mut c_void, *const u8, usize) -> c_int,
+    set_error: extern "C" fn(*mut c_void, *mut c_void),
+    clear_error_and_eof: extern "C" fn(*mut c_void, *mut c_void),
 }
 
 struct Stream {
@@ -31,14 +56,21 @@ struct Stream {
     writable: bool,
     pushback: Option<u8>,
     fd: i32,
+    orientation: i8,
+    error: bool,
+    eof: bool,
+    wide_leases: usize,
+    exclusive: bool,
 }
 struct Table {
     streams: BTreeMap<usize, Stream>,
     files: BTreeMap<Vec<u8>, Vec<u8>>,
     next_fd: i32,
+    shutting_down: bool,
 }
 pub struct Provider {
     table: Mutex<Table>,
+    idle: Condvar,
 }
 static ACTIVE: OnceLock<RwLock<Option<Arc<Provider>>>> = OnceLock::new();
 fn slot() -> &'static RwLock<Option<Arc<Provider>>> {
@@ -79,6 +111,11 @@ impl Provider {
                     writable: index != 0,
                     pushback: None,
                     fd: index as i32,
+                    orientation: 0,
+                    error: false,
+                    eof: false,
+                    wide_leases: 0,
+                    exclusive: false,
                 },
             );
         }
@@ -87,7 +124,9 @@ impl Provider {
                 streams,
                 files: file_map,
                 next_fd: 20_000,
+                shutting_down: false,
             }),
+            idle: Condvar::new(),
         })
     }
     pub fn activate(self: &Arc<Self>) -> Result<Activation, &'static str> {
@@ -96,7 +135,29 @@ impl Provider {
             return Err("stdio provider already active");
         }
         *active = Some(Arc::clone(self));
-        Ok(Activation)
+        let backend = WideStdioBackend {
+            abi_version: 1,
+            struct_size: std::mem::size_of::<WideStdioBackend>() as u32,
+            context: Arc::as_ptr(self).cast_mut().cast(),
+            acquire: wide_acquire,
+            release: wide_release,
+            orient_wide: wide_orient,
+            read_byte: wide_read_byte,
+            write_bytes: wide_write_bytes,
+            set_error: wide_set_error,
+            clear_error_and_eof: wide_clear_error_and_eof,
+        };
+        // SAFETY: the provider Arc outlives the installed callback table and
+        // the C++ owner copies the table before returning.
+        let wide = unsafe { darwin_art_bionic_wide_stdio_install(&backend) };
+        if wide.is_null() {
+            active.take();
+            return Err("wide stdio backend installation failed");
+        }
+        Ok(Activation {
+            provider: Arc::clone(self),
+            wide,
+        })
     }
     pub fn stdout_bytes(&self) -> Vec<u8> {
         let base = ptr::addr_of_mut!(darwin_art_bionic___sF).cast::<AndroidFile>() as usize;
@@ -109,13 +170,133 @@ impl Provider {
             .unwrap_or_default()
     }
 }
-pub struct Activation;
+pub struct Activation {
+    provider: Arc<Provider>,
+    wide: *mut WideStdioActivation,
+}
+
+// The opaque activation is process-scoped. Its teardown synchronizes all
+// callbacks before the pointer is destroyed, so moving the owner is safe.
+unsafe impl Send for Activation {}
+
 impl Drop for Activation {
     fn drop(&mut self) {
+        let mut table = match self.provider.table.lock() {
+            Ok(table) => table,
+            Err(_) => std::process::abort(),
+        };
+        table.shutting_down = true;
+        for stream in table.streams.values_mut() {
+            stream.exclusive = true;
+        }
+        while table.streams.values().any(|stream| stream.wide_leases != 0) {
+            table = match self.provider.idle.wait(table) {
+                Ok(table) => table,
+                Err(_) => std::process::abort(),
+            };
+        }
+        let tokens: Vec<usize> = table.streams.keys().copied().collect();
+        for token in tokens {
+            // SAFETY: shutdown owns an exclusive central lease for every
+            // still-live token and no new wide lease is admitted.
+            if unsafe { darwin_art_bionic_wide_stdio_forget(token as *mut AndroidFile) } != 0 {
+                std::process::abort();
+            }
+        }
+        drop(table);
+        // SAFETY: all central leases and side-table entries were drained.
+        if unsafe { darwin_art_bionic_wide_stdio_uninstall(&mut self.wide) } != 0
+            || !self.wide.is_null()
+        {
+            std::process::abort();
+        }
         if let Ok(mut active) = slot().write() {
-            active.take();
+            if active
+                .as_ref()
+                .is_some_and(|provider| Arc::ptr_eq(provider, &self.provider))
+            {
+                active.take();
+            }
         }
     }
+}
+
+struct ProcessOwner {
+    users: usize,
+    _provider: Arc<Provider>,
+    _activation: Activation,
+}
+
+static PROCESS_OWNER: OnceLock<Mutex<Option<ProcessOwner>>> = OnceLock::new();
+
+fn process_owner() -> &'static Mutex<Option<ProcessOwner>> {
+    PROCESS_OWNER.get_or_init(|| Mutex::new(None))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_stdio_process_install() -> c_int {
+    let mut owner = match process_owner().lock() {
+        Ok(owner) => owner,
+        Err(_) => {
+            errno(EIO);
+            return -1;
+        }
+    };
+    if let Some(active) = owner.as_mut() {
+        active.users = match active.users.checked_add(1) {
+            Some(users) => users,
+            None => {
+                errno(EOVERFLOW);
+                return -1;
+            }
+        };
+        return 0;
+    }
+    let provider = match Provider::new(Vec::new(), Vec::new()) {
+        Ok(provider) => Arc::new(provider),
+        Err(_) => {
+            errno(EIO);
+            return -1;
+        }
+    };
+    let activation = match provider.activate() {
+        Ok(activation) => activation,
+        Err(_) => {
+            errno(EIO);
+            return -1;
+        }
+    };
+    *owner = Some(ProcessOwner {
+        users: 1,
+        _provider: provider,
+        _activation: activation,
+    });
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_stdio_process_uninstall() -> c_int {
+    let removed = {
+        let mut owner = match process_owner().lock() {
+            Ok(owner) => owner,
+            Err(_) => {
+                errno(EIO);
+                return -1;
+            }
+        };
+        let Some(active) = owner.as_mut() else {
+            errno(EINVAL);
+            return -1;
+        };
+        active.users -= 1;
+        if active.users == 0 {
+            owner.take()
+        } else {
+            None
+        }
+    };
+    drop(removed);
+    0
 }
 
 fn errno(value: i32) {
@@ -127,6 +308,225 @@ fn provider() -> Option<Arc<Provider>> {
         errno(EIO);
     }
     value
+}
+
+struct WideLease {
+    provider: Arc<Provider>,
+    token: usize,
+}
+
+unsafe fn clone_context(context: *mut c_void) -> Option<Arc<Provider>> {
+    let pointer = context.cast::<Provider>();
+    if pointer.is_null() {
+        return None;
+    }
+    // SAFETY: Activation holds one strong Arc for the complete callback ABI
+    // lifetime, so incrementing before constructing the temporary Arc is safe.
+    unsafe { Arc::increment_strong_count(pointer) };
+    // SAFETY: the preceding increment created this owned strong reference.
+    Some(unsafe { Arc::from_raw(pointer) })
+}
+
+unsafe fn lease_ref<'a>(lease: *mut c_void) -> Option<&'a WideLease> {
+    // SAFETY: the C++ facade passes back only the live pointer returned by
+    // wide_acquire and calls release exactly once after its final callback.
+    unsafe { lease.cast::<WideLease>().as_ref() }
+}
+
+extern "C" fn wide_acquire(
+    context: *mut c_void,
+    file: *mut AndroidFile,
+    output: *mut *mut c_void,
+) -> c_int {
+    if file.is_null() || output.is_null() {
+        errno(EBADF);
+        return -1;
+    }
+    // SAFETY: output was validated writable by the embedding callback ABI.
+    unsafe { *output = ptr::null_mut() };
+    // SAFETY: context is the Arc inner pointer held by Activation.
+    let Some(provider) = (unsafe { clone_context(context) }) else {
+        errno(EIO);
+        return -1;
+    };
+    let token = file as usize;
+    let mut table = match provider.table.lock() {
+        Ok(table) => table,
+        Err(_) => {
+            errno(EIO);
+            return -1;
+        }
+    };
+    loop {
+        if table.shutting_down {
+            errno(EIO);
+            return -1;
+        }
+        let Some(stream) = table.streams.get_mut(&token) else {
+            errno(EBADF);
+            return -1;
+        };
+        if !stream.exclusive {
+            // The wide backend contract grants one stream lease held through
+            // release(). Marking it exclusive prevents byte operations,
+            // close, seek/reset, and a second wide operation from
+            // interleaving with a multibyte conversion.
+            stream.exclusive = true;
+            stream.wide_leases = 1;
+            break;
+        }
+        table = match provider.idle.wait(table) {
+            Ok(table) => table,
+            Err(_) => {
+                errno(EIO);
+                return -1;
+            }
+        };
+    }
+    drop(table);
+    let lease = Box::new(WideLease { provider, token });
+    // SAFETY: output is live and receives ownership until wide_release.
+    unsafe { *output = Box::into_raw(lease).cast() };
+    0
+}
+
+extern "C" fn wide_release(_: *mut c_void, lease: *mut c_void) {
+    if lease.is_null() {
+        std::process::abort();
+    }
+    // SAFETY: release consumes the unique allocation returned by acquire.
+    let lease = unsafe { Box::from_raw(lease.cast::<WideLease>()) };
+    let mut table = match lease.provider.table.lock() {
+        Ok(table) => table,
+        Err(_) => std::process::abort(),
+    };
+    let shutting_down = table.shutting_down;
+    let Some(stream) = table.streams.get_mut(&lease.token) else {
+        std::process::abort();
+    };
+    if stream.wide_leases != 1 || !stream.exclusive {
+        std::process::abort();
+    }
+    stream.wide_leases = 0;
+    if !shutting_down {
+        stream.exclusive = false;
+    }
+    lease.provider.idle.notify_all();
+}
+
+fn with_wide_lease<T>(lease: *mut c_void, error: T, operation: impl FnOnce(&mut Stream) -> T) -> T {
+    // SAFETY: callback lifetime is nested within acquire/release.
+    let Some(lease) = (unsafe { lease_ref(lease) }) else {
+        errno(EIO);
+        return error;
+    };
+    let mut table = match lease.provider.table.lock() {
+        Ok(table) => table,
+        Err(_) => {
+            errno(EIO);
+            return error;
+        }
+    };
+    let Some(stream) = table.streams.get_mut(&lease.token) else {
+        errno(EIO);
+        return error;
+    };
+    if stream.wide_leases == 0 {
+        errno(EIO);
+        return error;
+    }
+    operation(stream)
+}
+
+extern "C" fn wide_orient(_: *mut c_void, lease: *mut c_void) -> c_int {
+    with_wide_lease(lease, -1, |stream| {
+        if stream.orientation == 0 {
+            stream.orientation = 1;
+        }
+        0
+    })
+}
+
+extern "C" fn wide_read_byte(_: *mut c_void, lease: *mut c_void, output: *mut u8) -> c_int {
+    if output.is_null() {
+        errno(EFAULT);
+        return -1;
+    }
+    with_wide_lease(lease, -1, |stream| {
+        if !stream.readable {
+            stream.error = true;
+            errno(EBADF);
+            return -1;
+        }
+        let byte = if let Some(byte) = stream.pushback.take() {
+            byte
+        } else if stream.position < stream.data.len() {
+            let byte = stream.data[stream.position];
+            stream.position += 1;
+            byte
+        } else {
+            stream.eof = true;
+            return 0;
+        };
+        // SAFETY: output was validated and the callback ABI grants one byte.
+        unsafe { *output = byte };
+        1
+    })
+}
+
+extern "C" fn wide_write_bytes(
+    _: *mut c_void,
+    lease: *mut c_void,
+    bytes: *const u8,
+    length: usize,
+) -> c_int {
+    if length > isize::MAX as usize || (length != 0 && bytes.is_null()) {
+        errno(if bytes.is_null() { EFAULT } else { EOVERFLOW });
+        return -1;
+    }
+    let input: &[u8] = if length == 0 {
+        &[]
+    } else {
+        // SAFETY: nonempty input was validated for the callback length.
+        unsafe { slice::from_raw_parts(bytes, length) }
+    };
+    with_wide_lease(lease, -1, |stream| {
+        if !stream.writable {
+            stream.error = true;
+            errno(EBADF);
+            return -1;
+        }
+        let Some(end) = stream.position.checked_add(length) else {
+            stream.error = true;
+            errno(EOVERFLOW);
+            return -1;
+        };
+        if end > MAX_STREAM_BYTES {
+            stream.error = true;
+            errno(EFBIG);
+            return -1;
+        }
+        if stream.position > stream.data.len() {
+            stream.data.resize(stream.position, 0);
+        }
+        if end > stream.data.len() {
+            stream.data.resize(end, 0);
+        }
+        stream.data[stream.position..end].copy_from_slice(input);
+        stream.position = end;
+        0
+    })
+}
+
+extern "C" fn wide_set_error(_: *mut c_void, lease: *mut c_void) {
+    with_wide_lease(lease, (), |stream| stream.error = true);
+}
+
+extern "C" fn wide_clear_error_and_eof(_: *mut c_void, lease: *mut c_void) {
+    with_wide_lease(lease, (), |stream| {
+        stream.error = false;
+        stream.eof = false;
+    });
 }
 unsafe fn bytes<'a>(p: *const c_char) -> Option<&'a [u8]> {
     if p.is_null() {
@@ -168,6 +568,10 @@ unsafe fn fopen(path: *const c_char, mode: *const c_char) -> *mut AndroidFile {
             return ptr::null_mut();
         }
     };
+    if table.shutting_down {
+        errno(EIO);
+        return ptr::null_mut();
+    }
     let data = if truncate {
         Vec::new()
     } else {
@@ -193,6 +597,11 @@ unsafe fn fopen(path: *const c_char, mode: *const c_char) -> *mut AndroidFile {
             writable,
             pushback: None,
             fd,
+            orientation: 0,
+            error: false,
+            eof: false,
+            wide_leases: 0,
+            exclusive: false,
         },
     );
     pointer
@@ -211,11 +620,33 @@ where
             return error;
         }
     };
-    let Some(stream) = table.streams.get_mut(&(file as usize)) else {
-        errno(EBADF);
-        return error;
-    };
-    operation(stream)
+    let token = file as usize;
+    loop {
+        if table.shutting_down {
+            errno(EIO);
+            return error;
+        }
+        let Some(stream) = table.streams.get_mut(&token) else {
+            errno(EBADF);
+            return error;
+        };
+        if !stream.exclusive {
+            return operation(stream);
+        }
+        table = match provider.idle.wait(table) {
+            Ok(table) => table,
+            Err(_) => {
+                errno(EIO);
+                return error;
+            }
+        };
+    }
+}
+
+fn orient_byte(stream: &mut Stream) {
+    if stream.orientation == 0 {
+        stream.orientation = -1;
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -237,12 +668,52 @@ pub extern "C" fn darwin_art_bionic_stdio_fclose_core(f: *mut AndroidFile) -> c_
             return EOF;
         }
     };
-    if t.streams.remove(&(f as usize)).is_some() {
-        0
-    } else {
-        errno(EBADF);
-        EOF
+    let token = f as usize;
+    loop {
+        if t.shutting_down {
+            errno(EIO);
+            return EOF;
+        }
+        let Some(stream) = t.streams.get_mut(&token) else {
+            errno(EBADF);
+            return EOF;
+        };
+        if !stream.exclusive {
+            stream.exclusive = true;
+            break;
+        }
+        t = match p.idle.wait(t) {
+            Ok(table) => table,
+            Err(_) => {
+                errno(EIO);
+                return EOF;
+            }
+        };
     }
+    while t
+        .streams
+        .get(&token)
+        .is_some_and(|stream| stream.wide_leases != 0)
+    {
+        t = match p.idle.wait(t) {
+            Ok(table) => table,
+            Err(_) => std::process::abort(),
+        };
+    }
+    // SAFETY: close holds the central exclusive lease and all wide leases
+    // drained before the token can be removed or its Box reused.
+    if unsafe { darwin_art_bionic_wide_stdio_forget(f) } != 0 {
+        if let Some(stream) = t.streams.get_mut(&token) {
+            stream.exclusive = false;
+        }
+        p.idle.notify_all();
+        return EOF;
+    }
+    let removed = t.streams.remove(&token);
+    p.idle.notify_all();
+    drop(t);
+    drop(removed);
+    0
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_stdio_fflush_core(f: *mut AndroidFile) -> c_int {
@@ -281,7 +752,9 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fread_core(
         return 0;
     }
     with_stream(f, 0, |s| {
+        orient_byte(s);
         if !s.readable {
+            s.error = true;
             errno(EBADF);
             return 0;
         }
@@ -295,6 +768,9 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fread_core(
         let take = (total - n).min(available);
         out[n..n + take].copy_from_slice(&s.data[s.position..s.position + take]);
         s.position += take;
+        if n + take < total {
+            s.eof = true;
+        }
         (n + take) / size
     })
 }
@@ -328,7 +804,9 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fwrite_core(
     }
     let input = unsafe { slice::from_raw_parts(b.cast::<u8>(), total) };
     with_stream(f, 0, |s| {
+        orient_byte(s);
         if !s.writable {
+            s.error = true;
             errno(EBADF);
             return 0;
         }
@@ -337,6 +815,7 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fwrite_core(
             return 0;
         };
         if end > MAX_STREAM_BYTES {
+            s.error = true;
             errno(EFBIG);
             return 0;
         }
@@ -357,25 +836,84 @@ pub extern "C" fn darwin_art_bionic_stdio_fseek_core(
     offset: i64,
     whence: c_int,
 ) -> c_int {
-    with_stream(f, EOF, |s| {
+    let Some(provider) = provider() else {
+        return EOF;
+    };
+    let token = f as usize;
+    let mut table = match provider.table.lock() {
+        Ok(table) => table,
+        Err(_) => {
+            errno(EIO);
+            return EOF;
+        }
+    };
+    loop {
+        if table.shutting_down {
+            errno(EIO);
+            return EOF;
+        }
+        let Some(stream) = table.streams.get_mut(&token) else {
+            errno(EBADF);
+            return EOF;
+        };
+        if !stream.exclusive {
+            stream.exclusive = true;
+            break;
+        }
+        table = match provider.idle.wait(table) {
+            Ok(table) => table,
+            Err(_) => {
+                errno(EIO);
+                return EOF;
+            }
+        };
+    }
+    while table
+        .streams
+        .get(&token)
+        .is_some_and(|stream| stream.wide_leases != 0)
+    {
+        table = match provider.idle.wait(table) {
+            Ok(table) => table,
+            Err(_) => std::process::abort(),
+        };
+    }
+    let result = {
+        let stream = table.streams.get_mut(&token).expect("exclusive stream");
         let base = match whence {
             0 => 0i128,
-            1 => s.position as i128,
-            2 => s.data.len() as i128,
+            1 => stream.position as i128,
+            2 => stream.data.len() as i128,
             _ => {
                 errno(EINVAL);
+                stream.exclusive = false;
+                provider.idle.notify_all();
                 return EOF;
             }
         };
         let value = base + offset as i128;
         if value < 0 || value > usize::MAX as i128 {
             errno(EINVAL);
+            stream.exclusive = false;
+            provider.idle.notify_all();
             return EOF;
         }
-        s.position = value as usize;
-        s.pushback = None;
-        0
-    })
+        value as usize
+    };
+    // SAFETY: seek owns the central exclusive lease and all wide calls drained.
+    if unsafe { darwin_art_bionic_wide_stdio_reset(f) } != 0 {
+        let stream = table.streams.get_mut(&token).expect("exclusive stream");
+        stream.exclusive = false;
+        provider.idle.notify_all();
+        return EOF;
+    }
+    let stream = table.streams.get_mut(&token).expect("exclusive stream");
+    stream.position = result;
+    stream.pushback = None;
+    stream.eof = false;
+    stream.exclusive = false;
+    provider.idle.notify_all();
+    0
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_stdio_ftello_core(f: *mut AndroidFile) -> i64 {
@@ -391,7 +929,9 @@ pub extern "C" fn darwin_art_bionic_stdio_ftello_core(f: *mut AndroidFile) -> i6
 pub extern "C" fn darwin_art_bionic_stdio_fputc_core(c: c_int, f: *mut AndroidFile) -> c_int {
     let byte = (c & 255) as u8;
     with_stream(f, EOF, |s| {
+        orient_byte(s);
         if !s.writable {
+            s.error = true;
             errno(EBADF);
             return EOF;
         }
@@ -400,6 +940,7 @@ pub extern "C" fn darwin_art_bionic_stdio_fputc_core(c: c_int, f: *mut AndroidFi
             return EOF;
         };
         if end > MAX_STREAM_BYTES {
+            s.error = true;
             errno(EFBIG);
             return EOF;
         }
@@ -418,7 +959,9 @@ pub extern "C" fn darwin_art_bionic_stdio_fputc_core(c: c_int, f: *mut AndroidFi
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_stdio_getc_core(f: *mut AndroidFile) -> c_int {
     with_stream(f, EOF, |s| {
+        orient_byte(s);
         if !s.readable {
+            s.error = true;
             errno(EBADF);
             return EOF;
         }
@@ -426,6 +969,7 @@ pub extern "C" fn darwin_art_bionic_stdio_getc_core(f: *mut AndroidFile) -> c_in
             return v as i32;
         }
         if s.position >= s.data.len() {
+            s.eof = true;
             EOF
         } else {
             let v = s.data[s.position];
@@ -440,11 +984,13 @@ pub extern "C" fn darwin_art_bionic_stdio_ungetc_core(c: c_int, f: *mut AndroidF
         return EOF;
     }
     with_stream(f, EOF, |s| {
+        orient_byte(s);
         if !s.readable || s.pushback.is_some() {
             return EOF;
         }
         let v = (c & 255) as u8;
         s.pushback = Some(v);
+        s.eof = false;
         v as i32
     })
 }
