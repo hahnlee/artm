@@ -221,19 +221,23 @@ cxx="$(xcrun --find clang++)"
 libtool_bin="$(xcrun --find libtool)"
 sdk_root="$(xcrun --sdk macosx --show-sdk-path)"
 "$script_dir/build-android16-asynchronous-close-monitor.sh" >/dev/null
+"$script_dir/build-android16-os-constants-darwin.sh" >/dev/null
 nativehelper="$project_root/_build/nativehelper-foundation/source/libnativehelper"
 nativehelper_archive="$project_root/_build/nativehelper-foundation/libnativehelper_jvm.a"
 liblog_archive="$project_root/_build/graphics-foundations/liblog-darwin.a"
 async_close_archive="$project_root/_build/asynchronous-close-monitor/libandroidio-darwin.a"
+os_constants_archive="$project_root/_build/os-constants/libandroid-system-os-constants-darwin.a"
 for required in \
   "$project_root/compat/libcore_darwin_linux.cc" \
   "$project_root/compat/libcore_darwin_linux.h" \
+  "$project_root/compat/darwin_os_constants.h" \
   "$project_root/probes/android16_libcore_darwin_linux_smoke.cc" \
   "$nativehelper/include/nativehelper/JNIHelp.h" \
   "$nativehelper/include_platform/nativehelper/JNIPlatformHelp.h" \
   "$nativehelper/include_jni/jni.h" \
   "$nativehelper_archive" \
   "$async_close_archive" \
+  "$os_constants_archive" \
   "$liblog_archive"; do
   [[ -e "$required" ]] || { echo "libcore-darwin-linux: missing $required" >&2; exit 2; }
 done
@@ -264,7 +268,8 @@ grep -F ' T darwin_art::libcore_darwin::RegisterLinuxNatives(_JNIEnv*)' \
 smoke="$stage/libcore-darwin-linux-smoke"
 "$cxx" "${common_flags[@]}" \
   "$project_root/probes/android16_libcore_darwin_linux_smoke.cc" \
-  "$object" "$async_close_archive" -Wl,-force_load,"$nativehelper_archive" \
+  "$object" "$async_close_archive" "$os_constants_archive" \
+  -Wl,-force_load,"$nativehelper_archive" \
   "$liblog_archive" -o "$smoke"
 smoke_output="$($smoke "$source_file")"
 [[ "$smoke_output" == libcore-darwin-linux:* ]] || fail "smoke output mismatch"
@@ -274,7 +279,8 @@ abi_object="$stage/libcore_darwin_linux_abi_smoke.o"
   -c "$project_root/compat/libcore_darwin_linux.cc" -o "$abi_object"
 abi_library="$stage/libcore-darwin-linux-abi-smoke.dylib"
 "$cxx" -arch arm64 -isysroot "$sdk_root" -dynamiclib "$abi_object" \
-  "$async_close_archive" -Wl,-force_load,"$nativehelper_archive" \
+  "$async_close_archive" "$os_constants_archive" \
+  -Wl,-force_load,"$nativehelper_archive" \
   "$liblog_archive" -o "$abi_library"
 nm -gU "$abi_library" | grep -F ' _JNI_OnLoad' >/dev/null ||
   fail "managed ABI smoke JNI_OnLoad is missing"
@@ -373,7 +379,7 @@ public final class LibcoreDarwinAbiSmoke {
             invocation.run();
             throw new AssertionError(shorty + " unexpectedly succeeded");
         } catch (ErrnoException expected) {
-            if (expected.errno != 45) {
+            if (expected.errno != 95) {
                 throw new AssertionError(shorty + " errno=" + expected.errno, expected);
             }
         }

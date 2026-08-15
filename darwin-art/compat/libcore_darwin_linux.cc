@@ -1,6 +1,7 @@
 #include "libcore_darwin_linux.h"
 
 #include "AsynchronousCloseMonitor.h"
+#include "darwin_os_constants.h"
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -26,89 +27,10 @@
 namespace darwin_art::libcore_darwin {
 namespace {
 
-constexpr int kLinuxOAccmode = 00000003;
-constexpr int kLinuxOCreat = 00000100;
-constexpr int kLinuxOExcl = 00000200;
-constexpr int kLinuxONoctty = 00000400;
-constexpr int kLinuxOTrunc = 00001000;
-constexpr int kLinuxOAppend = 00002000;
-constexpr int kLinuxONonblock = 00004000;
-constexpr int kLinuxODsync = 00010000;
-constexpr int kLinuxODirect = 00040000;
-constexpr int kLinuxOLargefile = 00100000;
-constexpr int kLinuxODirectory = 00200000;
-constexpr int kLinuxONofollow = 00400000;
-constexpr int kLinuxOCloexec = 02000000;
-constexpr int kLinuxOSync = 04010000;
-constexpr int kLinuxOPath = 010000000;
-constexpr int kLinuxOTmpfile = 020000000 | kLinuxODirectory;
-
 constexpr int kLinuxMapShared = 0x01;
 constexpr int kLinuxMapPrivate = 0x02;
 constexpr int kLinuxMapFixed = 0x10;
 constexpr int kLinuxMapAnonymous = 0x20;
-
-int TranslateOpenFlags(int linux_flags) {
-  int remaining = linux_flags;
-  const int access_mode = remaining & kLinuxOAccmode;
-  remaining &= ~kLinuxOAccmode;
-  int darwin_flags = 0;
-  switch (access_mode) {
-    case 0:
-      darwin_flags |= O_RDONLY;
-      break;
-    case 1:
-      darwin_flags |= O_WRONLY;
-      break;
-    case 2:
-      darwin_flags |= O_RDWR;
-      break;
-    default:
-      errno = EINVAL;
-      return -1;
-  }
-
-#define TRANSLATE_OPEN_FLAG(linux_flag, darwin_flag) \
-  if ((remaining & (linux_flag)) != 0) {              \
-    darwin_flags |= (darwin_flag);                    \
-    remaining &= ~(linux_flag);                       \
-  }
-  TRANSLATE_OPEN_FLAG(kLinuxOCreat, O_CREAT)
-  TRANSLATE_OPEN_FLAG(kLinuxOExcl, O_EXCL)
-  TRANSLATE_OPEN_FLAG(kLinuxONoctty, O_NOCTTY)
-  TRANSLATE_OPEN_FLAG(kLinuxOTrunc, O_TRUNC)
-  TRANSLATE_OPEN_FLAG(kLinuxOAppend, O_APPEND)
-  TRANSLATE_OPEN_FLAG(kLinuxONonblock, O_NONBLOCK)
-  // Linux O_SYNC includes the O_DSYNC bit, so consume it first.
-  if ((remaining & kLinuxOSync) == kLinuxOSync) {
-    darwin_flags |= O_SYNC;
-    remaining &= ~kLinuxOSync;
-  }
-#ifdef O_DSYNC
-  TRANSLATE_OPEN_FLAG(kLinuxODsync, O_DSYNC)
-#else
-  TRANSLATE_OPEN_FLAG(kLinuxODsync, O_SYNC)
-#endif
-#ifdef O_DIRECTORY
-  TRANSLATE_OPEN_FLAG(kLinuxODirectory, O_DIRECTORY)
-#endif
-#ifdef O_NOFOLLOW
-  TRANSLATE_OPEN_FLAG(kLinuxONofollow, O_NOFOLLOW)
-#endif
-#ifdef O_CLOEXEC
-  TRANSLATE_OPEN_FLAG(kLinuxOCloexec, O_CLOEXEC)
-#endif
-#undef TRANSLATE_OPEN_FLAG
-
-  // O_LARGEFILE is a no-op on a 64-bit Darwin process.
-  remaining &= ~kLinuxOLargefile;
-  if ((remaining & (kLinuxODirect | kLinuxOPath | kLinuxOTmpfile)) != 0 ||
-      remaining != 0) {
-    errno = ENOTSUP;
-    return -1;
-  }
-  return darwin_flags;
-}
 
 int TranslateMmapFlags(int linux_flags) {
   int remaining = linux_flags;
@@ -139,7 +61,9 @@ int TranslateMmapFlags(int linux_flags) {
 }
 
 void ThrowErrno(JNIEnv* env, const char* operation, int error) {
-  jniThrowErrnoException(env, operation, error);
+  int android_error = error;
+  os_constants::AndroidErrnoFromDarwin(error, &android_error);
+  jniThrowErrnoException(env, operation, android_error);
 }
 
 jobject MakeTimespec(JNIEnv* env, const struct timespec& value) {
@@ -257,7 +181,6 @@ jobject MakeStructUtsname(JNIEnv* env, const struct utsname& host) {
   env->DeleteLocalRef(nodename);
   env->DeleteLocalRef(release);
   env->DeleteLocalRef(version);
-  env->DeleteLocalRef(machine);
   env->DeleteLocalRef(klass);
   return result;
 }
@@ -305,7 +228,7 @@ jstring DarwinLinuxGetenv(JNIEnv* env, jobject, jstring java_name) {
 }
 
 jobject DarwinLinuxGetpwuid(JNIEnv* env, jobject, jint uid) {
-  const long configured_size = Sysconf(_SC_GETPW_R_SIZE_MAX);
+  const long configured_size = sysconf(_SC_GETPW_R_SIZE_MAX);
   const size_t buffer_size = configured_size > 0
                                  ? static_cast<size_t>(configured_size)
                                  : 1024u;
@@ -477,7 +400,8 @@ jboolean AbiSmokeBoolean(JNIEnv* env, jobject, jstring, jint) {
   return JNI_FALSE;
 }
 jlong AbiSmokeAvailableProcessors(JNIEnv* env, jobject receiver) {
-  return DarwinLinuxSysconf(env, receiver, _SC_NPROCESSORS_CONF);
+  constexpr jint kAndroidScNprocessorsConf = 96;
+  return DarwinLinuxSysconf(env, receiver, kAndroidScNprocessorsConf);
 }
 jstring AbiSmokeStrerror(JNIEnv* env, jobject receiver, jint error_number) {
   return DarwinLinuxStrerror(env, receiver, error_number);
@@ -487,6 +411,8 @@ jstring AbiSmokeStrsignal(JNIEnv* env, jobject receiver, jint signal_number) {
 }
 jint AbiSmokeWriteFile(JNIEnv* env, jobject, jstring java_path,
                        jbyteArray java_bytes) {
+  constexpr int kAndroidOCreat = 64;
+  constexpr int kAndroidOTrunc = 512;
   ScopedUtfChars path(env, java_path);
   if (path.c_str() == nullptr || java_bytes == nullptr) {
     return -1;
@@ -496,7 +422,7 @@ jint AbiSmokeWriteFile(JNIEnv* env, jobject, jstring java_path,
     return -1;
   }
   const jsize size = env->GetArrayLength(java_bytes);
-  const int fd = Open(path.c_str(), kLinuxOTrunc | kLinuxOCreat | 1, 0600);
+  const int fd = Open(path.c_str(), kAndroidOTrunc | kAndroidOCreat | 1, 0600);
   const ssize_t written =
       fd == -1 ? -1 : Write(fd, bytes, static_cast<size_t>(size));
   struct stat status {};
@@ -743,8 +669,9 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
 #endif
 
 int Open(const char* path, int linux_flags, mode_t mode) {
-  const int flags = TranslateOpenFlags(linux_flags);
-  if (flags == -1) {
+  int flags = 0;
+  if (!os_constants::DarwinOpenFlagsFromAndroid(linux_flags, &flags)) {
+    errno = ENOTSUP;
     return -1;
   }
   int result;
@@ -801,7 +728,14 @@ int Munmap(void* address, size_t byte_count) {
   return munmap(address, byte_count);
 }
 
-long Sysconf(int name) { return sysconf(name); }
+long Sysconf(int name) {
+  int darwin_name = 0;
+  if (!os_constants::DarwinSysconfNameFromAndroid(name, &darwin_name)) {
+    errno = EINVAL;
+    return -1;
+  }
+  return sysconf(darwin_name);
+}
 
 bool RegisterLinuxNatives(JNIEnv* env) {
   jclass klass = env->FindClass("libcore/io/Linux");

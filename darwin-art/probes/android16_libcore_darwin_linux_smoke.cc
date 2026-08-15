@@ -28,8 +28,9 @@ int main(int argc, char** argv) {
     return 2;
   }
   errno = 0;
+  constexpr int kAndroidScNprocessorsConf = 96;
   const long processors =
-      darwin_art::libcore_darwin::Sysconf(_SC_NPROCESSORS_CONF);
+      darwin_art::libcore_darwin::Sysconf(kAndroidScNprocessorsConf);
   if (processors <= 0) {
     std::fprintf(stderr, "sysconf(_SC_NPROCESSORS_CONF): result=%ld errno=%s\n",
                  processors, std::strerror(errno));
