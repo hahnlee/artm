@@ -1,0 +1,153 @@
+#include "darwin_art_bionic_allocator.h"
+
+#include <errno.h>
+#include <stdlib.h>
+
+_Static_assert(sizeof(void*) == 8, "Android arm64 and Darwin arm64 use 64-bit pointers");
+_Static_assert(sizeof(size_t) == 8, "Android arm64 and Darwin arm64 use 64-bit size_t");
+_Static_assert(sizeof(int) == 4, "Android arm64 and Darwin arm64 use 32-bit int");
+
+static void* DarwinMalloc(size_t size) {
+  const int saved_errno = errno;
+  void* result = malloc(size);
+  errno = saved_errno;
+  return result;
+}
+
+static void DarwinFree(void* pointer) {
+  const int saved_errno = errno;
+  free(pointer);
+  errno = saved_errno;
+}
+
+static void* DarwinRealloc(void* pointer, size_t size) {
+  const int saved_errno = errno;
+  void* result = realloc(pointer, size);
+  errno = saved_errno;
+  return result;
+}
+
+static int DarwinPosixMemalign(void** output, size_t alignment, size_t size) {
+  const int saved_errno = errno;
+  const int result = posix_memalign(output, alignment, size);
+  errno = saved_errno;
+  return result;
+}
+
+static DarwinArtBionicAllocationResult AllocationResult(void* pointer) {
+  DarwinArtBionicAllocationResult result;
+  result.pointer = pointer;
+  result.bionic_errno = pointer == NULL ? DARWIN_ART_BIONIC_ENOMEM : 0;
+  return result;
+}
+
+DarwinArtBionicAllocationResult darwin_art_bionic_malloc_result(size_t size) {
+  /* Bionic guarantees a non-null, freeable allocation for malloc(0). */
+  return AllocationResult(DarwinMalloc(size == 0 ? 1 : size));
+}
+
+void* darwin_art_bionic_malloc(size_t size) {
+  return darwin_art_bionic_malloc_result(size).pointer;
+}
+
+void darwin_art_bionic_free(void* pointer) {
+  DarwinFree(pointer);
+}
+
+DarwinArtBionicAllocationResult darwin_art_bionic_realloc_result(void* pointer,
+                                                                 size_t size) {
+  if (pointer == NULL) return darwin_art_bionic_malloc_result(size);
+  if (size == 0) {
+    DarwinFree(pointer);
+    DarwinArtBionicAllocationResult result = {NULL, 0};
+    return result;
+  }
+  return AllocationResult(DarwinRealloc(pointer, size));
+}
+
+void* darwin_art_bionic_realloc(void* pointer, size_t size) {
+  return darwin_art_bionic_realloc_result(pointer, size).pointer;
+}
+
+static int ValidPosixAlignment(size_t alignment) {
+  return alignment >= sizeof(void*) && (alignment & (alignment - 1)) == 0;
+}
+
+DarwinArtBionicAllocationResult darwin_art_bionic_posix_memalign_result(
+    size_t alignment, size_t size) {
+  if (!ValidPosixAlignment(alignment)) {
+    DarwinArtBionicAllocationResult invalid = {NULL, DARWIN_ART_BIONIC_EINVAL};
+    return invalid;
+  }
+
+  void* pointer = NULL;
+  /* Keep the Bionic size-zero result non-null and freeable. */
+  const int backend_result =
+      DarwinPosixMemalign(&pointer, alignment, size == 0 ? 1 : size);
+  if (backend_result != 0 || pointer == NULL) {
+    DarwinArtBionicAllocationResult exhausted = {NULL, DARWIN_ART_BIONIC_ENOMEM};
+    return exhausted;
+  }
+  DarwinArtBionicAllocationResult success = {pointer, 0};
+  return success;
+}
+
+int darwin_art_bionic_posix_memalign(void** output, size_t alignment, size_t size) {
+  if (output == NULL) return DARWIN_ART_BIONIC_EINVAL;
+  DarwinArtBionicAllocationResult result =
+      darwin_art_bionic_posix_memalign_result(alignment, size);
+  if (result.bionic_errno == 0) *output = result.pointer;
+  return result.bionic_errno;
+}
+
+static int NameCompare(const char* left, const char* right) {
+  while (*left == *right && *left != '\0') {
+    ++left;
+    ++right;
+  }
+  return (unsigned char)*left < (unsigned char)*right
+             ? -1
+             : ((unsigned char)*left != (unsigned char)*right);
+}
+
+static const DarwinArtBionicAllocatorBinding kBindings[] = {
+    {"free", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_free,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
+         DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
+         DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE},
+    {"malloc", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_malloc,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
+         DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
+         DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM},
+    {"posix_memalign",
+     (DarwinArtBionicAllocatorFunction)darwin_art_bionic_posix_memalign,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
+         DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
+         DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE},
+    {"realloc", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_realloc,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
+         DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
+         DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM},
+};
+
+const DarwinArtBionicAllocatorBinding* darwin_art_bionic_allocator_table(size_t* count) {
+  if (count != NULL) *count = sizeof(kBindings) / sizeof(kBindings[0]);
+  return kBindings;
+}
+
+DarwinArtBionicAllocatorFunction darwin_art_bionic_allocator_resolve(
+    const char* import_name) {
+  if (import_name == NULL) return NULL;
+  size_t low = 0;
+  size_t high = sizeof(kBindings) / sizeof(kBindings[0]);
+  while (low < high) {
+    const size_t middle = low + (high - low) / 2;
+    const int order = NameCompare(import_name, kBindings[middle].import_name);
+    if (order == 0) return kBindings[middle].address;
+    if (order < 0)
+      high = middle;
+    else
+      low = middle + 1;
+  }
+  return NULL;
+}
