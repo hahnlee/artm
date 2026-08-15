@@ -16,13 +16,13 @@ static jlong NativeSpill(JNIEnv* env, jclass fixture_class, jboolean z, jbyte b,
                          jchar c, jshort s, jint i, jlong j, jobject reference,
                          jfloat f0, jdouble d0, jfloat f1, jdouble d1, jfloat f2,
                          jdouble d2, jfloat f3, jdouble d3, jfloat f4,
-                         jdouble d4) {
+                         jfloat f5, jdouble d4) {
   (void)env;
   (void)fixture_class;
   union {
     jfloat value;
     uint32_t bits;
-  } floats[] = {{f0}, {f1}, {f2}, {f3}, {f4}};
+  } floats[] = {{f0}, {f1}, {f2}, {f3}, {f4}, {f5}};
   union {
     jdouble value;
     uint64_t bits;
@@ -40,6 +40,7 @@ static jlong NativeSpill(JNIEnv* env, jclass fixture_class, jboolean z, jbyte b,
     digest = Mix(digest, floats[index].bits);
     digest = Mix(digest, doubles[index].bits);
   }
+  digest = Mix(digest, floats[5].bits);
   return (jlong)digest;
 }
 
@@ -59,7 +60,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
   const JNINativeMethod methods[] = {
       {"nativeAdd", "(IJI)J", (void*)&NativeAdd},
       {"nativeSpill",
-       "(ZBCSIJLjava/lang/Object;FDFDFDFDFD)J",
+       "(ZBCSIJLjava/lang/Object;FDFDFDFDFFD)J",
        (void*)&NativeSpill},
   };
   if ((*env)->RegisterNatives(env, fixture_class, methods, 2) != JNI_OK) {

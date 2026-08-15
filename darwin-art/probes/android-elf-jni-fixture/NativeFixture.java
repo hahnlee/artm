@@ -22,5 +22,6 @@ public final class NativeFixture {
             float f3,
             double d3,
             float f4,
+            float f5,
             double d4);
 }
