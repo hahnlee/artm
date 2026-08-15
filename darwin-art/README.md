@@ -131,15 +131,23 @@ operations while preserving the existing raster and direct-IOSurface golden
 hashes. A narrow locked patch now keeps Darwin's host platform branches while
 selecting Android's `@CriticalNative` function signatures and Skia's no-RTTI
 contract; representative Canvas/Paint symbols are checked to contain no
-`JNIEnv*` or `jclass` parameters. The four JNI/HWUI objects are still compile
-proofs rather than safe ART registrars because their complete module dependency
-and registration closure is not linked yet.
+`JNIEnv*` or `jclass` parameters. The original four-object gate is now followed
+by module-complete host builds: all 60 common GraphicsJNI translation units plus
+the Darwin host TU, the 51-entry Layoutlib registrar in `jni_runtime.cpp`
+dependency order, all 81 Darwin `libhwui_static` core/host members, the five
+APEX-common graphics TUs, and the 36-member Darwin `libandroidfw` composition.
+These are real upstream module archives, but they are not linked into the ART
+runtime yet because the remaining hostgraphics/image/JPEG/UltraHDR and Skia
+source-selection closure must be completed first.
 
 The first platform foundation modules are also real Android.bp-derived ARM64
 archives rather than symbol stubs:
 
 ```bash
 cargo run -p art-bootstrap -- build-hwui-canvas
+cargo run -p art-bootstrap -- build-android-graphics-jni
+cargo run -p art-bootstrap -- build-hwui-static
+cargo run -p art-bootstrap -- build-androidfw
 cargo run -p art-bootstrap -- build-graphics-foundations
 cargo run -p art-bootstrap -- build-nativehelper
 cargo run -p art-bootstrap -- build-ui-types
@@ -181,6 +189,18 @@ subtrees (about 49 MiB instead of the roughly 425 MiB full project), builds all
 458 translation units, and stages ICU 76 data. The Minikin acceptance then
 shapes Latin, Arabic bidi, Hangul, and a one-glyph `fi` GSUB ligature through
 the actual FreeType → Minikin → HarfBuzz → ICU closure.
+
+The GraphicsJNI and HWUI gates also use history-free sparse inputs. GraphicsJNI
+adds about 1.9 MiB of revision-locked JPEG, UltraHDR, GUI, media-NDK, and
+libhardware headers; HWUI adds about 2.2 MiB including the exact upstream
+`sysprop_cpp` generator. The generated 51-class property is derived by filtering
+Layoutlib's supported map through Android's authoritative `jni_runtime.cpp`
+registration order, so an empty or dependency-misordered registrar cannot pass.
+The runtime already has an atomic real-graphics build mode: it removes the fake
+Paint/RenderNode registrations and uses Bitmap creation, a real bitmap-backed
+Canvas, `DecorView.draw`, and `Bitmap.getPixels`. That mode intentionally remains
+unlinked until every module provider is present; the default ProbeCanvas path
+continues to pass end to end.
 
 `build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
 depfile for every translation unit; the bootstrapper fingerprints the complete

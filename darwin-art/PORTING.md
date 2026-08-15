@@ -125,9 +125,21 @@
       raster pinned Roboto glyphs through the AOSP FreeType/libpng/zlib chain.
 - [x] Build Android ICU common/i18n/stubdata/init for Darwin and exercise the
       complete Minikin/HarfBuzz/FreeType/ICU shaping path with pinned fonts.
+- [x] Build all 60 common GraphicsJNI sources plus the Darwin host source,
+      generate the 51-class Layoutlib property in `jni_runtime.cpp` dependency
+      order, and verify every registrar target under Android CriticalNative ABI.
+- [x] Build the complete Darwin `libhwui_static` core/host selection (81
+      members including upstream-generated HWUI properties) and the separate
+      five-member APEX-common archive without duplicating GraphicsJNI.
+- [x] Build the complete Darwin host `libandroidfw` composition: 34 common
+      sources plus whole-static PathUtils and incfs map support.
 - [ ] Close the complete upstream Canvas/Paint registrar dependency graph with
       GraphicsJNI, software `libhwui_static`, Minikin, HarfBuzz, FreeType, ICU,
       androidfw, and native utility modules; do not substitute per-symbol stubs.
+- [x] Make the runtime's real-graphics mode atomically exclude Darwin
+      Paint/RenderNode handles, configure the source-derived registrar only
+      after minimal System initialization, and prepare the Bitmap-backed Canvas
+      render path without changing the default probe backend.
 - [ ] Register the complete graphics native map atomically after libcore/System
       initialization, then replace `ProbeCanvas` with a real `Bitmap`-backed
       `Canvas` before attempting direct IOSurface backing.

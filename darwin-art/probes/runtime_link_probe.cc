@@ -184,71 +184,140 @@ static jboolean PresentContent(JNIEnv* env, jclass, jobject view, jint width,
       height > 4096) {
     return JNI_FALSE;
   }
-  jclass canvas_class = g_probe_canvas_class;
+  const darwin_art::FrameworkGraphicsBackend graphics_backend =
+      darwin_art::GetFrameworkGraphicsBackend();
+  const bool use_real_graphics =
+      graphics_backend ==
+      darwin_art::FrameworkGraphicsBackend::kAndroidGraphics;
+  jclass canvas_class = nullptr;
+  jclass real_canvas_class = nullptr;
+  jclass bitmap_class = nullptr;
+  jclass bitmap_config_class = nullptr;
+  jclass view_class = nullptr;
+  jobject bitmap = nullptr;
   jobject canvas = nullptr;
-  if (canvas_class != nullptr) {
+  jintArray pixels = nullptr;
+  jmethodID snapshot = nullptr;
+  auto release_render_target = [&]() {
+    env->DeleteLocalRef(pixels);
+    env->DeleteLocalRef(view_class);
+    env->DeleteLocalRef(canvas);
+    env->DeleteLocalRef(bitmap);
+    env->DeleteLocalRef(real_canvas_class);
+    env->DeleteLocalRef(bitmap_config_class);
+    env->DeleteLocalRef(bitmap_class);
+  };
+  if (!use_real_graphics) {
+    canvas_class = g_probe_canvas_class;
+    if (canvas_class == nullptr) {
+      std::cerr << "ART Android view: ProbeCanvas class is not rooted\n";
+      return JNI_FALSE;
+    }
     art::ScopedObjectAccess soa(env);
     art::ObjPtr<art::mirror::Class> canvas_mirror =
         soa.Decode<art::mirror::Class>(canvas_class);
     canvas = soa.AddLocalReference<jobject>(canvas_mirror->AllocObject(soa.Self()));
+    jmethodID initialize =
+        canvas == nullptr || env->ExceptionCheck()
+            ? nullptr
+            : env->GetMethodID(canvas_class, "initialize", "(II)V");
+    if (!env->ExceptionCheck()) {
+      snapshot = env->GetMethodID(canvas_class, "snapshot", "()[I");
+    }
+    if (canvas != nullptr && initialize != nullptr && snapshot != nullptr &&
+        !env->ExceptionCheck()) {
+      env->CallVoidMethod(canvas, initialize, width, height);
+    }
+  } else {
+    bitmap_class = env->FindClass("android/graphics/Bitmap");
+    if (!env->ExceptionCheck()) {
+      bitmap_config_class = env->FindClass("android/graphics/Bitmap$Config");
+    }
+    if (!env->ExceptionCheck()) {
+      real_canvas_class = env->FindClass("android/graphics/Canvas");
+    }
+    canvas_class = real_canvas_class;
+    jfieldID argb_8888 = nullptr;
+    jobject bitmap_config = nullptr;
+    jmethodID create_bitmap = nullptr;
+    jmethodID canvas_constructor = nullptr;
+    if (bitmap_class != nullptr && bitmap_config_class != nullptr &&
+        canvas_class != nullptr && !env->ExceptionCheck()) {
+      argb_8888 = env->GetStaticFieldID(
+          bitmap_config_class, "ARGB_8888",
+          "Landroid/graphics/Bitmap$Config;");
+    }
+    if (argb_8888 != nullptr && !env->ExceptionCheck()) {
+      bitmap_config =
+          env->GetStaticObjectField(bitmap_config_class, argb_8888);
+    }
+    if (bitmap_config != nullptr && !env->ExceptionCheck()) {
+      create_bitmap = env->GetStaticMethodID(
+          bitmap_class, "createBitmap",
+          "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
+    }
+    if (create_bitmap != nullptr && !env->ExceptionCheck()) {
+      bitmap = env->CallStaticObjectMethod(bitmap_class, create_bitmap, width,
+                                           height, bitmap_config);
+    }
+    if (bitmap != nullptr && !env->ExceptionCheck()) {
+      canvas_constructor = env->GetMethodID(
+          canvas_class, "<init>", "(Landroid/graphics/Bitmap;)V");
+    }
+    if (canvas_constructor != nullptr && !env->ExceptionCheck()) {
+      canvas = env->NewObject(canvas_class, canvas_constructor, bitmap);
+    }
+    env->DeleteLocalRef(bitmap_config);
   }
-  if (canvas == nullptr || env->ExceptionCheck()) {
-    std::cerr << "ART Android view: ProbeCanvas allocation failed\n";
+  const bool real_target_missing = use_real_graphics && bitmap == nullptr;
+  if (canvas == nullptr || real_target_missing || env->ExceptionCheck()) {
+    std::cerr << "ART Android view: "
+              << (use_real_graphics
+                      ? "Bitmap/Canvas(Bitmap) setup failed\n"
+                      : "ProbeCanvas setup failed\n");
     art::Thread* self = art::Thread::Current();
     if (self != nullptr && self->IsExceptionPending()) {
       std::cerr << self->GetException()->Dump() << "\n";
     }
+    release_render_target();
     return JNI_FALSE;
   }
-  jmethodID initialize =
-      canvas_class == nullptr
-          ? nullptr
-          : env->GetMethodID(canvas_class, "initialize", "(II)V");
-  jmethodID snapshot =
-      canvas_class == nullptr
-          ? nullptr
-          : env->GetMethodID(canvas_class, "snapshot", "()[I");
-  if (canvas == nullptr || initialize == nullptr || snapshot == nullptr ||
-      env->ExceptionCheck()) {
-    std::cerr << "ART Android view: ProbeCanvas setup failed\n";
-    art::Thread* self = art::Thread::Current();
-    if (self != nullptr && self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
-    }
-    return JNI_FALSE;
-  }
-  jclass view_class = env->FindClass("android/view/View");
+  view_class = env->FindClass("android/view/View");
+  auto get_view_method = [&](const char* name,
+                             const char* signature) -> jmethodID {
+    return view_class == nullptr || env->ExceptionCheck()
+               ? nullptr
+               : env->GetMethodID(view_class, name, signature);
+  };
+  auto get_view_field = [&](const char* name) -> jfieldID {
+    return view_class == nullptr || env->ExceptionCheck()
+               ? nullptr
+               : env->GetFieldID(view_class, name, "I");
+  };
   jmethodID layout =
-      view_class == nullptr
-          ? nullptr
-          : env->GetMethodID(view_class, "layout", "(IIII)V");
+      get_view_method("layout", "(IIII)V");
   jmethodID measure =
-      view_class == nullptr
-          ? nullptr
-          : env->GetMethodID(view_class, "measure", "(II)V");
+      get_view_method("measure", "(II)V");
   jmethodID draw =
-      view_class == nullptr
-          ? nullptr
-          : env->GetMethodID(view_class, "draw", "(Landroid/graphics/Canvas;)V");
-  jfieldID view_left =
-      view_class == nullptr ? nullptr : env->GetFieldID(view_class, "mLeft", "I");
-  jfieldID view_top =
-      view_class == nullptr ? nullptr : env->GetFieldID(view_class, "mTop", "I");
-  jfieldID view_right =
-      view_class == nullptr ? nullptr : env->GetFieldID(view_class, "mRight", "I");
-  jfieldID view_bottom =
-      view_class == nullptr ? nullptr : env->GetFieldID(view_class, "mBottom", "I");
-  if (canvas == nullptr || initialize == nullptr || snapshot == nullptr ||
-      measure == nullptr || layout == nullptr || draw == nullptr ||
-      view_left == nullptr ||
-      view_top == nullptr || view_right == nullptr || view_bottom == nullptr ||
+      get_view_method("draw", "(Landroid/graphics/Canvas;)V");
+  jfieldID view_left = get_view_field("mLeft");
+  jfieldID view_top = get_view_field("mTop");
+  jfieldID view_right = get_view_field("mRight");
+  jfieldID view_bottom = get_view_field("mBottom");
+  if (canvas == nullptr || measure == nullptr || layout == nullptr ||
+      draw == nullptr || view_left == nullptr || view_top == nullptr ||
+      view_right == nullptr || view_bottom == nullptr ||
       env->ExceptionCheck()) {
+    release_render_target();
     return JNI_FALSE;
   }
 
-  env->CallVoidMethod(canvas, initialize, width, height);
   constexpr jint kExactly = 0x40000000;
   env->CallVoidMethod(view, measure, kExactly | width, kExactly | height);
+  if (env->ExceptionCheck()) {
+    release_render_target();
+    return JNI_FALSE;
+  }
   // ViewRoot normally installs the surface bounds before the first traversal.
   // The Darwin window policy owns that root, so seed the same bounds before
   // layout. This prevents a detached View from trying to notify Android's
@@ -257,16 +326,40 @@ static jboolean PresentContent(JNIEnv* env, jclass, jobject view, jint width,
   env->SetIntField(view, view_top, 0);
   env->SetIntField(view, view_right, width);
   env->SetIntField(view, view_bottom, height);
+  if (env->ExceptionCheck()) {
+    release_render_target();
+    return JNI_FALSE;
+  }
   env->CallVoidMethod(view, layout, 0, 0, width, height);
+  if (env->ExceptionCheck()) {
+    release_render_target();
+    return JNI_FALSE;
+  }
   env->CallVoidMethod(view, draw, canvas);
-  jintArray pixels = static_cast<jintArray>(env->CallObjectMethod(canvas, snapshot));
-  const jboolean presented =
-      env->ExceptionCheck() || pixels == nullptr
-          ? JNI_FALSE
-          : PresentFrame(env, nullptr, width, height, pixels);
-  env->DeleteLocalRef(pixels);
-  env->DeleteLocalRef(view_class);
-  env->DeleteLocalRef(canvas);
+  if (env->ExceptionCheck()) {
+    release_render_target();
+    return JNI_FALSE;
+  }
+  if (!use_real_graphics) {
+    pixels = static_cast<jintArray>(env->CallObjectMethod(canvas, snapshot));
+  } else {
+    const jsize pixel_count = static_cast<jsize>(width * height);
+    pixels = env->NewIntArray(pixel_count);
+    jmethodID get_pixels =
+        bitmap_class == nullptr || env->ExceptionCheck()
+            ? nullptr
+            : env->GetMethodID(bitmap_class, "getPixels", "([IIIIIII)V");
+    if (pixels != nullptr && get_pixels != nullptr && !env->ExceptionCheck()) {
+      env->CallVoidMethod(bitmap, get_pixels, pixels, 0, width, 0, 0, width,
+                          height);
+    }
+  }
+  if (env->ExceptionCheck() || pixels == nullptr) {
+    release_render_target();
+    return JNI_FALSE;
+  }
+  const jboolean presented = PresentFrame(env, nullptr, width, height, pixels);
+  release_render_target();
   return presented;
 }
 
@@ -452,10 +545,6 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     }
     return 21;
   }
-  art::Handle<art::mirror::Class> probe_canvas_handle = hs.NewHandle(
-      class_linker->FindClass(self, "Ldev/darwinart/probe/ProbeCanvas;",
-                              sizeof("Ldev/darwinart/probe/ProbeCanvas;") - 1u,
-                              app_loader));
   art::Handle<art::mirror::Class> content_root_handle = hs.NewHandle(
       class_linker->FindClass(self, "Ldev/darwinart/probe/ProbeContentRoot;",
                               sizeof("Ldev/darwinart/probe/ProbeContentRoot;") - 1u,
@@ -465,8 +554,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                               "Ldev/darwinart/probe/ProbePackageManager;",
                               sizeof("Ldev/darwinart/probe/ProbePackageManager;") - 1u,
                               app_loader));
-  if (probe_canvas_handle == nullptr || content_root_handle == nullptr ||
-      package_manager_handle == nullptr ||
+  if (content_root_handle == nullptr || package_manager_handle == nullptr ||
       self->IsExceptionPending()) {
     std::cerr << "ART Android window: Darwin Canvas/Window lookup failed\n";
     if (self->IsExceptionPending()) {
@@ -484,8 +572,21 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       soa.AddLocalReference<jclass>(probe_resources_handle.Get());
   jclass probe_view_class =
       soa.AddLocalReference<jclass>(probe_view_handle.Get());
-  jclass probe_canvas_class =
-      soa.AddLocalReference<jclass>(probe_canvas_handle.Get());
+  jclass probe_canvas_class = nullptr;
+  if (darwin_art::GetFrameworkGraphicsBackend() ==
+      darwin_art::FrameworkGraphicsBackend::kProbeCanvas) {
+    art::ObjPtr<art::mirror::Class> probe_canvas = class_linker->FindClass(
+        self, "Ldev/darwinart/probe/ProbeCanvas;",
+        sizeof("Ldev/darwinart/probe/ProbeCanvas;") - 1u, app_loader);
+    if (probe_canvas == nullptr || self->IsExceptionPending()) {
+      std::cerr << "ART Android window: ProbeCanvas lookup failed\n";
+      if (self->IsExceptionPending()) {
+        std::cerr << self->GetException()->Dump() << "\n";
+      }
+      return 21;
+    }
+    probe_canvas_class = soa.AddLocalReference<jclass>(probe_canvas);
+  }
   jclass content_root_class =
       soa.AddLocalReference<jclass>(content_root_handle.Get());
   jclass package_manager_class =
@@ -504,13 +605,20 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 26;
   }
   art::Runtime::Current()->FinishMinimalForDarwinProbe();
+  if (!darwin_art::RegisterFrameworkGraphicsNatives(self->GetJniEnv())) {
+    std::cerr << "ART Darwin graphics: native registration failed\n";
+    return 35;
+  }
 
   JNIEnv* env = self->GetJniEnv();
-  g_probe_canvas_class = static_cast<jclass>(
-      env->NewGlobalRef(probe_canvas_class));
-  if (g_probe_canvas_class == nullptr || env->ExceptionCheck()) {
-    std::cerr << "ART Android window: ProbeCanvas global root failed\n";
-    return 32;
+  if (darwin_art::GetFrameworkGraphicsBackend() ==
+      darwin_art::FrameworkGraphicsBackend::kProbeCanvas) {
+    g_probe_canvas_class =
+        static_cast<jclass>(env->NewGlobalRef(probe_canvas_class));
+    if (g_probe_canvas_class == nullptr || env->ExceptionCheck()) {
+      std::cerr << "ART Android window: ProbeCanvas global root failed\n";
+      return 32;
+    }
   }
   jclass looper_class = env->FindClass("android/os/Looper");
   jmethodID prepare_main_looper =

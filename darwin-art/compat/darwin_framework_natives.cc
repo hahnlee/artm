@@ -13,6 +13,17 @@
 #include <unordered_map>
 #include <utility>
 
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+#include "darwin_android_graphics_registration.h"
+
+// These are the upstream libandroid_runtime entry points from
+// frameworks/base/libs/hwui/apex/jni_runtime.cpp. Deliberately do not provide
+// weak or fallback definitions: enabling the real backend must fail at link
+// time until the complete graphics registrar archive is present.
+void init_android_graphics();
+int register_android_graphics_classes(JNIEnv* env);
+#endif
+
 namespace {
 
 class DarwinMessageQueue {
@@ -248,6 +259,7 @@ struct DarwinTheme {
   DarwinAssetManager* assets;
 };
 
+#if !defined(DARWIN_ART_REAL_GRAPHICS)
 struct DarwinPaint {
   jint flags = 0;
   jint color = 0xff000000;
@@ -263,6 +275,7 @@ struct DarwinRenderNode {
   jint right = 0;
   jint bottom = 0;
 };
+#endif
 
 void BinderHolderFinalizer(void* holder) {
   delete static_cast<DarwinBinderHolder*>(holder);
@@ -283,6 +296,7 @@ void AssetManagerDestroy(JNIEnv*, jclass, jlong handle) {
 
 void ThemeFinalizer(void* theme) { delete static_cast<DarwinTheme*>(theme); }
 
+#if !defined(DARWIN_ART_REAL_GRAPHICS)
 void PaintFinalizer(void* paint) { delete static_cast<DarwinPaint*>(paint); }
 
 jlong PaintInit() {
@@ -312,6 +326,7 @@ void PaintSetColor(jlong handle, jint color) {
     paint->color = color;
   }
 }
+#endif
 
 jlong AssetManagerGetThemeFreeFunction(JNIEnv*, jclass) {
   return reinterpret_cast<std::uintptr_t>(&ThemeFinalizer);
@@ -391,6 +406,7 @@ jint BinderGetCallingUid() {
   return 1000;
 }
 
+#if !defined(DARWIN_ART_REAL_GRAPHICS)
 void RenderNodeFinalizer(void* render_node) {
   delete static_cast<DarwinRenderNode*>(render_node);
 }
@@ -426,6 +442,7 @@ jboolean RenderNodeHasIdentityMatrix(jlong) {
   // in its default identity state.
   return JNI_TRUE;
 }
+#endif
 
 void SystemPropertiesSet(JNIEnv* env, jclass, jstring key, jstring value) {
   const std::optional<std::string> name = JavaString(env, key);
@@ -451,9 +468,51 @@ bool Register(JNIEnv* env, const char* class_name, JNINativeMethod* methods,
   return registered;
 }
 
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+bool SetJavaSystemProperty(JNIEnv* env, const char* key, const char* value) {
+  jclass system = env->FindClass("java/lang/System");
+  jmethodID set_property =
+      system == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(
+                system, "setProperty",
+                "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+  jstring java_key = set_property == nullptr ? nullptr : env->NewStringUTF(key);
+  jstring java_value =
+      java_key == nullptr ? nullptr : env->NewStringUTF(value);
+  jobject previous =
+      java_value == nullptr || env->ExceptionCheck()
+          ? nullptr
+          : env->CallStaticObjectMethod(system, set_property, java_key,
+                                        java_value);
+  const bool success = !env->ExceptionCheck();
+  env->DeleteLocalRef(previous);
+  env->DeleteLocalRef(java_value);
+  env->DeleteLocalRef(java_key);
+  env->DeleteLocalRef(system);
+  return success;
+}
+
+bool ConfigureLayoutlibGraphicsRegistrar(JNIEnv* env) {
+  static_assert(darwin_art::android_graphics::kNativeClassCount == 51);
+  return SetJavaSystemProperty(env, "method_binding_format", "") &&
+         SetJavaSystemProperty(
+             env, darwin_art::android_graphics::kNativeClassesPropertyName,
+             darwin_art::android_graphics::kNativeClassesCsv);
+}
+#endif
+
 }  // namespace
 
 namespace darwin_art {
+
+FrameworkGraphicsBackend GetFrameworkGraphicsBackend() {
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+  return FrameworkGraphicsBackend::kAndroidGraphics;
+#else
+  return FrameworkGraphicsBackend::kProbeCanvas;
+#endif
+}
 
 bool RegisterFrameworkNatives(JNIEnv* env) {
   JNINativeMethod message_queue_methods[] = {
@@ -529,6 +588,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
     return false;
   }
 
+#if !defined(DARWIN_ART_REAL_GRAPHICS)
   JNINativeMethod render_node_methods[] = {
       {const_cast<char*>("nCreate"),
        const_cast<char*>("(Ljava/lang/String;)J"),
@@ -566,6 +626,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
                 static_cast<jint>(std::size(paint_methods)))) {
     return false;
   }
+#endif
 
   JNINativeMethod asset_manager_methods[] = {
       {const_cast<char*>("nativeCreate"), const_cast<char*>("()J"),
@@ -656,8 +717,35 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
        const_cast<char*>("()V"),
        reinterpret_cast<void*>(&SystemPropertiesNoOp)},
   };
-  return Register(env, "android/os/SystemProperties", system_properties_methods,
-                  static_cast<jint>(std::size(system_properties_methods)));
+  if (!Register(env, "android/os/SystemProperties", system_properties_methods,
+                static_cast<jint>(std::size(system_properties_methods)))) {
+    return false;
+  }
+
+  return true;
+}
+
+bool RegisterFrameworkGraphicsNatives(JNIEnv* env) {
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+  // Registration is atomic at the upstream libandroid_runtime boundary. In
+  // particular, never register DarwinPaint/DarwinRenderNode alongside native
+  // Canvas or Bitmap: their jlong values have unrelated C++ object layouts and
+  // eventually cross through Canvas/RenderNode drawing APIs. The caller must
+  // invoke this after Runtime::FinishMinimalForDarwinProbe(): the Darwin host
+  // uses LayoutlibLoader, whose registrar calls managed System.getProperty().
+  // The generated header is derived from LayoutlibLoader's source map; a real
+  // build deliberately cannot compile without that verified 51-class input.
+  if (!ConfigureLayoutlibGraphicsRegistrar(env)) {
+    return false;
+  }
+  init_android_graphics();
+  return register_android_graphics_classes(env) >= 0;
+#else
+  // ProbeCanvas, DarwinPaint, and DarwinRenderNode were registered atomically
+  // by RegisterFrameworkNatives().
+  (void)env;
+  return true;
+#endif
 }
 
 }  // namespace darwin_art
