@@ -86,3 +86,19 @@ cargo test --manifest-path "$crate_root/Cargo.toml"
 cargo run --quiet --release --manifest-path "$crate_root/Cargo.toml" --bin elf-loader-gate -- \
   "$fixture_dir/positive.so" "$fixture_dir/import.so" "$fixture_dir/weak.so" \
   "$fixture_dir/lazy.so" "$fixture_dir/relro.so" "$fixture_dir/tls.so"
+
+cargo build --quiet --release --manifest-path "$crate_root/Cargo.toml" --lib
+staticlib="$crate_root/target/release/libdarwin_art_elf_loader.a"
+[[ -f "$staticlib" ]] || { echo "elf-loader-gate: staticlib missing" >&2; exit 1; }
+xcrun clang -std=c11 -arch arm64 -Wall -Wextra -Werror -x c -fsyntax-only \
+  -include "$crate_root/include/darwin_art_elf_loader.h" /dev/null
+xcrun clang++ -std=c++17 -arch arm64 -Wall -Wextra -Werror \
+  -I "$crate_root/include" "$crate_root/ffi-smoke.mm" "$staticlib" \
+  -framework Security -framework CoreFoundation -liconv \
+  -o "$fixture_dir/ffi-smoke"
+file "$fixture_dir/ffi-smoke" | grep -F 'Mach-O 64-bit executable arm64' >/dev/null
+for symbol in darwin_art_elf_load_bytes darwin_art_elf_load_path \
+  darwin_art_elf_run_initializers darwin_art_elf_lookup darwin_art_elf_unload; do
+  nm -gU "$fixture_dir/ffi-smoke" | grep -E " _${symbol}$" >/dev/null
+done
+"$fixture_dir/ffi-smoke" "$fixture_dir/positive.so" "$fixture_dir/import.so"

@@ -6,6 +6,7 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
+crate-type = ["rlib", "staticlib"]
 
 [[bin]]
 name = "elf-loader-gate"
@@ -16,4 +17,3 @@ path = "src/bin/gate.rs"
 # Keep this experimental loader independently buildable until its public API is
 # ready to join the repository workspace.
 [workspace]
-

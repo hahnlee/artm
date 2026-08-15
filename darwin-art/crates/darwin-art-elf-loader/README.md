@@ -27,3 +27,25 @@ addresses must remain valid until the image is dropped.
 The fixtures use only the no-argument AArch64 procedure-call subset. Android JNI
 functions with spilled arguments still need a per-shorty Darwin-to-Android PCS
 repacking trampoline; this gate does not claim general JNI `.so` compatibility.
+
+## C ABI seam
+
+`include/darwin_art_elf_loader.h` exposes the crate as a static library with
+bytes/path loading, a closed synchronous resolver callback, initializer control,
+export lookup, and explicit unload. Every entrypoint returns a stable structured
+status and optionally fills `DarwinArtElfErrorBuffer`; `required` includes the
+terminating NUL even when the message was truncated. Rust panics are caught at
+every fallible C entrypoint.
+
+Handles are unique and opaque. Init/lookup are internally synchronized and may
+move across ART-attached threads. Unload may also run on another thread, but the
+adapter must first establish quiescence: no concurrent ABI operation and no code
+executing through a borrowed lookup/import address. Resolver request storage is
+valid only during the callback, while every FOUND address must remain valid until
+unload. Because lazy binding is rejected, the callback/context is not retained.
+
+A NativeBridge open adapter must keep the handle private until initializer and
+preflight success, and unload it privately on failure. Export addresses are
+invalid after unload; callers own their exact ABI. The Objective-C++ smoke
+validates header layout, both load forms, versioned imports, cross-thread
+lookup/unload, lifecycle, structured errors, and idempotent unload.

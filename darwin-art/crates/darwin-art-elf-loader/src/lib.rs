@@ -5,6 +5,8 @@ use std::fmt;
 use std::num::NonZeroUsize;
 use std::ptr::{self, NonNull};
 
+mod ffi;
+
 #[cfg(not(target_os = "macos"))]
 compile_error!("darwin-art-elf-loader supports only macOS hosts");
 
@@ -335,6 +337,11 @@ pub struct LoadedElf {
     initializers_run: bool,
 }
 
+// SAFETY: LoadedElf exclusively owns an mmap reservation with no thread-affine host resource.
+// TLS and lazy binding are rejected, resolver callbacks are not retained, and mutation is
+// restricted to &mut self. C consumers additionally serialize the value behind a Mutex.
+unsafe impl Send for LoadedElf {}
+
 #[derive(Default)]
 struct RejectAllResolver;
 
@@ -422,6 +429,15 @@ impl LoadedElf {
 
     pub fn soname(&self) -> Option<&str> {
         self.soname.as_deref()
+    }
+
+    /// Returns the mapped address of a defined dynamic export.
+    ///
+    /// The address remains valid only while this `LoadedElf` is alive. Calling it is unsafe in
+    /// the general case: the caller must know the exact ABI and must run required initializers
+    /// first. This method performs symbol visibility/type and executable-range validation only.
+    pub fn lookup_exported(&self, name: &str) -> Result<usize, LoadError> {
+        self.resolve_function(name)
     }
 
     pub fn run_initializers(&mut self) -> Result<(), LoadError> {
