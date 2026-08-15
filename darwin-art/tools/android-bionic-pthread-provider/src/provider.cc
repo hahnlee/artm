@@ -20,6 +20,7 @@ namespace {
 static_assert(sizeof(DarwinArtAndroidPthread) == 8);
 static_assert(sizeof(DarwinArtAndroidPthreadKey) == 4);
 static_assert(sizeof(DarwinArtAndroidPthreadOnce) == 4);
+static_assert(sizeof(DarwinArtAndroidPthreadMutexAttr) == 8);
 static_assert(sizeof(DarwinArtAndroidPthreadMutex) == 40);
 static_assert(sizeof(DarwinArtAndroidPthreadCond) == 48);
 static_assert(sizeof(DarwinArtAndroidPthreadRwlock) == 56);
@@ -35,6 +36,12 @@ constexpr uint32_t kAndroidKeyValid = UINT32_C(0x80000000);
 constexpr uint32_t kAndroidKeySlots = 128;
 constexpr int kAndroidDestructorIterations = 4;
 constexpr uint16_t kAndroidMutexDestroyed = UINT16_C(0xffff);
+constexpr uint16_t kAndroidMutexSharedMask = UINT16_C(0x2000);
+constexpr uint16_t kAndroidMutexTypeShift = 14;
+constexpr int64_t kAndroidMutexAttrTypeMask = INT64_C(0x000f);
+constexpr int64_t kAndroidMutexAttrSharedMask = INT64_C(0x0010);
+constexpr int64_t kAndroidMutexAttrProtocolMask = INT64_C(0x0020);
+constexpr int64_t kAndroidMutexAttrKnownMask = INT64_C(0x003f);
 constexpr uint32_t kAndroidCondSharedMask = UINT32_C(0x0001);
 constexpr uint32_t kAndroidCondClockMask = UINT32_C(0x0002);
 constexpr uint32_t kAndroidCondCounterStep = UINT32_C(0x0004);
@@ -83,6 +90,7 @@ struct ThreadTlsState {
 };
 
 struct MutexEntry {
+  enum class Kind { kNormal = 0, kRecursive = 1, kErrorcheck = 2 };
   pthread_mutex_t host{};
   std::mutex lifecycle_mutex;
   std::condition_variable lifecycle_condition;
@@ -90,6 +98,7 @@ struct MutexEntry {
   Lifecycle lifecycle{Lifecycle::kAlive};
   size_t active_operations{};
   bool host_initialized{};
+  Kind kind{Kind::kNormal};
 
   ~MutexEntry() {
     if (host_initialized) {
@@ -265,6 +274,58 @@ void SetAndroidMutexState(DarwinArtAndroidPthreadMutex* mutex, uint16_t value) {
   std::memcpy(mutex, &value, sizeof(value));
 }
 
+int ParseAndroidMutexAttributes(
+    const DarwinArtAndroidPthreadMutexAttr* attributes,
+    MutexEntry::Kind* kind_out) {
+  if (attributes == nullptr) {
+    *kind_out = MutexEntry::Kind::kNormal;
+    return 0;
+  }
+  int64_t value = 0;
+  std::memcpy(&value, attributes, sizeof(value));
+  if (value == -1) return kAndroidEinval;
+  if ((value & kAndroidMutexAttrSharedMask) != 0 ||
+      (value & kAndroidMutexAttrProtocolMask) != 0) {
+    return kAndroidEnotsup;
+  }
+  if ((value & ~kAndroidMutexAttrKnownMask) != 0) return kAndroidEinval;
+  switch (value & kAndroidMutexAttrTypeMask) {
+    case 0:
+      *kind_out = MutexEntry::Kind::kNormal;
+      return 0;
+    case 1:
+      *kind_out = MutexEntry::Kind::kRecursive;
+      return 0;
+    case 2:
+      *kind_out = MutexEntry::Kind::kErrorcheck;
+      return 0;
+    default:
+      return kAndroidEinval;
+  }
+}
+
+int InitializeHostMutex(const std::shared_ptr<MutexEntry>& entry,
+                        MutexEntry::Kind kind) {
+  pthread_mutexattr_t attributes;
+  const int initialized = pthread_mutexattr_init(&attributes);
+  if (initialized != 0) return AndroidError(initialized);
+  int result = 0;
+  if (kind == MutexEntry::Kind::kRecursive) {
+    result = pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);
+  } else if (kind == MutexEntry::Kind::kErrorcheck) {
+    result = pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_ERRORCHECK);
+  }
+  if (result == 0) {
+    result = pthread_mutex_init(&entry->host, &attributes);
+    if (result == 0) entry->host_initialized = true;
+  }
+  const int destroyed = pthread_mutexattr_destroy(&attributes);
+  if (result == 0 && destroyed != 0) result = destroyed;
+  if (result != 0) return AndroidError(result);
+  entry->kind = kind;
+  return 0;
+}
+
 uint32_t AndroidCondState(const DarwinArtAndroidPthreadCond* cond) {
   uint32_t value = 0;
   std::memcpy(&value, cond, sizeof(value));
@@ -313,24 +374,39 @@ std::shared_ptr<MutexEntry> FindOrCreateMutex(
     *error_out = 0;
     return found->second;
   }
-  // The only lazy initializer in this first slice is Bionic's normal static
-  // initializer, whose complete 40-byte representation is zero.
+  const uint16_t visible = AndroidMutexState(mutex);
+  if (visible == kAndroidMutexDestroyed) {
+    *error_out = kAndroidEbusy;
+    return nullptr;
+  }
+  if ((visible & kAndroidMutexSharedMask) != 0) {
+    *error_out = kAndroidEnotsup;
+    return nullptr;
+  }
+  const uint16_t type = visible >> kAndroidMutexTypeShift;
+  if (type > 2) {
+    *error_out = kAndroidEnotsup;
+    return nullptr;
+  }
+  const uint16_t expected = static_cast<uint16_t>(type << kAndroidMutexTypeShift);
+  if (visible != expected) {
+    *error_out = kAndroidEinval;
+    return nullptr;
+  }
   const unsigned char* bytes = reinterpret_cast<const unsigned char*>(mutex);
-  for (size_t index = 0; index < sizeof(*mutex); ++index) {
+  for (size_t index = sizeof(uint16_t); index < sizeof(*mutex); ++index) {
     if (bytes[index] != 0) {
-      *error_out = AndroidMutexState(mutex) == kAndroidMutexDestroyed
-                       ? kAndroidEbusy
-                       : kAndroidEnotsup;
+      *error_out = kAndroidEinval;
       return nullptr;
     }
   }
   auto entry = std::make_shared<MutexEntry>();
-  const int result = pthread_mutex_init(&entry->host, nullptr);
+  const int result = InitializeHostMutex(
+      entry, static_cast<MutexEntry::Kind>(type));
   if (result != 0) {
-    *error_out = AndroidError(result);
+    *error_out = result;
     return nullptr;
   }
-  entry->host_initialized = true;
   state.mutexes.emplace(mutex, entry);
   *error_out = 0;
   return entry;
@@ -651,11 +727,43 @@ extern "C" int darwin_art_bionic_pthread_once(
   return 0;
 }
 
+extern "C" int darwin_art_bionic_pthread_mutexattr_init(
+    DarwinArtAndroidPthreadMutexAttr* attributes) {
+  if (attributes == nullptr) return kAndroidEinval;
+  const int64_t value = 0;
+  std::memcpy(attributes, &value, sizeof(value));
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_mutexattr_destroy(
+    DarwinArtAndroidPthreadMutexAttr* attributes) {
+  if (attributes == nullptr) return kAndroidEinval;
+  const int64_t destroyed = -1;
+  std::memcpy(attributes, &destroyed, sizeof(destroyed));
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_mutexattr_settype(
+    DarwinArtAndroidPthreadMutexAttr* attributes,
+    int type) {
+  if (attributes == nullptr || type < 0 || type > 2) return kAndroidEinval;
+  int64_t value = 0;
+  std::memcpy(&value, attributes, sizeof(value));
+  // POSIX makes use after destroy undefined. Preserve Bionic's -1 guest
+  // sentinel but define a safe failure rather than resurrecting its low bits.
+  if (value == -1) return kAndroidEinval;
+  value = (value & ~kAndroidMutexAttrTypeMask) | type;
+  std::memcpy(attributes, &value, sizeof(value));
+  return 0;
+}
+
 extern "C" int darwin_art_bionic_pthread_mutex_init(
     DarwinArtAndroidPthreadMutex* mutex,
-    const void* android_attributes) {
+    const DarwinArtAndroidPthreadMutexAttr* android_attributes) {
   if (mutex == nullptr) return kAndroidEinval;
-  if (android_attributes != nullptr) return kAndroidEnotsup;
+  MutexEntry::Kind kind = MutexEntry::Kind::kNormal;
+  const int parsed = ParseAndroidMutexAttributes(android_attributes, &kind);
+  if (parsed != 0) return parsed;
   ProviderState& state = State();
   std::lock_guard<std::mutex> lock(state.mutex);
   const auto found = state.mutexes.find(mutex);
@@ -667,10 +775,12 @@ extern "C" int darwin_art_bionic_pthread_mutex_init(
     }
   }
   auto entry = std::make_shared<MutexEntry>();
-  const int result = pthread_mutex_init(&entry->host, nullptr);
-  if (result != 0) return AndroidError(result);
-  entry->host_initialized = true;
+  const int result = InitializeHostMutex(entry, kind);
+  if (result != 0) return result;
   std::memset(mutex, 0, sizeof(*mutex));
+  SetAndroidMutexState(
+      mutex,
+      static_cast<uint16_t>(static_cast<int>(kind) << kAndroidMutexTypeShift));
   state.mutexes[mutex] = entry;
   return 0;
 }
@@ -915,6 +1025,9 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
   RESOLVE(getspecific);
   RESOLVE(setspecific);
   RESOLVE(once);
+  RESOLVE(mutexattr_init);
+  RESOLVE(mutexattr_destroy);
+  RESOLVE(mutexattr_settype);
   RESOLVE(mutex_init);
   RESOLVE(mutex_lock);
   RESOLVE(mutex_trylock);
@@ -1001,6 +1114,8 @@ extern "C" int darwin_art_bionic_pthread_capability(const char* capability) {
   const std::string_view name(capability);
   return name == "thread-identity-token" || name == "tls-key-destructor" ||
          name == "once-private" || name == "mutex-normal-private" ||
+         name == "mutex-recursive-private" ||
+         name == "mutex-errorcheck-private" ||
          name == "cond-private" || name == "cond-monotonic-clock" ||
          name == "rwlock-private-reader-preferred";
 }

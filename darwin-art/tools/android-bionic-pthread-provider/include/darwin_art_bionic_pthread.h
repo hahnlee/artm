@@ -14,6 +14,7 @@ extern "C" {
 typedef int64_t DarwinArtAndroidPthread;
 typedef int32_t DarwinArtAndroidPthreadKey;
 typedef int32_t DarwinArtAndroidPthreadOnce;
+typedef int64_t DarwinArtAndroidPthreadMutexAttr;
 typedef struct DarwinArtAndroidPthreadMutex {
   int32_t opaque[10];
 } DarwinArtAndroidPthreadMutex;
@@ -37,8 +38,15 @@ int darwin_art_bionic_pthread_setspecific(DarwinArtAndroidPthreadKey key,
                                           const void* value);
 int darwin_art_bionic_pthread_once(DarwinArtAndroidPthreadOnce* once,
                                    DarwinArtAndroidOnceRoutine routine);
+int darwin_art_bionic_pthread_mutexattr_init(
+    DarwinArtAndroidPthreadMutexAttr* attributes);
+int darwin_art_bionic_pthread_mutexattr_destroy(
+    DarwinArtAndroidPthreadMutexAttr* attributes);
+int darwin_art_bionic_pthread_mutexattr_settype(
+    DarwinArtAndroidPthreadMutexAttr* attributes,
+    int type);
 int darwin_art_bionic_pthread_mutex_init(DarwinArtAndroidPthreadMutex* mutex,
-                                         const void* android_attributes);
+    const DarwinArtAndroidPthreadMutexAttr* android_attributes);
 int darwin_art_bionic_pthread_mutex_lock(DarwinArtAndroidPthreadMutex* mutex);
 int darwin_art_bionic_pthread_mutex_trylock(DarwinArtAndroidPthreadMutex* mutex);
 int darwin_art_bionic_pthread_mutex_unlock(DarwinArtAndroidPthreadMutex* mutex);

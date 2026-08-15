@@ -109,6 +109,7 @@ rwlock = (root / "libc/bionic/pthread_rwlock.cpp").read_text()
 assert "typedef long pthread_t;" in types
 assert "typedef int pthread_key_t;" in types
 assert "typedef int pthread_once_t;" in types
+assert "typedef long pthread_mutexattr_t;" in types
 assert "int32_t __private[10]" in types
 assert "int32_t __private[12]" in types
 assert "int32_t __private[14]" in types
@@ -144,6 +145,14 @@ assert "char __reserved[20]" in rwlock
 assert "rwlock->writer_tid" in rwlock and "return EPERM;" in rwlock
 assert "pthread_rwlock_destroy" in rwlock and "return EBUSY;" in rwlock
 assert "PTHREAD_RWLOCK_PREFER_READER_NP" in rwlock
+assert "MUTEXATTR_TYPE_MASK   0x000f" in mutex
+assert "MUTEXATTR_SHARED_MASK 0x0010" in mutex
+assert "MUTEXATTR_PROTOCOL_MASK 0x0020" in mutex
+assert "*attr = PTHREAD_MUTEX_DEFAULT" in mutex
+assert "*attr = -1" in mutex
+assert "type < PTHREAD_MUTEX_NORMAL || type > PTHREAD_MUTEX_ERRORCHECK" in mutex
+assert "case PTHREAD_MUTEX_RECURSIVE" in mutex
+assert "case PTHREAD_MUTEX_ERRORCHECK" in mutex
 print("bionic-pthread-provider: upstream-layout=PASS sources=6 cond=48-byte rwlock=56-byte")
 PY
 
@@ -159,7 +168,7 @@ macos_sdk="$(xcrun --sdk macosx --show-sdk-path)"
 host_flags=(-std=c++20 -arch arm64 -isysroot "$macos_sdk" -O2 -Wall -Wextra -Werror
             -fvisibility=hidden -fvisibility-inlines-hidden -I"$module_root/include")
 "$cxx" "${host_flags[@]}" -c "$module_root/src/provider.cc" -o "$stage/provider.o"
-if grep -E 'reinterpret_cast<[^>]*pthread_(t|key_t|once_t|mutex_t|cond_t|rwlock_t)' \
+if grep -E 'reinterpret_cast<[^>]*pthread_(t|key_t|once_t|mutex_t|mutexattr_t|cond_t|rwlock_t)' \
     "$module_root/src/provider.cc" >/dev/null; then
   fail "Android opaque object is reinterpreted as a Darwin pthread type"
 fi
@@ -171,6 +180,7 @@ if "$host_nm" -gU "$stage/provider.o" | awk '{print $3}' |
   fail "unprefixed pthread definition escaped provider"
 fi
 for symbol in self key_create key_delete getspecific setspecific once \
+              mutexattr_init mutexattr_destroy mutexattr_settype \
               mutex_init mutex_lock mutex_trylock mutex_unlock mutex_destroy \
               cond_wait cond_timedwait cond_signal cond_broadcast cond_destroy \
               rwlock_rdlock rwlock_wrlock rwlock_unlock; do
@@ -201,7 +211,7 @@ awk -F '\t' '$4=="supported"{print $1}' "$module_root/libcxx-pthread-imports.tsv
   sort -u > "$stage/supported-imports.txt"
 diff -u "$stage/supported-imports.txt" "$stage/fixture-imports.txt" ||
   fail "fixture does not execute exact supported import set"
-[[ "$($elf_nm -D --defined-only "$fixture" | awk '$2=="T"{n++}END{print n+0}')" == 22 ]] ||
+[[ "$($elf_nm -D --defined-only "$fixture" | awk '$2=="T"{n++}END{print n+0}')" == 25 ]] ||
   fail "fixture export count mismatch"
 
 export DARWIN_ART_PTHREAD_PROVIDER_LIBDIR="$stage"
@@ -209,17 +219,19 @@ export CARGO_TARGET_DIR="$stage/cargo-target"
 cargo build --quiet --manifest-path "$runner_root/Cargo.toml"
 runner="$CARGO_TARGET_DIR/debug/android-bionic-pthread-provider-runner"
 output="$("$runner" "$fixture")"
-grep -F 'ELF=executed resolver=libc.so@LIBC imports=19' <<< "$output" >/dev/null ||
+grep -F 'ELF=executed resolver=libc.so@LIBC imports=22' <<< "$output" >/dev/null ||
   fail "closed resolver execution failed"
 grep -F 'tls-destructor=2-pass once=1 mutex=8x2000-contention' <<< "$output" >/dev/null ||
   fail "thread/TLS/once/mutex E2E failed"
 grep -F 'destroy-lookup=race-safe' <<< "$output" >/dev/null ||
   fail "destroy/lookup lifecycle synchronization failed"
+grep -F 'mutex-attr=normal+recursive+errorcheck recursive-depth=2 errorcheck-self=EDEADLK wrong-unlock=EPERM destroyed-attr=EINVAL pshared+PI=ENOTSUP' <<< "$output" >/dev/null ||
+  fail "mutex attribute Android ELF E2E failed"
 grep -F 'cond=4-waiters signal=1 broadcast=3 predicate-loop=held monotonic-timeout=110 destroy-wait=EBUSY pshared=ENOTSUP' <<< "$output" >/dev/null ||
   fail "condition variable Android ELF E2E failed"
 grep -F 'rwlock=4-concurrent-readers writer=blocked-then-progress wrong-unlock=EPERM recursive-read=2 lazy-zero-init reset=idle' <<< "$output" >/dev/null ||
   fail "rwlock Android ELF E2E failed"
-grep -F 'no-Darwin-reinterpret stale-key=reuse-alias(Bionic-undefined) unsupported=fork+robust+pshared+PI+recursive+errorcheck' <<< "$output" >/dev/null ||
+grep -F 'no-Darwin-reinterpret stale-key=reuse-alias(Bionic-undefined) unsupported=fork+robust+pshared+PI+thread-lifecycle' <<< "$output" >/dev/null ||
   fail "capability matrix failed"
 
 "$cxx" "${host_flags[@]}" -fsanitize=address,undefined \
@@ -249,6 +261,15 @@ rwlock_stress_output="$("$stage/rwlock-stress")"
 grep -F 'rounds=20 readers=4 concurrent>=2 writer=10000-progress wrong-unlock=EPERM destroy-held=EBUSY lazy-reset=clean ASan=clean' <<< "$rwlock_stress_output" >/dev/null ||
   fail "rwlock sanitizer stress failed"
 
+[[ "$(sha "$module_root/mutex_attr_stress.cc")" == "$MUTEX_ATTR_STRESS_SHA256" ]] ||
+  fail "mutex attribute stress source SHA mismatch"
+"$cxx" "${host_flags[@]}" -fsanitize=address,undefined \
+  "$module_root/src/provider.cc" "$module_root/mutex_attr_stress.cc" \
+  -o "$stage/mutex-attr-stress"
+mutex_attr_stress_output="$("$stage/mutex-attr-stress")"
+grep -F 'rounds=100 normal+recursive+errorcheck recursive-depth=2 self=EDEADLK wrong-owner=EPERM held-destroy=EBUSY destroyed-attr=EINVAL pshared+PI=ENOTSUP ASan=clean' <<< "$mutex_attr_stress_output" >/dev/null ||
+  fail "mutex attribute sanitizer stress failed"
+
 mkdir -p "$build_dir"
 cp "$stage/libdarwin-art-bionic-pthread.a" "$build_dir/"
 cp "$fixture" "$build_dir/"
@@ -257,4 +278,5 @@ printf '%s\n' "$output"
 printf '%s\n' "$tls_stress_output"
 printf '%s\n' "$cond_stress_output"
 printf '%s\n' "$rwlock_stress_output"
-echo "bionic-pthread-provider: PASS imports=19/24 ELF=Android-arm64 host=Darwin-arm64 runtime-files-modified=0"
+printf '%s\n' "$mutex_attr_stress_output"
+echo "bionic-pthread-provider: PASS imports=22/24 ELF=Android-arm64 host=Darwin-arm64 runtime-files-modified=0"

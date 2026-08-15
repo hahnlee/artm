@@ -1,6 +1,9 @@
 {
   global:
     pthread_fixture_setup;
+    pthread_fixture_errorcheck_hold;
+    pthread_fixture_errorcheck_wrong_unlock;
+    pthread_fixture_errorcheck_release;
     pthread_fixture_worker;
     pthread_fixture_mutex_lookup_race;
     pthread_fixture_mutex_destroy_race;

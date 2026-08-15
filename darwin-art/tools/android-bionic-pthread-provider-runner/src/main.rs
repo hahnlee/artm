@@ -9,7 +9,7 @@ use std::num::NonZeroUsize;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-const EXPECTED: [&str; 19] = [
+const EXPECTED: [&str; 22] = [
     "pthread_cond_broadcast",
     "pthread_cond_destroy",
     "pthread_cond_signal",
@@ -23,6 +23,9 @@ const EXPECTED: [&str; 19] = [
     "pthread_mutex_lock",
     "pthread_mutex_trylock",
     "pthread_mutex_unlock",
+    "pthread_mutexattr_destroy",
+    "pthread_mutexattr_init",
+    "pthread_mutexattr_settype",
     "pthread_once",
     "pthread_rwlock_rdlock",
     "pthread_rwlock_unlock",
@@ -161,6 +164,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     image.run_initializers()?;
     if image.call_exported_i32("pthread_fixture_setup")? != 0 {
         return Err("Android fixture setup failed".into());
+    }
+    if image.call_exported_i32("pthread_fixture_errorcheck_hold")? != 0 {
+        return Err("errorcheck self-lock did not return EDEADLK".into());
+    }
+    let errorcheck_wrong = image.lookup_exported("pthread_fixture_errorcheck_wrong_unlock")?;
+    let wrong_result = std::thread::spawn(move || {
+        let function: unsafe extern "C" fn() -> i32 =
+            unsafe { std::mem::transmute(errorcheck_wrong) };
+        unsafe { function() }
+    })
+    .join()
+    .map_err(|_| "errorcheck wrong-owner worker panicked")?;
+    if wrong_result != 0 {
+        return Err(format!("errorcheck wrong-owner unlock failed: {wrong_result}").into());
+    }
+    if image.call_exported_i32("pthread_fixture_errorcheck_release")? != 0 {
+        return Err("errorcheck owner release failed".into());
     }
     if resolver.requested != EXPECTED.into_iter().map(str::to_owned).collect() {
         return Err(format!("resolver import set mismatch: {:?}", resolver.requested).into());
@@ -340,6 +360,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "tls-key-destructor",
         "once-private",
         "mutex-normal-private",
+        "mutex-recursive-private",
+        "mutex-errorcheck-private",
         "cond-private",
         "cond-monotonic-clock",
         "rwlock-private-reader-preferred",
@@ -361,9 +383,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("unsupported capability escaped: {unsupported}").into());
         }
     }
-    println!("android-bionic-pthread-provider: ELF=executed resolver=libc.so@LIBC imports=19");
+    println!("android-bionic-pthread-provider: ELF=executed resolver=libc.so@LIBC imports=22");
     println!(
         "pthread-self=stable+unique tls-destructor=2-pass once=1 mutex=8x2000-contention destroy-lookup=race-safe"
+    );
+    println!(
+        "mutex-attr=normal+recursive+errorcheck recursive-depth=2 errorcheck-self=EDEADLK wrong-unlock=EPERM destroyed-attr=EINVAL pshared+PI=ENOTSUP"
     );
     println!(
         "cond=4-waiters signal=1 broadcast=3 predicate-loop=held monotonic-timeout=110 destroy-wait=EBUSY pshared=ENOTSUP"
@@ -372,7 +397,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "rwlock=4-concurrent-readers writer=blocked-then-progress wrong-unlock=EPERM recursive-read=2 lazy-zero-init reset=idle"
     );
     println!(
-        "opaque-layout=side-table no-Darwin-reinterpret stale-key=reuse-alias(Bionic-undefined) unsupported=fork+robust+pshared+PI+recursive+errorcheck"
+        "opaque-layout=side-table no-Darwin-reinterpret stale-key=reuse-alias(Bionic-undefined) unsupported=fork+robust+pshared+PI+thread-lifecycle"
     );
     Ok(())
 }

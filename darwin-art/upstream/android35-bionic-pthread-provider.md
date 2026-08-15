@@ -2,7 +2,7 @@
 
 This module is derived from the SHA-locked NDK r28c/API 35 arm64
 `libc++_shared.so`. That ELF imports 24 `pthread_*` functions from
-`libc.so@LIBC`; this coherent slice owns 19 of them:
+`libc.so@LIBC`; this coherent slice owns 22 of them:
 
 ```text
 pthread_self
@@ -10,11 +10,12 @@ pthread_key_create / pthread_key_delete
 pthread_getspecific / pthread_setspecific
 pthread_once
 pthread_mutex_init / lock / trylock / unlock / destroy
+pthread_mutexattr_init / destroy / settype
 pthread_cond_wait / timedwait / signal / broadcast / destroy
 pthread_rwlock_rdlock / wrlock / unlock
 ```
 
-The remaining 5 imports are retained in the manifest as unsupported. A
+Only `pthread_join` and `pthread_detach` remain unsupported. A
 resolver can therefore never mistake this slice for complete pthread support.
 
 ## Object and state boundary
@@ -48,10 +49,18 @@ different representations. None of these Android values is cast to a Darwin
   undefined, while provider state access is serialized by its table lock.
 - Once controls retain Android's visible states 0/1/2, while wait ownership and
   condition state live in a side table keyed by the Android object address.
-- Normal process-private mutexes own an independently initialized Darwin mutex
+- Process-private mutexes own an independently initialized Darwin mutex
   in a side table. The Android 40-byte storage remains Android-formatted and is
   marked `0xffff` only after successful destruction, matching Bionic's visible
-  destroyed state.
+  destroyed state. Android arm64 mutex attributes are an eight-byte `long`:
+  bits 0–3 select NORMAL=0, RECURSIVE=1, or ERRORCHECK=2; bit 4 is pshared and
+  bit 5 is PI protocol. The provider preserves this guest representation but
+  builds a separate Darwin mutex/attribute object. Recursive lock depth and
+  errorcheck self-lock/wrong-owner behavior therefore come from the matching
+  host primitive without casting either Android object. Pshared and PI bits
+  return `ENOTSUP`; reserved bits return `EINVAL`. Destroy writes Bionic's `-1`
+  attribute sentinel. POSIX makes subsequent use undefined; the provider
+  deliberately returns `EINVAL` instead of resurrecting low type bits.
 - Static process-private condition variables own independent Darwin condition
   objects in a side table. The pinned Bionic state word is preserved:
   `shared=0x1`, `monotonic=0x2`, counter step `0x4`, and destroyed marker
@@ -97,11 +106,11 @@ Darwin errno numbers (`EAGAIN=11`, `EDEADLK=35`, `ENOTSUP=95`,
 ## Deliberate capability failures
 
 Fork while once initialization is underway, robust mutexes, process-shared
-mutexes/conditions/rwlocks, priority inheritance, recursive/error-check mutex
-attributes, condition attributes/explicit initialization, cancellation cleanup,
+mutexes/conditions/rwlocks, priority inheritance, condition attributes/explicit initialization, cancellation cleanup,
 rwlock attributes/explicit initialization, timed/try rwlocks, and thread create/join/
-detach are not implemented. Non-null mutex attributes return Android `ENOTSUP`;
-pshared condition/rwlock flags also return `ENOTSUP`, and those resolver symbols
+detach are not implemented. Mutex NORMAL/RECURSIVE/ERRORCHECK attributes are
+implemented; their pshared/PI bits and pshared condition/rwlock flags return
+`ENOTSUP`, while the related setter resolver symbols
 are absent. POSIX makes destroying a condition with waiters undefined; this
 provider deliberately returns Android `EBUSY` to avoid freeing host storage
 beneath a blocked Android thread. There is no unprefixed interposition or
@@ -125,7 +134,7 @@ The gate:
 2. sparsely materializes six exact Bionic implementation files without Git;
 3. builds a Darwin arm64 provider archive and an NDK AArch64 ELF fixture;
 4. loads that ELF with `darwin-art-elf-loader` and an exact `libc.so@LIBC`
-   resolver, then actually executes all 19 imports;
+   resolver, then actually executes all 22 imports;
 5. runs eight Darwin threads through the same loaded Android image, checks
    stable/unique thread tokens, two-pass TLS destructors, once-only execution,
    16,000 contended mutex increments, and concurrent destroy-versus-lookup;
@@ -144,6 +153,10 @@ The gate:
    `EPERM`, and uses quiescent reset as the lazy rwlock teardown boundary because
    `pthread_rwlock_init/destroy` are not imports of the pinned libc++ ELF. A
    separate 20-round ASan/UBSan gate drives 80,000 read and 10,000 write
-   acquisitions, held-destroy `EBUSY`, wrong-owner unlock, and idle reset.
+   acquisitions, held-destroy `EBUSY`, wrong-owner unlock, and idle reset;
+10. initializes NORMAL/RECURSIVE/ERRORCHECK attributes in Android ELF code,
+   proves recursive depth, errorcheck self-lock `EDEADLK`, foreign unlock
+   `EPERM`, destroyed-attribute `EINVAL`, and pshared/PI `ENOTSUP`. A 100-round
+   ASan/UBSan stress repeats the same lifecycle including held-destroy `EBUSY`.
 
 Artifacts are written to `_build/bionic-pthread-provider`.

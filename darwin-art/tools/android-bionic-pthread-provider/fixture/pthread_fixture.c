@@ -6,8 +6,10 @@ enum {
   kThreadCount = 8,
   kIterations = 2000,
   kCondWaiters = 4,
+  kAndroidEperm = 1,
   kAndroidEbusy = 16,
   kAndroidEinval = 22,
+  kAndroidEdeadlk = 35,
   kAndroidEnotsup = 95,
   kAndroidEtimedout = 110,
 };
@@ -16,6 +18,9 @@ static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t g_static_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_destroy_race_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_explicit_mutex;
+static pthread_mutex_t g_recursive_mutex;
+static pthread_mutex_t g_errorcheck_mutex;
+static pthread_mutex_t g_rejected_mutex;
 static pthread_key_t g_key;
 static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t g_monotonic_cond = PTHREAD_COND_INITIALIZER_MONOTONIC_NP;
@@ -60,19 +65,61 @@ static void TlsDestructor(void* value) {
 }
 
 __attribute__((visibility("default"))) int pthread_fixture_setup(void) {
-  pthread_mutexattr_t unsupported_attributes = 0;
-  if (pthread_mutex_init(&g_explicit_mutex, &unsupported_attributes) !=
-      kAndroidEnotsup) {
-    return -1;
-  }
-  if (pthread_mutex_init(&g_explicit_mutex, 0) != 0) return -2;
+  pthread_mutexattr_t attributes;
+  if (pthread_mutexattr_init(&attributes) != 0 || attributes != 0) return -1;
+  if (pthread_mutex_init(&g_explicit_mutex, &attributes) != 0) return -2;
+  if (pthread_mutexattr_destroy(&attributes) != 0 || attributes != -1)
+    return -3;
+  if (pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE) !=
+      kAndroidEinval)
+    return -4;
+  if (pthread_mutexattr_init(&attributes) != 0 ||
+      pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE) != 0 ||
+      pthread_mutex_init(&g_recursive_mutex, &attributes) != 0 ||
+      pthread_mutexattr_destroy(&attributes) != 0)
+    return -5;
+  if (pthread_mutexattr_init(&attributes) != 0 ||
+      pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_ERRORCHECK) != 0 ||
+      pthread_mutex_init(&g_errorcheck_mutex, &attributes) != 0 ||
+      pthread_mutexattr_destroy(&attributes) != 0)
+    return -6;
+  pthread_mutexattr_t unsupported = 0x10;
+  if (pthread_mutex_init(&g_rejected_mutex, &unsupported) != kAndroidEnotsup)
+    return -7;
+  unsupported = 0x20;
+  if (pthread_mutex_init(&g_rejected_mutex, &unsupported) != kAndroidEnotsup)
+    return -8;
+  unsupported = 0x40;
+  if (pthread_mutex_init(&g_rejected_mutex, &unsupported) != kAndroidEinval)
+    return -9;
   if (pthread_mutex_trylock(&g_explicit_mutex) != 0) return -3;
   if (pthread_mutex_unlock(&g_explicit_mutex) != 0) return -4;
-  if (pthread_key_create(&g_key, &TlsDestructor) != 0) return -5;
-  if (pthread_self() == 0 || pthread_self() != pthread_self()) return -6;
-  if (pthread_cond_signal(&g_pshared_cond) != kAndroidEnotsup) return -7;
-  if (pthread_rwlock_rdlock(&g_rwlock_pshared) != kAndroidEnotsup) return -8;
+  if (pthread_mutex_lock(&g_recursive_mutex) != 0 ||
+      pthread_mutex_lock(&g_recursive_mutex) != 0 ||
+      pthread_mutex_unlock(&g_recursive_mutex) != 0 ||
+      pthread_mutex_trylock(&g_recursive_mutex) != 0 ||
+      pthread_mutex_unlock(&g_recursive_mutex) != 0 ||
+      pthread_mutex_unlock(&g_recursive_mutex) != 0 ||
+      pthread_mutex_unlock(&g_recursive_mutex) != kAndroidEperm)
+    return -10;
+  if (pthread_key_create(&g_key, &TlsDestructor) != 0) return -11;
+  if (pthread_self() == 0 || pthread_self() != pthread_self()) return -12;
+  if (pthread_cond_signal(&g_pshared_cond) != kAndroidEnotsup) return -13;
+  if (pthread_rwlock_rdlock(&g_rwlock_pshared) != kAndroidEnotsup) return -14;
   return 0;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_errorcheck_hold(void) {
+  if (pthread_mutex_lock(&g_errorcheck_mutex) != 0) return -100;
+  return pthread_mutex_lock(&g_errorcheck_mutex) == kAndroidEdeadlk ? 0 : -101;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_errorcheck_wrong_unlock(void) {
+  return pthread_mutex_unlock(&g_errorcheck_mutex) == kAndroidEperm ? 0 : -102;
+}
+
+__attribute__((visibility("default"))) int pthread_fixture_errorcheck_release(void) {
+  return pthread_mutex_unlock(&g_errorcheck_mutex) == 0 ? 0 : -103;
 }
 
 __attribute__((visibility("default"))) int pthread_fixture_worker(void) {
@@ -272,6 +319,8 @@ __attribute__((visibility("default"))) int pthread_fixture_finish(void) {
   if (pthread_mutex_unlock(&g_static_mutex) != 0) return -28;
   if (pthread_mutex_destroy(&g_static_mutex) != 0) return -29;
   if (pthread_mutex_destroy(&g_explicit_mutex) != 0) return -30;
+  if (pthread_mutex_destroy(&g_recursive_mutex) != 0) return -94;
+  if (pthread_mutex_destroy(&g_errorcheck_mutex) != 0) return -95;
   if (pthread_key_delete(g_key) != 0) return -31;
   if (pthread_getspecific(g_key) != 0) return -32;
   if (pthread_key_delete(g_key) != kAndroidEinval) return -33;
