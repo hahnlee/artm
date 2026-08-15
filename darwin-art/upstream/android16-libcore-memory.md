@@ -40,3 +40,25 @@ Run:
 ```sh
 tools/build-android16-libcore-memory-darwin.sh
 ```
+
+## ART runtime collision-free variant
+
+The ICU-JNI archive already linked by the runtime defines five global
+`JniConstants` methods. Exact symbol auditing finds three collisions with the
+full libcore cache: `Initialize`, `Invalidate`, and `GetStringClass`. Because
+each cache is one archive member, resolving `GetPrimitiveByteArrayClass` would
+extract all 37 libcore definitions and cause duplicate globals.
+
+The gate therefore emits the recommended ART-runtime pair:
+
+- `libcore-memory-art-runtime-darwin.a`
+- `libcore-jni-constants-art-runtime-darwin.a`
+
+Both upstream translation units are compiled consistently with the module
+class token renamed to `DarwinArtLibcoreJniConstants`. All 37 cache methods are
+preserved, and the gate links the renamed pair alongside the real ICU-JNI
+`JniConstants.o` to prove zero collisions. This is not a per-symbol shim. The
+external registrar remains exactly `register_libcore_io_Memory`; only its
+private provider edge changes. The unrenamed archives remain useful for a
+standalone libjavacore that does not link ICU-JNI, but must not be used in the
+current ART runtime dylib.

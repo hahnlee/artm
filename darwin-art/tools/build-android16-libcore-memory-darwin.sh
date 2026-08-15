@@ -7,6 +7,7 @@ project_root="$(cd "$script_dir/.." && pwd)"
 lock_file="$project_root/upstream/android16-libcore-memory.lock"
 source_root="$project_root/_aosp/libcore-memory"
 art_root="$project_root/_aosp/art-memory-complement"
+icu_audit_root="$project_root/_aosp/icu-jni-constants-collision"
 native_root="$source_root/luni/src/main/native"
 build_dir="$project_root/_build/libcore-memory"
 
@@ -63,6 +64,12 @@ materialize "$ART_PROJECT" "$ART_REVISION" "$art_root" \
   runtime/runtime.cc "$ART_RUNTIME_CC_SHA256"
 materialize "$ART_PROJECT" "$ART_REVISION" "$art_root" \
   runtime/Android.bp "$ART_RUNTIME_ANDROID_BP_SHA256"
+materialize "$ICU_PROJECT" "$ICU_REVISION" "$icu_audit_root" \
+  android_icu4j/libcore_bridge/src/native/JniConstants.cpp \
+  "$ICU_JNI_CONSTANTS_CPP_SHA256"
+materialize "$ICU_PROJECT" "$ICU_REVISION" "$icu_audit_root" \
+  android_icu4j/libcore_bridge/src/native/JniConstants.h \
+  "$ICU_JNI_CONSTANTS_H_SHA256"
 
 stage="$(mktemp -d "${TMPDIR:-/tmp}/darwin-art-libcore-memory.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
@@ -127,6 +134,7 @@ grep -F 'register_libcore_io_Memory(env);' \
 
 nativehelper_source="$project_root/_aosp/libnativehelper-full"
 nativehelper_archive="$project_root/_build/nativehelper-foundation/libnativehelper_jvm.a"
+icu_jni_archive="$project_root/_build/icu-jni-foundation/libicu-jni-darwin.a"
 liblog_include="$project_root/_aosp/system/logging/liblog/include"
 liblog_archive="$project_root/_build/graphics-foundations/liblog-darwin.a"
 portability="$project_root/probes/android16-memory-portability"
@@ -135,7 +143,8 @@ for required in \
   "$nativehelper_source/include/nativehelper/JNIHelp.h" \
   "$nativehelper_source/include/nativehelper/ScopedPrimitiveArray.h" \
   "$nativehelper_source/include_platform_header_only/nativehelper/jni_macros.h" \
-  "$nativehelper_archive" "$liblog_include/android/log.h" "$liblog_archive" \
+  "$nativehelper_archive" "$icu_jni_archive" \
+  "$liblog_include/android/log.h" "$liblog_archive" \
   "$portability/byteswap.h" "$portability/sys/sendfile.h" \
   "$project_root/probes/android16_libcore_memory_jni.cc" \
   "$project_root/probes/memory/libcore/io/Memory.java" \
@@ -196,13 +205,90 @@ nm -g "$jni_constants_archive" | \
   grep -F 'GetPrimitiveByteArrayClass' >/dev/null ||
   fail "Memory memmove direct provider is missing"
 
+definitions() {
+  nm -g "$1" | c++filt | \
+    awk -v owner="$2" '$2 == "T" && index($0, owner "::") {sub(/^.* T /, ""); print}' | \
+    sort -u
+}
+definitions "$icu_jni_archive" JniConstants \
+  > "$stage/icu-jni-constants-definitions.txt"
+definitions "$jni_constants_archive" JniConstants \
+  > "$stage/libcore-jni-constants-definitions.txt"
+comm -12 "$stage/icu-jni-constants-definitions.txt" \
+  "$stage/libcore-jni-constants-definitions.txt" \
+  > "$stage/jni-constants-overlap.txt"
+[[ "$(wc -l < "$stage/icu-jni-constants-definitions.txt" | tr -d ' ')" == \
+   "$ICU_JNI_CONSTANT_DEFINITION_COUNT" && \
+   "$(sha256 "$stage/icu-jni-constants-definitions.txt")" == \
+   "$ICU_JNI_CONSTANT_DEFINITIONS_SHA256" ]] ||
+  fail "ICU-JNI JniConstants definition manifest drift"
+[[ "$(wc -l < "$stage/libcore-jni-constants-definitions.txt" | tr -d ' ')" == \
+   "$LIBCORE_JNI_CONSTANT_DEFINITION_COUNT" && \
+   "$(sha256 "$stage/libcore-jni-constants-definitions.txt")" == \
+   "$LIBCORE_JNI_CONSTANT_DEFINITIONS_SHA256" ]] ||
+  fail "libcore JniConstants definition manifest drift"
+[[ "$(wc -l < "$stage/jni-constants-overlap.txt" | tr -d ' ')" == \
+   "$JNI_CONSTANT_OVERLAP_COUNT" && \
+   "$(sha256 "$stage/jni-constants-overlap.txt")" == \
+   "$JNI_CONSTANT_OVERLAP_SHA256" ]] ||
+  fail "JniConstants collision set drift"
+for collision in GetStringClass Initialize Invalidate; do
+  grep -F "JniConstants::$collision" "$stage/jni-constants-overlap.txt" \
+    >/dev/null || fail "expected ICU/libcore collision missing: $collision"
+done
+
+art_target_flags=("-DJniConstants=$ART_TARGET_JNI_CONSTANTS_CLASS")
+art_memory_object="$stage/libcore_io_Memory-art-runtime.o"
+art_jni_constants_object="$stage/JniConstants-art-runtime.o"
+"$cc" "${common_flags[@]}" "${art_target_flags[@]}" \
+  -c "$native_root/libcore_io_Memory.cpp" -o "$art_memory_object"
+"$cc" "${common_flags[@]}" "${art_target_flags[@]}" \
+  -c "$native_root/JniConstants.cpp" -o "$art_jni_constants_object"
+art_memory_archive="$stage/libcore-memory-art-runtime-darwin.a"
+art_jni_constants_archive="$stage/libcore-jni-constants-art-runtime-darwin.a"
+"$libtool_bin" -static -o "$art_memory_archive" "$art_memory_object"
+"$libtool_bin" -static -o "$art_jni_constants_archive" \
+  "$art_jni_constants_object"
+for art_archive in "$art_memory_archive" "$art_jni_constants_archive"; do
+  [[ "$(lipo -archs "$art_archive")" == arm64 ]] ||
+    fail "ART-target archive is not arm64: $art_archive"
+  [[ "$({ ar -t "$art_archive" || true; } | grep -v '^__\.SYMDEF' | \
+        wc -l | tr -d ' ')" == 1 ]] ||
+    fail "ART-target archive lost module-complete one-TU shape: $art_archive"
+done
+nm -g "$art_memory_archive" | grep -F 'register_libcore_io_Memory' \
+  >/dev/null || fail "ART-target registrar name changed"
+nm -u "$art_memory_archive" | c++filt | \
+  grep -F "$ART_TARGET_JNI_CONSTANTS_CLASS::GetPrimitiveByteArrayClass" \
+  >/dev/null || fail "ART-target Memory did not bind renamed provider"
+nm -u "$art_memory_archive" | c++filt | \
+  grep -E '^JniConstants::GetPrimitiveByteArrayClass' >/dev/null &&
+  fail "ART-target Memory still references colliding JniConstants"
+definitions "$art_jni_constants_archive" "$ART_TARGET_JNI_CONSTANTS_CLASS" \
+  > "$stage/art-target-jni-constants-definitions.txt"
+[[ "$(wc -l < "$stage/art-target-jni-constants-definitions.txt" | tr -d ' ')" == \
+   "$ART_TARGET_JNI_CONSTANT_DEFINITION_COUNT" && \
+   "$(sha256 "$stage/art-target-jni-constants-definitions.txt")" == \
+   "$ART_TARGET_JNI_CONSTANT_DEFINITIONS_SHA256" ]] ||
+  fail "ART-target renamed JniConstants definition manifest drift"
+comm -12 "$stage/icu-jni-constants-definitions.txt" \
+  "$stage/art-target-jni-constants-definitions.txt" | grep . >/dev/null &&
+  fail "ART-target JniConstants still collides with ICU-JNI"
+
 "$cc" "${common_flags[@]}" -c \
   "$project_root/probes/android16_libcore_memory_jni.cc" \
   -o "$stage/android16_libcore_memory_jni.o"
 managed_library="$stage/libandroid16-libcore-memory-smoke.dylib"
+icu_member_dir="$stage/icu-jni-member"
+mkdir -p "$icu_member_dir"
+(cd "$icu_member_dir" && ar -x "$icu_jni_archive" JniConstants.o)
+[[ -f "$icu_member_dir/JniConstants.o" ]] ||
+  fail "ICU-JNI JniConstants archive member missing"
 "$cc" -arch arm64 -isysroot "$sdk_root" -dynamiclib \
-  "$stage/android16_libcore_memory_jni.o" -Wl,-force_load,"$archive" \
-  -Wl,-force_load,"$jni_constants_archive" \
+  "$stage/android16_libcore_memory_jni.o" \
+  -Wl,-force_load,"$art_memory_archive" \
+  -Wl,-force_load,"$art_jni_constants_archive" \
+  "$icu_member_dir/JniConstants.o" \
   -Wl,-force_load,"$nativehelper_archive" "$liblog_archive" \
   -Wl,-exported_symbol,_JNI_OnLoad -Wl,-dead_strip \
   -Wl,-undefined,dynamic_lookup -framework CoreFoundation \
@@ -224,4 +310,7 @@ expected='managed-libcore-memory: methods=18+7 byte=pass unaligned=pass endian=p
 mkdir -p "$build_dir"
 cp "$archive" "$build_dir/libcore-memory-darwin.a"
 cp "$jni_constants_archive" "$build_dir/libcore-jni-constants-darwin.a"
-echo "libcore-memory: split=ART7+libcore18 union=25 overlap=0 providers=JniConstants+liblog byte=pass unaligned=pass endian=pass arrays=pass bulk=pass archives=Mach-O-arm64"
+cp "$art_memory_archive" "$build_dir/libcore-memory-art-runtime-darwin.a"
+cp "$art_jni_constants_archive" \
+  "$build_dir/libcore-jni-constants-art-runtime-darwin.a"
+echo "libcore-memory: split=ART7+libcore18 union=25 method-overlap=0 ICU/libcore-JniConstants-overlap=3 ART-target-collisions=0 registrar=register_libcore_io_Memory byte=pass unaligned=pass endian=pass arrays=pass bulk=pass archives=Mach-O-arm64"
