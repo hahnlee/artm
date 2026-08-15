@@ -59,6 +59,7 @@ final class NioFileChannel {
 
 public final class OpenJdkNioMappingSmoke {
   private static native int peek(long address);
+  private static native int restoreSignalHandler();
 
   private static void require(boolean condition, String message) {
     if (!condition) throw new AssertionError(message);
@@ -88,9 +89,12 @@ public final class OpenJdkNioMappingSmoke {
     long thread = (Long) current.invoke(null);
     require(thread != 0, "NativeThread.current returned zero");
     signal.invoke(null, thread);
+    int restoreStatus = restoreSignalHandler();
+    require(restoreStatus == 1,
+            "NativeThread did not restore SIGIO status=" + restoreStatus);
 
     Files.delete(path);
     System.out.println(
-        "managed-openjdk-nio: methods=5+14+2 size=pass map-ro=pass unmap=pass thread=pass");
+        "managed-openjdk-nio: methods=5+14+2 size=pass map-ro=pass unmap=pass thread=pass signal-restore=pass");
   }
 }

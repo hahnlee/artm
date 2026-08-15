@@ -1,7 +1,8 @@
 # Android 16 OpenJDK NIO mapping gate
 
 This gate builds the pinned Android 16 OpenJDK mapping subsystem as three
-unaltered production translation units:
+production translation units. File/channel logic remains unmodified; the
+NativeThread TU receives one hash-locked Darwin host-lifecycle patch:
 
 - `FileChannelImpl.c`: complete five-method registrar, including Darwin's
   `mmap`, `munmap`, `lseek`, and `sendfile` path.
@@ -9,7 +10,10 @@ unaltered production translation units:
   `_ALLBSD_SOURCE` portability branch maps the `*64` APIs and `fdatasync` onto
   their Darwin equivalents at module scope.
 - `NativeThread.c`: complete two-method registrar and the BSD `SIGIO`
-  interruption contract using `pthread_self` and `pthread_kill`.
+  interruption contract using `pthread_self` and `pthread_kill`. Since Darwin
+  ART is embedded in a host process, the patch saves the previous process-wide
+  SIGIO disposition and exports a teardown function that restores it after all
+  NIO users have quiesced.
 
 Android's `OnLoad.cpp` registers `IOUtil`, then `SocketChannelImpl`, then
 `FileChannelImpl` and `FileDispatcherImpl`. `FileInputStream` and
@@ -37,6 +41,8 @@ signal-handler initialization are executed directly.
 The smoke verifies size through the real dispatcher implementation, a
 read-only mapping of a temporary file through `FileChannelImpl_map0`, byte
 visibility at the returned address, `munmap`, and safe current-thread signaling.
+It installs a distinct prior SIGIO handler and proves that the teardown seam
+restores that exact disposition.
 
 Run:
 

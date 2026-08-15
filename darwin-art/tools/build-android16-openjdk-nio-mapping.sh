@@ -75,6 +75,18 @@ materialize ojluni/src/main/native/sun_nio_ch_IOStatus.h \
 stage="$(mktemp -d "${TMPDIR:-/tmp}/darwin-art-openjdk-nio.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 
+native_thread_patch="$project_root/patches/libcore-openjdk/0003-darwin-native-thread-signal-lifecycle.patch"
+[[ -f "$native_thread_patch" ]] || blocked "missing NativeThread lifecycle patch"
+[[ "$(sha256 "$native_thread_patch")" == "$NATIVETHREAD_LIFECYCLE_PATCH_SHA256" ]] ||
+  fail "NativeThread lifecycle patch checksum mismatch"
+patched_native_root="$stage/patched/ojluni/src/main/native"
+mkdir -p "$patched_native_root"
+cp "$native_root/NativeThread.c" "$patched_native_root/NativeThread.c"
+(cd "$stage/patched" && git init -q &&
+  git apply --recount "$native_thread_patch")
+[[ "$(sha256 "$patched_native_root/NativeThread.c")" == "$PATCHED_NATIVETHREAD_C_SHA256" ]] ||
+  fail "patched NativeThread source checksum mismatch"
+
 printf '%s\n' FileChannelImpl.c FileDispatcherImpl.c NativeThread.c \
   > "$stage/target-sources.txt"
 [[ "$(wc -l < "$stage/target-sources.txt" | tr -d ' ')" == \
@@ -207,7 +219,11 @@ common_flags=(
 
 while IFS= read -r source; do
   object="$objects/${source%.c}.o"
-  "$cc" "${common_flags[@]}" -c "$native_root/$source" -o "$object"
+  source_path="$native_root/$source"
+  if [[ "$source" == NativeThread.c ]]; then
+    source_path="$patched_native_root/NativeThread.c"
+  fi
+  "$cc" "${common_flags[@]}" -c "$source_path" -o "$object"
   [[ "$(file "$object")" == *"Mach-O 64-bit object arm64"* ]] ||
     fail "non-arm64 target object: $source"
 done < "$stage/target-sources.txt"
@@ -228,6 +244,9 @@ for registrar in register_sun_nio_ch_FileChannelImpl \
   grep -F "$registrar" "$target_symbols" >/dev/null ||
     fail "missing complete registrar: $registrar"
 done
+grep -F 'darwin_art_restore_sun_nio_ch_NativeThread_signal' \
+  "$target_symbols" >/dev/null ||
+  fail "NativeThread archive lacks host signal restoration seam"
 grep -F 'register_sun_nio_ch_IOUtil' "$target_symbols" >/dev/null &&
   fail "target archive unexpectedly owns IOUtil"
 for provider in _fdval _convertReturnVal _convertLongReturnVal \
@@ -295,11 +314,11 @@ javac --release 17 -encoding UTF-8 -d "$classes" \
 managed_output="$(java --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
   -cp "$classes" dev.darwinart.probe.OpenJdkNioMappingSmoke \
   "$managed_library")"
-expected='managed-openjdk-nio: methods=5+14+2 size=pass map-ro=pass unmap=pass thread=pass'
+expected='managed-openjdk-nio: methods=5+14+2 size=pass map-ro=pass unmap=pass thread=pass signal-restore=pass'
 [[ "$managed_output" == "$expected" ]] ||
   fail "managed acceptance failed: $managed_output"
 
 mkdir -p "$build_dir"
 cp "$target_archive" "$build_dir/libopenjdk-nio-mapping-darwin.a"
 cp "$support_archive" "$build_dir/libopenjdk-nio-support-darwin.a"
-echo "openjdk-nio-mapping: methods=5+14+2 sources=3 providers=IOUtil+jni_util size=pass map-ro=pass unmap=pass thread=pass archives=Mach-O-arm64"
+echo "openjdk-nio-mapping: methods=5+14+2 sources=3 providers=IOUtil+jni_util size=pass map-ro=pass unmap=pass thread=pass signal-restore=pass archives=Mach-O-arm64"

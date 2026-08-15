@@ -1,10 +1,20 @@
 #include <stdint.h>
+#include <signal.h>
 
 #include <jni.h>
 #include <nativehelper/JNIHelp.h>
 
 extern void register_sun_nio_ch_IOUtil(JNIEnv* env);
 extern void register_sun_nio_ch_NativeThread(JNIEnv* env);
+extern int darwin_art_install_sun_nio_ch_NativeThread_signal(void);
+extern int darwin_art_restore_sun_nio_ch_NativeThread_signal(void);
+
+static volatile sig_atomic_t g_prior_sigio_count;
+
+static void PriorSigioHandler(int signal_number) {
+  (void)signal_number;
+  ++g_prior_sigio_count;
+}
 
 extern jlong FileChannelImpl_initIDs(JNIEnv*, jclass);
 extern jlong FileChannelImpl_map0(JNIEnv*, jobject, jint, jlong, jlong);
@@ -82,8 +92,22 @@ static jint Peek(JNIEnv* env, jclass clazz, jlong address) {
   return *(const unsigned char*)(uintptr_t)address;
 }
 
+static jint RestoreSignalHandler(JNIEnv* env, jclass clazz) {
+  (void)env;
+  (void)clazz;
+  if (darwin_art_restore_sun_nio_ch_NativeThread_signal() != 0) {
+    return -1;
+  }
+  g_prior_sigio_count = 0;
+  if (raise(SIGIO) != 0) {
+    return -2;
+  }
+  return g_prior_sigio_count == 1 ? 1 : 0;
+}
+
 static JNINativeMethod kSmokeMethods[] = {
     METHOD("peek", "(J)I", Peek),
+    METHOD("restoreSignalHandler", "()I", RestoreSignalHandler),
 };
 
 static int Register(JNIEnv* env, const char* name, JNINativeMethod* methods,
@@ -112,6 +136,16 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
   }
   // Host JDK 17 retains these exact two methods, so exercise the production
   // registrar and its SIGIO handler initialization without an alias table.
+  struct sigaction prior;
+  prior.sa_handler = PriorSigioHandler;
+  prior.sa_flags = 0;
+  sigemptyset(&prior.sa_mask);
+  if (sigaction(SIGIO, &prior, NULL) != 0) {
+    return JNI_ERR;
+  }
+  if (darwin_art_install_sun_nio_ch_NativeThread_signal() != 0) {
+    return JNI_ERR;
+  }
   register_sun_nio_ch_NativeThread(env);
   if ((*env)->ExceptionCheck(env)) {
     return JNI_ERR;
