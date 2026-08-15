@@ -1,0 +1,11 @@
+[package]
+name = "bionic-stdio-facade"
+version = "0.1.0"
+edition = "2024"
+publish = false
+build = "build.rs"
+
+[dependencies]
+darwin-art-elf-loader = { path = "../../crates/darwin-art-elf-loader" }
+
+[workspace]
