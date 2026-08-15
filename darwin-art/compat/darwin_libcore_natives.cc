@@ -8,6 +8,7 @@ void register_libcore_io_AsynchronousCloseMonitor(JNIEnv* env);
 extern "C" void register_java_io_UnixFileSystem(JNIEnv* env);
 extern "C" void register_java_io_FileDescriptor(JNIEnv* env);
 extern "C" void register_java_io_FileInputStream(JNIEnv* env);
+extern "C" void register_java_lang_System(JNIEnv* env);
 extern "C" void register_java_sun_nio_fs_UnixNativeDispatcher(JNIEnv* env);
 extern "C" void register_sun_nio_ch_IOUtil(JNIEnv* env);
 extern "C" void register_sun_nio_ch_FileChannelImpl(JNIEnv* env);
@@ -655,6 +656,7 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
        const_cast<char*>("()Ljava/lang/String;"),
        reinterpret_cast<void*>(&IcuGetCldrVersion)},
   };
+#if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
   JNINativeMethod system_methods[] = {
       {const_cast<char*>("currentTimeMillis"), const_cast<char*>("()J"),
        reinterpret_cast<void*>(&SystemCurrentTimeMillis)},
@@ -664,6 +666,7 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
        const_cast<char*>("()[Ljava/lang/String;"),
        reinterpret_cast<void*>(&SystemSpecialProperties)},
   };
+#endif
 #if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
   JNINativeMethod file_descriptor_methods[] = {
       {const_cast<char*>("getAppend"), const_cast<char*>("(I)Z"),
@@ -685,6 +688,14 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
 #else
     return Register(env, "libcore/io/Linux", linux_methods,
                     static_cast<jint>(std::size(linux_methods)));
+#endif
+  };
+  const auto register_system = [&]() {
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+    register_java_lang_System(env);
+    return !env->ExceptionCheck();
+#else
+    return Register(env, "java/lang/System", system_methods, 3);
 #endif
   };
   const auto register_os_constants = [&]() {
@@ -758,7 +769,7 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
          Register(env, "java/lang/Double", double_methods, 2) &&
          // Android's OpenJDK OnLoad registers System before owners whose
          // FindClass/GetFieldID paths may initialize java.io or NIO classes.
-         Register(env, "java/lang/System", system_methods, 3) &&
+         register_system() &&
          register_os_constants() &&
          register_linux() &&
          register_file_descriptor() &&

@@ -58,6 +58,9 @@ fn run() -> Result<()> {
         "build-file-descriptor" => {
             build_shell_gate(&root, "build-android16-file-descriptor-darwin.sh")
         }
+        "build-system-natives" => {
+            build_shell_gate(&root, "build-android16-system-natives-darwin.sh")
+        }
         "build-unix-native-dispatcher" => {
             build_shell_gate(&root, "build-android16-unix-native-dispatcher-darwin.sh")
         }
@@ -3292,6 +3295,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
     build_shell_gate(root, "build-android16-openjdkjvm-darwin.sh")?;
     build_shell_gate(root, "build-android16-file-input-stream-darwin.sh")?;
     build_shell_gate(root, "build-android16-file-descriptor-darwin.sh")?;
+    build_shell_gate(root, "build-android16-system-natives-darwin.sh")?;
     build_shell_gate(root, "build-android16-unix-native-dispatcher-darwin.sh")?;
     build_shell_gate(root, "build-android16-openjdk-nio-mapping.sh")?;
     build_shell_gate(root, "build-android16-libcore-memory-darwin.sh")?;
@@ -3317,6 +3321,8 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         root.join("_build/file-input-stream-darwin/libopenjdk-file-input-stream-darwin.a");
     let file_descriptor_archive =
         root.join("_build/file-descriptor-darwin/libopenjdk-file-descriptor-darwin.a");
+    let system_natives_archive =
+        root.join("_build/system-natives-darwin/libopenjdk-system-natives-darwin.a");
     let unix_native_dispatcher_archive = root
         .join("_build/unix-native-dispatcher-darwin/libopenjdk-unix-native-dispatcher-darwin.a");
     let openjdk_nio_dir = root.join("_build/openjdk-nio-mapping");
@@ -3346,6 +3352,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         &openjdkjvm_archive,
         &file_input_stream_archive,
         &file_descriptor_archive,
+        &system_natives_archive,
         &unix_native_dispatcher_archive,
         &openjdk_nio_mapping_archive,
         &openjdk_nio_support_archive,
@@ -3453,6 +3460,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         // archives so the latter extract only additional runtime providers.
         .arg(&graphics_closure)
         .arg(&bootstrap)
+        .arg(&system_natives_archive)
         .arg(&file_descriptor_archive)
         .arg(&unix_native_dispatcher_archive)
         .arg(&file_input_stream_archive)
@@ -3563,6 +3571,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         "register_java_io_UnixFileSystem",
         "register_java_io_FileInputStream",
         "register_java_io_FileDescriptor",
+        "register_java_lang_System",
         "register_java_sun_nio_fs_UnixNativeDispatcher",
         "register_sun_nio_ch_IOUtil",
         "register_sun_nio_ch_FileChannelImpl",
