@@ -374,6 +374,20 @@ jstring DarwinLinuxStrsignal(JNIEnv* env, jobject, jint signal_number) {
   return message == nullptr ? nullptr : env->NewStringUTF(message);
 }
 
+void DarwinLinuxFdsanExchangeOwnerTag(JNIEnv*, jclass, jobject, jlong,
+                                      jlong) {
+  // Match upstream's complete non-Bionic branch. Java still updates
+  // FileDescriptor.ownerId; Darwin libc has no fdsan kernel/libc side table.
+}
+
+jlong DarwinLinuxFdsanGetOwnerTag(JNIEnv*, jclass, jobject) { return 0; }
+
+jstring DarwinLinuxFdsanGetTagType(JNIEnv* env, jclass, jlong) {
+  return env->NewStringUTF("unknown");
+}
+
+jlong DarwinLinuxFdsanGetTagValue(JNIEnv*, jclass, jlong) { return 0; }
+
 jint DarwinLinuxWriteBytes(JNIEnv* env, jobject, jobject java_fd,
                            jobject java_bytes, jint byte_offset,
                            jint byte_count) {
@@ -691,6 +705,17 @@ JNINativeMethod kAbiSmokeMethods[] = {
     {const_cast<char*>("signalMessage"),
      const_cast<char*>("(I)Ljava/lang/String;"),
      reinterpret_cast<void*>(&AbiSmokeStrsignal)},
+    {const_cast<char*>("exchangeOwnerTag"),
+     const_cast<char*>("(Ljava/io/FileDescriptor;JJ)V"),
+     reinterpret_cast<void*>(&DarwinLinuxFdsanExchangeOwnerTag)},
+    {const_cast<char*>("getOwnerTag"),
+     const_cast<char*>("(Ljava/io/FileDescriptor;)J"),
+     reinterpret_cast<void*>(&DarwinLinuxFdsanGetOwnerTag)},
+    {const_cast<char*>("getTagType"),
+     const_cast<char*>("(J)Ljava/lang/String;"),
+     reinterpret_cast<void*>(&DarwinLinuxFdsanGetTagType)},
+    {const_cast<char*>("getTagValue"), const_cast<char*>("(J)J"),
+     reinterpret_cast<void*>(&DarwinLinuxFdsanGetTagValue)},
 };
 #endif
 

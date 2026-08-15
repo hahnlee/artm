@@ -132,6 +132,10 @@ my %supported = (
   getenv => 'DarwinLinuxGetenv', getpwuid => 'DarwinLinuxGetpwuid',
   stat => 'DarwinLinuxStat', uname => 'DarwinLinuxUname',
   strerror => 'DarwinLinuxStrerror', strsignal => 'DarwinLinuxStrsignal',
+  android_fdsan_exchange_owner_tag => 'DarwinLinuxFdsanExchangeOwnerTag',
+  android_fdsan_get_owner_tag => 'DarwinLinuxFdsanGetOwnerTag',
+  android_fdsan_get_tag_type => 'DarwinLinuxFdsanGetTagType',
+  android_fdsan_get_tag_value => 'DarwinLinuxFdsanGetTagValue',
   writeBytes => 'DarwinLinuxWriteBytes',
 );
 my ($index, $regular_count, $critical_count, $unsupported_count) = (0, 0, 0, 0);
@@ -199,7 +203,6 @@ fi
 for expected in \
   $'chmod\t(Ljava/lang/String;I)V\tvoid\tJNIEnv* env,jobject,jstring,jint' \
   $'fcntlInt\t(Ljava/io/FileDescriptor;II)I\tjint\tJNIEnv* env,jobject,jobject,jint,jint' \
-  $'android_fdsan_get_owner_tag\t(Ljava/io/FileDescriptor;)J\tjlong\tJNIEnv* env,jobject,jobject' \
   $'gai_strerror\t(I)Ljava/lang/String;\tjstring\tJNIEnv* env,jobject,jint' \
   $'access\t(Ljava/lang/String;I)Z\tjboolean\tJNIEnv* env,jobject,jstring,jint'; do
   grep -F "$expected" "$abi_manifest" >/dev/null ||
@@ -356,6 +359,10 @@ public final class LibcoreDarwinAbiSmoke {
     private native StructUtsname unameView() throws ErrnoException;
     private native String errorMessage(int errorNumber);
     private native String signalMessage(int signalNumber);
+    private static native void exchangeOwnerTag(FileDescriptor fd, long expected, long replacement);
+    private static native long getOwnerTag(FileDescriptor fd);
+    private static native String getTagType(long tag);
+    private static native long getTagValue(long tag);
 
     private interface Invocation {
         void run() throws ErrnoException;
@@ -416,8 +423,14 @@ public final class LibcoreDarwinAbiSmoke {
         if (terminationSignal == null || terminationSignal.isEmpty()) {
             throw new AssertionError("strsignal(SIGTERM)=" + terminationSignal);
         }
+        exchangeOwnerTag(fd, 1L, 2L);
+        if (getOwnerTag(fd) != 0L || getTagValue(2L) != 0L
+                || !"unknown".equals(getTagType(2L))) {
+            throw new AssertionError("non-Bionic fdsan contract failed");
+        }
         System.out.println("managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP)"
-                + " strerror(EINVAL)=pass strsignal(SIGTERM)=pass processors=" + processors);
+                + " strerror(EINVAL)=pass strsignal(SIGTERM)=pass fdsan=non-Bionic"
+                + " processors=" + processors);
     }
 }
 JAVA
@@ -430,7 +443,7 @@ javac --release 17 -encoding UTF-8 -d "$java_classes" \
 managed_abi_output="$(DARWIN_ART_MANAGED_SMOKE=present java -cp "$java_classes" \
   dev.darwinart.probe.LibcoreDarwinAbiSmoke "$abi_library")"
 [[ "$managed_abi_output" == \
-   'managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP) strerror(EINVAL)=pass strsignal(SIGTERM)=pass processors='* ]] ||
+   'managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP) strerror(EINVAL)=pass strsignal(SIGTERM)=pass fdsan=non-Bionic processors='* ]] ||
   fail "managed ABI smoke output mismatch: $managed_abi_output"
 managed_processors="${managed_abi_output##*=}"
 [[ "$managed_processors" =~ ^[1-9][0-9]*$ ]] ||
@@ -441,4 +454,4 @@ mkdir -p "$build_dir"
 cp "$archive" "$build_dir/libcore-darwin-linux.a"
 cp "$smoke" "$build_dir/libcore-darwin-linux-smoke"
 
-echo "libcore-darwin-linux: methods=$method_count regular=$supported_regular critical=$supported_critical enotsup=$unsupported_count fixed-abi=$unsupported_count managed=V/I/J/L/Z+getenv/stat/write/uname/strerror/strsignal managed-processors=$managed_processors archive=Mach-O-arm64 $smoke_output"
+echo "libcore-darwin-linux: methods=$method_count regular=$supported_regular critical=$supported_critical enotsup=$unsupported_count fixed-abi=$unsupported_count managed=V/I/J/L/Z+getenv/stat/write/uname/strerror/strsignal/fdsan managed-processors=$managed_processors archive=Mach-O-arm64 $smoke_output"

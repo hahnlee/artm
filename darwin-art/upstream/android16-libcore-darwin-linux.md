@@ -8,7 +8,8 @@ created.
 
 The initial Darwin capability slice implements real `open`, `fstat`,
 `readBytes`, `writeBytes`, `close`, `mmap`, `munmap`, `sysconf`, `getenv`,
-`getpwuid`, `stat`, `uname`, `strerror`, and `strsignal` behavior plus all seven upstream
+`getpwuid`, `stat`, `uname`, `strerror`, and `strsignal` behavior, the complete
+four-method fdsan family, plus all seven upstream
 CriticalNative identity calls. Android/Linux open and mmap flags are translated
 explicitly. Every remaining method is present in the registrar and fails with
 `android.system.ErrnoException(ENOTSUP)` through a generated per-method wrapper;
@@ -37,6 +38,11 @@ unique to the calling thread. The `uname` projection deliberately reports `sysna
 `machine=aarch64`: framework and package ABI selection must observe the Android
 runtime contract, while Darwin release/version remain available in the other
 `StructUtsname` fields for diagnostics.
+
+The fdsan methods use Android's exact upstream non-Bionic semantics: exchanging
+an owner tag is a no-op, reading a tag/value returns zero, and the tag type is
+`unknown`. Managed `FileDescriptor.ownerId` remains authoritative on Darwin;
+no nonexistent Bionic side table is simulated.
 
 Integration must atomically replace the existing eight-entry
 `libcore/io/Linux` table in `compat/darwin_libcore_natives.cc`. Registering both
