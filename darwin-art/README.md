@@ -159,23 +159,26 @@ cargo run -p art-bootstrap -- probe-runtime-elf-jni
 ```
 
 This is a real ART `JavaVMExt::LoadNativeLibrary` path, not a standalone loader
-smoke. The fixture reaches `JNI_OnLoad`, proxy `FindClass` and
+smoke. A root and child ELF form a closed `DT_NEEDED` graph: child-before-root
+constructors run, the root calls a child export through an eager relocation,
+and only the complete graph is published. The fixture then reaches
+`JNI_OnLoad`, proxy `FindClass` and
 `RegisterNatives`, then executes eight scalar/reference methods through
 write-then-execute-protected ARM64 thunks. The planner derives JNI shorties from
 descriptors, tracks GP and FP banks independently, and repacks Darwin's natural
 stack tail into Android's eight-byte slots. A native method invoked after
 `JNI_OnLoad` calls proxy `GetVersion` and `FindClass` using the current ART
-thread's `JNIEnv`, not a retained load-time pointer. Aggregates, HFA, variadic
-calls, CriticalNative, the rest of the JNI table, hardened-runtime `MAP_JIT`,
-and wiring the standalone `DT_NEEDED` graph into ART remain explicit work. ELF
-TLS is still rejected. The standalone loader runs `DT_FINI_ARRAY` in reverse
-order followed by `DT_FINI` exactly once; ART integration with the separate
-Bionic `__cxa_finalize` lifecycle remains explicit work.
+thread's `JNIEnv`, not a retained load-time pointer. Unload observes root then
+child finalizers. Aggregates, HFA, variadic calls, CriticalNative, the rest of
+the JNI table, hardened-runtime `MAP_JIT`, general dependency discovery, and
+the composed Bionic provider namespace remain explicit work. ELF TLS is still
+rejected. ART integration with the separate Bionic `__cxa_finalize` lifecycle
+also remains explicit work.
 
 Its final line is:
 
 ```text
-probe-runtime-elf-jni: ART load + regular shorty trampolines + current JNIEnv PASS
+probe-runtime-elf-jni: ART DT_NEEDED graph + JNI + reverse finalizers PASS
 ```
 
 The first Android 16 HWUI host compile gate is reproducible with:

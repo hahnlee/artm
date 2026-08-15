@@ -218,10 +218,10 @@ fixed-register binary stdio slice with guest `FILE` tokens and `__sF`, and the
 locale/multibyte slice with guest `locale_t`, `mbstate_t`, and unsigned wchar32,
 ICU-backed wide classification, integer parsing, plus Bionic-owned
 `__cxa_atexit`/`__cxa_finalize` registration state.
-The coverage audit deliberately labels these as standalone gates: composing
-them into one loader namespace with shared lifetime and teardown is still an
-open integration boundary, and the remaining 48 imports remain hard
-capability failures.
+The provider namespace now composes all owners into one exact
+SONAME/symbol/version router with shared quiescent teardown. Wiring that router
+to the ART loader call site remains an integration boundary, and the remaining
+48 imports remain hard capability failures.
 
 ## Prior art and the boundary we adopt
 
@@ -329,8 +329,10 @@ falling through to dyld. The inspection classifier additionally
 reports dependencies, versioned imports/exports, TLS, RELRO,
 executable-stack/text-relocation requirements, and raw `svc`.
 
-The first ELF image now travels through ART's real native-library ownership
-path. ART runs its Android `JNI_OnLoad` with a proxy JavaVM, accepts its exact
+The first recursive ELF graph now travels through ART's real native-library
+ownership path. Its root eagerly resolves a child export, runs child-before-root
+constructors, and publishes only after the full graph succeeds. ART then runs
+Android `JNI_OnLoad` with a proxy JavaVM, accepts its exact
 eight-entry `RegisterNatives` table, and installs only W-to-RX Darwin-entry
 thunks—never raw Android function pointers. The regular-JNI shorty planner
 supports Z/B/C/S/I/J/F/D/L/V scalar/reference arguments and returns, tracks GP
@@ -339,7 +341,8 @@ stack tail into Android eight-byte slots. Actual ELF calls cover mixed FP,
 narrow integer stack values, reference/FP/void returns, and post-load proxy
 `GetVersion` plus `FindClass`; the backend obtains the current ART thread's
 JNIEnv instead of retaining the load-time pointer. DestroyJavaVM closes the
-image and returns the executable-page live count to zero. Hardened-runtime JIT
+graph, runs root-before-child finalizers, and returns the executable-page live
+count to zero. Hardened-runtime JIT
 policy, CriticalNative, aggregate/HFA/varargs calls, broader JNI proxy tables,
 TLS, and ART composition of ELF/Bionic finalization remain explicit gates. The
 standalone loader runs `DT_FINI_ARRAY` in reverse order followed by `DT_FINI`,
@@ -368,8 +371,8 @@ integer parser owns the six `strto*` imports with AOSP base, prefix, overflow,
 locale-ignore, and Bionic errno behavior. Together these standalone gates
 cover 112/160 libc imports with duplicate ownership rejected by
 `tools/audit-android35-libcxx-provider-coverage.sh`. Wide-character formatting,
-floating-point conversion, wider writable filesystem operations, and one
-composed runtime resolver remain open gates.
+floating-point conversion, wider writable filesystem operations, and wiring
+the composed provider namespace into ART remain open gates.
 
 The Bionic DSO lifecycle provider owns destructor registration independently
 of Darwin's C++ runtime. It preserves each function/argument/DSO triple,
