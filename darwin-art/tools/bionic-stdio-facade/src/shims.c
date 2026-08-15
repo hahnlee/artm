@@ -23,6 +23,7 @@ int darwin_art_bionic_ungetc(int c,DarwinArtAndroidFile* f) { WRAP(e, darwin_art
 static int Compare(const char* a,const char* b) { while(*a==*b&&*a){a++;b++;} return (unsigned char)*a<(unsigned char)*b?-1:((unsigned char)*a!=(unsigned char)*b); }
 typedef struct { const char* name; DarwinArtBionicStdioFunction address; } Binding;
 static const Binding kBindings[] = {
+ {"__sF",(DarwinArtBionicStdioFunction)darwin_art_bionic___sF},
  {"fclose",(DarwinArtBionicStdioFunction)darwin_art_bionic_fclose},
  {"fflush",(DarwinArtBionicStdioFunction)darwin_art_bionic_fflush},
  {"fileno",(DarwinArtBionicStdioFunction)darwin_art_bionic_fileno},

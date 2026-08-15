@@ -59,6 +59,9 @@ def main() -> int:
     claims += [(name, "numeric") for name in names(
         "tools/bionic-numeric-facade/manifests/imports.tsv"
     )]
+    claims += [(name, "float-conversion") for name in names(
+        "tools/bionic-float-conversion-facade/manifests/imports.tsv"
+    )]
     with (ROOT / "tools/bionic-dso-lifecycle-facade/manifests/imports.tsv").open() as stream:
         claims += [(line.split("\t", 1)[0], "dso-lifecycle")
                    for line in stream if line.strip()]
@@ -91,6 +94,7 @@ def main() -> int:
         "stdio": "DARWIN_ART_BIONIC_PROVIDER_STDIO",
         "locale": "DARWIN_ART_BIONIC_PROVIDER_LOCALE",
         "numeric": "DARWIN_ART_BIONIC_PROVIDER_NUMERIC",
+        "float-conversion": "DARWIN_ART_BIONIC_PROVIDER_FLOAT_CONVERSION",
         "liblog": "DARWIN_ART_BIONIC_PROVIDER_LIBLOG",
         "dso-lifecycle": "DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE",
     }
@@ -103,7 +107,7 @@ def main() -> int:
         (symbol, row["category"], row["rationale"])
         for symbol, row in universe.items() if symbol not in claimed
     )
-    if len(universe) != 160 or len(claimed) != 112 or len(unsupported) != 48:
+    if len(universe) != 160 or len(claimed) != 129 or len(unsupported) != 31:
         raise SystemExit(
             f"coverage drift: universe={len(universe)} owned={len(claimed)} "
             f"unsupported={len(unsupported)}"

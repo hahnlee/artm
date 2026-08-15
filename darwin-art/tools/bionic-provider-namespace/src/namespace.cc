@@ -34,9 +34,9 @@ constexpr size_t kUnsupportedLibcCount =
     ;
 
 constexpr const char *kProviderNames[] = {
-    "leaf",    "allocator",     "errno",         "filesystem", "time",
-    "pthread", "process-state", "phdr",          "stdio",      "locale",
-    "numeric", "liblog",        "dso-lifecycle",
+    "leaf",    "allocator",        "errno",  "filesystem",    "time",
+    "pthread", "process-state",    "phdr",   "stdio",         "locale",
+    "numeric", "float-conversion", "liblog", "dso-lifecycle",
 };
 static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);
@@ -48,6 +48,7 @@ constexpr DarwinArtBionicProviderId kReleaseOrder[] = {
     DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE,
     DARWIN_ART_BIONIC_PROVIDER_LIBLOG,
     DARWIN_ART_BIONIC_PROVIDER_NUMERIC,
+    DARWIN_ART_BIONIC_PROVIDER_FLOAT_CONVERSION,
     DARWIN_ART_BIONIC_PROVIDER_LOCALE,
     DARWIN_ART_BIONIC_PROVIDER_STDIO,
     DARWIN_ART_BIONIC_PROVIDER_PHDR,

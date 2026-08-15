@@ -18,6 +18,9 @@ extern "C" SymbolFunction darwin_art_bionic_stdio_resolve(const char *);
 extern "C" void *darwin_art_bionic_locale_resolve(const char *, const char *,
                                                   const char *);
 extern "C" SymbolFunction darwin_art_bionic_numeric_resolve(const char *);
+extern "C" void *darwin_art_bionic_float_conversion_resolve(const char *,
+                                                            const char *,
+                                                            const char *);
 extern "C" uintptr_t darwin_art_liblog_provider_resolve(const char *,
                                                         const char *);
 extern "C" SymbolFunction darwin_art_bionic_dso_lifecycle_resolve(const char *);
@@ -65,6 +68,11 @@ uintptr_t Locale(void *, const char *soname, const char *symbol,
 uintptr_t Numeric(void *, const char *, const char *symbol, const char *) {
   return Address(darwin_art_bionic_numeric_resolve(symbol));
 }
+uintptr_t FloatConversion(void *, const char *soname, const char *symbol,
+                          const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_float_conversion_resolve(soname, symbol, version));
+}
 uintptr_t Liblog(void *, const char *, const char *symbol,
                  const char *version) {
   return darwin_art_liblog_provider_resolve(symbol, version);
@@ -74,8 +82,9 @@ uintptr_t DsoLifecycle(void *, const char *, const char *symbol, const char *) {
 }
 
 constexpr DarwinArtBionicProviderResolve kResolvers[] = {
-    Leaf, Allocator, Errno,  Filesystem, Time,   Pthread,      ProcessState,
-    Phdr, Stdio,     Locale, Numeric,    Liblog, DsoLifecycle,
+    Leaf,    Allocator,       Errno,  Filesystem,   Time,
+    Pthread, ProcessState,    Phdr,   Stdio,        Locale,
+    Numeric, FloatConversion, Liblog, DsoLifecycle,
 };
 static_assert(sizeof(kResolvers) / sizeof(kResolvers[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);

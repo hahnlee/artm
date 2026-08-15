@@ -87,6 +87,11 @@ extern "C" void *darwin_art_bionic_locale_resolve(const char *soname,
 extern "C" SymbolFunction darwin_art_bionic_numeric_resolve(const char *s) {
   return OneArg(DARWIN_ART_BIONIC_PROVIDER_NUMERIC, s);
 }
+extern "C" void *darwin_art_bionic_float_conversion_resolve(
+    const char *soname, const char *symbol, const char *version) {
+  return Triple(DARWIN_ART_BIONIC_PROVIDER_FLOAT_CONVERSION, "libc.so", soname,
+                symbol, version);
+}
 extern "C" uintptr_t darwin_art_liblog_provider_resolve(const char *symbol,
                                                         const char *version) {
   if (symbol == nullptr || (version != nullptr && version[0] != '\0'))
@@ -115,8 +120,8 @@ int main() {
         result.owner != expected.owner || result.address == 0)
       return 11;
   }
-  constexpr size_t kExpectedCalls[] = {11, 4,  1,  13, 3,  24, 3,
-                                       1,  13, 31, 6,  18, 2};
+  constexpr size_t kExpectedCalls[] = {11, 4,  1,  28, 3, 24, 3,
+                                       1,  13, 31, 6,  2, 18, 2};
   for (size_t index = 0; index < calls.size(); ++index) {
     if (calls[index] != kExpectedCalls[index])
       return 12;
@@ -125,7 +130,7 @@ int main() {
       DARWIN_ART_BIONIC_NAMESPACE_OK)
     return 13;
   darwin_art_bionic_namespace_destroy(instance);
-  std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=13 "
-                       "routes=130 libdl-soname=exact\n");
+  std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=14 "
+                       "routes=147 libdl-soname=exact\n");
   return 0;
 }
