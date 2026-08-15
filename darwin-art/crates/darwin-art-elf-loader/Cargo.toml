@@ -1,0 +1,19 @@
+[package]
+name = "darwin-art-elf-loader"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "elf-loader-gate"
+path = "src/bin/gate.rs"
+
+[dependencies]
+
+# Keep this experimental loader independently buildable until its public API is
+# ready to join the repository workspace.
+[workspace]
+
