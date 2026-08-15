@@ -112,6 +112,9 @@
 - [x] Build the first HWUI objects for the Darwin host platform while selecting
       Android's `@CriticalNative` calling convention through a narrow locked
       patch, without defining `__ANDROID__`, and match Skia's no-RTTI contract.
+- [x] Build Android.bp-complete Darwin host archives for `liblog`, `libcutils`,
+      `libnativehelper_any_vm`, and `libnativehelper_jvm`; verify ARM64 Mach-O
+      members and the real JNI/log definitions required by the graphics closure.
 - [ ] Close the complete upstream Canvas/Paint registrar dependency graph with
       GraphicsJNI, software `libhwui_static`, Minikin, HarfBuzz, FreeType, ICU,
       androidfw, and native utility modules; do not substitute per-symbol stubs.

@@ -135,6 +135,25 @@ contract; representative Canvas/Paint symbols are checked to contain no
 proofs rather than safe ART registrars because their complete module dependency
 and registration closure is not linked yet.
 
+The first platform foundation modules are also real Android.bp-derived ARM64
+archives rather than symbol stubs:
+
+```bash
+cargo run -p art-bootstrap -- build-hwui-canvas
+cargo run -p art-bootstrap -- build-graphics-foundations
+cargo run -p art-bootstrap -- build-nativehelper
+```
+
+`liblog-darwin.a` contains all eight Darwin-host sources and resolves the two
+log functions in the current HWUI closure. `libcutils-darwin.a` contains its
+base, host, non-Windows, and whole-static socket source groups (19 objects).
+The nativehelper gate builds the four-object `libnativehelper_any_vm` archive
+and the seven-object `libnativehelper_jvm` whole-static equivalent, including
+the real JNI registration, exception, NIO, and file-descriptor helpers. The
+nativehelper archive must use normal archive extraction in the final link;
+force-loading it would also pull `JniInvocation`'s `JNI_CreateJavaVM` alongside
+ART's VM implementation.
+
 `build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
 depfile for every translation unit; the bootstrapper fingerprints the complete
 compile command, compiler/macOS identity, and SHA-256 of every referenced source

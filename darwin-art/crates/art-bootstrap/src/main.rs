@@ -33,6 +33,13 @@ fn run() -> Result<()> {
         "probe-pagesize" => probe_page_size(&root),
         "build-foundation" => build_foundation(&root),
         "build-skia" => build_skia(&root),
+        "build-hwui-canvas" => build_shell_gate(&root, "compile-android16-hwui-canvas-gate.sh"),
+        "build-graphics-foundations" => {
+            build_shell_gate(&root, "build-android16-graphics-foundations.sh")
+        }
+        "build-nativehelper" => {
+            build_shell_gate(&root, "build-android16-nativehelper-foundation.sh")
+        }
         "build-dex" => build_dex_probe(&root),
         "build-runtime-platform" => build_runtime_platform(&root),
         "build-runtime-core" => build_runtime_core(&root),
@@ -83,6 +90,9 @@ fn print_help() {
     println!("  probe-pagesize  compile ART's dynamic page-size path for Darwin");
     println!("  build-foundation  build and execute the minimal libartbase archive");
     println!("  build-skia  build upstream Skia CPU raster core and pixel smoke test");
+    println!("  build-hwui-canvas  compile the first upstream HWUI Canvas/Paint gate");
+    println!("  build-graphics-foundations  build Darwin liblog/libcutils archives");
+    println!("  build-nativehelper  build Darwin nativehelper host archives");
     println!("  build-dex  compile AOSP libdexfile and parse a generated classes.dex");
     println!("  build-runtime-platform  compile ART host platform sources as Mach-O");
     println!("  build-runtime-core  apply Darwin monitor patches and compile runtime core");
@@ -95,6 +105,14 @@ fn print_help() {
     println!("  probe-window  display the Android View probe in a native NSWindow");
     println!("  verify-bootclasspath  verify extracted Android 16 core DEX files");
     println!("  all        run every check and probe");
+}
+
+fn build_shell_gate(root: &Path, script: &str) -> Result<()> {
+    let script = root.join("tools").join(script);
+    if !script.is_file() {
+        return Err(format!("build gate script is missing: {}", script.display()).into());
+    }
+    run_command(Command::new("bash").arg(script).current_dir(root))
 }
 
 fn doctor() -> Result<()> {
@@ -149,11 +167,61 @@ fn sync_sources(root: &Path) -> Result<()> {
         root,
         "platform/system/core",
         lock_value(&lock, "SYSTEM_CORE_REVISION")?,
-        "system-core-libcutils-include",
-        "libcutils/include",
-        "_aosp/system/core/libcutils/include",
-        "cutils/trace.h",
-        lock_value(&lock, "LIBCUTILS_TRACE_HEADER_SHA256")?,
+        "system-core-libcutils",
+        "libcutils",
+        "_aosp/system/core/libcutils",
+        "Android.bp",
+        lock_value(&lock, "LIBCUTILS_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/system/core",
+        lock_value(&lock, "SYSTEM_CORE_REVISION")?,
+        "system-core-libutils",
+        "libutils",
+        "_aosp/system/core/libutils",
+        "Android.bp",
+        lock_value(&lock, "LIBUTILS_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/system/core",
+        lock_value(&lock, "SYSTEM_CORE_REVISION")?,
+        "system-core-libsystem",
+        "libsystem",
+        "_aosp/system/core/libsystem",
+        "Android.bp",
+        lock_value(&lock, "LIBSYSTEM_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/system/logging",
+        lock_value(&lock, "SYSTEM_LOGGING_REVISION")?,
+        "system-logging-liblog",
+        "liblog",
+        "_aosp/system/logging/liblog",
+        "Android.bp",
+        lock_value(&lock, "LIBLOG_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/libnativehelper",
+        lock_value(&lock, "LIBNATIVEHELPER_REVISION")?,
+        "libnativehelper-full",
+        "",
+        "_aosp/libnativehelper-full",
+        "Android.bp",
+        lock_value(&lock, "LIBNATIVEHELPER_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/frameworks/base",
+        lock_value(&lock, "FRAMEWORKS_BASE_REVISION")?,
+        "frameworks-base-nativehelper-jvm",
+        "libs/nativehelper_jvm",
+        "_aosp/frameworks/base/libs/nativehelper_jvm",
+        "Android.bp",
+        lock_value(&lock, "NATIVEHELPER_JVM_ANDROID_BP_SHA256")?,
     )?;
     materialize_archive(
         root,
@@ -860,8 +928,9 @@ fn build_skia(root: &Path) -> Result<()> {
     if source_revision.trim() != lock_value(&lock, "SKIA_REVISION")? {
         return Err("materialized Skia revision does not match sources.lock".into());
     }
-    let libcutils_include = root.join("_aosp/system/core/libcutils/include");
-    let libcutils_revision = fs::read_to_string(libcutils_include.join(".source-revision"))?;
+    let libcutils = root.join("_aosp/system/core/libcutils");
+    let libcutils_include = libcutils.join("include");
+    let libcutils_revision = fs::read_to_string(libcutils.join(".source-revision"))?;
     if libcutils_revision.trim() != lock_value(&lock, "SYSTEM_CORE_REVISION")? {
         return Err("materialized libcutils headers do not match sources.lock".into());
     }
