@@ -1,0 +1,10 @@
+{
+  global:
+    pthread_fixture_setup;
+    pthread_fixture_worker;
+    pthread_fixture_mutex_lookup_race;
+    pthread_fixture_mutex_destroy_race;
+    pthread_fixture_finish;
+  local:
+    *;
+};
