@@ -27,7 +27,11 @@ stage="$(mktemp -d "${TMPDIR:-/tmp}/android-elf-jni-fixture.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 output="$stage/libdarwin-art-jni-fixture.so"
 child="$stage/libdarwin-art-jni-child.so"
+grandchild="$stage/libdarwin-art-jni-grandchild.so"
 host_provider="$stage/libdarwin-art-jni-host.so"
+generic_root="$stage/libdarwin-art-generic-root.so"
+generic_child="$stage/libdarwin-art-generic-child.so"
+generic_grandchild="$stage/libdarwin-art-generic-grandchild.so"
 
 common_flags=(-std=c17 -O2 -fPIC -fvisibility=hidden -fno-builtin -Wall -Wextra -Werror
   -shared -nostdlib -fuse-ld=lld -Wl,--build-id=none -Wl,--hash-style=sysv
@@ -36,13 +40,30 @@ common_flags=(-std=c17 -O2 -fPIC -fvisibility=hidden -fno-builtin -Wall -Wextra 
 "$android_clang" "${common_flags[@]}" -Wl,-soname,libdarwin-art-jni-host.so \
   "$fixture_root/host_provider.c" -o "$host_provider"
 "$android_clang" "${common_flags[@]}" \
+  -Wl,-soname,libdarwin-art-jni-grandchild.so \
+  -Wl,--version-script,"$fixture_root/grandchild.exports.map" \
+  "$fixture_root/grandchild.c" -o "$grandchild"
+"$android_clang" "${common_flags[@]}" \
   -Wl,-soname,libdarwin-art-jni-child.so \
   -Wl,--version-script,"$fixture_root/child.exports.map" \
-  "$fixture_root/child.c" "$host_provider" -lc -o "$child"
+  "$fixture_root/child.c" "$grandchild" "$host_provider" -lc -o "$child"
 "$android_clang" "${common_flags[@]}" \
   -Wl,-soname,libdarwin-art-jni-fixture.so \
   -Wl,--version-script,"$fixture_root/exports.map" \
   "$fixture_root/native_fixture.c" "$child" "$host_provider" -lc -o "$output"
+
+"$android_clang" "${common_flags[@]}" \
+  -Wl,-soname,libdarwin-art-generic-grandchild.so \
+  -Wl,--version-script,"$fixture_root/generic_grandchild.exports.map" \
+  "$fixture_root/generic_grandchild.c" -o "$generic_grandchild"
+"$android_clang" "${common_flags[@]}" \
+  -Wl,-soname,libdarwin-art-generic-child.so \
+  -Wl,--version-script,"$fixture_root/generic_child.exports.map" \
+  "$fixture_root/generic_child.c" "$generic_grandchild" -o "$generic_child"
+"$android_clang" "${common_flags[@]}" \
+  -Wl,-soname,libdarwin-art-generic-root.so \
+  -Wl,--version-script,"$fixture_root/generic_root.exports.map" \
+  "$fixture_root/generic_root.c" "$generic_child" -o "$generic_root"
 
 for elf in "$output" "$child"; do
   file "$elf" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null ||
@@ -60,8 +81,10 @@ for elf in "$output" "$child"; do
 done
 root_dynamic="$stage/root.dynamic.txt"
 child_dynamic="$stage/child.dynamic.txt"
+grandchild_dynamic="$stage/grandchild.dynamic.txt"
 "$readelf" -d -r "$output" > "$root_dynamic"
 "$readelf" -d -r "$child" > "$child_dynamic"
+"$readelf" -d -r "$grandchild" > "$grandchild_dynamic"
 [[ "$(grep -c '(NEEDED)' "$root_dynamic")" == 3 ]] ||
   fail "root DT_NEEDED closure is not exactly child+host-provider+libc"
 grep -E '\(NEEDED\).*libdarwin-art-jni-child\.so' "$root_dynamic" >/dev/null ||
@@ -70,18 +93,46 @@ grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' "$root_dynamic" >/dev/null ||
   fail "root lost explicit virtual provider dependency"
 grep -E '\(NEEDED\).*libc\.so' "$root_dynamic" >/dev/null ||
   fail "root lost closed Bionic provider dependency"
-[[ "$(grep -c '(NEEDED)' "$child_dynamic")" == 2 ]] ||
-  fail "child DT_NEEDED closure is not exactly host-provider+libc"
+[[ "$(grep -c '(NEEDED)' "$child_dynamic")" == 3 ]] ||
+  fail "child DT_NEEDED closure is not exactly grandchild+host-provider+libc"
+grep -E '\(NEEDED\).*libdarwin-art-jni-grandchild\.so' "$child_dynamic" >/dev/null ||
+  fail "child lost grandchild dependency"
 grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' "$child_dynamic" >/dev/null ||
   fail "child lost explicit virtual provider dependency"
 grep -E '\(NEEDED\).*libc\.so' "$child_dynamic" >/dev/null ||
   fail "child lost Bionic lifecycle provider dependency"
+[[ "$(grep -c '(NEEDED)' "$grandchild_dynamic" || true)" == 0 ]] ||
+  fail "grandchild unexpectedly gained a dependency"
+grep -E 'R_AARCH64_JUMP_SLOT.*DarwinArtFixtureGrandchildValue' "$child_dynamic" >/dev/null ||
+  fail "child grandchild-symbol relocation missing"
 grep -E 'R_AARCH64_JUMP_SLOT.*DarwinArtFixtureChildValue' "$root_dynamic" >/dev/null ||
   fail "root child-symbol relocation missing"
 [[ "$("$nm" -D --defined-only "$output" | awk '$2 == "T" {print $3}' | paste -sd, -)" == \
    'JNI_OnLoad,JNI_OnUnload' ]] || fail "unexpected dynamic exports"
 [[ "$("$nm" -D --defined-only "$child" | awk '$2 == "T" {print $3}' | paste -sd, -)" == \
    'DarwinArtFixtureChildValue' ]] || fail "unexpected child dynamic exports"
+[[ "$("$nm" -D --defined-only "$grandchild" | awk '$2 == "T" {print $3}' | paste -sd, -)" == \
+   'DarwinArtFixtureGrandchildValue' ]] || fail "unexpected grandchild dynamic exports"
+
+generic_root_dynamic="$stage/generic-root.dynamic.txt"
+generic_child_dynamic="$stage/generic-child.dynamic.txt"
+generic_grandchild_dynamic="$stage/generic-grandchild.dynamic.txt"
+"$readelf" -d -r "$generic_root" > "$generic_root_dynamic"
+"$readelf" -d -r "$generic_child" > "$generic_child_dynamic"
+"$readelf" -d -r "$generic_grandchild" > "$generic_grandchild_dynamic"
+[[ "$(grep -c '(NEEDED)' "$generic_root_dynamic")" == 1 ]] &&
+  grep -E '\(NEEDED\).*libdarwin-art-generic-child\.so' "$generic_root_dynamic" >/dev/null ||
+  fail "generic root dependency drift"
+[[ "$(grep -c '(NEEDED)' "$generic_child_dynamic")" == 1 ]] &&
+  grep -E '\(NEEDED\).*libdarwin-art-generic-grandchild\.so' "$generic_child_dynamic" >/dev/null ||
+  fail "generic child dependency drift"
+[[ "$(grep -c '(NEEDED)' "$generic_grandchild_dynamic" || true)" == 0 ]] ||
+  fail "generic grandchild dependency drift"
+[[ "$("$nm" -D --defined-only "$generic_root" | awk '$2 == "T" {print $3}' | paste -sd, -)" == \
+   'JNI_OnLoad' ]] || fail "generic root must export JNI_OnLoad without JNI_OnUnload"
+! grep -E '__errno|strlen|libc\.so|libdl\.so|liblog\.so|libm\.so' \
+  "$generic_root_dynamic" "$generic_child_dynamic" "$generic_grandchild_dynamic" >/dev/null ||
+  fail "generic graph unexpectedly depends on a Bionic provider"
 
 relocations="$stage/relocations.txt"
 "$readelf" -r "$output" > "$relocations"
@@ -149,10 +200,16 @@ darwin_stack_loads="$(grep -Ec '(ldr[[:space:]]+[wx][0-9]+|ldp[[:space:]]+w[0-9]
 mkdir -p "$build_dir"
 cp "$output" "$build_dir/libdarwin-art-jni-fixture.so"
 cp "$child" "$build_dir/libdarwin-art-jni-child.so"
+cp "$grandchild" "$build_dir/libdarwin-art-jni-grandchild.so"
+cp "$generic_root" "$build_dir/libdarwin-art-generic-root.so"
+cp "$generic_child" "$build_dir/libdarwin-art-generic-child.so"
+cp "$generic_grandchild" "$build_dir/libdarwin-art-generic-grandchild.so"
 fixture_sha="$(shasum -a 256 "$output" | awk '{print $1}')"
 fixture_size="$(stat -f '%z' "$output")"
 child_sha="$(shasum -a 256 "$child" | awk '{print $1}')"
 child_size="$(stat -f '%z' "$child")"
+grandchild_sha="$(shasum -a 256 "$grandchild" | awk '{print $1}')"
+grandchild_size="$(stat -f '%z' "$grandchild")"
 generated_dir="$build_dir/generated"
 mkdir -p "$generated_dir"
 identity="$stage/darwin_art_elf_jni_fixture_identity.h"
@@ -167,6 +224,10 @@ identity="$stage/darwin_art_elf_jni_fixture_identity.h"
   echo 'inline constexpr char kDarwinArtElfJniChildSoname[] = "libdarwin-art-jni-child.so";'
   echo "inline constexpr size_t kDarwinArtElfJniChildSize = ${child_size}u;"
   echo "inline constexpr char kDarwinArtElfJniChildSha256[] = \"${child_sha}\";"
+  echo 'inline constexpr char kDarwinArtElfJniGrandchildFilename[] = "libdarwin-art-jni-grandchild.so";'
+  echo 'inline constexpr char kDarwinArtElfJniGrandchildSoname[] = "libdarwin-art-jni-grandchild.so";'
+  echo "inline constexpr size_t kDarwinArtElfJniGrandchildSize = ${grandchild_size}u;"
+  echo "inline constexpr char kDarwinArtElfJniGrandchildSha256[] = \"${grandchild_sha}\";"
   echo 'inline constexpr char kDarwinArtElfJniHostProviderSoname[] = "libdarwin-art-jni-host.so";'
   echo 'inline constexpr char kDarwinArtElfJniFixtureSpillSignature[] ='
   echo '    "(ZBCSIJLjava/lang/Object;FDFDFDFDFFD)J";'
@@ -181,4 +242,4 @@ identity="$stage/darwin_art_elf_jni_fixture_identity.h"
   echo '#endif'
 } > "$identity"
 cp "$identity" "$generated_dir/darwin_art_elf_jni_fixture_identity.h"
-echo "android-elf-jni-fixture: PASS graph=root+child+virtual-provider+libc ctor=child-first cxa=root-first-before-fini fini=root-first bionic=__errno+strlen+__cxa_atexit dso-handle=local exports=JNI_OnLoad+JNI_OnUnload relro=0 tls=0 register=GetEnv+FindClass+RegisterNatives methods=8(register+spill+env+narrow+returns) pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) root_size=$fixture_size root_sha256=$fixture_sha child_size=$child_size child_sha256=$child_sha"
+echo "android-elf-jni-fixture: PASS graph=root+child+grandchild+virtual-provider+libc ctor=child-first cxa=root-first-before-fini fini=root-first bionic=__errno+strlen+__cxa_atexit dso-handle=local exports=JNI_OnLoad+JNI_OnUnload relro=0 tls=0 register=GetEnv+FindClass+RegisterNatives methods=8(register+spill+env+narrow+returns) pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) root_size=$fixture_size root_sha256=$fixture_sha child_size=$child_size child_sha256=$child_sha grandchild_size=$grandchild_size grandchild_sha256=$grandchild_sha"

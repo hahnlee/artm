@@ -1,8 +1,10 @@
 # Register-only Android ELF JNI fixture
 
 This fixture is the first ART native-bridge acceptance target. It is compiled
-as Android ARM64 ELF, has no `DT_NEEDED` dependency, and exports only
-`JNI_OnLoad` and `JNI_OnUnload`.
+as an Android ARM64 ELF root with a real two-level sibling graph
+(`root -> child -> grandchild`) plus explicit virtual Bionic/host providers.
+The root exports only `JNI_OnLoad` and `JNI_OnUnload`; the leaf is constructor-
+free so the existing observable child/root lifecycle ordering stays exact.
 
 `JNI_OnLoad` exercises the reverse ABI boundary through the supplied proxy
 `JavaVM` and `JNIEnv` tables: `GetEnv`, `FindClass`, and `RegisterNatives`. It

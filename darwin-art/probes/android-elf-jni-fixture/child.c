@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 extern void darwin_art_fixture_record_lifecycle(int phase);
+extern int DarwinArtFixtureGrandchildValue(void);
 extern int __cxa_atexit(void (*function)(void*), void* argument, void* dso);
 
 __attribute__((visibility("hidden"))) void* __dso_handle = &__dso_handle;
@@ -14,7 +15,7 @@ static void ChildCxaFinalize(void* argument) {
 }
 
 __attribute__((constructor)) static void ChildInitialize(void) {
-  g_child_state = 20;
+  g_child_state = DarwinArtFixtureGrandchildValue() + 10;
   if (__cxa_atexit(&ChildCxaFinalize, &g_child_state, __dso_handle) != 0) {
     g_child_state = -1;
   }
