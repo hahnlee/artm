@@ -25,5 +25,7 @@ report="$(cargo run --quiet --manifest-path "$crate_root/Cargo.toml" -- \
   "$fixture_dir/libarm64_inspector_smoke.so")"
 [[ "$report" == *'"machine":"AArch64"'* ]]
 [[ "$report" == *'"soname":"libarm64_inspector_smoke.so"'* ]]
+[[ "$report" == *'"versioning":{"versym":true'* ]]
+[[ "$report" == *'"name":"FIXTURE_1.0"'* ]]
 [[ "$report" == *'"tier1_compatible":true'* ]]
 echo "android-arm64-so-inspect: PASS pinned Android arm64 fixture"

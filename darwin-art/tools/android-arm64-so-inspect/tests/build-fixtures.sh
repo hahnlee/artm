@@ -20,11 +20,13 @@ trap 'rm -rf "$stage"' EXIT
 
 "$clang" -c -fPIC "$fixture_dir/dependency.S" -o "$stage/dependency.o"
 "$linker" -shared --soname=libfixture_dep.so --hash-style=both -z relro \
+  --version-script="$fixture_dir/dependency.map" \
   "$stage/dependency.o" -o "$fixture_dir/libfixture_dep.so"
 
 "$clang" -c -fPIC "$fixture_dir/smoke.S" -o "$stage/smoke.o"
 "$linker" -shared --soname=libarm64_inspector_smoke.so --hash-style=both \
   -z relro -z now --init=smoke_constructor -rpath='$ORIGIN/fixture' \
+  --version-script="$fixture_dir/smoke.map" \
   --no-as-needed "$fixture_dir/libfixture_dep.so" "$stage/smoke.o" \
   -o "$fixture_dir/libarm64_inspector_smoke.so"
 

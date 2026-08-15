@@ -1,0 +1,7 @@
+FIXTURE_1.0 {
+    global:
+        external_api;
+    local:
+        *;
+};
+
