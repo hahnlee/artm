@@ -6,7 +6,7 @@ This gate measures coherent standalone provider ownership against the exact
 happen to exist in Darwin libc: a symbol is covered only when a project facade
 claims its Android ABI and semantic state.
 
-The current composed namespace owns 145 imports through twenty providers
+The current composed namespace owns 147 imports through twenty-one providers
 (including the distinct liblog owner):
 
 | Provider | Imports | Boundary |
@@ -24,6 +24,7 @@ The current composed namespace owns 145 imports through twenty providers
 | numeric | 6 | narrow integer conversion |
 | float-conversion | 2 | renamed AOSP gdtoa `strtod`/`strtof` |
 | format | 3 | Android variadic formatting ABI |
+| formatted-stdio | 2 | bounded formatter output committed to provider-local Android `FILE` tokens |
 | strerror | 1 | Bionic errno message ownership |
 | wide-integer | 4 | unsigned Android wchar32 integer conversion |
 | wide-float | 2 | ICU whitespace plus AOSP gdtoa `wcstod`/`wcstof` |
@@ -31,15 +32,17 @@ The current composed namespace owns 145 imports through twenty providers
 | syslog | 3 | Android variadic capture, Bionic state, and AOSP liblog routing |
 | lifecycle | 2 | Bionic DSO finalizer ownership |
 
-Coverage by the original ABI classification is A 11/11, B 63/76, C 64/65,
-and D 7/8. The remaining 15 imports stay explicit capability failures. In
+Coverage by the original ABI classification is A 11/11, B 65/76, C 64/65,
+and D 7/8. The remaining 13 imports stay explicit capability failures. In
 particular, `wcstold` remains rejected because Android arm64 uses binary128
 while Darwin arm64 uses binary64 for `long double`.
 
 These manifests feed the generated closed provider namespace used by ART's ELF
 graph resolver. The runtime closure still requires exactly one allocator,
 errno/gdtoa, and ICU owner; the wide-float archive contains none of those
-dependencies itself.
+dependencies itself. The formatted-stdio archive likewise owns only
+`fprintf`/`vfprintf` and reuses the one format, stdio, allocator, and errno
+owners.
 
 Run `tools/audit-android35-libcxx-provider-coverage.sh`. It hash-locks every
 input manifest, rejects providers outside the actual libc++ import set,

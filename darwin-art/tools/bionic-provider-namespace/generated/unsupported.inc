@@ -1,4 +1,3 @@
-    {"fprintf", 'B', "FILE-layout-varargs"},
     {"fputwc", 'B', "FILE-layout-wide-state"},
     {"getwc", 'B', "FILE-layout-wide-state"},
     {"ioctl", 'B', "linux-request-constants-varargs"},
@@ -10,6 +9,5 @@
     {"swprintf", 'B', "wide-varargs-long-double"},
     {"syscall", 'D', "linux-syscall-number-ABI"},
     {"ungetwc", 'B', "FILE-layout-wide-state"},
-    {"vfprintf", 'B', "FILE-layout-va_list-format"},
     {"vsscanf", 'B', "va_list-format-long-double"},
     {"wcstold", 'B', "wide-long-double-locale-errno"},

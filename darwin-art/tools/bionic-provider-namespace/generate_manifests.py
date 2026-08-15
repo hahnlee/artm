@@ -64,6 +64,8 @@ def main() -> int:
     )]
     claims += [(row["symbol"], "format") for row in rows(
         "tools/bionic-format-facade/manifests/imports.tsv") if row["status"] == "supported"]
+    claims += [(name, "formatted-stdio") for name in names(
+        "tools/bionic-formatted-stdio-facade/manifests/imports.tsv")]
     claims += [(name, "strerror") for name in names(
         "tools/bionic-strerror-facade/manifests/imports.tsv")]
     claims += [(name, "wide-integer") for name in names(
@@ -115,6 +117,7 @@ def main() -> int:
         "liblog": "DARWIN_ART_BIONIC_PROVIDER_LIBLOG",
         "dso-lifecycle": "DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE",
         "syslog": "DARWIN_ART_BIONIC_PROVIDER_SYSLOG",
+        "formatted-stdio": "DARWIN_ART_BIONIC_PROVIDER_FORMATTED_STDIO",
     }
     ownership = sorted(
         [("libdl.so" if owner == "phdr" else "libc.so",
@@ -125,7 +128,7 @@ def main() -> int:
         (symbol, row["category"], row["rationale"])
         for symbol, row in universe.items() if symbol not in claimed
     )
-    if len(universe) != 160 or len(claimed) != 145 or len(unsupported) != 15:
+    if len(universe) != 160 or len(claimed) != 147 or len(unsupported) != 13:
         raise SystemExit(
             f"coverage drift: universe={len(universe)} owned={len(claimed)} "
             f"unsupported={len(unsupported)}"

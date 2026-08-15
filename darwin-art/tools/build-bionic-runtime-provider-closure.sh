@@ -77,6 +77,17 @@ icu_root="$root/_aosp/external/icu-graphics"
   -c "$root/tools/bionic-format-facade/src/format.cc" -o "$objects/format.o"
 "$cc" -arch arm64 -isysroot "$sdk" \
   -c "$root/tools/bionic-format-facade/src/aapcs64_entry.S" -o "$objects/format-entry.o"
+"$cxx" "${cxxflags[@]}" -fno-builtin \
+  -I"$root/tools/bionic-formatted-stdio-facade/include" \
+  -I"$root/tools/bionic-format-facade/include" \
+  -I"$root/tools/bionic-stdio-facade/include" \
+  -I"$root/tools/bionic-libc-allocator-facade/include" \
+  -I"$root/tools/bionic-errno-tls/include" \
+  -c "$root/tools/bionic-formatted-stdio-facade/src/provider.cc" \
+  -o "$objects/formatted-stdio.o"
+"$cc" -arch arm64 -isysroot "$sdk" \
+  -c "$root/tools/bionic-formatted-stdio-facade/src/aapcs64_entry.S" \
+  -o "$objects/formatted-stdio-entry.o"
 "$cxx" "${cxxflags[@]}" \
   -I"$root/tools/bionic-syslog-facade/include" \
   -I"$root/tools/bionic-format-facade/include" \
@@ -123,6 +134,7 @@ native="$build/libdarwin-art-bionic-native-providers.a"
   "$objects/leaf.o" "$objects/allocator.o" "$objects/time.o" \
   "$objects/pthread.o" "$objects/phdr.o" "$objects/locale.o" \
   "$objects/numeric.o" "$objects/format.o" "$objects/format-entry.o" \
+  "$objects/formatted-stdio.o" "$objects/formatted-stdio-entry.o" \
   "$objects/syslog.o" "$objects/syslog-entry.o" \
   "$objects/strerror.o" "$objects/wide-integer.o" "$objects/wide-float.o" \
   "$objects/abort.o" \
@@ -152,6 +164,7 @@ _darwin_art_bionic_dso_lifecycle_resolve
 _darwin_art_bionic_errno_resolve
 _darwin_art_bionic_float_conversion_resolve
 _darwin_art_bionic_format_resolve
+_darwin_art_bionic_formatted_stdio_resolve
 _darwin_art_bionic_fs_resolve
 _darwin_art_bionic_libc_leaf_resolve
 _darwin_art_bionic_locale_resolve
@@ -190,6 +203,9 @@ for symbol in _darwin_art_bionic_malloc_result _darwin_art_bionic_free \
               _darwin_art_bionic_strtod _darwin_art_bionic_strtof \
               _darwin_art_bionic___errno _darwin_art_bionic_errno_store \
               _darwin_art_bionic_format_resolve \
+              _darwin_art_bionic_formatted_stdio_resolve \
+              _darwin_art_bionic_fprintf _darwin_art_bionic_vfprintf \
+              _darwin_art_bionic_stdio_fwrite_core \
               _darwin_art_bionic_syslog_resolve \
               _darwin_art_liblog_provider_resolve ___android_log_write \
               _darwin_art_bionic_wide_float_resolve __Z16android_icu_initv \
@@ -203,4 +219,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=20 bind_builtins=sealed routes=163 Rust+C+C++=linked duplicate-provider=0 host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=21 bind_builtins=sealed routes=165 Rust+C+C++=linked duplicate-provider=0 host-fallback=0'

@@ -1,4 +1,3 @@
-    "fprintf",
     "fputwc",
     "getwc",
     "ioctl",
@@ -10,6 +9,5 @@
     "swprintf",
     "syscall",
     "ungetwc",
-    "vfprintf",
     "vsscanf",
     "wcstold",

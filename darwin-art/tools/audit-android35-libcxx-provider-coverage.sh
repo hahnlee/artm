@@ -28,6 +28,7 @@ locale="$root/tools/bionic-locale-facade/manifests/imports.tsv"
 numeric="$root/tools/bionic-numeric-facade/manifests/imports.tsv"
 float_conversion="$root/tools/bionic-float-conversion-facade/manifests/imports.tsv"
 format="$root/tools/bionic-format-facade/manifests/imports.tsv"
+formatted_stdio="$root/tools/bionic-formatted-stdio-facade/manifests/imports.tsv"
 strerror="$root/tools/bionic-strerror-facade/manifests/imports.tsv"
 wide_integer="$root/tools/bionic-wide-integer-facade/manifests/imports.tsv"
 wide_float="$root/tools/bionic-wide-float-facade/manifests/imports.tsv"
@@ -38,7 +39,7 @@ leaf_source="$root/tools/bionic-libc-leaf-facade/src/leaf.c"
 errno_source="$root/tools/bionic-errno-tls/src/errno_tls.c"
 phdr_source="$root/tools/android-dl-iterate-phdr-provider/src/provider.cc"
 
-for file in "$universe" "$allocator" "$filesystem" "$time" "$pthread" "$process_state" "$stdio" "$locale" "$numeric" "$float_conversion" "$format" "$strerror" "$wide_integer" "$wide_float" "$abort_provider" "$syslog" "$lifecycle" \
+for file in "$universe" "$allocator" "$filesystem" "$time" "$pthread" "$process_state" "$stdio" "$locale" "$numeric" "$float_conversion" "$format" "$formatted_stdio" "$strerror" "$wide_integer" "$wide_float" "$abort_provider" "$syslog" "$lifecycle" \
             "$leaf_source" "$errno_source" "$phdr_source"; do
   [[ -f "$file" ]] || fail "missing provider manifest: $file"
 done
@@ -64,6 +65,8 @@ done
 [[ "$(sha "$float_conversion")" == "$FLOAT_CONVERSION_IMPORTS_SHA256" ]] ||
   fail "float conversion import manifest drift"
 [[ "$(sha "$format")" == "$FORMAT_IMPORTS_SHA256" ]] || fail "format import manifest drift"
+[[ "$(sha "$formatted_stdio")" == "$FORMATTED_STDIO_IMPORTS_SHA256" ]] ||
+  fail "formatted stdio import manifest drift"
 [[ "$(sha "$strerror")" == "$STRERROR_IMPORTS_SHA256" ]] || fail "strerror import manifest drift"
 [[ "$(sha "$wide_integer")" == "$WIDE_INTEGER_IMPORTS_SHA256" ]] || fail "wide integer import manifest drift"
 [[ "$(sha "$wide_float")" == "$WIDE_FLOAT_IMPORTS_SHA256" ]] || fail "wide float import manifest drift"
@@ -98,6 +101,7 @@ awk -F '\t' 'NR > 1 { print "locale\t" $1 }' "$locale" >>"$owners"
 awk -F '\t' 'NR > 1 { print "numeric\t" $1 }' "$numeric" >>"$owners"
 awk -F '\t' 'NR > 1 { print "float-conversion\t" $1 }' "$float_conversion" >>"$owners"
 awk -F '\t' 'NR > 1 && $2 == "supported" { print "format\t" $1 }' "$format" >>"$owners"
+awk -F '\t' 'NR > 1 { print "formatted-stdio\t" $1 }' "$formatted_stdio" >>"$owners"
 awk -F '\t' 'NR > 1 { print "strerror\t" $1 }' "$strerror" >>"$owners"
 awk -F '\t' 'NR > 1 { print "wide-integer\t" $1 }' "$wide_integer" >>"$owners"
 awk -F '\t' 'NR > 1 { print "wide-float\t" $1 }' "$wide_float" >>"$owners"
@@ -135,6 +139,7 @@ errno	1
 filesystem	29
 float-conversion	2
 format	3
+formatted-stdio	2
 leaf	11
 lifecycle	2
 locale	31
@@ -158,7 +163,7 @@ awk -F '\t' 'NR == FNR { owned[$2] = 1; next }
   "$owners" "$universe" | LC_ALL=C sort >"$tmp/class-counts"
 cat >"$tmp/expected-class-counts" <<'EOF'
 A	11	11
-B	63	76
+B	65	76
 C	64	65
 D	7	8
 EOF
@@ -166,6 +171,6 @@ diff -u "$tmp/expected-class-counts" "$tmp/class-counts" ||
   fail "capability-class coverage drift"
 
 echo "android35-libcxx-provider-coverage: PASS imports=$universe_count owned=$owned_count duplicate-owners=0"
-echo "providers=leaf:11 allocator:4 errno:1 filesystem:29 time:3 pthread:24 process-state:3 phdr:1 stdio:13 locale:31 numeric:6 float-conversion:2 format:3 strerror:1 wide-integer:4 wide-float:2 abort:2 syslog:3 lifecycle:2"
-echo "classes=A:11/11 B:63/76 C:64/65 D:7/8 remaining=15"
+echo "providers=leaf:11 allocator:4 errno:1 filesystem:29 time:3 pthread:24 process-state:3 phdr:1 stdio:13 locale:31 numeric:6 float-conversion:2 format:3 formatted-stdio:2 strerror:1 wide-integer:4 wide-float:2 abort:2 syslog:3 lifecycle:2"
+echo "classes=A:11/11 B:65/76 C:64/65 D:7/8 remaining=13"
 echo "scope=composed-namespace-integrated-into-ART-ELF-resolver"
