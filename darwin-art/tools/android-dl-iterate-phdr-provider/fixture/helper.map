@@ -1,0 +1,6 @@
+{
+  global:
+    phdr_helper_marker;
+  local:
+    *;
+};

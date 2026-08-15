@@ -1,0 +1,10 @@
+[package]
+name = "android-dl-iterate-phdr-runner"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+darwin-art-elf-loader = { path = "../../crates/darwin-art-elf-loader" }
+
+[workspace]
