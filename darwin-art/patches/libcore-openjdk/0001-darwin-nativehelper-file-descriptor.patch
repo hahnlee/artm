@@ -1,0 +1,25 @@
+diff --git a/ojluni/src/main/native/io_util_md.c b/ojluni/src/main/native/io_util_md.c
+--- a/ojluni/src/main/native/io_util_md.c
++++ b/ojluni/src/main/native/io_util_md.c
+@@ -28,6 +28,9 @@
+ #include "io_util.h"
+ #include "io_util_md.h"
+ #include <string.h>
++#if defined(DARWIN_ART_NATIVEHELPER_FILE_DESCRIPTOR)
++#include <android/file_descriptor_jni.h>
++#endif
+ #include <unistd.h>
+
+ #if defined(__linux__) || defined(_ALLBSD_SOURCE) || defined(_AIX)
+@@ -104,7 +107,11 @@ FD getFD(JNIEnv *env, jobject obj, jfieldID fid) {
+   if (fdo == NULL) {
+     return -1;
+   }
++#if defined(DARWIN_ART_NATIVEHELPER_FILE_DESCRIPTOR)
++  return AFileDescriptor_getFd(env, fdo);
++#else
+   return (*env)->GetIntField(env, fdo, IO_fd_fdID);
++#endif
+ }
+
+ // BEGIN Android-removed: Open files using IoBridge to share BlockGuard & StrictMode logic.
