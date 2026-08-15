@@ -58,6 +58,20 @@ icu_root="$root/_aosp/external/icu-graphics"
   -I"$root/tools/bionic-numeric-facade/include" \
   -c "$root/tools/bionic-numeric-facade/src/provider.c" -o "$objects/numeric.o"
 "$cxx" "${cxxflags[@]}" \
+  -I"$root/tools/bionic-format-facade/include" \
+  -I"$root/tools/bionic-libc-allocator-facade/include" \
+  -I"$root/tools/bionic-errno-tls/include" \
+  -c "$root/tools/bionic-format-facade/src/format.cc" -o "$objects/format.o"
+"$cc" -arch arm64 -isysroot "$sdk" \
+  -c "$root/tools/bionic-format-facade/src/aapcs64_entry.S" -o "$objects/format-entry.o"
+"$cc" "${cflags[@]}" -std=c17 -fno-builtin \
+  -I"$root/tools/bionic-strerror-facade/include" \
+  -I"$root/tools/bionic-strerror-facade/generated" \
+  -c "$root/tools/bionic-strerror-facade/src/strerror.c" -o "$objects/strerror.o"
+"$cc" "${cflags[@]}" -std=c17 -fno-builtin \
+  -I"$root/tools/bionic-wide-integer-facade/include" \
+  -c "$root/tools/bionic-wide-integer-facade/src/provider.c" -o "$objects/wide-integer.o"
+"$cxx" "${cxxflags[@]}" \
   -I"$root/tools/android-liblog-exec-provider/include" \
   -I"$root/_aosp/system/logging/liblog/include" \
   -c "$root/tools/android-liblog-exec-provider/liblog_provider.cc" -o "$objects/liblog.o"
@@ -74,7 +88,9 @@ native="$build/libdarwin-art-bionic-native-providers.a"
 "$ar" rcs "$native" \
   "$objects/leaf.o" "$objects/allocator.o" "$objects/time.o" \
   "$objects/pthread.o" "$objects/phdr.o" "$objects/locale.o" \
-  "$objects/numeric.o" "$objects/liblog.o" "$objects/namespace.o" \
+  "$objects/numeric.o" "$objects/format.o" "$objects/format-entry.o" \
+  "$objects/strerror.o" "$objects/wide-integer.o" \
+  "$objects/liblog.o" "$objects/namespace.o" \
   "$objects/builtin_adapters.o"
 
 rust="$build/libdarwin-art-bionic-rust-providers.a"
@@ -98,6 +114,7 @@ _darwin_art_bionic_allocator_resolve
 _darwin_art_bionic_dso_lifecycle_resolve
 _darwin_art_bionic_errno_resolve
 _darwin_art_bionic_float_conversion_resolve
+_darwin_art_bionic_format_resolve
 _darwin_art_bionic_fs_resolve
 _darwin_art_bionic_libc_leaf_resolve
 _darwin_art_bionic_locale_resolve
@@ -105,7 +122,9 @@ _darwin_art_bionic_numeric_resolve
 _darwin_art_bionic_process_state_resolve
 _darwin_art_bionic_pthread_resolve
 _darwin_art_bionic_stdio_resolve
+_darwin_art_bionic_strerror_resolve
 _darwin_art_bionic_time_resolve
+_darwin_art_bionic_wide_integer_resolve
 _darwin_art_dl_phdr_resolve
 _darwin_art_liblog_provider_resolve
 EOF
@@ -119,4 +138,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=14 bind_builtins=sealed routes=147 Rust+C+C++=linked host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=17 bind_builtins=sealed routes=155 Rust+C+C++=linked host-fallback=0'
