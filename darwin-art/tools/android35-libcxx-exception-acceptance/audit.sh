@@ -118,7 +118,7 @@ relocation_count="$(grep -c 'R_AARCH64_' "$stage/accepted.readelf.txt")"
 [[ "$relocation_count" == "$EXPECTED_STATIC_UNWIND_RELOCATIONS" ]] ||
   fail "accepted fixture relocation count drift: $relocation_count"
 for expected in '19 R_AARCH64_RELATIVE' '2 R_AARCH64_ABS64' \
-  '9 R_AARCH64_GLOB_DAT' '27 R_AARCH64_JUMP_SLOT'; do
+  '9 R_AARCH64_GLOB_DAT' '28 R_AARCH64_JUMP_SLOT'; do
   actual="$(grep -o 'R_AARCH64_[A-Z0-9_]*' "$stage/accepted.readelf.txt" | \
     LC_ALL=C sort | uniq -c | awk '{$1=$1; print}' | grep -F "$expected" || true)"
   [[ "$actual" == "$expected" ]] || fail "accepted relocation drift: $expected"
@@ -130,6 +130,8 @@ done
   fail "local __unw_resume implementation drift"
 [[ "$("$nm" -D --defined-only "$accepted" | grep -c ' T darwin_art_libcxx_exception$')" == 1 ]] ||
   fail "exception export missing"
+[[ "$("$nm" -D --defined-only "$accepted" | grep -c ' T JNI_OnLoad$')" == 1 ]] ||
+  fail "self-testing JNI_OnLoad export missing"
 
 # Source-derived check for the only Linux syscall shape used by the pinned
 # libunwind address-readability probe. Its facade gate covers EINVAL/EFAULT.

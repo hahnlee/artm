@@ -65,7 +65,7 @@ grep -F 'GNU_RELRO' "$stage/consumer.readelf.txt" >/dev/null ||
 ! grep -E '^  TLS |\((RELR|REL|INIT|PREINIT_ARRAY|RPATH|RUNPATH|TEXTREL|SYMBOLIC)\)' \
   "$stage/consumer.readelf.txt" | grep -Ev 'RELA|INIT_ARRAY' >/dev/null ||
   fail "consumer acquired an unsupported ELF capability"
-[[ "$(grep -c 'R_AARCH64_JUMP_SLOT' "$stage/consumer.readelf.txt")" == 4 ]] ||
+[[ "$(grep -c 'R_AARCH64_JUMP_SLOT' "$stage/consumer.readelf.txt")" == 5 ]] ||
   fail "consumer relocation set drift"
 ! grep -E 'R_AARCH64_(RELATIVE|ABS64|GLOB_DAT)' "$stage/consumer.readelf.txt" >/dev/null ||
   fail "consumer acquired an unexpected non-PLT relocation"
@@ -76,6 +76,8 @@ cmp -s "$here/consumer.imports" "$stage/consumer.imports" ||
   fail "consumer import manifest drift"
 [[ "$("$nm" -D --defined-only "$consumer" | grep -c ' T darwin_art_libcxx_collections$')" == 1 ]] ||
   fail "consumer export missing"
+[[ "$("$nm" -D --defined-only "$consumer" | grep -c ' T JNI_OnLoad$')" == 1 ]] ||
+  fail "self-testing JNI_OnLoad export missing"
 
 "$readelf" -l -d -r -V --dyn-syms --wide "$libcxx" > "$stage/libcxx.readelf.txt"
 for needed in libc.so libm.so libdl.so; do

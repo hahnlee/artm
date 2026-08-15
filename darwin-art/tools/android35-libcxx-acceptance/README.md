@@ -17,6 +17,9 @@ no-argument `darwin_art_libcxx_collections` function crosses libc++ heap and ABI
 boundaries with a non-SSO `std::string`, `std::vector`, `std::sort`, bounds
 checking, allocation, and deletion. A real closed-namespace execution must
 return `189` after libc++, libc, libm, and libdl providers have been initialized.
+Its two-argument `JNI_OnLoad` runs that check internally and returns JNI 1.6
+only on success, so ART's ordinary generic native-library path can execute the
+acceptance without exposing a raw Android function pointer to Darwin code.
 
 Exceptions are deliberately outside this first executable consumer. Compiling
 the equivalent throw/catch probe introduces `_Unwind_Resume@LIBC_R`; the

@@ -23,6 +23,8 @@ nontrivial `std::string` cleanup frame and catches it in its caller. A result of
 execution exactly once, RTTI matching, and catch lifetime. The audit currently
 proves the exact build/ELF/provider closure; execution is enabled only after the
 real libc++ graph and its 160 providers are live.
+The fixture's two-argument `JNI_OnLoad` runs this check and returns JNI 1.6 only
+for `73`, allowing the normal ART native-library path to own load and unload.
 
 Run:
 

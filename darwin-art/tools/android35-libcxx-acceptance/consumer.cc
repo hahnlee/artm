@@ -23,3 +23,7 @@ darwin_art_libcxx_collections() {
          static_cast<unsigned char>(text.at(11)) + values.front() * 10 +
          values.back();
 }
+
+extern "C" __attribute__((visibility("default"))) int JNI_OnLoad(void*, void*) {
+  return darwin_art_libcxx_collections() == 189 ? 0x00010006 : -1;
+}

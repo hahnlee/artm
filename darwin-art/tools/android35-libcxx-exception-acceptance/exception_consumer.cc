@@ -34,3 +34,7 @@ darwin_art_libcxx_exception() {
   }
   return -2;
 }
+
+extern "C" __attribute__((visibility("default"))) int JNI_OnLoad(void*, void*) {
+  return darwin_art_libcxx_exception() == 73 ? 0x00010006 : -1;
+}
