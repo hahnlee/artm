@@ -169,6 +169,9 @@ reviewed thunk where their signatures can spill or use varargs. `JNI_OnLoad`
 itself has only two pointer arguments and is a useful first execution gate, but
 it does not prove general JNI calling-convention compatibility.
 
+The concrete ART ownership and teardown seam is specified in
+`docs/art-elf-native-loader-integration.md`.
+
 ### Virtual Android DSOs
 
 Normal NDK libraries import Bionic and Android libraries rather than issuing a
