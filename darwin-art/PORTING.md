@@ -72,9 +72,13 @@
 - [x] Invoke an app's conventional `public static void main(String[])` via JNI.
 - [x] Route Android `System.out.println` through `PrintStream`, Android
       `CharsetICU`, host ICU4C conversion, `IoBridge`, and Darwin `write(2)`.
+- [x] Verify Android 16's five framework DEX files, initialize the real main
+      `Looper`, and instantiate an app class extending `android.app.Activity`.
+- [x] Back the first Android framework natives (`MessageQueue` and
+      `Log.isLoggable`) with Darwin behavior.
 - [ ] Register the minimal libcore native method set needed by ordinary Java
       startup without loading Android `.so` libraries.
-- [ ] Launch a minimal `Activity` compatibility class.
+- [ ] Attach a minimal real `Activity` and dispatch `onCreate()`.
 - [ ] Connect the View backend to ProjectGPU and an `NSWindow`.
 
 ## Deferred performance work

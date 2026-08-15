@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "class_linker.h"
 #include "cmdline_types.h"
+#include "darwin_framework_natives.h"
 #include "darwin_icu_natives.h"
 #include "darwin_libcore_natives.h"
 #include "dex/art_dex_file_loader.h"
@@ -30,14 +31,14 @@
 static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
 
 int main(int argc, char** argv) {
-  if (argc != 5) {
+  if (argc != 6) {
     std::cerr << "usage: runtime-link-probe CORE_OJ_JAR CORE_LIBART_JAR "
-                 "CORE_ICU4J_JAR CLASSES_DEX\n";
+                 "FRAMEWORK_JAR CORE_ICU4J_JAR CLASSES_DEX\n";
     return 64;
   }
 
   std::string boot_class_path =
-      std::string(argv[1]) + ":" + argv[2] + ":" + argv[3];
+      std::string(argv[1]) + ":" + argv[2] + ":" + argv[3] + ":" + argv[4];
   std::cerr << "Mach-O slide: 0x" << std::hex << _dyld_get_image_vmaddr_slide(0)
             << std::dec << "\n";
   art::Locks::Init();
@@ -75,7 +76,7 @@ int main(int argc, char** argv) {
 
   std::vector<std::unique_ptr<const art::DexFile>> app_dex_files;
   std::string dex_error;
-  art::ArtDexFileLoader dex_loader(argv[4]);
+  art::ArtDexFileLoader dex_loader(argv[5]);
   if (!dex_loader.Open(/* verify= */ true,
                        /* verify_checksum= */ true, &dex_error,
                        &app_dex_files)) {
@@ -91,7 +92,7 @@ int main(int argc, char** argv) {
   art::ClassLinker* class_linker = art::Runtime::Current()->GetClassLinker();
   jobject loader_ref =
       class_linker->CreatePathClassLoader(self, app_dex_file_ptrs);
-  art::StackHandleScope<2> hs(self);
+  art::StackHandleScope<4> hs(self);
   art::Handle<art::mirror::ClassLoader> app_loader =
       hs.NewHandle(soa.Decode<art::mirror::ClassLoader>(loader_ref));
   for (const auto& dex_file : app_dex_files) {
@@ -109,7 +110,30 @@ int main(int argc, char** argv) {
     return 5;
   }
 
+  art::Handle<art::mirror::Class> framework_activity = hs.NewHandle(
+      class_linker->FindSystemClass(self, "Landroid/app/Activity;"));
+  if (framework_activity == nullptr || self->IsExceptionPending()) {
+    std::cerr << "ART Android framework: Activity class lookup failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 21;
+  }
+  art::Handle<art::mirror::Class> probe_activity =
+      hs.NewHandle(class_linker->FindClass(
+          self, "Ldev/darwinart/probe/ProbeActivity;",
+          sizeof("Ldev/darwinart/probe/ProbeActivity;") - 1u, app_loader));
+  if (probe_activity == nullptr || self->IsExceptionPending()) {
+    std::cerr << "ART Android framework: Activity subclass lookup failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 21;
+  }
+
   jclass hello_class = soa.AddLocalReference<jclass>(hello.Get());
+  jclass probe_activity_class =
+      soa.AddLocalReference<jclass>(probe_activity.Get());
   art::Runtime::Current()->StartMinimalForDarwinProbe(self->GetJniEnv());
   if (!darwin_art::RegisterLibcoreNatives(self->GetJniEnv())) {
     std::cerr << "ART Darwin libcore: native registration failed\n";
@@ -119,7 +143,59 @@ int main(int argc, char** argv) {
     std::cerr << "ART Darwin ICU: charset native registration failed\n";
     return 20;
   }
+  if (!darwin_art::RegisterFrameworkNatives(self->GetJniEnv())) {
+    std::cerr << "ART Darwin framework: native registration failed\n";
+    return 26;
+  }
   art::Runtime::Current()->FinishMinimalForDarwinProbe();
+
+  JNIEnv* env = self->GetJniEnv();
+  jclass looper_class = env->FindClass("android/os/Looper");
+  jmethodID prepare_main_looper =
+      looper_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(looper_class, "prepareMainLooper", "()V");
+  if (prepare_main_looper != nullptr) {
+    env->CallStaticVoidMethod(looper_class, prepare_main_looper);
+  }
+  env->DeleteLocalRef(looper_class);
+  if (prepare_main_looper == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Android framework: Looper.prepareMainLooper() failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 25;
+  }
+
+  if (!class_linker->EnsureInitialized(self, probe_activity, true, true)) {
+    std::cerr << "ART Android framework: ProbeActivity initialization failed\n"
+              << self->GetException()->Dump() << "\n";
+    return 22;
+  }
+  jmethodID activity_constructor =
+      env->GetMethodID(probe_activity_class, "<init>", "()V");
+  jobject activity_instance =
+      activity_constructor == nullptr
+          ? nullptr
+          : env->NewObject(probe_activity_class, activity_constructor);
+  jmethodID probe_value =
+      env->GetMethodID(probe_activity_class, "probeValue", "()I");
+  jint activity_result =
+      activity_instance == nullptr || probe_value == nullptr
+          ? -1
+          : env->CallIntMethod(activity_instance, probe_value);
+  if (env->ExceptionCheck()) {
+    std::cerr << "ART Android framework: ProbeActivity constructor threw\n"
+              << self->GetException()->Dump() << "\n";
+    return 23;
+  }
+  env->DeleteLocalRef(activity_instance);
+  if (activity_result != 42) {
+    std::cerr << "ART Android framework: expected 42, got " << activity_result
+              << "\n";
+    return 24;
+  }
+
   JNINativeMethod native_method{
       const_cast<char*>("hostPageSize"),
       const_cast<char*>("()I"),
@@ -191,7 +267,6 @@ int main(int argc, char** argv) {
     return 16;
   }
 
-  JNIEnv* env = self->GetJniEnv();
   jmethodID java_main =
       env->GetStaticMethodID(hello_class, "main", "([Ljava/lang/String;)V");
   jclass string_class = env->FindClass("java/lang/String");
@@ -224,6 +299,8 @@ int main(int argc, char** argv) {
             << " nativeRoundTrip()=" << native_result.GetI() << "\n"
             << "ART runtime native: System.arraycopy()="
             << arraycopy_result.GetI() << "\n"
+            << "ART Android framework: ProbeActivity().probeValue()="
+            << activity_result << "\n"
             << "ART Darwin launcher: main(String[])=ok\n";
   return 0;
 }

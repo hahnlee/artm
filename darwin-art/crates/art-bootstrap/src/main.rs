@@ -834,15 +834,22 @@ fn build_dex_probe(root: &Path) -> Result<()> {
         Command::new("javac")
             .args(["--release", "8", "-encoding", "UTF-8", "-d"])
             .arg(&class_dir)
-            .arg(root.join("probes/Hello.java")),
+            .arg("-classpath")
+            .arg(find_android_platform_jar()?)
+            .arg(root.join("probes/Hello.java"))
+            .arg(root.join("probes/ProbeActivity.java")),
     )?;
 
     let hello_class = class_dir.join("dev/darwinart/probe/Hello.class");
+    let activity_class = class_dir.join("dev/darwinart/probe/ProbeActivity.class");
     run_command(
         Command::new(find_d8()?)
-            .args(["--output"])
+            .arg("--lib")
+            .arg(find_android_platform_jar()?)
+            .arg("--output")
             .arg(&dex_dir)
-            .arg(&hello_class),
+            .arg(&hello_class)
+            .arg(&activity_class),
     )?;
 
     let includes = [
@@ -910,7 +917,9 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=1 methods=9 class[0]=Ldev/darwinart/probe/Hello;";
+    let expected = "AOSP DEX: verified=yes version=35 classes=2 methods=12 \
+                    class[0]=Ldev/darwinart/probe/Hello; \
+                    class[1]=Ldev/darwinart/probe/ProbeActivity;";
     if output.trim() != expected {
         return Err(format!("unexpected DEX probe output: {output:?}").into());
     }
@@ -937,15 +946,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 }
 
 fn find_d8() -> Result<PathBuf> {
-    let sdk_root = env::var_os("ANDROID_SDK_ROOT")
-        .or_else(|| env::var_os("ANDROID_HOME"))
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("HOME")
-                .map(PathBuf::from)
-                .map(|home| home.join("Library/Android/sdk"))
-        })
-        .ok_or("could not determine the Android SDK directory")?;
+    let sdk_root = android_sdk_root()?;
     let build_tools = sdk_root.join("build-tools");
     let mut candidates = fs::read_dir(&build_tools)?
         .filter_map(std::result::Result::ok)
@@ -956,6 +957,26 @@ fn find_d8() -> Result<PathBuf> {
     candidates
         .pop()
         .ok_or_else(|| format!("d8 was not found under {}", build_tools.display()).into())
+}
+
+fn android_sdk_root() -> Result<PathBuf> {
+    env::var_os("ANDROID_SDK_ROOT")
+        .or_else(|| env::var_os("ANDROID_HOME"))
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|home| home.join("Library/Android/sdk"))
+        })
+        .ok_or_else(|| "could not determine the Android SDK directory".into())
+}
+
+fn find_android_platform_jar() -> Result<PathBuf> {
+    let jar = android_sdk_root()?.join("platforms/android-36/android.jar");
+    if !jar.is_file() {
+        return Err(format!("Android API 36 platform JAR is missing: {}", jar.display()).into());
+    }
+    Ok(jar)
 }
 
 fn build_runtime_platform(root: &Path) -> Result<()> {
@@ -2023,6 +2044,7 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
         objects.push(profile_object);
     }
     for adapter_source in [
+        "darwin_framework_natives.cc",
         "darwin_icu_natives.cc",
         "darwin_libcore_natives.cc",
         "darwin_runtime_adapters.cc",
@@ -2254,12 +2276,14 @@ fn probe_runtime_dex(root: &Path) -> Result<()> {
     let executable = root.join("_build/runtime-link-probe/runtime-link-probe");
     let core_oj = root.join("_prebuilt/android-16/bootclasspath/core-oj.jar");
     let core_libart = root.join("_prebuilt/android-16/bootclasspath/core-libart.jar");
+    let framework = root.join("_prebuilt/android-16/bootclasspath/framework.jar");
     let core_icu4j = root.join("_build/bootclasspath/core-icu4j.jar");
     let classes_dex = root.join("_build/dex-probe/dex/classes.dex");
     for input in [
         &executable,
         &core_oj,
         &core_libart,
+        &framework,
         &core_icu4j,
         &classes_dex,
     ] {
@@ -2276,6 +2300,7 @@ fn probe_runtime_dex(root: &Path) -> Result<()> {
         Command::new(&executable)
             .arg(&core_oj)
             .arg(&core_libart)
+            .arg(&framework)
             .arg(&core_icu4j)
             .arg(&classes_dex),
     )?;
@@ -2285,11 +2310,14 @@ fn probe_runtime_dex(root: &Path) -> Result<()> {
                     ART Darwin DEX interpreter: Hello.answer()=42\n\
                     ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
                     ART runtime native: System.arraycopy()=42\n\
+                    ART Android framework: ProbeActivity().probeValue()=42\n\
                     ART Darwin launcher: main(String[])=ok";
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
-    println!("probe-runtime-dex: main(String[]) -> Android PrintStream/ICU -> Darwin write(2)");
+    println!(
+        "probe-runtime-dex: Activity constructor + main(String[]) -> Android PrintStream/ICU -> Darwin write(2)"
+    );
     Ok(())
 }
 
@@ -2440,6 +2468,70 @@ fn verify_bootclasspath(root: &Path) -> Result<()> {
             return Err(format!("unexpected {name} DEX summary: {output:?}").into());
         }
         println!("verify-bootclasspath: {name} {}", output.trim());
+    }
+    let framework = prebuilt.join("framework.jar");
+    if !framework.exists() {
+        return Err(format!(
+            "{} is missing; pull /system/framework/framework.jar from the matching Android 16 image",
+            framework.display()
+        )
+        .into());
+    }
+    verify_sha256(&framework, lock_value(&manifest, "FRAMEWORK_SHA256")?)?;
+    let expected_framework_size: u64 = lock_value(&manifest, "FRAMEWORK_SIZE")?.parse()?;
+    if fs::metadata(&framework)?.len() != expected_framework_size {
+        return Err(format!("size mismatch for {}", framework.display()).into());
+    }
+    let framework_summaries = [
+        (
+            "classes.dex",
+            "AOSP DEX: verified=yes version=39 classes=6609 methods=65389 \
+             class[0]=Landroid/Manifest$permission;",
+        ),
+        (
+            "classes2.dex",
+            "AOSP DEX: verified=yes version=39 classes=7041 methods=65454 \
+             class[0]=Landroid/hardware/camera2/impl/CallbackProxies$SessionStateCallbackProxy$$ExternalSyntheticLambda0;",
+        ),
+        (
+            "classes3.dex",
+            "AOSP DEX: verified=yes version=39 classes=8736 methods=65454 \
+             class[0]=Landroid/os/IInterface;",
+        ),
+        (
+            "classes4.dex",
+            "AOSP DEX: verified=yes version=39 classes=6855 methods=65167 \
+             class[0]=Lcom/android/ims/internal/IImsServiceController;",
+        ),
+        (
+            "classes5.dex",
+            "AOSP DEX: verified=yes version=39 classes=6478 methods=56051 \
+             class[0]=Lcom/android/internal/hidden_from_bootclasspath/android/app/admin/flags/CustomFeatureFlags$$ExternalSyntheticLambda0;",
+        ),
+    ];
+    let extract_dir = root.join("_build/bootclasspath/framework");
+    fs::create_dir_all(&extract_dir)?;
+    for (dex_name, expected) in framework_summaries {
+        run_command(
+            Command::new("unzip")
+                .args(["-o", "-q"])
+                .arg(&framework)
+                .arg(dex_name)
+                .arg("-d")
+                .arg(&extract_dir),
+        )?;
+        let output = command_output(
+            Command::new(&probe)
+                .arg("--summary")
+                .arg(extract_dir.join(dex_name)),
+        )?;
+        if output.trim() != expected {
+            return Err(format!("unexpected framework {dex_name} DEX summary: {output:?}").into());
+        }
+        println!(
+            "verify-bootclasspath: framework/{dex_name} {}",
+            output.trim()
+        );
     }
     let icu_source = prebuilt.join("core-icu4j.jar");
     let expected_icu_size: u64 = lock_value(&manifest, "CORE_ICU4J_SOURCE_SIZE")?.parse()?;

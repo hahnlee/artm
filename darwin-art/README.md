@@ -22,7 +22,7 @@ libraries:
 7. compile Java to DEX and verify it with AOSP `DexFileVerifier`;
 8. generate ART's real ARM64 ABI constants and compile context, optimized
    `__memcmp16`, plus quick/JNI/native entrypoint assembly;
-9. compile the C++ switch interpreter and a 208-object Runtime/ClassLinker/GC/
+9. compile the C++ switch interpreter and a 209-object Runtime/ClassLinker/GC/
    quick-entrypoint initialization spine as Mach-O archives;
 10. link the real bootstrap probe with no unresolved native symbols;
 11. create ART successfully with the pinned Android 16 core boot JARs;
@@ -36,7 +36,9 @@ libraries:
     main(String[])` through JNI;
 16. use Android's real `PrintStream -> CharsetICU -> StreamEncoder -> IoBridge`
     path, backed by host ICU4C and Darwin `write(2)`;
-17. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
+17. load Android 16's real framework DEX, prepare its main `Looper`, and
+    instantiate an app DEX class that directly extends `android.app.Activity`;
+18. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
 
 Run it with:
 
@@ -50,14 +52,14 @@ Expected final lines include:
 probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
-build-dex: AOSP DEX: verified=yes version=35 classes=1 methods=9 class[0]=Ldev/darwinart/probe/Hello; corrupt=rejected
+build-dex: AOSP DEX: verified=yes version=35 classes=2 methods=12 class[0]=Ldev/darwinart/probe/Hello; class[1]=Ldev/darwinart/probe/ProbeActivity; corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
 build-interpreter-core: AOSP C++ interpreter Mach-O objects=7 archive=...
-build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=208 compiled=0 cached=208 archive=...
+build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=209 compiled=0 cached=209 archive=...
 audit-runtime-link: closure complete undefined=0
-probe-runtime-dex: main(String[]) -> Android PrintStream/ICU -> Darwin write(2)
+probe-runtime-dex: Activity constructor + main(String[]) -> Android PrintStream/ICU -> Darwin write(2)
 probe-park: ART Darwin park: pre-permit=yes wakeups=200 timeout=yes
 ```
 
@@ -99,6 +101,7 @@ The linked runtime probe can be executed directly:
 _build/runtime-link-probe/runtime-link-probe \
   _prebuilt/android-16/bootclasspath/core-oj.jar \
   _prebuilt/android-16/bootclasspath/core-libart.jar \
+  _prebuilt/android-16/bootclasspath/framework.jar \
   _build/bootclasspath/core-icu4j.jar \
   _build/dex-probe/dex/classes.dex
 ```
@@ -108,7 +111,9 @@ Its success lines are `ART Darwin Runtime::Create: ok`,
 `ART Darwin DEX interpreter: Hello.answer()=42`, followed by
 `ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42`, and
 `ART runtime native: System.arraycopy()=42`, the Java-emitted
-`Hello from Darwin ART main: 안녕`, and `ART Darwin launcher: main(String[])=ok`.
+`Hello from Darwin ART main: 안녕`,
+`ART Android framework: ProbeActivity().probeValue()=42`, and
+`ART Darwin launcher: main(String[])=ok`.
 The generated app DEX remains separate from the boot class path. The native
 probe initializes ART's unstarted-runtime
 handlers, constructs a `PathClassLoader`, registers the DEX, then enables a
@@ -117,10 +122,11 @@ table, initializes intrinsics, creates the normal main `Thread` peer, and runs
 root class initializers. Darwin adapters provide the POSIX, file-descriptor,
 primitive-bit, ICU-metadata, system-property, and standard-output subset needed
 by this gate. The locked Android `core-icu4j` Java code is converted to DEX
-locally; its `NativeConverter` calls host Homebrew ICU4C 78. Android's
-libicu/libjavacore/libopenjdk shared libraries and daemon threads are still not
-loaded. The remaining libcore native surface and a framework launcher remain
-deferred.
+locally; its `NativeConverter` calls host Homebrew ICU4C 78. The framework gate
+uses Darwin-native `MessageQueue` wake/poll primitives and Android's default
+INFO logging threshold. Android's libicu/libjavacore/libopenjdk shared libraries
+and daemon threads are still not loaded. `Activity` attachment, lifecycle
+dispatch, resources, and the View/window backend remain deferred.
 
 Apple ARM64 executables retain the kernel-required 4 GiB `__PAGEZERO`, so ART's
 usual absolute-low-32-bit heap references cannot be used. The Darwin probe
@@ -133,10 +139,11 @@ The Darwin MVP defaults to concurrent mark sweep. Concurrent mark compact stays
 compiled in stop-the-world fallback form because Darwin has neither Linux
 `userfaultfd` nor `mremap`; it is not selected as the default collector.
 
-Matching Android 16 `core-oj.jar` and `core-libart.jar` remain ignored local
-inputs under `_prebuilt/android-16/bootclasspath`. `sync` downloads only the
+Matching Android 16 `core-oj.jar`, `core-libart.jar`, and `framework.jar` remain
+ignored local inputs under `_prebuilt/android-16/bootclasspath`. `sync` downloads only the
 revision-locked 2.99 MB `core-icu4j` class JAR and `d8` produces its ignored DEX
-JAR locally. Verify all three inputs with:
+JAR locally. Verify all four inputs, including all five framework DEX files,
+with:
 
 ```bash
 cargo run -p art-bootstrap -- verify-bootclasspath
