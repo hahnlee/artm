@@ -1,0 +1,3 @@
+symbol	type	class	status	reason
+fprintf	FUNC	B	supported	Android-AAPCS64-variadic-to-provider-FILE
+vfprintf	FUNC	B	supported	Android-va_list-to-provider-FILE
