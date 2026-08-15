@@ -18,6 +18,24 @@ Run:
 tools/audit-android16-graphics-closure.sh
 ```
 
+For the real ART class-library ABI, run the independent variant:
+
+```sh
+tools/audit-android16-graphics-closure.sh --art-runtime
+```
+
+It preserves the same 32-slot provider graph and replaces only the
+seven-member host/Layoutlib `libnativehelper_jvm.a` slot with
+`_build/nativehelper-device-foundation/libnativehelper-device-darwin.a`. Its
+relocatable object and executable are published under
+`_build/graphics-runtime-closure-audit` with the
+`android16-graphics-runtime-closure` basename. The variant requires the device
+archive to define `JniConstants_FileDescriptor_descriptor` and rejects the
+host-only `JniConstants_FileDescriptor_fd` definition. If that archive has not
+been built, the gate exits with status 2 and points to
+`tools/build-android16-nativehelper-device-foundation.sh`; its source and ABI
+identity are independently pinned by `android16-nativehelper-device.lock`.
+
 The gate produces a force-loaded relocatable Mach-O object and three strict
 classifications:
 
@@ -50,3 +68,9 @@ The executable dependency audit rejects CoreText and host ICU, FreeType, or
 png dylib regressions. Any future relocatable import already defined by one of
 the 32 supplied archives is a hard provider-order failure; any future final
 linker import is emitted as an unclassified missing-module set and fails.
+
+The ART-runtime composition also has 1,529 members across 32 archives. Its
+device-nativehelper provider changes the locked global definition identity to
+42,078 symbols while retaining the same locked 415-symbol external import
+set. Provider-order leaks and missing modules remain zero, and its independent
+arm64 executable closure links and launches successfully.

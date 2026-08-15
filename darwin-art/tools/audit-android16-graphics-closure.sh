@@ -5,11 +5,65 @@ export LC_ALL=C
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 project_root="$(cd "$script_dir/.." && pwd)"
 lock_file="$project_root/upstream/android16-graphics-closure-audit.lock"
-build_dir="$project_root/_build/graphics-closure-audit"
+
+audit_mode=host-layoutlib
+case "$#" in
+  0) ;;
+  1)
+    if [[ "$1" == --art-runtime ]]; then
+      audit_mode=art-runtime
+    else
+      echo "usage: $0 [--art-runtime]" >&2
+      exit 2
+    fi
+    ;;
+  *)
+    echo "usage: $0 [--art-runtime]" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$audit_mode" == art-runtime ]]; then
+  build_dir="$project_root/_build/graphics-runtime-closure-audit"
+  closure_object_name=android16-graphics-runtime-closure.o
+  closure_executable_name=android16-graphics-runtime-closure
+else
+  build_dir="$project_root/_build/graphics-closure-audit"
+  closure_object_name=android16-graphics-closure.o
+  closure_executable_name=android16-graphics-closure
+fi
 
 # The lock is a trusted assignment-only repository file.
 # shellcheck disable=SC1090
 source "$lock_file"
+
+if [[ "$audit_mode" == art-runtime ]]; then
+  expected_archive_count="$ART_RUNTIME_ARCHIVE_COUNT"
+  expected_archive_member_total="$ART_RUNTIME_ARCHIVE_MEMBER_TOTAL"
+  expected_global_definition_count="$ART_RUNTIME_GLOBAL_DEFINITION_COUNT"
+  expected_global_definitions_sha256="$ART_RUNTIME_GLOBAL_DEFINITIONS_SHA256"
+  expected_relocatable_undefined_count="$ART_RUNTIME_RELOCATABLE_UNDEFINED_COUNT"
+  expected_relocatable_undefined_sha256="$ART_RUNTIME_RELOCATABLE_UNDEFINED_SHA256"
+  expected_provider_order_leak_count="$ART_RUNTIME_PROVIDER_ORDER_LEAK_COUNT"
+  expected_executable_provider_resolved_count="$ART_RUNTIME_EXECUTABLE_PROVIDER_RESOLVED_COUNT"
+  expected_missing_module_count="$ART_RUNTIME_MISSING_MODULE_COUNT"
+  expected_missing_symbol_count="$ART_RUNTIME_MISSING_SYMBOL_COUNT"
+  expected_missing_symbols_sha256="$ART_RUNTIME_MISSING_SYMBOLS_SHA256"
+  expected_missing_demangled_sha256="$ART_RUNTIME_MISSING_DEMANGLED_SHA256"
+else
+  expected_archive_count="$ARCHIVE_COUNT"
+  expected_archive_member_total="$ARCHIVE_MEMBER_TOTAL"
+  expected_global_definition_count="$GLOBAL_DEFINITION_COUNT"
+  expected_global_definitions_sha256="$GLOBAL_DEFINITIONS_SHA256"
+  expected_relocatable_undefined_count="$RELOCATABLE_UNDEFINED_COUNT"
+  expected_relocatable_undefined_sha256="$RELOCATABLE_UNDEFINED_SHA256"
+  expected_provider_order_leak_count="$PROVIDER_ORDER_LEAK_COUNT"
+  expected_executable_provider_resolved_count="$EXECUTABLE_PROVIDER_RESOLVED_COUNT"
+  expected_missing_module_count="$MISSING_MODULE_COUNT"
+  expected_missing_symbol_count="$MISSING_SYMBOL_COUNT"
+  expected_missing_symbols_sha256="$MISSING_SYMBOLS_SHA256"
+  expected_missing_demangled_sha256="$MISSING_DEMANGLED_SHA256"
+fi
 
 # mode|expected-members|archive. The order is the actual ld64 order. F means
 # force-load module ownership; N means normal provider extraction.
@@ -48,7 +102,21 @@ archive_specs=(
   'N|1|_build/icu-foundation/libicuuc-stubdata-darwin.a'
 )
 
-if [[ "${#archive_specs[@]}" != "$ARCHIVE_COUNT" ]]; then
+if [[ "$audit_mode" == art-runtime ]]; then
+  device_nativehelper_relative=_build/nativehelper-device-foundation/libnativehelper-device-darwin.a
+  device_nativehelper="$project_root/$device_nativehelper_relative"
+  if [[ ! -f "$device_nativehelper" ]]; then
+    echo "graphics-closure: ART runtime nativehelper archive is missing" >&2
+    echo "  archive=$device_nativehelper" >&2
+    echo "  required-members=7" >&2
+    echo "  build=$project_root/tools/build-android16-nativehelper-device-foundation.sh" >&2
+    exit 2
+  fi
+  # This is the only provider-slot difference from the host/Layoutlib audit.
+  archive_specs[18]="N|7|$device_nativehelper_relative"
+fi
+
+if [[ "${#archive_specs[@]}" != "$expected_archive_count" ]]; then
   echo "graphics-closure: locked archive count mismatch" >&2
   exit 3
 fi
@@ -91,6 +159,20 @@ for spec in "${archive_specs[@]}"; do
   printf '%s %s %s\n' "$mode" "$actual_members" "$relative" >> "$link_order"
   nm -gU "$archive" | \
     awk '$2 ~ /^[TDBSCRGWV]$/ && $3 ~ /^_/ { print $3 }' >> "$all_definitions"
+  if [[ "$audit_mode" == art-runtime && "$relative" == "$device_nativehelper_relative" ]]; then
+    device_definitions="$stage_dir/device-nativehelper-definitions.txt"
+    nm -gU "$archive" | sort -u > "$device_definitions"
+    grep -E '[[:space:]]T _JniConstants_FileDescriptor_descriptor$' \
+      "$device_definitions" >/dev/null || {
+        echo "graphics-closure: ART nativehelper lacks FileDescriptor.descriptor provider" >&2
+        exit 3
+      }
+    if grep -E '[[:space:]]T _JniConstants_FileDescriptor_fd$' \
+      "$device_definitions" >/dev/null; then
+      echo "graphics-closure: ART nativehelper leaked host FileDescriptor.fd provider" >&2
+      exit 3
+    fi
+  fi
   if [[ "$mode" == F ]]; then
     linker_archives+=( -force_load "$archive" )
   else
@@ -98,20 +180,29 @@ for spec in "${archive_specs[@]}"; do
   fi
 done
 
-if [[ "$member_total" != "$ARCHIVE_MEMBER_TOTAL" ]]; then
+if [[ "$member_total" != "$expected_archive_member_total" ]]; then
   echo "graphics-closure: aggregate archive member count changed" >&2
-  echo "  expected=$ARCHIVE_MEMBER_TOTAL actual=$member_total" >&2
+  echo "  expected=$expected_archive_member_total actual=$member_total" >&2
   exit 3
+fi
+
+if [[ "$audit_mode" == art-runtime ]]; then
+  link_order_sha="$(shasum -a 256 "$link_order" | awk '{print $1}')"
+  if [[ "$link_order_sha" != "$ART_RUNTIME_LINK_ORDER_SHA256" ]]; then
+    echo "graphics-closure: ART runtime provider order identity changed" >&2
+    echo "  expected-sha=$ART_RUNTIME_LINK_ORDER_SHA256 actual-sha=$link_order_sha" >&2
+    exit 3
+  fi
 fi
 
 sort -u "$all_definitions" -o "$all_definitions"
 definition_count="$(wc -l < "$all_definitions" | tr -d ' ')"
 definition_sha="$(shasum -a 256 "$all_definitions" | awk '{print $1}')"
-if [[ "$definition_count" != "$GLOBAL_DEFINITION_COUNT" ||
-      "$definition_sha" != "$GLOBAL_DEFINITIONS_SHA256" ]]; then
+if [[ "$definition_count" != "$expected_global_definition_count" ||
+      "$definition_sha" != "$expected_global_definitions_sha256" ]]; then
   echo "graphics-closure: provider definition identity changed" >&2
-  echo "  expected-count=$GLOBAL_DEFINITION_COUNT actual-count=$definition_count" >&2
-  echo "  expected-sha=$GLOBAL_DEFINITIONS_SHA256 actual-sha=$definition_sha" >&2
+  echo "  expected-count=$expected_global_definition_count actual-count=$definition_count" >&2
+  echo "  expected-sha=$expected_global_definitions_sha256 actual-sha=$definition_sha" >&2
   exit 3
 fi
 
@@ -120,7 +211,7 @@ cxx="$(command -v clang++ || true)"
 [[ -n "$cxx" ]] || { echo "graphics-closure: clang++ is required" >&2; exit 2; }
 sdk_root="$(xcrun --sdk macosx --show-sdk-path)"
 sdk_version="$(xcrun --sdk macosx --show-sdk-version)"
-closure_object="$stage_dir/android16-graphics-closure.o"
+closure_object="$stage_dir/$closure_object_name"
 "$ld_bin" -r -arch arm64 \
   -platform_version macos "$sdk_version" "$sdk_version" \
   -syslibroot "$sdk_root" \
@@ -135,11 +226,11 @@ nm -u "$closure_object" | awk '$1 ~ /^_/ { print $1 }' | sort -u \
   > "$relocatable_undefined"
 undefined_count="$(wc -l < "$relocatable_undefined" | tr -d ' ')"
 undefined_sha="$(shasum -a 256 "$relocatable_undefined" | awk '{print $1}')"
-if [[ "$undefined_count" != "$RELOCATABLE_UNDEFINED_COUNT" ||
-      "$undefined_sha" != "$RELOCATABLE_UNDEFINED_SHA256" ]]; then
+if [[ "$undefined_count" != "$expected_relocatable_undefined_count" ||
+      "$undefined_sha" != "$expected_relocatable_undefined_sha256" ]]; then
   echo "graphics-closure: relocatable unresolved identity changed" >&2
-  echo "  expected-count=$RELOCATABLE_UNDEFINED_COUNT actual-count=$undefined_count" >&2
-  echo "  expected-sha=$RELOCATABLE_UNDEFINED_SHA256 actual-sha=$undefined_sha" >&2
+  echo "  expected-count=$expected_relocatable_undefined_count actual-count=$undefined_count" >&2
+  echo "  expected-sha=$expected_relocatable_undefined_sha256 actual-sha=$undefined_sha" >&2
   exit 3
 fi
 
@@ -149,7 +240,7 @@ fi
 provider_order_leaks="$stage_dir/provider-order-leaks.txt"
 comm -12 "$relocatable_undefined" "$all_definitions" > "$provider_order_leaks"
 provider_order_leak_count="$(wc -l < "$provider_order_leaks" | tr -d ' ')"
-if [[ "$provider_order_leak_count" != "$PROVIDER_ORDER_LEAK_COUNT" ]]; then
+if [[ "$provider_order_leak_count" != "$expected_provider_order_leak_count" ]]; then
   echo "graphics-closure: unresolved symbols already have an in-closure provider" >&2
   sed -n '1,80p' "$provider_order_leaks" >&2
   exit 3
@@ -160,25 +251,25 @@ grep -E '^__ZN(K)?7android4skia19(BitmapRegionDecoder|FrontBufferedStream)' \
   "$relocatable_undefined" > "$missing_mangled" || true
 missing_symbol_count="$(wc -l < "$missing_mangled" | tr -d ' ')"
 missing_symbol_sha="$(shasum -a 256 "$missing_mangled" | awk '{print $1}')"
-if [[ "$missing_symbol_count" != "$MISSING_SYMBOL_COUNT" ||
-      "$missing_symbol_sha" != "$MISSING_SYMBOLS_SHA256" ]]; then
+if [[ "$missing_symbol_count" != "$expected_missing_symbol_count" ||
+      "$missing_symbol_sha" != "$expected_missing_symbols_sha256" ]]; then
   echo "graphics-closure: known missing Skia android_utils symbol set changed" >&2
-  echo "  expected-count=$MISSING_SYMBOL_COUNT actual-count=$missing_symbol_count" >&2
-  echo "  expected-sha=$MISSING_SYMBOLS_SHA256 actual-sha=$missing_symbol_sha" >&2
+  echo "  expected-count=$expected_missing_symbol_count actual-count=$missing_symbol_count" >&2
+  echo "  expected-sha=$expected_missing_symbols_sha256 actual-sha=$missing_symbol_sha" >&2
   exit 3
 fi
 
 executable_resolved="$stage_dir/resolved-by-executable-providers.txt"
 comm -23 "$relocatable_undefined" "$missing_mangled" > "$executable_resolved"
 executable_resolved_count="$(wc -l < "$executable_resolved" | tr -d ' ')"
-if [[ "$executable_resolved_count" != "$EXECUTABLE_PROVIDER_RESOLVED_COUNT" ]]; then
+if [[ "$executable_resolved_count" != "$expected_executable_provider_resolved_count" ]]; then
   echo "graphics-closure: executable-provider classification count changed" >&2
   exit 3
 fi
 
 main_source="$stage_dir/closure_main.cpp"
 main_object="$stage_dir/closure_main.o"
-closure_executable="$stage_dir/android16-graphics-closure"
+closure_executable="$stage_dir/$closure_executable_name"
 printf '%s\n' 'int main() { return 0; }' > "$main_source"
 "$cxx" -std=c++20 -arch arm64 -mmacosx-version-min="$sdk_version" \
   -c "$main_source" -o "$main_object"
@@ -197,7 +288,7 @@ publish_results() {
   mkdir -p "$build_dir"
   cp "$link_order" "$build_dir/link-order.txt"
   cp "$all_definitions" "$build_dir/all-provider-definitions.txt"
-  cp "$closure_object" "$build_dir/android16-graphics-closure.o"
+  cp "$closure_object" "$build_dir/$closure_object_name"
   cp "$relocatable_undefined" "$build_dir/relocatable-undefined-symbols.txt"
   cp "$provider_order_leaks" "$build_dir/provider-order-leaks.txt"
   cp "$missing_mangled" "$build_dir/missing-skia-android-utils.txt"
@@ -216,13 +307,13 @@ if [[ "$executable_link_status" != 0 ]]; then
   executable_missing_count="$(wc -l < "$executable_missing" | tr -d ' ')"
   executable_missing_sha="$(shasum -a 256 "$executable_missing" | awk '{print $1}')"
   cp "$executable_missing" "$stage_dir/missing-module-skia_android_utils.txt"
-  if [[ "$executable_missing_count" != "$MISSING_SYMBOL_COUNT" ||
-        "$executable_missing_sha" != "$MISSING_DEMANGLED_SHA256" ]]; then
+  if [[ "$executable_missing_count" != "$expected_missing_symbol_count" ||
+        "$executable_missing_sha" != "$expected_missing_demangled_sha256" ]]; then
     publish_results
     cp "$executable_missing" "$build_dir/unclassified-executable-missing.txt"
     echo "graphics-closure: executable has an unclassified missing-module set" >&2
-    echo "  expected-count=$MISSING_SYMBOL_COUNT actual-count=$executable_missing_count" >&2
-    echo "  expected-sha=$MISSING_DEMANGLED_SHA256 actual-sha=$executable_missing_sha" >&2
+    echo "  expected-count=$expected_missing_symbol_count actual-count=$executable_missing_count" >&2
+    echo "  expected-sha=$expected_missing_demangled_sha256 actual-sha=$executable_missing_sha" >&2
     exit 3
   fi
   publish_results
@@ -235,7 +326,7 @@ if [[ "$executable_link_status" != 0 ]]; then
   exit 2
 fi
 
-if [[ "$missing_symbol_count" != 0 || "$MISSING_MODULE_COUNT" != 0 ]]; then
+if [[ "$missing_symbol_count" != 0 || "$expected_missing_module_count" != 0 ]]; then
   publish_results
   echo "graphics-closure: executable unexpectedly linked while lock still declares a missing module" >&2
   exit 3
@@ -250,5 +341,9 @@ if grep -E '(CoreText|libicu|libfreetype|libpng|libfmt|/opt/homebrew/opt/(icu|fr
   exit 3
 fi
 publish_results
-cp "$closure_executable" "$build_dir/android16-graphics-closure"
-echo "graphics-closure: executable closure complete archive-members=$member_total"
+cp "$closure_executable" "$build_dir/$closure_executable_name"
+if [[ "$audit_mode" == art-runtime ]]; then
+  echo "graphics-closure: mode=art-runtime executable closure complete archive-members=$member_total"
+else
+  echo "graphics-closure: executable closure complete archive-members=$member_total"
+fi
