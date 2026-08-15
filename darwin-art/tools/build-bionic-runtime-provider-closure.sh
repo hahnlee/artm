@@ -71,6 +71,9 @@ icu_root="$root/_aosp/external/icu-graphics"
 "$cc" "${cflags[@]}" -std=c17 -fno-builtin \
   -I"$root/tools/bionic-wide-integer-facade/include" \
   -c "$root/tools/bionic-wide-integer-facade/src/provider.c" -o "$objects/wide-integer.o"
+"$cc" "${cflags[@]}" -std=c17 -fno-builtin \
+  -I"$root/tools/bionic-abort-facade/include" \
+  -c "$root/tools/bionic-abort-facade/src/provider.c" -o "$objects/abort.o"
 "$cxx" "${cxxflags[@]}" \
   -I"$root/tools/android-liblog-exec-provider/include" \
   -I"$root/_aosp/system/logging/liblog/include" \
@@ -89,7 +92,7 @@ native="$build/libdarwin-art-bionic-native-providers.a"
   "$objects/leaf.o" "$objects/allocator.o" "$objects/time.o" \
   "$objects/pthread.o" "$objects/phdr.o" "$objects/locale.o" \
   "$objects/numeric.o" "$objects/format.o" "$objects/format-entry.o" \
-  "$objects/strerror.o" "$objects/wide-integer.o" \
+  "$objects/strerror.o" "$objects/wide-integer.o" "$objects/abort.o" \
   "$objects/liblog.o" "$objects/namespace.o" \
   "$objects/builtin_adapters.o"
 
@@ -110,6 +113,7 @@ smoke="$build/full-link-smoke"
 symbols="$build/provider-resolvers.txt"
 nm -gU "$native" "$float" "$rust" > "$build/all-symbols.txt" 2>/dev/null
 cat > "$symbols" <<'EOF'
+_darwin_art_bionic_abort_resolve
 _darwin_art_bionic_allocator_resolve
 _darwin_art_bionic_dso_lifecycle_resolve
 _darwin_art_bionic_errno_resolve
@@ -138,4 +142,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=17 bind_builtins=sealed routes=155 Rust+C+C++=linked host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=18 bind_builtins=sealed routes=158 Rust+C+C++=linked host-fallback=0'

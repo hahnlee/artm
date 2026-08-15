@@ -6,9 +6,9 @@ it combines the existing C, C++, and Rust provider archives so
 `darwin_art_bionic_namespace_bind_builtins` can bind every manifest owner to
 its actual resolver.
 
-The current closure contains seventeen providers and resolves 155 exact routes:
-137 of the pinned Android 35 arm64 `libc++_shared.so` libc-family imports plus
-all 18 public `liblog.so` exports. The remaining 23 libc imports stay explicit
+The current closure contains eighteen providers and resolves 158 exact routes:
+140 of the pinned Android 35 arm64 `libc++_shared.so` libc-family imports plus
+all 18 public `liblog.so` exports. The remaining 20 libc imports stay explicit
 capability failures. Unknown SONAMEs, symbols, or GNU versions never fall back
 to dyld or host `dlsym`.
 
@@ -20,10 +20,11 @@ tools/build-bionic-runtime-provider-closure.sh
 
 The gate builds one Rust static archive for the stateful filesystem,
 process-state, stdio, and DSO-lifecycle owners; one native archive for the
-remaining providers and namespace; and the pinned AOSP gdtoa float-conversion
-archive. It then links a real arm64 executable with Android ICU 76.1 and AOSP
-liblog, seals the namespace, and resolves every generated route through the
-actual provider callbacks. Host or dynamic ICU linkage is rejected.
+remaining providers (including Bionic abort/message state) and namespace; and
+the pinned AOSP gdtoa float-conversion archive. It then links a real arm64
+executable with Android ICU 76.1 and AOSP liblog, seals the namespace, and
+resolves every generated route through the actual provider callbacks. Host or
+dynamic ICU linkage is rejected.
 
 The embedding lifetime is strict: create, bind all providers, seal, load and
 run guest DSOs, run guest static and `__cxa_finalize` teardown, unload the ELF
