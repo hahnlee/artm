@@ -1,0 +1,4 @@
+symbol	kind	class	owner
+closelog	FUNC	C	syslog-global-state
+openlog	FUNC	C	syslog-global-state
+syslog	FUNC	C	syslog-global-varargs-state

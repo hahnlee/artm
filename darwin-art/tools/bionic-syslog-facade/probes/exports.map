@@ -1,0 +1,8 @@
+{
+  global:
+    SyslogFixtureRun;
+    SyslogFixtureAfterClose;
+    SyslogFixtureUnsupported;
+  local:
+    *;
+};
