@@ -61,6 +61,7 @@ impl ClosedResolver {
             "closedir" => c"closedir",
             "fchmod" => c"fchmod",
             "fchmodat" => c"fchmodat",
+            "fdopendir" => c"fdopendir",
             "fstat" => c"fstat",
             "ftruncate" => c"ftruncate",
             "getcwd" => c"getcwd",
@@ -168,7 +169,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if unsafe { *__error() } != 33_001 {
         return Err("filesystem facade changed host errno".into());
     }
-    println!("bionic-fs-facade: PASS Android ELF file/path/cwd/DIR mount-root broker errno");
+    println!(
+        "bionic-fs-facade: PASS Android ELF file/path/cwd/DIR+fdopendir mount-root broker errno"
+    );
     Ok(())
 }
 

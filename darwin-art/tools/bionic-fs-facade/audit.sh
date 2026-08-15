@@ -34,8 +34,8 @@ check_hash "$project_root/upstream/android16-os-constants-values.tsv" \
 check_hash "$project_root/tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv" \
   "$LIBC_IMPORT_MANIFEST_SHA256"
 
-symbols=(chdir close closedir fchmod fchmodat fstat ftruncate getcwd isatty link
-         lstat mkdir open openat opendir pathconf read readdir readlink realpath
+symbols=(chdir close closedir fchmod fchmodat fdopendir fstat ftruncate getcwd
+         isatty link lstat mkdir open openat opendir pathconf read readdir readlink realpath
          remove rename stat statvfs symlink truncate unlinkat utimensat)
 diff -u <(printf '%s\n' "${symbols[@]}") \
   <(tail -n +2 "$script_dir/manifests/imports.tsv" | cut -f1) ||
@@ -95,6 +95,7 @@ _darwin_art_bionic_fs_close_core
 _darwin_art_bionic_fs_closedir_core
 _darwin_art_bionic_fs_fchmod_core
 _darwin_art_bionic_fs_fchmodat_core
+_darwin_art_bionic_fs_fdopendir_core
 _darwin_art_bionic_fs_fstat_core
 _darwin_art_bionic_fs_ftruncate_core
 _darwin_art_bionic_fs_getcwd_core
@@ -169,6 +170,7 @@ close
 closedir
 fchmod
 fchmodat
+fdopendir
 fstat
 ftruncate
 getcwd
@@ -219,4 +221,4 @@ UBSAN_OPTIONS=halt_on_error=1 BIONIC_FS_C_SANITIZER=undefined \
   --manifest-path "$script_dir/Cargo.toml" -- "$fixture" "$temp_root/root"
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
 
-echo 'bionic-fs-facade: PASS AndroidELF imports=29 read-only path+cwd+DIR stat128/dirent280/statvfs112 pathconf20 mutation=EROFS closed-resolver ASan+UBSan'
+echo 'bionic-fs-facade: PASS AndroidELF imports=30 read-only path+cwd+DIR+fdopendir stat128/dirent280/statvfs112 pathconf20 mutation=EROFS closed-resolver ASan+UBSan'

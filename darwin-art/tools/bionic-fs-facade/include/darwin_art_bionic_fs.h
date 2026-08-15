@@ -105,6 +105,7 @@ intptr_t darwin_art_bionic_readlink(const char* path, char* buffer,
 char* darwin_art_bionic_getcwd(char* buffer, size_t size);
 int darwin_art_bionic_chdir(const char* path);
 void* darwin_art_bionic_opendir(const char* path);
+void* darwin_art_bionic_fdopendir(int fd);
 DarwinArtAndroidDirent* darwin_art_bionic_readdir(void* directory);
 int darwin_art_bionic_closedir(void* directory);
 int darwin_art_bionic_fchmod(int fd, uint32_t mode);
@@ -145,6 +146,7 @@ intptr_t darwin_art_bionic_fs_readlink_core(const char* path, char* buffer,
 char* darwin_art_bionic_fs_getcwd_core(char* buffer, size_t size);
 int darwin_art_bionic_fs_chdir_core(const char* path);
 void* darwin_art_bionic_fs_opendir_core(const char* path);
+void* darwin_art_bionic_fs_fdopendir_core(int fd);
 DarwinArtAndroidDirent* darwin_art_bionic_fs_readdir_core(void* directory);
 int darwin_art_bionic_fs_closedir_core(void* directory);
 int darwin_art_bionic_fs_fchmod_core(int fd, uint32_t mode);

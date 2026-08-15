@@ -130,6 +130,26 @@ __attribute__((visibility("default"))) int bionic_fs_fixture_run(void) {
   }
   if (errno != 777 || !saw_payload || !saw_link) return 31;
   if (closedir(stream) != 0) return 32;
+  int directory_fd = open("etc", O_RDONLY | O_DIRECTORY);
+  if (directory_fd < 0) return 64;
+  stream = fdopendir(directory_fd);
+  if (stream == NULL) return 65;
+  errno = 0;
+  if (close(directory_fd) != -1 || errno != EBADF) return 66;
+  saw_payload = 0;
+  for (;;) {
+    struct dirent* entry = readdir(stream);
+    if (entry == NULL) break;
+    if (NameEqual(entry->d_name, "payload.txt")) saw_payload = 1;
+  }
+  if (!saw_payload || closedir(stream) != 0) return 67;
+  int regular_fd = open("etc/payload.txt", O_RDONLY);
+  if (regular_fd < 0) return 68;
+  errno = 0;
+  if (fdopendir(regular_fd) != NULL || errno != ENOTDIR) return 69;
+  if (close(regular_fd) != 0) return 70;
+  errno = 0;
+  if (fdopendir(-7) != NULL || errno != EBADF) return 71;
   errno = 0;
   if (opendir("etc/payload.txt") != NULL || errno != ENOTDIR) return 33;
   errno = 0;

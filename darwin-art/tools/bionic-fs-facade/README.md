@@ -1,6 +1,6 @@
 # Bionic immutable filesystem facade gate
 
-This standalone gate connects 28 Class-B Android arm64 libc filesystem imports
+This standalone gate connects 29 Class-B Android arm64 libc filesystem imports
 to the Darwin component-walking filesystem broker. In addition to the original
 file/path/cwd/DIR set, it owns `fchmod`, `fchmodat`, `ftruncate`, `isatty`,
 `link`, `mkdir`, `pathconf`, `realpath`, `remove`, `rename`, `statvfs`,
@@ -58,10 +58,14 @@ As with virtual fds, another provider must not invent or accept these tokens.
   allocation is `EOPNOTSUPP` because this module does not own the Bionic
   allocator. `chdir` verifies a directory through the broker and updates one
   process-wide facade cwd shared by all activated pthreads.
-- `opendir`, `readdir`, and `closedir` translate a private Darwin stream into
-  the pinned Android arm64 280-byte `dirent` layout. Directory names remain
-  uninterpreted bytes. Known Darwin `d_type` values are translated explicitly;
-  unknown values become Android `DT_UNKNOWN`.
+- `opendir`, `fdopendir`, `readdir`, and `closedir` translate a private Darwin
+  stream into the pinned Android arm64 280-byte `dirent` layout. Directory
+  names remain uninterpreted bytes. Known Darwin `d_type` values are translated
+  explicitly; unknown values become Android `DT_UNKNOWN`.
+  `fdopendir` atomically consumes a facade-owned virtual directory descriptor
+  into the stream token. A failed conversion leaves that same virtual descriptor
+  open; after success, direct descriptor operations return `EBADF` and
+  `closedir` owns the final host close.
 - Android arm64 `struct stat` is materialized as the pinned 128-byte Bionic
   layout; it never exposes a Darwin `struct stat`.
 - `isatty` recognizes facade-owned regular-file/directory descriptors and
@@ -129,7 +133,7 @@ Compile-time probes lock every signature, the Android pathconf/`AT_*` numbers,
 and the Android `stat`, `dirent`, and `statvfs` layouts. It then:
 
 1. cross-compiles a real Android AArch64 ELF fixture whose only undefined
-   symbols are `__errno` and the 28 listed facade imports;
+   symbols are `__errno` and the 29 listed facade imports;
 2. loads it with a closed resolver and exercises content, Android stat/dirent
    layouts, cwd transitions, EOF errno, `ENOENT`, unsupported flags, write
    rejection, regular/final/intermediate `readlink` distinctions,

@@ -8,7 +8,7 @@ use std::ffi::{CStr, c_char, c_int, c_void};
 use std::fs::{File, Metadata};
 use std::io::Read;
 use std::marker::PhantomData;
-use std::os::fd::{AsRawFd, IntoRawFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
 use std::os::unix::fs::MetadataExt;
 use std::ptr;
 use std::rc::Rc;
@@ -845,6 +845,61 @@ impl Facade {
         directories.insert(host_directory)
     }
 
+    fn fdopendir(&self, fd: c_int) -> *mut c_void {
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => {
+                self.fail_capability();
+                return ptr::null_mut();
+            }
+        };
+        let Some(file) = descriptors.files.get(&fd) else {
+            self.fail(ANDROID_EBADF);
+            return ptr::null_mut();
+        };
+        match file.metadata() {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                self.fail(ANDROID_ENOTDIR);
+                return ptr::null_mut();
+            }
+            Err(error) => {
+                self.fail_io(&error);
+                return ptr::null_mut();
+            }
+        }
+        let file = descriptors
+            .files
+            .remove(&fd)
+            .expect("validated virtual descriptor must remain present under its lock");
+        let raw_fd = file.into_raw_fd();
+        let mut host_errno = 0;
+        // SAFETY: fdopendir consumes raw_fd only when it returns a stream.
+        let host_directory =
+            unsafe { darwin_art_bionic_fs_host_fdopendir(raw_fd, &mut host_errno) };
+        if host_directory.is_null() {
+            // SAFETY: failed fdopendir leaves ownership of the still-live descriptor
+            // with the caller; restore it under the exact same virtual descriptor.
+            let restored = unsafe { File::from_raw_fd(raw_fd) };
+            assert!(descriptors.files.insert(fd, restored).is_none());
+            self.fail_host_errno(host_errno);
+            return ptr::null_mut();
+        }
+        drop(descriptors);
+
+        let mut directories = match self.directories.lock() {
+            Ok(directories) => directories,
+            Err(_) => {
+                let mut ignored_errno = 0;
+                // SAFETY: the host stream owns raw_fd after successful fdopendir.
+                unsafe { darwin_art_bionic_fs_host_closedir(host_directory, &mut ignored_errno) };
+                self.fail_capability();
+                return ptr::null_mut();
+            }
+        };
+        directories.insert(host_directory)
+    }
+
     fn fail_host_errno(&self, host_errno: c_int) -> c_int {
         if host_errno != 0 {
             // SAFETY: translation is value-only and preserves Darwin errno.
@@ -1185,6 +1240,11 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_opendir_core(path: *const c_char) 
         return ptr::null_mut();
     };
     with_active(ptr::null_mut(), |facade| facade.opendir(path))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_fs_fdopendir_core(fd: c_int) -> *mut c_void {
+    with_active(ptr::null_mut(), |facade| facade.fdopendir(fd))
 }
 
 #[unsafe(no_mangle)]

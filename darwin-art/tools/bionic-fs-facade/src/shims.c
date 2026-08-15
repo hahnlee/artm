@@ -111,6 +111,13 @@ void* darwin_art_bionic_opendir(const char* path) {
   return result;
 }
 
+void* darwin_art_bionic_fdopendir(int fd) {
+  const int saved_host_errno = errno;
+  void* result = darwin_art_bionic_fs_fdopendir_core(fd);
+  errno = saved_host_errno;
+  return result;
+}
+
 DarwinArtAndroidDirent* darwin_art_bionic_readdir(void* directory) {
   const int saved_host_errno = errno;
   DarwinArtAndroidDirent* result = darwin_art_bionic_fs_readdir_core(directory);
@@ -361,6 +368,7 @@ static const Binding kBindings[] = {
     {"closedir", (DarwinArtBionicFsFunction)darwin_art_bionic_closedir},
     {"fchmod", (DarwinArtBionicFsFunction)darwin_art_bionic_fchmod},
     {"fchmodat", (DarwinArtBionicFsFunction)darwin_art_bionic_fchmodat},
+    {"fdopendir", (DarwinArtBionicFsFunction)darwin_art_bionic_fdopendir},
     {"fstat", (DarwinArtBionicFsFunction)darwin_art_bionic_fstat},
     {"ftruncate", (DarwinArtBionicFsFunction)darwin_art_bionic_ftruncate},
     {"getcwd", (DarwinArtBionicFsFunction)darwin_art_bionic_getcwd},

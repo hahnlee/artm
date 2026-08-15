@@ -4,6 +4,7 @@ close	int(int)	direct-register-only	virtual-fd-only
 closedir	int(DIR*)	direct-register-only	facade-token-only
 fchmod	int(int,mode_t)	direct-register-only	virtual-fd-immutable-EROFS
 fchmodat	int(int,const-char*,mode_t,int)	direct-register-only	AT_FDCWD-or-absolute-immutable-EROFS
+fdopendir	DIR*(int)	direct-register-only	virtual-fd-to-facade-token-ownership-transfer
 fstat	int(int,struct-stat*)	direct-register-only	translated-android-stat
 ftruncate	int(int,off_t)	direct-register-only	virtual-fd-immutable-EROFS
 getcwd	char*(char*,size_t)	direct-register-only	caller-buffer-only
