@@ -1,0 +1,79 @@
+diff --git a/runtime/interpreter/mterp/nterp.cc b/runtime/interpreter/mterp/nterp.cc
+--- a/runtime/interpreter/mterp/nterp.cc
++++ b/runtime/interpreter/mterp/nterp.cc
+@@ -35,6 +35,9 @@ namespace art HIDDEN {
+ namespace interpreter {
+ 
+ bool IsNterpSupported() {
++#if defined(__APPLE__)
++  return false;
++#else
+ #ifdef ART_USE_RESTRICTED_MODE
+   // TODO(Simulator): Support Nterp.
+   // Nterp uses the native stack and quick stack frame layout; this will be a complication
+@@ -54,5 +57,6 @@ bool IsNterpSupported() {
+   }
+ #endif  // #ifdef ART_USE_RESTRICTED_MODE
++#endif  // defined(__APPLE__)
+ }
+ 
+ bool CanRuntimeUseNterp() REQUIRES_SHARED(Locks::mutator_lock_) {
+@@ -77,14 +81,22 @@ extern "C" void ExecuteNterpImpl() REQUIRES_SHARED(Locks::mutator_lock_);
+ extern "C" void EndExecuteNterpImpl() REQUIRES_SHARED(Locks::mutator_lock_);
+ 
+ const void* GetNterpEntryPoint() {
++#if defined(__APPLE__)
++  return nullptr;
++#else
+   return reinterpret_cast<const void*>(interpreter::ExecuteNterpImpl);
++#endif
+ }
+ 
+ ArrayRef<const uint8_t> NterpImpl() {
++#if defined(__APPLE__)
++  return {};
++#else
+   const uint8_t* entry_point = reinterpret_cast<const uint8_t*>(ExecuteNterpImpl);
+   size_t size = reinterpret_cast<const uint8_t*>(EndExecuteNterpImpl) - entry_point;
+   const uint8_t* code = reinterpret_cast<const uint8_t*>(EntryPointToCodePointer(entry_point));
+   return ArrayRef<const uint8_t>(code, size);
++#endif
+ }
+ 
+ // Another entrypoint, which does a clinit check at entry.
+@@ -90,14 +102,22 @@ extern "C" void ExecuteNterpWithClinitImpl() REQUIRES_SHARED(Locks::mutator_lock_);
+ extern "C" void EndExecuteNterpWithClinitImpl() REQUIRES_SHARED(Locks::mutator_lock_);
+ 
+ const void* GetNterpWithClinitEntryPoint() {
++#if defined(__APPLE__)
++  return nullptr;
++#else
+   return reinterpret_cast<const void*>(interpreter::ExecuteNterpWithClinitImpl);
++#endif
+ }
+ 
+ ArrayRef<const uint8_t> NterpWithClinitImpl() {
++#if defined(__APPLE__)
++  return {};
++#else
+   const uint8_t* entry_point = reinterpret_cast<const uint8_t*>(ExecuteNterpWithClinitImpl);
+   size_t size = reinterpret_cast<const uint8_t*>(EndExecuteNterpWithClinitImpl) - entry_point;
+   const uint8_t* code = reinterpret_cast<const uint8_t*>(EntryPointToCodePointer(entry_point));
+   return ArrayRef<const uint8_t>(code, size);
++#endif
+ }
+ 
+ /*
+@@ -107,6 +128,7 @@ ArrayRef<const uint8_t> NterpWithClinitImpl() {
+  * Verify some constants used by the nterp interpreter.
+  */
+ void CheckNterpAsmConstants() {
++#if !defined(__APPLE__)
+   /*
+    * If we're using computed goto instruction transitions, make sure
+    * none of the handlers overflows the byte limit.  This won't tell
+@@ -122,3 +144,4 @@ void CheckNterpAsmConstants() {
+                << "(did an instruction handler exceed " << width << " bytes?)";
+   }
++#endif
+ }

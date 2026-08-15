@@ -1,0 +1,98 @@
+diff --git a/libartbase/base/mem_map.cc b/libartbase/base/mem_map.cc
+--- a/libartbase/base/mem_map.cc
++++ b/libartbase/base/mem_map.cc
+@@ -15,6 +15,11 @@
+  */
+ 
+-#include "mem_map.h"
++#include "base/mem_map.h"
+++#if defined(__APPLE__)
++#include <mach/mach.h>
++#include <mach/mach_vm.h>
++#endif
+ 
+ #include <inttypes.h>
+ #include <stdlib.h>
+@@ -263,5 +268,29 @@ void* MemMap::TryMemMapLow4GB(void* ptr,
+                                     int flags,
+                                     int fd,
+                                     off_t offset) {
++#if defined(__APPLE__)
++  // Darwin ignores ordinary low address hints on arm64. Reserve the exact
++  // range with Mach first; VM_FLAGS_FIXED fails rather than overwriting an
++  // existing mapping. MAP_FIXED then replaces only our own reservation.
++  mach_vm_address_t reservation = reinterpret_cast<mach_vm_address_t>(ptr);
++  kern_return_t result = mach_vm_allocate(mach_task_self(),
++                                          &reservation,
++                                          page_aligned_byte_count,
++                                          VM_FLAGS_FIXED);
++  if (result != KERN_SUCCESS) {
++    errno = ENOMEM;
++    return MAP_FAILED;
++  }
++  void* actual = TargetMMap(ptr,
++                            page_aligned_byte_count,
++                            prot,
++                            flags | MAP_FIXED,
++                            fd,
++                            offset);
++  if (actual == MAP_FAILED) {
++    mach_vm_deallocate(mach_task_self(), reservation, page_aligned_byte_count);
++  }
++  return actual;
++#else
+   void* actual = TargetMMap(ptr, page_aligned_byte_count, prot, flags, fd, offset);
+   if (actual != MAP_FAILED) {
+@@ -275,6 +304,7 @@ void* MemMap::TryMemMapLow4GB(void* ptr,
+     }
+   }
+   return actual;
++#endif
+ }
+ #endif
+ 
+@@ -1092,6 +1122,6 @@ void* MemMap::MapInternalArtLow4GBAllocator(size_t length,
+   bool first_run = true;
+ 
+   std::lock_guard<std::mutex> mu(*mem_maps_lock_);
+-  for (uintptr_t ptr = next_mem_pos_; ptr < 4 * GB; ptr += GetPageSize()) {
++  for (uintptr_t ptr = next_mem_pos_; ptr < kArtCompressedReferenceLimit; ptr += GetPageSize()) {
+     // Use gMaps as an optimization to skip over large maps.
+     // Find the first map which is address > ptr.
+@@ -1126,8 +1156,8 @@ void* MemMap::MapInternalArtLow4GBAllocator(size_t length,
+-    if (4U * GB - ptr < length) {
+-      // Not enough memory until 4GB.
++    if (kArtCompressedReferenceLimit - ptr < length) {
++      // Not enough memory until the end of the compressed-reference window.
+       if (first_run) {
+         // Try another time from the bottom;
+-        ptr = LOW_MEM_START - GetPageSize();
++        ptr = kArtCompressedReferenceBase + LOW_MEM_START - GetPageSize();
+         first_run = false;
+         continue;
+       } else {
+@@ -1139,5 +1169,9 @@ void* MemMap::MapInternalArtLow4GBAllocator(size_t length,
+ 
+     // Check pages are free.
+     bool safe = true;
++#if defined(__APPLE__)
++    tail_ptr = ptr;
++    safe = false;
++#else
+     for (tail_ptr = ptr; tail_ptr < ptr + length; tail_ptr += GetPageSize()) {
+       if (msync(reinterpret_cast<void*>(tail_ptr), GetPageSize(), 0) == 0) {
+@@ -1149,5 +1183,6 @@ void* MemMap::MapInternalArtLow4GBAllocator(size_t length,
+         DCHECK_EQ(errno, ENOMEM);
+       }
+     }
++#endif
+ 
+     next_mem_pos_ = tail_ptr;  // update early, as we break out when we found and mapped a region
+@@ -1203,4 +1242,7 @@ void* MemMap::MapInternal(void* addr,
+   void* actual = MAP_FAILED;
+ #if USE_ART_LOW_4G_ALLOCATOR
++  if (low_4gb && addr != nullptr) {
++    return TryMemMapLow4GB(addr, length, prot, flags, fd, offset);
++  }
+   // MAP_32BIT only available on x86_64.
+ 

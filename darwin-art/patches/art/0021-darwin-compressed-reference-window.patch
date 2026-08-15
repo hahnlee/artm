@@ -1,0 +1,47 @@
+diff --git a/libartbase/base/globals.h b/libartbase/base/globals.h
+--- a/libartbase/base/globals.h
++++ b/libartbase/base/globals.h
+@@ -29,4 +29,16 @@ static constexpr size_t MB = KB * KB;
+ static constexpr size_t GB = KB * KB * KB;
+ 
++// Android normally stores managed references as their absolute low 32 bits.
++// arm64 macOS enforces a hard 4GB __PAGEZERO, so reserve a 4GB-aligned high
++// window and store offsets from its base instead. Keeping the base at zero on
++// other hosts preserves upstream ART behavior.
++#if defined(__APPLE__) && defined(__LP64__)
++static constexpr uintptr_t kArtCompressedReferenceBase = 0x0000000400000000ULL;
++#else
++static constexpr uintptr_t kArtCompressedReferenceBase = 0u;
++#endif
++static constexpr uintptr_t kArtCompressedReferenceLimit =
++    kArtCompressedReferenceBase + 4ULL * GB;
++ // Runtime sizes.
+ static constexpr size_t kBitsPerByte = 8;
+diff --git a/libartbase/base/mem_map.cc b/libartbase/base/mem_map.cc
+--- a/libartbase/base/mem_map.cc
++++ b/libartbase/base/mem_map.cc
+@@ -143,6 +143,6 @@ static uintptr_t GenerateNextMemPos(size_t page_size) {
+ #else
+   UNUSED(page_size);
+   // No arc4random on host, see above.
+-  return LOW_MEM_START;
++  return kArtCompressedReferenceBase + LOW_MEM_START;
+ #endif
+ }
+@@ -1184,11 +1184,13 @@ void* MemMap::MapInternal(void* addr,
+ #ifdef __LP64__
+   // When requesting low_4g memory and having an expectation, the requested range should fit into
+-  // 4GB.
++  // the 4GB compressed-reference window. Darwin cannot map the literal low 4GB because the
++  // arm64 Mach-O loader enforces a hard __PAGEZERO over that entire range.
++  const uintptr_t requested = reinterpret_cast<uintptr_t>(addr);
+   if (low_4gb && (
+       // Start out of bounds.
+-      (reinterpret_cast<uintptr_t>(addr) >> 32) != 0 ||
++      (addr != nullptr && requested < kArtCompressedReferenceBase) ||
+       // End out of bounds. For simplicity, this will fail for the last page of memory.
+-      ((reinterpret_cast<uintptr_t>(addr) + length) >> 32) != 0)) {
++      requested > kArtCompressedReferenceLimit - length)) {
+     LOG(ERROR) << "The requested address space (" << addr << ", "
+                << reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(addr) + length)
+                << ") cannot fit in low_4gb";

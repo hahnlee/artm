@@ -1,0 +1,17 @@
+diff --git a/runtime/nterp_helpers.cc b/runtime/nterp_helpers.cc
+--- a/runtime/nterp_helpers.cc
++++ b/runtime/nterp_helpers.cc
+@@ -221,9 +221,13 @@ uint32_t NterpGetVRegReference(ArtMethod** frame, uint16_t vreg) {
+ }
+ 
+ uintptr_t NterpGetCatchHandler() {
++#if defined(__APPLE__)
++  return 0u;
++#else
+   // Nterp uses the same landing pad for all exceptions. The dex_pc_ptr set before
+   // longjmp will actually be used to jmp to the catch handler.
+   return reinterpret_cast<uintptr_t>(artNterpAsmInstructionEnd);
++#endif
+ }
+ 
+ bool CanMethodUseNterp(ArtMethod* method, InstructionSet isa) {

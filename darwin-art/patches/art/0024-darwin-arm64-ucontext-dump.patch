@@ -1,0 +1,33 @@
+diff --git a/runtime/runtime_common.cc b/runtime/runtime_common.cc
+--- a/runtime/runtime_common.cc
++++ b/runtime/runtime_common.cc
+@@ -17,5 +17,9 @@
+ #include "runtime_common.h"
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++#include <mach/arm/thread_status.h>
++#endif
++ #include <signal.h>
+ 
+ #include <cinttypes>
+@@ -147,7 +151,19 @@ struct UContext {
+ };
+ 
+ void UContext::Dump(std::ostream& os) const {
+-#if defined(__APPLE__) && defined(__i386__)
++#if defined(__APPLE__) && defined(__aarch64__)
++  DumpRegister64(os, "pc", arm_thread_state64_get_pc(context->__ss));
++  DumpRegister64(os, "lr", arm_thread_state64_get_lr(context->__ss));
++  os << '\n';
++  DumpRegister64(os, "sp", arm_thread_state64_get_sp(context->__ss));
++  DumpRegister64(os, "fp", arm_thread_state64_get_fp(context->__ss));
++  os << '\n';
++  for (size_t i = 0; i != 29; ++i) {
++    DumpRegister64(os, StringPrintf("x%zu", i).c_str(), context->__ss.__x[i]);
++    os << ((i % 4u) == 3u ? '\n' : ' ');
++  }
++  os << '\n';
++#elif defined(__APPLE__) && defined(__i386__)
+   DumpRegister32(os, "eax", context->__ss.__eax);
+   DumpRegister32(os, "ebx", context->__ss.__ebx);
+   DumpRegister32(os, "ecx", context->__ss.__ecx);
