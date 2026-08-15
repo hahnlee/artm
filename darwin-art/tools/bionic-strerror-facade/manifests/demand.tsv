@@ -1,0 +1,4 @@
+symbol	libcxx_import	owner
+strerror	absent	not-claimed
+strerror_r	present-Class-B	bionic-strerror-facade
+strsignal	absent	not-claimed
