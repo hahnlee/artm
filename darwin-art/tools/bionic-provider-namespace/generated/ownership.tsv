@@ -1,0 +1,131 @@
+soname	symbol	version	owner
+libc.so	__ctype_get_mb_cur_max	LIBC	locale
+libc.so	__cxa_atexit	LIBC	dso-lifecycle
+libc.so	__cxa_finalize	LIBC	dso-lifecycle
+libc.so	__errno	LIBC	errno
+libc.so	__sF	LIBC	stdio
+libc.so	__system_property_get	LIBC	process-state
+libc.so	btowc	LIBC	locale
+libc.so	chdir	LIBC	filesystem
+libc.so	clock_gettime	LIBC	time
+libc.so	close	LIBC	filesystem
+libc.so	closedir	LIBC	filesystem
+libc.so	fclose	LIBC	stdio
+libc.so	fflush	LIBC	stdio
+libc.so	fileno	LIBC	stdio
+libc.so	fopen	LIBC	stdio
+libc.so	fputc	LIBC	stdio
+libc.so	fread	LIBC	stdio
+libc.so	free	LIBC	allocator
+libc.so	freelocale	LIBC	locale
+libc.so	fseek	LIBC	stdio
+libc.so	fseeko	LIBC	stdio
+libc.so	fstat	LIBC	filesystem
+libc.so	ftello	LIBC	stdio
+libc.so	fwrite	LIBC	stdio
+libc.so	getauxval	LIBC	process-state
+libc.so	getc	LIBC	stdio
+libc.so	getcwd	LIBC	filesystem
+libc.so	getenv	LIBC	process-state
+libc.so	iswalpha_l	LIBC	locale
+libc.so	iswblank_l	LIBC	locale
+libc.so	iswcntrl_l	LIBC	locale
+libc.so	iswdigit_l	LIBC	locale
+libc.so	iswlower_l	LIBC	locale
+libc.so	iswprint_l	LIBC	locale
+libc.so	iswpunct_l	LIBC	locale
+libc.so	iswspace_l	LIBC	locale
+libc.so	iswupper_l	LIBC	locale
+libc.so	iswxdigit_l	LIBC	locale
+libc.so	localeconv	LIBC	locale
+libc.so	lstat	LIBC	filesystem
+libc.so	malloc	LIBC	allocator
+libc.so	mbrlen	LIBC	locale
+libc.so	mbrtowc	LIBC	locale
+libc.so	mbsnrtowcs	LIBC	locale
+libc.so	mbsrtowcs	LIBC	locale
+libc.so	mbtowc	LIBC	locale
+libc.so	memchr	LIBC	leaf
+libc.so	memcmp	LIBC	leaf
+libc.so	memcpy	LIBC	leaf
+libc.so	memmove	LIBC	leaf
+libc.so	memset	LIBC	leaf
+libc.so	nanosleep	LIBC	time
+libc.so	newlocale	LIBC	locale
+libc.so	open	LIBC	filesystem
+libc.so	openat	LIBC	filesystem
+libc.so	opendir	LIBC	filesystem
+libc.so	posix_memalign	LIBC	allocator
+libc.so	pthread_cond_broadcast	LIBC	pthread
+libc.so	pthread_cond_destroy	LIBC	pthread
+libc.so	pthread_cond_signal	LIBC	pthread
+libc.so	pthread_cond_timedwait	LIBC	pthread
+libc.so	pthread_cond_wait	LIBC	pthread
+libc.so	pthread_detach	LIBC	pthread
+libc.so	pthread_getspecific	LIBC	pthread
+libc.so	pthread_join	LIBC	pthread
+libc.so	pthread_key_create	LIBC	pthread
+libc.so	pthread_key_delete	LIBC	pthread
+libc.so	pthread_mutex_destroy	LIBC	pthread
+libc.so	pthread_mutex_init	LIBC	pthread
+libc.so	pthread_mutex_lock	LIBC	pthread
+libc.so	pthread_mutex_trylock	LIBC	pthread
+libc.so	pthread_mutex_unlock	LIBC	pthread
+libc.so	pthread_mutexattr_destroy	LIBC	pthread
+libc.so	pthread_mutexattr_init	LIBC	pthread
+libc.so	pthread_mutexattr_settype	LIBC	pthread
+libc.so	pthread_once	LIBC	pthread
+libc.so	pthread_rwlock_rdlock	LIBC	pthread
+libc.so	pthread_rwlock_unlock	LIBC	pthread
+libc.so	pthread_rwlock_wrlock	LIBC	pthread
+libc.so	pthread_self	LIBC	pthread
+libc.so	pthread_setspecific	LIBC	pthread
+libc.so	read	LIBC	filesystem
+libc.so	readdir	LIBC	filesystem
+libc.so	readlink	LIBC	filesystem
+libc.so	realloc	LIBC	allocator
+libc.so	setlocale	LIBC	locale
+libc.so	stat	LIBC	filesystem
+libc.so	strcmp	LIBC	leaf
+libc.so	strcoll_l	LIBC	locale
+libc.so	strlen	LIBC	leaf
+libc.so	strncmp	LIBC	leaf
+libc.so	strtol	LIBC	numeric
+libc.so	strtoll	LIBC	numeric
+libc.so	strtoll_l	LIBC	numeric
+libc.so	strtoul	LIBC	numeric
+libc.so	strtoull	LIBC	numeric
+libc.so	strtoull_l	LIBC	numeric
+libc.so	strxfrm_l	LIBC	locale
+libc.so	sysconf	LIBC	time
+libc.so	towlower_l	LIBC	locale
+libc.so	towupper_l	LIBC	locale
+libc.so	ungetc	LIBC	stdio
+libc.so	uselocale	LIBC	locale
+libc.so	wcrtomb	LIBC	locale
+libc.so	wcscoll_l	LIBC	locale
+libc.so	wcslen	LIBC	leaf
+libc.so	wcsnrtombs	LIBC	locale
+libc.so	wcsxfrm_l	LIBC	locale
+libc.so	wctob	LIBC	locale
+libc.so	wmemchr	LIBC	leaf
+libc.so	wmemcmp	LIBC	leaf
+libdl.so	dl_iterate_phdr	LIBC	phdr
+liblog.so	__android_log_assert		liblog
+liblog.so	__android_log_buf_print		liblog
+liblog.so	__android_log_buf_write		liblog
+liblog.so	__android_log_call_aborter		liblog
+liblog.so	__android_log_default_aborter		liblog
+liblog.so	__android_log_get_minimum_priority		liblog
+liblog.so	__android_log_is_loggable		liblog
+liblog.so	__android_log_is_loggable_len		liblog
+liblog.so	__android_log_logd_logger		liblog
+liblog.so	__android_log_print		liblog
+liblog.so	__android_log_set_aborter		liblog
+liblog.so	__android_log_set_default_tag		liblog
+liblog.so	__android_log_set_logger		liblog
+liblog.so	__android_log_set_minimum_priority		liblog
+liblog.so	__android_log_stderr_logger		liblog
+liblog.so	__android_log_vprint		liblog
+liblog.so	__android_log_write		liblog
+liblog.so	__android_log_write_log_message		liblog

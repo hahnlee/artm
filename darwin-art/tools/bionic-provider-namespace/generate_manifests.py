@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Derive the closed namespace from the existing provider manifests."""
+
+from __future__ import annotations
+
+import csv
+import pathlib
+import re
+import sys
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+HERE = pathlib.Path(__file__).resolve().parent
+
+
+def rows(relative: str) -> list[dict[str, str]]:
+    with (ROOT / relative).open(newline="") as stream:
+        return list(csv.DictReader(stream, delimiter="\t"))
+
+
+def names(relative: str, predicate=lambda row: True) -> list[str]:
+    return [row["symbol"] for row in rows(relative) if predicate(row)]
+
+
+def main() -> int:
+    output = pathlib.Path(sys.argv[1]) if len(sys.argv) == 2 else HERE / "generated"
+    output.mkdir(parents=True, exist_ok=True)
+
+    universe_rows = rows(
+        "tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv"
+    )
+    universe = {row["symbol"]: row for row in universe_rows}
+    claims: list[tuple[str, str]] = []
+
+    claims += [(row["symbol"], "leaf") for row in universe_rows if row["category"] == "A"]
+    claims += [(name, "allocator") for name in names(
+        "tools/bionic-libc-allocator-facade/imports/ndk-r28c-api35-arm64-allocators.tsv"
+    )]
+    claims.append(("__errno", "errno"))
+    claims += [(name, "filesystem") for name in names(
+        "tools/bionic-fs-facade/manifests/imports.tsv"
+    )]
+    claims += [(name, "time") for name in names(
+        "tools/bionic-time-facade/manifests/imports.tsv"
+    )]
+    claims += [(row["symbol"], "pthread") for row in rows(
+        "tools/android-bionic-pthread-provider/libcxx-pthread-imports.tsv"
+    ) if row["status"] == "supported"]
+    claims += [(name, "process-state") for name in names(
+        "tools/bionic-process-state-facade/manifests/imports.tsv"
+    )]
+    claims.append(("dl_iterate_phdr", "phdr"))
+    claims += [(row["symbol"], "stdio") for row in rows(
+        "tools/bionic-stdio-facade/manifests/imports.tsv"
+    ) if not row["policy"].startswith("rejected-")]
+    claims += [(name, "locale") for name in names(
+        "tools/bionic-locale-facade/manifests/imports.tsv"
+    )]
+    claims += [(name, "numeric") for name in names(
+        "tools/bionic-numeric-facade/manifests/imports.tsv"
+    )]
+    with (ROOT / "tools/bionic-dso-lifecycle-facade/manifests/imports.tsv").open() as stream:
+        claims += [(line.split("\t", 1)[0], "dso-lifecycle")
+                   for line in stream if line.strip()]
+
+    claimed: dict[str, str] = {}
+    duplicates: list[str] = []
+    for symbol, owner in claims:
+        if symbol not in universe:
+            raise SystemExit(f"provider claims symbol outside libc++ universe: {symbol}")
+        if symbol in claimed:
+            duplicates.append(f"{symbol}: {claimed[symbol]}, {owner}")
+        claimed[symbol] = owner
+    if duplicates:
+        raise SystemExit("duplicate owners:\n" + "\n".join(duplicates))
+
+    liblog_source = (ROOT / "tools/android-liblog-exec-provider/liblog_provider.cc").read_text()
+    liblog = re.findall(r"^\s*LIBLOG_ENTRY\(([^)]+)\),", liblog_source, re.MULTILINE)
+    if len(liblog) != 18 or len(set(liblog)) != 18:
+        raise SystemExit("liblog provider surface is not exactly 18 unique symbols")
+
+    owner_enum = {
+        "leaf": "DARWIN_ART_BIONIC_PROVIDER_LEAF",
+        "allocator": "DARWIN_ART_BIONIC_PROVIDER_ALLOCATOR",
+        "errno": "DARWIN_ART_BIONIC_PROVIDER_ERRNO",
+        "filesystem": "DARWIN_ART_BIONIC_PROVIDER_FILESYSTEM",
+        "time": "DARWIN_ART_BIONIC_PROVIDER_TIME",
+        "pthread": "DARWIN_ART_BIONIC_PROVIDER_PTHREAD",
+        "process-state": "DARWIN_ART_BIONIC_PROVIDER_PROCESS_STATE",
+        "phdr": "DARWIN_ART_BIONIC_PROVIDER_PHDR",
+        "stdio": "DARWIN_ART_BIONIC_PROVIDER_STDIO",
+        "locale": "DARWIN_ART_BIONIC_PROVIDER_LOCALE",
+        "numeric": "DARWIN_ART_BIONIC_PROVIDER_NUMERIC",
+        "liblog": "DARWIN_ART_BIONIC_PROVIDER_LIBLOG",
+        "dso-lifecycle": "DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE",
+    }
+    ownership = sorted(
+        [("libdl.so" if owner == "phdr" else "libc.so",
+          symbol, "LIBC", owner) for symbol, owner in claimed.items()]
+        + [("liblog.so", symbol, "", "liblog") for symbol in liblog]
+    )
+    unsupported = sorted(
+        (symbol, row["category"], row["rationale"])
+        for symbol, row in universe.items() if symbol not in claimed
+    )
+    if len(universe) != 160 or len(claimed) != 112 or len(unsupported) != 48:
+        raise SystemExit(
+            f"coverage drift: universe={len(universe)} owned={len(claimed)} "
+            f"unsupported={len(unsupported)}"
+        )
+
+    with (output / "ownership.tsv").open("w", newline="") as stream:
+        writer = csv.writer(stream, delimiter="\t", lineterminator="\n")
+        writer.writerow(("soname", "symbol", "version", "owner"))
+        writer.writerows(ownership)
+    with (output / "unsupported-libc.tsv").open("w", newline="") as stream:
+        writer = csv.writer(stream, delimiter="\t", lineterminator="\n")
+        writer.writerow(("symbol", "class", "reason"))
+        writer.writerows(unsupported)
+    with (output / "ownership.inc").open("w") as stream:
+        for soname, symbol, version, owner in ownership:
+            stream.write(
+                f'    {{"{soname}", "{symbol}", "{version}", {owner_enum[owner]}}},\n'
+            )
+    with (output / "unsupported_symbols.inc").open("w") as stream:
+        for symbol, _category, _reason in unsupported:
+            stream.write(f'    "{symbol}",\n')
+    with (output / "unsupported.inc").open("w") as stream:
+        for symbol, category, reason in unsupported:
+            stream.write(f'    {{"{symbol}", \'{category}\', "{reason}"}},\n')
+    (output / "unsupported_count.inc").write_text(f"{len(unsupported)}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

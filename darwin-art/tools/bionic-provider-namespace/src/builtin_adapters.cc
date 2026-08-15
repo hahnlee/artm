@@ -1,0 +1,105 @@
+#include "darwin_art_bionic_builtin_adapters.h"
+
+namespace {
+
+using SymbolFunction = void (*)(void);
+
+extern "C" SymbolFunction darwin_art_bionic_libc_leaf_resolve(const char *);
+extern "C" SymbolFunction darwin_art_bionic_allocator_resolve(const char *);
+extern "C" SymbolFunction darwin_art_bionic_errno_resolve(const char *);
+extern "C" SymbolFunction darwin_art_bionic_fs_resolve(const char *);
+extern "C" SymbolFunction darwin_art_bionic_time_resolve(const char *);
+extern "C" void *darwin_art_bionic_pthread_resolve(const char *, const char *,
+                                                   const char *);
+extern "C" SymbolFunction darwin_art_bionic_process_state_resolve(const char *);
+extern "C" void *darwin_art_dl_phdr_resolve(const char *, const char *,
+                                            const char *);
+extern "C" SymbolFunction darwin_art_bionic_stdio_resolve(const char *);
+extern "C" void *darwin_art_bionic_locale_resolve(const char *, const char *,
+                                                  const char *);
+extern "C" SymbolFunction darwin_art_bionic_numeric_resolve(const char *);
+extern "C" uintptr_t darwin_art_liblog_provider_resolve(const char *,
+                                                        const char *);
+extern "C" SymbolFunction darwin_art_bionic_dso_lifecycle_resolve(const char *);
+
+uintptr_t Address(SymbolFunction function) {
+  return reinterpret_cast<uintptr_t>(function);
+}
+
+uintptr_t Leaf(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_libc_leaf_resolve(symbol));
+}
+uintptr_t Allocator(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_allocator_resolve(symbol));
+}
+uintptr_t Errno(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_errno_resolve(symbol));
+}
+uintptr_t Filesystem(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_fs_resolve(symbol));
+}
+uintptr_t Time(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_time_resolve(symbol));
+}
+uintptr_t Pthread(void *, const char *soname, const char *symbol,
+                  const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_pthread_resolve(soname, symbol, version));
+}
+uintptr_t ProcessState(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_process_state_resolve(symbol));
+}
+uintptr_t Phdr(void *, const char *soname, const char *symbol,
+               const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_dl_phdr_resolve(soname, symbol, version));
+}
+uintptr_t Stdio(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_stdio_resolve(symbol));
+}
+uintptr_t Locale(void *, const char *soname, const char *symbol,
+                 const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_locale_resolve(soname, symbol, version));
+}
+uintptr_t Numeric(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_numeric_resolve(symbol));
+}
+uintptr_t Liblog(void *, const char *, const char *symbol,
+                 const char *version) {
+  return darwin_art_liblog_provider_resolve(symbol, version);
+}
+uintptr_t DsoLifecycle(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_dso_lifecycle_resolve(symbol));
+}
+
+constexpr DarwinArtBionicProviderResolve kResolvers[] = {
+    Leaf, Allocator, Errno,  Filesystem, Time,   Pthread,      ProcessState,
+    Phdr, Stdio,     Locale, Numeric,    Liblog, DsoLifecycle,
+};
+static_assert(sizeof(kResolvers) / sizeof(kResolvers[0]) ==
+              DARWIN_ART_BIONIC_PROVIDER_COUNT);
+
+} // namespace
+
+extern "C" DarwinArtBionicNamespaceStatus
+darwin_art_bionic_namespace_bind_builtins(
+    DarwinArtBionicNamespace *instance,
+    const DarwinArtBionicProviderReleaseHooks *release_hooks) {
+  if (instance == nullptr)
+    return DARWIN_ART_BIONIC_NAMESPACE_INVALID_ARGUMENT;
+  for (int index = 0; index < DARWIN_ART_BIONIC_PROVIDER_COUNT; ++index) {
+    const auto provider = static_cast<DarwinArtBionicProviderId>(index);
+    DarwinArtBionicProviderBinding binding{
+        provider,
+        release_hooks == nullptr ? nullptr : release_hooks->context[index],
+        kResolvers[index],
+        release_hooks == nullptr ? nullptr : release_hooks->release[index],
+    };
+    const DarwinArtBionicNamespaceStatus status =
+        darwin_art_bionic_namespace_bind(instance, &binding);
+    if (status != DARWIN_ART_BIONIC_NAMESPACE_OK)
+      return status;
+  }
+  return DARWIN_ART_BIONIC_NAMESPACE_OK;
+}
