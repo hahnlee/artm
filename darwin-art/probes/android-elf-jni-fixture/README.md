@@ -15,6 +15,10 @@ routes. It checks raw IEEE binary128 `%Lf` output and an Android 32-byte
 `va_list` whose pointer arguments spill after the GP register bank while FP
 distractors remain in the independent SIMD bank.
 
+It also executes `swprintf@LIBC` with Android wchar32 output,
+`ioctl@LIBC(RNDGETENTCNT)` through the process filesystem owner, and
+`strftime_l@LIBC` against the runtime's deterministic fixed-offset UTC owner.
+
 `JNI_OnLoad` exercises the reverse ABI boundary through the supplied proxy
 `JavaVM` and `JNIEnv` tables: `GetEnv`, `FindClass`, and `RegisterNatives`. It
 registers eight methods covering mixed scalar/reference/FP stack tails,

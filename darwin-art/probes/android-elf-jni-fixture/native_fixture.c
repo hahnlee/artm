@@ -7,11 +7,29 @@ extern int DarwinArtFixtureChildValue(void);
 extern void darwin_art_fixture_record_lifecycle(int phase);
 extern int* __errno(void);
 extern int close(int fd);
+extern int ioctl(int fd, int request, ...);
 extern int open(const char* path, int flags, ...);
 extern intptr_t read(int fd, void* buffer, size_t count);
 extern int sscanf(const char* input, const char* format, ...);
 extern size_t strlen(const char* string);
 extern int vsscanf(const char* input, const char* format, va_list arguments);
+extern int swprintf(uint32_t* output, size_t capacity,
+                    const uint32_t* format, ...);
+typedef struct {
+  int32_t tm_sec;
+  int32_t tm_min;
+  int32_t tm_hour;
+  int32_t tm_mday;
+  int32_t tm_mon;
+  int32_t tm_year;
+  int32_t tm_wday;
+  int32_t tm_yday;
+  int32_t tm_isdst;
+  int64_t tm_gmtoff;
+  const char* tm_zone;
+} FixtureTm;
+extern size_t strftime_l(char* output, size_t capacity, const char* format,
+                         const FixtureTm* value, void* locale);
 extern int __cxa_atexit(void (*function)(void*), void* argument, void* dso);
 
 __attribute__((visibility("hidden"))) void* __dso_handle = &__dso_handle;
@@ -21,6 +39,9 @@ static int g_bionic_provider_initialized;
 static int g_cxa_registered;
 static int g_filesystem_initialized;
 static int g_scanf_initialized;
+static int g_swprintf_initialized;
+static int g_ioctl_initialized;
+static int g_strftime_initialized;
 
 typedef struct {
   uint64_t words[2];
@@ -47,11 +68,15 @@ __attribute__((constructor)) static void RootInitialize(void) {
   uint8_t random_bytes[16];
   int* bionic_errno = __errno();
   int random_fd = open("/dev/random", 0);
+  int32_t entropy_bits = 0;
+  int ioctl_result =
+      random_fd < 0 ? -1 : ioctl(random_fd, (int)0x80045200U, &entropy_bits);
   intptr_t random_read =
       random_fd < 0 ? -1 : read(random_fd, random_bytes, sizeof(random_bytes));
   int random_close = random_fd < 0 ? -1 : close(random_fd);
   g_filesystem_initialized =
       random_read == (intptr_t)sizeof(random_bytes) && random_close == 0;
+  g_ioctl_initialized = ioctl_result == 0 && entropy_bits == 32;
   FixtureBinary128 binary128 = {0};
   int values[8] = {0};
   const char* binary128_format = "%Lf";
@@ -66,9 +91,42 @@ __attribute__((constructor)) static void RootInitialize(void) {
   for (int index = 0; index < 8; ++index) {
     g_scanf_initialized &= values[index] == index + 1;
   }
+  uint32_t wide_output[16] = {0};
+  static const uint32_t wide_format[] = {'%', 'f', 0};
+  static const uint32_t wide_expected[] = {
+      '1', '.', '2', '5', '0', '0', '0', '0', 0};
+  int wide_length = swprintf(wide_output, 16, wide_format, 1.25);
+  g_swprintf_initialized = wide_length == 8;
+  for (size_t index = 0; index < sizeof(wide_expected) / sizeof(*wide_expected);
+       ++index) {
+    g_swprintf_initialized &= wide_output[index] == wide_expected[index];
+  }
+  FixtureTm broken_down = {0};
+  broken_down.tm_sec = 5;
+  broken_down.tm_min = 4;
+  broken_down.tm_hour = 3;
+  broken_down.tm_mday = 2;
+  broken_down.tm_mon = 0;
+  broken_down.tm_year = 124;
+  broken_down.tm_wday = 2;
+  broken_down.tm_yday = 1;
+  broken_down.tm_isdst = 0;
+  char time_output[64] = {0};
+  static const char time_expected[] = "2024-01-02 03:04:05 +0000 UTC";
+  size_t time_length = strftime_l(time_output, sizeof(time_output),
+                                  "%Y-%m-%d %H:%M:%S %z %Z",
+                                  &broken_down, (void*)(uintptr_t)0x5a5a);
+  g_strftime_initialized =
+      time_length == sizeof(time_expected) - 1 &&
+      strlen(time_output) == sizeof(time_expected) - 1;
+  for (size_t index = 0; index < sizeof(time_expected); ++index) {
+    g_strftime_initialized &= time_output[index] == time_expected[index];
+  }
   if (DarwinArtFixtureChildValue() == 20 && bionic_errno != NULL &&
       strlen(provider_probe) == sizeof(provider_probe) - 1 &&
-      g_filesystem_initialized == 1 && g_scanf_initialized == 1) {
+      g_filesystem_initialized == 1 && g_scanf_initialized == 1 &&
+      g_swprintf_initialized == 1 && g_ioctl_initialized == 1 &&
+      g_strftime_initialized == 1) {
     *bionic_errno = 4242;
     g_bionic_provider_initialized = *__errno() == 4242;
     g_root_initialized = 1;
@@ -181,7 +239,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
   (void)reserved;
   if (g_root_initialized != 1 || g_bionic_provider_initialized != 1 ||
       g_cxa_registered != 1 || g_filesystem_initialized != 1 ||
-      g_scanf_initialized != 1 ||
+      g_scanf_initialized != 1 || g_swprintf_initialized != 1 ||
+      g_ioctl_initialized != 1 || g_strftime_initialized != 1 ||
       DarwinArtFixtureChildValue() != 20) {
     return JNI_ERR;
   }

@@ -6,8 +6,8 @@ This gate measures coherent standalone provider ownership against the exact
 happen to exist in Darwin libc: a symbol is covered only when a project facade
 claims its Android ABI and semantic state.
 
-The current composed namespace owns 151 imports through twenty-three providers
-(including the distinct liblog owner):
+The current composed namespace owns 159 libc-family imports plus 18 liblog
+routes through twenty-eight providers:
 
 | Provider | Imports | Boundary |
 |---|---:|---|
@@ -20,6 +20,11 @@ The current composed namespace owns 151 imports through twenty-three providers
 | process-state | 3 | immutable environment, properties, and auxv snapshot |
 | phdr | 1 | loader-owned Android ELF program-header snapshots |
 | stdio | 13 | Android FILE tokens, `__sF`, and fixed-register binary I/O |
+| wide-stdio | 3 | central FILE leases with Android wchar32 stream state |
+| scanf | 2 | Android AAPCS64 varargs and 32-byte `va_list` scanning |
+| swprintf | 1 | Android wchar32 output and AAPCS64 variadic floating input |
+| ioctl | 1 | Linux request decoding over the virtual FD owner |
+| strftime | 1 | Bionic C-locale formatting with fixed-offset timezone state |
 | locale | 31 | ICU 76 locale, multibyte, and wide-character semantics |
 | numeric | 6 | narrow integer conversion |
 | float-conversion | 2 | renamed AOSP gdtoa `strtod`/`strtof` |
@@ -30,12 +35,14 @@ The current composed namespace owns 151 imports through twenty-three providers
 | wide-float | 2 | ICU whitespace plus AOSP gdtoa `wcstod`/`wcstof` |
 | binary128-conversion | 3 | Android AAPCS64 q0 `strtold`/`strtold_l`/`wcstold` |
 | abort | 2 | Bionic abort/message state |
+| liblog | 18 | AOSP Android logging entrypoints without host fallback |
 | syslog | 3 | Android variadic capture, Bionic state, and AOSP liblog routing |
 | syscall | 1 | exact libc++ gettid/futex/libunwind-probe dispatch without raw host syscalls |
 | lifecycle | 2 | Bionic DSO finalizer ownership |
 
-Coverage by the original ABI classification is A 11/11, B 68/76, C 64/65,
-and D 8/8. The remaining 9 imports stay explicit capability failures.
+Coverage by the original ABI classification is A 11/11, B 75/76, C 65/65,
+and D 8/8. The remaining import, `sendfile`, stays an explicit capability
+failure.
 Binary128 conversions return raw IEEE bits through Android's q0 ABI and never
 reinterpret Darwin's binary64 `long double`.
 

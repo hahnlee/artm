@@ -19,6 +19,12 @@ extern "C" void *darwin_art_bionic_wide_stdio_resolve(
     const char *, const char *, const char *);
 extern "C" void *darwin_art_bionic_scanf_resolve(
     const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_swprintf_resolve(
+    const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_ioctl_resolve(
+    const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_strftime_resolve(
+    const char *, const char *, const char *);
 extern "C" void *darwin_art_bionic_locale_resolve(const char *, const char *,
                                                   const char *);
 extern "C" SymbolFunction darwin_art_bionic_numeric_resolve(const char *);
@@ -90,6 +96,21 @@ uintptr_t Scanf(void *, const char *soname, const char *symbol,
   return reinterpret_cast<uintptr_t>(
       darwin_art_bionic_scanf_resolve(soname, symbol, version));
 }
+uintptr_t Swprintf(void *, const char *soname, const char *symbol,
+                   const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_swprintf_resolve(soname, symbol, version));
+}
+uintptr_t Ioctl(void *, const char *soname, const char *symbol,
+                const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_ioctl_resolve(soname, symbol, version));
+}
+uintptr_t Strftime(void *, const char *soname, const char *symbol,
+                   const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_strftime_resolve(soname, symbol, version));
+}
 uintptr_t Locale(void *, const char *soname, const char *symbol,
                  const char *version) {
   return reinterpret_cast<uintptr_t>(
@@ -158,6 +179,9 @@ constexpr DarwinArtBionicProviderResolve kResolvers[] = {
     Binary128Conversion,
     WideStdio,
     Scanf,
+    Swprintf,
+    Ioctl,
+    Strftime,
 };
 static_assert(sizeof(kResolvers) / sizeof(kResolvers[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);

@@ -30,8 +30,10 @@
 #include "darwin_art_bionic_builtin_adapters.h"
 #include "darwin_art_bionic_dso_lifecycle.h"
 #include "darwin_art_bionic_fs.h"
+#include "darwin_art_bionic_ioctl.h"
 #include "darwin_art_bionic_provider_namespace.h"
 #include "darwin_art_bionic_stdio.h"
+#include "darwin_art_bionic_strftime.h"
 #include "darwin_art_jni_proxy.h"
 #include "nativebridge/native_bridge.h"
 #include "nativeloader/native_loader.h"
@@ -59,10 +61,14 @@ constexpr uint32_t kFixtureReadRouteMask = 1u << 3;
 constexpr uint32_t kFixtureCloseRouteMask = 1u << 4;
 constexpr uint32_t kFixtureScanfRouteMask = 1u << 5;
 constexpr uint32_t kFixtureVsscanfRouteMask = 1u << 6;
+constexpr uint32_t kFixtureSwprintfRouteMask = 1u << 7;
+constexpr uint32_t kFixtureIoctlRouteMask = 1u << 8;
+constexpr uint32_t kFixtureStrftimeRouteMask = 1u << 9;
 constexpr uint32_t kFixtureAllProviderRouteMask =
     kFixtureErrnoRouteMask | kFixtureStrlenRouteMask | kFixtureOpenRouteMask |
     kFixtureReadRouteMask | kFixtureCloseRouteMask | kFixtureScanfRouteMask |
-    kFixtureVsscanfRouteMask;
+    kFixtureVsscanfRouteMask | kFixtureSwprintfRouteMask |
+    kFixtureIoctlRouteMask | kFixtureStrftimeRouteMask;
 constexpr uint32_t kFixtureNativeAddEntryMask = 1u << 0;
 constexpr uint32_t kFixtureNativeSpillEntryMask = 1u << 1;
 constexpr uint32_t kFixtureNativeUsesEnvEntryMask = 1u << 2;
@@ -215,6 +221,79 @@ void ReleaseStdioOwner() {
   }
 }
 
+struct SingletonOwnerState {
+  std::mutex mutex;
+  size_t users = 0;
+};
+
+SingletonOwnerState g_ioctl_owner;
+SingletonOwnerState g_strftime_owner;
+
+bool AcquireIoctlOwner(std::string* error) {
+  std::lock_guard<std::mutex> lock(g_ioctl_owner.mutex);
+  if (g_ioctl_owner.users != 0) {
+    if (g_ioctl_owner.users == std::numeric_limits<size_t>::max()) {
+      *error = "Bionic ioctl graph-owner count overflow";
+      return false;
+    }
+    ++g_ioctl_owner.users;
+    return true;
+  }
+  const DarwinArtBionicIoctlLifecycleStatus status =
+      darwin_art_bionic_ioctl_activate(
+          &darwin_art_bionic_fs_ioctl_fd_lookup, nullptr);
+  if (status != DARWIN_ART_BIONIC_IOCTL_LIFECYCLE_OK) {
+    *error = "Bionic ioctl process-owner activation failed: " +
+             std::to_string(static_cast<int>(status));
+    return false;
+  }
+  g_ioctl_owner.users = 1;
+  return true;
+}
+
+void ReleaseIoctlOwner() {
+  std::lock_guard<std::mutex> lock(g_ioctl_owner.mutex);
+  if (g_ioctl_owner.users == 0) std::abort();
+  --g_ioctl_owner.users;
+  if (g_ioctl_owner.users != 0) return;
+  if (darwin_art_bionic_ioctl_deactivate() !=
+      DARWIN_ART_BIONIC_IOCTL_LIFECYCLE_OK) {
+    std::abort();
+  }
+}
+
+bool AcquireStrftimeOwner(std::string* error) {
+  std::lock_guard<std::mutex> lock(g_strftime_owner.mutex);
+  if (g_strftime_owner.users != 0) {
+    if (g_strftime_owner.users == std::numeric_limits<size_t>::max()) {
+      *error = "Bionic strftime graph-owner count overflow";
+      return false;
+    }
+    ++g_strftime_owner.users;
+    return true;
+  }
+  const DarwinArtBionicStrftimeLifecycleStatus status =
+      darwin_art_bionic_strftime_activate("UTC", 0, "UTC", 0);
+  if (status != DARWIN_ART_BIONIC_STRFTIME_OK) {
+    *error = "Bionic strftime process-owner activation failed: " +
+             std::to_string(static_cast<int>(status));
+    return false;
+  }
+  g_strftime_owner.users = 1;
+  return true;
+}
+
+void ReleaseStrftimeOwner() {
+  std::lock_guard<std::mutex> lock(g_strftime_owner.mutex);
+  if (g_strftime_owner.users == 0) std::abort();
+  --g_strftime_owner.users;
+  if (g_strftime_owner.users != 0) return;
+  if (darwin_art_bionic_strftime_deactivate() !=
+      DARWIN_ART_BIONIC_STRFTIME_OK) {
+    std::abort();
+  }
+}
+
 std::string Sha256(const uint8_t* bytes, size_t size) {
   std::array<unsigned char, CC_SHA256_DIGEST_LENGTH> digest{};
   CC_SHA256(bytes, static_cast<CC_LONG>(size), digest.data());
@@ -274,6 +353,8 @@ struct ElfLibrary {
   DarwinArtBionicDsoLifecycleOwner* dso_lifecycle = nullptr;
   bool filesystem_owner = false;
   bool stdio_owner = false;
+  bool ioctl_owner = false;
+  bool strftime_owner = false;
   uintptr_t jni_on_load = 0;
   uintptr_t jni_on_unload = 0;
   alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)
@@ -288,13 +369,21 @@ void TeardownProviderNamespace(ElfLibrary* library) {
     darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
     library->dso_lifecycle = nullptr;
   }
-  if (library->filesystem_owner) {
-    ReleaseFilesystemOwner();
-    library->filesystem_owner = false;
+  if (library->strftime_owner) {
+    ReleaseStrftimeOwner();
+    library->strftime_owner = false;
+  }
+  if (library->ioctl_owner) {
+    ReleaseIoctlOwner();
+    library->ioctl_owner = false;
   }
   if (library->stdio_owner) {
     ReleaseStdioOwner();
     library->stdio_owner = false;
+  }
+  if (library->filesystem_owner) {
+    ReleaseFilesystemOwner();
+    library->filesystem_owner = false;
   }
   if (library->provider_namespace == nullptr) return;
   const DarwinArtBionicNamespaceStatus status =
@@ -409,6 +498,12 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     route = kFixtureScanfRouteMask;
   } else if (std::strcmp(request->symbol, "vsscanf") == 0) {
     route = kFixtureVsscanfRouteMask;
+  } else if (std::strcmp(request->symbol, "swprintf") == 0) {
+    route = kFixtureSwprintfRouteMask;
+  } else if (std::strcmp(request->symbol, "ioctl") == 0) {
+    route = kFixtureIoctlRouteMask;
+  } else if (std::strcmp(request->symbol, "strftime_l") == 0) {
+    route = kFixtureStrftimeRouteMask;
   }
   if (route != 0 && library->fixture_graph) {
     g_elf_fixture_provider_routes.fetch_or(route, std::memory_order_relaxed);
@@ -900,6 +995,19 @@ void* OpenNativeLibrary(JNIEnv* env,
       return nullptr;
     }
     library->filesystem_owner = true;
+    if (!AcquireIoctlOwner(&error)) {
+      SetNativeLoaderError(error_msg, "Bionic ioctl setup failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    library->ioctl_owner = true;
+    if (!AcquireStrftimeOwner(&error)) {
+      SetNativeLoaderError(error_msg,
+                           "Bionic strftime setup failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    library->strftime_owner = true;
     if (!AcquireStdioOwner(&error)) {
       SetNativeLoaderError(error_msg, "Bionic stdio setup failed: " + error);
       TeardownProviderNamespace(library.get());
@@ -1025,13 +1133,21 @@ bool CloseNativeLibrary(void* handle, bool needs_native_bridge, char** error_msg
     }
     darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
     library->dso_lifecycle = nullptr;
-    if (library->filesystem_owner) {
-      ReleaseFilesystemOwner();
-      library->filesystem_owner = false;
+    if (library->strftime_owner) {
+      ReleaseStrftimeOwner();
+      library->strftime_owner = false;
+    }
+    if (library->ioctl_owner) {
+      ReleaseIoctlOwner();
+      library->ioctl_owner = false;
     }
     if (library->stdio_owner) {
       ReleaseStdioOwner();
       library->stdio_owner = false;
+    }
+    if (library->filesystem_owner) {
+      ReleaseFilesystemOwner();
+      library->filesystem_owner = false;
     }
     const DarwinArtBionicNamespaceStatus namespace_status =
         darwin_art_bionic_namespace_teardown(library->provider_namespace);

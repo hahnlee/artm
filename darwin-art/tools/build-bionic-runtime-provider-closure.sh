@@ -108,6 +108,47 @@ icu_root="$root/_aosp/external/icu-graphics"
 "$cc" -arch arm64 -isysroot "$sdk" \
   -c "$root/tools/bionic-scanf-facade/src/aapcs64_entry.S" \
   -o "$objects/scanf-entry.o"
+"$cxx" "${cxxflags[@]}" -fno-builtin \
+  -I"$root/tools/bionic-swprintf-facade/include" \
+  -I"$root/tools/bionic-format-facade/include" \
+  -I"$root/tools/bionic-errno-tls/include" \
+  -c "$root/tools/bionic-swprintf-facade/src/provider.cc" \
+  -o "$objects/swprintf.o"
+"$cc" -arch arm64 -isysroot "$sdk" \
+  -c "$root/tools/bionic-swprintf-facade/src/aapcs64_entry.S" \
+  -o "$objects/swprintf-entry.o"
+"$cc" "${cflags[@]}" -std=gnu17 -fno-builtin -fvisibility=hidden \
+  -Wno-sign-compare -Wno-extra-semi \
+  -I"$root/tools/bionic-float-conversion-facade/include" \
+  -I"$root/_aosp/bionic-float-conversion-facade/libc/upstream-openbsd/android/include" \
+  -I"$root/_aosp/bionic-float-conversion-facade/libc/upstream-openbsd/lib/libc/gdtoa" \
+  -include darwin_art_gdtoa_compat.h \
+  -D__gdtoa=darwin_art_aosp_gdtoa \
+  -c "$root/_aosp/bionic-swprintf-facade/libc/upstream-openbsd/lib/libc/gdtoa/gdtoa.c" \
+  -o "$objects/swprintf-gdtoa.o"
+"$cxx" "${cxxflags[@]}" \
+  -I"$root/tools/bionic-ioctl-facade/include" \
+  -I"$root/tools/bionic-errno-tls/include" \
+  -c "$root/tools/bionic-ioctl-facade/src/ioctl.cc" \
+  -o "$objects/ioctl.o"
+"$cc" -arch arm64 -isysroot "$sdk" \
+  -c "$root/tools/bionic-ioctl-facade/src/aapcs64_entry.S" \
+  -o "$objects/ioctl-entry.o"
+strftime_source="$root/_aosp/bionic-strftime-facade/platform/bionic/libc/tzcode/strftime.c"
+[[ -f "$strftime_source" ]] || {
+  echo 'bionic-runtime-provider-closure: run tools/bionic-strftime-facade/audit.sh to materialize pinned strftime.c' >&2
+  exit 2
+}
+"$cc" "${cflags[@]}" -std=c17 \
+  -I"$root/tools/bionic-strftime-facade/include" \
+  -I"$root/tools/bionic-errno-tls/include" \
+  -c "$root/tools/bionic-strftime-facade/src/provider.c" \
+  -o "$objects/strftime.o"
+"$cc" "${cflags[@]}" -std=c17 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+  -DHAVE_STRFTIME_L=1 -D__BIONIC__=1 -D__LP64__=1 \
+  -DDEPRECATE_TWO_DIGIT_YEARS=0 \
+  -include "$root/tools/bionic-strftime-facade/src/upstream_shim.h" \
+  -c "$strftime_source" -o "$objects/strftime-upstream.o"
 "$cxx" "${cxxflags[@]}" \
   -I"$root/tools/bionic-format-facade/include" \
   -I"$root/tools/bionic-libc-allocator-facade/include" \
@@ -179,6 +220,10 @@ native="$build/libdarwin-art-bionic-native-providers.a"
   "$objects/pthread.o" "$objects/phdr.o" "$objects/locale.o" \
   "$objects/wide-stdio.o" "$objects/wide-stdio-shims.o" \
   "$objects/numeric.o" "$objects/scanf.o" "$objects/scanf-entry.o" \
+  "$objects/swprintf.o" "$objects/swprintf-entry.o" \
+  "$objects/swprintf-gdtoa.o" \
+  "$objects/ioctl.o" "$objects/ioctl-entry.o" \
+  "$objects/strftime.o" "$objects/strftime-upstream.o" \
   "$objects/format.o" "$objects/format-entry.o" \
   "$objects/formatted-stdio.o" "$objects/formatted-stdio-entry.o" \
   "$objects/syslog.o" "$objects/syslog-entry.o" \
@@ -222,11 +267,14 @@ _darwin_art_bionic_numeric_resolve
 _darwin_art_bionic_process_state_resolve
 _darwin_art_bionic_pthread_resolve
 _darwin_art_bionic_scanf_resolve
+_darwin_art_bionic_strftime_resolve
 _darwin_art_bionic_stdio_resolve
 _darwin_art_bionic_strerror_resolve
 _darwin_art_bionic_syslog_resolve
 _darwin_art_bionic_syscall_resolve
 _darwin_art_bionic_time_resolve
+_darwin_art_bionic_swprintf_resolve
+_darwin_art_bionic_ioctl_resolve
 _darwin_art_bionic_wide_float_resolve
 _darwin_art_bionic_wide_integer_resolve
 _darwin_art_bionic_wide_stdio_resolve
@@ -272,6 +320,17 @@ for symbol in _darwin_art_bionic_malloc_result _darwin_art_bionic_free \
               _darwin_art_bionic_stdio_fwrite_core \
               _darwin_art_bionic_scanf_resolve \
               _darwin_art_bionic_sscanf _darwin_art_bionic_vsscanf \
+              _darwin_art_bionic_swprintf_resolve \
+              _darwin_art_bionic_swprintf \
+              _darwin_art_aosp_gdtoa \
+              _darwin_art_bionic_ioctl_resolve \
+              _darwin_art_bionic_ioctl_activate \
+              _darwin_art_bionic_ioctl_deactivate \
+              _darwin_art_bionic_ioctl \
+              _darwin_art_bionic_strftime_resolve \
+              _darwin_art_bionic_strftime_activate \
+              _darwin_art_bionic_strftime_deactivate \
+              _darwin_art_bionic_strftime_l \
               _darwin_art_bionic_wide_stdio_resolve \
               _darwin_art_bionic_fputwc _darwin_art_bionic_getwc \
               _darwin_art_bionic_ungetwc \
@@ -292,4 +351,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=25 bind_builtins=sealed routes=174 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=28 bind_builtins=sealed routes=177 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'

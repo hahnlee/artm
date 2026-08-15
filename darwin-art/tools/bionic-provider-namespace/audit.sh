@@ -39,16 +39,16 @@ for generated in ownership.tsv unsupported-libc.tsv ownership.inc unsupported.in
     fail "generated $generated drift"
 done
 
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 155 ]] ||
-  fail 'expected 155 libc owners'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 158 ]] ||
+  fail 'expected 158 libc owners'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libdl.so"{n++}END{print n+0}')" == 1 ]] ||
   fail 'expected one libdl owner'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="liblog.so"{n++}END{print n+0}')" == 18 ]] ||
   fail 'expected 18 liblog owners'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | cut -f1,2 | sort | uniq -d | wc -l | tr -d ' ')" == 0 ]] ||
   fail 'duplicate SONAME/symbol owners'
-[[ "$(tail -n +2 "$here/generated/unsupported-libc.tsv" | wc -l | tr -d ' ')" == 4 ]] ||
-  fail 'expected 4 exact unsupported imports'
+[[ "$(tail -n +2 "$here/generated/unsupported-libc.tsv" | wc -l | tr -d ' ')" == 1 ]] ||
+  fail 'expected one exact unsupported import'
 
 if rg -n '\b(dlopen|dlsym|dlvsym|NSLookupSymbolInImage|_dyld_)\b' \
     "$here/src" "$here/include"; then
@@ -80,6 +80,7 @@ _darwin_art_bionic_float_conversion_resolve
 _darwin_art_bionic_format_resolve
 _darwin_art_bionic_formatted_stdio_resolve
 _darwin_art_bionic_fs_resolve
+_darwin_art_bionic_ioctl_resolve
 _darwin_art_bionic_libc_leaf_resolve
 _darwin_art_bionic_locale_resolve
 _darwin_art_bionic_namespace_bind
@@ -89,6 +90,8 @@ _darwin_art_bionic_pthread_resolve
 _darwin_art_bionic_scanf_resolve
 _darwin_art_bionic_stdio_resolve
 _darwin_art_bionic_strerror_resolve
+_darwin_art_bionic_strftime_resolve
+_darwin_art_bionic_swprintf_resolve
 _darwin_art_bionic_syscall_resolve
 _darwin_art_bionic_syslog_resolve
 _darwin_art_bionic_time_resolve
@@ -121,4 +124,4 @@ if grep -E '(_dlopen|_dlsym|_dlvsym|_NSLookupSymbolInImage|__dyld_)' <<<"$undefi
   fail 'host loader undefined reference present'
 fi
 
-echo 'bionic-provider-namespace: PASS libc-family=156/160 liblog=18 owned=174 unsupported=4 duplicate-owner=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'
+echo 'bionic-provider-namespace: PASS libc-family=159/160 liblog=18 owned=177 unsupported=1 duplicate-owner=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'

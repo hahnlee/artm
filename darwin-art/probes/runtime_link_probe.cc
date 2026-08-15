@@ -1436,7 +1436,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       return 42;
     }
     std::cout << "ART Android ELF JNI: graph=child-first+relocated "
-                 "providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf "
+                 "providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+"
+                 "swprintf+ioctl+strftime "
                  "load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all "
                  "nativeUsesEnv=current stack-repack=ok\n"
               << std::flush;

@@ -37,6 +37,7 @@ libc.so	getc	LIBC	stdio
 libc.so	getcwd	LIBC	filesystem
 libc.so	getenv	LIBC	process-state
 libc.so	getwc	LIBC	wide-stdio
+libc.so	ioctl	LIBC	ioctl
 libc.so	isatty	LIBC	filesystem
 libc.so	iswalpha_l	LIBC	locale
 libc.so	iswblank_l	LIBC	locale
@@ -110,6 +111,7 @@ libc.so	statvfs	LIBC	filesystem
 libc.so	strcmp	LIBC	leaf
 libc.so	strcoll_l	LIBC	locale
 libc.so	strerror_r	LIBC	strerror
+libc.so	strftime_l	LIBC	strftime
 libc.so	strlen	LIBC	leaf
 libc.so	strncmp	LIBC	leaf
 libc.so	strtod	LIBC	float-conversion
@@ -123,6 +125,7 @@ libc.so	strtoul	LIBC	numeric
 libc.so	strtoull	LIBC	numeric
 libc.so	strtoull_l	LIBC	numeric
 libc.so	strxfrm_l	LIBC	locale
+libc.so	swprintf	LIBC	swprintf
 libc.so	symlink	LIBC	filesystem
 libc.so	syscall	LIBC	syscall
 libc.so	sysconf	LIBC	time

@@ -147,7 +147,7 @@ else
 fi
 grep -E 'R_AARCH64_JUMP_SLOT.*(DarwinArtFixtureChildValue|darwin_art_fixture_record_lifecycle)' \
   "$relocations" >/dev/null || fail "graph imports did not produce eager PLT relocations"
-for symbol in __errno close open read sscanf strlen vsscanf; do
+for symbol in __errno close ioctl open read sscanf strftime_l strlen swprintf vsscanf; do
   grep -E "R_AARCH64_JUMP_SLOT.*${symbol}" "$relocations" >/dev/null ||
     fail "Bionic provider relocation missing: $symbol"
 done
@@ -242,4 +242,4 @@ identity="$stage/darwin_art_elf_jni_fixture_identity.h"
   echo '#endif'
 } > "$identity"
 cp "$identity" "$generated_dir/darwin_art_elf_jni_fixture_identity.h"
-echo "android-elf-jni-fixture: PASS graph=root+child+grandchild+virtual-provider+libc ctor=child-first cxa=root-first-before-fini fini=root-first bionic=__errno+strlen+open+read+close+sscanf+vsscanf+__cxa_atexit random=ctor scanf=binary128+va_list32 dso-handle=local exports=JNI_OnLoad+JNI_OnUnload relro=0 tls=0 register=GetEnv+FindClass+RegisterNatives methods=8(register+spill+env+narrow+returns) pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) root_size=$fixture_size root_sha256=$fixture_sha child_size=$child_size child_sha256=$child_sha grandchild_size=$grandchild_size grandchild_sha256=$grandchild_sha"
+echo "android-elf-jni-fixture: PASS graph=root+child+grandchild+virtual-provider+libc ctor=child-first cxa=root-first-before-fini fini=root-first bionic=__errno+strlen+open+read+close+sscanf+vsscanf+swprintf+ioctl+strftime_l+__cxa_atexit random=ctor ioctl=RNDGETENTCNT scanf=binary128+va_list32 swprintf=Android-wchar32 strftime=UTC dso-handle=local exports=JNI_OnLoad+JNI_OnUnload relro=0 tls=0 register=GetEnv+FindClass+RegisterNatives methods=8(register+spill+env+narrow+returns) pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) root_size=$fixture_size root_sha256=$fixture_sha child_size=$child_size child_sha256=$child_sha grandchild_size=$grandchild_size grandchild_sha256=$grandchild_sha"

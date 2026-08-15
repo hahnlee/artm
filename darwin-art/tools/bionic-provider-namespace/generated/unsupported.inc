@@ -1,4 +1,1 @@
-    {"ioctl", 'B', "linux-request-constants-varargs"},
     {"sendfile", 'B', "off_t-kernel-errno"},
-    {"strftime_l", 'C', "locale-owned-state"},
-    {"swprintf", 'B', "wide-varargs-long-double"},

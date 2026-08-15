@@ -88,6 +88,21 @@ extern "C" void *darwin_art_bionic_scanf_resolve(
   return Triple(DARWIN_ART_BIONIC_PROVIDER_SCANF, "libc.so", soname, symbol,
                 version);
 }
+extern "C" void *darwin_art_bionic_swprintf_resolve(
+    const char *soname, const char *symbol, const char *version) {
+  return Triple(DARWIN_ART_BIONIC_PROVIDER_SWPRINTF, "libc.so", soname,
+                symbol, version);
+}
+extern "C" void *darwin_art_bionic_ioctl_resolve(
+    const char *soname, const char *symbol, const char *version) {
+  return Triple(DARWIN_ART_BIONIC_PROVIDER_IOCTL, "libc.so", soname, symbol,
+                version);
+}
+extern "C" void *darwin_art_bionic_strftime_resolve(
+    const char *soname, const char *symbol, const char *version) {
+  return Triple(DARWIN_ART_BIONIC_PROVIDER_STRFTIME, "libc.so", soname,
+                symbol, version);
+}
 extern "C" void *darwin_art_bionic_locale_resolve(const char *soname,
                                                   const char *symbol,
                                                   const char *version) {
@@ -176,7 +191,7 @@ int main() {
   }
   constexpr size_t kExpectedCalls[] = {11, 4,  1,  29, 3, 24, 3, 1, 13, 31, 6,
                                        2,  3,  1,  4,  2, 18, 2, 2, 3,  2, 1,
-                                       3, 3, 2};
+                                       3, 3, 2, 1, 1, 1};
   for (size_t index = 0; index < calls.size(); ++index) {
     if (calls[index] != kExpectedCalls[index])
       return 12;
@@ -185,7 +200,7 @@ int main() {
       DARWIN_ART_BIONIC_NAMESPACE_OK)
     return 13;
   darwin_art_bionic_namespace_destroy(instance);
-  std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=25 "
-                       "routes=174 libdl-soname=exact\n");
+  std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=28 "
+                       "routes=177 libdl-soname=exact\n");
   return 0;
 }

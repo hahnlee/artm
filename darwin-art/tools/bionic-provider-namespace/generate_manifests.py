@@ -59,6 +59,15 @@ def main() -> int:
     claims += [(name, "scanf") for name in names(
         "tools/bionic-scanf-facade/manifests/imports.tsv"
     )]
+    claims += [(name, "swprintf") for name in names(
+        "tools/bionic-swprintf-facade/manifests/imports.tsv"
+    )]
+    claims += [(name, "ioctl") for name in names(
+        "tools/bionic-ioctl-facade/manifests/imports.tsv"
+    )]
+    claims += [(name, "strftime") for name in names(
+        "tools/bionic-strftime-facade/manifests/imports.tsv"
+    )]
     claims += [(name, "locale") for name in names(
         "tools/bionic-locale-facade/manifests/imports.tsv"
     )]
@@ -118,6 +127,9 @@ def main() -> int:
         "stdio": "DARWIN_ART_BIONIC_PROVIDER_STDIO",
         "wide-stdio": "DARWIN_ART_BIONIC_PROVIDER_WIDE_STDIO",
         "scanf": "DARWIN_ART_BIONIC_PROVIDER_SCANF",
+        "swprintf": "DARWIN_ART_BIONIC_PROVIDER_SWPRINTF",
+        "ioctl": "DARWIN_ART_BIONIC_PROVIDER_IOCTL",
+        "strftime": "DARWIN_ART_BIONIC_PROVIDER_STRFTIME",
         "locale": "DARWIN_ART_BIONIC_PROVIDER_LOCALE",
         "numeric": "DARWIN_ART_BIONIC_PROVIDER_NUMERIC",
         "float-conversion": "DARWIN_ART_BIONIC_PROVIDER_FLOAT_CONVERSION",
@@ -142,7 +154,7 @@ def main() -> int:
         (symbol, row["category"], row["rationale"])
         for symbol, row in universe.items() if symbol not in claimed
     )
-    if len(universe) != 160 or len(claimed) != 156 or len(unsupported) != 4:
+    if len(universe) != 160 or len(claimed) != 159 or len(unsupported) != 1:
         raise SystemExit(
             f"coverage drift: universe={len(universe)} owned={len(claimed)} "
             f"unsupported={len(unsupported)}"

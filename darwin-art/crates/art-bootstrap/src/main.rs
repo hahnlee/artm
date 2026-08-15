@@ -3106,9 +3106,14 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
                 .arg("-I")
                 .arg(root.join("tools/bionic-fs-facade/include"))
                 .arg("-I")
+                .arg(root.join("tools/bionic-sendfile-facade/include"))
+                .arg("-I")
                 .arg(root.join("tools/bionic-stdio-facade/include"))
                 .arg("-I")
                 .arg(root.join("tools/bionic-ioctl-facade/include"));
+            adapter_command
+                .arg("-I")
+                .arg(root.join("tools/bionic-strftime-facade/include"));
         }
         adapter_command
             .arg("-idirafter")
@@ -3410,6 +3415,14 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             "darwin_art_bionic_scanf_resolve",
             "darwin_art_bionic_sscanf",
             "darwin_art_bionic_vsscanf",
+            "darwin_art_bionic_swprintf_resolve",
+            "darwin_art_bionic_swprintf",
+            "darwin_art_bionic_ioctl_resolve",
+            "darwin_art_bionic_ioctl_activate",
+            "darwin_art_bionic_ioctl_deactivate",
+            "darwin_art_bionic_strftime_resolve",
+            "darwin_art_bionic_strftime_activate",
+            "darwin_art_bionic_strftime_deactivate",
             "darwin_art_bionic_wide_stdio_resolve",
             "darwin_art_bionic_fputwc",
             "darwin_art_bionic_getwc",
@@ -3827,6 +3840,14 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         "darwin_art_bionic_scanf_resolve",
         "darwin_art_bionic_sscanf",
         "darwin_art_bionic_vsscanf",
+        "darwin_art_bionic_swprintf_resolve",
+        "darwin_art_bionic_swprintf",
+        "darwin_art_bionic_ioctl_resolve",
+        "darwin_art_bionic_ioctl_activate",
+        "darwin_art_bionic_ioctl_deactivate",
+        "darwin_art_bionic_strftime_resolve",
+        "darwin_art_bionic_strftime_activate",
+        "darwin_art_bionic_strftime_deactivate",
         "darwin_art_bionic_wide_stdio_resolve",
         "darwin_art_bionic_fputwc",
         "darwin_art_bionic_getwc",
@@ -4043,7 +4064,7 @@ fn probe_runtime_dex_flavor(
     let output = command_output(&mut command)?;
     let expected = if elf_jni {
         "Hello from Darwin ART main: 안녕\n\
-         ART Android ELF JNI: graph=child-first+relocated providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
+         ART Android ELF JNI: graph=child-first+relocated providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+swprintf+ioctl+strftime load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
          ART Darwin Runtime::Create: ok\n\
          ART Darwin app ClassLoader: PathClassLoader\n\
          ART Darwin DEX interpreter: Hello.answer()=42\n\
