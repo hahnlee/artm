@@ -8,12 +8,16 @@ created.
 
 The initial Darwin capability slice implements real `open`, `fstat`,
 `readBytes`, `writeBytes`, `close`, `mmap`, `munmap`, `sysconf`, `getenv`,
-`getpwuid`, `stat`, `uname`, `strerror`, and `strsignal` behavior, the complete
-four-method fdsan family, plus all seven upstream
-CriticalNative identity calls. Android/Linux open and mmap flags are translated
-explicitly. Every remaining method is present in the registrar and fails with
-`android.system.ErrnoException(ENOTSUP)` through a generated per-method wrapper;
-it never reports fake success. Further POSIX methods should move from that
+`getpwuid`, `stat`, `lseek`, `uname`, `strerror`, and `strsignal` behavior, the
+complete four-method fdsan family, plus all seven upstream
+CriticalNative identity calls. Android/Linux open and mmap flags and the three
+Android `SEEK_SET`/`SEEK_CUR`/`SEEK_END` values are translated explicitly.
+`lseek` preserves signed 64-bit offsets, retries `EINTR`, maps Darwin errno back
+to Android errno, and leaves impossible positions to Darwin libc's
+`EOVERFLOW`/`EINVAL` contract. Every remaining method is present in the
+registrar and fails with `android.system.ErrnoException(ENOTSUP)` through a
+generated per-method wrapper; it never reports fake success. Further POSIX
+methods should move from that
 capability-failure set to real Darwin implementations by whole behavioral
 families (filesystem, sockets, process, xattr), while Linux-only calls retain an
 explicit `ENOTSUP` contract.
@@ -28,7 +32,9 @@ that each call throws `android.system.ErrnoException(ENOTSUP)` across the real
 Apple arm64 managed/native ABI.
 
 The managed gate also checks a real environment lookup, a temporary-file
-write/stat size roundtrip, and the Android compatibility projection returned by
+write/stat size roundtrip, RandomAccessFile-style set/current/end seeks, a
+ZIP-like end-record read, 64-bit offset preservation and overflow, and the
+Android compatibility projection returned by
 `uname`. It additionally verifies that `strerror(EINVAL)` and
 `strsignal(SIGTERM)` return non-empty Darwin libc descriptions through their
 exact upstream JNI signatures. Darwin's XSI `strerror_r` and `strsignal_r`

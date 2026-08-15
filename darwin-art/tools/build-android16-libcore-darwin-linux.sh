@@ -130,7 +130,8 @@ my %supported = (
   mmap => 'DarwinLinuxMmap', munmap => 'DarwinLinuxMunmap',
   sysconf => 'DarwinLinuxSysconf',
   getenv => 'DarwinLinuxGetenv', getpwuid => 'DarwinLinuxGetpwuid',
-  stat => 'DarwinLinuxStat', uname => 'DarwinLinuxUname',
+  stat => 'DarwinLinuxStat', lseek => 'DarwinLinuxLseek',
+  uname => 'DarwinLinuxUname',
   strerror => 'DarwinLinuxStrerror', strsignal => 'DarwinLinuxStrsignal',
   android_fdsan_exchange_owner_tag => 'DarwinLinuxFdsanExchangeOwnerTag',
   android_fdsan_get_owner_tag => 'DarwinLinuxFdsanGetOwnerTag',
@@ -365,6 +366,13 @@ public final class LibcoreDarwinAbiSmoke {
     private native StructUtsname unameView() throws ErrnoException;
     private native String errorMessage(int errorNumber);
     private native String signalMessage(int signalNumber);
+    private native FileDescriptor openFile(String path, int flags, int mode)
+            throws ErrnoException;
+    private native long seekFile(FileDescriptor fd, long offset, int whence)
+            throws ErrnoException;
+    private native int readFile(FileDescriptor fd, Object bytes, int offset, int count)
+            throws ErrnoException;
+    private native void closeFile(FileDescriptor fd) throws ErrnoException;
     private static native void exchangeOwnerTag(FileDescriptor fd, long expected, long replacement);
     private static native long getOwnerTag(FileDescriptor fd);
     private static native String getTagType(long tag);
@@ -381,6 +389,18 @@ public final class LibcoreDarwinAbiSmoke {
         } catch (ErrnoException expected) {
             if (expected.errno != 95) {
                 throw new AssertionError(shorty + " errno=" + expected.errno, expected);
+            }
+        }
+    }
+
+    private static void expectErrno(int errno, String operation, Invocation invocation)
+            throws Exception {
+        try {
+            invocation.run();
+            throw new AssertionError(operation + " unexpectedly succeeded");
+        } catch (ErrnoException expected) {
+            if (expected.errno != errno) {
+                throw new AssertionError(operation + " errno=" + expected.errno, expected);
             }
         }
     }
@@ -405,13 +425,48 @@ public final class LibcoreDarwinAbiSmoke {
         if (!"present".equals(environment)) {
             throw new AssertionError("getenv=" + environment);
         }
-        byte[] payload = "darwin-libcore-write".getBytes(StandardCharsets.UTF_8);
+        byte[] payload = "PK\u0003\u0004darwin-libcore-writePK\u0005\u0006"
+                .getBytes(StandardCharsets.ISO_8859_1);
         File temporary = File.createTempFile("darwin-art-libcore-", ".tmp");
         try {
             int written = smoke.writeFile(temporary.getAbsolutePath(), payload);
             StructStat status = smoke.statPath(temporary.getAbsolutePath());
             if (written != payload.length || status == null || status.st_size != payload.length) {
                 throw new AssertionError("write/stat roundtrip failed");
+            }
+            FileDescriptor randomAccess = smoke.openFile(temporary.getAbsolutePath(), 0, 0);
+            try {
+                if (smoke.seekFile(randomAccess, 4L, 0) != 4L) {
+                    throw new AssertionError("SEEK_SET failed");
+                }
+                byte[] middle = new byte[6];
+                if (smoke.readFile(randomAccess, middle, 0, middle.length) != middle.length
+                        || !"darwin".equals(new String(
+                                middle, StandardCharsets.ISO_8859_1))) {
+                    throw new AssertionError("RandomAccessFile-style seek/read failed");
+                }
+                if (smoke.seekFile(randomAccess, -4L, 2) != payload.length - 4L) {
+                    throw new AssertionError("SEEK_END failed");
+                }
+                byte[] endRecord = new byte[4];
+                if (smoke.readFile(randomAccess, endRecord, 0, endRecord.length)
+                                != endRecord.length
+                        || endRecord[0] != 'P' || endRecord[1] != 'K'
+                        || endRecord[2] != 5 || endRecord[3] != 6) {
+                    throw new AssertionError("zip end-record seek failed");
+                }
+                if (smoke.seekFile(randomAccess, -2L, 1) != payload.length - 2L) {
+                    throw new AssertionError("SEEK_CUR failed");
+                }
+                if (smoke.seekFile(randomAccess, Long.MAX_VALUE, 0) != Long.MAX_VALUE) {
+                    throw new AssertionError("64-bit offset narrowed");
+                }
+                expectErrno(75, "lseek overflow",
+                        () -> smoke.seekFile(randomAccess, 1L, 1));
+                expectErrno(22, "lseek whence",
+                        () -> smoke.seekFile(randomAccess, 0L, 99));
+            } finally {
+                smoke.closeFile(randomAccess);
             }
         } finally {
             temporary.delete();
@@ -435,7 +490,8 @@ public final class LibcoreDarwinAbiSmoke {
             throw new AssertionError("non-Bionic fdsan contract failed");
         }
         System.out.println("managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP)"
-                + " strerror(EINVAL)=pass strsignal(SIGTERM)=pass fdsan=non-Bionic"
+                + " lseek=set/cur/end+zip+overflow strerror(EINVAL)=pass"
+                + " strsignal(SIGTERM)=pass fdsan=non-Bionic"
                 + " processors=" + processors);
     }
 }
@@ -449,7 +505,7 @@ javac --release 17 -encoding UTF-8 -d "$java_classes" \
 managed_abi_output="$(DARWIN_ART_MANAGED_SMOKE=present java -cp "$java_classes" \
   dev.darwinart.probe.LibcoreDarwinAbiSmoke "$abi_library")"
 [[ "$managed_abi_output" == \
-   'managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP) strerror(EINVAL)=pass strsignal(SIGTERM)=pass fdsan=non-Bionic processors='* ]] ||
+   'managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP) lseek=set/cur/end+zip+overflow strerror(EINVAL)=pass strsignal(SIGTERM)=pass fdsan=non-Bionic processors='* ]] ||
   fail "managed ABI smoke output mismatch: $managed_abi_output"
 managed_processors="${managed_abi_output##*=}"
 [[ "$managed_processors" =~ ^[1-9][0-9]*$ ]] ||
@@ -460,4 +516,4 @@ mkdir -p "$build_dir"
 cp "$archive" "$build_dir/libcore-darwin-linux.a"
 cp "$smoke" "$build_dir/libcore-darwin-linux-smoke"
 
-echo "libcore-darwin-linux: methods=$method_count regular=$supported_regular critical=$supported_critical enotsup=$unsupported_count fixed-abi=$unsupported_count managed=V/I/J/L/Z+getenv/stat/write/uname/strerror/strsignal/fdsan managed-processors=$managed_processors archive=Mach-O-arm64 $smoke_output"
+echo "libcore-darwin-linux: methods=$method_count regular=$supported_regular critical=$supported_critical enotsup=$unsupported_count fixed-abi=$unsupported_count managed=V/I/J/L/Z+getenv/stat/write/lseek/uname/strerror/strsignal/fdsan managed-processors=$managed_processors archive=Mach-O-arm64 $smoke_output"

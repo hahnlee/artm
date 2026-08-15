@@ -31,6 +31,28 @@ constexpr int kLinuxMapShared = 0x01;
 constexpr int kLinuxMapPrivate = 0x02;
 constexpr int kLinuxMapFixed = 0x10;
 constexpr int kLinuxMapAnonymous = 0x20;
+constexpr int kAndroidSeekSet = 0;
+constexpr int kAndroidSeekCur = 1;
+constexpr int kAndroidSeekEnd = 2;
+
+bool DarwinWhenceFromAndroid(int android_whence, int* darwin_whence) {
+  if (darwin_whence == nullptr) {
+    return false;
+  }
+  switch (android_whence) {
+    case kAndroidSeekSet:
+      *darwin_whence = SEEK_SET;
+      return true;
+    case kAndroidSeekCur:
+      *darwin_whence = SEEK_CUR;
+      return true;
+    case kAndroidSeekEnd:
+      *darwin_whence = SEEK_END;
+      return true;
+    default:
+      return false;
+  }
+}
 
 int TranslateMmapFlags(int linux_flags) {
   int remaining = linux_flags;
@@ -550,6 +572,18 @@ jint DarwinLinuxReadBytes(JNIEnv* env, jobject, jobject java_fd,
   return static_cast<jint>(result);
 }
 
+jlong DarwinLinuxLseek(JNIEnv* env, jobject, jobject java_fd, jlong offset,
+                       jint whence) {
+  const int64_t result =
+      Lseek(jniGetFDFromFileDescriptor(env, java_fd),
+            static_cast<int64_t>(offset), whence);
+  if (result == -1) {
+    ThrowErrno(env, "lseek", errno);
+    return -1;
+  }
+  return static_cast<jlong>(result);
+}
+
 jlong DarwinLinuxMmap(JNIEnv* env, jobject, jlong address, jlong byte_count,
                       jint prot, jint flags, jobject java_fd, jlong offset) {
   if (byte_count < 0 || offset < 0 ||
@@ -631,6 +665,18 @@ JNINativeMethod kAbiSmokeMethods[] = {
     {const_cast<char*>("signalMessage"),
      const_cast<char*>("(I)Ljava/lang/String;"),
      reinterpret_cast<void*>(&AbiSmokeStrsignal)},
+    {const_cast<char*>("openFile"),
+     const_cast<char*>("(Ljava/lang/String;II)Ljava/io/FileDescriptor;"),
+     reinterpret_cast<void*>(&DarwinLinuxOpen)},
+    {const_cast<char*>("seekFile"),
+     const_cast<char*>("(Ljava/io/FileDescriptor;JI)J"),
+     reinterpret_cast<void*>(&DarwinLinuxLseek)},
+    {const_cast<char*>("readFile"),
+     const_cast<char*>("(Ljava/io/FileDescriptor;Ljava/lang/Object;II)I"),
+     reinterpret_cast<void*>(&DarwinLinuxReadBytes)},
+    {const_cast<char*>("closeFile"),
+     const_cast<char*>("(Ljava/io/FileDescriptor;)V"),
+     reinterpret_cast<void*>(&DarwinLinuxClose)},
     {const_cast<char*>("exchangeOwnerTag"),
      const_cast<char*>("(Ljava/io/FileDescriptor;JJ)V"),
      reinterpret_cast<void*>(&DarwinLinuxFdsanExchangeOwnerTag)},
@@ -713,6 +759,29 @@ int Stat(const char* path, struct stat* status) {
     result = stat(path, status);
   } while (result == -1 && errno == EINTR);
   return result;
+}
+
+int64_t Lseek(int fd, int64_t offset, int android_whence) {
+  int darwin_whence = 0;
+  if (!DarwinWhenceFromAndroid(android_whence, &darwin_whence)) {
+    errno = EINVAL;
+    return -1;
+  }
+  const off_t darwin_offset = static_cast<off_t>(offset);
+  if (static_cast<int64_t>(darwin_offset) != offset) {
+    errno = EOVERFLOW;
+    return -1;
+  }
+  off_t result;
+  do {
+    result = lseek(fd, darwin_offset, darwin_whence);
+  } while (result == static_cast<off_t>(-1) && errno == EINTR);
+  if (result != static_cast<off_t>(-1) &&
+      static_cast<off_t>(static_cast<int64_t>(result)) != result) {
+    errno = EOVERFLOW;
+    return -1;
+  }
+  return static_cast<int64_t>(result);
 }
 
 void* Mmap(void* address, size_t byte_count, int linux_prot,

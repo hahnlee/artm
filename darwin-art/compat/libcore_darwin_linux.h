@@ -6,6 +6,7 @@
 #include <sys/types.h>
 
 #include <cstddef>
+#include <cstdint>
 
 namespace darwin_art::libcore_darwin {
 
@@ -17,6 +18,7 @@ ssize_t Read(int fd, void* bytes, size_t byte_count);
 ssize_t Write(int fd, const void* bytes, size_t byte_count);
 int Fstat(int fd, struct stat* status);
 int Stat(const char* path, struct stat* status);
+int64_t Lseek(int fd, int64_t offset, int android_whence);
 void* Mmap(void* address, size_t byte_count, int linux_prot,
            int linux_flags, int fd, off_t offset);
 int Munmap(void* address, size_t byte_count);

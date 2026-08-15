@@ -63,6 +63,34 @@ int main(int argc, char** argv) {
                  std::strerror(errno));
     return 7;
   }
+  if (darwin_art::libcore_darwin::Lseek(fd, 0, 0) != 0) {
+    std::fprintf(stderr, "lseek(SEEK_SET): %s\n", std::strerror(errno));
+    return 12;
+  }
+  std::array<unsigned char, 64> replay {};
+  if (darwin_art::libcore_darwin::Read(fd, replay.data(), replay.size()) !=
+          static_cast<ssize_t>(replay.size()) ||
+      replay != prefix) {
+    std::fprintf(stderr, "lseek/read replay mismatch\n");
+    return 13;
+  }
+  const int64_t tail_position = darwin_art::libcore_darwin::Lseek(fd, -16, 2);
+  if (tail_position != static_cast<int64_t>(status.st_size) - 16) {
+    std::fprintf(stderr, "lseek(SEEK_END): result=%lld errno=%s\n",
+                 static_cast<long long>(tail_position), std::strerror(errno));
+    return 14;
+  }
+  std::array<unsigned char, 16> tail {};
+  if (darwin_art::libcore_darwin::Read(fd, tail.data(), tail.size()) !=
+      static_cast<ssize_t>(tail.size())) {
+    std::fprintf(stderr, "tail read: %s\n", std::strerror(errno));
+    return 15;
+  }
+  errno = 0;
+  if (darwin_art::libcore_darwin::Lseek(fd, 0, 99) != -1 || errno != EINVAL) {
+    std::fprintf(stderr, "invalid lseek whence did not fail with EINVAL\n");
+    return 16;
+  }
   void* mapping = darwin_art::libcore_darwin::Mmap(
       nullptr, static_cast<size_t>(status.st_size), 1, 1, fd, 0);
   if (mapping == MAP_FAILED) {
@@ -85,7 +113,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "read/mmap hash mismatch\n");
     return 11;
   }
-  std::printf("libcore-darwin-linux: processors=%ld bytes=%lld prefix-hash=%016llx\n",
+  std::printf("libcore-darwin-linux: processors=%ld bytes=%lld prefix-hash=%016llx seek=pass\n",
               processors,
               static_cast<long long>(status.st_size),
               static_cast<unsigned long long>(prefix_hash));
