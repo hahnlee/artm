@@ -128,6 +128,10 @@ my %supported = (
   open => 'DarwinLinuxOpen', fstat => 'DarwinLinuxFstat',
   readBytes => 'DarwinLinuxReadBytes', close => 'DarwinLinuxClose',
   mmap => 'DarwinLinuxMmap', munmap => 'DarwinLinuxMunmap',
+  sysconf => 'DarwinLinuxSysconf',
+  getenv => 'DarwinLinuxGetenv', getpwuid => 'DarwinLinuxGetpwuid',
+  stat => 'DarwinLinuxStat', uname => 'DarwinLinuxUname',
+  writeBytes => 'DarwinLinuxWriteBytes',
 );
 my ($index, $regular_count, $critical_count, $unsupported_count) = (0, 0, 0, 0);
 while (my $line = <$input>) {
@@ -195,7 +199,7 @@ for expected in \
   $'chmod\t(Ljava/lang/String;I)V\tvoid\tJNIEnv* env,jobject,jstring,jint' \
   $'fcntlInt\t(Ljava/io/FileDescriptor;II)I\tjint\tJNIEnv* env,jobject,jobject,jint,jint' \
   $'android_fdsan_get_owner_tag\t(Ljava/io/FileDescriptor;)J\tjlong\tJNIEnv* env,jobject,jobject' \
-  $'getenv\t(Ljava/lang/String;)Ljava/lang/String;\tjstring\tJNIEnv* env,jobject,jstring' \
+  $'gai_strerror\t(I)Ljava/lang/String;\tjstring\tJNIEnv* env,jobject,jint' \
   $'access\t(Ljava/lang/String;I)Z\tjboolean\tJNIEnv* env,jobject,jstring,jint'; do
   grep -F "$expected" "$abi_manifest" >/dev/null ||
     fail "representative fixed ABI missing: $expected"
@@ -270,6 +274,46 @@ java_sources="$stage/java-sources"
 java_classes="$stage/java-classes"
 mkdir -p "$java_sources/android/system" "$java_sources/dev/darwinart/probe" \
   "$java_classes"
+cat > "$java_sources/android/system/StructTimespec.java" <<'JAVA'
+package android.system;
+
+public final class StructTimespec {
+    public final long tv_sec;
+    public final long tv_nsec;
+
+    public StructTimespec(long seconds, long nanoseconds) {
+        tv_sec = seconds;
+        tv_nsec = nanoseconds;
+    }
+}
+JAVA
+cat > "$java_sources/android/system/StructStat.java" <<'JAVA'
+package android.system;
+
+public final class StructStat {
+    public final long st_size;
+
+    public StructStat(long device, long inode, int mode, long links, int uid, int gid,
+            long rdev, long size, StructTimespec atime, StructTimespec mtime,
+            StructTimespec ctime, long blockSize, long blocks) {
+        st_size = size;
+    }
+}
+JAVA
+cat > "$java_sources/android/system/StructUtsname.java" <<'JAVA'
+package android.system;
+
+public final class StructUtsname {
+    public final String sysname;
+    public final String machine;
+
+    public StructUtsname(String sysname, String nodename, String release,
+            String version, String machine) {
+        this.sysname = sysname;
+        this.machine = machine;
+    }
+}
+JAVA
 cat > "$java_sources/android/system/ErrnoException.java" <<'JAVA'
 package android.system;
 
@@ -286,7 +330,11 @@ cat > "$java_sources/dev/darwinart/probe/LibcoreDarwinAbiSmoke.java" <<'JAVA'
 package dev.darwinart.probe;
 
 import android.system.ErrnoException;
+import android.system.StructStat;
+import android.system.StructUtsname;
+import java.io.File;
 import java.io.FileDescriptor;
+import java.nio.charset.StandardCharsets;
 
 public final class LibcoreDarwinAbiSmoke {
     private native void unsupportedVoid(String value, int number) throws ErrnoException;
@@ -295,6 +343,11 @@ public final class LibcoreDarwinAbiSmoke {
     private native long unsupportedLong(FileDescriptor fd) throws ErrnoException;
     private native String unsupportedObject(String value) throws ErrnoException;
     private native boolean unsupportedBoolean(String value, int number) throws ErrnoException;
+    private native long availableProcessors() throws ErrnoException;
+    private native String environment(String name) throws ErrnoException;
+    private native StructStat statPath(String path) throws ErrnoException;
+    private native int writeFile(String path, byte[] bytes) throws ErrnoException;
+    private native StructUtsname unameView() throws ErrnoException;
 
     private interface Invocation {
         void run() throws ErrnoException;
@@ -323,22 +376,53 @@ public final class LibcoreDarwinAbiSmoke {
         expectEnotsup("J", () -> smoke.unsupportedLong(fd));
         expectEnotsup("L", () -> smoke.unsupportedObject("o"));
         expectEnotsup("Z", () -> smoke.unsupportedBoolean("z", 4));
-        System.out.println("managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP)");
+        long processors = smoke.availableProcessors();
+        if (processors <= 0) {
+            throw new AssertionError("availableProcessors=" + processors);
+        }
+        String environment = smoke.environment("DARWIN_ART_MANAGED_SMOKE");
+        if (!"present".equals(environment)) {
+            throw new AssertionError("getenv=" + environment);
+        }
+        byte[] payload = "darwin-libcore-write".getBytes(StandardCharsets.UTF_8);
+        File temporary = File.createTempFile("darwin-art-libcore-", ".tmp");
+        try {
+            int written = smoke.writeFile(temporary.getAbsolutePath(), payload);
+            StructStat status = smoke.statPath(temporary.getAbsolutePath());
+            if (written != payload.length || status == null || status.st_size != payload.length) {
+                throw new AssertionError("write/stat roundtrip failed");
+            }
+        } finally {
+            temporary.delete();
+        }
+        StructUtsname uname = smoke.unameView();
+        if (uname == null || !"Linux".equals(uname.sysname)
+                || !"aarch64".equals(uname.machine)) {
+            throw new AssertionError("uname compatibility projection failed");
+        }
+        System.out.println("managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP) processors="
+                + processors);
     }
 }
 JAVA
 javac --release 17 -encoding UTF-8 -d "$java_classes" \
+  "$java_sources/android/system/StructTimespec.java" \
+  "$java_sources/android/system/StructStat.java" \
+  "$java_sources/android/system/StructUtsname.java" \
   "$java_sources/android/system/ErrnoException.java" \
   "$java_sources/dev/darwinart/probe/LibcoreDarwinAbiSmoke.java"
-managed_abi_output="$(java -cp "$java_classes" \
+managed_abi_output="$(DARWIN_ART_MANAGED_SMOKE=present java -cp "$java_classes" \
   dev.darwinart.probe.LibcoreDarwinAbiSmoke "$abi_library")"
 [[ "$managed_abi_output" == \
-   'managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP)' ]] ||
+   'managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP) processors='* ]] ||
   fail "managed ABI smoke output mismatch: $managed_abi_output"
+managed_processors="${managed_abi_output##*=}"
+[[ "$managed_processors" =~ ^[1-9][0-9]*$ ]] ||
+  fail "managed availableProcessors is not positive: $managed_processors"
 
 build_dir="$project_root/_build/libcore-darwin-linux"
 mkdir -p "$build_dir"
 cp "$archive" "$build_dir/libcore-darwin-linux.a"
 cp "$smoke" "$build_dir/libcore-darwin-linux-smoke"
 
-echo "libcore-darwin-linux: methods=$method_count regular=$supported_regular critical=$supported_critical enotsup=$unsupported_count fixed-abi=122 managed=V/I/J/L/Z archive=Mach-O-arm64 $smoke_output"
+echo "libcore-darwin-linux: methods=$method_count regular=$supported_regular critical=$supported_critical enotsup=$unsupported_count fixed-abi=$unsupported_count managed=V/I/J/L/Z+getenv/stat/write/uname managed-processors=$managed_processors archive=Mach-O-arm64 $smoke_output"

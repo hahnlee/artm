@@ -2,12 +2,16 @@
 
 #include <fcntl.h>
 #include <pthread.h>
+#include <pwd.h>
 #include <sys/mman.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 
 #include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
+#include <vector>
 
 #include <nativehelper/JNIHelp.h>
 #include <nativehelper/JNIPlatformHelp.h>
@@ -188,8 +192,195 @@ jobject MakeStructStat(JNIEnv* env, const struct stat& status) {
   return result;
 }
 
+jobject MakeStructPasswd(JNIEnv* env, const struct passwd& password) {
+  jclass klass = env->FindClass("android/system/StructPasswd");
+  jmethodID constructor =
+      klass == nullptr
+          ? nullptr
+          : env->GetMethodID(
+                klass, "<init>",
+                "(Ljava/lang/String;IILjava/lang/String;Ljava/lang/String;)V");
+  if (constructor == nullptr) {
+    env->DeleteLocalRef(klass);
+    return nullptr;
+  }
+  jstring name = env->NewStringUTF(password.pw_name);
+  jstring directory = env->NewStringUTF(password.pw_dir);
+  jstring shell = env->NewStringUTF(password.pw_shell);
+  jobject result =
+      name == nullptr || directory == nullptr || shell == nullptr
+          ? nullptr
+          : env->NewObject(klass, constructor, name,
+                           static_cast<jint>(password.pw_uid),
+                           static_cast<jint>(password.pw_gid), directory, shell);
+  env->DeleteLocalRef(name);
+  env->DeleteLocalRef(directory);
+  env->DeleteLocalRef(shell);
+  env->DeleteLocalRef(klass);
+  return result;
+}
+
+jobject MakeStructUtsname(JNIEnv* env, const struct utsname& host) {
+  jclass klass = env->FindClass("android/system/StructUtsname");
+  jmethodID constructor =
+      klass == nullptr
+          ? nullptr
+          : env->GetMethodID(
+                klass, "<init>",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
+                "Ljava/lang/String;Ljava/lang/String;)V");
+  if (constructor == nullptr) {
+    env->DeleteLocalRef(klass);
+    return nullptr;
+  }
+  // The compatibility environment exposes Android's kernel/ABI identity.
+  // Host release/version remain available for diagnostics without making
+  // framework ABI selection believe it is running on Darwin/x86_64.
+  jstring sysname = env->NewStringUTF("Linux");
+  jstring nodename = env->NewStringUTF(host.nodename);
+  jstring release = env->NewStringUTF(host.release);
+  jstring version = env->NewStringUTF(host.version);
+  jstring machine = env->NewStringUTF("aarch64");
+  jobject result =
+      sysname == nullptr || nodename == nullptr || release == nullptr ||
+              version == nullptr || machine == nullptr
+          ? nullptr
+          : env->NewObject(klass, constructor, sysname, nodename, release,
+                           version, machine);
+  env->DeleteLocalRef(sysname);
+  env->DeleteLocalRef(nodename);
+  env->DeleteLocalRef(release);
+  env->DeleteLocalRef(version);
+  env->DeleteLocalRef(machine);
+  env->DeleteLocalRef(klass);
+  return result;
+}
+
 void DarwinUnsupported(JNIEnv* env, const char* operation) {
   ThrowErrno(env, operation, ENOTSUP);
+}
+
+jlong DarwinLinuxSysconf(JNIEnv* env, jobject, jint name) {
+  // POSIX permits -1 with errno left at zero for an indeterminate value.
+  errno = 0;
+  const long result = Sysconf(name);
+  if (result == -1 && errno == EINVAL) {
+    ThrowErrno(env, "sysconf", errno);
+  }
+  return static_cast<jlong>(result);
+}
+
+jstring DarwinLinuxGetenv(JNIEnv* env, jobject, jstring java_name) {
+  ScopedUtfChars name(env, java_name);
+  if (name.c_str() == nullptr) {
+    return nullptr;
+  }
+  const char* value = std::getenv(name.c_str());
+  return value == nullptr ? nullptr : env->NewStringUTF(value);
+}
+
+jobject DarwinLinuxGetpwuid(JNIEnv* env, jobject, jint uid) {
+  const long configured_size = Sysconf(_SC_GETPW_R_SIZE_MAX);
+  const size_t buffer_size = configured_size > 0
+                                 ? static_cast<size_t>(configured_size)
+                                 : 1024u;
+  std::vector<char> buffer(buffer_size);
+  struct passwd password {};
+  struct passwd* result = nullptr;
+  const int error = getpwuid_r(static_cast<uid_t>(uid), &password,
+                               buffer.data(), buffer.size(), &result);
+  if (result == nullptr) {
+    ThrowErrno(env, "getpwuid_r", error);
+    return nullptr;
+  }
+  return MakeStructPasswd(env, password);
+}
+
+jobject DarwinLinuxStat(JNIEnv* env, jobject, jstring java_path) {
+  ScopedUtfChars path(env, java_path);
+  if (path.c_str() == nullptr) {
+    return nullptr;
+  }
+  struct stat status {};
+  if (Stat(path.c_str(), &status) == -1) {
+    ThrowErrno(env, "stat", errno);
+    return nullptr;
+  }
+  return MakeStructStat(env, status);
+}
+
+jobject DarwinLinuxUname(JNIEnv* env, jobject) {
+  struct utsname host {};
+  int result;
+  do {
+    result = uname(&host);
+  } while (result == -1 && errno == EINTR);
+  if (result == -1) {
+    // Matches upstream: uname failure is treated as impossible and returns
+    // null without manufacturing an ErrnoException.
+    return nullptr;
+  }
+  return MakeStructUtsname(env, host);
+}
+
+jint DarwinLinuxWriteBytes(JNIEnv* env, jobject, jobject java_fd,
+                           jobject java_bytes, jint byte_offset,
+                           jint byte_count) {
+  if (java_bytes == nullptr) {
+    jniThrowNullPointerException(env, "null byte storage");
+    return -1;
+  }
+  if (byte_offset < 0 || byte_count < 0) {
+    jniThrowException(env, "java/lang/ArrayIndexOutOfBoundsException",
+                      "negative offset or byte count");
+    return -1;
+  }
+  const void* bytes = nullptr;
+  jbyteArray array = nullptr;
+  jbyte* array_elements = nullptr;
+  jclass byte_array_class = env->FindClass("[B");
+  if (byte_array_class != nullptr &&
+      env->IsInstanceOf(java_bytes, byte_array_class)) {
+    array = static_cast<jbyteArray>(java_bytes);
+    const jsize length = env->GetArrayLength(array);
+    if (byte_offset > length || byte_count > length - byte_offset) {
+      env->DeleteLocalRef(byte_array_class);
+      jniThrowException(env, "java/lang/ArrayIndexOutOfBoundsException",
+                        "byte range exceeds array");
+      return -1;
+    }
+    array_elements = env->GetByteArrayElements(array, nullptr);
+    bytes = array_elements == nullptr
+                ? nullptr
+                : static_cast<const void*>(array_elements + byte_offset);
+  } else {
+    const jlong capacity = env->GetDirectBufferCapacity(java_bytes);
+    const void* direct = env->GetDirectBufferAddress(java_bytes);
+    if (direct == nullptr || byte_offset > capacity ||
+        byte_count > capacity - byte_offset) {
+      env->DeleteLocalRef(byte_array_class);
+      jniThrowException(env, "java/lang/IllegalArgumentException",
+                        "storage is neither byte[] nor a valid direct buffer range");
+      return -1;
+    }
+    bytes = static_cast<const char*>(direct) + byte_offset;
+  }
+  env->DeleteLocalRef(byte_array_class);
+  if (bytes == nullptr) {
+    return -1;
+  }
+  const ssize_t result =
+      Write(jniGetFDFromFileDescriptor(env, java_fd), bytes,
+            static_cast<size_t>(byte_count));
+  const int saved_errno = errno;
+  if (array_elements != nullptr) {
+    env->ReleaseByteArrayElements(array, array_elements, JNI_ABORT);
+  }
+  if (result == -1) {
+    ThrowErrno(env, "write", saved_errno);
+    return -1;
+  }
+  return static_cast<jint>(result);
 }
 
 #if defined(DARWIN_LIBCORE_LINUX_MANAGED_ABI_SMOKE)
@@ -211,6 +402,36 @@ jobject AbiSmokeObject(JNIEnv* env, jobject, jstring) {
 jboolean AbiSmokeBoolean(JNIEnv* env, jobject, jstring, jint) {
   DarwinUnsupported(env, "abi.boolean");
   return JNI_FALSE;
+}
+jlong AbiSmokeAvailableProcessors(JNIEnv* env, jobject receiver) {
+  return DarwinLinuxSysconf(env, receiver, _SC_NPROCESSORS_CONF);
+}
+jint AbiSmokeWriteFile(JNIEnv* env, jobject, jstring java_path,
+                       jbyteArray java_bytes) {
+  ScopedUtfChars path(env, java_path);
+  if (path.c_str() == nullptr || java_bytes == nullptr) {
+    return -1;
+  }
+  jbyte* bytes = env->GetByteArrayElements(java_bytes, nullptr);
+  if (bytes == nullptr) {
+    return -1;
+  }
+  const jsize size = env->GetArrayLength(java_bytes);
+  const int fd = Open(path.c_str(), kLinuxOTrunc | kLinuxOCreat | 1, 0600);
+  const ssize_t written =
+      fd == -1 ? -1 : Write(fd, bytes, static_cast<size_t>(size));
+  struct stat status {};
+  const int stat_result = fd == -1 ? -1 : Fstat(fd, &status);
+  const int saved_errno = errno;
+  if (fd != -1) {
+    Close(fd);
+  }
+  env->ReleaseByteArrayElements(java_bytes, bytes, JNI_ABORT);
+  if (written == -1 || stat_result == -1 || status.st_size != written) {
+    ThrowErrno(env, "write", saved_errno == 0 ? EIO : saved_errno);
+    return -1;
+  }
+  return static_cast<jint>(written);
 }
 #endif
 
@@ -376,6 +597,19 @@ JNINativeMethod kAbiSmokeMethods[] = {
     {const_cast<char*>("unsupportedBoolean"),
      const_cast<char*>("(Ljava/lang/String;I)Z"),
      reinterpret_cast<void*>(&AbiSmokeBoolean)},
+    {const_cast<char*>("availableProcessors"), const_cast<char*>("()J"),
+     reinterpret_cast<void*>(&AbiSmokeAvailableProcessors)},
+    {const_cast<char*>("environment"),
+     const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
+     reinterpret_cast<void*>(&DarwinLinuxGetenv)},
+    {const_cast<char*>("statPath"),
+     const_cast<char*>("(Ljava/lang/String;)Landroid/system/StructStat;"),
+     reinterpret_cast<void*>(&DarwinLinuxStat)},
+    {const_cast<char*>("writeFile"), const_cast<char*>("(Ljava/lang/String;[B)I"),
+     reinterpret_cast<void*>(&AbiSmokeWriteFile)},
+    {const_cast<char*>("unameView"),
+     const_cast<char*>("()Landroid/system/StructUtsname;"),
+     reinterpret_cast<void*>(&DarwinLinuxUname)},
 };
 #endif
 
@@ -424,10 +658,26 @@ ssize_t Read(int fd, void* bytes, size_t byte_count) {
   return result;
 }
 
+ssize_t Write(int fd, const void* bytes, size_t byte_count) {
+  ssize_t result;
+  do {
+    result = write(fd, bytes, byte_count);
+  } while (result == -1 && errno == EINTR);
+  return result;
+}
+
 int Fstat(int fd, struct stat* status) {
   int result;
   do {
     result = fstat(fd, status);
+  } while (result == -1 && errno == EINTR);
+  return result;
+}
+
+int Stat(const char* path, struct stat* status) {
+  int result;
+  do {
+    result = stat(path, status);
   } while (result == -1 && errno == EINTR);
   return result;
 }
@@ -444,6 +694,8 @@ void* Mmap(void* address, size_t byte_count, int linux_prot,
 int Munmap(void* address, size_t byte_count) {
   return munmap(address, byte_count);
 }
+
+long Sysconf(int name) { return sysconf(name); }
 
 bool RegisterLinuxNatives(JNIEnv* env) {
   jclass klass = env->FindClass("libcore/io/Linux");

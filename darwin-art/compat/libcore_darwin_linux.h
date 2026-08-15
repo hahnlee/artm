@@ -14,10 +14,13 @@ namespace darwin_art::libcore_darwin {
 int Open(const char* path, int linux_flags, mode_t mode);
 int Close(int fd);
 ssize_t Read(int fd, void* bytes, size_t byte_count);
+ssize_t Write(int fd, const void* bytes, size_t byte_count);
 int Fstat(int fd, struct stat* status);
+int Stat(const char* path, struct stat* status);
 void* Mmap(void* address, size_t byte_count, int linux_prot,
            int linux_flags, int fd, off_t offset);
 int Munmap(void* address, size_t byte_count);
+long Sysconf(int name);
 
 // Owns the complete Android 16 libcore.io.Linux 135-entry registration table.
 // No other registrar may register a subset of this class after this succeeds.

@@ -7,7 +7,8 @@ checksum verified at build time; no full libcore checkout or Git metadata is
 created.
 
 The initial Darwin capability slice implements real `open`, `fstat`,
-`readBytes`, `close`, `mmap`, and `munmap` behavior plus all seven upstream
+`readBytes`, `writeBytes`, `close`, `mmap`, `munmap`, `sysconf`, `getenv`,
+`getpwuid`, `stat`, and `uname` behavior plus all seven upstream
 CriticalNative identity calls. Android/Linux open and mmap flags are translated
 explicitly. Every remaining method is present in the registrar and fails with
 `android.system.ErrnoException(ENOTSUP)` through a generated per-method wrapper;
@@ -24,6 +25,13 @@ checks representative generated `V`, `I`, `J`, object, and `Z` declarations,
 then loads a test dylib in OpenJDK and invokes all five return classes to verify
 that each call throws `android.system.ErrnoException(ENOTSUP)` across the real
 Apple arm64 managed/native ABI.
+
+The managed gate also checks a real environment lookup, a temporary-file
+write/stat size roundtrip, and the Android compatibility projection returned by
+`uname`. That projection deliberately reports `sysname=Linux` and
+`machine=aarch64`: framework and package ABI selection must observe the Android
+runtime contract, while Darwin release/version remain available in the other
+`StructUtsname` fields for diagnostics.
 
 Integration must atomically replace the existing eight-entry
 `libcore/io/Linux` table in `compat/darwin_libcore_natives.cc`. Registering both
