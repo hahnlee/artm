@@ -1,0 +1,17 @@
+[package]
+name = "bionic-swprintf-facade"
+version = "0.1.0"
+edition = "2024"
+publish = false
+build = "build.rs"
+
+[dependencies]
+darwin-art-elf-loader = { path = "../../crates/darwin-art-elf-loader" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[workspace]
