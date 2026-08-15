@@ -17,8 +17,11 @@ The current gate is intentionally smaller than `dalvikvm`. It links and runs a
 complete native `Runtime::Create()` probe through Android 16 boot-class-path
 initialization, invokes a generated DEX `main(String[])` in ART's C++
 interpreter, round-trips through JNI into Darwin, and sends Android
-`System.out` through ICU and Darwin `write(2)` without loading Android `.so`
-libraries. It also runs Android 16's real `Activity.attach()`, retains the
+`System.out` through ICU and Darwin `write(2)`. A separate native-library gate
+loads an Android ARM64 ELF `.so` through ART's real native-library path, runs
+`JNI_OnLoad` against a proxy JavaVM, installs signature-specific JNI
+trampolines, and invokes two registered native methods. It also runs Android
+16's real `Activity.attach()`, retains the
 framework-created `PhoneWindow`, constructs its real `DecorView`, and executes
 the platform and app `Activity.onCreate()` bodies using a minimal host context.
 The app's real `Activity.setContentView(View)` call adds a normally constructed
@@ -69,7 +72,10 @@ IOSurface/Metal/AppKit presentation surface:
 22. draw 120 frames with upstream Skia directly into the mapped IOSurface and
     present them with zero staging copies;
 23. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts;
-24. shut ART down through the C ABI after every successful runtime probe.
+24. load an NDK-built Android ARM64 ELF through ART, run its `JNI_OnLoad`, and
+    invoke register-only and spilled-argument JNI methods through reviewed
+    Darwin-to-Android PCS thunks;
+25. shut ART down through the C ABI after every successful runtime probe.
 
 Run it with:
 
@@ -144,6 +150,27 @@ TLS, RELRO, relocations, constructors, executable-stack/text-relocation
 requirements, and raw `svc` instructions. Linuxulator-derived manifests are
 used only as an independent semantic oracle; no FreeBSD kernel code is linked
 into the Darwin runtime.
+
+The first executable JNI slice runs with:
+
+```bash
+cargo run -p art-bootstrap -- probe-runtime-elf-jni
+```
+
+This is a real ART `JavaVMExt::LoadNativeLibrary` path, not a standalone loader
+smoke. The fixture reaches `JNI_OnLoad`, proxy `FindClass` and
+`RegisterNatives`, then executes one register-only and one stack-spilling
+method through write-then-execute-protected ARM64 thunks. The acceptance is
+deliberately narrow: only the two locked signatures are enabled, native bodies
+do not yet call `JNIEnv` after `JNI_OnLoad`, and `DT_NEEDED`, ELF TLS,
+finalizers, generic shorties, variadic calls, and hardened-runtime `MAP_JIT`
+remain explicit work.
+
+Its final line is:
+
+```text
+probe-runtime-elf-jni: ART load + proxy JNI_OnLoad + nativeAdd/nativeSpill PASS
+```
 
 The first Android 16 HWUI host compile gate is reproducible with:
 
