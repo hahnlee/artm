@@ -113,7 +113,7 @@ awk -F '\t' '{ count[$1]++ } END { for (owner in count) print owner "\t" count[o
 cat >"$tmp/expected-provider-counts" <<'EOF'
 allocator	4
 errno	1
-filesystem	13
+filesystem	28
 float-conversion	2
 leaf	11
 lifecycle	2
@@ -134,7 +134,7 @@ awk -F '\t' 'NR == FNR { owned[$2] = 1; next }
   "$owners" "$universe" | LC_ALL=C sort >"$tmp/class-counts"
 cat >"$tmp/expected-class-counts" <<'EOF'
 A	11	11
-B	37	76
+B	52	76
 C	61	65
 D	5	8
 EOF
@@ -142,6 +142,6 @@ diff -u "$tmp/expected-class-counts" "$tmp/class-counts" ||
   fail "capability-class coverage drift"
 
 echo "android35-libcxx-provider-coverage: PASS imports=$universe_count owned=$owned_count duplicate-owners=0"
-echo "providers=leaf:11 allocator:4 errno:1 filesystem:13 time:3 pthread:24 process-state:3 phdr:1 stdio:13 locale:31 numeric:6 float-conversion:2 lifecycle:2"
-echo "classes=A:11/11 B:37/76 C:61/65 D:5/8 remaining=46"
+echo "providers=leaf:11 allocator:4 errno:1 filesystem:28 time:3 pthread:24 process-state:3 phdr:1 stdio:13 locale:31 numeric:6 float-conversion:2 lifecycle:2"
+echo "classes=A:11/11 B:52/76 C:61/65 D:5/8 remaining=31"
 echo "scope=standalone-gates-not-yet-one-runtime-namespace"
