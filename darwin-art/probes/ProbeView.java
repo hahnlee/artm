@@ -4,7 +4,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.view.View;
 
-/** Activity content rendered through an Android Canvas supplied by DarwinWindow. */
+/** Activity content traversed through the real PhoneWindow and DecorView. */
 public final class ProbeView extends View {
     private static final int WIDTH = 640;
     private static final int HEIGHT = 360;

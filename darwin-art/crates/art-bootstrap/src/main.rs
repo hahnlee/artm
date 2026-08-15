@@ -836,37 +836,68 @@ fn build_dex_probe(root: &Path) -> Result<()> {
     fs::create_dir_all(&dex_dir)?;
     fs::create_dir_all(&object_dir)?;
 
+    let android_platform_jar = find_android_platform_jar()?;
+    let android_mock_jar = android_platform_jar
+        .parent()
+        .ok_or("Android platform jar has no parent")?
+        .join("optional/android.test.mock.jar");
+    if !android_mock_jar.exists() {
+        return Err(format!(
+            "Android mock library is missing: {}",
+            android_mock_jar.display()
+        )
+        .into());
+    }
+    let javac_classpath = env::join_paths([&android_platform_jar, &android_mock_jar])?;
+
     run_command(
         Command::new("javac")
             .args(["--release", "8", "-encoding", "UTF-8", "-d"])
             .arg(&class_dir)
             .arg("-classpath")
-            .arg(find_android_platform_jar()?)
+            .arg(&javac_classpath)
             .arg(root.join("probes/Hello.java"))
             .arg(root.join("probes/ProbeActivity.java"))
             .arg(root.join("probes/ProbeContext.java"))
             .arg(root.join("probes/ProbeContentResolver.java"))
             .arg(root.join("probes/ProbeResources.java"))
+            .arg(root.join("probes/ProbePackageManager.java"))
+            .arg(root.join("probes/ProbeXmlResourceParser.java"))
             .arg(root.join("probes/ProbeCanvas.java"))
             .arg(root.join("probes/ProbeView.java"))
-            .arg(root.join("probes/DarwinWindow.java"))
+            .arg(root.join("probes/ProbeContentRoot.java"))
             .arg(root.join("probes/compile-stubs/android/content/IContentProvider.java")),
     )?;
+
+    run_command(
+        Command::new("unzip")
+            .args(["-qq", "-o"])
+            .arg(&android_mock_jar)
+            .arg("android/test/mock/MockPackageManager.class")
+            .arg("-d")
+            .arg(&class_dir),
+    )?;
+
+    let package_manager_class = class_dir.join("dev/darwinart/probe/ProbePackageManager.class");
+    let mock_package_manager_class = class_dir.join("android/test/mock/MockPackageManager.class");
 
     let hello_class = class_dir.join("dev/darwinart/probe/Hello.class");
     let activity_class = class_dir.join("dev/darwinart/probe/ProbeActivity.class");
     let context_class = class_dir.join("dev/darwinart/probe/ProbeContext.class");
     let resolver_class = class_dir.join("dev/darwinart/probe/ProbeContentResolver.class");
     let resources_class = class_dir.join("dev/darwinart/probe/ProbeResources.class");
+    let xml_parser_class = class_dir.join("dev/darwinart/probe/ProbeXmlResourceParser.class");
     let canvas_class = class_dir.join("dev/darwinart/probe/ProbeCanvas.class");
     let view_class = class_dir.join("dev/darwinart/probe/ProbeView.class");
-    let window_class = class_dir.join("dev/darwinart/probe/DarwinWindow.class");
+    let content_root_class = class_dir.join("dev/darwinart/probe/ProbeContentRoot.class");
     run_command(
         Command::new(find_d8()?)
             .arg("--lib")
-            .arg(find_android_platform_jar()?)
+            .arg(&android_platform_jar)
             .arg("--classpath")
             .arg(&class_dir)
+            .arg("--classpath")
+            .arg(&android_mock_jar)
             .arg("--output")
             .arg(&dex_dir)
             .arg(&hello_class)
@@ -874,9 +905,12 @@ fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(&context_class)
             .arg(&resolver_class)
             .arg(&resources_class)
+            .arg(&package_manager_class)
+            .arg(&mock_package_manager_class)
+            .arg(&xml_parser_class)
             .arg(&canvas_class)
             .arg(&view_class)
-            .arg(&window_class),
+            .arg(&content_root_class),
     )?;
 
     let includes = [
@@ -944,16 +978,19 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=9 methods=164 \
-                    class[0]=Ldev/darwinart/probe/DarwinWindow; \
+    let expected = "AOSP DEX: verified=yes version=35 classes=12 methods=288 \
+                    class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldev/darwinart/probe/Hello; \
                     class[2]=Ldev/darwinart/probe/ProbeActivity; \
                     class[3]=Ldev/darwinart/probe/ProbeCanvas; \
                     class[4]=Ldev/darwinart/probe/ProbeContentResolver$$ExternalSyntheticLambda0; \
                     class[5]=Ldev/darwinart/probe/ProbeContentResolver; \
-                    class[6]=Ldev/darwinart/probe/ProbeContext; \
-                    class[7]=Ldev/darwinart/probe/ProbeResources; \
-                    class[8]=Ldev/darwinart/probe/ProbeView;";
+                    class[6]=Ldev/darwinart/probe/ProbeContentRoot; \
+                    class[7]=Ldev/darwinart/probe/ProbeContext; \
+                    class[8]=Ldev/darwinart/probe/ProbePackageManager; \
+                    class[9]=Ldev/darwinart/probe/ProbeResources; \
+                    class[10]=Ldev/darwinart/probe/ProbeView; \
+                    class[11]=Ldev/darwinart/probe/ProbeXmlResourceParser;";
     if output.trim() != expected {
         return Err(format!("unexpected DEX probe output: {output:?}").into());
     }
@@ -2363,20 +2400,18 @@ fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
                     ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
                     ART runtime native: System.arraycopy()=42\n\
                     ART Android framework: ProbeActivity().probeValue()=42\n\
-                    ART Android window: Activity.attach()=DarwinWindow\n\
-                    ART Android view: Activity.setContentView()->View.draw(Canvas)=640x360\n\
+                    ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
+                    ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
                     ART Android lifecycle: Activity.onCreate()=43\n\
                     ART Darwin launcher: main(String[])=ok";
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
     if show_window {
-        println!(
-            "probe-window: Activity.setContentView() -> View.draw(Canvas) -> NSWindow"
-        );
+        println!("probe-window: PhoneWindow -> DecorView.draw(Canvas) -> NSWindow");
     } else {
         println!(
-            "probe-runtime-dex: Activity.attach() + DarwinWindow + View.draw(Canvas) -> Darwin"
+            "probe-runtime-dex: Activity.attach() + PhoneWindow + DecorView.draw(Canvas) -> Darwin"
         );
     }
     Ok(())

@@ -82,18 +82,19 @@
 - [x] Back Android framework clocks and the initial `SystemProperties` surface
       with Darwin monotonic/continuous/thread clocks and an in-process table.
 - [x] Attach a minimal base `Context`, `Application`, and `ActivityInfo` through
-      Android 16's real `Activity.attach()`, then install the host-integrated
-      `DarwinWindow` policy before executing the real `Activity.onCreate()`.
+      Android 16's real `Activity.attach()`, retain its `PhoneWindow`, normally
+      construct its `DecorView`, and execute the real `Activity.onCreate()`.
 - [ ] Register the minimal libcore native method set needed by ordinary Java
       startup without loading Android `.so` libraries.
 - [ ] Replace the null `Instrumentation` and synthetic resources/settings with
       the complete application/runtime service path.
 - [x] Execute the app's real `Activity.setContentView(new ProbeView(this))`,
-      lay out the normally constructed View, run the base `View.draw(Canvas)`
-      traversal plus `onDraw()`, and display it in an AppKit `NSWindow`.
-- [ ] Replace the software `Canvas.drawBitmap()` backend with Skia/HWUI and add
-      either resource-backed `DecorView` compatibility or a complete Darwin
-      decor implementation.
+      traverse the actual `PhoneWindow -> DecorView -> ViewGroup` hierarchy,
+      run the base `View.draw(Canvas)` plus `onDraw()`, and display it in an
+      AppKit `NSWindow`.
+- [ ] Replace the software `Canvas.drawBitmap()` backend with Skia/HWUI and
+      replace the programmatic content root/minimal interpolator parser with
+      complete compiled framework-resource support.
 
 ## Deferred performance work
 

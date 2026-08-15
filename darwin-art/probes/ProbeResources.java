@@ -3,6 +3,7 @@ package dev.darwinart.probe;
 import android.content.res.AssetManager;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.content.res.XmlResourceParser;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
 
@@ -16,11 +17,8 @@ public final class ProbeResources extends Resources {
         DISPLAY_METRICS.setToDefaults();
     }
 
-    // The Darwin probe allocates this class through JNI without invoking this
-    // constructor. The superclass ResourceImpl requires Android AssetManager
-    // natives which are intentionally outside the current window gate.
-    public ProbeResources() {
-        super((AssetManager) null, DISPLAY_METRICS, CONFIGURATION);
+    public ProbeResources(AssetManager assets) {
+        super(assets, DISPLAY_METRICS, CONFIGURATION);
     }
 
     @Override
@@ -48,6 +46,11 @@ public final class ProbeResources extends Resources {
         // ViewConfiguration's config_overrideHasPermanentMenuKey=false value;
         // this avoids consulting a remote IWindowManager during the host gate.
         return 2;
+    }
+
+    @Override
+    public XmlResourceParser getAnimation(int id) {
+        return new ProbeXmlResourceParser();
     }
 
     @Override

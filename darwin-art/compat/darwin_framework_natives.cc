@@ -55,6 +55,13 @@ std::unordered_map<std::string, std::string> g_system_properties{
     {"ro.product.cpu.abilist", "arm64-v8a"},
     {"ro.product.cpu.abilist64", "arm64-v8a"},
     {"ro.product.cpu.abilist32", ""},
+    {"ro.build.version.sdk", "36"},
+    {"ro.build.version.sdk_full", "36.0"},
+    {"ro.build.version.release", "16"},
+    {"ro.build.version.release_or_codename", "16"},
+    {"ro.build.version.codename", "REL"},
+    {"ro.build.version.all_codenames", "REL"},
+    {"ro.build.version.known_codenames", "REL"},
 };
 
 std::optional<std::string> JavaString(JNIEnv* env, jstring value) {
@@ -125,6 +132,12 @@ jboolean LogIsLoggable(JNIEnv*, jclass, jstring, jint priority) {
   constexpr jint kInfoPriority = 4;
   return priority >= kInfoPriority ? JNI_TRUE : JNI_FALSE;
 }
+
+jint LogPrintln(JNIEnv* env, jclass, jint, jint, jstring, jstring message) {
+  return message == nullptr ? 0 : env->GetStringLength(message);
+}
+
+jboolean TraceIsTagEnabled(JNIEnv*, jclass, jlong) { return JNI_FALSE; }
 
 jlong MachTicksToNanos(std::uint64_t ticks) {
   static mach_timebase_info_data_t timebase = [] {
@@ -227,6 +240,19 @@ jboolean SystemPropertiesGetBooleanByHandle(jlong, jboolean default_value) {
 
 struct DarwinBinderHolder {};
 
+struct DarwinAssetManager {};
+
+struct DarwinTheme {
+  explicit DarwinTheme(DarwinAssetManager* owner) : assets(owner) {}
+
+  DarwinAssetManager* assets;
+};
+
+struct DarwinPaint {
+  jint flags = 0;
+  jint color = 0xff000000;
+};
+
 struct DarwinRenderNode {
   explicit DarwinRenderNode(std::string node_name)
       : name(std::move(node_name)) {}
@@ -240,6 +266,115 @@ struct DarwinRenderNode {
 
 void BinderHolderFinalizer(void* holder) {
   delete static_cast<DarwinBinderHolder*>(holder);
+}
+
+void AssetManagerFinalizer(void* assets) {
+  delete static_cast<DarwinAssetManager*>(assets);
+}
+
+jlong AssetManagerCreate(JNIEnv*, jclass) {
+  return reinterpret_cast<std::uintptr_t>(new DarwinAssetManager());
+}
+
+void AssetManagerDestroy(JNIEnv*, jclass, jlong handle) {
+  AssetManagerFinalizer(reinterpret_cast<void*>(
+      static_cast<std::uintptr_t>(handle)));
+}
+
+void ThemeFinalizer(void* theme) { delete static_cast<DarwinTheme*>(theme); }
+
+void PaintFinalizer(void* paint) { delete static_cast<DarwinPaint*>(paint); }
+
+jlong PaintInit() {
+  return reinterpret_cast<std::uintptr_t>(new DarwinPaint());
+}
+
+jlong PaintGetNativeFinalizer() {
+  return reinterpret_cast<std::uintptr_t>(&PaintFinalizer);
+}
+
+void PaintSetFlags(jlong handle, jint flags) {
+  auto* paint = reinterpret_cast<DarwinPaint*>(
+      static_cast<std::uintptr_t>(handle));
+  if (paint != nullptr) {
+    paint->flags = flags;
+  }
+}
+
+void PaintSetElegantTextHeight(jlong, jint) {}
+
+jint PaintSetTextLocales(JNIEnv*, jclass, jlong, jstring) { return 0; }
+
+void PaintSetColor(jlong handle, jint color) {
+  auto* paint = reinterpret_cast<DarwinPaint*>(
+      static_cast<std::uintptr_t>(handle));
+  if (paint != nullptr) {
+    paint->color = color;
+  }
+}
+
+jlong AssetManagerGetThemeFreeFunction(JNIEnv*, jclass) {
+  return reinterpret_cast<std::uintptr_t>(&ThemeFinalizer);
+}
+
+jlong AssetManagerThemeCreate(JNIEnv*, jclass, jlong assets_handle) {
+  auto* assets = reinterpret_cast<DarwinAssetManager*>(
+      static_cast<std::uintptr_t>(assets_handle));
+  return reinterpret_cast<std::uintptr_t>(new DarwinTheme(assets));
+}
+
+void AssetManagerThemeApplyStyle(JNIEnv*, jclass, jlong, jlong, jint,
+                                 jboolean) {}
+
+void AssetManagerThemeCopy(JNIEnv*, jclass, jlong, jlong, jlong, jlong) {}
+
+jint AssetManagerThemeGetAttributeValue(JNIEnv*, jclass, jlong, jlong, jint,
+                                        jobject, jboolean) {
+  return 0;
+}
+
+jint AssetManagerThemeGetChangingConfigurations(JNIEnv*, jclass, jlong) {
+  return 0;
+}
+
+void AssetManagerThemeRebase(JNIEnv*, jclass, jlong, jlong, jintArray,
+                             jbooleanArray, jint) {}
+
+void AssetManagerApplyStyle(JNIEnv*, jclass, jlong, jlong, jint, jint, jlong,
+                            jintArray, jlong, jlong) {
+  // Java's TypedArray storage is zero-initialized. Leaving it untouched is an
+  // empty style result, so every framework lookup observes its documented
+  // default while the real framework-res table parser is brought up.
+}
+
+void AssetManagerApplyStyleWithArray(JNIEnv*, jclass, jlong, jlong, jint, jint,
+                                     jlong, jintArray, jintArray, jintArray) {}
+
+jboolean AssetManagerResolveAttrs(JNIEnv*, jclass, jlong, jlong, jint, jint,
+                                  jintArray, jintArray, jintArray,
+                                  jintArray) {
+  return JNI_TRUE;
+}
+
+jboolean AssetManagerRetrieveAttributes(JNIEnv*, jclass, jlong, jlong,
+                                         jintArray, jintArray, jintArray) {
+  return JNI_TRUE;
+}
+
+void AssetManagerSetApkAssets(JNIEnv*, jclass, jlong, jobjectArray, jboolean,
+                              jboolean) {}
+
+void AssetManagerSetConfiguration(
+    JNIEnv*, jclass, jlong, jint, jint, jstring, jobjectArray, jint, jint,
+    jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint,
+    jint, jint, jboolean) {}
+
+jobjectArray AssetManagerGetLocales(JNIEnv* env, jclass, jlong, jboolean) {
+  jclass string_class = env->FindClass("java/lang/String");
+  jobjectArray result =
+      string_class == nullptr ? nullptr : env->NewObjectArray(0, string_class, nullptr);
+  env->DeleteLocalRef(string_class);
+  return result;
 }
 
 jlong BinderGetNativeHolder(JNIEnv*, jclass) {
@@ -270,9 +405,8 @@ jlong RenderNodeGetNativeFinalizer(JNIEnv*, jclass) {
   return reinterpret_cast<std::uintptr_t>(&RenderNodeFinalizer);
 }
 
-jboolean RenderNodeSetLeftTopRightBottom(JNIEnv*, jclass, jlong handle,
-                                         jint left, jint top, jint right,
-                                         jint bottom) {
+jboolean RenderNodeSetLeftTopRightBottom(jlong handle, jint left, jint top,
+                                         jint right, jint bottom) {
   auto* node = reinterpret_cast<DarwinRenderNode*>(
       static_cast<std::uintptr_t>(handle));
   if (node == nullptr) {
@@ -285,6 +419,12 @@ jboolean RenderNodeSetLeftTopRightBottom(JNIEnv*, jclass, jlong handle,
   node->right = right;
   node->bottom = bottom;
   return changed ? JNI_TRUE : JNI_FALSE;
+}
+
+jboolean RenderNodeHasIdentityMatrix(jlong) {
+  // The software bridge has no transform mutators yet, so every node remains
+  // in its default identity state.
+  return JNI_TRUE;
 }
 
 void SystemPropertiesSet(JNIEnv* env, jclass, jstring key, jstring value) {
@@ -340,9 +480,22 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
       {const_cast<char*>("isLoggable"),
        const_cast<char*>("(Ljava/lang/String;I)Z"),
        reinterpret_cast<void*>(&LogIsLoggable)},
+      {const_cast<char*>("println_native"),
+       const_cast<char*>(
+           "(IILjava/lang/String;Ljava/lang/String;)I"),
+       reinterpret_cast<void*>(&LogPrintln)},
   };
   if (!Register(env, "android/util/Log", log_methods,
                 static_cast<jint>(std::size(log_methods)))) {
+    return false;
+  }
+
+  JNINativeMethod trace_methods[] = {
+      {const_cast<char*>("nativeIsTagEnabled"), const_cast<char*>("(J)Z"),
+       reinterpret_cast<void*>(&TraceIsTagEnabled)},
+  };
+  if (!Register(env, "android/os/Trace", trace_methods,
+                static_cast<jint>(std::size(trace_methods)))) {
     return false;
   }
 
@@ -385,9 +538,85 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
       {const_cast<char*>("nSetLeftTopRightBottom"),
        const_cast<char*>("(JIIII)Z"),
        reinterpret_cast<void*>(&RenderNodeSetLeftTopRightBottom)},
+      {const_cast<char*>("nHasIdentityMatrix"), const_cast<char*>("(J)Z"),
+       reinterpret_cast<void*>(&RenderNodeHasIdentityMatrix)},
   };
   if (!Register(env, "android/graphics/RenderNode", render_node_methods,
                 static_cast<jint>(std::size(render_node_methods)))) {
+    return false;
+  }
+
+  JNINativeMethod paint_methods[] = {
+      {const_cast<char*>("nInit"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&PaintInit)},
+      {const_cast<char*>("nGetNativeFinalizer"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&PaintGetNativeFinalizer)},
+      {const_cast<char*>("nSetFlags"), const_cast<char*>("(JI)V"),
+       reinterpret_cast<void*>(&PaintSetFlags)},
+      {const_cast<char*>("nSetElegantTextHeight"),
+       const_cast<char*>("(JI)V"),
+       reinterpret_cast<void*>(&PaintSetElegantTextHeight)},
+      {const_cast<char*>("nSetTextLocales"),
+       const_cast<char*>("(JLjava/lang/String;)I"),
+       reinterpret_cast<void*>(&PaintSetTextLocales)},
+      {const_cast<char*>("nSetColor"), const_cast<char*>("(JI)V"),
+       reinterpret_cast<void*>(&PaintSetColor)},
+  };
+  if (!Register(env, "android/graphics/Paint", paint_methods,
+                static_cast<jint>(std::size(paint_methods)))) {
+    return false;
+  }
+
+  JNINativeMethod asset_manager_methods[] = {
+      {const_cast<char*>("nativeCreate"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&AssetManagerCreate)},
+      {const_cast<char*>("nativeDestroy"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&AssetManagerDestroy)},
+      {const_cast<char*>("nativeGetThemeFreeFunction"),
+       const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&AssetManagerGetThemeFreeFunction)},
+      {const_cast<char*>("nativeThemeCreate"), const_cast<char*>("(J)J"),
+       reinterpret_cast<void*>(&AssetManagerThemeCreate)},
+      {const_cast<char*>("nativeThemeApplyStyle"),
+       const_cast<char*>("(JJIZ)V"),
+       reinterpret_cast<void*>(&AssetManagerThemeApplyStyle)},
+      {const_cast<char*>("nativeThemeCopy"), const_cast<char*>("(JJJJ)V"),
+       reinterpret_cast<void*>(&AssetManagerThemeCopy)},
+      {const_cast<char*>("nativeThemeGetAttributeValue"),
+       const_cast<char*>("(JJILandroid/util/TypedValue;Z)I"),
+       reinterpret_cast<void*>(&AssetManagerThemeGetAttributeValue)},
+      {const_cast<char*>("nativeThemeGetChangingConfigurations"),
+       const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&AssetManagerThemeGetChangingConfigurations)},
+      {const_cast<char*>("nativeThemeRebase"),
+       const_cast<char*>("(JJ[I[ZI)V"),
+       reinterpret_cast<void*>(&AssetManagerThemeRebase)},
+      {const_cast<char*>("nativeApplyStyle"),
+       const_cast<char*>("(JJIIJ[IJJ)V"),
+       reinterpret_cast<void*>(&AssetManagerApplyStyle)},
+      {const_cast<char*>("nativeApplyStyleWithArray"),
+       const_cast<char*>("(JJIIJ[I[I[I)V"),
+       reinterpret_cast<void*>(&AssetManagerApplyStyleWithArray)},
+      {const_cast<char*>("nativeResolveAttrs"),
+       const_cast<char*>("(JJII[I[I[I[I)Z"),
+       reinterpret_cast<void*>(&AssetManagerResolveAttrs)},
+      {const_cast<char*>("nativeRetrieveAttributes"),
+       const_cast<char*>("(JJ[I[I[I)Z"),
+       reinterpret_cast<void*>(&AssetManagerRetrieveAttributes)},
+      {const_cast<char*>("nativeSetApkAssets"),
+       const_cast<char*>("(J[Landroid/content/res/ApkAssets;ZZ)V"),
+       reinterpret_cast<void*>(&AssetManagerSetApkAssets)},
+      {const_cast<char*>("nativeSetConfiguration"),
+       const_cast<char*>(
+           "(JIILjava/lang/String;[Ljava/lang/String;IIIIIIIIIIIIIIIIZ)V"),
+       reinterpret_cast<void*>(&AssetManagerSetConfiguration)},
+      {const_cast<char*>("nativeGetLocales"),
+       const_cast<char*>("(JZ)[Ljava/lang/String;"),
+       reinterpret_cast<void*>(&AssetManagerGetLocales)},
+  };
+  if (!Register(env, "android/content/res/AssetManager",
+                asset_manager_methods,
+                static_cast<jint>(std::size(asset_manager_methods)))) {
     return false;
   }
 

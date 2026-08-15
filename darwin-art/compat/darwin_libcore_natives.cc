@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <pwd.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/utsname.h>
 #include <unicode/uchar.h>
 #include <unicode/ulocdata.h>
@@ -20,6 +21,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -40,6 +42,35 @@ jlong DoubleToRawLongBits(JNIEnv*, jclass, jdouble value) {
 
 jdouble LongBitsToDouble(JNIEnv*, jclass, jlong bits) {
   return std::bit_cast<double>(static_cast<std::int64_t>(bits));
+}
+
+void UnixFileSystemInitIds(JNIEnv*, jclass) {}
+
+jint UnixFileSystemGetBooleanAttributes(JNIEnv* env, jobject, jstring path) {
+  if (path == nullptr) {
+    return 0;
+  }
+  const char* utf_path = env->GetStringUTFChars(path, nullptr);
+  if (utf_path == nullptr) {
+    return 0;
+  }
+  struct stat status {};
+  const int result = stat(utf_path, &status);
+  const char* basename = std::strrchr(utf_path, '/');
+  basename = basename == nullptr ? utf_path : basename + 1;
+  constexpr jint kExists = 0x01;
+  constexpr jint kRegular = 0x02;
+  constexpr jint kDirectory = 0x04;
+  constexpr jint kHidden = 0x08;
+  jint attributes = 0;
+  if (result == 0) {
+    attributes |= kExists;
+    attributes |= S_ISREG(status.st_mode) ? kRegular : 0;
+    attributes |= S_ISDIR(status.st_mode) ? kDirectory : 0;
+    attributes |= basename[0] == '.' && basename[1] != '\0' ? kHidden : 0;
+  }
+  env->ReleaseStringUTFChars(path, utf_path);
+  return attributes;
 }
 
 jint CharacterDigit(JNIEnv*, jclass, jint code_point, jint radix) {
@@ -159,6 +190,64 @@ void OsConstantsInitConstants(JNIEnv* env, jclass klass) {
 
 jlong LinuxSysconf(JNIEnv*, jobject, jint name) {
   return static_cast<jlong>(sysconf(name));
+}
+
+jobject LinuxStat(JNIEnv* env, jobject, jstring path) {
+  if (path == nullptr) {
+    return nullptr;
+  }
+  const char* utf_path = env->GetStringUTFChars(path, nullptr);
+  if (utf_path == nullptr) {
+    return nullptr;
+  }
+  struct stat status {};
+  const int result = stat(utf_path, &status);
+  env->ReleaseStringUTFChars(path, utf_path);
+  if (result != 0) {
+    jclass exception_class = env->FindClass("android/system/ErrnoException");
+    jmethodID constructor =
+        exception_class == nullptr
+            ? nullptr
+            : env->GetMethodID(exception_class, "<init>",
+                               "(Ljava/lang/String;I)V");
+    jstring function_name = env->NewStringUTF("stat");
+    jobject exception =
+        constructor == nullptr
+            ? nullptr
+            : env->NewObject(exception_class, constructor, function_name, errno);
+    if (exception != nullptr) {
+      env->Throw(static_cast<jthrowable>(exception));
+    }
+    env->DeleteLocalRef(exception);
+    env->DeleteLocalRef(function_name);
+    env->DeleteLocalRef(exception_class);
+    return nullptr;
+  }
+
+  jclass stat_class = env->FindClass("android/system/StructStat");
+  jmethodID constructor =
+      stat_class == nullptr
+          ? nullptr
+          : env->GetMethodID(stat_class, "<init>", "(JJIJIIJJJJJJJ)V");
+  jobject value =
+      constructor == nullptr
+          ? nullptr
+          : env->NewObject(
+                stat_class, constructor, static_cast<jlong>(status.st_dev),
+                static_cast<jlong>(status.st_ino),
+                static_cast<jint>(status.st_mode),
+                static_cast<jlong>(status.st_nlink),
+                static_cast<jint>(status.st_uid),
+                static_cast<jint>(status.st_gid),
+                static_cast<jlong>(status.st_rdev),
+                static_cast<jlong>(status.st_size),
+                static_cast<jlong>(status.st_atimespec.tv_sec),
+                static_cast<jlong>(status.st_mtimespec.tv_sec),
+                static_cast<jlong>(status.st_ctimespec.tv_sec),
+                static_cast<jlong>(status.st_blksize),
+                static_cast<jlong>(status.st_blocks));
+  env->DeleteLocalRef(stat_class);
+  return value;
 }
 
 jstring LinuxGetenv(JNIEnv* env, jobject, jstring name) {
@@ -413,6 +502,18 @@ bool Register(JNIEnv* env, const char* class_name,
 namespace darwin_art {
 
 bool RegisterLibcoreNatives(JNIEnv* env) {
+  JNINativeMethod unix_file_system_methods[] = {
+      {const_cast<char*>("initIDs"), const_cast<char*>("()V"),
+       reinterpret_cast<void*>(&UnixFileSystemInitIds)},
+      {const_cast<char*>("getBooleanAttributes0"),
+       const_cast<char*>("(Ljava/lang/String;)I"),
+       reinterpret_cast<void*>(&UnixFileSystemGetBooleanAttributes)},
+  };
+  if (!Register(env, "java/io/UnixFileSystem", unix_file_system_methods,
+                static_cast<jint>(std::size(unix_file_system_methods)))) {
+    return false;
+  }
+
   JNINativeMethod character_methods[] = {
       {const_cast<char*>("digitImpl"), const_cast<char*>("(II)I"),
        reinterpret_cast<void*>(&CharacterDigit)},
@@ -494,6 +595,9 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&LinuxNativeGetuid)},
       {const_cast<char*>("sysconf"), const_cast<char*>("(I)J"),
        reinterpret_cast<void*>(&LinuxSysconf)},
+      {const_cast<char*>("stat"),
+       const_cast<char*>("(Ljava/lang/String;)Landroid/system/StructStat;"),
+       reinterpret_cast<void*>(&LinuxStat)},
       {const_cast<char*>("uname"),
        const_cast<char*>("()Landroid/system/StructUtsname;"),
        reinterpret_cast<void*>(&LinuxUname)},
@@ -532,7 +636,8 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
          Register(env, "java/lang/Float", float_methods, 2) &&
          Register(env, "java/lang/Double", double_methods, 2) &&
          Register(env, "android/system/OsConstants", os_constants_methods, 1) &&
-         Register(env, "libcore/io/Linux", linux_methods, 7) &&
+         Register(env, "libcore/io/Linux", linux_methods,
+                  static_cast<jint>(std::size(linux_methods))) &&
          Register(env, "libcore/icu/ICU", icu_methods, 3) &&
          Register(env, "java/lang/System", system_methods, 3) &&
          Register(env, "java/io/FileDescriptor", file_descriptor_methods, 2);

@@ -35,6 +35,7 @@ static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
 
 static std::size_t g_frame_width = 0;
 static std::size_t g_frame_height = 0;
+static jclass g_probe_canvas_class = nullptr;
 
 static double WindowVisibleSeconds() {
   const char* value = std::getenv("DARWIN_ART_WINDOW_SECONDS");
@@ -79,9 +80,22 @@ static jboolean PresentContent(JNIEnv* env, jclass, jobject view, jint width,
       height > 4096) {
     return JNI_FALSE;
   }
-  jclass canvas_class = env->FindClass("dev/darwinart/probe/ProbeCanvas");
-  jobject canvas =
-      canvas_class == nullptr ? nullptr : env->AllocObject(canvas_class);
+  jclass canvas_class = g_probe_canvas_class;
+  jobject canvas = nullptr;
+  if (canvas_class != nullptr) {
+    art::ScopedObjectAccess soa(env);
+    art::ObjPtr<art::mirror::Class> canvas_mirror =
+        soa.Decode<art::mirror::Class>(canvas_class);
+    canvas = soa.AddLocalReference<jobject>(canvas_mirror->AllocObject(soa.Self()));
+  }
+  if (canvas == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Android view: ProbeCanvas allocation failed\n";
+    art::Thread* self = art::Thread::Current();
+    if (self != nullptr && self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return JNI_FALSE;
+  }
   jmethodID initialize =
       canvas_class == nullptr
           ? nullptr
@@ -90,11 +104,24 @@ static jboolean PresentContent(JNIEnv* env, jclass, jobject view, jint width,
       canvas_class == nullptr
           ? nullptr
           : env->GetMethodID(canvas_class, "snapshot", "()[I");
+  if (canvas == nullptr || initialize == nullptr || snapshot == nullptr ||
+      env->ExceptionCheck()) {
+    std::cerr << "ART Android view: ProbeCanvas setup failed\n";
+    art::Thread* self = art::Thread::Current();
+    if (self != nullptr && self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return JNI_FALSE;
+  }
   jclass view_class = env->FindClass("android/view/View");
   jmethodID layout =
       view_class == nullptr
           ? nullptr
           : env->GetMethodID(view_class, "layout", "(IIII)V");
+  jmethodID measure =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "measure", "(II)V");
   jmethodID draw =
       view_class == nullptr
           ? nullptr
@@ -108,13 +135,16 @@ static jboolean PresentContent(JNIEnv* env, jclass, jobject view, jint width,
   jfieldID view_bottom =
       view_class == nullptr ? nullptr : env->GetFieldID(view_class, "mBottom", "I");
   if (canvas == nullptr || initialize == nullptr || snapshot == nullptr ||
-      layout == nullptr || draw == nullptr || view_left == nullptr ||
+      measure == nullptr || layout == nullptr || draw == nullptr ||
+      view_left == nullptr ||
       view_top == nullptr || view_right == nullptr || view_bottom == nullptr ||
       env->ExceptionCheck()) {
     return JNI_FALSE;
   }
 
   env->CallVoidMethod(canvas, initialize, width, height);
+  constexpr jint kExactly = 0x40000000;
+  env->CallVoidMethod(view, measure, kExactly | width, kExactly | height);
   // ViewRoot normally installs the surface bounds before the first traversal.
   // The Darwin window policy owns that root, so seed the same bounds before
   // layout. This prevents a detached View from trying to notify Android's
@@ -133,7 +163,6 @@ static jboolean PresentContent(JNIEnv* env, jclass, jobject view, jint width,
   env->DeleteLocalRef(pixels);
   env->DeleteLocalRef(view_class);
   env->DeleteLocalRef(canvas);
-  env->DeleteLocalRef(canvas_class);
   return presented;
 }
 
@@ -204,7 +233,7 @@ int main(int argc, char** argv) {
   art::ClassLinker* class_linker = art::Runtime::Current()->GetClassLinker();
   jobject loader_ref =
       class_linker->CreatePathClassLoader(self, app_dex_file_ptrs);
-  art::StackHandleScope<9> hs(self);
+  art::StackHandleScope<12> hs(self);
   art::Handle<art::mirror::ClassLoader> app_loader =
       hs.NewHandle(soa.Decode<art::mirror::ClassLoader>(loader_ref));
   for (const auto& dex_file : app_dex_files) {
@@ -279,11 +308,17 @@ int main(int argc, char** argv) {
       class_linker->FindClass(self, "Ldev/darwinart/probe/ProbeCanvas;",
                               sizeof("Ldev/darwinart/probe/ProbeCanvas;") - 1u,
                               app_loader));
-  art::Handle<art::mirror::Class> darwin_window_handle = hs.NewHandle(
-      class_linker->FindClass(self, "Ldev/darwinart/probe/DarwinWindow;",
-                              sizeof("Ldev/darwinart/probe/DarwinWindow;") - 1u,
+  art::Handle<art::mirror::Class> content_root_handle = hs.NewHandle(
+      class_linker->FindClass(self, "Ldev/darwinart/probe/ProbeContentRoot;",
+                              sizeof("Ldev/darwinart/probe/ProbeContentRoot;") - 1u,
                               app_loader));
-  if (probe_canvas_handle == nullptr || darwin_window_handle == nullptr ||
+  art::Handle<art::mirror::Class> package_manager_handle = hs.NewHandle(
+      class_linker->FindClass(self,
+                              "Ldev/darwinart/probe/ProbePackageManager;",
+                              sizeof("Ldev/darwinart/probe/ProbePackageManager;") - 1u,
+                              app_loader));
+  if (probe_canvas_handle == nullptr || content_root_handle == nullptr ||
+      package_manager_handle == nullptr ||
       self->IsExceptionPending()) {
     std::cerr << "ART Android window: Darwin Canvas/Window lookup failed\n";
     if (self->IsExceptionPending()) {
@@ -301,8 +336,12 @@ int main(int argc, char** argv) {
       soa.AddLocalReference<jclass>(probe_resources_handle.Get());
   jclass probe_view_class =
       soa.AddLocalReference<jclass>(probe_view_handle.Get());
-  jclass darwin_window_class =
-      soa.AddLocalReference<jclass>(darwin_window_handle.Get());
+  jclass probe_canvas_class =
+      soa.AddLocalReference<jclass>(probe_canvas_handle.Get());
+  jclass content_root_class =
+      soa.AddLocalReference<jclass>(content_root_handle.Get());
+  jclass package_manager_class =
+      soa.AddLocalReference<jclass>(package_manager_handle.Get());
   art::Runtime::Current()->StartMinimalForDarwinProbe(self->GetJniEnv());
   if (!darwin_art::RegisterLibcoreNatives(self->GetJniEnv())) {
     std::cerr << "ART Darwin libcore: native registration failed\n";
@@ -319,17 +358,10 @@ int main(int argc, char** argv) {
   art::Runtime::Current()->FinishMinimalForDarwinProbe();
 
   JNIEnv* env = self->GetJniEnv();
-  JNINativeMethod present_method{
-      const_cast<char*>("presentContent"),
-      const_cast<char*>("(Landroid/view/View;II)Z"),
-      reinterpret_cast<void*>(&PresentContent),
-  };
-  if (env->RegisterNatives(darwin_window_class, &present_method, 1) != JNI_OK ||
-      !class_linker->EnsureInitialized(self, darwin_window_handle, true, true)) {
-    std::cerr << "ART Android window: DarwinWindow native setup failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
-    }
+  g_probe_canvas_class = static_cast<jclass>(
+      env->NewGlobalRef(probe_canvas_class));
+  if (g_probe_canvas_class == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Android window: ProbeCanvas global root failed\n";
     return 32;
   }
   jclass looper_class = env->FindClass("android/os/Looper");
@@ -386,6 +418,8 @@ int main(int argc, char** argv) {
       env->FindClass("android/content/ComponentName");
   jclass configuration_class =
       env->FindClass("android/content/res/Configuration");
+  jclass asset_manager_class =
+      env->FindClass("android/content/res/AssetManager");
   jmethodID activity_info_constructor =
       activity_info_class == nullptr
           ? nullptr
@@ -402,29 +436,70 @@ int main(int argc, char** argv) {
       application_constructor == nullptr
           ? nullptr
           : env->NewObject(application_class, application_constructor);
-  jobject probe_resources = probe_resources_class == nullptr
-                                ? nullptr
-                                : env->AllocObject(probe_resources_class);
+  jmethodID asset_manager_constructor =
+      asset_manager_class == nullptr
+          ? nullptr
+          : env->GetMethodID(asset_manager_class, "<init>", "(Z)V");
+  jobject asset_manager =
+      asset_manager_constructor == nullptr
+          ? nullptr
+          : env->NewObject(asset_manager_class, asset_manager_constructor,
+                           JNI_TRUE);
+  jclass apk_assets_class = env->FindClass("android/content/res/ApkAssets");
+  jobjectArray empty_apk_assets =
+      apk_assets_class == nullptr
+          ? nullptr
+          : env->NewObjectArray(0, apk_assets_class, nullptr);
+  jfieldID apk_assets_field =
+      asset_manager_class == nullptr
+          ? nullptr
+          : env->GetFieldID(asset_manager_class, "mApkAssets",
+                            "[Landroid/content/res/ApkAssets;");
+  if (asset_manager != nullptr && apk_assets_field != nullptr &&
+      empty_apk_assets != nullptr) {
+    env->SetObjectField(asset_manager, apk_assets_field, empty_apk_assets);
+  }
+  jmethodID probe_resources_constructor =
+      probe_resources_class == nullptr
+          ? nullptr
+          : env->GetMethodID(probe_resources_class, "<init>",
+                             "(Landroid/content/res/AssetManager;)V");
+  jobject probe_resources =
+      probe_resources_constructor == nullptr || asset_manager == nullptr
+          ? nullptr
+          : env->NewObject(probe_resources_class, probe_resources_constructor,
+                           asset_manager);
+  jobject package_manager =
+      package_manager_class == nullptr
+          ? nullptr
+          : soa.AddLocalReference<jobject>(
+                package_manager_handle->AllocObject(self));
+  if (package_manager == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Android window: package feature stub failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 27;
+  }
   jmethodID probe_context_constructor =
       probe_context_class == nullptr
           ? nullptr
           : env->GetMethodID(probe_context_class, "<init>",
-                             "(Landroid/content/res/Resources;)V");
+                             "(Landroid/content/res/Resources;"
+                             "Landroid/content/pm/PackageManager;)V");
   jobject probe_context =
-      probe_context_constructor == nullptr || probe_resources == nullptr
+      probe_context_constructor == nullptr || probe_resources == nullptr ||
+              package_manager == nullptr
           ? nullptr
           : env->NewObject(probe_context_class, probe_context_constructor,
-                           probe_resources);
-  jmethodID darwin_window_constructor =
-      darwin_window_class == nullptr
-          ? nullptr
-          : env->GetMethodID(darwin_window_class, "<init>",
-                             "(Landroid/content/Context;)V");
-  jobject darwin_window =
-      darwin_window_constructor == nullptr || probe_context == nullptr
-          ? nullptr
-          : env->NewObject(darwin_window_class, darwin_window_constructor,
-                           probe_context);
+                           probe_resources, package_manager);
+  if (probe_context == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Android window: ProbeContext construction failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 27;
+  }
   jmethodID intent_constructor = intent_class == nullptr
                                     ? nullptr
                                     : env->GetMethodID(intent_class, "<init>", "()V");
@@ -478,9 +553,8 @@ int main(int argc, char** argv) {
           ? nullptr
           : env->GetMethodID(activity_class, "attach", kActivityAttachSignature);
   if (activity_info == nullptr || application == nullptr ||
-      probe_context == nullptr || darwin_window == nullptr || intent == nullptr ||
-      configuration == nullptr || attach_activity == nullptr ||
-      env->ExceptionCheck()) {
+      probe_context == nullptr || intent == nullptr || configuration == nullptr ||
+      attach_activity == nullptr || env->ExceptionCheck()) {
     std::cerr << "ART Android window: Activity.attach() setup failed\n";
     if (self->IsExceptionPending()) {
       std::cerr << self->GetException()->Dump() << "\n";
@@ -535,39 +609,144 @@ int main(int argc, char** argv) {
               << self->GetException()->Dump() << "\n";
     return 30;
   }
-  jfieldID activity_window = env->GetFieldID(
-      activity_class, "mWindow", "Landroid/view/Window;");
-  jclass window_class = env->FindClass("android/view/Window");
-  jmethodID set_window_callback =
-      window_class == nullptr
-          ? nullptr
-          : env->GetMethodID(window_class, "setCallback",
-                             "(Landroid/view/Window$Callback;)V");
-  if (activity_window == nullptr || set_window_callback == nullptr ||
-      env->ExceptionCheck()) {
-    std::cerr << "ART Android window: DarwinWindow policy setup failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
-    }
-    return 31;
-  }
-  env->CallVoidMethod(darwin_window, set_window_callback, activity_instance);
-  env->SetObjectField(activity_instance, activity_window, darwin_window);
-  env->DeleteLocalRef(window_class);
   jmethodID get_window =
       env->GetMethodID(activity_class, "getWindow", "()Landroid/view/Window;");
   jobject window = get_window == nullptr
                        ? nullptr
                        : env->CallObjectMethod(activity_instance, get_window);
-  const bool attached_darwin_window =
-      window != nullptr && env->IsInstanceOf(window, darwin_window_class);
-  if (!attached_darwin_window || env->ExceptionCheck()) {
-    std::cerr << "ART Android window: DarwinWindow attachment failed\n";
+  jclass window_class = env->FindClass("android/view/Window");
+  jclass phone_window_class =
+      env->FindClass("com/android/internal/policy/PhoneWindow");
+  if (window == nullptr || phone_window_class == nullptr ||
+      !env->IsInstanceOf(window, phone_window_class) || env->ExceptionCheck()) {
+    std::cerr << "ART Android window: PhoneWindow attachment failed\n";
     if (self->IsExceptionPending()) {
       std::cerr << self->GetException()->Dump() << "\n";
     }
     return 31;
   }
+
+  jmethodID get_probe_theme = env->GetMethodID(
+      probe_context_class, "getTheme", "()Landroid/content/res/Resources$Theme;");
+  jobject probe_theme =
+      get_probe_theme == nullptr
+          ? nullptr
+          : env->CallObjectMethod(probe_context, get_probe_theme);
+  jmethodID set_activity_theme = env->GetMethodID(
+      context_theme_wrapper_class, "setTheme",
+      "(Landroid/content/res/Resources$Theme;)V");
+  if (probe_theme == nullptr || set_activity_theme == nullptr ||
+      env->ExceptionCheck()) {
+    std::cerr << "ART Android window: Activity theme setup failed\n";
+    return 31;
+  }
+  env->CallVoidMethod(activity_instance, set_activity_theme, probe_theme);
+
+  // A detached hierarchy should observe accessibility as disabled until the
+  // Darwin service bridge exists. Seed the framework singleton without
+  // invoking its Binder-backed constructor.
+  jclass accessibility_class =
+      env->FindClass("android/view/accessibility/AccessibilityManager");
+  jobject accessibility =
+      accessibility_class == nullptr ? nullptr : env->AllocObject(accessibility_class);
+  jclass object_class = env->FindClass("java/lang/Object");
+  jmethodID object_constructor =
+      object_class == nullptr
+          ? nullptr
+          : env->GetMethodID(object_class, "<init>", "()V");
+  jobject accessibility_lock =
+      object_constructor == nullptr
+          ? nullptr
+          : env->NewObject(object_class, object_constructor);
+  jfieldID accessibility_lock_field =
+      accessibility_class == nullptr
+          ? nullptr
+          : env->GetFieldID(accessibility_class, "mLock", "Ljava/lang/Object;");
+  jfieldID accessibility_instance =
+      accessibility_class == nullptr
+          ? nullptr
+          : env->GetStaticFieldID(
+                accessibility_class, "sInstance",
+                "Landroid/view/accessibility/AccessibilityManager;");
+  if (accessibility == nullptr || accessibility_lock == nullptr ||
+      accessibility_lock_field == nullptr || accessibility_instance == nullptr ||
+      env->ExceptionCheck()) {
+    std::cerr << "ART Android window: accessibility stub setup failed\n";
+    return 31;
+  }
+  env->SetObjectField(accessibility, accessibility_lock_field,
+                      accessibility_lock);
+  env->SetStaticObjectField(accessibility_class, accessibility_instance,
+                            accessibility);
+
+  jmethodID get_window_attributes =
+      window_class == nullptr
+          ? nullptr
+          : env->GetMethodID(window_class, "getAttributes",
+                             "()Landroid/view/WindowManager$LayoutParams;");
+  jobject window_attributes =
+      get_window_attributes == nullptr
+          ? nullptr
+          : env->CallObjectMethod(window, get_window_attributes);
+  jclass decor_view_class =
+      env->FindClass("com/android/internal/policy/DecorView");
+  jmethodID decor_view_constructor =
+      decor_view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(
+                decor_view_class, "<init>",
+                "(Landroid/content/Context;I"
+                "Lcom/android/internal/policy/PhoneWindow;"
+                "Landroid/view/WindowManager$LayoutParams;)V");
+  jobject decor_view =
+      decor_view_constructor == nullptr || window_attributes == nullptr
+          ? nullptr
+          : env->NewObject(decor_view_class, decor_view_constructor,
+                           activity_instance, static_cast<jint>(-1), window,
+                           window_attributes);
+  jmethodID content_root_constructor =
+      content_root_class == nullptr
+          ? nullptr
+          : env->GetMethodID(content_root_class, "<init>",
+                             "(Landroid/content/Context;)V");
+  jobject content_root =
+      content_root_constructor == nullptr
+          ? nullptr
+          : env->NewObject(content_root_class, content_root_constructor,
+                           activity_instance);
+  jmethodID add_view =
+      decor_view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(decor_view_class, "addView",
+                             "(Landroid/view/View;)V");
+  jfieldID phone_decor =
+      phone_window_class == nullptr
+          ? nullptr
+          : env->GetFieldID(phone_window_class, "mDecor",
+                            "Lcom/android/internal/policy/DecorView;");
+  jfieldID phone_content_parent =
+      phone_window_class == nullptr
+          ? nullptr
+          : env->GetFieldID(phone_window_class, "mContentParent",
+                            "Landroid/view/ViewGroup;");
+  if (decor_view == nullptr || content_root == nullptr || add_view == nullptr ||
+      phone_decor == nullptr || phone_content_parent == nullptr ||
+      env->ExceptionCheck()) {
+    std::cerr << "ART Android window: DecorView setup failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 31;
+  }
+  env->CallVoidMethod(decor_view, add_view, content_root);
+  env->SetObjectField(window, phone_decor, decor_view);
+  env->SetObjectField(window, phone_content_parent, content_root);
+  if (env->ExceptionCheck()) {
+    std::cerr << "ART Android window: DecorView attachment threw\n"
+              << self->GetException()->Dump() << "\n";
+    return 31;
+  }
+
   jmethodID probe_on_create =
       env->GetMethodID(probe_activity_class, "probeOnCreate", "()I");
   jint lifecycle_result =
@@ -579,16 +758,35 @@ int main(int argc, char** argv) {
               << self->GetException()->Dump() << "\n";
     return 28;
   }
-  jmethodID get_content = env->GetMethodID(
-      darwin_window_class, "getContent", "()Landroid/view/View;");
-  jobject probe_view =
-      get_content == nullptr
+  jmethodID get_decor_view =
+      window_class == nullptr
           ? nullptr
-          : env->CallObjectMethod(darwin_window, get_content);
+          : env->GetMethodID(window_class, "getDecorView",
+                             "()Landroid/view/View;");
+  jobject attached_decor =
+      get_decor_view == nullptr
+          ? nullptr
+          : env->CallObjectMethod(window, get_decor_view);
+  jmethodID get_child_at =
+      content_root_class == nullptr
+          ? nullptr
+          : env->GetMethodID(content_root_class, "getChildAt",
+                             "(I)Landroid/view/View;");
+  jobject probe_view =
+      get_child_at == nullptr
+          ? nullptr
+          : env->CallObjectMethod(content_root, get_child_at,
+                                  static_cast<jint>(0));
+  const jboolean decor_presented =
+      attached_decor == nullptr ||
+              !env->IsSameObject(attached_decor, decor_view) ||
+              env->ExceptionCheck()
+          ? JNI_FALSE
+          : PresentContent(env, nullptr, attached_decor, 640, 360);
   jmethodID was_presented =
       env->GetMethodID(probe_view_class, "wasPresented", "()Z");
   const jboolean view_presented =
-      probe_view == nullptr ||
+      decor_presented != JNI_TRUE || probe_view == nullptr ||
               !env->IsInstanceOf(probe_view, probe_view_class) ||
               was_presented == nullptr || env->ExceptionCheck()
           ? JNI_FALSE
@@ -604,8 +802,19 @@ int main(int argc, char** argv) {
   env->DeleteLocalRef(application);
   env->DeleteLocalRef(activity_info);
   env->DeleteLocalRef(context_theme_wrapper_class);
+  env->DeleteLocalRef(probe_theme);
+  env->DeleteLocalRef(attached_decor);
+  env->DeleteLocalRef(content_root);
+  env->DeleteLocalRef(decor_view);
+  env->DeleteLocalRef(decor_view_class);
+  env->DeleteLocalRef(window_attributes);
+  env->DeleteLocalRef(accessibility_lock);
+  env->DeleteLocalRef(object_class);
+  env->DeleteLocalRef(accessibility);
+  env->DeleteLocalRef(accessibility_class);
+  env->DeleteLocalRef(phone_window_class);
+  env->DeleteLocalRef(window_class);
   env->DeleteLocalRef(window);
-  env->DeleteLocalRef(darwin_window);
   env->DeleteLocalRef(probe_view);
   env->DeleteLocalRef(configuration);
   env->DeleteLocalRef(component_name);
@@ -616,16 +825,23 @@ int main(int argc, char** argv) {
   env->DeleteLocalRef(configuration_class);
   env->DeleteLocalRef(component_name_class);
   env->DeleteLocalRef(intent_class);
+  env->DeleteLocalRef(empty_apk_assets);
+  env->DeleteLocalRef(apk_assets_class);
+  env->DeleteLocalRef(asset_manager);
+  env->DeleteLocalRef(asset_manager_class);
   env->DeleteLocalRef(probe_context);
   env->DeleteLocalRef(probe_resources);
   env->DeleteLocalRef(probe_resources_class);
   env->DeleteLocalRef(probe_view_class);
-  env->DeleteLocalRef(darwin_window_class);
+  env->DeleteLocalRef(probe_canvas_class);
+  env->DeleteLocalRef(content_root_class);
   env->DeleteLocalRef(probe_context_class);
   env->DeleteLocalRef(application_class);
   env->DeleteLocalRef(activity_info_class);
   env->DeleteLocalRef(activity_class);
   env->DeleteLocalRef(activity_instance);
+  env->DeleteGlobalRef(g_probe_canvas_class);
+  g_probe_canvas_class = nullptr;
   if (lifecycle_result != 43) {
     std::cerr << "ART Android lifecycle: expected 43, got " << lifecycle_result
               << "\n";
@@ -737,8 +953,8 @@ int main(int argc, char** argv) {
             << arraycopy_result.GetI() << "\n"
             << "ART Android framework: ProbeActivity().probeValue()="
             << activity_result << "\n"
-            << "ART Android window: Activity.attach()=DarwinWindow\n"
-            << "ART Android view: Activity.setContentView()->View.draw(Canvas)="
+            << "ART Android window: Activity.attach()=PhoneWindow+DecorView\n"
+            << "ART Android view: Activity.setContentView()->DecorView.draw(Canvas)="
             << g_frame_width << "x"
             << g_frame_height << "\n"
             << "ART Android lifecycle: Activity.onCreate()=" << lifecycle_result

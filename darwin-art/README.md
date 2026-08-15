@@ -11,13 +11,14 @@ complete native `Runtime::Create()` probe through Android 16 boot-class-path
 initialization, invokes a generated DEX `main(String[])` in ART's C++
 interpreter, round-trips through JNI into Darwin, and sends Android
 `System.out` through ICU and Darwin `write(2)` without loading Android `.so`
-libraries. It also runs Android 16's real `Activity.attach()` and platform
-`Activity.onCreate()` using a minimal host context. Before lifecycle dispatch,
-the launcher installs a Darwin `Window` policy so the app's real
-`Activity.setContentView(View)` call targets an independent AppKit `NSWindow`.
-The first vertical graphics slice constructs a normal Android `View`, executes
-the base `View.draw(Canvas)` traversal and its `onDraw(Canvas)` callback, then
-presents the resulting software frame:
+libraries. It also runs Android 16's real `Activity.attach()`, retains the
+framework-created `PhoneWindow`, constructs its real `DecorView`, and executes
+the platform and app `Activity.onCreate()` bodies using a minimal host context.
+The app's real `Activity.setContentView(View)` call adds a normally constructed
+View beneath that DecorView. The first vertical graphics slice executes the
+complete software `DecorView -> ViewGroup -> View.draw(Canvas) -> onDraw()`
+traversal, then presents the resulting frame in an independent AppKit
+`NSWindow`:
 
 1. verify the native host is ARM64 macOS with 16 KiB pages;
 2. fetch revision-locked ART subtrees without Git metadata;
@@ -44,12 +45,13 @@ presents the resulting software frame:
     path, backed by host ICU4C and Darwin `write(2)`;
 17. load Android 16's real framework DEX, prepare its main `Looper`, and
     instantiate an app DEX class that directly extends `android.app.Activity`;
-18. call the real `Activity.attach()` with a Darwin-backed context, then replace
-    its default `PhoneWindow` policy with `DarwinWindow`;
+18. call the real `Activity.attach()` with a Darwin-backed context, retain its
+    default `PhoneWindow`, and normally construct the framework `DecorView`;
 19. execute the real platform `Activity.onCreate()` body plus the app override,
     including `Activity.setContentView(new ProbeView(this))`;
-20. run `View.layout()` and the base `View.draw(Canvas)` traversal against a
-    Darwin software Canvas, then present its 640x360 frame in an `NSWindow`;
+20. run `DecorView.measure/layout/draw()` and the nested base `View.draw(Canvas)`
+    traversal against a Darwin software Canvas, then present its 640x360 frame
+    in an `NSWindow`;
 21. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts.
 
 Run it with:
@@ -64,14 +66,14 @@ Expected final lines include:
 probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
-build-dex: AOSP DEX: verified=yes version=35 classes=9 methods=164 ... corrupt=rejected
+build-dex: AOSP DEX: verified=yes version=35 classes=12 methods=288 ... corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
 build-interpreter-core: AOSP C++ interpreter Mach-O objects=7 archive=...
 build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=209 compiled=0 cached=209 archive=...
 audit-runtime-link: closure complete undefined=0
-probe-runtime-dex: Activity.attach() + DarwinWindow + View.draw(Canvas) -> Darwin
+probe-runtime-dex: Activity.attach() + PhoneWindow + DecorView.draw(Canvas) -> Darwin
 probe-park: ART Darwin park: pre-permit=yes wakeups=200 timeout=yes
 ```
 
@@ -85,9 +87,11 @@ The current frame producer is deliberately small: `ProbeView.onDraw()` submits
 a Java `0xAARRGGBB` bitmap through the Android `Canvas.drawBitmap()` API. The
 Darwin Canvas implementation stores that software frame, and Objective-C++
 copies it into a Core Graphics image owned by an `NSView`. This proves the real
-`Activity.onCreate() -> setContentView() -> Window -> View.layout() ->
-View.draw(Canvas) -> onDraw()` control path. It is not yet Skia, HWUI,
-zero-copy, or a resource-backed `PhoneWindow`/`DecorView` render path.
+`Activity.onCreate() -> PhoneWindow.setContentView() -> DecorView ->
+ViewGroup.dispatchDraw() -> View.draw(Canvas) -> onDraw()` control path. The
+DecorView uses a programmatic `android.R.id.content` root and a minimal resource
+backend; it is not yet the complete framework decor layout. Skia, HWUI,
+zero-copy, input, and production resource parsing remain deferred.
 
 `build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
 depfile for every translation unit; the bootstrapper fingerprints the complete
@@ -139,8 +143,8 @@ Its success lines are `ART Darwin Runtime::Create: ok`,
 `ART runtime native: System.arraycopy()=42`, the Java-emitted
 `Hello from Darwin ART main: 안녕`,
 `ART Android framework: ProbeActivity().probeValue()=42`,
-`ART Android window: Activity.attach()=DarwinWindow`,
-`ART Android view: Activity.setContentView()->View.draw(Canvas)=640x360`,
+`ART Android window: Activity.attach()=PhoneWindow+DecorView`,
+`ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360`,
 `ART Android lifecycle: Activity.onCreate()=43`, and
 `ART Darwin launcher: main(String[])=ok`.
 The generated app DEX remains separate from the boot class path. The native
@@ -161,11 +165,12 @@ bridge now covers both encoder and decoder paths. The app-only compile stub for
 hidden `IContentProvider` supplies a javac signature and is not emitted into the
 DEX; runtime resolution uses framework.jar's real interface. Android's
 libicu/libjavacore/libopenjdk shared libraries and daemon threads are still not
-loaded. The current real `Activity.attach()` uses synthetic resources/settings,
-a null `Instrumentation`, and no remote services. It still constructs the
-framework `PhoneWindow` during attach, after which the launcher installs the
-host-integrated `DarwinWindow` policy. The content `View` is normally
-constructed and traversed, but resource-backed `DecorView`, Android Skia/HWUI,
+loaded. The current real `Activity.attach()` uses a minimal AssetManager/resource
+backend, a null `Instrumentation`, and no remote services. It constructs and
+retains the framework `PhoneWindow`; the launcher normally constructs its
+`DecorView` and installs a programmatic content root because the complete
+compiled `framework-res.apk` parser is not ported yet. The content `View` is
+normally constructed and traversed. Android Skia/HWUI, full decor resources,
 input dispatch, and incremental frame scheduling remain deferred.
 
 Apple ARM64 executables retain the kernel-required 4 GiB `__PAGEZERO`, so ART's

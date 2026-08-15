@@ -65,6 +65,27 @@ public final class ProbeCanvas extends Canvas {
     }
 
     @Override
+    public boolean quickReject(float left, float top, float right, float bottom) {
+        return false;
+    }
+
+    @Override
+    public void translate(float dx, float dy) {
+        // The first hierarchy is positioned at the origin. A transform stack
+        // is added when nested/offset content becomes part of the gate.
+    }
+
+    @Override
+    public boolean clipRect(int left, int top, int right, int bottom) {
+        return left < right && top < bottom;
+    }
+
+    @Override
+    public boolean clipRect(float left, float top, float right, float bottom) {
+        return left < right && top < bottom;
+    }
+
+    @Override
     public void drawColor(int color) {
         for (int index = 0; index < pixels.length; index++) {
             pixels[index] = color;

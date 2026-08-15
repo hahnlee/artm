@@ -5,6 +5,7 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.os.Looper;
 
@@ -15,10 +16,14 @@ public final class ProbeContext extends ContextWrapper {
     private final AttributionSource attributionSource;
     private final ContentResolver contentResolver;
     private final Resources resources;
+    private final Resources.Theme theme;
+    private final PackageManager packageManager;
 
-    public ProbeContext(Resources resources) {
+    public ProbeContext(Resources resources, PackageManager packageManager) {
         super(null);
         this.resources = resources;
+        theme = resources.newTheme();
+        this.packageManager = packageManager;
         applicationInfo = new ApplicationInfo();
         applicationInfo.targetSdkVersion = 36;
         attributionSource = new AttributionSource.Builder(1000)
@@ -52,6 +57,16 @@ public final class ProbeContext extends ContextWrapper {
     @Override
     public Resources getResources() {
         return resources;
+    }
+
+    @Override
+    public Resources.Theme getTheme() {
+        return theme;
+    }
+
+    @Override
+    public PackageManager getPackageManager() {
+        return packageManager;
     }
 
     @Override
@@ -94,4 +109,5 @@ public final class ProbeContext extends ContextWrapper {
             throw new IllegalStateException("Could not construct " + className, error);
         }
     }
+
 }
