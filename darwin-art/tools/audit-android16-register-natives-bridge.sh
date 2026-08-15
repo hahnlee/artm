@@ -9,6 +9,10 @@ bridge_root="$project_root/tools/android-register-natives-bridge"
 fixture_root="$project_root/probes/android-elf-jni-fixture"
 fixture_elf="$project_root/_build/android-elf-jni-fixture/libdarwin-art-jni-fixture.so"
 fixture_child="$project_root/_build/android-elf-jni-fixture/libdarwin-art-jni-child.so"
+fixture_grandchild="$project_root/_build/android-elf-jni-fixture/libdarwin-art-jni-grandchild.so"
+generic_root="$project_root/_build/android-elf-jni-fixture/libdarwin-art-generic-root.so"
+generic_child="$project_root/_build/android-elf-jni-fixture/libdarwin-art-generic-child.so"
+generic_grandchild="$project_root/_build/android-elf-jni-fixture/libdarwin-art-generic-grandchild.so"
 build_dir="$project_root/_build/register-natives-bridge"
 
 fail() { echo "register-natives-bridge: $*" >&2; exit 3; }
@@ -136,9 +140,12 @@ root = Path(sys.argv[1])
 adapter = (root / "compat/darwin_runtime_adapters.cc").read_text()
 probe = (root / "probes/runtime_link_probe.cc").read_text()
 open_start = adapter.index("void* OpenNativeLibrary(")
-elf_start = adapter.index("if (is_elf) {", open_start)
+discovery_start = adapter.index("darwin_art_elf_discover_sibling_graph(", open_start)
+elf_start = adapter.index("if (discovery_status == DARWIN_ART_ELF_OK) {", discovery_start)
 host_start = adapter.index("void* handle =", elf_start)
 elf = adapter[elf_start:host_start]
+assert discovery_start < adapter.index("std::make_unique<ElfLibrary>()", elf_start)
+assert "O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW" in adapter[open_start:discovery_start]
 assert "darwin_art_elf_graph_load_with_lifecycle(" in elf
 assert "darwin_art_elf_graph_lookup_root(" in adapter
 assert "darwin_art_elf_graph_unload(" in adapter
@@ -159,6 +166,7 @@ assert close.index("DestroyRegularTrampolines") < close.index("darwin_art_elf_gr
 assert close.index("darwin_art_elf_graph_unload") < close.index(
     "darwin_art_bionic_namespace_teardown")
 assert "kDarwinArtElfJniHostProviderSoname" in adapter
+assert '"libm.so"' in adapter[open_start:elf_start]
 assert "lifecycle_status != 123" in probe
 assert "lifecycle_status() != 1234567" in probe
 assert "lifecycle_status() == 124567" in probe
@@ -170,10 +178,26 @@ PY
   fail "fixture C source SHA mismatch"
 [[ "$(sha "$fixture_root/child.c")" == "$FIXTURE_CHILD_C_SHA256" ]] ||
   fail "fixture child C source SHA mismatch"
+[[ "$(sha "$fixture_root/grandchild.c")" == "$FIXTURE_GRANDCHILD_C_SHA256" ]] ||
+  fail "fixture grandchild C source SHA mismatch"
 [[ "$(sha "$fixture_root/host_provider.c")" == "$FIXTURE_HOST_PROVIDER_C_SHA256" ]] ||
   fail "fixture host-provider C source SHA mismatch"
 [[ "$(sha "$fixture_root/child.exports.map")" == "$FIXTURE_CHILD_MAP_SHA256" ]] ||
   fail "fixture child export map SHA mismatch"
+[[ "$(sha "$fixture_root/grandchild.exports.map")" == "$FIXTURE_GRANDCHILD_MAP_SHA256" ]] ||
+  fail "fixture grandchild export map SHA mismatch"
+for entry in \
+  "generic_root.c:$GENERIC_ROOT_C_SHA256" \
+  "generic_child.c:$GENERIC_CHILD_C_SHA256" \
+  "generic_grandchild.c:$GENERIC_GRANDCHILD_C_SHA256" \
+  "generic_root.exports.map:$GENERIC_ROOT_MAP_SHA256" \
+  "generic_child.exports.map:$GENERIC_CHILD_MAP_SHA256" \
+  "generic_grandchild.exports.map:$GENERIC_GRANDCHILD_MAP_SHA256"; do
+  file="${entry%%:*}"
+  expected="${entry#*:}"
+  [[ "$(sha "$fixture_root/$file")" == "$expected" ]] ||
+    fail "generic graph source SHA mismatch: $file"
+done
 [[ "$(sha "$fixture_root/NativeFixture.java")" == "$FIXTURE_JAVA_SHA256" ]] ||
   fail "fixture Java source SHA mismatch"
 grep -F "{\"nativeAdd\", \"$FIXTURE_ADD_DESCRIPTOR\"" "$fixture_root/native_fixture.c" >/dev/null ||
@@ -188,6 +212,14 @@ ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}" \
   fail "fixture ELF SHA mismatch"
 [[ -f "$fixture_child" && "$(sha "$fixture_child")" == "$FIXTURE_CHILD_ELF_SHA256" ]] ||
   fail "fixture child ELF SHA mismatch"
+[[ -f "$fixture_grandchild" && "$(sha "$fixture_grandchild")" == "$FIXTURE_GRANDCHILD_ELF_SHA256" ]] ||
+  fail "fixture grandchild ELF SHA mismatch"
+[[ -f "$generic_root" && "$(sha "$generic_root")" == "$GENERIC_ROOT_ELF_SHA256" ]] ||
+  fail "generic root ELF SHA mismatch"
+[[ -f "$generic_child" && "$(sha "$generic_child")" == "$GENERIC_CHILD_ELF_SHA256" ]] ||
+  fail "generic child ELF SHA mismatch"
+[[ -f "$generic_grandchild" && "$(sha "$generic_grandchild")" == "$GENERIC_GRANDCHILD_ELF_SHA256" ]] ||
+  fail "generic grandchild ELF SHA mismatch"
 
 ndk="${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}/ndk/$NDK_REVISION"
 toolchain="$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin"
@@ -212,6 +244,7 @@ read -r exec_offset exec_begin exec_file_size exec_memory_size exec_alignment < 
   fail "fixture executable PT_LOAD mismatch"
 root_dynamic="$("$readelf" -d "$fixture_elf")"
 child_dynamic="$("$readelf" -d "$fixture_child")"
+grandchild_dynamic="$("$readelf" -d "$fixture_grandchild")"
 [[ "$(grep -c '(NEEDED)' <<< "$root_dynamic")" == 3 ]] ||
   fail "fixture root dependency count drift"
 grep -E '\(NEEDED\).*libdarwin-art-jni-child\.so' <<< "$root_dynamic" >/dev/null ||
@@ -220,12 +253,16 @@ grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' <<< "$root_dynamic" >/dev/null 
   fail "fixture root virtual-provider dependency drift"
 grep -E '\(NEEDED\).*libc\.so' <<< "$root_dynamic" >/dev/null ||
   fail "fixture root Bionic provider dependency drift"
-[[ "$(grep -c '(NEEDED)' <<< "$child_dynamic")" == 2 ]] ||
+[[ "$(grep -c '(NEEDED)' <<< "$child_dynamic")" == 3 ]] ||
   fail "fixture child dependency count drift"
+grep -E '\(NEEDED\).*libdarwin-art-jni-grandchild\.so' <<< "$child_dynamic" >/dev/null ||
+  fail "fixture child grandchild dependency drift"
 grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' <<< "$child_dynamic" >/dev/null ||
   fail "fixture child virtual-provider dependency drift"
 grep -E '\(NEEDED\).*libc\.so' <<< "$child_dynamic" >/dev/null ||
   fail "fixture child Bionic lifecycle dependency drift"
+[[ "$(grep -c '(NEEDED)' <<< "$grandchild_dynamic" || true)" == 0 ]] ||
+  fail "fixture grandchild dependency count drift"
 for elf in "$fixture_elf" "$fixture_child"; do
   "$readelf" -rW "$elf" |
     grep -E 'R_AARCH64_JUMP_SLOT.*__cxa_atexit' >/dev/null ||

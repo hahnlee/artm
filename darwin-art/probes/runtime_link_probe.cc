@@ -475,6 +475,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::getenv("DARWIN_ART_ANDROID_ELF_JNI_FIXTURE");
   const bool run_elf_jni_fixture =
       elf_fixture_path != nullptr && elf_fixture_path[0] != '\0';
+  const char* generic_elf_path =
+      std::getenv("DARWIN_ART_ANDROID_ELF_GENERIC_FIXTURE");
+  const bool run_generic_elf =
+      generic_elf_path != nullptr && generic_elf_path[0] != '\0';
 
   // Darwin's malloc zones can claim the fixed compressed-reference window
   // while RuntimeArgumentMap is being assembled. Reserve ART's bounded arena
@@ -1352,6 +1356,23 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   }
 
   if (run_elf_jni_fixture) {
+    if (!run_generic_elf) {
+      std::cerr << "ART Android ELF generic graph path is missing\n";
+      return 40;
+    }
+    std::string generic_load_error;
+    bool generic_loaded = false;
+    {
+      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
+      generic_loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
+          env, generic_elf_path, app_loader_ref, nullptr, &generic_load_error);
+    }
+    if (!generic_loaded || !generic_load_error.empty() || env->ExceptionCheck() ||
+        darwin_art_elf_jni_fixture_registration_status() != 0) {
+      std::cerr << "ART Android ELF generic graph load failed, load_error="
+                << generic_load_error << "\n";
+      return 40;
+    }
     char* partial_error = nullptr;
     void* partial_handle = android::OpenNativeLibrary(
         env, 35, elf_fixture_path, app_loader_ref, nullptr, nullptr, nullptr,

@@ -3978,12 +3978,19 @@ fn probe_runtime_dex_flavor(
     if elf_jni {
         build_shell_gate(root, "build-android-elf-jni-fixture.sh")?;
         let fixture = root.join("_build/android-elf-jni-fixture/libdarwin-art-jni-fixture.so");
-        if !fixture.is_file() {
-            return Err(
-                format!("Android ELF JNI fixture is missing: {}", fixture.display()).into(),
-            );
+        let generic_fixture =
+            root.join("_build/android-elf-jni-fixture/libdarwin-art-generic-root.so");
+        if !fixture.is_file() || !generic_fixture.is_file() {
+            return Err(format!(
+                "Android ELF JNI fixture is missing: {} or {}",
+                fixture.display(),
+                generic_fixture.display()
+            )
+            .into());
         }
-        command.env("DARWIN_ART_ANDROID_ELF_JNI_FIXTURE", fixture);
+        command
+            .env("DARWIN_ART_ANDROID_ELF_JNI_FIXTURE", fixture)
+            .env("DARWIN_ART_ANDROID_ELF_GENERIC_FIXTURE", generic_fixture);
     }
     let output = command_output(&mut command)?;
     let expected = if elf_jni {

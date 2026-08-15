@@ -5,14 +5,33 @@ Android `.so` compatibility.
 
 ## Accepted image
 
-`tools/build-android-elf-jni-fixture.sh` builds a root and child AArch64
-`ET_DYN` graph and generates an identity header from both exact byte lengths and
-SHA-256 values. The adapter reads the requested root and one fixed-name sibling,
-verifies both identities, and supplies those bytes under their exact embedded
-SONAMEs. It never searches a guest path or Darwin's global symbol namespace.
+`tools/build-android-elf-jni-fixture.sh` builds a root, child, and grandchild
+AArch64 `ET_DYN` graph and generates an identity header from all three exact byte
+lengths and SHA-256 values. The adapter delegates the caller-selected parent
+directory as trusted host authority, then the filesystem broker opens the root
+and recursively named siblings as byte components with `O_NOFOLLOW`,
+`O_NONBLOCK`, regular-file checks, and fixed file/count/total-size caps. The
+same authorized descriptor supplies metadata and bytes. Provider SONAMEs are
+never opened from disk; RPATH/RUNPATH, dyld lookup, and alternate paths are not
+consulted for an Android ELF graph.
 
-The root has exactly two `DT_NEEDED` entries: the real child and one explicit
-virtual host-provider SONAME. The child needs only that provider. The provider
+Selecting and opening the parent directory is host policy, not an ancestor
+symlink sandbox: only its final component is opened with `O_NOFOLLOW`. The host
+must also prevent concurrent writes to authorized inodes. Filename walking is
+byte-preserving, including a non-UTF-8 root basename, but the current
+`ClosedElfNamespace` uses Rust `String` keys. Embedded non-UTF-8 SONAME or
+DT_NEEDED values therefore fail with an explicit namespace-capability error
+after byte-component validation.
+
+The discovery gate also uses the pinned NDK r28c `libc++_shared.so`: a sibling
+root discovers it while `libc.so`, `libdl.so`, and `libm.so` are poisoned disk
+entries and must be skipped as providers. Metadata inspection deliberately
+accepts loader-unsupported tags such as GNU RELRO for discovery; the later load
+stage still applies its own explicit mapping/relocation capability checks.
+
+The root needs the real child plus explicit virtual host/Bionic providers. The
+child needs the real grandchild plus those providers; the grandchild is a pure
+leaf. The host provider
 exports one reviewed fixed-register `void(int)` lifecycle recorder; unknown
 SONAMEs and symbols fail closed. Both ELF objects have initializer/finalizer
 arrays and no GNU RELRO or TLS. The root's constructor and `NativeAdd` reach a
@@ -21,11 +40,12 @@ real child export through eager `R_AARCH64_JUMP_SLOT` relocation.
 ## ART lifecycle
 
 `JavaVMExt::LoadNativeLibrary` calls the Darwin `OpenNativeLibrary` seam. Mach-O
-libraries keep their existing `dlopen`/`dlclose` ownership. The hash-locked ELF
-fixture instead receives a private Rust graph handle. The C ABI stages the
+libraries keep their existing `dlopen`/`dlclose` ownership. A broker-discovered
+ELF receives a private Rust graph handle. The C ABI stages the
 complete closure, resolves it only against graph scope plus the explicit
 provider, and runs every constructor before returning the still-private handle.
-The adapter publishes only after lifecycle-symbol and JNI-proxy preflight. It is tagged
+The adapter creates no lifecycle/provider/graph handle until discovery has
+completed, and publishes only after graph construction and JNI-proxy preflight. It is tagged
 `needs_native_bridge=true`; close dispatch is therefore atomic between the ELF
 handle and the raw dyld handle.
 
@@ -35,7 +55,10 @@ never sees ART's real function tables. The proxy implements only the fixture's
 `GetEnv`, `FindClass`, `RegisterNatives`, and `ThrowNew` path. Backend calls use
 the current ART thread's `JNIEnv`; no synchronous-load pointer is retained.
 
-The backend accepts exactly the fixture's eight reviewed signatures. It creates
+The RegisterNatives backend accepts exactly the fixture's eight reviewed
+signatures. Generic sibling discovery does not yet imply arbitrary registered-
+JNI support; named JNI can only proceed through the separately supported shorty
+trampoline path. The fixture backend creates
 one cache-owned executable page while writable, emits the cached thunks, flushes
 the instruction cache, changes the page to read/execute, and publishes its
 generation/range. `NativeBridgeIsNativeBridgeFunctionPointer` recognizes only
@@ -86,10 +109,16 @@ it becomes the next action and the dispatcher is restored at the front.
 4. Regular-JNI scalar/reference shorty generation, actual ART registration,
    narrow and FP stack repacking, and Z/B/C/S/I/J/F/D/L/V return paths:
    complete for the graph root.
-5. The reviewed recursive `DT_NEEDED` root+child graph, explicit provider,
+5. Recursive sibling `DT_NEEDED` discovery, including the reviewed
+   root→child→grandchild graph, explicit providers,
    transactional constructors, and reverse finalizers: complete.
-6. Arbitrary dependency discovery, CriticalNative, and complete JNI
-   proxy/provider tables: incomplete.
+   A second actual-ART graph has the same two-level dependency topology but no
+   Bionic imports and exports `JNI_OnLoad` without `JNI_OnUnload`; it proves the
+   generic path is not coupled to fixture route masks or optional lifecycle
+   exports.
+6. Class-loader namespace caching, ZIP/APK extraction, arbitrary
+   RegisterNatives/JNI proxy expansion, CriticalNative, and complete provider
+   tables: incomplete.
 
 Stage 4 explicitly repacks the two calling conventions. The fixture gate
 compiles and disassembles the same source for both targets: Android uses
