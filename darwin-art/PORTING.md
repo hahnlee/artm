@@ -188,7 +188,9 @@
 - [ ] Provide coherent virtual `libdl`, `liblog`, and Bionic `libc` facades for
       file, memory, string, errno, and Android-prefix path behavior. The closed
       `libdl` policy and executable 18-symbol AOSP `liblog` provider pass; libc
-      and loader composition remain pending.
+      has a complete 160-import classification and 11 passing state-free leaf
+      implementations, while translated/stateful libc and loader composition
+      remain pending.
 - [ ] Execute a realistic Tier-1 JNI library through `Java -> JNI -> Android
       ELF -> Bionic facade -> Darwin`, including pthread and TLS behavior.
 - [ ] Add capability-based VM fallback for direct Linux syscalls,

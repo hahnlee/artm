@@ -191,6 +191,24 @@ libapplication.so (Android ELF)
 The facades are analogous to Wine's `ntdll` and system DLLs. They preserve the
 guest ABI and call Darwin mechanisms internally.
 
+The first real `libc++_shared.so` import census prevents the libc facade from
+becoming an accidental alias of Darwin libc. Its `libc.so` dependency contains
+159 function imports and the Bionic `FILE` object `__sF`. The locked manifest
+classifies them by implementation boundary:
+
+| Class | Count | Ownership |
+|---|---:|---|
+| A — state-free ABI leaves | 11 | prefixed implementations with differential tests |
+| B — translated wrappers | 76 | Android errno/constants/layout/path conversion |
+| C — Bionic state | 65 | allocator, pthread/TLS, locale, stdio, environment |
+| D — loader/kernel coupling | 8 | program headers, process/auxv and Linux semantics |
+
+All eleven A functions now pass as a closed prefixed provider: byte memory and
+string operations plus the required 32-bit wide-character leaves. In
+particular Android ARM64 `wchar_t` ordering is unsigned, unlike Darwin's signed
+type, so `wmemcmp` implements the Bionic ordering rather than forwarding to
+the host. Classes B–D remain explicit capability blockers.
+
 ## Prior art and the boundary we adopt
 
 This design reuses lessons from existing foreign-ABI runtimes rather than
