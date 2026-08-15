@@ -3854,6 +3854,23 @@ fn prepare_icu_bootclasspath(root: &Path) -> Result<()> {
 }
 
 fn prepare_icu_runtime_bootclasspath(root: &Path) -> Result<PathBuf> {
+    let api36_source = env::var_os("DARWIN_ART_CORE_ICU4J_JAR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("_prebuilt/android-16/i18n/core-icu4j-api36.jar"));
+    if api36_source.is_file() {
+        run_command(
+            Command::new("bash")
+                .arg(root.join("tools/audit-android16-core-icu4j-runtime.sh"))
+                .arg(&api36_source),
+        )?;
+        let output = root.join("_build/bootclasspath/core-icu4j-api36.jar");
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(&api36_source, &output)?;
+        return Ok(output);
+    }
+
     let source_lock = read_lock(root)?;
     let apex = root.join("_prebuilt/android-16/i18n/com.android.i18n-arm64.apex");
     if !apex.is_file() {
@@ -3964,7 +3981,7 @@ fn prepare_icu_runtime_bootclasspath(root: &Path) -> Result<PathBuf> {
     }
     let probe = root.join("_build/dex-probe/dex-probe");
     let summary = command_output(Command::new(&probe).arg("--summary").arg(&dex))?;
-    let expected = "AOSP DEX: verified=yes version=39 classes=1598 methods=14998 \
+    let expected = "AOSP DEX: verified=yes version=39 classes=1795 methods=16316 \
                     class[0]=Landroid/icu/impl/Assert;";
     if summary.trim() != expected {
         return Err(format!("unexpected runtime core-icu4j DEX summary: {summary:?}").into());
