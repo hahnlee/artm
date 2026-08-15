@@ -37,9 +37,12 @@ different from dependency traversal order.
 
 This is intentionally not a general dynamic linker. PLT relocation is eager and
 requires `DT_BIND_NOW`, `DF_BIND_NOW`, or `DF_1_NOW`; lazy binding is rejected.
-GNU RELRO is also rejected rather than silently weakened. TLS, `DT_REL`,
-`DT_RELR`, other relocation kinds, `DT_INIT`, preinit arrays, text relocations,
-symbolic lookup, and RPATH/RUNPATH return explicit capability errors.
+One well-formed `PT_GNU_RELRO` range is relocated while writable and then
+page-rounded and protected read-only before constructors or handle publication.
+The range must stay inside one readable, non-executable `PT_LOAD`; malformed,
+duplicate, or out-of-image RELRO segments fail closed. TLS, `DT_REL`, `DT_RELR`,
+other relocation kinds, `DT_INIT`, preinit arrays, text relocations, symbolic
+lookup, and RPATH/RUNPATH return explicit capability errors.
 `LoadedElf` owns the complete `mmap` reservation and unmaps it on every error
 path or `Drop`. Resolver-provided addresses must remain valid until the image is
 dropped.

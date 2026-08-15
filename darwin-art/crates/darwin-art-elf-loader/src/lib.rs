@@ -1559,10 +1559,7 @@ fn parse_image(bytes: &[u8]) -> Result<ParsedImage, LoadError> {
     parse_image_with_policy(bytes, false)
 }
 
-fn parse_image_with_policy(
-    bytes: &[u8],
-    metadata_only: bool,
-) -> Result<ParsedImage, LoadError> {
+fn parse_image_with_policy(bytes: &[u8], metadata_only: bool) -> Result<ParsedImage, LoadError> {
     if bytes.len() < ELF64_EHDR_SIZE || bytes.len() < EI_NIDENT {
         return Err(LoadError::Format("truncated ELF header"));
     }
@@ -1598,6 +1595,7 @@ fn parse_image_with_policy(
 
     let mut loads = Vec::new();
     let mut dynamic = None;
+    let mut relro = None;
     for index in 0..program_count {
         let offset = program_offset + index * ELF64_PHDR_SIZE;
         let header = ProgramHeader {
@@ -1621,7 +1619,9 @@ fn parse_image_with_policy(
             }
             PT_TLS if !metadata_only => return Err(LoadError::Capability(Capability::Tls)),
             PT_GNU_RELRO if !metadata_only => {
-                return Err(LoadError::Capability(Capability::Relro));
+                if relro.replace(header).is_some() {
+                    return Err(LoadError::Format("multiple PT_GNU_RELRO segments"));
+                }
             }
             _ => {}
         }
@@ -1689,6 +1689,48 @@ fn parse_image_with_policy(
                     "host page would be writable and executable",
                 ));
             }
+        }
+    }
+
+    if let Some(relro) = relro {
+        if relro.flags != PF_R || relro.memory_size == 0 || relro.file_size > relro.memory_size {
+            return Err(LoadError::Format("invalid PT_GNU_RELRO segment"));
+        }
+        let relro_end = relro
+            .virtual_address
+            .checked_add(relro.memory_size)
+            .ok_or(LoadError::Bounds("PT_GNU_RELRO end overflow"))?;
+        let containing_load = loads.iter().any(|load| {
+            load.virtual_address <= relro.virtual_address
+                && load
+                    .virtual_address
+                    .checked_add(load.memory_size)
+                    .is_some_and(|load_end| relro_end <= load_end)
+        });
+        if !containing_load {
+            return Err(LoadError::Format("PT_GNU_RELRO outside PT_LOAD"));
+        }
+
+        let start = difference_to_usize(relro.virtual_address & !page_mask, minimum)? / page_size;
+        let end_address = relro_end
+            .checked_add(page_mask)
+            .ok_or(LoadError::Bounds("PT_GNU_RELRO page rounding overflow"))?
+            & !page_mask;
+        let end = difference_to_usize(end_address, minimum)? / page_size;
+        let relro_pages = protections
+            .get_mut(start..end)
+            .ok_or(LoadError::Bounds("PT_GNU_RELRO page plan"))?;
+        if relro_pages.is_empty()
+            || relro_pages
+                .iter()
+                .any(|protection| protection & PROT_READ == 0 || protection & PROT_EXEC != 0)
+        {
+            return Err(LoadError::Protection(
+                "PT_GNU_RELRO does not cover readable non-executable pages",
+            ));
+        }
+        for protection in relro_pages {
+            *protection &= !PROT_WRITE;
         }
     }
 

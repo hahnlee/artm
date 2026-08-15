@@ -4,10 +4,14 @@ use darwin_art_elf_loader::{
 use std::env;
 use std::fs;
 use std::num::NonZeroUsize;
+use std::os::unix::process::ExitStatusExt;
+use std::process::Command;
 use std::sync::Mutex;
 
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
+const PT_GNU_EH_FRAME: u32 = 0x6474_e550;
+const PT_GNU_RELRO: u32 = 0x6474_e552;
 const PF_X: u32 = 1;
 const PF_W: u32 = 2;
 const DT_NULL: i64 = 0;
@@ -29,6 +33,18 @@ unsafe extern "C" fn provider_value() -> i32 {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<_> = env::args_os().collect();
+    if arguments
+        .get(1)
+        .is_some_and(|argument| argument == "--relro-write-child")
+    {
+        let path = arguments.get(2).ok_or("missing RELRO child fixture")?;
+        let bytes = fs::read(path)?;
+        let mut resolver = FixtureResolver::default();
+        let mut image = LoadedElf::load_with_resolver(&bytes, &mut resolver)?;
+        image.run_initializers()?;
+        let _ = image.call_exported_i32("relro_write_attempt")?;
+        return Err("PT_GNU_RELRO page remained writable".into());
+    }
     if arguments.len() != 8 {
         return Err(
             "usage: elf-loader-gate POSITIVE.so IMPORT.so WEAK.so LAZY.so RELRO.so TLS.so FINALIZER.so".into(),
@@ -49,17 +65,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     expect_capability(&lazy, |capability| {
         matches!(capability, Capability::LazyBinding)
     })?;
-    expect_capability(&relro, |capability| matches!(capability, Capability::Relro))?;
+    run_relro(&relro, &arguments[5])?;
     expect_capability(&tls, |capability| matches!(capability, Capability::Tls))?;
     run_malformed_matrix(&positive)?;
     run_finalizer_lifecycle(&finalizer)?;
 
     println!(
         "elf-loader-gate: positive=constructor-order import=ABS64+GLOB_DAT+JUMP_SLOT \
-         resolver=closed+versioned weak=zero NOW=required RELRO=reject TLS=reject \
+         resolver=closed+versioned weak=zero NOW=required RELRO=read-only TLS=reject \
          wx=reject overflow=reject overlap=reject bounds=reject \
          finalizers=array-reverse+DT_FINI exactly-once cleanup=drop"
     );
+    Ok(())
+}
+
+fn run_relro(
+    bytes: &[u8],
+    fixture_path: &std::ffi::OsStr,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut resolver = FixtureResolver::default();
+    let mut image = LoadedElf::load_with_resolver(bytes, &mut resolver)?;
+    image.run_initializers()?;
+    if image.call_exported_i32("imported_value")? != 165 {
+        return Err("RELRO fixture import execution mismatch".into());
+    }
+
+    let status = Command::new(env::current_exe()?)
+        .arg("--relro-write-child")
+        .arg(fixture_path)
+        .status()?;
+    if status.signal().is_none() {
+        return Err(format!("RELRO write child did not fault: {status}").into());
+    }
+    run_relro_malformed_matrix(bytes)?;
+    Ok(())
+}
+
+fn run_relro_malformed_matrix(bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let header = *load_program_headers(bytes, Some(PT_GNU_RELRO))?
+        .first()
+        .ok_or("RELRO fixture has no PT_GNU_RELRO")?;
+
+    let mut writable_flags = bytes.to_vec();
+    writable_flags[header + 4..header + 8].copy_from_slice(&(PF_W | 4).to_le_bytes());
+    expect_rejected(&writable_flags, "writable PT_GNU_RELRO flags")?;
+
+    let mut zero_size = bytes.to_vec();
+    zero_size[header + 40..header + 48].copy_from_slice(&0_u64.to_le_bytes());
+    expect_rejected(&zero_size, "zero-sized PT_GNU_RELRO")?;
+
+    let mut outside_load = bytes.to_vec();
+    outside_load[header + 16..header + 24].copy_from_slice(&0x4000_0000_u64.to_le_bytes());
+    expect_rejected(&outside_load, "PT_GNU_RELRO outside PT_LOAD")?;
+
+    let mut duplicate = bytes.to_vec();
+    let eh_frame = *load_program_headers(bytes, Some(PT_GNU_EH_FRAME))?
+        .first()
+        .ok_or("RELRO fixture has no PT_GNU_EH_FRAME")?;
+    duplicate[eh_frame..eh_frame + 4].copy_from_slice(&PT_GNU_RELRO.to_le_bytes());
+    expect_rejected(&duplicate, "duplicate PT_GNU_RELRO")?;
     Ok(())
 }
 
