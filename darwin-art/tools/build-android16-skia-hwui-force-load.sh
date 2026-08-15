@@ -46,6 +46,10 @@ verify_sha "$skia/gn/utils.gni" "$SKIA_UTILS_GNI_SHA256"
 verify_sha "$skia/include/private/base/SkFeatures.h" "$SKIA_FEATURES_SHA256"
 verify_sha "$skia/src/ports/SkFontMgr_custom_empty.cpp" "$SKIA_CUSTOM_EMPTY_SHA256"
 verify_sha "$skia/tools/SkSharingProc.cpp" "$SKIA_SHARING_PROC_SHA256"
+verify_sha "$skia/client_utils/android/BitmapRegionDecoder.cpp" \
+  "$SKIA_BITMAP_REGION_DECODER_SHA256"
+verify_sha "$skia/client_utils/android/FrontBufferedStream.cpp" \
+  "$SKIA_FRONT_BUFFERED_STREAM_SHA256"
 verify_sha "$coretext_patch" "$DARWIN_CORETEXT_PATCH_SHA256"
 
 required_archives=("$freetype_archive" "$libpng_archive" "$zlib_archive" \
@@ -75,7 +79,7 @@ patch -d "$shadow_skia" -p1 < "$coretext_patch"
 gn_args="is_official_build=true is_debug=false target_cpu=\"arm64\" \
 skia_enable_gpu=false skia_enable_graphite=false skia_enable_pdf=false \
 skia_enable_skottie=false skia_enable_svg=false skia_enable_precompile=false \
-skia_enable_tools=false skia_enable_fontmgr_empty=false \
+skia_enable_tools=false skia_enable_android_utils=true skia_enable_fontmgr_empty=false \
 skia_enable_fontmgr_custom_empty=true skia_enable_fontmgr_custom_directory=false \
 skia_enable_fontmgr_custom_embedded=true skia_enable_fontmgr_android=false \
 skia_enable_fontmgr_android_ndk=false skia_include_multiframe_procs=true \
@@ -102,6 +106,7 @@ extra_cflags=[\"-I$libcutils_include\",\"-I$liblog_include\",\"-I$project_root/_
 
 args_file="$build_dir/args.gn"
 for required in \
+  'skia_enable_android_utils = true' \
   'skia_enable_fontmgr_custom_empty = true' \
   'skia_include_multiframe_procs = true' \
   'skia_use_fonthost_mac = false' \
@@ -112,6 +117,13 @@ for required in \
   grep -Fx "$required" "$args_file" >/dev/null || fail_input "missing GN selection: $required"
 done
 resolved_sources="$(cd "$shadow_skia" && "$gn" desc "$build_dir" //:skia sources)"
+resolved_android_sources="$(cd "$shadow_skia" && "$gn" desc "$build_dir" //:android_utils sources)"
+for android_source in \
+  '//client_utils/android/BitmapRegionDecoder.cpp' \
+  '//client_utils/android/FrontBufferedStream.cpp'; do
+  [[ "$(grep -Fc "$android_source" <<<"$resolved_android_sources")" == 1 ]] ||
+    fail_input "Android utils source missing or duplicated: $android_source"
+done
 if grep -E 'SkCTFont(\.cpp|CreateExactCopy\.cpp)' <<<"$resolved_sources" >/dev/null; then
   fail_input "patched GN source closure still contains CoreText utilities"
 fi
@@ -120,6 +132,9 @@ archive="$build_dir/libskia.a"
 skcms="$build_dir/libskcms.a"
 [[ -f "$archive" && -f "$skcms" ]] || fail_input "Skia archives not generated"
 [[ "$(lipo -archs "$archive")" == arm64 ]] || fail_input "Skia archive is not arm64"
+archive_members="$(ar -t "$archive" | grep -v '^__\.SYMDEF' | wc -l | tr -d ' ')"
+[[ "$archive_members" == "$EXPECTED_SKIA_ARCHIVE_MEMBER_COUNT" ]] ||
+  fail_input "Skia archive members=$archive_members expected=$EXPECTED_SKIA_ARCHIVE_MEMBER_COUNT"
 
 definitions="$(nm -gUC "$archive")"
 for symbol in \
@@ -129,6 +144,22 @@ for symbol in \
   grep -F " T $symbol" <<<"$definitions" >/dev/null ||
     fail_input "missing upstream definition $symbol"
 done
+android_utils_symbols="$build_dir/android-utils-defined-symbols.txt"
+raw_definitions="$(nm -gU "$archive")"
+for symbol in \
+  '__ZN7android4skia19BitmapRegionDecoder12decodeRegionEP8SkBitmapPNS0_12BRDAllocatorERK7SkIRecti11SkColorTypeb5sk_spI12SkColorSpaceE' \
+  '__ZN7android4skia19BitmapRegionDecoder4MakeE5sk_spI6SkDataE' \
+  '__ZN7android4skia19BitmapRegionDecoderC1ENSt3__110unique_ptrI14SkAndroidCodecNS2_14default_deleteIS4_EEEE' \
+  '__ZN7android4skia19FrontBufferedStream4MakeENSt3__110unique_ptrI8SkStreamNS2_14default_deleteIS4_EEEEm' \
+  '__ZNK7android4skia19BitmapRegionDecoder5widthEv' \
+  '__ZNK7android4skia19BitmapRegionDecoder6heightEv'; do
+  grep -F " T $symbol" <<<"$raw_definitions" >/dev/null ||
+    fail_input "missing Android utils definition $symbol"
+  printf '%s\n' "$symbol"
+done > "$android_utils_symbols"
+android_utils_symbols_sha="$(shasum -a 256 "$android_utils_symbols" | awk '{print $1}')"
+[[ "$android_utils_symbols_sha" == "$ANDROID_UTILS_SYMBOL_MANIFEST_SHA256" ]] ||
+  fail_input "Android utils symbol manifest changed: $android_utils_symbols_sha"
 if nm -u "$archive" | grep -E '_(CTFont|kCTFont)' >/dev/null; then
   fail_input "archive still imports CoreText"
 fi
@@ -166,6 +197,12 @@ fi
 if nm -u "$probe" | grep -E '_(CTFont|kCTFont)' >/dev/null; then
   fail_input "force-load executable still imports CoreText symbols"
 fi
+provider_audit="$build_dir/forbidden-host-provider-audit.txt"
+printf 'CoreText=0\nHomebrew=0\n' > "$provider_audit"
+provider_audit_sha="$(shasum -a 256 "$provider_audit" | awk '{print $1}')"
+[[ "$provider_audit_sha" == "$FORBIDDEN_HOST_PROVIDER_AUDIT_SHA256" ]] ||
+  fail_input "forbidden-provider audit manifest changed: $provider_audit_sha"
 
 echo "skia-hwui-force-load: $output"
-echo "skia-hwui-force-load: archive=$archive"
+echo "skia-hwui-force-load: archive=$archive members=$archive_members android-utils=6"
+echo "skia-hwui-force-load: CoreText=0 Homebrew=0"
