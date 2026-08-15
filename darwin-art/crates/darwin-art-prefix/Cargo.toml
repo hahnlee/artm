@@ -1,0 +1,10 @@
+[package]
+name = "darwin-art-prefix"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
