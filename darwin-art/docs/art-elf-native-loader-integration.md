@@ -57,8 +57,9 @@ the current ART thread's `JNIEnv`; no synchronous-load pointer is retained.
 
 The RegisterNatives backend accepts exactly the fixture's eight reviewed
 signatures. Generic sibling discovery does not yet imply arbitrary registered-
-JNI support; named JNI can only proceed through the separately supported shorty
-trampoline path. The fixture backend creates
+JNI support, and ordinary named-JNI lookup is currently rejected. Supporting
+it requires a general per-shorty trampoline owner rather than returning a raw
+Android function pointer. The fixture backend creates
 one cache-owned executable page while writable, emits the cached thunks, flushes
 the instruction cache, changes the page to read/execute, and publishes its
 generation/range. `NativeBridgeIsNativeBridgeFunctionPointer` recognizes only
