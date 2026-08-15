@@ -139,7 +139,7 @@ open_start = adapter.index("void* OpenNativeLibrary(")
 elf_start = adapter.index("if (is_elf) {", open_start)
 host_start = adapter.index("void* handle =", elf_start)
 elf = adapter[elf_start:host_start]
-assert "darwin_art_elf_graph_load(" in elf
+assert "darwin_art_elf_graph_load_with_lifecycle(" in elf
 assert "darwin_art_elf_graph_lookup_root(" in adapter
 assert "darwin_art_elf_graph_unload(" in adapter
 assert "darwin_art_bionic_namespace_bind_builtins(" in elf
@@ -148,9 +148,11 @@ assert "darwin_art_bionic_namespace_teardown(" in adapter
 assert "darwin_art_elf_load_bytes(" not in adapter
 assert "dlopen(" not in elf and "dlsym(" not in elf
 assert elf.index("darwin_art_bionic_namespace_seal(") < elf.index(
-    "darwin_art_elf_graph_load(")
-assert elf.index("darwin_art_elf_graph_load(") < elf.index("darwin_art_jni_proxy_init(")
-assert elf.index("darwin_art_elf_graph_load(") < elf.index("*needs_native_bridge = true")
+    "darwin_art_elf_graph_load_with_lifecycle(")
+assert elf.index("darwin_art_elf_graph_load_with_lifecycle(") < elf.index(
+    "darwin_art_jni_proxy_init(")
+assert elf.index("darwin_art_elf_graph_load_with_lifecycle(") < elf.index(
+    "*needs_native_bridge = true")
 close = adapter[adapter.index("bool CloseNativeLibrary("):
                   adapter.index("void NativeLoaderFreeErrorMessage")]
 assert close.index("DestroyRegularTrampolines") < close.index("darwin_art_elf_graph_unload")
@@ -158,8 +160,8 @@ assert close.index("darwin_art_elf_graph_unload") < close.index(
     "darwin_art_bionic_namespace_teardown")
 assert "kDarwinArtElfJniHostProviderSoname" in adapter
 assert "lifecycle_status != 123" in probe
-assert "lifecycle_status() != 12345" in probe
-assert "lifecycle_status() == 1245" in probe
+assert "lifecycle_status() != 1234567" in probe
+assert "lifecycle_status() == 124567" in probe
 assert "namespace_lifecycle_status() == 5" in probe
 print("register-natives-bridge: local-graph-flow=PASS providers=sealed-before-graph teardown=graph-before-namespace publish=after-complete no-dyld=ELF")
 PY
@@ -198,8 +200,15 @@ add_value="0x$($elf_nm -n "$fixture_elf" | awk '$3 == "NativeAdd" {print $1}')"
 spill_value="0x$($elf_nm -n "$fixture_elf" | awk '$3 == "NativeSpill" {print $1}')"
 [[ "$((add_value))" == "$((FIXTURE_NATIVE_ADD))" ]] || fail "NativeAdd ELF value mismatch"
 [[ "$((spill_value))" == "$((FIXTURE_NATIVE_SPILL))" ]] || fail "NativeSpill ELF value mismatch"
-"$readelf" -lW "$fixture_elf" |
-  grep -E "LOAD +0x00099c +0x000000000000499c .* R E +0x4000" >/dev/null ||
+read -r exec_offset exec_begin exec_file_size exec_memory_size exec_alignment < <(
+  "$readelf" -lW "$fixture_elf" |
+    awk '$1 == "LOAD" && $7 == "R" && $8 == "E" { print $2, $3, $5, $6, $9 }'
+)
+[[ "$exec_offset" == "$FIXTURE_EXEC_OFFSET" &&
+   "$((exec_begin))" == "$((FIXTURE_EXEC_BEGIN))" &&
+   "$exec_file_size" == "$exec_memory_size" &&
+   "$exec_alignment" == 0x4000 &&
+   "$((exec_begin + exec_memory_size))" == "$((FIXTURE_EXEC_END))" ]] ||
   fail "fixture executable PT_LOAD mismatch"
 root_dynamic="$("$readelf" -d "$fixture_elf")"
 child_dynamic="$("$readelf" -d "$fixture_child")"
@@ -211,10 +220,17 @@ grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' <<< "$root_dynamic" >/dev/null 
   fail "fixture root virtual-provider dependency drift"
 grep -E '\(NEEDED\).*libc\.so' <<< "$root_dynamic" >/dev/null ||
   fail "fixture root Bionic provider dependency drift"
-[[ "$(grep -c '(NEEDED)' <<< "$child_dynamic")" == 1 ]] ||
+[[ "$(grep -c '(NEEDED)' <<< "$child_dynamic")" == 2 ]] ||
   fail "fixture child dependency count drift"
 grep -E '\(NEEDED\).*libdarwin-art-jni-host\.so' <<< "$child_dynamic" >/dev/null ||
   fail "fixture child virtual-provider dependency drift"
+grep -E '\(NEEDED\).*libc\.so' <<< "$child_dynamic" >/dev/null ||
+  fail "fixture child Bionic lifecycle dependency drift"
+for elf in "$fixture_elf" "$fixture_child"; do
+  "$readelf" -rW "$elf" |
+    grep -E 'R_AARCH64_JUMP_SLOT.*__cxa_atexit' >/dev/null ||
+    fail "fixture per-DSO lifecycle import drift"
+done
 
 stage="$(mktemp -d "${TMPDIR:-/tmp}/register-natives-bridge.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
