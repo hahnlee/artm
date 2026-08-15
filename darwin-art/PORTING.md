@@ -178,19 +178,20 @@
 - [x] Add a strict inspection-only Android ARM64 ELF gate for dependencies,
       symbols, relocations, TLS, executable-memory requirements, constructors,
       and raw `svc`; APK-wide aggregation and loader execution remain pending.
-- [x] Map an import-free Android ARM64 ELF `.so` directly on Apple Silicon,
-      apply checked `R_AARCH64_RELATIVE` relocations, run its constructors, and
-      execute a no-argument export; imported symbols and `JNI_OnLoad` are the
-      next loader gates.
+- [x] Map Android ARM64 ELF `.so` directly on Apple Silicon, run constructors,
+      and execute exports. The loader applies checked `R_AARCH64_RELATIVE`,
+      `ABS64`, `GLOB_DAT`, and `JUMP_SLOT` relocations through a closed,
+      GNU-version-aware resolver with no Darwin global-symbol fallback.
 - [ ] Generate both ARM64 PCS boundaries: Darwin ART calls into Android-ABI JNI
       methods, and Android code calls a proxy `JNIEnv`/`JavaVM` table rather
       than the incompatible Mach-O function table directly.
 - [ ] Provide coherent virtual `libdl`, `liblog`, and Bionic `libc` facades for
       file, memory, string, errno, and Android-prefix path behavior. The closed
       `libdl` policy and executable 18-symbol AOSP `liblog` provider pass; libc
-      has a complete 160-import classification and 11 passing state-free leaf
-      implementations, while translated/stateful libc and loader composition
-      remain pending.
+      has a complete 160-import classification, 11 passing state-free leaf
+      functions, four allocator entrypoints with an explicit Android errno
+      seam, and four bit-exact libm leaf functions. Translated/stateful libc and
+      ART loader composition remain pending.
 - [ ] Execute a realistic Tier-1 JNI library through `Java -> JNI -> Android
       ELF -> Bionic facade -> Darwin`, including pthread and TLS behavior.
 - [ ] Add capability-based VM fallback for direct Linux syscalls,
