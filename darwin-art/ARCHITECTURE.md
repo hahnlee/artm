@@ -207,7 +207,17 @@ All eleven A functions now pass as a closed prefixed provider: byte memory and
 string operations plus the required 32-bit wide-character leaves. In
 particular Android ARM64 `wchar_t` ordering is unsigned, unlike Darwin's signed
 type, so `wmemcmp` implements the Bionic ordering rather than forwarding to
-the host. Classes B–D remain explicit capability blockers.
+the host.
+
+The independently executable providers currently own 60/160 imports with no
+duplicate owner: A 11/11, B 17/76, C 29/65, and D 3/8. This includes allocator
+and Bionic errno ownership, the read-only filesystem/virtual-FD slice, clocks
+and sleep, all 24 pthread imports plus the provider-owned create seam, immutable
+environment/property/auxv state, and loader-owned program-header iteration.
+The coverage audit deliberately labels these as standalone gates: composing
+them into one loader namespace with shared lifetime and teardown is still an
+open integration boundary, and the remaining 100 imports remain hard
+capability failures.
 
 ## Prior art and the boundary we adopt
 
@@ -320,8 +330,17 @@ public APIs, while all 18 API-35 `liblog` exports resolve to and execute the
 pinned AOSP Darwin liblog implementation. Bionic libc has an exact 160-import
 `libc++_shared.so` census, 11 state-free leaf functions, four allocator
 entrypoints with an explicit Android errno result seam, and four bit-exact
-libm leaf functions. Stateful libc, TLS, pthreads, and ART native-library
-integration remain open gates.
+libm leaf functions. Bionic errno is pthread-local and host-isolated. The
+filesystem facade owns byte paths, virtual descriptors, Android `stat` and
+`dirent` layouts; the time facade owns explicit clock/sysconf mappings and
+interruptible sleep. The pthread provider now owns all 24 libc++ imports and a
+coherent create/join/detach token lifecycle without exposing Darwin
+`pthread_t`. Process state comes from an immutable Android environment,
+property, and auxv snapshot rather than host globals. Together these
+standalone gates cover 60/160 libc imports with duplicate ownership rejected by
+`tools/audit-android35-libcxx-provider-coverage.sh`. Stdio/`FILE`, locale,
+formatting, wider writable filesystem operations, and one composed runtime
+resolver remain open gates.
 
 ## Ordered implementation after the Button gate
 
