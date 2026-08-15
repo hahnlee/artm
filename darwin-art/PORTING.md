@@ -123,6 +123,8 @@
       and Minikin (31 objects), retaining the real ICU dependency closure.
 - [x] Build a separate Android-framework Skia FreeType configuration and
       raster pinned Roboto glyphs through the AOSP FreeType/libpng/zlib chain.
+- [x] Build Android ICU common/i18n/stubdata/init for Darwin and exercise the
+      complete Minikin/HarfBuzz/FreeType/ICU shaping path with pinned fonts.
 - [ ] Close the complete upstream Canvas/Paint registrar dependency graph with
       GraphicsJNI, software `libhwui_static`, Minikin, HarfBuzz, FreeType, ICU,
       androidfw, and native utility modules; do not substitute per-symbol stubs.

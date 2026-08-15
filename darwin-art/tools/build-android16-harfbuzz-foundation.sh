@@ -32,7 +32,7 @@ fi
 HARFBUZZ_SOURCE_ROOT="$source_root" "$script_dir/verify-android16-harfbuzz-source.sh"
 
 android_bp="$source_root/Android.bp"
-icu_common="${HARFBUZZ_ICU_COMMON:-$project_root/_aosp/external/icu/icu4c/source/common}"
+icu_common="${HARFBUZZ_ICU_COMMON:-$project_root/_aosp/external/icu-graphics/icu4c/source/common}"
 required_include_dirs=(
   "$source_root/src"
   "$icu_common"

@@ -147,6 +147,8 @@ cargo run -p art-bootstrap -- build-graphics-codecs
 cargo run -p art-bootstrap -- build-harfbuzz
 cargo run -p art-bootstrap -- build-minikin
 cargo run -p art-bootstrap -- build-skia-text
+cargo run -p art-bootstrap -- build-icu
+cargo run -p art-bootstrap -- probe-minikin-shaping
 ```
 
 `liblog-darwin.a` contains all eight Darwin-host sources and resolves the two
@@ -174,6 +176,11 @@ data image, not a local symbol shim.
 Skia archive wired to the pinned AOSP FreeType/libpng/zlib archives. Its actual
 Roboto `Click` raster is locked at five glyphs, 1,097 ink pixels, and pixel hash
 `1f94df6816828ca2`; the final binary has no Homebrew or CoreText dependency.
+The ICU gate sparsely materializes only the Android common/i18n/data/init
+subtrees (about 49 MiB instead of the roughly 425 MiB full project), builds all
+458 translation units, and stages ICU 76 data. The Minikin acceptance then
+shapes Latin, Arabic bidi, Hangul, and a one-glyph `fi` GSUB ligature through
+the actual FreeType → Minikin → HarfBuzz → ICU closure.
 
 `build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
 depfile for every translation unit; the bootstrapper fingerprints the complete

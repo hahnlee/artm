@@ -94,7 +94,7 @@ check_lock platform/external/skia SKIA_REVISION "$skia_revision"
 minikin_root="$aosp_root/frameworks/minikin"
 minikin_module="$minikin_root/libs/minikin"
 harfbuzz_root="$aosp_root/external/harfbuzz_ng"
-icu_root="$aosp_root/external/icu"
+icu_root="$aosp_root/external/icu-graphics"
 freetype_root="$aosp_root/external/freetype"
 
 check_sha256 platform/frameworks/minikin "$minikin_revision" \
@@ -225,7 +225,7 @@ check_sha256 platform/frameworks/minikin "$minikin_revision" \
 
 # Shaping itself does not require Skia. The immediately following glyph-raster
 # acceptance does, and must not silently reuse the current empty font manager.
-skia_args="$project_root/_build/skia/args.gn"
+skia_args="$project_root/_build/skia-text/args.gn"
 if [[ ! -f "$skia_args" ]]; then
   record_failure "platform/external/skia@$skia_revision: missing generated GN args $skia_args"
 else

@@ -121,8 +121,7 @@ selection, caching, bidi, and layout path.
 
 ## Skia and FreeType raster follow-up
 
-The current `_build/skia/args.gn` is a CPU no-font build. Before glyph pixels
-can be accepted it must contain at least:
+The separate `_build/skia-text/args.gn` must contain at least:
 
 ```gn
 skia_use_freetype = true

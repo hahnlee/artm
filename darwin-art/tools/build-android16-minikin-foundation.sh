@@ -53,7 +53,7 @@ fi
 minikin_root="$aosp_root/frameworks/minikin"
 module_root="$minikin_root/libs/minikin"
 harfbuzz_root="$aosp_root/external/harfbuzz_ng"
-icu_common="$aosp_root/external/icu/icu4c/source/common"
+icu_common="$aosp_root/external/icu-graphics/icu4c/source/common"
 
 verify_file platform/frameworks/minikin "$minikin_revision" \
   "$minikin_root/Android.bp" \

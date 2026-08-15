@@ -49,6 +49,10 @@ fn run() -> Result<()> {
         ),
         "build-minikin" => build_shell_gate(&root, "build-android16-minikin-foundation.sh"),
         "build-skia-text" => build_shell_gate(&root, "build-android16-skia-text-raster.sh"),
+        "build-icu" => build_shell_gate(&root, "build-android16-icu-foundation.sh"),
+        "probe-minikin-shaping" => {
+            build_shell_gate(&root, "run-android16-minikin-shaping-acceptance.sh")
+        }
         "check-text-shaping" => build_shell_gate(&root, "check-android16-text-shaping-inputs.sh"),
         "build-dex" => build_dex_probe(&root),
         "build-runtime-platform" => build_runtime_platform(&root),
@@ -108,6 +112,8 @@ fn print_help() {
     println!("  build-harfbuzz  build the complete Darwin HarfBuzz archive");
     println!("  build-minikin  build the complete Darwin Minikin archive");
     println!("  build-skia-text  raster pinned Roboto through AOSP FreeType and Skia");
+    println!("  build-icu  build Android ICU common/i18n/data for Darwin");
+    println!("  probe-minikin-shaping  run real Minikin/HarfBuzz/ICU shaping cases");
     println!("  check-text-shaping  audit the full shaping and raster input closure");
     println!("  build-dex  compile AOSP libdexfile and parse a generated classes.dex");
     println!("  build-runtime-platform  compile ART host platform sources as Mach-O");
@@ -335,6 +341,80 @@ fn sync_sources(root: &Path) -> Result<()> {
         "_aosp/frameworks/minikin",
         "Android.bp",
         lock_value(&lock, "MINIKIN_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_file(
+        root,
+        "platform/external/icu",
+        lock_value(&lock, "GRAPHICS_ICU_REVISION")?,
+        "Android.bp",
+        "_aosp/external/icu-graphics/Android.bp",
+        lock_value(&lock, "GRAPHICS_ICU_ROOT_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_file(
+        root,
+        "platform/external/icu",
+        lock_value(&lock, "GRAPHICS_ICU_REVISION")?,
+        "android_icu4c/Android.bp",
+        "_aosp/external/icu-graphics/android_icu4c/Android.bp",
+        lock_value(&lock, "GRAPHICS_ICU_ANDROID_ICU4C_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_file(
+        root,
+        "platform/external/icu",
+        lock_value(&lock, "GRAPHICS_ICU_REVISION")?,
+        "icu4c/source/Android.bp",
+        "_aosp/external/icu-graphics/icu4c/source/Android.bp",
+        lock_value(&lock, "GRAPHICS_ICU_SOURCE_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/external/icu",
+        lock_value(&lock, "GRAPHICS_ICU_REVISION")?,
+        "graphics-icu-android-include",
+        "android_icu4c/include",
+        "_aosp/external/icu-graphics/android_icu4c/include",
+        "uconfig_local.h",
+        lock_value(&lock, "GRAPHICS_ICU_UCONFIG_LOCAL_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/external/icu",
+        lock_value(&lock, "GRAPHICS_ICU_REVISION")?,
+        "graphics-icu-common",
+        "icu4c/source/common",
+        "_aosp/external/icu-graphics/icu4c/source/common",
+        "Android.bp",
+        lock_value(&lock, "GRAPHICS_ICU_COMMON_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/external/icu",
+        lock_value(&lock, "GRAPHICS_ICU_REVISION")?,
+        "graphics-icu-i18n",
+        "icu4c/source/i18n",
+        "_aosp/external/icu-graphics/icu4c/source/i18n",
+        "Android.bp",
+        lock_value(&lock, "GRAPHICS_ICU_I18N_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/external/icu",
+        lock_value(&lock, "GRAPHICS_ICU_REVISION")?,
+        "graphics-icu-stubdata",
+        "icu4c/source/stubdata",
+        "_aosp/external/icu-graphics/icu4c/source/stubdata",
+        "Android.bp",
+        lock_value(&lock, "GRAPHICS_ICU_STUBDATA_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/external/icu",
+        lock_value(&lock, "GRAPHICS_ICU_REVISION")?,
+        "graphics-icu-init",
+        "libandroidicuinit",
+        "_aosp/external/icu-graphics/libandroidicuinit",
+        "Android.bp",
+        lock_value(&lock, "GRAPHICS_ICU_INIT_ANDROID_BP_SHA256")?,
     )?;
     materialize_archive(
         root,
