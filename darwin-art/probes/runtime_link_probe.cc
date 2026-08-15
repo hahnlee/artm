@@ -9,6 +9,7 @@
 
 #include "art_method-inl.h"
 #include "base/locks.h"
+#include "base/mem_map.h"
 #include "base/logging.h"
 #include "class_linker.h"
 #include "cmdline_types.h"
@@ -31,6 +32,11 @@
 static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
 
 int main(int argc, char** argv) {
+  // Darwin's malloc zones can claim the fixed compressed-reference window
+  // while RuntimeArgumentMap is being assembled. Reserve ART's bounded arena
+  // before the launcher performs its first heap allocation.
+  art::MemMap::Init();
+
   if (argc != 6) {
     std::cerr << "usage: runtime-link-probe CORE_OJ_JAR CORE_LIBART_JAR "
                  "FRAMEWORK_JAR CORE_ICU4J_JAR CLASSES_DEX\n";

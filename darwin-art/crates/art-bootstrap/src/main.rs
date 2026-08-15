@@ -650,6 +650,10 @@ fn build_foundation(root: &Path) -> Result<()> {
         artbase.join("base/mem_map.cc"),
         patched_artbase.join("base/mem_map.cc"),
     )?;
+    fs::copy(
+        artbase.join("base/mem_map_unix.cc"),
+        patched_artbase.join("base/mem_map_unix.cc"),
+    )?;
     for patch in [
         "patches/art/0002-darwin-dynamic-page-size.patch",
         "patches/art/0020-darwin-low4g-mach-reservation.patch",
@@ -764,7 +768,7 @@ fn build_foundation(root: &Path) -> Result<()> {
         artbase.join("base/utils.cc"),
         artbase.join("base/zip_archive.cc"),
         artbase.join("base/globals_unix.cc"),
-        artbase.join("base/mem_map_unix.cc"),
+        patched_artbase.join("base/mem_map_unix.cc"),
         tinyxml2.join("tinyxml2.cpp"),
     ];
     let mut artbase_objects = Vec::new();

@@ -19,6 +19,9 @@
 - [x] Verify generated and Android 16 boot-class-path DEX with AOSP `DexFileVerifier`.
 - [x] Preserve macOS's mandatory 4 GiB `__PAGEZERO` and move ART's compressed
       managed-reference heap into a base-relative 4 GiB virtual window.
+- [x] Reserve only a 256 MiB managed arena for the 64 MiB-Xmx bootstrap and
+      activate its anonymous subranges lazily without committing the full
+      representable window.
 
 ## G2 — Interpreter-only runtime
 

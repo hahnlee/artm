@@ -136,12 +136,16 @@ backend remain deferred.
 
 Apple ARM64 executables retain the kernel-required 4 GiB `__PAGEZERO`, so ART's
 usual absolute-low-32-bit heap references cannot be used. The Darwin probe
-uses a separate 4 GiB representable window beginning at 16 GiB and stores
-managed references as 32-bit offsets from that base. It currently maps only the
-individual ART spaces it needs; it does not reserve or commit the full 4 GiB.
-Every object that inlines the reference ABI must be compiled through the same
-Darwin overlay. A bounded contiguous managed arena is the planned replacement
-for the current per-space allocator.
+uses a separate 4 GiB representable window beginning at 1 TiB and stores
+managed references as 32-bit offsets from that base. The 1 TiB base avoids
+Darwin's randomized malloc zones in the first few dozen GiB. Only a bounded
+256 MiB contiguous arena inside that window is reserved for the current
+64 MiB-Xmx CMS configuration; the complete 4 GiB window is never reserved.
+Mach virtual reservation does not make all 256 MiB resident: physical pages are
+committed as ART touches its heap spaces. Every object that inlines the
+reference ABI must be compiled through the same Darwin overlay. Launchers call
+`MemMap::Init()` before their first heap allocation so the arena cannot be
+claimed during runtime-option construction.
 
 The Darwin MVP defaults to concurrent mark sweep. Concurrent mark compact stays
 compiled in stop-the-world fallback form because Darwin has neither Linux

@@ -1,7 +1,7 @@
 diff --git a/libartbase/base/globals.h b/libartbase/base/globals.h
 --- a/libartbase/base/globals.h
 +++ b/libartbase/base/globals.h
-@@ -29,4 +29,16 @@ static constexpr size_t MB = KB * KB;
+@@ -29,4 +29,29 @@ static constexpr size_t MB = KB * KB;
  static constexpr size_t GB = KB * KB * KB;
  
 +// Android normally stores managed references as their absolute low 32 bits.
@@ -9,12 +9,25 @@ diff --git a/libartbase/base/globals.h b/libartbase/base/globals.h
 +// window and store offsets from its base instead. Keeping the base at zero on
 +// other hosts preserves upstream ART behavior.
 +#if defined(__APPLE__) && defined(__LP64__)
-+static constexpr uintptr_t kArtCompressedReferenceBase = 0x0000000400000000ULL;
++// Keep the fixed window away from Darwin's randomized default malloc zones,
++// which frequently occupy addresses in the first few dozen GiB.
++static constexpr uintptr_t kArtCompressedReferenceBase = 0x0000010000000000ULL;
 +#else
 +static constexpr uintptr_t kArtCompressedReferenceBase = 0u;
 +#endif
 +static constexpr uintptr_t kArtCompressedReferenceLimit =
 +    kArtCompressedReferenceBase + 4ULL * GB;
++#if defined(__APPLE__) && defined(__LP64__)
++// The Darwin launcher currently caps Xmx at 64 MiB. ART creates three
++// low-address spaces for this CMS configuration, so a 256 MiB virtual arena
++// holds them with one extra space of headroom. These pages remain uncommitted
++// until an ART mapping replaces part of the arena.
++static constexpr uintptr_t kArtManagedArenaBase =
++    kArtCompressedReferenceBase + 64 * KB;
++static constexpr size_t kArtManagedArenaSize = 256 * MB;
++static constexpr uintptr_t kArtManagedArenaLimit =
++    kArtManagedArenaBase + kArtManagedArenaSize;
++#endif
 +
  // Runtime sizes.
  static constexpr size_t kBitsPerByte = 8;
