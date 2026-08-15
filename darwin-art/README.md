@@ -142,6 +142,7 @@ archives rather than symbol stubs:
 cargo run -p art-bootstrap -- build-hwui-canvas
 cargo run -p art-bootstrap -- build-graphics-foundations
 cargo run -p art-bootstrap -- build-nativehelper
+cargo run -p art-bootstrap -- build-ui-types
 ```
 
 `liblog-darwin.a` contains all eight Darwin-host sources and resolves the two
@@ -153,6 +154,10 @@ the real JNI registration, exception, NIO, and file-descriptor helpers. The
 nativehelper archive must use normal archive extraction in the final link;
 force-loading it would also pull `JniInvocation`'s `JNI_CreateJavaVM` alongside
 ART's VM implementation.
+`libutils-darwin.a` follows its Darwin core source selection and whole-static
+Binder support archive (19 objects total). `libui-types.a` adds the complete
+four-source host module for Android `ColorSpace`, `Rect`, `Region`, and
+`Transform` types.
 
 `build-runtime-bootstrap` keeps a dependency-aware object cache. Clang emits a
 depfile for every translation unit; the bootstrapper fingerprints the complete

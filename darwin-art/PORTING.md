@@ -115,6 +115,8 @@
 - [x] Build Android.bp-complete Darwin host archives for `liblog`, `libcutils`,
       `libnativehelper_any_vm`, and `libnativehelper_jvm`; verify ARM64 Mach-O
       members and the real JNI/log definitions required by the graphics closure.
+- [x] Build Android.bp-complete Darwin host archives for `libutils` (including
+      its whole-static Binder support module) and `libui-types`.
 - [ ] Close the complete upstream Canvas/Paint registrar dependency graph with
       GraphicsJNI, software `libhwui_static`, Minikin, HarfBuzz, FreeType, ICU,
       androidfw, and native utility modules; do not substitute per-symbol stubs.

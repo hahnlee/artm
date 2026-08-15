@@ -40,6 +40,7 @@ fn run() -> Result<()> {
         "build-nativehelper" => {
             build_shell_gate(&root, "build-android16-nativehelper-foundation.sh")
         }
+        "build-ui-types" => build_shell_gate(&root, "build-android16-ui-types-foundation.sh"),
         "build-dex" => build_dex_probe(&root),
         "build-runtime-platform" => build_runtime_platform(&root),
         "build-runtime-core" => build_runtime_core(&root),
@@ -93,6 +94,7 @@ fn print_help() {
     println!("  build-hwui-canvas  compile the first upstream HWUI Canvas/Paint gate");
     println!("  build-graphics-foundations  build Darwin liblog/libcutils archives");
     println!("  build-nativehelper  build Darwin nativehelper host archives");
+    println!("  build-ui-types  build the Darwin Android libui-types archive");
     println!("  build-dex  compile AOSP libdexfile and parse a generated classes.dex");
     println!("  build-runtime-platform  compile ART host platform sources as Mach-O");
     println!("  build-runtime-core  apply Darwin monitor patches and compile runtime core");
@@ -222,6 +224,36 @@ fn sync_sources(root: &Path) -> Result<()> {
         "_aosp/frameworks/base/libs/nativehelper_jvm",
         "Android.bp",
         lock_value(&lock, "NATIVEHELPER_JVM_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/frameworks/native",
+        lock_value(&lock, "FRAMEWORKS_NATIVE_REVISION")?,
+        "frameworks-native-ui",
+        "libs/ui",
+        "_aosp/frameworks/native/libs/ui",
+        "Android.bp",
+        lock_value(&lock, "FRAMEWORKS_NATIVE_UI_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/frameworks/native",
+        lock_value(&lock, "FRAMEWORKS_NATIVE_REVISION")?,
+        "frameworks-native-arect",
+        "libs/arect",
+        "_aosp/frameworks/native/libs/arect",
+        "Android.bp",
+        lock_value(&lock, "FRAMEWORKS_NATIVE_ARECT_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/frameworks/native",
+        lock_value(&lock, "FRAMEWORKS_NATIVE_REVISION")?,
+        "frameworks-native-math",
+        "libs/math",
+        "_aosp/frameworks/native/libs/math",
+        "Android.bp",
+        lock_value(&lock, "FRAMEWORKS_NATIVE_MATH_ANDROID_BP_SHA256")?,
     )?;
     materialize_archive(
         root,
