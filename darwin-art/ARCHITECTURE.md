@@ -247,16 +247,18 @@ ownership, all 568 Android-visible `OsConstants`, the complete 12-entry
 complete registered `libcore.io.Linux` method table with an incrementally
 implemented Darwin backend.
 
-The real `android.widget.Button` vertical slice now opens the pinned Android
-font configuration and reaches KXml parsing. Its first missing owner is the
-complete Android 16 `java.io.FileInputStream` native table (`available0` is the
-first observed call), followed by the bounded OpenJDK NIO mapping cluster.
-Native application ELF is not loaded yet.
+The real `android.widget.Button` vertical slice now parses the pinned Android
+font configuration and passes the complete Android 16 `FileInputStream`,
+`IOUtil`, `FileChannelImpl`, `FileDispatcherImpl`, and `NativeThread` owners.
+Its first missing owner is now the complete `libcore.io.Memory` native table,
+reached by ICU through the mapped font data. Native application ELF is not
+loaded yet.
 
 ## Ordered implementation after the Button gate
 
-1. Implement the prefix mount table and path resolver as an independently
-   tested Rust library with a stable C ABI.
+1. Complete the existing byte-oriented prefix router with a component-walking
+   directory-FD broker. The router has a tested Rust/C ABI, but is deliberately
+   not an authorization boundary until symlink and rename races are contained.
 2. Route `libcore.io.Linux` file/path methods through it; populate a real
    `/system`, `/product`, `/apex`, and package-private `/data` prefix.
 3. Add an inspection-only ARM64 ELF parser and APK native-capability report.

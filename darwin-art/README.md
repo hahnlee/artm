@@ -123,8 +123,10 @@ replace the Bitmap/readback copy with direct IOSurface backing. The DecorView
 also still uses a programmatic `android.R.id.content` root plus a minimal
 `Resources` object. The runtime now uses the full Android 16 resource JNI,
 Android-visible OS constants, UnixFileSystem, and ART OpenJDK VM service
-owners. The Button probe opens the pinned Android font XML and currently stops
-at the next complete-owner boundary, `java.io.FileInputStream.available0`.
+owners. The Button probe now passes the complete Android 16 `FileInputStream`,
+`FileChannelImpl`, `FileDispatcherImpl`, `IOUtil`, and `NativeThread` owners,
+maps the pinned Android font data, and currently stops at the next
+complete-owner boundary, `libcore.io.Memory.peekByte(long)`.
 Compiled framework-resource inflation, input, and GPU HWUI remain deferred.
 
 The first Android 16 HWUI host compile gate is reproducible with:

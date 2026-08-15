@@ -6,6 +6,11 @@
 
 void register_libcore_io_AsynchronousCloseMonitor(JNIEnv* env);
 extern "C" void register_java_io_UnixFileSystem(JNIEnv* env);
+extern "C" void register_java_io_FileInputStream(JNIEnv* env);
+extern "C" void register_sun_nio_ch_IOUtil(JNIEnv* env);
+extern "C" void register_sun_nio_ch_FileChannelImpl(JNIEnv* env);
+extern "C" void register_sun_nio_ch_FileDispatcherImpl(JNIEnv* env);
+extern "C" void register_sun_nio_ch_NativeThread(JNIEnv* env);
 #endif
 
 #include <fcntl.h>
@@ -677,15 +682,43 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
     return Register(env, "android/system/OsConstants", os_constants_methods, 1);
 #endif
   };
+  const auto register_openjdk_file_mapping = [&]() {
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+    // Preserve the relative order from Android 16 libopenjdk's OnLoad.cpp.
+    // Each call owns the complete upstream method table for its Java class;
+    // partial or repeated RegisterNatives owners are forbidden.
+    register_sun_nio_ch_IOUtil(env);
+    if (env->ExceptionCheck()) {
+      return false;
+    }
+    register_sun_nio_ch_FileChannelImpl(env);
+    if (env->ExceptionCheck()) {
+      return false;
+    }
+    register_sun_nio_ch_FileDispatcherImpl(env);
+    if (env->ExceptionCheck()) {
+      return false;
+    }
+    register_java_io_FileInputStream(env);
+    if (env->ExceptionCheck()) {
+      return false;
+    }
+    register_sun_nio_ch_NativeThread(env);
+    return !env->ExceptionCheck();
+#else
+    return true;
+#endif
+  };
   return Register(env, "java/lang/Character", character_methods,
                   static_cast<jint>(std::size(character_methods))) &&
          Register(env, "java/lang/Float", float_methods, 2) &&
          Register(env, "java/lang/Double", double_methods, 2) &&
          register_os_constants() &&
          register_linux() &&
+         Register(env, "java/io/FileDescriptor", file_descriptor_methods, 2) &&
+         register_openjdk_file_mapping() &&
          Register(env, "libcore/icu/ICU", icu_methods, 3) &&
-         Register(env, "java/lang/System", system_methods, 3) &&
-         Register(env, "java/io/FileDescriptor", file_descriptor_methods, 2);
+         Register(env, "java/lang/System", system_methods, 3);
 }
 
 }  // namespace darwin_art

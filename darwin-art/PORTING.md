@@ -166,7 +166,7 @@
 
 ## G4 — Android namespace and mainstream native libraries
 
-- [ ] Replace partial Android constant/filesystem owners with complete,
+- [x] Replace partial Android constant/filesystem owners with complete,
       source-derived Android 16 registrations while keeping Android/Linux
       numeric values visible above the Darwin syscall boundary.
 - [ ] Render a real `android.widget.Button` using the pinned Android font
