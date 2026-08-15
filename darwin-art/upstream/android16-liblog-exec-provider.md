@@ -12,6 +12,15 @@ function body is used. Resolution is an explicit name/ordinal table. Unknown
 symbols and non-empty GNU versions return address zero because the API 35 NDK
 stub is unversioned.
 
+These are Darwin-ABI backend addresses, not final Android-ELF entrypoints.
+Fixed register-only signatures can share machine-level argument placement, but
+the public surface also contains variadic `print`, `vprint`, `buf_print`, and
+`assert` APIs whose Android and Darwin calling conventions/`va_list` layouts
+must not be conflated. The final ELF namespace publishes Android-ABI assembly
+thunks which call these backend addresses; it never hands the raw variadic
+Mach-O address to an Android DSO. This gate proves real implementation
+ownership and host execution only.
+
 The gate also links a dylib whose exported-symbol list contains only the four
 provider C ABI functions. AOSP archive globals, including private liblog APIs,
 cannot be discovered through the dylib's external Mach-O namespace. Their real
@@ -28,4 +37,3 @@ manifest with the NDK stub, rejects private/version-mismatched lookups, and call
 the resolved `__android_log_write`, variadic `__android_log_print`,
 `__android_log_write_log_message`, `__android_log_set_logger`, and
 `__android_log_stderr_logger` APIs using a capturing logger.
-
