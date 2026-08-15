@@ -6,7 +6,7 @@ This gate measures coherent standalone provider ownership against the exact
 happen to exist in Darwin libc: a symbol is covered only when a project facade
 claims its Android ABI and semantic state.
 
-The current composed namespace owns 142 imports through nineteen providers
+The current composed namespace owns 145 imports through twenty providers
 (including the distinct liblog owner):
 
 | Provider | Imports | Boundary |
@@ -28,10 +28,11 @@ The current composed namespace owns 142 imports through nineteen providers
 | wide-integer | 4 | unsigned Android wchar32 integer conversion |
 | wide-float | 2 | ICU whitespace plus AOSP gdtoa `wcstod`/`wcstof` |
 | abort | 2 | Bionic abort/message state |
+| syslog | 3 | Android variadic capture, Bionic state, and AOSP liblog routing |
 | lifecycle | 2 | Bionic DSO finalizer ownership |
 
-Coverage by the original ABI classification is A 11/11, B 63/76, C 61/65,
-and D 7/8. The remaining 18 imports stay explicit capability failures. In
+Coverage by the original ABI classification is A 11/11, B 63/76, C 64/65,
+and D 7/8. The remaining 15 imports stay explicit capability failures. In
 particular, `wcstold` remains rejected because Android arm64 uses binary128
 while Darwin arm64 uses binary64 for `long double`.
 

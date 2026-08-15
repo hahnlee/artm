@@ -12,6 +12,7 @@ libc.so	chdir	LIBC	filesystem
 libc.so	clock_gettime	LIBC	time
 libc.so	close	LIBC	filesystem
 libc.so	closedir	LIBC	filesystem
+libc.so	closelog	LIBC	syslog
 libc.so	fchmod	LIBC	filesystem
 libc.so	fchmodat	LIBC	filesystem
 libc.so	fclose	LIBC	stdio
@@ -64,6 +65,7 @@ libc.so	newlocale	LIBC	locale
 libc.so	open	LIBC	filesystem
 libc.so	openat	LIBC	filesystem
 libc.so	opendir	LIBC	filesystem
+libc.so	openlog	LIBC	syslog
 libc.so	pathconf	LIBC	filesystem
 libc.so	posix_memalign	LIBC	allocator
 libc.so	pthread_cond_broadcast	LIBC	pthread
@@ -117,6 +119,7 @@ libc.so	strtoull_l	LIBC	numeric
 libc.so	strxfrm_l	LIBC	locale
 libc.so	symlink	LIBC	filesystem
 libc.so	sysconf	LIBC	time
+libc.so	syslog	LIBC	syslog
 libc.so	towlower_l	LIBC	locale
 libc.so	towupper_l	LIBC	locale
 libc.so	truncate	LIBC	filesystem

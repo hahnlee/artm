@@ -72,6 +72,8 @@ def main() -> int:
         "tools/bionic-wide-float-facade/manifests/imports.tsv")]
     claims += [(name, "abort") for name in names(
         "tools/bionic-abort-facade/manifests/imports.tsv")]
+    claims += [(name, "syslog") for name in names(
+        "tools/bionic-syslog-facade/manifests/imports.tsv")]
     with (ROOT / "tools/bionic-dso-lifecycle-facade/manifests/imports.tsv").open() as stream:
         claims += [(line.split("\t", 1)[0], "dso-lifecycle")
                    for line in stream if line.strip()]
@@ -112,6 +114,7 @@ def main() -> int:
         "abort": "DARWIN_ART_BIONIC_PROVIDER_ABORT",
         "liblog": "DARWIN_ART_BIONIC_PROVIDER_LIBLOG",
         "dso-lifecycle": "DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE",
+        "syslog": "DARWIN_ART_BIONIC_PROVIDER_SYSLOG",
     }
     ownership = sorted(
         [("libdl.so" if owner == "phdr" else "libc.so",
@@ -122,7 +125,7 @@ def main() -> int:
         (symbol, row["category"], row["rationale"])
         for symbol, row in universe.items() if symbol not in claimed
     )
-    if len(universe) != 160 or len(claimed) != 142 or len(unsupported) != 18:
+    if len(universe) != 160 or len(claimed) != 145 or len(unsupported) != 15:
         raise SystemExit(
             f"coverage drift: universe={len(universe)} owned={len(claimed)} "
             f"unsupported={len(unsupported)}"
