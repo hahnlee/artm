@@ -1,0 +1,12 @@
+[package]
+name = "darwin-art-fs-broker"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+
+# This security gate is intentionally evaluated independently before any
+# integration into the repository workspace.
+[workspace]
+
