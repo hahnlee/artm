@@ -259,7 +259,8 @@ Initial syscall families are grouped by semantics:
 
 | Family | Darwin implementation strategy |
 |---|---|
-| file I/O and VM | direct Darwin calls after namespace/constant conversion |
+| file I/O | direct Darwin calls after namespace/constant conversion |
+| virtual memory | owned interval mappings; rebuild guest flags, preserve W^X, and translate advice semantics before Darwin VM calls |
 | sockets | Darwin sockets with Android structures, options, and errno conversion |
 | pthread/TLS | Bionic memory layout backed by a Darwin parking-lot/side table |
 | futex | user-space wait/wake parking lot; never reinterpret Bionic mutex memory |
@@ -360,6 +361,14 @@ duplicate ownership rejected by
 classification, formatting, wider
 writable filesystem operations, and one composed runtime resolver remain open
 gates.
+
+A separate virtual-memory facade serves DSOs beyond the pinned libc++ import
+set. Its first closed slice owns anonymous private whole mappings for
+`mmap/mmap64`, `munmap`, `mprotect`, and `madvise`. It never forwards Linux flag
+numbers to Darwin, rejects W+X, executes an AArch64 RW-to-RX transition with an
+instruction-cache flush, and translates Linux `MADV_DONTNEED` to Darwin's
+zero-fill advice. Fixed, shared, file-backed, partial-range, and ashmem mappings
+remain capability failures until the namespace FD and interval owners exist.
 
 ## Ordered implementation after the Button gate
 
