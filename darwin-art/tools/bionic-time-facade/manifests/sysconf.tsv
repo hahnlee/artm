@@ -1,0 +1,6 @@
+android_name	android_value	darwin_name	darwin_value	policy
+_SC_PAGESIZE	39	_SC_PAGESIZE	29	supported
+_SC_PAGE_SIZE	40	_SC_PAGESIZE	29	supported-alias
+_SC_NPROCESSORS_CONF	96	_SC_NPROCESSORS_CONF	57	supported-host-view
+_SC_NPROCESSORS_ONLN	97	_SC_NPROCESSORS_ONLN	58	supported-host-view
+other	-	-	-	EINVAL-unsupported
