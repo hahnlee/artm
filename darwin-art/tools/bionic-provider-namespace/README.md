@@ -36,14 +36,15 @@ Bionic `__cxa_finalize` drain must run *before* this boundary, while normal
 resolution is still admitted; release hooks only drop provider-owned host
 state. Bionic errno is deliberately released last.
 
-The adapter callbacks are the remaining runtime wiring seam: provider APIs
-currently have several resolver signatures. `builtin_adapters.cc` supplies the
-typed adapters and intentionally leaves exactly those thirteen resolver
-entrypoints undefined until the embedding binary links every standalone
-provider. Optional release hooks carry each provider's real owning context.
-This does not introduce a second implementation. It also does not merge the
-filesystem and stdio virtual descriptor tables; their existing capability
-limits still apply after namespace composition.
+Provider APIs have several resolver signatures, so `builtin_adapters.cc`
+supplies typed adapters and intentionally leaves exactly fourteen resolver
+entrypoints undefined until the embedding binary links every provider. The
+runtime provider closure now supplies those definitions, and ART's ELF graph
+resolver binds and seals this namespace before mapping guest code. Optional
+release hooks carry each provider's real owning context. This does not
+introduce a second implementation. It also does not merge the filesystem and
+stdio virtual descriptor tables; their existing capability limits still apply
+after namespace composition.
 
 Run `tools/bionic-provider-namespace/audit.sh`. It regenerates and diffs every
 table, re-derives all 160 libc imports from the hash-pinned real NDK ELF,

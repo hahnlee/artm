@@ -209,19 +209,20 @@ particular Android ARM64 `wchar_t` ordering is unsigned, unlike Darwin's signed
 type, so `wmemcmp` implements the Bionic ordering rather than forwarding to
 the host.
 
-The independently executable providers currently own 112/160 imports with no
-duplicate owner: A 11/11, B 35/76, C 61/65, and D 5/8. This includes allocator
+The providers currently own 129/160 imports with no duplicate owner: A 11/11,
+B 52/76, C 61/65, and D 5/8. This includes allocator
 and Bionic errno ownership, the read-only filesystem/virtual-FD slice, clocks
 and sleep, all 24 pthread imports plus the provider-owned create seam, immutable
 environment/property/auxv state, loader-owned program-header iteration, and a
 fixed-register binary stdio slice with guest `FILE` tokens and `__sF`, and the
 locale/multibyte slice with guest `locale_t`, `mbstate_t`, and unsigned wchar32,
-ICU-backed wide classification, integer parsing, plus Bionic-owned
+ICU-backed wide classification, integer and binary32/binary64 parsing,
+read-only filesystem queries and immutable-mount mutation semantics, plus Bionic-owned
 `__cxa_atexit`/`__cxa_finalize` registration state.
 The provider namespace now composes all owners into one exact
-SONAME/symbol/version router with shared quiescent teardown. Wiring that router
-to the ART loader call site remains an integration boundary, and the remaining
-48 imports remain hard capability failures.
+SONAME/symbol/version router with shared quiescent teardown. ART's ELF graph
+resolver uses that namespace and has executed real `__errno` and `strlen`
+relocations. The remaining 31 imports remain hard capability failures.
 
 ## Prior art and the boundary we adopt
 
@@ -368,11 +369,13 @@ rejected. The locale provider adds 31 fixed-register functions without using
 Darwin's process-global locale or reinterpreting its `wchar_t`; wide
 classification and case conversion use pinned static Android ICU 76.1. The
 integer parser owns the six `strto*` imports with AOSP base, prefix, overflow,
-locale-ignore, and Bionic errno behavior. Together these standalone gates
-cover 112/160 libc imports with duplicate ownership rejected by
-`tools/audit-android35-libcxx-provider-coverage.sh`. Wide-character formatting,
-floating-point conversion, wider writable filesystem operations, and wiring
-the composed provider namespace into ART remain open gates.
+locale-ignore, and Bionic errno behavior. Together these providers and the
+AOSP gdtoa binary32/binary64 closure cover 129/160 libc imports with
+duplicate ownership rejected by
+`tools/audit-android35-libcxx-provider-coverage.sh`. The composed namespace is
+linked into ART and resolves the fixture's `__errno` and `strlen` imports.
+Wide-character formatting, binary128 conversion, genuinely writable mounts,
+and the remaining formatted/varargs and kernel-coupled calls remain open gates.
 
 The Bionic DSO lifecycle provider owns destructor registration independently
 of Darwin's C++ runtime. It preserves each function/argument/DSO triple,

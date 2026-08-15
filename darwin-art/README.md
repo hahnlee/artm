@@ -168,12 +168,14 @@ write-then-execute-protected ARM64 thunks. The planner derives JNI shorties from
 descriptors, tracks GP and FP banks independently, and repacks Darwin's natural
 stack tail into Android's eight-byte slots. A native method invoked after
 `JNI_OnLoad` calls proxy `GetVersion` and `FindClass` using the current ART
-thread's `JNIEnv`, not a retained load-time pointer. Unload observes root then
-child finalizers. Aggregates, HFA, variadic calls, CriticalNative, the rest of
-the JNI table, hardened-runtime `MAP_JIT`, general dependency discovery, and
-the composed Bionic provider namespace remain explicit work. ELF TLS is still
-rejected. ART integration with the separate Bionic `__cxa_finalize` lifecycle
-also remains explicit work.
+thread's `JNIEnv`, not a retained load-time pointer. The same graph resolves
+and executes Bionic `__errno` and `strlen` through the sealed fourteen-provider
+namespace. Unload observes root then child finalizers, followed by quiescent
+namespace teardown; a pre-publish failure injection verifies the same cleanup.
+Aggregates, HFA, variadic calls, CriticalNative, the rest of the JNI table,
+hardened-runtime `MAP_JIT`, and general dependency discovery remain explicit
+work. ELF TLS is still rejected. ART composition with the separate Bionic
+`__cxa_finalize` lifecycle also remains explicit work.
 
 Its final line is:
 
