@@ -1,6 +1,8 @@
 use darwin_art_host::{RunOptions, run};
 use std::env;
 use std::error::Error;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 fn main() {
@@ -14,6 +16,16 @@ fn main_result() -> Result<(), Box<dyn Error>> {
     let mut arguments = env::args_os();
     let program = arguments.next().unwrap_or_else(|| "darwin-art-host".into());
     let mut values = arguments.collect::<Vec<_>>();
+    let frame_output = if values.first().is_some_and(|value| value == "--frame-ppm") {
+        if values.len() < 2 {
+            return Err("--frame-ppm requires a path".into());
+        }
+        let output = PathBuf::from(&values[1]);
+        values.drain(..2);
+        Some(output)
+    } else {
+        None
+    };
     let visible_seconds = if values
         .first()
         .is_some_and(|value| value == "--window-seconds")
@@ -29,7 +41,7 @@ fn main_result() -> Result<(), Box<dyn Error>> {
     };
     if values.len() != 6 {
         return Err(format!(
-            "usage: {} [--window-seconds SECONDS] LIBDARWIN_ART CORE_OJ_JAR \
+            "usage: {} [--frame-ppm PATH] [--window-seconds SECONDS] LIBDARWIN_ART CORE_OJ_JAR \
              CORE_LIBART_JAR FRAMEWORK_JAR CORE_ICU4J_JAR APP_DEX",
             PathBuf::from(program).display()
         )
@@ -47,6 +59,22 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         visible_seconds,
     };
     let outcome = run(&options)?;
+    if let Some(path) = frame_output {
+        let frame = outcome
+            .last_frame
+            .as_ref()
+            .ok_or("runtime did not produce a frame")?;
+        let mut output = BufWriter::new(File::create(path)?);
+        write!(output, "P6\n{} {}\n255\n", frame.width, frame.height)?;
+        for pixel in &frame.argb_pixels {
+            output.write_all(&[
+                ((pixel >> 16) & 0xff) as u8,
+                ((pixel >> 8) & 0xff) as u8,
+                (pixel & 0xff) as u8,
+            ])?;
+        }
+        output.flush()?;
+    }
     println!("ART Darwin Runtime::Create: ok");
     println!("ART Darwin app ClassLoader: PathClassLoader");
     println!(
