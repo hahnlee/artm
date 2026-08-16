@@ -29,11 +29,13 @@
 #include "darwin_art_elf_jni_fixture_identity.h"
 #include "darwin_art_elf_loader.h"
 #include "darwin_art_bionic_builtin_adapters.h"
+#include "darwin_art_bionic_dns.h"
 #include "darwin_art_bionic_dso_lifecycle.h"
 #include "darwin_art_bionic_fs.h"
 #include "darwin_art_bionic_ioctl.h"
 #include "darwin_art_bionic_provider_namespace.h"
 #include "darwin_art_bionic_sendfile.h"
+#include "darwin_art_bionic_socket_broker.h"
 #include "darwin_art_bionic_stdio.h"
 #include "darwin_art_bionic_strftime.h"
 #include "darwin_art_jni_proxy.h"
@@ -216,6 +218,42 @@ void ReleaseFilesystemOwner() {
   g_filesystem_owner.inode = 0;
 }
 
+struct NetworkOwnerState {
+  std::mutex mutex;
+  size_t users = 0;
+};
+
+NetworkOwnerState g_network_owner;
+
+bool AcquireNetworkOwner(std::string* error) {
+  std::lock_guard<std::mutex> lock(g_network_owner.mutex);
+  if (g_network_owner.users != 0) {
+    if (g_network_owner.users == std::numeric_limits<size_t>::max()) {
+      *error = "Bionic network graph-owner count overflow";
+      return false;
+    }
+    ++g_network_owner.users;
+    return true;
+  }
+  if (darwin_art_bionic_socket_broker_activate() != 0) {
+    *error = "Bionic socket broker activation failed";
+    return false;
+  }
+  g_network_owner.users = 1;
+  return true;
+}
+
+void ReleaseNetworkOwner() {
+  std::lock_guard<std::mutex> lock(g_network_owner.mutex);
+  if (g_network_owner.users == 0) std::abort();
+  --g_network_owner.users;
+  if (g_network_owner.users != 0) return;
+  if (darwin_art_bionic_socket_broker_live_objects() != 0 ||
+      darwin_art_bionic_socket_broker_deactivate() != 0) {
+    std::abort();
+  }
+}
+
 bool AcquireStdioOwner(std::string* error) {
   if (darwin_art_bionic_stdio_process_install() == 0) return true;
   *error = "Bionic stdio process-owner install failed";
@@ -396,6 +434,7 @@ struct ElfLibrary {
   DarwinArtBionicDsoLifecycleOwner* dso_lifecycle = nullptr;
   darwin_art_image_registry::Owner* image_registry = nullptr;
   bool filesystem_owner = false;
+  bool network_owner = false;
   bool stdio_owner = false;
   bool ioctl_owner = false;
   bool strftime_owner = false;
@@ -441,6 +480,16 @@ int FinalizeRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
 
 void TeardownProviderNamespace(ElfLibrary* library) {
   if (library == nullptr) return;
+  if (library->provider_namespace != nullptr) {
+    const DarwinArtBionicNamespaceStatus status =
+        darwin_art_bionic_namespace_teardown(library->provider_namespace);
+    if (status != DARWIN_ART_BIONIC_NAMESPACE_OK) std::abort();
+    if (library->fixture_graph) {
+      g_elf_fixture_namespace_lifecycle.store(5, std::memory_order_relaxed);
+    }
+    darwin_art_bionic_namespace_destroy(library->provider_namespace);
+    library->provider_namespace = nullptr;
+  }
   if (library->image_registry != nullptr) {
     darwin_art_image_registry::Destroy(library->image_registry);
     library->image_registry = nullptr;
@@ -448,6 +497,10 @@ void TeardownProviderNamespace(ElfLibrary* library) {
   if (library->dso_lifecycle != nullptr) {
     darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
     library->dso_lifecycle = nullptr;
+  }
+  if (library->network_owner) {
+    ReleaseNetworkOwner();
+    library->network_owner = false;
   }
   if (library->strftime_owner) {
     ReleaseStrftimeOwner();
@@ -469,14 +522,6 @@ void TeardownProviderNamespace(ElfLibrary* library) {
     ReleaseFilesystemOwner();
     library->filesystem_owner = false;
   }
-  if (library->provider_namespace == nullptr) return;
-  const DarwinArtBionicNamespaceStatus status =
-      darwin_art_bionic_namespace_teardown(library->provider_namespace);
-  if (status == DARWIN_ART_BIONIC_NAMESPACE_OK && library->fixture_graph) {
-    g_elf_fixture_namespace_lifecycle.store(5, std::memory_order_relaxed);
-  }
-  darwin_art_bionic_namespace_destroy(library->provider_namespace);
-  library->provider_namespace = nullptr;
 }
 
 void FixtureRecordLifecycle(int phase) {
@@ -1134,6 +1179,12 @@ void* OpenNativeLibrary(JNIEnv* env,
       return nullptr;
     }
     library->stdio_owner = true;
+    if (!AcquireNetworkOwner(&error)) {
+      SetNativeLoaderError(error_msg, "Bionic network setup failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    library->network_owner = true;
     DarwinArtElfLoadOptions options{
         DARWIN_ART_ELF_ABI_VERSION, &ResolveRuntimeProvider, library.get()};
     DarwinArtElfLifecycleCallbacks lifecycle{
@@ -1251,44 +1302,7 @@ bool CloseNativeLibrary(void* handle, bool needs_native_bridge, char** error_msg
     if (library->fixture_graph) {
       g_elf_fixture_namespace_lifecycle.store(4, std::memory_order_relaxed);
     }
-    darwin_art_image_registry::Destroy(library->image_registry);
-    library->image_registry = nullptr;
-    darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
-    library->dso_lifecycle = nullptr;
-    if (library->strftime_owner) {
-      ReleaseStrftimeOwner();
-      library->strftime_owner = false;
-    }
-    if (library->sendfile_owner) {
-      ReleaseSendfileOwner();
-      library->sendfile_owner = false;
-    }
-    if (library->ioctl_owner) {
-      ReleaseIoctlOwner();
-      library->ioctl_owner = false;
-    }
-    if (library->stdio_owner) {
-      ReleaseStdioOwner();
-      library->stdio_owner = false;
-    }
-    if (library->filesystem_owner) {
-      ReleaseFilesystemOwner();
-      library->filesystem_owner = false;
-    }
-    const DarwinArtBionicNamespaceStatus namespace_status =
-        darwin_art_bionic_namespace_teardown(library->provider_namespace);
-    if (namespace_status != DARWIN_ART_BIONIC_NAMESPACE_OK) {
-      SetNativeLoaderError(
-          error_msg,
-          std::string("Bionic provider namespace teardown failed: ") +
-              darwin_art_bionic_namespace_status_name(namespace_status));
-      return false;
-    }
-    darwin_art_bionic_namespace_destroy(library->provider_namespace);
-    library->provider_namespace = nullptr;
-    if (library->fixture_graph) {
-      g_elf_fixture_namespace_lifecycle.store(5, std::memory_order_relaxed);
-    }
+    TeardownProviderNamespace(library);
     library->magic = 0;
     delete library;
     return true;

@@ -100,11 +100,16 @@ awk -F '\t' 'NR>1 {if ($1 != NR-1) bad=1} END{exit bad}' \
 
 broker="$root/tools/bionic-central-fd-broker/include/darwin_art_bionic_fd_broker.h"
 [[ -f "$broker" ]] || missing "$broker"
-if rg -q 'dispatch_owned|borrow_owned|socket_control' "$broker"; then
-  fail 'broker dispatch ABI appeared; replace blocked-safe preflight with execution gate'
-fi
-rg -q 'darwin_art_fd_broker_(read|write|poll|ioctl|close)' "$broker" ||
-  fail 'central broker baseline ABI missing'
+rg -q 'DARWIN_ART_FD_OWNER_ABI_V3' "$broker" || fail 'broker v3 ABI missing'
+rg -q 'darwin_art_fd_broker_socket_operation' "$broker" ||
+  fail 'typed socket dispatch missing'
+adapter="$root/tools/bionic-socket-broker-adapter/src/adapter.cc"
+rg -q 'darwin_art_bionic_socket_broker_dns_resolve' "$adapter" ||
+  fail 'DNS lifecycle wrapper missing'
+rg -q 'kCentralBrokerTokenMarker' "$adapter" ||
+  fail 'central close token classification missing'
+rg -q 'DARWIN_ART_ANDROID_NETWORK_FIXTURE' "$root/probes/runtime_link_probe.cc" ||
+  fail 'actual ART network execution path missing'
 rg -q '127\.0\.0\.1' "$dir/probes/network_jni.c" || fail 'loopback target missing'
 if rg -n 'localhost|https?://|8\.8\.8\.8|AF_INET6' "$dir/probes/network_jni.c" >/dev/null; then
   fail 'fixture escaped numeric IPv4 loopback scope'
@@ -113,4 +118,4 @@ fi
 mkdir -p "$root/_build/bionic-network-runtime-integration"
 cp "$fixture" "$root/_build/bionic-network-runtime-integration/"
 cp "$tmp/dex/classes.dex" "$root/_build/bionic-network-runtime-integration/"
-echo 'bionic-network-runtime-integration: PASS Android-ELF=JNI_OnLoad+RegisterNatives DEX=nativeLoopbackHttp imports=8 routes=exact close=central lifecycle=12 Internet=no activation=blocked-safe'
+echo 'bionic-network-runtime-integration: PASS Android-ELF=JNI_OnLoad+RegisterNatives DEX=nativeLoopbackHttp imports=8 routes=exact close=central broker=v3 DNS=leased lifecycle=12 Internet=no activation=ART-loopback'

@@ -102,6 +102,7 @@ fn run() -> Result<()> {
         "check-text-shaping" => build_shell_gate(&root, "check-android16-text-shaping-inputs.sh"),
         "build-dex" => build_dex_probe(&root),
         "build-elf-jni-dex" => build_elf_jni_dex_probe(&root),
+        "build-network-dex" => build_network_dex_probe(&root),
         "build-button-dex" => build_button_dex_probe(&root),
         "build-runtime-platform" => build_runtime_platform(&root),
         "build-runtime-core" => build_runtime_core(&root),
@@ -115,6 +116,7 @@ fn run() -> Result<()> {
         "audit-graphics-closure" => build_shell_gate(&root, "audit-android16-graphics-closure.sh"),
         "probe-runtime-dex" => probe_runtime_dex(&root, false),
         "probe-runtime-elf-jni" => probe_runtime_elf_jni(&root),
+        "probe-runtime-network" => probe_runtime_network(&root),
         "probe-runtime-apk-direct" => probe_runtime_apk_direct(&root),
         "probe-window" => probe_runtime_dex(&root, true),
         "probe-runtime-graphics" => probe_runtime_graphics(&root),
@@ -190,6 +192,7 @@ fn print_help() {
     println!("  check-text-shaping  audit the full shaping and raster input closure");
     println!("  build-dex  compile AOSP libdexfile and parse a generated classes.dex");
     println!("  build-elf-jni-dex  add the isolated Android ELF JNI fixture class");
+    println!("  build-network-dex  add the isolated Android network JNI fixture class");
     println!("  build-button-dex  compile the isolated real android.widget.Button probe");
     println!("  build-runtime-platform  compile ART host platform sources as Mach-O");
     println!("  build-runtime-core  apply Darwin monitor patches and compile runtime core");
@@ -205,6 +208,7 @@ fn print_help() {
     println!("  audit-graphics-closure  verify the 32-archive Android graphics closure");
     println!("  probe-runtime-dex  launch Java main(String[]) with Android stdout");
     println!("  probe-runtime-elf-jni  load a fixed Android ELF graph and JNI thunks through ART");
+    println!("  probe-runtime-network  run Android JNI loopback HTTP through socket/DNS owners");
     println!("  probe-runtime-apk-direct  load a page-aligned STORED APK graph without extraction");
     println!("  probe-window  display the Android View probe in a native NSWindow");
     println!("  probe-runtime-graphics  draw DecorView through Bitmap-backed AOSP Canvas");
@@ -1710,6 +1714,94 @@ fn build_elf_jni_dex_probe(root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn build_network_dex_probe(root: &Path) -> Result<()> {
+    let baseline_dex = root.join("_build/dex-probe/dex/classes.dex");
+    let dex_probe = root.join("_build/dex-probe/dex-probe");
+    for input in [&baseline_dex, &dex_probe] {
+        if !input.is_file() {
+            return Err(format!(
+                "network DEX baseline is missing: {}; run `build-dex` first",
+                input.display()
+            )
+            .into());
+        }
+    }
+    let tool = root.join("tools/bionic-network-runtime-integration");
+    let build_dir = root.join("_build/network-runtime-probe");
+    let class_dir = build_dir.join("classes");
+    let dex_dir = build_dir.join("dex");
+    fs::create_dir_all(&class_dir)?;
+    fs::create_dir_all(&dex_dir)?;
+    run_command(
+        Command::new("javac")
+            .args(["--release", "8", "-encoding", "UTF-8", "-d"])
+            .arg(&class_dir)
+            .arg(tool.join("probes/NetworkRuntimeFixture.java")),
+    )?;
+    let classes_dex = dex_dir.join("classes.dex");
+    if classes_dex.is_file() {
+        fs::remove_file(&classes_dex)?;
+    }
+    run_command(
+        Command::new(find_d8()?)
+            .arg("--lib")
+            .arg(find_android_platform_jar()?)
+            .arg("--min-api")
+            .arg("35")
+            .arg("--output")
+            .arg(&dex_dir)
+            .arg(&baseline_dex)
+            .arg(class_dir.join("dev/darwinart/probe/NetworkRuntimeFixture.class")),
+    )?;
+    let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
+    if !output.contains("classes=13 methods=303")
+        || !output.contains("Ldev/darwinart/probe/NetworkRuntimeFixture;")
+    {
+        return Err(format!("unexpected network DEX probe output: {output:?}").into());
+    }
+
+    let fixture = build_dir.join("libdarwin_art_network_runtime.so");
+    let clang = pinned_direct_apk_ndk_bin()?.join("aarch64-linux-android35-clang");
+    run_command(
+        Command::new(clang)
+            .args([
+                "-std=c17",
+                "-O2",
+                "-fno-builtin",
+                "-fPIC",
+                "-fno-stack-protector",
+                "-U_FORTIFY_SOURCE",
+                "-D_FORTIFY_SOURCE=0",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-shared",
+                "-nostdlib",
+                "-fuse-ld=lld",
+                "-Wl,--build-id=none",
+                "-Wl,--hash-style=sysv",
+                "-Wl,-z,now",
+                "-Wl,-z,norelro",
+                "-Wl,-z,max-page-size=16384",
+                "-Wl,-soname,libdarwin_art_network_runtime.so",
+            ])
+            .arg(format!(
+                "-Wl,--version-script,{}",
+                tool.join("probes/exports.map").display()
+            ))
+            .arg(tool.join("probes/network_jni.c"))
+            .arg("-lc")
+            .arg("-o")
+            .arg(&fixture),
+    )?;
+    let kind = command_output(Command::new("file").arg(&fixture))?;
+    if !kind.contains("ELF 64-bit LSB shared object, ARM aarch64") {
+        return Err(format!("unexpected network fixture format: {kind}").into());
+    }
+    println!("build-network-dex: classes=13 methods=303 ELF=arm64 imports=8 loopback=only");
+    Ok(())
+}
+
 fn build_button_dex_probe(root: &Path) -> Result<()> {
     // Rebuild the baseline first: the Button flavor intentionally reuses the
     // launcher/context/resource test classes, but replaces only Activity/View
@@ -3109,6 +3201,10 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
                 .arg("-I")
                 .arg(root.join("tools/bionic-fs-facade/include"))
                 .arg("-I")
+                .arg(root.join("tools/bionic-dns-facade/include"))
+                .arg("-I")
+                .arg(root.join("tools/bionic-socket-broker-adapter/include"))
+                .arg("-I")
                 .arg(root.join("tools/bionic-sendfile-facade/include"))
                 .arg("-I")
                 .arg(root.join("tools/bionic-stdio-facade/include"))
@@ -3269,6 +3365,8 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         root.join("_aosp/libnativehelper/header_only_include"),
         root.join("_aosp/libnativehelper/platform_header_only_include"),
         root.join("_aosp/external/dlmalloc"),
+        root.join("tools/bionic-dns-facade/include"),
+        root.join("tools/bionic-socket-broker-adapter/include"),
         PathBuf::from("/opt/homebrew/include"),
     ];
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
@@ -3418,6 +3516,12 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             "darwin_art_bionic_syscall_resolve",
             "darwin_art_bionic_fs_process_install",
             "darwin_art_bionic_fs_process_uninstall",
+            "darwin_art_bionic_socket_broker_activate",
+            "darwin_art_bionic_socket_broker_deactivate",
+            "darwin_art_bionic_socket_broker_is_active",
+            "darwin_art_bionic_socket_broker_resolve",
+            "darwin_art_bionic_socket_broker_dns_resolve",
+            "darwin_art_bionic_dns_reset_for_test",
             "darwin_art_bionic_stdio_process_install",
             "darwin_art_bionic_stdio_process_uninstall",
             "darwin_art_bionic_formatted_stdio_resolve",
@@ -3954,12 +4058,17 @@ fn build_runtime_host(root: &Path) -> Result<()> {
 }
 
 fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
-    probe_runtime_dex_flavor(root, show_window, false, false, false)
+    probe_runtime_dex_flavor(root, show_window, false, false, false, false)
 }
 
 fn probe_runtime_elf_jni(root: &Path) -> Result<()> {
     build_elf_jni_dex_probe(root)?;
-    probe_runtime_dex_flavor(root, false, false, false, true)
+    probe_runtime_dex_flavor(root, false, false, false, true, false)
+}
+
+fn probe_runtime_network(root: &Path) -> Result<()> {
+    build_network_dex_probe(root)?;
+    probe_runtime_dex_flavor(root, false, false, false, false, true)
 }
 
 fn pinned_direct_apk_ndk_bin() -> Result<PathBuf> {
@@ -4358,6 +4467,51 @@ impl Drop for PrivateApkNativeFixture {
     }
 }
 
+struct PrivateNetworkFixture {
+    root: PathBuf,
+    library: PathBuf,
+}
+
+impl Drop for PrivateNetworkFixture {
+    fn drop(&mut self) {
+        let _ = fs::set_permissions(&self.root, fs::Permissions::from_mode(0o700));
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn prepare_private_network_fixture(root: &Path) -> Result<PrivateNetworkFixture> {
+    let source = root.join("_build/network-runtime-probe/libdarwin_art_network_runtime.so");
+    if !source.is_file() {
+        return Err(format!("network runtime fixture is missing: {}", source.display()).into());
+    }
+    let temporary_base = env::temp_dir();
+    let mut private_root = None;
+    for attempt in 0..128_u32 {
+        let candidate = temporary_base.join(format!(
+            "darwin-art-network-runtime.{}.{}",
+            std::process::id(),
+            attempt
+        ));
+        match fs::create_dir(&candidate) {
+            Ok(()) => {
+                private_root = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let private_root = private_root.ok_or("could not allocate private network fixture")?;
+    let library = private_root.join("libdarwin_art_network_runtime.so");
+    fs::copy(&source, &library)?;
+    fs::set_permissions(&library, fs::Permissions::from_mode(0o400))?;
+    fs::set_permissions(&private_root, fs::Permissions::from_mode(0o500))?;
+    Ok(PrivateNetworkFixture {
+        root: private_root,
+        library,
+    })
+}
+
 fn sha256_file(path: &Path) -> Result<String> {
     let mut file = fs::File::open(path)?;
     let mut digest = Sha256::new();
@@ -4472,15 +4626,15 @@ fn prepare_private_apk_native_fixture(root: &Path) -> Result<PrivateApkNativeFix
 }
 
 fn probe_runtime_graphics(root: &Path) -> Result<()> {
-    probe_runtime_dex_flavor(root, false, true, false, false)
+    probe_runtime_dex_flavor(root, false, true, false, false, false)
 }
 
 fn probe_runtime_graphics_window(root: &Path) -> Result<()> {
-    probe_runtime_dex_flavor(root, true, true, false, false)
+    probe_runtime_dex_flavor(root, true, true, false, false, false)
 }
 
 fn probe_runtime_button(root: &Path, show_window: bool) -> Result<()> {
-    probe_runtime_dex_flavor(root, show_window, true, true, false)
+    probe_runtime_dex_flavor(root, show_window, true, true, false, false)
 }
 
 fn probe_runtime_dex_flavor(
@@ -4489,6 +4643,7 @@ fn probe_runtime_dex_flavor(
     real_graphics: bool,
     button: bool,
     elf_jni: bool,
+    network: bool,
 ) -> Result<()> {
     let core_icu4j = if real_graphics {
         prepare_icu_runtime_bootclasspath(root)?
@@ -4505,7 +4660,9 @@ fn probe_runtime_dex_flavor(
     let core_oj = root.join("_prebuilt/android-16/bootclasspath/core-oj.jar");
     let core_libart = root.join("_prebuilt/android-16/bootclasspath/core-libart.jar");
     let framework = root.join("_prebuilt/android-16/bootclasspath/framework.jar");
-    let classes_dex = root.join(if elf_jni {
+    let classes_dex = root.join(if network {
+        "_build/network-runtime-probe/dex/classes.dex"
+    } else if elf_jni {
         "_build/elf-jni-dex/dex/classes.dex"
     } else if button {
         "_build/button-dex/dex/classes.dex"
@@ -4571,6 +4728,12 @@ fn probe_runtime_dex_flavor(
                 .env("DARWIN_ART_TEST_FONT", roboto);
         }
     }
+    let mut network_fixture = None;
+    if network {
+        let fixture = prepare_private_network_fixture(root)?;
+        command.env("DARWIN_ART_ANDROID_NETWORK_FIXTURE", &fixture.library);
+        network_fixture = Some(fixture);
+    }
     let mut apk_native_fixture = None;
     if elf_jni {
         build_shell_gate(root, "build-android-elf-jni-fixture.sh")?;
@@ -4628,7 +4791,21 @@ fn probe_runtime_dex_flavor(
         apk_native_fixture = Some(extracted);
     }
     let output = command_output(&mut command)?;
-    let expected = if elf_jni {
+    let expected = if network {
+        "Hello from Darwin ART main: 안녕\n\
+         ART Android network: JavaVMExt+JNI_OnLoad loopback-HTTP=42 socket+DNS=closed Internet=no\n\
+         ART Darwin Runtime::Create: ok\n\
+         ART Darwin app ClassLoader: PathClassLoader\n\
+         ART Darwin DEX interpreter: Hello.answer()=42\n\
+         ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
+         ART runtime native: System.arraycopy()=42\n\
+         ART Android framework: ProbeActivity().probeValue()=42\n\
+         ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
+         ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
+         ART Android lifecycle: Activity.onCreate()=43\n\
+         ART Darwin launcher: main(String[])=ok"
+            .to_owned()
+    } else if elf_jni {
         let extracted = apk_native_fixture
             .as_ref()
             .expect("ELF JNI probe retains its APK extraction");
@@ -4667,7 +4844,10 @@ fn probe_runtime_dex_flavor(
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
-    if elf_jni {
+    drop(network_fixture);
+    if network {
+        println!("probe-runtime-network: ART JNI loopback + socket/DNS quiescence PASS");
+    } else if elf_jni {
         println!("probe-runtime-elf-jni: ART DT_NEEDED graph + JNI + reverse finalizers PASS");
     } else if button {
         if show_window {

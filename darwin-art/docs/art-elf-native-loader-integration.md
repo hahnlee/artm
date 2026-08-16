@@ -168,12 +168,15 @@ it becomes the next action and the dispatcher is restored at the front.
    six-DSO directory. A separate actual-ART process also exercises the
    `extractNativeLibs=false` path: three 16 KiB-aligned STORED DSOs remain in a
    mode-0400 APK and are mapped as read-only fd slices with no copy or extraction.
-10. Class-loader namespace caching, broader JNI proxy coverage, CriticalNative,
-    and production network/central-FD semantics: incomplete. The JNI proxy now
-    executes 19 bounded JNIEnv entries plus JavaVM `GetEnv`. A standalone
-    20-entry socket facade and an OFD/epoll broker with 13 typed socket leases
-    are accepted but not yet atomically composed with the filesystem descriptor
-    owner.
+10. Numeric-loopback network and central-FD composition: complete for the
+    isolated ART JNI gate. The exact namespace now has 32 owners and 185 routes;
+    `socket`/`connect`/`send`/`recv` use broker ABI-v3 typed leases, DNS shares
+    the same process admission lifetime, and marker-safe `close` delegates
+    non-broker descriptors to the filesystem owner. `probe-runtime-network`
+    executes JavaVMExt → JNI_OnLoad → registered `(I)I` HTTP and verifies zero
+    socket/DNS/trampoline state after shutdown. External DNS/Internet,
+    class-loader namespace caching, broader JNI proxy coverage, and
+    CriticalNative remain incomplete.
 11. Guest `libdl`: a closed standalone owner executes `dlopen`, `dlsym`,
     `dlclose`, `dlerror`, and `android_dlopen_ext` with refcounts and lifecycle
     ordering. Production still needs ClassLoader-scoped dynamic sibling

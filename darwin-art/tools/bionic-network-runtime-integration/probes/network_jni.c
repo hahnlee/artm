@@ -49,7 +49,7 @@ static int ReceiveResponse(int descriptor) {
     if (capacity > 3)
       capacity = 3;
     if (capacity == 0)
-      return -1;
+      break;
     const ssize_t count = recv(descriptor, response + offset, capacity, 0);
     if (count < 0 && errno == EINTR)
       continue;
@@ -61,6 +61,7 @@ static int ReceiveResponse(int descriptor) {
   }
   if (offset != sizeof(expected) - 1)
     return -1;
+  response[offset] = '\0';
   for (size_t index = 0; index < sizeof(expected); ++index) {
     if (response[index] != expected[index])
       return -1;

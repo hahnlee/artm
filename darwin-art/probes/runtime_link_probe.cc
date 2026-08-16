@@ -1,8 +1,14 @@
+#include <arpa/inet.h>
 #include <mach-o/dyld.h>
+#include <netinet/in.h>
+#include <poll.h>
 #include <pthread.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <array>
+#include <atomic>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
@@ -10,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -20,6 +27,8 @@
 #include "class_linker.h"
 #include "cmdline_types.h"
 #include "darwin_art/darwin_art.h"
+#include "darwin_art_bionic_dns.h"
+#include "darwin_art_bionic_socket_broker.h"
 #include "darwin_android_jni_trampoline.h"
 #include "darwin_framework_natives.h"
 #include "darwin_icu_natives.h"
@@ -330,6 +339,126 @@ static bool RunAndroidElfSelfTest(JNIEnv* env, JavaVM* vm,
   return true;
 }
 
+class BoundedLoopbackHttpServer {
+ public:
+  ~BoundedLoopbackHttpServer() { Stop(); }
+
+  bool Start() {
+    listener_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (listener_ < 0) return false;
+    int enabled = 1;
+    (void)setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, &enabled,
+                     sizeof(enabled));
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    if (bind(listener_, reinterpret_cast<const sockaddr*>(&address),
+             sizeof(address)) != 0 ||
+        listen(listener_, 1) != 0) {
+      close(listener_);
+      listener_ = -1;
+      return false;
+    }
+    socklen_t length = sizeof(address);
+    if (getsockname(listener_, reinterpret_cast<sockaddr*>(&address),
+                    &length) != 0) {
+      close(listener_);
+      listener_ = -1;
+      return false;
+    }
+    port_ = ntohs(address.sin_port);
+    try {
+      thread_ = std::thread([this] { Serve(); });
+    } catch (...) {
+      close(listener_);
+      listener_ = -1;
+      port_ = 0;
+      return false;
+    }
+    return true;
+  }
+
+  int port() const { return port_; }
+
+  bool Stop() {
+    if (joined_) return success_.load(std::memory_order_acquire);
+    cancelled_.store(true, std::memory_order_release);
+    {
+      std::lock_guard<std::mutex> lock(listener_mutex_);
+      if (listener_ >= 0) (void)shutdown(listener_, SHUT_RDWR);
+    }
+    if (thread_.joinable()) thread_.join();
+    joined_ = true;
+    return success_.load(std::memory_order_acquire);
+  }
+
+ private:
+  void Serve() {
+    pollfd pending{listener_, POLLIN, 0};
+    for (int attempt = 0; attempt < 50; ++attempt) {
+      if (cancelled_.load(std::memory_order_acquire)) break;
+      const int ready = poll(&pending, 1, 100);
+      if (ready < 0 && errno == EINTR) continue;
+      if (ready <= 0 || (pending.revents & POLLIN) == 0) continue;
+      const int client = accept(listener_, nullptr, nullptr);
+      if (client < 0) break;
+      timeval timeout{2, 0};
+      (void)setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                       sizeof(timeout));
+      (void)setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout,
+                       sizeof(timeout));
+      std::array<char, 512> request{};
+      size_t used = 0;
+      while (used + 1 < request.size()) {
+        const ssize_t count =
+            recv(client, request.data() + used, request.size() - 1 - used, 0);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) break;
+        used += static_cast<size_t>(count);
+        request[used] = '\0';
+        if (std::strstr(request.data(), "\r\n\r\n") != nullptr) break;
+      }
+      static constexpr char kRequest[] =
+          "GET /runtime HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+      static constexpr char kResponse[] =
+          "HTTP/1.0 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK";
+      bool valid = used == sizeof(kRequest) - 1 &&
+                   std::memcmp(request.data(), kRequest, sizeof(kRequest) - 1) ==
+                       0;
+      size_t sent = 0;
+      while (valid && sent < sizeof(kResponse) - 1) {
+        const ssize_t count = send(client, kResponse + sent,
+                                   sizeof(kResponse) - 1 - sent, 0);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) {
+          valid = false;
+          break;
+        }
+        sent += static_cast<size_t>(count);
+      }
+      (void)shutdown(client, SHUT_WR);
+      close(client);
+      success_.store(valid && sent == sizeof(kResponse) - 1,
+                     std::memory_order_release);
+      break;
+    }
+    {
+      std::lock_guard<std::mutex> lock(listener_mutex_);
+      close(listener_);
+      listener_ = -1;
+    }
+  }
+
+  int listener_ = -1;
+  std::mutex listener_mutex_;
+  int port_ = 0;
+  std::thread thread_;
+  std::atomic<bool> cancelled_{false};
+  std::atomic<bool> success_{false};
+  bool joined_ = false;
+};
+
 static jlong NativePackedIntegerStack(JNIEnv*, jclass, jint a0, jint a1,
                                       jint a2, jint a3, jint a4, jint a5,
                                       jint spilled, jlong wide, jint tail0,
@@ -388,6 +517,7 @@ static bool g_apk_elf_loaded = false;
 static std::string g_apk_sha256;
 static std::string g_apk_root_sha256;
 static bool g_direct_apk_loaded = false;
+static bool g_network_elf_loaded = false;
 
 static bool IsSha256(const char* value) {
   if (value == nullptr || std::strlen(value) != 64) {
@@ -822,6 +952,16 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::getenv("DARWIN_ART_ANDROID_TLS_FIXTURE");
   const bool run_tls_acceptance =
       tls_fixture_path != nullptr && tls_fixture_path[0] != '\0';
+  const char* network_fixture_path =
+      std::getenv("DARWIN_ART_ANDROID_NETWORK_FIXTURE");
+  const bool run_network_acceptance =
+      network_fixture_path != nullptr && network_fixture_path[0] != '\0';
+  if (run_network_acceptance &&
+      (run_elf_jni_fixture || run_generic_elf || run_apk_elf ||
+       run_libcxx_acceptance || run_tls_acceptance || run_direct_apk)) {
+    std::cerr << "ART Android network fixture requires an isolated process\n";
+    return 47;
+  }
 
   // Darwin's malloc zones can claim the fixed compressed-reference window
   // while RuntimeArgumentMap is being assembled. Reserve ART's bounded arena
@@ -907,7 +1047,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   art::ClassLinker* class_linker = art::Runtime::Current()->GetClassLinker();
   jobject loader_ref =
       class_linker->CreatePathClassLoader(self, app_dex_file_ptrs);
-  art::StackHandleScope<12> hs(self);
+  art::StackHandleScope<13> hs(self);
   art::Handle<art::mirror::ClassLoader> app_loader =
       hs.NewHandle(soa.Decode<art::mirror::ClassLoader>(loader_ref));
   jobject app_loader_ref = soa.AddLocalReference<jobject>(app_loader.Get());
@@ -990,6 +1130,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                               app_loader));
   art::MutableHandle<art::mirror::Class> native_fixture_handle(
       hs.NewHandle<art::mirror::Class>(nullptr));
+  art::MutableHandle<art::mirror::Class> network_fixture_handle(
+      hs.NewHandle<art::mirror::Class>(nullptr));
   if (run_direct_apk) {
     if (run_elf_jni_fixture) {
       std::cerr << "ART Android direct APK must run in its isolated host flavor\n";
@@ -1017,8 +1159,15 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
         self, "Ldarwin/art/nativefixture/NativeFixture;",
         sizeof("Ldarwin/art/nativefixture/NativeFixture;") - 1u, app_loader));
   }
+  if (run_network_acceptance) {
+    network_fixture_handle.Assign(class_linker->FindClass(
+        self, "Ldev/darwinart/probe/NetworkRuntimeFixture;",
+        sizeof("Ldev/darwinart/probe/NetworkRuntimeFixture;") - 1u,
+        app_loader));
+  }
   if (content_root_handle == nullptr || package_manager_handle == nullptr ||
       (run_elf_jni_fixture && native_fixture_handle == nullptr) ||
+      (run_network_acceptance && network_fixture_handle == nullptr) ||
       self->IsExceptionPending()) {
     std::cerr << "ART Android window: Darwin Canvas/Window lookup failed\n";
     if (self->IsExceptionPending()) {
@@ -1058,6 +1207,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   jclass native_fixture_class =
       run_elf_jni_fixture
           ? soa.AddLocalReference<jclass>(native_fixture_handle.Get())
+          : nullptr;
+  jclass network_fixture_class =
+      run_network_acceptance
+          ? soa.AddLocalReference<jclass>(network_fixture_handle.Get())
           : nullptr;
   art::Runtime::Current()->StartMinimalForDarwinProbe(self->GetJniEnv());
   if (!darwin_art::RegisterLibcoreNatives(self->GetJniEnv())) {
@@ -1720,6 +1873,44 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 19;
   }
 
+  if (run_network_acceptance) {
+    std::string load_error;
+    bool loaded = false;
+    {
+      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
+      loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
+          env, network_fixture_path, app_loader_ref, network_fixture_class,
+          &load_error);
+    }
+    if (!loaded || !load_error.empty() || env->ExceptionCheck()) {
+      std::cerr << "ART Android network JavaVMExt load failed: " << load_error
+                << "\n";
+      return 47;
+    }
+    g_network_elf_loaded = true;
+    BoundedLoopbackHttpServer server;
+    if (!server.Start()) {
+      std::cerr << "ART Android network loopback listener failed\n";
+      return 47;
+    }
+    jmethodID loopback = env->GetStaticMethodID(
+        network_fixture_class, "nativeLoopbackHttp", "(I)I");
+    const jint network_result =
+        loopback == nullptr
+            ? -1
+            : env->CallStaticIntMethod(network_fixture_class, loopback,
+                                       static_cast<jint>(server.port()));
+    const bool server_ok = server.Stop();
+    if (network_result != 42 || !server_ok || env->ExceptionCheck()) {
+      std::cerr << "ART Android network loopback failed, result="
+                << network_result << " server=" << server_ok << "\n";
+      return 47;
+    }
+    std::cout << "ART Android network: JavaVMExt+JNI_OnLoad loopback-HTTP=42 "
+                 "socket+DNS=closed Internet=no\n"
+              << std::flush;
+  }
+
   if (run_elf_jni_fixture) {
     if (!run_generic_elf) {
       std::cerr << "ART Android ELF generic graph path is missing\n";
@@ -1971,6 +2162,16 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
   }
   if (darwin_art::android_jni::TrampolineLiveCount() != 0) {
     std::cerr << "ART Darwin shutdown: ELF JNI trampolines remain live\n";
+    std::lock_guard<std::mutex> lock(g_process_state.mutex);
+    g_process_state.phase = ProcessPhase::kShutdownFailed;
+    return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+  }
+  if (g_network_elf_loaded &&
+      (darwin_art_bionic_socket_broker_is_active() != 0 ||
+       darwin_art_bionic_socket_broker_live_objects() != 0 ||
+       darwin_art_bionic_dns_live_results_for_test() != 0 ||
+       darwin_art_bionic_dns_retired_results_for_test() != 0)) {
+    std::cerr << "ART Darwin shutdown: network owner did not quiesce\n";
     std::lock_guard<std::mutex> lock(g_process_state.mutex);
     g_process_state.phase = ProcessPhase::kShutdownFailed;
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
