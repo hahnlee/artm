@@ -11,6 +11,16 @@ Run:
 ./tools/android-managed-native-load/audit.sh
 ```
 
+The graphics-runtime build may prepare the pinned sources, Runtime registrar
+archive, DEX, and ELF without recursively executing the runtime acceptance:
+
+```sh
+./tools/android-managed-native-load/audit.sh --build-only
+```
+
+This mode still runs the source, bytecode, exact-symbol, ASan/UBSan, DEX, ELF,
+format, shell, and whitespace gates. It skips only the final ART process.
+
 The gate builds three artifacts under `_build/android-managed-native-load`:
 
 - `libopenjdk-runtime-managed-load-darwin.a`, compiled from the unmodified

@@ -10,6 +10,30 @@ source "$dir/sources.lock"
 fail() { echo "android-managed-native-load: FAIL $*" >&2; exit 2; }
 sha() { shasum -a 256 "$1" | awk '{print $1}'; }
 
+mode="${1:-}"
+case "$mode" in
+  ""|--build-only) ;;
+  *) fail "usage: $0 [--build-only]" ;;
+esac
+
+finish_audit() {
+  xcrun clang-format --dry-run --Werror "$dir/fixture/managed_native.c" \
+    "$dir/probes/runtime_registrar_smoke.cc"
+  bash -n "$dir/audit.sh"
+  git -C "$root" diff --check -- tools/android-managed-native-load
+  git -C "$root" diff --cached --check -- tools/android-managed-native-load
+  while IFS= read -r -d '' file; do
+    set +e
+    local whitespace
+    whitespace="$(git -C "$root" diff --no-index --check /dev/null "$file" 2>&1)"
+    local status=$?
+    set -e
+    [[ -z "$whitespace" ]] || fail "untracked whitespace: $file: $whitespace"
+    [[ $status -le 1 ]] || fail "could not diff-check untracked file: $file"
+  done < <(git -C "$root" ls-files --others --exclude-standard -z -- \
+           tools/android-managed-native-load)
+}
+
 build="$root/_build/android-managed-native-load"
 source_root="$build/source"
 mkdir -p "$source_root"
@@ -301,6 +325,12 @@ if "$readelf" -d "$fixture_so" | grep -F '(NEEDED)' >/dev/null; then
   fail 'managed fixture unexpectedly has DT_NEEDED dependencies'
 fi
 
+if [[ "$mode" == "--build-only" ]]; then
+  finish_audit
+  echo 'android-managed-native-load: BUILD-ONLY PASS Runtime6 archive + actual DEX + Android arm64 ELF'
+  exit 0
+fi
+
 runtime="$root/_build/runtime-link-probe/libdarwin_art_runtime.dylib"
 host="$root/target/debug/darwin-art-host"
 core_libart="$root/_prebuilt/android-16/bootclasspath/core-libart.jar"
@@ -343,17 +373,4 @@ else
   fi
 fi
 
-xcrun clang-format --dry-run --Werror "$dir/fixture/managed_native.c" \
-  "$dir/probes/runtime_registrar_smoke.cc"
-bash -n "$dir/audit.sh"
-git -C "$root" diff --check -- tools/android-managed-native-load
-git -C "$root" diff --cached --check -- tools/android-managed-native-load
-while IFS= read -r -d '' file; do
-  set +e
-  whitespace="$(git -C "$root" diff --no-index --check /dev/null "$file" 2>&1)"
-  status=$?
-  set -e
-  [[ -z "$whitespace" ]] || fail "untracked whitespace: $file: $whitespace"
-  [[ $status -le 1 ]] || fail "could not diff-check untracked file: $file"
-done < <(git -C "$root" ls-files --others --exclude-standard -z -- \
-         tools/android-managed-native-load)
+finish_audit
