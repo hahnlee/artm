@@ -8,6 +8,9 @@ fail() { echo "bionic-central-fd-broker: FAIL $*" >&2; exit 2; }
 # shellcheck disable=SC1090
 source "$dir/sources.lock"
 sha() { shasum -a 256 "$1" | awk '{print $1}'; }
+header_sha="$(sha "$dir/include/darwin_art_bionic_fd_broker.h")"
+[[ "$header_sha" == "$FD_BROKER_HEADER_SHA256" ]] ||
+  fail 'public C header drift'
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/central-fd-broker.XXXXXX")"
 cleanup() {
@@ -33,6 +36,7 @@ cat > "$tmp/android-abi.c" <<'EOF'
 #include <fcntl.h>
 #include <stddef.h>
 #include <sys/epoll.h>
+#include <sys/socket.h>
 _Static_assert(O_CLOEXEC == 02000000, "Android O_CLOEXEC");
 _Static_assert(F_DUPFD_CLOEXEC == 1030, "Android F_DUPFD_CLOEXEC");
 _Static_assert(EPOLL_CLOEXEC == O_CLOEXEC, "Android EPOLL_CLOEXEC");
@@ -40,6 +44,10 @@ _Static_assert(EPOLL_CTL_ADD == 1 && EPOLL_CTL_DEL == 2 && EPOLL_CTL_MOD == 3,
                "Android epoll operations");
 _Static_assert(EPOLLIN == 1 && sizeof(struct epoll_event) == 16,
                "Android epoll event ABI");
+_Static_assert(sizeof(socklen_t) == 4 && sizeof(struct sockaddr_storage) == 128,
+               "Android socket address ABI");
+_Static_assert(SOCK_NONBLOCK == 04000 && SOCK_CLOEXEC == O_CLOEXEC,
+               "Android socket descriptor flags");
 int main(void) { return 0; }
 EOF
 "$android_cc" -std=c17 -Wall -Wextra -Werror -c "$tmp/android-abi.c" \
@@ -58,13 +66,26 @@ fixture="$tmp/libcentral_fd_dup_epoll_fixture.so"
   awk '$7=="UND"&&$8!=""{name=$8;sub(/@.*/,"",name);print name}' | sort -u \
   > "$tmp/android-imports"
 cat > "$tmp/android-imports.expected" <<'EOF'
+accept4
+bind
 close
+connect
 dup
 dup3
 epoll_create1
 epoll_ctl
 epoll_wait
 fcntl
+getpeername
+getsockname
+getsockopt
+listen
+recv
+recvfrom
+send
+sendto
+setsockopt
+shutdown
 EOF
 diff -u "$tmp/android-imports.expected" "$tmp/android-imports" ||
   fail 'Android dup/epoll import drift'
@@ -112,4 +133,4 @@ while IFS= read -r -d '' file; do
 done < <(git -C "$root" ls-files --others --exclude-standard -z -- \
          tools/bionic-central-fd-broker)
 
-echo 'bionic-central-fd-broker: PASS C-ABI=v1+v2 AndroidELF=dup+dup3+fcntl+epoll OFD=shared-offset+status refclose=last descriptor-flags=independent epoll=socket-readiness token=generation-tagged ASan+UBSan+TSan host-fd=0'
+echo 'bionic-central-fd-broker: PASS C-ABI=v1+v2+v3 AndroidELF=dup+fcntl+epoll+socket-control OFD=shared-offset+status refclose=last descriptor-flags=independent epoll=socket-readiness socket=typed-leased+accept-atomic token=generation-tagged ASan+UBSan+TSan host-fd=0'

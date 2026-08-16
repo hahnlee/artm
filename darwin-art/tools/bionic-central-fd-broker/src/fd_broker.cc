@@ -230,6 +230,56 @@ void SetResult(DarwinArtFdIoResult *result, intptr_t value, int error) {
   result->value = value;
   result->android_errno = error;
 }
+bool ValidOutputBuffer(const void *buffer, uint32_t capacity,
+                       const uint32_t *length) {
+  return (buffer == nullptr && capacity == 0 && length == nullptr) ||
+         (buffer != nullptr && length != nullptr);
+}
+bool ValidSocketRequest(const DarwinArtFdSocketRequestV1 *request) {
+  if (!request || request->abi_version != DARWIN_ART_FD_SOCKET_REQUEST_ABI_V1 ||
+      request->struct_size < sizeof(*request) ||
+      request->operation < DARWIN_ART_FD_SOCKET_BIND ||
+      request->operation > DARWIN_ART_FD_SOCKET_ACCEPT4)
+    return false;
+  const bool input_bytes = request->byte_count == 0 || request->input_bytes;
+  const bool output_bytes = request->byte_count == 0 || request->output_bytes;
+  const bool output_address = ValidOutputBuffer(
+      request->output_address, request->output_address_capacity,
+      request->output_address_length);
+  const bool option_output =
+      ValidOutputBuffer(request->option_output, request->option_output_capacity,
+                        request->option_output_length);
+  const bool required_output_address =
+      request->output_address && request->output_address_length;
+  const bool required_option_output =
+      request->option_output && request->option_output_length;
+  switch (request->operation) {
+  case DARWIN_ART_FD_SOCKET_BIND:
+  case DARWIN_ART_FD_SOCKET_CONNECT:
+    return request->address && request->address_length;
+  case DARWIN_ART_FD_SOCKET_LISTEN:
+  case DARWIN_ART_FD_SOCKET_SHUTDOWN:
+    return true;
+  case DARWIN_ART_FD_SOCKET_SEND:
+    return input_bytes;
+  case DARWIN_ART_FD_SOCKET_RECV:
+    return output_bytes;
+  case DARWIN_ART_FD_SOCKET_SENDTO:
+    return input_bytes && request->address && request->address_length;
+  case DARWIN_ART_FD_SOCKET_RECVFROM:
+    return output_bytes && output_address;
+  case DARWIN_ART_FD_SOCKET_GETSOCKOPT:
+    return option_output && required_option_output;
+  case DARWIN_ART_FD_SOCKET_SETSOCKOPT:
+    return request->option_input_length == 0 || request->option_input;
+  case DARWIN_ART_FD_SOCKET_GETPEERNAME:
+  case DARWIN_ART_FD_SOCKET_GETSOCKNAME:
+    return output_address && required_output_address;
+  case DARWIN_ART_FD_SOCKET_ACCEPT4:
+    return output_address;
+  }
+  return false;
+}
 template <typename Invoke>
 DarwinArtFdBrokerStatus DispatchOne(DarwinArtFdBrokerImpl *broker, int fd,
                                     std::optional<DarwinArtFdKind> kind,
@@ -359,17 +409,23 @@ extern "C" DarwinArtFdBrokerStatus darwin_art_fd_broker_install_owner(
     const DarwinArtFdOwnerV1 *callbacks, DarwinArtFdOwnerHandle *owner) {
   if (!broker || !callbacks || !owner || !ValidOwnerKind(kind) ||
       (callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V1 &&
-       callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V2))
+       callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V2 &&
+       callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V3))
     return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
   const size_t required_size =
       callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V1
           ? offsetof(DarwinArtFdOwnerV1, read_at)
+      : callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V2
+          ? offsetof(DarwinArtFdOwnerV1, socket_operation)
           : sizeof(DarwinArtFdOwnerV1);
   if (callbacks->struct_size < required_size)
     return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
   DarwinArtFdOwnerV1 copied{};
-  std::memcpy(&copied, callbacks,
-              std::min<size_t>(callbacks->struct_size, sizeof(copied)));
+  std::memcpy(&copied, callbacks, required_size);
+  if (kind == DARWIN_ART_FD_SOCKET &&
+      callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V3 &&
+      (!copied.socket_operation || !copied.close))
+    return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
   auto *impl = Impl(broker);
   std::lock_guard lock(impl->mutex);
   if (impl->next_owner == 0)
@@ -718,6 +774,96 @@ darwin_art_fd_broker_sendfile(DarwinArtFdBroker *broker, int out_fd, int in_fd,
                 ? -1
                 : static_cast<intptr_t>(transferred),
             transferred == static_cast<size_t>(-1) ? error : 0);
+  return DARWIN_ART_FD_BROKER_OK;
+}
+
+extern "C" DarwinArtFdBrokerStatus darwin_art_fd_broker_socket_operation(
+    DarwinArtFdBroker *broker, DarwinArtFdOwnerHandle owner, int fd,
+    const DarwinArtFdSocketRequestV1 *request, DarwinArtFdIoResult *result) {
+  if (!broker || !owner || !result || !ValidSocketRequest(request))
+    return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
+  auto *impl = Impl(broker);
+  Lease lease;
+  {
+    std::lock_guard lock(impl->mutex);
+    auto status = AcquireLocked(impl, fd, DARWIN_ART_FD_SOCKET, &lease);
+    if (status != DARWIN_ART_FD_BROKER_OK)
+      return status;
+    if (lease.description->owner != owner) {
+      ReleaseLocked(impl, lease);
+      return DARWIN_ART_FD_BROKER_WRONG_OWNER;
+    }
+    if (!lease.description->callbacks.socket_operation) {
+      ReleaseLocked(impl, lease);
+      return DARWIN_ART_FD_BROKER_UNSUPPORTED;
+    }
+  }
+
+  DarwinArtFdSocketAcceptResultV1 accepted{
+      DARWIN_ART_FD_SOCKET_ACCEPT_RESULT_ABI_V1,
+      sizeof(DarwinArtFdSocketAcceptResultV1),
+      0,
+      0,
+      0,
+      0};
+  int error = 0;
+  auto &callbacks = lease.description->callbacks;
+  const intptr_t value = callbacks.socket_operation(
+      callbacks.context, lease.description->object, request, &accepted, &error);
+  if (request->operation != DARWIN_ART_FD_SOCKET_ACCEPT4 || value < 0) {
+    std::lock_guard lock(impl->mutex);
+    ReleaseLocked(impl, lease);
+    SetResult(result, value, value < 0 ? error : 0);
+    return DARWIN_ART_FD_BROKER_OK;
+  }
+
+  DarwinArtFdBrokerStatus publication = DARWIN_ART_FD_BROKER_OK;
+  int accepted_fd = -1;
+  {
+    std::lock_guard lock(impl->mutex);
+    auto found = impl->owners.find(owner);
+    if (accepted.abi_version != DARWIN_ART_FD_SOCKET_ACCEPT_RESULT_ABI_V1 ||
+        accepted.struct_size < sizeof(accepted) ||
+        accepted.kind != DARWIN_ART_FD_SOCKET ||
+        (accepted.descriptor_flags & ~DARWIN_ART_FD_CLOEXEC)) {
+      publication = DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
+    } else if (found == impl->owners.end()) {
+      publication = DARWIN_ART_FD_BROKER_STALE;
+    } else if (found->second.draining) {
+      publication = DARWIN_ART_FD_BROKER_DRAINING;
+    } else {
+      auto selected = TakeFreeSlotLocked(impl, 0);
+      if (!selected) {
+        publication = DARWIN_ART_FD_BROKER_EXHAUSTED;
+      } else {
+        auto description = std::make_shared<Description>();
+        description->owner = owner;
+        description->kind = DARWIN_ART_FD_SOCKET;
+        description->callbacks = found->second.callbacks;
+        description->object = accepted.object;
+        description->status_flags = accepted.status_flags;
+        Slot &slot = impl->slots[*selected];
+        slot.live = true;
+        slot.descriptor_flags = accepted.descriptor_flags;
+        slot.description = std::move(description);
+        ++found->second.live_descriptions;
+        accepted_fd = static_cast<int>(MakeToken(*selected, slot.generation));
+      }
+    }
+    if (publication == DARWIN_ART_FD_BROKER_OK)
+      ReleaseLocked(impl, lease);
+  }
+  if (publication != DARWIN_ART_FD_BROKER_OK) {
+    int ignored_error = 0;
+    if (callbacks.close)
+      (void)callbacks.close(callbacks.context, accepted.object, &ignored_error);
+    {
+      std::lock_guard lock(impl->mutex);
+      ReleaseLocked(impl, lease);
+    }
+    return publication;
+  }
+  SetResult(result, accepted_fd, 0);
   return DARWIN_ART_FD_BROKER_OK;
 }
 

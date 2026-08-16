@@ -35,6 +35,12 @@ struct Fake {
   std::thread::id blocked_reader;
   bool blocked_close_entered = false;
   bool release_blocked_close = false;
+  bool blocked_socket_entered = false;
+  bool release_blocked_socket = false;
+  size_t socket_calls = 0;
+  size_t accept_calls = 0;
+  uint64_t next_accepted_object = 200;
+  uint32_t accepted_kind = DARWIN_ART_FD_SOCKET;
 };
 
 intptr_t Read(void *context, uint64_t object, void *bytes, size_t count,
@@ -159,8 +165,83 @@ int Close(void *context, uint64_t object, int *android_errno) {
   return 0;
 }
 
+intptr_t SocketOperation(void *context, uint64_t object,
+                         const DarwinArtFdSocketRequestV1 *request,
+                         DarwinArtFdSocketAcceptResultV1 *accepted,
+                         int *android_errno) {
+  Fake *fake = static_cast<Fake *>(context);
+  std::unique_lock lock(fake->mutex);
+  ObjectState &state = fake->objects.at(object);
+  assert(!state.closed);
+  ++fake->socket_calls;
+  fake->events.push_back(std::to_string(object) + ":socket-enter");
+  if (object == 101 && !fake->blocked_socket_entered) {
+    fake->blocked_socket_entered = true;
+    fake->changed.notify_all();
+    fake->changed.wait(lock, [&] { return fake->release_blocked_socket; });
+  }
+  if (request->argument == -777) {
+    *android_errno = 111;
+    return -1;
+  }
+  switch (request->operation) {
+  case DARWIN_ART_FD_SOCKET_SEND:
+  case DARWIN_ART_FD_SOCKET_SENDTO:
+    state.output.append(static_cast<const char *>(request->input_bytes),
+                        request->byte_count);
+    *android_errno = 0;
+    return static_cast<intptr_t>(request->byte_count);
+  case DARWIN_ART_FD_SOCKET_RECV:
+  case DARWIN_ART_FD_SOCKET_RECVFROM: {
+    const size_t copied = std::min(request->byte_count, state.input.size());
+    if (copied)
+      std::memcpy(request->output_bytes, state.input.data(), copied);
+    if (request->operation == DARWIN_ART_FD_SOCKET_RECVFROM &&
+        request->output_address_length)
+      *request->output_address_length = 16;
+    *android_errno = 0;
+    return static_cast<intptr_t>(copied);
+  }
+  case DARWIN_ART_FD_SOCKET_GETSOCKOPT:
+    if (request->option_output_length)
+      *request->option_output_length = sizeof(int);
+    if (request->option_output &&
+        request->option_output_capacity >= sizeof(int))
+      *static_cast<int *>(request->option_output) = 1;
+    break;
+  case DARWIN_ART_FD_SOCKET_GETPEERNAME:
+  case DARWIN_ART_FD_SOCKET_GETSOCKNAME:
+    if (request->output_address_length)
+      *request->output_address_length = 16;
+    break;
+  case DARWIN_ART_FD_SOCKET_ACCEPT4: {
+    ++fake->accept_calls;
+    const uint64_t child = fake->next_accepted_object++;
+    fake->objects.emplace(child, ObjectState{});
+    accepted->object = child;
+    accepted->kind = fake->accepted_kind;
+    accepted->status_flags = request->flags;
+    accepted->descriptor_flags = request->flags ? DARWIN_ART_FD_CLOEXEC : 0;
+    if (request->output_address_length)
+      *request->output_address_length = 16;
+    break;
+  }
+  case DARWIN_ART_FD_SOCKET_BIND:
+  case DARWIN_ART_FD_SOCKET_CONNECT:
+  case DARWIN_ART_FD_SOCKET_LISTEN:
+  case DARWIN_ART_FD_SOCKET_SHUTDOWN:
+  case DARWIN_ART_FD_SOCKET_SETSOCKOPT:
+    break;
+  default:
+    assert(false && "broker admitted unknown socket operation");
+  }
+  fake->events.push_back(std::to_string(object) + ":socket-exit");
+  *android_errno = 0;
+  return 0;
+}
+
 DarwinArtFdOwnerV1 Callbacks(Fake *fake) {
-  return DarwinArtFdOwnerV1{DARWIN_ART_FD_OWNER_ABI_V2,
+  return DarwinArtFdOwnerV1{DARWIN_ART_FD_OWNER_ABI_V3,
                             sizeof(DarwinArtFdOwnerV1),
                             fake,
                             Read,
@@ -169,7 +250,8 @@ DarwinArtFdOwnerV1 Callbacks(Fake *fake) {
                             Ioctl,
                             Close,
                             ReadAt,
-                            WriteAt};
+                            WriteAt,
+                            SocketOperation};
 }
 
 size_t FindEvent(const std::vector<std::string> &events,
@@ -187,6 +269,14 @@ void Expect(DarwinArtFdBrokerStatus actual, DarwinArtFdBrokerStatus expected) {
   assert(actual == expected);
 }
 
+DarwinArtFdSocketRequestV1 SocketRequest(uint32_t operation) {
+  DarwinArtFdSocketRequestV1 request{};
+  request.abi_version = DARWIN_ART_FD_SOCKET_REQUEST_ABI_V1;
+  request.struct_size = sizeof(request);
+  request.operation = operation;
+  return request;
+}
+
 } // namespace
 
 int main() {
@@ -194,13 +284,14 @@ int main() {
   fake.objects.emplace(10, ObjectState{"hello", "", 0, false});
   fake.objects.emplace(20, ObjectState{});
   fake.objects.emplace(30, ObjectState{});
-  fake.objects.emplace(40, ObjectState{});
+  fake.objects.emplace(40, ObjectState{"network", "", 0, false});
   fake.objects.emplace(50, ObjectState{"other", "", 0, false});
   fake.objects.emplace(60, ObjectState{"abcdef", "", 0, false});
   fake.objects.emplace(kBlockedObject, ObjectState{"blocked", "", 0, false});
   fake.objects.emplace(100, ObjectState{});
   fake.objects.emplace(101, ObjectState{});
   fake.objects.emplace(102, ObjectState{"v1", "", 0, false});
+  fake.objects.emplace(103, ObjectState{});
 
   DarwinArtFdBroker *broker = darwin_art_fd_broker_create();
   assert(broker != nullptr);
@@ -268,6 +359,27 @@ int main() {
   Expect(darwin_art_fd_broker_close(broker, legacy_fd, &result),
          DARWIN_ART_FD_BROKER_OK);
   Expect(darwin_art_fd_broker_uninstall_owner(broker, legacy_owner),
+         DARWIN_ART_FD_BROKER_OK);
+
+  DarwinArtFdOwnerV1 v2_callbacks = callbacks;
+  v2_callbacks.abi_version = DARWIN_ART_FD_OWNER_ABI_V2;
+  v2_callbacks.struct_size = offsetof(DarwinArtFdOwnerV1, socket_operation);
+  DarwinArtFdOwnerHandle v2_socket_owner = 0;
+  Expect(darwin_art_fd_broker_install_owner(broker, DARWIN_ART_FD_SOCKET,
+                                            &v2_callbacks, &v2_socket_owner),
+         DARWIN_ART_FD_BROKER_OK);
+  int v2_socket_fd = -1;
+  Expect(
+      darwin_art_fd_broker_publish(broker, v2_socket_owner, 103, &v2_socket_fd),
+      DARWIN_ART_FD_BROKER_OK);
+  DarwinArtFdSocketRequestV1 v2_request =
+      SocketRequest(DARWIN_ART_FD_SOCKET_LISTEN);
+  Expect(darwin_art_fd_broker_socket_operation(
+             broker, v2_socket_owner, v2_socket_fd, &v2_request, &result),
+         DARWIN_ART_FD_BROKER_UNSUPPORTED);
+  Expect(darwin_art_fd_broker_close(broker, v2_socket_fd, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_uninstall_owner(broker, v2_socket_owner),
          DARWIN_ART_FD_BROKER_OK);
 
   int ofd_fd = -1;
@@ -346,12 +458,202 @@ int main() {
          DARWIN_ART_FD_BROKER_OK);
   assert(result.value == 0 && entropy == 32);
 
+  DarwinArtFdSocketRequestV1 connect_request =
+      SocketRequest(DARWIN_ART_FD_SOCKET_CONNECT);
+  uint8_t loopback_address[16]{};
+  connect_request.address = loopback_address;
+  connect_request.address_length = sizeof(loopback_address);
+  Expect(darwin_art_fd_broker_socket_operation(broker, file_owner, socket_fd,
+                                               &connect_request, &result),
+         DARWIN_ART_FD_BROKER_WRONG_OWNER);
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, file_fd,
+                                               &connect_request, &result),
+         DARWIN_ART_FD_BROKER_WRONG_KIND);
+  const size_t socket_calls_before_invalid = fake.socket_calls;
+  DarwinArtFdSocketRequestV1 invalid_request = connect_request;
+  invalid_request.address = nullptr;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &invalid_request, &result),
+         DARWIN_ART_FD_BROKER_INVALID_ARGUMENT);
+  assert(fake.socket_calls == socket_calls_before_invalid);
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &connect_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 0 && result.android_errno == 0);
+  DarwinArtFdSocketRequestV1 bind_request = connect_request;
+  bind_request.operation = DARWIN_ART_FD_SOCKET_BIND;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &bind_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  DarwinArtFdSocketRequestV1 listen_request =
+      SocketRequest(DARWIN_ART_FD_SOCKET_LISTEN);
+  listen_request.argument = 8;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &listen_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  DarwinArtFdSocketRequestV1 shutdown_request =
+      SocketRequest(DARWIN_ART_FD_SOCKET_SHUTDOWN);
+  shutdown_request.argument = 2;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &shutdown_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+
+  const char packet[] = "packet";
+  DarwinArtFdSocketRequestV1 send_request =
+      SocketRequest(DARWIN_ART_FD_SOCKET_SEND);
+  send_request.flags = 0x40;
+  send_request.input_bytes = packet;
+  send_request.byte_count = sizeof(packet) - 1;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &send_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 6 && result.android_errno == 0);
+  char received[8]{};
+  DarwinArtFdSocketRequestV1 recv_request =
+      SocketRequest(DARWIN_ART_FD_SOCKET_RECV);
+  recv_request.output_bytes = received;
+  recv_request.byte_count = sizeof(received);
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &recv_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 7 && std::memcmp(received, "network", 7) == 0);
+  uint8_t accepted_address[16]{};
+  uint32_t accepted_address_length = 0;
+  DarwinArtFdSocketRequestV1 sendto_request =
+      SocketRequest(DARWIN_ART_FD_SOCKET_SENDTO);
+  sendto_request.address = loopback_address;
+  sendto_request.address_length = sizeof(loopback_address);
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &sendto_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  DarwinArtFdSocketRequestV1 recvfrom_request =
+      SocketRequest(DARWIN_ART_FD_SOCKET_RECVFROM);
+  recvfrom_request.output_address = accepted_address;
+  recvfrom_request.output_address_capacity = sizeof(accepted_address);
+  recvfrom_request.output_address_length = &accepted_address_length;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &recvfrom_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(accepted_address_length == 16);
+  int option_value = 7;
+  DarwinArtFdSocketRequestV1 setsockopt_request =
+      SocketRequest(DARWIN_ART_FD_SOCKET_SETSOCKOPT);
+  setsockopt_request.option_input = &option_value;
+  setsockopt_request.option_input_length = sizeof(option_value);
+  setsockopt_request.level = 1;
+  setsockopt_request.option = 2;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &setsockopt_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  uint32_t option_length = 0;
+  DarwinArtFdSocketRequestV1 getsockopt_request =
+      SocketRequest(DARWIN_ART_FD_SOCKET_GETSOCKOPT);
+  getsockopt_request.option_output = &option_value;
+  getsockopt_request.option_output_capacity = sizeof(option_value);
+  getsockopt_request.option_output_length = &option_length;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &getsockopt_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(option_value == 1 && option_length == sizeof(int));
+  for (uint32_t operation :
+       {DARWIN_ART_FD_SOCKET_GETPEERNAME, DARWIN_ART_FD_SOCKET_GETSOCKNAME}) {
+    DarwinArtFdSocketRequestV1 name_request = SocketRequest(operation);
+    accepted_address_length = 0;
+    name_request.output_address = accepted_address;
+    name_request.output_address_capacity = sizeof(accepted_address);
+    name_request.output_address_length = &accepted_address_length;
+    Expect(darwin_art_fd_broker_socket_operation(
+               broker, socket_owner, socket_fd, &name_request, &result),
+           DARWIN_ART_FD_BROKER_OK);
+    assert(accepted_address_length == 16);
+  }
+  connect_request.argument = -777;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &connect_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == -1 && result.android_errno == 111);
+  connect_request.argument = 0;
+
+  DarwinArtFdSocketRequestV1 accept_request =
+      SocketRequest(DARWIN_ART_FD_SOCKET_ACCEPT4);
+  accept_request.flags = DARWIN_ART_FD_STATUS_NONBLOCK;
+  int accepted_length = 0;
+  accepted_address_length = 0;
+  accept_request.output_address = accepted_address;
+  accept_request.output_address_capacity = sizeof(accepted_address);
+  accept_request.output_address_length = &accepted_address_length;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &accept_request, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  const int accepted_fd = static_cast<int>(result.value);
+  assert(accepted_fd >= 0x40000000 && accepted_address_length == 16);
+  Expect(darwin_art_fd_broker_get_descriptor_flags(broker, accepted_fd,
+                                                   &accepted_length),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(accepted_length == DARWIN_ART_FD_CLOEXEC);
+  Expect(darwin_art_fd_broker_get_status_flags(broker, accepted_fd,
+                                               &accepted_length),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(accepted_length == DARWIN_ART_FD_STATUS_NONBLOCK);
+  Expect(darwin_art_fd_broker_close_owned(broker, socket_owner, accepted_fd,
+                                          &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_socket_operation(
+             broker, socket_owner, accepted_fd, &send_request, &result),
+         DARWIN_ART_FD_BROKER_STALE);
+
+  fake.accepted_kind = DARWIN_ART_FD_FS_FILE;
+  const uint64_t rejected_child = fake.next_accepted_object;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &accept_request, &result),
+         DARWIN_ART_FD_BROKER_INVALID_ARGUMENT);
+  {
+    std::lock_guard lock(fake.mutex);
+    assert(fake.objects.at(rejected_child).closed);
+    assert(std::count(fake.events.begin(), fake.events.end(),
+                      std::to_string(rejected_child) + ":close") == 1);
+  }
+  fake.accepted_kind = DARWIN_ART_FD_SOCKET;
+
+  std::vector<int> saturation_fds;
+  for (uint64_t object = 10000; object < 12048; ++object) {
+    {
+      std::lock_guard lock(fake.mutex);
+      fake.objects.emplace(object, ObjectState{});
+    }
+    int saturation_fd = -1;
+    const auto status = darwin_art_fd_broker_publish(broker, socket_owner,
+                                                     object, &saturation_fd);
+    if (status == DARWIN_ART_FD_BROKER_EXHAUSTED) {
+      std::lock_guard lock(fake.mutex);
+      fake.objects.erase(object);
+      break;
+    }
+    Expect(status, DARWIN_ART_FD_BROKER_OK);
+    saturation_fds.push_back(saturation_fd);
+  }
+  assert(!saturation_fds.empty());
+  const uint64_t exhausted_child = fake.next_accepted_object;
+  Expect(darwin_art_fd_broker_socket_operation(broker, socket_owner, socket_fd,
+                                               &accept_request, &result),
+         DARWIN_ART_FD_BROKER_EXHAUSTED);
+  {
+    std::lock_guard lock(fake.mutex);
+    assert(fake.objects.at(exhausted_child).closed);
+    assert(std::count(fake.events.begin(), fake.events.end(),
+                      std::to_string(exhausted_child) + ":close") == 1);
+  }
+  for (int saturation_fd : saturation_fds)
+    Expect(darwin_art_fd_broker_close_owned(broker, socket_owner, saturation_fd,
+                                            &result),
+           DARWIN_ART_FD_BROKER_OK);
+
   Expect(darwin_art_fd_broker_sendfile(broker, socket_fd, file_fd, 5, &result),
          DARWIN_ART_FD_BROKER_OK);
   assert(result.value == 5);
   {
     std::lock_guard lock(fake.mutex);
-    assert(fake.objects.at(40).output == "hello");
+    assert(fake.objects.at(40).output == "packethello");
   }
   DarwinArtFdPollEntry poll_entries[] = {
       DarwinArtFdPollEntry{socket_fd, 1, 0},
@@ -519,13 +821,61 @@ int main() {
   Expect(
       darwin_art_fd_broker_publish(broker, socket_owner, 101, &drain_socket_fd),
       DARWIN_ART_FD_BROKER_OK);
+  DarwinArtFdSocketRequestV1 blocking_accept =
+      SocketRequest(DARWIN_ART_FD_SOCKET_ACCEPT4);
+  const uint64_t draining_child = fake.next_accepted_object;
+  std::atomic<bool> socket_operation_done{false};
+  std::atomic<bool> socket_close_done{false};
+  std::thread socket_user([&] {
+    DarwinArtFdIoResult socket_result{};
+    Expect(darwin_art_fd_broker_socket_operation(
+               broker, socket_owner, drain_socket_fd, &blocking_accept,
+               &socket_result),
+           DARWIN_ART_FD_BROKER_DRAINING);
+    socket_operation_done = true;
+  });
+  {
+    std::unique_lock lock(fake.mutex);
+    fake.changed.wait(lock, [&] { return fake.blocked_socket_entered; });
+  }
+  std::thread socket_closer([&] {
+    DarwinArtFdIoResult close_result{};
+    Expect(darwin_art_fd_broker_close(broker, drain_socket_fd, &close_result),
+           DARWIN_ART_FD_BROKER_OK);
+    socket_close_done = true;
+  });
+  DarwinArtFdBrokerStatus closing_socket = DARWIN_ART_FD_BROKER_OK;
+  for (size_t attempt = 0; attempt < 100000; ++attempt) {
+    int ignored_flags = 0;
+    closing_socket = darwin_art_fd_broker_get_descriptor_flags(
+        broker, drain_socket_fd, &ignored_flags);
+    if (closing_socket == DARWIN_ART_FD_BROKER_STALE)
+      break;
+    std::this_thread::yield();
+  }
+  assert(closing_socket == DARWIN_ART_FD_BROKER_STALE);
   Expect(darwin_art_fd_broker_uninstall_owner(broker, socket_owner),
          DARWIN_ART_FD_BROKER_BUSY);
   int rejected_fd = -1;
   Expect(darwin_art_fd_broker_publish(broker, socket_owner, 40, &rejected_fd),
          DARWIN_ART_FD_BROKER_DRAINING);
-  Expect(darwin_art_fd_broker_close(broker, drain_socket_fd, &result),
-         DARWIN_ART_FD_BROKER_OK);
+  assert(!socket_operation_done.load() && !socket_close_done.load());
+  {
+    std::lock_guard lock(fake.mutex);
+    fake.release_blocked_socket = true;
+    fake.changed.notify_all();
+  }
+  socket_user.join();
+  socket_closer.join();
+  assert(socket_operation_done.load() && socket_close_done.load());
+  {
+    std::lock_guard lock(fake.mutex);
+    assert(fake.objects.at(draining_child).closed);
+    assert(std::count(fake.events.begin(), fake.events.end(),
+                      std::to_string(draining_child) + ":close") == 1);
+    assert(FindEvent(fake.events, "101:socket-exit") <
+           FindEvent(fake.events, "101:close"));
+  }
   Expect(darwin_art_fd_broker_uninstall_owner(broker, socket_owner),
          DARWIN_ART_FD_BROKER_OK);
   Expect(darwin_art_fd_broker_publish(broker, socket_owner, 40, &rejected_fd),
@@ -585,7 +935,11 @@ int main() {
   std::cout << "bionic-central-fd-broker: PASS epoll=ADD+MOD+DEL "
                "duplicate=reject socket-fan-in=OFD-stable "
                "timeout=fail-closed\n";
-  std::cout << "bionic-central-fd-broker: PASS owner-ABI=v1-prefix+v2 "
-               "callbacks=size-checked\n";
+  std::cout
+      << "bionic-central-fd-broker: PASS owner-ABI=v1-prefix+v2-prefix+v3 "
+         "callbacks=size-checked\n";
+  std::cout << "bionic-central-fd-broker: PASS socket=13-typed-operations "
+               "owner+kind+generation=checked callback=leased-unlocked "
+               "accept=atomic-publish+rollback-once\n";
   return kAndroidEbadf == 9 ? 0 : 1;
 }

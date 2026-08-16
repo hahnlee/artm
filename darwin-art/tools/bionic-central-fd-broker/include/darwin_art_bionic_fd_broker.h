@@ -47,6 +47,54 @@ typedef struct DarwinArtFdEpollEvent {
   uint64_t data;
 } DarwinArtFdEpollEvent;
 
+typedef enum DarwinArtFdSocketOperation {
+  DARWIN_ART_FD_SOCKET_BIND = 1,
+  DARWIN_ART_FD_SOCKET_CONNECT = 2,
+  DARWIN_ART_FD_SOCKET_LISTEN = 3,
+  DARWIN_ART_FD_SOCKET_SHUTDOWN = 4,
+  DARWIN_ART_FD_SOCKET_SEND = 5,
+  DARWIN_ART_FD_SOCKET_RECV = 6,
+  DARWIN_ART_FD_SOCKET_SENDTO = 7,
+  DARWIN_ART_FD_SOCKET_RECVFROM = 8,
+  DARWIN_ART_FD_SOCKET_GETSOCKOPT = 9,
+  DARWIN_ART_FD_SOCKET_SETSOCKOPT = 10,
+  DARWIN_ART_FD_SOCKET_GETPEERNAME = 11,
+  DARWIN_ART_FD_SOCKET_GETSOCKNAME = 12,
+  DARWIN_ART_FD_SOCKET_ACCEPT4 = 13,
+} DarwinArtFdSocketOperation;
+
+typedef struct DarwinArtFdSocketRequestV1 {
+  uint32_t abi_version;
+  uint32_t struct_size;
+  uint32_t operation;
+  int32_t flags;
+  const void *address;
+  uint32_t address_length;
+  void *output_address;
+  uint32_t output_address_capacity;
+  uint32_t *output_address_length;
+  const void *input_bytes;
+  void *output_bytes;
+  size_t byte_count;
+  const void *option_input;
+  uint32_t option_input_length;
+  void *option_output;
+  uint32_t option_output_capacity;
+  uint32_t *option_output_length;
+  int32_t level;
+  int32_t option;
+  int32_t argument;
+} DarwinArtFdSocketRequestV1;
+
+typedef struct DarwinArtFdSocketAcceptResultV1 {
+  uint32_t abi_version;
+  uint32_t struct_size;
+  uint64_t object;
+  uint32_t kind;
+  int32_t status_flags;
+  int32_t descriptor_flags;
+} DarwinArtFdSocketAcceptResultV1;
+
 typedef struct DarwinArtFdOwnerV1 {
   uint32_t abi_version;
   uint32_t struct_size;
@@ -64,11 +112,18 @@ typedef struct DarwinArtFdOwnerV1 {
                       void *bytes, size_t count, int *android_errno);
   intptr_t (*write_at)(void *context, uint64_t object, int64_t *offset,
                        const void *bytes, size_t count, int *android_errno);
+  intptr_t (*socket_operation)(void *context, uint64_t object,
+                               const DarwinArtFdSocketRequestV1 *request,
+                               DarwinArtFdSocketAcceptResultV1 *accepted,
+                               int *android_errno);
 } DarwinArtFdOwnerV1;
 
 enum {
   DARWIN_ART_FD_OWNER_ABI_V1 = 1,
   DARWIN_ART_FD_OWNER_ABI_V2 = 2,
+  DARWIN_ART_FD_OWNER_ABI_V3 = 3,
+  DARWIN_ART_FD_SOCKET_REQUEST_ABI_V1 = 1,
+  DARWIN_ART_FD_SOCKET_ACCEPT_RESULT_ABI_V1 = 1,
   DARWIN_ART_FD_CLOEXEC = 1,
   DARWIN_ART_FD_STATUS_APPEND = 0x400,
   DARWIN_ART_FD_STATUS_NONBLOCK = 0x800,
@@ -147,6 +202,9 @@ DarwinArtFdBrokerStatus
 darwin_art_fd_broker_sendfile(DarwinArtFdBroker *broker, int output_fd,
                               int input_fd, size_t count,
                               DarwinArtFdIoResult *result);
+DarwinArtFdBrokerStatus darwin_art_fd_broker_socket_operation(
+    DarwinArtFdBroker *broker, DarwinArtFdOwnerHandle owner, int guest_fd,
+    const DarwinArtFdSocketRequestV1 *request, DarwinArtFdIoResult *result);
 DarwinArtFdBrokerStatus
 darwin_art_fd_broker_epoll_create1(DarwinArtFdBroker *broker, int flags,
                                    int *epoll_fd);

@@ -18,11 +18,11 @@ Run the standalone acceptance gate with:
 
 ## C ABI and ownership contract
 
-- A provider installs an ABI-v2 callback table and receives an opaque owner
-  handle. The prefix-sized ABI-v1 table remains accepted without reading or
-  invoking its absent offset callbacks. Multiple owners, including multiple
-  owners of the same descriptor kind, share the central slot allocator without
-  overlapping token ranges.
+- A provider installs an ABI-v3 callback table and receives an opaque owner
+  handle. Prefix-sized ABI-v1 and ABI-v2 tables remain accepted without reading
+  or invoking absent offset or socket-operation callbacks. Multiple owners,
+  including multiple owners of the same descriptor kind, share the central slot
+  allocator without overlapping token ranges.
 - The provider kinds are filesystem file, filesystem random device, stdio, and
   socket; epoll is an internal broker-owned kind. A published slot records both
   the exact owner instance and kind; typed operations reject a foreign owner or
@@ -55,22 +55,44 @@ Run the standalone acceptance gate with:
   registered separately, and readiness remains attached to the OFD after one
   token closes. `epoll_wait(..., timeout=0)` fans out to socket owner poll
   callbacks while holding active OFD leases; blocking timeouts fail closed.
+- ABI-v3 adds one tagged socket-operation callback covering bind, connect,
+  listen, shutdown, send, recv, sendto, recvfrom, get/setsockopt,
+  getpeername, getsockname, and accept4. The fixed-width request explicitly
+  separates input address length from output address capacity and actual or
+  required length, and does the same for option output. The broker checks the
+  exact generation, socket kind, and expected owner before invoking it. The
+  callback runs without the broker mutex while a descriptor, OFD, and owner
+  lease prevents close or uninstall from invalidating its object. Partial I/O
+  and failure errno are preserved through the ordinary I/O result; no callback
+  or API unwraps a host descriptor. On a negative accept callback return,
+  ownership has not transferred and the broker ignores all accept-result bytes;
+  the provider remains responsible for any object it may have created.
+- A successful accept callback transfers one opaque child object and its kind
+  and flags to the broker. While the parent lease is still held, the broker
+  either publishes a fresh same-owner socket token under its mutex or calls the
+  same owner's close callback exactly once to roll the child back. Invalid child
+  metadata, owner draining, and slot exhaustion never expose an object or guest
+  token. The rollback callback is also covered by the owner lease.
 - Owner uninstall first enters draining state, which rejects publication. It
   returns busy while any live descriptor, active lease, or close callback
   remains. Only a later quiescent call removes the owner. Broker destruction is
   likewise rejected until all owners are uninstalled.
 
-The host probe covers four provider kinds and six simultaneous owners, including
-three file owners and a prefix-sized ABI-v1 owner; namespace collision freedom;
+The host probe covers four provider kinds and simultaneous owners, including
+three file owners and prefix-sized ABI-v1 and ABI-v2 owners; namespace collision freedom;
 foreign-owner and wrong-kind rejection;
 double close; stale access; same-slot generation-safe reuse; close racing a
 blocked read; uninstall racing a blocked close callback; typed ioctl; mixed
 poll; shared dup offset/status versus independent descriptor flags; last-close
-refcounting; duplicate epoll registration; and file-to-socket sendfile. It runs
+refcounting; duplicate epoll registration; file-to-socket sendfile; all thirteen
+socket opcodes; callback errors and partial I/O; close versus a blocked socket
+callback; accept publication, malformed-child rollback, allocation-exhaustion
+rollback, and draining-owner rollback. It runs
 the same state machine under ASan, UBSan, and TSan and rejects host descriptor
 or dynamic-loader imports. A real NDK r28c API-35 Android AArch64 ELF separately
-locks the `dup`, `dup3`, `fcntl`, `epoll_create1`, `epoll_ctl`, `epoll_wait`, and
-`close` LIBC import surface and Android constant/layout ABI.
+locks the descriptor, epoll, and socket-control LIBC import surfaces and Android
+constant/layout ABI. The C probe separately freezes every ABI-v1/v2 prefix and
+ABI-v3 request/result size and selected field offsets on arm64.
 
 ## Integration blockers
 
@@ -96,18 +118,18 @@ locks the `dup`, `dup3`, `fcntl`, `epoll_create1`, `epoll_ctl`, `epoll_wait`, an
 - `fcntl(F_DUPFD)` without CLOEXEC, `SCM_RIGHTS`, directory handles, and epoll
   nesting are still fail-closed. SCM_RIGHTS in particular must transfer a new
   OFD reference, never copy a token integer across broker instances.
+- `sendmsg` and `recvmsg` remain outside ABI-v3. Their scatter/gather payloads
+  and ancillary data require a separate bounded request ABI; especially,
+  `SCM_RIGHTS` cannot be represented as ordinary bytes or guest token integers.
 - Real blocking poll/epoll requires a central wakeup/fan-in mechanism across
   virtual files, sockets, close events, timers, and signals. The current epoll
   callback demonstrates generation-safe level readiness only; it does not claim
   timeout, signal-mask, EPOLLET, EPOLLONESHOT, or fairness parity.
-- Socket lifecycle/data operations with non-read/write arguments are not yet a
-  public broker capability. There is intentionally no API that unwraps a guest
-  token into an owner object, and `ioctl` must not be used to tunnel `connect`,
-  `bind`, `listen`, `accept`, `send(flags)`, or `recv(flags)`. Integration needs
-  an ABI-versioned, typed socket-control callback surface that validates the
-  live generation, socket kind, and owner, holds the descriptor/description/
-  owner lease for the complete callback, and publishes or rolls back an
-  accepted child atomically. Until that exists these calls must fail closed.
+- Socket creation and socketpair remain provider entry points because they begin
+  without an existing guest descriptor. They must publish every created opaque
+  socket object through this broker and close it on publication failure. All
+  later descriptor-taking socket operations must use the ABI-v3 typed dispatch;
+  `ioctl` is not an acceptable control tunnel.
 - Provider callbacks must treat the broker object key as opaque and maintain
   their own object lifetime until close returns. They must never unwrap another
   owner's key or publish a host descriptor as a guest token.
