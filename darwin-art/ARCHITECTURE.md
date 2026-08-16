@@ -467,8 +467,9 @@ remain capability failures until the namespace FD and interval owners exist.
 1. [Complete] Execute the real libc++ collections graph with its complete
    virtual `libc.so`/`libm.so`/`libdl.so` closure and the Android-libunwind
    throw/catch fixture without Darwin unwind fallback.
-2. Exercise libc++ `filesystem::copy_file` itself over the accepted `sendfile`
-   route and private `/data` overlay, beyond the current Android ELF transfer.
+2. [Complete] Exercise libc++ `filesystem::copy_file` itself over the accepted
+   `sendfile` route and private `/data` overlay, including source/destination
+   size verification inside the actual ART-loaded graph.
 3. [Complete for local `TLSDESC`] Allocate aligned guest TLS per Darwin thread,
    preserve the host thread pointer, and reject live-thread unload. Add
    graph-wide/imported TLS models and thread-local destructor integration.

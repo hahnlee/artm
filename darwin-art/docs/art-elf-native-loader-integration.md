@@ -147,9 +147,15 @@ it becomes the next action and the dispatcher is restored at the front.
 8. Local-definition AArch64 `TLSDESC`: complete with per-thread aligned guest
    blocks, opaque descriptor tokens, thread-exit reclamation, and live-thread
    unload rejection. Imported/static TLS and TLS destructors remain incomplete.
-9. Class-loader namespace caching, ZIP/APK extraction, arbitrary
-   RegisterNatives/JNI proxy expansion, CriticalNative, and network semantics:
-   incomplete.
+9. APK native extraction: complete for bounded Android arm64 entries using
+   stored/deflated ZIP records, central/local agreement, CRC verification,
+   atomic read-only publication, and actual-ART execution of the sealed
+   six-DSO directory. Direct mmap from aligned stored APK entries remains a
+   separate `extractNativeLibs=false` capability.
+10. Class-loader namespace caching, arbitrary RegisterNatives/JNI proxy
+    expansion, CriticalNative, and production network/central-FD semantics:
+    incomplete. A standalone 20-entry socket facade is accepted but not yet
+    composed with the filesystem descriptor owner.
 
 Stage 4 explicitly repacks the two calling conventions. The fixture gate
 compiles and disassembles the same source for both targets: Android uses

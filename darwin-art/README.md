@@ -178,10 +178,17 @@ exercised by an Android ELF copy into the private writable `/data` overlay.
 Unload composes each image's Bionic
 `__cxa_finalize(dso_handle)` callbacks with its ELF finalizers, then tears down
 the namespace after all in-flight leases drain. A pre-publish failure injection
-verifies the same cleanup. Aggregates, HFA, general variadic calls,
+verifies the same cleanup. The same acceptance builds an APK, validates its
+central/local ZIP records and CRCs, extracts six `arm64-v8a` DSOs into an
+atomically published read-only directory, and executes both graphs directly
+from that sealed directory through `JavaVMExt`/NativeBridge. Aggregates, HFA,
+general variadic calls,
 CriticalNative, the rest of the JNI table, hardened-runtime `MAP_JIT`,
-graph-wide/imported ELF TLS, C++ thread-local destructors, and networking remain
-explicit work. A bounded local-definition AArch64 `TLSDESC` path is implemented:
+graph-wide/imported ELF TLS, C++ thread-local destructors, and central network
+FD integration remain explicit work. A standalone Bionic socket facade already
+translates 20 TCP/UDP/poll/message APIs with virtual descriptors, but it is not
+yet installed in the production namespace. A bounded local-definition AArch64
+`TLSDESC` path is implemented:
 it allocates aligned guest blocks per Darwin thread, preserves `TPIDR_EL0`, and
 fails stop rather than unmapping an image used by another live thread.
 
@@ -191,7 +198,9 @@ sealed, its zero-valued AArch64 BTI tag is recognized, and all 160 strong
 `@LIBC` imports are observed. ART then executes a collections consumer
 (`std::string`/`vector`/sort/allocation = 189) and an exception consumer linked
 with pinned Android `libunwind.a` (cross-frame cleanup/catch = 73), followed by
-sequential graph unload. The runtime publishes concurrency-stable copied PHDR
+sequential graph unload. The collections path also runs libc++
+`filesystem::copy_file` from the immutable guest root into private `/data` and
+checks both file sizes. The runtime publishes concurrency-stable copied PHDR
 snapshots so `dl_iterate_phdr` never falls through to dyld.
 
 Its final line is:
