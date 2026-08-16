@@ -207,7 +207,9 @@ grep -F '(*env)->RegisterNatives(env, fixture, &method, 1)' \
   "$fixture_root/generic_root.c" >/dev/null ||
   fail "generic graph no longer exercises proxy RegisterNatives"
 for operation in NewStringUTF GetStringUTFLength GetStringUTFChars \
-  ReleaseStringUTFChars DeleteLocalRef; do
+  ReleaseStringUTFChars NewGlobalRef DeleteGlobalRef DeleteLocalRef \
+  NewLocalRef NewByteArray GetArrayLength GetByteArrayRegion \
+  SetByteArrayRegion ExceptionOccurred ExceptionClear ExceptionCheck; do
   grep -F "(*env)->$operation" "$fixture_root/generic_root.c" >/dev/null ||
     fail "generic native no longer exercises proxy $operation"
 done
