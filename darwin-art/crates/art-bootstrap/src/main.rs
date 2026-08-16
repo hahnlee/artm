@@ -2610,6 +2610,10 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
         runtime.join("gc/space/malloc_space.cc"),
         patched_runtime.join("gc/space/malloc_space.cc"),
     )?;
+    fs::copy(
+        runtime.join("gc/space/space.cc"),
+        patched_runtime.join("gc/space/space.cc"),
+    )?;
     fs::create_dir_all(patched_runtime.join("entrypoints/quick"))?;
     fs::copy(
         runtime.join("entrypoints/quick/quick_alloc_entrypoints.cc"),
@@ -2688,6 +2692,7 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
         "patches/art/0027-darwin-string-abi-overlay.patch",
         "patches/art/0028-darwin-minimal-runtime-start.patch",
         "patches/art/0029-darwin-arm64-native-stack-pcs.patch",
+        "patches/art/0030-darwin-large-object-bitmap-window.patch",
     ] {
         run_command(
             Command::new("patch")
@@ -3260,6 +3265,7 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
                 | "gc/collector/garbage_collector.cc"
                 | "gc/collector/mark_compact.cc"
                 | "gc/space/malloc_space.cc"
+                | "gc/space/space.cc"
                 | "entrypoints/quick/quick_alloc_entrypoints.cc"
                 | "entrypoints/quick/quick_trampoline_entrypoints.cc"
                 | "runtime_common.cc"
