@@ -77,6 +77,45 @@ intptr_t Write(void *context, uint64_t object, const void *bytes, size_t count,
   return static_cast<intptr_t>(count);
 }
 
+intptr_t ReadAt(void *context, uint64_t object, int64_t *offset, void *bytes,
+                size_t count, int *android_errno) {
+  Fake *fake = static_cast<Fake *>(context);
+  std::unique_lock lock(fake->mutex);
+  ObjectState &state = fake->objects.at(object);
+  assert(!state.closed && offset != nullptr && *offset >= 0);
+  fake->events.push_back(std::to_string(object) + ":read-enter");
+  if (object == kBlockedObject && !fake->blocked_read_entered) {
+    fake->blocked_read_entered = true;
+    fake->blocked_reader = std::this_thread::get_id();
+    fake->changed.notify_all();
+    fake->changed.wait(lock, [&] { return fake->release_blocked_read; });
+  }
+  const size_t start = static_cast<size_t>(*offset);
+  const size_t available =
+      start < state.input.size() ? state.input.size() - start : 0;
+  const size_t copied = std::min(count, available);
+  if (copied != 0) {
+    std::memcpy(bytes, state.input.data() + start, copied);
+    *offset += static_cast<int64_t>(copied);
+  }
+  fake->events.push_back(std::to_string(object) + ":read-exit");
+  *android_errno = 0;
+  return static_cast<intptr_t>(copied);
+}
+
+intptr_t WriteAt(void *context, uint64_t object, int64_t *offset,
+                 const void *bytes, size_t count, int *android_errno) {
+  Fake *fake = static_cast<Fake *>(context);
+  std::lock_guard lock(fake->mutex);
+  ObjectState &state = fake->objects.at(object);
+  assert(!state.closed && offset != nullptr && *offset >= 0);
+  state.output.append(static_cast<const char *>(bytes), count);
+  *offset += static_cast<int64_t>(count);
+  fake->events.push_back(std::to_string(object) + ":write");
+  *android_errno = 0;
+  return static_cast<intptr_t>(count);
+}
+
 int Poll(void *context, uint64_t object, int16_t events, int16_t *revents,
          int *android_errno) {
   Fake *fake = static_cast<Fake *>(context);
@@ -121,14 +160,16 @@ int Close(void *context, uint64_t object, int *android_errno) {
 }
 
 DarwinArtFdOwnerV1 Callbacks(Fake *fake) {
-  return DarwinArtFdOwnerV1{DARWIN_ART_FD_OWNER_ABI_V1,
+  return DarwinArtFdOwnerV1{DARWIN_ART_FD_OWNER_ABI_V2,
                             sizeof(DarwinArtFdOwnerV1),
                             fake,
                             Read,
                             Write,
                             Poll,
                             Ioctl,
-                            Close};
+                            Close,
+                            ReadAt,
+                            WriteAt};
 }
 
 size_t FindEvent(const std::vector<std::string> &events,
@@ -155,8 +196,11 @@ int main() {
   fake.objects.emplace(30, ObjectState{});
   fake.objects.emplace(40, ObjectState{});
   fake.objects.emplace(50, ObjectState{"other", "", 0, false});
+  fake.objects.emplace(60, ObjectState{"abcdef", "", 0, false});
   fake.objects.emplace(kBlockedObject, ObjectState{"blocked", "", 0, false});
   fake.objects.emplace(100, ObjectState{});
+  fake.objects.emplace(101, ObjectState{});
+  fake.objects.emplace(102, ObjectState{"v1", "", 0, false});
 
   DarwinArtFdBroker *broker = darwin_art_fd_broker_create();
   assert(broker != nullptr);
@@ -202,6 +246,94 @@ int main() {
          socket_fd != file_fd && second_file_fd != file_fd);
 
   DarwinArtFdIoResult result{};
+  DarwinArtFdOwnerV1 legacy_callbacks = callbacks;
+  legacy_callbacks.abi_version = DARWIN_ART_FD_OWNER_ABI_V1;
+  legacy_callbacks.struct_size = offsetof(DarwinArtFdOwnerV1, read_at);
+  DarwinArtFdOwnerHandle legacy_owner = 0;
+  Expect(darwin_art_fd_broker_install_owner(broker, DARWIN_ART_FD_FS_FILE,
+                                            &legacy_callbacks, &legacy_owner),
+         DARWIN_ART_FD_BROKER_OK);
+  int legacy_fd = -1;
+  Expect(darwin_art_fd_broker_publish(broker, legacy_owner, 102, &legacy_fd),
+         DARWIN_ART_FD_BROKER_OK);
+  char legacy_byte = 0;
+  Expect(darwin_art_fd_broker_read(broker, legacy_fd, &legacy_byte, 1, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(legacy_byte == 'v');
+  int64_t legacy_central_offset = -1;
+  Expect(darwin_art_fd_broker_get_offset(broker, legacy_fd,
+                                         &legacy_central_offset),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(legacy_central_offset == 0);
+  Expect(darwin_art_fd_broker_close(broker, legacy_fd, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_uninstall_owner(broker, legacy_owner),
+         DARWIN_ART_FD_BROKER_OK);
+
+  int ofd_fd = -1;
+  int ofd_dup = -1;
+  int ofd_dup3 = -1;
+  int ofd_fcntl = -1;
+  Expect(darwin_art_fd_broker_publish_with_flags(
+             broker, file_owner, 60, DARWIN_ART_FD_STATUS_APPEND,
+             DARWIN_ART_FD_CLOEXEC, &ofd_fd),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_dup(broker, ofd_fd, &ofd_dup),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_duplicate_with_flags(
+             broker, ofd_fd, DARWIN_ART_FD_CLOEXEC, &ofd_dup3),
+         DARWIN_ART_FD_BROKER_OK);
+  const int fcntl_minimum = ofd_dup3 + 10;
+  Expect(darwin_art_fd_broker_fcntl_dupfd_cloexec(broker, ofd_fd, fcntl_minimum,
+                                                  &ofd_fcntl),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(ofd_fcntl == fcntl_minimum);
+  int flags = -1;
+  Expect(darwin_art_fd_broker_get_descriptor_flags(broker, ofd_fd, &flags),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(flags == DARWIN_ART_FD_CLOEXEC);
+  Expect(darwin_art_fd_broker_get_descriptor_flags(broker, ofd_dup, &flags),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(flags == 0);
+  Expect(darwin_art_fd_broker_get_descriptor_flags(broker, ofd_dup3, &flags),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(flags == DARWIN_ART_FD_CLOEXEC);
+  Expect(darwin_art_fd_broker_set_status_flags(broker, ofd_dup3,
+                                               DARWIN_ART_FD_STATUS_NONBLOCK),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_get_status_flags(broker, ofd_fd, &flags),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(flags == DARWIN_ART_FD_STATUS_NONBLOCK);
+  char ofd_bytes[7]{};
+  Expect(darwin_art_fd_broker_read(broker, ofd_fd, ofd_bytes, 2, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_read(broker, ofd_dup, ofd_bytes + 2, 2, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(std::memcmp(ofd_bytes, "abcd", 4) == 0);
+  int64_t shared_offset = -1;
+  Expect(darwin_art_fd_broker_get_offset(broker, ofd_fcntl, &shared_offset),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(shared_offset == 4);
+  Expect(darwin_art_fd_broker_close(broker, ofd_fd, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  {
+    std::lock_guard lock(fake.mutex);
+    assert(!fake.objects.at(60).closed);
+  }
+  Expect(darwin_art_fd_broker_read(broker, ofd_dup3, ofd_bytes + 4, 2, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(std::memcmp(ofd_bytes, "abcdef", 6) == 0);
+  Expect(darwin_art_fd_broker_close(broker, ofd_dup, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_close(broker, ofd_dup3, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_close(broker, ofd_fcntl, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  {
+    std::lock_guard lock(fake.mutex);
+    assert(fake.objects.at(60).closed);
+  }
+
   Expect(
       darwin_art_fd_broker_close_owned(broker, file_owner, socket_fd, &result),
       DARWIN_ART_FD_BROKER_WRONG_OWNER);
@@ -266,6 +398,9 @@ int main() {
     std::unique_lock lock(fake.mutex);
     fake.changed.wait(lock, [&] { return fake.blocked_read_entered; });
   }
+  int blocked_dup = -1;
+  Expect(darwin_art_fd_broker_dup(broker, blocked_fd, &blocked_dup),
+         DARWIN_ART_FD_BROKER_OK);
   std::thread closer([&] {
     DarwinArtFdIoResult close_result{};
     Expect(darwin_art_fd_broker_close(broker, blocked_fd, &close_result),
@@ -274,16 +409,18 @@ int main() {
   });
   DarwinArtFdBrokerStatus during_close = DARWIN_ART_FD_BROKER_OK;
   for (size_t attempt = 0; attempt < 100000; ++attempt) {
-    char byte = 0;
-    DarwinArtFdIoResult one{};
-    during_close =
-        darwin_art_fd_broker_read(broker, blocked_fd, &byte, 1, &one);
+    int descriptor_flags = 0;
+    during_close = darwin_art_fd_broker_get_descriptor_flags(broker, blocked_fd,
+                                                             &descriptor_flags);
     if (during_close == DARWIN_ART_FD_BROKER_STALE) {
       break;
     }
     std::this_thread::yield();
   }
   assert(during_close == DARWIN_ART_FD_BROKER_STALE && !close_done.load());
+  int rejected_dup = -1;
+  Expect(darwin_art_fd_broker_dup(broker, blocked_fd, &rejected_dup),
+         DARWIN_ART_FD_BROKER_STALE);
   {
     std::lock_guard lock(fake.mutex);
     fake.release_blocked_read = true;
@@ -294,17 +431,100 @@ int main() {
   assert(read_done.load() && close_done.load());
   {
     std::lock_guard lock(fake.mutex);
+    assert(!fake.objects.at(kBlockedObject).closed);
+  }
+  char eof = 0;
+  Expect(darwin_art_fd_broker_read(broker, blocked_dup, &eof, 1, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 0);
+  Expect(darwin_art_fd_broker_close(broker, blocked_dup, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  {
+    std::lock_guard lock(fake.mutex);
     const size_t read_exit = FindEvent(fake.events, "99:read-exit");
     const size_t close = FindEvent(fake.events, "99:close");
     assert(read_exit < close);
   }
 
+  int epoll_fd = -1;
+  Expect(darwin_art_fd_broker_epoll_create1(broker, DARWIN_ART_EPOLL_CLOEXEC,
+                                            &epoll_fd),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_get_descriptor_flags(broker, epoll_fd, &flags),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(flags == DARWIN_ART_FD_CLOEXEC);
+  int socket_dup = -1;
+  Expect(darwin_art_fd_broker_dup(broker, socket_fd, &socket_dup),
+         DARWIN_ART_FD_BROKER_OK);
+  DarwinArtFdEpollEvent registration{1, 0x1111};
+  Expect(darwin_art_fd_broker_epoll_ctl(broker, epoll_fd,
+                                        DARWIN_ART_EPOLL_CTL_ADD, socket_fd,
+                                        &registration, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_epoll_ctl(broker, epoll_fd,
+                                        DARWIN_ART_EPOLL_CTL_ADD, socket_fd,
+                                        &registration, &result),
+         DARWIN_ART_FD_BROKER_ALREADY_EXISTS);
+  registration.data = 0x2222;
+  Expect(darwin_art_fd_broker_epoll_ctl(broker, epoll_fd,
+                                        DARWIN_ART_EPOLL_CTL_ADD, socket_dup,
+                                        &registration, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  registration.data = 0x3333;
+  Expect(darwin_art_fd_broker_epoll_ctl(broker, epoll_fd,
+                                        DARWIN_ART_EPOLL_CTL_MOD, socket_dup,
+                                        &registration, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  DarwinArtFdEpollEvent ready[4]{};
+  Expect(
+      darwin_art_fd_broker_epoll_wait(broker, epoll_fd, ready, 4, 1, &result),
+      DARWIN_ART_FD_BROKER_UNSUPPORTED);
+  Expect(
+      darwin_art_fd_broker_epoll_wait(broker, epoll_fd, ready, 4, 0, &result),
+      DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 2 && ready[0].data == 0x1111 &&
+         ready[1].data == 0x3333);
+  Expect(darwin_art_fd_broker_epoll_ctl(broker, epoll_fd,
+                                        DARWIN_ART_EPOLL_CTL_DEL, socket_dup,
+                                        nullptr, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(
+      darwin_art_fd_broker_epoll_wait(broker, epoll_fd, ready, 4, 0, &result),
+      DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 1 && ready[0].data == 0x1111);
+  registration.data = 0x2222;
+  Expect(darwin_art_fd_broker_epoll_ctl(broker, epoll_fd,
+                                        DARWIN_ART_EPOLL_CTL_ADD, socket_dup,
+                                        &registration, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_close(broker, socket_fd, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(
+      darwin_art_fd_broker_epoll_wait(broker, epoll_fd, ready, 4, 0, &result),
+      DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 2);
+  Expect(darwin_art_fd_broker_close(broker, socket_dup, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(
+      darwin_art_fd_broker_epoll_wait(broker, epoll_fd, ready, 4, 0, &result),
+      DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 0);
+  Expect(darwin_art_fd_broker_close(broker, epoll_fd, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(
+      darwin_art_fd_broker_epoll_wait(broker, epoll_fd, ready, 4, 0, &result),
+      DARWIN_ART_FD_BROKER_STALE);
+
+  int drain_socket_fd = -1;
+  Expect(
+      darwin_art_fd_broker_publish(broker, socket_owner, 101, &drain_socket_fd),
+      DARWIN_ART_FD_BROKER_OK);
   Expect(darwin_art_fd_broker_uninstall_owner(broker, socket_owner),
          DARWIN_ART_FD_BROKER_BUSY);
   int rejected_fd = -1;
   Expect(darwin_art_fd_broker_publish(broker, socket_owner, 40, &rejected_fd),
          DARWIN_ART_FD_BROKER_DRAINING);
-  Expect(darwin_art_fd_broker_close(broker, socket_fd, &result),
+  Expect(darwin_art_fd_broker_close(broker, drain_socket_fd, &result),
          DARWIN_ART_FD_BROKER_OK);
   Expect(darwin_art_fd_broker_uninstall_owner(broker, socket_owner),
          DARWIN_ART_FD_BROKER_OK);
@@ -352,11 +572,20 @@ int main() {
   }
   Expect(darwin_art_fd_broker_destroy(broker), DARWIN_ART_FD_BROKER_OK);
 
-  std::cout << "bionic-central-fd-broker: PASS kinds=4 owners=5 "
+  std::cout << "bionic-central-fd-broker: PASS kinds=4 owners=6 "
                "namespace=collision-free foreign=reject\n";
   std::cout << "bionic-central-fd-broker: PASS generation=reuse-safe "
                "stale=reject double-close=reject\n";
   std::cout << "bionic-central-fd-broker: PASS close-vs-use=drained "
                "poll+sendfile+ioctl=typed uninstall=quiescent\n";
+  std::cout << "bionic-central-fd-broker: PASS "
+               "OFD=dup+duplicate_with_flags+F_DUPFD_CLOEXEC "
+               "offset+status=shared "
+               "FD_CLOEXEC=independent close=last\n";
+  std::cout << "bionic-central-fd-broker: PASS epoll=ADD+MOD+DEL "
+               "duplicate=reject socket-fan-in=OFD-stable "
+               "timeout=fail-closed\n";
+  std::cout << "bionic-central-fd-broker: PASS owner-ABI=v1-prefix+v2 "
+               "callbacks=size-checked\n";
   return kAndroidEbadf == 9 ? 0 : 1;
 }

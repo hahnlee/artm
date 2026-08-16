@@ -15,6 +15,7 @@ typedef enum DarwinArtFdKind {
   DARWIN_ART_FD_FS_RANDOM = 2,
   DARWIN_ART_FD_STDIO = 3,
   DARWIN_ART_FD_SOCKET = 4,
+  DARWIN_ART_FD_EPOLL = 5,
 } DarwinArtFdKind;
 
 typedef enum DarwinArtFdBrokerStatus {
@@ -26,6 +27,8 @@ typedef enum DarwinArtFdBrokerStatus {
   DARWIN_ART_FD_BROKER_BUSY = 5,
   DARWIN_ART_FD_BROKER_DRAINING = 6,
   DARWIN_ART_FD_BROKER_EXHAUSTED = 7,
+  DARWIN_ART_FD_BROKER_ALREADY_EXISTS = 8,
+  DARWIN_ART_FD_BROKER_UNSUPPORTED = 9,
 } DarwinArtFdBrokerStatus;
 
 typedef struct DarwinArtFdIoResult {
@@ -38,6 +41,11 @@ typedef struct DarwinArtFdPollEntry {
   int16_t events;
   int16_t revents;
 } DarwinArtFdPollEntry;
+
+typedef struct DarwinArtFdEpollEvent {
+  uint32_t events;
+  uint64_t data;
+} DarwinArtFdEpollEvent;
 
 typedef struct DarwinArtFdOwnerV1 {
   uint32_t abi_version;
@@ -52,9 +60,23 @@ typedef struct DarwinArtFdOwnerV1 {
   int (*ioctl)(void *context, uint64_t object, uint64_t request, void *argument,
                int *android_errno);
   int (*close)(void *context, uint64_t object, int *android_errno);
+  intptr_t (*read_at)(void *context, uint64_t object, int64_t *offset,
+                      void *bytes, size_t count, int *android_errno);
+  intptr_t (*write_at)(void *context, uint64_t object, int64_t *offset,
+                       const void *bytes, size_t count, int *android_errno);
 } DarwinArtFdOwnerV1;
 
-enum { DARWIN_ART_FD_OWNER_ABI_V1 = 1 };
+enum {
+  DARWIN_ART_FD_OWNER_ABI_V1 = 1,
+  DARWIN_ART_FD_OWNER_ABI_V2 = 2,
+  DARWIN_ART_FD_CLOEXEC = 1,
+  DARWIN_ART_FD_STATUS_APPEND = 0x400,
+  DARWIN_ART_FD_STATUS_NONBLOCK = 0x800,
+  DARWIN_ART_EPOLL_CLOEXEC = 0x80000,
+  DARWIN_ART_EPOLL_CTL_ADD = 1,
+  DARWIN_ART_EPOLL_CTL_DEL = 2,
+  DARWIN_ART_EPOLL_CTL_MOD = 3,
+};
 
 DarwinArtFdBroker *darwin_art_fd_broker_create(void);
 DarwinArtFdBrokerStatus darwin_art_fd_broker_destroy(DarwinArtFdBroker *broker);
@@ -70,6 +92,32 @@ DarwinArtFdBrokerStatus
 darwin_art_fd_broker_publish(DarwinArtFdBroker *broker,
                              DarwinArtFdOwnerHandle owner, uint64_t object,
                              int *guest_fd);
+DarwinArtFdBrokerStatus darwin_art_fd_broker_publish_with_flags(
+    DarwinArtFdBroker *broker, DarwinArtFdOwnerHandle owner, uint64_t object,
+    int status_flags, int descriptor_flags, int *guest_fd);
+DarwinArtFdBrokerStatus darwin_art_fd_broker_dup(DarwinArtFdBroker *broker,
+                                                 int old_fd, int *new_fd);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_duplicate_with_flags(DarwinArtFdBroker *broker, int old_fd,
+                                          int flags, int *new_fd);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_fcntl_dupfd_cloexec(DarwinArtFdBroker *broker, int old_fd,
+                                         int minimum_fd, int *new_fd);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_get_descriptor_flags(DarwinArtFdBroker *broker,
+                                          int guest_fd, int *flags);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_set_descriptor_flags(DarwinArtFdBroker *broker,
+                                          int guest_fd, int flags);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_get_status_flags(DarwinArtFdBroker *broker, int guest_fd,
+                                      int *flags);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_set_status_flags(DarwinArtFdBroker *broker, int guest_fd,
+                                      int flags);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_get_offset(DarwinArtFdBroker *broker, int guest_fd,
+                                int64_t *offset);
 DarwinArtFdBrokerStatus darwin_art_fd_broker_close(DarwinArtFdBroker *broker,
                                                    int guest_fd,
                                                    DarwinArtFdIoResult *result);
@@ -99,6 +147,16 @@ DarwinArtFdBrokerStatus
 darwin_art_fd_broker_sendfile(DarwinArtFdBroker *broker, int output_fd,
                               int input_fd, size_t count,
                               DarwinArtFdIoResult *result);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_epoll_create1(DarwinArtFdBroker *broker, int flags,
+                                   int *epoll_fd);
+DarwinArtFdBrokerStatus darwin_art_fd_broker_epoll_ctl(
+    DarwinArtFdBroker *broker, int epoll_fd, int operation, int target_fd,
+    const DarwinArtFdEpollEvent *event, DarwinArtFdIoResult *result);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_epoll_wait(DarwinArtFdBroker *broker, int epoll_fd,
+                                DarwinArtFdEpollEvent *events, size_t capacity,
+                                int timeout_ms, DarwinArtFdIoResult *result);
 
 #ifdef __cplusplus
 }

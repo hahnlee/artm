@@ -5,6 +5,9 @@ export LC_ALL=C
 dir="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$dir/../.." && pwd)"
 fail() { echo "bionic-central-fd-broker: FAIL $*" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "$dir/sources.lock"
+sha() { shasum -a 256 "$1" | awk '{print $1}'; }
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/central-fd-broker.XXXXXX")"
 cleanup() {
@@ -17,6 +20,57 @@ cxx="$(xcrun --find clang++)"
 sdk="$(xcrun --sdk macosx --show-sdk-path)"
 "$cc" -std=c17 -arch arm64 -isysroot "$sdk" -Wall -Wextra -Werror \
   -Wpedantic -I"$dir/include" -fsyntax-only "$dir/probes/abi.c"
+
+ndk="${ANDROID_NDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}/ndk/$NDK_REVISION}"
+tc="$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin"
+android_cc="$tc/aarch64-linux-android${ANDROID_API}-clang"
+readelf="$tc/llvm-readelf"
+[[ -x "$android_cc" && -x "$readelf" ]] || fail 'pinned NDK toolchain missing'
+[[ "$(sha "$ndk/source.properties")" == "$NDK_SOURCE_PROPERTIES_SHA256" ]] ||
+  fail 'NDK source.properties drift'
+cat > "$tmp/android-abi.c" <<'EOF'
+#define _GNU_SOURCE 1
+#include <fcntl.h>
+#include <stddef.h>
+#include <sys/epoll.h>
+_Static_assert(O_CLOEXEC == 02000000, "Android O_CLOEXEC");
+_Static_assert(F_DUPFD_CLOEXEC == 1030, "Android F_DUPFD_CLOEXEC");
+_Static_assert(EPOLL_CLOEXEC == O_CLOEXEC, "Android EPOLL_CLOEXEC");
+_Static_assert(EPOLL_CTL_ADD == 1 && EPOLL_CTL_DEL == 2 && EPOLL_CTL_MOD == 3,
+               "Android epoll operations");
+_Static_assert(EPOLLIN == 1 && sizeof(struct epoll_event) == 16,
+               "Android epoll event ABI");
+int main(void) { return 0; }
+EOF
+"$android_cc" -std=c17 -Wall -Wextra -Werror -c "$tmp/android-abi.c" \
+  -o "$tmp/android-abi.o"
+fixture="$tmp/libcentral_fd_dup_epoll_fixture.so"
+"$android_cc" -std=c17 -O2 -fno-builtin -fPIC -fno-stack-protector \
+  -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wall -Wextra -Werror -shared \
+  -nostdlib -fuse-ld=lld -Wl,--build-id=none -Wl,--hash-style=sysv \
+  -Wl,-z,now -Wl,-z,norelro -Wl,-z,max-page-size=16384 \
+  -Wl,-soname,libcentral_fd_dup_epoll_fixture.so \
+  -Wl,--version-script,"$dir/probes/exports.map" \
+  "$dir/probes/android_fixture.c" -lc -o "$fixture"
+"$readelf" -h "$fixture" | grep -F 'Machine:                           AArch64' >/dev/null ||
+  fail 'fixture is not Android AArch64 ELF'
+"$readelf" --dyn-syms --wide "$fixture" |
+  awk '$7=="UND"&&$8!=""{name=$8;sub(/@.*/,"",name);print name}' | sort -u \
+  > "$tmp/android-imports"
+cat > "$tmp/android-imports.expected" <<'EOF'
+close
+dup
+dup3
+epoll_create1
+epoll_ctl
+epoll_wait
+fcntl
+EOF
+diff -u "$tmp/android-imports.expected" "$tmp/android-imports" ||
+  fail 'Android dup/epoll import drift'
+"$readelf" --dyn-syms --wide "$fixture" |
+  awk '$7=="UND"&&$8!=""&&$8!~ /@LIBC$/{bad=1}END{exit bad}' ||
+  fail 'Android fixture symbol-version drift'
 
 common=(-std=c++20 -arch arm64 -isysroot "$sdk" -pthread -Wall -Wextra -Werror
         -Wpedantic -I"$dir/include" "$dir/src/fd_broker.cc"
@@ -42,7 +96,8 @@ if rg -n '(^|[^.>A-Za-z_])(close|dup|fcntl|ioctl|poll|ppoll|read|recv|send|sendf
   fail 'host descriptor API entered broker source'
 fi
 xcrun clang-format --dry-run --Werror "$dir/include/darwin_art_bionic_fd_broker.h" \
-  "$dir/src/fd_broker.cc" "$dir/probes/state_machine_test.cc" "$dir/probes/abi.c"
+  "$dir/src/fd_broker.cc" "$dir/probes/state_machine_test.cc" \
+  "$dir/probes/abi.c" "$dir/probes/android_fixture.c"
 bash -n "$dir/audit.sh"
 
 git -C "$root" diff --check -- tools/bionic-central-fd-broker
@@ -57,4 +112,4 @@ while IFS= read -r -d '' file; do
 done < <(git -C "$root" ls-files --others --exclude-standard -z -- \
          tools/bionic-central-fd-broker)
 
-echo 'bionic-central-fd-broker: PASS C-ABI=v1 token=generation-tagged typed=FS-file+FS-random+stdio+socket dispatch=read+write+poll+sendfile+ioctl close=drained uninstall=quiescent ASan+UBSan+TSan host-fd=0'
+echo 'bionic-central-fd-broker: PASS C-ABI=v1+v2 AndroidELF=dup+dup3+fcntl+epoll OFD=shared-offset+status refclose=last descriptor-flags=independent epoll=socket-readiness token=generation-tagged ASan+UBSan+TSan host-fd=0'
