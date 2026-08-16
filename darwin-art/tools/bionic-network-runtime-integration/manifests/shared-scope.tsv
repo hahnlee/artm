@@ -1,0 +1,8 @@
+area	files	minimum-change
+fd-broker	tools/bionic-central-fd-broker/include+src+probe	add owner-checked opaque dispatch and sanitizer race coverage
+socket-provider	tools/bionic-socket-facade/include+src+probe	replace private tokens with broker publish dispatch and generic close
+provider-namespace	tools/bionic-provider-namespace/generator+enum+builtins	add socket and DNS owners and reassign close to central broker
+provider-closure	tools/build-bionic-runtime-provider-closure.sh	compile and link broker socket DNS adapters without dyld fallback
+runtime-owner	compat/darwin_runtime_adapters.cc	acquire one process network owner before graph load and release after graph unload
+runtime-fixture	probes/runtime_link_probe.cc+art-bootstrap	start loopback server load JNI DSO invoke native and verify teardown
+runtime-docs	docs/art-elf-native-loader-integration.md	record exact routing lifecycle and bounded network policy
