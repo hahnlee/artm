@@ -106,16 +106,20 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         {
             return Err("APK Activity frame did not match its opaque frame contract".into());
         }
-        let widget = if env::var("DARWIN_ART_APK_APP_EXPECT_BUTTON").as_deref() == Ok("1") {
-            let has_background = frame.argb_pixels.contains(&0xff0f_172a);
-            let has_button = frame.argb_pixels.contains(&0xff25_63eb);
-            let has_text = frame.argb_pixels.contains(&0xffff_ffff);
-            if !has_background || !has_button || !has_text {
-                return Err(
-                    "Android Button frame is missing its background, button, or text pixels".into(),
-                );
+        let widget = if env::var("DARWIN_ART_APK_APP_EXPECT_WIDGETS").as_deref() == Ok("1") {
+            let mut distinct_colors = Vec::new();
+            for pixel in &frame.argb_pixels {
+                if !distinct_colors.contains(pixel) {
+                    distinct_colors.push(*pixel);
+                    if distinct_colors.len() >= 16 {
+                        break;
+                    }
+                }
             }
-            " widget=android.widget.Button colors=background+button+text"
+            if distinct_colors.len() < 8 {
+                return Err("Android framework widget frame lacks visual diversity".into());
+            }
+            " widgets=TextView+CheckBox+RadioButton+ToggleButton+SeekBar+ProgressBar+Button colors>=8"
         } else {
             ""
         };

@@ -26,6 +26,7 @@ extern int register_android_content_AssetManager(JNIEnv* env);
 extern int register_android_content_StringBlock(JNIEnv* env);
 extern int register_android_content_XmlBlock(JNIEnv* env);
 extern int register_android_content_res_ApkAssets(JNIEnv* env);
+extern int register_com_android_internal_util_VirtualRefBasePtr(JNIEnv* env);
 }  // namespace android
 #endif
 
@@ -782,7 +783,8 @@ bool RegisterFrameworkResourceNatives(JNIEnv* env) {
          android::register_android_content_AssetManager(env) >= 0 &&
          android::register_android_content_StringBlock(env) >= 0 &&
          android::register_android_content_XmlBlock(env) >= 0 &&
-         android::register_android_content_res_ApkAssets(env) >= 0;
+         android::register_android_content_res_ApkAssets(env) >= 0 &&
+         android::register_com_android_internal_util_VirtualRefBasePtr(env) >= 0;
 #else
   // The baseline probe registered its deliberately small AssetManager table in
   // RegisterFrameworkNatives().

@@ -91,7 +91,7 @@ probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
 build-skia: Skia Darwin raster: 64x64 rowBytes=256 hash=a4bb4cdb0b4779ea Skia Android framework utils: base-canvas=same surface=same reset-clip=64x64 ...
-build-dex: AOSP DEX: verified=yes version=35 classes=12 methods=303 ... corrupt=rejected
+build-dex: AOSP DEX: verified=yes version=35 classes=12 methods=313 ... corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
@@ -119,10 +119,13 @@ cargo run -q -p art-bootstrap -- probe-runtime-apk-app-window
 ./tools/run-android-apk-app.sh path/to/app.apk 30
 ```
 
-The pinned APK creates a real `android.widget.Button` (not a custom `View`
-stand-in). The acceptance checks the widget's runtime type and the rendered
-background, rounded-button, and Roboto text pixels produced through Android's
-SystemFonts/Minikin/HarfBuzz/Skia path.
+The pinned APK loads Android 16's real `framework-res.apk`, applies its built-in
+Holo Light theme, and creates real `TextView`, `CheckBox`, `RadioButton`,
+`ToggleButton`, `SeekBar`, `ProgressBar`, and `Button` objects (not custom
+`View` stand-ins). The acceptance checks every runtime type plus an opaque,
+visually diverse frame rendered through Android's resource, drawable,
+SystemFonts/Minikin/HarfBuzz, and HWUI/Skia paths. The fixture contains no app
+colors, drawables, layout resources, or native `.so`.
 
 The lower-level graphics probe remains deliberately small: `ProbeView.onDraw()`
 creates a normal Android `Paint` and issues `Canvas.drawColor()`/`drawRect()` calls.
@@ -136,8 +139,10 @@ texture, and command queue remain alive for the session. No frame creates a
 
 This proves the real `Activity.onCreate() -> PhoneWindow.setContentView() ->
 DecorView -> ViewGroup.dispatchDraw() -> View.draw(Canvas) -> HWUI/Skia ->
-Paint -> Bitmap` path. The Rust acceptance requires all 230,400 pixels to be opaque, an
-exact six-color distribution, hash `44d122c296a3e065`, and clean ART shutdown.
+Paint -> Bitmap` path. The APK acceptance requires all 230,400 pixels to be
+opaque, at least eight distinct rendered colors, all seven framework widget
+types, and clean ART shutdown. Choreographer-driven animations, `Switch`, and
+editable text remain explicit next boundaries rather than fake-success paths.
 Separately, `build-skia` maps the IOSurface and wraps its base address with
 upstream `SkCanvas::MakeRasterDirect`; 120 frames are rasterized and
 Metal-presented with zero staging copies. The remaining presentation step is to

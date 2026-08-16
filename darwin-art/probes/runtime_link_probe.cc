@@ -962,21 +962,25 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::getenv("DARWIN_ART_APK_APP_DESCRIPTOR");
   const char* apk_app_support_dex =
       std::getenv("DARWIN_ART_APK_APP_SUPPORT_DEX");
+  const char* framework_res_apk =
+      std::getenv("DARWIN_ART_FRAMEWORK_RES_APK");
   const bool has_apk_app_environment =
       apk_app_package != nullptr || apk_app_activity != nullptr ||
-      apk_app_descriptor != nullptr || apk_app_support_dex != nullptr;
+      apk_app_descriptor != nullptr || apk_app_support_dex != nullptr ||
+      framework_res_apk != nullptr;
   const bool run_apk_app =
       apk_app_package != nullptr && apk_app_package[0] != '\0' &&
       apk_app_activity != nullptr && apk_app_activity[0] != '\0' &&
       apk_app_descriptor != nullptr && apk_app_descriptor[0] == 'L' &&
       apk_app_support_dex != nullptr && apk_app_support_dex[0] != '\0' &&
+      framework_res_apk != nullptr && framework_res_apk[0] == '/' &&
       std::strlen(apk_app_descriptor) >= 3u &&
       std::strlen(apk_app_descriptor) <= 513u &&
       apk_app_descriptor[std::strlen(apk_app_descriptor) - 1u] == ';';
-  const bool expect_apk_button =
+  const bool expect_apk_widgets =
       run_apk_app &&
-      std::getenv("DARWIN_ART_APK_APP_EXPECT_BUTTON") != nullptr &&
-      std::strcmp(std::getenv("DARWIN_ART_APK_APP_EXPECT_BUTTON"), "1") == 0;
+      std::getenv("DARWIN_ART_APK_APP_EXPECT_WIDGETS") != nullptr &&
+      std::strcmp(std::getenv("DARWIN_ART_APK_APP_EXPECT_WIDGETS"), "1") == 0;
   if (has_apk_app_environment && !run_apk_app) {
     std::cerr << "ART Android APK app environment is incomplete or invalid\n";
     return 48;
@@ -1348,6 +1352,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       env->FindClass("android/content/ComponentName");
   jclass configuration_class =
       env->FindClass("android/content/res/Configuration");
+  jmethodID configuration_constructor =
+      configuration_class == nullptr
+          ? nullptr
+          : env->GetMethodID(configuration_class, "<init>", "()V");
   jclass asset_manager_class =
       env->FindClass("android/content/res/AssetManager");
   jmethodID activity_info_constructor =
@@ -1376,31 +1384,67 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           : env->NewObject(asset_manager_class, asset_manager_constructor,
                            JNI_TRUE);
   jclass apk_assets_class = env->FindClass("android/content/res/ApkAssets");
-  jobjectArray empty_apk_assets =
-      apk_assets_class == nullptr
-          ? nullptr
-          : env->NewObjectArray(0, apk_assets_class, nullptr);
+  jobject framework_apk_assets = nullptr;
+  jstring framework_res_path = nullptr;
+  jobjectArray configured_apk_assets = nullptr;
+  if (run_apk_app && apk_assets_class != nullptr && asset_manager != nullptr) {
+    jmethodID load_from_path = env->GetStaticMethodID(
+        apk_assets_class, "loadFromPath",
+        "(Ljava/lang/String;)Landroid/content/res/ApkAssets;");
+    framework_res_path = env->NewStringUTF(framework_res_apk);
+    framework_apk_assets =
+        load_from_path == nullptr || framework_res_path == nullptr
+            ? nullptr
+            : env->CallStaticObjectMethod(apk_assets_class, load_from_path,
+                                          framework_res_path);
+    configured_apk_assets =
+        framework_apk_assets == nullptr
+            ? nullptr
+            : env->NewObjectArray(1, apk_assets_class, framework_apk_assets);
+  } else if (apk_assets_class != nullptr) {
+    configured_apk_assets = env->NewObjectArray(0, apk_assets_class, nullptr);
+  }
   jfieldID apk_assets_field =
       asset_manager_class == nullptr
           ? nullptr
           : env->GetFieldID(asset_manager_class, "mApkAssets",
                             "[Landroid/content/res/ApkAssets;");
-  if (asset_manager != nullptr && apk_assets_field != nullptr &&
-      empty_apk_assets != nullptr) {
-    env->SetObjectField(asset_manager, apk_assets_field, empty_apk_assets);
+  if (!run_apk_app && asset_manager != nullptr && apk_assets_field != nullptr &&
+      configured_apk_assets != nullptr) {
+    env->SetObjectField(asset_manager, apk_assets_field,
+                        configured_apk_assets);
+  } else if (run_apk_app && asset_manager != nullptr &&
+             apk_assets_field != nullptr && configured_apk_assets != nullptr) {
+    jfieldID asset_manager_object =
+        env->GetFieldID(asset_manager_class, "mObject", "J");
+    jmethodID native_set_apk_assets = env->GetStaticMethodID(
+        asset_manager_class, "nativeSetApkAssets",
+        "(J[Landroid/content/res/ApkAssets;ZZ)V");
+    if (asset_manager_object != nullptr && native_set_apk_assets != nullptr) {
+      const jlong native_asset_manager =
+          env->GetLongField(asset_manager, asset_manager_object);
+      env->CallStaticVoidMethod(asset_manager_class, native_set_apk_assets,
+                                native_asset_manager, configured_apk_assets,
+                                JNI_FALSE, JNI_FALSE);
+      if (!env->ExceptionCheck()) {
+        env->SetObjectField(asset_manager, apk_assets_field,
+                            configured_apk_assets);
+      }
+    }
   }
   jmethodID probe_resources_constructor =
       probe_resources_class == nullptr
           ? nullptr
           : env->GetMethodID(probe_resources_class, "<init>",
-                             "(Landroid/content/res/AssetManager;)V");
+                             "(Landroid/content/res/AssetManager;Z)V");
   jobject probe_resources =
       probe_resources_constructor == nullptr || asset_manager == nullptr
           ? nullptr
           : env->NewObject(probe_resources_class, probe_resources_constructor,
-                           asset_manager);
+                           asset_manager,
+                           run_apk_app ? JNI_TRUE : JNI_FALSE);
   if (activity_info == nullptr || application == nullptr ||
-      asset_manager == nullptr || empty_apk_assets == nullptr ||
+      asset_manager == nullptr || configured_apk_assets == nullptr ||
       apk_assets_field == nullptr || probe_resources == nullptr ||
       env->ExceptionCheck()) {
     std::cerr << "ART Android resources: bootstrap construction failed\n";
@@ -1453,10 +1497,6 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? nullptr
           : env->GetMethodID(intent_class, "setComponent",
                              "(Landroid/content/ComponentName;)Landroid/content/Intent;");
-  jmethodID configuration_constructor =
-      configuration_class == nullptr
-          ? nullptr
-          : env->GetMethodID(configuration_class, "<init>", "()V");
   jstring package_name = env->NewStringUTF(
       run_apk_app ? apk_app_package : "dev.darwinart.probe");
   jstring class_name = env->NewStringUTF(
@@ -1576,6 +1616,26 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       get_probe_theme == nullptr
           ? nullptr
           : env->CallObjectMethod(probe_context, get_probe_theme);
+  if (run_apk_app && probe_theme != nullptr) {
+    jclass theme_class = env->GetObjectClass(probe_theme);
+    jclass framework_style_class = env->FindClass("android/R$style");
+    jfieldID framework_light_no_action_bar =
+        framework_style_class == nullptr
+            ? nullptr
+            : env->GetStaticFieldID(framework_style_class,
+                                    "Theme_Holo_Light_NoActionBar", "I");
+    jmethodID apply_style =
+        theme_class == nullptr
+            ? nullptr
+            : env->GetMethodID(theme_class, "applyStyle", "(IZ)V");
+    if (framework_light_no_action_bar != nullptr && apply_style != nullptr) {
+      const jint style = env->GetStaticIntField(framework_style_class,
+                                                framework_light_no_action_bar);
+      env->CallVoidMethod(probe_theme, apply_style, style, JNI_TRUE);
+    }
+    env->DeleteLocalRef(framework_style_class);
+    env->DeleteLocalRef(theme_class);
+  }
   jmethodID set_activity_theme = env->GetMethodID(
       context_theme_wrapper_class, "setTheme",
       "(Landroid/content/res/Resources$Theme;)V");
@@ -1735,32 +1795,40 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? nullptr
           : env->CallObjectMethod(content_root, get_child_at,
                                   static_cast<jint>(0));
-  jclass expected_button_class =
-      expect_apk_button ? env->FindClass("android/widget/Button") : nullptr;
-  jobject expected_button = nullptr;
-  if (expect_apk_button && expected_button_class != nullptr &&
-      probe_view != nullptr) {
-    if (env->IsInstanceOf(probe_view, expected_button_class)) {
-      expected_button = env->NewLocalRef(probe_view);
-    } else {
-      jclass view_group_class = env->FindClass("android/view/ViewGroup");
-      jmethodID child_at =
-          view_group_class == nullptr
+  bool widgets_valid = true;
+  if (expect_apk_widgets) {
+    static constexpr const char* kWidgetTags[]{
+        "title", "checkbox", "radio", "toggle", "seek", "progress", "button"};
+    static constexpr const char* kWidgetClasses[]{
+        "android/widget/TextView",      "android/widget/CheckBox",
+        "android/widget/RadioButton",  "android/widget/ToggleButton",
+        "android/widget/SeekBar",      "android/widget/ProgressBar",
+        "android/widget/Button"};
+    jmethodID find_view_with_tag =
+        content_root_class == nullptr
+            ? nullptr
+            : env->GetMethodID(content_root_class, "findViewWithTag",
+                               "(Ljava/lang/Object;)Landroid/view/View;");
+    widgets_valid = find_view_with_tag != nullptr;
+    for (std::size_t index = 0;
+         widgets_valid && index < std::size(kWidgetTags); ++index) {
+      jstring tag = env->NewStringUTF(kWidgetTags[index]);
+      jobject widget =
+          tag == nullptr
               ? nullptr
-              : env->GetMethodID(view_group_class, "getChildAt",
-                                 "(I)Landroid/view/View;");
-      if (view_group_class != nullptr && child_at != nullptr &&
-          env->IsInstanceOf(probe_view, view_group_class)) {
-        expected_button = env->CallObjectMethod(probe_view, child_at, 0);
-      }
-      env->DeleteLocalRef(view_group_class);
+              : env->CallObjectMethod(content_root, find_view_with_tag, tag);
+      jclass widget_class = env->FindClass(kWidgetClasses[index]);
+      widgets_valid = tag != nullptr && widget != nullptr &&
+                      widget_class != nullptr &&
+                      env->IsInstanceOf(widget, widget_class) &&
+                      !env->ExceptionCheck();
+      env->DeleteLocalRef(widget_class);
+      env->DeleteLocalRef(widget);
+      env->DeleteLocalRef(tag);
     }
   }
-  if (expect_apk_button &&
-      (expected_button_class == nullptr || expected_button == nullptr ||
-       !env->IsInstanceOf(expected_button, expected_button_class) ||
-       env->ExceptionCheck())) {
-    std::cerr << "ART Android APK: content child is not android.widget.Button\n";
+  if (!widgets_valid) {
+    std::cerr << "ART Android APK: framework widget set is incomplete\n";
     return 33;
   }
   const jboolean decor_presented =
@@ -1808,8 +1876,6 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   env->DeleteLocalRef(window_class);
   env->DeleteLocalRef(window);
   env->DeleteLocalRef(probe_view);
-  env->DeleteLocalRef(expected_button);
-  env->DeleteLocalRef(expected_button_class);
   env->DeleteLocalRef(configuration);
   env->DeleteLocalRef(component_name);
   env->DeleteLocalRef(intent);
@@ -1819,7 +1885,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   env->DeleteLocalRef(configuration_class);
   env->DeleteLocalRef(component_name_class);
   env->DeleteLocalRef(intent_class);
-  env->DeleteLocalRef(empty_apk_assets);
+  env->DeleteLocalRef(configured_apk_assets);
+  env->DeleteLocalRef(framework_res_path);
+  env->DeleteLocalRef(framework_apk_assets);
   env->DeleteLocalRef(apk_assets_class);
   env->DeleteLocalRef(asset_manager);
   env->DeleteLocalRef(asset_manager_class);

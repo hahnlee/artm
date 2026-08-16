@@ -6,8 +6,10 @@ declared in binary `AndroidManifest.xml`, whose code lives in the APK's single
 
 The bounded inspector rejects ZIP64, encryption, duplicate or unsafe paths,
 secondary DEX files, malformed binary XML, ambiguous launchers, and any native
-library. The fixture programmatically creates a real `android.widget.Button`,
-so no app resource inflation is required for the first widget vertical slice.
+library. The fixture programmatically creates real `TextView`, `CheckBox`,
+`RadioButton`, `ToggleButton`, `SeekBar`, `ProgressBar`, and `Button` instances.
+It loads the pinned Android 16 `framework-res.apk` and applies the framework's
+built-in Holo Light theme; there are no app-supplied colors or drawables.
 
 Run:
 
@@ -24,10 +26,12 @@ through the APK `PathClassLoader`, execute `Activity.onCreate`, attach a real
 `PhoneWindow`/`DecorView`, and present its 640x360 frame in the Darwin host
 window.
 
-The acceptance resolves the child view back to an actual
-`android.widget.Button` instance and requires the captured frame to contain the
-exact dark background, blue rounded-button, and white Roboto text colors. It
-therefore does not accept a custom `View` stand-in or a blank opaque frame.
+The acceptance resolves all seven tagged children back to their exact Android
+framework widget types and requires a fully opaque, visually diverse 640x360
+frame. It therefore does not accept custom `View` stand-ins, app-painted
+rectangles, or a blank opaque frame. Because this is a detached single-frame
+host, state animators are advanced to their current state; Choreographer-driven
+ripple animation is a separate capability boundary.
 
 After the graphics runtime has been built, run any APK in the current bounded
 programmatic-UI subset with:
@@ -40,4 +44,6 @@ The runner never extracts or rewrites the APK. It rejects APKs containing
 native libraries, secondary DEX files, or an ambiguous launcher before ART is
 created. App resource-table/layout inflation and Android system services are
 not yet general; the first supported APK class builds its view hierarchy in
-Java from framework widgets or custom views.
+Java from framework widgets or custom views. `Switch` still requires the
+unintegrated VelocityTracker native table, and editable text requires the
+Editor/input-method service slice, so neither is claimed by this gate.

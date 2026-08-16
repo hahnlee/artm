@@ -87,6 +87,24 @@ public final class ProbeContext extends ContextWrapper {
         return null;
     }
 
+    @Override
+    public String getSystemServiceName(Class<?> serviceClass) {
+        String className = serviceClass.getName();
+        if ("android.view.inputmethod.InputMethodManager".equals(className)) {
+            return INPUT_METHOD_SERVICE;
+        }
+        if ("android.view.WindowManager".equals(className)) {
+            return WINDOW_SERVICE;
+        }
+        if ("android.view.LayoutInflater".equals(className)) {
+            return LAYOUT_INFLATER_SERVICE;
+        }
+        if ("android.view.accessibility.AccessibilityManager".equals(className)) {
+            return ACCESSIBILITY_SERVICE;
+        }
+        return null;
+    }
+
     // Hidden Context hooks called by Activity.attachBaseContext(). The Darwin
     // host does not expose autofill or content-capture services, so ownership
     // stays with the attached Activity while these services remain disabled.
@@ -102,6 +120,18 @@ public final class ProbeContext extends ContextWrapper {
     @Override
     public String getOpPackageName() {
         return getPackageName();
+    }
+
+    @Override
+    public boolean isRestricted() {
+        return false;
+    }
+
+    // Hidden Context hook used while TextView resolves framework text
+    // appearances. The trusted framework-res APK is the only resource owner
+    // installed by this probe.
+    public boolean canLoadUnsafeResources() {
+        return true;
     }
 
     // Hidden on the SDK surface but virtual in the platform Context class.

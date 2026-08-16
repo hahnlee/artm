@@ -17,28 +17,31 @@ public final class ProbeResources extends Resources {
         DISPLAY_METRICS.setToDefaults();
     }
 
-    public ProbeResources(AssetManager assets) {
+    private final boolean frameworkResources;
+
+    public ProbeResources(AssetManager assets, boolean frameworkResources) {
         super(assets, DISPLAY_METRICS, CONFIGURATION);
+        this.frameworkResources = frameworkResources;
     }
 
     @Override
     public boolean getBoolean(int id) {
-        return false;
+        return frameworkResources ? super.getBoolean(id) : false;
     }
 
     @Override
     public int getDimensionPixelSize(int id) {
-        return 8;
+        return frameworkResources ? super.getDimensionPixelSize(id) : 8;
     }
 
     @Override
     public int getColor(int id) {
-        return 0xff2563eb;
+        return frameworkResources ? super.getColor(id) : 0xff2563eb;
     }
 
     @Override
     public int getColor(int id, Theme theme) {
-        return 0xff2563eb;
+        return frameworkResources ? super.getColor(id, theme) : 0xff2563eb;
     }
 
     @Override
@@ -50,11 +53,15 @@ public final class ProbeResources extends Resources {
 
     @Override
     public XmlResourceParser getAnimation(int id) {
-        return new ProbeXmlResourceParser();
+        return frameworkResources ? super.getAnimation(id) : new ProbeXmlResourceParser();
     }
 
     @Override
     public void getValue(int id, TypedValue outValue, boolean resolveRefs) {
+        if (frameworkResources) {
+            super.getValue(id, outValue, resolveRefs);
+            return;
+        }
         outValue.type = TypedValue.TYPE_FLOAT;
         outValue.data = Float.floatToRawIntBits(2.0f);
     }

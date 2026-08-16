@@ -37,7 +37,8 @@ core_icu="$root/_build/bootclasspath/core-icu4j-api36.jar"
 support_dex="$root/_build/dex-probe/dex/classes.dex"
 fonts_xml="$root/probes/button/fonts.xml"
 roboto="$root/_aosp/external/skia/resources/fonts/Roboto-Regular.ttf"
-for input in "$host" "$runtime" "$core_oj" "$core_libart" "$framework" "$core_icu" "$support_dex" "$fonts_xml" "$roboto"; do
+framework_res="$root/_prebuilt/android-16/resources/framework-res.apk"
+for input in "$host" "$runtime" "$core_oj" "$core_libart" "$framework" "$core_icu" "$support_dex" "$fonts_xml" "$roboto" "$framework_res"; do
   [[ -f "$input" ]] || {
     echo "runtime input is missing: $input" >&2
     echo "run the bootstrap/graphics build gates first" >&2
@@ -53,6 +54,7 @@ export DARWIN_ART_APK_APP_PACKAGE="$package"
 export DARWIN_ART_APK_APP_ACTIVITY="$activity"
 export DARWIN_ART_APK_APP_DESCRIPTOR="$descriptor"
 export DARWIN_ART_APK_APP_SUPPORT_DEX="$support_dex"
+export DARWIN_ART_FRAMEWORK_RES_APK="$framework_res"
 export DARWIN_ART_TEST_FONTS_XML="$fonts_xml"
 export DARWIN_ART_TEST_FONT="$roboto"
 

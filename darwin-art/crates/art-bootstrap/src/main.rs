@@ -1624,7 +1624,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=12 methods=303 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=12 methods=313 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldev/darwinart/probe/Hello; \
                     class[2]=Ldev/darwinart/probe/ProbeActivity; \
@@ -1699,7 +1699,7 @@ fn build_elf_jni_dex_probe(root: &Path) -> Result<()> {
             .arg(class_dir.join("darwin/art/nativefixture/NativeFixture.class")),
     )?;
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=311 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=321 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldarwin/art/nativefixture/NativeFixture; \
                     class[2]=Ldev/darwinart/probe/Hello; \
@@ -1760,7 +1760,7 @@ fn build_network_dex_probe(root: &Path) -> Result<()> {
             .arg(class_dir.join("dev/darwinart/probe/NetworkRuntimeFixture.class")),
     )?;
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    if !output.contains("classes=13 methods=303")
+    if !output.contains("classes=13 methods=313")
         || !output.contains("Ldev/darwinart/probe/NetworkRuntimeFixture;")
     {
         return Err(format!("unexpected network DEX probe output: {output:?}").into());
@@ -1804,7 +1804,7 @@ fn build_network_dex_probe(root: &Path) -> Result<()> {
     if !kind.contains("ELF 64-bit LSB shared object, ARM aarch64") {
         return Err(format!("unexpected network fixture format: {kind}").into());
     }
-    println!("build-network-dex: classes=13 methods=303 ELF=arm64 imports=8 loopback=only");
+    println!("build-network-dex: classes=13 methods=313 ELF=arm64 imports=8 loopback=only");
     Ok(())
 }
 
@@ -1876,7 +1876,7 @@ fn build_button_dex_probe(root: &Path) -> Result<()> {
     let classes_dex = dex_dir.join("classes.dex");
     let dex_probe = root.join("_build/dex-probe/dex-probe");
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=307 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=319 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldev/darwinart/probe/FontBootstrap; \
                     class[2]=Ldev/darwinart/probe/Hello; \
@@ -3633,6 +3633,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
     build_shell_gate(root, "build-android16-openjdk-nio-mapping.sh")?;
     build_shell_gate(root, "build-android16-libcore-memory-darwin.sh")?;
     build_shell_gate(root, "build-android16-android-util-log.sh")?;
+    build_shell_gate(root, "build-android16-virtual-ref-base-ptr.sh")?;
 
     let runtime = root.join("_aosp/art/runtime");
     let build_dir = root.join("_build/runtime-graphics-link-probe");
@@ -3673,6 +3674,8 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         root.join("_build/resource-jni-foundation/libandroid-resource-jni-darwin.a");
     let android_util_log_archive =
         root.join("_build/android-util-log/libandroid-util-log-registrar-darwin.a");
+    let virtual_ref_base_ptr_archive =
+        root.join("_build/virtual-ref-base-ptr/libandroid-virtual-ref-base-ptr-darwin.a");
     let android_runtime_host =
         root.join("_build/android-runtime-host/libandroid-runtime-darwin-host.a");
     for input in [
@@ -3695,6 +3698,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         &asynchronous_close_backend,
         &resource_jni_archive,
         &android_util_log_archive,
+        &virtual_ref_base_ptr_archive,
         &android_runtime_host,
     ] {
         if !input.is_file() {
@@ -3832,6 +3836,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         .arg(&openjdkjvm_archive)
         .arg(&os_constants_archive)
         .arg(&android_util_log_archive)
+        .arg(&virtual_ref_base_ptr_archive)
         .arg(format!(
             "-Wl,-force_load,{}",
             resource_jni_archive.display()
@@ -3925,6 +3930,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         "register_android_content_StringBlock",
         "register_android_content_XmlBlock",
         "register_android_content_res_ApkAssets",
+        "register_com_android_internal_util_VirtualRefBasePtr",
         "register_android_util_Log",
         "darwin_art_android_runtime_install",
         "darwin_art_android_runtime_uninstall",
@@ -4745,6 +4751,14 @@ fn probe_runtime_dex_flavor(
         }
     }
     if apk_app {
+        let framework_res = root.join("_prebuilt/android-16/resources/framework-res.apk");
+        if !framework_res.is_file() {
+            return Err(format!(
+                "Android framework resources are missing: {}",
+                framework_res.display()
+            )
+            .into());
+        }
         command
             .env("DARWIN_ART_APK_APP_PACKAGE", "dev.darwinart.simple")
             .env(
@@ -4759,7 +4773,8 @@ fn probe_runtime_dex_flavor(
                 "DARWIN_ART_APK_APP_SUPPORT_DEX",
                 root.join("_build/dex-probe/dex/classes.dex"),
             )
-            .env("DARWIN_ART_APK_APP_EXPECT_BUTTON", "1");
+            .env("DARWIN_ART_FRAMEWORK_RES_APK", framework_res)
+            .env("DARWIN_ART_APK_APP_EXPECT_WIDGETS", "1");
     }
     let mut network_fixture = None;
     if network {
@@ -4831,7 +4846,7 @@ fn probe_runtime_dex_flavor(
          ART Darwin DEX interpreter: Hello.answer()=42\n\
          ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
          ART runtime native: System.arraycopy()=42\n\
-         ART Android APK: package=dev.darwinart.simple launcher=dev.darwinart.simple.MainActivity classes.dex=APK native=0 pixels=230400/opaque widget=android.widget.Button colors=background+button+text\n\
+         ART Android APK: package=dev.darwinart.simple launcher=dev.darwinart.simple.MainActivity classes.dex=APK native=0 pixels=230400/opaque widgets=TextView+CheckBox+RadioButton+ToggleButton+SeekBar+ProgressBar+Button colors>=8\n\
          ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
          ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
          ART Android lifecycle: Activity.onCreate()=43\n\
