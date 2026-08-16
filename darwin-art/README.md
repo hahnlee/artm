@@ -167,9 +167,11 @@ published. The fixture then reaches
 `RegisterNatives`, then executes eight scalar/reference methods through
 write-then-execute-protected ARM64 thunks. The planner derives JNI shorties from
 descriptors, tracks GP and FP banks independently, and repacks Darwin's natural
-stack tail into Android's eight-byte slots. A native method invoked after
-`JNI_OnLoad` calls proxy `GetVersion` and `FindClass` using the current ART
-thread's `JNIEnv`, not a retained load-time pointer. Before constructors, ART
+stack tail into Android's eight-byte slots. Native methods invoked after
+`JNI_OnLoad` use the current ART thread's `JNIEnv`, not a retained load-time
+pointer, to call proxy `GetVersion` and `FindClass`, round-trip modified UTF-8
+and a byte array, transition local/global/local references, and raise, observe,
+then clear an array-bounds exception. Before constructors, ART
 installs a process-wide Bionic filesystem owner with an immutable preopened
 root, private in-memory `/data`, and synthetic random devices. The same graph
 resolves imports through a sealed 29-provider namespace that owns
@@ -192,7 +194,11 @@ CriticalNative, the rest of the JNI table, hardened-runtime `MAP_JIT`,
 graph-wide/imported ELF TLS, C++ thread-local destructors, and central network
 FD integration remain explicit work. A standalone Bionic socket facade already
 translates 20 TCP/UDP/poll/message APIs with virtual descriptors, but it is not
-yet installed in the production namespace. A bounded local-definition AArch64
+yet installed in the production namespace. The central descriptor broker now
+passes generation-safe OFD sharing, dup allocation, per-descriptor CLOEXEC,
+last-close, and bounded epoll ADD/MOD/DEL acceptance; exact-target `dup3`, typed
+socket-control leases, and production provider composition remain open. A
+bounded local-definition AArch64
 `TLSDESC` path is implemented:
 it allocates aligned guest blocks per Darwin thread, preserves `TPIDR_EL0`, and
 fails stop rather than unmapping an image used by another live thread.

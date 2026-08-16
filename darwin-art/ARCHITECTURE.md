@@ -387,8 +387,10 @@ supports Z/B/C/S/I/J/F/D/L/V scalar/reference arguments and returns, tracks GP
 and FP register banks independently, and repacks Darwin's naturally aligned
 stack tail into Android eight-byte slots. Actual ELF calls cover mixed FP,
 narrow integer stack values, reference/FP/void returns, and post-load proxy
-`GetVersion` plus `FindClass`; the backend obtains the current ART thread's
-JNIEnv instead of retaining the load-time pointer. DestroyJavaVM closes the
+`GetVersion` plus `FindClass`. A separate generic registered native exercises
+the proxy's modified-UTF-8, byte-array region, local/global reference, and
+exception observation/clearing subset. Every forwarded call obtains the current
+ART thread's JNIEnv instead of retaining the load-time pointer. DestroyJavaVM closes the
 graph, runs root-before-child finalizers, and returns the executable-page live
 count to zero. Per-image Bionic `__cxa_finalize(dso_handle)` is composed with
 ELF `DT_FINI_ARRAY`/`DT_FINI`: each dependent drains its callbacks and ELF
@@ -431,9 +433,15 @@ an immutable preopened root with a private in-memory `/data` overlay, and owns
 synthetic random devices backed by Security.framework entropy. `sendfile` is
 implemented over the same virtual descriptors, and the actual ART ELF probe
 copies immutable input into the private writable `/data` overlay. Persistent
-writable prefix storage, a unified descriptor table across all provider
-families, general varargs formats, sockets/networking, and kernel-coupled calls
-remain open.
+writable prefix storage, production composition of every provider into one
+descriptor owner, general varargs formats, sockets/networking, and
+kernel-coupled calls remain open. A standalone central descriptor broker now
+models generation-tagged tokens over refcounted open-file descriptions: offset
+and status flags are shared across dup references, `FD_CLOEXEC` is per
+descriptor, owner close runs after the last descriptor and active lease, and a
+bounded level-triggered epoll gate covers ADD/MOD/DEL socket readiness.
+Exact-target `dup2`/`dup3`, SCM_RIGHTS, blocking/edge/oneshot epoll, and typed
+leased socket-control remain fail-closed.
 
 The Bionic DSO lifecycle provider owns destructor registration independently
 of Darwin's C++ runtime. It preserves each function/argument/DSO triple,

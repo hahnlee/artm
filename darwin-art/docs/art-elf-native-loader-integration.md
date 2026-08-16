@@ -168,10 +168,11 @@ it becomes the next action and the dispatcher is restored at the front.
    six-DSO directory. A separate actual-ART process also exercises the
    `extractNativeLibs=false` path: three 16 KiB-aligned STORED DSOs remain in a
    mode-0400 APK and are mapped as read-only fd slices with no copy or extraction.
-10. Class-loader namespace caching, arbitrary RegisterNatives/JNI proxy
-    expansion, CriticalNative, and production network/central-FD semantics:
-    incomplete. A standalone 20-entry socket facade is accepted but not yet
-    composed with the filesystem descriptor owner.
+10. Class-loader namespace caching, broader JNI proxy coverage, CriticalNative,
+    and production network/central-FD semantics: incomplete. The JNI proxy now
+    executes 19 bounded JNIEnv entries plus JavaVM `GetEnv`. A standalone
+    20-entry socket facade and an OFD/epoll central-broker gate are accepted but
+    not yet atomically composed with the filesystem descriptor owner.
 
 Stage 4 explicitly repacks the two calling conventions. The fixture gate
 compiles and disassembles the same source for both targets: Android uses
@@ -185,9 +186,11 @@ aggregate/HFA/varargs spellings. CriticalNative is outside this regular-JNI API.
 
 `nativeUsesEnv` runs after `JNI_OnLoad`, calls proxy `GetVersion` and
 `FindClass`, and succeeds only because each backend call obtains
-`Thread::Current()->GetJniEnv()`. No load-thread `JNIEnv` is retained. This is
-still a deliberately small proxy table and must not be described as general
-`.so` support.
+`Thread::Current()->GetJniEnv()`. The generic registered native additionally
+uses modified-UTF-8, byte-array region, local/global reference, and exception
+observation/clearing entries. No load-thread `JNIEnv` is retained. The remaining
+JNI table is null and fail-closed, so this bounded subset must not be described
+as general `.so` support.
 
 The executable page currently uses Darwin's anonymous RW mapping followed by
 an irreversible transition to RX. This is W^X and passes the development
