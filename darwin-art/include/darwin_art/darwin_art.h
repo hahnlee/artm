@@ -69,6 +69,15 @@ DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     const darwin_art_process_config_t* config,
     darwin_art_process_result_t* result);
 
+// Dispatches one host pointer sample into the retained Android root view and
+// emits a refreshed frame through frame_callback. Actions are 0=down, 1=up,
+// and 2=move. This first input ABI supports generic clickable View semantics;
+// full MotionEvent/native input semantics remain a later subsystem boundary.
+DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
+    uint32_t action,
+    float x,
+    float y);
+
 // Tears down the Runtime created by darwin_art_run_process. Once Runtime::Create
 // succeeded, the host must call this exactly once after run_process returns,
 // including when run_process returned a nonzero stage. It must be called on the

@@ -45,6 +45,18 @@ typedef struct DarwinArtSurfaceProducerMapping {
   uint32_t height;
 } DarwinArtSurfaceProducerMapping;
 
+typedef enum DarwinArtPointerAction {
+  DARWIN_ART_POINTER_DOWN = 0,
+  DARWIN_ART_POINTER_UP = 1,
+  DARWIN_ART_POINTER_MOVE = 2,
+} DarwinArtPointerAction;
+
+typedef struct DarwinArtPointerEvent {
+  uint32_t action;
+  float x;
+  float y;
+} DarwinArtPointerEvent;
+
 // Creates persistent Apple graphics objects. The returned handle owns them
 // until darwin_art_surface_destroy(). Returns null on failure and writes the
 // reason to out_result when it is non-null.
@@ -83,6 +95,14 @@ DarwinArtSurfaceResult darwin_art_surface_present(
 DarwinArtSurfaceResult darwin_art_surface_pump_events(
     DarwinArtSurface* surface,
     double seconds);
+
+// Removes the oldest pointer event captured by the surface's NSView. Event
+// coordinates are expressed in backing pixels, matching the Android render
+// target even when the host window uses a Retina content scale. Returns false
+// when the queue is empty or either argument is null.
+bool darwin_art_surface_next_pointer_event(
+    DarwinArtSurface* surface,
+    DarwinArtPointerEvent* out_event);
 
 // Waits for the most recently submitted command buffer, closes the window,
 // and releases all owned Apple objects.

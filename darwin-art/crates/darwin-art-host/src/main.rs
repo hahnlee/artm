@@ -111,7 +111,7 @@ fn main_result() -> Result<(), Box<dyn Error>> {
             .all(|pixel| pixel & 0xff00_0000 == 0xff00_0000);
         if frame.width != expected_width
             || frame.height != expected_height
-            || outcome.frames_presented != 1
+            || outcome.frames_presented == 0
             || !all_opaque
         {
             return Err("APK Activity frame did not match its opaque frame contract".into());

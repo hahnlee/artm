@@ -97,7 +97,7 @@ build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
 build-interpreter-core: AOSP C++ interpreter Mach-O objects=7 archive=...
 build-runtime-bootstrap: ART runtime initialization spine Mach-O objects=210 compiled=0 cached=210 archive=...
-audit-runtime-link: C ABI dylib closure complete undefined=0 exports=9
+audit-runtime-link: C ABI dylib closure complete undefined=0 exports=11
 probe-runtime-dex: Activity.attach() + PhoneWindow + DecorView.draw(Canvas) -> Darwin
 probe-runtime-graphics: Android Canvas 640x360 pixels=230400 colors=6 opaque=230400 hash=44d122c296a3e065
 probe-park: ART Darwin park: pre-permit=yes wakeups=200 timeout=yes
@@ -121,7 +121,10 @@ cargo run -q -p art-bootstrap -- probe-runtime-apk-app-window
 
 The interactive runner uses a 720x1280 Android render target, 320 dpi framework
 metrics, and a 2x Retina-backed 360x640 macOS window. Headless acceptance keeps
-the deterministic 360x640 portrait surface.
+the deterministic 360x640 portrait surface. AppKit mouse down/up events are
+translated into backing-pixel hit tests on the retained Android `DecorView`;
+clickable framework views run their real `performClick()` state transition and
+the updated tree is immediately rerendered through HWUI/Skia.
 
 The pinned APK loads Android 16's real `framework-res.apk`, applies its built-in
 Holo Light theme, and creates real `TextView`, `CheckBox`, `RadioButton`,
@@ -161,7 +164,8 @@ the complementary ART/libcore `libcore.io.Memory` owners, the 47-entry
 Darwin `lseek`. With a source-coherent ICU76 Java/native/data set it maps the
 pinned Android font data, constructs a real `android.widget.Button`, renders
 through HWUI/Minikin/Skia, exports a frame, and shuts ART down cleanly.
-Compiled framework-resource inflation, input, and GPU HWUI remain deferred.
+Compiled app-resource inflation, full Android `MotionEvent`/gesture dispatch,
+and GPU HWUI remain deferred. Basic clickable-view pointer input is live.
 
 The first Tier-1 native-library admission gate is also available:
 
@@ -441,11 +445,12 @@ as Android ELF DSOs. The current real `Activity.attach()` uses upstream
 AssetManager/ApkAssets native owners but still constructs a programmatic probe
 `Resources`, a null `Instrumentation`, and no remote services. It constructs and
 retains the framework `PhoneWindow`; the launcher normally constructs its
-`DecorView` and installs a programmatic content root because the complete
-compiled `framework-res.apk` parser is not ported yet. The content `View` is
+`DecorView` and installs a programmatic content root because complete app
+resource-table/layout inflation is not ported yet. The content `View` is
 normally constructed and traversed through Android Skia/HWUI CPU raster. Full
-decor resources, input dispatch, GPU HWUI, and incremental frame scheduling
-remain deferred.
+decor resources, Android `MotionEvent` gesture dispatch, GPU HWUI, and
+incremental frame scheduling remain deferred; the host currently implements
+bounded clickable-view down/up input with redraw.
 
 Apple ARM64 executables retain the kernel-required 4 GiB `__PAGEZERO`, so ART's
 usual absolute-low-32-bit heap references cannot be used. The Darwin probe

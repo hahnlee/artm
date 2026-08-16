@@ -3408,12 +3408,14 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-install_name,@rpath/libdarwin_art_runtime.dylib")
         .arg("-Wl,-exported_symbol,_darwin_art_run_process")
         .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
+        .arg("-Wl,-exported_symbol,_darwin_art_dispatch_pointer")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_update")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_map_producer")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_unmap_producer")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_present")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-dead_strip")
         .arg(&object)
@@ -3488,12 +3490,14 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         for required in [
             "_darwin_art_run_process",
             "_darwin_art_shutdown_process",
+            "_darwin_art_dispatch_pointer",
             "_darwin_art_surface_create",
             "_darwin_art_surface_update",
             "_darwin_art_surface_map_producer",
             "_darwin_art_surface_unmap_producer",
             "_darwin_art_surface_present",
             "_darwin_art_surface_pump_events",
+            "_darwin_art_surface_next_pointer_event",
             "_darwin_art_surface_destroy",
         ] {
             if !symbols.contains(required) {
@@ -3565,7 +3569,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             }
         }
         build_runtime_host(root)?;
-        println!("audit-runtime-link: C ABI dylib closure complete undefined=0 exports=9");
+        println!("audit-runtime-link: C ABI dylib closure complete undefined=0 exports=11");
         return Ok(());
     }
 
@@ -3784,12 +3788,14 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         .arg("-Wl,-install_name,@rpath/libdarwin_art_runtime_graphics.dylib")
         .arg("-Wl,-exported_symbol,_darwin_art_run_process")
         .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
+        .arg("-Wl,-exported_symbol,_darwin_art_dispatch_pointer")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_update")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_map_producer")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_unmap_producer")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_present")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-dead_strip")
         .arg(format!("-Wl,-map,{}", link_map.display()))
@@ -3910,12 +3916,14 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
     for required in [
         "_darwin_art_run_process",
         "_darwin_art_shutdown_process",
+        "_darwin_art_dispatch_pointer",
         "_darwin_art_surface_create",
         "_darwin_art_surface_update",
         "_darwin_art_surface_map_producer",
         "_darwin_art_surface_unmap_producer",
         "_darwin_art_surface_present",
         "_darwin_art_surface_pump_events",
+        "_darwin_art_surface_next_pointer_event",
         "_darwin_art_surface_destroy",
     ] {
         if !global_symbols.contains(required) {
@@ -4318,12 +4326,14 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-install_name,@rpath/libdarwin_art_runtime_direct_apk.dylib")
         .arg("-Wl,-exported_symbol,_darwin_art_run_process")
         .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
+        .arg("-Wl,-exported_symbol,_darwin_art_dispatch_pointer")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_update")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_map_producer")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_unmap_producer")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_present")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-dead_strip")
         .arg(&object)
@@ -4777,6 +4787,8 @@ fn probe_runtime_dex_flavor(
             .env("DARWIN_ART_APK_APP_EXPECT_WIDGETS", "1");
         if show_window {
             command.env("DARWIN_ART_WINDOW_SCALE", "2");
+        } else {
+            command.env("DARWIN_ART_TEST_POINTER_CLICK", "35,45");
         }
     }
     let mut network_fixture = None;

@@ -9,6 +9,7 @@
 
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
@@ -511,6 +512,10 @@ static jlong NativePackedNarrowStack(JNIEnv*, jclass, jint a0, jint a1,
 static std::size_t g_frame_width = 0;
 static std::size_t g_frame_height = 0;
 static jclass g_probe_canvas_class = nullptr;
+static jobject g_interactive_root = nullptr;
+static jobject g_pressed_view = nullptr;
+static jint g_interactive_width = 0;
+static jint g_interactive_height = 0;
 static void* g_host_context = nullptr;
 static darwin_art_frame_callback_t g_frame_callback = nullptr;
 static bool g_apk_elf_loaded = false;
@@ -625,9 +630,6 @@ class ScopedProcessRunBoundary final {
   ScopedProcessRunBoundary() = default;
 
   ~ScopedProcessRunBoundary() {
-    g_host_context = nullptr;
-    g_frame_callback = nullptr;
-
     if (art_thread_ == nullptr) {
       FinishProcessRun();
       return;
@@ -884,6 +886,157 @@ static jboolean PresentContent(JNIEnv* env, jclass, jobject view, jint width,
   const jboolean presented = PresentFrame(env, nullptr, width, height, pixels);
   release_render_target();
   return presented;
+}
+
+static jobject FindClickableViewAt(JNIEnv* env, jobject view, jfloat x,
+                                   jfloat y) {
+  if (view == nullptr || x < 0.0f || y < 0.0f || env->ExceptionCheck()) {
+    return nullptr;
+  }
+  jclass view_class = env->FindClass("android/view/View");
+  jclass group_class = env->FindClass("android/view/ViewGroup");
+  if (view_class == nullptr || group_class == nullptr || env->ExceptionCheck()) {
+    env->DeleteLocalRef(group_class);
+    env->DeleteLocalRef(view_class);
+    return nullptr;
+  }
+  jmethodID get_width = env->GetMethodID(view_class, "getWidth", "()I");
+  jmethodID get_height = env->GetMethodID(view_class, "getHeight", "()I");
+  jmethodID get_visibility =
+      env->GetMethodID(view_class, "getVisibility", "()I");
+  jmethodID is_enabled = env->GetMethodID(view_class, "isEnabled", "()Z");
+  jmethodID is_clickable = env->GetMethodID(view_class, "isClickable", "()Z");
+  if (get_width == nullptr || get_height == nullptr ||
+      get_visibility == nullptr || is_enabled == nullptr ||
+      is_clickable == nullptr || env->ExceptionCheck()) {
+    env->DeleteLocalRef(group_class);
+    env->DeleteLocalRef(view_class);
+    return nullptr;
+  }
+  const jint width = env->CallIntMethod(view, get_width);
+  const jint height = env->CallIntMethod(view, get_height);
+  const jint visibility = env->CallIntMethod(view, get_visibility);
+  const jboolean enabled = env->CallBooleanMethod(view, is_enabled);
+  if (env->ExceptionCheck() || visibility != 0 || enabled != JNI_TRUE ||
+      x >= static_cast<jfloat>(width) || y >= static_cast<jfloat>(height)) {
+    env->DeleteLocalRef(group_class);
+    env->DeleteLocalRef(view_class);
+    return nullptr;
+  }
+
+  if (env->IsInstanceOf(view, group_class)) {
+    jmethodID get_child_count =
+        env->GetMethodID(group_class, "getChildCount", "()I");
+    jmethodID get_child_at = env->GetMethodID(
+        group_class, "getChildAt", "(I)Landroid/view/View;");
+    jmethodID get_left = env->GetMethodID(view_class, "getLeft", "()I");
+    jmethodID get_top = env->GetMethodID(view_class, "getTop", "()I");
+    if (get_child_count != nullptr && get_child_at != nullptr &&
+        get_left != nullptr && get_top != nullptr && !env->ExceptionCheck()) {
+      const jint child_count = env->CallIntMethod(view, get_child_count);
+      for (jint index = child_count - 1; index >= 0 && !env->ExceptionCheck();
+           --index) {
+        jobject child = env->CallObjectMethod(view, get_child_at, index);
+        if (child == nullptr || env->ExceptionCheck()) {
+          env->DeleteLocalRef(child);
+          continue;
+        }
+        const jint left = env->CallIntMethod(child, get_left);
+        const jint top = env->CallIntMethod(child, get_top);
+        jobject result =
+            FindClickableViewAt(env, child, x - left, y - top);
+        env->DeleteLocalRef(child);
+        if (result != nullptr) {
+          env->DeleteLocalRef(group_class);
+          env->DeleteLocalRef(view_class);
+          return result;
+        }
+      }
+    }
+  }
+  jobject result =
+      env->CallBooleanMethod(view, is_clickable) == JNI_TRUE &&
+              !env->ExceptionCheck()
+          ? env->NewLocalRef(view)
+          : nullptr;
+  env->DeleteLocalRef(group_class);
+  env->DeleteLocalRef(view_class);
+  return result;
+}
+
+extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
+    uint32_t action, float x, float y) {
+  if (action > 2u || !std::isfinite(x) || !std::isfinite(y)) {
+    return 71;
+  }
+  art::Thread* art_thread = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_process_state.mutex);
+    if (g_process_state.phase != ProcessPhase::kAwaitingShutdown ||
+        !g_process_state.owner_thread_valid ||
+        pthread_equal(g_process_state.owner_thread, pthread_self()) == 0 ||
+        g_process_state.art_thread == nullptr || g_interactive_root == nullptr) {
+      return 72;
+    }
+    art_thread = g_process_state.art_thread;
+  }
+  if (art::Thread::Current() != art_thread ||
+      art_thread->GetState() != art::ThreadState::kNative) {
+    return 73;
+  }
+
+  art::ScopedObjectAccess soa(art_thread);
+  JNIEnv* env = art_thread->GetJniEnv();
+  jobject hit = FindClickableViewAt(env, g_interactive_root, x, y);
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID set_pressed =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "setPressed", "(Z)V");
+  jmethodID perform_click =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "performClick", "()Z");
+  if (view_class == nullptr || set_pressed == nullptr ||
+      perform_click == nullptr || env->ExceptionCheck()) {
+    env->DeleteLocalRef(hit);
+    env->DeleteLocalRef(view_class);
+    return 74;
+  }
+
+  if (action == 0u) {
+    if (g_pressed_view != nullptr) {
+      env->CallVoidMethod(g_pressed_view, set_pressed, JNI_FALSE);
+      env->DeleteGlobalRef(g_pressed_view);
+      g_pressed_view = nullptr;
+    }
+    if (hit != nullptr && !env->ExceptionCheck()) {
+      env->CallVoidMethod(hit, set_pressed, JNI_TRUE);
+      g_pressed_view = env->NewGlobalRef(hit);
+    }
+  } else if (action == 1u) {
+    if (g_pressed_view != nullptr) {
+      env->CallVoidMethod(g_pressed_view, set_pressed, JNI_FALSE);
+      if (hit != nullptr && env->IsSameObject(hit, g_pressed_view) &&
+          !env->ExceptionCheck()) {
+        env->CallBooleanMethod(g_pressed_view, perform_click);
+      }
+      env->DeleteGlobalRef(g_pressed_view);
+      g_pressed_view = nullptr;
+    }
+  }
+  env->DeleteLocalRef(hit);
+  env->DeleteLocalRef(view_class);
+  const bool rendered = !env->ExceptionCheck() &&
+                        PresentContent(env, nullptr, g_interactive_root,
+                                       g_interactive_width,
+                                       g_interactive_height) == JNI_TRUE;
+  if (env->ExceptionCheck()) {
+    std::cerr << "ART Android input: click dispatch threw\n"
+              << art_thread->GetException()->Dump() << "\n";
+    art_thread->ClearException();
+  }
+  return rendered ? 0 : 75;
 }
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
@@ -1889,6 +2042,18 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     }
     return 33;
   }
+  if (run_apk_app) {
+    if (g_interactive_root != nullptr) {
+      env->DeleteGlobalRef(g_interactive_root);
+    }
+    g_interactive_root = env->NewGlobalRef(attached_decor);
+    g_interactive_width = kApkFrameWidth * window_scale;
+    g_interactive_height = kApkFrameHeight * window_scale;
+    if (g_interactive_root == nullptr || env->ExceptionCheck()) {
+      std::cerr << "ART Android input: retaining DecorView failed\n";
+      return 33;
+    }
+  }
   env->DeleteLocalRef(application);
   env->DeleteLocalRef(activity_info);
   env->DeleteLocalRef(context_theme_wrapper_class);
@@ -2313,6 +2478,16 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
         art_thread->GetJniEnv()->DeleteGlobalRef(g_probe_canvas_class);
         g_probe_canvas_class = nullptr;
       }
+      if (g_pressed_view != nullptr) {
+        art_thread->GetJniEnv()->DeleteGlobalRef(g_pressed_view);
+        g_pressed_view = nullptr;
+      }
+      if (g_interactive_root != nullptr) {
+        art_thread->GetJniEnv()->DeleteGlobalRef(g_interactive_root);
+        g_interactive_root = nullptr;
+      }
+      g_interactive_width = 0;
+      g_interactive_height = 0;
       if (art_thread->IsExceptionPending()) {
         std::cerr << "ART Darwin shutdown: global reference cleanup threw: "
                   << art_thread->GetException()->Dump() << "\n";
@@ -2346,6 +2521,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
     g_process_state.phase = ProcessPhase::kShutdownFailed;
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
+  g_host_context = nullptr;
+  g_frame_callback = nullptr;
   if (darwin_art::android_jni::TrampolineLiveCount() != 0) {
     std::cerr << "ART Darwin shutdown: ELF JNI trampolines remain live\n";
     std::lock_guard<std::mutex> lock(g_process_state.mutex);

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <new>
 
@@ -65,10 +66,13 @@ CGFloat WindowScale(bool visible) {
                        device:(id<MTLDevice>)device
                     pixelSize:(CGSize)pixelSize
                  contentScale:(CGFloat)contentScale;
+- (BOOL)nextPointerEvent:(DarwinArtPointerEvent*)outEvent;
 @end
 
 @implementation DarwinArtMetalView {
   CAMetalLayer* _metalLayer;
+  std::deque<DarwinArtPointerEvent> _pointerEvents;
+  CGFloat _contentScale;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -86,6 +90,7 @@ CGFloat WindowScale(bool visible) {
     _metalLayer.framebufferOnly = NO;
     _metalLayer.contentsScale = contentScale;
     _metalLayer.drawableSize = pixelSize;
+    _contentScale = contentScale;
     self.layer = _metalLayer;
   }
   return self;
@@ -97,6 +102,45 @@ CGFloat WindowScale(bool visible) {
 
 - (CAMetalLayer*)metalLayer {
   return _metalLayer;
+}
+
+- (BOOL)acceptsFirstResponder {
+  return YES;
+}
+
+- (void)enqueuePointerEvent:(NSEvent*)event
+                     action:(DarwinArtPointerAction)action {
+  NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+  const NSRect bounds = self.bounds;
+  if (!NSPointInRect(point, bounds)) {
+    return;
+  }
+  _pointerEvents.push_back(DarwinArtPointerEvent{
+      .action = static_cast<uint32_t>(action),
+      .x = static_cast<float>(point.x * _contentScale),
+      .y = static_cast<float>(point.y * _contentScale),
+  });
+}
+
+- (void)mouseDown:(NSEvent*)event {
+  [self enqueuePointerEvent:event action:DARWIN_ART_POINTER_DOWN];
+}
+
+- (void)mouseUp:(NSEvent*)event {
+  [self enqueuePointerEvent:event action:DARWIN_ART_POINTER_UP];
+}
+
+- (void)mouseDragged:(NSEvent*)event {
+  [self enqueuePointerEvent:event action:DARWIN_ART_POINTER_MOVE];
+}
+
+- (BOOL)nextPointerEvent:(DarwinArtPointerEvent*)outEvent {
+  if (outEvent == nullptr || _pointerEvents.empty()) {
+    return NO;
+  }
+  *outEvent = _pointerEvents.front();
+  _pointerEvents.pop_front();
+  return YES;
 }
 
 @end
@@ -312,6 +356,7 @@ DarwinArtSurface* darwin_art_surface_create(
       return finish(DARWIN_ART_SURFACE_ALLOCATION_FAILED, nullptr);
     }
     surface->window.contentView = surface->view;
+    [surface->window makeFirstResponder:surface->view];
     [surface->window center];
     if (create_info->visible) {
       [surface->window makeKeyAndOrderFront:nil];
@@ -458,6 +503,15 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
   return surface->visible && !surface->window.visible
              ? DARWIN_ART_SURFACE_WINDOW_CLOSED
              : DARWIN_ART_SURFACE_OK;
+}
+
+bool darwin_art_surface_next_pointer_event(
+    DarwinArtSurface* surface,
+    DarwinArtPointerEvent* out_event) {
+  if (!IsMainThread() || surface == nullptr || out_event == nullptr) {
+    return false;
+  }
+  return [surface->view nextPointerEvent:out_event] == YES;
 }
 
 DarwinArtSurfaceResult darwin_art_surface_destroy(

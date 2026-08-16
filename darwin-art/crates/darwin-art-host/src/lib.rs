@@ -142,7 +142,16 @@ type SurfaceCreateFn = unsafe extern "C" fn(*const SurfaceCreateInfo, *mut i32) 
 type SurfaceUpdateFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> i32;
 type SurfacePresentFn = unsafe extern "C" fn(*mut c_void) -> i32;
 type SurfacePumpEventsFn = unsafe extern "C" fn(*mut c_void, f64) -> i32;
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+struct PointerEvent {
+    action: u32,
+    x: f32,
+    y: f32,
+}
+type SurfaceNextPointerEventFn = unsafe extern "C" fn(*mut c_void, *mut PointerEvent) -> bool;
 type SurfaceDestroyFn = unsafe extern "C" fn(*mut c_void) -> i32;
+type DispatchPointerFn = unsafe extern "C" fn(u32, f32, f32) -> i32;
 
 struct FrameHost {
     frames_received: u64,
@@ -258,8 +267,12 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             unsafe { library.symbol(b"darwin_art_surface_present\0")? };
         let surface_pump_events: SurfacePumpEventsFn =
             unsafe { library.symbol(b"darwin_art_surface_pump_events\0")? };
+        let surface_next_pointer_event: SurfaceNextPointerEventFn =
+            unsafe { library.symbol(b"darwin_art_surface_next_pointer_event\0")? };
         let surface_destroy: SurfaceDestroyFn =
             unsafe { library.symbol(b"darwin_art_surface_destroy\0")? };
+        let dispatch_pointer: DispatchPointerFn =
+            unsafe { library.symbol(b"darwin_art_dispatch_pointer\0")? };
 
         let core_oj = path_c_string(&options.core_oj_jar)?;
         let core_libart = path_c_string(&options.core_libart_jar)?;
@@ -307,14 +320,16 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // managed thread. The callback above merely copied into this Rust-owned
         // frame mailbox.
         let presentation = (|| -> Result<u64, HostError> {
-            let Some(frame) = frame_host.last_frame.as_ref() else {
+            let Some(initial_frame) = frame_host.last_frame.as_ref() else {
                 return Ok(0);
             };
+            let frame_width = initial_frame.width;
+            let frame_height = initial_frame.height;
             let title = CString::new("Darwin ART · Activity.setContentView()")
                 .expect("static window title contains no NUL");
             let create_info = SurfaceCreateInfo {
-                width: frame.width,
-                height: frame.height,
+                width: frame_width,
+                height: frame_height,
                 title: title.as_ptr(),
                 visible: options.visible_seconds > 0.0,
             };
@@ -330,26 +345,103 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             }
 
             let present_result = (|| {
+                let mut presentations = 0_u64;
+                let upload_latest = |frame_host: &FrameHost| -> Result<(), HostError> {
+                    let frame = frame_host
+                        .last_frame
+                        .as_ref()
+                        .ok_or(HostError::SurfaceFailed {
+                            operation: "missing_frame",
+                            status: -1,
+                        })?;
+                    if frame.width != frame_width || frame.height != frame_height {
+                        return Err(HostError::SurfaceFailed {
+                            operation: "frame_size_changed",
+                            status: -1,
+                        });
+                    }
+                    // SAFETY: surface and the packed frame are live for this
+                    // synchronous main-thread upload.
+                    let update_status = unsafe {
+                        surface_update(
+                            surface,
+                            frame.argb_pixels.as_ptr().cast(),
+                            frame.width as usize * size_of::<u32>(),
+                        )
+                    };
+                    surface_status("update", update_status, false)?;
+                    let present_status = unsafe { surface_present(surface) };
+                    surface_status("present", present_status, false)
+                };
                 // SAFETY: surface is live; the packed Rust frame remains live
                 // through update, and all platform calls occur on main.
-                let update_status = unsafe {
-                    surface_update(
-                        surface,
-                        frame.argb_pixels.as_ptr().cast(),
-                        frame.width as usize * size_of::<u32>(),
-                    )
-                };
-                surface_status("update", update_status, false)?;
-                let present_status = unsafe { surface_present(surface) };
-                surface_status("present", present_status, false)?;
-                let pump_status = unsafe { surface_pump_events(surface, options.visible_seconds) };
-                surface_status("pump_events", pump_status, true)
+                upload_latest(&frame_host)?;
+                presentations += 1;
+                if let Ok(sample) = std::env::var("DARWIN_ART_TEST_POINTER_CLICK") {
+                    let initial_pixels = frame_host
+                        .last_frame
+                        .as_ref()
+                        .map(|frame| frame.argb_pixels.clone())
+                        .ok_or(HostError::SurfaceFailed {
+                            operation: "test_pointer_click",
+                            status: -1,
+                        })?;
+                    let (x, y) = sample.split_once(',').ok_or(HostError::SurfaceFailed {
+                        operation: "test_pointer_click",
+                        status: -1,
+                    })?;
+                    let x = x.parse::<f32>().map_err(|_| HostError::SurfaceFailed {
+                        operation: "test_pointer_click",
+                        status: -1,
+                    })?;
+                    let y = y.parse::<f32>().map_err(|_| HostError::SurfaceFailed {
+                        operation: "test_pointer_click",
+                        status: -1,
+                    })?;
+                    for action in [0_u32, 1_u32] {
+                        let dispatch_status = unsafe { dispatch_pointer(action, x, y) };
+                        if dispatch_status != 0 {
+                            return Err(HostError::RuntimeFailed(dispatch_status));
+                        }
+                    }
+                    upload_latest(&frame_host)?;
+                    if frame_host.last_frame.as_ref().is_none_or(|frame| {
+                        frame.argb_pixels.as_slice() == initial_pixels.as_slice()
+                    }) {
+                        return Err(HostError::SurfaceFailed {
+                            operation: "test_pointer_click_unchanged",
+                            status: -1,
+                        });
+                    }
+                    presentations += 1;
+                }
+                let mut remaining = options.visible_seconds;
+                while remaining > 0.0 {
+                    let slice = remaining.min(0.016);
+                    let pump_status = unsafe { surface_pump_events(surface, slice) };
+                    if pump_status == 7 {
+                        break;
+                    }
+                    surface_status("pump_events", pump_status, false)?;
+                    let mut event = PointerEvent::default();
+                    while unsafe { surface_next_pointer_event(surface, &mut event) } {
+                        let dispatch_status =
+                            unsafe { dispatch_pointer(event.action, event.x, event.y) };
+                        if dispatch_status != 0 {
+                            return Err(HostError::RuntimeFailed(dispatch_status));
+                        }
+                        upload_latest(&frame_host)?;
+                        presentations += 1;
+                    }
+                    remaining -= slice;
+                }
+                Ok(presentations)
             })();
             // SAFETY: surface was returned by create and has not been destroyed.
             let destroy_status = unsafe { surface_destroy(surface) };
-            present_result?;
+            let presentations = present_result?;
             surface_status("destroy", destroy_status, false)?;
-            Ok(1)
+            Ok(presentations)
         })();
         // Presentation has released every platform surface at this point.
         // Destroy ART before returning ownership to arbitrary Rust code so its
