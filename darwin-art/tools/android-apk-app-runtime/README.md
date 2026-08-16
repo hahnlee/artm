@@ -40,6 +40,9 @@ programmatic-UI subset with:
 ./tools/run-android-apk-app.sh path/to/app.apk 30
 ```
 
+Omitting the duration keeps the window available for up to 24 hours and still
+exits immediately when the user closes it.
+
 The interactive runner renders a 720x1280 Android surface into a 360x640
 logical macOS window with a 2x `CAMetalLayer` backing scale. Framework density
 is set to 320 dpi for that mode, so widget size is unchanged while Retina

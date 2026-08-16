@@ -8,6 +8,7 @@ use std::ptr;
 
 pub const ABI_VERSION: u32 = 1;
 const MAX_FRAME_DIMENSION: u32 = 4096;
+const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
 pub type FrameCallback = unsafe extern "C" fn(
     context: *mut c_void,
@@ -102,7 +103,7 @@ impl fmt::Display for HostError {
             Self::InvalidVisibleSeconds(seconds) => {
                 write!(
                     formatter,
-                    "visible seconds must be finite and in the range 0..=30: {seconds}"
+                    "visible seconds must be finite and in the range 0..=86400: {seconds}"
                 )
             }
             Self::RuntimeFailed(status) => {
@@ -240,7 +241,7 @@ unsafe extern "C" fn receive_frame(
 pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
     if !options.visible_seconds.is_finite()
         || options.visible_seconds < 0.0
-        || options.visible_seconds > 30.0
+        || options.visible_seconds > MAX_VISIBLE_SECONDS
     {
         return Err(HostError::InvalidVisibleSeconds(options.visible_seconds));
     }
@@ -645,7 +646,7 @@ mod tests {
             app_dex: PathBuf::new(),
             heap_initial_bytes: 0,
             heap_maximum_bytes: 0,
-            visible_seconds: 30.001,
+            visible_seconds: 86_400.001,
         };
         assert!(matches!(
             run(&options),

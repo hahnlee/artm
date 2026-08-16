@@ -3,7 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 apk="${1:-}"
-seconds="${2:-30}"
+seconds="${2:-86400}"
 [[ -n "$apk" ]] || {
   echo "usage: $0 APK [VISIBLE_SECONDS]" >&2
   exit 64
