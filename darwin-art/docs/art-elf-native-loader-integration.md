@@ -26,16 +26,21 @@ after byte-component validation.
 The discovery gate also uses the pinned NDK r28c `libc++_shared.so`: a sibling
 root discovers it while `libc.so`, `libdl.so`, and `libm.so` are poisoned disk
 entries and must be skipped as providers. Metadata inspection deliberately
-accepts loader-unsupported tags such as GNU RELRO for discovery; the later load
-stage still applies its own explicit mapping/relocation capability checks.
+accepts tags independently from execution support. The later load stage now
+validates and seals one GNU RELRO range and recognizes the pinned libc++'s
+zero-valued `DT_AARCH64_BTI_PLT` tag. It also accepts the bounded local
+`PT_TLS`/`R_AARCH64_TLSDESC` model documented by the loader; imported/static TLS,
+nonzero BTI requirements, malformed RELRO, and unsupported relocations remain
+explicit capability checks.
 
 The root needs the real child plus explicit virtual host/Bionic providers. The
 child needs the real grandchild plus those providers; the grandchild is a pure
-leaf. The host provider
-exports one reviewed fixed-register `void(int)` lifecycle recorder; unknown
-SONAMEs and symbols fail closed. Both ELF objects have initializer/finalizer
-arrays and no GNU RELRO or TLS. The root's constructor and `NativeAdd` reach a
-real child export through eager `R_AARCH64_JUMP_SLOT` relocation.
+leaf. Discovery is recursive and capped; this is no longer a root-plus-one-child
+special case. The host provider exports one reviewed fixed-register `void(int)`
+lifecycle recorder; unknown SONAMEs and symbols fail closed. The root and child
+have initializer/finalizer arrays and no GNU RELRO or TLS. The root's constructor
+and `NativeAdd` reach a real child export through eager
+`R_AARCH64_JUMP_SLOT` relocation.
 Before any graph constructor runs, the adapter installs a process-wide Bionic
 filesystem owner from that same preopened directory authority. The root
 constructor proves the TLS-free path by opening, reading, and closing synthetic
@@ -104,6 +109,12 @@ root ELF finalizer → child callback → child ELF finalizer, then unmaps. The
 provider rejects null-handle registrations for graph owners and routes
 simultaneously live owners by disjoint image ranges.
 
+This is per-image lifecycle composition rather than two independent teardown
+systems. For each image, its Bionic `__cxa_finalize(dso_handle)` registrations
+drain to quiescence before its `DT_FINI_ARRAY`/`DT_FINI`; the live range is then
+unpublished and unmapped. Dependents complete that sequence before dependencies,
+and no process-global `__cxa_finalize(NULL)` is used as a shortcut.
+
 Retaining `JavaVMExt::LoadNativeLibrary` also retains its legacy target-SDK
 signal-chain repair call. `darwin_sigchain.cc` therefore provides the real
 `EnsureFrontOfChain` behavior: if another action displaced ART's dispatcher,
@@ -126,9 +137,19 @@ it becomes the next action and the dispatcher is restored at the front.
    Bionic imports and exports `JNI_OnLoad` without `JNI_OnUnload`; it proves the
    generic path is not coupled to fixture route masks or optional lifecycle
    exports.
-6. Class-loader namespace caching, ZIP/APK extraction, arbitrary
-   RegisterNatives/JNI proxy expansion, CriticalNative, and complete provider
-   tables: incomplete.
+6. Closed Bionic namespace against the exact pinned libc++ import census:
+   160/160 complete. The final `sendfile` route copies an immutable input into
+   the private writable `/data` overlay through central virtual descriptors.
+7. Real pinned NDK libc++ execution: complete for collections (189) and an
+   Android-libunwind cross-frame exception cleanup/catch (73), with sequential
+   unload and a process-wide copied-PHDR snapshot source for
+   `dl_iterate_phdr`.
+8. Local-definition AArch64 `TLSDESC`: complete with per-thread aligned guest
+   blocks, opaque descriptor tokens, thread-exit reclamation, and live-thread
+   unload rejection. Imported/static TLS and TLS destructors remain incomplete.
+9. Class-loader namespace caching, ZIP/APK extraction, arbitrary
+   RegisterNatives/JNI proxy expansion, CriticalNative, and network semantics:
+   incomplete.
 
 Stage 4 explicitly repacks the two calling conventions. The fixture gate
 compiles and disassembles the same source for both targets: Android uses

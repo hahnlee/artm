@@ -16,6 +16,20 @@ the caller's `SymbolResolver`; the loader never calls `dlopen`, `dlsym`, or dyld
 version, flags, hidden bit, and provider SONAME are passed to the resolver.
 Missing weak undefined symbols resolve to zero; missing strong symbols fail.
 
+The pinned NDK r28c/API 35 `libc++_shared.so` is also a structural acceptance
+image. With initializers disabled, the loader applies all 4,267 supported RELA
+entries through a closed resolver, observes all 160 strong `@LIBC` imports,
+seals GNU RELRO, and finds a real export. Its zero-valued
+`DT_AARCH64_BTI_PLT` metadata is recognized. A nonzero BTI requirement is a
+capability error until the Darwin execution contract for BTI landing pads is
+proved; a duplicate tag is malformed ELF.
+
+A bounded AArch64 TLS slice accepts one validated `PT_TLS` and local-definition
+`R_AARCH64_TLSDESC` relocations. It uses opaque descriptor tokens and aligned
+per-thread guest blocks while leaving Darwin `TPIDR_EL0` intact. Imported and
+static TLS models remain explicit capabilities. The ownership and unload
+contract is documented in [TLS.md](TLS.md).
+
 `ClosedElfNamespace` adds a recursive graph layer without introducing path
 search. Each ELF byte source is registered under its exact embedded
 `DT_SONAME`; an optional caller-owned `SymbolResolver` is the only non-ELF
@@ -40,9 +54,10 @@ requires `DT_BIND_NOW`, `DF_BIND_NOW`, or `DF_1_NOW`; lazy binding is rejected.
 One well-formed `PT_GNU_RELRO` range is relocated while writable and then
 page-rounded and protected read-only before constructors or handle publication.
 The range must stay inside one readable, non-executable `PT_LOAD`; malformed,
-duplicate, or out-of-image RELRO segments fail closed. TLS, `DT_REL`, `DT_RELR`,
-other relocation kinds, `DT_INIT`, preinit arrays, text relocations, symbolic
-lookup, and RPATH/RUNPATH return explicit capability errors.
+duplicate, or out-of-image RELRO segments fail closed. Imported/static TLS
+models, `DT_REL`, `DT_RELR`, other relocation kinds, `DT_INIT`, preinit arrays,
+text relocations, symbolic lookup, and RPATH/RUNPATH return explicit capability
+errors.
 `LoadedElf` owns the complete `mmap` reservation and unmaps it on every error
 path or `Drop`. Resolver-provided addresses must remain valid until the image is
 dropped.
@@ -61,8 +76,9 @@ The additive per-image lifecycle seam composes Bionic C++
 publishes every mmap reservation after full relocation and before constructors.
 Dependent-first teardown drains and quiesces that image's callbacks before its
 `DT_FINI_ARRAY` and `DT_FINI`; callback failure is fail-stop before unmap. No
-global `finalize(NULL)` is used. ELF TLS remains rejected, including finalizers
-that would require a guest TLS runtime.
+global `finalize(NULL)` is used. Local `TLSDESC` remains available while guest
+finalizers run; descriptors are unpublished only afterward. Language-level TLS
+destructors and cross-image TLS remain rejected.
 
 Graph exports with default or protected visibility participate in the closed
 dependency scope. Nonzero `SHN_ABS` definitions are rejected explicitly rather

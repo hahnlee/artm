@@ -159,23 +159,40 @@ cargo run -p art-bootstrap -- probe-runtime-elf-jni
 ```
 
 This is a real ART `JavaVMExt::LoadNativeLibrary` path, not a standalone loader
-smoke. A root and child ELF form a closed `DT_NEEDED` graph: child-before-root
-constructors run, the root calls a child export through an eager relocation,
-and only the complete graph is published. The fixture then reaches
+smoke. A root, child, and grandchild ELF form a recursively discovered closed
+`DT_NEEDED` graph: dependency-before-dependent constructors run, the root calls
+a child export through an eager relocation, and only the complete graph is
+published. The fixture then reaches
 `JNI_OnLoad`, proxy `FindClass` and
 `RegisterNatives`, then executes eight scalar/reference methods through
 write-then-execute-protected ARM64 thunks. The planner derives JNI shorties from
 descriptors, tracks GP and FP banks independently, and repacks Darwin's natural
 stack tail into Android's eight-byte slots. A native method invoked after
 `JNI_OnLoad` calls proxy `GetVersion` and `FindClass` using the current ART
-thread's `JNIEnv`, not a retained load-time pointer. The same graph resolves
-and executes Bionic `__errno` and `strlen` through the sealed fourteen-provider
-namespace. Unload observes root then child finalizers, followed by quiescent
-namespace teardown; a pre-publish failure injection verifies the same cleanup.
-Aggregates, HFA, variadic calls, CriticalNative, the rest of the JNI table,
-hardened-runtime `MAP_JIT`, and general dependency discovery remain explicit
-work. ELF TLS is still rejected. ART composition with the separate Bionic
-`__cxa_finalize` lifecycle also remains explicit work.
+thread's `JNIEnv`, not a retained load-time pointer. Before constructors, ART
+installs a process-wide Bionic filesystem owner with an immutable preopened
+root, private in-memory `/data`, and synthetic random devices. The same graph
+resolves imports through a sealed 29-provider namespace that owns
+all 160/160 pinned libc++ libc-family imports. The final `sendfile` route is
+exercised by an Android ELF copy into the private writable `/data` overlay.
+Unload composes each image's Bionic
+`__cxa_finalize(dso_handle)` callbacks with its ELF finalizers, then tears down
+the namespace after all in-flight leases drain. A pre-publish failure injection
+verifies the same cleanup. Aggregates, HFA, general variadic calls,
+CriticalNative, the rest of the JNI table, hardened-runtime `MAP_JIT`,
+graph-wide/imported ELF TLS, C++ thread-local destructors, and networking remain
+explicit work. A bounded local-definition AArch64 `TLSDESC` path is implemented:
+it allocates aligned guest blocks per Darwin thread, preserves `TPIDR_EL0`, and
+fails stop rather than unmapping an image used by another live thread.
+
+The pinned real NDK libc++ also passes both structural and executing gates. All
+4,267 supported relocations are applied through a closed resolver, GNU RELRO is
+sealed, its zero-valued AArch64 BTI tag is recognized, and all 160 strong
+`@LIBC` imports are observed. ART then executes a collections consumer
+(`std::string`/`vector`/sort/allocation = 189) and an exception consumer linked
+with pinned Android `libunwind.a` (cross-frame cleanup/catch = 73), followed by
+sequential graph unload. The runtime publishes concurrency-stable copied PHDR
+snapshots so `dl_iterate_phdr` never falls through to dyld.
 
 Its final line is:
 

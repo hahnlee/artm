@@ -5,11 +5,13 @@ and a normalized mount-relative byte path. It deliberately does not require
 UTF-8 and does not store or return host paths.
 
 The caller owns the host-side mount table and must open the returned relative
-path beneath a pre-opened directory descriptor. A later filesystem broker must
-walk every component with `openat`-style operations, preserve trailing-slash
-directory intent, and reject symlink escapes and rename races. String
-concatenation with a macOS path is outside this API's security contract. Until
-that broker exists, this crate must not authorize host filesystem operations.
+path beneath a pre-opened directory descriptor. The implemented read-only
+filesystem broker walks every component with `openat`-style operations,
+preserves trailing-slash directory intent, and rejects symlinks. The Bionic
+filesystem facade composes it with an immutable guest root, a private in-memory
+writable `/data` overlay, and exact synthetic random devices. String
+concatenation with a macOS path remains outside this API's security contract;
+the prefix router itself grants no host authority.
 
 Absolute `..` components clamp at the virtual Android root, matching Linux
 pathname lookup. Mount selection happens after lexical normalization and uses
