@@ -163,8 +163,9 @@ it becomes the next action and the dispatcher is restored at the front.
 9. APK native extraction: complete for bounded Android arm64 entries using
    stored/deflated ZIP records, central/local agreement, CRC verification,
    atomic read-only publication, and actual-ART execution of the sealed
-   six-DSO directory. Direct mmap from aligned stored APK entries remains a
-   separate `extractNativeLibs=false` capability.
+   six-DSO directory. A separate actual-ART process also exercises the
+   `extractNativeLibs=false` path: three 16 KiB-aligned STORED DSOs remain in a
+   mode-0400 APK and are mapped as read-only fd slices with no copy or extraction.
 10. Class-loader namespace caching, arbitrary RegisterNatives/JNI proxy
     expansion, CriticalNative, and production network/central-FD semantics:
     incomplete. A standalone 20-entry socket facade is accepted but not yet

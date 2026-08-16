@@ -181,7 +181,12 @@ the namespace after all in-flight leases drain. A pre-publish failure injection
 verifies the same cleanup. The same acceptance builds an APK, validates its
 central/local ZIP records and CRCs, extracts six `arm64-v8a` DSOs into an
 atomically published read-only directory, and executes both graphs directly
-from that sealed directory through `JavaVMExt`/NativeBridge. Aggregates, HFA,
+from that sealed directory through `JavaVMExt`/NativeBridge.
+The complementary `extractNativeLibs=false` acceptance keeps a
+root/child/grandchild graph in a read-only APK as 16 KiB-aligned STORED entries,
+maps those entry ranges directly, and reaches `JNI_OnLoad` and shutdown without
+creating extracted copies.
+Aggregates, HFA,
 general variadic calls,
 CriticalNative, the rest of the JNI table, hardened-runtime `MAP_JIT`,
 graph-wide/imported ELF TLS, C++ thread-local destructors, and central network
