@@ -3,6 +3,11 @@ JNI_OnLoad	export	-	jint(JavaVM*,void*)	direct-register-only	fixture-entry
 GetVersion	JNIEnv	4	jint(JNIEnv*)	direct-register-only	implemented
 FindClass	JNIEnv	6	jclass(JNIEnv*,const-char*)	direct-register-only	implemented
 ThrowNew	JNIEnv	14	jint(JNIEnv*,jclass,const-char*)	direct-register-only	implemented
+DeleteLocalRef	JNIEnv	23	void(JNIEnv*,jobject)	direct-register-only	forward-current-ART-env
+NewStringUTF	JNIEnv	167	jstring(JNIEnv*,const-char*)	direct-register-only	forward-current-ART-env
+GetStringUTFLength	JNIEnv	168	jsize(JNIEnv*,jstring)	direct-register-only	forward-current-ART-env
+GetStringUTFChars	JNIEnv	169	const-char*(JNIEnv*,jstring,jboolean*)	direct-register-only	forward-current-ART-env
+ReleaseStringUTFChars	JNIEnv	170	void(JNIEnv*,jstring,const-char*)	direct-register-only	forward-current-ART-env
 RegisterNatives	JNIEnv	215	jint(JNIEnv*,jclass,const-JNINativeMethod*,jint)	direct-register-only	implemented
 ExceptionCheck	JNIEnv	228	jboolean(JNIEnv*)	direct-register-only	implemented
 GetEnv	JavaVM	6	jint(JavaVM*,void**,jint)	direct-register-only	implemented

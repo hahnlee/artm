@@ -1,11 +1,12 @@
 # Android 16 JNI proxy table gate
 
 This standalone module supplies a small proxy `JavaVM`/`JNIEnv` surface for an
-Android ARM64 JNI library without exposing an ART function table. The first
+Android ARM64 JNI library without exposing an ART function table. The current
 executable subset is `JavaVM::GetEnv` plus `JNIEnv::{GetVersion, FindClass,
-ThrowNew, RegisterNatives, ExceptionCheck}`. All other table entries are null,
-so an unsupported call fails visibly instead of reaching ART or an accidentally
-similar Darwin symbol.
+ThrowNew, RegisterNatives, ExceptionCheck, DeleteLocalRef, NewStringUTF,
+GetStringUTFLength, GetStringUTFChars, ReleaseStringUTFChars}`. All other table
+entries are null, so an unsupported call fails visibly instead of reaching ART
+or an accidentally similar Darwin symbol.
 
 The table shape comes from the SHA-locked AOSP Android 16.0.0_r4
 `libnativehelper/include_jni/jni.h`. `tools/generate_slots.py` parses every
@@ -16,14 +17,15 @@ header has the same ordered tables.
 
 ## Boundary and state
 
-The public initializer accepts only three semantic backend callbacks. It never
-accepts, stores, or returns an ART `JNIEnv`, `JavaVM`, `JNIEnvExt`, or raw ART
-table. The handles visible to the Android ELF begin with this module's own
-generated proxy table. The backend owns class handles and native registration;
-the proxy owns the pending-exception bit and the attached test environment.
+The public initializer accepts three semantic callbacks plus an optional
+`current_env` accessor. Forwarding wrappers call that accessor for one operation
+and use the host table internally; they never store or return it. The handles
+visible to the Android ELF always begin with this module's own generated proxy
+table. The backend owns class handles and native registration; the proxy owns
+the pending-exception bit and the attached test environment.
 
-This first slice is deliberately single-environment and JNI 1.6-only. It has no
-thread attachment/detachment, local/global reference lifecycle, exception
+This slice is deliberately single-environment and JNI 1.6-only. It has no
+thread attachment/detachment, global-reference lifecycle, exception
 object, class-loader policy, or method invocation support. A registered native
 function pointer is transferred to the backend but is not invoked by this gate.
 That pointer remains Android-ABI-owned. A real backend must retain it as such
@@ -37,11 +39,13 @@ implemented manifest before loading constructors or executing `JNI_OnLoad`.
 The proxy table alone is not that preflight and must not be advertised as a
 general JNI implementation.
 
-Only the successful `FindClass` and `RegisterNatives` paths are coherent in
-this slice. Their failure-to-Java-exception behavior is not implemented.
-`ThrowNew` records only a pending bit after backend success, not a throwable
-object. A backend retaining `JNINativeMethod` metadata must copy it while the
-callback is active and preserve the Android-code ownership of `function`.
+Only the successful `FindClass`, `RegisterNatives`, local-reference deletion,
+and modified-UTF-8 string paths are coherent in this slice. Their
+failure-to-Java-exception behavior is not fully implemented. `ThrowNew` records
+only a pending bit in the standalone fake backend; the ART backend forwards
+through its current environment. A backend retaining `JNINativeMethod` metadata
+must copy it while the callback is active and preserve the Android-code
+ownership of `function`.
 
 ## ARM64 procedure-call classification
 
@@ -68,7 +72,9 @@ identical and independently digest-checked against the NDK header.
 
 The ELF exports a real `JNI_OnLoad`. Its no-argument runner obtains the proxy
 `JavaVM` through its sole resolved import, then Android-compiled instructions
-indirectly call `GetEnv` and the five `JNIEnv` slots. The Darwin process maps and
+indirectly calls `GetEnv` and the original five `JNIEnv` slots. Native-method
+execution in the ART integration additionally exercises all five forwarding
+slots after `JNI_OnLoad`. The Darwin process maps and
 executes that ELF through the isolated ELF loader, and a fake Darwin backend
 verifies both class names, the `JNINativeMethod` tuple, and the thrown exception
 message. Disassembly gating requires the expected indirect `blr` calls, so a

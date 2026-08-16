@@ -44,6 +44,11 @@ def main() -> int:
         "GetVersion",
         "FindClass",
         "ThrowNew",
+        "DeleteLocalRef",
+        "NewStringUTF",
+        "GetStringUTFLength",
+        "GetStringUTFChars",
+        "ReleaseStringUTFChars",
         "RegisterNatives",
         "ExceptionCheck",
     ]

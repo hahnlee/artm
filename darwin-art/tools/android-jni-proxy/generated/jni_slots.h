@@ -6,6 +6,11 @@
 #define DARWIN_ART_JNI_SLOT_GetVersion 4u
 #define DARWIN_ART_JNI_SLOT_FindClass 6u
 #define DARWIN_ART_JNI_SLOT_ThrowNew 14u
+#define DARWIN_ART_JNI_SLOT_DeleteLocalRef 23u
+#define DARWIN_ART_JNI_SLOT_NewStringUTF 167u
+#define DARWIN_ART_JNI_SLOT_GetStringUTFLength 168u
+#define DARWIN_ART_JNI_SLOT_GetStringUTFChars 169u
+#define DARWIN_ART_JNI_SLOT_ReleaseStringUTFChars 170u
 #define DARWIN_ART_JNI_SLOT_RegisterNatives 215u
 #define DARWIN_ART_JNI_SLOT_ExceptionCheck 228u
 #define DARWIN_ART_JNI_INVOKE_SLOT_GetEnv 6u

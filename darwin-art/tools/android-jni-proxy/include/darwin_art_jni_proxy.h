@@ -25,6 +25,10 @@ typedef struct DarwinArtJniNativeMethod {
 
 typedef struct DarwinArtJniBackend {
   void* context;
+  /* Returns the current host JNIEnv only to proxy wrappers. The guest never
+   * receives this pointer or its function table. It may be null when the
+   * forwarding subset is intentionally unavailable. */
+  void* (*current_env)(void* context);
   void* (*find_class)(void* context, const char* name);
   /* methods[].function points to Android ELF code. The backend must retain its
    * Android ABI ownership and route later calls through a signature-audited

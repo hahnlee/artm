@@ -688,6 +688,8 @@ bool DescriptorToShorty(const char* descriptor, std::string* shorty) {
   return true;
 }
 
+void* ProxyCurrentEnv(void*) { return CurrentArtEnv(); }
+
 void* ProxyFindClass(void* context, const char* name) {
   auto* library = static_cast<ElfLibrary*>(context);
   JNIEnv* art_env = CurrentArtEnv();
@@ -1169,8 +1171,8 @@ void* OpenNativeLibrary(JNIEnv* env,
     if (library->fixture_graph) {
       g_elf_fixture_namespace_lifecycle.store(3, std::memory_order_relaxed);
     }
-    DarwinArtJniBackend backend{library.get(), &ProxyFindClass, &ProxyRegisterNatives,
-                                &ProxyThrowNew};
+    DarwinArtJniBackend backend{library.get(), &ProxyCurrentEnv, &ProxyFindClass,
+                                &ProxyRegisterNatives, &ProxyThrowNew};
     library->proxy = darwin_art_jni_proxy_init(
         library->proxy_storage.data(), library->proxy_storage.size(), &backend);
     if (library->proxy == nullptr ||

@@ -13,6 +13,11 @@ typedef int32_t (*RegisterNativesFunction)(void*, void*,
                                            int32_t);
 typedef int32_t (*ThrowNewFunction)(void*, void*, const char*);
 typedef uint8_t (*ExceptionCheckFunction)(void*);
+typedef void (*DeleteLocalRefFunction)(void*, void*);
+typedef void* (*NewStringUtfFunction)(void*, const char*);
+typedef int32_t (*GetStringUtfLengthFunction)(void*, void*);
+typedef const char* (*GetStringUtfCharsFunction)(void*, void*, uint8_t*);
+typedef void (*ReleaseStringUtfCharsFunction)(void*, void*, const char*);
 
 extern void darwin_art_jni_fixture_reset(void);
 extern void* darwin_art_jni_fixture_vm(void);
@@ -45,9 +50,25 @@ int main(void) {
       (RegisterNativesFunction)native[DARWIN_ART_JNI_SLOT_RegisterNatives];
   ExceptionCheckFunction exception_check =
       (ExceptionCheckFunction)native[DARWIN_ART_JNI_SLOT_ExceptionCheck];
+  DeleteLocalRefFunction delete_local_ref =
+      (DeleteLocalRefFunction)native[DARWIN_ART_JNI_SLOT_DeleteLocalRef];
+  NewStringUtfFunction new_string_utf =
+      (NewStringUtfFunction)native[DARWIN_ART_JNI_SLOT_NewStringUTF];
+  GetStringUtfLengthFunction get_string_utf_length =
+      (GetStringUtfLengthFunction)native[DARWIN_ART_JNI_SLOT_GetStringUTFLength];
+  GetStringUtfCharsFunction get_string_utf_chars =
+      (GetStringUtfCharsFunction)native[DARWIN_ART_JNI_SLOT_GetStringUTFChars];
+  ReleaseStringUtfCharsFunction release_string_utf_chars =
+      (ReleaseStringUtfCharsFunction)
+          native[DARWIN_ART_JNI_SLOT_ReleaseStringUTFChars];
 
   CHECK(get_version(env) == DARWIN_ART_JNI_VERSION_1_6);
   CHECK(exception_check(env) == 0);
+  CHECK(new_string_utf(env, "unavailable") == NULL);
+  CHECK(get_string_utf_length(env, (void*)(uintptr_t)1) == 0);
+  CHECK(get_string_utf_chars(env, (void*)(uintptr_t)1, NULL) == NULL);
+  release_string_utf_chars(env, (void*)(uintptr_t)1, "ignored");
+  delete_local_ref(env, (void*)(uintptr_t)1);
   void* bridge = find_class(env, "fixture/Bridge");
   CHECK(bridge != NULL);
   const DarwinArtJniNativeMethod method = {

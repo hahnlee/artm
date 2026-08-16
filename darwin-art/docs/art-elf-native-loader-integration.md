@@ -66,8 +66,12 @@ handle and the raw dyld handle.
 ART looks up `JNI_OnLoad` through `NativeBridgeGetTrampoline2`. The fixed
 lifecycle trampoline substitutes the closed proxy `JavaVM*`; the Android image
 never sees ART's real function tables. The bounded proxy implements
-`GetEnv`, `FindClass`, `RegisterNatives`, and `ThrowNew`. Backend calls use
-the current ART thread's `JNIEnv`; no synchronous-load pointer is retained.
+`GetEnv`, `FindClass`, `RegisterNatives`, `ThrowNew`, and a five-operation
+modified-UTF-8/local-reference subset (`NewStringUTF`, `GetStringUTFLength`,
+`GetStringUTFChars`, `ReleaseStringUTFChars`, and `DeleteLocalRef`). Each
+forwarded operation obtains the current ART thread's `JNIEnv` for that call
+only; no synchronous-load pointer or ART function table is retained or exposed
+to guest code.
 
 The RegisterNatives backend now accepts one table of up to 32 static regular-JNI
 methods per graph. It parses arbitrary scalar/reference descriptors into
@@ -75,7 +79,10 @@ Z/B/C/S/I/J/F/D/L/V shorties, verifies every declared Java method, and rejects
 a second table, instance methods, CriticalNative, aggregates/HFA, and
 unreviewed varargs. The generic graph proves this path independently by
 registering and calling a one-method `(IJI)J` table before the hash-identified
-eight-method fixture replaces it. Ordinary named-JNI lookup remains rejected.
+eight-method fixture replaces it. That generic method creates and reads a Java
+string through the proxy after `JNI_OnLoad`, proving the registered native body
+can use the bounded forwarding subset. Ordinary named-JNI lookup remains
+rejected.
 The backend creates
 one cache-owned executable page while writable, emits the cached thunks, flushes
 the instruction cache, changes the page to read/execute, and publishes its

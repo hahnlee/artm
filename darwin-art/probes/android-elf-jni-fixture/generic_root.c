@@ -11,7 +11,21 @@ __attribute__((constructor)) static void GenericGraphInitialize(void) {
 
 static jlong GenericNativeAdd(JNIEnv *env, jclass type, jint left, jlong middle,
                               jint right) {
-  return env != 0 && type != 0 ? (jlong)left + middle + (jlong)right : -1;
+  static const char expected[] = "generic-proxy";
+  if (env == 0 || type == 0) return -1;
+  jstring string = (*env)->NewStringUTF(env, expected);
+  jboolean is_copy = JNI_FALSE;
+  const char *bytes =
+      string == 0 ? 0 : (*env)->GetStringUTFChars(env, string, &is_copy);
+  int valid = string != 0 && bytes != 0 &&
+              (*env)->GetStringUTFLength(env, string) ==
+                  (jsize)(sizeof(expected) - 1);
+  for (size_t index = 0; valid && index < sizeof(expected); ++index) {
+    valid = bytes[index] == expected[index];
+  }
+  if (bytes != 0) (*env)->ReleaseStringUTFChars(env, string, bytes);
+  if (string != 0) (*env)->DeleteLocalRef(env, string);
+  return valid ? (jlong)left + middle + (jlong)right : -1;
 }
 
 __attribute__((visibility("default"))) jint JNI_OnLoad(JavaVM *vm,

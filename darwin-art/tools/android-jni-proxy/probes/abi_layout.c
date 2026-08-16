@@ -17,6 +17,17 @@ _Static_assert(offsetof(struct JNINativeInterface, FindClass) == 6 * 8,
                "FindClass slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, ThrowNew) == 14 * 8,
                "ThrowNew slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, DeleteLocalRef) == 23 * 8,
+               "DeleteLocalRef slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, NewStringUTF) == 167 * 8,
+               "NewStringUTF slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, GetStringUTFLength) == 168 * 8,
+               "GetStringUTFLength slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, GetStringUTFChars) == 169 * 8,
+               "GetStringUTFChars slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, ReleaseStringUTFChars) ==
+                   170 * 8,
+               "ReleaseStringUTFChars slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, RegisterNatives) == 215 * 8,
                "RegisterNatives slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, ExceptionCheck) == 228 * 8,
