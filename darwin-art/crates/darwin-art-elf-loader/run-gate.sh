@@ -150,8 +150,12 @@ grep -E 'R_AARCH64_JUMP_SLOT.*provider_value' "$fixture_dir/lazy.readelf.txt" >/
 ! grep -E '\(BIND_NOW\)|FLAGS.*NOW' "$fixture_dir/lazy.readelf.txt" >/dev/null
 "$readelf" -l "$fixture_dir/relro.so" > "$fixture_dir/relro.readelf.txt"
 grep -E 'GNU_RELRO' "$fixture_dir/relro.readelf.txt" >/dev/null
-"$readelf" -l "$fixture_dir/tls.so" > "$fixture_dir/tls.readelf.txt"
+"$readelf" -l -r --dyn-syms "$fixture_dir/tls.so" > "$fixture_dir/tls.readelf.txt"
 grep -E '^  TLS ' "$fixture_dir/tls.readelf.txt" >/dev/null
+[[ "$(grep -c 'R_AARCH64_TLSDESC' "$fixture_dir/tls.readelf.txt")" == 3 ]]
+! grep -E 'R_AARCH64_TLS_(DTPMOD|DTPREL|TPREL)' "$fixture_dir/tls.readelf.txt" >/dev/null
+grep -E 'TLS +GLOBAL +PROTECTED.*fixture_tls_state$' "$fixture_dir/tls.readelf.txt" >/dev/null
+grep -E 'GLOBAL +DEFAULT.*fixture_tls_exchange$' "$fixture_dir/tls.readelf.txt" >/dev/null
 "$readelf" -d -r "$fixture_dir/finalizer.so" > "$fixture_dir/finalizer.readelf.txt"
 grep -E '\(FINI\).*0x[0-9a-f]+' "$fixture_dir/finalizer.readelf.txt" >/dev/null
 grep -E 'FINI_ARRAYSZ.*16 \(bytes\)' "$fixture_dir/finalizer.readelf.txt" >/dev/null

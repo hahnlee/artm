@@ -1,3 +1,5 @@
+use std::alloc::{Layout, alloc_zeroed, dealloc, handle_alloc_error};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::error::Error as StdError;
 use std::ffi::{c_int, c_void};
@@ -5,7 +7,8 @@ use std::fmt;
 use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::ptr::{self, NonNull};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 mod ffi;
 mod namespace;
@@ -176,6 +179,7 @@ const R_AARCH64_ABS64: u32 = 257;
 const R_AARCH64_GLOB_DAT: u32 = 1025;
 const R_AARCH64_JUMP_SLOT: u32 = 1026;
 const R_AARCH64_RELATIVE: u32 = 1027;
+const R_AARCH64_TLSDESC: u32 = 1031;
 const DF_BIND_NOW: u64 = 0x8;
 const DF_1_NOW: u64 = 0x1;
 const SHN_UNDEF: u16 = 0;
@@ -201,6 +205,291 @@ const PROT_EXEC: c_int = 4;
 const MAP_PRIVATE: c_int = 0x0002;
 const MAP_ANON: c_int = 0x1000;
 const MAX_IMAGE_SIZE: usize = 1024 * 1024 * 1024;
+const MAX_TLS_SIZE: usize = 64 * 1024 * 1024;
+const MAX_TLS_ALIGNMENT: usize = 1024 * 1024;
+
+static NEXT_TLS_MODULE_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_TLS_DESCRIPTOR_TOKEN: AtomicU64 = AtomicU64::new(1);
+static TLS_DESCRIPTOR_REGISTRY: OnceLock<Mutex<HashMap<u64, Arc<TlsDescriptorContext>>>> =
+    OnceLock::new();
+
+thread_local! {
+    static GUEST_TLS_BLOCKS: RefCell<HashMap<u64, ThreadTlsAllocation>> =
+        RefCell::new(HashMap::new());
+}
+
+#[repr(C)]
+struct TlsDescriptor {
+    resolver: usize,
+    token: u64,
+}
+
+struct TlsDescriptorContext {
+    module: Arc<TlsModule>,
+    offset: usize,
+    descriptor_address: usize,
+}
+
+struct TlsModule {
+    id: u64,
+    memory_size: usize,
+    alignment: usize,
+    template: Mutex<Vec<u8>>,
+    lifecycle: Mutex<TlsLifecycle>,
+}
+
+#[derive(Default)]
+struct TlsLifecycle {
+    accepting: bool,
+    active_threads: usize,
+}
+
+struct ThreadTlsAllocation {
+    module: Arc<TlsModule>,
+    pointer: NonNull<u8>,
+    layout: Layout,
+}
+
+impl ThreadTlsAllocation {
+    fn new(module: Arc<TlsModule>) -> Self {
+        {
+            let mut lifecycle = module
+                .lifecycle
+                .lock()
+                .unwrap_or_else(|_| std::process::abort());
+            if !lifecycle.accepting {
+                std::process::abort();
+            }
+            lifecycle.active_threads = lifecycle
+                .active_threads
+                .checked_add(1)
+                .unwrap_or_else(|| std::process::abort());
+        }
+        let layout = Layout::from_size_align(module.memory_size, module.alignment)
+            .unwrap_or_else(|_| std::process::abort());
+        // SAFETY: the validated nonzero layout is retained for the matching deallocation.
+        let raw = unsafe { alloc_zeroed(layout) };
+        let pointer = NonNull::new(raw).unwrap_or_else(|| handle_alloc_error(layout));
+        let template = module
+            .template
+            .lock()
+            .unwrap_or_else(|_| std::process::abort());
+        // SAFETY: the template is bounded by memory_size and both regions are live/nonoverlapping.
+        unsafe { ptr::copy_nonoverlapping(template.as_ptr(), pointer.as_ptr(), template.len()) };
+        drop(template);
+        Self {
+            module,
+            pointer,
+            layout,
+        }
+    }
+}
+
+impl Drop for ThreadTlsAllocation {
+    fn drop(&mut self) {
+        // SAFETY: this allocation uniquely owns pointer with the original layout.
+        unsafe { dealloc(self.pointer.as_ptr(), self.layout) };
+        let mut lifecycle = self
+            .module
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|_| std::process::abort());
+        lifecycle.active_threads = lifecycle
+            .active_threads
+            .checked_sub(1)
+            .unwrap_or_else(|| std::process::abort());
+    }
+}
+
+impl TlsModule {
+    fn new(header: ProgramHeader, bytes: &[u8]) -> Result<Arc<Self>, LoadError> {
+        let memory_size = to_usize(header.memory_size, "PT_TLS memory size")?;
+        let alignment = to_usize(header.alignment, "PT_TLS alignment")?;
+        let template = checked_slice(
+            bytes,
+            to_usize(header.offset, "PT_TLS file offset")?,
+            to_usize(header.file_size, "PT_TLS file size")?,
+            "PT_TLS file range",
+        )?
+        .to_vec();
+        let id = NEXT_TLS_MODULE_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| LoadError::Bounds("TLS module identifier exhausted"))?;
+        Ok(Arc::new(Self {
+            id,
+            memory_size,
+            alignment,
+            template: Mutex::new(template),
+            lifecycle: Mutex::new(TlsLifecycle {
+                accepting: true,
+                active_threads: 0,
+            }),
+        }))
+    }
+
+    fn seal_for_unload(&self) -> Result<(), LoadError> {
+        let mut lifecycle = self
+            .lifecycle
+            .lock()
+            .map_err(|_| LoadError::Protection("poisoned TLS lifecycle"))?;
+        lifecycle.accepting = false;
+        if lifecycle.active_threads != 0 {
+            return Err(LoadError::TlsInUse {
+                active_threads: lifecycle.active_threads,
+            });
+        }
+        Ok(())
+    }
+}
+
+fn release_current_thread_tls(module_id: u64) {
+    let removed = GUEST_TLS_BLOCKS.try_with(|blocks| {
+        blocks
+            .try_borrow_mut()
+            .unwrap_or_else(|_| std::process::abort())
+            .remove(&module_id)
+    });
+    if removed.is_err() {
+        std::process::abort();
+    }
+}
+
+fn tls_descriptor_registry() -> &'static Mutex<HashMap<u64, Arc<TlsDescriptorContext>>> {
+    TLS_DESCRIPTOR_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn register_tls_descriptor(context: TlsDescriptorContext) -> Result<u64, LoadError> {
+    let token = NEXT_TLS_DESCRIPTOR_TOKEN
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .map_err(|_| LoadError::Bounds("TLS descriptor token exhausted"))?;
+    let previous = tls_descriptor_registry()
+        .lock()
+        .map_err(|_| LoadError::Protection("poisoned TLS descriptor registry"))?
+        .insert(token, Arc::new(context));
+    if previous.is_some() {
+        std::process::abort();
+    }
+    Ok(token)
+}
+
+fn unregister_tls_descriptors(tokens: &[u64]) {
+    let mut registry = tls_descriptor_registry()
+        .lock()
+        .unwrap_or_else(|_| std::process::abort());
+    for token in tokens {
+        if registry.remove(token).is_none() {
+            std::process::abort();
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+core::arch::global_asm!(
+    r#"
+    .text
+    .p2align 2
+    .globl _darwin_art_tlsdesc_resolver
+_darwin_art_tlsdesc_resolver:
+    sub sp, sp, #672
+    stp x2, x3, [sp, #0]
+    stp x4, x5, [sp, #16]
+    stp x6, x7, [sp, #32]
+    stp x8, x9, [sp, #48]
+    stp x10, x11, [sp, #64]
+    stp x12, x13, [sp, #80]
+    stp x14, x15, [sp, #96]
+    stp x16, x17, [sp, #112]
+    stp x18, x30, [sp, #128]
+    stp q0, q1, [sp, #144]
+    stp q2, q3, [sp, #176]
+    stp q4, q5, [sp, #208]
+    stp q6, q7, [sp, #240]
+    stp q8, q9, [sp, #272]
+    stp q10, q11, [sp, #304]
+    stp q12, q13, [sp, #336]
+    stp q14, q15, [sp, #368]
+    stp q16, q17, [sp, #400]
+    stp q18, q19, [sp, #432]
+    stp q20, q21, [sp, #464]
+    stp q22, q23, [sp, #496]
+    stp q24, q25, [sp, #528]
+    stp q26, q27, [sp, #560]
+    stp q28, q29, [sp, #592]
+    stp q30, q31, [sp, #624]
+    mov x1, x0
+    ldr x0, [x0, #8]
+    bl _darwin_art_tlsdesc_resolve_impl
+    ldp q0, q1, [sp, #144]
+    ldp q2, q3, [sp, #176]
+    ldp q4, q5, [sp, #208]
+    ldp q6, q7, [sp, #240]
+    ldp q8, q9, [sp, #272]
+    ldp q10, q11, [sp, #304]
+    ldp q12, q13, [sp, #336]
+    ldp q14, q15, [sp, #368]
+    ldp q16, q17, [sp, #400]
+    ldp q18, q19, [sp, #432]
+    ldp q20, q21, [sp, #464]
+    ldp q22, q23, [sp, #496]
+    ldp q24, q25, [sp, #528]
+    ldp q26, q27, [sp, #560]
+    ldp q28, q29, [sp, #592]
+    ldp q30, q31, [sp, #624]
+    ldp x18, x30, [sp, #128]
+    ldp x16, x17, [sp, #112]
+    ldp x14, x15, [sp, #96]
+    ldp x12, x13, [sp, #80]
+    ldp x10, x11, [sp, #64]
+    ldp x8, x9, [sp, #48]
+    ldp x6, x7, [sp, #32]
+    ldp x4, x5, [sp, #16]
+    ldp x2, x3, [sp, #0]
+    add sp, sp, #672
+    ret
+"#
+);
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" {
+    fn darwin_art_tlsdesc_resolver(descriptor: *const TlsDescriptor) -> isize;
+}
+
+#[cfg(target_arch = "aarch64")]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn darwin_art_tlsdesc_resolve_impl(
+    token: u64,
+    descriptor_address: usize,
+) -> isize {
+    let context = tls_descriptor_registry()
+        .lock()
+        .unwrap_or_else(|_| std::process::abort())
+        .get(&token)
+        .cloned()
+        .unwrap_or_else(|| std::process::abort());
+    if context.descriptor_address != descriptor_address {
+        std::process::abort();
+    }
+    let storage = GUEST_TLS_BLOCKS
+        .try_with(|blocks| {
+            let mut blocks = blocks
+                .try_borrow_mut()
+                .unwrap_or_else(|_| std::process::abort());
+            let allocation = blocks
+                .entry(context.module.id)
+                .or_insert_with(|| ThreadTlsAllocation::new(context.module.clone()));
+            // SAFETY: the relocation validated offset inside this allocation.
+            unsafe { allocation.pointer.as_ptr().add(context.offset) as usize }
+        })
+        .unwrap_or_else(|_| std::process::abort());
+    let thread_pointer: usize;
+    // SAFETY: reading TPIDR_EL0 is side-effect free and does not expose or replace Darwin TLS.
+    unsafe { core::arch::asm!("mrs {value}, TPIDR_EL0", value = out(reg) thread_pointer) };
+    storage.wrapping_sub(thread_pointer) as isize
+}
 
 unsafe extern "C" {
     fn getpagesize() -> c_int;
@@ -337,6 +626,9 @@ pub enum LoadError {
     InvalidSymbol(String),
     InitializersAlreadyRun,
     InitializersNotRun,
+    TlsInUse {
+        active_threads: usize,
+    },
     System {
         operation: &'static str,
         code: i32,
@@ -373,6 +665,10 @@ impl fmt::Display for LoadError {
             Self::InvalidSymbol(name) => write!(formatter, "invalid dynamic symbol: {name}"),
             Self::InitializersAlreadyRun => write!(formatter, "DT_INIT_ARRAY already executed"),
             Self::InitializersNotRun => write!(formatter, "DT_INIT_ARRAY has not executed"),
+            Self::TlsInUse { active_threads } => write!(
+                formatter,
+                "ELF TLS module still has {active_threads} live thread allocation(s)"
+            ),
             Self::System { operation, code } => {
                 write!(formatter, "{operation} failed with errno {code}")
             }
@@ -429,6 +725,7 @@ struct DynamicInfo {
 struct ParsedImage {
     loads: Vec<ProgramHeader>,
     dynamic: ProgramHeader,
+    tls: Option<ProgramHeader>,
     minimum_page: u64,
     image_size: usize,
     page_size: usize,
@@ -448,6 +745,9 @@ pub struct LoadedElf {
     finalizers_run: bool,
     finalizers: Vec<usize>,
     dso_lifecycle: Option<Arc<dyn DsoLifecycle>>,
+    tls_header: Option<ProgramHeader>,
+    tls_module: Option<Arc<TlsModule>>,
+    tls_descriptor_tokens: Vec<u64>,
 }
 
 /// Per-image lifecycle boundary for Bionic `__cxa_atexit` registrations.
@@ -467,9 +767,10 @@ struct StagedElf {
     page_protections: Vec<c_int>,
 }
 
-// SAFETY: LoadedElf exclusively owns an mmap reservation with no thread-affine host resource.
-// TLS and lazy binding are rejected, resolver callbacks are not retained, and mutation is
-// restricted to &mut self. C consumers additionally serialize the value behind a Mutex.
+// SAFETY: LoadedElf exclusively owns an mmap reservation. Guest TLS allocations retain their
+// synchronized module owner and teardown aborts rather than unmapping code with live threads.
+// Resolver callbacks are not retained and mutation is restricted to &mut self. C consumers
+// additionally serialize the value behind a Mutex.
 unsafe impl Send for LoadedElf {}
 
 #[derive(Default)]
@@ -542,6 +843,10 @@ impl LoadedElf {
 
         let dynamic = parse_dynamic(bytes, &parsed.dynamic)?;
         validate_dynamic_capabilities(&dynamic)?;
+        let tls_module = parsed
+            .tls
+            .map(|header| TlsModule::new(header, bytes))
+            .transpose()?;
 
         let mut loaded = Self {
             mapping: mapping.pointer,
@@ -556,6 +861,9 @@ impl LoadedElf {
             finalizers_run: false,
             finalizers: Vec::new(),
             dso_lifecycle: None,
+            tls_header: parsed.tls,
+            tls_module,
+            tls_descriptor_tokens: Vec::new(),
         };
         std::mem::forget(mapping);
 
@@ -574,6 +882,7 @@ impl LoadedElf {
         page_protections: &[c_int],
     ) -> Result<(), LoadError> {
         self.validate_symbols_and_apply_relocations(resolver)?;
+        self.refresh_tls_template()?;
         self.validate_initializer_entries()?;
         self.prepare_finalizers()?;
         self.apply_final_protections(page_size, page_protections)
@@ -781,7 +1090,12 @@ impl LoadedElf {
         for index in 1..symbol_count {
             let symbol = self.dynamic_symbol(index)?;
             if symbol.kind == STT_TLS {
-                return Err(LoadError::Capability(Capability::Tls));
+                if symbol.section_index == SHN_UNDEF {
+                    // Cross-module TLS needs graph-wide module indexing. This bounded slice owns
+                    // only definitions in this image and deliberately fails imported TLS closed.
+                    return Err(LoadError::Capability(Capability::Tls));
+                }
+                self.validate_defined_tls_symbol(&symbol)?;
             }
         }
 
@@ -885,6 +1199,16 @@ impl LoadedElf {
                     symbol: symbol_index,
                 }));
             }
+            if relocation_type == R_AARCH64_TLSDESC {
+                if plt_only {
+                    return Err(LoadError::Capability(Capability::UnsupportedRelocation {
+                        relocation_type,
+                        symbol: symbol_index,
+                    }));
+                }
+                self.apply_tlsdesc_relocation(offset, symbol_index, symbol_count, addend)?;
+                continue;
+            }
             self.require_loaded_range(offset, 8, Some(PF_W), "RELA target")?;
             let value = match relocation_type {
                 R_AARCH64_RELATIVE if symbol_index == 0 => self.load_bias_add(addend)?,
@@ -914,6 +1238,99 @@ impl LoadedElf {
             // SAFETY: require_loaded_range proves an aligned-size writable destination.
             unsafe { ptr::write_unaligned(destination.cast::<usize>(), value) };
         }
+        Ok(())
+    }
+
+    fn validate_defined_tls_symbol(&self, symbol: &DynamicSymbol) -> Result<(), LoadError> {
+        let module = self
+            .tls_module
+            .as_ref()
+            .ok_or(LoadError::Format("STT_TLS definition without PT_TLS"))?;
+        let start = usize::try_from(symbol.value)
+            .map_err(|_| LoadError::Bounds("STT_TLS symbol offset"))?;
+        let size = usize::try_from(symbol.size.max(1))
+            .map_err(|_| LoadError::Bounds("STT_TLS symbol size"))?;
+        if start
+            .checked_add(size)
+            .is_none_or(|end| end > module.memory_size)
+        {
+            return Err(LoadError::Bounds("STT_TLS symbol outside PT_TLS"));
+        }
+        Ok(())
+    }
+
+    fn apply_tlsdesc_relocation(
+        &mut self,
+        target: u64,
+        symbol_index: u32,
+        symbol_count: u32,
+        addend: i64,
+    ) -> Result<(), LoadError> {
+        if target % 8 != 0 {
+            return Err(LoadError::Format("unaligned R_AARCH64_TLSDESC target"));
+        }
+        self.require_loaded_range(target, 16, Some(PF_W), "R_AARCH64_TLSDESC target")?;
+        let module = self
+            .tls_module
+            .as_ref()
+            .cloned()
+            .ok_or(LoadError::Format("R_AARCH64_TLSDESC without PT_TLS"))?;
+        let base = if symbol_index == 0 {
+            0_i128
+        } else {
+            if symbol_index >= symbol_count {
+                return Err(LoadError::Bounds("TLS relocation symbol index"));
+            }
+            let symbol = self.dynamic_symbol(symbol_index)?;
+            if symbol.kind != STT_TLS
+                || symbol.section_index == SHN_UNDEF
+                || symbol.section_index == SHN_ABS
+            {
+                return Err(LoadError::InvalidSymbol(format!(
+                    "dynsym[{symbol_index}] is not a local TLS definition"
+                )));
+            }
+            self.validate_defined_tls_symbol(&symbol)?;
+            i128::from(symbol.value)
+        };
+        let offset = base
+            .checked_add(i128::from(addend))
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or(LoadError::Bounds("R_AARCH64_TLSDESC offset overflow"))?;
+        if offset >= module.memory_size {
+            return Err(LoadError::Bounds("R_AARCH64_TLSDESC outside PT_TLS"));
+        }
+        let destination = self.loaded_pointer(target, 16)?.cast::<TlsDescriptor>();
+        let token = register_tls_descriptor(TlsDescriptorContext {
+            module,
+            offset,
+            descriptor_address: destination as usize,
+        })?;
+        let descriptor = TlsDescriptor {
+            resolver: darwin_art_tlsdesc_resolver as usize,
+            token,
+        };
+        // SAFETY: target is a validated writable pair of 8-byte GOT entries. The second word is
+        // an opaque integer; Rust resolves it only through the checked process registry.
+        unsafe { ptr::write_unaligned(destination, descriptor) };
+        self.tls_descriptor_tokens.push(token);
+        Ok(())
+    }
+
+    fn refresh_tls_template(&self) -> Result<(), LoadError> {
+        let (Some(header), Some(module)) = (self.tls_header, self.tls_module.as_ref()) else {
+            return Ok(());
+        };
+        let template = self.loaded_slice(
+            header.virtual_address,
+            to_usize(header.file_size, "PT_TLS file size")?,
+        )?;
+        let mut owned = module
+            .template
+            .lock()
+            .map_err(|_| LoadError::Protection("poisoned TLS template"))?;
+        owned.clear();
+        owned.extend_from_slice(template);
         Ok(())
     }
 
@@ -1467,13 +1884,22 @@ impl LoadedElf {
 
 impl Drop for LoadedElf {
     fn drop(&mut self) {
-        if let Some(lifecycle) = self.dso_lifecycle.take() {
-            if lifecycle.finalize_image(self.mapping_range()).is_err() {
-                // Continuing could unmap code that still owns live callbacks.
+        if let Some(lifecycle) = self.dso_lifecycle.take()
+            && lifecycle.finalize_image(self.mapping_range()).is_err()
+        {
+            // Continuing could unmap code that still owns live callbacks.
+            std::process::abort();
+        }
+        self.run_finalizers_once();
+        unregister_tls_descriptors(&self.tls_descriptor_tokens);
+        if let Some(module) = &self.tls_module {
+            // Guest finalizers may touch this image's TLS. Release the unloading thread's block
+            // synchronously, then seal allocation. Any other live thread makes unmapping unsafe.
+            release_current_thread_tls(module.id);
+            if module.seal_for_unload().is_err() {
                 std::process::abort();
             }
         }
-        self.run_finalizers_once();
         // SAFETY: LoadedElf exclusively owns this complete mmap reservation.
         let result = unsafe { munmap(self.mapping.as_ptr().cast(), self.mapping_size) };
         debug_assert_eq!(result, 0, "munmap failed while dropping LoadedElf");
@@ -1601,6 +2027,7 @@ fn parse_image_with_policy(bytes: &[u8], metadata_only: bool) -> Result<ParsedIm
     let mut loads = Vec::new();
     let mut dynamic = None;
     let mut relro = None;
+    let mut tls = None;
     for index in 0..program_count {
         let offset = program_offset + index * ELF64_PHDR_SIZE;
         let header = ProgramHeader {
@@ -1622,7 +2049,11 @@ fn parse_image_with_policy(bytes: &[u8], metadata_only: bool) -> Result<ParsedIm
                     return Err(LoadError::Format("multiple PT_DYNAMIC segments"));
                 }
             }
-            PT_TLS if !metadata_only => return Err(LoadError::Capability(Capability::Tls)),
+            PT_TLS => {
+                if tls.replace(header).is_some() {
+                    return Err(LoadError::Format("multiple PT_TLS segments"));
+                }
+            }
             PT_GNU_RELRO if !metadata_only => {
                 if relro.replace(header).is_some() {
                     return Err(LoadError::Format("multiple PT_GNU_RELRO segments"));
@@ -1643,6 +2074,10 @@ fn parse_image_with_policy(bytes: &[u8], metadata_only: bool) -> Result<ParsedIm
         if previous_end > pair[1].virtual_address {
             return Err(LoadError::Format("overlapping PT_LOAD memory ranges"));
         }
+    }
+
+    if let Some(header) = tls {
+        validate_tls_segment(bytes, &header, &loads)?;
     }
 
     let dynamic = dynamic.ok_or(LoadError::Format("missing PT_DYNAMIC"))?;
@@ -1742,6 +2177,7 @@ fn parse_image_with_policy(bytes: &[u8], metadata_only: bool) -> Result<ParsedIm
     Ok(ParsedImage {
         loads,
         dynamic,
+        tls,
         minimum_page: minimum,
         image_size,
         page_size,
@@ -1774,6 +2210,66 @@ fn validate_load(bytes: &[u8], load: &ProgramHeader) -> Result<(), LoadError> {
     load.virtual_address
         .checked_add(load.memory_size)
         .ok_or(LoadError::Bounds("PT_LOAD virtual range overflow"))?;
+    Ok(())
+}
+
+fn validate_tls_segment(
+    bytes: &[u8],
+    tls: &ProgramHeader,
+    loads: &[ProgramHeader],
+) -> Result<(), LoadError> {
+    if tls.memory_size == 0 || tls.file_size > tls.memory_size {
+        return Err(LoadError::Format("invalid PT_TLS size"));
+    }
+    if tls.memory_size > MAX_TLS_SIZE as u64 {
+        return Err(LoadError::Bounds("PT_TLS memory size cap"));
+    }
+    if tls.flags != PF_R {
+        return Err(LoadError::Format("PT_TLS must be read-only metadata"));
+    }
+    if tls.alignment == 0
+        || !tls.alignment.is_power_of_two()
+        || tls.alignment > MAX_TLS_ALIGNMENT as u64
+        || tls.offset % tls.alignment != tls.virtual_address % tls.alignment
+    {
+        return Err(LoadError::Format("invalid PT_TLS alignment"));
+    }
+    checked_slice(
+        bytes,
+        to_usize(tls.offset, "PT_TLS file offset")?,
+        to_usize(tls.file_size, "PT_TLS file size")?,
+        "PT_TLS file range",
+    )?;
+    let memory_end = tls
+        .virtual_address
+        .checked_add(tls.memory_size)
+        .ok_or(LoadError::Bounds("PT_TLS memory range overflow"))?;
+    let file_end = tls
+        .virtual_address
+        .checked_add(tls.file_size)
+        .ok_or(LoadError::Bounds("PT_TLS file range overflow"))?;
+    let containing = loads.iter().find(|load| {
+        load.virtual_address <= tls.virtual_address
+            && load
+                .virtual_address
+                .checked_add(load.memory_size)
+                .is_some_and(|load_end| memory_end <= load_end)
+    });
+    let Some(load) = containing else {
+        return Err(LoadError::Bounds("PT_TLS is not inside PT_LOAD"));
+    };
+    let file_delta = tls
+        .offset
+        .checked_sub(load.offset)
+        .ok_or(LoadError::Bounds("PT_TLS file mapping"))?;
+    let virtual_delta = tls
+        .virtual_address
+        .checked_sub(load.virtual_address)
+        .ok_or(LoadError::Bounds("PT_TLS virtual mapping"))?;
+    if file_delta != virtual_delta || file_end > load.virtual_address.saturating_add(load.file_size)
+    {
+        return Err(LoadError::Format("PT_TLS file/virtual mapping mismatch"));
+    }
     Ok(())
 }
 

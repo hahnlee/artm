@@ -7,10 +7,12 @@ use std::fs;
 use std::num::NonZeroUsize;
 use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Barrier, Mutex, mpsc};
+use std::thread;
 
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
+const PT_TLS: u32 = 7;
 const PT_GNU_EH_FRAME: u32 = 0x6474_e550;
 const PT_GNU_RELRO: u32 = 0x6474_e552;
 const PF_X: u32 = 1;
@@ -18,11 +20,15 @@ const PF_W: u32 = 2;
 const DT_NULL: i64 = 0;
 const DT_NEEDED: i64 = 1;
 const DT_STRTAB: i64 = 5;
+const DT_RELA: i64 = 7;
+const DT_RELASZ: i64 = 8;
 const DT_FINI: i64 = 13;
 const DT_FINI_ARRAYSZ: i64 = 28;
 const DT_VERNEED: i64 = 0x6fff_fffe;
 const DT_GNU_HASH: i64 = 0x6fff_fef5;
 const DT_AARCH64_BTI_PLT: i64 = 0x7000_0001;
+const R_AARCH64_TLS_TPREL64: u32 = 1030;
+const R_AARCH64_TLSDESC: u32 = 1031;
 const PROVIDER_SONAME: &str = "libdarwin_art_provider.so";
 const PROVIDER_VERSION: &str = "DARWIN_ART_1";
 const LIFECYCLE_SONAME: &str = "liblifecycle_sink.so";
@@ -51,6 +57,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = image.call_exported_i32("relro_write_attempt")?;
         return Err("PT_GNU_RELRO page remained writable".into());
     }
+    if arguments
+        .get(1)
+        .is_some_and(|argument| argument == "--tls-live-unload-child")
+    {
+        let path = arguments.get(2).ok_or("missing TLS child fixture")?;
+        let bytes = fs::read(path)?;
+        let mut image = LoadedElf::load(&bytes)?;
+        image.run_initializers()?;
+        let exchange = image.lookup_exported("fixture_tls_exchange")?;
+        let (ready_tx, ready_rx) = mpsc::sync_channel(0);
+        let parked = Arc::new(Barrier::new(2));
+        let worker_parked = parked.clone();
+        let worker = thread::spawn(move || {
+            // SAFETY: the fixture export has the audited int(int) ABI and image is retained by
+            // the parent until this call has returned and its TLS allocation is live.
+            let function: unsafe extern "C" fn(i32) -> i32 =
+                unsafe { std::mem::transmute(exchange) };
+            if unsafe { function(91) } != 7000 {
+                std::process::abort();
+            }
+            ready_tx.send(()).unwrap();
+            worker_parked.wait();
+        });
+        ready_rx.recv()?;
+        drop(image);
+        parked.wait();
+        worker.join().unwrap();
+        return Err("TLS image unloaded with a live thread".into());
+    }
+    if arguments
+        .get(1)
+        .is_some_and(|argument| argument == "--tls-forged-descriptor-child")
+    {
+        let path = arguments.get(2).ok_or("missing forged TLS child fixture")?;
+        let bytes = fs::read(path)?;
+        let mut image = LoadedElf::load(&bytes)?;
+        image.run_initializers()?;
+        let descriptor_export = image.lookup_exported("fixture_tls_descriptor")?;
+        // SAFETY: this trusted fixture export has the audited void*() ABI.
+        let descriptor_fn: unsafe extern "C" fn() -> *const usize =
+            unsafe { std::mem::transmute(descriptor_export) };
+        let descriptor = unsafe { descriptor_fn() };
+        if descriptor.is_null() {
+            return Err("TLS fixture returned a null descriptor".into());
+        }
+        // SAFETY: the trusted fixture returns its live, mapped two-word GOT descriptor.
+        let resolver = unsafe { descriptor.read_unaligned() };
+        let token = unsafe { descriptor.add(1).read_unaligned() };
+        let forged = [resolver, token];
+        // SAFETY: the first word is the installed resolver. Passing a copied descriptor must
+        // fail-stop at the exact registered-address check before any TLS state is returned.
+        let resolver_fn: unsafe extern "C" fn(*const usize) -> isize =
+            unsafe { std::mem::transmute(resolver) };
+        let _ = unsafe { resolver_fn(forged.as_ptr()) };
+        return Err("forged TLS descriptor address was accepted".into());
+    }
     if arguments.len() != 9 {
         return Err(
             "usage: elf-loader-gate POSITIVE.so IMPORT.so WEAK.so LAZY.so RELRO.so TLS.so FINALIZER.so LIBCXX.so".into(),
@@ -73,14 +135,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         matches!(capability, Capability::LazyBinding)
     })?;
     run_relro(&relro, &arguments[5])?;
-    expect_capability(&tls, |capability| matches!(capability, Capability::Tls))?;
+    run_tls(&tls, &arguments[6])?;
     run_malformed_matrix(&positive)?;
     run_finalizer_lifecycle(&finalizer)?;
     run_aarch64_bti_plt(&libcxx)?;
 
     println!(
         "elf-loader-gate: positive=constructor-order import=ABS64+GLOB_DAT+JUMP_SLOT \
-         resolver=closed+versioned weak=zero NOW=required RELRO=read-only TLS=reject \
+         resolver=closed+versioned weak=zero NOW=required RELRO=read-only \
+         TLS=TLSDESC+per-thread-template+quiescent-unload \
          wx=reject overflow=reject overlap=reject bounds=reject \
          finalizers=array-reverse+DT_FINI exactly-once cleanup=drop \
          DT_AARCH64_BTI_PLT=zero-presence real-libcxx=relocated-without-init"
@@ -239,6 +302,128 @@ fn run_relro_malformed_matrix(bytes: &[u8]) -> Result<(), Box<dyn std::error::Er
     duplicate[eh_frame..eh_frame + 4].copy_from_slice(&PT_GNU_RELRO.to_le_bytes());
     expect_rejected(&duplicate, "duplicate PT_GNU_RELRO")?;
     Ok(())
+}
+
+fn run_tls(bytes: &[u8], fixture_path: &std::ffi::OsStr) -> Result<(), Box<dyn std::error::Error>> {
+    let mut image = LoadedElf::load(bytes)?;
+    image.run_initializers()?;
+    let exchange = image.lookup_exported("fixture_tls_exchange")?;
+    let alignment = image.lookup_exported("fixture_tls_alignment")?;
+    let rendezvous = Arc::new(Barrier::new(5));
+    let mut workers = Vec::new();
+    for value in [11_i32, 22, 33, 44] {
+        let rendezvous = rendezvous.clone();
+        workers.push(thread::spawn(move || -> Result<(), String> {
+            // SAFETY: both addresses are audited fixture exports with the stated AAPCS64 ABI;
+            // the image remains mapped until every worker is joined below.
+            let exchange_fn: unsafe extern "C" fn(i32) -> i32 =
+                unsafe { std::mem::transmute(exchange) };
+            let alignment_fn: unsafe extern "C" fn() -> i32 =
+                unsafe { std::mem::transmute(alignment) };
+            let initial = unsafe { exchange_fn(value) };
+            rendezvous.wait();
+            let retained = unsafe { exchange_fn(value + 1) };
+            let aligned = unsafe { alignment_fn() };
+            if initial != 7000 || retained != value * 1000 + value || aligned != 0 {
+                return Err(format!(
+                    "thread TLS mismatch value={value} initial={initial} retained={retained} aligned={aligned}"
+                ));
+            }
+            Ok(())
+        }));
+    }
+    rendezvous.wait();
+    for worker in workers {
+        worker.join().map_err(|_| "TLS worker panicked")??;
+    }
+    // Joining destroys each Darwin pthread's host TLS map. Drop therefore also proves that the
+    // guest allocations released their module ownership before unmapping the image.
+    drop(image);
+
+    let status = Command::new(env::current_exe()?)
+        .arg("--tls-live-unload-child")
+        .arg(fixture_path)
+        .status()?;
+    if status.signal().is_none() {
+        return Err(format!("live-thread TLS unload did not fail closed: {status}").into());
+    }
+    let status = Command::new(env::current_exe()?)
+        .arg("--tls-forged-descriptor-child")
+        .arg(fixture_path)
+        .status()?;
+    if status.signal().is_none() {
+        return Err(format!("forged TLS descriptor did not fail closed: {status}").into());
+    }
+    run_tls_malformed_matrix(bytes)?;
+    Ok(())
+}
+
+fn run_tls_malformed_matrix(bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let tls = *load_program_headers(bytes, Some(PT_TLS))?
+        .first()
+        .ok_or("TLS fixture has no PT_TLS")?;
+
+    let mut filesz_exceeds_memsz = bytes.to_vec();
+    let memory_size = read_u64(bytes, tls + 40)?;
+    filesz_exceeds_memsz[tls + 32..tls + 40]
+        .copy_from_slice(&memory_size.saturating_add(1).to_le_bytes());
+    expect_rejected(&filesz_exceeds_memsz, "PT_TLS filesz exceeds memsz")?;
+
+    let mut bad_alignment = bytes.to_vec();
+    bad_alignment[tls + 48..tls + 56].copy_from_slice(&3_u64.to_le_bytes());
+    expect_rejected(&bad_alignment, "PT_TLS non-power-of-two alignment")?;
+
+    let mut outside_load = bytes.to_vec();
+    outside_load[tls + 16..tls + 24].copy_from_slice(&0x4000_0000_u64.to_le_bytes());
+    expect_rejected(&outside_load, "PT_TLS outside PT_LOAD")?;
+
+    let mut duplicate = bytes.to_vec();
+    let eh_frame = *load_program_headers(bytes, Some(PT_GNU_EH_FRAME))?
+        .first()
+        .ok_or("TLS fixture has no PT_GNU_EH_FRAME")?;
+    duplicate[eh_frame..eh_frame + 4].copy_from_slice(&PT_TLS.to_le_bytes());
+    expect_rejected(&duplicate, "duplicate PT_TLS")?;
+
+    let relocation = first_relocation(bytes, R_AARCH64_TLSDESC)?;
+    let mut outside_tls = bytes.to_vec();
+    outside_tls[relocation + 16..relocation + 24].copy_from_slice(&memory_size.to_le_bytes());
+    expect_rejected(&outside_tls, "TLSDESC offset outside PT_TLS")?;
+
+    let mut unaligned_target = bytes.to_vec();
+    let target = read_u64(bytes, relocation)?;
+    unaligned_target[relocation..relocation + 8]
+        .copy_from_slice(&target.saturating_add(1).to_le_bytes());
+    expect_rejected(&unaligned_target, "unaligned TLSDESC target")?;
+
+    let mut unsupported_model = bytes.to_vec();
+    let info = read_u64(bytes, relocation + 8)?;
+    let changed = (info & !u64::from(u32::MAX)) | u64::from(R_AARCH64_TLS_TPREL64);
+    unsupported_model[relocation + 8..relocation + 16].copy_from_slice(&changed.to_le_bytes());
+    expect_capability(&unsupported_model, |capability| {
+        matches!(
+            capability,
+            Capability::UnsupportedRelocation {
+                relocation_type: R_AARCH64_TLS_TPREL64,
+                ..
+            }
+        )
+    })?;
+    Ok(())
+}
+
+fn first_relocation(
+    bytes: &[u8],
+    requested_type: u32,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let address = dynamic_tag_value(bytes, DT_RELA)?;
+    let size = usize::try_from(dynamic_tag_value(bytes, DT_RELASZ)?)?;
+    let file = virtual_to_file(bytes, address, size)?;
+    for entry in (file..file.checked_add(size).ok_or("RELA file range overflow")?).step_by(24) {
+        if read_u64(bytes, entry + 8)? as u32 == requested_type {
+            return Ok(entry);
+        }
+    }
+    Err(format!("relocation type {requested_type} missing").into())
 }
 
 unsafe extern "C" fn lifecycle_record(value: i32) {

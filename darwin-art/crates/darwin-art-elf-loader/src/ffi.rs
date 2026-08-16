@@ -215,9 +215,9 @@ fn load_error_status(error: &LoadError) -> DarwinArtElfStatus {
         LoadError::UnresolvedSymbol { .. } => DarwinArtElfStatus::UnresolvedSymbol,
         LoadError::SymbolNotFound(_) => DarwinArtElfStatus::SymbolNotFound,
         LoadError::InvalidSymbol(_) => DarwinArtElfStatus::InvalidSymbol,
-        LoadError::InitializersAlreadyRun | LoadError::InitializersNotRun => {
-            DarwinArtElfStatus::Lifecycle
-        }
+        LoadError::InitializersAlreadyRun
+        | LoadError::InitializersNotRun
+        | LoadError::TlsInUse { .. } => DarwinArtElfStatus::Lifecycle,
         LoadError::System { .. } => DarwinArtElfStatus::System,
     }
 }
