@@ -23,11 +23,11 @@ DEX that is added to the same `PathClassLoader`. The generated APK is
 `_build/android-apk-app-runtime/simple-no-native.apk`. The integration target
 is to pass that exact APK to ART's DEX loader, instantiate the manifest launcher
 through the APK `PathClassLoader`, execute `Activity.onCreate`, attach a real
-`PhoneWindow`/`DecorView`, and present its 640x360 frame in the Darwin host
+`PhoneWindow`/`DecorView`, and present its 360x640 frame in the Darwin host
 window.
 
 The acceptance resolves all seven tagged children back to their exact Android
-framework widget types and requires a fully opaque, visually diverse 640x360
+framework widget types and requires a fully opaque, visually diverse 360x640
 frame. It therefore does not accept custom `View` stand-ins, app-painted
 rectangles, or a blank opaque frame. Because this is a detached single-frame
 host, state animators are advanced to their current state; Choreographer-driven
@@ -40,10 +40,10 @@ programmatic-UI subset with:
 ./tools/run-android-apk-app.sh path/to/app.apk 30
 ```
 
-The interactive runner renders a 1280x720 Android surface into a 640x360
+The interactive runner renders a 720x1280 Android surface into a 360x640
 logical macOS window with a 2x `CAMetalLayer` backing scale. Framework density
 is set to 320 dpi for that mode, so widget size is unchanged while Retina
-sharpness is preserved. Headless acceptance remains 640x360 for stable,
+sharpness is preserved. Headless acceptance remains 360x640 for stable,
 low-cost regression captures.
 
 The runner never extracts or rewrites the APK. It rejects APKs containing

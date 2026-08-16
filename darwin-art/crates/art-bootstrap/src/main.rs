@@ -4844,8 +4844,8 @@ fn probe_runtime_dex_flavor(
     let output = command_output(&mut command)?;
     let expected = if apk_app {
         let render_scale = if show_window { 2 } else { 1 };
-        let frame_width = 640 * render_scale;
-        let frame_height = 360 * render_scale;
+        let frame_width = 360 * render_scale;
+        let frame_height = 640 * render_scale;
         let pixel_count = frame_width * frame_height;
         format!(
             "Hello from Darwin ART main: 안녕\n\

@@ -119,9 +119,9 @@ cargo run -q -p art-bootstrap -- probe-runtime-apk-app-window
 ./tools/run-android-apk-app.sh path/to/app.apk 30
 ```
 
-The interactive runner uses a 1280x720 Android render target, 320 dpi framework
-metrics, and a 2x Retina-backed 640x360 macOS window. Headless acceptance keeps
-the deterministic 640x360 surface.
+The interactive runner uses a 720x1280 Android render target, 320 dpi framework
+metrics, and a 2x Retina-backed 360x640 macOS window. Headless acceptance keeps
+the deterministic 360x640 portrait surface.
 
 The pinned APK loads Android 16's real `framework-res.apk`, applies its built-in
 Holo Light theme, and creates real `TextView`, `CheckBox`, `RadioButton`,

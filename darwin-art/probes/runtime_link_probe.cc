@@ -988,6 +988,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
               std::strcmp(window_scale_value, "2") == 0
           ? 2
           : 1;
+  constexpr jint kApkFrameWidth = 360;
+  constexpr jint kApkFrameHeight = 640;
   const bool expect_apk_widgets =
       run_apk_app &&
       std::getenv("DARWIN_ART_APK_APP_EXPECT_WIDGETS") != nullptr &&
@@ -1858,8 +1860,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
               !env->IsSameObject(attached_decor, decor_view) ||
               env->ExceptionCheck()
           ? JNI_FALSE
-          : PresentContent(env, nullptr, attached_decor, 640 * window_scale,
-                           360 * window_scale);
+          : PresentContent(env, nullptr, attached_decor,
+                           kApkFrameWidth * window_scale,
+                           kApkFrameHeight * window_scale);
   jmethodID was_presented =
       run_apk_app
           ? nullptr
@@ -1875,8 +1878,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                  ? JNI_FALSE
                  : env->CallBooleanMethod(probe_view, was_presented));
   if (view_presented != JNI_TRUE ||
-      g_frame_width != static_cast<std::size_t>(640 * window_scale) ||
-      g_frame_height != static_cast<std::size_t>(360 * window_scale) ||
+      g_frame_width !=
+          static_cast<std::size_t>(kApkFrameWidth * window_scale) ||
+      g_frame_height !=
+          static_cast<std::size_t>(kApkFrameHeight * window_scale) ||
       env->ExceptionCheck()) {
     std::cerr << "ART Android view: Activity content presentation failed\n";
     if (self->IsExceptionPending()) {

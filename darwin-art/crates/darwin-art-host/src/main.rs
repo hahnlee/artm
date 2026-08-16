@@ -99,8 +99,8 @@ fn main_result() -> Result<(), Box<dyn Error>> {
             Ok("1") | Err(_) => 1,
             Ok(_) => return Err("DARWIN_ART_WINDOW_SCALE must be 1 or 2".into()),
         };
-        let expected_width = 640 * render_scale;
-        let expected_height = 360 * render_scale;
+        let expected_width = 360 * render_scale;
+        let expected_height = 640 * render_scale;
         let frame = outcome
             .last_frame
             .as_ref()
