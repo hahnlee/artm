@@ -29,11 +29,13 @@ rm -rf "$build"
 mkdir -p "$classes" "$dex"
 javac --release 8 -encoding UTF-8 \
   -classpath "$android_jar:$root/_build/dex-probe/classes" \
-  -d "$classes" "$module/fixture/MainActivity.java"
+  -d "$classes" \
+  "$module/fixture/FontBootstrap.java" \
+  "$module/fixture/MainActivity.java"
 
 app_classes=(
+  "$classes/dev/darwinart/simple/FontBootstrap.class"
   "$classes/dev/darwinart/simple/MainActivity.class"
-  "$classes/dev/darwinart/simple/MainActivity\$AppView.class"
 )
 "$d8" --lib "$android_jar" --output "$dex" "${app_classes[@]}"
 
@@ -49,7 +51,7 @@ entries="$(unzip -Z1 "$apk")"
 [[ "$(grep -c '^classes\.dex$' <<<"$entries")" == 1 ]]
 ! grep -Eq '(^|/)classes[2-9][0-9]*\.dex$|\.so$' <<<"$entries"
 dex_summary="$($root/_build/dex-probe/dex-probe "$dex/classes.dex")"
-expected_dex='AOSP DEX: verified=yes version=35 classes=2 methods=16 class[0]=Ldev/darwinart/simple/MainActivity$AppView; class[1]=Ldev/darwinart/simple/MainActivity;'
+expected_dex='AOSP DEX: verified=yes version=35 classes=2 methods=15 class[0]=Ldev/darwinart/simple/FontBootstrap; class[1]=Ldev/darwinart/simple/MainActivity;'
 [[ "$dex_summary" == "$expected_dex" ]]
 
 expected='apk-app-runtime: package=dev.darwinart.simple activity=dev.darwinart.simple.MainActivity descriptor=Ldev/darwinart/simple/MainActivity; dex=primary native=0'

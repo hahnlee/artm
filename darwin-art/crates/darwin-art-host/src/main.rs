@@ -98,30 +98,29 @@ fn main_result() -> Result<(), Box<dyn Error>> {
             .last_frame
             .as_ref()
             .ok_or("APK Activity did not produce a host frame")?;
-        let required_colors = [
-            0xff0f_172a_u32,
-            0xfff8_fafc,
-            0xff3d_dc84,
-            0xff33_4155,
-            0xff94_a3b8,
-            0xff25_63eb,
-        ];
         let all_opaque = frame
             .argb_pixels
             .iter()
             .all(|pixel| pixel & 0xff00_0000 == 0xff00_0000);
-        if frame.width != 640
-            || frame.height != 360
-            || outcome.frames_presented != 1
-            || !all_opaque
-            || required_colors
-                .iter()
-                .any(|color| !frame.argb_pixels.contains(color))
+        if frame.width != 640 || frame.height != 360 || outcome.frames_presented != 1 || !all_opaque
         {
-            return Err("APK Activity frame did not match its six-color opaque contract".into());
+            return Err("APK Activity frame did not match its opaque frame contract".into());
         }
+        let widget = if env::var("DARWIN_ART_APK_APP_EXPECT_BUTTON").as_deref() == Ok("1") {
+            let has_background = frame.argb_pixels.contains(&0xff0f_172a);
+            let has_button = frame.argb_pixels.contains(&0xff25_63eb);
+            let has_text = frame.argb_pixels.contains(&0xffff_ffff);
+            if !has_background || !has_button || !has_text {
+                return Err(
+                    "Android Button frame is missing its background, button, or text pixels".into(),
+                );
+            }
+            " widget=android.widget.Button colors=background+button+text"
+        } else {
+            ""
+        };
         println!(
-            "ART Android APK: package={package} launcher={activity} classes.dex=APK native=0 pixels=230400/opaque colors=6"
+            "ART Android APK: package={package} launcher={activity} classes.dex=APK native=0 pixels=230400/opaque{widget}"
         );
     } else {
         println!(

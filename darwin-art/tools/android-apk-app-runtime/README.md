@@ -6,8 +6,8 @@ declared in binary `AndroidManifest.xml`, whose code lives in the APK's single
 
 The bounded inspector rejects ZIP64, encryption, duplicate or unsafe paths,
 secondary DEX files, malformed binary XML, ambiguous launchers, and any native
-library. The fixture uses a programmatic Android `View`, so no app resource
-inflation is required for the first screen vertical slice.
+library. The fixture programmatically creates a real `android.widget.Button`,
+so no app resource inflation is required for the first widget vertical slice.
 
 Run:
 
@@ -15,14 +15,19 @@ Run:
 ./tools/android-apk-app-runtime/audit.sh
 ```
 
-The generated APK contains only the fixture's `MainActivity` and nested
-programmatic `AppView`; Darwin bootstrap helpers remain in a separate support
+The generated APK contains only the fixture's `MainActivity` and its
+`SystemFonts` bootstrap; Darwin runtime helpers remain in a separate support
 DEX that is added to the same `PathClassLoader`. The generated APK is
 `_build/android-apk-app-runtime/simple-no-native.apk`. The integration target
 is to pass that exact APK to ART's DEX loader, instantiate the manifest launcher
 through the APK `PathClassLoader`, execute `Activity.onCreate`, attach a real
 `PhoneWindow`/`DecorView`, and present its 640x360 frame in the Darwin host
 window.
+
+The acceptance resolves the child view back to an actual
+`android.widget.Button` instance and requires the captured frame to contain the
+exact dark background, blue rounded-button, and white Roboto text colors. It
+therefore does not accept a custom `View` stand-in or a blank opaque frame.
 
 After the graphics runtime has been built, run any APK in the current bounded
 programmatic-UI subset with:

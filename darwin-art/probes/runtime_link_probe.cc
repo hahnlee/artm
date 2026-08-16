@@ -973,6 +973,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::strlen(apk_app_descriptor) >= 3u &&
       std::strlen(apk_app_descriptor) <= 513u &&
       apk_app_descriptor[std::strlen(apk_app_descriptor) - 1u] == ';';
+  const bool expect_apk_button =
+      run_apk_app &&
+      std::getenv("DARWIN_ART_APK_APP_EXPECT_BUTTON") != nullptr &&
+      std::strcmp(std::getenv("DARWIN_ART_APK_APP_EXPECT_BUTTON"), "1") == 0;
   if (has_apk_app_environment && !run_apk_app) {
     std::cerr << "ART Android APK app environment is incomplete or invalid\n";
     return 48;
@@ -1731,6 +1735,34 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? nullptr
           : env->CallObjectMethod(content_root, get_child_at,
                                   static_cast<jint>(0));
+  jclass expected_button_class =
+      expect_apk_button ? env->FindClass("android/widget/Button") : nullptr;
+  jobject expected_button = nullptr;
+  if (expect_apk_button && expected_button_class != nullptr &&
+      probe_view != nullptr) {
+    if (env->IsInstanceOf(probe_view, expected_button_class)) {
+      expected_button = env->NewLocalRef(probe_view);
+    } else {
+      jclass view_group_class = env->FindClass("android/view/ViewGroup");
+      jmethodID child_at =
+          view_group_class == nullptr
+              ? nullptr
+              : env->GetMethodID(view_group_class, "getChildAt",
+                                 "(I)Landroid/view/View;");
+      if (view_group_class != nullptr && child_at != nullptr &&
+          env->IsInstanceOf(probe_view, view_group_class)) {
+        expected_button = env->CallObjectMethod(probe_view, child_at, 0);
+      }
+      env->DeleteLocalRef(view_group_class);
+    }
+  }
+  if (expect_apk_button &&
+      (expected_button_class == nullptr || expected_button == nullptr ||
+       !env->IsInstanceOf(expected_button, expected_button_class) ||
+       env->ExceptionCheck())) {
+    std::cerr << "ART Android APK: content child is not android.widget.Button\n";
+    return 33;
+  }
   const jboolean decor_presented =
       attached_decor == nullptr ||
               !env->IsSameObject(attached_decor, decor_view) ||
@@ -1776,6 +1808,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   env->DeleteLocalRef(window_class);
   env->DeleteLocalRef(window);
   env->DeleteLocalRef(probe_view);
+  env->DeleteLocalRef(expected_button);
+  env->DeleteLocalRef(expected_button_class);
   env->DeleteLocalRef(configuration);
   env->DeleteLocalRef(component_name);
   env->DeleteLocalRef(intent);

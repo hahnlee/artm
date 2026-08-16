@@ -4731,7 +4731,7 @@ fn probe_runtime_dex_flavor(
             .env("ANDROID_I18N_ROOT", &i18n_root)
             .env("ANDROID_DATA", &data_root)
             .env("ANDROID_TZDATA_ROOT", &tzdata_root);
-        if button {
+        if button || apk_app {
             let fonts_xml = root.join("probes/button/fonts.xml");
             let roboto = root.join("_aosp/external/skia/resources/fonts/Roboto-Regular.ttf");
             for input in [&fonts_xml, &roboto] {
@@ -4758,7 +4758,8 @@ fn probe_runtime_dex_flavor(
             .env(
                 "DARWIN_ART_APK_APP_SUPPORT_DEX",
                 root.join("_build/dex-probe/dex/classes.dex"),
-            );
+            )
+            .env("DARWIN_ART_APK_APP_EXPECT_BUTTON", "1");
     }
     let mut network_fixture = None;
     if network {
@@ -4830,7 +4831,7 @@ fn probe_runtime_dex_flavor(
          ART Darwin DEX interpreter: Hello.answer()=42\n\
          ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
          ART runtime native: System.arraycopy()=42\n\
-         ART Android APK: package=dev.darwinart.simple launcher=dev.darwinart.simple.MainActivity classes.dex=APK native=0 pixels=230400/opaque colors=6\n\
+         ART Android APK: package=dev.darwinart.simple launcher=dev.darwinart.simple.MainActivity classes.dex=APK native=0 pixels=230400/opaque widget=android.widget.Button colors=background+button+text\n\
          ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
          ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
          ART Android lifecycle: Activity.onCreate()=43\n\

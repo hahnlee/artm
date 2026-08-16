@@ -119,8 +119,13 @@ cargo run -q -p art-bootstrap -- probe-runtime-apk-app-window
 ./tools/run-android-apk-app.sh path/to/app.apk 30
 ```
 
-The current Activity scene is deliberately small: `ProbeView.onDraw()` creates
-a normal Android `Paint` and issues `Canvas.drawColor()`/`drawRect()` calls.
+The pinned APK creates a real `android.widget.Button` (not a custom `View`
+stand-in). The acceptance checks the widget's runtime type and the rendered
+background, rounded-button, and Roboto text pixels produced through Android's
+SystemFonts/Minikin/HarfBuzz/Skia path.
+
+The lower-level graphics probe remains deliberately small: `ProbeView.onDraw()`
+creates a normal Android `Paint` and issues `Canvas.drawColor()`/`drawRect()` calls.
 Android's upstream Paint JNI and HWUI `SkiaCanvas` rasterize those primitives
 into a real mutable `Bitmap`; upstream `Bitmap.getPixels()` exports the result. The C callback
 borrows that frame only while ART is runnable; Rust makes one tightly packed
