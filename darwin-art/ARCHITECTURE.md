@@ -404,9 +404,12 @@ exactly once after successful initialization, and a recursive graph finalizes
 dependents before dependencies when its last owner closes.
 
 The virtual DSO namespace is closed: unknown SONAMEs, symbols, and GNU versions
-cannot fall back to Darwin globals. Loader-owned `libdl` has its first five
-public APIs, while all 18 API-35 `liblog` exports resolve to and execute the
-pinned AOSP Darwin liblog implementation. Bionic libc has an exact 160-import
+cannot fall back to Darwin globals. A standalone owner executes the first five
+guest `libdl` APIs with same-handle refcounts, TLS `dlerror`, and constructor/
+finalizer ordering, but production still lacks dynamic sibling insertion and a
+lease that survives use of a `dlsym` result. All 18 API-35 `liblog` exports
+resolve to and execute the pinned AOSP Darwin liblog implementation. Bionic
+libc has an exact 160-import
 `libc++_shared.so` census, 11 state-free leaf functions, four allocator
 entrypoints with an explicit Android errno result seam, and four bit-exact
 libm leaf functions. Bionic errno is pthread-local and host-isolated. The
@@ -440,8 +443,10 @@ models generation-tagged tokens over refcounted open-file descriptions: offset
 and status flags are shared across dup references, `FD_CLOEXEC` is per
 descriptor, owner close runs after the last descriptor and active lease, and a
 bounded level-triggered epoll gate covers ADD/MOD/DEL socket readiness.
-Exact-target `dup2`/`dup3`, SCM_RIGHTS, blocking/edge/oneshot epoll, and typed
-leased socket-control remain fail-closed.
+ABI v3 additionally leases 13 typed socket operations and atomically publishes
+or rolls back an accepted child without exposing an owner object. Exact-target
+`dup2`/`dup3`, SCM_RIGHTS, blocking/edge/oneshot epoll, and production adapter
+composition remain fail-closed.
 
 The Bionic DSO lifecycle provider owns destructor registration independently
 of Darwin's C++ runtime. It preserves each function/argument/DSO triple,

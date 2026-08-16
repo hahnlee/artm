@@ -196,9 +196,9 @@ FD integration remain explicit work. A standalone Bionic socket facade already
 translates 20 TCP/UDP/poll/message APIs with virtual descriptors, but it is not
 yet installed in the production namespace. The central descriptor broker now
 passes generation-safe OFD sharing, dup allocation, per-descriptor CLOEXEC,
-last-close, and bounded epoll ADD/MOD/DEL acceptance; exact-target `dup3`, typed
-socket-control leases, and production provider composition remain open. A
-bounded local-definition AArch64
+last-close, bounded epoll ADD/MOD/DEL, and 13 typed leased socket operations
+including atomic accept publication/rollback. Exact-target `dup3` and production
+provider composition remain open. A bounded local-definition AArch64
 `TLSDESC` path is implemented:
 it allocates aligned guest blocks per Darwin thread, preserves `TPIDR_EL0`, and
 fails stop rather than unmapping an image used by another live thread.

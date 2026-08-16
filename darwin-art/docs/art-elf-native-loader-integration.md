@@ -171,8 +171,13 @@ it becomes the next action and the dispatcher is restored at the front.
 10. Class-loader namespace caching, broader JNI proxy coverage, CriticalNative,
     and production network/central-FD semantics: incomplete. The JNI proxy now
     executes 19 bounded JNIEnv entries plus JavaVM `GetEnv`. A standalone
-    20-entry socket facade and an OFD/epoll central-broker gate are accepted but
-    not yet atomically composed with the filesystem descriptor owner.
+    20-entry socket facade and an OFD/epoll broker with 13 typed socket leases
+    are accepted but not yet atomically composed with the filesystem descriptor
+    owner.
+11. Guest `libdl`: a closed standalone owner executes `dlopen`, `dlsym`,
+    `dlclose`, `dlerror`, and `android_dlopen_ext` with refcounts and lifecycle
+    ordering. Production still needs ClassLoader-scoped dynamic sibling
+    insertion, generation handles, and a use lease for returned symbol pointers.
 
 Stage 4 explicitly repacks the two calling conventions. The fixture gate
 compiles and disassembles the same source for both targets: Android uses
