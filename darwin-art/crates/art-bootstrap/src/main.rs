@@ -4063,6 +4063,7 @@ fn probe_runtime_dex_flavor(
     if elf_jni {
         build_shell_gate(root, "build-android-elf-jni-fixture.sh")?;
         build_shell_gate(root, "build-android35-libcxx-runtime-fixtures.sh")?;
+        build_shell_gate(root, "build-android-elf-tls-runtime-fixture.sh")?;
         let fixture = root.join("_build/android-elf-jni-fixture/libdarwin-art-jni-fixture.so");
         let generic_fixture =
             root.join("_build/android-elf-jni-fixture/libdarwin-art-generic-root.so");
@@ -4072,17 +4073,22 @@ fn probe_runtime_dex_flavor(
         let libcxx_exception = root.join(
             "_build/android35-libcxx-runtime-fixtures/exception/libdarwin_art_libcxx_exception.so",
         );
+        let tls_fixture = root.join(
+            "_build/android-elf-tls-runtime-fixture/libdarwin_art_tls_runtime.so",
+        );
         if !fixture.is_file()
             || !generic_fixture.is_file()
             || !libcxx_collections.is_file()
             || !libcxx_exception.is_file()
+            || !tls_fixture.is_file()
         {
             return Err(format!(
-                "Android ELF fixture is missing: {}, {}, {}, or {}",
+                "Android ELF fixture is missing: {}, {}, {}, {}, or {}",
                 fixture.display(),
                 generic_fixture.display(),
                 libcxx_collections.display(),
-                libcxx_exception.display()
+                libcxx_exception.display(),
+                tls_fixture.display()
             )
             .into());
         }
@@ -4096,12 +4102,14 @@ fn probe_runtime_dex_flavor(
             .env(
                 "DARWIN_ART_ANDROID_LIBCXX_EXCEPTION_FIXTURE",
                 libcxx_exception,
-            );
+            )
+            .env("DARWIN_ART_ANDROID_TLS_FIXTURE", tls_fixture);
     }
     let output = command_output(&mut command)?;
     let expected = if elf_jni {
         "Hello from Darwin ART main: 안녕\n\
          ART Android libc++: real-r28c collections=189 exception-cleanup=73 unload=sequential\n\
+         ART Android ELF TLS: local-TLSDESC threads=4 align=64 unload=quiescent\n\
          ART Android ELF JNI: graph=child-first+relocated providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+swprintf+ioctl+strftime+sendfile load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
          ART Darwin Runtime::Create: ok\n\
          ART Darwin app ClassLoader: PathClassLoader\n\

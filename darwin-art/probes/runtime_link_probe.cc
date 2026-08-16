@@ -536,6 +536,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   const bool run_libcxx_acceptance =
       libcxx_collections_path != nullptr && libcxx_collections_path[0] != '\0' &&
       libcxx_exception_path != nullptr && libcxx_exception_path[0] != '\0';
+  const char* tls_fixture_path =
+      std::getenv("DARWIN_ART_ANDROID_TLS_FIXTURE");
+  const bool run_tls_acceptance =
+      tls_fixture_path != nullptr && tls_fixture_path[0] != '\0';
 
   // Darwin's malloc zones can claim the fixed compressed-reference window
   // while RuntimeArgumentMap is being assembled. Reserve ART's bounded arena
@@ -1421,6 +1425,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::cerr << "ART Android libc++ fixture paths are missing\n";
       return 43;
     }
+    if (!run_tls_acceptance) {
+      std::cerr << "ART Android TLS fixture path is missing\n";
+      return 44;
+    }
     std::string libcxx_error;
     bool collections_ok = false;
     bool exception_ok = false;
@@ -1442,6 +1450,23 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     }
     std::cout << "ART Android libc++: real-r28c collections=189 "
                  "exception-cleanup=73 unload=sequential\n"
+              << std::flush;
+    std::string tls_error;
+    bool tls_ok = false;
+    {
+      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
+      JavaVM* vm =
+          reinterpret_cast<JavaVM*>(art::Runtime::Current()->GetJavaVM());
+      tls_ok = RunAndroidElfSelfTest(env, vm, app_loader_ref, tls_fixture_path,
+                                    &tls_error);
+    }
+    if (!tls_ok || env->ExceptionCheck()) {
+      std::cerr << "ART Android ELF TLS acceptance failed: " << tls_error
+                << "\n";
+      return 44;
+    }
+    std::cout << "ART Android ELF TLS: local-TLSDESC threads=4 align=64 "
+                 "unload=quiescent\n"
               << std::flush;
     std::string generic_load_error;
     bool generic_loaded = false;
