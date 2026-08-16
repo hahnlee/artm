@@ -1,9 +1,11 @@
 #include <mach-o/dyld.h>
 #include <pthread.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <cstdlib>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -159,6 +161,46 @@ static std::size_t g_frame_height = 0;
 static jclass g_probe_canvas_class = nullptr;
 static void* g_host_context = nullptr;
 static darwin_art_frame_callback_t g_frame_callback = nullptr;
+static bool g_apk_elf_loaded = false;
+static std::string g_apk_sha256;
+static std::string g_apk_root_sha256;
+
+static bool IsSha256(const char* value) {
+  if (value == nullptr || std::strlen(value) != 64) {
+    return false;
+  }
+  for (const char* cursor = value; *cursor != '\0'; ++cursor) {
+    if (!((*cursor >= '0' && *cursor <= '9') ||
+          (*cursor >= 'a' && *cursor <= 'f'))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool IsPrivateExtractedRoot(const char* path) {
+  if (path == nullptr) {
+    return false;
+  }
+  struct stat path_stat {};
+  struct stat followed_stat {};
+  if (lstat(path, &path_stat) != 0 || stat(path, &followed_stat) != 0 ||
+      !S_ISREG(path_stat.st_mode) || path_stat.st_dev != followed_stat.st_dev ||
+      path_stat.st_ino != followed_stat.st_ino ||
+      (path_stat.st_mode & 0777) != 0400) {
+    return false;
+  }
+  const std::string root_path(path);
+  const std::size_t separator = root_path.rfind('/');
+  if (separator == std::string::npos || separator == 0) {
+    return false;
+  }
+  const std::string directory = root_path.substr(0, separator);
+  struct stat directory_stat {};
+  return lstat(directory.c_str(), &directory_stat) == 0 &&
+         S_ISDIR(directory_stat.st_mode) &&
+         (directory_stat.st_mode & 0777) == 0500;
+}
 
 enum class ProcessPhase {
   kNeverStarted,
@@ -529,6 +571,16 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::getenv("DARWIN_ART_ANDROID_ELF_GENERIC_FIXTURE");
   const bool run_generic_elf =
       generic_elf_path != nullptr && generic_elf_path[0] != '\0';
+  const char* apk_elf_path =
+      std::getenv("DARWIN_ART_ANDROID_APK_ELF_FIXTURE");
+  const char* apk_sha256 = std::getenv("DARWIN_ART_ANDROID_APK_SHA256");
+  const char* apk_root_sha256 =
+      std::getenv("DARWIN_ART_ANDROID_APK_ROOT_SHA256");
+  const bool run_apk_elf =
+      apk_elf_path != nullptr && apk_elf_path[0] != '\0' &&
+      IsSha256(apk_sha256) && IsSha256(apk_root_sha256) &&
+      IsPrivateExtractedRoot(apk_elf_path) &&
+      run_generic_elf && std::strcmp(apk_elf_path, generic_elf_path) == 0;
   const char* libcxx_collections_path =
       std::getenv("DARWIN_ART_ANDROID_LIBCXX_COLLECTIONS_FIXTURE");
   const char* libcxx_exception_path =
@@ -1421,6 +1473,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::cerr << "ART Android ELF generic graph path is missing\n";
       return 40;
     }
+    if (!run_apk_elf) {
+      std::cerr << "ART Android APK ELF extraction/hash boundary is missing\n";
+      return 45;
+    }
     if (!run_libcxx_acceptance) {
       std::cerr << "ART Android libc++ fixture paths are missing\n";
       return 43;
@@ -1481,6 +1537,13 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                 << generic_load_error << "\n";
       return 40;
     }
+    // generic_elf_path and apk_elf_path are required to be the same extracted
+    // root. The successful JavaVMExt load above is therefore the APK execution
+    // evidence; loading the same SONAME a second time would only exercise ART's
+    // path cache and acquire no additional graph ownership.
+    g_apk_elf_loaded = true;
+    g_apk_sha256 = apk_sha256;
+    g_apk_root_sha256 = apk_root_sha256;
     char* partial_error = nullptr;
     void* partial_handle = android::OpenNativeLibrary(
         env, 35, elf_fixture_path, app_loader_ref, nullptr, nullptr, nullptr,
@@ -1646,6 +1709,13 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
     std::lock_guard<std::mutex> lock(g_process_state.mutex);
     g_process_state.phase = ProcessPhase::kShutdownFailed;
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+  }
+  if (g_apk_elf_loaded) {
+    std::cout << "ART Android APK ELF: apk-sha256=" << g_apk_sha256
+              << " root-sha256=" << g_apk_root_sha256
+              << " graph=root+child+grandchild load=JavaVMExt+NativeBridge "
+                 "unload=shutdown-trampolines-zero\n"
+              << std::flush;
   }
   if (darwin_art_elf_jni_fixture_registration_status() != 0 &&
       darwin_art_elf_jni_fixture_lifecycle_status() != 1234567) {

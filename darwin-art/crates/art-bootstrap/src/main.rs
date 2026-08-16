@@ -4,7 +4,7 @@ use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Read;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -3960,6 +3960,133 @@ fn probe_runtime_elf_jni(root: &Path) -> Result<()> {
     probe_runtime_dex_flavor(root, false, false, false, true)
 }
 
+struct PrivateApkNativeFixture {
+    temporary_root: PathBuf,
+    extracted_root: PathBuf,
+    apk_sha256: String,
+    root_sha256: String,
+}
+
+impl Drop for PrivateApkNativeFixture {
+    fn drop(&mut self) {
+        let _ = fs::set_permissions(&self.extracted_root, fs::Permissions::from_mode(0o700));
+        let _ = fs::remove_dir_all(&self.temporary_root);
+    }
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn prepare_private_apk_native_fixture(root: &Path) -> Result<PrivateApkNativeFixture> {
+    let fixture_root = root.join("_build/android-elf-jni-fixture");
+    let root_soname = "libdarwin-art-generic-root.so";
+    let sonames = [
+        root_soname,
+        "libdarwin-art-generic-child.so",
+        "libdarwin-art-generic-grandchild.so",
+        "libdarwin-art-jni-fixture.so",
+        "libdarwin-art-jni-child.so",
+        "libdarwin-art-jni-grandchild.so",
+    ];
+    let temporary_base = env::temp_dir();
+    let mut temporary_root = None;
+    for attempt in 0..128_u32 {
+        let candidate = temporary_base.join(format!(
+            "darwin-art-apk-native-runtime.{}.{}",
+            std::process::id(),
+            attempt
+        ));
+        match fs::create_dir(&candidate) {
+            Ok(()) => {
+                fs::set_permissions(&candidate, fs::Permissions::from_mode(0o700))?;
+                temporary_root = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let temporary_root =
+        temporary_root.ok_or("could not allocate private APK native fixture directory")?;
+    let mut cleanup = PrivateApkNativeFixture {
+        extracted_root: temporary_root.join("extracted"),
+        temporary_root,
+        apk_sha256: String::new(),
+        root_sha256: String::new(),
+    };
+    let apk_source = cleanup.temporary_root.join("apk/lib/arm64-v8a");
+    fs::create_dir_all(&apk_source)?;
+    for soname in sonames {
+        let source = fixture_root.join(soname);
+        if !source.is_file() {
+            return Err(format!("APK native fixture is missing: {}", source.display()).into());
+        }
+        fs::copy(source, apk_source.join(soname))?;
+    }
+    let apk = cleanup.temporary_root.join("fixture.apk");
+    run_command(
+        Command::new("zip")
+            .current_dir(cleanup.temporary_root.join("apk"))
+            .args(["-q", "-9", "-X", "-r"])
+            .arg(&apk)
+            .arg("."),
+    )?;
+    cleanup.apk_sha256 = sha256_file(&apk)?;
+
+    let extractor = root.join("tools/android-apk-native-extract/Cargo.toml");
+    if !extractor.is_file() {
+        return Err(format!("APK native extractor is missing: {}", extractor.display()).into());
+    }
+    let extraction_output = command_output(
+        Command::new("cargo")
+            .args(["run", "--quiet", "--release", "--manifest-path"])
+            .arg(&extractor)
+            .arg("--")
+            .arg(&apk)
+            .arg(&cleanup.extracted_root)
+            .arg(root_soname),
+    )?;
+    if !extraction_output.starts_with("apk-native-extract: PASS files=6 stored=0 deflated=6 ")
+        || !extraction_output.contains(
+            "crc=verified mode=dir0500+file0400 publish=atomic root=libdarwin-art-generic-root.so",
+        )
+    {
+        return Err(
+            format!("unexpected APK native extraction output: {extraction_output:?}").into(),
+        );
+    }
+    if fs::metadata(&cleanup.extracted_root)?.mode() & 0o777 != 0o500 {
+        return Err("APK native extraction directory is not sealed to mode 0500".into());
+    }
+    for soname in sonames {
+        let original = fixture_root.join(soname);
+        let extracted = cleanup.extracted_root.join(soname);
+        if fs::metadata(&extracted)?.mode() & 0o777 != 0o400 {
+            return Err(format!("extracted native fixture is not mode 0400: {soname}").into());
+        }
+        let original_sha256 = sha256_file(&original)?;
+        let extracted_sha256 = sha256_file(&extracted)?;
+        if original_sha256 != extracted_sha256 {
+            return Err(format!("APK extraction changed native fixture bytes: {soname}").into());
+        }
+        if soname == root_soname {
+            cleanup.root_sha256 = extracted_sha256;
+        }
+    }
+    Ok(cleanup)
+}
+
 fn probe_runtime_graphics(root: &Path) -> Result<()> {
     probe_runtime_dex_flavor(root, false, true, false, false)
 }
@@ -4060,6 +4187,7 @@ fn probe_runtime_dex_flavor(
                 .env("DARWIN_ART_TEST_FONT", roboto);
         }
     }
+    let mut apk_native_fixture = None;
     if elf_jni {
         build_shell_gate(root, "build-android-elf-jni-fixture.sh")?;
         build_shell_gate(root, "build-android35-libcxx-runtime-fixtures.sh")?;
@@ -4073,9 +4201,8 @@ fn probe_runtime_dex_flavor(
         let libcxx_exception = root.join(
             "_build/android35-libcxx-runtime-fixtures/exception/libdarwin_art_libcxx_exception.so",
         );
-        let tls_fixture = root.join(
-            "_build/android-elf-tls-runtime-fixture/libdarwin_art_tls_runtime.so",
-        );
+        let tls_fixture =
+            root.join("_build/android-elf-tls-runtime-fixture/libdarwin_art_tls_runtime.so");
         if !fixture.is_file()
             || !generic_fixture.is_file()
             || !libcxx_collections.is_file()
@@ -4092,9 +4219,19 @@ fn probe_runtime_dex_flavor(
             )
             .into());
         }
+        let extracted = prepare_private_apk_native_fixture(root)?;
+        let extracted_root = extracted
+            .extracted_root
+            .join("libdarwin-art-generic-root.so");
+        let extracted_jni = extracted
+            .extracted_root
+            .join("libdarwin-art-jni-fixture.so");
         command
-            .env("DARWIN_ART_ANDROID_ELF_JNI_FIXTURE", fixture)
-            .env("DARWIN_ART_ANDROID_ELF_GENERIC_FIXTURE", generic_fixture)
+            .env("DARWIN_ART_ANDROID_ELF_JNI_FIXTURE", extracted_jni)
+            .env("DARWIN_ART_ANDROID_ELF_GENERIC_FIXTURE", &extracted_root)
+            .env("DARWIN_ART_ANDROID_APK_ELF_FIXTURE", extracted_root)
+            .env("DARWIN_ART_ANDROID_APK_SHA256", &extracted.apk_sha256)
+            .env("DARWIN_ART_ANDROID_APK_ROOT_SHA256", &extracted.root_sha256)
             .env(
                 "DARWIN_ART_ANDROID_LIBCXX_COLLECTIONS_FIXTURE",
                 libcxx_collections,
@@ -4104,13 +4241,19 @@ fn probe_runtime_dex_flavor(
                 libcxx_exception,
             )
             .env("DARWIN_ART_ANDROID_TLS_FIXTURE", tls_fixture);
+        apk_native_fixture = Some(extracted);
     }
     let output = command_output(&mut command)?;
     let expected = if elf_jni {
-        "Hello from Darwin ART main: 안녕\n\
+        let extracted = apk_native_fixture
+            .as_ref()
+            .expect("ELF JNI probe retains its APK extraction");
+        format!(
+            "Hello from Darwin ART main: 안녕\n\
          ART Android libc++: real-r28c collections=189 exception-cleanup=73 unload=sequential\n\
          ART Android ELF TLS: local-TLSDESC threads=4 align=64 unload=quiescent\n\
          ART Android ELF JNI: graph=child-first+relocated providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+swprintf+ioctl+strftime+sendfile load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
+         ART Android APK ELF: apk-sha256={} root-sha256={} graph=root+child+grandchild load=JavaVMExt+NativeBridge unload=shutdown-trampolines-zero\n\
          ART Darwin Runtime::Create: ok\n\
          ART Darwin app ClassLoader: PathClassLoader\n\
          ART Darwin DEX interpreter: Hello.answer()=42\n\
@@ -4120,7 +4263,9 @@ fn probe_runtime_dex_flavor(
          ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
          ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
          ART Android lifecycle: Activity.onCreate()=43\n\
-         ART Darwin launcher: main(String[])=ok"
+         ART Darwin launcher: main(String[])=ok",
+            extracted.apk_sha256, extracted.root_sha256
+        )
     } else {
         "Hello from Darwin ART main: 안녕\n\
                     ART Darwin Runtime::Create: ok\n\
@@ -4133,6 +4278,7 @@ fn probe_runtime_dex_flavor(
                     ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
                     ART Android lifecycle: Activity.onCreate()=43\n\
                     ART Darwin launcher: main(String[])=ok"
+            .to_owned()
     };
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
