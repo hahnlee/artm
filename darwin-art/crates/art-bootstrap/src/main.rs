@@ -3060,6 +3060,7 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
     objects.push(jni_proxy_object);
     for adapter_source in [
         "darwin_android_jni_trampoline.cc",
+        "darwin_android_elf_image_registry.cc",
         "darwin_framework_natives.cc",
         "darwin_icu_natives.cc",
         "darwin_icu_jni_bridge.cc",
@@ -3114,6 +3115,11 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
             adapter_command
                 .arg("-I")
                 .arg(root.join("tools/bionic-strftime-facade/include"));
+        }
+        if adapter_source == "darwin_android_elf_image_registry.cc" {
+            adapter_command
+                .arg("-I")
+                .arg(root.join("tools/android-dl-iterate-phdr-provider/include"));
         }
         adapter_command
             .arg("-idirafter")
@@ -3250,6 +3256,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         root.join("_aosp/art/libdexfile"),
         root.join("_aosp/art/libelffile"),
         root.join("_aosp/art/libprofile"),
+        root.join("_aosp/art/libnativebridge/include"),
         runtime.clone(),
         runtime.join("base"),
         runtime.join("arch/arm64"),
@@ -3610,6 +3617,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         root.join("_aosp/art/libdexfile"),
         root.join("_aosp/art/libelffile"),
         root.join("_aosp/art/libprofile"),
+        root.join("_aosp/art/libnativebridge/include"),
         runtime.clone(),
         runtime.join("base"),
         runtime.join("arch/arm64"),
@@ -4054,24 +4062,46 @@ fn probe_runtime_dex_flavor(
     }
     if elf_jni {
         build_shell_gate(root, "build-android-elf-jni-fixture.sh")?;
+        build_shell_gate(root, "build-android35-libcxx-runtime-fixtures.sh")?;
         let fixture = root.join("_build/android-elf-jni-fixture/libdarwin-art-jni-fixture.so");
         let generic_fixture =
             root.join("_build/android-elf-jni-fixture/libdarwin-art-generic-root.so");
-        if !fixture.is_file() || !generic_fixture.is_file() {
+        let libcxx_collections = root.join(
+            "_build/android35-libcxx-runtime-fixtures/collections/libdarwin_art_libcxx_consumer.so",
+        );
+        let libcxx_exception = root.join(
+            "_build/android35-libcxx-runtime-fixtures/exception/libdarwin_art_libcxx_exception.so",
+        );
+        if !fixture.is_file()
+            || !generic_fixture.is_file()
+            || !libcxx_collections.is_file()
+            || !libcxx_exception.is_file()
+        {
             return Err(format!(
-                "Android ELF JNI fixture is missing: {} or {}",
+                "Android ELF fixture is missing: {}, {}, {}, or {}",
                 fixture.display(),
-                generic_fixture.display()
+                generic_fixture.display(),
+                libcxx_collections.display(),
+                libcxx_exception.display()
             )
             .into());
         }
         command
             .env("DARWIN_ART_ANDROID_ELF_JNI_FIXTURE", fixture)
-            .env("DARWIN_ART_ANDROID_ELF_GENERIC_FIXTURE", generic_fixture);
+            .env("DARWIN_ART_ANDROID_ELF_GENERIC_FIXTURE", generic_fixture)
+            .env(
+                "DARWIN_ART_ANDROID_LIBCXX_COLLECTIONS_FIXTURE",
+                libcxx_collections,
+            )
+            .env(
+                "DARWIN_ART_ANDROID_LIBCXX_EXCEPTION_FIXTURE",
+                libcxx_exception,
+            );
     }
     let output = command_output(&mut command)?;
     let expected = if elf_jni {
         "Hello from Darwin ART main: 안녕\n\
+         ART Android libc++: real-r28c collections=189 exception-cleanup=73 unload=sequential\n\
          ART Android ELF JNI: graph=child-first+relocated providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+swprintf+ioctl+strftime+sendfile load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
          ART Darwin Runtime::Create: ok\n\
          ART Darwin app ClassLoader: PathClassLoader\n\

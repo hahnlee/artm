@@ -42,6 +42,12 @@ extern "C" int darwin_art_elf_jni_fixture_lifecycle_status();
 extern "C" int darwin_art_elf_jni_fixture_namespace_lifecycle_status();
 
 namespace android {
+enum JNICallType {
+  kJNICallTypeRegular = 1,
+};
+extern "C" void* NativeBridgeGetTrampoline2(void* handle, const char* name,
+                                             const char* shorty, uint32_t len,
+                                             JNICallType jni_call_type);
 extern "C" void* OpenNativeLibrary(JNIEnv* env, int32_t target_sdk_version,
                                     const char* path, jobject class_loader,
                                     const char* caller_location,
@@ -54,6 +60,50 @@ extern "C" void NativeLoaderFreeErrorMessage(char* message);
 }  // namespace android
 
 static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
+
+static bool RunAndroidElfSelfTest(JNIEnv* env, JavaVM* vm,
+                                  jobject class_loader, const char* path,
+                                  std::string* error) {
+  bool needs_native_bridge = false;
+  char* open_error = nullptr;
+  void* handle = android::OpenNativeLibrary(
+      env, 35, path, class_loader, nullptr, nullptr, &needs_native_bridge,
+      &open_error);
+  if (handle == nullptr || open_error != nullptr || !needs_native_bridge) {
+    *error = open_error == nullptr ? "Android ELF open failed without detail"
+                                   : open_error;
+    android::NativeLoaderFreeErrorMessage(open_error);
+    if (handle != nullptr) {
+      char* close_error = nullptr;
+      (void)android::CloseNativeLibrary(handle, needs_native_bridge,
+                                        &close_error);
+      android::NativeLoaderFreeErrorMessage(close_error);
+    }
+    return false;
+  }
+  android::NativeLoaderFreeErrorMessage(open_error);
+
+  void* entry = android::NativeBridgeGetTrampoline2(
+      handle, "JNI_OnLoad", nullptr, 0, android::kJNICallTypeRegular);
+  using JniOnLoad = jint (*)(JavaVM*, void*);
+  const jint version = entry == nullptr
+                           ? JNI_ERR
+                           : reinterpret_cast<JniOnLoad>(entry)(vm, nullptr);
+
+  char* close_error = nullptr;
+  const bool closed =
+      android::CloseNativeLibrary(handle, needs_native_bridge, &close_error);
+  if (version != JNI_VERSION_1_6 || !closed || close_error != nullptr) {
+    *error = close_error == nullptr
+                 ? "self-testing JNI_OnLoad returned " +
+                       std::to_string(static_cast<int>(version))
+                 : close_error;
+    android::NativeLoaderFreeErrorMessage(close_error);
+    return false;
+  }
+  android::NativeLoaderFreeErrorMessage(close_error);
+  return true;
+}
 
 static jlong NativePackedIntegerStack(JNIEnv*, jclass, jint a0, jint a1,
                                       jint a2, jint a3, jint a4, jint a5,
@@ -479,6 +529,13 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::getenv("DARWIN_ART_ANDROID_ELF_GENERIC_FIXTURE");
   const bool run_generic_elf =
       generic_elf_path != nullptr && generic_elf_path[0] != '\0';
+  const char* libcxx_collections_path =
+      std::getenv("DARWIN_ART_ANDROID_LIBCXX_COLLECTIONS_FIXTURE");
+  const char* libcxx_exception_path =
+      std::getenv("DARWIN_ART_ANDROID_LIBCXX_EXCEPTION_FIXTURE");
+  const bool run_libcxx_acceptance =
+      libcxx_collections_path != nullptr && libcxx_collections_path[0] != '\0' &&
+      libcxx_exception_path != nullptr && libcxx_exception_path[0] != '\0';
 
   // Darwin's malloc zones can claim the fixed compressed-reference window
   // while RuntimeArgumentMap is being assembled. Reserve ART's bounded arena
@@ -1360,6 +1417,32 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::cerr << "ART Android ELF generic graph path is missing\n";
       return 40;
     }
+    if (!run_libcxx_acceptance) {
+      std::cerr << "ART Android libc++ fixture paths are missing\n";
+      return 43;
+    }
+    std::string libcxx_error;
+    bool collections_ok = false;
+    bool exception_ok = false;
+    {
+      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
+      JavaVM* vm =
+          reinterpret_cast<JavaVM*>(art::Runtime::Current()->GetJavaVM());
+      collections_ok = RunAndroidElfSelfTest(
+          env, vm, app_loader_ref, libcxx_collections_path, &libcxx_error);
+      if (collections_ok) {
+        exception_ok = RunAndroidElfSelfTest(
+            env, vm, app_loader_ref, libcxx_exception_path, &libcxx_error);
+      }
+    }
+    if (!collections_ok || !exception_ok || env->ExceptionCheck()) {
+      std::cerr << "ART Android libc++ acceptance failed: " << libcxx_error
+                << "\n";
+      return 43;
+    }
+    std::cout << "ART Android libc++: real-r28c collections=189 "
+                 "exception-cleanup=73 unload=sequential\n"
+              << std::flush;
     std::string generic_load_error;
     bool generic_loaded = false;
     {

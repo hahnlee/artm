@@ -25,6 +25,7 @@
 #include "jni/jni_env_ext.h"
 #include "hprof/hprof.h"
 #include "darwin_android_jni_trampoline.h"
+#include "darwin_android_elf_image_registry.h"
 #include "darwin_art_elf_jni_fixture_identity.h"
 #include "darwin_art_elf_loader.h"
 #include "darwin_art_bionic_builtin_adapters.h"
@@ -393,6 +394,7 @@ struct ElfLibrary {
   DarwinArtElfGraphHandle* graph = nullptr;
   DarwinArtBionicNamespace* provider_namespace = nullptr;
   DarwinArtBionicDsoLifecycleOwner* dso_lifecycle = nullptr;
+  darwin_art_image_registry::Owner* image_registry = nullptr;
   bool filesystem_owner = false;
   bool stdio_owner = false;
   bool ioctl_owner = false;
@@ -406,8 +408,43 @@ struct ElfLibrary {
   darwin_art::android_jni::TrampolineSet* trampolines = nullptr;
 };
 
+int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
+  ElfLibrary* library = static_cast<ElfLibrary*>(context);
+  if (library == nullptr || library->dso_lifecycle == nullptr ||
+      library->image_registry == nullptr ||
+      darwin_art_image_registry::Publish(library->image_registry, start, end) !=
+          0) {
+    return -1;
+  }
+  if (darwin_art_bionic_dso_lifecycle_publish_image(
+          library->dso_lifecycle, start, end) == 0) {
+    return 0;
+  }
+  if (darwin_art_image_registry::RollbackPublish(library->image_registry, start,
+                                                  end) != 0) {
+    std::abort();
+  }
+  return -1;
+}
+
+int FinalizeRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
+  ElfLibrary* library = static_cast<ElfLibrary*>(context);
+  if (library == nullptr || library->dso_lifecycle == nullptr ||
+      library->image_registry == nullptr ||
+      darwin_art_bionic_dso_lifecycle_finalize_image(
+          library->dso_lifecycle, start, end) != 0) {
+    return -1;
+  }
+  return darwin_art_image_registry::Finalize(library->image_registry, start,
+                                              end);
+}
+
 void TeardownProviderNamespace(ElfLibrary* library) {
   if (library == nullptr) return;
+  if (library->image_registry != nullptr) {
+    darwin_art_image_registry::Destroy(library->image_registry);
+    library->image_registry = nullptr;
+  }
   if (library->dso_lifecycle != nullptr) {
     darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
     library->dso_lifecycle = nullptr;
@@ -507,6 +544,14 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
   if ((provider_soname == nullptr) != (provider_version == nullptr)) {
     SetResolverError(error, "Bionic symbol version request is incomplete");
     return DARWIN_ART_ELF_RESOLVE_ERROR;
+  }
+  if (provider_soname == nullptr &&
+      std::strcmp(request->symbol, "__cxa_thread_atexit_impl") == 0) {
+    // The pinned r28c libc++ has exactly one unversioned weak import. Bionic
+    // permits it to be absent and libc++ falls back to process-lifetime TLS
+    // destruction. Returning NOT_FOUND preserves ELF weak binding semantics;
+    // the loader still rejects a strong request for the same missing symbol.
+    return DARWIN_ART_ELF_RESOLVE_NOT_FOUND;
   }
   if (provider_soname == nullptr) {
     for (size_t index = 0; index < request->needed_library_count; ++index) {
@@ -1010,6 +1055,15 @@ void* OpenNativeLibrary(JNIEnv* env,
                            "Bionic DSO lifecycle activation failed");
       return nullptr;
     }
+    library->image_registry = darwin_art_image_registry::Create(
+        root_soname, sources, source_count, providers, std::size(providers),
+        &error);
+    if (library->image_registry == nullptr) {
+      SetNativeLoaderError(error_msg,
+                           "Android ELF image registry setup failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     library->provider_namespace = darwin_art_bionic_namespace_create();
     if (library->provider_namespace == nullptr) {
       SetNativeLoaderError(error_msg, "Bionic provider namespace allocation failed");
@@ -1074,9 +1128,9 @@ void* OpenNativeLibrary(JNIEnv* env,
         DARWIN_ART_ELF_ABI_VERSION, &ResolveRuntimeProvider, library.get()};
     DarwinArtElfLifecycleCallbacks lifecycle{
         DARWIN_ART_ELF_ABI_VERSION,
-        &darwin_art_bionic_dso_lifecycle_publish_image,
-        &darwin_art_bionic_dso_lifecycle_finalize_image,
-        library->dso_lifecycle};
+        &PublishRuntimeElfImage,
+        &FinalizeRuntimeElfImage,
+        library.get()};
     std::array<char, 1024> error_storage{};
     DarwinArtElfErrorBuffer error_buffer{error_storage.data(), error_storage.size(), 0};
     status = darwin_art_elf_graph_load_with_lifecycle(
@@ -1187,6 +1241,8 @@ bool CloseNativeLibrary(void* handle, bool needs_native_bridge, char** error_msg
     if (library->fixture_graph) {
       g_elf_fixture_namespace_lifecycle.store(4, std::memory_order_relaxed);
     }
+    darwin_art_image_registry::Destroy(library->image_registry);
+    library->image_registry = nullptr;
     darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
     library->dso_lifecycle = nullptr;
     if (library->strftime_owner) {
