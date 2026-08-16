@@ -115,6 +115,7 @@ fn run() -> Result<()> {
         "audit-graphics-closure" => build_shell_gate(&root, "audit-android16-graphics-closure.sh"),
         "probe-runtime-dex" => probe_runtime_dex(&root, false),
         "probe-runtime-elf-jni" => probe_runtime_elf_jni(&root),
+        "probe-runtime-apk-direct" => probe_runtime_apk_direct(&root),
         "probe-window" => probe_runtime_dex(&root, true),
         "probe-runtime-graphics" => probe_runtime_graphics(&root),
         "probe-runtime-graphics-window" => probe_runtime_graphics_window(&root),
@@ -204,6 +205,7 @@ fn print_help() {
     println!("  audit-graphics-closure  verify the 32-archive Android graphics closure");
     println!("  probe-runtime-dex  launch Java main(String[]) with Android stdout");
     println!("  probe-runtime-elf-jni  load a fixed Android ELF graph and JNI thunks through ART");
+    println!("  probe-runtime-apk-direct  load a page-aligned STORED APK graph without extraction");
     println!("  probe-window  display the Android View probe in a native NSWindow");
     println!("  probe-runtime-graphics  draw DecorView through Bitmap-backed AOSP Canvas");
     println!("  probe-runtime-graphics-window  display the real Android Canvas frame in NSWindow");
@@ -3958,6 +3960,388 @@ fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
 fn probe_runtime_elf_jni(root: &Path) -> Result<()> {
     build_elf_jni_dex_probe(root)?;
     probe_runtime_dex_flavor(root, false, false, false, true)
+}
+
+fn pinned_direct_apk_ndk_bin() -> Result<PathBuf> {
+    let sdk_root = env::var_os("ANDROID_SDK_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|home| home.join("Library/Android/sdk"))
+        })
+        .ok_or("ANDROID_SDK_ROOT or HOME is required to locate pinned NDK r28c")?;
+    let bin = sdk_root.join("ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin");
+    for tool in ["aarch64-linux-android35-clang", "llvm-objcopy"] {
+        if !bin.join(tool).is_file() {
+            return Err(format!(
+                "pinned NDK r28c tool is missing: {}",
+                bin.join(tool).display()
+            )
+            .into());
+        }
+    }
+    Ok(bin)
+}
+
+fn build_direct_apk_runtime_fixture(root: &Path) -> Result<PathBuf> {
+    let tool_root = root.join("tools/android-apk-native-direct-load");
+    run_command(Command::new("bash").arg(tool_root.join("audit.sh")))?;
+
+    let build_dir = root.join("_build/android-apk-native-direct-runtime");
+    let fixture_dir = build_dir.join("fixtures");
+    fs::create_dir_all(&fixture_dir)?;
+    let clang = pinned_direct_apk_ndk_bin()?.join("aarch64-linux-android35-clang");
+    let grandchild = fixture_dir.join("libapk-direct-grandchild.so");
+    let child = fixture_dir.join("libapk-direct-child.so");
+    let root_library = fixture_dir.join("libapk-direct-root.so");
+    let common = [
+        "-shared",
+        "-fPIC",
+        "-O2",
+        "-nostdlib",
+        "-fuse-ld=lld",
+        "-Wl,--hash-style=sysv",
+        "-Wl,--build-id=none",
+        "-Wl,-z,now",
+        "-Wl,-z,norelro",
+        "-Wl,-z,max-page-size=16384",
+    ];
+    run_command(
+        Command::new(&clang)
+            .args(common)
+            .arg("-Wl,-soname,libapk-direct-grandchild.so")
+            .arg(format!(
+                "-Wl,--version-script,{}",
+                tool_root.join("fixtures/grandchild.map").display()
+            ))
+            .arg(tool_root.join("fixtures/grandchild.c"))
+            .arg("-o")
+            .arg(&grandchild),
+    )?;
+    run_command(
+        Command::new(&clang)
+            .args(common)
+            .arg("-Wl,-soname,libapk-direct-child.so")
+            .arg(format!(
+                "-Wl,--version-script,{}",
+                tool_root.join("fixtures/child.map").display()
+            ))
+            .arg(tool_root.join("fixtures/child.c"))
+            .arg(&grandchild)
+            .arg("-o")
+            .arg(&child),
+    )?;
+    run_command(
+        Command::new(&clang)
+            .args(common)
+            .arg("-Wl,-soname,libapk-direct-root.so")
+            .arg(format!(
+                "-Wl,--version-script,{}",
+                tool_root.join("fixtures/root.map").display()
+            ))
+            .arg(tool_root.join("fixtures/root.c"))
+            .arg(&child)
+            .arg("-o")
+            .arg(&root_library),
+    )?;
+    for library in [&root_library, &child, &grandchild] {
+        let kind = command_output(Command::new("file").arg(library))?;
+        if !kind.contains("ELF 64-bit LSB shared object, ARM aarch64") {
+            return Err(format!("unexpected direct APK fixture format: {kind}").into());
+        }
+    }
+
+    let apk = build_dir.join("direct-runtime.apk");
+    if apk.exists() {
+        fs::set_permissions(&apk, fs::Permissions::from_mode(0o600))?;
+        fs::remove_file(&apk)?;
+    }
+    run_command(
+        Command::new("python3")
+            .arg(tool_root.join("make_fixture.py"))
+            .arg(&apk)
+            .arg("valid")
+            .arg(&root_library)
+            .arg(&child)
+            .arg(&grandchild),
+    )?;
+    if fs::metadata(&apk)?.mode() & 0o777 != 0o400 {
+        return Err("direct APK runtime fixture is not immutable mode 0400".into());
+    }
+    Ok(apk)
+}
+
+fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
+    audit_runtime_link(root)?;
+    let runtime = root.join("_aosp/art/runtime");
+    let build_dir = root.join("_build/runtime-direct-apk-link-probe");
+    let original_member_dir = build_dir.join("original-member");
+    let patched_member_dir = build_dir.join("patched-member");
+    fs::create_dir_all(&original_member_dir)?;
+    fs::create_dir_all(&patched_member_dir)?;
+    let source_archive = root.join("_build/runtime-bootstrap/libart-runtime-bootstrap-darwin.a");
+    let bootstrap = build_dir.join("libart-runtime-direct-apk-bootstrap-darwin.a");
+    fs::copy(&source_archive, &bootstrap)?;
+    let member_name = "darwin_runtime_adapters.cc.o";
+    let original_member = original_member_dir.join(member_name);
+    let patched_member = patched_member_dir.join(member_name);
+    if original_member.exists() {
+        fs::remove_file(&original_member)?;
+    }
+    if patched_member.exists() {
+        fs::remove_file(&patched_member)?;
+    }
+    run_command(
+        Command::new("ar")
+            .args(["-x"])
+            .arg(&source_archive)
+            .arg(member_name)
+            .current_dir(&original_member_dir),
+    )?;
+    let objcopy = pinned_direct_apk_ndk_bin()?.join("llvm-objcopy");
+    let renames = [
+        (
+            "_darwin_art_elf_discover_sibling_graph",
+            "_darwin_art_direct_discover_sibling_graph",
+        ),
+        (
+            "_darwin_art_elf_discovered_graph_root_soname",
+            "_darwin_art_direct_discovered_graph_root_soname",
+        ),
+        (
+            "_darwin_art_elf_discovered_graph_sources",
+            "_darwin_art_direct_discovered_graph_sources",
+        ),
+        (
+            "_darwin_art_elf_discovered_graph_destroy",
+            "_darwin_art_direct_discovered_graph_destroy",
+        ),
+    ];
+    let mut objcopy_command = Command::new(objcopy);
+    for (from, to) in renames {
+        objcopy_command.args(["--redefine-sym", &format!("{from}={to}")]);
+    }
+    run_command(objcopy_command.arg(&original_member).arg(&patched_member))?;
+    let patched_undefined = command_output(Command::new("nm").arg("-u").arg(&patched_member))?;
+    for (_, direct) in renames {
+        if !patched_undefined.contains(direct) {
+            return Err(format!("patched runtime adapter does not reference {direct}").into());
+        }
+    }
+    run_command(
+        Command::new("ar")
+            .arg("-d")
+            .arg(&bootstrap)
+            .arg(member_name),
+    )?;
+    run_command(
+        Command::new("ar")
+            .arg("-r")
+            .arg(&bootstrap)
+            .arg(&patched_member),
+    )?;
+    run_command(Command::new("ar").arg("-s").arg(&bootstrap))?;
+
+    let object = build_dir.join("darwin_art_runtime_direct_apk.cc.o");
+    let surface_object = root.join("_build/runtime-link-probe/darwin_surface_bridge.mm.o");
+    let runtime_library = build_dir.join("libdarwin_art_runtime_direct_apk.dylib");
+    let includes = [
+        root.join("include"),
+        root.join("compat"),
+        root.join("crates/darwin-art-elf-loader/include"),
+        root.join("_build/runtime-arm64/generated"),
+        root.join("_build/runtime-bootstrap/patched-source/runtime"),
+        root.join("_build/runtime-core/patched-source/runtime"),
+        root.join("_build/foundation/patched-source/libartbase"),
+        root.join("_aosp/art/libartbase"),
+        root.join("_aosp/art/cmdline"),
+        root.join("_aosp/art/libdexfile"),
+        root.join("_aosp/art/libelffile"),
+        root.join("_aosp/art/libprofile"),
+        root.join("_aosp/art/libnativebridge/include"),
+        runtime.clone(),
+        runtime.join("base"),
+        runtime.join("arch/arm64"),
+        root.join("_aosp/art/libartpalette/include"),
+        root.join("_aosp/system/libbase/include"),
+        root.join("_aosp/external/tinyxml2"),
+        root.join("_aosp/libnativehelper/include_jni"),
+        root.join("_aosp/libnativehelper/header_only_include"),
+        root.join("_aosp/libnativehelper/platform_header_only_include"),
+        root.join("_aosp/external/dlmalloc"),
+        PathBuf::from("/opt/homebrew/include"),
+    ];
+    let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+    let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
+    run_command(
+        runtime_cpp_command(&include_refs)
+            .args(["-include", "mirror/object_reference.h"])
+            .arg("-idirafter")
+            .arg(ndk_arch_include)
+            .arg("-idirafter")
+            .arg(ndk_include)
+            .arg("-Wno-macro-redefined")
+            .arg("-DDARWIN_ART_DIRECT_APK_RUNTIME")
+            .arg("-c")
+            .arg(root.join("probes/runtime_link_probe.cc"))
+            .arg("-o")
+            .arg(&object),
+    )?;
+
+    let mut linker = Command::new("clang++");
+    linker
+        .arg("-dynamiclib")
+        .arg("-Wl,-install_name,@rpath/libdarwin_art_runtime_direct_apk.dylib")
+        .arg("-Wl,-exported_symbol,_darwin_art_run_process")
+        .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_update")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_map_producer")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_unmap_producer")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_present")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
+        .arg("-Wl,-dead_strip")
+        .arg(&object)
+        .arg(&surface_object)
+        .arg(&bootstrap)
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-binary128-conversion.a"
+            )
+            .display()
+        ))
+        .arg(
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a",
+            ),
+        )
+        .arg(
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-float-conversion.a",
+            ),
+        )
+        .arg(
+            root.join(
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-rust-providers.a",
+            ),
+        )
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            root.join("_build/icu-foundation/libandroidicuinit-darwin.a")
+                .display()
+        ))
+        .arg(root.join("_build/icu-foundation/libicuuc-common-darwin.a"))
+        .arg(root.join("_build/icu-foundation/libicuuc-stubdata-darwin.a"))
+        .arg(root.join("crates/darwin-art-elf-loader/target/release/libdarwin_art_elf_loader.a"))
+        .arg(root.join("_build/interpreter-core/libart-interpreter-darwin.a"))
+        .arg(root.join("_build/runtime-arm64/libart-arm64-darwin.a"))
+        .arg(root.join("_build/runtime-core/libart-core-darwin.a"))
+        .arg(root.join("_build/runtime-platform/libart-platform-darwin.a"))
+        .arg(root.join("_build/dex-probe/libdexfile-darwin.a"))
+        .arg(root.join("_build/foundation/libartbase-darwin.a"))
+        .arg(root.join("_build/foundation/libandroid-base-darwin.a"))
+        .arg(root.join("_build/foundation/libziparchive-darwin.a"))
+        .arg(root.join("_build/nativehelper-foundation/libnativehelper_jvm.a"))
+        .arg(root.join("_build/graphics-foundations/liblog-darwin.a"))
+        .args([
+            "-L/opt/homebrew/lib",
+            "-L/opt/homebrew/opt/icu4c@78/lib",
+            "-lfmt",
+            "-llz4",
+            "-licui18n",
+            "-licuuc",
+            "-licudata",
+            "-lz",
+            "-framework",
+            "AppKit",
+            "-framework",
+            "IOSurface",
+            "-framework",
+            "Metal",
+            "-framework",
+            "QuartzCore",
+            "-framework",
+            "Security",
+            "-o",
+        ])
+        .arg(&runtime_library);
+    run_command(&mut linker)?;
+    let undefined = command_output(Command::new("nm").arg("-u").arg(&runtime_library))?;
+    if undefined.contains("darwin_art_direct_") {
+        return Err("direct APK runtime dylib has unresolved discovery shims".into());
+    }
+    let all_symbols = command_output(Command::new("nm").args(["-aC"]).arg(&runtime_library))?;
+    for required in [
+        "darwin_art_direct_discover_sibling_graph",
+        "darwin_art_direct_discovered_graph_sources",
+        "darwin_art_elf_graph_load",
+        "NativeBridgeGetTrampoline2",
+    ] {
+        if !all_symbols.contains(required) {
+            return Err(format!("direct APK runtime lacks required symbol {required}").into());
+        }
+    }
+    Ok(runtime_library)
+}
+
+fn probe_runtime_apk_direct(root: &Path) -> Result<()> {
+    let apk = build_direct_apk_runtime_fixture(root)?;
+    let runtime_library = build_runtime_direct_apk_link(root)?;
+    prepare_icu_bootclasspath(root)?;
+    build_runtime_host(root)?;
+    let executable = root.join("target/debug/darwin-art-host");
+    let core_oj = root.join("_prebuilt/android-16/bootclasspath/core-oj.jar");
+    let core_libart = root.join("_prebuilt/android-16/bootclasspath/core-libart.jar");
+    let framework = root.join("_prebuilt/android-16/bootclasspath/framework.jar");
+    let core_icu4j = root.join("_build/bootclasspath/core-icu4j.jar");
+    let classes_dex = root.join("_build/dex-probe/dex/classes.dex");
+    for input in [
+        &executable,
+        &runtime_library,
+        &core_oj,
+        &core_libart,
+        &framework,
+        &core_icu4j,
+        &classes_dex,
+        &apk,
+    ] {
+        if !input.is_file() {
+            return Err(format!("direct APK runtime input is missing: {}", input.display()).into());
+        }
+    }
+    let output = command_output(
+        Command::new(&executable)
+            .arg(&runtime_library)
+            .arg(&core_oj)
+            .arg(&core_libart)
+            .arg(&framework)
+            .arg(&core_icu4j)
+            .arg(&classes_dex)
+            .env("DARWIN_ART_DIRECT_APK_FIXTURE", &apk)
+            .env("DARWIN_ART_DIRECT_APK_ROOT", "libapk-direct-root.so"),
+    )?;
+    let expected = "Hello from Darwin ART main: 안녕\n\
+                    ART Android direct APK ELF: source=readonly-fd-slices copy=0 extract=0 alignment=16384 graph=root+child+grandchild load=JavaVMExt+NativeBridge JNI_OnLoad=0x00010006 unload=shutdown-trampolines-zero authority=isolated-process\n\
+                    ART Darwin Runtime::Create: ok\n\
+                    ART Darwin app ClassLoader: PathClassLoader\n\
+                    ART Darwin DEX interpreter: Hello.answer()=42\n\
+                    ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
+                    ART runtime native: System.arraycopy()=42\n\
+                    ART Android framework: ProbeActivity().probeValue()=42\n\
+                    ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
+                    ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
+                    ART Android lifecycle: Activity.onCreate()=43\n\
+                    ART Darwin launcher: main(String[])=ok";
+    if output.trim() != expected {
+        return Err(format!("unexpected direct APK runtime output: {output:?}").into());
+    }
+    println!(
+        "probe-runtime-apk-direct: ART JavaVMExt + NativeBridge + readonly APK fd slices PASS"
+    );
+    Ok(())
 }
 
 struct PrivateApkNativeFixture {
