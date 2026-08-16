@@ -20,7 +20,8 @@ clang="$toolchain/bin/aarch64-linux-android35-clang++"
 readelf="$toolchain/bin/llvm-readelf"
 nm="$toolchain/bin/llvm-nm"
 libcxx="$toolchain/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
-for input in "$clang" "$readelf" "$nm" "$libcxx"; do
+libc="$toolchain/sysroot/usr/lib/aarch64-linux-android/35/libc.so"
+for input in "$clang" "$readelf" "$nm" "$libcxx" "$libc"; do
   [[ -e "$input" ]] || fail "missing pinned input: $input"
 done
 
@@ -43,7 +44,7 @@ consumer="$stage/libdarwin_art_libcxx_consumer.so"
 "$clang" -shared -fPIC -O2 -fvisibility=hidden -fno-exceptions -fno-rtti \
   -nostdlib -nodefaultlibs -Wl,-soname,libdarwin_art_libcxx_consumer.so \
   -Wl,-z,now,-z,relro,--hash-style=sysv -Wl,--build-id=none \
-  "$here/consumer.cc" -Wl,--no-as-needed "$libcxx" -Wl,--as-needed \
+  "$here/consumer.cc" -Wl,--no-as-needed "$libcxx" "$libc" -Wl,--as-needed \
   -o "$consumer"
 
 [[ "$(hash_file "$consumer")" == "$CONSUMER_ELF_SHA256" ]] ||
@@ -52,10 +53,14 @@ file "$consumer" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/nul
   fail "consumer is not Android AArch64 ELF"
 
 "$readelf" -l -d -r -V --dyn-syms --wide "$consumer" > "$stage/consumer.readelf.txt"
-[[ "$(grep -c '(NEEDED)' "$stage/consumer.readelf.txt")" == 1 ]] ||
+[[ "$(grep -c '(NEEDED)' "$stage/consumer.readelf.txt")" == 2 ]] ||
   fail "consumer DT_NEEDED set drift"
 grep -E '\(NEEDED\).*\[libc\+\+_shared\.so\]' "$stage/consumer.readelf.txt" >/dev/null ||
   fail "consumer does not require real libc++_shared.so"
+grep -E '\(NEEDED\).*\[libc\.so\]' "$stage/consumer.readelf.txt" >/dev/null ||
+  fail "compiler-emitted libc calls lack Android libc ownership"
+grep -E 'memcpy@LIBC' "$stage/consumer.readelf.txt" >/dev/null ||
+  fail "compiler-emitted memcpy lacks its Android LIBC version requirement"
 grep -E '\(SONAME\).*\[libdarwin_art_libcxx_consumer\.so\]' \
   "$stage/consumer.readelf.txt" >/dev/null || fail "consumer SONAME drift"
 grep -E '\(BIND_NOW\)|FLAGS.*NOW' "$stage/consumer.readelf.txt" >/dev/null ||
@@ -65,7 +70,7 @@ grep -F 'GNU_RELRO' "$stage/consumer.readelf.txt" >/dev/null ||
 ! grep -E '^  TLS |\((RELR|REL|INIT|PREINIT_ARRAY|RPATH|RUNPATH|TEXTREL|SYMBOLIC)\)' \
   "$stage/consumer.readelf.txt" | grep -Ev 'RELA|INIT_ARRAY' >/dev/null ||
   fail "consumer acquired an unsupported ELF capability"
-[[ "$(grep -c 'R_AARCH64_JUMP_SLOT' "$stage/consumer.readelf.txt")" == 5 ]] ||
+[[ "$(grep -c 'R_AARCH64_JUMP_SLOT' "$stage/consumer.readelf.txt")" == 12 ]] ||
   fail "consumer relocation set drift"
 ! grep -E 'R_AARCH64_(RELATIVE|ABS64|GLOB_DAT)' "$stage/consumer.readelf.txt" >/dev/null ||
   fail "consumer acquired an unexpected non-PLT relocation"
@@ -120,4 +125,4 @@ weak_imports="$("$readelf" --dyn-syms --wide "$libcxx" | \
 # run libc++ constructors against placeholder provider addresses.
 "$root/crates/darwin-art-elf-loader/run-gate.sh" >/dev/null
 
-echo "android35-libcxx-acceptance: PASS structural=real-libcxx consumer=string+vector+sort expected=$CONSUMER_EXPECTED_RESULT execution=deferred-to-real-providers"
+echo "android35-libcxx-acceptance: PASS structural=real-libcxx consumer=string+vector+sort+filesystem-copy expected=$CONSUMER_EXPECTED_RESULT execution=deferred-to-real-providers"

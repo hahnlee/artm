@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -19,6 +21,24 @@ darwin_art_libcxx_collections() {
   std::string text(TextSource());
   std::vector<int> values{9, 1, 7, 3, 5};
   std::sort(values.begin(), values.end());
+  std::error_code error;
+  const std::filesystem::path source("/libc++_shared.so");
+  const std::filesystem::path destination("/data/libcxx-copy.so");
+  const bool copied = std::filesystem::copy_file(
+      source, destination, std::filesystem::copy_options::overwrite_existing,
+      error);
+  if (!copied || error) {
+    return -10;
+  }
+  const std::uintmax_t source_size = std::filesystem::file_size(source, error);
+  if (error) {
+    return -11;
+  }
+  const std::uintmax_t destination_size =
+      std::filesystem::file_size(destination, error);
+  if (error || source_size == 0 || destination_size != source_size) {
+    return -12;
+  }
   return static_cast<int>(text.size()) +
          static_cast<unsigned char>(text.at(11)) + values.front() * 10 +
          values.back();

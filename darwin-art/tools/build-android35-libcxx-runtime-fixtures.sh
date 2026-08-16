@@ -40,7 +40,7 @@ mkdir -p "$stage/collections" "$stage/exception"
 "$clang" -shared -fPIC -O2 -fvisibility=hidden -fno-exceptions -fno-rtti \
   -nostdlib -nodefaultlibs -Wl,-soname,libdarwin_art_libcxx_consumer.so \
   -Wl,-z,now,-z,relro,--hash-style=sysv -Wl,--build-id=none \
-  "$base/consumer.cc" -Wl,--no-as-needed "$libcxx" -Wl,--as-needed \
+  "$base/consumer.cc" -Wl,--no-as-needed "$libcxx" "$libc" -Wl,--as-needed \
   -o "$stage/collections/libdarwin_art_libcxx_consumer.so"
 
 "$clang" -shared -fPIC -O2 -fvisibility=hidden -nostdlib -nodefaultlibs \

@@ -11,23 +11,27 @@ versions and `DT_NEEDED` ownership are checked, RELRO is sealed, and a real
 libc++ export is looked up. No initializer or finalizer is called with the
 placeholder addresses.
 
-The gate then builds `libdarwin_art_libcxx_consumer.so`. Its only dependency is
-the pinned `libc++_shared.so`, and its four imports are libc++ exports. The
-no-argument `darwin_art_libcxx_collections` function crosses libc++ heap and ABI
-boundaries with a non-SSO `std::string`, `std::vector`, `std::sort`, bounds
-checking, allocation, and deletion. A real closed-namespace execution must
-return `189` after libc++, libc, libm, and libdl providers have been initialized.
+The gate then builds `libdarwin_art_libcxx_consumer.so`. Its direct
+dependencies are the pinned `libc++_shared.so` and Android's public `libc.so`
+stub. Linking the latter is deliberate: compiler-emitted calls such as
+`memcpy` retain their `LIBC` GNU-version requirement instead of becoming an
+unversioned hole in the closed namespace. The no-argument
+`darwin_art_libcxx_collections` function crosses libc++ heap and ABI boundaries
+with a non-SSO `std::string`, `std::vector`, `std::sort`, bounds checking,
+allocation, and deletion. It also calls `std::filesystem::copy_file` to copy
+`/libc++_shared.so` from the immutable graph root into private
+`/data/libcxx-copy.so`, then compares both `file_size` results. A real
+closed-namespace execution must return `189` after libc++, libc, libm, and
+libdl providers have been initialized.
 Its two-argument `JNI_OnLoad` runs that check internally and returns JNI 1.6
 only on success, so ART's ordinary generic native-library path can execute the
 acceptance without exposing a raw Android function pointer to Darwin code.
 
-Exceptions are deliberately outside this first executable consumer. Compiling
-the equivalent throw/catch probe introduces `_Unwind_Resume@LIBC_R`; the
-current Bionic provider namespace is intentionally pinned to `@LIBC`. Claiming
-exception execution before adding an exact `LIBC_R` owner and validating ELF
-unwind registration would overstate compatibility. Iostream is also deferred;
-it adds global stream initialization and obscures whether this focused
-collection/allocator path works.
+Exceptions remain outside this particular consumer. The adjacent exception
+acceptance statically links the pinned Android `libunwind.a`, exercises
+cross-frame nontrivial cleanup and catch, and therefore does not invent a
+`LIBC_R` host provider. Iostream remains deferred; it adds global stream
+initialization and obscures this focused collection/filesystem path.
 
 Run:
 
