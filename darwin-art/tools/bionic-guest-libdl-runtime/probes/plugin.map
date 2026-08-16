@@ -1,0 +1,6 @@
+{
+  global:
+    guest_plugin_value;
+  local:
+    *;
+};
