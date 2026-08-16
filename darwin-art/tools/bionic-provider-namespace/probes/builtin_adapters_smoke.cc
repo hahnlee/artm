@@ -78,35 +78,54 @@ extern "C" void *darwin_art_dl_phdr_resolve(const char *soname,
 extern "C" SymbolFunction darwin_art_bionic_stdio_resolve(const char *s) {
   return OneArg(DARWIN_ART_BIONIC_PROVIDER_STDIO, s);
 }
-extern "C" void *darwin_art_bionic_wide_stdio_resolve(
-    const char *soname, const char *symbol, const char *version) {
+extern "C" void *darwin_art_bionic_wide_stdio_resolve(const char *soname,
+                                                      const char *symbol,
+                                                      const char *version) {
   return Triple(DARWIN_ART_BIONIC_PROVIDER_WIDE_STDIO, "libc.so", soname,
                 symbol, version);
 }
-extern "C" void *darwin_art_bionic_scanf_resolve(
-    const char *soname, const char *symbol, const char *version) {
+extern "C" void *darwin_art_bionic_scanf_resolve(const char *soname,
+                                                 const char *symbol,
+                                                 const char *version) {
   return Triple(DARWIN_ART_BIONIC_PROVIDER_SCANF, "libc.so", soname, symbol,
                 version);
 }
-extern "C" void *darwin_art_bionic_swprintf_resolve(
-    const char *soname, const char *symbol, const char *version) {
-  return Triple(DARWIN_ART_BIONIC_PROVIDER_SWPRINTF, "libc.so", soname,
-                symbol, version);
+extern "C" void *darwin_art_bionic_swprintf_resolve(const char *soname,
+                                                    const char *symbol,
+                                                    const char *version) {
+  return Triple(DARWIN_ART_BIONIC_PROVIDER_SWPRINTF, "libc.so", soname, symbol,
+                version);
 }
-extern "C" void *darwin_art_bionic_ioctl_resolve(
-    const char *soname, const char *symbol, const char *version) {
+extern "C" void *darwin_art_bionic_ioctl_resolve(const char *soname,
+                                                 const char *symbol,
+                                                 const char *version) {
   return Triple(DARWIN_ART_BIONIC_PROVIDER_IOCTL, "libc.so", soname, symbol,
                 version);
 }
-extern "C" void *darwin_art_bionic_strftime_resolve(
-    const char *soname, const char *symbol, const char *version) {
-  return Triple(DARWIN_ART_BIONIC_PROVIDER_STRFTIME, "libc.so", soname,
-                symbol, version);
+extern "C" void *darwin_art_bionic_strftime_resolve(const char *soname,
+                                                    const char *symbol,
+                                                    const char *version) {
+  return Triple(DARWIN_ART_BIONIC_PROVIDER_STRFTIME, "libc.so", soname, symbol,
+                version);
 }
-extern "C" void *darwin_art_bionic_sendfile_resolve(
+extern "C" void *darwin_art_bionic_sendfile_resolve(const char *soname,
+                                                    const char *symbol,
+                                                    const char *version) {
+  return Triple(DARWIN_ART_BIONIC_PROVIDER_SENDFILE, "libc.so", soname, symbol,
+                version);
+}
+extern "C" void *darwin_art_bionic_socket_broker_resolve(const char *soname,
+                                                         const char *symbol,
+                                                         const char *version) {
+  const auto owner = std::strcmp(symbol, "close") == 0
+                         ? DARWIN_ART_BIONIC_PROVIDER_CENTRAL_FD_BROKER
+                         : DARWIN_ART_BIONIC_PROVIDER_SOCKET;
+  return Triple(owner, "libc.so", soname, symbol, version);
+}
+extern "C" void *darwin_art_bionic_socket_broker_dns_resolve(
     const char *soname, const char *symbol, const char *version) {
-  return Triple(DARWIN_ART_BIONIC_PROVIDER_SENDFILE, "libc.so", soname,
-                symbol, version);
+  return Triple(DARWIN_ART_BIONIC_PROVIDER_DNS, "libc.so", soname, symbol,
+                version);
 }
 extern "C" void *darwin_art_bionic_locale_resolve(const char *soname,
                                                   const char *symbol,
@@ -128,13 +147,15 @@ extern "C" SymbolFunction darwin_art_bionic_format_resolve(const char *s) {
 extern "C" SymbolFunction darwin_art_bionic_strerror_resolve(const char *s) {
   return OneArg(DARWIN_ART_BIONIC_PROVIDER_STRERROR, s);
 }
-extern "C" void *darwin_art_bionic_wide_integer_resolve(
-    const char *soname, const char *symbol, const char *version) {
+extern "C" void *darwin_art_bionic_wide_integer_resolve(const char *soname,
+                                                        const char *symbol,
+                                                        const char *version) {
   return Triple(DARWIN_ART_BIONIC_PROVIDER_WIDE_INTEGER, "libc.so", soname,
                 symbol, version);
 }
-extern "C" void *darwin_art_bionic_wide_float_resolve(
-    const char *soname, const char *symbol, const char *version) {
+extern "C" void *darwin_art_bionic_wide_float_resolve(const char *soname,
+                                                      const char *symbol,
+                                                      const char *version) {
   return Triple(DARWIN_ART_BIONIC_PROVIDER_WIDE_FLOAT, "libc.so", soname,
                 symbol, version);
 }
@@ -143,8 +164,9 @@ extern "C" void *darwin_art_bionic_binary128_conversion_resolve(
   return Triple(DARWIN_ART_BIONIC_PROVIDER_BINARY128_CONVERSION, "libc.so",
                 soname, symbol, version);
 }
-extern "C" void *darwin_art_bionic_abort_resolve(
-    const char *soname, const char *symbol, const char *version) {
+extern "C" void *darwin_art_bionic_abort_resolve(const char *soname,
+                                                 const char *symbol,
+                                                 const char *version) {
   return Triple(DARWIN_ART_BIONIC_PROVIDER_ABORT, "libc.so", soname, symbol,
                 version);
 }
@@ -159,11 +181,11 @@ extern "C" SymbolFunction
 darwin_art_bionic_dso_lifecycle_resolve(const char *s) {
   return OneArg(DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE, s);
 }
-extern "C" SymbolFunction darwin_art_bionic_syslog_resolve(
-    const char *soname, const char *symbol, const char *version) {
-  return reinterpret_cast<SymbolFunction>(
-      Triple(DARWIN_ART_BIONIC_PROVIDER_SYSLOG, "libc.so", soname, symbol,
-             version));
+extern "C" SymbolFunction
+darwin_art_bionic_syslog_resolve(const char *soname, const char *symbol,
+                                 const char *version) {
+  return reinterpret_cast<SymbolFunction>(Triple(
+      DARWIN_ART_BIONIC_PROVIDER_SYSLOG, "libc.so", soname, symbol, version));
 }
 extern "C" SymbolFunction darwin_art_bionic_formatted_stdio_resolve(
     const char *soname, const char *symbol, const char *version) {
@@ -171,11 +193,11 @@ extern "C" SymbolFunction darwin_art_bionic_formatted_stdio_resolve(
       Triple(DARWIN_ART_BIONIC_PROVIDER_FORMATTED_STDIO, "libc.so", soname,
              symbol, version));
 }
-extern "C" SymbolFunction darwin_art_bionic_syscall_resolve(
-    const char *soname, const char *symbol, const char *version) {
-  return reinterpret_cast<SymbolFunction>(
-      Triple(DARWIN_ART_BIONIC_PROVIDER_SYSCALL, "libc.so", soname, symbol,
-             version));
+extern "C" SymbolFunction
+darwin_art_bionic_syscall_resolve(const char *soname, const char *symbol,
+                                  const char *version) {
+  return reinterpret_cast<SymbolFunction>(Triple(
+      DARWIN_ART_BIONIC_PROVIDER_SYSCALL, "libc.so", soname, symbol, version));
 }
 
 int main() {
@@ -194,9 +216,9 @@ int main() {
         result.owner != expected.owner || result.address == 0)
       return 11;
   }
-  constexpr size_t kExpectedCalls[] = {11, 4,  1,  29, 3, 25, 3, 1, 13, 31, 6,
-                                       2,  3,  1,  4,  2, 18, 2, 2, 3,  2, 1,
-                                       3, 3, 2, 1, 1, 1, 1};
+  constexpr size_t kExpectedCalls[] = {11, 4, 1, 28, 3, 25, 3, 1, 13, 31, 6,
+                                       2,  3, 1, 4,  2, 18, 2, 2, 3,  2,  1,
+                                       3,  3, 2, 1,  1, 1,  1, 1, 4,  2};
   for (size_t index = 0; index < calls.size(); ++index) {
     if (calls[index] != kExpectedCalls[index])
       return 12;
@@ -205,7 +227,7 @@ int main() {
       DARWIN_ART_BIONIC_NAMESPACE_OK)
     return 13;
   darwin_art_bionic_namespace_destroy(instance);
-  std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=29 "
-                       "routes=179 libdl-soname=exact\n");
+  std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=32 "
+                       "routes=185 libdl-soname=exact\n");
   return 0;
 }

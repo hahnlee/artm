@@ -79,6 +79,19 @@ cxxflags=(-arch arm64 -isysroot "$sdk" -std=c++20 -O2 -Wall -Wextra -Werror)
 "$cxx" "${cxxflags[@]}" \
   -I"$root/tools/android-dl-iterate-phdr-provider/include" \
   -c "$root/tools/android-dl-iterate-phdr-provider/src/provider.cc" -o "$objects/phdr.o"
+"$cxx" "${cxxflags[@]}" \
+  -I"$root/tools/bionic-central-fd-broker/include" \
+  -c "$root/tools/bionic-central-fd-broker/src/fd_broker.cc" \
+  -o "$objects/central-fd-broker.o"
+"$cxx" "${cxxflags[@]}" \
+  -I"$root/tools/bionic-socket-broker-adapter/include" \
+  -I"$root/tools/bionic-central-fd-broker/include" \
+  -I"$root/tools/bionic-dns-facade/include" \
+  -c "$root/tools/bionic-socket-broker-adapter/src/adapter.cc" \
+  -o "$objects/socket-broker-adapter.o"
+"$cxx" "${cxxflags[@]}" \
+  -I"$root/tools/bionic-dns-facade/include" \
+  -c "$root/tools/bionic-dns-facade/src/dns.cc" -o "$objects/dns.o"
 
 icu_root="$root/_aosp/external/icu-graphics"
 "$cxx" "${cxxflags[@]}" -fno-builtin -fvisibility=hidden -DANDROID \
@@ -222,7 +235,9 @@ strftime_source="$root/_aosp/bionic-strftime-facade/platform/bionic/libc/tzcode/
 native="$build/libdarwin-art-bionic-native-providers.a"
 "$ar" rcs "$native" \
   "$objects/leaf.o" "$objects/allocator.o" "$objects/time.o" \
-  "$objects/pthread.o" "$objects/phdr.o" "$objects/locale.o" \
+  "$objects/pthread.o" "$objects/phdr.o" \
+  "$objects/central-fd-broker.o" "$objects/socket-broker-adapter.o" \
+  "$objects/dns.o" "$objects/locale.o" \
   "$objects/wide-stdio.o" "$objects/wide-stdio-shims.o" \
   "$objects/numeric.o" "$objects/scanf.o" "$objects/scanf-entry.o" \
   "$objects/swprintf.o" "$objects/swprintf-entry.o" \
@@ -246,6 +261,10 @@ smoke="$build/full-link-smoke"
 "$cxx" "${cxxflags[@]}" \
   -I"$root/tools/bionic-provider-namespace/include" \
   -I"$root/tools/bionic-provider-namespace/generated" \
+  -I"$root/tools/bionic-fs-facade/include" \
+  -I"$root/tools/bionic-ioctl-facade/include" \
+  -I"$root/tools/bionic-socket-broker-adapter/include" \
+  -I"$root/tools/bionic-dns-facade/include" \
   -I"$root/_aosp/system/logging/liblog/include" \
   "$module/full_link_smoke.cc" -Wl,-force_load,"$binary128" \
   "$native" "$float" "$rust" \
@@ -274,6 +293,8 @@ _darwin_art_bionic_process_state_resolve
 _darwin_art_bionic_pthread_resolve
 _darwin_art_bionic_scanf_resolve
 _darwin_art_bionic_sendfile_resolve
+_darwin_art_bionic_socket_broker_resolve
+_darwin_art_bionic_socket_broker_dns_resolve
 _darwin_art_bionic_strftime_resolve
 _darwin_art_bionic_stdio_resolve
 _darwin_art_bionic_strerror_resolve
@@ -322,6 +343,13 @@ for symbol in _darwin_art_bionic_malloc_result _darwin_art_bionic_free \
               _darwin_art_bionic_fprintf _darwin_art_bionic_vfprintf \
               _darwin_art_bionic_fs_process_install \
               _darwin_art_bionic_fs_process_uninstall \
+              _darwin_art_bionic_socket_broker_activate \
+              _darwin_art_bionic_socket_broker_deactivate \
+              _darwin_art_bionic_socket_broker_is_active \
+              _darwin_art_bionic_socket_broker_resolve \
+              _darwin_art_bionic_socket_broker_dns_resolve \
+              _darwin_art_bionic_dns_resolve \
+              _darwin_art_bionic_dns_reset_for_test \
               _darwin_art_bionic_stdio_process_install \
               _darwin_art_bionic_stdio_process_uninstall \
               _darwin_art_bionic_stdio_fwrite_core \
@@ -362,4 +390,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=29 bind_builtins=sealed routes=179 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=32 bind_builtins=sealed routes=185 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'

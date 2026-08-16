@@ -15,18 +15,24 @@ extern "C" SymbolFunction darwin_art_bionic_process_state_resolve(const char *);
 extern "C" void *darwin_art_dl_phdr_resolve(const char *, const char *,
                                             const char *);
 extern "C" SymbolFunction darwin_art_bionic_stdio_resolve(const char *);
-extern "C" void *darwin_art_bionic_wide_stdio_resolve(
-    const char *, const char *, const char *);
-extern "C" void *darwin_art_bionic_scanf_resolve(
-    const char *, const char *, const char *);
-extern "C" void *darwin_art_bionic_swprintf_resolve(
-    const char *, const char *, const char *);
-extern "C" void *darwin_art_bionic_ioctl_resolve(
-    const char *, const char *, const char *);
-extern "C" void *darwin_art_bionic_strftime_resolve(
-    const char *, const char *, const char *);
-extern "C" void *darwin_art_bionic_sendfile_resolve(
-    const char *, const char *, const char *);
+extern "C" void *
+darwin_art_bionic_wide_stdio_resolve(const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_scanf_resolve(const char *, const char *,
+                                                 const char *);
+extern "C" void *darwin_art_bionic_swprintf_resolve(const char *, const char *,
+                                                    const char *);
+extern "C" void *darwin_art_bionic_ioctl_resolve(const char *, const char *,
+                                                 const char *);
+extern "C" void *darwin_art_bionic_strftime_resolve(const char *, const char *,
+                                                    const char *);
+extern "C" void *darwin_art_bionic_sendfile_resolve(const char *, const char *,
+                                                    const char *);
+extern "C" void *darwin_art_bionic_socket_broker_resolve(const char *,
+                                                         const char *,
+                                                         const char *);
+extern "C" void *darwin_art_bionic_socket_broker_dns_resolve(const char *,
+                                                             const char *,
+                                                             const char *);
 extern "C" void *darwin_art_bionic_locale_resolve(const char *, const char *,
                                                   const char *);
 extern "C" SymbolFunction darwin_art_bionic_numeric_resolve(const char *);
@@ -35,23 +41,26 @@ extern "C" void *darwin_art_bionic_float_conversion_resolve(const char *,
                                                             const char *);
 extern "C" SymbolFunction darwin_art_bionic_format_resolve(const char *);
 extern "C" SymbolFunction darwin_art_bionic_strerror_resolve(const char *);
-extern "C" void *darwin_art_bionic_wide_integer_resolve(
-    const char *, const char *, const char *);
-extern "C" void *darwin_art_bionic_wide_float_resolve(
-    const char *, const char *, const char *);
-extern "C" void *darwin_art_bionic_binary128_conversion_resolve(
-    const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_wide_integer_resolve(const char *,
+                                                        const char *,
+                                                        const char *);
+extern "C" void *
+darwin_art_bionic_wide_float_resolve(const char *, const char *, const char *);
+extern "C" void *darwin_art_bionic_binary128_conversion_resolve(const char *,
+                                                                const char *,
+                                                                const char *);
 extern "C" void *darwin_art_bionic_abort_resolve(const char *, const char *,
-                                                  const char *);
+                                                 const char *);
 extern "C" uintptr_t darwin_art_liblog_provider_resolve(const char *,
                                                         const char *);
 extern "C" SymbolFunction darwin_art_bionic_dso_lifecycle_resolve(const char *);
-extern "C" SymbolFunction darwin_art_bionic_syslog_resolve(
-    const char *, const char *, const char *);
-extern "C" SymbolFunction darwin_art_bionic_formatted_stdio_resolve(
-    const char *, const char *, const char *);
-extern "C" SymbolFunction darwin_art_bionic_syscall_resolve(
-    const char *, const char *, const char *);
+extern "C" SymbolFunction
+darwin_art_bionic_syslog_resolve(const char *, const char *, const char *);
+extern "C" SymbolFunction
+darwin_art_bionic_formatted_stdio_resolve(const char *, const char *,
+                                          const char *);
+extern "C" SymbolFunction
+darwin_art_bionic_syscall_resolve(const char *, const char *, const char *);
 
 uintptr_t Address(SymbolFunction function) {
   return reinterpret_cast<uintptr_t>(function);
@@ -118,6 +127,21 @@ uintptr_t Sendfile(void *, const char *soname, const char *symbol,
   return reinterpret_cast<uintptr_t>(
       darwin_art_bionic_sendfile_resolve(soname, symbol, version));
 }
+uintptr_t CentralFdBroker(void *, const char *soname, const char *symbol,
+                          const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_socket_broker_resolve(soname, symbol, version));
+}
+uintptr_t Socket(void *, const char *soname, const char *symbol,
+                 const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_socket_broker_resolve(soname, symbol, version));
+}
+uintptr_t Dns(void *, const char *soname, const char *symbol,
+              const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_bionic_socket_broker_dns_resolve(soname, symbol, version));
+}
 uintptr_t Locale(void *, const char *soname, const char *symbol,
                  const char *version) {
   return reinterpret_cast<uintptr_t>(
@@ -179,10 +203,28 @@ uintptr_t Syscall(void *, const char *soname, const char *symbol,
 }
 
 constexpr DarwinArtBionicProviderResolve kResolvers[] = {
-    Leaf,    Allocator,       Errno,  Filesystem,   Time,
-    Pthread, ProcessState,    Phdr,   Stdio,        Locale,
-    Numeric, FloatConversion, Format, Strerror, WideInteger, Abort,
-    Liblog,  DsoLifecycle, WideFloat, Syslog, FormattedStdio, Syscall,
+    Leaf,
+    Allocator,
+    Errno,
+    Filesystem,
+    Time,
+    Pthread,
+    ProcessState,
+    Phdr,
+    Stdio,
+    Locale,
+    Numeric,
+    FloatConversion,
+    Format,
+    Strerror,
+    WideInteger,
+    Abort,
+    Liblog,
+    DsoLifecycle,
+    WideFloat,
+    Syslog,
+    FormattedStdio,
+    Syscall,
     Binary128Conversion,
     WideStdio,
     Scanf,
@@ -190,6 +232,9 @@ constexpr DarwinArtBionicProviderResolve kResolvers[] = {
     Ioctl,
     Strftime,
     Sendfile,
+    CentralFdBroker,
+    Socket,
+    Dns,
 };
 static_assert(sizeof(kResolvers) / sizeof(kResolvers[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);

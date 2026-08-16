@@ -6,11 +6,11 @@ it combines the existing C, C++, and Rust provider archives so
 `darwin_art_bionic_namespace_bind_builtins` can bind every manifest owner to
 its actual resolver.
 
-The current closure contains twenty-nine providers and resolves 179 exact
+The current closure contains thirty-two providers and resolves 185 exact
 routes: all 160 pinned Android 35 arm64 `libc++_shared.so` libc-family imports,
-the pthread provider's reviewed `pthread_create@LIBC` extension, and all 18
-public `liblog.so` exports. Unknown SONAMEs, symbols, or GNU versions never fall
-back to dyld or host `dlsym`.
+seven reviewed libc extensions for pthread creation, central close dispatch,
+socket I/O, and bounded DNS, plus all 18 public `liblog.so` exports. Unknown
+SONAMEs, symbols, or GNU versions never fall back to dyld or host `dlsym`.
 
 Run:
 
@@ -20,7 +20,8 @@ tools/build-bionic-runtime-provider-closure.sh
 
 The gate builds one Rust static archive for the stateful filesystem,
 process-state, stdio, and DSO-lifecycle owners; one native archive for the
-remaining providers (including Bionic abort/message state and the provider-only
+remaining providers (including the central descriptor broker, socket/DNS,
+Bionic abort/message state, and the provider-only
 wide-float, wide-stdio, scanf, swprintf, ioctl, strftime, and sendfile owners) and
 namespace; and the pinned AOSP gdtoa float-conversion
 archive. The wide-float owner reuses the one allocator, gdtoa/errno, and ICU
@@ -63,6 +64,13 @@ available. Both drain in-flight calls after guest finalizers. The swprintf
 owner reuses the existing formatter, errno, allocator, and gdtoa providers.
 The sendfile owner delegates only to the process filesystem callback and
 drains before that filesystem owner is uninstalled.
+
+The network owner publishes socket objects only through the central descriptor
+broker. The shared `close@LIBC` route dispatches broker-shaped tokens to that
+broker and all other tokens to the filesystem owner; the filesystem allocator
+reserves the broker marker range, so stale tokens cannot alias across owners.
+Namespace admission drains before DNS result retirement, socket teardown, and
+the final filesystem uninstall.
 
 The syscall owner contributes the one variadic `syscall@LIBC` entry and its
 exact libc++ gettid/futex/libunwind-probe dispatcher. It reuses the closure's

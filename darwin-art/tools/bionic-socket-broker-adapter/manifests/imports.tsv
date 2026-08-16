@@ -1,0 +1,6 @@
+symbol	soname	version	owner
+close	libc.so	LIBC	central-broker
+connect	libc.so	LIBC	socket-owner-v3
+recv	libc.so	LIBC	socket-owner-v3
+send	libc.so	LIBC	socket-owner-v3
+socket	libc.so	LIBC	socket-owner-v3

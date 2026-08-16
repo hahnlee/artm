@@ -10,9 +10,10 @@ libc.so	android_set_abort_message	LIBC	abort
 libc.so	btowc	LIBC	locale
 libc.so	chdir	LIBC	filesystem
 libc.so	clock_gettime	LIBC	time
-libc.so	close	LIBC	filesystem
+libc.so	close	LIBC	central-fd-broker
 libc.so	closedir	LIBC	filesystem
 libc.so	closelog	LIBC	syslog
+libc.so	connect	LIBC	socket
 libc.so	fchmod	LIBC	filesystem
 libc.so	fchmodat	LIBC	filesystem
 libc.so	fclose	LIBC	stdio
@@ -25,6 +26,7 @@ libc.so	fputc	LIBC	stdio
 libc.so	fputwc	LIBC	wide-stdio
 libc.so	fread	LIBC	stdio
 libc.so	free	LIBC	allocator
+libc.so	freeaddrinfo	LIBC	dns
 libc.so	freelocale	LIBC	locale
 libc.so	fseek	LIBC	stdio
 libc.so	fseeko	LIBC	stdio
@@ -32,6 +34,7 @@ libc.so	fstat	LIBC	filesystem
 libc.so	ftello	LIBC	stdio
 libc.so	ftruncate	LIBC	filesystem
 libc.so	fwrite	LIBC	stdio
+libc.so	getaddrinfo	LIBC	dns
 libc.so	getauxval	LIBC	process-state
 libc.so	getc	LIBC	stdio
 libc.so	getcwd	LIBC	filesystem
@@ -102,11 +105,14 @@ libc.so	readdir	LIBC	filesystem
 libc.so	readlink	LIBC	filesystem
 libc.so	realloc	LIBC	allocator
 libc.so	realpath	LIBC	filesystem
+libc.so	recv	LIBC	socket
 libc.so	remove	LIBC	filesystem
 libc.so	rename	LIBC	filesystem
+libc.so	send	LIBC	socket
 libc.so	sendfile	LIBC	sendfile
 libc.so	setlocale	LIBC	locale
 libc.so	snprintf	LIBC	format
+libc.so	socket	LIBC	socket
 libc.so	sscanf	LIBC	scanf
 libc.so	stat	LIBC	filesystem
 libc.so	statvfs	LIBC	filesystem

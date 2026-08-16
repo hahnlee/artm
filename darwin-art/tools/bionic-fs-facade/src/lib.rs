@@ -271,6 +271,8 @@ struct DescriptorTable {
     entries: BTreeMap<c_int, Descriptor>,
 }
 
+const CENTRAL_BROKER_TOKEN_MARKER: c_int = 0x4000_0000;
+
 impl Default for DescriptorTable {
     fn default() -> Self {
         Self {
@@ -289,11 +291,14 @@ impl DescriptorTable {
         }
         for _ in 0..100_000 {
             let candidate = self.next;
-            self.next = if self.next == c_int::MAX {
+            self.next = if self.next >= CENTRAL_BROKER_TOKEN_MARKER - 1 {
                 10_000
             } else {
                 self.next + 1
             };
+            if candidate & CENTRAL_BROKER_TOKEN_MARKER != 0 {
+                continue;
+            }
             if let std::collections::btree_map::Entry::Vacant(entry) = self.entries.entry(candidate)
             {
                 entry.insert(descriptor);
@@ -2416,6 +2421,24 @@ mod tests {
     unsafe extern "C" {
         fn __error() -> *mut i32;
         fn darwin_art_bionic_errno_load() -> i32;
+    }
+
+    #[test]
+    fn descriptor_allocator_reserves_central_broker_token_range() {
+        let mut table = DescriptorTable {
+            next: CENTRAL_BROKER_TOKEN_MARKER - 1,
+            ..DescriptorTable::default()
+        };
+        let boundary = table
+            .insert(Descriptor::Random(RandomDeviceKind::Random))
+            .unwrap();
+        let wrapped = table
+            .insert(Descriptor::Random(RandomDeviceKind::Urandom))
+            .unwrap();
+        assert_eq!(boundary, CENTRAL_BROKER_TOKEN_MARKER - 1);
+        assert_eq!(wrapped, 10_000);
+        assert_eq!(boundary & CENTRAL_BROKER_TOKEN_MARKER, 0);
+        assert_eq!(wrapped & CENTRAL_BROKER_TOKEN_MARKER, 0);
     }
 
     #[test]

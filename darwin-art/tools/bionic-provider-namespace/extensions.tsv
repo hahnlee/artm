@@ -1,2 +1,8 @@
 soname	symbol	version	owner	rationale
 libc.so	pthread_create	LIBC	pthread	provider-owned thread creation required by general Android DSOs but absent from pinned libc++ imports
+libc.so	connect	LIBC	socket	central-broker socket owner v3
+libc.so	freeaddrinfo	LIBC	dns	bounded resolver result retirement
+libc.so	getaddrinfo	LIBC	dns	bounded numeric and localhost resolution
+libc.so	recv	LIBC	socket	central-broker socket owner v3
+libc.so	send	LIBC	socket	central-broker socket owner v3
+libc.so	socket	LIBC	socket	central-broker socket publication

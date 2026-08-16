@@ -112,10 +112,10 @@ DarwinArtBionicNamespace *Build(Context *contexts, Shared *shared) {
 } // namespace
 
 int main() {
-  Check(darwin_art_bionic_namespace_owned_count() == 179, "owned count");
+  Check(darwin_art_bionic_namespace_owned_count() == 185, "owned count");
   Check(darwin_art_bionic_namespace_unsupported_libc_count() == 0,
         "unsupported count");
-  Check(sizeof(kExpected) / sizeof(kExpected[0]) == 179, "fixture count");
+  Check(sizeof(kExpected) / sizeof(kExpected[0]) == 185, "fixture count");
   Check(kUnsupported.empty(), "unsupported fixture count");
 
   {
@@ -261,6 +261,9 @@ int main() {
 
   constexpr DarwinArtBionicProviderId kExpectedRelease[] = {
       DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE,
+      DARWIN_ART_BIONIC_PROVIDER_DNS,
+      DARWIN_ART_BIONIC_PROVIDER_SOCKET,
+      DARWIN_ART_BIONIC_PROVIDER_CENTRAL_FD_BROKER,
       DARWIN_ART_BIONIC_PROVIDER_ABORT,
       DARWIN_ART_BIONIC_PROVIDER_SYSLOG,
       DARWIN_ART_BIONIC_PROVIDER_SYSCALL,
@@ -300,9 +303,10 @@ int main() {
         "idempotent teardown");
   darwin_art_bionic_namespace_destroy(instance);
 
-  std::fprintf(stderr,
-               "bionic-provider-namespace: PASS libcxx=160/160 extensions=1 liblog=18 "
-               "owned=179 unsupported=0 duplicate-owner=0 threads=12 "
-               "teardown=ordered+quiescent host-fallback=denied\n");
+  std::fprintf(
+      stderr,
+      "bionic-provider-namespace: PASS libcxx=160/160 extensions=7 liblog=18 "
+      "owned=185 unsupported=0 duplicate-owner=0 threads=12 "
+      "teardown=ordered+quiescent host-fallback=denied\n");
   return 0;
 }

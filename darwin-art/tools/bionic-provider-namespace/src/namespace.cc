@@ -34,17 +34,38 @@ constexpr std::array<Unsupported, kUnsupportedLibcCount> kUnsupported = {{
 }};
 
 constexpr const char *kProviderNames[] = {
-    "leaf",    "allocator",        "errno",  "filesystem",    "time",
-    "pthread", "process-state",    "phdr",   "stdio",         "locale",
-    "numeric", "float-conversion", "format", "strerror", "wide-integer",
-    "abort", "liblog", "dso-lifecycle", "wide-float", "syslog",
-    "formatted-stdio", "syscall", "binary128-conversion",
+    "leaf",
+    "allocator",
+    "errno",
+    "filesystem",
+    "time",
+    "pthread",
+    "process-state",
+    "phdr",
+    "stdio",
+    "locale",
+    "numeric",
+    "float-conversion",
+    "format",
+    "strerror",
+    "wide-integer",
+    "abort",
+    "liblog",
+    "dso-lifecycle",
+    "wide-float",
+    "syslog",
+    "formatted-stdio",
+    "syscall",
+    "binary128-conversion",
     "wide-stdio",
     "scanf",
     "swprintf",
     "ioctl",
     "strftime",
     "sendfile",
+    "central-fd-broker",
+    "socket",
+    "dns",
 };
 static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);
@@ -54,6 +75,9 @@ static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
  * Dependants are released before the shared errno/allocator/leaf substrate. */
 constexpr DarwinArtBionicProviderId kReleaseOrder[] = {
     DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE,
+    DARWIN_ART_BIONIC_PROVIDER_DNS,
+    DARWIN_ART_BIONIC_PROVIDER_SOCKET,
+    DARWIN_ART_BIONIC_PROVIDER_CENTRAL_FD_BROKER,
     DARWIN_ART_BIONIC_PROVIDER_ABORT,
     DARWIN_ART_BIONIC_PROVIDER_SYSLOG,
     DARWIN_ART_BIONIC_PROVIDER_SYSCALL,
