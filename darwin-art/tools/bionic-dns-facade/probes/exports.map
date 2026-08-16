@@ -1,0 +1,12 @@
+DNS_FIXTURE {
+  global:
+    DnsFixtureLookup;
+    DnsFixtureLookupPassive;
+    DnsFixtureCount;
+    DnsFixtureReverseNumeric;
+    DnsFixtureReversePolicyRejected;
+    DnsFixtureFree;
+    DnsFixtureErrorString;
+  local:
+    *;
+};

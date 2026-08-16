@@ -1,0 +1,5 @@
+symbol	soname	version	owner
+freeaddrinfo	libc.so	LIBC	bionic-dns-facade-retire-owner
+gai_strerror	libc.so	LIBC	bionic-dns-facade
+getaddrinfo	libc.so	LIBC	bionic-dns-facade-closed-policy
+getnameinfo	libc.so	LIBC	bionic-dns-facade-numeric-only
