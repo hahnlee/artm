@@ -145,7 +145,9 @@ elf_start = adapter.index("if (discovery_status == DARWIN_ART_ELF_OK) {", discov
 host_start = adapter.index("void* handle =", elf_start)
 elf = adapter[elf_start:host_start]
 assert discovery_start < adapter.index("std::make_unique<ElfLibrary>()", elf_start)
-assert "O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW" in adapter[open_start:discovery_start]
+open_setup = adapter[open_start:discovery_start]
+for flag in ("O_DIRECTORY", "O_CLOEXEC", "O_NOFOLLOW"):
+    assert flag in open_setup
 assert "darwin_art_elf_graph_load_with_lifecycle(" in elf
 assert "darwin_art_elf_graph_lookup_root(" in adapter
 assert "darwin_art_elf_graph_unload(" in adapter
@@ -171,6 +173,9 @@ assert "lifecycle_status != 123" in probe
 assert "lifecycle_status() != 1234567" in probe
 assert "lifecycle_status() == 124567" in probe
 assert "namespace_lifecycle_status() == 5" in probe
+assert "kMaxRegularMethodsPerGraph = 32" in adapter
+assert "darwin_art_image_registry::ContainsAddress(" in adapter
+assert "RegisterNatives=generic+fixture" in probe
 print("register-natives-bridge: local-graph-flow=PASS providers=sealed-before-graph teardown=graph-before-namespace publish=after-complete no-dyld=ELF")
 PY
 
@@ -198,6 +203,12 @@ for entry in \
   [[ "$(sha "$fixture_root/$file")" == "$expected" ]] ||
     fail "generic graph source SHA mismatch: $file"
 done
+grep -F '(*env)->RegisterNatives(env, fixture, &method, 1)' \
+  "$fixture_root/generic_root.c" >/dev/null ||
+  fail "generic graph no longer exercises proxy RegisterNatives"
+grep -E 'foreign\.fnPtr = .*uintptr_t\)1' \
+  "$fixture_root/generic_root.c" >/dev/null ||
+  fail "generic graph no longer rejects a foreign native address"
 [[ "$(sha "$fixture_root/NativeFixture.java")" == "$FIXTURE_JAVA_SHA256" ]] ||
   fail "fixture Java source SHA mismatch"
 grep -F "{\"nativeAdd\", \"$FIXTURE_ADD_DESCRIPTOR\"" "$fixture_root/native_fixture.c" >/dev/null ||

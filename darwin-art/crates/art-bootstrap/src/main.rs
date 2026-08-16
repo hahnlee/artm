@@ -4252,7 +4252,7 @@ fn probe_runtime_dex_flavor(
             "Hello from Darwin ART main: 안녕\n\
          ART Android libc++: real-r28c collections=189 exception-cleanup=73 unload=sequential\n\
          ART Android ELF TLS: local-TLSDESC threads=4 align=64 unload=quiescent\n\
-         ART Android ELF JNI: graph=child-first+relocated providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+swprintf+ioctl+strftime+sendfile load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
+         ART Android ELF JNI: graph=child-first+relocated providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+swprintf+ioctl+strftime+sendfile load+JNI_OnLoad+RegisterNatives=generic+fixture scalar-ref=all nativeUsesEnv=current stack-repack=ok\n\
          ART Android APK ELF: apk-sha256={} root-sha256={} graph=root+child+grandchild load=JavaVMExt+NativeBridge unload=shutdown-trampolines-zero\n\
          ART Darwin Runtime::Create: ok\n\
          ART Darwin app ClassLoader: PathClassLoader\n\

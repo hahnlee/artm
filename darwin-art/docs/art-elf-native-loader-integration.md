@@ -65,18 +65,24 @@ handle and the raw dyld handle.
 
 ART looks up `JNI_OnLoad` through `NativeBridgeGetTrampoline2`. The fixed
 lifecycle trampoline substitutes the closed proxy `JavaVM*`; the Android image
-never sees ART's real function tables. The proxy implements only the fixture's
-`GetEnv`, `FindClass`, `RegisterNatives`, and `ThrowNew` path. Backend calls use
+never sees ART's real function tables. The bounded proxy implements
+`GetEnv`, `FindClass`, `RegisterNatives`, and `ThrowNew`. Backend calls use
 the current ART thread's `JNIEnv`; no synchronous-load pointer is retained.
 
-The RegisterNatives backend accepts exactly the fixture's eight reviewed
-signatures. Generic sibling discovery does not yet imply arbitrary registered-
-JNI support, and ordinary named-JNI lookup is currently rejected. Supporting
-it requires a general per-shorty trampoline owner rather than returning a raw
-Android function pointer. The fixture backend creates
+The RegisterNatives backend now accepts one table of up to 32 static regular-JNI
+methods per graph. It parses arbitrary scalar/reference descriptors into
+Z/B/C/S/I/J/F/D/L/V shorties, verifies every declared Java method, and rejects
+a second table, instance methods, CriticalNative, aggregates/HFA, and
+unreviewed varargs. The generic graph proves this path independently by
+registering and calling a one-method `(IJI)J` table before the hash-identified
+eight-method fixture replaces it. Ordinary named-JNI lookup remains rejected.
+The backend creates
 one cache-owned executable page while writable, emits the cached thunks, flushes
 the instruction cache, changes the page to read/execute, and publishes its
-generation/range. `NativeBridgeIsNativeBridgeFunctionPointer` recognizes only
+generation/range. Every guest function pointer must first belong to an exact
+currently published image range in that graph. A deliberate address `1`
+registration is rejected before code generation.
+`NativeBridgeIsNativeBridgeFunctionPointer` recognizes only
 the callable entries, never a literal or arbitrary address in that range.
 Its source-derived entry mask distinguishes all eight methods, so duplicate
 classification of one address cannot satisfy the complete-table acceptance gate.
@@ -88,10 +94,10 @@ asks `NativeBridgeIsNativeBridgeFunctionPointer` about every installed pointer;
 the non-Android Darwin branch then retains each already-repacked Darwin entry
 as the method target. The observed complete-table mask is part of runtime acceptance.
 
-Registration is transactional at this boundary. Every thunk must exist and
-ART must register the complete table before the backend returns `JNI_OK`. A
-failure unregisters the exact fixture class, unpublishes the generation, and
-unmaps the page. On success the `ElfLibrary` owns the executable page and ELF
+Registration is transactional for the reviewed fresh-class boundary. Every
+thunk must exist and ART must register the complete table before the backend
+returns `JNI_OK`. A failure unregisters that class, unpublishes the generation,
+and unmaps the page. On success the `ElfLibrary` owns the executable page and ELF
 graph together. ART shutdown provides the required external quiescence, then
 the close seam unpublishes/unmaps the thunks before finalizing the root and then
 the child, each before its mapping is released.

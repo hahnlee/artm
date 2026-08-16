@@ -22,20 +22,24 @@ Owner* Create(const char* root_soname,
               std::string* error);
 
 // Called synchronously by the loader's dependency-first lifecycle callback.
-int Publish(Owner* owner, uintptr_t start, uintptr_t end);
+int Publish(Owner *owner, uintptr_t start, uintptr_t end);
 
 // Undoes only the most recent exact publication when the following chained
 // lifecycle publisher rejects it.
-int RollbackPublish(Owner* owner, uintptr_t start, uintptr_t end);
+int RollbackPublish(Owner *owner, uintptr_t start, uintptr_t end);
 
 // Removes one exact image in dependency-reverse order after Bionic callback
 // ownership has drained, while the loader still keeps the mapping live.
-int Finalize(Owner* owner, uintptr_t start, uintptr_t end);
+int Finalize(Owner *owner, uintptr_t start, uintptr_t end);
+
+// Returns true only while address belongs to an exact published image in this
+// owner. JNI registration uses this before creating a callable host thunk.
+bool ContainsAddress(const Owner *owner, uintptr_t address);
 
 // Transactional load failures can leave an already-published prefix. This
 // removes any remaining prefix before its owner is destroyed.
-void UnpublishAll(Owner* owner);
-void Destroy(Owner* owner);
+void UnpublishAll(Owner *owner);
+void Destroy(Owner *owner);
 
 }  // namespace android::darwin_art_image_registry
 

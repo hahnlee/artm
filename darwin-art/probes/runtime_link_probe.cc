@@ -1537,6 +1537,18 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                 << generic_load_error << "\n";
       return 40;
     }
+    jmethodID generic_native_add =
+        env->GetStaticMethodID(native_fixture_class, "nativeAdd", "(IJI)J");
+    const jlong generic_add_result =
+        generic_native_add == nullptr
+            ? -1
+            : env->CallStaticLongMethod(native_fixture_class,
+                                        generic_native_add, 10, jlong{20}, 12);
+    if (generic_add_result != 42 || env->ExceptionCheck()) {
+      std::cerr << "ART Android ELF generic RegisterNatives failed, result="
+                << generic_add_result << "\n";
+      return 40;
+    }
     // generic_elf_path and apk_elf_path are required to be the same extracted
     // root. The successful JavaVMExt load above is therefore the APK execution
     // evidence; loading the same SONAME a second time would only exercise ART's
@@ -1544,10 +1556,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     g_apk_elf_loaded = true;
     g_apk_sha256 = apk_sha256;
     g_apk_root_sha256 = apk_root_sha256;
-    char* partial_error = nullptr;
-    void* partial_handle = android::OpenNativeLibrary(
-        env, 35, elf_fixture_path, app_loader_ref, nullptr, nullptr, nullptr,
-        &partial_error);
+    char *partial_error = nullptr;
+    void *partial_handle =
+        android::OpenNativeLibrary(env, 35, elf_fixture_path, app_loader_ref,
+                                   nullptr, nullptr, nullptr, &partial_error);
     const bool partial_cleanup_ok =
         partial_handle == nullptr && partial_error != nullptr &&
         darwin_art_elf_jni_fixture_lifecycle_status() == 124567 &&
@@ -1592,8 +1604,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                 << " load_error=" << load_error << "\n";
       return 41;
     }
-    jmethodID run_acceptance = env->GetStaticMethodID(
-        native_fixture_class, "runAcceptance", "()I");
+    jmethodID run_acceptance =
+        env->GetStaticMethodID(native_fixture_class, "runAcceptance", "()I");
     const jint acceptance =
         run_acceptance == nullptr
             ? -3
@@ -1606,12 +1618,13 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       }
       return 42;
     }
-    std::cout << "ART Android ELF JNI: graph=child-first+relocated "
-                 "providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+"
-                 "swprintf+ioctl+strftime+sendfile "
-                 "load+JNI_OnLoad+RegisterNatives=installed scalar-ref=all "
-                 "nativeUsesEnv=current stack-repack=ok\n"
-              << std::flush;
+    std::cout
+        << "ART Android ELF JNI: graph=child-first+relocated "
+           "providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+"
+           "swprintf+ioctl+strftime+sendfile "
+           "load+JNI_OnLoad+RegisterNatives=generic+fixture scalar-ref=all "
+           "nativeUsesEnv=current stack-repack=ok\n"
+        << std::flush;
   }
 
   run_result->hello_answer = result.GetI();

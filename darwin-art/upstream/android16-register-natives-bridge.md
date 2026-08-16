@@ -101,14 +101,14 @@ local implementation symbols inside one executable `PT_LOAD`:
 
 | Method | Descriptor | ART shorty | ELF value |
 |---|---|---|---:|
-| `nativeAdd` | `(IJI)J` | `JIJI` | `0x4818` |
-| `nativeSpill` | `(ZBCSIJLjava/lang/Object;FDFDFDFDFFD)J` | `JZBCSIJLFDFDFDFFD` | `0x4824` |
-| `nativeUsesEnv` | `()I` | `I` | `0x491c` |
-| `nativeNarrowStack` | `(IIIIIIZBCSIJLjava/lang/Object;)I` | `IIIIIIIZBCSIJL` | `0x4980` |
-| `nativeEcho` | `(Ljava/lang/Object;)Ljava/lang/Object;` | `LL` | `0x4a0c` |
-| `nativeFloat` | `(F)F` | `FF` | `0x4a14` |
-| `nativeDouble` | `(D)D` | `DD` | `0x4a20` |
-| `nativeVoid` | `()V` | `V` | `0x4a2c` |
+| `nativeAdd` | `(IJI)J` | `JIJI` | `0x5748` |
+| `nativeSpill` | `(ZBCSIJLjava/lang/Object;FDFDFDFDFFD)J` | `JZBCSIJLFDFDFDFDFFD` | `0x5788` |
+| `nativeUsesEnv` | `()I` | `I` | `0x5880` |
+| `nativeNarrowStack` | `(IIIIIIZBCSIJLjava/lang/Object;)I` | `IIIIIIIZBCSIJL` | `0x58e4` |
+| `nativeEcho` | `(Ljava/lang/Object;)Ljava/lang/Object;` | `LL` | `0x5970` |
+| `nativeFloat` | `(F)F` | `FF` | `0x5978` |
+| `nativeDouble` | `(D)D` | `DD` | `0x5984` |
+| `nativeVoid` | `()V` | `V` | `0x5990` |
 
 The mixed method exhausts both integer and floating register classes, then
 places two 32-bit floats before a 64-bit double on the stack. Darwin compacts
@@ -117,8 +117,12 @@ genuinely diverge. `nativeNarrowStack` separately forces byte, halfword, word,
 and doubleword values into Darwin's naturally packed tail. The standalone
 registered-native cache smoke still uses fake callable functions to isolate
 ownership and retirement, while the ART runtime gate executes the real
-regular-JNI scalar/reference shorty generator. CriticalNative remains a
-separate, fail-closed capability.
+regular-JNI scalar/reference shorty generator. A separate generic graph calls
+proxy `GetEnv`, `FindClass`, and `RegisterNatives` for one `(IJI)J` method and
+executes it through ART before the exact table is installed. The current
+production boundary allows one static-method table of at most 32 entries per
+graph; repeated tables, instance methods, and CriticalNative remain explicit
+fail-closed capabilities.
 
 ## Gate
 

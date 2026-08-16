@@ -405,11 +405,23 @@ int Finalize(Owner* owner, uintptr_t start, uintptr_t end) {
   return 0;
 }
 
-void UnpublishAll(Owner* owner) {
-  if (owner == nullptr) return;
+bool ContainsAddress(const Owner *owner, uintptr_t address) {
+  if (owner == nullptr || address == 0)
+    return false;
+  for (const Owner::PublishedImage &image : owner->published) {
+    if (address >= image.start && address < image.end)
+      return true;
+  }
+  return false;
+}
+
+void UnpublishAll(Owner *owner) {
+  if (owner == nullptr)
+    return;
   for (auto it = owner->published.rbegin(); it != owner->published.rend();
        ++it) {
-    if (!ProcessRegistry().Unpublish(it->image_id)) std::abort();
+    if (!ProcessRegistry().Unpublish(it->image_id))
+      std::abort();
   }
   owner->published.clear();
 }
