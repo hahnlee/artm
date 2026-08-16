@@ -40,6 +40,12 @@ programmatic-UI subset with:
 ./tools/run-android-apk-app.sh path/to/app.apk 30
 ```
 
+The interactive runner renders a 1280x720 Android surface into a 640x360
+logical macOS window with a 2x `CAMetalLayer` backing scale. Framework density
+is set to 320 dpi for that mode, so widget size is unchanged while Retina
+sharpness is preserved. Headless acceptance remains 640x360 for stable,
+low-cost regression captures.
+
 The runner never extracts or rewrites the APK. It rejects APKs containing
 native libraries, secondary DEX files, or an ambiguous launcher before ART is
 created. App resource-table/layout inflation and Android system services are

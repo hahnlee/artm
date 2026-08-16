@@ -19,6 +19,21 @@ public final class ProbeResources extends Resources {
 
     private final boolean frameworkResources;
 
+    public static void configureDisplayScale(int scale) {
+        if (scale != 1 && scale != 2) {
+            throw new IllegalArgumentException("display scale must be 1 or 2");
+        }
+        int densityDpi = DisplayMetrics.DENSITY_DEFAULT * scale;
+        CONFIGURATION.setToDefaults();
+        CONFIGURATION.densityDpi = densityDpi;
+        DISPLAY_METRICS.setToDefaults();
+        DISPLAY_METRICS.density = scale;
+        DISPLAY_METRICS.densityDpi = densityDpi;
+        DISPLAY_METRICS.scaledDensity = scale;
+        DISPLAY_METRICS.xdpi = densityDpi;
+        DISPLAY_METRICS.ydpi = densityDpi;
+    }
+
     public ProbeResources(AssetManager assets, boolean frameworkResources) {
         super(assets, DISPLAY_METRICS, CONFIGURATION);
         this.frameworkResources = frameworkResources;

@@ -57,6 +57,7 @@ export DARWIN_ART_APK_APP_SUPPORT_DEX="$support_dex"
 export DARWIN_ART_FRAMEWORK_RES_APK="$framework_res"
 export DARWIN_ART_TEST_FONTS_XML="$fonts_xml"
 export DARWIN_ART_TEST_FONT="$roboto"
+export DARWIN_ART_WINDOW_SCALE=2
 
 echo "$metadata"
 exec "$host" --window-seconds "$seconds" \

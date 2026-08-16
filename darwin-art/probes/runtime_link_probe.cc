@@ -964,6 +964,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::getenv("DARWIN_ART_APK_APP_SUPPORT_DEX");
   const char* framework_res_apk =
       std::getenv("DARWIN_ART_FRAMEWORK_RES_APK");
+  const char* window_scale_value =
+      std::getenv("DARWIN_ART_WINDOW_SCALE");
   const bool has_apk_app_environment =
       apk_app_package != nullptr || apk_app_activity != nullptr ||
       apk_app_descriptor != nullptr || apk_app_support_dex != nullptr ||
@@ -977,11 +979,20 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::strlen(apk_app_descriptor) >= 3u &&
       std::strlen(apk_app_descriptor) <= 513u &&
       apk_app_descriptor[std::strlen(apk_app_descriptor) - 1u] == ';';
+  const bool valid_window_scale =
+      window_scale_value == nullptr ||
+      std::strcmp(window_scale_value, "1") == 0 ||
+      std::strcmp(window_scale_value, "2") == 0;
+  const jint window_scale =
+      run_apk_app && window_scale_value != nullptr &&
+              std::strcmp(window_scale_value, "2") == 0
+          ? 2
+          : 1;
   const bool expect_apk_widgets =
       run_apk_app &&
       std::getenv("DARWIN_ART_APK_APP_EXPECT_WIDGETS") != nullptr &&
       std::strcmp(std::getenv("DARWIN_ART_APK_APP_EXPECT_WIDGETS"), "1") == 0;
-  if (has_apk_app_environment && !run_apk_app) {
+  if ((has_apk_app_environment && !run_apk_app) || !valid_window_scale) {
     std::cerr << "ART Android APK app environment is incomplete or invalid\n";
     return 48;
   }
@@ -1437,15 +1448,26 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? nullptr
           : env->GetMethodID(probe_resources_class, "<init>",
                              "(Landroid/content/res/AssetManager;Z)V");
+  jmethodID configure_display_scale =
+      probe_resources_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(probe_resources_class,
+                                   "configureDisplayScale", "(I)V");
+  if (configure_display_scale != nullptr) {
+    env->CallStaticVoidMethod(probe_resources_class, configure_display_scale,
+                              window_scale);
+  }
   jobject probe_resources =
-      probe_resources_constructor == nullptr || asset_manager == nullptr
+      probe_resources_constructor == nullptr || asset_manager == nullptr ||
+              env->ExceptionCheck()
           ? nullptr
           : env->NewObject(probe_resources_class, probe_resources_constructor,
                            asset_manager,
                            run_apk_app ? JNI_TRUE : JNI_FALSE);
   if (activity_info == nullptr || application == nullptr ||
       asset_manager == nullptr || configured_apk_assets == nullptr ||
-      apk_assets_field == nullptr || probe_resources == nullptr ||
+      apk_assets_field == nullptr || configure_display_scale == nullptr ||
+      probe_resources == nullptr ||
       env->ExceptionCheck()) {
     std::cerr << "ART Android resources: bootstrap construction failed\n";
     if (self->IsExceptionPending()) {
@@ -1836,7 +1858,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
               !env->IsSameObject(attached_decor, decor_view) ||
               env->ExceptionCheck()
           ? JNI_FALSE
-          : PresentContent(env, nullptr, attached_decor, 640, 360);
+          : PresentContent(env, nullptr, attached_decor, 640 * window_scale,
+                           360 * window_scale);
   jmethodID was_presented =
       run_apk_app
           ? nullptr
@@ -1851,8 +1874,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                      was_presented == nullptr || env->ExceptionCheck()
                  ? JNI_FALSE
                  : env->CallBooleanMethod(probe_view, was_presented));
-  if (view_presented != JNI_TRUE || g_frame_width != 640 ||
-      g_frame_height != 360 || env->ExceptionCheck()) {
+  if (view_presented != JNI_TRUE ||
+      g_frame_width != static_cast<std::size_t>(640 * window_scale) ||
+      g_frame_height != static_cast<std::size_t>(360 * window_scale) ||
+      env->ExceptionCheck()) {
     std::cerr << "ART Android view: Activity content presentation failed\n";
     if (self->IsExceptionPending()) {
       std::cerr << self->GetException()->Dump() << "\n";

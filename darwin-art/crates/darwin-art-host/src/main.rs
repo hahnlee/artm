@@ -94,6 +94,13 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         env::var("DARWIN_ART_APK_APP_PACKAGE"),
         env::var("DARWIN_ART_APK_APP_ACTIVITY"),
     ) {
+        let render_scale = match env::var("DARWIN_ART_WINDOW_SCALE").as_deref() {
+            Ok("2") => 2,
+            Ok("1") | Err(_) => 1,
+            Ok(_) => return Err("DARWIN_ART_WINDOW_SCALE must be 1 or 2".into()),
+        };
+        let expected_width = 640 * render_scale;
+        let expected_height = 360 * render_scale;
         let frame = outcome
             .last_frame
             .as_ref()
@@ -102,7 +109,10 @@ fn main_result() -> Result<(), Box<dyn Error>> {
             .argb_pixels
             .iter()
             .all(|pixel| pixel & 0xff00_0000 == 0xff00_0000);
-        if frame.width != 640 || frame.height != 360 || outcome.frames_presented != 1 || !all_opaque
+        if frame.width != expected_width
+            || frame.height != expected_height
+            || outcome.frames_presented != 1
+            || !all_opaque
         {
             return Err("APK Activity frame did not match its opaque frame contract".into());
         }
@@ -123,8 +133,9 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         } else {
             ""
         };
+        let pixel_count = frame.width as u64 * frame.height as u64;
         println!(
-            "ART Android APK: package={package} launcher={activity} classes.dex=APK native=0 pixels=230400/opaque{widget}"
+            "ART Android APK: package={package} launcher={activity} classes.dex=APK native=0 pixels={pixel_count}/opaque{widget}"
         );
     } else {
         println!(

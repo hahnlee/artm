@@ -1624,7 +1624,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=12 methods=313 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=12 methods=315 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldev/darwinart/probe/Hello; \
                     class[2]=Ldev/darwinart/probe/ProbeActivity; \
@@ -1699,7 +1699,7 @@ fn build_elf_jni_dex_probe(root: &Path) -> Result<()> {
             .arg(class_dir.join("darwin/art/nativefixture/NativeFixture.class")),
     )?;
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=321 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=323 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldarwin/art/nativefixture/NativeFixture; \
                     class[2]=Ldev/darwinart/probe/Hello; \
@@ -1760,7 +1760,7 @@ fn build_network_dex_probe(root: &Path) -> Result<()> {
             .arg(class_dir.join("dev/darwinart/probe/NetworkRuntimeFixture.class")),
     )?;
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    if !output.contains("classes=13 methods=313")
+    if !output.contains("classes=13 methods=315")
         || !output.contains("Ldev/darwinart/probe/NetworkRuntimeFixture;")
     {
         return Err(format!("unexpected network DEX probe output: {output:?}").into());
@@ -1804,7 +1804,7 @@ fn build_network_dex_probe(root: &Path) -> Result<()> {
     if !kind.contains("ELF 64-bit LSB shared object, ARM aarch64") {
         return Err(format!("unexpected network fixture format: {kind}").into());
     }
-    println!("build-network-dex: classes=13 methods=313 ELF=arm64 imports=8 loopback=only");
+    println!("build-network-dex: classes=13 methods=315 ELF=arm64 imports=8 loopback=only");
     Ok(())
 }
 
@@ -1876,7 +1876,7 @@ fn build_button_dex_probe(root: &Path) -> Result<()> {
     let classes_dex = dex_dir.join("classes.dex");
     let dex_probe = root.join("_build/dex-probe/dex-probe");
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=319 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=321 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldev/darwinart/probe/FontBootstrap; \
                     class[2]=Ldev/darwinart/probe/Hello; \
@@ -4775,6 +4775,9 @@ fn probe_runtime_dex_flavor(
             )
             .env("DARWIN_ART_FRAMEWORK_RES_APK", framework_res)
             .env("DARWIN_ART_APK_APP_EXPECT_WIDGETS", "1");
+        if show_window {
+            command.env("DARWIN_ART_WINDOW_SCALE", "2");
+        }
     }
     let mut network_fixture = None;
     if network {
@@ -4840,18 +4843,23 @@ fn probe_runtime_dex_flavor(
     }
     let output = command_output(&mut command)?;
     let expected = if apk_app {
-        "Hello from Darwin ART main: 안녕\n\
+        let render_scale = if show_window { 2 } else { 1 };
+        let frame_width = 640 * render_scale;
+        let frame_height = 360 * render_scale;
+        let pixel_count = frame_width * frame_height;
+        format!(
+            "Hello from Darwin ART main: 안녕\n\
          ART Darwin Runtime::Create: ok\n\
          ART Darwin app ClassLoader: PathClassLoader\n\
          ART Darwin DEX interpreter: Hello.answer()=42\n\
          ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
          ART runtime native: System.arraycopy()=42\n\
-         ART Android APK: package=dev.darwinart.simple launcher=dev.darwinart.simple.MainActivity classes.dex=APK native=0 pixels=230400/opaque widgets=TextView+CheckBox+RadioButton+ToggleButton+SeekBar+ProgressBar+Button colors>=8\n\
+         ART Android APK: package=dev.darwinart.simple launcher=dev.darwinart.simple.MainActivity classes.dex=APK native=0 pixels={pixel_count}/opaque widgets=TextView+CheckBox+RadioButton+ToggleButton+SeekBar+ProgressBar+Button colors>=8\n\
          ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
-         ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
+         ART Android view: Activity.setContentView()->DecorView.draw(Canvas)={frame_width}x{frame_height}\n\
          ART Android lifecycle: Activity.onCreate()=43\n\
          ART Darwin launcher: main(String[])=ok"
-            .to_owned()
+        )
     } else if network {
         "Hello from Darwin ART main: 안녕\n\
          ART Android network: JavaVMExt+JNI_OnLoad loopback-HTTP=42 socket+DNS=closed Internet=no\n\

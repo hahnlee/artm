@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <new>
@@ -50,13 +51,20 @@ NSString* WindowTitle(const char* title) {
   return result == nil ? @"Darwin ART Surface" : result;
 }
 
+CGFloat WindowScale(bool visible) {
+  const char* value = std::getenv("DARWIN_ART_WINDOW_SCALE");
+  return visible && value != nullptr && std::strcmp(value, "2") == 0 ? 2.0
+                                                                       : 1.0;
+}
+
 }  // namespace
 
 @interface DarwinArtMetalView : NSView
 @property(nonatomic, readonly) CAMetalLayer* metalLayer;
 - (instancetype)initWithFrame:(NSRect)frame
                        device:(id<MTLDevice>)device
-                    pixelSize:(CGSize)pixelSize;
+                    pixelSize:(CGSize)pixelSize
+                 contentScale:(CGFloat)contentScale;
 @end
 
 @implementation DarwinArtMetalView {
@@ -65,7 +73,8 @@ NSString* WindowTitle(const char* title) {
 
 - (instancetype)initWithFrame:(NSRect)frame
                        device:(id<MTLDevice>)device
-                    pixelSize:(CGSize)pixelSize {
+                    pixelSize:(CGSize)pixelSize
+                 contentScale:(CGFloat)contentScale {
   self = [super initWithFrame:frame];
   if (self != nil) {
     self.wantsLayer = YES;
@@ -75,7 +84,7 @@ NSString* WindowTitle(const char* title) {
     // The current presenter uses the CAMetalLayer drawable as a blit
     // destination. Metal forbids blits into framebuffer-only textures.
     _metalLayer.framebufferOnly = NO;
-    _metalLayer.contentsScale = 1.0;
+    _metalLayer.contentsScale = contentScale;
     _metalLayer.drawableSize = pixelSize;
     self.layer = _metalLayer;
   }
@@ -276,7 +285,9 @@ DarwinArtSurface* darwin_art_surface_create(
     if (create_info->visible) {
       [application setActivationPolicy:NSApplicationActivationPolicyRegular];
     }
-    NSRect frame = NSMakeRect(0, 0, create_info->width, create_info->height);
+    const CGFloat window_scale = WindowScale(create_info->visible);
+    NSRect frame = NSMakeRect(0, 0, create_info->width / window_scale,
+                              create_info->height / window_scale);
     surface->window = [[NSWindow alloc]
         initWithContentRect:frame
                   styleMask:(NSWindowStyleMaskTitled |
@@ -294,7 +305,8 @@ DarwinArtSurface* darwin_art_surface_create(
     surface->view = [[DarwinArtMetalView alloc]
         initWithFrame:frame
                device:device
-            pixelSize:CGSizeMake(create_info->width, create_info->height)];
+            pixelSize:CGSizeMake(create_info->width, create_info->height)
+         contentScale:window_scale];
     if (surface->view == nil || surface->view.metalLayer == nil) {
       delete surface;
       return finish(DARWIN_ART_SURFACE_ALLOCATION_FAILED, nullptr);
