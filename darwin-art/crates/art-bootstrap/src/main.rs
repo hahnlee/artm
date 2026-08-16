@@ -123,6 +123,8 @@ fn run() -> Result<()> {
         "probe-runtime-graphics-window" => probe_runtime_graphics_window(&root),
         "probe-runtime-button" => probe_runtime_button(&root, false),
         "probe-runtime-button-window" => probe_runtime_button(&root, true),
+        "probe-runtime-apk-app" => probe_runtime_apk_app(&root, false),
+        "probe-runtime-apk-app-window" => probe_runtime_apk_app(&root, true),
         "verify-bootclasspath" => verify_bootclasspath(&root),
         "all" => {
             doctor()?;
@@ -215,6 +217,8 @@ fn print_help() {
     println!("  probe-runtime-graphics-window  display the real Android Canvas frame in NSWindow");
     println!("  probe-runtime-button  draw a real android.widget.Button through AOSP HWUI");
     println!("  probe-runtime-button-window  display the real Button frame in NSWindow");
+    println!("  probe-runtime-apk-app  launch a no-native APK through its manifest Activity");
+    println!("  probe-runtime-apk-app-window  display the APK Activity frame in NSWindow");
     println!("  verify-bootclasspath  verify extracted Android 16 core DEX files");
     println!("  all        run every check and probe");
 }
@@ -1506,7 +1510,9 @@ fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(root.join("probes/ProbeCanvas.java"))
             .arg(root.join("probes/ProbeView.java"))
             .arg(root.join("probes/ProbeContentRoot.java"))
-            .arg(root.join("probes/compile-stubs/android/content/IContentProvider.java")),
+            .arg(root.join("probes/compile-stubs/android/content/IContentProvider.java"))
+            .arg(root.join("probes/compile-stubs/android/content/ContentCaptureOptions.java"))
+            .arg(root.join("probes/compile-stubs/android/view/autofill/AutofillManager.java")),
     )?;
 
     run_command(
@@ -1618,7 +1624,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=12 methods=301 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=12 methods=303 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldev/darwinart/probe/Hello; \
                     class[2]=Ldev/darwinart/probe/ProbeActivity; \
@@ -3734,6 +3740,8 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         root.join("_aosp/libnativehelper/header_only_include"),
         root.join("_aosp/libnativehelper/platform_header_only_include"),
         root.join("_aosp/external/dlmalloc"),
+        root.join("tools/bionic-dns-facade/include"),
+        root.join("tools/bionic-socket-broker-adapter/include"),
         PathBuf::from("/opt/homebrew/include"),
     ];
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
@@ -4058,17 +4066,17 @@ fn build_runtime_host(root: &Path) -> Result<()> {
 }
 
 fn probe_runtime_dex(root: &Path, show_window: bool) -> Result<()> {
-    probe_runtime_dex_flavor(root, show_window, false, false, false, false)
+    probe_runtime_dex_flavor(root, show_window, false, false, false, false, false)
 }
 
 fn probe_runtime_elf_jni(root: &Path) -> Result<()> {
     build_elf_jni_dex_probe(root)?;
-    probe_runtime_dex_flavor(root, false, false, false, true, false)
+    probe_runtime_dex_flavor(root, false, false, false, true, false, false)
 }
 
 fn probe_runtime_network(root: &Path) -> Result<()> {
     build_network_dex_probe(root)?;
-    probe_runtime_dex_flavor(root, false, false, false, false, true)
+    probe_runtime_dex_flavor(root, false, false, false, false, true, false)
 }
 
 fn pinned_direct_apk_ndk_bin() -> Result<PathBuf> {
@@ -4626,15 +4634,20 @@ fn prepare_private_apk_native_fixture(root: &Path) -> Result<PrivateApkNativeFix
 }
 
 fn probe_runtime_graphics(root: &Path) -> Result<()> {
-    probe_runtime_dex_flavor(root, false, true, false, false, false)
+    probe_runtime_dex_flavor(root, false, true, false, false, false, false)
 }
 
 fn probe_runtime_graphics_window(root: &Path) -> Result<()> {
-    probe_runtime_dex_flavor(root, true, true, false, false, false)
+    probe_runtime_dex_flavor(root, true, true, false, false, false, false)
 }
 
 fn probe_runtime_button(root: &Path, show_window: bool) -> Result<()> {
-    probe_runtime_dex_flavor(root, show_window, true, true, false, false)
+    probe_runtime_dex_flavor(root, show_window, true, true, false, false, false)
+}
+
+fn probe_runtime_apk_app(root: &Path, show_window: bool) -> Result<()> {
+    build_shell_gate(root, "android-apk-app-runtime/audit.sh")?;
+    probe_runtime_dex_flavor(root, show_window, true, false, false, false, true)
 }
 
 fn probe_runtime_dex_flavor(
@@ -4644,6 +4657,7 @@ fn probe_runtime_dex_flavor(
     button: bool,
     elf_jni: bool,
     network: bool,
+    apk_app: bool,
 ) -> Result<()> {
     let core_icu4j = if real_graphics {
         prepare_icu_runtime_bootclasspath(root)?
@@ -4660,7 +4674,9 @@ fn probe_runtime_dex_flavor(
     let core_oj = root.join("_prebuilt/android-16/bootclasspath/core-oj.jar");
     let core_libart = root.join("_prebuilt/android-16/bootclasspath/core-libart.jar");
     let framework = root.join("_prebuilt/android-16/bootclasspath/framework.jar");
-    let classes_dex = root.join(if network {
+    let classes_dex = root.join(if apk_app {
+        "_build/android-apk-app-runtime/simple-no-native.apk"
+    } else if network {
         "_build/network-runtime-probe/dex/classes.dex"
     } else if elf_jni {
         "_build/elf-jni-dex/dex/classes.dex"
@@ -4728,6 +4744,22 @@ fn probe_runtime_dex_flavor(
                 .env("DARWIN_ART_TEST_FONT", roboto);
         }
     }
+    if apk_app {
+        command
+            .env("DARWIN_ART_APK_APP_PACKAGE", "dev.darwinart.simple")
+            .env(
+                "DARWIN_ART_APK_APP_ACTIVITY",
+                "dev.darwinart.simple.MainActivity",
+            )
+            .env(
+                "DARWIN_ART_APK_APP_DESCRIPTOR",
+                "Ldev/darwinart/simple/MainActivity;",
+            )
+            .env(
+                "DARWIN_ART_APK_APP_SUPPORT_DEX",
+                root.join("_build/dex-probe/dex/classes.dex"),
+            );
+    }
     let mut network_fixture = None;
     if network {
         let fixture = prepare_private_network_fixture(root)?;
@@ -4791,7 +4823,20 @@ fn probe_runtime_dex_flavor(
         apk_native_fixture = Some(extracted);
     }
     let output = command_output(&mut command)?;
-    let expected = if network {
+    let expected = if apk_app {
+        "Hello from Darwin ART main: 안녕\n\
+         ART Darwin Runtime::Create: ok\n\
+         ART Darwin app ClassLoader: PathClassLoader\n\
+         ART Darwin DEX interpreter: Hello.answer()=42\n\
+         ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
+         ART runtime native: System.arraycopy()=42\n\
+         ART Android APK: package=dev.darwinart.simple launcher=dev.darwinart.simple.MainActivity classes.dex=APK native=0 pixels=230400/opaque colors=6\n\
+         ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
+         ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
+         ART Android lifecycle: Activity.onCreate()=43\n\
+         ART Darwin launcher: main(String[])=ok"
+            .to_owned()
+    } else if network {
         "Hello from Darwin ART main: 안녕\n\
          ART Android network: JavaVMExt+JNI_OnLoad loopback-HTTP=42 socket+DNS=closed Internet=no\n\
          ART Darwin Runtime::Create: ok\n\
@@ -4845,7 +4890,15 @@ fn probe_runtime_dex_flavor(
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }
     drop(network_fixture);
-    if network {
+    if apk_app {
+        if show_window {
+            println!("probe-runtime-apk-app-window: APK -> Activity.onCreate -> NSWindow");
+        } else {
+            println!(
+                "probe-runtime-apk-app: no-native APK -> manifest Activity -> frame -> shutdown"
+            );
+        }
+    } else if network {
         println!("probe-runtime-network: ART JNI loopback + socket/DNS quiescence PASS");
     } else if elf_jni {
         println!("probe-runtime-elf-jni: ART DT_NEEDED graph + JNI + reverse finalizers PASS");

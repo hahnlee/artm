@@ -62,10 +62,45 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         "ART runtime native: System.arraycopy()={}",
         outcome.process.arraycopy_result
     );
-    println!(
-        "ART Android framework: ProbeActivity().probeValue()={}",
-        outcome.process.activity_probe_result
-    );
+    if let (Ok(package), Ok(activity)) = (
+        env::var("DARWIN_ART_APK_APP_PACKAGE"),
+        env::var("DARWIN_ART_APK_APP_ACTIVITY"),
+    ) {
+        let frame = outcome
+            .last_frame
+            .as_ref()
+            .ok_or("APK Activity did not produce a host frame")?;
+        let required_colors = [
+            0xff0f_172a_u32,
+            0xfff8_fafc,
+            0xff3d_dc84,
+            0xff33_4155,
+            0xff94_a3b8,
+            0xff25_63eb,
+        ];
+        let all_opaque = frame
+            .argb_pixels
+            .iter()
+            .all(|pixel| pixel & 0xff00_0000 == 0xff00_0000);
+        if frame.width != 640
+            || frame.height != 360
+            || outcome.frames_presented != 1
+            || !all_opaque
+            || required_colors
+                .iter()
+                .any(|color| !frame.argb_pixels.contains(color))
+        {
+            return Err("APK Activity frame did not match its six-color opaque contract".into());
+        }
+        println!(
+            "ART Android APK: package={package} launcher={activity} classes.dex=APK native=0 pixels=230400/opaque colors=6"
+        );
+    } else {
+        println!(
+            "ART Android framework: ProbeActivity().probeValue()={}",
+            outcome.process.activity_probe_result
+        );
+    }
     println!("ART Android window: Activity.attach()=PhoneWindow+DecorView");
     println!(
         "ART Android view: Activity.setContentView()->DecorView.draw(Canvas)={}x{}",

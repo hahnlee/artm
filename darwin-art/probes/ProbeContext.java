@@ -2,12 +2,14 @@ package dev.darwinart.probe;
 
 import android.content.AttributionSource;
 import android.content.ContentResolver;
+import android.content.ContentCaptureOptions;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.os.Looper;
+import android.view.autofill.AutofillManager;
 
 import java.lang.reflect.Constructor;
 
@@ -84,6 +86,13 @@ public final class ProbeContext extends ContextWrapper {
         }
         return null;
     }
+
+    // Hidden Context hooks called by Activity.attachBaseContext(). The Darwin
+    // host does not expose autofill or content-capture services, so ownership
+    // stays with the attached Activity while these services remain disabled.
+    public void setAutofillClient(AutofillManager.AutofillClient client) {}
+
+    public void setContentCaptureOptions(ContentCaptureOptions options) {}
 
     @Override
     public String getPackageName() {

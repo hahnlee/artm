@@ -956,6 +956,27 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::getenv("DARWIN_ART_ANDROID_NETWORK_FIXTURE");
   const bool run_network_acceptance =
       network_fixture_path != nullptr && network_fixture_path[0] != '\0';
+  const char* apk_app_package = std::getenv("DARWIN_ART_APK_APP_PACKAGE");
+  const char* apk_app_activity = std::getenv("DARWIN_ART_APK_APP_ACTIVITY");
+  const char* apk_app_descriptor =
+      std::getenv("DARWIN_ART_APK_APP_DESCRIPTOR");
+  const char* apk_app_support_dex =
+      std::getenv("DARWIN_ART_APK_APP_SUPPORT_DEX");
+  const bool has_apk_app_environment =
+      apk_app_package != nullptr || apk_app_activity != nullptr ||
+      apk_app_descriptor != nullptr || apk_app_support_dex != nullptr;
+  const bool run_apk_app =
+      apk_app_package != nullptr && apk_app_package[0] != '\0' &&
+      apk_app_activity != nullptr && apk_app_activity[0] != '\0' &&
+      apk_app_descriptor != nullptr && apk_app_descriptor[0] == 'L' &&
+      apk_app_support_dex != nullptr && apk_app_support_dex[0] != '\0' &&
+      std::strlen(apk_app_descriptor) >= 3u &&
+      std::strlen(apk_app_descriptor) <= 513u &&
+      apk_app_descriptor[std::strlen(apk_app_descriptor) - 1u] == ';';
+  if (has_apk_app_environment && !run_apk_app) {
+    std::cerr << "ART Android APK app environment is incomplete or invalid\n";
+    return 48;
+  }
   if (run_network_acceptance &&
       (run_elf_jni_fixture || run_generic_elf || run_apk_elf ||
        run_libcxx_acceptance || run_tls_acceptance || run_direct_apk)) {
@@ -1031,6 +1052,15 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       g_process_state.app_dex_files;
   CHECK(app_dex_files.empty());
   std::string dex_error;
+  if (run_apk_app) {
+    art::ArtDexFileLoader support_loader(apk_app_support_dex);
+    if (!support_loader.Open(/* verify= */ true,
+                             /* verify_checksum= */ true, &dex_error,
+                             &app_dex_files)) {
+      std::cerr << "ART Darwin support DEX: open failed: " << dex_error << "\n";
+      return 3;
+    }
+  }
   art::ArtDexFileLoader dex_loader(config->app_dex);
   if (!dex_loader.Open(/* verify= */ true,
                        /* verify_checksum= */ true, &dex_error,
@@ -1075,10 +1105,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     }
     return 21;
   }
-  art::Handle<art::mirror::Class> probe_activity =
-      hs.NewHandle(class_linker->FindClass(
-          self, "Ldev/darwinart/probe/ProbeActivity;",
-          sizeof("Ldev/darwinart/probe/ProbeActivity;") - 1u, app_loader));
+  const char* activity_descriptor =
+      run_apk_app ? apk_app_descriptor : "Ldev/darwinart/probe/ProbeActivity;";
+  art::Handle<art::mirror::Class> probe_activity = hs.NewHandle(
+      class_linker->FindClass(self, activity_descriptor,
+                              std::strlen(activity_descriptor), app_loader));
   if (probe_activity == nullptr || self->IsExceptionPending()) {
     std::cerr << "ART Android framework: Activity subclass lookup failed\n";
     if (self->IsExceptionPending()) {
@@ -1273,7 +1304,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   }
 
   if (!class_linker->EnsureInitialized(self, probe_activity, true, true)) {
-    std::cerr << "ART Android framework: ProbeActivity initialization failed\n"
+    std::cerr << "ART Android framework: launcher Activity initialization failed\n"
               << self->GetException()->Dump() << "\n";
     return 22;
   }
@@ -1284,11 +1315,15 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? nullptr
           : env->NewObject(probe_activity_class, activity_constructor);
   jmethodID probe_value =
-      env->GetMethodID(probe_activity_class, "probeValue", "()I");
+      run_apk_app
+          ? nullptr
+          : env->GetMethodID(probe_activity_class, "probeValue", "()I");
   jint activity_result =
-      activity_instance == nullptr || probe_value == nullptr
-          ? -1
-          : env->CallIntMethod(activity_instance, probe_value);
+      run_apk_app
+          ? (activity_instance == nullptr ? -1 : 42)
+          : (activity_instance == nullptr || probe_value == nullptr
+                 ? -1
+                 : env->CallIntMethod(activity_instance, probe_value));
   if (env->ExceptionCheck()) {
     std::cerr << "ART Android framework: ProbeActivity constructor threw\n"
               << self->GetException()->Dump() << "\n";
@@ -1418,9 +1453,12 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       configuration_class == nullptr
           ? nullptr
           : env->GetMethodID(configuration_class, "<init>", "()V");
-  jstring package_name = env->NewStringUTF("dev.darwinart.probe");
-  jstring class_name = env->NewStringUTF("dev.darwinart.probe.ProbeActivity");
-  jstring title = env->NewStringUTF("Darwin ART Probe");
+  jstring package_name = env->NewStringUTF(
+      run_apk_app ? apk_app_package : "dev.darwinart.probe");
+  jstring class_name = env->NewStringUTF(
+      run_apk_app ? apk_app_activity : "dev.darwinart.probe.ProbeActivity");
+  jstring title =
+      env->NewStringUTF(run_apk_app ? "Darwin ART APK" : "Darwin ART Probe");
   jobject component_name =
       component_name_constructor == nullptr
           ? nullptr
@@ -1469,13 +1507,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? nullptr
           : env->GetMethodID(context_theme_wrapper_class, "attachBaseContext",
                              "(Landroid/content/Context;)V");
-  if (attach_base_context != nullptr) {
+  if (!run_apk_app && attach_base_context != nullptr) {
     env->CallNonvirtualVoidMethod(activity_instance,
                                   context_theme_wrapper_class,
                                   attach_base_context,
                                   probe_context);
   }
-  if (attach_base_context == nullptr || env->ExceptionCheck()) {
+  if ((!run_apk_app && attach_base_context == nullptr) ||
+      env->ExceptionCheck()) {
     std::cerr << "ART Android window: base Context preparation failed\n";
     if (self->IsExceptionPending()) {
       std::cerr << self->GetException()->Dump() << "\n";
@@ -1654,11 +1693,20 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   }
 
   jmethodID probe_on_create =
-      env->GetMethodID(probe_activity_class, "probeOnCreate", "()I");
-  jint lifecycle_result =
-      probe_on_create == nullptr
-          ? -1
-          : env->CallIntMethod(activity_instance, probe_on_create);
+      run_apk_app
+          ? env->GetMethodID(probe_activity_class, "onCreate",
+                             "(Landroid/os/Bundle;)V")
+          : env->GetMethodID(probe_activity_class, "probeOnCreate", "()I");
+  jint lifecycle_result = -1;
+  if (probe_on_create != nullptr) {
+    if (run_apk_app) {
+      env->CallVoidMethod(activity_instance, probe_on_create, nullptr);
+      lifecycle_result = env->ExceptionCheck() ? -1 : 43;
+    } else {
+      lifecycle_result =
+          env->CallIntMethod(activity_instance, probe_on_create);
+    }
+  }
   if (env->ExceptionCheck()) {
     std::cerr << "ART Android lifecycle: Activity.onCreate() threw\n"
               << self->GetException()->Dump() << "\n";
@@ -1690,13 +1738,19 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? JNI_FALSE
           : PresentContent(env, nullptr, attached_decor, 640, 360);
   jmethodID was_presented =
-      env->GetMethodID(probe_view_class, "wasPresented", "()Z");
+      run_apk_app
+          ? nullptr
+          : env->GetMethodID(probe_view_class, "wasPresented", "()Z");
   const jboolean view_presented =
-      decor_presented != JNI_TRUE || probe_view == nullptr ||
-              !env->IsInstanceOf(probe_view, probe_view_class) ||
-              was_presented == nullptr || env->ExceptionCheck()
-          ? JNI_FALSE
-          : env->CallBooleanMethod(probe_view, was_presented);
+      run_apk_app
+          ? (decor_presented == JNI_TRUE && probe_view != nullptr
+                 ? JNI_TRUE
+                 : JNI_FALSE)
+          : (decor_presented != JNI_TRUE || probe_view == nullptr ||
+                     !env->IsInstanceOf(probe_view, probe_view_class) ||
+                     was_presented == nullptr || env->ExceptionCheck()
+                 ? JNI_FALSE
+                 : env->CallBooleanMethod(probe_view, was_presented));
   if (view_presented != JNI_TRUE || g_frame_width != 640 ||
       g_frame_height != 360 || env->ExceptionCheck()) {
     std::cerr << "ART Android view: Activity content presentation failed\n";

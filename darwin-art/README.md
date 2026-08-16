@@ -91,7 +91,7 @@ probe-asm: ART Darwin ARM64 assembly result: 42
 probe-pagesize: ART Darwin page size: 16384
 build-foundation: libartbase Darwin: 1.500ms
 build-skia: Skia Darwin raster: 64x64 rowBytes=256 hash=a4bb4cdb0b4779ea Skia Android framework utils: base-canvas=same surface=same reset-clip=64x64 ...
-build-dex: AOSP DEX: verified=yes version=35 classes=12 methods=301 ... corrupt=rejected
+build-dex: AOSP DEX: verified=yes version=35 classes=12 methods=303 ... corrupt=rejected
 build-runtime-platform: Mach-O arm64 objects=3 archive=...
 build-runtime-core: pthread monitor bootstrap objects=2 archive=...
 build-runtime-arm64: generated ABI constants, Mach-O objects=10 archive=...
@@ -107,6 +107,16 @@ To keep the native window visible for three seconds, run:
 
 ```bash
 cargo run -p art-bootstrap -- probe-window
+```
+
+A real, no-native APK with a binary manifest and a single app-only
+`classes.dex` can launch its `MAIN/LAUNCHER` Activity into the Darwin window:
+
+```bash
+./tools/android-apk-app-runtime/audit.sh
+cargo run -q -p art-bootstrap -- probe-runtime-apk-app-window
+# Or pass another APK in the current programmatic-UI subset:
+./tools/run-android-apk-app.sh path/to/app.apk 30
 ```
 
 The current Activity scene is deliberately small: `ProbeView.onDraw()` creates
