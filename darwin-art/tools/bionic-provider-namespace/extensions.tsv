@@ -1,0 +1,2 @@
+soname	symbol	version	owner	rationale
+libc.so	pthread_create	LIBC	pthread	provider-owned thread creation required by general Android DSOs but absent from pinned libc++ imports

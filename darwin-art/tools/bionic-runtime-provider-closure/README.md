@@ -6,10 +6,11 @@ it combines the existing C, C++, and Rust provider archives so
 `darwin_art_bionic_namespace_bind_builtins` can bind every manifest owner to
 its actual resolver.
 
-The current closure contains twenty-nine providers and resolves 178 exact routes:
-all 160 pinned Android 35 arm64 `libc++_shared.so` libc-family imports plus
-all 18 public `liblog.so` exports. Unknown SONAMEs, symbols, or GNU versions
-never fall back to dyld or host `dlsym`.
+The current closure contains twenty-nine providers and resolves 179 exact
+routes: all 160 pinned Android 35 arm64 `libc++_shared.so` libc-family imports,
+the pthread provider's reviewed `pthread_create@LIBC` extension, and all 18
+public `liblog.so` exports. Unknown SONAMEs, symbols, or GNU versions never fall
+back to dyld or host `dlsym`.
 
 Run:
 

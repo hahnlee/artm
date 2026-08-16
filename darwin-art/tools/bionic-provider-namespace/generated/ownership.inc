@@ -76,6 +76,7 @@
     {"libc.so", "pthread_cond_signal", "LIBC", DARWIN_ART_BIONIC_PROVIDER_PTHREAD},
     {"libc.so", "pthread_cond_timedwait", "LIBC", DARWIN_ART_BIONIC_PROVIDER_PTHREAD},
     {"libc.so", "pthread_cond_wait", "LIBC", DARWIN_ART_BIONIC_PROVIDER_PTHREAD},
+    {"libc.so", "pthread_create", "LIBC", DARWIN_ART_BIONIC_PROVIDER_PTHREAD},
     {"libc.so", "pthread_detach", "LIBC", DARWIN_ART_BIONIC_PROVIDER_PTHREAD},
     {"libc.so", "pthread_getspecific", "LIBC", DARWIN_ART_BIONIC_PROVIDER_PTHREAD},
     {"libc.so", "pthread_join", "LIBC", DARWIN_ART_BIONIC_PROVIDER_PTHREAD},

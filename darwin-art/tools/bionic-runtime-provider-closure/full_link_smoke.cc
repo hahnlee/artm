@@ -97,7 +97,7 @@ int main() {
   darwin_art_bionic_namespace_destroy(instance);
   std::fprintf(stderr,
                "bionic-runtime-provider-closure: PASS bind_builtins=29 "
-               "routes=178 actual-resolvers=yes wide-stdio=central-lease "
+               "routes=179 actual-resolvers=yes wide-stdio=central-lease "
                "syslog-tag=owned-copy\n");
   return 0;
 }

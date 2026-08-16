@@ -194,7 +194,7 @@ int main() {
         result.owner != expected.owner || result.address == 0)
       return 11;
   }
-  constexpr size_t kExpectedCalls[] = {11, 4,  1,  29, 3, 24, 3, 1, 13, 31, 6,
+  constexpr size_t kExpectedCalls[] = {11, 4,  1,  29, 3, 25, 3, 1, 13, 31, 6,
                                        2,  3,  1,  4,  2, 18, 2, 2, 3,  2, 1,
                                        3, 3, 2, 1, 1, 1, 1};
   for (size_t index = 0; index < calls.size(); ++index) {
@@ -206,6 +206,6 @@ int main() {
     return 13;
   darwin_art_bionic_namespace_destroy(instance);
   std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=29 "
-                       "routes=178 libdl-soname=exact\n");
+                       "routes=179 libdl-soname=exact\n");
   return 0;
 }

@@ -3,7 +3,8 @@
 This integration seam composes the standalone Bionic providers into one exact
 SONAME/symbol/version namespace without modifying their implementations. The
 generated ownership table covers all 160 of the pinned NDK r28c API-35 arm64
-`libc++_shared.so`'s 160 libc-family `@LIBC` imports and all 18
+`libc++_shared.so`'s 160 libc-family `@LIBC` imports, the provider-owned
+`pthread_create@LIBC` extension needed by general Android DSOs, and all 18
 unversioned `liblog.so` exports. `generated/unsupported-libc.tsv` is empty;
 unknown symbols remain capability errors rather than candidates for a Darwin
 symbol with the same name.
@@ -18,9 +19,10 @@ syslog state/Android variadic capture, bounded formatted stdio over
 provider-local Android `FILE`, exact libc++ syscall dispatch, liblog, and DSO
 lifecycle, plus Linux-offset sendfile over the process filesystem owner.
 `generate_manifests.py` derives the
-table directly from those provider manifests and the canonical 160-import
-classification. It refuses a duplicate owner or a symbol outside that pinned
-universe. 159 imports are owned by `libc.so`; loader-owned
+table directly from those provider manifests, the canonical 160-import
+classification, and the reviewed extension manifest. It refuses a duplicate
+owner or an unreviewed extension. 159 pinned imports plus `pthread_create` are
+owned by `libc.so`; loader-owned
 `dl_iterate_phdr` is owned by `libdl.so`, matching that provider's actual
 contract and libc++'s `DT_NEEDED`. Both accept only `LIBC`; `liblog.so` accepts
 only an absent or empty version.
@@ -54,9 +56,9 @@ after namespace composition.
 
 Run `tools/bionic-provider-namespace/audit.sh`. It regenerates and diffs every
 table, re-derives all 160 libc imports from the hash-pinned real NDK ELF,
-checks 178 unique `(SONAME, symbol)` routes and zero unsupported libc
+checks 179 unique `(SONAME, symbol)` routes and zero unsupported libc
 imports, rejects wrong SONAMEs and versions, performs 12-thread lookup stress,
-routes all 178 entries through the typed adapters with exact per-provider
+routes all 179 entries through the typed adapters with exact per-provider
 counts (including the distinct `libdl.so` contract),
 proves teardown waits for a blocked resolver and releases every provider once
 in order, scans for host-loader escape hatches, and repeats the C++ boundary

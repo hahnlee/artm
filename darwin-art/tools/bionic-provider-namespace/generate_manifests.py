@@ -149,9 +149,22 @@ def main() -> int:
         "formatted-stdio": "DARWIN_ART_BIONIC_PROVIDER_FORMATTED_STDIO",
         "syscall": "DARWIN_ART_BIONIC_PROVIDER_SYSCALL",
     }
+    extensions = rows("tools/bionic-provider-namespace/extensions.tsv")
+    extension_keys: set[tuple[str, str, str]] = set()
+    for row in extensions:
+        key = (row["soname"], row["symbol"], row["version"])
+        if (
+            row["owner"] not in owner_enum
+            or row["symbol"] in universe
+            or key in extension_keys
+        ):
+            raise SystemExit(f"invalid provider namespace extension: {row}")
+        extension_keys.add(key)
     ownership = sorted(
         [("libdl.so" if owner == "phdr" else "libc.so",
           symbol, "LIBC", owner) for symbol, owner in claimed.items()]
+        + [(row["soname"], row["symbol"], row["version"], row["owner"])
+           for row in extensions]
         + [("liblog.so", symbol, "", "liblog") for symbol in liblog]
     )
     unsupported = sorted(

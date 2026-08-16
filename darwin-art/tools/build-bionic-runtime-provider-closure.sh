@@ -362,4 +362,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=29 bind_builtins=sealed routes=178 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=29 bind_builtins=sealed routes=179 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'
