@@ -109,35 +109,16 @@ class ScopedJniLocalFrame final {
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     const darwin_art_process_config_t* config,
     darwin_art_process_result_t* run_result) {
-  if (config == nullptr || run_result == nullptr ||
-      config->struct_size < sizeof(darwin_art_process_config_t) ||
-      run_result->struct_size < sizeof(darwin_art_process_result_t) ||
-      config->abi_version != DARWIN_ART_ABI_VERSION ||
-      run_result->abi_version != DARWIN_ART_ABI_VERSION ||
-      config->core_oj_jar == nullptr || config->core_libart_jar == nullptr ||
-      config->framework_jar == nullptr || config->core_icu4j_jar == nullptr ||
-      config->app_dex == nullptr) {
-    std::cerr << "darwin_art_run_process: invalid ABI/configuration\n";
-    return 64;
+  darwin_art_process::ProcessConfigBounds config_bounds;
+  std::string config_error;
+  const int config_status = darwin_art_process::ValidateProcessConfig(
+      config, run_result, &config_bounds, &config_error);
+  if (config_status != 0) {
+    std::cerr << "darwin_art_run_process: " << config_error << "\n";
+    return config_status;
   }
-  if ((config->provider_context != nullptr || config->provider_acquire != nullptr ||
-       config->provider_release != nullptr) &&
-      (config->provider_context == nullptr || config->provider_acquire == nullptr ||
-       config->provider_release == nullptr)) {
-    std::cerr << "darwin_art_run_process: incomplete provider hook table\n";
-    return 64;
-  }
-
-  const uint64_t heap_initial = config->heap_initial_bytes == 0
-                                    ? 64u * 1024u * 1024u
-                                    : config->heap_initial_bytes;
-  const uint64_t heap_maximum = config->heap_maximum_bytes == 0
-                                    ? 64u * 1024u * 1024u
-                                    : config->heap_maximum_bytes;
-  if (heap_initial > heap_maximum || heap_maximum > 256u * 1024u * 1024u) {
-    std::cerr << "darwin_art_run_process: invalid heap bounds\n";
-    return 65;
-  }
+  const uint64_t heap_initial = config_bounds.heap_initial_bytes;
+  const uint64_t heap_maximum = config_bounds.heap_maximum_bytes;
 
   if (!darwin_art_process::begin_run()) {
     std::cerr << "darwin_art_run_process: process already started\n";

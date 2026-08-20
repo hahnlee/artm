@@ -49,6 +49,41 @@ bool IsPrivateExtractedRoot(const std::string& path) {
 
 }  // namespace
 
+int ValidateProcessConfig(const darwin_art_process_config_t* config,
+                          const darwin_art_process_result_t* run_result,
+                          ProcessConfigBounds* bounds, std::string* error) {
+  if (config == nullptr || run_result == nullptr || bounds == nullptr ||
+      error == nullptr || config->struct_size < sizeof(*config) ||
+      run_result->struct_size < sizeof(*run_result) ||
+      config->abi_version != DARWIN_ART_ABI_VERSION ||
+      run_result->abi_version != DARWIN_ART_ABI_VERSION ||
+      config->core_oj_jar == nullptr || config->core_libart_jar == nullptr ||
+      config->framework_jar == nullptr || config->core_icu4j_jar == nullptr ||
+      config->app_dex == nullptr) {
+    if (error != nullptr) *error = "invalid ABI/configuration";
+    return 64;
+  }
+  if ((config->provider_context != nullptr || config->provider_acquire != nullptr ||
+       config->provider_release != nullptr) &&
+      (config->provider_context == nullptr || config->provider_acquire == nullptr ||
+       config->provider_release == nullptr)) {
+    *error = "incomplete provider hook table";
+    return 64;
+  }
+  bounds->heap_initial_bytes = config->heap_initial_bytes == 0
+                                   ? 64u * 1024u * 1024u
+                                   : config->heap_initial_bytes;
+  bounds->heap_maximum_bytes = config->heap_maximum_bytes == 0
+                                   ? 64u * 1024u * 1024u
+                                   : config->heap_maximum_bytes;
+  if (bounds->heap_initial_bytes > bounds->heap_maximum_bytes ||
+      bounds->heap_maximum_bytes > 256u * 1024u * 1024u) {
+    *error = "invalid heap bounds";
+    return 65;
+  }
+  return 0;
+}
+
 int LoadProcessOptions(ProcessOptions* options, std::string* error) {
   if (options == nullptr || error == nullptr) return 48;
   *options = ProcessOptions{};

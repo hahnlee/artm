@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string>
 
+#include "darwin_art/darwin_art.h"
+
 namespace darwin_art_process {
 
 // Immutable, owner-thread configuration assembled once at the C ABI boundary.
@@ -42,6 +44,18 @@ struct ProcessOptions final {
   bool expect_apk_widgets = false;
   int32_t window_scale = 1;
 };
+
+struct ProcessConfigBounds final {
+  uint64_t heap_initial_bytes = 0;
+  uint64_t heap_maximum_bytes = 0;
+};
+
+// Validate the flat C ABI before ART allocates anything.  Keeping this at the
+// process-options boundary makes the large orchestration TU consume a checked
+// value object instead of repeating pointer/heap policy.
+int ValidateProcessConfig(const darwin_art_process_config_t* config,
+                          const darwin_art_process_result_t* run_result,
+                          ProcessConfigBounds* bounds, std::string* error);
 
 // Returns 0 on success, 47 for an invalid mixed network mode, and 48 for any
 // malformed APK/framework/window environment. `error` is diagnostic text only.
