@@ -121,6 +121,7 @@ fn run() -> Result<()> {
         "build-interpreter-core" => build_interpreter_core(&root),
         "build-runtime-bootstrap" => build_runtime_bootstrap(&root),
         "build-runtime-graphics-bootstrap" => build_runtime_graphics_bootstrap(&root),
+        "build-runtime-filesystem-probe" => build_runtime_filesystem_probe(&root),
         "audit-runtime-link" => audit_runtime_link(&root),
         "audit-runtime-graphics-link" => audit_runtime_graphics_link(&root),
         "audit-graphics-closure" => build_shell_gate(&root, "audit-android16-graphics-closure.sh"),
@@ -3327,6 +3328,23 @@ fn compile_runtime_filesystem_probe(root: &Path, build_dir: &Path) -> Result<Pat
     Ok(object)
 }
 
+fn build_runtime_filesystem_probe(root: &Path) -> Result<()> {
+    let output = env::var_os("DARWIN_ART_NATIVE_OUTPUT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            root.join("_build/runtime-link-probe/darwin_art_runtime_filesystem_probe.cc.o")
+        });
+    let build_dir = output
+        .parent()
+        .ok_or_else(|| format!("native probe output has no parent: {}", output.display()))?;
+    let object = compile_runtime_filesystem_probe(root, build_dir)?;
+    if object != output {
+        fs::copy(&object, &output)?;
+    }
+    println!("build-runtime-filesystem-probe: {}", output.display());
+    Ok(())
+}
+
 fn compile_cached_probe_tu(
     command: &mut Command,
     object: &Path,
@@ -3348,7 +3366,18 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
     let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime.dylib");
     fs::create_dir_all(&build_dir)?;
-    let filesystem_object = compile_runtime_filesystem_probe(root, &build_dir)?;
+    let filesystem_object = if let Some(path) = env::var_os("DARWIN_ART_NATIVE_FILESYSTEM_OBJECT") {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_filesystem_probe(root, &build_dir)?
+    };
+    if !filesystem_object.is_file() {
+        return Err(format!(
+            "runtime filesystem object is missing: {}",
+            filesystem_object.display()
+        )
+        .into());
+    }
     build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
     let includes = [
         root.join("include"),
@@ -3692,7 +3721,18 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
     let build_paths = BuildPaths::from_root(root);
     let build_dir = build_paths.native_output("runtime-graphics-link-probe");
     let object = build_dir.join("darwin_art_runtime.cc.o");
-    let filesystem_object = compile_runtime_filesystem_probe(root, &build_dir)?;
+    let filesystem_object = if let Some(path) = env::var_os("DARWIN_ART_NATIVE_FILESYSTEM_OBJECT") {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_filesystem_probe(root, &build_dir)?
+    };
+    if !filesystem_object.is_file() {
+        return Err(format!(
+            "runtime filesystem object is missing: {}",
+            filesystem_object.display()
+        )
+        .into());
+    }
     let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime_graphics.dylib");
     let graphics_closure =
