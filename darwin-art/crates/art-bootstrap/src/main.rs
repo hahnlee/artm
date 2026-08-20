@@ -3401,46 +3401,51 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         &probe_cache,
         &compiler_identity,
     )?;
-    run_command(
-        Command::new("clang++")
-            .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
-            .arg(root.join("compat/darwin_surface_bridge.mm"))
-            .arg("-I")
-            .arg(root.join("compat"))
-            .arg("-I")
-            .arg(root.join("include"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/core"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/effects"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/utils"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/private"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/android"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/codec"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/core"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/effects"))
-            .arg("-I")
-            .arg(root.join("_aosp/frameworks/base/libs/hwui"))
-            .arg("-I")
-            .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
-            .arg("-I")
-            .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
-            .arg("-I")
-            .arg(root.join("_aosp/system/logging/liblog/include"))
-            .arg("-I")
-            .arg(root.join("_aosp/system/core/libcutils/include"))
-            .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
-            .arg("-DSK_USER_CONFIG_HEADER=\"include/config/SkUserConfigManual.h\"")
-            .arg("-o")
-            .arg(&surface_object),
+    let mut surface_command = Command::new("clang++");
+    surface_command
+        .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
+        .arg(root.join("compat/darwin_surface_bridge.mm"))
+        .arg("-I")
+        .arg(root.join("compat"))
+        .arg("-I")
+        .arg(root.join("include"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/core"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/effects"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/utils"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/private"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/android"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/codec"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/core"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/effects"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/logging/liblog/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libcutils/include"))
+        .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
+        .arg("-DSK_USER_CONFIG_HEADER=\"include/config/SkUserConfigManual.h\"")
+        .arg("-o")
+        .arg(&surface_object);
+    let _ = compile_cached_probe_tu(
+        &mut surface_command,
+        &surface_object,
+        &probe_cache,
+        &compiler_identity,
     )?;
 
     let mut linker = Command::new("clang++");
@@ -3875,24 +3880,29 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         &probe_cache,
         &compiler_identity,
     )?;
-    run_command(
-        Command::new("clang++")
-            .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
-            .arg(root.join("compat/darwin_surface_bridge.mm"))
-            .arg("-I")
-            .arg(root.join("compat"))
-            .arg("-I")
-            .arg(root.join("include"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/core"))
-            .arg("-I")
-            .arg(root.join("_aosp/system/logging/liblog/include"))
-            .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
-            .arg("-DSK_USER_CONFIG_HEADER=\"include/config/SkUserConfigManual.h\"")
-            .arg("-o")
-            .arg(&surface_object),
+    let mut surface_command = Command::new("clang++");
+    surface_command
+        .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
+        .arg(root.join("compat/darwin_surface_bridge.mm"))
+        .arg("-I")
+        .arg(root.join("compat"))
+        .arg("-I")
+        .arg(root.join("include"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/core"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/logging/liblog/include"))
+        .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
+        .arg("-DSK_USER_CONFIG_HEADER=\"include/config/SkUserConfigManual.h\"")
+        .arg("-o")
+        .arg(&surface_object);
+    let _ = compile_cached_probe_tu(
+        &mut surface_command,
+        &surface_object,
+        &probe_cache,
+        &compiler_identity,
     )?;
 
     let link_map = build_dir.join("runtime-graphics-link.map");
