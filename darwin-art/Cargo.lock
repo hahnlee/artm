@@ -70,6 +70,7 @@ name = "darwin-art-host"
 version = "0.1.0"
 dependencies = [
  "darwin-art-abi",
+ "darwin-art-engine-sys",
  "darwin-art-runtime",
 ]
 
