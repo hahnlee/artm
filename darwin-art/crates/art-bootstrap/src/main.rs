@@ -122,6 +122,7 @@ fn run() -> Result<()> {
         "build-runtime-bootstrap" => build_runtime_bootstrap(&root),
         "build-runtime-graphics-bootstrap" => build_runtime_graphics_bootstrap(&root),
         "build-runtime-filesystem-probe" => build_runtime_filesystem_probe(&root),
+        "build-runtime-network-probe" => build_runtime_network_probe(&root),
         "audit-runtime-link" => audit_runtime_link(&root),
         "audit-runtime-graphics-link" => audit_runtime_graphics_link(&root),
         "audit-graphics-closure" => build_shell_gate(&root, "audit-android16-graphics-closure.sh"),
@@ -3347,6 +3348,23 @@ fn compile_runtime_network_probe(root: &Path, build_dir: &Path) -> Result<PathBu
     Ok(object)
 }
 
+fn build_runtime_network_probe(root: &Path) -> Result<()> {
+    let output = env::var_os("DARWIN_ART_NATIVE_OUTPUT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            root.join("_build/runtime-link-probe/darwin_art_runtime_network_probe.cc.o")
+        });
+    let build_dir = output
+        .parent()
+        .ok_or_else(|| format!("native probe output has no parent: {}", output.display()))?;
+    let object = compile_runtime_network_probe(root, build_dir)?;
+    if object != output {
+        fs::copy(&object, &output)?;
+    }
+    println!("build-runtime-network-probe: {}", output.display());
+    Ok(())
+}
+
 fn build_runtime_filesystem_probe(root: &Path) -> Result<()> {
     let output = env::var_os("DARWIN_ART_NATIVE_OUTPUT")
         .map(PathBuf::from)
@@ -3397,7 +3415,18 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         )
         .into());
     }
-    let network_object = compile_runtime_network_probe(root, &build_dir)?;
+    let network_object = if let Some(path) = env::var_os("DARWIN_ART_NATIVE_NETWORK_OBJECT") {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_network_probe(root, &build_dir)?
+    };
+    if !network_object.is_file() {
+        return Err(format!(
+            "runtime network object is missing: {}",
+            network_object.display()
+        )
+        .into());
+    }
     build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
     let includes = [
         root.join("include"),
@@ -3754,7 +3783,18 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         )
         .into());
     }
-    let network_object = compile_runtime_network_probe(root, &build_dir)?;
+    let network_object = if let Some(path) = env::var_os("DARWIN_ART_NATIVE_NETWORK_OBJECT") {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_network_probe(root, &build_dir)?
+    };
+    if !network_object.is_file() {
+        return Err(format!(
+            "runtime network object is missing: {}",
+            network_object.display()
+        )
+        .into());
+    }
     let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime_graphics.dylib");
     let graphics_closure =
@@ -4479,7 +4519,18 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
     let object = build_dir.join("darwin_art_runtime_direct_apk.cc.o");
     let graph_object = build_dir.join("darwin_art_runtime_apk_graph.cc.o");
     let filesystem_object = compile_runtime_filesystem_probe(root, &build_dir)?;
-    let network_object = compile_runtime_network_probe(root, &build_dir)?;
+    let network_object = if let Some(path) = env::var_os("DARWIN_ART_NATIVE_NETWORK_OBJECT") {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_network_probe(root, &build_dir)?
+    };
+    if !network_object.is_file() {
+        return Err(format!(
+            "runtime network object is missing: {}",
+            network_object.display()
+        )
+        .into());
+    }
     let surface_object = root.join("_build/runtime-link-probe/darwin_surface_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime_direct_apk.dylib");
     let includes = [
