@@ -9,8 +9,10 @@ build_dir="$project_root/_build/android-graphics-jni"
 patched_hwui="$build_dir/patched-hwui"
 object_dir="$build_dir/objects"
 lock_file="$project_root/upstream/android16-android-graphics-jni.lock"
+gpu_lock_file="$project_root/upstream/android16-hwui-gpu.lock"
 critical_patch="$project_root/patches/frameworks-base/0001-darwin-android-critical-jni-abi.patch"
 lazy_native_window_patch="$project_root/patches/frameworks-base/0002-darwin-lazy-native-window-jni.patch"
+hwui_gpu_patch="$project_root/patches/frameworks-base/0003-darwin-hwui-gpu-layoutlib.patch"
 mode=full
 
 usage() {
@@ -189,6 +191,26 @@ fi
 cp -R "$source_hwui" "$patched_hwui"
 patch -s -d "$patched_hwui" -p1 < "$critical_patch"
 patch -s -d "$patched_hwui" -p1 < "$lazy_native_window_patch"
+gpu_mode=0
+if [[ -n "${DARWIN_ART_HWUI_GPU:-}" &&
+      "${DARWIN_ART_HWUI_GPU:-}" != "0" &&
+      "${DARWIN_ART_HWUI_GPU:-}" != "false" &&
+      "${DARWIN_ART_HWUI_GPU:-}" != "off" ]]; then
+  [[ -f "$gpu_lock_file" ]] || {
+    echo "android-graphics-jni: missing GPU lock: $gpu_lock_file" >&2
+    exit 3
+  }
+  # shellcheck disable=SC1090
+  source "$gpu_lock_file"
+  verify_hash "$source_hwui/apex/LayoutlibLoader.cpp" "$LAYOUTLIB_LOADER_SHA256"
+  verify_hash "$hwui_gpu_patch" "$GPU_LAYOUTLIB_PATCH_SHA256"
+  [[ -f "$hwui_gpu_patch" ]] || {
+    echo "android-graphics-jni: missing GPU layoutlib patch: $hwui_gpu_patch" >&2
+    exit 3
+  }
+  patch -s -d "$patched_hwui" -p1 < "$hwui_gpu_patch"
+  gpu_mode=1
+fi
 verify_hash "$patched_hwui/jni/graphics_jni_helpers.h" "$GRAPHICS_JNI_HELPERS_PATCHED_SHA256"
 verify_hash "$patched_hwui/jni/android_graphics_HardwareRenderer.cpp" "$HARDWARE_RENDERER_PATCHED_SHA256"
 python3 - "$patched_hwui/jni/PathIterator.cpp" <<'PY'
@@ -215,7 +237,7 @@ libhardware_include="${DARWIN_ART_LIBHARDWARE_INCLUDE:-$aosp/hardware/libhardwar
 
 common_flags=(
   -std=c++23 -arch arm64 -fPIC -fno-rtti -fvisibility=hidden
-  -DDARWIN_ART_ANDROID_CRITICAL_JNI_ABI -DHWUI_NULL_GPU
+  -DDARWIN_ART_ANDROID_CRITICAL_JNI_ABI
   -DGL_GLEXT_PROTOTYPES -DEGL_EGLEXT_PROTOTYPES -DU_USING_ICU_NAMESPACE=0
   '-D__INTRODUCED_IN(n)='
   '-DSK_USER_CONFIG_HEADER="include/config/SkUserConfigManual.h"'
@@ -252,6 +274,11 @@ common_flags=(
   -I"$aosp/external/skia/include/private" -I"$aosp/external/skia/src/core"
   -I"$aosp/external/skia/src/codec"
 )
+if [[ "$gpu_mode" == 1 ]]; then
+  common_flags+=( -DDARWIN_ART_HWUI_GPU -iquote "$project_root/compat" )
+else
+  common_flags+=( -DHWUI_NULL_GPU )
+fi
 
 registrar_object="$object_dir/LayoutlibLoader.o"
 echo "android-graphics-jni: compile apex/LayoutlibLoader.cpp"
@@ -267,7 +294,7 @@ for symbol in _init_android_graphics _register_android_graphics_classes _zygote_
     exit 3
   }
 done
-echo "android-graphics-jni: registrar-map=$registration_count sha256=$registration_sha arm64=1"
+echo "android-graphics-jni: registrar-map=$registration_count sha256=$registration_sha arm64=1 gpu-mode=$gpu_mode"
 if [[ "$mode" == registrar ]]; then
   exit 0
 fi

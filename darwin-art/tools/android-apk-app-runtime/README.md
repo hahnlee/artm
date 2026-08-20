@@ -38,6 +38,23 @@ hooks. ValueAnimator/Choreographer timing remains Android-driven; the patterned
 framework RippleDrawable path is GPU-only on Android 16 and is therefore replaced
 by the software-compatible drawable on this host Canvas.
 
+The Android-side GPU handoff has a separate opt-in gate:
+
+```sh
+./tools/accept-android16-hwui-gpu-layoutlib.sh
+```
+
+It compiles the checksum-verified Layoutlib registrar with
+`DARWIN_ART_HWUI_GPU=1`; only in that mode does Layoutlib stop forcing
+`RenderPipelineType::SkiaCpu`. The normal registrar build remains CPU-safe.
+The direct Metal replay gate then verifies framework `RecordingCanvas` display
+list replay, a Material-style button/ripple frame, zero CPU readback, and zero
+full-frame blits:
+
+```sh
+./tools/run-android16-hwui-metal-replay-gate.sh
+```
+
 After the graphics runtime has been built, run any APK in the current bounded
 programmatic-UI subset with:
 
