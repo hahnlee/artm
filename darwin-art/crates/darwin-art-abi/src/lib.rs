@@ -13,21 +13,36 @@ pub const ABI_VERSION: u32 = 1;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AbiHeader {
-    pub abi_version: u32,
     pub struct_size: u32,
+    pub abi_version: u32,
 }
 
 impl AbiHeader {
     pub const fn new(struct_size: usize) -> Self {
         Self {
-            abi_version: ABI_VERSION,
             struct_size: struct_size as u32,
+            abi_version: ABI_VERSION,
         }
     }
 
     pub const fn accepts(self, minimum_size: usize) -> bool {
         self.abi_version == ABI_VERSION && self.struct_size as usize >= minimum_size
     }
+}
+
+/// Validate the flattened `(struct_size, abi_version)` prefix used by the C
+/// ABI structs.  The wire layout intentionally stays flat for C callers while
+/// the rule itself lives in one Rust crate.
+pub const fn accepts_header_fields(
+    struct_size: u32,
+    abi_version: u32,
+    minimum_size: usize,
+) -> bool {
+    AbiHeader {
+        struct_size,
+        abi_version,
+    }
+    .accepts(minimum_size)
 }
 
 #[repr(i32)]
@@ -102,15 +117,15 @@ mod tests {
         );
         assert!(
             !AbiHeader {
+                struct_size: 64,
                 abi_version: 2,
-                struct_size: 64
             }
             .accepts(8)
         );
         assert!(
             !AbiHeader {
+                struct_size: 4,
                 abi_version: ABI_VERSION,
-                struct_size: 4
             }
             .accepts(8)
         );

@@ -8,7 +8,7 @@
 //! slice, STL object, or borrowed string crosses this boundary.
 
 use core::ffi::{c_char, c_void};
-use darwin_art_abi::{ABI_VERSION, StatusCode};
+use darwin_art_abi::{ABI_VERSION, StatusCode, accepts_header_fields};
 
 pub type FrameCallback = unsafe extern "C" fn(
     context: *mut c_void,
@@ -75,7 +75,11 @@ impl ProcessConfig {
     }
 
     pub const fn is_compatible(&self) -> bool {
-        self.abi_version == ABI_VERSION && self.struct_size as usize >= core::mem::size_of::<Self>()
+        accepts_header_fields(
+            self.struct_size,
+            self.abi_version,
+            core::mem::size_of::<Self>(),
+        )
     }
 }
 
@@ -109,7 +113,11 @@ impl ProcessResult {
     }
 
     pub const fn is_compatible(&self) -> bool {
-        self.abi_version == ABI_VERSION && self.struct_size as usize >= core::mem::size_of::<Self>()
+        accepts_header_fields(
+            self.struct_size,
+            self.abi_version,
+            core::mem::size_of::<Self>(),
+        )
     }
 }
 
