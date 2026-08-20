@@ -741,7 +741,12 @@ fn cached_native_objects(
             continue;
         }
         let object = fingerprint.with_extension("");
-        if !object.is_file() || !object.with_extension("o.d").is_file() {
+        // A Ninja-produced depfile may not exist yet (Ninja can be starting
+        // from a persisted Rust fingerprint), but the object and its command
+        // fingerprint are still sufficient to seed the cached graph.  The
+        // first cached edge will regenerate the depfile; requiring it here
+        // would incorrectly fall back to the monolithic Rust builder.
+        if !object.is_file() {
             continue;
         }
         let contents = fs::read_to_string(&fingerprint)?;
