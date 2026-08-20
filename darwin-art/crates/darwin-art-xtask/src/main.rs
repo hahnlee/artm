@@ -6,11 +6,175 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-const GRAPH_VERSION: &str = "darwin-art-native-graph-v3";
+const GRAPH_VERSION: &str = "darwin-art-native-graph-v4";
 const GRAPHICS_BOOTSTRAP_ARCHIVE: &str =
     "runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a";
 const GRAPHICS_RUNTIME_LIBRARY: &str =
     "runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib";
+
+const SDK_NAME: &str = "macosx";
+
+const CXX_FLAGS: &[&str] = &[
+    "-std=c++20",
+    "-fPIC",
+    "-Wall",
+    "-Wextra",
+    "-DDARWIN_ART_REAL_GRAPHICS",
+    "-DDARWIN_ART_HWUI_GPU",
+    "-DSK_BUILD_FOR_ANDROID_FRAMEWORK",
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RepresentativeEdge {
+    name: &'static str,
+    source: &'static str,
+    headers: &'static [&'static str],
+    objc: bool,
+}
+
+const REPRESENTATIVE_EDGES: &[RepresentativeEdge] = &[
+    RepresentativeEdge {
+        name: "elf-image-registry",
+        source: "compat/darwin_android_elf_image_registry.cc",
+        headers: &[
+            "compat/darwin_android_elf_image_registry.h",
+            "crates/darwin-art-elf-loader/include/darwin_art_elf_loader.h",
+            "tools/android-dl-iterate-phdr-provider/include/darwin_art_dl_iterate_phdr.h",
+        ],
+        objc: false,
+    },
+    RepresentativeEdge {
+        name: "asynchronous-close-monitor",
+        source: "compat/darwin_asynchronous_close_monitor.cc",
+        headers: &["compat/AsynchronousCloseMonitor.h"],
+        objc: false,
+    },
+    RepresentativeEdge {
+        name: "android-base-logging",
+        source: "compat/android_base_logging.cc",
+        headers: &[
+            "compat/log/log.h",
+            "_aosp/system/libbase/include/android-base/logging.h",
+        ],
+        objc: false,
+    },
+];
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ToolchainInputs {
+    cxx: String,
+    sdkroot: String,
+}
+
+fn toolchain_inputs() -> ToolchainInputs {
+    ToolchainInputs {
+        cxx: env::var("DARWIN_ART_CXX")
+            .or_else(|_| env::var("CXX"))
+            .unwrap_or_else(|_| "clang++".to_owned()),
+        sdkroot: env::var("DARWIN_ART_SDKROOT")
+            .or_else(|_| env::var("SDKROOT"))
+            .unwrap_or_default(),
+    }
+}
+
+fn json_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+fn edge_digest(
+    root: &Path,
+    edge: &RepresentativeEdge,
+    toolchain: &ToolchainInputs,
+) -> io::Result<String> {
+    let mut digest = Sha256::new();
+    digest.update(GRAPH_VERSION.as_bytes());
+    digest.update(edge.name.as_bytes());
+    digest.update(edge.source.as_bytes());
+    digest.update(toolchain.cxx.as_bytes());
+    digest.update(toolchain.sdkroot.as_bytes());
+    for flag in CXX_FLAGS {
+        digest.update(flag.as_bytes());
+        digest.update([0]);
+    }
+    for path in std::iter::once(edge.source).chain(edge.headers.iter().copied()) {
+        digest.update(path.as_bytes());
+        digest.update([0]);
+        digest.update(fs::read(root.join(path))?);
+        digest.update([0]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn emit_representative_edges(
+    graph: &mut String,
+    root: &Path,
+    cache_dir: &Path,
+    toolchain: &ToolchainInputs,
+) -> io::Result<()> {
+    // These edges are an opt-in preflight target until the bootstrap command
+    // consumes their objects directly. Keeping them off the default audit
+    // prevents the transitional graph from doing duplicate compilation.
+    let object_dir = cache_dir.join("native-tu");
+    graph.push_str("rule native_representative_cpp\n");
+    graph.push_str("  command = mkdir -p ");
+    graph.push_str(&shell_quote(&object_dir.to_string_lossy()));
+    graph.push_str(" && ");
+    graph.push_str(&shell_quote(&toolchain.cxx));
+    for flag in CXX_FLAGS {
+        graph.push(' ');
+        graph.push_str(flag);
+    }
+    for include in [
+        "compat",
+        "include",
+        "crates/darwin-art-elf-loader/include",
+        "_aosp/art/runtime",
+        "_aosp/art/libartbase",
+        "_build/foundation/patched-source/libartbase",
+        "tools/android-dl-iterate-phdr-provider/include",
+        "_aosp/system/libbase/include",
+        "_aosp/libnativehelper/include_jni",
+    ] {
+        let include_path = root.join(include);
+        if include_path.is_dir() {
+            graph.push_str(" -I");
+            graph.push_str(&shell_quote(&include_path.to_string_lossy()));
+        }
+    }
+    if !toolchain.sdkroot.is_empty() {
+        graph.push_str(" -isysroot ");
+        graph.push_str(&shell_quote(&toolchain.sdkroot));
+    }
+    graph.push_str(" -MMD -MF $depfile -c $in -o $out\n");
+    graph.push_str("  depfile = $out.d\n");
+    graph.push_str("  deps = gcc\n");
+    graph.push_str("  description = CXX $out\n\n");
+
+    let mut outputs = Vec::new();
+    for edge in REPRESENTATIVE_EDGES {
+        let digest = edge_digest(root, edge, toolchain)?;
+        let object = object_dir.join(format!("{}-{digest}.o", edge.name));
+        let output = ninja_path(&object);
+        let source = ninja_path(&root.join(edge.source));
+        graph.push_str("build ");
+        graph.push_str(&output);
+        graph.push_str(": native_representative_cpp ");
+        graph.push_str(&source);
+        for header in edge.headers {
+            graph.push(' ');
+            graph.push_str(&ninja_path(&root.join(header)));
+        }
+        graph.push('\n');
+        outputs.push(output);
+    }
+    graph.push_str("build native-tu-preflight: phony ");
+    graph.push_str(&outputs.join(" "));
+    graph.push('\n');
+    Ok(())
+}
 
 fn main() {
     if let Err(error) = run() {
@@ -41,6 +205,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     let root = repository_root(out);
     let inputs = graph_inputs(&root);
     let digest = digest_inputs(&root, &inputs)?;
+    let toolchain = toolchain_inputs();
     if let Some(parent) = out.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -51,8 +216,23 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     fs::write(
         cache_dir.join("manifest.json"),
         format!(
-            "{{\"graph_version\":\"{GRAPH_VERSION}\",\"digest\":\"{digest}\",\"input_count\":{}}}\n",
-            inputs.len()
+            "{{\"graph_version\":\"{GRAPH_VERSION}\",\"digest\":\"{digest}\",\"input_count\":{},\"compiler\":\"{}\",\"sdk\":\"{}\",\"edges\":[{}]}}\n",
+            inputs.len(),
+            json_escape(&toolchain.cxx),
+            SDK_NAME,
+            REPRESENTATIVE_EDGES
+                .iter()
+                .map(|edge| {
+                    format!(
+                        "{{\"name\":\"{}\",\"digest\":\"{}\",\"source\":\"{}\",\"language\":\"{}\"}}",
+                        edge.name,
+                        edge_digest(&root, edge, &toolchain).unwrap_or_else(|_| "missing".into()),
+                        edge.source,
+                        if edge.objc { "objc++" } else { "c++" }
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",")
         ),
     )?;
 
@@ -74,6 +254,9 @@ fn emit_graph(out: &Path) -> io::Result<()> {
 
     let mut graph = String::new();
     graph.push_str("# Generated by darwin-art-xtask. Do not edit.\n");
+    graph.push_str(&format!("# graph-version: {GRAPH_VERSION}\n"));
+    graph.push_str(&format!("# input-digest: {digest}\n"));
+    graph.push_str(&format!("# compiler: {} sdk: {SDK_NAME}\n", toolchain.cxx));
     graph.push_str("ninja_required_version = 1.10\n\n");
     graph.push_str("rule graphics_bootstrap\n");
     graph.push_str("  command = cd ");
@@ -115,6 +298,8 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&ninja_path(&digest_path));
     graph.push('\n');
 
+    emit_representative_edges(&mut graph, &root, &cache_dir, &toolchain)?;
+
     let mut file = fs::File::create(out)?;
     file.write_all(graph.as_bytes())?;
     println!(
@@ -131,6 +316,7 @@ fn repository_root(out: &Path) -> PathBuf {
     } else {
         env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
+
     if let Some(root) = start
         .ancestors()
         .find(|candidate| candidate.join("Cargo.toml").is_file())

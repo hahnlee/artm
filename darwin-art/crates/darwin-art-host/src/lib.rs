@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::error::Error;
-use std::ffi::{CStr, CString, c_char, c_void};
+use std::ffi::{CString, c_void};
 use std::fmt;
 use std::fs;
 use std::mem::size_of;
@@ -9,7 +9,12 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 use std::rc::Rc;
 
+#[cfg(target_os = "macos")]
+mod dynamic_library;
 mod ffi;
+
+#[cfg(target_os = "macos")]
+use dynamic_library::DynamicLibrary;
 
 pub use darwin_art_abi::ABI_VERSION;
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
@@ -325,30 +330,41 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         runtime
             .start()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
-        let library = DynamicLibrary::open(&options.library)?;
+        let library = DynamicLibrary::open(&options.library).map_err(HostError::DynamicLoader)?;
         // SAFETY: Symbol names and signatures are fixed by darwin_art.h ABI v1.
-        let run_process: RunProcessFn = unsafe { library.symbol(b"darwin_art_run_process\0")? };
+        let run_process: RunProcessFn = unsafe { library.symbol(b"darwin_art_run_process\0") }
+            .map_err(HostError::DynamicLoader)?;
         let shutdown_process: ShutdownProcessFn =
-            unsafe { library.symbol(b"darwin_art_shutdown_process\0")? };
+            unsafe { library.symbol(b"darwin_art_shutdown_process\0") }
+                .map_err(HostError::DynamicLoader)?;
         // SAFETY: These signatures are fixed by darwin_surface_bridge.h.
         let surface_create: SurfaceCreateFn =
-            unsafe { library.symbol(b"darwin_art_surface_create\0")? };
+            unsafe { library.symbol(b"darwin_art_surface_create\0") }
+                .map_err(HostError::DynamicLoader)?;
         let surface_update: SurfaceUpdateFn =
-            unsafe { library.symbol(b"darwin_art_surface_update\0")? };
+            unsafe { library.symbol(b"darwin_art_surface_update\0") }
+                .map_err(HostError::DynamicLoader)?;
         let surface_present: SurfacePresentFn =
-            unsafe { library.symbol(b"darwin_art_surface_present\0")? };
+            unsafe { library.symbol(b"darwin_art_surface_present\0") }
+                .map_err(HostError::DynamicLoader)?;
         let surface_pump_events: SurfacePumpEventsFn =
-            unsafe { library.symbol(b"darwin_art_surface_pump_events\0")? };
+            unsafe { library.symbol(b"darwin_art_surface_pump_events\0") }
+                .map_err(HostError::DynamicLoader)?;
         let surface_next_pointer_event: SurfaceNextPointerEventFn =
-            unsafe { library.symbol(b"darwin_art_surface_next_pointer_event\0")? };
+            unsafe { library.symbol(b"darwin_art_surface_next_pointer_event\0") }
+                .map_err(HostError::DynamicLoader)?;
         let surface_destroy: SurfaceDestroyFn =
-            unsafe { library.symbol(b"darwin_art_surface_destroy\0")? };
+            unsafe { library.symbol(b"darwin_art_surface_destroy\0") }
+                .map_err(HostError::DynamicLoader)?;
         let surface_active: SurfaceActiveFn =
-            unsafe { library.symbol(b"darwin_art_surface_active_gpu\0")? };
+            unsafe { library.symbol(b"darwin_art_surface_active_gpu\0") }
+                .map_err(HostError::DynamicLoader)?;
         let dispatch_pointer: DispatchPointerFn =
-            unsafe { library.symbol(b"darwin_art_dispatch_pointer\0")? };
+            unsafe { library.symbol(b"darwin_art_dispatch_pointer\0") }
+                .map_err(HostError::DynamicLoader)?;
         let pump_framework_frame: PumpFrameworkFrameFn =
-            unsafe { library.symbol(b"darwin_art_pump_framework_frame\0")? };
+            unsafe { library.symbol(b"darwin_art_pump_framework_frame\0") }
+                .map_err(HostError::DynamicLoader)?;
 
         let core_oj = path_c_string(&options.core_oj_jar)?;
         let core_libart = path_c_string(&options.core_libart_jar)?;
@@ -887,74 +903,6 @@ fn surface_status(
 
 fn path_c_string(path: &Path) -> Result<CString, HostError> {
     CString::new(path.as_os_str().as_bytes()).map_err(|_| HostError::InteriorNul(path.into()))
-}
-
-#[cfg(target_os = "macos")]
-struct DynamicLibrary(*mut c_void);
-
-#[cfg(target_os = "macos")]
-impl DynamicLibrary {
-    fn open(path: &Path) -> Result<Self, HostError> {
-        let path = path_c_string(path)?;
-        // SAFETY: path is NUL terminated and flags are valid Darwin dlopen flags.
-        let handle = unsafe { dlopen(path.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
-        if handle.is_null() {
-            Err(HostError::DynamicLoader(dynamic_loader_error()))
-        } else {
-            Ok(Self(handle))
-        }
-    }
-
-    unsafe fn symbol<T: Copy>(&self, name: &'static [u8]) -> Result<T, HostError> {
-        debug_assert_eq!(name.last(), Some(&0));
-        // Clear a prior loader error before dlsym and inspect dlerror after it;
-        // a null symbol address is not by itself the portable error signal.
-        unsafe { dlerror() };
-        let symbol = unsafe { dlsym(self.0, name.as_ptr().cast()) };
-        let error = unsafe { dlerror() };
-        if !error.is_null() {
-            return Err(HostError::DynamicLoader(unsafe {
-                CStr::from_ptr(error).to_string_lossy().into_owned()
-            }));
-        }
-        if size_of::<T>() != size_of::<*mut c_void>() {
-            return Err(HostError::DynamicLoader(
-                "function pointer has an unexpected size".to_owned(),
-            ));
-        }
-        // SAFETY: The caller supplies the ABI signature associated with name.
-        Ok(unsafe { ptr::read((&symbol as *const *mut c_void).cast::<T>()) })
-    }
-}
-
-// ABI v1 intentionally keeps this handle loaded for the process lifetime even
-// after DestroyJavaVM. ART installed process-global handlers while the image
-// was loaded, and this gate has not yet proved that every handler is restored
-// before dlclose. Leaking one process-scoped handle is safer than leaving a
-// possible callback into unmapped code.
-
-#[cfg(target_os = "macos")]
-fn dynamic_loader_error() -> String {
-    // SAFETY: dlerror returns either null or a process-owned NUL-terminated string.
-    let error = unsafe { dlerror() };
-    if error.is_null() {
-        "unknown error".to_owned()
-    } else {
-        // SAFETY: Non-null dlerror result points to a NUL-terminated string.
-        unsafe { CStr::from_ptr(error).to_string_lossy().into_owned() }
-    }
-}
-
-#[cfg(target_os = "macos")]
-const RTLD_LOCAL: i32 = 0x4;
-#[cfg(target_os = "macos")]
-const RTLD_NOW: i32 = 0x2;
-
-#[cfg(target_os = "macos")]
-unsafe extern "C" {
-    fn dlopen(path: *const c_char, mode: i32) -> *mut c_void;
-    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-    fn dlerror() -> *const c_char;
 }
 
 #[cfg(test)]
