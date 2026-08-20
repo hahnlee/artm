@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 
 pub use darwin_art_abi::ABI_VERSION;
-use darwin_art_runtime::{RuntimeError, RuntimeSession};
+use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
@@ -350,6 +350,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         runtime
             .mark_running()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
+        let engine_lease = runtime
+            .install_subsystem(Subsystem::Engine)
+            .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
         // Darwin's application renderer is GPU-only.  The CPU surface path is
         // retained for diagnostics, never selected by the normal host.
         let gpu_mode = true;
@@ -361,6 +364,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     status: -1,
                 });
             }
+            let surface_lease = runtime
+                .install_subsystem(Subsystem::Surface)
+                .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
             let mut frames_presented = 1_u64;
             let mut remaining = options.visible_seconds;
             let mut loop_error: Option<HostError> = None;
@@ -491,6 +497,8 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             }
             let destroy_status = unsafe { surface_destroy(surface) };
             let _ = runtime.begin_shutdown();
+            let _ = runtime.uninstall_subsystem(surface_lease);
+            let _ = runtime.uninstall_subsystem(engine_lease);
             let shutdown_status = unsafe { shutdown_process() };
             if shutdown_status == 0 {
                 let _ = runtime.finish_shutdown();
@@ -709,6 +717,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         let shutdown_status = unsafe { shutdown_process() };
         if shutdown_status == 0 {
             let _ = runtime.begin_shutdown();
+            let _ = runtime.uninstall_subsystem(engine_lease);
             let _ = runtime.finish_shutdown();
         } else {
             runtime.fail(RuntimeError::EngineFailure {
