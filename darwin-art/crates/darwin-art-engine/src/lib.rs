@@ -36,13 +36,13 @@ mod platform {
         pub pump_framework_frame: PumpFrameworkFrameFn,
     }
 
-    pub struct LoadedEngine {
+    struct LoadedEngine {
         _library: DynamicLibrary,
         symbols: EngineSymbols,
     }
 
     impl LoadedEngine {
-        pub fn open(path: &Path) -> Result<Self, String> {
+        fn open(path: &Path) -> Result<Self, String> {
             let library = DynamicLibrary::open(path)?;
             // SAFETY: Every name and type is fixed by the Darwin ART v1 ABI.
             let symbols = unsafe {
@@ -159,4 +159,4 @@ mod platform {
 }
 
 #[cfg(target_os = "macos")]
-pub use platform::{EngineSession, EngineSymbols, LoadedEngine};
+pub use platform::{EngineSession, EngineSymbols};
