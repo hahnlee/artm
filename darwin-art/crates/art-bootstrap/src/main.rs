@@ -3653,6 +3653,19 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     let probe_cache = build_dir.join("runtime-link-probe-hashes.cache");
+    let elf_probe_object = build_dir.join("darwin_art_runtime_elf_probe.cc.o");
+    let mut elf_probe_command = runtime_cpp_command(&include_refs);
+    elf_probe_command
+        .arg("-c")
+        .arg(root.join("probes/runtime_elf_probe.cc"))
+        .arg("-o")
+        .arg(&elf_probe_object);
+    let _ = compile_cached_probe_tu(
+        &mut elf_probe_command,
+        &elf_probe_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -3741,6 +3754,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
         .arg("-Wl,-dead_strip")
         .arg(&object)
+        .arg(&elf_probe_object)
         .arg(&filesystem_object)
         .arg(&network_object)
         .arg(&surface_object)
@@ -4138,6 +4152,19 @@ fn audit_runtime_graphics_link_mode(root: &Path, run_upstream_gates: bool) -> Re
     // the sole owner of DARWIN_ART_REAL_GRAPHICS and chooses the real backend.
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     let probe_cache = build_dir.join("runtime-graphics-probe-hashes.cache");
+    let elf_probe_object = build_dir.join("darwin_art_runtime_elf_probe.cc.o");
+    let mut elf_probe_command = runtime_cpp_command(&include_refs);
+    elf_probe_command
+        .arg("-c")
+        .arg(root.join("probes/runtime_elf_probe.cc"))
+        .arg("-o")
+        .arg(&elf_probe_object);
+    let _ = compile_cached_probe_tu(
+        &mut elf_probe_command,
+        &elf_probe_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -4257,6 +4284,7 @@ fn audit_runtime_graphics_link_mode(root: &Path, run_upstream_gates: bool) -> Re
         .arg("-Wl,-dead_strip")
         .arg(format!("-Wl,-map,{}", link_map.display()))
         .arg(&object)
+        .arg(&elf_probe_object)
         .arg(&filesystem_object)
         .arg(&network_object)
         .arg(&hwui_object)
@@ -4806,6 +4834,19 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     let probe_cache = build_dir.join("runtime-direct-apk-probe-hashes.cache");
+    let elf_probe_object = build_dir.join("darwin_art_runtime_elf_probe.cc.o");
+    let mut elf_probe_command = runtime_cpp_command(&include_refs);
+    elf_probe_command
+        .arg("-c")
+        .arg(root.join("probes/runtime_elf_probe.cc"))
+        .arg("-o")
+        .arg(&elf_probe_object);
+    let _ = compile_cached_probe_tu(
+        &mut elf_probe_command,
+        &elf_probe_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -4870,6 +4911,7 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
         .arg("-Wl,-dead_strip")
         .arg(&object)
+        .arg(&elf_probe_object)
         .arg(&filesystem_object)
         .arg(&graph_object)
         .arg(&network_object)
