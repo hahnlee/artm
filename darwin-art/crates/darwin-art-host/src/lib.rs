@@ -19,8 +19,8 @@ pub use darwin_art_abi::ABI_VERSION;
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
 pub use ffi::{FrameCallback, ProcessConfig, ProcessResult};
 use session::{
-    SharedProcessShutdown, SharedSurfaceCleanup, SurfaceCleanupGuard, engine_symbols,
-    shutdown_process_once,
+    ProviderBridge, SharedProcessShutdown, SharedSurfaceCleanup, SurfaceCleanupGuard,
+    engine_symbols, shutdown_process_once,
 };
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
@@ -237,6 +237,18 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             EngineSession::open(&options.library).map_err(HostError::DynamicLoader)?,
         ));
         let symbols = engine_symbols(&engine);
+        let provider_bridge = Box::new(ProviderBridge::new(symbols));
+        let provider_context = provider_bridge.context();
+        // SAFETY: provider_bridge is kept alive by the local scope until it
+        // is transferred into RuntimeSession below; the callbacks are static
+        // and use only that stable context pointer.
+        unsafe {
+            engine.borrow().install_provider_hooks(
+                provider_context,
+                Some(ProviderBridge::acquire_callback()),
+                Some(ProviderBridge::release_callback()),
+            );
+        }
         let run_process: RunProcessFn = symbols.run_process;
         let surface_create: SurfaceCreateFn = symbols.surface_create;
         let surface_update: SurfaceUpdateFn = symbols.surface_update;
@@ -270,6 +282,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             heap_maximum_bytes: options.heap_maximum_bytes,
             host_context: ptr::from_mut(&mut frame_host).cast(),
             frame_callback: Some(receive_frame),
+            provider_context,
+            provider_acquire: Some(ProviderBridge::acquire_callback()),
+            provider_release: Some(ProviderBridge::release_callback()),
         };
         let mut process = ProcessResult {
             struct_size: size_of::<ProcessResult>() as u32,
@@ -291,15 +306,21 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             if shutdown_status != 0 && shutdown_status != SHUTDOWN_NOT_READY {
                 return Err(HostError::ShutdownFailed(shutdown_status));
             }
+            engine.borrow().clear_provider_hooks();
             return Err(HostError::RuntimeFailed(status));
         }
-        if let Err(error) = runtime.mark_running() {
-            let shutdown_status = shutdown_process_once(&process_shutdown);
-            if shutdown_status != 0 {
-                return Err(HostError::ShutdownFailed(shutdown_status));
-            }
-            return Err(HostError::RuntimeFailed(error.status() as i32));
-        }
+        let provider_pointer = provider_context.cast::<ProviderBridge>();
+        let provider_engine = Rc::clone(&engine);
+        let provider_lease = runtime
+            .install_owned_subsystem(Subsystem::ElfNamespace, provider_bridge, move || {
+                // The engine shutdown lease is installed after this provider
+                // lease, so it runs first and drains all provider callbacks.
+                let bridge = unsafe { &*provider_pointer };
+                let clear_result = bridge.clear();
+                drop(provider_engine);
+                clear_result.map_err(|_| RuntimeError::EngineFailure { status: -1 })
+            })
+            .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
         let engine_cleanup = Rc::clone(&process_shutdown);
         let engine_lease =
             match runtime.install_owned_subsystem(Subsystem::Engine, engine, move || {
@@ -319,15 +340,48 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     return Err(HostError::RuntimeFailed(error.status() as i32));
                 }
             };
+        if let Err(error) = runtime.mark_running() {
+            runtime.fail(error);
+            return Err(HostError::RuntimeFailed(error.status() as i32));
+        }
         // Darwin's application renderer is GPU-only.  The CPU surface path is
         // retained for diagnostics, never selected by the normal host.
         let gpu_mode = true;
         if gpu_mode {
             let surface = unsafe { surface_active() };
             if surface.is_null() {
+                // No surface was published, but ART and the provider
+                // bridge are already live.  Roll them back through the
+                // same owner-thread LIFO as the normal GPU path; a bare
+                // early return here would leave JavaVM/provider hooks
+                // resident in the process.
+                let cleanup_status = if runtime.begin_shutdown().is_err() {
+                    -1
+                } else {
+                    match runtime.uninstall_subsystem(engine_lease) {
+                        Ok(()) => match runtime.uninstall_subsystem(provider_lease) {
+                            Ok(()) => 0,
+                            Err(RuntimeError::EngineFailure { status }) => status,
+                            Err(error) => error.status() as i32,
+                        },
+                        Err(RuntimeError::EngineFailure { status }) => status,
+                        Err(error) => error.status() as i32,
+                    }
+                };
+                if cleanup_status == 0 {
+                    let _ = runtime.finish_shutdown();
+                } else {
+                    runtime.fail(RuntimeError::EngineFailure {
+                        status: cleanup_status,
+                    });
+                }
                 return Err(HostError::SurfaceFailed {
                     operation: "gpu_active_surface",
-                    status: -1,
+                    status: if cleanup_status == 0 {
+                        -1
+                    } else {
+                        cleanup_status
+                    },
                 });
             }
             let surface_state: SharedSurfaceCleanup = Rc::new(RefCell::new(
@@ -485,7 +539,11 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             } else {
                 match runtime.uninstall_subsystem(surface_lease) {
                     Ok(()) => match runtime.uninstall_subsystem(engine_lease) {
-                        Ok(()) => 0,
+                        Ok(()) => match runtime.uninstall_subsystem(provider_lease) {
+                            Ok(()) => 0,
+                            Err(RuntimeError::EngineFailure { status }) => status,
+                            Err(error) => error.status() as i32,
+                        },
                         Err(RuntimeError::EngineFailure { status }) => status,
                         Err(error) => error.status() as i32,
                     },
@@ -749,7 +807,11 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     }
                     Some(Err(error)) => error.status() as i32,
                     Some(Ok(())) | None => match runtime.uninstall_subsystem(engine_lease) {
-                        Ok(()) => 0,
+                        Ok(()) => match runtime.uninstall_subsystem(provider_lease) {
+                            Ok(()) => 0,
+                            Err(RuntimeError::EngineFailure { status }) => status,
+                            Err(error) => error.status() as i32,
+                        },
                         Err(RuntimeError::EngineFailure { status }) => status,
                         Err(error) => error.status() as i32,
                     },
@@ -809,7 +871,7 @@ mod tests {
 
     #[test]
     fn process_config_matches_c_abi_v1() {
-        assert_eq!(size_of::<ProcessConfig>(), 80);
+        assert_eq!(size_of::<ProcessConfig>(), 104);
         assert_eq!(align_of::<ProcessConfig>(), 8);
         assert_eq!(offset_of!(ProcessConfig, struct_size), 0);
         assert_eq!(offset_of!(ProcessConfig, abi_version), 4);
@@ -822,6 +884,9 @@ mod tests {
         assert_eq!(offset_of!(ProcessConfig, heap_maximum_bytes), 56);
         assert_eq!(offset_of!(ProcessConfig, host_context), 64);
         assert_eq!(offset_of!(ProcessConfig, frame_callback), 72);
+        assert_eq!(offset_of!(ProcessConfig, provider_context), 80);
+        assert_eq!(offset_of!(ProcessConfig, provider_acquire), 88);
+        assert_eq!(offset_of!(ProcessConfig, provider_release), 96);
     }
 
     #[test]

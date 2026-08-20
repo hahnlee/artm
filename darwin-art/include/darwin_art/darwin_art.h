@@ -34,6 +34,14 @@ typedef int32_t (*darwin_art_frame_callback_t)(
     uint32_t height,
     size_t stride_bytes);
 
+// Optional Rust-owned provider lifecycle hooks.  When both callbacks are
+// present, provider activation/deactivation is delegated to the host owner;
+// when absent, the engine uses its built-in compatibility owner.
+typedef int32_t (*darwin_art_provider_acquire_t)(
+    void* context, uint32_t provider_kind, int32_t authority_fd);
+typedef int32_t (*darwin_art_provider_release_t)(
+    void* context, uint32_t provider_kind);
+
 typedef struct darwin_art_process_config {
   uint32_t struct_size;
   uint32_t abi_version;
@@ -46,6 +54,9 @@ typedef struct darwin_art_process_config {
   uint64_t heap_maximum_bytes;
   void* host_context;
   darwin_art_frame_callback_t frame_callback;
+  void* provider_context;
+  darwin_art_provider_acquire_t provider_acquire;
+  darwin_art_provider_release_t provider_release;
 } darwin_art_process_config_t;
 
 typedef struct darwin_art_process_result {

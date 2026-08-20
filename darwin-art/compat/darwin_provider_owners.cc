@@ -8,6 +8,7 @@
 #include <limits>
 #include <mutex>
 #include <string>
+#include <utility>
 
 #include "darwin_art_bionic_fs.h"
 #include "darwin_art_bionic_ioctl.h"
@@ -49,9 +50,29 @@ SingletonOwnerState g_ioctl_owner;
 SingletonOwnerState g_strftime_owner;
 SingletonOwnerState g_sendfile_owner;
 
+struct HookState {
+  std::mutex mutex;
+  void* context = nullptr;
+  AcquireHook acquire = nullptr;
+  ReleaseHook release = nullptr;
+};
+
+HookState g_hooks;
+
+struct HookSnapshot {
+  void* context;
+  AcquireHook acquire;
+  ReleaseHook release;
+};
+
+HookSnapshot hooks() {
+  std::lock_guard<std::mutex> lock(g_hooks.mutex);
+  return {g_hooks.context, g_hooks.acquire, g_hooks.release};
+}
+
 }  // namespace
 
-bool acquire_filesystem(int directory_fd, std::string* error) {
+bool acquire_filesystem_direct(int directory_fd, std::string* error) {
   struct stat status {};
   if (directory_fd < 0 || fstat(directory_fd, &status) != 0 ||
       !S_ISDIR(status.st_mode)) {
@@ -88,7 +109,7 @@ bool acquire_filesystem(int directory_fd, std::string* error) {
   return true;
 }
 
-void release_filesystem() {
+void release_filesystem_direct() {
   std::lock_guard<std::mutex> lock(g_filesystem_owner.mutex);
   if (g_filesystem_owner.users == 0) std::abort();
   --g_filesystem_owner.users;
@@ -101,7 +122,7 @@ void release_filesystem() {
   g_filesystem_owner.inode = 0;
 }
 
-bool acquire_network(std::string* error) {
+bool acquire_network_direct(std::string* error) {
   std::lock_guard<std::mutex> lock(g_network_owner.mutex);
   if (g_network_owner.users != 0) {
     if (g_network_owner.users == std::numeric_limits<size_t>::max()) {
@@ -119,7 +140,7 @@ bool acquire_network(std::string* error) {
   return true;
 }
 
-void release_network() {
+void release_network_direct() {
   std::lock_guard<std::mutex> lock(g_network_owner.mutex);
   if (g_network_owner.users == 0) std::abort();
   --g_network_owner.users;
@@ -130,17 +151,17 @@ void release_network() {
   }
 }
 
-bool acquire_stdio(std::string* error) {
+bool acquire_stdio_direct(std::string* error) {
   if (darwin_art_bionic_stdio_process_install() == 0) return true;
   *error = "Bionic stdio process-owner install failed";
   return false;
 }
 
-void release_stdio() {
+void release_stdio_direct() {
   if (darwin_art_bionic_stdio_process_uninstall() != 0) std::abort();
 }
 
-bool acquire_ioctl(std::string* error) {
+bool acquire_ioctl_direct(std::string* error) {
   std::lock_guard<std::mutex> lock(g_ioctl_owner.mutex);
   if (g_ioctl_owner.users != 0) {
     if (g_ioctl_owner.users == std::numeric_limits<size_t>::max()) {
@@ -162,7 +183,7 @@ bool acquire_ioctl(std::string* error) {
   return true;
 }
 
-void release_ioctl() {
+void release_ioctl_direct() {
   std::lock_guard<std::mutex> lock(g_ioctl_owner.mutex);
   if (g_ioctl_owner.users == 0) std::abort();
   --g_ioctl_owner.users;
@@ -171,7 +192,7 @@ void release_ioctl() {
       DARWIN_ART_BIONIC_IOCTL_LIFECYCLE_OK) std::abort();
 }
 
-bool acquire_strftime(std::string* error) {
+bool acquire_strftime_direct(std::string* error) {
   std::lock_guard<std::mutex> lock(g_strftime_owner.mutex);
   if (g_strftime_owner.users != 0) {
     if (g_strftime_owner.users == std::numeric_limits<size_t>::max()) {
@@ -192,7 +213,7 @@ bool acquire_strftime(std::string* error) {
   return true;
 }
 
-void release_strftime() {
+void release_strftime_direct() {
   std::lock_guard<std::mutex> lock(g_strftime_owner.mutex);
   if (g_strftime_owner.users == 0) std::abort();
   --g_strftime_owner.users;
@@ -201,7 +222,7 @@ void release_strftime() {
       DARWIN_ART_BIONIC_STRFTIME_OK) std::abort();
 }
 
-bool acquire_sendfile(std::string* error) {
+bool acquire_sendfile_direct(std::string* error) {
   std::lock_guard<std::mutex> lock(g_sendfile_owner.mutex);
   if (g_sendfile_owner.users != 0) {
     if (g_sendfile_owner.users == std::numeric_limits<size_t>::max()) {
@@ -223,13 +244,225 @@ bool acquire_sendfile(std::string* error) {
   return true;
 }
 
-void release_sendfile() {
+void release_sendfile_direct() {
   std::lock_guard<std::mutex> lock(g_sendfile_owner.mutex);
   if (g_sendfile_owner.users == 0) std::abort();
   --g_sendfile_owner.users;
   if (g_sendfile_owner.users != 0) return;
   if (darwin_art_bionic_sendfile_deactivate() !=
       DARWIN_ART_BIONIC_SENDFILE_LIFECYCLE_OK) std::abort();
+}
+
+bool acquire_filesystem(int directory_fd, std::string* error) {
+  const HookSnapshot hook = hooks();
+  if (hook.acquire != nullptr) {
+    const int32_t status = hook.acquire(
+        hook.context, static_cast<uint32_t>(Kind::Filesystem), directory_fd);
+    if (status == 0) return true;
+    *error = "Rust filesystem provider owner rejected activation: " +
+             std::to_string(status);
+    return false;
+  }
+  return acquire_filesystem_direct(directory_fd, error);
+}
+
+void release_filesystem() {
+  const HookSnapshot hook = hooks();
+  if (hook.release != nullptr) {
+    if (hook.release(hook.context, static_cast<uint32_t>(Kind::Filesystem)) != 0) {
+      std::abort();
+    }
+    return;
+  }
+  release_filesystem_direct();
+}
+
+bool acquire_network(std::string* error) {
+  const HookSnapshot hook = hooks();
+  if (hook.acquire != nullptr) {
+    const int32_t status =
+        hook.acquire(hook.context, static_cast<uint32_t>(Kind::Network), -1);
+    if (status == 0) return true;
+    *error = "Rust network provider owner rejected activation: " +
+             std::to_string(status);
+    return false;
+  }
+  return acquire_network_direct(error);
+}
+
+void release_network() {
+  const HookSnapshot hook = hooks();
+  if (hook.release != nullptr) {
+    if (hook.release(hook.context, static_cast<uint32_t>(Kind::Network)) != 0) {
+      std::abort();
+    }
+    return;
+  }
+  release_network_direct();
+}
+
+bool acquire_stdio(std::string* error) {
+  const HookSnapshot hook = hooks();
+  if (hook.acquire != nullptr) {
+    const int32_t status =
+        hook.acquire(hook.context, static_cast<uint32_t>(Kind::Stdio), -1);
+    if (status == 0) return true;
+    *error = "Rust stdio provider owner rejected activation: " +
+             std::to_string(status);
+    return false;
+  }
+  return acquire_stdio_direct(error);
+}
+
+void release_stdio() {
+  const HookSnapshot hook = hooks();
+  if (hook.release != nullptr) {
+    if (hook.release(hook.context, static_cast<uint32_t>(Kind::Stdio)) != 0) {
+      std::abort();
+    }
+    return;
+  }
+  release_stdio_direct();
+}
+
+bool acquire_ioctl(std::string* error) {
+  const HookSnapshot hook = hooks();
+  if (hook.acquire != nullptr) {
+    const int32_t status =
+        hook.acquire(hook.context, static_cast<uint32_t>(Kind::Ioctl), -1);
+    if (status == 0) return true;
+    *error = "Rust ioctl provider owner rejected activation: " +
+             std::to_string(status);
+    return false;
+  }
+  return acquire_ioctl_direct(error);
+}
+
+void release_ioctl() {
+  const HookSnapshot hook = hooks();
+  if (hook.release != nullptr) {
+    if (hook.release(hook.context, static_cast<uint32_t>(Kind::Ioctl)) != 0) {
+      std::abort();
+    }
+    return;
+  }
+  release_ioctl_direct();
+}
+
+bool acquire_strftime(std::string* error) {
+  const HookSnapshot hook = hooks();
+  if (hook.acquire != nullptr) {
+    const int32_t status =
+        hook.acquire(hook.context, static_cast<uint32_t>(Kind::Strftime), -1);
+    if (status == 0) return true;
+    *error = "Rust strftime provider owner rejected activation: " +
+             std::to_string(status);
+    return false;
+  }
+  return acquire_strftime_direct(error);
+}
+
+void release_strftime() {
+  const HookSnapshot hook = hooks();
+  if (hook.release != nullptr) {
+    if (hook.release(hook.context, static_cast<uint32_t>(Kind::Strftime)) != 0) {
+      std::abort();
+    }
+    return;
+  }
+  release_strftime_direct();
+}
+
+bool acquire_sendfile(std::string* error) {
+  const HookSnapshot hook = hooks();
+  if (hook.acquire != nullptr) {
+    const int32_t status =
+        hook.acquire(hook.context, static_cast<uint32_t>(Kind::Sendfile), -1);
+    if (status == 0) return true;
+    *error = "Rust sendfile provider owner rejected activation: " +
+             std::to_string(status);
+    return false;
+  }
+  return acquire_sendfile_direct(error);
+}
+
+void release_sendfile() {
+  const HookSnapshot hook = hooks();
+  if (hook.release != nullptr) {
+    if (hook.release(hook.context, static_cast<uint32_t>(Kind::Sendfile)) != 0) {
+      std::abort();
+    }
+    return;
+  }
+  release_sendfile_direct();
+}
+
+extern "C" void darwin_art_provider_install_hooks(
+    void* context, AcquireHook acquire, ReleaseHook release) {
+  std::lock_guard<std::mutex> lock(g_hooks.mutex);
+  g_hooks.context = context;
+  g_hooks.acquire = acquire;
+  g_hooks.release = release;
+}
+
+extern "C" void darwin_art_provider_clear_hooks() {
+  std::lock_guard<std::mutex> lock(g_hooks.mutex);
+  g_hooks.context = nullptr;
+  g_hooks.acquire = nullptr;
+  g_hooks.release = nullptr;
+}
+
+extern "C" int32_t darwin_art_provider_native_acquire(uint32_t kind,
+                                                       int32_t authority_fd) {
+  std::string error;
+  bool ok = false;
+  switch (static_cast<Kind>(kind)) {
+    case Kind::Filesystem:
+      ok = acquire_filesystem_direct(authority_fd, &error);
+      break;
+    case Kind::Network:
+      ok = acquire_network_direct(&error);
+      break;
+    case Kind::Stdio:
+      ok = acquire_stdio_direct(&error);
+      break;
+    case Kind::Ioctl:
+      ok = acquire_ioctl_direct(&error);
+      break;
+    case Kind::Strftime:
+      ok = acquire_strftime_direct(&error);
+      break;
+    case Kind::Sendfile:
+      ok = acquire_sendfile_direct(&error);
+      break;
+  }
+  return ok ? 0 : -1;
+}
+
+extern "C" int32_t darwin_art_provider_native_release(uint32_t kind) {
+  switch (static_cast<Kind>(kind)) {
+    case Kind::Filesystem:
+      release_filesystem_direct();
+      break;
+    case Kind::Network:
+      release_network_direct();
+      break;
+    case Kind::Stdio:
+      release_stdio_direct();
+      break;
+    case Kind::Ioctl:
+      release_ioctl_direct();
+      break;
+    case Kind::Strftime:
+      release_strftime_direct();
+      break;
+    case Kind::Sendfile:
+      release_sendfile_direct();
+      break;
+    default:
+      return -1;
+  }
+  return 0;
 }
 
 }  // namespace darwin_art::providers

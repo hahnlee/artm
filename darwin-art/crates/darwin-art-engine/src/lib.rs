@@ -16,9 +16,10 @@ mod platform {
     use std::path::Path;
 
     use darwin_art_engine_sys::{
-        DispatchPointerFn, PumpFrameworkFrameFn, RunProcessFn, ShutdownProcessFn, SurfaceActiveFn,
-        SurfaceCreateFn, SurfaceDestroyFn, SurfaceNextPointerEventFn, SurfacePresentFn,
-        SurfacePumpEventsFn, SurfaceUpdateFn,
+        DispatchPointerFn, ProviderAcquireFn, ProviderClearHooksFn, ProviderInstallHooksFn,
+        ProviderNativeAcquireFn, ProviderNativeReleaseFn, ProviderReleaseFn, PumpFrameworkFrameFn,
+        RunProcessFn, ShutdownProcessFn, SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn,
+        SurfaceNextPointerEventFn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
     };
 
     #[derive(Clone, Copy)]
@@ -34,6 +35,10 @@ mod platform {
         pub surface_active: SurfaceActiveFn,
         pub dispatch_pointer: DispatchPointerFn,
         pub pump_framework_frame: PumpFrameworkFrameFn,
+        pub provider_install_hooks: ProviderInstallHooksFn,
+        pub provider_clear_hooks: ProviderClearHooksFn,
+        pub provider_native_acquire: ProviderNativeAcquireFn,
+        pub provider_native_release: ProviderNativeReleaseFn,
     }
 
     struct LoadedEngine {
@@ -59,6 +64,13 @@ mod platform {
                     surface_active: library.symbol(b"darwin_art_surface_active_gpu\0")?,
                     dispatch_pointer: library.symbol(b"darwin_art_dispatch_pointer\0")?,
                     pump_framework_frame: library.symbol(b"darwin_art_pump_framework_frame\0")?,
+                    provider_install_hooks: library
+                        .symbol(b"darwin_art_provider_install_hooks\0")?,
+                    provider_clear_hooks: library.symbol(b"darwin_art_provider_clear_hooks\0")?,
+                    provider_native_acquire: library
+                        .symbol(b"darwin_art_provider_native_acquire\0")?,
+                    provider_native_release: library
+                        .symbol(b"darwin_art_provider_native_release\0")?,
                 }
             };
             Ok(Self {
@@ -90,6 +102,29 @@ mod platform {
 
         pub fn symbols(&self) -> EngineSymbols {
             self.engine.symbols()
+        }
+
+        /// # Safety
+        ///
+        /// `context` and both callbacks must remain valid until
+        /// `clear_provider_hooks` is called. The callbacks may run on an ART
+        /// thread during native-library graph loading.
+        pub unsafe fn install_provider_hooks(
+            &self,
+            context: *mut c_void,
+            acquire: Option<ProviderAcquireFn>,
+            release: Option<ProviderReleaseFn>,
+        ) {
+            // SAFETY: the callback context is owned by the caller for the
+            // entire engine session, and the function pointer table belongs
+            // to this live dynamic image.
+            unsafe { (self.engine.symbols.provider_install_hooks)(context, acquire, release) }
+        }
+
+        pub fn clear_provider_hooks(&self) {
+            // SAFETY: the hook table is process-global and this owner is the
+            // same image that installed it.
+            unsafe { (self.engine.symbols.provider_clear_hooks)() }
         }
 
         /// Invoke the process shutdown callback at most once.  The callback

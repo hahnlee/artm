@@ -36,6 +36,7 @@
 #include "darwin_art_bionic_socket_broker.h"
 #include "darwin_android_jni_trampoline.h"
 #include "darwin_framework_natives.h"
+#include "darwin_provider_owners.h"
 #include "darwin_hwui_gpu_mode.h"
 #include "darwin_surface_bridge.h"
 #include "runtime_filesystem_probe.h"
@@ -301,6 +302,7 @@ struct ProcessState {
 };
 
 static ProcessState g_process_state;
+static bool g_provider_hooks_installed = false;
 
 static bool BeginProcessRun() {
   std::lock_guard<std::mutex> lock(g_process_state.mutex);
@@ -1375,6 +1377,13 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     std::cerr << "darwin_art_run_process: invalid ABI/configuration\n";
     return 64;
   }
+  if ((config->provider_context != nullptr || config->provider_acquire != nullptr ||
+       config->provider_release != nullptr) &&
+      (config->provider_context == nullptr || config->provider_acquire == nullptr ||
+       config->provider_release == nullptr)) {
+    std::cerr << "darwin_art_run_process: incomplete provider hook table\n";
+    return 64;
+  }
 
   const uint64_t heap_initial = config->heap_initial_bytes == 0
                                     ? 64u * 1024u * 1024u
@@ -1540,6 +1549,12 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   JNIEnv* env = self->GetJniEnv();
 
   process_boundary.SetArtThread(self);
+  if (config->provider_acquire != nullptr) {
+    darwin_art::providers::darwin_art_provider_install_hooks(
+        config->provider_context, config->provider_acquire,
+        config->provider_release);
+    g_provider_hooks_installed = true;
+  }
   return [&]() -> int32_t {
 
   art::interpreter::UnstartedRuntime::Initialize();
@@ -3038,6 +3053,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
 
   darwin_art::ShutdownIcuCharsetNatives();
   darwin_art::ShutdownFrameworkGraphicsRuntime();
+  if (g_provider_hooks_installed) {
+    darwin_art::providers::darwin_art_provider_clear_hooks();
+    g_provider_hooks_installed = false;
+  }
   g_process_state.app_dex_files.clear();
   {
     std::lock_guard<std::mutex> lock(g_process_state.mutex);

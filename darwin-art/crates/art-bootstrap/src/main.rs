@@ -3684,6 +3684,10 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_install_hooks")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_clear_hooks")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_native_acquire")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&filesystem_object)
@@ -3769,6 +3773,10 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             "_darwin_art_surface_pump_events",
             "_darwin_art_surface_next_pointer_event",
             "_darwin_art_surface_destroy",
+            "_darwin_art_provider_install_hooks",
+            "_darwin_art_provider_clear_hooks",
+            "_darwin_art_provider_native_acquire",
+            "_darwin_art_provider_native_release",
         ] {
             if !symbols.contains(required) {
                 return Err(format!(
@@ -3839,7 +3847,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             }
         }
         build_runtime_host(root)?;
-        println!("audit-runtime-link: C ABI dylib closure complete undefined=0 exports=11");
+        println!("audit-runtime-link: C ABI dylib closure complete undefined=0 exports=15");
         return Ok(());
     }
 
@@ -4191,6 +4199,10 @@ fn audit_runtime_graphics_link_mode(root: &Path, run_upstream_gates: bool) -> Re
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_install_hooks")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_clear_hooks")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_native_acquire")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
         .arg("-Wl,-dead_strip")
         .arg(format!("-Wl,-map,{}", link_map.display()))
         .arg(&object)
@@ -4335,6 +4347,10 @@ fn audit_runtime_graphics_link_mode(root: &Path, run_upstream_gates: bool) -> Re
         "_darwin_art_surface_pump_events",
         "_darwin_art_surface_next_pointer_event",
         "_darwin_art_surface_destroy",
+        "_darwin_art_provider_install_hooks",
+        "_darwin_art_provider_clear_hooks",
+        "_darwin_art_provider_native_acquire",
+        "_darwin_art_provider_native_release",
     ] {
         if !global_symbols.contains(required) {
             return Err(format!("real-graphics Runtime lacks required symbol {required}").into());

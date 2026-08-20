@@ -28,6 +28,10 @@ pub type FrameCallback = unsafe extern "C" fn(
     stride_bytes: usize,
 ) -> i32;
 
+pub type ProviderAcquireFn =
+    unsafe extern "C" fn(context: *mut c_void, provider_kind: u32, authority_fd: i32) -> i32;
+pub type ProviderReleaseFn = unsafe extern "C" fn(context: *mut c_void, provider_kind: u32) -> i32;
+
 #[repr(C)]
 pub struct ProcessConfig {
     pub struct_size: u32,
@@ -41,6 +45,9 @@ pub struct ProcessConfig {
     pub heap_maximum_bytes: u64,
     pub host_context: *mut c_void,
     pub frame_callback: Option<FrameCallback>,
+    pub provider_context: *mut c_void,
+    pub provider_acquire: Option<ProviderAcquireFn>,
+    pub provider_release: Option<ProviderReleaseFn>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -91,6 +98,14 @@ pub type SurfaceDestroyFn = unsafe extern "C" fn(*mut c_void) -> i32;
 pub type SurfaceActiveFn = unsafe extern "C" fn() -> *mut c_void;
 pub type DispatchPointerFn = unsafe extern "C" fn(u32, f32, f32) -> i32;
 pub type PumpFrameworkFrameFn = unsafe extern "C" fn(i64) -> i32;
+pub type ProviderInstallHooksFn = unsafe extern "C" fn(
+    context: *mut c_void,
+    acquire: Option<ProviderAcquireFn>,
+    release: Option<ProviderReleaseFn>,
+);
+pub type ProviderClearHooksFn = unsafe extern "C" fn();
+pub type ProviderNativeAcquireFn = unsafe extern "C" fn(kind: u32, authority_fd: i32) -> i32;
+pub type ProviderNativeReleaseFn = unsafe extern "C" fn(kind: u32) -> i32;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
