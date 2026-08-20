@@ -8,22 +8,18 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 
 mod provider;
-mod session;
 
 #[cfg(target_os = "macos")]
-use darwin_art_engine::EngineSession;
+use darwin_art_engine::{EngineSession, SurfaceSession};
 
 pub use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProcessResult};
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
 use provider::ProviderBridge;
-use session::SurfaceCleanupGuard;
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
 use darwin_art_engine_sys::{
-    DispatchPointerFn, PointerEvent, PumpFrameworkFrameFn, SurfaceActiveFn, SurfaceCreateFn,
-    SurfaceCreateInfo, SurfaceDestroyFn, SurfaceNextPointerEventFn, SurfacePresentFn,
-    SurfacePumpEventsFn, SurfaceUpdateFn,
+    DispatchPointerFn, PointerEvent, PumpFrameworkFrameFn, SurfaceCreateInfo,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -242,14 +238,6 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 Some(ProviderBridge::release_callback()),
             );
         }
-        let surface_create: SurfaceCreateFn = symbols.surface_create;
-        let surface_update: SurfaceUpdateFn = symbols.surface_update;
-        let surface_present: SurfacePresentFn = symbols.surface_present;
-        let surface_pump_events: SurfacePumpEventsFn = symbols.surface_pump_events;
-        let surface_next_pointer_event: SurfaceNextPointerEventFn =
-            symbols.surface_next_pointer_event;
-        let surface_destroy: SurfaceDestroyFn = symbols.surface_destroy;
-        let surface_active: SurfaceActiveFn = symbols.surface_active;
         let dispatch_pointer: DispatchPointerFn = symbols.dispatch_pointer;
         let pump_framework_frame: PumpFrameworkFrameFn = symbols.pump_framework_frame;
 
@@ -329,8 +317,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // retained for diagnostics, never selected by the normal host.
         let gpu_mode = true;
         if gpu_mode {
-            let surface = unsafe { surface_active() };
-            if surface.is_null() {
+            let Some(surface) = SurfaceSession::active(symbols) else {
                 // No surface was published, but ART and the provider
                 // bridge are already live.  Roll them back through the
                 // same owner-thread LIFO as the normal GPU path; a bare
@@ -364,11 +351,11 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                         cleanup_status
                     },
                 });
-            }
+            };
             let surface_lease = runtime
                 .install_owned_subsystem_with_resource_cleanup(
                     Subsystem::Surface,
-                    SurfaceCleanupGuard::new(surface_destroy, surface),
+                    surface,
                     |surface| {
                         let status = surface.close();
                         if status == 0 {
@@ -402,9 +389,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             let dispatch_queued_events = || -> Result<u64, HostError> {
                 let mut dispatched = 0_u64;
                 let mut event = PointerEvent::default();
-                while unsafe {
-                    surface_next_pointer_event(owned_surface_handle(&runtime), &mut event)
-                } {
+                while owned_surface_next_pointer_event(&runtime, &mut event) {
                     let dispatch_status =
                         unsafe { dispatch_pointer(event.action, event.x, event.y) };
                     if dispatch_status != 0 {
@@ -424,12 +409,8 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     let mut held_ms = 0_u64;
                     while held_ms < test_hold_ms && loop_error.is_none() {
                         let slice_ms = (test_hold_ms - held_ms).min(16);
-                        let pump_status = unsafe {
-                            surface_pump_events(
-                                owned_surface_handle(&runtime),
-                                slice_ms as f64 / 1000.0,
-                            )
-                        };
+                        let pump_status =
+                            owned_surface_pump_events(&runtime, slice_ms as f64 / 1000.0);
                         if pump_status == 7 {
                             break;
                         }
@@ -474,8 +455,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             }
             while remaining > 0.0 {
                 let slice = remaining.min(0.016);
-                let pump_status =
-                    unsafe { surface_pump_events(owned_surface_handle(&runtime), slice) };
+                let pump_status = owned_surface_pump_events(&runtime, slice);
                 if pump_status == 7 {
                     break;
                 }
@@ -584,21 +564,17 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 title: title.as_ptr(),
                 visible: options.visible_seconds > 0.0,
             };
-            let mut create_status = 0;
-            // SAFETY: create_info and status remain live for this synchronous
-            // main-thread call and match darwin_surface_bridge.h.
-            let surface = unsafe { surface_create(&create_info, &mut create_status) };
-            if surface.is_null() {
-                return Err(HostError::SurfaceFailed {
+            let surface = SurfaceSession::create(symbols, &create_info).map_err(|status| {
+                HostError::SurfaceFailed {
                     operation: "create",
-                    status: create_status,
-                });
-            }
+                    status,
+                }
+            })?;
             surface_lease = Some(
                 runtime
                     .install_owned_subsystem_with_resource_cleanup(
                         Subsystem::Surface,
-                        SurfaceCleanupGuard::new(surface_destroy, surface),
+                        surface,
                         |surface| {
                             let status = surface.close();
                             if status == 0 {
@@ -627,17 +603,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                             status: -1,
                         });
                     }
-                    // SAFETY: surface and the packed frame are live for this
-                    // synchronous main-thread upload.
-                    let update_status = unsafe {
-                        surface_update(
-                            owned_surface_handle(&runtime),
-                            frame.argb_pixels.as_ptr().cast(),
-                            frame.width as usize * size_of::<u32>(),
-                        )
-                    };
+                    let update_status = owned_surface_update(&runtime, &frame.argb_pixels);
                     surface_status("update", update_status, false)?;
-                    let present_status = unsafe { surface_present(owned_surface_handle(&runtime)) };
+                    let present_status = owned_surface_present(&runtime);
                     surface_status("present", present_status, false)
                 };
                 // SAFETY: surface is live; the packed Rust frame remains live
@@ -704,12 +672,8 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                         let mut held = 0_u64;
                         while held < hold_ms {
                             let slice_ms = (hold_ms - held).min(16);
-                            let pump_status = unsafe {
-                                surface_pump_events(
-                                    owned_surface_handle(&runtime),
-                                    slice_ms as f64 / 1000.0,
-                                )
-                            };
+                            let pump_status =
+                                owned_surface_pump_events(&runtime, slice_ms as f64 / 1000.0);
                             if pump_status == 7 {
                                 break;
                             }
@@ -746,16 +710,13 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 let mut remaining = options.visible_seconds;
                 while remaining > 0.0 {
                     let slice = remaining.min(0.016);
-                    let pump_status =
-                        unsafe { surface_pump_events(owned_surface_handle(&runtime), slice) };
+                    let pump_status = owned_surface_pump_events(&runtime, slice);
                     if pump_status == 7 {
                         break;
                     }
                     surface_status("pump_events", pump_status, false)?;
                     let mut event = PointerEvent::default();
-                    while unsafe {
-                        surface_next_pointer_event(owned_surface_handle(&runtime), &mut event)
-                    } {
+                    while owned_surface_next_pointer_event(&runtime, &mut event) {
                         let dispatch_status =
                             unsafe { dispatch_pointer(event.action, event.x, event.y) };
                         if dispatch_status != 0 {
@@ -840,10 +801,29 @@ fn surface_status(
     }
 }
 
-fn owned_surface_handle(runtime: &RuntimeSession) -> *mut c_void {
-    runtime
-        .owned_resource::<SurfaceCleanupGuard>(Subsystem::Surface)
-        .map_or(std::ptr::null_mut(), SurfaceCleanupGuard::handle)
+#[cfg(target_os = "macos")]
+fn owned_surface(runtime: &RuntimeSession) -> Option<&SurfaceSession> {
+    runtime.owned_resource::<SurfaceSession>(Subsystem::Surface)
+}
+
+#[cfg(target_os = "macos")]
+fn owned_surface_pump_events(runtime: &RuntimeSession, seconds: f64) -> i32 {
+    owned_surface(runtime).map_or(-1, |surface| surface.pump_events(seconds))
+}
+
+#[cfg(target_os = "macos")]
+fn owned_surface_next_pointer_event(runtime: &RuntimeSession, event: &mut PointerEvent) -> bool {
+    owned_surface(runtime).is_some_and(|surface| surface.next_pointer_event(event))
+}
+
+#[cfg(target_os = "macos")]
+fn owned_surface_update(runtime: &RuntimeSession, pixels: &[u32]) -> i32 {
+    owned_surface(runtime).map_or(-1, |surface| surface.update_words(pixels))
+}
+
+#[cfg(target_os = "macos")]
+fn owned_surface_present(runtime: &RuntimeSession) -> i32 {
+    owned_surface(runtime).map_or(-1, SurfaceSession::present)
 }
 
 fn path_c_string(path: &Path) -> Result<CString, HostError> {

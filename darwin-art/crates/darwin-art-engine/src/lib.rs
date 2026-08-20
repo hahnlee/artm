@@ -16,11 +16,11 @@ mod platform {
     use std::path::Path;
 
     use darwin_art_engine_sys::{
-        DispatchPointerFn, ProcessConfig, ProcessResult, ProviderAcquireFn, ProviderClearHooksFn,
-        ProviderInstallHooksFn, ProviderNativeAcquireFn, ProviderNativeReleaseFn,
-        ProviderReleaseFn, PumpFrameworkFrameFn, RunProcessFn, ShutdownProcessFn, SurfaceActiveFn,
-        SurfaceCreateFn, SurfaceDestroyFn, SurfaceNextPointerEventFn, SurfacePresentFn,
-        SurfacePumpEventsFn, SurfaceUpdateFn,
+        DispatchPointerFn, PointerEvent, ProcessConfig, ProcessResult, ProviderAcquireFn,
+        ProviderClearHooksFn, ProviderInstallHooksFn, ProviderNativeAcquireFn,
+        ProviderNativeReleaseFn, ProviderReleaseFn, PumpFrameworkFrameFn, RunProcessFn,
+        ShutdownProcessFn, SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn,
+        SurfaceNextPointerEventFn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
     };
 
     #[derive(Clone, Copy)]
@@ -40,6 +40,95 @@ mod platform {
         pub provider_clear_hooks: ProviderClearHooksFn,
         pub provider_native_acquire: ProviderNativeAcquireFn,
         pub provider_native_release: ProviderNativeReleaseFn,
+    }
+
+    /// Owner-thread surface handle. Its callback table and native handle stay
+    /// paired until `close`, so RuntimeSession can drop it before EngineSession
+    /// and never call into an unmapped engine image.
+    pub struct SurfaceSession {
+        handle: *mut c_void,
+        update: SurfaceUpdateFn,
+        present: SurfacePresentFn,
+        pump_events: SurfacePumpEventsFn,
+        next_pointer_event: SurfaceNextPointerEventFn,
+        destroy: SurfaceDestroyFn,
+        armed: bool,
+    }
+
+    impl SurfaceSession {
+        fn from_parts(handle: *mut c_void, symbols: EngineSymbols) -> Self {
+            Self {
+                handle,
+                update: symbols.surface_update,
+                present: symbols.surface_present,
+                pump_events: symbols.surface_pump_events,
+                next_pointer_event: symbols.surface_next_pointer_event,
+                destroy: symbols.surface_destroy,
+                armed: true,
+            }
+        }
+
+        pub fn handle(&self) -> *mut c_void {
+            self.handle
+        }
+
+        pub fn active(symbols: EngineSymbols) -> Option<Self> {
+            // SAFETY: callback belongs to the live engine image represented by
+            // this symbol table.
+            let handle = unsafe { (symbols.surface_active)() };
+            (!handle.is_null()).then(|| Self::from_parts(handle, symbols))
+        }
+
+        pub fn create(
+            symbols: EngineSymbols,
+            info: &darwin_art_engine_sys::SurfaceCreateInfo,
+        ) -> Result<Self, i32> {
+            let mut status = -1;
+            // SAFETY: info is a valid POD for the duration of this call.
+            let handle = unsafe { (symbols.surface_create)(info, &mut status) };
+            if handle.is_null() {
+                Err(status)
+            } else {
+                Ok(Self::from_parts(handle, symbols))
+            }
+        }
+
+        pub fn update_words(&self, pixels: &[u32]) -> i32 {
+            let byte_count = pixels.len().saturating_mul(size_of::<u32>());
+            // SAFETY: the callback and handle are paired and live; `pixels`
+            // remains borrowed for the duration of the synchronous callback.
+            unsafe { (self.update)(self.handle, pixels.as_ptr().cast(), byte_count) }
+        }
+
+        pub fn present(&self) -> i32 {
+            // SAFETY: same invariant as update.
+            unsafe { (self.present)(self.handle) }
+        }
+
+        pub fn pump_events(&self, visible_seconds: f64) -> i32 {
+            // SAFETY: same invariant as update.
+            unsafe { (self.pump_events)(self.handle, visible_seconds) }
+        }
+
+        pub fn next_pointer_event(&self, event: &mut PointerEvent) -> bool {
+            // SAFETY: event is writable POD and the handle is live.
+            unsafe { (self.next_pointer_event)(self.handle, event) }
+        }
+
+        pub fn close(&mut self) -> i32 {
+            if !self.armed {
+                return 0;
+            }
+            self.armed = false;
+            // SAFETY: this is the one matching destroy call for the handle.
+            unsafe { (self.destroy)(self.handle) }
+        }
+    }
+
+    impl Drop for SurfaceSession {
+        fn drop(&mut self) {
+            let _ = self.close();
+        }
     }
 
     struct LoadedEngine {
@@ -118,6 +207,17 @@ mod platform {
             // pointer belongs to this live EngineSession image.
             let status = unsafe { (self.engine.symbols.run_process)(config, &mut result) };
             if status == 0 { Ok(result) } else { Err(status) }
+        }
+
+        pub fn active_surface(&self) -> Option<SurfaceSession> {
+            SurfaceSession::active(self.symbols())
+        }
+
+        pub fn create_surface(
+            &self,
+            info: &darwin_art_engine_sys::SurfaceCreateInfo,
+        ) -> Result<SurfaceSession, i32> {
+            SurfaceSession::create(self.symbols(), info)
         }
 
         /// # Safety
@@ -219,4 +319,4 @@ mod platform {
 }
 
 #[cfg(target_os = "macos")]
-pub use platform::{EngineSession, EngineSymbols};
+pub use platform::{EngineSession, EngineSymbols, SurfaceSession};
