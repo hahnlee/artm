@@ -114,9 +114,10 @@ fn emit_representative_edges(
     cache_dir: &Path,
     toolchain: &ToolchainInputs,
 ) -> io::Result<()> {
-    // These edges are an opt-in preflight target until the bootstrap command
-    // consumes their objects directly. Keeping them off the default audit
-    // prevents the transitional graph from doing duplicate compilation.
+    // These edges are deliberately separate from the ART bootstrap archive:
+    // they are small, independently cacheable production-side TUs and make
+    // the graph's object ownership observable without duplicating the 200+
+    // upstream ART objects in the transitional archive builder.
     let object_dir = cache_dir.join("native-tu");
     graph.push_str("rule native_representative_cpp\n");
     graph.push_str("  command = mkdir -p ");
@@ -245,7 +246,11 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     )?;
 
     let root_for_shell = root.to_string_lossy().into_owned();
-    let native_output_root = cache_dir.join("outputs");
+    // Keep compiler outputs at a stable path.  The graph digest is a
+    // manifest/invalidation identity, not an object-cache namespace: moving
+    // objects into a new digest directory would turn every header edit into
+    // a cold 200+ TU rebuild and defeat dependency-fingerprint caching.
+    let native_output_root = root.join("_build");
     let archive_path = native_output_root.join(GRAPHICS_BOOTSTRAP_ARCHIVE);
     let runtime_library_path = native_output_root.join(GRAPHICS_RUNTIME_LIBRARY);
     let filesystem_object_path =
@@ -288,7 +293,9 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&root_for_shell));
     graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT_ROOT=");
     graph.push_str(&shell_quote(&native_output_for_shell));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-bootstrap && touch ");
+    graph.push_str(
+        " cargo run -p art-bootstrap -- build-runtime-graphics-bootstrap-internal && touch ",
+    );
     graph.push_str(&shell_quote(&stamp_for_shell));
     graph.push('\n');
     graph.push_str("  description = GRAPHICS bootstrap\n");
@@ -301,7 +308,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&bootstrap_input_list);
     graph.push('\n');
     graph.push_str("build graphics-bootstrap: phony ");
-    graph.push_str(&stamp);
+    graph.push_str(&archive);
     graph.push('\n');
     graph.push_str("rule runtime_filesystem_probe\n");
     graph.push_str("  command = cd ");
@@ -586,12 +593,12 @@ mod tests {
     }
 
     #[test]
-    fn graphics_bootstrap_archive_is_declared_under_cache_outputs() {
-        let output_root = Path::new("_build/native-cache/digest/outputs");
+    fn graphics_bootstrap_archive_is_declared_at_stable_output_path() {
+        let output_root = Path::new("_build");
         assert_eq!(
             output_root.join(GRAPHICS_BOOTSTRAP_ARCHIVE),
             PathBuf::from(
-                "_build/native-cache/digest/outputs/runtime-graphics-bootstrap/\
+                "_build/runtime-graphics-bootstrap/\
                  libart-runtime-graphics-bootstrap-darwin.a"
             )
         );

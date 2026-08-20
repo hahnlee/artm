@@ -121,6 +121,9 @@ fn run() -> Result<()> {
         "build-interpreter-core" => build_interpreter_core(&root),
         "build-runtime-bootstrap" => build_runtime_bootstrap(&root),
         "build-runtime-graphics-bootstrap" => build_runtime_graphics_bootstrap(&root),
+        "build-runtime-graphics-bootstrap-internal" => {
+            build_runtime_graphics_bootstrap_inner(&root)
+        }
         "build-runtime-filesystem-probe" => build_runtime_filesystem_probe(&root),
         "build-runtime-network-probe" => build_runtime_network_probe(&root),
         "build-runtime-hwui-probe" => build_runtime_hwui_probe(&root),
@@ -2459,6 +2462,49 @@ fn build_runtime_bootstrap(root: &Path) -> Result<()> {
 }
 
 fn build_runtime_graphics_bootstrap(root: &Path) -> Result<()> {
+    build_native_graph(root, "graphics-bootstrap")
+}
+
+/// Drive the content-addressed Ninja graph for the production graphics
+/// archive.  The graph action invokes the inner builder only for a stale
+/// archive; callers therefore do not pay the 200+ TU orchestration cost on a
+/// warm run, while the inner builder remains available as an explicit escape
+/// hatch for diagnostics and CI.
+fn build_native_graph(root: &Path, target: &str) -> Result<()> {
+    if target != "graphics-bootstrap" {
+        return Err(format!("unsupported native graph target: {target}").into());
+    }
+    let graph_dir = root.join("_build/native-graph");
+    fs::create_dir_all(&graph_dir)?;
+    let graph = graph_dir.join("build.ninja");
+    run_command(
+        Command::new("cargo")
+            .args([
+                "run",
+                "-q",
+                "-p",
+                "darwin-art-xtask",
+                "--",
+                "native-graph",
+                "--out",
+            ])
+            .arg(&graph)
+            .current_dir(root),
+    )?;
+    let ninja = root.join("_aosp/external/skia/third_party/ninja/ninja");
+    if !ninja.is_file() {
+        return Err(format!("pinned Ninja is missing: {}", ninja.display()).into());
+    }
+    run_command(
+        Command::new(&ninja)
+            .arg("-f")
+            .arg(&graph)
+            .arg(target)
+            .current_dir(root),
+    )
+}
+
+fn build_runtime_graphics_bootstrap_inner(root: &Path) -> Result<()> {
     build_runtime_bootstrap_flavor(root, true)
 }
 
