@@ -1704,7 +1704,7 @@ fn build_network_dex_probe(root: &Path) -> Result<()> {
             .arg(class_dir.join("dev/darwinart/probe/NetworkRuntimeFixture.class")),
     )?;
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    if !output.contains("classes=13 methods=315")
+    if !output.contains("classes=13 methods=320")
         || !output.contains("Ldev/darwinart/probe/NetworkRuntimeFixture;")
     {
         return Err(format!("unexpected network DEX probe output: {output:?}").into());
@@ -1748,7 +1748,7 @@ fn build_network_dex_probe(root: &Path) -> Result<()> {
     if !kind.contains("ELF 64-bit LSB shared object, ARM aarch64") {
         return Err(format!("unexpected network fixture format: {kind}").into());
     }
-    println!("build-network-dex: classes=13 methods=315 ELF=arm64 imports=8 loopback=only");
+    println!("build-network-dex: classes=13 methods=320 ELF=arm64 imports=8 loopback=only");
     Ok(())
 }
 
@@ -3328,6 +3328,25 @@ fn compile_runtime_filesystem_probe(root: &Path, build_dir: &Path) -> Result<Pat
     Ok(object)
 }
 
+fn compile_runtime_network_probe(root: &Path, build_dir: &Path) -> Result<PathBuf> {
+    let object = build_dir.join("darwin_art_runtime_network_probe.cc.o");
+    fs::create_dir_all(build_dir)?;
+    let cache_path = build_dir.join("runtime-probe-network-hashes.cache");
+    let mut cache = FileHashCache::load(&cache_path)?;
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let mut command = Command::new("clang++");
+    command
+        .args(["-std=c++20", "-fPIC", "-Wall", "-Wextra", "-c"])
+        .arg(root.join("probes/runtime_network_probe.cc"))
+        .arg("-I")
+        .arg(root.join("probes"))
+        .arg("-o")
+        .arg(&object);
+    let _ = compile_with_dependency_cache(&mut command, &object, &compiler_identity, &mut cache)?;
+    cache.save(&cache_path)?;
+    Ok(object)
+}
+
 fn build_runtime_filesystem_probe(root: &Path) -> Result<()> {
     let output = env::var_os("DARWIN_ART_NATIVE_OUTPUT")
         .map(PathBuf::from)
@@ -3378,6 +3397,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         )
         .into());
     }
+    let network_object = compile_runtime_network_probe(root, &build_dir)?;
     build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
     let includes = [
         root.join("include"),
@@ -3497,6 +3517,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&filesystem_object)
+        .arg(&network_object)
         .arg(&surface_object)
         .arg(root.join("_build/runtime-bootstrap/libart-runtime-bootstrap-darwin.a"))
         .arg(format!(
@@ -3733,6 +3754,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         )
         .into());
     }
+    let network_object = compile_runtime_network_probe(root, &build_dir)?;
     let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime_graphics.dylib");
     let graphics_closure =
@@ -3967,6 +3989,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         .arg(format!("-Wl,-map,{}", link_map.display()))
         .arg(&object)
         .arg(&filesystem_object)
+        .arg(&network_object)
         .arg(&surface_object)
         .arg(root.join("_build/skia-metal-gpu/libskia.a"))
         .arg(root.join("_build/skia-metal-gpu/libskcms.a"))
@@ -4456,6 +4479,7 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
     let object = build_dir.join("darwin_art_runtime_direct_apk.cc.o");
     let graph_object = build_dir.join("darwin_art_runtime_apk_graph.cc.o");
     let filesystem_object = compile_runtime_filesystem_probe(root, &build_dir)?;
+    let network_object = compile_runtime_network_probe(root, &build_dir)?;
     let surface_object = root.join("_build/runtime-link-probe/darwin_surface_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime_direct_apk.dylib");
     let includes = [
@@ -4558,6 +4582,7 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(&object)
         .arg(&filesystem_object)
         .arg(&graph_object)
+        .arg(&network_object)
         .arg(&surface_object)
         .arg(root.join("_build/skia-metal-gpu/libskia.a"))
         .arg(root.join("_build/skia-metal-gpu/libskcms.a"))
