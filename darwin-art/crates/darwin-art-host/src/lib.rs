@@ -7,6 +7,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
+mod provider;
 mod session;
 
 #[cfg(target_os = "macos")]
@@ -14,7 +15,8 @@ use darwin_art_engine::EngineSession;
 
 pub use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProcessResult};
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
-use session::{ProviderBridge, SurfaceCleanupGuard, engine_symbols};
+use provider::ProviderBridge;
+use session::SurfaceCleanupGuard;
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
@@ -227,7 +229,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             .start()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
         let mut engine = EngineSession::open(&options.library).map_err(HostError::DynamicLoader)?;
-        let symbols = engine_symbols(&engine);
+        let symbols = engine.symbols();
         let provider_bridge = Box::new(ProviderBridge::new(symbols));
         let provider_context = provider_bridge.context();
         // SAFETY: provider_bridge is kept alive by the local scope until it

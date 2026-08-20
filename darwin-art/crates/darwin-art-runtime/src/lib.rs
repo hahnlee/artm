@@ -10,6 +10,10 @@ use std::{any::Any, collections::BTreeMap, marker::PhantomData, rc::Rc, thread::
 
 use darwin_art_abi::StatusCode;
 
+mod provider;
+
+pub use provider::{ProviderLeaseError, ProviderLeaseTable};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimePhase {
     New,
