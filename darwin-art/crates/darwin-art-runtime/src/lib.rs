@@ -6,7 +6,7 @@
 //! the ordering and rollback state so C++ callbacks cannot invent a second,
 //! conflicting lifecycle machine.
 
-use std::{collections::BTreeMap, marker::PhantomData, rc::Rc, thread::ThreadId};
+use std::{any::Any, collections::BTreeMap, marker::PhantomData, rc::Rc, thread::ThreadId};
 
 use darwin_art_abi::StatusCode;
 
@@ -83,6 +83,7 @@ pub struct RuntimeSession {
     failure: Option<RuntimeError>,
     subsystems: BTreeMap<Subsystem, u64>,
     cleanups: BTreeMap<Subsystem, Box<dyn FnOnce() -> Result<(), RuntimeError>>>,
+    owned_resources: BTreeMap<Subsystem, Box<dyn Any>>,
     install_order: Vec<Subsystem>,
     next_generation: u64,
     _owner_thread: PhantomData<Rc<()>>,
@@ -96,6 +97,7 @@ impl RuntimeSession {
             failure: None,
             subsystems: BTreeMap::new(),
             cleanups: BTreeMap::new(),
+            owned_resources: BTreeMap::new(),
             install_order: Vec::new(),
             next_generation: 1,
             _owner_thread: PhantomData,
@@ -176,6 +178,33 @@ impl RuntimeSession {
         })
     }
 
+    /// Installs a subsystem and transfers a concrete Rust resource into the
+    /// session. The resource is removed only after its native cleanup has
+    /// returned, so foreign teardown always runs while the owning image/guard
+    /// is still alive.
+    pub fn install_owned_subsystem<T, F>(
+        &mut self,
+        subsystem: Subsystem,
+        resource: T,
+        cleanup: F,
+    ) -> Result<SubsystemLease, RuntimeError>
+    where
+        T: 'static,
+        F: FnOnce() -> Result<(), RuntimeError> + 'static,
+    {
+        let lease = self.install_subsystem_with_cleanup(subsystem, cleanup)?;
+        self.owned_resources.insert(subsystem, Box::new(resource));
+        Ok(lease)
+    }
+
+    /// Borrows a session-owned resource for owner-thread orchestration. The
+    /// caller must not retain the reference across a subsystem uninstall.
+    pub fn owned_resource<T: 'static>(&self, subsystem: Subsystem) -> Option<&T> {
+        self.owned_resources
+            .get(&subsystem)
+            .and_then(|resource| resource.downcast_ref::<T>())
+    }
+
     pub fn uninstall_subsystem(&mut self, lease: SubsystemLease) -> Result<(), RuntimeError> {
         self.assert_owner()?;
         let Some(expected) = self.install_order.last().copied() else {
@@ -200,7 +229,9 @@ impl RuntimeSession {
             .cleanups
             .remove(&lease.subsystem)
             .expect("subsystem cleanup must accompany its lease");
-        cleanup()
+        let result = cleanup();
+        self.owned_resources.remove(&lease.subsystem);
+        result
     }
 
     pub fn assert_owner(&self) -> Result<(), RuntimeError> {
@@ -252,6 +283,7 @@ impl Drop for RuntimeSession {
             if let Some(cleanup) = self.cleanups.remove(&subsystem) {
                 let _ = cleanup();
             }
+            self.owned_resources.remove(&subsystem);
         }
     }
 }
@@ -370,5 +402,28 @@ mod tests {
         runtime.finish_shutdown().unwrap();
         drop(runtime);
         assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn owned_resource_is_visible_only_while_lease_is_active() {
+        let mut runtime = RuntimeSession::new();
+        runtime.start().unwrap();
+        let lease = runtime
+            .install_owned_subsystem(Subsystem::Engine, String::from("engine"), || Ok(()))
+            .unwrap();
+        assert_eq!(
+            runtime
+                .owned_resource::<String>(Subsystem::Engine)
+                .map(String::as_str),
+            Some("engine")
+        );
+        runtime.begin_shutdown().unwrap();
+        runtime.uninstall_subsystem(lease).unwrap();
+        assert!(
+            runtime
+                .owned_resource::<String>(Subsystem::Engine)
+                .is_none()
+        );
+        runtime.finish_shutdown().unwrap();
     }
 }

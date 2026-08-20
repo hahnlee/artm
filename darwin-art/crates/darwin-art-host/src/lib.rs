@@ -365,7 +365,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         }
         let engine_cleanup = Rc::clone(&process_shutdown);
         let engine_lease =
-            match runtime.install_subsystem_with_cleanup(Subsystem::Engine, move || {
+            match runtime.install_owned_subsystem(Subsystem::Engine, library, move || {
                 let status = shutdown_process_once(&engine_cleanup);
                 if status == 0 {
                     Ok(())
@@ -398,7 +398,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             ));
             let surface_cleanup = Rc::clone(&surface_state);
             let surface_lease = runtime
-                .install_subsystem_with_cleanup(Subsystem::Surface, move || {
+                .install_owned_subsystem(Subsystem::Surface, Rc::clone(&surface_state), move || {
                     let status = surface_cleanup.borrow_mut().close();
                     if status == 0 {
                         Ok(())
