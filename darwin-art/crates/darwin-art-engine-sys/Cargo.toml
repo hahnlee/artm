@@ -1,0 +1,8 @@
+[package]
+name = "darwin-art-engine-sys"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+darwin-art-abi = { path = "../darwin-art-abi" }
