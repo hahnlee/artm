@@ -40,6 +40,7 @@
 #include "darwin_surface_bridge.h"
 #include "runtime_filesystem_probe.h"
 #include "runtime_network_probe.h"
+#include "runtime_hwui_probe.h"
 #include "darwin_icu_natives.h"
 #include "darwin_libcore_natives.h"
 #include "darwin_openjdk_natives.h"
@@ -74,118 +75,6 @@
 #include "pipeline/skia/RenderNodeDrawable.h"
 #include "pipeline/skia/SkiaRecordingCanvas.h"
 #include "include/core/SkSurface.h"
-
-namespace {
-
-class DarwinHwuiTreeObserver final : public android::uirenderer::TreeObserver {
- public:
-  void onMaybeRemovedFromTree(android::uirenderer::RenderNode* node) override {
-    node->onRemovedFromTree(nullptr);
-  }
-};
-
-// View.draw() on a hardware RecordingCanvas stores child views in their own
-// RenderNode staging display lists. Android's RenderThread normally promotes
-// those lists during a MODE_FULL prepareTree traversal. This standalone host
-// owns no CanvasContext yet, so perform only that promotion before replay;
-// animation, damage, and layer policy remain untouched.
-size_t SyncRecordedRenderNodeTree(android::uirenderer::RenderNode* node,
-                                  DarwinHwuiTreeObserver* observer) {
-  if (node == nullptr || observer == nullptr) return 0;
-  size_t synchronized = 0;
-  if (node->mDirtyPropertyFields != 0) {
-    node->mDirtyPropertyFields = 0;
-    node->syncProperties();
-  }
-  if (node->mNeedsDisplayListSync) {
-    node->mNeedsDisplayListSync = false;
-    node->syncDisplayList(*observer, nullptr);
-    ++synchronized;
-  }
-  if (node->mDisplayList) {
-    node->mDisplayList.updateChildren(
-        [&](android::uirenderer::RenderNode* child) {
-          synchronized += SyncRecordedRenderNodeTree(child, observer);
-        });
-  }
-  return synchronized;
-}
-
-// Android's CanvasContext normally calls AnimatorManager::animateCommon().
-// The Darwin host owns the same AnimationContext but intentionally keeps the
-// pixel path on the Metal drawable, so reproduce only this no-damage portion
-// locally rather than adding a new public HWUI ABI symbol.
-void AnimateNodeWithContext(android::uirenderer::RenderNode* node,
-                            android::uirenderer::AnimationContext& context) {
-  if (node == nullptr) return;
-  auto& manager = node->mAnimatorManager;
-  const bool debug_animation = std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr;
-  if (debug_animation) {
-    std::cerr << "ART HWUI animation pulse node=" << node
-              << " new=" << manager.mNewAnimators.size()
-              << " active=" << manager.mAnimators.size()
-              << " handle=" << manager.mAnimationHandle
-              << " frame_ms=" << context.frameTimeMs() << "\n";
-  }
-  if (manager.mAnimationHandle == nullptr) return;
-  manager.pushStaging();
-  auto new_end = std::remove_if(
-      manager.mAnimators.begin(), manager.mAnimators.end(),
-      [&context](android::sp<android::uirenderer::BaseRenderNodeAnimator>& animator) {
-        const bool finished = animator->animate(context);
-        if (finished) animator->detach();
-        return finished;
-      });
-  manager.mAnimators.erase(new_end, manager.mAnimators.end());
-  auto* handle = manager.mAnimationHandle;
-  node->mProperties.updateMatrix();
-  handle->notifyAnimationsRan();
-  if (debug_animation) {
-    std::cerr << "ART HWUI animation pulse result active="
-              << manager.mAnimators.size() << " handle="
-              << manager.mAnimationHandle << "\n";
-    for (const auto& animator : manager.mAnimators) {
-      std::cerr << "ART HWUI animator duration=" << animator->duration()
-                << " remaining=" << animator->getRemainingPlayTime()
-                << " final=" << animator->finalValue() << "\n";
-    }
-  }
-}
-
-bool HwuiNodeSubtreeHasAnimators(android::uirenderer::RenderNode* node) {
-  if (node == nullptr) return false;
-  if (!node->mAnimatorManager.mNewAnimators.empty() ||
-      !node->mAnimatorManager.mAnimators.empty()) {
-    return true;
-  }
-  bool found = false;
-  if (node->mDisplayList) {
-    node->mDisplayList.updateChildren(
-        [&](android::uirenderer::RenderNode* child) {
-          found = found || HwuiNodeSubtreeHasAnimators(child);
-        });
-  }
-  return found;
-}
-
-void RegisterHwuiNodeSubtreeAnimators(
-    android::uirenderer::RenderNode* node,
-    android::uirenderer::AnimationContext& context) {
-  if (node == nullptr) return;
-  if ((!node->mAnimatorManager.mNewAnimators.empty() ||
-       !node->mAnimatorManager.mAnimators.empty()) &&
-      !node->animators().hasAnimationHandle()) {
-    context.addAnimatingRenderNode(*node);
-  }
-  if (node->mDisplayList) {
-    node->mDisplayList.updateChildren(
-        [&](android::uirenderer::RenderNode* child) {
-          RegisterHwuiNodeSubtreeAnimators(child, context);
-        });
-  }
-}
-
-}  // namespace
 #endif
 
 #if defined(DARWIN_ART_DIRECT_APK_RUNTIME)
@@ -905,12 +794,11 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
     return JNI_FALSE;
   }
   node->mValid = true;
-  DarwinHwuiTreeObserver tree_observer;
   std::cerr << "ART HWUI GPU: node staging needs=" << node->mNeedsDisplayListSync
             << " stagingContent=" << node->mStagingDisplayList.hasContent()
             << " stagingSize=" << node->mStagingDisplayList.getUsedSize()
             << " activeContent=" << node->mDisplayList.hasContent() << "\n";
-  SyncRecordedRenderNodeTree(node, &tree_observer);
+  darwin_art_hwui::sync_recorded_render_node_tree(node);
   if (std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr) {
     std::cerr << "ART HWUI animation inspect root new="
               << node->mAnimatorManager.mNewAnimators.size()
@@ -922,7 +810,7 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
     std::cerr << "ART HWUI GPU: Java RenderNode produced empty display list\n";
     return JNI_FALSE;
   }
-  if (HwuiNodeSubtreeHasAnimators(node)) {
+  if (darwin_art_hwui::node_subtree_has_animators(node)) {
     if (g_hwui_animation_context == nullptr) {
       g_hwui_time_lord = std::make_unique<
           android::uirenderer::renderthread::TimeLord>();
@@ -931,7 +819,8 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
           std::make_unique<android::uirenderer::AnimationContext>(
               *g_hwui_time_lord);
     }
-    RegisterHwuiNodeSubtreeAnimators(node, *g_hwui_animation_context);
+    darwin_art_hwui::register_node_subtree_animators(
+        node, *g_hwui_animation_context);
     if (std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr) {
       std::cerr << "ART HWUI animation registered context="
                 << g_hwui_animation_context.get() << " has="
@@ -1397,7 +1286,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_pump_framework_frame(
                                       frame_time_nanos + 16666666, 16666666);
       g_hwui_animation_context->startFrame(
           android::uirenderer::TreeInfo::MODE_FULL);
-      AnimateNodeWithContext(node, *g_hwui_animation_context);
+      darwin_art_hwui::animate_node_with_context(
+          node, *g_hwui_animation_context);
     }
     env->ExceptionClear();
     env->DeleteLocalRef(render_node_class);

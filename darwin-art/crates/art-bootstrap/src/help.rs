@@ -47,6 +47,7 @@ pub(crate) fn print_help() {
     println!(
         "  build-runtime-graphics-bootstrap  compile the isolated real-graphics Runtime flavor"
     );
+    println!("  build-runtime-hwui-probe  compile the cached HWUI animation/tree probe");
     println!("  audit-runtime-link  measure the remaining Runtime::Create link closure");
     println!("  audit-runtime-graphics-link  link ART with the strict Android graphics closure");
     println!(

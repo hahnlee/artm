@@ -244,12 +244,15 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         native_output_root.join("runtime-probes/darwin_art_runtime_filesystem_probe.cc.o");
     let network_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_network_probe.cc.o");
+    let hwui_object_path =
+        native_output_root.join("runtime-probes/darwin_art_runtime_hwui_probe.cc.o");
     let stamp_path = cache_dir.join("graphics-bootstrap.stamp");
     let stamp = ninja_path(&stamp_path);
     let archive = ninja_path(&archive_path);
     let runtime_library = ninja_path(&runtime_library_path);
     let filesystem_object = ninja_path(&filesystem_object_path);
     let network_object = ninja_path(&network_object_path);
+    let hwui_object = ninja_path(&hwui_object_path);
     let stamp_for_shell = stamp_path.to_string_lossy().into_owned();
     let native_output_for_shell = native_output_root.to_string_lossy().into_owned();
     let filesystem_object_for_shell = filesystem_object_path.to_string_lossy().into_owned();
@@ -312,6 +315,19 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(": runtime_network_probe ");
     graph.push_str(&input_list);
     graph.push('\n');
+    graph.push_str("rule runtime_hwui_probe\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT=");
+    graph.push_str(&shell_quote(&hwui_object_path.to_string_lossy()));
+    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-hwui-probe\n");
+    graph.push_str("  description = CXX runtime_hwui_probe\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&hwui_object);
+    graph.push_str(": runtime_hwui_probe ");
+    graph.push_str(&input_list);
+    graph.push_str(" probes/runtime_hwui_probe.cc probes/runtime_hwui_probe.h\n");
     graph.push_str("rule graphics_audit\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
@@ -321,6 +337,8 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&filesystem_object_for_shell));
     graph.push_str(" DARWIN_ART_NATIVE_NETWORK_OBJECT=");
     graph.push_str(&shell_quote(&network_object_for_shell));
+    graph.push_str(" DARWIN_ART_NATIVE_HWUI_OBJECT=");
+    graph.push_str(&shell_quote(&hwui_object_path.to_string_lossy()));
     graph.push_str(" cargo run -p art-bootstrap -- audit-runtime-graphics-link\n");
     graph.push_str("  description = GRAPHICS link/audit\n");
     graph.push_str("  restat = 1\n\n");
@@ -332,6 +350,8 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&filesystem_object);
     graph.push(' ');
     graph.push_str(&network_object);
+    graph.push(' ');
+    graph.push_str(&hwui_object);
     graph.push('\n');
     graph.push_str("build graphics-audit: phony ");
     graph.push_str(&runtime_library);
@@ -398,6 +418,8 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_filesystem_probe.h"),
         PathBuf::from("probes/runtime_network_probe.cc"),
         PathBuf::from("probes/runtime_network_probe.h"),
+        PathBuf::from("probes/runtime_hwui_probe.cc"),
+        PathBuf::from("probes/runtime_hwui_probe.h"),
         PathBuf::from("probes/runtime_apk_graph.cc"),
         PathBuf::from("probes/runtime_apk_graph.h"),
     ];
