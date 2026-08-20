@@ -21,9 +21,9 @@ const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
 use darwin_art_engine_sys::{
-    DispatchPointerFn, PointerEvent, PumpFrameworkFrameFn, RunProcessFn, SurfaceActiveFn,
-    SurfaceCreateFn, SurfaceCreateInfo, SurfaceDestroyFn, SurfaceNextPointerEventFn,
-    SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
+    DispatchPointerFn, PointerEvent, PumpFrameworkFrameFn, SurfaceActiveFn, SurfaceCreateFn,
+    SurfaceCreateInfo, SurfaceDestroyFn, SurfaceNextPointerEventFn, SurfacePresentFn,
+    SurfacePumpEventsFn, SurfaceUpdateFn,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -242,7 +242,6 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 Some(ProviderBridge::release_callback()),
             );
         }
-        let run_process: RunProcessFn = symbols.run_process;
         let surface_create: SurfaceCreateFn = symbols.surface_create;
         let surface_update: SurfaceUpdateFn = symbols.surface_update;
         let surface_present: SurfacePresentFn = symbols.surface_present;
@@ -277,23 +276,22 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             Some(ProviderBridge::acquire_callback()),
             Some(ProviderBridge::release_callback()),
         );
-        let mut process = ProcessResult::new();
-        // SAFETY: config and result match ABI v1 and all pointed-to state stays
-        // live for this synchronous call.
-        let status = unsafe { run_process(&config, &mut process) };
-        if status != 0 {
-            runtime.fail(RuntimeError::EngineFailure { status });
-            // A late run-stage failure may still have created ART. Ask the
-            // process ABI to tear it down; NOT_READY means creation never
-            // completed and is the only benign shutdown result here.
-            let shutdown_status = engine.shutdown_once();
-            const SHUTDOWN_NOT_READY: i32 = 67;
-            if shutdown_status != 0 && shutdown_status != SHUTDOWN_NOT_READY {
-                return Err(HostError::ShutdownFailed(shutdown_status));
+        let process = match engine.run_process(&config) {
+            Ok(result) => result,
+            Err(status) => {
+                runtime.fail(RuntimeError::EngineFailure { status });
+                // A late run-stage failure may still have created ART. Ask the
+                // process ABI to tear it down; NOT_READY means creation never
+                // completed and is the only benign shutdown result here.
+                let shutdown_status = engine.shutdown_once();
+                const SHUTDOWN_NOT_READY: i32 = 67;
+                if shutdown_status != 0 && shutdown_status != SHUTDOWN_NOT_READY {
+                    return Err(HostError::ShutdownFailed(shutdown_status));
+                }
+                engine.clear_provider_hooks();
+                return Err(HostError::RuntimeFailed(status));
             }
-            engine.clear_provider_hooks();
-            return Err(HostError::RuntimeFailed(status));
-        }
+        };
         let provider_lease = runtime
             .install_owned_subsystem_with_resource_cleanup(
                 Subsystem::ElfNamespace,
