@@ -479,6 +479,8 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_process_state.h"),
         PathBuf::from("probes/runtime_frame_probe.cc"),
         PathBuf::from("probes/runtime_frame_probe.h"),
+        PathBuf::from("probes/runtime_graphics_probe.cc"),
+        PathBuf::from("probes/runtime_graphics_probe.h"),
         PathBuf::from("probes/runtime_apk_graph.cc"),
         PathBuf::from("probes/runtime_apk_graph.h"),
         PathBuf::from("compat/darwin_surface_bridge.mm"),
@@ -568,6 +570,8 @@ fn is_probe_only_input(path: &Path) -> bool {
             | "probes/runtime_process_state.h"
             | "probes/runtime_frame_probe.cc"
             | "probes/runtime_frame_probe.h"
+            | "probes/runtime_graphics_probe.cc"
+            | "probes/runtime_graphics_probe.h"
             | "probes/runtime_apk_graph.cc"
             | "probes/runtime_apk_graph.h"
             | "compat/darwin_surface_bridge.mm"

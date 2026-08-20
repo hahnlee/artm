@@ -3705,6 +3705,45 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         &probe_cache,
         &compiler_identity,
     )?;
+    let graphics_probe_object = build_dir.join("darwin_art_runtime_graphics_probe.cc.o");
+    let mut graphics_probe_command = runtime_cpp_command(&include_refs);
+    graphics_probe_command
+        .arg("-c")
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/core"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/effects"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/private"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/android"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/utils"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/codec"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/minikin/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/harfbuzz_ng/src"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/googletest/googletest/include"))
+        .arg(root.join("probes/runtime_graphics_probe.cc"))
+        .arg("-o")
+        .arg(&graphics_probe_object);
+    let _ = compile_cached_probe_tu(
+        &mut graphics_probe_command,
+        &graphics_probe_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -3797,6 +3836,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&abi_probe_object)
         .arg(&process_state_object)
         .arg(&frame_probe_object)
+        .arg(&graphics_probe_object)
         .arg(&filesystem_object)
         .arg(&network_object)
         .arg(&surface_object)
@@ -4246,6 +4286,85 @@ fn audit_runtime_graphics_link_mode(root: &Path, run_upstream_gates: bool) -> Re
         &probe_cache,
         &compiler_identity,
     )?;
+    let graphics_probe_object = build_dir.join("darwin_art_runtime_graphics_probe.cc.o");
+    let mut graphics_probe_command = runtime_cpp_command(&include_refs);
+    graphics_probe_command
+        .args(["-include", "mirror/object_reference.h"])
+        .arg("-idirafter")
+        .arg(&ndk_arch_include)
+        .arg("-idirafter")
+        .arg(&ndk_include)
+        .arg("-DLOG_TAG=\"DarwinArtHWUI\"")
+        .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
+        .arg("-include")
+        .arg("log/log_main.h")
+        .arg("-DDARWIN_ART_REAL_GRAPHICS")
+        .arg("-DDARWIN_ART_HWUI_GPU")
+        .arg("-DDARWIN_ART_AOSP_COMPAT_LSEEK64")
+        .arg("-c")
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/androidfw/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/incremental_delivery/incfs/util/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libutils/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libsystem/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libcutils/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libutils/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/incremental_delivery/incfs/util/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/libs/ui/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/libs/ui/include_types"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/libs/nativewindow/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/libs/arect/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/logging/liblog/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/core"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/effects"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/private"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/android"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/utils"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/codec"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/minikin/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/harfbuzz_ng/src"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/googletest/googletest/include"))
+        .arg(root.join("probes/runtime_graphics_probe.cc"))
+        .arg("-o")
+        .arg(&graphics_probe_object);
+    let _ = compile_cached_probe_tu(
+        &mut graphics_probe_command,
+        &graphics_probe_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -4369,6 +4488,7 @@ fn audit_runtime_graphics_link_mode(root: &Path, run_upstream_gates: bool) -> Re
         .arg(&abi_probe_object)
         .arg(&process_state_object)
         .arg(&frame_probe_object)
+        .arg(&graphics_probe_object)
         .arg(&filesystem_object)
         .arg(&network_object)
         .arg(&hwui_object)
@@ -4970,6 +5090,94 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         &probe_cache,
         &compiler_identity,
     )?;
+    let graphics_probe_object = build_dir.join("darwin_art_runtime_graphics_probe.cc.o");
+    let mut graphics_probe_command = runtime_cpp_command(&include_refs);
+    graphics_probe_command
+        .arg("-DDARWIN_ART_REAL_GRAPHICS")
+        .arg("-DDARWIN_ART_HWUI_GPU")
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/minikin/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/harfbuzz_ng/src"))
+        .arg("-DDARWIN_ART_DIRECT_APK_RUNTIME")
+        .arg("-DDARWIN_ART_AOSP_COMPAT_LSEEK64")
+        .args(["-include", "mirror/object_reference.h"])
+        .arg("-idirafter")
+        .arg(&ndk_arch_include)
+        .arg("-idirafter")
+        .arg(&ndk_include)
+        .arg("-DLOG_TAG=\"DarwinArtHWUI\"")
+        .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
+        .arg("-include")
+        .arg("log/log_main.h")
+        .arg("-c")
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/androidfw/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/incremental_delivery/incfs/util/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libutils/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libsystem/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libcutils/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/libs/ui/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/libs/ui/include_types"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/libs/nativewindow/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/libs/arect/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/logging/liblog/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/core"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/core"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/effects"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/private"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/android"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/utils"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/codec"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/minikin/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/harfbuzz_ng/src"))
+        .arg(root.join("probes/runtime_graphics_probe.cc"))
+        .arg("-o")
+        .arg(&graphics_probe_object);
+    let _ = compile_cached_probe_tu(
+        &mut graphics_probe_command,
+        &graphics_probe_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -5038,6 +5246,7 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(&abi_probe_object)
         .arg(&process_state_object)
         .arg(&frame_probe_object)
+        .arg(&graphics_probe_object)
         .arg(&filesystem_object)
         .arg(&graph_object)
         .arg(&network_object)
