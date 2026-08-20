@@ -3666,6 +3666,19 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         &probe_cache,
         &compiler_identity,
     )?;
+    let abi_probe_object = build_dir.join("darwin_art_runtime_abi_probe.cc.o");
+    let mut abi_probe_command = runtime_cpp_command(&include_refs);
+    abi_probe_command
+        .arg("-c")
+        .arg(root.join("probes/runtime_abi_probe.cc"))
+        .arg("-o")
+        .arg(&abi_probe_object);
+    let _ = compile_cached_probe_tu(
+        &mut abi_probe_command,
+        &abi_probe_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -3755,6 +3768,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&elf_probe_object)
+        .arg(&abi_probe_object)
         .arg(&filesystem_object)
         .arg(&network_object)
         .arg(&surface_object)
@@ -4165,6 +4179,19 @@ fn audit_runtime_graphics_link_mode(root: &Path, run_upstream_gates: bool) -> Re
         &probe_cache,
         &compiler_identity,
     )?;
+    let abi_probe_object = build_dir.join("darwin_art_runtime_abi_probe.cc.o");
+    let mut abi_probe_command = runtime_cpp_command(&include_refs);
+    abi_probe_command
+        .arg("-c")
+        .arg(root.join("probes/runtime_abi_probe.cc"))
+        .arg("-o")
+        .arg(&abi_probe_object);
+    let _ = compile_cached_probe_tu(
+        &mut abi_probe_command,
+        &abi_probe_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -4285,6 +4312,7 @@ fn audit_runtime_graphics_link_mode(root: &Path, run_upstream_gates: bool) -> Re
         .arg(format!("-Wl,-map,{}", link_map.display()))
         .arg(&object)
         .arg(&elf_probe_object)
+        .arg(&abi_probe_object)
         .arg(&filesystem_object)
         .arg(&network_object)
         .arg(&hwui_object)
@@ -4847,6 +4875,19 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         &probe_cache,
         &compiler_identity,
     )?;
+    let abi_probe_object = build_dir.join("darwin_art_runtime_abi_probe.cc.o");
+    let mut abi_probe_command = runtime_cpp_command(&include_refs);
+    abi_probe_command
+        .arg("-c")
+        .arg(root.join("probes/runtime_abi_probe.cc"))
+        .arg("-o")
+        .arg(&abi_probe_object);
+    let _ = compile_cached_probe_tu(
+        &mut abi_probe_command,
+        &abi_probe_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -4912,6 +4953,7 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&elf_probe_object)
+        .arg(&abi_probe_object)
         .arg(&filesystem_object)
         .arg(&graph_object)
         .arg(&network_object)
