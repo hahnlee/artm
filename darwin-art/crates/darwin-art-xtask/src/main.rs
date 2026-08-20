@@ -1,10 +1,12 @@
 #![forbid(unsafe_code)]
 
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const GRAPH_VERSION: &str = "darwin-art-native-graph-v6";
 const GRAPHICS_BOOTSTRAP_ARCHIVE: &str =
@@ -65,6 +67,12 @@ const REPRESENTATIVE_EDGES: &[RepresentativeEdge] = &[
 struct ToolchainInputs {
     cxx: String,
     sdkroot: String,
+}
+
+struct CachedNativeObject {
+    object: PathBuf,
+    source: PathBuf,
+    command: String,
 }
 
 fn toolchain_inputs() -> ToolchainInputs {
@@ -276,6 +284,10 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     let graphics_object = ninja_path(&graphics_object_path);
     let stamp_for_shell = stamp_path.to_string_lossy().into_owned();
     let native_output_for_shell = native_output_root.to_string_lossy().into_owned();
+    let cached_runtime_objects = cached_native_objects(
+        &native_output_root.join("runtime-bootstrap/objects"),
+        &runtime_archive_path,
+    )?;
     let filesystem_object_for_shell = filesystem_object_path.to_string_lossy().into_owned();
     let network_object_for_shell = network_object_path.to_string_lossy().into_owned();
     let bootstrap_input_list = bootstrap_inputs
@@ -358,23 +370,33 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str("build graphics-bootstrap: phony ");
     graph.push_str(&archive);
     graph.push('\n');
-    graph.push_str("rule runtime_bootstrap\n");
-    graph.push_str("  command = cd ");
-    graph.push_str(&shell_quote(&root_for_shell));
-    graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT_ROOT=");
-    graph.push_str(&shell_quote(&native_output_for_shell));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-bootstrap-internal && touch ");
-    graph.push_str(&shell_quote(&runtime_stamp_path.to_string_lossy()));
-    graph.push('\n');
-    graph.push_str("  description = ART bootstrap\n");
-    graph.push_str("  restat = 1\n\n");
-    graph.push_str("build ");
-    graph.push_str(&runtime_stamp);
-    graph.push(' ');
-    graph.push_str(&runtime_archive);
-    graph.push_str(": runtime_bootstrap ");
-    graph.push_str(&bootstrap_input_list);
-    graph.push('\n');
+    if let Some(cached_objects) = cached_runtime_objects.as_deref() {
+        emit_cached_native_graph(&mut graph, cached_objects, &runtime_archive);
+        graph.push_str("build ");
+        graph.push_str(&runtime_stamp);
+        graph.push_str(": phony ");
+        graph.push_str(&runtime_archive);
+        graph.push('\n');
+        graph.push_str("# runtime-bootstrap uses persisted per-object commands\n\n");
+    } else {
+        graph.push_str("rule runtime_bootstrap\n");
+        graph.push_str("  command = cd ");
+        graph.push_str(&shell_quote(&root_for_shell));
+        graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT_ROOT=");
+        graph.push_str(&shell_quote(&native_output_for_shell));
+        graph.push_str(" cargo run -p art-bootstrap -- build-runtime-bootstrap-internal && touch ");
+        graph.push_str(&shell_quote(&runtime_stamp_path.to_string_lossy()));
+        graph.push('\n');
+        graph.push_str("  description = ART bootstrap\n");
+        graph.push_str("  restat = 1\n\n");
+        graph.push_str("build ");
+        graph.push_str(&runtime_stamp);
+        graph.push(' ');
+        graph.push_str(&runtime_archive);
+        graph.push_str(": runtime_bootstrap ");
+        graph.push_str(&bootstrap_input_list);
+        graph.push('\n');
+    }
     graph.push_str("build runtime-bootstrap: phony ");
     graph.push_str(&runtime_archive);
     graph.push('\n');
@@ -665,6 +687,114 @@ fn probe_inputs(root: &Path, paths: &[&str]) -> String {
         .map(|path| ninja_path(&path))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Recover the compiler command and source identity persisted by
+/// `compile_with_dependency_cache`. This lets a later graph generation turn
+/// an already materialized bootstrap into real per-object Ninja edges without
+/// duplicating ART's long include/define command construction in xtask.
+fn cached_native_objects(
+    object_dir: &Path,
+    archive: &Path,
+) -> io::Result<Option<Vec<CachedNativeObject>>> {
+    let mut by_name = BTreeMap::new();
+    let Ok(entries) = fs::read_dir(object_dir) else {
+        return Ok(None);
+    };
+    for entry in entries.flatten() {
+        let fingerprint = entry.path();
+        if fingerprint
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("fingerprint")
+        {
+            continue;
+        }
+        let object = fingerprint.with_extension("");
+        if !object.is_file() || !object.with_extension("o.d").is_file() {
+            continue;
+        }
+        let contents = fs::read_to_string(&fingerprint)?;
+        let Some(command_line) = contents
+            .lines()
+            .find_map(|line| line.strip_prefix("command="))
+        else {
+            continue;
+        };
+        let tokens = command_line.split_whitespace().collect::<Vec<_>>();
+        let Some(source_index) = tokens.iter().position(|token| *token == "-c") else {
+            continue;
+        };
+        let Some(source) = tokens.get(source_index + 1).map(PathBuf::from) else {
+            continue;
+        };
+        if !source.is_file() {
+            continue;
+        }
+        let Some(name) = object.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        by_name.insert(
+            name.to_owned(),
+            CachedNativeObject {
+                object,
+                source,
+                command: command_line.to_owned(),
+            },
+        );
+    }
+    if by_name.len() < 16 || !archive.is_file() {
+        return Ok(None);
+    }
+    let archive_members = Command::new("ar").arg("-t").arg(archive).output()?;
+    if !archive_members.status.success() {
+        return Ok(None);
+    }
+    let mut ordered = Vec::new();
+    for member in String::from_utf8_lossy(&archive_members.stdout).lines() {
+        if member == "__.SYMDEF" || member == "__.SYMDEF SORTED" {
+            continue;
+        }
+        if let Some(object) = by_name.remove(member.trim()) {
+            ordered.push(object);
+        }
+    }
+    if ordered.len() < 16 {
+        return Ok(None);
+    }
+    Ok(Some(ordered))
+}
+
+fn emit_cached_native_graph(graph: &mut String, objects: &[CachedNativeObject], archive: &str) {
+    graph.push_str("rule native_cached_cpp\n");
+    graph.push_str("  command = $compile_command\n");
+    graph.push_str("  depfile = $out.d\n");
+    graph.push_str("  deps = gcc\n");
+    graph.push_str("  description = CXX $out\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("rule native_cached_archive\n");
+    graph.push_str("  command = rm -f $out && ar rcs $out $in\n");
+    graph.push_str("  description = AR $out\n");
+    graph.push_str("  restat = 1\n\n");
+    let mut object_paths = Vec::with_capacity(objects.len());
+    for object in objects {
+        let output = ninja_path(&object.object);
+        let source = ninja_path(&object.source);
+        graph.push_str("build ");
+        graph.push_str(&output);
+        graph.push_str(": native_cached_cpp ");
+        graph.push_str(&source);
+        graph.push('\n');
+        graph.push_str("  compile_command = ");
+        graph.push_str(&object.command.replace('$', "$$"));
+        graph.push('\n');
+        object_paths.push(output);
+    }
+    graph.push_str("build ");
+    graph.push_str(archive);
+    graph.push_str(": native_cached_archive ");
+    graph.push_str(&object_paths.join(" "));
+    graph.push('\n');
 }
 
 fn digest_inputs(root: &Path, inputs: &[PathBuf]) -> io::Result<String> {
