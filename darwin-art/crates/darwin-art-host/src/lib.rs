@@ -392,7 +392,14 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             .mark_running()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
         let engine_lease = runtime
-            .install_subsystem(Subsystem::Engine)
+            .install_subsystem_with_cleanup(Subsystem::Engine, move || {
+                let status = process_guard.close();
+                if status == 0 {
+                    Ok(())
+                } else {
+                    Err(RuntimeError::EngineFailure { status })
+                }
+            })
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
         // Darwin's application renderer is GPU-only.  The CPU surface path is
         // retained for diagnostics, never selected by the normal host.
@@ -539,12 +546,27 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 remaining -= slice;
             }
             let destroy_status = surface_guard.close();
-            let _ = runtime.begin_shutdown();
-            let _ = runtime.uninstall_subsystem(surface_lease);
-            let _ = runtime.uninstall_subsystem(engine_lease);
-            let shutdown_status = process_guard.close();
+            let shutdown_status = if runtime.begin_shutdown().is_err() {
+                -1
+            } else {
+                let surface_status = runtime.uninstall_subsystem(surface_lease);
+                if surface_status.is_err() {
+                    -1
+                } else {
+                    match runtime.uninstall_subsystem(engine_lease) {
+                        Ok(()) => 0,
+                        Err(RuntimeError::EngineFailure { status }) => status,
+                        Err(error) => error.status() as i32,
+                    }
+                }
+            };
             if shutdown_status == 0 {
-                let _ = runtime.finish_shutdown();
+                if runtime.finish_shutdown().is_err() {
+                    runtime.fail(RuntimeError::InvalidTransition {
+                        from: runtime.phase(),
+                        to: darwin_art_runtime::RuntimePhase::Stopped,
+                    });
+                }
             } else {
                 runtime.fail(RuntimeError::EngineFailure {
                     status: shutdown_status,
@@ -764,11 +786,18 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // Destroy ART before returning ownership to arbitrary Rust code so its
         // registered DexFile pointers and process-global handlers remain valid
         // throughout Runtime teardown.
-        let shutdown_status = process_guard.close();
+        let shutdown_status = match runtime.begin_shutdown() {
+            Ok(()) => match runtime.uninstall_subsystem(engine_lease) {
+                Ok(()) => 0,
+                Err(RuntimeError::EngineFailure { status }) => status,
+                Err(error) => error.status() as i32,
+            },
+            Err(error) => error.status() as i32,
+        };
         if shutdown_status == 0 {
-            let _ = runtime.begin_shutdown();
-            let _ = runtime.uninstall_subsystem(engine_lease);
-            let _ = runtime.finish_shutdown();
+            if let Err(error) = runtime.finish_shutdown() {
+                runtime.fail(error);
+            }
         } else {
             runtime.fail(RuntimeError::EngineFailure {
                 status: shutdown_status,

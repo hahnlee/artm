@@ -82,6 +82,7 @@ pub struct RuntimeSession {
     phase: RuntimePhase,
     failure: Option<RuntimeError>,
     subsystems: BTreeMap<Subsystem, u64>,
+    cleanups: BTreeMap<Subsystem, Box<dyn FnOnce() -> Result<(), RuntimeError>>>,
     install_order: Vec<Subsystem>,
     next_generation: u64,
     _owner_thread: PhantomData<Rc<()>>,
@@ -94,6 +95,7 @@ impl RuntimeSession {
             phase: RuntimePhase::New,
             failure: None,
             subsystems: BTreeMap::new(),
+            cleanups: BTreeMap::new(),
             install_order: Vec::new(),
             next_generation: 1,
             _owner_thread: PhantomData,
@@ -133,6 +135,23 @@ impl RuntimeSession {
         &mut self,
         subsystem: Subsystem,
     ) -> Result<SubsystemLease, RuntimeError> {
+        self.install_subsystem_with_cleanup(subsystem, || Ok(()))
+    }
+
+    /// Installs a subsystem together with its one-shot native cleanup.
+    ///
+    /// The callback is owned by the session and is invoked exactly once when
+    /// the matching lease is uninstalled or when the session is dropped during
+    /// rollback. This keeps native lifetime ownership in Rust without making
+    /// the runtime crate depend on a particular C++ object type.
+    pub fn install_subsystem_with_cleanup<F>(
+        &mut self,
+        subsystem: Subsystem,
+        cleanup: F,
+    ) -> Result<SubsystemLease, RuntimeError>
+    where
+        F: FnOnce() -> Result<(), RuntimeError> + 'static,
+    {
         self.assert_owner()?;
         if !matches!(
             self.phase,
@@ -149,6 +168,7 @@ impl RuntimeSession {
         let generation = self.next_generation;
         self.next_generation = self.next_generation.saturating_add(1);
         self.subsystems.insert(subsystem, generation);
+        self.cleanups.insert(subsystem, Box::new(cleanup));
         self.install_order.push(subsystem);
         Ok(SubsystemLease {
             subsystem,
@@ -176,7 +196,11 @@ impl RuntimeSession {
         }
         self.install_order.pop();
         self.subsystems.remove(&lease.subsystem);
-        Ok(())
+        let cleanup = self
+            .cleanups
+            .remove(&lease.subsystem)
+            .expect("subsystem cleanup must accompany its lease");
+        cleanup()
     }
 
     pub fn assert_owner(&self) -> Result<(), RuntimeError> {
@@ -214,6 +238,21 @@ impl RuntimeSession {
         }
         self.phase = to;
         Ok(())
+    }
+}
+
+impl Drop for RuntimeSession {
+    fn drop(&mut self) {
+        // Drop is a best-effort rollback path. Normal shutdown uses
+        // uninstall_subsystem so it can surface cleanup errors; a partially
+        // bootstrapped session still must release every owned callback in the
+        // reverse install order without panicking across a host boundary.
+        while let Some(subsystem) = self.install_order.pop() {
+            self.subsystems.remove(&subsystem);
+            if let Some(cleanup) = self.cleanups.remove(&subsystem) {
+                let _ = cleanup();
+            }
+        }
     }
 }
 
@@ -279,5 +318,35 @@ mod tests {
         runtime.uninstall_subsystem(engine).unwrap();
         runtime.finish_shutdown().unwrap();
         assert_eq!(runtime.phase(), RuntimePhase::Stopped);
+    }
+
+    #[test]
+    fn owned_cleanups_run_once_in_reverse_order_on_drop() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let events = Rc::new(RefCell::new(Vec::new()));
+        {
+            let mut runtime = RuntimeSession::new();
+            runtime.start().unwrap();
+            let engine_events = Rc::clone(&events);
+            runtime
+                .install_subsystem_with_cleanup(Subsystem::Engine, move || {
+                    engine_events.borrow_mut().push(Subsystem::Engine);
+                    Ok(())
+                })
+                .unwrap();
+            let surface_events = Rc::clone(&events);
+            runtime
+                .install_subsystem_with_cleanup(Subsystem::Surface, move || {
+                    surface_events.borrow_mut().push(Subsystem::Surface);
+                    Ok(())
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[Subsystem::Surface, Subsystem::Engine]
+        );
     }
 }
