@@ -349,4 +349,26 @@ mod tests {
             &[Subsystem::Surface, Subsystem::Engine]
         );
     }
+
+    #[test]
+    fn owned_cleanup_is_consumed_by_normal_uninstall() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let calls = Rc::new(Cell::new(0));
+        let mut runtime = RuntimeSession::new();
+        runtime.start().unwrap();
+        let cleanup_calls = Rc::clone(&calls);
+        let lease = runtime
+            .install_subsystem_with_cleanup(Subsystem::Engine, move || {
+                cleanup_calls.set(cleanup_calls.get() + 1);
+                Ok(())
+            })
+            .unwrap();
+        runtime.begin_shutdown().unwrap();
+        runtime.uninstall_subsystem(lease).unwrap();
+        runtime.finish_shutdown().unwrap();
+        drop(runtime);
+        assert_eq!(calls.get(), 1);
+    }
 }

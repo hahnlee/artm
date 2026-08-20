@@ -3306,19 +3306,24 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
 
 fn compile_runtime_filesystem_probe(root: &Path, build_dir: &Path) -> Result<PathBuf> {
     let object = build_dir.join("darwin_art_runtime_filesystem_probe.cc.o");
-    run_command(
-        Command::new("clang++")
-            .args(["-std=c++20", "-fPIC", "-Wall", "-Wextra", "-c"])
-            .arg(root.join("probes/runtime_filesystem_probe.cc"))
-            .arg("-I")
-            .arg(root.join("probes"))
-            .arg("-I")
-            .arg(root.join("tools/bionic-fs-facade/include"))
-            .arg("-I")
-            .arg(root.join("tools/bionic-ioctl-facade/include"))
-            .arg("-o")
-            .arg(&object),
-    )?;
+    fs::create_dir_all(build_dir)?;
+    let cache_path = build_dir.join("runtime-probe-file-hashes.cache");
+    let mut cache = FileHashCache::load(&cache_path)?;
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let mut command = Command::new("clang++");
+    command
+        .args(["-std=c++20", "-fPIC", "-Wall", "-Wextra", "-c"])
+        .arg(root.join("probes/runtime_filesystem_probe.cc"))
+        .arg("-I")
+        .arg(root.join("probes"))
+        .arg("-I")
+        .arg(root.join("tools/bionic-fs-facade/include"))
+        .arg("-I")
+        .arg(root.join("tools/bionic-ioctl-facade/include"))
+        .arg("-o")
+        .arg(&object);
+    let _ = compile_with_dependency_cache(&mut command, &object, &compiler_identity, &mut cache)?;
+    cache.save(&cache_path)?;
     Ok(object)
 }
 

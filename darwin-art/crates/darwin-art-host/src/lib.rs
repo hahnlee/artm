@@ -111,51 +111,21 @@ struct FrameHost {
     last_frame: Option<OwnedFrame>,
 }
 
-/// Owns the native process lifetime after the dynamic entry points have been
-/// resolved.  The process ABI is one-shot and process-global, so cleanup must
-/// happen even when a later Rust validation or surface operation returns an
-/// error.  `close` is used on the normal path to retain the shutdown status;
-/// `Drop` is the rollback path for every early return.
+/// The process shutdown callback is transferred into `RuntimeSession` as the
+/// engine subsystem cleanup.  Keeping the one-shot slot separate while the
+/// engine lease is being installed lets the few pre-lease error paths release
+/// ART without introducing a second lifetime owner.
 #[cfg(target_os = "macos")]
-struct ProcessCleanupGuard {
-    shutdown: ShutdownProcessFn,
-    armed: bool,
-}
+type SharedProcessShutdown = Rc<RefCell<Option<ShutdownProcessFn>>>;
 
 #[cfg(target_os = "macos")]
-impl ProcessCleanupGuard {
-    fn new(shutdown: ShutdownProcessFn) -> Self {
-        Self {
-            shutdown,
-            armed: true,
-        }
-    }
-
-    fn close(&mut self) -> i32 {
-        if !self.armed {
-            return 0;
-        }
-        // Disarm before entering foreign code.  This keeps cleanup one-shot
-        // even if a malformed implementation were to unwind through the ABI.
-        self.armed = false;
-        // SAFETY: The function pointer was resolved from the fixed v1 ABI and
-        // remains valid because DynamicLibrary is intentionally process-scoped.
-        unsafe { (self.shutdown)() }
-    }
-}
-
-#[cfg(target_os = "macos")]
-impl Drop for ProcessCleanupGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            self.armed = false;
-            // SAFETY: Same invariant as `close`; this is the best-effort
-            // rollback path, so its status cannot be returned to the caller.
-            unsafe {
-                let _ = (self.shutdown)();
-            }
-        }
-    }
+fn shutdown_process_once(shutdown: &SharedProcessShutdown) -> i32 {
+    let Some(callback) = shutdown.borrow_mut().take() else {
+        return 0;
+    };
+    // SAFETY: the callback came from the fixed v1 ABI and the process remains
+    // initialized until this one-shot lease cleanup invokes it.
+    unsafe { callback() }
 }
 
 /// Owns a surface returned by either `surface_active_gpu` or
@@ -370,7 +340,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             abi_version: ABI_VERSION,
             ..ProcessResult::default()
         };
-        let mut process_guard = ProcessCleanupGuard::new(shutdown_process);
+        let process_shutdown: SharedProcessShutdown = Rc::new(RefCell::new(Some(shutdown_process)));
         // SAFETY: config and result match ABI v1 and all pointed-to state stays
         // live for this synchronous call.
         let status = unsafe { run_process(&config, &mut process) };
@@ -379,26 +349,39 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             // A late run-stage failure may still have created ART. Ask the
             // process ABI to tear it down; NOT_READY means creation never
             // completed and is the only benign shutdown result here.
-            let shutdown_status = process_guard.close();
+            let shutdown_status = shutdown_process_once(&process_shutdown);
             const SHUTDOWN_NOT_READY: i32 = 67;
             if shutdown_status != 0 && shutdown_status != SHUTDOWN_NOT_READY {
                 return Err(HostError::ShutdownFailed(shutdown_status));
             }
             return Err(HostError::RuntimeFailed(status));
         }
-        runtime
-            .mark_running()
-            .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
-        let engine_lease = runtime
-            .install_subsystem_with_cleanup(Subsystem::Engine, move || {
-                let status = process_guard.close();
+        if let Err(error) = runtime.mark_running() {
+            let shutdown_status = shutdown_process_once(&process_shutdown);
+            if shutdown_status != 0 {
+                return Err(HostError::ShutdownFailed(shutdown_status));
+            }
+            return Err(HostError::RuntimeFailed(error.status() as i32));
+        }
+        let engine_cleanup = Rc::clone(&process_shutdown);
+        let engine_lease =
+            match runtime.install_subsystem_with_cleanup(Subsystem::Engine, move || {
+                let status = shutdown_process_once(&engine_cleanup);
                 if status == 0 {
                     Ok(())
                 } else {
                     Err(RuntimeError::EngineFailure { status })
                 }
-            })
-            .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
+            }) {
+                Ok(lease) => lease,
+                Err(error) => {
+                    let shutdown_status = shutdown_process_once(&process_shutdown);
+                    if shutdown_status != 0 {
+                        return Err(HostError::ShutdownFailed(shutdown_status));
+                    }
+                    return Err(HostError::RuntimeFailed(error.status() as i32));
+                }
+            };
         // Darwin's application renderer is GPU-only.  The CPU surface path is
         // retained for diagnostics, never selected by the normal host.
         let gpu_mode = true;
