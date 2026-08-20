@@ -6,7 +6,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-const GRAPH_VERSION: &str = "darwin-art-native-graph-v5";
+const GRAPH_VERSION: &str = "darwin-art-native-graph-v6";
 const GRAPHICS_BOOTSTRAP_ARCHIVE: &str =
     "runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a";
 const GRAPHICS_RUNTIME_LIBRARY: &str =
