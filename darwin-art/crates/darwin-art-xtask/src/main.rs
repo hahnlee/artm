@@ -6,7 +6,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-const GRAPH_VERSION: &str = "darwin-art-native-graph-v1";
+const GRAPH_VERSION: &str = "darwin-art-native-graph-v2";
 
 fn main() {
     if let Err(error) = run() {
@@ -40,15 +40,22 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     if let Some(parent) = out.parent() {
         fs::create_dir_all(parent)?;
     }
-    let digest_path = out.with_extension("inputs.sha256");
+    let cache_dir = root.join("_build/native-cache").join(&digest);
+    fs::create_dir_all(&cache_dir)?;
+    let digest_path = cache_dir.join("inputs.sha256");
     fs::write(&digest_path, format!("{digest}  {GRAPH_VERSION}\n"))?;
+    fs::write(
+        cache_dir.join("manifest.json"),
+        format!(
+            "{{\"graph_version\":\"{GRAPH_VERSION}\",\"digest\":\"{digest}\",\"input_count\":{}}}\n",
+            inputs.len()
+        ),
+    )?;
 
     let root_for_shell = root.to_string_lossy().into_owned();
-    let stamp = ninja_path(&out.with_extension("graphics-bootstrap.stamp"));
-    let stamp_for_shell = out
-        .with_extension("graphics-bootstrap.stamp")
-        .canonicalize()
-        .unwrap_or_else(|_| out.with_extension("graphics-bootstrap.stamp").to_path_buf());
+    let stamp_path = cache_dir.join("graphics-bootstrap.stamp");
+    let stamp = ninja_path(&stamp_path);
+    let stamp_for_shell = stamp_path.to_string_lossy().into_owned();
     let input_list = inputs
         .iter()
         .map(|path| ninja_path(&root.join(path)))
@@ -62,7 +69,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
     graph.push_str(" && cargo run -p art-bootstrap -- build-runtime-graphics-bootstrap && touch ");
-    graph.push_str(&shell_quote(&stamp_for_shell.to_string_lossy()));
+    graph.push_str(&shell_quote(&stamp_for_shell));
     graph.push('\n');
     graph.push_str("  description = GRAPHICS bootstrap\n");
     graph.push_str("  restat = 1\n\n");
@@ -107,6 +114,8 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("Cargo.lock"),
         PathBuf::from("crates/art-bootstrap/Cargo.toml"),
         PathBuf::from("crates/art-bootstrap/src/main.rs"),
+        PathBuf::from("crates/darwin-art-xtask/Cargo.toml"),
+        PathBuf::from("crates/darwin-art-xtask/src/main.rs"),
         PathBuf::from("probes/runtime_link_probe.cc"),
         PathBuf::from("compat/darwin_runtime_adapters.cc"),
         PathBuf::from("tools/build-android16-skia-hwui-force-load.sh"),

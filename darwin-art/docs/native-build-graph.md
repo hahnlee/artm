@@ -18,6 +18,11 @@ object graph will be added after this action's input set and stamp behavior
 are validated. The old command remains the source of truth during migration.
 
 The input digest includes the graph generator version, repository paths, and
-contents of the tracked bootstrap/probe/compat inputs. A future graph action
-can replace the shell command with depfile-backed object rules without
-changing the Rust runtime or acceptance contract.
+contents of the tracked bootstrap/probe/compat inputs. Each digest gets a
+persistent `_build/native-cache/<digest>/` directory containing the input
+manifest and a bootstrap stamp. The stamp is intentionally separate from the
+existing `_build/runtime-*` artifacts for now; the next migration step will
+make native archive actions write into this digest directory.
+
+A future graph action can replace the shell command with depfile-backed object
+rules without changing the Rust runtime or acceptance contract.
