@@ -6,7 +6,8 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use super::{Result, describe_command, run_command};
+use crate::Result;
+use crate::support::{describe_command, run_command};
 
 pub(crate) fn common_cpp_command(includes: &[&Path]) -> Command {
     let mut command = Command::new("clang++");
