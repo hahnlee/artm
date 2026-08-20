@@ -127,12 +127,13 @@ clickable framework views run their real `performClick()` state transition and
 the updated tree is immediately rerendered through HWUI/Skia.
 
 The pinned APK loads Android 16's real `framework-res.apk`, applies its built-in
-Holo Light theme, and creates real `TextView`, `CheckBox`, `RadioButton`,
+Material Light theme with a restrained Material You light-scheme palette, and creates real `TextView`, `CheckBox`, `RadioButton`,
 `ToggleButton`, `SeekBar`, `ProgressBar`, and `Button` objects (not custom
 `View` stand-ins). The acceptance checks every runtime type plus an opaque,
 visually diverse frame rendered through Android's resource, drawable,
-SystemFonts/Minikin/HarfBuzz, and HWUI/Skia paths. The fixture contains no app
-colors, drawables, layout resources, or native `.so`.
+SystemFonts/Minikin/HarfBuzz, and HWUI/Skia paths. The fixture contains no
+layout resources or native `.so`; its only app-level visual customization is
+the explicit Material You palette and a software-compatible Material ripple drawable.
 
 The lower-level graphics probe remains deliberately small: `ProbeView.onDraw()`
 creates a normal Android `Paint` and issues `Canvas.drawColor()`/`drawRect()` calls.

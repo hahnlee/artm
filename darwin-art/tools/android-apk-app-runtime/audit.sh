@@ -31,12 +31,10 @@ javac --release 8 -encoding UTF-8 \
   -classpath "$android_jar:$root/_build/dex-probe/classes" \
   -d "$classes" \
   "$module/fixture/FontBootstrap.java" \
-  "$module/fixture/MainActivity.java"
+  "$module/fixture/MainActivity.java" \
+  "$module/fixture/DarwinServiceBridge.java"
 
-app_classes=(
-  "$classes/dev/darwinart/simple/FontBootstrap.class"
-  "$classes/dev/darwinart/simple/MainActivity.class"
-)
+app_classes=("$classes"/dev/darwinart/simple/*.class)
 "$d8" --lib "$android_jar" --output "$dex" "${app_classes[@]}"
 
 "$aapt2" link \

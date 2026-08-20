@@ -9,7 +9,10 @@ secondary DEX files, malformed binary XML, ambiguous launchers, and any native
 library. The fixture programmatically creates real `TextView`, `CheckBox`,
 `RadioButton`, `ToggleButton`, `SeekBar`, `ProgressBar`, and `Button` instances.
 It loads the pinned Android 16 `framework-res.apk` and applies the framework's
-built-in Material Light theme; there are no app-supplied colors or drawables.
+built-in Material Light theme. The fixture adds only a restrained Material You
+light-scheme palette and a software-compatible Material ripple drawable for the primary
+button; widget state lists, typography, animation, and rendering remain owned
+by Android framework code.
 
 Run:
 
@@ -29,9 +32,11 @@ window.
 The acceptance resolves all seven tagged children back to their exact Android
 framework widget types and requires a fully opaque, visually diverse 360x640
 frame. It therefore does not accept custom `View` stand-ins, app-painted
-rectangles, or a blank opaque frame. Because this is a detached single-frame
-host, state animators are advanced to their current state; Choreographer-driven
-ripple animation is a separate capability boundary.
+rectangles, or a blank opaque frame. The host provides a synthetic 60 Hz display
+clock and the framework's `PropertyValuesHolder`/`NativeAllocationRegistry`
+hooks. ValueAnimator/Choreographer timing remains Android-driven; the patterned
+framework RippleDrawable path is GPU-only on Android 16 and is therefore replaced
+by the software-compatible drawable on this host Canvas.
 
 After the graphics runtime has been built, run any APK in the current bounded
 programmatic-UI subset with:

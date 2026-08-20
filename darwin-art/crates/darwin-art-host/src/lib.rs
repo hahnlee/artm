@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt;
+use std::fs;
 use std::mem::size_of;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -218,6 +219,24 @@ impl FrameHost {
     }
 }
 
+fn write_frame_ppm(frame: &OwnedFrame, path: &Path) -> Result<(), HostError> {
+    let mut bytes = Vec::with_capacity(
+        32usize.saturating_add((frame.width as usize).saturating_mul(frame.height as usize) * 3),
+    );
+    bytes.extend_from_slice(format!("P6\n{} {}\n255\n", frame.width, frame.height).as_bytes());
+    for pixel in &frame.argb_pixels {
+        bytes.extend_from_slice(&[
+            ((pixel >> 16) & 0xff) as u8,
+            ((pixel >> 8) & 0xff) as u8,
+            (pixel & 0xff) as u8,
+        ]);
+    }
+    fs::write(path, bytes).map_err(|_| HostError::SurfaceFailed {
+        operation: "write_frame",
+        status: -1,
+    })
+}
+
 unsafe extern "C" fn receive_frame(
     context: *mut c_void,
     pixels: *const u32,
@@ -399,13 +418,70 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                         operation: "test_pointer_click",
                         status: -1,
                     })?;
-                    for action in [0_u32, 1_u32] {
-                        let dispatch_status = unsafe { dispatch_pointer(action, x, y) };
-                        if dispatch_status != 0 {
-                            return Err(HostError::RuntimeFailed(dispatch_status));
-                        }
+                    let hold_ms = std::env::var("DARWIN_ART_TEST_POINTER_HOLD_MS")
+                        .ok()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .unwrap_or(0);
+                    let frame_dir =
+                        std::env::var_os("DARWIN_ART_TEST_RIPPLE_DIR").map(PathBuf::from);
+                    if let Some(directory) = &frame_dir {
+                        fs::create_dir_all(directory).map_err(|_| HostError::SurfaceFailed {
+                            operation: "create_ripple_dir",
+                            status: -1,
+                        })?;
+                    }
+                    let mut ripple_frame = 0_u32;
+                    let save_ripple_frame =
+                        |frame_host: &FrameHost, index: u32| -> Result<(), HostError> {
+                            let Some(directory) = &frame_dir else {
+                                return Ok(());
+                            };
+                            let frame =
+                                frame_host
+                                    .last_frame
+                                    .as_ref()
+                                    .ok_or(HostError::SurfaceFailed {
+                                        operation: "missing_ripple_frame",
+                                        status: -1,
+                                    })?;
+                            write_frame_ppm(frame, &directory.join(format!("frame-{index:03}.ppm")))
+                        };
+                    let dispatch_status = unsafe { dispatch_pointer(0, x, y) };
+                    if dispatch_status != 0 {
+                        return Err(HostError::RuntimeFailed(dispatch_status));
                     }
                     upload_latest(&frame_host)?;
+                    save_ripple_frame(&frame_host, ripple_frame)?;
+                    ripple_frame += 1;
+                    if hold_ms > 0 {
+                        let mut held = 0_u64;
+                        while held < hold_ms {
+                            let slice_ms = (hold_ms - held).min(16);
+                            let pump_status =
+                                unsafe { surface_pump_events(surface, slice_ms as f64 / 1000.0) };
+                            if pump_status == 7 {
+                                break;
+                            }
+                            surface_status("pump_events", pump_status, false)?;
+                            // Re-present a held pointer as a move so the
+                            // retained Android tree is asked to draw each
+                            // animation sample while the button stays down.
+                            let dispatch_status = unsafe { dispatch_pointer(2, x, y) };
+                            if dispatch_status != 0 {
+                                return Err(HostError::RuntimeFailed(dispatch_status));
+                            }
+                            upload_latest(&frame_host)?;
+                            save_ripple_frame(&frame_host, ripple_frame)?;
+                            ripple_frame += 1;
+                            held += slice_ms;
+                        }
+                    }
+                    let dispatch_status = unsafe { dispatch_pointer(1, x, y) };
+                    if dispatch_status != 0 {
+                        return Err(HostError::RuntimeFailed(dispatch_status));
+                    }
+                    upload_latest(&frame_host)?;
+                    save_ripple_frame(&frame_host, ripple_frame)?;
                     if frame_host.last_frame.as_ref().is_none_or(|frame| {
                         frame.argb_pixels.as_slice() == initial_pixels.as_slice()
                     }) {

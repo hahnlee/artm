@@ -1,4 +1,5 @@
 #include "darwin_libcore_natives.h"
+#include "darwin_framework_natives.h"
 
 #if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
 #include "darwin_os_constants.h"
@@ -531,6 +532,12 @@ bool Register(JNIEnv* env, const char* class_name,
 namespace darwin_art {
 
 bool RegisterLibcoreNatives(JNIEnv* env) {
+  // NativeAllocationRegistry is part of libcore's boot class path rather than
+  // framework.jar. Register its free-function ABI from the libcore owner so
+  // Cleaner can release RippleShader/VectorDrawable allocations.
+  if (!darwin_art::RegisterFrameworkSupportNatives(env)) {
+    return false;
+  }
 #if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
   JNINativeMethod unix_file_system_methods[] = {
       {const_cast<char*>("initIDs"), const_cast<char*>("()V"),
