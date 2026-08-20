@@ -1,0 +1,121 @@
+//! Concrete Rust ownership slots for the native runtime resources.
+//!
+//! `RuntimeSession` tracks phase/lease order.  This type owns the actual
+//! engine, provider, and optional surface values so production code does not
+//! need to hide them behind `Any` just to get reverse teardown.
+
+/// Concrete resources owned by one owner thread.
+///
+/// Field order is intentional: if a caller forgets an explicit shutdown,
+/// surface drops before provider, and provider drops before engine.  Normal
+/// teardown should still call the resource-specific close methods before
+/// taking the values out of these slots so failures remain observable.
+pub struct RuntimeOwners<E, P, S> {
+    surface: Option<S>,
+    provider: Option<P>,
+    engine: Option<E>,
+}
+
+impl<E, P, S> RuntimeOwners<E, P, S> {
+    pub const fn new() -> Self {
+        Self {
+            surface: None,
+            provider: None,
+            engine: None,
+        }
+    }
+
+    pub fn attach_engine(&mut self, engine: E) -> Result<(), E> {
+        if self.engine.is_some() {
+            Err(engine)
+        } else {
+            self.engine = Some(engine);
+            Ok(())
+        }
+    }
+
+    pub fn attach_provider(&mut self, provider: P) -> Result<(), P> {
+        if self.provider.is_some() {
+            Err(provider)
+        } else {
+            self.provider = Some(provider);
+            Ok(())
+        }
+    }
+
+    pub fn attach_surface(&mut self, surface: S) -> Result<(), S> {
+        if self.surface.is_some() {
+            Err(surface)
+        } else {
+            self.surface = Some(surface);
+            Ok(())
+        }
+    }
+
+    pub fn engine(&self) -> Option<&E> {
+        self.engine.as_ref()
+    }
+
+    pub fn engine_mut(&mut self) -> Option<&mut E> {
+        self.engine.as_mut()
+    }
+
+    pub fn provider(&self) -> Option<&P> {
+        self.provider.as_ref()
+    }
+
+    pub fn provider_mut(&mut self) -> Option<&mut P> {
+        self.provider.as_mut()
+    }
+
+    pub fn surface(&self) -> Option<&S> {
+        self.surface.as_ref()
+    }
+
+    pub fn surface_mut(&mut self) -> Option<&mut S> {
+        self.surface.as_mut()
+    }
+
+    pub fn take_engine(&mut self) -> Option<E> {
+        self.engine.take()
+    }
+
+    pub fn take_provider(&mut self) -> Option<P> {
+        self.provider.take()
+    }
+
+    pub fn take_surface(&mut self) -> Option<S> {
+        self.surface.take()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.engine.is_none() && self.provider.is_none() && self.surface.is_none()
+    }
+}
+
+impl<E, P, S> Default for RuntimeOwners<E, P, S> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RuntimeOwners;
+
+    #[test]
+    fn slots_reject_duplicates_and_preserve_concrete_values() {
+        let mut owners = RuntimeOwners::<u8, u16, u32>::new();
+        assert!(owners.attach_engine(1).is_ok());
+        assert_eq!(owners.attach_engine(2), Err(2));
+        assert!(owners.attach_provider(3).is_ok());
+        assert!(owners.attach_surface(4).is_ok());
+        assert_eq!(owners.engine(), Some(&1));
+        assert_eq!(owners.provider(), Some(&3));
+        assert_eq!(owners.surface(), Some(&4));
+        assert_eq!(owners.take_surface(), Some(4));
+        assert_eq!(owners.take_provider(), Some(3));
+        assert_eq!(owners.take_engine(), Some(1));
+        assert!(owners.is_empty());
+    }
+}

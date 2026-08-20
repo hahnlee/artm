@@ -10,8 +10,10 @@ use std::{any::Any, collections::BTreeMap, marker::PhantomData, rc::Rc, thread::
 
 use darwin_art_abi::StatusCode;
 
+mod owners;
 mod provider;
 
+pub use owners::RuntimeOwners;
 pub use provider::{ProviderLeaseError, ProviderLeaseTable};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
