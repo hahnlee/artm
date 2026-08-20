@@ -247,7 +247,7 @@ pub(crate) fn build_elf_jni_dex_probe(root: &Path) -> Result<()> {
             .arg(class_dir.join("darwin/art/nativefixture/NativeFixture.class")),
     )?;
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=323 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=328 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldarwin/art/nativefixture/NativeFixture; \
                     class[2]=Ldev/darwinart/probe/Hello; \

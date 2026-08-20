@@ -280,6 +280,10 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 return Err(HostError::RuntimeFailed(status));
             }
         };
+        // The graphics engine publishes its drawable during run_process, so
+        // capture the owner only after that bootstrap has completed.
+        let active_surface = engine.active_surface();
+        let gpu_mode = active_surface.is_some();
         let provider_lease = runtime
             .install_owned_subsystem_with_resource_cleanup(
                 Subsystem::ElfNamespace,
@@ -315,9 +319,8 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         }
         // Darwin's application renderer is GPU-only.  The CPU surface path is
         // retained for diagnostics, never selected by the normal host.
-        let gpu_mode = true;
         if gpu_mode {
-            let Some(surface) = SurfaceSession::active(symbols) else {
+            let Some(surface) = active_surface else {
                 // No surface was published, but ART and the provider
                 // bridge are already live.  Roll them back through the
                 // same owner-thread LIFO as the normal GPU path; a bare

@@ -213,6 +213,16 @@ mod platform {
             SurfaceSession::active(self.symbols())
         }
 
+        /// Reports whether the graphics flavor has published a drawable
+        /// surface without taking ownership of it. The non-graphics probe
+        /// intentionally has no active surface and uses the diagnostic path;
+        /// production graphics always publishes one before the host enters
+        /// its frame loop.
+        pub fn has_active_surface(&self) -> bool {
+            // SAFETY: this is a read-only query on the live engine image.
+            unsafe { !(self.engine.symbols.surface_active)().is_null() }
+        }
+
         pub fn create_surface(
             &self,
             info: &darwin_art_engine_sys::SurfaceCreateInfo,
