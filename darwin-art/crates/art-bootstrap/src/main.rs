@@ -3304,6 +3304,24 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
     Ok(())
 }
 
+fn compile_runtime_filesystem_probe(root: &Path, build_dir: &Path) -> Result<PathBuf> {
+    let object = build_dir.join("darwin_art_runtime_filesystem_probe.cc.o");
+    run_command(
+        Command::new("clang++")
+            .args(["-std=c++20", "-fPIC", "-Wall", "-Wextra", "-c"])
+            .arg(root.join("probes/runtime_filesystem_probe.cc"))
+            .arg("-I")
+            .arg(root.join("probes"))
+            .arg("-I")
+            .arg(root.join("tools/bionic-fs-facade/include"))
+            .arg("-I")
+            .arg(root.join("tools/bionic-ioctl-facade/include"))
+            .arg("-o")
+            .arg(&object),
+    )?;
+    Ok(object)
+}
+
 fn audit_runtime_link(root: &Path) -> Result<()> {
     const MAX_EXPECTED_UNDEFINED: usize = 365;
 
@@ -3313,6 +3331,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
     let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime.dylib");
     fs::create_dir_all(&build_dir)?;
+    let filesystem_object = compile_runtime_filesystem_probe(root, &build_dir)?;
     build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
     let includes = [
         root.join("include"),
@@ -3349,9 +3368,9 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         runtime_cpp_command(&include_refs)
             .args(["-include", "mirror/object_reference.h"])
             .arg("-idirafter")
-            .arg(ndk_arch_include)
+            .arg(&ndk_arch_include)
             .arg("-idirafter")
-            .arg(ndk_include)
+            .arg(&ndk_include)
             .arg("-Wno-macro-redefined")
             .arg("-c")
             .arg(root.join("probes/runtime_link_probe.cc"))
@@ -3368,6 +3387,18 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             .arg(root.join("include"))
             .arg("-I")
             .arg(root.join("_aosp/external/skia"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/core"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/effects"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/utils"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/private"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/android"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/codec"))
             .arg("-I")
             .arg(root.join("_aosp/external/skia/include/core"))
             .arg("-I")
@@ -3407,6 +3438,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
         .arg("-Wl,-dead_strip")
         .arg(&object)
+        .arg(&filesystem_object)
         .arg(&surface_object)
         .arg(root.join("_build/runtime-bootstrap/libart-runtime-bootstrap-darwin.a"))
         .arg(format!(
@@ -3631,6 +3663,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
     let build_paths = BuildPaths::from_root(root);
     let build_dir = build_paths.native_output("runtime-graphics-link-probe");
     let object = build_dir.join("darwin_art_runtime.cc.o");
+    let filesystem_object = compile_runtime_filesystem_probe(root, &build_dir)?;
     let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime_graphics.dylib");
     let graphics_closure =
@@ -3781,6 +3814,8 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
             .arg("-I")
             .arg(root.join("_aosp/system/core/libcutils/include"))
             .arg("-I")
+            .arg(root.join("_aosp/system/core/libutils/include"))
+            .arg("-I")
             .arg(root.join("_aosp/frameworks/base/libs/hwui"))
             .arg("-I")
             .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
@@ -3850,6 +3885,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         .arg("-Wl,-dead_strip")
         .arg(format!("-Wl,-map,{}", link_map.display()))
         .arg(&object)
+        .arg(&filesystem_object)
         .arg(&surface_object)
         .arg(root.join("_build/skia-metal-gpu/libskia.a"))
         .arg(root.join("_build/skia-metal-gpu/libskcms.a"))
@@ -4337,6 +4373,8 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
     run_command(Command::new("ar").arg("-s").arg(&bootstrap))?;
 
     let object = build_dir.join("darwin_art_runtime_direct_apk.cc.o");
+    let graph_object = build_dir.join("darwin_art_runtime_apk_graph.cc.o");
+    let filesystem_object = compile_runtime_filesystem_probe(root, &build_dir)?;
     let surface_object = root.join("_build/runtime-link-probe/darwin_surface_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime_direct_apk.dylib");
     let includes = [
@@ -4363,6 +4401,10 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         root.join("_aosp/libnativehelper/header_only_include"),
         root.join("_aosp/libnativehelper/platform_header_only_include"),
         root.join("_aosp/external/dlmalloc"),
+        root.join("tools/bionic-dns-facade/include"),
+        root.join("tools/bionic-fs-facade/include"),
+        root.join("tools/bionic-ioctl-facade/include"),
+        root.join("tools/bionic-socket-broker-adapter/include"),
         PathBuf::from("/opt/homebrew/include"),
     ];
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
@@ -4371,19 +4413,35 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         runtime_cpp_command(&include_refs)
             .args(["-include", "mirror/object_reference.h"])
             .arg("-idirafter")
-            .arg(ndk_arch_include)
+            .arg(&ndk_arch_include)
             .arg("-idirafter")
-            .arg(ndk_include)
+            .arg(&ndk_include)
             .arg("-Wno-macro-redefined")
             .arg("-DDARWIN_ART_REAL_GRAPHICS")
             .arg("-DDARWIN_ART_HWUI_GPU")
             .arg("-I")
             .arg(root.join("_aosp/external/skia"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/core"))
             .arg("-DDARWIN_ART_DIRECT_APK_RUNTIME")
             .arg("-c")
             .arg(root.join("probes/runtime_link_probe.cc"))
             .arg("-o")
             .arg(&object),
+    )?;
+    run_command(
+        runtime_cpp_command(&include_refs)
+            .args(["-include", "mirror/object_reference.h"])
+            .arg("-idirafter")
+            .arg(&ndk_arch_include)
+            .arg("-idirafter")
+            .arg(&ndk_include)
+            .arg("-Wno-macro-redefined")
+            .arg("-DDARWIN_ART_DIRECT_APK_RUNTIME")
+            .arg("-c")
+            .arg(root.join("probes/runtime_apk_graph.cc"))
+            .arg("-o")
+            .arg(&graph_object),
     )?;
 
     let mut linker = Command::new("clang++");
@@ -4405,6 +4463,8 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
         .arg("-Wl,-dead_strip")
         .arg(&object)
+        .arg(&filesystem_object)
+        .arg(&graph_object)
         .arg(&surface_object)
         .arg(root.join("_build/skia-metal-gpu/libskia.a"))
         .arg(root.join("_build/skia-metal-gpu/libskcms.a"))

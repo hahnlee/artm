@@ -352,6 +352,10 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("crates/darwin-art-xtask/src/main.rs"),
         PathBuf::from("tools/build-android-elf-jni-fixture.sh"),
         PathBuf::from("tools/audit-android16-graphics-closure.sh"),
+        PathBuf::from("probes/runtime_filesystem_probe.cc"),
+        PathBuf::from("probes/runtime_filesystem_probe.h"),
+        PathBuf::from("probes/runtime_apk_graph.cc"),
+        PathBuf::from("probes/runtime_apk_graph.h"),
     ];
     // Keep this graph tied to the production bootstrap closure. In
     // particular, acceptance probes and unrelated graphics gates should not
