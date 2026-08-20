@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::error::Error;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt;
@@ -6,6 +7,7 @@ use std::mem::size_of;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::rc::Rc;
 
 mod ffi;
 
@@ -162,6 +164,9 @@ struct SurfaceCleanupGuard {
     surface: *mut c_void,
     armed: bool,
 }
+
+#[cfg(target_os = "macos")]
+type SharedSurfaceCleanup = Rc<RefCell<SurfaceCleanupGuard>>;
 
 #[cfg(target_os = "macos")]
 impl SurfaceCleanupGuard {
@@ -412,9 +417,19 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     status: -1,
                 });
             }
-            let mut surface_guard = SurfaceCleanupGuard::new(surface_destroy, surface);
+            let surface_state: SharedSurfaceCleanup = Rc::new(RefCell::new(
+                SurfaceCleanupGuard::new(surface_destroy, surface),
+            ));
+            let surface_cleanup = Rc::clone(&surface_state);
             let surface_lease = runtime
-                .install_subsystem(Subsystem::Surface)
+                .install_subsystem_with_cleanup(Subsystem::Surface, move || {
+                    let status = surface_cleanup.borrow_mut().close();
+                    if status == 0 {
+                        Ok(())
+                    } else {
+                        Err(RuntimeError::EngineFailure { status })
+                    }
+                })
                 .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
             let mut frames_presented = 1_u64;
             let mut remaining = options.visible_seconds;
@@ -439,7 +454,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             let dispatch_queued_events = || -> Result<u64, HostError> {
                 let mut dispatched = 0_u64;
                 let mut event = PointerEvent::default();
-                while unsafe { surface_next_pointer_event(surface_guard.handle(), &mut event) } {
+                while unsafe {
+                    surface_next_pointer_event(surface_state.borrow().handle(), &mut event)
+                } {
                     let dispatch_status =
                         unsafe { dispatch_pointer(event.action, event.x, event.y) };
                     if dispatch_status != 0 {
@@ -460,7 +477,10 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     while held_ms < test_hold_ms && loop_error.is_none() {
                         let slice_ms = (test_hold_ms - held_ms).min(16);
                         let pump_status = unsafe {
-                            surface_pump_events(surface_guard.handle(), slice_ms as f64 / 1000.0)
+                            surface_pump_events(
+                                surface_state.borrow().handle(),
+                                slice_ms as f64 / 1000.0,
+                            )
                         };
                         if pump_status == 7 {
                             break;
@@ -506,7 +526,8 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             }
             while remaining > 0.0 {
                 let slice = remaining.min(0.016);
-                let pump_status = unsafe { surface_pump_events(surface_guard.handle(), slice) };
+                let pump_status =
+                    unsafe { surface_pump_events(surface_state.borrow().handle(), slice) };
                 if pump_status == 7 {
                     break;
                 }
@@ -525,18 +546,18 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 // request redraws after ACTION_UP. Keep the framework pulse
                 // and GPU RenderNode replay alive for the test pointer so the
                 // real ripple/compatibility bridge can finish on-screen.
-                if loop_error.is_none() {
-                    if let Some((x, y)) = test_pointer {
-                        let pulse_status = unsafe { pump_framework_frame(0) };
-                        if pulse_status != 0 {
-                            loop_error = Some(HostError::RuntimeFailed(pulse_status));
+                if loop_error.is_none()
+                    && let Some((x, y)) = test_pointer
+                {
+                    let pulse_status = unsafe { pump_framework_frame(0) };
+                    if pulse_status != 0 {
+                        loop_error = Some(HostError::RuntimeFailed(pulse_status));
+                    } else {
+                        let replay_status = unsafe { dispatch_pointer(2, x, y) };
+                        if replay_status != 0 {
+                            loop_error = Some(HostError::RuntimeFailed(replay_status));
                         } else {
-                            let replay_status = unsafe { dispatch_pointer(2, x, y) };
-                            if replay_status != 0 {
-                                loop_error = Some(HostError::RuntimeFailed(replay_status));
-                            } else {
-                                frames_presented += 1;
-                            }
+                            frames_presented += 1;
                         }
                     }
                 }
@@ -545,19 +566,21 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 }
                 remaining -= slice;
             }
-            let destroy_status = surface_guard.close();
+            let mut surface_destroy_status = 0;
             let shutdown_status = if runtime.begin_shutdown().is_err() {
                 -1
             } else {
-                let surface_status = runtime.uninstall_subsystem(surface_lease);
-                if surface_status.is_err() {
-                    -1
-                } else {
-                    match runtime.uninstall_subsystem(engine_lease) {
+                match runtime.uninstall_subsystem(surface_lease) {
+                    Ok(()) => match runtime.uninstall_subsystem(engine_lease) {
                         Ok(()) => 0,
                         Err(RuntimeError::EngineFailure { status }) => status,
                         Err(error) => error.status() as i32,
+                    },
+                    Err(RuntimeError::EngineFailure { status }) => {
+                        surface_destroy_status = status;
+                        status
                     }
+                    Err(error) => error.status() as i32,
                 }
             };
             if shutdown_status == 0 {
@@ -575,10 +598,10 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             if let Some(error) = loop_error {
                 return Err(error);
             }
-            if destroy_status != 0 {
+            if surface_destroy_status != 0 {
                 return Err(HostError::SurfaceFailed {
                     operation: "gpu_destroy",
-                    status: destroy_status,
+                    status: surface_destroy_status,
                 });
             }
             if shutdown_status != 0 {
@@ -594,6 +617,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // after returning from ART so AppKit's event loop never blocks a runnable
         // managed thread. The callback above merely copied into this Rust-owned
         // frame mailbox.
+        let mut surface_lease = None;
         let presentation = (|| -> Result<u64, HostError> {
             let Some(initial_frame) = frame_host.last_frame.as_ref() else {
                 return Ok(0);
@@ -618,7 +642,22 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     status: create_status,
                 });
             }
-            let mut surface_guard = SurfaceCleanupGuard::new(surface_destroy, surface);
+            let surface_state: SharedSurfaceCleanup = Rc::new(RefCell::new(
+                SurfaceCleanupGuard::new(surface_destroy, surface),
+            ));
+            let surface_cleanup = Rc::clone(&surface_state);
+            surface_lease = Some(
+                runtime
+                    .install_subsystem_with_cleanup(Subsystem::Surface, move || {
+                        let status = surface_cleanup.borrow_mut().close();
+                        if status == 0 {
+                            Ok(())
+                        } else {
+                            Err(RuntimeError::EngineFailure { status })
+                        }
+                    })
+                    .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?,
+            );
 
             let present_result = (|| {
                 let mut presentations = 0_u64;
@@ -640,13 +679,14 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     // synchronous main-thread upload.
                     let update_status = unsafe {
                         surface_update(
-                            surface_guard.handle(),
+                            surface_state.borrow().handle(),
                             frame.argb_pixels.as_ptr().cast(),
                             frame.width as usize * size_of::<u32>(),
                         )
                     };
                     surface_status("update", update_status, false)?;
-                    let present_status = unsafe { surface_present(surface_guard.handle()) };
+                    let present_status =
+                        unsafe { surface_present(surface_state.borrow().handle()) };
                     surface_status("present", present_status, false)
                 };
                 // SAFETY: surface is live; the packed Rust frame remains live
@@ -715,7 +755,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                             let slice_ms = (hold_ms - held).min(16);
                             let pump_status = unsafe {
                                 surface_pump_events(
-                                    surface_guard.handle(),
+                                    surface_state.borrow().handle(),
                                     slice_ms as f64 / 1000.0,
                                 )
                             };
@@ -755,14 +795,16 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 let mut remaining = options.visible_seconds;
                 while remaining > 0.0 {
                     let slice = remaining.min(0.016);
-                    let pump_status = unsafe { surface_pump_events(surface_guard.handle(), slice) };
+                    let pump_status =
+                        unsafe { surface_pump_events(surface_state.borrow().handle(), slice) };
                     if pump_status == 7 {
                         break;
                     }
                     surface_status("pump_events", pump_status, false)?;
                     let mut event = PointerEvent::default();
-                    while unsafe { surface_next_pointer_event(surface_guard.handle(), &mut event) }
-                    {
+                    while unsafe {
+                        surface_next_pointer_event(surface_state.borrow().handle(), &mut event)
+                    } {
                         let dispatch_status =
                             unsafe { dispatch_pointer(event.action, event.x, event.y) };
                         if dispatch_status != 0 {
@@ -775,23 +817,31 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 }
                 Ok(presentations)
             })();
-            // SurfaceCleanupGuard keeps the surface alive through the
-            // presentation closure and also handles any early return from it.
-            let destroy_status = surface_guard.close();
             let presentations = present_result?;
-            surface_status("destroy", destroy_status, false)?;
             Ok(presentations)
         })();
-        // Presentation has released every platform surface at this point.
-        // Destroy ART before returning ownership to arbitrary Rust code so its
-        // registered DexFile pointers and process-global handlers remain valid
-        // throughout Runtime teardown.
+        // The surface lease is installed after creation and remains owned by
+        // RuntimeSession even when presentation returns an error. Teardown
+        // therefore destroys the surface before releasing the engine lease.
+        let mut surface_destroy_status = 0;
         let shutdown_status = match runtime.begin_shutdown() {
-            Ok(()) => match runtime.uninstall_subsystem(engine_lease) {
-                Ok(()) => 0,
-                Err(RuntimeError::EngineFailure { status }) => status,
-                Err(error) => error.status() as i32,
-            },
+            Ok(()) => {
+                let surface_status = surface_lease
+                    .take()
+                    .map(|lease| runtime.uninstall_subsystem(lease));
+                match surface_status {
+                    Some(Err(RuntimeError::EngineFailure { status })) => {
+                        surface_destroy_status = status;
+                        status
+                    }
+                    Some(Err(error)) => error.status() as i32,
+                    Some(Ok(())) | None => match runtime.uninstall_subsystem(engine_lease) {
+                        Ok(()) => 0,
+                        Err(RuntimeError::EngineFailure { status }) => status,
+                        Err(error) => error.status() as i32,
+                    },
+                }
+            }
             Err(error) => error.status() as i32,
         };
         if shutdown_status == 0 {
@@ -804,6 +854,12 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             });
         }
         if shutdown_status != 0 {
+            if surface_destroy_status != 0 {
+                return Err(HostError::SurfaceFailed {
+                    operation: "destroy",
+                    status: surface_destroy_status,
+                });
+            }
             return Err(HostError::ShutdownFailed(shutdown_status));
         }
         let frames_presented = presentation?;

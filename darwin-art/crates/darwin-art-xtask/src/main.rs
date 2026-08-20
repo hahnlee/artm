@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 const GRAPH_VERSION: &str = "darwin-art-native-graph-v3";
 const GRAPHICS_BOOTSTRAP_ARCHIVE: &str =
     "runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a";
+const GRAPHICS_RUNTIME_LIBRARY: &str =
+    "runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib";
 
 fn main() {
     if let Err(error) = run() {
@@ -57,9 +59,11 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     let root_for_shell = root.to_string_lossy().into_owned();
     let native_output_root = cache_dir.join("outputs");
     let archive_path = native_output_root.join(GRAPHICS_BOOTSTRAP_ARCHIVE);
+    let runtime_library_path = native_output_root.join(GRAPHICS_RUNTIME_LIBRARY);
     let stamp_path = cache_dir.join("graphics-bootstrap.stamp");
     let stamp = ninja_path(&stamp_path);
     let archive = ninja_path(&archive_path);
+    let runtime_library = ninja_path(&runtime_library_path);
     let stamp_for_shell = stamp_path.to_string_lossy().into_owned();
     let native_output_for_shell = native_output_root.to_string_lossy().into_owned();
     let input_list = inputs
@@ -90,6 +94,22 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push('\n');
     graph.push_str("build graphics-bootstrap: phony ");
     graph.push_str(&stamp);
+    graph.push('\n');
+    graph.push_str("rule graphics_audit\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT_ROOT=");
+    graph.push_str(&shell_quote(&native_output_for_shell));
+    graph.push_str(" cargo run -p art-bootstrap -- audit-runtime-graphics-link\n");
+    graph.push_str("  description = GRAPHICS link/audit\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&runtime_library);
+    graph.push_str(": graphics_audit ");
+    graph.push_str(&archive);
+    graph.push('\n');
+    graph.push_str("build graphics-audit: phony ");
+    graph.push_str(&runtime_library);
     graph.push('\n');
     graph.push_str("build graph-input-digest: phony ");
     graph.push_str(&ninja_path(&digest_path));
@@ -145,6 +165,7 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("crates/darwin-art-xtask/Cargo.toml"),
         PathBuf::from("crates/darwin-art-xtask/src/main.rs"),
         PathBuf::from("tools/build-android-elf-jni-fixture.sh"),
+        PathBuf::from("tools/audit-android16-graphics-closure.sh"),
     ];
     // Keep this graph tied to the production bootstrap closure. In
     // particular, acceptance probes and unrelated graphics gates should not
@@ -168,6 +189,24 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         "tools/bionic-strftime-facade/include",
     ] {
         collect_files(&root.join(directory), root, &mut paths);
+    }
+    for script in [
+        "build-bionic-runtime-provider-closure.sh",
+        "build-android16-android-runtime-host.sh",
+        "build-android16-libcore-darwin-linux.sh",
+        "build-android16-os-constants-darwin.sh",
+        "build-android16-unix-filesystem-darwin.sh",
+        "build-android16-openjdkjvm-darwin.sh",
+        "build-android16-file-input-stream-darwin.sh",
+        "build-android16-file-descriptor-darwin.sh",
+        "build-android16-system-natives-darwin.sh",
+        "build-android16-unix-native-dispatcher-darwin.sh",
+        "build-android16-openjdk-nio-mapping.sh",
+        "build-android16-libcore-memory-darwin.sh",
+        "build-android16-android-util-log.sh",
+        "build-android16-virtual-ref-base-ptr.sh",
+    ] {
+        paths.push(PathBuf::from("tools").join(script));
     }
     paths.extend([
         PathBuf::from("probes/android-elf-jni-fixture/child.c"),
@@ -200,10 +239,10 @@ fn collect_files(directory: &Path, root: &Path, output: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect_files(&path, root, output);
-        } else if path.is_file() {
-            if let Ok(relative) = path.strip_prefix(root) {
-                output.push(relative.to_path_buf());
-            }
+        } else if path.is_file()
+            && let Ok(relative) = path.strip_prefix(root)
+        {
+            output.push(relative.to_path_buf());
         }
     }
 }

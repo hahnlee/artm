@@ -3628,14 +3628,15 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
     build_shell_gate(root, "build-android16-virtual-ref-base-ptr.sh")?;
 
     let runtime = root.join("_aosp/art/runtime");
-    let build_dir = root.join("_build/runtime-graphics-link-probe");
+    let build_paths = BuildPaths::from_root(root);
+    let build_dir = build_paths.native_output("runtime-graphics-link-probe");
     let object = build_dir.join("darwin_art_runtime.cc.o");
     let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime_graphics.dylib");
     let graphics_closure =
         root.join("_build/graphics-runtime-closure-audit/android16-graphics-runtime-closure.o");
-    let bootstrap =
-        root.join("_build/runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a");
+    let bootstrap = build_paths
+        .native_output("runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a");
     let icu_jni_archive = root.join("_build/icu-jni-foundation/libicu-jni-darwin.a");
     let libcore_linux_archive = root.join("_build/libcore-darwin-linux/libcore-darwin-linux.a");
     let os_constants_archive =
@@ -3717,7 +3718,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         root.join("include"),
         root.join("compat"),
         root.join("_build/runtime-arm64/generated"),
-        root.join("_build/runtime-graphics-bootstrap/patched-source/runtime"),
+        build_paths.native_output("runtime-graphics-bootstrap/patched-source/runtime"),
         root.join("_build/runtime-core/patched-source/runtime"),
         root.join("_build/foundation/patched-source/libartbase"),
         root.join("_aosp/art/libartbase"),
@@ -3912,7 +3913,10 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         .arg(root.join("_build/runtime-core/libart-core-darwin.a"))
         .arg(root.join("_build/runtime-platform/libart-platform-darwin.a"))
         .arg(root.join("_build/dex-probe/libdexfile-darwin.a"))
-        .arg(root.join("_build/runtime-graphics-bootstrap/objects/artbase_os_linux_aosp_fmt.cc.o"))
+        .arg(
+            build_paths
+                .native_output("runtime-graphics-bootstrap/objects/artbase_os_linux_aosp_fmt.cc.o"),
+        )
         .arg(root.join("_build/foundation/libartbase-darwin.a"))
         .arg(root.join("_build/ziparchive-incfs/libziparchive-for-incfs-darwin.a"))
         .arg(root.join("_build/graphics-foundations/liblog-darwin.a"))
