@@ -7,7 +7,7 @@
 //! ownership wrappers belong in the higher-level runtime crate; no Rust
 //! slice, STL object, or borrowed string crosses this boundary.
 
-use core::ffi::c_void;
+use core::ffi::{c_char, c_void};
 use darwin_art_abi::{ABI_VERSION, AbiHeader, StatusCode};
 
 #[repr(C)]
@@ -20,9 +20,77 @@ pub struct RuntimeSessionHandle {
     _private: [u8; 0],
 }
 
+pub type FrameCallback = unsafe extern "C" fn(
+    context: *mut c_void,
+    argb_pixels: *const u32,
+    width: u32,
+    height: u32,
+    stride_bytes: usize,
+) -> i32;
+
+#[repr(C)]
+pub struct ProcessConfig {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub core_oj_jar: *const c_char,
+    pub core_libart_jar: *const c_char,
+    pub framework_jar: *const c_char,
+    pub core_icu4j_jar: *const c_char,
+    pub app_dex: *const c_char,
+    pub heap_initial_bytes: u64,
+    pub heap_maximum_bytes: u64,
+    pub host_context: *mut c_void,
+    pub frame_callback: Option<FrameCallback>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(C)]
+pub struct ProcessResult {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub hello_answer: i32,
+    pub native_round_trip: i32,
+    pub arraycopy_result: i32,
+    pub activity_probe_result: i32,
+    pub lifecycle_result: i32,
+    pub frame_width: u32,
+    pub frame_height: u32,
+}
+
 pub type EngineCreateFn = unsafe extern "C" fn(*const EngineApi) -> *mut EngineHandle;
 pub type EngineShutdownFn = unsafe extern "C" fn(*mut EngineHandle) -> i32;
 pub type EngineDestroyFn = unsafe extern "C" fn(*mut EngineHandle);
+
+pub type RunProcessFn = unsafe extern "C" fn(*const ProcessConfig, *mut ProcessResult) -> i32;
+pub type ShutdownProcessFn = unsafe extern "C" fn() -> i32;
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct SurfaceCreateInfo {
+    pub width: u32,
+    pub height: u32,
+    pub title: *const c_char,
+    pub visible: bool,
+}
+
+pub type SurfaceCreateFn = unsafe extern "C" fn(*const SurfaceCreateInfo, *mut i32) -> *mut c_void;
+pub type SurfaceUpdateFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> i32;
+pub type SurfacePresentFn = unsafe extern "C" fn(*mut c_void) -> i32;
+pub type SurfacePumpEventsFn = unsafe extern "C" fn(*mut c_void, f64) -> i32;
+
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+pub struct PointerEvent {
+    pub action: u32,
+    pub x: f32,
+    pub y: f32,
+}
+
+pub type SurfaceNextPointerEventFn = unsafe extern "C" fn(*mut c_void, *mut PointerEvent) -> bool;
+pub type SurfaceDestroyFn = unsafe extern "C" fn(*mut c_void) -> i32;
+pub type SurfaceActiveFn = unsafe extern "C" fn() -> *mut c_void;
+pub type DispatchPointerFn = unsafe extern "C" fn(u32, f32, f32) -> i32;
+pub type PumpFrameworkFrameFn = unsafe extern "C" fn(i64) -> i32;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
