@@ -6,7 +6,9 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-const GRAPH_VERSION: &str = "darwin-art-native-graph-v2";
+const GRAPH_VERSION: &str = "darwin-art-native-graph-v3";
+const GRAPHICS_BOOTSTRAP_ARCHIVE: &str =
+    "runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a";
 
 fn main() {
     if let Err(error) = run() {
@@ -53,9 +55,13 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     )?;
 
     let root_for_shell = root.to_string_lossy().into_owned();
+    let native_output_root = cache_dir.join("outputs");
+    let archive_path = native_output_root.join(GRAPHICS_BOOTSTRAP_ARCHIVE);
     let stamp_path = cache_dir.join("graphics-bootstrap.stamp");
     let stamp = ninja_path(&stamp_path);
+    let archive = ninja_path(&archive_path);
     let stamp_for_shell = stamp_path.to_string_lossy().into_owned();
+    let native_output_for_shell = native_output_root.to_string_lossy().into_owned();
     let input_list = inputs
         .iter()
         .map(|path| ninja_path(&root.join(path)))
@@ -68,13 +74,17 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str("rule graphics_bootstrap\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
-    graph.push_str(" && cargo run -p art-bootstrap -- build-runtime-graphics-bootstrap && touch ");
+    graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT_ROOT=");
+    graph.push_str(&shell_quote(&native_output_for_shell));
+    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-bootstrap && touch ");
     graph.push_str(&shell_quote(&stamp_for_shell));
     graph.push('\n');
     graph.push_str("  description = GRAPHICS bootstrap\n");
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
     graph.push_str(&stamp);
+    graph.push(' ');
+    graph.push_str(&archive);
     graph.push_str(": graphics_bootstrap ");
     graph.push_str(&input_list);
     graph.push('\n');
@@ -101,29 +111,81 @@ fn repository_root(out: &Path) -> PathBuf {
     } else {
         env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
-    start
+    if let Some(root) = start
         .ancestors()
         .find(|candidate| candidate.join("Cargo.toml").is_file())
-        .unwrap_or(start.as_path())
-        .to_path_buf()
+    {
+        return root.to_path_buf();
+    }
+    // An absolute output path outside the checkout is useful for CI scratch
+    // graphs. Fall back to the invocation directory before accepting an
+    // unrelated path as the repository root.
+    env::current_dir()
+        .ok()
+        .and_then(|current| {
+            current
+                .ancestors()
+                .find(|candidate| candidate.join("Cargo.toml").is_file())
+                .map(Path::to_path_buf)
+        })
+        .unwrap_or(start)
 }
 
 fn graph_inputs(root: &Path) -> Vec<PathBuf> {
     let mut paths = vec![
         PathBuf::from("Cargo.toml"),
         PathBuf::from("Cargo.lock"),
+        PathBuf::from("sources.lock"),
+        PathBuf::from("bootclasspath.lock"),
         PathBuf::from("crates/art-bootstrap/Cargo.toml"),
         PathBuf::from("crates/art-bootstrap/src/main.rs"),
+        PathBuf::from("crates/art-bootstrap/src/build_context.rs"),
+        PathBuf::from("crates/art-bootstrap/src/help.rs"),
+        PathBuf::from("crates/darwin-art-elf-loader/Cargo.toml"),
         PathBuf::from("crates/darwin-art-xtask/Cargo.toml"),
         PathBuf::from("crates/darwin-art-xtask/src/main.rs"),
-        PathBuf::from("probes/runtime_link_probe.cc"),
-        PathBuf::from("compat/darwin_runtime_adapters.cc"),
-        PathBuf::from("tools/build-android16-skia-hwui-force-load.sh"),
-        PathBuf::from("tools/build-android16-hwui-static-foundation.sh"),
+        PathBuf::from("tools/build-android-elf-jni-fixture.sh"),
     ];
-    for directory in ["compat", "probes", "crates/art-bootstrap/src"] {
+    // Keep this graph tied to the production bootstrap closure. In
+    // particular, acceptance probes and unrelated graphics gates should not
+    // invalidate the runtime archive cache.
+    for directory in [
+        "compat",
+        "include",
+        "patches/art",
+        "crates/darwin-art-elf-loader/src",
+        "tools/android-jni-proxy/include",
+        "tools/android-jni-proxy/generated",
+        "tools/android-dl-iterate-phdr-provider/include",
+        "tools/bionic-dns-facade/include",
+        "tools/bionic-dso-lifecycle-facade/include",
+        "tools/bionic-fs-facade/include",
+        "tools/bionic-ioctl-facade/include",
+        "tools/bionic-provider-namespace/include",
+        "tools/bionic-sendfile-facade/include",
+        "tools/bionic-socket-broker-adapter/include",
+        "tools/bionic-stdio-facade/include",
+        "tools/bionic-strftime-facade/include",
+    ] {
         collect_files(&root.join(directory), root, &mut paths);
     }
+    paths.extend([
+        PathBuf::from("probes/android-elf-jni-fixture/child.c"),
+        PathBuf::from("probes/android-elf-jni-fixture/child.exports.map"),
+        PathBuf::from("probes/android-elf-jni-fixture/exports.map"),
+        PathBuf::from("probes/android-elf-jni-fixture/generic_child.c"),
+        PathBuf::from("probes/android-elf-jni-fixture/generic_child.exports.map"),
+        PathBuf::from("probes/android-elf-jni-fixture/generic_grandchild.c"),
+        PathBuf::from("probes/android-elf-jni-fixture/generic_grandchild.exports.map"),
+        PathBuf::from("probes/android-elf-jni-fixture/generic_root.c"),
+        PathBuf::from("probes/android-elf-jni-fixture/generic_root.exports.map"),
+        PathBuf::from("probes/android-elf-jni-fixture/grandchild.c"),
+        PathBuf::from("probes/android-elf-jni-fixture/grandchild.exports.map"),
+        PathBuf::from("probes/android-elf-jni-fixture/host_provider.c"),
+        PathBuf::from("probes/android-elf-jni-fixture/native_fixture.c"),
+        PathBuf::from("tools/android-jni-proxy/src/proxy.c"),
+        PathBuf::from("tools/android-jni-proxy/sources.lock"),
+    ]);
     paths.sort();
     paths.dedup();
     paths.retain(|path| root.join(path).is_file());
@@ -186,5 +248,17 @@ mod tests {
     #[test]
     fn ninja_path_escapes_ninja_metacharacters() {
         assert_eq!(ninja_path(Path::new("a b/$c")), "a$ b/$$c");
+    }
+
+    #[test]
+    fn graphics_bootstrap_archive_is_declared_under_cache_outputs() {
+        let output_root = Path::new("_build/native-cache/digest/outputs");
+        assert_eq!(
+            output_root.join(GRAPHICS_BOOTSTRAP_ARCHIVE),
+            PathBuf::from(
+                "_build/native-cache/digest/outputs/runtime-graphics-bootstrap/\
+                 libart-runtime-graphics-bootstrap-darwin.a"
+            )
+        );
     }
 }

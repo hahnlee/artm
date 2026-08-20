@@ -8,7 +8,10 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod build_context;
 mod help;
+
+use build_context::BuildPaths;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -2448,6 +2451,7 @@ fn build_runtime_graphics_bootstrap(root: &Path) -> Result<()> {
 
 fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()> {
     build_shell_gate(root, "build-android-elf-jni-fixture.sh")?;
+    let build_paths = BuildPaths::from_root(root);
     run_command(
         Command::new("cargo")
             .args(["build", "--release", "--lib", "--manifest-path"])
@@ -2514,10 +2518,10 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
         .into());
     }
 
-    let build_dir = root.join(if real_graphics {
-        "_build/runtime-graphics-bootstrap"
+    let build_dir = build_paths.native_output(if real_graphics {
+        "runtime-graphics-bootstrap"
     } else {
-        "_build/runtime-bootstrap"
+        "runtime-bootstrap"
     });
     let runtime_generated_dir = build_dir.join("generated");
     let patched_source_dir = build_dir.join("patched-source");
