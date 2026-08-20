@@ -9,15 +9,14 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 use std::rc::Rc;
 
-mod ffi;
 mod session;
 
 #[cfg(target_os = "macos")]
 use darwin_art_engine::EngineSession;
 
 pub use darwin_art_abi::ABI_VERSION;
+pub use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProcessResult};
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
-pub use ffi::{FrameCallback, ProcessConfig, ProcessResult};
 use session::{
     ProviderBridge, SharedProcessShutdown, SharedSurfaceCleanup, SurfaceCleanupGuard,
     engine_symbols, shutdown_process_once,
@@ -25,7 +24,7 @@ use session::{
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
-use ffi::{
+use darwin_art_engine_sys::{
     DispatchPointerFn, PointerEvent, PumpFrameworkFrameFn, RunProcessFn, SurfaceActiveFn,
     SurfaceCreateFn, SurfaceCreateInfo, SurfaceDestroyFn, SurfaceNextPointerEventFn,
     SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
