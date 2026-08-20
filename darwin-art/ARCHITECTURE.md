@@ -213,6 +213,27 @@ it does not prove general JNI calling-convention compatibility.
 The concrete ART ownership and teardown seam is specified in
 `docs/art-elf-native-loader-integration.md`.
 
+### Rust ownership boundary
+
+`darwin-art-runtime::RuntimeSession` is the owner-thread lifecycle machine.
+Engine, ELF namespace, provider, network, filesystem, input, and surface
+leases are installed as typed Rust resources and unwound in reverse order;
+normal uninstall consumes the resource before its lease can be reused, while
+`Drop` performs best-effort rollback for partial bootstrap failures. Provider
+lease accounting lives in the Rust runtime crate as `ProviderLeaseTable`.
+The host's only unsafe provider code is a thin callback adapter that converts
+the native function table into that table; it does not own counts or teardown
+policy. `darwin-art-engine-sys` is the single POD/function-pointer ABI
+definition and centralizes construction/version checks for process config and
+results.
+
+Native build ownership follows the same boundary. `art-bootstrap` persists a
+dependency fingerprint and compiler command per native object, while
+`darwin-art-xtask` promotes those records to per-object Ninja edges after a
+cold bootstrap. C++/ObjC++ remains responsible for ART/JNI/HWUI/Metal ABI
+operations, but Rust owns the lifetime and the graph that decides when each
+native artifact is rebuilt.
+
 ### Virtual Android DSOs
 
 Normal NDK libraries import Bionic and Android libraries rather than issuing a
