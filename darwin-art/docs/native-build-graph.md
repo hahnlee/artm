@@ -42,3 +42,9 @@ separately cached object. The ART orchestration object therefore only changes
 when the process lifecycle or JNI/HWUI implementation changes; adding a new
 fixture selector recompiles the options object and relinks the probe instead of
 recompiling the full ART TU.
+
+Shutdown/finalizer ordering is similarly isolated in
+`probes/runtime_shutdown_probe.cc`. It consumes a value snapshot of the
+process acceptance state, performs the owner-thread ART/DSO teardown, and is a
+separate cached object; the main probe only exports the ABI wrapper and builds
+that snapshot.

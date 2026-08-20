@@ -317,6 +317,19 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         &probe_cache,
         &compiler_identity,
     )?;
+    let shutdown_probe_object = build_dir.join("darwin_art_runtime_shutdown_probe.cc.o");
+    let mut shutdown_probe_command = runtime_cpp_command(&include_refs);
+    shutdown_probe_command
+        .arg("-c")
+        .arg(root.join("probes/runtime_shutdown_probe.cc"))
+        .arg("-o")
+        .arg(&shutdown_probe_object);
+    let _ = compile_cached_probe_tu(
+        &mut shutdown_probe_command,
+        &shutdown_probe_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let frame_probe_object = build_dir.join("darwin_art_runtime_frame_probe.cc.o");
     let mut frame_probe_command = runtime_cpp_command(&include_refs);
     frame_probe_command
@@ -486,6 +499,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(&abi_probe_object)
         .arg(&process_state_object)
         .arg(&process_options_object)
+        .arg(&shutdown_probe_object)
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
         .arg(&filesystem_object)

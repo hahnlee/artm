@@ -239,7 +239,8 @@ selection is isolated in `probes/runtime_process_options.cc`, while
 `runtime_link_probe.cc` consumes the immutable result and remains the ART
 orchestration boundary. Its object is cached independently, so changing a
 fixture selector does not recompile the full ART translation unit. The next
-split is the shutdown/finalizer boundary, followed by graphics/input phase
+split is now the shutdown/finalizer boundary in
+`probes/runtime_shutdown_probe.cc`, followed by graphics/input phase
 ownership; neither is allowed to introduce a second lifecycle machine.
 
 ### Virtual Android DSOs

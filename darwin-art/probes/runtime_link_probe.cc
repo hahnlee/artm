@@ -46,6 +46,7 @@
 #include "runtime_abi_probe.h"
 #include "runtime_process_state.h"
 #include "runtime_process_options.h"
+#include "runtime_shutdown_probe.h"
 #include "runtime_frame_probe.h"
 #include "runtime_graphics_probe.h"
 #include "darwin_icu_natives.h"
@@ -1587,115 +1588,16 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
 }
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
-  darwin_art_process::ShutdownSnapshot shutdown{};
-  switch (darwin_art_process::begin_shutdown(&shutdown)) {
-    case darwin_art_process::ShutdownBeginResult::kAlreadyComplete:
-      return DARWIN_ART_STATUS_SHUTDOWN_ALREADY_COMPLETED;
-    case darwin_art_process::ShutdownBeginResult::kFailed:
-      return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
-    case darwin_art_process::ShutdownBeginResult::kNotReady:
-      return DARWIN_ART_STATUS_SHUTDOWN_NOT_READY;
-    case darwin_art_process::ShutdownBeginResult::kWrongThread:
-      return DARWIN_ART_STATUS_SHUTDOWN_WRONG_THREAD;
-    case darwin_art_process::ShutdownBeginResult::kReady:
-      break;
-  }
-  JavaVM* java_vm = shutdown.java_vm;
-  art::Thread* art_thread = shutdown.art_thread;
-  const bool resource_runtime_installed = shutdown.resource_runtime_installed;
-
-  CHECK(java_vm != nullptr);
-  if (art_thread != nullptr) {
-    CHECK_EQ(art_thread->GetState(), art::ThreadState::kNative);
-    {
-      art::ScopedObjectAccess soa(art_thread);
-      if (art_thread->IsExceptionPending()) {
-        std::cerr << "ART Darwin shutdown: clearing pending exception: "
-                  << art_thread->GetException()->Dump() << "\n";
-        art_thread->ClearException();
-      }
-      darwin_art_graphics::shutdown(art_thread->GetJniEnv());
-      if (art_thread->IsExceptionPending()) {
-        std::cerr << "ART Darwin shutdown: global reference cleanup threw: "
-                  << art_thread->GetException()->Dump() << "\n";
-        art_thread->ClearException();
-      }
-      if (!darwin_art::ShutdownLibcoreNatives()) {
-        std::cerr << "ART Darwin shutdown: libcore host state restore failed\n";
-        darwin_art_process::mark_shutdown_failed();
-        return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
-      }
-      if (resource_runtime_installed &&
-          !darwin_art::ShutdownFrameworkResourceRuntime(
-              art_thread->GetJniEnv())) {
-        std::cerr << "ART Darwin shutdown: AndroidRuntime ownership uninstall failed\n";
-        darwin_art_process::mark_shutdown_failed();
-        return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
-      }
-    }
-    CHECK_EQ(art_thread->GetState(), art::ThreadState::kNative);
-  }
-
-  // DestroyJavaVM deletes Runtime::Current(). Registered DexFile pointers must
-  // remain valid through ClassLinker/Heap teardown, so release their owning
-  // storage only after this returns successfully. Do not touch art_thread after
-  // this call: its Thread object is owned by the destroyed Runtime.
-  const jint destroy_result = java_vm->DestroyJavaVM();
-  if (destroy_result != JNI_OK) {
-    darwin_art_process::mark_shutdown_failed();
-    return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
-  }
-  darwin_art_frame_probe::reset();
-  if (darwin_art::android_jni::TrampolineLiveCount() != 0) {
-    std::cerr << "ART Darwin shutdown: ELF JNI trampolines remain live\n";
-    darwin_art_process::mark_shutdown_failed();
-    return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
-  }
-  if (g_network_elf_loaded &&
-      (darwin_art_bionic_socket_broker_is_active() != 0 ||
-       darwin_art_bionic_socket_broker_live_objects() != 0 ||
-       darwin_art_bionic_dns_live_results_for_test() != 0 ||
-       darwin_art_bionic_dns_retired_results_for_test() != 0)) {
-    std::cerr << "ART Darwin shutdown: network owner did not quiesce\n";
-    darwin_art_process::mark_shutdown_failed();
-    return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
-  }
-  if (g_apk_elf_loaded) {
-    std::cout << "ART Android APK ELF: apk-sha256=" << g_apk_sha256
-              << " root-sha256=" << g_apk_root_sha256
-              << " graph=root+child+grandchild load=JavaVMExt+NativeBridge "
-                 "unload=shutdown-trampolines-zero\n"
-              << std::flush;
-  }
-  if (g_direct_apk_loaded) {
-    std::cout << "ART Android direct APK ELF: source=readonly-fd-slices "
-                 "copy=0 extract=0 alignment=16384 graph=root+child+grandchild "
-                 "load=JavaVMExt+NativeBridge JNI_OnLoad=0x00010006 "
-                 "unload=shutdown-trampolines-zero authority=isolated-process\n"
-              << std::flush;
-  }
-  if (darwin_art_elf_jni_fixture_registration_status() != 0 &&
-      darwin_art_elf_jni_fixture_lifecycle_status() != 1234567) {
-    std::cerr << "ART Darwin shutdown: ELF JNI graph finalizer order failed, status="
-              << darwin_art_elf_jni_fixture_lifecycle_status() << "\n";
-    darwin_art_process::mark_shutdown_failed();
-    return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
-  }
-  if (darwin_art_elf_jni_fixture_registration_status() != 0 &&
-      darwin_art_elf_jni_fixture_namespace_lifecycle_status() != 5) {
-    std::cerr << "ART Darwin shutdown: Bionic namespace teardown order failed, status="
-              << darwin_art_elf_jni_fixture_namespace_lifecycle_status() << "\n";
-    darwin_art_process::mark_shutdown_failed();
-    return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
-  }
-
-  darwin_art::ShutdownIcuCharsetNatives();
-  darwin_art::ShutdownFrameworkGraphicsRuntime();
-  if (g_provider_hooks_installed) {
-    darwin_art::providers::darwin_art_provider_clear_hooks();
+  darwin_art_process::ShutdownState state;
+  state.network_elf_loaded = g_network_elf_loaded;
+  state.apk_elf_loaded = g_apk_elf_loaded;
+  state.direct_apk_loaded = g_direct_apk_loaded;
+  state.provider_hooks_installed = g_provider_hooks_installed;
+  state.apk_sha256 = g_apk_sha256;
+  state.apk_root_sha256 = g_apk_root_sha256;
+  const int32_t status = darwin_art_process::run_shutdown(state);
+  if (status == 0) {
     g_provider_hooks_installed = false;
   }
-  darwin_art_process::clear_app_dex_files();
-  darwin_art_process::mark_shutdown_complete();
-  return 0;
+  return status;
 }
