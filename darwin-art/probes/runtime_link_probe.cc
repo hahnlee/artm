@@ -88,13 +88,6 @@ extern "C" void NativeLoaderFreeErrorMessage(char* message);
 
 static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
 
-static bool g_apk_elf_loaded = false;
-static std::string g_apk_sha256;
-static std::string g_apk_root_sha256;
-static bool g_direct_apk_loaded = false;
-static bool g_network_elf_loaded = false;
-
-static bool g_provider_hooks_installed = false;
 class ScopedJniLocalFrame final {
  public:
   explicit ScopedJniLocalFrame(JNIEnv* env)
@@ -248,7 +241,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     darwin_art::providers::darwin_art_provider_install_hooks(
         config->provider_context, config->provider_acquire,
         config->provider_release);
-    g_provider_hooks_installed = true;
+    darwin_art_process::record_provider_hooks_installed();
   }
   return [&]() -> int32_t {
 
@@ -395,7 +388,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                 << direct_error << "\n";
       return 46;
     }
-    g_direct_apk_loaded = true;
+    darwin_art_process::record_direct_apk_loaded();
   }
 
   if (run_elf_jni_fixture) {
@@ -1392,7 +1385,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                 << "\n";
       return 47;
     }
-    g_network_elf_loaded = true;
+    darwin_art_process::record_network_elf_loaded();
     BoundedLoopbackHttpServer server;
     if (!server.Start()) {
       std::cerr << "ART Android network loopback listener failed\n";
@@ -1501,9 +1494,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     // root. The successful JavaVMExt load above is therefore the APK execution
     // evidence; loading the same SONAME a second time would only exercise ART's
     // path cache and acquire no additional graph ownership.
-    g_apk_elf_loaded = true;
-    g_apk_sha256 = apk_sha256;
-    g_apk_root_sha256 = apk_root_sha256;
+    darwin_art_process::record_apk_elf_loaded(apk_sha256, apk_root_sha256);
     char *partial_error = nullptr;
     void *partial_handle =
         android::OpenNativeLibrary(env, 35, elf_fixture_path, app_loader_ref,
@@ -1589,15 +1580,16 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
   darwin_art_process::ShutdownState state;
-  state.network_elf_loaded = g_network_elf_loaded;
-  state.apk_elf_loaded = g_apk_elf_loaded;
-  state.direct_apk_loaded = g_direct_apk_loaded;
-  state.provider_hooks_installed = g_provider_hooks_installed;
-  state.apk_sha256 = g_apk_sha256;
-  state.apk_root_sha256 = g_apk_root_sha256;
+  const auto acceptance = darwin_art_process::acceptance_snapshot();
+  state.network_elf_loaded = acceptance.network_elf_loaded;
+  state.apk_elf_loaded = acceptance.apk_elf_loaded;
+  state.direct_apk_loaded = acceptance.direct_apk_loaded;
+  state.provider_hooks_installed = acceptance.provider_hooks_installed;
+  state.apk_sha256 = acceptance.apk_sha256;
+  state.apk_root_sha256 = acceptance.apk_root_sha256;
   const int32_t status = darwin_art_process::run_shutdown(state);
   if (status == 0) {
-    g_provider_hooks_installed = false;
+    darwin_art_process::clear_provider_hooks_state();
   }
   return status;
 }

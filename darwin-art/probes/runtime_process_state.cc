@@ -3,6 +3,7 @@
 #include <pthread.h>
 
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include "base/locks.h"
@@ -31,6 +32,7 @@ struct State {
   JavaVM* java_vm = nullptr;
   art::Thread* art_thread = nullptr;
   bool resource_runtime_installed = false;
+  AcceptanceSnapshot acceptance;
   std::vector<std::unique_ptr<const art::DexFile>> app_dex_files;
 };
 
@@ -133,6 +135,42 @@ void mark_shutdown_complete() {
   g_state.art_thread = nullptr;
   g_state.resource_runtime_installed = false;
   g_state.phase = Phase::kShutdownComplete;
+}
+
+void record_network_elf_loaded() {
+  std::lock_guard<std::mutex> lock(g_state.mutex);
+  CHECK(g_state.phase == Phase::kRunning);
+  g_state.acceptance.network_elf_loaded = true;
+}
+
+void record_apk_elf_loaded(std::string apk_sha256, std::string apk_root_sha256) {
+  std::lock_guard<std::mutex> lock(g_state.mutex);
+  CHECK(g_state.phase == Phase::kRunning);
+  g_state.acceptance.apk_elf_loaded = true;
+  g_state.acceptance.apk_sha256 = std::move(apk_sha256);
+  g_state.acceptance.apk_root_sha256 = std::move(apk_root_sha256);
+}
+
+void record_direct_apk_loaded() {
+  std::lock_guard<std::mutex> lock(g_state.mutex);
+  CHECK(g_state.phase == Phase::kRunning);
+  g_state.acceptance.direct_apk_loaded = true;
+}
+
+void record_provider_hooks_installed() {
+  std::lock_guard<std::mutex> lock(g_state.mutex);
+  CHECK(g_state.phase == Phase::kRunning);
+  g_state.acceptance.provider_hooks_installed = true;
+}
+
+void clear_provider_hooks_state() {
+  std::lock_guard<std::mutex> lock(g_state.mutex);
+  g_state.acceptance.provider_hooks_installed = false;
+}
+
+AcceptanceSnapshot acceptance_snapshot() {
+  std::lock_guard<std::mutex> lock(g_state.mutex);
+  return g_state.acceptance;
 }
 
 ScopedRunBoundary::~ScopedRunBoundary() {
