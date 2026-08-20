@@ -234,6 +234,14 @@ cold bootstrap. C++/ObjC++ remains responsible for ART/JNI/HWUI/Metal ABI
 operations, but Rust owns the lifetime and the graph that decides when each
 native artifact is rebuilt.
 
+The first production probe split follows that rule: fixture/environment
+selection is isolated in `probes/runtime_process_options.cc`, while
+`runtime_link_probe.cc` consumes the immutable result and remains the ART
+orchestration boundary. Its object is cached independently, so changing a
+fixture selector does not recompile the full ART translation unit. The next
+split is the shutdown/finalizer boundary, followed by graphics/input phase
+ownership; neither is allowed to introduce a second lifecycle machine.
+
 ### Virtual Android DSOs
 
 Normal NDK libraries import Bionic and Android libraries rather than issuing a
