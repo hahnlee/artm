@@ -45,6 +45,7 @@
 #include "runtime_elf_probe.h"
 #include "runtime_abi_probe.h"
 #include "runtime_process_state.h"
+#include "runtime_frame_probe.h"
 #include "darwin_icu_natives.h"
 #include "darwin_libcore_natives.h"
 #include "darwin_openjdk_natives.h"
@@ -103,8 +104,6 @@ extern "C" void NativeLoaderFreeErrorMessage(char* message);
 
 static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
 
-static std::size_t g_frame_width = 0;
-static std::size_t g_frame_height = 0;
 static jclass g_probe_canvas_class = nullptr;
 static jobject g_interactive_root = nullptr;
 // Java-owned HWUI RenderNode retained across traversals. Recording through
@@ -138,8 +137,6 @@ static jfloat g_pending_pressed_x = 0.0f;
 static jfloat g_pending_pressed_y = 0.0f;
 static jint g_interactive_width = 0;
 static jint g_interactive_height = 0;
-static void* g_host_context = nullptr;
-static darwin_art_frame_callback_t g_frame_callback = nullptr;
 static DarwinArtSurface* g_gpu_surface = nullptr;
 static bool g_apk_elf_loaded = false;
 static std::string g_apk_sha256;
@@ -203,36 +200,6 @@ class ScopedJniLocalFrame final {
   bool pushed_;
 };
 
-static jboolean PresentFrame(JNIEnv* env, jclass, jint width, jint height,
-                             jintArray argb) {
-  if (width <= 0 || height <= 0 || width > 4096 || height > 4096 ||
-      argb == nullptr) {
-    return JNI_FALSE;
-  }
-  const std::size_t pixel_count =
-      static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-  if (env->GetArrayLength(argb) != static_cast<jsize>(pixel_count)) {
-    return JNI_FALSE;
-  }
-  std::vector<jint> pixels(pixel_count);
-  env->GetIntArrayRegion(argb, 0, static_cast<jsize>(pixel_count), pixels.data());
-  if (env->ExceptionCheck()) {
-    return JNI_FALSE;
-  }
-  const bool presented =
-      g_frame_callback == nullptr ||
-      g_frame_callback(g_host_context,
-                       reinterpret_cast<const std::uint32_t*>(pixels.data()),
-                       static_cast<std::uint32_t>(width),
-                       static_cast<std::uint32_t>(height),
-                       static_cast<std::size_t>(width) * sizeof(std::uint32_t)) != 0;
-  if (presented) {
-    g_frame_width = static_cast<std::size_t>(width);
-    g_frame_height = static_cast<std::size_t>(height);
-  }
-  return presented ? JNI_TRUE : JNI_FALSE;
-}
-
 #if defined(DARWIN_ART_REAL_GRAPHICS)
 // Production GPU frame path: View.draw() records into AOSP's Skia
 // RecordingCanvas, the resulting RenderNode is replayed directly into the
@@ -295,8 +262,7 @@ static jboolean ReplayGpuRenderNode(JNIEnv* env, jint width, jint height) {
   if (result != DARWIN_ART_SURFACE_OK) {
     return JNI_FALSE;
   }
-  g_frame_width = static_cast<std::size_t>(width);
-  g_frame_height = static_cast<std::size_t>(height);
+  darwin_art_frame_probe::record_dimensions(width, height);
   return JNI_TRUE;
 }
 
@@ -681,8 +647,7 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
               << "\n";
     return JNI_FALSE;
   }
-  g_frame_width = static_cast<std::size_t>(width);
-  g_frame_height = static_cast<std::size_t>(height);
+  darwin_art_frame_probe::record_dimensions(width, height);
   g_gpu_render_node_recorded = true;
   return JNI_TRUE;
 }
@@ -873,7 +838,8 @@ static jboolean PresentContent(JNIEnv* env, jclass, jobject view, jint width,
     release_render_target();
     return JNI_FALSE;
   }
-  const jboolean presented = PresentFrame(env, nullptr, width, height, pixels);
+  const jboolean presented =
+      darwin_art_frame_probe::present(env, width, height, pixels);
   release_render_target();
   return presented;
 }
@@ -1294,10 +1260,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   // concurrent callers.
   art::MemMap::Init();
 
-  g_host_context = config->host_context;
-  g_frame_callback = config->frame_callback;
-  g_frame_width = 0;
-  g_frame_height = 0;
+  darwin_art_frame_probe::configure(config->host_context, config->frame_callback);
 
   if (!darwin_art::InitializeFrameworkGraphicsRuntime()) {
     std::cerr << "ART Darwin graphics: runtime initialization failed\n";
@@ -2286,9 +2249,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                  ? JNI_FALSE
                  : env->CallBooleanMethod(probe_view, was_presented));
   if (view_presented != JNI_TRUE ||
-      g_frame_width !=
+      darwin_art_frame_probe::dimensions().width !=
           static_cast<std::size_t>(kApkFrameWidth * window_scale) ||
-      g_frame_height !=
+      darwin_art_frame_probe::dimensions().height !=
           static_cast<std::size_t>(kApkFrameHeight * window_scale) ||
       env->ExceptionCheck()) {
     std::cerr << "ART Android view: Activity content presentation failed\n";
@@ -2682,8 +2645,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   run_result->arraycopy_result = arraycopy_result.GetI();
   run_result->activity_probe_result = activity_result;
   run_result->lifecycle_result = lifecycle_result;
-  run_result->frame_width = static_cast<uint32_t>(g_frame_width);
-  run_result->frame_height = static_cast<uint32_t>(g_frame_height);
+  const auto frame_dimensions = darwin_art_frame_probe::dimensions();
+  run_result->frame_width = static_cast<uint32_t>(frame_dimensions.width);
+  run_result->frame_height = static_cast<uint32_t>(frame_dimensions.height);
   return 0;
   }();
 }
@@ -2777,8 +2741,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
     darwin_art_process::mark_shutdown_failed();
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
-  g_host_context = nullptr;
-  g_frame_callback = nullptr;
+  darwin_art_frame_probe::reset();
   if (darwin_art::android_jni::TrampolineLiveCount() != 0) {
     std::cerr << "ART Darwin shutdown: ELF JNI trampolines remain live\n";
     darwin_art_process::mark_shutdown_failed();
