@@ -352,6 +352,85 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             let mut frames_presented = 1_u64;
             let mut remaining = options.visible_seconds;
             let mut loop_error: Option<HostError> = None;
+            // Keep the synthetic input path on the same owner thread as ART
+            // and the Metal surface.  Each 16 ms pump is the host-side frame
+            // cadence: the pointer state is dispatched into Android, then
+            // View.draw()/HWUI presents the updated RenderNode directly to
+            // the CAMetalLayer drawable.  No CPU framebuffer is involved.
+            let test_pointer = std::env::var("DARWIN_ART_TEST_POINTER_CLICK")
+                .ok()
+                .and_then(|sample| {
+                    let (x, y) = sample.split_once(',')?;
+                    Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))
+                });
+            let test_hold_ms = std::env::var("DARWIN_ART_TEST_POINTER_HOLD_MS")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(0);
+            eprintln!("DARWIN_ART gpu test pointer={test_pointer:?} hold_ms={test_hold_ms}");
+
+            let dispatch_queued_events = || -> Result<u64, HostError> {
+                let mut dispatched = 0_u64;
+                let mut event = PointerEvent::default();
+                while unsafe { surface_next_pointer_event(surface, &mut event) } {
+                    let dispatch_status =
+                        unsafe { dispatch_pointer(event.action, event.x, event.y) };
+                    if dispatch_status != 0 {
+                        return Err(HostError::RuntimeFailed(dispatch_status));
+                    }
+                    dispatched += 1;
+                }
+                Ok(dispatched)
+            };
+
+            if let Some((x, y)) = test_pointer {
+                let dispatch_status = unsafe { dispatch_pointer(0, x, y) };
+                if dispatch_status != 0 {
+                    loop_error = Some(HostError::RuntimeFailed(dispatch_status));
+                } else {
+                    frames_presented += 1;
+                    let mut held_ms = 0_u64;
+                    while held_ms < test_hold_ms && loop_error.is_none() {
+                        let slice_ms = (test_hold_ms - held_ms).min(16);
+                        let pump_status =
+                            unsafe { surface_pump_events(surface, slice_ms as f64 / 1000.0) };
+                        if pump_status == 7 {
+                            break;
+                        }
+                        if pump_status != 0 {
+                            loop_error = Some(HostError::SurfaceFailed {
+                                operation: "gpu_test_pointer_pump",
+                                status: pump_status,
+                            });
+                            break;
+                        }
+                        match dispatch_queued_events() {
+                            Ok(dispatched) => frames_presented += dispatched,
+                            Err(error) => loop_error = Some(error),
+                        }
+                        if loop_error.is_none() {
+                            // ACTION_MOVE causes PresentContent to replay the
+                            // Android RenderNode while RippleDrawable's
+                            // pressed animation advances between pumps.
+                            let dispatch_status = unsafe { dispatch_pointer(2, x, y) };
+                            if dispatch_status != 0 {
+                                loop_error = Some(HostError::RuntimeFailed(dispatch_status));
+                            } else {
+                                frames_presented += 1;
+                            }
+                        }
+                        held_ms += slice_ms;
+                    }
+                    if loop_error.is_none() {
+                        let dispatch_status = unsafe { dispatch_pointer(1, x, y) };
+                        if dispatch_status != 0 {
+                            loop_error = Some(HostError::RuntimeFailed(dispatch_status));
+                        } else {
+                            frames_presented += 1;
+                        }
+                    }
+                }
+            }
             while remaining > 0.0 {
                 let slice = remaining.min(0.016);
                 let pump_status = unsafe { surface_pump_events(surface, slice) };
@@ -365,15 +444,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     });
                     break;
                 }
-                let mut event = PointerEvent::default();
-                while unsafe { surface_next_pointer_event(surface, &mut event) } {
-                    let dispatch_status =
-                        unsafe { dispatch_pointer(event.action, event.x, event.y) };
-                    if dispatch_status != 0 {
-                        loop_error = Some(HostError::RuntimeFailed(dispatch_status));
-                        break;
-                    }
-                    frames_presented += 1;
+                match dispatch_queued_events() {
+                    Ok(dispatched) => frames_presented += dispatched,
+                    Err(error) => loop_error = Some(error),
                 }
                 if loop_error.is_some() {
                     break;
