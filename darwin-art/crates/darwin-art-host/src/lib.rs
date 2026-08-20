@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::error::Error;
 use std::ffi::{CString, c_void};
 use std::fmt;
@@ -7,7 +6,6 @@ use std::mem::size_of;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
-use std::rc::Rc;
 
 mod session;
 
@@ -17,10 +15,7 @@ use darwin_art_engine::EngineSession;
 pub use darwin_art_abi::ABI_VERSION;
 pub use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProcessResult};
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
-use session::{
-    ProviderBridge, SharedProcessShutdown, SharedSurfaceCleanup, SurfaceCleanupGuard,
-    engine_symbols, shutdown_process_once,
-};
+use session::{ProviderBridge, SurfaceCleanupGuard, engine_symbols};
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
@@ -232,9 +227,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         runtime
             .start()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
-        let engine = Rc::new(RefCell::new(
-            EngineSession::open(&options.library).map_err(HostError::DynamicLoader)?,
-        ));
+        let mut engine = EngineSession::open(&options.library).map_err(HostError::DynamicLoader)?;
         let symbols = engine_symbols(&engine);
         let provider_bridge = Box::new(ProviderBridge::new(symbols));
         let provider_context = provider_bridge.context();
@@ -242,7 +235,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // is transferred into RuntimeSession below; the callbacks are static
         // and use only that stable context pointer.
         unsafe {
-            engine.borrow().install_provider_hooks(
+            engine.install_provider_hooks(
                 provider_context,
                 Some(ProviderBridge::acquire_callback()),
                 Some(ProviderBridge::release_callback()),
@@ -290,8 +283,6 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             abi_version: ABI_VERSION,
             ..ProcessResult::default()
         };
-        let process_shutdown: SharedProcessShutdown =
-            Rc::new(RefCell::new(Some(Rc::clone(&engine))));
         // SAFETY: config and result match ABI v1 and all pointed-to state stays
         // live for this synchronous call.
         let status = unsafe { run_process(&config, &mut process) };
@@ -300,45 +291,43 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             // A late run-stage failure may still have created ART. Ask the
             // process ABI to tear it down; NOT_READY means creation never
             // completed and is the only benign shutdown result here.
-            let shutdown_status = shutdown_process_once(&process_shutdown);
+            let shutdown_status = engine.shutdown_once();
             const SHUTDOWN_NOT_READY: i32 = 67;
             if shutdown_status != 0 && shutdown_status != SHUTDOWN_NOT_READY {
                 return Err(HostError::ShutdownFailed(shutdown_status));
             }
-            engine.borrow().clear_provider_hooks();
+            engine.clear_provider_hooks();
             return Err(HostError::RuntimeFailed(status));
         }
-        let provider_pointer = provider_context.cast::<ProviderBridge>();
-        let provider_engine = Rc::clone(&engine);
         let provider_lease = runtime
-            .install_owned_subsystem(Subsystem::ElfNamespace, provider_bridge, move || {
-                // The engine shutdown lease is installed after this provider
-                // lease, so it runs first and drains all provider callbacks.
-                let bridge = unsafe { &*provider_pointer };
-                let clear_result = bridge.clear();
-                drop(provider_engine);
-                clear_result.map_err(|_| RuntimeError::EngineFailure { status: -1 })
-            })
+            .install_owned_subsystem_with_resource_cleanup(
+                Subsystem::ElfNamespace,
+                provider_bridge,
+                move |bridge| {
+                    // The engine shutdown lease is installed after this
+                    // provider lease, so it runs first and drains all
+                    // provider callbacks.
+                    bridge
+                        .clear()
+                        .map_err(|_| RuntimeError::EngineFailure { status: -1 })
+                },
+            )
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
-        let engine_cleanup = Rc::clone(&process_shutdown);
-        let engine_lease =
-            match runtime.install_owned_subsystem(Subsystem::Engine, engine, move || {
-                let status = shutdown_process_once(&engine_cleanup);
+        let engine_lease = match runtime.install_owned_subsystem_with_resource_cleanup(
+            Subsystem::Engine,
+            engine,
+            |engine| {
+                let status = engine.shutdown_once();
                 if status == 0 {
                     Ok(())
                 } else {
                     Err(RuntimeError::EngineFailure { status })
                 }
-            }) {
-                Ok(lease) => lease,
-                Err(error) => {
-                    let shutdown_status = shutdown_process_once(&process_shutdown);
-                    if shutdown_status != 0 {
-                        return Err(HostError::ShutdownFailed(shutdown_status));
-                    }
-                    return Err(HostError::RuntimeFailed(error.status() as i32));
-                }
-            };
+            },
+        ) {
+            Ok(lease) => lease,
+            Err(error) => return Err(HostError::RuntimeFailed(error.status() as i32)),
+        };
         if let Err(error) = runtime.mark_running() {
             runtime.fail(error);
             return Err(HostError::RuntimeFailed(error.status() as i32));
@@ -383,19 +372,19 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     },
                 });
             }
-            let surface_state: SharedSurfaceCleanup = Rc::new(RefCell::new(
-                SurfaceCleanupGuard::new(surface_destroy, surface),
-            ));
-            let surface_cleanup = Rc::clone(&surface_state);
             let surface_lease = runtime
-                .install_owned_subsystem(Subsystem::Surface, Rc::clone(&surface_state), move || {
-                    let status = surface_cleanup.borrow_mut().close();
-                    if status == 0 {
-                        Ok(())
-                    } else {
-                        Err(RuntimeError::EngineFailure { status })
-                    }
-                })
+                .install_owned_subsystem_with_resource_cleanup(
+                    Subsystem::Surface,
+                    SurfaceCleanupGuard::new(surface_destroy, surface),
+                    |surface| {
+                        let status = surface.close();
+                        if status == 0 {
+                            Ok(())
+                        } else {
+                            Err(RuntimeError::EngineFailure { status })
+                        }
+                    },
+                )
                 .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
             let mut frames_presented = 1_u64;
             let mut remaining = options.visible_seconds;
@@ -421,7 +410,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 let mut dispatched = 0_u64;
                 let mut event = PointerEvent::default();
                 while unsafe {
-                    surface_next_pointer_event(surface_state.borrow().handle(), &mut event)
+                    surface_next_pointer_event(owned_surface_handle(&runtime), &mut event)
                 } {
                     let dispatch_status =
                         unsafe { dispatch_pointer(event.action, event.x, event.y) };
@@ -444,7 +433,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                         let slice_ms = (test_hold_ms - held_ms).min(16);
                         let pump_status = unsafe {
                             surface_pump_events(
-                                surface_state.borrow().handle(),
+                                owned_surface_handle(&runtime),
                                 slice_ms as f64 / 1000.0,
                             )
                         };
@@ -493,7 +482,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             while remaining > 0.0 {
                 let slice = remaining.min(0.016);
                 let pump_status =
-                    unsafe { surface_pump_events(surface_state.borrow().handle(), slice) };
+                    unsafe { surface_pump_events(owned_surface_handle(&runtime), slice) };
                 if pump_status == 7 {
                     break;
                 }
@@ -612,20 +601,20 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     status: create_status,
                 });
             }
-            let surface_state: SharedSurfaceCleanup = Rc::new(RefCell::new(
-                SurfaceCleanupGuard::new(surface_destroy, surface),
-            ));
-            let surface_cleanup = Rc::clone(&surface_state);
             surface_lease = Some(
                 runtime
-                    .install_subsystem_with_cleanup(Subsystem::Surface, move || {
-                        let status = surface_cleanup.borrow_mut().close();
-                        if status == 0 {
-                            Ok(())
-                        } else {
-                            Err(RuntimeError::EngineFailure { status })
-                        }
-                    })
+                    .install_owned_subsystem_with_resource_cleanup(
+                        Subsystem::Surface,
+                        SurfaceCleanupGuard::new(surface_destroy, surface),
+                        |surface| {
+                            let status = surface.close();
+                            if status == 0 {
+                                Ok(())
+                            } else {
+                                Err(RuntimeError::EngineFailure { status })
+                            }
+                        },
+                    )
                     .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?,
             );
 
@@ -649,14 +638,13 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     // synchronous main-thread upload.
                     let update_status = unsafe {
                         surface_update(
-                            surface_state.borrow().handle(),
+                            owned_surface_handle(&runtime),
                             frame.argb_pixels.as_ptr().cast(),
                             frame.width as usize * size_of::<u32>(),
                         )
                     };
                     surface_status("update", update_status, false)?;
-                    let present_status =
-                        unsafe { surface_present(surface_state.borrow().handle()) };
+                    let present_status = unsafe { surface_present(owned_surface_handle(&runtime)) };
                     surface_status("present", present_status, false)
                 };
                 // SAFETY: surface is live; the packed Rust frame remains live
@@ -725,7 +713,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                             let slice_ms = (hold_ms - held).min(16);
                             let pump_status = unsafe {
                                 surface_pump_events(
-                                    surface_state.borrow().handle(),
+                                    owned_surface_handle(&runtime),
                                     slice_ms as f64 / 1000.0,
                                 )
                             };
@@ -766,14 +754,14 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 while remaining > 0.0 {
                     let slice = remaining.min(0.016);
                     let pump_status =
-                        unsafe { surface_pump_events(surface_state.borrow().handle(), slice) };
+                        unsafe { surface_pump_events(owned_surface_handle(&runtime), slice) };
                     if pump_status == 7 {
                         break;
                     }
                     surface_status("pump_events", pump_status, false)?;
                     let mut event = PointerEvent::default();
                     while unsafe {
-                        surface_next_pointer_event(surface_state.borrow().handle(), &mut event)
+                        surface_next_pointer_event(owned_surface_handle(&runtime), &mut event)
                     } {
                         let dispatch_status =
                             unsafe { dispatch_pointer(event.action, event.x, event.y) };
@@ -857,6 +845,12 @@ fn surface_status(
     } else {
         Err(HostError::SurfaceFailed { operation, status })
     }
+}
+
+fn owned_surface_handle(runtime: &RuntimeSession) -> *mut c_void {
+    runtime
+        .owned_resource::<SurfaceCleanupGuard>(Subsystem::Surface)
+        .map_or(std::ptr::null_mut(), SurfaceCleanupGuard::handle)
 }
 
 fn path_c_string(path: &Path) -> Result<CString, HostError> {

@@ -79,6 +79,11 @@ struct OwnedSubsystemResource<T, F> {
     cleanup: Option<F>,
 }
 
+struct OwnedSubsystemResourceWithCleanup<T, F> {
+    resource: Option<T>,
+    cleanup: Option<F>,
+}
+
 impl<T, F> OwnedSubsystem for OwnedSubsystemResource<T, F>
 where
     T: Any,
@@ -94,6 +99,30 @@ where
         self.cleanup
             .take()
             .expect("owned subsystem cleanup must run once")()
+    }
+}
+
+impl<T, F> OwnedSubsystem for OwnedSubsystemResourceWithCleanup<T, F>
+where
+    T: Any,
+    F: FnOnce(&mut T) -> Result<(), RuntimeError> + 'static,
+{
+    fn resource_any(&self) -> &dyn Any {
+        self.resource
+            .as_ref()
+            .expect("owned subsystem resource must remain live")
+    }
+
+    fn cleanup(&mut self) -> Result<(), RuntimeError> {
+        let cleanup = self
+            .cleanup
+            .take()
+            .expect("owned subsystem cleanup must run once");
+        cleanup(
+            self.resource
+                .as_mut()
+                .expect("owned subsystem resource must remain live"),
+        )
     }
 }
 
@@ -216,6 +245,50 @@ impl RuntimeSession {
         self.owned_resources.insert(
             subsystem,
             Box::new(OwnedSubsystemResource {
+                resource: Some(resource),
+                cleanup: Some(cleanup),
+            }),
+        );
+        self.install_order.push(subsystem);
+        Ok(SubsystemLease {
+            subsystem,
+            generation,
+        })
+    }
+
+    /// Installs a concrete resource whose cleanup receives the same owned
+    /// value. This is the preferred form for native handles: the shutdown
+    /// callback cannot accidentally capture a second `Rc<RefCell<T>>` alias,
+    /// and the resource remains alive until cleanup returns.
+    pub fn install_owned_subsystem_with_resource_cleanup<T, F>(
+        &mut self,
+        subsystem: Subsystem,
+        resource: T,
+        cleanup: F,
+    ) -> Result<SubsystemLease, RuntimeError>
+    where
+        T: 'static,
+        F: FnOnce(&mut T) -> Result<(), RuntimeError> + 'static,
+    {
+        self.assert_owner()?;
+        if !matches!(
+            self.phase,
+            RuntimePhase::Bootstrapping | RuntimePhase::Running
+        ) {
+            return Err(RuntimeError::InvalidTransition {
+                from: self.phase,
+                to: self.phase,
+            });
+        }
+        if self.subsystems.contains_key(&subsystem) {
+            return Err(RuntimeError::SubsystemNotActive { subsystem });
+        }
+        let generation = self.next_generation;
+        self.next_generation = self.next_generation.saturating_add(1);
+        self.subsystems.insert(subsystem, generation);
+        self.owned_resources.insert(
+            subsystem,
+            Box::new(OwnedSubsystemResourceWithCleanup {
                 resource: Some(resource),
                 cleanup: Some(cleanup),
             }),

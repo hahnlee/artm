@@ -5,26 +5,15 @@
 //! `RuntimeSession`: the one-shot ART process shutdown callback and the native
 //! surface handle.
 
-use std::cell::RefCell;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::rc::Rc;
 use std::sync::Mutex;
 
 use darwin_art_engine::{EngineSession, EngineSymbols};
 use darwin_art_engine_sys::SurfaceDestroyFn;
 
-pub(super) type SharedProcessShutdown = Rc<RefCell<Option<Rc<RefCell<EngineSession>>>>>;
-
-pub(super) fn shutdown_process_once(shutdown: &SharedProcessShutdown) -> i32 {
-    let Some(engine) = shutdown.borrow_mut().take() else {
-        return 0;
-    };
-    engine.borrow_mut().shutdown_once()
-}
-
-pub(super) fn engine_symbols(engine: &Rc<RefCell<EngineSession>>) -> EngineSymbols {
-    engine.borrow().symbols()
+pub(super) fn engine_symbols(engine: &EngineSession) -> EngineSymbols {
+    engine.symbols()
 }
 
 /// Rust-owned provider activation state. The native provider implementations
@@ -140,8 +129,6 @@ pub(super) struct SurfaceCleanupGuard {
     surface: *mut c_void,
     armed: bool,
 }
-
-pub(super) type SharedSurfaceCleanup = Rc<RefCell<SurfaceCleanupGuard>>;
 
 impl SurfaceCleanupGuard {
     pub(super) fn new(destroy: SurfaceDestroyFn, surface: *mut c_void) -> Self {

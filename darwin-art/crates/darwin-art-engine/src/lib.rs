@@ -141,6 +141,15 @@ mod platform {
         }
     }
 
+    impl Drop for EngineSession {
+        fn drop(&mut self) {
+            // A failed ownership transfer must not leave ART resident. Normal
+            // RuntimeSession teardown marks this callback consumed first, so
+            // Drop is idempotent in the successful path.
+            let _ = self.shutdown_once();
+        }
+    }
+
     struct DynamicLibrary(*mut c_void);
 
     impl DynamicLibrary {
