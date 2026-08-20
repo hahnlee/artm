@@ -11,6 +11,7 @@ extern "C" {
 // Opaque owner of one persistent NSWindow, CAMetalLayer, IOSurface, and Metal
 // texture. All API calls currently require the macOS main thread.
 typedef struct DarwinArtSurface DarwinArtSurface;
+typedef struct DarwinArtGpuFrame DarwinArtGpuFrame;
 
 typedef enum DarwinArtSurfaceResult {
   DARWIN_ART_SURFACE_OK = 0,
@@ -87,6 +88,18 @@ DarwinArtSurfaceResult darwin_art_surface_update(
 // of the persistent CAMetalLayer and schedules it for presentation.
 DarwinArtSurfaceResult darwin_art_surface_present(
     DarwinArtSurface* surface);
+
+// GPU-only frame path. The returned frame wraps the CAMetalLayer drawable
+// directly; callers must submit it with darwin_art_surface_gpu_end(). No
+// IOSurface mapping or CPU pixel buffer is involved.
+DarwinArtGpuFrame* darwin_art_surface_gpu_begin(DarwinArtSurface* surface);
+void* darwin_art_surface_gpu_canvas(DarwinArtGpuFrame* frame);
+DarwinArtSurfaceResult darwin_art_surface_gpu_end(
+    DarwinArtSurface* surface, DarwinArtGpuFrame* frame);
+
+// Runtime-owned GPU surface hand-off used by the in-process Android renderer.
+DarwinArtSurface* darwin_art_surface_active_gpu(void);
+void darwin_art_surface_set_active_gpu(DarwinArtSurface* surface);
 
 // Runs the NSApplication event pump in slices no longer than 16 ms. seconds
 // must be finite and in the inclusive range 0..30. A zero duration performs

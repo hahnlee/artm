@@ -1,20 +1,17 @@
 #ifndef DARWIN_ART_COMPAT_HWUI_GPU_MODE_H_
 #define DARWIN_ART_COMPAT_HWUI_GPU_MODE_H_
 
-#include <cstdlib>
-#include <cstring>
-
 namespace darwin_art {
 
-// GPU mode is intentionally opt-in.  The compile-time define keeps the
-// upstream host build unchanged, while the environment switch makes the
-// mode selectable by the Darwin launcher without pretending that Android
-// system properties exist on macOS.
+// GPU mode is the Darwin production path.  A CPU build is available only for
+// source/registrar diagnostics; an application launcher must not silently
+// downgrade when Metal is unavailable.
 inline bool hwui_gpu_enabled() {
 #if defined(DARWIN_ART_HWUI_GPU)
-    const char* value = std::getenv("DARWIN_ART_HWUI_GPU");
-    return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0 &&
-            std::strcmp(value, "false") != 0 && std::strcmp(value, "off") != 0;
+    // Production graphics is intentionally GPU-only.  CPU rendering is a
+    // separate registrar/layout diagnostic build and is never selected by an
+    // application environment variable.
+    return true;
 #else
     return false;
 #endif

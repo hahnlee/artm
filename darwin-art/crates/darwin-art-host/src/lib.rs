@@ -153,6 +153,7 @@ struct PointerEvent {
 }
 type SurfaceNextPointerEventFn = unsafe extern "C" fn(*mut c_void, *mut PointerEvent) -> bool;
 type SurfaceDestroyFn = unsafe extern "C" fn(*mut c_void) -> i32;
+type SurfaceActiveFn = unsafe extern "C" fn() -> *mut c_void;
 type DispatchPointerFn = unsafe extern "C" fn(u32, f32, f32) -> i32;
 
 struct FrameHost {
@@ -291,6 +292,8 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             unsafe { library.symbol(b"darwin_art_surface_next_pointer_event\0")? };
         let surface_destroy: SurfaceDestroyFn =
             unsafe { library.symbol(b"darwin_art_surface_destroy\0")? };
+        let surface_active: SurfaceActiveFn =
+            unsafe { library.symbol(b"darwin_art_surface_active_gpu\0")? };
         let dispatch_pointer: DispatchPointerFn =
             unsafe { library.symbol(b"darwin_art_dispatch_pointer\0")? };
 
@@ -334,6 +337,68 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 return Err(HostError::ShutdownFailed(shutdown_status));
             }
             return Err(HostError::RuntimeFailed(status));
+        }
+        // Darwin's application renderer is GPU-only.  The CPU surface path is
+        // retained for diagnostics, never selected by the normal host.
+        let gpu_mode = true;
+        if gpu_mode {
+            let surface = unsafe { surface_active() };
+            if surface.is_null() {
+                return Err(HostError::SurfaceFailed {
+                    operation: "gpu_active_surface",
+                    status: -1,
+                });
+            }
+            let mut frames_presented = 1_u64;
+            let mut remaining = options.visible_seconds;
+            let mut loop_error: Option<HostError> = None;
+            while remaining > 0.0 {
+                let slice = remaining.min(0.016);
+                let pump_status = unsafe { surface_pump_events(surface, slice) };
+                if pump_status == 7 {
+                    break;
+                }
+                if pump_status != 0 {
+                    loop_error = Some(HostError::SurfaceFailed {
+                        operation: "gpu_pump_events",
+                        status: pump_status,
+                    });
+                    break;
+                }
+                let mut event = PointerEvent::default();
+                while unsafe { surface_next_pointer_event(surface, &mut event) } {
+                    let dispatch_status =
+                        unsafe { dispatch_pointer(event.action, event.x, event.y) };
+                    if dispatch_status != 0 {
+                        loop_error = Some(HostError::RuntimeFailed(dispatch_status));
+                        break;
+                    }
+                    frames_presented += 1;
+                }
+                if loop_error.is_some() {
+                    break;
+                }
+                remaining -= slice;
+            }
+            let destroy_status = unsafe { surface_destroy(surface) };
+            let shutdown_status = unsafe { shutdown_process() };
+            if let Some(error) = loop_error {
+                return Err(error);
+            }
+            if destroy_status != 0 {
+                return Err(HostError::SurfaceFailed {
+                    operation: "gpu_destroy",
+                    status: destroy_status,
+                });
+            }
+            if shutdown_status != 0 {
+                return Err(HostError::ShutdownFailed(shutdown_status));
+            }
+            return Ok(HostOutcome {
+                process,
+                frames_presented,
+                last_frame: None,
+            });
         }
         // ART invokes the callback while its mutator lock is held. Present only
         // after returning from ART so AppKit's event loop never blocks a runnable

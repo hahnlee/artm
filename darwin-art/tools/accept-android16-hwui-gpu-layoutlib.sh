@@ -9,8 +9,7 @@ root="$(cd "$script_dir/.." && pwd)"
 # CPU-forcing hook is no longer active in GPU mode.  It does not claim that a
 # Metal drawable was presented; that is covered by the HWUI Metal replay gate.
 output="$(
-  DARWIN_ART_HWUI_GPU=1 \
-    "$root/tools/build-android16-android-graphics-jni.sh" --registrar-only
+  "$root/tools/build-android16-android-graphics-jni.sh" --registrar-only
 )"
 [[ "$output" == *"gpu-mode=1"* ]] || {
   echo "android16-hwui-gpu-layoutlib: registrar was not built in GPU mode" >&2
@@ -18,8 +17,7 @@ output="$(
   exit 2
 }
 fallback_output="$(
-  env -u DARWIN_ART_HWUI_GPU \
-    "$root/tools/build-android16-android-graphics-jni.sh" --registrar-only
+  "$root/tools/build-android16-android-graphics-jni.sh" --registrar-only-cpu
 )"
 [[ "$fallback_output" == *"gpu-mode=0"* ]] || {
   echo "android16-hwui-gpu-layoutlib: CPU fallback registrar changed unexpectedly" >&2

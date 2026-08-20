@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <vector>
 
 #include <nativehelper/JNIHelp.h>
@@ -26,6 +27,7 @@
 
 namespace darwin_art::libcore_darwin {
 namespace {
+
 
 constexpr int kLinuxMapShared = 0x01;
 constexpr int kLinuxMapPrivate = 0x02;
@@ -719,6 +721,36 @@ int Open(const char* path, int linux_flags, mode_t mode) {
   if (!os_constants::DarwinOpenFlagsFromAndroid(linux_flags, &flags)) {
     errno = ENOTSUP;
     return -1;
+  }
+  // The graphics acceptance owns a sealed Android system-root fixture. Keep
+  // this explicit test authority separate from normal host-path handling;
+  // production callers never set it and therefore cannot inherit a host
+  // fallback for arbitrary guest paths.
+  const char* test_root = std::getenv("DARWIN_ART_ANDROID_SYSTEM_ROOT");
+  if (test_root != nullptr && path != nullptr &&
+      std::strncmp(path, "/system/", 8) == 0) {
+    // This is a probe-only sealed-root authority.  Reject traversal rather
+    // than turning the explicit fixture root into a general host fallback.
+    const char* relative = path + 8;
+    if (*relative == '\0' || std::strstr(relative, "/../") != nullptr ||
+        std::strncmp(relative, "../", 3) == 0 ||
+        (std::strlen(relative) >= 3 &&
+         std::strcmp(relative + std::strlen(relative) - 3, "/..") == 0) ||
+        std::strcmp(relative, ".") == 0 || std::strstr(relative, "/./") != nullptr ||
+        std::strncmp(relative, "./", 2) == 0 ||
+        (std::strlen(relative) >= 2 &&
+         std::strcmp(relative + std::strlen(relative) - 2, "/.") == 0)) {
+      errno = EINVAL;
+      return -1;
+    }
+    std::string redirected(test_root);
+    redirected.push_back('/');
+    redirected.append(relative);
+    int result;
+    do {
+      result = open(redirected.c_str(), flags, mode);
+    } while (result == -1 && errno == EINTR);
+    return result;
   }
   int result;
   do {

@@ -3,6 +3,15 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 
+#include "include/core/SkSurface.h"
+#include "include/core/SkColorSpace.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
+#include "include/gpu/ganesh/SkSurfaceGanesh.h"
+#include "include/gpu/ganesh/mtl/GrMtlBackendContext.h"
+#include "include/gpu/ganesh/mtl/GrMtlBackendSurface.h"
+#include "include/gpu/ganesh/mtl/GrMtlDirectContext.h"
+
 #include "darwin_surface_bridge.h"
 
 #include <algorithm>
@@ -153,6 +162,7 @@ struct DarwinArtSurface {
   id<MTLDevice> device = nil;
   id<MTLCommandQueue> command_queue = nil;
   id<MTLTexture> io_surface_texture = nil;
+  sk_sp<GrDirectContext> skia_context;
   id<MTLCommandBuffer> last_command_buffer = nil;
   NSWindow* window = nil;
   DarwinArtMetalView* view = nil;
@@ -176,6 +186,13 @@ struct DarwinArtSurface {
     }
   }
 };
+
+struct DarwinArtGpuFrame {
+  sk_sp<SkSurface> surface;
+  id<CAMetalDrawable> drawable = nil;
+};
+
+DarwinArtSurface* g_active_gpu_surface = nullptr;
 
 DarwinArtSurfaceResult darwin_art_surface_map_producer(
     DarwinArtSurface* surface,
@@ -462,6 +479,85 @@ DarwinArtSurfaceResult darwin_art_surface_present(
   return DARWIN_ART_SURFACE_OK;
 }
 
+DarwinArtGpuFrame* darwin_art_surface_gpu_begin(DarwinArtSurface* surface) {
+  if (!IsMainThread() || surface == nullptr || surface->producer_mapped) {
+    return nullptr;
+  }
+  @autoreleasepool {
+    if (surface->skia_context == nullptr) {
+      GrMtlBackendContext backend = {};
+      backend.fDevice.retain((__bridge GrMTLHandle)surface->device);
+      backend.fQueue.retain((__bridge GrMTLHandle)surface->command_queue);
+      surface->skia_context = GrDirectContexts::MakeMetal(backend);
+    }
+    if (surface->skia_context == nullptr) {
+      return nullptr;
+    }
+    id<CAMetalDrawable> drawable = [surface->view.metalLayer nextDrawable];
+    if (drawable == nil || drawable.texture.width < surface->width ||
+        drawable.texture.height < surface->height) {
+      return nullptr;
+    }
+    GrMtlTextureInfo texture_info;
+    texture_info.fTexture.retain((__bridge GrMTLHandle)drawable.texture);
+    GrBackendRenderTarget target = GrBackendRenderTargets::MakeMtl(
+        surface->width, surface->height, texture_info);
+    sk_sp<SkSurface> sk_surface = SkSurfaces::WrapBackendRenderTarget(
+        surface->skia_context.get(), target, kTopLeft_GrSurfaceOrigin,
+        kBGRA_8888_SkColorType, nullptr, nullptr);
+    if (sk_surface == nullptr) {
+      return nullptr;
+    }
+    auto* frame = new (std::nothrow) DarwinArtGpuFrame();
+    if (frame == nullptr) {
+      return nullptr;
+    }
+    frame->surface = std::move(sk_surface);
+    frame->drawable = drawable;
+    return frame;
+  }
+}
+
+void* darwin_art_surface_gpu_canvas(DarwinArtGpuFrame* frame) {
+  return frame == nullptr || frame->surface == nullptr
+             ? nullptr
+             : static_cast<void*>(frame->surface->getCanvas());
+}
+
+DarwinArtSurfaceResult darwin_art_surface_gpu_end(
+    DarwinArtSurface* surface, DarwinArtGpuFrame* frame) {
+  if (!IsMainThread()) {
+    return DARWIN_ART_SURFACE_NOT_MAIN_THREAD;
+  }
+  if (surface == nullptr || frame == nullptr || frame->surface == nullptr ||
+      frame->drawable == nil) {
+    delete frame;
+    return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+  }
+  @autoreleasepool {
+    surface->skia_context->flushAndSubmit();
+    id<MTLCommandBuffer> command_buffer =
+        [surface->command_queue commandBuffer];
+    if (command_buffer == nil) {
+      delete frame;
+      return DARWIN_ART_SURFACE_GPU_SUBMISSION_FAILED;
+    }
+    [command_buffer presentDrawable:frame->drawable];
+    [command_buffer commit];
+    surface->last_command_buffer = command_buffer;
+  }
+  delete frame;
+  return DARWIN_ART_SURFACE_OK;
+}
+
+DarwinArtSurface* darwin_art_surface_active_gpu(void) {
+  return g_active_gpu_surface;
+}
+
+void darwin_art_surface_set_active_gpu(DarwinArtSurface* surface) {
+  g_active_gpu_surface = surface;
+}
+
 DarwinArtSurfaceResult darwin_art_surface_pump_events(
     DarwinArtSurface* surface,
     double seconds) {
@@ -521,6 +617,9 @@ DarwinArtSurfaceResult darwin_art_surface_destroy(
   }
   if (surface == nullptr) {
     return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+  }
+  if (g_active_gpu_surface == surface) {
+    g_active_gpu_surface = nullptr;
   }
   DarwinArtSurfaceResult unmap_result = DARWIN_ART_SURFACE_OK;
   if (surface->producer_mapped) {

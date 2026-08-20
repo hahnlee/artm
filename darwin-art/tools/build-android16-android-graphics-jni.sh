@@ -14,13 +14,16 @@ critical_patch="$project_root/patches/frameworks-base/0001-darwin-android-critic
 lazy_native_window_patch="$project_root/patches/frameworks-base/0002-darwin-lazy-native-window-jni.patch"
 hwui_gpu_patch="$project_root/patches/frameworks-base/0003-darwin-hwui-gpu-layoutlib.patch"
 mode=full
+cpu_diagnostic=0
 
 usage() {
-  echo "usage: $0 [--registrar-only | --object-audit]" >&2
+  echo "usage: $0 [--registrar-only | --object-audit | --cpu-diagnostic]" >&2
 }
 case "${1:-}" in
   --registrar-only) mode=registrar; shift ;;
+  --registrar-only-cpu) mode=registrar; cpu_diagnostic=1; shift ;;
   --object-audit) mode=objects; shift ;;
+  --cpu-diagnostic) cpu_diagnostic=1; shift ;;
   --help|-h) usage; exit 0 ;;
   "") ;;
   *) usage; exit 64 ;;
@@ -191,11 +194,10 @@ fi
 cp -R "$source_hwui" "$patched_hwui"
 patch -s -d "$patched_hwui" -p1 < "$critical_patch"
 patch -s -d "$patched_hwui" -p1 < "$lazy_native_window_patch"
-gpu_mode=0
-if [[ -n "${DARWIN_ART_HWUI_GPU:-}" &&
-      "${DARWIN_ART_HWUI_GPU:-}" != "0" &&
-      "${DARWIN_ART_HWUI_GPU:-}" != "false" &&
-      "${DARWIN_ART_HWUI_GPU:-}" != "off" ]]; then
+gpu_mode=1
+if [[ "$cpu_diagnostic" == 1 ]]; then
+  gpu_mode=0
+else
   [[ -f "$gpu_lock_file" ]] || {
     echo "android-graphics-jni: missing GPU lock: $gpu_lock_file" >&2
     exit 3

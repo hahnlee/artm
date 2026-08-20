@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <mach-o/dyld.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -29,9 +30,12 @@
 #include "cmdline_types.h"
 #include "darwin_art/darwin_art.h"
 #include "darwin_art_bionic_dns.h"
+#include "darwin_art_bionic_fs.h"
 #include "darwin_art_bionic_socket_broker.h"
 #include "darwin_android_jni_trampoline.h"
 #include "darwin_framework_natives.h"
+#include "darwin_hwui_gpu_mode.h"
+#include "darwin_surface_bridge.h"
 #include "darwin_icu_natives.h"
 #include "darwin_libcore_natives.h"
 #include "darwin_openjdk_natives.h"
@@ -48,6 +52,37 @@
 #include "scoped_thread_state_change-inl.h"
 #include "thread-current-inl.h"
 #include "well_known_classes.h"
+
+bool InstallProbeAndroidSystemRoot() {
+  const char* root = std::getenv("DARWIN_ART_ANDROID_SYSTEM_ROOT");
+  if (root == nullptr || root[0] == '\0') return true;
+  const int fd = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) {
+    std::cerr << "ART Android filesystem: cannot open test root " << root << "\n";
+    return false;
+  }
+  constexpr uint8_t kMount[] = {'/', 's', 'y', 's', 't', 'e', 'm'};
+  const auto status = darwin_art_bionic_fs_process_install(
+      fd, kMount, sizeof(kMount), kMount, sizeof(kMount));
+  close(fd);
+  std::cerr << "ART Android filesystem: test root status="
+            << static_cast<int>(status) << " root=" << root << "\n";
+  return status == DARWIN_ART_BIONIC_FS_PROCESS_OWNER_OK ||
+         status == DARWIN_ART_BIONIC_FS_PROCESS_OWNER_ALREADY_INSTALLED;
+}
+
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+#ifdef HIDDEN
+#undef HIDDEN
+#endif
+#include "hwui/Canvas.h"
+#define private public
+#include "RenderNode.h"
+#undef private
+#include "pipeline/skia/RenderNodeDrawable.h"
+#include "pipeline/skia/SkiaRecordingCanvas.h"
+#include "include/core/SkSurface.h"
+#endif
 
 #if defined(DARWIN_ART_DIRECT_APK_RUNTIME)
 #define main darwin_art_direct_apk_standalone_main
@@ -518,6 +553,7 @@ static jint g_interactive_width = 0;
 static jint g_interactive_height = 0;
 static void* g_host_context = nullptr;
 static darwin_art_frame_callback_t g_frame_callback = nullptr;
+static DarwinArtSurface* g_gpu_surface = nullptr;
 static bool g_apk_elf_loaded = false;
 static std::string g_apk_sha256;
 static std::string g_apk_root_sha256;
@@ -703,6 +739,150 @@ static jboolean PresentFrame(JNIEnv* env, jclass, jint width, jint height,
   return presented ? JNI_TRUE : JNI_FALSE;
 }
 
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+// Production GPU frame path: View.draw() records into AOSP's Skia
+// RecordingCanvas, the resulting RenderNode is replayed directly into the
+// CAMetalLayer drawable. No Bitmap, Java int[] or IOSurface CPU mapping is
+// created in this path.
+static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
+                                  jint height) {
+  if (!darwin_art::hwui_gpu_enabled()) {
+    return JNI_FALSE;
+  }
+  if (g_gpu_surface == nullptr) {
+    DarwinArtSurfaceCreateInfo info{
+        .width = static_cast<uint32_t>(width),
+        .height = static_cast<uint32_t>(height),
+        .title = "Darwin ART · HWUI Metal",
+        .visible = true,
+    };
+    DarwinArtSurfaceResult result = DARWIN_ART_SURFACE_OK;
+    g_gpu_surface = darwin_art_surface_create(&info, &result);
+    if (g_gpu_surface == nullptr) {
+      std::cerr << "ART HWUI GPU: surface initialization failed status="
+                << result << "\n";
+      return JNI_FALSE;
+    }
+    darwin_art_surface_set_active_gpu(g_gpu_surface);
+  }
+
+  std::unique_ptr<android::Canvas> recorder(
+      android::Canvas::create_recording_canvas(width, height));
+  if (recorder == nullptr) {
+    std::cerr << "ART HWUI GPU: RecordingCanvas initialization failed\n";
+    return JNI_FALSE;
+  }
+  jclass canvas_class = env->FindClass("android/graphics/Canvas");
+  jmethodID canvas_ctor = canvas_class == nullptr
+                              ? nullptr
+                              : env->GetMethodID(canvas_class, "<init>", "()V");
+  jfieldID native_canvas = canvas_class == nullptr
+                               ? nullptr
+                               : env->GetFieldID(canvas_class,
+                                                 "mNativeCanvasWrapper", "J");
+  jobject java_canvas = canvas_ctor == nullptr || native_canvas == nullptr
+                            ? nullptr
+                            : env->NewObject(canvas_class, canvas_ctor);
+  if (java_canvas == nullptr || env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(canvas_class);
+    std::cerr << "ART HWUI GPU: Canvas wrapper initialization failed\n";
+    return JNI_FALSE;
+  }
+  const jlong original_canvas = env->GetLongField(java_canvas, native_canvas);
+  env->SetLongField(java_canvas, native_canvas,
+                    reinterpret_cast<jlong>(recorder.get()));
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID draw = view_class == nullptr
+                       ? nullptr
+                       : env->GetMethodID(view_class, "draw",
+                                          "(Landroid/graphics/Canvas;)V");
+  jmethodID measure = view_class == nullptr
+                          ? nullptr
+                          : env->GetMethodID(view_class, "measure", "(II)V");
+  jmethodID layout = view_class == nullptr
+                         ? nullptr
+                         : env->GetMethodID(view_class, "layout", "(IIII)V");
+  if (draw == nullptr || measure == nullptr || layout == nullptr ||
+      env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->SetLongField(java_canvas, native_canvas, original_canvas);
+    env->DeleteLocalRef(view_class);
+    env->DeleteLocalRef(java_canvas);
+    env->DeleteLocalRef(canvas_class);
+    return JNI_FALSE;
+  }
+  // The standalone probe has no ViewRoot/ThreadedRenderer to perform the
+  // normal measure/layout pass. Give the real widget an exact portrait
+  // viewport before recording so Button/TextView emits its display list.
+  constexpr jint kMeasureExactly = 0x40000000;
+  const jint width_spec = kMeasureExactly | (width & 0x3fffffff);
+  const jint height_spec = kMeasureExactly | (height & 0x3fffffff);
+  env->CallVoidMethod(view, measure, width_spec, height_spec);
+  env->CallVoidMethod(view, layout, 0, 0, width, height);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->SetLongField(java_canvas, native_canvas, original_canvas);
+    env->DeleteLocalRef(view_class);
+    env->DeleteLocalRef(java_canvas);
+    env->DeleteLocalRef(canvas_class);
+    std::cerr << "ART HWUI GPU: View measure/layout failed\n";
+    return JNI_FALSE;
+  }
+  env->CallVoidMethod(view, draw, java_canvas);
+  // Restore the Canvas() raster wrapper so its NativeAllocationRegistry can
+  // safely finalize the object; the recording canvas remains C++ owned.
+  env->SetLongField(java_canvas, native_canvas, original_canvas);
+  const bool draw_ok = !env->ExceptionCheck();
+  env->DeleteLocalRef(view_class);
+  env->DeleteLocalRef(java_canvas);
+  env->DeleteLocalRef(canvas_class);
+  if (!draw_ok) {
+    std::cerr << "ART HWUI GPU: View.draw failed\n";
+    env->ExceptionClear();
+    return JNI_FALSE;
+  }
+
+  auto display_list =
+      static_cast<android::uirenderer::skiapipeline::SkiaRecordingCanvas*>(
+          recorder.get())->finishRecording();
+  if (display_list == nullptr || display_list->isEmpty()) {
+    std::cerr << "ART HWUI GPU: empty display list\n";
+    return JNI_FALSE;
+  }
+  android::sp<android::uirenderer::RenderNode> node =
+      new android::uirenderer::RenderNode();
+  node->mDisplayList = android::uirenderer::DisplayList(std::move(display_list));
+  node->mValid = true;
+  node->mProperties.setLeftTopRightBottom(0, 0, width, height);
+
+  DarwinArtGpuFrame* frame = darwin_art_surface_gpu_begin(g_gpu_surface);
+  if (frame == nullptr) {
+    std::cerr << "ART HWUI GPU: drawable begin failed\n";
+    return JNI_FALSE;
+  }
+  auto* canvas = static_cast<SkCanvas*>(darwin_art_surface_gpu_canvas(frame));
+  if (canvas == nullptr) {
+    darwin_art_surface_gpu_end(g_gpu_surface, frame);
+    std::cerr << "ART HWUI GPU: drawable canvas unavailable\n";
+    return JNI_FALSE;
+  }
+  android::uirenderer::skiapipeline::RenderNodeDrawable drawable(
+      node.get(), canvas, false);
+  drawable.forceDraw(canvas);
+  const DarwinArtSurfaceResult result =
+      darwin_art_surface_gpu_end(g_gpu_surface, frame);
+  if (result != DARWIN_ART_SURFACE_OK) {
+    std::cerr << "ART HWUI GPU: drawable submit failed status=" << result
+              << "\n";
+    return JNI_FALSE;
+  }
+  g_frame_width = static_cast<std::size_t>(width);
+  g_frame_height = static_cast<std::size_t>(height);
+  return JNI_TRUE;
+}
+#endif
+
 static jboolean PresentContent(JNIEnv* env, jclass, jobject view, jint width,
                                jint height) {
   if (view == nullptr || width <= 0 || height <= 0 || width > 4096 ||
@@ -714,6 +894,11 @@ static jboolean PresentContent(JNIEnv* env, jclass, jobject view, jint width,
   const bool use_real_graphics =
       graphics_backend ==
       darwin_art::FrameworkGraphicsBackend::kAndroidGraphics;
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+  if (darwin_art::hwui_gpu_enabled()) {
+    return PresentGpuContent(env, view, width, height);
+  }
+#endif
   jclass canvas_class = nullptr;
   jclass real_canvas_class = nullptr;
   jclass bitmap_class = nullptr;
@@ -1418,6 +1603,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? soa.AddLocalReference<jclass>(network_fixture_handle.Get())
           : nullptr;
   art::Runtime::Current()->StartMinimalForDarwinProbe(self->GetJniEnv());
+  if (!InstallProbeAndroidSystemRoot()) {
+    std::cerr << "ART Android filesystem: test system root install failed\n";
+    return 40;
+  }
   if (!darwin_art::RegisterLibcoreNatives(self->GetJniEnv())) {
     std::cerr << "ART Darwin libcore: native registration failed\n";
     return 17;
@@ -1953,15 +2142,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
               << self->GetException()->Dump() << "\n";
     return 28;
   }
-  jmethodID get_decor_view =
-      window_class == nullptr
-          ? nullptr
-          : env->GetMethodID(window_class, "getDecorView",
-                             "()Landroid/view/View;");
-  jobject attached_decor =
-      get_decor_view == nullptr
-          ? nullptr
-          : env->CallObjectMethod(window, get_decor_view);
+  // We just installed this exact DecorView in PhoneWindow.mDecor above.  The
+  // detached probe Window has no ViewRoot to lazily materialize a decor, so
+  // relying on PhoneWindow.getDecorView() here can legitimately return null.
+  // Keep the authoritative local object instead.
+  jobject attached_decor = decor_view;
   jmethodID get_child_at =
       content_root_class == nullptr
           ? nullptr
@@ -2009,9 +2194,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 33;
   }
   const jboolean decor_presented =
-      attached_decor == nullptr ||
-              !env->IsSameObject(attached_decor, decor_view) ||
-              env->ExceptionCheck()
+      attached_decor == nullptr || env->ExceptionCheck()
           ? JNI_FALSE
           : PresentContent(env, nullptr, attached_decor,
                            kApkFrameWidth * window_scale,

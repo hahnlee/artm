@@ -3378,6 +3378,8 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         root.join("_aosp/libnativehelper/platform_header_only_include"),
         root.join("_aosp/external/dlmalloc"),
         root.join("tools/bionic-dns-facade/include"),
+        root.join("tools/bionic-fs-facade/include"),
+        root.join("tools/bionic-ioctl-facade/include"),
         root.join("tools/bionic-socket-broker-adapter/include"),
         PathBuf::from("/opt/homebrew/include"),
     ];
@@ -3404,6 +3406,24 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
             .arg(root.join("compat"))
             .arg("-I")
             .arg(root.join("include"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/core"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/effects"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/base/libs/hwui"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
+            .arg("-I")
+            .arg(root.join("_aosp/system/logging/liblog/include"))
+            .arg("-I")
+            .arg(root.join("_aosp/system/core/libcutils/include"))
+            .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
+            .arg("-DSK_USER_CONFIG_HEADER=\"include/config/SkUserConfigManual.h\"")
             .arg("-o")
             .arg(&surface_object),
     )?;
@@ -3423,6 +3443,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&surface_object)
@@ -3755,6 +3776,8 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         root.join("_aosp/libnativehelper/platform_header_only_include"),
         root.join("_aosp/external/dlmalloc"),
         root.join("tools/bionic-dns-facade/include"),
+        root.join("tools/bionic-fs-facade/include"),
+        root.join("tools/bionic-ioctl-facade/include"),
         root.join("tools/bionic-socket-broker-adapter/include"),
         PathBuf::from("/opt/homebrew/include"),
     ];
@@ -3770,6 +3793,55 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
             .arg("-idirafter")
             .arg(ndk_include)
             .arg("-Wno-macro-redefined")
+            .arg("-DDARWIN_ART_REAL_GRAPHICS")
+            .arg("-DDARWIN_ART_HWUI_GPU")
+            .arg("-DDARWIN_ART_AOSP_COMPAT_LSEEK64")
+            .arg("-DLOG_TAG=\"DarwinArtHWUI\"")
+            .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
+            .arg("-include")
+            .arg("log/log_main.h")
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/core"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/effects"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/utils"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/private"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/android"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/codec"))
+            .arg("-I")
+            .arg(root.join("_aosp/system/logging/liblog/include"))
+            .arg("-I")
+            .arg(root.join("_aosp/system/core/libcutils/include"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/base/libs/hwui"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/base/libs/androidfw/include"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/native/libs/ui/include"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/native/libs/ui/include_types"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/minikin/include"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/googletest/googletest/include"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/harfbuzz_ng/src"))
+            .arg("-I")
+            .arg(root.join("_aosp/system/core/libutils/include"))
+            .arg("-I")
+            .arg(root.join("_aosp/system/incremental_delivery/incfs/util/include"))
+            .arg("-I")
+            .arg(root.join("_aosp/system/core/libsystem/include"))
             .arg("-c")
             .arg(root.join("probes/runtime_link_probe.cc"))
             .arg("-o")
@@ -3783,6 +3855,14 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
             .arg(root.join("compat"))
             .arg("-I")
             .arg(root.join("include"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia"))
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia/include/core"))
+            .arg("-I")
+            .arg(root.join("_aosp/system/logging/liblog/include"))
+            .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
+            .arg("-DSK_USER_CONFIG_HEADER=\"include/config/SkUserConfigManual.h\"")
             .arg("-o")
             .arg(&surface_object),
     )?;
@@ -3803,10 +3883,18 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
         .arg("-Wl,-dead_strip")
         .arg(format!("-Wl,-map,{}", link_map.display()))
         .arg(&object)
         .arg(&surface_object)
+        .arg(root.join("_build/skia-metal-gpu/libskia.a"))
+        .arg(root.join("_build/skia-metal-gpu/libskcms.a"))
+        // RenderNode/RecordingCanvas are the real HWUI display-list path. Keep
+        // these AOSP objects in the same GPU link so RenderNodeDrawable replay
+        // cannot silently fall back to the bitmap/CPU bridge.
+        .arg(root.join("_build/hwui-static-foundation/libhwui-static-darwin.a"))
+        .arg(root.join("_build/android-graphics-jni/libandroid-graphics-jni-darwin.a"))
         // This is the already-audited force/normal composition of all 32
         // graphics archives. Place its fixed definitions before ART's normal
         // archives so the latter extract only additional runtime providers.
@@ -3872,6 +3960,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         // dependency order; normal archive extraction prevents duplicates with
         // the already-composed graphics closure.
         .arg(root.join("_build/androidfw-foundation/libandroidfw-darwin.a"))
+        .arg(root.join("_build/ui-types-foundation/libui-types.a"))
         .arg(root.join("_build/nativehelper-device-foundation/libnativehelper-device-darwin.a"))
         .arg(root.join("_build/graphics-foundations/libutils-darwin.a"))
         .arg(root.join("_build/graphics-foundations/libutils-binder-darwin.a"))
@@ -4319,6 +4408,10 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
             .arg("-idirafter")
             .arg(ndk_include)
             .arg("-Wno-macro-redefined")
+            .arg("-DDARWIN_ART_REAL_GRAPHICS")
+            .arg("-DDARWIN_ART_HWUI_GPU")
+            .arg("-I")
+            .arg(root.join("_aosp/external/skia"))
             .arg("-DDARWIN_ART_DIRECT_APK_RUNTIME")
             .arg("-c")
             .arg(root.join("probes/runtime_link_probe.cc"))
@@ -4341,9 +4434,12 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&surface_object)
+        .arg(root.join("_build/skia-metal-gpu/libskia.a"))
+        .arg(root.join("_build/skia-metal-gpu/libskcms.a"))
         .arg(&bootstrap)
         .arg(format!(
             "-Wl,-force_load,{}",
@@ -4471,7 +4567,7 @@ fn probe_runtime_apk_direct(root: &Path) -> Result<()> {
                     ART runtime native: System.arraycopy()=42\n\
                     ART Android framework: ProbeActivity().probeValue()=42\n\
                     ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
-                    ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
+                    ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=360x640\n\
                     ART Android lifecycle: Activity.onCreate()=43\n\
                     ART Darwin launcher: main(String[])=ok";
     if output.trim() != expected {
@@ -4663,6 +4759,45 @@ fn probe_runtime_graphics_window(root: &Path) -> Result<()> {
     probe_runtime_dex_flavor(root, true, true, false, false, false, false)
 }
 
+fn prepare_probe_android_system_root(root: &Path) -> Result<PathBuf> {
+    let base = env::temp_dir();
+    let mut directory = None;
+    for attempt in 0..128_u32 {
+        let candidate = base.join(format!(
+            "darwin-art-android-system-root.{}.{}",
+            std::process::id(),
+            attempt
+        ));
+        match fs::create_dir(&candidate) {
+            Ok(()) => {
+                directory = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let directory = directory.ok_or("could not allocate Android system root")?;
+    let etc = directory.join("etc");
+    let fonts = directory.join("fonts");
+    fs::create_dir_all(&etc)?;
+    fs::create_dir_all(&fonts)?;
+    fs::copy(root.join("probes/button/fonts.xml"), etc.join("fonts.xml"))?;
+    fs::copy(
+        root.join("_aosp/external/skia/resources/fonts/Roboto-Regular.ttf"),
+        fonts.join("Roboto-Regular.ttf"),
+    )?;
+    fs::set_permissions(etc.join("fonts.xml"), fs::Permissions::from_mode(0o400))?;
+    fs::set_permissions(
+        fonts.join("Roboto-Regular.ttf"),
+        fs::Permissions::from_mode(0o400),
+    )?;
+    fs::set_permissions(&etc, fs::Permissions::from_mode(0o500))?;
+    fs::set_permissions(&fonts, fs::Permissions::from_mode(0o500))?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o500))?;
+    Ok(directory)
+}
+
 fn probe_runtime_button(root: &Path, show_window: bool) -> Result<()> {
     probe_runtime_dex_flavor(root, show_window, true, true, false, false, false)
 }
@@ -4736,6 +4871,7 @@ fn probe_runtime_dex_flavor(
         .arg(&framework)
         .arg(&core_icu4j)
         .arg(&classes_dex);
+    let mut system_root = None;
     if real_graphics {
         let icu_runtime = root.join("_build/icu-runtime-adapters/runtime");
         let i18n_root = icu_runtime.join("i18n");
@@ -4764,6 +4900,9 @@ fn probe_runtime_dex_flavor(
             command
                 .env("DARWIN_ART_TEST_FONTS_XML", fonts_xml)
                 .env("DARWIN_ART_TEST_FONT", roboto);
+            let guest_root = prepare_probe_android_system_root(root)?;
+            command.env("DARWIN_ART_ANDROID_SYSTEM_ROOT", &guest_root);
+            system_root = Some(guest_root);
         }
     }
     if apk_app {
@@ -4859,7 +4998,11 @@ fn probe_runtime_dex_flavor(
             .env("DARWIN_ART_ANDROID_TLS_FIXTURE", tls_fixture);
         apk_native_fixture = Some(extracted);
     }
-    let output = command_output(&mut command)?;
+    let output_result = command_output(&mut command);
+    if let Some(guest_root) = system_root {
+        let _ = fs::remove_dir_all(guest_root);
+    }
+    let output = output_result?;
     let expected = if apk_app {
         let render_scale = if show_window { 2 } else { 1 };
         let frame_width = 360 * render_scale;
@@ -4923,7 +5066,7 @@ fn probe_runtime_dex_flavor(
                     ART runtime native: System.arraycopy()=42\n\
                     ART Android framework: ProbeActivity().probeValue()=42\n\
                     ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
-                    ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
+                    ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=360x640\n\
                     ART Android lifecycle: Activity.onCreate()=43\n\
                     ART Darwin launcher: main(String[])=ok"
             .to_owned()
