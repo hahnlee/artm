@@ -443,6 +443,8 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_apk_graph.h"),
         PathBuf::from("compat/darwin_surface_bridge.mm"),
         PathBuf::from("compat/darwin_surface_bridge.h"),
+        PathBuf::from("compat/darwin_provider_owners.cc"),
+        PathBuf::from("compat/darwin_provider_owners.h"),
     ];
     // Keep this graph tied to the production bootstrap closure. In
     // particular, acceptance probes and unrelated graphics gates should not

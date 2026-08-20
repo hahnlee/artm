@@ -3134,6 +3134,7 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
     for adapter_source in [
         "darwin_android_jni_trampoline.cc",
         "darwin_android_elf_image_registry.cc",
+        "darwin_provider_owners.cc",
         "darwin_framework_natives.cc",
         "darwin_icu_natives.cc",
         "darwin_icu_jni_bridge.cc",
@@ -3171,7 +3172,10 @@ fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()
         if real_graphics && adapter_source == "darwin_libcore_natives.cc" {
             adapter_command.arg("-DDARWIN_ART_FULL_LIBCORE_LINUX");
         }
-        if adapter_source == "darwin_runtime_adapters.cc" {
+        if matches!(
+            adapter_source,
+            "darwin_runtime_adapters.cc" | "darwin_provider_owners.cc"
+        ) {
             adapter_command
                 .arg("-I")
                 .arg(root.join("tools/bionic-provider-namespace/include"))
