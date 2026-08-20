@@ -49,6 +49,9 @@ pub(crate) fn print_help() {
     );
     println!("  audit-runtime-link  measure the remaining Runtime::Create link closure");
     println!("  audit-runtime-graphics-link  link ART with the strict Android graphics closure");
+    println!(
+        "  audit-runtime-graphics-link-fast  validate existing graphics artifacts without upstream rebuilds"
+    );
     println!("  audit-graphics-closure  verify the 32-archive Android graphics closure");
     println!("  probe-runtime-dex  launch Java main(String[]) with Android stdout");
     println!("  probe-runtime-elf-jni  load a fixed Android ELF graph and JNI thunks through ART");

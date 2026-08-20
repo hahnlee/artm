@@ -306,6 +306,17 @@ bash tools/verify-real-graphics-rust-host.sh \
   _build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib
 ```
 
+For the native inner loop, use the fast validator after a targeted TU or
+artifact build:
+
+```sh
+cargo run -p art-bootstrap -- audit-runtime-graphics-link-fast
+```
+
+It consumes the existing graphics closure, performs the runtime link and
+symbol checks, and skips the upstream registrar build gates. The full command
+above remains the release/CI acceptance gate.
+
 `liblog-darwin.a` contains all eight Darwin-host sources and resolves the two
 log functions in the current HWUI closure. `libcutils-darwin.a` contains its
 base, host, non-Windows, and whole-static socket source groups (19 objects).

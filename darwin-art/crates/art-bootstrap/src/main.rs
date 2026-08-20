@@ -125,6 +125,7 @@ fn run() -> Result<()> {
         "build-runtime-network-probe" => build_runtime_network_probe(&root),
         "audit-runtime-link" => audit_runtime_link(&root),
         "audit-runtime-graphics-link" => audit_runtime_graphics_link(&root),
+        "audit-runtime-graphics-link-fast" => audit_runtime_graphics_link_fast(&root),
         "audit-graphics-closure" => build_shell_gate(&root, "audit-android16-graphics-closure.sh"),
         "probe-runtime-dex" => probe_runtime_dex(&root, false),
         "probe-runtime-elf-jni" => probe_runtime_elf_jni(&root),
@@ -3616,7 +3617,17 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         ])
         .arg(&runtime_library);
     let description = describe_command(&linker);
-    let output = linker.output()?;
+    let link_stamp = build_dir.join("runtime-link.fingerprint");
+    let cached_link = link_fingerprint_matches(&linker, &runtime_library, &link_stamp)?;
+    let output = if cached_link {
+        Command::new("true").output()?
+    } else {
+        let output = linker.output()?;
+        if output.status.success() {
+            write_link_fingerprint(&linker, &runtime_library, &link_stamp)?;
+        }
+        output
+    };
     if output.status.success() {
         let symbols = command_output(Command::new("nm").args(["-gU"]).arg(&runtime_library))?;
         for required in [
@@ -3751,25 +3762,38 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
 }
 
 fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
-    build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
-    build_shell_gate_with_args(
-        root,
-        "audit-android16-graphics-closure.sh",
-        &["--art-runtime"],
-    )?;
-    build_shell_gate(root, "build-android16-android-runtime-host.sh")?;
-    build_shell_gate(root, "build-android16-libcore-darwin-linux.sh")?;
-    build_shell_gate(root, "build-android16-os-constants-darwin.sh")?;
-    build_shell_gate(root, "build-android16-unix-filesystem-darwin.sh")?;
-    build_shell_gate(root, "build-android16-openjdkjvm-darwin.sh")?;
-    build_shell_gate(root, "build-android16-file-input-stream-darwin.sh")?;
-    build_shell_gate(root, "build-android16-file-descriptor-darwin.sh")?;
-    build_shell_gate(root, "build-android16-system-natives-darwin.sh")?;
-    build_shell_gate(root, "build-android16-unix-native-dispatcher-darwin.sh")?;
-    build_shell_gate(root, "build-android16-openjdk-nio-mapping.sh")?;
-    build_shell_gate(root, "build-android16-libcore-memory-darwin.sh")?;
-    build_shell_gate(root, "build-android16-android-util-log.sh")?;
-    build_shell_gate(root, "build-android16-virtual-ref-base-ptr.sh")?;
+    audit_runtime_graphics_link_mode(root, true)
+}
+
+/// Validate/link against already-built graphics inputs without rerunning the
+/// long upstream closure scripts. This is the inner-loop target after a
+/// narrow TU change; the full command remains the release/CI gate.
+fn audit_runtime_graphics_link_fast(root: &Path) -> Result<()> {
+    audit_runtime_graphics_link_mode(root, false)
+}
+
+fn audit_runtime_graphics_link_mode(root: &Path, run_upstream_gates: bool) -> Result<()> {
+    if run_upstream_gates {
+        build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
+        build_shell_gate_with_args(
+            root,
+            "audit-android16-graphics-closure.sh",
+            &["--art-runtime"],
+        )?;
+        build_shell_gate(root, "build-android16-android-runtime-host.sh")?;
+        build_shell_gate(root, "build-android16-libcore-darwin-linux.sh")?;
+        build_shell_gate(root, "build-android16-os-constants-darwin.sh")?;
+        build_shell_gate(root, "build-android16-unix-filesystem-darwin.sh")?;
+        build_shell_gate(root, "build-android16-openjdkjvm-darwin.sh")?;
+        build_shell_gate(root, "build-android16-file-input-stream-darwin.sh")?;
+        build_shell_gate(root, "build-android16-file-descriptor-darwin.sh")?;
+        build_shell_gate(root, "build-android16-system-natives-darwin.sh")?;
+        build_shell_gate(root, "build-android16-unix-native-dispatcher-darwin.sh")?;
+        build_shell_gate(root, "build-android16-openjdk-nio-mapping.sh")?;
+        build_shell_gate(root, "build-android16-libcore-memory-darwin.sh")?;
+        build_shell_gate(root, "build-android16-android-util-log.sh")?;
+        build_shell_gate(root, "build-android16-virtual-ref-base-ptr.sh")?;
+    }
 
     let runtime = root.join("_aosp/art/runtime");
     let build_paths = BuildPaths::from_root(root);
@@ -4150,7 +4174,17 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         ])
         .arg(&runtime_library);
     let description = describe_command(&linker);
-    let output = linker.output()?;
+    let link_stamp = build_dir.join("runtime-graphics-link.fingerprint");
+    let cached_link = link_fingerprint_matches(&linker, &runtime_library, &link_stamp)?;
+    let output = if cached_link {
+        Command::new("true").output()?
+    } else {
+        let output = linker.output()?;
+        if output.status.success() {
+            write_link_fingerprint(&linker, &runtime_library, &link_stamp)?;
+        }
+        output
+    };
     if !output.status.success() {
         let stderr = String::from_utf8(output.stderr)?;
         fs::write(build_dir.join("link.err"), &stderr)?;
@@ -5733,6 +5767,56 @@ fn describe_command(command: &Command) -> String {
         .collect::<Vec<_>>()
         .join(" ");
     format!("{program} {args}")
+}
+
+/// Return a cheap identity for a native link invocation and its artifacts.
+/// Compilation already has a dependency/content cache; this closes the
+/// remaining warm-audit gap where the same large graphics closure was linked
+/// on every run. Paths are represented by size and nanosecond mtime, so normal
+/// artifact replacement invalidates the link without rereading archives.
+fn link_fingerprint(command: &Command) -> String {
+    let mut digest = Sha256::new();
+    digest.update(command.get_program().to_string_lossy().as_bytes());
+    digest.update([0]);
+    for argument in command.get_args() {
+        let value = argument.to_string_lossy();
+        digest.update(value.as_bytes());
+        digest.update([0]);
+        if let Ok(metadata) = fs::metadata(argument) {
+            digest.update(metadata.len().to_le_bytes());
+            if let Ok(modified) = metadata.modified()
+                && let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH)
+            {
+                digest.update(duration.as_secs().to_le_bytes());
+                digest.update(duration.subsec_nanos().to_le_bytes());
+            }
+        } else {
+            digest.update([0xff]);
+        }
+    }
+    format!("{:x}", digest.finalize())
+}
+
+fn link_fingerprint_matches(command: &Command, output: &Path, stamp: &Path) -> Result<bool> {
+    if !output.is_file() || !stamp.is_file() {
+        return Ok(false);
+    }
+    Ok(fs::read_to_string(stamp)?.trim() == link_fingerprint(command))
+}
+
+fn write_link_fingerprint(command: &Command, output: &Path, stamp: &Path) -> Result<()> {
+    if !output.is_file() {
+        return Err(format!(
+            "linker reported success without output: {}",
+            output.display()
+        )
+        .into());
+    }
+    if let Some(parent) = stamp.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(stamp, format!("{}\n", link_fingerprint(command)))?;
+    Ok(())
 }
 
 #[cfg(test)]
