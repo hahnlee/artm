@@ -10,6 +10,7 @@ use std::ptr;
 use std::rc::Rc;
 
 mod ffi;
+mod session;
 
 #[cfg(target_os = "macos")]
 use darwin_art_engine::LoadedEngine;
@@ -17,6 +18,9 @@ use darwin_art_engine::LoadedEngine;
 pub use darwin_art_abi::ABI_VERSION;
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
 pub use ffi::{FrameCallback, ProcessConfig, ProcessResult};
+use session::{
+    SharedProcessShutdown, SharedSurfaceCleanup, SurfaceCleanupGuard, shutdown_process_once,
+};
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
@@ -109,76 +113,6 @@ impl Error for HostError {}
 struct FrameHost {
     frames_received: u64,
     last_frame: Option<OwnedFrame>,
-}
-
-/// The process shutdown callback is transferred into `RuntimeSession` as the
-/// engine subsystem cleanup.  Keeping the one-shot slot separate while the
-/// engine lease is being installed lets the few pre-lease error paths release
-/// ART without introducing a second lifetime owner.
-#[cfg(target_os = "macos")]
-type SharedProcessShutdown = Rc<RefCell<Option<ShutdownProcessFn>>>;
-
-#[cfg(target_os = "macos")]
-fn shutdown_process_once(shutdown: &SharedProcessShutdown) -> i32 {
-    let Some(callback) = shutdown.borrow_mut().take() else {
-        return 0;
-    };
-    // SAFETY: the callback came from the fixed v1 ABI and the process remains
-    // initialized until this one-shot lease cleanup invokes it.
-    unsafe { callback() }
-}
-
-/// Owns a surface returned by either `surface_active_gpu` or
-/// `surface_create`.  Surface destruction is deliberately ordered before the
-/// process guard (the surface may refer to ART-owned rendering state).
-#[cfg(target_os = "macos")]
-struct SurfaceCleanupGuard {
-    destroy: SurfaceDestroyFn,
-    surface: *mut c_void,
-    armed: bool,
-}
-
-#[cfg(target_os = "macos")]
-type SharedSurfaceCleanup = Rc<RefCell<SurfaceCleanupGuard>>;
-
-#[cfg(target_os = "macos")]
-impl SurfaceCleanupGuard {
-    fn new(destroy: SurfaceDestroyFn, surface: *mut c_void) -> Self {
-        debug_assert!(!surface.is_null());
-        Self {
-            destroy,
-            surface,
-            armed: true,
-        }
-    }
-
-    fn handle(&self) -> *mut c_void {
-        self.surface
-    }
-
-    fn close(&mut self) -> i32 {
-        if !self.armed {
-            return 0;
-        }
-        self.armed = false;
-        // SAFETY: The pointer was returned by the matching v1 surface API and
-        // is kept live until this one-shot destruction call.
-        unsafe { (self.destroy)(self.surface) }
-    }
-}
-
-#[cfg(target_os = "macos")]
-impl Drop for SurfaceCleanupGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            self.armed = false;
-            // SAFETY: Same invariant as `close`; Drop cannot report a status,
-            // but it must still release the native surface on rollback.
-            unsafe {
-                let _ = (self.destroy)(self.surface);
-            }
-        }
-    }
 }
 
 impl FrameHost {
