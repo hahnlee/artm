@@ -559,18 +559,15 @@ fn repository_root(out: &Path) -> PathBuf {
 }
 
 fn graph_inputs(root: &Path) -> Vec<PathBuf> {
+    // This digest is the invalidation boundary for native objects, not for
+    // the Rust command that happens to emit the Ninja file.  Rust orchestration
+    // changes are intentionally excluded here: changing an xtask, bootstrap
+    // CLI, or Cargo manifest must not force hundreds of unchanged C++/ObjC++
+    // translation units to rebuild.  Bump GRAPH_VERSION when the graph
+    // policy/command generation itself changes.
     let mut paths = vec![
-        PathBuf::from("Cargo.toml"),
-        PathBuf::from("Cargo.lock"),
         PathBuf::from("sources.lock"),
         PathBuf::from("bootclasspath.lock"),
-        PathBuf::from("crates/art-bootstrap/Cargo.toml"),
-        PathBuf::from("crates/art-bootstrap/src/main.rs"),
-        PathBuf::from("crates/art-bootstrap/src/build_context.rs"),
-        PathBuf::from("crates/art-bootstrap/src/help.rs"),
-        PathBuf::from("crates/darwin-art-elf-loader/Cargo.toml"),
-        PathBuf::from("crates/darwin-art-xtask/Cargo.toml"),
-        PathBuf::from("crates/darwin-art-xtask/src/main.rs"),
         PathBuf::from("tools/build-android-elf-jni-fixture.sh"),
         PathBuf::from("tools/audit-android16-graphics-closure.sh"),
         PathBuf::from("probes/runtime_filesystem_probe.cc"),
@@ -776,7 +773,12 @@ fn cached_native_objects(
             },
         );
     }
-    if by_name.len() < 16 || !archive.is_file() {
+    // The bootstrap archives are deliberately large (200+ objects).  A
+    // partially interrupted Rust builder can leave a handful of fingerprints
+    // and a seemingly valid archive; do not promote that into a native graph.
+    // Falling back to the canonical builder below is safer than silently
+    // linking an incomplete ART runtime.
+    if by_name.len() < 128 || !archive.is_file() {
         return Ok(None);
     }
     let archive_members = Command::new("ar").arg("-t").arg(archive).output()?;
@@ -792,7 +794,12 @@ fn cached_native_objects(
             ordered.push(object);
         }
     }
-    if ordered.len() < 16 {
+    // An interrupted archive command can leave a valid, but incomplete,
+    // archive behind.  Never let that partial member order become the cache
+    // manifest: append every remaining fingerprint object in stable name
+    // order so the next graph rebuilds a complete archive.
+    ordered.extend(by_name.into_values());
+    if ordered.len() < 128 {
         return Ok(None);
     }
     Ok(Some(ordered))
@@ -900,6 +907,27 @@ mod tests {
                  libart-runtime-graphics-bootstrap-darwin.a"
             )
         );
+    }
+
+    #[test]
+    fn native_graph_digest_excludes_rust_orchestration() {
+        let paths = graph_inputs(Path::new("."));
+        for excluded in [
+            "Cargo.toml",
+            "Cargo.lock",
+            "crates/art-bootstrap/Cargo.toml",
+            "crates/art-bootstrap/src/main.rs",
+            "crates/art-bootstrap/src/build_context.rs",
+            "crates/art-bootstrap/src/help.rs",
+            "crates/darwin-art-elf-loader/Cargo.toml",
+            "crates/darwin-art-xtask/Cargo.toml",
+            "crates/darwin-art-xtask/src/main.rs",
+        ] {
+            assert!(
+                !paths.iter().any(|path| path == Path::new(excluded)),
+                "Rust orchestration path leaked into native graph digest: {excluded}"
+            );
+        }
     }
 
     #[test]
