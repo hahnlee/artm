@@ -1,6 +1,8 @@
 use super::*;
 use std::thread;
 
+pub(crate) use crate::native_graph::build_native_graph;
+
 struct PendingNativeCompile {
     command: Command,
     object: PathBuf,
@@ -634,45 +636,6 @@ pub(crate) fn build_runtime_bootstrap(root: &Path) -> Result<()> {
 
 pub(crate) fn build_runtime_graphics_bootstrap(root: &Path) -> Result<()> {
     build_native_graph(root, "graphics-bootstrap")
-}
-
-/// Drive the content-addressed Ninja graph for the production graphics
-/// archive.  The graph action invokes the inner builder only for a stale
-/// archive; callers therefore do not pay the 200+ TU orchestration cost on a
-/// warm run, while the inner builder remains available as an explicit escape
-/// hatch for diagnostics and CI.
-pub(crate) fn build_native_graph(root: &Path, target: &str) -> Result<()> {
-    if !matches!(target, "graphics-bootstrap" | "runtime-bootstrap") {
-        return Err(format!("unsupported native graph target: {target}").into());
-    }
-    let graph_dir = root.join("_build/native-graph");
-    fs::create_dir_all(&graph_dir)?;
-    let graph = graph_dir.join("build.ninja");
-    run_command(
-        Command::new("cargo")
-            .args([
-                "run",
-                "-q",
-                "-p",
-                "darwin-art-xtask",
-                "--",
-                "native-graph",
-                "--out",
-            ])
-            .arg(&graph)
-            .current_dir(root),
-    )?;
-    let ninja = root.join("_aosp/external/skia/third_party/ninja/ninja");
-    if !ninja.is_file() {
-        return Err(format!("pinned Ninja is missing: {}", ninja.display()).into());
-    }
-    run_command(
-        Command::new(&ninja)
-            .arg("-f")
-            .arg(&graph)
-            .arg(target)
-            .current_dir(root),
-    )
 }
 
 pub(crate) fn build_runtime_graphics_bootstrap_inner(root: &Path) -> Result<()> {
