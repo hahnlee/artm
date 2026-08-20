@@ -28,6 +28,9 @@ pub enum RuntimeError {
         to: RuntimePhase,
     },
     AlreadyFailed,
+    EngineFailure {
+        status: i32,
+    },
 }
 
 impl RuntimeError {
@@ -36,6 +39,7 @@ impl RuntimeError {
             Self::WrongOwnerThread => StatusCode::InvalidState,
             Self::InvalidTransition { .. } => StatusCode::InvalidState,
             Self::AlreadyFailed => StatusCode::Internal,
+            Self::EngineFailure { .. } => StatusCode::Internal,
         }
     }
 }

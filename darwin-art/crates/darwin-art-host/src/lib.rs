@@ -7,7 +7,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-pub const ABI_VERSION: u32 = 1;
+pub use darwin_art_abi::ABI_VERSION;
+use darwin_art_runtime::{RuntimeError, RuntimeSession};
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
@@ -275,6 +276,10 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
 
     #[cfg(target_os = "macos")]
     {
+        let mut runtime = RuntimeSession::new();
+        runtime
+            .start()
+            .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
         let library = DynamicLibrary::open(&options.library)?;
         // SAFETY: Symbol names and signatures are fixed by darwin_art.h ABI v1.
         let run_process: RunProcessFn = unsafe { library.symbol(b"darwin_art_run_process\0")? };
@@ -331,6 +336,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // live for this synchronous call.
         let status = unsafe { run_process(&config, &mut process) };
         if status != 0 {
+            runtime.fail(RuntimeError::EngineFailure { status });
             // A late run-stage failure may still have created ART. Ask the
             // process ABI to tear it down; NOT_READY means creation never
             // completed and is the only benign shutdown result here.
@@ -341,6 +347,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             }
             return Err(HostError::RuntimeFailed(status));
         }
+        runtime
+            .mark_running()
+            .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
         // Darwin's application renderer is GPU-only.  The CPU surface path is
         // retained for diagnostics, never selected by the normal host.
         let gpu_mode = true;
@@ -481,7 +490,15 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 remaining -= slice;
             }
             let destroy_status = unsafe { surface_destroy(surface) };
+            let _ = runtime.begin_shutdown();
             let shutdown_status = unsafe { shutdown_process() };
+            if shutdown_status == 0 {
+                let _ = runtime.finish_shutdown();
+            } else {
+                runtime.fail(RuntimeError::EngineFailure {
+                    status: shutdown_status,
+                });
+            }
             if let Some(error) = loop_error {
                 return Err(error);
             }
@@ -690,6 +707,14 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // registered DexFile pointers and process-global handlers remain valid
         // throughout Runtime teardown.
         let shutdown_status = unsafe { shutdown_process() };
+        if shutdown_status == 0 {
+            let _ = runtime.begin_shutdown();
+            let _ = runtime.finish_shutdown();
+        } else {
+            runtime.fail(RuntimeError::EngineFailure {
+                status: shutdown_status,
+            });
+        }
         if shutdown_status != 0 {
             return Err(HostError::ShutdownFailed(shutdown_status));
         }
