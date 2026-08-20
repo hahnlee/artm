@@ -6,7 +6,7 @@
 //! the ordering and rollback state so C++ callbacks cannot invent a second,
 //! conflicting lifecycle machine.
 
-use std::{marker::PhantomData, rc::Rc, thread::ThreadId};
+use std::{collections::BTreeMap, marker::PhantomData, rc::Rc, thread::ThreadId};
 
 use darwin_art_abi::StatusCode;
 
@@ -31,6 +31,13 @@ pub enum RuntimeError {
     EngineFailure {
         status: i32,
     },
+    SubsystemNotActive {
+        subsystem: Subsystem,
+    },
+    InvalidShutdownOrder {
+        expected: Subsystem,
+        requested: Subsystem,
+    },
 }
 
 impl RuntimeError {
@@ -40,7 +47,31 @@ impl RuntimeError {
             Self::InvalidTransition { .. } => StatusCode::InvalidState,
             Self::AlreadyFailed => StatusCode::Internal,
             Self::EngineFailure { .. } => StatusCode::Internal,
+            Self::SubsystemNotActive { .. } => StatusCode::InvalidState,
+            Self::InvalidShutdownOrder { .. } => StatusCode::InvalidState,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum Subsystem {
+    Engine,
+    ElfNamespace,
+    Filesystem,
+    Network,
+    Surface,
+    Input,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SubsystemLease {
+    subsystem: Subsystem,
+    generation: u64,
+}
+
+impl SubsystemLease {
+    pub const fn subsystem(self) -> Subsystem {
+        self.subsystem
     }
 }
 
@@ -50,6 +81,9 @@ pub struct RuntimeSession {
     owner: ThreadId,
     phase: RuntimePhase,
     failure: Option<RuntimeError>,
+    subsystems: BTreeMap<Subsystem, u64>,
+    install_order: Vec<Subsystem>,
+    next_generation: u64,
     _owner_thread: PhantomData<Rc<()>>,
 }
 
@@ -59,6 +93,9 @@ impl RuntimeSession {
             owner: std::thread::current().id(),
             phase: RuntimePhase::New,
             failure: None,
+            subsystems: BTreeMap::new(),
+            install_order: Vec::new(),
+            next_generation: 1,
             _owner_thread: PhantomData,
         }
     }
@@ -92,6 +129,56 @@ impl RuntimeSession {
         self.failure = Some(error);
     }
 
+    pub fn install_subsystem(
+        &mut self,
+        subsystem: Subsystem,
+    ) -> Result<SubsystemLease, RuntimeError> {
+        self.assert_owner()?;
+        if !matches!(
+            self.phase,
+            RuntimePhase::Bootstrapping | RuntimePhase::Running
+        ) {
+            return Err(RuntimeError::InvalidTransition {
+                from: self.phase,
+                to: self.phase,
+            });
+        }
+        if self.subsystems.contains_key(&subsystem) {
+            return Err(RuntimeError::SubsystemNotActive { subsystem });
+        }
+        let generation = self.next_generation;
+        self.next_generation = self.next_generation.saturating_add(1);
+        self.subsystems.insert(subsystem, generation);
+        self.install_order.push(subsystem);
+        Ok(SubsystemLease {
+            subsystem,
+            generation,
+        })
+    }
+
+    pub fn uninstall_subsystem(&mut self, lease: SubsystemLease) -> Result<(), RuntimeError> {
+        self.assert_owner()?;
+        let Some(expected) = self.install_order.last().copied() else {
+            return Err(RuntimeError::SubsystemNotActive {
+                subsystem: lease.subsystem,
+            });
+        };
+        if expected != lease.subsystem {
+            return Err(RuntimeError::InvalidShutdownOrder {
+                expected,
+                requested: lease.subsystem,
+            });
+        }
+        if self.subsystems.get(&lease.subsystem).copied() != Some(lease.generation) {
+            return Err(RuntimeError::SubsystemNotActive {
+                subsystem: lease.subsystem,
+            });
+        }
+        self.install_order.pop();
+        self.subsystems.remove(&lease.subsystem);
+        Ok(())
+    }
+
     pub fn assert_owner(&self) -> Result<(), RuntimeError> {
         if std::thread::current().id() == self.owner {
             Ok(())
@@ -114,6 +201,12 @@ impl RuntimeSession {
                 | (RuntimePhase::ShuttingDown, RuntimePhase::Stopped)
         );
         if !valid {
+            return Err(RuntimeError::InvalidTransition {
+                from: self.phase,
+                to,
+            });
+        }
+        if to == RuntimePhase::Stopped && !self.install_order.is_empty() {
             return Err(RuntimeError::InvalidTransition {
                 from: self.phase,
                 to,
@@ -164,5 +257,27 @@ mod tests {
             runtime.start(),
             Err(RuntimeError::InvalidTransition { .. })
         ));
+    }
+
+    #[test]
+    fn subsystem_leases_enforce_reverse_teardown_and_generation() {
+        let mut runtime = RuntimeSession::new();
+        runtime.start().unwrap();
+        let engine = runtime.install_subsystem(Subsystem::Engine).unwrap();
+        let fs = runtime.install_subsystem(Subsystem::Filesystem).unwrap();
+
+        assert_eq!(
+            runtime.uninstall_subsystem(engine),
+            Err(RuntimeError::InvalidShutdownOrder {
+                expected: Subsystem::Filesystem,
+                requested: Subsystem::Engine,
+            })
+        );
+        runtime.begin_shutdown().unwrap();
+        assert!(runtime.finish_shutdown().is_err());
+        runtime.uninstall_subsystem(fs).unwrap();
+        runtime.uninstall_subsystem(engine).unwrap();
+        runtime.finish_shutdown().unwrap();
+        assert_eq!(runtime.phase(), RuntimePhase::Stopped);
     }
 }
