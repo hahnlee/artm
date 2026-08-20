@@ -352,8 +352,14 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&format!("# input-digest: {digest}\n"));
     graph.push_str(&format!("# compiler: {} sdk: {SDK_NAME}\n", toolchain.cxx));
     graph.push_str("ninja_required_version = 1.10\n\n");
+    let mut cached_rules_emitted = false;
     if let Some(cached_objects) = cached_graphics_objects.as_deref() {
-        emit_cached_native_graph(&mut graph, cached_objects, &archive);
+        emit_cached_native_graph(
+            &mut graph,
+            cached_objects,
+            &archive,
+            &mut cached_rules_emitted,
+        );
         graph.push_str("build ");
         graph.push_str(&stamp);
         graph.push_str(": phony ");
@@ -385,7 +391,12 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&archive);
     graph.push('\n');
     if let Some(cached_objects) = cached_runtime_objects.as_deref() {
-        emit_cached_native_graph(&mut graph, cached_objects, &runtime_archive);
+        emit_cached_native_graph(
+            &mut graph,
+            cached_objects,
+            &runtime_archive,
+            &mut cached_rules_emitted,
+        );
         graph.push_str("build ");
         graph.push_str(&runtime_stamp);
         graph.push_str(": phony ");
@@ -787,17 +798,25 @@ fn cached_native_objects(
     Ok(Some(ordered))
 }
 
-fn emit_cached_native_graph(graph: &mut String, objects: &[CachedNativeObject], archive: &str) {
-    graph.push_str("rule native_cached_cpp\n");
-    graph.push_str("  command = $compile_command\n");
-    graph.push_str("  depfile = $out.d\n");
-    graph.push_str("  deps = gcc\n");
-    graph.push_str("  description = CXX $out\n");
-    graph.push_str("  restat = 1\n\n");
-    graph.push_str("rule native_cached_archive\n");
-    graph.push_str("  command = rm -f $out && ar rcs $out $in\n");
-    graph.push_str("  description = AR $out\n");
-    graph.push_str("  restat = 1\n\n");
+fn emit_cached_native_graph(
+    graph: &mut String,
+    objects: &[CachedNativeObject],
+    archive: &str,
+    rules_emitted: &mut bool,
+) {
+    if !*rules_emitted {
+        graph.push_str("rule native_cached_cpp\n");
+        graph.push_str("  command = $compile_command\n");
+        graph.push_str("  depfile = $out.d\n");
+        graph.push_str("  deps = gcc\n");
+        graph.push_str("  description = CXX $out\n");
+        graph.push_str("  restat = 1\n\n");
+        graph.push_str("rule native_cached_archive\n");
+        graph.push_str("  command = rm -f $out && ar rcs $out $in\n");
+        graph.push_str("  description = AR $out\n");
+        graph.push_str("  restat = 1\n\n");
+        *rules_emitted = true;
+    }
     let mut object_paths = Vec::with_capacity(objects.len());
     for object in objects {
         let output = ninja_path(&object.object);
