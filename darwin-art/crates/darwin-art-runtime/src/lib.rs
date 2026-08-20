@@ -69,6 +69,34 @@ pub struct SubsystemLease {
     generation: u64,
 }
 
+trait OwnedSubsystem {
+    fn resource_any(&self) -> &dyn Any;
+    fn cleanup(&mut self) -> Result<(), RuntimeError>;
+}
+
+struct OwnedSubsystemResource<T, F> {
+    resource: Option<T>,
+    cleanup: Option<F>,
+}
+
+impl<T, F> OwnedSubsystem for OwnedSubsystemResource<T, F>
+where
+    T: Any,
+    F: FnOnce() -> Result<(), RuntimeError> + 'static,
+{
+    fn resource_any(&self) -> &dyn Any {
+        self.resource
+            .as_ref()
+            .expect("owned subsystem resource must remain live")
+    }
+
+    fn cleanup(&mut self) -> Result<(), RuntimeError> {
+        self.cleanup
+            .take()
+            .expect("owned subsystem cleanup must run once")()
+    }
+}
+
 impl SubsystemLease {
     pub const fn subsystem(self) -> Subsystem {
         self.subsystem
@@ -82,8 +110,7 @@ pub struct RuntimeSession {
     phase: RuntimePhase,
     failure: Option<RuntimeError>,
     subsystems: BTreeMap<Subsystem, u64>,
-    cleanups: BTreeMap<Subsystem, Box<dyn FnOnce() -> Result<(), RuntimeError>>>,
-    owned_resources: BTreeMap<Subsystem, Box<dyn Any>>,
+    owned_resources: BTreeMap<Subsystem, Box<dyn OwnedSubsystem>>,
     install_order: Vec<Subsystem>,
     next_generation: u64,
     _owner_thread: PhantomData<Rc<()>>,
@@ -96,7 +123,6 @@ impl RuntimeSession {
             phase: RuntimePhase::New,
             failure: None,
             subsystems: BTreeMap::new(),
-            cleanups: BTreeMap::new(),
             owned_resources: BTreeMap::new(),
             install_order: Vec::new(),
             next_generation: 1,
@@ -154,28 +180,7 @@ impl RuntimeSession {
     where
         F: FnOnce() -> Result<(), RuntimeError> + 'static,
     {
-        self.assert_owner()?;
-        if !matches!(
-            self.phase,
-            RuntimePhase::Bootstrapping | RuntimePhase::Running
-        ) {
-            return Err(RuntimeError::InvalidTransition {
-                from: self.phase,
-                to: self.phase,
-            });
-        }
-        if self.subsystems.contains_key(&subsystem) {
-            return Err(RuntimeError::SubsystemNotActive { subsystem });
-        }
-        let generation = self.next_generation;
-        self.next_generation = self.next_generation.saturating_add(1);
-        self.subsystems.insert(subsystem, generation);
-        self.cleanups.insert(subsystem, Box::new(cleanup));
-        self.install_order.push(subsystem);
-        Ok(SubsystemLease {
-            subsystem,
-            generation,
-        })
+        self.install_owned_subsystem(subsystem, (), cleanup)
     }
 
     /// Installs a subsystem and transfers a concrete Rust resource into the
@@ -192,9 +197,34 @@ impl RuntimeSession {
         T: 'static,
         F: FnOnce() -> Result<(), RuntimeError> + 'static,
     {
-        let lease = self.install_subsystem_with_cleanup(subsystem, cleanup)?;
-        self.owned_resources.insert(subsystem, Box::new(resource));
-        Ok(lease)
+        self.assert_owner()?;
+        if !matches!(
+            self.phase,
+            RuntimePhase::Bootstrapping | RuntimePhase::Running
+        ) {
+            return Err(RuntimeError::InvalidTransition {
+                from: self.phase,
+                to: self.phase,
+            });
+        }
+        if self.subsystems.contains_key(&subsystem) {
+            return Err(RuntimeError::SubsystemNotActive { subsystem });
+        }
+        let generation = self.next_generation;
+        self.next_generation = self.next_generation.saturating_add(1);
+        self.subsystems.insert(subsystem, generation);
+        self.owned_resources.insert(
+            subsystem,
+            Box::new(OwnedSubsystemResource {
+                resource: Some(resource),
+                cleanup: Some(cleanup),
+            }),
+        );
+        self.install_order.push(subsystem);
+        Ok(SubsystemLease {
+            subsystem,
+            generation,
+        })
     }
 
     /// Borrows a session-owned resource for owner-thread orchestration. The
@@ -202,7 +232,7 @@ impl RuntimeSession {
     pub fn owned_resource<T: 'static>(&self, subsystem: Subsystem) -> Option<&T> {
         self.owned_resources
             .get(&subsystem)
-            .and_then(|resource| resource.downcast_ref::<T>())
+            .and_then(|resource| resource.resource_any().downcast_ref::<T>())
     }
 
     pub fn uninstall_subsystem(&mut self, lease: SubsystemLease) -> Result<(), RuntimeError> {
@@ -225,13 +255,11 @@ impl RuntimeSession {
         }
         self.install_order.pop();
         self.subsystems.remove(&lease.subsystem);
-        let cleanup = self
-            .cleanups
+        let mut resource = self
+            .owned_resources
             .remove(&lease.subsystem)
-            .expect("subsystem cleanup must accompany its lease");
-        let result = cleanup();
-        self.owned_resources.remove(&lease.subsystem);
-        result
+            .expect("subsystem resource must accompany its lease");
+        resource.cleanup()
     }
 
     pub fn assert_owner(&self) -> Result<(), RuntimeError> {
@@ -280,10 +308,9 @@ impl Drop for RuntimeSession {
         // reverse install order without panicking across a host boundary.
         while let Some(subsystem) = self.install_order.pop() {
             self.subsystems.remove(&subsystem);
-            if let Some(cleanup) = self.cleanups.remove(&subsystem) {
-                let _ = cleanup();
+            if let Some(mut resource) = self.owned_resources.remove(&subsystem) {
+                let _ = resource.cleanup();
             }
-            self.owned_resources.remove(&subsystem);
         }
     }
 }
