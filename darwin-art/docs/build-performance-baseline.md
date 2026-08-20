@@ -59,6 +59,14 @@ budget, but the repository does not yet have enough stable samples to choose
 one. A cache hit must never be inferred from a short run alone; retain the
 reported signals and the source/toolchain revision with each baseline.
 
+## Post-workspace sample
+
+After consolidating the core Rust crates and adding the ABI/runtime/xtask
+packages, a warm `cargo check --workspace -v` measured **0.16 s**, exit 0,
+compiled signal 0, cached signal 19. This is recorded separately from the
+original baseline so future graph changes can be compared without mixing
+different workspace shapes.
+
 ## Known bottlenecks
 
 The current graph is dominated by large native translation units and serial
