@@ -827,7 +827,17 @@ fn emit_cached_native_graph(
         graph.push_str(&source);
         graph.push('\n');
         graph.push_str("  compile_command = ");
-        graph.push_str(&object.command.replace('$', "$$"));
+        // Fingerprints store a diagnostic, whitespace-separated command.  It
+        // is sufficient to recover the persisted argv here because the
+        // bootstrap paths contain no spaces; every token still needs shell
+        // quoting (notably ART defines containing parentheses or quotes).
+        let quoted_command = object
+            .command
+            .split_whitespace()
+            .map(shell_quote)
+            .collect::<Vec<_>>()
+            .join(" ");
+        graph.push_str(&quoted_command.replace('$', "$$"));
         graph.push('\n');
         object_paths.push(output);
     }
