@@ -50,6 +50,45 @@ pub struct ProcessConfig {
     pub provider_release: Option<ProviderReleaseFn>,
 }
 
+impl ProcessConfig {
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        core_oj_jar: *const c_char,
+        core_libart_jar: *const c_char,
+        framework_jar: *const c_char,
+        core_icu4j_jar: *const c_char,
+        app_dex: *const c_char,
+        heap_initial_bytes: u64,
+        heap_maximum_bytes: u64,
+        host_context: *mut c_void,
+        frame_callback: Option<FrameCallback>,
+        provider_context: *mut c_void,
+        provider_acquire: Option<ProviderAcquireFn>,
+        provider_release: Option<ProviderReleaseFn>,
+    ) -> Self {
+        Self {
+            struct_size: core::mem::size_of::<Self>() as u32,
+            abi_version: ABI_VERSION,
+            core_oj_jar,
+            core_libart_jar,
+            framework_jar,
+            core_icu4j_jar,
+            app_dex,
+            heap_initial_bytes,
+            heap_maximum_bytes,
+            host_context,
+            frame_callback,
+            provider_context,
+            provider_acquire,
+            provider_release,
+        }
+    }
+
+    pub const fn is_compatible(&self) -> bool {
+        self.abi_version == ABI_VERSION && self.struct_size as usize >= core::mem::size_of::<Self>()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(C)]
 pub struct ProcessResult {
@@ -62,6 +101,26 @@ pub struct ProcessResult {
     pub lifecycle_result: i32,
     pub frame_width: u32,
     pub frame_height: u32,
+}
+
+impl ProcessResult {
+    pub const fn new() -> Self {
+        Self {
+            struct_size: core::mem::size_of::<Self>() as u32,
+            abi_version: ABI_VERSION,
+            hello_answer: 0,
+            native_round_trip: 0,
+            arraycopy_result: 0,
+            activity_probe_result: 0,
+            lifecycle_result: 0,
+            frame_width: 0,
+            frame_height: 0,
+        }
+    }
+
+    pub const fn is_compatible(&self) -> bool {
+        self.abi_version == ABI_VERSION && self.struct_size as usize >= core::mem::size_of::<Self>()
+    }
 }
 
 pub type EngineCreateFn = unsafe extern "C" fn(*const EngineApi) -> *mut EngineHandle;

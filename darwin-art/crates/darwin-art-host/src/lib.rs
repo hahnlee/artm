@@ -12,7 +12,6 @@ mod session;
 #[cfg(target_os = "macos")]
 use darwin_art_engine::EngineSession;
 
-pub use darwin_art_abi::ABI_VERSION;
 pub use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProcessResult};
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
 use session::{ProviderBridge, SurfaceCleanupGuard, engine_symbols};
@@ -262,27 +261,21 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             frames_received: 0,
             last_frame: None,
         };
-        let config = ProcessConfig {
-            struct_size: size_of::<ProcessConfig>() as u32,
-            abi_version: ABI_VERSION,
-            core_oj_jar: core_oj.as_ptr(),
-            core_libart_jar: core_libart.as_ptr(),
-            framework_jar: framework.as_ptr(),
-            core_icu4j_jar: core_icu4j.as_ptr(),
-            app_dex: app_dex.as_ptr(),
-            heap_initial_bytes: options.heap_initial_bytes,
-            heap_maximum_bytes: options.heap_maximum_bytes,
-            host_context: ptr::from_mut(&mut frame_host).cast(),
-            frame_callback: Some(receive_frame),
+        let config = ProcessConfig::new(
+            core_oj.as_ptr(),
+            core_libart.as_ptr(),
+            framework.as_ptr(),
+            core_icu4j.as_ptr(),
+            app_dex.as_ptr(),
+            options.heap_initial_bytes,
+            options.heap_maximum_bytes,
+            ptr::from_mut(&mut frame_host).cast(),
+            Some(receive_frame),
             provider_context,
-            provider_acquire: Some(ProviderBridge::acquire_callback()),
-            provider_release: Some(ProviderBridge::release_callback()),
-        };
-        let mut process = ProcessResult {
-            struct_size: size_of::<ProcessResult>() as u32,
-            abi_version: ABI_VERSION,
-            ..ProcessResult::default()
-        };
+            Some(ProviderBridge::acquire_callback()),
+            Some(ProviderBridge::release_callback()),
+        );
+        let mut process = ProcessResult::new();
         // SAFETY: config and result match ABI v1 and all pointed-to state stays
         // live for this synchronous call.
         let status = unsafe { run_process(&config, &mut process) };
