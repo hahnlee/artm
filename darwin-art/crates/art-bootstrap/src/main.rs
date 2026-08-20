@@ -3327,6 +3327,18 @@ fn compile_runtime_filesystem_probe(root: &Path, build_dir: &Path) -> Result<Pat
     Ok(object)
 }
 
+fn compile_cached_probe_tu(
+    command: &mut Command,
+    object: &Path,
+    cache_path: &Path,
+    compiler_identity: &str,
+) -> Result<bool> {
+    let mut cache = FileHashCache::load(cache_path)?;
+    let compiled = compile_with_dependency_cache(command, object, compiler_identity, &mut cache)?;
+    cache.save(cache_path)?;
+    Ok(compiled)
+}
+
 fn audit_runtime_link(root: &Path) -> Result<()> {
     const MAX_EXPECTED_UNDEFINED: usize = 365;
 
@@ -3369,18 +3381,25 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
     ];
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
-    run_command(
-        runtime_cpp_command(&include_refs)
-            .args(["-include", "mirror/object_reference.h"])
-            .arg("-idirafter")
-            .arg(&ndk_arch_include)
-            .arg("-idirafter")
-            .arg(&ndk_include)
-            .arg("-Wno-macro-redefined")
-            .arg("-c")
-            .arg(root.join("probes/runtime_link_probe.cc"))
-            .arg("-o")
-            .arg(&object),
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let probe_cache = build_dir.join("runtime-link-probe-hashes.cache");
+    let mut probe_command = runtime_cpp_command(&include_refs);
+    probe_command
+        .args(["-include", "mirror/object_reference.h"])
+        .arg("-idirafter")
+        .arg(&ndk_arch_include)
+        .arg("-idirafter")
+        .arg(&ndk_include)
+        .arg("-Wno-macro-redefined")
+        .arg("-c")
+        .arg(root.join("probes/runtime_link_probe.cc"))
+        .arg("-o")
+        .arg(&object);
+    let _ = compile_cached_probe_tu(
+        &mut probe_command,
+        &object,
+        &probe_cache,
+        &compiler_identity,
     )?;
     run_command(
         Command::new("clang++")
@@ -3785,69 +3804,76 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
     // Keep the process probe flavor-neutral. The linked compatibility object is
     // the sole owner of DARWIN_ART_REAL_GRAPHICS and chooses the real backend.
-    run_command(
-        runtime_cpp_command(&include_refs)
-            .args(["-include", "mirror/object_reference.h"])
-            .arg("-idirafter")
-            .arg(ndk_arch_include)
-            .arg("-idirafter")
-            .arg(ndk_include)
-            .arg("-Wno-macro-redefined")
-            .arg("-DDARWIN_ART_REAL_GRAPHICS")
-            .arg("-DDARWIN_ART_HWUI_GPU")
-            .arg("-DDARWIN_ART_AOSP_COMPAT_LSEEK64")
-            .arg("-DLOG_TAG=\"DarwinArtHWUI\"")
-            .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
-            .arg("-include")
-            .arg("log/log_main.h")
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/core"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/effects"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/utils"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/private"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/android"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/codec"))
-            .arg("-I")
-            .arg(root.join("_aosp/system/logging/liblog/include"))
-            .arg("-I")
-            .arg(root.join("_aosp/system/core/libcutils/include"))
-            .arg("-I")
-            .arg(root.join("_aosp/system/core/libutils/include"))
-            .arg("-I")
-            .arg(root.join("_aosp/frameworks/base/libs/hwui"))
-            .arg("-I")
-            .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
-            .arg("-I")
-            .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
-            .arg("-I")
-            .arg(root.join("_aosp/frameworks/base/libs/androidfw/include"))
-            .arg("-I")
-            .arg(root.join("_aosp/frameworks/native/libs/ui/include"))
-            .arg("-I")
-            .arg(root.join("_aosp/frameworks/native/libs/ui/include_types"))
-            .arg("-I")
-            .arg(root.join("_aosp/frameworks/minikin/include"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/googletest/googletest/include"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/harfbuzz_ng/src"))
-            .arg("-I")
-            .arg(root.join("_aosp/system/core/libutils/include"))
-            .arg("-I")
-            .arg(root.join("_aosp/system/incremental_delivery/incfs/util/include"))
-            .arg("-I")
-            .arg(root.join("_aosp/system/core/libsystem/include"))
-            .arg("-c")
-            .arg(root.join("probes/runtime_link_probe.cc"))
-            .arg("-o")
-            .arg(&object),
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let probe_cache = build_dir.join("runtime-graphics-probe-hashes.cache");
+    let mut probe_command = runtime_cpp_command(&include_refs);
+    probe_command
+        .args(["-include", "mirror/object_reference.h"])
+        .arg("-idirafter")
+        .arg(ndk_arch_include)
+        .arg("-idirafter")
+        .arg(ndk_include)
+        .arg("-Wno-macro-redefined")
+        .arg("-DDARWIN_ART_REAL_GRAPHICS")
+        .arg("-DDARWIN_ART_HWUI_GPU")
+        .arg("-DDARWIN_ART_AOSP_COMPAT_LSEEK64")
+        .arg("-DLOG_TAG=\"DarwinArtHWUI\"")
+        .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
+        .arg("-include")
+        .arg("log/log_main.h")
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/core"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/effects"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/utils"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/private"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/android"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/codec"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/logging/liblog/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libcutils/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libutils/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/base/libs/androidfw/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/libs/ui/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/native/libs/ui/include_types"))
+        .arg("-I")
+        .arg(root.join("_aosp/frameworks/minikin/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/googletest/googletest/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/harfbuzz_ng/src"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libutils/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/incremental_delivery/incfs/util/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libsystem/include"))
+        .arg("-c")
+        .arg(root.join("probes/runtime_link_probe.cc"))
+        .arg("-o")
+        .arg(&object);
+    let _ = compile_cached_probe_tu(
+        &mut probe_command,
+        &object,
+        &probe_cache,
+        &compiler_identity,
     )?;
     run_command(
         Command::new("clang++")
@@ -4414,39 +4440,51 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
     ];
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
-    run_command(
-        runtime_cpp_command(&include_refs)
-            .args(["-include", "mirror/object_reference.h"])
-            .arg("-idirafter")
-            .arg(&ndk_arch_include)
-            .arg("-idirafter")
-            .arg(&ndk_include)
-            .arg("-Wno-macro-redefined")
-            .arg("-DDARWIN_ART_REAL_GRAPHICS")
-            .arg("-DDARWIN_ART_HWUI_GPU")
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia"))
-            .arg("-I")
-            .arg(root.join("_aosp/external/skia/include/core"))
-            .arg("-DDARWIN_ART_DIRECT_APK_RUNTIME")
-            .arg("-c")
-            .arg(root.join("probes/runtime_link_probe.cc"))
-            .arg("-o")
-            .arg(&object),
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let probe_cache = build_dir.join("runtime-direct-apk-probe-hashes.cache");
+    let mut probe_command = runtime_cpp_command(&include_refs);
+    probe_command
+        .args(["-include", "mirror/object_reference.h"])
+        .arg("-idirafter")
+        .arg(&ndk_arch_include)
+        .arg("-idirafter")
+        .arg(&ndk_include)
+        .arg("-Wno-macro-redefined")
+        .arg("-DDARWIN_ART_REAL_GRAPHICS")
+        .arg("-DDARWIN_ART_HWUI_GPU")
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/core"))
+        .arg("-DDARWIN_ART_DIRECT_APK_RUNTIME")
+        .arg("-c")
+        .arg(root.join("probes/runtime_link_probe.cc"))
+        .arg("-o")
+        .arg(&object);
+    let _ = compile_cached_probe_tu(
+        &mut probe_command,
+        &object,
+        &probe_cache,
+        &compiler_identity,
     )?;
-    run_command(
-        runtime_cpp_command(&include_refs)
-            .args(["-include", "mirror/object_reference.h"])
-            .arg("-idirafter")
-            .arg(&ndk_arch_include)
-            .arg("-idirafter")
-            .arg(&ndk_include)
-            .arg("-Wno-macro-redefined")
-            .arg("-DDARWIN_ART_DIRECT_APK_RUNTIME")
-            .arg("-c")
-            .arg(root.join("probes/runtime_apk_graph.cc"))
-            .arg("-o")
-            .arg(&graph_object),
+    let mut graph_command = runtime_cpp_command(&include_refs);
+    graph_command
+        .args(["-include", "mirror/object_reference.h"])
+        .arg("-idirafter")
+        .arg(&ndk_arch_include)
+        .arg("-idirafter")
+        .arg(&ndk_include)
+        .arg("-Wno-macro-redefined")
+        .arg("-DDARWIN_ART_DIRECT_APK_RUNTIME")
+        .arg("-c")
+        .arg(root.join("probes/runtime_apk_graph.cc"))
+        .arg("-o")
+        .arg(&graph_object);
+    let _ = compile_cached_probe_tu(
+        &mut graph_command,
+        &graph_object,
+        &probe_cache,
+        &compiler_identity,
     )?;
 
     let mut linker = Command::new("clang++");
