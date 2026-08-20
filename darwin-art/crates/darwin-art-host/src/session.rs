@@ -9,17 +9,20 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use darwin_art_engine_sys::{ShutdownProcessFn, SurfaceDestroyFn};
+use darwin_art_engine::{EngineSession, EngineSymbols};
+use darwin_art_engine_sys::SurfaceDestroyFn;
 
-pub(super) type SharedProcessShutdown = Rc<RefCell<Option<ShutdownProcessFn>>>;
+pub(super) type SharedProcessShutdown = Rc<RefCell<Option<Rc<RefCell<EngineSession>>>>>;
 
 pub(super) fn shutdown_process_once(shutdown: &SharedProcessShutdown) -> i32 {
-    let Some(callback) = shutdown.borrow_mut().take() else {
+    let Some(engine) = shutdown.borrow_mut().take() else {
         return 0;
     };
-    // SAFETY: the callback came from the fixed v1 ABI and the process remains
-    // initialized until this one-shot lease cleanup invokes it.
-    unsafe { callback() }
+    engine.borrow_mut().shutdown_once()
+}
+
+pub(super) fn engine_symbols(engine: &Rc<RefCell<EngineSession>>) -> EngineSymbols {
+    engine.borrow().symbols()
 }
 
 /// Owns a surface returned by either `surface_active_gpu` or `surface_create`.

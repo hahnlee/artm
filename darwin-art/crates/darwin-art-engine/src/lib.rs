@@ -72,6 +72,40 @@ mod platform {
         }
     }
 
+    /// Process-scoped engine owner.  The dynamic library and its shutdown
+    /// callback share one Rust lifetime, so callers cannot accidentally drop
+    /// the symbol image before ART has been shut down.
+    pub struct EngineSession {
+        engine: LoadedEngine,
+        shutdown_taken: bool,
+    }
+
+    impl EngineSession {
+        pub fn open(path: &Path) -> Result<Self, String> {
+            Ok(Self {
+                engine: LoadedEngine::open(path)?,
+                shutdown_taken: false,
+            })
+        }
+
+        pub fn symbols(&self) -> EngineSymbols {
+            self.engine.symbols()
+        }
+
+        /// Invoke the process shutdown callback at most once.  The callback
+        /// is kept behind this owner so its code image remains mapped for the
+        /// entire call and until the owner is dropped afterward.
+        pub fn shutdown_once(&mut self) -> i32 {
+            if self.shutdown_taken {
+                return 0;
+            }
+            self.shutdown_taken = true;
+            // SAFETY: the function pointer was resolved from this live,
+            // version-checked engine image and takes no arguments.
+            unsafe { (self.engine.symbols.shutdown_process)() }
+        }
+    }
+
     struct DynamicLibrary(*mut c_void);
 
     impl DynamicLibrary {
@@ -125,4 +159,4 @@ mod platform {
 }
 
 #[cfg(target_os = "macos")]
-pub use platform::{EngineSymbols, LoadedEngine};
+pub use platform::{EngineSession, EngineSymbols, LoadedEngine};

@@ -13,21 +13,22 @@ mod ffi;
 mod session;
 
 #[cfg(target_os = "macos")]
-use darwin_art_engine::LoadedEngine;
+use darwin_art_engine::EngineSession;
 
 pub use darwin_art_abi::ABI_VERSION;
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
 pub use ffi::{FrameCallback, ProcessConfig, ProcessResult};
 use session::{
-    SharedProcessShutdown, SharedSurfaceCleanup, SurfaceCleanupGuard, shutdown_process_once,
+    SharedProcessShutdown, SharedSurfaceCleanup, SurfaceCleanupGuard, engine_symbols,
+    shutdown_process_once,
 };
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
 use ffi::{
-    DispatchPointerFn, PointerEvent, PumpFrameworkFrameFn, RunProcessFn, ShutdownProcessFn,
-    SurfaceActiveFn, SurfaceCreateFn, SurfaceCreateInfo, SurfaceDestroyFn,
-    SurfaceNextPointerEventFn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
+    DispatchPointerFn, PointerEvent, PumpFrameworkFrameFn, RunProcessFn, SurfaceActiveFn,
+    SurfaceCreateFn, SurfaceCreateInfo, SurfaceDestroyFn, SurfaceNextPointerEventFn,
+    SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -232,10 +233,11 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         runtime
             .start()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
-        let library = LoadedEngine::open(&options.library).map_err(HostError::DynamicLoader)?;
-        let symbols = library.symbols();
+        let engine = Rc::new(RefCell::new(
+            EngineSession::open(&options.library).map_err(HostError::DynamicLoader)?,
+        ));
+        let symbols = engine_symbols(&engine);
         let run_process: RunProcessFn = symbols.run_process;
-        let shutdown_process: ShutdownProcessFn = symbols.shutdown_process;
         let surface_create: SurfaceCreateFn = symbols.surface_create;
         let surface_update: SurfaceUpdateFn = symbols.surface_update;
         let surface_present: SurfacePresentFn = symbols.surface_present;
@@ -274,7 +276,8 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             abi_version: ABI_VERSION,
             ..ProcessResult::default()
         };
-        let process_shutdown: SharedProcessShutdown = Rc::new(RefCell::new(Some(shutdown_process)));
+        let process_shutdown: SharedProcessShutdown =
+            Rc::new(RefCell::new(Some(Rc::clone(&engine))));
         // SAFETY: config and result match ABI v1 and all pointed-to state stays
         // live for this synchronous call.
         let status = unsafe { run_process(&config, &mut process) };
@@ -299,7 +302,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         }
         let engine_cleanup = Rc::clone(&process_shutdown);
         let engine_lease =
-            match runtime.install_owned_subsystem(Subsystem::Engine, library, move || {
+            match runtime.install_owned_subsystem(Subsystem::Engine, engine, move || {
                 let status = shutdown_process_once(&engine_cleanup);
                 if status == 0 {
                     Ok(())
