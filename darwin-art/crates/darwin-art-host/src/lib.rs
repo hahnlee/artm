@@ -106,6 +106,103 @@ struct FrameHost {
     last_frame: Option<OwnedFrame>,
 }
 
+/// Owns the native process lifetime after the dynamic entry points have been
+/// resolved.  The process ABI is one-shot and process-global, so cleanup must
+/// happen even when a later Rust validation or surface operation returns an
+/// error.  `close` is used on the normal path to retain the shutdown status;
+/// `Drop` is the rollback path for every early return.
+#[cfg(target_os = "macos")]
+struct ProcessCleanupGuard {
+    shutdown: ShutdownProcessFn,
+    armed: bool,
+}
+
+#[cfg(target_os = "macos")]
+impl ProcessCleanupGuard {
+    fn new(shutdown: ShutdownProcessFn) -> Self {
+        Self {
+            shutdown,
+            armed: true,
+        }
+    }
+
+    fn close(&mut self) -> i32 {
+        if !self.armed {
+            return 0;
+        }
+        // Disarm before entering foreign code.  This keeps cleanup one-shot
+        // even if a malformed implementation were to unwind through the ABI.
+        self.armed = false;
+        // SAFETY: The function pointer was resolved from the fixed v1 ABI and
+        // remains valid because DynamicLibrary is intentionally process-scoped.
+        unsafe { (self.shutdown)() }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for ProcessCleanupGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.armed = false;
+            // SAFETY: Same invariant as `close`; this is the best-effort
+            // rollback path, so its status cannot be returned to the caller.
+            unsafe {
+                let _ = (self.shutdown)();
+            }
+        }
+    }
+}
+
+/// Owns a surface returned by either `surface_active_gpu` or
+/// `surface_create`.  Surface destruction is deliberately ordered before the
+/// process guard (the surface may refer to ART-owned rendering state).
+#[cfg(target_os = "macos")]
+struct SurfaceCleanupGuard {
+    destroy: SurfaceDestroyFn,
+    surface: *mut c_void,
+    armed: bool,
+}
+
+#[cfg(target_os = "macos")]
+impl SurfaceCleanupGuard {
+    fn new(destroy: SurfaceDestroyFn, surface: *mut c_void) -> Self {
+        debug_assert!(!surface.is_null());
+        Self {
+            destroy,
+            surface,
+            armed: true,
+        }
+    }
+
+    fn handle(&self) -> *mut c_void {
+        self.surface
+    }
+
+    fn close(&mut self) -> i32 {
+        if !self.armed {
+            return 0;
+        }
+        self.armed = false;
+        // SAFETY: The pointer was returned by the matching v1 surface API and
+        // is kept live until this one-shot destruction call.
+        unsafe { (self.destroy)(self.surface) }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for SurfaceCleanupGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.armed = false;
+            // SAFETY: Same invariant as `close`; Drop cannot report a status,
+            // but it must still release the native surface on rollback.
+            unsafe {
+                let _ = (self.destroy)(self.surface);
+            }
+        }
+    }
+}
+
 impl FrameHost {
     unsafe fn receive(
         &mut self,
@@ -275,6 +372,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             abi_version: ABI_VERSION,
             ..ProcessResult::default()
         };
+        let mut process_guard = ProcessCleanupGuard::new(shutdown_process);
         // SAFETY: config and result match ABI v1 and all pointed-to state stays
         // live for this synchronous call.
         let status = unsafe { run_process(&config, &mut process) };
@@ -283,7 +381,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             // A late run-stage failure may still have created ART. Ask the
             // process ABI to tear it down; NOT_READY means creation never
             // completed and is the only benign shutdown result here.
-            let shutdown_status = unsafe { shutdown_process() };
+            let shutdown_status = process_guard.close();
             const SHUTDOWN_NOT_READY: i32 = 67;
             if shutdown_status != 0 && shutdown_status != SHUTDOWN_NOT_READY {
                 return Err(HostError::ShutdownFailed(shutdown_status));
@@ -307,6 +405,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     status: -1,
                 });
             }
+            let mut surface_guard = SurfaceCleanupGuard::new(surface_destroy, surface);
             let surface_lease = runtime
                 .install_subsystem(Subsystem::Surface)
                 .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
@@ -333,7 +432,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             let dispatch_queued_events = || -> Result<u64, HostError> {
                 let mut dispatched = 0_u64;
                 let mut event = PointerEvent::default();
-                while unsafe { surface_next_pointer_event(surface, &mut event) } {
+                while unsafe { surface_next_pointer_event(surface_guard.handle(), &mut event) } {
                     let dispatch_status =
                         unsafe { dispatch_pointer(event.action, event.x, event.y) };
                     if dispatch_status != 0 {
@@ -353,8 +452,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     let mut held_ms = 0_u64;
                     while held_ms < test_hold_ms && loop_error.is_none() {
                         let slice_ms = (test_hold_ms - held_ms).min(16);
-                        let pump_status =
-                            unsafe { surface_pump_events(surface, slice_ms as f64 / 1000.0) };
+                        let pump_status = unsafe {
+                            surface_pump_events(surface_guard.handle(), slice_ms as f64 / 1000.0)
+                        };
                         if pump_status == 7 {
                             break;
                         }
@@ -399,7 +499,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             }
             while remaining > 0.0 {
                 let slice = remaining.min(0.016);
-                let pump_status = unsafe { surface_pump_events(surface, slice) };
+                let pump_status = unsafe { surface_pump_events(surface_guard.handle(), slice) };
                 if pump_status == 7 {
                     break;
                 }
@@ -438,11 +538,11 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 }
                 remaining -= slice;
             }
-            let destroy_status = unsafe { surface_destroy(surface) };
+            let destroy_status = surface_guard.close();
             let _ = runtime.begin_shutdown();
             let _ = runtime.uninstall_subsystem(surface_lease);
             let _ = runtime.uninstall_subsystem(engine_lease);
-            let shutdown_status = unsafe { shutdown_process() };
+            let shutdown_status = process_guard.close();
             if shutdown_status == 0 {
                 let _ = runtime.finish_shutdown();
             } else {
@@ -496,6 +596,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     status: create_status,
                 });
             }
+            let mut surface_guard = SurfaceCleanupGuard::new(surface_destroy, surface);
 
             let present_result = (|| {
                 let mut presentations = 0_u64;
@@ -517,13 +618,13 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     // synchronous main-thread upload.
                     let update_status = unsafe {
                         surface_update(
-                            surface,
+                            surface_guard.handle(),
                             frame.argb_pixels.as_ptr().cast(),
                             frame.width as usize * size_of::<u32>(),
                         )
                     };
                     surface_status("update", update_status, false)?;
-                    let present_status = unsafe { surface_present(surface) };
+                    let present_status = unsafe { surface_present(surface_guard.handle()) };
                     surface_status("present", present_status, false)
                 };
                 // SAFETY: surface is live; the packed Rust frame remains live
@@ -590,8 +691,12 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                         let mut held = 0_u64;
                         while held < hold_ms {
                             let slice_ms = (hold_ms - held).min(16);
-                            let pump_status =
-                                unsafe { surface_pump_events(surface, slice_ms as f64 / 1000.0) };
+                            let pump_status = unsafe {
+                                surface_pump_events(
+                                    surface_guard.handle(),
+                                    slice_ms as f64 / 1000.0,
+                                )
+                            };
                             if pump_status == 7 {
                                 break;
                             }
@@ -628,13 +733,14 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 let mut remaining = options.visible_seconds;
                 while remaining > 0.0 {
                     let slice = remaining.min(0.016);
-                    let pump_status = unsafe { surface_pump_events(surface, slice) };
+                    let pump_status = unsafe { surface_pump_events(surface_guard.handle(), slice) };
                     if pump_status == 7 {
                         break;
                     }
                     surface_status("pump_events", pump_status, false)?;
                     let mut event = PointerEvent::default();
-                    while unsafe { surface_next_pointer_event(surface, &mut event) } {
+                    while unsafe { surface_next_pointer_event(surface_guard.handle(), &mut event) }
+                    {
                         let dispatch_status =
                             unsafe { dispatch_pointer(event.action, event.x, event.y) };
                         if dispatch_status != 0 {
@@ -647,8 +753,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 }
                 Ok(presentations)
             })();
-            // SAFETY: surface was returned by create and has not been destroyed.
-            let destroy_status = unsafe { surface_destroy(surface) };
+            // SurfaceCleanupGuard keeps the surface alive through the
+            // presentation closure and also handles any early return from it.
+            let destroy_status = surface_guard.close();
             let presentations = present_result?;
             surface_status("destroy", destroy_status, false)?;
             Ok(presentations)
@@ -657,7 +764,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // Destroy ART before returning ownership to arbitrary Rust code so its
         // registered DexFile pointers and process-global handlers remain valid
         // throughout Runtime teardown.
-        let shutdown_status = unsafe { shutdown_process() };
+        let shutdown_status = process_guard.close();
         if shutdown_status == 0 {
             let _ = runtime.begin_shutdown();
             let _ = runtime.uninstall_subsystem(engine_lease);
