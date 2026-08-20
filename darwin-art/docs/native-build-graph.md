@@ -36,6 +36,15 @@ The remaining migration is to apply the same persisted-command promotion to
 the graphics/ICU/HWUI foundation archives. That can proceed without changing
 the Rust runtime or Android acceptance contract.
 
+## Current measurement
+
+On the development machine, the materialized graphics graph currently
+contains 172 cached C++ translation-unit edges and one archive edge. A clean
+graph execution completed the 172-object parallel compile and archive in
+75.25s (`ninja -j8`); the immediately repeated execution reported `no work to
+do` in 0.01s. The remaining link/audit command is intentionally measured
+separately because it includes the production dylib link and symbol gates.
+
 The process probe is now split at the first stable boundary: environment and
 fixture-mode validation lives in `probes/runtime_process_options.cc` and is a
 separately cached object. The ART orchestration object therefore only changes
