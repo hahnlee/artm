@@ -1687,7 +1687,8 @@ fn build_network_dex_probe(root: &Path) -> Result<()> {
         Command::new("javac")
             .args(["--release", "8", "-encoding", "UTF-8", "-d"])
             .arg(&class_dir)
-            .arg(tool.join("probes/NetworkRuntimeFixture.java")),
+            .arg(tool.join("probes/NetworkRuntimeFixture.java"))
+            .arg(root.join("probes/button/ProbeAnimationHost.java")),
     )?;
     let classes_dex = dex_dir.join("classes.dex");
     if classes_dex.is_file() {
@@ -1702,11 +1703,14 @@ fn build_network_dex_probe(root: &Path) -> Result<()> {
             .arg("--output")
             .arg(&dex_dir)
             .arg(&baseline_dex)
-            .arg(class_dir.join("dev/darwinart/probe/NetworkRuntimeFixture.class")),
+            .arg(class_dir.join("dev/darwinart/probe/NetworkRuntimeFixture.class"))
+            .arg(class_dir.join("dev/darwinart/probe/ProbeAnimationHost.class"))
+            .arg(class_dir.join("dev/darwinart/probe/ProbeAnimationHost$1.class")),
     )?;
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    if !output.contains("classes=13 methods=320")
+    if !output.contains("classes=15")
         || !output.contains("Ldev/darwinart/probe/NetworkRuntimeFixture;")
+        || !output.contains("Ldev/darwinart/probe/ProbeAnimationHost;")
     {
         return Err(format!("unexpected network DEX probe output: {output:?}").into());
     }
@@ -1749,7 +1753,7 @@ fn build_network_dex_probe(root: &Path) -> Result<()> {
     if !kind.contains("ELF 64-bit LSB shared object, ARM aarch64") {
         return Err(format!("unexpected network fixture format: {kind}").into());
     }
-    println!("build-network-dex: classes=13 methods=320 ELF=arm64 imports=8 loopback=only");
+    println!("build-network-dex: classes=15 methods=328 ELF=arm64 imports=8 loopback=only");
     Ok(())
 }
 
@@ -4332,7 +4336,11 @@ fn probe_runtime_elf_jni(root: &Path) -> Result<()> {
 
 fn probe_runtime_network(root: &Path) -> Result<()> {
     build_network_dex_probe(root)?;
-    probe_runtime_dex_flavor(root, false, false, false, false, true, false)
+    // The host is intentionally GPU-only.  Network acceptance still drives
+    // the same Activity/DecorView path as the other Android flavors, so use
+    // the real graphics runtime rather than a CPU/minimal flavor that cannot
+    // create an active Metal surface.
+    probe_runtime_dex_flavor(root, false, true, false, false, true, false)
 }
 
 fn pinned_direct_apk_ndk_bin() -> Result<PathBuf> {
@@ -5241,7 +5249,7 @@ fn probe_runtime_dex_flavor(
          ART runtime native: System.arraycopy()=42\n\
          ART Android framework: ProbeActivity().probeValue()=42\n\
          ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
-         ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
+         ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=360x640\n\
          ART Android lifecycle: Activity.onCreate()=43\n\
          ART Darwin launcher: main(String[])=ok"
             .to_owned()
