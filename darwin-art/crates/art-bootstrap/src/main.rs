@@ -15,7 +15,7 @@ mod native_build;
 use build_context::BuildPaths;
 use native_build::{
     FileHashCache, common_cpp_command, compile_cpp, compile_with_dependency_cache, create_archive,
-    record_cache_result,
+    link_with_cache, record_cache_result,
 };
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -3618,16 +3618,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&runtime_library);
     let description = describe_command(&linker);
     let link_stamp = build_dir.join("runtime-link.fingerprint");
-    let cached_link = link_fingerprint_matches(&linker, &runtime_library, &link_stamp)?;
-    let output = if cached_link {
-        Command::new("true").output()?
-    } else {
-        let output = linker.output()?;
-        if output.status.success() {
-            write_link_fingerprint(&linker, &runtime_library, &link_stamp)?;
-        }
-        output
-    };
+    let output = link_with_cache(&mut linker, &runtime_library, &link_stamp)?;
     if output.status.success() {
         let symbols = command_output(Command::new("nm").args(["-gU"]).arg(&runtime_library))?;
         for required in [
@@ -4175,16 +4166,7 @@ fn audit_runtime_graphics_link_mode(root: &Path, run_upstream_gates: bool) -> Re
         .arg(&runtime_library);
     let description = describe_command(&linker);
     let link_stamp = build_dir.join("runtime-graphics-link.fingerprint");
-    let cached_link = link_fingerprint_matches(&linker, &runtime_library, &link_stamp)?;
-    let output = if cached_link {
-        Command::new("true").output()?
-    } else {
-        let output = linker.output()?;
-        if output.status.success() {
-            write_link_fingerprint(&linker, &runtime_library, &link_stamp)?;
-        }
-        output
-    };
+    let output = link_with_cache(&mut linker, &runtime_library, &link_stamp)?;
     if !output.status.success() {
         let stderr = String::from_utf8(output.stderr)?;
         fs::write(build_dir.join("link.err"), &stderr)?;
@@ -5767,56 +5749,6 @@ fn describe_command(command: &Command) -> String {
         .collect::<Vec<_>>()
         .join(" ");
     format!("{program} {args}")
-}
-
-/// Return a cheap identity for a native link invocation and its artifacts.
-/// Compilation already has a dependency/content cache; this closes the
-/// remaining warm-audit gap where the same large graphics closure was linked
-/// on every run. Paths are represented by size and nanosecond mtime, so normal
-/// artifact replacement invalidates the link without rereading archives.
-fn link_fingerprint(command: &Command) -> String {
-    let mut digest = Sha256::new();
-    digest.update(command.get_program().to_string_lossy().as_bytes());
-    digest.update([0]);
-    for argument in command.get_args() {
-        let value = argument.to_string_lossy();
-        digest.update(value.as_bytes());
-        digest.update([0]);
-        if let Ok(metadata) = fs::metadata(argument) {
-            digest.update(metadata.len().to_le_bytes());
-            if let Ok(modified) = metadata.modified()
-                && let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH)
-            {
-                digest.update(duration.as_secs().to_le_bytes());
-                digest.update(duration.subsec_nanos().to_le_bytes());
-            }
-        } else {
-            digest.update([0xff]);
-        }
-    }
-    format!("{:x}", digest.finalize())
-}
-
-fn link_fingerprint_matches(command: &Command, output: &Path, stamp: &Path) -> Result<bool> {
-    if !output.is_file() || !stamp.is_file() {
-        return Ok(false);
-    }
-    Ok(fs::read_to_string(stamp)?.trim() == link_fingerprint(command))
-}
-
-fn write_link_fingerprint(command: &Command, output: &Path, stamp: &Path) -> Result<()> {
-    if !output.is_file() {
-        return Err(format!(
-            "linker reported success without output: {}",
-            output.display()
-        )
-        .into());
-    }
-    if let Some(parent) = stamp.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(stamp, format!("{}\n", link_fingerprint(command)))?;
-    Ok(())
 }
 
 #[cfg(test)]

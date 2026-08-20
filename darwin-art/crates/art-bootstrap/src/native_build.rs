@@ -4,7 +4,7 @@ use std::fs;
 use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
 use super::{Result, describe_command, run_command};
 
@@ -264,4 +264,67 @@ pub(crate) fn create_archive(archive: &Path, objects: &[PathBuf]) -> Result<()> 
         command.arg(object);
     }
     run_command(&mut command)
+}
+
+/// Link an artifact only when the command or one of its file inputs changed.
+/// The caller still performs the normal symbol/ABI audit on the returned
+/// output; a cached result is represented by a successful `true` command.
+pub(crate) fn link_with_cache(
+    command: &mut Command,
+    output: &Path,
+    stamp: &Path,
+) -> Result<Output> {
+    let fingerprint = link_fingerprint(command, output);
+    let cached =
+        output.is_file() && stamp.is_file() && fs::read_to_string(stamp)?.trim() == fingerprint;
+    if cached {
+        return Ok(Command::new("true").output()?);
+    }
+
+    let result = command.output()?;
+    if result.status.success() {
+        if !output.is_file() {
+            return Err(format!(
+                "linker reported success without output: {}",
+                output.display()
+            )
+            .into());
+        }
+        if let Some(parent) = stamp.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(stamp, format!("{fingerprint}\n"))?;
+    }
+    Ok(result)
+}
+
+fn link_fingerprint(command: &Command, output: &Path) -> String {
+    let mut digest = Sha256::new();
+    digest.update(command.get_program().to_string_lossy().as_bytes());
+    digest.update([0]);
+    let output = output.to_string_lossy();
+    for argument in command.get_args() {
+        let value = argument.to_string_lossy();
+        // The output's own mtime changes as a consequence of a successful
+        // link; including it would make every subsequent invocation stale.
+        if value == output {
+            digest.update(b"<output>");
+            digest.update([0]);
+            continue;
+        }
+        digest.update(value.as_bytes());
+        digest.update([0]);
+        if let Ok(metadata) = fs::metadata(argument) {
+            digest.update(metadata.len().to_le_bytes());
+            if let Ok(modified) = metadata.modified()
+                && let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH)
+            {
+                digest.update(duration.as_secs().to_le_bytes());
+                digest.update(duration.subsec_nanos().to_le_bytes());
+            }
+        } else {
+            digest.update([0xff]);
+        }
+    }
+    format!("{:x}", digest.finalize())
 }
