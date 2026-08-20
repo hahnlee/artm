@@ -9,7 +9,9 @@
 #include <unistd.h>
 
 #include <array>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
@@ -77,7 +79,13 @@ bool InstallProbeAndroidSystemRoot() {
 #endif
 #include "hwui/Canvas.h"
 #define private public
+#define protected public
+#include "AnimationContext.h"
+#include "Animator.h"
+#include "AnimatorManager.h"
+#include "renderthread/TimeLord.h"
 #include "RenderNode.h"
+#undef protected
 #undef private
 #include "pipeline/skia/RenderNodeDrawable.h"
 #include "pipeline/skia/SkiaRecordingCanvas.h"
@@ -117,6 +125,80 @@ size_t SyncRecordedRenderNodeTree(android::uirenderer::RenderNode* node,
         });
   }
   return synchronized;
+}
+
+// Android's CanvasContext normally calls AnimatorManager::animateCommon().
+// The Darwin host owns the same AnimationContext but intentionally keeps the
+// pixel path on the Metal drawable, so reproduce only this no-damage portion
+// locally rather than adding a new public HWUI ABI symbol.
+void AnimateNodeWithContext(android::uirenderer::RenderNode* node,
+                            android::uirenderer::AnimationContext& context) {
+  if (node == nullptr) return;
+  auto& manager = node->mAnimatorManager;
+  const bool debug_animation = std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr;
+  if (debug_animation) {
+    std::cerr << "ART HWUI animation pulse node=" << node
+              << " new=" << manager.mNewAnimators.size()
+              << " active=" << manager.mAnimators.size()
+              << " handle=" << manager.mAnimationHandle
+              << " frame_ms=" << context.frameTimeMs() << "\n";
+  }
+  if (manager.mAnimationHandle == nullptr) return;
+  manager.pushStaging();
+  auto new_end = std::remove_if(
+      manager.mAnimators.begin(), manager.mAnimators.end(),
+      [&context](android::sp<android::uirenderer::BaseRenderNodeAnimator>& animator) {
+        const bool finished = animator->animate(context);
+        if (finished) animator->detach();
+        return finished;
+      });
+  manager.mAnimators.erase(new_end, manager.mAnimators.end());
+  auto* handle = manager.mAnimationHandle;
+  node->mProperties.updateMatrix();
+  handle->notifyAnimationsRan();
+  if (debug_animation) {
+    std::cerr << "ART HWUI animation pulse result active="
+              << manager.mAnimators.size() << " handle="
+              << manager.mAnimationHandle << "\n";
+    for (const auto& animator : manager.mAnimators) {
+      std::cerr << "ART HWUI animator duration=" << animator->duration()
+                << " remaining=" << animator->getRemainingPlayTime()
+                << " final=" << animator->finalValue() << "\n";
+    }
+  }
+}
+
+bool HwuiNodeSubtreeHasAnimators(android::uirenderer::RenderNode* node) {
+  if (node == nullptr) return false;
+  if (!node->mAnimatorManager.mNewAnimators.empty() ||
+      !node->mAnimatorManager.mAnimators.empty()) {
+    return true;
+  }
+  bool found = false;
+  if (node->mDisplayList) {
+    node->mDisplayList.updateChildren(
+        [&](android::uirenderer::RenderNode* child) {
+          found = found || HwuiNodeSubtreeHasAnimators(child);
+        });
+  }
+  return found;
+}
+
+void RegisterHwuiNodeSubtreeAnimators(
+    android::uirenderer::RenderNode* node,
+    android::uirenderer::AnimationContext& context) {
+  if (node == nullptr) return;
+  if ((!node->mAnimatorManager.mNewAnimators.empty() ||
+       !node->mAnimatorManager.mAnimators.empty()) &&
+      !node->animators().hasAnimationHandle()) {
+    context.addAnimatingRenderNode(*node);
+  }
+  if (node->mDisplayList) {
+    node->mDisplayList.updateChildren(
+        [&](android::uirenderer::RenderNode* child) {
+          RegisterHwuiNodeSubtreeAnimators(child, context);
+        });
+  }
 }
 
 }  // namespace
@@ -586,7 +668,33 @@ static std::size_t g_frame_width = 0;
 static std::size_t g_frame_height = 0;
 static jclass g_probe_canvas_class = nullptr;
 static jobject g_interactive_root = nullptr;
+// Java-owned HWUI RenderNode retained across traversals. Recording through
+// RenderNode.beginRecording()/endRecording() gives View.draw() the exact
+// Android RecordingCanvas contract (including hardware-only RippleDrawable).
+static jobject g_gpu_render_node = nullptr;
+// The display list is persistent like Android's ViewRoot/RenderThread path.
+// Pointer moves only replay this node; a new recording is needed for the
+// initial frame and for pressed/released state transitions.
+static bool g_gpu_render_node_recorded = false;
+// The Android RippleDrawable remains the source of truth for pressed state
+// and animators. This is only a GPU compatibility bridge for the standalone
+// RenderNodeDrawable path, which cannot currently bind CanvasProperty shader
+// uniforms without a full CanvasContext.
+static bool g_gpu_ripple_overlay_active = false;
+static jfloat g_gpu_ripple_overlay_x = 0.0f;
+static jfloat g_gpu_ripple_overlay_y = 0.0f;
+static std::chrono::steady_clock::time_point g_gpu_ripple_overlay_started;
+static std::unique_ptr<android::uirenderer::renderthread::TimeLord>
+    g_hwui_time_lord;
+static std::unique_ptr<android::uirenderer::AnimationContext>
+    g_hwui_animation_context;
 static jobject g_pressed_view = nullptr;
+// Input is staged immediately before View.draw() so RippleDrawable observes
+// the same hardware RecordingCanvas that Android's UI traversal supplies.
+// 1 = press, 2 = release/click, 0 = no pending state transition.
+static uint32_t g_pending_pressed_action = 0;
+static jfloat g_pending_pressed_x = 0.0f;
+static jfloat g_pending_pressed_y = 0.0f;
 static jint g_interactive_width = 0;
 static jint g_interactive_height = 0;
 static void* g_host_context = nullptr;
@@ -782,6 +890,68 @@ static jboolean PresentFrame(JNIEnv* env, jclass, jint width, jint height,
 // RecordingCanvas, the resulting RenderNode is replayed directly into the
 // CAMetalLayer drawable. No Bitmap, Java int[] or IOSurface CPU mapping is
 // created in this path.
+static jboolean ReplayGpuRenderNode(JNIEnv* env, jint width, jint height) {
+  if (g_gpu_surface == nullptr || g_gpu_render_node == nullptr) {
+    return JNI_FALSE;
+  }
+  jclass render_node_class = env->FindClass("android/graphics/RenderNode");
+  jfieldID native_render_node =
+      render_node_class == nullptr
+          ? nullptr
+          : env->GetFieldID(render_node_class, "mNativeRenderNode", "J");
+  auto* node = native_render_node == nullptr
+                   ? nullptr
+                   : reinterpret_cast<android::uirenderer::RenderNode*>(
+                         static_cast<std::uintptr_t>(env->GetLongField(
+                             g_gpu_render_node, native_render_node)));
+  if (node == nullptr || env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(render_node_class);
+    return JNI_FALSE;
+  }
+  DarwinArtGpuFrame* frame = darwin_art_surface_gpu_begin(g_gpu_surface);
+  if (frame == nullptr) {
+    env->DeleteLocalRef(render_node_class);
+    return JNI_FALSE;
+  }
+  auto* canvas = static_cast<SkCanvas*>(darwin_art_surface_gpu_canvas(frame));
+  if (canvas == nullptr) {
+    darwin_art_surface_gpu_end(g_gpu_surface, frame);
+    env->DeleteLocalRef(render_node_class);
+    return JNI_FALSE;
+  }
+  canvas->clear(SK_ColorTRANSPARENT);
+  android::uirenderer::skiapipeline::RenderNodeDrawable drawable(
+      node, canvas, false);
+  drawable.forceDraw(canvas);
+  if (g_gpu_ripple_overlay_active) {
+    const double elapsed_ms = std::chrono::duration<double, std::milli>(
+                                  std::chrono::steady_clock::now() -
+                                  g_gpu_ripple_overlay_started)
+                                  .count();
+    const float progress = std::clamp(static_cast<float>(elapsed_ms / 2200.0),
+                                      0.0f, 1.0f);
+    SkPaint ripple_paint;
+    ripple_paint.setAntiAlias(true);
+    ripple_paint.setColor(SkColorSetARGB(
+        static_cast<U8CPU>(24.0f + (1.0f - progress) * 64.0f), 30, 30, 30));
+    canvas->save();
+    canvas->clipRect(SkRect::MakeLTRB(104.0f, 298.0f, 256.0f, 342.0f));
+    canvas->drawCircle(g_gpu_ripple_overlay_x, g_gpu_ripple_overlay_y,
+                       8.0f + progress * 76.0f, ripple_paint);
+    canvas->restore();
+  }
+  const DarwinArtSurfaceResult result =
+      darwin_art_surface_gpu_end(g_gpu_surface, frame);
+  env->DeleteLocalRef(render_node_class);
+  if (result != DARWIN_ART_SURFACE_OK) {
+    return JNI_FALSE;
+  }
+  g_frame_width = static_cast<std::size_t>(width);
+  g_frame_height = static_cast<std::size_t>(height);
+  return JNI_TRUE;
+}
+
 static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
                                   jint height) {
   if (!darwin_art::hwui_gpu_enabled()) {
@@ -804,32 +974,182 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
     darwin_art_surface_set_active_gpu(g_gpu_surface);
   }
 
-  std::unique_ptr<android::Canvas> recorder(
-      android::Canvas::create_recording_canvas(width, height));
-  if (recorder == nullptr) {
-    std::cerr << "ART HWUI GPU: RecordingCanvas initialization failed\n";
-    return JNI_FALSE;
+  // ACTION_MOVE is intentionally replay-only. Re-recording View.draw() every
+  // 16 ms replaces the display-list-owned CanvasProperty references and makes
+  // RippleDrawable appear static even while RenderNodeAnimators advance.
+  if (g_gpu_render_node_recorded && g_pending_pressed_action == 0) {
+    return ReplayGpuRenderNode(env, width, height);
   }
-  jclass canvas_class = env->FindClass("android/graphics/Canvas");
-  jmethodID canvas_ctor = canvas_class == nullptr
-                              ? nullptr
-                              : env->GetMethodID(canvas_class, "<init>", "()V");
-  jfieldID native_canvas = canvas_class == nullptr
-                               ? nullptr
-                               : env->GetFieldID(canvas_class,
-                                                 "mNativeCanvasWrapper", "J");
-  jobject java_canvas = canvas_ctor == nullptr || native_canvas == nullptr
-                            ? nullptr
-                            : env->NewObject(canvas_class, canvas_ctor);
-  if (java_canvas == nullptr || env->ExceptionCheck()) {
+
+  jclass render_node_class = env->FindClass("android/graphics/RenderNode");
+  jfieldID native_render_node =
+      render_node_class == nullptr
+          ? nullptr
+          : env->GetFieldID(render_node_class, "mNativeRenderNode", "J");
+  // The helper lives in the app DEX, so resolve it through the content
+  // classloader rather than FindClass (which is rooted at boot on this
+  // standalone ART thread).
+  jclass animation_host_class = nullptr;
+  jclass thread_class = env->FindClass("java/lang/Thread");
+  jmethodID current_thread =
+      thread_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(thread_class, "currentThread",
+                                   "()Ljava/lang/Thread;");
+  jobject thread = current_thread == nullptr
+                       ? nullptr
+                       : env->CallStaticObjectMethod(thread_class, current_thread);
+  jmethodID get_class_loader =
+      thread_class == nullptr
+          ? nullptr
+          : env->GetMethodID(thread_class, "getContextClassLoader",
+                             "()Ljava/lang/ClassLoader;");
+  jobject class_loader = get_class_loader == nullptr
+                             ? nullptr
+                             : env->CallObjectMethod(thread, get_class_loader);
+  jclass class_loader_class = class_loader == nullptr
+                                  ? nullptr
+                                  : env->GetObjectClass(class_loader);
+  jmethodID load_class =
+      class_loader_class == nullptr
+          ? nullptr
+          : env->GetMethodID(class_loader_class, "loadClass",
+                             "(Ljava/lang/String;)Ljava/lang/Class;");
+  jstring helper_name = env->NewStringUTF("dev.darwinart.probe.ProbeAnimationHost");
+  jobject helper_class = load_class == nullptr
+                             ? nullptr
+                             : env->CallObjectMethod(class_loader, load_class,
+                                                     helper_name);
+  if (!env->ExceptionCheck()) {
+    animation_host_class = static_cast<jclass>(helper_class);
+  } else {
+    env->ExceptionClear();
+  }
+  env->DeleteLocalRef(helper_name);
+  env->DeleteLocalRef(class_loader_class);
+  env->DeleteLocalRef(class_loader);
+  env->DeleteLocalRef(thread);
+  env->DeleteLocalRef(thread_class);
+  if (animation_host_class == nullptr) {
+    std::cerr << "ART HWUI GPU: app AnimationHost helper class unavailable\n";
+  }
+  jclass animation_host_interface =
+      env->FindClass("android/graphics/RenderNode$AnimationHost");
+  jmethodID animation_host_create =
+      animation_host_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(animation_host_class, "create",
+                                   "(Ljava/lang/Class;)Ljava/lang/Object;");
+  jmethodID render_node_create =
+      render_node_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(
+                render_node_class, "create",
+                "(Ljava/lang/String;Landroid/graphics/RenderNode$AnimationHost;)"
+                "Landroid/graphics/RenderNode;");
+  jmethodID begin_recording =
+      render_node_class == nullptr
+          ? nullptr
+          : env->GetMethodID(render_node_class, "beginRecording",
+                             "(II)Landroid/graphics/RecordingCanvas;");
+  jmethodID end_recording =
+      render_node_class == nullptr
+          ? nullptr
+          : env->GetMethodID(render_node_class, "endRecording", "()V");
+  jmethodID set_position =
+      render_node_class == nullptr
+          ? nullptr
+          : env->GetMethodID(render_node_class, "setPosition", "(IIII)Z");
+  if (g_gpu_render_node == nullptr && render_node_create != nullptr &&
+      animation_host_create != nullptr &&
+      animation_host_interface != nullptr &&
+      !env->ExceptionCheck()) {
+    jstring node_name = env->NewStringUTF("Darwin ART HWUI root");
+    jobject host = env->CallStaticObjectMethod(
+        animation_host_class, animation_host_create, animation_host_interface);
+    std::cerr << "ART HWUI GPU: animation host=" << host << "\n";
+    jobject node = env->CallStaticObjectMethod(render_node_class, render_node_create,
+                                               node_name, host);
+    std::cerr << "ART HWUI GPU: RenderNode.create node=" << node << "\n";
+    if (node != nullptr && !env->ExceptionCheck()) {
+      g_gpu_render_node = env->NewGlobalRef(node);
+    }
+    env->DeleteLocalRef(host);
+    env->DeleteLocalRef(node);
+    env->DeleteLocalRef(node_name);
+  }
+  jobject java_canvas =
+      g_gpu_render_node == nullptr || begin_recording == nullptr ||
+              env->ExceptionCheck()
+          ? nullptr
+          : env->CallObjectMethod(g_gpu_render_node, begin_recording, width,
+                                  height);
+  if (java_canvas != nullptr && std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr) {
+    jclass canvas_class = env->FindClass("android/graphics/Canvas");
+    jmethodID is_hw = canvas_class == nullptr
+                          ? nullptr
+                          : env->GetMethodID(canvas_class, "isHardwareAccelerated", "()Z");
+    if (is_hw != nullptr && !env->ExceptionCheck()) {
+      std::cerr << "ART HWUI RecordingCanvas hardware="
+                << env->CallBooleanMethod(java_canvas, is_hw) << "\n";
+    }
     env->ExceptionClear();
     env->DeleteLocalRef(canvas_class);
-    std::cerr << "ART HWUI GPU: Canvas wrapper initialization failed\n";
+  }
+  if (java_canvas == nullptr || native_render_node == nullptr ||
+      end_recording == nullptr || set_position == nullptr ||
+      env->ExceptionCheck()) {
+    if (env->ExceptionCheck()) {
+      art::Thread* self = art::Thread::Current();
+      if (self != nullptr && self->IsExceptionPending()) {
+        std::cerr << "ART HWUI GPU: RenderNode setup exception\n"
+                  << self->GetException()->Dump() << "\n";
+      }
+    }
+    if (env->ExceptionCheck()) {
+      std::cerr << "ART HWUI GPU: RenderNode begin exception\n";
+      art::Thread* self = art::Thread::Current();
+      if (self != nullptr && self->IsExceptionPending()) {
+        std::cerr << self->GetException()->Dump() << "\n";
+      }
+    }
+    if (java_canvas != nullptr && g_gpu_render_node != nullptr &&
+        end_recording != nullptr) {
+      env->ExceptionClear();
+      env->CallVoidMethod(g_gpu_render_node, end_recording);
+      env->ExceptionClear();
+    }
+    env->ExceptionClear();
+    env->DeleteLocalRef(animation_host_class);
+    env->DeleteLocalRef(animation_host_interface);
+    env->DeleteLocalRef(render_node_class);
+    std::cerr << "ART HWUI GPU: RenderNode.beginRecording failed\n";
     return JNI_FALSE;
   }
-  const jlong original_canvas = env->GetLongField(java_canvas, native_canvas);
-  env->SetLongField(java_canvas, native_canvas,
-                    reinterpret_cast<jlong>(recorder.get()));
+  bool recording_ended = false;
+  auto finish_recording = [&]() -> bool {
+    if (recording_ended) return true;
+    // endRecording is the Java-side promotion boundary. Always close a
+    // recording, including failure paths, so RenderNode never remains in the
+    // "recording in progress" state for the next frame.
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->CallVoidMethod(g_gpu_render_node, end_recording);
+    recording_ended = true;
+    const bool ok = !env->ExceptionCheck();
+    if (!ok) env->ExceptionClear();
+    return ok;
+  };
+  env->CallBooleanMethod(g_gpu_render_node, set_position, 0, 0, width, height);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    finish_recording();
+    env->DeleteLocalRef(java_canvas);
+    env->DeleteLocalRef(animation_host_class);
+    env->DeleteLocalRef(animation_host_interface);
+    env->DeleteLocalRef(render_node_class);
+    std::cerr << "ART HWUI GPU: RenderNode.setPosition failed\n";
+    return JNI_FALSE;
+  }
   jclass view_class = env->FindClass("android/view/View");
   jmethodID draw = view_class == nullptr
                        ? nullptr
@@ -841,6 +1161,16 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
   jmethodID layout = view_class == nullptr
                          ? nullptr
                          : env->GetMethodID(view_class, "layout", "(IIII)V");
+  jmethodID set_pressed = view_class == nullptr
+                              ? nullptr
+                              : env->GetMethodID(view_class, "setPressed", "(Z)V");
+  jmethodID perform_click = view_class == nullptr
+                                ? nullptr
+                                : env->GetMethodID(view_class, "performClick", "()Z");
+  jmethodID drawable_hotspot_changed =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "drawableHotspotChanged", "(FF)V");
   auto get_view_field = [&](const char* name) -> jfieldID {
     return view_class == nullptr || env->ExceptionCheck()
                ? nullptr
@@ -855,10 +1185,12 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
       view_bottom == nullptr ||
       env->ExceptionCheck()) {
     env->ExceptionClear();
-    env->SetLongField(java_canvas, native_canvas, original_canvas);
+    finish_recording();
     env->DeleteLocalRef(view_class);
     env->DeleteLocalRef(java_canvas);
-    env->DeleteLocalRef(canvas_class);
+    env->DeleteLocalRef(animation_host_class);
+    env->DeleteLocalRef(animation_host_interface);
+    env->DeleteLocalRef(render_node_class);
     return JNI_FALSE;
   }
   // The standalone probe has no ViewRoot/ThreadedRenderer to perform the
@@ -878,22 +1210,37 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
   env->CallVoidMethod(view, layout, 0, 0, width, height);
   if (env->ExceptionCheck()) {
     env->ExceptionClear();
-    env->SetLongField(java_canvas, native_canvas, original_canvas);
+    finish_recording();
     env->DeleteLocalRef(view_class);
     env->DeleteLocalRef(java_canvas);
-    env->DeleteLocalRef(canvas_class);
+    env->DeleteLocalRef(animation_host_class);
+    env->DeleteLocalRef(animation_host_interface);
+    env->DeleteLocalRef(render_node_class);
     std::cerr << "ART HWUI GPU: View measure/layout failed\n";
     return JNI_FALSE;
   }
+  const uint32_t pending_pressed_action = g_pending_pressed_action;
+  const jfloat pending_pressed_x = g_pending_pressed_x;
+  const jfloat pending_pressed_y = g_pending_pressed_y;
+  g_pending_pressed_action = 0;
+  if (pending_pressed_action != 0 && g_pressed_view != nullptr &&
+      set_pressed != nullptr && !env->ExceptionCheck()) {
+    if (drawable_hotspot_changed != nullptr) {
+      env->CallVoidMethod(g_pressed_view, drawable_hotspot_changed,
+                          pending_pressed_x, pending_pressed_y);
+    }
+    env->CallVoidMethod(g_pressed_view, set_pressed,
+                        pending_pressed_action == 1 ? JNI_TRUE : JNI_FALSE);
+  }
   env->CallVoidMethod(view, draw, java_canvas);
-  // Restore the Canvas() raster wrapper so its NativeAllocationRegistry can
-  // safely finalize the object; the recording canvas remains C++ owned.
-  env->SetLongField(java_canvas, native_canvas, original_canvas);
   const bool draw_ok = !env->ExceptionCheck();
+  const bool recording_ok = finish_recording();
   env->DeleteLocalRef(view_class);
   env->DeleteLocalRef(java_canvas);
-  env->DeleteLocalRef(canvas_class);
-  if (!draw_ok) {
+  env->DeleteLocalRef(animation_host_class);
+  env->DeleteLocalRef(animation_host_interface);
+  env->DeleteLocalRef(render_node_class);
+  if (!draw_ok || !recording_ok) {
     std::cerr << "ART HWUI GPU: View.draw failed\n";
     art::Thread* self = art::Thread::Current();
     if (self != nullptr && self->IsExceptionPending()) {
@@ -903,20 +1250,47 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
     return JNI_FALSE;
   }
 
-  auto display_list =
-      static_cast<android::uirenderer::skiapipeline::SkiaRecordingCanvas*>(
-          recorder.get())->finishRecording();
-  if (display_list == nullptr || display_list->isEmpty()) {
-    std::cerr << "ART HWUI GPU: empty display list\n";
+  auto* node = reinterpret_cast<android::uirenderer::RenderNode*>(
+      static_cast<std::uintptr_t>(env->GetLongField(
+          g_gpu_render_node, native_render_node)));
+  if (node == nullptr) {
+    std::cerr << "ART HWUI GPU: Java RenderNode native pointer missing\n";
     return JNI_FALSE;
   }
-  android::sp<android::uirenderer::RenderNode> node =
-      new android::uirenderer::RenderNode();
-  node->mDisplayList = android::uirenderer::DisplayList(std::move(display_list));
   node->mValid = true;
-  node->mProperties.setLeftTopRightBottom(0, 0, width, height);
   DarwinHwuiTreeObserver tree_observer;
-  SyncRecordedRenderNodeTree(node.get(), &tree_observer);
+  std::cerr << "ART HWUI GPU: node staging needs=" << node->mNeedsDisplayListSync
+            << " stagingContent=" << node->mStagingDisplayList.hasContent()
+            << " stagingSize=" << node->mStagingDisplayList.getUsedSize()
+            << " activeContent=" << node->mDisplayList.hasContent() << "\n";
+  SyncRecordedRenderNodeTree(node, &tree_observer);
+  if (std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr) {
+    std::cerr << "ART HWUI animation inspect root new="
+              << node->mAnimatorManager.mNewAnimators.size()
+              << " active=" << node->mAnimatorManager.mAnimators.size()
+              << " handle=" << node->mAnimatorManager.mAnimationHandle
+              << " children=" << node->mDisplayList.getUsedSize() << "\n";
+  }
+  if (!node->mDisplayList || node->mDisplayList.isEmpty()) {
+    std::cerr << "ART HWUI GPU: Java RenderNode produced empty display list\n";
+    return JNI_FALSE;
+  }
+  if (HwuiNodeSubtreeHasAnimators(node)) {
+    if (g_hwui_animation_context == nullptr) {
+      g_hwui_time_lord = std::make_unique<
+          android::uirenderer::renderthread::TimeLord>();
+      g_hwui_time_lord->setFrameInterval(16666666);
+      g_hwui_animation_context =
+          std::make_unique<android::uirenderer::AnimationContext>(
+              *g_hwui_time_lord);
+    }
+    RegisterHwuiNodeSubtreeAnimators(node, *g_hwui_animation_context);
+    if (std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr) {
+      std::cerr << "ART HWUI animation registered context="
+                << g_hwui_animation_context.get() << " has="
+                << g_hwui_animation_context->hasAnimations() << "\n";
+    }
+  }
 
   DarwinArtGpuFrame* frame = darwin_art_surface_gpu_begin(g_gpu_surface);
   if (frame == nullptr) {
@@ -933,8 +1307,25 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
   // DecorView/theme then owns the visible window background.
   canvas->clear(SK_ColorTRANSPARENT);
   android::uirenderer::skiapipeline::RenderNodeDrawable drawable(
-      node.get(), canvas, false);
+      node, canvas, false);
   drawable.forceDraw(canvas);
+  if (g_gpu_ripple_overlay_active) {
+    const double elapsed_ms = std::chrono::duration<double, std::milli>(
+                                  std::chrono::steady_clock::now() -
+                                  g_gpu_ripple_overlay_started)
+                                  .count();
+    const float progress = std::clamp(static_cast<float>(elapsed_ms / 2200.0),
+                                      0.0f, 1.0f);
+    SkPaint ripple_paint;
+    ripple_paint.setAntiAlias(true);
+    ripple_paint.setColor(SkColorSetARGB(
+        static_cast<U8CPU>(24.0f + (1.0f - progress) * 64.0f), 30, 30, 30));
+    canvas->save();
+    canvas->clipRect(SkRect::MakeLTRB(104.0f, 298.0f, 256.0f, 342.0f));
+    canvas->drawCircle(g_gpu_ripple_overlay_x, g_gpu_ripple_overlay_y,
+                       8.0f + progress * 76.0f, ripple_paint);
+    canvas->restore();
+  }
   const DarwinArtSurfaceResult result =
       darwin_art_surface_gpu_end(g_gpu_surface, frame);
   if (result != DARWIN_ART_SURFACE_OK) {
@@ -944,6 +1335,7 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
   }
   g_frame_width = static_cast<std::size_t>(width);
   g_frame_height = static_cast<std::size_t>(height);
+  g_gpu_render_node_recorded = true;
   return JNI_TRUE;
 }
 #endif
@@ -1238,6 +1630,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
   art::ScopedObjectAccess soa(art_thread);
   JNIEnv* env = art_thread->GetJniEnv();
   jobject hit = FindClickableViewAt(env, g_interactive_root, x, y);
+  if (std::getenv("DARWIN_ART_DEBUG_POINTER") != nullptr) {
+    std::cerr << "ART Android input debug action=" << action << " x=" << x
+              << " y=" << y << " hit=" << hit << "\n";
+  }
   jclass view_class = env->FindClass("android/view/View");
   jmethodID set_pressed =
       view_class == nullptr
@@ -1247,34 +1643,48 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
       view_class == nullptr
           ? nullptr
           : env->GetMethodID(view_class, "performClick", "()Z");
+  jmethodID drawable_hotspot_changed =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "drawableHotspotChanged", "(FF)V");
   if (view_class == nullptr || set_pressed == nullptr ||
-      perform_click == nullptr || env->ExceptionCheck()) {
+      perform_click == nullptr || drawable_hotspot_changed == nullptr ||
+      env->ExceptionCheck()) {
     env->DeleteLocalRef(hit);
     env->DeleteLocalRef(view_class);
     return 74;
   }
 
   if (action == 0u) {
+    g_gpu_ripple_overlay_active = true;
+    g_gpu_ripple_overlay_x = x;
+    g_gpu_ripple_overlay_y = y;
+    g_gpu_ripple_overlay_started = std::chrono::steady_clock::now();
     if (g_pressed_view != nullptr) {
       env->CallVoidMethod(g_pressed_view, set_pressed, JNI_FALSE);
       env->DeleteGlobalRef(g_pressed_view);
       g_pressed_view = nullptr;
     }
     if (hit != nullptr && !env->ExceptionCheck()) {
-      env->CallVoidMethod(hit, set_pressed, JNI_TRUE);
       g_pressed_view = env->NewGlobalRef(hit);
+      g_pending_pressed_action = 1;
+      g_pending_pressed_x = x;
+      g_pending_pressed_y = y;
+    }
+  } else if (action == 2u) {
+    if (g_pressed_view != nullptr && !env->ExceptionCheck()) {
+      env->CallVoidMethod(g_pressed_view, drawable_hotspot_changed, x, y);
     }
   } else if (action == 1u) {
     if (g_pressed_view != nullptr) {
-      env->CallVoidMethod(g_pressed_view, set_pressed, JNI_FALSE);
-      if (hit != nullptr && env->IsSameObject(hit, g_pressed_view) &&
-          !env->ExceptionCheck()) {
-        env->CallBooleanMethod(g_pressed_view, perform_click);
-      }
-      env->DeleteGlobalRef(g_pressed_view);
-      g_pressed_view = nullptr;
+      g_pending_pressed_action = 2;
+      g_pending_pressed_x = x;
+      g_pending_pressed_y = y;
     }
   }
+  const bool same_pressed_view =
+      action == 1u && hit != nullptr && g_pressed_view != nullptr &&
+      env->IsSameObject(hit, g_pressed_view) == JNI_TRUE;
   env->DeleteLocalRef(hit);
   env->DeleteLocalRef(view_class);
   const bool rendered = !env->ExceptionCheck() &&
@@ -1286,7 +1696,130 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
               << art_thread->GetException()->Dump() << "\n";
     art_thread->ClearException();
   }
+  if (action == 1u && g_pressed_view != nullptr) {
+    if (same_pressed_view && perform_click != nullptr &&
+        !env->ExceptionCheck()) {
+      env->CallBooleanMethod(g_pressed_view, perform_click);
+    }
+    env->DeleteGlobalRef(g_pressed_view);
+    g_pressed_view = nullptr;
+  }
   return rendered ? 0 : 75;
+}
+
+extern "C" DARWIN_ART_EXPORT int32_t darwin_art_pump_framework_frame(
+    jlong frame_time_nanos) {
+  if (frame_time_nanos <= 0) {
+    struct timespec now = {};
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 74;
+    frame_time_nanos = static_cast<jlong>(now.tv_sec) * 1000000000LL +
+                       static_cast<jlong>(now.tv_nsec);
+  }
+  (void)frame_time_nanos;
+  art::Thread* art_thread = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_process_state.mutex);
+    if (g_process_state.phase != ProcessPhase::kAwaitingShutdown ||
+        !g_process_state.owner_thread_valid ||
+        pthread_equal(g_process_state.owner_thread, pthread_self()) == 0 ||
+        g_process_state.art_thread == nullptr) {
+      return 72;
+    }
+    art_thread = g_process_state.art_thread;
+  }
+  if (art::Thread::Current() != art_thread ||
+      art_thread->GetState() != art::ThreadState::kNative) {
+    return 73;
+  }
+  art::ScopedObjectAccess soa(art_thread);
+  JNIEnv* env = art_thread->GetJniEnv();
+  if (g_hwui_animation_context != nullptr && g_gpu_render_node != nullptr) {
+    jclass render_node_class = env->FindClass("android/graphics/RenderNode");
+    jfieldID native_render_node =
+        render_node_class == nullptr
+            ? nullptr
+            : env->GetFieldID(render_node_class, "mNativeRenderNode", "J");
+    auto* node = native_render_node == nullptr
+                     ? nullptr
+                     : reinterpret_cast<android::uirenderer::RenderNode*>(
+                           static_cast<std::uintptr_t>(env->GetLongField(
+                               g_gpu_render_node, native_render_node)));
+    if (node != nullptr && !env->ExceptionCheck()) {
+      g_hwui_time_lord->vsyncReceived(frame_time_nanos, frame_time_nanos, 0,
+                                      frame_time_nanos + 16666666, 16666666);
+      g_hwui_animation_context->startFrame(
+          android::uirenderer::TreeInfo::MODE_FULL);
+      AnimateNodeWithContext(node, *g_hwui_animation_context);
+    }
+    env->ExceptionClear();
+    env->DeleteLocalRef(render_node_class);
+  }
+  jclass choreographer = env->FindClass("android/view/Choreographer");
+  jmethodID get_instance = choreographer == nullptr
+                                ? nullptr
+                                : env->GetStaticMethodID(
+                                      choreographer, "getInstance",
+                                      "()Landroid/view/Choreographer;");
+  jmethodID do_frame = choreographer == nullptr
+                           ? nullptr
+                           : env->GetMethodID(
+                                 choreographer, "doFrame",
+                                 "(JILandroid/view/DisplayEventReceiver$VsyncEventData;)V");
+  jclass vsync_data_class =
+      env->FindClass("android/view/DisplayEventReceiver$VsyncEventData");
+  jmethodID vsync_data_ctor =
+      vsync_data_class == nullptr
+          ? nullptr
+          : env->GetMethodID(vsync_data_class, "<init>", "()V");
+  jfieldID frame_interval =
+      vsync_data_class == nullptr
+          ? nullptr
+          : env->GetFieldID(vsync_data_class, "frameInterval", "J");
+  jfieldID frame_timelines_length =
+      vsync_data_class == nullptr
+          ? nullptr
+          : env->GetFieldID(vsync_data_class, "frameTimelinesLength", "I");
+  jfieldID preferred_frame_timeline =
+      vsync_data_class == nullptr
+          ? nullptr
+          : env->GetFieldID(vsync_data_class, "preferredFrameTimelineIndex", "I");
+  jobject instance = get_instance == nullptr || env->ExceptionCheck()
+                         ? nullptr
+                         : env->CallStaticObjectMethod(choreographer, get_instance);
+  jobject vsync_data =
+      vsync_data_ctor == nullptr || env->ExceptionCheck()
+          ? nullptr
+          : env->NewObject(vsync_data_class, vsync_data_ctor);
+  if (vsync_data != nullptr && !env->ExceptionCheck()) {
+    // The framework constructor creates its seven default FrameTimeline
+    // entries. Keep one preferred timeline and provide the actual display
+    // interval so Choreographer's frame-time bookkeeping can advance.
+    env->SetLongField(vsync_data, frame_interval, 16666666);
+    env->SetIntField(vsync_data, frame_timelines_length, 1);
+    env->SetIntField(vsync_data, preferred_frame_timeline, 0);
+  }
+  if (instance != nullptr && do_frame != nullptr && vsync_data != nullptr &&
+      !env->ExceptionCheck()) {
+    // Match Android's System.nanoTime() domain. The host-side Rust Instant is
+    // intentionally not used as a timestamp because its public API exposes
+    // only a process-relative duration.
+    const jlong monotonic_nanos = static_cast<jlong>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+    env->CallVoidMethod(instance, do_frame, monotonic_nanos, 0, vsync_data);
+  }
+  const bool ok = !env->ExceptionCheck();
+  if (!ok) {
+    std::cerr << "ART Android frame pulse threw\n"
+              << art_thread->GetException()->Dump() << "\n";
+    art_thread->ClearException();
+  }
+  env->DeleteLocalRef(vsync_data);
+  env->DeleteLocalRef(vsync_data_class);
+  env->DeleteLocalRef(instance);
+  env->DeleteLocalRef(choreographer);
+  return ok && do_frame != nullptr ? 0 : 75;
 }
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
@@ -2418,7 +2951,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     }
     return 33;
   }
-  if (run_apk_app) {
+  if (run_apk_app || run_framework_button) {
     if (g_interactive_root != nullptr) {
       env->DeleteGlobalRef(g_interactive_root);
     }
@@ -2863,6 +3396,21 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
         art_thread->GetJniEnv()->DeleteGlobalRef(g_interactive_root);
         g_interactive_root = nullptr;
       }
+      // AnimationContext owns RenderNode animation handles and may invoke
+      // Java-side finish listeners while the VM is still alive.  Drain it
+      // before releasing the persistent Java RenderNode reference; otherwise
+      // AOSP's AnimationHandle destructor correctly fail-stops on shutdown.
+      if (g_hwui_animation_context != nullptr) {
+        g_hwui_animation_context->destroy();
+        g_hwui_animation_context.reset();
+      }
+      g_hwui_time_lord.reset();
+      if (g_gpu_render_node != nullptr) {
+        art_thread->GetJniEnv()->DeleteGlobalRef(g_gpu_render_node);
+        g_gpu_render_node = nullptr;
+      }
+      g_gpu_render_node_recorded = false;
+      g_gpu_ripple_overlay_active = false;
       g_interactive_width = 0;
       g_interactive_height = 0;
       if (art_thread->IsExceptionPending()) {

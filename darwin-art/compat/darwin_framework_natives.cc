@@ -15,6 +15,7 @@
 #include <thread>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #if defined(DARWIN_ART_REAL_GRAPHICS)
 #include <android/graphics/jni_runtime.h>
@@ -307,6 +308,8 @@ jobject DisplayEventReceiverNativeGetLatestVsyncEventData(JNIEnv*, jclass,
   return nullptr;
 }
 
+jlong PerfettoCategoryNativeGetExtraPtr(jlong) { return 0; }
+
 jlong DisplayEventReceiverNativeFinalizer(JNIEnv*, jclass) {
   return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(
       &DisplayEventReceiverRelease));
@@ -315,7 +318,7 @@ jlong DisplayEventReceiverNativeFinalizer(JNIEnv*, jclass) {
 // PropertyValuesHolder's JNI helpers are used by ValueAnimator and
 // RippleDrawable. A jmethodID is already an opaque stable JNI handle, so the
 // host can preserve Android's lookup/call ABI without exposing ART internals.
-jlong PropertyGetMethod(JNIEnv* env, jclass target, jstring name,
+jlong PropertyGetMethod(JNIEnv* env, jclass, jclass target, jstring name,
                         const char* signature) {
   if (target == nullptr || name == nullptr) return 0;
   const char* utf_name = env->GetStringUTFChars(name, nullptr);
@@ -325,62 +328,92 @@ jlong PropertyGetMethod(JNIEnv* env, jclass target, jstring name,
   return reinterpret_cast<jlong>(method);
 }
 
-jlong PropertyGetFloatMethod(JNIEnv* env, jclass target, jstring name) {
-  return PropertyGetMethod(env, target, name, "()F");
+jlong PropertyGetFloatMethod(JNIEnv* env, jclass declaring, jclass target,
+                             jstring name) {
+  return PropertyGetMethod(env, declaring, target, name, "(F)V");
 }
-jlong PropertyGetIntMethod(JNIEnv* env, jclass target, jstring name) {
-  return PropertyGetMethod(env, target, name, "()I");
+jlong PropertyGetIntMethod(JNIEnv* env, jclass declaring, jclass target,
+                           jstring name) {
+  return PropertyGetMethod(env, declaring, target, name, "(I)V");
 }
-jlong PropertyGetMultipleFloatMethod(JNIEnv* env, jclass target, jstring name,
-                                     jint) {
-  return PropertyGetMethod(env, target, name, "([F)V");
+jlong PropertyGetMultipleFloatMethod(JNIEnv* env, jclass declaring,
+                                     jclass target, jstring name, jint count) {
+  std::string signature("(");
+  signature.append(static_cast<std::size_t>(count > 0 ? count : 0), 'F');
+  signature.append(")V");
+  return PropertyGetMethod(env, declaring, target, name, signature.c_str());
 }
-jlong PropertyGetMultipleIntMethod(JNIEnv* env, jclass target, jstring name,
-                                   jint) {
-  return PropertyGetMethod(env, target, name, "([I)V");
+jlong PropertyGetMultipleIntMethod(JNIEnv* env, jclass declaring, jclass target,
+                                   jstring name, jint count) {
+  std::string signature("(");
+  signature.append(static_cast<std::size_t>(count > 0 ? count : 0), 'I');
+  signature.append(")V");
+  return PropertyGetMethod(env, declaring, target, name, signature.c_str());
 }
 
-void PropertyCallFloatMethod(JNIEnv* env, jobject object, jlong method,
+void PropertyCallFloatMethod(JNIEnv* env, jclass, jobject object, jlong method,
                              jfloat value) {
   if (object != nullptr && method != 0)
     env->CallVoidMethod(object, reinterpret_cast<jmethodID>(method), value);
 }
-void PropertyCallIntMethod(JNIEnv* env, jobject object, jlong method,
+void PropertyCallIntMethod(JNIEnv* env, jclass, jobject object, jlong method,
                            jint value) {
   if (object != nullptr && method != 0)
     env->CallVoidMethod(object, reinterpret_cast<jmethodID>(method), value);
 }
-void PropertyCallTwoFloatMethod(JNIEnv* env, jobject object, jlong method,
+void PropertyCallTwoFloatMethod(JNIEnv* env, jclass, jobject object, jlong method,
                                 jfloat a, jfloat b) {
   if (object != nullptr && method != 0)
     env->CallVoidMethod(object, reinterpret_cast<jmethodID>(method), a, b);
 }
-void PropertyCallFourFloatMethod(JNIEnv* env, jobject object, jlong method,
+void PropertyCallFourFloatMethod(JNIEnv* env, jclass, jobject object, jlong method,
                                  jfloat a, jfloat b, jfloat c, jfloat d) {
   if (object != nullptr && method != 0)
     env->CallVoidMethod(object, reinterpret_cast<jmethodID>(method), a, b, c,
                         d);
 }
-void PropertyCallMultipleFloatMethod(JNIEnv* env, jobject object, jlong method,
+void PropertyCallMultipleFloatMethod(JNIEnv* env, jclass, jobject object,
+                                     jlong method,
                                      jfloatArray values) {
-  if (object != nullptr && method != 0)
-    env->CallVoidMethod(object, reinterpret_cast<jmethodID>(method), values);
+  if (object == nullptr || method == 0 || values == nullptr) return;
+  const jsize count = env->GetArrayLength(values);
+  std::vector<jfloat> source(static_cast<std::size_t>(count));
+  env->GetFloatArrayRegion(values, 0, count, source.data());
+  std::vector<jvalue> arguments(static_cast<std::size_t>(count));
+  for (jsize index = 0; index < count; ++index) {
+    arguments[static_cast<std::size_t>(index)].f =
+        source[static_cast<std::size_t>(index)];
+  }
+  env->CallVoidMethodA(object, reinterpret_cast<jmethodID>(method),
+                       arguments.data());
 }
-void PropertyCallTwoIntMethod(JNIEnv* env, jobject object, jlong method, jint a,
+void PropertyCallTwoIntMethod(JNIEnv* env, jclass, jobject object, jlong method,
+                              jint a,
                               jint b) {
   if (object != nullptr && method != 0)
     env->CallVoidMethod(object, reinterpret_cast<jmethodID>(method), a, b);
 }
-void PropertyCallFourIntMethod(JNIEnv* env, jobject object, jlong method, jint a,
+void PropertyCallFourIntMethod(JNIEnv* env, jclass, jobject object, jlong method,
+                               jint a,
                                jint b, jint c, jint d) {
   if (object != nullptr && method != 0)
     env->CallVoidMethod(object, reinterpret_cast<jmethodID>(method), a, b, c,
                         d);
 }
-void PropertyCallMultipleIntMethod(JNIEnv* env, jobject object, jlong method,
+void PropertyCallMultipleIntMethod(JNIEnv* env, jclass, jobject object,
+                                   jlong method,
                                    jintArray values) {
-  if (object != nullptr && method != 0)
-    env->CallVoidMethod(object, reinterpret_cast<jmethodID>(method), values);
+  if (object == nullptr || method == 0 || values == nullptr) return;
+  const jsize count = env->GetArrayLength(values);
+  std::vector<jint> source(static_cast<std::size_t>(count));
+  env->GetIntArrayRegion(values, 0, count, source.data());
+  std::vector<jvalue> arguments(static_cast<std::size_t>(count));
+  for (jsize index = 0; index < count; ++index) {
+    arguments[static_cast<std::size_t>(index)].i =
+        source[static_cast<std::size_t>(index)];
+  }
+  env->CallVoidMethodA(object, reinterpret_cast<jmethodID>(method),
+                       arguments.data());
 }
 
 void NativeAllocationRegistryApplyFreeFunction(JNIEnv*, jclass,
@@ -392,15 +425,31 @@ void NativeAllocationRegistryApplyFreeFunction(JNIEnv*, jclass,
       reinterpret_cast<void*>(static_cast<std::uintptr_t>(native_ptr)));
 }
 
-jlong PerfettoCategoryNativeDelete(JNIEnv*, jclass) {
-  // Perfetto is intentionally disabled on the Darwin host. Returning a null
-  // finalizer keeps its Java category object valid without importing tracing
-  // or host-specific allocation state.
-  return 0;
+void PerfettoNoopFinalizer(void*) {}
+
+jlong PerfettoCategoryNativeDelete() {
+  // Perfetto is intentionally disabled on the Darwin host. Return a no-op
+  // finalizer address so NativeAllocationRegistry can retain its contract
+  // without importing tracing or host-specific allocation state.
+  return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(
+      &PerfettoNoopFinalizer));
 }
 
-jlong PerfettoCategoryNativeInit(JNIEnv*, jclass, jstring, jstring, jstring) {
-  return 0;
+jlong PerfettoCategoryNativeInit(jstring, jstring, jstring) {
+  // Non-zero sentinel: Java keeps the category alive, while all tracing is
+  // disabled by native_is_enabled below.
+  return 1;
+}
+
+void PerfettoCategoryNativeRegister(jlong) {}
+void PerfettoCategoryNativeUnregister(jlong) {}
+jboolean PerfettoCategoryNativeIsEnabled(jlong) {
+  return JNI_FALSE;
+}
+
+jlong PerfettoTrackEventExtraNativeDelete() {
+  return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(
+      &PerfettoNoopFinalizer));
 }
 
 jint EventLogWriteEvent(JNIEnv*, jclass, jint, jobjectArray) {
@@ -1078,10 +1127,27 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&PerfettoCategoryNativeInit)},
       {const_cast<char*>("native_delete"), const_cast<char*>("()J"),
        reinterpret_cast<void*>(&PerfettoCategoryNativeDelete)},
+      {const_cast<char*>("native_get_extra_ptr"), const_cast<char*>("(J)J"),
+       reinterpret_cast<void*>(&PerfettoCategoryNativeGetExtraPtr)},
+      {const_cast<char*>("native_register"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&PerfettoCategoryNativeRegister)},
+      {const_cast<char*>("native_unregister"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&PerfettoCategoryNativeUnregister)},
+      {const_cast<char*>("native_is_enabled"), const_cast<char*>("(J)Z"),
+       reinterpret_cast<void*>(&PerfettoCategoryNativeIsEnabled)},
   };
   if (!Register(env, "android/os/PerfettoTrace$Category",
                 perfetto_category_methods,
                 static_cast<jint>(std::size(perfetto_category_methods)))) {
+    return false;
+  }
+  JNINativeMethod perfetto_extra_methods[] = {
+      {const_cast<char*>("native_delete"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&PerfettoTrackEventExtraNativeDelete)},
+  };
+  if (!Register(env, "android/os/PerfettoTrackEventExtra",
+                perfetto_extra_methods,
+                static_cast<jint>(std::size(perfetto_extra_methods)))) {
     return false;
   }
 

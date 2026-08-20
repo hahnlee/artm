@@ -155,6 +155,7 @@ type SurfaceNextPointerEventFn = unsafe extern "C" fn(*mut c_void, *mut PointerE
 type SurfaceDestroyFn = unsafe extern "C" fn(*mut c_void) -> i32;
 type SurfaceActiveFn = unsafe extern "C" fn() -> *mut c_void;
 type DispatchPointerFn = unsafe extern "C" fn(u32, f32, f32) -> i32;
+type PumpFrameworkFrameFn = unsafe extern "C" fn(i64) -> i32;
 
 struct FrameHost {
     frames_received: u64,
@@ -296,6 +297,8 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             unsafe { library.symbol(b"darwin_art_surface_active_gpu\0")? };
         let dispatch_pointer: DispatchPointerFn =
             unsafe { library.symbol(b"darwin_art_dispatch_pointer\0")? };
+        let pump_framework_frame: PumpFrameworkFrameFn =
+            unsafe { library.symbol(b"darwin_art_pump_framework_frame\0")? };
 
         let core_oj = path_c_string(&options.core_oj_jar)?;
         let core_libart = path_c_string(&options.core_libart_jar)?;
@@ -409,6 +412,11 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                             Err(error) => loop_error = Some(error),
                         }
                         if loop_error.is_none() {
+                            let pulse_status = unsafe { pump_framework_frame(0) };
+                            if pulse_status != 0 {
+                                loop_error = Some(HostError::RuntimeFailed(pulse_status));
+                                continue;
+                            }
                             // ACTION_MOVE causes PresentContent to replay the
                             // Android RenderNode while RippleDrawable's
                             // pressed animation advances between pumps.
@@ -447,6 +455,25 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 match dispatch_queued_events() {
                     Ok(dispatched) => frames_presented += dispatched,
                     Err(error) => loop_error = Some(error),
+                }
+                // The standalone capture gate has no Android ViewRoot to
+                // request redraws after ACTION_UP. Keep the framework pulse
+                // and GPU RenderNode replay alive for the test pointer so the
+                // real ripple/compatibility bridge can finish on-screen.
+                if loop_error.is_none() {
+                    if let Some((x, y)) = test_pointer {
+                        let pulse_status = unsafe { pump_framework_frame(0) };
+                        if pulse_status != 0 {
+                            loop_error = Some(HostError::RuntimeFailed(pulse_status));
+                        } else {
+                            let replay_status = unsafe { dispatch_pointer(2, x, y) };
+                            if replay_status != 0 {
+                                loop_error = Some(HostError::RuntimeFailed(replay_status));
+                            } else {
+                                frames_presented += 1;
+                            }
+                        }
+                    }
                 }
                 if loop_error.is_some() {
                     break;

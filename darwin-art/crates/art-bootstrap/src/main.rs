@@ -1843,6 +1843,7 @@ fn build_button_dex_probe(root: &Path) -> Result<()> {
             .arg("-classpath")
             .arg(&javac_classpath)
             .arg(root.join("probes/button/FontBootstrap.java"))
+            .arg(root.join("probes/button/ProbeAnimationHost.java"))
             .arg(root.join("probes/button/ProbeActivity.java"))
             .arg(root.join("probes/button/ProbeView.java"))
             .arg(root.join("tools/android-apk-app-runtime/fixture/DarwinServiceBridge.java")),
@@ -1870,6 +1871,8 @@ fn build_button_dex_probe(root: &Path) -> Result<()> {
             .arg(baseline("dev/darwinart/probe/ProbeResources.class"))
             .arg(baseline("dev/darwinart/probe/ProbeXmlResourceParser.class"))
             .arg(button("dev/darwinart/probe/FontBootstrap.class"))
+            .arg(button("dev/darwinart/probe/ProbeAnimationHost.class"))
+            .arg(button("dev/darwinart/probe/ProbeAnimationHost$1.class"))
             .arg(button("dev/darwinart/probe/ProbeActivity.class"))
             .arg(button("dev/darwinart/probe/ProbeView.class"))
             .arg(button("dev/darwinart/simple/DarwinServiceBridge.class"))
@@ -1884,23 +1887,25 @@ fn build_button_dex_probe(root: &Path) -> Result<()> {
     let classes_dex = dex_dir.join("classes.dex");
     let dex_probe = root.join("_build/dex-probe/dex-probe");
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=16 methods=351 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=18 methods=369 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldev/darwinart/probe/FontBootstrap; \
                     class[2]=Ldev/darwinart/probe/Hello; \
                     class[3]=Ldev/darwinart/probe/ProbeActivity; \
-                    class[4]=Ldev/darwinart/probe/ProbeCanvas; \
-                    class[5]=Ldev/darwinart/probe/ProbeContentResolver$$ExternalSyntheticLambda0; \
-                    class[6]=Ldev/darwinart/probe/ProbeContentResolver; \
-                    class[7]=Ldev/darwinart/probe/ProbeContentRoot; \
-                    class[8]=Ldev/darwinart/probe/ProbeContext; \
-                    class[9]=Ldev/darwinart/probe/ProbePackageManager; \
-                    class[10]=Ldev/darwinart/probe/ProbeResources; \
-                    class[11]=Ldev/darwinart/probe/ProbeView; \
-                    class[12]=Ldev/darwinart/probe/ProbeXmlResourceParser; \
-                    class[13]=Ldev/darwinart/simple/DarwinServiceBridge$DisplayHandler; \
-                    class[14]=Ldev/darwinart/simple/DarwinServiceBridge$ManagerHandler; \
-                    class[15]=Ldev/darwinart/simple/DarwinServiceBridge;";
+                    class[4]=Ldev/darwinart/probe/ProbeAnimationHost$1; \
+                    class[5]=Ldev/darwinart/probe/ProbeAnimationHost; \
+                    class[6]=Ldev/darwinart/probe/ProbeCanvas; \
+                    class[7]=Ldev/darwinart/probe/ProbeContentResolver$$ExternalSyntheticLambda0; \
+                    class[8]=Ldev/darwinart/probe/ProbeContentResolver; \
+                    class[9]=Ldev/darwinart/probe/ProbeContentRoot; \
+                    class[10]=Ldev/darwinart/probe/ProbeContext; \
+                    class[11]=Ldev/darwinart/probe/ProbePackageManager; \
+                    class[12]=Ldev/darwinart/probe/ProbeResources; \
+                    class[13]=Ldev/darwinart/probe/ProbeView; \
+                    class[14]=Ldev/darwinart/probe/ProbeXmlResourceParser; \
+                    class[15]=Ldev/darwinart/simple/DarwinServiceBridge$DisplayHandler; \
+                    class[16]=Ldev/darwinart/simple/DarwinServiceBridge$ManagerHandler; \
+                    class[17]=Ldev/darwinart/simple/DarwinServiceBridge;";
     if output.trim() != expected {
         return Err(format!("unexpected Button DEX probe output: {output:?}").into());
     }
@@ -3446,6 +3451,7 @@ fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,_darwin_art_run_process")
         .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
         .arg("-Wl,-exported_symbol,_darwin_art_dispatch_pointer")
+        .arg("-Wl,-exported_symbol,_darwin_art_pump_framework_frame")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_update")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_map_producer")
@@ -3886,6 +3892,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,_darwin_art_run_process")
         .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
         .arg("-Wl,-exported_symbol,_darwin_art_dispatch_pointer")
+        .arg("-Wl,-exported_symbol,_darwin_art_pump_framework_frame")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_update")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_map_producer")
@@ -4023,6 +4030,7 @@ fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
         "_darwin_art_run_process",
         "_darwin_art_shutdown_process",
         "_darwin_art_dispatch_pointer",
+        "_darwin_art_pump_framework_frame",
         "_darwin_art_surface_create",
         "_darwin_art_surface_update",
         "_darwin_art_surface_map_producer",
@@ -4437,6 +4445,7 @@ fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_run_process")
         .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
         .arg("-Wl,-exported_symbol,_darwin_art_dispatch_pointer")
+        .arg("-Wl,-exported_symbol,_darwin_art_pump_framework_frame")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_update")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_map_producer")
@@ -4873,6 +4882,8 @@ fn probe_runtime_dex_flavor(
 
     let mut command = Command::new(&executable);
     if show_window {
+        // Keep normal window probes short; the capture script controls its
+        // own interaction hold time through DARWIN_ART_TEST_POINTER_HOLD_MS.
         command.args(["--window-seconds", "3"]);
     }
     command
@@ -5770,6 +5781,9 @@ fn command_output(command: &mut Command) -> Result<String> {
         stdout,
         stderr,
     } = command.output()?;
+    if std::env::var_os("DARWIN_ART_DEBUG_CHILD_STDERR").is_some() && !stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&stderr));
+    }
     if !status.success() {
         return Err(format!(
             "command failed ({status}): {description}\n{}",
