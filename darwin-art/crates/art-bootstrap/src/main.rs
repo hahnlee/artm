@@ -120,6 +120,7 @@ fn run() -> Result<()> {
         "build-runtime-arm64" => build_runtime_arm64(&root),
         "build-interpreter-core" => build_interpreter_core(&root),
         "build-runtime-bootstrap" => build_runtime_bootstrap(&root),
+        "build-runtime-bootstrap-internal" => build_runtime_bootstrap_inner(&root),
         "build-runtime-graphics-bootstrap" => build_runtime_graphics_bootstrap(&root),
         "build-runtime-graphics-bootstrap-internal" => {
             build_runtime_graphics_bootstrap_inner(&root)
@@ -2458,7 +2459,7 @@ fn build_interpreter_core(root: &Path) -> Result<()> {
 }
 
 fn build_runtime_bootstrap(root: &Path) -> Result<()> {
-    build_runtime_bootstrap_flavor(root, false)
+    build_native_graph(root, "runtime-bootstrap")
 }
 
 fn build_runtime_graphics_bootstrap(root: &Path) -> Result<()> {
@@ -2471,7 +2472,7 @@ fn build_runtime_graphics_bootstrap(root: &Path) -> Result<()> {
 /// warm run, while the inner builder remains available as an explicit escape
 /// hatch for diagnostics and CI.
 fn build_native_graph(root: &Path, target: &str) -> Result<()> {
-    if target != "graphics-bootstrap" {
+    if !matches!(target, "graphics-bootstrap" | "runtime-bootstrap") {
         return Err(format!("unsupported native graph target: {target}").into());
     }
     let graph_dir = root.join("_build/native-graph");
@@ -2506,6 +2507,10 @@ fn build_native_graph(root: &Path, target: &str) -> Result<()> {
 
 fn build_runtime_graphics_bootstrap_inner(root: &Path) -> Result<()> {
     build_runtime_bootstrap_flavor(root, true)
+}
+
+fn build_runtime_bootstrap_inner(root: &Path) -> Result<()> {
+    build_runtime_bootstrap_flavor(root, false)
 }
 
 fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()> {
