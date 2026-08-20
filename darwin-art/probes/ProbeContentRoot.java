@@ -3,6 +3,7 @@ package dev.darwinart.probe;
 import android.content.Context;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 
 /** Programmatic android.R.id.content parent inside the real DecorView. */
 public final class ProbeContentRoot extends ViewGroup {
@@ -17,9 +18,12 @@ public final class ProbeContentRoot extends ViewGroup {
         int height = MeasureSpec.getSize(heightMeasureSpec);
         for (int index = 0; index < getChildCount(); index++) {
             View child = getChildAt(index);
+            boolean materialButton = child instanceof Button;
+            int childWidth = materialButton ? Math.min(width, 160) : width;
+            int childHeight = materialButton ? Math.min(height, 56) : height;
             child.measure(
-                    MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-                    MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
+                    MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(childHeight, MeasureSpec.EXACTLY));
         }
         setMeasuredDimension(width, height);
     }
@@ -29,7 +33,17 @@ public final class ProbeContentRoot extends ViewGroup {
         int width = right - left;
         int height = bottom - top;
         for (int index = 0; index < getChildCount(); index++) {
-            getChildAt(index).layout(0, 0, width, height);
+            View child = getChildAt(index);
+            if (child instanceof Button) {
+                int childWidth = child.getMeasuredWidth();
+                int childHeight = child.getMeasuredHeight();
+                int childLeft = (width - childWidth) / 2;
+                int childTop = (height - childHeight) / 2;
+                child.layout(
+                        childLeft, childTop, childLeft + childWidth, childTop + childHeight);
+            } else {
+                child.layout(0, 0, width, height);
+            }
         }
     }
 }

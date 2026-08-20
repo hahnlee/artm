@@ -1624,7 +1624,7 @@ fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=12 methods=315 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=12 methods=318 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldev/darwinart/probe/Hello; \
                     class[2]=Ldev/darwinart/probe/ProbeActivity; \
@@ -1844,7 +1844,8 @@ fn build_button_dex_probe(root: &Path) -> Result<()> {
             .arg(&javac_classpath)
             .arg(root.join("probes/button/FontBootstrap.java"))
             .arg(root.join("probes/button/ProbeActivity.java"))
-            .arg(root.join("probes/button/ProbeView.java")),
+            .arg(root.join("probes/button/ProbeView.java"))
+            .arg(root.join("tools/android-apk-app-runtime/fixture/DarwinServiceBridge.java")),
     )?;
 
     let baseline = |relative: &str| baseline_classes.join(relative);
@@ -1870,13 +1871,20 @@ fn build_button_dex_probe(root: &Path) -> Result<()> {
             .arg(baseline("dev/darwinart/probe/ProbeXmlResourceParser.class"))
             .arg(button("dev/darwinart/probe/FontBootstrap.class"))
             .arg(button("dev/darwinart/probe/ProbeActivity.class"))
-            .arg(button("dev/darwinart/probe/ProbeView.class")),
+            .arg(button("dev/darwinart/probe/ProbeView.class"))
+            .arg(button("dev/darwinart/simple/DarwinServiceBridge.class"))
+            .arg(button(
+                "dev/darwinart/simple/DarwinServiceBridge$ManagerHandler.class",
+            ))
+            .arg(button(
+                "dev/darwinart/simple/DarwinServiceBridge$DisplayHandler.class",
+            )),
     )?;
 
     let classes_dex = dex_dir.join("classes.dex");
     let dex_probe = root.join("_build/dex-probe/dex-probe");
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=321 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=16 methods=351 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldev/darwinart/probe/FontBootstrap; \
                     class[2]=Ldev/darwinart/probe/Hello; \
@@ -1889,7 +1897,10 @@ fn build_button_dex_probe(root: &Path) -> Result<()> {
                     class[9]=Ldev/darwinart/probe/ProbePackageManager; \
                     class[10]=Ldev/darwinart/probe/ProbeResources; \
                     class[11]=Ldev/darwinart/probe/ProbeView; \
-                    class[12]=Ldev/darwinart/probe/ProbeXmlResourceParser;";
+                    class[12]=Ldev/darwinart/probe/ProbeXmlResourceParser; \
+                    class[13]=Ldev/darwinart/simple/DarwinServiceBridge$DisplayHandler; \
+                    class[14]=Ldev/darwinart/simple/DarwinServiceBridge$ManagerHandler; \
+                    class[15]=Ldev/darwinart/simple/DarwinServiceBridge;";
     if output.trim() != expected {
         return Err(format!("unexpected Button DEX probe output: {output:?}").into());
     }
@@ -4900,6 +4911,17 @@ fn probe_runtime_dex_flavor(
             command
                 .env("DARWIN_ART_TEST_FONTS_XML", fonts_xml)
                 .env("DARWIN_ART_TEST_FONT", roboto);
+            if button {
+                let framework_res = root.join("_prebuilt/android-16/resources/framework-res.apk");
+                if !framework_res.is_file() {
+                    return Err(format!(
+                        "Android framework resources are missing: {}",
+                        framework_res.display()
+                    )
+                    .into());
+                }
+                command.env("DARWIN_ART_FRAMEWORK_RES_APK", framework_res);
+            }
             let guest_root = prepare_probe_android_system_root(root)?;
             command.env("DARWIN_ART_ANDROID_SYSTEM_ROOT", &guest_root);
             system_root = Some(guest_root);

@@ -82,6 +82,44 @@ bool InstallProbeAndroidSystemRoot() {
 #include "pipeline/skia/RenderNodeDrawable.h"
 #include "pipeline/skia/SkiaRecordingCanvas.h"
 #include "include/core/SkSurface.h"
+
+namespace {
+
+class DarwinHwuiTreeObserver final : public android::uirenderer::TreeObserver {
+ public:
+  void onMaybeRemovedFromTree(android::uirenderer::RenderNode* node) override {
+    node->onRemovedFromTree(nullptr);
+  }
+};
+
+// View.draw() on a hardware RecordingCanvas stores child views in their own
+// RenderNode staging display lists. Android's RenderThread normally promotes
+// those lists during a MODE_FULL prepareTree traversal. This standalone host
+// owns no CanvasContext yet, so perform only that promotion before replay;
+// animation, damage, and layer policy remain untouched.
+size_t SyncRecordedRenderNodeTree(android::uirenderer::RenderNode* node,
+                                  DarwinHwuiTreeObserver* observer) {
+  if (node == nullptr || observer == nullptr) return 0;
+  size_t synchronized = 0;
+  if (node->mDirtyPropertyFields != 0) {
+    node->mDirtyPropertyFields = 0;
+    node->syncProperties();
+  }
+  if (node->mNeedsDisplayListSync) {
+    node->mNeedsDisplayListSync = false;
+    node->syncDisplayList(*observer, nullptr);
+    ++synchronized;
+  }
+  if (node->mDisplayList) {
+    node->mDisplayList.updateChildren(
+        [&](android::uirenderer::RenderNode* child) {
+          synchronized += SyncRecordedRenderNodeTree(child, observer);
+        });
+  }
+  return synchronized;
+}
+
+}  // namespace
 #endif
 
 #if defined(DARWIN_ART_DIRECT_APK_RUNTIME)
@@ -803,7 +841,18 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
   jmethodID layout = view_class == nullptr
                          ? nullptr
                          : env->GetMethodID(view_class, "layout", "(IIII)V");
+  auto get_view_field = [&](const char* name) -> jfieldID {
+    return view_class == nullptr || env->ExceptionCheck()
+               ? nullptr
+               : env->GetFieldID(view_class, name, "I");
+  };
+  jfieldID view_left = get_view_field("mLeft");
+  jfieldID view_top = get_view_field("mTop");
+  jfieldID view_right = get_view_field("mRight");
+  jfieldID view_bottom = get_view_field("mBottom");
   if (draw == nullptr || measure == nullptr || layout == nullptr ||
+      view_left == nullptr || view_top == nullptr || view_right == nullptr ||
+      view_bottom == nullptr ||
       env->ExceptionCheck()) {
     env->ExceptionClear();
     env->SetLongField(java_canvas, native_canvas, original_canvas);
@@ -819,6 +868,13 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
   const jint width_spec = kMeasureExactly | (width & 0x3fffffff);
   const jint height_spec = kMeasureExactly | (height & 0x3fffffff);
   env->CallVoidMethod(view, measure, width_spec, height_spec);
+  // Match the ViewRoot traversal contract used by the existing raster probe:
+  // seed detached root bounds before layout so its children receive a stable
+  // first hardware-recording pass without window-service callbacks.
+  env->SetIntField(view, view_left, 0);
+  env->SetIntField(view, view_top, 0);
+  env->SetIntField(view, view_right, width);
+  env->SetIntField(view, view_bottom, height);
   env->CallVoidMethod(view, layout, 0, 0, width, height);
   if (env->ExceptionCheck()) {
     env->ExceptionClear();
@@ -839,6 +895,10 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
   env->DeleteLocalRef(canvas_class);
   if (!draw_ok) {
     std::cerr << "ART HWUI GPU: View.draw failed\n";
+    art::Thread* self = art::Thread::Current();
+    if (self != nullptr && self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
     env->ExceptionClear();
     return JNI_FALSE;
   }
@@ -855,6 +915,8 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
   node->mDisplayList = android::uirenderer::DisplayList(std::move(display_list));
   node->mValid = true;
   node->mProperties.setLeftTopRightBottom(0, 0, width, height);
+  DarwinHwuiTreeObserver tree_observer;
+  SyncRecordedRenderNodeTree(node.get(), &tree_observer);
 
   DarwinArtGpuFrame* frame = darwin_art_surface_gpu_begin(g_gpu_surface);
   if (frame == nullptr) {
@@ -867,6 +929,9 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
     std::cerr << "ART HWUI GPU: drawable canvas unavailable\n";
     return JNI_FALSE;
   }
+  // Match SkiaPipeline's non-opaque frame initialization. The framework
+  // DecorView/theme then owns the visible window background.
+  canvas->clear(SK_ColorTRANSPARENT);
   android::uirenderer::skiapipeline::RenderNodeDrawable drawable(
       node.get(), canvas, false);
   drawable.forceDraw(canvas);
@@ -1304,10 +1369,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::getenv("DARWIN_ART_FRAMEWORK_RES_APK");
   const char* window_scale_value =
       std::getenv("DARWIN_ART_WINDOW_SCALE");
-  const bool has_apk_app_environment =
+  const bool has_apk_app_identity_environment =
       apk_app_package != nullptr || apk_app_activity != nullptr ||
-      apk_app_descriptor != nullptr || apk_app_support_dex != nullptr ||
-      framework_res_apk != nullptr;
+      apk_app_descriptor != nullptr || apk_app_support_dex != nullptr;
   const bool run_apk_app =
       apk_app_package != nullptr && apk_app_package[0] != '\0' &&
       apk_app_activity != nullptr && apk_app_activity[0] != '\0' &&
@@ -1317,6 +1381,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::strlen(apk_app_descriptor) >= 3u &&
       std::strlen(apk_app_descriptor) <= 513u &&
       apk_app_descriptor[std::strlen(apk_app_descriptor) - 1u] == ';';
+  const bool run_framework_button =
+      !has_apk_app_identity_environment &&
+      std::getenv("DARWIN_ART_TEST_FONTS_XML") != nullptr &&
+      framework_res_apk != nullptr && framework_res_apk[0] == '/';
+  const bool use_framework_resources = run_apk_app || run_framework_button;
   const bool valid_window_scale =
       window_scale_value == nullptr ||
       std::strcmp(window_scale_value, "1") == 0 ||
@@ -1332,7 +1401,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       run_apk_app &&
       std::getenv("DARWIN_ART_APK_APP_EXPECT_WIDGETS") != nullptr &&
       std::strcmp(std::getenv("DARWIN_ART_APK_APP_EXPECT_WIDGETS"), "1") == 0;
-  if ((has_apk_app_environment && !run_apk_app) || !valid_window_scale) {
+  if ((has_apk_app_identity_environment && !run_apk_app) ||
+      (framework_res_apk != nullptr && !use_framework_resources) ||
+      !valid_window_scale) {
     std::cerr << "ART Android APK app environment is incomplete or invalid\n";
     return 48;
   }
@@ -1394,6 +1465,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     std::cerr << "ART Darwin DEX: no current thread\n";
     return 2;
   }
+  JNIEnv* env = self->GetJniEnv();
 
   process_boundary.SetArtThread(self);
   return [&]() -> int32_t {
@@ -1639,7 +1711,40 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 35;
   }
 
-  JNIEnv* env = self->GetJniEnv();
+  // Android's ActivityThread installs the application PathClassLoader as the
+  // managed thread context loader. Native framework bridges reached from a
+  // boot-class method (for example ServiceManagerProxy) otherwise cannot find
+  // process-local service implementations packaged in the probe/APK DEX. Do
+  // this only after FinishMinimalForDarwinProbe: Thread.currentThread() is not
+  // legal while ART is still in unstarted-runtime mode.
+  jclass thread_class = env->FindClass("java/lang/Thread");
+  jmethodID current_thread =
+      thread_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(thread_class, "currentThread",
+                                   "()Ljava/lang/Thread;");
+  jmethodID set_context_loader =
+      thread_class == nullptr
+          ? nullptr
+          : env->GetMethodID(thread_class, "setContextClassLoader",
+                             "(Ljava/lang/ClassLoader;)V");
+  jobject managed_thread =
+      current_thread == nullptr
+          ? nullptr
+          : env->CallStaticObjectMethod(thread_class, current_thread);
+  if (managed_thread == nullptr || set_context_loader == nullptr ||
+      app_loader_ref == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Darwin DEX: context ClassLoader setup failed\n";
+    return 4;
+  }
+  env->CallVoidMethod(managed_thread, set_context_loader, app_loader_ref);
+  env->DeleteLocalRef(managed_thread);
+  env->DeleteLocalRef(thread_class);
+  if (env->ExceptionCheck()) {
+    std::cerr << "ART Darwin DEX: context ClassLoader install failed\n";
+    return 4;
+  }
+
   if (darwin_art::GetFrameworkGraphicsBackend() ==
       darwin_art::FrameworkGraphicsBackend::kProbeCanvas) {
     g_probe_canvas_class =
@@ -1742,7 +1847,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   jobject framework_apk_assets = nullptr;
   jstring framework_res_path = nullptr;
   jobjectArray configured_apk_assets = nullptr;
-  if (run_apk_app && apk_assets_class != nullptr && asset_manager != nullptr) {
+  if (use_framework_resources && apk_assets_class != nullptr &&
+      asset_manager != nullptr) {
     jmethodID load_from_path = env->GetStaticMethodID(
         apk_assets_class, "loadFromPath",
         "(Ljava/lang/String;)Landroid/content/res/ApkAssets;");
@@ -1764,11 +1870,12 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? nullptr
           : env->GetFieldID(asset_manager_class, "mApkAssets",
                             "[Landroid/content/res/ApkAssets;");
-  if (!run_apk_app && asset_manager != nullptr && apk_assets_field != nullptr &&
+  if (!use_framework_resources && asset_manager != nullptr &&
+      apk_assets_field != nullptr &&
       configured_apk_assets != nullptr) {
     env->SetObjectField(asset_manager, apk_assets_field,
                         configured_apk_assets);
-  } else if (run_apk_app && asset_manager != nullptr &&
+  } else if (use_framework_resources && asset_manager != nullptr &&
              apk_assets_field != nullptr && configured_apk_assets != nullptr) {
     jfieldID asset_manager_object =
         env->GetFieldID(asset_manager_class, "mObject", "J");
@@ -1807,7 +1914,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? nullptr
           : env->NewObject(probe_resources_class, probe_resources_constructor,
                            asset_manager,
-                           run_apk_app ? JNI_TRUE : JNI_FALSE);
+                           use_framework_resources ? JNI_TRUE : JNI_FALSE);
   if (activity_info == nullptr || application == nullptr ||
       asset_manager == nullptr || configured_apk_assets == nullptr ||
       apk_assets_field == nullptr || configure_display_scale == nullptr ||
@@ -1982,7 +2089,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       get_probe_theme == nullptr
           ? nullptr
           : env->CallObjectMethod(probe_context, get_probe_theme);
-  if (run_apk_app && probe_theme != nullptr) {
+  const bool use_framework_material_theme = use_framework_resources;
+  if (use_framework_material_theme && probe_theme != nullptr) {
     jclass theme_class = env->GetObjectClass(probe_theme);
     jclass framework_style_class = env->FindClass("android/R$style");
     jfieldID framework_light_no_action_bar =
@@ -2079,6 +2187,65 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           : env->NewObject(decor_view_class, decor_view_constructor,
                            activity_instance, static_cast<jint>(-1), window,
                            window_attributes);
+  // PhoneWindow.installDecor() normally resolves windowBackground from the
+  // active Theme and installs it on DecorView. The standalone launcher builds
+  // the same objects directly, so preserve that framework-owned resource path
+  // explicitly instead of substituting a host color.
+  jobject window_background = nullptr;
+  if (use_framework_resources && decor_view != nullptr) {
+    jclass typed_value_class = env->FindClass("android/util/TypedValue");
+    jmethodID typed_value_constructor =
+        typed_value_class == nullptr
+            ? nullptr
+            : env->GetMethodID(typed_value_class, "<init>", "()V");
+    jobject typed_value =
+        typed_value_constructor == nullptr
+            ? nullptr
+            : env->NewObject(typed_value_class, typed_value_constructor);
+    jclass theme_class = env->GetObjectClass(probe_theme);
+    jmethodID resolve_attribute =
+        theme_class == nullptr
+            ? nullptr
+            : env->GetMethodID(theme_class, "resolveAttribute",
+                               "(ILandroid/util/TypedValue;Z)Z");
+    jclass framework_attr_class = env->FindClass("android/R$attr");
+    jfieldID window_background_attr =
+        framework_attr_class == nullptr
+            ? nullptr
+            : env->GetStaticFieldID(framework_attr_class, "windowBackground",
+                                    "I");
+    jfieldID typed_value_resource_id =
+        typed_value_class == nullptr
+            ? nullptr
+            : env->GetFieldID(typed_value_class, "resourceId", "I");
+    jmethodID get_drawable =
+        probe_resources_class == nullptr
+            ? nullptr
+            : env->GetMethodID(
+                  probe_resources_class, "getDrawable",
+                  "(ILandroid/content/res/Resources$Theme;)"
+                  "Landroid/graphics/drawable/Drawable;");
+    if (typed_value != nullptr && resolve_attribute != nullptr &&
+        window_background_attr != nullptr &&
+        typed_value_resource_id != nullptr && get_drawable != nullptr) {
+      const jint attr = env->GetStaticIntField(framework_attr_class,
+                                               window_background_attr);
+      const jboolean resolved = env->CallBooleanMethod(
+          probe_theme, resolve_attribute, attr, typed_value, JNI_TRUE);
+      const jint resource_id =
+          resolved == JNI_TRUE && !env->ExceptionCheck()
+              ? env->GetIntField(typed_value, typed_value_resource_id)
+              : 0;
+      if (resource_id != 0) {
+        window_background = env->CallObjectMethod(
+            probe_resources, get_drawable, resource_id, probe_theme);
+      }
+    }
+    env->DeleteLocalRef(framework_attr_class);
+    env->DeleteLocalRef(theme_class);
+    env->DeleteLocalRef(typed_value);
+    env->DeleteLocalRef(typed_value_class);
+  }
   jmethodID content_root_constructor =
       content_root_class == nullptr
           ? nullptr
@@ -2104,7 +2271,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? nullptr
           : env->GetFieldID(phone_window_class, "mContentParent",
                             "Landroid/view/ViewGroup;");
-  if (decor_view == nullptr || content_root == nullptr || add_view == nullptr ||
+  if (decor_view == nullptr ||
+      (use_framework_resources && window_background == nullptr) ||
+      content_root == nullptr || add_view == nullptr ||
       phone_decor == nullptr || phone_content_parent == nullptr ||
       env->ExceptionCheck()) {
     std::cerr << "ART Android window: DecorView setup failed\n";
@@ -2141,6 +2310,30 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     std::cerr << "ART Android lifecycle: Activity.onCreate() threw\n"
               << self->GetException()->Dump() << "\n";
     return 28;
+  }
+  // PhoneWindow applies the resolved theme background while installing its
+  // decor.  The standalone launcher supplies the decor before Activity's
+  // setContentView(), so finish the same Android-owned operation after the
+  // activity has installed its content.  Going through PhoneWindow keeps the
+  // Drawable callback/window-background state in the framework path.
+  if (use_framework_resources && window_background != nullptr) {
+    jmethodID set_window_background =
+        phone_window_class == nullptr
+            ? nullptr
+            : env->GetMethodID(
+                  phone_window_class, "setBackgroundDrawable",
+                  "(Landroid/graphics/drawable/Drawable;)V");
+    if (set_window_background == nullptr || env->ExceptionCheck()) {
+      std::cerr << "ART Android window: PhoneWindow background setup failed\n";
+      env->ExceptionClear();
+      return 31;
+    }
+    env->CallVoidMethod(window, set_window_background, window_background);
+    if (env->ExceptionCheck()) {
+      std::cerr << "ART Android window: PhoneWindow background setup threw\n"
+                << self->GetException()->Dump() << "\n";
+      return 31;
+    }
   }
   // We just installed this exact DecorView in PhoneWindow.mDecor above.  The
   // detached probe Window has no ViewRoot to lazily materialize a decor, so
@@ -2241,6 +2434,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   env->DeleteLocalRef(activity_info);
   env->DeleteLocalRef(context_theme_wrapper_class);
   env->DeleteLocalRef(probe_theme);
+  env->DeleteLocalRef(window_background);
   env->DeleteLocalRef(attached_decor);
   env->DeleteLocalRef(content_root);
   env->DeleteLocalRef(decor_view);
