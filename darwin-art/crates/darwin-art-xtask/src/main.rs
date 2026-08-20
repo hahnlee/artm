@@ -204,7 +204,15 @@ fn run() -> Result<(), String> {
 fn emit_graph(out: &Path) -> io::Result<()> {
     let root = repository_root(out);
     let inputs = graph_inputs(&root);
-    let digest = digest_inputs(&root, &inputs)?;
+    // The bootstrap archive must not be invalidated by probe-only sources.
+    // Those sources are linked by the final dylib edge and therefore have a
+    // narrower invalidation boundary than the provider/runtime archive.
+    let bootstrap_inputs = inputs
+        .iter()
+        .filter(|path| !is_probe_only_input(path))
+        .cloned()
+        .collect::<Vec<_>>();
+    let digest = digest_inputs(&root, &bootstrap_inputs)?;
     let toolchain = toolchain_inputs();
     if let Some(parent) = out.parent() {
         fs::create_dir_all(parent)?;
@@ -217,7 +225,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         cache_dir.join("manifest.json"),
         format!(
             "{{\"graph_version\":\"{GRAPH_VERSION}\",\"digest\":\"{digest}\",\"input_count\":{},\"compiler\":\"{}\",\"sdk\":\"{}\",\"edges\":[{}]}}\n",
-            inputs.len(),
+            bootstrap_inputs.len(),
             json_escape(&toolchain.cxx),
             SDK_NAME,
             REPRESENTATIVE_EDGES
@@ -257,8 +265,14 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     let native_output_for_shell = native_output_root.to_string_lossy().into_owned();
     let filesystem_object_for_shell = filesystem_object_path.to_string_lossy().into_owned();
     let network_object_for_shell = network_object_path.to_string_lossy().into_owned();
-    let input_list = inputs
+    let bootstrap_input_list = bootstrap_inputs
         .iter()
+        .map(|path| ninja_path(&root.join(path)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let probe_only_input_list = inputs
+        .iter()
+        .filter(|path| is_probe_only_input(path))
         .map(|path| ninja_path(&root.join(path)))
         .collect::<Vec<_>>()
         .join(" ");
@@ -284,7 +298,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push(' ');
     graph.push_str(&archive);
     graph.push_str(": graphics_bootstrap ");
-    graph.push_str(&input_list);
+    graph.push_str(&bootstrap_input_list);
     graph.push('\n');
     graph.push_str("build graphics-bootstrap: phony ");
     graph.push_str(&stamp);
@@ -300,7 +314,8 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str("build ");
     graph.push_str(&filesystem_object);
     graph.push_str(": runtime_filesystem_probe ");
-    graph.push_str(&input_list);
+    graph.push_str(&bootstrap_input_list);
+    graph.push_str(" probes/runtime_filesystem_probe.cc probes/runtime_filesystem_probe.h");
     graph.push('\n');
     graph.push_str("rule runtime_network_probe\n");
     graph.push_str("  command = cd ");
@@ -313,7 +328,8 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str("build ");
     graph.push_str(&network_object);
     graph.push_str(": runtime_network_probe ");
-    graph.push_str(&input_list);
+    graph.push_str(&bootstrap_input_list);
+    graph.push_str(" probes/runtime_network_probe.cc probes/runtime_network_probe.h");
     graph.push('\n');
     graph.push_str("rule runtime_hwui_probe\n");
     graph.push_str("  command = cd ");
@@ -326,7 +342,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str("build ");
     graph.push_str(&hwui_object);
     graph.push_str(": runtime_hwui_probe ");
-    graph.push_str(&input_list);
+    graph.push_str(&bootstrap_input_list);
     graph.push_str(" probes/runtime_hwui_probe.cc probes/runtime_hwui_probe.h\n");
     graph.push_str("rule graphics_audit\n");
     graph.push_str("  command = cd ");
@@ -352,6 +368,8 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&network_object);
     graph.push(' ');
     graph.push_str(&hwui_object);
+    graph.push(' ');
+    graph.push_str(&probe_only_input_list);
     graph.push('\n');
     graph.push_str("build graphics-audit: phony ");
     graph.push_str(&runtime_library);
@@ -420,8 +438,11 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_network_probe.h"),
         PathBuf::from("probes/runtime_hwui_probe.cc"),
         PathBuf::from("probes/runtime_hwui_probe.h"),
+        PathBuf::from("probes/runtime_link_probe.cc"),
         PathBuf::from("probes/runtime_apk_graph.cc"),
         PathBuf::from("probes/runtime_apk_graph.h"),
+        PathBuf::from("compat/darwin_surface_bridge.mm"),
+        PathBuf::from("compat/darwin_surface_bridge.h"),
     ];
     // Keep this graph tied to the production bootstrap closure. In
     // particular, acceptance probes and unrelated graphics gates should not
@@ -485,6 +506,23 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
     paths.dedup();
     paths.retain(|path| root.join(path).is_file());
     paths
+}
+
+fn is_probe_only_input(path: &Path) -> bool {
+    matches!(
+        path.to_string_lossy().as_ref(),
+        "probes/runtime_filesystem_probe.cc"
+            | "probes/runtime_filesystem_probe.h"
+            | "probes/runtime_network_probe.cc"
+            | "probes/runtime_network_probe.h"
+            | "probes/runtime_hwui_probe.cc"
+            | "probes/runtime_hwui_probe.h"
+            | "probes/runtime_link_probe.cc"
+            | "probes/runtime_apk_graph.cc"
+            | "probes/runtime_apk_graph.h"
+            | "compat/darwin_surface_bridge.mm"
+            | "compat/darwin_surface_bridge.h"
+    )
 }
 
 fn collect_files(directory: &Path, root: &Path, output: &mut Vec<PathBuf>) {
@@ -555,5 +593,18 @@ mod tests {
                  libart-runtime-graphics-bootstrap-darwin.a"
             )
         );
+    }
+
+    #[test]
+    fn probe_sources_do_not_invalidate_the_bootstrap_archive() {
+        assert!(is_probe_only_input(Path::new(
+            "probes/runtime_link_probe.cc"
+        )));
+        assert!(is_probe_only_input(Path::new(
+            "compat/darwin_surface_bridge.mm"
+        )));
+        assert!(!is_probe_only_input(Path::new(
+            "compat/darwin_runtime_adapters.cc"
+        )));
     }
 }
