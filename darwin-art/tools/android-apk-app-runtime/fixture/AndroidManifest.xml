@@ -4,7 +4,7 @@
     <uses-sdk android:minSdkVersion="35" android:targetSdkVersion="35" />
     <application
         android:label="Darwin ART APK"
-        android:theme="@android:style/Theme.Holo.Light.NoActionBar">
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
             android:name=".MainActivity"
             android:exported="true">

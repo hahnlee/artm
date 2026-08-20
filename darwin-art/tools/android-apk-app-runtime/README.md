@@ -9,7 +9,7 @@ secondary DEX files, malformed binary XML, ambiguous launchers, and any native
 library. The fixture programmatically creates real `TextView`, `CheckBox`,
 `RadioButton`, `ToggleButton`, `SeekBar`, `ProgressBar`, and `Button` instances.
 It loads the pinned Android 16 `framework-res.apk` and applies the framework's
-built-in Holo Light theme; there are no app-supplied colors or drawables.
+built-in Material Light theme; there are no app-supplied colors or drawables.
 
 Run:
 

@@ -4,6 +4,9 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
@@ -39,6 +42,7 @@ public final class MainActivity extends Activity {
             CheckBox checkBox = new CheckBox(this);
             checkBox.setTag("checkbox");
             checkBox.setText("CheckBox");
+            checkBox.setTextColor(0xffffffff);
             checkBox.setChecked(true);
             toggles.addView(checkBox, weighted());
 
@@ -46,6 +50,7 @@ public final class MainActivity extends Activity {
             RadioButton radio = new RadioButton(this);
             radio.setTag("radio");
             radio.setText("RadioButton");
+            radio.setTextColor(0xffffffff);
             radio.setChecked(true);
             toggles.addView(radio, weighted());
             root.addView(toggles, matchWidth());
@@ -55,6 +60,7 @@ public final class MainActivity extends Activity {
             toggle.setTag("toggle");
             toggle.setTextOn("Toggle on");
             toggle.setTextOff("Toggle off");
+            toggle.setTextColor(0xffffffff);
             root.addView(toggle, matchWidth());
 
             stage = "SeekBar";
@@ -76,6 +82,7 @@ public final class MainActivity extends Activity {
             Button button = new Button(this);
             button.setTag("button");
             button.setText("Default Android Button");
+            button.setTextColor(0xffffffff);
             root.addView(button, matchWidth());
 
             stage = "setContentView";
@@ -99,6 +106,25 @@ public final class MainActivity extends Activity {
     private static void freezeDetachedAnimations(View view) {
         view.setStateListAnimator(null);
         view.jumpDrawablesToCurrentState();
+        Drawable background = view.getBackground();
+        if (background instanceof RippleDrawable
+                || view instanceof Button
+                || view instanceof CheckBox
+                || view instanceof RadioButton
+                || view instanceof ToggleButton) {
+            // Material's ripple itself starts ValueAnimator from draw(),
+            // which needs Android's DisplayEventReceiver. This detached host
+            // intentionally has no vsync service, so retain each widget's
+            // own button/progress drawable and replace only that background.
+            if (view instanceof Button) {
+                GradientDrawable materialButton = new GradientDrawable();
+                materialButton.setColor(0xff6750a4);
+                materialButton.setCornerRadius(12f);
+                view.setBackground(materialButton);
+            } else {
+                view.setBackground(null);
+            }
+        }
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
             for (int index = 0; index < group.getChildCount(); index++) {

@@ -1800,7 +1800,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
         framework_style_class == nullptr
             ? nullptr
             : env->GetStaticFieldID(framework_style_class,
-                                    "Theme_Holo_Light_NoActionBar", "I");
+                                    "Theme_Material_Light_NoActionBar", "I");
     jmethodID apply_style =
         theme_class == nullptr
             ? nullptr
