@@ -1577,19 +1577,3 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   return 0;
   }();
 }
-
-extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
-  darwin_art_process::ShutdownState state;
-  const auto acceptance = darwin_art_process::acceptance_snapshot();
-  state.network_elf_loaded = acceptance.network_elf_loaded;
-  state.apk_elf_loaded = acceptance.apk_elf_loaded;
-  state.direct_apk_loaded = acceptance.direct_apk_loaded;
-  state.provider_hooks_installed = acceptance.provider_hooks_installed;
-  state.apk_sha256 = acceptance.apk_sha256;
-  state.apk_root_sha256 = acceptance.apk_root_sha256;
-  const int32_t status = darwin_art_process::run_shutdown(state);
-  if (status == 0) {
-    darwin_art_process::clear_provider_hooks_state();
-  }
-  return status;
-}

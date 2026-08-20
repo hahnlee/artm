@@ -20,3 +20,5 @@ struct ShutdownState final {
 int32_t run_shutdown(const ShutdownState& state);
 
 }  // namespace darwin_art_process
+
+extern "C" int32_t darwin_art_shutdown_process();
