@@ -9,12 +9,10 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 use std::rc::Rc;
 
-#[cfg(target_os = "macos")]
-mod dynamic_library;
 mod ffi;
 
 #[cfg(target_os = "macos")]
-use dynamic_library::DynamicLibrary;
+use darwin_art_engine::LoadedEngine;
 
 pub use darwin_art_abi::ABI_VERSION;
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
@@ -330,41 +328,20 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         runtime
             .start()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
-        let library = DynamicLibrary::open(&options.library).map_err(HostError::DynamicLoader)?;
-        // SAFETY: Symbol names and signatures are fixed by darwin_art.h ABI v1.
-        let run_process: RunProcessFn = unsafe { library.symbol(b"darwin_art_run_process\0") }
-            .map_err(HostError::DynamicLoader)?;
-        let shutdown_process: ShutdownProcessFn =
-            unsafe { library.symbol(b"darwin_art_shutdown_process\0") }
-                .map_err(HostError::DynamicLoader)?;
-        // SAFETY: These signatures are fixed by darwin_surface_bridge.h.
-        let surface_create: SurfaceCreateFn =
-            unsafe { library.symbol(b"darwin_art_surface_create\0") }
-                .map_err(HostError::DynamicLoader)?;
-        let surface_update: SurfaceUpdateFn =
-            unsafe { library.symbol(b"darwin_art_surface_update\0") }
-                .map_err(HostError::DynamicLoader)?;
-        let surface_present: SurfacePresentFn =
-            unsafe { library.symbol(b"darwin_art_surface_present\0") }
-                .map_err(HostError::DynamicLoader)?;
-        let surface_pump_events: SurfacePumpEventsFn =
-            unsafe { library.symbol(b"darwin_art_surface_pump_events\0") }
-                .map_err(HostError::DynamicLoader)?;
+        let library = LoadedEngine::open(&options.library).map_err(HostError::DynamicLoader)?;
+        let symbols = library.symbols();
+        let run_process: RunProcessFn = symbols.run_process;
+        let shutdown_process: ShutdownProcessFn = symbols.shutdown_process;
+        let surface_create: SurfaceCreateFn = symbols.surface_create;
+        let surface_update: SurfaceUpdateFn = symbols.surface_update;
+        let surface_present: SurfacePresentFn = symbols.surface_present;
+        let surface_pump_events: SurfacePumpEventsFn = symbols.surface_pump_events;
         let surface_next_pointer_event: SurfaceNextPointerEventFn =
-            unsafe { library.symbol(b"darwin_art_surface_next_pointer_event\0") }
-                .map_err(HostError::DynamicLoader)?;
-        let surface_destroy: SurfaceDestroyFn =
-            unsafe { library.symbol(b"darwin_art_surface_destroy\0") }
-                .map_err(HostError::DynamicLoader)?;
-        let surface_active: SurfaceActiveFn =
-            unsafe { library.symbol(b"darwin_art_surface_active_gpu\0") }
-                .map_err(HostError::DynamicLoader)?;
-        let dispatch_pointer: DispatchPointerFn =
-            unsafe { library.symbol(b"darwin_art_dispatch_pointer\0") }
-                .map_err(HostError::DynamicLoader)?;
-        let pump_framework_frame: PumpFrameworkFrameFn =
-            unsafe { library.symbol(b"darwin_art_pump_framework_frame\0") }
-                .map_err(HostError::DynamicLoader)?;
+            symbols.surface_next_pointer_event;
+        let surface_destroy: SurfaceDestroyFn = symbols.surface_destroy;
+        let surface_active: SurfaceActiveFn = symbols.surface_active;
+        let dispatch_pointer: DispatchPointerFn = symbols.dispatch_pointer;
+        let pump_framework_frame: PumpFrameworkFrameFn = symbols.pump_framework_frame;
 
         let core_oj = path_c_string(&options.core_oj_jar)?;
         let core_libart = path_c_string(&options.core_libart_jar)?;

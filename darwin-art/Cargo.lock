@@ -55,6 +55,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "darwin-art-engine"
+version = "0.1.0"
+dependencies = [
+ "darwin-art-engine-sys",
+]
+
+[[package]]
 name = "darwin-art-engine-sys"
 version = "0.1.0"
 dependencies = [
@@ -70,6 +77,7 @@ name = "darwin-art-host"
 version = "0.1.0"
 dependencies = [
  "darwin-art-abi",
+ "darwin-art-engine",
  "darwin-art-engine-sys",
  "darwin-art-runtime",
 ]
