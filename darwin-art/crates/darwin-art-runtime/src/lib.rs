@@ -10,9 +10,11 @@ use std::{any::Any, collections::BTreeMap, marker::PhantomData, rc::Rc, thread::
 
 use darwin_art_abi::StatusCode;
 
+mod lifecycle;
 mod owners;
 mod provider;
 
+pub use lifecycle::RuntimeLifecycle;
 pub use owners::RuntimeOwners;
 pub use provider::{ProviderLeaseError, ProviderLeaseTable};
 

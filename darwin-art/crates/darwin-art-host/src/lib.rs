@@ -13,7 +13,7 @@ mod provider;
 use darwin_art_engine::{EngineSession, SurfaceSession};
 
 pub use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProcessResult};
-use darwin_art_runtime::{RuntimeError, RuntimeOwners, RuntimeSession, Subsystem};
+use darwin_art_runtime::{RuntimeError, RuntimeLifecycle, RuntimeOwners, Subsystem};
 use provider::ProviderBridge;
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
@@ -220,7 +220,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
 
     #[cfg(target_os = "macos")]
     {
-        let mut runtime = RuntimeSession::new();
+        let mut runtime = RuntimeLifecycle::new();
         runtime
             .start()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
@@ -230,7 +230,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         let provider_bridge = Box::new(ProviderBridge::new(symbols));
         let provider_context = provider_bridge.context();
         // SAFETY: provider_bridge is kept alive by the local scope until it
-        // is transferred into RuntimeSession below; the callbacks are static
+        // is transferred into RuntimeOwners below; the callbacks are static
         // and use only that stable context pointer.
         unsafe {
             engine.install_provider_hooks(
@@ -761,7 +761,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             Ok(presentations)
         })();
         // The surface lease is installed after creation and remains owned by
-        // RuntimeSession even when presentation returns an error. Teardown
+        // RuntimeLifecycle even when presentation returns an error. Teardown
         // therefore destroys the surface before releasing the engine lease.
         let mut surface_destroy_status = 0;
         let shutdown_status = match runtime.begin_shutdown() {
