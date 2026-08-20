@@ -258,7 +258,7 @@ pub(crate) fn probe_runtime_dex_flavor(
          ART runtime native: System.arraycopy()=42\n\
          ART Android framework: ProbeActivity().probeValue()=42\n\
          ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
-         ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=640x360\n\
+         ART Android view: Activity.setContentView()->DecorView.draw(Canvas)=360x640\n\
          ART Android lifecycle: Activity.onCreate()=43\n\
          ART Darwin launcher: main(String[])=ok",
             extracted.apk_sha256, extracted.root_sha256

@@ -548,6 +548,50 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 last_frame: None,
             });
         }
+        // A non-graphics engine deliberately has no presentation surface.
+        // Do not manufacture an IOSurface and copy the diagnostic callback
+        // into it: that is a legacy CPU fallback, not part of the Android
+        // GPU architecture, and it also makes a headless ART acceptance
+        // depend on AppKit/IOSurface mapping details.  The callback mailbox
+        // remains available for explicit diagnostic callers, while the
+        // normal headless path owns only ART/provider teardown here.
+        // The legacy IOSurface upload path remains available only for an
+        // explicit diagnostic invocation.  It is never selected by the
+        // normal host, whose non-graphics probes are headless and whose
+        // graphics probes are direct Metal/Ganesh.
+        if std::env::var_os("DARWIN_ART_ENABLE_CPU_SURFACE").is_some() {
+            // Keep the old diagnostic presenter below reachable without
+            // making it a production fallback.
+        } else {
+            let shutdown_status = if runtime.begin_shutdown().is_err() {
+                -1
+            } else {
+                match runtime.uninstall_subsystem(engine_lease) {
+                    Ok(()) => match runtime.uninstall_subsystem(provider_lease) {
+                        Ok(()) => 0,
+                        Err(RuntimeError::EngineFailure { status }) => status,
+                        Err(error) => error.status() as i32,
+                    },
+                    Err(RuntimeError::EngineFailure { status }) => status,
+                    Err(error) => error.status() as i32,
+                }
+            };
+            if shutdown_status == 0 {
+                runtime
+                    .finish_shutdown()
+                    .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
+            } else {
+                runtime.fail(RuntimeError::EngineFailure {
+                    status: shutdown_status,
+                });
+                return Err(HostError::ShutdownFailed(shutdown_status));
+            }
+            return Ok(HostOutcome {
+                process,
+                frames_presented: 0,
+                last_frame: frame_host.last_frame,
+            });
+        }
         // ART invokes the callback while its mutator lock is held. Present only
         // after returning from ART so AppKit's event loop never blocks a runnable
         // managed thread. The callback above merely copied into this Rust-owned
