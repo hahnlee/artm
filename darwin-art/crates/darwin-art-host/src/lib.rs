@@ -7,47 +7,19 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
+mod ffi;
+
 pub use darwin_art_abi::ABI_VERSION;
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
+pub use ffi::{FrameCallback, ProcessConfig, ProcessResult};
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
-pub type FrameCallback = unsafe extern "C" fn(
-    context: *mut c_void,
-    argb_pixels: *const u32,
-    width: u32,
-    height: u32,
-    stride_bytes: usize,
-) -> i32;
-
-#[repr(C)]
-pub struct ProcessConfig {
-    pub struct_size: u32,
-    pub abi_version: u32,
-    pub core_oj_jar: *const c_char,
-    pub core_libart_jar: *const c_char,
-    pub framework_jar: *const c_char,
-    pub core_icu4j_jar: *const c_char,
-    pub app_dex: *const c_char,
-    pub heap_initial_bytes: u64,
-    pub heap_maximum_bytes: u64,
-    pub host_context: *mut c_void,
-    pub frame_callback: Option<FrameCallback>,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[repr(C)]
-pub struct ProcessResult {
-    pub struct_size: u32,
-    pub abi_version: u32,
-    pub hello_answer: i32,
-    pub native_round_trip: i32,
-    pub arraycopy_result: i32,
-    pub activity_probe_result: i32,
-    pub lifecycle_result: i32,
-    pub frame_width: u32,
-    pub frame_height: u32,
-}
+use ffi::{
+    DispatchPointerFn, PointerEvent, PumpFrameworkFrameFn, RunProcessFn, ShutdownProcessFn,
+    SurfaceActiveFn, SurfaceCreateFn, SurfaceCreateInfo, SurfaceDestroyFn,
+    SurfaceNextPointerEventFn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OwnedFrame {
@@ -128,35 +100,6 @@ impl fmt::Display for HostError {
 }
 
 impl Error for HostError {}
-
-type RunProcessFn = unsafe extern "C" fn(*const ProcessConfig, *mut ProcessResult) -> i32;
-type ShutdownProcessFn = unsafe extern "C" fn() -> i32;
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct SurfaceCreateInfo {
-    width: u32,
-    height: u32,
-    title: *const c_char,
-    visible: bool,
-}
-
-type SurfaceCreateFn = unsafe extern "C" fn(*const SurfaceCreateInfo, *mut i32) -> *mut c_void;
-type SurfaceUpdateFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> i32;
-type SurfacePresentFn = unsafe extern "C" fn(*mut c_void) -> i32;
-type SurfacePumpEventsFn = unsafe extern "C" fn(*mut c_void, f64) -> i32;
-#[derive(Clone, Copy, Debug, Default)]
-#[repr(C)]
-struct PointerEvent {
-    action: u32,
-    x: f32,
-    y: f32,
-}
-type SurfaceNextPointerEventFn = unsafe extern "C" fn(*mut c_void, *mut PointerEvent) -> bool;
-type SurfaceDestroyFn = unsafe extern "C" fn(*mut c_void) -> i32;
-type SurfaceActiveFn = unsafe extern "C" fn() -> *mut c_void;
-type DispatchPointerFn = unsafe extern "C" fn(u32, f32, f32) -> i32;
-type PumpFrameworkFrameFn = unsafe extern "C" fn(i64) -> i32;
 
 struct FrameHost {
     frames_received: u64,
