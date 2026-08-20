@@ -7,6 +7,7 @@ members = [
     "crates/darwin-art-fs-broker",
     "crates/darwin-art-abi",
     "crates/darwin-art-engine-sys",
+    "crates/darwin-art-runtime",
 ]
 default-members = ["crates/art-bootstrap", "crates/darwin-art-host", "crates/darwin-art-prefix"]
 resolver = "2"
