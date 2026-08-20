@@ -35,3 +35,10 @@ filesystem/network/HWUI/graphics probe has its own narrow direct-input edge.
 The remaining migration is to apply the same persisted-command promotion to
 the graphics/ICU/HWUI foundation archives. That can proceed without changing
 the Rust runtime or Android acceptance contract.
+
+The process probe is now split at the first stable boundary: environment and
+fixture-mode validation lives in `probes/runtime_process_options.cc` and is a
+separately cached object. The ART orchestration object therefore only changes
+when the process lifecycle or JNI/HWUI implementation changes; adding a new
+fixture selector recompiles the options object and relinks the probe instead of
+recompiling the full ART TU.

@@ -45,6 +45,7 @@
 #include "runtime_elf_probe.h"
 #include "runtime_abi_probe.h"
 #include "runtime_process_state.h"
+#include "runtime_process_options.h"
 #include "runtime_frame_probe.h"
 #include "runtime_graphics_probe.h"
 #include "darwin_icu_natives.h"
@@ -91,43 +92,6 @@ static std::string g_apk_sha256;
 static std::string g_apk_root_sha256;
 static bool g_direct_apk_loaded = false;
 static bool g_network_elf_loaded = false;
-
-static bool IsSha256(const char* value) {
-  if (value == nullptr || std::strlen(value) != 64) {
-    return false;
-  }
-  for (const char* cursor = value; *cursor != '\0'; ++cursor) {
-    if (!((*cursor >= '0' && *cursor <= '9') ||
-          (*cursor >= 'a' && *cursor <= 'f'))) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static bool IsPrivateExtractedRoot(const char* path) {
-  if (path == nullptr) {
-    return false;
-  }
-  struct stat path_stat {};
-  struct stat followed_stat {};
-  if (lstat(path, &path_stat) != 0 || stat(path, &followed_stat) != 0 ||
-      !S_ISREG(path_stat.st_mode) || path_stat.st_dev != followed_stat.st_dev ||
-      path_stat.st_ino != followed_stat.st_ino ||
-      (path_stat.st_mode & 0777) != 0400) {
-    return false;
-  }
-  const std::string root_path(path);
-  const std::size_t separator = root_path.rfind('/');
-  if (separator == std::string::npos || separator == 0) {
-    return false;
-  }
-  const std::string directory = root_path.substr(0, separator);
-  struct stat directory_stat {};
-  return lstat(directory.c_str(), &directory_stat) == 0 &&
-         S_ISDIR(directory_stat.st_mode) &&
-         (directory_stat.st_mode & 0777) == 0500;
-}
 
 static bool g_provider_hooks_installed = false;
 class ScopedJniLocalFrame final {
@@ -186,99 +150,47 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return DARWIN_ART_STATUS_PROCESS_ALREADY_STARTED;
   }
   darwin_art_process::ScopedRunBoundary process_boundary;
-  const char* elf_fixture_path =
-      std::getenv("DARWIN_ART_ANDROID_ELF_JNI_FIXTURE");
-  const bool run_elf_jni_fixture =
-      elf_fixture_path != nullptr && elf_fixture_path[0] != '\0';
-  const char* generic_elf_path =
-      std::getenv("DARWIN_ART_ANDROID_ELF_GENERIC_FIXTURE");
-  const bool run_generic_elf =
-      generic_elf_path != nullptr && generic_elf_path[0] != '\0';
-  const char* apk_elf_path =
-      std::getenv("DARWIN_ART_ANDROID_APK_ELF_FIXTURE");
-  const char* apk_sha256 = std::getenv("DARWIN_ART_ANDROID_APK_SHA256");
-  const char* apk_root_sha256 =
-      std::getenv("DARWIN_ART_ANDROID_APK_ROOT_SHA256");
-  const bool run_apk_elf =
-      apk_elf_path != nullptr && apk_elf_path[0] != '\0' &&
-      IsSha256(apk_sha256) && IsSha256(apk_root_sha256) &&
-      IsPrivateExtractedRoot(apk_elf_path) &&
-      run_generic_elf && std::strcmp(apk_elf_path, generic_elf_path) == 0;
-  const char* direct_apk_path =
-      std::getenv("DARWIN_ART_DIRECT_APK_FIXTURE");
-  const char* direct_apk_root = std::getenv("DARWIN_ART_DIRECT_APK_ROOT");
-  const bool run_direct_apk =
-      direct_apk_path != nullptr && direct_apk_path[0] != '\0' &&
-      direct_apk_root != nullptr && direct_apk_root[0] != '\0';
+  darwin_art_process::ProcessOptions process_options;
+  std::string options_error;
+  const int options_status =
+      darwin_art_process::LoadProcessOptions(&process_options, &options_error);
+  if (options_status != 0) {
+    std::cerr << options_error << "\n";
+    return options_status;
+  }
+  const char* elf_fixture_path = process_options.elf_fixture_path.c_str();
+  const char* generic_elf_path = process_options.generic_elf_path.c_str();
+  const char* apk_elf_path = process_options.apk_elf_path.c_str();
+  const char* apk_sha256 = process_options.apk_sha256.c_str();
+  const char* apk_root_sha256 = process_options.apk_root_sha256.c_str();
+  const char* direct_apk_path = process_options.direct_apk_path.c_str();
+  const char* direct_apk_root = process_options.direct_apk_root.c_str();
   const char* libcxx_collections_path =
-      std::getenv("DARWIN_ART_ANDROID_LIBCXX_COLLECTIONS_FIXTURE");
-  const char* libcxx_exception_path =
-      std::getenv("DARWIN_ART_ANDROID_LIBCXX_EXCEPTION_FIXTURE");
-  const bool run_libcxx_acceptance =
-      libcxx_collections_path != nullptr && libcxx_collections_path[0] != '\0' &&
-      libcxx_exception_path != nullptr && libcxx_exception_path[0] != '\0';
-  const char* tls_fixture_path =
-      std::getenv("DARWIN_ART_ANDROID_TLS_FIXTURE");
-  const bool run_tls_acceptance =
-      tls_fixture_path != nullptr && tls_fixture_path[0] != '\0';
-  const char* network_fixture_path =
-      std::getenv("DARWIN_ART_ANDROID_NETWORK_FIXTURE");
-  const bool run_network_acceptance =
-      network_fixture_path != nullptr && network_fixture_path[0] != '\0';
-  const char* apk_app_package = std::getenv("DARWIN_ART_APK_APP_PACKAGE");
-  const char* apk_app_activity = std::getenv("DARWIN_ART_APK_APP_ACTIVITY");
-  const char* apk_app_descriptor =
-      std::getenv("DARWIN_ART_APK_APP_DESCRIPTOR");
-  const char* apk_app_support_dex =
-      std::getenv("DARWIN_ART_APK_APP_SUPPORT_DEX");
-  const char* framework_res_apk =
-      std::getenv("DARWIN_ART_FRAMEWORK_RES_APK");
-  const char* window_scale_value =
-      std::getenv("DARWIN_ART_WINDOW_SCALE");
+      process_options.libcxx_collections_path.c_str();
+  const char* libcxx_exception_path = process_options.libcxx_exception_path.c_str();
+  const char* tls_fixture_path = process_options.tls_fixture_path.c_str();
+  const char* network_fixture_path = process_options.network_fixture_path.c_str();
+  const char* apk_app_package = process_options.apk_app_package.c_str();
+  const char* apk_app_activity = process_options.apk_app_activity.c_str();
+  const char* apk_app_descriptor = process_options.apk_app_descriptor.c_str();
+  const char* apk_app_support_dex = process_options.apk_app_support_dex.c_str();
+  const char* framework_res_apk = process_options.framework_res_apk.c_str();
+  const bool run_elf_jni_fixture = process_options.run_elf_jni_fixture;
+  const bool run_generic_elf = process_options.run_generic_elf;
+  const bool run_apk_elf = process_options.run_apk_elf;
+  const bool run_direct_apk = process_options.run_direct_apk;
+  const bool run_libcxx_acceptance = process_options.run_libcxx_acceptance;
+  const bool run_tls_acceptance = process_options.run_tls_acceptance;
+  const bool run_network_acceptance = process_options.run_network_acceptance;
   const bool has_apk_app_identity_environment =
-      apk_app_package != nullptr || apk_app_activity != nullptr ||
-      apk_app_descriptor != nullptr || apk_app_support_dex != nullptr;
-  const bool run_apk_app =
-      apk_app_package != nullptr && apk_app_package[0] != '\0' &&
-      apk_app_activity != nullptr && apk_app_activity[0] != '\0' &&
-      apk_app_descriptor != nullptr && apk_app_descriptor[0] == 'L' &&
-      apk_app_support_dex != nullptr && apk_app_support_dex[0] != '\0' &&
-      framework_res_apk != nullptr && framework_res_apk[0] == '/' &&
-      std::strlen(apk_app_descriptor) >= 3u &&
-      std::strlen(apk_app_descriptor) <= 513u &&
-      apk_app_descriptor[std::strlen(apk_app_descriptor) - 1u] == ';';
-  const bool run_framework_button =
-      !has_apk_app_identity_environment &&
-      std::getenv("DARWIN_ART_TEST_FONTS_XML") != nullptr &&
-      framework_res_apk != nullptr && framework_res_apk[0] == '/';
-  const bool use_framework_resources = run_apk_app || run_framework_button;
-  const bool valid_window_scale =
-      window_scale_value == nullptr ||
-      std::strcmp(window_scale_value, "1") == 0 ||
-      std::strcmp(window_scale_value, "2") == 0;
-  const jint window_scale =
-      run_apk_app && window_scale_value != nullptr &&
-              std::strcmp(window_scale_value, "2") == 0
-          ? 2
-          : 1;
+      process_options.has_apk_app_identity_environment;
+  const bool run_apk_app = process_options.run_apk_app;
+  const bool run_framework_button = process_options.run_framework_button;
+  const bool use_framework_resources = process_options.use_framework_resources;
+  const jint window_scale = process_options.window_scale;
   constexpr jint kApkFrameWidth = 360;
   constexpr jint kApkFrameHeight = 640;
-  const bool expect_apk_widgets =
-      run_apk_app &&
-      std::getenv("DARWIN_ART_APK_APP_EXPECT_WIDGETS") != nullptr &&
-      std::strcmp(std::getenv("DARWIN_ART_APK_APP_EXPECT_WIDGETS"), "1") == 0;
-  if ((has_apk_app_identity_environment && !run_apk_app) ||
-      (framework_res_apk != nullptr && !use_framework_resources) ||
-      !valid_window_scale) {
-    std::cerr << "ART Android APK app environment is incomplete or invalid\n";
-    return 48;
-  }
-  if (run_network_acceptance &&
-      (run_elf_jni_fixture || run_generic_elf || run_apk_elf ||
-       run_libcxx_acceptance || run_tls_acceptance || run_direct_apk)) {
-    std::cerr << "ART Android network fixture requires an isolated process\n";
-    return 47;
-  }
+  const bool expect_apk_widgets = process_options.expect_apk_widgets;
 
   // Darwin's malloc zones can claim the fixed compressed-reference window
   // while RuntimeArgumentMap is being assembled. Reserve ART's bounded arena

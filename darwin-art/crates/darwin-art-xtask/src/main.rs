@@ -575,6 +575,8 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_abi_probe.h"),
         PathBuf::from("probes/runtime_process_state.cc"),
         PathBuf::from("probes/runtime_process_state.h"),
+        PathBuf::from("probes/runtime_process_options.cc"),
+        PathBuf::from("probes/runtime_process_options.h"),
         PathBuf::from("probes/runtime_frame_probe.cc"),
         PathBuf::from("probes/runtime_frame_probe.h"),
         PathBuf::from("probes/runtime_graphics_probe.cc"),
@@ -666,6 +668,8 @@ fn is_probe_only_input(path: &Path) -> bool {
             | "probes/runtime_abi_probe.h"
             | "probes/runtime_process_state.cc"
             | "probes/runtime_process_state.h"
+            | "probes/runtime_process_options.cc"
+            | "probes/runtime_process_options.h"
             | "probes/runtime_frame_probe.cc"
             | "probes/runtime_frame_probe.h"
             | "probes/runtime_graphics_probe.cc"
@@ -872,6 +876,9 @@ mod tests {
         )));
         assert!(is_probe_only_input(Path::new(
             "compat/darwin_surface_bridge.mm"
+        )));
+        assert!(is_probe_only_input(Path::new(
+            "probes/runtime_process_options.cc"
         )));
         assert!(!is_probe_only_input(Path::new(
             "compat/darwin_runtime_adapters.cc"
