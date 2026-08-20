@@ -1,0 +1,267 @@
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::Read;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use super::{Result, describe_command, run_command};
+
+pub(crate) fn common_cpp_command(includes: &[&Path]) -> Command {
+    let mut command = Command::new("clang++");
+    command.args([
+        "-std=c++20",
+        "-O2",
+        "-DNDEBUG",
+        "-DART_PAGE_SIZE_AGNOSTIC",
+        // Android's platform Clang configuration zero-initializes trivial
+        // automatic storage. ART's Soong build is compiled under that contract.
+        "-ftrivial-auto-var-init=zero",
+        "-ffunction-sections",
+        "-fdata-sections",
+    ]);
+    for include in includes {
+        command.arg(format!("-I{}", include.display()));
+    }
+    // Many AOSP headers include libartbase's globals.h relative to their own
+    // directory. Force the patched Darwin copy first so the original include
+    // guard cannot lock in the 4 KiB non-Linux fallback.
+    command.args(["-include", "base/globals.h"]);
+    command
+}
+
+pub(crate) fn compile_cpp(source: &Path, object_dir: &Path, includes: &[&Path]) -> Result<PathBuf> {
+    let file_name = source
+        .file_name()
+        .ok_or_else(|| format!("source has no file name: {}", source.display()))?;
+    let object = object_dir.join(format!("{}.o", file_name.to_string_lossy()));
+    run_command(
+        common_cpp_command(includes)
+            .arg("-c")
+            .arg(source)
+            .arg("-o")
+            .arg(&object),
+    )?;
+    Ok(object)
+}
+
+pub(crate) fn record_cache_result(
+    compiled: bool,
+    compiled_objects: &mut usize,
+    cached_objects: &mut usize,
+) {
+    if compiled {
+        *compiled_objects += 1;
+    } else {
+        *cached_objects += 1;
+    }
+}
+
+pub(crate) fn compile_with_dependency_cache(
+    command: &mut Command,
+    object: &Path,
+    compiler_identity: &str,
+    file_hash_cache: &mut FileHashCache,
+) -> Result<bool> {
+    let depfile = object.with_extension("o.d");
+    let fingerprint = object.with_extension("o.fingerprint");
+    command.arg("-MMD").arg("-MF").arg(&depfile);
+    let command_description = describe_command(command);
+
+    if object.is_file()
+        && depfile.is_file()
+        && fingerprint.is_file()
+        && let Some(current) = dependency_fingerprint(
+            &depfile,
+            &command_description,
+            compiler_identity,
+            file_hash_cache,
+        )?
+        && fs::read_to_string(&fingerprint).is_ok_and(|cached| cached == current)
+    {
+        return Ok(false);
+    }
+
+    run_command(command)?;
+    let current = dependency_fingerprint(
+        &depfile,
+        &command_description,
+        compiler_identity,
+        file_hash_cache,
+    )?
+    .ok_or_else(|| {
+        format!(
+            "compiler did not produce a usable dependency file for {}",
+            object.display()
+        )
+    })?;
+    fs::write(fingerprint, current)?;
+    Ok(true)
+}
+
+fn dependency_fingerprint(
+    depfile: &Path,
+    command_description: &str,
+    compiler_identity: &str,
+    file_hash_cache: &mut FileHashCache,
+) -> Result<Option<String>> {
+    let Ok(depfile_text) = fs::read_to_string(depfile) else {
+        return Ok(None);
+    };
+    let normalized = depfile_text.replace("\\\r\n", " ").replace("\\\n", " ");
+    let Some((_, dependency_text)) = normalized.split_once(':') else {
+        return Ok(None);
+    };
+    let mut dependencies = parse_makefile_words(dependency_text)
+        .into_iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    dependencies.sort();
+    dependencies.dedup();
+    if dependencies.is_empty() || dependencies.iter().any(|path| !path.is_file()) {
+        return Ok(None);
+    }
+
+    let mut dependency_hashes = String::new();
+    for dependency in &dependencies {
+        dependency_hashes.push_str(file_hash_cache.hash(dependency)?);
+        dependency_hashes.push_str("  ");
+        dependency_hashes.push_str(&dependency.to_string_lossy());
+        dependency_hashes.push('\n');
+    }
+    Ok(Some(format!(
+        "cache-format=1\ncompiler={compiler_identity}\ncommand={command_description}\n{dependency_hashes}"
+    )))
+}
+
+#[derive(Default)]
+pub(crate) struct FileHashCache {
+    entries: BTreeMap<String, FileHashEntry>,
+}
+
+struct FileHashEntry {
+    metadata: String,
+    sha256: String,
+}
+
+impl FileHashCache {
+    pub(crate) fn load(path: &Path) -> Result<Self> {
+        let Ok(contents) = fs::read_to_string(path) else {
+            return Ok(Self::default());
+        };
+        let mut entries = BTreeMap::new();
+        for line in contents.lines() {
+            let mut fields = line.splitn(3, '\t');
+            let (Some(path), Some(metadata), Some(sha256)) =
+                (fields.next(), fields.next(), fields.next())
+            else {
+                continue;
+            };
+            entries.insert(
+                path.to_owned(),
+                FileHashEntry {
+                    metadata: metadata.to_owned(),
+                    sha256: sha256.to_owned(),
+                },
+            );
+        }
+        Ok(Self { entries })
+    }
+
+    fn hash(&mut self, path: &Path) -> Result<&str> {
+        let path_key = path.to_string_lossy().into_owned();
+        let metadata = fs::metadata(path)?;
+        let metadata_key = format!(
+            "{}:{}:{}:{}:{}:{}:{}",
+            metadata.dev(),
+            metadata.ino(),
+            metadata.size(),
+            metadata.mtime(),
+            metadata.mtime_nsec(),
+            metadata.ctime(),
+            metadata.ctime_nsec()
+        );
+        let cache_hit = self
+            .entries
+            .get(&path_key)
+            .is_some_and(|entry| entry.metadata == metadata_key);
+        if !cache_hit {
+            let mut file = fs::File::open(path)?;
+            let mut digest = Sha256::new();
+            let mut buffer = [0_u8; 64 * 1024];
+            loop {
+                let count = file.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                digest.update(&buffer[..count]);
+            }
+            let sha256 = format!("{:x}", digest.finalize());
+            self.entries.insert(
+                path_key.clone(),
+                FileHashEntry {
+                    metadata: metadata_key,
+                    sha256,
+                },
+            );
+        }
+        Ok(&self.entries[&path_key].sha256)
+    }
+
+    pub(crate) fn save(&self, path: &Path) -> Result<()> {
+        let mut contents = String::new();
+        for (path, entry) in &self.entries {
+            contents.push_str(path);
+            contents.push('\t');
+            contents.push_str(&entry.metadata);
+            contents.push('\t');
+            contents.push_str(&entry.sha256);
+            contents.push('\n');
+        }
+        fs::write(path, contents)?;
+        Ok(())
+    }
+}
+
+pub(crate) fn parse_makefile_words(input: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut escaped = false;
+    for character in input.chars() {
+        if escaped {
+            word.push(character);
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character.is_whitespace() {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+        } else {
+            word.push(character);
+        }
+    }
+    if escaped {
+        word.push('\\');
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
+pub(crate) fn create_archive(archive: &Path, objects: &[PathBuf]) -> Result<()> {
+    // `ar r` replaces members with matching names but leaves every stale member
+    // whose name disappeared from the new object list. Build flavors with a
+    // different module composition must therefore publish from an empty archive.
+    if archive.exists() {
+        fs::remove_file(archive)?;
+    }
+    let mut command = Command::new("ar");
+    command.arg("rcs").arg(archive);
+    for object in objects {
+        command.arg(object);
+    }
+    run_command(&mut command)
+}
