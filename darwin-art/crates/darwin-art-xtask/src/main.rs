@@ -288,6 +288,10 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         &native_output_root.join("runtime-bootstrap/objects"),
         &runtime_archive_path,
     )?;
+    let cached_graphics_objects = cached_native_objects(
+        &native_output_root.join("runtime-graphics-bootstrap/objects"),
+        &archive_path,
+    )?;
     let filesystem_object_for_shell = filesystem_object_path.to_string_lossy().into_owned();
     let network_object_for_shell = network_object_path.to_string_lossy().into_owned();
     let bootstrap_input_list = bootstrap_inputs
@@ -348,25 +352,35 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&format!("# input-digest: {digest}\n"));
     graph.push_str(&format!("# compiler: {} sdk: {SDK_NAME}\n", toolchain.cxx));
     graph.push_str("ninja_required_version = 1.10\n\n");
-    graph.push_str("rule graphics_bootstrap\n");
-    graph.push_str("  command = cd ");
-    graph.push_str(&shell_quote(&root_for_shell));
-    graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT_ROOT=");
-    graph.push_str(&shell_quote(&native_output_for_shell));
-    graph.push_str(
-        " cargo run -p art-bootstrap -- build-runtime-graphics-bootstrap-internal && touch ",
-    );
-    graph.push_str(&shell_quote(&stamp_for_shell));
-    graph.push('\n');
-    graph.push_str("  description = GRAPHICS bootstrap\n");
-    graph.push_str("  restat = 1\n\n");
-    graph.push_str("build ");
-    graph.push_str(&stamp);
-    graph.push(' ');
-    graph.push_str(&archive);
-    graph.push_str(": graphics_bootstrap ");
-    graph.push_str(&bootstrap_input_list);
-    graph.push('\n');
+    if let Some(cached_objects) = cached_graphics_objects.as_deref() {
+        emit_cached_native_graph(&mut graph, cached_objects, &archive);
+        graph.push_str("build ");
+        graph.push_str(&stamp);
+        graph.push_str(": phony ");
+        graph.push_str(&archive);
+        graph.push('\n');
+        graph.push_str("# graphics-bootstrap uses persisted per-object commands\n\n");
+    } else {
+        graph.push_str("rule graphics_bootstrap\n");
+        graph.push_str("  command = cd ");
+        graph.push_str(&shell_quote(&root_for_shell));
+        graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT_ROOT=");
+        graph.push_str(&shell_quote(&native_output_for_shell));
+        graph.push_str(
+            " cargo run -p art-bootstrap -- build-runtime-graphics-bootstrap-internal && touch ",
+        );
+        graph.push_str(&shell_quote(&stamp_for_shell));
+        graph.push('\n');
+        graph.push_str("  description = GRAPHICS bootstrap\n");
+        graph.push_str("  restat = 1\n\n");
+        graph.push_str("build ");
+        graph.push_str(&stamp);
+        graph.push(' ');
+        graph.push_str(&archive);
+        graph.push_str(": graphics_bootstrap ");
+        graph.push_str(&bootstrap_input_list);
+        graph.push('\n');
+    }
     graph.push_str("build graphics-bootstrap: phony ");
     graph.push_str(&archive);
     graph.push('\n');

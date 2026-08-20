@@ -14,12 +14,12 @@ ninja -f _build/native-graph/build.ninja -n graphics-bootstrap
 
 On a clean checkout with no native fingerprints, the runtime target is a
 single bootstrap edge. After that first successful build, graph generation
-discovers the persisted runtime object commands and emits one
-`native_cached_cpp` edge per object (214 objects in the current ART flavor),
-plus a deterministic archive edge. The graphics bootstrap/link edge and the
-four independently owned probe objects remain separate products. The old
-bootstrap command remains the source of truth for the cold-start transition;
-the per-object graph is the source of truth for subsequent incremental builds.
+discovers the persisted runtime and graphics object commands and emits one
+`native_cached_cpp` edge per object (214 objects per current ART flavor), plus
+one deterministic archive edge per archive. The four independently owned
+probe objects remain separate products. The old bootstrap command remains the
+source of truth for the cold-start transition; the per-object graph is the
+source of truth for subsequent incremental builds.
 
 The input digest includes the graph generator version, repository paths, and
 contents of the tracked production bootstrap/fixture/proxy closure. Each
