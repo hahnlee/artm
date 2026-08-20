@@ -44,6 +44,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "darwin-art-elf-loader"
+version = "0.1.0"
+dependencies = [
+ "darwin-art-fs-broker",
+]
+
+[[package]]
+name = "darwin-art-fs-broker"
+version = "0.1.0"
+
+[[package]]
 name = "darwin-art-host"
 version = "0.1.0"
 

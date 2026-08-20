@@ -1,3 +1,10 @@
 [workspace]
-members = ["crates/art-bootstrap", "crates/darwin-art-host", "crates/darwin-art-prefix"]
+members = [
+    "crates/art-bootstrap",
+    "crates/darwin-art-host",
+    "crates/darwin-art-prefix",
+    "crates/darwin-art-elf-loader",
+    "crates/darwin-art-fs-broker",
+]
+default-members = ["crates/art-bootstrap", "crates/darwin-art-host", "crates/darwin-art-prefix"]
 resolver = "2"
