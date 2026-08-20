@@ -44,6 +44,7 @@
 #include "runtime_hwui_probe.h"
 #include "runtime_elf_probe.h"
 #include "runtime_abi_probe.h"
+#include "runtime_process_state.h"
 #include "darwin_icu_natives.h"
 #include "darwin_libcore_natives.h"
 #include "darwin_openjdk_natives.h"
@@ -183,101 +184,7 @@ static bool IsPrivateExtractedRoot(const char* path) {
          (directory_stat.st_mode & 0777) == 0500;
 }
 
-enum class ProcessPhase {
-  kNeverStarted,
-  kRunning,
-  kAwaitingShutdown,
-  kShuttingDown,
-  kShutdownComplete,
-  kCreateFailed,
-  kShutdownFailed,
-};
-
-struct ProcessState {
-  std::mutex mutex;
-  ProcessPhase phase = ProcessPhase::kNeverStarted;
-  pthread_t owner_thread{};
-  bool owner_thread_valid = false;
-  JavaVM* java_vm = nullptr;
-  art::Thread* art_thread = nullptr;
-  bool resource_runtime_installed = false;
-  std::vector<std::unique_ptr<const art::DexFile>> app_dex_files;
-};
-
-static ProcessState g_process_state;
 static bool g_provider_hooks_installed = false;
-
-static bool BeginProcessRun() {
-  std::lock_guard<std::mutex> lock(g_process_state.mutex);
-  if (g_process_state.phase != ProcessPhase::kNeverStarted) {
-    return false;
-  }
-  g_process_state.phase = ProcessPhase::kRunning;
-  g_process_state.owner_thread = pthread_self();
-  g_process_state.owner_thread_valid = true;
-  return true;
-}
-
-static void RecordCreatedRuntime(art::Thread* art_thread) {
-  std::lock_guard<std::mutex> lock(g_process_state.mutex);
-  CHECK(g_process_state.phase == ProcessPhase::kRunning);
-  CHECK(art::Runtime::Current() != nullptr);
-  g_process_state.java_vm = reinterpret_cast<JavaVM*>(
-      art::Runtime::Current()->GetJavaVM());
-  g_process_state.art_thread = art_thread;
-}
-
-static void RecordResourceRuntimeInstalled() {
-  std::lock_guard<std::mutex> lock(g_process_state.mutex);
-  CHECK(g_process_state.phase == ProcessPhase::kRunning);
-  CHECK(!g_process_state.resource_runtime_installed);
-  g_process_state.resource_runtime_installed = true;
-}
-
-static void FinishProcessRun() {
-  std::lock_guard<std::mutex> lock(g_process_state.mutex);
-  CHECK(g_process_state.phase == ProcessPhase::kRunning);
-  g_process_state.phase = g_process_state.java_vm == nullptr
-                              ? ProcessPhase::kCreateFailed
-                              : ProcessPhase::kAwaitingShutdown;
-}
-
-// darwin_art_run_process is deliberately a one-shot process ABI for now. ART's
-// Runtime::Create() leaves its main thread runnable, which is appropriate for
-// the monolithic probe but not for returning to an arbitrary native host. Keep
-// this guard outside the managed-work lambda so every normal exit first
-// destroys ScopedObjectAccess/StackHandleScope and only then releases the
-// mutator lock by returning the ART thread to kNative.
-class ScopedProcessRunBoundary final {
- public:
-  ScopedProcessRunBoundary() = default;
-
-  ~ScopedProcessRunBoundary() {
-    if (art_thread_ == nullptr) {
-      FinishProcessRun();
-      return;
-    }
-    CHECK_EQ(art::Thread::Current(), art_thread_);
-    const art::ThreadState state = art_thread_->GetState();
-    if (state == art::ThreadState::kRunnable) {
-      art_thread_->TransitionFromRunnableToSuspended(
-          art::ThreadState::kNative);
-    } else {
-      CHECK_EQ(state, art::ThreadState::kNative);
-    }
-    FinishProcessRun();
-  }
-
-  void SetArtThread(art::Thread* art_thread) {
-    DCHECK(art_thread_ == nullptr);
-    DCHECK(art_thread != nullptr);
-    art_thread_ = art_thread;
-  }
-
- private:
-  art::Thread* art_thread_ = nullptr;
-};
-
 class ScopedJniLocalFrame final {
  public:
   explicit ScopedJniLocalFrame(JNIEnv* env)
@@ -1052,17 +959,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
   if (action > 2u || !std::isfinite(x) || !std::isfinite(y)) {
     return 71;
   }
-  art::Thread* art_thread = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(g_process_state.mutex);
-    if (g_process_state.phase != ProcessPhase::kAwaitingShutdown ||
-        !g_process_state.owner_thread_valid ||
-        pthread_equal(g_process_state.owner_thread, pthread_self()) == 0 ||
-        g_process_state.art_thread == nullptr || g_interactive_root == nullptr) {
-      return 72;
-    }
-    art_thread = g_process_state.art_thread;
-  }
+  art::Thread* art_thread = darwin_art_process::owner_thread_for_callback();
+  if (art_thread == nullptr || g_interactive_root == nullptr) return 72;
   if (art::Thread::Current() != art_thread ||
       art_thread->GetState() != art::ThreadState::kNative) {
     return 73;
@@ -1157,17 +1055,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_pump_framework_frame(
                        static_cast<jlong>(now.tv_nsec);
   }
   (void)frame_time_nanos;
-  art::Thread* art_thread = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(g_process_state.mutex);
-    if (g_process_state.phase != ProcessPhase::kAwaitingShutdown ||
-        !g_process_state.owner_thread_valid ||
-        pthread_equal(g_process_state.owner_thread, pthread_self()) == 0 ||
-        g_process_state.art_thread == nullptr) {
-      return 72;
-    }
-    art_thread = g_process_state.art_thread;
-  }
+  art::Thread* art_thread = darwin_art_process::owner_thread_for_callback();
+  if (art_thread == nullptr) return 72;
   if (art::Thread::Current() != art_thread ||
       art_thread->GetState() != art::ThreadState::kNative) {
     return 73;
@@ -1299,11 +1188,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 65;
   }
 
-  if (!BeginProcessRun()) {
+  if (!darwin_art_process::begin_run()) {
     std::cerr << "darwin_art_run_process: process already started\n";
     return DARWIN_ART_STATUS_PROCESS_ALREADY_STARTED;
   }
-  ScopedProcessRunBoundary process_boundary;
+  darwin_art_process::ScopedRunBoundary process_boundary;
   const char* elf_fixture_path =
       std::getenv("DARWIN_ART_ANDROID_ELF_JNI_FIXTURE");
   const bool run_elf_jni_fixture =
@@ -1444,14 +1333,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   }
 
   art::Thread* self = art::Thread::Current();
-  RecordCreatedRuntime(self);
+  darwin_art_process::record_created_runtime(self);
   if (self == nullptr) {
     std::cerr << "ART Darwin DEX: no current thread\n";
     return 2;
   }
   JNIEnv* env = self->GetJniEnv();
 
-  process_boundary.SetArtThread(self);
+  process_boundary.set_art_thread(self);
   if (config->provider_acquire != nullptr) {
     darwin_art::providers::darwin_art_provider_install_hooks(
         config->provider_context, config->provider_acquire,
@@ -1470,7 +1359,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   art::WellKnownClasses::Init(self->GetJniEnv());
 
   std::vector<std::unique_ptr<const art::DexFile>>& app_dex_files =
-      g_process_state.app_dex_files;
+      darwin_art_process::app_dex_files();
   CHECK(app_dex_files.empty());
   std::string dex_error;
   if (run_apk_app) {
@@ -1691,7 +1580,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     std::cerr << "ART Darwin resources: AndroidRuntime ownership install failed\n";
     return 38;
   }
-  RecordResourceRuntimeInstalled();
+  darwin_art_process::record_resource_runtime_installed();
   if (!darwin_art::RegisterFrameworkResourceNatives(self->GetJniEnv())) {
     std::cerr << "ART Darwin resources: native registration failed\n";
     return 39;
@@ -2800,36 +2689,22 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
 }
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
-  JavaVM* java_vm = nullptr;
-  art::Thread* art_thread = nullptr;
-  bool resource_runtime_installed = false;
-  {
-    std::lock_guard<std::mutex> lock(g_process_state.mutex);
-    switch (g_process_state.phase) {
-      case ProcessPhase::kShutdownComplete:
-        return DARWIN_ART_STATUS_SHUTDOWN_ALREADY_COMPLETED;
-      case ProcessPhase::kShutdownFailed:
-        return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
-      case ProcessPhase::kNeverStarted:
-      case ProcessPhase::kCreateFailed:
-      case ProcessPhase::kRunning:
-      case ProcessPhase::kShuttingDown:
-        return DARWIN_ART_STATUS_SHUTDOWN_NOT_READY;
-      case ProcessPhase::kAwaitingShutdown:
-        break;
-    }
-
-    if (!g_process_state.owner_thread_valid ||
-        pthread_equal(g_process_state.owner_thread, pthread_self()) == 0 ||
-        (g_process_state.art_thread != nullptr &&
-         art::Thread::Current() != g_process_state.art_thread)) {
+  darwin_art_process::ShutdownSnapshot shutdown{};
+  switch (darwin_art_process::begin_shutdown(&shutdown)) {
+    case darwin_art_process::ShutdownBeginResult::kAlreadyComplete:
+      return DARWIN_ART_STATUS_SHUTDOWN_ALREADY_COMPLETED;
+    case darwin_art_process::ShutdownBeginResult::kFailed:
+      return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+    case darwin_art_process::ShutdownBeginResult::kNotReady:
+      return DARWIN_ART_STATUS_SHUTDOWN_NOT_READY;
+    case darwin_art_process::ShutdownBeginResult::kWrongThread:
       return DARWIN_ART_STATUS_SHUTDOWN_WRONG_THREAD;
-    }
-    g_process_state.phase = ProcessPhase::kShuttingDown;
-    java_vm = g_process_state.java_vm;
-    art_thread = g_process_state.art_thread;
-    resource_runtime_installed = g_process_state.resource_runtime_installed;
+    case darwin_art_process::ShutdownBeginResult::kReady:
+      break;
   }
+  JavaVM* java_vm = shutdown.java_vm;
+  art::Thread* art_thread = shutdown.art_thread;
+  const bool resource_runtime_installed = shutdown.resource_runtime_installed;
 
   CHECK(java_vm != nullptr);
   if (art_thread != nullptr) {
@@ -2879,16 +2754,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
       }
       if (!darwin_art::ShutdownLibcoreNatives()) {
         std::cerr << "ART Darwin shutdown: libcore host state restore failed\n";
-        std::lock_guard<std::mutex> lock(g_process_state.mutex);
-        g_process_state.phase = ProcessPhase::kShutdownFailed;
+        darwin_art_process::mark_shutdown_failed();
         return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
       }
       if (resource_runtime_installed &&
           !darwin_art::ShutdownFrameworkResourceRuntime(
               art_thread->GetJniEnv())) {
         std::cerr << "ART Darwin shutdown: AndroidRuntime ownership uninstall failed\n";
-        std::lock_guard<std::mutex> lock(g_process_state.mutex);
-        g_process_state.phase = ProcessPhase::kShutdownFailed;
+        darwin_art_process::mark_shutdown_failed();
         return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
       }
     }
@@ -2901,16 +2774,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
   // this call: its Thread object is owned by the destroyed Runtime.
   const jint destroy_result = java_vm->DestroyJavaVM();
   if (destroy_result != JNI_OK) {
-    std::lock_guard<std::mutex> lock(g_process_state.mutex);
-    g_process_state.phase = ProcessPhase::kShutdownFailed;
+    darwin_art_process::mark_shutdown_failed();
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
   g_host_context = nullptr;
   g_frame_callback = nullptr;
   if (darwin_art::android_jni::TrampolineLiveCount() != 0) {
     std::cerr << "ART Darwin shutdown: ELF JNI trampolines remain live\n";
-    std::lock_guard<std::mutex> lock(g_process_state.mutex);
-    g_process_state.phase = ProcessPhase::kShutdownFailed;
+    darwin_art_process::mark_shutdown_failed();
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
   if (g_network_elf_loaded &&
@@ -2919,8 +2790,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
        darwin_art_bionic_dns_live_results_for_test() != 0 ||
        darwin_art_bionic_dns_retired_results_for_test() != 0)) {
     std::cerr << "ART Darwin shutdown: network owner did not quiesce\n";
-    std::lock_guard<std::mutex> lock(g_process_state.mutex);
-    g_process_state.phase = ProcessPhase::kShutdownFailed;
+    darwin_art_process::mark_shutdown_failed();
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
   if (g_apk_elf_loaded) {
@@ -2941,16 +2811,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
       darwin_art_elf_jni_fixture_lifecycle_status() != 1234567) {
     std::cerr << "ART Darwin shutdown: ELF JNI graph finalizer order failed, status="
               << darwin_art_elf_jni_fixture_lifecycle_status() << "\n";
-    std::lock_guard<std::mutex> lock(g_process_state.mutex);
-    g_process_state.phase = ProcessPhase::kShutdownFailed;
+    darwin_art_process::mark_shutdown_failed();
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
   if (darwin_art_elf_jni_fixture_registration_status() != 0 &&
       darwin_art_elf_jni_fixture_namespace_lifecycle_status() != 5) {
     std::cerr << "ART Darwin shutdown: Bionic namespace teardown order failed, status="
               << darwin_art_elf_jni_fixture_namespace_lifecycle_status() << "\n";
-    std::lock_guard<std::mutex> lock(g_process_state.mutex);
-    g_process_state.phase = ProcessPhase::kShutdownFailed;
+    darwin_art_process::mark_shutdown_failed();
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
 
@@ -2960,13 +2828,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process() {
     darwin_art::providers::darwin_art_provider_clear_hooks();
     g_provider_hooks_installed = false;
   }
-  g_process_state.app_dex_files.clear();
-  {
-    std::lock_guard<std::mutex> lock(g_process_state.mutex);
-    g_process_state.java_vm = nullptr;
-    g_process_state.art_thread = nullptr;
-    g_process_state.resource_runtime_installed = false;
-    g_process_state.phase = ProcessPhase::kShutdownComplete;
-  }
+  darwin_art_process::clear_app_dex_files();
+  darwin_art_process::mark_shutdown_complete();
   return 0;
 }
