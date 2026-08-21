@@ -24,4 +24,18 @@ std::chrono::steady_clock::time_point& gpu_ripple_overlay_started_for_input();
 
 jobject find_clickable_view_at(JNIEnv* env, jobject view, jfloat x, jfloat y);
 
+#if defined(DARWIN_ART_REAL_GRAPHICS)
+namespace android::uirenderer {
+class AnimationContext;
+class RenderNode;
+namespace renderthread {
+class TimeLord;
+}  // namespace renderthread
+}  // namespace android::uirenderer
+
+jobject gpu_render_node_for_input();
+android::uirenderer::renderthread::TimeLord* hwui_time_lord_for_input();
+android::uirenderer::AnimationContext* hwui_animation_context_for_input();
+#endif
+
 }  // namespace darwin_art_graphics
