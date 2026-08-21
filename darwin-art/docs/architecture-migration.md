@@ -328,17 +328,23 @@ build/bootstrap split. M1–M4 are landed for the measured boundaries above;
 M5 is in progress. The app bootstrap and presentation objects are now real
 Ninja edges with content stamps: after their first build, a second graph run
 reports `no work to do`, while a source touch invalidates only the affected
-object and the graphics link. The same persistent graph keeps a warm
-`build-runtime-bootstrap` invocation around 1.1s on the reference machine;
-the warm graphics link audit is about 2.2s, with unchanged ART/HWUI objects
-reused. The host-side legacy CPU/IOSurface upload presenter has been removed:
+object and the graphics link. The same persistent graph keeps a direct warm
+`target/debug/art-bootstrap build-runtime-graphics-bootstrap` invocation around
+2.4s on the reference machine (the Ninja portion is about 0.06s), with
+unchanged ART/HWUI objects reused. The warm graphics link audit intentionally
+rechecks the full closure and remains separate. The host-side legacy CPU/IOSurface upload presenter has been removed:
 headless runs tear down without allocating a surface, and graphics runs enter
 only the direct Metal/HWUI loop. Remaining M5 work is measured archive/link
 phase decomposition and removal of duplicate ABI declarations and broad
 fallback edges.
 
 With the graph materialized, regenerating it and querying the graphics audit is
-a true no-op (`ninja -d explain -n` reports `no work to do`, about 0.04s for
-the Ninja query on the reference machine). This is distinct from the
-production dylib link/audit time above: the former measures invalidation
-scheduling, while the latter intentionally rechecks the full ABI closure.
+a true no-op (`ninja -d explain -n` reports `no work to do`). On the reference
+machine the pinned Ninja target itself completes in about 0.06s; the direct
+`target/debug/art-bootstrap` wrapper completes in about 2.4s because it
+regenerates the graph and launches Ninja. The wrapper executes a cached
+`darwin-art-xtask` binary directly and invokes Cargo only when xtask sources
+change, so it no longer pays a nested `cargo run` cost on every native build.
+This is distinct from the production dylib link/audit time above: the former
+measures invalidation scheduling, while the latter intentionally rechecks the
+full ABI closure.
