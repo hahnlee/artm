@@ -139,6 +139,13 @@ cleanup occurs before the Metal surface and ART/provider teardown. Headless
 engines may omit these optional symbols, while the graphics link exports and
 audits them when a drawable is present.
 
+The native graph emitter is split by ownership rather than kept in one command
+file: `graph::inputs` owns invalidation/input stamps, `graph::foundation` owns
+HWUI/GraphicsJNI/ICU family partitioning, `graph::cache` owns persisted
+command/fingerprint promotion, and `graph::representative` owns small
+independently cacheable production TUs. `darwin-art-xtask/src/main.rs` remains
+the graph assembly/CLI boundary instead of owning those policies.
+
 ## Measurement gates
 
 The migration is considered successful only when all of these are recorded on
@@ -170,3 +177,9 @@ headless runs tear down without allocating a surface, and graphics runs enter
 only the direct Metal/HWUI loop. Remaining M5 work is measured archive/link
 phase decomposition and removal of duplicate ABI declarations and broad
 fallback edges.
+
+With the graph materialized, regenerating it and querying the graphics audit is
+a true no-op (`ninja -d explain -n` reports `no work to do`, about 0.04s for
+the Ninja query on the reference machine). This is distinct from the
+production dylib link/audit time above: the former measures invalidation
+scheduling, while the latter intentionally rechecks the full ABI closure.
