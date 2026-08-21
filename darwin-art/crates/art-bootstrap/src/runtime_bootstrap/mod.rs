@@ -3,6 +3,7 @@ use darwin_art_build_contract::RuntimeFlavor;
 
 mod archive;
 mod compile;
+mod manifest;
 mod staging;
 
 pub(crate) use archive::finalize;
