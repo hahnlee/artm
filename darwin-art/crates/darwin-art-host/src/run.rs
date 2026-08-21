@@ -1,6 +1,6 @@
 use std::ptr;
 
-use crate::config::{HostError, HostOutcome, ProcessConfigInputs, RunOptions};
+use crate::config::{HostError, HostOutcome, RunOptions, build_process_request};
 use crate::frame::{FrameHost, receive_frame};
 #[cfg(target_os = "macos")]
 use crate::gpu_loop::run as run_gpu_loop;
@@ -45,7 +45,21 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             );
         }
         let mut graphics_session = engine.create_graphics_session().ok();
-        let config_inputs = match ProcessConfigInputs::from_options(options) {
+        let mut frame_host = FrameHost {
+            frames_received: 0,
+            last_frame: None,
+        };
+        let request = match build_process_request(
+            options,
+            ptr::from_mut(&mut frame_host).cast(),
+            Some(receive_frame),
+            provider_context,
+            Some(ProviderBridge::acquire_callback()),
+            Some(ProviderBridge::release_callback()),
+            graphics_session
+                .as_ref()
+                .map_or(ptr::null_mut(), |session| session.raw_handle().cast()),
+        ) {
             Ok(inputs) => inputs,
             Err(error) => {
                 // The engine has installed provider hooks, but ownership has
@@ -65,22 +79,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 });
             }
         };
-        let mut frame_host = FrameHost {
-            frames_received: 0,
-            last_frame: None,
-        };
-        let config = config_inputs.build(
-            options,
-            ptr::from_mut(&mut frame_host).cast(),
-            Some(receive_frame),
-            provider_context,
-            Some(ProviderBridge::acquire_callback()),
-            Some(ProviderBridge::release_callback()),
-            graphics_session
-                .as_ref()
-                .map_or(ptr::null_mut(), |session| session.raw_handle().cast()),
-        );
-        let process = match engine.run_process(&config) {
+        let process = match engine.run_request(&request) {
             Ok(result) => result,
             Err(status) => {
                 return Err(process_run_failure(

@@ -1,5 +1,6 @@
 use super::abi::{EngineSymbols, LoadedEngine};
 use super::graphics::GraphicsSession;
+use super::process::ProcessRequest;
 use super::surface::SurfaceSession;
 use core::ffi::c_void;
 use darwin_art_engine_sys::{
@@ -82,6 +83,14 @@ impl EngineSession {
         // pointer belongs to this live EngineSession image.
         let status = unsafe { (self.engine.symbols().process.run_process)(config, &mut result) };
         if status == 0 { Ok(result) } else { Err(status) }
+    }
+
+    /// Run an owned request without exposing the raw ABI struct to host
+    /// orchestration. The request keeps all referenced strings and callback
+    /// state alive until this synchronous call returns.
+    pub fn run_request(&self, request: &ProcessRequest) -> Result<ProcessResult, i32> {
+        let config = request.as_config();
+        self.run_process(&config)
     }
 
     pub fn active_surface(&self) -> Option<SurfaceSession> {

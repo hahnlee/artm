@@ -1,15 +1,13 @@
 //! Stable host configuration and result types.
 
 use std::error::Error;
-use std::ffi::{CString, c_void};
+use std::ffi::c_void;
 use std::fmt;
-use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
 use std::path::PathBuf;
 
-use darwin_art_engine_sys::{
-    FrameCallback, ProcessConfig, ProcessResult, ProviderAcquireFn, ProviderReleaseFn,
-};
+#[cfg(target_os = "macos")]
+use darwin_art_engine::{ProcessRequest, ProcessRequestError};
+use darwin_art_engine_sys::ProcessResult;
 
 use crate::OwnedFrame;
 
@@ -47,60 +45,37 @@ impl RunOptions {
     }
 }
 
-/// Owns the NUL-terminated process paths for the synchronous engine call.
-/// Keeping these strings together with the builder makes the pointer lifetime
-/// in `ProcessConfig` explicit at the orchestration boundary.
-pub(crate) struct ProcessConfigInputs {
-    core_oj_jar: CString,
-    core_libart_jar: CString,
-    framework_jar: CString,
-    core_icu4j_jar: CString,
-    app_dex: CString,
-}
-
-impl ProcessConfigInputs {
-    pub(crate) fn from_options(options: &RunOptions) -> Result<Self, HostError> {
-        Ok(Self {
-            core_oj_jar: path_c_string(&options.core_oj_jar)?,
-            core_libart_jar: path_c_string(&options.core_libart_jar)?,
-            framework_jar: path_c_string(&options.framework_jar)?,
-            core_icu4j_jar: path_c_string(&options.core_icu4j_jar)?,
-            app_dex: path_c_string(&options.app_dex)?,
-        })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn build(
-        &self,
-        options: &RunOptions,
-        host_context: *mut c_void,
-        frame_callback: Option<FrameCallback>,
-        provider_context: *mut c_void,
-        provider_acquire: Option<ProviderAcquireFn>,
-        provider_release: Option<ProviderReleaseFn>,
-        graphics_session_context: *mut c_void,
-    ) -> ProcessConfig {
-        let mut config = ProcessConfig::new(
-            self.core_oj_jar.as_ptr(),
-            self.core_libart_jar.as_ptr(),
-            self.framework_jar.as_ptr(),
-            self.core_icu4j_jar.as_ptr(),
-            self.app_dex.as_ptr(),
-            options.heap_initial_bytes,
-            options.heap_maximum_bytes,
-            host_context,
-            frame_callback,
-            provider_context,
-            provider_acquire,
-            provider_release,
-        );
-        config.graphics_session_context = graphics_session_context;
-        config
-    }
-}
-
-fn path_c_string(path: &Path) -> Result<CString, HostError> {
-    CString::new(path.as_os_str().as_bytes()).map_err(|_| HostError::InteriorNul(path.into()))
+#[cfg(target_os = "macos")]
+pub(crate) fn build_process_request(
+    options: &RunOptions,
+    host_context: *mut c_void,
+    frame_callback: Option<darwin_art_engine_sys::FrameCallback>,
+    provider_context: *mut c_void,
+    provider_acquire: Option<darwin_art_engine_sys::ProviderAcquireFn>,
+    provider_release: Option<darwin_art_engine_sys::ProviderReleaseFn>,
+    graphics_session_context: *mut c_void,
+) -> Result<ProcessRequest, HostError> {
+    let mut request = ProcessRequest::new(
+        &options.core_oj_jar,
+        &options.core_libart_jar,
+        &options.framework_jar,
+        &options.core_icu4j_jar,
+        &options.app_dex,
+        options.heap_initial_bytes,
+        options.heap_maximum_bytes,
+    )
+    .map_err(|error| match error {
+        ProcessRequestError::InteriorNul(path) => HostError::InteriorNul(path),
+    })?;
+    request.bind_callbacks(
+        host_context,
+        frame_callback,
+        provider_context,
+        provider_acquire,
+        provider_release,
+        graphics_session_context,
+    );
+    Ok(request)
 }
 
 #[derive(Debug)]

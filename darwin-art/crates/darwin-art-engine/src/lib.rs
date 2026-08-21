@@ -10,12 +10,17 @@ mod platform {
     pub(crate) mod abi;
     pub(crate) mod engine;
     pub(crate) mod graphics;
+    pub(crate) mod process;
     pub(crate) mod surface;
 
     pub use engine::{EngineSession, ProviderHooks};
     pub use graphics::GraphicsSession;
+    pub use process::{ProcessRequest, ProcessRequestError};
     pub use surface::SurfaceSession;
 }
 
 #[cfg(target_os = "macos")]
-pub use platform::{EngineSession, GraphicsSession, ProviderHooks, SurfaceSession};
+pub use platform::{
+    EngineSession, GraphicsSession, ProcessRequest, ProcessRequestError, ProviderHooks,
+    SurfaceSession,
+};

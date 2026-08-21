@@ -83,6 +83,11 @@ impl ProcessConfig {
             core::mem::size_of::<Self>(),
         )
     }
+
+    pub const fn with_graphics_session(mut self, context: *mut c_void) -> Self {
+        self.graphics_session_context = context;
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

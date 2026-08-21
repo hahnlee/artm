@@ -204,6 +204,13 @@ identity never escape into `run.rs` or `gpu_loop.rs`. This removes a duplicate
 host-side teardown state machine while preserving strict Graphics → Surface →
 Engine → Provider ordering.
 
+The process-call boundary is also now owned by the engine crate. `ProcessRequest`
+keeps all five path strings, heap limits, callback contexts, and graphics
+handle alive together, then materializes the raw `ProcessConfig` only inside
+`EngineSession::run_request`. Host orchestration no longer constructs or stores
+the raw FFI struct, so its unsafe lifetime surface is limited to one synchronous
+engine call.
+
 The large graph emission routine itself is in `graph::emit`; the CLI entrypoint
 is now a 279-line command/test boundary. This is intentionally a source/build
 boundary only: it does not pretend that the remaining framework-native
