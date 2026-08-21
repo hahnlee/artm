@@ -135,6 +135,9 @@ canonical compile path instead of silently reusing an incomplete archive.
 The process-wide NativeBridge/NativeLoader hooks are a third independent
 object, `darwin_native_bridge_stubs.cc`; only the per-image trampoline selector
 stays in the graph-aware adapter.
+Descriptor-to-shorty planning is a fourth cached object,
+`darwin_jni_shorty.cc`, so changing the regular JNI proxy does not rebuild the
+parser and vice versa.
 
 Graphics presentation now follows the same boundary. The JNI/widget
 validation and `present_content`/interactive-root orchestration live in

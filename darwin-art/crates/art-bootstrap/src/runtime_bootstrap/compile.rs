@@ -224,6 +224,7 @@ fn adapter_jobs(
         "darwin_runtime_adapters.cc",
         "darwin_runtime_platform_stubs.cc",
         "darwin_native_bridge_stubs.cc",
+        "darwin_jni_shorty.cc",
         "darwin_sigchain.cc",
         "fault_handler_arm64_darwin.cc",
     ] {

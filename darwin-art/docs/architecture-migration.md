@@ -176,6 +176,12 @@ the native-bridge pointer classifier remain graph-aware because they select
 the per-image JNI trampoline owned by the ELF handle. All unsupported bridge
 operations stay explicit closed-capability stubs.
 
+JNI descriptor validation is now an independent `darwin_jni_shorty.cc` phase.
+It owns only Android descriptor parsing and the current ART `JNIEnv` lookup;
+the graph-aware proxy still owns class lookup, RegisterNatives, and trampoline
+publication. Its tiny header is the only shared declaration between those
+phases.
+
 The large graph emission routine itself is in `graph::emit`; the CLI entrypoint
 is now a 279-line command/test boundary. This is intentionally a source/build
 boundary only: it does not pretend that the remaining framework-native

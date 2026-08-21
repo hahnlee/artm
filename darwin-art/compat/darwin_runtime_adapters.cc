@@ -21,26 +21,20 @@
 
 #include "jni/jni_env_ext.h"
 #include "hprof/hprof.h"
-#include "darwin_android_jni_trampoline.h"
-#include "darwin_android_elf_image_registry.h"
 #include "darwin_provider_owners.h"
-#include "darwin_art_elf_jni_fixture_identity.h"
-#include "darwin_art_elf_loader.h"
+#include "darwin_jni_shorty.h"
+#include "darwin_runtime_adapters_internal.h"
 #include "darwin_art_bionic_builtin_adapters.h"
 #include "darwin_art_bionic_dns.h"
-#include "darwin_art_bionic_dso_lifecycle.h"
 #include "darwin_art_bionic_fs.h"
 #include "darwin_art_bionic_ioctl.h"
-#include "darwin_art_bionic_provider_namespace.h"
 #include "darwin_art_bionic_sendfile.h"
 #include "darwin_art_bionic_socket_broker.h"
 #include "darwin_art_bionic_stdio.h"
 #include "darwin_art_bionic_strftime.h"
-#include "darwin_art_jni_proxy.h"
 #include "nativebridge/native_bridge.h"
 #include "nativeloader/native_loader.h"
 #include "odr_statslog/odr_statslog.h"
-#include "thread.h"
 
 extern "C" DarwinArtBionicSendfileTransferStatus
 darwin_art_bionic_fs_sendfile_transfer(
@@ -48,43 +42,14 @@ darwin_art_bionic_fs_sendfile_transfer(
     DarwinArtBionicSendfileResult* result);
 
 namespace android {
-namespace {
-
-constexpr uint64_t kElfLibraryMagic = UINT64_C(0x44415257454c464a);
-constexpr int kElfOpened = 1 << 0;
-constexpr int kElfOnLoadCalled = 1 << 1;
-constexpr int kElfFoundFixtureClass = 1 << 2;
-constexpr int kElfCapturedRegistration = 1 << 3;
-constexpr int kElfInstalledRegistration = 1 << 4;
-constexpr int kElfClassifiedTrampolines = 1 << 5;
-constexpr int kElfBionicProvidersRouted = 1 << 6;
-constexpr uint32_t kFixtureErrnoRouteMask = 1u << 0;
-constexpr uint32_t kFixtureStrlenRouteMask = 1u << 1;
-constexpr uint32_t kFixtureOpenRouteMask = 1u << 2;
-constexpr uint32_t kFixtureReadRouteMask = 1u << 3;
-constexpr uint32_t kFixtureCloseRouteMask = 1u << 4;
-constexpr uint32_t kFixtureScanfRouteMask = 1u << 5;
-constexpr uint32_t kFixtureVsscanfRouteMask = 1u << 6;
-constexpr uint32_t kFixtureSwprintfRouteMask = 1u << 7;
-constexpr uint32_t kFixtureIoctlRouteMask = 1u << 8;
-constexpr uint32_t kFixtureStrftimeRouteMask = 1u << 9;
-constexpr uint32_t kFixtureSendfileRouteMask = 1u << 10;
-constexpr uint32_t kFixtureAllProviderRouteMask =
-    kFixtureErrnoRouteMask | kFixtureStrlenRouteMask | kFixtureOpenRouteMask |
-    kFixtureReadRouteMask | kFixtureCloseRouteMask | kFixtureScanfRouteMask |
-    kFixtureVsscanfRouteMask | kFixtureSwprintfRouteMask |
-    kFixtureIoctlRouteMask | kFixtureStrftimeRouteMask |
-    kFixtureSendfileRouteMask;
-constexpr uint32_t kFixtureNativeAddEntryMask = 1u << 0;
-constexpr uint32_t kFixtureNativeSpillEntryMask = 1u << 1;
-constexpr uint32_t kFixtureNativeUsesEnvEntryMask = 1u << 2;
-constexpr uint32_t kFixtureAllEntryMask = 0xffu;
 
 std::atomic<int> g_elf_fixture_status{0};
 std::atomic<uint32_t> g_elf_classified_trampoline_mask{0};
 std::atomic<int> g_elf_fixture_lifecycle{0};
 std::atomic<uint32_t> g_elf_fixture_provider_routes{0};
 std::atomic<int> g_elf_fixture_namespace_lifecycle{0};
+
+namespace {
 
 extern "C" uintptr_t darwin_art_bionic_rust_provider_closure_anchor();
 
@@ -202,27 +167,6 @@ bool IsExactFixtureGraph(const char* root_soname,
   }
   return true;
 }
-
-struct ElfLibrary {
-  uint64_t magic = kElfLibraryMagic;
-  bool fixture_graph = false;
-  DarwinArtElfGraphHandle* graph = nullptr;
-  DarwinArtBionicNamespace* provider_namespace = nullptr;
-  DarwinArtBionicDsoLifecycleOwner* dso_lifecycle = nullptr;
-  darwin_art_image_registry::Owner* image_registry = nullptr;
-  bool filesystem_owner = false;
-  bool network_owner = false;
-  bool stdio_owner = false;
-  bool ioctl_owner = false;
-  bool strftime_owner = false;
-  bool sendfile_owner = false;
-  uintptr_t jni_on_load = 0;
-  uintptr_t jni_on_unload = 0;
-  alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)
-      std::array<unsigned char, DARWIN_ART_JNI_PROXY_STORAGE_SIZE> proxy_storage{};
-  DarwinArtJniProxy* proxy = nullptr;
-  darwin_art::android_jni::TrampolineSet* trampolines = nullptr;
-};
 
 int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
   ElfLibrary* library = static_cast<ElfLibrary*>(context);
@@ -431,83 +375,6 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
 ElfLibrary* AsElfLibrary(void* handle) {
   auto* library = static_cast<ElfLibrary*>(handle);
   return library != nullptr && library->magic == kElfLibraryMagic ? library : nullptr;
-}
-
-JNIEnv* CurrentArtEnv() {
-  art::Thread* self = art::Thread::Current();
-  return self == nullptr ? nullptr : static_cast<JNIEnv*>(self->GetJniEnv());
-}
-
-bool ParseDescriptorType(const char** cursor,
-                         bool allow_void,
-                         char* shorty_type) {
-  const char* current = *cursor;
-  switch (*current) {
-    case 'V':
-      if (!allow_void) {
-        return false;
-      }
-      *shorty_type = 'V';
-      *cursor = current + 1;
-      return true;
-    case 'Z':
-    case 'B':
-    case 'C':
-    case 'S':
-    case 'I':
-    case 'J':
-    case 'F':
-    case 'D':
-      *shorty_type = *current;
-      *cursor = current + 1;
-      return true;
-    case 'L': {
-      const char* end = std::strchr(current + 1, ';');
-      if (end == nullptr || end == current + 1) {
-        return false;
-      }
-      *shorty_type = 'L';
-      *cursor = end + 1;
-      return true;
-    }
-    case '[': {
-      do {
-        ++current;
-      } while (*current == '[');
-      char component = 0;
-      if (!ParseDescriptorType(&current, false, &component)) {
-        return false;
-      }
-      *shorty_type = 'L';
-      *cursor = current;
-      return true;
-    }
-    default:
-      return false;
-  }
-}
-
-bool DescriptorToShorty(const char* descriptor, std::string* shorty) {
-  if (descriptor == nullptr || shorty == nullptr || descriptor[0] != '(') {
-    return false;
-  }
-  const char* cursor = descriptor + 1;
-  std::string arguments;
-  while (*cursor != ')') {
-    char type = 0;
-    if (*cursor == '\0' || !ParseDescriptorType(&cursor, false, &type)) {
-      return false;
-    }
-    arguments.push_back(type);
-  }
-  ++cursor;
-  char return_type = 0;
-  if (!ParseDescriptorType(&cursor, true, &return_type) || *cursor != '\0') {
-    return false;
-  }
-  shorty->assign(1, return_type);
-  shorty->append(arguments);
-  return true;
 }
 
 void* ProxyCurrentEnv(void*) { return CurrentArtEnv(); }
