@@ -298,20 +298,23 @@ compile_cached() {
   local label="$1" source="$2" object="$3"
   shift 3
   local meta="${object}.cmd"
+  local command_file="${object}.command"
   local source_sha
   source_sha="$(shasum -a 256 "$source" | awk '{print $1}')"
-  local -a command=("$cxx" "${flags[@]}" "$@" -c "$source" -o "$object")
+  local -a command=("$cxx" "${flags[@]}" "$@" -MMD -MF "$object.d" -c "$source" -o "$object")
   local command_text
   command_text="$(printf '%q ' "${command[@]}")"
   local key
   key="$(printf '%s\n%s\n' "$source_sha" "$command_text" | shasum -a 256 | awk '{print $1}')"
-  if [[ -f "$object" && -f "$meta" && "$(<"$meta")" == "$key" ]]; then
+  if [[ -f "$object" && -f "$meta" && -f "$command_file" && "$(<"$meta")" == "$key" ]]; then
     echo "hwui-static-foundation: cache $label"
     return
   fi
   echo "hwui-static-foundation: compile $label"
   "${command[@]}"
   printf '%s\n' "$key" > "$meta"
+  printf '%s\n' "$command_text" > "${command_file}.tmp.$$"
+  mv "${command_file}.tmp.$$" "$command_file"
 }
 for source in "${sources[@]}"; do
   object="$cache_dir/${source//\//_}.o"

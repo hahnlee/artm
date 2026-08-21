@@ -286,20 +286,23 @@ compile_cached() {
   local label="$1" source="$2" object="$3"
   shift 3
   local meta="${object}.cmd"
+  local command_file="${object}.command"
   local source_sha
   source_sha="$(sha256 "$source")"
-  local -a command=("$cxx" "${common_flags[@]}" "$@" -c "$source" -o "$object")
+  local -a command=("$cxx" "${common_flags[@]}" "$@" -MMD -MF "$object.d" -c "$source" -o "$object")
   local command_text
   command_text="$(printf '%q ' "${command[@]}")"
   local key
   key="$(printf '%s\n%s\n' "$source_sha" "$command_text" | shasum -a 256 | awk '{print $1}')"
-  if [[ -f "$object" && -f "$meta" && "$(<"$meta")" == "$key" ]]; then
+  if [[ -f "$object" && -f "$meta" && -f "$command_file" && "$(<"$meta")" == "$key" ]]; then
     echo "android-graphics-jni: cache $label"
     return
   fi
   echo "android-graphics-jni: compile $label"
   "${command[@]}"
   printf '%s\n' "$key" > "$meta"
+  printf '%s\n' "$command_text" > "${command_file}.tmp.$$"
+  mv "${command_file}.tmp.$$" "$command_file"
 }
 
 registrar_object="$object_dir/LayoutlibLoader.o"

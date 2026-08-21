@@ -77,10 +77,12 @@ struct ToolchainInputs {
     sdkroot: String,
 }
 
+#[derive(Clone)]
 struct CachedNativeObject {
     object: PathBuf,
     source: PathBuf,
     command: String,
+    shell_quoted: bool,
 }
 
 fn toolchain_inputs() -> ToolchainInputs {
@@ -475,32 +477,123 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&runtime_archive);
     graph.push('\n');
 
-    // Foundation archives deliberately remain shell-owned during this
-    // transition.  Their builders already persist one command stamp per
-    // translation unit and enforce the Android source/ABI manifests.  Ninja
-    // owns only the stable archive products and invokes both builders as one
-    // cold/bootstrap edge; this keeps the existing archive gates intact while
-    // making the foundation boundary explicit and incrementally addressable.
-    graph.push_str("rule graphics_foundation_bootstrap\n");
-    graph.push_str("  command = cd ");
-    graph.push_str(&shell_quote(&root_for_shell));
-    graph.push_str(" && tools/build-android16-hwui-static-foundation.sh && ");
-    graph.push_str("tools/build-android16-android-graphics-jni.sh --object-audit\n");
-    graph.push_str("  description = GRAPHICS foundation archives\n");
-    graph.push_str("  restat = 1\n\n");
-    graph.push_str("build ");
-    graph.push_str(&hwui_foundation_archive);
-    graph.push(' ');
-    graph.push_str(&hwui_apex_foundation_archive);
-    graph.push(' ');
-    graph.push_str(&graphics_jni_archive);
-    graph.push(' ');
-    graph.push_str(&graphics_registrar_archive);
-    graph.push(' ');
-    graph.push_str(&graphics_force_loaded_object);
-    graph.push_str(": graphics_foundation_bootstrap ");
-    graph.push_str(&foundation_input_list);
-    graph.push('\n');
+    let hwui_cached =
+        cached_foundation_objects(&native_output_root.join("hwui-static-foundation/objects"))?;
+    let hwui_main = hwui_cached
+        .iter()
+        .filter(|object| {
+            object
+                .object
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| !name.starts_with("apex_"))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let hwui_apex = hwui_cached
+        .iter()
+        .filter(|object| {
+            object
+                .object
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("apex_"))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let graphics_cached =
+        cached_foundation_objects(&native_output_root.join("android-graphics-jni/objects"))?;
+    let graphics_registrar = graphics_cached
+        .iter()
+        .filter(|object| {
+            object.object.file_name().and_then(|name| name.to_str()) == Some("LayoutlibLoader.o")
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let graphics_main = graphics_cached
+        .iter()
+        .filter(|object| {
+            object.object.file_name().and_then(|name| name.to_str()) != Some("LayoutlibLoader.o")
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let hwui_ready = hwui_main.len() == 81 && hwui_apex.len() == 5;
+    let graphics_ready = graphics_main.len() == 61 && graphics_registrar.len() == 1;
+    if hwui_ready {
+        emit_cached_native_graph(
+            &mut graph,
+            &hwui_main,
+            &hwui_foundation_archive,
+            &mut cached_rules_emitted,
+        );
+        emit_cached_native_graph(
+            &mut graph,
+            &hwui_apex,
+            &hwui_apex_foundation_archive,
+            &mut cached_rules_emitted,
+        );
+    } else {
+        graph.push_str("rule hwui_foundation_bootstrap\n");
+        graph.push_str("  command = cd ");
+        graph.push_str(&shell_quote(&root_for_shell));
+        graph.push_str(" && tools/build-android16-hwui-static-foundation.sh\n");
+        graph.push_str("  description = HWUI foundation archives\n");
+        graph.push_str("  restat = 1\n\n");
+        graph.push_str("build ");
+        graph.push_str(&hwui_foundation_archive);
+        graph.push(' ');
+        graph.push_str(&hwui_apex_foundation_archive);
+        graph.push_str(": hwui_foundation_bootstrap ");
+        graph.push_str(&foundation_input_list);
+        graph.push('\n');
+    }
+
+    if graphics_ready {
+        emit_cached_native_graph(
+            &mut graph,
+            &graphics_main,
+            &graphics_jni_archive,
+            &mut cached_rules_emitted,
+        );
+        emit_cached_native_graph(
+            &mut graph,
+            &graphics_registrar,
+            &graphics_registrar_archive,
+            &mut cached_rules_emitted,
+        );
+        graph.push_str("rule graphics_jni_force_load\n");
+        graph.push_str("  command = ");
+        graph.push_str(&shell_quote(&toolchain.cxx));
+        graph.push_str(" -r -arch arm64 -Wl,-force_load,");
+        graph.push_str(&shell_quote(&graphics_registrar_archive));
+        graph.push_str(" -Wl,-force_load,");
+        graph.push_str(&shell_quote(&graphics_jni_archive));
+        graph.push_str(" -o $out\n");
+        graph.push_str("  description = LINK GraphicsJNI force-load\n\n");
+        graph.push_str("build ");
+        graph.push_str(&graphics_force_loaded_object);
+        graph.push_str(": graphics_jni_force_load ");
+        graph.push_str(&graphics_jni_archive);
+        graph.push(' ');
+        graph.push_str(&graphics_registrar_archive);
+        graph.push('\n');
+    } else {
+        graph.push_str("rule graphics_jni_foundation_bootstrap\n");
+        graph.push_str("  command = cd ");
+        graph.push_str(&shell_quote(&root_for_shell));
+        graph.push_str(" && tools/build-android16-android-graphics-jni.sh --object-audit\n");
+        graph.push_str("  description = GraphicsJNI foundation archives\n");
+        graph.push_str("  restat = 1\n\n");
+        graph.push_str("build ");
+        graph.push_str(&graphics_jni_archive);
+        graph.push(' ');
+        graph.push_str(&graphics_registrar_archive);
+        graph.push(' ');
+        graph.push_str(&graphics_force_loaded_object);
+        graph.push_str(": graphics_jni_foundation_bootstrap ");
+        graph.push_str(&foundation_input_list);
+        graph.push('\n');
+    }
     graph.push_str("build graphics-foundation: phony ");
     graph.push_str(&hwui_foundation_archive);
     graph.push(' ');
@@ -831,6 +924,48 @@ fn foundation_inputs(root: &Path) -> Vec<PathBuf> {
     paths
 }
 
+/// Read command stamps emitted by the foundation shell builders.  Once a
+/// complete object set exists, the graph can promote that archive from a
+/// shell edge to ordinary per-TU edges without duplicating the AOSP command
+/// construction in Rust.  A partial/interrupted set deliberately returns an
+/// empty vector so the canonical shell builder remains the safe fallback.
+fn cached_foundation_objects(object_dir: &Path) -> io::Result<Vec<CachedNativeObject>> {
+    let mut objects = Vec::new();
+    let Ok(entries) = fs::read_dir(object_dir) else {
+        return Ok(objects);
+    };
+    for entry in entries.flatten() {
+        let command_file = entry.path();
+        if command_file.extension().and_then(|ext| ext.to_str()) != Some("command") {
+            continue;
+        }
+        let object = command_file.with_extension("");
+        if !object.is_file() {
+            continue;
+        }
+        let command = fs::read_to_string(&command_file)?.trim().to_owned();
+        let tokens = command.split_whitespace().collect::<Vec<_>>();
+        let Some(source_index) = tokens.iter().position(|token| *token == "-c") else {
+            continue;
+        };
+        let Some(source_token) = tokens.get(source_index + 1) else {
+            continue;
+        };
+        let source = PathBuf::from(source_token.trim_matches('\''));
+        if !source.is_file() {
+            continue;
+        }
+        objects.push(CachedNativeObject {
+            object,
+            source,
+            command,
+            shell_quoted: true,
+        });
+    }
+    objects.sort_by(|left, right| left.object.cmp(&right.object));
+    Ok(objects)
+}
+
 fn is_probe_only_input(path: &Path) -> bool {
     matches!(
         path.to_string_lossy().as_ref(),
@@ -952,6 +1087,7 @@ fn cached_native_objects(
                 object,
                 source,
                 command: command_line.to_owned(),
+                shell_quoted: false,
             },
         );
     }
@@ -1020,12 +1156,16 @@ fn emit_cached_native_graph(
         // is sufficient to recover the persisted argv here because the
         // bootstrap paths contain no spaces; every token still needs shell
         // quoting (notably ART defines containing parentheses or quotes).
-        let quoted_command = object
-            .command
-            .split_whitespace()
-            .map(shell_quote)
-            .collect::<Vec<_>>()
-            .join(" ");
+        let quoted_command = if object.shell_quoted {
+            object.command.clone()
+        } else {
+            object
+                .command
+                .split_whitespace()
+                .map(shell_quote)
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
         graph.push_str(&quoted_command.replace('$', "$$"));
         graph.push('\n');
         object_paths.push(output);

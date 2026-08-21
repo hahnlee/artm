@@ -38,20 +38,24 @@ the Rust runtime or Android acceptance contract.
 
 The graph now exposes that boundary as `graphics-foundation` (with
 `foundation` as a short alias). It declares the stable HWUI static/APEX
-archives and Android GraphicsJNI/registrar/force-loaded products, then invokes
-the existing two shell builders as one cold/bootstrap edge. The builders remain
-responsible for source locks, generated manifests, ABI gates, and per-TU
-command stamps; changing a tracked foundation source or lock invalidates the
-edge without invalidating the ART runtime archive cache:
+archives and Android GraphicsJNI/registrar/force-loaded products. A complete
+command-stamped object set is promoted to ordinary Ninja TU/archive edges;
+otherwise the corresponding shell builder remains the safe cold/bootstrap
+edge. The builders remain responsible for source locks, generated manifests,
+ABI gates, and per-TU command stamps; changing a tracked foundation source or
+lock invalidates only the foundation closure and not the ART runtime archive:
 
 ```sh
 ninja -f _build/native-graph/build.ninja -n graphics-foundation
 cargo run -p art-bootstrap -- build-graphics-foundation
 ```
 
-This is intentionally an archive-level edge for now. Promotion of the 81 HWUI
-and 61 GraphicsJNI translation units into native Ninja compile edges remains a
-follow-up once their shell-owned command/depfile metadata is made complete.
+GraphicsJNI promotion is active after its command/depfile materialization: 61
+JNI objects plus the registrar are compiled in parallel and archived directly,
+with the force-loaded object as a separate link edge. HWUI remains on the
+shell-owned fallback until its pinned source manifest is reconciled and all 81
+plus 5 APEX command stamps are available; no source-lock failure is hidden by
+the graph.
 
 The first foundation step is now landed in the two largest graphics shell
 builders. `build-android16-android-graphics-jni.sh` keeps one command stamp per
@@ -76,6 +80,12 @@ graph execution completed the 172-object parallel compile and archive in
 75.25s (`ninja -j8`); the immediately repeated execution reported `no work to
 do` in 0.01s. The remaining link/audit command is intentionally measured
 separately because it includes the production dylib link and symbol gates.
+
+The first promoted foundation slice is GraphicsJNI: after the shell builder
+materialized its command stamps, Ninja rebuilt 61 JNI objects plus the
+registrar in parallel in 9.69s, and the next archive query reported `no work
+to do` in 0.01s. The HWUI 81+5 object set still correctly falls back to its
+source-locked shell edge until its manifest is valid and materialized.
 
 The process probe is now split at the first stable boundary: environment and
 fixture-mode validation lives in `probes/runtime_process_options.cc` and is a
