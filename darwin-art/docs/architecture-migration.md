@@ -420,3 +420,8 @@ change, so it no longer pays a nested `cargo run` cost on every native build.
 This is distinct from the production dylib link/audit time above: the former
 measures invalidation scheduling, while the latter intentionally rechecks the
 full ABI closure.
+
+The measured native invalidation check is explicit: changing only the
+AssetManager adapter rebuilt `1/234` graphics-bootstrap objects; the next
+unchanged run rebuilt `0/234`. The archive and Android acceptance results were
+unchanged. Later phase extractions must retain this same evidence.
