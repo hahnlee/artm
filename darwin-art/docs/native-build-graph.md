@@ -57,3 +57,10 @@ Shutdown/finalizer ordering is similarly isolated in
 process acceptance state, performs the owner-thread ART/DSO teardown, and is a
 separate cached object; the main probe only exports the ABI wrapper and builds
 that snapshot.
+
+Graphics presentation now follows the same boundary. The JNI/widget
+validation and `present_content`/interactive-root orchestration live in
+`probes/runtime_graphics_phase.cc`, while RenderNode/Metal replay remains in
+`probes/runtime_graphics_probe.cc`. The linker consumes both objects, so a
+change to framework validation does not recompile the HWUI/Skia implementation
+and a graphics implementation change does not rebuild the orchestration phase.

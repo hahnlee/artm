@@ -63,12 +63,15 @@ Move the loaded engine, provider graph, and optional surface into typed
 borrowed handles. Verify rollback for run failure, surface creation failure,
 window close, and `DestroyJavaVM` failure.
 
-### M2 — phase modules
+### M2 — phase modules (in progress, first boundaries landed)
 
-Split the process probe into `runtime_framework_phase`, `runtime_elf_phase`,
-`runtime_graphics_phase`, and `runtime_shutdown_probe`. Each phase receives a
-small `#[repr(C)]` input and returns a value snapshot; globals are removed from
-the phase modules. Keep the existing JNI/ELF/HWUI acceptance unchanged.
+Split the process probe into small, separately cached phase objects. The first
+landed boundaries are `runtime_process_options`, `runtime_shutdown_probe`,
+`runtime_acceptance_phases` (network), and `runtime_graphics_phase` (content
+validation/presentation). Each phase receives a narrow JNI/value boundary and
+returns a status snapshot; the heavy Android JNI/HWUI implementation remains
+in its own object. Keep the existing JNI/ELF/HWUI acceptance unchanged while
+the remaining framework/activity setup is extracted.
 
 ### M3 — real native graph
 
@@ -94,7 +97,8 @@ the same machine:
 | Rust host CLI change | Rust host/CLI crates only |
 | provider facade change | provider object, closure link, provider audit |
 | framework/JNI phase change | framework phase + runtime link |
-| HWUI/Metal phase change | graphics phase + graphics link |
+| graphics presentation/JNI phase change | `runtime_graphics_phase` + runtime link |
+| HWUI/Metal implementation change | `runtime_graphics_probe` + graphics link |
 | AOSP foundation header change | affected foundation TU closure |
 
 The current implementation has the first probe/object cache and lifecycle

@@ -217,16 +217,16 @@ The concrete ART ownership and teardown seam is specified in
 
 `darwin-art-runtime::RuntimeSession` is the owner-thread lifecycle machine.
 Engine, ELF namespace, provider, network, filesystem, input, and surface
-leases are currently registered through a reverse-ordered resource bridge;
-normal uninstall consumes the resource before its lease can be reused, while
-`Drop` performs best-effort rollback for partial bootstrap failures. Provider
-lease accounting lives in the Rust runtime crate as `ProviderLeaseTable`.
+leases are concrete typed fields in the Rust owner graph and are released in
+reverse dependency order; normal uninstall consumes the resource before its
+lease can be reused, while `Drop` performs best-effort rollback for partial
+bootstrap failures. Provider lease accounting lives in the Rust runtime crate
+as `ProviderLeaseTable`.
 The host's only unsafe provider code is a thin callback adapter that converts
 the native function table into that table; it does not own counts or teardown
 policy. `darwin-art-engine-sys` is the single POD/function-pointer ABI
 definition and centralizes construction/version checks for process config and
-results. The next migration replaces the type-erased bridge with concrete
-engine/graph/surface owner fields; see
+results. The migration details and remaining boundaries are tracked in
 [`docs/architecture-migration.md`](docs/architecture-migration.md).
 
 Native build ownership follows the same boundary. `art-bootstrap` persists a
@@ -236,14 +236,15 @@ cold bootstrap. C++/ObjC++ remains responsible for ART/JNI/HWUI/Metal ABI
 operations, but Rust owns the lifetime and the graph that decides when each
 native artifact is rebuilt.
 
-The first production probe split follows that rule: fixture/environment
-selection is isolated in `probes/runtime_process_options.cc`, while
-`runtime_link_probe.cc` consumes the immutable result and remains the ART
-orchestration boundary. Its object is cached independently, so changing a
-fixture selector does not recompile the full ART translation unit. The next
-split is now the shutdown/finalizer boundary in
-`probes/runtime_shutdown_probe.cc`, followed by graphics/input phase
-ownership; neither is allowed to introduce a second lifecycle machine.
+The production probe is split into independently cached phase objects:
+fixture/environment selection (`runtime_process_options.cc`), shutdown and
+finalizers (`runtime_shutdown_probe.cc`), network acceptance
+(`runtime_acceptance_phases.cc`), and graphics presentation/JNI orchestration
+(`runtime_graphics_phase.cc`). The heavy RenderNode/Metal implementation stays
+in `runtime_graphics_probe.cc`; changing Activity validation or widget
+assertions therefore does not recompile that implementation object. None of
+these phases owns process lifetime; they consume snapshots and call the single
+Rust-owned lifecycle boundary.
 
 ### Virtual Android DSOs
 
