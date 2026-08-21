@@ -9,3 +9,4 @@ crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 darwin-art-abi = { path = "../darwin-art-abi" }
+darwin-art-engine-sys = { path = "../darwin-art-engine-sys" }

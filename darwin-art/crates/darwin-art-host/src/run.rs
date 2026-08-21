@@ -4,13 +4,12 @@ use crate::config::{HostError, HostOutcome, RunOptions, build_process_request};
 use crate::frame::{FrameHost, receive_frame};
 #[cfg(target_os = "macos")]
 use crate::gpu_loop::run as run_gpu_loop;
-use crate::provider::ProviderBridge;
 use crate::runtime::HostRuntime;
 #[cfg(target_os = "macos")]
 use crate::teardown::RuntimeShutdownGuard;
 #[cfg(target_os = "macos")]
 use darwin_art_engine::EngineSession;
-use darwin_art_runtime::Subsystem;
+use darwin_art_runtime::{ProviderBridge, Subsystem};
 
 pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
     options.validate()?;
@@ -36,7 +35,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // invoking ART. The bootstrap call below then borrows the Rust owner
         // instead of keeping a second host-side engine/provider state machine.
         let engine = EngineSession::open(&options.library).map_err(HostError::DynamicLoader)?;
-        let provider_bridge = Box::new(ProviderBridge::new(engine.provider_hooks()));
+        let provider_bridge = Box::new(engine.provider_bridge());
         let provider_context = provider_bridge.context();
         // SAFETY: provider_bridge is transferred into RuntimeSession immediately
         // below and remains alive until the engine hooks are cleared in teardown.

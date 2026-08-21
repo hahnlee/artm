@@ -2,7 +2,6 @@ mod config;
 mod frame;
 #[cfg(target_os = "macos")]
 mod gpu_loop;
-mod provider;
 mod run;
 #[cfg(target_os = "macos")]
 mod runtime;

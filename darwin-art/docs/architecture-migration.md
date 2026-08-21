@@ -381,6 +381,15 @@ The adapter TU manifest is shared by `darwin-art-build-contract` and consumed
 by both the Cargo bootstrap and `darwin-art-xtask`; a new native boundary now
 has one source-list owner instead of two independently maintained arrays.
 
+The process-global provider callback bridge is now owned by
+`darwin-art-runtime::ProviderBridge`. The host no longer contains an unsafe
+provider context or a second callback state machine: `EngineSession` converts
+the live image's three function pointers into the Rust bridge, and
+`RuntimeSession` owns the boxed context until provider quiescence and engine
+shutdown have completed. This makes provider implementation movement a Rust
+boundary change rather than a host-composition change; the remaining native
+surface is limited to the versioned callback ABI.
+
 With the graph materialized, regenerating it and querying the graphics audit is
 a true no-op (`ninja -d explain -n` reports `no work to do`). On the reference
 machine the pinned Ninja target itself completes in about 0.06s; the direct

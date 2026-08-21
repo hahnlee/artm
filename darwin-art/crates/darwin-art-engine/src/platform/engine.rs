@@ -7,7 +7,7 @@ use darwin_art_engine_sys::{
     ProcessConfig, ProcessResult, ProviderAcquireFn, ProviderClearHooksFn, ProviderNativeAcquireFn,
     ProviderNativeReleaseFn, ProviderReleaseFn,
 };
-use darwin_art_runtime::NativeResource;
+use darwin_art_runtime::{NativeResource, ProviderBridge};
 use std::path::Path;
 
 /// Safe provider-hook view owned by the live `EngineSession` image.
@@ -62,13 +62,15 @@ impl EngineSession {
         self.engine.symbols()
     }
 
-    pub fn provider_hooks(&self) -> ProviderHooks {
+    /// Build the Rust-owned provider bridge directly from this image's ABI.
+    /// The host does not copy or interpret the callback table.
+    pub fn provider_bridge(&self) -> ProviderBridge {
         let symbols = self.engine.symbols();
-        ProviderHooks {
-            acquire: symbols.provider.native_acquire,
-            release: symbols.provider.native_release,
-            clear: symbols.provider.clear_hooks,
-        }
+        ProviderBridge::from_callbacks(
+            symbols.provider.native_acquire,
+            symbols.provider.native_release,
+            symbols.provider.clear_hooks,
+        )
     }
 
     /// Run one process through the versioned ABI and construct its result

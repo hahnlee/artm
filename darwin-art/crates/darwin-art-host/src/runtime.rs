@@ -5,19 +5,8 @@
 //! importantly, it gives the next ownership migration one explicit seam:
 //! replacing or extending a native owner changes this composition once.
 
-use crate::provider::ProviderBridge;
 use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
-use darwin_art_runtime::{NativeResource, RuntimeSession};
+use darwin_art_runtime::{ProviderBridge, RuntimeSession};
 
 pub(crate) type HostRuntime =
     RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>;
-
-impl NativeResource for Box<ProviderBridge> {
-    fn close(&mut self) -> i32 {
-        0
-    }
-
-    fn clear(&mut self) -> i32 {
-        ProviderBridge::clear(self).map_or(-1, |_| 0)
-    }
-}
