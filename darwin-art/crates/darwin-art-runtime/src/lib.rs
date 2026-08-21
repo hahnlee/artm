@@ -14,7 +14,6 @@ mod provider;
 mod session;
 
 pub use lifecycle::RuntimeLifecycle;
-pub use owners::RuntimeOwners;
 pub use provider::{ProviderLeaseError, ProviderLeaseTable};
 pub use session::RuntimeSession;
 

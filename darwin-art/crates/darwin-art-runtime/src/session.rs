@@ -5,9 +5,8 @@
 //! accidentally dropping a provider or surface before the lifecycle has
 //! recorded its reverse-order lease release.
 
-use crate::{
-    RuntimeError, RuntimeLifecycle, RuntimeOwners, RuntimePhase, Subsystem, SubsystemLease,
-};
+use crate::owners::RuntimeOwners;
+use crate::{RuntimeError, RuntimeLifecycle, RuntimePhase, Subsystem, SubsystemLease};
 
 /// Owns one runtime's lifecycle and its concrete native resources.
 pub struct RuntimeSession<E, P, S, G = ()> {
@@ -66,12 +65,24 @@ impl<E, P, S, G> RuntimeSession<E, P, S, G> {
         self.lifecycle.assert_owner()
     }
 
-    pub fn owners(&self) -> &RuntimeOwners<E, P, S, G> {
-        &self.owners
+    /// Returns the attached engine without exposing the owner slots.
+    pub fn engine(&self) -> Option<&E> {
+        self.owners.engine()
     }
 
-    pub fn owners_mut(&mut self) -> &mut RuntimeOwners<E, P, S, G> {
-        &mut self.owners
+    /// Returns the attached provider without exposing the owner slots.
+    pub fn provider(&self) -> Option<&P> {
+        self.owners.provider()
+    }
+
+    /// Returns the attached surface without exposing the owner slots.
+    pub fn surface(&self) -> Option<&S> {
+        self.owners.surface()
+    }
+
+    /// Returns the attached graphics session without exposing the owner slots.
+    pub fn graphics(&self) -> Option<&G> {
+        self.owners.graphics()
     }
 
     pub fn graphics_for_shutdown_mut(&mut self) -> Result<Option<&mut G>, RuntimeError> {
@@ -113,22 +124,6 @@ impl<E, P, S, G> RuntimeSession<E, P, S, G> {
 
     pub fn attach_graphics(&mut self, graphics: G) -> Result<(), G> {
         self.owners.attach_graphics(graphics)
-    }
-
-    pub fn take_engine(&mut self) -> Option<E> {
-        self.owners.take_engine()
-    }
-
-    pub fn take_provider(&mut self) -> Option<P> {
-        self.owners.take_provider()
-    }
-
-    pub fn take_surface(&mut self) -> Option<S> {
-        self.owners.take_surface()
-    }
-
-    pub fn take_graphics(&mut self) -> Option<G> {
-        self.owners.take_graphics()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -179,13 +174,13 @@ mod tests {
         session.mark_running().unwrap();
         session.begin_shutdown().unwrap();
         session.uninstall_subsystem(graphics).unwrap();
-        assert_eq!(session.take_graphics(), Some(10));
+        assert_eq!(session.release_graphics().unwrap(), Some(10));
         session.uninstall_subsystem(surface).unwrap();
-        assert_eq!(session.take_surface(), Some(9));
+        assert_eq!(session.release_surface().unwrap(), Some(9));
         session.uninstall_subsystem(provider).unwrap();
-        assert_eq!(session.take_provider(), Some(8));
+        assert_eq!(session.release_provider().unwrap(), Some(8));
         session.uninstall_subsystem(engine).unwrap();
-        assert_eq!(session.take_engine(), Some(7));
+        assert_eq!(session.release_engine().unwrap(), Some(7));
         session.finish_shutdown().unwrap();
         assert_eq!(session.phase(), RuntimePhase::Stopped);
         assert!(session.is_empty());

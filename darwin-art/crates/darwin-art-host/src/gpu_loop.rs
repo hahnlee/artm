@@ -119,8 +119,8 @@ pub(super) fn run(
     let dispatch_queued_events = || -> Result<u64, HostError> {
         let mut dispatched = 0_u64;
         let mut event = PointerEvent::default();
-        while owned_surface_next_pointer_event(runtime.owners(), &mut event) {
-            let dispatch_status = runtime.owners().graphics().map_or(-1, |graphics| {
+        while owned_surface_next_pointer_event(runtime, &mut event) {
+            let dispatch_status = runtime.graphics().map_or(-1, |graphics| {
                 graphics.dispatch_pointer(event.action, event.x, event.y)
             });
             if dispatch_status != 0 {
@@ -133,7 +133,6 @@ pub(super) fn run(
 
     if let Some((x, y)) = test_pointer {
         let dispatch_status = runtime
-            .owners()
             .graphics()
             .map_or(-1, |graphics| graphics.dispatch_pointer(0, x, y));
         if dispatch_status != 0 {
@@ -143,8 +142,7 @@ pub(super) fn run(
             let mut held_ms = 0_u64;
             while held_ms < test_hold_ms && loop_error.is_none() {
                 let slice_ms = (test_hold_ms - held_ms).min(16);
-                let pump_status =
-                    owned_surface_pump_events(runtime.owners(), slice_ms as f64 / 1000.0);
+                let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
                 if pump_status == 7 {
                     break;
                 }
@@ -161,7 +159,6 @@ pub(super) fn run(
                 }
                 if loop_error.is_none() {
                     let pulse_status = runtime
-                        .owners()
                         .graphics()
                         .map_or(-1, |graphics| graphics.pump_frame(0));
                     if pulse_status != 0 {
@@ -172,7 +169,6 @@ pub(super) fn run(
                     // Android RenderNode while RippleDrawable's
                     // pressed animation advances between pumps.
                     let dispatch_status = runtime
-                        .owners()
                         .graphics()
                         .map_or(-1, |graphics| graphics.dispatch_pointer(2, x, y));
                     if dispatch_status != 0 {
@@ -185,7 +181,6 @@ pub(super) fn run(
             }
             if loop_error.is_none() {
                 let dispatch_status = runtime
-                    .owners()
                     .graphics()
                     .map_or(-1, |graphics| graphics.dispatch_pointer(1, x, y));
                 if dispatch_status != 0 {
@@ -198,7 +193,7 @@ pub(super) fn run(
     }
     while remaining > 0.0 {
         let slice = remaining.min(0.016);
-        let pump_status = owned_surface_pump_events(runtime.owners(), slice);
+        let pump_status = owned_surface_pump_events(runtime, slice);
         if pump_status == 7 {
             break;
         }
@@ -221,14 +216,12 @@ pub(super) fn run(
             && let Some((x, y)) = test_pointer
         {
             let pulse_status = runtime
-                .owners()
                 .graphics()
                 .map_or(-1, |graphics| graphics.pump_frame(0));
             if pulse_status != 0 {
                 loop_error = Some(HostError::RuntimeFailed(pulse_status));
             } else {
                 let replay_status = runtime
-                    .owners()
                     .graphics()
                     .map_or(-1, |graphics| graphics.dispatch_pointer(2, x, y));
                 if replay_status != 0 {

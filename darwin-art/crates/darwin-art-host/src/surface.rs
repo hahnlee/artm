@@ -2,32 +2,32 @@
 
 #[cfg(target_os = "macos")]
 use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
-use darwin_art_runtime::{RuntimeOwners, RuntimeSession};
+use darwin_art_runtime::RuntimeSession;
 
 #[cfg(target_os = "macos")]
 use crate::provider::ProviderBridge;
 
 #[cfg(target_os = "macos")]
 pub fn owned_surface(
-    owners: &RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
+    runtime: &RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
 ) -> Option<&SurfaceSession> {
-    owners.surface()
+    runtime.surface()
 }
 
 #[cfg(target_os = "macos")]
 pub fn owned_surface_pump_events(
-    owners: &RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
+    runtime: &RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
     seconds: f64,
 ) -> i32 {
-    owned_surface(owners).map_or(-1, |surface| surface.pump_events(seconds))
+    owned_surface(runtime).map_or(-1, |surface| surface.pump_events(seconds))
 }
 
 #[cfg(target_os = "macos")]
 pub fn owned_surface_next_pointer_event(
-    owners: &RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
+    runtime: &RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
     event: &mut darwin_art_engine_sys::PointerEvent,
 ) -> bool {
-    owned_surface(owners).is_some_and(|surface| surface.next_pointer_event(event))
+    owned_surface(runtime).is_some_and(|surface| surface.next_pointer_event(event))
 }
 
 #[cfg(target_os = "macos")]

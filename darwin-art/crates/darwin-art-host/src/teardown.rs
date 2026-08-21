@@ -83,7 +83,7 @@ pub(super) fn shutdown_runtime(
     {
         remember_error(&mut first_error, map_shutdown_error("graphics", error));
     }
-    if runtime.owners().graphics().is_some()
+    if runtime.graphics().is_some()
         && let Err(status) = close_graphics_owner(runtime)
     {
         remember_error(&mut first_error, HostError::RuntimeFailed(status));
@@ -94,7 +94,7 @@ pub(super) fn shutdown_runtime(
     {
         remember_error(&mut first_error, map_shutdown_error("destroy", error));
     }
-    if runtime.owners().surface().is_some()
+    if runtime.surface().is_some()
         && let Err(status) = close_surface_owner(runtime)
     {
         remember_error(
@@ -111,7 +111,7 @@ pub(super) fn shutdown_runtime(
     {
         remember_error(&mut first_error, map_shutdown_error("engine", error));
     }
-    if runtime.owners().engine().is_some()
+    if runtime.engine().is_some()
         && let Err(status) = shutdown_engine_owner(runtime)
     {
         remember_error(&mut first_error, HostError::ShutdownFailed(status));
@@ -122,7 +122,7 @@ pub(super) fn shutdown_runtime(
     {
         remember_error(&mut first_error, map_shutdown_error("provider", error));
     }
-    if runtime.owners().provider().is_some() {
+    if runtime.provider().is_some() {
         let provider_status = clear_provider_owner(runtime);
         if provider_status != 0 {
             remember_error(&mut first_error, HostError::ShutdownFailed(provider_status));

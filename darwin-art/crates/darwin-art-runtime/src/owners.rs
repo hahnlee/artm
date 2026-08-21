@@ -13,7 +13,7 @@ use std::rc::Rc;
 /// graphics drops before surface, surface before provider, and provider before
 /// engine. Normal teardown should still call the resource-specific close methods before
 /// taking the values out of these slots so failures remain observable.
-pub struct RuntimeOwners<E, P, S, G = ()> {
+pub(crate) struct RuntimeOwners<E, P, S, G = ()> {
     graphics: Option<G>,
     surface: Option<S>,
     provider: Option<P>,
@@ -88,24 +88,12 @@ impl<E, P, S, G> RuntimeOwners<E, P, S, G> {
         self.engine.as_ref()
     }
 
-    pub fn engine_mut(&mut self) -> Option<&mut E> {
-        self.engine.as_mut()
-    }
-
     pub fn provider(&self) -> Option<&P> {
         self.provider.as_ref()
     }
 
-    pub fn provider_mut(&mut self) -> Option<&mut P> {
-        self.provider.as_mut()
-    }
-
     pub fn surface(&self) -> Option<&S> {
         self.surface.as_ref()
-    }
-
-    pub fn surface_mut(&mut self) -> Option<&mut S> {
-        self.surface.as_mut()
     }
 
     pub fn graphics(&self) -> Option<&G> {
@@ -116,19 +104,19 @@ impl<E, P, S, G> RuntimeOwners<E, P, S, G> {
         self.graphics.as_mut()
     }
 
-    pub fn take_engine(&mut self) -> Option<E> {
+    pub(crate) fn take_engine(&mut self) -> Option<E> {
         self.engine.take()
     }
 
-    pub fn take_provider(&mut self) -> Option<P> {
+    pub(crate) fn take_provider(&mut self) -> Option<P> {
         self.provider.take()
     }
 
-    pub fn take_surface(&mut self) -> Option<S> {
+    pub(crate) fn take_surface(&mut self) -> Option<S> {
         self.surface.take()
     }
 
-    pub fn take_graphics(&mut self) -> Option<G> {
+    pub(crate) fn take_graphics(&mut self) -> Option<G> {
         self.graphics.take()
     }
 
