@@ -36,7 +36,7 @@ pub(super) fn run(
     }
     // Surface is installed before Graphics so shutdown can remove the
     // Graphics lease first and then the Surface lease in strict LIFO order.
-    if graphics_attached {
+    if graphics_attached && !runtime.subsystem_active(Subsystem::Graphics) {
         match runtime.install_subsystem(Subsystem::Graphics) {
             Ok(_) => {}
             Err(error) => return Err(HostError::RuntimeFailed(error.status() as i32)),

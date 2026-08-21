@@ -68,6 +68,10 @@ impl<E, P, S, G> RuntimeSession<E, P, S, G> {
         self.lifecycle.uninstall_latest_subsystem()
     }
 
+    pub fn subsystem_active(&self, subsystem: Subsystem) -> bool {
+        self.lifecycle.subsystem_active(subsystem)
+    }
+
     pub fn assert_owner(&self) -> Result<(), RuntimeError> {
         self.lifecycle.assert_owner()
     }
@@ -77,14 +81,29 @@ impl<E, P, S, G> RuntimeSession<E, P, S, G> {
         self.owners.engine()
     }
 
+    /// Borrow the live engine through the session owner. This keeps the
+    /// native engine inaccessible once the session has been dropped and makes
+    /// the Rust session the sole owner even during bootstrap calls.
+    pub fn engine_mut(&mut self) -> Option<&mut E> {
+        self.owners.engine_mut()
+    }
+
     /// Returns the attached provider without exposing the owner slots.
     pub fn provider(&self) -> Option<&P> {
         self.owners.provider()
     }
 
+    pub fn provider_mut(&mut self) -> Option<&mut P> {
+        self.owners.provider_mut()
+    }
+
     /// Returns the attached surface without exposing the owner slots.
     pub fn surface(&self) -> Option<&S> {
         self.owners.surface()
+    }
+
+    pub fn surface_mut(&mut self) -> Option<&mut S> {
+        self.owners.surface_mut()
     }
 
     /// Returns the attached graphics session without exposing the owner slots.

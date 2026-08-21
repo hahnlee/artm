@@ -48,48 +48,6 @@ impl Drop for RuntimeShutdownGuard<'_> {
     }
 }
 
-/// Roll back a process call before its engine has transferred into the
-/// `RuntimeSession`. The engine and optional graphics session are still local
-/// owners here, so this boundary performs their close/shutdown operations and
-/// preserves the historical error precedence.
-pub(super) fn process_run_failure(
-    runtime: &mut HostRuntime,
-    engine: &mut EngineSession,
-    graphics_session: Option<&mut GraphicsSession>,
-    status: i32,
-) -> HostError {
-    runtime.fail(RuntimeError::EngineFailure { status });
-    if let Some(session) = graphics_session {
-        let _ = session.close();
-    }
-    // A late run-stage failure may still have created ART. Ask the process ABI
-    // to tear it down; NOT_READY means creation never completed and is the
-    // only benign shutdown result here.
-    let shutdown_status = engine.shutdown_once();
-    const SHUTDOWN_NOT_READY: i32 = 67;
-    if shutdown_status != 0 && shutdown_status != SHUTDOWN_NOT_READY {
-        return HostError::ShutdownFailed(shutdown_status);
-    }
-    engine.clear_provider_hooks();
-    HostError::RuntimeFailed(status)
-}
-
-/// Roll back an engine whose transfer into `RuntimeSession` was rejected.
-/// Nothing in this path is owned by the runtime yet, so it must remain
-/// separate from `shutdown_runtime`'s lease-driven path.
-pub(super) fn unattached_engine_failure(
-    engine: &mut EngineSession,
-    graphics_session: Option<&mut GraphicsSession>,
-    provider_bridge: &ProviderBridge,
-) -> HostError {
-    if let Some(session) = graphics_session {
-        let _ = session.close();
-    }
-    let _ = engine.shutdown_once();
-    let _ = provider_bridge.clear();
-    HostError::RuntimeFailed(-1)
-}
-
 pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostError> {
     // Cleanup is deliberately best-effort after shutdown begins. A failing
     // surface destroy must not prevent ART shutdown, and a provider-hook

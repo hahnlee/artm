@@ -88,12 +88,24 @@ impl<E, P, S, G> RuntimeOwners<E, P, S, G> {
         self.engine.as_ref()
     }
 
+    pub(crate) fn engine_mut(&mut self) -> Option<&mut E> {
+        self.engine.as_mut()
+    }
+
     pub fn provider(&self) -> Option<&P> {
         self.provider.as_ref()
     }
 
+    pub(crate) fn provider_mut(&mut self) -> Option<&mut P> {
+        self.provider.as_mut()
+    }
+
     pub fn surface(&self) -> Option<&S> {
         self.surface.as_ref()
+    }
+
+    pub(crate) fn surface_mut(&mut self) -> Option<&mut S> {
+        self.surface.as_mut()
     }
 
     pub fn graphics(&self) -> Option<&G> {

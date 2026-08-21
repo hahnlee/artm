@@ -6,9 +6,7 @@ use crate::frame::{FrameHost, receive_frame};
 use crate::gpu_loop::run as run_gpu_loop;
 use crate::provider::ProviderBridge;
 #[cfg(target_os = "macos")]
-use crate::teardown::{
-    RuntimeShutdownGuard, process_run_failure, shutdown_runtime, unattached_engine_failure,
-};
+use crate::teardown::{RuntimeShutdownGuard, shutdown_runtime};
 #[cfg(target_os = "macos")]
 use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
 use darwin_art_runtime::{RuntimeSession, Subsystem};
@@ -24,21 +22,22 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
 
     #[cfg(target_os = "macos")]
     {
-        let mut runtime = RuntimeSession::<
-            EngineSession,
-            Box<ProviderBridge>,
-            SurfaceSession,
-            GraphicsSession,
-        >::new();
+        type HostRuntime =
+            RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>;
+
+        let mut runtime = HostRuntime::new();
         runtime
             .start()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
-        let mut engine = EngineSession::open(&options.library).map_err(HostError::DynamicLoader)?;
+
+        // Transfer every long-lived native resource into RuntimeSession before
+        // invoking ART. The bootstrap call below then borrows the Rust owner
+        // instead of keeping a second host-side engine/provider state machine.
+        let engine = EngineSession::open(&options.library).map_err(HostError::DynamicLoader)?;
         let provider_bridge = Box::new(ProviderBridge::new(engine.provider_hooks()));
         let provider_context = provider_bridge.context();
-        // SAFETY: provider_bridge is kept alive by the local scope until it
-        // is transferred into the RuntimeSession below; the callbacks are static
-        // and use only that stable context pointer.
+        // SAFETY: provider_bridge is transferred into RuntimeSession immediately
+        // below and remains alive until the engine hooks are cleared in teardown.
         unsafe {
             engine.install_provider_hooks(
                 provider_context,
@@ -46,7 +45,41 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 Some(ProviderBridge::release_callback()),
             );
         }
-        let mut graphics_session = engine.create_graphics_session().ok();
+        if let Err(_engine) = runtime.attach_engine(engine) {
+            return Err(HostError::RuntimeFailed(-1));
+        }
+        if let Err(provider_bridge) = runtime.attach_provider(provider_bridge) {
+            let _ = provider_bridge.clear();
+            let _ = shutdown_runtime(&mut runtime);
+            return Err(HostError::RuntimeFailed(-1));
+        }
+
+        let graphics_session = runtime
+            .engine()
+            .and_then(|engine| engine.create_graphics_session().ok());
+        let graphics_attached = if let Some(graphics) = graphics_session {
+            if runtime.attach_graphics(graphics).is_err() {
+                let _ = shutdown_runtime(&mut runtime);
+                return Err(HostError::RuntimeFailed(-1));
+            }
+            true
+        } else {
+            false
+        };
+
+        if let Err(error) = runtime.install_subsystem(Subsystem::ElfNamespace) {
+            let _ = shutdown_runtime(&mut runtime);
+            return Err(HostError::RuntimeFailed(error.status() as i32));
+        }
+        if let Err(error) = runtime.install_subsystem(Subsystem::Engine) {
+            let _ = shutdown_runtime(&mut runtime);
+            return Err(HostError::RuntimeFailed(error.status() as i32));
+        }
+        if graphics_attached && let Err(error) = runtime.install_subsystem(Subsystem::Graphics) {
+            let _ = shutdown_runtime(&mut runtime);
+            return Err(HostError::RuntimeFailed(error.status() as i32));
+        }
+
         let mut frame_host = FrameHost {
             frames_received: 0,
             last_frame: None,
@@ -58,89 +91,46 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             provider_context,
             Some(ProviderBridge::acquire_callback()),
             Some(ProviderBridge::release_callback()),
-            graphics_session
-                .as_ref()
+            runtime
+                .graphics()
                 .map_or(ptr::null_mut(), |session| session.raw_handle().cast()),
         ) {
             Ok(inputs) => inputs,
             Err(error) => {
-                // The engine has installed provider hooks, but ownership has
-                // not yet transferred into RuntimeSession.  Keep this
-                // pre-transfer failure on the same explicit rollback seam as
-                // a failed engine attach; otherwise a malformed path (for
-                // example an interior NUL) would leak the VM/bootstrap state
-                // until process exit.
-                let rollback = unattached_engine_failure(
-                    &mut engine,
-                    graphics_session.as_mut(),
-                    &provider_bridge,
-                );
-                return Err(match rollback {
-                    HostError::RuntimeFailed(_) => error,
-                    other => other,
-                });
+                return match shutdown_runtime(&mut runtime) {
+                    Ok(()) => Err(error),
+                    Err(cleanup) => Err(cleanup),
+                };
             }
         };
-        let process = match engine.run_request(&request) {
+
+        let process = match runtime
+            .engine()
+            .ok_or(HostError::RuntimeFailed(-1))
+            .and_then(|engine| {
+                engine
+                    .run_request(&request)
+                    .map_err(HostError::RuntimeFailed)
+            }) {
             Ok(result) => result,
-            Err(status) => {
-                return Err(process_run_failure(
-                    &mut runtime,
-                    &mut engine,
-                    graphics_session.as_mut(),
-                    status,
-                ));
+            Err(error) => {
+                return match shutdown_runtime(&mut runtime) {
+                    Ok(()) => Err(error),
+                    Err(cleanup) => Err(cleanup),
+                };
             }
         };
-        // The graphics engine publishes its drawable during run_process, so
-        // capture the owner only after that bootstrap has completed.
-        let active_surface = engine.active_surface();
-        if let Err(mut engine) = runtime.attach_engine(engine) {
-            // The resource was never transferred, so its Drop path is the
-            // only owner responsible for the failed transfer. Clear hooks
-            // before dropping the bridge that supplied their context.
-            return Err(unattached_engine_failure(
-                &mut engine,
-                graphics_session.as_mut(),
-                &provider_bridge,
-            ));
-        }
-        if let Err(provider_bridge) = runtime.attach_provider(provider_bridge) {
-            let _ = provider_bridge.clear();
-            let _ = shutdown_runtime(&mut runtime);
-            return Err(HostError::RuntimeFailed(-1));
-        }
-        if let Err(error) = runtime.install_subsystem(Subsystem::ElfNamespace) {
-            let _ = shutdown_runtime(&mut runtime);
-            return Err(HostError::RuntimeFailed(error.status() as i32));
-        }
-        if let Err(error) = runtime.install_subsystem(Subsystem::Engine) {
-            let _ = shutdown_runtime(&mut runtime);
-            return Err(HostError::RuntimeFailed(error.status() as i32));
-        }
-        // Attach the graphics owner before entering ART, but install its
-        // lifecycle lease only once a surface exists.  The surface is
-        // published by the process bootstrap and is installed by gpu_loop;
-        // keeping this order makes teardown the exact reverse:
-        // Graphics -> Surface -> Engine -> Provider.
-        let graphics_attached = if let Some(graphics) = graphics_session.take() {
-            if let Err(graphics) = runtime.attach_graphics(graphics) {
-                drop(graphics);
-                let _ = shutdown_runtime(&mut runtime);
-                return Err(HostError::RuntimeFailed(-1));
-            }
-            true
-        } else {
-            false
-        };
-        if let Err(error) = runtime.mark_running() {
-            runtime.fail(error);
-            let _ = shutdown_runtime(&mut runtime);
-            return Err(HostError::RuntimeFailed(error.status() as i32));
-        }
+
+        // The graphics engine publishes its drawable during run_process. The
+        // surface value is still returned as a short-lived transfer and is
+        // attached by gpu_loop, while engine/provider/graphics remain owned by
+        // RuntimeSession for the entire process.
+        let active_surface = runtime.engine().and_then(EngineSession::active_surface);
+        runtime
+            .mark_running()
+            .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
         let mut shutdown_guard = RuntimeShutdownGuard::new(&mut runtime);
-        // Darwin's application renderer is GPU-only. A published surface is
-        // always handed to the direct Metal/HWUI loop below.
+
         if active_surface.is_some() {
             let outcome = run_gpu_loop(
                 shutdown_guard.runtime(),
@@ -155,23 +145,22 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 (_, Err(error)) => Err(error),
             };
         }
-        // Headless ART is a first-class mode. It never allocates a surface and
-        // never uploads the callback mailbox into an IOSurface. Graphics runs
-        // exclusively through `gpu_loop::run` above.
-        if graphics_attached {
-            match shutdown_guard
+
+        // Headless ART is a first-class mode. It never allocates a surface
+        // and never uploads the callback mailbox into an IOSurface.
+        if graphics_attached
+            && !shutdown_guard
+                .runtime()
+                .subsystem_active(Subsystem::Graphics)
+            && let Err(error) = shutdown_guard
                 .runtime()
                 .install_subsystem(Subsystem::Graphics)
-            {
-                Ok(_) => {}
-                Err(error) => {
-                    let cleanup = shutdown_guard.shutdown();
-                    return match cleanup {
-                        Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
-                        Err(cleanup_error) => Err(cleanup_error),
-                    };
-                }
-            }
+        {
+            let cleanup = shutdown_guard.shutdown();
+            return match cleanup {
+                Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
+                Err(cleanup_error) => Err(cleanup_error),
+            };
         }
         let outcome = HostOutcome {
             process,
