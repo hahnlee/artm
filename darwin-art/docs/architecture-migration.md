@@ -162,6 +162,12 @@ trampolines, provider ownership, and NativeLoader remain in
 stubs have no graph/provider state and can be rebuilt independently when the
 loader or provider path changes.
 
+The process-wide NativeBridge/NativeLoader hooks follow the same rule in
+`compat/darwin_native_bridge_stubs.cc`. Only `NativeBridgeGetTrampoline2` and
+the native-bridge pointer classifier remain graph-aware because they select
+the per-image JNI trampoline owned by the ELF handle. All unsupported bridge
+operations stay explicit closed-capability stubs.
+
 The large graph emission routine itself is in `graph::emit`; the CLI entrypoint
 is now a 279-line command/test boundary. This is intentionally a source/build
 boundary only: it does not pretend that the remaining framework-native

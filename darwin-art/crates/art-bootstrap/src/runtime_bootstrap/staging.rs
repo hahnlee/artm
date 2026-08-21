@@ -127,12 +127,7 @@ pub(crate) fn prepare(root: &Path, real_graphics: bool) -> Result<RuntimeBootstr
         "patches/art/0029-darwin-arm64-native-stack-pcs.patch",
         "patches/art/0030-darwin-large-object-bitmap-window.patch",
     ] {
-        run_command(
-            Command::new("patch")
-                .args(["--batch", "--forward", "-p1", "-i"])
-                .arg(root.join(patch))
-                .current_dir(&patched_source_dir),
-        )?;
+        apply_patch_if_needed(&root.join(patch), &patched_source_dir)?;
     }
 
     let mut includes = vec![
@@ -299,4 +294,45 @@ fn copy_runtime_sources(runtime: &Path, patched_runtime: &Path) -> Result<()> {
         fs::copy(runtime.join(source), destination)?;
     }
     Ok(())
+}
+
+/// Apply one ART shadow-tree patch exactly once.
+///
+/// Bootstrap commands can be launched concurrently by the native graph and by
+/// a direct audit command. The shadow tree is deliberately shared so its
+/// generated headers and object paths remain stable, which means a second
+/// preparer may observe an already-applied patch. A plain `patch --forward`
+/// treats that valid state as an error and leaves a `.rej` file behind. Probe
+/// both directions first: forward means apply, reverse means already applied,
+/// and neither means the pinned source drifted and must fail closed.
+fn apply_patch_if_needed(patch_file: &Path, patched_source_dir: &Path) -> Result<()> {
+    let mut forward = Command::new("patch");
+    forward
+        .args(["--batch", "--forward", "--dry-run", "-p1", "-i"])
+        .arg(patch_file)
+        .current_dir(patched_source_dir);
+    if forward.status()?.success() {
+        return run_command(
+            Command::new("patch")
+                .args(["--batch", "--forward", "-p1", "-i"])
+                .arg(patch_file)
+                .current_dir(patched_source_dir),
+        );
+    }
+
+    let mut reverse = Command::new("patch");
+    reverse
+        .args(["--batch", "--reverse", "--dry-run", "-p1", "-i"])
+        .arg(patch_file)
+        .current_dir(patched_source_dir);
+    if reverse.status()?.success() {
+        return Ok(());
+    }
+
+    run_command(
+        Command::new("patch")
+            .args(["--batch", "--forward", "-p1", "-i"])
+            .arg(patch_file)
+            .current_dir(patched_source_dir),
+    )
 }

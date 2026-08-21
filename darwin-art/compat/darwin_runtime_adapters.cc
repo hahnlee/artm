@@ -742,19 +742,6 @@ bool LookupOptionalElfSymbol(ElfLibrary* library,
 
 extern "C" {
 
-bool LoadNativeBridge(const char* library, const NativeBridgeRuntimeCallbacks*) {
-  // An empty name means that ART explicitly requested no translation bridge.
-  return library == nullptr || library[0] == '\0';
-}
-
-bool PreInitializeNativeBridge(const char*, const char*) { return true; }
-void PreZygoteForkNativeBridge() {}
-bool InitializeNativeBridge(JNIEnv*, const char*) { return true; }
-bool NativeBridgeInitialized() { return false; }
-uint32_t NativeBridgeGetVersion() { return 0; }
-
-void UnloadNativeBridge() {}
-
 void* NativeBridgeGetTrampoline2(void* handle,
                                  const char* name,
                                  const char*,
@@ -1093,12 +1080,6 @@ bool CloseNativeLibrary(void* handle, bool needs_native_bridge, char** error_msg
   }
   return false;
 }
-
-void NativeLoaderFreeErrorMessage(char* message) {
-  std::free(message);
-}
-
-void ResetNativeLoader() {}
 
 }  // extern "C"
 }  // namespace android

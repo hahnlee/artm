@@ -132,6 +132,9 @@ the graph/provider/JNI adapter remains `darwin_runtime_adapters.cc`. The
 archive cache records both source names and command fingerprints; if a new
 required TU is absent from a persisted archive, the builder falls back to the
 canonical compile path instead of silently reusing an incomplete archive.
+The process-wide NativeBridge/NativeLoader hooks are a third independent
+object, `darwin_native_bridge_stubs.cc`; only the per-image trampoline selector
+stays in the graph-aware adapter.
 
 Graphics presentation now follows the same boundary. The JNI/widget
 validation and `present_content`/interactive-root orchestration live in
