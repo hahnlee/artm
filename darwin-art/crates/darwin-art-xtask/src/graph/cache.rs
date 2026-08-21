@@ -195,10 +195,15 @@ pub(crate) fn emit_cached_native_graph_with_inputs(
                 .map(shell_quote)
                 .collect::<Vec<_>>()
                 .join(" ");
+            // The depfile must be newer than the source after the one-time
+            // scan. Copying the object's timestamp is incorrect when a
+            // checkout restored the source with a newer mtime: Ninja would
+            // repeat the dependency scan on every invocation. A plain touch
+            // records the successful scan at the current time and leaves the
+            // object itself untouched.
             let dependency_scan_command = format!(
-                "{quoted_command} -E -Wno-unused-command-line-argument -MMD -MF {} -o /dev/null && touch -r {} {}",
+                "{quoted_command} -E -Wno-unused-command-line-argument -MMD -MF {} -o /dev/null && touch {}",
                 shell_quote(&depfile.to_string_lossy()),
-                shell_quote(&object.object.to_string_lossy()),
                 shell_quote(&depfile.to_string_lossy()),
             );
             graph.push_str("build ");
