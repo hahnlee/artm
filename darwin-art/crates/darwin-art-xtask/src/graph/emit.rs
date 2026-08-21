@@ -65,6 +65,11 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     )?;
 
     let root_for_shell = root.to_string_lossy().into_owned();
+    // Ninja edges run the already-built bootstrap CLI directly.  Cargo is
+    // still the public entry point that emits this graph, but invoking Cargo
+    // once per native TU edge defeats the persistent object cache and adds a
+    // process/workspace resolution cost to every warm build.
+    let bootstrap_cli = shell_quote(&root.join("target/debug/art-bootstrap").to_string_lossy());
     // Keep compiler outputs at a stable path.  The graph digest is a
     // manifest/invalidation identity, not an object-cache namespace: moving
     // objects into a new digest directory would turn every header edit into
@@ -487,9 +492,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push_str(&shell_quote(&root_for_shell));
         graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT_ROOT=");
         graph.push_str(&shell_quote(&native_output_for_shell));
-        graph.push_str(
-            " cargo run -p art-bootstrap -- build-runtime-graphics-bootstrap-internal && touch ",
-        );
+        graph.push(' ');
+        graph.push_str(&bootstrap_cli);
+        graph.push_str(" build-runtime-graphics-bootstrap-internal && touch ");
         graph.push_str(&shell_quote(&stamp_for_shell));
         graph.push('\n');
         graph.push_str("  description = GRAPHICS bootstrap\n");
@@ -524,7 +529,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push_str(&shell_quote(&root_for_shell));
         graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT_ROOT=");
         graph.push_str(&shell_quote(&native_output_for_shell));
-        graph.push_str(" cargo run -p art-bootstrap -- build-runtime-bootstrap-internal && touch ");
+        graph.push(' ');
+        graph.push_str(&bootstrap_cli);
+        graph.push_str(" build-runtime-bootstrap-internal && touch ");
         graph.push_str(&shell_quote(&runtime_stamp_path.to_string_lossy()));
         graph.push('\n');
         graph.push_str("  description = ART bootstrap\n");
@@ -763,7 +770,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&root_for_shell));
     graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT=");
     graph.push_str(&shell_quote(&filesystem_object_for_shell));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-filesystem-probe\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-filesystem-probe\n");
     graph.push_str("  description = CXX runtime_filesystem_probe\n");
     // The Rust command owns the C++ dependency cache for this probe.  Ninja
     // only tracks the explicit phase stamp and source inputs; consuming a
@@ -782,7 +791,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&root_for_shell));
     graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT=");
     graph.push_str(&shell_quote(&network_object_for_shell));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-network-probe\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-network-probe\n");
     graph.push_str("  description = CXX runtime_network_probe\n");
     // Dependency fingerprints are maintained by art-bootstrap.
     graph.push_str("  restat = 1\n\n");
@@ -798,7 +809,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&root_for_shell));
     graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT=");
     graph.push_str(&shell_quote(&hwui_object_path.to_string_lossy()));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-hwui-probe\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-hwui-probe\n");
     graph.push_str("  description = CXX runtime_hwui_probe\n");
     // Dependency fingerprints are maintained by art-bootstrap.
     graph.push_str("  restat = 1\n\n");
@@ -857,7 +870,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(
         &app_presentation_object_path.to_string_lossy(),
     ));
-    graph.push_str(" cargo run -p art-bootstrap -- audit-runtime-graphics-link-fast\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" audit-runtime-graphics-link-fast\n");
     graph.push_str("  description = CXX runtime_graphics_probe\n");
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
@@ -888,7 +903,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&root_for_shell));
     graph.push_str(" && DARWIN_ART_NATIVE_GRAPHICS_PHASE_OBJECT=");
     graph.push_str(&shell_quote(&graphics_phase_object_path.to_string_lossy()));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-phase-probe\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-graphics-phase-probe\n");
     graph.push_str("  description = CXX runtime_graphics_phase\n");
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
@@ -903,7 +920,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&root_for_shell));
     graph.push_str(" && DARWIN_ART_NATIVE_GRAPHICS_INPUT_OBJECT=");
     graph.push_str(&shell_quote(&graphics_input_object_path.to_string_lossy()));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-input-probe\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-graphics-input-probe\n");
     graph.push_str("  description = CXX runtime_graphics_input\n");
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
@@ -918,7 +937,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&root_for_shell));
     graph.push_str(" && DARWIN_ART_NATIVE_GRAPHICS_STATE_OBJECT=");
     graph.push_str(&shell_quote(&graphics_state_object_path.to_string_lossy()));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-state-probe\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-graphics-state-probe\n");
     graph.push_str("  description = CXX runtime_graphics_state\n");
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
@@ -935,7 +956,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(
         &graphics_session_object_path.to_string_lossy(),
     ));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-session-probe\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-graphics-session-probe\n");
     graph.push_str("  description = CXX runtime_graphics_session\n");
     graph.push_str("  restat = 1\n\n");
     let graphics_session_object = ninja_path(&graphics_session_object_path);
@@ -951,7 +974,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&root_for_shell));
     graph.push_str(" && DARWIN_ART_NATIVE_JNI_ACCEPTANCE_OBJECT=");
     graph.push_str(&shell_quote(&jni_acceptance_object_path.to_string_lossy()));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-jni-acceptance-probe\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-jni-acceptance-probe\n");
     graph.push_str("  description = CXX runtime_jni_acceptance\n");
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
@@ -966,7 +991,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&root_for_shell));
     graph.push_str(" && DARWIN_ART_NATIVE_APP_BOOTSTRAP_OBJECT=");
     graph.push_str(&shell_quote(&app_bootstrap_object_path.to_string_lossy()));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-app-bootstrap-probe\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-app-bootstrap-probe\n");
     graph.push_str("  description = CXX runtime_app_bootstrap\n");
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
@@ -983,7 +1010,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(
         &app_presentation_object_path.to_string_lossy(),
     ));
-    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-app-presentation-probe\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-app-presentation-probe\n");
     graph.push_str("  description = CXX runtime_app_presentation\n");
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
@@ -1027,7 +1056,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     // The full upstream closure is a separate release/CI gate.  The Ninja
     // graph is the developer inner loop and must only relink/audit against
     // already materialized foundation artifacts.
-    graph.push_str(" cargo run -p art-bootstrap -- audit-runtime-graphics-link-fast\n");
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" audit-runtime-graphics-link-fast\n");
     graph.push_str("  description = GRAPHICS link/audit\n");
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
