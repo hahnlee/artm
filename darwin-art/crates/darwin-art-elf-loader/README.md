@@ -30,6 +30,11 @@ per-thread guest blocks while leaving Darwin `TPIDR_EL0` intact. Imported and
 static TLS models remain explicit capabilities. The ownership and unload
 contract is documented in [TLS.md](TLS.md).
 
+The TLS registry, TLSDESC resolver, and per-thread allocation/drop path live in
+`src/tls.rs`; the main loader remains responsible for parsing, relocation, and
+mapping policy. This is an implementation split only: the descriptor token ABI
+and unload behavior are unchanged.
+
 `ClosedElfNamespace` adds a recursive graph layer without introducing path
 search. Each ELF byte source is registered under its exact embedded
 `DT_SONAME`; an optional caller-owned `SymbolResolver` is the only non-ELF
