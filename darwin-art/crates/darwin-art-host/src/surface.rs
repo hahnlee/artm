@@ -69,7 +69,11 @@ pub fn clear_provider_owner(
 pub fn close_graphics_owner(
     owners: &mut RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
 ) -> Result<(), i32> {
-    let Some(mut graphics) = owners.take_graphics() else {
+    // Keep the opaque graphics session alive until the canonical engine
+    // shutdown callback has finished. The native process state borrows the
+    // session's GraphicsState during shutdown; taking it here would drop and
+    // destroy that state before `shutdown_engine_owner` reaches it.
+    let Some(graphics) = owners.graphics_mut() else {
         return Ok(());
     };
     let status = graphics.close();
