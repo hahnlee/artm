@@ -326,6 +326,12 @@ owning a copy of the compile policy. Graphics archive discovery and member
 validation are likewise owned by `GraphicsRuntimeInputs`, leaving the link
 routine responsible only for native compilation, linking, and symbol gates.
 
+The headless runtime link follows the same split: `audit/runtime_link.rs`
+assembles and caches native compile/link inputs, while
+`audit/runtime_link_checks.rs` owns the exported-symbol and undefined-symbol
+policy. Changing the acceptance census therefore does not alter the link
+orchestration module or its native graph inputs.
+
 The host composition is now one explicit `HostRuntime` alias in
 `darwin-art-host/src/runtime.rs`. Surface, GPU-loop, and teardown modules no
 longer repeat the four generic owner parameters, so changing the concrete
@@ -438,6 +444,11 @@ the live image's three function pointers into the Rust bridge, and
 shutdown have completed. This makes provider implementation movement a Rust
 boundary change rather than a host-composition change; the remaining native
 surface is limited to the versioned callback ABI.
+
+`ProcessRequest` now borrows the provider and optional graphics owner for its
+entire synchronous ART call. Raw context pointers are materialized only while
+the wire `ProcessConfig` is built, so the host cannot drop or replace an owner
+while the native graph may still invoke its callbacks.
 
 With the graph materialized, regenerating it and querying the graphics audit is
 a true no-op (`ninja -d explain -n` reports `no work to do`). On the reference
