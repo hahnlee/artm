@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "darwin_provider_owners.h"
+#include "darwin_art_bionic_builtin_adapters.h"
 #include "darwin_runtime_adapters_internal.h"
 #include "nativebridge/native_bridge.h"
 #include "nativeloader/native_loader.h"
