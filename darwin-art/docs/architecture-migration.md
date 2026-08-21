@@ -222,6 +222,16 @@ handle alive together, then materializes the raw `ProcessConfig` only inside
 the raw FFI struct, so its unsafe lifetime surface is limited to one synchronous
 engine call.
 
+Native ELF resource lifetime now crosses the same boundary through the Rust
+`darwin-art-runtime` static library. `RuntimeNativeOwner` stores opaque graph,
+image-registry, DSO, namespace, and provider slots with C drop callbacks and
+releases them in descending order. `ElfLibrary` no longer manually unloads the
+graph before provider teardown; `OpenNativeLibrary` registers each successful
+resource and `CloseNativeLibrary` destroys the Rust owner. The callback ABI is
+owner-thread-only and fail-stop on a destructor error. This is the first
+production path where Rust owns native ELF teardown rather than merely
+recording a C++ lease.
+
 The large graph emission routine itself is in `graph::emit`; the CLI entrypoint
 is now a 279-line command/test boundary. This is intentionally a source/build
 boundary only: it does not pretend that the remaining framework-native

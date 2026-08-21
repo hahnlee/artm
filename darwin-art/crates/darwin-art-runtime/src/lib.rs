@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 //! Rust-owned runtime lifecycle state.
 //!
@@ -9,11 +9,16 @@
 use darwin_art_abi::StatusCode;
 
 mod lifecycle;
+mod native_owner;
 mod owners;
 mod provider;
 mod session;
 
 pub use lifecycle::RuntimeLifecycle;
+pub use native_owner::{
+    RuntimeNativeOwner, RuntimeNativeOwnerDropFn, darwin_art_runtime_native_owner_attach,
+    darwin_art_runtime_native_owner_create, darwin_art_runtime_native_owner_destroy,
+};
 pub use provider::{ProviderLeaseError, ProviderLeaseTable};
 pub use session::RuntimeSession;
 

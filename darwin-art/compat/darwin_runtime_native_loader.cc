@@ -77,6 +77,23 @@ class ScopedFd {
   int fd_ = -1;
 };
 
+bool AttachNativeOwner(ElfLibrary* library,
+                       uint32_t order,
+                       void* value,
+                       RuntimeNativeOwnerDropFn drop_fn,
+                       std::string* error) {
+  if (library == nullptr || library->native_owner == nullptr || value == nullptr ||
+      darwin_art_runtime_native_owner_attach(library->native_owner, order, value,
+                                              library, drop_fn) != 0) {
+    if (value != nullptr && drop_fn != nullptr) {
+      (void)drop_fn(value, library);
+    }
+    if (error != nullptr) *error = "Rust native owner rejected resource slot";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 ElfLibrary* AsElfLibrary(void* handle) {
@@ -144,6 +161,11 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
     }
     std::string error;
     auto library = std::make_unique<ElfLibrary>();
+    library->native_owner = darwin_art_runtime_native_owner_create();
+    if (library->native_owner == nullptr) {
+      SetNativeLoaderError(error_msg, "Rust native owner allocation failed");
+      return nullptr;
+    }
     library->fixture_graph = IsExactFixtureGraph(root_soname, sources, source_count);
     if (library->fixture_graph) {
       g_elf_fixture_lifecycle.store(0, std::memory_order_relaxed);
@@ -159,6 +181,12 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       SetNativeLoaderError(error_msg, "Bionic DSO lifecycle activation failed");
       return nullptr;
     }
+    if (!AttachNativeOwner(library.get(), kNativeOwnerDso, library->dso_lifecycle,
+                           &DropRuntimeDsoLifecycle, &error)) {
+      SetNativeLoaderError(error_msg, "Rust native owner DSO slot failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     library->image_registry = darwin_art_image_registry::Create(
         root_soname, sources, source_count, providers, std::size(providers), &error);
     if (library->image_registry == nullptr) {
@@ -167,9 +195,23 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
+    if (!AttachNativeOwner(library.get(), kNativeOwnerImageRegistry,
+                           library->image_registry, &DropRuntimeElfImageRegistry,
+                           &error)) {
+      SetNativeLoaderError(error_msg, "Rust native owner image slot failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     library->provider_namespace = darwin_art_bionic_namespace_create();
     if (library->provider_namespace == nullptr) {
       SetNativeLoaderError(error_msg, "Bionic provider namespace allocation failed");
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    if (!AttachNativeOwner(library.get(), kNativeOwnerNamespace,
+                           library->provider_namespace, &DropRuntimeProviderNamespace,
+                           &error)) {
+      SetNativeLoaderError(error_msg, "Rust native owner namespace slot failed: " + error);
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
@@ -197,36 +239,90 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       return nullptr;
     }
     library->filesystem_owner = true;
+    if (!AttachNativeOwner(
+            library.get(), kNativeOwnerFilesystem,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(
+                darwin_art::providers::Kind::Filesystem)),
+            &DropRuntimeProviderKind, &error)) {
+      SetNativeLoaderError(error_msg, "Rust native owner filesystem slot failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     if (!darwin_art::providers::acquire_sendfile(&error)) {
       SetNativeLoaderError(error_msg, "Bionic sendfile setup failed: " + error);
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
     library->sendfile_owner = true;
+    if (!AttachNativeOwner(
+            library.get(), kNativeOwnerSendfile,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(
+                darwin_art::providers::Kind::Sendfile)),
+            &DropRuntimeProviderKind, &error)) {
+      SetNativeLoaderError(error_msg, "Rust native owner sendfile slot failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     if (!darwin_art::providers::acquire_ioctl(&error)) {
       SetNativeLoaderError(error_msg, "Bionic ioctl setup failed: " + error);
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
     library->ioctl_owner = true;
+    if (!AttachNativeOwner(
+            library.get(), kNativeOwnerIoctl,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(
+                darwin_art::providers::Kind::Ioctl)),
+            &DropRuntimeProviderKind, &error)) {
+      SetNativeLoaderError(error_msg, "Rust native owner ioctl slot failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     if (!darwin_art::providers::acquire_strftime(&error)) {
       SetNativeLoaderError(error_msg, "Bionic strftime setup failed: " + error);
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
     library->strftime_owner = true;
+    if (!AttachNativeOwner(
+            library.get(), kNativeOwnerStrftime,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(
+                darwin_art::providers::Kind::Strftime)),
+            &DropRuntimeProviderKind, &error)) {
+      SetNativeLoaderError(error_msg, "Rust native owner strftime slot failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     if (!darwin_art::providers::acquire_stdio(&error)) {
       SetNativeLoaderError(error_msg, "Bionic stdio setup failed: " + error);
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
     library->stdio_owner = true;
+    if (!AttachNativeOwner(
+            library.get(), kNativeOwnerStdio,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(
+                darwin_art::providers::Kind::Stdio)),
+            &DropRuntimeProviderKind, &error)) {
+      SetNativeLoaderError(error_msg, "Rust native owner stdio slot failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     if (!darwin_art::providers::acquire_network(&error)) {
       SetNativeLoaderError(error_msg, "Bionic network setup failed: " + error);
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
     library->network_owner = true;
+    if (!AttachNativeOwner(
+            library.get(), kNativeOwnerNetwork,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(
+                darwin_art::providers::Kind::Network)),
+            &DropRuntimeProviderKind, &error)) {
+      SetNativeLoaderError(error_msg, "Rust native owner network slot failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     DarwinArtElfLoadOptions options{DARWIN_ART_ELF_ABI_VERSION,
                                     &ResolveRuntimeProvider, library.get()};
     DarwinArtElfLifecycleCallbacks lifecycle{DARWIN_ART_ELF_ABI_VERSION,
@@ -244,13 +340,16 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
+    if (!AttachNativeOwner(library.get(), kNativeOwnerGraph, library->graph,
+                           &DropRuntimeElfGraph, &error)) {
+      SetNativeLoaderError(error_msg, "Rust native owner graph slot failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     if (library->fixture_graph &&
         g_elf_fixture_provider_routes.load(std::memory_order_relaxed) !=
             kFixtureAllProviderRouteMask) {
       SetNativeLoaderError(error_msg, "Android ELF did not route all Bionic provider imports");
-      if (darwin_art_elf_graph_unload(&library->graph, nullptr) == DARWIN_ART_ELF_OK) {
-        g_elf_fixture_namespace_lifecycle.store(4, std::memory_order_relaxed);
-      }
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
@@ -266,17 +365,11 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       SetNativeLoaderError(error_msg,
                            library->proxy == nullptr ? "Android JNI proxy initialization failed"
                                                      : "Android ELF lifecycle preflight failed: " + error);
-      if (darwin_art_elf_graph_unload(&library->graph, nullptr) == DARWIN_ART_ELF_OK) {
-        g_elf_fixture_namespace_lifecycle.store(4, std::memory_order_relaxed);
-      }
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
     if (needs_native_bridge == nullptr) {
       SetNativeLoaderError(error_msg, "Android ELF load requires needs_native_bridge ownership");
-      if (darwin_art_elf_graph_unload(&library->graph, nullptr) == DARWIN_ART_ELF_OK) {
-        g_elf_fixture_namespace_lifecycle.store(4, std::memory_order_relaxed);
-      }
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
@@ -312,16 +405,6 @@ extern "C" bool CloseNativeLibrary(void* handle,
     }
     darwin_art::android_jni::DestroyRegularTrampolines(library->trampolines);
     library->trampolines = nullptr;
-    std::array<char, 1024> storage{};
-    DarwinArtElfErrorBuffer error_buffer{storage.data(), storage.size(), 0};
-    const DarwinArtElfStatus status =
-        darwin_art_elf_graph_unload(&library->graph, &error_buffer);
-    if (status != DARWIN_ART_ELF_OK) {
-      SetNativeLoaderError(error_msg,
-                           "Android ELF unload failed: " + ElfError(status, error_buffer));
-      return false;
-    }
-    if (library->fixture_graph) g_elf_fixture_namespace_lifecycle.store(4, std::memory_order_relaxed);
     TeardownProviderNamespace(library);
     library->magic = 0;
     delete library;

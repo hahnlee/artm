@@ -1,4 +1,4 @@
-use super::common::require_file;
+use super::common::{build_runtime_native_owner, require_file};
 use super::*;
 pub(crate) fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
     audit_runtime_graphics_link_mode(root, true)
@@ -36,6 +36,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         build_shell_gate(root, "build-android16-android-util-log.sh")?;
         build_shell_gate(root, "build-android16-virtual-ref-base-ptr.sh")?;
     }
+    let runtime_native_owner_archive = build_runtime_native_owner(root)?;
 
     let runtime = root.join("_aosp/art/runtime");
     let build_paths = BuildPaths::from_root(root);
@@ -559,6 +560,9 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_provider_clear_hooks")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_acquire")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
+        .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_create")
+        .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_attach")
+        .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_destroy")
         .arg("-Wl,-dead_strip")
         .arg(format!("-Wl,-map,{}", link_map.display()))
         .arg(&object)
@@ -619,6 +623,10 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         )
         .arg(root.join("_build/icu-foundation/libandroidicuinit-darwin.a"))
         .arg(root.join("crates/darwin-art-elf-loader/target/release/libdarwin_art_elf_loader.a"))
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            runtime_native_owner_archive.display()
+        ))
         .arg(&system_natives_archive)
         .arg(&file_descriptor_archive)
         .arg(&unix_native_dispatcher_archive)
@@ -729,6 +737,9 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         "_darwin_art_provider_clear_hooks",
         "_darwin_art_provider_native_acquire",
         "_darwin_art_provider_native_release",
+        "_darwin_art_runtime_native_owner_create",
+        "_darwin_art_runtime_native_owner_attach",
+        "_darwin_art_runtime_native_owner_destroy",
     ] {
         if !global_symbols.contains(required) {
             return Err(format!("real-graphics Runtime lacks required symbol {required}").into());

@@ -1,4 +1,4 @@
-use super::common::require_file;
+use super::common::{build_runtime_native_owner, require_file};
 use super::*;
 
 pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
@@ -26,6 +26,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     };
     require_file(&network_object, "runtime network object is missing")?;
     build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
+    let runtime_native_owner_archive = build_runtime_native_owner(root)?;
     let includes = [
         root.join("include"),
         root.join("compat"),
@@ -314,6 +315,9 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,_darwin_art_provider_clear_hooks")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_acquire")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
+        .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_create")
+        .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_attach")
+        .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_destroy")
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&elf_probe_object)
@@ -366,6 +370,10 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(root.join("_build/icu-foundation/libicuuc-common-darwin.a"))
         .arg(root.join("_build/icu-foundation/libicuuc-stubdata-darwin.a"))
         .arg(root.join("crates/darwin-art-elf-loader/target/release/libdarwin_art_elf_loader.a"))
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            runtime_native_owner_archive.display()
+        ))
         .arg(root.join("_build/interpreter-core/libart-interpreter-darwin.a"))
         .arg(root.join("_build/runtime-arm64/libart-arm64-darwin.a"))
         .arg(root.join("_build/runtime-core/libart-core-darwin.a"))
@@ -419,6 +427,9 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
             "_darwin_art_provider_clear_hooks",
             "_darwin_art_provider_native_acquire",
             "_darwin_art_provider_native_release",
+            "_darwin_art_runtime_native_owner_create",
+            "_darwin_art_runtime_native_owner_attach",
+            "_darwin_art_runtime_native_owner_destroy",
         ] {
             if !symbols.contains(required) {
                 return Err(format!(

@@ -172,6 +172,11 @@ including the Cargo/xtask wrapper. Runtime link closure remained
 `undefined=0`, and recursive ELF/JNI/TLS acceptance continued to pass after
 each split.
 
+The runtime link now also force-loads the small Rust `darwin-art-runtime`
+static library. Its opaque native-owner symbols are exported and audited in
+both CPU and graphics dylibs; the Rust archive is built incrementally by Cargo
+and does not participate in the large AOSP/HWUI object promotion.
+
 Graphics presentation now follows the same boundary. The JNI/widget
 validation and `present_content`/interactive-root orchestration live in
 `probes/runtime_graphics_phase.cc`, while clickable hit-testing, pointer/frame

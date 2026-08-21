@@ -12,10 +12,21 @@
 #include "darwin_art_bionic_dso_lifecycle.h"
 #include "darwin_art_bionic_provider_namespace.h"
 #include "darwin_art_jni_proxy.h"
+#include "darwin_art_runtime_native_owner.h"
 
 namespace android {
 
 inline constexpr uint64_t kElfLibraryMagic = UINT64_C(0x44415257454c464a);
+inline constexpr uint32_t kNativeOwnerFilesystem = 20;
+inline constexpr uint32_t kNativeOwnerStdio = 30;
+inline constexpr uint32_t kNativeOwnerIoctl = 40;
+inline constexpr uint32_t kNativeOwnerSendfile = 50;
+inline constexpr uint32_t kNativeOwnerStrftime = 60;
+inline constexpr uint32_t kNativeOwnerNetwork = 70;
+inline constexpr uint32_t kNativeOwnerDso = 80;
+inline constexpr uint32_t kNativeOwnerImageRegistry = 90;
+inline constexpr uint32_t kNativeOwnerNamespace = 100;
+inline constexpr uint32_t kNativeOwnerGraph = 110;
 inline constexpr int kElfOpened = 1 << 0;
 inline constexpr int kElfOnLoadCalled = 1 << 1;
 inline constexpr int kElfFoundFixtureClass = 1 << 2;
@@ -53,6 +64,7 @@ extern std::atomic<int> g_elf_fixture_namespace_lifecycle;
 
 struct ElfLibrary {
   uint64_t magic = kElfLibraryMagic;
+  RuntimeNativeOwner* native_owner = nullptr;
   bool fixture_graph = false;
   DarwinArtElfGraphHandle* graph = nullptr;
   DarwinArtBionicNamespace* provider_namespace = nullptr;
@@ -87,6 +99,11 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     const DarwinArtElfSymbolRequest* request,
     uintptr_t* out_address,
     DarwinArtElfErrorBuffer* error);
+int DropRuntimeElfGraph(void* value, void* context);
+int DropRuntimeElfImageRegistry(void* value, void* context);
+int DropRuntimeDsoLifecycle(void* value, void* context);
+int DropRuntimeProviderNamespace(void* value, void* context);
+int DropRuntimeProviderKind(void* value, void* context);
 ElfLibrary* AsElfLibrary(void* handle);
 int32_t ProxyRegisterNatives(void* context,
                              void* clazz,
