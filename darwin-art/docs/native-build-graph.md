@@ -49,6 +49,13 @@ The patched ART shadow tree also has a content identity manifest. Preparation
 does not rewrite an unchanged staged source or header, so a canonical fallback
 after graph promotion preserves existing depfile mtimes and reuses the old
 object fingerprints instead of recompiling the full ART archive.
+
+Standalone libcore Linux is also represented by explicit graph inputs for its
+three native phases (`libcore_darwin_linux.cc`,
+`libcore_darwin_linux_system_natives.cc`, and
+`libcore_darwin_linux_syscalls.cc`) plus the shared header. The archive edge
+therefore observes a system/metadata edit directly instead of treating the
+shell builder script timestamp as a proxy for all of its C++ inputs.
 The upstream ART runtime translation units and flavor-independent compat
 adapters now use a shared `_build/runtime-common/{patched-source,objects}`
 boundary. Graphics-only framework, libcore, and ICU adapters remain

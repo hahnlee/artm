@@ -76,6 +76,15 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("compat/darwin_surface_gpu_bridge.mm"),
         PathBuf::from("compat/darwin_provider_owners.cc"),
         PathBuf::from("compat/darwin_provider_owners.h"),
+        // The libcore Linux archive is produced by a standalone shell edge,
+        // so its C++ inputs must be explicit graph inputs rather than relying
+        // on the shell script's timestamp to represent all three objects.
+        // This keeps system/metadata edits and syscall edits incremental while
+        // preserving the generated 135-entry registrar boundary.
+        PathBuf::from("compat/libcore_darwin_linux.cc"),
+        PathBuf::from("compat/libcore_darwin_linux_system_natives.cc"),
+        PathBuf::from("compat/libcore_darwin_linux_syscalls.cc"),
+        PathBuf::from("compat/libcore_darwin_linux.h"),
     ];
     // Keep this graph tied to the production bootstrap closure. Acceptance
     // probes and unrelated native sources must not rotate the persistent

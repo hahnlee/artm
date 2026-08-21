@@ -174,6 +174,23 @@ mod tests {
     }
 
     #[test]
+    fn libcore_linux_archive_tracks_each_native_phase_input() {
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let paths = graph_inputs(&repository_root);
+        for input in [
+            "compat/libcore_darwin_linux.cc",
+            "compat/libcore_darwin_linux_system_natives.cc",
+            "compat/libcore_darwin_linux_syscalls.cc",
+            "compat/libcore_darwin_linux.h",
+        ] {
+            assert!(
+                paths.iter().any(|path| path == Path::new(input)),
+                "libcore archive input is missing from native graph: {input}"
+            );
+        }
+    }
+
+    #[test]
     fn probe_sources_do_not_invalidate_the_bootstrap_archive() {
         assert!(is_probe_only_input(Path::new(
             "probes/runtime_link_probe.cc"

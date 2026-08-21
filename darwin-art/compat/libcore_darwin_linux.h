@@ -24,6 +24,17 @@ void* Mmap(void* address, size_t byte_count, int linux_prot,
 int Munmap(void* address, size_t byte_count);
 long Sysconf(int name);
 
+// System/metadata JNI phase. Keeping these definitions out of the generated
+// registrar TU lets edits to environment, identity, and diagnostic policy
+// rebuild one small object instead of the complete 135-entry table.
+void ThrowErrno(JNIEnv* env, const char* operation, int error);
+jlong DarwinLinuxSysconf(JNIEnv* env, jobject receiver, jint name);
+jstring DarwinLinuxGetenv(JNIEnv* env, jobject receiver, jstring java_name);
+jobject DarwinLinuxGetpwuid(JNIEnv* env, jobject receiver, jint uid);
+jobject DarwinLinuxUname(JNIEnv* env, jobject receiver);
+jstring DarwinLinuxStrerror(JNIEnv* env, jobject receiver, jint error_number);
+jstring DarwinLinuxStrsignal(JNIEnv* env, jobject receiver, jint signal_number);
+
 // Owns the complete Android 16 libcore.io.Linux 135-entry registration table.
 // No other registrar may register a subset of this class after this succeeds.
 bool RegisterLinuxNatives(JNIEnv* env);

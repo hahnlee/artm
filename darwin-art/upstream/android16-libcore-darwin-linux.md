@@ -22,7 +22,13 @@ capability-failure set to real Darwin implementations by whole behavioral
 families (filesystem, sockets, process, xattr), while Linux-only calls retain an
 explicit `ENOTSUP` contract.
 
-The generator decodes every upstream JNI descriptor into a fixed C++ parameter
+The generated registrar and descriptor wrappers live in
+`compat/libcore_darwin_linux.cc`; system/metadata JNI semantics are isolated
+in `compat/libcore_darwin_linux_system_natives.cc`, and low-level syscall
+translation remains in `compat/libcore_darwin_linux_syscalls.cc`. The gate
+archives all three objects as one owner, so the split changes compilation
+boundaries without changing the complete registration table. The generator
+decodes every upstream JNI descriptor into a fixed C++ parameter
 list and the matching JNI return type. It emits no ellipsis wrappers. The
 descriptor decoder handles object, primitive, array, float, and double types;
 the pinned table itself has no float or double return shorty. The gate

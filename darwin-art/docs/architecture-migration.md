@@ -198,12 +198,15 @@ animation, resource, or system registration no longer recompiles the other
 implementation phases.
 
 The libcore Linux compatibility archive applies the same boundary:
-`compat/libcore_darwin_linux.cc` owns the generated JNI method table and Java
-object/error translation, while
+`compat/libcore_darwin_linux.cc` owns the generated JNI method table, file
+descriptor JNI operations, and Java object/error translation;
+`compat/libcore_darwin_linux_system_natives.cc` owns environment, identity,
+password, diagnostic-string, and `sysconf` JNI semantics; and
 `compat/libcore_darwin_linux_syscalls.cc` owns Android-flag translation,
-descriptor I/O, mmap, and sysconf. The standalone libcore gate archives both
-objects and verifies the split smoke/managed ABI path, so a syscall policy edit
-does not recompile the generated 135-entry JNI registrar.
+descriptor I/O, and mmap. The standalone libcore gate archives all three
+objects and verifies the split smoke/managed ABI path, so edits to system
+metadata or syscall policy do not recompile the generated 135-entry JNI
+registrar.
 
 The character/primitive and ICU registrations are now isolated in
 `compat/darwin_libcore_unicode_natives.cc`. The main
