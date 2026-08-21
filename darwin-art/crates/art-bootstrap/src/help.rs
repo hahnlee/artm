@@ -58,6 +58,10 @@ pub(crate) fn print_help() {
         "  build-runtime-graphics-session-probe  compile the opaque graphics session ABI probe"
     );
     println!("  build-runtime-jni-acceptance-probe  compile the DEX/JNI acceptance phase");
+    println!("  build-runtime-app-bootstrap-probe  compile the detached app class bootstrap phase");
+    println!(
+        "  build-runtime-app-presentation-probe  compile the detached Activity/window presentation phase"
+    );
     println!("  audit-runtime-link  measure the remaining Runtime::Create link closure");
     println!("  audit-runtime-graphics-link  link ART with the strict Android graphics closure");
     println!(

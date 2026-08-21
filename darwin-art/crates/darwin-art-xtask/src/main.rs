@@ -313,6 +313,10 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         native_output_root.join("runtime-probes/darwin_art_runtime_graphics_session.cc.o");
     let jni_acceptance_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_jni_acceptance_probe.cc.o");
+    let app_bootstrap_object_path =
+        native_output_root.join("runtime-probes/darwin_art_runtime_app_bootstrap.cc.o");
+    let app_presentation_object_path =
+        native_output_root.join("runtime-probes/darwin_art_runtime_app_presentation.cc.o");
     let stamp_path = cache_dir.join("graphics-bootstrap.stamp");
     let runtime_stamp_path = cache_dir.join("runtime-bootstrap.stamp");
     let stamp = ninja_path(&stamp_path);
@@ -337,6 +341,8 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     let graphics_input_object = ninja_path(&graphics_input_object_path);
     let graphics_state_object = ninja_path(&graphics_state_object_path);
     let jni_acceptance_object = ninja_path(&jni_acceptance_object_path);
+    let app_bootstrap_object = ninja_path(&app_bootstrap_object_path);
+    let app_presentation_object = ninja_path(&app_presentation_object_path);
     let stamp_for_shell = stamp_path.to_string_lossy().into_owned();
     let native_output_for_shell = native_output_root.to_string_lossy().into_owned();
     let cached_runtime_objects = cached_native_objects(
@@ -453,6 +459,23 @@ fn emit_graph(out: &Path) -> io::Result<()> {
             "probes/runtime_jni_scope.h",
         ],
     );
+    let app_bootstrap_inputs = probe_inputs(
+        &root,
+        &[
+            "probes/runtime_app_bootstrap.cc",
+            "probes/runtime_app_bootstrap.h",
+            "probes/runtime_process_state.h",
+        ],
+    );
+    let app_presentation_inputs = probe_inputs(
+        &root,
+        &[
+            "probes/runtime_app_presentation.cc",
+            "probes/runtime_app_presentation.h",
+            "probes/runtime_graphics_phase.h",
+            "probes/runtime_graphics_state.h",
+        ],
+    );
     // Ninja normally invalidates by mtime.  These stable content stamps make
     // the probe boundary robust when a checkout/materializer preserves source
     // mtimes (and keep each phase's content identity independent of the broad
@@ -544,6 +567,25 @@ fn emit_graph(out: &Path) -> io::Result<()> {
             "probes/runtime_jni_acceptance_probe.h",
             "probes/runtime_abi_probe.h",
             "probes/runtime_jni_scope.h",
+        ],
+    )?;
+    let app_bootstrap_stamp = probe_content_stamp(
+        &root,
+        "app-bootstrap",
+        &[
+            "probes/runtime_app_bootstrap.cc",
+            "probes/runtime_app_bootstrap.h",
+            "probes/runtime_process_state.h",
+        ],
+    )?;
+    let app_presentation_stamp = probe_content_stamp(
+        &root,
+        "app-presentation",
+        &[
+            "probes/runtime_app_presentation.cc",
+            "probes/runtime_app_presentation.h",
+            "probes/runtime_graphics_phase.h",
+            "probes/runtime_graphics_state.h",
         ],
     )?;
 
@@ -986,6 +1028,38 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push(' ');
     graph.push_str(&ninja_path(&jni_acceptance_stamp));
     graph.push('\n');
+    graph.push_str("rule runtime_app_bootstrap_probe\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && DARWIN_ART_NATIVE_APP_BOOTSTRAP_OBJECT=");
+    graph.push_str(&shell_quote(&app_bootstrap_object_path.to_string_lossy()));
+    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-app-bootstrap-probe\n");
+    graph.push_str("  description = CXX runtime_app_bootstrap\n");
+    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&app_bootstrap_object);
+    graph.push_str(": runtime_app_bootstrap_probe ");
+    graph.push_str(&app_bootstrap_inputs);
+    graph.push(' ');
+    graph.push_str(&ninja_path(&app_bootstrap_stamp));
+    graph.push('\n');
+    graph.push_str("rule runtime_app_presentation_probe\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && DARWIN_ART_NATIVE_APP_PRESENTATION_OBJECT=");
+    graph.push_str(&shell_quote(
+        &app_presentation_object_path.to_string_lossy(),
+    ));
+    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-app-presentation-probe\n");
+    graph.push_str("  description = CXX runtime_app_presentation\n");
+    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&app_presentation_object);
+    graph.push_str(": runtime_app_presentation_probe ");
+    graph.push_str(&app_presentation_inputs);
+    graph.push(' ');
+    graph.push_str(&ninja_path(&app_presentation_stamp));
+    graph.push('\n');
     graph.push_str("rule graphics_audit\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
@@ -1011,6 +1085,12 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&jni_acceptance_object_path.to_string_lossy()));
     graph.push_str(" DARWIN_ART_NATIVE_HWUI_OBJECT=");
     graph.push_str(&shell_quote(&hwui_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_APP_BOOTSTRAP_OBJECT=");
+    graph.push_str(&shell_quote(&app_bootstrap_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_APP_PRESENTATION_OBJECT=");
+    graph.push_str(&shell_quote(
+        &app_presentation_object_path.to_string_lossy(),
+    ));
     // The full upstream closure is a separate release/CI gate.  The Ninja
     // graph is the developer inner loop and must only relink/audit against
     // already materialized foundation artifacts.
@@ -1060,6 +1140,10 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&jni_acceptance_object);
     graph.push(' ');
     graph.push_str(&hwui_object);
+    graph.push(' ');
+    graph.push_str(&app_bootstrap_object);
+    graph.push(' ');
+    graph.push_str(&app_presentation_object);
     graph.push(' ');
     graph.push_str(&probe_only_input_list);
     graph.push('\n');

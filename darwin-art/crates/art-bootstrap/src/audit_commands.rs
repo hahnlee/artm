@@ -241,10 +241,22 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         compile_runtime_network_loader_probe(root, &build_dir, &include_refs)?;
     let context_loader_object =
         compile_runtime_context_loader_probe(root, &build_dir, &include_refs)?;
-    let app_bootstrap_object =
-        compile_runtime_app_bootstrap_probe(root, &build_dir, &include_refs)?;
-    let app_presentation_object =
-        compile_runtime_app_presentation_probe(root, &build_dir, &include_refs)?;
+    let app_bootstrap_object = if let Some(path) =
+        env::var_os("DARWIN_ART_NATIVE_APP_BOOTSTRAP_OBJECT")
+        && Path::new(&path).is_file()
+    {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_app_bootstrap_probe(root, &build_dir, &include_refs)?
+    };
+    let app_presentation_object = if let Some(path) =
+        env::var_os("DARWIN_ART_NATIVE_APP_PRESENTATION_OBJECT")
+        && Path::new(&path).is_file()
+    {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_app_presentation_probe(root, &build_dir, &include_refs)?
+    };
     let mut surface_command = Command::new("clang++");
     surface_command
         .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
@@ -1000,10 +1012,22 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         compile_runtime_network_loader_probe(root, &build_dir, &include_refs)?;
     let context_loader_object =
         compile_runtime_context_loader_probe(root, &build_dir, &include_refs)?;
-    let app_bootstrap_object =
-        compile_runtime_app_bootstrap_probe(root, &build_dir, &include_refs)?;
-    let app_presentation_object =
-        compile_runtime_app_presentation_probe(root, &build_dir, &include_refs)?;
+    let app_bootstrap_object = if let Some(path) =
+        env::var_os("DARWIN_ART_NATIVE_APP_BOOTSTRAP_OBJECT")
+        && Path::new(&path).is_file()
+    {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_app_bootstrap_probe(root, &build_dir, &include_refs)?
+    };
+    let app_presentation_object = if let Some(path) =
+        env::var_os("DARWIN_ART_NATIVE_APP_PRESENTATION_OBJECT")
+        && Path::new(&path).is_file()
+    {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_app_presentation_probe(root, &build_dir, &include_refs)?
+    };
     let mut surface_command = Command::new("clang++");
     surface_command
         .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
