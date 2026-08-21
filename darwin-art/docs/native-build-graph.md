@@ -124,7 +124,8 @@ Graphics presentation now follows the same boundary. The JNI/widget
 validation and `present_content`/interactive-root orchestration live in
 `probes/runtime_graphics_phase.cc`, while clickable hit-testing, pointer/frame
 dispatch, and input state live in `probes/runtime_graphics_input.cc`.
-RenderNode/Metal replay remains in `probes/runtime_graphics_probe.cc`. The
-linker consumes all three objects, so a change to framework validation or
-input handling does not recompile the HWUI/Skia implementation and a graphics
+RenderNode/Metal replay is owned by `probes/runtime_hwui_probe.cc`; the
+remaining graphics probe owns Java recording/orchestration state. The linker
+consumes all phase objects, so a change to framework validation or input
+handling does not recompile the HWUI/Skia implementation and a graphics
 implementation change does not rebuild the orchestration phases.
