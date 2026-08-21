@@ -171,6 +171,8 @@ mod native_probe_commands;
 mod probe_commands;
 #[path = "runtime_art_build.rs"]
 mod runtime_art_build;
+#[path = "runtime_bootstrap.rs"]
+mod runtime_bootstrap;
 #[path = "runtime_commands.rs"]
 mod runtime_commands;
 #[path = "runtime_toolchain.rs"]
@@ -184,6 +186,7 @@ pub(crate) use fixture_commands::*;
 pub(crate) use native_probe_commands::*;
 pub(crate) use probe_commands::*;
 pub(crate) use runtime_art_build::*;
+pub(crate) use runtime_bootstrap::*;
 pub(crate) use runtime_commands::*;
 pub(crate) use runtime_toolchain::*;
 pub(crate) use source_commands::*;
