@@ -1,4 +1,5 @@
 use super::common::{build_runtime_native_owner, require_file};
+use super::graphics_core_probes::{CoreProbeObjects, compile_core_probe_objects};
 use super::*;
 
 pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
@@ -60,55 +61,17 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     let probe_cache = build_dir.join("runtime-link-probe-hashes.cache");
-    let elf_probe_object = build_dir.join("darwin_art_runtime_elf_probe.cc.o");
-    let mut elf_probe_command = runtime_cpp_command(&include_refs);
-    elf_probe_command
-        .arg("-c")
-        .arg(root.join("probes/runtime_elf_probe.cc"))
-        .arg("-o")
-        .arg(&elf_probe_object);
-    let _ = compile_cached_probe_tu(
-        &mut elf_probe_command,
-        &elf_probe_object,
-        &probe_cache,
-        &compiler_identity,
-    )?;
-    let abi_probe_object = build_dir.join("darwin_art_runtime_abi_probe.cc.o");
-    let mut abi_probe_command = runtime_cpp_command(&include_refs);
-    abi_probe_command
-        .arg("-c")
-        .arg(root.join("probes/runtime_abi_probe.cc"))
-        .arg("-o")
-        .arg(&abi_probe_object);
-    let _ = compile_cached_probe_tu(
-        &mut abi_probe_command,
-        &abi_probe_object,
-        &probe_cache,
-        &compiler_identity,
-    )?;
-    let process_state_object = build_dir.join("darwin_art_runtime_process_state.cc.o");
-    let mut process_state_command = runtime_cpp_command(&include_refs);
-    process_state_command
-        .arg("-c")
-        .arg(root.join("probes/runtime_process_state.cc"))
-        .arg("-o")
-        .arg(&process_state_object);
-    let _ = compile_cached_probe_tu(
-        &mut process_state_command,
-        &process_state_object,
-        &probe_cache,
-        &compiler_identity,
-    )?;
-    let process_options_object = build_dir.join("darwin_art_runtime_process_options.cc.o");
-    let mut process_options_command = runtime_cpp_command(&include_refs);
-    process_options_command
-        .arg("-c")
-        .arg(root.join("probes/runtime_process_options.cc"))
-        .arg("-o")
-        .arg(&process_options_object);
-    let _ = compile_cached_probe_tu(
-        &mut process_options_command,
-        &process_options_object,
+    let CoreProbeObjects {
+        elf: elf_probe_object,
+        abi: abi_probe_object,
+        process_state: process_state_object,
+        process_options: process_options_object,
+        shutdown: shutdown_probe_object,
+        frame: frame_probe_object,
+    } = compile_core_probe_objects(
+        root,
+        &build_dir,
+        &include_refs,
         &probe_cache,
         &compiler_identity,
     )?;
@@ -122,32 +85,6 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     let _ = compile_cached_probe_tu(
         &mut registration_command,
         &registration_object,
-        &probe_cache,
-        &compiler_identity,
-    )?;
-    let shutdown_probe_object = build_dir.join("darwin_art_runtime_shutdown_probe.cc.o");
-    let mut shutdown_probe_command = runtime_cpp_command(&include_refs);
-    shutdown_probe_command
-        .arg("-c")
-        .arg(root.join("probes/runtime_shutdown_probe.cc"))
-        .arg("-o")
-        .arg(&shutdown_probe_object);
-    let _ = compile_cached_probe_tu(
-        &mut shutdown_probe_command,
-        &shutdown_probe_object,
-        &probe_cache,
-        &compiler_identity,
-    )?;
-    let frame_probe_object = build_dir.join("darwin_art_runtime_frame_probe.cc.o");
-    let mut frame_probe_command = runtime_cpp_command(&include_refs);
-    frame_probe_command
-        .arg("-c")
-        .arg(root.join("probes/runtime_frame_probe.cc"))
-        .arg("-o")
-        .arg(&frame_probe_object);
-    let _ = compile_cached_probe_tu(
-        &mut frame_probe_command,
-        &frame_probe_object,
         &probe_cache,
         &compiler_identity,
     )?;
