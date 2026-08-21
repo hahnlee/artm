@@ -76,13 +76,16 @@ warm direct-CLI sample measured:
 | --- | --- | --- | ---: | ---: |
 | 2026-08-21 | warm/no-op | `target/debug/art-bootstrap audit-runtime-link` | 0 | 14.60 |
 | 2026-08-21 | warm/no-op | `target/debug/art-bootstrap audit-runtime-graphics-link-fast` | 0 | 3.41 |
+| 2026-08-21 | warm/incremental | `target/debug/art-bootstrap audit-runtime-graphics-link-incremental` | 0 | 24.81 |
 
 The six flavor-neutral core probe objects are now shared under
 `_build/native-probes/core`; the warm samples therefore do not recompile those
 objects once the CPU and graphics audits have populated the cache. These rows
 are direct CLI timings (not the older Cargo wrapper rows) and should not be
 compared to the 58.88 s full upstream graphics audit as if they were the same
-workload.
+workload. The incremental row includes the graphics closure audit and final
+link/symbol checks while reusing all 14 source-pinned foundation products; its
+first run after a stamp/input change remains a cold foundation build.
 
 ## Known bottlenecks
 

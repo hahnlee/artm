@@ -1,33 +1,143 @@
 use super::*;
 
+fn build_archive_inputs(root: &Path) -> Vec<PathBuf> {
+    fn visit(directory: &Path, files: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit(&path, files);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("a") {
+                files.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    visit(&root.join("_build"), &mut files);
+    files.sort();
+    files
+}
+
+fn cached_foundation_gate(root: &Path, script: &str, lock: &str, outputs: &[&str]) -> Result<()> {
+    let output_paths = outputs
+        .iter()
+        .map(|path| root.join(path))
+        .collect::<Vec<_>>();
+    let mut inputs = build_archive_inputs(root);
+    inputs.retain(|path| !output_paths.contains(path));
+    inputs.push(root.join(lock));
+    build_shell_gate_cached(root, script, &[], &inputs, &output_paths)
+}
+
 /// Build the source-pinned native closure consumed by the graphics link audit.
 ///
 /// This phase is intentionally independent from probe compilation and final
 /// symbol verification. The full audit invokes it, while the fast inner-loop
 /// audit can reuse the already-materialized archives.
-pub(super) fn run_graphics_upstream_gates(root: &Path) -> Result<()> {
-    build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
+pub(super) fn run_graphics_upstream_gates(root: &Path, incremental: bool) -> Result<()> {
+    if incremental {
+        cached_foundation_gate(
+            root,
+            "build-bionic-runtime-provider-closure.sh",
+            "upstream/android35-libcxx-provider-coverage.lock",
+            &[
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-rust-providers.a",
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a",
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-float-conversion.a",
+                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-binary128-conversion.a",
+            ],
+        )?;
+    } else {
+        build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
+    }
     build_shell_gate_with_args(
         root,
         "audit-android16-graphics-closure.sh",
         &["--art-runtime"],
     )?;
-    for script in [
-        "build-android16-android-runtime-host.sh",
-        "build-android16-libcore-darwin-linux.sh",
-        "build-android16-os-constants-darwin.sh",
-        "build-android16-unix-filesystem-darwin.sh",
-        "build-android16-openjdkjvm-darwin.sh",
-        "build-android16-file-input-stream-darwin.sh",
-        "build-android16-file-descriptor-darwin.sh",
-        "build-android16-system-natives-darwin.sh",
-        "build-android16-unix-native-dispatcher-darwin.sh",
-        "build-android16-openjdk-nio-mapping.sh",
-        "build-android16-libcore-memory-darwin.sh",
-        "build-android16-android-util-log.sh",
-        "build-android16-virtual-ref-base-ptr.sh",
-    ] {
-        build_shell_gate(root, script)?;
+    let gates = [
+        (
+            "build-android16-android-runtime-host.sh",
+            "upstream/android16-android-runtime-host.lock",
+            &["_build/android-runtime-host/libandroid-runtime-darwin-host.a"][..],
+        ),
+        (
+            "build-android16-libcore-darwin-linux.sh",
+            "upstream/android16-libcore-darwin-linux.lock",
+            &["_build/libcore-darwin-linux/libcore-darwin-linux.a"][..],
+        ),
+        (
+            "build-android16-os-constants-darwin.sh",
+            "upstream/android16-os-constants.lock",
+            &["_build/os-constants/libandroid-system-os-constants-darwin.a"][..],
+        ),
+        (
+            "build-android16-unix-filesystem-darwin.sh",
+            "upstream/android16-unix-filesystem-darwin.lock",
+            &["_build/unix-filesystem-darwin/libopenjdk-unix-filesystem-darwin.a"][..],
+        ),
+        (
+            "build-android16-openjdkjvm-darwin.sh",
+            "upstream/android16-openjdkjvm-darwin.lock",
+            &["_build/openjdkjvm-darwin/libopenjdkjvm-darwin.a"][..],
+        ),
+        (
+            "build-android16-file-input-stream-darwin.sh",
+            "upstream/android16-file-input-stream-darwin.lock",
+            &["_build/file-input-stream-darwin/libopenjdk-file-input-stream-darwin.a"][..],
+        ),
+        (
+            "build-android16-file-descriptor-darwin.sh",
+            "upstream/android16-file-descriptor-darwin.lock",
+            &["_build/file-descriptor-darwin/libopenjdk-file-descriptor-darwin.a"][..],
+        ),
+        (
+            "build-android16-system-natives-darwin.sh",
+            "upstream/android16-system-natives-darwin.lock",
+            &["_build/system-natives-darwin/libopenjdk-system-natives-darwin.a"][..],
+        ),
+        (
+            "build-android16-unix-native-dispatcher-darwin.sh",
+            "upstream/android16-unix-native-dispatcher-darwin.lock",
+            &["_build/unix-native-dispatcher-darwin/libopenjdk-unix-native-dispatcher-darwin.a"][..],
+        ),
+        (
+            "build-android16-openjdk-nio-mapping.sh",
+            "upstream/android16-openjdk-nio-mapping.lock",
+            &[
+                "_build/openjdk-nio-mapping/libopenjdk-nio-mapping-darwin.a",
+                "_build/openjdk-nio-mapping/libopenjdk-nio-support-darwin.a",
+            ][..],
+        ),
+        (
+            "build-android16-libcore-memory-darwin.sh",
+            "upstream/android16-libcore-memory.lock",
+            &[
+                "_build/libcore-memory/libcore-memory-darwin.a",
+                "_build/libcore-memory/libcore-jni-constants-darwin.a",
+                "_build/libcore-memory/libcore-memory-art-runtime-darwin.a",
+                "_build/libcore-memory/libcore-jni-constants-art-runtime-darwin.a",
+            ][..],
+        ),
+        (
+            "build-android16-android-util-log.sh",
+            "upstream/android16-android-util-log.lock",
+            &["_build/android-util-log/libandroid-util-log-registrar-darwin.a"][..],
+        ),
+        (
+            "build-android16-virtual-ref-base-ptr.sh",
+            "upstream/android16-virtual-ref-base-ptr.lock",
+            &["_build/virtual-ref-base-ptr/libandroid-virtual-ref-base-ptr-darwin.a"][..],
+        ),
+    ];
+    for (script, lock, outputs) in gates {
+        if incremental {
+            cached_foundation_gate(root, script, lock, outputs)?;
+        } else {
+            build_shell_gate(root, script)?;
+        }
     }
     Ok(())
 }

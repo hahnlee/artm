@@ -268,6 +268,13 @@ actions now fingerprint the same paths and consume the same object directory.
 This is a real cache boundary, not only a type alias: a second flavor does not
 recompile the six core TUs after the first flavor has populated the cache.
 
+For foundation inner-loop work, `audit-runtime-graphics-link-incremental`
+reuses successful source-pinned foundation products through per-script stamps,
+then still reruns the graphics closure audit and final dylib/symbol checks.
+The strict `audit-runtime-graphics-link` path remains unchanged and executes
+every upstream build/managed acceptance gate; the incremental command is not a
+replacement for release validation.
+
 Native ELF resource lifetime now crosses the same boundary through the Rust
 `darwin-art-runtime` static library. `RuntimeNativeOwner` stores opaque graph,
 image-registry, DSO, namespace, and provider slots with C drop callbacks and

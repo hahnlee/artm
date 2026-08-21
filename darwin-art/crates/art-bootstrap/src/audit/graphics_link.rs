@@ -7,22 +7,31 @@ use super::graphics_phases::run_graphics_upstream_gates;
 use super::graphics_surface::compile_surface_objects;
 use super::*;
 pub(crate) fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
-    audit_runtime_graphics_link_mode(root, true)
+    audit_runtime_graphics_link_mode(root, true, false)
 }
 
 /// Validate/link against already-built graphics inputs without rerunning the
 /// long upstream closure scripts. This is the inner-loop target after a
 /// narrow TU change; the full command remains the release/CI gate.
 pub(crate) fn audit_runtime_graphics_link_fast(root: &Path) -> Result<()> {
-    audit_runtime_graphics_link_mode(root, false)
+    audit_runtime_graphics_link_mode(root, false, false)
+}
+
+/// Reuse successful source-pinned foundation artifacts while still running
+/// the graphics closure audit and final dylib/symbol checks. This is the
+/// development path between the strict full gate and the artifact-only fast
+/// link check.
+pub(crate) fn audit_runtime_graphics_link_incremental(root: &Path) -> Result<()> {
+    audit_runtime_graphics_link_mode(root, true, true)
 }
 
 pub(crate) fn audit_runtime_graphics_link_mode(
     root: &Path,
     run_upstream_gates: bool,
+    incremental: bool,
 ) -> Result<()> {
     if run_upstream_gates {
-        run_graphics_upstream_gates(root)?;
+        run_graphics_upstream_gates(root, incremental)?;
     }
     let runtime_native_owner_archive = build_runtime_native_owner(root)?;
 

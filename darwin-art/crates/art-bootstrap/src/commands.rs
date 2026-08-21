@@ -127,6 +127,7 @@ pub(crate) fn run() -> Result<()> {
         "audit-runtime-link" => audit_runtime_link(&root),
         "audit-runtime-graphics-link" => audit_runtime_graphics_link(&root),
         "audit-runtime-graphics-link-fast" => audit_runtime_graphics_link_fast(&root),
+        "audit-runtime-graphics-link-incremental" => audit_runtime_graphics_link_incremental(&root),
         "audit-graphics-closure" => build_shell_gate(&root, "audit-android16-graphics-closure.sh"),
         "probe-runtime-dex" => probe_runtime_dex(&root, false),
         "probe-runtime-elf-jni" => probe_runtime_elf_jni(&root),
