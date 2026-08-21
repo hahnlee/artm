@@ -1,11 +1,11 @@
 //! Single owner-thread shutdown path for graphics and headless runs.
 
-use super::{
-    HostError, ProviderBridge, RuntimeError, RuntimeSession, SurfaceSession, clear_provider_owner,
-    close_surface_owner, shutdown_engine_owner,
-};
-use darwin_art_engine::EngineSession;
-use darwin_art_runtime::SubsystemLease;
+use crate::config::HostError;
+use crate::provider::ProviderBridge;
+use crate::surface::{clear_provider_owner, close_surface_owner, shutdown_engine_owner};
+use darwin_art_engine::{EngineSession, SurfaceSession};
+use darwin_art_runtime::RuntimeSession;
+use darwin_art_runtime::{RuntimeError, SubsystemLease};
 
 pub(super) fn shutdown_runtime(
     runtime: &mut RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession>,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::frame::FrameHost;
 use std::mem::size_of;
 use std::path::PathBuf;
 
