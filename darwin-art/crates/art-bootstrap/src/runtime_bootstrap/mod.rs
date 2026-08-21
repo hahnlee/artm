@@ -4,6 +4,7 @@ use darwin_art_build_contract::RuntimeFlavor;
 mod archive;
 mod compile;
 mod manifest;
+mod seed_jobs;
 mod staging;
 
 pub(crate) use archive::finalize;
