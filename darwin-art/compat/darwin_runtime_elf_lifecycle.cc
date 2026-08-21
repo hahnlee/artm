@@ -69,6 +69,15 @@ int DropRuntimeElfGraph(void* value, void* context) {
   return status == DARWIN_ART_ELF_OK ? 0 : -1;
 }
 
+int DropRuntimeElfLibrary(void* value, void*) {
+  auto* library = static_cast<ElfLibrary*>(value);
+  if (library == nullptr || library->magic != kElfLibraryMagic) return -1;
+  TeardownProviderNamespace(library);
+  library->magic = 0;
+  delete library;
+  return 0;
+}
+
 int DropRuntimeElfImageRegistry(void* value, void*) {
   if (value == nullptr) return -1;
   darwin_art_image_registry::Destroy(

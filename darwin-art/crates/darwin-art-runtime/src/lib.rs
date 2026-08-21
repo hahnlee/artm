@@ -18,6 +18,7 @@ pub use lifecycle::RuntimeLifecycle;
 pub use native_owner::{
     RuntimeNativeOwner, RuntimeNativeOwnerDropFn, darwin_art_runtime_native_owner_attach,
     darwin_art_runtime_native_owner_create, darwin_art_runtime_native_owner_destroy,
+    darwin_art_runtime_native_owner_lookup,
 };
 pub use provider::{ProviderKind, ProviderLeaseError, ProviderLeaseTable};
 pub use session::RuntimeSession;

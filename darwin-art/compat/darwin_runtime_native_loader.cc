@@ -98,7 +98,9 @@ bool AttachNativeOwner(ElfLibrary* library,
 }  // namespace
 
 ElfLibrary* AsElfLibrary(void* handle) {
-  auto* library = static_cast<ElfLibrary*>(handle);
+  auto* library = static_cast<ElfLibrary*>(
+      darwin_art_runtime_native_owner_lookup(
+          static_cast<RuntimeNativeOwner*>(handle), kNativeOwnerGraphHandle));
   return library != nullptr && library->magic == kElfLibraryMagic ? library : nullptr;
 }
 
@@ -374,7 +376,21 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       g_elf_fixture_status.store(kElfOpened | kElfBionicProvidersRouted,
                                  std::memory_order_relaxed);
     }
-    return library.release();
+    ElfLibrary* library_value = library.release();
+    RuntimeNativeOwner* graph_handle =
+        darwin_art_runtime_native_owner_create();
+    if (graph_handle == nullptr ||
+        darwin_art_runtime_native_owner_attach(
+            graph_handle, kNativeOwnerGraphHandle, library_value, nullptr,
+            &DropRuntimeElfLibrary) != 0) {
+      if (graph_handle != nullptr) {
+        (void)darwin_art_runtime_native_owner_destroy(graph_handle);
+      }
+      (void)DropRuntimeElfLibrary(library_value, nullptr);
+      SetNativeLoaderError(error_msg, "Rust graph handle publication failed");
+      return nullptr;
+    }
+    return graph_handle;
   }
   if (path != nullptr && root_is_elf != 0) {
     SetNativeLoaderError(error_msg, "Android ELF discovery failed: " +
@@ -400,9 +416,12 @@ extern "C" bool CloseNativeLibrary(void* handle,
     }
     darwin_art::android_jni::DestroyRegularTrampolines(library->trampolines);
     library->trampolines = nullptr;
-    TeardownProviderNamespace(library);
-    library->magic = 0;
-    delete library;
+    const int status = darwin_art_runtime_native_owner_destroy(
+        static_cast<RuntimeNativeOwner*>(handle));
+    if (status != 0) {
+      SetNativeLoaderError(error_msg, "Rust graph owner teardown failed");
+      return false;
+    }
     return true;
   }
   if (handle == nullptr || dlclose(handle) == 0) return true;

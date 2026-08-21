@@ -27,6 +27,7 @@ inline constexpr uint32_t kNativeOwnerDso = 80;
 inline constexpr uint32_t kNativeOwnerImageRegistry = 90;
 inline constexpr uint32_t kNativeOwnerNamespace = 100;
 inline constexpr uint32_t kNativeOwnerGraph = 110;
+inline constexpr uint32_t kNativeOwnerGraphHandle = 120;
 inline constexpr int kElfOpened = 1 << 0;
 inline constexpr int kElfOnLoadCalled = 1 << 1;
 inline constexpr int kElfFoundFixtureClass = 1 << 2;
@@ -94,6 +95,7 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     uintptr_t* out_address,
     DarwinArtElfErrorBuffer* error);
 int DropRuntimeElfGraph(void* value, void* context);
+int DropRuntimeElfLibrary(void* value, void* context);
 int DropRuntimeElfImageRegistry(void* value, void* context);
 int DropRuntimeDsoLifecycle(void* value, void* context);
 int DropRuntimeProviderNamespace(void* value, void* context);

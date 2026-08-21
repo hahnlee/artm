@@ -17,6 +17,8 @@ int32_t darwin_art_runtime_native_owner_attach(
     void* value,
     void* context,
     RuntimeNativeOwnerDropFn drop_fn);
+void* darwin_art_runtime_native_owner_lookup(RuntimeNativeOwner* owner,
+                                             uint32_t order);
 int32_t darwin_art_runtime_native_owner_destroy(RuntimeNativeOwner* owner);
 
 #ifdef __cplusplus

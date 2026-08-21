@@ -245,6 +245,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_create")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_attach")
+        .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_lookup")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_destroy")
         .arg("-Wl,-dead_strip")
         .arg(&object)
@@ -362,6 +363,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
             "_darwin_art_provider_native_release",
             "_darwin_art_runtime_native_owner_create",
             "_darwin_art_runtime_native_owner_attach",
+            "_darwin_art_runtime_native_owner_lookup",
             "_darwin_art_runtime_native_owner_destroy",
         ] {
             if !symbols.contains(required) {

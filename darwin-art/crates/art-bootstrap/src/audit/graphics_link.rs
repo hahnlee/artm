@@ -365,6 +365,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_create")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_attach")
+        .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_lookup")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_destroy")
         .arg("-Wl,-dead_strip")
         .arg(format!("-Wl,-map,{}", link_map.display()))
@@ -543,6 +544,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         "_darwin_art_provider_native_release",
         "_darwin_art_runtime_native_owner_create",
         "_darwin_art_runtime_native_owner_attach",
+        "_darwin_art_runtime_native_owner_lookup",
         "_darwin_art_runtime_native_owner_destroy",
     ] {
         if !global_symbols.contains(required) {
