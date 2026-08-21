@@ -189,6 +189,12 @@ fixture state. RegisterNatives, trampoline publication, and rollback remain in
 the graph adapter, so changing lookup policy no longer recompiles that larger
 transaction boundary.
 
+The proxy's exception bridge is separately cacheable in
+`darwin_jni_proxy_registration.cc`; it only translates `ThrowNew` into the
+current ART environment. The larger RegisterNatives transaction remains in the
+adapter until its graph-owned rollback state is moved behind a dedicated Rust
+session ABI.
+
 On the Rust side, the dynamic engine ABI is grouped into four private
 capabilities (`ProcessSymbols`, `SurfaceSymbols`, `GraphicsSymbols`, and
 `ProviderSymbols`) instead of one flat raw-symbol bag. `EngineSession` exposes

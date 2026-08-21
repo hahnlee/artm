@@ -145,6 +145,11 @@ header and provider/DSO ABI headers, so changes to lookup policy invalidate only
 that object and the final runtime link; RegisterNatives and trampoline code
 remain independently cacheable.
 
+The small exception bridge is a sixth cached object,
+`darwin_jni_proxy_registration.cc`. It shares the internal state header but not
+the registration transaction, keeping ThrowNew-only changes out of the
+trampoline/rollback object.
+
 Graphics presentation now follows the same boundary. The JNI/widget
 validation and `present_content`/interactive-root orchestration live in
 `probes/runtime_graphics_phase.cc`, while clickable hit-testing, pointer/frame

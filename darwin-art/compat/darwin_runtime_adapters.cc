@@ -531,16 +531,6 @@ int32_t ProxyRegisterNatives(void *context, void *clazz,
   return DARWIN_ART_JNI_OK;
 }
 
-int32_t ProxyThrowNew(void *context, void *clazz, const char *message) {
-  auto *library = static_cast<ElfLibrary *>(context);
-  JNIEnv *art_env = CurrentArtEnv();
-  if (library == nullptr || art_env == nullptr || clazz == nullptr ||
-      message == nullptr) {
-    return DARWIN_ART_JNI_ERR;
-  }
-  return art_env->ThrowNew(static_cast<jclass>(clazz), message);
-}
-
 thread_local ElfLibrary* g_pending_on_load = nullptr;
 thread_local ElfLibrary* g_pending_on_unload = nullptr;
 

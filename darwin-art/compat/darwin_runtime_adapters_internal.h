@@ -73,5 +73,6 @@ struct ElfLibrary {
 
 void* ProxyCurrentEnv(void* context);
 void* ProxyFindClass(void* context, const char* name);
+int32_t ProxyThrowNew(void* context, void* clazz, const char* message);
 
 }  // namespace android
