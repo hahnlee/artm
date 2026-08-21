@@ -18,6 +18,10 @@ use std::{fs::File, io::Read};
 
 #[path = "ffi_discovery.rs"]
 mod ffi_discovery;
+#[path = "ffi_types.rs"]
+mod ffi_types;
+
+pub use ffi_types::*;
 
 use ffi_discovery::{discover_sibling_graph, inspection_from_bytes, validate_discovery_component};
 
@@ -30,75 +34,6 @@ const MAX_DISCOVERY_COMPONENT_SIZE: usize = 255;
 
 unsafe extern "C" {
     fn dup(fd: i32) -> i32;
-}
-
-#[repr(i32)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DarwinArtElfStatus {
-    Ok = 0,
-    InvalidArgument = 1,
-    Io = 2,
-    Format = 3,
-    Bounds = 4,
-    Capability = 5,
-    Protection = 6,
-    Resolver = 7,
-    UnresolvedSymbol = 8,
-    SymbolNotFound = 9,
-    InvalidSymbol = 10,
-    Lifecycle = 11,
-    System = 12,
-    Poisoned = 13,
-    Panic = 14,
-}
-
-#[repr(C)]
-pub struct DarwinArtElfErrorBuffer {
-    pub data: *mut c_char,
-    pub capacity: usize,
-    pub required: usize,
-}
-
-#[repr(C)]
-pub struct DarwinArtElfSymbolRequest {
-    pub abi_version: u32,
-    pub symbol: *const c_char,
-    pub version_soname: *const c_char,
-    pub version_name: *const c_char,
-    pub version_flags: u16,
-    pub version_hidden: u8,
-    pub reserved: u8,
-    pub needed_libraries: *const *const c_char,
-    pub needed_library_count: usize,
-}
-
-pub type DarwinArtElfResolverCallback = unsafe extern "C" fn(
-    context: *mut c_void,
-    request: *const DarwinArtElfSymbolRequest,
-    out_address: *mut usize,
-    error: *mut DarwinArtElfErrorBuffer,
-) -> i32;
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct DarwinArtElfLoadOptions {
-    pub abi_version: u32,
-    pub resolver: Option<DarwinArtElfResolverCallback>,
-    pub resolver_context: *mut c_void,
-}
-
-pub type DarwinArtElfPublishImageCallback =
-    unsafe extern "C" fn(context: *mut c_void, start: usize, end: usize) -> i32;
-pub type DarwinArtElfFinalizeImageCallback =
-    unsafe extern "C" fn(context: *mut c_void, start: usize, end: usize) -> i32;
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct DarwinArtElfLifecycleCallbacks {
-    pub abi_version: u32,
-    pub publish_image: Option<DarwinArtElfPublishImageCallback>,
-    pub finalize_image: Option<DarwinArtElfFinalizeImageCallback>,
-    pub context: *mut c_void,
 }
 
 struct CallbackDsoLifecycle {
@@ -137,33 +72,6 @@ impl DsoLifecycle for CallbackDsoLifecycle {
             ))
         }
     }
-}
-
-pub struct DarwinArtElfHandle {
-    image: Mutex<LoadedElf>,
-}
-
-pub struct DarwinArtElfGraphHandle {
-    graph: Mutex<LoadedElfGraph>,
-}
-
-#[repr(C)]
-pub struct DarwinArtElfGraphSource {
-    pub soname: *const c_char,
-    pub bytes: *const u8,
-    pub length: usize,
-}
-
-pub struct DarwinArtElfInspection {
-    soname: Option<CString>,
-    needed: Vec<CString>,
-}
-
-pub struct DarwinArtElfDiscoveredGraph {
-    root_soname: CString,
-    _names: Vec<CString>,
-    _bytes: Vec<Vec<u8>>,
-    sources: Vec<DarwinArtElfGraphSource>,
 }
 
 enum FfiFailure {
