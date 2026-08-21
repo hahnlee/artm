@@ -194,6 +194,14 @@ independent persisted native object in the ART bootstrap archive, so changing
 animation, resource, or system registration no longer recompiles the other
 implementation phases.
 
+The libcore Linux compatibility archive applies the same boundary:
+`compat/libcore_darwin_linux.cc` owns the generated JNI method table and Java
+object/error translation, while
+`compat/libcore_darwin_linux_syscalls.cc` owns Android-flag translation,
+descriptor I/O, mmap, and sysconf. The standalone libcore gate archives both
+objects and verifies the split smoke/managed ABI path, so a syscall policy edit
+does not recompile the generated 135-entry JNI registrar.
+
 The ART adapter now applies the same boundary to platform compatibility shims:
 Palette, runtime-image, intrinsic-printing, HWASAN, and unwind stubs live in
 `compat/darwin_runtime_platform_stubs.cc`. The graph-aware adapter is now

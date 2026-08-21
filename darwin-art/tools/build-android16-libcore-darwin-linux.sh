@@ -230,6 +230,7 @@ async_close_archive="$project_root/_build/asynchronous-close-monitor/libandroidi
 os_constants_archive="$project_root/_build/os-constants/libandroid-system-os-constants-darwin.a"
 for required in \
   "$project_root/compat/libcore_darwin_linux.cc" \
+  "$project_root/compat/libcore_darwin_linux_syscalls.cc" \
   "$project_root/compat/libcore_darwin_linux.h" \
   "$project_root/compat/darwin_os_constants.h" \
   "$project_root/probes/android16_libcore_darwin_linux_smoke.cc" \
@@ -257,10 +258,16 @@ object="$stage/libcore_darwin_linux.o"
 "$cxx" "${common_flags[@]}" -c \
   "$project_root/compat/libcore_darwin_linux.cc" -o "$object"
 [[ "$(file "$object")" == *"Mach-O 64-bit object arm64"* ]] ||
-  fail "backend object is not Mach-O arm64"
+  fail "JNI registrar object is not Mach-O arm64"
+
+syscalls_object="$stage/libcore_darwin_linux_syscalls.o"
+"$cxx" "${common_flags[@]}" -c \
+  "$project_root/compat/libcore_darwin_linux_syscalls.cc" -o "$syscalls_object"
+[[ "$(file "$syscalls_object")" == *"Mach-O 64-bit object arm64"* ]] ||
+  fail "syscall backend object is not Mach-O arm64"
 
 archive="$stage/libcore-darwin-linux.a"
-"$libtool_bin" -static -o "$archive" "$object"
+"$libtool_bin" -static -o "$archive" "$object" "$syscalls_object"
 definitions="$stage/definitions.txt"
 nm -gU "$archive" | c++filt > "$definitions"
 grep -F ' T darwin_art::libcore_darwin::RegisterLinuxNatives(_JNIEnv*)' \
@@ -269,7 +276,7 @@ grep -F ' T darwin_art::libcore_darwin::RegisterLinuxNatives(_JNIEnv*)' \
 smoke="$stage/libcore-darwin-linux-smoke"
 "$cxx" "${common_flags[@]}" \
   "$project_root/probes/android16_libcore_darwin_linux_smoke.cc" \
-  "$object" "$async_close_archive" "$os_constants_archive" \
+  "$object" "$syscalls_object" "$async_close_archive" "$os_constants_archive" \
   -Wl,-force_load,"$nativehelper_archive" \
   "$liblog_archive" -o "$smoke"
 smoke_output="$($smoke "$source_file")"
@@ -280,6 +287,7 @@ abi_object="$stage/libcore_darwin_linux_abi_smoke.o"
   -c "$project_root/compat/libcore_darwin_linux.cc" -o "$abi_object"
 abi_library="$stage/libcore-darwin-linux-abi-smoke.dylib"
 "$cxx" -arch arm64 -isysroot "$sdk_root" -dynamiclib "$abi_object" \
+  "$syscalls_object" \
   "$async_close_archive" "$os_constants_archive" \
   -Wl,-force_load,"$nativehelper_archive" \
   "$liblog_archive" -o "$abi_library"
