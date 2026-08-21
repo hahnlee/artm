@@ -195,6 +195,11 @@ Detached Activity/PhoneWindow presentation uses the shared
 small C++-side safety net: framework construction has many early-return paths,
 so JNI locals are released even when resource/theme setup fails before the
 Rust-owned runtime shutdown guard is reached.
+The framework `AssetManager`/`ApkAssets`/`Resources` construction is now a
+separate `runtime_app_resources` native object; the Activity/PhoneWindow
+object links it as a narrow prerequisite. Resource/theme edits therefore do
+not invalidate the Activity presentation TU, while the direct-APK and graphics
+link gates consume the same object and keep one ownership path.
 
 The ART-side bootstrap now has a shared runtime-core cache boundary. Common
 upstream runtime TUs and flavor-independent compat adapters compile from one
