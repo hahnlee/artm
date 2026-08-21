@@ -156,6 +156,17 @@ DarwinArtSurface* g_active_gpu_surface = nullptr;
 __attribute__((weak)) void darwin_art_surface_gpu_forget(
     DarwinArtSurface*) {}
 
+// CPU/runtime links retain the surface ABI but deliberately do not link
+// Ganesh or Metal.  Keep the optional GPU capability closed in that flavor;
+// the graphics link supplies the strong implementations from
+// darwin_surface_gpu_bridge.mm.
+__attribute__((weak)) DarwinArtSurface* darwin_art_surface_active_gpu() {
+  return nullptr;
+}
+
+__attribute__((weak)) void darwin_art_surface_set_active_gpu(
+    DarwinArtSurface*) {}
+
 DarwinArtSurfaceResult darwin_art_surface_map_producer(
     DarwinArtSurface* surface,
     DarwinArtSurfaceProducerMapping* out_mapping) {

@@ -277,6 +277,18 @@ pub(crate) fn probe_runtime_dex_flavor(
                     ART Darwin launcher: main(String[])=ok"
             .to_owned()
     };
+    // The headless ELF acceptance intentionally has no GraphicsSession and
+    // therefore performs managed Activity/DecorView validation without a
+    // presented frame.  Keep that distinction explicit in the golden output;
+    // real graphics/APK modes still require their concrete dimensions.
+    let expected = if !real_graphics && !show_window {
+        expected.replace(
+            "DecorView.draw(Canvas)=360x640",
+            "DecorView.draw(Canvas)=0x0",
+        )
+    } else {
+        expected
+    };
     if output.trim() != expected {
         return Err(format!("unexpected runtime DEX probe output: {output:?}").into());
     }

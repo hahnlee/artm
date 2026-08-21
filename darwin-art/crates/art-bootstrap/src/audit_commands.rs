@@ -190,6 +190,19 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     let graphics_phase_object = compile_runtime_graphics_phase(root, &build_dir, &include_refs)?;
     let graphics_input_object =
         compile_runtime_graphics_input_probe(root, &build_dir, &include_refs)?;
+    let graphics_cpu_stubs_object = build_dir.join("darwin_art_runtime_graphics_cpu_stubs.cc.o");
+    let mut graphics_cpu_stubs_command = runtime_cpp_command(&include_refs);
+    graphics_cpu_stubs_command
+        .arg("-c")
+        .arg(root.join("probes/runtime_graphics_cpu_stubs.cc"))
+        .arg("-o")
+        .arg(&graphics_cpu_stubs_object);
+    let _ = compile_cached_probe_tu(
+        &mut graphics_cpu_stubs_command,
+        &graphics_cpu_stubs_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let graphics_state_object = if let Some(path) =
         env::var_os("DARWIN_ART_NATIVE_GRAPHICS_STATE_OBJECT")
         && Path::new(&path).is_file()
@@ -302,6 +315,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
         .arg(&graphics_state_object)
+        .arg(&graphics_cpu_stubs_object)
         .arg(&jni_acceptance_object)
         .arg(&graphics_phase_object)
         .arg(&graphics_input_object)

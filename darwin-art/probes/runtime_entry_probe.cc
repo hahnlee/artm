@@ -536,15 +536,17 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
 
   if (darwin_art::GetFrameworkGraphicsBackend() ==
       darwin_art::FrameworkGraphicsBackend::kProbeCanvas) {
-    if (graphics_state == nullptr) {
-      std::cerr << "ART Android window: graphics session state is missing\n";
-      return DARWIN_ART_STATUS_GRAPHICS_SESSION_NOT_READY;
-    }
-    darwin_art_graphics::set_probe_canvas_class(graphics_state, env,
-                                                probe_canvas_class);
-    if (env->ExceptionCheck()) {
-      std::cerr << "ART Android window: ProbeCanvas global root failed\n";
-      return 32;
+    // Headless/runtime flavor intentionally has no GraphicsSession owner.
+    // The real-graphics flavor supplies the state and installs the HWUI
+    // canvas class; do not make the CPU acceptance path manufacture a GPU
+    // owner merely because the common framework backend is selected.
+    if (graphics_state != nullptr) {
+      darwin_art_graphics::set_probe_canvas_class(graphics_state, env,
+                                                  probe_canvas_class);
+      if (env->ExceptionCheck()) {
+        std::cerr << "ART Android window: ProbeCanvas global root failed\n";
+        return 32;
+      }
     }
   }
   jclass looper_class = env->FindClass("android/os/Looper");
@@ -1142,12 +1144,12 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           ? nullptr
           : env->CallObjectMethod(content_root, get_child_at,
                                   static_cast<jint>(0));
-  if (darwin_art_graphics_phase::present_and_retain(
+  if (graphics_state != nullptr &&
+      darwin_art_graphics_phase::present_and_retain(
           graphics_state, env, decor_view, content_root_class, content_root,
-          probe_view_class,
-          probe_view, run_apk_app, expect_apk_widgets,
-          run_apk_app || run_framework_button,
-          kApkFrameWidth * window_scale, kApkFrameHeight * window_scale) != 0) {
+          probe_view_class, probe_view, run_apk_app, expect_apk_widgets,
+          run_apk_app || run_framework_button, kApkFrameWidth * window_scale,
+          kApkFrameHeight * window_scale) != 0) {
     return 33;
   }
   env->DeleteLocalRef(application);

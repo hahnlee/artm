@@ -1153,6 +1153,7 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_graphics_state.h"),
         PathBuf::from("probes/runtime_graphics_session.cc"),
         PathBuf::from("probes/runtime_graphics_session.h"),
+        PathBuf::from("probes/runtime_graphics_cpu_stubs.cc"),
         PathBuf::from("probes/runtime_jni_acceptance_probe.cc"),
         PathBuf::from("probes/runtime_jni_acceptance_probe.h"),
         PathBuf::from("probes/runtime_graphics_probe_internal.h"),
