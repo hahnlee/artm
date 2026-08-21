@@ -7,6 +7,7 @@
 //! transitions (zero-to-one and one-to-zero); individual ELF graphs retain
 //! ordinary Rust leases without asking C++ to maintain a duplicate counter.
 
+use crate::ProviderKind;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Condvar, Mutex};
 
@@ -14,47 +15,6 @@ pub struct ProviderLeaseTable {
     callbacks: ProviderCallbacks,
     state: Mutex<LeaseState>,
     quiescent: Condvar,
-}
-
-/// The only provider identifiers that may enter the Rust ownership state
-/// machine. The C ABI still carries a `u32`, but conversion is performed at
-/// that boundary rather than allowing arbitrary numbers into safe runtime
-/// state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u32)]
-pub enum ProviderKind {
-    Filesystem = 1,
-    Network = 2,
-    Stdio = 3,
-    Ioctl = 4,
-    Strftime = 5,
-    Sendfile = 6,
-}
-
-impl ProviderKind {
-    pub const fn raw(self) -> u32 {
-        self as u32
-    }
-
-    const fn index(self) -> usize {
-        self as usize
-    }
-}
-
-impl TryFrom<u32> for ProviderKind {
-    type Error = ();
-
-    fn try_from(raw: u32) -> Result<Self, Self::Error> {
-        match raw {
-            1 => Ok(Self::Filesystem),
-            2 => Ok(Self::Network),
-            3 => Ok(Self::Stdio),
-            4 => Ok(Self::Ioctl),
-            5 => Ok(Self::Strftime),
-            6 => Ok(Self::Sendfile),
-            _ => Err(()),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

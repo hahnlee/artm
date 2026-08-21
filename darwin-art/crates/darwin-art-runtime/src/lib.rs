@@ -13,6 +13,7 @@ mod native_owner;
 mod owners;
 mod provider;
 mod provider_bridge;
+mod provider_kind;
 mod session;
 mod shutdown;
 
@@ -22,8 +23,9 @@ pub use native_owner::{
     darwin_art_runtime_native_owner_create, darwin_art_runtime_native_owner_destroy,
     darwin_art_runtime_native_owner_lookup,
 };
-pub use provider::{ProviderKind, ProviderLeaseError, ProviderLeaseTable};
+pub use provider::{ProviderLeaseError, ProviderLeaseTable};
 pub use provider_bridge::ProviderBridge;
+pub use provider_kind::ProviderKind;
 pub use session::{NativeResource, RuntimeSession};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
