@@ -885,6 +885,13 @@ pub(crate) fn audit_runtime_graphics_link_mode(
             &ndk_arch_include,
         )?
     };
+    let graphics_session_object_real = compile_runtime_graphics_session_probe(
+        root,
+        &build_dir,
+        &include_refs,
+        &ndk_include,
+        &ndk_arch_include,
+    )?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -988,6 +995,11 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
         .arg("-Wl,-exported_symbol,_darwin_art_dispatch_pointer")
         .arg("-Wl,-exported_symbol,_darwin_art_pump_framework_frame")
+        .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_create")
+        .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_close")
+        .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_destroy")
+        .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_dispatch_pointer")
+        .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_pump_frame")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_update")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_map_producer")
@@ -1012,6 +1024,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
         .arg(&graphics_state_object)
+        .arg(&graphics_session_object_real)
         .arg(&graphics_phase_object)
         .arg(&graphics_input_object)
         .arg(&filesystem_object)
@@ -1147,6 +1160,11 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         "_darwin_art_shutdown_process",
         "_darwin_art_dispatch_pointer",
         "_darwin_art_pump_framework_frame",
+        "_darwin_art_graphics_session_create",
+        "_darwin_art_graphics_session_close",
+        "_darwin_art_graphics_session_destroy",
+        "_darwin_art_graphics_session_dispatch_pointer",
+        "_darwin_art_graphics_session_pump_frame",
         "_darwin_art_surface_create",
         "_darwin_art_surface_update",
         "_darwin_art_surface_map_producer",

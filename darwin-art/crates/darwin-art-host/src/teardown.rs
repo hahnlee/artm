@@ -2,16 +2,24 @@
 
 use crate::config::HostError;
 use crate::provider::ProviderBridge;
-use crate::surface::{clear_provider_owner, close_surface_owner, shutdown_engine_owner};
-use darwin_art_engine::{EngineSession, SurfaceSession};
+use crate::surface::{
+    clear_provider_owner, close_graphics_owner, close_surface_owner, shutdown_engine_owner,
+};
+use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
 use darwin_art_runtime::RuntimeSession;
 use darwin_art_runtime::{RuntimeError, SubsystemLease};
 
 pub(super) fn shutdown_runtime(
-    runtime: &mut RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession>,
+    runtime: &mut RuntimeSession<
+        EngineSession,
+        Box<ProviderBridge>,
+        SurfaceSession,
+        GraphicsSession,
+    >,
     provider_lease: Option<SubsystemLease>,
     engine_lease: Option<SubsystemLease>,
     surface_lease: Option<SubsystemLease>,
+    graphics_lease: Option<SubsystemLease>,
 ) -> Result<(), HostError> {
     // Cleanup is deliberately best-effort after shutdown begins. A failing
     // surface destroy must not prevent ART shutdown, and a provider-hook
@@ -22,6 +30,17 @@ pub(super) fn shutdown_runtime(
         .begin_shutdown()
         .err()
         .map(|error| HostError::RuntimeFailed(error.status() as i32));
+
+    if let Some(lease) = graphics_lease
+        && let Err(error) = runtime.uninstall_subsystem(lease)
+    {
+        remember_error(&mut first_error, map_shutdown_error("graphics", error));
+    }
+    if runtime.owners().graphics().is_some()
+        && let Err(status) = close_graphics_owner(runtime.owners_mut())
+    {
+        remember_error(&mut first_error, HostError::RuntimeFailed(status));
+    }
 
     if let Some(lease) = surface_lease
         && let Err(error) = runtime.uninstall_subsystem(lease)

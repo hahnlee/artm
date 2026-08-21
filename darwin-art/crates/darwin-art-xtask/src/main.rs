@@ -302,6 +302,8 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         native_output_root.join("runtime-probes/darwin_art_runtime_graphics_input.cc.o");
     let graphics_state_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_graphics_state.cc.o");
+    let graphics_session_object_path =
+        native_output_root.join("runtime-probes/darwin_art_runtime_graphics_session.cc.o");
     let stamp_path = cache_dir.join("graphics-bootstrap.stamp");
     let runtime_stamp_path = cache_dir.join("runtime-bootstrap.stamp");
     let stamp = ninja_path(&stamp_path);
@@ -417,6 +419,17 @@ fn emit_graph(out: &Path) -> io::Result<()> {
             "probes/runtime_graphics_state.cc",
             "probes/runtime_graphics_state.h",
             "compat/darwin_surface_bridge.h",
+        ],
+    );
+    let graphics_session_inputs = probe_inputs(
+        &root,
+        &[
+            "probes/runtime_graphics_session.cc",
+            "probes/runtime_graphics_session.h",
+            "probes/runtime_graphics_probe.h",
+            "probes/runtime_graphics_state.h",
+            "probes/runtime_process_state.h",
+            "include/darwin_art/darwin_art.h",
         ],
     );
 
@@ -812,6 +825,22 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(": runtime_graphics_state_probe ");
     graph.push_str(&graphics_state_inputs);
     graph.push('\n');
+    graph.push_str("rule runtime_graphics_session_probe\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT=");
+    graph.push_str(&shell_quote(
+        &graphics_session_object_path.to_string_lossy(),
+    ));
+    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-session-probe\n");
+    graph.push_str("  description = CXX runtime_graphics_session\n");
+    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    let graphics_session_object = ninja_path(&graphics_session_object_path);
+    graph.push_str("build ");
+    graph.push_str(&graphics_session_object);
+    graph.push_str(": runtime_graphics_session_probe ");
+    graph.push_str(&graphics_session_inputs);
+    graph.push('\n');
     graph.push_str("rule graphics_audit\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
@@ -829,6 +858,10 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&graphics_input_object_path.to_string_lossy()));
     graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_STATE_OBJECT=");
     graph.push_str(&shell_quote(&graphics_state_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT=");
+    graph.push_str(&shell_quote(
+        &graphics_session_object_path.to_string_lossy(),
+    ));
     graph.push_str(" DARWIN_ART_NATIVE_HWUI_OBJECT=");
     graph.push_str(&shell_quote(&hwui_object_path.to_string_lossy()));
     // The full upstream closure is a separate release/CI gate.  The Ninja
@@ -874,6 +907,8 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&graphics_input_object);
     graph.push(' ');
     graph.push_str(&graphics_state_object);
+    graph.push(' ');
+    graph.push_str(&graphics_session_object);
     graph.push(' ');
     graph.push_str(&hwui_object);
     graph.push(' ');
@@ -967,6 +1002,8 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_graphics_input.cc"),
         PathBuf::from("probes/runtime_graphics_state.cc"),
         PathBuf::from("probes/runtime_graphics_state.h"),
+        PathBuf::from("probes/runtime_graphics_session.cc"),
+        PathBuf::from("probes/runtime_graphics_session.h"),
         PathBuf::from("probes/runtime_graphics_probe_internal.h"),
         PathBuf::from("probes/runtime_apk_graph.cc"),
         PathBuf::from("probes/runtime_apk_graph.h"),
@@ -1160,6 +1197,8 @@ fn is_probe_only_input(path: &Path) -> bool {
             | "probes/runtime_graphics_input.cc"
             | "probes/runtime_graphics_state.cc"
             | "probes/runtime_graphics_state.h"
+            | "probes/runtime_graphics_session.cc"
+            | "probes/runtime_graphics_session.h"
             | "probes/runtime_graphics_probe_internal.h"
             | "probes/runtime_apk_graph.cc"
             | "probes/runtime_apk_graph.h"

@@ -68,6 +68,7 @@ pub enum Subsystem {
     Filesystem,
     Network,
     Surface,
+    Graphics,
     Input,
 }
 

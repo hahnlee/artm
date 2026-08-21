@@ -127,6 +127,15 @@ orchestration by phase. Each extraction must preserve the existing acceptance
 gates and report its native invalidation boundary; moving code without
 narrowing a rebuild edge is not considered progress.
 
+The graphics boundary is now an explicit seventh native phase. Rust owns a
+`RuntimeSession<..., GraphicsSession>` slot containing only an opaque C handle;
+JNI global references, RenderNode, AnimationContext, and TimeLord remain
+private to the native graphics session. Creation, owner-thread validation,
+dispatch/pulse, close, and destroy are separate ABI operations, so graphics
+cleanup occurs before the Metal surface and ART/provider teardown. Headless
+engines may omit these optional symbols, while the graphics link exports and
+audits them when a drawable is present.
+
 ## Measurement gates
 
 The migration is considered successful only when all of these are recorded on
@@ -138,6 +147,7 @@ the same machine:
 | provider facade change | provider object, closure link, provider audit |
 | framework/JNI phase change | framework phase + runtime link |
 | graphics presentation/JNI phase change | `runtime_graphics_phase` + runtime link |
+| graphics session-state/ABI change | `runtime_graphics_session` + graphics link |
 | HWUI/Metal implementation change | `runtime_graphics_probe` + graphics link |
 | AOSP foundation header change | affected foundation TU closure |
 

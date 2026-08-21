@@ -2,18 +2,22 @@ use crate::config::{HostError, HostOutcome, RunOptions};
 use crate::provider::ProviderBridge;
 use crate::surface::{owned_surface_next_pointer_event, owned_surface_pump_events};
 use crate::teardown::shutdown_runtime;
-use darwin_art_engine::{EngineSession, SurfaceSession};
-use darwin_art_engine_sys::{DispatchPointerFn, PointerEvent, ProcessResult, PumpFrameworkFrameFn};
+use darwin_art_engine::{EngineSession, EngineSymbols, GraphicsSession, SurfaceSession};
+use darwin_art_engine_sys::{PointerEvent, ProcessResult};
 use darwin_art_runtime::{RuntimeSession, Subsystem};
 
 pub(super) struct GpuCallbacks {
-    pub dispatch_pointer: DispatchPointerFn,
-    pub pump_framework_frame: PumpFrameworkFrameFn,
+    pub symbols: EngineSymbols,
 }
 
 #[cfg(target_os = "macos")]
 pub(super) fn run(
-    runtime: &mut RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession>,
+    runtime: &mut RuntimeSession<
+        EngineSession,
+        Box<ProviderBridge>,
+        SurfaceSession,
+        GraphicsSession,
+    >,
     active_surface: Option<SurfaceSession>,
     process: ProcessResult,
     options: &RunOptions,
@@ -21,17 +25,19 @@ pub(super) fn run(
     engine_lease: darwin_art_runtime::SubsystemLease,
     callbacks: GpuCallbacks,
 ) -> Result<HostOutcome, HostError> {
-    let GpuCallbacks {
-        dispatch_pointer,
-        pump_framework_frame,
-    } = callbacks;
     let Some(surface) = active_surface else {
         // No surface was published, but ART and the provider
         // bridge are already live.  Roll them back through the
         // same owner-thread LIFO as the normal GPU path; a bare
         // early return here would leave JavaVM/provider hooks
         // resident in the process.
-        return match shutdown_runtime(runtime, Some(provider_lease), Some(engine_lease), None) {
+        return match shutdown_runtime(
+            runtime,
+            Some(provider_lease),
+            Some(engine_lease),
+            None,
+            None,
+        ) {
             Ok(()) => Err(HostError::SurfaceFailed {
                 operation: "gpu_active_surface",
                 status: -1,
@@ -44,7 +50,13 @@ pub(super) fn run(
         // closes the native surface. The already-attached engine/provider
         // still need the common rollback path.
         drop(surface);
-        let cleanup = shutdown_runtime(runtime, Some(provider_lease), Some(engine_lease), None);
+        let cleanup = shutdown_runtime(
+            runtime,
+            Some(provider_lease),
+            Some(engine_lease),
+            None,
+            None,
+        );
         return match cleanup {
             Ok(()) => Err(HostError::RuntimeFailed(-1)),
             Err(error) => Err(error),
@@ -53,7 +65,59 @@ pub(super) fn run(
     let surface_lease = match runtime.install_subsystem(Subsystem::Surface) {
         Ok(lease) => lease,
         Err(error) => {
-            let cleanup = shutdown_runtime(runtime, Some(provider_lease), Some(engine_lease), None);
+            let cleanup = shutdown_runtime(
+                runtime,
+                Some(provider_lease),
+                Some(engine_lease),
+                None,
+                None,
+            );
+            return match cleanup {
+                Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
+                Err(cleanup_error) => Err(cleanup_error),
+            };
+        }
+    };
+    let graphics = match GraphicsSession::create(callbacks.symbols) {
+        Ok(graphics) => graphics,
+        Err(status) => {
+            let cleanup = shutdown_runtime(
+                runtime,
+                Some(provider_lease),
+                Some(engine_lease),
+                Some(surface_lease),
+                None,
+            );
+            return match cleanup {
+                Ok(()) => Err(HostError::RuntimeFailed(status)),
+                Err(cleanup_error) => Err(cleanup_error),
+            };
+        }
+    };
+    if let Err(graphics) = runtime.attach_graphics(graphics) {
+        drop(graphics);
+        let cleanup = shutdown_runtime(
+            runtime,
+            Some(provider_lease),
+            Some(engine_lease),
+            Some(surface_lease),
+            None,
+        );
+        return match cleanup {
+            Ok(()) => Err(HostError::RuntimeFailed(-1)),
+            Err(cleanup_error) => Err(cleanup_error),
+        };
+    }
+    let graphics_lease = match runtime.install_subsystem(Subsystem::Graphics) {
+        Ok(lease) => lease,
+        Err(error) => {
+            let cleanup = shutdown_runtime(
+                runtime,
+                Some(provider_lease),
+                Some(engine_lease),
+                Some(surface_lease),
+                None,
+            );
             return match cleanup {
                 Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
                 Err(cleanup_error) => Err(cleanup_error),
@@ -84,7 +148,9 @@ pub(super) fn run(
         let mut dispatched = 0_u64;
         let mut event = PointerEvent::default();
         while owned_surface_next_pointer_event(runtime.owners(), &mut event) {
-            let dispatch_status = unsafe { dispatch_pointer(event.action, event.x, event.y) };
+            let dispatch_status = runtime.owners().graphics().map_or(-1, |graphics| {
+                graphics.dispatch_pointer(event.action, event.x, event.y)
+            });
             if dispatch_status != 0 {
                 return Err(HostError::RuntimeFailed(dispatch_status));
             }
@@ -94,7 +160,10 @@ pub(super) fn run(
     };
 
     if let Some((x, y)) = test_pointer {
-        let dispatch_status = unsafe { dispatch_pointer(0, x, y) };
+        let dispatch_status = runtime
+            .owners()
+            .graphics()
+            .map_or(-1, |graphics| graphics.dispatch_pointer(0, x, y));
         if dispatch_status != 0 {
             loop_error = Some(HostError::RuntimeFailed(dispatch_status));
         } else {
@@ -119,7 +188,10 @@ pub(super) fn run(
                     Err(error) => loop_error = Some(error),
                 }
                 if loop_error.is_none() {
-                    let pulse_status = unsafe { pump_framework_frame(0) };
+                    let pulse_status = runtime
+                        .owners()
+                        .graphics()
+                        .map_or(-1, |graphics| graphics.pump_frame(0));
                     if pulse_status != 0 {
                         loop_error = Some(HostError::RuntimeFailed(pulse_status));
                         continue;
@@ -127,7 +199,10 @@ pub(super) fn run(
                     // ACTION_MOVE causes PresentContent to replay the
                     // Android RenderNode while RippleDrawable's
                     // pressed animation advances between pumps.
-                    let dispatch_status = unsafe { dispatch_pointer(2, x, y) };
+                    let dispatch_status = runtime
+                        .owners()
+                        .graphics()
+                        .map_or(-1, |graphics| graphics.dispatch_pointer(2, x, y));
                     if dispatch_status != 0 {
                         loop_error = Some(HostError::RuntimeFailed(dispatch_status));
                     } else {
@@ -137,7 +212,10 @@ pub(super) fn run(
                 held_ms += slice_ms;
             }
             if loop_error.is_none() {
-                let dispatch_status = unsafe { dispatch_pointer(1, x, y) };
+                let dispatch_status = runtime
+                    .owners()
+                    .graphics()
+                    .map_or(-1, |graphics| graphics.dispatch_pointer(1, x, y));
                 if dispatch_status != 0 {
                     loop_error = Some(HostError::RuntimeFailed(dispatch_status));
                 } else {
@@ -170,11 +248,17 @@ pub(super) fn run(
         if loop_error.is_none()
             && let Some((x, y)) = test_pointer
         {
-            let pulse_status = unsafe { pump_framework_frame(0) };
+            let pulse_status = runtime
+                .owners()
+                .graphics()
+                .map_or(-1, |graphics| graphics.pump_frame(0));
             if pulse_status != 0 {
                 loop_error = Some(HostError::RuntimeFailed(pulse_status));
             } else {
-                let replay_status = unsafe { dispatch_pointer(2, x, y) };
+                let replay_status = runtime
+                    .owners()
+                    .graphics()
+                    .map_or(-1, |graphics| graphics.dispatch_pointer(2, x, y));
                 if replay_status != 0 {
                     loop_error = Some(HostError::RuntimeFailed(replay_status));
                 } else {
@@ -193,6 +277,7 @@ pub(super) fn run(
             Some(provider_lease),
             Some(engine_lease),
             Some(surface_lease),
+            Some(graphics_lease),
         );
         return match cleanup {
             Ok(()) => Err(error),
@@ -204,6 +289,7 @@ pub(super) fn run(
         Some(provider_lease),
         Some(engine_lease),
         Some(surface_lease),
+        Some(graphics_lease),
     )?;
     Ok(HostOutcome {
         process,

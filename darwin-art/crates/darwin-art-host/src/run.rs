@@ -11,8 +11,8 @@ use crate::provider::ProviderBridge;
 #[cfg(target_os = "macos")]
 use crate::teardown::shutdown_runtime;
 #[cfg(target_os = "macos")]
-use darwin_art_engine::{EngineSession, SurfaceSession};
-use darwin_art_engine_sys::{DispatchPointerFn, ProcessConfig, PumpFrameworkFrameFn};
+use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
+use darwin_art_engine_sys::ProcessConfig;
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
 
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
@@ -33,8 +33,12 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
 
     #[cfg(target_os = "macos")]
     {
-        let mut runtime =
-            RuntimeSession::<EngineSession, Box<ProviderBridge>, SurfaceSession>::new();
+        let mut runtime = RuntimeSession::<
+            EngineSession,
+            Box<ProviderBridge>,
+            SurfaceSession,
+            GraphicsSession,
+        >::new();
         runtime
             .start()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
@@ -52,9 +56,6 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 Some(ProviderBridge::release_callback()),
             );
         }
-        let dispatch_pointer: DispatchPointerFn = symbols.dispatch_pointer;
-        let pump_framework_frame: PumpFrameworkFrameFn = symbols.pump_framework_frame;
-
         let core_oj = path_c_string(&options.core_oj_jar)?;
         let core_libart = path_c_string(&options.core_libart_jar)?;
         let framework = path_c_string(&options.framework_jar)?;
@@ -107,26 +108,32 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         }
         if let Err(provider_bridge) = runtime.attach_provider(provider_bridge) {
             let _ = provider_bridge.clear();
-            let _ = shutdown_runtime(&mut runtime, None, None, None);
+            let _ = shutdown_runtime(&mut runtime, None, None, None, None);
             return Err(HostError::RuntimeFailed(-1));
         }
         let provider_lease = match runtime.install_subsystem(Subsystem::ElfNamespace) {
             Ok(lease) => lease,
             Err(error) => {
-                let _ = shutdown_runtime(&mut runtime, None, None, None);
+                let _ = shutdown_runtime(&mut runtime, None, None, None, None);
                 return Err(HostError::RuntimeFailed(error.status() as i32));
             }
         };
         let engine_lease = match runtime.install_subsystem(Subsystem::Engine) {
             Ok(lease) => lease,
             Err(error) => {
-                let _ = shutdown_runtime(&mut runtime, Some(provider_lease), None, None);
+                let _ = shutdown_runtime(&mut runtime, Some(provider_lease), None, None, None);
                 return Err(HostError::RuntimeFailed(error.status() as i32));
             }
         };
         if let Err(error) = runtime.mark_running() {
             runtime.fail(error);
-            let _ = shutdown_runtime(&mut runtime, Some(provider_lease), Some(engine_lease), None);
+            let _ = shutdown_runtime(
+                &mut runtime,
+                Some(provider_lease),
+                Some(engine_lease),
+                None,
+                None,
+            );
             return Err(HostError::RuntimeFailed(error.status() as i32));
         }
         // Darwin's application renderer is GPU-only. A published surface is
@@ -139,16 +146,19 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 options,
                 provider_lease,
                 engine_lease,
-                GpuCallbacks {
-                    dispatch_pointer,
-                    pump_framework_frame,
-                },
+                GpuCallbacks { symbols },
             );
         }
         // Headless ART is a first-class mode. It never allocates a surface and
         // never uploads the callback mailbox into an IOSurface. Graphics runs
         // exclusively through `gpu_loop::run` above.
-        shutdown_runtime(&mut runtime, Some(provider_lease), Some(engine_lease), None)?;
+        shutdown_runtime(
+            &mut runtime,
+            Some(provider_lease),
+            Some(engine_lease),
+            None,
+            None,
+        )?;
         Ok(HostOutcome {
             process,
             frames_presented: 0,

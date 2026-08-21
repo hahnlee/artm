@@ -10,12 +10,12 @@ use crate::{
 };
 
 /// Owns one runtime's lifecycle and its concrete native resources.
-pub struct RuntimeSession<E, P, S> {
+pub struct RuntimeSession<E, P, S, G = ()> {
     lifecycle: RuntimeLifecycle,
-    owners: RuntimeOwners<E, P, S>,
+    owners: RuntimeOwners<E, P, S, G>,
 }
 
-impl<E, P, S> RuntimeSession<E, P, S> {
+impl<E, P, S, G> RuntimeSession<E, P, S, G> {
     pub fn new() -> Self {
         Self {
             lifecycle: RuntimeLifecycle::new(),
@@ -66,11 +66,11 @@ impl<E, P, S> RuntimeSession<E, P, S> {
         self.lifecycle.assert_owner()
     }
 
-    pub fn owners(&self) -> &RuntimeOwners<E, P, S> {
+    pub fn owners(&self) -> &RuntimeOwners<E, P, S, G> {
         &self.owners
     }
 
-    pub fn owners_mut(&mut self) -> &mut RuntimeOwners<E, P, S> {
+    pub fn owners_mut(&mut self) -> &mut RuntimeOwners<E, P, S, G> {
         &mut self.owners
     }
 
@@ -86,6 +86,10 @@ impl<E, P, S> RuntimeSession<E, P, S> {
         self.owners.attach_surface(surface)
     }
 
+    pub fn attach_graphics(&mut self, graphics: G) -> Result<(), G> {
+        self.owners.attach_graphics(graphics)
+    }
+
     pub fn take_engine(&mut self) -> Option<E> {
         self.owners.take_engine()
     }
@@ -98,12 +102,16 @@ impl<E, P, S> RuntimeSession<E, P, S> {
         self.owners.take_surface()
     }
 
+    pub fn take_graphics(&mut self) -> Option<G> {
+        self.owners.take_graphics()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.owners.is_empty()
     }
 }
 
-impl<E, P, S> Default for RuntimeSession<E, P, S> {
+impl<E, P, S, G> Default for RuntimeSession<E, P, S, G> {
     fn default() -> Self {
         Self::new()
     }
@@ -116,16 +124,20 @@ mod tests {
 
     #[test]
     fn session_keeps_resources_and_lifecycle_in_one_owner_value() {
-        let mut session = RuntimeSession::<u8, u16, u32>::new();
+        let mut session = RuntimeSession::<u8, u16, u32, u64>::new();
         session.start().unwrap();
         session.attach_engine(7).unwrap();
         session.attach_provider(8).unwrap();
         session.attach_surface(9).unwrap();
+        session.attach_graphics(10).unwrap();
         let engine = session.install_subsystem(Subsystem::Engine).unwrap();
         let provider = session.install_subsystem(Subsystem::ElfNamespace).unwrap();
         let surface = session.install_subsystem(Subsystem::Surface).unwrap();
+        let graphics = session.install_subsystem(Subsystem::Graphics).unwrap();
         session.mark_running().unwrap();
         session.begin_shutdown().unwrap();
+        session.uninstall_subsystem(graphics).unwrap();
+        assert_eq!(session.take_graphics(), Some(10));
         session.uninstall_subsystem(surface).unwrap();
         assert_eq!(session.take_surface(), Some(9));
         session.uninstall_subsystem(provider).unwrap();

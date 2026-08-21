@@ -16,7 +16,9 @@ mod platform {
     use std::path::Path;
 
     use darwin_art_engine_sys::{
-        DispatchPointerFn, PointerEvent, ProcessConfig, ProcessResult, ProviderAcquireFn,
+        DispatchPointerFn, GraphicsSessionCloseFn, GraphicsSessionCreateFn,
+        GraphicsSessionDestroyFn, GraphicsSessionDispatchPointerFn, GraphicsSessionHandle,
+        GraphicsSessionPumpFrameFn, PointerEvent, ProcessConfig, ProcessResult, ProviderAcquireFn,
         ProviderClearHooksFn, ProviderInstallHooksFn, ProviderNativeAcquireFn,
         ProviderNativeReleaseFn, ProviderReleaseFn, PumpFrameworkFrameFn, RunProcessFn,
         ShutdownProcessFn, SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn,
@@ -36,6 +38,11 @@ mod platform {
         pub surface_active: SurfaceActiveFn,
         pub dispatch_pointer: DispatchPointerFn,
         pub pump_framework_frame: PumpFrameworkFrameFn,
+        pub graphics_session_create: Option<GraphicsSessionCreateFn>,
+        pub graphics_session_close: Option<GraphicsSessionCloseFn>,
+        pub graphics_session_destroy: Option<GraphicsSessionDestroyFn>,
+        pub graphics_session_dispatch_pointer: Option<GraphicsSessionDispatchPointerFn>,
+        pub graphics_session_pump_frame: Option<GraphicsSessionPumpFrameFn>,
         pub provider_install_hooks: ProviderInstallHooksFn,
         pub provider_clear_hooks: ProviderClearHooksFn,
         pub provider_native_acquire: ProviderNativeAcquireFn,
@@ -53,6 +60,104 @@ mod platform {
         next_pointer_event: SurfaceNextPointerEventFn,
         destroy: SurfaceDestroyFn,
         armed: bool,
+    }
+
+    /// Rust owner for the opaque native HWUI session.  The C ABI deliberately
+    /// exposes only a void handle; JNI, RenderNode, and AnimationContext stay
+    /// entirely on the C++ side.  `close` must precede `destroy`, which makes
+    /// a use-after-close a normal status result instead of undefined behavior.
+    pub struct GraphicsSession {
+        handle: *mut GraphicsSessionHandle,
+        close_fn: GraphicsSessionCloseFn,
+        destroy_fn: GraphicsSessionDestroyFn,
+        dispatch_fn: GraphicsSessionDispatchPointerFn,
+        pump_fn: GraphicsSessionPumpFrameFn,
+        closed: bool,
+    }
+
+    impl GraphicsSession {
+        pub fn create(symbols: EngineSymbols) -> Result<Self, i32> {
+            // SAFETY: the function pointer belongs to the live engine image.
+            let (
+                Some(create_fn),
+                Some(close_fn),
+                Some(destroy_fn),
+                Some(dispatch_fn),
+                Some(pump_fn),
+            ) = (
+                symbols.graphics_session_create,
+                symbols.graphics_session_close,
+                symbols.graphics_session_destroy,
+                symbols.graphics_session_dispatch_pointer,
+                symbols.graphics_session_pump_frame,
+            )
+            else {
+                return Err(darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE);
+            };
+            // SAFETY: the function pointer belongs to the live engine image.
+            let handle = unsafe { (create_fn)() };
+            if handle.is_null() {
+                return Err(darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE);
+            }
+            Ok(Self {
+                handle,
+                close_fn,
+                destroy_fn,
+                dispatch_fn,
+                pump_fn,
+                closed: false,
+            })
+        }
+
+        pub fn close(&mut self) -> i32 {
+            if self.closed {
+                return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+            }
+            // SAFETY: handle and callback belong to this live owner.
+            let status = unsafe { (self.close_fn)(self.handle) };
+            if status == 0 {
+                self.closed = true;
+            }
+            status
+        }
+
+        pub fn dispatch_pointer(&self, action: u32, x: f32, y: f32) -> i32 {
+            if self.closed {
+                return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+            }
+            // SAFETY: handle remains live while self is borrowed.
+            unsafe { (self.dispatch_fn)(self.handle, action, x, y) }
+        }
+
+        pub fn pump_frame(&self, frame_time_nanos: i64) -> i32 {
+            if self.closed {
+                return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+            }
+            // SAFETY: handle remains live while self is borrowed.
+            unsafe { (self.pump_fn)(self.handle, frame_time_nanos) }
+        }
+
+        fn destroy(&mut self) -> i32 {
+            if !self.closed || self.handle.is_null() {
+                return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+            }
+            // SAFETY: close made the native handle inert and this is the one
+            // matching destroy call for it.
+            let status = unsafe { (self.destroy_fn)(self.handle) };
+            if status == 0 {
+                self.handle = std::ptr::null_mut();
+            }
+            status
+        }
+    }
+
+    impl Drop for GraphicsSession {
+        fn drop(&mut self) {
+            if !self.closed {
+                let _ = self.close();
+            }
+            let _ = self.destroy();
+        }
     }
 
     impl SurfaceSession {
@@ -154,6 +259,21 @@ mod platform {
                     surface_active: library.symbol(b"darwin_art_surface_active_gpu\0")?,
                     dispatch_pointer: library.symbol(b"darwin_art_dispatch_pointer\0")?,
                     pump_framework_frame: library.symbol(b"darwin_art_pump_framework_frame\0")?,
+                    graphics_session_create: library
+                        .symbol(b"darwin_art_graphics_session_create\0")
+                        .ok(),
+                    graphics_session_close: library
+                        .symbol(b"darwin_art_graphics_session_close\0")
+                        .ok(),
+                    graphics_session_destroy: library
+                        .symbol(b"darwin_art_graphics_session_destroy\0")
+                        .ok(),
+                    graphics_session_dispatch_pointer: library
+                        .symbol(b"darwin_art_graphics_session_dispatch_pointer\0")
+                        .ok(),
+                    graphics_session_pump_frame: library
+                        .symbol(b"darwin_art_graphics_session_pump_frame\0")
+                        .ok(),
                     provider_install_hooks: library
                         .symbol(b"darwin_art_provider_install_hooks\0")?,
                     provider_clear_hooks: library.symbol(b"darwin_art_provider_clear_hooks\0")?,
@@ -211,6 +331,10 @@ mod platform {
 
         pub fn active_surface(&self) -> Option<SurfaceSession> {
             SurfaceSession::active(self.symbols())
+        }
+
+        pub fn create_graphics_session(&self) -> Result<GraphicsSession, i32> {
+            GraphicsSession::create(self.symbols())
         }
 
         /// Reports whether the graphics flavor has published a drawable
@@ -276,6 +400,60 @@ mod platform {
         }
     }
 
+    #[cfg(test)]
+    mod graphics_session_tests {
+        use super::GraphicsSession;
+        use core::ffi::c_void;
+
+        unsafe extern "C" fn close(_: *mut c_void) -> i32 {
+            0
+        }
+
+        unsafe extern "C" fn destroy(handle: *mut c_void) -> i32 {
+            if !handle.is_null() {
+                // SAFETY: the test allocated this exact boxed byte below.
+                unsafe { drop(Box::from_raw(handle.cast::<u8>())) };
+            }
+            0
+        }
+
+        unsafe extern "C" fn dispatch(_: *mut c_void, _: u32, _: f32, _: f32) -> i32 {
+            123
+        }
+
+        unsafe extern "C" fn pump(_: *mut c_void, _: i64) -> i32 {
+            456
+        }
+
+        #[test]
+        fn close_makes_use_after_close_fail_closed() {
+            let handle = Box::into_raw(Box::new(1_u8)).cast::<c_void>();
+            let mut session = GraphicsSession {
+                handle,
+                close_fn: close,
+                destroy_fn: destroy,
+                dispatch_fn: dispatch,
+                pump_fn: pump,
+                closed: false,
+            };
+            assert_eq!(session.dispatch_pointer(0, 1.0, 1.0), 123);
+            assert_eq!(session.pump_frame(10), 456);
+            assert_eq!(session.close(), 0);
+            assert_eq!(
+                session.dispatch_pointer(0, 1.0, 1.0),
+                darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE
+            );
+            assert_eq!(
+                session.pump_frame(10),
+                darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE
+            );
+            assert_eq!(
+                session.close(),
+                darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE
+            );
+        }
+    }
+
     struct DynamicLibrary(*mut c_void);
 
     impl DynamicLibrary {
@@ -329,4 +507,4 @@ mod platform {
 }
 
 #[cfg(target_os = "macos")]
-pub use platform::{EngineSession, EngineSymbols, SurfaceSession};
+pub use platform::{EngineSession, EngineSymbols, GraphicsSession, SurfaceSession};

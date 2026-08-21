@@ -10,10 +10,11 @@ use std::rc::Rc;
 /// Concrete resources owned by one owner thread.
 ///
 /// Field order is intentional: if a caller forgets an explicit shutdown,
-/// surface drops before provider, and provider drops before engine.  Normal
-/// teardown should still call the resource-specific close methods before
+/// graphics drops before surface, surface before provider, and provider before
+/// engine. Normal teardown should still call the resource-specific close methods before
 /// taking the values out of these slots so failures remain observable.
-pub struct RuntimeOwners<E, P, S> {
+pub struct RuntimeOwners<E, P, S, G = ()> {
+    graphics: Option<G>,
     surface: Option<S>,
     provider: Option<P>,
     engine: Option<E>,
@@ -23,9 +24,10 @@ pub struct RuntimeOwners<E, P, S> {
     _owner_thread: PhantomData<Rc<()>>,
 }
 
-impl<E, P, S> RuntimeOwners<E, P, S> {
+impl<E, P, S, G> RuntimeOwners<E, P, S, G> {
     pub const fn new() -> Self {
         Self {
+            graphics: None,
             surface: None,
             provider: None,
             engine: None,
@@ -60,6 +62,15 @@ impl<E, P, S> RuntimeOwners<E, P, S> {
         }
     }
 
+    pub fn attach_graphics(&mut self, graphics: G) -> Result<(), G> {
+        if self.graphics.is_some() {
+            Err(graphics)
+        } else {
+            self.graphics = Some(graphics);
+            Ok(())
+        }
+    }
+
     pub fn engine(&self) -> Option<&E> {
         self.engine.as_ref()
     }
@@ -84,6 +95,14 @@ impl<E, P, S> RuntimeOwners<E, P, S> {
         self.surface.as_mut()
     }
 
+    pub fn graphics(&self) -> Option<&G> {
+        self.graphics.as_ref()
+    }
+
+    pub fn graphics_mut(&mut self) -> Option<&mut G> {
+        self.graphics.as_mut()
+    }
+
     pub fn take_engine(&mut self) -> Option<E> {
         self.engine.take()
     }
@@ -96,12 +115,19 @@ impl<E, P, S> RuntimeOwners<E, P, S> {
         self.surface.take()
     }
 
+    pub fn take_graphics(&mut self) -> Option<G> {
+        self.graphics.take()
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.engine.is_none() && self.provider.is_none() && self.surface.is_none()
+        self.engine.is_none()
+            && self.provider.is_none()
+            && self.surface.is_none()
+            && self.graphics.is_none()
     }
 }
 
-impl<E, P, S> Default for RuntimeOwners<E, P, S> {
+impl<E, P, S, G> Default for RuntimeOwners<E, P, S, G> {
     fn default() -> Self {
         Self::new()
     }
@@ -144,7 +170,7 @@ mod tests {
     #[test]
     fn implicit_drop_preserves_surface_provider_engine_order() {
         let order = Rc::new(RefCell::new(Vec::new()));
-        let mut owners = RuntimeOwners::new();
+        let mut owners = RuntimeOwners::<DropProbe, DropProbe, DropProbe, ()>::new();
         owners
             .attach_engine(DropProbe {
                 name: "engine",
@@ -168,9 +194,32 @@ mod tests {
     }
 
     #[test]
+    fn implicit_drop_releases_graphics_before_surface_provider_engine() {
+        let order = Rc::new(RefCell::new(Vec::new()));
+        let mut owners = RuntimeOwners::<DropProbe, DropProbe, DropProbe, DropProbe>::new();
+        for name in ["engine", "provider", "surface", "graphics"] {
+            let probe = DropProbe {
+                name,
+                order: Rc::clone(&order),
+            };
+            match name {
+                "engine" => owners.attach_engine(probe).unwrap(),
+                "provider" => owners.attach_provider(probe).unwrap(),
+                "surface" => owners.attach_surface(probe).unwrap(),
+                _ => owners.attach_graphics(probe).unwrap(),
+            }
+        }
+        drop(owners);
+        assert_eq!(
+            &*order.borrow(),
+            &["graphics", "surface", "provider", "engine"]
+        );
+    }
+
+    #[test]
     fn early_return_cleanup_drops_each_owner_once_after_surface_transfer() {
         let order = Rc::new(RefCell::new(Vec::new()));
-        let mut owners = RuntimeOwners::new();
+        let mut owners = RuntimeOwners::<DropProbe, DropProbe, DropProbe, ()>::new();
         owners
             .attach_engine(DropProbe {
                 name: "engine",

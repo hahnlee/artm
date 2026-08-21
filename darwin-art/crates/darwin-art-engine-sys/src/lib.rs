@@ -207,6 +207,13 @@ pub type SurfaceDestroyFn = unsafe extern "C" fn(*mut c_void) -> i32;
 pub type SurfaceActiveFn = unsafe extern "C" fn() -> *mut c_void;
 pub type DispatchPointerFn = unsafe extern "C" fn(u32, f32, f32) -> i32;
 pub type PumpFrameworkFrameFn = unsafe extern "C" fn(i64) -> i32;
+pub type GraphicsSessionHandle = c_void;
+pub type GraphicsSessionCreateFn = unsafe extern "C" fn() -> *mut GraphicsSessionHandle;
+pub type GraphicsSessionCloseFn = unsafe extern "C" fn(*mut GraphicsSessionHandle) -> i32;
+pub type GraphicsSessionDestroyFn = unsafe extern "C" fn(*mut GraphicsSessionHandle) -> i32;
+pub type GraphicsSessionDispatchPointerFn =
+    unsafe extern "C" fn(*mut GraphicsSessionHandle, u32, f32, f32) -> i32;
+pub type GraphicsSessionPumpFrameFn = unsafe extern "C" fn(*mut GraphicsSessionHandle, i64) -> i32;
 pub type ProviderInstallHooksFn = unsafe extern "C" fn(
     context: *mut c_void,
     acquire: Option<ProviderAcquireFn>,

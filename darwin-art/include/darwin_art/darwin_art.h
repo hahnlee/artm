@@ -19,6 +19,16 @@ extern "C" {
 #define DARWIN_ART_STATUS_SHUTDOWN_ALREADY_COMPLETED 69
 #define DARWIN_ART_STATUS_SHUTDOWN_FAILED 70
 
+// Graphics-session handles are owner-thread opaque tokens.  They deliberately
+// carry no JNI, Skia, or HWUI types across the C ABI; the native side resolves
+// the current ART thread and retains those implementation details privately.
+#define DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID 71
+#define DARWIN_ART_STATUS_GRAPHICS_SESSION_WRONG_THREAD 72
+#define DARWIN_ART_STATUS_GRAPHICS_SESSION_CLOSED 73
+#define DARWIN_ART_STATUS_GRAPHICS_SESSION_NOT_READY 74
+#define DARWIN_ART_STATUS_GRAPHICS_SESSION_ALREADY_ACTIVE 75
+#define DARWIN_ART_STATUS_GRAPHICS_SESSION_NOT_CLOSED 76
+
 #if defined(__GNUC__)
 #define DARWIN_ART_EXPORT __attribute__((visibility("default")))
 #else
@@ -71,6 +81,8 @@ typedef struct darwin_art_process_result {
   uint32_t frame_height;
 } darwin_art_process_result_t;
 
+typedef struct darwin_art_graphics_session_t darwin_art_graphics_session_t;
+
 // Runs exactly one ART instance in the current process. Version 1 deliberately
 // exposes a one-shot operation: Runtime::Create is process-global, and the
 // existing Darwin port does not yet promise safe re-creation after shutdown.
@@ -100,6 +112,33 @@ DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
 // failure); WRONG_THREAD leaves it available for the owning thread; an
 // ALREADY_COMPLETED result identifies a duplicate shutdown call.
 DARWIN_ART_EXPORT int32_t darwin_art_shutdown_process(void);
+
+// Creates an owner-thread graphics handle around the HWUI state initialized
+// by darwin_art_run_process.  The handle is intentionally additive to the
+// process ABI: callers may adopt it incrementally without passing it through
+// darwin_art_process_config_t::host_context.  A null return means the ART
+// owner thread has not reached the graphics-ready state or another session is
+// still active.
+DARWIN_ART_EXPORT darwin_art_graphics_session_t*
+darwin_art_graphics_session_create(void);
+
+// Closes the HWUI/JNI state owned by the handle.  This must run on the ART
+// owner thread.  Close is separate from destroy so a Rust owner can make the
+// lifetime transition explicit and reject use-after-close deterministically.
+DARWIN_ART_EXPORT int32_t darwin_art_graphics_session_close(
+    darwin_art_graphics_session_t* session);
+
+// Releases an already-closed handle.  Destroying an open handle is rejected
+// and leaves ownership with the caller, preventing an accidental leak of the
+// native HWUI state hidden behind a premature free.
+DARWIN_ART_EXPORT int32_t darwin_art_graphics_session_destroy(
+    darwin_art_graphics_session_t* session);
+
+DARWIN_ART_EXPORT int32_t darwin_art_graphics_session_dispatch_pointer(
+    darwin_art_graphics_session_t* session, uint32_t action, float x, float y);
+
+DARWIN_ART_EXPORT int32_t darwin_art_graphics_session_pump_frame(
+    darwin_art_graphics_session_t* session, int64_t frame_time_nanos);
 
 #if defined(__cplusplus)
 }  // extern "C"
