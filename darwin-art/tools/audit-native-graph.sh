@@ -14,11 +14,11 @@ fi
 
 (cd "$root" && cargo run -q -p darwin-art-xtask -- native-graph --out "$graph")
 
-cached_cpp="$(grep -c ': native_cached_cpp ' "$graph" || true)"
+cached_cpp="$(grep -Ec ': native_cached_cpp(_legacy)? ' "$graph" || true)"
 cached_archives="$(grep -c ': native_cached_archive ' "$graph" || true)"
-icu_cpp="$(grep -c '_build/icu-foundation/objects/.*: native_cached_cpp ' "$graph" || true)"
-runtime_cpp="$(grep -c '_build/runtime-bootstrap/objects/.*: native_cached_cpp ' "$graph" || true)"
-graphics_cpp="$(grep -c '_build/android-graphics-jni/objects/.*: native_cached_cpp ' "$graph" || true)"
+icu_cpp="$(grep -Ec '_build/icu-foundation/objects/.*: native_cached_cpp(_legacy)? ' "$graph" || true)"
+runtime_cpp="$(grep -Ec '_build/runtime-(common|bootstrap)/objects/.*: native_cached_cpp(_legacy)? ' "$graph" || true)"
+graphics_cpp="$(grep -Ec '_build/android-graphics-jni/objects/.*: native_cached_cpp(_legacy)? ' "$graph" || true)"
 
 (( icu_cpp >= 458 )) || {
   echo "native-graph: ICU cache incomplete ($icu_cpp/458 TUs)" >&2
@@ -34,6 +34,15 @@ graphics_cpp="$(grep -c '_build/android-graphics-jni/objects/.*: native_cached_c
 }
 grep -q 'depfile = \$out.d' "$graph"
 grep -q 'deps = gcc' "$graph"
+# Rust ownership is a real final-link prerequisite. A RuntimeSession/provider
+# edit must rebuild only this archive and relink the dylib, never invalidate
+# the C++ ART/HWUI translation-unit set.
+grep -q '^rule runtime_owner_archive$' "$graph"
+grep -q 'target/release/libdarwin_art_runtime.a' "$graph"
+grep -q 'runtime_owner_archive' "$graph"
+runtime_library_target="$root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib"
+runtime_query="$($ninja -f "$graph" -t query "$runtime_library_target" 2>&1)"
+grep -q 'target/release/libdarwin_art_runtime.a' <<<"$runtime_query"
 
 # Phase edges must remain independently addressable. This is the build-time
 # contract that keeps a graphics-input/framework edit from recompiling the
@@ -102,6 +111,10 @@ for object in "${phase_objects[@]}"; do
   fi
 done
 
+# Legacy promoted objects may need one dependency-scan edge before the warm
+# assertion. Materialize that metadata once, then require the actual second
+# query to be a no-op rather than mistaking the bootstrap scan for a rebuild.
+"$ninja" -f "$graph" icu-foundation >/dev/null
 warm_output="$($ninja -f "$graph" -n icu-foundation 2>&1)"
 grep -q 'no work to do' <<<"$warm_output" || {
   echo "native-graph: ICU warm target is not a no-op" >&2

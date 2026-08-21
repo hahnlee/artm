@@ -77,6 +77,13 @@ mtimes still recompiles only the changed probe object before the downstream
 graphics link. The audit path regenerates the graph before its warm/no-op
 check; repeated generation with unchanged bytes leaves all stamps untouched.
 
+The Rust runtime owner is an explicit final-link edge at
+`target/release/libdarwin_art_runtime.a`. Its Cargo sources are Ninja inputs,
+but the archive is not a prerequisite of any C++ compile edge. A change to
+`RuntimeSession`, provider lease state, or the engine ABI therefore rebuilds
+the Rust owner and relinks the dylib without recompiling the ART/HWUI object
+set. The graph audit checks this edge directly.
+
 The same persisted-command promotion now covers ICU as well. The Android ICU
 foundation keeps 201 common, 254 i18n, one stubdata, and two init translation
 units under `_build/icu-foundation/objects/`; a complete set is emitted as
