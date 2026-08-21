@@ -82,6 +82,15 @@ for object in "${phase_objects[@]}"; do
     echo "$phase_output" >&2
     exit 1
   }
+  # The phase object may feed the final dylib, but it must not inherit a
+  # bootstrap archive as a direct input.  Otherwise a framework/probe edit
+  # silently widens the invalidation boundary back to the monolithic archive.
+  phase_query="$($ninja -f "$graph" -t query "$object" 2>&1)"
+  if grep -Eq 'runtime-bootstrap|runtime-graphics-bootstrap|hwui-static-foundation' <<<"$phase_query"; then
+    echo "native-graph: phase edge widened by bootstrap input: $object" >&2
+    echo "$phase_query" >&2
+    exit 1
+  fi
 done
 
 warm_output="$($ninja -f "$graph" -n icu-foundation 2>&1)"
