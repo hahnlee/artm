@@ -67,6 +67,10 @@ typedef struct darwin_art_process_config {
   void* provider_context;
   darwin_art_provider_acquire_t provider_acquire;
   darwin_art_provider_release_t provider_release;
+  // Optional additive graphics-session sidecar. Older callers may provide a
+  // legacy struct prefix without this field; the engine checks struct_size
+  // before reading it and never aliases host_context for graphics state.
+  void* graphics_session_context;
 } darwin_art_process_config_t;
 
 typedef struct darwin_art_process_result {

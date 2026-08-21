@@ -120,6 +120,7 @@ pub(crate) fn run() -> Result<()> {
         "build-runtime-graphics-input-probe" => build_runtime_graphics_input_probe(&root),
         "build-runtime-graphics-state-probe" => build_runtime_graphics_state_probe(&root),
         "build-runtime-graphics-session-probe" => build_runtime_graphics_session_probe(&root),
+        "build-runtime-jni-acceptance-probe" => build_runtime_jni_acceptance_probe(&root),
         "build-runtime-hwui-probe" => build_runtime_hwui_probe(&root),
         "audit-runtime-link" => audit_runtime_link(&root),
         "audit-runtime-graphics-link" => audit_runtime_graphics_link(&root),

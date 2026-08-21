@@ -448,6 +448,8 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         &ndk_include,
         &ndk_arch_include,
     )?;
+    let jni_acceptance_object =
+        compile_runtime_jni_acceptance_probe(root, &build_dir, &include_refs)?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -525,6 +527,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
         .arg(&graphics_state_object)
+        .arg(&jni_acceptance_object)
         .arg(&graphics_session_object)
         .arg(&graphics_phase_object)
         .arg(&graphics_input_object)

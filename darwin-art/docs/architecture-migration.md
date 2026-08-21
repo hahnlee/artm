@@ -81,8 +81,8 @@ outside the lease mutex to preserve reentrancy.
 Split the process probe into small, separately cached phase objects. The first
 landed boundaries are `runtime_process_options`, `runtime_shutdown_probe`,
 `runtime_acceptance_phases` (network), `runtime_graphics_phase` (content
-validation/presentation), and `runtime_graphics_input` (pointer/frame
-dispatch). Each phase receives a narrow JNI/value boundary and
+validation/presentation), `runtime_graphics_input` (pointer/frame dispatch),
+and `runtime_jni_acceptance_probe` (DEX/JNI ABI matrix). Each phase receives a narrow JNI/value boundary and
 returns a status snapshot; the heavy Android JNI/HWUI implementation remains
 in its own object. Keep the existing JNI/ELF/HWUI acceptance unchanged while
 the remaining framework/activity setup is extracted.
@@ -127,7 +127,7 @@ orchestration by phase. Each extraction must preserve the existing acceptance
 gates and report its native invalidation boundary; moving code without
 narrowing a rebuild edge is not considered progress.
 
-The graphics boundary is now an explicit seventh native phase. Rust owns a
+The graphics boundary is now an explicit eighth native phase. Rust owns a
 `RuntimeSession<..., GraphicsSession>` slot containing only an opaque C handle;
 JNI global references, RenderNode, AnimationContext, and TimeLord remain
 private to the native graphics session. Creation, owner-thread validation,
@@ -146,15 +146,20 @@ the same machine:
 | Rust host CLI change | Rust host/CLI crates only |
 | provider facade change | provider object, closure link, provider audit |
 | framework/JNI phase change | framework phase + runtime link |
+| DEX/JNI ABI acceptance change | `runtime_jni_acceptance_probe` + runtime link |
 | graphics presentation/JNI phase change | `runtime_graphics_phase` + runtime link |
 | graphics session-state/ABI change | `runtime_graphics_session` + graphics link |
 | HWUI/Metal implementation change | `runtime_graphics_probe` + graphics link |
 | AOSP foundation header change | affected foundation TU closure |
 
-The current implementation has the probe/object cache, graphics-JNI/HWUI/ICU
+The current implementation has the probe/object cache, eight independently
+addressable native phases, graphics-JNI/HWUI/ICU
 foundation stamps, concrete RuntimeSession ownership, and the low-level ART
 build/bootstrap split. M1–M4 are landed for the measured boundaries above;
-M5 is in progress. The host-side legacy CPU/IOSurface upload presenter has
+M5 is in progress. A source touch in the JNI acceptance phase schedules only
+that object on a cold Ninja dry-run (`[1/1] CXX runtime_jni_acceptance`), while
+the restored timestamp is a warm no-op; the full graph audit reports
+`phases=8 warm=no-op`. The host-side legacy CPU/IOSurface upload presenter has
 been removed: headless runs tear down without allocating a surface, and
 graphics runs enter only the direct Metal/HWUI loop. Remaining M4 work is
 removing duplicate ABI declarations and broad fallback edges, then proving

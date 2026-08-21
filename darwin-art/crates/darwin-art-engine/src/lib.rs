@@ -121,6 +121,10 @@ mod platform {
             status
         }
 
+        pub fn raw_handle(&self) -> *mut GraphicsSessionHandle {
+            self.handle
+        }
+
         pub fn dispatch_pointer(&self, action: u32, x: f32, y: f32) -> i32 {
             if self.closed {
                 return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;

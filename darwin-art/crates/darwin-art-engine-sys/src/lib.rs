@@ -38,6 +38,7 @@ pub struct ProcessConfig {
     pub provider_context: *mut c_void,
     pub provider_acquire: Option<ProviderAcquireFn>,
     pub provider_release: Option<ProviderReleaseFn>,
+    pub graphics_session_context: *mut c_void,
 }
 
 impl ProcessConfig {
@@ -71,6 +72,7 @@ impl ProcessConfig {
             provider_context,
             provider_acquire,
             provider_release,
+            graphics_session_context: core::ptr::null_mut(),
         }
     }
 
@@ -145,7 +147,7 @@ mod tests {
 
     #[test]
     fn process_config_layout_is_owned_by_raw_ffi_crate() {
-        assert_eq!(size_of::<ProcessConfig>(), 104);
+        assert_eq!(size_of::<ProcessConfig>(), 112);
         assert_eq!(align_of::<ProcessConfig>(), 8);
         assert_eq!(offset_of!(ProcessConfig, struct_size), 0);
         assert_eq!(offset_of!(ProcessConfig, abi_version), 4);
@@ -161,6 +163,7 @@ mod tests {
         assert_eq!(offset_of!(ProcessConfig, provider_context), 80);
         assert_eq!(offset_of!(ProcessConfig, provider_acquire), 88);
         assert_eq!(offset_of!(ProcessConfig, provider_release), 96);
+        assert_eq!(offset_of!(ProcessConfig, graphics_session_context), 104);
     }
 
     #[test]

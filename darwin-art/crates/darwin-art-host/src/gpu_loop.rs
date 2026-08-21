@@ -2,13 +2,9 @@ use crate::config::{HostError, HostOutcome, RunOptions};
 use crate::provider::ProviderBridge;
 use crate::surface::{owned_surface_next_pointer_event, owned_surface_pump_events};
 use crate::teardown::shutdown_runtime;
-use darwin_art_engine::{EngineSession, EngineSymbols, GraphicsSession, SurfaceSession};
+use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
 use darwin_art_engine_sys::{PointerEvent, ProcessResult};
 use darwin_art_runtime::{RuntimeSession, Subsystem};
-
-pub(super) struct GpuCallbacks {
-    pub symbols: EngineSymbols,
-}
 
 #[cfg(target_os = "macos")]
 pub(super) fn run(
@@ -23,7 +19,7 @@ pub(super) fn run(
     options: &RunOptions,
     provider_lease: darwin_art_runtime::SubsystemLease,
     engine_lease: darwin_art_runtime::SubsystemLease,
-    callbacks: GpuCallbacks,
+    graphics_attached: bool,
 ) -> Result<HostOutcome, HostError> {
     let Some(surface) = active_surface else {
         // No surface was published, but ART and the provider
@@ -78,51 +74,27 @@ pub(super) fn run(
             };
         }
     };
-    let graphics = match GraphicsSession::create(callbacks.symbols) {
-        Ok(graphics) => graphics,
-        Err(status) => {
-            let cleanup = shutdown_runtime(
-                runtime,
-                Some(provider_lease),
-                Some(engine_lease),
-                Some(surface_lease),
-                None,
-            );
-            return match cleanup {
-                Ok(()) => Err(HostError::RuntimeFailed(status)),
-                Err(cleanup_error) => Err(cleanup_error),
-            };
+    // Surface is installed before Graphics so shutdown can remove the
+    // Graphics lease first and then the Surface lease in strict LIFO order.
+    let graphics_lease = if graphics_attached {
+        match runtime.install_subsystem(Subsystem::Graphics) {
+            Ok(lease) => Some(lease),
+            Err(error) => {
+                let cleanup = shutdown_runtime(
+                    runtime,
+                    Some(provider_lease),
+                    Some(engine_lease),
+                    Some(surface_lease),
+                    None,
+                );
+                return match cleanup {
+                    Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
+                    Err(cleanup_error) => Err(cleanup_error),
+                };
+            }
         }
-    };
-    if let Err(graphics) = runtime.attach_graphics(graphics) {
-        drop(graphics);
-        let cleanup = shutdown_runtime(
-            runtime,
-            Some(provider_lease),
-            Some(engine_lease),
-            Some(surface_lease),
-            None,
-        );
-        return match cleanup {
-            Ok(()) => Err(HostError::RuntimeFailed(-1)),
-            Err(cleanup_error) => Err(cleanup_error),
-        };
-    }
-    let graphics_lease = match runtime.install_subsystem(Subsystem::Graphics) {
-        Ok(lease) => lease,
-        Err(error) => {
-            let cleanup = shutdown_runtime(
-                runtime,
-                Some(provider_lease),
-                Some(engine_lease),
-                Some(surface_lease),
-                None,
-            );
-            return match cleanup {
-                Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
-                Err(cleanup_error) => Err(cleanup_error),
-            };
-        }
+    } else {
+        None
     };
     let mut frames_presented = 1_u64;
     let mut remaining = options.visible_seconds;
@@ -277,7 +249,7 @@ pub(super) fn run(
             Some(provider_lease),
             Some(engine_lease),
             Some(surface_lease),
-            Some(graphics_lease),
+            graphics_lease,
         );
         return match cleanup {
             Ok(()) => Err(error),
@@ -289,7 +261,7 @@ pub(super) fn run(
         Some(provider_lease),
         Some(engine_lease),
         Some(surface_lease),
-        Some(graphics_lease),
+        graphics_lease,
     )?;
     Ok(HostOutcome {
         process,

@@ -6,7 +6,7 @@ use std::ptr;
 use crate::config::{HostError, HostOutcome, RunOptions};
 use crate::frame::{FrameHost, receive_frame};
 #[cfg(target_os = "macos")]
-use crate::gpu_loop::{GpuCallbacks, run as run_gpu_loop};
+use crate::gpu_loop::run as run_gpu_loop;
 use crate::provider::ProviderBridge;
 #[cfg(target_os = "macos")]
 use crate::teardown::shutdown_runtime;
@@ -61,11 +61,12 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         let framework = path_c_string(&options.framework_jar)?;
         let core_icu4j = path_c_string(&options.core_icu4j_jar)?;
         let app_dex = path_c_string(&options.app_dex)?;
+        let mut graphics_session = engine.create_graphics_session().ok();
         let mut frame_host = FrameHost {
             frames_received: 0,
             last_frame: None,
         };
-        let config = ProcessConfig::new(
+        let mut config = ProcessConfig::new(
             core_oj.as_ptr(),
             core_libart.as_ptr(),
             framework.as_ptr(),
@@ -79,10 +80,16 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             Some(ProviderBridge::acquire_callback()),
             Some(ProviderBridge::release_callback()),
         );
+        config.graphics_session_context = graphics_session
+            .as_ref()
+            .map_or(ptr::null_mut(), |session| session.raw_handle().cast());
         let process = match engine.run_process(&config) {
             Ok(result) => result,
             Err(status) => {
                 runtime.fail(RuntimeError::EngineFailure { status });
+                if let Some(session) = graphics_session.as_mut() {
+                    let _ = session.close();
+                }
                 // A late run-stage failure may still have created ART. Ask the
                 // process ABI to tear it down; NOT_READY means creation never
                 // completed and is the only benign shutdown result here.
@@ -102,6 +109,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             // The resource was never transferred, so its Drop path is the
             // only owner responsible for the failed transfer. Clear hooks
             // before dropping the bridge that supplied their context.
+            if let Some(session) = graphics_session.as_mut() {
+                let _ = session.close();
+            }
             let _ = engine.shutdown_once();
             let _ = provider_bridge.clear();
             return Err(HostError::RuntimeFailed(-1));
@@ -125,6 +135,27 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 return Err(HostError::RuntimeFailed(error.status() as i32));
             }
         };
+        // Attach the graphics owner before entering ART, but install its
+        // lifecycle lease only once a surface exists.  The surface is
+        // published by the process bootstrap and is installed by gpu_loop;
+        // keeping this order makes teardown the exact reverse:
+        // Graphics -> Surface -> Engine -> Provider.
+        let graphics_attached = if let Some(graphics) = graphics_session.take() {
+            if let Err(graphics) = runtime.attach_graphics(graphics) {
+                drop(graphics);
+                let _ = shutdown_runtime(
+                    &mut runtime,
+                    Some(provider_lease),
+                    Some(engine_lease),
+                    None,
+                    None,
+                );
+                return Err(HostError::RuntimeFailed(-1));
+            }
+            true
+        } else {
+            false
+        };
         if let Err(error) = runtime.mark_running() {
             runtime.fail(error);
             let _ = shutdown_runtime(
@@ -146,18 +177,27 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 options,
                 provider_lease,
                 engine_lease,
-                GpuCallbacks { symbols },
+                graphics_attached,
             );
         }
         // Headless ART is a first-class mode. It never allocates a surface and
         // never uploads the callback mailbox into an IOSurface. Graphics runs
         // exclusively through `gpu_loop::run` above.
+        let graphics_lease = if graphics_attached {
+            Some(
+                runtime
+                    .install_subsystem(Subsystem::Graphics)
+                    .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?,
+            )
+        } else {
+            None
+        };
         shutdown_runtime(
             &mut runtime,
             Some(provider_lease),
             Some(engine_lease),
             None,
-            None,
+            graphics_lease,
         )?;
         Ok(HostOutcome {
             process,

@@ -2,6 +2,8 @@
 
 #include <sys/stat.h>
 
+#include <cstddef>
+
 #include <cstdlib>
 #include <cstring>
 
@@ -52,8 +54,10 @@ bool IsPrivateExtractedRoot(const std::string& path) {
 int ValidateProcessConfig(const darwin_art_process_config_t* config,
                           const darwin_art_process_result_t* run_result,
                           ProcessConfigBounds* bounds, std::string* error) {
+  constexpr uint32_t kLegacyConfigSize = static_cast<uint32_t>(
+      offsetof(darwin_art_process_config_t, graphics_session_context));
   if (config == nullptr || run_result == nullptr || bounds == nullptr ||
-      error == nullptr || config->struct_size < sizeof(*config) ||
+      error == nullptr || config->struct_size < kLegacyConfigSize ||
       run_result->struct_size < sizeof(*run_result) ||
       config->abi_version != DARWIN_ART_ABI_VERSION ||
       run_result->abi_version != DARWIN_ART_ABI_VERSION ||

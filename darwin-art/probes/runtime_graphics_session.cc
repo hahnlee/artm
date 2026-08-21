@@ -16,6 +16,7 @@
 struct darwin_art_graphics_session_t {
   pthread_t owner_thread{};
   art::Thread* owner_art_thread = nullptr;
+  bool bound_to_process = false;
   bool closed = false;
 };
 
@@ -37,39 +38,76 @@ int32_t check_owner(const darwin_art_graphics_session_t* session) {
   return 0;
 }
 
+int32_t check_active_locked(const darwin_art_graphics_session_t* session) {
+  if (session == nullptr || session != g_active_session) {
+    return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+  }
+  if (session->closed) return DARWIN_ART_STATUS_GRAPHICS_SESSION_CLOSED;
+  return 0;
+}
+
 }  // namespace
 
 darwin_art_graphics_session_t* create_session() {
-  art::Thread* owner = darwin_art_process::owner_thread_for_callback();
-  if (owner == nullptr || art::Thread::Current() != owner ||
-      interactive_root_for_state() == nullptr) {
-    return nullptr;
-  }
   std::lock_guard<std::mutex> lock(g_session_mutex);
   if (g_active_session != nullptr) return nullptr;
   auto* session = new (std::nothrow) darwin_art_graphics_session_t;
   if (session == nullptr) return nullptr;
   session->owner_thread = pthread_self();
-  session->owner_art_thread = owner;
   g_active_session = session;
   return session;
 }
 
-int32_t close_session(darwin_art_graphics_session_t* session) {
+int32_t bind_session_for_process(void* context) {
+  if (context == nullptr) return 0;
   std::lock_guard<std::mutex> lock(g_session_mutex);
-  if (session == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
-  if (session != g_active_session) {
+  auto* session = static_cast<darwin_art_graphics_session_t*>(context);
+  if (session != g_active_session ||
+      pthread_equal(session->owner_thread, pthread_self()) == 0 ||
+      session->closed || session->bound_to_process) {
     return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   }
-  const int32_t owner_status = check_owner(session);
-  if (owner_status != 0) return owner_status;
-  if (session->closed) return DARWIN_ART_STATUS_GRAPHICS_SESSION_CLOSED;
-  if (session->owner_art_thread->GetState() != art::ThreadState::kNative) {
-    return DARWIN_ART_STATUS_GRAPHICS_SESSION_WRONG_THREAD;
+  session->bound_to_process = true;
+  return 0;
+}
+
+int32_t bind_session_art_thread(art::Thread* thread) {
+  if (thread == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+  std::lock_guard<std::mutex> lock(g_session_mutex);
+  if (g_active_session == nullptr || !g_active_session->bound_to_process ||
+      g_active_session->closed ||
+      pthread_equal(g_active_session->owner_thread, pthread_self()) == 0) {
+    return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   }
-  art::ScopedObjectAccess soa(session->owner_art_thread);
-  darwin_art_graphics::shutdown(session->owner_art_thread->GetJniEnv());
-  session->closed = true;
+  g_active_session->owner_art_thread = thread;
+  return 0;
+}
+
+int32_t close_session(darwin_art_graphics_session_t* session) {
+  art::Thread* owner = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_session_mutex);
+    if (session == nullptr || session != g_active_session) {
+      return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+    }
+    if (session->closed) return DARWIN_ART_STATUS_GRAPHICS_SESSION_CLOSED;
+    if (pthread_equal(session->owner_thread, pthread_self()) == 0 ||
+        (session->owner_art_thread != nullptr &&
+         art::Thread::Current() != session->owner_art_thread)) {
+      return DARWIN_ART_STATUS_GRAPHICS_SESSION_WRONG_THREAD;
+    }
+    owner = session->owner_art_thread;
+    if (owner != nullptr && owner->GetState() != art::ThreadState::kNative) {
+      return DARWIN_ART_STATUS_GRAPHICS_SESSION_WRONG_THREAD;
+    }
+    session->closed = true;
+  }
+  // Native graphics teardown is performed by run_shutdown while the ART
+  // runtime is still in its canonical shutdown transaction. Closing the
+  // opaque handle here only stops new calls; doing JNI/HWUI destruction in a
+  // separate pre-shutdown transaction leaves Runtime::DestroyJavaVM with an
+  // attached-thread state it cannot safely detach.
+  (void)owner;
   return 0;
 }
 
@@ -78,8 +116,11 @@ int32_t destroy_session(darwin_art_graphics_session_t* session) {
   if (session == nullptr || session != g_active_session) {
     return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   }
-  const int32_t owner_status = check_owner(session);
-  if (owner_status != 0) return owner_status;
+  if (pthread_equal(session->owner_thread, pthread_self()) == 0 ||
+      (session->owner_art_thread != nullptr &&
+       art::Thread::Current() != session->owner_art_thread)) {
+    return DARWIN_ART_STATUS_GRAPHICS_SESSION_WRONG_THREAD;
+  }
   if (!session->closed) {
     return DARWIN_ART_STATUS_GRAPHICS_SESSION_NOT_CLOSED;
   }
@@ -90,25 +131,25 @@ int32_t destroy_session(darwin_art_graphics_session_t* session) {
 
 int32_t dispatch_pointer(darwin_art_graphics_session_t* session,
                          uint32_t action, float x, float y) {
-  std::lock_guard<std::mutex> lock(g_session_mutex);
-  if (session == nullptr || session != g_active_session) {
-    return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+  {
+    std::lock_guard<std::mutex> lock(g_session_mutex);
+    const int32_t active_status = check_active_locked(session);
+    if (active_status != 0) return active_status;
+    const int32_t owner_status = check_owner(session);
+    if (owner_status != 0) return owner_status;
   }
-  const int32_t owner_status = check_owner(session);
-  if (owner_status != 0) return owner_status;
-  if (session->closed) return DARWIN_ART_STATUS_GRAPHICS_SESSION_CLOSED;
   return darwin_art_dispatch_pointer(action, x, y);
 }
 
 int32_t pump_frame(darwin_art_graphics_session_t* session,
                    int64_t frame_time_nanos) {
-  std::lock_guard<std::mutex> lock(g_session_mutex);
-  if (session == nullptr || session != g_active_session) {
-    return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+  {
+    std::lock_guard<std::mutex> lock(g_session_mutex);
+    const int32_t active_status = check_active_locked(session);
+    if (active_status != 0) return active_status;
+    const int32_t owner_status = check_owner(session);
+    if (owner_status != 0) return owner_status;
   }
-  const int32_t owner_status = check_owner(session);
-  if (owner_status != 0) return owner_status;
-  if (session->closed) return DARWIN_ART_STATUS_GRAPHICS_SESSION_CLOSED;
   return darwin_art_pump_framework_frame(frame_time_nanos);
 }
 
