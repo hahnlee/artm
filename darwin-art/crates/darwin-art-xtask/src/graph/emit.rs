@@ -12,7 +12,9 @@ use super::cache::{
 use super::foundation::{
     FoundationFamily, cached_foundation_objects, foundation_input_list, foundation_inputs,
 };
-use super::inputs::{graph_inputs, is_probe_only_input, probe_content_stamp, probe_inputs};
+use super::inputs::{
+    collect_files, graph_inputs, is_probe_only_input, probe_content_stamp, probe_inputs,
+};
 use super::representative::{
     REPRESENTATIVE_EDGES, edge_digest, emit_representative_edges, json_escape, toolchain_inputs,
 };
@@ -70,6 +72,21 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     // once per native TU edge defeats the persistent object cache and adds a
     // process/workspace resolution cost to every warm build.
     let bootstrap_cli = shell_quote(&root.join("target/debug/art-bootstrap").to_string_lossy());
+    let bootstrap_cli_path = root.join("target/debug/art-bootstrap");
+    let bootstrap_cli_target = ninja_path(&bootstrap_cli_path);
+    let mut bootstrap_cli_inputs = vec![root.join("Cargo.toml"), root.join("Cargo.lock")];
+    collect_files(
+        &root.join("crates/art-bootstrap"),
+        &root,
+        &mut bootstrap_cli_inputs,
+    );
+    collect_files(
+        &root.join("crates/darwin-art-build-contract"),
+        &root,
+        &mut bootstrap_cli_inputs,
+    );
+    bootstrap_cli_inputs.sort();
+    bootstrap_cli_inputs.dedup();
     // Keep compiler outputs at a stable path.  The graph digest is a
     // manifest/invalidation identity, not an object-cache namespace: moving
     // objects into a new digest directory would turn every header edit into
@@ -463,6 +480,20 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&format!("# input-digest: {digest}\n"));
     graph.push_str(&format!("# compiler: {} sdk: {SDK_NAME}\n", toolchain.cxx));
     graph.push_str("ninja_required_version = 1.10\n\n");
+    graph.push_str("rule art_bootstrap_cli\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && cargo build -q -p art-bootstrap\n");
+    graph.push_str("  description = Rust art-bootstrap CLI\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&bootstrap_cli_target);
+    graph.push_str(": art_bootstrap_cli ");
+    for input in &bootstrap_cli_inputs {
+        graph.push_str(&ninja_path(input));
+        graph.push(' ');
+    }
+    graph.push('\n');
     let mut cached_rules_emitted = false;
     if let Some(cached_objects) = cached_graphics_objects.as_deref() {
         let (shared_objects, flavor_objects): (Vec<_>, Vec<_>) = cached_objects
@@ -508,6 +539,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push('\n');
     }
     graph.push_str("build graphics-bootstrap: phony ");
+    graph.push_str(&bootstrap_cli_target);
+    graph.push(' ');
     graph.push_str(&archive);
     graph.push('\n');
     if let Some(cached_objects) = cached_runtime_objects.as_deref() {
@@ -545,6 +578,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push('\n');
     }
     graph.push_str("build runtime-bootstrap: phony ");
+    graph.push_str(&bootstrap_cli_target);
+    graph.push(' ');
     graph.push_str(&runtime_archive);
     graph.push('\n');
 
@@ -1114,6 +1149,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&ninja_path(&runtime_entry_stamp));
     graph.push('\n');
     graph.push_str("build graphics-audit: phony ");
+    graph.push_str(&bootstrap_cli_target);
+    graph.push(' ');
     graph.push_str(&runtime_library);
     graph.push('\n');
     graph.push_str("build graph-input-digest: phony ");
