@@ -814,6 +814,27 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str("build ");
     graph.push_str(&runtime_library);
     graph.push_str(": graphics_audit ");
+    // The fast audit consumes these foundation artifacts directly.  Keep them
+    // as real Ninja prerequisites so a missing or rebuilt foundation cannot
+    // race the final dylib link/audit edge.
+    graph.push_str(&hwui_foundation_archive);
+    graph.push(' ');
+    graph.push_str(&hwui_apex_foundation_archive);
+    graph.push(' ');
+    graph.push_str(&graphics_jni_archive);
+    graph.push(' ');
+    graph.push_str(&graphics_registrar_archive);
+    graph.push(' ');
+    graph.push_str(&graphics_force_loaded_object);
+    graph.push(' ');
+    graph.push_str(&icu_common_archive);
+    graph.push(' ');
+    graph.push_str(&icu_i18n_archive);
+    graph.push(' ');
+    graph.push_str(&icu_stubdata_archive);
+    graph.push(' ');
+    graph.push_str(&icu_init_archive);
+    graph.push(' ');
     graph.push_str(&archive);
     graph.push(' ');
     graph.push_str(&filesystem_object);
