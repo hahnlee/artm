@@ -87,6 +87,11 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     const DarwinArtElfSymbolRequest* request,
     uintptr_t* out_address,
     DarwinArtElfErrorBuffer* error);
+ElfLibrary* AsElfLibrary(void* handle);
+int32_t ProxyRegisterNatives(void* context,
+                             void* clazz,
+                             const DarwinArtJniNativeMethod* methods,
+                             int32_t count);
 
 void* ProxyCurrentEnv(void* context);
 void* ProxyFindClass(void* context, const char* name);
