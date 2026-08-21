@@ -11,7 +11,7 @@ use crate::build_context::BuildPaths;
 use crate::help;
 use crate::native_build::{
     FileHashCache, common_cpp_command, compile_cpp, compile_with_dependency_cache, create_archive,
-    link_with_cache, record_cache_result,
+    link_with_cache,
 };
 use crate::support::{command_output, describe_command, run_command};
 
@@ -176,7 +176,7 @@ mod native_probe_commands;
 mod probe_commands;
 #[path = "runtime_art_build.rs"]
 mod runtime_art_build;
-#[path = "runtime_bootstrap.rs"]
+#[path = "runtime_bootstrap/mod.rs"]
 mod runtime_bootstrap;
 #[path = "runtime_commands.rs"]
 mod runtime_commands;
