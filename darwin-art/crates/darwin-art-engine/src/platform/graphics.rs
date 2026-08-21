@@ -65,7 +65,7 @@ impl GraphicsSession {
         status
     }
 
-    pub fn raw_handle(&self) -> *mut GraphicsSessionHandle {
+    pub(crate) fn raw_handle(&self) -> *mut GraphicsSessionHandle {
         self.handle
     }
 

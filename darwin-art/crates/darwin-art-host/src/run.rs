@@ -91,9 +91,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             provider_context,
             Some(ProviderBridge::acquire_callback()),
             Some(ProviderBridge::release_callback()),
-            runtime
-                .graphics()
-                .map_or(ptr::null_mut(), |session| session.raw_handle().cast()),
+            runtime.graphics(),
         ) {
             Ok(inputs) => inputs,
             Err(error) => {

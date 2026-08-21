@@ -6,7 +6,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
-use darwin_art_engine::{ProcessRequest, ProcessRequestError};
+use darwin_art_engine::{GraphicsSession, ProcessRequest, ProcessRequestError};
 use darwin_art_engine_sys::ProcessResult;
 
 use crate::OwnedFrame;
@@ -53,7 +53,7 @@ pub(crate) fn build_process_request(
     provider_context: *mut c_void,
     provider_acquire: Option<darwin_art_engine_sys::ProviderAcquireFn>,
     provider_release: Option<darwin_art_engine_sys::ProviderReleaseFn>,
-    graphics_session_context: *mut c_void,
+    graphics_session: Option<&GraphicsSession>,
 ) -> Result<ProcessRequest, HostError> {
     let mut request = ProcessRequest::new(
         &options.core_oj_jar,
@@ -77,9 +77,10 @@ pub(crate) fn build_process_request(
             provider_context,
             provider_acquire,
             provider_release,
-            graphics_session_context,
+            core::ptr::null_mut(),
         );
     }
+    request.bind_graphics_session(graphics_session);
     Ok(request)
 }
 

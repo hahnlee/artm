@@ -11,6 +11,8 @@ use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
+use super::graphics::GraphicsSession;
+
 #[derive(Debug)]
 pub enum ProcessRequestError {
     InteriorNul(PathBuf),
@@ -85,6 +87,15 @@ impl ProcessRequest {
         self.provider_acquire = provider_acquire;
         self.provider_release = provider_release;
         self.graphics_session_context = graphics_session_context;
+    }
+
+    /// Bind the live graphics owner without exposing its opaque ABI pointer to
+    /// host orchestration. The request borrows the session for the same
+    /// synchronous call in which `as_config` is materialized.
+    pub fn bind_graphics_session(&mut self, session: Option<&GraphicsSession>) {
+        self.graphics_session_context = session.map_or(core::ptr::null_mut(), |graphics| {
+            graphics.raw_handle().cast()
+        });
     }
 
     pub(crate) fn as_config(&self) -> ProcessConfig {
