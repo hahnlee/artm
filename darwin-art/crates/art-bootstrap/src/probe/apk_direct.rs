@@ -260,6 +260,23 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         &probe_cache,
         &compiler_identity,
     )?;
+    // The runtime entry point is intentionally kept as a thin orchestrator;
+    // its registration phase is a separate TU and every flavor must link it
+    // explicitly.  The direct-APK flavor used to omit this edge, which only
+    // surfaced when the APK-specific dylib was linked after the TU split.
+    let registration_object = build_dir.join("darwin_art_runtime_registration_phase.cc.o");
+    let mut registration_command = runtime_cpp_command(&include_refs);
+    registration_command
+        .arg("-c")
+        .arg(root.join("probes/runtime_registration_phase.cc"))
+        .arg("-o")
+        .arg(&registration_object);
+    let _ = compile_cached_probe_tu(
+        &mut registration_command,
+        &registration_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let graphics_probe_object = build_dir.join("darwin_art_runtime_graphics_probe.cc.o");
     let mut graphics_probe_command = runtime_cpp_command(&include_refs);
     graphics_probe_command
@@ -450,6 +467,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(&process_options_object)
         .arg(&shutdown_probe_object)
         .arg(&frame_probe_object)
+        .arg(&registration_object)
         .arg(&graphics_probe_object)
         .arg(&graphics_state_object)
         .arg(&network_loader_object)
