@@ -184,84 +184,13 @@ impl<E, P, S, G> RuntimeSession<E, P, S, G> {
         S: NativeResource,
         G: NativeResource,
     {
-        let mut first_status = self
-            .begin_shutdown()
-            .err()
-            .map(|error| error.status() as i32);
-        let mut remember = |status: i32| {
-            if status != 0 && first_status.is_none() {
-                first_status = Some(status);
-            }
-        };
-
-        if self.surface().is_some() {
-            if let Err(error) = self.remove_expected_subsystem(Subsystem::Surface) {
-                remember(error.status() as i32);
-            }
-            if let Some(surface) = self.surface_mut() {
-                remember(surface.close());
-            }
-            if let Err(error) = self.release_surface() {
-                remember(error.status() as i32);
-            }
-        }
-
-        if self.graphics().is_some() {
-            if let Err(error) = self.remove_expected_subsystem(Subsystem::Graphics) {
-                remember(error.status() as i32);
-            }
-            if let Ok(Some(graphics)) = self.graphics_for_shutdown_mut() {
-                remember(graphics.close());
-            }
-        }
-
-        if self.provider().is_some()
-            && let Err(error) = self.remove_expected_subsystem(Subsystem::ElfNamespace)
-        {
-            remember(error.status() as i32);
-        }
-
-        if self.engine().is_some()
-            && let Err(error) = self.remove_expected_subsystem(Subsystem::Engine)
-        {
-            remember(error.status() as i32);
-        }
-
-        // DestroyJavaVM may still execute provider-backed code, so the
-        // engine closes before provider hooks are cleared.
-        if let Some(engine) = self.engine_mut() {
-            remember(engine.close());
-        }
-        if let Err(error) = self.release_engine() {
-            remember(error.status() as i32);
-        }
-
-        if let Some(provider) = self.provider_mut() {
-            remember(provider.clear());
-        }
-        if let Err(error) = self.release_provider() {
-            remember(error.status() as i32);
-        }
-        if let Err(error) = self.release_graphics()
-            && self.graphics().is_some()
-        {
-            remember(error.status() as i32);
-        }
-
-        if first_status.is_none()
-            && let Err(error) = self.finish_shutdown()
-        {
-            first_status = Some(error.status() as i32);
-        }
-        if let Some(status) = first_status {
-            self.fail(RuntimeError::EngineFailure { status });
-            Err(RuntimeError::EngineFailure { status })
-        } else {
-            Ok(())
-        }
+        crate::shutdown::shutdown_native(self)
     }
 
-    fn remove_expected_subsystem(&mut self, expected: Subsystem) -> Result<(), RuntimeError> {
+    pub(crate) fn remove_expected_subsystem(
+        &mut self,
+        expected: Subsystem,
+    ) -> Result<(), RuntimeError> {
         match self.uninstall_latest_subsystem()? {
             Some(actual) if actual == expected => Ok(()),
             Some(actual) => Err(RuntimeError::InvalidShutdownOrder {

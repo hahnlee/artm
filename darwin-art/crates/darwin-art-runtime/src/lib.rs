@@ -14,6 +14,7 @@ mod owners;
 mod provider;
 mod provider_bridge;
 mod session;
+mod shutdown;
 
 pub use lifecycle::RuntimeLifecycle;
 pub use native_owner::{
