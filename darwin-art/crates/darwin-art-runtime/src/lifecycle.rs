@@ -9,6 +9,7 @@ use std::{
     collections::BTreeMap,
     marker::PhantomData,
     rc::Rc,
+    sync::atomic::{AtomicU64, Ordering},
     thread::{self, ThreadId},
 };
 
@@ -16,6 +17,7 @@ use super::{RuntimeError, RuntimePhase, Subsystem, SubsystemLease};
 
 /// Owner-thread lifecycle coordinator for production runtime resources.
 pub struct RuntimeLifecycle {
+    session_id: u64,
     owner: ThreadId,
     phase: RuntimePhase,
     failure: Option<RuntimeError>,
@@ -27,7 +29,9 @@ pub struct RuntimeLifecycle {
 
 impl RuntimeLifecycle {
     pub fn new() -> Self {
+        static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
         Self {
+            session_id: NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed),
             owner: thread::current().id(),
             phase: RuntimePhase::New,
             failure: None,
@@ -91,6 +95,7 @@ impl RuntimeLifecycle {
         Ok(SubsystemLease {
             subsystem,
             generation,
+            session_id: self.session_id,
         })
     }
 
@@ -108,6 +113,11 @@ impl RuntimeLifecycle {
             });
         }
         if self.subsystems.get(&lease.subsystem).copied() != Some(lease.generation) {
+            return Err(RuntimeError::SubsystemNotActive {
+                subsystem: lease.subsystem,
+            });
+        }
+        if lease.session_id != self.session_id {
             return Err(RuntimeError::SubsystemNotActive {
                 subsystem: lease.subsystem,
             });
@@ -183,5 +193,32 @@ mod tests {
         lifecycle.mark_running().unwrap();
         lifecycle.begin_shutdown().unwrap();
         lifecycle.finish_shutdown().unwrap();
+    }
+
+    #[test]
+    fn subsystem_leases_cannot_cross_runtime_sessions() {
+        let mut first = RuntimeLifecycle::new();
+        first.start().unwrap();
+        let first_lease = first.install_subsystem(Subsystem::Engine).unwrap();
+
+        let mut second = RuntimeLifecycle::new();
+        second.start().unwrap();
+        let second_lease = second.install_subsystem(Subsystem::Engine).unwrap();
+
+        // Both sessions intentionally use generation one.  The opaque
+        // session discriminator is what prevents a stale lease from tearing
+        // down a different runtime's engine.
+        assert_eq!(
+            second.uninstall_subsystem(first_lease),
+            Err(RuntimeError::SubsystemNotActive {
+                subsystem: Subsystem::Engine,
+            })
+        );
+        second.begin_shutdown().unwrap();
+        second.uninstall_subsystem(second_lease).unwrap();
+        second.finish_shutdown().unwrap();
+        first.begin_shutdown().unwrap();
+        first.uninstall_subsystem(first_lease).unwrap();
+        first.finish_shutdown().unwrap();
     }
 }

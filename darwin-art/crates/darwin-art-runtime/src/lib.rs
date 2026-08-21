@@ -75,6 +75,7 @@ pub enum Subsystem {
 pub struct SubsystemLease {
     subsystem: Subsystem,
     generation: u64,
+    session_id: u64,
 }
 
 impl SubsystemLease {
