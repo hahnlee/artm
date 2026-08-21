@@ -57,6 +57,10 @@ state machine or call a shutdown callback that is not held by the Rust owner.
    operation, while lease counts and teardown order remain in Rust. The
    owner slots are declared surface → provider → engine and are tested to
    preserve that reverse dependency order even on implicit Rust drop.
+   Provider lease accounting uses the Rust `ProviderKind` enum internally;
+   only the one-shot C callback adapter converts the versioned `u32` ABI tag.
+   Host installation order is engine → provider → graphics, so provider hooks
+   are cleared before the engine image is shut down or unmapped.
 4. `runtime_link_probe.cc` is an orchestration shell. ART setup, framework
    registration, ELF acceptance, and HWUI frame phases are separate cached
    native translation units with value-only phase inputs/outputs.
