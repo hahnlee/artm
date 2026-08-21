@@ -258,6 +258,16 @@ owning a copy of the compile policy. Graphics archive discovery and member
 validation are likewise owned by `GraphicsRuntimeInputs`, leaving the link
 routine responsible only for native compilation, linking, and symbol gates.
 
+The host composition is now one explicit `HostRuntime` alias in
+`darwin-art-host/src/runtime.rs`. Surface, GPU-loop, and teardown modules no
+longer repeat the four generic owner parameters, so changing the concrete
+engine/provider/surface/graphics composition has one compile-time boundary.
+The canonical core include search path is likewise constructed once by
+`native_probe::core::core_probe_includes`; CPU, Graphics, and direct-APK
+actions now fingerprint the same paths and consume the same object directory.
+This is a real cache boundary, not only a type alias: a second flavor does not
+recompile the six core TUs after the first flavor has populated the cache.
+
 Native ELF resource lifetime now crosses the same boundary through the Rust
 `darwin-art-runtime` static library. `RuntimeNativeOwner` stores opaque graph,
 image-registry, DSO, namespace, and provider slots with C drop callbacks and
