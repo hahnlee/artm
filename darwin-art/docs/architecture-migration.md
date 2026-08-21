@@ -103,13 +103,29 @@ ART-side bootstrap archive; it retains one cold fallback command for cache
 population while the runtime object graph is promoted after a complete archive
 exists.
 
-### M4 — acceptance and removal (in progress)
+### M4 — acceptance and removal (landed; measured follow-up continues)
 
 Run ART DEX, recursive ELF/JNI, libc++, TLS, APK, Button, Metal, input/ripple,
 and shutdown gates from the new owners. The legacy CPU presenter is now gone;
 headless runs tear down without a surface and graphics runs use only the direct
 Metal/HWUI loop. Remaining work is duplicate ABI/fallback removal and a
 measured phase-local invalidation audit.
+
+### M5 — ownership and orchestration decomposition (in progress)
+
+The first M5 slices are now in the tree. Locked AOSP file/archive download and
+generated-source materialization live in
+`art-bootstrap::source_materialization` instead of the command dispatcher.
+The host's surface, engine, and provider owners also use one best-effort Rust
+rollback path on every early return; a surface destroy or engine shutdown
+error is recorded without skipping the remaining owners. This keeps cleanup
+policy in Rust while leaving native ABI operations in `darwin-art-engine`.
+
+The remaining M5 work is deliberately incremental: move host run orchestration
+out of the public host facade, then split the remaining bootstrap/probe
+orchestration by phase. Each extraction must preserve the existing acceptance
+gates and report its native invalidation boundary; moving code without
+narrowing a rebuild edge is not considered progress.
 
 ## Measurement gates
 
@@ -127,8 +143,8 @@ the same machine:
 
 The current implementation has the probe/object cache, graphics-JNI/HWUI/ICU
 foundation stamps, concrete RuntimeSession ownership, and the low-level ART
-build/bootstrap split. M1–M3 are landed for the measured boundaries above;
-M4 is in progress. The host-side legacy CPU/IOSurface upload presenter has
+build/bootstrap split. M1–M4 are landed for the measured boundaries above;
+M5 is in progress. The host-side legacy CPU/IOSurface upload presenter has
 been removed: headless runs tear down without allocating a surface, and
 graphics runs enter only the direct Metal/HWUI loop. Remaining M4 work is
 removing duplicate ABI declarations and broad fallback edges, then proving
