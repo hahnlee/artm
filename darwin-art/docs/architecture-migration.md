@@ -371,6 +371,12 @@ is now a 279-line command/test boundary. This is intentionally a source/build
 boundary only: it does not pretend that the remaining framework-native
 registration TU is already Rust-owned.
 
+The ELF loader's C boundary follows the same separation: `ffi_types.rs` owns
+the public versioned PODs, opaque handles, and callback signatures, while
+`ffi.rs` owns pointer validation, panic containment, resolver adaptation, and
+the exported operations. This keeps ABI edits reviewable without mixing them
+with loader transaction code.
+
 ## Measurement gates
 
 The migration is considered successful only when all of these are recorded on
