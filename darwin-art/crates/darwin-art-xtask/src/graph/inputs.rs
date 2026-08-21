@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::super::ninja_path;
+use super::atomic;
 
 pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
     // This digest is the invalidation boundary for native objects, not for
@@ -245,7 +246,7 @@ pub(crate) fn probe_content_stamp(root: &Path, name: &str, paths: &[&str]) -> io
         if let Some(parent) = stamp.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&stamp, content)?;
+        atomic::write(&stamp, content.as_bytes())?;
     }
     Ok(stamp)
 }

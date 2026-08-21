@@ -1,10 +1,11 @@
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 
 use darwin_art_build_contract::RUNTIME_CACHE_IDENTITY;
 
 use super::super::*;
+use super::atomic;
 use super::cache::{
     cached_native_objects_from_dirs, emit_cached_native_graph, emit_cached_native_graph_with_inputs,
 };
@@ -35,9 +36,12 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let cache_dir = root.join("_build/native-cache").join(&digest);
     fs::create_dir_all(&cache_dir)?;
     let digest_path = cache_dir.join("inputs.sha256");
-    fs::write(&digest_path, format!("{digest}  {GRAPH_VERSION}\n"))?;
-    fs::write(
-        cache_dir.join("manifest.json"),
+    atomic::write(
+        &digest_path,
+        format!("{digest}  {GRAPH_VERSION}\n").as_bytes(),
+    )?;
+    atomic::write(
+        &cache_dir.join("manifest.json"),
         format!(
             "{{\"graph_version\":\"{GRAPH_VERSION}\",\"digest\":\"{digest}\",\"input_count\":{},\"compiler\":\"{}\",\"sdk\":\"{}\",\"edges\":[{}]}}\n",
             bootstrap_inputs.len(),
@@ -56,7 +60,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
                 })
                 .collect::<Vec<_>>()
                 .join(",")
-        ),
+        )
+        .as_bytes(),
     )?;
 
     let root_for_shell = root.to_string_lossy().into_owned();
@@ -1068,8 +1073,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
 
     emit_representative_edges(&mut graph, &root, &cache_dir, &toolchain)?;
 
-    let mut file = fs::File::create(out)?;
-    file.write_all(graph.as_bytes())?;
+    atomic::write(out, graph.as_bytes())?;
     println!(
         "darwin-art-xtask: wrote {} (inputs={} digest={digest})",
         out.display(),
