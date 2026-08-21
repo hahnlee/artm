@@ -110,6 +110,20 @@ impl<E, P, S> Default for RuntimeOwners<E, P, S> {
 #[cfg(test)]
 mod tests {
     use super::RuntimeOwners;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[derive(Debug)]
+    struct DropProbe {
+        name: &'static str,
+        order: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    impl Drop for DropProbe {
+        fn drop(&mut self) {
+            self.order.borrow_mut().push(self.name);
+        }
+    }
 
     #[test]
     fn slots_reject_duplicates_and_preserve_concrete_values() {
@@ -125,5 +139,31 @@ mod tests {
         assert_eq!(owners.take_provider(), Some(3));
         assert_eq!(owners.take_engine(), Some(1));
         assert!(owners.is_empty());
+    }
+
+    #[test]
+    fn implicit_drop_preserves_surface_provider_engine_order() {
+        let order = Rc::new(RefCell::new(Vec::new()));
+        let mut owners = RuntimeOwners::new();
+        owners
+            .attach_engine(DropProbe {
+                name: "engine",
+                order: Rc::clone(&order),
+            })
+            .unwrap();
+        owners
+            .attach_provider(DropProbe {
+                name: "provider",
+                order: Rc::clone(&order),
+            })
+            .unwrap();
+        owners
+            .attach_surface(DropProbe {
+                name: "surface",
+                order: Rc::clone(&order),
+            })
+            .unwrap();
+        drop(owners);
+        assert_eq!(&*order.borrow(), &["surface", "provider", "engine"]);
     }
 }
