@@ -10,7 +10,13 @@ Generate the graph with:
 ```sh
 cargo run -p darwin-art-xtask -- native-graph --out _build/native-graph/build.ninja
 ninja -f _build/native-graph/build.ninja -n graphics-bootstrap
+./tools/audit-native-graph.sh
 ```
+
+`audit-native-graph.sh` is the structural gate: it requires the promoted ART
+runtime, GraphicsJNI, and all 458 ICU TU edges, checks that compiler depfiles
+are enabled, and requires a warm ICU target to report `no work to do`. It does
+not infer cache hits from wall time alone.
 
 On a clean checkout with no native fingerprints, the runtime target is a
 single bootstrap edge. After that first successful build, graph generation
