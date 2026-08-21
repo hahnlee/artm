@@ -51,7 +51,9 @@ state machine or call a shutdown callback that is not held by the Rust owner.
    by Rust layout tests plus the native static assertions.
 3. `RuntimeSession` contains concrete typed engine/surface/provider owners;
    the only callback retained at the FFI edge is the one-shot ART shutdown
-   operation, while lease counts and teardown order remain in Rust.
+   operation, while lease counts and teardown order remain in Rust. The
+   owner slots are declared surface → provider → engine and are tested to
+   preserve that reverse dependency order even on implicit Rust drop.
 4. `runtime_link_probe.cc` is an orchestration shell. ART setup, framework
    registration, ELF acceptance, and HWUI frame phases are separate cached
    native translation units with value-only phase inputs/outputs.
