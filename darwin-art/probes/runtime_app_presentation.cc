@@ -4,6 +4,7 @@
 
 #include "runtime_graphics_phase.h"
 #include "runtime_jni_scope.h"
+#include "runtime_app_resources.h"
 #include "mirror/throwable.h"
 #include "thread-current-inl.h"
 
@@ -30,10 +31,30 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   }
   constexpr jint kApkFrameWidth = 360;
   constexpr jint kApkFrameHeight = 640;
+  darwin_art_app_resources::Bundle resources;
+  if (darwin_art_app_resources::prepare(
+          env, probe_resources_class, use_framework_resources, window_scale,
+          framework_res_apk, &resources) != 0) {
+    std::cerr << "ART Android resources: bootstrap construction failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 27;
+  }
+  // Keep the call site readable while the resource phase owns construction
+  // and release of these JNI locals.
+  jclass activity_info_class = resources.activity_info_class;
+  jclass application_class = resources.application_class;
+  jclass asset_manager_class = resources.asset_manager_class;
+  jclass apk_assets_class = resources.apk_assets_class;
+  jobject activity_info = resources.activity_info;
+  jobject application = resources.application;
+  jobject asset_manager = resources.asset_manager;
+  jobject framework_apk_assets = resources.framework_apk_assets;
+  jstring framework_res_path = resources.framework_res_path;
+  jobjectArray configured_apk_assets = resources.configured_apk_assets;
+  jobject probe_resources = resources.probe_resources;
   jclass activity_class = env->GetSuperclass(probe_activity_class);
-  jclass activity_info_class =
-      env->FindClass("android/content/pm/ActivityInfo");
-  jclass application_class = env->FindClass("android/app/Application");
   jclass intent_class = env->FindClass("android/content/Intent");
   jclass component_name_class =
       env->FindClass("android/content/ComponentName");
@@ -43,116 +64,6 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
       configuration_class == nullptr
           ? nullptr
           : env->GetMethodID(configuration_class, "<init>", "()V");
-  jclass asset_manager_class =
-      env->FindClass("android/content/res/AssetManager");
-  jmethodID activity_info_constructor =
-      activity_info_class == nullptr
-          ? nullptr
-          : env->GetMethodID(activity_info_class, "<init>", "()V");
-  jmethodID application_constructor =
-      application_class == nullptr
-          ? nullptr
-          : env->GetMethodID(application_class, "<init>", "()V");
-  jobject activity_info =
-      activity_info_constructor == nullptr
-          ? nullptr
-          : env->NewObject(activity_info_class, activity_info_constructor);
-  jobject application =
-      application_constructor == nullptr
-          ? nullptr
-          : env->NewObject(application_class, application_constructor);
-  jmethodID asset_manager_constructor =
-      asset_manager_class == nullptr
-          ? nullptr
-          : env->GetMethodID(asset_manager_class, "<init>", "(Z)V");
-  jobject asset_manager =
-      asset_manager_constructor == nullptr
-          ? nullptr
-          : env->NewObject(asset_manager_class, asset_manager_constructor,
-                           JNI_TRUE);
-  jclass apk_assets_class = env->FindClass("android/content/res/ApkAssets");
-  jobject framework_apk_assets = nullptr;
-  jstring framework_res_path = nullptr;
-  jobjectArray configured_apk_assets = nullptr;
-  if (use_framework_resources && apk_assets_class != nullptr &&
-      asset_manager != nullptr) {
-    jmethodID load_from_path = env->GetStaticMethodID(
-        apk_assets_class, "loadFromPath",
-        "(Ljava/lang/String;)Landroid/content/res/ApkAssets;");
-    framework_res_path = env->NewStringUTF(framework_res_apk);
-    framework_apk_assets =
-        load_from_path == nullptr || framework_res_path == nullptr
-            ? nullptr
-            : env->CallStaticObjectMethod(apk_assets_class, load_from_path,
-                                          framework_res_path);
-    configured_apk_assets =
-        framework_apk_assets == nullptr
-            ? nullptr
-            : env->NewObjectArray(1, apk_assets_class, framework_apk_assets);
-  } else if (apk_assets_class != nullptr) {
-    configured_apk_assets = env->NewObjectArray(0, apk_assets_class, nullptr);
-  }
-  jfieldID apk_assets_field =
-      asset_manager_class == nullptr
-          ? nullptr
-          : env->GetFieldID(asset_manager_class, "mApkAssets",
-                            "[Landroid/content/res/ApkAssets;");
-  if (!use_framework_resources && asset_manager != nullptr &&
-      apk_assets_field != nullptr &&
-      configured_apk_assets != nullptr) {
-    env->SetObjectField(asset_manager, apk_assets_field,
-                        configured_apk_assets);
-  } else if (use_framework_resources && asset_manager != nullptr &&
-             apk_assets_field != nullptr && configured_apk_assets != nullptr) {
-    jfieldID asset_manager_object =
-        env->GetFieldID(asset_manager_class, "mObject", "J");
-    jmethodID native_set_apk_assets = env->GetStaticMethodID(
-        asset_manager_class, "nativeSetApkAssets",
-        "(J[Landroid/content/res/ApkAssets;ZZ)V");
-    if (asset_manager_object != nullptr && native_set_apk_assets != nullptr) {
-      const jlong native_asset_manager =
-          env->GetLongField(asset_manager, asset_manager_object);
-      env->CallStaticVoidMethod(asset_manager_class, native_set_apk_assets,
-                                native_asset_manager, configured_apk_assets,
-                                JNI_FALSE, JNI_FALSE);
-      if (!env->ExceptionCheck()) {
-        env->SetObjectField(asset_manager, apk_assets_field,
-                            configured_apk_assets);
-      }
-    }
-  }
-  jmethodID probe_resources_constructor =
-      probe_resources_class == nullptr
-          ? nullptr
-          : env->GetMethodID(probe_resources_class, "<init>",
-                             "(Landroid/content/res/AssetManager;Z)V");
-  jmethodID configure_display_scale =
-      probe_resources_class == nullptr
-          ? nullptr
-          : env->GetStaticMethodID(probe_resources_class,
-                                   "configureDisplayScale", "(I)V");
-  if (configure_display_scale != nullptr) {
-    env->CallStaticVoidMethod(probe_resources_class, configure_display_scale,
-                              window_scale);
-  }
-  jobject probe_resources =
-      probe_resources_constructor == nullptr || asset_manager == nullptr ||
-              env->ExceptionCheck()
-          ? nullptr
-          : env->NewObject(probe_resources_class, probe_resources_constructor,
-                           asset_manager,
-                           use_framework_resources ? JNI_TRUE : JNI_FALSE);
-  if (activity_info == nullptr || application == nullptr ||
-      asset_manager == nullptr || configured_apk_assets == nullptr ||
-      apk_assets_field == nullptr || configure_display_scale == nullptr ||
-      probe_resources == nullptr ||
-      env->ExceptionCheck()) {
-    std::cerr << "ART Android resources: bootstrap construction failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
-    }
-    return 27;
-  }
   jmethodID probe_context_constructor =
       probe_context_class == nullptr
           ? nullptr
@@ -572,8 +483,7 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
           kApkFrameHeight * window_scale) != 0) {
     return 33;
   }
-  env->DeleteLocalRef(application);
-  env->DeleteLocalRef(activity_info);
+  darwin_art_app_resources::release(env, &resources);
   env->DeleteLocalRef(context_theme_wrapper_class);
   env->DeleteLocalRef(probe_theme);
   env->DeleteLocalRef(window_background);
@@ -598,21 +508,12 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   env->DeleteLocalRef(configuration_class);
   env->DeleteLocalRef(component_name_class);
   env->DeleteLocalRef(intent_class);
-  env->DeleteLocalRef(configured_apk_assets);
-  env->DeleteLocalRef(framework_res_path);
-  env->DeleteLocalRef(framework_apk_assets);
-  env->DeleteLocalRef(apk_assets_class);
-  env->DeleteLocalRef(asset_manager);
-  env->DeleteLocalRef(asset_manager_class);
   env->DeleteLocalRef(probe_context);
-  env->DeleteLocalRef(probe_resources);
   env->DeleteLocalRef(probe_resources_class);
   env->DeleteLocalRef(probe_view_class);
   env->DeleteLocalRef(probe_canvas_class);
   env->DeleteLocalRef(content_root_class);
   env->DeleteLocalRef(probe_context_class);
-  env->DeleteLocalRef(application_class);
-  env->DeleteLocalRef(activity_info_class);
   env->DeleteLocalRef(activity_class);
   env->DeleteLocalRef(activity_instance);
   if (lifecycle_result != 43) {

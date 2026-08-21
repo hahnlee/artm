@@ -174,6 +174,11 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     } else {
         compile_runtime_app_presentation_probe(root, &build_dir, &include_refs)?
     };
+    let app_resources_object = app_resources_object_path(&build_dir);
+    require_file(
+        &app_resources_object,
+        "runtime app resources object is missing",
+    )?;
     let mut surface_command = Command::new("clang++");
     surface_command
         .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
@@ -261,6 +266,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&network_loader_object)
         .arg(&context_loader_object)
         .arg(&app_bootstrap_object)
+        .arg(&app_resources_object)
         .arg(&app_presentation_object)
         .arg(&jni_acceptance_object)
         .arg(&graphics_phase_object)

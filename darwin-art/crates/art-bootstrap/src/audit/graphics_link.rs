@@ -334,6 +334,11 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     } else {
         compile_runtime_app_presentation_probe(root, &build_dir, &include_refs)?
     };
+    let app_resources_object = app_resources_object_path(&build_dir);
+    require_file(
+        &app_resources_object,
+        "graphics app resources object is missing",
+    )?;
     let (surface_object, surface_gpu_object) =
         compile_surface_objects(root, &build_dir, &probe_cache, &compiler_identity)?;
 
@@ -383,6 +388,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&network_loader_object)
         .arg(&context_loader_object)
         .arg(&app_bootstrap_object)
+        .arg(&app_resources_object)
         .arg(&app_presentation_object)
         .arg(&jni_acceptance_object)
         .arg(&graphics_session_object_real)

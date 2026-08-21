@@ -20,6 +20,7 @@ pub(crate) struct ProbeGraphInputs {
     pub(crate) graphics_session_inputs: String,
     pub(crate) jni_acceptance_inputs: String,
     pub(crate) app_bootstrap_inputs: String,
+    pub(crate) app_resources_inputs: String,
     pub(crate) app_presentation_inputs: String,
     pub(crate) filesystem_probe_stamp: PathBuf,
     pub(crate) network_probe_stamp: PathBuf,
@@ -31,6 +32,7 @@ pub(crate) struct ProbeGraphInputs {
     pub(crate) graphics_session_stamp: PathBuf,
     pub(crate) jni_acceptance_stamp: PathBuf,
     pub(crate) app_bootstrap_stamp: PathBuf,
+    pub(crate) app_resources_stamp: PathBuf,
     pub(crate) app_presentation_stamp: PathBuf,
     pub(crate) runtime_entry_stamp: PathBuf,
 }
@@ -134,6 +136,13 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
             "probes/runtime_app_presentation.h",
             "probes/runtime_graphics_phase.h",
             "probes/runtime_graphics_state.h",
+        ],
+    );
+    let app_resources_inputs = probe_inputs(
+        root,
+        &[
+            "probes/runtime_app_resources.cc",
+            "probes/runtime_app_resources.h",
         ],
     );
     // Ninja normally invalidates by mtime.  These stable content stamps make
@@ -248,6 +257,14 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
             "probes/runtime_graphics_state.h",
         ],
     )?;
+    let app_resources_stamp = probe_content_stamp(
+        root,
+        "app-resources",
+        &[
+            "probes/runtime_app_resources.cc",
+            "probes/runtime_app_resources.h",
+        ],
+    )?;
     // The graphics link command compiles the process entry TU as part of its
     // phase orchestration. Keep that source's content identity as an explicit
     // Ninja prerequisite so a checkout that preserves mtimes cannot reuse a
@@ -277,6 +294,7 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
         graphics_session_inputs,
         jni_acceptance_inputs,
         app_bootstrap_inputs,
+        app_resources_inputs,
         app_presentation_inputs,
         filesystem_probe_stamp,
         network_probe_stamp,
@@ -288,6 +306,7 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
         graphics_session_stamp,
         jni_acceptance_stamp,
         app_bootstrap_stamp,
+        app_resources_stamp,
         app_presentation_stamp,
         runtime_entry_stamp,
     })

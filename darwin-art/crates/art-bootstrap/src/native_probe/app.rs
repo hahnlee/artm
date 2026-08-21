@@ -71,6 +71,48 @@ pub(crate) fn compile_runtime_app_bootstrap_probe(
     Ok(object)
 }
 
+/// Compile the framework-resource construction phase separately from the
+/// Activity/PhoneWindow presentation phase. Resource/APK asset edits now
+/// invalidate this narrow object instead of the full presentation TU.
+pub(crate) fn app_resources_object_path(build_dir: &Path) -> PathBuf {
+    env::var_os("DARWIN_ART_NATIVE_APP_RESOURCES_OBJECT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| build_dir.join("darwin_art_runtime_app_resources.cc.o"))
+}
+
+pub(crate) fn compile_runtime_app_resources_probe(
+    root: &Path,
+    build_dir: &Path,
+    includes: &[&Path],
+) -> Result<PathBuf> {
+    let object = app_resources_object_path(build_dir);
+    if let Some(parent) = object.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let cache_path = build_dir.join("runtime-probe-app-resources-hashes.cache");
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
+    let mut command = runtime_cpp_command(includes);
+    command
+        .args([
+            "-include",
+            "mirror/object_reference.h",
+            "-DDARWIN_ART_REAL_GRAPHICS",
+            "-DDARWIN_ART_HWUI_GPU",
+        ])
+        .arg("-idirafter")
+        .arg(&ndk_arch_include)
+        .arg("-idirafter")
+        .arg(&ndk_include)
+        .arg("-Wno-macro-redefined")
+        .arg("-c")
+        .arg(root.join("probes/runtime_app_resources.cc"))
+        .arg("-o")
+        .arg(&object);
+    let _ = compile_cached_probe_tu(&mut command, &object, &cache_path, &compiler_identity)?;
+    Ok(object)
+}
+
 /// Compile the detached Activity/PhoneWindow/DecorView presentation phase as
 /// its own cacheable translation unit. This keeps framework/JNI presentation
 /// edits from rebuilding the runtime entry orchestration and bootstrap.
@@ -79,6 +121,9 @@ pub(crate) fn compile_runtime_app_presentation_probe(
     build_dir: &Path,
     includes: &[&Path],
 ) -> Result<PathBuf> {
+    // Keep the helper cache warm for direct callers; link callers add the
+    // returned object explicitly to the final dylib.
+    let _ = compile_runtime_app_resources_probe(root, build_dir, includes)?;
     let object = env::var_os("DARWIN_ART_NATIVE_APP_PRESENTATION_OBJECT")
         .map(PathBuf::from)
         .unwrap_or_else(|| build_dir.join("darwin_art_runtime_app_presentation.cc.o"));
@@ -164,6 +209,7 @@ fn build_detached_app_probe(root: &Path, presentation: bool) -> Result<()> {
     let includes = app_probe_include_paths(root);
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
     let object = if presentation {
+        let _ = compile_runtime_app_resources_probe(root, build_dir, &include_refs)?;
         compile_runtime_app_presentation_probe(root, build_dir, &include_refs)?
     } else {
         compile_runtime_app_bootstrap_probe(root, build_dir, &include_refs)?
