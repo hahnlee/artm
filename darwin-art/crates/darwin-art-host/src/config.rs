@@ -47,25 +47,24 @@ impl RunOptions {
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn build_process_request(
+pub(crate) fn build_process_request<'a>(
     options: &RunOptions,
     host_context: *mut c_void,
     frame_callback: Option<darwin_art_engine_sys::FrameCallback>,
-    provider: &ProviderBridge,
+    provider: &'a ProviderBridge,
     provider_acquire: Option<darwin_art_engine_sys::ProviderAcquireFn>,
     provider_release: Option<darwin_art_engine_sys::ProviderReleaseFn>,
-    graphics_session: Option<&GraphicsSession>,
-) -> Result<ProcessRequest, HostError> {
+    graphics_session: Option<&'a GraphicsSession>,
+) -> Result<ProcessRequest<'a>, HostError> {
     // SAFETY: FrameHost, ProviderBridge, and the optional graphics session are
     // owned by the caller for the complete synchronous engine invocation.
     let callbacks = unsafe {
         CallbackBindings::from_raw(
             host_context,
             frame_callback,
-            provider.context(),
+            provider,
             provider_acquire,
             provider_release,
-            core::ptr::null_mut(),
         )
     }
     .map_err(|error| match error {

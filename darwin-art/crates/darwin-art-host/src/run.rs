@@ -63,13 +63,13 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             frames_received: 0,
             last_frame: None,
         };
-        let request = {
+        let process = {
             let runtime = shutdown_guard.runtime();
             let Some(provider) = runtime.provider() else {
                 let _ = shutdown_guard.shutdown();
                 return Err(HostError::RuntimeFailed(-1));
             };
-            match build_process_request(
+            let request = match build_process_request(
                 options,
                 ptr::from_mut(&mut frame_host).cast(),
                 Some(receive_frame),
@@ -83,22 +83,17 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     let _ = shutdown_guard.shutdown();
                     return Err(error);
                 }
-            }
-        };
-
-        let process = match shutdown_guard
-            .runtime()
-            .engine()
-            .ok_or(HostError::RuntimeFailed(-1))
-            .and_then(|engine| {
-                engine
-                    .run_request(&request)
-                    .map_err(HostError::RuntimeFailed)
-            }) {
-            Ok(result) => result,
-            Err(error) => {
+            };
+            let Some(engine) = runtime.engine() else {
                 let _ = shutdown_guard.shutdown();
-                return Err(error);
+                return Err(HostError::RuntimeFailed(-1));
+            };
+            match engine.run_request(&request) {
+                Ok(result) => result,
+                Err(error) => {
+                    let _ = shutdown_guard.shutdown();
+                    return Err(HostError::RuntimeFailed(error));
+                }
             }
         };
 

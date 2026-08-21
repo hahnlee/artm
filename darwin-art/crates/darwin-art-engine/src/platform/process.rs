@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 
 use super::graphics::GraphicsSession;
+use darwin_art_runtime::ProviderBridge;
 
 #[derive(Debug)]
 pub enum ProcessRequestError {
@@ -26,34 +27,33 @@ pub enum ProcessRequestError {
 /// engine layers carry this value by ownership and cannot accidentally omit a
 /// required context or pass an unpaired provider callback.
 #[derive(Clone, Copy)]
-pub struct CallbackBindings {
+pub struct CallbackBindings<'a> {
     host_context: NonNull<c_void>,
     frame_callback: Option<FrameCallback>,
-    provider_context: NonNull<c_void>,
+    provider: &'a ProviderBridge,
     provider_acquire: Option<ProviderAcquireFn>,
     provider_release: Option<ProviderReleaseFn>,
-    graphics_session_context: Option<NonNull<c_void>>,
+    graphics_session: Option<&'a GraphicsSession>,
 }
 
-impl CallbackBindings {
+impl<'a> CallbackBindings<'a> {
     /// # Safety
     ///
-    /// Each non-null context must remain valid and synchronized, and each
-    /// callback must remain callable, until the synchronous engine call
-    /// returns. The native ART graph may invoke provider callbacks on
-    /// attached ART threads during that call.
+    /// The host context must remain valid and synchronized, and each callback
+    /// must remain callable, until the synchronous engine call returns. The
+    /// provider and optional graphics session are borrowed by the returned
+    /// request, so Rust also prevents either owner from being dropped before
+    /// the native call finishes. The native ART graph may invoke provider
+    /// callbacks on attached ART threads during that call.
     pub unsafe fn from_raw(
         host_context: *mut c_void,
         frame_callback: Option<FrameCallback>,
-        provider_context: *mut c_void,
+        provider: &'a ProviderBridge,
         provider_acquire: Option<ProviderAcquireFn>,
         provider_release: Option<ProviderReleaseFn>,
-        graphics_session_context: *mut c_void,
     ) -> Result<Self, ProcessRequestError> {
         let host_context = NonNull::new(host_context)
             .ok_or(ProcessRequestError::MissingCallbackContext("host"))?;
-        let provider_context = NonNull::new(provider_context)
-            .ok_or(ProcessRequestError::MissingCallbackContext("provider"))?;
         if provider_acquire.is_some() != provider_release.is_some() {
             return Err(ProcessRequestError::MissingCallbackContext(
                 "provider callback pair",
@@ -62,25 +62,24 @@ impl CallbackBindings {
         Ok(Self {
             host_context,
             frame_callback,
-            provider_context,
+            provider,
             provider_acquire,
             provider_release,
-            graphics_session_context: NonNull::new(graphics_session_context),
+            graphics_session: None,
         })
     }
 
     /// Attach the live graphics owner without exposing its opaque ABI pointer
     /// to host orchestration. The request borrows the session for the same
     /// synchronous call in which the wire config is materialized.
-    pub fn with_graphics_session(mut self, session: Option<&GraphicsSession>) -> Self {
-        self.graphics_session_context =
-            session.and_then(|graphics| NonNull::new(graphics.raw_handle().cast()));
+    pub fn with_graphics_session(mut self, session: Option<&'a GraphicsSession>) -> Self {
+        self.graphics_session = session;
         self
     }
 }
 
 /// Owns the complete input lifetime for one synchronous ART process call.
-pub struct ProcessRequest {
+pub struct ProcessRequest<'a> {
     core_oj_jar: CString,
     core_libart_jar: CString,
     framework_jar: CString,
@@ -88,10 +87,10 @@ pub struct ProcessRequest {
     app_dex: CString,
     heap_initial_bytes: u64,
     heap_maximum_bytes: u64,
-    callbacks: CallbackBindings,
+    callbacks: CallbackBindings<'a>,
 }
 
-impl ProcessRequest {
+impl<'a> ProcessRequest<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         core_oj_jar: &Path,
@@ -101,7 +100,7 @@ impl ProcessRequest {
         app_dex: &Path,
         heap_initial_bytes: u64,
         heap_maximum_bytes: u64,
-        callbacks: CallbackBindings,
+        callbacks: CallbackBindings<'a>,
     ) -> Result<Self, ProcessRequestError> {
         Ok(Self {
             core_oj_jar: path_c_string(core_oj_jar)?,
@@ -126,14 +125,16 @@ impl ProcessRequest {
             self.heap_maximum_bytes,
             self.callbacks.host_context.as_ptr(),
             self.callbacks.frame_callback,
-            self.callbacks.provider_context.as_ptr(),
+            self.callbacks.provider.context(),
             self.callbacks.provider_acquire,
             self.callbacks.provider_release,
         )
         .with_graphics_session(
             self.callbacks
-                .graphics_session_context
-                .map_or(core::ptr::null_mut(), NonNull::as_ptr),
+                .graphics_session
+                .map_or(core::ptr::null_mut(), |graphics| {
+                    graphics.raw_handle().cast()
+                }),
         )
     }
 }

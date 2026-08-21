@@ -56,7 +56,7 @@ impl EngineSession {
     /// Run an owned request without exposing the raw ABI struct to host
     /// orchestration. The request keeps all referenced strings and callback
     /// state alive until this synchronous call returns.
-    pub fn run_request(&self, request: &ProcessRequest) -> Result<ProcessResult, i32> {
+    pub fn run_request(&self, request: &ProcessRequest<'_>) -> Result<ProcessResult, i32> {
         let config = request.as_config();
         self.run_process(&config)
     }
