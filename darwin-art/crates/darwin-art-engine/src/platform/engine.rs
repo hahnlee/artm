@@ -73,7 +73,7 @@ impl EngineSession {
     /// Run one process through the versioned ABI and construct its result
     /// in the same crate that owns the raw function pointer. The caller
     /// receives no partially initialized result on a nonzero status.
-    pub fn run_process(&self, config: &ProcessConfig) -> Result<ProcessResult, i32> {
+    pub(crate) fn run_process(&self, config: &ProcessConfig) -> Result<ProcessResult, i32> {
         if !config.is_compatible() {
             return Err(-1);
         }

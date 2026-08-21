@@ -10,7 +10,10 @@ mod surface;
 mod teardown;
 
 pub use config::{HostError, HostOutcome, RunOptions};
-pub use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProcessResult};
+// The host surface intentionally exports only the value result. Raw config
+// structs and callback function pointers belong to `darwin-art-engine-sys` and
+// are kept behind the owned `ProcessRequest` path.
+pub use darwin_art_engine_sys::ProcessResult;
 pub use frame::OwnedFrame;
 pub use run::run;
 
