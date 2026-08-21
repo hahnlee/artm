@@ -11,6 +11,10 @@ class DexFile;
 class Thread;
 }  // namespace art
 
+namespace darwin_art_graphics {
+struct GraphicsState;
+}
+
 namespace darwin_art_process {
 
 enum class ShutdownBeginResult {
@@ -25,6 +29,7 @@ struct ShutdownSnapshot {
   JavaVM* java_vm = nullptr;
   art::Thread* art_thread = nullptr;
   bool resource_runtime_installed = false;
+  darwin_art_graphics::GraphicsState* graphics_state = nullptr;
 };
 
 // Value-only acceptance state shared by the orchestration and shutdown
@@ -41,6 +46,7 @@ struct AcceptanceSnapshot {
 
 bool begin_run();
 void record_created_runtime(art::Thread* art_thread);
+void record_graphics_state(darwin_art_graphics::GraphicsState* state);
 void record_resource_runtime_installed();
 void finish_run();
 void record_app_dex_file(std::unique_ptr<const art::DexFile> dex_file);

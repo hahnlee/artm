@@ -87,37 +87,14 @@
 
 namespace darwin_art_graphics {
 
-// Keep the presentation code readable while making the ownership boundary
-// explicit: these are references to slots owned by runtime_graphics_state.cc.
-static jclass& g_probe_canvas_class = probe_canvas_class_for_state();
-static jobject& g_interactive_root = interactive_root_for_state();
-static jobject& g_gpu_render_node = gpu_render_node_for_state();
-static bool& g_gpu_render_node_recorded = gpu_render_node_recorded_for_state();
-static bool& g_gpu_ripple_overlay_active =
-    gpu_ripple_overlay_active_for_state();
-static jfloat& g_gpu_ripple_overlay_x = gpu_ripple_overlay_x_for_state();
-static jfloat& g_gpu_ripple_overlay_y = gpu_ripple_overlay_y_for_state();
-static auto& g_gpu_ripple_overlay_started =
-    gpu_ripple_overlay_started_for_state();
-static jobject& g_pressed_view = pressed_view_for_state();
-static uint32_t& g_pending_pressed_action = pending_pressed_action_for_state();
-static jfloat& g_pending_pressed_x = pending_pressed_x_for_state();
-static jfloat& g_pending_pressed_y = pending_pressed_y_for_state();
-static jint& g_interactive_width = interactive_width_for_state();
-static jint& g_interactive_height = interactive_height_for_state();
-static DarwinArtSurface*& g_gpu_surface = gpu_surface_for_state();
 #if defined(DARWIN_ART_REAL_GRAPHICS)
-static auto& g_hwui_time_lord = hwui_time_lord_owner_for_state();
-static auto& g_hwui_animation_context = hwui_animation_context_owner_for_state();
-#endif
-
-#if defined(DARWIN_ART_REAL_GRAPHICS)
-static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
-                                  jint height) {
+static jboolean PresentGpuContent(GraphicsState* state, JNIEnv* env, jobject view,
+                                  jint width, jint height) {
+  if (state == nullptr) return JNI_FALSE;
   if (!darwin_art::hwui_gpu_enabled()) {
     return JNI_FALSE;
   }
-  if (g_gpu_surface == nullptr) {
+  if (state->gpu_surface == nullptr) {
     DarwinArtSurfaceCreateInfo info{
         .width = static_cast<uint32_t>(width),
         .height = static_cast<uint32_t>(height),
@@ -125,23 +102,23 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
         .visible = true,
     };
     DarwinArtSurfaceResult result = DARWIN_ART_SURFACE_OK;
-    g_gpu_surface = darwin_art_surface_create(&info, &result);
-    if (g_gpu_surface == nullptr) {
+    state->gpu_surface = darwin_art_surface_create(&info, &result);
+    if (state->gpu_surface == nullptr) {
       std::cerr << "ART HWUI GPU: surface initialization failed status="
                 << result << "\n";
       return JNI_FALSE;
     }
-    darwin_art_surface_set_active_gpu(g_gpu_surface);
+    darwin_art_surface_set_active_gpu(state->gpu_surface);
   }
 
   // ACTION_MOVE is intentionally replay-only. Re-recording View.draw() every
   // 16 ms replaces the display-list-owned CanvasProperty references and makes
   // RippleDrawable appear static even while RenderNodeAnimators advance.
-  if (g_gpu_render_node_recorded && g_pending_pressed_action == 0) {
+  if (state->gpu_render_node_recorded && state->pending_pressed_action == 0) {
     return darwin_art_hwui::render_node_to_surface(
-               env, g_gpu_render_node, g_gpu_surface, width, height,
-               g_gpu_ripple_overlay_active, g_gpu_ripple_overlay_x,
-               g_gpu_ripple_overlay_y, g_gpu_ripple_overlay_started)
+               env, state->gpu_render_node, state->gpu_surface, width, height,
+               state->gpu_ripple_overlay_active, state->gpu_ripple_overlay_x,
+               state->gpu_ripple_overlay_y, state->gpu_ripple_overlay_started)
                ? JNI_TRUE
                : JNI_FALSE;
   }
@@ -225,7 +202,7 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
       render_node_class == nullptr
           ? nullptr
           : env->GetMethodID(render_node_class, "setPosition", "(IIII)Z");
-  if (g_gpu_render_node == nullptr && render_node_create != nullptr &&
+  if (state->gpu_render_node == nullptr && render_node_create != nullptr &&
       animation_host_create != nullptr &&
       animation_host_interface != nullptr &&
       !env->ExceptionCheck()) {
@@ -237,17 +214,17 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
                                                node_name, host);
     std::cerr << "ART HWUI GPU: RenderNode.create node=" << node << "\n";
     if (node != nullptr && !env->ExceptionCheck()) {
-      g_gpu_render_node = env->NewGlobalRef(node);
+      state->gpu_render_node = env->NewGlobalRef(node);
     }
     env->DeleteLocalRef(host);
     env->DeleteLocalRef(node);
     env->DeleteLocalRef(node_name);
   }
   jobject java_canvas =
-      g_gpu_render_node == nullptr || begin_recording == nullptr ||
+      state->gpu_render_node == nullptr || begin_recording == nullptr ||
               env->ExceptionCheck()
           ? nullptr
-          : env->CallObjectMethod(g_gpu_render_node, begin_recording, width,
+          : env->CallObjectMethod(state->gpu_render_node, begin_recording, width,
                                   height);
   if (java_canvas != nullptr && std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr) {
     jclass canvas_class = env->FindClass("android/graphics/Canvas");
@@ -278,10 +255,10 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
         std::cerr << self->GetException()->Dump() << "\n";
       }
     }
-    if (java_canvas != nullptr && g_gpu_render_node != nullptr &&
+    if (java_canvas != nullptr && state->gpu_render_node != nullptr &&
         end_recording != nullptr) {
       env->ExceptionClear();
-      env->CallVoidMethod(g_gpu_render_node, end_recording);
+      env->CallVoidMethod(state->gpu_render_node, end_recording);
       env->ExceptionClear();
     }
     env->ExceptionClear();
@@ -298,13 +275,13 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
     // recording, including failure paths, so RenderNode never remains in the
     // "recording in progress" state for the next frame.
     if (env->ExceptionCheck()) env->ExceptionClear();
-    env->CallVoidMethod(g_gpu_render_node, end_recording);
+    env->CallVoidMethod(state->gpu_render_node, end_recording);
     recording_ended = true;
     const bool ok = !env->ExceptionCheck();
     if (!ok) env->ExceptionClear();
     return ok;
   };
-  env->CallBooleanMethod(g_gpu_render_node, set_position, 0, 0, width, height);
+  env->CallBooleanMethod(state->gpu_render_node, set_position, 0, 0, width, height);
   if (env->ExceptionCheck()) {
     env->ExceptionClear();
     finish_recording();
@@ -384,17 +361,17 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
     std::cerr << "ART HWUI GPU: View measure/layout failed\n";
     return JNI_FALSE;
   }
-  const uint32_t pending_pressed_action = g_pending_pressed_action;
-  const jfloat pending_pressed_x = g_pending_pressed_x;
-  const jfloat pending_pressed_y = g_pending_pressed_y;
-  g_pending_pressed_action = 0;
-  if (pending_pressed_action != 0 && g_pressed_view != nullptr &&
+  const uint32_t pending_pressed_action = state->pending_pressed_action;
+  const jfloat pending_pressed_x = state->pending_pressed_x;
+  const jfloat pending_pressed_y = state->pending_pressed_y;
+  state->pending_pressed_action = 0;
+  if (pending_pressed_action != 0 && state->pressed_view != nullptr &&
       set_pressed != nullptr && !env->ExceptionCheck()) {
     if (drawable_hotspot_changed != nullptr) {
-      env->CallVoidMethod(g_pressed_view, drawable_hotspot_changed,
+      env->CallVoidMethod(state->pressed_view, drawable_hotspot_changed,
                           pending_pressed_x, pending_pressed_y);
     }
-    env->CallVoidMethod(g_pressed_view, set_pressed,
+    env->CallVoidMethod(state->pressed_view, set_pressed,
                         pending_pressed_action == 1 ? JNI_TRUE : JNI_FALSE);
   }
   env->CallVoidMethod(view, draw, java_canvas);
@@ -417,7 +394,7 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
 
   auto* node = reinterpret_cast<android::uirenderer::RenderNode*>(
       static_cast<std::uintptr_t>(env->GetLongField(
-          g_gpu_render_node, native_render_node)));
+          state->gpu_render_node, native_render_node)));
   if (node == nullptr) {
     std::cerr << "ART HWUI GPU: Java RenderNode native pointer missing\n";
     return JNI_FALSE;
@@ -440,37 +417,38 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
     return JNI_FALSE;
   }
   if (darwin_art_hwui::node_subtree_has_animators(node)) {
-    if (g_hwui_animation_context == nullptr) {
-      g_hwui_time_lord = std::make_unique<
+    if (state->hwui_animation_context == nullptr) {
+      state->hwui_time_lord = std::make_unique<
           android::uirenderer::renderthread::TimeLord>();
-      g_hwui_time_lord->setFrameInterval(16666666);
-      g_hwui_animation_context =
+      state->hwui_time_lord->setFrameInterval(16666666);
+      state->hwui_animation_context =
           std::make_unique<android::uirenderer::AnimationContext>(
-              *g_hwui_time_lord);
+              *state->hwui_time_lord);
     }
     darwin_art_hwui::register_node_subtree_animators(
-        node, *g_hwui_animation_context);
+        node, *state->hwui_animation_context);
     if (std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr) {
       std::cerr << "ART HWUI animation registered context="
-                << g_hwui_animation_context.get() << " has="
-                << g_hwui_animation_context->hasAnimations() << "\n";
+                << state->hwui_animation_context.get() << " has="
+                << state->hwui_animation_context->hasAnimations() << "\n";
     }
   }
 
   if (!darwin_art_hwui::render_node_to_surface(
-          env, g_gpu_render_node, g_gpu_surface, width, height,
-          g_gpu_ripple_overlay_active, g_gpu_ripple_overlay_x,
-          g_gpu_ripple_overlay_y, g_gpu_ripple_overlay_started)) {
+          env, state->gpu_render_node, state->gpu_surface, width, height,
+          state->gpu_ripple_overlay_active, state->gpu_ripple_overlay_x,
+          state->gpu_ripple_overlay_y, state->gpu_ripple_overlay_started)) {
     std::cerr << "ART HWUI GPU: drawable submit failed\n";
     return JNI_FALSE;
   }
-  g_gpu_render_node_recorded = true;
+  state->gpu_render_node_recorded = true;
   return JNI_TRUE;
 }
 #endif
 
-jboolean present_content(JNIEnv* env, jclass, jobject view, jint width,
-                               jint height) {
+jboolean present_content(GraphicsState* state, JNIEnv* env, jclass, jobject view,
+                               jint width, jint height) {
+  if (state == nullptr) return JNI_FALSE;
   if (view == nullptr || width <= 0 || height <= 0 || width > 4096 ||
       height > 4096) {
     return JNI_FALSE;
@@ -482,7 +460,7 @@ jboolean present_content(JNIEnv* env, jclass, jobject view, jint width,
       darwin_art::FrameworkGraphicsBackend::kAndroidGraphics;
 #if defined(DARWIN_ART_REAL_GRAPHICS)
   if (darwin_art::hwui_gpu_enabled()) {
-    return PresentGpuContent(env, view, width, height);
+    return PresentGpuContent(state, env, view, width, height);
   }
   // The production graphics flavor is GPU-only. Keep the software probe
   // implementation below available to the headless/raster flavor, but do not
@@ -508,7 +486,7 @@ jboolean present_content(JNIEnv* env, jclass, jobject view, jint width,
     env->DeleteLocalRef(bitmap_class);
   };
   if (!use_real_graphics) {
-    canvas_class = g_probe_canvas_class;
+    canvas_class = state->probe_canvas_class;
     if (canvas_class == nullptr) {
       std::cerr << "ART Android view: ProbeCanvas class is not rooted\n";
       return JNI_FALSE;

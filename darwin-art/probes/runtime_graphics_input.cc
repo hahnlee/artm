@@ -97,13 +97,14 @@ jobject find_clickable_view_at(JNIEnv* env, jobject view, jfloat x, jfloat y) {
   return result;
 }
 
-extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
-    uint32_t action, float x, float y) {
+int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
+                          float y) {
+  if (state == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   if (action > 2u || !std::isfinite(x) || !std::isfinite(y)) {
     return 71;
   }
   art::Thread* art_thread = darwin_art_process::owner_thread_for_callback();
-  jobject root = interactive_root_for_input();
+  jobject root = state->interactive_root;
   if (art_thread == nullptr || root == nullptr) return 72;
   if (art::Thread::Current() != art_thread ||
       art_thread->GetState() != art::ThreadState::kNative) {
@@ -138,15 +139,15 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
     return 74;
   }
 
-  jobject& pressed_view = pressed_view_for_input();
-  uint32_t& pending_action = pending_pressed_action_for_input();
-  jfloat& pending_x = pending_pressed_x_for_input();
-  jfloat& pending_y = pending_pressed_y_for_input();
+  jobject& pressed_view = state->pressed_view;
+  uint32_t& pending_action = state->pending_pressed_action;
+  jfloat& pending_x = state->pending_pressed_x;
+  jfloat& pending_y = state->pending_pressed_y;
   if (action == 0u) {
-    gpu_ripple_overlay_active_for_input() = true;
-    gpu_ripple_overlay_x_for_input() = x;
-    gpu_ripple_overlay_y_for_input() = y;
-    gpu_ripple_overlay_started_for_input() = std::chrono::steady_clock::now();
+    state->gpu_ripple_overlay_active = true;
+    state->gpu_ripple_overlay_x = x;
+    state->gpu_ripple_overlay_y = y;
+    state->gpu_ripple_overlay_started = std::chrono::steady_clock::now();
     if (pressed_view != nullptr) {
       env->CallVoidMethod(pressed_view, set_pressed, JNI_FALSE);
       env->DeleteGlobalRef(pressed_view);
@@ -176,8 +177,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
   env->DeleteLocalRef(view_class);
   const bool rendered =
       !env->ExceptionCheck() &&
-      present_content(env, nullptr, root, interactive_width_for_input(),
-                      interactive_height_for_input()) == JNI_TRUE;
+      present_content(state, env, nullptr, root, state->interactive_width,
+                      state->interactive_height) == JNI_TRUE;
   if (env->ExceptionCheck()) {
     std::cerr << "ART Android input: click dispatch threw\n"
               << art_thread->GetException()->Dump() << "\n";
@@ -194,8 +195,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
   return rendered ? 0 : 75;
 }
 
-extern "C" DARWIN_ART_EXPORT int32_t darwin_art_pump_framework_frame(
-    jlong frame_time_nanos) {
+int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
+  if (state == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   if (frame_time_nanos <= 0) {
     struct timespec now = {};
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 74;
@@ -211,9 +212,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_pump_framework_frame(
   art::ScopedObjectAccess soa(art_thread);
   JNIEnv* env = art_thread->GetJniEnv();
 #if defined(DARWIN_ART_REAL_GRAPHICS)
-  auto* animation_context = hwui_animation_context_for_input();
-  auto* time_lord = hwui_time_lord_for_input();
-  jobject render_node = gpu_render_node_for_input();
+  auto* animation_context = state->hwui_animation_context.get();
+  auto* time_lord = state->hwui_time_lord.get();
+  jobject render_node = state->gpu_render_node;
   if (animation_context != nullptr && time_lord != nullptr &&
       render_node != nullptr) {
     jclass render_node_class = env->FindClass("android/graphics/RenderNode");
@@ -299,3 +300,13 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_pump_framework_frame(
 }
 
 }  // namespace darwin_art_graphics
+
+extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
+    uint32_t, float, float) {
+  return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+}
+
+extern "C" DARWIN_ART_EXPORT int32_t darwin_art_pump_framework_frame(
+    jlong) {
+  return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+}

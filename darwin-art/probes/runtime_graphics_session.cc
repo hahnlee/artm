@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <mutex>
 #include <new>
+#include <unordered_set>
 
 #include "runtime_graphics_probe.h"
 #include "runtime_graphics_state.h"
@@ -14,6 +15,7 @@
 #include "thread-current-inl.h"
 
 struct darwin_art_graphics_session_t {
+  darwin_art_graphics::GraphicsState state;
   pthread_t owner_thread{};
   art::Thread* owner_art_thread = nullptr;
   bool bound_to_process = false;
@@ -24,7 +26,10 @@ namespace darwin_art_graphics {
 namespace {
 
 std::mutex g_session_mutex;
-darwin_art_graphics_session_t* g_active_session = nullptr;
+// Session ownership is carried by the opaque handle. There is deliberately
+// no process-global active graphics state; the registry only protects handle
+// validity during the short validation phase.
+std::unordered_set<darwin_art_graphics_session_t*> g_sessions;
 
 int32_t check_owner(const darwin_art_graphics_session_t* session) {
   if (session == nullptr) {
@@ -39,7 +44,8 @@ int32_t check_owner(const darwin_art_graphics_session_t* session) {
 }
 
 int32_t check_active_locked(const darwin_art_graphics_session_t* session) {
-  if (session == nullptr || session != g_active_session) {
+  if (session == nullptr || g_sessions.find(const_cast<darwin_art_graphics_session_t*>(session)) ==
+                                g_sessions.end()) {
     return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   }
   if (session->closed) return DARWIN_ART_STATUS_GRAPHICS_SESSION_CLOSED;
@@ -50,11 +56,10 @@ int32_t check_active_locked(const darwin_art_graphics_session_t* session) {
 
 darwin_art_graphics_session_t* create_session() {
   std::lock_guard<std::mutex> lock(g_session_mutex);
-  if (g_active_session != nullptr) return nullptr;
   auto* session = new (std::nothrow) darwin_art_graphics_session_t;
   if (session == nullptr) return nullptr;
   session->owner_thread = pthread_self();
-  g_active_session = session;
+  g_sessions.insert(session);
   return session;
 }
 
@@ -62,7 +67,7 @@ int32_t bind_session_for_process(void* context) {
   if (context == nullptr) return 0;
   std::lock_guard<std::mutex> lock(g_session_mutex);
   auto* session = static_cast<darwin_art_graphics_session_t*>(context);
-  if (session != g_active_session ||
+  if (g_sessions.find(session) == g_sessions.end() ||
       pthread_equal(session->owner_thread, pthread_self()) == 0 ||
       session->closed || session->bound_to_process) {
     return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
@@ -74,12 +79,24 @@ int32_t bind_session_for_process(void* context) {
 int32_t bind_session_art_thread(art::Thread* thread) {
   if (thread == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   std::lock_guard<std::mutex> lock(g_session_mutex);
-  if (g_active_session == nullptr || !g_active_session->bound_to_process ||
-      g_active_session->closed ||
-      pthread_equal(g_active_session->owner_thread, pthread_self()) == 0) {
+  if (g_sessions.empty()) {
     return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   }
-  g_active_session->owner_art_thread = thread;
+  // The ART process binds exactly one handle. Find the one marked for this
+  // owner thread without exposing it as a singleton active session.
+  darwin_art_graphics_session_t* bound = nullptr;
+  for (auto* candidate : g_sessions) {
+    if (candidate->bound_to_process && !candidate->closed &&
+        pthread_equal(candidate->owner_thread, pthread_self()) != 0) {
+      bound = candidate;
+      break;
+    }
+  }
+  if (bound == nullptr ||
+      pthread_equal(bound->owner_thread, pthread_self()) == 0) {
+    return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+  }
+  bound->owner_art_thread = thread;
   return 0;
 }
 
@@ -87,7 +104,7 @@ int32_t close_session(darwin_art_graphics_session_t* session) {
   art::Thread* owner = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_session_mutex);
-    if (session == nullptr || session != g_active_session) {
+    if (session == nullptr || g_sessions.find(session) == g_sessions.end()) {
       return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
     }
     if (session->closed) return DARWIN_ART_STATUS_GRAPHICS_SESSION_CLOSED;
@@ -113,7 +130,7 @@ int32_t close_session(darwin_art_graphics_session_t* session) {
 
 int32_t destroy_session(darwin_art_graphics_session_t* session) {
   std::lock_guard<std::mutex> lock(g_session_mutex);
-  if (session == nullptr || session != g_active_session) {
+    if (session == nullptr || g_sessions.find(session) == g_sessions.end()) {
     return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   }
   if (pthread_equal(session->owner_thread, pthread_self()) == 0 ||
@@ -124,9 +141,17 @@ int32_t destroy_session(darwin_art_graphics_session_t* session) {
   if (!session->closed) {
     return DARWIN_ART_STATUS_GRAPHICS_SESSION_NOT_CLOSED;
   }
-  g_active_session = nullptr;
+  g_sessions.erase(session);
   delete session;
   return 0;
+}
+
+GraphicsState* state_for_context(void* context) {
+  std::lock_guard<std::mutex> lock(g_session_mutex);
+  auto* session = static_cast<darwin_art_graphics_session_t*>(context);
+  return session != nullptr && g_sessions.find(session) != g_sessions.end()
+             ? &session->state
+             : nullptr;
 }
 
 int32_t dispatch_pointer(darwin_art_graphics_session_t* session,
@@ -138,7 +163,7 @@ int32_t dispatch_pointer(darwin_art_graphics_session_t* session,
     const int32_t owner_status = check_owner(session);
     if (owner_status != 0) return owner_status;
   }
-  return darwin_art_dispatch_pointer(action, x, y);
+  return dispatch_pointer(&session->state, action, x, y);
 }
 
 int32_t pump_frame(darwin_art_graphics_session_t* session,
@@ -150,7 +175,7 @@ int32_t pump_frame(darwin_art_graphics_session_t* session,
     const int32_t owner_status = check_owner(session);
     if (owner_status != 0) return owner_status;
   }
-  return darwin_art_pump_framework_frame(frame_time_nanos);
+  return pump_frame(&session->state, frame_time_nanos);
 }
 
 }  // namespace darwin_art_graphics

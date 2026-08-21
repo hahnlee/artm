@@ -8,7 +8,8 @@
 
 namespace darwin_art_graphics_phase {
 
-int present_and_retain(JNIEnv* env, jobject decor_view,
+int present_and_retain(darwin_art_graphics::GraphicsState* state,
+                       JNIEnv* env, jobject decor_view,
                        jclass content_root_class, jobject content_root,
                        jclass probe_view_class, jobject probe_view,
                        bool run_apk_app, bool expect_apk_widgets,
@@ -59,7 +60,7 @@ int present_and_retain(JNIEnv* env, jobject decor_view,
   const jboolean decor_presented =
       env->ExceptionCheck()
           ? JNI_FALSE
-          : darwin_art_graphics::present_content(env, nullptr, decor_view,
+          : darwin_art_graphics::present_content(state, env, nullptr, decor_view,
                                                   width, height);
   jmethodID was_presented =
       run_apk_app || probe_view_class == nullptr
@@ -84,7 +85,7 @@ int present_and_retain(JNIEnv* env, jobject decor_view,
   }
 
   if (retain_interactive &&
-      !darwin_art_graphics::retain_interactive_root(env, decor_view, width,
+      !darwin_art_graphics::retain_interactive_root(state, env, decor_view, width,
                                                      height)) {
     std::cerr << "ART Android input: retaining DecorView failed\n";
     return 33;

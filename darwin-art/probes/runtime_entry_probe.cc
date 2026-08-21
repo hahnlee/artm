@@ -146,6 +146,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     std::cerr << "darwin_art_run_process: graphics session binding failed\n";
     return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   }
+  auto* graphics_state = darwin_art_graphics::state_for_context(
+      config->graphics_session_context);
+  darwin_art_process::record_graphics_state(graphics_state);
   darwin_art_process::ScopedRunBoundary process_boundary;
   darwin_art_process::ProcessOptions process_options;
   std::string options_error;
@@ -533,7 +536,12 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
 
   if (darwin_art::GetFrameworkGraphicsBackend() ==
       darwin_art::FrameworkGraphicsBackend::kProbeCanvas) {
-    darwin_art_graphics::set_probe_canvas_class(env, probe_canvas_class);
+    if (graphics_state == nullptr) {
+      std::cerr << "ART Android window: graphics session state is missing\n";
+      return DARWIN_ART_STATUS_GRAPHICS_SESSION_NOT_READY;
+    }
+    darwin_art_graphics::set_probe_canvas_class(graphics_state, env,
+                                                probe_canvas_class);
     if (env->ExceptionCheck()) {
       std::cerr << "ART Android window: ProbeCanvas global root failed\n";
       return 32;
@@ -1135,7 +1143,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           : env->CallObjectMethod(content_root, get_child_at,
                                   static_cast<jint>(0));
   if (darwin_art_graphics_phase::present_and_retain(
-          env, decor_view, content_root_class, content_root, probe_view_class,
+          graphics_state, env, decor_view, content_root_class, content_root,
+          probe_view_class,
           probe_view, run_apk_app, expect_apk_widgets,
           run_apk_app || run_framework_button,
           kApkFrameWidth * window_scale, kApkFrameHeight * window_scale) != 0) {

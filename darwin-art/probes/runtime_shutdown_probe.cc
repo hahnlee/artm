@@ -51,7 +51,8 @@ int32_t run_shutdown(const ShutdownState& state) {
                   << art_thread->GetException()->Dump() << "\n";
         art_thread->ClearException();
       }
-      darwin_art_graphics::shutdown(art_thread->GetJniEnv());
+      darwin_art_graphics::shutdown(shutdown.graphics_state,
+                                    art_thread->GetJniEnv());
       if (art_thread->IsExceptionPending()) {
         std::cerr << "ART Darwin shutdown: global reference cleanup threw: "
                   << art_thread->GetException()->Dump() << "\n";

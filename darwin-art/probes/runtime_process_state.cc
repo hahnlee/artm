@@ -32,6 +32,7 @@ struct State {
   JavaVM* java_vm = nullptr;
   art::Thread* art_thread = nullptr;
   bool resource_runtime_installed = false;
+  darwin_art_graphics::GraphicsState* graphics_state = nullptr;
   AcceptanceSnapshot acceptance;
   std::vector<std::unique_ptr<const art::DexFile>> app_dex_files;
 };
@@ -55,6 +56,12 @@ void record_created_runtime(art::Thread* art_thread) {
   CHECK(art::Runtime::Current() != nullptr);
   g_state.java_vm = reinterpret_cast<JavaVM*>(art::Runtime::Current()->GetJavaVM());
   g_state.art_thread = art_thread;
+}
+
+void record_graphics_state(darwin_art_graphics::GraphicsState* state) {
+  std::lock_guard<std::mutex> lock(g_state.mutex);
+  CHECK(g_state.phase == Phase::kRunning);
+  g_state.graphics_state = state;
 }
 
 void record_resource_runtime_installed() {
@@ -121,6 +128,7 @@ ShutdownBeginResult begin_shutdown(ShutdownSnapshot* snapshot) {
   snapshot->java_vm = g_state.java_vm;
   snapshot->art_thread = g_state.art_thread;
   snapshot->resource_runtime_installed = g_state.resource_runtime_installed;
+  snapshot->graphics_state = g_state.graphics_state;
   return ShutdownBeginResult::kReady;
 }
 
@@ -134,6 +142,7 @@ void mark_shutdown_complete() {
   g_state.java_vm = nullptr;
   g_state.art_thread = nullptr;
   g_state.resource_runtime_installed = false;
+  g_state.graphics_state = nullptr;
   g_state.phase = Phase::kShutdownComplete;
 }
 

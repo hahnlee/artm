@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "darwin_art/darwin_art.h"
+#include "runtime_graphics_state.h"
 
 namespace art {
 class Thread;
@@ -14,6 +15,7 @@ namespace darwin_art_graphics {
 // made on the ART owner thread; no JNI/HWUI object crosses the ABI.
 int32_t bind_session_for_process(void* context);
 int32_t bind_session_art_thread(art::Thread* thread);
+GraphicsState* state_for_context(void* context);
 
 // Session state is an opaque owner-thread token.  The implementation keeps
 // JNI/HWUI objects out of this header and delegates cleanup to the existing
