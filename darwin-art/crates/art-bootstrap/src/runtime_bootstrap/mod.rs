@@ -1,4 +1,5 @@
 use super::*;
+use darwin_art_build_contract::RuntimeFlavor;
 
 mod archive;
 mod compile;
@@ -8,8 +9,8 @@ pub(crate) use archive::finalize;
 pub(crate) use compile::{RuntimeBootstrapCompiled, compile};
 pub(crate) use staging::{RuntimeBootstrapStaging, prepare};
 
-pub(crate) fn build_runtime_bootstrap_flavor(root: &Path, real_graphics: bool) -> Result<()> {
-    let staged = prepare(root, real_graphics)?;
-    let compiled = compile(&staged, real_graphics)?;
-    finalize(&staged, real_graphics, compiled)
+pub(crate) fn build_runtime_bootstrap_flavor(root: &Path, flavor: RuntimeFlavor) -> Result<()> {
+    let staged = prepare(root, flavor)?;
+    let compiled = compile(&staged, flavor)?;
+    finalize(&staged, flavor, compiled)
 }

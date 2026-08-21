@@ -3,6 +3,7 @@ use crate::native_build::{
     FileHashCache, PendingNativeCompile, compile_pending_native, compile_with_dependency_cache,
     record_cache_result,
 };
+use darwin_art_build_contract::RuntimeFlavor;
 
 pub(crate) struct RuntimeBootstrapCompiled {
     pub(crate) objects: Vec<PathBuf>,
@@ -12,8 +13,9 @@ pub(crate) struct RuntimeBootstrapCompiled {
 
 pub(crate) fn compile(
     staged: &RuntimeBootstrapStaging,
-    real_graphics: bool,
+    flavor: RuntimeFlavor,
 ) -> Result<RuntimeBootstrapCompiled> {
+    let real_graphics = flavor.real_graphics();
     let includes = staged
         .includes
         .iter()

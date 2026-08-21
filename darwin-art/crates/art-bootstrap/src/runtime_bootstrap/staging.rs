@@ -1,5 +1,5 @@
 use super::*;
-use darwin_art_build_contract::RUNTIME_CACHE_IDENTITY;
+use darwin_art_build_contract::{RUNTIME_CACHE_IDENTITY, RuntimeFlavor};
 
 const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.cc",
@@ -78,7 +78,8 @@ pub(crate) struct RuntimeBootstrapStaging {
     pub(crate) operator_source: PathBuf,
 }
 
-pub(crate) fn prepare(root: &Path, real_graphics: bool) -> Result<RuntimeBootstrapStaging> {
+pub(crate) fn prepare(root: &Path, flavor: RuntimeFlavor) -> Result<RuntimeBootstrapStaging> {
+    let real_graphics = flavor.real_graphics();
     build_shell_gate(root, "build-android-elf-jni-fixture.sh")?;
     let build_paths = BuildPaths::from_root(root);
     run_command(
@@ -148,11 +149,7 @@ pub(crate) fn prepare(root: &Path, real_graphics: bool) -> Result<RuntimeBootstr
         .into());
     }
 
-    let build_dir = build_paths.native_output(if real_graphics {
-        "runtime-graphics-bootstrap"
-    } else {
-        "runtime-bootstrap"
-    });
+    let build_dir = build_paths.native_output(flavor.output_dir());
     let runtime_generated_dir = build_dir.join("generated");
     // The patched ART runtime sources are identical between the headless and
     // graphics flavors.  A shared shadow is the source-level half of the
