@@ -6,7 +6,9 @@ use crate::frame::{FrameHost, receive_frame};
 use crate::gpu_loop::run as run_gpu_loop;
 use crate::provider::ProviderBridge;
 #[cfg(target_os = "macos")]
-use crate::teardown::{process_run_failure, shutdown_runtime, unattached_engine_failure};
+use crate::teardown::{
+    RuntimeShutdownGuard, process_run_failure, shutdown_runtime, unattached_engine_failure,
+};
 #[cfg(target_os = "macos")]
 use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
 use darwin_art_runtime::{RuntimeSession, Subsystem};
@@ -136,25 +138,34 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             let _ = shutdown_runtime(&mut runtime);
             return Err(HostError::RuntimeFailed(error.status() as i32));
         }
+        let mut shutdown_guard = RuntimeShutdownGuard::new(&mut runtime);
         // Darwin's application renderer is GPU-only. A published surface is
         // always handed to the direct Metal/HWUI loop below.
         if active_surface.is_some() {
-            return run_gpu_loop(
-                &mut runtime,
+            let outcome = run_gpu_loop(
+                shutdown_guard.runtime(),
                 active_surface,
                 process,
                 options,
                 graphics_attached,
             );
+            return match (outcome, shutdown_guard.shutdown()) {
+                (Ok(outcome), Ok(())) => Ok(outcome),
+                (Err(error), Ok(())) => Err(error),
+                (_, Err(error)) => Err(error),
+            };
         }
         // Headless ART is a first-class mode. It never allocates a surface and
         // never uploads the callback mailbox into an IOSurface. Graphics runs
         // exclusively through `gpu_loop::run` above.
         if graphics_attached {
-            match runtime.install_subsystem(Subsystem::Graphics) {
+            match shutdown_guard
+                .runtime()
+                .install_subsystem(Subsystem::Graphics)
+            {
                 Ok(_) => {}
                 Err(error) => {
-                    let cleanup = shutdown_runtime(&mut runtime);
+                    let cleanup = shutdown_guard.shutdown();
                     return match cleanup {
                         Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
                         Err(cleanup_error) => Err(cleanup_error),
@@ -162,11 +173,12 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 }
             }
         }
-        shutdown_runtime(&mut runtime)?;
-        Ok(HostOutcome {
+        let outcome = HostOutcome {
             process,
             frames_presented: 0,
             last_frame: frame_host.last_frame,
-        })
+        };
+        shutdown_guard.shutdown()?;
+        Ok(outcome)
     }
 }

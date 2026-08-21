@@ -9,17 +9,51 @@ use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
 use darwin_art_runtime::RuntimeSession;
 use darwin_art_runtime::{RuntimeError, Subsystem};
 
+type HostRuntime =
+    RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>;
+
+/// Owns the final shutdown obligation after the runtime has entered its
+/// running phase.  Moving this obligation into a guard makes every later
+/// error path (surface attach, graphics install, or frame loop) use the same
+/// reverse-order teardown, including newly added paths.
+pub(super) struct RuntimeShutdownGuard<'a> {
+    runtime: &'a mut HostRuntime,
+    armed: bool,
+}
+
+impl<'a> RuntimeShutdownGuard<'a> {
+    pub(super) fn new(runtime: &'a mut HostRuntime) -> Self {
+        Self {
+            runtime,
+            armed: true,
+        }
+    }
+
+    pub(super) fn runtime(&mut self) -> &mut HostRuntime {
+        self.runtime
+    }
+
+    pub(super) fn shutdown(mut self) -> Result<(), HostError> {
+        let result = shutdown_runtime(self.runtime);
+        self.armed = false;
+        result
+    }
+}
+
+impl Drop for RuntimeShutdownGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = shutdown_runtime(self.runtime);
+        }
+    }
+}
+
 /// Roll back a process call before its engine has transferred into the
 /// `RuntimeSession`. The engine and optional graphics session are still local
 /// owners here, so this boundary performs their close/shutdown operations and
 /// preserves the historical error precedence.
 pub(super) fn process_run_failure(
-    runtime: &mut RuntimeSession<
-        EngineSession,
-        Box<ProviderBridge>,
-        SurfaceSession,
-        GraphicsSession,
-    >,
+    runtime: &mut HostRuntime,
     engine: &mut EngineSession,
     graphics_session: Option<&mut GraphicsSession>,
     status: i32,
@@ -56,14 +90,7 @@ pub(super) fn unattached_engine_failure(
     HostError::RuntimeFailed(-1)
 }
 
-pub(super) fn shutdown_runtime(
-    runtime: &mut RuntimeSession<
-        EngineSession,
-        Box<ProviderBridge>,
-        SurfaceSession,
-        GraphicsSession,
-    >,
-) -> Result<(), HostError> {
+pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostError> {
     // Cleanup is deliberately best-effort after shutdown begins. A failing
     // surface destroy must not prevent ART shutdown, and a provider-hook
     // failure must not leave the engine image resident. Each owner is taken
@@ -136,15 +163,7 @@ pub(super) fn shutdown_runtime(
     }
 }
 
-fn uninstall_owned(
-    runtime: &mut RuntimeSession<
-        EngineSession,
-        Box<ProviderBridge>,
-        SurfaceSession,
-        GraphicsSession,
-    >,
-    expected: Subsystem,
-) -> Result<(), RuntimeError> {
+fn uninstall_owned(runtime: &mut HostRuntime, expected: Subsystem) -> Result<(), RuntimeError> {
     match runtime.uninstall_latest_subsystem()? {
         Some(actual) if actual == expected => Ok(()),
         Some(actual) => Err(RuntimeError::InvalidShutdownOrder {

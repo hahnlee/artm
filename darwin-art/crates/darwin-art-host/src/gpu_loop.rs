@@ -1,7 +1,6 @@
 use crate::config::{HostError, HostOutcome, RunOptions};
 use crate::provider::ProviderBridge;
 use crate::surface::{owned_surface_next_pointer_event, owned_surface_pump_events};
-use crate::teardown::shutdown_runtime;
 use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
 use darwin_art_engine_sys::{PointerEvent, ProcessResult};
 use darwin_art_runtime::{RuntimeSession, Subsystem};
@@ -20,49 +19,27 @@ pub(super) fn run(
     graphics_attached: bool,
 ) -> Result<HostOutcome, HostError> {
     let Some(surface) = active_surface else {
-        // No surface was published, but ART and the provider
-        // bridge are already live.  Roll them back through the
-        // same owner-thread LIFO as the normal GPU path; a bare
-        // early return here would leave JavaVM/provider hooks
-        // resident in the process.
-        return match shutdown_runtime(runtime) {
-            Ok(()) => Err(HostError::SurfaceFailed {
-                operation: "gpu_active_surface",
-                status: -1,
-            }),
-            Err(error) => Err(error),
-        };
+        return Err(HostError::SurfaceFailed {
+            operation: "gpu_active_surface",
+            status: -1,
+        });
     };
     if let Err(surface) = runtime.attach_surface(surface) {
         // The failed transfer returns ownership to this scope; its Drop
         // closes the native surface. The already-attached engine/provider
         // still need the common rollback path.
         drop(surface);
-        let cleanup = shutdown_runtime(runtime);
-        return match cleanup {
-            Ok(()) => Err(HostError::RuntimeFailed(-1)),
-            Err(error) => Err(error),
-        };
+        return Err(HostError::RuntimeFailed(-1));
     }
     if let Err(error) = runtime.install_subsystem(Subsystem::Surface) {
-        let cleanup = shutdown_runtime(runtime);
-        return match cleanup {
-            Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
-            Err(cleanup_error) => Err(cleanup_error),
-        };
+        return Err(HostError::RuntimeFailed(error.status() as i32));
     }
     // Surface is installed before Graphics so shutdown can remove the
     // Graphics lease first and then the Surface lease in strict LIFO order.
     if graphics_attached {
         match runtime.install_subsystem(Subsystem::Graphics) {
             Ok(_) => {}
-            Err(error) => {
-                let cleanup = shutdown_runtime(runtime);
-                return match cleanup {
-                    Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
-                    Err(cleanup_error) => Err(cleanup_error),
-                };
-            }
+            Err(error) => return Err(HostError::RuntimeFailed(error.status() as i32)),
         }
     }
     let mut frames_presented = 1_u64;
@@ -206,13 +183,8 @@ pub(super) fn run(
         remaining -= slice;
     }
     if let Some(error) = loop_error {
-        let cleanup = shutdown_runtime(runtime);
-        return match cleanup {
-            Ok(()) => Err(error),
-            Err(cleanup_error) => Err(cleanup_error),
-        };
+        return Err(error);
     }
-    shutdown_runtime(runtime)?;
     Ok(HostOutcome {
         process,
         frames_presented,
