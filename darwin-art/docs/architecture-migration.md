@@ -157,7 +157,8 @@ recompiles the larger framework registration TU.
 The ART adapter now applies the same boundary to platform compatibility shims:
 Palette, runtime-image, intrinsic-printing, HWASAN, and unwind stubs live in
 `compat/darwin_runtime_platform_stubs.cc`. ELF graph discovery, JNI proxy
-trampolines, provider ownership, and NativeLoader remain in
+trampolines, provider ownership, and graph-aware NativeBridge trampoline
+selection remain in
 `darwin_runtime_adapters.cc`. This is an intentionally narrow ABI split: the
 stubs have no graph/provider state and can be rebuilt independently when the
 loader or provider path changes.
