@@ -20,6 +20,7 @@ struct darwin_art_graphics_session_t {
   art::Thread* owner_art_thread = nullptr;
   bool bound_to_process = false;
   bool closed = false;
+  bool finalized = false;
 };
 
 namespace darwin_art_graphics {
@@ -128,10 +129,35 @@ int32_t close_session(darwin_art_graphics_session_t* session) {
   return 0;
 }
 
+int32_t finalize_bound_session(GraphicsState* state) {
+  if (state == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+  std::lock_guard<std::mutex> lock(g_session_mutex);
+  for (auto* session : g_sessions) {
+    if (&session->state != state) continue;
+    if (!session->closed || !session->bound_to_process ||
+        pthread_equal(session->owner_thread, pthread_self()) == 0 ||
+        session->owner_art_thread == nullptr ||
+        art::Thread::Current() != session->owner_art_thread) {
+      return DARWIN_ART_STATUS_GRAPHICS_SESSION_WRONG_THREAD;
+    }
+    session->finalized = true;
+    return 0;
+  }
+  return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+}
+
 int32_t destroy_session(darwin_art_graphics_session_t* session) {
   std::lock_guard<std::mutex> lock(g_session_mutex);
     if (session == nullptr || g_sessions.find(session) == g_sessions.end()) {
     return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+  }
+  // The native shutdown transaction marks the session finalized before
+  // DestroyJavaVM.  Rust Drop may run after ART is gone; in that path only
+  // erase the opaque allocation and never call art::Thread::Current().
+  if (session->finalized) {
+    g_sessions.erase(session);
+    delete session;
+    return 0;
   }
   if (pthread_equal(session->owner_thread, pthread_self()) == 0 ||
       (session->owner_art_thread != nullptr &&

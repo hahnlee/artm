@@ -167,6 +167,10 @@ mod platform {
 
     impl Drop for GraphicsSession {
         fn drop(&mut self) {
+            // The native shutdown transaction may finalize the bound session
+            // before DestroyJavaVM.  In that case destroy_fn returns the
+            // benign INVALID handle status after erasing the opaque owner;
+            // importantly it performs no ART lookup after the VM is gone.
             if !self.closed && !self.close_attempted {
                 let _ = self.close();
             }

@@ -5,6 +5,7 @@
 
 namespace darwin_art_graphics {
 struct GraphicsState;
+int32_t finalize_bound_session(GraphicsState* state);
 void set_probe_canvas_class(GraphicsState* state, JNIEnv* env,
                             jclass canvas_class);
 bool retain_interactive_root(GraphicsState* state, JNIEnv* env, jobject root,

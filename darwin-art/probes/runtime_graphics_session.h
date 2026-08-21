@@ -22,6 +22,10 @@ GraphicsState* state_for_context(void* context);
 // runtime_graphics_state owner.
 darwin_art_graphics_session_t* create_session();
 int32_t close_session(darwin_art_graphics_session_t* session);
+// Marks the bound session finalized after GraphicsState::shutdown has released
+// all JNI/HWUI references, but before DestroyJavaVM.  Rust may then drop the
+// opaque owner after VM teardown without re-entering ART.
+int32_t finalize_bound_session(GraphicsState* state);
 int32_t destroy_session(darwin_art_graphics_session_t* session);
 int32_t dispatch_pointer(darwin_art_graphics_session_t* session,
                          uint32_t action, float x, float y);

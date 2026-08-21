@@ -58,6 +58,17 @@ int32_t run_shutdown(const ShutdownState& state) {
                   << art_thread->GetException()->Dump() << "\n";
         art_thread->ClearException();
       }
+      // GraphicsState has released every JNI/HWUI reference above.  Finalize
+      // the opaque session while ART is still attached; Rust may retain the
+      // owner until after DestroyJavaVM, but its eventual Drop is now a
+      // memory-only erase and cannot re-enter ART.
+      if (shutdown.graphics_state != nullptr &&
+          darwin_art_graphics::finalize_bound_session(
+              shutdown.graphics_state) != 0) {
+        std::cerr << "ART Darwin shutdown: graphics session finalization failed\n";
+        darwin_art_process::mark_shutdown_failed();
+        return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+      }
       if (!darwin_art::ShutdownLibcoreNatives()) {
         std::cerr << "ART Darwin shutdown: libcore host state restore failed\n";
         darwin_art_process::mark_shutdown_failed();
