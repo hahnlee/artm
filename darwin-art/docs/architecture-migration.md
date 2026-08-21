@@ -127,7 +127,7 @@ headless runs tear down without a surface and graphics runs use only the direct
 Metal/HWUI loop. Remaining work is duplicate ABI/fallback removal and a
 measured phase-local invalidation audit.
 
-### M5 — ownership and orchestration decomposition (in progress)
+### M5 — ownership and orchestration decomposition (landed; follow-up optimization remains)
 
 The first M5 slices are now in the tree. Locked AOSP file/archive download and
 generated-source materialization live in
@@ -137,11 +137,11 @@ rollback path on every early return; a surface destroy or engine shutdown
 error is recorded without skipping the remaining owners. This keeps cleanup
 policy in Rust while leaving native ABI operations in `darwin-art-engine`.
 
-The remaining M5 work is deliberately incremental: move host run orchestration
-out of the public host facade, then split the remaining bootstrap/probe
-orchestration by phase. Each extraction must preserve the existing acceptance
-gates and report its native invalidation boundary; moving code without
-narrowing a rebuild edge is not considered progress.
+Host run orchestration now lives behind the private `run.rs` module, while
+bootstrap/probe orchestration is split by phase and emitted as independent
+native graph products. Each extraction preserves the existing acceptance
+gates and reports its native invalidation boundary; broad fallback rules are
+rejected once the persistent cache is promotable.
 
 The graphics boundary is now an explicit eighth native phase. Rust owns a
 `RuntimeSession<..., GraphicsSession>` slot containing only an opaque C handle;
@@ -442,8 +442,8 @@ the same machine:
 The current implementation has the probe/object cache, independently
 addressable app/runtime/graphics phases, graphics-JNI/HWUI/ICU foundation
 stamps, concrete RuntimeSession ownership, and the low-level ART
-build/bootstrap split. M1–M4 are landed for the measured boundaries above;
-M5 is in progress. The app bootstrap and presentation objects are now real
+build/bootstrap split. M1–M5 are landed for the measured boundaries above.
+The app bootstrap and presentation objects are now real
 Ninja edges with content stamps: after their first build, a second graph run
 reports `no work to do`, while a source touch invalidates only the affected
 object and the graphics link. The same persistent graph keeps a direct warm
@@ -452,14 +452,13 @@ object and the graphics link. The same persistent graph keeps a direct warm
 unchanged ART/HWUI objects reused. The warm graphics link audit intentionally
 rechecks the full closure and remains separate. The host-side legacy CPU/IOSurface upload presenter has been removed:
 headless runs tear down without allocating a surface, and graphics runs enter
-only the direct Metal/HWUI loop. Remaining M5 work is measured archive/link
-phase decomposition and removal of duplicate ABI declarations and broad
-fallback edges. The remaining large orchestration surfaces are intentionally
-explicit: `graph::emit` assembles Ninja text, `elf-loader/src/ffi.rs` owns the
-versioned C ABI façade, and the graphics/runtime audit modules own acceptance
-commands. They are split candidates only when a narrow invalidation
-measurement proves a build-time benefit; moving code without changing a
-rebuild edge is not an M5 completion criterion.
+only the direct Metal/HWUI loop. Follow-up optimization may further decompose
+archive/link phases. The remaining large orchestration surfaces are
+intentionally explicit: `graph::emit` assembles Ninja text,
+`elf-loader/src/ffi.rs` owns the versioned C ABI façade, and the
+graphics/runtime audit modules own acceptance commands. They are split only
+when a narrow invalidation measurement proves a build-time benefit; such work
+is no longer required for the ownership/build-graph migration contract.
 
 Framework graphics runtime setup is now isolated in
 `compat/darwin_framework_graphics_runtime.cc`: ICU/graphics initialization,
