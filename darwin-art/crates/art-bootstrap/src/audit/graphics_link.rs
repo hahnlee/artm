@@ -119,7 +119,10 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         root.join("include"),
         root.join("compat"),
         root.join("_build/runtime-arm64/generated"),
-        build_paths.native_output("runtime-graphics-bootstrap/patched-source/runtime"),
+        // Core probe TUs are flavor-neutral. Use the same patched runtime
+        // header root as the CPU audit so their dependency fingerprints and
+        // object paths can be shared across both link flavors.
+        build_paths.native_output("runtime-bootstrap/patched-source/runtime"),
         root.join("_build/runtime-core/patched-source/runtime"),
         root.join("_build/foundation/patched-source/libartbase"),
         root.join("_aosp/art/libartbase"),
@@ -161,6 +164,9 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     // the sole owner of DARWIN_ART_REAL_GRAPHICS and chooses the real backend.
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     let probe_cache = build_dir.join("runtime-graphics-probe-hashes.cache");
+    let core_build_dir = build_paths.native_output("native-probes/core");
+    fs::create_dir_all(&core_build_dir)?;
+    let core_probe_cache = core_build_dir.join("core-probe-hashes.cache");
     let CoreProbeObjects {
         elf: elf_probe_object,
         abi: abi_probe_object,
@@ -170,9 +176,9 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         frame: frame_probe_object,
     } = compile_core_probe_objects(
         root,
-        &build_dir,
+        &core_build_dir,
         &include_refs,
-        &probe_cache,
+        &core_probe_cache,
         &compiler_identity,
     )?;
     let graphics_probe_object = if let Some(path) = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_OBJECT")

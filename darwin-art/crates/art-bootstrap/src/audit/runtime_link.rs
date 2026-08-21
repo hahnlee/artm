@@ -6,7 +6,8 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     const MAX_EXPECTED_UNDEFINED: usize = 365;
 
     let runtime = root.join("_aosp/art/runtime");
-    let build_dir = root.join("_build/runtime-link-probe");
+    let build_paths = BuildPaths::from_root(root);
+    let build_dir = build_paths.native_output("runtime-link-probe");
     let object = build_dir.join("darwin_art_runtime.cc.o");
     let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
     // The CPU/runtime link owns only the IOSurface/AppKit core. The Ganesh
@@ -31,10 +32,10 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     let includes = [
         root.join("include"),
         root.join("compat"),
-        root.join("_build/runtime-arm64/generated"),
-        root.join("_build/runtime-bootstrap/patched-source/runtime"),
-        root.join("_build/runtime-core/patched-source/runtime"),
-        root.join("_build/foundation/patched-source/libartbase"),
+        build_paths.native_output("runtime-arm64/generated"),
+        build_paths.native_output("runtime-bootstrap/patched-source/runtime"),
+        build_paths.native_output("runtime-core/patched-source/runtime"),
+        build_paths.native_output("foundation/patched-source/libartbase"),
         root.join("_aosp/art/libartbase"),
         root.join("_aosp/art/cmdline"),
         root.join("_aosp/art/libdexfile"),
@@ -61,6 +62,9 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     let probe_cache = build_dir.join("runtime-link-probe-hashes.cache");
+    let core_build_dir = build_paths.native_output("native-probes/core");
+    fs::create_dir_all(&core_build_dir)?;
+    let core_probe_cache = core_build_dir.join("core-probe-hashes.cache");
     let CoreProbeObjects {
         elf: elf_probe_object,
         abi: abi_probe_object,
@@ -70,9 +74,9 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         frame: frame_probe_object,
     } = compile_core_probe_objects(
         root,
-        &build_dir,
+        &core_build_dir,
         &include_refs,
-        &probe_cache,
+        &core_probe_cache,
         &compiler_identity,
     )?;
     let registration_object = build_dir.join("darwin_art_runtime_registration_phase.cc.o");
