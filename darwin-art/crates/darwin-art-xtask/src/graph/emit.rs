@@ -776,7 +776,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str("  description = CXX runtime_filesystem_probe\n");
     // The Rust command owns the C++ dependency cache for this probe.  Ninja
     // only tracks the explicit phase stamp and source inputs; consuming a
-    // depfile produced inside `cargo run` makes the stored dependency mtime
+    // depfile produced inside the bootstrap CLI makes the stored dependency mtime
     // race the copied object and dirties every warm graph invocation.
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
