@@ -565,7 +565,11 @@ jboolean present_content(JNIEnv* env, jclass, jobject view, jint width,
   if (darwin_art::hwui_gpu_enabled()) {
     return PresentGpuContent(env, view, width, height);
   }
-#endif
+  // The production graphics flavor is GPU-only. Keep the software probe
+  // implementation below available to the headless/raster flavor, but do not
+  // compile an accidental Bitmap/IOSurface fallback into the Metal dylib.
+  return JNI_FALSE;
+#else
   jclass canvas_class = nullptr;
   jclass real_canvas_class = nullptr;
   jclass bitmap_class = nullptr;
@@ -739,6 +743,7 @@ jboolean present_content(JNIEnv* env, jclass, jobject view, jint width,
       darwin_art_frame_probe::present(env, width, height, pixels);
   release_render_target();
   return presented;
+#endif
 }
 
 }  // namespace darwin_art_graphics
