@@ -52,6 +52,8 @@ warm rows as if they were the same workload.
 | 2026-08-21 | warm/no-op | `cargo check --workspace` | 0 | 0.08 | 0 | 13 |
 | 2026-08-21 | warm/no-op | `build-runtime-graphics-bootstrap` | 0 | 4.06 | 0 | 12 |
 | 2026-08-21 | warm/no-op | `audit-runtime-graphics-link` | 0 | 58.88 | 0 | 11 |
+| 2026-08-21 | warm/no-op | `audit-native-graph.sh` | 0 | 1.99 | 0 | 1035 |
+| 2026-08-21 | warm/no-op | `audit-runtime-graphics-link-fast` | 0 | 4.62 | 0 | 11 |
 
 The first safe no-op criterion is unchanged output plus a successful exit on a
 second consecutive warm run. A useful future criterion is a measured wall-time
@@ -69,22 +71,24 @@ different workspace shapes.
 
 ## Known bottlenecks
 
-The current graph is dominated by large native translation units and serial
-shell gates rather than by Rust type-checking:
+The current graph is dominated by the production dylib link and serial full
+acceptance gates rather than by Rust type-checking:
 
-- `probes/runtime_link_probe.cc` combines ART bootstrap, JNI, View, RenderNode,
-  input, Metal presentation, and shutdown responsibilities.
+- `probes/runtime_graphics_probe.cc` still owns the RenderNode/Metal bridge;
+  the smaller phase/input/shutdown objects are separate cache products.
 - `crates/art-bootstrap/src/main.rs` combines source materialization, patching,
   native compilation, archive/link orchestration, audit, and probes.
-- ICU, HWUI, Skia/graphics JNI, and related AOSP objects are rebuilt through
-  shell actions without one persistent depfile-backed native graph.
-- The workspace contains a small number of production crates while many
-  independent `tools/*` Cargo projects are outside that graph.
-- The existing gates have useful artifact checks but do not expose a stable
-  compiled-versus-reused object count.
+- The full graphics audit intentionally reruns serial upstream source/ABI
+  gates; use `audit-runtime-graphics-link-fast` for the inner loop.
+- The workspace still contains independent `tools/*` Cargo projects outside
+  the main Rust graph, so provider-specific edits should use their local audit
+  before the full workspace gate.
+- The remaining broad bootstrap stamps do not affect the promoted warm graph,
+  but their phase-local invalidation still needs an explicit mutation test.
 
 These are observations to validate with the baseline, not permission for the
-measurement script to change the graph. The intended follow-up is to introduce
-an explicit Ninja/depfile native graph and persistent object cache, then move
-runtime ownership and lifecycle state into Rust behind a narrow unsafe FFI
-boundary. Each structural change should preserve this measurement contract.
+measurement script to change the graph. The intended follow-up is to finish
+the phase-local invalidation audit and remove the remaining broad bootstrap
+stamps while keeping runtime ownership and lifecycle state in Rust behind a
+narrow unsafe FFI boundary. Each structural change should preserve this
+measurement contract.
