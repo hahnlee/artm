@@ -238,7 +238,25 @@ keeps all five path strings, heap limits, callback contexts, and graphics
 handle alive together, then materializes the raw `ProcessConfig` only inside
 `EngineSession::run_request`. Host orchestration no longer constructs or stores
 the raw FFI struct, so its unsafe lifetime surface is limited to one synchronous
-engine call.
+engine call. `CallbackBindings` validates the required host/provider context
+and callback pairing once at that boundary; the host no longer mutates a
+partially initialized request with several independent raw-pointer calls.
+
+The host arms `RuntimeShutdownGuard` immediately after the Rust session enters
+bootstrapping, before opening the dynamic engine image. Engine/provider attach
+rollback, graphics-session failure, request construction, and process-call
+errors therefore all use the same owner-thread reverse shutdown path. A
+provider-hook table is cleared before an engine-image attach rollback, so no
+process-global callback can outlive either its Rust bridge or its code image.
+
+Flavor-neutral probe compilation follows the same ownership boundary. The six
+core probe TUs (`runtime_elf`, ABI, process state/options, shutdown, and frame)
+are implemented by `native_probe/core.rs` and emitted under one
+`_build/native-probes/core` dependency-fingerprinted cache. CPU runtime,
+graphics runtime, and APK graph actions consume those objects instead of each
+owning a copy of the compile policy. Graphics archive discovery and member
+validation are likewise owned by `GraphicsRuntimeInputs`, leaving the link
+routine responsible only for native compilation, linking, and symbol gates.
 
 Native ELF resource lifetime now crosses the same boundary through the Rust
 `darwin-art-runtime` static library. `RuntimeNativeOwner` stores opaque graph,

@@ -69,6 +69,21 @@ compiled signal 0, cached signal 19. This is recorded separately from the
 original baseline so future graph changes can be compared without mixing
 different workspace shapes.
 
+After the shared core-probe cache and host ownership boundaries landed, a
+warm direct-CLI sample measured:
+
+| Date | State | Command | Exit | Wall (s) |
+| --- | --- | --- | ---: | ---: |
+| 2026-08-21 | warm/no-op | `target/debug/art-bootstrap audit-runtime-link` | 0 | 14.60 |
+| 2026-08-21 | warm/no-op | `target/debug/art-bootstrap audit-runtime-graphics-link-fast` | 0 | 3.41 |
+
+The six flavor-neutral core probe objects are now shared under
+`_build/native-probes/core`; the warm samples therefore do not recompile those
+objects once the CPU and graphics audits have populated the cache. These rows
+are direct CLI timings (not the older Cargo wrapper rows) and should not be
+compared to the 58.88 s full upstream graphics audit as if they were the same
+workload.
+
 ## Known bottlenecks
 
 The current graph is dominated by the production dylib link and serial full
