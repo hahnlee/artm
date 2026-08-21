@@ -202,6 +202,15 @@ descriptor I/O, mmap, and sysconf. The standalone libcore gate archives both
 objects and verifies the split smoke/managed ABI path, so a syscall policy edit
 does not recompile the generated 135-entry JNI registrar.
 
+The character/primitive and ICU registrations are now isolated in
+`compat/darwin_libcore_unicode_natives.cc`. The main
+`compat/darwin_libcore_natives.cc` TU retains Linux/System/FileDescriptor and
+OpenJDK registration orchestration; it calls the Unicode registrar before the
+platform registration phases and the ICU registrar at the original final
+position. The ICU adapter lock and native graph list both track the new object,
+so edits to Unicode semantics no longer rebuild the libcore syscall/JNI
+orchestration object.
+
 The ART adapter now applies the same boundary to platform compatibility shims:
 Palette, runtime-image, intrinsic-printing, HWASAN, and unwind stubs live in
 `compat/darwin_runtime_platform_stubs.cc`. The graph-aware adapter is now

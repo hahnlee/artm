@@ -20,6 +20,7 @@ pub(super) fn adapter_jobs(
         "darwin_icu_natives.cc",
         "darwin_icu_jni_bridge.cc",
         "darwin_libcore_natives.cc",
+        "darwin_libcore_unicode_natives.cc",
         "darwin_runtime_adapters.cc",
         "darwin_runtime_platform_stubs.cc",
         "darwin_native_bridge_stubs.cc",
@@ -46,8 +47,11 @@ pub(super) fn adapter_jobs(
         };
         let adapter_object = adapter_object_dir.join(format!("{adapter_source}.o"));
         let compile_includes = if common { runtime_includes } else { includes };
-        let mut adapter_command = if real_graphics && adapter_source == "darwin_libcore_natives.cc"
-        {
+        let mut adapter_command = if real_graphics
+            && matches!(
+                adapter_source,
+                "darwin_libcore_natives.cc" | "darwin_libcore_unicode_natives.cc"
+            ) {
             let mut libcore_includes = includes.to_vec();
             libcore_includes
                 .retain(|path| *path != Path::new("/opt/homebrew/opt/icu4c@78/include"));
@@ -71,7 +75,12 @@ pub(super) fn adapter_jobs(
         if real_graphics && adapter_source == "darwin_icu_jni_bridge.cc" {
             adapter_command.arg("-I").arg(staged.root.join("include"));
         }
-        if real_graphics && adapter_source == "darwin_libcore_natives.cc" {
+        if real_graphics
+            && matches!(
+                adapter_source,
+                "darwin_libcore_natives.cc" | "darwin_libcore_unicode_natives.cc"
+            )
+        {
             adapter_command.arg("-DDARWIN_ART_FULL_LIBCORE_LINUX");
         }
         if matches!(

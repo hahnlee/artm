@@ -34,6 +34,7 @@ verify_sha "$project_root/compat/darwin_icu_natives.cc" "$DARWIN_ICU_NATIVES_CC_
 verify_sha "$project_root/compat/darwin_icu_natives.h" "$DARWIN_ICU_NATIVES_H_SHA256"
 verify_sha "$project_root/compat/darwin_libcore_natives.cc" "$DARWIN_LIBCORE_NATIVES_CC_SHA256"
 verify_sha "$project_root/compat/darwin_libcore_natives.h" "$DARWIN_LIBCORE_NATIVES_H_SHA256"
+verify_sha "$project_root/compat/darwin_libcore_unicode_natives.cc" "$DARWIN_LIBCORE_UNICODE_NATIVES_CC_SHA256"
 
 common_archive="$foundation_dir/libicuuc-common-darwin.a"
 i18n_archive="$foundation_dir/libicui18n-darwin.a"
@@ -78,7 +79,8 @@ flags=(
 )
 
 adapter_objects=()
-for source in darwin_icu_natives.cc darwin_libcore_natives.cc; do
+for source in darwin_icu_natives.cc darwin_libcore_natives.cc \
+             darwin_libcore_unicode_natives.cc; do
   object="$stage/${source%.cc}.o"
   echo "icu-runtime-adapters: compile $source"
   "$cxx" "${flags[@]}" -c "$project_root/compat/$source" -o "$object"
@@ -101,9 +103,14 @@ fi
 probe_object="$stage/android16_icu_runtime_adapter_smoke.o"
 "$cxx" "${flags[@]}" -c \
   "$project_root/probes/android16_icu_runtime_adapter_smoke.cc" -o "$probe_object"
+framework_stub_object="$stage/android16_icu_runtime_adapter_framework_stub.o"
+"$cxx" "${flags[@]}" -c \
+  "$project_root/probes/android16_icu_runtime_adapter_framework_stub.cc" \
+  -o "$framework_stub_object"
 executable="$stage/android16-icu-runtime-adapter-smoke"
 link_map="$stage/android16-icu-runtime-adapter-smoke.map"
 "$cxx" -arch arm64 -isysroot "$sdk_root" "$probe_object" \
+  "$framework_stub_object" \
   "${adapter_objects[@]}" "$i18n_archive" "$common_archive" \
   -Wl,-force_load,"$init_archive" "$stubdata_archive" \
   -Wl,-map,"$link_map" -o "$executable"
