@@ -184,13 +184,6 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         &probe_cache,
         &compiler_identity,
     )?;
-    let graphics_recording_object = compile_runtime_graphics_recording_probe(
-        root,
-        &build_dir,
-        &include_refs,
-        &ndk_include,
-        &ndk_arch_include,
-    )?;
     let graphics_phase_object = compile_runtime_graphics_phase(root, &build_dir, &include_refs)?;
     let graphics_input_object =
         compile_runtime_graphics_input_probe(root, &build_dir, &include_refs)?;
@@ -305,7 +298,6 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&shutdown_probe_object)
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
-        .arg(&graphics_recording_object)
         .arg(&graphics_state_object)
         .arg(&jni_acceptance_object)
         .arg(&graphics_phase_object)
@@ -879,20 +871,6 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         )?;
         graphics_probe_object
     };
-    let graphics_recording_object = if let Some(path) =
-        env::var_os("DARWIN_ART_NATIVE_GRAPHICS_RECORDING_OBJECT")
-        && Path::new(&path).is_file()
-    {
-        PathBuf::from(path)
-    } else {
-        compile_runtime_graphics_recording_probe(
-            root,
-            &build_dir,
-            &include_refs,
-            &ndk_include,
-            &ndk_arch_include,
-        )?
-    };
     let graphics_phase_object = compile_runtime_graphics_phase(root, &build_dir, &include_refs)?;
     let graphics_input_object =
         compile_runtime_graphics_input_probe(root, &build_dir, &include_refs)?;
@@ -1050,7 +1028,6 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&shutdown_probe_object)
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
-        .arg(&graphics_recording_object)
         .arg(&graphics_state_object)
         .arg(&jni_acceptance_object)
         .arg(&graphics_session_object_real)

@@ -303,8 +303,6 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         native_output_root.join("runtime-probes/darwin_art_runtime_hwui_probe.cc.o");
     let graphics_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_graphics_probe.cc.o");
-    let graphics_recording_object_path =
-        native_output_root.join("runtime-probes/darwin_art_runtime_graphics_recording.cc.o");
     let graphics_phase_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_graphics_phase.cc.o");
     let graphics_input_object_path =
@@ -335,7 +333,6 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     let network_object = ninja_path(&network_object_path);
     let hwui_object = ninja_path(&hwui_object_path);
     let graphics_object = ninja_path(&graphics_object_path);
-    let graphics_recording_object = ninja_path(&graphics_recording_object_path);
     let graphics_phase_object = ninja_path(&graphics_phase_object_path);
     let graphics_input_object = ninja_path(&graphics_input_object_path);
     let graphics_state_object = ninja_path(&graphics_state_object_path);
@@ -407,16 +404,6 @@ fn emit_graph(out: &Path) -> io::Result<()> {
             "probes/runtime_graphics_probe.h",
             "compat/darwin_surface_bridge.h",
             "compat/darwin_framework_natives.h",
-            "compat/darwin_hwui_gpu_mode.h",
-        ],
-    );
-    let graphics_recording_inputs = probe_inputs(
-        &root,
-        &[
-            "probes/runtime_graphics_recording.cc",
-            "probes/runtime_graphics_recording.h",
-            "probes/runtime_graphics_state.h",
-            "compat/darwin_surface_bridge.h",
             "compat/darwin_hwui_gpu_mode.h",
         ],
     );
@@ -507,17 +494,6 @@ fn emit_graph(out: &Path) -> io::Result<()> {
             "probes/runtime_graphics_probe.h",
             "compat/darwin_surface_bridge.h",
             "compat/darwin_framework_natives.h",
-            "compat/darwin_hwui_gpu_mode.h",
-        ],
-    )?;
-    let graphics_recording_stamp = probe_content_stamp(
-        &root,
-        "graphics-recording",
-        &[
-            "probes/runtime_graphics_recording.cc",
-            "probes/runtime_graphics_recording.h",
-            "probes/runtime_graphics_state.h",
-            "compat/darwin_surface_bridge.h",
             "compat/darwin_hwui_gpu_mode.h",
         ],
     )?;
@@ -932,23 +908,6 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push(' ');
     graph.push_str(&ninja_path(&graphics_probe_stamp));
     graph.push('\n');
-    graph.push_str("rule runtime_graphics_recording_probe\n");
-    graph.push_str("  command = cd ");
-    graph.push_str(&shell_quote(&root_for_shell));
-    graph.push_str(" && DARWIN_ART_NATIVE_GRAPHICS_RECORDING_OBJECT=");
-    graph.push_str(&shell_quote(
-        &graphics_recording_object_path.to_string_lossy(),
-    ));
-    graph.push_str(" cargo run -p art-bootstrap -- audit-runtime-graphics-link-fast\n");
-    graph.push_str("  description = CXX runtime_graphics_recording\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
-    graph.push_str("build ");
-    graph.push_str(&graphics_recording_object);
-    graph.push_str(": runtime_graphics_recording_probe ");
-    graph.push_str(&graphics_recording_inputs);
-    graph.push(' ');
-    graph.push_str(&ninja_path(&graphics_recording_stamp));
-    graph.push('\n');
     graph.push_str("rule runtime_graphics_phase_probe\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
@@ -1038,10 +997,6 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&network_object_for_shell));
     graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_OBJECT=");
     graph.push_str(&shell_quote(&graphics_object_path.to_string_lossy()));
-    graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_RECORDING_OBJECT=");
-    graph.push_str(&shell_quote(
-        &graphics_recording_object_path.to_string_lossy(),
-    ));
     graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_PHASE_OBJECT=");
     graph.push_str(&shell_quote(&graphics_phase_object_path.to_string_lossy()));
     graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_INPUT_OBJECT=");
@@ -1093,8 +1048,6 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&network_object);
     graph.push(' ');
     graph.push_str(&graphics_object);
-    graph.push(' ');
-    graph.push_str(&graphics_recording_object);
     graph.push(' ');
     graph.push_str(&graphics_phase_object);
     graph.push(' ');
@@ -1193,8 +1146,6 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_frame_probe.h"),
         PathBuf::from("probes/runtime_graphics_probe.cc"),
         PathBuf::from("probes/runtime_graphics_probe.h"),
-        PathBuf::from("probes/runtime_graphics_recording.cc"),
-        PathBuf::from("probes/runtime_graphics_recording.h"),
         PathBuf::from("probes/runtime_graphics_phase.cc"),
         PathBuf::from("probes/runtime_graphics_phase.h"),
         PathBuf::from("probes/runtime_graphics_input.cc"),
@@ -1443,8 +1394,6 @@ fn is_probe_only_input(path: &Path) -> bool {
             | "probes/runtime_frame_probe.h"
             | "probes/runtime_graphics_probe.cc"
             | "probes/runtime_graphics_probe.h"
-            | "probes/runtime_graphics_recording.cc"
-            | "probes/runtime_graphics_recording.h"
             | "probes/runtime_graphics_phase.cc"
             | "probes/runtime_graphics_phase.h"
             | "probes/runtime_graphics_input.cc"
