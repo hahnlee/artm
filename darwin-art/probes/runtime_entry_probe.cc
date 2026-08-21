@@ -1,12 +1,4 @@
-#include <arpa/inet.h>
-#include <fcntl.h>
 #include <mach-o/dyld.h>
-#include <netinet/in.h>
-#include <poll.h>
-#include <pthread.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include <array>
 #include <algorithm>
@@ -92,30 +84,6 @@ extern "C" bool CloseNativeLibrary(void* handle, bool needs_native_bridge,
                                     char** error_msg);
 extern "C" void NativeLoaderFreeErrorMessage(char* message);
 }  // namespace android
-
-extern "C" int darwin_art_network_load_fixture(JNIEnv* env,
-                                                  const char* fixture_path,
-                                                  jobject app_loader,
-                                                  jclass fixture_class) {
-  art::Thread* self = art::Thread::Current();
-  if (self == nullptr) {
-    std::cerr << "ART Android network: no owner thread\n";
-    return 47;
-  }
-  std::string load_error;
-  bool loaded = false;
-  {
-    art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
-    loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
-        env, fixture_path, app_loader, fixture_class, &load_error);
-  }
-  if (!loaded || !load_error.empty() || env->ExceptionCheck()) {
-    std::cerr << "ART Android network JavaVMExt load failed: " << load_error
-              << "\n";
-    return 47;
-  }
-  return 0;
-}
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     const darwin_art_process_config_t* config,

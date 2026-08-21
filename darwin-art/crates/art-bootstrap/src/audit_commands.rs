@@ -237,6 +237,8 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         &probe_cache,
         &compiler_identity,
     )?;
+    let network_loader_object =
+        compile_runtime_network_loader_probe(root, &build_dir, &include_refs)?;
     let mut surface_command = Command::new("clang++");
     surface_command
         .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
@@ -316,6 +318,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&graphics_probe_object)
         .arg(&graphics_state_object)
         .arg(&graphics_cpu_stubs_object)
+        .arg(&network_loader_object)
         .arg(&jni_acceptance_object)
         .arg(&graphics_phase_object)
         .arg(&graphics_input_object)
@@ -984,6 +987,8 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         &probe_cache,
         &compiler_identity,
     )?;
+    let network_loader_object =
+        compile_runtime_network_loader_probe(root, &build_dir, &include_refs)?;
     let mut surface_command = Command::new("clang++");
     surface_command
         .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
@@ -1093,6 +1098,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
         .arg(&graphics_state_object)
+        .arg(&network_loader_object)
         .arg(&jni_acceptance_object)
         .arg(&graphics_session_object_real)
         .arg(&graphics_phase_object)

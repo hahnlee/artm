@@ -1130,6 +1130,7 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_hwui_probe.cc"),
         PathBuf::from("probes/runtime_hwui_probe.h"),
         PathBuf::from("probes/runtime_entry_probe.cc"),
+        PathBuf::from("probes/runtime_network_loader.cc"),
         PathBuf::from("probes/runtime_link_probe.cc"),
         PathBuf::from("probes/runtime_elf_probe.cc"),
         PathBuf::from("probes/runtime_elf_probe.h"),
