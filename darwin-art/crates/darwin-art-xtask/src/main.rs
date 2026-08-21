@@ -937,8 +937,39 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str("rule runtime_graphics_probe\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
-    graph.push_str(" && DARWIN_ART_NATIVE_GRAPHICS_OBJECT=");
+    // The graphics translation unit is materialized by the same audit
+    // command that links the probe dylib.  Pass every split probe output
+    // through here; otherwise this edge silently falls back to the legacy
+    // runtime-graphics-link-probe directory and can link a mixed stale/new
+    // object set before the final audit edge runs.
+    graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT_ROOT=");
+    graph.push_str(&shell_quote(&native_output_for_shell));
+    graph.push_str(" DARWIN_ART_NATIVE_FILESYSTEM_OBJECT=");
+    graph.push_str(&shell_quote(&filesystem_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_NETWORK_OBJECT=");
+    graph.push_str(&shell_quote(&network_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_OBJECT=");
     graph.push_str(&shell_quote(&graphics_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_PHASE_OBJECT=");
+    graph.push_str(&shell_quote(&graphics_phase_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_INPUT_OBJECT=");
+    graph.push_str(&shell_quote(&graphics_input_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_STATE_OBJECT=");
+    graph.push_str(&shell_quote(&graphics_state_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT=");
+    graph.push_str(&shell_quote(
+        &graphics_session_object_path.to_string_lossy(),
+    ));
+    graph.push_str(" DARWIN_ART_NATIVE_JNI_ACCEPTANCE_OBJECT=");
+    graph.push_str(&shell_quote(&jni_acceptance_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_HWUI_OBJECT=");
+    graph.push_str(&shell_quote(&hwui_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_APP_BOOTSTRAP_OBJECT=");
+    graph.push_str(&shell_quote(&app_bootstrap_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_APP_PRESENTATION_OBJECT=");
+    graph.push_str(&shell_quote(
+        &app_presentation_object_path.to_string_lossy(),
+    ));
     graph.push_str(" cargo run -p art-bootstrap -- audit-runtime-graphics-link-fast\n");
     graph.push_str("  description = CXX runtime_graphics_probe\n");
     graph.push_str("  depfile = $out.d\n  deps = gcc\n");
@@ -949,6 +980,22 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&graphics_probe_inputs);
     graph.push(' ');
     graph.push_str(&ninja_path(&graphics_probe_stamp));
+    graph.push(' ');
+    graph.push_str(&graphics_phase_object);
+    graph.push(' ');
+    graph.push_str(&graphics_input_object);
+    graph.push(' ');
+    graph.push_str(&graphics_state_object);
+    graph.push(' ');
+    graph.push_str(&ninja_path(&graphics_session_object_path));
+    graph.push(' ');
+    graph.push_str(&jni_acceptance_object);
+    graph.push(' ');
+    graph.push_str(&hwui_object);
+    graph.push(' ');
+    graph.push_str(&app_bootstrap_object);
+    graph.push(' ');
+    graph.push_str(&app_presentation_object);
     graph.push('\n');
     graph.push_str("rule runtime_graphics_phase_probe\n");
     graph.push_str("  command = cd ");
