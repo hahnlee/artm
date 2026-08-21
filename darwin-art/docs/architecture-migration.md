@@ -163,12 +163,16 @@ recompiles the larger framework registration TU.
 
 The ART adapter now applies the same boundary to platform compatibility shims:
 Palette, runtime-image, intrinsic-printing, HWASAN, and unwind stubs live in
-`compat/darwin_runtime_platform_stubs.cc`. ELF graph discovery, JNI proxy
-trampolines, provider ownership, and graph-aware NativeBridge trampoline
-selection remain in
-`darwin_runtime_adapters.cc`. This is an intentionally narrow ABI split: the
-stubs have no graph/provider state and can be rebuilt independently when the
-loader or provider path changes.
+`compat/darwin_runtime_platform_stubs.cc`. The graph-aware adapter is now
+split into narrow phases: `darwin_runtime_elf_lifecycle.cc` owns image
+publish/finalize and provider teardown, `darwin_runtime_elf_resolver.cc` owns
+closed provider resolution, `darwin_runtime_native_loader.cc` owns trusted
+discovery and NativeLoader open/close, and
+`darwin_runtime_jni_registration.cc` owns RegisterNatives and trampoline
+publication. The remaining `darwin_runtime_adapters.cc` is limited to
+NativeBridge callbacks and JNI-on-load dispatch. These phases share only the
+opaque `ElfLibrary` ABI header, so changing one policy does not recompile the
+others.
 
 The process-wide NativeBridge/NativeLoader hooks follow the same rule in
 `compat/darwin_native_bridge_stubs.cc`. Only `NativeBridgeGetTrampoline2` and
@@ -178,22 +182,23 @@ operations stay explicit closed-capability stubs.
 
 JNI descriptor validation is now an independent `darwin_jni_shorty.cc` phase.
 It owns only Android descriptor parsing and the current ART `JNIEnv` lookup;
-the graph-aware proxy still owns class lookup, RegisterNatives, and trampoline
-publication. Its tiny header is the only shared declaration between those
+the graph-aware proxy still owns class lookup, while
+`darwin_runtime_jni_registration.cc` owns RegisterNatives and trampoline
+publication. Its tiny headers are the only shared declarations between those
 phases.
 
 The proxy's environment/class lookup is now a separate
 `darwin_jni_proxy_lookup.cc` phase. It is deliberately limited to resolving the
 current ART environment and validating a class lookup against the graph-owned
-fixture state. RegisterNatives, trampoline publication, and rollback remain in
-the graph adapter, so changing lookup policy no longer recompiles that larger
-transaction boundary.
+fixture state. RegisterNatives, trampoline publication, and rollback now live
+in `darwin_runtime_jni_registration.cc`, so changing lookup policy no longer
+recompiles that transaction boundary.
 
 The proxy's exception bridge is separately cacheable in
 `darwin_jni_proxy_registration.cc`; it only translates `ThrowNew` into the
-current ART environment. The larger RegisterNatives transaction remains in the
-adapter until its graph-owned rollback state is moved behind a dedicated Rust
-session ABI.
+current ART environment. The registration transaction still shares the opaque
+C++ `ElfLibrary` state; moving that graph-owned rollback state behind a
+dedicated Rust session ABI is the next ownership milestone.
 
 On the Rust side, the dynamic engine ABI is grouped into four private
 capabilities (`ProcessSymbols`, `SurfaceSymbols`, `GraphicsSymbols`, and

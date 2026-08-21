@@ -157,6 +157,21 @@ The small exception bridge is a sixth cached object,
 the registration transaction, keeping ThrowNew-only changes out of the
 trampoline/rollback object.
 
+The remaining graph-aware adapter is now partitioned into four more cached
+objects. `darwin_runtime_elf_lifecycle.cc` owns image publish/finalize and
+provider teardown, `darwin_runtime_elf_resolver.cc` owns closed provider symbol
+resolution and fixture route accounting, `darwin_runtime_native_loader.cc`
+owns trusted-directory discovery plus NativeLoader open/close, and
+`darwin_runtime_jni_registration.cc` owns RegisterNatives and trampoline
+publication. A change to provider routing, loader discovery, teardown policy,
+or JNI registration therefore invalidates only that object plus the final link.
+
+After these boundaries were promoted, warm runtime and graphics bootstrap
+commands both reached the native `ninja: no work to do` path in about 3 seconds
+including the Cargo/xtask wrapper. Runtime link closure remained
+`undefined=0`, and recursive ELF/JNI/TLS acceptance continued to pass after
+each split.
+
 Graphics presentation now follows the same boundary. The JNI/widget
 validation and `present_content`/interactive-root orchestration live in
 `probes/runtime_graphics_phase.cc`, while clickable hit-testing, pointer/frame
