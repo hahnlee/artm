@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+mod bootstrap;
 mod config;
 mod frame;
 #[cfg(target_os = "macos")]

@@ -1,5 +1,7 @@
 use std::ptr;
 
+#[cfg(target_os = "macos")]
+use crate::bootstrap::attach_runtime;
 use crate::config::{HostError, HostOutcome, RunOptions, build_process_request};
 use crate::frame::{FrameHost, receive_frame};
 #[cfg(target_os = "macos")]
@@ -31,47 +33,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // through the same owner-thread shutdown path.
         let mut shutdown_guard = RuntimeShutdownGuard::new(&mut runtime);
 
-        // Transfer every long-lived native resource into RuntimeSession before
-        // invoking ART. The bootstrap call below then borrows the Rust owner
-        // instead of keeping a second host-side engine/provider state machine.
-        let engine = EngineSession::open(&options.library).map_err(HostError::DynamicLoader)?;
-        let provider_bridge = Box::new(engine.provider_bridge());
-        let provider_context = provider_bridge.context();
-        // SAFETY: provider_bridge is transferred into RuntimeSession immediately
-        // below and remains alive until the engine hooks are cleared in teardown.
-        unsafe {
-            engine.install_provider_hooks(
-                provider_context,
-                Some(ProviderBridge::acquire_callback()),
-                Some(ProviderBridge::release_callback()),
-            );
-        }
-        if let Err(engine) = shutdown_guard.runtime().attach_engine(engine) {
-            // Hooks were installed before the ownership transfer. Clear the
-            // native table while both the callback bridge and engine image
-            // are still alive; dropping either one first would leave a stale
-            // process-global callback context.
-            let _ = provider_bridge.clear();
-            drop(engine);
-            return Err(HostError::RuntimeFailed(-1));
-        }
-        if let Err(provider_bridge) = shutdown_guard.runtime().attach_provider(provider_bridge) {
-            let _ = provider_bridge.clear();
-            return Err(HostError::RuntimeFailed(-1));
-        }
-
-        let graphics_session = shutdown_guard
-            .runtime()
-            .engine()
-            .and_then(|engine| engine.create_graphics_session().ok());
-        let graphics_attached = if let Some(graphics) = graphics_session {
-            if shutdown_guard.runtime().attach_graphics(graphics).is_err() {
-                return Err(HostError::RuntimeFailed(-1));
-            }
-            true
-        } else {
-            false
-        };
+        let bootstrap = attach_runtime(shutdown_guard.runtime(), &options.library)?;
+        let provider_context = bootstrap.provider_context;
+        let graphics_attached = bootstrap.graphics_attached;
 
         if let Err(error) = shutdown_guard
             .runtime()
