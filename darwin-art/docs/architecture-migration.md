@@ -152,10 +152,11 @@ audits them when a drawable is present.
 
 The host no longer consumes the complete raw `EngineSymbols` table. Provider
 acquire/release/clear callbacks are converted directly into the Rust-owned
-`ProviderBridge`; raw symbol resolution and graphics/surface dispatch remain
-crate-private. This removes the former duplicate `ProviderHooks` capability
-from the engine crate and keeps provider callback code independent of unrelated
-engine ABI entries.
+`ProviderBridge` (`darwin-art-runtime/src/provider_bridge.rs`); its lease
+state machine remains in `provider.rs`. Raw symbol resolution and
+graphics/surface dispatch remain crate-private. This removes the former
+duplicate `ProviderHooks` capability from the engine crate and keeps provider
+callback code independent of unrelated engine ABI entries.
 
 The native graph emitter is split by ownership rather than kept in one command
 file: `graph::inputs` owns invalidation/input stamps, `graph::foundation` owns
