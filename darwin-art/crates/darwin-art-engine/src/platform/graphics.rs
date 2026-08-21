@@ -3,6 +3,7 @@ use darwin_art_engine_sys::{
     GraphicsSessionCloseFn, GraphicsSessionDestroyFn, GraphicsSessionDispatchPointerFn,
     GraphicsSessionHandle, GraphicsSessionPumpFrameFn,
 };
+use darwin_art_runtime::NativeResource;
 use std::ptr::NonNull;
 
 /// Rust owner for the opaque native HWUI session.  The C ABI deliberately
@@ -116,6 +117,12 @@ impl Drop for GraphicsSession {
         if self.closed {
             let _ = self.destroy();
         }
+    }
+}
+
+impl NativeResource for GraphicsSession {
+    fn close(&mut self) -> i32 {
+        GraphicsSession::close(self)
     }
 }
 

@@ -6,3 +6,4 @@ publish = false
 
 [dependencies]
 darwin-art-engine-sys = { path = "../darwin-art-engine-sys" }
+darwin-art-runtime = { path = "../darwin-art-runtime" }

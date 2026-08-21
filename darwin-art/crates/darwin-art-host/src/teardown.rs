@@ -2,11 +2,6 @@
 
 use crate::config::HostError;
 use crate::runtime::HostRuntime;
-use crate::surface::{
-    clear_provider_owner, close_graphics_owner, close_surface_owner, release_engine_owner,
-    release_graphics_owner, shutdown_engine_owner,
-};
-use darwin_art_runtime::{RuntimeError, Subsystem};
 
 /// Owns the final shutdown obligation after the runtime has entered its
 /// running phase.  Moving this obligation into a guard makes every later
@@ -45,149 +40,10 @@ impl Drop for RuntimeShutdownGuard<'_> {
 }
 
 pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostError> {
-    // Cleanup is deliberately best-effort after shutdown begins. A failing
-    // surface destroy must not prevent ART shutdown, and a provider-hook
-    // failure must not leave the engine image resident. Each owner is taken
-    // before its native close operation, so a repeated call is harmless and
-    // cannot invoke a destroy/shutdown callback twice.
-    let mut first_error = runtime
-        .begin_shutdown()
-        .err()
-        .map(|error| HostError::RuntimeFailed(error.status() as i32));
-
-    if runtime.surface().is_some() {
-        if let Err(error) = uninstall_if_active(runtime, Subsystem::Surface) {
-            remember_error(&mut first_error, map_shutdown_error("destroy", error));
+    runtime.shutdown_native().map_err(|error| match error {
+        darwin_art_runtime::RuntimeError::EngineFailure { status } => {
+            HostError::ShutdownFailed(status)
         }
-        if let Err(status) = close_surface_owner(runtime) {
-            remember_error(
-                &mut first_error,
-                HostError::SurfaceFailed {
-                    operation: "destroy",
-                    status,
-                },
-            );
-        }
-    }
-
-    // A graphics session is installed before the engine runs, while the
-    // concrete surface is installed later by the frame loop. Close the
-    // graphics session while ART is alive, but retain its opaque handle until
-    // engine shutdown has finished; the native process borrows that state
-    // during DestroyJavaVM.
-    if runtime.graphics().is_some() {
-        if let Err(error) = uninstall_if_active(runtime, Subsystem::Graphics) {
-            remember_error(&mut first_error, map_shutdown_error("graphics", error));
-        }
-        if let Err(status) = close_graphics_owner(runtime) {
-            remember_error(&mut first_error, HostError::RuntimeFailed(status));
-        }
-    }
-
-    if runtime.provider().is_some()
-        && let Err(error) = uninstall_if_active(runtime, Subsystem::ElfNamespace)
-    {
-        remember_error(&mut first_error, map_shutdown_error("provider", error));
-    }
-
-    // Remove the provider lease before the engine lease to preserve strict
-    // reverse installation order, but keep provider callbacks installed until
-    // DestroyJavaVM has completed below.
-    if runtime.engine().is_some() {
-        if let Err(error) = uninstall_if_active(runtime, Subsystem::Engine) {
-            remember_error(&mut first_error, map_shutdown_error("engine", error));
-        }
-        if let Err(status) = shutdown_engine_owner(runtime) {
-            remember_error(&mut first_error, HostError::ShutdownFailed(status));
-        }
-    }
-
-    // DestroyJavaVM may still call provider-backed native code. Clear the
-    // provider lease only after the shutdown callback completes, while the
-    // engine image still owns the callback table.
-    if runtime.provider().is_some() {
-        let provider_status = clear_provider_owner(runtime);
-        if provider_status != 0 {
-            remember_error(&mut first_error, HostError::ShutdownFailed(provider_status));
-        }
-    }
-
-    if runtime.engine().is_some()
-        && let Err(status) = release_engine_owner(runtime)
-    {
-        remember_error(&mut first_error, HostError::ShutdownFailed(status));
-    }
-
-    // Destroy the already-closed graphics handle only after the engine image
-    // has completed DestroyJavaVM. This makes the final native callback
-    // lifetime explicit instead of relying on RuntimeOwners::Drop.
-    if runtime.graphics().is_some()
-        && let Err(status) = release_graphics_owner(runtime)
-    {
-        remember_error(&mut first_error, HostError::RuntimeFailed(status));
-    }
-
-    if first_error.is_none()
-        && let Err(error) = runtime.finish_shutdown()
-    {
-        remember_error(
-            &mut first_error,
-            HostError::RuntimeFailed(error.status() as i32),
-        );
-    }
-
-    if let Some(error) = first_error {
-        runtime.fail(RuntimeError::EngineFailure {
-            status: error_status(&error),
-        });
-        Err(error)
-    } else {
-        Ok(())
-    }
-}
-
-fn uninstall_owned(runtime: &mut HostRuntime, expected: Subsystem) -> Result<(), RuntimeError> {
-    match runtime.uninstall_latest_subsystem()? {
-        Some(actual) if actual == expected => Ok(()),
-        Some(actual) => Err(RuntimeError::InvalidShutdownOrder {
-            expected,
-            requested: actual,
-        }),
-        None => Err(RuntimeError::SubsystemNotActive {
-            subsystem: expected,
-        }),
-    }
-}
-
-fn uninstall_if_active(runtime: &mut HostRuntime, expected: Subsystem) -> Result<(), RuntimeError> {
-    if runtime.subsystem_active(expected) {
-        uninstall_owned(runtime, expected)
-    } else {
-        Ok(())
-    }
-}
-
-fn remember_error(slot: &mut Option<HostError>, error: HostError) {
-    if slot.is_none() {
-        *slot = Some(error);
-    }
-}
-
-fn map_shutdown_error(operation: &'static str, error: RuntimeError) -> HostError {
-    match error {
-        RuntimeError::EngineFailure { status } if operation == "destroy" => {
-            HostError::SurfaceFailed { operation, status }
-        }
-        RuntimeError::EngineFailure { status } => HostError::ShutdownFailed(status),
         other => HostError::RuntimeFailed(other.status() as i32),
-    }
-}
-
-fn error_status(error: &HostError) -> i32 {
-    match error {
-        HostError::RuntimeFailed(status)
-        | HostError::ShutdownFailed(status)
-        | HostError::SurfaceFailed { status, .. } => *status,
-        _ => -1,
-    }
+    })
 }

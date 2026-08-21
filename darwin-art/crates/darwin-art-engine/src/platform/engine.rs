@@ -7,6 +7,7 @@ use darwin_art_engine_sys::{
     ProcessConfig, ProcessResult, ProviderAcquireFn, ProviderClearHooksFn, ProviderNativeAcquireFn,
     ProviderNativeReleaseFn, ProviderReleaseFn,
 };
+use darwin_art_runtime::NativeResource;
 use std::path::Path;
 
 /// Safe provider-hook view owned by the live `EngineSession` image.
@@ -166,6 +167,12 @@ impl Drop for EngineSession {
         // RuntimeSession teardown marks this callback consumed first, so
         // Drop is idempotent in the successful path.
         let _ = self.close();
+    }
+}
+
+impl NativeResource for EngineSession {
+    fn close(&mut self) -> i32 {
+        EngineSession::close(self)
     }
 }
 

@@ -64,6 +64,7 @@ name = "darwin-art-engine"
 version = "0.1.0"
 dependencies = [
  "darwin-art-engine-sys",
+ "darwin-art-runtime",
 ]
 
 [[package]]

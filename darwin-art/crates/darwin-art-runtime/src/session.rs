@@ -8,6 +8,20 @@
 use crate::owners::RuntimeOwners;
 use crate::{RuntimeError, RuntimeLifecycle, RuntimePhase, Subsystem, SubsystemLease};
 
+/// Native resource contract used by the Rust-owned shutdown coordinator.
+///
+/// Implementations are deliberately tiny ABI adapters: they close or clear
+/// an already-borrowed native object and return its status.  The ordering,
+/// rollback, and owner-thread checks remain in `RuntimeSession` rather than
+/// being duplicated by each host frontend.
+pub trait NativeResource {
+    fn close(&mut self) -> i32;
+
+    fn clear(&mut self) -> i32 {
+        0
+    }
+}
+
 /// Owns one runtime's lifecycle and its concrete native resources.
 pub struct RuntimeSession<E, P, S, G = ()> {
     lifecycle: RuntimeLifecycle,
@@ -156,6 +170,110 @@ impl<E, P, S, G> RuntimeSession<E, P, S, G> {
         self.owners.is_empty()
     }
 
+    /// Close and release every native resource in dependency order.
+    ///
+    /// Graphics and surface are closed before ART. Provider hooks remain
+    /// installed while the engine performs its shutdown callback, then are
+    /// cleared before the engine image is released. Every step continues
+    /// after an error and returns the first failure, preserving the native
+    /// rollback contract on early returns.
+    pub fn shutdown_native(&mut self) -> Result<(), RuntimeError>
+    where
+        E: NativeResource,
+        P: NativeResource,
+        S: NativeResource,
+        G: NativeResource,
+    {
+        let mut first_status = self
+            .begin_shutdown()
+            .err()
+            .map(|error| error.status() as i32);
+        let mut remember = |status: i32| {
+            if status != 0 && first_status.is_none() {
+                first_status = Some(status);
+            }
+        };
+
+        if self.surface().is_some() {
+            if let Err(error) = self.remove_expected_subsystem(Subsystem::Surface) {
+                remember(error.status() as i32);
+            }
+            if let Some(surface) = self.surface_mut() {
+                remember(surface.close());
+            }
+            if let Err(error) = self.release_surface() {
+                remember(error.status() as i32);
+            }
+        }
+
+        if self.graphics().is_some() {
+            if let Err(error) = self.remove_expected_subsystem(Subsystem::Graphics) {
+                remember(error.status() as i32);
+            }
+            if let Ok(Some(graphics)) = self.graphics_for_shutdown_mut() {
+                remember(graphics.close());
+            }
+        }
+
+        if self.provider().is_some()
+            && let Err(error) = self.remove_expected_subsystem(Subsystem::ElfNamespace)
+        {
+            remember(error.status() as i32);
+        }
+
+        if self.engine().is_some()
+            && let Err(error) = self.remove_expected_subsystem(Subsystem::Engine)
+        {
+            remember(error.status() as i32);
+        }
+
+        // DestroyJavaVM may still execute provider-backed code, so the
+        // engine closes before provider hooks are cleared.
+        if let Some(engine) = self.engine_mut() {
+            remember(engine.close());
+        }
+        if let Err(error) = self.release_engine() {
+            remember(error.status() as i32);
+        }
+
+        if let Some(provider) = self.provider_mut() {
+            remember(provider.clear());
+        }
+        if let Err(error) = self.release_provider() {
+            remember(error.status() as i32);
+        }
+        if let Err(error) = self.release_graphics()
+            && self.graphics().is_some()
+        {
+            remember(error.status() as i32);
+        }
+
+        if first_status.is_none()
+            && let Err(error) = self.finish_shutdown()
+        {
+            first_status = Some(error.status() as i32);
+        }
+        if let Some(status) = first_status {
+            self.fail(RuntimeError::EngineFailure { status });
+            Err(RuntimeError::EngineFailure { status })
+        } else {
+            Ok(())
+        }
+    }
+
+    fn remove_expected_subsystem(&mut self, expected: Subsystem) -> Result<(), RuntimeError> {
+        match self.uninstall_latest_subsystem()? {
+            Some(actual) if actual == expected => Ok(()),
+            Some(actual) => Err(RuntimeError::InvalidShutdownOrder {
+                expected,
+                requested: actual,
+            }),
+            None => Err(RuntimeError::SubsystemNotActive {
+                subsystem: expected,
+            }),
+        }
+    }
+
     fn release_boundary(&self, subsystem: Subsystem) -> Result<(), RuntimeError> {
         self.lifecycle.assert_owner()?;
         if self.phase() != RuntimePhase::ShuttingDown {
@@ -184,6 +302,26 @@ impl<E, P, S, G> Default for RuntimeSession<E, P, S, G> {
 mod tests {
     use super::RuntimeSession;
     use crate::{RuntimePhase, Subsystem};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[derive(Debug)]
+    struct CloseProbe {
+        name: &'static str,
+        events: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    impl super::NativeResource for CloseProbe {
+        fn close(&mut self) -> i32 {
+            self.events.borrow_mut().push(self.name);
+            0
+        }
+
+        fn clear(&mut self) -> i32 {
+            self.events.borrow_mut().push("provider-clear");
+            0
+        }
+    }
 
     #[test]
     fn session_keeps_resources_and_lifecycle_in_one_owner_value() {
@@ -226,5 +364,55 @@ mod tests {
         session.uninstall_subsystem(engine).unwrap();
         assert_eq!(session.release_engine().unwrap(), Some(7));
         session.finish_shutdown().unwrap();
+    }
+
+    #[test]
+    fn native_shutdown_owns_reverse_close_and_provider_clear_order() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut session = RuntimeSession::<CloseProbe, CloseProbe, CloseProbe, CloseProbe>::new();
+        session.start().unwrap();
+        session
+            .attach_engine(CloseProbe {
+                name: "engine-close",
+                events: Rc::clone(&events),
+            })
+            .unwrap();
+        session
+            .attach_provider(CloseProbe {
+                name: "provider-close",
+                events: Rc::clone(&events),
+            })
+            .unwrap();
+        session
+            .attach_graphics(CloseProbe {
+                name: "graphics-close",
+                events: Rc::clone(&events),
+            })
+            .unwrap();
+        session
+            .attach_surface(CloseProbe {
+                name: "surface-close",
+                events: Rc::clone(&events),
+            })
+            .unwrap();
+        session.install_subsystem(Subsystem::Engine).unwrap();
+        session.install_subsystem(Subsystem::ElfNamespace).unwrap();
+        session.install_subsystem(Subsystem::Graphics).unwrap();
+        session.install_subsystem(Subsystem::Surface).unwrap();
+        session.mark_running().unwrap();
+
+        session.shutdown_native().unwrap();
+
+        assert_eq!(
+            &*events.borrow(),
+            &[
+                "surface-close",
+                "graphics-close",
+                "engine-close",
+                "provider-clear"
+            ]
+        );
+        assert_eq!(session.phase(), RuntimePhase::Stopped);
+        assert!(session.is_empty());
     }
 }

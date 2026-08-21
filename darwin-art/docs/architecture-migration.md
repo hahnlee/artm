@@ -274,6 +274,13 @@ the engine image and provider callbacks are still valid, and only then are the
 provider hooks cleared and the engine image dropped. No process-global
 callback can outlive either its Rust bridge or its code image.
 
+The guard now delegates the complete native close sequence to
+`RuntimeSession::shutdown_native()` through the `NativeResource` trait. Host
+code supplies only the four thin close/clear adapters; it no longer contains a
+second graphics/surface/provider/engine ordering state machine. A Rust unit
+gate records the exact surface → graphics → engine → provider-clear sequence,
+including the stopped/empty postcondition.
+
 Flavor-neutral probe compilation follows the same ownership boundary. The six
 core probe TUs (`runtime_elf`, ABI, process state/options, shutdown, and frame)
 are implemented by `native_probe/core.rs` and emitted under one

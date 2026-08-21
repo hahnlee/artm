@@ -4,6 +4,7 @@ use darwin_art_engine_sys::{
     PointerEvent, SurfaceDestroyFn, SurfaceNextPointerEventFn, SurfacePresentFn,
     SurfacePumpEventsFn, SurfaceUpdateFn,
 };
+use darwin_art_runtime::NativeResource;
 use std::{mem::size_of, ptr::NonNull};
 
 /// Owner-thread surface handle. Its callback table and native handle stay
@@ -115,6 +116,12 @@ impl SurfaceSession {
 impl Drop for SurfaceSession {
     fn drop(&mut self) {
         let _ = self.close();
+    }
+}
+
+impl NativeResource for SurfaceSession {
+    fn close(&mut self) -> i32 {
+        SurfaceSession::close(self)
     }
 }
 
