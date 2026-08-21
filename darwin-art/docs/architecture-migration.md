@@ -290,7 +290,12 @@ reuses successful source-pinned foundation products through per-script stamps,
 then still reruns the graphics closure audit and final dylib/symbol checks.
 The strict `audit-runtime-graphics-link` path remains unchanged and executes
 every upstream build/managed acceptance gate; the incremental command is not a
-replacement for release validation.
+replacement for release validation. The cache key for each foundation gate is
+now limited to that gate's own lock/script and declared archive outputs; an
+unrelated provider or probe archive cannot invalidate every foundation gate.
+On the reference machine this reduced a post-cold incremental audit from
+roughly 139 seconds to 12.5 seconds while retaining the final closure/link
+checks.
 
 Native ELF resource lifetime now crosses the same boundary through the Rust
 `darwin-art-runtime` static library. `RuntimeNativeOwner` stores opaque graph,
