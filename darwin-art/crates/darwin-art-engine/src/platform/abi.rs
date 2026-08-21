@@ -142,6 +142,21 @@ impl DynamicLibrary {
     }
 }
 
+impl Drop for DynamicLibrary {
+    fn drop(&mut self) {
+        if self.0.is_null() {
+            return;
+        }
+        // SAFETY: the handle was returned by dlopen and remains owned by this
+        // value until Drop. EngineSession closes ART before this owner is
+        // dropped, so no callback can execute from the image after dlclose.
+        unsafe {
+            let _ = dlclose(self.0);
+        }
+        self.0 = core::ptr::null_mut();
+    }
+}
+
 fn loader_error() -> String {
     // SAFETY: dlerror returns a process-owned C string.
     let error = unsafe { dlerror() };
@@ -159,4 +174,5 @@ unsafe extern "C" {
     fn dlopen(path: *const c_char, mode: i32) -> *mut c_void;
     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
     fn dlerror() -> *const c_char;
+    fn dlclose(handle: *mut c_void) -> i32;
 }
