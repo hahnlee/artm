@@ -179,6 +179,8 @@ mod runtime_commands;
 mod runtime_toolchain;
 #[path = "source_commands.rs"]
 mod source_commands;
+#[path = "source_materialization.rs"]
+mod source_materialization;
 
 pub(crate) use audit_commands::*;
 pub(crate) use dex_commands::*;
@@ -190,6 +192,7 @@ pub(crate) use runtime_bootstrap::*;
 pub(crate) use runtime_commands::*;
 pub(crate) use runtime_toolchain::*;
 pub(crate) use source_commands::*;
+pub(crate) use source_materialization::*;
 
 #[cfg(test)]
 mod tests {
