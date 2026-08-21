@@ -46,6 +46,7 @@
 #include "runtime_abi_probe.h"
 #include "runtime_process_state.h"
 #include "runtime_process_options.h"
+#include "runtime_acceptance_phases.h"
 #include "runtime_jni_scope.h"
 #include "runtime_shutdown_probe.h"
 #include "runtime_frame_probe.h"
@@ -86,6 +87,30 @@ extern "C" bool CloseNativeLibrary(void* handle, bool needs_native_bridge,
                                     char** error_msg);
 extern "C" void NativeLoaderFreeErrorMessage(char* message);
 }  // namespace android
+
+extern "C" int darwin_art_network_load_fixture(JNIEnv* env,
+                                                  const char* fixture_path,
+                                                  jobject app_loader,
+                                                  jclass fixture_class) {
+  art::Thread* self = art::Thread::Current();
+  if (self == nullptr) {
+    std::cerr << "ART Android network: no owner thread\n";
+    return 47;
+  }
+  std::string load_error;
+  bool loaded = false;
+  {
+    art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
+    loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
+        env, fixture_path, app_loader, fixture_class, &load_error);
+  }
+  if (!loaded || !load_error.empty() || env->ExceptionCheck()) {
+    std::cerr << "ART Android network JavaVMExt load failed: " << load_error
+              << "\n";
+    return 47;
+  }
+  return 0;
+}
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     const darwin_art_process_config_t* config,
@@ -1333,42 +1358,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 19;
   }
 
-  if (run_network_acceptance) {
-    std::string load_error;
-    bool loaded = false;
-    {
-      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
-      loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
-          env, network_fixture_path, app_loader_ref, network_fixture_class,
-          &load_error);
-    }
-    if (!loaded || !load_error.empty() || env->ExceptionCheck()) {
-      std::cerr << "ART Android network JavaVMExt load failed: " << load_error
-                << "\n";
-      return 47;
-    }
-    darwin_art_process::record_network_elf_loaded();
-    BoundedLoopbackHttpServer server;
-    if (!server.Start()) {
-      std::cerr << "ART Android network loopback listener failed\n";
-      return 47;
-    }
-    jmethodID loopback = env->GetStaticMethodID(
-        network_fixture_class, "nativeLoopbackHttp", "(I)I");
-    const jint network_result =
-        loopback == nullptr
-            ? -1
-            : env->CallStaticIntMethod(network_fixture_class, loopback,
-                                       static_cast<jint>(server.port()));
-    const bool server_ok = server.Stop();
-    if (network_result != 42 || !server_ok || env->ExceptionCheck()) {
-      std::cerr << "ART Android network loopback failed, result="
-                << network_result << " server=" << server_ok << "\n";
-      return 47;
-    }
-    std::cout << "ART Android network: JavaVMExt+JNI_OnLoad loopback-HTTP=42 "
-                 "socket+DNS=closed Internet=no\n"
-              << std::flush;
+  if (run_network_acceptance &&
+      darwin_art_network_phase::run(env, network_fixture_path,
+                                    app_loader_ref, network_fixture_class) != 0) {
+    return 47;
   }
 
   if (run_elf_jni_fixture) {
@@ -1539,4 +1532,3 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   return 0;
   }();
 }
-

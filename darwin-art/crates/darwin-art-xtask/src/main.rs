@@ -574,6 +574,8 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_filesystem_probe.h"),
         PathBuf::from("probes/runtime_network_probe.cc"),
         PathBuf::from("probes/runtime_network_probe.h"),
+        PathBuf::from("probes/runtime_acceptance_phases.cc"),
+        PathBuf::from("probes/runtime_acceptance_phases.h"),
         PathBuf::from("probes/runtime_hwui_probe.cc"),
         PathBuf::from("probes/runtime_hwui_probe.h"),
         PathBuf::from("probes/runtime_entry_probe.cc"),
@@ -671,6 +673,8 @@ fn is_probe_only_input(path: &Path) -> bool {
             | "probes/runtime_filesystem_probe.h"
             | "probes/runtime_network_probe.cc"
             | "probes/runtime_network_probe.h"
+            | "probes/runtime_acceptance_phases.cc"
+            | "probes/runtime_acceptance_phases.h"
             | "probes/runtime_hwui_probe.cc"
             | "probes/runtime_hwui_probe.h"
             | "probes/runtime_entry_probe.cc"
