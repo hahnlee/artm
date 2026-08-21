@@ -53,12 +53,14 @@ state machine or call a shutdown callback that is not held by the Rust owner.
    process/config PODs, and callback signatures are defined once and checked
    by Rust layout tests plus the native static assertions.
 3. `RuntimeSession` contains concrete typed engine/surface/provider owners;
-   the only callback retained at the FFI edge is the one-shot ART shutdown
-   operation, while lease counts and teardown order remain in Rust. The
+   the FFI edge retains only a small synchronous lifecycle hook table whose
+   context points back to that session. Rust remains authoritative for phase,
+   lease counts, and teardown order; native callbacks only report the
+   corresponding ART transition and cannot own resources. The
    owner slots are declared surface → provider → engine and are tested to
    preserve that reverse dependency order even on implicit Rust drop.
    Provider lease accounting uses the Rust `ProviderKind` enum internally;
-   only the one-shot C callback adapter converts the versioned `u32` ABI tag.
+   only the C callback adapter converts the versioned `u32` ABI tag.
    Host installation order is engine → provider → graphics. Shutdown removes
    the provider lease before the engine lease, keeps provider callbacks alive
    while `DestroyJavaVM` runs, then clears the provider hooks before the engine
