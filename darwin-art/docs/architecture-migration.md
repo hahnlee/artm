@@ -82,15 +82,19 @@ returns a status snapshot; the heavy Android JNI/HWUI implementation remains
 in its own object. Keep the existing JNI/ELF/HWUI acceptance unchanged while
 the remaining framework/activity setup is extracted.
 
-### M3 — real native graph (probe graph landed; foundation cache promotion in progress)
+### M3 — real native graph (landed; foundation cache promotion in progress)
 
 Ninja is now the normal path after the first cold bootstrap for the native
 probe graph, with persisted per-object commands and depfiles. The graphics-JNI
 and HWUI foundation shell builders now also retain per-TU object/command
 stamps, so repeated registrar and object-audit builds do not invoke clang++ for
-unchanged sources. The remaining work is to make those foundation objects
-first-class Ninja edges (and apply the same boundary to ART/ICU) while keeping
-one cold fallback command only for cache population.
+unchanged sources. GraphicsJNI is already promoted to first-class Ninja edges.
+HWUI now builds from a stable patched shadow tree: pristine AOSP sources are
+verified against the lock, then the tracked animation-pulse patch is applied
+outside `_aosp`. The 81+5 command stamps therefore survive warm builds without
+depending on ignored checkout edits. The remaining foundation work is to apply
+the same boundary to ART/ICU while keeping one cold fallback command only for
+cache population.
 
 ### M4 — acceptance and removal
 
@@ -113,6 +117,7 @@ the same machine:
 | HWUI/Metal implementation change | `runtime_graphics_probe` + graphics link |
 | AOSP foundation header change | affected foundation TU closure |
 
-The current implementation has the first probe/object cache, graphics-JNI
-foundation stamps, and lifecycle scaffolding, but M1–M3 are not claimed
-complete until these concrete owner and timing checks pass.
+The current implementation has the first probe/object cache, graphics-JNI and
+HWUI foundation stamps, and lifecycle scaffolding. M1–M3 are considered
+landed for the measured boundaries above; concrete RuntimeSession ownership
+and the ART/ICU foundation split remain explicit M4 work.

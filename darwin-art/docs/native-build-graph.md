@@ -33,8 +33,9 @@ Unrelated acceptance probes do not invalidate the runtime archive, and each
 filesystem/network/HWUI/graphics probe has its own narrow direct-input edge.
 
 The remaining migration is to apply the same persisted-command promotion to
-the graphics/ICU/HWUI foundation archives. That can proceed without changing
-the Rust runtime or Android acceptance contract.
+the ICU and remaining ART foundation archives. HWUI and GraphicsJNI now have
+stable source-locked shadow/build boundaries, so this can proceed without
+changing the Rust runtime or Android acceptance contract.
 
 The graph now exposes that boundary as `graphics-foundation` (with
 `foundation` as a short alias). It declares the stable HWUI static/APEX
@@ -52,10 +53,12 @@ cargo run -p art-bootstrap -- build-graphics-foundation
 
 GraphicsJNI promotion is active after its command/depfile materialization: 61
 JNI objects plus the registrar are compiled in parallel and archived directly,
-with the force-loaded object as a separate link edge. HWUI remains on the
-shell-owned fallback until its pinned source manifest is reconciled and all 81
-plus 5 APEX command stamps are available; no source-lock failure is hidden by
-the graph.
+with the force-loaded object as a separate link edge. HWUI keeps the
+shell-owned fallback only until its command stamps are materialized. Its source
+lock remains strict: the builder verifies pristine AOSP files, applies the
+tracked `patches/frameworks-base/0005-darwin-hwui-animation-pulse.patch` to a
+stable shadow tree, and compiles from that tree. Ignored `_aosp` edits are
+never consumed by the production graph.
 
 The first foundation step is now landed in the two largest graphics shell
 builders. `build-android16-android-graphics-jni.sh` keeps one command stamp per
@@ -68,8 +71,8 @@ Archives are still recreated from the cached objects, so the public archive
 paths and member-count gates do not change. On the development machine the
 graphics-JNI object audit was 74s cold and 11s warm (with no source changes),
 while the registrar-only path was 5.0s cold and 3.4s warm. HWUI foundation
-source identity remains separately locked; when that upstream manifest is
-reconciled, its 81 objects will use the same cache without weakening the
+source identity remains separately locked; its 81+5 objects now use the same
+cache after the tracked shadow patch is materialized, without weakening the
 source pin.
 
 ## Current measurement
@@ -84,8 +87,8 @@ separately because it includes the production dylib link and symbol gates.
 The first promoted foundation slice is GraphicsJNI: after the shell builder
 materialized its command stamps, Ninja rebuilt 61 JNI objects plus the
 registrar in parallel in 9.69s, and the next archive query reported `no work
-to do` in 0.01s. The HWUI 81+5 object set still correctly falls back to its
-source-locked shell edge until its manifest is valid and materialized.
+to do` in 0.01s. The HWUI 81+5 object set uses the source-locked shell edge
+only during its first cache population.
 
 The process probe is now split at the first stable boundary: environment and
 fixture-mode validation lives in `probes/runtime_process_options.cc` and is a

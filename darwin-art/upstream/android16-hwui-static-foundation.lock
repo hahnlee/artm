@@ -28,6 +28,9 @@ GENERATED_HWUI_PROPERTIES_H_SHA256=5b18035d6e4c67f717df5f4a5c9e4683db42733a04384
 # Android @CriticalNative ABI remains a separate JNI compile gate, but this
 # module gate pins the exact patch that must be used by the later JNI module.
 CRITICAL_JNI_PATCH_SHA256=b1bd6343e46cb40eccd55cff73239e949e1fc98c1db3f3d97f3089ecab8d11a0
+# Tracked Darwin animation pulse extension applied only to the staged HWUI
+# source tree; the pinned upstream checkout remains pristine.
+ANIMATION_PULSE_PATCH_SHA256=9caabedaaf3e968fc14009af153f55e8f138fc1a4139f230490776c31e9dc3cb
 
 # Exact module-level force-load closure found after the 81-TU archive gate.
 FRAMEWORKS_NATIVE_PROJECT=platform/frameworks/native

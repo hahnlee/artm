@@ -7,6 +7,7 @@ aosp_root="$project_root/_aosp"
 hwui="$aosp_root/frameworks/base/libs/hwui"
 lock_file="$project_root/upstream/android16-hwui-static-foundation.lock"
 output_dir="$project_root/_build/hwui-static-foundation"
+animation_patch="$project_root/patches/frameworks-base/0005-darwin-hwui-animation-pulse.patch"
 
 # shellcheck disable=SC1090
 source "$lock_file"
@@ -39,6 +40,7 @@ verify_sha "$hwui/Android.bp" "$HWUI_ANDROID_BP_SHA256"
 verify_sha "$hwui/HWUIProperties.sysprop" "$HWUI_SYSPROP_SHA256"
 verify_sha "$project_root/patches/frameworks-base/0001-darwin-android-critical-jni-abi.patch" \
   "$CRITICAL_JNI_PATCH_SHA256"
+verify_sha "$animation_patch" "$ANIMATION_PULSE_PATCH_SHA256"
 
 sources=(
   canvas/CanvasFrontend.cpp
@@ -223,6 +225,25 @@ trap 'rm -rf "$stage"' EXIT
 cache_dir="$output_dir/objects"
 generated_dir="$output_dir/generated"
 mkdir -p "$cache_dir" "$generated_dir/include" "$generated_dir/source" "$generated_dir/public"
+
+# Keep Darwin-only HWUI edits in a tracked patch instead of mutating the
+# ignored upstream checkout.  The shadow tree has a stable path so command
+# stamps remain valid across invocations; it is rebuilt only when the patch
+# or pinned source identity changes.
+patched_hwui="$output_dir/patched-source"
+patched_marker="$patched_hwui/.darwin-art-patched-source"
+patch_identity="$(printf '%s\n%s\n' "$HWUI_SOURCE_MANIFEST_SHA256" \
+  "$ANIMATION_PULSE_PATCH_SHA256" | shasum -a 256 | awk '{print $1}')"
+if [[ ! -f "$patched_marker" || "$(<"$patched_marker")" != "$patch_identity" ]]; then
+  fresh_shadow="$output_dir/patched-source.new.$$"
+  mkdir -p "$fresh_shadow"
+  cp -R "$hwui/." "$fresh_shadow/"
+  patch -d "$fresh_shadow" -p1 < "$animation_patch"
+  printf '%s\n' "$patch_identity" > "$fresh_shadow/.darwin-art-patched-source"
+  rm -rf "$patched_hwui"
+  mv "$fresh_shadow" "$patched_hwui"
+fi
+hwui_source="$patched_hwui"
 "$sysprop_cpp" \
   --header-dir "$generated_dir/include" \
   --source-dir "$generated_dir/source" \
@@ -250,7 +271,7 @@ flags=(
   -Wno-inconsistent-missing-override -Wno-abstract-final-class
   -Wno-deprecated-literal-operator -Wno-missing-field-initializers
   -I"$generated_dir/include"
-  -I"$hwui" -I"$hwui/platform/host"
+  -I"$hwui_source" -I"$hwui_source/platform/host"
   -I"$aosp_root/frameworks/base/libs/androidfw/include"
   -I"$aosp_root/frameworks/native/include"
   -I"$aosp_root/frameworks/native/include/private"
@@ -318,7 +339,7 @@ compile_cached() {
 }
 for source in "${sources[@]}"; do
   object="$cache_dir/${source//\//_}.o"
-  compile_cached "$source" "$hwui/$source" "$object"
+  compile_cached "$source" "$hwui_source/$source" "$object"
   objects+=("$object")
 done
 generated_object="$cache_dir/HWUIProperties.sysprop.cpp.o"
@@ -329,8 +350,8 @@ objects+=("$generated_object")
 apex_objects=()
 for source in "${apex_common_sources[@]}"; do
   object="$cache_dir/${source//\//_}.o"
-  compile_cached "APEX-common $source" "$hwui/$source" "$object" \
-    -I"$hwui/apex/include" -I"$hwui/jni"
+  compile_cached "APEX-common $source" "$hwui_source/$source" "$object" \
+    -I"$hwui_source/apex/include" -I"$hwui_source/jni"
   apex_objects+=("$object")
 done
 
