@@ -79,6 +79,14 @@ bool LookupOptionalElfSymbol(ElfLibrary* library,
                              const char* name,
                              uintptr_t* address,
                              std::string* error);
+bool IsExactFixtureGraph(const char* root_soname,
+                         const DarwinArtElfGraphSource* sources,
+                         size_t source_count);
+DarwinArtElfResolveStatus ResolveRuntimeProvider(
+    void* context,
+    const DarwinArtElfSymbolRequest* request,
+    uintptr_t* out_address,
+    DarwinArtElfErrorBuffer* error);
 
 void* ProxyCurrentEnv(void* context);
 void* ProxyFindClass(void* context, const char* name);
