@@ -146,6 +146,11 @@ command/fingerprint promotion, and `graph::representative` owns small
 independently cacheable production TUs. `darwin-art-xtask/src/main.rs` remains
 the graph assembly/CLI boundary instead of owning those policies.
 
+The large graph emission routine itself is in `graph::emit`; the CLI entrypoint
+is now a 279-line command/test boundary. This is intentionally a source/build
+boundary only: it does not pretend that the remaining framework-native
+registration TU is already Rust-owned.
+
 ## Measurement gates
 
 The migration is considered successful only when all of these are recorded on
