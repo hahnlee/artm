@@ -442,7 +442,7 @@ fn compile_runtime_graphics_session_probe_flavor(
 
 /// Compile the small JavaVMExt network-loader boundary separately from the
 /// large managed Activity entry probe.  Network fixture changes now
-/// invalidate this TU only instead of recompiling the 1.3k-line entry point.
+/// invalidate this TU only instead of recompiling the managed entry point.
 pub(crate) fn build_runtime_graphics_session_probe(root: &Path) -> Result<()> {
     let output = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT")
         .map(PathBuf::from)
