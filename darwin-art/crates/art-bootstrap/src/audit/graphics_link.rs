@@ -1,5 +1,6 @@
 use super::common::{build_runtime_native_owner, require_file};
 use super::graphics_phases::run_graphics_upstream_gates;
+use super::graphics_surface::compile_surface_objects;
 use super::*;
 pub(crate) fn audit_runtime_graphics_link(root: &Path) -> Result<()> {
     audit_runtime_graphics_link_mode(root, true)
@@ -37,8 +38,6 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         compile_runtime_network_probe(root, &build_dir)?
     };
     require_file(&network_object, "runtime network object is missing")?;
-    let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
-    let surface_gpu_object = build_dir.join("darwin_surface_gpu_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime_graphics.dylib");
     let graphics_closure =
         root.join("_build/graphics-runtime-closure-audit/android16-graphics-runtime-closure.o");
@@ -445,76 +444,8 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     } else {
         compile_runtime_app_presentation_probe(root, &build_dir, &include_refs)?
     };
-    let mut surface_command = Command::new("clang++");
-    surface_command
-        .args(["-std=c++20", "-fobjc-arc", "-Wall", "-Wextra", "-c"])
-        .arg(root.join("compat/darwin_surface_bridge.mm"))
-        .arg("-I")
-        .arg(root.join("compat"))
-        .arg("-I")
-        .arg(root.join("include"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia/include/core"))
-        .arg("-I")
-        .arg(root.join("_aosp/system/logging/liblog/include"))
-        .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
-        .arg("-DSK_USER_CONFIG_HEADER=\"include/config/SkUserConfigManual.h\"")
-        .arg("-o")
-        .arg(&surface_object);
-    let _ = compile_cached_probe_tu(
-        &mut surface_command,
-        &surface_object,
-        &probe_cache,
-        &compiler_identity,
-    )?;
-
-    let mut surface_gpu_command = Command::new("clang++");
-    surface_gpu_command
-        .args([
-            "-std=c++20",
-            "-fobjc-arc",
-            "-Wall",
-            "-Wextra",
-            "-Wno-macro-redefined",
-            "-c",
-        ])
-        .arg(root.join("compat/darwin_surface_gpu_bridge.mm"))
-        .arg("-I")
-        .arg(root.join("compat"))
-        .arg("-I")
-        .arg(root.join("include"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia/include/core"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia/include/gpu"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia/include/effects"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia/include/utils"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia/include/private"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia/include/android"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia/include/codec"))
-        .arg("-I")
-        .arg(root.join("_aosp/system/logging/liblog/include"))
-        .arg("-I")
-        .arg(root.join("_aosp/system/core/libcutils/include"))
-        .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
-        .arg("-DSK_USER_CONFIG_HEADER=\"include/config/SkUserConfigManual.h\"")
-        .arg("-o")
-        .arg(&surface_gpu_object);
-    let _ = compile_cached_probe_tu(
-        &mut surface_gpu_command,
-        &surface_gpu_object,
-        &probe_cache,
-        &compiler_identity,
-    )?;
+    let (surface_object, surface_gpu_object) =
+        compile_surface_objects(root, &build_dir, &probe_cache, &compiler_identity)?;
 
     let link_map = build_dir.join("runtime-graphics-link.map");
     let mut linker = Command::new("clang++");
