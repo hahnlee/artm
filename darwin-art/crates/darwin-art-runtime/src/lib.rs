@@ -27,6 +27,7 @@ pub use provider::{ProviderLeaseError, ProviderLeaseTable};
 pub use provider_bridge::ProviderBridge;
 pub use provider_kind::ProviderKind;
 pub use session::{NativeResource, RuntimeSession};
+pub use shutdown::ShutdownGuard;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimePhase {

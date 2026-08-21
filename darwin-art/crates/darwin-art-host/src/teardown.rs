@@ -2,48 +2,45 @@
 
 use crate::config::HostError;
 use crate::runtime::HostRuntime;
+use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
+use darwin_art_runtime::{ProviderBridge, RuntimeError, ShutdownGuard as RuntimeOwnerGuard};
 
 /// Owns the final shutdown obligation after the runtime has entered its
 /// running phase.  Moving this obligation into a guard makes every later
 /// error path (surface attach, graphics install, or frame loop) use the same
 /// reverse-order teardown, including newly added paths.
 pub(super) struct RuntimeShutdownGuard<'a> {
-    runtime: &'a mut HostRuntime,
-    armed: bool,
+    inner: Option<
+        RuntimeOwnerGuard<'a, EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
+    >,
 }
 
 impl<'a> RuntimeShutdownGuard<'a> {
     pub(super) fn new(runtime: &'a mut HostRuntime) -> Self {
         Self {
-            runtime,
-            armed: true,
+            inner: Some(RuntimeOwnerGuard::new(runtime)),
         }
     }
 
     pub(super) fn runtime(&mut self) -> &mut HostRuntime {
-        self.runtime
+        self.inner
+            .as_mut()
+            .expect("shutdown guard already consumed")
+            .session()
     }
 
     pub(super) fn shutdown(mut self) -> Result<(), HostError> {
-        let result = shutdown_runtime(self.runtime);
-        self.armed = false;
-        result
+        self.inner
+            .take()
+            .expect("shutdown guard already consumed")
+            .shutdown()
+            .map_err(map_shutdown_error)
     }
 }
 
-impl Drop for RuntimeShutdownGuard<'_> {
-    fn drop(&mut self) {
-        if self.armed {
-            let _ = shutdown_runtime(self.runtime);
-        }
-    }
-}
-
-pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostError> {
-    runtime.shutdown_native().map_err(|error| match error {
-        darwin_art_runtime::RuntimeError::EngineFailure { status } => {
-            HostError::ShutdownFailed(status)
-        }
+fn map_shutdown_error(error: RuntimeError) -> HostError {
+    match error {
+        RuntimeError::EngineFailure { status } => HostError::ShutdownFailed(status),
         other => HostError::RuntimeFailed(other.status() as i32),
-    })
+    }
 }

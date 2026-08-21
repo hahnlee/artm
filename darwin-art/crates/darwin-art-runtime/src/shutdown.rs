@@ -7,6 +7,64 @@
 
 use crate::{NativeResource, RuntimeError, RuntimeSession, Subsystem};
 
+/// Owns the final shutdown obligation for one concrete `RuntimeSession`.
+///
+/// The guard lives in the ownership crate rather than a host frontend, so a
+/// new launcher cannot accidentally invent a second armed/rollback state
+/// machine. Dropping an armed guard invokes the same dependency-ordered
+/// transaction as an explicit shutdown.
+pub struct ShutdownGuard<'a, E, P, S, G>
+where
+    E: NativeResource,
+    P: NativeResource,
+    S: NativeResource,
+    G: NativeResource,
+{
+    session: Option<&'a mut RuntimeSession<E, P, S, G>>,
+}
+
+impl<'a, E, P, S, G> ShutdownGuard<'a, E, P, S, G>
+where
+    E: NativeResource,
+    P: NativeResource,
+    S: NativeResource,
+    G: NativeResource,
+{
+    pub fn new(session: &'a mut RuntimeSession<E, P, S, G>) -> Self {
+        Self {
+            session: Some(session),
+        }
+    }
+
+    pub fn session(&mut self) -> &mut RuntimeSession<E, P, S, G> {
+        self.session
+            .as_deref_mut()
+            .expect("shutdown guard already consumed")
+    }
+
+    pub fn shutdown(mut self) -> Result<(), RuntimeError> {
+        let session = self
+            .session
+            .take()
+            .expect("shutdown guard already consumed");
+        shutdown_native(session)
+    }
+}
+
+impl<E, P, S, G> Drop for ShutdownGuard<'_, E, P, S, G>
+where
+    E: NativeResource,
+    P: NativeResource,
+    S: NativeResource,
+    G: NativeResource,
+{
+    fn drop(&mut self) {
+        if let Some(session) = self.session.take() {
+            let _ = shutdown_native(session);
+        }
+    }
+}
+
 pub(crate) fn shutdown_native<E, P, S, G>(
     session: &mut RuntimeSession<E, P, S, G>,
 ) -> Result<(), RuntimeError>
@@ -90,5 +148,53 @@ where
         Err(RuntimeError::EngineFailure { status })
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ShutdownGuard;
+    use crate::{NativeResource, RuntimePhase, RuntimeSession, Subsystem};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[derive(Debug)]
+    struct Probe(Arc<AtomicUsize>);
+
+    impl NativeResource for Probe {
+        fn close(&mut self) -> i32 {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            0
+        }
+
+        fn clear(&mut self) -> i32 {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            0
+        }
+    }
+
+    #[test]
+    fn dropped_guard_runs_the_same_reverse_shutdown_transaction() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut session = RuntimeSession::<Probe, Probe, Probe, Probe>::new();
+        session.start().unwrap();
+        session.attach_engine(Probe(Arc::clone(&calls))).unwrap();
+        session.attach_provider(Probe(Arc::clone(&calls))).unwrap();
+        session.attach_surface(Probe(Arc::clone(&calls))).unwrap();
+        session.attach_graphics(Probe(Arc::clone(&calls))).unwrap();
+        session.install_subsystem(Subsystem::Engine).unwrap();
+        session.install_subsystem(Subsystem::ElfNamespace).unwrap();
+        session.install_subsystem(Subsystem::Graphics).unwrap();
+        session.install_subsystem(Subsystem::Surface).unwrap();
+        session.mark_running().unwrap();
+
+        {
+            let _guard = ShutdownGuard::new(&mut session);
+        }
+
+        assert_eq!(session.phase(), RuntimePhase::Stopped);
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
     }
 }
