@@ -93,7 +93,8 @@ phase_objects=(
 # reconcile those entries once; the following dry-run is the actual warm
 # no-op assertion.
 "$ninja" -f "$graph" "${phase_objects[@]}" >/dev/null
-for object in "${phase_objects[@]}"; do
+for index in "${!phase_objects[@]}"; do
+  object="${phase_objects[$index]}"
   phase_output="$($ninja -f "$graph" -n "$object" 2>&1)"
   grep -q 'no work to do' <<<"$phase_output" || {
     echo "native-graph: warm phase is not a no-op: $object" >&2
@@ -109,6 +110,28 @@ for object in "${phase_objects[@]}"; do
     echo "$phase_query" >&2
     exit 1
   fi
+  # A phase rule must own exactly its narrow probe source.  The rule-name
+  # checks above only prove that an edge exists; this query proves that a
+  # later edit to another probe cannot silently widen the phase's direct
+  # invalidation set.  Keep this structural check on the generated graph so
+  # it does not rely on mtimes or a particular cache state.
+  expected_source="probes/${phase_sources[$index]}"
+  grep -Fq -- "$expected_source" <<<"$phase_query" || {
+    echo "native-graph: phase query lost owner source ${phase_sources[$index]}: $object" >&2
+    echo "$phase_query" >&2
+    exit 1
+  }
+  for other_index in "${!phase_sources[@]}"; do
+    if [[ "$other_index" == "$index" ]]; then
+      continue
+    fi
+    other_source="probes/${phase_sources[$other_index]}"
+    if grep -Fq -- "$other_source" <<<"$phase_query"; then
+      echo "native-graph: phase query widened to ${phase_sources[$other_index]}: $object" >&2
+      echo "$phase_query" >&2
+      exit 1
+    fi
+  done
 done
 
 # Legacy promoted objects may need one dependency-scan edge before the warm
@@ -122,4 +145,4 @@ grep -q 'no work to do' <<<"$warm_output" || {
   exit 1
 }
 
-echo "native-graph: PASS runtime=$runtime_cpp graphics-jni=$graphics_cpp icu=$icu_cpp cached-tu=$cached_cpp archives=$cached_archives phases=${#phase_rules[@]} warm=no-op depfiles=gcc"
+echo "native-graph: PASS runtime=$runtime_cpp graphics-jni=$graphics_cpp icu=$icu_cpp cached-tu=$cached_cpp archives=$cached_archives phases=${#phase_rules[@]} warm=no-op depfiles=gcc invalidation=direct-source"
