@@ -505,10 +505,6 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_provider_clear_hooks")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_acquire")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
-        .arg("-Wl,-exported_symbol,_darwin_art_provider_install_hooks")
-        .arg("-Wl,-exported_symbol,_darwin_art_provider_clear_hooks")
-        .arg("-Wl,-exported_symbol,_darwin_art_provider_native_acquire")
-        .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&elf_probe_object)
@@ -534,7 +530,6 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(&surface_object)
         .arg(root.join("_build/skia-metal-gpu/libskia.a"))
         .arg(root.join("_build/skia-metal-gpu/libskcms.a"))
-        .arg(root.join("_build/runtime-graphics-bootstrap/objects/darwin_provider_owners.cc.o"))
         .arg(&bootstrap)
         .arg(format!(
             "-Wl,-force_load,{}",
