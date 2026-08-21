@@ -1,8 +1,5 @@
 use super::*;
-use crate::native_build::{
-    FileHashCache, PendingNativeCompile, compile_pending_native, compile_with_dependency_cache,
-    record_cache_result,
-};
+use crate::native_build::{PendingNativeCompile, compile_pending_native};
 use darwin_art_build_contract::RuntimeFlavor;
 
 pub(crate) struct RuntimeBootstrapCompiled {
@@ -32,13 +29,53 @@ pub(crate) fn compile(
         command_output(Command::new("sw_vers").arg("-productVersion"))?.trim(),
         command_output(Command::new("sw_vers").arg("-buildVersion"))?.trim()
     );
-    let file_hash_cache_path = staged.build_dir.join("file-hashes.cache");
-    let mut file_hash_cache = FileHashCache::load(&file_hash_cache_path)?;
-    let mut objects = Vec::new();
-    let mut compiled_objects = 0usize;
-    let mut cached_objects = 0usize;
+    let (mut objects, bootstrap_compiled, bootstrap_cached) = compile_pending_native(
+        bootstrap_jobs(staged, real_graphics, &includes, &runtime_includes),
+        &compiler_identity,
+    )?;
+    let mut compiled_objects = bootstrap_compiled;
+    let mut cached_objects = bootstrap_cached;
+
+    let adapter_jobs = adapter_jobs(staged, real_graphics, &includes, &runtime_includes);
+    let (adapter_objects, adapter_compiled, adapter_cached) =
+        compile_pending_native(adapter_jobs, &compiler_identity)?;
+    compiled_objects += adapter_compiled;
+    cached_objects += adapter_cached;
+    objects.extend(adapter_objects);
+
+    let runtime_jobs = runtime_jobs(staged, &runtime_includes);
+    let (runtime_objects, runtime_compiled, runtime_cached) =
+        compile_pending_native(runtime_jobs, &compiler_identity)?;
+    compiled_objects += runtime_compiled;
+    cached_objects += runtime_cached;
+    for object in runtime_objects {
+        let kind = command_output(Command::new("file").arg(&object))?;
+        if !kind.contains("Mach-O 64-bit object arm64") {
+            return Err(format!("unexpected Runtime object format: {kind}").into());
+        }
+        objects.push(object);
+    }
+    let runtime_object = staged.runtime_core_object_dir.join("runtime.cc.o");
+    let symbols = command_output(Command::new("nm").args(["-gU"]).arg(&runtime_object))?;
+    if !symbols.contains("_ZN3art7Runtime6Create") {
+        return Err("compiled Runtime object does not export Runtime::Create".into());
+    }
+    Ok(RuntimeBootstrapCompiled {
+        objects,
+        compiled_objects,
+        cached_objects,
+    })
+}
+
+fn bootstrap_jobs(
+    staged: &RuntimeBootstrapStaging,
+    real_graphics: bool,
+    includes: &[&Path],
+    runtime_includes: &[&Path],
+) -> Vec<PendingNativeCompile> {
+    let mut jobs = Vec::new();
     let operator_object = staged.object_dir.join("generated_operator_out.cc.o");
-    let mut operator_command = runtime_bootstrap_cpp_command(&runtime_includes);
+    let mut operator_command = runtime_bootstrap_cpp_command(runtime_includes);
     operator_command
         .arg("-idirafter")
         .arg(&staged.ndk_arch_include)
@@ -49,17 +86,10 @@ pub(crate) fn compile(
         .arg(&staged.operator_source)
         .arg("-o")
         .arg(&operator_object);
-    record_cache_result(
-        compile_with_dependency_cache(
-            &mut operator_command,
-            &operator_object,
-            &compiler_identity,
-            &mut file_hash_cache,
-        )?,
-        &mut compiled_objects,
-        &mut cached_objects,
-    );
-    objects.push(operator_object);
+    jobs.push(PendingNativeCompile {
+        command: operator_command,
+        object: operator_object,
+    });
 
     for profile_source in [
         "profile/profile_boot_info.cc",
@@ -68,7 +98,7 @@ pub(crate) fn compile(
         let profile_object = staged
             .object_dir
             .join(format!("libprofile_{}.o", profile_source.replace('/', "_")));
-        let mut profile_command = runtime_bootstrap_cpp_command(&runtime_includes);
+        let mut profile_command = runtime_bootstrap_cpp_command(runtime_includes);
         profile_command
             .arg("-idirafter")
             .arg(&staged.ndk_arch_include)
@@ -79,36 +109,24 @@ pub(crate) fn compile(
             .arg(staged.libprofile.join(profile_source))
             .arg("-o")
             .arg(&profile_object);
-        record_cache_result(
-            compile_with_dependency_cache(
-                &mut profile_command,
-                &profile_object,
-                &compiler_identity,
-                &mut file_hash_cache,
-            )?,
-            &mut compiled_objects,
-            &mut cached_objects,
-        );
-        objects.push(profile_object);
+        jobs.push(PendingNativeCompile {
+            command: profile_command,
+            object: profile_object,
+        });
     }
+
     if real_graphics {
         let os_linux_object = staged.object_dir.join("artbase_os_linux_aosp_fmt.cc.o");
-        let mut os_linux_command = runtime_cpp_command(&includes);
+        let mut os_linux_command = runtime_cpp_command(includes);
         os_linux_command
             .arg("-c")
             .arg(staged.artbase.join("base/os_linux.cc"))
             .arg("-o")
             .arg(&os_linux_object);
-        record_cache_result(
-            compile_with_dependency_cache(
-                &mut os_linux_command,
-                &os_linux_object,
-                &compiler_identity,
-                &mut file_hash_cache,
-            )?,
-            &mut compiled_objects,
-            &mut cached_objects,
-        );
+        jobs.push(PendingNativeCompile {
+            command: os_linux_command,
+            object: os_linux_object,
+        });
     }
 
     let openjdk_math_object = staged.object_dir.join("libcore_openjdk_Math.c.o");
@@ -137,17 +155,10 @@ pub(crate) fn compile(
         )
         .arg("-o")
         .arg(&openjdk_math_object);
-    record_cache_result(
-        compile_with_dependency_cache(
-            &mut openjdk_math_command,
-            &openjdk_math_object,
-            &compiler_identity,
-            &mut file_hash_cache,
-        )?,
-        &mut compiled_objects,
-        &mut cached_objects,
-    );
-    objects.push(openjdk_math_object);
+    jobs.push(PendingNativeCompile {
+        command: openjdk_math_command,
+        object: openjdk_math_object,
+    });
 
     let jni_proxy_object = staged.object_dir.join("darwin_art_jni_proxy.c.o");
     let mut jni_proxy_command = Command::new("clang");
@@ -169,48 +180,11 @@ pub(crate) fn compile(
         .arg(staged.root.join("tools/android-jni-proxy/src/proxy.c"))
         .arg("-o")
         .arg(&jni_proxy_object);
-    record_cache_result(
-        compile_with_dependency_cache(
-            &mut jni_proxy_command,
-            &jni_proxy_object,
-            &compiler_identity,
-            &mut file_hash_cache,
-        )?,
-        &mut compiled_objects,
-        &mut cached_objects,
-    );
-    objects.push(jni_proxy_object);
-
-    let adapter_jobs = adapter_jobs(staged, real_graphics, &includes, &runtime_includes);
-    let (adapter_objects, adapter_compiled, adapter_cached) =
-        compile_pending_native(adapter_jobs, &compiler_identity)?;
-    compiled_objects += adapter_compiled;
-    cached_objects += adapter_cached;
-    objects.extend(adapter_objects);
-
-    let runtime_jobs = runtime_jobs(staged, &runtime_includes);
-    let (runtime_objects, runtime_compiled, runtime_cached) =
-        compile_pending_native(runtime_jobs, &compiler_identity)?;
-    compiled_objects += runtime_compiled;
-    cached_objects += runtime_cached;
-    for object in runtime_objects {
-        let kind = command_output(Command::new("file").arg(&object))?;
-        if !kind.contains("Mach-O 64-bit object arm64") {
-            return Err(format!("unexpected Runtime object format: {kind}").into());
-        }
-        objects.push(object);
-    }
-    let runtime_object = staged.runtime_core_object_dir.join("runtime.cc.o");
-    let symbols = command_output(Command::new("nm").args(["-gU"]).arg(&runtime_object))?;
-    if !symbols.contains("_ZN3art7Runtime6Create") {
-        return Err("compiled Runtime object does not export Runtime::Create".into());
-    }
-    file_hash_cache.save(&file_hash_cache_path)?;
-    Ok(RuntimeBootstrapCompiled {
-        objects,
-        compiled_objects,
-        cached_objects,
-    })
+    jobs.push(PendingNativeCompile {
+        command: jni_proxy_command,
+        object: jni_proxy_object,
+    });
+    jobs
 }
 
 fn adapter_jobs(
