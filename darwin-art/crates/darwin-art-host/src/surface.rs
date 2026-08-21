@@ -35,11 +35,20 @@ pub fn close_surface_owner(runtime: &mut HostRuntime) -> Result<(), i32> {
 
 #[cfg(target_os = "macos")]
 pub fn shutdown_engine_owner(runtime: &mut HostRuntime) -> Result<(), i32> {
-    let Some(mut engine) = runtime.release_engine().map_err(|_| -1)? else {
+    let Some(engine) = runtime.engine_mut() else {
         return Ok(());
     };
     let status = engine.shutdown_once();
     if status == 0 { Ok(()) } else { Err(status) }
+}
+
+#[cfg(target_os = "macos")]
+pub fn release_engine_owner(runtime: &mut HostRuntime) -> Result<(), i32> {
+    let Some(engine) = runtime.release_engine().map_err(|_| -1)? else {
+        return Ok(());
+    };
+    drop(engine);
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]

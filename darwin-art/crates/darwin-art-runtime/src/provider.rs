@@ -14,9 +14,9 @@ pub struct ProviderLeaseTable {
 }
 
 /// The only provider identifiers that may enter the Rust ownership state
-/// machine.  The C ABI still carries a `u32`, but conversion is performed at
-/// that boundary rather than allowing arbitrary numbers to circulate through
-/// the safe runtime.
+/// machine. The C ABI still carries a `u32`, but conversion is performed at
+/// that boundary rather than allowing arbitrary numbers into safe runtime
+/// state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ProviderKind {

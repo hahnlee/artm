@@ -59,8 +59,10 @@ state machine or call a shutdown callback that is not held by the Rust owner.
    preserve that reverse dependency order even on implicit Rust drop.
    Provider lease accounting uses the Rust `ProviderKind` enum internally;
    only the one-shot C callback adapter converts the versioned `u32` ABI tag.
-   Host installation order is engine → provider → graphics, so provider hooks
-   are cleared before the engine image is shut down or unmapped.
+   Host installation order is engine → provider → graphics. Shutdown removes
+   the provider lease before the engine lease, keeps provider callbacks alive
+   while `DestroyJavaVM` runs, then clears the provider hooks before the engine
+   image is unmapped.
 4. `runtime_link_probe.cc` is an orchestration shell. ART setup, framework
    registration, ELF acceptance, and HWUI frame phases are separate cached
    native translation units with value-only phase inputs/outputs.
@@ -249,9 +251,11 @@ partially initialized request with several independent raw-pointer calls.
 The host arms `RuntimeShutdownGuard` immediately after the Rust session enters
 bootstrapping, before opening the dynamic engine image. Engine/provider attach
 rollback, graphics-session failure, request construction, and process-call
-errors therefore all use the same owner-thread reverse shutdown path. A
-provider-hook table is cleared before an engine-image attach rollback, so no
-process-global callback can outlive either its Rust bridge or its code image.
+errors therefore all use the same owner-thread reverse shutdown path. During
+normal shutdown the provider lease is removed first, `DestroyJavaVM` runs while
+the engine image and provider callbacks are still valid, and only then are the
+provider hooks cleared and the engine image dropped. No process-global
+callback can outlive either its Rust bridge or its code image.
 
 Flavor-neutral probe compilation follows the same ownership boundary. The six
 core probe TUs (`runtime_elf`, ABI, process state/options, shutdown, and frame)

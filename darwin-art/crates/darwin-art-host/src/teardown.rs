@@ -3,8 +3,8 @@
 use crate::config::HostError;
 use crate::runtime::HostRuntime;
 use crate::surface::{
-    clear_provider_owner, close_graphics_owner, close_surface_owner, release_graphics_owner,
-    shutdown_engine_owner,
+    clear_provider_owner, close_graphics_owner, close_surface_owner, release_engine_owner,
+    release_graphics_owner, shutdown_engine_owner,
 };
 use darwin_art_runtime::{RuntimeError, Subsystem};
 
@@ -84,16 +84,15 @@ pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostErro
         }
     }
 
-    if runtime.provider().is_some() {
-        if let Err(error) = uninstall_if_active(runtime, Subsystem::ElfNamespace) {
-            remember_error(&mut first_error, map_shutdown_error("provider", error));
-        }
-        let provider_status = clear_provider_owner(runtime);
-        if provider_status != 0 {
-            remember_error(&mut first_error, HostError::ShutdownFailed(provider_status));
-        }
+    if runtime.provider().is_some()
+        && let Err(error) = uninstall_if_active(runtime, Subsystem::ElfNamespace)
+    {
+        remember_error(&mut first_error, map_shutdown_error("provider", error));
     }
 
+    // Remove the provider lease before the engine lease to preserve strict
+    // reverse installation order, but keep provider callbacks installed until
+    // DestroyJavaVM has completed below.
     if runtime.engine().is_some() {
         if let Err(error) = uninstall_if_active(runtime, Subsystem::Engine) {
             remember_error(&mut first_error, map_shutdown_error("engine", error));
@@ -101,6 +100,22 @@ pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostErro
         if let Err(status) = shutdown_engine_owner(runtime) {
             remember_error(&mut first_error, HostError::ShutdownFailed(status));
         }
+    }
+
+    // DestroyJavaVM may still call provider-backed native code. Clear the
+    // provider lease only after the shutdown callback completes, while the
+    // engine image still owns the callback table.
+    if runtime.provider().is_some() {
+        let provider_status = clear_provider_owner(runtime);
+        if provider_status != 0 {
+            remember_error(&mut first_error, HostError::ShutdownFailed(provider_status));
+        }
+    }
+
+    if runtime.engine().is_some()
+        && let Err(status) = release_engine_owner(runtime)
+    {
+        remember_error(&mut first_error, HostError::ShutdownFailed(status));
     }
 
     // Destroy the already-closed graphics handle only after the engine image
