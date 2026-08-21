@@ -19,6 +19,8 @@ bool ShutdownFrameworkResourceRuntime(JNIEnv* env);
 bool RegisterFrameworkNatives(JNIEnv* env);
 bool RegisterFrameworkBinderNatives(JNIEnv* env);
 bool RegisterFrameworkSystemPropertyNatives(JNIEnv* env);
+bool RegisterFrameworkAssetManagerNatives(JNIEnv* env);
+bool RegisterFrameworkRenderNodeNatives(JNIEnv* env);
 bool RegisterFrameworkAnimationNatives(JNIEnv* env);
 bool RegisterFrameworkSupportNatives(JNIEnv* env);
 bool RegisterFrameworkResourceNatives(JNIEnv* env);

@@ -185,8 +185,11 @@ boundary is not duplicated as stringly-typed build policy.
 The framework JNI boundary follows the same rule: Choreographer/
 DisplayEventReceiver, PropertyValuesHolder, Perfetto, and their registration
 table live in `compat/darwin_framework_animation_natives.cc`; Android resource
-registration (AssetManager, StringBlock, XmlBlock, ApkAssets, and
-VirtualRefBasePtr) lives in `compat/darwin_framework_resource_registration.cc`.
+registration (StringBlock, XmlBlock, ApkAssets, and VirtualRefBasePtr) lives in
+`compat/darwin_framework_resource_registration.cc`, while the AssetManager
+theme/attribute bridge and RenderNode support table each have their own
+`compat/darwin_framework_asset_manager_natives.cc` and
+`compat/darwin_framework_render_node_natives.cc` phases.
 MessageQueue, EventLog, Log, Trace, and SystemClock live in
 `compat/darwin_framework_system_natives.cc`; the remaining framework
 implementations stay in `compat/darwin_framework_natives.cc`. Each phase is an
@@ -380,7 +383,7 @@ MessageQueue/Binder/AssetManager support table.
 Framework system-property storage and its JNI registration are likewise
 isolated in `compat/darwin_framework_system_property_natives.cc`. Changes to
 the property map now invalidate only that adapter object and the final link;
-the Binder/AssetManager/RenderNode support TU is no longer rebuilt for a
+the Binder, AssetManager, and RenderNode phases are no longer rebuilt for a
 property-only change.
 
 Binder/ServiceManager bridge state and registration are isolated in
@@ -388,6 +391,11 @@ Binder/ServiceManager bridge state and registration are isolated in
 registration TU now only sequences the phase; the process-local service
 bridge and its native holder lifetime have one compilation and ownership
 boundary.
+
+The framework registration TU is therefore an orchestration boundary rather
+than an implementation bucket: a change to AssetManager, RenderNode, Binder,
+system properties, or the remaining framework methods invalidates only its
+own native object and the final archive link.
 
 The adapter TU manifest is shared by `darwin-art-build-contract` and consumed
 by both the Cargo bootstrap and `darwin-art-xtask`; a new native boundary now
