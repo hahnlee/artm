@@ -1242,6 +1242,8 @@ fn emit_cached_native_graph(
     if !*rules_emitted {
         graph.push_str("rule native_cached_cpp\n");
         graph.push_str("  command = $compile_command\n");
+        graph.push_str("  depfile = $out.d\n");
+        graph.push_str("  deps = gcc\n");
         graph.push_str("  description = CXX $out\n");
         graph.push_str("  restat = 1\n\n");
         graph.push_str("rule native_cached_archive\n");

@@ -171,7 +171,7 @@ compile_cached() {
   command_text="$(printf '%q ' "${command[@]}")"
   local key
   key="$(printf '%s\n%s\n' "$source_sha" "$command_text" | shasum -a 256 | awk '{print $1}')"
-  if [[ -f "$object" && -f "$meta" && -f "$command_file" &&
+  if [[ -f "$object" && -f "$object.d" && -f "$meta" && -f "$command_file" &&
         "$(<"$meta")" == "$key" ]]; then
     echo "icu-foundation: cache $label"
     return
