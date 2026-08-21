@@ -4,6 +4,9 @@
 //! engine, provider, and optional surface values so production code does not
 //! need to hide them behind `Any` just to get reverse teardown.
 
+use std::marker::PhantomData;
+use std::rc::Rc;
+
 /// Concrete resources owned by one owner thread.
 ///
 /// Field order is intentional: if a caller forgets an explicit shutdown,
@@ -14,6 +17,10 @@ pub struct RuntimeOwners<E, P, S> {
     surface: Option<S>,
     provider: Option<P>,
     engine: Option<E>,
+    // Native callbacks and surface handles are owner-thread resources.  The
+    // marker makes accidental cross-thread moves a compile-time error instead
+    // of relying on every caller to remember the ART affinity rule.
+    _owner_thread: PhantomData<Rc<()>>,
 }
 
 impl<E, P, S> RuntimeOwners<E, P, S> {
@@ -22,6 +29,7 @@ impl<E, P, S> RuntimeOwners<E, P, S> {
             surface: None,
             provider: None,
             engine: None,
+            _owner_thread: PhantomData,
         }
     }
 
