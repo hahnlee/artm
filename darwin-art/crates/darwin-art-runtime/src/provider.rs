@@ -4,6 +4,7 @@
 //! the state machine around them, so cross-thread ART callbacks cannot invent
 //! a second count or clear hooks while a provider lease is still active.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Condvar, Mutex};
 
 pub struct ProviderLeaseTable {
@@ -16,6 +17,7 @@ pub struct ProviderLeaseTable {
 pub enum ProviderLeaseError {
     ActiveLeases,
     Poisoned,
+    CallbackPanicked,
 }
 
 struct ProviderCallbacks {
@@ -67,7 +69,10 @@ impl ProviderLeaseTable {
 
         // Never invoke foreign code while holding the lease mutex. A provider
         // callback may re-enter another provider route on the same ART thread.
-        let status = (self.callbacks.acquire)(kind, authority_fd);
+        let status = catch_unwind(AssertUnwindSafe(|| {
+            (self.callbacks.acquire)(kind, authority_fd)
+        }))
+        .unwrap_or(-1);
         let Ok(mut state) = self.state.lock() else {
             return -1;
         };
@@ -95,7 +100,8 @@ impl ProviderLeaseTable {
 
         // Reserve the lease before dropping the lock; this prevents clear()
         // from observing a false quiescent state while the callback runs.
-        let status = (self.callbacks.release)(kind);
+        let status =
+            catch_unwind(AssertUnwindSafe(|| (self.callbacks.release)(kind))).unwrap_or(-1);
         let Ok(mut state) = self.state.lock() else {
             return -1;
         };
@@ -132,14 +138,16 @@ impl ProviderLeaseTable {
         // The owner callback is deliberately outside the mutex. Reentrant
         // clear/acquire calls fail closed through `clearing` instead of
         // deadlocking the owner thread.
-        (self.callbacks.clear)();
+        let callback_result = catch_unwind(AssertUnwindSafe(|| (self.callbacks.clear)()));
         let mut state = self
             .state
             .lock()
             .map_err(|_| ProviderLeaseError::Poisoned)?;
         state.clearing = false;
         self.quiescent.notify_all();
-        Ok(())
+        callback_result
+            .map(|_| ())
+            .map_err(|_| ProviderLeaseError::CallbackPanicked)
     }
 }
 
@@ -215,5 +223,20 @@ mod tests {
         assert_eq!(table.release(3), 0);
         assert_eq!(table.release(2), 0);
         assert_eq!(table.clear(), Ok(()));
+    }
+
+    #[test]
+    fn callback_panics_fail_closed_without_poisoning_lease_state() {
+        let table = ProviderLeaseTable::new(
+            |_, _| panic!("foreign acquire panic"),
+            |_| panic!("foreign release panic"),
+            || panic!("foreign clear panic"),
+        );
+        assert_eq!(table.acquire(1, -1), -1);
+        assert_eq!(table.release(1), -1);
+        assert_eq!(table.clear(), Err(ProviderLeaseError::CallbackPanicked));
+
+        // The table remains usable after the callback boundary recovers.
+        assert_eq!(table.acquire(1, -1), -1);
     }
 }
