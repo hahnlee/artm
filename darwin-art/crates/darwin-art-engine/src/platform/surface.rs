@@ -24,11 +24,11 @@ impl SurfaceSession {
     fn from_parts(handle: *mut c_void, symbols: EngineSymbols) -> Self {
         Self {
             handle,
-            update: symbols.surface_update,
-            present: symbols.surface_present,
-            pump_events: symbols.surface_pump_events,
-            next_pointer_event: symbols.surface_next_pointer_event,
-            destroy: symbols.surface_destroy,
+            update: symbols.surface.update,
+            present: symbols.surface.present,
+            pump_events: symbols.surface.pump_events,
+            next_pointer_event: symbols.surface.next_pointer_event,
+            destroy: symbols.surface.destroy,
             armed: true,
             close_status: None,
         }
@@ -45,7 +45,7 @@ impl SurfaceSession {
     pub(crate) fn active(symbols: EngineSymbols) -> Option<Self> {
         // SAFETY: callback belongs to the live engine image represented by
         // this symbol table.
-        let handle = unsafe { (symbols.surface_active)() };
+        let handle = unsafe { (symbols.surface.active)() };
         (!handle.is_null()).then(|| Self::from_parts(handle, symbols))
     }
 
@@ -55,7 +55,7 @@ impl SurfaceSession {
     ) -> Result<Self, i32> {
         let mut status = -1;
         // SAFETY: info is a valid POD for the duration of this call.
-        let handle = unsafe { (symbols.surface_create)(info, &mut status) };
+        let handle = unsafe { (symbols.surface.create)(info, &mut status) };
         if handle.is_null() {
             Err(status)
         } else {

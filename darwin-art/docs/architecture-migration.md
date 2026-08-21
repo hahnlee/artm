@@ -189,6 +189,14 @@ fixture state. RegisterNatives, trampoline publication, and rollback remain in
 the graph adapter, so changing lookup policy no longer recompiles that larger
 transaction boundary.
 
+On the Rust side, the dynamic engine ABI is grouped into four private
+capabilities (`ProcessSymbols`, `SurfaceSymbols`, `GraphicsSymbols`, and
+`ProviderSymbols`) instead of one flat raw-symbol bag. `EngineSession` exposes
+safe operations and narrow `ProviderHooks`; surface/graphics owners receive
+only their capability group. This keeps raw function pointers inside the
+engine crate and makes future `RuntimeSession` ownership moves independent of
+unrelated ABI groups.
+
 The large graph emission routine itself is in `graph::emit`; the CLI entrypoint
 is now a 279-line command/test boundary. This is intentionally a source/build
 boundary only: it does not pretend that the remaining framework-native

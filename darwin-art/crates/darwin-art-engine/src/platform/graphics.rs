@@ -22,11 +22,11 @@ impl GraphicsSession {
     pub(crate) fn create(symbols: EngineSymbols) -> Result<Self, i32> {
         // SAFETY: the function pointer belongs to the live engine image.
         let (Some(create_fn), Some(close_fn), Some(destroy_fn), Some(dispatch_fn), Some(pump_fn)) = (
-            symbols.graphics_session_create,
-            symbols.graphics_session_close,
-            symbols.graphics_session_destroy,
-            symbols.graphics_session_dispatch_pointer,
-            symbols.graphics_session_pump_frame,
+            symbols.graphics.create,
+            symbols.graphics.close,
+            symbols.graphics.destroy,
+            symbols.graphics.dispatch_pointer,
+            symbols.graphics.pump_frame,
         ) else {
             return Err(darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE);
         };

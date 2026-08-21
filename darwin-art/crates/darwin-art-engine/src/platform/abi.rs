@@ -12,25 +12,45 @@ use darwin_art_engine_sys::{
 };
 
 #[derive(Clone, Copy)]
-pub(crate) struct EngineSymbols {
+pub(crate) struct ProcessSymbols {
     pub run_process: RunProcessFn,
     pub shutdown_process: ShutdownProcessFn,
-    pub surface_create: SurfaceCreateFn,
-    pub surface_update: SurfaceUpdateFn,
-    pub surface_present: SurfacePresentFn,
-    pub surface_pump_events: SurfacePumpEventsFn,
-    pub surface_next_pointer_event: SurfaceNextPointerEventFn,
-    pub surface_destroy: SurfaceDestroyFn,
-    pub surface_active: SurfaceActiveFn,
-    pub graphics_session_create: Option<GraphicsSessionCreateFn>,
-    pub graphics_session_close: Option<GraphicsSessionCloseFn>,
-    pub graphics_session_destroy: Option<GraphicsSessionDestroyFn>,
-    pub graphics_session_dispatch_pointer: Option<GraphicsSessionDispatchPointerFn>,
-    pub graphics_session_pump_frame: Option<GraphicsSessionPumpFrameFn>,
-    pub provider_install_hooks: ProviderInstallHooksFn,
-    pub provider_clear_hooks: ProviderClearHooksFn,
-    pub provider_native_acquire: ProviderNativeAcquireFn,
-    pub provider_native_release: ProviderNativeReleaseFn,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SurfaceSymbols {
+    pub create: SurfaceCreateFn,
+    pub update: SurfaceUpdateFn,
+    pub present: SurfacePresentFn,
+    pub pump_events: SurfacePumpEventsFn,
+    pub next_pointer_event: SurfaceNextPointerEventFn,
+    pub destroy: SurfaceDestroyFn,
+    pub active: SurfaceActiveFn,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct GraphicsSymbols {
+    pub create: Option<GraphicsSessionCreateFn>,
+    pub close: Option<GraphicsSessionCloseFn>,
+    pub destroy: Option<GraphicsSessionDestroyFn>,
+    pub dispatch_pointer: Option<GraphicsSessionDispatchPointerFn>,
+    pub pump_frame: Option<GraphicsSessionPumpFrameFn>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ProviderSymbols {
+    pub install_hooks: ProviderInstallHooksFn,
+    pub clear_hooks: ProviderClearHooksFn,
+    pub native_acquire: ProviderNativeAcquireFn,
+    pub native_release: ProviderNativeReleaseFn,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct EngineSymbols {
+    pub process: ProcessSymbols,
+    pub surface: SurfaceSymbols,
+    pub graphics: GraphicsSymbols,
+    pub provider: ProviderSymbols,
 }
 
 pub(crate) struct LoadedEngine {
@@ -44,33 +64,39 @@ impl LoadedEngine {
         // SAFETY: Every name and type is fixed by the Darwin ART v1 ABI.
         let symbols = unsafe {
             EngineSymbols {
-                run_process: library.symbol(b"darwin_art_run_process\0")?,
-                shutdown_process: library.symbol(b"darwin_art_shutdown_process\0")?,
-                surface_create: library.symbol(b"darwin_art_surface_create\0")?,
-                surface_update: library.symbol(b"darwin_art_surface_update\0")?,
-                surface_present: library.symbol(b"darwin_art_surface_present\0")?,
-                surface_pump_events: library.symbol(b"darwin_art_surface_pump_events\0")?,
-                surface_next_pointer_event: library
-                    .symbol(b"darwin_art_surface_next_pointer_event\0")?,
-                surface_destroy: library.symbol(b"darwin_art_surface_destroy\0")?,
-                surface_active: library.symbol(b"darwin_art_surface_active_gpu\0")?,
-                graphics_session_create: library
-                    .symbol(b"darwin_art_graphics_session_create\0")
-                    .ok(),
-                graphics_session_close: library.symbol(b"darwin_art_graphics_session_close\0").ok(),
-                graphics_session_destroy: library
-                    .symbol(b"darwin_art_graphics_session_destroy\0")
-                    .ok(),
-                graphics_session_dispatch_pointer: library
-                    .symbol(b"darwin_art_graphics_session_dispatch_pointer\0")
-                    .ok(),
-                graphics_session_pump_frame: library
-                    .symbol(b"darwin_art_graphics_session_pump_frame\0")
-                    .ok(),
-                provider_install_hooks: library.symbol(b"darwin_art_provider_install_hooks\0")?,
-                provider_clear_hooks: library.symbol(b"darwin_art_provider_clear_hooks\0")?,
-                provider_native_acquire: library.symbol(b"darwin_art_provider_native_acquire\0")?,
-                provider_native_release: library.symbol(b"darwin_art_provider_native_release\0")?,
+                process: ProcessSymbols {
+                    run_process: library.symbol(b"darwin_art_run_process\0")?,
+                    shutdown_process: library.symbol(b"darwin_art_shutdown_process\0")?,
+                },
+                surface: SurfaceSymbols {
+                    create: library.symbol(b"darwin_art_surface_create\0")?,
+                    update: library.symbol(b"darwin_art_surface_update\0")?,
+                    present: library.symbol(b"darwin_art_surface_present\0")?,
+                    pump_events: library.symbol(b"darwin_art_surface_pump_events\0")?,
+                    next_pointer_event: library
+                        .symbol(b"darwin_art_surface_next_pointer_event\0")?,
+                    destroy: library.symbol(b"darwin_art_surface_destroy\0")?,
+                    active: library.symbol(b"darwin_art_surface_active_gpu\0")?,
+                },
+                graphics: GraphicsSymbols {
+                    create: library.symbol(b"darwin_art_graphics_session_create\0").ok(),
+                    close: library.symbol(b"darwin_art_graphics_session_close\0").ok(),
+                    destroy: library
+                        .symbol(b"darwin_art_graphics_session_destroy\0")
+                        .ok(),
+                    dispatch_pointer: library
+                        .symbol(b"darwin_art_graphics_session_dispatch_pointer\0")
+                        .ok(),
+                    pump_frame: library
+                        .symbol(b"darwin_art_graphics_session_pump_frame\0")
+                        .ok(),
+                },
+                provider: ProviderSymbols {
+                    install_hooks: library.symbol(b"darwin_art_provider_install_hooks\0")?,
+                    clear_hooks: library.symbol(b"darwin_art_provider_clear_hooks\0")?,
+                    native_acquire: library.symbol(b"darwin_art_provider_native_acquire\0")?,
+                    native_release: library.symbol(b"darwin_art_provider_native_release\0")?,
+                },
             }
         };
         Ok(Self {

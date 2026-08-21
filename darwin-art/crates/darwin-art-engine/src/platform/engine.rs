@@ -63,9 +63,9 @@ impl EngineSession {
     pub fn provider_hooks(&self) -> ProviderHooks {
         let symbols = self.engine.symbols();
         ProviderHooks {
-            acquire: symbols.provider_native_acquire,
-            release: symbols.provider_native_release,
-            clear: symbols.provider_clear_hooks,
+            acquire: symbols.provider.native_acquire,
+            release: symbols.provider.native_release,
+            clear: symbols.provider.clear_hooks,
         }
     }
 
@@ -80,7 +80,7 @@ impl EngineSession {
         // SAFETY: `config` and all callback state it references are owned
         // by the caller for this synchronous invocation; the function
         // pointer belongs to this live EngineSession image.
-        let status = unsafe { (self.engine.symbols().run_process)(config, &mut result) };
+        let status = unsafe { (self.engine.symbols().process.run_process)(config, &mut result) };
         if status == 0 { Ok(result) } else { Err(status) }
     }
 
@@ -99,7 +99,7 @@ impl EngineSession {
     /// its frame loop.
     pub fn has_active_surface(&self) -> bool {
         // SAFETY: this is a read-only query on the live engine image.
-        unsafe { !(self.engine.symbols().surface_active)().is_null() }
+        unsafe { !(self.engine.symbols().surface.active)().is_null() }
     }
 
     pub fn create_surface(
@@ -123,13 +123,13 @@ impl EngineSession {
         // SAFETY: the callback context is owned by the caller for the
         // entire engine session, and the function pointer table belongs
         // to this live dynamic image.
-        unsafe { (self.engine.symbols().provider_install_hooks)(context, acquire, release) }
+        unsafe { (self.engine.symbols().provider.install_hooks)(context, acquire, release) }
     }
 
     pub fn clear_provider_hooks(&self) {
         // SAFETY: the hook table is process-global and this owner is the
         // same image that installed it.
-        unsafe { (self.engine.symbols().provider_clear_hooks)() }
+        unsafe { (self.engine.symbols().provider.clear_hooks)() }
     }
 
     /// Close the process-scoped engine at most once. The callback is kept
@@ -142,7 +142,7 @@ impl EngineSession {
         self.shutdown_taken = true;
         // SAFETY: the function pointer was resolved from this live,
         // version-checked engine image and takes no arguments.
-        unsafe { (self.engine.symbols().shutdown_process)() }
+        unsafe { (self.engine.symbols().process.shutdown_process)() }
     }
 
     /// Backwards-compatible name for the explicit process close contract.
