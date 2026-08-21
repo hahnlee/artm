@@ -150,7 +150,10 @@ pub(crate) fn emit_cached_native_graph(
     for object in objects {
         let output = ninja_path(&object.object);
         let source = ninja_path(&object.source);
-        let depfile = object.object.with_extension("d");
+        // The canonical builder names depfiles `<source>.o.d`; using
+        // `with_extension("d")` silently looked for `<source>.d` and kept
+        // every promoted object on the legacy rule forever.
+        let depfile = object.object.with_extension("o.d");
         graph.push_str("build ");
         graph.push_str(&output);
         graph.push_str(if depfile.is_file() {

@@ -132,6 +132,13 @@ the graph/provider/JNI adapter remains `darwin_runtime_adapters.cc`. The
 archive cache records both source names and command fingerprints; if a new
 required TU is absent from a persisted archive, the builder falls back to the
 canonical compile path instead of silently reusing an incomplete archive.
+Runtime and graphics bootstrap cache promotion uses flavor-specific required
+TU sets (`darwin_icu_natives.cc` versus `darwin_icu_jni_bridge.cc`), so a
+headless archive no longer falls back merely because the graphics-only ICU
+bridge is absent. Promoted depfiles are read from the canonical `<object>.o.d`
+name, avoiding the legacy rule for every object. On the reference machine the
+first Ninja promotion after this fix rebuilt 221 objects in 159.28s; the next
+graph query reported `ninja: no work to do` in 0.03s.
 The process-wide NativeBridge/NativeLoader hooks are a third independent
 object, `darwin_native_bridge_stubs.cc`; only the per-image trampoline selector
 stays in the graph-aware adapter.
