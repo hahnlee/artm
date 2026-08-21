@@ -39,6 +39,12 @@ object or the archive therefore causes Ninja to rebuild the missing product.
 Compiler depfiles add transitive AOSP header edges after the first compile.
 Unrelated acceptance probes do not invalidate the runtime archive, and each
 filesystem/network/HWUI/graphics probe has its own narrow direct-input edge.
+If an older persisted fingerprint has no depfile, the graph emits a one-time
+preprocessing-only dependency-scan edge. It seeds `<object>.o.d` without
+rewriting the object; the following graph generation promotes that TU to the
+normal `deps = gcc` edge. This avoids silently accepting a legacy object whose
+header closure is unknown while also avoiding a forced full recompilation just
+to create metadata.
 The patched ART shadow tree also has a content identity manifest. Preparation
 does not rewrite an unchanged staged source or header, so a canonical fallback
 after graph promotion preserves existing depfile mtimes and reuses the old

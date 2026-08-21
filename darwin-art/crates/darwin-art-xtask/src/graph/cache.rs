@@ -158,6 +158,10 @@ pub(crate) fn emit_cached_native_graph_with_inputs(
         graph.push_str("  command = $compile_command\n");
         graph.push_str("  description = CXX $out (legacy cache)\n");
         graph.push_str("  restat = 1\n\n");
+        graph.push_str("rule native_dependency_scan\n");
+        graph.push_str("  command = $dependency_scan_command\n");
+        graph.push_str("  description = DEP $out\n");
+        graph.push_str("  restat = 1\n\n");
         graph.push_str("rule native_cached_archive\n");
         graph.push_str("  command = rm -f $out && ar rcs $out $in\n");
         graph.push_str("  description = AR $out\n");
@@ -172,6 +176,40 @@ pub(crate) fn emit_cached_native_graph_with_inputs(
         // `with_extension("d")` silently looked for `<source>.d` and kept
         // every promoted object on the legacy rule forever.
         let depfile = object.object.with_extension("o.d");
+        let needs_dependency_scan = !depfile.is_file();
+        if needs_dependency_scan {
+            // Older cache entries contain the exact compile command and a
+            // fingerprint, but not the compiler-generated dependency file.
+            // Seed that missing metadata with a preprocessing-only edge.  It
+            // is order-only for the object, so the one-time scan does not
+            // force a needless recompilation; the next Ninja invocation then
+            // consumes the depfile through the normal `deps = gcc` rule.
+            let quoted_command = object
+                .command
+                .split_whitespace()
+                // `-E` is a driver-only preprocessing action; the original
+                // `-c` must be removed or Clang's `-Werror` rejects the scan
+                // for an unused compilation argument. The source path remains
+                // a positional input and is still covered by the depfile.
+                .filter(|token| *token != "-c")
+                .map(shell_quote)
+                .collect::<Vec<_>>()
+                .join(" ");
+            let dependency_scan_command = format!(
+                "{quoted_command} -E -Wno-unused-command-line-argument -MMD -MF {} -o /dev/null && touch -r {} {}",
+                shell_quote(&depfile.to_string_lossy()),
+                shell_quote(&object.object.to_string_lossy()),
+                shell_quote(&depfile.to_string_lossy()),
+            );
+            graph.push_str("build ");
+            graph.push_str(&ninja_path(&depfile));
+            graph.push_str(": native_dependency_scan ");
+            graph.push_str(&source);
+            graph.push('\n');
+            graph.push_str("  dependency_scan_command = ");
+            graph.push_str(&dependency_scan_command.replace('$', "$$"));
+            graph.push('\n');
+        }
         graph.push_str("build ");
         graph.push_str(&output);
         graph.push_str(if depfile.is_file() {
@@ -180,6 +218,10 @@ pub(crate) fn emit_cached_native_graph_with_inputs(
             ": native_cached_cpp_legacy "
         });
         graph.push_str(&source);
+        if needs_dependency_scan {
+            graph.push_str(" || ");
+            graph.push_str(&ninja_path(&depfile));
+        }
         graph.push('\n');
         graph.push_str("  compile_command = ");
         // Fingerprints store a diagnostic, whitespace-separated command.  It
