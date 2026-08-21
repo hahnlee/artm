@@ -14,15 +14,9 @@
 #include "class_linker.h"
 #include "cmdline_types.h"
 #include "darwin_art/darwin_art.h"
-#include "darwin_art_bionic_dns.h"
-#include "darwin_art_bionic_fs.h"
-#include "darwin_art_bionic_socket_broker.h"
-#include "darwin_android_jni_trampoline.h"
 #include "darwin_framework_natives.h"
 #include "darwin_provider_owners.h"
-#include "darwin_hwui_gpu_mode.h"
-#include "darwin_surface_bridge.h"
-#include "runtime_filesystem_probe.h"
+#include "darwin_art/darwin_art.h"
 #include "runtime_network_probe.h"
 #include "runtime_hwui_probe.h"
 #include "runtime_elf_probe.h"
@@ -31,7 +25,6 @@
 #include "runtime_process_options.h"
 #include "runtime_acceptance_phases.h"
 #include "runtime_jni_scope.h"
-#include "runtime_shutdown_probe.h"
 #include "runtime_frame_probe.h"
 #include "runtime_graphics_probe.h"
 #include "runtime_graphics_session.h"
@@ -40,9 +33,6 @@
 #include "runtime_registration_phase.h"
 #include "runtime_app_bootstrap.h"
 #include "runtime_app_presentation.h"
-#include "darwin_icu_natives.h"
-#include "darwin_libcore_natives.h"
-#include "darwin_openjdk_natives.h"
 #include "handle_scope-inl.h"
 #include "interpreter/unstarted_runtime.h"
 #include "jni/java_vm_ext.h"
@@ -58,24 +48,6 @@
 #if defined(DARWIN_ART_DIRECT_APK_RUNTIME)
 #include "runtime_apk_graph.h"
 #endif
-
-extern "C" int darwin_art_elf_jni_fixture_registration_status();
-extern "C" int darwin_art_elf_jni_fixture_lifecycle_status();
-extern "C" int darwin_art_elf_jni_fixture_namespace_lifecycle_status();
-extern "C" int darwin_art_install_context_loader(JNIEnv* env,
-                                                   jobject app_loader);
-
-namespace android {
-extern "C" void* OpenNativeLibrary(JNIEnv* env, int32_t target_sdk_version,
-                                    const char* path, jobject class_loader,
-                                    const char* caller_location,
-                                    jstring library_path,
-                                    bool* needs_native_bridge,
-                                    char** error_msg);
-extern "C" bool CloseNativeLibrary(void* handle, bool needs_native_bridge,
-                                    char** error_msg);
-extern "C" void NativeLoaderFreeErrorMessage(char* message);
-}  // namespace android
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     const darwin_art_process_config_t* config,
