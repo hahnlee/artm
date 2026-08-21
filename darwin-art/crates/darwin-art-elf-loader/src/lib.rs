@@ -8,6 +8,7 @@ use std::ptr::{self, NonNull};
 use std::sync::Arc;
 
 mod ffi;
+mod mapping;
 mod namespace;
 mod parser;
 mod tls;
@@ -17,6 +18,7 @@ use parser::{
     validate_dynamic_capabilities,
 };
 
+use mapping::Mapping;
 use tls::{
     MAX_TLS_ALIGNMENT, MAX_TLS_SIZE, TlsDescriptor, TlsDescriptorContext, TlsModule,
     darwin_art_tlsdesc_resolver, register_tls_descriptor, release_current_thread_tls,
@@ -555,11 +557,14 @@ impl LoadedElf {
             unsafe {
                 ptr::copy_nonoverlapping(
                     source.as_ptr(),
-                    mapping.pointer.as_ptr().add(destination_offset),
+                    mapping.pointer().as_ptr().add(destination_offset),
                     file_size,
                 );
                 ptr::write_bytes(
-                    mapping.pointer.as_ptr().add(destination_offset + file_size),
+                    mapping
+                        .pointer()
+                        .as_ptr()
+                        .add(destination_offset + file_size),
                     0,
                     memory_size - file_size,
                 );
@@ -574,8 +579,8 @@ impl LoadedElf {
             .transpose()?;
 
         let mut loaded = Self {
-            mapping: mapping.pointer,
-            mapping_size: mapping.length,
+            mapping: mapping.pointer(),
+            mapping_size: mapping.length(),
             minimum_page: parsed.minimum_page,
             loads: parsed.loads,
             dynamic,
@@ -1628,54 +1633,6 @@ impl Drop for LoadedElf {
         // SAFETY: LoadedElf exclusively owns this complete mmap reservation.
         let result = unsafe { munmap(self.mapping.as_ptr().cast(), self.mapping_size) };
         debug_assert_eq!(result, 0, "munmap failed while dropping LoadedElf");
-    }
-}
-
-struct Mapping {
-    pointer: NonNull<u8>,
-    length: usize,
-}
-
-impl Mapping {
-    fn reserve(length: usize) -> Result<Self, LoadError> {
-        let pointer = unsafe {
-            mmap(
-                ptr::null_mut(),
-                length,
-                PROT_NONE,
-                MAP_PRIVATE | MAP_ANON,
-                -1,
-                0,
-            )
-        };
-        if pointer as usize == usize::MAX {
-            return Err(system_error("mmap(reserve)"));
-        }
-        let pointer = NonNull::new(pointer.cast::<u8>()).ok_or(LoadError::System {
-            operation: "mmap(reserve)",
-            code: 0,
-        })?;
-        Ok(Self { pointer, length })
-    }
-
-    fn protect(&self, offset: usize, length: usize, protection: c_int) -> Result<(), LoadError> {
-        let end = offset
-            .checked_add(length)
-            .ok_or(LoadError::Bounds("mprotect overflow"))?;
-        if end > self.length {
-            return Err(LoadError::Bounds("mprotect outside reservation"));
-        }
-        let pointer = unsafe { self.pointer.as_ptr().add(offset) };
-        if unsafe { mprotect(pointer.cast(), length, protection) } != 0 {
-            return Err(system_error("mprotect(staging)"));
-        }
-        Ok(())
-    }
-}
-
-impl Drop for Mapping {
-    fn drop(&mut self) {
-        unsafe { munmap(self.pointer.as_ptr().cast(), self.length) };
     }
 }
 
