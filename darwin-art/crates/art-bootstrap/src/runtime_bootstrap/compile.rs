@@ -230,6 +230,7 @@ fn adapter_jobs(
         "darwin_runtime_elf_lifecycle.cc",
         "darwin_runtime_elf_resolver.cc",
         "darwin_runtime_native_loader.cc",
+        "darwin_runtime_jni_registration.cc",
         "darwin_sigchain.cc",
         "fault_handler_arm64_darwin.cc",
     ] {
@@ -268,6 +269,7 @@ fn adapter_jobs(
                 | "darwin_runtime_elf_lifecycle.cc"
                 | "darwin_runtime_elf_resolver.cc"
                 | "darwin_runtime_native_loader.cc"
+                | "darwin_runtime_jni_registration.cc"
                 | "darwin_provider_owners.cc"
                 | "darwin_jni_proxy_lookup.cc"
                 | "darwin_jni_proxy_registration.cc"
