@@ -16,19 +16,17 @@
 namespace darwin_art_process {
 namespace {
 
-enum class Phase {
-  kNeverStarted,
-  kRunning,
-  kAwaitingShutdown,
-  kShuttingDown,
-  kShutdownComplete,
-  kCreateFailed,
-  kShutdownFailed,
-};
-
 struct State {
   std::mutex mutex;
-  Phase phase = Phase::kNeverStarted;
+  // Rust RuntimeLifecycle is authoritative whenever lifecycle_hooks is
+  // present. These booleans are native readiness gates for ART-owned
+  // pointers and the legacy null-hook ABI; they intentionally do not mirror
+  // Rust's phase machine.
+  bool run_started = false;
+  bool runtime_created = false;
+  bool shutdown_started = false;
+  bool shutdown_complete = false;
+  bool failed = false;
   pthread_t owner_thread{};
   bool owner_thread_valid = false;
   JavaVM* java_vm = nullptr;
@@ -58,8 +56,8 @@ bool begin_run(const struct darwin_art_lifecycle_hooks* lifecycle_hooks) {
     }
   }
   std::lock_guard<std::mutex> lock(g_state.mutex);
-  if (g_state.phase != Phase::kNeverStarted) return false;
-  g_state.phase = Phase::kRunning;
+  if (g_state.run_started) return false;
+  g_state.run_started = true;
   g_state.owner_thread = pthread_self();
   g_state.owner_thread_valid = true;
   g_state.lifecycle_hooks = lifecycle_hooks;
@@ -68,21 +66,22 @@ bool begin_run(const struct darwin_art_lifecycle_hooks* lifecycle_hooks) {
 
 void record_created_runtime(art::Thread* art_thread) {
   std::lock_guard<std::mutex> lock(g_state.mutex);
-  CHECK(g_state.phase == Phase::kRunning);
+  CHECK(g_state.run_started && !g_state.failed && !g_state.shutdown_started);
   CHECK(art::Runtime::Current() != nullptr);
   g_state.java_vm = reinterpret_cast<JavaVM*>(art::Runtime::Current()->GetJavaVM());
   g_state.art_thread = art_thread;
+  g_state.runtime_created = true;
 }
 
 void record_graphics_state(darwin_art_graphics::GraphicsState* state) {
   std::lock_guard<std::mutex> lock(g_state.mutex);
-  CHECK(g_state.phase == Phase::kRunning);
+  CHECK(g_state.run_started && !g_state.failed && !g_state.shutdown_started);
   g_state.graphics_state = state;
 }
 
 void record_resource_runtime_installed() {
   std::lock_guard<std::mutex> lock(g_state.mutex);
-  CHECK(g_state.phase == Phase::kRunning);
+  CHECK(g_state.run_started && !g_state.failed && !g_state.shutdown_started);
   CHECK(!g_state.resource_runtime_installed);
   g_state.resource_runtime_installed = true;
 }
@@ -91,16 +90,16 @@ void finish_run(bool runtime_created) {
   const struct darwin_art_lifecycle_hooks* lifecycle_hooks = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_state.mutex);
-    CHECK(g_state.phase == Phase::kRunning);
-    g_state.phase = runtime_created ? Phase::kAwaitingShutdown
-                                    : Phase::kCreateFailed;
+    CHECK(g_state.run_started && !g_state.failed && !g_state.shutdown_started);
+    g_state.runtime_created = runtime_created;
+    if (!runtime_created) g_state.failed = true;
     lifecycle_hooks = g_state.lifecycle_hooks;
   }
   if (lifecycle_hooks != nullptr &&
       lifecycle_hooks->finish_run(lifecycle_hooks->context,
                                   runtime_created ? 1 : 0) != 0) {
     std::lock_guard<std::mutex> lock(g_state.mutex);
-    g_state.phase = Phase::kShutdownFailed;
+    g_state.failed = true;
   }
 }
 
@@ -120,7 +119,7 @@ void clear_app_dex_files() {
 
 art::Thread* owner_thread_for_callback() {
   std::lock_guard<std::mutex> lock(g_state.mutex);
-  if (g_state.phase != Phase::kAwaitingShutdown ||
+  if (!g_state.runtime_created || g_state.failed || g_state.shutdown_started ||
       !g_state.owner_thread_valid ||
       pthread_equal(g_state.owner_thread, pthread_self()) == 0 ||
       g_state.art_thread == nullptr) {
@@ -133,18 +132,11 @@ ShutdownBeginResult begin_shutdown(ShutdownSnapshot* snapshot) {
   const struct darwin_art_lifecycle_hooks* lifecycle_hooks = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_state.mutex);
-    switch (g_state.phase) {
-      case Phase::kShutdownComplete:
-        return ShutdownBeginResult::kAlreadyComplete;
-      case Phase::kShutdownFailed:
-        return ShutdownBeginResult::kFailed;
-      case Phase::kNeverStarted:
-      case Phase::kCreateFailed:
-      case Phase::kRunning:
-      case Phase::kShuttingDown:
-        return ShutdownBeginResult::kNotReady;
-      case Phase::kAwaitingShutdown:
-        break;
+    if (g_state.shutdown_complete) return ShutdownBeginResult::kAlreadyComplete;
+    if (g_state.failed) return ShutdownBeginResult::kFailed;
+    if (!g_state.run_started || !g_state.runtime_created ||
+        g_state.shutdown_started) {
+      return ShutdownBeginResult::kNotReady;
     }
     if (!g_state.owner_thread_valid ||
         pthread_equal(g_state.owner_thread, pthread_self()) == 0 ||
@@ -152,7 +144,7 @@ ShutdownBeginResult begin_shutdown(ShutdownSnapshot* snapshot) {
          art::Thread::Current() != g_state.art_thread)) {
       return ShutdownBeginResult::kWrongThread;
     }
-    g_state.phase = Phase::kShuttingDown;
+    g_state.shutdown_started = true;
     snapshot->java_vm = g_state.java_vm;
     snapshot->art_thread = g_state.art_thread;
     snapshot->resource_runtime_installed = g_state.resource_runtime_installed;
@@ -162,7 +154,7 @@ ShutdownBeginResult begin_shutdown(ShutdownSnapshot* snapshot) {
   if (lifecycle_hooks != nullptr &&
       lifecycle_hooks->begin_shutdown(lifecycle_hooks->context) != 0) {
     std::lock_guard<std::mutex> lock(g_state.mutex);
-    g_state.phase = Phase::kShutdownFailed;
+    g_state.failed = true;
     return ShutdownBeginResult::kFailed;
   }
   return ShutdownBeginResult::kReady;
@@ -172,7 +164,7 @@ void mark_shutdown_failed() {
   const darwin_art_lifecycle_hooks_t* lifecycle_hooks = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_state.mutex);
-    g_state.phase = Phase::kShutdownFailed;
+    g_state.failed = true;
     lifecycle_hooks = g_state.lifecycle_hooks;
   }
   if (lifecycle_hooks != nullptr) {
@@ -188,18 +180,18 @@ void mark_shutdown_complete() {
   g_state.resource_runtime_installed = false;
   g_state.graphics_state = nullptr;
   g_state.lifecycle_hooks = nullptr;
-  g_state.phase = Phase::kShutdownComplete;
+  g_state.shutdown_complete = true;
 }
 
 void record_network_elf_loaded() {
   std::lock_guard<std::mutex> lock(g_state.mutex);
-  CHECK(g_state.phase == Phase::kRunning);
+  CHECK(g_state.run_started && !g_state.failed && !g_state.shutdown_started);
   g_state.acceptance.network_elf_loaded = true;
 }
 
 void record_apk_elf_loaded(std::string apk_sha256, std::string apk_root_sha256) {
   std::lock_guard<std::mutex> lock(g_state.mutex);
-  CHECK(g_state.phase == Phase::kRunning);
+  CHECK(g_state.run_started && !g_state.failed && !g_state.shutdown_started);
   g_state.acceptance.apk_elf_loaded = true;
   g_state.acceptance.apk_sha256 = std::move(apk_sha256);
   g_state.acceptance.apk_root_sha256 = std::move(apk_root_sha256);
@@ -207,13 +199,13 @@ void record_apk_elf_loaded(std::string apk_sha256, std::string apk_root_sha256) 
 
 void record_direct_apk_loaded() {
   std::lock_guard<std::mutex> lock(g_state.mutex);
-  CHECK(g_state.phase == Phase::kRunning);
+  CHECK(g_state.run_started && !g_state.failed && !g_state.shutdown_started);
   g_state.acceptance.direct_apk_loaded = true;
 }
 
 void record_provider_hooks_installed() {
   std::lock_guard<std::mutex> lock(g_state.mutex);
-  CHECK(g_state.phase == Phase::kRunning);
+  CHECK(g_state.run_started && !g_state.failed && !g_state.shutdown_started);
   g_state.acceptance.provider_hooks_installed = true;
 }
 
