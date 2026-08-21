@@ -13,7 +13,7 @@ mod platform {
     pub(crate) mod process;
     pub(crate) mod surface;
 
-    pub use engine::{EngineSession, ProviderHooks};
+    pub use engine::EngineSession;
     pub use graphics::GraphicsSession;
     pub use process::{CallbackBindings, ProcessRequest, ProcessRequestError};
     pub use surface::SurfaceSession;
@@ -22,5 +22,5 @@ mod platform {
 #[cfg(target_os = "macos")]
 pub use platform::{
     CallbackBindings, EngineSession, GraphicsSession, ProcessRequest, ProcessRequestError,
-    ProviderHooks, SurfaceSession,
+    SurfaceSession,
 };

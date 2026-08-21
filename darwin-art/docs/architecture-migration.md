@@ -150,12 +150,12 @@ cleanup occurs before the Metal surface and ART/provider teardown. Headless
 engines may omit these optional symbols, while the graphics link exports and
 audits them when a drawable is present.
 
-The host no longer consumes the complete raw `EngineSymbols` table. The engine
-crate exposes a narrow `ProviderHooks` capability for acquire/release/clear;
-raw symbol resolution and graphics/surface dispatch remain crate-private.
-`ProviderBridge` stores only that capability inside the Rust-owned session,
-which keeps provider callback code from depending on unrelated engine ABI
-entries.
+The host no longer consumes the complete raw `EngineSymbols` table. Provider
+acquire/release/clear callbacks are converted directly into the Rust-owned
+`ProviderBridge`; raw symbol resolution and graphics/surface dispatch remain
+crate-private. This removes the former duplicate `ProviderHooks` capability
+from the engine crate and keeps provider callback code independent of unrelated
+engine ABI entries.
 
 The native graph emitter is split by ownership rather than kept in one command
 file: `graph::inputs` owns invalidation/input stamps, `graph::foundation` owns
@@ -256,10 +256,10 @@ dedicated Rust session ABI is the next ownership milestone.
 On the Rust side, the dynamic engine ABI is grouped into four private
 capabilities (`ProcessSymbols`, `SurfaceSymbols`, `GraphicsSymbols`, and
 `ProviderSymbols`) instead of one flat raw-symbol bag. `EngineSession` exposes
-safe operations and narrow `ProviderHooks`; surface/graphics owners receive
-only their capability group. This keeps raw function pointers inside the
-engine crate and makes future `RuntimeSession` ownership moves independent of
-unrelated ABI groups.
+safe operations, while provider callbacks are owned by `ProviderBridge` in the
+runtime crate; surface/graphics owners receive only their capability group.
+This keeps raw function pointers inside the engine crate and makes future
+`RuntimeSession` ownership moves independent of unrelated ABI groups.
 
 Subsystem lease tokens are now owned by `RuntimeLifecycle` during production
 shutdown. Host teardown asks the session to remove its newest subsystem and

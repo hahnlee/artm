@@ -3,44 +3,9 @@ use super::graphics::GraphicsSession;
 use super::process::ProcessRequest;
 use super::surface::SurfaceSession;
 use core::ffi::c_void;
-use darwin_art_engine_sys::{
-    ProcessConfig, ProcessResult, ProviderAcquireFn, ProviderClearHooksFn, ProviderNativeAcquireFn,
-    ProviderNativeReleaseFn, ProviderReleaseFn,
-};
+use darwin_art_engine_sys::{ProcessConfig, ProcessResult, ProviderAcquireFn, ProviderReleaseFn};
 use darwin_art_runtime::{NativeResource, ProviderBridge};
 use std::path::Path;
-
-/// Safe provider-hook view owned by the live `EngineSession` image.
-///
-/// The raw function-pointer table stays private to this crate. Runtime code
-/// receives this narrow capability instead of a copy of every engine ABI
-/// symbol. `RuntimeSession` drops the provider before the engine, preserving
-/// the image-lifetime invariant for these callbacks.
-#[derive(Clone, Copy)]
-pub struct ProviderHooks {
-    acquire: ProviderNativeAcquireFn,
-    release: ProviderNativeReleaseFn,
-    clear: ProviderClearHooksFn,
-}
-
-impl ProviderHooks {
-    pub fn acquire(&self, kind: u32, authority_fd: i32) -> i32 {
-        // SAFETY: this view is produced by a live EngineSession and the
-        // RuntimeSession teardown order releases provider hooks first.
-        unsafe { (self.acquire)(kind, authority_fd) }
-    }
-
-    pub fn release(&self, kind: u32) -> i32 {
-        // SAFETY: same engine-image lifetime invariant as acquire.
-        unsafe { (self.release)(kind) }
-    }
-
-    pub fn clear(&self) {
-        // SAFETY: clear is called only after ProviderLeaseTable reaches
-        // quiescence and before the owning EngineSession is dropped.
-        unsafe { (self.clear)() }
-    }
-}
 
 /// Process-scoped engine owner.  The dynamic library and its shutdown
 /// callback share one Rust lifetime, so callers cannot accidentally drop
