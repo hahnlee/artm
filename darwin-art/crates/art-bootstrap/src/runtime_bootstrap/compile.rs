@@ -225,6 +225,7 @@ fn adapter_jobs(
         "darwin_runtime_platform_stubs.cc",
         "darwin_native_bridge_stubs.cc",
         "darwin_jni_shorty.cc",
+        "darwin_jni_proxy_lookup.cc",
         "darwin_sigchain.cc",
         "fault_handler_arm64_darwin.cc",
     ] {
@@ -259,7 +260,9 @@ fn adapter_jobs(
         }
         if matches!(
             adapter_source,
-            "darwin_runtime_adapters.cc" | "darwin_provider_owners.cc"
+            "darwin_runtime_adapters.cc"
+                | "darwin_provider_owners.cc"
+                | "darwin_jni_proxy_lookup.cc"
         ) {
             for include in [
                 "tools/bionic-provider-namespace/include",

@@ -71,4 +71,7 @@ struct ElfLibrary {
   darwin_art::android_jni::TrampolineSet* trampolines = nullptr;
 };
 
+void* ProxyCurrentEnv(void* context);
+void* ProxyFindClass(void* context, const char* name);
+
 }  // namespace android

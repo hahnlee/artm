@@ -182,6 +182,13 @@ the graph-aware proxy still owns class lookup, RegisterNatives, and trampoline
 publication. Its tiny header is the only shared declaration between those
 phases.
 
+The proxy's environment/class lookup is now a separate
+`darwin_jni_proxy_lookup.cc` phase. It is deliberately limited to resolving the
+current ART environment and validating a class lookup against the graph-owned
+fixture state. RegisterNatives, trampoline publication, and rollback remain in
+the graph adapter, so changing lookup policy no longer recompiles that larger
+transaction boundary.
+
 The large graph emission routine itself is in `graph::emit`; the CLI entrypoint
 is now a 279-line command/test boundary. This is intentionally a source/build
 boundary only: it does not pretend that the remaining framework-native

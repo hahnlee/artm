@@ -139,6 +139,12 @@ Descriptor-to-shorty planning is a fourth cached object,
 `darwin_jni_shorty.cc`, so changing the regular JNI proxy does not rebuild the
 parser and vice versa.
 
+Proxy environment/class lookup is a fifth cached object,
+`darwin_jni_proxy_lookup.cc`. Its command includes the internal graph-state
+header and provider/DSO ABI headers, so changes to lookup policy invalidate only
+that object and the final runtime link; RegisterNatives and trampoline code
+remain independently cacheable.
+
 Graphics presentation now follows the same boundary. The JNI/widget
 validation and `present_content`/interactive-root orchestration live in
 `probes/runtime_graphics_phase.cc`, while clickable hit-testing, pointer/frame
