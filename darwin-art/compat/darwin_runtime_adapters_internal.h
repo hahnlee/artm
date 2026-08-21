@@ -70,12 +70,6 @@ struct ElfLibrary {
   DarwinArtBionicNamespace* provider_namespace = nullptr;
   DarwinArtBionicDsoLifecycleOwner* dso_lifecycle = nullptr;
   darwin_art_image_registry::Owner* image_registry = nullptr;
-  bool filesystem_owner = false;
-  bool network_owner = false;
-  bool stdio_owner = false;
-  bool ioctl_owner = false;
-  bool strftime_owner = false;
-  bool sendfile_owner = false;
   uintptr_t jni_on_load = 0;
   uintptr_t jni_on_unload = 0;
   alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)

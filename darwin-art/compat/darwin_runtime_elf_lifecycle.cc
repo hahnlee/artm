@@ -132,56 +132,15 @@ void TeardownProviderNamespace(ElfLibrary* library) {
     library->provider_namespace = nullptr;
     library->image_registry = nullptr;
     library->dso_lifecycle = nullptr;
-    library->filesystem_owner = false;
-    library->network_owner = false;
-    library->stdio_owner = false;
-    library->ioctl_owner = false;
-    library->strftime_owner = false;
-    library->sendfile_owner = false;
     if (status != 0) std::abort();
     return;
   }
-  if (library->provider_namespace != nullptr) {
-    const DarwinArtBionicNamespaceStatus status =
-        darwin_art_bionic_namespace_teardown(library->provider_namespace);
-    if (status != DARWIN_ART_BIONIC_NAMESPACE_OK) std::abort();
-    if (library->fixture_graph) {
-      g_elf_fixture_namespace_lifecycle.store(5, std::memory_order_relaxed);
-    }
-    darwin_art_bionic_namespace_destroy(library->provider_namespace);
-    library->provider_namespace = nullptr;
-  }
-  if (library->image_registry != nullptr) {
-    darwin_art_image_registry::Destroy(library->image_registry);
-    library->image_registry = nullptr;
-  }
-  if (library->dso_lifecycle != nullptr) {
-    darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
-    library->dso_lifecycle = nullptr;
-  }
-  if (library->network_owner) {
-    darwin_art::providers::release_network();
-    library->network_owner = false;
-  }
-  if (library->strftime_owner) {
-    darwin_art::providers::release_strftime();
-    library->strftime_owner = false;
-  }
-  if (library->sendfile_owner) {
-    darwin_art::providers::release_sendfile();
-    library->sendfile_owner = false;
-  }
-  if (library->ioctl_owner) {
-    darwin_art::providers::release_ioctl();
-    library->ioctl_owner = false;
-  }
-  if (library->stdio_owner) {
-    darwin_art::providers::release_stdio();
-    library->stdio_owner = false;
-  }
-  if (library->filesystem_owner) {
-    darwin_art::providers::release_filesystem();
-    library->filesystem_owner = false;
+  // Provider installation is only reachable after the Rust native-owner slot
+  // has been created. Reaching this branch with any graph resource would mean
+  // that a C++ fallback has escaped the Rust ownership boundary.
+  if (library->graph != nullptr || library->provider_namespace != nullptr ||
+      library->image_registry != nullptr || library->dso_lifecycle != nullptr) {
+    std::abort();
   }
 }
 

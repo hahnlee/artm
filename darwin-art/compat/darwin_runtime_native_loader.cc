@@ -239,7 +239,6 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
-    library->filesystem_owner = true;
     if (!AttachNativeOwner(
             library.get(), kNativeOwnerFilesystem,
             reinterpret_cast<void*>(static_cast<uintptr_t>(
@@ -254,7 +253,6 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
-    library->sendfile_owner = true;
     if (!AttachNativeOwner(
             library.get(), kNativeOwnerSendfile,
             reinterpret_cast<void*>(static_cast<uintptr_t>(
@@ -269,7 +267,6 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
-    library->ioctl_owner = true;
     if (!AttachNativeOwner(
             library.get(), kNativeOwnerIoctl,
             reinterpret_cast<void*>(static_cast<uintptr_t>(
@@ -284,7 +281,6 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
-    library->strftime_owner = true;
     if (!AttachNativeOwner(
             library.get(), kNativeOwnerStrftime,
             reinterpret_cast<void*>(static_cast<uintptr_t>(
@@ -299,7 +295,6 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
-    library->stdio_owner = true;
     if (!AttachNativeOwner(
             library.get(), kNativeOwnerStdio,
             reinterpret_cast<void*>(static_cast<uintptr_t>(
@@ -314,7 +309,6 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
-    library->network_owner = true;
     if (!AttachNativeOwner(
             library.get(), kNativeOwnerNetwork,
             reinterpret_cast<void*>(static_cast<uintptr_t>(
