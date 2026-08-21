@@ -11,7 +11,7 @@ mod graph;
 use darwin_art_build_contract::RUNTIME_CACHE_IDENTITY;
 use graph::emit::emit_graph;
 
-const GRAPH_VERSION: &str = "darwin-art-native-graph-v13-cache-stamp-input";
+const GRAPH_VERSION: &str = "darwin-art-native-graph-v14-shared-adapter-manifest";
 const GRAPHICS_BOOTSTRAP_ARCHIVE: &str =
     "runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a";
 const RUNTIME_BOOTSTRAP_ARCHIVE: &str = "runtime-bootstrap/libart-runtime-bootstrap-darwin.a";
