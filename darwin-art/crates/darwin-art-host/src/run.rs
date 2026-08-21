@@ -45,8 +45,27 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 Some(ProviderBridge::release_callback()),
             );
         }
-        let config_inputs = ProcessConfigInputs::from_options(options)?;
         let mut graphics_session = engine.create_graphics_session().ok();
+        let config_inputs = match ProcessConfigInputs::from_options(options) {
+            Ok(inputs) => inputs,
+            Err(error) => {
+                // The engine has installed provider hooks, but ownership has
+                // not yet transferred into RuntimeSession.  Keep this
+                // pre-transfer failure on the same explicit rollback seam as
+                // a failed engine attach; otherwise a malformed path (for
+                // example an interior NUL) would leak the VM/bootstrap state
+                // until process exit.
+                let rollback = unattached_engine_failure(
+                    &mut engine,
+                    graphics_session.as_mut(),
+                    &provider_bridge,
+                );
+                return Err(match rollback {
+                    HostError::RuntimeFailed(_) => error,
+                    other => other,
+                });
+            }
+        };
         let mut frame_host = FrameHost {
             frames_received: 0,
             last_frame: None,
@@ -154,11 +173,22 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // never uploads the callback mailbox into an IOSurface. Graphics runs
         // exclusively through `gpu_loop::run` above.
         let graphics_lease = if graphics_attached {
-            Some(
-                runtime
-                    .install_subsystem(Subsystem::Graphics)
-                    .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?,
-            )
+            match runtime.install_subsystem(Subsystem::Graphics) {
+                Ok(lease) => Some(lease),
+                Err(error) => {
+                    let cleanup = shutdown_runtime(
+                        &mut runtime,
+                        Some(provider_lease),
+                        Some(engine_lease),
+                        None,
+                        None,
+                    );
+                    return match cleanup {
+                        Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
+                        Err(cleanup_error) => Err(cleanup_error),
+                    };
+                }
+            }
         } else {
             None
         };
