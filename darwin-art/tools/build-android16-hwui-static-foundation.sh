@@ -220,16 +220,18 @@ sdk_root="$(xcrun --sdk macosx --show-sdk-path)"
 mkdir -p "$output_dir"
 stage="$(mktemp -d "$output_dir/stage.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
-mkdir -p "$stage/generated/include" "$stage/generated/source" "$stage/generated/public" "$stage/objects"
+cache_dir="$output_dir/objects"
+generated_dir="$output_dir/generated"
+mkdir -p "$cache_dir" "$generated_dir/include" "$generated_dir/source" "$generated_dir/public"
 "$sysprop_cpp" \
-  --header-dir "$stage/generated/include" \
-  --source-dir "$stage/generated/source" \
+  --header-dir "$generated_dir/include" \
+  --source-dir "$generated_dir/source" \
   --include-name HWUIProperties.sysprop.h \
-  --public-header-dir "$stage/generated/public" \
+  --public-header-dir "$generated_dir/public" \
   "$hwui/HWUIProperties.sysprop"
-verify_sha "$stage/generated/source/HWUIProperties.sysprop.cpp" \
+verify_sha "$generated_dir/source/HWUIProperties.sysprop.cpp" \
   "$GENERATED_HWUI_PROPERTIES_CPP_SHA256"
-verify_sha "$stage/generated/include/HWUIProperties.sysprop.h" \
+verify_sha "$generated_dir/include/HWUIProperties.sysprop.h" \
   "$GENERATED_HWUI_PROPERTIES_H_SHA256"
 
 flags=(
@@ -247,7 +249,7 @@ flags=(
   -Wno-sign-compare
   -Wno-inconsistent-missing-override -Wno-abstract-final-class
   -Wno-deprecated-literal-operator -Wno-missing-field-initializers
-  -I"$stage/generated/include"
+  -I"$generated_dir/include"
   -I"$hwui" -I"$hwui/platform/host"
   -I"$aosp_root/frameworks/base/libs/androidfw/include"
   -I"$aosp_root/frameworks/native/include"
@@ -292,24 +294,40 @@ flags=(
 )
 
 objects=()
+compile_cached() {
+  local label="$1" source="$2" object="$3"
+  shift 3
+  local meta="${object}.cmd"
+  local source_sha
+  source_sha="$(shasum -a 256 "$source" | awk '{print $1}')"
+  local -a command=("$cxx" "${flags[@]}" "$@" -c "$source" -o "$object")
+  local command_text
+  command_text="$(printf '%q ' "${command[@]}")"
+  local key
+  key="$(printf '%s\n%s\n' "$source_sha" "$command_text" | shasum -a 256 | awk '{print $1}')"
+  if [[ -f "$object" && -f "$meta" && "$(<"$meta")" == "$key" ]]; then
+    echo "hwui-static-foundation: cache $label"
+    return
+  fi
+  echo "hwui-static-foundation: compile $label"
+  "${command[@]}"
+  printf '%s\n' "$key" > "$meta"
+}
 for source in "${sources[@]}"; do
-  object="$stage/objects/${source//\//_}.o"
-  echo "hwui-static-foundation: compile $source"
-  "$cxx" "${flags[@]}" -c "$hwui/$source" -o "$object"
+  object="$cache_dir/${source//\//_}.o"
+  compile_cached "$source" "$hwui/$source" "$object"
   objects+=("$object")
 done
-generated_object="$stage/objects/HWUIProperties.sysprop.cpp.o"
-echo "hwui-static-foundation: compile generated HWUIProperties.sysprop.cpp"
-"$cxx" "${flags[@]}" -c "$stage/generated/source/HWUIProperties.sysprop.cpp" \
-  -o "$generated_object"
+generated_object="$cache_dir/HWUIProperties.sysprop.cpp.o"
+compile_cached "generated HWUIProperties.sysprop.cpp" \
+  "$generated_dir/source/HWUIProperties.sysprop.cpp" "$generated_object"
 objects+=("$generated_object")
 
 apex_objects=()
 for source in "${apex_common_sources[@]}"; do
-  object="$stage/objects/${source//\//_}.o"
-  echo "hwui-static-foundation: compile APEX-common $source"
-  "$cxx" "${flags[@]}" -I"$hwui/apex/include" -I"$hwui/jni" \
-    -c "$hwui/$source" -o "$object"
+  object="$cache_dir/${source//\//_}.o"
+  compile_cached "APEX-common $source" "$hwui/$source" "$object" \
+    -I"$hwui/apex/include" -I"$hwui/jni"
   apex_objects+=("$object")
 done
 

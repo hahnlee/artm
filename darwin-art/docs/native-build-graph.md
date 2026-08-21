@@ -36,6 +36,21 @@ The remaining migration is to apply the same persisted-command promotion to
 the graphics/ICU/HWUI foundation archives. That can proceed without changing
 the Rust runtime or Android acceptance contract.
 
+The first foundation step is now landed in the two largest graphics shell
+builders. `build-android16-android-graphics-jni.sh` keeps one command stamp per
+registrar/JNI translation unit under `_build/android-graphics-jni/objects/`,
+and `build-android16-hwui-static-foundation.sh` uses the same scheme under
+`_build/hwui-static-foundation/objects/`. The stamp includes the compiler
+identity-independent command line, all flags, and the source digest; an
+interrupted compile cannot be reused because its object has no matching stamp.
+Archives are still recreated from the cached objects, so the public archive
+paths and member-count gates do not change. On the development machine the
+graphics-JNI object audit was 74s cold and 11s warm (with no source changes),
+while the registrar-only path was 5.0s cold and 3.4s warm. HWUI foundation
+source identity remains separately locked; when that upstream manifest is
+reconciled, its 81 objects will use the same cache without weakening the
+source pin.
+
 ## Current measurement
 
 On the development machine, the materialized graphics graph currently

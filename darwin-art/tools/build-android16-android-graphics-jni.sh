@@ -282,9 +282,28 @@ else
   common_flags+=( -DHWUI_NULL_GPU )
 fi
 
+compile_cached() {
+  local label="$1" source="$2" object="$3"
+  shift 3
+  local meta="${object}.cmd"
+  local source_sha
+  source_sha="$(sha256 "$source")"
+  local -a command=("$cxx" "${common_flags[@]}" "$@" -c "$source" -o "$object")
+  local command_text
+  command_text="$(printf '%q ' "${command[@]}")"
+  local key
+  key="$(printf '%s\n%s\n' "$source_sha" "$command_text" | shasum -a 256 | awk '{print $1}')"
+  if [[ -f "$object" && -f "$meta" && "$(<"$meta")" == "$key" ]]; then
+    echo "android-graphics-jni: cache $label"
+    return
+  fi
+  echo "android-graphics-jni: compile $label"
+  "${command[@]}"
+  printf '%s\n' "$key" > "$meta"
+}
+
 registrar_object="$object_dir/LayoutlibLoader.o"
-echo "android-graphics-jni: compile apex/LayoutlibLoader.cpp"
-"$cxx" "${common_flags[@]}" -c "$patched_hwui/apex/LayoutlibLoader.cpp" -o "$registrar_object"
+compile_cached "apex/LayoutlibLoader.cpp" "$patched_hwui/apex/LayoutlibLoader.cpp" "$registrar_object"
 if [[ "$(file "$registrar_object")" != *"Mach-O 64-bit object arm64"* ]]; then
   echo "android-graphics-jni: registrar is not an arm64 Mach-O object" >&2
   exit 3
@@ -367,19 +386,17 @@ objects=()
 while IFS= read -r relative_source; do
   object_name="${relative_source//\//_}"
   object="$object_dir/${object_name%.cpp}.o"
-  echo "android-graphics-jni: compile $relative_source"
   if [[ "$relative_source" == jni/android_graphics_HardwareRenderer.cpp ]]; then
-    "$cxx" "${common_flags[@]}" -DDARWIN_ART_LAZY_NATIVE_WINDOW_JNI \
-      -c "$patched_hwui/$relative_source" -o "$object"
+    compile_cached "$relative_source" "$patched_hwui/$relative_source" "$object" \
+      -DDARWIN_ART_LAZY_NATIVE_WINDOW_JNI
   else
-    "$cxx" "${common_flags[@]}" -c "$patched_hwui/$relative_source" -o "$object"
+    compile_cached "$relative_source" "$patched_hwui/$relative_source" "$object"
   fi
   objects+=("$object")
 done < "$sources_file"
 darwin_shared_object="$object_dir/platform_darwin_utils_SharedLib.o"
-echo "android-graphics-jni: compile platform/darwin/utils/SharedLib.cpp"
-"$cxx" "${common_flags[@]}" -c "$patched_hwui/platform/darwin/utils/SharedLib.cpp" \
-  -o "$darwin_shared_object"
+compile_cached "platform/darwin/utils/SharedLib.cpp" \
+  "$patched_hwui/platform/darwin/utils/SharedLib.cpp" "$darwin_shared_object"
 objects+=("$darwin_shared_object")
 
 jni_archive="$build_dir/libandroid-graphics-jni-darwin.a"

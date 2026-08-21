@@ -75,13 +75,15 @@ returns a status snapshot; the heavy Android JNI/HWUI implementation remains
 in its own object. Keep the existing JNI/ELF/HWUI acceptance unchanged while
 the remaining framework/activity setup is extracted.
 
-### M3 — real native graph (probe graph landed; foundation promotion remains)
+### M3 — real native graph (probe graph landed; foundation cache promotion in progress)
 
 Ninja is now the normal path after the first cold bootstrap for the native
-probe graph, with persisted per-object commands and depfiles. The remaining
-work is to promote foundation archive objects (ART, ICU, HWUI, graphics JNI)
-to the same content-addressed per-TU cache. Keep one cold fallback command only
-for cache population.
+probe graph, with persisted per-object commands and depfiles. The graphics-JNI
+and HWUI foundation shell builders now also retain per-TU object/command
+stamps, so repeated registrar and object-audit builds do not invoke clang++ for
+unchanged sources. The remaining work is to make those foundation objects
+first-class Ninja edges (and apply the same boundary to ART/ICU) while keeping
+one cold fallback command only for cache population.
 
 ### M4 — acceptance and removal
 
@@ -104,6 +106,6 @@ the same machine:
 | HWUI/Metal implementation change | `runtime_graphics_probe` + graphics link |
 | AOSP foundation header change | affected foundation TU closure |
 
-The current implementation has the first probe/object cache and lifecycle
-scaffolding, but M1–M3 are not claimed complete until these concrete owner and
-timing checks pass.
+The current implementation has the first probe/object cache, graphics-JNI
+foundation stamps, and lifecycle scaffolding, but M1–M3 are not claimed
+complete until these concrete owner and timing checks pass.

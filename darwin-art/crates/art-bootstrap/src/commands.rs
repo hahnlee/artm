@@ -164,6 +164,8 @@ mod audit_commands;
 mod dex_commands;
 #[path = "fixture_commands.rs"]
 mod fixture_commands;
+#[path = "native_probe_commands.rs"]
+mod native_probe_commands;
 #[path = "probe_commands.rs"]
 mod probe_commands;
 #[path = "runtime_commands.rs"]
@@ -176,6 +178,7 @@ mod source_commands;
 pub(crate) use audit_commands::*;
 pub(crate) use dex_commands::*;
 pub(crate) use fixture_commands::*;
+pub(crate) use native_probe_commands::*;
 pub(crate) use probe_commands::*;
 pub(crate) use runtime_commands::*;
 pub(crate) use runtime_toolchain::*;
