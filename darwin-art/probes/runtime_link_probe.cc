@@ -46,6 +46,7 @@
 #include "runtime_abi_probe.h"
 #include "runtime_process_state.h"
 #include "runtime_process_options.h"
+#include "runtime_jni_scope.h"
 #include "runtime_shutdown_probe.h"
 #include "runtime_frame_probe.h"
 #include "runtime_graphics_probe.h"
@@ -85,26 +86,6 @@ extern "C" bool CloseNativeLibrary(void* handle, bool needs_native_bridge,
                                     char** error_msg);
 extern "C" void NativeLoaderFreeErrorMessage(char* message);
 }  // namespace android
-
-static jint HostPageSize(JNIEnv*, jclass) { return getpagesize(); }
-
-class ScopedJniLocalFrame final {
- public:
-  explicit ScopedJniLocalFrame(JNIEnv* env)
-      : env_(env), pushed_(env != nullptr && env->PushLocalFrame(256) == JNI_OK) {}
-
-  ~ScopedJniLocalFrame() {
-    if (pushed_) {
-      env_->PopLocalFrame(nullptr);
-    }
-  }
-
-  bool IsValid() const { return pushed_; }
-
- private:
-  JNIEnv* env_;
-  bool pushed_;
-};
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     const darwin_art_process_config_t* config,
@@ -228,8 +209,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
 
   art::interpreter::UnstartedRuntime::Initialize();
   art::ScopedObjectAccess soa(self);
-  ScopedJniLocalFrame local_frame(self->GetJniEnv());
-  if (!local_frame.IsValid()) {
+  darwin_art_jni_scope::ScopedLocalFrame local_frame(self->GetJniEnv());
+  if (!local_frame.valid()) {
     std::cerr << "ART Darwin JNI: local frame allocation failed\n";
     return 34;
   }
@@ -1233,7 +1214,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
 
   JNINativeMethod native_methods[]{
       {const_cast<char*>("hostPageSize"), const_cast<char*>("()I"),
-       reinterpret_cast<void*>(&HostPageSize)},
+       reinterpret_cast<void*>(&darwin_art_jni_scope::HostPageSize)},
       {const_cast<char*>("nativePackedIntegerStack"),
        const_cast<char*>("(IIIIIIIJII)J"),
        reinterpret_cast<void*>(&darwin_art_abi_probe::packed_integer_stack)},

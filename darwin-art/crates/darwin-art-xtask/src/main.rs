@@ -585,6 +585,7 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_process_state.h"),
         PathBuf::from("probes/runtime_process_options.cc"),
         PathBuf::from("probes/runtime_process_options.h"),
+        PathBuf::from("probes/runtime_jni_scope.h"),
         PathBuf::from("probes/runtime_shutdown_probe.cc"),
         PathBuf::from("probes/runtime_shutdown_probe.h"),
         PathBuf::from("probes/runtime_frame_probe.cc"),
@@ -680,6 +681,7 @@ fn is_probe_only_input(path: &Path) -> bool {
             | "probes/runtime_process_state.h"
             | "probes/runtime_process_options.cc"
             | "probes/runtime_process_options.h"
+            | "probes/runtime_jni_scope.h"
             | "probes/runtime_shutdown_probe.cc"
             | "probes/runtime_shutdown_probe.h"
             | "probes/runtime_frame_probe.cc"
