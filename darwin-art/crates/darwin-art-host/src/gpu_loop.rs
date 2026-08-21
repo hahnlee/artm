@@ -1,36 +1,25 @@
 use crate::config::{HostError, HostOutcome, RunOptions};
 use crate::runtime::HostRuntime;
 use crate::surface::{owned_surface_next_pointer_event, owned_surface_pump_events};
-use darwin_art_engine::SurfaceSession;
 use darwin_art_engine_sys::{PointerEvent, ProcessResult};
 use darwin_art_runtime::Subsystem;
 
 #[cfg(target_os = "macos")]
 pub(super) fn run(
     runtime: &mut HostRuntime,
-    active_surface: Option<SurfaceSession>,
     process: ProcessResult,
     options: &RunOptions,
     graphics_attached: bool,
 ) -> Result<HostOutcome, HostError> {
-    let Some(surface) = active_surface else {
+    if runtime.surface().is_none() {
         return Err(HostError::SurfaceFailed {
             operation: "gpu_active_surface",
             status: -1,
         });
-    };
-    if let Err(surface) = runtime.attach_surface(surface) {
-        // The failed transfer returns ownership to this scope; its Drop
-        // closes the native surface. The already-attached engine/provider
-        // still need the common rollback path.
-        drop(surface);
-        return Err(HostError::RuntimeFailed(-1));
     }
-    if let Err(error) = runtime.install_subsystem(Subsystem::Surface) {
-        return Err(HostError::RuntimeFailed(error.status() as i32));
-    }
-    // Surface is installed before Graphics so shutdown can remove the
-    // Graphics lease first and then the Surface lease in strict LIFO order.
+    // Graphics is normally already leased before process execution. The
+    // surface lease is attached afterward, making it the newest lease so
+    // shutdown removes the surface before graphics in strict LIFO order.
     if graphics_attached && !runtime.subsystem_active(Subsystem::Graphics) {
         match runtime.install_subsystem(Subsystem::Graphics) {
             Ok(_) => {}

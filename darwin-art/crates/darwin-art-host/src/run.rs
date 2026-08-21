@@ -104,18 +104,32 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             }
         };
 
-        // The graphics engine publishes its drawable during run_process. The
-        // surface value is still returned as a short-lived transfer and is
-        // attached by gpu_loop, while engine/provider/graphics remain owned by
-        // RuntimeSession for the entire process.
+        // The graphics engine publishes its drawable during run_process.
+        // Transfer that handle into RuntimeSession immediately, before any
+        // later host branch can fail. This keeps the surface owned by the
+        // same Rust shutdown transaction as ART/graphics instead of leaving
+        // a short-lived foreign owner between process return and the frame
+        // loop.
         let active_surface = shutdown_guard
             .runtime()
             .engine()
             .and_then(EngineSession::active_surface);
-        if active_surface.is_some() {
+        let has_active_surface = if let Some(surface) = active_surface {
+            shutdown_guard
+                .runtime()
+                .attach_surface(surface)
+                .map_err(|_| HostError::RuntimeFailed(-1))?;
+            shutdown_guard
+                .runtime()
+                .install_subsystem(Subsystem::Surface)
+                .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
+            true
+        } else {
+            false
+        };
+        if has_active_surface {
             let outcome = run_gpu_loop(
                 shutdown_guard.runtime(),
-                active_surface,
                 process,
                 options,
                 graphics_attached,
