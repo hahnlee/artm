@@ -2,7 +2,10 @@ use super::abi::{EngineSymbols, LoadedEngine};
 use super::graphics::GraphicsSession;
 use super::surface::SurfaceSession;
 use core::ffi::c_void;
-use darwin_art_engine_sys::{ProcessConfig, ProcessResult, ProviderAcquireFn, ProviderReleaseFn};
+use darwin_art_engine_sys::{
+    ProcessConfig, ProcessResult, ProviderAcquireFn, ProviderClearHooksFn, ProviderNativeAcquireFn,
+    ProviderNativeReleaseFn, ProviderReleaseFn,
+};
 use std::path::Path;
 
 /// Safe provider-hook view owned by the live `EngineSession` image.
@@ -13,25 +16,27 @@ use std::path::Path;
 /// the image-lifetime invariant for these callbacks.
 #[derive(Clone, Copy)]
 pub struct ProviderHooks {
-    acquire: super::abi::EngineSymbols,
+    acquire: ProviderNativeAcquireFn,
+    release: ProviderNativeReleaseFn,
+    clear: ProviderClearHooksFn,
 }
 
 impl ProviderHooks {
     pub fn acquire(&self, kind: u32, authority_fd: i32) -> i32 {
         // SAFETY: this view is produced by a live EngineSession and the
         // RuntimeSession teardown order releases provider hooks first.
-        unsafe { (self.acquire.provider_native_acquire)(kind, authority_fd) }
+        unsafe { (self.acquire)(kind, authority_fd) }
     }
 
     pub fn release(&self, kind: u32) -> i32 {
         // SAFETY: same engine-image lifetime invariant as acquire.
-        unsafe { (self.acquire.provider_native_release)(kind) }
+        unsafe { (self.release)(kind) }
     }
 
     pub fn clear(&self) {
         // SAFETY: clear is called only after ProviderLeaseTable reaches
         // quiescence and before the owning EngineSession is dropped.
-        unsafe { (self.acquire.provider_clear_hooks)() }
+        unsafe { (self.clear)() }
     }
 }
 
@@ -56,8 +61,11 @@ impl EngineSession {
     }
 
     pub fn provider_hooks(&self) -> ProviderHooks {
+        let symbols = self.engine.symbols();
         ProviderHooks {
-            acquire: self.engine.symbols(),
+            acquire: symbols.provider_native_acquire,
+            release: symbols.provider_native_release,
+            clear: symbols.provider_clear_hooks,
         }
     }
 
