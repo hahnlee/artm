@@ -5,6 +5,49 @@
 //! instead of each command owning a copy of the compilation policy.
 
 use super::*;
+use crate::build_context::BuildPaths;
+
+/// Canonical include search path for the six flavor-neutral probe TUs.
+///
+/// Keeping this list in one module is important: an object cache is only
+/// useful when CPU, Metal, and APK actions fingerprint the same compiler
+/// inputs. Flavor-specific probes may append their own headers, but they must
+/// not silently change this core path.
+pub(crate) fn core_probe_includes(
+    root: &Path,
+    build_paths: &BuildPaths,
+    runtime: &Path,
+) -> Vec<PathBuf> {
+    vec![
+        root.join("include"),
+        root.join("compat"),
+        build_paths.native_output("runtime-arm64/generated"),
+        build_paths.native_output("runtime-bootstrap/patched-source/runtime"),
+        build_paths.native_output("runtime-core/patched-source/runtime"),
+        build_paths.native_output("foundation/patched-source/libartbase"),
+        root.join("_aosp/art/libartbase"),
+        root.join("_aosp/art/cmdline"),
+        root.join("_aosp/art/libdexfile"),
+        root.join("_aosp/art/libelffile"),
+        root.join("_aosp/art/libprofile"),
+        root.join("_aosp/art/libnativebridge/include"),
+        runtime.to_path_buf(),
+        runtime.join("base"),
+        runtime.join("arch/arm64"),
+        root.join("_aosp/art/libartpalette/include"),
+        root.join("_aosp/system/libbase/include"),
+        root.join("_aosp/external/tinyxml2"),
+        root.join("_aosp/libnativehelper/include_jni"),
+        root.join("_aosp/libnativehelper/header_only_include"),
+        root.join("_aosp/libnativehelper/platform_header_only_include"),
+        root.join("_aosp/external/dlmalloc"),
+        root.join("tools/bionic-dns-facade/include"),
+        root.join("tools/bionic-fs-facade/include"),
+        root.join("tools/bionic-ioctl-facade/include"),
+        root.join("tools/bionic-socket-broker-adapter/include"),
+        PathBuf::from("/opt/homebrew/include"),
+    ]
+}
 
 pub(crate) struct CoreProbeObjects {
     pub(crate) elf: PathBuf,

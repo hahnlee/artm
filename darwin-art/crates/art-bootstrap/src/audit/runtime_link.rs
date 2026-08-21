@@ -1,5 +1,7 @@
 use super::common::{build_runtime_native_owner, require_file};
-use super::graphics_core_probes::{CoreProbeObjects, compile_core_probe_objects};
+use super::graphics_core_probes::{
+    CoreProbeObjects, compile_core_probe_objects, core_probe_includes,
+};
 use super::*;
 
 pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
@@ -29,35 +31,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     require_file(&network_object, "runtime network object is missing")?;
     build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
     let runtime_native_owner_archive = build_runtime_native_owner(root)?;
-    let includes = [
-        root.join("include"),
-        root.join("compat"),
-        build_paths.native_output("runtime-arm64/generated"),
-        build_paths.native_output("runtime-bootstrap/patched-source/runtime"),
-        build_paths.native_output("runtime-core/patched-source/runtime"),
-        build_paths.native_output("foundation/patched-source/libartbase"),
-        root.join("_aosp/art/libartbase"),
-        root.join("_aosp/art/cmdline"),
-        root.join("_aosp/art/libdexfile"),
-        root.join("_aosp/art/libelffile"),
-        root.join("_aosp/art/libprofile"),
-        root.join("_aosp/art/libnativebridge/include"),
-        runtime.clone(),
-        runtime.join("base"),
-        runtime.join("arch/arm64"),
-        root.join("_aosp/art/libartpalette/include"),
-        root.join("_aosp/system/libbase/include"),
-        root.join("_aosp/external/tinyxml2"),
-        root.join("_aosp/libnativehelper/include_jni"),
-        root.join("_aosp/libnativehelper/header_only_include"),
-        root.join("_aosp/libnativehelper/platform_header_only_include"),
-        root.join("_aosp/external/dlmalloc"),
-        root.join("tools/bionic-dns-facade/include"),
-        root.join("tools/bionic-fs-facade/include"),
-        root.join("tools/bionic-ioctl-facade/include"),
-        root.join("tools/bionic-socket-broker-adapter/include"),
-        PathBuf::from("/opt/homebrew/include"),
-    ];
+    let includes = core_probe_includes(root, &build_paths, &runtime);
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;

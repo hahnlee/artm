@@ -1,5 +1,7 @@
+use super::super::native_probe_commands::core_probe_includes;
 use super::super::native_probe_commands::{CoreProbeObjects, compile_core_probe_objects};
 use super::*;
+use crate::build_context::BuildPaths;
 
 pub(crate) fn pinned_direct_apk_ndk_bin() -> Result<PathBuf> {
     let sdk_root = env::var_os("ANDROID_SDK_ROOT")
@@ -245,7 +247,20 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     // The direct APK flavor has an independent cache from the GPU graphics
     // probe.  A command-line flavor change must never reuse a real-HWUI TU.
-    let probe_cache = build_dir.join("runtime-direct-apk-cpu-probe-hashes.cache");
+    // Core probe objects are flavor-neutral. Keep their output/cache under
+    // the shared native-probes tree so CPU, Graphics, and direct-APK links
+    // all reuse the same dependency-fingerprinted objects. Flavor-specific
+    // objects continue to use the APK-local cache below.
+    let build_paths = BuildPaths::from_root(root);
+    let core_build_dir = build_paths.native_output("native-probes/core");
+    fs::create_dir_all(&core_build_dir)?;
+    let core_probe_cache = core_build_dir.join("core-probe-hashes.cache");
+    let core_includes = core_probe_includes(root, &build_paths, &runtime);
+    let core_include_refs = core_includes
+        .iter()
+        .map(PathBuf::as_path)
+        .collect::<Vec<_>>();
+    let probe_cache = build_dir.join("runtime-direct-apk-probe-hashes.cache");
     let CoreProbeObjects {
         elf: elf_probe_object,
         abi: abi_probe_object,
@@ -255,9 +270,9 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         frame: frame_probe_object,
     } = compile_core_probe_objects(
         root,
-        &build_dir,
-        &include_refs,
-        &probe_cache,
+        &core_build_dir,
+        &core_include_refs,
+        &core_probe_cache,
         &compiler_identity,
     )?;
     // The runtime entry point is intentionally kept as a thin orchestrator;

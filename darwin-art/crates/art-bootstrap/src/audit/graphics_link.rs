@@ -1,5 +1,7 @@
 use super::common::{build_runtime_native_owner, require_file};
-use super::graphics_core_probes::{CoreProbeObjects, compile_core_probe_objects};
+use super::graphics_core_probes::{
+    CoreProbeObjects, compile_core_probe_objects, core_probe_includes,
+};
 use super::graphics_link_inputs::GraphicsRuntimeInputs;
 use super::graphics_phases::run_graphics_upstream_gates;
 use super::graphics_surface::compile_surface_objects;
@@ -66,38 +68,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     } = GraphicsRuntimeInputs::load(root, &build_paths)?;
 
     fs::create_dir_all(&build_dir)?;
-    let includes = [
-        root.join("include"),
-        root.join("compat"),
-        root.join("_build/runtime-arm64/generated"),
-        // Core probe TUs are flavor-neutral. Use the same patched runtime
-        // header root as the CPU audit so their dependency fingerprints and
-        // object paths can be shared across both link flavors.
-        build_paths.native_output("runtime-bootstrap/patched-source/runtime"),
-        root.join("_build/runtime-core/patched-source/runtime"),
-        root.join("_build/foundation/patched-source/libartbase"),
-        root.join("_aosp/art/libartbase"),
-        root.join("_aosp/art/cmdline"),
-        root.join("_aosp/art/libdexfile"),
-        root.join("_aosp/art/libelffile"),
-        root.join("_aosp/art/libprofile"),
-        root.join("_aosp/art/libnativebridge/include"),
-        runtime.clone(),
-        runtime.join("base"),
-        runtime.join("arch/arm64"),
-        root.join("_aosp/art/libartpalette/include"),
-        root.join("_aosp/system/libbase/include"),
-        root.join("_aosp/external/tinyxml2"),
-        root.join("_aosp/libnativehelper/include_jni"),
-        root.join("_aosp/libnativehelper/header_only_include"),
-        root.join("_aosp/libnativehelper/platform_header_only_include"),
-        root.join("_aosp/external/dlmalloc"),
-        root.join("tools/bionic-dns-facade/include"),
-        root.join("tools/bionic-fs-facade/include"),
-        root.join("tools/bionic-ioctl-facade/include"),
-        root.join("tools/bionic-socket-broker-adapter/include"),
-        PathBuf::from("/opt/homebrew/include"),
-    ];
+    let includes = core_probe_includes(root, &build_paths, &runtime);
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
     let hwui_object = if let Some(path) = env::var_os("DARWIN_ART_NATIVE_HWUI_OBJECT") {
