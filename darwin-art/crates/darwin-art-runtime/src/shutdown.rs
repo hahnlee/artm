@@ -103,6 +103,14 @@ where
         if let Ok(Some(graphics)) = session.graphics_for_shutdown_mut() {
             remember(graphics.close());
         }
+        // GraphicsSession stores function pointers into the live engine
+        // image.  Release the Rust owner immediately after close, while the
+        // image is still mapped, rather than keeping a closed handle until
+        // after EngineSession::close()/dlclose.  Its Drop path may still call
+        // the native destroy callback even though the session is closed.
+        if let Err(error) = session.release_graphics() {
+            remember(error.status() as i32);
+        }
     }
 
     if session.provider().is_some()
@@ -132,12 +140,6 @@ where
     if let Err(error) = session.release_provider() {
         remember(error.status() as i32);
     }
-    if let Err(error) = session.release_graphics()
-        && session.graphics().is_some()
-    {
-        remember(error.status() as i32);
-    }
-
     if first_status.is_none()
         && let Err(error) = session.finish_shutdown()
     {
@@ -175,6 +177,36 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct OrderedProbe {
+        name: &'static str,
+        events: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    }
+
+    impl NativeResource for OrderedProbe {
+        fn close(&mut self) -> i32 {
+            self.events.lock().unwrap().push(self.name);
+            0
+        }
+
+        fn clear(&mut self) -> i32 {
+            self.events.lock().unwrap().push("provider-clear");
+            0
+        }
+    }
+
+    impl Drop for OrderedProbe {
+        fn drop(&mut self) {
+            self.events.lock().unwrap().push(match self.name {
+                "graphics" => "drop-graphics",
+                "surface" => "drop-surface",
+                "engine" => "drop-engine",
+                "provider" => "drop-provider",
+                other => other,
+            });
+        }
+    }
+
     #[test]
     fn dropped_guard_runs_the_same_reverse_shutdown_transaction() {
         let calls = Arc::new(AtomicUsize::new(0));
@@ -196,5 +228,57 @@ mod tests {
 
         assert_eq!(session.phase(), RuntimePhase::Stopped);
         assert_eq!(calls.load(Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn graphics_owner_drops_before_engine_image_owner() {
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut session =
+            RuntimeSession::<OrderedProbe, OrderedProbe, OrderedProbe, OrderedProbe>::new();
+        session.start().unwrap();
+        session
+            .attach_engine(OrderedProbe {
+                name: "engine",
+                events: Arc::clone(&events),
+            })
+            .unwrap();
+        session
+            .attach_provider(OrderedProbe {
+                name: "provider",
+                events: Arc::clone(&events),
+            })
+            .unwrap();
+        session
+            .attach_surface(OrderedProbe {
+                name: "surface",
+                events: Arc::clone(&events),
+            })
+            .unwrap();
+        session
+            .attach_graphics(OrderedProbe {
+                name: "graphics",
+                events: Arc::clone(&events),
+            })
+            .unwrap();
+        session.install_subsystem(Subsystem::Engine).unwrap();
+        session.install_subsystem(Subsystem::ElfNamespace).unwrap();
+        session.install_subsystem(Subsystem::Graphics).unwrap();
+        session.install_subsystem(Subsystem::Surface).unwrap();
+        session.mark_running().unwrap();
+
+        session.shutdown_native().unwrap();
+        assert_eq!(
+            &*events.lock().unwrap(),
+            &[
+                "surface",
+                "drop-surface",
+                "graphics",
+                "drop-graphics",
+                "engine",
+                "drop-engine",
+                "provider-clear",
+                "drop-provider",
+            ]
+        );
     }
 }
