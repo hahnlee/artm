@@ -380,6 +380,10 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(root.join("_build/runtime-platform/libart-platform-darwin.a"))
         .arg(root.join("_build/dex-probe/libdexfile-darwin.a"))
         .arg(root.join("_build/foundation/libartbase-darwin.a"))
+        // The runtime probe uses the source-pinned Android-base/fmt v11
+        // objects.  The smaller foundation archive intentionally omits those
+        // objects; linking Homebrew fmt here would mix ABI generations.
+        .arg(root.join("_build/libbase-foundation/libandroid-base-darwin.a"))
         .arg(root.join("_build/foundation/libandroid-base-darwin.a"))
         .arg(root.join("_build/foundation/libziparchive-darwin.a"))
         .arg(root.join("_build/nativehelper-foundation/libnativehelper_jvm.a"))
