@@ -445,6 +445,10 @@ shutdown have completed. This makes provider implementation movement a Rust
 boundary change rather than a host-composition change; the remaining native
 surface is limited to the versioned callback ABI.
 
+The armed shutdown guard is now also defined in `darwin-art-runtime`; the host
+frontend only adapts `RuntimeError` into its CLI error type. Early returns in a
+new host cannot bypass or duplicate the dependency-ordered owner transaction.
+
 `ProcessRequest` now borrows the provider and optional graphics owner for its
 entire synchronous ART call. Raw context pointers are materialized only while
 the wire `ProcessConfig` is built, so the host cannot drop or replace an owner
