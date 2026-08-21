@@ -1454,6 +1454,27 @@ pub(crate) fn compile_runtime_network_probe(root: &Path, build_dir: &Path) -> Re
     Ok(object)
 }
 
+/// Compile the small JNI orchestration phase independently from the heavy
+/// HWUI/Skia implementation.  This keeps Activity/content validation changes
+/// from invalidating the graphics RenderNode translation unit.
+pub(crate) fn compile_runtime_graphics_phase(
+    root: &Path,
+    build_dir: &Path,
+    includes: &[&Path],
+) -> Result<PathBuf> {
+    let object = build_dir.join("darwin_art_runtime_graphics_phase.cc.o");
+    let cache_path = build_dir.join("runtime-probe-graphics-phase-hashes.cache");
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let mut command = runtime_cpp_command(includes);
+    command
+        .arg("-c")
+        .arg(root.join("probes/runtime_graphics_phase.cc"))
+        .arg("-o")
+        .arg(&object);
+    let _ = compile_cached_probe_tu(&mut command, &object, &cache_path, &compiler_identity)?;
+    Ok(object)
+}
+
 pub(crate) fn compile_runtime_hwui_probe(
     root: &Path,
     build_dir: &Path,
