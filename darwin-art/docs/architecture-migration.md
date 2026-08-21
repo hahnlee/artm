@@ -139,6 +139,13 @@ cleanup occurs before the Metal surface and ART/provider teardown. Headless
 engines may omit these optional symbols, while the graphics link exports and
 audits them when a drawable is present.
 
+The host no longer consumes the complete raw `EngineSymbols` table. The engine
+crate exposes a narrow `ProviderHooks` capability for acquire/release/clear;
+raw symbol resolution and graphics/surface dispatch remain crate-private.
+`ProviderBridge` stores only that capability inside the Rust-owned session,
+which keeps provider callback code from depending on unrelated engine ABI
+entries.
+
 The native graph emitter is split by ownership rather than kept in one command
 file: `graph::inputs` owns invalidation/input stamps, `graph::foundation` owns
 HWUI/GraphicsJNI/ICU family partitioning, `graph::cache` owns persisted

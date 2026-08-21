@@ -32,8 +32,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             .start()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
         let mut engine = EngineSession::open(&options.library).map_err(HostError::DynamicLoader)?;
-        let symbols = engine.symbols();
-        let provider_bridge = Box::new(ProviderBridge::new(symbols));
+        let provider_bridge = Box::new(ProviderBridge::new(engine.provider_hooks()));
         let provider_context = provider_bridge.context();
         // SAFETY: provider_bridge is kept alive by the local scope until it
         // is transferred into the RuntimeSession below; the callbacks are static

@@ -4,15 +4,15 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use darwin_art_engine_sys::{
-    DispatchPointerFn, GraphicsSessionCloseFn, GraphicsSessionCreateFn, GraphicsSessionDestroyFn,
+    GraphicsSessionCloseFn, GraphicsSessionCreateFn, GraphicsSessionDestroyFn,
     GraphicsSessionDispatchPointerFn, GraphicsSessionPumpFrameFn, ProviderClearHooksFn,
-    ProviderInstallHooksFn, ProviderNativeAcquireFn, ProviderNativeReleaseFn, PumpFrameworkFrameFn,
-    RunProcessFn, ShutdownProcessFn, SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn,
+    ProviderInstallHooksFn, ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn,
+    ShutdownProcessFn, SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn,
     SurfaceNextPointerEventFn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
 };
 
 #[derive(Clone, Copy)]
-pub struct EngineSymbols {
+pub(crate) struct EngineSymbols {
     pub run_process: RunProcessFn,
     pub shutdown_process: ShutdownProcessFn,
     pub surface_create: SurfaceCreateFn,
@@ -22,8 +22,6 @@ pub struct EngineSymbols {
     pub surface_next_pointer_event: SurfaceNextPointerEventFn,
     pub surface_destroy: SurfaceDestroyFn,
     pub surface_active: SurfaceActiveFn,
-    pub dispatch_pointer: DispatchPointerFn,
-    pub pump_framework_frame: PumpFrameworkFrameFn,
     pub graphics_session_create: Option<GraphicsSessionCreateFn>,
     pub graphics_session_close: Option<GraphicsSessionCloseFn>,
     pub graphics_session_destroy: Option<GraphicsSessionDestroyFn>,
@@ -56,8 +54,6 @@ impl LoadedEngine {
                     .symbol(b"darwin_art_surface_next_pointer_event\0")?,
                 surface_destroy: library.symbol(b"darwin_art_surface_destroy\0")?,
                 surface_active: library.symbol(b"darwin_art_surface_active_gpu\0")?,
-                dispatch_pointer: library.symbol(b"darwin_art_dispatch_pointer\0")?,
-                pump_framework_frame: library.symbol(b"darwin_art_pump_framework_frame\0")?,
                 graphics_session_create: library
                     .symbol(b"darwin_art_graphics_session_create\0")
                     .ok(),

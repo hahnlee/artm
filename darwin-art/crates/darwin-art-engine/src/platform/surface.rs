@@ -42,14 +42,14 @@ impl SurfaceSession {
         }
     }
 
-    pub fn active(symbols: EngineSymbols) -> Option<Self> {
+    pub(crate) fn active(symbols: EngineSymbols) -> Option<Self> {
         // SAFETY: callback belongs to the live engine image represented by
         // this symbol table.
         let handle = unsafe { (symbols.surface_active)() };
         (!handle.is_null()).then(|| Self::from_parts(handle, symbols))
     }
 
-    pub fn create(
+    pub(crate) fn create(
         symbols: EngineSymbols,
         info: &darwin_art_engine_sys::SurfaceCreateInfo,
     ) -> Result<Self, i32> {

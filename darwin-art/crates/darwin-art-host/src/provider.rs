@@ -3,7 +3,7 @@
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use darwin_art_engine::EngineSymbols;
+use darwin_art_engine::ProviderHooks;
 use darwin_art_engine_sys::{ProviderAcquireFn, ProviderReleaseFn};
 use darwin_art_runtime::ProviderLeaseTable;
 
@@ -12,26 +12,15 @@ pub(super) struct ProviderBridge {
 }
 
 impl ProviderBridge {
-    pub(super) fn new(symbols: EngineSymbols) -> Self {
-        let acquire_symbols = symbols;
-        let release_symbols = symbols;
-        let clear_symbols = symbols;
+    pub(super) fn new(hooks: ProviderHooks) -> Self {
+        let acquire_hooks = hooks;
+        let release_hooks = hooks;
+        let clear_hooks = hooks;
         Self {
             leases: ProviderLeaseTable::new(
-                move |kind, authority_fd| {
-                    // SAFETY: EngineSession keeps the image mapped while this
-                    // table is owned by RuntimeSession.
-                    unsafe { (acquire_symbols.provider_native_acquire)(kind, authority_fd) }
-                },
-                move |kind| {
-                    // SAFETY: same image-lifetime invariant as acquire.
-                    unsafe { (release_symbols.provider_native_release)(kind) }
-                },
-                move || {
-                    // SAFETY: hooks are cleared only after the Rust table has
-                    // observed zero active leases.
-                    unsafe { (clear_symbols.provider_clear_hooks)() }
-                },
+                move |kind, authority_fd| acquire_hooks.acquire(kind, authority_fd),
+                move |kind| release_hooks.release(kind),
+                move || clear_hooks.clear(),
             ),
         }
     }

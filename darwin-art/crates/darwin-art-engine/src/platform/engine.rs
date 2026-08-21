@@ -5,6 +5,36 @@ use core::ffi::c_void;
 use darwin_art_engine_sys::{ProcessConfig, ProcessResult, ProviderAcquireFn, ProviderReleaseFn};
 use std::path::Path;
 
+/// Safe provider-hook view owned by the live `EngineSession` image.
+///
+/// The raw function-pointer table stays private to this crate. Runtime code
+/// receives this narrow capability instead of a copy of every engine ABI
+/// symbol. `RuntimeSession` drops the provider before the engine, preserving
+/// the image-lifetime invariant for these callbacks.
+#[derive(Clone, Copy)]
+pub struct ProviderHooks {
+    acquire: super::abi::EngineSymbols,
+}
+
+impl ProviderHooks {
+    pub fn acquire(&self, kind: u32, authority_fd: i32) -> i32 {
+        // SAFETY: this view is produced by a live EngineSession and the
+        // RuntimeSession teardown order releases provider hooks first.
+        unsafe { (self.acquire.provider_native_acquire)(kind, authority_fd) }
+    }
+
+    pub fn release(&self, kind: u32) -> i32 {
+        // SAFETY: same engine-image lifetime invariant as acquire.
+        unsafe { (self.acquire.provider_native_release)(kind) }
+    }
+
+    pub fn clear(&self) {
+        // SAFETY: clear is called only after ProviderLeaseTable reaches
+        // quiescence and before the owning EngineSession is dropped.
+        unsafe { (self.acquire.provider_clear_hooks)() }
+    }
+}
+
 /// Process-scoped engine owner.  The dynamic library and its shutdown
 /// callback share one Rust lifetime, so callers cannot accidentally drop
 /// the symbol image before ART has been shut down.
@@ -21,8 +51,14 @@ impl EngineSession {
         })
     }
 
-    pub fn symbols(&self) -> EngineSymbols {
+    pub(crate) fn symbols(&self) -> EngineSymbols {
         self.engine.symbols()
+    }
+
+    pub fn provider_hooks(&self) -> ProviderHooks {
+        ProviderHooks {
+            acquire: self.engine.symbols(),
+        }
     }
 
     /// Run one process through the versioned ABI and construct its result

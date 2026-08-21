@@ -12,11 +12,10 @@ mod platform {
     pub(crate) mod graphics;
     pub(crate) mod surface;
 
-    pub use abi::EngineSymbols;
-    pub use engine::EngineSession;
+    pub use engine::{EngineSession, ProviderHooks};
     pub use graphics::GraphicsSession;
     pub use surface::SurfaceSession;
 }
 
 #[cfg(target_os = "macos")]
-pub use platform::{EngineSession, EngineSymbols, GraphicsSession, SurfaceSession};
+pub use platform::{EngineSession, GraphicsSession, ProviderHooks, SurfaceSession};

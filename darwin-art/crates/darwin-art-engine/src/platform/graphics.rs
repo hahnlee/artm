@@ -19,7 +19,7 @@ pub struct GraphicsSession {
 }
 
 impl GraphicsSession {
-    pub fn create(symbols: EngineSymbols) -> Result<Self, i32> {
+    pub(crate) fn create(symbols: EngineSymbols) -> Result<Self, i32> {
         // SAFETY: the function pointer belongs to the live engine image.
         let (Some(create_fn), Some(close_fn), Some(destroy_fn), Some(dispatch_fn), Some(pump_fn)) = (
             symbols.graphics_session_create,
