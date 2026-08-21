@@ -167,6 +167,12 @@ HWUI/GraphicsJNI/ICU family partitioning, `graph::cache` owns persisted
 command/fingerprint promotion, and `graph::representative` owns small
 independently cacheable production TUs. `darwin-art-xtask/src/main.rs` remains
 the graph assembly/CLI boundary instead of owning those policies.
+The graph identity/cache-manifest calculation is now isolated in
+`graph::manifest`; `emit.rs` only assembles Ninja rules. The native graph audit
+also queries every phase object and rejects a phase that directly inherits
+another phase's source, so the invalidation contract is checked structurally
+rather than inferred from mtimes. A successful warm audit reports
+`invalidation=direct-source`.
 
 The runtime owner teardown is now a separate `darwin-art-runtime::shutdown`
 transaction, and the provider ABI vocabulary is isolated in
@@ -183,6 +189,12 @@ invocation, preserving depfile metadata so a canonical fallback can retain
 the existing object set. The small `compat/darwin_art_abi_layout.cc` phase
 provides the native half of the cross-language POD layout gate; Rust offset
 tests remain the other half.
+
+Detached Activity/PhoneWindow presentation uses the shared
+`darwin_art_jni_scope::ScopedLocalFrame` boundary. This is intentionally a
+small C++-side safety net: framework construction has many early-return paths,
+so JNI locals are released even when resource/theme setup fails before the
+Rust-owned runtime shutdown guard is reached.
 
 The ART-side bootstrap now has a shared runtime-core cache boundary. Common
 upstream runtime TUs and flavor-independent compat adapters compile from one
