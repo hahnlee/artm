@@ -127,6 +127,30 @@ impl RuntimeLifecycle {
         Ok(())
     }
 
+    /// Remove the newest lease owned by this lifecycle.
+    ///
+    /// Production teardown should not keep lease tokens in a second host-side
+    /// state machine. The lifecycle already owns the generation and session
+    /// identity, so it can mint the checked token internally and return only
+    /// the subsystem that was removed.
+    pub fn uninstall_latest_subsystem(&mut self) -> Result<Option<Subsystem>, RuntimeError> {
+        self.assert_owner()?;
+        let Some(&subsystem) = self.install_order.last() else {
+            return Ok(None);
+        };
+        let generation = self
+            .subsystems
+            .get(&subsystem)
+            .copied()
+            .ok_or(RuntimeError::SubsystemNotActive { subsystem })?;
+        self.uninstall_subsystem(SubsystemLease {
+            subsystem,
+            generation,
+            session_id: self.session_id,
+        })?;
+        Ok(Some(subsystem))
+    }
+
     pub fn subsystem_active(&self, subsystem: Subsystem) -> bool {
         self.subsystems.contains_key(&subsystem)
     }
@@ -224,5 +248,24 @@ mod tests {
         first.begin_shutdown().unwrap();
         first.uninstall_subsystem(first_lease).unwrap();
         first.finish_shutdown().unwrap();
+    }
+
+    #[test]
+    fn owner_can_uninstall_latest_without_exporting_lease_tokens() {
+        let mut lifecycle = RuntimeLifecycle::new();
+        lifecycle.start().unwrap();
+        lifecycle.install_subsystem(Subsystem::Engine).unwrap();
+        lifecycle.install_subsystem(Subsystem::Surface).unwrap();
+        lifecycle.begin_shutdown().unwrap();
+        assert_eq!(
+            lifecycle.uninstall_latest_subsystem().unwrap(),
+            Some(Subsystem::Surface)
+        );
+        assert_eq!(
+            lifecycle.uninstall_latest_subsystem().unwrap(),
+            Some(Subsystem::Engine)
+        );
+        assert_eq!(lifecycle.uninstall_latest_subsystem().unwrap(), None);
+        lifecycle.finish_shutdown().unwrap();
     }
 }

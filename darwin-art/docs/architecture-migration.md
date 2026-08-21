@@ -197,6 +197,13 @@ only their capability group. This keeps raw function pointers inside the
 engine crate and makes future `RuntimeSession` ownership moves independent of
 unrelated ABI groups.
 
+Subsystem lease tokens are now owned by `RuntimeLifecycle` during production
+shutdown. Host teardown asks the session to remove its newest subsystem and
+receives only the checked subsystem identity; lease generations and session
+identity never escape into `run.rs` or `gpu_loop.rs`. This removes a duplicate
+host-side teardown state machine while preserving strict Graphics → Surface →
+Engine → Provider ordering.
+
 The large graph emission routine itself is in `graph::emit`; the CLI entrypoint
 is now a 279-line command/test boundary. This is intentionally a source/build
 boundary only: it does not pretend that the remaining framework-native

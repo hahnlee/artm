@@ -17,8 +17,6 @@ pub(super) fn run(
     active_surface: Option<SurfaceSession>,
     process: ProcessResult,
     options: &RunOptions,
-    provider_lease: darwin_art_runtime::SubsystemLease,
-    engine_lease: darwin_art_runtime::SubsystemLease,
     graphics_attached: bool,
 ) -> Result<HostOutcome, HostError> {
     let Some(surface) = active_surface else {
@@ -27,13 +25,7 @@ pub(super) fn run(
         // same owner-thread LIFO as the normal GPU path; a bare
         // early return here would leave JavaVM/provider hooks
         // resident in the process.
-        return match shutdown_runtime(
-            runtime,
-            Some(provider_lease),
-            Some(engine_lease),
-            None,
-            None,
-        ) {
+        return match shutdown_runtime(runtime) {
             Ok(()) => Err(HostError::SurfaceFailed {
                 operation: "gpu_active_surface",
                 status: -1,
@@ -46,56 +38,33 @@ pub(super) fn run(
         // closes the native surface. The already-attached engine/provider
         // still need the common rollback path.
         drop(surface);
-        let cleanup = shutdown_runtime(
-            runtime,
-            Some(provider_lease),
-            Some(engine_lease),
-            None,
-            None,
-        );
+        let cleanup = shutdown_runtime(runtime);
         return match cleanup {
             Ok(()) => Err(HostError::RuntimeFailed(-1)),
             Err(error) => Err(error),
         };
     }
-    let surface_lease = match runtime.install_subsystem(Subsystem::Surface) {
-        Ok(lease) => lease,
-        Err(error) => {
-            let cleanup = shutdown_runtime(
-                runtime,
-                Some(provider_lease),
-                Some(engine_lease),
-                None,
-                None,
-            );
-            return match cleanup {
-                Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
-                Err(cleanup_error) => Err(cleanup_error),
-            };
-        }
-    };
+    if let Err(error) = runtime.install_subsystem(Subsystem::Surface) {
+        let cleanup = shutdown_runtime(runtime);
+        return match cleanup {
+            Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
+            Err(cleanup_error) => Err(cleanup_error),
+        };
+    }
     // Surface is installed before Graphics so shutdown can remove the
     // Graphics lease first and then the Surface lease in strict LIFO order.
-    let graphics_lease = if graphics_attached {
+    if graphics_attached {
         match runtime.install_subsystem(Subsystem::Graphics) {
-            Ok(lease) => Some(lease),
+            Ok(_) => {}
             Err(error) => {
-                let cleanup = shutdown_runtime(
-                    runtime,
-                    Some(provider_lease),
-                    Some(engine_lease),
-                    Some(surface_lease),
-                    None,
-                );
+                let cleanup = shutdown_runtime(runtime);
                 return match cleanup {
                     Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
                     Err(cleanup_error) => Err(cleanup_error),
                 };
             }
         }
-    } else {
-        None
-    };
+    }
     let mut frames_presented = 1_u64;
     let mut remaining = options.visible_seconds;
     let mut loop_error: Option<HostError> = None;
@@ -237,25 +206,13 @@ pub(super) fn run(
         remaining -= slice;
     }
     if let Some(error) = loop_error {
-        let cleanup = shutdown_runtime(
-            runtime,
-            Some(provider_lease),
-            Some(engine_lease),
-            Some(surface_lease),
-            graphics_lease,
-        );
+        let cleanup = shutdown_runtime(runtime);
         return match cleanup {
             Ok(()) => Err(error),
             Err(cleanup_error) => Err(cleanup_error),
         };
     }
-    shutdown_runtime(
-        runtime,
-        Some(provider_lease),
-        Some(engine_lease),
-        Some(surface_lease),
-        graphics_lease,
-    )?;
+    shutdown_runtime(runtime)?;
     Ok(HostOutcome {
         process,
         frames_presented,

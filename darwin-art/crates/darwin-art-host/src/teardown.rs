@@ -7,7 +7,7 @@ use crate::surface::{
 };
 use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
 use darwin_art_runtime::RuntimeSession;
-use darwin_art_runtime::{RuntimeError, SubsystemLease};
+use darwin_art_runtime::{RuntimeError, Subsystem};
 
 /// Roll back a process call before its engine has transferred into the
 /// `RuntimeSession`. The engine and optional graphics session are still local
@@ -63,10 +63,6 @@ pub(super) fn shutdown_runtime(
         SurfaceSession,
         GraphicsSession,
     >,
-    provider_lease: Option<SubsystemLease>,
-    engine_lease: Option<SubsystemLease>,
-    surface_lease: Option<SubsystemLease>,
-    graphics_lease: Option<SubsystemLease>,
 ) -> Result<(), HostError> {
     // Cleanup is deliberately best-effort after shutdown begins. A failing
     // surface destroy must not prevent ART shutdown, and a provider-hook
@@ -78,51 +74,43 @@ pub(super) fn shutdown_runtime(
         .err()
         .map(|error| HostError::RuntimeFailed(error.status() as i32));
 
-    if let Some(lease) = graphics_lease
-        && let Err(error) = runtime.uninstall_subsystem(lease)
-    {
-        remember_error(&mut first_error, map_shutdown_error("graphics", error));
-    }
-    if runtime.graphics().is_some()
-        && let Err(status) = close_graphics_owner(runtime)
-    {
-        remember_error(&mut first_error, HostError::RuntimeFailed(status));
+    if runtime.graphics().is_some() {
+        if let Err(error) = uninstall_owned(runtime, Subsystem::Graphics) {
+            remember_error(&mut first_error, map_shutdown_error("graphics", error));
+        }
+        if let Err(status) = close_graphics_owner(runtime) {
+            remember_error(&mut first_error, HostError::RuntimeFailed(status));
+        }
     }
 
-    if let Some(lease) = surface_lease
-        && let Err(error) = runtime.uninstall_subsystem(lease)
-    {
-        remember_error(&mut first_error, map_shutdown_error("destroy", error));
-    }
-    if runtime.surface().is_some()
-        && let Err(status) = close_surface_owner(runtime)
-    {
-        remember_error(
-            &mut first_error,
-            HostError::SurfaceFailed {
-                operation: "destroy",
-                status,
-            },
-        );
+    if runtime.surface().is_some() {
+        if let Err(error) = uninstall_owned(runtime, Subsystem::Surface) {
+            remember_error(&mut first_error, map_shutdown_error("destroy", error));
+        }
+        if let Err(status) = close_surface_owner(runtime) {
+            remember_error(
+                &mut first_error,
+                HostError::SurfaceFailed {
+                    operation: "destroy",
+                    status,
+                },
+            );
+        }
     }
 
-    if let Some(lease) = engine_lease
-        && let Err(error) = runtime.uninstall_subsystem(lease)
-    {
-        remember_error(&mut first_error, map_shutdown_error("engine", error));
-    }
-    if runtime.engine().is_some()
-        && let Err(status) = shutdown_engine_owner(runtime)
-    {
-        remember_error(&mut first_error, HostError::ShutdownFailed(status));
+    if runtime.engine().is_some() {
+        if let Err(error) = uninstall_owned(runtime, Subsystem::Engine) {
+            remember_error(&mut first_error, map_shutdown_error("engine", error));
+        }
+        if let Err(status) = shutdown_engine_owner(runtime) {
+            remember_error(&mut first_error, HostError::ShutdownFailed(status));
+        }
     }
 
-    if let Some(lease) = provider_lease
-        && let Err(error) = runtime.uninstall_subsystem(lease)
-    {
-        remember_error(&mut first_error, map_shutdown_error("provider", error));
-    }
     if runtime.provider().is_some() {
+        if let Err(error) = uninstall_owned(runtime, Subsystem::ElfNamespace) {
+            remember_error(&mut first_error, map_shutdown_error("provider", error));
+        }
         let provider_status = clear_provider_owner(runtime);
         if provider_status != 0 {
             remember_error(&mut first_error, HostError::ShutdownFailed(provider_status));
@@ -145,6 +133,27 @@ pub(super) fn shutdown_runtime(
         Err(error)
     } else {
         Ok(())
+    }
+}
+
+fn uninstall_owned(
+    runtime: &mut RuntimeSession<
+        EngineSession,
+        Box<ProviderBridge>,
+        SurfaceSession,
+        GraphicsSession,
+    >,
+    expected: Subsystem,
+) -> Result<(), RuntimeError> {
+    match runtime.uninstall_latest_subsystem()? {
+        Some(actual) if actual == expected => Ok(()),
+        Some(actual) => Err(RuntimeError::InvalidShutdownOrder {
+            expected,
+            requested: actual,
+        }),
+        None => Err(RuntimeError::SubsystemNotActive {
+            subsystem: expected,
+        }),
     }
 }
 

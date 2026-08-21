@@ -106,23 +106,17 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         }
         if let Err(provider_bridge) = runtime.attach_provider(provider_bridge) {
             let _ = provider_bridge.clear();
-            let _ = shutdown_runtime(&mut runtime, None, None, None, None);
+            let _ = shutdown_runtime(&mut runtime);
             return Err(HostError::RuntimeFailed(-1));
         }
-        let provider_lease = match runtime.install_subsystem(Subsystem::ElfNamespace) {
-            Ok(lease) => lease,
-            Err(error) => {
-                let _ = shutdown_runtime(&mut runtime, None, None, None, None);
-                return Err(HostError::RuntimeFailed(error.status() as i32));
-            }
-        };
-        let engine_lease = match runtime.install_subsystem(Subsystem::Engine) {
-            Ok(lease) => lease,
-            Err(error) => {
-                let _ = shutdown_runtime(&mut runtime, Some(provider_lease), None, None, None);
-                return Err(HostError::RuntimeFailed(error.status() as i32));
-            }
-        };
+        if let Err(error) = runtime.install_subsystem(Subsystem::ElfNamespace) {
+            let _ = shutdown_runtime(&mut runtime);
+            return Err(HostError::RuntimeFailed(error.status() as i32));
+        }
+        if let Err(error) = runtime.install_subsystem(Subsystem::Engine) {
+            let _ = shutdown_runtime(&mut runtime);
+            return Err(HostError::RuntimeFailed(error.status() as i32));
+        }
         // Attach the graphics owner before entering ART, but install its
         // lifecycle lease only once a surface exists.  The surface is
         // published by the process bootstrap and is installed by gpu_loop;
@@ -131,13 +125,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         let graphics_attached = if let Some(graphics) = graphics_session.take() {
             if let Err(graphics) = runtime.attach_graphics(graphics) {
                 drop(graphics);
-                let _ = shutdown_runtime(
-                    &mut runtime,
-                    Some(provider_lease),
-                    Some(engine_lease),
-                    None,
-                    None,
-                );
+                let _ = shutdown_runtime(&mut runtime);
                 return Err(HostError::RuntimeFailed(-1));
             }
             true
@@ -146,13 +134,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         };
         if let Err(error) = runtime.mark_running() {
             runtime.fail(error);
-            let _ = shutdown_runtime(
-                &mut runtime,
-                Some(provider_lease),
-                Some(engine_lease),
-                None,
-                None,
-            );
+            let _ = shutdown_runtime(&mut runtime);
             return Err(HostError::RuntimeFailed(error.status() as i32));
         }
         // Darwin's application renderer is GPU-only. A published surface is
@@ -163,41 +145,25 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 active_surface,
                 process,
                 options,
-                provider_lease,
-                engine_lease,
                 graphics_attached,
             );
         }
         // Headless ART is a first-class mode. It never allocates a surface and
         // never uploads the callback mailbox into an IOSurface. Graphics runs
         // exclusively through `gpu_loop::run` above.
-        let graphics_lease = if graphics_attached {
+        if graphics_attached {
             match runtime.install_subsystem(Subsystem::Graphics) {
-                Ok(lease) => Some(lease),
+                Ok(_) => {}
                 Err(error) => {
-                    let cleanup = shutdown_runtime(
-                        &mut runtime,
-                        Some(provider_lease),
-                        Some(engine_lease),
-                        None,
-                        None,
-                    );
+                    let cleanup = shutdown_runtime(&mut runtime);
                     return match cleanup {
                         Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
                         Err(cleanup_error) => Err(cleanup_error),
                     };
                 }
             }
-        } else {
-            None
-        };
-        shutdown_runtime(
-            &mut runtime,
-            Some(provider_lease),
-            Some(engine_lease),
-            None,
-            graphics_lease,
-        )?;
+        }
+        shutdown_runtime(&mut runtime)?;
         Ok(HostOutcome {
             process,
             frames_presented: 0,

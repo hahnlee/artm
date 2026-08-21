@@ -61,6 +61,13 @@ impl<E, P, S, G> RuntimeSession<E, P, S, G> {
         self.lifecycle.uninstall_subsystem(lease)
     }
 
+    /// Uninstall the newest subsystem without exporting its lease token to the
+    /// host orchestration layer. The lifecycle validates owner thread,
+    /// generation, session identity, and reverse order internally.
+    pub fn uninstall_latest_subsystem(&mut self) -> Result<Option<Subsystem>, RuntimeError> {
+        self.lifecycle.uninstall_latest_subsystem()
+    }
+
     pub fn assert_owner(&self) -> Result<(), RuntimeError> {
         self.lifecycle.assert_owner()
     }
