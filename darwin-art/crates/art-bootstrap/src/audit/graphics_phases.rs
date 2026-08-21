@@ -1,32 +1,17 @@
 use super::*;
 
-fn build_archive_inputs(root: &Path) -> Vec<PathBuf> {
-    fn visit(directory: &Path, files: &mut Vec<PathBuf>) {
-        let Ok(entries) = fs::read_dir(directory) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                visit(&path, files);
-            } else if path.extension().and_then(|ext| ext.to_str()) == Some("a") {
-                files.push(path);
-            }
-        }
-    }
-    let mut files = Vec::new();
-    visit(&root.join("_build"), &mut files);
-    files.sort();
-    files
-}
-
 fn cached_foundation_gate(root: &Path, script: &str, lock: &str, outputs: &[&str]) -> Result<()> {
     let output_paths = outputs
         .iter()
         .map(|path| root.join(path))
         .collect::<Vec<_>>();
-    let mut inputs = build_archive_inputs(root);
-    inputs.retain(|path| !output_paths.contains(path));
+    // A foundation gate owns exactly the outputs declared by its manifest.
+    // Scanning every archive below `_build` here made unrelated provider or
+    // probe artifacts invalidate all 14 gates, defeating the persistent
+    // native graph.  The source-pinned lock/script plus this gate's own
+    // outputs are the complete local cache boundary; cross-gate ordering is
+    // already explicit in `run_graphics_upstream_gates`.
+    let mut inputs = output_paths.clone();
     inputs.push(root.join(lock));
     build_shell_gate_cached(root, script, &[], &inputs, &output_paths)
 }
