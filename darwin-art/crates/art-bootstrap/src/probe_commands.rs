@@ -825,11 +825,15 @@ pub(crate) fn prepare_private_apk_native_fixture(root: &Path) -> Result<PrivateA
 }
 
 pub(crate) fn probe_runtime_graphics(root: &Path) -> Result<()> {
-    probe_runtime_dex_flavor(root, false, true, false, false, false, false)
+    // The real HWUI path needs the package-side AnimationHost bridge used by
+    // RenderNode.create(..., AnimationHost).  The button flavor is the
+    // smallest Android UI DEX that carries that bridge and framework resources
+    // while still exercising the normal Activity/DecorView pipeline.
+    probe_runtime_dex_flavor(root, false, true, true, false, false, false)
 }
 
 pub(crate) fn probe_runtime_graphics_window(root: &Path) -> Result<()> {
-    probe_runtime_dex_flavor(root, true, true, false, false, false, false)
+    probe_runtime_dex_flavor(root, true, true, true, false, false, false)
 }
 
 pub(crate) fn prepare_probe_android_system_root(root: &Path) -> Result<PathBuf> {
