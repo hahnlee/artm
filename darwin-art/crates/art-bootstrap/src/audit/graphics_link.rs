@@ -1,5 +1,6 @@
 use super::common::{build_runtime_native_owner, require_file};
 use super::graphics_core_probes::{CoreProbeObjects, compile_core_probe_objects};
+use super::graphics_link_inputs::GraphicsRuntimeInputs;
 use super::graphics_phases::run_graphics_upstream_gates;
 use super::graphics_surface::compile_surface_objects;
 use super::*;
@@ -40,79 +41,29 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     };
     require_file(&network_object, "runtime network object is missing")?;
     let runtime_library = build_dir.join("libdarwin_art_runtime_graphics.dylib");
-    let graphics_closure =
-        root.join("_build/graphics-runtime-closure-audit/android16-graphics-runtime-closure.o");
-    let bootstrap = build_paths
-        .native_output("runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a");
-    let icu_jni_archive = root.join("_build/icu-jni-foundation/libicu-jni-darwin.a");
-    let libcore_linux_archive = root.join("_build/libcore-darwin-linux/libcore-darwin-linux.a");
-    let os_constants_archive =
-        root.join("_build/os-constants/libandroid-system-os-constants-darwin.a");
-    let unix_filesystem_archive =
-        root.join("_build/unix-filesystem-darwin/libopenjdk-unix-filesystem-darwin.a");
-    let openjdkjvm_archive = root.join("_build/openjdkjvm-darwin/libopenjdkjvm-darwin.a");
-    let file_input_stream_archive =
-        root.join("_build/file-input-stream-darwin/libopenjdk-file-input-stream-darwin.a");
-    let file_descriptor_archive =
-        root.join("_build/file-descriptor-darwin/libopenjdk-file-descriptor-darwin.a");
-    let system_natives_archive =
-        root.join("_build/system-natives-darwin/libopenjdk-system-natives-darwin.a");
-    let unix_native_dispatcher_archive = root
-        .join("_build/unix-native-dispatcher-darwin/libopenjdk-unix-native-dispatcher-darwin.a");
-    let openjdk_nio_dir = root.join("_build/openjdk-nio-mapping");
-    let openjdk_nio_mapping_archive = openjdk_nio_dir.join("libopenjdk-nio-mapping-darwin.a");
-    let openjdk_nio_support_archive = openjdk_nio_dir.join("libopenjdk-nio-support-darwin.a");
-    let libcore_memory_dir = root.join("_build/libcore-memory");
-    let libcore_memory_archive = libcore_memory_dir.join("libcore-memory-art-runtime-darwin.a");
-    let libcore_jni_constants_archive =
-        libcore_memory_dir.join("libcore-jni-constants-art-runtime-darwin.a");
-    let asynchronous_close_dir = root.join("_build/asynchronous-close-monitor");
-    let asynchronous_close_registrar =
-        asynchronous_close_dir.join("libcore-io-asynchronous-close-monitor-registrar-darwin.a");
-    let asynchronous_close_backend = asynchronous_close_dir.join("libandroidio-darwin.a");
-    let resource_jni_archive =
-        root.join("_build/resource-jni-foundation/libandroid-resource-jni-darwin.a");
-    let android_util_log_archive =
-        root.join("_build/android-util-log/libandroid-util-log-registrar-darwin.a");
-    let virtual_ref_base_ptr_archive =
-        root.join("_build/virtual-ref-base-ptr/libandroid-virtual-ref-base-ptr-darwin.a");
-    let android_runtime_host =
-        root.join("_build/android-runtime-host/libandroid-runtime-darwin-host.a");
-    for input in [
-        &graphics_closure,
-        &bootstrap,
-        &icu_jni_archive,
-        &libcore_linux_archive,
-        &os_constants_archive,
-        &unix_filesystem_archive,
-        &openjdkjvm_archive,
-        &file_input_stream_archive,
-        &file_descriptor_archive,
-        &system_natives_archive,
-        &unix_native_dispatcher_archive,
-        &openjdk_nio_mapping_archive,
-        &openjdk_nio_support_archive,
-        &libcore_memory_archive,
-        &libcore_jni_constants_archive,
-        &asynchronous_close_registrar,
-        &asynchronous_close_backend,
-        &resource_jni_archive,
-        &android_util_log_archive,
-        &virtual_ref_base_ptr_archive,
-        &android_runtime_host,
-    ] {
-        require_file(input, "real-graphics runtime input is missing")?;
-    }
-    let icu_jni_members = command_output(Command::new("ar").arg("-t").arg(&icu_jni_archive))?
-        .lines()
-        .filter(|member| *member != "__.SYMDEF")
-        .count();
-    if icu_jni_members != 15 {
-        return Err(format!(
-            "module-complete Android ICU JNI archive has {icu_jni_members} members, expected 15"
-        )
-        .into());
-    }
+    let GraphicsRuntimeInputs {
+        graphics_closure,
+        bootstrap,
+        icu_jni_archive,
+        libcore_linux_archive,
+        os_constants_archive,
+        unix_filesystem_archive,
+        openjdkjvm_archive,
+        file_input_stream_archive,
+        file_descriptor_archive,
+        system_natives_archive,
+        unix_native_dispatcher_archive,
+        openjdk_nio_mapping_archive,
+        openjdk_nio_support_archive,
+        libcore_memory_archive,
+        libcore_jni_constants_archive,
+        asynchronous_close_registrar,
+        asynchronous_close_backend,
+        resource_jni_archive,
+        android_util_log_archive,
+        virtual_ref_base_ptr_archive,
+        android_runtime_host,
+    } = GraphicsRuntimeInputs::load(root, &build_paths)?;
 
     fs::create_dir_all(&build_dir)?;
     let includes = [
