@@ -3,7 +3,8 @@
 use crate::config::HostError;
 use crate::runtime::HostRuntime;
 use crate::surface::{
-    clear_provider_owner, close_graphics_owner, close_surface_owner, shutdown_engine_owner,
+    clear_provider_owner, close_graphics_owner, close_surface_owner, release_graphics_owner,
+    shutdown_engine_owner,
 };
 use darwin_art_runtime::{RuntimeError, Subsystem};
 
@@ -55,7 +56,7 @@ pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostErro
         .map(|error| HostError::RuntimeFailed(error.status() as i32));
 
     if runtime.surface().is_some() {
-        if let Err(error) = uninstall_owned(runtime, Subsystem::Surface) {
+        if let Err(error) = uninstall_if_active(runtime, Subsystem::Surface) {
             remember_error(&mut first_error, map_shutdown_error("destroy", error));
         }
         if let Err(status) = close_surface_owner(runtime) {
@@ -70,14 +71,12 @@ pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostErro
     }
 
     // A graphics session is installed before the engine runs, while the
-    // concrete surface is installed later by the frame loop.  Therefore the
-    // actual LIFO lease order is Surface -> Graphics, even though graphics is
-    // the native prerequisite for the surface.  Keep the Rust lease order
-    // aligned with the native lifetime: surface is closed first, then the
-    // graphics session is closed while ART is still alive, and only then can
-    // the engine shutdown callback run.
+    // concrete surface is installed later by the frame loop. Close the
+    // graphics session while ART is alive, but retain its opaque handle until
+    // engine shutdown has finished; the native process borrows that state
+    // during DestroyJavaVM.
     if runtime.graphics().is_some() {
-        if let Err(error) = uninstall_owned(runtime, Subsystem::Graphics) {
+        if let Err(error) = uninstall_if_active(runtime, Subsystem::Graphics) {
             remember_error(&mut first_error, map_shutdown_error("graphics", error));
         }
         if let Err(status) = close_graphics_owner(runtime) {
@@ -85,8 +84,18 @@ pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostErro
         }
     }
 
+    if runtime.provider().is_some() {
+        if let Err(error) = uninstall_if_active(runtime, Subsystem::ElfNamespace) {
+            remember_error(&mut first_error, map_shutdown_error("provider", error));
+        }
+        let provider_status = clear_provider_owner(runtime);
+        if provider_status != 0 {
+            remember_error(&mut first_error, HostError::ShutdownFailed(provider_status));
+        }
+    }
+
     if runtime.engine().is_some() {
-        if let Err(error) = uninstall_owned(runtime, Subsystem::Engine) {
+        if let Err(error) = uninstall_if_active(runtime, Subsystem::Engine) {
             remember_error(&mut first_error, map_shutdown_error("engine", error));
         }
         if let Err(status) = shutdown_engine_owner(runtime) {
@@ -94,14 +103,13 @@ pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostErro
         }
     }
 
-    if runtime.provider().is_some() {
-        if let Err(error) = uninstall_owned(runtime, Subsystem::ElfNamespace) {
-            remember_error(&mut first_error, map_shutdown_error("provider", error));
-        }
-        let provider_status = clear_provider_owner(runtime);
-        if provider_status != 0 {
-            remember_error(&mut first_error, HostError::ShutdownFailed(provider_status));
-        }
+    // Destroy the already-closed graphics handle only after the engine image
+    // has completed DestroyJavaVM. This makes the final native callback
+    // lifetime explicit instead of relying on RuntimeOwners::Drop.
+    if runtime.graphics().is_some()
+        && let Err(status) = release_graphics_owner(runtime)
+    {
+        remember_error(&mut first_error, HostError::RuntimeFailed(status));
     }
 
     if first_error.is_none()
@@ -133,6 +141,14 @@ fn uninstall_owned(runtime: &mut HostRuntime, expected: Subsystem) -> Result<(),
         None => Err(RuntimeError::SubsystemNotActive {
             subsystem: expected,
         }),
+    }
+}
+
+fn uninstall_if_active(runtime: &mut HostRuntime, expected: Subsystem) -> Result<(), RuntimeError> {
+    if runtime.subsystem_active(expected) {
+        uninstall_owned(runtime, expected)
+    } else {
+        Ok(())
     }
 }
 

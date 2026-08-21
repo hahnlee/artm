@@ -68,3 +68,12 @@ pub fn close_graphics_owner(runtime: &mut HostRuntime) -> Result<(), i32> {
     let status = graphics.close();
     if status == 0 { Ok(()) } else { Err(status) }
 }
+
+#[cfg(target_os = "macos")]
+pub fn release_graphics_owner(runtime: &mut HostRuntime) -> Result<(), i32> {
+    let Some(graphics) = runtime.release_graphics().map_err(|_| -1)? else {
+        return Ok(());
+    };
+    drop(graphics);
+    Ok(())
+}

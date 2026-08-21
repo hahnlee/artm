@@ -76,13 +76,16 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
 
         if let Err(error) = shutdown_guard
             .runtime()
-            .install_subsystem(Subsystem::ElfNamespace)
+            .install_subsystem(Subsystem::Engine)
         {
             return Err(HostError::RuntimeFailed(error.status() as i32));
         }
+        // Provider callbacks point into the live engine image. Install the
+        // engine lease before the provider/ELF lease so reverse teardown
+        // clears provider hooks while the image is still mapped.
         if let Err(error) = shutdown_guard
             .runtime()
-            .install_subsystem(Subsystem::Engine)
+            .install_subsystem(Subsystem::ElfNamespace)
         {
             return Err(HostError::RuntimeFailed(error.status() as i32));
         }
