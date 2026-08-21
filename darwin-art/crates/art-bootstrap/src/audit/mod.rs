@@ -8,6 +8,7 @@ mod graphics_link_inputs;
 mod graphics_phases;
 mod graphics_surface;
 mod runtime_link;
+mod runtime_link_checks;
 pub(crate) use graphics_link::{
     audit_runtime_graphics_link, audit_runtime_graphics_link_fast,
     audit_runtime_graphics_link_incremental,
