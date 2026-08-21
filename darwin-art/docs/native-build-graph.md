@@ -60,7 +60,9 @@ that snapshot.
 
 Graphics presentation now follows the same boundary. The JNI/widget
 validation and `present_content`/interactive-root orchestration live in
-`probes/runtime_graphics_phase.cc`, while RenderNode/Metal replay remains in
-`probes/runtime_graphics_probe.cc`. The linker consumes both objects, so a
-change to framework validation does not recompile the HWUI/Skia implementation
-and a graphics implementation change does not rebuild the orchestration phase.
+`probes/runtime_graphics_phase.cc`, while pointer/frame dispatch lives in
+`probes/runtime_graphics_input.cc` and RenderNode/Metal replay remains in
+`probes/runtime_graphics_probe.cc`. The linker consumes all three objects, so
+a change to framework validation or input handling does not recompile the
+HWUI/Skia implementation and a graphics implementation change does not rebuild
+the orchestration phases.
