@@ -28,11 +28,11 @@ darwin-art-engine-sys (raw FFI declarations only)
 ```
 
 The Rust CLI is organized by change domain rather than one command file:
-`runtime_commands.rs` owns runtime/archive orchestration, while
-`native_probe_commands.rs` owns the cached filesystem/network/HWUI/graphics
-probe builders. This is a module boundary first: both modules share the
-command/context helpers, so the split introduces no second ABI or duplicate
-build policy.
+`runtime_commands.rs` is a small command facade; `runtime_art_build.rs` owns
+low-level ART platform/ARM64/interpreter products and `runtime_bootstrap.rs`
+owns patched-source/runtime archive orchestration. `native_probe_commands.rs`
+owns the cached filesystem/network/HWUI/graphics probe builders. These modules
+share command/context helpers but not ABI declarations or lifecycle policy.
 
 Rust owns resources, state transitions, leases, rollback, and build graph
 decisions. C++/ObjC++ owns only operations that require ART/HWUI/Skia/Metal
@@ -72,7 +72,7 @@ container. Rollback is covered for run failure, surface creation failure,
 window close, and `DestroyJavaVM` failure; provider callbacks are invoked
 outside the lease mutex to preserve reentrancy.
 
-### M2 — phase modules (in progress, first boundaries landed)
+### M2 — phase modules (landed; extraction continues)
 
 Split the process probe into small, separately cached phase objects. The first
 landed boundaries are `runtime_process_options`, `runtime_shutdown_probe`,
@@ -83,19 +83,21 @@ returns a status snapshot; the heavy Android JNI/HWUI implementation remains
 in its own object. Keep the existing JNI/ELF/HWUI acceptance unchanged while
 the remaining framework/activity setup is extracted.
 
-### M3 — real native graph (landed; foundation cache promotion in progress)
+### M3 — real native graph (landed)
 
 Ninja is now the normal path after the first cold bootstrap for the native
-probe graph, with persisted per-object commands and depfiles. The graphics-JNI
-and HWUI foundation shell builders now also retain per-TU object/command
-stamps, so repeated registrar and object-audit builds do not invoke clang++ for
-unchanged sources. GraphicsJNI is already promoted to first-class Ninja edges.
+probe graph, with persisted per-object commands and depfiles. The graphics-JNI,
+HWUI, and ICU foundation shell builders retain per-TU object/command stamps, so
+repeated registrar and object-audit builds do not invoke clang++ for unchanged
+sources. GraphicsJNI, HWUI, and all 458 ICU translation units are promoted to
+first-class Ninja edges.
 HWUI now builds from a stable patched shadow tree: pristine AOSP sources are
 verified against the lock, then the tracked animation-pulse patch is applied
 outside `_aosp`. The 81+5 command stamps therefore survive warm builds without
-depending on ignored checkout edits. The remaining foundation work is to apply
-the same boundary to ART/ICU while keeping one cold fallback command only for
-cache population.
+depending on ignored checkout edits. The remaining foundation work is the
+ART-side bootstrap archive; it retains one cold fallback command for cache
+population while the runtime object graph is promoted after a complete archive
+exists.
 
 ### M4 — acceptance and removal
 
@@ -118,7 +120,8 @@ the same machine:
 | HWUI/Metal implementation change | `runtime_graphics_probe` + graphics link |
 | AOSP foundation header change | affected foundation TU closure |
 
-The current implementation has the first probe/object cache, graphics-JNI and
-HWUI foundation stamps, and lifecycle scaffolding. M1–M3 are considered
-landed for the measured boundaries above; concrete RuntimeSession ownership
-and the ART/ICU foundation split remain explicit M4 work.
+The current implementation has the probe/object cache, graphics-JNI/HWUI/ICU
+foundation stamps, concrete RuntimeSession ownership, and the low-level ART
+build/bootstrap split. M1–M3 are landed for the measured boundaries above;
+M4 is now the acceptance sweep and removal of the remaining legacy presenter,
+duplicate ABI declarations, and broad fallback edges.
