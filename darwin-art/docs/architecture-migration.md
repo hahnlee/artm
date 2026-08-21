@@ -424,4 +424,7 @@ full ABI closure.
 The measured native invalidation check is explicit: changing only the
 AssetManager adapter rebuilt `1/234` graphics-bootstrap objects; the next
 unchanged run rebuilt `0/234`. The archive and Android acceptance results were
-unchanged. Later phase extractions must retain this same evidence.
+unchanged. The graph digest now contains 189 production inputs rather than
+the entire `compat/` implementation directory; changing an unrelated
+`compat/android_base_logging.cc` left that digest unchanged. Later phase
+extractions must retain this same evidence.

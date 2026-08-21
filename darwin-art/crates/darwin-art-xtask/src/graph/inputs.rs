@@ -3,6 +3,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use darwin_art_build_contract::{GRAPHICS_ADAPTER_SOURCES, HEADLESS_ADAPTER_SOURCES};
+
 use super::super::ninja_path;
 use super::atomic;
 
@@ -75,11 +77,20 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("compat/darwin_provider_owners.cc"),
         PathBuf::from("compat/darwin_provider_owners.h"),
     ];
-    // Keep this graph tied to the production bootstrap closure. In
-    // particular, acceptance probes and unrelated graphics gates should not
-    // invalidate the runtime archive cache.
+    // Keep this graph tied to the production bootstrap closure. Acceptance
+    // probes and unrelated native sources must not rotate the persistent
+    // runtime cache identity. The adapter manifest is the source of truth for
+    // implementation TUs; compatibility headers/includes are still collected
+    // recursively because they participate in compiler dependency checks.
+    let mut adapter_sources = HEADLESS_ADAPTER_SOURCES
+        .iter()
+        .chain(GRAPHICS_ADAPTER_SOURCES.iter())
+        .map(|source| PathBuf::from("compat").join(source))
+        .collect::<Vec<_>>();
+    adapter_sources.sort();
+    adapter_sources.dedup();
+    paths.extend(adapter_sources);
     for directory in [
-        "compat",
         "include",
         "patches/art",
         "crates/darwin-art-elf-loader/src",
@@ -98,6 +109,7 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
     ] {
         collect_files(&root.join(directory), root, &mut paths);
     }
+    collect_compat_support_files(&root.join("compat"), root, &mut paths);
     for script in [
         "build-bionic-runtime-provider-closure.sh",
         "build-android16-android-runtime-host.sh",
@@ -203,6 +215,31 @@ pub(crate) fn collect_files(directory: &Path, root: &Path, output: &mut Vec<Path
         } else if path.is_file()
             && let Ok(relative) = path.strip_prefix(root)
         {
+            output.push(relative.to_path_buf());
+        }
+    }
+}
+
+/// Collect compatibility headers and generated include fragments without
+/// reintroducing every native implementation into the global graph digest.
+/// Implementation TUs are listed explicitly by the shared adapter contract;
+/// depfiles remain authoritative for any transitive include discovered by the
+/// compiler.
+fn collect_compat_support_files(directory: &Path, root: &Path, output: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_compat_support_files(&path, root, output);
+            continue;
+        }
+        let is_support = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| matches!(extension, "h" | "hh" | "hpp" | "inc"));
+        if is_support && let Ok(relative) = path.strip_prefix(root) {
             output.push(relative.to_path_buf());
         }
     }
