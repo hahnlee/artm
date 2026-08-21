@@ -5,6 +5,12 @@ pub(crate) fn compile_runtime_graphics_phase(
     build_dir: &Path,
     includes: &[&Path],
 ) -> Result<PathBuf> {
+    if let Some(path) = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_PHASE_OBJECT") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
     let object = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_PHASE_OBJECT")
         .map(PathBuf::from)
         .unwrap_or_else(|| build_dir.join("darwin_art_runtime_graphics_phase.cc.o"));
@@ -69,6 +75,12 @@ pub(crate) fn compile_runtime_jni_acceptance_probe(
     build_dir: &Path,
     includes: &[&Path],
 ) -> Result<PathBuf> {
+    if let Some(path) = env::var_os("DARWIN_ART_NATIVE_JNI_ACCEPTANCE_OBJECT") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
     let object = env::var_os("DARWIN_ART_NATIVE_JNI_ACCEPTANCE_OBJECT")
         .map(PathBuf::from)
         .unwrap_or_else(|| build_dir.join("darwin_art_runtime_jni_acceptance_probe.cc.o"));
@@ -135,6 +147,12 @@ pub(crate) fn compile_runtime_graphics_input_probe(
     build_dir: &Path,
     includes: &[&Path],
 ) -> Result<PathBuf> {
+    if let Some(path) = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_INPUT_OBJECT") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
     let object = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_INPUT_OBJECT")
         .map(PathBuf::from)
         .unwrap_or_else(|| build_dir.join("darwin_art_runtime_graphics_input.cc.o"));
@@ -371,6 +389,12 @@ fn compile_runtime_graphics_session_probe_flavor(
     ndk_arch_include: &Path,
     real_graphics: bool,
 ) -> Result<PathBuf> {
+    if real_graphics && let Some(path) = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
     let object = if real_graphics {
         env::var_os("DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT")
             .map(PathBuf::from)

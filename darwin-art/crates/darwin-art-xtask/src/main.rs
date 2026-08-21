@@ -893,7 +893,10 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&filesystem_object_for_shell));
     graph.push_str(" cargo run -p art-bootstrap -- build-runtime-filesystem-probe\n");
     graph.push_str("  description = CXX runtime_filesystem_probe\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n");
+    // The Rust command owns the C++ dependency cache for this probe.  Ninja
+    // only tracks the explicit phase stamp and source inputs; consuming a
+    // depfile produced inside `cargo run` makes the stored dependency mtime
+    // race the copied object and dirties every warm graph invocation.
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
     graph.push_str(&filesystem_object);
@@ -909,7 +912,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&network_object_for_shell));
     graph.push_str(" cargo run -p art-bootstrap -- build-runtime-network-probe\n");
     graph.push_str("  description = CXX runtime_network_probe\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n");
+    // Dependency fingerprints are maintained by art-bootstrap.
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
     graph.push_str(&network_object);
@@ -925,7 +928,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&hwui_object_path.to_string_lossy()));
     graph.push_str(" cargo run -p art-bootstrap -- build-runtime-hwui-probe\n");
     graph.push_str("  description = CXX runtime_hwui_probe\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n");
+    // Dependency fingerprints are maintained by art-bootstrap.
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
     graph.push_str(&hwui_object);
@@ -942,6 +945,18 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     // through here; otherwise this edge silently falls back to the legacy
     // runtime-graphics-link-probe directory and can link a mixed stale/new
     // object set before the final audit edge runs.
+    graph.push_str(" && rm -f ");
+    graph.push_str(&shell_quote(&graphics_object_path.to_string_lossy()));
+    graph.push(' ');
+    graph.push_str(&shell_quote(
+        &graphics_object_path.with_extension("o.d").to_string_lossy(),
+    ));
+    graph.push(' ');
+    graph.push_str(&shell_quote(
+        &graphics_object_path
+            .with_extension("o.fingerprint")
+            .to_string_lossy(),
+    ));
     graph.push_str(" && DARWIN_ART_NATIVE_OUTPUT_ROOT=");
     graph.push_str(&shell_quote(&native_output_for_shell));
     graph.push_str(" DARWIN_ART_NATIVE_FILESYSTEM_OBJECT=");
@@ -972,7 +987,6 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     ));
     graph.push_str(" cargo run -p art-bootstrap -- audit-runtime-graphics-link-fast\n");
     graph.push_str("  description = CXX runtime_graphics_probe\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n");
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
     graph.push_str(&graphics_object);
@@ -1004,7 +1018,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&graphics_phase_object_path.to_string_lossy()));
     graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-phase-probe\n");
     graph.push_str("  description = CXX runtime_graphics_phase\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
     graph.push_str(&graphics_phase_object);
     graph.push_str(": runtime_graphics_phase_probe ");
@@ -1019,7 +1033,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&graphics_input_object_path.to_string_lossy()));
     graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-input-probe\n");
     graph.push_str("  description = CXX runtime_graphics_input\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
     graph.push_str(&graphics_input_object);
     graph.push_str(": runtime_graphics_input_probe ");
@@ -1034,7 +1048,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&graphics_state_object_path.to_string_lossy()));
     graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-state-probe\n");
     graph.push_str("  description = CXX runtime_graphics_state\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
     graph.push_str(&graphics_state_object);
     graph.push_str(": runtime_graphics_state_probe ");
@@ -1051,7 +1065,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     ));
     graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-session-probe\n");
     graph.push_str("  description = CXX runtime_graphics_session\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    graph.push_str("  restat = 1\n\n");
     let graphics_session_object = ninja_path(&graphics_session_object_path);
     graph.push_str("build ");
     graph.push_str(&graphics_session_object);
@@ -1067,7 +1081,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&jni_acceptance_object_path.to_string_lossy()));
     graph.push_str(" cargo run -p art-bootstrap -- build-runtime-jni-acceptance-probe\n");
     graph.push_str("  description = CXX runtime_jni_acceptance\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
     graph.push_str(&jni_acceptance_object);
     graph.push_str(": runtime_jni_acceptance_probe ");
@@ -1082,7 +1096,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&app_bootstrap_object_path.to_string_lossy()));
     graph.push_str(" cargo run -p art-bootstrap -- build-runtime-app-bootstrap-probe\n");
     graph.push_str("  description = CXX runtime_app_bootstrap\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
     graph.push_str(&app_bootstrap_object);
     graph.push_str(": runtime_app_bootstrap_probe ");
@@ -1099,7 +1113,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     ));
     graph.push_str(" cargo run -p art-bootstrap -- build-runtime-app-presentation-probe\n");
     graph.push_str("  description = CXX runtime_app_presentation\n");
-    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
     graph.push_str(&app_presentation_object);
     graph.push_str(": runtime_app_presentation_probe ");
@@ -1725,6 +1739,16 @@ fn emit_cached_native_graph(
         graph.push_str("  deps = gcc\n");
         graph.push_str("  description = CXX $out\n");
         graph.push_str("  restat = 1\n\n");
+        // Older canonical builders persisted command/fingerprint metadata but
+        // did not emit depfiles.  Treat those objects as valid cache entries
+        // instead of making Ninja rebuild the entire archive merely because
+        // metadata is missing.  Once such a TU is rebuilt, the normal rule
+        // above writes a depfile and the next graph generation promotes it to
+        // dependency-aware scheduling.
+        graph.push_str("rule native_cached_cpp_legacy\n");
+        graph.push_str("  command = $compile_command\n");
+        graph.push_str("  description = CXX $out (legacy cache)\n");
+        graph.push_str("  restat = 1\n\n");
         graph.push_str("rule native_cached_archive\n");
         graph.push_str("  command = rm -f $out && ar rcs $out $in\n");
         graph.push_str("  description = AR $out\n");
@@ -1735,9 +1759,14 @@ fn emit_cached_native_graph(
     for object in objects {
         let output = ninja_path(&object.object);
         let source = ninja_path(&object.source);
+        let depfile = object.object.with_extension("d");
         graph.push_str("build ");
         graph.push_str(&output);
-        graph.push_str(": native_cached_cpp ");
+        graph.push_str(if depfile.is_file() {
+            ": native_cached_cpp "
+        } else {
+            ": native_cached_cpp_legacy "
+        });
         graph.push_str(&source);
         graph.push('\n');
         graph.push_str("  compile_command = ");
