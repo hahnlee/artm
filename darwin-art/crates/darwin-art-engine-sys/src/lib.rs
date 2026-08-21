@@ -21,6 +21,22 @@ pub type FrameCallback = unsafe extern "C" fn(
 pub type ProviderAcquireFn =
     unsafe extern "C" fn(context: *mut c_void, provider_kind: u32, authority_fd: i32) -> i32;
 pub type ProviderReleaseFn = unsafe extern "C" fn(context: *mut c_void, provider_kind: u32) -> i32;
+pub type LifecycleBeginFn = unsafe extern "C" fn(context: *mut c_void) -> i32;
+pub type LifecycleFinishFn =
+    unsafe extern "C" fn(context: *mut c_void, runtime_created: i32) -> i32;
+pub type LifecycleFailedFn = unsafe extern "C" fn(context: *mut c_void, status: i32);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct LifecycleHooks {
+    pub struct_size: u32,
+    pub abi_version: u32,
+    pub context: *mut c_void,
+    pub begin_run: Option<LifecycleBeginFn>,
+    pub finish_run: Option<LifecycleFinishFn>,
+    pub begin_shutdown: Option<LifecycleBeginFn>,
+    pub mark_failed: Option<LifecycleFailedFn>,
+}
 
 #[repr(C)]
 pub struct ProcessConfig {
@@ -38,6 +54,7 @@ pub struct ProcessConfig {
     pub provider_acquire: Option<ProviderAcquireFn>,
     pub provider_release: Option<ProviderReleaseFn>,
     pub graphics_session_context: *mut c_void,
+    pub lifecycle_hooks: *const LifecycleHooks,
 }
 
 impl ProcessConfig {
@@ -71,6 +88,7 @@ impl ProcessConfig {
             provider_acquire,
             provider_release,
             graphics_session_context: core::ptr::null_mut(),
+            lifecycle_hooks: core::ptr::null(),
         }
     }
 
@@ -80,6 +98,11 @@ impl ProcessConfig {
 
     pub const fn with_graphics_session(mut self, context: *mut c_void) -> Self {
         self.graphics_session_context = context;
+        self
+    }
+
+    pub const fn with_lifecycle_hooks(mut self, hooks: *const LifecycleHooks) -> Self {
+        self.lifecycle_hooks = hooks;
         self
     }
 }
@@ -140,7 +163,7 @@ mod tests {
 
     #[test]
     fn process_config_layout_is_owned_by_raw_ffi_crate() {
-        assert_eq!(size_of::<ProcessConfig>(), 112);
+        assert_eq!(size_of::<ProcessConfig>(), 120);
         assert_eq!(align_of::<ProcessConfig>(), 8);
         assert_eq!(offset_of!(ProcessConfig, header), 0);
         assert_eq!(
@@ -164,6 +187,20 @@ mod tests {
         assert_eq!(offset_of!(ProcessConfig, provider_acquire), 88);
         assert_eq!(offset_of!(ProcessConfig, provider_release), 96);
         assert_eq!(offset_of!(ProcessConfig, graphics_session_context), 104);
+        assert_eq!(offset_of!(ProcessConfig, lifecycle_hooks), 112);
+    }
+
+    #[test]
+    fn lifecycle_hooks_layout_matches_native_abi() {
+        assert_eq!(size_of::<LifecycleHooks>(), 48);
+        assert_eq!(align_of::<LifecycleHooks>(), 8);
+        assert_eq!(offset_of!(LifecycleHooks, struct_size), 0);
+        assert_eq!(offset_of!(LifecycleHooks, abi_version), 4);
+        assert_eq!(offset_of!(LifecycleHooks, context), 8);
+        assert_eq!(offset_of!(LifecycleHooks, begin_run), 16);
+        assert_eq!(offset_of!(LifecycleHooks, finish_run), 24);
+        assert_eq!(offset_of!(LifecycleHooks, begin_shutdown), 32);
+        assert_eq!(offset_of!(LifecycleHooks, mark_failed), 40);
     }
 
     #[test]

@@ -52,6 +52,25 @@ typedef int32_t (*darwin_art_provider_acquire_t)(
 typedef int32_t (*darwin_art_provider_release_t)(
     void* context, uint32_t provider_kind);
 
+// Optional external lifecycle owner. Production Rust hosts provide these
+// callbacks so the native probe cannot become a second phase/lifecycle
+// authority. Legacy/direct C callers may leave the pointer null and retain the
+// native compatibility state machine.
+typedef int32_t (*darwin_art_lifecycle_begin_t)(void* context);
+typedef int32_t (*darwin_art_lifecycle_finish_t)(void* context,
+                                                  int32_t runtime_created);
+typedef void (*darwin_art_lifecycle_failed_t)(void* context, int32_t status);
+
+typedef struct darwin_art_lifecycle_hooks {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  void* context;
+  darwin_art_lifecycle_begin_t begin_run;
+  darwin_art_lifecycle_finish_t finish_run;
+  darwin_art_lifecycle_begin_t begin_shutdown;
+  darwin_art_lifecycle_failed_t mark_failed;
+} darwin_art_lifecycle_hooks_t;
+
 typedef struct darwin_art_process_config {
   uint32_t struct_size;
   uint32_t abi_version;
@@ -71,6 +90,9 @@ typedef struct darwin_art_process_config {
   // legacy struct prefix without this field; the engine checks struct_size
   // before reading it and never aliases host_context for graphics state.
   void* graphics_session_context;
+  // Optional additive Rust lifecycle owner. Older callers may provide a
+  // prefix ending at graphics_session_context.
+  const darwin_art_lifecycle_hooks_t* lifecycle_hooks;
 } darwin_art_process_config_t;
 
 typedef struct darwin_art_process_result {

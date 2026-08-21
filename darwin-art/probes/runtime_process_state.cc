@@ -6,6 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include "../include/darwin_art/darwin_art.h"
+
 #include "base/locks.h"
 #include "runtime.h"
 #include "scoped_thread_state_change-inl.h"
@@ -33,6 +35,7 @@ struct State {
   art::Thread* art_thread = nullptr;
   bool resource_runtime_installed = false;
   darwin_art_graphics::GraphicsState* graphics_state = nullptr;
+  const darwin_art_lifecycle_hooks_t* lifecycle_hooks = nullptr;
   AcceptanceSnapshot acceptance;
   std::vector<std::unique_ptr<const art::DexFile>> app_dex_files;
 };
@@ -41,12 +44,25 @@ State g_state;
 
 }  // namespace
 
-bool begin_run() {
+bool begin_run(const struct darwin_art_lifecycle_hooks* lifecycle_hooks) {
+  if (lifecycle_hooks != nullptr) {
+    if (lifecycle_hooks->struct_size < sizeof(*lifecycle_hooks) ||
+        lifecycle_hooks->abi_version != DARWIN_ART_ABI_VERSION ||
+        lifecycle_hooks->context == nullptr ||
+        lifecycle_hooks->begin_run == nullptr ||
+        lifecycle_hooks->finish_run == nullptr ||
+        lifecycle_hooks->begin_shutdown == nullptr ||
+        lifecycle_hooks->mark_failed == nullptr ||
+        lifecycle_hooks->begin_run(lifecycle_hooks->context) != 0) {
+      return false;
+    }
+  }
   std::lock_guard<std::mutex> lock(g_state.mutex);
   if (g_state.phase != Phase::kNeverStarted) return false;
   g_state.phase = Phase::kRunning;
   g_state.owner_thread = pthread_self();
   g_state.owner_thread_valid = true;
+  g_state.lifecycle_hooks = lifecycle_hooks;
   return true;
 }
 
@@ -71,11 +87,21 @@ void record_resource_runtime_installed() {
   g_state.resource_runtime_installed = true;
 }
 
-void finish_run() {
-  std::lock_guard<std::mutex> lock(g_state.mutex);
-  CHECK(g_state.phase == Phase::kRunning);
-  g_state.phase = g_state.java_vm == nullptr ? Phase::kCreateFailed
-                                              : Phase::kAwaitingShutdown;
+void finish_run(bool runtime_created) {
+  const struct darwin_art_lifecycle_hooks* lifecycle_hooks = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_state.mutex);
+    CHECK(g_state.phase == Phase::kRunning);
+    g_state.phase = runtime_created ? Phase::kAwaitingShutdown
+                                    : Phase::kCreateFailed;
+    lifecycle_hooks = g_state.lifecycle_hooks;
+  }
+  if (lifecycle_hooks != nullptr &&
+      lifecycle_hooks->finish_run(lifecycle_hooks->context,
+                                  runtime_created ? 1 : 0) != 0) {
+    std::lock_guard<std::mutex> lock(g_state.mutex);
+    g_state.phase = Phase::kShutdownFailed;
+  }
 }
 
 void record_app_dex_file(std::unique_ptr<const art::DexFile> dex_file) {
@@ -104,37 +130,55 @@ art::Thread* owner_thread_for_callback() {
 }
 
 ShutdownBeginResult begin_shutdown(ShutdownSnapshot* snapshot) {
-  std::lock_guard<std::mutex> lock(g_state.mutex);
-  switch (g_state.phase) {
-    case Phase::kShutdownComplete:
-      return ShutdownBeginResult::kAlreadyComplete;
-    case Phase::kShutdownFailed:
-      return ShutdownBeginResult::kFailed;
-    case Phase::kNeverStarted:
-    case Phase::kCreateFailed:
-    case Phase::kRunning:
-    case Phase::kShuttingDown:
-      return ShutdownBeginResult::kNotReady;
-    case Phase::kAwaitingShutdown:
-      break;
+  const struct darwin_art_lifecycle_hooks* lifecycle_hooks = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_state.mutex);
+    switch (g_state.phase) {
+      case Phase::kShutdownComplete:
+        return ShutdownBeginResult::kAlreadyComplete;
+      case Phase::kShutdownFailed:
+        return ShutdownBeginResult::kFailed;
+      case Phase::kNeverStarted:
+      case Phase::kCreateFailed:
+      case Phase::kRunning:
+      case Phase::kShuttingDown:
+        return ShutdownBeginResult::kNotReady;
+      case Phase::kAwaitingShutdown:
+        break;
+    }
+    if (!g_state.owner_thread_valid ||
+        pthread_equal(g_state.owner_thread, pthread_self()) == 0 ||
+        (g_state.art_thread != nullptr &&
+         art::Thread::Current() != g_state.art_thread)) {
+      return ShutdownBeginResult::kWrongThread;
+    }
+    g_state.phase = Phase::kShuttingDown;
+    snapshot->java_vm = g_state.java_vm;
+    snapshot->art_thread = g_state.art_thread;
+    snapshot->resource_runtime_installed = g_state.resource_runtime_installed;
+    snapshot->graphics_state = g_state.graphics_state;
+    lifecycle_hooks = g_state.lifecycle_hooks;
   }
-  if (!g_state.owner_thread_valid ||
-      pthread_equal(g_state.owner_thread, pthread_self()) == 0 ||
-      (g_state.art_thread != nullptr &&
-       art::Thread::Current() != g_state.art_thread)) {
-    return ShutdownBeginResult::kWrongThread;
+  if (lifecycle_hooks != nullptr &&
+      lifecycle_hooks->begin_shutdown(lifecycle_hooks->context) != 0) {
+    std::lock_guard<std::mutex> lock(g_state.mutex);
+    g_state.phase = Phase::kShutdownFailed;
+    return ShutdownBeginResult::kFailed;
   }
-  g_state.phase = Phase::kShuttingDown;
-  snapshot->java_vm = g_state.java_vm;
-  snapshot->art_thread = g_state.art_thread;
-  snapshot->resource_runtime_installed = g_state.resource_runtime_installed;
-  snapshot->graphics_state = g_state.graphics_state;
   return ShutdownBeginResult::kReady;
 }
 
 void mark_shutdown_failed() {
-  std::lock_guard<std::mutex> lock(g_state.mutex);
-  g_state.phase = Phase::kShutdownFailed;
+  const darwin_art_lifecycle_hooks_t* lifecycle_hooks = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_state.mutex);
+    g_state.phase = Phase::kShutdownFailed;
+    lifecycle_hooks = g_state.lifecycle_hooks;
+  }
+  if (lifecycle_hooks != nullptr) {
+    lifecycle_hooks->mark_failed(lifecycle_hooks->context,
+                                 DARWIN_ART_STATUS_SHUTDOWN_FAILED);
+  }
 }
 
 void mark_shutdown_complete() {
@@ -143,6 +187,7 @@ void mark_shutdown_complete() {
   g_state.art_thread = nullptr;
   g_state.resource_runtime_installed = false;
   g_state.graphics_state = nullptr;
+  g_state.lifecycle_hooks = nullptr;
   g_state.phase = Phase::kShutdownComplete;
 }
 
@@ -184,7 +229,7 @@ AcceptanceSnapshot acceptance_snapshot() {
 
 ScopedRunBoundary::~ScopedRunBoundary() {
   if (art_thread_ == nullptr) {
-    finish_run();
+    finish_run(false);
     return;
   }
   CHECK_EQ(art::Thread::Current(), art_thread_);
@@ -194,7 +239,7 @@ ScopedRunBoundary::~ScopedRunBoundary() {
   } else {
     CHECK_EQ(state, art::ThreadState::kNative);
   }
-  finish_run();
+  finish_run(true);
 }
 
 void ScopedRunBoundary::set_art_thread(art::Thread* art_thread) {

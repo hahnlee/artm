@@ -59,6 +59,12 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             return Err(HostError::RuntimeFailed(error.status() as i32));
         }
 
+        // The native entrypoint receives a Rust-owned lifecycle bridge. It is
+        // kept alive through the later shutdown call, so the C++ probe only
+        // reports ART-specific runtime handles and never owns the production
+        // phase machine.
+        let lifecycle_hooks = shutdown_guard.runtime().native_lifecycle_hooks();
+
         let mut frame_host = FrameHost {
             frames_received: 0,
             last_frame: None,
@@ -77,6 +83,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 Some(ProviderBridge::acquire_callback()),
                 Some(ProviderBridge::release_callback()),
                 runtime.graphics(),
+                Some(&lifecycle_hooks),
             ) {
                 Ok(inputs) => inputs,
                 Err(error) => {
@@ -105,11 +112,6 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             .runtime()
             .engine()
             .and_then(EngineSession::active_surface);
-        shutdown_guard
-            .runtime()
-            .mark_running()
-            .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
-
         if active_surface.is_some() {
             let outcome = run_gpu_loop(
                 shutdown_guard.runtime(),

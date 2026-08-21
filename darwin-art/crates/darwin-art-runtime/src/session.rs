@@ -7,6 +7,7 @@
 
 use crate::owners::RuntimeOwners;
 use crate::{RuntimeError, RuntimeLifecycle, RuntimePhase, Subsystem, SubsystemLease};
+use darwin_art_engine_sys::LifecycleHooks;
 
 /// Native resource contract used by the Rust-owned shutdown coordinator.
 ///
@@ -50,6 +51,12 @@ impl<E, P, S, G> RuntimeSession<E, P, S, G> {
 
     pub const fn failure(&self) -> Option<RuntimeError> {
         self.lifecycle.failure()
+    }
+
+    /// Construct the synchronous native lifecycle bridge. The table is valid
+    /// only while this session remains alive on its owner thread.
+    pub fn native_lifecycle_hooks(&mut self) -> LifecycleHooks {
+        self.lifecycle.native_hooks()
     }
 
     pub fn start(&mut self) -> Result<(), RuntimeError> {

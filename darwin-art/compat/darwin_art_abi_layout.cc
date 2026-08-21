@@ -10,7 +10,15 @@
 // unit makes a drift in either declaration fail during the native build rather
 // than becoming an opaque runtime failure.
 static_assert(std::is_standard_layout_v<darwin_art_process_config_t>);
-static_assert(sizeof(darwin_art_process_config_t) == 112);
+static_assert(std::is_standard_layout_v<darwin_art_lifecycle_hooks_t>);
+static_assert(sizeof(darwin_art_lifecycle_hooks_t) == 48);
+static_assert(alignof(darwin_art_lifecycle_hooks_t) == 8);
+static_assert(offsetof(darwin_art_lifecycle_hooks_t, context) == 8);
+static_assert(offsetof(darwin_art_lifecycle_hooks_t, begin_run) == 16);
+static_assert(offsetof(darwin_art_lifecycle_hooks_t, finish_run) == 24);
+static_assert(offsetof(darwin_art_lifecycle_hooks_t, begin_shutdown) == 32);
+static_assert(offsetof(darwin_art_lifecycle_hooks_t, mark_failed) == 40);
+static_assert(sizeof(darwin_art_process_config_t) == 120);
 static_assert(alignof(darwin_art_process_config_t) == 8);
 static_assert(offsetof(darwin_art_process_config_t, struct_size) == 0);
 static_assert(offsetof(darwin_art_process_config_t, abi_version) == 4);
@@ -27,6 +35,7 @@ static_assert(offsetof(darwin_art_process_config_t, provider_context) == 80);
 static_assert(offsetof(darwin_art_process_config_t, provider_acquire) == 88);
 static_assert(offsetof(darwin_art_process_config_t, provider_release) == 96);
 static_assert(offsetof(darwin_art_process_config_t, graphics_session_context) == 104);
+static_assert(offsetof(darwin_art_process_config_t, lifecycle_hooks) == 112);
 
 static_assert(std::is_standard_layout_v<darwin_art_process_result_t>);
 static_assert(sizeof(darwin_art_process_result_t) == 36);

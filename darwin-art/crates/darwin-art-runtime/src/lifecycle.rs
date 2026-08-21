@@ -5,6 +5,10 @@
 //! production host never hides native resources behind `Any` or cleanup
 //! closures.
 
+use core::ffi::c_void;
+use darwin_art_engine_sys::{
+    LifecycleBeginFn, LifecycleFailedFn, LifecycleFinishFn, LifecycleHooks,
+};
 use std::{
     collections::BTreeMap,
     marker::PhantomData,
@@ -48,6 +52,23 @@ impl RuntimeLifecycle {
 
     pub const fn failure(&self) -> Option<RuntimeError> {
         self.failure
+    }
+
+    /// Build the optional native lifecycle bridge for one synchronous ART
+    /// invocation. The returned table contains only an opaque pointer to this
+    /// lifecycle object; it must not outlive the owning `RuntimeSession` or be
+    /// called from another thread. The host keeps the table alive until the
+    /// matching native shutdown has completed.
+    pub fn native_hooks(&mut self) -> LifecycleHooks {
+        LifecycleHooks {
+            struct_size: core::mem::size_of::<LifecycleHooks>() as u32,
+            abi_version: 1,
+            context: (self as *mut Self).cast::<c_void>(),
+            begin_run: Some(native_begin_run as LifecycleBeginFn),
+            finish_run: Some(native_finish_run as LifecycleFinishFn),
+            begin_shutdown: Some(native_begin_shutdown as LifecycleBeginFn),
+            mark_failed: Some(native_mark_failed as LifecycleFailedFn),
+        }
     }
 
     pub fn start(&mut self) -> Result<(), RuntimeError> {
@@ -193,6 +214,46 @@ impl RuntimeLifecycle {
     }
 }
 
+unsafe extern "C" fn native_begin_run(context: *mut c_void) -> i32 {
+    let lifecycle = unsafe { &mut *context.cast::<RuntimeLifecycle>() };
+    match lifecycle.phase {
+        RuntimePhase::Bootstrapping => 0,
+        _ => RuntimeError::InvalidTransition {
+            from: lifecycle.phase,
+            to: RuntimePhase::Bootstrapping,
+        }
+        .status() as i32,
+    }
+}
+
+unsafe extern "C" fn native_finish_run(context: *mut c_void, runtime_created: i32) -> i32 {
+    let lifecycle = unsafe { &mut *context.cast::<RuntimeLifecycle>() };
+    if runtime_created == 0 {
+        lifecycle.fail(RuntimeError::EngineFailure { status: 1 });
+        return 1;
+    }
+    lifecycle
+        .mark_running()
+        .map(|_| 0)
+        .unwrap_or_else(|error| error.status() as i32)
+}
+
+unsafe extern "C" fn native_begin_shutdown(context: *mut c_void) -> i32 {
+    let lifecycle = unsafe { &mut *context.cast::<RuntimeLifecycle>() };
+    if lifecycle.phase() == RuntimePhase::ShuttingDown {
+        return 0;
+    }
+    lifecycle
+        .begin_shutdown()
+        .map(|_| 0)
+        .unwrap_or_else(|error| error.status() as i32)
+}
+
+unsafe extern "C" fn native_mark_failed(context: *mut c_void, status: i32) {
+    let lifecycle = unsafe { &mut *context.cast::<RuntimeLifecycle>() };
+    lifecycle.fail(RuntimeError::EngineFailure { status });
+}
+
 impl Default for RuntimeLifecycle {
     fn default() -> Self {
         Self::new()
@@ -248,6 +309,20 @@ mod tests {
         first.begin_shutdown().unwrap();
         first.uninstall_subsystem(first_lease).unwrap();
         first.finish_shutdown().unwrap();
+    }
+
+    #[test]
+    fn native_hooks_drive_the_same_lifecycle_owner() {
+        let mut lifecycle = RuntimeLifecycle::new();
+        lifecycle.start().unwrap();
+        let hooks = lifecycle.native_hooks();
+        unsafe {
+            assert_eq!((hooks.begin_run.unwrap())(hooks.context), 0);
+            assert_eq!((hooks.finish_run.unwrap())(hooks.context, 1), 0);
+            assert_eq!((hooks.begin_shutdown.unwrap())(hooks.context), 0);
+            (hooks.mark_failed.unwrap())(hooks.context, 70);
+        }
+        assert_eq!(lifecycle.phase(), RuntimePhase::Failed);
     }
 
     #[test]

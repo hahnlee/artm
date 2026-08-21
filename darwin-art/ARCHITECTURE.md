@@ -254,6 +254,12 @@ the affected phase and the final graphics link. None of these phases owns
 process lifetime; they consume snapshots and call the single Rust-owned
 lifecycle boundary.
 
+The process ABI's additive `darwin_art_lifecycle_hooks_t` table connects that
+boundary to the native entrypoint for production hosts. Direct legacy callers
+may omit it and retain the compatibility phase state; the Rust host always
+supplies it, so the native process-state object cannot override Rust's
+bootstrapping/running/shutdown decisions.
+
 ### Virtual Android DSOs
 
 Normal NDK libraries import Bionic and Android libraries rather than issuing a

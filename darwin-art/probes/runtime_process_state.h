@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+struct darwin_art_lifecycle_hooks;
+
 namespace art {
 class DexFile;
 class Thread;
@@ -44,11 +46,11 @@ struct AcceptanceSnapshot {
   std::string apk_root_sha256;
 };
 
-bool begin_run();
+bool begin_run(const struct darwin_art_lifecycle_hooks* lifecycle_hooks = nullptr);
 void record_created_runtime(art::Thread* art_thread);
 void record_graphics_state(darwin_art_graphics::GraphicsState* state);
 void record_resource_runtime_installed();
-void finish_run();
+void finish_run(bool runtime_created);
 void record_app_dex_file(std::unique_ptr<const art::DexFile> dex_file);
 std::vector<std::unique_ptr<const art::DexFile>>& app_dex_files();
 void clear_app_dex_files();

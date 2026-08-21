@@ -6,7 +6,9 @@
 //! call and materializes the wire struct only inside `EngineSession`.
 
 use core::ffi::c_void;
-use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProviderAcquireFn, ProviderReleaseFn};
+use darwin_art_engine_sys::{
+    FrameCallback, LifecycleHooks, ProcessConfig, ProviderAcquireFn, ProviderReleaseFn,
+};
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -34,6 +36,7 @@ pub struct CallbackBindings<'a> {
     provider_acquire: Option<ProviderAcquireFn>,
     provider_release: Option<ProviderReleaseFn>,
     graphics_session: Option<&'a GraphicsSession>,
+    lifecycle_hooks: Option<&'a LifecycleHooks>,
 }
 
 impl<'a> CallbackBindings<'a> {
@@ -66,6 +69,7 @@ impl<'a> CallbackBindings<'a> {
             provider_acquire,
             provider_release,
             graphics_session: None,
+            lifecycle_hooks: None,
         })
     }
 
@@ -74,6 +78,14 @@ impl<'a> CallbackBindings<'a> {
     /// synchronous call in which the wire config is materialized.
     pub fn with_graphics_session(mut self, session: Option<&'a GraphicsSession>) -> Self {
         self.graphics_session = session;
+        self
+    }
+
+    /// Attach the Rust-owned lifecycle bridge for the synchronous ART call.
+    /// Direct/native callers may omit it and use the compatibility state
+    /// machine retained inside the probe.
+    pub fn with_lifecycle_hooks(mut self, hooks: Option<&'a LifecycleHooks>) -> Self {
+        self.lifecycle_hooks = hooks;
         self
     }
 }
@@ -114,6 +126,13 @@ impl<'a> ProcessRequest<'a> {
         })
     }
 
+    /// Attach the Rust lifecycle bridge to the wire config without exposing
+    /// raw ABI construction to the host frontend.
+    pub fn with_lifecycle_hooks(mut self, hooks: Option<&'a LifecycleHooks>) -> Self {
+        self.callbacks.lifecycle_hooks = hooks;
+        self
+    }
+
     pub(crate) fn as_config(&self) -> ProcessConfig {
         ProcessConfig::new(
             self.core_oj_jar.as_ptr(),
@@ -135,6 +154,11 @@ impl<'a> ProcessRequest<'a> {
                 .map_or(core::ptr::null_mut(), |graphics| {
                     graphics.raw_handle().cast()
                 }),
+        )
+        .with_lifecycle_hooks(
+            self.callbacks
+                .lifecycle_hooks
+                .map_or(core::ptr::null(), |hooks| hooks as *const LifecycleHooks),
         )
     }
 }

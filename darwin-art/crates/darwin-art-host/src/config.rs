@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
 use darwin_art_engine::{CallbackBindings, GraphicsSession, ProcessRequest, ProcessRequestError};
+use darwin_art_engine_sys::LifecycleHooks;
 use darwin_art_engine_sys::ProcessResult;
 use darwin_art_runtime::ProviderBridge;
 
@@ -47,6 +48,7 @@ impl RunOptions {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_process_request<'a>(
     options: &RunOptions,
     host_context: *mut c_void,
@@ -55,6 +57,7 @@ pub(crate) fn build_process_request<'a>(
     provider_acquire: Option<darwin_art_engine_sys::ProviderAcquireFn>,
     provider_release: Option<darwin_art_engine_sys::ProviderReleaseFn>,
     graphics_session: Option<&'a GraphicsSession>,
+    lifecycle_hooks: Option<&'a LifecycleHooks>,
 ) -> Result<ProcessRequest<'a>, HostError> {
     // SAFETY: FrameHost, ProviderBridge, and the optional graphics session are
     // owned by the caller for the complete synchronous engine invocation.
@@ -90,7 +93,7 @@ pub(crate) fn build_process_request<'a>(
             HostError::InvalidCallbackBinding(kind)
         }
     })?;
-    Ok(request)
+    Ok(request.with_lifecycle_hooks(lifecycle_hooks))
 }
 
 #[derive(Debug)]

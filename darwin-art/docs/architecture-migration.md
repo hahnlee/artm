@@ -192,6 +192,15 @@ while `lib.rs` retains mapping, relocation, symbol resolution, and lifecycle.
 These are production module boundaries, not compatibility wrappers, and each
 one is covered by the workspace/loader gates below.
 
+The process ABI now accepts an additive `darwin_art_lifecycle_hooks_t` table.
+The production host passes a Rust-owned table backed by `RuntimeLifecycle`, so
+the native entrypoint no longer decides whether the production session is
+bootstrapping, running, or shutting down. The C++ process-state object retains
+only ART-specific handles/snapshots and a compatibility state machine for
+legacy direct C callers that omit the table. The hook table is synchronous,
+owner-thread-only, and remains borrowed until the matching native shutdown
+returns.
+
 The staging boundary records a content identity for the patched ART shadow
 tree. Unchanged upstream sources and patches are not recopied on every
 invocation, preserving depfile metadata so a canonical fallback can retain

@@ -63,7 +63,13 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   const uint64_t heap_initial = config_bounds.heap_initial_bytes;
   const uint64_t heap_maximum = config_bounds.heap_maximum_bytes;
 
-  if (!darwin_art_process::begin_run()) {
+  const darwin_art_lifecycle_hooks_t* lifecycle_hooks =
+      config->struct_size >=
+                  offsetof(darwin_art_process_config_t, lifecycle_hooks) +
+                      sizeof(config->lifecycle_hooks)
+          ? config->lifecycle_hooks
+          : nullptr;
+  if (!darwin_art_process::begin_run(lifecycle_hooks)) {
     std::cerr << "darwin_art_run_process: process already started\n";
     return DARWIN_ART_STATUS_PROCESS_ALREADY_STARTED;
   }
