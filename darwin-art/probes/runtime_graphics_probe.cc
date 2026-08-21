@@ -9,7 +9,6 @@
 #include <unistd.h>
 
 #include <array>
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -77,9 +76,7 @@
 #include "RenderNode.h"
 #undef protected
 #undef private
-#include "pipeline/skia/RenderNodeDrawable.h"
 #include "pipeline/skia/SkiaRecordingCanvas.h"
-#include "include/core/SkSurface.h"
 #endif
 
 #if defined(DARWIN_ART_DIRECT_APK_RUNTIME)
@@ -196,71 +193,6 @@ void shutdown(JNIEnv* env) {
 }
 
 #if defined(DARWIN_ART_REAL_GRAPHICS)
-// Production GPU frame path: View.draw() records into AOSP's Skia
-// RecordingCanvas, the resulting RenderNode is replayed directly into the
-// CAMetalLayer drawable. No Bitmap, Java int[] or IOSurface CPU mapping is
-// created in this path.
-static jboolean ReplayGpuRenderNode(JNIEnv* env, jint width, jint height) {
-  if (g_gpu_surface == nullptr || g_gpu_render_node == nullptr) {
-    return JNI_FALSE;
-  }
-  jclass render_node_class = env->FindClass("android/graphics/RenderNode");
-  jfieldID native_render_node =
-      render_node_class == nullptr
-          ? nullptr
-          : env->GetFieldID(render_node_class, "mNativeRenderNode", "J");
-  auto* node = native_render_node == nullptr
-                   ? nullptr
-                   : reinterpret_cast<android::uirenderer::RenderNode*>(
-                         static_cast<std::uintptr_t>(env->GetLongField(
-                             g_gpu_render_node, native_render_node)));
-  if (node == nullptr || env->ExceptionCheck()) {
-    env->ExceptionClear();
-    env->DeleteLocalRef(render_node_class);
-    return JNI_FALSE;
-  }
-  DarwinArtGpuFrame* frame = darwin_art_surface_gpu_begin(g_gpu_surface);
-  if (frame == nullptr) {
-    env->DeleteLocalRef(render_node_class);
-    return JNI_FALSE;
-  }
-  auto* canvas = static_cast<SkCanvas*>(darwin_art_surface_gpu_canvas(frame));
-  if (canvas == nullptr) {
-    darwin_art_surface_gpu_end(g_gpu_surface, frame);
-    env->DeleteLocalRef(render_node_class);
-    return JNI_FALSE;
-  }
-  canvas->clear(SK_ColorTRANSPARENT);
-  android::uirenderer::skiapipeline::RenderNodeDrawable drawable(
-      node, canvas, false);
-  drawable.forceDraw(canvas);
-  if (g_gpu_ripple_overlay_active) {
-    const double elapsed_ms = std::chrono::duration<double, std::milli>(
-                                  std::chrono::steady_clock::now() -
-                                  g_gpu_ripple_overlay_started)
-                                  .count();
-    const float progress = std::clamp(static_cast<float>(elapsed_ms / 2200.0),
-                                      0.0f, 1.0f);
-    SkPaint ripple_paint;
-    ripple_paint.setAntiAlias(true);
-    ripple_paint.setColor(SkColorSetARGB(
-        static_cast<U8CPU>(24.0f + (1.0f - progress) * 64.0f), 30, 30, 30));
-    canvas->save();
-    canvas->clipRect(SkRect::MakeLTRB(104.0f, 298.0f, 256.0f, 342.0f));
-    canvas->drawCircle(g_gpu_ripple_overlay_x, g_gpu_ripple_overlay_y,
-                       8.0f + progress * 76.0f, ripple_paint);
-    canvas->restore();
-  }
-  const DarwinArtSurfaceResult result =
-      darwin_art_surface_gpu_end(g_gpu_surface, frame);
-  env->DeleteLocalRef(render_node_class);
-  if (result != DARWIN_ART_SURFACE_OK) {
-    return JNI_FALSE;
-  }
-  darwin_art_frame_probe::record_dimensions(width, height);
-  return JNI_TRUE;
-}
-
 static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
                                   jint height) {
   if (!darwin_art::hwui_gpu_enabled()) {
@@ -287,7 +219,12 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
   // 16 ms replaces the display-list-owned CanvasProperty references and makes
   // RippleDrawable appear static even while RenderNodeAnimators advance.
   if (g_gpu_render_node_recorded && g_pending_pressed_action == 0) {
-    return ReplayGpuRenderNode(env, width, height);
+    return darwin_art_hwui::render_node_to_surface(
+               env, g_gpu_render_node, g_gpu_surface, width, height,
+               g_gpu_ripple_overlay_active, g_gpu_ripple_overlay_x,
+               g_gpu_ripple_overlay_y, g_gpu_ripple_overlay_started)
+               ? JNI_TRUE
+               : JNI_FALSE;
   }
 
   jclass render_node_class = env->FindClass("android/graphics/RenderNode");
@@ -601,48 +538,13 @@ static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
     }
   }
 
-  DarwinArtGpuFrame* frame = darwin_art_surface_gpu_begin(g_gpu_surface);
-  if (frame == nullptr) {
-    std::cerr << "ART HWUI GPU: drawable begin failed\n";
+  if (!darwin_art_hwui::render_node_to_surface(
+          env, g_gpu_render_node, g_gpu_surface, width, height,
+          g_gpu_ripple_overlay_active, g_gpu_ripple_overlay_x,
+          g_gpu_ripple_overlay_y, g_gpu_ripple_overlay_started)) {
+    std::cerr << "ART HWUI GPU: drawable submit failed\n";
     return JNI_FALSE;
   }
-  auto* canvas = static_cast<SkCanvas*>(darwin_art_surface_gpu_canvas(frame));
-  if (canvas == nullptr) {
-    darwin_art_surface_gpu_end(g_gpu_surface, frame);
-    std::cerr << "ART HWUI GPU: drawable canvas unavailable\n";
-    return JNI_FALSE;
-  }
-  // Match SkiaPipeline's non-opaque frame initialization. The framework
-  // DecorView/theme then owns the visible window background.
-  canvas->clear(SK_ColorTRANSPARENT);
-  android::uirenderer::skiapipeline::RenderNodeDrawable drawable(
-      node, canvas, false);
-  drawable.forceDraw(canvas);
-  if (g_gpu_ripple_overlay_active) {
-    const double elapsed_ms = std::chrono::duration<double, std::milli>(
-                                  std::chrono::steady_clock::now() -
-                                  g_gpu_ripple_overlay_started)
-                                  .count();
-    const float progress = std::clamp(static_cast<float>(elapsed_ms / 2200.0),
-                                      0.0f, 1.0f);
-    SkPaint ripple_paint;
-    ripple_paint.setAntiAlias(true);
-    ripple_paint.setColor(SkColorSetARGB(
-        static_cast<U8CPU>(24.0f + (1.0f - progress) * 64.0f), 30, 30, 30));
-    canvas->save();
-    canvas->clipRect(SkRect::MakeLTRB(104.0f, 298.0f, 256.0f, 342.0f));
-    canvas->drawCircle(g_gpu_ripple_overlay_x, g_gpu_ripple_overlay_y,
-                       8.0f + progress * 76.0f, ripple_paint);
-    canvas->restore();
-  }
-  const DarwinArtSurfaceResult result =
-      darwin_art_surface_gpu_end(g_gpu_surface, frame);
-  if (result != DARWIN_ART_SURFACE_OK) {
-    std::cerr << "ART HWUI GPU: drawable submit failed status=" << result
-              << "\n";
-    return JNI_FALSE;
-  }
-  darwin_art_frame_probe::record_dimensions(width, height);
   g_gpu_render_node_recorded = true;
   return JNI_TRUE;
 }

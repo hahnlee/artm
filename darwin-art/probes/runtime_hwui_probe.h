@@ -1,6 +1,11 @@
 #pragma once
 
 #include <cstddef>
+#include <chrono>
+
+#include <jni.h>
+
+struct DarwinArtSurface;
 
 #if defined(DARWIN_ART_REAL_GRAPHICS)
 
@@ -20,6 +25,11 @@ bool node_subtree_has_animators(android::uirenderer::RenderNode* node);
 
 void register_node_subtree_animators(android::uirenderer::RenderNode* node,
                                      android::uirenderer::AnimationContext& context);
+
+bool render_node_to_surface(
+    JNIEnv* env, jobject render_node, DarwinArtSurface* surface, jint width,
+    jint height, bool overlay_active, jfloat overlay_x, jfloat overlay_y,
+    std::chrono::steady_clock::time_point overlay_started);
 
 }  // namespace darwin_art_hwui
 
