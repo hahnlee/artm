@@ -53,6 +53,7 @@ pub(crate) fn print_help() {
         "  build-runtime-graphics-phase-probe  compile the cached graphics presentation phase"
     );
     println!("  build-runtime-graphics-input-probe  compile the cached graphics input probe");
+    println!("  build-runtime-graphics-state-probe  compile the graphics state owner probe");
     println!("  audit-runtime-link  measure the remaining Runtime::Create link closure");
     println!("  audit-runtime-graphics-link  link ART with the strict Android graphics closure");
     println!(

@@ -187,6 +187,20 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     let graphics_phase_object = compile_runtime_graphics_phase(root, &build_dir, &include_refs)?;
     let graphics_input_object =
         compile_runtime_graphics_input_probe(root, &build_dir, &include_refs)?;
+    let graphics_state_object = if let Some(path) =
+        env::var_os("DARWIN_ART_NATIVE_GRAPHICS_STATE_OBJECT")
+        && Path::new(&path).is_file()
+    {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_graphics_state_probe(
+            root,
+            &build_dir,
+            &include_refs,
+            &ndk_include,
+            &ndk_arch_include,
+        )?
+    };
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -282,6 +296,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&shutdown_probe_object)
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
+        .arg(&graphics_state_object)
         .arg(&graphics_phase_object)
         .arg(&graphics_input_object)
         .arg(&filesystem_object)
@@ -856,6 +871,20 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     let graphics_phase_object = compile_runtime_graphics_phase(root, &build_dir, &include_refs)?;
     let graphics_input_object =
         compile_runtime_graphics_input_probe(root, &build_dir, &include_refs)?;
+    let graphics_state_object = if let Some(path) =
+        env::var_os("DARWIN_ART_NATIVE_GRAPHICS_STATE_OBJECT")
+        && Path::new(&path).is_file()
+    {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_graphics_state_probe(
+            root,
+            &build_dir,
+            &include_refs,
+            &ndk_include,
+            &ndk_arch_include,
+        )?
+    };
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -982,6 +1011,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&shutdown_probe_object)
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
+        .arg(&graphics_state_object)
         .arg(&graphics_phase_object)
         .arg(&graphics_input_object)
         .arg(&filesystem_object)

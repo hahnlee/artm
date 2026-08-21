@@ -10,7 +10,6 @@
 
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
@@ -84,113 +83,33 @@
 #endif
 
 #include "runtime_graphics_probe.h"
+#include "runtime_graphics_state.h"
 
 namespace darwin_art_graphics {
 
-static jclass g_probe_canvas_class = nullptr;
-static jobject g_interactive_root = nullptr;
-static jobject g_gpu_render_node = nullptr;
-static bool g_gpu_render_node_recorded = false;
-static bool g_gpu_ripple_overlay_active = false;
-static jfloat g_gpu_ripple_overlay_x = 0.0f;
-static jfloat g_gpu_ripple_overlay_y = 0.0f;
-static std::chrono::steady_clock::time_point g_gpu_ripple_overlay_started;
+// Keep the presentation code readable while making the ownership boundary
+// explicit: these are references to slots owned by runtime_graphics_state.cc.
+static jclass& g_probe_canvas_class = probe_canvas_class_for_state();
+static jobject& g_interactive_root = interactive_root_for_state();
+static jobject& g_gpu_render_node = gpu_render_node_for_state();
+static bool& g_gpu_render_node_recorded = gpu_render_node_recorded_for_state();
+static bool& g_gpu_ripple_overlay_active =
+    gpu_ripple_overlay_active_for_state();
+static jfloat& g_gpu_ripple_overlay_x = gpu_ripple_overlay_x_for_state();
+static jfloat& g_gpu_ripple_overlay_y = gpu_ripple_overlay_y_for_state();
+static auto& g_gpu_ripple_overlay_started =
+    gpu_ripple_overlay_started_for_state();
+static jobject& g_pressed_view = pressed_view_for_state();
+static uint32_t& g_pending_pressed_action = pending_pressed_action_for_state();
+static jfloat& g_pending_pressed_x = pending_pressed_x_for_state();
+static jfloat& g_pending_pressed_y = pending_pressed_y_for_state();
+static jint& g_interactive_width = interactive_width_for_state();
+static jint& g_interactive_height = interactive_height_for_state();
+static DarwinArtSurface*& g_gpu_surface = gpu_surface_for_state();
 #if defined(DARWIN_ART_REAL_GRAPHICS)
-static std::unique_ptr<android::uirenderer::renderthread::TimeLord>
-    g_hwui_time_lord;
-static std::unique_ptr<android::uirenderer::AnimationContext>
-    g_hwui_animation_context;
+static auto& g_hwui_time_lord = hwui_time_lord_owner_for_state();
+static auto& g_hwui_animation_context = hwui_animation_context_owner_for_state();
 #endif
-static jobject g_pressed_view = nullptr;
-static uint32_t g_pending_pressed_action = 0;
-static jfloat g_pending_pressed_x = 0.0f;
-static jfloat g_pending_pressed_y = 0.0f;
-static jint g_interactive_width = 0;
-static jint g_interactive_height = 0;
-static DarwinArtSurface* g_gpu_surface = nullptr;
-
-jobject interactive_root_for_input() { return g_interactive_root; }
-jint interactive_width_for_input() { return g_interactive_width; }
-jint interactive_height_for_input() { return g_interactive_height; }
-jobject& pressed_view_for_input() { return g_pressed_view; }
-uint32_t& pending_pressed_action_for_input() { return g_pending_pressed_action; }
-jfloat& pending_pressed_x_for_input() { return g_pending_pressed_x; }
-jfloat& pending_pressed_y_for_input() { return g_pending_pressed_y; }
-bool& gpu_ripple_overlay_active_for_input() {
-  return g_gpu_ripple_overlay_active;
-}
-jfloat& gpu_ripple_overlay_x_for_input() { return g_gpu_ripple_overlay_x; }
-jfloat& gpu_ripple_overlay_y_for_input() { return g_gpu_ripple_overlay_y; }
-std::chrono::steady_clock::time_point&
-gpu_ripple_overlay_started_for_input() {
-  return g_gpu_ripple_overlay_started;
-}
-#if defined(DARWIN_ART_REAL_GRAPHICS)
-jobject gpu_render_node_for_input() { return g_gpu_render_node; }
-android::uirenderer::renderthread::TimeLord* hwui_time_lord_for_input() {
-  return g_hwui_time_lord.get();
-}
-android::uirenderer::AnimationContext* hwui_animation_context_for_input() {
-  return g_hwui_animation_context.get();
-}
-#endif
-
-void set_probe_canvas_class(JNIEnv* env, jclass canvas_class) {
-  if (env != nullptr && g_probe_canvas_class != nullptr) {
-    env->DeleteGlobalRef(g_probe_canvas_class);
-    g_probe_canvas_class = nullptr;
-  }
-  if (env != nullptr && canvas_class != nullptr) {
-    g_probe_canvas_class =
-        static_cast<jclass>(env->NewGlobalRef(canvas_class));
-  }
-}
-
-bool retain_interactive_root(JNIEnv* env, jobject root, jint width, jint height) {
-  if (env == nullptr || root == nullptr || env->ExceptionCheck()) {
-    return false;
-  }
-  if (g_interactive_root != nullptr) {
-    env->DeleteGlobalRef(g_interactive_root);
-    g_interactive_root = nullptr;
-  }
-  g_interactive_root = env->NewGlobalRef(root);
-  g_interactive_width = width;
-  g_interactive_height = height;
-  return g_interactive_root != nullptr && !env->ExceptionCheck();
-}
-
-void shutdown(JNIEnv* env) {
-  if (env == nullptr) return;
-#if defined(DARWIN_ART_REAL_GRAPHICS)
-  if (g_hwui_animation_context != nullptr) {
-    g_hwui_animation_context->destroy();
-    g_hwui_animation_context.reset();
-  }
-  g_hwui_time_lord.reset();
-#endif
-  if (g_gpu_render_node != nullptr) {
-    env->DeleteGlobalRef(g_gpu_render_node);
-    g_gpu_render_node = nullptr;
-  }
-  if (g_pressed_view != nullptr) {
-    env->DeleteGlobalRef(g_pressed_view);
-    g_pressed_view = nullptr;
-  }
-  if (g_interactive_root != nullptr) {
-    env->DeleteGlobalRef(g_interactive_root);
-    g_interactive_root = nullptr;
-  }
-  if (g_probe_canvas_class != nullptr) {
-    env->DeleteGlobalRef(g_probe_canvas_class);
-    g_probe_canvas_class = nullptr;
-  }
-  g_gpu_render_node_recorded = false;
-  g_gpu_ripple_overlay_active = false;
-  g_interactive_width = 0;
-  g_interactive_height = 0;
-  g_gpu_surface = nullptr;
-}
 
 #if defined(DARWIN_ART_REAL_GRAPHICS)
 static jboolean PresentGpuContent(JNIEnv* env, jobject view, jint width,
