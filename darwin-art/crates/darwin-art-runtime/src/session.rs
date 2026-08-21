@@ -74,6 +74,31 @@ impl<E, P, S, G> RuntimeSession<E, P, S, G> {
         &mut self.owners
     }
 
+    pub fn graphics_for_shutdown_mut(&mut self) -> Result<Option<&mut G>, RuntimeError> {
+        self.release_boundary(Subsystem::Graphics)?;
+        Ok(self.owners.graphics_mut())
+    }
+
+    pub fn release_engine(&mut self) -> Result<Option<E>, RuntimeError> {
+        self.release_boundary(Subsystem::Engine)?;
+        Ok(self.owners.take_engine())
+    }
+
+    pub fn release_provider(&mut self) -> Result<Option<P>, RuntimeError> {
+        self.release_boundary(Subsystem::ElfNamespace)?;
+        Ok(self.owners.take_provider())
+    }
+
+    pub fn release_surface(&mut self) -> Result<Option<S>, RuntimeError> {
+        self.release_boundary(Subsystem::Surface)?;
+        Ok(self.owners.take_surface())
+    }
+
+    pub fn release_graphics(&mut self) -> Result<Option<G>, RuntimeError> {
+        self.release_boundary(Subsystem::Graphics)?;
+        Ok(self.owners.take_graphics())
+    }
+
     pub fn attach_engine(&mut self, engine: E) -> Result<(), E> {
         self.owners.attach_engine(engine)
     }
@@ -108,6 +133,23 @@ impl<E, P, S, G> RuntimeSession<E, P, S, G> {
 
     pub fn is_empty(&self) -> bool {
         self.owners.is_empty()
+    }
+
+    fn release_boundary(&self, subsystem: Subsystem) -> Result<(), RuntimeError> {
+        self.lifecycle.assert_owner()?;
+        if self.phase() != RuntimePhase::ShuttingDown {
+            return Err(RuntimeError::InvalidTransition {
+                from: self.phase(),
+                to: RuntimePhase::ShuttingDown,
+            });
+        }
+        if self.lifecycle.subsystem_active(subsystem) {
+            return Err(RuntimeError::InvalidShutdownOrder {
+                expected: subsystem,
+                requested: subsystem,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -147,5 +189,21 @@ mod tests {
         session.finish_shutdown().unwrap();
         assert_eq!(session.phase(), RuntimePhase::Stopped);
         assert!(session.is_empty());
+    }
+
+    #[test]
+    fn resource_release_requires_shutdown_and_inactive_lease() {
+        let mut session = RuntimeSession::<u8, u16, u32, u64>::new();
+        session.start().unwrap();
+        session.attach_engine(7).unwrap();
+        let engine = session.install_subsystem(Subsystem::Engine).unwrap();
+        assert!(session.release_engine().is_err());
+
+        session.mark_running().unwrap();
+        session.begin_shutdown().unwrap();
+        assert!(session.release_engine().is_err());
+        session.uninstall_subsystem(engine).unwrap();
+        assert_eq!(session.release_engine().unwrap(), Some(7));
+        session.finish_shutdown().unwrap();
     }
 }

@@ -2,7 +2,7 @@
 
 #[cfg(target_os = "macos")]
 use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
-use darwin_art_runtime::RuntimeOwners;
+use darwin_art_runtime::{RuntimeOwners, RuntimeSession};
 
 #[cfg(target_os = "macos")]
 use crate::provider::ProviderBridge;
@@ -32,9 +32,14 @@ pub fn owned_surface_next_pointer_event(
 
 #[cfg(target_os = "macos")]
 pub fn close_surface_owner(
-    owners: &mut RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
+    runtime: &mut RuntimeSession<
+        EngineSession,
+        Box<ProviderBridge>,
+        SurfaceSession,
+        GraphicsSession,
+    >,
 ) -> Result<(), i32> {
-    let Some(mut surface) = owners.take_surface() else {
+    let Some(mut surface) = runtime.release_surface().map_err(|_| -1)? else {
         return Ok(());
     };
     let status = surface.close();
@@ -43,9 +48,14 @@ pub fn close_surface_owner(
 
 #[cfg(target_os = "macos")]
 pub fn shutdown_engine_owner(
-    owners: &mut RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
+    runtime: &mut RuntimeSession<
+        EngineSession,
+        Box<ProviderBridge>,
+        SurfaceSession,
+        GraphicsSession,
+    >,
 ) -> Result<(), i32> {
-    let Some(mut engine) = owners.take_engine() else {
+    let Some(mut engine) = runtime.release_engine().map_err(|_| -1)? else {
         return Ok(());
     };
     let status = engine.shutdown_once();
@@ -54,9 +64,17 @@ pub fn shutdown_engine_owner(
 
 #[cfg(target_os = "macos")]
 pub fn clear_provider_owner(
-    owners: &mut RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
+    runtime: &mut RuntimeSession<
+        EngineSession,
+        Box<ProviderBridge>,
+        SurfaceSession,
+        GraphicsSession,
+    >,
 ) -> i32 {
-    let Some(provider) = owners.take_provider() else {
+    let Some(provider) = (match runtime.release_provider() {
+        Ok(provider) => provider,
+        Err(_) => return -1,
+    }) else {
         return 0;
     };
     match provider.clear() {
@@ -67,13 +85,18 @@ pub fn clear_provider_owner(
 
 #[cfg(target_os = "macos")]
 pub fn close_graphics_owner(
-    owners: &mut RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>,
+    runtime: &mut RuntimeSession<
+        EngineSession,
+        Box<ProviderBridge>,
+        SurfaceSession,
+        GraphicsSession,
+    >,
 ) -> Result<(), i32> {
     // Keep the opaque graphics session alive until the canonical engine
     // shutdown callback has finished. The native process state borrows the
     // session's GraphicsState during shutdown; taking it here would drop and
     // destroy that state before `shutdown_engine_owner` reaches it.
-    let Some(graphics) = owners.graphics_mut() else {
+    let Some(graphics) = runtime.graphics_for_shutdown_mut().map_err(|_| -1)? else {
         return Ok(());
     };
     let status = graphics.close();

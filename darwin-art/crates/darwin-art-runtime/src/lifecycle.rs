@@ -127,6 +127,10 @@ impl RuntimeLifecycle {
         Ok(())
     }
 
+    pub fn subsystem_active(&self, subsystem: Subsystem) -> bool {
+        self.subsystems.contains_key(&subsystem)
+    }
+
     pub fn assert_owner(&self) -> Result<(), RuntimeError> {
         if thread::current().id() == self.owner {
             Ok(())
