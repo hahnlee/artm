@@ -166,6 +166,8 @@ pub(crate) fn run() -> Result<()> {
 
 #[path = "audit_commands.rs"]
 mod audit_commands;
+#[path = "bootclasspath.rs"]
+mod bootclasspath;
 #[path = "dex_commands.rs"]
 mod dex_commands;
 #[path = "fixture_commands.rs"]
@@ -188,6 +190,7 @@ mod source_commands;
 mod source_materialization;
 
 pub(crate) use audit_commands::*;
+pub(crate) use bootclasspath::*;
 pub(crate) use dex_commands::*;
 pub(crate) use fixture_commands::*;
 pub(crate) use native_probe_commands::*;
