@@ -271,6 +271,10 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         native_output_root.join("runtime-probes/darwin_art_runtime_hwui_probe.cc.o");
     let graphics_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_graphics_probe.cc.o");
+    let graphics_phase_object_path =
+        native_output_root.join("runtime-probes/darwin_art_runtime_graphics_phase.cc.o");
+    let graphics_input_object_path =
+        native_output_root.join("runtime-probes/darwin_art_runtime_graphics_input.cc.o");
     let stamp_path = cache_dir.join("graphics-bootstrap.stamp");
     let runtime_stamp_path = cache_dir.join("runtime-bootstrap.stamp");
     let stamp = ninja_path(&stamp_path);
@@ -282,6 +286,8 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     let network_object = ninja_path(&network_object_path);
     let hwui_object = ninja_path(&hwui_object_path);
     let graphics_object = ninja_path(&graphics_object_path);
+    let graphics_phase_object = ninja_path(&graphics_phase_object_path);
+    let graphics_input_object = ninja_path(&graphics_input_object_path);
     let stamp_for_shell = stamp_path.to_string_lossy().into_owned();
     let native_output_for_shell = native_output_root.to_string_lossy().into_owned();
     let cached_runtime_objects = cached_native_objects(
@@ -340,13 +346,27 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         &[
             "probes/runtime_graphics_probe.cc",
             "probes/runtime_graphics_probe.h",
-            "probes/runtime_graphics_phase.cc",
-            "probes/runtime_graphics_phase.h",
-            "probes/runtime_graphics_input.cc",
-            "probes/runtime_graphics_probe_internal.h",
             "compat/darwin_surface_bridge.h",
             "compat/darwin_framework_natives.h",
             "compat/darwin_hwui_gpu_mode.h",
+        ],
+    );
+    let graphics_phase_inputs = probe_inputs(
+        &root,
+        &[
+            "probes/runtime_graphics_phase.cc",
+            "probes/runtime_graphics_phase.h",
+            "probes/runtime_graphics_probe.h",
+            "probes/runtime_frame_probe.h",
+        ],
+    );
+    let graphics_input_inputs = probe_inputs(
+        &root,
+        &[
+            "probes/runtime_graphics_input.cc",
+            "probes/runtime_graphics_probe.h",
+            "probes/runtime_graphics_probe_internal.h",
+            "probes/runtime_process_state.h",
         ],
     );
 
@@ -485,6 +505,32 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(": runtime_graphics_probe ");
     graph.push_str(&graphics_probe_inputs);
     graph.push('\n');
+    graph.push_str("rule runtime_graphics_phase_probe\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && DARWIN_ART_NATIVE_GRAPHICS_PHASE_OBJECT=");
+    graph.push_str(&shell_quote(&graphics_phase_object_path.to_string_lossy()));
+    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-phase-probe\n");
+    graph.push_str("  description = CXX runtime_graphics_phase\n");
+    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&graphics_phase_object);
+    graph.push_str(": runtime_graphics_phase_probe ");
+    graph.push_str(&graphics_phase_inputs);
+    graph.push('\n');
+    graph.push_str("rule runtime_graphics_input_probe\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && DARWIN_ART_NATIVE_GRAPHICS_INPUT_OBJECT=");
+    graph.push_str(&shell_quote(&graphics_input_object_path.to_string_lossy()));
+    graph.push_str(" cargo run -p art-bootstrap -- build-runtime-graphics-input-probe\n");
+    graph.push_str("  description = CXX runtime_graphics_input\n");
+    graph.push_str("  depfile = $out.d\n  deps = gcc\n  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&graphics_input_object);
+    graph.push_str(": runtime_graphics_input_probe ");
+    graph.push_str(&graphics_input_inputs);
+    graph.push('\n');
     graph.push_str("rule graphics_audit\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
@@ -496,9 +542,16 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&network_object_for_shell));
     graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_OBJECT=");
     graph.push_str(&shell_quote(&graphics_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_PHASE_OBJECT=");
+    graph.push_str(&shell_quote(&graphics_phase_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_INPUT_OBJECT=");
+    graph.push_str(&shell_quote(&graphics_input_object_path.to_string_lossy()));
     graph.push_str(" DARWIN_ART_NATIVE_HWUI_OBJECT=");
     graph.push_str(&shell_quote(&hwui_object_path.to_string_lossy()));
-    graph.push_str(" cargo run -p art-bootstrap -- audit-runtime-graphics-link\n");
+    // The full upstream closure is a separate release/CI gate.  The Ninja
+    // graph is the developer inner loop and must only relink/audit against
+    // already materialized foundation artifacts.
+    graph.push_str(" cargo run -p art-bootstrap -- audit-runtime-graphics-link-fast\n");
     graph.push_str("  description = GRAPHICS link/audit\n");
     graph.push_str("  restat = 1\n\n");
     graph.push_str("build ");
@@ -511,6 +564,10 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&network_object);
     graph.push(' ');
     graph.push_str(&graphics_object);
+    graph.push(' ');
+    graph.push_str(&graphics_phase_object);
+    graph.push(' ');
+    graph.push_str(&graphics_input_object);
     graph.push(' ');
     graph.push_str(&hwui_object);
     graph.push(' ');

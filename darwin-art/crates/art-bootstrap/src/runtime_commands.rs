@@ -1462,7 +1462,12 @@ pub(crate) fn compile_runtime_graphics_phase(
     build_dir: &Path,
     includes: &[&Path],
 ) -> Result<PathBuf> {
-    let object = build_dir.join("darwin_art_runtime_graphics_phase.cc.o");
+    let object = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_PHASE_OBJECT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| build_dir.join("darwin_art_runtime_graphics_phase.cc.o"));
+    if let Some(parent) = object.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let cache_path = build_dir.join("runtime-probe-graphics-phase-hashes.cache");
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     let mut command = runtime_cpp_command(includes);
@@ -1473,6 +1478,44 @@ pub(crate) fn compile_runtime_graphics_phase(
         .arg(&object);
     let _ = compile_cached_probe_tu(&mut command, &object, &cache_path, &compiler_identity)?;
     Ok(object)
+}
+
+pub(crate) fn build_runtime_graphics_phase_probe(root: &Path) -> Result<()> {
+    let output = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_PHASE_OBJECT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            root.join("_build/runtime-link-probe/darwin_art_runtime_graphics_phase.cc.o")
+        });
+    let build_dir = output
+        .parent()
+        .ok_or_else(|| format!("graphics phase output has no parent: {}", output.display()))?;
+    let includes = [
+        root.join("include"),
+        root.join("compat"),
+        root.join("_build/runtime-arm64/generated"),
+        root.join("_build/runtime-core/patched-source/runtime"),
+        root.join("_build/foundation/patched-source/libartbase"),
+        root.join("_aosp/art/libartbase"),
+        root.join("_aosp/art/libdexfile"),
+        root.join("_aosp/art/libelffile"),
+        root.join("_aosp/art/cmdline"),
+        root.join("_aosp/art/libnativebridge/include"),
+        root.join("_aosp/art/runtime"),
+        root.join("_aosp/art/runtime/base"),
+        root.join("_aosp/system/libbase/include"),
+        root.join("_aosp/external/tinyxml2"),
+        root.join("_aosp/libnativehelper/include_jni"),
+        root.join("_aosp/libnativehelper/header_only_include"),
+        root.join("_aosp/libnativehelper/platform_header_only_include"),
+        PathBuf::from("/opt/homebrew/include"),
+    ];
+    let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+    let object = compile_runtime_graphics_phase(root, build_dir, &include_refs)?;
+    if object != output {
+        fs::copy(&object, &output)?;
+    }
+    println!("build-runtime-graphics-phase-probe: {}", output.display());
+    Ok(())
 }
 
 /// Compile the pointer-input half of the graphics probe independently from
