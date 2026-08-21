@@ -7,6 +7,8 @@ graph_dir="$root/_build/native-graph-audit"
 graph="$graph_dir/build.ninja"
 mkdir -p "$graph_dir"
 
+audit_start=$SECONDS
+
 if [[ ! -x "$ninja" ]]; then
   echo "native-graph: pinned Ninja is missing: $ninja" >&2
   exit 2
@@ -92,7 +94,10 @@ phase_objects=(
 # `.ninja_deps` even when the compiler fingerprint is current. Let Ninja
 # reconcile those entries once; the following dry-run is the actual warm
 # no-op assertion.
+phase_start=$SECONDS
 "$ninja" -f "$graph" "${phase_objects[@]}" >/dev/null
+phase_seconds=$((SECONDS - phase_start))
+warm_start=$SECONDS
 for index in "${!phase_objects[@]}"; do
   object="${phase_objects[$index]}"
   phase_output="$($ninja -f "$graph" -n "$object" 2>&1)"
@@ -133,6 +138,7 @@ for index in "${!phase_objects[@]}"; do
     fi
   done
 done
+warm_seconds=$((SECONDS - warm_start))
 
 # Legacy promoted objects may need one dependency-scan edge before the warm
 # assertion. Materialize that metadata once, then require the actual second
@@ -145,4 +151,5 @@ grep -q 'no work to do' <<<"$warm_output" || {
   exit 1
 }
 
-echo "native-graph: PASS runtime=$runtime_cpp graphics-jni=$graphics_cpp icu=$icu_cpp cached-tu=$cached_cpp archives=$cached_archives phases=${#phase_rules[@]} warm=no-op depfiles=gcc invalidation=direct-source"
+audit_seconds=$((SECONDS - audit_start))
+echo "native-graph: PASS runtime=$runtime_cpp graphics-jni=$graphics_cpp icu=$icu_cpp cached-tu=$cached_cpp archives=$cached_archives phases=${#phase_rules[@]} warm=no-op depfiles=gcc invalidation=direct-source phase_materialize_seconds=$phase_seconds warm_query_seconds=$warm_seconds audit_seconds=$audit_seconds"
