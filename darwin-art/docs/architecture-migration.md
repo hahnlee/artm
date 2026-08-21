@@ -157,7 +157,11 @@ Metal drawable submission, while `runtime_graphics_probe.cc` owns orchestration
 and state transitions. Its source/header are explicit graph inputs, so a
 presenter edit does not rebuild activity/resource/input phases. The Rust owner
 keeps the opaque surface and graphics session alive across the whole frame
-loop; C++ does not own a second lifecycle state machine.
+loop; C++ does not own a second lifecycle state machine. The surface is
+transferred into `RuntimeSession` immediately after the ART process call
+publishes it, before the host chooses the GPU/headless branch. An error in
+that interval therefore cannot leave a foreign surface owner outside the Rust
+shutdown transaction.
 
 The host no longer consumes the complete raw `EngineSymbols` table. Provider
 acquire/release/clear callbacks are converted directly into the Rust-owned
