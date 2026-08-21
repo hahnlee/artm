@@ -1,18 +1,13 @@
 use crate::config::{HostError, HostOutcome, RunOptions};
-use crate::provider::ProviderBridge;
+use crate::runtime::HostRuntime;
 use crate::surface::{owned_surface_next_pointer_event, owned_surface_pump_events};
-use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
+use darwin_art_engine::SurfaceSession;
 use darwin_art_engine_sys::{PointerEvent, ProcessResult};
-use darwin_art_runtime::{RuntimeSession, Subsystem};
+use darwin_art_runtime::Subsystem;
 
 #[cfg(target_os = "macos")]
 pub(super) fn run(
-    runtime: &mut RuntimeSession<
-        EngineSession,
-        Box<ProviderBridge>,
-        SurfaceSession,
-        GraphicsSession,
-    >,
+    runtime: &mut HostRuntime,
     active_surface: Option<SurfaceSession>,
     process: ProcessResult,
     options: &RunOptions,

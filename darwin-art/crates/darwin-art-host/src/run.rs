@@ -5,11 +5,12 @@ use crate::frame::{FrameHost, receive_frame};
 #[cfg(target_os = "macos")]
 use crate::gpu_loop::run as run_gpu_loop;
 use crate::provider::ProviderBridge;
+use crate::runtime::HostRuntime;
 #[cfg(target_os = "macos")]
 use crate::teardown::RuntimeShutdownGuard;
 #[cfg(target_os = "macos")]
-use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
-use darwin_art_runtime::{RuntimeSession, Subsystem};
+use darwin_art_engine::EngineSession;
+use darwin_art_runtime::Subsystem;
 
 pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
     options.validate()?;
@@ -22,9 +23,6 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
 
     #[cfg(target_os = "macos")]
     {
-        type HostRuntime =
-            RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>;
-
         let mut runtime = HostRuntime::new();
         runtime
             .start()

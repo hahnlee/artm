@@ -5,6 +5,8 @@ mod gpu_loop;
 mod provider;
 mod run;
 #[cfg(target_os = "macos")]
+mod runtime;
+#[cfg(target_os = "macos")]
 mod surface;
 #[cfg(target_os = "macos")]
 mod teardown;

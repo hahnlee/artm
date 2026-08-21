@@ -1,16 +1,11 @@
 //! Single owner-thread shutdown path for graphics and headless runs.
 
 use crate::config::HostError;
-use crate::provider::ProviderBridge;
+use crate::runtime::HostRuntime;
 use crate::surface::{
     clear_provider_owner, close_graphics_owner, close_surface_owner, shutdown_engine_owner,
 };
-use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
-use darwin_art_runtime::RuntimeSession;
 use darwin_art_runtime::{RuntimeError, Subsystem};
-
-type HostRuntime =
-    RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession, GraphicsSession>;
 
 /// Owns the final shutdown obligation after the runtime has entered its
 /// running phase.  Moving this obligation into a guard makes every later
