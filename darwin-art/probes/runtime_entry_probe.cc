@@ -435,160 +435,28 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   }
 
   if (run_elf_jni_fixture) {
-    if (!run_generic_elf) {
-      std::cerr << "ART Android ELF generic graph path is missing\n";
-      return 40;
+    const darwin_art_elf_probe::FixtureGraphAcceptance fixture_input{
+        .env = env,
+        .self = self,
+        .app_loader_ref = app_loader_ref,
+        .native_fixture_class = native_fixture_class,
+        .elf_fixture_path = elf_fixture_path,
+        .generic_elf_path = generic_elf_path,
+        .libcxx_collections_path = libcxx_collections_path,
+        .libcxx_exception_path = libcxx_exception_path,
+        .tls_fixture_path = tls_fixture_path,
+        .apk_sha256 = apk_sha256,
+        .apk_root_sha256 = apk_root_sha256,
+        .run_generic_elf = run_generic_elf,
+        .run_apk_elf = run_apk_elf,
+        .run_libcxx_acceptance = run_libcxx_acceptance,
+        .run_tls_acceptance = run_tls_acceptance,
+    };
+    const int fixture_status =
+        darwin_art_elf_probe::run_fixture_graph_acceptance(fixture_input);
+    if (fixture_status != 0) {
+      return fixture_status;
     }
-    if (!run_apk_elf) {
-      std::cerr << "ART Android APK ELF extraction/hash boundary is missing\n";
-      return 45;
-    }
-    if (!run_libcxx_acceptance) {
-      std::cerr << "ART Android libc++ fixture paths are missing\n";
-      return 43;
-    }
-    if (!run_tls_acceptance) {
-      std::cerr << "ART Android TLS fixture path is missing\n";
-      return 44;
-    }
-    std::string libcxx_error;
-    bool collections_ok = false;
-    bool exception_ok = false;
-    {
-      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
-      JavaVM* vm =
-          reinterpret_cast<JavaVM*>(art::Runtime::Current()->GetJavaVM());
-      collections_ok = darwin_art_elf_probe::run_android_elf_self_test(
-          env, vm, app_loader_ref, libcxx_collections_path, &libcxx_error);
-      if (collections_ok) {
-        exception_ok = darwin_art_elf_probe::run_android_elf_self_test(
-            env, vm, app_loader_ref, libcxx_exception_path, &libcxx_error);
-      }
-    }
-    if (!collections_ok || !exception_ok || env->ExceptionCheck()) {
-      std::cerr << "ART Android libc++ acceptance failed: " << libcxx_error
-                << "\n";
-      return 43;
-    }
-    std::cout << "ART Android libc++: real-r28c collections=189 "
-                 "exception-cleanup=73 unload=sequential\n"
-              << std::flush;
-    std::string tls_error;
-    bool tls_ok = false;
-    {
-      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
-      JavaVM* vm =
-          reinterpret_cast<JavaVM*>(art::Runtime::Current()->GetJavaVM());
-      tls_ok = darwin_art_elf_probe::run_android_elf_self_test(
-          env, vm, app_loader_ref, tls_fixture_path, &tls_error);
-    }
-    if (!tls_ok || env->ExceptionCheck()) {
-      std::cerr << "ART Android ELF TLS acceptance failed: " << tls_error
-                << "\n";
-      return 44;
-    }
-    std::cout << "ART Android ELF TLS: local-TLSDESC threads=4 align=64 "
-                 "unload=quiescent\n"
-              << std::flush;
-    std::string generic_load_error;
-    bool generic_loaded = false;
-    {
-      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
-      generic_loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
-          env, generic_elf_path, app_loader_ref, nullptr, &generic_load_error);
-    }
-    if (!generic_loaded || !generic_load_error.empty() || env->ExceptionCheck() ||
-        darwin_art_elf_jni_fixture_registration_status() != 0) {
-      std::cerr << "ART Android ELF generic graph load failed, load_error="
-                << generic_load_error << "\n";
-      return 40;
-    }
-    jmethodID generic_native_add =
-        env->GetStaticMethodID(native_fixture_class, "nativeAdd", "(IJI)J");
-    const jlong generic_add_result =
-        generic_native_add == nullptr
-            ? -1
-            : env->CallStaticLongMethod(native_fixture_class,
-                                        generic_native_add, 10, jlong{20}, 12);
-    if (generic_add_result != 42 || env->ExceptionCheck()) {
-      std::cerr << "ART Android ELF generic RegisterNatives failed, result="
-                << generic_add_result << "\n";
-      return 40;
-    }
-    // generic_elf_path and apk_elf_path are required to be the same extracted
-    // root. The successful JavaVMExt load above is therefore the APK execution
-    // evidence; loading the same SONAME a second time would only exercise ART's
-    // path cache and acquire no additional graph ownership.
-    darwin_art_process::record_apk_elf_loaded(apk_sha256, apk_root_sha256);
-    char *partial_error = nullptr;
-    void *partial_handle =
-        android::OpenNativeLibrary(env, 35, elf_fixture_path, app_loader_ref,
-                                   nullptr, nullptr, nullptr, &partial_error);
-    const bool partial_cleanup_ok =
-        partial_handle == nullptr && partial_error != nullptr &&
-        darwin_art_elf_jni_fixture_lifecycle_status() == 124567 &&
-        darwin_art_elf_jni_fixture_namespace_lifecycle_status() == 5;
-    if (partial_handle != nullptr) {
-      char* close_error = nullptr;
-      (void)android::CloseNativeLibrary(partial_handle, true, &close_error);
-      android::NativeLoaderFreeErrorMessage(close_error);
-    }
-    const std::string partial_error_text =
-        partial_error == nullptr ? "<none>" : partial_error;
-    android::NativeLoaderFreeErrorMessage(partial_error);
-    if (!partial_cleanup_ok || env->ExceptionCheck()) {
-      std::cerr << "ART Android ELF JNI: partial failure cleanup failed, lifecycle="
-                << darwin_art_elf_jni_fixture_lifecycle_status()
-                << " namespace="
-                << darwin_art_elf_jni_fixture_namespace_lifecycle_status()
-                << " error=" << partial_error_text
-                << "\n";
-      return 40;
-    }
-    std::string load_error;
-    bool loaded = false;
-    {
-      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
-      loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
-          env, elf_fixture_path, app_loader_ref, native_fixture_class,
-          &load_error);
-    }
-    const int bridge_status =
-        darwin_art_elf_jni_fixture_registration_status();
-    const int lifecycle_status =
-        darwin_art_elf_jni_fixture_lifecycle_status();
-    const int namespace_status =
-        darwin_art_elf_jni_fixture_namespace_lifecycle_status();
-    if (!loaded || !load_error.empty() || bridge_status != 0x7f ||
-        lifecycle_status != 123 || namespace_status != 3 ||
-        env->ExceptionCheck()) {
-      std::cerr << "ART Android ELF JNI: load/registration failed, status="
-                << bridge_status << " lifecycle=" << lifecycle_status
-                << " namespace=" << namespace_status
-                << " load_error=" << load_error << "\n";
-      return 41;
-    }
-    jmethodID run_acceptance =
-        env->GetStaticMethodID(native_fixture_class, "runAcceptance", "()I");
-    const jint acceptance =
-        run_acceptance == nullptr
-            ? -3
-            : env->CallStaticIntMethod(native_fixture_class, run_acceptance);
-    if (acceptance != 42 || env->ExceptionCheck()) {
-      std::cerr << "ART Android ELF JNI: nativeAdd/nativeSpill failed, result="
-                << acceptance << "\n";
-      if (self->IsExceptionPending()) {
-        std::cerr << self->GetException()->Dump() << "\n";
-      }
-      return 42;
-    }
-    std::cout
-        << "ART Android ELF JNI: graph=child-first+relocated "
-           "providers=bind_builtins+__errno+strlen+fs-random-ctor+scanf+"
-           "swprintf+ioctl+strftime+sendfile "
-           "load+JNI_OnLoad+RegisterNatives=generic+fixture scalar-ref=all "
-           "nativeUsesEnv=current stack-repack=ok\n"
-        << std::flush;
   }
 
   run_result->hello_answer = jni_results.hello_answer;
