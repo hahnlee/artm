@@ -24,14 +24,6 @@
 #include "darwin_art/android_runtime_host.h"
 #include "darwin_android_graphics_registration.h"
 
-namespace android {
-extern int register_android_util_Log(JNIEnv* env);
-extern int register_android_content_AssetManager(JNIEnv* env);
-extern int register_android_content_StringBlock(JNIEnv* env);
-extern int register_android_content_XmlBlock(JNIEnv* env);
-extern int register_android_content_res_ApkAssets(JNIEnv* env);
-extern int register_com_android_internal_util_VirtualRefBasePtr(JNIEnv* env);
-}  // namespace android
 #endif
 
 namespace {
@@ -907,26 +899,6 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   }
 
   return true;
-}
-
-bool RegisterFrameworkResourceNatives(JNIEnv* env) {
-#if defined(DARWIN_ART_REAL_GRAPHICS)
-  // Preserve AndroidRuntime.cpp's ownership and registration order. These four
-  // tables replace the temporary AssetManager table as one atomic resource
-  // subsystem; mixing either AssetManager native-handle representation would
-  // make Theme/ApkAssets jlong values type-unsafe.
-  return android::register_android_util_Log(env) >= 0 &&
-         android::register_android_content_AssetManager(env) >= 0 &&
-         android::register_android_content_StringBlock(env) >= 0 &&
-         android::register_android_content_XmlBlock(env) >= 0 &&
-         android::register_android_content_res_ApkAssets(env) >= 0 &&
-         android::register_com_android_internal_util_VirtualRefBasePtr(env) >= 0;
-#else
-  // The baseline probe registered its deliberately small AssetManager table in
-  // RegisterFrameworkNatives().
-  (void)env;
-  return true;
-#endif
 }
 
 bool RegisterFrameworkGraphicsNatives(JNIEnv* env) {

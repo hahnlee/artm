@@ -129,7 +129,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let app_presentation_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_app_presentation.cc.o");
     let stamp_path = cache_dir.join("graphics-bootstrap.stamp");
+    let graphics_ready_path = cache_dir.join("graphics-bootstrap.ready");
     let runtime_stamp_path = cache_dir.join("runtime-bootstrap.stamp");
+    let runtime_ready_path = cache_dir.join("runtime-bootstrap.ready");
     let stamp = ninja_path(&stamp_path);
     let runtime_stamp = ninja_path(&runtime_stamp_path);
     let archive = ninja_path(&archive_path);
@@ -172,6 +174,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
                 "darwin_android_elf_image_registry.cc",
                 "darwin_provider_owners.cc",
                 "darwin_framework_natives.cc",
+                "darwin_framework_resource_registration.cc",
                 "darwin_framework_animation_natives.cc",
                 "darwin_icu_natives.cc",
                 "darwin_libcore_natives.cc",
@@ -202,6 +205,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
                 "darwin_android_elf_image_registry.cc",
                 "darwin_provider_owners.cc",
                 "darwin_framework_natives.cc",
+                "darwin_framework_resource_registration.cc",
                 "darwin_framework_animation_natives.cc",
                 "darwin_icu_jni_bridge.cc",
                 "darwin_libcore_natives.cc",
@@ -522,6 +526,10 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push('\n');
         graph.push_str("# graphics-bootstrap uses persisted per-object commands\n\n");
     } else {
+        // A prior fallback may have produced an archive before a newly added
+        // adapter source was promoted into the cache. The readiness marker is
+        // intentionally a separate output: an existing archive alone must
+        // not make Ninja accept an incomplete canonical fallback.
         graph.push_str("rule graphics_bootstrap\n");
         graph.push_str("  command = cd ");
         graph.push_str(&shell_quote(&root_for_shell));
@@ -531,6 +539,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push_str(&bootstrap_cli);
         graph.push_str(" build-runtime-graphics-bootstrap-internal && touch ");
         graph.push_str(&shell_quote(&stamp_for_shell));
+        graph.push(' ');
+        graph.push_str(&shell_quote(&graphics_ready_path.to_string_lossy()));
         graph.push('\n');
         graph.push_str("  description = GRAPHICS bootstrap\n");
         graph.push_str("  restat = 1\n\n");
@@ -538,6 +548,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push_str(&stamp);
         graph.push(' ');
         graph.push_str(&archive);
+        graph.push(' ');
+        graph.push_str(&ninja_path(&graphics_ready_path));
         graph.push_str(": graphics_bootstrap ");
         graph.push_str(&bootstrap_input_list);
         graph.push('\n');
@@ -561,6 +573,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push('\n');
         graph.push_str("# runtime-bootstrap uses persisted per-object commands\n\n");
     } else {
+        // Keep the same completeness contract for the headless archive. This
+        // marker is absent after an interrupted or source-incomplete fallback
+        // and therefore forces the canonical builder to run again.
         graph.push_str("rule runtime_bootstrap\n");
         graph.push_str("  command = cd ");
         graph.push_str(&shell_quote(&root_for_shell));
@@ -570,6 +585,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push_str(&bootstrap_cli);
         graph.push_str(" build-runtime-bootstrap-internal && touch ");
         graph.push_str(&shell_quote(&runtime_stamp_path.to_string_lossy()));
+        graph.push(' ');
+        graph.push_str(&shell_quote(&runtime_ready_path.to_string_lossy()));
         graph.push('\n');
         graph.push_str("  description = ART bootstrap\n");
         graph.push_str("  restat = 1\n\n");
@@ -577,6 +594,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push_str(&runtime_stamp);
         graph.push(' ');
         graph.push_str(&runtime_archive);
+        graph.push(' ');
+        graph.push_str(&ninja_path(&runtime_ready_path));
         graph.push_str(": runtime_bootstrap ");
         graph.push_str(&bootstrap_input_list);
         graph.push('\n');

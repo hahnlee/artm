@@ -14,6 +14,7 @@ pub(super) fn adapter_jobs(
         "darwin_android_elf_image_registry.cc",
         "darwin_provider_owners.cc",
         "darwin_framework_natives.cc",
+        "darwin_framework_resource_registration.cc",
         "darwin_framework_animation_natives.cc",
         "darwin_icu_natives.cc",
         "darwin_icu_jni_bridge.cc",
@@ -55,7 +56,12 @@ pub(super) fn adapter_jobs(
         } else {
             runtime_bootstrap_cpp_command(compile_includes)
         };
-        if real_graphics && adapter_source == "darwin_framework_natives.cc" {
+        if real_graphics
+            && matches!(
+                adapter_source,
+                "darwin_framework_natives.cc" | "darwin_framework_resource_registration.cc"
+            )
+        {
             adapter_command
                 .arg("-DDARWIN_ART_REAL_GRAPHICS")
                 .arg("-I")
