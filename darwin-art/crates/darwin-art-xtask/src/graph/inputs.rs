@@ -15,6 +15,10 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
     let mut paths = vec![
         PathBuf::from("sources.lock"),
         PathBuf::from("bootclasspath.lock"),
+        // The canonical builder writes this stamp after preparing the shared
+        // runtime cache. Including it prevents a graph emitted before
+        // preparation from being reused after the cache becomes promotable.
+        PathBuf::from("_build/runtime-common/cache-identity"),
         PathBuf::from("tools/build-android-elf-jni-fixture.sh"),
         PathBuf::from("tools/audit-android16-graphics-closure.sh"),
         PathBuf::from("probes/runtime_filesystem_probe.cc"),

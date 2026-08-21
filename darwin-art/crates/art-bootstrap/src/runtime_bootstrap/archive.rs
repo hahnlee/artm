@@ -1,15 +1,17 @@
 use super::*;
+use darwin_art_build_contract::RuntimeFlavor;
 
 pub(crate) fn finalize(
     staged: &RuntimeBootstrapStaging,
     real_graphics: bool,
     compiled: RuntimeBootstrapCompiled,
 ) -> Result<()> {
-    let archive = staged.build_dir.join(if real_graphics {
-        "libart-runtime-graphics-bootstrap-darwin.a"
+    let flavor = if real_graphics {
+        RuntimeFlavor::Graphics
     } else {
-        "libart-runtime-bootstrap-darwin.a"
-    });
+        RuntimeFlavor::Headless
+    };
+    let archive = staged.build_dir.join(flavor.archive_name());
     create_archive(&archive, &compiled.objects)?;
     println!(
         "{}: ART runtime initialization spine Mach-O objects={} compiled={} cached={} archive={}",

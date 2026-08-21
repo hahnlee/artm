@@ -6,6 +6,7 @@ version = 4
 name = "art-bootstrap"
 version = "0.1.0"
 dependencies = [
+ "darwin-art-build-contract",
  "sha2",
 ]
 
@@ -45,6 +46,10 @@ dependencies = [
 
 [[package]]
 name = "darwin-art-abi"
+version = "0.1.0"
+
+[[package]]
+name = "darwin-art-build-contract"
 version = "0.1.0"
 
 [[package]]
@@ -97,6 +102,7 @@ dependencies = [
 name = "darwin-art-xtask"
 version = "0.1.0"
 dependencies = [
+ "darwin-art-build-contract",
  "sha2",
 ]
 

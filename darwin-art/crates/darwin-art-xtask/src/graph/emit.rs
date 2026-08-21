@@ -2,6 +2,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
+use darwin_art_build_contract::RUNTIME_CACHE_IDENTITY;
+
 use super::super::*;
 use super::cache::{
     cached_native_objects_from_dirs, emit_cached_native_graph, emit_cached_native_graph_with_inputs,
@@ -13,8 +15,6 @@ use super::inputs::{graph_inputs, is_probe_only_input, probe_content_stamp, prob
 use super::representative::{
     REPRESENTATIVE_EDGES, edge_digest, emit_representative_edges, json_escape, toolchain_inputs,
 };
-
-const SHARED_RUNTIME_CACHE_IDENTITY: &str = "darwin-art-runtime-core-cache-v2-common-includes-fmt";
 
 pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let root = repository_root(out);
@@ -134,7 +134,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let graphics_objects = native_output_root.join("runtime-graphics-bootstrap/objects");
     let shared_runtime_cache_ready =
         fs::read_to_string(native_output_root.join("runtime-common/cache-identity"))
-            .is_ok_and(|identity| identity.trim() == SHARED_RUNTIME_CACHE_IDENTITY);
+            .is_ok_and(|identity| identity.trim() == RUNTIME_CACHE_IDENTITY);
     let cached_runtime_objects = if shared_runtime_cache_ready {
         cached_native_objects_from_dirs(
             &[&runtime_common_objects, &runtime_objects],

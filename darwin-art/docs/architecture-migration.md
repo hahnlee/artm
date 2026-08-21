@@ -167,6 +167,9 @@ framework, libcore, and ICU graphics adapters remain flavor-specific. Graphics
 therefore reuses the runtime archive's common objects instead of compiling a
 second ART core, while a cache-identity mismatch forces a complete canonical
 repopulation rather than mixing header ABIs.
+The cache identity and flavor archive names live in the dependency-free
+`darwin-art-build-contract` crate, shared by bootstrap and xtask, so this
+boundary is not duplicated as stringly-typed build policy.
 
 The framework JNI boundary follows the same rule: Choreographer/
 DisplayEventReceiver, PropertyValuesHolder, Perfetto, and their registration

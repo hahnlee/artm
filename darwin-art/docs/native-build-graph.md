@@ -53,6 +53,10 @@ locked AOSP fmt headers); when that identity changes, graph promotion is
 disabled until the canonical builder repopulates the shared cache. This avoids
 silently mixing a graphics-only header ABI into the headless runtime and makes
 the second flavor an adapter/link step rather than another ART cold build.
+The identity is defined once in the dependency-free
+`darwin-art-build-contract` crate and is also an explicit graph input, so a
+post-prepare cache transition regenerates the graph instead of reusing a
+pre-prepare canonical rule.
 Each probe phase also has a stable content stamp under
 `_build/runtime-probes/content-stamps/`. The graph generator updates a stamp
 only when that phase's source/header bytes change, so a checkout that preserves

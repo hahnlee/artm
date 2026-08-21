@@ -5,4 +5,5 @@ edition = "2024"
 publish = false
 
 [dependencies]
+darwin-art-build-contract = { path = "../darwin-art-build-contract" }
 sha2 = "0.10"

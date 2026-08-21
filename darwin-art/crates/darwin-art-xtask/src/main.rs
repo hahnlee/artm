@@ -8,9 +8,10 @@ use std::path::{Path, PathBuf};
 
 mod graph;
 
+use darwin_art_build_contract::RUNTIME_CACHE_IDENTITY;
 use graph::emit::emit_graph;
 
-const GRAPH_VERSION: &str = "darwin-art-native-graph-v12-shared-common-adapters";
+const GRAPH_VERSION: &str = "darwin-art-native-graph-v13-cache-stamp-input";
 const GRAPHICS_BOOTSTRAP_ARCHIVE: &str =
     "runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a";
 const RUNTIME_BOOTSTRAP_ARCHIVE: &str = "runtime-bootstrap/libart-runtime-bootstrap-darwin.a";
@@ -96,6 +97,8 @@ fn repository_root(out: &Path) -> PathBuf {
 fn digest_inputs(root: &Path, inputs: &[PathBuf]) -> io::Result<String> {
     let mut digest = Sha256::new();
     digest.update(GRAPH_VERSION.as_bytes());
+    digest.update([0]);
+    digest.update(RUNTIME_CACHE_IDENTITY.as_bytes());
     for path in inputs {
         digest.update(path.to_string_lossy().as_bytes());
         digest.update([0]);

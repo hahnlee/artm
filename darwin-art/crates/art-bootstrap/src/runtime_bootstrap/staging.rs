@@ -1,4 +1,5 @@
 use super::*;
+use darwin_art_build_contract::RUNTIME_CACHE_IDENTITY;
 
 const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.cc",
@@ -48,9 +49,6 @@ const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0029-darwin-arm64-native-stack-pcs.patch",
     "patches/art/0030-darwin-large-object-bitmap-window.patch",
 ];
-
-pub(crate) const SHARED_RUNTIME_CACHE_IDENTITY: &str =
-    "darwin-art-runtime-core-cache-v2-common-includes-fmt";
 
 pub(crate) struct RuntimeBootstrapStaging {
     pub(crate) root: PathBuf,
@@ -167,7 +165,7 @@ pub(crate) fn prepare(root: &Path, real_graphics: bool) -> Result<RuntimeBootstr
     fs::create_dir_all(&runtime_core_object_dir)?;
     fs::write(
         root.join("_build/runtime-common/cache-identity"),
-        format!("{SHARED_RUNTIME_CACHE_IDENTITY}\n"),
+        format!("{RUNTIME_CACHE_IDENTITY}\n"),
     )?;
     fs::create_dir_all(&runtime_generated_dir)?;
 
