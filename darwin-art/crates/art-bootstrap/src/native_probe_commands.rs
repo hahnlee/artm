@@ -406,6 +406,26 @@ pub(crate) fn compile_runtime_network_loader_probe(
     Ok(object)
 }
 
+/// Compile the JNI-only context-loader bridge separately from the managed
+/// Activity entry probe.  It has no ART/HWUI dependency beyond JNI headers.
+pub(crate) fn compile_runtime_context_loader_probe(
+    root: &Path,
+    build_dir: &Path,
+    includes: &[&Path],
+) -> Result<PathBuf> {
+    let object = build_dir.join("darwin_art_runtime_context_loader.cc.o");
+    let cache_path = build_dir.join("runtime-probe-context-loader-hashes.cache");
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let mut command = runtime_cpp_command(includes);
+    command
+        .arg("-c")
+        .arg(root.join("probes/runtime_context_loader.cc"))
+        .arg("-o")
+        .arg(&object);
+    let _ = compile_cached_probe_tu(&mut command, &object, &cache_path, &compiler_identity)?;
+    Ok(object)
+}
+
 pub(crate) fn build_runtime_graphics_session_probe(root: &Path) -> Result<()> {
     let output = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT")
         .map(PathBuf::from)

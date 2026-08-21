@@ -72,6 +72,8 @@
 extern "C" int darwin_art_elf_jni_fixture_registration_status();
 extern "C" int darwin_art_elf_jni_fixture_lifecycle_status();
 extern "C" int darwin_art_elf_jni_fixture_namespace_lifecycle_status();
+extern "C" int darwin_art_install_context_loader(JNIEnv* env,
+                                                   jobject app_loader);
 
 namespace android {
 extern "C" void* OpenNativeLibrary(JNIEnv* env, int32_t target_sdk_version,
@@ -468,37 +470,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 35;
   }
 
-  // Android's ActivityThread installs the application PathClassLoader as the
-  // managed thread context loader. Native framework bridges reached from a
-  // boot-class method (for example ServiceManagerProxy) otherwise cannot find
-  // process-local service implementations packaged in the probe/APK DEX. Do
-  // this only after FinishMinimalForDarwinProbe: Thread.currentThread() is not
-  // legal while ART is still in unstarted-runtime mode.
-  jclass thread_class = env->FindClass("java/lang/Thread");
-  jmethodID current_thread =
-      thread_class == nullptr
-          ? nullptr
-          : env->GetStaticMethodID(thread_class, "currentThread",
-                                   "()Ljava/lang/Thread;");
-  jmethodID set_context_loader =
-      thread_class == nullptr
-          ? nullptr
-          : env->GetMethodID(thread_class, "setContextClassLoader",
-                             "(Ljava/lang/ClassLoader;)V");
-  jobject managed_thread =
-      current_thread == nullptr
-          ? nullptr
-          : env->CallStaticObjectMethod(thread_class, current_thread);
-  if (managed_thread == nullptr || set_context_loader == nullptr ||
-      app_loader_ref == nullptr || env->ExceptionCheck()) {
-    std::cerr << "ART Darwin DEX: context ClassLoader setup failed\n";
-    return 4;
-  }
-  env->CallVoidMethod(managed_thread, set_context_loader, app_loader_ref);
-  env->DeleteLocalRef(managed_thread);
-  env->DeleteLocalRef(thread_class);
-  if (env->ExceptionCheck()) {
-    std::cerr << "ART Darwin DEX: context ClassLoader install failed\n";
+  // ActivityThread performs this after minimal runtime startup. Keep the
+  // JNI-only bridge independent from the large Activity entry TU.
+  if (darwin_art_install_context_loader(env, app_loader_ref) != 0) {
     return 4;
   }
 

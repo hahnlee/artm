@@ -477,6 +477,8 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
     )?;
     let network_loader_object =
         compile_runtime_network_loader_probe(root, &build_dir, &include_refs)?;
+    let context_loader_object =
+        compile_runtime_context_loader_probe(root, &build_dir, &include_refs)?;
     let mut graph_command = runtime_cpp_command(&include_refs);
     graph_command
         .args(["-include", "mirror/object_reference.h"])
@@ -530,6 +532,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(&graphics_probe_object)
         .arg(&graphics_state_object)
         .arg(&network_loader_object)
+        .arg(&context_loader_object)
         .arg(&jni_acceptance_object)
         .arg(&graphics_session_object)
         .arg(&graphics_phase_object)
