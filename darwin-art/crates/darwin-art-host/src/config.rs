@@ -6,7 +6,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
-use darwin_art_engine::{GraphicsSession, ProcessRequest, ProcessRequestError};
+use darwin_art_engine::{CallbackBindings, GraphicsSession, ProcessRequest, ProcessRequestError};
 use darwin_art_engine_sys::ProcessResult;
 
 use crate::OwnedFrame;
@@ -55,7 +55,26 @@ pub(crate) fn build_process_request(
     provider_release: Option<darwin_art_engine_sys::ProviderReleaseFn>,
     graphics_session: Option<&GraphicsSession>,
 ) -> Result<ProcessRequest, HostError> {
-    let mut request = ProcessRequest::new(
+    // SAFETY: FrameHost, ProviderBridge, and the optional graphics session are
+    // owned by the caller for the complete synchronous engine invocation.
+    let callbacks = unsafe {
+        CallbackBindings::from_raw(
+            host_context,
+            frame_callback,
+            provider_context,
+            provider_acquire,
+            provider_release,
+            core::ptr::null_mut(),
+        )
+    }
+    .map_err(|error| match error {
+        ProcessRequestError::InteriorNul(path) => HostError::InteriorNul(path),
+        ProcessRequestError::MissingCallbackContext(kind) => {
+            HostError::InvalidCallbackBinding(kind)
+        }
+    })?
+    .with_graphics_session(graphics_session);
+    let request = ProcessRequest::new(
         &options.core_oj_jar,
         &options.core_libart_jar,
         &options.framework_jar,
@@ -63,24 +82,14 @@ pub(crate) fn build_process_request(
         &options.app_dex,
         options.heap_initial_bytes,
         options.heap_maximum_bytes,
+        callbacks,
     )
     .map_err(|error| match error {
         ProcessRequestError::InteriorNul(path) => HostError::InteriorNul(path),
+        ProcessRequestError::MissingCallbackContext(kind) => {
+            HostError::InvalidCallbackBinding(kind)
+        }
     })?;
-    // SAFETY: the caller keeps `FrameHost`, `ProviderBridge`, and the optional
-    // graphics session alive for the complete synchronous `run_request` call;
-    // the static callbacks only dereference those contexts during that call.
-    unsafe {
-        request.bind_callbacks(
-            host_context,
-            frame_callback,
-            provider_context,
-            provider_acquire,
-            provider_release,
-            core::ptr::null_mut(),
-        );
-    }
-    request.bind_graphics_session(graphics_session);
     Ok(request)
 }
 
@@ -88,6 +97,7 @@ pub(crate) fn build_process_request(
 pub enum HostError {
     UnsupportedPlatform,
     InteriorNul(PathBuf),
+    InvalidCallbackBinding(&'static str),
     DynamicLoader(String),
     InvalidVisibleSeconds(f64),
     RuntimeFailed(i32),
@@ -108,6 +118,9 @@ impl fmt::Display for HostError {
                     "path contains an interior NUL: {}",
                     path.display()
                 )
+            }
+            Self::InvalidCallbackBinding(kind) => {
+                write!(formatter, "invalid callback binding: {kind}")
             }
             Self::DynamicLoader(message) => write!(formatter, "dynamic loader: {message}"),
             Self::InvalidVisibleSeconds(seconds) => write!(

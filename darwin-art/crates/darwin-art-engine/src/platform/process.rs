@@ -10,12 +10,73 @@ use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProviderAcquireFn, Pro
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::ptr::NonNull;
 
 use super::graphics::GraphicsSession;
 
 #[derive(Debug)]
 pub enum ProcessRequestError {
     InteriorNul(PathBuf),
+    MissingCallbackContext(&'static str),
+}
+
+/// Validated callback/context bundle for one synchronous ART invocation.
+///
+/// The only raw-pointer construction lives in `from_raw`; the request and
+/// engine layers carry this value by ownership and cannot accidentally omit a
+/// required context or pass an unpaired provider callback.
+#[derive(Clone, Copy)]
+pub struct CallbackBindings {
+    host_context: NonNull<c_void>,
+    frame_callback: Option<FrameCallback>,
+    provider_context: NonNull<c_void>,
+    provider_acquire: Option<ProviderAcquireFn>,
+    provider_release: Option<ProviderReleaseFn>,
+    graphics_session_context: Option<NonNull<c_void>>,
+}
+
+impl CallbackBindings {
+    /// # Safety
+    ///
+    /// Each non-null context must remain valid and synchronized, and each
+    /// callback must remain callable, until the synchronous engine call
+    /// returns. The native ART graph may invoke provider callbacks on
+    /// attached ART threads during that call.
+    pub unsafe fn from_raw(
+        host_context: *mut c_void,
+        frame_callback: Option<FrameCallback>,
+        provider_context: *mut c_void,
+        provider_acquire: Option<ProviderAcquireFn>,
+        provider_release: Option<ProviderReleaseFn>,
+        graphics_session_context: *mut c_void,
+    ) -> Result<Self, ProcessRequestError> {
+        let host_context = NonNull::new(host_context)
+            .ok_or(ProcessRequestError::MissingCallbackContext("host"))?;
+        let provider_context = NonNull::new(provider_context)
+            .ok_or(ProcessRequestError::MissingCallbackContext("provider"))?;
+        if provider_acquire.is_some() != provider_release.is_some() {
+            return Err(ProcessRequestError::MissingCallbackContext(
+                "provider callback pair",
+            ));
+        }
+        Ok(Self {
+            host_context,
+            frame_callback,
+            provider_context,
+            provider_acquire,
+            provider_release,
+            graphics_session_context: NonNull::new(graphics_session_context),
+        })
+    }
+
+    /// Attach the live graphics owner without exposing its opaque ABI pointer
+    /// to host orchestration. The request borrows the session for the same
+    /// synchronous call in which the wire config is materialized.
+    pub fn with_graphics_session(mut self, session: Option<&GraphicsSession>) -> Self {
+        self.graphics_session_context =
+            session.and_then(|graphics| NonNull::new(graphics.raw_handle().cast()));
+        self
+    }
 }
 
 /// Owns the complete input lifetime for one synchronous ART process call.
@@ -27,12 +88,7 @@ pub struct ProcessRequest {
     app_dex: CString,
     heap_initial_bytes: u64,
     heap_maximum_bytes: u64,
-    host_context: *mut c_void,
-    frame_callback: Option<FrameCallback>,
-    provider_context: *mut c_void,
-    provider_acquire: Option<ProviderAcquireFn>,
-    provider_release: Option<ProviderReleaseFn>,
-    graphics_session_context: *mut c_void,
+    callbacks: CallbackBindings,
 }
 
 impl ProcessRequest {
@@ -45,6 +101,7 @@ impl ProcessRequest {
         app_dex: &Path,
         heap_initial_bytes: u64,
         heap_maximum_bytes: u64,
+        callbacks: CallbackBindings,
     ) -> Result<Self, ProcessRequestError> {
         Ok(Self {
             core_oj_jar: path_c_string(core_oj_jar)?,
@@ -54,48 +111,8 @@ impl ProcessRequest {
             app_dex: path_c_string(app_dex)?,
             heap_initial_bytes,
             heap_maximum_bytes,
-            host_context: core::ptr::null_mut(),
-            frame_callback: None,
-            provider_context: core::ptr::null_mut(),
-            provider_acquire: None,
-            provider_release: None,
-            graphics_session_context: core::ptr::null_mut(),
+            callbacks,
         })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    /// Bind raw callback state for the synchronous ART call.
-    ///
-    /// # Safety
-    ///
-    /// Every context pointer must remain valid, and every callback must remain
-    /// callable, until `EngineSession::run_request` returns. The native ART
-    /// graph may invoke provider callbacks on attached ART threads during that
-    /// call, so the context must also be synchronized for those callbacks.
-    pub unsafe fn bind_callbacks(
-        &mut self,
-        host_context: *mut c_void,
-        frame_callback: Option<FrameCallback>,
-        provider_context: *mut c_void,
-        provider_acquire: Option<ProviderAcquireFn>,
-        provider_release: Option<ProviderReleaseFn>,
-        graphics_session_context: *mut c_void,
-    ) {
-        self.host_context = host_context;
-        self.frame_callback = frame_callback;
-        self.provider_context = provider_context;
-        self.provider_acquire = provider_acquire;
-        self.provider_release = provider_release;
-        self.graphics_session_context = graphics_session_context;
-    }
-
-    /// Bind the live graphics owner without exposing its opaque ABI pointer to
-    /// host orchestration. The request borrows the session for the same
-    /// synchronous call in which `as_config` is materialized.
-    pub fn bind_graphics_session(&mut self, session: Option<&GraphicsSession>) {
-        self.graphics_session_context = session.map_or(core::ptr::null_mut(), |graphics| {
-            graphics.raw_handle().cast()
-        });
     }
 
     pub(crate) fn as_config(&self) -> ProcessConfig {
@@ -107,13 +124,17 @@ impl ProcessRequest {
             self.app_dex.as_ptr(),
             self.heap_initial_bytes,
             self.heap_maximum_bytes,
-            self.host_context,
-            self.frame_callback,
-            self.provider_context,
-            self.provider_acquire,
-            self.provider_release,
+            self.callbacks.host_context.as_ptr(),
+            self.callbacks.frame_callback,
+            self.callbacks.provider_context.as_ptr(),
+            self.callbacks.provider_acquire,
+            self.callbacks.provider_release,
         )
-        .with_graphics_session(self.graphics_session_context)
+        .with_graphics_session(
+            self.callbacks
+                .graphics_session_context
+                .map_or(core::ptr::null_mut(), NonNull::as_ptr),
+        )
     }
 }
 
