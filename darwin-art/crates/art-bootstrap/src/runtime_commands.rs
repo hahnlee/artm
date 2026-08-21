@@ -161,48 +161,6 @@ pub(crate) fn build_runtime_core(root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn runtime_cpp_command(includes: &[&Path]) -> Command {
-    let mut command = common_cpp_command(includes);
-    command.args([
-        "-DBUILDING_LIBART",
-        // AOSP's Android 16 boot class path is built with D8 desugaring. Soong
-        // normally injects this and String::ClassSize depends on it.
-        "-DUSE_D8_DESUGAR",
-        // Concurrent Mark Compact depends on Linux userfaultfd/mremap. Keep it
-        // compilable in fallback mode, but make portable CMS the Darwin MVP default.
-        "-DART_DEFAULT_GC_TYPE_IS_CMS",
-        "-DART_FRAME_SIZE_LIMIT=1744",
-        // These are normally injected by AOSP's Soong art-global defaults.
-        "-DART_BASE_ADDRESS=0x70000000",
-        "-DART_BASE_ADDRESS_MIN_DELTA=(-0x1000000)",
-        "-DART_BASE_ADDRESS_MAX_DELTA=0x1000000",
-        "-DART_STACK_OVERFLOW_GAP_arm=8192",
-        "-DART_STACK_OVERFLOW_GAP_arm64=8192",
-        "-DART_STACK_OVERFLOW_GAP_riscv64=8192",
-        "-DART_STACK_OVERFLOW_GAP_x86=8192",
-        "-DART_STACK_OVERFLOW_GAP_x86_64=8192",
-        "-Wno-invalid-offsetof",
-        "-Wno-unsupported-visibility",
-        "-Wno-deprecated-enum-enum-conversion",
-        "-Wno-nontrivial-memcall",
-    ]);
-    command
-}
-
-pub(crate) fn runtime_bootstrap_cpp_command(includes: &[&Path]) -> Command {
-    let mut command = runtime_cpp_command(includes);
-    // Original runtime headers include mirror/object_reference.h relative to
-    // their own AOSP directory. Force the Darwin overlay before that include
-    // guard can select ART's absolute-low-32-bit representation.
-    command.args([
-        "-include",
-        "mirror/object_reference.h",
-        "-include",
-        "mirror/string-inl.h",
-    ]);
-    command
-}
-
 pub(crate) fn probe_park(root: &Path) -> Result<()> {
     let mutex_object = root.join("_build/runtime-core/objects/mutex.cc.o");
     let patched_runtime = root.join("_build/runtime-bootstrap/patched-source/runtime");

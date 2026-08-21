@@ -166,6 +166,8 @@ mod fixture_commands;
 mod probe_commands;
 #[path = "runtime_commands.rs"]
 mod runtime_commands;
+#[path = "runtime_toolchain.rs"]
+mod runtime_toolchain;
 #[path = "source_commands.rs"]
 mod source_commands;
 
@@ -174,6 +176,7 @@ pub(crate) use dex_commands::*;
 pub(crate) use fixture_commands::*;
 pub(crate) use probe_commands::*;
 pub(crate) use runtime_commands::*;
+pub(crate) use runtime_toolchain::*;
 pub(crate) use source_commands::*;
 
 #[cfg(test)]
