@@ -112,6 +112,19 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         &probe_cache,
         &compiler_identity,
     )?;
+    let registration_object = build_dir.join("darwin_art_runtime_registration_phase.cc.o");
+    let mut registration_command = runtime_cpp_command(&include_refs);
+    registration_command
+        .arg("-c")
+        .arg(root.join("probes/runtime_registration_phase.cc"))
+        .arg("-o")
+        .arg(&registration_object);
+    let _ = compile_cached_probe_tu(
+        &mut registration_command,
+        &registration_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let shutdown_probe_object = build_dir.join("darwin_art_runtime_shutdown_probe.cc.o");
     let mut shutdown_probe_command = runtime_cpp_command(&include_refs);
     shutdown_probe_command
@@ -324,6 +337,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&abi_probe_object)
         .arg(&process_state_object)
         .arg(&process_options_object)
+        .arg(&registration_object)
         .arg(&shutdown_probe_object)
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)

@@ -361,6 +361,21 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         &probe_cache,
         &compiler_identity,
     )?;
+    let registration_object = build_dir.join("darwin_art_runtime_registration_phase.cc.o");
+    let mut registration_command = runtime_cpp_command(&include_refs);
+    registration_command
+        .arg("-DDARWIN_ART_REAL_GRAPHICS")
+        .arg("-DDARWIN_ART_HWUI_GPU")
+        .arg("-c")
+        .arg(root.join("probes/runtime_registration_phase.cc"))
+        .arg("-o")
+        .arg(&registration_object);
+    let _ = compile_cached_probe_tu(
+        &mut registration_command,
+        &registration_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
     let network_loader_object =
         compile_runtime_network_loader_probe(root, &build_dir, &include_refs)?;
     let context_loader_object =
@@ -417,6 +432,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-dead_strip")
         .arg(format!("-Wl,-map,{}", link_map.display()))
         .arg(&object)
+        .arg(&registration_object)
         .arg(&elf_probe_object)
         .arg(&abi_probe_object)
         .arg(&process_state_object)

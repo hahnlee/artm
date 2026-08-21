@@ -37,6 +37,7 @@
 #include "runtime_graphics_session.h"
 #include "runtime_graphics_phase.h"
 #include "runtime_jni_acceptance_probe.h"
+#include "runtime_registration_phase.h"
 #include "runtime_app_bootstrap.h"
 #include "runtime_app_presentation.h"
 #include "darwin_icu_natives.h"
@@ -291,79 +292,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 21;
   }
 
-  art::Runtime::Current()->StartMinimalForDarwinProbe(self->GetJniEnv());
-  if (!InstallProbeAndroidSystemRoot()) {
-    std::cerr << "ART Android filesystem: test system root install failed\n";
-    return 40;
-  }
-  if (!darwin_art::RegisterLibcoreNatives(self->GetJniEnv())) {
-    std::cerr << "ART Darwin libcore: native registration failed\n";
-    return 17;
-  }
-  register_java_lang_Math(self->GetJniEnv());
-  if (self->GetJniEnv()->ExceptionCheck()) {
-    std::cerr << "ART Darwin OpenJDK: Math native registration failed\n";
-    return 37;
-  }
-  if (!darwin_art::RegisterIcuCharsetNatives(self->GetJniEnv())) {
-    std::cerr << "ART Darwin ICU: charset native registration failed\n";
-    return 20;
-  }
-  if (!darwin_art::RegisterFrameworkNatives(self->GetJniEnv())) {
-    std::cerr << "ART Darwin framework: native registration failed\n";
-    return 26;
-  }
-  art::Runtime::Current()->FinishMinimalForDarwinProbe();
-  if (!darwin_art::InstallFrameworkResourceRuntime(self->GetJniEnv())) {
-    std::cerr << "ART Darwin resources: AndroidRuntime ownership install failed\n";
-    return 38;
-  }
-  darwin_art_process::record_resource_runtime_installed();
-  if (!darwin_art::RegisterFrameworkResourceNatives(self->GetJniEnv())) {
-    std::cerr << "ART Darwin resources: native registration failed\n";
-    return 39;
-  }
-  if (!darwin_art::RegisterFrameworkGraphicsNatives(self->GetJniEnv())) {
-    std::cerr << "ART Darwin graphics: native registration failed\n";
-    return 35;
-  }
-
-  // ActivityThread performs this after minimal runtime startup. Keep the
-  // JNI-only bridge independent from the large Activity entry TU.
-  if (darwin_art_install_context_loader(env, app_loader_ref) != 0) {
-    return 4;
-  }
-
-  if (darwin_art::GetFrameworkGraphicsBackend() ==
-      darwin_art::FrameworkGraphicsBackend::kProbeCanvas) {
-    // Headless/runtime flavor intentionally has no GraphicsSession owner.
-    // The real-graphics flavor supplies the state and installs the HWUI
-    // canvas class; do not make the CPU acceptance path manufacture a GPU
-    // owner merely because the common framework backend is selected.
-    if (graphics_state != nullptr) {
-      darwin_art_graphics::set_probe_canvas_class(graphics_state, env,
-                                                  probe_canvas_class);
-      if (env->ExceptionCheck()) {
-        std::cerr << "ART Android window: ProbeCanvas global root failed\n";
-        return 32;
-      }
-    }
-  }
-  jclass looper_class = env->FindClass("android/os/Looper");
-  jmethodID prepare_main_looper =
-      looper_class == nullptr
-          ? nullptr
-          : env->GetStaticMethodID(looper_class, "prepareMainLooper", "()V");
-  if (prepare_main_looper != nullptr) {
-    env->CallStaticVoidMethod(looper_class, prepare_main_looper);
-  }
-  env->DeleteLocalRef(looper_class);
-  if (prepare_main_looper == nullptr || env->ExceptionCheck()) {
-    std::cerr << "ART Android framework: Looper.prepareMainLooper() failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
-    }
-    return 25;
+  const int registration_status = darwin_art_registration_phase::run(
+      {.env = env,
+       .self = self,
+       .app_loader_ref = app_loader_ref,
+       .probe_canvas_class = probe_canvas_class,
+       .graphics_state = graphics_state});
+  if (registration_status != 0) {
+    return registration_status;
   }
 
   if (!class_linker->EnsureInitialized(self, probe_activity, true, true)) {

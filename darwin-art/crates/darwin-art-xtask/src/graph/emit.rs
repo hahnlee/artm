@@ -277,6 +277,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         &[
             "probes/runtime_graphics_probe.cc",
             "probes/runtime_graphics_probe.h",
+            "probes/runtime_registration_phase.cc",
+            "probes/runtime_registration_phase.h",
             "compat/darwin_surface_bridge.h",
             "compat/darwin_framework_natives.h",
             "compat/darwin_hwui_gpu_mode.h",
@@ -466,6 +468,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         "runtime-entry",
         &[
             "probes/runtime_entry_probe.cc",
+            "probes/runtime_registration_phase.cc",
+            "probes/runtime_registration_phase.h",
             "probes/runtime_process_state.h",
             "probes/runtime_process_options.h",
             "probes/runtime_shutdown_probe.h",
