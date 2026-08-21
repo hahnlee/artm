@@ -28,7 +28,9 @@ pub(super) fn adapter_jobs(
         let mut adapter_command = if real_graphics
             && matches!(
                 adapter_source,
-                "darwin_libcore_natives.cc" | "darwin_libcore_unicode_natives.cc"
+                "darwin_libcore_natives.cc"
+                    | "darwin_libcore_unicode_natives.cc"
+                    | "darwin_framework_graphics_runtime.cc"
             ) {
             let mut libcore_includes = includes.to_vec();
             libcore_includes
@@ -42,7 +44,9 @@ pub(super) fn adapter_jobs(
         if real_graphics
             && matches!(
                 adapter_source,
-                "darwin_framework_natives.cc" | "darwin_framework_resource_registration.cc"
+                "darwin_framework_natives.cc"
+                    | "darwin_framework_resource_registration.cc"
+                    | "darwin_framework_graphics_runtime.cc"
             )
         {
             adapter_command

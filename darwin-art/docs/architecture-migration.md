@@ -371,6 +371,12 @@ only the direct Metal/HWUI loop. Remaining M5 work is measured archive/link
 phase decomposition and removal of duplicate ABI declarations and broad
 fallback edges.
 
+Framework graphics runtime setup is now isolated in
+`compat/darwin_framework_graphics_runtime.cc`: ICU/graphics initialization,
+resource-runtime install/uninstall, Layoutlib registrar configuration, and the
+51-class graphics registrar no longer share a translation unit with the
+MessageQueue/Binder/AssetManager support table.
+
 The adapter TU manifest is shared by `darwin-art-build-contract` and consumed
 by both the Cargo bootstrap and `darwin-art-xtask`; a new native boundary now
 has one source-list owner instead of two independently maintained arrays.
