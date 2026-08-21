@@ -168,6 +168,15 @@ command/fingerprint promotion, and `graph::representative` owns small
 independently cacheable production TUs. `darwin-art-xtask/src/main.rs` remains
 the graph assembly/CLI boundary instead of owning those policies.
 
+The runtime owner teardown is now a separate `darwin-art-runtime::shutdown`
+transaction, and the provider ABI vocabulary is isolated in
+`provider_kind.rs`; `session.rs` contains owner/lifecycle accessors while the
+lease algorithm remains in `provider.rs`. The ELF loader follows the same
+boundary: `src/parser.rs` owns ELF header/program-header/dynamic-tag policy,
+while `lib.rs` retains mapping, relocation, symbol resolution, and lifecycle.
+These are production module boundaries, not compatibility wrappers, and each
+one is covered by the workspace/loader gates below.
+
 The staging boundary records a content identity for the patched ART shadow
 tree. Unchanged upstream sources and patches are not recopied on every
 invocation, preserving depfile metadata so a canonical fallback can retain
@@ -387,7 +396,12 @@ rechecks the full closure and remains separate. The host-side legacy CPU/IOSurfa
 headless runs tear down without allocating a surface, and graphics runs enter
 only the direct Metal/HWUI loop. Remaining M5 work is measured archive/link
 phase decomposition and removal of duplicate ABI declarations and broad
-fallback edges.
+fallback edges. The remaining large orchestration surfaces are intentionally
+explicit: `graph::emit` assembles Ninja text, `elf-loader/src/ffi.rs` owns the
+versioned C ABI façade, and the graphics/runtime audit modules own acceptance
+commands. They are split candidates only when a narrow invalidation
+measurement proves a build-time benefit; moving code without changing a
+rebuild edge is not an M5 completion criterion.
 
 Framework graphics runtime setup is now isolated in
 `compat/darwin_framework_graphics_runtime.cc`: ICU/graphics initialization,
