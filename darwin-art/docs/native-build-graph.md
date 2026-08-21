@@ -39,6 +39,12 @@ object or the archive therefore causes Ninja to rebuild the missing product.
 Compiler depfiles add transitive AOSP header edges after the first compile.
 Unrelated acceptance probes do not invalidate the runtime archive, and each
 filesystem/network/HWUI/graphics probe has its own narrow direct-input edge.
+Each probe phase also has a stable content stamp under
+`_build/runtime-probes/content-stamps/`. The graph generator updates a stamp
+only when that phase's source/header bytes change, so a checkout that preserves
+mtimes still recompiles only the changed probe object before the downstream
+graphics link. The audit path regenerates the graph before its warm/no-op
+check; repeated generation with unchanged bytes leaves all stamps untouched.
 
 The same persisted-command promotion now covers ICU as well. The Android ICU
 foundation keeps 201 common, 254 i18n, one stubdata, and two init translation
