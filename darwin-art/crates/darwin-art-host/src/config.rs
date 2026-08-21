@@ -67,14 +67,19 @@ pub(crate) fn build_process_request(
     .map_err(|error| match error {
         ProcessRequestError::InteriorNul(path) => HostError::InteriorNul(path),
     })?;
-    request.bind_callbacks(
-        host_context,
-        frame_callback,
-        provider_context,
-        provider_acquire,
-        provider_release,
-        graphics_session_context,
-    );
+    // SAFETY: the caller keeps `FrameHost`, `ProviderBridge`, and the optional
+    // graphics session alive for the complete synchronous `run_request` call;
+    // the static callbacks only dereference those contexts during that call.
+    unsafe {
+        request.bind_callbacks(
+            host_context,
+            frame_callback,
+            provider_context,
+            provider_acquire,
+            provider_release,
+            graphics_session_context,
+        );
+    }
     Ok(request)
 }
 

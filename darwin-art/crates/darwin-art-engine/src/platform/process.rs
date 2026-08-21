@@ -62,7 +62,15 @@ impl ProcessRequest {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn bind_callbacks(
+    /// Bind raw callback state for the synchronous ART call.
+    ///
+    /// # Safety
+    ///
+    /// Every context pointer must remain valid, and every callback must remain
+    /// callable, until `EngineSession::run_request` returns. The native ART
+    /// graph may invoke provider callbacks on attached ART threads during that
+    /// call, so the context must also be synchronized for those callbacks.
+    pub unsafe fn bind_callbacks(
         &mut self,
         host_context: *mut c_void,
         frame_callback: Option<FrameCallback>,
