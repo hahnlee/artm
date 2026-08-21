@@ -428,9 +428,11 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         compile_runtime_app_bootstrap_probe(root, &build_dir, &include_refs)?;
     let _app_resources_object =
         compile_runtime_app_resources_probe(root, &build_dir, &include_refs)?;
+    let _app_activity_object = compile_runtime_app_activity_probe(root, &build_dir, &include_refs)?;
     let app_presentation_object =
         compile_runtime_app_presentation_probe(root, &build_dir, &include_refs)?;
     let app_resources_object = app_resources_object_path(&build_dir);
+    let app_activity_object = app_activity_object_path(&build_dir);
     let mut graph_command = runtime_cpp_command(&include_refs);
     graph_command
         .args(["-include", "mirror/object_reference.h"])
@@ -492,6 +494,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(&context_loader_object)
         .arg(&app_bootstrap_object)
         .arg(&app_resources_object)
+        .arg(&app_activity_object)
         .arg(&app_presentation_object)
         .arg(&jni_acceptance_object)
         .arg(&graphics_session_object)

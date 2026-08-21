@@ -21,6 +21,7 @@ pub(crate) struct ProbeGraphInputs {
     pub(crate) jni_acceptance_inputs: String,
     pub(crate) app_bootstrap_inputs: String,
     pub(crate) app_resources_inputs: String,
+    pub(crate) app_activity_inputs: String,
     pub(crate) app_presentation_inputs: String,
     pub(crate) filesystem_probe_stamp: PathBuf,
     pub(crate) network_probe_stamp: PathBuf,
@@ -33,6 +34,7 @@ pub(crate) struct ProbeGraphInputs {
     pub(crate) jni_acceptance_stamp: PathBuf,
     pub(crate) app_bootstrap_stamp: PathBuf,
     pub(crate) app_resources_stamp: PathBuf,
+    pub(crate) app_activity_stamp: PathBuf,
     pub(crate) app_presentation_stamp: PathBuf,
     pub(crate) runtime_entry_stamp: PathBuf,
 }
@@ -134,6 +136,8 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
         &[
             "probes/runtime_app_presentation.cc",
             "probes/runtime_app_presentation.h",
+            "probes/runtime_app_activity.h",
+            "probes/runtime_app_resources.h",
             "probes/runtime_graphics_phase.h",
             "probes/runtime_graphics_state.h",
         ],
@@ -142,6 +146,14 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
         root,
         &[
             "probes/runtime_app_resources.cc",
+            "probes/runtime_app_resources.h",
+        ],
+    );
+    let app_activity_inputs = probe_inputs(
+        root,
+        &[
+            "probes/runtime_app_activity.cc",
+            "probes/runtime_app_activity.h",
             "probes/runtime_app_resources.h",
         ],
     );
@@ -253,6 +265,8 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
         &[
             "probes/runtime_app_presentation.cc",
             "probes/runtime_app_presentation.h",
+            "probes/runtime_app_activity.h",
+            "probes/runtime_app_resources.h",
             "probes/runtime_graphics_phase.h",
             "probes/runtime_graphics_state.h",
         ],
@@ -262,6 +276,15 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
         "app-resources",
         &[
             "probes/runtime_app_resources.cc",
+            "probes/runtime_app_resources.h",
+        ],
+    )?;
+    let app_activity_stamp = probe_content_stamp(
+        root,
+        "app-activity",
+        &[
+            "probes/runtime_app_activity.cc",
+            "probes/runtime_app_activity.h",
             "probes/runtime_app_resources.h",
         ],
     )?;
@@ -295,6 +318,7 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
         jni_acceptance_inputs,
         app_bootstrap_inputs,
         app_resources_inputs,
+        app_activity_inputs,
         app_presentation_inputs,
         filesystem_probe_stamp,
         network_probe_stamp,
@@ -307,6 +331,7 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
         jni_acceptance_stamp,
         app_bootstrap_stamp,
         app_resources_stamp,
+        app_activity_stamp,
         app_presentation_stamp,
         runtime_entry_stamp,
     })

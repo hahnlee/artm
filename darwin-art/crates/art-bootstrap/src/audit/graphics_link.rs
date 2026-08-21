@@ -328,6 +328,8 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     };
     let _compiled_app_resources =
         compile_runtime_app_resources_probe(root, &build_dir, &include_refs)?;
+    let _compiled_app_activity =
+        compile_runtime_app_activity_probe(root, &build_dir, &include_refs)?;
     let app_presentation_object = if let Some(path) =
         env::var_os("DARWIN_ART_NATIVE_APP_PRESENTATION_OBJECT")
         && Path::new(&path).is_file()
@@ -340,6 +342,11 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     require_file(
         &app_resources_object,
         "graphics app resources object is missing",
+    )?;
+    let app_activity_object = app_activity_object_path(&build_dir);
+    require_file(
+        &app_activity_object,
+        "graphics app activity object is missing",
     )?;
     let (surface_object, surface_gpu_object) =
         compile_surface_objects(root, &build_dir, &probe_cache, &compiler_identity)?;
@@ -391,6 +398,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&context_loader_object)
         .arg(&app_bootstrap_object)
         .arg(&app_resources_object)
+        .arg(&app_activity_object)
         .arg(&app_presentation_object)
         .arg(&jni_acceptance_object)
         .arg(&graphics_session_object_real)

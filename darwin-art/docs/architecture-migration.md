@@ -197,10 +197,13 @@ so JNI locals are released even when resource/theme setup fails before the
 Rust-owned runtime shutdown guard is reached.
 The framework `AssetManager`/`ApkAssets`/`Resources` construction is now a
 separate `runtime_app_resources` native object; the Activity/PhoneWindow
-object is emitted by a separate Ninja rule and links it as a narrow
-prerequisite. Resource/theme edits therefore do not invalidate the Activity
-presentation TU, while the direct-APK and graphics link gates consume the same
-object and keep one ownership path.
+object is emitted by a separate Ninja rule. Activity.attach, ContextThemeWrapper,
+PhoneWindow, and Theme setup now form a third `runtime_app_activity` object,
+while DecorView/content recording remains in `runtime_app_presentation`.
+Resource edits therefore invalidate only the resource object; lifecycle/theme
+edits invalidate only the activity object; display-list edits invalidate only
+the presentation object. The direct-APK and graphics link gates consume all
+three narrow objects in dependency order and keep one ownership path.
 
 The ART-side bootstrap now has a shared runtime-core cache boundary. Common
 upstream runtime TUs and flavor-independent compat adapters compile from one

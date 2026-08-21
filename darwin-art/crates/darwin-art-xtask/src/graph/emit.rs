@@ -92,6 +92,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         native_output_root.join("runtime-probes/darwin_art_runtime_app_bootstrap.cc.o");
     let app_resources_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_app_resources.cc.o");
+    let app_activity_object_path =
+        native_output_root.join("runtime-probes/darwin_art_runtime_app_activity.cc.o");
     let app_presentation_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_app_presentation.cc.o");
     let stamp_path = cache_dir.join("graphics-bootstrap.stamp");
@@ -123,6 +125,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let jni_acceptance_object = ninja_path(&jni_acceptance_object_path);
     let app_bootstrap_object = ninja_path(&app_bootstrap_object_path);
     let app_resources_object = ninja_path(&app_resources_object_path);
+    let app_activity_object = ninja_path(&app_activity_object_path);
     let app_presentation_object = ninja_path(&app_presentation_object_path);
     let stamp_for_shell = stamp_path.to_string_lossy().into_owned();
     let native_output_for_shell = native_output_root.to_string_lossy().into_owned();
@@ -187,6 +190,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         jni_acceptance_inputs,
         app_bootstrap_inputs,
         app_resources_inputs,
+        app_activity_inputs,
         app_presentation_inputs,
         filesystem_probe_stamp,
         network_probe_stamp,
@@ -199,6 +203,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         jni_acceptance_stamp,
         app_bootstrap_stamp,
         app_resources_stamp,
+        app_activity_stamp,
         app_presentation_stamp,
         runtime_entry_stamp,
     } = probe_manifest::collect(&root)?;
@@ -686,6 +691,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     ));
     graph.push_str(" DARWIN_ART_NATIVE_APP_RESOURCES_OBJECT=");
     graph.push_str(&shell_quote(&app_resources_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_APP_ACTIVITY_OBJECT=");
+    graph.push_str(&shell_quote(&app_activity_object_path.to_string_lossy()));
     graph.push(' ');
     graph.push_str(&bootstrap_cli);
     graph.push_str(" audit-runtime-graphics-link-fast\n");
@@ -711,6 +718,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&hwui_object);
     graph.push(' ');
     graph.push_str(&app_bootstrap_object);
+    graph.push(' ');
+    graph.push_str(&app_activity_object);
     graph.push(' ');
     graph.push_str(&app_presentation_object);
     graph.push('\n');
@@ -836,6 +845,23 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push(' ');
     graph.push_str(&ninja_path(&app_resources_stamp));
     graph.push('\n');
+    graph.push_str("rule runtime_app_activity_probe\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && DARWIN_ART_NATIVE_APP_ACTIVITY_OBJECT=");
+    graph.push_str(&shell_quote(&app_activity_object_path.to_string_lossy()));
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-app-activity-probe\n");
+    graph.push_str("  description = CXX runtime_app_activity\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&app_activity_object);
+    graph.push_str(": runtime_app_activity_probe ");
+    graph.push_str(&app_activity_inputs);
+    graph.push(' ');
+    graph.push_str(&ninja_path(&app_activity_stamp));
+    graph.push('\n');
     graph.push_str("rule runtime_app_presentation_probe\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
@@ -889,6 +915,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     ));
     graph.push_str(" DARWIN_ART_NATIVE_APP_RESOURCES_OBJECT=");
     graph.push_str(&shell_quote(&app_resources_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_APP_ACTIVITY_OBJECT=");
+    graph.push_str(&shell_quote(&app_activity_object_path.to_string_lossy()));
     // The full upstream closure is a separate release/CI gate.  The Ninja
     // graph is the developer inner loop and must only relink/audit against
     // already materialized foundation artifacts.
@@ -944,6 +972,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&app_bootstrap_object);
     graph.push(' ');
     graph.push_str(&app_resources_object);
+    graph.push(' ');
+    graph.push_str(&app_activity_object);
     graph.push(' ');
     graph.push_str(&app_presentation_object);
     graph.push(' ');

@@ -113,6 +113,49 @@ pub(crate) fn compile_runtime_app_resources_probe(
     Ok(object)
 }
 
+/// Compile the Activity.attach/PhoneWindow/theme phase independently from
+/// resource construction and display-list presentation.  This keeps changes
+/// to lifecycle wiring from invalidating either the asset or GPU recording
+/// translation units.
+pub(crate) fn app_activity_object_path(build_dir: &Path) -> PathBuf {
+    env::var_os("DARWIN_ART_NATIVE_APP_ACTIVITY_OBJECT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| build_dir.join("darwin_art_runtime_app_activity.cc.o"))
+}
+
+pub(crate) fn compile_runtime_app_activity_probe(
+    root: &Path,
+    build_dir: &Path,
+    includes: &[&Path],
+) -> Result<PathBuf> {
+    let object = app_activity_object_path(build_dir);
+    if let Some(parent) = object.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let cache_path = build_dir.join("runtime-probe-app-activity-hashes.cache");
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
+    let mut command = runtime_cpp_command(includes);
+    command
+        .args([
+            "-include",
+            "mirror/object_reference.h",
+            "-DDARWIN_ART_REAL_GRAPHICS",
+            "-DDARWIN_ART_HWUI_GPU",
+        ])
+        .arg("-idirafter")
+        .arg(&ndk_arch_include)
+        .arg("-idirafter")
+        .arg(&ndk_include)
+        .arg("-Wno-macro-redefined")
+        .arg("-c")
+        .arg(root.join("probes/runtime_app_activity.cc"))
+        .arg("-o")
+        .arg(&object);
+    let _ = compile_cached_probe_tu(&mut command, &object, &cache_path, &compiler_identity)?;
+    Ok(object)
+}
+
 /// Compile the detached Activity/PhoneWindow/DecorView presentation phase as
 /// its own cacheable translation unit. This keeps framework/JNI presentation
 /// edits from rebuilding the runtime entry orchestration and bootstrap.
@@ -207,6 +250,7 @@ fn build_detached_app_probe(root: &Path, presentation: bool) -> Result<()> {
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
     let object = if presentation {
         compile_runtime_app_resources_probe(root, build_dir, &include_refs)?;
+        compile_runtime_app_activity_probe(root, build_dir, &include_refs)?;
         compile_runtime_app_presentation_probe(root, build_dir, &include_refs)?
     } else {
         compile_runtime_app_bootstrap_probe(root, build_dir, &include_refs)?
@@ -250,5 +294,24 @@ pub(crate) fn build_runtime_app_resources_probe(root: &Path) -> Result<()> {
         fs::copy(&object, &output)?;
     }
     println!("build-runtime-app-resources-probe: {}", output.display());
+    Ok(())
+}
+
+pub(crate) fn build_runtime_app_activity_probe(root: &Path) -> Result<()> {
+    let output = env::var_os("DARWIN_ART_NATIVE_APP_ACTIVITY_OBJECT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            root.join("_build/runtime-link-probe/darwin_art_runtime_app_activity.cc.o")
+        });
+    let build_dir = output
+        .parent()
+        .ok_or_else(|| format!("app activity output has no parent: {}", output.display()))?;
+    let includes = app_probe_include_paths(root);
+    let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+    let object = compile_runtime_app_activity_probe(root, build_dir, &include_refs)?;
+    if object != output {
+        fs::copy(&object, &output)?;
+    }
+    println!("build-runtime-app-activity-probe: {}", output.display());
     Ok(())
 }
