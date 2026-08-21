@@ -6,6 +6,7 @@ use darwin_art_build_contract::RUNTIME_CACHE_IDENTITY;
 use darwin_art_build_contract::{GRAPHICS_ADAPTER_SOURCES, HEADLESS_ADAPTER_SOURCES};
 
 use super::super::*;
+use super::GRAPH_VERSION;
 use super::atomic;
 use super::cache::{
     cached_native_objects_from_dirs, emit_cached_native_graph, emit_cached_native_graph_with_inputs,

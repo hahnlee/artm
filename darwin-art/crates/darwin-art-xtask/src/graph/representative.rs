@@ -4,7 +4,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::super::{CXX_FLAGS, GRAPH_VERSION, ninja_path, shell_quote};
+use super::super::{CXX_FLAGS, ninja_path, shell_quote};
+use super::GRAPH_VERSION;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RepresentativeEdge {

@@ -9,8 +9,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::super::GRAPH_VERSION;
 use super::super::{digest_inputs, repository_root};
+use super::GRAPH_VERSION;
 use super::atomic;
 use super::inputs::{graph_inputs, is_probe_only_input};
 use super::representative::{

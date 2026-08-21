@@ -10,6 +10,11 @@
 pub const RUNTIME_CACHE_IDENTITY: &str =
     "darwin-art-runtime-core-cache-v2-common-includes-fmt-adapters";
 
+/// Identity of the generated native Ninja graph. Keeping this beside the
+/// runtime cache contract prevents the canonical builder and graph emitter
+/// from silently disagreeing about graph format or edge ownership.
+pub const NATIVE_GRAPH_VERSION: &str = "darwin-art-native-graph-v14-shared-adapter-manifest";
+
 /// Canonical adapter translation units for the two runtime flavors.  Keeping
 /// this list in the dependency-free contract crate prevents the Cargo
 /// bootstrap and Ninja graph emitter from drifting when a native boundary is
