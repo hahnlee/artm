@@ -231,13 +231,59 @@ pub(crate) fn compile_runtime_graphics_state_probe(
     ndk_include: &Path,
     ndk_arch_include: &Path,
 ) -> Result<PathBuf> {
-    let object = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_STATE_OBJECT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| build_dir.join("darwin_art_runtime_graphics_state.cc.o"));
+    compile_runtime_graphics_state_probe_flavor(
+        root,
+        build_dir,
+        includes,
+        ndk_include,
+        ndk_arch_include,
+        true,
+    )
+}
+
+/// Compile the state bridge for the direct-APK/headless flavor.  That flavor
+/// deliberately does not pull HWUI/RenderThread types into its ABI; it still
+/// needs the same opaque GraphicsState layout for the common lifecycle code.
+pub(crate) fn compile_runtime_graphics_state_probe_cpu(
+    root: &Path,
+    build_dir: &Path,
+    includes: &[&Path],
+    ndk_include: &Path,
+    ndk_arch_include: &Path,
+) -> Result<PathBuf> {
+    compile_runtime_graphics_state_probe_flavor(
+        root,
+        build_dir,
+        includes,
+        ndk_include,
+        ndk_arch_include,
+        false,
+    )
+}
+
+fn compile_runtime_graphics_state_probe_flavor(
+    root: &Path,
+    build_dir: &Path,
+    includes: &[&Path],
+    ndk_include: &Path,
+    ndk_arch_include: &Path,
+    real_graphics: bool,
+) -> Result<PathBuf> {
+    let object = if real_graphics {
+        env::var_os("DARWIN_ART_NATIVE_GRAPHICS_STATE_OBJECT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| build_dir.join("darwin_art_runtime_graphics_state.cc.o"))
+    } else {
+        build_dir.join("darwin_art_runtime_graphics_state_cpu.cc.o")
+    };
     if let Some(parent) = object.parent() {
         fs::create_dir_all(parent)?;
     }
-    let cache_path = build_dir.join("runtime-probe-graphics-state-hashes.cache");
+    let cache_path = if real_graphics {
+        build_dir.join("runtime-probe-graphics-state-hashes.cache")
+    } else {
+        build_dir.join("runtime-probe-graphics-state-cpu-hashes.cache")
+    };
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     let mut command = runtime_cpp_command(includes);
     command
@@ -246,31 +292,65 @@ pub(crate) fn compile_runtime_graphics_state_probe(
         .arg(ndk_arch_include)
         .arg("-idirafter")
         .arg(ndk_include)
-        .args([
-            "-Wno-macro-redefined",
-            "-DDARWIN_ART_REAL_GRAPHICS",
-            "-DDARWIN_ART_HWUI_GPU",
-            "-DDARWIN_ART_AOSP_COMPAT_LSEEK64",
-            "-DSK_BUILD_FOR_ANDROID_FRAMEWORK",
-        ])
-        .arg("-I")
-        .arg(root.join("_aosp/frameworks/base/libs/hwui"))
-        .arg("-I")
-        .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
-        .arg("-I")
-        .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia"))
-        .arg("-I")
-        .arg(root.join("_aosp/external/skia/include/core"))
-        .arg("-I")
-        .arg(root.join("_aosp/system/core/libcutils/include"))
-        .arg("-I")
-        .arg(root.join("_aosp/system/core/libutils/include"))
-        .arg("-I")
-        .arg(root.join("_aosp/system/core/libsystem/include"))
-        .arg("-I")
-        .arg(root.join("_aosp/system/logging/liblog/include"))
+        .args(["-Wno-macro-redefined", "-DDARWIN_ART_AOSP_COMPAT_LSEEK64"]);
+    if real_graphics {
+        command
+            .args([
+                "-DDARWIN_ART_REAL_GRAPHICS",
+                "-DDARWIN_ART_HWUI_GPU",
+                "-DSK_BUILD_FOR_ANDROID_FRAMEWORK",
+            ])
+            .args([
+                "-I",
+                root.join("_aosp/frameworks/base/libs/hwui")
+                    .to_str()
+                    .unwrap(),
+            ])
+            .args([
+                "-I",
+                root.join("_aosp/frameworks/base/libs/hwui/hwui")
+                    .to_str()
+                    .unwrap(),
+            ])
+            .args([
+                "-I",
+                root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia")
+                    .to_str()
+                    .unwrap(),
+            ])
+            .args(["-I", root.join("_aosp/external/skia").to_str().unwrap()])
+            .args([
+                "-I",
+                root.join("_aosp/external/skia/include/core")
+                    .to_str()
+                    .unwrap(),
+            ])
+            .args([
+                "-I",
+                root.join("_aosp/system/core/libcutils/include")
+                    .to_str()
+                    .unwrap(),
+            ])
+            .args([
+                "-I",
+                root.join("_aosp/system/core/libutils/include")
+                    .to_str()
+                    .unwrap(),
+            ])
+            .args([
+                "-I",
+                root.join("_aosp/system/core/libsystem/include")
+                    .to_str()
+                    .unwrap(),
+            ])
+            .args([
+                "-I",
+                root.join("_aosp/system/logging/liblog/include")
+                    .to_str()
+                    .unwrap(),
+            ]);
+    }
+    command
         .arg("-c")
         .arg(root.join("probes/runtime_graphics_state.cc"))
         .arg("-o")
@@ -327,13 +407,56 @@ pub(crate) fn compile_runtime_graphics_session_probe(
     ndk_include: &Path,
     ndk_arch_include: &Path,
 ) -> Result<PathBuf> {
-    let object = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| build_dir.join("darwin_art_runtime_graphics_session.cc.o"));
+    compile_runtime_graphics_session_probe_flavor(
+        root,
+        build_dir,
+        includes,
+        ndk_include,
+        ndk_arch_include,
+        true,
+    )
+}
+
+pub(crate) fn compile_runtime_graphics_session_probe_cpu(
+    root: &Path,
+    build_dir: &Path,
+    includes: &[&Path],
+    ndk_include: &Path,
+    ndk_arch_include: &Path,
+) -> Result<PathBuf> {
+    compile_runtime_graphics_session_probe_flavor(
+        root,
+        build_dir,
+        includes,
+        ndk_include,
+        ndk_arch_include,
+        false,
+    )
+}
+
+fn compile_runtime_graphics_session_probe_flavor(
+    root: &Path,
+    build_dir: &Path,
+    includes: &[&Path],
+    ndk_include: &Path,
+    ndk_arch_include: &Path,
+    real_graphics: bool,
+) -> Result<PathBuf> {
+    let object = if real_graphics {
+        env::var_os("DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| build_dir.join("darwin_art_runtime_graphics_session.cc.o"))
+    } else {
+        build_dir.join("darwin_art_runtime_graphics_session_cpu.cc.o")
+    };
     if let Some(parent) = object.parent() {
         fs::create_dir_all(parent)?;
     }
-    let cache_path = build_dir.join("runtime-probe-graphics-session-hashes.cache");
+    let cache_path = if real_graphics {
+        build_dir.join("runtime-probe-graphics-session-hashes.cache")
+    } else {
+        build_dir.join("runtime-probe-graphics-session-cpu-hashes.cache")
+    };
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     let mut command = runtime_cpp_command(includes);
     command
@@ -342,19 +465,22 @@ pub(crate) fn compile_runtime_graphics_session_probe(
         .arg(ndk_arch_include)
         .arg("-idirafter")
         .arg(ndk_include)
-        .args([
-            "-Wno-macro-redefined",
-            "-DDARWIN_ART_REAL_GRAPHICS",
-            "-DDARWIN_ART_HWUI_GPU",
-            "-DDARWIN_ART_AOSP_COMPAT_LSEEK64",
-            "-DSK_BUILD_FOR_ANDROID_FRAMEWORK",
-        ])
-        .arg("-I")
-        .arg(root.join("_aosp/frameworks/base/libs/hwui"))
-        .arg("-I")
-        .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
-        .arg("-I")
-        .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"))
+        .args(["-Wno-macro-redefined", "-DDARWIN_ART_AOSP_COMPAT_LSEEK64"]);
+    if real_graphics {
+        command
+            .args([
+                "-DDARWIN_ART_REAL_GRAPHICS",
+                "-DDARWIN_ART_HWUI_GPU",
+                "-DSK_BUILD_FOR_ANDROID_FRAMEWORK",
+            ])
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/base/libs/hwui"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/base/libs/hwui/hwui"))
+            .arg("-I")
+            .arg(root.join("_aosp/frameworks/base/libs/hwui/pipeline/skia"));
+    }
+    command
         .arg("-I")
         .arg(root.join("_aosp/art/libdexfile"))
         .arg("-I")

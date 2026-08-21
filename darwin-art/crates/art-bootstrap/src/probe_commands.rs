@@ -264,7 +264,9 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
-    let probe_cache = build_dir.join("runtime-direct-apk-probe-hashes.cache");
+    // The direct APK flavor has an independent cache from the GPU graphics
+    // probe.  A command-line flavor change must never reuse a real-HWUI TU.
+    let probe_cache = build_dir.join("runtime-direct-apk-cpu-probe-hashes.cache");
     let elf_probe_object = build_dir.join("darwin_art_runtime_elf_probe.cc.o");
     let mut elf_probe_command = runtime_cpp_command(&include_refs);
     elf_probe_command
@@ -346,8 +348,6 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
     let graphics_probe_object = build_dir.join("darwin_art_runtime_graphics_probe.cc.o");
     let mut graphics_probe_command = runtime_cpp_command(&include_refs);
     graphics_probe_command
-        .arg("-DDARWIN_ART_REAL_GRAPHICS")
-        .arg("-DDARWIN_ART_HWUI_GPU")
         .arg("-I")
         .arg(root.join("_aosp/frameworks/minikin/include"))
         .arg("-I")
@@ -434,14 +434,14 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
     let graphics_phase_object = compile_runtime_graphics_phase(root, &build_dir, &include_refs)?;
     let graphics_input_object =
         compile_runtime_graphics_input_probe(root, &build_dir, &include_refs)?;
-    let graphics_state_object = compile_runtime_graphics_state_probe(
+    let graphics_state_object = compile_runtime_graphics_state_probe_cpu(
         root,
         &build_dir,
         &include_refs,
         &ndk_include,
         &ndk_arch_include,
     )?;
-    let graphics_session_object = compile_runtime_graphics_session_probe(
+    let graphics_session_object = compile_runtime_graphics_session_probe_cpu(
         root,
         &build_dir,
         &include_refs,
@@ -458,8 +458,6 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-idirafter")
         .arg(&ndk_include)
         .arg("-Wno-macro-redefined")
-        .arg("-DDARWIN_ART_REAL_GRAPHICS")
-        .arg("-DDARWIN_ART_HWUI_GPU")
         .arg("-I")
         .arg(root.join("_aosp/external/skia"))
         .arg("-I")
@@ -525,6 +523,14 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_install_hooks")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_clear_hooks")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_native_acquire")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_install_hooks")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_clear_hooks")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_native_acquire")
+        .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&elf_probe_object)
@@ -543,12 +549,14 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(&graphics_session_object)
         .arg(&graphics_phase_object)
         .arg(&graphics_input_object)
+        .arg(root.join("_build/runtime-graphics-bootstrap/objects/darwin_provider_owners.cc.o"))
         .arg(&filesystem_object)
         .arg(&graph_object)
         .arg(&network_object)
         .arg(&surface_object)
         .arg(root.join("_build/skia-metal-gpu/libskia.a"))
         .arg(root.join("_build/skia-metal-gpu/libskcms.a"))
+        .arg(root.join("_build/runtime-graphics-bootstrap/objects/darwin_provider_owners.cc.o"))
         .arg(&bootstrap)
         .arg(format!(
             "-Wl,-force_load,{}",
