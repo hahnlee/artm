@@ -13,7 +13,6 @@ use darwin_art_engine::EngineSession;
 use darwin_art_runtime::ProviderBridge;
 
 pub(super) struct RuntimeBootstrap {
-    pub(super) provider_context: *mut std::ffi::c_void,
     pub(super) graphics_attached: bool,
 }
 
@@ -27,12 +26,11 @@ pub(super) fn attach_runtime(
 ) -> Result<RuntimeBootstrap, HostError> {
     let engine = EngineSession::open(library).map_err(HostError::DynamicLoader)?;
     let provider_bridge = Box::new(engine.provider_bridge());
-    let provider_context = provider_bridge.context();
     // SAFETY: provider_bridge is transferred into HostRuntime immediately
     // below and remains alive until the engine hooks are cleared in teardown.
     unsafe {
         engine.install_provider_hooks(
-            provider_context,
+            provider_bridge.context(),
             Some(ProviderBridge::acquire_callback()),
             Some(ProviderBridge::release_callback()),
         );
@@ -61,8 +59,5 @@ pub(super) fn attach_runtime(
         false
     };
 
-    Ok(RuntimeBootstrap {
-        provider_context,
-        graphics_attached,
-    })
+    Ok(RuntimeBootstrap { graphics_attached })
 }

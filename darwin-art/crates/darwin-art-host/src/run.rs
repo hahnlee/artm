@@ -34,7 +34,6 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         let mut shutdown_guard = RuntimeShutdownGuard::new(&mut runtime);
 
         let bootstrap = attach_runtime(shutdown_guard.runtime(), &options.library)?;
-        let provider_context = bootstrap.provider_context;
         let graphics_attached = bootstrap.graphics_attached;
 
         if let Err(error) = shutdown_guard
@@ -64,19 +63,26 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             frames_received: 0,
             last_frame: None,
         };
-        let request = match build_process_request(
-            options,
-            ptr::from_mut(&mut frame_host).cast(),
-            Some(receive_frame),
-            provider_context,
-            Some(ProviderBridge::acquire_callback()),
-            Some(ProviderBridge::release_callback()),
-            shutdown_guard.runtime().graphics(),
-        ) {
-            Ok(inputs) => inputs,
-            Err(error) => {
+        let request = {
+            let runtime = shutdown_guard.runtime();
+            let Some(provider) = runtime.provider() else {
                 let _ = shutdown_guard.shutdown();
-                return Err(error);
+                return Err(HostError::RuntimeFailed(-1));
+            };
+            match build_process_request(
+                options,
+                ptr::from_mut(&mut frame_host).cast(),
+                Some(receive_frame),
+                provider,
+                Some(ProviderBridge::acquire_callback()),
+                Some(ProviderBridge::release_callback()),
+                runtime.graphics(),
+            ) {
+                Ok(inputs) => inputs,
+                Err(error) => {
+                    let _ = shutdown_guard.shutdown();
+                    return Err(error);
+                }
             }
         };
 

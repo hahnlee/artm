@@ -8,6 +8,7 @@ use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use darwin_art_engine::{CallbackBindings, GraphicsSession, ProcessRequest, ProcessRequestError};
 use darwin_art_engine_sys::ProcessResult;
+use darwin_art_runtime::ProviderBridge;
 
 use crate::OwnedFrame;
 
@@ -50,7 +51,7 @@ pub(crate) fn build_process_request(
     options: &RunOptions,
     host_context: *mut c_void,
     frame_callback: Option<darwin_art_engine_sys::FrameCallback>,
-    provider_context: *mut c_void,
+    provider: &ProviderBridge,
     provider_acquire: Option<darwin_art_engine_sys::ProviderAcquireFn>,
     provider_release: Option<darwin_art_engine_sys::ProviderReleaseFn>,
     graphics_session: Option<&GraphicsSession>,
@@ -61,7 +62,7 @@ pub(crate) fn build_process_request(
         CallbackBindings::from_raw(
             host_context,
             frame_callback,
-            provider_context,
+            provider.context(),
             provider_acquire,
             provider_release,
             core::ptr::null_mut(),
