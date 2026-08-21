@@ -3,13 +3,14 @@ use darwin_art_engine_sys::{
     GraphicsSessionCloseFn, GraphicsSessionDestroyFn, GraphicsSessionDispatchPointerFn,
     GraphicsSessionHandle, GraphicsSessionPumpFrameFn,
 };
+use std::ptr::NonNull;
 
 /// Rust owner for the opaque native HWUI session.  The C ABI deliberately
 /// exposes only a void handle; JNI, RenderNode, and AnimationContext stay
 /// entirely on the C++ side.  `close` must precede `destroy`, which makes
 /// a use-after-close a normal status result instead of undefined behavior.
 pub struct GraphicsSession {
-    handle: *mut GraphicsSessionHandle,
+    handle: Option<NonNull<GraphicsSessionHandle>>,
     close_fn: GraphicsSessionCloseFn,
     destroy_fn: GraphicsSessionDestroyFn,
     dispatch_fn: GraphicsSessionDispatchPointerFn,
@@ -36,7 +37,7 @@ impl GraphicsSession {
             return Err(darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE);
         }
         Ok(Self {
-            handle,
+            handle: NonNull::new(handle),
             close_fn,
             destroy_fn,
             dispatch_fn,
@@ -57,8 +58,11 @@ impl GraphicsSession {
         // A failed close remains observable to the caller, but Drop must
         // not accidentally call a non-idempotent callback a second time.
         self.close_attempted = true;
+        let Some(handle) = self.handle else {
+            return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+        };
         // SAFETY: handle and callback belong to this live owner.
-        let status = unsafe { (self.close_fn)(self.handle) };
+        let status = unsafe { (self.close_fn)(handle.as_ptr()) };
         if status == 0 {
             self.closed = true;
         }
@@ -66,34 +70,35 @@ impl GraphicsSession {
     }
 
     pub(crate) fn raw_handle(&self) -> *mut GraphicsSessionHandle {
-        self.handle
+        self.handle.map_or(std::ptr::null_mut(), NonNull::as_ptr)
     }
 
     pub fn dispatch_pointer(&self, action: u32, x: f32, y: f32) -> i32 {
-        if self.closed {
+        let Some(handle) = self.handle.filter(|_| !self.closed) else {
             return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
-        }
+        };
         // SAFETY: handle remains live while self is borrowed.
-        unsafe { (self.dispatch_fn)(self.handle, action, x, y) }
+        unsafe { (self.dispatch_fn)(handle.as_ptr(), action, x, y) }
     }
 
     pub fn pump_frame(&self, frame_time_nanos: i64) -> i32 {
-        if self.closed {
+        let Some(handle) = self.handle.filter(|_| !self.closed) else {
             return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
-        }
+        };
         // SAFETY: handle remains live while self is borrowed.
-        unsafe { (self.pump_fn)(self.handle, frame_time_nanos) }
+        unsafe { (self.pump_fn)(handle.as_ptr(), frame_time_nanos) }
     }
 
     fn destroy(&mut self) -> i32 {
-        if !self.closed || self.handle.is_null() {
+        if !self.closed || self.handle.is_none() {
             return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
         }
+        let handle = self.handle.expect("checked graphics handle");
         // SAFETY: close made the native handle inert and this is the one
         // matching destroy call for it.
-        let status = unsafe { (self.destroy_fn)(self.handle) };
+        let status = unsafe { (self.destroy_fn)(handle.as_ptr()) };
         if status == 0 {
-            self.handle = std::ptr::null_mut();
+            self.handle = None;
         }
         status
     }
@@ -118,6 +123,7 @@ impl Drop for GraphicsSession {
 mod graphics_session_tests {
     use super::GraphicsSession;
     use core::ffi::c_void;
+    use core::ptr::NonNull;
     use core::sync::atomic::{AtomicUsize, Ordering};
 
     static FAILED_CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -151,7 +157,7 @@ mod graphics_session_tests {
     fn close_makes_use_after_close_fail_closed() {
         let handle = Box::into_raw(Box::new(1_u8)).cast::<c_void>();
         let mut session = GraphicsSession {
-            handle,
+            handle: NonNull::new(handle),
             close_fn: close,
             destroy_fn: destroy,
             dispatch_fn: dispatch,
@@ -181,7 +187,7 @@ mod graphics_session_tests {
         FAILED_CLOSE_CALLS.store(0, Ordering::SeqCst);
         let handle = Box::into_raw(Box::new(1_u8)).cast::<c_void>();
         let mut session = GraphicsSession {
-            handle,
+            handle: NonNull::new(handle),
             close_fn: failing_close,
             destroy_fn: destroy,
             dispatch_fn: dispatch,

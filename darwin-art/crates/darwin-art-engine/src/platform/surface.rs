@@ -4,13 +4,13 @@ use darwin_art_engine_sys::{
     PointerEvent, SurfaceDestroyFn, SurfaceNextPointerEventFn, SurfacePresentFn,
     SurfacePumpEventsFn, SurfaceUpdateFn,
 };
-use std::mem::size_of;
+use std::{mem::size_of, ptr::NonNull};
 
 /// Owner-thread surface handle. Its callback table and native handle stay
 /// paired until `close`, so RuntimeSession can drop it before EngineSession
 /// and never call into an unmapped engine image.
 pub struct SurfaceSession {
-    handle: *mut c_void,
+    handle: Option<NonNull<c_void>>,
     update: SurfaceUpdateFn,
     present: SurfacePresentFn,
     pump_events: SurfacePumpEventsFn,
@@ -23,7 +23,7 @@ pub struct SurfaceSession {
 impl SurfaceSession {
     fn from_parts(handle: *mut c_void, symbols: EngineSymbols) -> Self {
         Self {
-            handle,
+            handle: NonNull::new(handle),
             update: symbols.surface.update,
             present: symbols.surface.present,
             pump_events: symbols.surface.pump_events,
@@ -35,11 +35,9 @@ impl SurfaceSession {
     }
 
     pub fn handle(&self) -> *mut c_void {
-        if self.armed {
-            self.handle
-        } else {
-            std::ptr::null_mut()
-        }
+        self.handle
+            .filter(|_| self.armed)
+            .map_or(std::ptr::null_mut(), NonNull::as_ptr)
     }
 
     pub(crate) fn active(symbols: EngineSymbols) -> Option<Self> {
@@ -64,37 +62,37 @@ impl SurfaceSession {
     }
 
     pub fn update_words(&self, pixels: &[u32]) -> i32 {
-        if !self.armed {
+        let Some(handle) = self.handle.filter(|_| self.armed) else {
             return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
-        }
+        };
         let byte_count = pixels.len().saturating_mul(size_of::<u32>());
         // SAFETY: the callback and handle are paired and live; `pixels`
         // remains borrowed for the duration of the synchronous callback.
-        unsafe { (self.update)(self.handle, pixels.as_ptr().cast(), byte_count) }
+        unsafe { (self.update)(handle.as_ptr(), pixels.as_ptr().cast(), byte_count) }
     }
 
     pub fn present(&self) -> i32 {
-        if !self.armed {
+        let Some(handle) = self.handle.filter(|_| self.armed) else {
             return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
-        }
+        };
         // SAFETY: same invariant as update.
-        unsafe { (self.present)(self.handle) }
+        unsafe { (self.present)(handle.as_ptr()) }
     }
 
     pub fn pump_events(&self, visible_seconds: f64) -> i32 {
-        if !self.armed {
+        let Some(handle) = self.handle.filter(|_| self.armed) else {
             return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
-        }
+        };
         // SAFETY: same invariant as update.
-        unsafe { (self.pump_events)(self.handle, visible_seconds) }
+        unsafe { (self.pump_events)(handle.as_ptr(), visible_seconds) }
     }
 
     pub fn next_pointer_event(&self, event: &mut PointerEvent) -> bool {
-        if !self.armed {
+        let Some(handle) = self.handle.filter(|_| self.armed) else {
             return false;
-        }
+        };
         // SAFETY: event is writable POD and the handle is live.
-        unsafe { (self.next_pointer_event)(self.handle, event) }
+        unsafe { (self.next_pointer_event)(handle.as_ptr(), event) }
     }
 
     pub fn close(&mut self) -> i32 {
@@ -102,8 +100,13 @@ impl SurfaceSession {
             return self.close_status.unwrap_or(0);
         }
         self.armed = false;
+        let Some(handle) = self.handle else {
+            return self
+                .close_status
+                .unwrap_or(darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE);
+        };
         // SAFETY: this is the one matching destroy call for the handle.
-        let status = unsafe { (self.destroy)(self.handle) };
+        let status = unsafe { (self.destroy)(handle.as_ptr()) };
         self.close_status = Some(status);
         status
     }
@@ -119,6 +122,7 @@ impl Drop for SurfaceSession {
 mod surface_session_tests {
     use super::SurfaceSession;
     use core::ffi::c_void;
+    use core::ptr::NonNull;
     use core::sync::atomic::{AtomicUsize, Ordering};
 
     static DESTROY_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -151,7 +155,7 @@ mod surface_session_tests {
     fn destroy_failure_is_reported_once_and_not_reentered_by_drop() {
         DESTROY_CALLS.store(0, Ordering::SeqCst);
         let mut session = SurfaceSession {
-            handle: std::ptr::dangling_mut::<c_void>(),
+            handle: NonNull::new(std::ptr::dangling_mut::<c_void>()),
             update,
             present,
             pump_events: pump,
@@ -169,7 +173,7 @@ mod surface_session_tests {
     #[test]
     fn closed_surface_fails_closed_before_foreign_operations() {
         let mut session = SurfaceSession {
-            handle: std::ptr::dangling_mut::<c_void>(),
+            handle: NonNull::new(std::ptr::dangling_mut::<c_void>()),
             update,
             present,
             pump_events: pump,
