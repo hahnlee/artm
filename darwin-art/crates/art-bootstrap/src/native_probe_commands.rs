@@ -85,9 +85,107 @@ pub(crate) fn compile_runtime_graphics_phase(
     let cache_path = build_dir.join("runtime-probe-graphics-phase-hashes.cache");
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     let mut command = runtime_cpp_command(includes);
+    command.current_dir(root);
     command
         .arg("-c")
         .arg(root.join("probes/runtime_graphics_phase.cc"))
+        .arg("-o")
+        .arg(&object);
+    let _ = compile_cached_probe_tu(&mut command, &object, &cache_path, &compiler_identity)?;
+    Ok(object)
+}
+
+/// Compile the HWUI/Skia-heavy RenderNode recording half independently from
+/// presentation dispatch. Keeping this cache key separate is the main native
+/// inner-loop win: changes to raster presentation, input, or phase JNI code
+/// no longer recompile the private AOSP graphics implementation.
+pub(crate) fn compile_runtime_graphics_recording_probe(
+    root: &Path,
+    build_dir: &Path,
+    includes: &[&Path],
+    ndk_include: &Path,
+    ndk_arch_include: &Path,
+) -> Result<PathBuf> {
+    let object = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_RECORDING_OBJECT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| build_dir.join("darwin_art_runtime_graphics_recording.cc.o"));
+    if let Some(parent) = object.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let cache_path = build_dir.join("runtime-probe-graphics-recording-hashes.cache");
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let mut command = runtime_cpp_command(includes);
+    command.current_dir(root);
+    command
+        .args(["-include", "mirror/object_reference.h"])
+        .arg("-idirafter")
+        .arg(ndk_arch_include)
+        .arg("-idirafter")
+        .arg(ndk_include)
+        .args([
+            "-Wno-macro-redefined",
+            "-DDARWIN_ART_REAL_GRAPHICS",
+            "-DDARWIN_ART_HWUI_GPU",
+            "-DDARWIN_ART_AOSP_COMPAT_LSEEK64",
+            "-DSK_BUILD_FOR_ANDROID_FRAMEWORK",
+            "-DLOG_TAG=\"DarwinArtHWUI\"",
+            "-include",
+            "log/log_main.h",
+        ])
+        .args([
+            "-I",
+            "_aosp/frameworks/base/libs/hwui",
+            "-I",
+            "_aosp/frameworks/base/libs/hwui/hwui",
+            "-I",
+            "_aosp/frameworks/base/libs/hwui/pipeline/skia",
+            "-I",
+            "_aosp/frameworks/base/libs/androidfw/include",
+            "-I",
+            "_aosp/frameworks/base/include",
+            "-I",
+            "_aosp/frameworks/native/include",
+            "-I",
+            "_aosp/system/incremental_delivery/incfs/util/include",
+            "-I",
+            "_aosp/system/core/libutils/include",
+            "-I",
+            "_aosp/system/core/libsystem/include",
+            "-I",
+            "_aosp/system/core/libcutils/include",
+            "-I",
+            "_aosp/frameworks/native/libs/ui/include",
+            "-I",
+            "_aosp/frameworks/native/libs/ui/include_types",
+            "-I",
+            "_aosp/frameworks/native/libs/nativewindow/include",
+            "-I",
+            "_aosp/frameworks/native/libs/arect/include",
+            "-I",
+            "_aosp/system/logging/liblog/include",
+            "-I",
+            "_aosp/external/skia",
+            "-I",
+            "_aosp/external/skia/include/core",
+            "-I",
+            "_aosp/external/skia/include/effects",
+            "-I",
+            "_aosp/external/skia/include/private",
+            "-I",
+            "_aosp/external/skia/include/android",
+            "-I",
+            "_aosp/external/skia/include/utils",
+            "-I",
+            "_aosp/external/skia/include/codec",
+            "-I",
+            "_aosp/frameworks/minikin/include",
+            "-I",
+            "_aosp/external/harfbuzz_ng/src",
+            "-I",
+            "_aosp/external/googletest/googletest/include",
+        ])
+        .arg("-c")
+        .arg(root.join("probes/runtime_graphics_recording.cc"))
         .arg("-o")
         .arg(&object);
     let _ = compile_cached_probe_tu(&mut command, &object, &cache_path, &compiler_identity)?;

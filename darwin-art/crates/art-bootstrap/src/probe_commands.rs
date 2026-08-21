@@ -431,6 +431,13 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         &probe_cache,
         &compiler_identity,
     )?;
+    let graphics_recording_object = compile_runtime_graphics_recording_probe(
+        root,
+        &build_dir,
+        &include_refs,
+        &ndk_include,
+        &ndk_arch_include,
+    )?;
     let graphics_phase_object = compile_runtime_graphics_phase(root, &build_dir, &include_refs)?;
     let graphics_input_object =
         compile_runtime_graphics_input_probe(root, &build_dir, &include_refs)?;
@@ -526,6 +533,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(&shutdown_probe_object)
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
+        .arg(&graphics_recording_object)
         .arg(&graphics_state_object)
         .arg(&jni_acceptance_object)
         .arg(&graphics_session_object)
