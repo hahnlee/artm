@@ -8,15 +8,19 @@ use std::ptr;
 
 mod frame;
 mod provider;
+#[cfg(target_os = "macos")]
+mod surface;
 
 #[cfg(target_os = "macos")]
 use darwin_art_engine::{EngineSession, SurfaceSession};
 
 pub use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProcessResult};
-use darwin_art_runtime::{RuntimeError, RuntimeOwners, RuntimeSession, Subsystem};
+use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
 use frame::{FrameHost, receive_frame};
 pub use frame::{OwnedFrame, write_frame_ppm};
 use provider::ProviderBridge;
+#[cfg(target_os = "macos")]
+use surface::*;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
 use darwin_art_engine_sys::{
@@ -729,79 +733,6 @@ fn surface_status(
     }
 }
 
-#[cfg(target_os = "macos")]
-fn owned_surface(
-    owners: &RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession>,
-) -> Option<&SurfaceSession> {
-    owners.surface()
-}
-
-#[cfg(target_os = "macos")]
-fn owned_surface_pump_events(
-    owners: &RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession>,
-    seconds: f64,
-) -> i32 {
-    owned_surface(owners).map_or(-1, |surface| surface.pump_events(seconds))
-}
-
-#[cfg(target_os = "macos")]
-fn owned_surface_next_pointer_event(
-    owners: &RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession>,
-    event: &mut PointerEvent,
-) -> bool {
-    owned_surface(owners).is_some_and(|surface| surface.next_pointer_event(event))
-}
-
-#[cfg(target_os = "macos")]
-fn owned_surface_update(
-    owners: &RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession>,
-    pixels: &[u32],
-) -> i32 {
-    owned_surface(owners).map_or(-1, |surface| surface.update_words(pixels))
-}
-
-#[cfg(target_os = "macos")]
-fn owned_surface_present(
-    owners: &RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession>,
-) -> i32 {
-    owned_surface(owners).map_or(-1, SurfaceSession::present)
-}
-
-#[cfg(target_os = "macos")]
-fn close_surface_owner(
-    owners: &mut RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession>,
-) -> Result<(), i32> {
-    let Some(mut surface) = owners.take_surface() else {
-        return Ok(());
-    };
-    let status = surface.close();
-    if status == 0 { Ok(()) } else { Err(status) }
-}
-
-#[cfg(target_os = "macos")]
-fn shutdown_engine_owner(
-    owners: &mut RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession>,
-) -> Result<(), i32> {
-    let Some(mut engine) = owners.take_engine() else {
-        return Ok(());
-    };
-    let status = engine.shutdown_once();
-    if status == 0 { Ok(()) } else { Err(status) }
-}
-
-#[cfg(target_os = "macos")]
-fn clear_provider_owner(
-    owners: &mut RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession>,
-) -> i32 {
-    let Some(provider) = owners.take_provider() else {
-        return 0;
-    };
-    match provider.clear() {
-        Ok(()) => 0,
-        Err(()) => -1,
-    }
-}
-
 fn path_c_string(path: &Path) -> Result<CString, HostError> {
     CString::new(path.as_os_str().as_bytes()).map_err(|_| HostError::InteriorNul(path.into()))
 }
@@ -809,6 +740,7 @@ fn path_c_string(path: &Path) -> Result<CString, HostError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::c_void;
     use std::mem::{align_of, offset_of, size_of};
 
     #[test]
