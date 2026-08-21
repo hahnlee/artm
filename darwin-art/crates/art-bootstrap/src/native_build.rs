@@ -5,6 +5,7 @@ use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::thread;
 
 use crate::Result;
 use crate::support::{describe_command, run_command};
@@ -30,6 +31,77 @@ pub(crate) fn common_cpp_command(includes: &[&Path]) -> Command {
     // guard cannot lock in the 4 KiB non-Linux fallback.
     command.args(["-include", "base/globals.h"]);
     command
+}
+
+pub(crate) struct PendingNativeCompile {
+    pub(crate) command: Command,
+    pub(crate) object: PathBuf,
+}
+
+/// Compile independent native actions concurrently while keeping each
+/// object's dependency fingerprint durable and isolated.  This belongs to
+/// the native build module rather than the runtime command dispatcher so
+/// changing a runtime command does not obscure the cache boundary.
+pub(crate) fn compile_pending_native(
+    jobs: Vec<PendingNativeCompile>,
+    compiler_identity: &str,
+) -> Result<(Vec<PathBuf>, usize, usize)> {
+    if jobs.is_empty() {
+        return Ok((Vec::new(), 0, 0));
+    }
+    let default_jobs = thread::available_parallelism()
+        .map(|count| count.get().min(8))
+        .unwrap_or(4)
+        .max(1);
+    let workers = std::env::var("DARWIN_ART_NATIVE_JOBS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default_jobs)
+        .min(8);
+    let mut pending = jobs;
+    let mut objects = Vec::new();
+    let mut compiled = 0;
+    let mut cached = 0;
+    while !pending.is_empty() {
+        let batch_len = pending.len().min(workers);
+        let batch: Vec<_> = pending.drain(..batch_len).collect();
+        let results = thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(batch.len());
+            for job in batch {
+                let identity = compiler_identity.to_owned();
+                handles.push(scope.spawn(move || {
+                    let cache_path = job.object.with_extension("hashes.cache");
+                    let mut cache =
+                        FileHashCache::load(&cache_path).map_err(|error| error.to_string())?;
+                    let mut command = job.command;
+                    let did_compile = compile_with_dependency_cache(
+                        &mut command,
+                        &job.object,
+                        &identity,
+                        &mut cache,
+                    )
+                    .map_err(|error| error.to_string())?;
+                    cache.save(&cache_path).map_err(|error| error.to_string())?;
+                    Ok::<_, String>((job.object, did_compile))
+                }));
+            }
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle
+                        .join()
+                        .map_err(|_| "native compile worker panicked".to_owned())?
+                })
+                .collect::<std::result::Result<Vec<_>, String>>()
+        })
+        .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
+        for (object, did_compile) in results {
+            record_cache_result(did_compile, &mut compiled, &mut cached);
+            objects.push(object);
+        }
+    }
+    Ok((objects, compiled, cached))
 }
 
 pub(crate) fn compile_cpp(source: &Path, object_dir: &Path, includes: &[&Path]) -> Result<PathBuf> {
