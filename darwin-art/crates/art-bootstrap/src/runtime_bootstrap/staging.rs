@@ -49,10 +49,17 @@ const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0030-darwin-large-object-bitmap-window.patch",
 ];
 
+pub(crate) const SHARED_RUNTIME_CACHE_IDENTITY: &str =
+    "darwin-art-runtime-core-cache-v2-common-includes-fmt";
+
 pub(crate) struct RuntimeBootstrapStaging {
     pub(crate) root: PathBuf,
     pub(crate) build_dir: PathBuf,
     pub(crate) object_dir: PathBuf,
+    /// Objects for upstream ART runtime TUs are flavor-independent.  Keep
+    /// them outside the runtime/graphics output roots so the second flavor
+    /// consumes the first flavor's dependency-fingerprinted objects.
+    pub(crate) runtime_core_object_dir: PathBuf,
     pub(crate) patched_runtime: PathBuf,
     pub(crate) artbase: PathBuf,
     pub(crate) libprofile: PathBuf,
@@ -69,6 +76,7 @@ pub(crate) struct RuntimeBootstrapStaging {
     pub(crate) ndk_include: PathBuf,
     pub(crate) ndk_arch_include: PathBuf,
     pub(crate) includes: Vec<PathBuf>,
+    pub(crate) runtime_includes: Vec<PathBuf>,
     pub(crate) operator_source: PathBuf,
 }
 
@@ -148,10 +156,19 @@ pub(crate) fn prepare(root: &Path, real_graphics: bool) -> Result<RuntimeBootstr
         "runtime-bootstrap"
     });
     let runtime_generated_dir = build_dir.join("generated");
-    let patched_source_dir = build_dir.join("patched-source");
+    // The patched ART runtime sources are identical between the headless and
+    // graphics flavors.  A shared shadow is the source-level half of the
+    // cross-flavor object cache; adapter sources remain flavor-local below.
+    let patched_source_dir = root.join("_build/runtime-common/patched-source");
     let patched_runtime = patched_source_dir.join("runtime");
     let object_dir = build_dir.join("objects");
+    let runtime_core_object_dir = root.join("_build/runtime-common/objects");
     fs::create_dir_all(&object_dir)?;
+    fs::create_dir_all(&runtime_core_object_dir)?;
+    fs::write(
+        root.join("_build/runtime-common/cache-identity"),
+        format!("{SHARED_RUNTIME_CACHE_IDENTITY}\n"),
+    )?;
     fs::create_dir_all(&runtime_generated_dir)?;
 
     let shadow_identity = runtime_shadow_identity(&runtime, root)?;
@@ -170,7 +187,7 @@ pub(crate) fn prepare(root: &Path, real_graphics: bool) -> Result<RuntimeBootstr
         fs::write(shadow_identity_path, format!("{shadow_identity}\n"))?;
     }
 
-    let mut includes = vec![
+    let runtime_includes = vec![
         public_include,
         compat,
         elf_fixture_generated,
@@ -206,9 +223,11 @@ pub(crate) fn prepare(root: &Path, real_graphics: bool) -> Result<RuntimeBootstr
         nativehelper_headers,
         nativehelper_platform_headers.clone(),
         dlmalloc,
+        aosp_fmt_include.clone(),
         PathBuf::from("/opt/homebrew/opt/icu4c@78/include"),
         PathBuf::from("/opt/homebrew/include"),
     ];
+    let mut includes = runtime_includes.clone();
     if real_graphics {
         let generated_registration =
             graphics_registration_include.join("darwin_android_graphics_registration.h");
@@ -279,6 +298,7 @@ pub(crate) fn prepare(root: &Path, real_graphics: bool) -> Result<RuntimeBootstr
         root: root.to_owned(),
         build_dir,
         object_dir,
+        runtime_core_object_dir,
         patched_runtime,
         artbase,
         libprofile,
@@ -295,6 +315,7 @@ pub(crate) fn prepare(root: &Path, real_graphics: bool) -> Result<RuntimeBootstr
         ndk_include,
         ndk_arch_include,
         includes,
+        runtime_includes,
         operator_source,
     })
 }

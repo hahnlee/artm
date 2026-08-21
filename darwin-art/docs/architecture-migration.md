@@ -160,6 +160,13 @@ the existing object set. The small `compat/darwin_art_abi_layout.cc` phase
 provides the native half of the cross-language POD layout gate; Rust offset
 tests remain the other half.
 
+The ART-side bootstrap now has a shared runtime-core cache boundary. Common
+upstream runtime TUs compile from one patched shadow and one include identity
+under `_build/runtime-common`; only the JNI/provider/graphics adapters remain
+flavor-specific. Graphics therefore reuses the runtime archive's common
+objects instead of compiling a second ART core, while a cache-identity mismatch
+forces a complete canonical repopulation rather than mixing header ABIs.
+
 The framework JNI boundary follows the same rule: Choreographer/
 DisplayEventReceiver, PropertyValuesHolder, Perfetto, and their registration
 table live in `compat/darwin_framework_animation_natives.cc`, while the

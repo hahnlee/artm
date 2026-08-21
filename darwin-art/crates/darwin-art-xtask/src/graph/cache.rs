@@ -18,62 +18,70 @@ pub(crate) struct CachedNativeObject {
 /// `compile_with_dependency_cache`. This lets a later graph generation turn
 /// an already materialized bootstrap into real per-object Ninja edges without
 /// duplicating ART's long include/define command construction in xtask.
-pub(crate) fn cached_native_objects(
-    object_dir: &Path,
+/// Recover one archive from a flavor-local adapter directory plus the shared
+/// ART core object directory.  The archive member list remains authoritative,
+/// so stale objects that are no longer members cannot leak into the Ninja
+/// graph.
+pub(crate) fn cached_native_objects_from_dirs(
+    object_dirs: &[&Path],
     archive: &Path,
     required_sources: &[&str],
 ) -> io::Result<Option<Vec<CachedNativeObject>>> {
     let mut by_name = BTreeMap::new();
-    let Ok(entries) = fs::read_dir(object_dir) else {
-        return Ok(None);
-    };
-    for entry in entries.flatten() {
-        let fingerprint = entry.path();
-        if fingerprint
-            .extension()
-            .and_then(|extension| extension.to_str())
-            != Some("fingerprint")
-        {
-            continue;
+    for object_dir in object_dirs {
+        let Ok(entries) = fs::read_dir(object_dir) else {
+            return Ok(None);
+        };
+        for entry in entries.flatten() {
+            let fingerprint = entry.path();
+            if fingerprint
+                .extension()
+                .and_then(|extension| extension.to_str())
+                != Some("fingerprint")
+            {
+                continue;
+            }
+            let object = fingerprint.with_extension("");
+            // A Ninja-produced depfile may not exist yet (Ninja can be starting
+            // from a persisted Rust fingerprint), but the object and its command
+            // fingerprint are still sufficient to seed the cached graph.  The
+            // first cached edge will regenerate the depfile; requiring it here
+            // would incorrectly fall back to the monolithic Rust builder.
+            if !object.is_file() {
+                continue;
+            }
+            let contents = fs::read_to_string(&fingerprint)?;
+            let Some(command_line) = contents
+                .lines()
+                .find_map(|line| line.strip_prefix("command="))
+            else {
+                continue;
+            };
+            let tokens = command_line.split_whitespace().collect::<Vec<_>>();
+            let Some(source_index) = tokens.iter().position(|token| *token == "-c") else {
+                continue;
+            };
+            let Some(source) = tokens.get(source_index + 1).map(PathBuf::from) else {
+                continue;
+            };
+            if !source.is_file() {
+                continue;
+            }
+            let Some(name) = object.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            // The shared ART core directory is visited first.  Preserve its
+            // object when the flavor directory still contains a pre-split
+            // copy with the same member name.
+            by_name
+                .entry(name.to_owned())
+                .or_insert(CachedNativeObject {
+                    object,
+                    source,
+                    command: command_line.to_owned(),
+                    shell_quoted: false,
+                });
         }
-        let object = fingerprint.with_extension("");
-        // A Ninja-produced depfile may not exist yet (Ninja can be starting
-        // from a persisted Rust fingerprint), but the object and its command
-        // fingerprint are still sufficient to seed the cached graph.  The
-        // first cached edge will regenerate the depfile; requiring it here
-        // would incorrectly fall back to the monolithic Rust builder.
-        if !object.is_file() {
-            continue;
-        }
-        let contents = fs::read_to_string(&fingerprint)?;
-        let Some(command_line) = contents
-            .lines()
-            .find_map(|line| line.strip_prefix("command="))
-        else {
-            continue;
-        };
-        let tokens = command_line.split_whitespace().collect::<Vec<_>>();
-        let Some(source_index) = tokens.iter().position(|token| *token == "-c") else {
-            continue;
-        };
-        let Some(source) = tokens.get(source_index + 1).map(PathBuf::from) else {
-            continue;
-        };
-        if !source.is_file() {
-            continue;
-        }
-        let Some(name) = object.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        by_name.insert(
-            name.to_owned(),
-            CachedNativeObject {
-                object,
-                source,
-                command: command_line.to_owned(),
-                shell_quoted: false,
-            },
-        );
     }
     if required_sources.iter().any(|required| {
         !by_name.values().any(|object| {
@@ -123,6 +131,16 @@ pub(crate) fn emit_cached_native_graph(
     archive: &str,
     rules_emitted: &mut bool,
 ) {
+    emit_cached_native_graph_with_inputs(graph, objects, archive, rules_emitted, &[]);
+}
+
+pub(crate) fn emit_cached_native_graph_with_inputs(
+    graph: &mut String,
+    objects: &[CachedNativeObject],
+    archive: &str,
+    rules_emitted: &mut bool,
+    extra_archive_inputs: &[PathBuf],
+) {
     if !*rules_emitted {
         graph.push_str("rule native_cached_cpp\n");
         graph.push_str("  command = $compile_command\n");
@@ -146,7 +164,7 @@ pub(crate) fn emit_cached_native_graph(
         graph.push_str("  restat = 1\n\n");
         *rules_emitted = true;
     }
-    let mut object_paths = Vec::with_capacity(objects.len());
+    let mut object_paths = Vec::with_capacity(objects.len() + extra_archive_inputs.len());
     for object in objects {
         let output = ninja_path(&object.object);
         let source = ninja_path(&object.source);
@@ -182,6 +200,7 @@ pub(crate) fn emit_cached_native_graph(
         graph.push('\n');
         object_paths.push(output);
     }
+    object_paths.extend(extra_archive_inputs.iter().map(|path| ninja_path(path)));
     graph.push_str("build ");
     graph.push_str(archive);
     graph.push_str(": native_cached_archive ");

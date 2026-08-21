@@ -3,7 +3,9 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use super::super::*;
-use super::cache::{cached_native_objects, emit_cached_native_graph};
+use super::cache::{
+    cached_native_objects_from_dirs, emit_cached_native_graph, emit_cached_native_graph_with_inputs,
+};
 use super::foundation::{
     FoundationFamily, cached_foundation_objects, foundation_input_list, foundation_inputs,
 };
@@ -11,6 +13,8 @@ use super::inputs::{graph_inputs, is_probe_only_input, probe_content_stamp, prob
 use super::representative::{
     REPRESENTATIVE_EDGES, edge_digest, emit_representative_edges, json_escape, toolchain_inputs,
 };
+
+const SHARED_RUNTIME_CACHE_IDENTITY: &str = "darwin-art-runtime-core-cache-v2-common-includes-fmt";
 
 pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let root = repository_root(out);
@@ -125,58 +129,72 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let app_presentation_object = ninja_path(&app_presentation_object_path);
     let stamp_for_shell = stamp_path.to_string_lossy().into_owned();
     let native_output_for_shell = native_output_root.to_string_lossy().into_owned();
-    let cached_runtime_objects = cached_native_objects(
-        &native_output_root.join("runtime-bootstrap/objects"),
-        &runtime_archive_path,
-        &[
-            "darwin_art_abi_layout.cc",
-            "darwin_android_jni_trampoline.cc",
-            "darwin_android_elf_image_registry.cc",
-            "darwin_provider_owners.cc",
-            "darwin_framework_natives.cc",
-            "darwin_framework_animation_natives.cc",
-            "darwin_icu_natives.cc",
-            "darwin_libcore_natives.cc",
-            "darwin_runtime_adapters.cc",
-            "darwin_runtime_platform_stubs.cc",
-            "darwin_native_bridge_stubs.cc",
-            "darwin_jni_shorty.cc",
-            "darwin_jni_proxy_lookup.cc",
-            "darwin_jni_proxy_registration.cc",
-            "darwin_runtime_elf_lifecycle.cc",
-            "darwin_runtime_elf_resolver.cc",
-            "darwin_runtime_native_loader.cc",
-            "darwin_runtime_jni_registration.cc",
-            "darwin_sigchain.cc",
-            "fault_handler_arm64_darwin.cc",
-        ],
-    )?;
-    let cached_graphics_objects = cached_native_objects(
-        &native_output_root.join("runtime-graphics-bootstrap/objects"),
-        &archive_path,
-        &[
-            "darwin_art_abi_layout.cc",
-            "darwin_android_jni_trampoline.cc",
-            "darwin_android_elf_image_registry.cc",
-            "darwin_provider_owners.cc",
-            "darwin_framework_natives.cc",
-            "darwin_framework_animation_natives.cc",
-            "darwin_icu_jni_bridge.cc",
-            "darwin_libcore_natives.cc",
-            "darwin_runtime_adapters.cc",
-            "darwin_runtime_platform_stubs.cc",
-            "darwin_native_bridge_stubs.cc",
-            "darwin_jni_shorty.cc",
-            "darwin_jni_proxy_lookup.cc",
-            "darwin_jni_proxy_registration.cc",
-            "darwin_runtime_elf_lifecycle.cc",
-            "darwin_runtime_elf_resolver.cc",
-            "darwin_runtime_native_loader.cc",
-            "darwin_runtime_jni_registration.cc",
-            "darwin_sigchain.cc",
-            "fault_handler_arm64_darwin.cc",
-        ],
-    )?;
+    let runtime_common_objects = native_output_root.join("runtime-common/objects");
+    let runtime_objects = native_output_root.join("runtime-bootstrap/objects");
+    let graphics_objects = native_output_root.join("runtime-graphics-bootstrap/objects");
+    let shared_runtime_cache_ready =
+        fs::read_to_string(native_output_root.join("runtime-common/cache-identity"))
+            .is_ok_and(|identity| identity.trim() == SHARED_RUNTIME_CACHE_IDENTITY);
+    let cached_runtime_objects = if shared_runtime_cache_ready {
+        cached_native_objects_from_dirs(
+            &[&runtime_common_objects, &runtime_objects],
+            &runtime_archive_path,
+            &[
+                "darwin_art_abi_layout.cc",
+                "darwin_android_jni_trampoline.cc",
+                "darwin_android_elf_image_registry.cc",
+                "darwin_provider_owners.cc",
+                "darwin_framework_natives.cc",
+                "darwin_framework_animation_natives.cc",
+                "darwin_icu_natives.cc",
+                "darwin_libcore_natives.cc",
+                "darwin_runtime_adapters.cc",
+                "darwin_runtime_platform_stubs.cc",
+                "darwin_native_bridge_stubs.cc",
+                "darwin_jni_shorty.cc",
+                "darwin_jni_proxy_lookup.cc",
+                "darwin_jni_proxy_registration.cc",
+                "darwin_runtime_elf_lifecycle.cc",
+                "darwin_runtime_elf_resolver.cc",
+                "darwin_runtime_native_loader.cc",
+                "darwin_runtime_jni_registration.cc",
+                "darwin_sigchain.cc",
+                "fault_handler_arm64_darwin.cc",
+            ],
+        )?
+    } else {
+        None
+    };
+    let cached_graphics_objects = if shared_runtime_cache_ready {
+        cached_native_objects_from_dirs(
+            &[&runtime_common_objects, &graphics_objects],
+            &archive_path,
+            &[
+                "darwin_art_abi_layout.cc",
+                "darwin_android_jni_trampoline.cc",
+                "darwin_android_elf_image_registry.cc",
+                "darwin_provider_owners.cc",
+                "darwin_framework_natives.cc",
+                "darwin_framework_animation_natives.cc",
+                "darwin_icu_jni_bridge.cc",
+                "darwin_libcore_natives.cc",
+                "darwin_runtime_adapters.cc",
+                "darwin_runtime_platform_stubs.cc",
+                "darwin_native_bridge_stubs.cc",
+                "darwin_jni_shorty.cc",
+                "darwin_jni_proxy_lookup.cc",
+                "darwin_jni_proxy_registration.cc",
+                "darwin_runtime_elf_lifecycle.cc",
+                "darwin_runtime_elf_resolver.cc",
+                "darwin_runtime_native_loader.cc",
+                "darwin_runtime_jni_registration.cc",
+                "darwin_sigchain.cc",
+                "fault_handler_arm64_darwin.cc",
+            ],
+        )?
+    } else {
+        None
+    };
     let filesystem_object_for_shell = filesystem_object_path.to_string_lossy().into_owned();
     let network_object_for_shell = network_object_path.to_string_lossy().into_owned();
     let bootstrap_input_list = bootstrap_inputs
@@ -421,11 +439,20 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str("ninja_required_version = 1.10\n\n");
     let mut cached_rules_emitted = false;
     if let Some(cached_objects) = cached_graphics_objects.as_deref() {
-        emit_cached_native_graph(
+        let (shared_objects, flavor_objects): (Vec<_>, Vec<_>) = cached_objects
+            .iter()
+            .cloned()
+            .partition(|object| object.object.starts_with(&runtime_common_objects));
+        let shared_inputs = shared_objects
+            .iter()
+            .map(|object| object.object.clone())
+            .collect::<Vec<_>>();
+        emit_cached_native_graph_with_inputs(
             &mut graph,
-            cached_objects,
+            &flavor_objects,
             &archive,
             &mut cached_rules_emitted,
+            &shared_inputs,
         );
         graph.push_str("build ");
         graph.push_str(&stamp);

@@ -43,6 +43,15 @@ The patched ART shadow tree also has a content identity manifest. Preparation
 does not rewrite an unchanged staged source or header, so a canonical fallback
 after graph promotion preserves existing depfile mtimes and reuses the old
 object fingerprints instead of recompiling the full ART archive.
+The upstream ART runtime translation units now use a shared
+`_build/runtime-common/{patched-source,objects}` boundary. Headless and
+graphics adapters remain flavor-local, but the roughly 200 common runtime
+objects are archived into both products from one dependency-fingerprinted
+cache. A cache identity stamp includes the common include set (including the
+locked AOSP fmt headers); when that identity changes, graph promotion is
+disabled until the canonical builder repopulates the shared cache. This avoids
+silently mixing a graphics-only header ABI into the headless runtime and makes
+the second flavor an adapter/link step rather than another ART cold build.
 Each probe phase also has a stable content stamp under
 `_build/runtime-probes/content-stamps/`. The graph generator updates a stamp
 only when that phase's source/header bytes change, so a checkout that preserves

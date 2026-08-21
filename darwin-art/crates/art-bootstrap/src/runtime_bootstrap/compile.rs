@@ -19,6 +19,11 @@ pub(crate) fn compile(
         .iter()
         .map(PathBuf::as_path)
         .collect::<Vec<_>>();
+    let runtime_includes = staged
+        .runtime_includes
+        .iter()
+        .map(PathBuf::as_path)
+        .collect::<Vec<_>>();
     let compiler_identity = format!(
         "{}macOS {} ({})",
         command_output(Command::new("clang++").arg("--version"))?,
@@ -31,7 +36,7 @@ pub(crate) fn compile(
     let mut compiled_objects = 0usize;
     let mut cached_objects = 0usize;
     let operator_object = staged.object_dir.join("generated_operator_out.cc.o");
-    let mut operator_command = runtime_bootstrap_cpp_command(&includes);
+    let mut operator_command = runtime_bootstrap_cpp_command(&runtime_includes);
     operator_command
         .arg("-idirafter")
         .arg(&staged.ndk_arch_include)
@@ -61,7 +66,7 @@ pub(crate) fn compile(
         let profile_object = staged
             .object_dir
             .join(format!("libprofile_{}.o", profile_source.replace('/', "_")));
-        let mut profile_command = runtime_bootstrap_cpp_command(&includes);
+        let mut profile_command = runtime_bootstrap_cpp_command(&runtime_includes);
         profile_command
             .arg("-idirafter")
             .arg(&staged.ndk_arch_include)
@@ -181,7 +186,7 @@ pub(crate) fn compile(
     cached_objects += adapter_cached;
     objects.extend(adapter_objects);
 
-    let runtime_jobs = runtime_jobs(staged, &includes);
+    let runtime_jobs = runtime_jobs(staged, &runtime_includes);
     let (runtime_objects, runtime_compiled, runtime_cached) =
         compile_pending_native(runtime_jobs, &compiler_identity)?;
     compiled_objects += runtime_compiled;
@@ -193,7 +198,7 @@ pub(crate) fn compile(
         }
         objects.push(object);
     }
-    let runtime_object = staged.object_dir.join("runtime.cc.o");
+    let runtime_object = staged.runtime_core_object_dir.join("runtime.cc.o");
     let symbols = command_output(Command::new("nm").args(["-gU"]).arg(&runtime_object))?;
     if !symbols.contains("_ZN3art7Runtime6Create") {
         return Err("compiled Runtime object does not export Runtime::Create".into());
@@ -540,7 +545,7 @@ fn runtime_jobs(staged: &RuntimeBootstrapStaging, includes: &[&Path]) -> Vec<Pen
         .into_iter()
         .map(|source| {
             let object = staged
-                .object_dir
+                .runtime_core_object_dir
                 .join(format!("{}.o", source.replace('/', "_")));
             let source_path = if patched_sources.contains(&source) {
                 staged.patched_runtime.join(source)
