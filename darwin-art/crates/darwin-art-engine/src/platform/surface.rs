@@ -131,8 +131,10 @@ mod surface_session_tests {
     use core::ffi::c_void;
     use core::ptr::NonNull;
     use core::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
 
     static DESTROY_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static DESTROY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     unsafe extern "C" fn destroy(_: *mut c_void) -> i32 {
         DESTROY_CALLS.fetch_add(1, Ordering::SeqCst);
@@ -160,6 +162,7 @@ mod surface_session_tests {
 
     #[test]
     fn destroy_failure_is_reported_once_and_not_reentered_by_drop() {
+        let _lock = DESTROY_TEST_LOCK.lock().unwrap();
         DESTROY_CALLS.store(0, Ordering::SeqCst);
         let mut session = SurfaceSession {
             handle: NonNull::new(std::ptr::dangling_mut::<c_void>()),
@@ -179,6 +182,7 @@ mod surface_session_tests {
 
     #[test]
     fn closed_surface_fails_closed_before_foreign_operations() {
+        let _lock = DESTROY_TEST_LOCK.lock().unwrap();
         let mut session = SurfaceSession {
             handle: NonNull::new(std::ptr::dangling_mut::<c_void>()),
             update,
