@@ -66,10 +66,11 @@ state machine or call a shutdown callback that is not held by the Rust owner.
 ### M1 — concrete Rust owners (landed)
 
 The loaded engine, provider bridge, and optional surface now live in typed
-`darwin-art-runtime` owner structs. `darwin-art-host` is a thin loop over
-borrowed handles. Rollback is covered for run failure, surface creation
-failure, window close, and `DestroyJavaVM` failure; provider callbacks are
-invoked outside the lease mutex to preserve reentrancy.
+`darwin-art-runtime::RuntimeSession<E, P, S>` slots. `darwin-art-host` uses
+borrowed views of that one session rather than maintaining a parallel owner
+container. Rollback is covered for run failure, surface creation failure,
+window close, and `DestroyJavaVM` failure; provider callbacks are invoked
+outside the lease mutex to preserve reentrancy.
 
 ### M2 — phase modules (in progress, first boundaries landed)
 

@@ -13,7 +13,7 @@ mod provider;
 use darwin_art_engine::{EngineSession, SurfaceSession};
 
 pub use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProcessResult};
-use darwin_art_runtime::{RuntimeError, RuntimeLifecycle, RuntimeOwners, Subsystem};
+use darwin_art_runtime::{RuntimeError, RuntimeOwners, RuntimeSession, Subsystem};
 use provider::ProviderBridge;
 const MAX_FRAME_DIMENSION: u32 = 4096;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
@@ -220,17 +220,17 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
 
     #[cfg(target_os = "macos")]
     {
-        let mut runtime = RuntimeLifecycle::new();
+        let mut runtime =
+            RuntimeSession::<EngineSession, Box<ProviderBridge>, SurfaceSession>::new();
         runtime
             .start()
             .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
-        let mut owners = RuntimeOwners::<EngineSession, Box<ProviderBridge>, SurfaceSession>::new();
         let mut engine = EngineSession::open(&options.library).map_err(HostError::DynamicLoader)?;
         let symbols = engine.symbols();
         let provider_bridge = Box::new(ProviderBridge::new(symbols));
         let provider_context = provider_bridge.context();
         // SAFETY: provider_bridge is kept alive by the local scope until it
-        // is transferred into RuntimeOwners below; the callbacks are static
+        // is transferred into the RuntimeSession below; the callbacks are static
         // and use only that stable context pointer.
         unsafe {
             engine.install_provider_hooks(
@@ -285,10 +285,10 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // capture the owner only after that bootstrap has completed.
         let active_surface = engine.active_surface();
         let gpu_mode = active_surface.is_some();
-        owners
+        runtime
             .attach_engine(engine)
             .map_err(|_| HostError::RuntimeFailed(-1))?;
-        owners
+        runtime
             .attach_provider(provider_bridge)
             .map_err(|_| HostError::RuntimeFailed(-1))?;
         let provider_lease = runtime
@@ -315,9 +315,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     -1
                 } else {
                     match runtime.uninstall_subsystem(engine_lease) {
-                        Ok(()) => match shutdown_engine_owner(&mut owners) {
+                        Ok(()) => match shutdown_engine_owner(runtime.owners_mut()) {
                             Ok(()) => match runtime.uninstall_subsystem(provider_lease) {
-                                Ok(()) => clear_provider_owner(&mut owners),
+                                Ok(()) => clear_provider_owner(runtime.owners_mut()),
                                 Err(RuntimeError::EngineFailure { status }) => status,
                                 Err(error) => error.status() as i32,
                             },
@@ -343,7 +343,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     },
                 });
             };
-            owners
+            runtime
                 .attach_surface(surface)
                 .map_err(|_| HostError::RuntimeFailed(-1))?;
             let surface_lease = runtime
@@ -372,7 +372,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             let dispatch_queued_events = || -> Result<u64, HostError> {
                 let mut dispatched = 0_u64;
                 let mut event = PointerEvent::default();
-                while owned_surface_next_pointer_event(&owners, &mut event) {
+                while owned_surface_next_pointer_event(runtime.owners(), &mut event) {
                     let dispatch_status =
                         unsafe { dispatch_pointer(event.action, event.x, event.y) };
                     if dispatch_status != 0 {
@@ -393,7 +393,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     while held_ms < test_hold_ms && loop_error.is_none() {
                         let slice_ms = (test_hold_ms - held_ms).min(16);
                         let pump_status =
-                            owned_surface_pump_events(&owners, slice_ms as f64 / 1000.0);
+                            owned_surface_pump_events(runtime.owners(), slice_ms as f64 / 1000.0);
                         if pump_status == 7 {
                             break;
                         }
@@ -438,7 +438,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             }
             while remaining > 0.0 {
                 let slice = remaining.min(0.016);
-                let pump_status = owned_surface_pump_events(&owners, slice);
+                let pump_status = owned_surface_pump_events(runtime.owners(), slice);
                 if pump_status == 7 {
                     break;
                 }
@@ -482,11 +482,11 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 -1
             } else {
                 match runtime.uninstall_subsystem(surface_lease) {
-                    Ok(()) => match close_surface_owner(&mut owners) {
+                    Ok(()) => match close_surface_owner(runtime.owners_mut()) {
                         Ok(()) => match runtime.uninstall_subsystem(engine_lease) {
-                            Ok(()) => match shutdown_engine_owner(&mut owners) {
+                            Ok(()) => match shutdown_engine_owner(runtime.owners_mut()) {
                                 Ok(()) => match runtime.uninstall_subsystem(provider_lease) {
-                                    Ok(()) => clear_provider_owner(&mut owners),
+                                    Ok(()) => clear_provider_owner(runtime.owners_mut()),
                                     Err(RuntimeError::EngineFailure { status }) => status,
                                     Err(error) => error.status() as i32,
                                 },
@@ -553,9 +553,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 -1
             } else {
                 match runtime.uninstall_subsystem(engine_lease) {
-                    Ok(()) => match shutdown_engine_owner(&mut owners) {
+                    Ok(()) => match shutdown_engine_owner(runtime.owners_mut()) {
                         Ok(()) => match runtime.uninstall_subsystem(provider_lease) {
-                            Ok(()) => clear_provider_owner(&mut owners),
+                            Ok(()) => clear_provider_owner(runtime.owners_mut()),
                             Err(RuntimeError::EngineFailure { status }) => status,
                             Err(error) => error.status() as i32,
                         },
@@ -606,7 +606,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                     status,
                 }
             })?;
-            owners
+            runtime
                 .attach_surface(surface)
                 .map_err(|_| HostError::RuntimeFailed(-1))?;
             surface_lease = Some(
@@ -631,9 +631,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                             status: -1,
                         });
                     }
-                    let update_status = owned_surface_update(&owners, &frame.argb_pixels);
+                    let update_status = owned_surface_update(runtime.owners(), &frame.argb_pixels);
                     surface_status("update", update_status, false)?;
-                    let present_status = owned_surface_present(&owners);
+                    let present_status = owned_surface_present(runtime.owners());
                     surface_status("present", present_status, false)
                 };
                 // SAFETY: surface is live; the packed Rust frame remains live
@@ -700,8 +700,10 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                         let mut held = 0_u64;
                         while held < hold_ms {
                             let slice_ms = (hold_ms - held).min(16);
-                            let pump_status =
-                                owned_surface_pump_events(&owners, slice_ms as f64 / 1000.0);
+                            let pump_status = owned_surface_pump_events(
+                                runtime.owners(),
+                                slice_ms as f64 / 1000.0,
+                            );
                             if pump_status == 7 {
                                 break;
                             }
@@ -738,13 +740,13 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 let mut remaining = options.visible_seconds;
                 while remaining > 0.0 {
                     let slice = remaining.min(0.016);
-                    let pump_status = owned_surface_pump_events(&owners, slice);
+                    let pump_status = owned_surface_pump_events(runtime.owners(), slice);
                     if pump_status == 7 {
                         break;
                     }
                     surface_status("pump_events", pump_status, false)?;
                     let mut event = PointerEvent::default();
-                    while owned_surface_next_pointer_event(&owners, &mut event) {
+                    while owned_surface_next_pointer_event(runtime.owners(), &mut event) {
                         let dispatch_status =
                             unsafe { dispatch_pointer(event.action, event.x, event.y) };
                         if dispatch_status != 0 {
@@ -775,11 +777,11 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                         status
                     }
                     Some(Err(error)) => error.status() as i32,
-                    Some(Ok(())) | None => match close_surface_owner(&mut owners) {
+                    Some(Ok(())) | None => match close_surface_owner(runtime.owners_mut()) {
                         Ok(()) => match runtime.uninstall_subsystem(engine_lease) {
-                            Ok(()) => match shutdown_engine_owner(&mut owners) {
+                            Ok(()) => match shutdown_engine_owner(runtime.owners_mut()) {
                                 Ok(()) => match runtime.uninstall_subsystem(provider_lease) {
-                                    Ok(()) => clear_provider_owner(&mut owners),
+                                    Ok(()) => clear_provider_owner(runtime.owners_mut()),
                                     Err(RuntimeError::EngineFailure { status }) => status,
                                     Err(error) => error.status() as i32,
                                 },

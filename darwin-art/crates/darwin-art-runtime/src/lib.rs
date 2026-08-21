@@ -11,10 +11,12 @@ use darwin_art_abi::StatusCode;
 mod lifecycle;
 mod owners;
 mod provider;
+mod session;
 
 pub use lifecycle::RuntimeLifecycle;
 pub use owners::RuntimeOwners;
 pub use provider::{ProviderLeaseError, ProviderLeaseTable};
+pub use session::RuntimeSession;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimePhase {
@@ -81,25 +83,20 @@ impl SubsystemLease {
     }
 }
 
-/// Compatibility name for callers that still refer to the old session type.
-/// Production code should use `RuntimeLifecycle` explicitly; concrete values
-/// belong in `RuntimeOwners`.
-pub type RuntimeSession = RuntimeLifecycle;
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn lifecycle_is_monotonic_and_supports_bootstrap_rollback() {
-        let mut runtime = RuntimeSession::new();
+        let mut runtime = RuntimeLifecycle::new();
         assert_eq!(runtime.phase(), RuntimePhase::New);
         runtime.start().unwrap();
         runtime.begin_shutdown().unwrap();
         runtime.finish_shutdown().unwrap();
         assert_eq!(runtime.phase(), RuntimePhase::Stopped);
 
-        let mut failed = RuntimeSession::new();
+        let mut failed = RuntimeLifecycle::new();
         failed.start().unwrap();
         failed.fail(RuntimeError::AlreadyFailed);
         assert_eq!(failed.phase(), RuntimePhase::Failed);
@@ -109,7 +106,7 @@ mod tests {
 
     #[test]
     fn invalid_transitions_are_rejected() {
-        let mut runtime = RuntimeSession::new();
+        let mut runtime = RuntimeLifecycle::new();
         assert!(matches!(
             runtime.finish_shutdown(),
             Err(RuntimeError::InvalidTransition { .. })
@@ -124,7 +121,7 @@ mod tests {
 
     #[test]
     fn subsystem_leases_enforce_reverse_teardown_and_generation() {
-        let mut runtime = RuntimeSession::new();
+        let mut runtime = RuntimeLifecycle::new();
         runtime.start().unwrap();
         let engine = runtime.install_subsystem(Subsystem::Engine).unwrap();
         let fs = runtime.install_subsystem(Subsystem::Filesystem).unwrap();
