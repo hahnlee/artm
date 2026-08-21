@@ -185,6 +185,8 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         &compiler_identity,
     )?;
     let graphics_phase_object = compile_runtime_graphics_phase(root, &build_dir, &include_refs)?;
+    let graphics_input_object =
+        compile_runtime_graphics_input_probe(root, &build_dir, &include_refs)?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -281,6 +283,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
         .arg(&graphics_phase_object)
+        .arg(&graphics_input_object)
         .arg(&filesystem_object)
         .arg(&network_object)
         .arg(&surface_object)
@@ -851,6 +854,8 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         graphics_probe_object
     };
     let graphics_phase_object = compile_runtime_graphics_phase(root, &build_dir, &include_refs)?;
+    let graphics_input_object =
+        compile_runtime_graphics_input_probe(root, &build_dir, &include_refs)?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -978,6 +983,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
         .arg(&graphics_phase_object)
+        .arg(&graphics_input_object)
         .arg(&filesystem_object)
         .arg(&network_object)
         .arg(&hwui_object)

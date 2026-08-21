@@ -112,6 +112,23 @@ static jint g_interactive_width = 0;
 static jint g_interactive_height = 0;
 static DarwinArtSurface* g_gpu_surface = nullptr;
 
+jobject interactive_root_for_input() { return g_interactive_root; }
+jint interactive_width_for_input() { return g_interactive_width; }
+jint interactive_height_for_input() { return g_interactive_height; }
+jobject& pressed_view_for_input() { return g_pressed_view; }
+uint32_t& pending_pressed_action_for_input() { return g_pending_pressed_action; }
+jfloat& pending_pressed_x_for_input() { return g_pending_pressed_x; }
+jfloat& pending_pressed_y_for_input() { return g_pending_pressed_y; }
+bool& gpu_ripple_overlay_active_for_input() {
+  return g_gpu_ripple_overlay_active;
+}
+jfloat& gpu_ripple_overlay_x_for_input() { return g_gpu_ripple_overlay_x; }
+jfloat& gpu_ripple_overlay_y_for_input() { return g_gpu_ripple_overlay_y; }
+std::chrono::steady_clock::time_point&
+gpu_ripple_overlay_started_for_input() {
+  return g_gpu_ripple_overlay_started;
+}
+
 void set_probe_canvas_class(JNIEnv* env, jclass canvas_class) {
   if (env != nullptr && g_probe_canvas_class != nullptr) {
     env->DeleteGlobalRef(g_probe_canvas_class);
@@ -813,8 +830,7 @@ jboolean present_content(JNIEnv* env, jclass, jobject view, jint width,
   return presented;
 }
 
-static jobject FindClickableViewAt(JNIEnv* env, jobject view, jfloat x,
-                                   jfloat y) {
+jobject find_clickable_view_at(JNIEnv* env, jobject view, jfloat x, jfloat y) {
   if (view == nullptr || x < 0.0f || y < 0.0f || env->ExceptionCheck()) {
     return nullptr;
   }
@@ -869,7 +885,7 @@ static jobject FindClickableViewAt(JNIEnv* env, jobject view, jfloat x,
         const jint left = env->CallIntMethod(child, get_left);
         const jint top = env->CallIntMethod(child, get_top);
         jobject result =
-            FindClickableViewAt(env, child, x - left, y - top);
+            find_clickable_view_at(env, child, x - left, y - top);
         env->DeleteLocalRef(child);
         if (result != nullptr) {
           env->DeleteLocalRef(group_class);
@@ -887,98 +903,6 @@ static jobject FindClickableViewAt(JNIEnv* env, jobject view, jfloat x,
   env->DeleteLocalRef(group_class);
   env->DeleteLocalRef(view_class);
   return result;
-}
-
-extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
-    uint32_t action, float x, float y) {
-  if (action > 2u || !std::isfinite(x) || !std::isfinite(y)) {
-    return 71;
-  }
-  art::Thread* art_thread = darwin_art_process::owner_thread_for_callback();
-  if (art_thread == nullptr || g_interactive_root == nullptr) return 72;
-  if (art::Thread::Current() != art_thread ||
-      art_thread->GetState() != art::ThreadState::kNative) {
-    return 73;
-  }
-
-  art::ScopedObjectAccess soa(art_thread);
-  JNIEnv* env = art_thread->GetJniEnv();
-  jobject hit = FindClickableViewAt(env, g_interactive_root, x, y);
-  if (std::getenv("DARWIN_ART_DEBUG_POINTER") != nullptr) {
-    std::cerr << "ART Android input debug action=" << action << " x=" << x
-              << " y=" << y << " hit=" << hit << "\n";
-  }
-  jclass view_class = env->FindClass("android/view/View");
-  jmethodID set_pressed =
-      view_class == nullptr
-          ? nullptr
-          : env->GetMethodID(view_class, "setPressed", "(Z)V");
-  jmethodID perform_click =
-      view_class == nullptr
-          ? nullptr
-          : env->GetMethodID(view_class, "performClick", "()Z");
-  jmethodID drawable_hotspot_changed =
-      view_class == nullptr
-          ? nullptr
-          : env->GetMethodID(view_class, "drawableHotspotChanged", "(FF)V");
-  if (view_class == nullptr || set_pressed == nullptr ||
-      perform_click == nullptr || drawable_hotspot_changed == nullptr ||
-      env->ExceptionCheck()) {
-    env->DeleteLocalRef(hit);
-    env->DeleteLocalRef(view_class);
-    return 74;
-  }
-
-  if (action == 0u) {
-    g_gpu_ripple_overlay_active = true;
-    g_gpu_ripple_overlay_x = x;
-    g_gpu_ripple_overlay_y = y;
-    g_gpu_ripple_overlay_started = std::chrono::steady_clock::now();
-    if (g_pressed_view != nullptr) {
-      env->CallVoidMethod(g_pressed_view, set_pressed, JNI_FALSE);
-      env->DeleteGlobalRef(g_pressed_view);
-      g_pressed_view = nullptr;
-    }
-    if (hit != nullptr && !env->ExceptionCheck()) {
-      g_pressed_view = env->NewGlobalRef(hit);
-      g_pending_pressed_action = 1;
-      g_pending_pressed_x = x;
-      g_pending_pressed_y = y;
-    }
-  } else if (action == 2u) {
-    if (g_pressed_view != nullptr && !env->ExceptionCheck()) {
-      env->CallVoidMethod(g_pressed_view, drawable_hotspot_changed, x, y);
-    }
-  } else if (action == 1u) {
-    if (g_pressed_view != nullptr) {
-      g_pending_pressed_action = 2;
-      g_pending_pressed_x = x;
-      g_pending_pressed_y = y;
-    }
-  }
-  const bool same_pressed_view =
-      action == 1u && hit != nullptr && g_pressed_view != nullptr &&
-      env->IsSameObject(hit, g_pressed_view) == JNI_TRUE;
-  env->DeleteLocalRef(hit);
-  env->DeleteLocalRef(view_class);
-  const bool rendered = !env->ExceptionCheck() &&
-                        present_content(env, nullptr, g_interactive_root,
-                                       g_interactive_width,
-                                       g_interactive_height) == JNI_TRUE;
-  if (env->ExceptionCheck()) {
-    std::cerr << "ART Android input: click dispatch threw\n"
-              << art_thread->GetException()->Dump() << "\n";
-    art_thread->ClearException();
-  }
-  if (action == 1u && g_pressed_view != nullptr) {
-    if (same_pressed_view && perform_click != nullptr &&
-        !env->ExceptionCheck()) {
-      env->CallBooleanMethod(g_pressed_view, perform_click);
-    }
-    env->DeleteGlobalRef(g_pressed_view);
-    g_pressed_view = nullptr;
-  }
-  return rendered ? 0 : 75;
 }
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_pump_framework_frame(

@@ -432,6 +432,8 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         &compiler_identity,
     )?;
     let graphics_phase_object = compile_runtime_graphics_phase(root, &build_dir, &include_refs)?;
+    let graphics_input_object =
+        compile_runtime_graphics_input_probe(root, &build_dir, &include_refs)?;
     let mut probe_command = runtime_cpp_command(&include_refs);
     probe_command
         .args(["-include", "mirror/object_reference.h"])
@@ -504,6 +506,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
         .arg(&graphics_phase_object)
+        .arg(&graphics_input_object)
         .arg(&filesystem_object)
         .arg(&graph_object)
         .arg(&network_object)

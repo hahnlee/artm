@@ -342,6 +342,8 @@ fn emit_graph(out: &Path) -> io::Result<()> {
             "probes/runtime_graphics_probe.h",
             "probes/runtime_graphics_phase.cc",
             "probes/runtime_graphics_phase.h",
+            "probes/runtime_graphics_input.cc",
+            "probes/runtime_graphics_probe_internal.h",
             "compat/darwin_surface_bridge.h",
             "compat/darwin_framework_natives.h",
             "compat/darwin_hwui_gpu_mode.h",
@@ -599,6 +601,8 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_graphics_probe.h"),
         PathBuf::from("probes/runtime_graphics_phase.cc"),
         PathBuf::from("probes/runtime_graphics_phase.h"),
+        PathBuf::from("probes/runtime_graphics_input.cc"),
+        PathBuf::from("probes/runtime_graphics_probe_internal.h"),
         PathBuf::from("probes/runtime_apk_graph.cc"),
         PathBuf::from("probes/runtime_apk_graph.h"),
         PathBuf::from("compat/darwin_surface_bridge.mm"),
@@ -700,6 +704,8 @@ fn is_probe_only_input(path: &Path) -> bool {
             | "probes/runtime_graphics_probe.h"
             | "probes/runtime_graphics_phase.cc"
             | "probes/runtime_graphics_phase.h"
+            | "probes/runtime_graphics_input.cc"
+            | "probes/runtime_graphics_probe_internal.h"
             | "probes/runtime_apk_graph.cc"
             | "probes/runtime_apk_graph.h"
             | "compat/darwin_surface_bridge.mm"
