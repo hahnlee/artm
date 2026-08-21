@@ -2,8 +2,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::super::{collect_files, ninja_path};
+use super::super::ninja_path;
 use super::cache::CachedNativeObject;
+use super::inputs::collect_files;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FoundationFamily {
