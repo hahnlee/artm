@@ -1,20 +1,9 @@
 #include <mach-o/dyld.h>
 
-#include <array>
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <cmath>
-#include <cstdlib>
 #include <cstdint>
-#include <cstring>
 #include <iostream>
-#include <memory>
-#include <mutex>
 #include <string>
-#include <thread>
 #include <utility>
-#include <vector>
 
 #include <cstddef>
 
@@ -48,16 +37,15 @@
 #include "runtime_graphics_session.h"
 #include "runtime_graphics_phase.h"
 #include "runtime_jni_acceptance_probe.h"
+#include "runtime_app_bootstrap.h"
 #include "darwin_icu_natives.h"
 #include "darwin_libcore_natives.h"
 #include "darwin_openjdk_natives.h"
-#include "dex/art_dex_file_loader.h"
 #include "handle_scope-inl.h"
 #include "interpreter/unstarted_runtime.h"
 #include "jni/java_vm_ext.h"
 #include "jvalue.h"
 #include "mirror/class-inl.h"
-#include "mirror/class_loader.h"
 #include "mirror/throwable.h"
 #include "runtime.h"
 #include "runtime_options.h"
@@ -238,54 +226,50 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   }
   art::WellKnownClasses::Init(self->GetJniEnv());
 
-  std::vector<std::unique_ptr<const art::DexFile>>& app_dex_files =
-      darwin_art_process::app_dex_files();
-  CHECK(app_dex_files.empty());
-  std::string dex_error;
-  if (run_apk_app) {
-    art::ArtDexFileLoader support_loader(apk_app_support_dex);
-    if (!support_loader.Open(/* verify= */ true,
-                             /* verify_checksum= */ true, &dex_error,
-                             &app_dex_files)) {
-      std::cerr << "ART Darwin support DEX: open failed: " << dex_error << "\n";
-      return 3;
-    }
-  }
-  art::ArtDexFileLoader dex_loader(config->app_dex);
-  if (!dex_loader.Open(/* verify= */ true,
-                       /* verify_checksum= */ true, &dex_error,
-                       &app_dex_files)) {
-    std::cerr << "ART Darwin DEX: open failed: " << dex_error << "\n";
-    return 3;
-  }
-  std::vector<const art::DexFile*> app_dex_file_ptrs;
-  app_dex_file_ptrs.reserve(app_dex_files.size());
-  for (const auto& dex_file : app_dex_files) {
-    app_dex_file_ptrs.push_back(dex_file.get());
-  }
-
   art::ClassLinker* class_linker = art::Runtime::Current()->GetClassLinker();
-  jobject loader_ref =
-      class_linker->CreatePathClassLoader(self, app_dex_file_ptrs);
-  art::StackHandleScope<13> hs(self);
-  art::Handle<art::mirror::ClassLoader> app_loader =
-      hs.NewHandle(soa.Decode<art::mirror::ClassLoader>(loader_ref));
-  jobject app_loader_ref = soa.AddLocalReference<jobject>(app_loader.Get());
-  for (const auto& dex_file : app_dex_files) {
-    if (class_linker->RegisterDexFile(*dex_file, app_loader.Get()) == nullptr) {
-      std::cerr << "ART Darwin DEX: registration failed\n";
-      return 4;
-    }
+  art::StackHandleScope<32> hs(self);
+  const char* activity_descriptor =
+      run_apk_app ? apk_app_descriptor : "Ldev/darwinart/probe/ProbeActivity;";
+  darwin_art_app::ClassSet app_classes;
+  const int app_status = darwin_art_app::load_classes(
+      self->GetJniEnv(), self, class_linker, soa, hs, run_apk_app, config->app_dex,
+      apk_app_support_dex, activity_descriptor, run_direct_apk, direct_apk_path,
+      run_elf_jni_fixture, run_network_acceptance,
+      darwin_art::GetFrameworkGraphicsBackend() ==
+          darwin_art::FrameworkGraphicsBackend::kProbeCanvas,
+      &app_classes);
+  if (app_status != 0) {
+    return app_status;
   }
-
-  art::Handle<art::mirror::Class> hello = hs.NewHandle(class_linker->FindClass(
-      self, "Ldev/darwinart/probe/Hello;",
-      sizeof("Ldev/darwinart/probe/Hello;") - 1u, app_loader));
-  if (hello == nullptr || self->IsExceptionPending()) {
-    std::cerr << "ART Darwin DEX: Hello class lookup failed\n";
-    return 5;
-  }
-
+  jobject app_loader_ref = app_classes.app_loader;
+  jclass hello_class = app_classes.hello;
+  jclass probe_activity_class = app_classes.activity;
+  jclass probe_context_class = app_classes.context;
+  jclass probe_resources_class = app_classes.resources;
+  jclass probe_view_class = app_classes.view;
+  jclass probe_canvas_class = app_classes.canvas;
+  jclass content_root_class = app_classes.content_root;
+  jclass package_manager_class = app_classes.package_manager;
+  jclass native_fixture_class = app_classes.native_fixture;
+  jclass network_fixture_class = app_classes.network_fixture;
+  art::Handle<art::mirror::Class> hello =
+      hs.NewHandle(soa.Decode<art::mirror::Class>(hello_class));
+  art::Handle<art::mirror::Class> probe_activity =
+      hs.NewHandle(soa.Decode<art::mirror::Class>(probe_activity_class));
+  art::Handle<art::mirror::Class> probe_context_handle =
+      hs.NewHandle(soa.Decode<art::mirror::Class>(probe_context_class));
+  art::Handle<art::mirror::Class> probe_resources_handle =
+      hs.NewHandle(soa.Decode<art::mirror::Class>(probe_resources_class));
+  art::Handle<art::mirror::Class> probe_view_handle =
+      hs.NewHandle(soa.Decode<art::mirror::Class>(probe_view_class));
+  art::Handle<art::mirror::Class> content_root_handle =
+      hs.NewHandle(soa.Decode<art::mirror::Class>(content_root_class));
+  art::Handle<art::mirror::Class> package_manager_handle =
+      hs.NewHandle(soa.Decode<art::mirror::Class>(package_manager_class));
+  art::MutableHandle<art::mirror::Class> native_fixture_handle(
+      hs.NewHandle(soa.Decode<art::mirror::Class>(native_fixture_class)));
+  art::MutableHandle<art::mirror::Class> network_fixture_handle(
+      hs.NewHandle(soa.Decode<art::mirror::Class>(network_fixture_class)));
   art::Handle<art::mirror::Class> framework_activity = hs.NewHandle(
       class_linker->FindSystemClass(self, "Landroid/app/Activity;"));
   if (framework_activity == nullptr || self->IsExceptionPending()) {
@@ -294,97 +278,6 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       std::cerr << self->GetException()->Dump() << "\n";
     }
     return 21;
-  }
-  const char* activity_descriptor =
-      run_apk_app ? apk_app_descriptor : "Ldev/darwinart/probe/ProbeActivity;";
-  art::Handle<art::mirror::Class> probe_activity = hs.NewHandle(
-      class_linker->FindClass(self, activity_descriptor,
-                              std::strlen(activity_descriptor), app_loader));
-  if (probe_activity == nullptr || self->IsExceptionPending()) {
-    std::cerr << "ART Android framework: Activity subclass lookup failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
-    }
-    return 21;
-  }
-  art::Handle<art::mirror::Class> probe_context_handle =
-      hs.NewHandle(class_linker->FindClass(
-          self, "Ldev/darwinart/probe/ProbeContext;",
-          sizeof("Ldev/darwinart/probe/ProbeContext;") - 1u, app_loader));
-  if (probe_context_handle == nullptr || self->IsExceptionPending()) {
-    std::cerr << "ART Android framework: Context subclass lookup failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
-    }
-    return 21;
-  }
-  art::Handle<art::mirror::Class> probe_resources_handle =
-      hs.NewHandle(class_linker->FindClass(
-          self, "Ldev/darwinart/probe/ProbeResources;",
-          sizeof("Ldev/darwinart/probe/ProbeResources;") - 1u, app_loader));
-  if (probe_resources_handle == nullptr || self->IsExceptionPending()) {
-    std::cerr << "ART Android framework: Resources subclass lookup failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
-    }
-    return 21;
-  }
-  art::Handle<art::mirror::Class> probe_view_handle = hs.NewHandle(
-      class_linker->FindClass(self, "Ldev/darwinart/probe/ProbeView;",
-                              sizeof("Ldev/darwinart/probe/ProbeView;") - 1u,
-                              app_loader));
-  if (probe_view_handle == nullptr || self->IsExceptionPending()) {
-    std::cerr << "ART Android view: ProbeView lookup failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
-    }
-    return 21;
-  }
-  art::Handle<art::mirror::Class> content_root_handle = hs.NewHandle(
-      class_linker->FindClass(self, "Ldev/darwinart/probe/ProbeContentRoot;",
-                              sizeof("Ldev/darwinart/probe/ProbeContentRoot;") - 1u,
-                              app_loader));
-  art::Handle<art::mirror::Class> package_manager_handle = hs.NewHandle(
-      class_linker->FindClass(self,
-                              "Ldev/darwinart/probe/ProbePackageManager;",
-                              sizeof("Ldev/darwinart/probe/ProbePackageManager;") - 1u,
-                              app_loader));
-  art::MutableHandle<art::mirror::Class> native_fixture_handle(
-      hs.NewHandle<art::mirror::Class>(nullptr));
-  art::MutableHandle<art::mirror::Class> network_fixture_handle(
-      hs.NewHandle<art::mirror::Class>(nullptr));
-  if (run_direct_apk) {
-    if (run_elf_jni_fixture) {
-      std::cerr << "ART Android direct APK must run in its isolated host flavor\n";
-      return 46;
-    }
-    std::string direct_error;
-    bool direct_loaded = false;
-    {
-      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
-      direct_loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
-          self->GetJniEnv(), direct_apk_path, app_loader_ref, nullptr,
-          &direct_error);
-    }
-    if (!direct_loaded || !direct_error.empty() ||
-        self->GetJniEnv()->ExceptionCheck()) {
-      std::cerr << "ART Android direct APK JavaVMExt load failed, load_error="
-                << direct_error << "\n";
-      return 46;
-    }
-    darwin_art_process::record_direct_apk_loaded();
-  }
-
-  if (run_elf_jni_fixture) {
-    native_fixture_handle.Assign(class_linker->FindClass(
-        self, "Ldarwin/art/nativefixture/NativeFixture;",
-        sizeof("Ldarwin/art/nativefixture/NativeFixture;") - 1u, app_loader));
-  }
-  if (run_network_acceptance) {
-    network_fixture_handle.Assign(class_linker->FindClass(
-        self, "Ldev/darwinart/probe/NetworkRuntimeFixture;",
-        sizeof("Ldev/darwinart/probe/NetworkRuntimeFixture;") - 1u,
-        app_loader));
   }
   if (content_root_handle == nullptr || package_manager_handle == nullptr ||
       (run_elf_jni_fixture && native_fixture_handle == nullptr) ||
@@ -397,42 +290,6 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 21;
   }
 
-  jclass hello_class = soa.AddLocalReference<jclass>(hello.Get());
-  jclass probe_activity_class =
-      soa.AddLocalReference<jclass>(probe_activity.Get());
-  jclass probe_context_class =
-      soa.AddLocalReference<jclass>(probe_context_handle.Get());
-  jclass probe_resources_class =
-      soa.AddLocalReference<jclass>(probe_resources_handle.Get());
-  jclass probe_view_class =
-      soa.AddLocalReference<jclass>(probe_view_handle.Get());
-  jclass probe_canvas_class = nullptr;
-  if (darwin_art::GetFrameworkGraphicsBackend() ==
-      darwin_art::FrameworkGraphicsBackend::kProbeCanvas) {
-    art::ObjPtr<art::mirror::Class> probe_canvas = class_linker->FindClass(
-        self, "Ldev/darwinart/probe/ProbeCanvas;",
-        sizeof("Ldev/darwinart/probe/ProbeCanvas;") - 1u, app_loader);
-    if (probe_canvas == nullptr || self->IsExceptionPending()) {
-      std::cerr << "ART Android window: ProbeCanvas lookup failed\n";
-      if (self->IsExceptionPending()) {
-        std::cerr << self->GetException()->Dump() << "\n";
-      }
-      return 21;
-    }
-    probe_canvas_class = soa.AddLocalReference<jclass>(probe_canvas);
-  }
-  jclass content_root_class =
-      soa.AddLocalReference<jclass>(content_root_handle.Get());
-  jclass package_manager_class =
-      soa.AddLocalReference<jclass>(package_manager_handle.Get());
-  jclass native_fixture_class =
-      run_elf_jni_fixture
-          ? soa.AddLocalReference<jclass>(native_fixture_handle.Get())
-          : nullptr;
-  jclass network_fixture_class =
-      run_network_acceptance
-          ? soa.AddLocalReference<jclass>(network_fixture_handle.Get())
-          : nullptr;
   art::Runtime::Current()->StartMinimalForDarwinProbe(self->GetJniEnv());
   if (!InstallProbeAndroidSystemRoot()) {
     std::cerr << "ART Android filesystem: test system root install failed\n";
