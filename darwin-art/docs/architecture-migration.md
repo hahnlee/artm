@@ -42,9 +42,9 @@ state machine or call a shutdown callback that is not held by the Rust owner.
 2. `darwin-art-engine-sys` is the only raw ABI declaration crate. `AbiHeader`,
    process/config PODs, and callback signatures are defined once and checked
    by Rust layout tests plus the native static assertions.
-3. `RuntimeSession` must contain concrete typed engine/surface/graph owners;
-   type-erased cleanup callbacks are a rollback bridge, not the final
-   production ownership API.
+3. `RuntimeSession` contains concrete typed engine/surface/provider owners;
+   the only callback retained at the FFI edge is the one-shot ART shutdown
+   operation, while lease counts and teardown order remain in Rust.
 4. `runtime_link_probe.cc` is an orchestration shell. ART setup, framework
    registration, ELF acceptance, and HWUI frame phases are separate cached
    native translation units with value-only phase inputs/outputs.
@@ -56,29 +56,32 @@ state machine or call a shutdown callback that is not held by the Rust owner.
 
 ## Migration milestones
 
-### M1 — concrete Rust owners
+### M1 — concrete Rust owners (landed)
 
-Move the loaded engine, provider graph, and optional surface into typed
-`darwin-art-runtime` owner structs. `darwin-art-host` becomes a thin loop over
-borrowed handles. Verify rollback for run failure, surface creation failure,
-window close, and `DestroyJavaVM` failure.
+The loaded engine, provider bridge, and optional surface now live in typed
+`darwin-art-runtime` owner structs. `darwin-art-host` is a thin loop over
+borrowed handles. Rollback is covered for run failure, surface creation
+failure, window close, and `DestroyJavaVM` failure; provider callbacks are
+invoked outside the lease mutex to preserve reentrancy.
 
 ### M2 — phase modules (in progress, first boundaries landed)
 
 Split the process probe into small, separately cached phase objects. The first
 landed boundaries are `runtime_process_options`, `runtime_shutdown_probe`,
-`runtime_acceptance_phases` (network), and `runtime_graphics_phase` (content
-validation/presentation). Each phase receives a narrow JNI/value boundary and
+`runtime_acceptance_phases` (network), `runtime_graphics_phase` (content
+validation/presentation), and `runtime_graphics_input` (pointer/frame
+dispatch). Each phase receives a narrow JNI/value boundary and
 returns a status snapshot; the heavy Android JNI/HWUI implementation remains
 in its own object. Keep the existing JNI/ELF/HWUI acceptance unchanged while
 the remaining framework/activity setup is extracted.
 
-### M3 — real native graph
+### M3 — real native graph (probe graph landed; foundation promotion remains)
 
-Make Ninja the normal path after the first cold bootstrap. Promote foundation
-archive objects (ART, ICU, HWUI, graphics JNI) to the same content-addressed
-per-TU cache already used by the probe objects. Keep one cold fallback command
-only for cache population.
+Ninja is now the normal path after the first cold bootstrap for the native
+probe graph, with persisted per-object commands and depfiles. The remaining
+work is to promote foundation archive objects (ART, ICU, HWUI, graphics JNI)
+to the same content-addressed per-TU cache. Keep one cold fallback command only
+for cache population.
 
 ### M4 — acceptance and removal
 
