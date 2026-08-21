@@ -383,6 +383,12 @@ the property map now invalidate only that adapter object and the final link;
 the Binder/AssetManager/RenderNode support TU is no longer rebuilt for a
 property-only change.
 
+Binder/ServiceManager bridge state and registration are isolated in
+`compat/darwin_framework_binder_natives.cc` as well. The main framework
+registration TU now only sequences the phase; the process-local service
+bridge and its native holder lifetime have one compilation and ownership
+boundary.
+
 The adapter TU manifest is shared by `darwin-art-build-contract` and consumed
 by both the Cargo bootstrap and `darwin-art-xtask`; a new native boundary now
 has one source-list owner instead of two independently maintained arrays.
