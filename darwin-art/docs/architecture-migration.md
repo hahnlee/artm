@@ -183,6 +183,14 @@ The cache identity and flavor archive names live in the dependency-free
 `darwin-art-build-contract` crate, shared by bootstrap and xtask, so this
 boundary is not duplicated as stringly-typed build policy.
 
+The Rust owner crates follow the same phase rule. ELF TLSDESC registry,
+per-thread allocation, and unload sealing live in
+`crates/darwin-art-elf-loader/src/tls.rs`, while the loader `lib.rs` retains
+ELF parsing/relocation policy. Runtime provider callback ABI adaptation lives
+in `crates/darwin-art-runtime/src/provider_bridge.rs`; the lease state machine
+is isolated in `provider.rs`. These are separate Rust modules with unchanged
+public contracts, so ownership policy and ABI wiring can evolve independently.
+
 The framework JNI boundary follows the same rule: Choreographer/
 DisplayEventReceiver, PropertyValuesHolder, Perfetto, and their registration
 table live in `compat/darwin_framework_animation_natives.cc`; Android resource
