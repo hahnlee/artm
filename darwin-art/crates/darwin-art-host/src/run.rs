@@ -1,29 +1,18 @@
-use std::ffi::CString;
-use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
 use std::ptr;
 
-use crate::config::{HostError, HostOutcome, RunOptions};
+use crate::config::{HostError, HostOutcome, ProcessConfigInputs, RunOptions};
 use crate::frame::{FrameHost, receive_frame};
 #[cfg(target_os = "macos")]
 use crate::gpu_loop::run as run_gpu_loop;
 use crate::provider::ProviderBridge;
 #[cfg(target_os = "macos")]
-use crate::teardown::shutdown_runtime;
+use crate::teardown::{process_run_failure, shutdown_runtime, unattached_engine_failure};
 #[cfg(target_os = "macos")]
 use darwin_art_engine::{EngineSession, GraphicsSession, SurfaceSession};
-use darwin_art_engine_sys::ProcessConfig;
-use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
-
-const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
+use darwin_art_runtime::{RuntimeSession, Subsystem};
 
 pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
-    if !options.visible_seconds.is_finite()
-        || options.visible_seconds < 0.0
-        || options.visible_seconds > MAX_VISIBLE_SECONDS
-    {
-        return Err(HostError::InvalidVisibleSeconds(options.visible_seconds));
-    }
+    options.validate()?;
 
     #[cfg(not(target_os = "macos"))]
     {
@@ -56,50 +45,32 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 Some(ProviderBridge::release_callback()),
             );
         }
-        let core_oj = path_c_string(&options.core_oj_jar)?;
-        let core_libart = path_c_string(&options.core_libart_jar)?;
-        let framework = path_c_string(&options.framework_jar)?;
-        let core_icu4j = path_c_string(&options.core_icu4j_jar)?;
-        let app_dex = path_c_string(&options.app_dex)?;
+        let config_inputs = ProcessConfigInputs::from_options(options)?;
         let mut graphics_session = engine.create_graphics_session().ok();
         let mut frame_host = FrameHost {
             frames_received: 0,
             last_frame: None,
         };
-        let mut config = ProcessConfig::new(
-            core_oj.as_ptr(),
-            core_libart.as_ptr(),
-            framework.as_ptr(),
-            core_icu4j.as_ptr(),
-            app_dex.as_ptr(),
-            options.heap_initial_bytes,
-            options.heap_maximum_bytes,
+        let config = config_inputs.build(
+            options,
             ptr::from_mut(&mut frame_host).cast(),
             Some(receive_frame),
             provider_context,
             Some(ProviderBridge::acquire_callback()),
             Some(ProviderBridge::release_callback()),
+            graphics_session
+                .as_ref()
+                .map_or(ptr::null_mut(), |session| session.raw_handle().cast()),
         );
-        config.graphics_session_context = graphics_session
-            .as_ref()
-            .map_or(ptr::null_mut(), |session| session.raw_handle().cast());
         let process = match engine.run_process(&config) {
             Ok(result) => result,
             Err(status) => {
-                runtime.fail(RuntimeError::EngineFailure { status });
-                if let Some(session) = graphics_session.as_mut() {
-                    let _ = session.close();
-                }
-                // A late run-stage failure may still have created ART. Ask the
-                // process ABI to tear it down; NOT_READY means creation never
-                // completed and is the only benign shutdown result here.
-                let shutdown_status = engine.shutdown_once();
-                const SHUTDOWN_NOT_READY: i32 = 67;
-                if shutdown_status != 0 && shutdown_status != SHUTDOWN_NOT_READY {
-                    return Err(HostError::ShutdownFailed(shutdown_status));
-                }
-                engine.clear_provider_hooks();
-                return Err(HostError::RuntimeFailed(status));
+                return Err(process_run_failure(
+                    &mut runtime,
+                    &mut engine,
+                    graphics_session.as_mut(),
+                    status,
+                ));
             }
         };
         // The graphics engine publishes its drawable during run_process, so
@@ -109,12 +80,11 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             // The resource was never transferred, so its Drop path is the
             // only owner responsible for the failed transfer. Clear hooks
             // before dropping the bridge that supplied their context.
-            if let Some(session) = graphics_session.as_mut() {
-                let _ = session.close();
-            }
-            let _ = engine.shutdown_once();
-            let _ = provider_bridge.clear();
-            return Err(HostError::RuntimeFailed(-1));
+            return Err(unattached_engine_failure(
+                &mut engine,
+                graphics_session.as_mut(),
+                &provider_bridge,
+            ));
         }
         if let Err(provider_bridge) = runtime.attach_provider(provider_bridge) {
             let _ = provider_bridge.clear();
@@ -205,8 +175,4 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             last_frame: frame_host.last_frame,
         })
     }
-}
-
-fn path_c_string(path: &Path) -> Result<CString, HostError> {
-    CString::new(path.as_os_str().as_bytes()).map_err(|_| HostError::InteriorNul(path.into()))
 }

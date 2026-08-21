@@ -89,6 +89,13 @@ struct CachedNativeObject {
     shell_quoted: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FoundationFamily {
+    Hwui,
+    GraphicsJni,
+    Icu,
+}
+
 fn toolchain_inputs() -> ToolchainInputs {
     ToolchainInputs {
         cxx: env::var("DARWIN_ART_CXX")
@@ -353,11 +360,13 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         .map(|path| ninja_path(&root.join(path)))
         .collect::<Vec<_>>()
         .join(" ");
-    let foundation_input_list = foundation_inputs(&root)
-        .iter()
-        .map(|path| ninja_path(&root.join(path)))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let foundation_inputs = foundation_inputs(&root);
+    let hwui_foundation_input_list =
+        foundation_input_list(&root, &foundation_inputs, FoundationFamily::Hwui);
+    let graphics_jni_foundation_input_list =
+        foundation_input_list(&root, &foundation_inputs, FoundationFamily::GraphicsJni);
+    let icu_foundation_input_list =
+        foundation_input_list(&root, &foundation_inputs, FoundationFamily::Icu);
     // Probe objects are separate graph products.  Do not attach the complete
     // bootstrap input closure to each one: that turns an edit to an unrelated
     // probe/provider into a rebuild of every probe.  The compiler writes the
@@ -617,7 +626,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push(' ');
         graph.push_str(&hwui_apex_foundation_archive);
         graph.push_str(": hwui_foundation_bootstrap ");
-        graph.push_str(&foundation_input_list);
+        graph.push_str(&hwui_foundation_input_list);
         graph.push('\n');
     }
 
@@ -662,7 +671,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push(' ');
         graph.push_str(&icu_init_archive);
         graph.push_str(": icu_foundation_bootstrap ");
-        graph.push_str(&foundation_input_list);
+        graph.push_str(&icu_foundation_input_list);
         graph.push('\n');
     }
 
@@ -709,7 +718,7 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push(' ');
         graph.push_str(&graphics_force_loaded_object);
         graph.push_str(": graphics_jni_foundation_bootstrap ");
-        graph.push_str(&foundation_input_list);
+        graph.push_str(&graphics_jni_foundation_input_list);
         graph.push('\n');
     }
     graph.push_str("build graphics-foundation: phony ");
@@ -1127,6 +1136,7 @@ fn foundation_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("patches/frameworks-base/0001-darwin-android-critical-jni-abi.patch"),
         PathBuf::from("patches/frameworks-base/0002-darwin-lazy-native-window-jni.patch"),
         PathBuf::from("patches/frameworks-base/0003-darwin-hwui-gpu-layoutlib.patch"),
+        PathBuf::from("patches/frameworks-base/0005-darwin-hwui-animation-pulse.patch"),
     ];
     for directory in [
         "_aosp/frameworks/base/libs/hwui",
@@ -1143,6 +1153,56 @@ fn foundation_inputs(root: &Path) -> Vec<PathBuf> {
     paths.dedup();
     paths.retain(|path| root.join(path).is_file());
     paths
+}
+
+fn foundation_input_list(root: &Path, inputs: &[PathBuf], family: FoundationFamily) -> String {
+    inputs
+        .iter()
+        .filter(|path| is_foundation_family_input(path, family))
+        .map(|path| ninja_path(&root.join(path)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Keep shell fallback edges independent even before their command-stamped
+/// translation units are promoted.  A HWUI source edit must not rerun ICU or
+/// GraphicsJNI's shell builder, and vice versa.
+fn is_foundation_family_input(path: &Path, family: FoundationFamily) -> bool {
+    let path = path.to_string_lossy();
+    let shared = path.starts_with("patches/frameworks-base/");
+    match family {
+        FoundationFamily::Hwui => {
+            shared
+                || matches!(
+                    path.as_ref(),
+                    "tools/build-android16-hwui-static-foundation.sh"
+                        | "upstream/android16-hwui-static-foundation.lock"
+                        | "upstream/android16-hwui-gpu.lock"
+                )
+                || path.starts_with("_aosp/frameworks/base/libs/hwui/")
+                || path.starts_with("_aosp/hwui-static-deps/")
+        }
+        FoundationFamily::GraphicsJni => {
+            shared
+                || matches!(
+                    path.as_ref(),
+                    "tools/build-android16-android-graphics-jni.sh"
+                        | "upstream/android16-android-graphics-jni.lock"
+                        | "upstream/android16-hwui-gpu.lock"
+                )
+                || path.starts_with("_aosp/frameworks/base/libs/hwui/")
+                || path.starts_with("_aosp/external/libjpeg-turbo/")
+                || path.starts_with("_aosp/external/libultrahdr/")
+                || path.starts_with("_aosp/frameworks/native/libs/gui/")
+                || path.starts_with("_aosp/frameworks/av/media/ndk/")
+                || path.starts_with("_aosp/hardware/libhardware/include_all/")
+        }
+        FoundationFamily::Icu => {
+            path == "tools/build-android16-icu-foundation.sh"
+                || path == "upstream/android16-icu-foundation.lock"
+                || path.starts_with("_aosp/external/icu-graphics/")
+        }
+    }
 }
 
 /// Read command stamps emitted by the foundation shell builders.  Once a
@@ -1501,5 +1561,64 @@ mod tests {
         assert!(!is_probe_only_input(Path::new(
             "compat/darwin_runtime_adapters.cc"
         )));
+    }
+
+    #[test]
+    fn foundation_fallback_inputs_are_partitioned_by_owner() {
+        let hwui_script = Path::new("tools/build-android16-hwui-static-foundation.sh");
+        let graphics_jni_script = Path::new("tools/build-android16-android-graphics-jni.sh");
+        let icu_script = Path::new("tools/build-android16-icu-foundation.sh");
+        assert!(is_foundation_family_input(
+            hwui_script,
+            FoundationFamily::Hwui
+        ));
+        assert!(!is_foundation_family_input(
+            hwui_script,
+            FoundationFamily::Icu
+        ));
+        let hwui_animation_patch =
+            Path::new("patches/frameworks-base/0005-darwin-hwui-animation-pulse.patch");
+        assert!(is_foundation_family_input(
+            hwui_animation_patch,
+            FoundationFamily::Hwui
+        ));
+        assert!(!is_foundation_family_input(
+            hwui_animation_patch,
+            FoundationFamily::Icu
+        ));
+        assert!(is_foundation_family_input(
+            graphics_jni_script,
+            FoundationFamily::GraphicsJni
+        ));
+        assert!(!is_foundation_family_input(
+            graphics_jni_script,
+            FoundationFamily::Hwui
+        ));
+        assert!(is_foundation_family_input(
+            icu_script,
+            FoundationFamily::Icu
+        ));
+        assert!(!is_foundation_family_input(
+            icu_script,
+            FoundationFamily::GraphicsJni
+        ));
+        let icu_source = Path::new("_aosp/external/icu-graphics/icu4c/source/common/foo.cpp");
+        let hwui_source = Path::new("_aosp/frameworks/base/libs/hwui/RenderNode.cpp");
+        assert!(is_foundation_family_input(
+            icu_source,
+            FoundationFamily::Icu
+        ));
+        assert!(!is_foundation_family_input(
+            icu_source,
+            FoundationFamily::Hwui
+        ));
+        assert!(is_foundation_family_input(
+            hwui_source,
+            FoundationFamily::Hwui
+        ));
+        assert!(is_foundation_family_input(
+            hwui_source,
+            FoundationFamily::GraphicsJni
+        ));
     }
 }
