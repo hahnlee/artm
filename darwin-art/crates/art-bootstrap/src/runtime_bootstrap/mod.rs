@@ -5,6 +5,7 @@ mod adapter_jobs;
 mod archive;
 mod compile;
 mod manifest;
+mod runtime_jobs;
 mod seed_jobs;
 mod staging;
 
