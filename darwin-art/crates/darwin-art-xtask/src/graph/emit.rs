@@ -13,58 +13,20 @@ use super::cache::{
 use super::foundation::{
     FoundationFamily, cached_foundation_objects, foundation_input_list, foundation_inputs,
 };
-use super::inputs::{collect_files, graph_inputs, is_probe_only_input};
+use super::inputs::{collect_files, is_probe_only_input};
+use super::manifest::prepare as prepare_manifest;
 use super::probe_manifest;
-use super::representative::{
-    REPRESENTATIVE_EDGES, edge_digest, emit_representative_edges, json_escape, toolchain_inputs,
-};
+use super::representative::emit_representative_edges;
 
 pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
-    let root = repository_root(out);
-    let inputs = graph_inputs(&root);
-    // The bootstrap archive must not be invalidated by probe-only sources.
-    // Those sources are linked by the final dylib edge and therefore have a
-    // narrower invalidation boundary than the provider/runtime archive.
-    let bootstrap_inputs = inputs
-        .iter()
-        .filter(|path| !is_probe_only_input(path))
-        .cloned()
-        .collect::<Vec<_>>();
-    let digest = digest_inputs(&root, &bootstrap_inputs)?;
-    let toolchain = toolchain_inputs();
-    if let Some(parent) = out.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let cache_dir = root.join("_build/native-cache").join(&digest);
-    fs::create_dir_all(&cache_dir)?;
-    let digest_path = cache_dir.join("inputs.sha256");
-    atomic::write(
-        &digest_path,
-        format!("{digest}  {GRAPH_VERSION}\n").as_bytes(),
-    )?;
-    atomic::write(
-        &cache_dir.join("manifest.json"),
-        format!(
-            "{{\"graph_version\":\"{GRAPH_VERSION}\",\"digest\":\"{digest}\",\"input_count\":{},\"compiler\":\"{}\",\"sdk\":\"{}\",\"edges\":[{}]}}\n",
-            bootstrap_inputs.len(),
-            json_escape(&toolchain.cxx),
-            SDK_NAME,
-            REPRESENTATIVE_EDGES
-                .iter()
-                .map(|edge| {
-                    format!(
-                        "{{\"name\":\"{}\",\"digest\":\"{}\",\"source\":\"{}\",\"language\":\"{}\"}}",
-                        edge.name,
-                        edge_digest(&root, edge, &toolchain).unwrap_or_else(|_| "missing".into()),
-                        edge.source,
-                        if edge.objc { "objc++" } else { "c++" }
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-        .as_bytes(),
-    )?;
+    let manifest = prepare_manifest(out)?;
+    let root = manifest.root;
+    let inputs = manifest.inputs;
+    let bootstrap_inputs = manifest.bootstrap_inputs;
+    let digest = manifest.digest;
+    let toolchain = manifest.toolchain;
+    let cache_dir = manifest.cache_dir;
+    let digest_path = manifest.digest_path;
 
     let root_for_shell = root.to_string_lossy().into_owned();
     // Ninja edges run the already-built bootstrap CLI directly.  Cargo is
