@@ -63,6 +63,11 @@ state machine or call a shutdown callback that is not held by the Rust owner.
    the provider lease before the engine lease, keeps provider callbacks alive
    while `DestroyJavaVM` runs, then clears the provider hooks before the engine
    image is unmapped.
+   The native provider shim does not keep a second process-wide refcount:
+   `ProviderLeaseTable` reserves each 0→1 and 1→0 transition and invokes the
+   C ABI only at those boundaries. C++ therefore performs stateless
+   install/uninstall operations, so Rust and C++ cannot disagree about graph
+   owner counts or filesystem authority identity.
 4. `runtime_link_probe.cc` is an orchestration shell. ART setup, framework
    registration, ELF acceptance, and HWUI frame phases are separate cached
    native translation units with value-only phase inputs/outputs.

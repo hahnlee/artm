@@ -3,6 +3,9 @@
 //! The host crate supplies the tiny unsafe FFI adapters.  This module owns
 //! the state machine around them, so cross-thread ART callbacks cannot invent
 //! a second count or clear hooks while a provider lease is still active.
+//! Native install/uninstall callbacks are crossed only on the process-owner
+//! transitions (zero-to-one and one-to-zero); individual ELF graphs retain
+//! ordinary Rust leases without asking C++ to maintain a duplicate counter.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Condvar, Mutex};
@@ -69,6 +72,10 @@ struct ProviderCallbacks {
 
 struct LeaseState {
     counts: [u32; 7],
+    /// A provider transition is reserved before crossing the native ABI. This
+    /// keeps concurrent graph loads from both observing a zero count and
+    /// installing the same process-global provider.
+    transitioning: [bool; 7],
     in_flight: usize,
     clearing: bool,
 }
@@ -88,6 +95,7 @@ impl ProviderLeaseTable {
             },
             state: Mutex::new(LeaseState {
                 counts: [0; 7],
+                transitioning: [false; 7],
                 in_flight: 0,
                 clearing: false,
             }),
@@ -97,13 +105,32 @@ impl ProviderLeaseTable {
 
     pub fn acquire(&self, kind: ProviderKind, authority_fd: i32) -> i32 {
         let index = kind.index();
-        let Ok(mut state) = self.state.lock() else {
-            return -1;
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(_) => return -1,
         };
-        if state.clearing {
-            return -1;
+        loop {
+            if state.clearing {
+                return -1;
+            }
+            if state.transitioning[index] {
+                state = match self.quiescent.wait(state) {
+                    Ok(state) => state,
+                    Err(_) => return -1,
+                };
+                continue;
+            }
+            if state.counts[index] != 0 {
+                if state.counts[index] == u32::MAX {
+                    return -1;
+                }
+                state.counts[index] += 1;
+                return 0;
+            }
+            state.transitioning[index] = true;
+            state.in_flight += 1;
+            break;
         }
-        state.in_flight += 1;
         drop(state);
 
         // Never invoke foreign code while holding the lease mutex. A provider
@@ -117,22 +144,42 @@ impl ProviderLeaseTable {
         };
         state.in_flight = state.in_flight.saturating_sub(1);
         if status == 0 {
-            state.counts[index] = state.counts[index].saturating_add(1);
+            state.counts[index] = 1;
         }
+        state.transitioning[index] = false;
         self.quiescent.notify_all();
         status
     }
 
     pub fn release(&self, kind: ProviderKind) -> i32 {
         let index = kind.index();
-        let Ok(mut state) = self.state.lock() else {
-            return -1;
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(_) => return -1,
         };
-        if state.clearing || state.counts[index] == 0 {
-            return -1;
+        loop {
+            if state.clearing {
+                return -1;
+            }
+            if state.transitioning[index] {
+                state = match self.quiescent.wait(state) {
+                    Ok(state) => state,
+                    Err(_) => return -1,
+                };
+                continue;
+            }
+            if state.counts[index] == 0 {
+                return -1;
+            }
+            if state.counts[index] > 1 {
+                state.counts[index] -= 1;
+                return 0;
+            }
+            state.counts[index] = 0;
+            state.transitioning[index] = true;
+            state.in_flight += 1;
+            break;
         }
-        state.counts[index] -= 1;
-        state.in_flight += 1;
         drop(state);
 
         // Reserve the lease before dropping the lock; this prevents clear()
@@ -144,8 +191,9 @@ impl ProviderLeaseTable {
         };
         state.in_flight = state.in_flight.saturating_sub(1);
         if status != 0 {
-            state.counts[index] = state.counts[index].saturating_add(1);
+            state.counts[index] = 1;
         }
+        state.transitioning[index] = false;
         self.quiescent.notify_all();
         status
     }
@@ -159,7 +207,7 @@ impl ProviderLeaseTable {
             return Err(ProviderLeaseError::ActiveLeases);
         }
         state.clearing = true;
-        while state.in_flight != 0 {
+        while state.in_flight != 0 || state.transitioning.iter().any(|active| *active) {
             state = self
                 .quiescent
                 .wait(state)
@@ -228,6 +276,34 @@ mod tests {
         assert_eq!(table.acquire(ProviderKind::Network, 7), 0);
         assert_eq!(table.clear(), Err(ProviderLeaseError::ActiveLeases));
         assert_eq!(table.release(ProviderKind::Network), 0);
+        assert_eq!(table.clear(), Ok(()));
+    }
+
+    #[test]
+    fn shared_leases_cross_native_boundary_once() {
+        let acquired = Arc::new(AtomicU32::new(0));
+        let released = Arc::new(AtomicU32::new(0));
+        let acquire_count = Arc::clone(&acquired);
+        let release_count = Arc::clone(&released);
+        let table = ProviderLeaseTable::new(
+            move |_, _| {
+                acquire_count.fetch_add(1, Ordering::SeqCst);
+                0
+            },
+            move |_| {
+                release_count.fetch_add(1, Ordering::SeqCst);
+                0
+            },
+            || {},
+        );
+
+        assert_eq!(table.acquire(ProviderKind::Filesystem, 3), 0);
+        assert_eq!(table.acquire(ProviderKind::Filesystem, 4), 0);
+        assert_eq!(acquired.load(Ordering::SeqCst), 1);
+        assert_eq!(table.release(ProviderKind::Filesystem), 0);
+        assert_eq!(released.load(Ordering::SeqCst), 0);
+        assert_eq!(table.release(ProviderKind::Filesystem), 0);
+        assert_eq!(released.load(Ordering::SeqCst), 1);
         assert_eq!(table.clear(), Ok(()));
     }
 
