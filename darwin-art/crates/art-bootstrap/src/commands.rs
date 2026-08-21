@@ -201,7 +201,7 @@ pub(crate) use source_materialization::*;
 
 #[cfg(test)]
 mod tests {
-    use crate::native_build::parse_makefile_words;
+    use crate::native_cache::parse_makefile_words;
 
     #[test]
     fn parses_escaped_makefile_dependency_paths() {

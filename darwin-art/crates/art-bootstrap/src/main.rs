@@ -9,6 +9,7 @@ mod build_context;
 mod commands;
 mod help;
 mod native_build;
+mod native_cache;
 mod native_graph;
 mod support;
 
