@@ -99,12 +99,13 @@ ART-side bootstrap archive; it retains one cold fallback command for cache
 population while the runtime object graph is promoted after a complete archive
 exists.
 
-### M4 — acceptance and removal
+### M4 — acceptance and removal (in progress)
 
 Run ART DEX, recursive ELF/JNI, libc++, TLS, APK, Button, Metal, input/ripple,
-and shutdown gates from the new owners. Then remove the legacy CPU presenter,
-duplicate ABI declarations, broad bootstrap stamps, and type-erased ownership
-from production paths.
+and shutdown gates from the new owners. The legacy CPU presenter is now gone;
+headless runs tear down without a surface and graphics runs use only the direct
+Metal/HWUI loop. Remaining work is duplicate ABI/fallback removal and a
+measured phase-local invalidation audit.
 
 ## Measurement gates
 

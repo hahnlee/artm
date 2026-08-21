@@ -21,6 +21,8 @@ pub use darwin_art_engine_sys::{FrameCallback, ProcessConfig, ProcessResult};
 use darwin_art_runtime::{RuntimeError, RuntimeSession, Subsystem};
 pub use frame::OwnedFrame;
 use frame::{FrameHost, receive_frame};
+#[cfg(target_os = "macos")]
+use gpu_loop::GpuCallbacks;
 use provider::ProviderBridge;
 #[cfg(target_os = "macos")]
 use surface::*;
@@ -137,8 +139,10 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 options,
                 provider_lease,
                 engine_lease,
-                dispatch_pointer,
-                pump_framework_frame,
+                GpuCallbacks {
+                    dispatch_pointer,
+                    pump_framework_frame,
+                },
             );
         }
         // Headless ART is a first-class mode. It never allocates a surface and

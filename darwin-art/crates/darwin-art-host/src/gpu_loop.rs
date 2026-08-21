@@ -1,6 +1,11 @@
 use super::*;
 use darwin_art_engine_sys::PointerEvent;
 
+pub(super) struct GpuCallbacks {
+    pub dispatch_pointer: DispatchPointerFn,
+    pub pump_framework_frame: PumpFrameworkFrameFn,
+}
+
 #[cfg(target_os = "macos")]
 pub(super) fn run(
     runtime: &mut RuntimeSession<EngineSession, Box<ProviderBridge>, SurfaceSession>,
@@ -9,9 +14,12 @@ pub(super) fn run(
     options: &RunOptions,
     provider_lease: darwin_art_runtime::SubsystemLease,
     engine_lease: darwin_art_runtime::SubsystemLease,
-    dispatch_pointer: DispatchPointerFn,
-    pump_framework_frame: PumpFrameworkFrameFn,
+    callbacks: GpuCallbacks,
 ) -> Result<HostOutcome, HostError> {
+    let GpuCallbacks {
+        dispatch_pointer,
+        pump_framework_frame,
+    } = callbacks;
     let Some(surface) = active_surface else {
         // No surface was published, but ART and the provider
         // bridge are already live.  Roll them back through the
@@ -163,9 +171,9 @@ pub(super) fn run(
         return Err(error);
     }
     shutdown_runtime(runtime, provider_lease, engine_lease, Some(surface_lease))?;
-    return Ok(HostOutcome {
+    Ok(HostOutcome {
         process,
         frames_presented,
         last_frame: None,
-    });
+    })
 }

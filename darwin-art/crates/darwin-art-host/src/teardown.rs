@@ -33,8 +33,7 @@ pub(super) fn shutdown_runtime(
         runtime
             .uninstall_subsystem(engine_lease)
             .map_err(|error| map_shutdown_error("engine", error))?;
-        shutdown_engine_owner(runtime.owners_mut())
-            .map_err(|status| HostError::ShutdownFailed(status))?;
+        shutdown_engine_owner(runtime.owners_mut()).map_err(HostError::ShutdownFailed)?;
 
         runtime
             .uninstall_subsystem(provider_lease)
