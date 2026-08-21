@@ -16,25 +16,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     run_upstream_gates: bool,
 ) -> Result<()> {
     if run_upstream_gates {
-        build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
-        build_shell_gate_with_args(
-            root,
-            "audit-android16-graphics-closure.sh",
-            &["--art-runtime"],
-        )?;
-        build_shell_gate(root, "build-android16-android-runtime-host.sh")?;
-        build_shell_gate(root, "build-android16-libcore-darwin-linux.sh")?;
-        build_shell_gate(root, "build-android16-os-constants-darwin.sh")?;
-        build_shell_gate(root, "build-android16-unix-filesystem-darwin.sh")?;
-        build_shell_gate(root, "build-android16-openjdkjvm-darwin.sh")?;
-        build_shell_gate(root, "build-android16-file-input-stream-darwin.sh")?;
-        build_shell_gate(root, "build-android16-file-descriptor-darwin.sh")?;
-        build_shell_gate(root, "build-android16-system-natives-darwin.sh")?;
-        build_shell_gate(root, "build-android16-unix-native-dispatcher-darwin.sh")?;
-        build_shell_gate(root, "build-android16-openjdk-nio-mapping.sh")?;
-        build_shell_gate(root, "build-android16-libcore-memory-darwin.sh")?;
-        build_shell_gate(root, "build-android16-android-util-log.sh")?;
-        build_shell_gate(root, "build-android16-virtual-ref-base-ptr.sh")?;
+        run_graphics_upstream_gates(root)?;
     }
     let runtime_native_owner_archive = build_runtime_native_owner(root)?;
 
@@ -876,5 +858,38 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     println!(
         "audit-runtime-graphics-link: closure complete registrar=51 fake-symbols=0 host-icu=0 host-fmt=0 CoreText=0"
     );
+    Ok(())
+}
+
+/// Build the source-pinned native closure consumed by the graphics link audit.
+///
+/// Keeping this phase separate is important for the inner loop: a change to a
+/// probe TU or linker inputs must not force every upstream Android archive
+/// gate to run again. The full public audit still calls this function, while
+/// the `-fast` variant deliberately skips it.
+fn run_graphics_upstream_gates(root: &Path) -> Result<()> {
+    build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
+    build_shell_gate_with_args(
+        root,
+        "audit-android16-graphics-closure.sh",
+        &["--art-runtime"],
+    )?;
+    for script in [
+        "build-android16-android-runtime-host.sh",
+        "build-android16-libcore-darwin-linux.sh",
+        "build-android16-os-constants-darwin.sh",
+        "build-android16-unix-filesystem-darwin.sh",
+        "build-android16-openjdkjvm-darwin.sh",
+        "build-android16-file-input-stream-darwin.sh",
+        "build-android16-file-descriptor-darwin.sh",
+        "build-android16-system-natives-darwin.sh",
+        "build-android16-unix-native-dispatcher-darwin.sh",
+        "build-android16-openjdk-nio-mapping.sh",
+        "build-android16-libcore-memory-darwin.sh",
+        "build-android16-android-util-log.sh",
+        "build-android16-virtual-ref-base-ptr.sh",
+    ] {
+        build_shell_gate(root, script)?;
+    }
     Ok(())
 }
