@@ -216,6 +216,9 @@ impl RuntimeLifecycle {
 
 unsafe extern "C" fn native_begin_run(context: *mut c_void) -> i32 {
     let lifecycle = unsafe { &mut *context.cast::<RuntimeLifecycle>() };
+    if let Err(error) = lifecycle.assert_owner() {
+        return error.status() as i32;
+    }
     match lifecycle.phase {
         RuntimePhase::Bootstrapping => 0,
         _ => RuntimeError::InvalidTransition {
