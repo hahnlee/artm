@@ -1160,6 +1160,8 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_apk_graph.h"),
         PathBuf::from("compat/darwin_surface_bridge.mm"),
         PathBuf::from("compat/darwin_surface_bridge.h"),
+        PathBuf::from("compat/darwin_surface_internal.h"),
+        PathBuf::from("compat/darwin_surface_gpu_bridge.mm"),
         PathBuf::from("compat/darwin_provider_owners.cc"),
         PathBuf::from("compat/darwin_provider_owners.h"),
     ];
@@ -1408,6 +1410,8 @@ fn is_probe_only_input(path: &Path) -> bool {
             | "probes/runtime_apk_graph.h"
             | "compat/darwin_surface_bridge.mm"
             | "compat/darwin_surface_bridge.h"
+            | "compat/darwin_surface_internal.h"
+            | "compat/darwin_surface_gpu_bridge.mm"
     )
 }
 
@@ -1702,6 +1706,9 @@ mod tests {
         )));
         assert!(is_probe_only_input(Path::new(
             "compat/darwin_surface_bridge.mm"
+        )));
+        assert!(is_probe_only_input(Path::new(
+            "compat/darwin_surface_gpu_bridge.mm"
         )));
         assert!(is_probe_only_input(Path::new(
             "probes/runtime_process_options.cc"

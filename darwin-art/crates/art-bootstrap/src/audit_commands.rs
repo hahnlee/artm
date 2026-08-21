@@ -7,6 +7,9 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     let build_dir = root.join("_build/runtime-link-probe");
     let object = build_dir.join("darwin_art_runtime.cc.o");
     let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
+    // The CPU/runtime link owns only the IOSurface/AppKit core. The Ganesh
+    // Metal implementation is compiled and linked exclusively by the
+    // graphics runtime below, where the GPU Skia archive is explicit.
     let runtime_library = build_dir.join("libdarwin_art_runtime.dylib");
     fs::create_dir_all(&build_dir)?;
     let filesystem_object = if let Some(path) = env::var_os("DARWIN_ART_NATIVE_FILESYSTEM_OBJECT") {
@@ -574,6 +577,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .into());
     }
     let surface_object = build_dir.join("darwin_surface_bridge.mm.o");
+    let surface_gpu_object = build_dir.join("darwin_surface_gpu_bridge.mm.o");
     let runtime_library = build_dir.join("libdarwin_art_runtime_graphics.dylib");
     let graphics_closure =
         root.join("_build/graphics-runtime-closure-audit/android16-graphics-runtime-closure.o");
@@ -991,6 +995,52 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         &compiler_identity,
     )?;
 
+    let mut surface_gpu_command = Command::new("clang++");
+    surface_gpu_command
+        .args([
+            "-std=c++20",
+            "-fobjc-arc",
+            "-Wall",
+            "-Wextra",
+            "-Wno-macro-redefined",
+            "-c",
+        ])
+        .arg(root.join("compat/darwin_surface_gpu_bridge.mm"))
+        .arg("-I")
+        .arg(root.join("compat"))
+        .arg("-I")
+        .arg(root.join("include"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/core"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/gpu"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/effects"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/utils"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/private"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/android"))
+        .arg("-I")
+        .arg(root.join("_aosp/external/skia/include/codec"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/logging/liblog/include"))
+        .arg("-I")
+        .arg(root.join("_aosp/system/core/libcutils/include"))
+        .arg("-DSK_BUILD_FOR_ANDROID_FRAMEWORK")
+        .arg("-DSK_USER_CONFIG_HEADER=\"include/config/SkUserConfigManual.h\"")
+        .arg("-o")
+        .arg(&surface_gpu_object);
+    let _ = compile_cached_probe_tu(
+        &mut surface_gpu_command,
+        &surface_gpu_object,
+        &probe_cache,
+        &compiler_identity,
+    )?;
+
     let link_map = build_dir.join("runtime-graphics-link.map");
     let mut linker = Command::new("clang++");
     linker
@@ -1037,6 +1087,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&network_object)
         .arg(&hwui_object)
         .arg(&surface_object)
+        .arg(&surface_gpu_object)
         .arg(root.join("_build/skia-metal-gpu/libskia.a"))
         .arg(root.join("_build/skia-metal-gpu/libskcms.a"))
         // RenderNode/RecordingCanvas are the real HWUI display-list path. Keep
