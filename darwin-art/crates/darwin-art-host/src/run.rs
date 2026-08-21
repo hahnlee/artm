@@ -50,6 +50,11 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             );
         }
         if let Err(engine) = shutdown_guard.runtime().attach_engine(engine) {
+            // Hooks were installed before the ownership transfer. Clear the
+            // native table while both the callback bridge and engine image
+            // are still alive; dropping either one first would leave a stale
+            // process-global callback context.
+            let _ = provider_bridge.clear();
             drop(engine);
             return Err(HostError::RuntimeFailed(-1));
         }
