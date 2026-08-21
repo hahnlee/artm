@@ -193,7 +193,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&ndk_include)
         .arg("-Wno-macro-redefined")
         .arg("-c")
-        .arg(root.join("probes/runtime_link_probe.cc"))
+        .arg(root.join("probes/runtime_entry_probe.cc"))
         .arg("-o")
         .arg(&object);
     let _ = compile_cached_probe_tu(
@@ -908,7 +908,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-I")
         .arg(root.join("_aosp/system/core/libsystem/include"))
         .arg("-c")
-        .arg(root.join("probes/runtime_link_probe.cc"))
+        .arg(root.join("probes/runtime_entry_probe.cc"))
         .arg("-o")
         .arg(&object);
     let _ = compile_cached_probe_tu(

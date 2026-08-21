@@ -31,7 +31,7 @@ by this module.
    managed-load registration step. Do not add partial method arrays.
 2. Move the existing complete Unix registrar call out of
    `RegisterLibcoreNatives`. After the existing Math registration in
-   `probes/runtime_link_probe.cc`, invoke the managed-load step exactly once.
+   `probes/runtime_entry_probe.cc`, invoke the managed-load step exactly once.
 3. The step calls `register_java_lang_Runtime` once, checks for a pending
    exception, then calls `register_java_sun_nio_fs_UnixNativeDispatcher` once
    and checks again. This preserves the relevant Android 16 `OnLoad.cpp`

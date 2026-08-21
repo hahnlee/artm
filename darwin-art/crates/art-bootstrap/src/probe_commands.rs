@@ -447,7 +447,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg(root.join("_aosp/external/skia/include/core"))
         .arg("-DDARWIN_ART_DIRECT_APK_RUNTIME")
         .arg("-c")
-        .arg(root.join("probes/runtime_link_probe.cc"))
+        .arg(root.join("probes/runtime_entry_probe.cc"))
         .arg("-o")
         .arg(&object);
     let _ = compile_cached_probe_tu(

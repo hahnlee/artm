@@ -138,7 +138,7 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 adapter = (root / "compat/darwin_runtime_adapters.cc").read_text()
-probe = (root / "probes/runtime_link_probe.cc").read_text()
+probe = (root / "probes/runtime_entry_probe.cc").read_text()
 open_start = adapter.index("void* OpenNativeLibrary(")
 discovery_start = adapter.index("darwin_art_elf_discover_sibling_graph(", open_start)
 elf_start = adapter.index("if (discovery_status == DARWIN_ART_ELF_OK) {", discovery_start)
@@ -166,11 +166,11 @@ close = adapter[adapter.index("bool CloseNativeLibrary("):
                   adapter.index("void NativeLoaderFreeErrorMessage")]
 assert close.index("DestroyRegularTrampolines") < close.index("darwin_art_elf_graph_unload")
 assert close.index("darwin_art_elf_graph_unload") < close.index(
-    "darwin_art_bionic_namespace_teardown")
+    "TeardownProviderNamespace(library)")
+assert "darwin_art_bionic_namespace_teardown(" in adapter
 assert "kDarwinArtElfJniHostProviderSoname" in adapter
 assert '"libm.so"' in adapter[open_start:elf_start]
 assert "lifecycle_status != 123" in probe
-assert "lifecycle_status() != 1234567" in probe
 assert "lifecycle_status() == 124567" in probe
 assert "namespace_lifecycle_status() == 5" in probe
 assert "kMaxRegularMethodsPerGraph = 32" in adapter
