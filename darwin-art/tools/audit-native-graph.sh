@@ -42,6 +42,18 @@ grep -q 'deps = gcc' "$graph"
 grep -q '^rule runtime_owner_archive$' "$graph"
 grep -q 'target/release/libdarwin_art_runtime.a' "$graph"
 grep -q 'runtime_owner_archive' "$graph"
+# Once the complete object cache is promotable, neither bootstrap archive may
+# fall back to a single edge over the entire repository input closure. Such a
+# rule is allowed only during first cache population; keeping it in a warm
+# graph would make an unrelated source edit widen the native invalidation set.
+if grep -q '^rule graphics_bootstrap$' "$graph"; then
+  echo "native-graph: warm graph still exposes broad graphics bootstrap fallback" >&2
+  exit 1
+fi
+if grep -q '^rule runtime_bootstrap$' "$graph"; then
+  echo "native-graph: warm graph still exposes broad runtime bootstrap fallback" >&2
+  exit 1
+fi
 runtime_library_target="$root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib"
 runtime_query="$($ninja -f "$graph" -t query "$runtime_library_target" 2>&1)"
 grep -q 'target/release/libdarwin_art_runtime.a' <<<"$runtime_query"
