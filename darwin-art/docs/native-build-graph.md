@@ -16,7 +16,9 @@ ninja -f _build/native-graph/build.ninja -n graphics-bootstrap
 `audit-native-graph.sh` is the structural gate: it requires the promoted ART
 runtime, GraphicsJNI, and all 458 ICU TU edges, checks that compiler depfiles
 are enabled, and requires a warm ICU target to report `no work to do`. It does
-not infer cache hits from wall time alone.
+not infer cache hits from wall time alone. It also verifies that filesystem,
+network, HWUI, graphics-phase, and graphics-input probe objects remain
+separate warm no-op targets with narrow source edges.
 
 On a clean checkout with no native fingerprints, the runtime target is a
 single bootstrap edge. After that first successful build, graph generation
