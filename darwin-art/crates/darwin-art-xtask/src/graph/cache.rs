@@ -14,6 +14,41 @@ pub(crate) struct CachedNativeObject {
     pub(crate) shell_quoted: bool,
 }
 
+fn dependency_scan_command(object: &CachedNativeObject, depfile: &Path) -> String {
+    let command_tokens = object
+        .command
+        .split_whitespace()
+        // `-E` is a driver-only preprocessing action; the original `-c`
+        // must be removed or Clang's `-Werror` rejects the scan for an
+        // unused compilation argument. The source path remains positional
+        // and is still covered by the depfile.
+        .filter(|token| *token != "-c")
+        .collect::<Vec<_>>();
+    // Foundation command files already contain shell escaping (`\(…\)` and
+    // `\"…\"`). Re-quoting those tokens would turn valid compiler arguments
+    // into literal backslashes during the one-time dependency scan. Runtime
+    // fingerprints contain raw argv diagnostics and still need per-token
+    // quoting.
+    let quoted_command = if object.shell_quoted {
+        command_tokens.join(" ")
+    } else {
+        command_tokens
+            .into_iter()
+            .map(shell_quote)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    // The depfile must be newer than the source after the one-time scan.
+    // Copying the object's timestamp is incorrect when a checkout restored
+    // the source with a newer mtime, so a plain touch records the successful
+    // scan at the current time and leaves the object untouched.
+    format!(
+        "{quoted_command} -E -Wno-unused-command-line-argument -MMD -MF {} -o /dev/null && touch {}",
+        shell_quote(&depfile.to_string_lossy()),
+        shell_quote(&depfile.to_string_lossy()),
+    )
+}
+
 /// Recover the compiler command and source identity persisted by
 /// `compile_with_dependency_cache`. This lets a later graph generation turn
 /// an already materialized bootstrap into real per-object Ninja edges without
@@ -184,28 +219,7 @@ pub(crate) fn emit_cached_native_graph_with_inputs(
             // is order-only for the object, so the one-time scan does not
             // force a needless recompilation; the next Ninja invocation then
             // consumes the depfile through the normal `deps = gcc` rule.
-            let quoted_command = object
-                .command
-                .split_whitespace()
-                // `-E` is a driver-only preprocessing action; the original
-                // `-c` must be removed or Clang's `-Werror` rejects the scan
-                // for an unused compilation argument. The source path remains
-                // a positional input and is still covered by the depfile.
-                .filter(|token| *token != "-c")
-                .map(shell_quote)
-                .collect::<Vec<_>>()
-                .join(" ");
-            // The depfile must be newer than the source after the one-time
-            // scan. Copying the object's timestamp is incorrect when a
-            // checkout restored the source with a newer mtime: Ninja would
-            // repeat the dependency scan on every invocation. A plain touch
-            // records the successful scan at the current time and leaves the
-            // object itself untouched.
-            let dependency_scan_command = format!(
-                "{quoted_command} -E -Wno-unused-command-line-argument -MMD -MF {} -o /dev/null && touch {}",
-                shell_quote(&depfile.to_string_lossy()),
-                shell_quote(&depfile.to_string_lossy()),
-            );
+            let dependency_scan_command = dependency_scan_command(object, &depfile);
             graph.push_str("build ");
             graph.push_str(&ninja_path(&depfile));
             graph.push_str(": native_dependency_scan ");
@@ -253,4 +267,46 @@ pub(crate) fn emit_cached_native_graph_with_inputs(
     graph.push_str(": native_cached_archive ");
     graph.push_str(&object_paths.join(" "));
     graph.push('\n');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CachedNativeObject, dependency_scan_command};
+    use std::path::PathBuf;
+
+    fn object(command: &str, shell_quoted: bool) -> CachedNativeObject {
+        CachedNativeObject {
+            object: PathBuf::from("/tmp/object.o"),
+            source: PathBuf::from("/tmp/source.cc"),
+            command: command.to_owned(),
+            shell_quoted,
+        }
+    }
+
+    #[test]
+    fn dependency_scan_preserves_preescaped_foundation_arguments() {
+        let command = r#"clang++ -D__INTRODUCED_IN\(n\)= -DSK_USER_CONFIG_HEADER=\"include/config/SkUserConfigManual.h\" -c /tmp/source.cc -o /tmp/object.o"#;
+        let scan = dependency_scan_command(
+            &object(command, true),
+            PathBuf::from("/tmp/object.o.d").as_path(),
+        );
+        assert!(scan.contains(r#"-D__INTRODUCED_IN\(n\)="#));
+        assert!(
+            scan.contains(r#"-DSK_USER_CONFIG_HEADER=\"include/config/SkUserConfigManual.h\""#)
+        );
+        assert!(!scan.contains(r#"'-D__INTRODUCED_IN"#));
+        assert!(!scan.contains(" -c "));
+    }
+
+    #[test]
+    fn dependency_scan_quotes_raw_runtime_arguments() {
+        let command =
+            "clang++ -DART_BASE_ADDRESS_MIN_DELTA=(-0x1000000) -c /tmp/source.cc -o /tmp/object.o";
+        let scan = dependency_scan_command(
+            &object(command, false),
+            PathBuf::from("/tmp/object.o.d").as_path(),
+        );
+        assert!(scan.contains("'-DART_BASE_ADDRESS_MIN_DELTA=(-0x1000000)'"));
+        assert!(!scan.contains(" -c "));
+    }
 }
