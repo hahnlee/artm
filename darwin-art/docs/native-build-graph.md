@@ -43,10 +43,11 @@ The patched ART shadow tree also has a content identity manifest. Preparation
 does not rewrite an unchanged staged source or header, so a canonical fallback
 after graph promotion preserves existing depfile mtimes and reuses the old
 object fingerprints instead of recompiling the full ART archive.
-The upstream ART runtime translation units now use a shared
-`_build/runtime-common/{patched-source,objects}` boundary. Headless and
-graphics adapters remain flavor-local, but the roughly 200 common runtime
-objects are archived into both products from one dependency-fingerprinted
+The upstream ART runtime translation units and flavor-independent compat
+adapters now use a shared `_build/runtime-common/{patched-source,objects}`
+boundary. Graphics-only framework, libcore, and ICU adapters remain
+flavor-local, while the roughly 200 common runtime objects plus the common
+adapter set are archived into both products from one dependency-fingerprinted
 cache. A cache identity stamp includes the common include set (including the
 locked AOSP fmt headers); when that identity changes, graph promotion is
 disabled until the canonical builder repopulates the shared cache. This avoids

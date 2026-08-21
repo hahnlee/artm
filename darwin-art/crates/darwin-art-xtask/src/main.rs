@@ -10,7 +10,7 @@ mod graph;
 
 use graph::emit::emit_graph;
 
-const GRAPH_VERSION: &str = "darwin-art-native-graph-v11-shared-runtime-cache-identity";
+const GRAPH_VERSION: &str = "darwin-art-native-graph-v12-shared-common-adapters";
 const GRAPHICS_BOOTSTRAP_ARCHIVE: &str =
     "runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a";
 const RUNTIME_BOOTSTRAP_ARCHIVE: &str = "runtime-bootstrap/libart-runtime-bootstrap-darwin.a";
