@@ -3,6 +3,7 @@
 #include <iostream>
 
 #include "runtime_graphics_phase.h"
+#include "runtime_jni_scope.h"
 #include "mirror/throwable.h"
 #include "thread-current-inl.h"
 
@@ -18,6 +19,15 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
          const char* framework_res_apk, const char* apk_app_package,
          const char* apk_app_activity,
          darwin_art_graphics::GraphicsState* graphics_state) {
+  // Every construction step below has multiple fail-fast returns.  Keep all
+  // JNI locals created by the detached Activity/Window transaction in one
+  // frame so an exception or an incomplete framework resource cannot leak a
+  // local reference into the ART owner thread.
+  darwin_art_jni_scope::ScopedLocalFrame local_frame(env);
+  if (!local_frame.valid()) {
+    std::cerr << "ART Android window: JNI local frame allocation failed\n";
+    return 26;
+  }
   constexpr jint kApkFrameWidth = 360;
   constexpr jint kApkFrameHeight = 640;
   jclass activity_class = env->GetSuperclass(probe_activity_class);
