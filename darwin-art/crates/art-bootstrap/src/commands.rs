@@ -110,6 +110,7 @@ pub(crate) fn run() -> Result<()> {
         "build-runtime-bootstrap" => build_runtime_bootstrap(&root),
         "build-runtime-bootstrap-internal" => build_runtime_bootstrap_inner(&root),
         "build-runtime-graphics-bootstrap" => build_runtime_graphics_bootstrap(&root),
+        "build-graphics-foundation" => build_graphics_foundation(&root),
         "build-runtime-graphics-bootstrap-internal" => {
             build_runtime_graphics_bootstrap_inner(&root)
         }

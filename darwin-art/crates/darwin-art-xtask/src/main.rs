@@ -8,10 +8,18 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const GRAPH_VERSION: &str = "darwin-art-native-graph-v6";
+const GRAPH_VERSION: &str = "darwin-art-native-graph-v7";
 const GRAPHICS_BOOTSTRAP_ARCHIVE: &str =
     "runtime-graphics-bootstrap/libart-runtime-graphics-bootstrap-darwin.a";
 const RUNTIME_BOOTSTRAP_ARCHIVE: &str = "runtime-bootstrap/libart-runtime-bootstrap-darwin.a";
+const HWUI_STATIC_FOUNDATION_ARCHIVE: &str = "hwui-static-foundation/libhwui-static-darwin.a";
+const HWUI_APEX_FOUNDATION_ARCHIVE: &str =
+    "hwui-static-foundation/libandroid-graphics-apex-common-darwin.a";
+const ANDROID_GRAPHICS_JNI_ARCHIVE: &str = "android-graphics-jni/libandroid-graphics-jni-darwin.a";
+const ANDROID_GRAPHICS_REGISTRAR_ARCHIVE: &str =
+    "android-graphics-jni/libandroid-graphics-layoutlib-registrar-darwin.a";
+const ANDROID_GRAPHICS_FORCE_LOADED_OBJECT: &str =
+    "android-graphics-jni/android-graphics-jni-force-loaded.o";
 const GRAPHICS_RUNTIME_LIBRARY: &str =
     "runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib";
 
@@ -262,6 +270,13 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     let native_output_root = root.join("_build");
     let archive_path = native_output_root.join(GRAPHICS_BOOTSTRAP_ARCHIVE);
     let runtime_archive_path = native_output_root.join(RUNTIME_BOOTSTRAP_ARCHIVE);
+    let hwui_foundation_archive_path = native_output_root.join(HWUI_STATIC_FOUNDATION_ARCHIVE);
+    let hwui_apex_foundation_archive_path = native_output_root.join(HWUI_APEX_FOUNDATION_ARCHIVE);
+    let graphics_jni_archive_path = native_output_root.join(ANDROID_GRAPHICS_JNI_ARCHIVE);
+    let graphics_registrar_archive_path =
+        native_output_root.join(ANDROID_GRAPHICS_REGISTRAR_ARCHIVE);
+    let graphics_force_loaded_object_path =
+        native_output_root.join(ANDROID_GRAPHICS_FORCE_LOADED_OBJECT);
     let runtime_library_path = native_output_root.join(GRAPHICS_RUNTIME_LIBRARY);
     let filesystem_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_filesystem_probe.cc.o");
@@ -281,6 +296,11 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     let runtime_stamp = ninja_path(&runtime_stamp_path);
     let archive = ninja_path(&archive_path);
     let runtime_archive = ninja_path(&runtime_archive_path);
+    let hwui_foundation_archive = ninja_path(&hwui_foundation_archive_path);
+    let hwui_apex_foundation_archive = ninja_path(&hwui_apex_foundation_archive_path);
+    let graphics_jni_archive = ninja_path(&graphics_jni_archive_path);
+    let graphics_registrar_archive = ninja_path(&graphics_registrar_archive_path);
+    let graphics_force_loaded_object = ninja_path(&graphics_force_loaded_object_path);
     let runtime_library = ninja_path(&runtime_library_path);
     let filesystem_object = ninja_path(&filesystem_object_path);
     let network_object = ninja_path(&network_object_path);
@@ -308,6 +328,11 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     let probe_only_input_list = inputs
         .iter()
         .filter(|path| is_probe_only_input(path))
+        .map(|path| ninja_path(&root.join(path)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let foundation_input_list = foundation_inputs(&root)
+        .iter()
         .map(|path| ninja_path(&root.join(path)))
         .collect::<Vec<_>>()
         .join(" ");
@@ -449,6 +474,46 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str("build runtime-bootstrap: phony ");
     graph.push_str(&runtime_archive);
     graph.push('\n');
+
+    // Foundation archives deliberately remain shell-owned during this
+    // transition.  Their builders already persist one command stamp per
+    // translation unit and enforce the Android source/ABI manifests.  Ninja
+    // owns only the stable archive products and invokes both builders as one
+    // cold/bootstrap edge; this keeps the existing archive gates intact while
+    // making the foundation boundary explicit and incrementally addressable.
+    graph.push_str("rule graphics_foundation_bootstrap\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && tools/build-android16-hwui-static-foundation.sh && ");
+    graph.push_str("tools/build-android16-android-graphics-jni.sh --object-audit\n");
+    graph.push_str("  description = GRAPHICS foundation archives\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&hwui_foundation_archive);
+    graph.push(' ');
+    graph.push_str(&hwui_apex_foundation_archive);
+    graph.push(' ');
+    graph.push_str(&graphics_jni_archive);
+    graph.push(' ');
+    graph.push_str(&graphics_registrar_archive);
+    graph.push(' ');
+    graph.push_str(&graphics_force_loaded_object);
+    graph.push_str(": graphics_foundation_bootstrap ");
+    graph.push_str(&foundation_input_list);
+    graph.push('\n');
+    graph.push_str("build graphics-foundation: phony ");
+    graph.push_str(&hwui_foundation_archive);
+    graph.push(' ');
+    graph.push_str(&hwui_apex_foundation_archive);
+    graph.push(' ');
+    graph.push_str(&graphics_jni_archive);
+    graph.push(' ');
+    graph.push_str(&graphics_registrar_archive);
+    graph.push(' ');
+    graph.push_str(&graphics_force_loaded_object);
+    graph.push('\n');
+    graph.push_str("build foundation: phony graphics-foundation\n\n");
+
     graph.push_str("rule runtime_filesystem_probe\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
@@ -725,6 +790,41 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("tools/android-jni-proxy/src/proxy.c"),
         PathBuf::from("tools/android-jni-proxy/sources.lock"),
     ]);
+    paths.sort();
+    paths.dedup();
+    paths.retain(|path| root.join(path).is_file());
+    paths
+}
+
+/// Inputs for the transitional graphics foundation edge.
+///
+/// The archive builders remain the authority for their generated manifests,
+/// dependency checks, and per-TU command stamps.  Listing the source trees
+/// here gives Ninja a conservative invalidation boundary so a changed HWUI or
+/// GraphicsJNI source cannot leave an apparently up-to-date archive behind.
+/// These inputs are intentionally kept out of `graph_inputs`: editing a
+/// foundation source must not invalidate the ART runtime archive cache.
+fn foundation_inputs(root: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![
+        PathBuf::from("tools/build-android16-hwui-static-foundation.sh"),
+        PathBuf::from("tools/build-android16-android-graphics-jni.sh"),
+        PathBuf::from("upstream/android16-hwui-static-foundation.lock"),
+        PathBuf::from("upstream/android16-android-graphics-jni.lock"),
+        PathBuf::from("upstream/android16-hwui-gpu.lock"),
+        PathBuf::from("patches/frameworks-base/0001-darwin-android-critical-jni-abi.patch"),
+        PathBuf::from("patches/frameworks-base/0002-darwin-lazy-native-window-jni.patch"),
+        PathBuf::from("patches/frameworks-base/0003-darwin-hwui-gpu-layoutlib.patch"),
+    ];
+    for directory in [
+        "_aosp/frameworks/base/libs/hwui",
+        "_aosp/external/libjpeg-turbo",
+        "_aosp/external/libultrahdr",
+        "_aosp/frameworks/native/libs/gui",
+        "_aosp/frameworks/av/media/ndk",
+        "_aosp/hardware/libhardware/include_all",
+    ] {
+        collect_files(&root.join(directory), root, &mut paths);
+    }
     paths.sort();
     paths.dedup();
     paths.retain(|path| root.join(path).is_file());

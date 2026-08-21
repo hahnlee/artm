@@ -47,6 +47,7 @@ pub(crate) fn print_help() {
     println!(
         "  build-runtime-graphics-bootstrap  compile the isolated real-graphics Runtime flavor"
     );
+    println!("  build-graphics-foundation  build cached HWUI and GraphicsJNI foundation archives");
     println!("  build-runtime-hwui-probe  compile the cached HWUI animation/tree probe");
     println!(
         "  build-runtime-graphics-phase-probe  compile the cached graphics presentation phase"

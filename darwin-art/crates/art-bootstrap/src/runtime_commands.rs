@@ -524,6 +524,10 @@ pub(crate) fn build_runtime_graphics_bootstrap(root: &Path) -> Result<()> {
     build_native_graph(root, "graphics-bootstrap")
 }
 
+pub(crate) fn build_graphics_foundation(root: &Path) -> Result<()> {
+    build_native_graph(root, "graphics-foundation")
+}
+
 pub(crate) fn build_runtime_graphics_bootstrap_inner(root: &Path) -> Result<()> {
     build_runtime_bootstrap_flavor(root, true)
 }

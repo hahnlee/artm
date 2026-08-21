@@ -27,6 +27,13 @@ darwin-art-engine-sys (raw FFI declarations only)
         ART/JNI | ELF adapter | HWUI/Metal | platform providers
 ```
 
+The Rust CLI is organized by change domain rather than one command file:
+`runtime_commands.rs` owns runtime/archive orchestration, while
+`native_probe_commands.rs` owns the cached filesystem/network/HWUI/graphics
+probe builders. This is a module boundary first: both modules share the
+command/context helpers, so the split introduces no second ABI or duplicate
+build policy.
+
 Rust owns resources, state transitions, leases, rollback, and build graph
 decisions. C++/ObjC++ owns only operations that require ART/HWUI/Skia/Metal
 ABI or platform object access. A C++ phase may not own a second lifecycle

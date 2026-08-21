@@ -36,6 +36,23 @@ The remaining migration is to apply the same persisted-command promotion to
 the graphics/ICU/HWUI foundation archives. That can proceed without changing
 the Rust runtime or Android acceptance contract.
 
+The graph now exposes that boundary as `graphics-foundation` (with
+`foundation` as a short alias). It declares the stable HWUI static/APEX
+archives and Android GraphicsJNI/registrar/force-loaded products, then invokes
+the existing two shell builders as one cold/bootstrap edge. The builders remain
+responsible for source locks, generated manifests, ABI gates, and per-TU
+command stamps; changing a tracked foundation source or lock invalidates the
+edge without invalidating the ART runtime archive cache:
+
+```sh
+ninja -f _build/native-graph/build.ninja -n graphics-foundation
+cargo run -p art-bootstrap -- build-graphics-foundation
+```
+
+This is intentionally an archive-level edge for now. Promotion of the 81 HWUI
+and 61 GraphicsJNI translation units into native Ninja compile edges remains a
+follow-up once their shell-owned command/depfile metadata is made complete.
+
 The first foundation step is now landed in the two largest graphics shell
 builders. `build-android16-android-graphics-jni.sh` keeps one command stamp per
 registrar/JNI translation unit under `_build/android-graphics-jni/objects/`,

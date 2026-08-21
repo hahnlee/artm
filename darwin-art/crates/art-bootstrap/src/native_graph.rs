@@ -12,7 +12,10 @@ use crate::Result;
 use crate::support::run_command;
 
 pub(crate) fn build_native_graph(root: &Path, target: &str) -> Result<()> {
-    if !matches!(target, "graphics-bootstrap" | "runtime-bootstrap") {
+    if !matches!(
+        target,
+        "graphics-bootstrap" | "runtime-bootstrap" | "graphics-foundation" | "foundation"
+    ) {
         return Err(format!("unsupported native graph target: {target}").into());
     }
     let graph_dir = root.join("_build/native-graph");
