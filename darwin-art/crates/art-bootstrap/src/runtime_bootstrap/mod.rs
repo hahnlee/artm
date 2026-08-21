@@ -1,6 +1,7 @@
 use super::*;
 use darwin_art_build_contract::RuntimeFlavor;
 
+mod adapter_jobs;
 mod archive;
 mod compile;
 mod manifest;
