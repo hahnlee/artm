@@ -227,6 +227,7 @@ fn adapter_jobs(
         "darwin_jni_shorty.cc",
         "darwin_jni_proxy_lookup.cc",
         "darwin_jni_proxy_registration.cc",
+        "darwin_runtime_elf_lifecycle.cc",
         "darwin_sigchain.cc",
         "fault_handler_arm64_darwin.cc",
     ] {
@@ -262,6 +263,7 @@ fn adapter_jobs(
         if matches!(
             adapter_source,
             "darwin_runtime_adapters.cc"
+                | "darwin_runtime_elf_lifecycle.cc"
                 | "darwin_provider_owners.cc"
                 | "darwin_jni_proxy_lookup.cc"
                 | "darwin_jni_proxy_registration.cc"

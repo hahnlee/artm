@@ -168,83 +168,6 @@ bool IsExactFixtureGraph(const char* root_soname,
   return true;
 }
 
-int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
-  ElfLibrary* library = static_cast<ElfLibrary*>(context);
-  if (library == nullptr || library->dso_lifecycle == nullptr ||
-      library->image_registry == nullptr ||
-      darwin_art_image_registry::Publish(library->image_registry, start, end) !=
-          0) {
-    return -1;
-  }
-  if (darwin_art_bionic_dso_lifecycle_publish_image(
-          library->dso_lifecycle, start, end) == 0) {
-    return 0;
-  }
-  if (darwin_art_image_registry::RollbackPublish(library->image_registry, start,
-                                                  end) != 0) {
-    std::abort();
-  }
-  return -1;
-}
-
-int FinalizeRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
-  ElfLibrary* library = static_cast<ElfLibrary*>(context);
-  if (library == nullptr || library->dso_lifecycle == nullptr ||
-      library->image_registry == nullptr ||
-      darwin_art_bionic_dso_lifecycle_finalize_image(
-          library->dso_lifecycle, start, end) != 0) {
-    return -1;
-  }
-  return darwin_art_image_registry::Finalize(library->image_registry, start,
-                                              end);
-}
-
-void TeardownProviderNamespace(ElfLibrary* library) {
-  if (library == nullptr) return;
-  if (library->provider_namespace != nullptr) {
-    const DarwinArtBionicNamespaceStatus status =
-        darwin_art_bionic_namespace_teardown(library->provider_namespace);
-    if (status != DARWIN_ART_BIONIC_NAMESPACE_OK) std::abort();
-    if (library->fixture_graph) {
-      g_elf_fixture_namespace_lifecycle.store(5, std::memory_order_relaxed);
-    }
-    darwin_art_bionic_namespace_destroy(library->provider_namespace);
-    library->provider_namespace = nullptr;
-  }
-  if (library->image_registry != nullptr) {
-    darwin_art_image_registry::Destroy(library->image_registry);
-    library->image_registry = nullptr;
-  }
-  if (library->dso_lifecycle != nullptr) {
-    darwin_art_bionic_dso_lifecycle_owner_destroy(library->dso_lifecycle);
-    library->dso_lifecycle = nullptr;
-  }
-  if (library->network_owner) {
-    darwin_art::providers::release_network();
-    library->network_owner = false;
-  }
-  if (library->strftime_owner) {
-    darwin_art::providers::release_strftime();
-    library->strftime_owner = false;
-  }
-  if (library->sendfile_owner) {
-    darwin_art::providers::release_sendfile();
-    library->sendfile_owner = false;
-  }
-  if (library->ioctl_owner) {
-    darwin_art::providers::release_ioctl();
-    library->ioctl_owner = false;
-  }
-  if (library->stdio_owner) {
-    darwin_art::providers::release_stdio();
-    library->stdio_owner = false;
-  }
-  if (library->filesystem_owner) {
-    darwin_art::providers::release_filesystem();
-    library->filesystem_owner = false;
-  }
-}
-
 void FixtureRecordLifecycle(int phase) {
   if (phase < 1 || phase > 7) {
     g_elf_fixture_lifecycle.store(-phase, std::memory_order_relaxed);
@@ -560,23 +483,6 @@ void ElfJniOnUnloadTrampoline(JavaVM*, void*) {
   using AndroidJniOnUnload = void (*)(JavaVM*, void*);
   auto function = reinterpret_cast<AndroidJniOnUnload>(library->jni_on_unload);
   function(static_cast<JavaVM*>(darwin_art_jni_proxy_java_vm(library->proxy)), nullptr);
-}
-
-bool LookupOptionalElfSymbol(ElfLibrary* library,
-                             const char* name,
-                             uintptr_t* address,
-                             std::string* error) {
-  std::array<char, 1024> storage{};
-  DarwinArtElfErrorBuffer error_buffer{storage.data(), storage.size(), 0};
-  const DarwinArtElfStatus status =
-      darwin_art_elf_graph_lookup_root(library->graph, name, address, &error_buffer);
-  if (status == DARWIN_ART_ELF_OK) return true;
-  if (status == DARWIN_ART_ELF_SYMBOL_NOT_FOUND) {
-    *address = 0;
-    return true;
-  }
-  *error = ElfError(status, error_buffer);
-  return false;
 }
 
 }  // namespace

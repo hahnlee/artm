@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <string>
 
 #include "darwin_android_jni_trampoline.h"
 #include "darwin_android_elf_image_registry.h"
@@ -70,6 +71,14 @@ struct ElfLibrary {
   DarwinArtJniProxy* proxy = nullptr;
   darwin_art::android_jni::TrampolineSet* trampolines = nullptr;
 };
+
+int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end);
+int FinalizeRuntimeElfImage(void* context, uintptr_t start, uintptr_t end);
+void TeardownProviderNamespace(ElfLibrary* library);
+bool LookupOptionalElfSymbol(ElfLibrary* library,
+                             const char* name,
+                             uintptr_t* address,
+                             std::string* error);
 
 void* ProxyCurrentEnv(void* context);
 void* ProxyFindClass(void* context, const char* name);
