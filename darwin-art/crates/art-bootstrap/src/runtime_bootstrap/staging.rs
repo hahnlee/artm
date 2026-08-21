@@ -1,5 +1,54 @@
 use super::*;
 
+const PATCHED_RUNTIME_SOURCES: &[&str] = &[
+    "runtime.cc",
+    "signal_set.h",
+    "class_linker.cc",
+    "class_linker.h",
+    "mirror/object_reference.h",
+    "mirror/string-inl.h",
+    "gc/heap.cc",
+    "gc/space/malloc_space.cc",
+    "gc/space/space.cc",
+    "entrypoints/quick/quick_alloc_entrypoints.cc",
+    "entrypoints/quick/callee_save_frame.h",
+    "entrypoints/quick/quick_trampoline_entrypoints.cc",
+    "arch/arm64/jni_frame_arm64.h",
+    "runtime_common.cc",
+    "runtime.h",
+    "thread.cc",
+    "thread.h",
+    "thread_list.cc",
+    "gc/collector/garbage_collector.cc",
+    "gc/collector/mark_compact.cc",
+    "oat/oat_file.cc",
+    "exec_utils.cc",
+    "signal_catcher.cc",
+    "nterp_helpers.cc",
+    "interpreter/mterp/nterp.cc",
+];
+
+const PATCHED_RUNTIME_PATCHES: &[&str] = &[
+    "patches/art/0006-darwin-standard-signal-set.patch",
+    "patches/art/0007-darwin-thread-cpu-time.patch",
+    "patches/art/0008-darwin-nonfutex-suspend-barrier.patch",
+    "patches/art/0009-darwin-locksupport-park.patch",
+    "patches/art/0010-darwin-host-gc-release-policy.patch",
+    "patches/art/0011-darwin-disable-userfaultfd-mark-compact.patch",
+    "patches/art/0013-darwin-stat-mtime.patch",
+    "patches/art/0014-darwin-exec-pidfd-fallback.patch",
+    "patches/art/0017-darwin-disable-nterp.patch",
+    "patches/art/0019-darwin-disable-nterp-catch-entry.patch",
+    "patches/art/0022-darwin-base-relative-heap-references.patch",
+    "patches/art/0023-darwin-enable-quick-allocation-entrypoints.patch",
+    "patches/art/0024-darwin-arm64-ucontext-dump.patch",
+    "patches/art/0025-darwin-morecore-diagnostics.patch",
+    "patches/art/0027-darwin-string-abi-overlay.patch",
+    "patches/art/0028-darwin-minimal-runtime-start.patch",
+    "patches/art/0029-darwin-arm64-native-stack-pcs.patch",
+    "patches/art/0030-darwin-large-object-bitmap-window.patch",
+];
+
 pub(crate) struct RuntimeBootstrapStaging {
     pub(crate) root: PathBuf,
     pub(crate) build_dir: PathBuf,
@@ -102,32 +151,23 @@ pub(crate) fn prepare(root: &Path, real_graphics: bool) -> Result<RuntimeBootstr
     let patched_source_dir = build_dir.join("patched-source");
     let patched_runtime = patched_source_dir.join("runtime");
     let object_dir = build_dir.join("objects");
-    fs::create_dir_all(&patched_runtime)?;
     fs::create_dir_all(&object_dir)?;
     fs::create_dir_all(&runtime_generated_dir)?;
-    copy_runtime_sources(&runtime, &patched_runtime)?;
 
-    for patch in [
-        "patches/art/0006-darwin-standard-signal-set.patch",
-        "patches/art/0007-darwin-thread-cpu-time.patch",
-        "patches/art/0008-darwin-nonfutex-suspend-barrier.patch",
-        "patches/art/0009-darwin-locksupport-park.patch",
-        "patches/art/0010-darwin-host-gc-release-policy.patch",
-        "patches/art/0011-darwin-disable-userfaultfd-mark-compact.patch",
-        "patches/art/0013-darwin-stat-mtime.patch",
-        "patches/art/0014-darwin-exec-pidfd-fallback.patch",
-        "patches/art/0017-darwin-disable-nterp.patch",
-        "patches/art/0019-darwin-disable-nterp-catch-entry.patch",
-        "patches/art/0022-darwin-base-relative-heap-references.patch",
-        "patches/art/0023-darwin-enable-quick-allocation-entrypoints.patch",
-        "patches/art/0024-darwin-arm64-ucontext-dump.patch",
-        "patches/art/0025-darwin-morecore-diagnostics.patch",
-        "patches/art/0027-darwin-string-abi-overlay.patch",
-        "patches/art/0028-darwin-minimal-runtime-start.patch",
-        "patches/art/0029-darwin-arm64-native-stack-pcs.patch",
-        "patches/art/0030-darwin-large-object-bitmap-window.patch",
-    ] {
-        apply_patch_if_needed(&root.join(patch), &patched_source_dir)?;
+    let shadow_identity = runtime_shadow_identity(&runtime, root)?;
+    let shadow_identity_path = patched_source_dir.join(".darwin-art-shadow-identity");
+    let shadow_current = fs::read_to_string(&shadow_identity_path)
+        .is_ok_and(|cached| cached.trim() == shadow_identity)
+        && PATCHED_RUNTIME_SOURCES
+            .iter()
+            .all(|source| patched_runtime.join(source).is_file());
+    if !shadow_current {
+        fs::create_dir_all(&patched_runtime)?;
+        copy_runtime_sources(&runtime, &patched_runtime)?;
+        for patch in PATCHED_RUNTIME_PATCHES {
+            apply_patch_if_needed(&root.join(patch), &patched_source_dir)?;
+        }
+        fs::write(shadow_identity_path, format!("{shadow_identity}\n"))?;
     }
 
     let mut includes = vec![
@@ -260,39 +300,47 @@ pub(crate) fn prepare(root: &Path, real_graphics: bool) -> Result<RuntimeBootstr
 }
 
 fn copy_runtime_sources(runtime: &Path, patched_runtime: &Path) -> Result<()> {
-    for source in [
-        "runtime.cc",
-        "signal_set.h",
-        "class_linker.cc",
-        "class_linker.h",
-        "mirror/object_reference.h",
-        "mirror/string-inl.h",
-        "gc/heap.cc",
-        "gc/space/malloc_space.cc",
-        "gc/space/space.cc",
-        "entrypoints/quick/quick_alloc_entrypoints.cc",
-        "entrypoints/quick/callee_save_frame.h",
-        "entrypoints/quick/quick_trampoline_entrypoints.cc",
-        "arch/arm64/jni_frame_arm64.h",
-        "runtime_common.cc",
-        "runtime.h",
-        "thread.cc",
-        "thread.h",
-        "thread_list.cc",
-        "gc/collector/garbage_collector.cc",
-        "gc/collector/mark_compact.cc",
-        "oat/oat_file.cc",
-        "exec_utils.cc",
-        "signal_catcher.cc",
-        "nterp_helpers.cc",
-        "interpreter/mterp/nterp.cc",
-    ] {
+    for source in PATCHED_RUNTIME_SOURCES {
         let destination = patched_runtime.join(source);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::copy(runtime.join(source), destination)?;
+        copy_if_changed(&runtime.join(source), &destination)?;
     }
+    Ok(())
+}
+
+fn runtime_shadow_identity(runtime: &Path, root: &Path) -> Result<String> {
+    let mut digest = Sha256::new();
+    for path in PATCHED_RUNTIME_SOURCES
+        .iter()
+        .map(|source| runtime.join(source))
+        .chain(PATCHED_RUNTIME_PATCHES.iter().map(|patch| root.join(patch)))
+    {
+        digest.update(path.to_string_lossy().as_bytes());
+        digest.update([0]);
+        digest.update(fs::read(path)?);
+        digest.update([0]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+/// Preserve the staged source mtime when the source bytes are unchanged.
+///
+/// The native dependency cache fingerprints metadata for every depfile edge.
+/// An unconditional `fs::copy` therefore made every canonical fallback look
+/// like a full ART source edit and recompiled hundreds of unchanged TUs.
+/// Compare bytes first, then publish changed content through a sibling temp
+/// file so an interrupted preparation cannot leave a truncated header/source.
+fn copy_if_changed(source: &Path, destination: &Path) -> Result<()> {
+    let source_bytes = fs::read(source)?;
+    if destination.is_file() && fs::read(destination)? == source_bytes {
+        return Ok(());
+    }
+    let temporary =
+        destination.with_extension(format!("darwin-art-copy-tmp-{}", std::process::id()));
+    fs::write(&temporary, source_bytes)?;
+    fs::rename(temporary, destination)?;
     Ok(())
 }
 

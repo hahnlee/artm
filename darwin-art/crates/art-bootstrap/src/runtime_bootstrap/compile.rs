@@ -213,6 +213,7 @@ fn adapter_jobs(
 ) -> Vec<PendingNativeCompile> {
     let mut jobs = Vec::new();
     for adapter_source in [
+        "darwin_art_abi_layout.cc",
         "darwin_android_jni_trampoline.cc",
         "darwin_android_elf_image_registry.cc",
         "darwin_provider_owners.cc",

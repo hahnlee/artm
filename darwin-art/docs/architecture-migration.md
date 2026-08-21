@@ -153,6 +153,13 @@ command/fingerprint promotion, and `graph::representative` owns small
 independently cacheable production TUs. `darwin-art-xtask/src/main.rs` remains
 the graph assembly/CLI boundary instead of owning those policies.
 
+The staging boundary records a content identity for the patched ART shadow
+tree. Unchanged upstream sources and patches are not recopied on every
+invocation, preserving depfile metadata so a canonical fallback can retain
+the existing object set. The small `compat/darwin_art_abi_layout.cc` phase
+provides the native half of the cross-language POD layout gate; Rust offset
+tests remain the other half.
+
 The framework JNI boundary follows the same rule: Choreographer/
 DisplayEventReceiver, PropertyValuesHolder, Perfetto, and their registration
 table live in `compat/darwin_framework_animation_natives.cc`, while the

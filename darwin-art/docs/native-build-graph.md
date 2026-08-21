@@ -39,6 +39,10 @@ object or the archive therefore causes Ninja to rebuild the missing product.
 Compiler depfiles add transitive AOSP header edges after the first compile.
 Unrelated acceptance probes do not invalidate the runtime archive, and each
 filesystem/network/HWUI/graphics probe has its own narrow direct-input edge.
+The patched ART shadow tree also has a content identity manifest. Preparation
+does not rewrite an unchanged staged source or header, so a canonical fallback
+after graph promotion preserves existing depfile mtimes and reuses the old
+object fingerprints instead of recompiling the full ART archive.
 Each probe phase also has a stable content stamp under
 `_build/runtime-probes/content-stamps/`. The graph generator updates a stamp
 only when that phase's source/header bytes change, so a checkout that preserves
@@ -176,6 +180,13 @@ The runtime link now also force-loads the small Rust `darwin-art-runtime`
 static library. Its opaque native-owner symbols are exported and audited in
 both CPU and graphics dylibs; the Rust archive is built incrementally by Cargo
 and does not participate in the large AOSP/HWUI object promotion.
+
+The `compat/darwin_art_abi_layout.cc` TU is a deliberately tiny native ABI
+gate. It statically asserts the C process/result/surface layouts exported by
+`include/darwin_art/darwin_art.h` and `compat/darwin_surface_bridge.h`; the
+Rust `darwin-art-engine-sys` crate asserts the same offsets independently.
+This keeps the raw FFI declarations narrow without making C++ layout drift a
+runtime-only failure.
 
 Graphics presentation now follows the same boundary. The JNI/widget
 validation and `present_content`/interactive-root orchestration live in

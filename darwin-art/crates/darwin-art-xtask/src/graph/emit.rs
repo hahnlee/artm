@@ -129,6 +129,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         &native_output_root.join("runtime-bootstrap/objects"),
         &runtime_archive_path,
         &[
+            "darwin_art_abi_layout.cc",
             "darwin_android_jni_trampoline.cc",
             "darwin_android_elf_image_registry.cc",
             "darwin_provider_owners.cc",
@@ -154,6 +155,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         &native_output_root.join("runtime-graphics-bootstrap/objects"),
         &archive_path,
         &[
+            "darwin_art_abi_layout.cc",
             "darwin_android_jni_trampoline.cc",
             "darwin_android_elf_image_registry.cc",
             "darwin_provider_owners.cc",
