@@ -8,7 +8,7 @@
 //! slice, STL object, or borrowed string crosses this boundary.
 
 use core::ffi::{c_char, c_void};
-use darwin_art_abi::{ABI_VERSION, StatusCode, accepts_header_fields};
+use darwin_art_abi::{AbiHeader, StatusCode};
 
 pub type FrameCallback = unsafe extern "C" fn(
     context: *mut c_void,
@@ -24,8 +24,7 @@ pub type ProviderReleaseFn = unsafe extern "C" fn(context: *mut c_void, provider
 
 #[repr(C)]
 pub struct ProcessConfig {
-    pub struct_size: u32,
-    pub abi_version: u32,
+    pub header: AbiHeader,
     pub core_oj_jar: *const c_char,
     pub core_libart_jar: *const c_char,
     pub framework_jar: *const c_char,
@@ -58,8 +57,7 @@ impl ProcessConfig {
         provider_release: Option<ProviderReleaseFn>,
     ) -> Self {
         Self {
-            struct_size: core::mem::size_of::<Self>() as u32,
-            abi_version: ABI_VERSION,
+            header: AbiHeader::new(core::mem::size_of::<Self>()),
             core_oj_jar,
             core_libart_jar,
             framework_jar,
@@ -77,11 +75,7 @@ impl ProcessConfig {
     }
 
     pub const fn is_compatible(&self) -> bool {
-        accepts_header_fields(
-            self.struct_size,
-            self.abi_version,
-            core::mem::size_of::<Self>(),
-        )
+        self.header.accepts(core::mem::size_of::<Self>())
     }
 
     pub const fn with_graphics_session(mut self, context: *mut c_void) -> Self {
@@ -93,8 +87,7 @@ impl ProcessConfig {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(C)]
 pub struct ProcessResult {
-    pub struct_size: u32,
-    pub abi_version: u32,
+    pub header: AbiHeader,
     pub hello_answer: i32,
     pub native_round_trip: i32,
     pub arraycopy_result: i32,
@@ -107,8 +100,7 @@ pub struct ProcessResult {
 impl ProcessResult {
     pub const fn new() -> Self {
         Self {
-            struct_size: core::mem::size_of::<Self>() as u32,
-            abi_version: ABI_VERSION,
+            header: AbiHeader::new(core::mem::size_of::<Self>()),
             hello_answer: 0,
             native_round_trip: 0,
             arraycopy_result: 0,
@@ -120,11 +112,7 @@ impl ProcessResult {
     }
 
     pub const fn is_compatible(&self) -> bool {
-        accepts_header_fields(
-            self.struct_size,
-            self.abi_version,
-            core::mem::size_of::<Self>(),
-        )
+        self.header.accepts(core::mem::size_of::<Self>())
     }
 }
 
@@ -154,8 +142,15 @@ mod tests {
     fn process_config_layout_is_owned_by_raw_ffi_crate() {
         assert_eq!(size_of::<ProcessConfig>(), 112);
         assert_eq!(align_of::<ProcessConfig>(), 8);
-        assert_eq!(offset_of!(ProcessConfig, struct_size), 0);
-        assert_eq!(offset_of!(ProcessConfig, abi_version), 4);
+        assert_eq!(offset_of!(ProcessConfig, header), 0);
+        assert_eq!(
+            offset_of!(ProcessConfig, header) + offset_of!(AbiHeader, struct_size),
+            0
+        );
+        assert_eq!(
+            offset_of!(ProcessConfig, header) + offset_of!(AbiHeader, abi_version),
+            4
+        );
         assert_eq!(offset_of!(ProcessConfig, core_oj_jar), 8);
         assert_eq!(offset_of!(ProcessConfig, core_libart_jar), 16);
         assert_eq!(offset_of!(ProcessConfig, framework_jar), 24);
@@ -175,8 +170,15 @@ mod tests {
     fn process_result_layout_is_owned_by_raw_ffi_crate() {
         assert_eq!(size_of::<ProcessResult>(), 36);
         assert_eq!(align_of::<ProcessResult>(), 4);
-        assert_eq!(offset_of!(ProcessResult, struct_size), 0);
-        assert_eq!(offset_of!(ProcessResult, abi_version), 4);
+        assert_eq!(offset_of!(ProcessResult, header), 0);
+        assert_eq!(
+            offset_of!(ProcessResult, header) + offset_of!(AbiHeader, struct_size),
+            0
+        );
+        assert_eq!(
+            offset_of!(ProcessResult, header) + offset_of!(AbiHeader, abi_version),
+            4
+        );
         assert_eq!(offset_of!(ProcessResult, hello_answer), 8);
         assert_eq!(offset_of!(ProcessResult, native_round_trip), 12);
         assert_eq!(offset_of!(ProcessResult, arraycopy_result), 16);

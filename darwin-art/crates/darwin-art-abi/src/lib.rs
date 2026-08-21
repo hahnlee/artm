@@ -11,7 +11,7 @@ use core::fmt;
 pub const ABI_VERSION: u32 = 1;
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct AbiHeader {
     pub struct_size: u32,
     pub abi_version: u32,
