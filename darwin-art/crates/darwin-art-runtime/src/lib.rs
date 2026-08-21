@@ -19,7 +19,7 @@ pub use native_owner::{
     RuntimeNativeOwner, RuntimeNativeOwnerDropFn, darwin_art_runtime_native_owner_attach,
     darwin_art_runtime_native_owner_create, darwin_art_runtime_native_owner_destroy,
 };
-pub use provider::{ProviderLeaseError, ProviderLeaseTable};
+pub use provider::{ProviderKind, ProviderLeaseError, ProviderLeaseTable};
 pub use session::RuntimeSession;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

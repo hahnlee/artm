@@ -13,6 +13,47 @@ pub struct ProviderLeaseTable {
     quiescent: Condvar,
 }
 
+/// The only provider identifiers that may enter the Rust ownership state
+/// machine.  The C ABI still carries a `u32`, but conversion is performed at
+/// that boundary rather than allowing arbitrary numbers to circulate through
+/// the safe runtime.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ProviderKind {
+    Filesystem = 1,
+    Network = 2,
+    Stdio = 3,
+    Ioctl = 4,
+    Strftime = 5,
+    Sendfile = 6,
+}
+
+impl ProviderKind {
+    pub const fn raw(self) -> u32 {
+        self as u32
+    }
+
+    const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+impl TryFrom<u32> for ProviderKind {
+    type Error = ();
+
+    fn try_from(raw: u32) -> Result<Self, Self::Error> {
+        match raw {
+            1 => Ok(Self::Filesystem),
+            2 => Ok(Self::Network),
+            3 => Ok(Self::Stdio),
+            4 => Ok(Self::Ioctl),
+            5 => Ok(Self::Strftime),
+            6 => Ok(Self::Sendfile),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProviderLeaseError {
     ActiveLeases,
@@ -21,8 +62,8 @@ pub enum ProviderLeaseError {
 }
 
 struct ProviderCallbacks {
-    acquire: Box<dyn Fn(u32, i32) -> i32 + Send + Sync>,
-    release: Box<dyn Fn(u32) -> i32 + Send + Sync>,
+    acquire: Box<dyn Fn(ProviderKind, i32) -> i32 + Send + Sync>,
+    release: Box<dyn Fn(ProviderKind) -> i32 + Send + Sync>,
     clear: Box<dyn Fn() + Send + Sync>,
 }
 
@@ -35,8 +76,8 @@ struct LeaseState {
 impl ProviderLeaseTable {
     pub fn new<A, R, C>(acquire: A, release: R, clear: C) -> Self
     where
-        A: Fn(u32, i32) -> i32 + Send + Sync + 'static,
-        R: Fn(u32) -> i32 + Send + Sync + 'static,
+        A: Fn(ProviderKind, i32) -> i32 + Send + Sync + 'static,
+        R: Fn(ProviderKind) -> i32 + Send + Sync + 'static,
         C: Fn() + Send + Sync + 'static,
     {
         Self {
@@ -54,10 +95,8 @@ impl ProviderLeaseTable {
         }
     }
 
-    pub fn acquire(&self, kind: u32, authority_fd: i32) -> i32 {
-        let Some(index) = provider_index(kind) else {
-            return -1;
-        };
+    pub fn acquire(&self, kind: ProviderKind, authority_fd: i32) -> i32 {
+        let index = kind.index();
         let Ok(mut state) = self.state.lock() else {
             return -1;
         };
@@ -84,10 +123,8 @@ impl ProviderLeaseTable {
         status
     }
 
-    pub fn release(&self, kind: u32) -> i32 {
-        let Some(index) = provider_index(kind) else {
-            return -1;
-        };
+    pub fn release(&self, kind: ProviderKind) -> i32 {
+        let index = kind.index();
         let Ok(mut state) = self.state.lock() else {
             return -1;
         };
@@ -151,10 +188,6 @@ impl ProviderLeaseTable {
     }
 }
 
-fn provider_index(kind: u32) -> Option<usize> {
-    (1..=6).contains(&kind).then_some(kind as usize)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,10 +213,10 @@ mod tests {
             },
             || {},
         );
-        assert_eq!(table.acquire(0, -1), -1);
-        assert_eq!(table.acquire(1, -1), 0);
-        assert_eq!(table.release(1), 0);
-        assert_eq!(table.release(1), -1);
+        assert!(ProviderKind::try_from(0).is_err());
+        assert_eq!(table.acquire(ProviderKind::Filesystem, -1), 0);
+        assert_eq!(table.release(ProviderKind::Filesystem), 0);
+        assert_eq!(table.release(ProviderKind::Filesystem), -1);
         assert_eq!(acquired.load(Ordering::Relaxed), 1);
         assert_eq!(released.load(Ordering::Relaxed), 1);
         assert!(table.clear().is_ok());
@@ -192,9 +225,9 @@ mod tests {
     #[test]
     fn clear_waits_for_all_leases() {
         let table = ProviderLeaseTable::new(|_, _| 0, |_| 0, || {});
-        assert_eq!(table.acquire(2, 7), 0);
+        assert_eq!(table.acquire(ProviderKind::Network, 7), 0);
         assert_eq!(table.clear(), Err(ProviderLeaseError::ActiveLeases));
-        assert_eq!(table.release(2), 0);
+        assert_eq!(table.release(ProviderKind::Network), 0);
         assert_eq!(table.clear(), Ok(()));
     }
 
@@ -208,8 +241,12 @@ mod tests {
             let weak: Weak<ProviderLeaseTable> = weak.clone();
             ProviderLeaseTable::new(
                 move |kind, _| {
-                    if kind == 2 && !entered_in_callback.swap(true, Ordering::SeqCst) {
-                        weak.upgrade().expect("table alive").acquire(3, -1)
+                    if kind == ProviderKind::Network
+                        && !entered_in_callback.swap(true, Ordering::SeqCst)
+                    {
+                        weak.upgrade()
+                            .expect("table alive")
+                            .acquire(ProviderKind::Ioctl, -1)
                     } else {
                         0
                     }
@@ -218,10 +255,10 @@ mod tests {
                 || {},
             )
         });
-        assert_eq!(table.acquire(2, -1), 0);
+        assert_eq!(table.acquire(ProviderKind::Network, -1), 0);
         assert!(entered.load(Ordering::SeqCst));
-        assert_eq!(table.release(3), 0);
-        assert_eq!(table.release(2), 0);
+        assert_eq!(table.release(ProviderKind::Ioctl), 0);
+        assert_eq!(table.release(ProviderKind::Network), 0);
         assert_eq!(table.clear(), Ok(()));
     }
 
@@ -232,11 +269,11 @@ mod tests {
             |_| panic!("foreign release panic"),
             || panic!("foreign clear panic"),
         );
-        assert_eq!(table.acquire(1, -1), -1);
-        assert_eq!(table.release(1), -1);
+        assert_eq!(table.acquire(ProviderKind::Filesystem, -1), -1);
+        assert_eq!(table.release(ProviderKind::Filesystem), -1);
         assert_eq!(table.clear(), Err(ProviderLeaseError::CallbackPanicked));
 
         // The table remains usable after the callback boundary recovers.
-        assert_eq!(table.acquire(1, -1), -1);
+        assert_eq!(table.acquire(ProviderKind::Filesystem, -1), -1);
     }
 }
