@@ -1134,6 +1134,8 @@ fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_context_loader.cc"),
         PathBuf::from("probes/runtime_app_bootstrap.cc"),
         PathBuf::from("probes/runtime_app_bootstrap.h"),
+        PathBuf::from("probes/runtime_app_presentation.cc"),
+        PathBuf::from("probes/runtime_app_presentation.h"),
         PathBuf::from("probes/runtime_link_probe.cc"),
         PathBuf::from("probes/runtime_elf_probe.cc"),
         PathBuf::from("probes/runtime_elf_probe.h"),
@@ -1387,6 +1389,8 @@ fn is_probe_only_input(path: &Path) -> bool {
             | "probes/runtime_entry_probe.cc"
             | "probes/runtime_app_bootstrap.cc"
             | "probes/runtime_app_bootstrap.h"
+            | "probes/runtime_app_presentation.cc"
+            | "probes/runtime_app_presentation.h"
             | "probes/runtime_link_probe.cc"
             | "probes/runtime_elf_probe.cc"
             | "probes/runtime_elf_probe.h"

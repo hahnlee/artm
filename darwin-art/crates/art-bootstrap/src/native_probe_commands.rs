@@ -454,6 +454,39 @@ pub(crate) fn compile_runtime_app_bootstrap_probe(
     Ok(object)
 }
 
+/// Compile the detached Activity/PhoneWindow/DecorView presentation phase as
+/// its own cacheable translation unit. This keeps framework/JNI presentation
+/// edits from rebuilding the runtime entry orchestration and bootstrap.
+pub(crate) fn compile_runtime_app_presentation_probe(
+    root: &Path,
+    build_dir: &Path,
+    includes: &[&Path],
+) -> Result<PathBuf> {
+    let object = build_dir.join("darwin_art_runtime_app_presentation.cc.o");
+    let cache_path = build_dir.join("runtime-probe-app-presentation-hashes.cache");
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
+    let mut command = runtime_cpp_command(includes);
+    command
+        .args([
+            "-include",
+            "mirror/object_reference.h",
+            "-DDARWIN_ART_REAL_GRAPHICS",
+            "-DDARWIN_ART_HWUI_GPU",
+        ])
+        .arg("-idirafter")
+        .arg(&ndk_arch_include)
+        .arg("-idirafter")
+        .arg(&ndk_include)
+        .arg("-Wno-macro-redefined")
+        .arg("-c")
+        .arg(root.join("probes/runtime_app_presentation.cc"))
+        .arg("-o")
+        .arg(&object);
+    let _ = compile_cached_probe_tu(&mut command, &object, &cache_path, &compiler_identity)?;
+    Ok(object)
+}
+
 pub(crate) fn build_runtime_graphics_session_probe(root: &Path) -> Result<()> {
     let output = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT")
         .map(PathBuf::from)
