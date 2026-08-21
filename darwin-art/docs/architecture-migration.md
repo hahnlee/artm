@@ -377,6 +377,12 @@ resource-runtime install/uninstall, Layoutlib registrar configuration, and the
 51-class graphics registrar no longer share a translation unit with the
 MessageQueue/Binder/AssetManager support table.
 
+Framework system-property storage and its JNI registration are likewise
+isolated in `compat/darwin_framework_system_property_natives.cc`. Changes to
+the property map now invalidate only that adapter object and the final link;
+the Binder/AssetManager/RenderNode support TU is no longer rebuilt for a
+property-only change.
+
 The adapter TU manifest is shared by `darwin-art-build-contract` and consumed
 by both the Cargo bootstrap and `darwin-art-xtask`; a new native boundary now
 has one source-list owner instead of two independently maintained arrays.
