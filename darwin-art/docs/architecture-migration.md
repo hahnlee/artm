@@ -29,10 +29,13 @@ darwin-art-engine-sys (raw FFI declarations only)
 
 The Rust CLI is organized by change domain rather than one command file:
 `runtime_commands.rs` is a small command facade; `runtime_art_build.rs` owns
-low-level ART platform/ARM64/interpreter products and `runtime_bootstrap.rs`
-owns patched-source/runtime archive orchestration. `native_probe_commands.rs`
-owns the cached filesystem/network/HWUI/graphics probe builders. These modules
-share command/context helpers but not ABI declarations or lifecycle policy.
+low-level ART platform/ARM64/interpreter products; `source/` owns locked source
+materialization and foundation/Skia builders; `audit/` owns CPU/graphics link
+audits; `probe/` owns runtime/graphics/APK fixture commands; `native_probe/`
+owns cached C++ probe builders; and `runtime_bootstrap/` separates patched
+source staging, per-object compilation, and archive finalization. These
+modules share command/context helpers but not ABI declarations or lifecycle
+policy.
 
 Rust owns resources, state transitions, leases, rollback, and build graph
 decisions. C++/ObjC++ owns only operations that require ART/HWUI/Skia/Metal
@@ -152,15 +155,18 @@ the same machine:
 | HWUI/Metal implementation change | `runtime_graphics_probe` + graphics link |
 | AOSP foundation header change | affected foundation TU closure |
 
-The current implementation has the probe/object cache, eight independently
-addressable native phases, graphics-JNI/HWUI/ICU
-foundation stamps, concrete RuntimeSession ownership, and the low-level ART
+The current implementation has the probe/object cache, independently
+addressable app/runtime/graphics phases, graphics-JNI/HWUI/ICU foundation
+stamps, concrete RuntimeSession ownership, and the low-level ART
 build/bootstrap split. M1–M4 are landed for the measured boundaries above;
-M5 is in progress. A source touch in the JNI acceptance phase schedules only
-that object on a cold Ninja dry-run (`[1/1] CXX runtime_jni_acceptance`), while
-the restored timestamp is a warm no-op; the full graph audit reports
-`phases=8 warm=no-op`. The host-side legacy CPU/IOSurface upload presenter has
-been removed: headless runs tear down without allocating a surface, and
-graphics runs enter only the direct Metal/HWUI loop. Remaining M4 work is
-removing duplicate ABI declarations and broad fallback edges, then proving
-phase-local invalidation with measured cold/warm counts.
+M5 is in progress. The app bootstrap and presentation objects are now real
+Ninja edges with content stamps: after their first build, a second graph run
+reports `no work to do`, while a source touch invalidates only the affected
+object and the graphics link. The same persistent graph keeps a warm
+`build-runtime-bootstrap` invocation around 1.1s on the reference machine;
+the warm graphics link audit is about 2.2s, with unchanged ART/HWUI objects
+reused. The host-side legacy CPU/IOSurface upload presenter has been removed:
+headless runs tear down without allocating a surface, and graphics runs enter
+only the direct Metal/HWUI loop. Remaining M5 work is measured archive/link
+phase decomposition and removal of duplicate ABI declarations and broad
+fallback edges.

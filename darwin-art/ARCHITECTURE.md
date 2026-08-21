@@ -232,7 +232,12 @@ results. The migration details and remaining boundaries are tracked in
 Native build ownership follows the same boundary. `art-bootstrap` persists a
 dependency fingerprint and compiler command per native object, while
 `darwin-art-xtask` promotes those records to per-object Ninja edges after a
-cold bootstrap. C++/ObjC++ remains responsible for ART/JNI/HWUI/Metal ABI
+cold bootstrap. The CLI is now physically split by change domain: `source/`
+contains locked materialization and foundation/Skia builders, `audit/` owns
+CPU and graphics link audits, `probe/` owns runtime/graphics/fixture probe
+commands, `native_probe/` owns the small C++ probe builders, and
+`runtime_bootstrap/` owns staging, per-object compilation, and archive
+finalization. C++/ObjC++ remains responsible for ART/JNI/HWUI/Metal ABI
 operations, but Rust owns the lifetime and the graph that decides when each
 native artifact is rebuilt.
 
