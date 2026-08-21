@@ -31,21 +31,6 @@ pub fn owned_surface_next_pointer_event(
 }
 
 #[cfg(target_os = "macos")]
-pub fn owned_surface_update(
-    owners: &RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession>,
-    pixels: &[u32],
-) -> i32 {
-    owned_surface(owners).map_or(-1, |surface| surface.update_words(pixels))
-}
-
-#[cfg(target_os = "macos")]
-pub fn owned_surface_present(
-    owners: &RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession>,
-) -> i32 {
-    owned_surface(owners).map_or(-1, SurfaceSession::present)
-}
-
-#[cfg(target_os = "macos")]
 pub fn close_surface_owner(
     owners: &mut RuntimeOwners<EngineSession, Box<ProviderBridge>, SurfaceSession>,
 ) -> Result<(), i32> {

@@ -1,6 +1,8 @@
 use super::*;
+use darwin_art_engine_sys::SurfaceCreateInfo;
 use std::ffi::c_void;
 use std::mem::{align_of, offset_of, size_of};
+use std::path::PathBuf;
 
 #[test]
 fn process_config_matches_c_abi_v1() {

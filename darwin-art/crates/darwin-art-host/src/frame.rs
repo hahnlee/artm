@@ -1,11 +1,7 @@
 //! Frame callback mailbox and diagnostic frame serialization.
 
-use std::fs;
 use std::mem::size_of;
-use std::path::Path;
 use std::ptr;
-
-use crate::HostError;
 
 const MAX_FRAME_DIMENSION: u32 = 4096;
 
@@ -77,24 +73,6 @@ impl FrameHost {
         self.frames_received += 1;
         true
     }
-}
-
-pub fn write_frame_ppm(frame: &OwnedFrame, path: &Path) -> Result<(), HostError> {
-    let mut bytes = Vec::with_capacity(
-        32usize.saturating_add((frame.width as usize).saturating_mul(frame.height as usize) * 3),
-    );
-    bytes.extend_from_slice(format!("P6\n{} {}\n255\n", frame.width, frame.height).as_bytes());
-    for pixel in &frame.argb_pixels {
-        bytes.extend_from_slice(&[
-            ((pixel >> 16) & 0xff) as u8,
-            ((pixel >> 8) & 0xff) as u8,
-            (pixel & 0xff) as u8,
-        ]);
-    }
-    fs::write(path, bytes).map_err(|_| HostError::SurfaceFailed {
-        operation: "write_frame",
-        status: -1,
-    })
 }
 
 pub unsafe extern "C" fn receive_frame(

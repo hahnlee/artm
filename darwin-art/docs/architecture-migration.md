@@ -123,5 +123,8 @@ the same machine:
 The current implementation has the probe/object cache, graphics-JNI/HWUI/ICU
 foundation stamps, concrete RuntimeSession ownership, and the low-level ART
 build/bootstrap split. M1–M3 are landed for the measured boundaries above;
-M4 is now the acceptance sweep and removal of the remaining legacy presenter,
-duplicate ABI declarations, and broad fallback edges.
+M4 is in progress. The host-side legacy CPU/IOSurface upload presenter has
+been removed: headless runs tear down without allocating a surface, and
+graphics runs enter only the direct Metal/HWUI loop. Remaining M4 work is
+removing duplicate ABI declarations and broad fallback edges, then proving
+phase-local invalidation with measured cold/warm counts.

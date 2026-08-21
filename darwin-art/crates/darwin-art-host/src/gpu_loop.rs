@@ -1,4 +1,5 @@
 use super::*;
+use darwin_art_engine_sys::PointerEvent;
 
 #[cfg(target_os = "macos")]
 pub(super) fn run(
