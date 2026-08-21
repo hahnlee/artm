@@ -21,6 +21,7 @@ pub(crate) struct CachedNativeObject {
 pub(crate) fn cached_native_objects(
     object_dir: &Path,
     archive: &Path,
+    required_sources: &[&str],
 ) -> io::Result<Option<Vec<CachedNativeObject>>> {
     let mut by_name = BTreeMap::new();
     let Ok(entries) = fs::read_dir(object_dir) else {
@@ -73,6 +74,16 @@ pub(crate) fn cached_native_objects(
                 shell_quoted: false,
             },
         );
+    }
+    if required_sources.iter().any(|required| {
+        !by_name.values().any(|object| {
+            object.source.file_name().and_then(|name| name.to_str()) == Some(required)
+        })
+    }) {
+        // A source-list change must not be hidden by an older archive cache.
+        // Let the canonical builder materialize the missing TU and its
+        // fingerprint before promoting the archive back to Ninja edges.
+        return Ok(None);
     }
     // The bootstrap archives are deliberately large (200+ objects).  A
     // partially interrupted Rust builder can leave a handful of fingerprints

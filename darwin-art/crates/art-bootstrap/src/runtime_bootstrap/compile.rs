@@ -217,6 +217,7 @@ fn adapter_jobs(
         "darwin_android_elf_image_registry.cc",
         "darwin_provider_owners.cc",
         "darwin_framework_natives.cc",
+        "darwin_framework_animation_natives.cc",
         "darwin_icu_natives.cc",
         "darwin_icu_jni_bridge.cc",
         "darwin_libcore_natives.cc",

@@ -128,10 +128,36 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let cached_runtime_objects = cached_native_objects(
         &native_output_root.join("runtime-bootstrap/objects"),
         &runtime_archive_path,
+        &[
+            "darwin_android_jni_trampoline.cc",
+            "darwin_android_elf_image_registry.cc",
+            "darwin_provider_owners.cc",
+            "darwin_framework_natives.cc",
+            "darwin_framework_animation_natives.cc",
+            "darwin_icu_natives.cc",
+            "darwin_icu_jni_bridge.cc",
+            "darwin_libcore_natives.cc",
+            "darwin_runtime_adapters.cc",
+            "darwin_sigchain.cc",
+            "fault_handler_arm64_darwin.cc",
+        ],
     )?;
     let cached_graphics_objects = cached_native_objects(
         &native_output_root.join("runtime-graphics-bootstrap/objects"),
         &archive_path,
+        &[
+            "darwin_android_jni_trampoline.cc",
+            "darwin_android_elf_image_registry.cc",
+            "darwin_provider_owners.cc",
+            "darwin_framework_natives.cc",
+            "darwin_framework_animation_natives.cc",
+            "darwin_icu_natives.cc",
+            "darwin_icu_jni_bridge.cc",
+            "darwin_libcore_natives.cc",
+            "darwin_runtime_adapters.cc",
+            "darwin_sigchain.cc",
+            "fault_handler_arm64_darwin.cc",
+        ],
     )?;
     let filesystem_object_for_shell = filesystem_object_path.to_string_lossy().into_owned();
     let network_object_for_shell = network_object_path.to_string_lossy().into_owned();

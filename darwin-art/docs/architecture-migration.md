@@ -146,6 +146,14 @@ command/fingerprint promotion, and `graph::representative` owns small
 independently cacheable production TUs. `darwin-art-xtask/src/main.rs` remains
 the graph assembly/CLI boundary instead of owning those policies.
 
+The framework JNI boundary follows the same rule: Choreographer/
+DisplayEventReceiver, PropertyValuesHolder, Perfetto, and their registration
+table live in `compat/darwin_framework_animation_natives.cc`, while the
+remaining framework/resource/system registrations stay in
+`compat/darwin_framework_natives.cc`. Both are independent persisted native
+objects in the ART bootstrap archive; changing animation cadence no longer
+recompiles the larger framework registration TU.
+
 The large graph emission routine itself is in `graph::emit`; the CLI entrypoint
 is now a 279-line command/test boundary. This is intentionally a source/build
 boundary only: it does not pretend that the remaining framework-native
