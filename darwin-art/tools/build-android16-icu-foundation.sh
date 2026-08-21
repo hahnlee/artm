@@ -155,9 +155,33 @@ cleanup() {
   rm -rf "$stage_dir"
 }
 trap cleanup EXIT
-object_dir="$stage_dir/objects"
+object_dir="$build_dir/objects"
 mkdir -p "$object_dir/common" "$object_dir/i18n" \
   "$object_dir/stubdata" "$object_dir/androidicuinit"
+
+compile_cached() {
+  local label="$1" source="$2" object="$3"
+  shift 3
+  local meta="${object}.cmd"
+  local command_file="${object}.command"
+  local source_sha
+  source_sha="$(shasum -a 256 "$source" | awk '{print $1}')"
+  local -a command=("$cxx" "$@" -MMD -MF "$object.d" -c "$source" -o "$object")
+  local command_text
+  command_text="$(printf '%q ' "${command[@]}")"
+  local key
+  key="$(printf '%s\n%s\n' "$source_sha" "$command_text" | shasum -a 256 | awk '{print $1}')"
+  if [[ -f "$object" && -f "$meta" && -f "$command_file" &&
+        "$(<"$meta")" == "$key" ]]; then
+    echo "icu-foundation: cache $label"
+    return
+  fi
+  echo "icu-foundation: compile $label"
+  "${command[@]}"
+  printf '%s\n' "$key" > "$meta"
+  printf '%s\n' "$command_text" > "${command_file}.tmp.$$"
+  mv "${command_file}.tmp.$$" "$command_file"
+}
 
 base_flags=(
   -arch arm64
@@ -183,43 +207,39 @@ base_flags=(
 common_objects=()
 for source in "${common_sources[@]}"; do
   object="$object_dir/common/${source%.cpp}.o"
-  echo "icu-foundation: compile common/$source"
-  "$cxx" "${base_flags[@]}" \
+  compile_cached "common/$source" "$common_dir/$source" "$object" \
+    "${base_flags[@]}" \
     -D_REENTRANT -DU_COMMON_IMPLEMENTATION -O3 -fvisibility=hidden \
-    -Wno-missing-field-initializers -Wno-sign-compare \
-    -c "$common_dir/$source" -o "$object"
+    -Wno-missing-field-initializers -Wno-sign-compare
   common_objects+=("$object")
 done
 
 i18n_objects=()
 for source in "${i18n_sources[@]}"; do
   object="$object_dir/i18n/${source%.cpp}.o"
-  echo "icu-foundation: compile i18n/$source"
-  "$cxx" "${base_flags[@]}" \
+  compile_cached "i18n/$source" "$i18n_dir/$source" "$object" \
+    "${base_flags[@]}" \
     -D_REENTRANT -DU_I18N_IMPLEMENTATION -O3 -fvisibility=hidden \
-    -Wno-unreachable-code-loop-increment \
-    -c "$i18n_dir/$source" -o "$object"
+    -Wno-unreachable-code-loop-increment
   i18n_objects+=("$object")
 done
 
 stubdata_objects=()
 for source in "${stubdata_sources[@]}"; do
   object="$object_dir/stubdata/${source%.cpp}.o"
-  echo "icu-foundation: compile stubdata/$source"
-  "$cxx" -arch arm64 -isysroot "$sdk_root" -std=gnu++20 -fPIC -Wall -Werror \
-    -DANDROID -I"$icu_root/android_icu4c/include" -I"$common_dir" \
-    -c "$stubdata_dir/$source" -o "$object"
+  compile_cached "stubdata/$source" "$stubdata_dir/$source" "$object" \
+    -arch arm64 -isysroot "$sdk_root" -std=gnu++20 -fPIC -Wall -Werror \
+    -DANDROID -I"$icu_root/android_icu4c/include" -I"$common_dir"
   stubdata_objects+=("$object")
 done
 
 init_objects=()
 for source in "${init_sources[@]}"; do
   object="$object_dir/androidicuinit/${source%.cpp}.o"
-  echo "icu-foundation: compile libandroidicuinit/$source"
-  "$cxx" -arch arm64 -isysroot "$sdk_root" -std=gnu++20 -fPIC -Wall -Werror \
+  compile_cached "libandroidicuinit/$source" "$init_dir/$source" "$object" \
+    -arch arm64 -isysroot "$sdk_root" -std=gnu++20 -fPIC -Wall -Werror \
     -DANDROID -I"$icu_root/android_icu4c/include" -I"$common_dir" \
-    -I"$init_dir" -I"$init_dir/include" \
-    -c "$init_dir/$source" -o "$object"
+    -I"$init_dir" -I"$init_dir/include"
   init_objects+=("$object")
 done
 

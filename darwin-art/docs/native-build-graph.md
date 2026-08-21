@@ -32,10 +32,12 @@ Compiler depfiles add transitive AOSP header edges after the first compile.
 Unrelated acceptance probes do not invalidate the runtime archive, and each
 filesystem/network/HWUI/graphics probe has its own narrow direct-input edge.
 
-The remaining migration is to apply the same persisted-command promotion to
-the ICU and remaining ART foundation archives. HWUI and GraphicsJNI now have
-stable source-locked shadow/build boundaries, so this can proceed without
-changing the Rust runtime or Android acceptance contract.
+The same persisted-command promotion now covers ICU as well. The Android ICU
+foundation keeps 201 common, 254 i18n, one stubdata, and two init translation
+units under `_build/icu-foundation/objects/`; a complete set is emitted as
+ordinary Ninja edges and a partial/interrupted set falls back to the locked
+shell builder. The remaining foundation work is limited to the ART-side
+bootstrap archive; it is intentionally separate from the graphics/ICU graph.
 
 The graph now exposes that boundary as `graphics-foundation` (with
 `foundation` as a short alias). It declares the stable HWUI static/APEX
@@ -75,10 +77,17 @@ source identity remains separately locked; its 81+5 objects now use the same
 cache after the tracked shadow patch is materialized, without weakening the
 source pin.
 
+ICU promotion uses the same source digest and command stamp policy. Its four
+archives remain stable products, while Ninja owns the 458 translation-unit
+edges once the shell builder has populated them. A warm `icu-foundation`
+query is a true no-op; changing one ICU source invalidates only that object and
+the affected archive.
+
 ## Current measurement
 
 On the development machine, the materialized graphics graph currently
-contains 172 cached C++ translation-unit edges and one archive edge. A clean
+contains 630 cached C++ translation-unit edges (172 graphics/HWUI plus 458
+ICU) and five archive edges. A clean
 graph execution completed the 172-object parallel compile and archive in
 75.25s (`ninja -j8`); the immediately repeated execution reported `no work to
 do` in 0.01s. The remaining link/audit command is intentionally measured

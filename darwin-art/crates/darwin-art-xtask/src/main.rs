@@ -20,6 +20,10 @@ const ANDROID_GRAPHICS_REGISTRAR_ARCHIVE: &str =
     "android-graphics-jni/libandroid-graphics-layoutlib-registrar-darwin.a";
 const ANDROID_GRAPHICS_FORCE_LOADED_OBJECT: &str =
     "android-graphics-jni/android-graphics-jni-force-loaded.o";
+const ICU_COMMON_FOUNDATION_ARCHIVE: &str = "icu-foundation/libicuuc-common-darwin.a";
+const ICU_I18N_FOUNDATION_ARCHIVE: &str = "icu-foundation/libicui18n-darwin.a";
+const ICU_STUBDATA_FOUNDATION_ARCHIVE: &str = "icu-foundation/libicuuc-stubdata-darwin.a";
+const ICU_INIT_FOUNDATION_ARCHIVE: &str = "icu-foundation/libandroidicuinit-darwin.a";
 const GRAPHICS_RUNTIME_LIBRARY: &str =
     "runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib";
 
@@ -279,6 +283,10 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         native_output_root.join(ANDROID_GRAPHICS_REGISTRAR_ARCHIVE);
     let graphics_force_loaded_object_path =
         native_output_root.join(ANDROID_GRAPHICS_FORCE_LOADED_OBJECT);
+    let icu_common_archive_path = native_output_root.join(ICU_COMMON_FOUNDATION_ARCHIVE);
+    let icu_i18n_archive_path = native_output_root.join(ICU_I18N_FOUNDATION_ARCHIVE);
+    let icu_stubdata_archive_path = native_output_root.join(ICU_STUBDATA_FOUNDATION_ARCHIVE);
+    let icu_init_archive_path = native_output_root.join(ICU_INIT_FOUNDATION_ARCHIVE);
     let runtime_library_path = native_output_root.join(GRAPHICS_RUNTIME_LIBRARY);
     let filesystem_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_filesystem_probe.cc.o");
@@ -303,6 +311,10 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     let graphics_jni_archive = ninja_path(&graphics_jni_archive_path);
     let graphics_registrar_archive = ninja_path(&graphics_registrar_archive_path);
     let graphics_force_loaded_object = ninja_path(&graphics_force_loaded_object_path);
+    let icu_common_archive = ninja_path(&icu_common_archive_path);
+    let icu_i18n_archive = ninja_path(&icu_i18n_archive_path);
+    let icu_stubdata_archive = ninja_path(&icu_stubdata_archive_path);
+    let icu_init_archive = ninja_path(&icu_init_archive_path);
     let runtime_library = ninja_path(&runtime_library_path);
     let filesystem_object = ninja_path(&filesystem_object_path);
     let network_object = ninja_path(&network_object_path);
@@ -519,6 +531,31 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         .collect::<Vec<_>>();
     let hwui_ready = hwui_main.len() == 81 && hwui_apex.len() == 5;
     let graphics_ready = graphics_main.len() == 61 && graphics_registrar.len() == 1;
+    let icu_cached = cached_foundation_objects(&native_output_root.join("icu-foundation/objects"))?;
+    let icu_common = icu_cached
+        .iter()
+        .filter(|object| object.object.to_string_lossy().contains("/common/"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let icu_i18n = icu_cached
+        .iter()
+        .filter(|object| object.object.to_string_lossy().contains("/i18n/"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let icu_stubdata = icu_cached
+        .iter()
+        .filter(|object| object.object.to_string_lossy().contains("/stubdata/"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let icu_init = icu_cached
+        .iter()
+        .filter(|object| object.object.to_string_lossy().contains("/androidicuinit/"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let icu_ready = icu_common.len() == 201
+        && icu_i18n.len() == 254
+        && icu_stubdata.len() == 1
+        && icu_init.len() == 2;
     if hwui_ready {
         emit_cached_native_graph(
             &mut graph,
@@ -544,6 +581,51 @@ fn emit_graph(out: &Path) -> io::Result<()> {
         graph.push(' ');
         graph.push_str(&hwui_apex_foundation_archive);
         graph.push_str(": hwui_foundation_bootstrap ");
+        graph.push_str(&foundation_input_list);
+        graph.push('\n');
+    }
+
+    if icu_ready {
+        emit_cached_native_graph(
+            &mut graph,
+            &icu_common,
+            &icu_common_archive,
+            &mut cached_rules_emitted,
+        );
+        emit_cached_native_graph(
+            &mut graph,
+            &icu_i18n,
+            &icu_i18n_archive,
+            &mut cached_rules_emitted,
+        );
+        emit_cached_native_graph(
+            &mut graph,
+            &icu_stubdata,
+            &icu_stubdata_archive,
+            &mut cached_rules_emitted,
+        );
+        emit_cached_native_graph(
+            &mut graph,
+            &icu_init,
+            &icu_init_archive,
+            &mut cached_rules_emitted,
+        );
+    } else {
+        graph.push_str("rule icu_foundation_bootstrap\n");
+        graph.push_str("  command = cd ");
+        graph.push_str(&shell_quote(&root_for_shell));
+        graph.push_str(" && tools/build-android16-icu-foundation.sh\n");
+        graph.push_str("  description = ICU foundation archives\n");
+        graph.push_str("  restat = 1\n\n");
+        graph.push_str("build ");
+        graph.push_str(&icu_common_archive);
+        graph.push(' ');
+        graph.push_str(&icu_i18n_archive);
+        graph.push(' ');
+        graph.push_str(&icu_stubdata_archive);
+        graph.push(' ');
+        graph.push_str(&icu_init_archive);
+        graph.push_str(": icu_foundation_bootstrap ");
         graph.push_str(&foundation_input_list);
         graph.push('\n');
     }
@@ -604,8 +686,25 @@ fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&graphics_registrar_archive);
     graph.push(' ');
     graph.push_str(&graphics_force_loaded_object);
+    graph.push(' ');
+    graph.push_str(&icu_common_archive);
+    graph.push(' ');
+    graph.push_str(&icu_i18n_archive);
+    graph.push(' ');
+    graph.push_str(&icu_stubdata_archive);
+    graph.push(' ');
+    graph.push_str(&icu_init_archive);
     graph.push('\n');
-    graph.push_str("build foundation: phony graphics-foundation\n\n");
+    graph.push_str("build icu-foundation: phony ");
+    graph.push_str(&icu_common_archive);
+    graph.push(' ');
+    graph.push_str(&icu_i18n_archive);
+    graph.push(' ');
+    graph.push_str(&icu_stubdata_archive);
+    graph.push(' ');
+    graph.push_str(&icu_init_archive);
+    graph.push('\n');
+    graph.push_str("build foundation: phony graphics-foundation icu-foundation\n\n");
 
     graph.push_str("rule runtime_filesystem_probe\n");
     graph.push_str("  command = cd ");
@@ -904,6 +1003,8 @@ fn foundation_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("upstream/android16-hwui-static-foundation.lock"),
         PathBuf::from("upstream/android16-android-graphics-jni.lock"),
         PathBuf::from("upstream/android16-hwui-gpu.lock"),
+        PathBuf::from("tools/build-android16-icu-foundation.sh"),
+        PathBuf::from("upstream/android16-icu-foundation.lock"),
         PathBuf::from("patches/frameworks-base/0001-darwin-android-critical-jni-abi.patch"),
         PathBuf::from("patches/frameworks-base/0002-darwin-lazy-native-window-jni.patch"),
         PathBuf::from("patches/frameworks-base/0003-darwin-hwui-gpu-layoutlib.patch"),
@@ -915,6 +1016,7 @@ fn foundation_inputs(root: &Path) -> Vec<PathBuf> {
         "_aosp/frameworks/native/libs/gui",
         "_aosp/frameworks/av/media/ndk",
         "_aosp/hardware/libhardware/include_all",
+        "_aosp/external/icu-graphics",
     ] {
         collect_files(&root.join(directory), root, &mut paths);
     }
@@ -931,36 +1033,44 @@ fn foundation_inputs(root: &Path) -> Vec<PathBuf> {
 /// empty vector so the canonical shell builder remains the safe fallback.
 fn cached_foundation_objects(object_dir: &Path) -> io::Result<Vec<CachedNativeObject>> {
     let mut objects = Vec::new();
-    let Ok(entries) = fs::read_dir(object_dir) else {
-        return Ok(objects);
-    };
-    for entry in entries.flatten() {
-        let command_file = entry.path();
-        if command_file.extension().and_then(|ext| ext.to_str()) != Some("command") {
-            continue;
-        }
-        let object = command_file.with_extension("");
-        if !object.is_file() {
-            continue;
-        }
-        let command = fs::read_to_string(&command_file)?.trim().to_owned();
-        let tokens = command.split_whitespace().collect::<Vec<_>>();
-        let Some(source_index) = tokens.iter().position(|token| *token == "-c") else {
+    let mut pending = vec![object_dir.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = fs::read_dir(directory) else {
             continue;
         };
-        let Some(source_token) = tokens.get(source_index + 1) else {
-            continue;
-        };
-        let source = PathBuf::from(source_token.trim_matches('\''));
-        if !source.is_file() {
-            continue;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let command_file = path;
+            if command_file.extension().and_then(|ext| ext.to_str()) != Some("command") {
+                continue;
+            }
+            let object = command_file.with_extension("");
+            if !object.is_file() {
+                continue;
+            }
+            let command = fs::read_to_string(&command_file)?.trim().to_owned();
+            let tokens = command.split_whitespace().collect::<Vec<_>>();
+            let Some(source_index) = tokens.iter().position(|token| *token == "-c") else {
+                continue;
+            };
+            let Some(source_token) = tokens.get(source_index + 1) else {
+                continue;
+            };
+            let source = PathBuf::from(source_token.trim_matches('\''));
+            if !source.is_file() {
+                continue;
+            }
+            objects.push(CachedNativeObject {
+                object,
+                source,
+                command,
+                shell_quoted: true,
+            });
         }
-        objects.push(CachedNativeObject {
-            object,
-            source,
-            command,
-            shell_quoted: true,
-        });
     }
     objects.sort_by(|left, right| left.object.cmp(&right.object));
     Ok(objects)
@@ -1132,8 +1242,6 @@ fn emit_cached_native_graph(
     if !*rules_emitted {
         graph.push_str("rule native_cached_cpp\n");
         graph.push_str("  command = $compile_command\n");
-        graph.push_str("  depfile = $out.d\n");
-        graph.push_str("  deps = gcc\n");
         graph.push_str("  description = CXX $out\n");
         graph.push_str("  restat = 1\n\n");
         graph.push_str("rule native_cached_archive\n");
