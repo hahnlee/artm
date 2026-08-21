@@ -59,15 +59,6 @@ pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostErro
         .err()
         .map(|error| HostError::RuntimeFailed(error.status() as i32));
 
-    if runtime.graphics().is_some() {
-        if let Err(error) = uninstall_owned(runtime, Subsystem::Graphics) {
-            remember_error(&mut first_error, map_shutdown_error("graphics", error));
-        }
-        if let Err(status) = close_graphics_owner(runtime) {
-            remember_error(&mut first_error, HostError::RuntimeFailed(status));
-        }
-    }
-
     if runtime.surface().is_some() {
         if let Err(error) = uninstall_owned(runtime, Subsystem::Surface) {
             remember_error(&mut first_error, map_shutdown_error("destroy", error));
@@ -80,6 +71,22 @@ pub(super) fn shutdown_runtime(runtime: &mut HostRuntime) -> Result<(), HostErro
                     status,
                 },
             );
+        }
+    }
+
+    // A graphics session is installed before the engine runs, while the
+    // concrete surface is installed later by the frame loop.  Therefore the
+    // actual LIFO lease order is Surface -> Graphics, even though graphics is
+    // the native prerequisite for the surface.  Keep the Rust lease order
+    // aligned with the native lifetime: surface is closed first, then the
+    // graphics session is closed while ART is still alive, and only then can
+    // the engine shutdown callback run.
+    if runtime.graphics().is_some() {
+        if let Err(error) = uninstall_owned(runtime, Subsystem::Graphics) {
+            remember_error(&mut first_error, map_shutdown_error("graphics", error));
+        }
+        if let Err(status) = close_graphics_owner(runtime) {
+            remember_error(&mut first_error, HostError::RuntimeFailed(status));
         }
     }
 
