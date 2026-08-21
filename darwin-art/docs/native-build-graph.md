@@ -126,6 +126,13 @@ process acceptance state, performs the owner-thread ART/DSO teardown, and is a
 separate cached object; the main probe only exports the ABI wrapper and builds
 that snapshot.
 
+The runtime adapter uses the same per-TU cache boundary. Platform-only
+compatibility shims are compiled as `darwin_runtime_platform_stubs.cc`, while
+the graph/provider/JNI adapter remains `darwin_runtime_adapters.cc`. The
+archive cache records both source names and command fingerprints; if a new
+required TU is absent from a persisted archive, the builder falls back to the
+canonical compile path instead of silently reusing an incomplete archive.
+
 Graphics presentation now follows the same boundary. The JNI/widget
 validation and `present_content`/interactive-root orchestration live in
 `probes/runtime_graphics_phase.cc`, while clickable hit-testing, pointer/frame
