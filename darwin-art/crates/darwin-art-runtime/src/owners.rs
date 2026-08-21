@@ -24,6 +24,19 @@ pub struct RuntimeOwners<E, P, S, G = ()> {
     _owner_thread: PhantomData<Rc<()>>,
 }
 
+impl<E, P, S, G> Drop for RuntimeOwners<E, P, S, G> {
+    fn drop(&mut self) {
+        // Keep rollback order explicit at the owner boundary.  The native
+        // session values each have their own close contract; this only
+        // determines which owner is dropped first when a caller returns
+        // before the lease-driven teardown path can run.
+        drop(self.graphics.take());
+        drop(self.surface.take());
+        drop(self.provider.take());
+        drop(self.engine.take());
+    }
+}
+
 impl<E, P, S, G> RuntimeOwners<E, P, S, G> {
     pub const fn new() -> Self {
         Self {

@@ -60,6 +60,7 @@ mod platform {
         next_pointer_event: SurfaceNextPointerEventFn,
         destroy: SurfaceDestroyFn,
         armed: bool,
+        close_status: Option<i32>,
     }
 
     /// Rust owner for the opaque native HWUI session.  The C ABI deliberately
@@ -73,6 +74,7 @@ mod platform {
         dispatch_fn: GraphicsSessionDispatchPointerFn,
         pump_fn: GraphicsSessionPumpFrameFn,
         closed: bool,
+        close_attempted: bool,
     }
 
     impl GraphicsSession {
@@ -106,13 +108,21 @@ mod platform {
                 dispatch_fn,
                 pump_fn,
                 closed: false,
+                close_attempted: false,
             })
         }
 
+        /// Close the native session. A failed explicit close leaves the
+        /// handle owned and may be retried by the caller; Drop will not make
+        /// that policy decision by re-entering the foreign callback.
         pub fn close(&mut self) -> i32 {
             if self.closed {
                 return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
             }
+            // Mark the explicit close boundary before entering foreign code.
+            // A failed close remains observable to the caller, but Drop must
+            // not accidentally call a non-idempotent callback a second time.
+            self.close_attempted = true;
             // SAFETY: handle and callback belong to this live owner.
             let status = unsafe { (self.close_fn)(self.handle) };
             if status == 0 {
@@ -157,10 +167,12 @@ mod platform {
 
     impl Drop for GraphicsSession {
         fn drop(&mut self) {
-            if !self.closed {
+            if !self.closed && !self.close_attempted {
                 let _ = self.close();
             }
-            let _ = self.destroy();
+            if self.closed {
+                let _ = self.destroy();
+            }
         }
     }
 
@@ -174,6 +186,7 @@ mod platform {
                 next_pointer_event: symbols.surface_next_pointer_event,
                 destroy: symbols.surface_destroy,
                 armed: true,
+                close_status: None,
             }
         }
 
@@ -226,11 +239,13 @@ mod platform {
 
         pub fn close(&mut self) -> i32 {
             if !self.armed {
-                return 0;
+                return self.close_status.unwrap_or(0);
             }
             self.armed = false;
             // SAFETY: this is the one matching destroy call for the handle.
-            unsafe { (self.destroy)(self.handle) }
+            let status = unsafe { (self.destroy)(self.handle) };
+            self.close_status = Some(status);
+            status
         }
     }
 
@@ -381,10 +396,10 @@ mod platform {
             unsafe { (self.engine.symbols.provider_clear_hooks)() }
         }
 
-        /// Invoke the process shutdown callback at most once.  The callback
-        /// is kept behind this owner so its code image remains mapped for the
-        /// entire call and until the owner is dropped afterward.
-        pub fn shutdown_once(&mut self) -> i32 {
+        /// Close the process-scoped engine at most once. The callback is kept
+        /// behind this owner so its code image remains mapped for the entire
+        /// call and until the owner is dropped afterward.
+        pub fn close(&mut self) -> i32 {
             if self.shutdown_taken {
                 return 0;
             }
@@ -393,6 +408,11 @@ mod platform {
             // version-checked engine image and takes no arguments.
             unsafe { (self.engine.symbols.shutdown_process)() }
         }
+
+        /// Backwards-compatible name for the explicit process close contract.
+        pub fn shutdown_once(&mut self) -> i32 {
+            self.close()
+        }
     }
 
     impl Drop for EngineSession {
@@ -400,7 +420,7 @@ mod platform {
             // A failed ownership transfer must not leave ART resident. Normal
             // RuntimeSession teardown marks this callback consumed first, so
             // Drop is idempotent in the successful path.
-            let _ = self.shutdown_once();
+            let _ = self.close();
         }
     }
 
@@ -408,6 +428,9 @@ mod platform {
     mod graphics_session_tests {
         use super::GraphicsSession;
         use core::ffi::c_void;
+        use core::sync::atomic::{AtomicUsize, Ordering};
+
+        static FAILED_CLOSE_CALLS: AtomicUsize = AtomicUsize::new(0);
 
         unsafe extern "C" fn close(_: *mut c_void) -> i32 {
             0
@@ -429,6 +452,11 @@ mod platform {
             456
         }
 
+        unsafe extern "C" fn failing_close(_: *mut c_void) -> i32 {
+            FAILED_CLOSE_CALLS.fetch_add(1, Ordering::SeqCst);
+            -99
+        }
+
         #[test]
         fn close_makes_use_after_close_fail_closed() {
             let handle = Box::into_raw(Box::new(1_u8)).cast::<c_void>();
@@ -439,6 +467,7 @@ mod platform {
                 dispatch_fn: dispatch,
                 pump_fn: pump,
                 closed: false,
+                close_attempted: false,
             };
             assert_eq!(session.dispatch_pointer(0, 1.0, 1.0), 123);
             assert_eq!(session.pump_frame(10), 456);
@@ -455,6 +484,105 @@ mod platform {
                 session.close(),
                 darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE
             );
+        }
+
+        #[test]
+        fn failed_explicit_close_is_not_reentered_by_drop() {
+            FAILED_CLOSE_CALLS.store(0, Ordering::SeqCst);
+            let handle = Box::into_raw(Box::new(1_u8)).cast::<c_void>();
+            let mut session = GraphicsSession {
+                handle,
+                close_fn: failing_close,
+                destroy_fn: destroy,
+                dispatch_fn: dispatch,
+                pump_fn: pump,
+                closed: false,
+                close_attempted: false,
+            };
+            assert_eq!(session.close(), -99);
+            drop(session);
+            assert_eq!(FAILED_CLOSE_CALLS.load(Ordering::SeqCst), 1);
+
+            // A failed native close cannot be safely destroyed under the C
+            // contract. Reclaim this test fixture manually because the Rust
+            // owner deliberately leaves a failed handle untouched.
+            unsafe { drop(Box::from_raw(handle.cast::<u8>())) };
+        }
+    }
+
+    #[cfg(test)]
+    mod close_contract_tests {
+        use super::{EngineSession, GraphicsSession, SurfaceSession};
+
+        // Keep all three owner types on the same explicit close-shaped API.
+        // This is intentionally a function-pointer check: changing a close
+        // contract's receiver or status type fails at compile time here.
+        fn assert_close_contracts(
+            _engine: fn(&mut EngineSession) -> i32,
+            _surface: fn(&mut SurfaceSession) -> i32,
+            _graphics: fn(&mut GraphicsSession) -> i32,
+        ) {
+        }
+
+        #[test]
+        fn all_native_owners_expose_explicit_close_contracts() {
+            assert_close_contracts(
+                EngineSession::close,
+                SurfaceSession::close,
+                GraphicsSession::close,
+            );
+        }
+    }
+
+    #[cfg(test)]
+    mod surface_session_tests {
+        use super::SurfaceSession;
+        use core::ffi::c_void;
+        use core::sync::atomic::{AtomicUsize, Ordering};
+
+        static DESTROY_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+        unsafe extern "C" fn destroy(_: *mut c_void) -> i32 {
+            DESTROY_CALLS.fetch_add(1, Ordering::SeqCst);
+            -17
+        }
+
+        unsafe extern "C" fn update(_: *mut c_void, _: *const c_void, _: usize) -> i32 {
+            0
+        }
+
+        unsafe extern "C" fn present(_: *mut c_void) -> i32 {
+            0
+        }
+
+        unsafe extern "C" fn pump(_: *mut c_void, _: f64) -> i32 {
+            0
+        }
+
+        unsafe extern "C" fn next_event(
+            _: *mut c_void,
+            _: *mut darwin_art_engine_sys::PointerEvent,
+        ) -> bool {
+            false
+        }
+
+        #[test]
+        fn destroy_failure_is_reported_once_and_not_reentered_by_drop() {
+            DESTROY_CALLS.store(0, Ordering::SeqCst);
+            let mut session = SurfaceSession {
+                handle: std::ptr::dangling_mut::<c_void>(),
+                update,
+                present,
+                pump_events: pump,
+                next_pointer_event: next_event,
+                destroy,
+                armed: true,
+                close_status: None,
+            };
+            assert_eq!(session.close(), -17);
+            assert_eq!(session.close(), -17);
+            drop(session);
+            assert_eq!(DESTROY_CALLS.load(Ordering::SeqCst), 1);
         }
     }
 
