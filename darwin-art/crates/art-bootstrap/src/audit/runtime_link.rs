@@ -166,6 +166,8 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     } else {
         compile_runtime_app_bootstrap_probe(root, &build_dir, &include_refs)?
     };
+    let _compiled_app_resources =
+        compile_runtime_app_resources_probe(root, &build_dir, &include_refs)?;
     let app_presentation_object = if let Some(path) =
         env::var_os("DARWIN_ART_NATIVE_APP_PRESENTATION_OBJECT")
         && Path::new(&path).is_file()

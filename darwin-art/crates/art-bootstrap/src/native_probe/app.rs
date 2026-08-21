@@ -121,9 +121,6 @@ pub(crate) fn compile_runtime_app_presentation_probe(
     build_dir: &Path,
     includes: &[&Path],
 ) -> Result<PathBuf> {
-    // Keep the helper cache warm for direct callers; link callers add the
-    // returned object explicitly to the final dylib.
-    let _ = compile_runtime_app_resources_probe(root, build_dir, includes)?;
     let object = env::var_os("DARWIN_ART_NATIVE_APP_PRESENTATION_OBJECT")
         .map(PathBuf::from)
         .unwrap_or_else(|| build_dir.join("darwin_art_runtime_app_presentation.cc.o"));
@@ -209,7 +206,7 @@ fn build_detached_app_probe(root: &Path, presentation: bool) -> Result<()> {
     let includes = app_probe_include_paths(root);
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
     let object = if presentation {
-        let _ = compile_runtime_app_resources_probe(root, build_dir, &include_refs)?;
+        compile_runtime_app_resources_probe(root, build_dir, &include_refs)?;
         compile_runtime_app_presentation_probe(root, build_dir, &include_refs)?
     } else {
         compile_runtime_app_bootstrap_probe(root, build_dir, &include_refs)?
@@ -235,4 +232,23 @@ pub(crate) fn build_runtime_app_bootstrap_probe(root: &Path) -> Result<()> {
 
 pub(crate) fn build_runtime_app_presentation_probe(root: &Path) -> Result<()> {
     build_detached_app_probe(root, true)
+}
+
+pub(crate) fn build_runtime_app_resources_probe(root: &Path) -> Result<()> {
+    let output = env::var_os("DARWIN_ART_NATIVE_APP_RESOURCES_OBJECT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            root.join("_build/runtime-link-probe/darwin_art_runtime_app_resources.cc.o")
+        });
+    let build_dir = output
+        .parent()
+        .ok_or_else(|| format!("app resources output has no parent: {}", output.display()))?;
+    let includes = app_probe_include_paths(root);
+    let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+    let object = compile_runtime_app_resources_probe(root, build_dir, &include_refs)?;
+    if object != output {
+        fs::copy(&object, &output)?;
+    }
+    println!("build-runtime-app-resources-probe: {}", output.display());
+    Ok(())
 }
