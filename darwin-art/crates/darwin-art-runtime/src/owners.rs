@@ -166,4 +166,36 @@ mod tests {
         drop(owners);
         assert_eq!(&*order.borrow(), &["surface", "provider", "engine"]);
     }
+
+    #[test]
+    fn early_return_cleanup_drops_each_owner_once_after_surface_transfer() {
+        let order = Rc::new(RefCell::new(Vec::new()));
+        let mut owners = RuntimeOwners::new();
+        owners
+            .attach_engine(DropProbe {
+                name: "engine",
+                order: Rc::clone(&order),
+            })
+            .unwrap();
+        owners
+            .attach_provider(DropProbe {
+                name: "provider",
+                order: Rc::clone(&order),
+            })
+            .unwrap();
+        owners
+            .attach_surface(DropProbe {
+                name: "surface",
+                order: Rc::clone(&order),
+            })
+            .unwrap();
+
+        // Model an early return after the surface has been detached for its
+        // native destroy operation. The remaining RuntimeOwners value still
+        // owns provider and engine and must release each exactly once.
+        drop(owners.take_surface());
+        drop(owners);
+
+        assert_eq!(&*order.borrow(), &["surface", "provider", "engine"]);
+    }
 }

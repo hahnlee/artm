@@ -112,21 +112,36 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // The graphics engine publishes its drawable during run_process, so
         // capture the owner only after that bootstrap has completed.
         let active_surface = engine.active_surface();
-        runtime
-            .attach_engine(engine)
-            .map_err(|_| HostError::RuntimeFailed(-1))?;
-        runtime
-            .attach_provider(provider_bridge)
-            .map_err(|_| HostError::RuntimeFailed(-1))?;
-        let provider_lease = runtime
-            .install_subsystem(Subsystem::ElfNamespace)
-            .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
+        if let Err(mut engine) = runtime.attach_engine(engine) {
+            // The resource was never transferred, so its Drop path is the
+            // only owner responsible for the failed transfer. Clear hooks
+            // before dropping the bridge that supplied their context.
+            let _ = engine.shutdown_once();
+            let _ = provider_bridge.clear();
+            return Err(HostError::RuntimeFailed(-1));
+        }
+        if let Err(provider_bridge) = runtime.attach_provider(provider_bridge) {
+            let _ = provider_bridge.clear();
+            let _ = shutdown_runtime(&mut runtime, None, None, None);
+            return Err(HostError::RuntimeFailed(-1));
+        }
+        let provider_lease = match runtime.install_subsystem(Subsystem::ElfNamespace) {
+            Ok(lease) => lease,
+            Err(error) => {
+                let _ = shutdown_runtime(&mut runtime, None, None, None);
+                return Err(HostError::RuntimeFailed(error.status() as i32));
+            }
+        };
         let engine_lease = match runtime.install_subsystem(Subsystem::Engine) {
             Ok(lease) => lease,
-            Err(error) => return Err(HostError::RuntimeFailed(error.status() as i32)),
+            Err(error) => {
+                let _ = shutdown_runtime(&mut runtime, Some(provider_lease), None, None);
+                return Err(HostError::RuntimeFailed(error.status() as i32));
+            }
         };
         if let Err(error) = runtime.mark_running() {
             runtime.fail(error);
+            let _ = shutdown_runtime(&mut runtime, Some(provider_lease), Some(engine_lease), None);
             return Err(HostError::RuntimeFailed(error.status() as i32));
         }
         // Darwin's application renderer is GPU-only. A published surface is
@@ -148,7 +163,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // Headless ART is a first-class mode. It never allocates a surface and
         // never uploads the callback mailbox into an IOSurface. Graphics runs
         // exclusively through `gpu_loop::run` above.
-        shutdown_runtime(&mut runtime, provider_lease, engine_lease, None)?;
+        shutdown_runtime(&mut runtime, Some(provider_lease), Some(engine_lease), None)?;
         Ok(HostOutcome {
             process,
             frames_presented: 0,

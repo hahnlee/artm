@@ -26,7 +26,7 @@ pub(super) fn run(
         // same owner-thread LIFO as the normal GPU path; a bare
         // early return here would leave JavaVM/provider hooks
         // resident in the process.
-        return match shutdown_runtime(runtime, provider_lease, engine_lease, None) {
+        return match shutdown_runtime(runtime, Some(provider_lease), Some(engine_lease), None) {
             Ok(()) => Err(HostError::SurfaceFailed {
                 operation: "gpu_active_surface",
                 status: -1,
@@ -34,12 +34,27 @@ pub(super) fn run(
             Err(error) => Err(error),
         };
     };
-    runtime
-        .attach_surface(surface)
-        .map_err(|_| HostError::RuntimeFailed(-1))?;
-    let surface_lease = runtime
-        .install_subsystem(Subsystem::Surface)
-        .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
+    if let Err(surface) = runtime.attach_surface(surface) {
+        // The failed transfer returns ownership to this scope; its Drop
+        // closes the native surface. The already-attached engine/provider
+        // still need the common rollback path.
+        drop(surface);
+        let cleanup = shutdown_runtime(runtime, Some(provider_lease), Some(engine_lease), None);
+        return match cleanup {
+            Ok(()) => Err(HostError::RuntimeFailed(-1)),
+            Err(error) => Err(error),
+        };
+    }
+    let surface_lease = match runtime.install_subsystem(Subsystem::Surface) {
+        Ok(lease) => lease,
+        Err(error) => {
+            let cleanup = shutdown_runtime(runtime, Some(provider_lease), Some(engine_lease), None);
+            return match cleanup {
+                Ok(()) => Err(HostError::RuntimeFailed(error.status() as i32)),
+                Err(cleanup_error) => Err(cleanup_error),
+            };
+        }
+    };
     let mut frames_presented = 1_u64;
     let mut remaining = options.visible_seconds;
     let mut loop_error: Option<HostError> = None;
@@ -168,9 +183,23 @@ pub(super) fn run(
         remaining -= slice;
     }
     if let Some(error) = loop_error {
-        return Err(error);
+        let cleanup = shutdown_runtime(
+            runtime,
+            Some(provider_lease),
+            Some(engine_lease),
+            Some(surface_lease),
+        );
+        return match cleanup {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(cleanup_error),
+        };
     }
-    shutdown_runtime(runtime, provider_lease, engine_lease, Some(surface_lease))?;
+    shutdown_runtime(
+        runtime,
+        Some(provider_lease),
+        Some(engine_lease),
+        Some(surface_lease),
+    )?;
     Ok(HostOutcome {
         process,
         frames_presented,
