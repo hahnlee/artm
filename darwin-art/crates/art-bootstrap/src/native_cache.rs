@@ -53,7 +53,7 @@ pub(crate) fn compile_with_dependency_cache(
             object.display()
         )
     })?;
-    fs::write(fingerprint, current)?;
+    atomic_write(&fingerprint, current.as_bytes())?;
     Ok(true)
 }
 
@@ -176,9 +176,18 @@ impl FileHashCache {
             contents.push_str(&entry.sha256);
             contents.push('\n');
         }
-        fs::write(path, contents)?;
+        atomic_write(path, contents.as_bytes())?;
         Ok(())
     }
+}
+
+fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension(format!("darwin-art-cache-tmp-{}", std::process::id()));
+    fs::write(&temporary, contents)?;
+    fs::rename(temporary, path)
 }
 
 pub(crate) fn parse_makefile_words(input: &str) -> Vec<String> {
@@ -233,7 +242,7 @@ pub(crate) fn link_with_cache(
         if let Some(parent) = stamp.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(stamp, format!("{fingerprint}\n"))?;
+        atomic_write(stamp, format!("{fingerprint}\n").as_bytes())?;
     }
     Ok(result)
 }
