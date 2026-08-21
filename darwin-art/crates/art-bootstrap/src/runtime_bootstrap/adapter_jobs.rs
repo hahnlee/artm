@@ -15,6 +15,7 @@ pub(super) fn adapter_jobs(
         "darwin_provider_owners.cc",
         "darwin_framework_natives.cc",
         "darwin_framework_resource_registration.cc",
+        "darwin_framework_system_natives.cc",
         "darwin_framework_animation_natives.cc",
         "darwin_icu_natives.cc",
         "darwin_icu_jni_bridge.cc",

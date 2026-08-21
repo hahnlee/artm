@@ -1,10 +1,7 @@
 #include "darwin_framework_natives.h"
-
-#include <mach/mach_time.h>
+#include "darwin_framework_system_natives.h"
 
 #include <charconv>
-#include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <ctime>
 #include <iterator>
@@ -12,7 +9,6 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -28,42 +24,6 @@
 
 namespace {
 
-class DarwinMessageQueue {
- public:
-  void Poll(jint timeout_millis) {
-    std::unique_lock lock(mutex_);
-    polling_ = true;
-    if (!wake_pending_) {
-      if (timeout_millis < 0) {
-        condition_.wait(lock, [this] { return wake_pending_; });
-      } else if (timeout_millis > 0) {
-        condition_.wait_for(lock, std::chrono::milliseconds(timeout_millis),
-                            [this] { return wake_pending_; });
-      }
-    }
-    wake_pending_ = false;
-    polling_ = false;
-  }
-
-  void Wake() {
-    std::lock_guard lock(mutex_);
-    wake_pending_ = true;
-    condition_.notify_one();
-  }
-
-  bool IsPolling() {
-    std::lock_guard lock(mutex_);
-    return polling_;
-  }
-
- private:
-  std::mutex mutex_;
-  std::condition_variable condition_;
-  bool wake_pending_ = false;
-  bool polling_ = false;
-};
-
-
 void NativeAllocationRegistryApplyFreeFunction(JNIEnv*, jclass,
                                                 jlong free_function,
                                                 jlong native_ptr) {
@@ -71,12 +31,6 @@ void NativeAllocationRegistryApplyFreeFunction(JNIEnv*, jclass,
   using FreeFunction = void (*)(void*);
   reinterpret_cast<FreeFunction>(static_cast<std::uintptr_t>(free_function))(
       reinterpret_cast<void*>(static_cast<std::uintptr_t>(native_ptr)));
-}
-
-jint EventLogWriteEvent(JNIEnv*, jclass, jint, jobjectArray) {
-  // ServiceManager latency diagnostics are optional on the host; preserve
-  // the Java call contract without importing Android's kernel event log.
-  return 0;
 }
 
 std::mutex g_system_properties_mutex;
@@ -116,91 +70,6 @@ std::optional<std::string> GetSystemProperty(JNIEnv* env, jstring key) {
   return found == g_system_properties.end()
              ? std::nullopt
              : std::optional<std::string>(found->second);
-}
-
-DarwinMessageQueue* ToMessageQueue(jlong handle) {
-  return reinterpret_cast<DarwinMessageQueue*>(
-      static_cast<std::uintptr_t>(handle));
-}
-
-jlong MessageQueueNativeInit(JNIEnv*, jclass) {
-  return reinterpret_cast<std::uintptr_t>(new DarwinMessageQueue());
-}
-
-void MessageQueueNativeDestroy(JNIEnv*, jclass, jlong handle) {
-  delete ToMessageQueue(handle);
-}
-
-void MessageQueueNativePollOnce(JNIEnv*, jobject, jlong handle,
-                                jint timeout_millis) {
-  if (DarwinMessageQueue* queue = ToMessageQueue(handle); queue != nullptr) {
-    queue->Poll(timeout_millis);
-  }
-}
-
-void MessageQueueNativeWake(JNIEnv*, jclass, jlong handle) {
-  if (DarwinMessageQueue* queue = ToMessageQueue(handle); queue != nullptr) {
-    queue->Wake();
-  }
-}
-
-jboolean MessageQueueNativeIsPolling(JNIEnv*, jclass, jlong handle) {
-  DarwinMessageQueue* queue = ToMessageQueue(handle);
-  return queue != nullptr && queue->IsPolling() ? JNI_TRUE : JNI_FALSE;
-}
-
-void MessageQueueNativeSetFileDescriptorEvents(JNIEnv*, jclass, jlong, jint,
-                                               jint) {
-  // File-descriptor polling will use kqueue. Activity/Handler construction does
-  // not register descriptors, so the first framework gate keeps this explicit.
-}
-
-jboolean LogIsLoggable(JNIEnv*, jclass, jstring, jint priority) {
-  // Android's default log threshold is INFO when no per-tag system property
-  // overrides it. A Darwin property bridge can replace this policy later.
-  constexpr jint kInfoPriority = 4;
-  return priority >= kInfoPriority ? JNI_TRUE : JNI_FALSE;
-}
-
-jint LogPrintln(JNIEnv* env, jclass, jint, jint, jstring, jstring message) {
-  return message == nullptr ? 0 : env->GetStringLength(message);
-}
-
-jboolean TraceIsTagEnabled(JNIEnv*, jclass, jlong) { return JNI_FALSE; }
-
-jlong MachTicksToNanos(std::uint64_t ticks) {
-  static mach_timebase_info_data_t timebase = [] {
-    mach_timebase_info_data_t value{};
-    mach_timebase_info(&value);
-    return value;
-  }();
-  return static_cast<jlong>(
-      (static_cast<unsigned __int128>(ticks) * timebase.numer) /
-      timebase.denom);
-}
-
-jlong SystemClockUptimeNanos(JNIEnv*, jclass) {
-  return MachTicksToNanos(mach_absolute_time());
-}
-
-jlong SystemClockUptimeMillis(JNIEnv* env, jclass klass) {
-  return SystemClockUptimeNanos(env, klass) / 1'000'000;
-}
-
-jlong SystemClockElapsedRealtimeNanos(JNIEnv*, jclass) {
-  return MachTicksToNanos(mach_continuous_time());
-}
-
-jlong SystemClockElapsedRealtime(JNIEnv* env, jclass klass) {
-  return SystemClockElapsedRealtimeNanos(env, klass) / 1'000'000;
-}
-
-jlong SystemClockCurrentThreadTimeMillis(JNIEnv*, jclass) {
-  timespec value{};
-  if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &value) != 0) {
-    return 0;
-  }
-  return static_cast<jlong>(value.tv_sec) * 1'000 + value.tv_nsec / 1'000'000;
 }
 
 jstring SystemPropertiesGet(JNIEnv* env, jclass, jstring key,
@@ -652,20 +521,21 @@ bool RegisterFrameworkSupportNatives(JNIEnv* env) {
 }
 
 bool RegisterFrameworkNatives(JNIEnv* env) {
+  using namespace framework_system;
   JNINativeMethod message_queue_methods[] = {
       {const_cast<char*>("nativeInit"), const_cast<char*>("()J"),
-       reinterpret_cast<void*>(&MessageQueueNativeInit)},
+       reinterpret_cast<void*>(&message_queue_native_init)},
       {const_cast<char*>("nativeDestroy"), const_cast<char*>("(J)V"),
-       reinterpret_cast<void*>(&MessageQueueNativeDestroy)},
+       reinterpret_cast<void*>(&message_queue_native_destroy)},
       {const_cast<char*>("nativePollOnce"), const_cast<char*>("(JI)V"),
-       reinterpret_cast<void*>(&MessageQueueNativePollOnce)},
+       reinterpret_cast<void*>(&message_queue_native_poll_once)},
       {const_cast<char*>("nativeWake"), const_cast<char*>("(J)V"),
-       reinterpret_cast<void*>(&MessageQueueNativeWake)},
+       reinterpret_cast<void*>(&message_queue_native_wake)},
       {const_cast<char*>("nativeIsPolling"), const_cast<char*>("(J)Z"),
-       reinterpret_cast<void*>(&MessageQueueNativeIsPolling)},
+       reinterpret_cast<void*>(&message_queue_native_is_polling)},
       {const_cast<char*>("nativeSetFileDescriptorEvents"),
        const_cast<char*>("(JII)V"),
-       reinterpret_cast<void*>(&MessageQueueNativeSetFileDescriptorEvents)},
+       reinterpret_cast<void*>(&message_queue_native_set_file_descriptor_events)},
   };
   if (!Register(env, "android/os/MessageQueue", message_queue_methods,
                 static_cast<jint>(std::size(message_queue_methods)))) {
@@ -679,7 +549,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   JNINativeMethod event_log_methods[] = {
       {const_cast<char*>("writeEvent"),
        const_cast<char*>("(I[Ljava/lang/Object;)I"),
-       reinterpret_cast<void*>(&EventLogWriteEvent)},
+       reinterpret_cast<void*>(&event_log_write_event)},
   };
   if (!Register(env, "android/util/EventLog", event_log_methods,
                 static_cast<jint>(std::size(event_log_methods)))) {
@@ -690,11 +560,11 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   JNINativeMethod log_methods[] = {
       {const_cast<char*>("isLoggable"),
        const_cast<char*>("(Ljava/lang/String;I)Z"),
-       reinterpret_cast<void*>(&LogIsLoggable)},
+       reinterpret_cast<void*>(&log_is_loggable)},
       {const_cast<char*>("println_native"),
        const_cast<char*>(
            "(IILjava/lang/String;Ljava/lang/String;)I"),
-       reinterpret_cast<void*>(&LogPrintln)},
+       reinterpret_cast<void*>(&log_println)},
   };
   if (!Register(env, "android/util/Log", log_methods,
                 static_cast<jint>(std::size(log_methods)))) {
@@ -704,7 +574,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
 
   JNINativeMethod trace_methods[] = {
       {const_cast<char*>("nativeIsTagEnabled"), const_cast<char*>("(J)Z"),
-       reinterpret_cast<void*>(&TraceIsTagEnabled)},
+       reinterpret_cast<void*>(&trace_is_tag_enabled)},
   };
   if (!Register(env, "android/os/Trace", trace_methods,
                 static_cast<jint>(std::size(trace_methods)))) {
@@ -713,15 +583,15 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
 
   JNINativeMethod system_clock_methods[] = {
       {const_cast<char*>("currentThreadTimeMillis"), const_cast<char*>("()J"),
-       reinterpret_cast<void*>(&SystemClockCurrentThreadTimeMillis)},
+       reinterpret_cast<void*>(&system_clock_current_thread_time_millis)},
       {const_cast<char*>("elapsedRealtime"), const_cast<char*>("()J"),
-       reinterpret_cast<void*>(&SystemClockElapsedRealtime)},
+       reinterpret_cast<void*>(&system_clock_elapsed_realtime)},
       {const_cast<char*>("elapsedRealtimeNanos"), const_cast<char*>("()J"),
-       reinterpret_cast<void*>(&SystemClockElapsedRealtimeNanos)},
+       reinterpret_cast<void*>(&system_clock_elapsed_realtime_nanos)},
       {const_cast<char*>("uptimeMillis"), const_cast<char*>("()J"),
-       reinterpret_cast<void*>(&SystemClockUptimeMillis)},
+       reinterpret_cast<void*>(&system_clock_uptime_millis)},
       {const_cast<char*>("uptimeNanos"), const_cast<char*>("()J"),
-       reinterpret_cast<void*>(&SystemClockUptimeNanos)},
+       reinterpret_cast<void*>(&system_clock_uptime_nanos)},
   };
   if (!Register(env, "android/os/SystemClock", system_clock_methods,
                 static_cast<jint>(std::size(system_clock_methods)))) {

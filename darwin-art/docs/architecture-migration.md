@@ -187,10 +187,12 @@ DisplayEventReceiver, PropertyValuesHolder, Perfetto, and their registration
 table live in `compat/darwin_framework_animation_natives.cc`; Android resource
 registration (AssetManager, StringBlock, XmlBlock, ApkAssets, and
 VirtualRefBasePtr) lives in `compat/darwin_framework_resource_registration.cc`.
-The remaining framework/system implementations stay in
-`compat/darwin_framework_natives.cc`. Each is an independent persisted native
-object in the ART bootstrap archive, so changing animation or resource
-registration no longer recompiles the other implementation phase.
+MessageQueue, EventLog, Log, Trace, and SystemClock live in
+`compat/darwin_framework_system_natives.cc`; the remaining framework
+implementations stay in `compat/darwin_framework_natives.cc`. Each phase is an
+independent persisted native object in the ART bootstrap archive, so changing
+animation, resource, or system registration no longer recompiles the other
+implementation phases.
 
 The ART adapter now applies the same boundary to platform compatibility shims:
 Palette, runtime-image, intrinsic-printing, HWASAN, and unwind stubs live in
