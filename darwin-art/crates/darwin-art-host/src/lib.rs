@@ -10,6 +10,8 @@ mod gpu_loop;
 mod provider;
 #[cfg(target_os = "macos")]
 mod surface;
+#[cfg(target_os = "macos")]
+mod teardown;
 
 #[cfg(target_os = "macos")]
 use darwin_art_engine::{EngineSession, SurfaceSession};
@@ -22,6 +24,8 @@ use frame::{FrameHost, receive_frame};
 use provider::ProviderBridge;
 #[cfg(target_os = "macos")]
 use surface::*;
+#[cfg(target_os = "macos")]
+use teardown::shutdown_runtime;
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;
 
 use darwin_art_engine_sys::{DispatchPointerFn, PumpFrameworkFrameFn};
@@ -140,32 +144,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // Headless ART is a first-class mode. It never allocates a surface and
         // never uploads the callback mailbox into an IOSurface. Graphics runs
         // exclusively through `gpu_loop::run` above.
-        let shutdown_status = if runtime.begin_shutdown().is_err() {
-            -1
-        } else {
-            match runtime.uninstall_subsystem(engine_lease) {
-                Ok(()) => match shutdown_engine_owner(runtime.owners_mut()) {
-                    Ok(()) => match runtime.uninstall_subsystem(provider_lease) {
-                        Ok(()) => clear_provider_owner(runtime.owners_mut()),
-                        Err(RuntimeError::EngineFailure { status }) => status,
-                        Err(error) => error.status() as i32,
-                    },
-                    Err(status) => status,
-                },
-                Err(RuntimeError::EngineFailure { status }) => status,
-                Err(error) => error.status() as i32,
-            }
-        };
-        if shutdown_status == 0 {
-            runtime
-                .finish_shutdown()
-                .map_err(|error| HostError::RuntimeFailed(error.status() as i32))?;
-        } else {
-            runtime.fail(RuntimeError::EngineFailure {
-                status: shutdown_status,
-            });
-            return Err(HostError::ShutdownFailed(shutdown_status));
-        }
+        shutdown_runtime(&mut runtime, provider_lease, engine_lease, None)?;
         Ok(HostOutcome {
             process,
             frames_presented: 0,

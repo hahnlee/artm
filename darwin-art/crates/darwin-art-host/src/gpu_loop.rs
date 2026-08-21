@@ -18,37 +18,13 @@ pub(super) fn run(
         // same owner-thread LIFO as the normal GPU path; a bare
         // early return here would leave JavaVM/provider hooks
         // resident in the process.
-        let cleanup_status = if runtime.begin_shutdown().is_err() {
-            -1
-        } else {
-            match runtime.uninstall_subsystem(engine_lease) {
-                Ok(()) => match shutdown_engine_owner(runtime.owners_mut()) {
-                    Ok(()) => match runtime.uninstall_subsystem(provider_lease) {
-                        Ok(()) => clear_provider_owner(runtime.owners_mut()),
-                        Err(RuntimeError::EngineFailure { status }) => status,
-                        Err(error) => error.status() as i32,
-                    },
-                    Err(status) => status,
-                },
-                Err(RuntimeError::EngineFailure { status }) => status,
-                Err(error) => error.status() as i32,
-            }
+        return match shutdown_runtime(runtime, provider_lease, engine_lease, None) {
+            Ok(()) => Err(HostError::SurfaceFailed {
+                operation: "gpu_active_surface",
+                status: -1,
+            }),
+            Err(error) => Err(error),
         };
-        if cleanup_status == 0 {
-            let _ = runtime.finish_shutdown();
-        } else {
-            runtime.fail(RuntimeError::EngineFailure {
-                status: cleanup_status,
-            });
-        }
-        return Err(HostError::SurfaceFailed {
-            operation: "gpu_active_surface",
-            status: if cleanup_status == 0 {
-                -1
-            } else {
-                cleanup_status
-            },
-        });
     };
     runtime
         .attach_surface(surface)
@@ -183,57 +159,10 @@ pub(super) fn run(
         }
         remaining -= slice;
     }
-    let mut surface_destroy_status = 0;
-    let shutdown_status = if runtime.begin_shutdown().is_err() {
-        -1
-    } else {
-        match runtime.uninstall_subsystem(surface_lease) {
-            Ok(()) => match close_surface_owner(runtime.owners_mut()) {
-                Ok(()) => match runtime.uninstall_subsystem(engine_lease) {
-                    Ok(()) => match shutdown_engine_owner(runtime.owners_mut()) {
-                        Ok(()) => match runtime.uninstall_subsystem(provider_lease) {
-                            Ok(()) => clear_provider_owner(runtime.owners_mut()),
-                            Err(RuntimeError::EngineFailure { status }) => status,
-                            Err(error) => error.status() as i32,
-                        },
-                        Err(status) => status,
-                    },
-                    Err(RuntimeError::EngineFailure { status }) => status,
-                    Err(error) => error.status() as i32,
-                },
-                Err(status) => status,
-            },
-            Err(RuntimeError::EngineFailure { status }) => {
-                surface_destroy_status = status;
-                status
-            }
-            Err(error) => error.status() as i32,
-        }
-    };
-    if shutdown_status == 0 {
-        if runtime.finish_shutdown().is_err() {
-            runtime.fail(RuntimeError::InvalidTransition {
-                from: runtime.phase(),
-                to: darwin_art_runtime::RuntimePhase::Stopped,
-            });
-        }
-    } else {
-        runtime.fail(RuntimeError::EngineFailure {
-            status: shutdown_status,
-        });
-    }
     if let Some(error) = loop_error {
         return Err(error);
     }
-    if surface_destroy_status != 0 {
-        return Err(HostError::SurfaceFailed {
-            operation: "gpu_destroy",
-            status: surface_destroy_status,
-        });
-    }
-    if shutdown_status != 0 {
-        return Err(HostError::ShutdownFailed(shutdown_status));
-    }
+    shutdown_runtime(runtime, provider_lease, engine_lease, Some(surface_lease))?;
     return Ok(HostOutcome {
         process,
         frames_presented,
