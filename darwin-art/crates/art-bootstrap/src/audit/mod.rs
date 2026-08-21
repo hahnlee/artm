@@ -3,6 +3,7 @@ use super::*;
 mod common;
 mod graphics_core_probes;
 mod graphics_link;
+mod graphics_link_checks;
 mod graphics_link_inputs;
 mod graphics_phases;
 mod graphics_surface;
