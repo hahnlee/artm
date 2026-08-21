@@ -66,7 +66,9 @@ state machine or call a shutdown callback that is not held by the Rust owner.
 ### M1 — concrete Rust owners (landed)
 
 The loaded engine, provider bridge, and optional surface now live in typed
-`darwin-art-runtime::RuntimeSession<E, P, S>` slots. `darwin-art-host` uses
+`darwin-art-runtime::RuntimeSession<E, P, S>` slots. Every subsystem lease is
+bound to the session that issued it, so a stale lease from another runtime
+cannot tear down a same-generation subsystem. `darwin-art-host` uses
 borrowed views of that one session rather than maintaining a parallel owner
 container. Rollback is covered for run failure, surface creation failure,
 window close, and `DestroyJavaVM` failure; provider callbacks are invoked
