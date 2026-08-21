@@ -78,6 +78,11 @@ struct LeaseState {
     transitioning: [bool; 7],
     in_flight: usize,
     clearing: bool,
+    /// Once the process-global callback table has been cleared, this bridge
+    /// can never be reactivated.  Keeping that fact in the Rust state machine
+    /// makes repeated shutdown/drop paths idempotent instead of crossing the
+    /// foreign clear ABI more than once.
+    cleared: bool,
 }
 
 impl ProviderLeaseTable {
@@ -98,6 +103,7 @@ impl ProviderLeaseTable {
                 transitioning: [false; 7],
                 in_flight: 0,
                 clearing: false,
+                cleared: false,
             }),
             quiescent: Condvar::new(),
         }
@@ -110,7 +116,7 @@ impl ProviderLeaseTable {
             Err(_) => return -1,
         };
         loop {
-            if state.clearing {
+            if state.clearing || state.cleared {
                 return -1;
             }
             if state.transitioning[index] {
@@ -158,7 +164,7 @@ impl ProviderLeaseTable {
             Err(_) => return -1,
         };
         loop {
-            if state.clearing {
+            if state.clearing || state.cleared {
                 return -1;
             }
             if state.transitioning[index] {
@@ -203,6 +209,9 @@ impl ProviderLeaseTable {
             .state
             .lock()
             .map_err(|_| ProviderLeaseError::Poisoned)?;
+        if state.cleared {
+            return Ok(());
+        }
         if state.clearing {
             return Err(ProviderLeaseError::ActiveLeases);
         }
@@ -228,6 +237,9 @@ impl ProviderLeaseTable {
             .state
             .lock()
             .map_err(|_| ProviderLeaseError::Poisoned)?;
+        if callback_result.is_ok() {
+            state.cleared = true;
+        }
         state.clearing = false;
         self.quiescent.notify_all();
         callback_result
@@ -305,6 +317,25 @@ mod tests {
         assert_eq!(table.release(ProviderKind::Filesystem), 0);
         assert_eq!(released.load(Ordering::SeqCst), 1);
         assert_eq!(table.clear(), Ok(()));
+    }
+
+    #[test]
+    fn clear_is_idempotent_and_closes_the_acquire_boundary() {
+        let clear_calls = Arc::new(AtomicU32::new(0));
+        let clear_calls_in_callback = Arc::clone(&clear_calls);
+        let table = ProviderLeaseTable::new(
+            |_, _| 0,
+            |_| 0,
+            move || {
+                clear_calls_in_callback.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+
+        assert_eq!(table.clear(), Ok(()));
+        assert_eq!(table.clear(), Ok(()));
+        assert_eq!(clear_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(table.acquire(ProviderKind::Filesystem, -1), -1);
+        assert_eq!(table.release(ProviderKind::Filesystem), -1);
     }
 
     #[test]

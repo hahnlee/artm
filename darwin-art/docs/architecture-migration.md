@@ -157,6 +157,9 @@ state machine remains in `provider.rs`. Raw symbol resolution and
 graphics/surface dispatch remain crate-private. This removes the former
 duplicate `ProviderHooks` capability from the engine crate and keeps provider
 callback code independent of unrelated engine ABI entries.
+The bridge also owns the early-drop safety boundary: clear is idempotent,
+acquisition is closed after clear, and an unresolved live lease fails closed
+instead of allowing the engine image to unload with a dangling callback.
 
 The native graph emitter is split by ownership rather than kept in one command
 file: `graph::inputs` owns invalidation/input stamps, `graph::foundation` owns

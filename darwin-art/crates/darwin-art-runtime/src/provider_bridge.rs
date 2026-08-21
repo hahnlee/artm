@@ -81,6 +81,21 @@ impl crate::NativeResource for Box<ProviderBridge> {
     }
 }
 
+impl Drop for ProviderBridge {
+    fn drop(&mut self) {
+        // RuntimeOwners drops the provider slot before the engine slot, so
+        // the callback image is still mapped here even on an early-return
+        // path that never reached RuntimeSession::shutdown_native.  Leaving
+        // hooks installed would let a later ART callback jump through a
+        // dangling Rust context or an unmapped engine image.  A live lease
+        // cannot be made safe by best-effort cleanup; fail-stop instead of
+        // permitting that use-after-unload.
+        if self.clear().is_err() {
+            std::process::abort();
+        }
+    }
+}
+
 unsafe extern "C" fn acquire_provider(context: *mut c_void, kind: u32, authority_fd: i32) -> i32 {
     if context.is_null() {
         return -1;
