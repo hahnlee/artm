@@ -14,6 +14,7 @@ pub(crate) struct ProbeGraphInputs {
     pub(crate) network_probe_inputs: String,
     pub(crate) hwui_probe_inputs: String,
     pub(crate) graphics_probe_inputs: String,
+    pub(crate) graphics_gpu_probe_inputs: String,
     pub(crate) graphics_phase_inputs: String,
     pub(crate) graphics_input_inputs: String,
     pub(crate) graphics_state_inputs: String,
@@ -27,6 +28,7 @@ pub(crate) struct ProbeGraphInputs {
     pub(crate) network_probe_stamp: PathBuf,
     pub(crate) hwui_probe_stamp: PathBuf,
     pub(crate) graphics_probe_stamp: PathBuf,
+    pub(crate) graphics_gpu_probe_stamp: PathBuf,
     pub(crate) graphics_phase_stamp: PathBuf,
     pub(crate) graphics_input_stamp: PathBuf,
     pub(crate) graphics_state_stamp: PathBuf,
@@ -75,6 +77,15 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
             "compat/darwin_surface_bridge.h",
             "compat/darwin_framework_natives.h",
             "compat/darwin_hwui_gpu_mode.h",
+        ],
+    );
+    let graphics_gpu_probe_inputs = probe_inputs(
+        root,
+        &[
+            "probes/runtime_graphics_gpu.cc",
+            "probes/runtime_graphics_gpu.h",
+            "probes/runtime_graphics_state.h",
+            "probes/runtime_hwui_probe.h",
         ],
     );
     let graphics_phase_inputs = probe_inputs(
@@ -201,6 +212,16 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
             "compat/darwin_hwui_gpu_mode.h",
         ],
     )?;
+    let graphics_gpu_probe_stamp = probe_content_stamp(
+        root,
+        "graphics-gpu",
+        &[
+            "probes/runtime_graphics_gpu.cc",
+            "probes/runtime_graphics_gpu.h",
+            "probes/runtime_graphics_state.h",
+            "probes/runtime_hwui_probe.h",
+        ],
+    )?;
     let graphics_phase_stamp = probe_content_stamp(
         root,
         "graphics-phase",
@@ -311,6 +332,7 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
         network_probe_inputs,
         hwui_probe_inputs,
         graphics_probe_inputs,
+        graphics_gpu_probe_inputs,
         graphics_phase_inputs,
         graphics_input_inputs,
         graphics_state_inputs,
@@ -324,6 +346,7 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
         network_probe_stamp,
         hwui_probe_stamp,
         graphics_probe_stamp,
+        graphics_gpu_probe_stamp,
         graphics_phase_stamp,
         graphics_input_stamp,
         graphics_state_stamp,

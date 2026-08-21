@@ -61,6 +61,8 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_frame_probe.h"),
         PathBuf::from("probes/runtime_graphics_probe.cc"),
         PathBuf::from("probes/runtime_graphics_probe.h"),
+        PathBuf::from("probes/runtime_graphics_gpu.cc"),
+        PathBuf::from("probes/runtime_graphics_gpu.h"),
         PathBuf::from("probes/runtime_graphics_phase.cc"),
         PathBuf::from("probes/runtime_graphics_phase.h"),
         PathBuf::from("probes/runtime_graphics_input.cc"),
@@ -202,6 +204,8 @@ pub(crate) fn is_probe_only_input(path: &Path) -> bool {
             | "probes/runtime_frame_probe.h"
             | "probes/runtime_graphics_probe.cc"
             | "probes/runtime_graphics_probe.h"
+            | "probes/runtime_graphics_gpu.cc"
+            | "probes/runtime_graphics_gpu.h"
             | "probes/runtime_graphics_phase.cc"
             | "probes/runtime_graphics_phase.h"
             | "probes/runtime_graphics_input.cc"

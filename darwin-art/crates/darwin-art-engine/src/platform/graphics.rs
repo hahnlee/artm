@@ -124,6 +124,10 @@ impl NativeResource for GraphicsSession {
     fn close(&mut self) -> i32 {
         GraphicsSession::close(self)
     }
+
+    fn finalize(&mut self) -> i32 {
+        self.destroy()
+    }
 }
 
 #[cfg(test)]

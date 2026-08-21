@@ -78,6 +78,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         native_output_root.join("runtime-probes/darwin_art_runtime_hwui_probe.cc.o");
     let graphics_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_graphics_probe.cc.o");
+    let graphics_gpu_object_path =
+        native_output_root.join("runtime-probes/darwin_art_runtime_graphics_gpu.cc.o");
     let graphics_phase_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_graphics_phase.cc.o");
     let graphics_input_object_path =
@@ -119,6 +121,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let network_object = ninja_path(&network_object_path);
     let hwui_object = ninja_path(&hwui_object_path);
     let graphics_object = ninja_path(&graphics_object_path);
+    let graphics_gpu_object = ninja_path(&graphics_gpu_object_path);
     let graphics_phase_object = ninja_path(&graphics_phase_object_path);
     let graphics_input_object = ninja_path(&graphics_input_object_path);
     let graphics_state_object = ninja_path(&graphics_state_object_path);
@@ -183,6 +186,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         network_probe_inputs,
         hwui_probe_inputs,
         graphics_probe_inputs,
+        graphics_gpu_probe_inputs,
         graphics_phase_inputs,
         graphics_input_inputs,
         graphics_state_inputs,
@@ -196,6 +200,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         network_probe_stamp,
         hwui_probe_stamp,
         graphics_probe_stamp,
+        graphics_gpu_probe_stamp,
         graphics_phase_stamp,
         graphics_input_stamp,
         graphics_state_stamp,
@@ -669,6 +674,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&network_object_path.to_string_lossy()));
     graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_OBJECT=");
     graph.push_str(&shell_quote(&graphics_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_GPU_OBJECT=");
+    graph.push_str(&shell_quote(&graphics_gpu_object_path.to_string_lossy()));
     graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_PHASE_OBJECT=");
     graph.push_str(&shell_quote(&graphics_phase_object_path.to_string_lossy()));
     graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_INPUT_OBJECT=");
@@ -719,9 +726,28 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push(' ');
     graph.push_str(&app_bootstrap_object);
     graph.push(' ');
+    graph.push_str(&graphics_gpu_object);
+    graph.push(' ');
     graph.push_str(&app_activity_object);
     graph.push(' ');
     graph.push_str(&app_presentation_object);
+    graph.push('\n');
+    graph.push_str("rule runtime_graphics_gpu_probe\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && DARWIN_ART_NATIVE_GRAPHICS_GPU_OBJECT=");
+    graph.push_str(&shell_quote(&graphics_gpu_object_path.to_string_lossy()));
+    graph.push(' ');
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-runtime-graphics-gpu-probe\n");
+    graph.push_str("  description = CXX runtime_graphics_gpu\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&graphics_gpu_object);
+    graph.push_str(": runtime_graphics_gpu_probe ");
+    graph.push_str(&graphics_gpu_probe_inputs);
+    graph.push(' ');
+    graph.push_str(&ninja_path(&graphics_gpu_probe_stamp));
     graph.push('\n');
     graph.push_str("rule runtime_graphics_phase_probe\n");
     graph.push_str("  command = cd ");
@@ -893,6 +919,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&shell_quote(&network_object_for_shell));
     graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_OBJECT=");
     graph.push_str(&shell_quote(&graphics_object_path.to_string_lossy()));
+    graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_GPU_OBJECT=");
+    graph.push_str(&shell_quote(&graphics_gpu_object_path.to_string_lossy()));
     graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_PHASE_OBJECT=");
     graph.push_str(&shell_quote(&graphics_phase_object_path.to_string_lossy()));
     graph.push_str(" DARWIN_ART_NATIVE_GRAPHICS_INPUT_OBJECT=");
@@ -956,6 +984,8 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&network_object);
     graph.push(' ');
     graph.push_str(&graphics_object);
+    graph.push(' ');
+    graph.push_str(&graphics_gpu_object);
     graph.push(' ');
     graph.push_str(&graphics_phase_object);
     graph.push(' ');

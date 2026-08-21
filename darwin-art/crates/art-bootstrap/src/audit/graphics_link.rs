@@ -205,6 +205,20 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         graphics_probe_object
     };
     let graphics_phase_object = compile_runtime_graphics_phase(root, &build_dir, &include_refs)?;
+    let graphics_gpu_object = if let Some(path) =
+        env::var_os("DARWIN_ART_NATIVE_GRAPHICS_GPU_OBJECT")
+        && Path::new(&path).is_file()
+    {
+        PathBuf::from(path)
+    } else {
+        compile_runtime_graphics_gpu_probe(
+            root,
+            &build_dir,
+            &include_refs,
+            &ndk_include,
+            &ndk_arch_include,
+        )?
+    };
     let graphics_input_object =
         compile_runtime_graphics_input_probe(root, &build_dir, &include_refs)?;
     let graphics_state_object = if let Some(path) =
@@ -393,6 +407,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&shutdown_probe_object)
         .arg(&frame_probe_object)
         .arg(&graphics_probe_object)
+        .arg(&graphics_gpu_object)
         .arg(&graphics_state_object)
         .arg(&network_loader_object)
         .arg(&context_loader_object)

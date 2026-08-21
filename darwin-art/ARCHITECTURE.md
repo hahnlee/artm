@@ -246,11 +246,13 @@ fixture/environment selection (`runtime_process_options.cc`), shutdown and
 finalizers (`runtime_shutdown_probe.cc`), network acceptance
 (`runtime_acceptance_phases.cc`), and graphics presentation/JNI orchestration
 (`runtime_graphics_phase.cc`) and pointer/frame input dispatch
-(`runtime_graphics_input.cc`). The heavy RenderNode/Metal implementation stays
-in `runtime_graphics_probe.cc`; changing Activity validation, widget
-assertions, or pointer handling therefore does not recompile that
-implementation object. None of these phases owns process lifetime; they
-consume snapshots and call the single Rust-owned lifecycle boundary.
+(`runtime_graphics_input.cc`). RenderNode recording/orchestration remains in
+`runtime_graphics_probe.cc`, while the direct HWUI/Ganesh Metal presenter is a
+separate `runtime_graphics_gpu.cc` object. Changing Activity validation, widget
+assertions, pointer handling, or Metal presentation therefore invalidates only
+the affected phase and the final graphics link. None of these phases owns
+process lifetime; they consume snapshots and call the single Rust-owned
+lifecycle boundary.
 
 ### Virtual Android DSOs
 

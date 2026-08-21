@@ -117,6 +117,7 @@ pub(crate) fn run() -> Result<()> {
         "build-runtime-filesystem-probe" => build_runtime_filesystem_probe(&root),
         "build-runtime-network-probe" => build_runtime_network_probe(&root),
         "build-runtime-graphics-phase-probe" => build_runtime_graphics_phase_probe(&root),
+        "build-runtime-graphics-gpu-probe" => build_runtime_graphics_gpu_probe(&root),
         "build-runtime-graphics-input-probe" => build_runtime_graphics_input_probe(&root),
         "build-runtime-graphics-state-probe" => build_runtime_graphics_state_probe(&root),
         "build-runtime-graphics-session-probe" => build_runtime_graphics_session_probe(&root),

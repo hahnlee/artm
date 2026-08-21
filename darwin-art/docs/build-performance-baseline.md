@@ -92,8 +92,9 @@ first run after a stamp/input change remains a cold foundation build.
 The current graph is dominated by the production dylib link and serial full
 acceptance gates rather than by Rust type-checking:
 
-- `probes/runtime_graphics_probe.cc` still owns the RenderNode/Metal bridge;
-  the smaller phase/input/shutdown objects are separate cache products.
+- `probes/runtime_graphics_probe.cc` owns RenderNode orchestration while
+  `probes/runtime_graphics_gpu.cc` owns the direct Metal presenter; the
+  phase/input/shutdown/GPU objects are separate cache products.
 - `crates/art-bootstrap/src/main.rs` combines source materialization, patching,
   native compilation, archive/link orchestration, audit, and probes.
 - The full graphics audit intentionally reruns serial upstream source/ABI

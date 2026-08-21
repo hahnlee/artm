@@ -103,14 +103,6 @@ where
         if let Ok(Some(graphics)) = session.graphics_for_shutdown_mut() {
             remember(graphics.close());
         }
-        // GraphicsSession stores function pointers into the live engine
-        // image.  Release the Rust owner immediately after close, while the
-        // image is still mapped, rather than keeping a closed handle until
-        // after EngineSession::close()/dlclose.  Its Drop path may still call
-        // the native destroy callback even though the session is closed.
-        if let Err(error) = session.release_graphics() {
-            remember(error.status() as i32);
-        }
     }
 
     if session.provider().is_some()
@@ -129,6 +121,17 @@ where
     // closes before provider hooks are cleared and the image is dropped.
     if let Some(engine) = session.engine_mut() {
         remember(engine.close());
+    }
+
+    // The ART shutdown callback finalizes the bound graphics session while
+    // the VM is still attached. Only after that callback returns may the
+    // Rust owner invoke its destroy function. Keep the engine image mapped
+    // until this second phase has completed.
+    if let Err(error) = session.finalize_graphics() {
+        remember(error.status() as i32);
+    }
+    if let Err(error) = session.release_graphics() {
+        remember(error.status() as i32);
     }
     if let Err(error) = session.release_engine() {
         remember(error.status() as i32);
@@ -186,6 +189,13 @@ mod tests {
     impl NativeResource for OrderedProbe {
         fn close(&mut self) -> i32 {
             self.events.lock().unwrap().push(self.name);
+            0
+        }
+
+        fn finalize(&mut self) -> i32 {
+            if self.name == "graphics" {
+                self.events.lock().unwrap().push("finalize-graphics");
+            }
             0
         }
 
@@ -273,8 +283,9 @@ mod tests {
                 "surface",
                 "drop-surface",
                 "graphics",
-                "drop-graphics",
                 "engine",
+                "finalize-graphics",
+                "drop-graphics",
                 "drop-engine",
                 "provider-clear",
                 "drop-provider",

@@ -27,11 +27,10 @@ the platform and app `Activity.onCreate()` bodies using a minimal host context.
 The app's real `Activity.setContentView(View)` call adds a normally constructed
 View beneath that DecorView. The real-graphics vertical slice registers the
 complete 51-class Android graphics native map and executes `DecorView ->
-ViewGroup -> View.draw(android.graphics.Canvas) -> HWUI SkiaCanvas -> Skia
-raster -> Bitmap.getPixels()`. The resulting frame is presented in an
-independent AppKit `NSWindow`. The runtime is now a process-scoped C ABI dynamic
-library. A Rust host owns its lifecycle and the persistent
-IOSurface/Metal/AppKit presentation surface:
+ViewGroup -> View.draw(android.graphics.RecordingCanvas) -> HWUI RenderNode ->
+Ganesh Metal`. The resulting drawable is presented in an independent AppKit
+`NSWindow`. The runtime is now a process-scoped C ABI dynamic library. A Rust
+host owns its lifecycle and the persistent Metal/AppKit presentation surface:
 
 1. verify the native host is ARM64 macOS with 16 KiB pages;
 2. fetch revision-locked ART subtrees without Git metadata;
@@ -39,8 +38,8 @@ IOSurface/Metal/AppKit presentation surface:
 4. call an ART-style assembly entrypoint from Rust and return through Rust;
 5. compile ART's page-size-agnostic path and verify 16 KiB on Darwin;
 6. build small Mach-O ARM64 `libartbase` and `libdexfile` archives;
-7. build revision-locked AOSP Skia as a CPU-only Mach-O ARM64 archive and
-   pixel-verify real `SkSurface`, `SkCanvas`, `SkPaint`, and `SkPath` output;
+7. build revision-locked AOSP Skia as a Mach-O ARM64 archive and verify real
+   Ganesh Metal `SkSurface`, `SkCanvas`, `SkPaint`, and `SkPath` output;
 8. compile Java to DEX and verify it with AOSP `DexFileVerifier`;
 9. generate ART's real ARM64 ABI constants and compile context, optimized
    `__memcmp16`, plus quick/JNI/native entrypoint assembly;
@@ -64,13 +63,12 @@ IOSurface/Metal/AppKit presentation surface:
     default `PhoneWindow`, and normally construct the framework `DecorView`;
 20. execute the real platform `Activity.onCreate()` body plus the app override,
     including `Activity.setContentView(new ProbeView(this))`;
-21. run `DecorView.measure/layout/draw()` and the nested base `View.draw(Canvas)`
-    traversal against Android's real Bitmap-backed HWUI `SkiaCanvas`, verify
-    its 640x360 frame through upstream `Bitmap.getPixels()`, then present it
-    through one persistent IOSurface, Metal texture, `CAMetalLayer`, and
-    `NSWindow`;
-22. draw 120 frames with upstream Skia directly into the mapped IOSurface and
-    present them with zero staging copies;
+21. run `DecorView.measure/layout/draw()` and the nested base
+    `View.draw(RecordingCanvas)` traversal against Android's real HWUI display
+    list, replay it into one persistent Ganesh Metal drawable, and present it
+    through `CAMetalLayer` and `NSWindow`;
+22. replay persistent RenderNode frames without CPU readback or full-frame
+    IOSurface upload copies;
 23. stress Darwin `LockSupport.park/unpark` permits, wakeups, and timeouts;
 24. load an NDK-built Android ARM64 ELF through ART, run its `JNI_OnLoad`, and
     invoke scalar/reference JNI methods—including spilled narrow, integer,
@@ -136,27 +134,23 @@ layout resources or native `.so`; its only app-level visual customization is
 the explicit Material You palette and a software-compatible Material ripple drawable.
 
 The lower-level graphics probe remains deliberately small: `ProbeView.onDraw()`
-creates a normal Android `Paint` and issues `Canvas.drawColor()`/`drawRect()` calls.
-Android's upstream Paint JNI and HWUI `SkiaCanvas` rasterize those primitives
-into a real mutable `Bitmap`; upstream `Bitmap.getPixels()` exports the result. The C callback
-borrows that frame only while ART is runnable; Rust makes one tightly packed
-owned copy, returns across the ART boundary, then uploads it into a persistent
-IOSurface-backed Metal texture. The same `NSWindow`, `CAMetalLayer`, IOSurface,
-texture, and command queue remain alive for the session. No frame creates a
-`CFData`, `CGImage`, window, or texture.
+records the Android view tree into a real `RecordingCanvas`/`RenderNode` display
+list. The persistent display list is replayed by HWUI's Ganesh Metal path into
+the `CAMetalLayer` drawable. The production graphics path has no Bitmap
+readback, CPU framebuffer, IOSurface upload, or per-frame full-frame copy. The
+opaque surface and Metal command queue remain owned by the graphics session;
+Rust owns their lifetime while the C++ boundary only performs ART/HWUI/Metal
+operations.
 
 This proves the real `Activity.onCreate() -> PhoneWindow.setContentView() ->
-DecorView -> ViewGroup.dispatchDraw() -> View.draw(Canvas) -> HWUI/Skia ->
-Paint -> Bitmap` path. The APK acceptance requires all 230,400 pixels to be
-opaque, at least eight distinct rendered colors, all seven framework widget
-types, and clean ART shutdown. Choreographer-driven animations, `Switch`, and
-editable text remain explicit next boundaries rather than fake-success paths.
-Separately, `build-skia` maps the IOSurface and wraps its base address with
-upstream `SkCanvas::MakeRasterDirect`; 120 frames are rasterized and
-Metal-presented with zero staging copies. The remaining presentation step is to
-replace the Bitmap/readback copy with direct IOSurface backing. The DecorView
-also still uses a programmatic `android.R.id.content` root plus a minimal
-`Resources` object. The runtime now uses the full Android 16 resource JNI,
+DecorView -> ViewGroup.dispatchDraw() -> View.draw(RecordingCanvas) ->
+HWUI/Skia -> Ganesh Metal drawable` path. The APK acceptance requires all
+230,400 pixels to be opaque, at least eight distinct rendered colors, all seven
+framework widget types, and clean ART shutdown. Choreographer-driven
+animations, `Switch`, and editable text remain explicit next boundaries rather
+than fake-success paths. The DecorView also still uses a programmatic
+`android.R.id.content` root plus a minimal `Resources` object. The runtime now
+uses the full Android 16 resource JNI,
 Android-visible OS constants, UnixFileSystem, and ART OpenJDK VM service
 owners. The Button probe now passes the complete Android 16 `FileInputStream`,
 `FileChannelImpl`, `FileDispatcherImpl`, `IOUtil`, and `NativeThread` owners,
@@ -165,8 +159,9 @@ the complementary ART/libcore `libcore.io.Memory` owners, the 47-entry
 Darwin `lseek`. With a source-coherent ICU76 Java/native/data set it maps the
 pinned Android font data, constructs a real `android.widget.Button`, renders
 through HWUI/Minikin/Skia, exports a frame, and shuts ART down cleanly.
-Compiled app-resource inflation, full Android `MotionEvent`/gesture dispatch,
-and GPU HWUI remain deferred. Basic clickable-view pointer input is live.
+Compiled app-resource inflation and direct GPU HWUI are live. Full Android
+`MotionEvent`/gesture dispatch remains a separate boundary; the current input
+adapter intentionally supports bounded clickable-view pointer semantics only.
 
 The first Tier-1 native-library admission gate is also available:
 
@@ -355,9 +350,9 @@ libhardware headers; HWUI adds about 2.2 MiB including the exact upstream
 Layoutlib's supported map through Android's authoritative `jni_runtime.cpp`
 registration order, so an empty or dependency-misordered registrar cannot pass.
 The runtime's atomic real-graphics mode removes the fake Paint/RenderNode
-registrations and uses Bitmap creation, a real bitmap-backed Canvas,
-`DecorView.draw`, and `Bitmap.getPixels`. It links and passes end to end while
-the default ProbeCanvas path remains as a regression baseline.
+registrations and uses a real `RecordingCanvas`, persistent RenderNode, and
+direct Ganesh Metal drawable replay. It links and passes end to end while the
+headless ProbeCanvas path remains as a regression baseline.
 The bootstrap also compiles Android 16 libcore's revision-locked `Math.c`
 unchanged, including its complete 23-entry FastNative table, instead of
 reimplementing those methods as Darwin wrappers.

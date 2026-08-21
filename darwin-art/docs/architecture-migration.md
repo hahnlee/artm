@@ -146,9 +146,18 @@ The graphics boundary is now an explicit eighth native phase. Rust owns a
 JNI global references, RenderNode, AnimationContext, and TimeLord remain
 private to the native graphics session. Creation, owner-thread validation,
 dispatch/pulse, close, and destroy are separate ABI operations, so graphics
-cleanup occurs before the Metal surface and ART/provider teardown. Headless
+cleanup closes during ART shutdown, finalizes the bound native session, and
+destroys the opaque handle before the engine image is unmapped. Headless
 engines may omit these optional symbols, while the graphics link exports and
 audits them when a drawable is present.
+
+The direct presenter is a separate cached native phase:
+`runtime_graphics_gpu.cc` owns `RecordingCanvas`/RenderNode replay and Ganesh
+Metal drawable submission, while `runtime_graphics_probe.cc` owns orchestration
+and state transitions. Its source/header are explicit graph inputs, so a
+presenter edit does not rebuild activity/resource/input phases. The Rust owner
+keeps the opaque surface and graphics session alive across the whole frame
+loop; C++ does not own a second lifecycle state machine.
 
 The host no longer consumes the complete raw `EngineSymbols` table. Provider
 acquire/release/clear callbacks are converted directly into the Rust-owned

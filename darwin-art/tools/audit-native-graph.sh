@@ -56,6 +56,7 @@ phase_rules=(
   runtime_graphics_input_probe
   runtime_graphics_state_probe
   runtime_graphics_session_probe
+  runtime_graphics_gpu_probe
   runtime_jni_acceptance_probe
   runtime_hwui_probe
   runtime_app_resources_probe
@@ -69,6 +70,7 @@ phase_sources=(
   runtime_graphics_input.cc
   runtime_graphics_state.cc
   runtime_graphics_session.cc
+  runtime_graphics_gpu.cc
   runtime_jni_acceptance_probe.cc
   runtime_hwui_probe.cc
   runtime_app_resources.cc
@@ -93,6 +95,7 @@ phase_objects=(
   "$root/_build/runtime-probes/darwin_art_runtime_graphics_input.cc.o"
   "$root/_build/runtime-probes/darwin_art_runtime_graphics_state.cc.o"
   "$root/_build/runtime-probes/darwin_art_runtime_graphics_session.cc.o"
+  "$root/_build/runtime-probes/darwin_art_runtime_graphics_gpu.cc.o"
   "$root/_build/runtime-probes/darwin_art_runtime_jni_acceptance_probe.cc.o"
   "$root/_build/runtime-probes/darwin_art_runtime_hwui_probe.cc.o"
   "$root/_build/runtime-probes/darwin_art_runtime_app_resources.cc.o"

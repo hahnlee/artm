@@ -17,6 +17,14 @@ use crate::{RuntimeError, RuntimeLifecycle, RuntimePhase, Subsystem, SubsystemLe
 pub trait NativeResource {
     fn close(&mut self) -> i32;
 
+    /// Complete native destruction after the owning process has shut down but
+    /// before the dynamic image containing the callback is released. Most
+    /// resources have no second phase; resources whose destroy callback lives
+    /// in the engine image override this hook.
+    fn finalize(&mut self) -> i32 {
+        0
+    }
+
     fn clear(&mut self) -> i32 {
         0
     }
@@ -128,6 +136,21 @@ impl<E, P, S, G> RuntimeSession<E, P, S, G> {
     pub fn graphics_for_shutdown_mut(&mut self) -> Result<Option<&mut G>, RuntimeError> {
         self.release_boundary(Subsystem::Graphics)?;
         Ok(self.owners.graphics_mut())
+    }
+
+    /// Run resource-specific destruction after the process owner has closed,
+    /// while the engine image is still mapped.
+    pub fn finalize_graphics(&mut self) -> Result<(), RuntimeError>
+    where
+        G: NativeResource,
+    {
+        if let Some(graphics) = self.owners.graphics_mut() {
+            let status = graphics.finalize();
+            if status != 0 {
+                return Err(RuntimeError::EngineFailure { status });
+            }
+        }
+        Ok(())
     }
 
     pub fn release_engine(&mut self) -> Result<Option<E>, RuntimeError> {
