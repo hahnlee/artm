@@ -34,6 +34,7 @@ public final class ProbeContext extends ContextWrapper {
         this.packageManager = packageManager;
         this.packageName = packageName == null ? "dev.darwinart.probe" : packageName;
         applicationInfo = new ApplicationInfo();
+        applicationInfo.packageName = this.packageName;
         applicationInfo.targetSdkVersion = 36;
         attributionSource = new AttributionSource.Builder(1000)
                 .setPackageName(getPackageName())
@@ -48,9 +49,11 @@ public final class ProbeContext extends ContextWrapper {
 
     @Override
     public Context getApplicationContext() {
-        // PhoneWindow explicitly supports processes without an application
-        // context by using the Activity context directly for its DecorView.
-        return null;
+        // The detached launcher has no separately constructed Application
+        // ContextImpl.  Returning this stable, process-owned context matches
+        // the identity callers observe on Android and keeps framework widget
+        // construction from dereferencing a null application context.
+        return this;
     }
 
     @Override
@@ -66,6 +69,11 @@ public final class ProbeContext extends ContextWrapper {
     @Override
     public Resources getResources() {
         return resources;
+    }
+
+    @Override
+    public android.content.res.AssetManager getAssets() {
+        return resources.getAssets();
     }
 
     @Override
@@ -122,6 +130,17 @@ public final class ProbeContext extends ContextWrapper {
     @Override
     public String getPackageName() {
         return packageName;
+    }
+
+    // ProbeContext intentionally has no host ContextImpl backing object.  The
+    // real Android ContextImpl nevertheless exposes the application
+    // PathClassLoader, and LayoutInflater uses Context.getClassLoader() while
+    // constructing custom views from an APK layout.  Return the owner thread's
+    // installed app loader instead of delegating through the null ContextWrapper
+    // base used by this detached Darwin context.
+    @Override
+    public ClassLoader getClassLoader() {
+        return Thread.currentThread().getContextClassLoader();
     }
 
     @Override

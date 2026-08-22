@@ -230,6 +230,63 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   jint lifecycle_result = -1;
   if (probe_on_create != nullptr) {
     if (run_apk_app) {
+      // A device initializes Typeface's system font map during framework
+      // startup.  The detached host has no Zygote/SystemServer phase, so run
+      // the same pinned AOSP font bootstrap from the support DEX before an
+      // arbitrary APK constructs TextView/Button objects.  The APK itself is
+      // untouched; this is a runtime-owned framework initialization seam.
+      // The support DEX is registered in the same PathClassLoader as the APK,
+      // not in the boot class loader.  FindClass from this native frame would
+      // therefore miss it for arbitrary APKs; resolve it through the actual
+      // Activity class loader instead.
+      jclass class_class = env->FindClass("java/lang/Class");
+      jmethodID get_class_loader =
+          class_class == nullptr
+              ? nullptr
+              : env->GetMethodID(
+                    class_class, "getClassLoader",
+                    "()Ljava/lang/ClassLoader;");
+      jobject app_loader =
+          get_class_loader == nullptr
+              ? nullptr
+              : env->CallObjectMethod(
+                    reinterpret_cast<jobject>(probe_activity_class),
+                    get_class_loader);
+      jclass loader_class =
+          app_loader == nullptr ? nullptr : env->GetObjectClass(app_loader);
+      jmethodID load_class =
+          loader_class == nullptr
+              ? nullptr
+              : env->GetMethodID(
+                    loader_class, "loadClass",
+                    "(Ljava/lang/String;)Ljava/lang/Class;");
+      jstring bootstrap_name =
+          env->NewStringUTF("dev.darwinart.probe.FontBootstrap");
+      jobject bootstrap_class_object =
+          load_class == nullptr || bootstrap_name == nullptr
+              ? nullptr
+              : env->CallObjectMethod(app_loader, load_class, bootstrap_name);
+      jclass font_bootstrap =
+          reinterpret_cast<jclass>(bootstrap_class_object);
+      jmethodID install_fonts =
+          font_bootstrap == nullptr
+              ? nullptr
+              : env->GetStaticMethodID(font_bootstrap, "install", "()V");
+      if (install_fonts != nullptr) {
+        env->CallStaticVoidMethod(font_bootstrap, install_fonts);
+      }
+      env->DeleteLocalRef(bootstrap_name);
+      env->DeleteLocalRef(loader_class);
+      env->DeleteLocalRef(app_loader);
+      env->DeleteLocalRef(class_class);
+      env->DeleteLocalRef(font_bootstrap);
+      if (env->ExceptionCheck()) {
+        std::cerr << "ART Android framework: system font bootstrap failed\n"
+                  << self->GetException()->Dump() << "\n";
+        return 28;
+      }
+    }
+    if (run_apk_app) {
       env->CallVoidMethod(activity_instance, probe_on_create, nullptr);
       lifecycle_result = env->ExceptionCheck() ? -1 : 43;
     } else {
