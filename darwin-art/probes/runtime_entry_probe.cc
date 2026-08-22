@@ -112,6 +112,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   const char* apk_app_activity = process_options.apk_app_activity.c_str();
   const char* apk_app_descriptor = process_options.apk_app_descriptor.c_str();
   const char* apk_app_support_dex = process_options.apk_app_support_dex.c_str();
+  const char* apk_app_native_path = process_options.apk_app_native_path.c_str();
   const char* framework_res_apk = process_options.framework_res_apk.c_str();
   const bool run_elf_jni_fixture = process_options.run_elf_jni_fixture;
   const bool run_generic_elf = process_options.run_generic_elf;
@@ -213,7 +214,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   darwin_art_app::ClassSet app_classes;
   const int app_status = darwin_art_app::load_classes(
       self->GetJniEnv(), self, class_linker, soa, hs, run_apk_app, config->app_dex,
-      apk_app_support_dex, activity_descriptor, run_direct_apk, direct_apk_path,
+      apk_app_support_dex, apk_app_native_path, activity_descriptor,
+      run_direct_apk, direct_apk_path,
       run_elf_jni_fixture, run_network_acceptance,
       darwin_art::GetFrameworkGraphicsBackend() ==
           darwin_art::FrameworkGraphicsBackend::kProbeCanvas,
@@ -329,8 +331,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       env, self, activity_instance, probe_activity_class, probe_context_class,
       probe_resources_class, probe_view_class, probe_canvas_class,
       content_root_class, package_manager, run_apk_app, use_framework_resources,
-      expect_apk_widgets, run_framework_button, window_scale, framework_res_apk,
-      apk_app_package, apk_app_activity, graphics_state);
+      expect_apk_widgets, !process_options.apk_app_native_path.empty(),
+      run_framework_button, window_scale, framework_res_apk,
+      apk_app_package, apk_app_activity, config->app_dex, graphics_state);
   if (presentation_status != 0) {
     return presentation_status;
   }

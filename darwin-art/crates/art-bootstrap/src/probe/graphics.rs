@@ -56,6 +56,14 @@ pub(crate) fn probe_runtime_button(root: &Path, show_window: bool) -> Result<()>
 }
 
 pub(crate) fn probe_runtime_apk_app(root: &Path, show_window: bool) -> Result<()> {
+    probe_runtime_apk_variant(root, show_window, false)
+}
+
+pub(crate) fn probe_runtime_apk_jni_app(root: &Path, show_window: bool) -> Result<()> {
+    probe_runtime_apk_variant(root, show_window, true)
+}
+
+fn probe_runtime_apk_variant(root: &Path, show_window: bool, apk_jni: bool) -> Result<()> {
     build_shell_gate(root, "android-apk-app-runtime/audit.sh")?;
-    probe_runtime_dex_flavor(root, show_window, true, false, false, false, true)
+    probe_runtime_dex_flavor_impl(root, show_window, true, false, false, false, true, apk_jni)
 }

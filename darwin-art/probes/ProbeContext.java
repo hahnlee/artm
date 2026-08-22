@@ -20,12 +20,19 @@ public final class ProbeContext extends ContextWrapper {
     private final Resources resources;
     private final Resources.Theme theme;
     private final PackageManager packageManager;
+    private final String packageName;
 
     public ProbeContext(Resources resources, PackageManager packageManager) {
+        this(resources, packageManager, "dev.darwinart.probe");
+    }
+
+    public ProbeContext(Resources resources, PackageManager packageManager,
+            String packageName) {
         super(null);
         this.resources = resources;
         theme = resources.newTheme();
         this.packageManager = packageManager;
+        this.packageName = packageName == null ? "dev.darwinart.probe" : packageName;
         applicationInfo = new ApplicationInfo();
         applicationInfo.targetSdkVersion = 36;
         attributionSource = new AttributionSource.Builder(1000)
@@ -114,7 +121,7 @@ public final class ProbeContext extends ContextWrapper {
 
     @Override
     public String getPackageName() {
-        return "dev.darwinart.probe";
+        return packageName;
     }
 
     @Override

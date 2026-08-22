@@ -28,6 +28,7 @@ int load_classes(JNIEnv* env,
                  bool run_apk_app,
                  const char* app_dex,
                  const char* support_dex,
+                 const char* native_library_path,
                  const char* activity_descriptor,
                  bool run_direct_apk,
                  const char* direct_apk_path,
@@ -80,6 +81,26 @@ int load_classes(JNIEnv* env,
       std::cerr << "ART Darwin DEX: registration failed\n";
       return 4;
     }
+  }
+
+  if (run_apk_app && native_library_path != nullptr &&
+      native_library_path[0] != '\0') {
+    std::string native_error;
+    bool loaded = false;
+    {
+      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
+      loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
+          env, native_library_path, out->app_loader, nullptr, &native_error);
+    }
+    if (!loaded || !native_error.empty() || env->ExceptionCheck()) {
+      std::cerr << "ART Android APK JNI: JavaVMExt load failed path="
+                << native_library_path << " error=" << native_error << "\n";
+      if (self->IsExceptionPending()) {
+        std::cerr << self->GetException()->Dump() << "\n";
+      }
+      return 46;
+    }
+    std::cerr << "ART Android APK JNI: JavaVMExt+NativeBridge load ok\n";
   }
 
   auto find = [&](const char* descriptor) -> jclass {

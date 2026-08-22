@@ -4,7 +4,8 @@ namespace darwin_art_app_resources {
 
 int prepare(JNIEnv* env, jclass probe_resources_class,
             bool use_framework_resources, jint window_scale,
-            const char* framework_res_apk, Bundle* out) {
+            const char* framework_res_apk, const char* app_apk_path,
+            Bundle* out) {
   if (env == nullptr || probe_resources_class == nullptr || out == nullptr ||
       (use_framework_resources && framework_res_apk == nullptr)) {
     return 27;
@@ -52,11 +53,31 @@ int prepare(JNIEnv* env, jclass probe_resources_class,
             ? nullptr
             : env->CallStaticObjectMethod(out->apk_assets_class, load_from_path,
                                           out->framework_res_path);
-    out->configured_apk_assets =
-        out->framework_apk_assets == nullptr
+    out->app_apk_path =
+        app_apk_path == nullptr ? nullptr : env->NewStringUTF(app_apk_path);
+    jmethodID load_app = env->GetStaticMethodID(
+        out->apk_assets_class, "loadFromPath",
+        "(Ljava/lang/String;)Landroid/content/res/ApkAssets;");
+    out->app_apk_assets =
+        load_app == nullptr || out->app_apk_path == nullptr
             ? nullptr
-            : env->NewObjectArray(1, out->apk_assets_class,
-                                  out->framework_apk_assets);
+            : env->CallStaticObjectMethod(out->apk_assets_class, load_app,
+                                          out->app_apk_path);
+    const jint asset_count = out->framework_apk_assets == nullptr
+                                 ? 0
+                                 : (out->app_apk_assets == nullptr ? 1 : 2);
+    out->configured_apk_assets =
+        asset_count == 0
+            ? nullptr
+            : env->NewObjectArray(asset_count, out->apk_assets_class, nullptr);
+    if (out->configured_apk_assets != nullptr) {
+      env->SetObjectArrayElement(out->configured_apk_assets, 0,
+                                 out->framework_apk_assets);
+      if (out->app_apk_assets != nullptr) {
+        env->SetObjectArrayElement(out->configured_apk_assets, 1,
+                                   out->app_apk_assets);
+      }
+    }
   } else if (out->apk_assets_class != nullptr) {
     out->configured_apk_assets =
         env->NewObjectArray(0, out->apk_assets_class, nullptr);
@@ -122,6 +143,8 @@ void release(JNIEnv* env, Bundle* bundle) {
   env->DeleteLocalRef(bundle->probe_resources);
   env->DeleteLocalRef(bundle->configured_apk_assets);
   env->DeleteLocalRef(bundle->framework_res_path);
+  env->DeleteLocalRef(bundle->app_apk_path);
+  env->DeleteLocalRef(bundle->app_apk_assets);
   env->DeleteLocalRef(bundle->framework_apk_assets);
   env->DeleteLocalRef(bundle->apk_assets_class);
   env->DeleteLocalRef(bundle->asset_manager);

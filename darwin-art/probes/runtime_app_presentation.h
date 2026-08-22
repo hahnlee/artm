@@ -19,10 +19,9 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
          jclass probe_canvas_class, jclass content_root_class,
          jobject package_manager, bool run_apk_app,
          bool use_framework_resources, bool expect_apk_widgets,
-         bool run_framework_button, jint window_scale,
+         bool apk_native_loaded, bool run_framework_button, jint window_scale,
          const char* framework_res_apk, const char* apk_app_package,
-         const char* apk_app_activity,
+         const char* apk_app_activity, const char* app_apk_path,
          darwin_art_graphics::GraphicsState* graphics_state);
 
 }  // namespace darwin_art_presentation
-

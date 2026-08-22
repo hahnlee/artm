@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <iostream>
+#include <string>
 
 #include "runtime_frame_probe.h"
 #include "runtime_graphics_probe.h"
@@ -50,6 +51,44 @@ int present_and_retain(darwin_art_graphics::GraphicsState* state,
       if (widget_class != nullptr) env->DeleteLocalRef(widget_class);
       if (widget != nullptr) env->DeleteLocalRef(widget);
       if (tag != nullptr) env->DeleteLocalRef(tag);
+    }
+    if (widgets_valid) {
+      jstring title_tag = env->NewStringUTF("title");
+      jobject title_view = env->CallObjectMethod(content_root, find_view_with_tag,
+                                                 title_tag);
+      jclass text_view_class = env->FindClass("android/widget/TextView");
+      jmethodID get_text = text_view_class == nullptr
+                               ? nullptr
+                               : env->GetMethodID(text_view_class, "getText",
+                                                  "()Ljava/lang/CharSequence;");
+      jobject title_text =
+          title_view == nullptr || get_text == nullptr
+              ? nullptr
+              : env->CallObjectMethod(title_view, get_text);
+      jclass object_class = env->FindClass("java/lang/Object");
+      jmethodID to_string = object_class == nullptr
+                                ? nullptr
+                                : env->GetMethodID(object_class, "toString",
+                                                   "()Ljava/lang/String;");
+      jstring title_string = title_text == nullptr || to_string == nullptr
+                                 ? nullptr
+                                 : static_cast<jstring>(env->CallObjectMethod(
+                                       title_text, to_string));
+      const char* title_chars = title_string == nullptr
+                                    ? nullptr
+                                    : env->GetStringUTFChars(title_string, nullptr);
+      widgets_valid = title_chars != nullptr &&
+                      std::string(title_chars) == "AOSP resource-backed widgets" &&
+                      !env->ExceptionCheck();
+      if (title_chars != nullptr) {
+        env->ReleaseStringUTFChars(title_string, title_chars);
+      }
+      env->DeleteLocalRef(title_string);
+      env->DeleteLocalRef(object_class);
+      env->DeleteLocalRef(title_text);
+      env->DeleteLocalRef(text_view_class);
+      env->DeleteLocalRef(title_view);
+      env->DeleteLocalRef(title_tag);
     }
     if (!widgets_valid) {
       std::cerr << "ART Android APK: framework widget set is incomplete\n";

@@ -32,12 +32,25 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
   jmethodID probe_context_constructor = env->GetMethodID(
       probe_context_class, "<init>",
       "(Landroid/content/res/Resources;"
-      "Landroid/content/pm/PackageManager;)V");
+      "Landroid/content/pm/PackageManager;Ljava/lang/String;)V");
+  if (!run_apk_app) {
+    probe_context_constructor = env->GetMethodID(
+        probe_context_class, "<init>",
+        "(Landroid/content/res/Resources;"
+        "Landroid/content/pm/PackageManager;)V");
+  }
+  jstring context_package = env->NewStringUTF(
+      run_apk_app ? apk_app_package : "dev.darwinart.probe");
   out->probe_context =
       probe_context_constructor == nullptr || resources->probe_resources == nullptr
           ? nullptr
-          : env->NewObject(probe_context_class, probe_context_constructor,
-                           resources->probe_resources, package_manager);
+          : (run_apk_app
+                 ? env->NewObject(probe_context_class, probe_context_constructor,
+                                  resources->probe_resources, package_manager,
+                                  context_package)
+                 : env->NewObject(probe_context_class, probe_context_constructor,
+                                  resources->probe_resources, package_manager));
+  env->DeleteLocalRef(context_package);
   if (out->probe_context == nullptr || env->ExceptionCheck()) {
     std::cerr << "ART Android window: ProbeContext construction failed\n";
     if (self->IsExceptionPending()) {

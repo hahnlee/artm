@@ -143,6 +143,8 @@ pub(crate) fn run() -> Result<()> {
         "probe-runtime-button-window" => probe_runtime_button(&root, true),
         "probe-runtime-apk-app" => probe_runtime_apk_app(&root, false),
         "probe-runtime-apk-app-window" => probe_runtime_apk_app(&root, true),
+        "probe-runtime-apk-jni-app" => probe_runtime_apk_jni_app(&root, false),
+        "probe-runtime-apk-jni-app-window" => probe_runtime_apk_jni_app(&root, true),
         "verify-bootclasspath" => verify_bootclasspath(&root),
         "all" => {
             doctor()?;

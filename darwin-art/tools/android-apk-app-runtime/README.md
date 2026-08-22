@@ -10,9 +10,9 @@ library. The fixture programmatically creates real `TextView`, `CheckBox`,
 `RadioButton`, `ToggleButton`, `SeekBar`, `ProgressBar`, and `Button` instances.
 It loads the pinned Android 16 `framework-res.apk` and applies the framework's
 built-in Material Light theme. The fixture adds only a restrained Material You
-light-scheme palette and a software-compatible Material ripple drawable for the primary
-button; widget state lists, typography, animation, and rendering remain owned
-by Android framework code.
+light-scheme palette; the primary button keeps the framework-provided Button
+background, state list, typography, and RippleDrawable rather than replacing it
+with a host drawable.
 
 Run:
 
@@ -29,14 +29,21 @@ through the APK `PathClassLoader`, execute `Activity.onCreate`, attach a real
 `PhoneWindow`/`DecorView`, and present its 360x640 frame in the Darwin host
 window.
 
+The same AOSP toolchain also emits
+`_build/android-apk-app-runtime/simple-jni.apk`, which adds one arm64
+`libdarwin-art-simple-jni.so`. The `probe-runtime-apk-jni-app` gate extracts
+that library into a sealed private file, loads it through ART's
+`JavaVMExt::LoadNativeLibrary`/NativeBridge path, and verifies the app's
+`nativeAnswer()` returns 42 before the Activity is drawn.
+
 The acceptance resolves all seven tagged children back to their exact Android
 framework widget types and requires a fully opaque, visually diverse 360x640
 frame. It therefore does not accept custom `View` stand-ins, app-painted
 rectangles, or a blank opaque frame. The host provides a synthetic 60 Hz display
 clock and the framework's `PropertyValuesHolder`/`NativeAllocationRegistry`
-hooks. ValueAnimator/Choreographer timing remains Android-driven; the patterned
-framework RippleDrawable path is GPU-only on Android 16 and is therefore replaced
-by the software-compatible drawable on this host Canvas.
+hooks. ValueAnimator/Choreographer timing remains Android-driven; the framework
+RippleDrawable remains the app's drawable and the Darwin renderer supplies only
+the GPU presentation bridge required for its display list.
 
 The Android-side GPU handoff has a separate opt-in gate:
 
@@ -77,8 +84,10 @@ dragging the `SeekBar`, multitouch, scrolling, and long-press remain unsupported
 
 The runner never extracts or rewrites the APK. It rejects APKs containing
 native libraries, secondary DEX files, or an ambiguous launcher before ART is
-created. App resource-table/layout inflation and Android system services are
-not yet general; the first supported APK class builds its view hierarchy in
-Java from framework widgets or custom views. `Switch` still requires the
-unintegrated VelocityTracker native table, and editable text requires the
-Editor/input-method service slice, so neither is claimed by this gate.
+created. The current fixture proves an app-owned string resource through the
+real `AssetManager2` APK asset graph; arbitrary XML layout inflation and
+application resource overlays are the next resource milestone. The first
+supported APK class builds its view hierarchy in Java from framework widgets or
+custom views. `Switch` still requires the unintegrated VelocityTracker native
+table, and editable text requires the Editor/input-method service slice, so
+neither is claimed by this gate.

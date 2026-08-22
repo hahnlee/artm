@@ -8,6 +8,7 @@
 #include "mirror/throwable.h"
 #include "runtime_graphics_gpu.h"
 #include "runtime_graphics_state.h"
+#include "runtime_frame_probe.h"
 #include "runtime_hwui_probe.h"
 #include "thread-current-inl.h"
 
@@ -382,6 +383,10 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     std::cerr << "ART HWUI GPU: drawable submit failed\n";
     return JNI_FALSE;
   }
+  // Direct Metal presentation intentionally does not invoke the CPU frame
+  // callback. Publish only the drawable dimensions so GPU-only APK
+  // acceptance can validate the presented surface without a readback.
+  darwin_art_frame_probe::record_dimensions(width, height);
   state->gpu_render_node_recorded = true;
   return JNI_TRUE;
 }
@@ -394,4 +399,3 @@ jboolean present_gpu_content(GraphicsState*, JNIEnv*, jobject, jint, jint) {
 #endif
 
 }  // namespace darwin_art_graphics
-

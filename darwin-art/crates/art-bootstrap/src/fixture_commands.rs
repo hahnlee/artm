@@ -1,5 +1,32 @@
 use super::*;
 
+fn prepare_apk_jni_native(root: &Path) -> Result<PathBuf> {
+    let apk = root.join("_build/android-apk-app-runtime/simple-jni.apk");
+    let output = Command::new("unzip")
+        .args(["-p"])
+        .arg(&apk)
+        .arg("lib/arm64-v8a/libdarwin-art-simple-jni.so")
+        .output()?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err(format!(
+            "JNI APK native entry could not be extracted: {}",
+            apk.display()
+        )
+        .into());
+    }
+    let directory = root.join("_build/android-apk-app-runtime/native-root");
+    fs::create_dir_all(&directory)?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    let library = directory.join("libdarwin-art-simple-jni.so");
+    if library.exists() {
+        fs::set_permissions(&library, fs::Permissions::from_mode(0o600))?;
+    }
+    fs::write(&library, output.stdout)?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o500))?;
+    fs::set_permissions(&library, fs::Permissions::from_mode(0o400))?;
+    Ok(library)
+}
+
 pub(crate) fn probe_runtime_dex_flavor(
     root: &Path,
     show_window: bool,
@@ -8,6 +35,29 @@ pub(crate) fn probe_runtime_dex_flavor(
     elf_jni: bool,
     network: bool,
     apk_app: bool,
+) -> Result<()> {
+    probe_runtime_dex_flavor_impl(
+        root,
+        show_window,
+        real_graphics,
+        button,
+        elf_jni,
+        network,
+        apk_app,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn probe_runtime_dex_flavor_impl(
+    root: &Path,
+    show_window: bool,
+    real_graphics: bool,
+    button: bool,
+    elf_jni: bool,
+    network: bool,
+    apk_app: bool,
+    apk_jni: bool,
 ) -> Result<()> {
     let core_icu4j = if real_graphics {
         prepare_icu_runtime_bootclasspath(root)?
@@ -25,7 +75,11 @@ pub(crate) fn probe_runtime_dex_flavor(
     let core_libart = root.join("_prebuilt/android-16/bootclasspath/core-libart.jar");
     let framework = root.join("_prebuilt/android-16/bootclasspath/framework.jar");
     let classes_dex = root.join(if apk_app {
-        "_build/android-apk-app-runtime/simple-no-native.apk"
+        if apk_jni {
+            "_build/android-apk-app-runtime/simple-jni.apk"
+        } else {
+            "_build/android-apk-app-runtime/simple-no-native.apk"
+        }
     } else if network {
         "_build/network-runtime-probe/dex/classes.dex"
     } else if elf_jni {
@@ -112,6 +166,15 @@ pub(crate) fn probe_runtime_dex_flavor(
         }
     }
     if apk_app {
+        // A real APK's classes.dex is loaded as the application image, but the
+        // detached Darwin window still needs the same framework-side helper
+        // classes as the native Button GPU gate (AnimationHost, service
+        // bridge, and probe Resources/Context shims).  Using the baseline
+        // support DEX here silently makes RenderNode.create unavailable and
+        // causes the otherwise valid APK to fail before its first frame.
+        build_button_dex_probe(root)?;
+    }
+    if apk_app {
         let framework_res = root.join("_prebuilt/android-16/resources/framework-res.apk");
         if !framework_res.is_file() {
             return Err(format!(
@@ -132,15 +195,21 @@ pub(crate) fn probe_runtime_dex_flavor(
             )
             .env(
                 "DARWIN_ART_APK_APP_SUPPORT_DEX",
-                root.join("_build/dex-probe/dex/classes.dex"),
+                root.join("_build/button-dex/dex/classes.dex"),
             )
             .env("DARWIN_ART_FRAMEWORK_RES_APK", framework_res)
             .env("DARWIN_ART_APK_APP_EXPECT_WIDGETS", "1");
+        if apk_jni {
+            let native_path = prepare_apk_jni_native(root)?;
+            command.env("DARWIN_ART_APK_APP_NATIVE_PATH", native_path);
+        }
         if show_window {
             command.env("DARWIN_ART_WINDOW_SCALE", "2");
-        } else {
-            command.env("DARWIN_ART_TEST_POINTER_CLICK", "35,45");
         }
+        // The fixture's framework Button is laid out beneath the title and
+        // controls; use its center for the real pointer acceptance rather
+        // than a coordinate that only exercises the root view.
+        command.env("DARWIN_ART_TEST_POINTER_CLICK", "180,260");
     }
     let mut network_fixture = None;
     if network {
@@ -213,7 +282,7 @@ pub(crate) fn probe_runtime_dex_flavor(
         let render_scale = if show_window { 2 } else { 1 };
         let frame_width = 360 * render_scale;
         let frame_height = 640 * render_scale;
-        let pixel_count = frame_width * frame_height;
+        let native_marker = if apk_jni { 1 } else { 0 };
         format!(
             "Hello from Darwin ART main: 안녕\n\
          ART Darwin Runtime::Create: ok\n\
@@ -221,7 +290,7 @@ pub(crate) fn probe_runtime_dex_flavor(
          ART Darwin DEX interpreter: Hello.answer()=42\n\
          ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
          ART runtime native: System.arraycopy()=42\n\
-         ART Android APK: package=dev.darwinart.simple launcher=dev.darwinart.simple.MainActivity classes.dex=APK native=0 pixels={pixel_count}/opaque widgets=TextView+CheckBox+RadioButton+ToggleButton+SeekBar+ProgressBar+Button colors>=8\n\
+         ART Android APK: package=dev.darwinart.simple launcher=dev.darwinart.simple.MainActivity classes.dex=APK native={native_marker} gpu=direct drawable={frame_width}x{frame_height} widgets=framework-owned\n\
          ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
          ART Android view: Activity.setContentView()->DecorView.draw(Canvas)={frame_width}x{frame_height}\n\
          ART Android lifecycle: Activity.onCreate()=43\n\
@@ -295,10 +364,15 @@ pub(crate) fn probe_runtime_dex_flavor(
     drop(network_fixture);
     if apk_app {
         if show_window {
-            println!("probe-runtime-apk-app-window: APK -> Activity.onCreate -> NSWindow");
+            println!(
+                "probe-runtime-apk{}-window: APK -> Activity.onCreate -> NSWindow",
+                if apk_jni { "-jni" } else { "-app" }
+            );
         } else {
             println!(
-                "probe-runtime-apk-app: no-native APK -> manifest Activity -> frame -> shutdown"
+                "probe-runtime-apk{}: {} APK -> manifest Activity -> frame -> shutdown",
+                if apk_jni { "-jni-app" } else { "-app" },
+                if apk_jni { "JNI" } else { "no-native" }
             );
         }
     } else if network {

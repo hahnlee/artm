@@ -7,12 +7,17 @@ sdk="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 aapt2="$sdk/build-tools/35.0.0/aapt2"
 d8="$sdk/build-tools/35.0.0/d8"
 android_jar="$sdk/platforms/android-36/android.jar"
+ndk_revision="28.2.13676358"
+ndk="$sdk/ndk/$ndk_revision"
+toolchain="$ndk/toolchains/llvm/prebuilt/darwin-x86_64"
+android_clang="$toolchain/bin/aarch64-linux-android35-clang"
 build="$root/_build/android-apk-app-runtime"
 classes="$build/classes"
 dex="$build/dex"
 apk="$build/simple-no-native.apk"
+jni_apk="$build/simple-jni.apk"
 
-[[ -x "$aapt2" && -x "$d8" && -f "$android_jar" ]] || {
+[[ -x "$aapt2" && -x "$d8" && -x "$android_clang" && -f "$android_jar" ]] || {
   echo "Android SDK 35 build tools and platform 36 are required" >&2
   exit 1
 }
@@ -25,8 +30,11 @@ if [[ ! -f "$root/_build/dex-probe/dex/classes.dex" ]]; then
   cargo run -q -p art-bootstrap -- build-dex
 fi
 
+if [[ -d "$build" ]]; then
+  chmod -R u+w "$build"
+fi
 rm -rf "$build"
-mkdir -p "$classes" "$dex"
+mkdir -p "$classes" "$dex" "$build/jni/lib/arm64-v8a"
 javac --release 8 -encoding UTF-8 \
   -classpath "$android_jar:$root/_build/dex-probe/classes" \
   -d "$classes" \
@@ -37,13 +45,25 @@ javac --release 8 -encoding UTF-8 \
 app_classes=("$classes"/dev/darwinart/simple/*.class)
 "$d8" --lib "$android_jar" --output "$dex" "${app_classes[@]}"
 
+resource_zip="$build/resources.zip"
+"$aapt2" compile --dir "$module/fixture/res" -o "$resource_zip"
+
 "$aapt2" link \
   -I "$android_jar" \
+  --auto-add-overlay \
+  -R "$resource_zip" \
   --manifest "$module/fixture/AndroidManifest.xml" \
   --min-sdk-version 35 \
   --target-sdk-version 35 \
   -o "$apk"
 (cd "$dex" && zip -q -j "$apk" classes.dex)
+
+"$android_clang" -std=c17 -O2 -fPIC -fvisibility=hidden -Wall -Wextra -Werror \
+  -shared -nostdlib -fuse-ld=lld -Wl,--build-id=none -Wl,--hash-style=sysv \
+  -Wl,-z,now -Wl,-z,norelro -Wl,-soname,libdarwin-art-simple-jni.so \
+  "$module/fixture/native_app.c" -o "$build/jni/lib/arm64-v8a/libdarwin-art-simple-jni.so"
+cp "$apk" "$jni_apk"
+(cd "$build/jni" && zip -q -r "$jni_apk" lib)
 
 entries="$(unzip -Z1 "$apk")"
 [[ "$(grep -c '^classes\.dex$' <<<"$entries")" == 1 ]]
@@ -59,6 +79,15 @@ actual="$(cargo run -q --manifest-path "$module/Cargo.toml" -- "$apk")"
   exit 1
 }
 "$aapt2" dump badging "$apk" | grep -F "launchable-activity: name='dev.darwinart.simple.MainActivity'" >/dev/null
+
+jni_entries="$(unzip -Z1 "$jni_apk")"
+[[ "$(grep -c '^classes\.dex$' <<<"$jni_entries")" == 1 ]]
+grep -Fx 'lib/arm64-v8a/libdarwin-art-simple-jni.so' <<<"$jni_entries" >/dev/null
+file "$build/jni/lib/arm64-v8a/libdarwin-art-simple-jni.so" |
+  grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null
+llvm_readelf="$toolchain/bin/llvm-readelf"
+"$llvm_readelf" -d "$build/jni/lib/arm64-v8a/libdarwin-art-simple-jni.so" |
+  grep -F '(SONAME)' >/dev/null
 
 native_apk="$build/reject-native.apk"
 cp "$apk" "$native_apk"

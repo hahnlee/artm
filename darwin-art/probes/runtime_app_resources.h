@@ -17,14 +17,17 @@ struct Bundle {
   jobject application = nullptr;
   jobject asset_manager = nullptr;
   jobject framework_apk_assets = nullptr;
+  jobject app_apk_assets = nullptr;
   jstring framework_res_path = nullptr;
+  jstring app_apk_path = nullptr;
   jobjectArray configured_apk_assets = nullptr;
   jobject probe_resources = nullptr;
 };
 
 int prepare(JNIEnv* env, jclass probe_resources_class,
             bool use_framework_resources, jint window_scale,
-            const char* framework_res_apk, Bundle* out);
+            const char* framework_res_apk, const char* app_apk_path,
+            Bundle* out);
 
 void release(JNIEnv* env, Bundle* bundle);
 

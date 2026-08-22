@@ -17,9 +17,9 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
          jclass probe_canvas_class, jclass content_root_class,
          jobject package_manager, bool run_apk_app,
          bool use_framework_resources, bool expect_apk_widgets,
-         bool run_framework_button, jint window_scale,
+         bool apk_native_loaded, bool run_framework_button, jint window_scale,
          const char* framework_res_apk, const char* apk_app_package,
-         const char* apk_app_activity,
+         const char* apk_app_activity, const char* app_apk_path,
          darwin_art_graphics::GraphicsState* graphics_state) {
   // Every construction step below has multiple fail-fast returns.  Keep all
   // JNI locals created by the detached Activity/Window transaction in one
@@ -35,7 +35,7 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   darwin_art_app_resources::Bundle resources;
   if (darwin_art_app_resources::prepare(
           env, probe_resources_class, use_framework_resources, window_scale,
-          framework_res_apk, &resources) != 0) {
+          framework_res_apk, app_apk_path, &resources) != 0) {
     std::cerr << "ART Android resources: bootstrap construction failed\n";
     if (self->IsExceptionPending()) {
       std::cerr << self->GetException()->Dump() << "\n";
@@ -241,6 +241,22 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
     std::cerr << "ART Android lifecycle: Activity.onCreate() threw\n"
               << self->GetException()->Dump() << "\n";
     return 28;
+  }
+  if (run_apk_app && apk_native_loaded) {
+    jmethodID native_answer = env->GetStaticMethodID(
+        probe_activity_class, "nativeAnswer", "()I");
+    const jint value = native_answer == nullptr
+                           ? -1
+                           : env->CallStaticIntMethod(probe_activity_class,
+                                                       native_answer);
+    if (native_answer == nullptr || env->ExceptionCheck() || value != 42) {
+      std::cerr << "ART Android APK JNI: nativeAnswer() expected 42, got "
+                << value << "\n";
+      if (self->IsExceptionPending()) {
+        std::cerr << self->GetException()->Dump() << "\n";
+      }
+      return 46;
+    }
   }
   // PhoneWindow applies the resolved theme background while installing its
   // decor.  The standalone launcher supplies the decor before Activity's

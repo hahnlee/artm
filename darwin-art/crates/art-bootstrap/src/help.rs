@@ -82,6 +82,8 @@ pub(crate) fn print_help() {
     println!("  probe-runtime-button-window  display the real Button frame in NSWindow");
     println!("  probe-runtime-apk-app  launch a no-native APK through its manifest Activity");
     println!("  probe-runtime-apk-app-window  display the APK Activity frame in NSWindow");
+    println!("  probe-runtime-apk-jni-app  load an AOSP APK with JNI_OnLoad and nativeAnswer");
+    println!("  probe-runtime-apk-jni-app-window  display the JNI APK Activity in NSWindow");
     println!("  verify-bootclasspath  verify extracted Android 16 core DEX files");
     println!("  all        run every check and probe");
 }
