@@ -209,7 +209,7 @@ pub(crate) fn probe_runtime_dex_flavor_impl(
         // The fixture's framework Button is laid out beneath the title and
         // controls; use its center for the real pointer acceptance rather
         // than a coordinate that only exercises the root view.
-        command.env("DARWIN_ART_TEST_POINTER_CLICK", "180,260");
+        command.env("DARWIN_ART_TEST_POINTER_CLICK", "180,340");
     }
     let mut network_fixture = None;
     if network {

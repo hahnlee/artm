@@ -144,6 +144,13 @@ int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
   jfloat& pending_x = state->pending_pressed_x;
   jfloat& pending_y = state->pending_pressed_y;
   if (action == 0u) {
+    if (std::getenv("DARWIN_ART_APK_APP_EXPECT_WIDGETS") != nullptr &&
+        hit == nullptr) {
+      env->DeleteLocalRef(view_class);
+      env->DeleteLocalRef(hit);
+      std::cerr << "ART Android input: expected APK clickable target was not hit\n";
+      return 76;
+    }
     state->gpu_ripple_overlay_active = true;
     state->gpu_ripple_overlay_x = x;
     state->gpu_ripple_overlay_y = y;
@@ -173,6 +180,14 @@ int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
   const bool same_pressed_view =
       action == 1u && hit != nullptr && pressed_view != nullptr &&
       env->IsSameObject(hit, pressed_view) == JNI_TRUE;
+  if (action == 1u &&
+      std::getenv("DARWIN_ART_APK_APP_EXPECT_WIDGETS") != nullptr &&
+      !same_pressed_view) {
+    env->DeleteLocalRef(hit);
+    env->DeleteLocalRef(view_class);
+    std::cerr << "ART Android input: APK pointer release missed pressed target\n";
+    return 77;
+  }
   env->DeleteLocalRef(hit);
   env->DeleteLocalRef(view_class);
   const bool rendered =
