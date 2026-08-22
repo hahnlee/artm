@@ -282,6 +282,18 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return registration_status;
   }
 
+  // Android's managed System.load/Runtime.nativeLoad path reaches
+  // JavaVMExt only after the app PathClassLoader and thread context loader
+  // have been installed.  Loading earlier makes JNI_OnLoad observe the boot
+  // loader and breaks RegisterNatives for app-owned classes.
+  if (run_apk_app && !process_options.apk_app_native_path.empty()) {
+    const int native_status = darwin_art_app::load_native_library(
+        env, self, app_loader_ref, apk_app_native_path);
+    if (native_status != 0) {
+      return native_status;
+    }
+  }
+
   if (!class_linker->EnsureInitialized(self, probe_activity, true, true)) {
     std::cerr << "ART Android framework: launcher Activity initialization failed\n"
               << self->GetException()->Dump() << "\n";

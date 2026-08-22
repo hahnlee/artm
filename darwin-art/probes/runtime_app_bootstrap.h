@@ -48,4 +48,7 @@ int load_classes(JNIEnv* env,
                  bool probe_canvas_backend,
                  ClassSet* out);
 
+int load_native_library(JNIEnv* env, art::Thread* self, jobject app_loader,
+                        const char* native_library_path);
+
 }  // namespace darwin_art_app

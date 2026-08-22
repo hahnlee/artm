@@ -33,6 +33,13 @@ struct HookState {
 
 HookState g_hooks;
 
+// A process-wide filesystem facade is intentionally singleton-owned.  A
+// native library loaded after ActivityThread has installed the app/system
+// authority must borrow that owner rather than attempting a second install;
+// otherwise JavaVMExt rejects the library even though its path is trusted.
+std::mutex g_filesystem_borrow_mutex;
+uint32_t g_filesystem_borrowed_leases = 0;
+
 struct HookSnapshot {
   void* context;
   AcquireHook acquire;
@@ -151,6 +158,13 @@ void release_sendfile_direct() {
 bool acquire_filesystem(int directory_fd, std::string* error) {
   const HookSnapshot hook = hooks();
   if (hook.acquire != nullptr) {
+    {
+      std::lock_guard<std::mutex> lock(g_filesystem_borrow_mutex);
+      if (darwin_art_bionic_fs_process_has_capability_failure() >= 0) {
+        ++g_filesystem_borrowed_leases;
+        return true;
+      }
+    }
     const int32_t status = hook.acquire(
         hook.context, static_cast<uint32_t>(Kind::Filesystem), directory_fd);
     if (status == 0) return true;
@@ -164,6 +178,13 @@ bool acquire_filesystem(int directory_fd, std::string* error) {
 void release_filesystem() {
   const HookSnapshot hook = hooks();
   if (hook.release != nullptr) {
+    {
+      std::lock_guard<std::mutex> lock(g_filesystem_borrow_mutex);
+      if (g_filesystem_borrowed_leases != 0) {
+        --g_filesystem_borrowed_leases;
+        return;
+      }
+    }
     if (hook.release(hook.context, static_cast<uint32_t>(Kind::Filesystem)) != 0) {
       std::abort();
     }

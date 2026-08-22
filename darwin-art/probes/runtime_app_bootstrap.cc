@@ -83,26 +83,6 @@ int load_classes(JNIEnv* env,
     }
   }
 
-  if (run_apk_app && native_library_path != nullptr &&
-      native_library_path[0] != '\0') {
-    std::string native_error;
-    bool loaded = false;
-    {
-      art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
-      loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
-          env, native_library_path, out->app_loader, nullptr, &native_error);
-    }
-    if (!loaded || !native_error.empty() || env->ExceptionCheck()) {
-      std::cerr << "ART Android APK JNI: JavaVMExt load failed path="
-                << native_library_path << " error=" << native_error << "\n";
-      if (self->IsExceptionPending()) {
-        std::cerr << self->GetException()->Dump() << "\n";
-      }
-      return 46;
-    }
-    std::cerr << "ART Android APK JNI: JavaVMExt+NativeBridge load ok\n";
-  }
-
   auto find = [&](const char* descriptor) -> jclass {
     art::Handle<art::mirror::Class> klass = hs.NewHandle(
         class_linker->FindClass(self, descriptor, std::strlen(descriptor),
@@ -172,6 +152,35 @@ int load_classes(JNIEnv* env,
     std::cerr << "ART Android window: fixture class lookup failed\n";
     return 21;
   }
+  return 0;
+}
+
+int load_native_library(JNIEnv* env, art::Thread* self, jobject app_loader,
+                        const char* native_library_path) {
+  if (env == nullptr || self == nullptr || app_loader == nullptr ||
+      native_library_path == nullptr || native_library_path[0] == '\0') {
+    return 46;
+  }
+  std::string native_error;
+  bool loaded = false;
+  {
+    // ART's JavaVMExt loader may enter NativeBridge and execute JNI_OnLoad;
+    // keep the owner thread in the native state exactly as the platform
+    // Runtime.nativeLoad path does, but invoke it only after the app
+    // ClassLoader has been installed by the registration phase.
+    art::ScopedThreadSuspension suspended(self, art::ThreadState::kNative);
+    loaded = art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
+        env, native_library_path, app_loader, nullptr, &native_error);
+  }
+  if (!loaded || !native_error.empty() || env->ExceptionCheck()) {
+    std::cerr << "ART Android APK JNI: JavaVMExt load failed path="
+              << native_library_path << " error=" << native_error << "\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 46;
+  }
+  std::cerr << "ART Android APK JNI: JavaVMExt+NativeBridge load ok\n";
   return 0;
 }
 

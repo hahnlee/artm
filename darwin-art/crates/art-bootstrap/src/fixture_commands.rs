@@ -197,8 +197,13 @@ pub(crate) fn probe_runtime_dex_flavor_impl(
                 "DARWIN_ART_APK_APP_SUPPORT_DEX",
                 root.join("_build/button-dex/dex/classes.dex"),
             )
-            .env("DARWIN_ART_FRAMEWORK_RES_APK", framework_res)
-            .env("DARWIN_ART_APK_APP_EXPECT_WIDGETS", "1");
+            .env("DARWIN_ART_FRAMEWORK_RES_APK", framework_res);
+        // The headless gate proves APK/Activity/resource/native loading;
+        // pointer hit-testing is a window-only contract.  Do not install the
+        // strict input marker unless a real window is being exercised.
+        if show_window {
+            command.env("DARWIN_ART_APK_APP_EXPECT_WIDGETS", "1");
+        }
         if apk_jni {
             let native_path = prepare_apk_jni_native(root)?;
             command.env("DARWIN_ART_APK_APP_NATIVE_PATH", native_path);
@@ -206,10 +211,12 @@ pub(crate) fn probe_runtime_dex_flavor_impl(
         if show_window {
             command.env("DARWIN_ART_WINDOW_SCALE", "2");
         }
-        // The fixture's framework Button is laid out beneath the title and
-        // controls; use its center for the real pointer acceptance rather
-        // than a coordinate that only exercises the root view.
-        command.env("DARWIN_ART_TEST_POINTER_CLICK", "180,340");
+        if show_window {
+            // The fixture's framework Button is laid out beneath the title
+            // and controls; use its center for the real pointer acceptance
+            // rather than a coordinate that only exercises the root view.
+            command.env("DARWIN_ART_TEST_POINTER_CLICK", "180,340");
+        }
     }
     let mut network_fixture = None;
     if network {
@@ -283,6 +290,11 @@ pub(crate) fn probe_runtime_dex_flavor_impl(
         let frame_width = 360 * render_scale;
         let frame_height = 640 * render_scale;
         let native_marker = if apk_jni { 1 } else { 0 };
+        let widget_marker = if show_window {
+            " widgets=framework-owned"
+        } else {
+            ""
+        };
         format!(
             "Hello from Darwin ART main: 안녕\n\
          ART Darwin Runtime::Create: ok\n\
@@ -290,7 +302,7 @@ pub(crate) fn probe_runtime_dex_flavor_impl(
          ART Darwin DEX interpreter: Hello.answer()=42\n\
          ART Darwin JNI: hostPageSize()=16384 nativeRoundTrip()=42\n\
          ART runtime native: System.arraycopy()=42\n\
-         ART Android APK: package=dev.darwinart.simple launcher=dev.darwinart.simple.MainActivity classes.dex=APK native={native_marker} gpu=direct drawable={frame_width}x{frame_height} widgets=framework-owned\n\
+         ART Android APK: package=dev.darwinart.simple launcher=dev.darwinart.simple.MainActivity classes.dex=APK native={native_marker} gpu=direct drawable={frame_width}x{frame_height}{widget_marker}\n\
          ART Android window: Activity.attach()=PhoneWindow+DecorView\n\
          ART Android view: Activity.setContentView()->DecorView.draw(Canvas)={frame_width}x{frame_height}\n\
          ART Android lifecycle: Activity.onCreate()=43\n\
