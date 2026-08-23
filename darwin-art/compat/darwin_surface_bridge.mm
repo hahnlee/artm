@@ -50,6 +50,29 @@ NSString* WindowTitle(const char* title) {
   return result == nil ? @"Darwin ART Surface" : result;
 }
 
+NSImage* ApplicationIconFromEnvironment() {
+  const char* path = std::getenv("DARWIN_ART_APK_APP_ICON");
+  if (path == nullptr || path[0] == '\0') return nil;
+  NSString* file = [NSString stringWithUTF8String:path];
+  if (file == nil) return nil;
+  NSData* data = [NSData dataWithContentsOfFile:file options:0 error:nil];
+  NSImage* image = data == nil ? nil : [[NSImage alloc] initWithData:data];
+  if (image != nil) {
+    // AppKit uses the image's representations at their native size.  Keep
+    // the APK's density choice intact while providing a useful dock/menu
+    // size for low-density icons as well.
+    image.size = NSMakeSize(128.0, 128.0);
+  }
+  return image;
+}
+
+void ApplyApplicationIdentity(NSApplication* application, NSWindow* window) {
+  NSImage* image = ApplicationIconFromEnvironment();
+  if (image == nil) return;
+  application.applicationIconImage = image;
+  if (window != nil) window.miniwindowImage = image;
+}
+
 CGFloat WindowScale(bool visible) {
   const char* value = std::getenv("DARWIN_ART_WINDOW_SCALE");
   return visible && value != nullptr && std::strcmp(value, "2") == 0 ? 2.0
@@ -342,6 +365,7 @@ DarwinArtSurface* darwin_art_surface_create(
       // The opaque handle, not AppKit's close operation, owns the window.
       surface->window.releasedWhenClosed = NO;
       surface->window.title = WindowTitle(create_info->title);
+      ApplyApplicationIdentity(application, surface->window);
     }
     surface->view = [[DarwinArtMetalView alloc]
         initWithFrame:frame

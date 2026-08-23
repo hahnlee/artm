@@ -46,6 +46,8 @@ struct ActivityCandidate {
 struct ManifestInfo {
     package: String,
     activity: String,
+    label: String,
+    icon: Option<String>,
 }
 
 fn checked_add(a: usize, b: usize, label: &str) -> Result<usize> {
@@ -376,6 +378,15 @@ fn normalize_activity(package: &str, name: &str) -> Result<String> {
     Ok(full)
 }
 
+fn activity_label(activity: &str) -> String {
+    activity
+        .rsplit('.')
+        .next()
+        .unwrap_or(activity)
+        .trim_start_matches('$')
+        .to_owned()
+}
+
 fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
     if u16le(input, 0, "XML type")? != RES_XML {
         return Err("AndroidManifest.xml is not binary Android XML".to_owned());
@@ -388,6 +399,7 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
     let mut pool = None;
     let mut depth = 0_usize;
     let mut package = None;
+    let mut label = None;
     let mut current: Option<ActivityCandidate> = None;
     let mut launchers = Vec::new();
     while offset < input.len() {
@@ -426,6 +438,9 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                 "manifest" => {
                     package =
                         find_attribute(input, strings, attrs, attr_count, attr_size, "package")?;
+                }
+                "application" => {
+                    label = find_attribute(input, strings, attrs, attr_count, attr_size, "label")?;
                 }
                 "activity" => {
                     if current.is_some() {
@@ -489,7 +504,44 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
         ));
     }
     let activity = normalize_activity(&package, &launchers[0])?;
-    Ok(ManifestInfo { package, activity })
+    let label = label
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| activity_label(&activity));
+    Ok(ManifestInfo {
+        package,
+        activity,
+        label,
+        icon: None,
+    })
+}
+
+fn icon_entry(entries: &[ZipEntry]) -> Option<String> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let name = std::str::from_utf8(&entry.name).ok()?;
+            let lower = name.to_ascii_lowercase();
+            let is_image = lower.ends_with(".png") || lower.ends_with(".webp");
+            if !is_image || (!lower.contains("icon") && !lower.contains("launcher")) {
+                return None;
+            }
+            let density = if lower.contains("xxxhdpi") {
+                5
+            } else if lower.contains("xxhdpi") {
+                4
+            } else if lower.contains("xhdpi") {
+                3
+            } else if lower.contains("hdpi") {
+                2
+            } else if lower.contains("mdpi") {
+                1
+            } else {
+                0
+            };
+            Some((density, name.len(), name.to_owned()))
+        })
+        .max_by_key(|(density, length, _)| (*density, *length))
+        .map(|(_, _, name)| name)
 }
 
 fn validate_dex(input: &[u8]) -> Result<()> {
@@ -540,7 +592,9 @@ fn inspect(path: &Path) -> Result<ManifestInfo> {
     let manifest = entry_bytes(&input, manifest_entries[0], MAX_MANIFEST_SIZE)?;
     let dex = entry_bytes(&input, dex_entries[0], MAX_DEX_SIZE)?;
     validate_dex(&dex)?;
-    parse_manifest(&manifest)
+    let mut info = parse_manifest(&manifest)?;
+    info.icon = icon_entry(&entries);
+    Ok(info)
 }
 
 fn descriptor(class_name: &str) -> String {
@@ -560,10 +614,12 @@ fn run() -> Result<()> {
     }
     let info = inspect(Path::new(&path))?;
     println!(
-        "apk-app-runtime: package={} activity={} descriptor={} dex=primary native=0",
+        "apk-app-runtime: package={} activity={} descriptor={} label={} icon={} dex=primary native=0",
         info.package,
         info.activity,
-        descriptor(&info.activity)
+        descriptor(&info.activity),
+        info.label,
+        info.icon.as_deref().unwrap_or("none")
     );
     Ok(())
 }

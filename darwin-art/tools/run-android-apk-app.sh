@@ -20,10 +20,12 @@ apk="$(cd "$(dirname "$apk")" && pwd)/$(basename "$apk")"
 
 metadata="$(cargo run -q \
   --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$apk")"
-package="$(sed -n 's/^apk-app-runtime: package=\([^ ]*\) activity=.*/\1/p' <<<"$metadata")"
-activity="$(sed -n 's/^apk-app-runtime: .* activity=\([^ ]*\) descriptor=.*/\1/p' <<<"$metadata")"
-descriptor="$(sed -n 's/^apk-app-runtime: .* descriptor=\([^ ]*\) dex=.*/\1/p' <<<"$metadata")"
-[[ -n "$package" && -n "$activity" && -n "$descriptor" ]] || {
+package="$(sed -n 's/^apk-app-runtime: package=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+activity="$(sed -n 's/^apk-app-runtime: .* activity=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+descriptor="$(sed -n 's/^apk-app-runtime: .* descriptor=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+label="$(sed -n 's/^apk-app-runtime: .* label=\(.*\) icon=.*/\1/p' <<<"$metadata")"
+icon="$(sed -n 's/^apk-app-runtime: .* icon=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+[[ -n "$package" && -n "$activity" && -n "$descriptor" && -n "$label" && -n "$icon" ]] || {
   echo "could not decode inspected APK metadata" >&2
   exit 65
 }
@@ -60,7 +62,11 @@ done
 # pointing the process at the host filesystem would bypass the guest path
 # policy and make results depend on the developer machine.
 system_root="$(mktemp -d "${TMPDIR:-/tmp}/darwin-art-apk-system-root.XXXXXX")"
-cleanup_system_root() { rm -rf "$system_root"; }
+icon_file=""
+cleanup_system_root() {
+  rm -rf "$system_root"
+  [[ -z "$icon_file" ]] || rm -f "$icon_file"
+}
 trap cleanup_system_root EXIT
 mkdir -p "$system_root/etc" "$system_root/fonts"
 cp "$fonts_xml" "$system_root/etc/fonts.xml"
@@ -75,6 +81,15 @@ export ANDROID_TZDATA_ROOT="$icu_runtime/tzdata"
 export DARWIN_ART_APK_APP_PACKAGE="$package"
 export DARWIN_ART_APK_APP_ACTIVITY="$activity"
 export DARWIN_ART_APK_APP_DESCRIPTOR="$descriptor"
+export DARWIN_ART_APK_APP_LABEL="$label"
+if [[ "$icon" != "none" ]]; then
+  icon_file="$(mktemp "${TMPDIR:-/tmp}/darwin-art-apk-icon.XXXXXX")"
+  unzip -p "$apk" "$icon" >"$icon_file"
+  chmod 0400 "$icon_file"
+  export DARWIN_ART_APK_APP_ICON="$icon_file"
+else
+  unset DARWIN_ART_APK_APP_ICON
+fi
 export DARWIN_ART_APK_APP_SUPPORT_DEX="$support_dex"
 export DARWIN_ART_FRAMEWORK_RES_APK="$framework_res"
 export DARWIN_ART_TEST_FONTS_XML="$fonts_xml"

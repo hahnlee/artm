@@ -69,6 +69,13 @@ programmatic-UI subset with:
 ./tools/run-android-apk-app.sh path/to/app.apk 30
 ```
 
+The inspector also carries the launcher identity into the host presentation:
+the manifest label becomes the NSWindow title, and the highest-density
+launcher PNG/WebP entry (when present) becomes the macOS application and
+miniwindow icon. The APK is never rewritten; the launcher only exposes the
+validated icon entry through a private read-only temporary file for the
+surface bridge.
+
 Omitting the duration keeps the window available for up to 24 hours and still
 exits immediately when the user closes it.
 

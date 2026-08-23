@@ -72,7 +72,7 @@ dex_summary="$($root/_build/dex-probe/dex-probe "$dex/classes.dex")"
 expected_dex='AOSP DEX: verified=yes version=35 classes=2 methods=15 class[0]=Ldev/darwinart/simple/FontBootstrap; class[1]=Ldev/darwinart/simple/MainActivity;'
 [[ "$dex_summary" == "$expected_dex" ]]
 
-expected='apk-app-runtime: package=dev.darwinart.simple activity=dev.darwinart.simple.MainActivity descriptor=Ldev/darwinart/simple/MainActivity; dex=primary native=0'
+expected='apk-app-runtime: package=dev.darwinart.simple activity=dev.darwinart.simple.MainActivity descriptor=Ldev/darwinart/simple/MainActivity; label=Darwin ART APK icon=none dex=primary native=0'
 actual="$(cargo run -q --manifest-path "$module/Cargo.toml" -- "$apk")"
 [[ "$actual" == "$expected" ]] || {
   printf 'unexpected inspector output:\n%s\n' "$actual" >&2
