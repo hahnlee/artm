@@ -7,6 +7,7 @@
 #include <iterator>
 #include <memory>
 #include <atomic>
+#include <new>
 #include <vector>
 
 namespace {
@@ -37,6 +38,30 @@ jlong NextEglHandle();
 jlong SurfaceControlNativeCreateTransaction(JNIEnv*, jclass) { return NextEglHandle(); }
 
 std::atomic<jlong> g_egl_handle{1};
+
+// The detached host does not need native velocity estimation to render a
+// frame, but framework ViewGroups (including Calculator's support ViewPager)
+// still create a VelocityTracker while dispatching MotionEvent. Keep the
+// Android object lifecycle valid and return a conservative zero velocity until
+// a host-side estimator is required by a gesture.
+struct DarwinVelocityTracker {};
+
+jlong VelocityTrackerInitialize(JNIEnv*, jclass, jint) {
+  auto* tracker = new (std::nothrow) DarwinVelocityTracker();
+  return reinterpret_cast<jlong>(tracker);
+}
+
+void VelocityTrackerDispose(JNIEnv*, jclass, jlong handle) {
+  delete reinterpret_cast<DarwinVelocityTracker*>(handle);
+}
+
+void VelocityTrackerAddMovement(JNIEnv*, jclass, jlong, jobject) {}
+void VelocityTrackerClear(JNIEnv*, jclass, jlong) {}
+void VelocityTrackerComputeCurrentVelocity(JNIEnv*, jclass, jlong, jint, jfloat) {}
+jfloat VelocityTrackerGetVelocity(JNIEnv*, jclass, jlong, jint, jint) { return 0.0f; }
+jboolean VelocityTrackerIsAxisSupported(JNIEnv*, jclass, jint axis) {
+  return axis == 0 || axis == 1 ? JNI_TRUE : JNI_FALSE;
+}
 
 jlong NextEglHandle() { return g_egl_handle.fetch_add(1, std::memory_order_relaxed); }
 
@@ -209,6 +234,27 @@ bool RegisterFrameworkSupportNatives(JNIEnv* env) {
 
 bool RegisterFrameworkNatives(JNIEnv* env) {
   if (!RegisterMotionEventNatives(env)) {
+    return false;
+  }
+  JNINativeMethod velocity_tracker_methods[] = {
+      {const_cast<char*>("nativeInitialize"), const_cast<char*>("(I)J"),
+       reinterpret_cast<void*>(&VelocityTrackerInitialize)},
+      {const_cast<char*>("nativeDispose"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&VelocityTrackerDispose)},
+      {const_cast<char*>("nativeAddMovement"),
+       const_cast<char*>("(JLandroid/view/MotionEvent;)V"),
+       reinterpret_cast<void*>(&VelocityTrackerAddMovement)},
+      {const_cast<char*>("nativeClear"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&VelocityTrackerClear)},
+      {const_cast<char*>("nativeComputeCurrentVelocity"), const_cast<char*>("(JIF)V"),
+       reinterpret_cast<void*>(&VelocityTrackerComputeCurrentVelocity)},
+      {const_cast<char*>("nativeGetVelocity"), const_cast<char*>("(JII)F"),
+       reinterpret_cast<void*>(&VelocityTrackerGetVelocity)},
+      {const_cast<char*>("nativeIsAxisSupported"), const_cast<char*>("(I)Z"),
+       reinterpret_cast<void*>(&VelocityTrackerIsAxisSupported)},
+  };
+  if (!Register(env, "android/view/VelocityTracker", velocity_tracker_methods,
+                static_cast<jint>(std::size(velocity_tracker_methods)))) {
     return false;
   }
   using namespace framework_system;

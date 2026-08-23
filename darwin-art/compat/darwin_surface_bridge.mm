@@ -303,6 +303,11 @@ CGFloat WindowScale(bool visible) {
 @property(nonatomic, assign) DarwinArtSurface* surface;
 @end
 
+static DarwinArtSurfaceResult ResizeSurfaceBacking(DarwinArtSurface* surface,
+                                                   uint32_t width,
+                                                   uint32_t height,
+                                                   bool update_window);
+
 @implementation DarwinArtSurfaceWindowDelegate
 - (void)windowDidResignKey:(NSNotification*)notification {
   (void)notification;
@@ -326,7 +331,7 @@ CGFloat WindowScale(bool visible) {
   const uint32_t height = static_cast<uint32_t>(std::max<CGFloat>(
       1.0, std::ceil(bounds.size.height * scale)));
   const DarwinArtSurfaceResult result =
-      darwin_art_surface_resize(self.surface, width, height);
+      ResizeSurfaceBacking(self.surface, width, height, false);
   if (result != DARWIN_ART_SURFACE_OK) {
     std::cerr << "DARWIN_ART window resize failed status=" << result
               << " width=" << width << " height=" << height << "\n";
@@ -586,8 +591,10 @@ DarwinArtSurface* darwin_art_surface_create(
   }
 }
 
-DarwinArtSurfaceResult darwin_art_surface_resize(
-    DarwinArtSurface* surface, uint32_t width, uint32_t height) {
+static DarwinArtSurfaceResult ResizeSurfaceBacking(DarwinArtSurface* surface,
+                                                   uint32_t width,
+                                                   uint32_t height,
+                                                   bool update_window) {
   if (!IsMainThread()) return DARWIN_ART_SURFACE_NOT_MAIN_THREAD;
   if (surface == nullptr || !IsValidDimension(width) ||
       !IsValidDimension(height)) {
@@ -616,7 +623,7 @@ DarwinArtSurfaceResult darwin_art_surface_resize(
   if (old_surface != nullptr) CFRelease(old_surface);
   if (surface->view != nil) {
     [surface->view updateDrawableSize];
-    if (surface->window != nil) {
+    if (update_window && surface->window != nil) {
       const CGFloat scale = surface->view.metalLayer.contentsScale > 0.0
                                 ? surface->view.metalLayer.contentsScale
                                 : 1.0;
@@ -626,6 +633,11 @@ DarwinArtSurfaceResult darwin_art_surface_resize(
     }
   }
   return DARWIN_ART_SURFACE_OK;
+}
+
+DarwinArtSurfaceResult darwin_art_surface_resize(
+    DarwinArtSurface* surface, uint32_t width, uint32_t height) {
+  return ResizeSurfaceBacking(surface, width, height, true);
 }
 
 bool darwin_art_surface_get_size(DarwinArtSurface* surface,

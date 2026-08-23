@@ -205,7 +205,16 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     std::cerr << "ART Android MotionEvent: ViewRoot enqueue helper unavailable host="
               << input_host << " method=" << enqueue << "\n";
   }
-  if (enqueue != nullptr && !env->ExceptionCheck()) {
+  // This detached launcher constructs ViewRootImpl/AttachInfo for hardware
+  // rendering, but intentionally does not call ViewRootImpl.setView().  Its
+  // InputStage chain is therefore absent; enqueueInputEvent() can report
+  // success while dropping the packet before DecorView.  Keep the true
+  // ViewRoot route available for an attached host, but use synchronous
+  // DecorView dispatch by default so real APK widgets receive ACTION_UP in
+  // the same owner-thread turn as the native event.
+  const bool use_viewroot_input =
+      std::getenv("DARWIN_ART_USE_VIEWROOT_INPUT") != nullptr;
+  if (use_viewroot_input && enqueue != nullptr && !env->ExceptionCheck()) {
     enqueued = env->CallStaticBooleanMethod(input_host, enqueue, event) == JNI_TRUE;
     if (env->ExceptionCheck()) {
       env->ExceptionClear();
