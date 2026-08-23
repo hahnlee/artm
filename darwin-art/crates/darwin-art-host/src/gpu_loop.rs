@@ -86,6 +86,12 @@ pub(super) fn run(
             loop_error = Some(HostError::RuntimeFailed(dispatch_status));
         } else {
             frames_presented += 1;
+            let pulse_status = runtime
+                .graphics()
+                .map_or(-1, |graphics| graphics.pump_frame(0));
+            if pulse_status != 0 {
+                loop_error = Some(HostError::RuntimeFailed(pulse_status));
+            }
             let mut held_ms = 0_u64;
             while held_ms < test_hold_ms && loop_error.is_none() {
                 let slice_ms = (test_hold_ms - held_ms).min(16);
@@ -160,6 +166,14 @@ pub(super) fn run(
             Ok(dispatched) => frames_presented += dispatched,
             Err(error) => loop_error = Some(error),
         }
+        if loop_error.is_none() {
+            let pulse_status = runtime
+                .graphics()
+                .map_or(-1, |graphics| graphics.pump_frame(0));
+            if pulse_status != 0 {
+                loop_error = Some(HostError::RuntimeFailed(pulse_status));
+            }
+        }
         // The standalone capture gate has no Android ViewRoot to
         // request redraws after ACTION_UP. Keep the framework pulse
         // and GPU RenderNode replay alive for the test pointer so the
@@ -167,20 +181,13 @@ pub(super) fn run(
         if loop_error.is_none()
             && let Some((x, y)) = test_pointer
         {
-            let pulse_status = runtime
+            let replay_status = runtime
                 .graphics()
-                .map_or(-1, |graphics| graphics.pump_frame(0));
-            if pulse_status != 0 {
-                loop_error = Some(HostError::RuntimeFailed(pulse_status));
+                .map_or(-1, |graphics| graphics.dispatch_pointer(2, x, y));
+            if replay_status != 0 {
+                loop_error = Some(HostError::RuntimeFailed(replay_status));
             } else {
-                let replay_status = runtime
-                    .graphics()
-                    .map_or(-1, |graphics| graphics.dispatch_pointer(2, x, y));
-                if replay_status != 0 {
-                    loop_error = Some(HostError::RuntimeFailed(replay_status));
-                } else {
-                    frames_presented += 1;
-                }
+                frames_presented += 1;
             }
         }
         if loop_error.is_some() {

@@ -214,13 +214,9 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   env->DeleteLocalRef(input_host);
   env->DeleteLocalRef(event);
   env->DeleteLocalRef(motion_event_class);
-  const bool rendered = present_content(
-      state, env, nullptr, root, state->interactive_width, state->interactive_height) == JNI_TRUE;
-  if (env->ExceptionCheck()) {
-    env->ExceptionClear();
-    return 84;
-  }
-  return rendered ? 0 : 75;
+  // Input mutates Android state only. The owner-thread vsync loop performs
+  // the single RenderNode/Metal submission for the next frame.
+  return 0;
 }
 
 }  // namespace
@@ -322,14 +318,10 @@ int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
     // Rendering remains on the same owner thread and is still presented once
     // for the current frame.
     if (action == 2u && !state->pointer_stream_active) {
-      const bool rendered =
-          present_content(state, env, nullptr, root, state->interactive_width,
-                          state->interactive_height) == JNI_TRUE;
-      if (env->ExceptionCheck()) {
-        env->ExceptionClear();
-        return 84;
-      }
-      return rendered ? 0 : 75;
+      // Post-terminal animation replays are not Android pointer events. The
+      // frame loop owns their presentation, so this path stays side-effect
+      // free and never submits a frame per synthetic MOVE.
+      return 0;
     }
     const int32_t status = dispatch_motion_event(state, env, root, action, x, y);
     if (status == 0 || std::getenv("DARWIN_ART_INPUT_MODE") != nullptr ||
