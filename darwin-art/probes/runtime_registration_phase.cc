@@ -41,6 +41,10 @@ int run(const Inputs& inputs) {
     std::cerr << "ART Darwin OpenJDK: Math native registration failed\n";
     return 37;
   }
+  if (!darwin_art::RegisterManagedLoadNatives(env)) {
+    std::cerr << "ART Darwin OpenJDK: Runtime/Unix native registration failed\n";
+    return 41;
+  }
   if (!darwin_art::RegisterIcuCharsetNatives(env)) {
     std::cerr << "ART Darwin ICU: charset native registration failed\n";
     return 20;
@@ -96,8 +100,9 @@ int run(const Inputs& inputs) {
   env->DeleteLocalRef(looper_class);
   if (prepare_main_looper == nullptr || env->ExceptionCheck()) {
     std::cerr << "ART Android framework: Looper.prepareMainLooper() failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
     }
     return 25;
   }

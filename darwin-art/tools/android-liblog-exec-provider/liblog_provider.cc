@@ -13,6 +13,14 @@ struct Entry {
 
 #define LIBLOG_ENTRY(symbol) {#symbol, reinterpret_cast<uintptr_t>(&symbol)}
 
+extern "C" int darwin_art_android_log_error_write(int priority,
+                                                    const char* tag,
+                                                    int uid,
+                                                    const char* message) {
+  (void)uid;
+  return __android_log_write(priority, tag, message);
+}
+
 // Exact sorted dynsym surface of the NDK r28c API 35 liblog.so stub.
 const Entry kEntries[] = {
     LIBLOG_ENTRY(__android_log_assert),
@@ -20,6 +28,8 @@ const Entry kEntries[] = {
     LIBLOG_ENTRY(__android_log_buf_write),
     LIBLOG_ENTRY(__android_log_call_aborter),
     LIBLOG_ENTRY(__android_log_default_aborter),
+    {"__android_log_error_write",
+     reinterpret_cast<uintptr_t>(&darwin_art_android_log_error_write)},
     LIBLOG_ENTRY(__android_log_get_minimum_priority),
     LIBLOG_ENTRY(__android_log_is_loggable),
     LIBLOG_ENTRY(__android_log_is_loggable_len),
@@ -59,4 +69,3 @@ extern "C" uintptr_t darwin_art_liblog_provider_resolve(const char* symbol,
   }
   return 0;
 }
-

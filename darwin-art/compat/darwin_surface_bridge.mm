@@ -322,20 +322,27 @@ DarwinArtSurface* darwin_art_surface_create(
     const CGFloat window_scale = WindowScale(create_info->visible);
     NSRect frame = NSMakeRect(0, 0, create_info->width / window_scale,
                               create_info->height / window_scale);
-    surface->window = [[NSWindow alloc]
-        initWithContentRect:frame
-                  styleMask:(NSWindowStyleMaskTitled |
-                             NSWindowStyleMaskClosable |
-                             NSWindowStyleMaskMiniaturizable)
-                    backing:NSBackingStoreBuffered
-                      defer:NO];
-    if (surface->window == nil) {
-      delete surface;
-      return finish(DARWIN_ART_SURFACE_ALLOCATION_FAILED, nullptr);
+    // Headless surfaces still need a Metal view/layer for GPU work, but must
+    // not allocate an AppKit window. A large number of probes and hidden
+    // rendering surfaces are created with visible=false; creating an
+    // NSWindow for each one makes tests leak apparent windows and needlessly
+    // couples offscreen rendering to AppKit window management.
+    if (create_info->visible) {
+      surface->window = [[NSWindow alloc]
+          initWithContentRect:frame
+                    styleMask:(NSWindowStyleMaskTitled |
+                               NSWindowStyleMaskClosable |
+                               NSWindowStyleMaskMiniaturizable)
+                      backing:NSBackingStoreBuffered
+                        defer:NO];
+      if (surface->window == nil) {
+        delete surface;
+        return finish(DARWIN_ART_SURFACE_ALLOCATION_FAILED, nullptr);
+      }
+      // The opaque handle, not AppKit's close operation, owns the window.
+      surface->window.releasedWhenClosed = NO;
+      surface->window.title = WindowTitle(create_info->title);
     }
-    // The opaque handle, not AppKit's close operation, owns the window.
-    surface->window.releasedWhenClosed = NO;
-    surface->window.title = WindowTitle(create_info->title);
     surface->view = [[DarwinArtMetalView alloc]
         initWithFrame:frame
                device:device
@@ -345,10 +352,10 @@ DarwinArtSurface* darwin_art_surface_create(
       delete surface;
       return finish(DARWIN_ART_SURFACE_ALLOCATION_FAILED, nullptr);
     }
-    surface->window.contentView = surface->view;
-    [surface->window makeFirstResponder:surface->view];
-    [surface->window center];
     if (create_info->visible) {
+      surface->window.contentView = surface->view;
+      [surface->window makeFirstResponder:surface->view];
+      [surface->window center];
       [surface->window makeKeyAndOrderFront:nil];
       [application activateIgnoringOtherApps:YES];
     }
@@ -471,6 +478,15 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
 
   @autoreleasepool {
     NSApplication* application = NSApplication.sharedApplication;
+    // A host process does not run AppKit's default NSApplication event loop;
+    // another desktop application can therefore reclaim frontmost status
+    // between pump slices even though our window remains visible. Reassert
+    // the same ownership that surface creation establishes so screenshots
+    // and pointer events observe the Android surface, not the desktop.
+    if (surface->visible && surface->window != nil) {
+      [application activateIgnoringOtherApps:YES];
+      [surface->window makeKeyAndOrderFront:nil];
+    }
     NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
     while (deadline.timeIntervalSinceNow > 0.0) {
       if (surface->visible && !surface->window.visible) {
@@ -486,6 +502,11 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
                                                   dequeue:YES];
       if (event != nil) {
         [application sendEvent:event];
+      }
+      if (surface->visible && surface->window != nil &&
+          !surface->window.isKeyWindow) {
+        [application activateIgnoringOtherApps:YES];
+        [surface->window makeKeyAndOrderFront:nil];
       }
       [application updateWindows];
     }

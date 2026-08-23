@@ -61,6 +61,14 @@ int darwin_art_bionic_strcmp(const char* left, const char* right) {
   return *a == *b ? 0 : (*a < *b ? -1 : 1);
 }
 
+const char* darwin_art_bionic_strchr(const char* string, int value) {
+  const unsigned char wanted = (unsigned char)value;
+  for (const unsigned char* cursor = (const unsigned char*)string;; ++cursor) {
+    if (*cursor == wanted) return (const char*)cursor;
+    if (*cursor == 0) return NULL;
+  }
+}
+
 size_t darwin_art_bionic_strlen(const char* string) {
   const char* end = string;
   while (*end != '\0') ++end;
@@ -78,6 +86,81 @@ int darwin_art_bionic_strncmp(const char* left, const char* right, size_t length
     --length;
   }
   return 0;
+}
+
+const char* darwin_art_bionic_strstr(const char* haystack, const char* needle) {
+  if (*needle == '\0') return haystack;
+  for (const char* candidate = haystack; *candidate != '\0'; ++candidate) {
+    const char* a = candidate;
+    const char* b = needle;
+    while (*a != '\0' && *b != '\0' && *a == *b) {
+      ++a;
+      ++b;
+    }
+    if (*b == '\0') return candidate;
+  }
+  return NULL;
+}
+
+static int Contains(const char* set, unsigned char value) {
+  for (; *set != '\0'; ++set) if ((unsigned char)*set == value) return 1;
+  return 0;
+}
+
+size_t darwin_art_bionic_strspn(const char* string, const char* accept) {
+  size_t length = 0;
+  while (string[length] != '\0' && Contains(accept, (unsigned char)string[length])) ++length;
+  return length;
+}
+
+size_t darwin_art_bionic_strcspn(const char* string, const char* reject) {
+  size_t length = 0;
+  while (string[length] != '\0' && !Contains(reject, (unsigned char)string[length])) ++length;
+  return length;
+}
+
+const char* darwin_art_bionic_strpbrk(const char* string, const char* accept) {
+  for (; *string != '\0'; ++string) if (Contains(accept, (unsigned char)*string)) return string;
+  return NULL;
+}
+
+const char* darwin_art_bionic_strrchr(const char* string, int value) {
+  const char* found = NULL;
+  const unsigned char wanted = (unsigned char)value;
+  for (const unsigned char* cursor = (const unsigned char*)string;; ++cursor) {
+    if (*cursor == wanted) found = (const char*)cursor;
+    if (*cursor == 0) return found;
+  }
+}
+
+char* darwin_art_bionic_strcpy(char* destination, const char* source) {
+  char* result = destination;
+  while ((*destination++ = *source++) != '\0') {}
+  return result;
+}
+
+int darwin_art_bionic_atoi(const char* string) {
+  while (*string == ' ' || *string == '\t' || *string == '\n' || *string == '\r') ++string;
+  int sign = 1;
+  if (*string == '-' || *string == '+') { if (*string++ == '-') sign = -1; }
+  int value = 0;
+  while (*string >= '0' && *string <= '9') value = value * 10 + (*string++ - '0');
+  return sign * value;
+}
+
+void* darwin_art_bionic_bsearch(const void* key, const void* base, size_t count,
+                                size_t size, int (*compare)(const void*, const void*)) {
+  const unsigned char* bytes = (const unsigned char*)base;
+  size_t low = 0;
+  while (low < count) {
+    const size_t middle = low + (count - low) / 2;
+    const void* candidate = bytes + middle * size;
+    const int order = compare(key, candidate);
+    if (order == 0) return (void*)candidate;
+    if (order < 0) count = middle;
+    else low = middle + 1;
+  }
+  return NULL;
 }
 
 wchar_t* darwin_art_bionic_wmemchr(const wchar_t* source, wchar_t value, size_t length) {
@@ -113,14 +196,23 @@ static int NameCompare(const char* left, const char* right) {
 }
 
 static const DarwinArtBionicLeafBinding kBindings[] = {
+    {"atoi", (DarwinArtBionicFunction)darwin_art_bionic_atoi},
+    {"bsearch", (DarwinArtBionicFunction)darwin_art_bionic_bsearch},
     {"memchr", (DarwinArtBionicFunction)darwin_art_bionic_memchr},
     {"memcmp", (DarwinArtBionicFunction)darwin_art_bionic_memcmp},
     {"memcpy", (DarwinArtBionicFunction)darwin_art_bionic_memcpy},
     {"memmove", (DarwinArtBionicFunction)darwin_art_bionic_memmove},
     {"memset", (DarwinArtBionicFunction)darwin_art_bionic_memset},
+    {"strchr", (DarwinArtBionicFunction)darwin_art_bionic_strchr},
     {"strcmp", (DarwinArtBionicFunction)darwin_art_bionic_strcmp},
+    {"strcpy", (DarwinArtBionicFunction)darwin_art_bionic_strcpy},
+    {"strcspn", (DarwinArtBionicFunction)darwin_art_bionic_strcspn},
     {"strlen", (DarwinArtBionicFunction)darwin_art_bionic_strlen},
     {"strncmp", (DarwinArtBionicFunction)darwin_art_bionic_strncmp},
+    {"strpbrk", (DarwinArtBionicFunction)darwin_art_bionic_strpbrk},
+    {"strrchr", (DarwinArtBionicFunction)darwin_art_bionic_strrchr},
+    {"strspn", (DarwinArtBionicFunction)darwin_art_bionic_strspn},
+    {"strstr", (DarwinArtBionicFunction)darwin_art_bionic_strstr},
     {"wcslen", (DarwinArtBionicFunction)darwin_art_bionic_wcslen},
     {"wmemchr", (DarwinArtBionicFunction)darwin_art_bionic_wmemchr},
     {"wmemcmp", (DarwinArtBionicFunction)darwin_art_bionic_wmemcmp},

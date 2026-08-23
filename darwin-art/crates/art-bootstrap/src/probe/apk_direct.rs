@@ -475,6 +475,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_gpu_active_canvas")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_install_hooks")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_clear_hooks")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_acquire")

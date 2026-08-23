@@ -22,27 +22,90 @@ final class DarwinServiceBridge {
                     new DisplayHandler());
             attach(displayBinder, displayService, "android.hardware.display.IDisplayManager");
 
+            // Calculator's Activity.onCreate reports its task description through
+            // ActivityClient -> ActivityTaskManager.  A detached host has no
+            // system_server, so expose a local no-op controller with the same
+            // Android interface instead of returning a null ServiceWithMetadata.
+            Binder activityBinder = new Binder();
+            Class<?> activityTaskInterface =
+                    Class.forName("android.app.IActivityTaskManager");
+            Object activityTaskService = Proxy.newProxyInstance(
+                    activityTaskInterface.getClassLoader(),
+                    new Class<?>[] {activityTaskInterface},
+                    new ActivityTaskHandler());
+            attach(activityBinder, activityTaskService,
+                    "android.app.IActivityTaskManager");
+
+            // ViewRootImpl construction also obtains InputMethodManager.  A
+            // real app window receives this binder from system_server; the
+            // host has no server, so provide the same typed interface with
+            // conservative no-op results rather than a null ServiceWithMetadata.
+            Binder inputMethodBinder = new Binder();
+            Class<?> inputMethodInterface =
+                    Class.forName("com.android.internal.view.IInputMethodManager");
+            Object inputMethodService = Proxy.newProxyInstance(
+                    inputMethodInterface.getClassLoader(),
+                    new Class<?>[] {inputMethodInterface},
+                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+            attach(inputMethodBinder, inputMethodService,
+                    "com.android.internal.view.IInputMethodManager");
+
+            Binder windowBinder = new Binder();
+            Class<?> windowInterface = Class.forName("android.view.IWindowManager");
+            Object windowService = Proxy.newProxyInstance(
+                    windowInterface.getClassLoader(),
+                    new Class<?>[] {windowInterface},
+                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+            attach(windowBinder, windowService, "android.view.IWindowManager");
+
+            // ViewRootImpl asks AccessibilityManager for the high-contrast
+            // setting while it builds AttachInfo.  On Android this is backed
+            // by the system_server accessibility service.  The Darwin host
+            // has no system_server, so install the typed local service rather
+            // than allowing ServiceManager.getService("accessibility") to
+            // return null during ViewRootImpl construction.
+            Binder accessibilityBinder = new Binder();
+            Class<?> accessibilityInterface = Class.forName(
+                    "android.view.accessibility.IAccessibilityManager");
+            Object accessibilityService = Proxy.newProxyInstance(
+                    accessibilityInterface.getClassLoader(),
+                    new Class<?>[] {accessibilityInterface},
+                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+            attach(accessibilityBinder, accessibilityService,
+                    "android.view.accessibility.IAccessibilityManager");
+
+            Binder sensitiveContentBinder = new Binder();
+            Class<?> sensitiveContentInterface = Class.forName(
+                    "android.view.ISensitiveContentProtectionManager");
+            Object sensitiveContentService = Proxy.newProxyInstance(
+                    sensitiveContentInterface.getClassLoader(),
+                    new Class<?>[] {sensitiveContentInterface},
+                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+            attach(sensitiveContentBinder, sensitiveContentService,
+                    "android.view.ISensitiveContentProtectionManager");
+
             Class<?> metadataClass = Class.forName("android.os.ServiceWithMetadata");
-            Object metadata = metadataClass.getDeclaredConstructor().newInstance();
-            Field service = metadataClass.getDeclaredField("service");
-            service.setAccessible(true);
-            service.set(metadata, displayBinder);
-            Field lazy = metadataClass.getDeclaredField("isLazyService");
-            lazy.setAccessible(true);
-            lazy.setBoolean(metadata, false);
             Class<?> serviceClass = Class.forName("android.os.Service");
-            Constructor<?> serviceCtor = serviceClass.getDeclaredConstructor(
-                    int.class, Object.class);
-            serviceCtor.setAccessible(true);
-            // Service's tagged union uses tag 0 for ServiceWithMetadata and
-            // tag 1 for the raw accessor form.
-            Object displayServiceValue = serviceCtor.newInstance(0, metadata);
+            Object displayServiceValue = serviceValue(
+                    metadataClass, serviceClass, displayBinder);
+            Object activityServiceValue = serviceValue(
+                    metadataClass, serviceClass, activityBinder);
+            Object inputMethodServiceValue = serviceValue(
+                    metadataClass, serviceClass, inputMethodBinder);
+            Object windowServiceValue = serviceValue(
+                    metadataClass, serviceClass, windowBinder);
+            Object accessibilityServiceValue = serviceValue(
+                    metadataClass, serviceClass, accessibilityBinder);
+            Object sensitiveContentServiceValue = serviceValue(
+                    metadataClass, serviceClass, sensitiveContentBinder);
 
             Class<?> managerInterface = Class.forName("android.os.IServiceManager");
             Object manager = Proxy.newProxyInstance(
                     managerInterface.getClassLoader(),
                     new Class<?>[] {managerInterface},
-                    new ManagerHandler(displayServiceValue));
+                    new ManagerHandler(displayServiceValue, activityServiceValue,
+                            inputMethodServiceValue, windowServiceValue,
+                            accessibilityServiceValue, sensitiveContentServiceValue));
             Binder context = new Binder();
             attach(context, manager, "android.os.IServiceManager");
             return context;
@@ -50,6 +113,20 @@ final class DarwinServiceBridge {
             Log.e("DarwinServiceBridge", "could not install in-process display service", ignored);
             return new Binder();
         }
+    }
+
+    private static Object serviceValue(Class<?> metadataClass, Class<?> serviceClass,
+            Binder binder) throws Exception {
+        Object metadata = metadataClass.getDeclaredConstructor().newInstance();
+        Field service = metadataClass.getDeclaredField("service");
+        service.setAccessible(true);
+        service.set(metadata, binder);
+        Field lazy = metadataClass.getDeclaredField("isLazyService");
+        lazy.setAccessible(true);
+        lazy.setBoolean(metadata, false);
+        Constructor<?> serviceCtor = serviceClass.getDeclaredConstructor(int.class, Object.class);
+        serviceCtor.setAccessible(true);
+        return serviceCtor.newInstance(0, metadata);
     }
 
     private static void attach(Binder binder, Object owner, String descriptor)
@@ -63,9 +140,21 @@ final class DarwinServiceBridge {
 
     private static final class ManagerHandler implements InvocationHandler {
         private final Object displayService;
+        private final Object activityService;
+        private final Object inputMethodService;
+        private final Object windowService;
+        private final Object accessibilityService;
+        private final Object sensitiveContentService;
 
-        ManagerHandler(Object displayService) {
+        ManagerHandler(Object displayService, Object activityService,
+                Object inputMethodService, Object windowService,
+                Object accessibilityService, Object sensitiveContentService) {
             this.displayService = displayService;
+            this.activityService = activityService;
+            this.inputMethodService = inputMethodService;
+            this.windowService = windowService;
+            this.accessibilityService = accessibilityService;
+            this.sensitiveContentService = sensitiveContentService;
         }
 
         @Override
@@ -73,8 +162,45 @@ final class DarwinServiceBridge {
             if ((method.getName().equals("getService2")
                     || method.getName().equals("checkService2"))
                     && args != null && args.length > 0
-                    && "display".equals(args[0])) {
-                return displayService;
+                    && args[0] instanceof String) {
+                if ("display".equals(args[0])) return displayService;
+                if ("activity".equals(args[0]) || "activity_task".equals(args[0])) {
+                    return activityService;
+                }
+                if ("input_method".equals(args[0])) return inputMethodService;
+                if ("window".equals(args[0])) return windowService;
+                if ("accessibility".equals(args[0])) return accessibilityService;
+                if ("sensitive_content_protection_service".equals(args[0])) {
+                    return sensitiveContentService;
+                }
+            }
+            return defaultValue(method.getReturnType());
+        }
+    }
+
+    private static final class ActivityTaskHandler implements InvocationHandler {
+        private final Object controller;
+
+        ActivityTaskHandler() {
+            Object value = null;
+            try {
+                Class<?> controllerInterface =
+                        Class.forName("android.app.IActivityClientController");
+                value = Proxy.newProxyInstance(
+                        controllerInterface.getClassLoader(),
+                        new Class<?>[] {controllerInterface},
+                        (proxy, method, args) -> defaultValue(method.getReturnType()));
+            } catch (Throwable ignored) {
+                // A missing controller is handled as an ordinary unsupported
+                // service; framework callers still receive safe defaults.
+            }
+            controller = value;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) {
+            if (method.getName().equals("getActivityClientController")) {
+                return controller;
             }
             return defaultValue(method.getReturnType());
         }

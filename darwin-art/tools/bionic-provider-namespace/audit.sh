@@ -39,12 +39,12 @@ for generated in ownership.tsv unsupported-libc.tsv ownership.inc unsupported.in
     fail "generated $generated drift"
 done
 
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 166 ]] ||
-  fail 'expected 159 libc++ owners plus seven reviewed extensions'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 185 ]] ||
+  fail 'expected pinned libc++ owners plus reviewed extensions'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libdl.so"{n++}END{print n+0}')" == 1 ]] ||
   fail 'expected one libdl owner'
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="liblog.so"{n++}END{print n+0}')" == 18 ]] ||
-  fail 'expected 18 liblog owners'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="liblog.so"{n++}END{print n+0}')" == 19 ]] ||
+  fail 'expected 19 liblog owners'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | cut -f1,2 | sort | uniq -d | wc -l | tr -d ' ')" == 0 ]] ||
   fail 'duplicate SONAME/symbol owners'
 [[ "$(tail -n +2 "$here/generated/unsupported-libc.tsv" | wc -l | tr -d ' ')" == 0 ]] ||
@@ -83,6 +83,7 @@ _darwin_art_bionic_fs_resolve
 _darwin_art_bionic_ioctl_resolve
 _darwin_art_bionic_libc_leaf_resolve
 _darwin_art_bionic_locale_resolve
+_darwin_art_bionic_math_resolve
 _darwin_art_bionic_namespace_bind
 _darwin_art_bionic_numeric_resolve
 _darwin_art_bionic_process_state_resolve
@@ -127,4 +128,4 @@ if grep -E '(_dlopen|_dlsym|_dlvsym|_NSLookupSymbolInImage|__dyld_)' <<<"$undefi
   fail 'host loader undefined reference present'
 fi
 
-echo 'bionic-provider-namespace: PASS libcxx=160/160 extensions=7 liblog=18 owned=185 unsupported=0 duplicate-owner=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'
+echo 'bionic-provider-namespace: PASS libcxx=160/160 extensions=65 liblog=19 owned=243 unsupported=0 duplicate-owner=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'

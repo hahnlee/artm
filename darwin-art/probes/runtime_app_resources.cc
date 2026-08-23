@@ -104,7 +104,7 @@ int prepare(JNIEnv* env, jclass probe_resources_class,
           env->GetLongField(out->asset_manager, asset_manager_object);
       env->CallStaticVoidMethod(out->asset_manager_class, native_set_apk_assets,
                                 native_asset_manager,
-                                out->configured_apk_assets, JNI_FALSE, JNI_FALSE);
+                                out->configured_apk_assets, JNI_TRUE, JNI_FALSE);
       if (!env->ExceptionCheck()) {
         env->SetObjectField(out->asset_manager, apk_assets_field,
                             out->configured_apk_assets);

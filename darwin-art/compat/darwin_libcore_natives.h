@@ -6,6 +6,9 @@
 namespace darwin_art {
 
 bool RegisterLibcoreNatives(JNIEnv* env);
+// Complete Android java.lang.Runtime + sun.nio.fs.UnixNativeDispatcher tables.
+// The real-graphics owner installs these after Math and before app code.
+bool RegisterManagedLoadNatives(JNIEnv* env);
 bool RegisterLibcoreCharacterNatives(JNIEnv* env);
 bool RegisterLibcoreIcuNatives(JNIEnv* env);
 bool ShutdownLibcoreNatives();

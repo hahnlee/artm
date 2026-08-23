@@ -25,6 +25,12 @@ jint BinderGetCallingUid() {
   return 1000;
 }
 
+// These identity operations are @CriticalNative in Android 16, so their
+// callback ABI intentionally has no JNIEnv/jclass pair.
+jlong BinderClearCallingIdentity() { return 0; }
+void BinderRestoreCallingIdentity(jlong) {}
+void BinderFlushPendingCommands() {}
+
 jobject CreateDarwinContextBinder(JNIEnv* env) {
   // There is no system_server on the Darwin host. The fixture installs a
   // process-local IServiceManager/IDisplayManager pair whose only real answer
@@ -120,6 +126,12 @@ bool RegisterFrameworkBinderNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&BinderGetNativeFinalizer)},
       {const_cast<char*>("getCallingUid"), const_cast<char*>("()I"),
        reinterpret_cast<void*>(&BinderGetCallingUid)},
+      {const_cast<char*>("clearCallingIdentity"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&BinderClearCallingIdentity)},
+      {const_cast<char*>("restoreCallingIdentity"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&BinderRestoreCallingIdentity)},
+      {const_cast<char*>("flushPendingCommands"), const_cast<char*>("()V"),
+       reinterpret_cast<void*>(&BinderFlushPendingCommands)},
   };
   if (!Register(env, "android/os/Binder", binder_methods,
                 static_cast<jint>(std::size(binder_methods)))) {

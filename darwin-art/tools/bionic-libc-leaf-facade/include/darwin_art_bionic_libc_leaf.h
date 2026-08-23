@@ -22,8 +22,18 @@ void* darwin_art_bionic_memcpy(void* destination, const void* source, size_t len
 void* darwin_art_bionic_memmove(void* destination, const void* source, size_t length);
 void* darwin_art_bionic_memset(void* destination, int value, size_t length);
 int darwin_art_bionic_strcmp(const char* left, const char* right);
+const char* darwin_art_bionic_strchr(const char* string, int value);
 size_t darwin_art_bionic_strlen(const char* string);
 int darwin_art_bionic_strncmp(const char* left, const char* right, size_t length);
+const char* darwin_art_bionic_strstr(const char* haystack, const char* needle);
+size_t darwin_art_bionic_strspn(const char* string, const char* accept);
+size_t darwin_art_bionic_strcspn(const char* string, const char* reject);
+const char* darwin_art_bionic_strpbrk(const char* string, const char* accept);
+const char* darwin_art_bionic_strrchr(const char* string, int value);
+char* darwin_art_bionic_strcpy(char* destination, const char* source);
+int darwin_art_bionic_atoi(const char* string);
+void* darwin_art_bionic_bsearch(const void* key, const void* base, size_t count,
+                                size_t size, int (*compare)(const void*, const void*));
 wchar_t* darwin_art_bionic_wmemchr(const wchar_t* source, wchar_t value, size_t length);
 int darwin_art_bionic_wmemcmp(const wchar_t* left, const wchar_t* right, size_t length);
 size_t darwin_art_bionic_wcslen(const wchar_t* string);
@@ -36,4 +46,3 @@ DarwinArtBionicFunction darwin_art_bionic_libc_leaf_resolve(const char* import_n
 #endif
 
 #endif
-

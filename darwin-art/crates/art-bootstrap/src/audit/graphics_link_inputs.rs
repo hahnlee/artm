@@ -15,6 +15,7 @@ pub(super) struct GraphicsRuntimeInputs {
     pub(super) os_constants_archive: PathBuf,
     pub(super) unix_filesystem_archive: PathBuf,
     pub(super) openjdkjvm_archive: PathBuf,
+    pub(super) managed_load_archive: PathBuf,
     pub(super) file_input_stream_archive: PathBuf,
     pub(super) file_descriptor_archive: PathBuf,
     pub(super) system_natives_archive: PathBuf,
@@ -45,6 +46,9 @@ impl GraphicsRuntimeInputs {
             unix_filesystem_archive: root
                 .join("_build/unix-filesystem-darwin/libopenjdk-unix-filesystem-darwin.a"),
             openjdkjvm_archive: root.join("_build/openjdkjvm-darwin/libopenjdkjvm-darwin.a"),
+            managed_load_archive: root.join(
+                "_build/android-managed-native-load/libopenjdk-runtime-managed-load-darwin.a",
+            ),
             file_input_stream_archive: root
                 .join("_build/file-input-stream-darwin/libopenjdk-file-input-stream-darwin.a"),
             file_descriptor_archive: root
@@ -85,6 +89,7 @@ impl GraphicsRuntimeInputs {
             &inputs.os_constants_archive,
             &inputs.unix_filesystem_archive,
             &inputs.openjdkjvm_archive,
+            &inputs.managed_load_archive,
             &inputs.file_input_stream_archive,
             &inputs.file_descriptor_archive,
             &inputs.system_natives_archive,

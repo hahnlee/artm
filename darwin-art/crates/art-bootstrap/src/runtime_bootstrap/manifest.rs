@@ -51,6 +51,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0028-darwin-minimal-runtime-start.patch",
     "patches/art/0029-darwin-arm64-native-stack-pcs.patch",
     "patches/art/0030-darwin-large-object-bitmap-window.patch",
+    "patches/art/0031-darwin-class-loader-native-path-elements.patch",
 ];
 
 #[cfg(test)]

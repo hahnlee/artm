@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -107,7 +108,7 @@ ElfLibrary* AsElfLibrary(void* handle) {
 extern "C" void* OpenNativeLibrary(JNIEnv* env,
                                     int32_t,
                                     const char* path,
-                                    jobject,
+                                    jobject loader,
                                     const char*,
                                     jstring,
                                     bool* needs_native_bridge,
@@ -164,6 +165,9 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
     }
     std::string error;
     auto library = std::make_unique<ElfLibrary>();
+    library->app_loader = loader == nullptr ? nullptr : env->NewGlobalRef(loader);
+    std::cerr << "DARWIN ELF loader: initiating loader=" << loader
+              << " global=" << library->app_loader << "\n";
     library->native_owner = darwin_art_runtime_native_owner_create();
     if (library->native_owner == nullptr) {
       SetNativeLoaderError(error_msg, "Rust native owner allocation failed");
@@ -414,8 +418,7 @@ extern "C" bool CloseNativeLibrary(void* handle,
       SetNativeLoaderError(error_msg, "invalid Android ELF NativeBridge handle");
       return false;
     }
-    darwin_art::android_jni::DestroyRegularTrampolines(library->trampolines);
-    library->trampolines = nullptr;
+    DestroyRuntimeElfTrampolines(library);
     const int status = darwin_art_runtime_native_owner_destroy(
         static_cast<RuntimeNativeOwner*>(handle));
     if (status != 0) {

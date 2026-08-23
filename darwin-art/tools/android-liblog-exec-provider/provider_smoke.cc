@@ -71,7 +71,6 @@ int main() {
   Resolve<SetLogger>("__android_log_set_logger")(
       Resolve<__android_logger_function>("__android_log_stderr_logger"));
   std::fprintf(stderr,
-               "android-liblog-exec-provider: PASS symbols=18 unique=18 calls=3 private=denied\n");
+               "android-liblog-exec-provider: PASS symbols=19 unique=19 calls=3 private=denied\n");
   return 0;
 }
-

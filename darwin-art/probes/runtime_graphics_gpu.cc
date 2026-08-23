@@ -30,6 +30,86 @@
 namespace darwin_art_graphics {
 
 #if defined(DARWIN_ART_REAL_GRAPHICS)
+int prepare_gpu_surface(GraphicsState* state, jint width, jint height) {
+  if (state == nullptr) return 1;
+  if (state->gpu_surface != nullptr) return 0;
+  DarwinArtSurfaceCreateInfo info{
+      .width = static_cast<uint32_t>(width),
+      .height = static_cast<uint32_t>(height),
+      .title = "Darwin ART · HWUI Metal",
+      .visible = true,
+  };
+  DarwinArtSurfaceResult result = DARWIN_ART_SURFACE_OK;
+  state->gpu_surface = darwin_art_surface_create(&info, &result);
+  if (state->gpu_surface == nullptr) {
+    std::cerr << "ART HWUI GPU: surface initialization failed status="
+              << result << "\n";
+    return static_cast<int>(result);
+  }
+  darwin_art_surface_set_active_gpu(state->gpu_surface);
+  return 0;
+}
+
+jboolean attach_hardware_hierarchy_on_owner(GraphicsState* state, JNIEnv* env,
+                                            jobject view) {
+  if (state == nullptr || env == nullptr || view == nullptr ||
+      state->hardware_context == nullptr) {
+    return JNI_FALSE;
+  }
+  std::cerr << "ART HWUI GPU: owner-thread attach begin\n";
+  jclass thread_class = env->FindClass("java/lang/Thread");
+  jmethodID current_thread = thread_class == nullptr
+                                 ? nullptr
+                                 : env->GetStaticMethodID(
+                                       thread_class, "currentThread",
+                                       "()Ljava/lang/Thread;");
+  jobject thread = current_thread == nullptr
+                       ? nullptr
+                       : env->CallStaticObjectMethod(thread_class, current_thread);
+  jmethodID get_loader = thread_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(
+                                   thread_class, "getContextClassLoader",
+                                   "()Ljava/lang/ClassLoader;");
+  jobject loader = get_loader == nullptr
+                       ? nullptr
+                       : env->CallObjectMethod(thread, get_loader);
+  jclass loader_class = loader == nullptr ? nullptr : env->GetObjectClass(loader);
+  jmethodID load_class = loader_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(
+                                   loader_class, "loadClass",
+                                   "(Ljava/lang/String;)Ljava/lang/Class;");
+  jstring helper_name = env->NewStringUTF("dev.darwinart.probe.ProbeAnimationHost");
+  jclass helper = load_class == nullptr
+                      ? nullptr
+                      : static_cast<jclass>(env->CallObjectMethod(
+                            loader, load_class, helper_name));
+  jmethodID attach = helper == nullptr
+                         ? nullptr
+                         : env->GetStaticMethodID(
+                               helper, "attachHardwareHierarchy",
+                               "(Ljava/lang/Object;Ljava/lang/Object;)Z");
+  jboolean result = (attach == nullptr || env->ExceptionCheck())
+                        ? JNI_FALSE
+                        : env->CallStaticBooleanMethod(
+                              helper, attach, view, state->hardware_context);
+  if (env->ExceptionCheck()) {
+    std::cerr << "ART HWUI GPU: owner-thread ViewRoot attach failed\n";
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+    result = JNI_FALSE;
+  }
+  std::cerr << "ART HWUI GPU: owner-thread attach end result="
+            << (result == JNI_TRUE ? 1 : 0) << "\n";
+  env->DeleteLocalRef(helper_name);
+  env->DeleteLocalRef(loader_class);
+  env->DeleteLocalRef(loader);
+  env->DeleteLocalRef(thread);
+  env->DeleteLocalRef(thread_class);
+  return result;
+}
+
 jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
                                   jint width, jint height) {
   if (state == nullptr) return JNI_FALSE;
@@ -37,20 +117,9 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     return JNI_FALSE;
   }
   if (state->gpu_surface == nullptr) {
-    DarwinArtSurfaceCreateInfo info{
-        .width = static_cast<uint32_t>(width),
-        .height = static_cast<uint32_t>(height),
-        .title = "Darwin ART · HWUI Metal",
-        .visible = true,
-    };
-    DarwinArtSurfaceResult result = DARWIN_ART_SURFACE_OK;
-    state->gpu_surface = darwin_art_surface_create(&info, &result);
-    if (state->gpu_surface == nullptr) {
-      std::cerr << "ART HWUI GPU: surface initialization failed status="
-                << result << "\n";
+    if (prepare_gpu_surface(state, width, height) != 0) {
       return JNI_FALSE;
     }
-    darwin_art_surface_set_active_gpu(state->gpu_surface);
   }
 
   // ACTION_MOVE is intentionally replay-only. Re-recording View.draw() every
@@ -58,7 +127,7 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   // RippleDrawable appear static even while RenderNodeAnimators advance.
   if (state->gpu_render_node_recorded && state->pending_pressed_action == 0) {
     return darwin_art_hwui::render_node_to_surface(
-               env, state->gpu_render_node, state->gpu_surface, width, height,
+               env, view, state->gpu_render_node, state->gpu_surface, width, height,
                state->gpu_ripple_overlay_active, state->gpu_ripple_overlay_x,
                state->gpu_ripple_overlay_y, state->gpu_ripple_overlay_started)
                ? JNI_TRUE
@@ -124,6 +193,11 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
           ? nullptr
           : env->GetStaticMethodID(animation_host_class, "create",
                                    "(Ljava/lang/Class;)Ljava/lang/Object;");
+  jmethodID prepare_view_pagers =
+      animation_host_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(animation_host_class, "prepareViewPagers",
+                                   "(Ljava/lang/Object;)V");
   jmethodID render_node_create =
       render_node_class == nullptr
           ? nullptr
@@ -162,24 +236,21 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     env->DeleteLocalRef(node);
     env->DeleteLocalRef(node_name);
   }
+  // Supply only Android's AttachInfo bookkeeping to the detached hierarchy.
+  // ProbeAnimationHost deliberately does not dispatch the full ViewRoot
+  // attach lifecycle (there is no window session or traversal thread), but
+  // ViewGroup child recording still needs mAttachInfo to take the normal
+  // hardware path. This is a one-time owner-thread operation.
+  if (state->gpu_render_node != nullptr && state->hardware_context != nullptr &&
+      !state->gpu_render_node_recorded) {
+    attach_hardware_hierarchy_on_owner(state, env, view);
+  }
   jobject java_canvas =
       state->gpu_render_node == nullptr || begin_recording == nullptr ||
               env->ExceptionCheck()
           ? nullptr
           : env->CallObjectMethod(state->gpu_render_node, begin_recording, width,
                                   height);
-  if (java_canvas != nullptr && std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr) {
-    jclass canvas_class = env->FindClass("android/graphics/Canvas");
-    jmethodID is_hw = canvas_class == nullptr
-                          ? nullptr
-                          : env->GetMethodID(canvas_class, "isHardwareAccelerated", "()Z");
-    if (is_hw != nullptr && !env->ExceptionCheck()) {
-      std::cerr << "ART HWUI RecordingCanvas hardware="
-                << env->CallBooleanMethod(java_canvas, is_hw) << "\n";
-    }
-    env->ExceptionClear();
-    env->DeleteLocalRef(canvas_class);
-  }
   if (java_canvas == nullptr || native_render_node == nullptr ||
       end_recording == nullptr || set_position == nullptr ||
       env->ExceptionCheck()) {
@@ -211,6 +282,14 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     return JNI_FALSE;
   }
   bool recording_ended = false;
+  auto dump_pending_exception = [&](const char* phase) {
+    if (!env->ExceptionCheck()) return;
+    std::cerr << "ART HWUI GPU: managed exception during " << phase << "\n";
+    art::Thread* self = art::Thread::Current();
+    if (self != nullptr && self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+  };
   auto finish_recording = [&]() -> bool {
     if (recording_ended) return true;
     // endRecording is the Java-side promotion boundary. Always close a
@@ -284,6 +363,7 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   const jint width_spec = kMeasureExactly | (width & 0x3fffffff);
   const jint height_spec = kMeasureExactly | (height & 0x3fffffff);
   env->CallVoidMethod(view, measure, width_spec, height_spec);
+  dump_pending_exception("View.measure");
   // Match the ViewRoot traversal contract used by the existing raster probe:
   // seed detached root bounds before layout so its children receive a stable
   // first hardware-recording pass without window-service callbacks.
@@ -293,6 +373,7 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   env->SetIntField(view, view_bottom, height);
   env->CallVoidMethod(view, layout, 0, 0, width, height);
   if (env->ExceptionCheck()) {
+    dump_pending_exception("View.layout");
     env->ExceptionClear();
     finish_recording();
     env->DeleteLocalRef(view_class);
@@ -303,6 +384,25 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     std::cerr << "ART HWUI GPU: View measure/layout failed\n";
     return JNI_FALSE;
   }
+  if (std::getenv("DARWIN_ART_SKOTTIE_METAL") != nullptr) {
+    darwin_art_hwui::hide_skottie_backing_views(env, view);
+  }
+  // A real ViewRoot performs the first ViewPager population while the
+  // hierarchy is attached to a window.  This standalone probe has no
+  // ViewRoot, so support-library ViewPager's drawing-order cache would remain
+  // null and its getChildDrawingOrder() would throw during DecorView.draw().
+  // Re-run the same public population hook on every pager in the hierarchy;
+  // this changes no APK code and keeps the Android view traversal intact.
+  // A real ViewRoot owns an app Looper and window-system thread. This
+  // detached host intentionally does not synthesize one; the content root
+  // is measured/layouted directly and recorded into the persistent RenderNode.
+  if (prepare_view_pagers != nullptr && !env->ExceptionCheck()) {
+    env->CallStaticVoidMethod(animation_host_class, prepare_view_pagers, view);
+    if (env->ExceptionCheck()) {
+      dump_pending_exception("ProbeAnimationHost.prepareViewPagers");
+      env->ExceptionClear();
+    }
+  }
   const uint32_t pending_pressed_action = state->pending_pressed_action;
   const jfloat pending_pressed_x = state->pending_pressed_x;
   const jfloat pending_pressed_y = state->pending_pressed_y;
@@ -312,11 +412,14 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     if (drawable_hotspot_changed != nullptr) {
       env->CallVoidMethod(state->pressed_view, drawable_hotspot_changed,
                           pending_pressed_x, pending_pressed_y);
+      dump_pending_exception("View.drawableHotspotChanged");
     }
     env->CallVoidMethod(state->pressed_view, set_pressed,
                         pending_pressed_action == 1 ? JNI_TRUE : JNI_FALSE);
+    dump_pending_exception("View.setPressed");
   }
   env->CallVoidMethod(view, draw, java_canvas);
+  dump_pending_exception("View.draw");
   const bool draw_ok = !env->ExceptionCheck();
   const bool recording_ok = finish_recording();
   env->DeleteLocalRef(view_class);
@@ -326,10 +429,6 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   env->DeleteLocalRef(render_node_class);
   if (!draw_ok || !recording_ok) {
     std::cerr << "ART HWUI GPU: View.draw failed\n";
-    art::Thread* self = art::Thread::Current();
-    if (self != nullptr && self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
-    }
     env->ExceptionClear();
     return JNI_FALSE;
   }
@@ -346,14 +445,15 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
             << " stagingContent=" << node->mStagingDisplayList.hasContent()
             << " stagingSize=" << node->mStagingDisplayList.getUsedSize()
             << " activeContent=" << node->mDisplayList.hasContent() << "\n";
-  darwin_art_hwui::sync_recorded_render_node_tree(node);
-  if (std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr) {
-    std::cerr << "ART HWUI animation inspect root new="
-              << node->mAnimatorManager.mNewAnimators.size()
-              << " active=" << node->mAnimatorManager.mAnimators.size()
-              << " handle=" << node->mAnimatorManager.mAnimationHandle
-              << " children=" << node->mDisplayList.getUsedSize() << "\n";
-  }
+  const size_t synchronized_nodes =
+      darwin_art_hwui::sync_recorded_render_node_tree(node);
+  std::cerr << "ART HWUI GPU: synchronized RenderNodes=" << synchronized_nodes
+            << " activeSize=" << node->mDisplayList.getUsedSize()
+            << " childNodes="
+            << (node->mDisplayList.asSkiaDl() == nullptr
+                    ? 0
+                    : node->mDisplayList.asSkiaDl()->mChildNodes.size())
+            << "\n";
   if (!node->mDisplayList || node->mDisplayList.isEmpty()) {
     std::cerr << "ART HWUI GPU: Java RenderNode produced empty display list\n";
     return JNI_FALSE;
@@ -369,15 +469,10 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     }
     darwin_art_hwui::register_node_subtree_animators(
         node, *state->hwui_animation_context);
-    if (std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr) {
-      std::cerr << "ART HWUI animation registered context="
-                << state->hwui_animation_context.get() << " has="
-                << state->hwui_animation_context->hasAnimations() << "\n";
-    }
   }
 
   if (!darwin_art_hwui::render_node_to_surface(
-          env, state->gpu_render_node, state->gpu_surface, width, height,
+          env, view, state->gpu_render_node, state->gpu_surface, width, height,
           state->gpu_ripple_overlay_active, state->gpu_ripple_overlay_x,
           state->gpu_ripple_overlay_y, state->gpu_ripple_overlay_started)) {
     std::cerr << "ART HWUI GPU: drawable submit failed\n";
@@ -390,6 +485,8 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   state->gpu_render_node_recorded = true;
   return JNI_TRUE;
 }
+#else
+int prepare_gpu_surface(GraphicsState*, jint, jint) { return 0; }
 #endif
 
 #if !defined(DARWIN_ART_REAL_GRAPHICS)

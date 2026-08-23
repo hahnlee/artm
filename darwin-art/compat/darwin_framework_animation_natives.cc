@@ -372,6 +372,38 @@ void PerfettoCategoryNativeRegister(jlong) {}
 void PerfettoCategoryNativeUnregister(jlong) {}
 jboolean PerfettoCategoryNativeIsEnabled(jlong) { return JNI_FALSE; }
 
+// ProtoLog initializes Perfetto while ViewRootImpl is being constructed. A
+// Darwin host has no perfetto producer backend, but the framework still needs
+// the exact initialization ABI so tracing remains an inert optional service
+// instead of aborting window attachment with UnsatisfiedLinkError.
+void PerfettoProducerNativeInit(JNIEnv*, jclass, jint, jint) {}
+
+// ProtoLogDataSource is constructed by ViewRootImpl even when no tracing
+// backend is present. Keep its Java-side object lifecycle valid while making
+// all trace iteration inert on Darwin.
+jlong PerfettoDataSourceNativeCreate(JNIEnv*, jclass, jobject, jstring) {
+  return 1;
+}
+void PerfettoDataSourceNativeFlushAll(JNIEnv*, jclass, jlong) {}
+jlong PerfettoDataSourceNativeGetFinalizer(JNIEnv*, jclass) { return 0; }
+jint PerfettoDataSourceNativeGetInstanceIndex(JNIEnv*, jclass, jlong) {
+  return 0;
+}
+jobject PerfettoDataSourceNativeGetInstance(JNIEnv*, jclass, jlong, jint) {
+  return nullptr;
+}
+jboolean PerfettoDataSourceNativeIterateBegin(JNIEnv*, jclass, jlong) {
+  return JNI_FALSE;
+}
+void PerfettoDataSourceNativeIterateBreak(JNIEnv*, jclass, jlong) {}
+jboolean PerfettoDataSourceNativeIterateNext(JNIEnv*, jclass, jlong) {
+  return JNI_FALSE;
+}
+void PerfettoDataSourceNativeRegister(JNIEnv*, jclass, jlong, jint, jboolean,
+                                      jboolean) {}
+void PerfettoDataSourceNativeReleaseInstance(JNIEnv*, jclass, jlong, jint) {}
+void PerfettoDataSourceNativeWritePackets(JNIEnv*, jclass, jlong, jobjectArray) {}
+
 jlong PerfettoTrackEventExtraNativeDelete() {
   return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(
       &PerfettoNoopFinalizer));
@@ -484,8 +516,55 @@ bool RegisterFrameworkAnimationNatives(JNIEnv* env) {
       {const_cast<char*>("native_delete"), const_cast<char*>("()J"),
        reinterpret_cast<void*>(&PerfettoTrackEventExtraNativeDelete)},
   };
-  return Register(env, "android/os/PerfettoTrackEventExtra", perfetto_extra_methods,
-                  static_cast<jint>(std::size(perfetto_extra_methods)));
+  if (!Register(env, "android/os/PerfettoTrackEventExtra", perfetto_extra_methods,
+                static_cast<jint>(std::size(perfetto_extra_methods)))) {
+    return false;
+  }
+  JNINativeMethod perfetto_producer_methods[] = {
+      {const_cast<char*>("nativePerfettoProducerInit"),
+       const_cast<char*>("(II)V"),
+       reinterpret_cast<void*>(&PerfettoProducerNativeInit)},
+  };
+  if (!Register(env, "android/tracing/perfetto/Producer",
+                perfetto_producer_methods,
+                static_cast<jint>(std::size(perfetto_producer_methods)))) {
+    return false;
+  }
+  JNINativeMethod perfetto_data_source_methods[] = {
+      {const_cast<char*>("nativeCreate"),
+       const_cast<char*>("(Landroid/tracing/perfetto/DataSource;Ljava/lang/String;)J"),
+       reinterpret_cast<void*>(&PerfettoDataSourceNativeCreate)},
+      {const_cast<char*>("nativeFlushAll"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&PerfettoDataSourceNativeFlushAll)},
+      {const_cast<char*>("nativeGetFinalizer"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&PerfettoDataSourceNativeGetFinalizer)},
+      {const_cast<char*>("nativeGetPerfettoDsInstanceIndex"),
+       const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&PerfettoDataSourceNativeGetInstanceIndex)},
+      {const_cast<char*>("nativeGetPerfettoInstanceLocked"),
+       const_cast<char*>("(JI)Landroid/tracing/perfetto/DataSourceInstance;"),
+       reinterpret_cast<void*>(&PerfettoDataSourceNativeGetInstance)},
+      {const_cast<char*>("nativePerfettoDsTraceIterateBegin"),
+       const_cast<char*>("(J)Z"),
+       reinterpret_cast<void*>(&PerfettoDataSourceNativeIterateBegin)},
+      {const_cast<char*>("nativePerfettoDsTraceIterateBreak"),
+       const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&PerfettoDataSourceNativeIterateBreak)},
+      {const_cast<char*>("nativePerfettoDsTraceIterateNext"),
+       const_cast<char*>("(J)Z"),
+       reinterpret_cast<void*>(&PerfettoDataSourceNativeIterateNext)},
+      {const_cast<char*>("nativeRegisterDataSource"),
+       const_cast<char*>("(JIZZ)V"),
+       reinterpret_cast<void*>(&PerfettoDataSourceNativeRegister)},
+      {const_cast<char*>("nativeReleasePerfettoInstanceLocked"),
+       const_cast<char*>("(JI)V"),
+       reinterpret_cast<void*>(&PerfettoDataSourceNativeReleaseInstance)},
+      {const_cast<char*>("nativeWritePackets"), const_cast<char*>("(J[[B)V"),
+       reinterpret_cast<void*>(&PerfettoDataSourceNativeWritePackets)},
+  };
+  return Register(env, "android/tracing/perfetto/DataSource",
+                  perfetto_data_source_methods,
+                  static_cast<jint>(std::size(perfetto_data_source_methods)));
 }
 
 }  // namespace darwin_art

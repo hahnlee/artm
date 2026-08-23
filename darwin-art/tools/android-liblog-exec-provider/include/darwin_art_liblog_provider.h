@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-enum { DARWIN_ART_LIBLOG_PROVIDER_COUNT = 18 };
+enum { DARWIN_ART_LIBLOG_PROVIDER_COUNT = 19 };
 
 size_t darwin_art_liblog_provider_count(void);
 const char* darwin_art_liblog_provider_name(uint32_t ordinal);

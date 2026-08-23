@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 
 #ifdef HIDDEN
 #undef HIDDEN
@@ -20,6 +21,7 @@
 #undef protected
 #undef private
 #include "darwin_surface_bridge.h"
+#include "include/core/SkCanvas.h"
 #include "pipeline/skia/RenderNodeDrawable.h"
 #include "runtime_frame_probe.h"
 
@@ -32,9 +34,268 @@ class DarwinHwuiTreeObserver final : public android::uirenderer::TreeObserver {
   }
 };
 
+jclass load_context_class(JNIEnv* env, const char* binary_name) {
+  if (env == nullptr || binary_name == nullptr) return nullptr;
+  jclass thread_class = env->FindClass("java/lang/Thread");
+  if (thread_class == nullptr || env->ExceptionCheck()) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    return nullptr;
+  }
+  jmethodID current_thread =
+      env->GetStaticMethodID(thread_class, "currentThread",
+                             "()Ljava/lang/Thread;");
+  jmethodID get_loader =
+      env->GetMethodID(thread_class, "getContextClassLoader",
+                       "()Ljava/lang/ClassLoader;");
+  jobject thread = current_thread == nullptr
+                       ? nullptr
+                       : env->CallStaticObjectMethod(thread_class, current_thread);
+  jobject loader = (thread == nullptr || get_loader == nullptr)
+                       ? nullptr
+                       : env->CallObjectMethod(thread, get_loader);
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  jclass loader_class =
+      loader == nullptr ? nullptr : env->GetObjectClass(loader);
+  jmethodID load_class =
+      loader_class == nullptr
+          ? nullptr
+          : env->GetMethodID(loader_class, "loadClass",
+                             "(Ljava/lang/String;)Ljava/lang/Class;");
+  jstring name = env->NewStringUTF(binary_name);
+  jobject result = (loader == nullptr || load_class == nullptr || name == nullptr)
+                       ? nullptr
+                       : env->CallObjectMethod(loader, load_class, name);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    result = nullptr;
+  }
+  if (name != nullptr) env->DeleteLocalRef(name);
+  if (loader_class != nullptr) env->DeleteLocalRef(loader_class);
+  if (loader != nullptr) env->DeleteLocalRef(loader);
+  if (thread != nullptr) env->DeleteLocalRef(thread);
+  env->DeleteLocalRef(thread_class);
+  return static_cast<jclass>(result);
+}
+
+// Render the real AOSP SkottieView instances into the same CAMetalLayer
+// drawable as the framework display list.  The APK remains byte-for-byte
+// unchanged; we only invoke its existing private native nDrawFrame method
+// while the host-owned GPU canvas is live.
+bool render_skottie_view_tree(JNIEnv* env, jobject view, jclass skottie_class,
+                              jclass animation_class, jfieldID animation_field,
+                              jfieldID native_proxy_field, jmethodID draw_frame,
+                              jclass runner_class, jmethodID set_canvas,
+                              jmethodID progress_method, jmethodID get_child_count,
+                              jmethodID get_child_at, jmethodID get_width,
+                              jmethodID get_height, jmethodID get_left,
+                              jmethodID get_top, jclass view_group_class,
+                              jint origin_x, jint origin_y, jint surface_width,
+                              jint surface_height) {
+  if (env == nullptr || view == nullptr) return false;
+  bool drew = false;
+  const jint left = get_left == nullptr ? 0 : env->CallIntMethod(view, get_left);
+  const jint top = get_top == nullptr ? 0 : env->CallIntMethod(view, get_top);
+  const jint x = origin_x + left;
+  const jint y = origin_y + top;
+  if (skottie_class != nullptr && env->IsInstanceOf(view, skottie_class)) {
+    // AOSP SkottieView owns a TextureView/SurfaceView child.  That child is
+    // a separate compositor layer and would cover the direct Ganesh result
+    // with its empty white surface on Darwin.  Keep the APK and its Java
+    // animation object unchanged; only suppress this runtime-only backing
+    // layer while the native Skottie graph is replayed into Metal.
+    if (get_child_count != nullptr && get_child_at != nullptr) {
+      const jint backing_count = env->CallIntMethod(view, get_child_count);
+      if (!env->ExceptionCheck()) {
+        for (jint i = 0; i < backing_count; ++i) {
+          jobject backing = env->CallObjectMethod(view, get_child_at, i);
+          if (backing == nullptr || env->ExceptionCheck()) {
+            if (env->ExceptionCheck()) env->ExceptionClear();
+            continue;
+          }
+          jclass backing_class = env->GetObjectClass(backing);
+          jmethodID set_visibility =
+              backing_class == nullptr
+                  ? nullptr
+                  : env->GetMethodID(backing_class, "setVisibility", "(I)V");
+          if (set_visibility != nullptr && !env->ExceptionCheck()) {
+            env->CallVoidMethod(backing, set_visibility, 4 /* View.INVISIBLE */);
+          }
+          if (env->ExceptionCheck()) env->ExceptionClear();
+          if (backing_class != nullptr) env->DeleteLocalRef(backing_class);
+          env->DeleteLocalRef(backing);
+        }
+      } else {
+        env->ExceptionClear();
+      }
+    }
+    jobject animation = env->GetObjectField(view, animation_field);
+    if (animation != nullptr && !env->ExceptionCheck()) {
+      const jlong native_proxy = env->GetLongField(animation, native_proxy_field);
+      const jfloat progress = progress_method == nullptr
+                                  ? 0.0f
+                                  : env->CallFloatMethod(animation, progress_method);
+      const jint width = get_width == nullptr ? surface_width
+                                               : env->CallIntMethod(view, get_width);
+      const jint height = get_height == nullptr ? surface_height
+                                                 : env->CallIntMethod(view, get_height);
+      if (native_proxy != 0 && width > 0 && height > 0 &&
+          !env->ExceptionCheck()) {
+        auto* canvas = static_cast<SkCanvas*>(
+            darwin_art_surface_gpu_active_canvas());
+        if (std::getenv("DARWIN_ART_DEBUG_SKOTTIE") != nullptr) {
+          std::cerr << "ART Skottie nativeProxy=" << std::hex
+                    << static_cast<std::uint64_t>(native_proxy) << std::dec
+                    << " width=" << width << " height=" << height
+                    << " x=" << x << " y=" << y
+                    << " canvas=" << canvas << "\\n";
+        }
+        // SkottieAnimation::nDrawFrame paints in its local origin. Translate
+        // the canvas by the view's measured position so multiple SkottieViews
+        // in the stock APK layout compose correctly.
+        // The active SkCanvas is intentionally reached by the native bridge;
+        // this JNI call only supplies the APK-owned animation/progress state.
+        if (canvas != nullptr) canvas->save();
+        if (canvas != nullptr) canvas->translate(static_cast<SkScalar>(x),
+                                                 static_cast<SkScalar>(y));
+        if (runner_class != nullptr && set_canvas != nullptr && canvas != nullptr) {
+          jvalue set_args[2] = {};
+          set_args[0].i = std::numeric_limits<jint>::min();
+          set_args[1].j = static_cast<jlong>(
+              reinterpret_cast<std::uintptr_t>(canvas));
+          env->CallStaticVoidMethodA(runner_class, set_canvas, set_args);
+        }
+        jvalue draw_args[7] = {};
+        draw_args[0].j = native_proxy;
+        draw_args[1].i = width;
+        draw_args[2].i = height;
+        draw_args[3].z = JNI_FALSE;
+        draw_args[4].f = progress;
+        draw_args[5].i = 0;
+        draw_args[6].z = JNI_TRUE;
+        const jboolean ok =
+            env->CallBooleanMethodA(animation, draw_frame, draw_args);
+        if (runner_class != nullptr && set_canvas != nullptr) {
+          jvalue clear_args[2] = {};
+          clear_args[0].i = std::numeric_limits<jint>::min();
+          clear_args[1].j = 0;
+          env->CallStaticVoidMethodA(runner_class, set_canvas, clear_args);
+        }
+        if (canvas != nullptr) canvas->restore();
+        drew = ok == JNI_TRUE && !env->ExceptionCheck();
+      }
+      env->DeleteLocalRef(animation);
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+  }
+
+  if (view_group_class != nullptr && env->IsInstanceOf(view, view_group_class) &&
+      get_child_count != nullptr && get_child_at != nullptr) {
+    const jint count = env->CallIntMethod(view, get_child_count);
+    if (!env->ExceptionCheck()) {
+      for (jint i = 0; i < count; ++i) {
+        jobject child = env->CallObjectMethod(view, get_child_at, i);
+        if (child == nullptr || env->ExceptionCheck()) {
+          if (env->ExceptionCheck()) env->ExceptionClear();
+          continue;
+        }
+        drew = render_skottie_view_tree(
+                   env, child, skottie_class, animation_class, animation_field,
+                   native_proxy_field, draw_frame, runner_class, set_canvas,
+                   progress_method,
+                   get_child_count, get_child_at, get_width, get_height,
+                   get_left, get_top, view_group_class, x, y, surface_width,
+                   surface_height) || drew;
+        env->DeleteLocalRef(child);
+      }
+    } else {
+      env->ExceptionClear();
+    }
+  }
+  return drew;
+}
+
+namespace {
+void hide_skottie_backing_views_impl(JNIEnv* env, jobject view,
+                                     jclass skottie_class, jclass view_group_class,
+                                     jmethodID get_child_count,
+                                     jmethodID get_child_at) {
+  if (env == nullptr || view == nullptr) return;
+  if (skottie_class != nullptr && env->IsInstanceOf(view, skottie_class) &&
+      get_child_count != nullptr && get_child_at != nullptr) {
+    const jint count = env->CallIntMethod(view, get_child_count);
+    if (!env->ExceptionCheck()) {
+      for (jint i = 0; i < count; ++i) {
+        jobject child = env->CallObjectMethod(view, get_child_at, i);
+        if (child == nullptr || env->ExceptionCheck()) {
+          if (env->ExceptionCheck()) env->ExceptionClear();
+          continue;
+        }
+        jclass child_class = env->GetObjectClass(child);
+        jmethodID set_visibility =
+            child_class == nullptr
+                ? nullptr
+                : env->GetMethodID(child_class, "setVisibility", "(I)V");
+        if (set_visibility != nullptr && !env->ExceptionCheck()) {
+          env->CallVoidMethod(child, set_visibility, 4 /* INVISIBLE */);
+        }
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        if (child_class != nullptr) env->DeleteLocalRef(child_class);
+        env->DeleteLocalRef(child);
+      }
+    } else {
+      env->ExceptionClear();
+    }
+  }
+  if (view_group_class != nullptr && env->IsInstanceOf(view, view_group_class) &&
+      get_child_count != nullptr && get_child_at != nullptr) {
+    const jint count = env->CallIntMethod(view, get_child_count);
+    if (!env->ExceptionCheck()) {
+      for (jint i = 0; i < count; ++i) {
+        jobject child = env->CallObjectMethod(view, get_child_at, i);
+        if (child == nullptr || env->ExceptionCheck()) {
+          if (env->ExceptionCheck()) env->ExceptionClear();
+          continue;
+        }
+        hide_skottie_backing_views_impl(env, child, skottie_class,
+                                        view_group_class, get_child_count,
+                                        get_child_at);
+        env->DeleteLocalRef(child);
+      }
+    } else {
+      env->ExceptionClear();
+    }
+  }
+}
+}  // namespace
+
 }  // namespace
 
 namespace darwin_art_hwui {
+
+void hide_skottie_backing_views(JNIEnv* env, jobject root_view) {
+  if (env == nullptr || root_view == nullptr) return;
+  jclass skottie_class = load_context_class(env, "org.skia.skottie.SkottieView");
+  jclass view_group_class = env->FindClass("android/view/ViewGroup");
+  if (skottie_class == nullptr || view_group_class == nullptr ||
+      env->ExceptionCheck()) {
+    env->ExceptionClear();
+    if (skottie_class != nullptr) env->DeleteLocalRef(skottie_class);
+    if (view_group_class != nullptr) env->DeleteLocalRef(view_group_class);
+    return;
+  }
+  jmethodID get_child_count =
+      env->GetMethodID(view_group_class, "getChildCount", "()I");
+  jmethodID get_child_at = env->GetMethodID(
+      view_group_class, "getChildAt", "(I)Landroid/view/View;");
+  if (!env->ExceptionCheck()) {
+    hide_skottie_backing_views_impl(env, root_view, skottie_class,
+                                    view_group_class, get_child_count,
+                                    get_child_at);
+  }
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  env->DeleteLocalRef(skottie_class);
+  env->DeleteLocalRef(view_group_class);
+}
 
 size_t sync_recorded_render_node_tree(android::uirenderer::RenderNode* node) {
   DarwinHwuiTreeObserver observer;
@@ -62,14 +323,6 @@ void animate_node_with_context(android::uirenderer::RenderNode* node,
                                android::uirenderer::AnimationContext& context) {
   if (node == nullptr) return;
   auto& manager = node->mAnimatorManager;
-  const bool debug_animation = std::getenv("DARWIN_ART_DEBUG_ANIMATION") != nullptr;
-  if (debug_animation) {
-    std::cerr << "ART HWUI animation pulse node=" << node
-              << " new=" << manager.mNewAnimators.size()
-              << " active=" << manager.mAnimators.size()
-              << " handle=" << manager.mAnimationHandle
-              << " frame_ms=" << context.frameTimeMs() << "\n";
-  }
   if (manager.mAnimationHandle == nullptr) return;
   manager.pushStaging();
   auto new_end = std::remove_if(
@@ -83,16 +336,6 @@ void animate_node_with_context(android::uirenderer::RenderNode* node,
   auto* handle = manager.mAnimationHandle;
   node->mProperties.updateMatrix();
   handle->notifyAnimationsRan();
-  if (debug_animation) {
-    std::cerr << "ART HWUI animation pulse result active="
-              << manager.mAnimators.size() << " handle="
-              << manager.mAnimationHandle << "\n";
-    for (const auto& animator : manager.mAnimators) {
-      std::cerr << "ART HWUI animator duration=" << animator->duration()
-                << " remaining=" << animator->getRemainingPlayTime()
-                << " final=" << animator->finalValue() << "\n";
-    }
-  }
 }
 
 bool node_subtree_has_animators(android::uirenderer::RenderNode* node) {
@@ -129,7 +372,7 @@ void register_node_subtree_animators(
 }
 
 bool render_node_to_surface(
-    JNIEnv* env, jobject render_node, DarwinArtSurface* surface, jint width,
+    JNIEnv* env, jobject root_view, jobject render_node, DarwinArtSurface* surface, jint width,
     jint height, bool overlay_active, jfloat overlay_x, jfloat overlay_y,
     std::chrono::steady_clock::time_point overlay_started) {
   if (env == nullptr || render_node == nullptr || surface == nullptr) {
@@ -152,19 +395,105 @@ bool render_node_to_surface(
   }
   DarwinArtGpuFrame* frame = darwin_art_surface_gpu_begin(surface);
   if (frame == nullptr) {
+    std::cerr << "ART HWUI GPU: gpu_begin returned null\n";
     env->DeleteLocalRef(render_node_class);
     return false;
   }
   auto* canvas = static_cast<SkCanvas*>(darwin_art_surface_gpu_canvas(frame));
   if (canvas == nullptr) {
+    std::cerr << "ART HWUI GPU: gpu_canvas returned null\n";
     darwin_art_surface_gpu_end(surface, frame);
     env->DeleteLocalRef(render_node_class);
     return false;
   }
   canvas->clear(SK_ColorTRANSPARENT);
+  // The AOSP Skottie APK owns its animation state in SkottieAnimation and
+  // normally calls the EGL-backed nDrawFrame from a HandlerThread. Invoke the
+  // same native method here while our Metal canvas is active. The method is
+  // private in the APK but JNI method lookup is class-scoped and does not
+  // require changing the APK.
+  jclass skottie_view_class =
+      load_context_class(env, "org.skia.skottie.SkottieView");
+  jclass skottie_animation_class =
+      load_context_class(env, "org.skia.skottie.SkottieAnimation");
+  jclass skottie_runner_class =
+      load_context_class(env, "org.skia.skottie.SkottieRunner");
+  jclass view_group_class = env->FindClass("android/view/ViewGroup");
+  jclass view_class = env->FindClass("android/view/View");
+  jfieldID animation_field =
+      skottie_view_class == nullptr
+          ? nullptr
+          : env->GetFieldID(skottie_view_class, "mAnimation",
+                            "Lorg/skia/skottie/SkottieAnimation;");
+  jfieldID native_proxy_field =
+      skottie_animation_class == nullptr
+          ? nullptr
+          : env->GetFieldID(skottie_animation_class, "mNativeProxy", "J");
+  jmethodID set_canvas =
+      skottie_runner_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(skottie_runner_class, "nSetMaxCacheSize",
+                                   "(IJ)V");
+  jmethodID draw_frame =
+      skottie_animation_class == nullptr
+          ? nullptr
+          : env->GetMethodID(skottie_animation_class, "nDrawFrame",
+                             "(JIIZFIZ)Z");
+  jmethodID progress_method =
+      skottie_animation_class == nullptr
+          ? nullptr
+          : env->GetMethodID(skottie_animation_class, "getProgress", "()F");
+  jmethodID get_child_count =
+      view_group_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_group_class, "getChildCount", "()I");
+  jmethodID get_child_at =
+      view_group_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_group_class, "getChildAt",
+                             "(I)Landroid/view/View;");
+  jmethodID get_width = view_class == nullptr
+                            ? nullptr
+                            : env->GetMethodID(view_class, "getWidth", "()I");
+  jmethodID get_height = view_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(view_class, "getHeight", "()I");
+  jmethodID get_left = view_class == nullptr
+                           ? nullptr
+                           : env->GetMethodID(view_class, "getLeft", "()I");
+  jmethodID get_top = view_class == nullptr
+                          ? nullptr
+                          : env->GetMethodID(view_class, "getTop", "()I");
   android::uirenderer::skiapipeline::RenderNodeDrawable drawable(
       node, canvas, false);
   drawable.forceDraw(canvas);
+  // The framework display list owns the opaque SurfaceView/TextureView
+  // placeholder and may paint its white background. Replay the APK's native
+  // Skottie content once more after that display list so the animation is the
+  // topmost content in the same GPU pass.
+  if (std::getenv("DARWIN_ART_SKOTTIE_METAL") != nullptr &&
+      !env->ExceptionCheck() && skottie_view_class != nullptr &&
+      skottie_animation_class != nullptr && animation_field != nullptr &&
+      native_proxy_field != nullptr && draw_frame != nullptr) {
+    const bool skottie_drew = render_skottie_view_tree(
+        env, root_view, skottie_view_class, skottie_animation_class,
+        animation_field, native_proxy_field, draw_frame, skottie_runner_class,
+        set_canvas, progress_method, get_child_count, get_child_at, get_width,
+        get_height, get_left, get_top, view_group_class, 0, 0, width, height);
+    if (std::getenv("DARWIN_ART_DEBUG_SKOTTIE") != nullptr) {
+      std::cerr << "ART Skottie replay drew=" << skottie_drew
+                << " exception=" << env->ExceptionCheck() << "\n";
+    }
+  }
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  if (skottie_view_class != nullptr) env->DeleteLocalRef(skottie_view_class);
+  if (skottie_animation_class != nullptr)
+    env->DeleteLocalRef(skottie_animation_class);
+  if (skottie_runner_class != nullptr)
+    env->DeleteLocalRef(skottie_runner_class);
+  if (view_group_class != nullptr) env->DeleteLocalRef(view_group_class);
+  if (view_class != nullptr) env->DeleteLocalRef(view_class);
+  if (env->ExceptionCheck()) env->ExceptionClear();
   if (overlay_active) {
     const double elapsed_ms = std::chrono::duration<double, std::milli>(
                                   std::chrono::steady_clock::now() -
@@ -184,6 +513,9 @@ bool render_node_to_surface(
   }
   const DarwinArtSurfaceResult result =
       darwin_art_surface_gpu_end(surface, frame);
+  if (result != DARWIN_ART_SURFACE_OK) {
+    std::cerr << "ART HWUI GPU: gpu_end status=" << result << "\n";
+  }
   env->DeleteLocalRef(render_node_class);
   if (result != DARWIN_ART_SURFACE_OK) return false;
   darwin_art_frame_probe::record_dimensions(width, height);

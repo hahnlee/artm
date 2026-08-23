@@ -143,8 +143,8 @@ int main() {
   unlinkat(root_fd, "fixture", 0);
   close(root_fd);
   rmdir(root_path);
-  std::fprintf(stderr, "bionic-runtime-provider-closure: PASS bind_builtins=32 "
-                       "routes=185 actual-resolvers=yes close=broker-or-fs "
+  std::fprintf(stderr, "bionic-runtime-provider-closure: PASS bind_builtins=33 "
+                       "routes=243 actual-resolvers=yes close=broker-or-fs "
                        "wide-stdio=central-lease syslog-tag=owned-copy\n");
   return 0;
 }

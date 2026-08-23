@@ -60,6 +60,8 @@ def main() -> int:
         "SetByteArrayRegion",
         "RegisterNatives",
         "ExceptionCheck",
+        "GetDirectBufferAddress",
+        "GetDirectBufferCapacity",
     ]
     required_invoke = ["GetEnv"]
 

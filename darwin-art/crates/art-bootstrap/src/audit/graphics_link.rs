@@ -31,6 +31,11 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     run_upstream_gates: bool,
     incremental: bool,
 ) -> Result<()> {
+    run_command(
+        Command::new("bash")
+            .arg(root.join("tools/android-managed-native-load/audit.sh"))
+            .arg("--build-only"),
+    )?;
     if run_upstream_gates {
         run_graphics_upstream_gates(root, incremental)?;
     }
@@ -61,6 +66,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         os_constants_archive,
         unix_filesystem_archive,
         openjdkjvm_archive,
+        managed_load_archive,
         file_input_stream_archive,
         file_descriptor_archive,
         system_natives_archive,
@@ -388,6 +394,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_gpu_active_canvas")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_install_hooks")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_clear_hooks")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_acquire")
@@ -473,6 +480,9 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&libcore_memory_archive)
         .arg(&libcore_jni_constants_archive)
         .arg(&unix_filesystem_archive)
+        // Complete java.lang.Runtime owner must precede openjdkjvm, which
+        // supplies its JVM_* support symbols.
+        .arg(&managed_load_archive)
         .arg(&openjdkjvm_archive)
         .arg(&os_constants_archive)
         .arg(&android_util_log_archive)

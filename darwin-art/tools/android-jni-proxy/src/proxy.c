@@ -145,6 +145,22 @@ static void ProxyDeleteLocalRef(void* raw_env, void* reference) {
   ((void (*)(void*, void*))raw)(host_env, reference);
 }
 
+static void* ProxyGetDirectBufferAddress(void* raw_env, void* buffer) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_GetDirectBufferAddress);
+  if (raw == NULL) return NULL;
+  return ((void* (*)(void*, void*))raw)(host_env, buffer);
+}
+
+static int64_t ProxyGetDirectBufferCapacity(void* raw_env, void* buffer) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_GetDirectBufferCapacity);
+  if (raw == NULL) return -1;
+  return ((int64_t (*)(void*, void*))raw)(host_env, buffer);
+}
+
 static void* ProxyNewLocalRef(void* raw_env, void* reference) {
   struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
   void* host_env = HostEnv(proxy);
@@ -254,6 +270,10 @@ static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
     [DARWIN_ART_JNI_SLOT_NewGlobalRef] = (RawJniSlot)ProxyNewGlobalRef,
     [DARWIN_ART_JNI_SLOT_DeleteGlobalRef] = (RawJniSlot)ProxyDeleteGlobalRef,
     [DARWIN_ART_JNI_SLOT_DeleteLocalRef] = (RawJniSlot)ProxyDeleteLocalRef,
+    [DARWIN_ART_JNI_SLOT_GetDirectBufferAddress] =
+        (RawJniSlot)ProxyGetDirectBufferAddress,
+    [DARWIN_ART_JNI_SLOT_GetDirectBufferCapacity] =
+        (RawJniSlot)ProxyGetDirectBufferCapacity,
     [DARWIN_ART_JNI_SLOT_NewLocalRef] = (RawJniSlot)ProxyNewLocalRef,
     [DARWIN_ART_JNI_SLOT_NewStringUTF] = (RawJniSlot)ProxyNewStringUTF,
     [DARWIN_ART_JNI_SLOT_GetStringUTFLength] =

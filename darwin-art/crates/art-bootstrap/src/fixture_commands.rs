@@ -206,7 +206,9 @@ pub(crate) fn probe_runtime_dex_flavor_impl(
         }
         if apk_jni {
             let native_path = prepare_apk_jni_native(root)?;
-            command.env("DARWIN_ART_APK_APP_NATIVE_PATH", native_path);
+            command
+                .env("DARWIN_ART_APK_APP_NATIVE_PATH", native_path)
+                .env("DARWIN_ART_APK_EXPECT_NATIVE_ANSWER", "1");
         }
         if show_window {
             command.env("DARWIN_ART_WINDOW_SCALE", "2");

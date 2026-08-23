@@ -1,6 +1,7 @@
 #include "darwin_art_bionic_allocator.h"
 
 #include <errno.h>
+#include <malloc/malloc.h>
 #include <stdlib.h>
 
 _Static_assert(sizeof(void*) == 8, "Android arm64 and Darwin arm64 use 64-bit pointers");
@@ -50,6 +51,13 @@ void* darwin_art_bionic_malloc(size_t size) {
   return darwin_art_bionic_malloc_result(size).pointer;
 }
 
+void* darwin_art_bionic_calloc(size_t count, size_t size) {
+  const int saved_errno = errno;
+  void* result = calloc(count, size);
+  errno = saved_errno;
+  return result;
+}
+
 void darwin_art_bionic_free(void* pointer) {
   DarwinFree(pointer);
 }
@@ -67,6 +75,16 @@ DarwinArtBionicAllocationResult darwin_art_bionic_realloc_result(void* pointer,
 
 void* darwin_art_bionic_realloc(void* pointer, size_t size) {
   return darwin_art_bionic_realloc_result(pointer, size).pointer;
+}
+
+int darwin_art_bionic_mallopt(int param, int value) {
+  (void)param;
+  (void)value;
+  return 1;
+}
+
+size_t darwin_art_bionic_malloc_usable_size(const void* pointer) {
+  return pointer == NULL ? 0 : malloc_size(pointer);
 }
 
 static int ValidPosixAlignment(size_t alignment) {
@@ -111,6 +129,10 @@ static int NameCompare(const char* left, const char* right) {
 }
 
 static const DarwinArtBionicAllocatorBinding kBindings[] = {
+    {"calloc", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_calloc,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
+         DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
+         DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM},
     {"free", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_free,
      DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
          DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
@@ -119,6 +141,13 @@ static const DarwinArtBionicAllocatorBinding kBindings[] = {
      DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
          DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
          DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM},
+    {"malloc_usable_size",
+     (DarwinArtBionicAllocatorFunction)darwin_art_bionic_malloc_usable_size,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
+         DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE},
+    {"mallopt", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_mallopt,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
+         DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE},
     {"posix_memalign",
      (DarwinArtBionicAllocatorFunction)darwin_art_bionic_posix_memalign,
      DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |

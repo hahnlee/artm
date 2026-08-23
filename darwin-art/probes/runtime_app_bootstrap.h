@@ -51,4 +51,10 @@ int load_classes(JNIEnv* env,
 int load_native_library(JNIEnv* env, art::Thread* self, jobject app_loader,
                         const char* native_library_path);
 
+// CreatePathClassLoader is an ART test helper and intentionally leaves the
+// Java DexPathList native-library path array uninitialized.  Populate it with
+// the runtime-owned directory before any APK class executes System.loadLibrary.
+int install_native_library_path(JNIEnv* env, jobject app_loader,
+                                const char* native_library_path);
+
 }  // namespace darwin_art_app

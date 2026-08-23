@@ -6,6 +6,7 @@ import android.content.res.Resources;
 import android.content.res.XmlResourceParser;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
+import java.util.Locale;
 
 @SuppressWarnings("deprecation")
 public final class ProbeResources extends Resources {
@@ -14,6 +15,7 @@ public final class ProbeResources extends Resources {
 
     static {
         CONFIGURATION.setToDefaults();
+        CONFIGURATION.setLocale(Locale.US);
         DISPLAY_METRICS.setToDefaults();
     }
 
@@ -25,7 +27,17 @@ public final class ProbeResources extends Resources {
         }
         int densityDpi = DisplayMetrics.DENSITY_DEFAULT * scale;
         CONFIGURATION.setToDefaults();
+        CONFIGURATION.setLocale(Locale.US);
         CONFIGURATION.densityDpi = densityDpi;
+        // The detached host has no WindowManager to populate a configuration.
+        // Android resource aliases (for example Calculator's generic layout
+        // alias to its port/land variants) require a concrete orientation and
+        // screen bucket, otherwise Resources.getLayout() cannot select an
+        // entry even though the APK's resource table is installed.
+        CONFIGURATION.orientation = Configuration.ORIENTATION_PORTRAIT;
+        CONFIGURATION.screenWidthDp = 360;
+        CONFIGURATION.screenHeightDp = 640;
+        CONFIGURATION.smallestScreenWidthDp = 360;
         DISPLAY_METRICS.setToDefaults();
         DISPLAY_METRICS.density = scale;
         DISPLAY_METRICS.densityDpi = densityDpi;

@@ -1,8 +1,66 @@
 soname	symbol	version	owner	rationale
 libc.so	pthread_create	LIBC	pthread	provider-owned thread creation required by general Android DSOs but absent from pinned libc++ imports
+libc.so	atoi	LIBC	leaf	integer parsing required by AOSP Skia native consumers
+libc.so	bsearch	LIBC	leaf	binary search required by AOSP Skia native consumers
+libc.so	stdout	LIBC	stdio	Android stdio stdout object required by AOSP native consumers
+libc.so	strchr	LIBC	leaf	byte-string search required by AOSP Skia native consumers
+libc.so	strcspn	LIBC	leaf	byte-string search required by AOSP Skia native consumers
+libc.so	strcpy	LIBC	leaf	byte-string copy required by AOSP Skia native consumers
+libc.so	strpbrk	LIBC	leaf	byte-string search required by AOSP Skia native consumers
+libc.so	strrchr	LIBC	leaf	byte-string search required by AOSP Skia native consumers
+libc.so	strspn	LIBC	leaf	byte-string search required by AOSP Skia native consumers
+libc.so	strstr	LIBC	leaf	byte-string search required by AOSP Skia native consumers
+libc.so	mallopt		allocator	Android allocator tuning compatibility for AOSP Skia native consumers
+libc.so	calloc	LIBC	allocator	Android zeroed allocation compatibility for AOSP Skia native consumers
+libc.so	malloc_usable_size	LIBC	allocator	Android allocation size compatibility for AOSP Skia native consumers
+libc.so	vprintf	LIBC	stdio	Bounded Android vprintf compatibility for AOSP Skia native consumers
+libc.so	__register_atfork	LIBC	dso-lifecycle	Android libc startup hook required by native ELF constructors
 libc.so	connect	LIBC	socket	central-broker socket owner v3
 libc.so	freeaddrinfo	LIBC	dns	bounded resolver result retirement
 libc.so	getaddrinfo	LIBC	dns	bounded numeric and localhost resolution
 libc.so	recv	LIBC	socket	central-broker socket owner v3
 libc.so	send	LIBC	socket	central-broker socket owner v3
 libc.so	socket	LIBC	socket	central-broker socket publication
+libc.so	sem_destroy	LIBC	pthread	Android semaphore compatibility for AOSP native Skia workers
+libc.so	sem_init	LIBC	pthread	Android semaphore compatibility for AOSP native Skia workers
+libc.so	sem_post	LIBC	pthread	Android semaphore compatibility for AOSP native Skia workers
+libc.so	sem_wait	LIBC	pthread	Android semaphore compatibility for AOSP native Skia workers
+libm.so	acos	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	acosf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	acosh	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	asin	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	asinf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	asinh	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	atan	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	atan2	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	atan2f	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	atanf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	atanh	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	cbrt	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	cbrtf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	cos	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	cosf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	cosh	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	erff	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	exp	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	exp2	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	exp2f	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	expf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	fmod	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	fmodf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	ilogbf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	log	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	log2	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	log2f	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	nextafterf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	pow	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	powf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	remainder	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	sin	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	sincosf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	sinf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	sinh	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	tan	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	tanf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	tanh	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+liblog.so	__android_log_error_write		liblog	Android liblog error-write compatibility for AOSP Skia native consumers

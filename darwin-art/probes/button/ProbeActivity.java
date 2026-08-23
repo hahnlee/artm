@@ -10,7 +10,10 @@ public final class ProbeActivity extends Activity {
 
     @Override
     protected void attachBaseContext(Context newBase) {
-        // The native launcher attaches ContextThemeWrapper non-virtually.
+        // Preserve the normal Android ContextWrapper base so PhoneWindow and
+        // LayoutInflater see the APK PathClassLoader/resources from the
+        // attached ProbeContext.
+        super.attachBaseContext(newBase);
     }
 
     @Override

@@ -10,6 +10,7 @@ extern "C" void register_java_io_UnixFileSystem(JNIEnv* env);
 extern "C" void register_java_io_FileDescriptor(JNIEnv* env);
 extern "C" void register_java_io_FileInputStream(JNIEnv* env);
 extern "C" void register_java_lang_System(JNIEnv* env);
+extern "C" void register_java_lang_Runtime(JNIEnv* env);
 extern "C" void register_java_sun_nio_fs_UnixNativeDispatcher(JNIEnv* env);
 extern "C" void register_sun_nio_ch_IOUtil(JNIEnv* env);
 extern "C" void register_sun_nio_ch_FileChannelImpl(JNIEnv* env);
@@ -46,6 +47,136 @@ class DarwinArtLibcoreJniConstants {
 #include <vector>
 
 namespace {
+
+bool Register(JNIEnv* env, const char* class_name,
+              const JNINativeMethod* methods, jint method_count);
+
+// java.util.zip.Inflater is part of the Android boot class path and is used
+// while framework and APK resources are read.  Keep the Java-facing ABI
+// identical to AOSP, but own the z_stream in this provider rather than
+// forwarding a guest pointer to the host.  The packed result format is the
+// Android contract: input-consumed in bits 0..30, output-produced in bits
+// 31..61, finished in bit 62, and needs-dictionary in bit 63.
+struct DarwinInflaterState {
+  z_stream stream{};
+};
+
+jlong InflaterInit(JNIEnv*, jclass, jboolean nowrap) {
+  auto* state = new DarwinInflaterState();
+  const int window_bits = nowrap == JNI_TRUE ? -MAX_WBITS : MAX_WBITS;
+  if (inflateInit2(&state->stream, window_bits) != Z_OK) {
+    delete state;
+    return 0;
+  }
+  return reinterpret_cast<jlong>(state);
+}
+
+void InflaterSetDictionary(JNIEnv* env, jclass, jlong address,
+                           jbyteArray dictionary, jint offset, jint length) {
+  auto* state = reinterpret_cast<DarwinInflaterState*>(address);
+  if (state == nullptr || dictionary == nullptr || offset < 0 || length < 0 ||
+      offset > env->GetArrayLength(dictionary) ||
+      length > env->GetArrayLength(dictionary) - offset) {
+    return;
+  }
+  std::vector<jbyte> bytes(static_cast<std::size_t>(length));
+  env->GetByteArrayRegion(dictionary, offset, length, bytes.data());
+  if (!env->ExceptionCheck()) {
+    inflateSetDictionary(&state->stream,
+                         reinterpret_cast<const Bytef*>(bytes.data()),
+                         static_cast<uInt>(bytes.size()));
+  }
+}
+
+jlong InflaterBytesBytes(JNIEnv* env, jobject, jlong address,
+                          jbyteArray input, jint input_offset,
+                          jint input_length, jbyteArray output,
+                          jint output_offset, jint output_length) {
+  auto* state = reinterpret_cast<DarwinInflaterState*>(address);
+  if (state == nullptr || input == nullptr || output == nullptr ||
+      input_offset < 0 || input_length < 0 || output_offset < 0 ||
+      output_length < 0 ||
+      input_offset > env->GetArrayLength(input) ||
+      input_length > env->GetArrayLength(input) - input_offset ||
+      output_offset > env->GetArrayLength(output) ||
+      output_length > env->GetArrayLength(output) - output_offset) {
+    return 0;
+  }
+  std::vector<jbyte> input_bytes(static_cast<std::size_t>(input_length));
+  env->GetByteArrayRegion(input, input_offset, input_length,
+                          input_bytes.data());
+  if (env->ExceptionCheck()) {
+    return 0;
+  }
+  std::vector<jbyte> output_bytes(static_cast<std::size_t>(output_length));
+  state->stream.next_in = reinterpret_cast<Bytef*>(input_bytes.data());
+  state->stream.avail_in = static_cast<uInt>(input_bytes.size());
+  state->stream.next_out = reinterpret_cast<Bytef*>(output_bytes.data());
+  state->stream.avail_out = static_cast<uInt>(output_bytes.size());
+  const int result = inflate(&state->stream, Z_NO_FLUSH);
+  const jint consumed = input_length - static_cast<jint>(state->stream.avail_in);
+  const jint produced = output_length - static_cast<jint>(state->stream.avail_out);
+  if (produced > 0) {
+    env->SetByteArrayRegion(output, output_offset, produced,
+                            output_bytes.data());
+  }
+  if (result == Z_NEED_DICT) {
+    return (static_cast<jlong>(consumed) & 0x7fffffffLL) |
+           ((static_cast<jlong>(produced) & 0x7fffffffLL) << 31) |
+           (1LL << 63);
+  }
+  if (result == Z_DATA_ERROR || result == Z_STREAM_ERROR) {
+    jclass exception = env->FindClass("java/util/zip/DataFormatException");
+    if (exception != nullptr) {
+      env->ThrowNew(exception, "invalid compressed data");
+      env->DeleteLocalRef(exception);
+    }
+    return 0;
+  }
+  const jlong finished = result == Z_STREAM_END ? (1LL << 62) : 0;
+  return (static_cast<jlong>(consumed) & 0x7fffffffLL) |
+         ((static_cast<jlong>(produced) & 0x7fffffffLL) << 31) | finished;
+}
+
+jint InflaterGetAdler(JNIEnv*, jclass, jlong address) {
+  const auto* state = reinterpret_cast<const DarwinInflaterState*>(address);
+  return state == nullptr ? 0 : static_cast<jint>(state->stream.adler);
+}
+
+void InflaterReset(JNIEnv*, jclass, jlong address) {
+  auto* state = reinterpret_cast<DarwinInflaterState*>(address);
+  if (state != nullptr) {
+    inflateReset(&state->stream);
+  }
+}
+
+void InflaterEnd(JNIEnv*, jclass, jlong address) {
+  auto* state = reinterpret_cast<DarwinInflaterState*>(address);
+  if (state != nullptr) {
+    inflateEnd(&state->stream);
+    delete state;
+  }
+}
+
+bool RegisterInflaterNatives(JNIEnv* env) {
+  JNINativeMethod methods[] = {
+      {const_cast<char*>("init"), const_cast<char*>("(Z)J"),
+       reinterpret_cast<void*>(&InflaterInit)},
+      {const_cast<char*>("setDictionary"), const_cast<char*>("(J[BII)V"),
+       reinterpret_cast<void*>(&InflaterSetDictionary)},
+      {const_cast<char*>("inflateBytesBytes"),
+       const_cast<char*>("(J[BII[BII)J"),
+       reinterpret_cast<void*>(&InflaterBytesBytes)},
+      {const_cast<char*>("getAdler"), const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&InflaterGetAdler)},
+      {const_cast<char*>("reset"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&InflaterReset)},
+      {const_cast<char*>("end"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&InflaterEnd)},
+  };
+  return Register(env, "java/util/zip/Inflater", methods,
+                  static_cast<jint>(std::size(methods)));
+}
 
 #if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
 void UnixFileSystemInitIds(JNIEnv*, jclass) {}
@@ -385,6 +516,9 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
   if (!darwin_art::RegisterFrameworkSupportNatives(env)) {
     return false;
   }
+  if (!RegisterInflaterNatives(env)) {
+    return false;
+  }
 #if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
   JNINativeMethod unix_file_system_methods[] = {
       {const_cast<char*>("initIDs"), const_cast<char*>("()V"),
@@ -520,14 +654,6 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
     return Register(env, "java/io/FileDescriptor", file_descriptor_methods, 2);
 #endif
   };
-  const auto register_unix_native_dispatcher = [&]() {
-#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
-    register_java_sun_nio_fs_UnixNativeDispatcher(env);
-    return !env->ExceptionCheck();
-#else
-    return true;
-#endif
-  };
   const auto register_libcore_memory = [&]() {
 #if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
     // StartMinimal has already registered ART's complementary seven array
@@ -549,9 +675,27 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
          register_os_constants() &&
          register_linux() &&
          register_file_descriptor() &&
-         register_unix_native_dispatcher() &&
          register_openjdk_file_mapping() &&
          register_libcore_memory() && RegisterLibcoreIcuNatives(env);
+}
+
+bool RegisterManagedLoadNatives(JNIEnv* env) {
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+  if (env == nullptr) {
+    return false;
+  }
+  // Match Android 16 OnLoad.cpp: Runtime follows Math, then the complete
+  // UnixNativeDispatcher table. Each registrar is one atomic JNI table.
+  register_java_lang_Runtime(env);
+  if (env->ExceptionCheck()) {
+    return false;
+  }
+  register_java_sun_nio_fs_UnixNativeDispatcher(env);
+  return !env->ExceptionCheck();
+#else
+  (void)env;
+  return true;
+#endif
 }
 
 bool ShutdownLibcoreNatives() {

@@ -4,6 +4,7 @@ This standalone module supplies a small proxy `JavaVM`/`JNIEnv` surface for an
 Android ARM64 JNI library without exposing an ART function table. The current
 executable subset is `JavaVM::GetEnv` plus `JNIEnv::{GetVersion, FindClass,
 ThrowNew, ExceptionOccurred, ExceptionClear, RegisterNatives, ExceptionCheck,
+GetDirectBufferAddress, GetDirectBufferCapacity,
 NewGlobalRef, DeleteGlobalRef, DeleteLocalRef, NewLocalRef, NewStringUTF,
 GetStringUTFLength, GetStringUTFChars, ReleaseStringUTFChars, GetArrayLength,
 NewByteArray, GetByteArrayRegion, SetByteArrayRegion}`. All other table

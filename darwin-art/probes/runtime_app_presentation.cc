@@ -1,8 +1,10 @@
 #include "runtime_app_presentation.h"
 
 #include <iostream>
+#include <cstdlib>
 
 #include "runtime_graphics_phase.h"
+#include "runtime_graphics_gpu.h"
 #include "runtime_jni_scope.h"
 #include "runtime_app_resources.h"
 #include "runtime_app_activity.h"
@@ -49,6 +51,62 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
           use_framework_resources, apk_app_package, apk_app_activity,
           &activity) != 0) {
     return 27;
+  }
+  if (run_apk_app) {
+    // ContextImpl normally carries the application's complete PathClassLoader.
+    // Install that exact loader after Activity.attach() and before
+    // PhoneWindow/LayoutInflater touches APK XML custom views.
+    jclass activity_class = env->GetObjectClass(activity_instance);
+    jmethodID get_base_context =
+        activity_class == nullptr
+            ? nullptr
+            : env->GetMethodID(activity_class, "getBaseContext",
+                               "()Landroid/content/Context;");
+    jobject base_context =
+        get_base_context == nullptr
+            ? nullptr
+            : env->CallObjectMethod(activity_instance, get_base_context);
+    jclass base_context_class =
+        base_context == nullptr ? nullptr : env->GetObjectClass(base_context);
+    jmethodID get_class_loader =
+        base_context_class == nullptr
+            ? nullptr
+            : env->GetMethodID(base_context_class, "getClassLoader",
+                               "()Ljava/lang/ClassLoader;");
+    jobject app_loader =
+        get_class_loader == nullptr
+            ? nullptr
+            : env->CallObjectMethod(base_context, get_class_loader);
+    jmethodID install_loader =
+        env->GetStaticMethodID(probe_context_class,
+                               "installApplicationClassLoader",
+                               "(Ljava/lang/ClassLoader;)V");
+    if (install_loader == nullptr || app_loader == nullptr ||
+        env->ExceptionCheck()) {
+      std::cerr << "ART Android APK: application ClassLoader bootstrap failed"
+                << " activity=" << (activity_class != nullptr)
+                << " base=" << (base_context != nullptr)
+                << " base_class=" << (base_context_class != nullptr)
+                << " get_loader=" << (get_class_loader != nullptr)
+                << " app_loader=" << (app_loader != nullptr)
+                << " install=" << (install_loader != nullptr) << "\n";
+      if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+      }
+      return 27;
+    }
+    env->CallStaticVoidMethod(probe_context_class, install_loader, app_loader);
+    env->DeleteLocalRef(app_loader);
+    env->DeleteLocalRef(base_context_class);
+    env->DeleteLocalRef(base_context);
+    env->DeleteLocalRef(activity_class);
+    if (env->ExceptionCheck()) {
+      std::cerr << "ART Android APK: application ClassLoader install failed\n";
+      env->ExceptionDescribe();
+      env->ExceptionClear();
+      return 27;
+    }
   }
   jclass window_class = activity.window_class;
   jclass phone_window_class = activity.phone_window_class;
@@ -295,11 +353,15 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
     }
   }
   if (env->ExceptionCheck()) {
+    env->ExceptionDescribe();
     std::cerr << "ART Android lifecycle: Activity.onCreate() threw\n"
               << self->GetException()->Dump() << "\n";
     return 28;
   }
-  if (run_apk_app && apk_native_loaded) {
+  const bool expect_apk_native_answer =
+      std::getenv("DARWIN_ART_APK_EXPECT_NATIVE_ANSWER") != nullptr &&
+      std::strcmp(std::getenv("DARWIN_ART_APK_EXPECT_NATIVE_ANSWER"), "1") == 0;
+  if (run_apk_app && apk_native_loaded && expect_apk_native_answer) {
     jmethodID native_answer = env->GetStaticMethodID(
         probe_activity_class, "nativeAnswer", "()I");
     const jint value = native_answer == nullptr
@@ -339,6 +401,28 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
       return 31;
     }
   }
+  // A real ViewRootImpl performs the final DecorView layout before input
+  // dispatch.  The detached launcher has no ViewRoot, so mirror that one
+  // ownership step explicitly; without it DecorView remains 0x0 even though
+  // its content display list has already been recorded, making all hit tests
+  // fail closed.
+  jmethodID layout = decor_view_class == nullptr
+                         ? nullptr
+                         : env->GetMethodID(decor_view_class, "layout",
+                                            "(IIII)V");
+  if (layout == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Android input: DecorView layout lookup failed\n";
+    env->ExceptionClear();
+    return 31;
+  }
+  env->CallVoidMethod(decor_view, layout, 0, 0,
+                      kApkFrameWidth * window_scale,
+                      kApkFrameHeight * window_scale);
+  if (env->ExceptionCheck()) {
+    std::cerr << "ART Android input: DecorView layout failed\n"
+              << self->GetException()->Dump() << "\n";
+    return 31;
+  }
   // We just installed this exact DecorView in PhoneWindow.mDecor above.  The
   // detached probe Window has no ViewRoot to lazily materialize a decor, so
   // relying on PhoneWindow.getDecorView() here can legitimately return null.
@@ -353,6 +437,12 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
           ? nullptr
           : env->CallObjectMethod(content_root, get_child_at,
                                   static_cast<jint>(0));
+  if (graphics_state != nullptr &&
+      !darwin_art_graphics::retain_hardware_context(graphics_state, env,
+                                                    activity_instance)) {
+    std::cerr << "ART Android graphics: activity context retention failed\n";
+    return 33;
+  }
   if (graphics_state != nullptr &&
       darwin_art_graphics_phase::present_and_retain(
           graphics_state, env, decor_view, content_root_class, content_root,

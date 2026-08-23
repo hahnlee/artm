@@ -3,11 +3,15 @@ libc.so	__ctype_get_mb_cur_max	LIBC	locale
 libc.so	__cxa_atexit	LIBC	dso-lifecycle
 libc.so	__cxa_finalize	LIBC	dso-lifecycle
 libc.so	__errno	LIBC	errno
+libc.so	__register_atfork	LIBC	dso-lifecycle
 libc.so	__sF	LIBC	stdio
 libc.so	__system_property_get	LIBC	process-state
 libc.so	abort	LIBC	abort
 libc.so	android_set_abort_message	LIBC	abort
+libc.so	atoi	LIBC	leaf
+libc.so	bsearch	LIBC	leaf
 libc.so	btowc	LIBC	locale
+libc.so	calloc	LIBC	allocator
 libc.so	chdir	LIBC	filesystem
 libc.so	clock_gettime	LIBC	time
 libc.so	close	LIBC	central-fd-broker
@@ -56,6 +60,8 @@ libc.so	link	LIBC	filesystem
 libc.so	localeconv	LIBC	locale
 libc.so	lstat	LIBC	filesystem
 libc.so	malloc	LIBC	allocator
+libc.so	malloc_usable_size	LIBC	allocator
+libc.so	mallopt		allocator
 libc.so	mbrlen	LIBC	locale
 libc.so	mbrtowc	LIBC	locale
 libc.so	mbsnrtowcs	LIBC	locale
@@ -108,6 +114,10 @@ libc.so	realpath	LIBC	filesystem
 libc.so	recv	LIBC	socket
 libc.so	remove	LIBC	filesystem
 libc.so	rename	LIBC	filesystem
+libc.so	sem_destroy	LIBC	pthread
+libc.so	sem_init	LIBC	pthread
+libc.so	sem_post	LIBC	pthread
+libc.so	sem_wait	LIBC	pthread
 libc.so	send	LIBC	socket
 libc.so	sendfile	LIBC	sendfile
 libc.so	setlocale	LIBC	locale
@@ -116,12 +126,20 @@ libc.so	socket	LIBC	socket
 libc.so	sscanf	LIBC	scanf
 libc.so	stat	LIBC	filesystem
 libc.so	statvfs	LIBC	filesystem
+libc.so	stdout	LIBC	stdio
+libc.so	strchr	LIBC	leaf
 libc.so	strcmp	LIBC	leaf
 libc.so	strcoll_l	LIBC	locale
+libc.so	strcpy	LIBC	leaf
+libc.so	strcspn	LIBC	leaf
 libc.so	strerror_r	LIBC	strerror
 libc.so	strftime_l	LIBC	strftime
 libc.so	strlen	LIBC	leaf
 libc.so	strncmp	LIBC	leaf
+libc.so	strpbrk	LIBC	leaf
+libc.so	strrchr	LIBC	leaf
+libc.so	strspn	LIBC	leaf
+libc.so	strstr	LIBC	leaf
 libc.so	strtod	LIBC	float-conversion
 libc.so	strtof	LIBC	float-conversion
 libc.so	strtol	LIBC	numeric
@@ -148,6 +166,7 @@ libc.so	uselocale	LIBC	locale
 libc.so	utimensat	LIBC	filesystem
 libc.so	vasprintf	LIBC	format
 libc.so	vfprintf	LIBC	formatted-stdio
+libc.so	vprintf	LIBC	stdio
 libc.so	vsnprintf	LIBC	format
 libc.so	vsscanf	LIBC	scanf
 libc.so	wcrtomb	LIBC	locale
@@ -171,6 +190,7 @@ liblog.so	__android_log_buf_print		liblog
 liblog.so	__android_log_buf_write		liblog
 liblog.so	__android_log_call_aborter		liblog
 liblog.so	__android_log_default_aborter		liblog
+liblog.so	__android_log_error_write		liblog
 liblog.so	__android_log_get_minimum_priority		liblog
 liblog.so	__android_log_is_loggable		liblog
 liblog.so	__android_log_is_loggable_len		liblog
@@ -184,3 +204,41 @@ liblog.so	__android_log_stderr_logger		liblog
 liblog.so	__android_log_vprint		liblog
 liblog.so	__android_log_write		liblog
 liblog.so	__android_log_write_log_message		liblog
+libm.so	acos	LIBC	math
+libm.so	acosf	LIBC	math
+libm.so	acosh	LIBC	math
+libm.so	asin	LIBC	math
+libm.so	asinf	LIBC	math
+libm.so	asinh	LIBC	math
+libm.so	atan	LIBC	math
+libm.so	atan2	LIBC	math
+libm.so	atan2f	LIBC	math
+libm.so	atanf	LIBC	math
+libm.so	atanh	LIBC	math
+libm.so	cbrt	LIBC	math
+libm.so	cbrtf	LIBC	math
+libm.so	cos	LIBC	math
+libm.so	cosf	LIBC	math
+libm.so	cosh	LIBC	math
+libm.so	erff	LIBC	math
+libm.so	exp	LIBC	math
+libm.so	exp2	LIBC	math
+libm.so	exp2f	LIBC	math
+libm.so	expf	LIBC	math
+libm.so	fmod	LIBC	math
+libm.so	fmodf	LIBC	math
+libm.so	ilogbf	LIBC	math
+libm.so	log	LIBC	math
+libm.so	log2	LIBC	math
+libm.so	log2f	LIBC	math
+libm.so	nextafterf	LIBC	math
+libm.so	pow	LIBC	math
+libm.so	powf	LIBC	math
+libm.so	remainder	LIBC	math
+libm.so	sin	LIBC	math
+libm.so	sincosf	LIBC	math
+libm.so	sinf	LIBC	math
+libm.so	sinh	LIBC	math
+libm.so	tan	LIBC	math
+libm.so	tanf	LIBC	math
+libm.so	tanh	LIBC	math

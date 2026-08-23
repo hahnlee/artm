@@ -20,6 +20,8 @@ struct DarwinArtGpuFrame {
   id<CAMetalDrawable> drawable = nil;
 };
 
+thread_local SkCanvas* g_active_gpu_canvas = nullptr;
+
 namespace {
 
 struct DarwinArtGpuState {
@@ -56,7 +58,11 @@ DarwinArtGpuState* EnsureState(DarwinArtSurface* surface) {
 }  // namespace
 
 DarwinArtGpuFrame* darwin_art_surface_gpu_begin(DarwinArtSurface* surface) {
-  if (!IsMainThread() || surface == nullptr || surface->producer_mapped) {
+  // The CAMetalLayer/window is created and serviced on AppKit's main thread,
+  // but the drawable is owned by the Android RenderThread equivalent.  The
+  // GPU path must therefore be callable from that renderer thread; unlike the
+  // IOSurface producer APIs it never touches AppKit view state or CPU memory.
+  if (surface == nullptr || surface->producer_mapped) {
     return nullptr;
   }
   @autoreleasepool {
@@ -79,6 +85,7 @@ DarwinArtGpuFrame* darwin_art_surface_gpu_begin(DarwinArtSurface* surface) {
     if (frame == nullptr) return nullptr;
     frame->surface = std::move(sk_surface);
     frame->drawable = drawable;
+    g_active_gpu_canvas = frame->surface->getCanvas();
     return frame;
   }
 }
@@ -89,9 +96,12 @@ void* darwin_art_surface_gpu_canvas(DarwinArtGpuFrame* frame) {
              : static_cast<void*>(frame->surface->getCanvas());
 }
 
+void* darwin_art_surface_gpu_active_canvas(void) {
+  return static_cast<void*>(g_active_gpu_canvas);
+}
+
 DarwinArtSurfaceResult darwin_art_surface_gpu_end(
     DarwinArtSurface* surface, DarwinArtGpuFrame* frame) {
-  if (!IsMainThread()) return DARWIN_ART_SURFACE_NOT_MAIN_THREAD;
   DarwinArtGpuState* state = State(surface);
   if (surface == nullptr || state == nullptr || frame == nullptr ||
       frame->surface == nullptr || frame->drawable == nil) {
@@ -110,6 +120,7 @@ DarwinArtSurfaceResult darwin_art_surface_gpu_end(
     [command_buffer commit];
     surface->last_command_buffer = command_buffer;
   }
+  g_active_gpu_canvas = nullptr;
   delete frame;
   return DARWIN_ART_SURFACE_OK;
 }

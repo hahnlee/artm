@@ -1,9 +1,11 @@
 #include "runtime_app_bootstrap.h"
 
 #include <cstring>
+#include <cerrno>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 #include "base/logging.h"
@@ -181,6 +183,65 @@ int load_native_library(JNIEnv* env, art::Thread* self, jobject app_loader,
     return 46;
   }
   std::cerr << "ART Android APK JNI: JavaVMExt+NativeBridge load ok\n";
+  return 0;
+}
+
+int install_native_library_path(JNIEnv* env, jobject app_loader,
+                                const char* native_library_path) {
+  if (env == nullptr || app_loader == nullptr || native_library_path == nullptr ||
+      native_library_path[0] == '\0') {
+    return 46;
+  }
+  const std::string path(native_library_path);
+  const std::string::size_type slash = path.find_last_of('/');
+  if (slash == std::string::npos || slash == 0) {
+    return 46;
+  }
+  const std::string directory = path.substr(0, slash);
+  const std::string basename = path.substr(slash + 1);
+  std::string mapped_name = basename;
+  if (mapped_name.size() >= 3 &&
+      mapped_name.compare(mapped_name.size() - 3, 3, ".so") == 0) {
+    // The host ojluni System.c was compiled for Darwin and therefore maps
+    // System.loadLibrary("x") to libx.dylib. Android APKs conventionally
+    // ship libx.so. Keep the APK untouched: create a runtime-owned alias in
+    // the sealed native directory, then let Runtime.nativeLoad consume it.
+    mapped_name.replace(mapped_name.size() - 3, 3, ".dylib");
+    const std::string alias = directory + "/" + mapped_name;
+    if (symlink(path.c_str(), alias.c_str()) != 0 && errno != EEXIST) {
+      return 46;
+    }
+  }
+  jclass array_list_class = env->FindClass("java/util/ArrayList");
+  jclass loader_class = env->GetObjectClass(app_loader);
+  if (array_list_class == nullptr || loader_class == nullptr) {
+    return 46;
+  }
+  jmethodID array_list_ctor =
+      env->GetMethodID(array_list_class, "<init>", "()V");
+  jmethodID add = env->GetMethodID(array_list_class, "add", "(Ljava/lang/Object;)Z");
+  jmethodID add_native_path = env->GetMethodID(
+      loader_class, "addNativePath", "(Ljava/util/Collection;)V");
+  jobject paths = array_list_ctor == nullptr
+                      ? nullptr
+                      : env->NewObject(array_list_class, array_list_ctor);
+  jstring directory_string = env->NewStringUTF(directory.c_str());
+  if (paths == nullptr || directory_string == nullptr || add == nullptr ||
+      add_native_path == nullptr) {
+    return 46;
+  }
+  env->CallBooleanMethod(paths, add, directory_string);
+  env->CallVoidMethod(app_loader, add_native_path, paths);
+  const bool failed = env->ExceptionCheck();
+  env->DeleteLocalRef(directory_string);
+  env->DeleteLocalRef(paths);
+  env->DeleteLocalRef(loader_class);
+  env->DeleteLocalRef(array_list_class);
+  if (failed) {
+    return 46;
+  }
+  std::cerr << "ART Android APK: PathClassLoader nativeLibraryPath installed dir="
+            << directory << "\n";
   return 0;
 }
 

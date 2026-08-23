@@ -96,11 +96,18 @@ int present_and_retain(darwin_art_graphics::GraphicsState* state,
     }
   }
 
+  // A real APK's application content lives under android.R.id.content. The
+  // window background remains owned by the CAMetal clear, while this root
+  // records every Calculator sibling (display + keypad) in one Android view
+  // traversal. The isolated button probe still uses its bounded child.
+  jobject render_root = run_apk_app
+                            ? content_root
+                            : (probe_view != nullptr ? probe_view : content_root);
   const jboolean decor_presented =
       env->ExceptionCheck()
           ? JNI_FALSE
-          : darwin_art_graphics::present_content(state, env, nullptr, decor_view,
-                                                  width, height);
+          : darwin_art_graphics::present_content(
+                state, env, nullptr, render_root, width, height);
   jmethodID was_presented =
       run_apk_app || probe_view_class == nullptr
           ? nullptr

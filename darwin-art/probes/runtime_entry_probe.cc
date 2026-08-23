@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <thread>
 #include <string>
 #include <utility>
 
@@ -27,6 +28,7 @@
 #include "runtime_jni_scope.h"
 #include "runtime_frame_probe.h"
 #include "runtime_graphics_probe.h"
+#include "runtime_graphics_gpu.h"
 #include "runtime_graphics_session.h"
 #include "runtime_graphics_phase.h"
 #include "runtime_jni_acceptance_probe.h"
@@ -256,8 +258,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       class_linker->FindSystemClass(self, "Landroid/app/Activity;"));
   if (framework_activity == nullptr || self->IsExceptionPending()) {
     std::cerr << "ART Android framework: Activity class lookup failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
     }
     return 21;
   }
@@ -266,8 +269,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       (run_network_acceptance && network_fixture_handle == nullptr) ||
       self->IsExceptionPending()) {
     std::cerr << "ART Android window: Darwin Canvas/Window lookup failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
     }
     return 21;
   }
@@ -287,22 +291,45 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   // have been installed.  Loading earlier makes JNI_OnLoad observe the boot
   // loader and breaks RegisterNatives for app-owned classes.
   if (run_apk_app && !process_options.apk_app_native_path.empty()) {
-    const int native_status = darwin_art_app::load_native_library(
-        env, self, app_loader_ref, apk_app_native_path);
-    if (native_status != 0) {
-      return native_status;
+    if (darwin_art_app::install_native_library_path(
+            env, app_loader_ref, apk_app_native_path) != 0) {
+      std::cerr << "ART Android APK: PathClassLoader native path setup failed\n";
+      return 46;
+    }
+    // Real Android APKs load JNI libraries from the managed
+    // System.load/Runtime.nativeLoad path during class initialization.  Do
+    // not eagerly call JavaVMExt here as that would make the subsequent
+    // System.loadLibrary a recursive second load of the same image.  The
+    // explicit loader remains available for the isolated fixture/direct APK
+    // gates, while the normal app path follows the platform ordering.
+    const char* managed_native_load =
+        std::getenv("DARWIN_ART_APK_MANAGED_NATIVE_LOAD");
+    if (managed_native_load == nullptr || std::strcmp(managed_native_load, "1") != 0) {
+      const int native_status = darwin_art_app::load_native_library(
+          env, self, app_loader_ref, apk_app_native_path);
+      if (native_status != 0) {
+        return native_status;
+      }
     }
   }
 
   if (!class_linker->EnsureInitialized(self, probe_activity, true, true)) {
-    std::cerr << "ART Android framework: launcher Activity initialization failed\n"
-              << self->GetException()->Dump() << "\n";
+    std::cerr << "ART Android framework: launcher Activity initialization failed\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
+    }
+    if (self->IsExceptionPending()) {
+      self->ClearException();
+    }
     return 22;
   }
   jmethodID activity_constructor =
       env->GetMethodID(probe_activity_class, "<init>", "()V");
+  // APK Activity construction is deferred to the attached Java UI thread.
+  // Activity/Fragment hosts capture thread identity during construction.
   jobject activity_instance =
-      activity_constructor == nullptr
+      run_apk_app || activity_constructor == nullptr
           ? nullptr
           : env->NewObject(probe_activity_class, activity_constructor);
   jmethodID probe_value =
@@ -311,13 +338,14 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           : env->GetMethodID(probe_activity_class, "probeValue", "()I");
   jint activity_result =
       run_apk_app
-          ? (activity_instance == nullptr ? -1 : 42)
+          ? 42
           : (activity_instance == nullptr || probe_value == nullptr
                  ? -1
                  : env->CallIntMethod(activity_instance, probe_value));
   if (env->ExceptionCheck()) {
-    std::cerr << "ART Android framework: ProbeActivity constructor threw\n"
-              << self->GetException()->Dump() << "\n";
+    std::cerr << "ART Android framework: ProbeActivity constructor threw\n";
+    env->ExceptionDescribe();
+    env->ExceptionClear();
     return 23;
   }
   if (activity_result != 42) {
@@ -333,19 +361,202 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
                 package_manager_handle->AllocObject(self));
   if (package_manager == nullptr || env->ExceptionCheck()) {
     std::cerr << "ART Android window: package feature stub failed\n";
-    if (self->IsExceptionPending()) {
-      std::cerr << self->GetException()->Dump() << "\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
     }
     return 27;
   }
   jint lifecycle_result = 43;
-  const int presentation_status = darwin_art_presentation::run(
-      env, self, activity_instance, probe_activity_class, probe_context_class,
-      probe_resources_class, probe_view_class, probe_canvas_class,
-      content_root_class, package_manager, run_apk_app, use_framework_resources,
-      expect_apk_widgets, !process_options.apk_app_native_path.empty(),
-      run_framework_button, window_scale, framework_res_apk,
-      apk_app_package, apk_app_activity, config->app_dex, graphics_state);
+  int presentation_status = 0;
+  if (run_apk_app) {
+    // NSWindow/CAMetalLayer creation is AppKit-main-thread owned.  The
+    // Activity itself is deliberately constructed on the attached Android UI
+    // thread below, but the drawable owner must exist before that handoff.
+    if (darwin_art_graphics::prepare_gpu_surface(
+            graphics_state, kApkFrameWidth * window_scale,
+            kApkFrameHeight * window_scale) != 0) {
+      std::cerr << "ART Android GPU: main-thread surface preparation failed\n";
+      return 33;
+    }
+    // Android runs Activity/View construction on the app's Java main thread,
+    // not on the ART bootstrap thread that called LoadNativeLibrary.  Apart
+    // from being the correct ownership boundary, this matters for framework
+    // widgets: TextView/EditText resolve their helper classes through the
+    // attached Java thread's class-loading state.  Keep the bootstrap thread
+    // parked while the attached UI thread owns the whole window transaction.
+    JavaVM* vm = nullptr;
+    if (env->GetJavaVM(&vm) != JNI_OK || vm == nullptr) {
+      std::cerr << "ART Android window: JavaVM lookup failed\n";
+      return 27;
+    }
+    struct PresentationRefs {
+      jobject activity;
+      jclass activity_class;
+      jclass context_class;
+      jclass resources_class;
+      jclass view_class;
+      jclass canvas_class;
+      jclass content_root_class;
+      jobject package_manager;
+      jobject app_loader;
+    } refs{
+        env->NewGlobalRef(activity_instance),
+        reinterpret_cast<jclass>(env->NewGlobalRef(probe_activity_class)),
+        reinterpret_cast<jclass>(env->NewGlobalRef(probe_context_class)),
+        reinterpret_cast<jclass>(env->NewGlobalRef(probe_resources_class)),
+        reinterpret_cast<jclass>(env->NewGlobalRef(probe_view_class)),
+        reinterpret_cast<jclass>(env->NewGlobalRef(probe_canvas_class)),
+        reinterpret_cast<jclass>(env->NewGlobalRef(content_root_class)),
+        env->NewGlobalRef(package_manager),
+        env->NewGlobalRef(app_loader_ref),
+    };
+    if (refs.activity_class == nullptr ||
+        refs.context_class == nullptr || refs.resources_class == nullptr ||
+        refs.view_class == nullptr || refs.content_root_class == nullptr ||
+        refs.package_manager == nullptr || refs.app_loader == nullptr) {
+      std::cerr << "ART Android window: UI thread reference setup failed"
+                << " activity_class=" << (refs.activity_class != nullptr)
+                << " context=" << (refs.context_class != nullptr)
+                << " resources=" << (refs.resources_class != nullptr)
+                << " view=" << (refs.view_class != nullptr)
+                << " content=" << (refs.content_root_class != nullptr)
+                << " package_manager=" << (refs.package_manager != nullptr)
+                << " app_loader=" << (refs.app_loader != nullptr)
+                << "\n";
+      return 27;
+    }
+    std::thread ui_thread([&]() {
+      JNIEnv* ui_env = nullptr;
+      if (vm->AttachCurrentThread(&ui_env, nullptr) != JNI_OK ||
+          ui_env == nullptr) {
+        presentation_status = 27;
+        return;
+      }
+      art::Thread* ui_self = art::Thread::Current();
+      jclass activity_class_local =
+          reinterpret_cast<jclass>(ui_env->NewLocalRef(refs.activity_class));
+      jclass looper_class = ui_env->FindClass("android/os/Looper");
+      jmethodID prepare_looper =
+          looper_class == nullptr
+              ? nullptr
+              : ui_env->GetStaticMethodID(looper_class, "prepare", "()V");
+      if (prepare_looper != nullptr) {
+        ui_env->CallStaticVoidMethod(looper_class, prepare_looper);
+      }
+      ui_env->DeleteLocalRef(looper_class);
+      if (prepare_looper == nullptr || ui_env->ExceptionCheck()) {
+        presentation_status = 27;
+        vm->DetachCurrentThread();
+        return;
+      }
+      jclass thread_class = ui_env->FindClass("java/lang/Thread");
+      jmethodID current_thread =
+          thread_class == nullptr
+              ? nullptr
+              : ui_env->GetStaticMethodID(thread_class, "currentThread",
+                                          "()Ljava/lang/Thread;");
+      jmethodID set_context_loader =
+          thread_class == nullptr
+              ? nullptr
+              : ui_env->GetMethodID(thread_class, "setContextClassLoader",
+                                    "(Ljava/lang/ClassLoader;)V");
+      jobject thread =
+          current_thread == nullptr
+              ? nullptr
+              : ui_env->CallStaticObjectMethod(thread_class, current_thread);
+      jobject app_loader_local = ui_env->NewLocalRef(refs.app_loader);
+      if (set_context_loader != nullptr && thread != nullptr &&
+          app_loader_local != nullptr) {
+        ui_env->CallVoidMethod(thread, set_context_loader, app_loader_local);
+      }
+      ui_env->DeleteLocalRef(app_loader_local);
+      ui_env->DeleteLocalRef(thread);
+      ui_env->DeleteLocalRef(thread_class);
+      if (current_thread == nullptr || set_context_loader == nullptr ||
+          ui_env->ExceptionCheck()) {
+        presentation_status = 27;
+        vm->DetachCurrentThread();
+        return;
+      }
+      // ServiceManager is normally initialized by ActivityThread after the
+      // app thread has its PathClassLoader.  The detached host has no
+      // ActivityThread, so perform the same binder bootstrap now; the native
+      // BinderInternal bridge resolves DarwinServiceBridge through this exact
+      // thread context loader.
+      jclass binder_internal =
+          ui_env->FindClass("com/android/internal/os/BinderInternal");
+      jmethodID get_context_object =
+          binder_internal == nullptr
+              ? nullptr
+              : ui_env->GetStaticMethodID(
+                    binder_internal, "getContextObject",
+                    "()Landroid/os/IBinder;");
+      jobject context_binder =
+          get_context_object == nullptr
+              ? nullptr
+              : ui_env->CallStaticObjectMethod(binder_internal,
+                                                 get_context_object);
+      if (ui_env->ExceptionCheck()) {
+        ui_env->ExceptionDescribe();
+        ui_env->ExceptionClear();
+      }
+      std::cerr << "ART Android services: context binder="
+                << (context_binder != nullptr) << "\n";
+      ui_env->DeleteLocalRef(context_binder);
+      ui_env->DeleteLocalRef(binder_internal);
+      jobject activity_local = nullptr;
+      if (refs.activity != nullptr) {
+        activity_local = ui_env->NewLocalRef(refs.activity);
+      } else {
+        jmethodID ui_activity_constructor =
+            ui_env->GetMethodID(activity_class_local, "<init>", "()V");
+        activity_local = ui_activity_constructor == nullptr
+                             ? nullptr
+                             : ui_env->NewObject(activity_class_local,
+                                                 ui_activity_constructor);
+      }
+      jclass context_class_local =
+          reinterpret_cast<jclass>(ui_env->NewLocalRef(refs.context_class));
+      jclass resources_class_local = reinterpret_cast<jclass>(
+          ui_env->NewLocalRef(refs.resources_class));
+      jclass view_class_local =
+          reinterpret_cast<jclass>(ui_env->NewLocalRef(refs.view_class));
+      jclass canvas_class_local =
+          reinterpret_cast<jclass>(ui_env->NewLocalRef(refs.canvas_class));
+      jclass content_root_class_local = reinterpret_cast<jclass>(
+          ui_env->NewLocalRef(refs.content_root_class));
+      jobject package_manager_local =
+          ui_env->NewLocalRef(refs.package_manager);
+      presentation_status = darwin_art_presentation::run(
+          ui_env, ui_self, activity_local, activity_class_local,
+          context_class_local, resources_class_local, view_class_local,
+          canvas_class_local, content_root_class_local, package_manager_local,
+          true, use_framework_resources, expect_apk_widgets,
+          !process_options.apk_app_native_path.empty(), run_framework_button,
+          window_scale, framework_res_apk, apk_app_package, apk_app_activity,
+          config->app_dex, graphics_state);
+      vm->DetachCurrentThread();
+    });
+    ui_thread.join();
+    env->DeleteGlobalRef(refs.activity);
+    env->DeleteGlobalRef(refs.activity_class);
+    env->DeleteGlobalRef(refs.context_class);
+    env->DeleteGlobalRef(refs.resources_class);
+    env->DeleteGlobalRef(refs.view_class);
+    env->DeleteGlobalRef(refs.canvas_class);
+    env->DeleteGlobalRef(refs.content_root_class);
+    env->DeleteGlobalRef(refs.package_manager);
+    env->DeleteGlobalRef(refs.app_loader);
+  } else {
+    presentation_status = darwin_art_presentation::run(
+        env, self, activity_instance, probe_activity_class, probe_context_class,
+        probe_resources_class, probe_view_class, probe_canvas_class,
+        content_root_class, package_manager, false, use_framework_resources,
+        expect_apk_widgets, !process_options.apk_app_native_path.empty(),
+        run_framework_button, window_scale, framework_res_apk, apk_app_package,
+        apk_app_activity, config->app_dex, graphics_state);
+  }
   if (presentation_status != 0) {
     return presentation_status;
   }

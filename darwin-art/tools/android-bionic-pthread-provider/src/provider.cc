@@ -1230,6 +1230,73 @@ extern "C" int darwin_art_bionic_pthread_rwlock_destroy(
   return 0;
 }
 
+struct SemEntry {
+  std::mutex mutex;
+  std::condition_variable condition;
+  unsigned value = 0;
+  bool destroyed = false;
+};
+std::mutex g_sem_mutex;
+std::unordered_map<void*, std::shared_ptr<SemEntry>> g_semaphores;
+
+extern "C" int darwin_art_bionic_sem_init(void* address, int pshared,
+                                           unsigned value) {
+  if (address == nullptr || pshared != 0) return kAndroidEnotsup;
+  auto entry = std::make_shared<SemEntry>();
+  entry->value = value;
+  std::lock_guard<std::mutex> lock(g_sem_mutex);
+  if (g_semaphores.count(address) != 0) return kAndroidEinval;
+  g_semaphores.emplace(address, std::move(entry));
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_sem_destroy(void* address) {
+  std::shared_ptr<SemEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_sem_mutex);
+    auto found = g_semaphores.find(address);
+    if (found == g_semaphores.end()) return kAndroidEinval;
+    entry = found->second;
+    std::lock_guard<std::mutex> sem_lock(entry->mutex);
+    if (entry->value == 0) return kAndroidEbusy;
+    entry->destroyed = true;
+    g_semaphores.erase(found);
+  }
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_sem_post(void* address) {
+  std::shared_ptr<SemEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_sem_mutex);
+    auto found = g_semaphores.find(address);
+    if (found == g_semaphores.end()) return kAndroidEinval;
+    entry = found->second;
+  }
+  {
+    std::lock_guard<std::mutex> lock(entry->mutex);
+    if (entry->destroyed || entry->value == UINT_MAX) return kAndroidEinval;
+    ++entry->value;
+  }
+  entry->condition.notify_one();
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_sem_wait(void* address) {
+  std::shared_ptr<SemEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_sem_mutex);
+    auto found = g_semaphores.find(address);
+    if (found == g_semaphores.end()) return kAndroidEinval;
+    entry = found->second;
+  }
+  std::unique_lock<std::mutex> lock(entry->mutex);
+  entry->condition.wait(lock, [&] { return entry->destroyed || entry->value != 0; });
+  if (entry->destroyed) return kAndroidEinval;
+  --entry->value;
+  return 0;
+}
+
 extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
                                                     const char* symbol,
                                                     const char* version) {
@@ -1238,6 +1305,14 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
       std::string_view(version) != "LIBC") {
     return nullptr;
   }
+  if (std::string_view(symbol) == "sem_init")
+    return reinterpret_cast<void*>(&darwin_art_bionic_sem_init);
+  if (std::string_view(symbol) == "sem_destroy")
+    return reinterpret_cast<void*>(&darwin_art_bionic_sem_destroy);
+  if (std::string_view(symbol) == "sem_post")
+    return reinterpret_cast<void*>(&darwin_art_bionic_sem_post);
+  if (std::string_view(symbol) == "sem_wait")
+    return reinterpret_cast<void*>(&darwin_art_bionic_sem_wait);
 #define RESOLVE(name)                                                        \
   if (std::string_view(symbol) == "pthread_" #name)                         \
     return reinterpret_cast<void*>(&darwin_art_bionic_pthread_##name)

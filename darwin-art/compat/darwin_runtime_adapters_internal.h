@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <vector>
 #include <string>
 
 #include "darwin_android_jni_trampoline.h"
@@ -76,7 +77,14 @@ struct ElfLibrary {
   alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)
       std::array<unsigned char, DARWIN_ART_JNI_PROXY_STORAGE_SIZE> proxy_storage{};
   DarwinArtJniProxy* proxy = nullptr;
+  // Initiating app loader for JNI_OnLoad/ProxyFindClass.  NativeBridge's
+  // callback has no class-loader argument, so retain the lease per image.
+  void* app_loader = nullptr;
   darwin_art::android_jni::TrampolineSet* trampolines = nullptr;
+  // JNI_OnLoad may register methods on more than one app class.  Each
+  // RegisterNatives call gets an independent executable trampoline mapping;
+  // all mappings remain owned by the image until its graph is torn down.
+  std::vector<darwin_art::android_jni::TrampolineSet*> trampoline_sets;
 };
 
 int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end);
@@ -95,6 +103,7 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     uintptr_t* out_address,
     DarwinArtElfErrorBuffer* error);
 int DropRuntimeElfGraph(void* value, void* context);
+void DestroyRuntimeElfTrampolines(ElfLibrary* library);
 int DropRuntimeElfLibrary(void* value, void* context);
 int DropRuntimeElfImageRegistry(void* value, void* context);
 int DropRuntimeDsoLifecycle(void* value, void* context);

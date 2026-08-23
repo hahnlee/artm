@@ -19,4 +19,6 @@ GetByteArrayRegion	JNIEnv	200	void(JNIEnv*,jbyteArray,jsize,jsize,jbyte*)	direct
 SetByteArrayRegion	JNIEnv	208	void(JNIEnv*,jbyteArray,jsize,jsize,const-jbyte*)	direct-register-only	forward-current-ART-env
 RegisterNatives	JNIEnv	215	jint(JNIEnv*,jclass,const-JNINativeMethod*,jint)	direct-register-only	implemented
 ExceptionCheck	JNIEnv	228	jboolean(JNIEnv*)	direct-register-only	forward-current-ART-env-with-standalone-fallback
+GetDirectBufferAddress	JNIEnv	230	void*(JNIEnv*,jobject)	direct-register-only	forward-current-ART-env
+GetDirectBufferCapacity	JNIEnv	231	jlong(JNIEnv*,jobject)	direct-register-only	forward-current-ART-env
 GetEnv	JavaVM	6	jint(JavaVM*,void**,jint)	direct-register-only	implemented

@@ -231,6 +231,9 @@ strftime_source="$root/_aosp/bionic-strftime-facade/platform/bionic/libc/tzcode/
   -I"$root/tools/bionic-provider-namespace/include" \
   -c "$root/tools/bionic-provider-namespace/src/builtin_adapters.cc" \
   -o "$objects/builtin_adapters.o"
+"$cxx" "${cxxflags[@]}" \
+  -I"$root/tools/bionic-math-facade/include" \
+  -c "$root/tools/bionic-math-facade/src/math.cc" -o "$objects/math.o"
 
 native="$build/libdarwin-art-bionic-native-providers.a"
 "$ar" rcs "$native" \
@@ -252,7 +255,8 @@ native="$build/libdarwin-art-bionic-native-providers.a"
   "$objects/strerror.o" "$objects/wide-integer.o" "$objects/wide-float.o" \
   "$objects/abort.o" \
   "$objects/liblog.o" "$objects/namespace.o" \
-  "$objects/builtin_adapters.o"
+  "$objects/builtin_adapters.o" \
+  "$objects/math.o"
 
 float="$build/libdarwin-art-bionic-float-conversion.a"
 binary128="$build/libdarwin-art-bionic-binary128-conversion.a"
@@ -390,4 +394,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=32 bind_builtins=sealed routes=185 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=33 bind_builtins=sealed routes=243 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'

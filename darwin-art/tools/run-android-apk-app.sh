@@ -33,6 +33,12 @@ runtime="$root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics
 core_oj="$root/_prebuilt/android-16/bootclasspath/core-oj.jar"
 core_libart="$root/_prebuilt/android-16/bootclasspath/core-libart.jar"
 framework="$root/_prebuilt/android-16/bootclasspath/framework.jar"
+if [[ -f "$root/_build/android16-framework-compat/framework-compat.jar" ]]; then
+  # The detached host has no DeviceConfig service manager.  Use the merged
+  # framework boot image whose no-service DeviceConfig seam preserves AOSP
+  # default-valued feature flags during widget construction.
+  framework="$root/_build/android16-framework-compat/framework-compat.jar"
+fi
 core_icu="$root/_build/bootclasspath/core-icu4j-api36.jar"
 support_dex="$root/_build/button-dex/dex/classes.dex"
 fonts_xml="$root/probes/button/fonts.xml"

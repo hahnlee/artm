@@ -22,6 +22,15 @@ std::string ElfError(DarwinArtElfStatus status,
 
 }  // namespace
 
+void DestroyRuntimeElfTrampolines(ElfLibrary* library) {
+  if (library == nullptr) return;
+  for (auto* trampolines : library->trampoline_sets) {
+    darwin_art::android_jni::DestroyRegularTrampolines(trampolines);
+  }
+  library->trampoline_sets.clear();
+  library->trampolines = nullptr;
+}
+
 int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
   ElfLibrary* library = static_cast<ElfLibrary*>(context);
   if (library == nullptr || library->dso_lifecycle == nullptr ||
@@ -72,6 +81,13 @@ int DropRuntimeElfGraph(void* value, void* context) {
 int DropRuntimeElfLibrary(void* value, void*) {
   auto* library = static_cast<ElfLibrary*>(value);
   if (library == nullptr || library->magic != kElfLibraryMagic) return -1;
+  if (library->app_loader != nullptr) {
+    if (JNIEnv* env = static_cast<JNIEnv*>(ProxyCurrentEnv(library))) {
+      env->DeleteGlobalRef(static_cast<jobject>(library->app_loader));
+    }
+    library->app_loader = nullptr;
+  }
+  DestroyRuntimeElfTrampolines(library);
   TeardownProviderNamespace(library);
   library->magic = 0;
   delete library;

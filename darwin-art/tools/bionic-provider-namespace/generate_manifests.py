@@ -152,6 +152,7 @@ def main() -> int:
         "central-fd-broker": "DARWIN_ART_BIONIC_PROVIDER_CENTRAL_FD_BROKER",
         "socket": "DARWIN_ART_BIONIC_PROVIDER_SOCKET",
         "dns": "DARWIN_ART_BIONIC_PROVIDER_DNS",
+        "math": "DARWIN_ART_BIONIC_PROVIDER_MATH",
     }
     extensions = rows("tools/bionic-provider-namespace/extensions.tsv")
     extension_keys: set[tuple[str, str, str]] = set()

@@ -25,6 +25,7 @@ namespace darwin_art_graphics {
 struct GraphicsState {
   jclass probe_canvas_class = nullptr;
   jobject interactive_root = nullptr;
+  jobject hardware_context = nullptr;
   jobject gpu_render_node = nullptr;
   bool gpu_render_node_recorded = false;
   bool gpu_ripple_overlay_active = false;
@@ -56,6 +57,7 @@ struct GraphicsState {
 void set_probe_canvas_class(GraphicsState* state, JNIEnv* env, jclass canvas_class);
 bool retain_interactive_root(GraphicsState* state, JNIEnv* env, jobject root,
                              jint width, jint height);
+bool retain_hardware_context(GraphicsState* state, JNIEnv* env, jobject context);
 void shutdown(GraphicsState* state, JNIEnv* env);
 
 #if defined(DARWIN_ART_REAL_GRAPHICS)

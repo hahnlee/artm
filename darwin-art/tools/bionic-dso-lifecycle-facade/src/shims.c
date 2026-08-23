@@ -18,6 +18,15 @@ void darwin_art_bionic___cxa_finalize(void* dso) {
   errno = saved_host_errno;
 }
 
+int darwin_art_bionic___register_atfork(void* prepare, void* parent,
+                                        void* child, void* arg) {
+  (void)prepare;
+  (void)parent;
+  (void)child;
+  (void)arg;
+  return 0;
+}
+
 static int NameCompare(const char* left, const char* right) {
   while (*left == *right && *left != '\0') {
     ++left;
@@ -38,6 +47,8 @@ static const Binding kBindings[] = {
      (DarwinArtBionicDsoFunction)darwin_art_bionic___cxa_atexit},
     {"__cxa_finalize",
      (DarwinArtBionicDsoFunction)darwin_art_bionic___cxa_finalize},
+    {"__register_atfork",
+     (DarwinArtBionicDsoFunction)darwin_art_bionic___register_atfork},
 };
 
 DarwinArtBionicDsoFunction darwin_art_bionic_dso_lifecycle_resolve(

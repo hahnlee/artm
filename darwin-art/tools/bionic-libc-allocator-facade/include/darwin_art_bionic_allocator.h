@@ -36,8 +36,11 @@ typedef struct DarwinArtBionicAllocatorBinding {
 /* Direct Android-import signatures. malloc/realloc deliberately do not write
  * host errno; use the result seam until the Bionic TLS errno provider exists. */
 void* darwin_art_bionic_malloc(size_t size);
+void* darwin_art_bionic_calloc(size_t count, size_t size);
 void darwin_art_bionic_free(void* pointer);
 void* darwin_art_bionic_realloc(void* pointer, size_t size);
+int darwin_art_bionic_mallopt(int param, int value);
+size_t darwin_art_bionic_malloc_usable_size(const void* pointer);
 int darwin_art_bionic_posix_memalign(void** output, size_t alignment, size_t size);
 
 /* Non-import seam carrying Android errno numbers without exposing Darwin TLS. */

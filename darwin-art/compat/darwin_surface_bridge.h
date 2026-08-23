@@ -94,6 +94,11 @@ DarwinArtSurfaceResult darwin_art_surface_present(
 // IOSurface mapping or CPU pixel buffer is involved.
 DarwinArtGpuFrame* darwin_art_surface_gpu_begin(DarwinArtSurface* surface);
 void* darwin_art_surface_gpu_canvas(DarwinArtGpuFrame* frame);
+// Returns the SkCanvas owned by the current GPU frame on the calling thread.
+// It is valid only between gpu_begin() and gpu_end(); no ownership is
+// transferred. Native APK renderers may use this seam to draw directly into
+// the CAMetalLayer drawable without a CPU readback or an intermediate image.
+void* darwin_art_surface_gpu_active_canvas(void);
 DarwinArtSurfaceResult darwin_art_surface_gpu_end(
     DarwinArtSurface* surface, DarwinArtGpuFrame* frame);
 

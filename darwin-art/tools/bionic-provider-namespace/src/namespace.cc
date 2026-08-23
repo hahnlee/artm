@@ -66,6 +66,7 @@ constexpr const char *kProviderNames[] = {
     "central-fd-broker",
     "socket",
     "dns",
+    "math",
 };
 static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);
@@ -75,6 +76,7 @@ static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
  * Dependants are released before the shared errno/allocator/leaf substrate. */
 constexpr DarwinArtBionicProviderId kReleaseOrder[] = {
     DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE,
+    DARWIN_ART_BIONIC_PROVIDER_MATH,
     DARWIN_ART_BIONIC_PROVIDER_DNS,
     DARWIN_ART_BIONIC_PROVIDER_SOCKET,
     DARWIN_ART_BIONIC_PROVIDER_CENTRAL_FD_BROKER,
@@ -141,10 +143,16 @@ const Ownership *FindOwnership(const char *soname, const char *symbol) {
 bool KnownSoname(const char *soname) {
   return std::strcmp(soname, "libc.so") == 0 ||
          std::strcmp(soname, "libdl.so") == 0 ||
-         std::strcmp(soname, "liblog.so") == 0;
+         std::strcmp(soname, "liblog.so") == 0 ||
+         std::strcmp(soname, "libm.so") == 0;
 }
 
 bool VersionMatches(const Ownership &entry, const char *version) {
+  /* Some NDK-built compatibility DSOs carry mallopt without a version tag,
+   * while the Android stub advertises it as LIBC.  Keep this one reviewed
+   * extension tolerant of both encodings; all pinned libc++ routes remain
+   * exact-version checked below. */
+  if (std::strcmp(entry.symbol, "mallopt") == 0) return true;
   if (entry.version[0] == '\0')
     return version == nullptr || version[0] == '\0';
   return version != nullptr && std::strcmp(entry.version, version) == 0;

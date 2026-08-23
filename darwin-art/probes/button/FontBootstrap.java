@@ -19,6 +19,16 @@ final class FontBootstrap {
 
             Map<String, File> updatedFonts = new LinkedHashMap<>();
             updatedFonts.put("Roboto-Regular", new File(roboto));
+            // The AOSP Calculator display style requests sans-serif-light.
+            // The Darwin fixture intentionally ships one pinned face, so map
+            // Android's stock family names to that face instead of allowing
+            // Typeface.create(null, style) during EditText construction.
+            File regular = new File(roboto);
+            updatedFonts.put("sans-serif", regular);
+            updatedFonts.put("sans-serif-thin", regular);
+            updatedFonts.put("sans-serif-light", regular);
+            updatedFonts.put("sans-serif-medium", regular);
+            updatedFonts.put("sans-serif-black", regular);
 
             Method readConfig = systemFonts.getDeclaredMethod(
                     "getSystemFontConfigInternal",
@@ -43,6 +53,39 @@ final class FontBootstrap {
             Class<?> typeface = Class.forName("android.graphics.Typeface");
             Method installMap = typeface.getMethod("setSystemFontMap", Map.class);
             installMap.invoke(null, typefaces);
+            // Typeface's static defaults may have been touched by framework
+            // startup before this detached launcher installs SystemFonts.  A
+            // real zygote initializes these fields from the same map; restore
+            // that invariant explicitly so TextView/EditText constructors do
+            // not call Typeface.create(null, style).
+            Method create = typeface.getMethod("create", String.class, int.class);
+            Object regularTypeface = create.invoke(null, "sans-serif", 0);
+            Object boldTypeface = create.invoke(null, "sans-serif", 1);
+            java.lang.reflect.Field defaultField = typeface.getField("DEFAULT");
+            java.lang.reflect.Field defaultBoldField = typeface.getField("DEFAULT_BOLD");
+            java.lang.reflect.Field defaultTypefaceField =
+                    typeface.getDeclaredField("sDefaultTypeface");
+            java.lang.reflect.Field defaultsField =
+                    typeface.getDeclaredField("sDefaults");
+            defaultField.setAccessible(true);
+            defaultBoldField.setAccessible(true);
+            defaultTypefaceField.setAccessible(true);
+            defaultsField.setAccessible(true);
+            if (regularTypeface != null) {
+                defaultField.set(null, regularTypeface);
+                defaultTypefaceField.set(null, regularTypeface);
+            }
+            if (boldTypeface != null) {
+                defaultBoldField.set(null, boldTypeface);
+            }
+            if (regularTypeface != null && boldTypeface != null) {
+                Object defaults = java.lang.reflect.Array.newInstance(typeface, 4);
+                java.lang.reflect.Array.set(defaults, 0, regularTypeface);
+                java.lang.reflect.Array.set(defaults, 1, boldTypeface);
+                java.lang.reflect.Array.set(defaults, 2, regularTypeface);
+                java.lang.reflect.Array.set(defaults, 3, regularTypeface);
+                defaultsField.set(null, defaults);
+            }
         } catch (InvocationTargetException error) {
             Throwable cause = error.getCause();
             if (cause instanceof RuntimeException) {

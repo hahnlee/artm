@@ -21,6 +21,8 @@ public final class ProbeContext extends ContextWrapper {
     private final Resources.Theme theme;
     private final PackageManager packageManager;
     private final String packageName;
+    private final ClassLoader classLoader;
+    private static volatile ClassLoader applicationClassLoader;
 
     public ProbeContext(Resources resources, PackageManager packageManager) {
         this(resources, packageManager, "dev.darwinart.probe");
@@ -33,6 +35,11 @@ public final class ProbeContext extends ContextWrapper {
         theme = resources.newTheme();
         this.packageManager = packageManager;
         this.packageName = packageName == null ? "dev.darwinart.probe" : packageName;
+        // Capture the PathClassLoader at context construction.  The detached
+        // host may later execute Activity/View work on a dedicated Java UI
+        // thread, so consulting that thread's mutable context loader would
+        // otherwise make LayoutInflater lose APK-owned custom views.
+        classLoader = ProbeContext.class.getClassLoader();
         applicationInfo = new ApplicationInfo();
         applicationInfo.packageName = this.packageName;
         applicationInfo.targetSdkVersion = 36;
@@ -93,6 +100,17 @@ public final class ProbeContext extends ContextWrapper {
 
     @Override
     public Object getSystemService(String name) {
+        if (INPUT_METHOD_SERVICE.equals(name)) {
+            try {
+                Class<?> type = Class.forName("android.view.inputmethod.InputMethodManager");
+                java.lang.reflect.Method factory = type.getDeclaredMethod(
+                        "createStubInstance", int.class, Looper.class);
+                factory.setAccessible(true);
+                return factory.invoke(null, 0, Looper.getMainLooper());
+            } catch (ReflectiveOperationException error) {
+                throw new IllegalStateException("Could not construct input method stub", error);
+            }
+        }
         if (LAYOUT_INFLATER_SERVICE.equals(name)) {
             return construct("com.android.internal.policy.PhoneLayoutInflater");
         }
@@ -132,6 +150,13 @@ public final class ProbeContext extends ContextWrapper {
         return packageName;
     }
 
+    // ContextWrapper's implementation dereferences the null base used by
+    // this detached context. Android's ViewRootImpl uses this identity while
+    // constructing AttachInfo, so expose the same package-owned value.
+    public String getBasePackageName() {
+        return packageName;
+    }
+
     // ProbeContext intentionally has no host ContextImpl backing object.  The
     // real Android ContextImpl nevertheless exposes the application
     // PathClassLoader, and LayoutInflater uses Context.getClassLoader() while
@@ -140,7 +165,23 @@ public final class ProbeContext extends ContextWrapper {
     // base used by this detached Darwin context.
     @Override
     public ClassLoader getClassLoader() {
-        return Thread.currentThread().getContextClassLoader();
+        // ContextImpl on Android returns the application PathClassLoader.  In
+        // the detached launcher the support DEX and APK DEX are registered
+        // together, but the support class can retain the loader that first
+        // defined it.  Prefer the UI thread's installed application loader so
+        // LayoutInflater resolves custom APK views (CalculatorEditText, etc.)
+        // from the same loader as the Activity itself.
+        ClassLoader application = applicationClassLoader;
+        if (application != null) {
+            return application;
+        }
+        ClassLoader current = Thread.currentThread().getContextClassLoader();
+        return current != null ? current : classLoader;
+    }
+
+    /** Installs the Activity's complete APK+support PathClassLoader. */
+    public static void installApplicationClassLoader(ClassLoader loader) {
+        applicationClassLoader = loader;
     }
 
     @Override

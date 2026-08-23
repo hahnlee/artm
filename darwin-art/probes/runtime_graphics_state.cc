@@ -55,6 +55,19 @@ bool retain_interactive_root(GraphicsState* state, JNIEnv* env, jobject root,
   return state->interactive_root != nullptr && !env->ExceptionCheck();
 }
 
+bool retain_hardware_context(GraphicsState* state, JNIEnv* env, jobject context) {
+  if (state == nullptr || env == nullptr || context == nullptr ||
+      env->ExceptionCheck()) {
+    return false;
+  }
+  if (state->hardware_context != nullptr) {
+    env->DeleteGlobalRef(state->hardware_context);
+    state->hardware_context = nullptr;
+  }
+  state->hardware_context = env->NewGlobalRef(context);
+  return state->hardware_context != nullptr && !env->ExceptionCheck();
+}
+
 void shutdown(GraphicsState* state, JNIEnv* env) {
   if (state == nullptr || env == nullptr) return;
 #if defined(DARWIN_ART_REAL_GRAPHICS)
@@ -75,6 +88,10 @@ void shutdown(GraphicsState* state, JNIEnv* env) {
   if (state->interactive_root != nullptr) {
     env->DeleteGlobalRef(state->interactive_root);
     state->interactive_root = nullptr;
+  }
+  if (state->hardware_context != nullptr) {
+    env->DeleteGlobalRef(state->hardware_context);
+    state->hardware_context = nullptr;
   }
   if (state->probe_canvas_class != nullptr) {
     env->DeleteGlobalRef(state->probe_canvas_class);
