@@ -33,6 +33,7 @@ struct DarwinArtSurface {
   id<MTLTexture> io_surface_texture = nil;
   id<MTLCommandBuffer> last_command_buffer = nil;
   NSWindow* window = nil;
+  id window_delegate = nil;
   DarwinArtMetalView* view = nil;
   bool visible = false;
   bool producer_mapped = false;

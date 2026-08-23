@@ -228,12 +228,33 @@ CGFloat WindowScale(bool visible) {
 
 @end
 
+@interface DarwinArtSurfaceWindowDelegate : NSObject <NSWindowDelegate>
+@property(nonatomic, weak) DarwinArtMetalView* view;
+@end
+
+@implementation DarwinArtSurfaceWindowDelegate
+- (void)windowDidResignKey:(NSNotification*)notification {
+  (void)notification;
+  [self.view cancelPointerStream];
+}
+- (void)windowWillClose:(NSNotification*)notification {
+  (void)notification;
+  [self.view cancelPointerStream];
+}
+- (void)windowDidResize:(NSNotification*)notification {
+  (void)notification;
+  [self.view cancelPointerStream];
+}
+@end
+
 DarwinArtSurface::~DarwinArtSurface() {
     // Metal textures created from an IOSurface may consult that IOSurface
     // while they are being released. ARC destroys C++ fields after the
     // destructor body, so release the Objective-C owners explicitly before
     // dropping our Core Foundation reference.
     last_command_buffer = nil;
+    if (window != nil) window.delegate = nil;
+    window_delegate = nil;
     io_surface_texture = nil;
     command_queue = nil;
     device = nil;
@@ -448,6 +469,11 @@ DarwinArtSurface* darwin_art_surface_create(
       return finish(DARWIN_ART_SURFACE_ALLOCATION_FAILED, nullptr);
     }
     if (create_info->visible) {
+      DarwinArtSurfaceWindowDelegate* delegate =
+          [[DarwinArtSurfaceWindowDelegate alloc] init];
+      delegate.view = surface->view;
+      surface->window_delegate = delegate;
+      surface->window.delegate = delegate;
       surface->window.contentView = surface->view;
       [surface->window makeFirstResponder:surface->view];
       [surface->window center];
