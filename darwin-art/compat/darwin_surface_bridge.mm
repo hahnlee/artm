@@ -84,7 +84,6 @@ CGFloat WindowScale(bool visible) {
 @implementation DarwinArtMetalView {
   CAMetalLayer* _metalLayer;
   std::deque<DarwinArtPointerEvent> _pointerEvents;
-  CGFloat _contentScale;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -102,7 +101,6 @@ CGFloat WindowScale(bool visible) {
     _metalLayer.framebufferOnly = NO;
     _metalLayer.contentsScale = contentScale;
     _metalLayer.drawableSize = pixelSize;
-    _contentScale = contentScale;
     self.layer = _metalLayer;
   }
   return self;
@@ -127,10 +125,21 @@ CGFloat WindowScale(bool visible) {
   if (!NSPointInRect(point, bounds)) {
     return;
   }
+  // NSEvent coordinates are AppKit points, while Android's retained view is
+  // laid out in the CAMetalLayer drawable's backing pixels.  Derive the
+  // mapping from the live layer instead of assuming the launcher's requested
+  // scale is still the presentation scale after a Retina/resize transition.
+  const CGSize drawable_size = _metalLayer.drawableSize;
+  const CGFloat x_scale = bounds.size.width > 0.0
+                              ? drawable_size.width / bounds.size.width
+                              : 1.0;
+  const CGFloat y_scale = bounds.size.height > 0.0
+                              ? drawable_size.height / bounds.size.height
+                              : 1.0;
   _pointerEvents.push_back(DarwinArtPointerEvent{
       .action = static_cast<uint32_t>(action),
-      .x = static_cast<float>(point.x * _contentScale),
-      .y = static_cast<float>(point.y * _contentScale),
+      .x = static_cast<float>(point.x * x_scale),
+      .y = static_cast<float>(point.y * y_scale),
   });
 }
 
