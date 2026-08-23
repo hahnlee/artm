@@ -85,6 +85,25 @@ pub(super) fn run(
     let debug_latency = std::env::var_os("DARWIN_ART_DEBUG_INPUT_LATENCY").is_some();
     let mut last_input_dispatch: Option<Instant> = None;
     let mut frame_latencies_us = Vec::new();
+    let test_resize = std::env::var("DARWIN_ART_TEST_WINDOW_RESIZE")
+        .ok()
+        .and_then(|value| {
+            let (width, height) = value.split_once('x').or_else(|| value.split_once(','))?;
+            Some((width.parse::<u32>().ok()?, height.parse::<u32>().ok()?))
+        });
+    if let Some((width, height)) = test_resize {
+        let status = runtime
+            .surface()
+            .map_or(-1, |surface| surface.resize(width, height));
+        if status != 0 {
+            loop_error = Some(HostError::SurfaceFailed {
+                operation: "gpu_test_window_resize",
+                status,
+            });
+        } else {
+            eprintln!("DARWIN_ART gpu test resize={width}x{height}");
+        }
+    }
     // Keep the synthetic input path on the same owner thread as ART
     // and the Metal surface.  Each 16 ms pump is the host-side frame
     // cadence: the pointer state is dispatched into Android, then
@@ -143,7 +162,9 @@ pub(super) fn run(
         event
     };
 
-    if let Some((x, y)) = test_pointer {
+    if loop_error.is_none()
+        && let Some((x, y)) = test_pointer
+    {
         let down = synthetic_event(0, x, y);
         let dispatch_status = runtime
             .graphics()

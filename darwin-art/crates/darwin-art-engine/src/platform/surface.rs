@@ -1,8 +1,9 @@
 use super::abi::EngineSymbols;
 use core::ffi::c_void;
 use darwin_art_engine_sys::{
-    PointerEvent, PointerEventV2, SurfaceDestroyFn, SurfaceNextPointerEventFn,
-    SurfaceNextPointerEventV2Fn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
+    PointerEvent, PointerEventV2, SurfaceDestroyFn, SurfaceGetSizeFn, SurfaceNextPointerEventFn,
+    SurfaceNextPointerEventV2Fn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn,
+    SurfaceUpdateFn,
 };
 use darwin_art_runtime::NativeResource;
 use std::{mem::size_of, ptr::NonNull};
@@ -12,6 +13,8 @@ use std::{mem::size_of, ptr::NonNull};
 /// and never call into an unmapped engine image.
 pub struct SurfaceSession {
     handle: Option<NonNull<c_void>>,
+    resize: Option<SurfaceResizeFn>,
+    get_size: Option<SurfaceGetSizeFn>,
     update: SurfaceUpdateFn,
     present: SurfacePresentFn,
     pump_events: SurfacePumpEventsFn,
@@ -26,6 +29,8 @@ impl SurfaceSession {
     fn from_parts(handle: *mut c_void, symbols: EngineSymbols) -> Self {
         Self {
             handle: NonNull::new(handle),
+            resize: symbols.surface.resize,
+            get_size: symbols.surface.get_size,
             update: symbols.surface.update,
             present: symbols.surface.present,
             pump_events: symbols.surface.pump_events,
@@ -72,6 +77,30 @@ impl SurfaceSession {
         // SAFETY: the callback and handle are paired and live; `pixels`
         // remains borrowed for the duration of the synchronous callback.
         unsafe { (self.update)(handle.as_ptr(), pixels.as_ptr().cast(), byte_count) }
+    }
+
+    pub fn resize(&self, width: u32, height: u32) -> i32 {
+        let Some(handle) = self.handle.filter(|_| self.armed) else {
+            return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+        };
+        let Some(resize) = self.resize else {
+            return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+        };
+        // SAFETY: callback and handle are paired for the lifetime of this session.
+        unsafe { resize(handle.as_ptr(), width, height) }
+    }
+
+    pub fn size(&self) -> Option<(u32, u32)> {
+        let handle = self.handle.filter(|_| self.armed)?;
+        let get_size = self.get_size?;
+        let mut width = 0;
+        let mut height = 0;
+        // SAFETY: callback writes two valid output scalars owned by this frame.
+        if unsafe { get_size(handle.as_ptr(), &mut width, &mut height) } {
+            Some((width, height))
+        } else {
+            None
+        }
     }
 
     pub fn present(&self) -> i32 {
@@ -179,6 +208,8 @@ mod surface_session_tests {
         DESTROY_CALLS.store(0, Ordering::SeqCst);
         let mut session = SurfaceSession {
             handle: NonNull::new(std::ptr::dangling_mut::<c_void>()),
+            resize: None,
+            get_size: None,
             update,
             present,
             pump_events: pump,
@@ -199,6 +230,8 @@ mod surface_session_tests {
         let _lock = DESTROY_TEST_LOCK.lock().unwrap();
         let mut session = SurfaceSession {
             handle: NonNull::new(std::ptr::dangling_mut::<c_void>()),
+            resize: None,
+            get_size: None,
             update,
             present,
             pump_events: pump,

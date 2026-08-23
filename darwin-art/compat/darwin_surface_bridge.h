@@ -88,6 +88,19 @@ DarwinArtSurface* darwin_art_surface_create(
     const DarwinArtSurfaceCreateInfo* create_info,
     DarwinArtSurfaceResult* out_result);
 
+// Updates the IOSurface/CAMetalLayer backing and pixel dimensions. The call
+// is main-thread-only and waits for the prior GPU submission before swapping
+// the backing, so the renderer never observes a partially resized texture.
+DarwinArtSurfaceResult darwin_art_surface_resize(
+    DarwinArtSurface* surface,
+    uint32_t width,
+    uint32_t height);
+
+bool darwin_art_surface_get_size(
+    DarwinArtSurface* surface,
+    uint32_t* width,
+    uint32_t* height);
+
 // Waits for the previous GPU presentation to finish, then locks the IOSurface
 // for a CPU producer. Only one producer mapping may be active per surface.
 DarwinArtSurfaceResult darwin_art_surface_map_producer(

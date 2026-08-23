@@ -23,6 +23,8 @@ pub(super) fn validate_graphics_runtime_link(
         "_darwin_art_graphics_session_dispatch_pointer_v2",
         "_darwin_art_graphics_session_pump_frame",
         "_darwin_art_surface_create",
+        "_darwin_art_surface_resize",
+        "_darwin_art_surface_get_size",
         "_darwin_art_surface_update",
         "_darwin_art_surface_map_producer",
         "_darwin_art_surface_unmap_producer",

@@ -152,6 +152,8 @@ pub struct SurfaceCreateInfo {
 }
 
 pub type SurfaceCreateFn = unsafe extern "C" fn(*const SurfaceCreateInfo, *mut i32) -> *mut c_void;
+pub type SurfaceResizeFn = unsafe extern "C" fn(*mut c_void, u32, u32) -> i32;
+pub type SurfaceGetSizeFn = unsafe extern "C" fn(*mut c_void, *mut u32, *mut u32) -> bool;
 pub type SurfaceUpdateFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> i32;
 pub type SurfacePresentFn = unsafe extern "C" fn(*mut c_void) -> i32;
 pub type SurfacePumpEventsFn = unsafe extern "C" fn(*mut c_void, f64) -> i32;

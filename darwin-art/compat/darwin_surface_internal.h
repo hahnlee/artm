@@ -18,6 +18,7 @@
 - (BOOL)nextPointerEvent:(DarwinArtPointerEvent*)outEvent;
 - (BOOL)nextPointerEventV2:(DarwinArtPointerEventV2*)outEvent;
 - (void)cancelPointerStream;
+- (void)updateDrawableSize;
 @end
 
 // Shared host-owned surface state. GPU-only state is deliberately opaque so

@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <iostream>
 #include <limits>
 #include <new>
 
@@ -40,6 +41,64 @@ bool IsValidDimension(uint32_t value) {
 
 size_t AlignRowBytes(size_t value) {
   return (value + kRowAlignment - 1) & ~(kRowAlignment - 1);
+}
+
+struct SurfaceBacking {
+  IOSurfaceRef io_surface = nullptr;
+  id<MTLTexture> texture = nil;
+  size_t bytes_per_row = 0;
+};
+
+bool AllocateSurfaceBacking(id<MTLDevice> device, uint32_t width,
+                            uint32_t height, SurfaceBacking* out) {
+  if (device == nil || out == nullptr || !IsValidDimension(width) ||
+      !IsValidDimension(height)) {
+    return false;
+  }
+  const size_t minimum_row_bytes = static_cast<size_t>(width) * kBytesPerPixel;
+  const size_t bytes_per_row = AlignRowBytes(minimum_row_bytes);
+  if (bytes_per_row > std::numeric_limits<size_t>::max() /
+                          static_cast<size_t>(height)) {
+    return false;
+  }
+  NSDictionary* surface_properties = @{
+    (__bridge NSString*)kIOSurfaceWidth : @(width),
+    (__bridge NSString*)kIOSurfaceHeight : @(height),
+    (__bridge NSString*)kIOSurfaceBytesPerElement : @(kBytesPerPixel),
+    (__bridge NSString*)kIOSurfaceBytesPerRow : @(bytes_per_row),
+    (__bridge NSString*)kIOSurfacePixelFormat : @(kBgraPixelFormat),
+  };
+  IOSurfaceRef io_surface = IOSurfaceCreate(
+      (__bridge CFDictionaryRef)surface_properties);
+  if (io_surface == nullptr) return false;
+  const size_t actual_bytes_per_row = IOSurfaceGetBytesPerRow(io_surface);
+  const size_t allocation_size = IOSurfaceGetAllocSize(io_surface);
+  if (actual_bytes_per_row < minimum_row_bytes ||
+      actual_bytes_per_row > std::numeric_limits<size_t>::max() /
+                                 static_cast<size_t>(height) ||
+      allocation_size < actual_bytes_per_row * static_cast<size_t>(height)) {
+    CFRelease(io_surface);
+    return false;
+  }
+  MTLTextureDescriptor* descriptor =
+      [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
+                               MTLPixelFormatBGRA8Unorm
+                                                       width:width
+                                                      height:height
+                                                   mipmapped:NO];
+  descriptor.storageMode = MTLStorageModeShared;
+  descriptor.usage = MTLTextureUsageShaderRead;
+  id<MTLTexture> texture = [device newTextureWithDescriptor:descriptor
+                                                    iosurface:io_surface
+                                                        plane:0];
+  if (texture == nil) {
+    CFRelease(io_surface);
+    return false;
+  }
+  out->io_surface = io_surface;
+  out->texture = texture;
+  out->bytes_per_row = actual_bytes_per_row;
+  return true;
 }
 
 NSString* WindowTitle(const char* title) {
@@ -118,6 +177,17 @@ CGFloat WindowScale(bool visible) {
 
 - (CAMetalLayer*)metalLayer {
   return _metalLayer;
+}
+
+- (void)updateDrawableSize {
+  if (_metalLayer == nil) return;
+  const CGFloat scale = _metalLayer.contentsScale > 0.0
+                            ? _metalLayer.contentsScale
+                            : 1.0;
+  const NSRect bounds = self.bounds;
+  _metalLayer.drawableSize = CGSizeMake(
+      std::max<CGFloat>(1.0, std::ceil(bounds.size.width * scale)),
+      std::max<CGFloat>(1.0, std::ceil(bounds.size.height * scale)));
 }
 
 - (BOOL)acceptsFirstResponder {
@@ -230,6 +300,7 @@ CGFloat WindowScale(bool visible) {
 
 @interface DarwinArtSurfaceWindowDelegate : NSObject <NSWindowDelegate>
 @property(nonatomic, weak) DarwinArtMetalView* view;
+@property(nonatomic, assign) DarwinArtSurface* surface;
 @end
 
 @implementation DarwinArtSurfaceWindowDelegate
@@ -244,6 +315,25 @@ CGFloat WindowScale(bool visible) {
 - (void)windowDidResize:(NSNotification*)notification {
   (void)notification;
   [self.view cancelPointerStream];
+  [self.view updateDrawableSize];
+  if (self.surface == nullptr || self.view == nil) return;
+  const CGFloat scale = self.view.metalLayer.contentsScale > 0.0
+                            ? self.view.metalLayer.contentsScale
+                            : 1.0;
+  const NSRect bounds = self.view.bounds;
+  const uint32_t width = static_cast<uint32_t>(std::max<CGFloat>(
+      1.0, std::ceil(bounds.size.width * scale)));
+  const uint32_t height = static_cast<uint32_t>(std::max<CGFloat>(
+      1.0, std::ceil(bounds.size.height * scale)));
+  const DarwinArtSurfaceResult result =
+      darwin_art_surface_resize(self.surface, width, height);
+  if (result != DARWIN_ART_SURFACE_OK) {
+    std::cerr << "DARWIN_ART window resize failed status=" << result
+              << " width=" << width << " height=" << height << "\n";
+  } else {
+    std::cerr << "DARWIN_ART window resize pixels=" << width << "x"
+              << height << "\n";
+  }
 }
 @end
 
@@ -447,7 +537,8 @@ DarwinArtSurface* darwin_art_surface_create(
           initWithContentRect:frame
                     styleMask:(NSWindowStyleMaskTitled |
                                NSWindowStyleMaskClosable |
-                               NSWindowStyleMaskMiniaturizable)
+                               NSWindowStyleMaskMiniaturizable |
+                               NSWindowStyleMaskResizable)
                       backing:NSBackingStoreBuffered
                         defer:NO];
       if (surface->window == nil) {
@@ -472,6 +563,7 @@ DarwinArtSurface* darwin_art_surface_create(
       DarwinArtSurfaceWindowDelegate* delegate =
           [[DarwinArtSurfaceWindowDelegate alloc] init];
       delegate.view = surface->view;
+      delegate.surface = surface;
       surface->window_delegate = delegate;
       surface->window.delegate = delegate;
       surface->window.contentView = surface->view;
@@ -492,6 +584,56 @@ DarwinArtSurface* darwin_art_surface_create(
     }
     return finish(DARWIN_ART_SURFACE_OK, surface);
   }
+}
+
+DarwinArtSurfaceResult darwin_art_surface_resize(
+    DarwinArtSurface* surface, uint32_t width, uint32_t height) {
+  if (!IsMainThread()) return DARWIN_ART_SURFACE_NOT_MAIN_THREAD;
+  if (surface == nullptr || !IsValidDimension(width) ||
+      !IsValidDimension(height)) {
+    return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+  }
+  if (surface->width == width && surface->height == height) return DARWIN_ART_SURFACE_OK;
+  if (surface->producer_mapped) {
+    return DARWIN_ART_SURFACE_PRODUCER_ALREADY_MAPPED;
+  }
+  [surface->last_command_buffer waitUntilCompleted];
+  if (surface->last_command_buffer != nil &&
+      surface->last_command_buffer.status == MTLCommandBufferStatusError) {
+    return DARWIN_ART_SURFACE_GPU_SUBMISSION_FAILED;
+  }
+  SurfaceBacking backing;
+  if (!AllocateSurfaceBacking(surface->device, width, height, &backing)) {
+    return DARWIN_ART_SURFACE_ALLOCATION_FAILED;
+  }
+  IOSurfaceRef old_surface = surface->io_surface;
+  surface->io_surface = backing.io_surface;
+  surface->io_surface_texture = backing.texture;
+  surface->bytes_per_row = backing.bytes_per_row;
+  surface->width = width;
+  surface->height = height;
+  surface->last_command_buffer = nil;
+  if (old_surface != nullptr) CFRelease(old_surface);
+  if (surface->view != nil) {
+    [surface->view updateDrawableSize];
+    if (surface->window != nil) {
+      const CGFloat scale = surface->view.metalLayer.contentsScale > 0.0
+                                ? surface->view.metalLayer.contentsScale
+                                : 1.0;
+      [surface->window setContentSize:
+                         NSMakeSize(static_cast<CGFloat>(width) / scale,
+                                    static_cast<CGFloat>(height) / scale)];
+    }
+  }
+  return DARWIN_ART_SURFACE_OK;
+}
+
+bool darwin_art_surface_get_size(DarwinArtSurface* surface,
+                                 uint32_t* width, uint32_t* height) {
+  if (surface == nullptr || width == nullptr || height == nullptr) return false;
+  *width = surface->width;
+  *height = surface->height;
+  return true;
 }
 
 DarwinArtSurfaceResult darwin_art_surface_update(

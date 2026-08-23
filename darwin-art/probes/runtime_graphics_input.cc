@@ -41,6 +41,38 @@ int64_t MonotonicNanos() {
   return static_cast<int64_t>(now.tv_sec) * 1000000000LL + now.tv_nsec;
 }
 
+bool sync_interactive_surface_size(GraphicsState* state, JNIEnv* env) {
+  if (state == nullptr || env == nullptr || state->gpu_surface == nullptr ||
+      state->interactive_root == nullptr) {
+    return true;
+  }
+  uint32_t width = 0;
+  uint32_t height = 0;
+  if (!darwin_art_surface_get_size(state->gpu_surface, &width, &height) ||
+      width == 0 || height == 0) {
+    return false;
+  }
+  if (state->interactive_width == static_cast<jint>(width) &&
+      state->interactive_height == static_cast<jint>(height)) {
+    return true;
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_RESIZE") != nullptr) {
+    std::cerr << "ART Android resize: " << state->interactive_width << "x"
+              << state->interactive_height << " -> " << width << "x"
+              << height << "\n";
+  }
+  state->gpu_render_node_recorded = false;
+  const jboolean rendered = present_content(
+      state, env, nullptr, state->interactive_root, static_cast<jint>(width),
+      static_cast<jint>(height));
+  if (rendered == JNI_TRUE) {
+    state->interactive_width = static_cast<jint>(width);
+    state->interactive_height = static_cast<jint>(height);
+    return true;
+  }
+  return false;
+}
+
 jclass LoadProbeAnimationHost(JNIEnv* env) {
   if (env == nullptr) return nullptr;
   jclass thread_class = env->FindClass("java/lang/Thread");
@@ -501,6 +533,7 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
   }
   art::ScopedObjectAccess soa(art_thread);
   JNIEnv* env = art_thread->GetJniEnv();
+  if (!sync_interactive_surface_size(state, env)) return 75;
 #if defined(DARWIN_ART_REAL_GRAPHICS)
   auto* animation_context = state->hwui_animation_context.get();
   auto* time_lord = state->hwui_time_lord.get();
