@@ -39,6 +39,45 @@ int64_t MonotonicNanos() {
   return static_cast<int64_t>(now.tv_sec) * 1000000000LL + now.tv_nsec;
 }
 
+jclass LoadProbeAnimationHost(JNIEnv* env) {
+  if (env == nullptr) return nullptr;
+  jclass thread_class = env->FindClass("java/lang/Thread");
+  jmethodID current_thread = thread_class == nullptr
+                                 ? nullptr
+                                 : env->GetStaticMethodID(
+                                       thread_class, "currentThread",
+                                       "()Ljava/lang/Thread;");
+  jobject thread = current_thread == nullptr
+                       ? nullptr
+                       : env->CallStaticObjectMethod(thread_class, current_thread);
+  jmethodID get_loader = thread_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(thread_class, "getContextClassLoader",
+                                                "()Ljava/lang/ClassLoader;");
+  jobject loader = get_loader == nullptr
+                       ? nullptr
+                       : env->CallObjectMethod(thread, get_loader);
+  jclass loader_class = loader == nullptr ? nullptr : env->GetObjectClass(loader);
+  jmethodID load_class = loader_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(loader_class, "loadClass",
+                                                "(Ljava/lang/String;)Ljava/lang/Class;");
+  jstring name = env->NewStringUTF("dev.darwinart.probe.ProbeAnimationHost");
+  jclass helper = load_class == nullptr
+                      ? nullptr
+                      : static_cast<jclass>(env->CallObjectMethod(loader, load_class, name));
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    helper = nullptr;
+  }
+  env->DeleteLocalRef(name);
+  env->DeleteLocalRef(loader_class);
+  env->DeleteLocalRef(loader);
+  env->DeleteLocalRef(thread);
+  env->DeleteLocalRef(thread_class);
+  return helper;
+}
+
 int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
                               uint32_t action, float x, float y) {
   if (state == nullptr || env == nullptr || root == nullptr) return 72;
@@ -74,13 +113,8 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     return 81;
   }
   jclass root_class = env->GetObjectClass(root);
-  jmethodID dispatch_touch = root_class == nullptr
-                                 ? nullptr
-                                 : env->GetMethodID(
-                                       root_class, "dispatchTouchEvent",
-                                       "(Landroid/view/MotionEvent;)Z");
   jmethodID recycle = env->GetMethodID(motion_event_class, "recycle", "()V");
-  if (dispatch_touch == nullptr || recycle == nullptr || env->ExceptionCheck()) {
+  if (recycle == nullptr || env->ExceptionCheck()) {
     env->ExceptionClear();
     env->DeleteLocalRef(root_class);
     env->DeleteLocalRef(event);
@@ -88,22 +122,68 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     return 82;
   }
   const int64_t dispatch_start = MonotonicNanos();
-  const jboolean consumed = env->CallBooleanMethod(root, dispatch_touch, event);
+  jboolean consumed = JNI_FALSE;
+  bool enqueued = false;
+  jclass input_host = LoadProbeAnimationHost(env);
+  jmethodID enqueue = input_host == nullptr
+                          ? nullptr
+                          : env->GetStaticMethodID(
+                                input_host, "enqueueInputEvent",
+                                "(Ljava/lang/Object;)Z");
+  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr &&
+      (input_host == nullptr || enqueue == nullptr)) {
+    std::cerr << "ART Android MotionEvent: ViewRoot enqueue helper unavailable host="
+              << input_host << " method=" << enqueue << "\n";
+  }
+  if (enqueue != nullptr && !env->ExceptionCheck()) {
+    enqueued = env->CallStaticBooleanMethod(input_host, enqueue, event) == JNI_TRUE;
+    if (env->ExceptionCheck()) {
+      env->ExceptionClear();
+      enqueued = false;
+    }
+  } else if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+  }
+  if (!enqueued) {
+    jmethodID dispatch_touch = root_class == nullptr
+                                   ? nullptr
+                                   : env->GetMethodID(
+                                         root_class, "dispatchTouchEvent",
+                                         "(Landroid/view/MotionEvent;)Z");
+    if (dispatch_touch == nullptr || env->ExceptionCheck()) {
+      env->ExceptionClear();
+      env->DeleteLocalRef(input_host);
+      env->DeleteLocalRef(root_class);
+      env->DeleteLocalRef(event);
+      env->DeleteLocalRef(motion_event_class);
+      return 82;
+    }
+    consumed = env->CallBooleanMethod(root, dispatch_touch, event);
+  } else {
+    consumed = JNI_TRUE;
+  }
   const int64_t dispatch_end = MonotonicNanos();
   const bool dispatch_ok = !env->ExceptionCheck();
   if (!dispatch_ok && std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
     std::cerr << "ART Android MotionEvent dispatch exception\n";
     env->ExceptionDescribe();
   }
-  env->CallVoidMethod(event, recycle);
-  const bool recycle_ok = !env->ExceptionCheck();
-  if (!recycle_ok && std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
-    std::cerr << "ART Android MotionEvent recycle exception\n";
-    env->ExceptionDescribe();
+  // ViewRootImpl takes ownership of an enqueued InputEvent and recycles it
+  // after the InputStage chain finishes. DecorView dispatch does not, so the
+  // bounded fallback owns the explicit recycle call.
+  bool recycle_ok = true;
+  if (!enqueued) {
+    env->CallVoidMethod(event, recycle);
+    recycle_ok = !env->ExceptionCheck();
+    if (!recycle_ok && std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+      std::cerr << "ART Android MotionEvent recycle exception\n";
+      env->ExceptionDescribe();
+    }
   }
   if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
     std::cerr << "ART Android MotionEvent v1 action=" << action
               << " consumed=" << (consumed == JNI_TRUE ? 1 : 0)
+              << " path=" << (enqueued ? "viewroot" : "decor")
               << " dispatch_us="
               << (dispatch_end > dispatch_start
                       ? (dispatch_end - dispatch_start) / 1000
@@ -112,6 +192,7 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   }
   if (!dispatch_ok || !recycle_ok) {
     env->ExceptionClear();
+    env->DeleteLocalRef(input_host);
     env->DeleteLocalRef(root_class);
     env->DeleteLocalRef(event);
     env->DeleteLocalRef(motion_event_class);
@@ -130,6 +211,7 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   }
   if (action != 2u) state->gpu_render_node_recorded = false;
   env->DeleteLocalRef(root_class);
+  env->DeleteLocalRef(input_host);
   env->DeleteLocalRef(event);
   env->DeleteLocalRef(motion_event_class);
   const bool rendered = present_content(

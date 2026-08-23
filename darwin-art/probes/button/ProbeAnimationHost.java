@@ -190,10 +190,38 @@ public final class ProbeAnimationHost {
             Field attachField = View.class.getDeclaredField("mAttachInfo");
             attachField.setAccessible(true);
             installAttachInfo((View) root, attachField, attachInfo);
-            sViewRootImpl = attachInfo;
+            // Give the detached ViewRootImpl the same root reference that a
+            // real WindowManager.addView() would install. This enables the
+            // app-side InputStage chain without creating a second NSWindow.
+            Field rootField = viewRootType.getDeclaredField("mView");
+            rootField.setAccessible(true);
+            rootField.set(viewRoot, root);
+            sViewRootImpl = viewRoot;
             return true;
         } catch (Throwable error) {
             error.printStackTrace();
+            return false;
+        }
+    }
+
+    /** Enqueue one framework MotionEvent through ViewRootImpl's app-side
+     * input stages. Returns false when the detached root is unavailable so
+     * the native bridge can use DecorView dispatch as its bounded gate. */
+    public static boolean enqueueInputEvent(Object event) {
+        if (sViewRootImpl == null || event == null) return false;
+        try {
+            Class<?> inputEvent = Class.forName("android.view.InputEvent");
+            Method enqueue = sViewRootImpl.getClass().getDeclaredMethod(
+                    "enqueueInputEvent", inputEvent,
+                    Class.forName("android.view.InputEventReceiver"),
+                    int.class, boolean.class);
+            enqueue.setAccessible(true);
+            enqueue.invoke(sViewRootImpl, event, null, Integer.valueOf(0), Boolean.TRUE);
+            return true;
+        } catch (Throwable error) {
+            if (System.getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != null) {
+                error.printStackTrace();
+            }
             return false;
         }
     }
