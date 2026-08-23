@@ -91,6 +91,10 @@ pub(super) fn run(
                 let slice_ms = (test_hold_ms - held_ms).min(16);
                 let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
                 if pump_status == 7 {
+                    // Surface shutdown enqueues a terminal CANCEL for an
+                    // active pointer stream. Drain it before leaving so the
+                    // Android hierarchy cannot retain pressed state.
+                    let _ = dispatch_queued_events();
                     break;
                 }
                 if pump_status != 0 {
@@ -142,6 +146,7 @@ pub(super) fn run(
         let slice = remaining.min(0.016);
         let pump_status = owned_surface_pump_events(runtime, slice);
         if pump_status == 7 {
+            let _ = dispatch_queued_events();
             break;
         }
         if pump_status != 0 {

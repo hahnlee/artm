@@ -178,6 +178,13 @@ CGFloat WindowScale(bool visible) {
   return YES;
 }
 
+- (void)cancelPointerStream {
+  if (!_pointerActive) return;
+  _pointerEvents.push_back(DarwinArtPointerEvent{
+      .action = DARWIN_ART_POINTER_CANCEL, .x = 0.0f, .y = 0.0f});
+  _pointerActive = NO;
+}
+
 @end
 
 DarwinArtSurface::~DarwinArtSurface() {
@@ -517,6 +524,7 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
     return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
   }
   if (surface->visible && !surface->window.visible) {
+    [surface->view cancelPointerStream];
     return DARWIN_ART_SURFACE_WINDOW_CLOSED;
   }
   if (seconds == 0.0) {
@@ -537,6 +545,7 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
     NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
     while (deadline.timeIntervalSinceNow > 0.0) {
       if (surface->visible && !surface->window.visible) {
+        [surface->view cancelPointerStream];
         return DARWIN_ART_SURFACE_WINDOW_CLOSED;
       }
       const NSTimeInterval slice_seconds =
@@ -558,9 +567,11 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
       [application updateWindows];
     }
   }
-  return surface->visible && !surface->window.visible
-             ? DARWIN_ART_SURFACE_WINDOW_CLOSED
-             : DARWIN_ART_SURFACE_OK;
+  if (surface->visible && !surface->window.visible) {
+    [surface->view cancelPointerStream];
+    return DARWIN_ART_SURFACE_WINDOW_CLOSED;
+  }
+  return DARWIN_ART_SURFACE_OK;
 }
 
 bool darwin_art_surface_next_pointer_event(

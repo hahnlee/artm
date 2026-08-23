@@ -16,6 +16,7 @@
                     pixelSize:(CGSize)pixelSize
                  contentScale:(CGFloat)contentScale;
 - (BOOL)nextPointerEvent:(DarwinArtPointerEvent*)outEvent;
+- (void)cancelPointerStream;
 @end
 
 // Shared host-owned surface state. GPU-only state is deliberately opaque so
