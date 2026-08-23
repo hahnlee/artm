@@ -120,6 +120,19 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     env->DeleteLocalRef(motion_event_class);
     return 81;
   }
+  // The compact obtain() overload defaults to a generic pointer source on
+  // this detached host. Mark the packet as a touchscreen event before it
+  // enters ViewRoot so source/tool filtering follows Android semantics.
+  jmethodID set_source = env->GetMethodID(motion_event_class, "setSource", "(I)V");
+  if (set_source != nullptr && !env->ExceptionCheck()) {
+    env->CallVoidMethod(event, set_source, static_cast<jint>(0x1002));
+  }
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(event);
+    env->DeleteLocalRef(motion_event_class);
+    return 81;
+  }
   jclass root_class = env->GetObjectClass(root);
   jmethodID recycle = env->GetMethodID(motion_event_class, "recycle", "()V");
   if (recycle == nullptr || env->ExceptionCheck()) {

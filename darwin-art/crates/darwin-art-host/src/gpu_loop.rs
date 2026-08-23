@@ -62,8 +62,13 @@ pub(super) fn run(
     let test_cancel = std::env::var("DARWIN_ART_TEST_POINTER_CANCEL")
         .ok()
         .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+    let test_pointer_hz = std::env::var("DARWIN_ART_TEST_POINTER_HZ")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|hz| *hz > 0);
+    let mut synthetic_moves = 0_u64;
     eprintln!(
-        "DARWIN_ART gpu test pointer={test_pointer:?} drag_points={} hold_ms={test_hold_ms} cancel={test_cancel}",
+        "DARWIN_ART gpu test pointer={test_pointer:?} drag_points={} hold_ms={test_hold_ms} cancel={test_cancel} hz={test_pointer_hz:?}",
         test_drag.as_ref().map_or(0, Vec::len),
     );
 
@@ -162,19 +167,24 @@ pub(super) fn run(
                     // ACTION_MOVE causes PresentContent to replay the
                     // Android RenderNode while RippleDrawable's
                     // pressed animation advances between pumps.
-                    let move_index = (held_ms / 16 + 1) as usize;
-                    let (move_x, move_y) = test_drag
-                        .as_ref()
-                        .and_then(|points| points.get(move_index).copied())
-                        .unwrap_or((x, y));
-                    let move_event = synthetic_event(2, move_x, move_y);
-                    let dispatch_status = runtime
-                        .graphics()
-                        .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&move_event));
-                    if dispatch_status != 0 {
-                        loop_error = Some(HostError::RuntimeFailed(dispatch_status));
-                    } else {
-                        frames_presented += 1;
+                    let moves_this_slice = test_pointer_hz
+                        .map(|hz| ((slice_ms * u64::from(hz) + 999) / 1000).max(1))
+                        .unwrap_or(1);
+                    for move_offset in 0..moves_this_slice {
+                        let move_index = (held_ms / 16 + move_offset + 1) as usize;
+                        let (move_x, move_y) = test_drag
+                            .as_ref()
+                            .and_then(|points| points.get(move_index).copied())
+                            .unwrap_or((x, y));
+                        let move_event = synthetic_event(2, move_x, move_y);
+                        let dispatch_status = runtime
+                            .graphics()
+                            .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&move_event));
+                        if dispatch_status != 0 {
+                            loop_error = Some(HostError::RuntimeFailed(dispatch_status));
+                            break;
+                        }
+                        synthetic_moves += 1;
                     }
                 }
                 held_ms += slice_ms;
@@ -246,6 +256,9 @@ pub(super) fn run(
     }
     if let Some(error) = loop_error {
         return Err(error);
+    }
+    if test_pointer.is_some() {
+        eprintln!("DARWIN_ART gpu synthetic moves dispatched={synthetic_moves}");
     }
     Ok(HostOutcome {
         process,
