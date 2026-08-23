@@ -84,6 +84,7 @@ CGFloat WindowScale(bool visible) {
 @implementation DarwinArtMetalView {
   CAMetalLayer* _metalLayer;
   std::deque<DarwinArtPointerEvent> _pointerEvents;
+  BOOL _pointerActive;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -102,6 +103,7 @@ CGFloat WindowScale(bool visible) {
     _metalLayer.contentsScale = contentScale;
     _metalLayer.drawableSize = pixelSize;
     self.layer = _metalLayer;
+    _pointerActive = NO;
   }
   return self;
 }
@@ -122,8 +124,14 @@ CGFloat WindowScale(bool visible) {
                      action:(DarwinArtPointerAction)action {
   NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
   const NSRect bounds = self.bounds;
-  if (!NSPointInRect(point, bounds)) {
-    return;
+  // Keep the stream alive while a button is held even after the cursor leaves
+  // the view. Android receives those coordinates and decides whether the
+  // gesture remains owned by the child; dropping them here makes an eventual
+  // mouseUp indistinguishable from a lost pointer. A new DOWN while the old
+  // stream is still active is repaired with an explicit CANCEL.
+  if (action == DARWIN_ART_POINTER_DOWN && _pointerActive) {
+    _pointerEvents.push_back(DarwinArtPointerEvent{
+        .action = DARWIN_ART_POINTER_CANCEL, .x = 0.0f, .y = 0.0f});
   }
   // NSEvent coordinates are AppKit points, while Android's retained view is
   // laid out in the CAMetalLayer drawable's backing pixels.  Derive the
@@ -141,6 +149,12 @@ CGFloat WindowScale(bool visible) {
       .x = static_cast<float>(point.x * x_scale),
       .y = static_cast<float>(point.y * y_scale),
   });
+  if (action == DARWIN_ART_POINTER_DOWN) {
+    _pointerActive = YES;
+  } else if (action == DARWIN_ART_POINTER_UP ||
+             action == DARWIN_ART_POINTER_CANCEL) {
+    _pointerActive = NO;
+  }
 }
 
 - (void)mouseDown:(NSEvent*)event {

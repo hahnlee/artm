@@ -49,7 +49,8 @@ pub(super) fn run(
     let dispatch_queued_events = || -> Result<u64, HostError> {
         let mut dispatched = 0_u64;
         let mut event = PointerEvent::default();
-        while owned_surface_next_pointer_event(runtime, &mut event) {
+        let mut pending_move: Option<PointerEvent> = None;
+        let mut dispatch = |event: PointerEvent| -> Result<(), HostError> {
             let dispatch_status = runtime.graphics().map_or(-1, |graphics| {
                 graphics.dispatch_pointer(event.action, event.x, event.y)
             });
@@ -57,6 +58,22 @@ pub(super) fn run(
                 return Err(HostError::RuntimeFailed(dispatch_status));
             }
             dispatched += 1;
+            Ok(())
+        };
+        while owned_surface_next_pointer_event(runtime, &mut event) {
+            if event.action == 2 {
+                // MOVE is latest-wins within one host poll. DOWN/UP/CANCEL
+                // are never coalesced, so gesture boundaries remain exact.
+                pending_move = Some(event);
+                continue;
+            }
+            if let Some(move_event) = pending_move.take() {
+                dispatch(move_event)?;
+            }
+            dispatch(event)?;
+        }
+        if let Some(move_event) = pending_move {
+            dispatch(move_event)?;
         }
         Ok(dispatched)
     };

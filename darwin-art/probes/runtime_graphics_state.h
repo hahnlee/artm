@@ -36,6 +36,8 @@ struct GraphicsState {
   uint32_t pending_pressed_action = 0;
   jfloat pending_pressed_x = 0.0f;
   jfloat pending_pressed_y = 0.0f;
+  int64_t pointer_down_time_nanos = 0;
+  bool pointer_stream_active = false;
   jint interactive_width = 0;
   jint interactive_height = 0;
   // Borrowed from the surface owner. GraphicsState never destroys this.

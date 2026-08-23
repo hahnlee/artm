@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <pthread.h>
+#include <string>
 #include <time.h>
 
 #include "base/locks.h"
@@ -22,6 +24,124 @@
 #endif
 
 namespace darwin_art_graphics {
+
+namespace {
+
+bool MotionEventBridgeEnabled() {
+  const char* mode = std::getenv("DARWIN_ART_INPUT_MODE");
+  if (mode != nullptr) return std::string(mode) == "motion_event";
+  return std::getenv("DARWIN_ART_APK_APP_PACKAGE") != nullptr;
+}
+
+int64_t MonotonicNanos() {
+  struct timespec now = {};
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
+  return static_cast<int64_t>(now.tv_sec) * 1000000000LL + now.tv_nsec;
+}
+
+int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
+                              uint32_t action, float x, float y) {
+  if (state == nullptr || env == nullptr || root == nullptr) return 72;
+  if (action > 3u || !std::isfinite(x) || !std::isfinite(y)) return 71;
+  const bool down = action == 0u;
+  const bool terminal = action == 1u || action == 3u;
+  if (!down && !state->pointer_stream_active) return 78;
+  const int64_t event_time_nanos = MonotonicNanos();
+  if (event_time_nanos <= 0) return 79;
+  if (down) state->pointer_down_time_nanos = event_time_nanos;
+  const int64_t down_time_nanos = state->pointer_down_time_nanos;
+  if (down_time_nanos <= 0 || down_time_nanos > event_time_nanos) return 79;
+
+  jclass motion_event_class = env->FindClass("android/view/MotionEvent");
+  jmethodID obtain = motion_event_class == nullptr
+                         ? nullptr
+                         : env->GetStaticMethodID(
+                               motion_event_class, "obtain",
+                               "(JJIFFI)Landroid/view/MotionEvent;");
+  if (obtain == nullptr || env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(motion_event_class);
+    return 80;
+  }
+  jobject event = env->CallStaticObjectMethod(
+      motion_event_class, obtain, static_cast<jlong>(down_time_nanos / 1000000),
+      static_cast<jlong>(event_time_nanos / 1000000), static_cast<jint>(action),
+      static_cast<jfloat>(x), static_cast<jfloat>(y), static_cast<jint>(0));
+  if (event == nullptr || env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(event);
+    env->DeleteLocalRef(motion_event_class);
+    return 81;
+  }
+  jclass root_class = env->GetObjectClass(root);
+  jmethodID dispatch_touch = root_class == nullptr
+                                 ? nullptr
+                                 : env->GetMethodID(
+                                       root_class, "dispatchTouchEvent",
+                                       "(Landroid/view/MotionEvent;)Z");
+  jmethodID recycle = env->GetMethodID(motion_event_class, "recycle", "()V");
+  if (dispatch_touch == nullptr || recycle == nullptr || env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(root_class);
+    env->DeleteLocalRef(event);
+    env->DeleteLocalRef(motion_event_class);
+    return 82;
+  }
+  const int64_t dispatch_start = MonotonicNanos();
+  const jboolean consumed = env->CallBooleanMethod(root, dispatch_touch, event);
+  const int64_t dispatch_end = MonotonicNanos();
+  const bool dispatch_ok = !env->ExceptionCheck();
+  if (!dispatch_ok && std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android MotionEvent dispatch exception\n";
+    env->ExceptionDescribe();
+  }
+  env->CallVoidMethod(event, recycle);
+  const bool recycle_ok = !env->ExceptionCheck();
+  if (!recycle_ok && std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android MotionEvent recycle exception\n";
+    env->ExceptionDescribe();
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android MotionEvent v1 action=" << action
+              << " consumed=" << (consumed == JNI_TRUE ? 1 : 0)
+              << " dispatch_us="
+              << (dispatch_end > dispatch_start
+                      ? (dispatch_end - dispatch_start) / 1000
+                      : 0)
+              << " owner=" << pthread_self() << "\n";
+  }
+  if (!dispatch_ok || !recycle_ok) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(root_class);
+    env->DeleteLocalRef(event);
+    env->DeleteLocalRef(motion_event_class);
+    return 83;
+  }
+  if (down) state->pointer_stream_active = true;
+  if (terminal) {
+    state->pointer_stream_active = false;
+    state->pointer_down_time_nanos = 0;
+  }
+  state->gpu_ripple_overlay_active = action != 3u;
+  if (down) {
+    state->gpu_ripple_overlay_x = x;
+    state->gpu_ripple_overlay_y = y;
+    state->gpu_ripple_overlay_started = std::chrono::steady_clock::now();
+  }
+  if (action != 2u) state->gpu_render_node_recorded = false;
+  env->DeleteLocalRef(root_class);
+  env->DeleteLocalRef(event);
+  env->DeleteLocalRef(motion_event_class);
+  const bool rendered = present_content(
+      state, env, nullptr, root, state->interactive_width, state->interactive_height) == JNI_TRUE;
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    return 84;
+  }
+  return rendered ? 0 : 75;
+}
+
+}  // namespace
 
 jobject find_clickable_view_at(JNIEnv* env, jobject view, jfloat x, jfloat y) {
   if (view == nullptr || x < 0.0f || y < 0.0f || env->ExceptionCheck()) {
@@ -100,7 +220,7 @@ jobject find_clickable_view_at(JNIEnv* env, jobject view, jfloat x, jfloat y) {
 int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
                           float y) {
   if (state == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
-  if (action > 2u || !std::isfinite(x) || !std::isfinite(y)) {
+  if (action > 3u || !std::isfinite(x) || !std::isfinite(y)) {
     return 71;
   }
   art::Thread* art_thread = darwin_art_process::owner_thread_for_callback();
@@ -113,6 +233,30 @@ int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
 
   art::ScopedObjectAccess soa(art_thread);
   JNIEnv* env = art_thread->GetJniEnv();
+  if (MotionEventBridgeEnabled()) {
+    // The host keeps pulsing the retained RenderNode after ACTION_UP so
+    // animations can finish. Those replay samples are not Android pointer
+    // events: never synthesize a MOVE after the stream has been terminated.
+    // Rendering remains on the same owner thread and is still presented once
+    // for the current frame.
+    if (action == 2u && !state->pointer_stream_active) {
+      const bool rendered =
+          present_content(state, env, nullptr, root, state->interactive_width,
+                          state->interactive_height) == JNI_TRUE;
+      if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return 84;
+      }
+      return rendered ? 0 : 75;
+    }
+    const int32_t status = dispatch_motion_event(state, env, root, action, x, y);
+    if (status == 0 || std::getenv("DARWIN_ART_INPUT_MODE") != nullptr ||
+        std::getenv("DARWIN_ART_APK_APP_PACKAGE") != nullptr) {
+      return status;
+    }
+    std::cerr << "ART Android input: MotionEvent bridge unavailable status=" << status
+              << ", using explicit direct fallback\n";
+  }
   jobject hit = find_clickable_view_at(env, root, x, y);
   if (std::getenv("DARWIN_ART_DEBUG_POINTER") != nullptr) {
     std::cerr << "ART Android input debug action=" << action << " x=" << x

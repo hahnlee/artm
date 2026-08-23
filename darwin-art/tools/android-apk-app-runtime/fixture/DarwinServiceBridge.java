@@ -50,6 +50,18 @@ final class DarwinServiceBridge {
             attach(inputMethodBinder, inputMethodService,
                     "com.android.internal.view.IInputMethodManager");
 
+            // ViewGroup's native MotionEvent path creates a VelocityTracker.
+            // Android obtains its device metadata through the input service;
+            // provide a typed, conservative in-process service so dispatch
+            // does not fall back to a null system_server object.
+            Binder inputBinder = new Binder();
+            Class<?> inputInterface = Class.forName("android.hardware.input.IInputManager");
+            Object inputService = Proxy.newProxyInstance(
+                    inputInterface.getClassLoader(),
+                    new Class<?>[] {inputInterface},
+                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+            attach(inputBinder, inputService, "android.hardware.input.IInputManager");
+
             Binder windowBinder = new Binder();
             Class<?> windowInterface = Class.forName("android.view.IWindowManager");
             Object windowService = Proxy.newProxyInstance(
@@ -92,6 +104,7 @@ final class DarwinServiceBridge {
                     metadataClass, serviceClass, activityBinder);
             Object inputMethodServiceValue = serviceValue(
                     metadataClass, serviceClass, inputMethodBinder);
+            Object inputServiceValue = serviceValue(metadataClass, serviceClass, inputBinder);
             Object windowServiceValue = serviceValue(
                     metadataClass, serviceClass, windowBinder);
             Object accessibilityServiceValue = serviceValue(
@@ -104,7 +117,7 @@ final class DarwinServiceBridge {
                     managerInterface.getClassLoader(),
                     new Class<?>[] {managerInterface},
                     new ManagerHandler(displayServiceValue, activityServiceValue,
-                            inputMethodServiceValue, windowServiceValue,
+                            inputMethodServiceValue, inputServiceValue, windowServiceValue,
                             accessibilityServiceValue, sensitiveContentServiceValue));
             Binder context = new Binder();
             attach(context, manager, "android.os.IServiceManager");
@@ -142,16 +155,18 @@ final class DarwinServiceBridge {
         private final Object displayService;
         private final Object activityService;
         private final Object inputMethodService;
+        private final Object inputService;
         private final Object windowService;
         private final Object accessibilityService;
         private final Object sensitiveContentService;
 
         ManagerHandler(Object displayService, Object activityService,
-                Object inputMethodService, Object windowService,
+                Object inputMethodService, Object inputService, Object windowService,
                 Object accessibilityService, Object sensitiveContentService) {
             this.displayService = displayService;
             this.activityService = activityService;
             this.inputMethodService = inputMethodService;
+            this.inputService = inputService;
             this.windowService = windowService;
             this.accessibilityService = accessibilityService;
             this.sensitiveContentService = sensitiveContentService;
@@ -168,6 +183,7 @@ final class DarwinServiceBridge {
                     return activityService;
                 }
                 if ("input_method".equals(args[0])) return inputMethodService;
+                if ("input".equals(args[0])) return inputService;
                 if ("window".equals(args[0])) return windowService;
                 if ("accessibility".equals(args[0])) return accessibilityService;
                 if ("sensitive_content_protection_service".equals(args[0])) {

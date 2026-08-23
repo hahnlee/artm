@@ -101,7 +101,7 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
     let classes_dex = dex_dir.join("classes.dex");
     let dex_probe = root.join("_build/dex-probe/dex-probe");
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=32 methods=448 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=33 methods=451 \
                     class[0]=Landroid/test/mock/MockPackageManager; \
                     class[1]=Ldev/darwinart/probe/FontBootstrap; \
                     class[2]=Ldev/darwinart/probe/Hello; \
@@ -122,18 +122,19 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
                     class[17]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda1; \
                     class[18]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda2; \
                     class[19]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda3; \
-                    class[20]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler$$ExternalSyntheticLambda0; \
-                    class[21]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler; \
-                    class[22]=Ldev/darwinart/simple/DarwinServiceBridge$DisplayHandler; \
-                    class[23]=Ldev/darwinart/simple/DarwinServiceBridge$ManagerHandler; \
-                    class[24]=Ldev/darwinart/simple/DarwinServiceBridge; \
-                    class[25]=Ljavax/microedition/khronos/egl/EGL; \
-                    class[26]=Ljavax/microedition/khronos/egl/EGL10; \
-                    class[27]=Ljavax/microedition/khronos/egl/DarwinEGL10; \
-                    class[28]=Ljavax/microedition/khronos/egl/EGLConfig; \
-                    class[29]=Ljavax/microedition/khronos/egl/EGLContext; \
-                    class[30]=Ljavax/microedition/khronos/egl/EGLDisplay; \
-                    class[31]=Ljavax/microedition/khronos/egl/EGLSurface;";
+                    class[20]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda4; \
+                    class[21]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler$$ExternalSyntheticLambda0; \
+                    class[22]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler; \
+                    class[23]=Ldev/darwinart/simple/DarwinServiceBridge$DisplayHandler; \
+                    class[24]=Ldev/darwinart/simple/DarwinServiceBridge$ManagerHandler; \
+                    class[25]=Ldev/darwinart/simple/DarwinServiceBridge; \
+                    class[26]=Ljavax/microedition/khronos/egl/EGL; \
+                    class[27]=Ljavax/microedition/khronos/egl/EGL10; \
+                    class[28]=Ljavax/microedition/khronos/egl/DarwinEGL10; \
+                    class[29]=Ljavax/microedition/khronos/egl/EGLConfig; \
+                    class[30]=Ljavax/microedition/khronos/egl/EGLContext; \
+                    class[31]=Ljavax/microedition/khronos/egl/EGLDisplay; \
+                    class[32]=Ljavax/microedition/khronos/egl/EGLSurface;";
     if output.trim() != expected {
         return Err(format!("unexpected Button DEX probe output: {output:?}").into());
     }

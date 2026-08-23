@@ -1,5 +1,6 @@
 #include "darwin_framework_natives.h"
 #include "darwin_framework_system_natives.h"
+#include "darwin_motion_event_natives.h"
 
 #include <cstdint>
 #include <ctime>
@@ -207,6 +208,9 @@ bool RegisterFrameworkSupportNatives(JNIEnv* env) {
 }
 
 bool RegisterFrameworkNatives(JNIEnv* env) {
+  if (!RegisterMotionEventNatives(env)) {
+    return false;
+  }
   using namespace framework_system;
   JNINativeMethod process_methods[] = {
       {const_cast<char*>("setThreadPriority"), const_cast<char*>("(I)V"),

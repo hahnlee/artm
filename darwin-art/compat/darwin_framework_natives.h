@@ -17,6 +17,7 @@ void ShutdownFrameworkGraphicsRuntime();
 bool InstallFrameworkResourceRuntime(JNIEnv* env);
 bool ShutdownFrameworkResourceRuntime(JNIEnv* env);
 bool RegisterFrameworkNatives(JNIEnv* env);
+bool RegisterMotionEventNatives(JNIEnv* env);
 bool RegisterFrameworkBinderNatives(JNIEnv* env);
 bool RegisterFrameworkSystemPropertyNatives(JNIEnv* env);
 bool RegisterFrameworkAssetManagerNatives(JNIEnv* env);
