@@ -202,7 +202,7 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     }
   }
   if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
-    std::cerr << "ART Android MotionEvent v1 action=" << action
+    std::cerr << "ART Android MotionEvent ABI2 action=" << action
               << " consumed=" << (consumed == JNI_TRUE ? 1 : 0)
               << " path=" << (enqueued ? "viewroot" : "decor")
               << " dispatch_us="

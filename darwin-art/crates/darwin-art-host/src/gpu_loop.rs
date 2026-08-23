@@ -3,6 +3,59 @@ use crate::runtime::HostRuntime;
 use crate::surface::{owned_surface_next_pointer_event_v2, owned_surface_pump_events};
 use darwin_art_engine_sys::{PointerEventV2, ProcessResult};
 use darwin_art_runtime::Subsystem;
+use std::time::Instant;
+
+#[cfg(target_os = "macos")]
+fn pump_frame_with_latency(
+    runtime: &mut HostRuntime,
+    debug_latency: bool,
+    last_input_dispatch: &mut Option<Instant>,
+    frame_latencies_us: &mut Vec<u64>,
+) -> Result<(), HostError> {
+    let pulse_status = runtime
+        .graphics()
+        .map_or(-1, |graphics| graphics.pump_frame(0));
+    if pulse_status != 0 {
+        return Err(HostError::RuntimeFailed(pulse_status));
+    }
+    if debug_latency && let Some(dispatched_at) = last_input_dispatch.take() {
+        frame_latencies_us.push(dispatched_at.elapsed().as_micros() as u64);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn dispatch_queued_events(runtime: &mut HostRuntime) -> Result<u64, HostError> {
+    let mut dispatched = 0_u64;
+    let mut event = PointerEventV2::default();
+    let mut pending_move: Option<PointerEventV2> = None;
+    let mut dispatch = |event: PointerEventV2| -> Result<(), HostError> {
+        let dispatch_status = runtime
+            .graphics()
+            .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&event));
+        if dispatch_status != 0 {
+            return Err(HostError::RuntimeFailed(dispatch_status));
+        }
+        dispatched += 1;
+        Ok(())
+    };
+    while owned_surface_next_pointer_event_v2(runtime, &mut event) {
+        if event.action == 2 {
+            // MOVE is latest-wins within one host poll. DOWN/UP/CANCEL
+            // are never coalesced, so gesture boundaries remain exact.
+            pending_move = Some(event);
+            continue;
+        }
+        if let Some(move_event) = pending_move.take() {
+            dispatch(move_event)?;
+        }
+        dispatch(event)?;
+    }
+    if let Some(move_event) = pending_move {
+        dispatch(move_event)?;
+    }
+    Ok(dispatched)
+}
 
 #[cfg(target_os = "macos")]
 pub(super) fn run(
@@ -29,6 +82,9 @@ pub(super) fn run(
     let mut frames_presented = 1_u64;
     let mut remaining = options.visible_seconds;
     let mut loop_error: Option<HostError> = None;
+    let debug_latency = std::env::var_os("DARWIN_ART_DEBUG_INPUT_LATENCY").is_some();
+    let mut last_input_dispatch: Option<Instant> = None;
+    let mut frame_latencies_us = Vec::new();
     // Keep the synthetic input path on the same owner thread as ART
     // and the Metal surface.  Each 16 ms pump is the host-side frame
     // cadence: the pointer state is dispatched into Android, then
@@ -72,38 +128,6 @@ pub(super) fn run(
         test_drag.as_ref().map_or(0, Vec::len),
     );
 
-    let dispatch_queued_events = || -> Result<u64, HostError> {
-        let mut dispatched = 0_u64;
-        let mut event = PointerEventV2::default();
-        let mut pending_move: Option<PointerEventV2> = None;
-        let mut dispatch = |event: PointerEventV2| -> Result<(), HostError> {
-            let dispatch_status = runtime
-                .graphics()
-                .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&event));
-            if dispatch_status != 0 {
-                return Err(HostError::RuntimeFailed(dispatch_status));
-            }
-            dispatched += 1;
-            Ok(())
-        };
-        while owned_surface_next_pointer_event_v2(runtime, &mut event) {
-            if event.action == 2 {
-                // MOVE is latest-wins within one host poll. DOWN/UP/CANCEL
-                // are never coalesced, so gesture boundaries remain exact.
-                pending_move = Some(event);
-                continue;
-            }
-            if let Some(move_event) = pending_move.take() {
-                dispatch(move_event)?;
-            }
-            dispatch(event)?;
-        }
-        if let Some(move_event) = pending_move {
-            dispatch(move_event)?;
-        }
-        Ok(dispatched)
-    };
-
     let synthetic_event = |action: u32, x: f32, y: f32| {
         let mut event = PointerEventV2::default();
         event.version = 2;
@@ -127,12 +151,17 @@ pub(super) fn run(
         if dispatch_status != 0 {
             loop_error = Some(HostError::RuntimeFailed(dispatch_status));
         } else {
+            if debug_latency {
+                last_input_dispatch = Some(Instant::now());
+            }
             frames_presented += 1;
-            let pulse_status = runtime
-                .graphics()
-                .map_or(-1, |graphics| graphics.pump_frame(0));
-            if pulse_status != 0 {
-                loop_error = Some(HostError::RuntimeFailed(pulse_status));
+            if let Err(error) = pump_frame_with_latency(
+                runtime,
+                debug_latency,
+                &mut last_input_dispatch,
+                &mut frame_latencies_us,
+            ) {
+                loop_error = Some(error);
             }
             let mut held_ms = 0_u64;
             while held_ms < test_hold_ms && loop_error.is_none() {
@@ -142,7 +171,7 @@ pub(super) fn run(
                     // Surface shutdown enqueues a terminal CANCEL for an
                     // active pointer stream. Drain it before leaving so the
                     // Android hierarchy cannot retain pressed state.
-                    let _ = dispatch_queued_events();
+                    let _ = dispatch_queued_events(runtime);
                     break;
                 }
                 if pump_status != 0 {
@@ -152,21 +181,19 @@ pub(super) fn run(
                     });
                     break;
                 }
-                match dispatch_queued_events() {
-                    Ok(dispatched) => frames_presented += dispatched,
+                match dispatch_queued_events(runtime) {
+                    Ok(dispatched) => {
+                        frames_presented += dispatched;
+                        if debug_latency && dispatched > 0 {
+                            last_input_dispatch = Some(Instant::now());
+                        }
+                    }
                     Err(error) => loop_error = Some(error),
                 }
                 if loop_error.is_none() {
-                    let pulse_status = runtime
-                        .graphics()
-                        .map_or(-1, |graphics| graphics.pump_frame(0));
-                    if pulse_status != 0 {
-                        loop_error = Some(HostError::RuntimeFailed(pulse_status));
-                        continue;
-                    }
-                    // ACTION_MOVE causes PresentContent to replay the
-                    // Android RenderNode while RippleDrawable's
-                    // pressed animation advances between pumps.
+                    // ACTION_MOVE is dispatched before the pulse so the
+                    // next framework frame observes the newest pointer
+                    // state, matching a native input/vsync handoff.
                     let moves_this_slice = test_pointer_hz
                         .map(|hz| ((slice_ms * u64::from(hz) + 999) / 1000).max(1))
                         .unwrap_or(1);
@@ -184,7 +211,20 @@ pub(super) fn run(
                             loop_error = Some(HostError::RuntimeFailed(dispatch_status));
                             break;
                         }
+                        if debug_latency {
+                            last_input_dispatch = Some(Instant::now());
+                        }
                         synthetic_moves += 1;
+                    }
+                    if loop_error.is_none()
+                        && let Err(error) = pump_frame_with_latency(
+                            runtime,
+                            debug_latency,
+                            &mut last_input_dispatch,
+                            &mut frame_latencies_us,
+                        )
+                    {
+                        loop_error = Some(error);
                     }
                 }
                 held_ms += slice_ms;
@@ -201,7 +241,18 @@ pub(super) fn run(
                 if dispatch_status != 0 {
                     loop_error = Some(HostError::RuntimeFailed(dispatch_status));
                 } else {
+                    if debug_latency {
+                        last_input_dispatch = Some(Instant::now());
+                    }
                     frames_presented += 1;
+                    if let Err(error) = pump_frame_with_latency(
+                        runtime,
+                        debug_latency,
+                        &mut last_input_dispatch,
+                        &mut frame_latencies_us,
+                    ) {
+                        loop_error = Some(error);
+                    }
                 }
             }
         }
@@ -210,7 +261,7 @@ pub(super) fn run(
         let slice = remaining.min(0.016);
         let pump_status = owned_surface_pump_events(runtime, slice);
         if pump_status == 7 {
-            let _ = dispatch_queued_events();
+            let _ = dispatch_queued_events(runtime);
             break;
         }
         if pump_status != 0 {
@@ -220,16 +271,23 @@ pub(super) fn run(
             });
             break;
         }
-        match dispatch_queued_events() {
-            Ok(dispatched) => frames_presented += dispatched,
+        match dispatch_queued_events(runtime) {
+            Ok(dispatched) => {
+                frames_presented += dispatched;
+                if debug_latency && dispatched > 0 {
+                    last_input_dispatch = Some(Instant::now());
+                }
+            }
             Err(error) => loop_error = Some(error),
         }
         if loop_error.is_none() {
-            let pulse_status = runtime
-                .graphics()
-                .map_or(-1, |graphics| graphics.pump_frame(0));
-            if pulse_status != 0 {
-                loop_error = Some(HostError::RuntimeFailed(pulse_status));
+            if let Err(error) = pump_frame_with_latency(
+                runtime,
+                debug_latency,
+                &mut last_input_dispatch,
+                &mut frame_latencies_us,
+            ) {
+                loop_error = Some(error);
             }
         }
         // The standalone capture gate has no Android ViewRoot to
@@ -259,6 +317,23 @@ pub(super) fn run(
     }
     if test_pointer.is_some() {
         eprintln!("DARWIN_ART gpu synthetic moves dispatched={synthetic_moves}");
+    }
+    if debug_latency && !frame_latencies_us.is_empty() {
+        frame_latencies_us.sort_unstable();
+        let percentile = |numerator: usize, denominator: usize| -> u64 {
+            let index = (frame_latencies_us.len() * numerator)
+                .div_ceil(denominator)
+                .saturating_sub(1);
+            frame_latencies_us[index.min(frame_latencies_us.len() - 1)]
+        };
+        eprintln!(
+            "DARWIN_ART input->framework-pulse samples={} p50_us={} p95_us={} p99_us={} max_us={}",
+            frame_latencies_us.len(),
+            percentile(50, 100),
+            percentile(95, 100),
+            percentile(99, 100),
+            frame_latencies_us.last().copied().unwrap_or(0),
+        );
     }
     Ok(HostOutcome {
         process,
