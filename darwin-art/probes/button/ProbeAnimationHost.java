@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.MotionEvent;
 
 /** Creates the hidden RenderNode.AnimationHost without hidden compile stubs. */
 public final class ProbeAnimationHost {
@@ -223,6 +224,52 @@ public final class ProbeAnimationHost {
                 error.printStackTrace();
             }
             return false;
+        }
+    }
+
+    /**
+     * Exercise the Android MotionEvent history contract against the native
+     * registrar. This is opt-in diagnostic coverage; production APK input
+     * never allocates a probe event or takes this branch.
+     */
+    public static int motionEventArchiveProbe() {
+        MotionEvent event = null;
+        MotionEvent copy = null;
+        MotionEvent noHistory = null;
+        try {
+            event = MotionEvent.obtain(10L, 10L, MotionEvent.ACTION_MOVE,
+                    1.0f, 2.0f, 0);
+            event.addBatch(20L, 3.0f, 4.0f, 1.0f, 1.0f, 0);
+            if (event.getHistorySize() != 1
+                    || event.getHistoricalEventTime(0) != 10L
+                    || event.getHistoricalX(0) != 1.0f
+                    || event.getHistoricalY(0) != 2.0f
+                    || event.getX() != 3.0f
+                    || event.getY() != 4.0f) {
+                return 1;
+            }
+            copy = MotionEvent.obtain(event);
+            if (copy.getHistorySize() != 1
+                    || copy.getHistoricalX(0) != 1.0f
+                    || copy.getHistoricalY(0) != 2.0f) {
+                return 2;
+            }
+            noHistory = MotionEvent.obtainNoHistory(event);
+            if (noHistory.getHistorySize() != 0
+                    || noHistory.getX() != 3.0f
+                    || noHistory.getY() != 4.0f) {
+                return 3;
+            }
+            return 0;
+        } catch (Throwable error) {
+            if (System.getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != null) {
+                error.printStackTrace();
+            }
+            return 3;
+        } finally {
+            if (noHistory != null) noHistory.recycle();
+            if (copy != null) copy.recycle();
+            if (event != null) event.recycle();
         }
     }
 

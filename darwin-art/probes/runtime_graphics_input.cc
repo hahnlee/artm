@@ -33,6 +33,8 @@ bool MotionEventBridgeEnabled() {
   return std::getenv("DARWIN_ART_APK_APP_PACKAGE") != nullptr;
 }
 
+bool g_motion_event_archive_probe_done = false;
+
 int64_t MonotonicNanos() {
   struct timespec now = {};
   if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
@@ -146,6 +148,21 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   jboolean consumed = JNI_FALSE;
   bool enqueued = false;
   jclass input_host = LoadProbeAnimationHost(env);
+  if (input_host != nullptr && !g_motion_event_archive_probe_done &&
+      std::getenv("DARWIN_ART_DEBUG_MOTION_EVENT_ARCHIVE") != nullptr) {
+    jmethodID archive_probe =
+        env->GetStaticMethodID(input_host, "motionEventArchiveProbe", "()I");
+    if (archive_probe != nullptr && !env->ExceptionCheck()) {
+      const jint probe_status =
+          env->CallStaticIntMethod(input_host, archive_probe);
+      if (!env->ExceptionCheck()) {
+        std::cerr << "ART Android MotionEvent archive probe status="
+                  << probe_status << " history=1 copy=1\n";
+        g_motion_event_archive_probe_done = true;
+      }
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+  }
   jmethodID enqueue = input_host == nullptr
                           ? nullptr
                           : env->GetStaticMethodID(

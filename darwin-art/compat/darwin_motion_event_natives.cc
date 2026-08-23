@@ -24,6 +24,9 @@ constexpr jint kAxisOrientation = 8;
 constexpr jint kAxisRelativeX = 27;
 constexpr jint kAxisRelativeY = 28;
 constexpr jint kMaxPointers = 16;
+// MotionEvent.java's private HISTORY_CURRENT sentinel.
+constexpr jint kHistoryCurrent = static_cast<jint>(0x80000000u);
+constexpr size_t kMaxHistory = 256;
 
 struct DarwinMotionPointer {
   jint id = 0;
@@ -39,6 +42,11 @@ struct DarwinMotionPointer {
   float orientation = 0.0f;
   float relative_x = 0.0f;
   float relative_y = 0.0f;
+};
+
+struct DarwinMotionSample {
+  int64_t event_time_nanos = 0;
+  std::vector<DarwinMotionPointer> pointers;
 };
 
 struct DarwinMotionEvent {
@@ -61,6 +69,7 @@ struct DarwinMotionEvent {
   int64_t down_time_nanos = 0;
   int64_t event_time_nanos = 0;
   std::vector<DarwinMotionPointer> pointers;
+  std::vector<DarwinMotionSample> history;
 };
 
 struct PointerFields {
@@ -100,6 +109,29 @@ bool ValidPointer(const DarwinMotionEvent* event, jint index) {
          static_cast<size_t>(index) < event->pointers.size();
 }
 
+const DarwinMotionPointer* PointerAt(const DarwinMotionEvent* event, jint index,
+                                     jint history_pos) {
+  if (event == nullptr || index < 0) return nullptr;
+  if (history_pos == kHistoryCurrent) {
+    return static_cast<size_t>(index) < event->pointers.size()
+               ? &event->pointers[static_cast<size_t>(index)]
+               : nullptr;
+  }
+  if (history_pos < 0 || static_cast<size_t>(history_pos) >= event->history.size()) {
+    return nullptr;
+  }
+  const auto& sample = event->history[static_cast<size_t>(history_pos)];
+  return static_cast<size_t>(index) < sample.pointers.size()
+             ? &sample.pointers[static_cast<size_t>(index)]
+             : nullptr;
+}
+
+bool ValidHistory(const DarwinMotionEvent* event, jint history_pos) {
+  return history_pos == kHistoryCurrent ||
+         (history_pos >= 0 && event != nullptr &&
+          static_cast<size_t>(history_pos) < event->history.size());
+}
+
 bool ValidPointerCount(JNIEnv* env, jint count) {
   if (count >= 1 && count <= kMaxPointers) return true;
   if (env != nullptr) env->ThrowNew(env->FindClass("java/lang/IllegalArgumentException"),
@@ -123,6 +155,21 @@ DarwinMotionPointer ReadPointer(JNIEnv* env, jobject properties, jobject coords)
   pointer.relative_x = env->GetFloatField(coords, g_coord_fields.relative_x);
   pointer.relative_y = env->GetFloatField(coords, g_coord_fields.relative_y);
   return pointer;
+}
+
+void ReadPointerCoords(JNIEnv* env, jobject coords, DarwinMotionPointer* pointer) {
+  if (env == nullptr || coords == nullptr || pointer == nullptr) return;
+  pointer->x = env->GetFloatField(coords, g_coord_fields.x);
+  pointer->y = env->GetFloatField(coords, g_coord_fields.y);
+  pointer->pressure = env->GetFloatField(coords, g_coord_fields.pressure);
+  pointer->size = env->GetFloatField(coords, g_coord_fields.size);
+  pointer->touch_major = env->GetFloatField(coords, g_coord_fields.touch_major);
+  pointer->touch_minor = env->GetFloatField(coords, g_coord_fields.touch_minor);
+  pointer->tool_major = env->GetFloatField(coords, g_coord_fields.tool_major);
+  pointer->tool_minor = env->GetFloatField(coords, g_coord_fields.tool_minor);
+  pointer->orientation = env->GetFloatField(coords, g_coord_fields.orientation);
+  pointer->relative_x = env->GetFloatField(coords, g_coord_fields.relative_x);
+  pointer->relative_y = env->GetFloatField(coords, g_coord_fields.relative_y);
 }
 
 void WritePointer(JNIEnv* env, const DarwinMotionPointer& pointer, jobject properties,
@@ -201,6 +248,7 @@ jlong NativeInitialize(JNIEnv* env, jclass, jlong native_ptr, jint device_id,
   event->down_time_nanos = down_time_nanos;
   event->event_time_nanos = event_time_nanos;
   event->pointers.clear();
+  event->history.clear();
   event->pointers.reserve(pointer_count);
   for (jint index = 0; index < pointer_count; ++index) {
     jobject properties = env->GetObjectArrayElement(properties_array, index);
@@ -227,32 +275,37 @@ void NativeAddBatch(JNIEnv* env, jclass, jlong native_ptr, jlong event_time_nano
     ThrowIllegalArgument(env, "invalid MotionEvent batch");
     return;
   }
+  std::vector<DarwinMotionPointer> next_pointers = event->pointers;
   for (size_t index = 0; index < event->pointers.size(); ++index) {
     jobject coords = env->GetObjectArrayElement(coords_array, static_cast<jsize>(index));
     if (coords == nullptr || env->ExceptionCheck()) {
       env->DeleteLocalRef(coords);
       return;
     }
-    DarwinMotionPointer pointer = event->pointers[index];
-    pointer.x = env->GetFloatField(coords, g_coord_fields.x);
-    pointer.y = env->GetFloatField(coords, g_coord_fields.y);
-    pointer.pressure = env->GetFloatField(coords, g_coord_fields.pressure);
-    event->pointers[index] = pointer;
+    ReadPointerCoords(env, coords, &next_pointers[index]);
     env->DeleteLocalRef(coords);
   }
+  DarwinMotionSample sample;
+  sample.event_time_nanos = event->event_time_nanos;
+  sample.pointers = event->pointers;
+  event->history.push_back(std::move(sample));
+  if (event->history.size() > kMaxHistory) {
+    event->history.erase(event->history.begin());
+  }
+  event->pointers = std::move(next_pointers);
   event->event_time_nanos = event_time_nanos;
   event->meta_state |= meta_state;
 }
 
 void NativeGetPointerCoords(JNIEnv* env, jclass, jlong native_ptr, jint pointer_index,
-                            jint, jobject out_coords) {
+                            jint history_pos, jobject out_coords) {
   DarwinMotionEvent* event = Event(native_ptr);
-  if (!ValidPointer(event, pointer_index) || out_coords == nullptr) {
+  const DarwinMotionPointer* pointer = PointerAt(event, pointer_index, history_pos);
+  if (pointer == nullptr || !ValidHistory(event, history_pos) || out_coords == nullptr) {
     ThrowIllegalArgument(env, "invalid MotionEvent pointer index");
     return;
   }
-  DarwinMotionPointer pointer = event->pointers[static_cast<size_t>(pointer_index)];
-  WritePointer(env, pointer, nullptr, out_coords);
+  WritePointer(env, *pointer, nullptr, out_coords);
 }
 
 void NativeGetPointerProperties(JNIEnv* env, jclass, jlong native_ptr, jint pointer_index,
@@ -275,17 +328,28 @@ jint NativeGetToolType(JNIEnv*, jclass, jlong native_ptr, jint index) {
   auto* event = Event(native_ptr);
   return ValidPointer(event, index) ? event->pointers[static_cast<size_t>(index)].tool_type : 0;
 }
-jlong NativeGetEventTimeNanos(JNIEnv*, jclass, jlong native_ptr, jint) {
+jlong NativeGetEventTimeNanos(JNIEnv* env, jclass, jlong native_ptr, jint history_pos) {
   auto* event = Event(native_ptr);
-  return ValidEvent(event) ? event->event_time_nanos : 0;
+  if (!ValidEvent(event) || !ValidHistory(event, history_pos)) {
+    ThrowIllegalArgument(env, "invalid MotionEvent history position");
+    return 0;
+  }
+  if (history_pos == kHistoryCurrent) return event->event_time_nanos;
+  return event->history[static_cast<size_t>(history_pos)].event_time_nanos;
 }
-jfloat NativeGetAxisValue(JNIEnv*, jclass, jlong native_ptr, jint axis, jint index, jint) {
+jfloat NativeGetAxisValue(JNIEnv* env, jclass, jlong native_ptr, jint axis, jint index,
+                          jint history_pos) {
   auto* event = Event(native_ptr);
-  return ValidPointer(event, index) ? AxisValue(event->pointers[static_cast<size_t>(index)], axis)
-                                    : 0.0f;
+  const auto* pointer = PointerAt(event, index, history_pos);
+  if (pointer == nullptr || !ValidHistory(event, history_pos)) {
+    ThrowIllegalArgument(env, "invalid MotionEvent history position");
+    return 0.0f;
+  }
+  return AxisValue(*pointer, axis);
 }
-jfloat NativeGetRawAxisValue(JNIEnv* env, jclass clazz, jlong ptr, jint axis, jint index, jint history) {
-  return NativeGetAxisValue(env, clazz, ptr, axis, index, history);
+jfloat NativeGetRawAxisValue(JNIEnv* env, jclass clazz, jlong ptr, jint axis, jint index,
+                             jint history_pos) {
+  return NativeGetAxisValue(env, clazz, ptr, axis, index, history_pos);
 }
 
 jint NativeGetId(jlong ptr) { auto* e = Event(ptr); return ValidEvent(e) ? e->id : 0; }
@@ -308,7 +372,18 @@ jint NativeGetClassification(jlong ptr) { auto* e = Event(ptr); return ValidEven
 jint NativeGetActionButton(jlong ptr) { return 0; }
 void NativeSetActionButton(jlong, jint) {}
 void NativeOffsetLocation(jlong ptr, jfloat dx, jfloat dy) {
-  if (auto* e = Event(ptr)) for (auto& p : e->pointers) { p.x += dx; p.y += dy; }
+  if (auto* e = Event(ptr)) {
+    for (auto& p : e->pointers) {
+      p.x += dx;
+      p.y += dy;
+    }
+    for (auto& sample : e->history) {
+      for (auto& p : sample.pointers) {
+        p.x += dx;
+        p.y += dy;
+      }
+    }
+  }
 }
 jfloat NativeGetRawXOffset(jlong ptr) { auto* e = Event(ptr); return ValidEvent(e) ? e->x_offset : 0; }
 jfloat NativeGetRawYOffset(jlong ptr) { auto* e = Event(ptr); return ValidEvent(e) ? e->y_offset : 0; }
@@ -316,7 +391,12 @@ jfloat NativeGetXPrecision(jlong ptr) { auto* e = Event(ptr); return ValidEvent(
 jfloat NativeGetYPrecision(jlong ptr) { auto* e = Event(ptr); return ValidEvent(e) ? e->y_precision : 1; }
 jfloat NativeGetXCursorPosition(jlong ptr) { auto* e = Event(ptr); return ValidEvent(e) ? e->raw_x_cursor : NAN; }
 jfloat NativeGetYCursorPosition(jlong ptr) { auto* e = Event(ptr); return ValidEvent(e) ? e->raw_y_cursor : NAN; }
-void NativeSetCursorPosition(jlong ptr, jfloat x, jfloat y) { if (auto* e = Event(ptr)) { e->raw_x_cursor = x; e->raw_y_cursor = y; } }
+void NativeSetCursorPosition(jlong ptr, jfloat x, jfloat y) {
+  if (auto* e = Event(ptr)) {
+    e->raw_x_cursor = x;
+    e->raw_y_cursor = y;
+  }
+}
 jlong NativeGetDownTimeNanos(jlong ptr) { auto* e = Event(ptr); return ValidEvent(e) ? e->down_time_nanos : 0; }
 void NativeSetDownTimeNanos(jlong ptr, jlong value) { if (auto* e = Event(ptr)) e->down_time_nanos = value; }
 jint NativeGetPointerCount(jlong ptr) { auto* e = Event(ptr); return ValidEvent(e) ? static_cast<jint>(e->pointers.size()) : 0; }
@@ -325,19 +405,88 @@ jint NativeFindPointerIndex(jlong ptr, jint id) {
   for (size_t i = 0; i < e->pointers.size(); ++i) if (e->pointers[i].id == id) return static_cast<jint>(i);
   return -1;
 }
-jint NativeGetHistorySize(jlong) { return 0; }
-void NativeScale(jlong ptr, jfloat scale) { if (auto* e = Event(ptr)) for (auto& p : e->pointers) { p.x *= scale; p.y *= scale; } }
+jint NativeGetHistorySize(jlong ptr) {
+  auto* event = Event(ptr);
+  return ValidEvent(event) ? static_cast<jint>(event->history.size()) : 0;
+}
+void NativeScale(jlong ptr, jfloat scale) {
+  if (auto* e = Event(ptr)) {
+    for (auto& p : e->pointers) {
+      p.x *= scale;
+      p.y *= scale;
+      p.touch_major *= scale;
+      p.touch_minor *= scale;
+      p.tool_major *= scale;
+      p.tool_minor *= scale;
+    }
+    for (auto& sample : e->history) {
+      for (auto& p : sample.pointers) {
+        p.x *= scale;
+        p.y *= scale;
+        p.touch_major *= scale;
+        p.touch_minor *= scale;
+        p.tool_major *= scale;
+        p.tool_minor *= scale;
+      }
+    }
+    e->x_precision *= scale;
+    e->y_precision *= scale;
+  }
+}
 jint NativeGetSurfaceRotation(jlong) { return 0; }
 
-jlong NativeCopy(jlong dest_ptr, jlong source_ptr, jboolean) {
+jlong NativeCopy(jlong dest_ptr, jlong source_ptr, jboolean keep_history) {
   auto* source = Event(source_ptr);
   if (source == nullptr) return 0;
   auto event = std::unique_ptr<DarwinMotionEvent>(Event(dest_ptr));
   if (event == nullptr) event = std::make_unique<DarwinMotionEvent>();
   *event = *source;
+  if (keep_history == JNI_FALSE) event->history.clear();
   return static_cast<jlong>(reinterpret_cast<uintptr_t>(event.release()));
 }
-jlong NativeSplit(jlong dest_ptr, jlong source_ptr, jint) { return NativeCopy(dest_ptr, source_ptr, JNI_FALSE); }
+jlong NativeSplit(jlong dest_ptr, jlong source_ptr, jint id_bits) {
+  auto* source = Event(source_ptr);
+  if (source == nullptr) return 0;
+  auto event = std::unique_ptr<DarwinMotionEvent>(Event(dest_ptr));
+  if (event == nullptr) event = std::make_unique<DarwinMotionEvent>();
+  *event = *source;
+  auto keep_pointer = [id_bits](const DarwinMotionPointer& pointer) {
+    return pointer.id >= 0 && pointer.id < 31 &&
+           (id_bits & (static_cast<jint>(1) << pointer.id)) != 0;
+  };
+  std::vector<jint> old_indices;
+  for (jint index = 0; index < static_cast<jint>(source->pointers.size()); ++index) {
+    if (keep_pointer(source->pointers[static_cast<size_t>(index)])) old_indices.push_back(index);
+  }
+  event->pointers.clear();
+  for (jint index : old_indices) {
+    event->pointers.push_back(source->pointers[static_cast<size_t>(index)]);
+  }
+  for (auto& sample : event->history) {
+    std::vector<DarwinMotionPointer> filtered;
+    for (const auto& pointer : sample.pointers) {
+      if (keep_pointer(pointer)) filtered.push_back(pointer);
+    }
+    sample.pointers = std::move(filtered);
+  }
+  const jint action = source->action & kActionMask;
+  const jint action_index = (source->action >> 8) & 0xff;
+  if ((action == 5 || action == 6) && action_index <
+          static_cast<jint>(source->pointers.size())) {
+    const jint action_id = source->pointers[static_cast<size_t>(action_index)].id;
+    auto found = std::find_if(old_indices.begin(), old_indices.end(),
+                              [&](jint index) {
+                                return source->pointers[static_cast<size_t>(index)].id == action_id;
+                              });
+    if (found == old_indices.end()) {
+      event->action = 2;
+    } else {
+      const jint remapped_index = static_cast<jint>(found - old_indices.begin());
+      event->action = action | (remapped_index << 8);
+    }
+  }
+  return static_cast<jlong>(reinterpret_cast<uintptr_t>(event.release()));
+}
 
 const JNINativeMethod kMethods[] = {
     {"nativeInitialize", "(JIIIIIIIIIFFFFJJI[Landroid/view/MotionEvent$PointerProperties;[Landroid/view/MotionEvent$PointerCoords;)J", reinterpret_cast<void*>(&NativeInitialize)},
