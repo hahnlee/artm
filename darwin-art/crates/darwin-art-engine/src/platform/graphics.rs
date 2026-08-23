@@ -1,7 +1,8 @@
 use super::abi::EngineSymbols;
 use darwin_art_engine_sys::{
     GraphicsSessionCloseFn, GraphicsSessionDestroyFn, GraphicsSessionDispatchPointerFn,
-    GraphicsSessionHandle, GraphicsSessionPumpFrameFn,
+    GraphicsSessionDispatchPointerV2Fn, GraphicsSessionHandle, GraphicsSessionPumpFrameFn,
+    PointerEventV2,
 };
 use darwin_art_runtime::NativeResource;
 use std::ptr::NonNull;
@@ -15,6 +16,7 @@ pub struct GraphicsSession {
     close_fn: GraphicsSessionCloseFn,
     destroy_fn: GraphicsSessionDestroyFn,
     dispatch_fn: GraphicsSessionDispatchPointerFn,
+    dispatch_v2_fn: Option<GraphicsSessionDispatchPointerV2Fn>,
     pump_fn: GraphicsSessionPumpFrameFn,
     closed: bool,
     close_attempted: bool,
@@ -42,6 +44,7 @@ impl GraphicsSession {
             close_fn,
             destroy_fn,
             dispatch_fn,
+            dispatch_v2_fn: symbols.graphics.dispatch_pointer_v2,
             pump_fn,
             closed: false,
             close_attempted: false,
@@ -80,6 +83,18 @@ impl GraphicsSession {
         };
         // SAFETY: handle remains live while self is borrowed.
         unsafe { (self.dispatch_fn)(handle.as_ptr(), action, x, y) }
+    }
+
+    pub fn dispatch_pointer_v2(&self, event: &PointerEventV2) -> i32 {
+        let Some(handle) = self.handle.filter(|_| !self.closed) else {
+            return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+        };
+        if let Some(dispatch) = self.dispatch_v2_fn {
+            // SAFETY: event is borrowed for the synchronous foreign call.
+            unsafe { dispatch(handle.as_ptr(), event) }
+        } else {
+            self.dispatch_pointer(event.action, event.x, event.y)
+        }
     }
 
     pub fn pump_frame(&self, frame_time_nanos: i64) -> i32 {
@@ -172,6 +187,7 @@ mod graphics_session_tests {
             close_fn: close,
             destroy_fn: destroy,
             dispatch_fn: dispatch,
+            dispatch_v2_fn: None,
             pump_fn: pump,
             closed: false,
             close_attempted: false,
@@ -202,6 +218,7 @@ mod graphics_session_tests {
             close_fn: failing_close,
             destroy_fn: destroy,
             dispatch_fn: dispatch,
+            dispatch_v2_fn: None,
             pump_fn: pump,
             closed: false,
             close_attempted: false,

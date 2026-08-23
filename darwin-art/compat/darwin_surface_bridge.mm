@@ -83,8 +83,10 @@ CGFloat WindowScale(bool visible) {
 
 @implementation DarwinArtMetalView {
   CAMetalLayer* _metalLayer;
-  std::deque<DarwinArtPointerEvent> _pointerEvents;
+  std::deque<DarwinArtPointerEventV2> _pointerEvents;
   BOOL _pointerActive;
+  uint64_t _nextPointerSequence;
+  uint64_t _downTimeNanos;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame
@@ -104,6 +106,8 @@ CGFloat WindowScale(bool visible) {
     _metalLayer.drawableSize = pixelSize;
     self.layer = _metalLayer;
     _pointerActive = NO;
+    _nextPointerSequence = 1;
+    _downTimeNanos = 0;
   }
   return self;
 }
@@ -130,8 +134,7 @@ CGFloat WindowScale(bool visible) {
   // mouseUp indistinguishable from a lost pointer. A new DOWN while the old
   // stream is still active is repaired with an explicit CANCEL.
   if (action == DARWIN_ART_POINTER_DOWN && _pointerActive) {
-    _pointerEvents.push_back(DarwinArtPointerEvent{
-        .action = DARWIN_ART_POINTER_CANCEL, .x = 0.0f, .y = 0.0f});
+    [self cancelPointerStream];
   }
   // NSEvent coordinates are AppKit points, while Android's retained view is
   // laid out in the CAMetalLayer drawable's backing pixels.  Derive the
@@ -144,16 +147,32 @@ CGFloat WindowScale(bool visible) {
   const CGFloat y_scale = bounds.size.height > 0.0
                               ? drawable_size.height / bounds.size.height
                               : 1.0;
-  _pointerEvents.push_back(DarwinArtPointerEvent{
+  const uint64_t event_time_nanos =
+      event.timestamp > 0.0 ? static_cast<uint64_t>(event.timestamp * 1000000000.0) : 0;
+  if (action == DARWIN_ART_POINTER_DOWN) _downTimeNanos = event_time_nanos;
+  _pointerEvents.push_back(DarwinArtPointerEventV2{
+      .version = 2,
+      .size = static_cast<uint32_t>(sizeof(DarwinArtPointerEventV2)),
       .action = static_cast<uint32_t>(action),
+      .flags = 0,
+      .sequence = _nextPointerSequence++,
+      .event_time_nanos = event_time_nanos,
+      .down_time_nanos = _downTimeNanos,
+      .pointer_id = 0,
+      .pointer_count = 1,
       .x = static_cast<float>(point.x * x_scale),
       .y = static_cast<float>(point.y * y_scale),
+      .raw_x = static_cast<float>(point.x * x_scale),
+      .raw_y = static_cast<float>(point.y * y_scale),
+      .pressure = 1.0f,
+      .size_value = 1.0f,
   });
   if (action == DARWIN_ART_POINTER_DOWN) {
     _pointerActive = YES;
   } else if (action == DARWIN_ART_POINTER_UP ||
              action == DARWIN_ART_POINTER_CANCEL) {
     _pointerActive = NO;
+    _downTimeNanos = 0;
   }
 }
 
@@ -170,9 +189,15 @@ CGFloat WindowScale(bool visible) {
 }
 
 - (BOOL)nextPointerEvent:(DarwinArtPointerEvent*)outEvent {
-  if (outEvent == nullptr || _pointerEvents.empty()) {
-    return NO;
-  }
+  DarwinArtPointerEventV2 event = {};
+  if (![self nextPointerEventV2:&event] || outEvent == nullptr) return NO;
+  *outEvent = DarwinArtPointerEvent{
+      .action = event.action, .x = event.x, .y = event.y};
+  return YES;
+}
+
+- (BOOL)nextPointerEventV2:(DarwinArtPointerEventV2*)outEvent {
+  if (outEvent == nullptr || _pointerEvents.empty()) return NO;
   *outEvent = _pointerEvents.front();
   _pointerEvents.pop_front();
   return YES;
@@ -180,9 +205,25 @@ CGFloat WindowScale(bool visible) {
 
 - (void)cancelPointerStream {
   if (!_pointerActive) return;
-  _pointerEvents.push_back(DarwinArtPointerEvent{
-      .action = DARWIN_ART_POINTER_CANCEL, .x = 0.0f, .y = 0.0f});
+  _pointerEvents.push_back(DarwinArtPointerEventV2{
+      .version = 2,
+      .size = static_cast<uint32_t>(sizeof(DarwinArtPointerEventV2)),
+      .action = DARWIN_ART_POINTER_CANCEL,
+      .flags = 0,
+      .sequence = _nextPointerSequence++,
+      .event_time_nanos = _downTimeNanos,
+      .down_time_nanos = _downTimeNanos,
+      .pointer_id = 0,
+      .pointer_count = 1,
+      .x = 0.0f,
+      .y = 0.0f,
+      .raw_x = 0.0f,
+      .raw_y = 0.0f,
+      .pressure = 0.0f,
+      .size_value = 0.0f,
+  });
   _pointerActive = NO;
+  _downTimeNanos = 0;
 }
 
 @end
@@ -581,6 +622,15 @@ bool darwin_art_surface_next_pointer_event(
     return false;
   }
   return [surface->view nextPointerEvent:out_event] == YES;
+}
+
+bool darwin_art_surface_next_pointer_event_v2(
+    DarwinArtSurface* surface,
+    DarwinArtPointerEventV2* out_event) {
+  if (!IsMainThread() || surface == nullptr || out_event == nullptr) {
+    return false;
+  }
+  return [surface->view nextPointerEventV2:out_event] == YES;
 }
 
 DarwinArtSurfaceResult darwin_art_surface_destroy(

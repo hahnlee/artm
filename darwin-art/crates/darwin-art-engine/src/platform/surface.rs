@@ -1,8 +1,8 @@
 use super::abi::EngineSymbols;
 use core::ffi::c_void;
 use darwin_art_engine_sys::{
-    PointerEvent, SurfaceDestroyFn, SurfaceNextPointerEventFn, SurfacePresentFn,
-    SurfacePumpEventsFn, SurfaceUpdateFn,
+    PointerEvent, PointerEventV2, SurfaceDestroyFn, SurfaceNextPointerEventFn,
+    SurfaceNextPointerEventV2Fn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
 };
 use darwin_art_runtime::NativeResource;
 use std::{mem::size_of, ptr::NonNull};
@@ -16,6 +16,7 @@ pub struct SurfaceSession {
     present: SurfacePresentFn,
     pump_events: SurfacePumpEventsFn,
     next_pointer_event: SurfaceNextPointerEventFn,
+    next_pointer_event_v2: Option<SurfaceNextPointerEventV2Fn>,
     destroy: SurfaceDestroyFn,
     armed: bool,
     close_status: Option<i32>,
@@ -29,6 +30,7 @@ impl SurfaceSession {
             present: symbols.surface.present,
             pump_events: symbols.surface.pump_events,
             next_pointer_event: symbols.surface.next_pointer_event,
+            next_pointer_event_v2: symbols.surface.next_pointer_event_v2,
             destroy: symbols.surface.destroy,
             armed: true,
             close_status: None,
@@ -94,6 +96,17 @@ impl SurfaceSession {
         };
         // SAFETY: event is writable POD and the handle is live.
         unsafe { (self.next_pointer_event)(handle.as_ptr(), event) }
+    }
+
+    pub fn next_pointer_event_v2(&self, event: &mut PointerEventV2) -> bool {
+        let Some(handle) = self.handle.filter(|_| self.armed) else {
+            return false;
+        };
+        let Some(next) = self.next_pointer_event_v2 else {
+            return false;
+        };
+        // SAFETY: event is writable POD and the handle is live.
+        unsafe { next(handle.as_ptr(), event) }
     }
 
     pub fn close(&mut self) -> i32 {
@@ -170,6 +183,7 @@ mod surface_session_tests {
             present,
             pump_events: pump,
             next_pointer_event: next_event,
+            next_pointer_event_v2: None,
             destroy,
             armed: true,
             close_status: None,
@@ -189,6 +203,7 @@ mod surface_session_tests {
             present,
             pump_events: pump,
             next_pointer_event: next_event,
+            next_pointer_event_v2: None,
             destroy,
             armed: true,
             close_status: None,

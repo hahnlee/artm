@@ -59,6 +59,28 @@ typedef struct DarwinArtPointerEvent {
   float y;
 } DarwinArtPointerEvent;
 
+// Versioned, pointer-free event packet used by the Rust ingress. The legacy
+// three-field packet remains exported for older probes, while new hosts get
+// ordering and Android timing metadata without crossing JNI or borrowing an
+// AppKit object.
+typedef struct DarwinArtPointerEventV2 {
+  uint32_t version;
+  uint32_t size;
+  uint32_t action;
+  uint32_t flags;
+  uint64_t sequence;
+  uint64_t event_time_nanos;
+  uint64_t down_time_nanos;
+  uint32_t pointer_id;
+  uint32_t pointer_count;
+  float x;
+  float y;
+  float raw_x;
+  float raw_y;
+  float pressure;
+  float size_value;
+} DarwinArtPointerEventV2;
+
 // Creates persistent Apple graphics objects. The returned handle owns them
 // until darwin_art_surface_destroy(). Returns null on failure and writes the
 // reason to out_result when it is non-null.
@@ -122,6 +144,10 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
 bool darwin_art_surface_next_pointer_event(
     DarwinArtSurface* surface,
     DarwinArtPointerEvent* out_event);
+
+bool darwin_art_surface_next_pointer_event_v2(
+    DarwinArtSurface* surface,
+    DarwinArtPointerEventV2* out_event);
 
 // Waits for the most recently submitted command buffer, closes the window,
 // and releases all owned Apple objects.

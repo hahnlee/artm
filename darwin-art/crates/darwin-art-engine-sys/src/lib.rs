@@ -239,6 +239,15 @@ mod tests {
             align_of::<*mut c_void>()
         );
     }
+
+    #[test]
+    fn pointer_event_v2_layout_is_stable() {
+        assert_eq!(size_of::<PointerEventV2>(), 72);
+        assert_eq!(align_of::<PointerEventV2>(), 8);
+        assert_eq!(offset_of!(PointerEventV2, sequence), 16);
+        assert_eq!(offset_of!(PointerEventV2, event_time_nanos), 24);
+        assert_eq!(offset_of!(PointerEventV2, x), 48);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -249,7 +258,29 @@ pub struct PointerEvent {
     pub y: f32,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+pub struct PointerEventV2 {
+    pub version: u32,
+    pub size: u32,
+    pub action: u32,
+    pub flags: u32,
+    pub sequence: u64,
+    pub event_time_nanos: u64,
+    pub down_time_nanos: u64,
+    pub pointer_id: u32,
+    pub pointer_count: u32,
+    pub x: f32,
+    pub y: f32,
+    pub raw_x: f32,
+    pub raw_y: f32,
+    pub pressure: f32,
+    pub size_value: f32,
+}
+
 pub type SurfaceNextPointerEventFn = unsafe extern "C" fn(*mut c_void, *mut PointerEvent) -> bool;
+pub type SurfaceNextPointerEventV2Fn =
+    unsafe extern "C" fn(*mut c_void, *mut PointerEventV2) -> bool;
 pub type SurfaceDestroyFn = unsafe extern "C" fn(*mut c_void) -> i32;
 pub type SurfaceActiveFn = unsafe extern "C" fn() -> *mut c_void;
 pub type DispatchPointerFn = unsafe extern "C" fn(u32, f32, f32) -> i32;
@@ -260,6 +291,8 @@ pub type GraphicsSessionCloseFn = unsafe extern "C" fn(*mut GraphicsSessionHandl
 pub type GraphicsSessionDestroyFn = unsafe extern "C" fn(*mut GraphicsSessionHandle) -> i32;
 pub type GraphicsSessionDispatchPointerFn =
     unsafe extern "C" fn(*mut GraphicsSessionHandle, u32, f32, f32) -> i32;
+pub type GraphicsSessionDispatchPointerV2Fn =
+    unsafe extern "C" fn(*mut GraphicsSessionHandle, *const PointerEventV2) -> i32;
 pub type GraphicsSessionPumpFrameFn = unsafe extern "C" fn(*mut GraphicsSessionHandle, i64) -> i32;
 pub type ProviderInstallHooksFn = unsafe extern "C" fn(
     context: *mut c_void,

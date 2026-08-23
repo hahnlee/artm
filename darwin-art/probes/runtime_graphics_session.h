@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "darwin_art/darwin_art.h"
+#include "darwin_surface_bridge.h"
 #include "runtime_graphics_state.h"
 
 namespace art {
@@ -29,6 +30,8 @@ int32_t finalize_bound_session(GraphicsState* state);
 int32_t destroy_session(darwin_art_graphics_session_t* session);
 int32_t dispatch_pointer(darwin_art_graphics_session_t* session,
                          uint32_t action, float x, float y);
+int32_t dispatch_pointer_v2(darwin_art_graphics_session_t* session,
+                            const DarwinArtPointerEventV2* event);
 int32_t pump_frame(darwin_art_graphics_session_t* session,
                    int64_t frame_time_nanos);
 

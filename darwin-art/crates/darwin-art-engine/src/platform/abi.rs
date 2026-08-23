@@ -5,10 +5,11 @@ use std::path::Path;
 
 use darwin_art_engine_sys::{
     GraphicsSessionCloseFn, GraphicsSessionCreateFn, GraphicsSessionDestroyFn,
-    GraphicsSessionDispatchPointerFn, GraphicsSessionPumpFrameFn, ProviderClearHooksFn,
-    ProviderInstallHooksFn, ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn,
-    ShutdownProcessFn, SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn,
-    SurfaceNextPointerEventFn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
+    GraphicsSessionDispatchPointerFn, GraphicsSessionDispatchPointerV2Fn,
+    GraphicsSessionPumpFrameFn, ProviderClearHooksFn, ProviderInstallHooksFn,
+    ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn, ShutdownProcessFn,
+    SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn, SurfaceNextPointerEventFn,
+    SurfaceNextPointerEventV2Fn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceUpdateFn,
 };
 
 #[derive(Clone, Copy)]
@@ -24,6 +25,7 @@ pub(crate) struct SurfaceSymbols {
     pub present: SurfacePresentFn,
     pub pump_events: SurfacePumpEventsFn,
     pub next_pointer_event: SurfaceNextPointerEventFn,
+    pub next_pointer_event_v2: Option<SurfaceNextPointerEventV2Fn>,
     pub destroy: SurfaceDestroyFn,
     pub active: SurfaceActiveFn,
 }
@@ -34,6 +36,7 @@ pub(crate) struct GraphicsSymbols {
     pub close: Option<GraphicsSessionCloseFn>,
     pub destroy: Option<GraphicsSessionDestroyFn>,
     pub dispatch_pointer: Option<GraphicsSessionDispatchPointerFn>,
+    pub dispatch_pointer_v2: Option<GraphicsSessionDispatchPointerV2Fn>,
     pub pump_frame: Option<GraphicsSessionPumpFrameFn>,
 }
 
@@ -75,6 +78,9 @@ impl LoadedEngine {
                     pump_events: library.symbol(b"darwin_art_surface_pump_events\0")?,
                     next_pointer_event: library
                         .symbol(b"darwin_art_surface_next_pointer_event\0")?,
+                    next_pointer_event_v2: library
+                        .symbol(b"darwin_art_surface_next_pointer_event_v2\0")
+                        .ok(),
                     destroy: library.symbol(b"darwin_art_surface_destroy\0")?,
                     active: library.symbol(b"darwin_art_surface_active_gpu\0")?,
                 },
@@ -86,6 +92,9 @@ impl LoadedEngine {
                         .ok(),
                     dispatch_pointer: library
                         .symbol(b"darwin_art_graphics_session_dispatch_pointer\0")
+                        .ok(),
+                    dispatch_pointer_v2: library
+                        .symbol(b"darwin_art_graphics_session_dispatch_pointer_v2\0")
                         .ok(),
                     pump_frame: library
                         .symbol(b"darwin_art_graphics_session_pump_frame\0")

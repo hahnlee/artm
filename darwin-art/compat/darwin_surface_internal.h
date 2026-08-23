@@ -16,6 +16,7 @@
                     pixelSize:(CGSize)pixelSize
                  contentScale:(CGFloat)contentScale;
 - (BOOL)nextPointerEvent:(DarwinArtPointerEvent*)outEvent;
+- (BOOL)nextPointerEventV2:(DarwinArtPointerEventV2*)outEvent;
 - (void)cancelPointerStream;
 @end
 

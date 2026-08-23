@@ -1,7 +1,7 @@
 use crate::config::{HostError, HostOutcome, RunOptions};
 use crate::runtime::HostRuntime;
-use crate::surface::{owned_surface_next_pointer_event, owned_surface_pump_events};
-use darwin_art_engine_sys::{PointerEvent, ProcessResult};
+use crate::surface::{owned_surface_next_pointer_event_v2, owned_surface_pump_events};
+use darwin_art_engine_sys::{PointerEventV2, ProcessResult};
 use darwin_art_runtime::Subsystem;
 
 #[cfg(target_os = "macos")]
@@ -40,27 +40,48 @@ pub(super) fn run(
             let (x, y) = sample.split_once(',')?;
             Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))
         });
+    let test_drag = std::env::var("DARWIN_ART_TEST_POINTER_DRAG")
+        .ok()
+        .map(|path| {
+            path.split(';')
+                .filter_map(|sample| {
+                    let (x, y) = sample.split_once(',')?;
+                    Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|points| points.len() >= 2);
+    let test_pointer = test_drag
+        .as_ref()
+        .and_then(|points| points.first().copied())
+        .or(test_pointer);
     let test_hold_ms = std::env::var("DARWIN_ART_TEST_POINTER_HOLD_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(0);
-    eprintln!("DARWIN_ART gpu test pointer={test_pointer:?} hold_ms={test_hold_ms}");
+    let test_cancel = std::env::var("DARWIN_ART_TEST_POINTER_CANCEL")
+        .ok()
+        .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+    eprintln!(
+        "DARWIN_ART gpu test pointer={test_pointer:?} drag_points={} hold_ms={test_hold_ms} cancel={test_cancel}",
+        test_drag.as_ref().map_or(0, Vec::len),
+    );
 
     let dispatch_queued_events = || -> Result<u64, HostError> {
         let mut dispatched = 0_u64;
-        let mut event = PointerEvent::default();
-        let mut pending_move: Option<PointerEvent> = None;
-        let mut dispatch = |event: PointerEvent| -> Result<(), HostError> {
-            let dispatch_status = runtime.graphics().map_or(-1, |graphics| {
-                graphics.dispatch_pointer(event.action, event.x, event.y)
-            });
+        let mut event = PointerEventV2::default();
+        let mut pending_move: Option<PointerEventV2> = None;
+        let mut dispatch = |event: PointerEventV2| -> Result<(), HostError> {
+            let dispatch_status = runtime
+                .graphics()
+                .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&event));
             if dispatch_status != 0 {
                 return Err(HostError::RuntimeFailed(dispatch_status));
             }
             dispatched += 1;
             Ok(())
         };
-        while owned_surface_next_pointer_event(runtime, &mut event) {
+        while owned_surface_next_pointer_event_v2(runtime, &mut event) {
             if event.action == 2 {
                 // MOVE is latest-wins within one host poll. DOWN/UP/CANCEL
                 // are never coalesced, so gesture boundaries remain exact.
@@ -78,10 +99,26 @@ pub(super) fn run(
         Ok(dispatched)
     };
 
+    let synthetic_event = |action: u32, x: f32, y: f32| {
+        let mut event = PointerEventV2::default();
+        event.version = 2;
+        event.size = std::mem::size_of::<PointerEventV2>() as u32;
+        event.action = action;
+        event.pointer_count = 1;
+        event.x = x;
+        event.y = y;
+        event.raw_x = x;
+        event.raw_y = y;
+        event.pressure = 1.0;
+        event.size_value = 1.0;
+        event
+    };
+
     if let Some((x, y)) = test_pointer {
+        let down = synthetic_event(0, x, y);
         let dispatch_status = runtime
             .graphics()
-            .map_or(-1, |graphics| graphics.dispatch_pointer(0, x, y));
+            .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&down));
         if dispatch_status != 0 {
             loop_error = Some(HostError::RuntimeFailed(dispatch_status));
         } else {
@@ -125,9 +162,15 @@ pub(super) fn run(
                     // ACTION_MOVE causes PresentContent to replay the
                     // Android RenderNode while RippleDrawable's
                     // pressed animation advances between pumps.
+                    let move_index = (held_ms / 16 + 1) as usize;
+                    let (move_x, move_y) = test_drag
+                        .as_ref()
+                        .and_then(|points| points.get(move_index).copied())
+                        .unwrap_or((x, y));
+                    let move_event = synthetic_event(2, move_x, move_y);
                     let dispatch_status = runtime
                         .graphics()
-                        .map_or(-1, |graphics| graphics.dispatch_pointer(2, x, y));
+                        .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&move_event));
                     if dispatch_status != 0 {
                         loop_error = Some(HostError::RuntimeFailed(dispatch_status));
                     } else {
@@ -137,9 +180,14 @@ pub(super) fn run(
                 held_ms += slice_ms;
             }
             if loop_error.is_none() {
+                let (up_x, up_y) = test_drag
+                    .as_ref()
+                    .and_then(|points| points.last().copied())
+                    .unwrap_or((x, y));
+                let up = synthetic_event(if test_cancel { 3 } else { 1 }, up_x, up_y);
                 let dispatch_status = runtime
                     .graphics()
-                    .map_or(-1, |graphics| graphics.dispatch_pointer(1, x, y));
+                    .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&up));
                 if dispatch_status != 0 {
                     loop_error = Some(HostError::RuntimeFailed(dispatch_status));
                 } else {
@@ -181,9 +229,10 @@ pub(super) fn run(
         if loop_error.is_none()
             && let Some((x, y)) = test_pointer
         {
+            let move_event = synthetic_event(2, x, y);
             let replay_status = runtime
                 .graphics()
-                .map_or(-1, |graphics| graphics.dispatch_pointer(2, x, y));
+                .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&move_event));
             if replay_status != 0 {
                 loop_error = Some(HostError::RuntimeFailed(replay_status));
             } else {

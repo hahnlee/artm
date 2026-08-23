@@ -3,6 +3,8 @@
 #include <jni.h>
 #include <cstdint>
 
+#include "darwin_surface_bridge.h"
+
 namespace darwin_art_graphics {
 struct GraphicsState;
 int32_t finalize_bound_session(GraphicsState* state);
@@ -15,9 +17,13 @@ jboolean present_content(GraphicsState* state, JNIEnv* env, jclass unused,
 void shutdown(GraphicsState* state, JNIEnv* env);
 int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
                          float y);
+int32_t dispatch_pointer_v2(GraphicsState* state,
+                             const DarwinArtPointerEventV2* event);
 int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos);
 }  // namespace darwin_art_graphics
 
 extern "C" int32_t darwin_art_dispatch_pointer(uint32_t action, float x,
                                                  float y);
+extern "C" int32_t darwin_art_dispatch_pointer_v2(
+    const DarwinArtPointerEventV2* event);
 extern "C" int32_t darwin_art_pump_framework_frame(jlong frame_time_nanos);

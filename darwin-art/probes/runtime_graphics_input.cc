@@ -79,15 +79,23 @@ jclass LoadProbeAnimationHost(JNIEnv* env) {
 }
 
 int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
-                              uint32_t action, float x, float y) {
+                              uint32_t action, float x, float y,
+                              uint64_t event_time_hint,
+                              uint64_t down_time_hint) {
   if (state == nullptr || env == nullptr || root == nullptr) return 72;
   if (action > 3u || !std::isfinite(x) || !std::isfinite(y)) return 71;
   const bool down = action == 0u;
   const bool terminal = action == 1u || action == 3u;
   if (!down && !state->pointer_stream_active) return 78;
-  const int64_t event_time_nanos = MonotonicNanos();
+  const int64_t event_time_nanos = event_time_hint > 0
+                                       ? static_cast<int64_t>(event_time_hint)
+                                       : MonotonicNanos();
   if (event_time_nanos <= 0) return 79;
-  if (down) state->pointer_down_time_nanos = event_time_nanos;
+  if (down) {
+    state->pointer_down_time_nanos = down_time_hint > 0
+                                         ? static_cast<int64_t>(down_time_hint)
+                                         : event_time_nanos;
+  }
   const int64_t down_time_nanos = state->pointer_down_time_nanos;
   if (down_time_nanos <= 0 || down_time_nanos > event_time_nanos) return 79;
 
@@ -295,8 +303,9 @@ jobject find_clickable_view_at(JNIEnv* env, jobject view, jfloat x, jfloat y) {
   return result;
 }
 
-int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
-                          float y) {
+int32_t dispatch_pointer_internal(GraphicsState* state, uint32_t action, float x,
+                                  float y, uint64_t event_time_nanos,
+                                  uint64_t down_time_nanos) {
   if (state == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   if (action > 3u || !std::isfinite(x) || !std::isfinite(y)) {
     return 71;
@@ -323,7 +332,8 @@ int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
       // free and never submits a frame per synthetic MOVE.
       return 0;
     }
-    const int32_t status = dispatch_motion_event(state, env, root, action, x, y);
+    const int32_t status = dispatch_motion_event(
+        state, env, root, action, x, y, event_time_nanos, down_time_nanos);
     if (status == 0 || std::getenv("DARWIN_ART_INPUT_MODE") != nullptr ||
         std::getenv("DARWIN_ART_APK_APP_PACKAGE") != nullptr) {
       return status;
@@ -426,6 +436,23 @@ int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
     pressed_view = nullptr;
   }
   return rendered ? 0 : 75;
+}
+
+int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
+                         float y) {
+  return dispatch_pointer_internal(state, action, x, y, 0, 0);
+}
+
+int32_t dispatch_pointer_v2(GraphicsState* state,
+                             const DarwinArtPointerEventV2* event) {
+  if (event == nullptr || event->version != 2 ||
+      event->size < sizeof(DarwinArtPointerEventV2) ||
+      event->pointer_count == 0 || event->pointer_count > 16) {
+    return 71;
+  }
+  return dispatch_pointer_internal(state, event->action, event->x, event->y,
+                                   event->event_time_nanos,
+                                   event->down_time_nanos);
 }
 
 int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
@@ -536,6 +563,11 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
     uint32_t, float, float) {
+  return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+}
+
+extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer_v2(
+    const DarwinArtPointerEventV2*) {
   return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
 }
 
