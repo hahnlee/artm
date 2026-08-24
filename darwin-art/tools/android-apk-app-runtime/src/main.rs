@@ -19,7 +19,10 @@ const RES_XML: u16 = 0x0003;
 const RES_XML_START_ELEMENT: u16 = 0x0102;
 const RES_XML_END_ELEMENT: u16 = 0x0103;
 const UTF8_FLAG: u32 = 0x0000_0100;
+const TYPE_REFERENCE: u8 = 0x01;
 const TYPE_STRING: u8 = 0x03;
+const TYPE_INT_DEC: u8 = 0x10;
+const TYPE_INT_HEX: u8 = 0x11;
 
 #[derive(Clone)]
 struct ZipEntry {
@@ -39,13 +42,17 @@ struct StringPool {
 struct ActivityCandidate {
     depth: usize,
     name: String,
+    theme: Option<u32>,
     main: bool,
     launcher: bool,
 }
 
 struct ManifestInfo {
     package: String,
+    application: String,
     activity: String,
+    theme: u32,
+    target_sdk: u32,
     label: String,
     icon: Option<String>,
 }
@@ -357,6 +364,66 @@ fn find_attribute(
     Ok(None)
 }
 
+fn find_resource_attribute(
+    input: &[u8],
+    pool: &StringPool,
+    attrs: usize,
+    count: usize,
+    attr_size: usize,
+    wanted: &str,
+) -> Result<Option<u32>> {
+    if attr_size < 20 {
+        return Err("manifest attribute record is too small".to_owned());
+    }
+    for index in 0..count {
+        let attr = checked_add(attrs, index * attr_size, "manifest attribute")?;
+        let name = pool_string(pool, u32le(input, attr + 4, "attribute name")?)?;
+        if name != wanted {
+            continue;
+        }
+        let value_size = u16le(input, attr + 12, "attribute value size")?;
+        let value_type = *bytes(input, attr + 15, 1, "attribute type")?
+            .first()
+            .ok_or_else(|| "attribute type is absent".to_owned())?;
+        return if value_size == 8 && value_type == TYPE_REFERENCE {
+            Ok(Some(u32le(input, attr + 16, "attribute resource")?))
+        } else {
+            Ok(None)
+        };
+    }
+    Ok(None)
+}
+
+fn find_integer_attribute(
+    input: &[u8],
+    pool: &StringPool,
+    attrs: usize,
+    count: usize,
+    attr_size: usize,
+    wanted: &str,
+) -> Result<Option<u32>> {
+    if attr_size < 20 {
+        return Err("manifest attribute record is too small".to_owned());
+    }
+    for index in 0..count {
+        let attr = checked_add(attrs, index * attr_size, "manifest attribute")?;
+        let name = pool_string(pool, u32le(input, attr + 4, "attribute name")?)?;
+        if name != wanted {
+            continue;
+        }
+        let value_size = u16le(input, attr + 12, "attribute value size")?;
+        let value_type = *bytes(input, attr + 15, 1, "attribute type")?
+            .first()
+            .ok_or_else(|| "attribute type is absent".to_owned())?;
+        return if value_size == 8 && matches!(value_type, TYPE_INT_DEC | TYPE_INT_HEX) {
+            Ok(Some(u32le(input, attr + 16, "attribute integer")?))
+        } else {
+            Ok(None)
+        };
+    }
+    Ok(None)
+}
+
 fn normalize_activity(package: &str, name: &str) -> Result<String> {
     let full = if name.starts_with('.') {
         format!("{package}{name}")
@@ -399,7 +466,10 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
     let mut pool = None;
     let mut depth = 0_usize;
     let mut package = None;
+    let mut application = None;
     let mut label = None;
+    let mut application_theme = None;
+    let mut target_sdk = None;
     let mut current: Option<ActivityCandidate> = None;
     let mut launchers = Vec::new();
     while offset < input.len() {
@@ -439,8 +509,23 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                     package =
                         find_attribute(input, strings, attrs, attr_count, attr_size, "package")?;
                 }
+                "uses-sdk" => {
+                    target_sdk = find_integer_attribute(
+                        input,
+                        strings,
+                        attrs,
+                        attr_count,
+                        attr_size,
+                        "targetSdkVersion",
+                    )?;
+                }
                 "application" => {
+                    application =
+                        find_attribute(input, strings, attrs, attr_count, attr_size, "name")?;
                     label = find_attribute(input, strings, attrs, attr_count, attr_size, "label")?;
+                    application_theme = find_resource_attribute(
+                        input, strings, attrs, attr_count, attr_size, "theme",
+                    )?;
                 }
                 "activity" => {
                     if current.is_some() {
@@ -449,9 +534,13 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                     let name =
                         find_attribute(input, strings, attrs, attr_count, attr_size, "name")?
                             .ok_or_else(|| "activity is missing android:name".to_owned())?;
+                    let theme = find_resource_attribute(
+                        input, strings, attrs, attr_count, attr_size, "theme",
+                    )?;
                     current = Some(ActivityCandidate {
                         depth,
                         name,
+                        theme,
                         main: false,
                         launcher: false,
                     });
@@ -487,7 +576,7 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                     return Err("activity element depth mismatch".to_owned());
                 }
                 if candidate.main && candidate.launcher {
-                    launchers.push(candidate.name);
+                    launchers.push(candidate);
                 }
             }
             depth = depth
@@ -497,19 +586,30 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
         offset += chunk_size;
     }
     let package = package.ok_or_else(|| "manifest package is missing".to_owned())?;
+    let application = match application {
+        Some(name) => normalize_activity(&package, &name)?,
+        None => "android.app.Application".to_owned(),
+    };
     if launchers.len() != 1 {
         return Err(format!(
             "APK must declare exactly one MAIN/LAUNCHER activity, found {}",
             launchers.len()
         ));
     }
-    let activity = normalize_activity(&package, &launchers[0])?;
+    let launcher = launchers
+        .pop()
+        .ok_or_else(|| "launcher Activity is missing".to_owned())?;
+    let activity = normalize_activity(&package, &launcher.name)?;
+    let theme = launcher.theme.or(application_theme).unwrap_or(0);
     let label = label
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| activity_label(&activity));
     Ok(ManifestInfo {
         package,
+        application,
         activity,
+        theme,
+        target_sdk: target_sdk.unwrap_or(1),
         label,
         icon: None,
     })
@@ -614,10 +714,13 @@ fn run() -> Result<()> {
     }
     let info = inspect(Path::new(&path))?;
     println!(
-        "apk-app-runtime: package={} activity={} descriptor={} label={} icon={} dex=primary native=0",
+        "apk-app-runtime: package={} application={} activity={} descriptor={} theme={:#x} target_sdk={} label={} icon={} dex=primary native=0",
         info.package,
+        info.application,
         info.activity,
         descriptor(&info.activity),
+        info.theme,
+        info.target_sdk,
         info.label,
         info.icon.as_deref().unwrap_or("none")
     );

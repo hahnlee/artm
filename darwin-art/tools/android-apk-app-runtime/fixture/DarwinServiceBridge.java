@@ -36,6 +36,14 @@ final class DarwinServiceBridge {
             attach(activityBinder, activityTaskService,
                     "android.app.IActivityTaskManager");
 
+            Binder activityManagerBinder = new Binder();
+            Class<?> activityManagerInterface = Class.forName("android.app.IActivityManager");
+            Object activityManagerService = Proxy.newProxyInstance(
+                    activityManagerInterface.getClassLoader(),
+                    new Class<?>[] {activityManagerInterface},
+                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+            attach(activityManagerBinder, activityManagerService, "android.app.IActivityManager");
+
             // ViewRootImpl construction also obtains InputMethodManager.  A
             // real app window receives this binder from system_server; the
             // host has no server, so provide the same typed interface with
@@ -96,12 +104,45 @@ final class DarwinServiceBridge {
             attach(sensitiveContentBinder, sensitiveContentService,
                     "android.view.ISensitiveContentProtectionManager");
 
+            // ContentResolver registers observers through IContentService.
+            // Keep the framework call path intact even though this detached
+            // process has no system_server or cross-process providers.
+            Binder contentBinder = new Binder();
+            Class<?> contentInterface = Class.forName("android.content.IContentService");
+            Object contentService = Proxy.newProxyInstance(
+                    contentInterface.getClassLoader(),
+                    new Class<?>[] {contentInterface},
+                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+            attach(contentBinder, contentService, "android.content.IContentService");
+
+            Binder notificationBinder = new Binder();
+            Class<?> notificationInterface = Class.forName(
+                    "android.app.INotificationManager");
+            Object notificationService = Proxy.newProxyInstance(
+                    notificationInterface.getClassLoader(),
+                    new Class<?>[] {notificationInterface},
+                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+            attach(notificationBinder, notificationService,
+                    "android.app.INotificationManager");
+
+            Binder voiceInteractionBinder = new Binder();
+            Class<?> voiceInteractionInterface = Class.forName(
+                    "com.android.internal.app.IVoiceInteractionManagerService");
+            Object voiceInteractionService = Proxy.newProxyInstance(
+                    voiceInteractionInterface.getClassLoader(),
+                    new Class<?>[] {voiceInteractionInterface},
+                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+            attach(voiceInteractionBinder, voiceInteractionService,
+                    "com.android.internal.app.IVoiceInteractionManagerService");
+
             Class<?> metadataClass = Class.forName("android.os.ServiceWithMetadata");
             Class<?> serviceClass = Class.forName("android.os.Service");
             Object displayServiceValue = serviceValue(
                     metadataClass, serviceClass, displayBinder);
             Object activityServiceValue = serviceValue(
                     metadataClass, serviceClass, activityBinder);
+            Object activityManagerServiceValue = serviceValue(
+                    metadataClass, serviceClass, activityManagerBinder);
             Object inputMethodServiceValue = serviceValue(
                     metadataClass, serviceClass, inputMethodBinder);
             Object inputServiceValue = serviceValue(metadataClass, serviceClass, inputBinder);
@@ -111,14 +152,23 @@ final class DarwinServiceBridge {
                     metadataClass, serviceClass, accessibilityBinder);
             Object sensitiveContentServiceValue = serviceValue(
                     metadataClass, serviceClass, sensitiveContentBinder);
+            Object contentServiceValue = serviceValue(
+                    metadataClass, serviceClass, contentBinder);
+            Object notificationServiceValue = serviceValue(
+                    metadataClass, serviceClass, notificationBinder);
+            Object voiceInteractionServiceValue = serviceValue(
+                    metadataClass, serviceClass, voiceInteractionBinder);
 
             Class<?> managerInterface = Class.forName("android.os.IServiceManager");
             Object manager = Proxy.newProxyInstance(
                     managerInterface.getClassLoader(),
                     new Class<?>[] {managerInterface},
-                    new ManagerHandler(displayServiceValue, activityServiceValue,
+                    new ManagerHandler(displayServiceValue, activityManagerServiceValue,
+                            activityServiceValue,
                             inputMethodServiceValue, inputServiceValue, windowServiceValue,
-                            accessibilityServiceValue, sensitiveContentServiceValue));
+                            accessibilityServiceValue, sensitiveContentServiceValue,
+                            contentServiceValue, notificationServiceValue,
+                            voiceInteractionServiceValue));
             Binder context = new Binder();
             attach(context, manager, "android.os.IServiceManager");
             return context;
@@ -154,22 +204,33 @@ final class DarwinServiceBridge {
     private static final class ManagerHandler implements InvocationHandler {
         private final Object displayService;
         private final Object activityService;
+        private final Object activityManagerService;
         private final Object inputMethodService;
         private final Object inputService;
         private final Object windowService;
         private final Object accessibilityService;
         private final Object sensitiveContentService;
+        private final Object contentService;
+        private final Object notificationService;
+        private final Object voiceInteractionService;
 
-        ManagerHandler(Object displayService, Object activityService,
+        ManagerHandler(Object displayService, Object activityManagerService,
+                Object activityService,
                 Object inputMethodService, Object inputService, Object windowService,
-                Object accessibilityService, Object sensitiveContentService) {
+                Object accessibilityService, Object sensitiveContentService,
+                Object contentService, Object notificationService,
+                Object voiceInteractionService) {
             this.displayService = displayService;
+            this.activityManagerService = activityManagerService;
             this.activityService = activityService;
             this.inputMethodService = inputMethodService;
             this.inputService = inputService;
             this.windowService = windowService;
             this.accessibilityService = accessibilityService;
             this.sensitiveContentService = sensitiveContentService;
+            this.contentService = contentService;
+            this.notificationService = notificationService;
+            this.voiceInteractionService = voiceInteractionService;
         }
 
         @Override
@@ -179,7 +240,8 @@ final class DarwinServiceBridge {
                     && args != null && args.length > 0
                     && args[0] instanceof String) {
                 if ("display".equals(args[0])) return displayService;
-                if ("activity".equals(args[0]) || "activity_task".equals(args[0])) {
+                if ("activity".equals(args[0])) return activityManagerService;
+                if ("activity_task".equals(args[0])) {
                     return activityService;
                 }
                 if ("input_method".equals(args[0])) return inputMethodService;
@@ -188,6 +250,11 @@ final class DarwinServiceBridge {
                 if ("accessibility".equals(args[0])) return accessibilityService;
                 if ("sensitive_content_protection_service".equals(args[0])) {
                     return sensitiveContentService;
+                }
+                if ("content".equals(args[0])) return contentService;
+                if ("notification".equals(args[0])) return notificationService;
+                if ("voiceinteraction".equals(args[0])) {
+                    return voiceInteractionService;
                 }
             }
             return defaultValue(method.getReturnType());

@@ -66,11 +66,23 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
             .arg("--output")
             .arg(&dex_dir)
             .arg(baseline("android/test/mock/MockPackageManager.class"))
+            .arg(baseline("android/content/pm/ProbeShortcutManager.class"))
+            .arg(baseline("android/os/ProbeUserManager.class"))
             .arg(baseline("dev/darwinart/probe/Hello.class"))
             .arg(baseline("dev/darwinart/probe/ProbeCanvas.class"))
             .arg(baseline("dev/darwinart/probe/ProbeContentResolver.class"))
             .arg(baseline("dev/darwinart/probe/ProbeContentRoot.class"))
             .arg(baseline("dev/darwinart/probe/ProbeContext.class"))
+            .arg(baseline(
+                "dev/darwinart/probe/ProbeContext$CompatibilityHandler.class",
+            ))
+            .arg(baseline(
+                "dev/darwinart/probe/ProbeContext$DefaultServiceHandler.class",
+            ))
+            .arg(baseline("dev/darwinart/probe/ProbeSharedPreferences.class"))
+            .arg(baseline(
+                "dev/darwinart/probe/ProbeSharedPreferences$EditorImpl.class",
+            ))
             .arg(baseline("dev/darwinart/probe/ProbePackageManager.class"))
             .arg(baseline("dev/darwinart/probe/ProbeResources.class"))
             .arg(baseline("dev/darwinart/probe/ProbeXmlResourceParser.class"))
@@ -101,40 +113,50 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
     let classes_dex = dex_dir.join("classes.dex");
     let dex_probe = root.join("_build/dex-probe/dex-probe");
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=33 methods=464 \
-                    class[0]=Landroid/test/mock/MockPackageManager; \
-                    class[1]=Ldev/darwinart/probe/FontBootstrap; \
-                    class[2]=Ldev/darwinart/probe/Hello; \
-                    class[3]=Ldev/darwinart/probe/ProbeActivity; \
-                    class[4]=Ldev/darwinart/probe/ProbeAnimationHost$$ExternalSyntheticLambda0; \
-                    class[5]=Ldev/darwinart/probe/ProbeAnimationHost$1; \
-                    class[6]=Ldev/darwinart/probe/ProbeAnimationHost; \
-                    class[7]=Ldev/darwinart/probe/ProbeCanvas; \
-                    class[8]=Ldev/darwinart/probe/ProbeContentResolver$$ExternalSyntheticLambda0; \
-                    class[9]=Ldev/darwinart/probe/ProbeContentResolver; \
-                    class[10]=Ldev/darwinart/probe/ProbeContentRoot; \
-                    class[11]=Ldev/darwinart/probe/ProbeContext; \
-                    class[12]=Ldev/darwinart/probe/ProbePackageManager; \
-                    class[13]=Ldev/darwinart/probe/ProbeResources; \
-                    class[14]=Ldev/darwinart/probe/ProbeView; \
-                    class[15]=Ldev/darwinart/probe/ProbeXmlResourceParser; \
-                    class[16]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda0; \
-                    class[17]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda1; \
-                    class[18]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda2; \
-                    class[19]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda3; \
-                    class[20]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda4; \
-                    class[21]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler$$ExternalSyntheticLambda0; \
-                    class[22]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler; \
-                    class[23]=Ldev/darwinart/simple/DarwinServiceBridge$DisplayHandler; \
-                    class[24]=Ldev/darwinart/simple/DarwinServiceBridge$ManagerHandler; \
-                    class[25]=Ldev/darwinart/simple/DarwinServiceBridge; \
-                    class[26]=Ljavax/microedition/khronos/egl/EGL; \
-                    class[27]=Ljavax/microedition/khronos/egl/EGL10; \
-                    class[28]=Ljavax/microedition/khronos/egl/DarwinEGL10; \
-                    class[29]=Ljavax/microedition/khronos/egl/EGLConfig; \
-                    class[30]=Ljavax/microedition/khronos/egl/EGLContext; \
-                    class[31]=Ljavax/microedition/khronos/egl/EGLDisplay; \
-                    class[32]=Ljavax/microedition/khronos/egl/EGLSurface;";
+    let expected = "AOSP DEX: verified=yes version=35 classes=43 methods=572 \
+                    class[0]=Landroid/content/pm/ProbeShortcutManager; \
+                    class[1]=Landroid/os/ProbeUserManager; \
+                    class[2]=Landroid/test/mock/MockPackageManager; \
+                    class[3]=Ldev/darwinart/probe/FontBootstrap; \
+                    class[4]=Ldev/darwinart/probe/Hello; \
+                    class[5]=Ldev/darwinart/probe/ProbeActivity; \
+                    class[6]=Ldev/darwinart/probe/ProbeAnimationHost$$ExternalSyntheticLambda0; \
+                    class[7]=Ldev/darwinart/probe/ProbeAnimationHost$1; \
+                    class[8]=Ldev/darwinart/probe/ProbeAnimationHost; \
+                    class[9]=Ldev/darwinart/probe/ProbeCanvas; \
+                    class[10]=Ldev/darwinart/probe/ProbeContentResolver$$ExternalSyntheticLambda0; \
+                    class[11]=Ldev/darwinart/probe/ProbeContentResolver; \
+                    class[12]=Ldev/darwinart/probe/ProbeContentRoot; \
+                    class[13]=Ldev/darwinart/probe/ProbeContext$CompatibilityHandler; \
+                    class[14]=Ldev/darwinart/probe/ProbeContext$DefaultServiceHandler; \
+                    class[15]=Ldev/darwinart/probe/ProbeContext; \
+                    class[16]=Ldev/darwinart/probe/ProbePackageManager; \
+                    class[17]=Ldev/darwinart/probe/ProbeResources; \
+                    class[18]=Ldev/darwinart/probe/ProbeSharedPreferences$EditorImpl; \
+                    class[19]=Ldev/darwinart/probe/ProbeSharedPreferences; \
+                    class[20]=Ldev/darwinart/probe/ProbeView; \
+                    class[21]=Ldev/darwinart/probe/ProbeXmlResourceParser; \
+                    class[22]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda0; \
+                    class[23]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda1; \
+                    class[24]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda2; \
+                    class[25]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda3; \
+                    class[26]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda4; \
+                    class[27]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda5; \
+                    class[28]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda6; \
+                    class[29]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda7; \
+                    class[30]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda8; \
+                    class[31]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler$$ExternalSyntheticLambda0; \
+                    class[32]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler; \
+                    class[33]=Ldev/darwinart/simple/DarwinServiceBridge$DisplayHandler; \
+                    class[34]=Ldev/darwinart/simple/DarwinServiceBridge$ManagerHandler; \
+                    class[35]=Ldev/darwinart/simple/DarwinServiceBridge; \
+                    class[36]=Ljavax/microedition/khronos/egl/EGL; \
+                    class[37]=Ljavax/microedition/khronos/egl/EGL10; \
+                    class[38]=Ljavax/microedition/khronos/egl/DarwinEGL10; \
+                    class[39]=Ljavax/microedition/khronos/egl/EGLConfig; \
+                    class[40]=Ljavax/microedition/khronos/egl/EGLContext; \
+                    class[41]=Ljavax/microedition/khronos/egl/EGLDisplay; \
+                    class[42]=Ljavax/microedition/khronos/egl/EGLSurface;";
     if output.trim() != expected {
         return Err(format!("unexpected Button DEX probe output: {output:?}").into());
     }

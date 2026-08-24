@@ -30,6 +30,33 @@
 namespace darwin_art_graphics {
 
 #if defined(DARWIN_ART_REAL_GRAPHICS)
+namespace {
+
+bool view_subtree_needs_recording(JNIEnv* env, jobject view, jclass group_class,
+                                  jmethodID is_dirty,
+                                  jmethodID is_layout_requested,
+                                  jmethodID get_child_count,
+                                  jmethodID get_child_at, int depth) {
+  if (view == nullptr || depth > 32 || env->ExceptionCheck()) return true;
+  if (env->CallBooleanMethod(view, is_dirty) == JNI_TRUE ||
+      env->CallBooleanMethod(view, is_layout_requested) == JNI_TRUE) {
+    return true;
+  }
+  if (!env->IsInstanceOf(view, group_class)) return false;
+  const jint count = env->CallIntMethod(view, get_child_count);
+  for (jint index = 0; index < count && !env->ExceptionCheck(); ++index) {
+    jobject child = env->CallObjectMethod(view, get_child_at, index);
+    const bool child_needs_recording = view_subtree_needs_recording(
+        env, child, group_class, is_dirty, is_layout_requested,
+        get_child_count, get_child_at, depth + 1);
+    if (child != nullptr) env->DeleteLocalRef(child);
+    if (child_needs_recording) return true;
+  }
+  return env->ExceptionCheck();
+}
+
+}  // namespace
+
 int prepare_gpu_surface(GraphicsState* state, jint width, jint height) {
   if (state == nullptr) return 1;
   if (state->gpu_surface != nullptr) return 0;
@@ -98,6 +125,45 @@ jboolean attach_hardware_hierarchy_on_owner(GraphicsState* state, JNIEnv* env,
                         ? JNI_FALSE
                         : env->CallStaticBooleanMethod(
                               helper, attach, view, state->hardware_context);
+  if (result == JNI_TRUE && !env->ExceptionCheck()) {
+    jclass view_class = env->FindClass("android/view/View");
+    jfieldID attach_info_field =
+        view_class == nullptr
+            ? nullptr
+            : env->GetFieldID(view_class, "mAttachInfo",
+                              "Landroid/view/View$AttachInfo;");
+    jobject attach_info =
+        attach_info_field == nullptr
+            ? nullptr
+            : env->GetObjectField(view, attach_info_field);
+    jclass attach_info_class =
+        attach_info == nullptr ? nullptr : env->GetObjectClass(attach_info);
+    jfieldID window_token_field =
+        attach_info_class == nullptr
+            ? nullptr
+            : env->GetFieldID(attach_info_class, "mWindowToken",
+                              "Landroid/os/IBinder;");
+    jclass binder_class = env->FindClass("android/os/Binder");
+    jmethodID binder_constructor =
+        binder_class == nullptr
+            ? nullptr
+            : env->GetMethodID(binder_class, "<init>", "()V");
+    jobject window_token =
+        binder_constructor == nullptr
+            ? nullptr
+            : env->NewObject(binder_class, binder_constructor);
+    if (attach_info != nullptr && window_token_field != nullptr &&
+        window_token != nullptr && !env->ExceptionCheck()) {
+      env->SetObjectField(attach_info, window_token_field, window_token);
+    } else {
+      result = JNI_FALSE;
+    }
+    env->DeleteLocalRef(window_token);
+    env->DeleteLocalRef(binder_class);
+    env->DeleteLocalRef(attach_info_class);
+    env->DeleteLocalRef(attach_info);
+    env->DeleteLocalRef(view_class);
+  }
   if (env->ExceptionCheck()) {
     std::cerr << "ART HWUI GPU: owner-thread ViewRoot attach failed\n";
     env->ExceptionDescribe();
@@ -125,11 +191,48 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
       return JNI_FALSE;
     }
   }
-
-  // ACTION_MOVE is intentionally replay-only. Re-recording View.draw() every
-  // 16 ms replaces the display-list-owned CanvasProperty references and makes
-  // RippleDrawable appear static even while RenderNodeAnimators advance.
-  if (state->gpu_render_node_recorded && state->pending_pressed_action == 0) {
+  // Keep retained replay for unchanged frames, but honor Android's normal
+  // invalidation contract. App-side Handler/Choreographer work can dirty a
+  // TextView or request layout without another pointer action (for example a
+  // running stopwatch). Those frames must rebuild the display list; otherwise
+  // state advances in Java while Metal keeps presenting stale pixels.
+  bool view_needs_recording = true;
+  jclass dirty_view_class = env->FindClass("android/view/View");
+  jclass dirty_group_class = env->FindClass("android/view/ViewGroup");
+  jmethodID is_dirty = dirty_view_class == nullptr
+                           ? nullptr
+                           : env->GetMethodID(dirty_view_class, "isDirty", "()Z");
+  jmethodID is_layout_requested =
+      dirty_view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(dirty_view_class, "isLayoutRequested", "()Z");
+  jmethodID get_child_count =
+      dirty_group_class == nullptr
+          ? nullptr
+          : env->GetMethodID(dirty_group_class, "getChildCount", "()I");
+  jmethodID get_child_at =
+      dirty_group_class == nullptr
+          ? nullptr
+          : env->GetMethodID(dirty_group_class, "getChildAt",
+                             "(I)Landroid/view/View;");
+  if (is_dirty != nullptr && is_layout_requested != nullptr &&
+      get_child_count != nullptr && get_child_at != nullptr &&
+      !env->ExceptionCheck()) {
+    view_needs_recording = view_subtree_needs_recording(
+        env, view, dirty_group_class, is_dirty,
+        is_layout_requested, get_child_count, get_child_at, 0);
+  }
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    view_needs_recording = true;
+  }
+  if (dirty_group_class != nullptr) env->DeleteLocalRef(dirty_group_class);
+  if (dirty_view_class != nullptr) env->DeleteLocalRef(dirty_view_class);
+  // ACTION_MOVE remains replay-only while the hierarchy is clean. Re-recording
+  // every 16 ms would replace display-list-owned CanvasProperty references and
+  // make native RenderNode animations appear static.
+  if (state->gpu_render_node_recorded && state->pending_pressed_action == 0 &&
+      !view_needs_recording) {
     return darwin_art_hwui::render_node_to_surface(
                env, view, state->gpu_render_node, state->gpu_surface, width, height,
                state->gpu_ripple_overlay_active, state->gpu_ripple_overlay_x,
@@ -201,6 +304,16 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
       animation_host_class == nullptr
           ? nullptr
           : env->GetStaticMethodID(animation_host_class, "prepareViewPagers",
+                                   "(Ljava/lang/Object;)V");
+  jmethodID dispatch_pre_draw =
+      animation_host_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(animation_host_class, "dispatchPreDraw",
+                                   "(Ljava/lang/Object;)Z");
+  jmethodID invalidate_view_tree =
+      animation_host_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(animation_host_class, "invalidateViewTree",
                                    "(Ljava/lang/Object;)V");
   jmethodID render_node_create =
       render_node_class == nullptr
@@ -404,6 +517,20 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     env->CallStaticVoidMethod(animation_host_class, prepare_view_pagers, view);
     if (env->ExceptionCheck()) {
       dump_pending_exception("ProbeAnimationHost.prepareViewPagers");
+      env->ExceptionClear();
+    }
+  }
+  if (dispatch_pre_draw != nullptr && !env->ExceptionCheck()) {
+    env->CallStaticBooleanMethod(animation_host_class, dispatch_pre_draw, view);
+    if (env->ExceptionCheck()) {
+      dump_pending_exception("ProbeAnimationHost.dispatchPreDraw");
+      env->ExceptionClear();
+    }
+  }
+  if (invalidate_view_tree != nullptr && !env->ExceptionCheck()) {
+    env->CallStaticVoidMethod(animation_host_class, invalidate_view_tree, view);
+    if (env->ExceptionCheck()) {
+      dump_pending_exception("ProbeAnimationHost.invalidateViewTree");
       env->ExceptionClear();
     }
   }

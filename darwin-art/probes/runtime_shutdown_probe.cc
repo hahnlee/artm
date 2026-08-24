@@ -23,6 +23,64 @@ extern "C" int darwin_art_elf_jni_fixture_namespace_lifecycle_status();
 
 namespace darwin_art_process {
 
+namespace {
+
+bool ShutdownAndroidAsyncTaskExecutor(JNIEnv* env) {
+  jclass async_task_class = env->FindClass("android/os/AsyncTask");
+  if (async_task_class == nullptr) {
+    env->ExceptionClear();
+    return true;
+  }
+  jfieldID executor_field = env->GetStaticFieldID(
+      async_task_class, "THREAD_POOL_EXECUTOR",
+      "Ljava/util/concurrent/Executor;");
+  if (executor_field == nullptr) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(async_task_class);
+    return true;
+  }
+  jobject executor =
+      env->GetStaticObjectField(async_task_class, executor_field);
+  env->DeleteLocalRef(async_task_class);
+  if (executor == nullptr) {
+    return !env->ExceptionCheck();
+  }
+
+  jclass executor_service_class =
+      env->FindClass("java/util/concurrent/ExecutorService");
+  if (executor_service_class == nullptr ||
+      !env->IsInstanceOf(executor, executor_service_class)) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(executor);
+    if (executor_service_class != nullptr) {
+      env->DeleteLocalRef(executor_service_class);
+    }
+    return true;
+  }
+  jmethodID shutdown_now = env->GetMethodID(
+      executor_service_class, "shutdownNow", "()Ljava/util/List;");
+  if (shutdown_now == nullptr) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(executor_service_class);
+    env->DeleteLocalRef(executor);
+    return false;
+  }
+  jobject abandoned_tasks = env->CallObjectMethod(executor, shutdown_now);
+  const bool succeeded = !env->ExceptionCheck();
+  if (!succeeded) {
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+  }
+  if (abandoned_tasks != nullptr) {
+    env->DeleteLocalRef(abandoned_tasks);
+  }
+  env->DeleteLocalRef(executor_service_class);
+  env->DeleteLocalRef(executor);
+  return succeeded;
+}
+
+}  // namespace
+
 int32_t run_shutdown(const ShutdownState& state) {
   darwin_art_process::ShutdownSnapshot shutdown{};
   switch (darwin_art_process::begin_shutdown(&shutdown)) {
@@ -50,6 +108,16 @@ int32_t run_shutdown(const ShutdownState& state) {
         std::cerr << "ART Darwin shutdown: clearing pending exception: "
                   << art_thread->GetException()->Dump() << "\n";
         art_thread->ClearException();
+      }
+      // Android's process lifetime normally ends without DestroyJavaVM, so
+      // framework-owned executors are not automatically stopped.  Darwin ART
+      // does destroy the VM, and ART correctly waits for non-daemon Java
+      // threads.  Quiesce AsyncTask's shared pool before releasing framework
+      // state so a loader worker cannot keep shutdown blocked indefinitely.
+      if (!ShutdownAndroidAsyncTaskExecutor(art_thread->GetJniEnv())) {
+        std::cerr << "ART Darwin shutdown: AsyncTask executor shutdown failed\n";
+        darwin_art_process::mark_shutdown_failed();
+        return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
       }
       darwin_art_graphics::shutdown(shutdown.graphics_state,
                                     art_thread->GetJniEnv());

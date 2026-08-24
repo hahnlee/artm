@@ -1,6 +1,7 @@
 #include "darwin_libcore_natives.h"
 
 #include <unicode/uchar.h>
+#include <unicode/uloc.h>
 #include <unicode/ulocdata.h>
 #include <unicode/uversion.h>
 
@@ -160,6 +161,30 @@ jstring IcuGetCldrVersion(JNIEnv* env, jclass) {
   return U_SUCCESS(status) ? IcuVersionString(env, version) : nullptr;
 }
 
+jobjectArray IcuStringArray(JNIEnv* env, const char* const* values) {
+  jclass string_class = env->FindClass("java/lang/String");
+  if (string_class == nullptr) return nullptr;
+  jsize count = 0;
+  while (values != nullptr && values[count] != nullptr) ++count;
+  jobjectArray result = env->NewObjectArray(count, string_class, nullptr);
+  for (jsize i = 0; result != nullptr && i < count; ++i) {
+    jstring value = env->NewStringUTF(values[i]);
+    if (value == nullptr) break;
+    env->SetObjectArrayElement(result, i, value);
+    env->DeleteLocalRef(value);
+  }
+  env->DeleteLocalRef(string_class);
+  return result;
+}
+
+jobjectArray IcuGetIsoCountries(JNIEnv* env, jclass) {
+  return IcuStringArray(env, uloc_getISOCountries());
+}
+
+jobjectArray IcuGetIsoLanguages(JNIEnv* env, jclass) {
+  return IcuStringArray(env, uloc_getISOLanguages());
+}
+
 bool Register(JNIEnv* env, const char* class_name,
               const JNINativeMethod* methods, jint method_count) {
   jclass klass = env->FindClass(class_name);
@@ -252,6 +277,12 @@ bool RegisterLibcoreIcuNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&IcuGetUnicodeVersion)},
       {const_cast<char*>("getCldrVersion"), const_cast<char*>("()Ljava/lang/String;"),
        reinterpret_cast<void*>(&IcuGetCldrVersion)},
+      {const_cast<char*>("getISOCountriesNative"),
+       const_cast<char*>("()[Ljava/lang/String;"),
+       reinterpret_cast<void*>(&IcuGetIsoCountries)},
+      {const_cast<char*>("getISOLanguagesNative"),
+       const_cast<char*>("()[Ljava/lang/String;"),
+       reinterpret_cast<void*>(&IcuGetIsoLanguages)},
   };
   return Register(env, "libcore/icu/ICU", icu_methods,
                   static_cast<jint>(std::size(icu_methods)));

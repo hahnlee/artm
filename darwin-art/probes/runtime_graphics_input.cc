@@ -41,6 +41,132 @@ int64_t MonotonicNanos() {
   return static_cast<int64_t>(now.tv_sec) * 1000000000LL + now.tv_nsec;
 }
 
+// Process only messages that Android's main Looper could dispatch without
+// blocking. The standalone host owns the ART/UI thread, so calling
+// Looper.loop() would take over that thread permanently. Peeking at the queue
+// first preserves MessageQueue.next() semantics (including sync barriers) and
+// lets the host interleave due Handler work with native events and Metal
+// frames just like one ViewRoot traversal.
+bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
+  jclass looper_class = env->FindClass("android/os/Looper");
+  jclass queue_class = env->FindClass("android/os/MessageQueue");
+  jclass message_class = env->FindClass("android/os/Message");
+  jclass handler_class = env->FindClass("android/os/Handler");
+  jclass clock_class = env->FindClass("android/os/SystemClock");
+  jmethodID my_queue = looper_class == nullptr
+                           ? nullptr
+                           : env->GetStaticMethodID(
+                                 looper_class, "myQueue",
+                                 "()Landroid/os/MessageQueue;");
+  jmethodID queue_next = queue_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(queue_class, "next",
+                                                "()Landroid/os/Message;");
+  jfieldID queue_messages =
+      queue_class == nullptr
+          ? nullptr
+          : env->GetFieldID(queue_class, "mMessages", "Landroid/os/Message;");
+  jfieldID message_when = message_class == nullptr
+                              ? nullptr
+                              : env->GetFieldID(message_class, "when", "J");
+  jfieldID message_next =
+      message_class == nullptr
+          ? nullptr
+          : env->GetFieldID(message_class, "next", "Landroid/os/Message;");
+  jfieldID message_target =
+      message_class == nullptr
+          ? nullptr
+          : env->GetFieldID(message_class, "target", "Landroid/os/Handler;");
+  jmethodID is_asynchronous =
+      message_class == nullptr
+          ? nullptr
+          : env->GetMethodID(message_class, "isAsynchronous", "()Z");
+  jmethodID recycle = message_class == nullptr
+                          ? nullptr
+                          : env->GetMethodID(message_class, "recycleUnchecked",
+                                             "()V");
+  jmethodID dispatch =
+      handler_class == nullptr
+          ? nullptr
+          : env->GetMethodID(handler_class, "dispatchMessage",
+                             "(Landroid/os/Message;)V");
+  jmethodID uptime_millis =
+      clock_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(clock_class, "uptimeMillis", "()J");
+  const bool resolved = my_queue != nullptr && queue_next != nullptr &&
+                        queue_messages != nullptr && message_when != nullptr &&
+                        message_next != nullptr && message_target != nullptr &&
+                        is_asynchronous != nullptr && recycle != nullptr &&
+                        dispatch != nullptr && uptime_millis != nullptr &&
+                        !env->ExceptionCheck();
+  jobject queue = resolved
+                      ? env->CallStaticObjectMethod(looper_class, my_queue)
+                      : nullptr;
+  bool ok = resolved && queue != nullptr && !env->ExceptionCheck();
+  for (size_t dispatched = 0; ok && dispatched < limit; ++dispatched) {
+    jobject head = env->GetObjectField(queue, queue_messages);
+    if (head == nullptr || env->ExceptionCheck()) {
+      if (head != nullptr) env->DeleteLocalRef(head);
+      break;
+    }
+    const jlong now = env->CallStaticLongMethod(clock_class, uptime_millis);
+    jobject target = env->GetObjectField(head, message_target);
+    bool selectable = target != nullptr &&
+                      env->GetLongField(head, message_when) <= now;
+    if (target != nullptr) env->DeleteLocalRef(target);
+    if (!selectable) {
+      // A null target is a synchronization barrier. MessageQueue.next() may
+      // pass it only when a due asynchronous message exists behind it.
+      jobject candidate = env->GetObjectField(head, message_next);
+      while (candidate != nullptr && !env->ExceptionCheck()) {
+        jobject candidate_target = env->GetObjectField(candidate, message_target);
+        const bool due_async = candidate_target != nullptr &&
+                               env->CallBooleanMethod(candidate, is_asynchronous) ==
+                                   JNI_TRUE &&
+                               env->GetLongField(candidate, message_when) <= now;
+        if (candidate_target != nullptr) env->DeleteLocalRef(candidate_target);
+        if (due_async) {
+          selectable = true;
+          env->DeleteLocalRef(candidate);
+          break;
+        }
+        jobject next = env->GetObjectField(candidate, message_next);
+        env->DeleteLocalRef(candidate);
+        candidate = next;
+      }
+    }
+    env->DeleteLocalRef(head);
+    if (!selectable || env->ExceptionCheck()) break;
+
+    jobject message = env->CallObjectMethod(queue, queue_next);
+    if (message == nullptr || env->ExceptionCheck()) {
+      if (message != nullptr) env->DeleteLocalRef(message);
+      ok = false;
+      break;
+    }
+    jobject dispatch_target = env->GetObjectField(message, message_target);
+    if (dispatch_target == nullptr || env->ExceptionCheck()) {
+      if (dispatch_target != nullptr) env->DeleteLocalRef(dispatch_target);
+      env->DeleteLocalRef(message);
+      ok = false;
+      break;
+    }
+    env->CallVoidMethod(dispatch_target, dispatch, message);
+    if (!env->ExceptionCheck()) env->CallVoidMethod(message, recycle);
+    env->DeleteLocalRef(dispatch_target);
+    env->DeleteLocalRef(message);
+    ok = !env->ExceptionCheck();
+  }
+  if (queue != nullptr) env->DeleteLocalRef(queue);
+  if (clock_class != nullptr) env->DeleteLocalRef(clock_class);
+  if (handler_class != nullptr) env->DeleteLocalRef(handler_class);
+  if (message_class != nullptr) env->DeleteLocalRef(message_class);
+  if (queue_class != nullptr) env->DeleteLocalRef(queue_class);
+  if (looper_class != nullptr) env->DeleteLocalRef(looper_class);
+  return ok;
+}
+
 bool sync_interactive_surface_size(GraphicsState* state, JNIEnv* env) {
   if (state == nullptr || env == nullptr || state->gpu_surface == nullptr ||
       state->interactive_root == nullptr) {
@@ -178,12 +304,11 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   }
   const bool use_viewroot_input =
       std::getenv("DARWIN_ART_USE_VIEWROOT_INPUT") != nullptr;
-  // Until this launcher owns a WindowManager-attached ViewRootImpl, its
-  // synchronous DecorView route lacks the InputStage finish callback that
-  // completes a tap. Preserve the Android MotionEvent dispatch for widget
-  // state/gestures, and retain the real clickable target so ACTION_UP can
-  // complete exactly one click. The bridge is disabled for the attached
-  // ViewRoot path, where Android owns click completion end to end.
+  // A detached DecorView still posts View$PerformClick on ACTION_UP, but its
+  // synthetic ViewRoot has no attached input-finish traversal in which to run
+  // that boot-framework callback with the APK execution context. Retain the
+  // exact clickable target so the fallback can cancel that one queued runnable
+  // and complete the same click synchronously exactly once.
   if (!use_viewroot_input && down) {
     if (state->pressed_view != nullptr) {
       env->DeleteGlobalRef(state->pressed_view);
@@ -193,7 +318,7 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     if (hit != nullptr && !env->ExceptionCheck()) {
       state->pressed_view = env->NewGlobalRef(hit);
     }
-    env->DeleteLocalRef(hit);
+    if (hit != nullptr) env->DeleteLocalRef(hit);
   }
   const int64_t dispatch_start = MonotonicNanos();
   jboolean consumed = JNI_FALSE;
@@ -267,16 +392,36 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
         env->IsSameObject(hit, state->pressed_view) == JNI_TRUE;
     if (same_target && !env->ExceptionCheck()) {
       jclass view_class = env->FindClass("android/view/View");
+      jfieldID perform_click_runnable =
+          view_class == nullptr
+              ? nullptr
+              : env->GetFieldID(view_class, "mPerformClick",
+                                "Landroid/view/View$PerformClick;");
+      jmethodID remove_callbacks =
+          view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(view_class, "removeCallbacks",
+                                 "(Ljava/lang/Runnable;)Z");
       jmethodID perform_click =
           view_class == nullptr
               ? nullptr
               : env->GetMethodID(view_class, "performClick", "()Z");
+      jobject runnable =
+          perform_click_runnable == nullptr
+              ? nullptr
+              : env->GetObjectField(state->pressed_view,
+                                    perform_click_runnable);
+      if (runnable != nullptr && remove_callbacks != nullptr &&
+          !env->ExceptionCheck()) {
+        env->CallBooleanMethod(state->pressed_view, remove_callbacks, runnable);
+      }
       if (perform_click != nullptr && !env->ExceptionCheck()) {
         env->CallBooleanMethod(state->pressed_view, perform_click);
       }
-      env->DeleteLocalRef(view_class);
+      if (runnable != nullptr) env->DeleteLocalRef(runnable);
+      if (view_class != nullptr) env->DeleteLocalRef(view_class);
     }
-    env->DeleteLocalRef(hit);
+    if (hit != nullptr) env->DeleteLocalRef(hit);
     env->DeleteGlobalRef(state->pressed_view);
     state->pressed_view = nullptr;
   }
@@ -582,6 +727,14 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
   art::ScopedObjectAccess soa(art_thread);
   JNIEnv* env = art_thread->GetJniEnv();
   if (!sync_interactive_surface_size(state, env)) return 75;
+  if (!DispatchDueMainMessages(env)) {
+    if (env->ExceptionCheck()) {
+      std::cerr << "ART Android main message dispatch threw\n"
+                << art_thread->GetException()->Dump() << "\n";
+      art_thread->ClearException();
+    }
+    return 75;
+  }
 #if defined(DARWIN_ART_REAL_GRAPHICS)
   auto* animation_context = state->hwui_animation_context.get();
   auto* time_lord = state->hwui_time_lord.get();
@@ -658,6 +811,7 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
     env->CallVoidMethod(instance, do_frame, monotonic_nanos, 0, vsync_data);
   }
   bool ok = !env->ExceptionCheck();
+  if (ok) ok = DispatchDueMainMessages(env);
   if (!ok) {
     std::cerr << "ART Android frame pulse threw\n"
               << art_thread->GetException()->Dump() << "\n";

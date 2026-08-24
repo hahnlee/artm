@@ -21,11 +21,14 @@ apk="$(cd "$(dirname "$apk")" && pwd)/$(basename "$apk")"
 metadata="$(cargo run -q \
   --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$apk")"
 package="$(sed -n 's/^apk-app-runtime: package=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+application="$(sed -n 's/^apk-app-runtime: .* application=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 activity="$(sed -n 's/^apk-app-runtime: .* activity=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 descriptor="$(sed -n 's/^apk-app-runtime: .* descriptor=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+theme="$(sed -n 's/^apk-app-runtime: .* theme=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+target_sdk="$(sed -n 's/^apk-app-runtime: .* target_sdk=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 label="$(sed -n 's/^apk-app-runtime: .* label=\(.*\) icon=.*/\1/p' <<<"$metadata")"
 icon="$(sed -n 's/^apk-app-runtime: .* icon=\([^ ]*\) .*/\1/p' <<<"$metadata")"
-[[ -n "$package" && -n "$activity" && -n "$descriptor" && -n "$label" && -n "$icon" ]] || {
+[[ -n "$package" && -n "$application" && -n "$activity" && -n "$descriptor" && -n "$theme" && -n "$target_sdk" && -n "$label" && -n "$icon" ]] || {
   echo "could not decode inspected APK metadata" >&2
   exit 65
 }
@@ -79,8 +82,11 @@ export ANDROID_I18N_ROOT="$icu_runtime/i18n"
 export ANDROID_DATA="$icu_runtime/data"
 export ANDROID_TZDATA_ROOT="$icu_runtime/tzdata"
 export DARWIN_ART_APK_APP_PACKAGE="$package"
+export DARWIN_ART_APK_APP_APPLICATION="$application"
 export DARWIN_ART_APK_APP_ACTIVITY="$activity"
 export DARWIN_ART_APK_APP_DESCRIPTOR="$descriptor"
+export DARWIN_ART_APK_APP_THEME="$theme"
+export DARWIN_ART_APK_APP_TARGET_SDK="$target_sdk"
 export DARWIN_ART_APK_APP_LABEL="$label"
 if [[ "$icon" != "none" ]]; then
   icon_file="$(mktemp "${TMPDIR:-/tmp}/darwin-art-apk-icon.XXXXXX")"

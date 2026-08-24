@@ -282,9 +282,19 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
 
   jmethodID probe_on_create =
       run_apk_app
-          ? env->GetMethodID(probe_activity_class, "onCreate",
+          ? env->GetMethodID(probe_activity_class, "performCreate",
                              "(Landroid/os/Bundle;)V")
           : env->GetMethodID(probe_activity_class, "probeOnCreate", "()I");
+  jmethodID perform_start =
+      run_apk_app
+          ? env->GetMethodID(probe_activity_class, "performStart",
+                             "(Ljava/lang/String;)V")
+          : nullptr;
+  jmethodID perform_resume =
+      run_apk_app
+          ? env->GetMethodID(probe_activity_class, "performResume",
+                             "(ZLjava/lang/String;)V")
+          : nullptr;
   jint lifecycle_result = -1;
   if (probe_on_create != nullptr) {
     if (run_apk_app) {
@@ -346,6 +356,16 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
     }
     if (run_apk_app) {
       env->CallVoidMethod(activity_instance, probe_on_create, nullptr);
+      jstring lifecycle_reason = env->NewStringUTF("darwin-art launch");
+      if (!env->ExceptionCheck() && perform_start != nullptr) {
+        env->CallVoidMethod(activity_instance, perform_start,
+                            lifecycle_reason);
+      }
+      if (!env->ExceptionCheck() && perform_resume != nullptr) {
+        env->CallVoidMethod(activity_instance, perform_resume, JNI_FALSE,
+                            lifecycle_reason);
+      }
+      env->DeleteLocalRef(lifecycle_reason);
       lifecycle_result = env->ExceptionCheck() ? -1 : 43;
     } else {
       lifecycle_result =
@@ -463,12 +483,6 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   env->DeleteLocalRef(accessibility);
   env->DeleteLocalRef(accessibility_class);
   env->DeleteLocalRef(probe_view);
-  env->DeleteLocalRef(probe_resources_class);
-  env->DeleteLocalRef(probe_view_class);
-  env->DeleteLocalRef(probe_canvas_class);
-  env->DeleteLocalRef(content_root_class);
-  env->DeleteLocalRef(probe_context_class);
-  env->DeleteLocalRef(activity_instance);
   if (lifecycle_result != 43) {
     std::cerr << "ART Android lifecycle: expected 43, got " << lifecycle_result
               << "\n";

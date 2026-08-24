@@ -13,11 +13,16 @@ import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.MotionEvent;
+import android.view.ViewTreeObserver;
 
 /** Creates the hidden RenderNode.AnimationHost without hidden compile stubs. */
 public final class ProbeAnimationHost {
     private ProbeAnimationHost() {}
     private static Object sViewRootImpl;
+    private static Object sAttachInfo;
+    private static Field sPrivateFlags;
+    private static Field sRecreateDisplayList;
+    private static Field sGroupFlags;
 
     public static Object create(Class<?> host) {
         try {
@@ -65,9 +70,25 @@ public final class ProbeAnimationHost {
             } catch (NoSuchMethodException ignored) {
                 type = type.getSuperclass();
             } catch (Throwable error) {
-                // A pager may legitimately defer population until its adapter
-                // is ready; leave the normal Android draw path to decide.
+                if (System.getenv("DARWIN_ART_DEBUG_VIEW_TREE") != null) {
+                    error.printStackTrace();
+                }
                 break;
+            }
+        }
+        // Fragment views created by populate() normally inherit AttachInfo
+        // through ViewGroup.addView() on an attached parent. The detached
+        // Metal owner carries the same object but does not run a WindowManager
+        // attach transaction, so propagate it to newly-created children here.
+        if (sAttachInfo != null) {
+            try {
+                Field attachField = View.class.getDeclaredField("mAttachInfo");
+                attachField.setAccessible(true);
+                installAttachInfo((View) root, attachField, sAttachInfo);
+            } catch (Throwable error) {
+                if (System.getenv("DARWIN_ART_DEBUG_VIEW_TREE") != null) {
+                    error.printStackTrace();
+                }
             }
         }
         // populate() intentionally defers when getWindowToken() is null.  A
@@ -107,6 +128,52 @@ public final class ProbeAnimationHost {
         }
     }
 
+    /**
+     * Runs the pre-draw phase of a normal ViewRoot traversal. TextView uses
+     * this phase to resolve deferred scrolling for single-line, horizontally
+     * scrolling layouts (whose internal width is VERY_WIDE). Without it,
+     * centered glyphs remain positioned around x=524288 and are clipped.
+     */
+    public static boolean dispatchPreDraw(Object root) {
+        if (!(root instanceof View)) return false;
+        ViewTreeObserver observer = ((View) root).getViewTreeObserver();
+        return observer != null && observer.isAlive() && observer.dispatchOnPreDraw();
+    }
+
+    /** Mark every child dirty before replacing the flattened GPU display list. */
+    public static void invalidateViewTree(Object root) {
+        if (!(root instanceof View)) return;
+        View view = (View) root;
+        try {
+            if (sPrivateFlags == null) {
+                sPrivateFlags = View.class.getDeclaredField("mPrivateFlags");
+                sPrivateFlags.setAccessible(true);
+                sRecreateDisplayList = View.class.getDeclaredField("mRecreateDisplayList");
+                sRecreateDisplayList.setAccessible(true);
+                sGroupFlags = ViewGroup.class.getDeclaredField("mGroupFlags");
+                sGroupFlags.setAccessible(true);
+            }
+            int flags = sPrivateFlags.getInt(view);
+            // PFLAG_DIRTY_MASK=0x00600000, PFLAG_DIRTY=0x00200000,
+            // PFLAG_INVALIDATED=0x80000000 in the pinned Android 16 framework.
+            sPrivateFlags.setInt(view,
+                    (flags & ~0x00600000) | 0x00200000 | 0x80000000);
+            sRecreateDisplayList.setBoolean(view, true);
+            if (view instanceof ViewGroup) {
+                int groupFlags = sGroupFlags.getInt(view);
+                sGroupFlags.setInt(view, groupFlags | 0x00000004);
+            }
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Unable to invalidate flattened View tree", error);
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); ++index) {
+                invalidateViewTree(group.getChildAt(index));
+            }
+        }
+    }
+
     /** Attach the real hierarchy bookkeeping without creating a second window.
      * The Metal surface remains owned by the host; this only supplies the
      * AttachInfo that Android View.draw() normally receives from ViewRootImpl.
@@ -134,8 +201,9 @@ public final class ProbeAnimationHost {
             Class<?> displayType = Class.forName("android.view.Display");
             Class<?> iWindowSession = Class.forName("android.view.IWindowSession");
             Class<?> iWindow = Class.forName("android.view.IWindow");
+            Binder windowToken = new Binder();
             InvocationHandler windowHandler = (proxy, method, args) -> {
-                if ("asBinder".equals(method.getName())) return new Binder();
+                if ("asBinder".equals(method.getName())) return windowToken;
                 return defaultValue(method.getReturnType());
             };
             Object window = Proxy.newProxyInstance(
@@ -176,7 +244,12 @@ public final class ProbeAnimationHost {
             Field hardwareField = attachInfo.getClass().getDeclaredField(
                     "mHardwareAccelerated");
             hardwareField.setAccessible(true);
-            hardwareField.setBoolean(attachInfo, true);
+            // The target Canvas is still a hardware RecordingCanvas backed by
+            // Metal. Keep per-View display lists disabled because this direct
+            // owner does not run RenderThread.prepareTree(); children therefore
+            // flatten into the one GPU display list instead of producing stale
+            // or unprepared nested RenderNodes.
+            hardwareField.setBoolean(attachInfo, false);
             Field requestedField = attachInfo.getClass().getDeclaredField(
                     "mHardwareAccelerationRequested");
             requestedField.setAccessible(true);
@@ -197,6 +270,7 @@ public final class ProbeAnimationHost {
             Field rootField = viewRootType.getDeclaredField("mView");
             rootField.setAccessible(true);
             rootField.set(viewRoot, root);
+            sAttachInfo = attachInfo;
             sViewRootImpl = viewRoot;
             return true;
         } catch (Throwable error) {

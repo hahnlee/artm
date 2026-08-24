@@ -433,6 +433,56 @@ void NativeScale(jlong ptr, jfloat scale) {
     e->y_precision *= scale;
   }
 }
+
+bool TransformPointers(JNIEnv* env, jobject matrix,
+                       std::vector<DarwinMotionPointer>* pointers) {
+  if (pointers == nullptr || pointers->empty()) return true;
+  jclass matrix_class = env->FindClass("android/graphics/Matrix");
+  jmethodID map_points =
+      matrix_class == nullptr
+          ? nullptr
+          : env->GetMethodID(matrix_class, "mapPoints", "([F)V");
+  const jsize count = static_cast<jsize>(pointers->size() * 2);
+  jfloatArray coordinates =
+      map_points == nullptr || env->ExceptionCheck()
+          ? nullptr
+          : env->NewFloatArray(count);
+  if (coordinates == nullptr || env->ExceptionCheck()) {
+    if (coordinates != nullptr) env->DeleteLocalRef(coordinates);
+    if (matrix_class != nullptr) env->DeleteLocalRef(matrix_class);
+    return false;
+  }
+  std::vector<jfloat> values(static_cast<size_t>(count));
+  for (size_t index = 0; index < pointers->size(); ++index) {
+    values[index * 2] = (*pointers)[index].x;
+    values[index * 2 + 1] = (*pointers)[index].y;
+  }
+  env->SetFloatArrayRegion(coordinates, 0, count, values.data());
+  env->CallVoidMethod(matrix, map_points, coordinates);
+  if (!env->ExceptionCheck()) {
+    env->GetFloatArrayRegion(coordinates, 0, count, values.data());
+    for (size_t index = 0; index < pointers->size(); ++index) {
+      (*pointers)[index].x = values[index * 2];
+      (*pointers)[index].y = values[index * 2 + 1];
+    }
+  }
+  const bool ok = !env->ExceptionCheck();
+  env->DeleteLocalRef(coordinates);
+  env->DeleteLocalRef(matrix_class);
+  return ok;
+}
+
+void NativeTransform(JNIEnv* env, jclass, jlong ptr, jobject matrix) {
+  auto* event = Event(ptr);
+  if (!ValidEvent(event) || matrix == nullptr) {
+    ThrowIllegalArgument(env, "invalid MotionEvent transform");
+    return;
+  }
+  if (!TransformPointers(env, matrix, &event->pointers)) return;
+  for (auto& sample : event->history) {
+    if (!TransformPointers(env, matrix, &sample.pointers)) return;
+  }
+}
 jint NativeGetSurfaceRotation(jlong) { return 0; }
 
 jlong NativeCopy(jlong dest_ptr, jlong source_ptr, jboolean keep_history) {
@@ -532,6 +582,8 @@ const JNINativeMethod kMethods[] = {
     {"nativeFindPointerIndex", "(JI)I", reinterpret_cast<void*>(&NativeFindPointerIndex)},
     {"nativeGetHistorySize", "(J)I", reinterpret_cast<void*>(&NativeGetHistorySize)},
     {"nativeScale", "(JF)V", reinterpret_cast<void*>(&NativeScale)},
+    {"nativeTransform", "(JLandroid/graphics/Matrix;)V", reinterpret_cast<void*>(&NativeTransform)},
+    {"nativeApplyTransform", "(JLandroid/graphics/Matrix;)V", reinterpret_cast<void*>(&NativeTransform)},
     {"nativeGetSurfaceRotation", "(J)I", reinterpret_cast<void*>(&NativeGetSurfaceRotation)},
     {"nativeCopy", "(JJZ)J", reinterpret_cast<void*>(&NativeCopy)},
     {"nativeSplit", "(JJI)J", reinterpret_cast<void*>(&NativeSplit)},

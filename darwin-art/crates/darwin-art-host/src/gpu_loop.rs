@@ -126,9 +126,33 @@ pub(super) fn run(
                 .collect::<Vec<_>>()
         })
         .filter(|points| points.len() >= 2);
+    // Test-only multi-tap input uses the same MotionEvent/DecorView route as
+    // native mouse input. Samples after the first wait for their third field
+    // (milliseconds) before dispatch: "x,y,0;x,y,500".
+    let test_tap_sequence = std::env::var("DARWIN_ART_TEST_POINTER_SEQUENCE")
+        .ok()
+        .map(|sequence| {
+            sequence
+                .split(';')
+                .filter_map(|sample| {
+                    let mut values = sample.split(',');
+                    Some((
+                        values.next()?.parse::<f32>().ok()?,
+                        values.next()?.parse::<f32>().ok()?,
+                        values.next()?.parse::<u64>().ok()?,
+                    ))
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|samples| !samples.is_empty());
     let test_pointer = test_drag
         .as_ref()
         .and_then(|points| points.first().copied())
+        .or_else(|| {
+            test_tap_sequence
+                .as_ref()
+                .and_then(|samples| samples.first().map(|&(x, y, _)| (x, y)))
+        })
         .or(test_pointer);
     let test_hold_ms = std::env::var("DARWIN_ART_TEST_POINTER_HOLD_MS")
         .ok()
@@ -274,6 +298,61 @@ pub(super) fn run(
                     ) {
                         loop_error = Some(error);
                     }
+                }
+            }
+        }
+    }
+    if loop_error.is_none()
+        && let Some(sequence) = test_tap_sequence.as_ref()
+    {
+        for &(x, y, delay_ms) in sequence.iter().skip(1) {
+            let mut waited_ms = 0_u64;
+            while waited_ms < delay_ms && loop_error.is_none() {
+                let slice_ms = (delay_ms - waited_ms).min(16);
+                let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
+                if pump_status != 0 {
+                    loop_error = Some(HostError::SurfaceFailed {
+                        operation: "gpu_test_pointer_sequence_wait",
+                        status: pump_status,
+                    });
+                    break;
+                }
+                if let Err(error) = dispatch_queued_events(runtime) {
+                    loop_error = Some(error);
+                    break;
+                }
+                if let Err(error) = pump_frame_with_latency(
+                    runtime,
+                    debug_latency,
+                    &mut last_input_dispatch,
+                    &mut frame_latencies_us,
+                ) {
+                    loop_error = Some(error);
+                    break;
+                }
+                waited_ms += slice_ms;
+            }
+            if loop_error.is_some() {
+                break;
+            }
+            for action in [0_u32, 1_u32] {
+                let event = synthetic_event(action, x, y);
+                let status = runtime
+                    .graphics()
+                    .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&event));
+                if status != 0 {
+                    loop_error = Some(HostError::RuntimeFailed(status));
+                    break;
+                }
+                frames_presented += 1;
+                if let Err(error) = pump_frame_with_latency(
+                    runtime,
+                    debug_latency,
+                    &mut last_input_dispatch,
+                    &mut frame_latencies_us,
+                ) {
+                    loop_error = Some(error);
+                    break;
                 }
             }
         }

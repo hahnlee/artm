@@ -78,6 +78,38 @@ int load_classes(JNIEnv* env,
     return 4;
   }
   out->app_loader = soa.AddLocalReference<jobject>(app_loader.Get());
+  // ClassLinker::CreatePathClassLoader is an ART test helper: it allocates and
+  // wires BaseDexClassLoader fields directly, without running ClassLoader's
+  // Java constructor. Production Android creates the loader through that
+  // constructor, which owns maps used by Class.getPackage(), certificates,
+  // assertions, and class-loader values. Complete the omitted base
+  // construction while preserving the helper-installed boot parent and
+  // DexPathList.
+  jclass class_loader_class = env->FindClass("java/lang/ClassLoader");
+  jmethodID get_parent =
+      class_loader_class == nullptr
+          ? nullptr
+          : env->GetMethodID(class_loader_class, "getParent",
+                             "()Ljava/lang/ClassLoader;");
+  jmethodID class_loader_constructor =
+      class_loader_class == nullptr
+          ? nullptr
+          : env->GetMethodID(class_loader_class, "<init>",
+                             "(Ljava/lang/ClassLoader;)V");
+  jobject loader_parent =
+      get_parent == nullptr
+          ? nullptr
+          : env->CallObjectMethod(out->app_loader, get_parent);
+  if (class_loader_constructor != nullptr && !env->ExceptionCheck()) {
+    env->CallNonvirtualVoidMethod(out->app_loader, class_loader_class,
+                                  class_loader_constructor, loader_parent);
+  }
+  env->DeleteLocalRef(loader_parent);
+  env->DeleteLocalRef(class_loader_class);
+  if (class_loader_constructor == nullptr || self->IsExceptionPending()) {
+    std::cerr << "ART Darwin DEX: ClassLoader base initialization failed\n";
+    return 4;
+  }
   for (const auto& dex_file : app_dex_files) {
     if (class_linker->RegisterDexFile(*dex_file, app_loader.Get()) == nullptr) {
       std::cerr << "ART Darwin DEX: registration failed\n";

@@ -1,17 +1,31 @@
 package dev.darwinart.probe;
 
 import android.content.AttributionSource;
+import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.ContentCaptureOptions;
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ProbeShortcutManager;
+import android.content.pm.ShortcutManager;
 import android.content.res.Resources;
 import android.os.Looper;
+import android.os.Handler;
+import android.os.Process;
+import android.os.ProbeUserManager;
+import android.os.UserHandle;
+import android.os.UserManager;
 import android.view.autofill.AutofillManager;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 
 public final class ProbeContext extends ContextWrapper {
     private final ApplicationInfo applicationInfo;
@@ -20,6 +34,9 @@ public final class ProbeContext extends ContextWrapper {
     private final Resources resources;
     private final Resources.Theme theme;
     private final PackageManager packageManager;
+    private final SharedPreferences sharedPreferences;
+    private final ShortcutManager shortcutManager;
+    private final UserManager userManager;
     private final String packageName;
     private final ClassLoader classLoader;
     private static volatile ClassLoader applicationClassLoader;
@@ -35,6 +52,9 @@ public final class ProbeContext extends ContextWrapper {
         theme = resources.newTheme();
         this.packageManager = packageManager;
         this.packageName = packageName == null ? "dev.darwinart.probe" : packageName;
+        sharedPreferences = new ProbeSharedPreferences();
+        shortcutManager = new ProbeShortcutManager();
+        userManager = new ProbeUserManager();
         // Capture the PathClassLoader at context construction.  The detached
         // host may later execute Activity/View work on a dedicated Java UI
         // thread, so consulting that thread's mutable context loader would
@@ -54,6 +74,66 @@ public final class ProbeContext extends ContextWrapper {
         return applicationInfo;
     }
 
+    /** Applies the manifest compatibility level before Application.onCreate(). */
+    public void setTargetSdkVersion(int targetSdkVersion) {
+        applicationInfo.targetSdkVersion = targetSdkVersion;
+    }
+
+    /** Installs the target-SDK compatibility delegate normally owned by ActivityThread. */
+    public static void configureCompatibility(int targetSdkVersion) {
+        try {
+            Class<?> compatibility = Class.forName("android.compat.Compatibility");
+            Class<?> delegate = Class.forName(
+                    "android.compat.Compatibility$BehaviorChangeDelegate");
+            Object callbacks = Proxy.newProxyInstance(
+                    delegate.getClassLoader(), new Class<?>[] {delegate},
+                    new CompatibilityHandler(targetSdkVersion));
+            Method install = compatibility.getMethod(
+                    "setBehaviorChangeDelegate", delegate);
+            install.invoke(null, callbacks);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Could not install compatibility callbacks", error);
+        }
+    }
+
+    private static final class CompatibilityHandler implements InvocationHandler {
+        private final int targetSdkVersion;
+
+        CompatibilityHandler(int targetSdkVersion) {
+            this.targetSdkVersion = targetSdkVersion;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) {
+            if ("isChangeEnabled".equals(method.getName())
+                    && args != null && args.length == 1 && args[0] instanceof Long) {
+                long changeId = (Long) args[0];
+                if (changeId == 160794467L) return targetSdkVersion > 30;
+                if (changeId == 236704164L) return targetSdkVersion >= 34;
+                if (changeId == 320664730L) return targetSdkVersion > 34;
+                return true;
+            }
+            return null;
+        }
+    }
+
+    private static final class DefaultServiceHandler implements InvocationHandler {
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) {
+            Class<?> type = method.getReturnType();
+            if (!type.isPrimitive()) return null;
+            if (type == boolean.class) return Boolean.FALSE;
+            if (type == byte.class) return Byte.valueOf((byte) 0);
+            if (type == short.class) return Short.valueOf((short) 0);
+            if (type == char.class) return Character.valueOf((char) 0);
+            if (type == int.class) return Integer.valueOf(0);
+            if (type == long.class) return Long.valueOf(0L);
+            if (type == float.class) return Float.valueOf(0.0f);
+            if (type == double.class) return Double.valueOf(0.0d);
+            return null;
+        }
+    }
+
     @Override
     public Context getApplicationContext() {
         // The detached launcher has no separately constructed Application
@@ -64,9 +144,44 @@ public final class ProbeContext extends ContextWrapper {
     }
 
     @Override
+    public Context createDeviceProtectedStorageContext() {
+        return this;
+    }
+
+    @Override
+    public boolean isDeviceProtectedStorage() {
+        return true;
+    }
+
+    @Override
+    public boolean moveSharedPreferencesFrom(Context sourceContext, String name) {
+        return true;
+    }
+
+    @Override
+    public SharedPreferences getSharedPreferences(String name, int mode) {
+        return sharedPreferences;
+    }
+
+    @Override
     public ContentResolver getContentResolver() {
         return contentResolver;
     }
+
+    @Override
+    public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter) {
+        // A detached app process has no ActivityManager broadcast registry.
+        // Registration succeeds locally; no sticky broadcast is pending.
+        return null;
+    }
+
+    public Intent registerReceiverAsUser(BroadcastReceiver receiver, UserHandle user,
+            IntentFilter filter, String broadcastPermission, Handler scheduler) {
+        return null;
+    }
+
+    @Override
+    public void unregisterReceiver(BroadcastReceiver receiver) {}
 
     @Override
     public AttributionSource getAttributionSource() {
@@ -117,6 +232,33 @@ public final class ProbeContext extends ContextWrapper {
         if (WINDOW_SERVICE.equals(name)) {
             return construct("android.view.WindowManagerImpl");
         }
+        if (ACCESSIBILITY_SERVICE.equals(name)) {
+            try {
+                Class<?> type = Class.forName(
+                        "android.view.accessibility.AccessibilityManager");
+                Method factory = type.getMethod("getInstance", Context.class);
+                return factory.invoke(null, this);
+            } catch (ReflectiveOperationException error) {
+                throw new IllegalStateException(
+                        "Could not construct accessibility manager", error);
+            }
+        }
+        if (SHORTCUT_SERVICE.equals(name)) {
+            return shortcutManager;
+        }
+        if (NOTIFICATION_SERVICE.equals(name)) {
+            return construct("android.app.NotificationManager");
+        }
+        if (USER_SERVICE.equals(name)) {
+            return userManager;
+        }
+        if (VIBRATOR_SERVICE.equals(name)) {
+            return construct("android.os.SystemVibrator");
+        }
+        if (ALARM_SERVICE.equals(name)) {
+            return constructProxyManager("android.app.AlarmManager",
+                    "android.app.IAlarmManager");
+        }
         return null;
     }
 
@@ -134,6 +276,21 @@ public final class ProbeContext extends ContextWrapper {
         }
         if ("android.view.accessibility.AccessibilityManager".equals(className)) {
             return ACCESSIBILITY_SERVICE;
+        }
+        if ("android.content.pm.ShortcutManager".equals(className)) {
+            return SHORTCUT_SERVICE;
+        }
+        if ("android.app.NotificationManager".equals(className)) {
+            return NOTIFICATION_SERVICE;
+        }
+        if ("android.os.UserManager".equals(className)) {
+            return USER_SERVICE;
+        }
+        if ("android.os.Vibrator".equals(className)) {
+            return VIBRATOR_SERVICE;
+        }
+        if ("android.app.AlarmManager".equals(className)) {
+            return ALARM_SERVICE;
         }
         return null;
     }
@@ -190,6 +347,11 @@ public final class ProbeContext extends ContextWrapper {
     }
 
     @Override
+    public String getAttributionTag() {
+        return null;
+    }
+
+    @Override
     public boolean isRestricted() {
         return false;
     }
@@ -206,11 +368,31 @@ public final class ProbeContext extends ContextWrapper {
         return 0;
     }
 
+    // Hidden virtual Context hook used by NotificationManager.
+    public UserHandle getUser() {
+        return Process.myUserHandle();
+    }
+
     private Object construct(String className) {
         try {
             Class<?> type = Class.forName(className);
             Constructor<?> constructor = type.getConstructor(Context.class);
             return constructor.newInstance(this);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Could not construct " + className, error);
+        }
+    }
+
+    private Object constructProxyManager(String className, String interfaceName) {
+        try {
+            Class<?> interfaceType = Class.forName(interfaceName);
+            Object service = Proxy.newProxyInstance(interfaceType.getClassLoader(),
+                    new Class<?>[] {interfaceType}, new DefaultServiceHandler());
+            Class<?> type = Class.forName(className);
+            Constructor<?> constructor = type.getDeclaredConstructor(
+                    interfaceType, Context.class);
+            constructor.setAccessible(true);
+            return constructor.newInstance(service, this);
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException("Could not construct " + className, error);
         }
