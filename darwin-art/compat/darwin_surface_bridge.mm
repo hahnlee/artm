@@ -11,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <new>
+#include <unordered_map>
 
 namespace {
 
@@ -138,13 +139,116 @@ CGFloat WindowScale(bool visible) {
                                                                        : 1.0;
 }
 
+uint32_t AndroidMetaState(NSEventModifierFlags flags) {
+  uint32_t meta = 0;
+  if ((flags & NSEventModifierFlagShift) != 0) meta |= 0x1;
+  if ((flags & NSEventModifierFlagOption) != 0) meta |= 0x2;
+  if ((flags & NSEventModifierFlagFunction) != 0) meta |= 0x8;
+  if ((flags & NSEventModifierFlagControl) != 0) meta |= 0x1000;
+  if ((flags & NSEventModifierFlagCommand) != 0) meta |= 0x10000;
+  if ((flags & NSEventModifierFlagCapsLock) != 0) meta |= 0x100000;
+  return meta;
+}
+
+uint32_t AndroidKeyCode(unsigned short code) {
+  switch (code) {
+    case 0: return 29;  // A
+    case 1: return 47;  // S
+    case 2: return 32;  // D
+    case 3: return 34;  // F
+    case 4: return 36;  // H
+    case 5: return 35;  // G
+    case 6: return 54;  // Z
+    case 7: return 52;  // X
+    case 8: return 31;  // C
+    case 9: return 50;  // V
+    case 11: return 30; // B
+    case 12: return 45; // Q
+    case 13: return 51; // W
+    case 14: return 33; // E
+    case 15: return 46; // R
+    case 16: return 53; // Y
+    case 17: return 48; // T
+    case 18: return 8;  // 1
+    case 19: return 9;  // 2
+    case 20: return 10; // 3
+    case 21: return 11; // 4
+    case 22: return 13; // 6
+    case 23: return 12; // 5
+    case 24: return 70; // =
+    case 25: return 16; // 9
+    case 26: return 14; // 7
+    case 27: return 69; // -
+    case 28: return 15; // 8
+    case 29: return 7;  // 0
+    case 30: return 72; // ]
+    case 31: return 43; // O
+    case 32: return 49; // U
+    case 33: return 71; // [
+    case 34: return 37; // I
+    case 35: return 44; // P
+    case 36: return 66; // ENTER
+    case 37: return 40; // L
+    case 38: return 38; // J
+    case 39: return 75; // '
+    case 40: return 39; // K
+    case 41: return 74; // ;
+    case 42: return 73; // backslash
+    case 43: return 55; // ,
+    case 44: return 76; // /
+    case 45: return 42; // N
+    case 46: return 41; // M
+    case 47: return 56; // .
+    case 48: return 61; // TAB
+    case 49: return 62; // SPACE
+    case 50: return 68; // grave
+    case 51: return 67; // DEL
+    case 53: return 111; // ESCAPE
+    case 54: return 118; // META_RIGHT
+    case 55: return 117; // META_LEFT
+    case 56: return 59;  // SHIFT_LEFT
+    case 57: return 115; // CAPS_LOCK
+    case 58: return 57;  // ALT_LEFT
+    case 59: return 113; // CTRL_LEFT
+    case 60: return 60;  // SHIFT_RIGHT
+    case 61: return 58;  // ALT_RIGHT
+    case 62: return 114; // CTRL_RIGHT
+    case 63: return 119; // FUNCTION
+    case 123: return 21; // DPAD_LEFT
+    case 124: return 22; // DPAD_RIGHT
+    case 125: return 20; // DPAD_DOWN
+    case 126: return 19; // DPAD_UP
+    default: return 0;
+  }
+}
+
+NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
+  switch (code) {
+    case 54:
+    case 55: return NSEventModifierFlagCommand;
+    case 56:
+    case 60: return NSEventModifierFlagShift;
+    case 57: return NSEventModifierFlagCapsLock;
+    case 58:
+    case 61: return NSEventModifierFlagOption;
+    case 59:
+    case 62: return NSEventModifierFlagControl;
+    case 63: return NSEventModifierFlagFunction;
+    default: return 0;
+  }
+}
+
 }  // namespace
 
 @implementation DarwinArtMetalView {
   CAMetalLayer* _metalLayer;
   std::deque<DarwinArtPointerEventV2> _pointerEvents;
+  std::deque<DarwinArtKeyEventV1> _keyEvents;
+  std::unordered_map<unsigned short, uint64_t> _keyDownTimes;
+  std::unordered_map<unsigned short, uint32_t> _keyRepeatCounts;
   BOOL _pointerActive;
   uint64_t _nextPointerSequence;
+  uint64_t _nextKeySequence;
   uint64_t _downTimeNanos;
 }
 
@@ -166,6 +270,7 @@ CGFloat WindowScale(bool visible) {
     self.layer = _metalLayer;
     _pointerActive = NO;
     _nextPointerSequence = 1;
+    _nextKeySequence = 1;
     _downTimeNanos = 0;
   }
   return self;
@@ -262,6 +367,65 @@ CGFloat WindowScale(bool visible) {
   [self enqueuePointerEvent:event action:DARWIN_ART_POINTER_MOVE];
 }
 
+- (void)enqueueKeyEvent:(NSEvent*)event action:(uint32_t)action {
+  const unsigned short scan_code = event.keyCode;
+  const uint32_t key_code = AndroidKeyCode(scan_code);
+  if (key_code == 0) return;
+  const uint64_t event_time_nanos =
+      event.timestamp > 0.0
+          ? static_cast<uint64_t>(event.timestamp * 1000000000.0)
+          : 0;
+  if (action == 0 && !event.isARepeat) {
+    _keyDownTimes[scan_code] = event_time_nanos;
+    _keyRepeatCounts[scan_code] = 0;
+  }
+  const auto down = _keyDownTimes.find(scan_code);
+  const uint64_t down_time_nanos =
+      down == _keyDownTimes.end() ? event_time_nanos : down->second;
+  uint32_t repeat_count = 0;
+  if (action == 0 && event.isARepeat) {
+    repeat_count = ++_keyRepeatCounts[scan_code];
+  }
+  NSString* characters = event.characters;
+  const uint32_t unicode_char =
+      characters.length == 0 ? 0 : [characters characterAtIndex:0];
+  _keyEvents.push_back(DarwinArtKeyEventV1{
+      .version = 1,
+      .size = static_cast<uint32_t>(sizeof(DarwinArtKeyEventV1)),
+      .action = action,
+      .flags = 0,
+      .sequence = _nextKeySequence++,
+      .event_time_nanos = event_time_nanos,
+      .down_time_nanos = down_time_nanos,
+      .key_code = key_code,
+      .scan_code = scan_code,
+      .meta_state = AndroidMetaState(event.modifierFlags),
+      .repeat_count = repeat_count,
+      .device_id = 1,
+      .source = 0x101,
+      .unicode_char = unicode_char,
+  });
+  if (action == 1) {
+    _keyDownTimes.erase(scan_code);
+    _keyRepeatCounts.erase(scan_code);
+  }
+}
+
+- (void)keyDown:(NSEvent*)event {
+  [self enqueueKeyEvent:event action:0];
+}
+
+- (void)keyUp:(NSEvent*)event {
+  [self enqueueKeyEvent:event action:1];
+}
+
+- (void)flagsChanged:(NSEvent*)event {
+  const NSEventModifierFlags flag = ModifierFlagForKey(event.keyCode);
+  if (flag == 0) return;
+  const uint32_t action = (event.modifierFlags & flag) != 0 ? 0 : 1;
+  [self enqueueKeyEvent:event action:action];
+}
+
 - (BOOL)nextPointerEvent:(DarwinArtPointerEvent*)outEvent {
   DarwinArtPointerEventV2 event = {};
   if (![self nextPointerEventV2:&event] || outEvent == nullptr) return NO;
@@ -274,6 +438,13 @@ CGFloat WindowScale(bool visible) {
   if (outEvent == nullptr || _pointerEvents.empty()) return NO;
   *outEvent = _pointerEvents.front();
   _pointerEvents.pop_front();
+  return YES;
+}
+
+- (BOOL)nextKeyEventV1:(DarwinArtKeyEventV1*)outEvent {
+  if (outEvent == nullptr || _keyEvents.empty()) return NO;
+  *outEvent = _keyEvents.front();
+  _keyEvents.pop_front();
   return YES;
 }
 
@@ -644,6 +815,16 @@ DarwinArtSurfaceResult darwin_art_surface_resize(
   return ResizeSurfaceBacking(surface, width, height, true);
 }
 
+DarwinArtSurfaceResult darwin_art_surface_set_title(
+    DarwinArtSurface* surface, const char* title) {
+  if (!IsMainThread()) return DARWIN_ART_SURFACE_NOT_MAIN_THREAD;
+  if (surface == nullptr || title == nullptr || title[0] == '\0') {
+    return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+  }
+  if (surface->window != nil) surface->window.title = WindowTitle(title);
+  return DARWIN_ART_SURFACE_OK;
+}
+
 bool darwin_art_surface_get_size(DarwinArtSurface* surface,
                                  uint32_t* width, uint32_t* height) {
   if (surface == nullptr || width == nullptr || height == nullptr) return false;
@@ -815,6 +996,15 @@ bool darwin_art_surface_next_pointer_event_v2(
     return false;
   }
   return [surface->view nextPointerEventV2:out_event] == YES;
+}
+
+bool darwin_art_surface_next_key_event_v1(
+    DarwinArtSurface* surface,
+    DarwinArtKeyEventV1* out_event) {
+  if (!IsMainThread() || surface == nullptr || out_event == nullptr) {
+    return false;
+  }
+  return [surface->view nextKeyEventV1:out_event] == YES;
 }
 
 DarwinArtSurfaceResult darwin_art_surface_destroy(

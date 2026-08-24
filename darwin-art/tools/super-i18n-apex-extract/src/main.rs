@@ -9,7 +9,7 @@ const GPT_SIGNATURE: &[u8; 8] = b"EFI PART";
 const LP_GEOMETRY_MAGIC: u32 = 0x616c_4467;
 const LP_HEADER_MAGIC: u32 = 0x414c_5030;
 const EROFS_MAGIC: u32 = 0xe0f5_e1e2;
-const TARGET: &[&[u8]] = &[b"system", b"apex", b"com.android.i18n.apex"];
+const DEFAULT_APEX_NAME: &str = "com.android.i18n.apex";
 const MAX_TABLE_BYTES: usize = 1024 * 1024;
 const MAX_APEX_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_PCLUSTER_BYTES: usize = 1024 * 1024;
@@ -467,9 +467,16 @@ impl<'a> Erofs<'a> {
         ))
         .into())
     }
-    fn target(&mut self) -> Result<Inode> {
+    fn target(&mut self, apex_name: &str) -> Result<Inode> {
+        if apex_name.is_empty()
+            || apex_name == "."
+            || apex_name == ".."
+            || apex_name.as_bytes().contains(&b'/')
+        {
+            return Err(invalid("target APEX name must be one normalized path component").into());
+        }
         let mut inode = self.inode(self.root)?;
-        for component in TARGET {
+        for component in [b"system".as_slice(), b"apex".as_slice(), apex_name.as_bytes()] {
             inode = self.child(&inode, component)?;
         }
         if inode.mode & 0xf000 != 0x8000 {
@@ -892,7 +899,7 @@ fn run() -> Result<()> {
     let program = args.next().unwrap_or_default();
     let input = args.next().map(PathBuf::from).ok_or_else(|| {
         invalid(format!(
-            "usage: {} INPUT-system.img OUTPUT.apex",
+            "usage: {} INPUT-system.img OUTPUT.apex [APEX_NAME]",
             PathBuf::from(program).display()
         ))
     })?;
@@ -900,6 +907,10 @@ fn run() -> Result<()> {
         .next()
         .map(PathBuf::from)
         .ok_or_else(|| invalid("missing OUTPUT.apex"))?;
+    let apex_name = args
+        .next()
+        .and_then(|value| value.into_string().ok())
+        .unwrap_or_else(|| DEFAULT_APEX_NAME.to_owned());
     if args.next().is_some() {
         return Err(invalid("too many arguments").into());
     }
@@ -914,7 +925,7 @@ fn run() -> Result<()> {
         bytes: 0,
     };
     let mut fs = Erofs::open(view)?;
-    let inode = fs.target()?;
+    let inode = fs.target(&apex_name)?;
     let (bytes, digest, pclusters) = extract(&mut fs, &inode, &output)?;
     println!(
         "super-i18n-apex-extract: input={} output={}",
@@ -937,8 +948,8 @@ fn run() -> Result<()> {
         fs.block, fs.incompat, inode.nid, inode.compressed_blocks, pclusters
     );
     println!(
-        "target.path=/system/apex/com.android.i18n.apex target.bytes={bytes} target.sha256={}",
-        hex(&digest)
+        "target.path=/system/apex/{apex_name} target.bytes={bytes} target.sha256={}",
+        hex(&digest),
     );
     println!(
         "io.physical_reads={} io.physical_bytes={}",

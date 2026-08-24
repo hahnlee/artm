@@ -35,6 +35,7 @@ pub(crate) fn validate_runtime_link(
             "_darwin_art_surface_pump_events",
             "_darwin_art_surface_next_pointer_event",
             "_darwin_art_surface_next_pointer_event_v2",
+            "_darwin_art_surface_next_key_event_v1",
             "_darwin_art_surface_destroy",
             "_darwin_art_provider_install_hooks",
             "_darwin_art_provider_clear_hooks",

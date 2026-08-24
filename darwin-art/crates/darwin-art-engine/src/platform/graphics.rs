@@ -1,8 +1,8 @@
 use super::abi::EngineSymbols;
 use darwin_art_engine_sys::{
-    GraphicsSessionCloseFn, GraphicsSessionDestroyFn, GraphicsSessionDispatchPointerFn,
-    GraphicsSessionDispatchPointerV2Fn, GraphicsSessionHandle, GraphicsSessionPumpFrameFn,
-    PointerEventV2,
+    GraphicsSessionCloseFn, GraphicsSessionDestroyFn, GraphicsSessionDispatchKeyV1Fn,
+    GraphicsSessionDispatchPointerFn, GraphicsSessionDispatchPointerV2Fn, GraphicsSessionHandle,
+    GraphicsSessionPumpFrameFn, KeyEventV1, PointerEventV2,
 };
 use darwin_art_runtime::NativeResource;
 use std::ptr::NonNull;
@@ -17,6 +17,7 @@ pub struct GraphicsSession {
     destroy_fn: GraphicsSessionDestroyFn,
     dispatch_fn: GraphicsSessionDispatchPointerFn,
     dispatch_v2_fn: Option<GraphicsSessionDispatchPointerV2Fn>,
+    dispatch_key_v1_fn: Option<GraphicsSessionDispatchKeyV1Fn>,
     pump_fn: GraphicsSessionPumpFrameFn,
     closed: bool,
     close_attempted: bool,
@@ -45,6 +46,7 @@ impl GraphicsSession {
             destroy_fn,
             dispatch_fn,
             dispatch_v2_fn: symbols.graphics.dispatch_pointer_v2,
+            dispatch_key_v1_fn: symbols.graphics.dispatch_key_v1,
             pump_fn,
             closed: false,
             close_attempted: false,
@@ -95,6 +97,17 @@ impl GraphicsSession {
         } else {
             self.dispatch_pointer(event.action, event.x, event.y)
         }
+    }
+
+    pub fn dispatch_key_v1(&self, event: &KeyEventV1) -> i32 {
+        let Some(handle) = self.handle.filter(|_| !self.closed) else {
+            return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+        };
+        let Some(dispatch) = self.dispatch_key_v1_fn else {
+            return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+        };
+        // SAFETY: event is borrowed for the synchronous foreign call.
+        unsafe { dispatch(handle.as_ptr(), event) }
     }
 
     pub fn pump_frame(&self, frame_time_nanos: i64) -> i32 {

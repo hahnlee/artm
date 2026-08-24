@@ -25,6 +25,7 @@ namespace darwin_art_graphics {
 struct GraphicsState {
   jclass probe_canvas_class = nullptr;
   jobject interactive_root = nullptr;
+  jobject interactive_view_root = nullptr;
   jobject hardware_context = nullptr;
   jobject gpu_render_node = nullptr;
   bool gpu_render_node_recorded = false;
@@ -33,11 +34,20 @@ struct GraphicsState {
   jfloat gpu_ripple_overlay_y = 0.0f;
   std::chrono::steady_clock::time_point gpu_ripple_overlay_started{};
   jobject pressed_view = nullptr;
+  jobject pointer_dispatch_root = nullptr;
+  jobject pointer_dispatch_view_root = nullptr;
+  jfloat pointer_dispatch_offset_x = 0.0f;
+  jfloat pointer_dispatch_offset_y = 0.0f;
+  bool pointer_dispatch_is_window = false;
   uint32_t pending_pressed_action = 0;
   jfloat pending_pressed_x = 0.0f;
   jfloat pending_pressed_y = 0.0f;
   int64_t pointer_down_time_nanos = 0;
   bool pointer_stream_active = false;
+  jfloat pointer_down_x = 0.0f;
+  jfloat pointer_down_y = 0.0f;
+  jint pointer_touch_slop = 8;
+  bool pointer_click_candidate = false;
   jint interactive_width = 0;
   jint interactive_height = 0;
   // Borrowed from the surface owner. GraphicsState never destroys this.
@@ -59,6 +69,8 @@ struct GraphicsState {
 void set_probe_canvas_class(GraphicsState* state, JNIEnv* env, jclass canvas_class);
 bool retain_interactive_root(GraphicsState* state, JNIEnv* env, jobject root,
                              jint width, jint height);
+bool retain_interactive_view_root(GraphicsState* state, JNIEnv* env,
+                                  jobject view_root);
 bool retain_hardware_context(GraphicsState* state, JNIEnv* env, jobject context);
 void shutdown(GraphicsState* state, JNIEnv* env);
 

@@ -10,6 +10,7 @@ struct GraphicsState;
 // run on the attached Android UI thread, so create the drawable owner before
 // handing Java ownership to that thread.
 int prepare_gpu_surface(GraphicsState* state, jint width, jint height);
+int refresh_gpu_surface_identity(GraphicsState* state);
 
 // ViewRootImpl/AttachInfo must be created on the Android owner thread. The
 // Metal RenderThread may call present_gpu_content later, but it must only

@@ -55,6 +55,111 @@ bool view_subtree_needs_recording(JNIEnv* env, jobject view, jclass group_class,
   return env->ExceptionCheck();
 }
 
+bool draw_window_manager_layers(JNIEnv* env, jobject canvas,
+                                jclass view_class, jmethodID draw,
+                                jclass animation_host_class,
+                                jmethodID invalidate_view_tree) {
+  jclass global_class = env->FindClass("android/view/WindowManagerGlobal");
+  jmethodID get_instance =
+      global_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(global_class, "getInstance",
+                                   "()Landroid/view/WindowManagerGlobal;");
+  jobject global = get_instance == nullptr
+                       ? nullptr
+                       : env->CallStaticObjectMethod(global_class, get_instance);
+  jfieldID views_field =
+      global_class == nullptr
+          ? nullptr
+          : env->GetFieldID(global_class, "mViews", "Ljava/util/ArrayList;");
+  jfieldID params_field =
+      global_class == nullptr
+          ? nullptr
+          : env->GetFieldID(global_class, "mParams", "Ljava/util/ArrayList;");
+  jobject views = global == nullptr || views_field == nullptr
+                      ? nullptr
+                      : env->GetObjectField(global, views_field);
+  jobject params = global == nullptr || params_field == nullptr
+                       ? nullptr
+                       : env->GetObjectField(global, params_field);
+  jclass list_class = env->FindClass("java/util/ArrayList");
+  jmethodID list_size = list_class == nullptr
+                            ? nullptr
+                            : env->GetMethodID(list_class, "size", "()I");
+  jmethodID list_get =
+      list_class == nullptr
+          ? nullptr
+          : env->GetMethodID(list_class, "get", "(I)Ljava/lang/Object;");
+  jclass params_class = env->FindClass("android/view/WindowManager$LayoutParams");
+  jfieldID params_x = params_class == nullptr
+                          ? nullptr
+                          : env->GetFieldID(params_class, "x", "I");
+  jfieldID params_y = params_class == nullptr
+                          ? nullptr
+                          : env->GetFieldID(params_class, "y", "I");
+  jmethodID get_width = view_class == nullptr
+                            ? nullptr
+                            : env->GetMethodID(view_class, "getWidth", "()I");
+  jmethodID get_height = view_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(view_class, "getHeight", "()I");
+  jclass canvas_class = env->FindClass("android/graphics/Canvas");
+  jmethodID save = canvas_class == nullptr
+                       ? nullptr
+                       : env->GetMethodID(canvas_class, "save", "()I");
+  jmethodID translate =
+      canvas_class == nullptr
+          ? nullptr
+          : env->GetMethodID(canvas_class, "translate", "(FF)V");
+  jmethodID clip_rect =
+      canvas_class == nullptr
+          ? nullptr
+          : env->GetMethodID(canvas_class, "clipRect", "(FFFF)Z");
+  jmethodID restore =
+      canvas_class == nullptr
+          ? nullptr
+          : env->GetMethodID(canvas_class, "restoreToCount", "(I)V");
+  bool ok = global != nullptr && views != nullptr && params != nullptr &&
+            list_size != nullptr && list_get != nullptr && params_x != nullptr &&
+            params_y != nullptr && get_width != nullptr && get_height != nullptr &&
+            save != nullptr && translate != nullptr && clip_rect != nullptr &&
+            restore != nullptr && draw != nullptr && !env->ExceptionCheck();
+  const jint count = ok ? env->CallIntMethod(views, list_size) : 0;
+  for (jint index = 0; ok && index < count; ++index) {
+    jobject layer = env->CallObjectMethod(views, list_get, index);
+    jobject layout_params = env->CallObjectMethod(params, list_get, index);
+    const jint layer_width = layer == nullptr ? 0 : env->CallIntMethod(layer, get_width);
+    const jint layer_height = layer == nullptr ? 0 : env->CallIntMethod(layer, get_height);
+    if (layer != nullptr && layout_params != nullptr && layer_width > 0 &&
+        layer_height > 0 && !env->ExceptionCheck()) {
+      if (invalidate_view_tree != nullptr && animation_host_class != nullptr) {
+        env->CallStaticVoidMethod(animation_host_class, invalidate_view_tree, layer);
+      }
+      const jint restore_count = env->CallIntMethod(canvas, save);
+      env->CallVoidMethod(canvas, translate,
+                          static_cast<jfloat>(env->GetIntField(layout_params, params_x)),
+                          static_cast<jfloat>(env->GetIntField(layout_params, params_y)));
+      env->CallBooleanMethod(canvas, clip_rect, 0.0f, 0.0f,
+                             static_cast<jfloat>(layer_width),
+                             static_cast<jfloat>(layer_height));
+      env->CallVoidMethod(layer, draw, canvas);
+      env->CallVoidMethod(canvas, restore, restore_count);
+    }
+    if (layout_params != nullptr) env->DeleteLocalRef(layout_params);
+    if (layer != nullptr) env->DeleteLocalRef(layer);
+    ok = !env->ExceptionCheck();
+  }
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  if (canvas_class != nullptr) env->DeleteLocalRef(canvas_class);
+  if (params_class != nullptr) env->DeleteLocalRef(params_class);
+  if (list_class != nullptr) env->DeleteLocalRef(list_class);
+  if (params != nullptr) env->DeleteLocalRef(params);
+  if (views != nullptr) env->DeleteLocalRef(views);
+  if (global != nullptr) env->DeleteLocalRef(global);
+  if (global_class != nullptr) env->DeleteLocalRef(global_class);
+  return ok;
+}
+
 }  // namespace
 
 int prepare_gpu_surface(GraphicsState* state, jint width, jint height) {
@@ -79,6 +184,14 @@ int prepare_gpu_surface(GraphicsState* state, jint width, jint height) {
   }
   darwin_art_surface_set_active_gpu(state->gpu_surface);
   return 0;
+}
+
+int refresh_gpu_surface_identity(GraphicsState* state) {
+  if (state == nullptr || state->gpu_surface == nullptr) return 1;
+  const char* app_label = std::getenv("DARWIN_ART_APK_APP_LABEL");
+  if (app_label == nullptr || app_label[0] == '\0') return 0;
+  return static_cast<int>(
+      darwin_art_surface_set_title(state->gpu_surface, app_label));
 }
 
 jboolean attach_hardware_hierarchy_on_owner(GraphicsState* state, JNIEnv* env,
@@ -353,13 +466,22 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     env->DeleteLocalRef(node);
     env->DeleteLocalRef(node_name);
   }
-  // Supply only Android's AttachInfo bookkeeping to the detached hierarchy.
-  // ProbeAnimationHost deliberately does not dispatch the full ViewRoot
-  // attach lifecycle (there is no window session or traversal thread), but
-  // ViewGroup child recording still needs mAttachInfo to take the normal
-  // hardware path. This is a one-time owner-thread operation.
+  // APK windows are attached by WindowManagerGlobal/ViewRootImpl and must
+  // retain that authoritative AttachInfo. Only legacy standalone widget
+  // probes use the bounded synthetic attachment helper.
+  jclass attached_view_class = env->FindClass("android/view/View");
+  jmethodID is_attached_to_window =
+      attached_view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(attached_view_class, "isAttachedToWindow", "()Z");
+  const bool has_real_view_root =
+      is_attached_to_window != nullptr && !env->ExceptionCheck() &&
+      env->CallBooleanMethod(view, is_attached_to_window) == JNI_TRUE;
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  env->DeleteLocalRef(attached_view_class);
   if (state->gpu_render_node != nullptr && state->hardware_context != nullptr &&
-      !state->gpu_render_node_recorded) {
+      !state->gpu_render_node_recorded && !has_real_view_root &&
+      state->interactive_view_root == nullptr) {
     attach_hardware_hierarchy_on_owner(state, env, view);
   }
   jobject java_canvas =
@@ -551,7 +673,12 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   }
   env->CallVoidMethod(view, draw, java_canvas);
   dump_pending_exception("View.draw");
-  const bool draw_ok = !env->ExceptionCheck();
+  const bool layers_ok = !env->ExceptionCheck() &&
+                         draw_window_manager_layers(
+                             env, java_canvas, view_class, draw,
+                             animation_host_class, invalidate_view_tree);
+  dump_pending_exception("WindowManager layers");
+  const bool draw_ok = layers_ok && !env->ExceptionCheck();
   const bool recording_ok = finish_recording();
   env->DeleteLocalRef(view_class);
   env->DeleteLocalRef(java_canvas);
@@ -618,6 +745,7 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
 }
 #else
 int prepare_gpu_surface(GraphicsState*, jint, jint) { return 0; }
+int refresh_gpu_surface_identity(GraphicsState*) { return 0; }
 #endif
 
 #if !defined(DARWIN_ART_REAL_GRAPHICS)

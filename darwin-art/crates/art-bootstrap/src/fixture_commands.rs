@@ -197,6 +197,7 @@ pub(crate) fn probe_runtime_dex_flavor_impl(
                 "DARWIN_ART_APK_APP_SUPPORT_DEX",
                 root.join("_build/button-dex/dex/classes.dex"),
             )
+            .env("DARWIN_ART_APK_APP_RESOURCE_APK", &classes_dex)
             .env("DARWIN_ART_FRAMEWORK_RES_APK", framework_res);
         // The headless gate proves APK/Activity/resource/native loading;
         // pointer hit-testing is a window-only contract.  Do not install the

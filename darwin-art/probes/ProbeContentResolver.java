@@ -3,13 +3,18 @@ package dev.darwinart.probe;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.IContentProvider;
+import android.content.ContentProvider;
+import android.content.pm.ProviderInfo;
 import android.database.MatrixCursor;
 import android.os.Bundle;
+import android.provider.CalendarContract;
 
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 
 final class ProbeContentResolver extends ContentResolver {
     private final IContentProvider settingsProvider;
+    private final IContentProvider calendarProvider;
 
     ProbeContentResolver(Context context) {
         super(context);
@@ -19,7 +24,10 @@ final class ProbeContentResolver extends ContentResolver {
                 (proxy, method, args) -> {
                     if (method.getName().equals("call")) {
                         Bundle result = new Bundle();
-                        result.putString("value", "1");
+                        // An absent Android settings row is represented by a
+                        // Bundle with no value. Returning a universal "1"
+                        // corrupts typed settings such as SQLite's comma-
+                        // separated compatibility flags.
                         return result;
                     }
                     if (method.getName().equals("query")) {
@@ -28,7 +36,6 @@ final class ProbeContentResolver extends ContentResolver {
                             for (Object arg : args) {
                                 if (arg instanceof String[]) {
                                     projection = (String[]) arg;
-                                    break;
                                 }
                             }
                         }
@@ -45,13 +52,31 @@ final class ProbeContentResolver extends ContentResolver {
                     if (returnType == long.class) return 0L;
                     return null;
                 });
+        calendarProvider = attachCalendarProvider(context);
+    }
+
+    private static IContentProvider attachCalendarProvider(Context context) {
+        try {
+            ProbeCalendarProvider provider = new ProbeCalendarProvider();
+            ProviderInfo info = new ProviderInfo();
+            info.authority = CalendarContract.AUTHORITY;
+            info.exported = true;
+            provider.attachInfo(context, info);
+            Method transport = ContentProvider.class.getDeclaredMethod("getIContentProvider");
+            transport.setAccessible(true);
+            return (IContentProvider) transport.invoke(provider);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Could not attach Calendar provider", error);
+        }
     }
 
     protected IContentProvider acquireProvider(Context context, String name) {
+        if (CalendarContract.AUTHORITY.equals(name)) return calendarProvider;
         return settingsProvider;
     }
 
     protected IContentProvider acquireUnstableProvider(Context context, String name) {
+        if (CalendarContract.AUTHORITY.equals(name)) return calendarProvider;
         return settingsProvider;
     }
 

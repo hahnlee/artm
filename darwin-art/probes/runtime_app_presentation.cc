@@ -5,6 +5,7 @@
 
 #include "runtime_graphics_phase.h"
 #include "runtime_graphics_gpu.h"
+#include "runtime_graphics_state.h"
 #include "runtime_jni_scope.h"
 #include "runtime_app_resources.h"
 #include "runtime_app_activity.h"
@@ -12,6 +13,129 @@
 #include "thread-current-inl.h"
 
 namespace darwin_art_presentation {
+
+namespace {
+
+bool attach_android_window(JNIEnv* env, jobject activity, jobject window,
+                           jobject decor_view, jobject window_attributes,
+                           darwin_art_graphics::GraphicsState* graphics_state) {
+  if (env == nullptr || activity == nullptr || window == nullptr ||
+      decor_view == nullptr || window_attributes == nullptr ||
+      graphics_state == nullptr) {
+    return false;
+  }
+  jclass activity_class = env->GetObjectClass(activity);
+  jmethodID get_display =
+      activity_class == nullptr
+          ? nullptr
+          : env->GetMethodID(activity_class, "getDisplay",
+                             "()Landroid/view/Display;");
+  jobject display =
+      get_display == nullptr ? nullptr : env->CallObjectMethod(activity, get_display);
+  jclass params_class =
+      env->FindClass("android/view/WindowManager$LayoutParams");
+  jfieldID flags_field = params_class == nullptr
+                             ? nullptr
+                             : env->GetFieldID(params_class, "flags", "I");
+  if (flags_field != nullptr && !env->ExceptionCheck()) {
+    // The Darwin compatibility runtime owns the Metal RenderNode target.  A
+    // framework ThreadedRenderer would try to allocate a second Android
+    // SurfaceControl, so keep ViewRoot's traversal/input lifecycle while the
+    // existing HWUI owner performs the sole GPU submission.
+    constexpr jint kFlagHardwareAccelerated = 0x01000000;
+    const jint flags = env->GetIntField(window_attributes, flags_field);
+    env->SetIntField(window_attributes, flags_field,
+                     flags & ~kFlagHardwareAccelerated);
+  }
+  jclass global_class = env->FindClass("android/view/WindowManagerGlobal");
+  jmethodID get_instance =
+      global_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(global_class, "getInstance",
+                                   "()Landroid/view/WindowManagerGlobal;");
+  jobject global =
+      get_instance == nullptr
+          ? nullptr
+          : env->CallStaticObjectMethod(global_class, get_instance);
+  jmethodID add_view =
+      global_class == nullptr
+          ? nullptr
+          : env->GetMethodID(
+                global_class, "addView",
+                "(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;"
+                "Landroid/view/Display;Landroid/view/Window;I)V");
+  if (display == nullptr || global == nullptr || add_view == nullptr ||
+      env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(global);
+    env->DeleteLocalRef(global_class);
+    env->DeleteLocalRef(params_class);
+    env->DeleteLocalRef(display);
+    env->DeleteLocalRef(activity_class);
+    return false;
+  }
+  env->CallVoidMethod(global, add_view, decor_view, window_attributes, display,
+                      window, static_cast<jint>(0));
+  if (env->ExceptionCheck()) {
+    std::cerr << "ART Android window: WindowManagerGlobal.addView failed\n";
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+    env->DeleteLocalRef(global);
+    env->DeleteLocalRef(global_class);
+    env->DeleteLocalRef(params_class);
+    env->DeleteLocalRef(display);
+    env->DeleteLocalRef(activity_class);
+    return false;
+  }
+
+  jfieldID views_field =
+      env->GetFieldID(global_class, "mViews", "Ljava/util/ArrayList;");
+  jfieldID roots_field =
+      env->GetFieldID(global_class, "mRoots", "Ljava/util/ArrayList;");
+  jobject views = views_field == nullptr ? nullptr
+                                         : env->GetObjectField(global, views_field);
+  jobject roots = roots_field == nullptr ? nullptr
+                                         : env->GetObjectField(global, roots_field);
+  jclass list_class = env->FindClass("java/util/ArrayList");
+  jmethodID size = list_class == nullptr
+                       ? nullptr
+                       : env->GetMethodID(list_class, "size", "()I");
+  jmethodID get = list_class == nullptr
+                      ? nullptr
+                      : env->GetMethodID(list_class, "get",
+                                         "(I)Ljava/lang/Object;");
+  jobject view_root = nullptr;
+  if (views != nullptr && roots != nullptr && size != nullptr && get != nullptr &&
+      !env->ExceptionCheck()) {
+    const jint count = env->CallIntMethod(views, size);
+    for (jint index = count - 1; index >= 0 && !env->ExceptionCheck(); --index) {
+      jobject candidate = env->CallObjectMethod(views, get, index);
+      const bool matches = candidate != nullptr &&
+                           env->IsSameObject(candidate, decor_view) == JNI_TRUE;
+      env->DeleteLocalRef(candidate);
+      if (matches) {
+        view_root = env->CallObjectMethod(roots, get, index);
+        break;
+      }
+    }
+  }
+  const bool retained =
+      view_root != nullptr && !env->ExceptionCheck() &&
+      darwin_art_graphics::retain_interactive_view_root(
+          graphics_state, env, view_root);
+  env->DeleteLocalRef(view_root);
+  env->DeleteLocalRef(list_class);
+  env->DeleteLocalRef(roots);
+  env->DeleteLocalRef(views);
+  env->DeleteLocalRef(global);
+  env->DeleteLocalRef(global_class);
+  env->DeleteLocalRef(params_class);
+  env->DeleteLocalRef(display);
+  env->DeleteLocalRef(activity_class);
+  return retained && !env->ExceptionCheck();
+}
+
+}  // namespace
 
 int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
          jclass probe_activity_class, jclass probe_context_class,
@@ -114,42 +238,28 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   jobject probe_theme = activity.probe_theme;
   jobject probe_resources = resources.probe_resources;
 
-  // A detached hierarchy should observe accessibility as disabled until the
-  // Darwin service bridge exists. Seed the framework singleton without
-  // invoking its Binder-backed constructor.
+  // Construct the real framework singleton against the process-local
+  // accessibility Binder. Popup ViewRoots register listeners in its internal
+  // maps, so an AllocObject shell is not a valid ContextImpl substitute.
   jclass accessibility_class =
       env->FindClass("android/view/accessibility/AccessibilityManager");
-  jobject accessibility =
-      accessibility_class == nullptr ? nullptr : env->AllocObject(accessibility_class);
-  jclass object_class = env->FindClass("java/lang/Object");
-  jmethodID object_constructor =
-      object_class == nullptr
-          ? nullptr
-          : env->GetMethodID(object_class, "<init>", "()V");
-  jobject accessibility_lock =
-      object_constructor == nullptr
-          ? nullptr
-          : env->NewObject(object_class, object_constructor);
-  jfieldID accessibility_lock_field =
+  jmethodID get_accessibility_instance =
       accessibility_class == nullptr
           ? nullptr
-          : env->GetFieldID(accessibility_class, "mLock", "Ljava/lang/Object;");
-  jfieldID accessibility_instance =
-      accessibility_class == nullptr
-          ? nullptr
-          : env->GetStaticFieldID(
-                accessibility_class, "sInstance",
+          : env->GetStaticMethodID(
+                accessibility_class, "getInstance",
+                "(Landroid/content/Context;)"
                 "Landroid/view/accessibility/AccessibilityManager;");
-  if (accessibility == nullptr || accessibility_lock == nullptr ||
-      accessibility_lock_field == nullptr || accessibility_instance == nullptr ||
-      env->ExceptionCheck()) {
+  jobject accessibility =
+      get_accessibility_instance == nullptr
+          ? nullptr
+          : env->CallStaticObjectMethod(accessibility_class,
+                                        get_accessibility_instance,
+                                        activity.probe_context);
+  if (accessibility == nullptr || env->ExceptionCheck()) {
     std::cerr << "ART Android window: accessibility stub setup failed\n";
     return 31;
   }
-  env->SetObjectField(accessibility, accessibility_lock_field,
-                      accessibility_lock);
-  env->SetStaticObjectField(accessibility_class, accessibility_instance,
-                            accessibility);
 
   jmethodID get_window_attributes =
       window_class == nullptr
@@ -170,12 +280,45 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
                 "(Landroid/content/Context;I"
                 "Lcom/android/internal/policy/PhoneWindow;"
                 "Landroid/view/WindowManager$LayoutParams;)V");
-  jobject decor_view =
-      decor_view_constructor == nullptr || window_attributes == nullptr
-          ? nullptr
-          : env->NewObject(decor_view_class, decor_view_constructor,
-                           activity_instance, static_cast<jint>(-1), window,
-                           window_attributes);
+  jobject decor_view = nullptr;
+  jobject content_root = nullptr;
+  if (run_apk_app) {
+    // Let PhoneWindow install the framework decor selected by the APK theme.
+    // This is what requests FEATURE_ACTION_BAR and creates DecorContentParent;
+    // constructing DecorView directly leaves Activity.getActionBar() null.
+    jmethodID get_decor_view =
+        window_class == nullptr
+            ? nullptr
+            : env->GetMethodID(window_class, "getDecorView",
+                               "()Landroid/view/View;");
+    jmethodID find_view_by_id =
+        window_class == nullptr
+            ? nullptr
+            : env->GetMethodID(window_class, "findViewById",
+                               "(I)Landroid/view/View;");
+    jclass framework_id_class = env->FindClass("android/R$id");
+    jfieldID content_id =
+        framework_id_class == nullptr
+            ? nullptr
+            : env->GetStaticFieldID(framework_id_class, "content", "I");
+    if (get_decor_view != nullptr && find_view_by_id != nullptr &&
+        content_id != nullptr && !env->ExceptionCheck()) {
+      decor_view = env->CallObjectMethod(window, get_decor_view);
+      if (!env->ExceptionCheck()) {
+        content_root = env->CallObjectMethod(
+            window, find_view_by_id,
+            env->GetStaticIntField(framework_id_class, content_id));
+      }
+    }
+    env->DeleteLocalRef(framework_id_class);
+  } else {
+    decor_view =
+        decor_view_constructor == nullptr || window_attributes == nullptr
+            ? nullptr
+            : env->NewObject(decor_view_class, decor_view_constructor,
+                             activity_instance, static_cast<jint>(-1), window,
+                             window_attributes);
+  }
   // PhoneWindow.installDecor() normally resolves windowBackground from the
   // active Theme and installs it on DecorView. The standalone launcher builds
   // the same objects directly, so preserve that framework-owned resource path
@@ -240,11 +383,13 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
           ? nullptr
           : env->GetMethodID(content_root_class, "<init>",
                              "(Landroid/content/Context;)V");
-  jobject content_root =
-      content_root_constructor == nullptr
-          ? nullptr
-          : env->NewObject(content_root_class, content_root_constructor,
-                           activity_instance);
+  if (!run_apk_app) {
+    content_root =
+        content_root_constructor == nullptr
+            ? nullptr
+            : env->NewObject(content_root_class, content_root_constructor,
+                             activity_instance);
+  }
   jmethodID add_view =
       decor_view_class == nullptr
           ? nullptr
@@ -271,9 +416,11 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
     }
     return 31;
   }
-  env->CallVoidMethod(decor_view, add_view, content_root);
-  env->SetObjectField(window, phone_decor, decor_view);
-  env->SetObjectField(window, phone_content_parent, content_root);
+  if (!run_apk_app) {
+    env->CallVoidMethod(decor_view, add_view, content_root);
+    env->SetObjectField(window, phone_decor, decor_view);
+    env->SetObjectField(window, phone_content_parent, content_root);
+  }
   if (env->ExceptionCheck()) {
     std::cerr << "ART Android window: DecorView attachment threw\n"
               << self->GetException()->Dump() << "\n";
@@ -421,6 +568,12 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
       return 31;
     }
   }
+  if (run_apk_app &&
+      !attach_android_window(env, activity_instance, window, decor_view,
+                             window_attributes, graphics_state)) {
+    std::cerr << "ART Android window: real ViewRoot attachment failed\n";
+    return 31;
+  }
   // A real ViewRootImpl performs the final DecorView layout before input
   // dispatch.  The detached launcher has no ViewRoot, so mirror that one
   // ownership step explicitly; without it DecorView remains 0x0 even though
@@ -478,8 +631,6 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   env->DeleteLocalRef(decor_view);
   env->DeleteLocalRef(decor_view_class);
   env->DeleteLocalRef(window_attributes);
-  env->DeleteLocalRef(accessibility_lock);
-  env->DeleteLocalRef(object_class);
   env->DeleteLocalRef(accessibility);
   env->DeleteLocalRef(accessibility_class);
   env->DeleteLocalRef(probe_view);

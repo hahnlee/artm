@@ -385,6 +385,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_destroy")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_dispatch_pointer")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_dispatch_pointer_v2")
+        .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_dispatch_key_v1")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_pump_frame")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_resize")
@@ -396,6 +397,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event_v2")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_next_key_event_v1")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_gpu_active_canvas")
@@ -534,6 +536,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .args([
             "-L/opt/homebrew/lib",
             "-llz4",
+            "-lsqlite3",
             "-lz",
             "-framework",
             "CoreFoundation",

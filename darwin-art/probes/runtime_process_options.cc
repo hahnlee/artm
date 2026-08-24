@@ -108,6 +108,7 @@ int LoadProcessOptions(ProcessOptions* options, std::string* error) {
   options->apk_app_activity = Env("DARWIN_ART_APK_APP_ACTIVITY");
   options->apk_app_descriptor = Env("DARWIN_ART_APK_APP_DESCRIPTOR");
   options->apk_app_support_dex = Env("DARWIN_ART_APK_APP_SUPPORT_DEX");
+  options->apk_app_resource_apk = Env("DARWIN_ART_APK_APP_RESOURCE_APK");
   options->apk_app_native_path = Env("DARWIN_ART_APK_APP_NATIVE_PATH");
   options->framework_res_apk = Env("DARWIN_ART_FRAMEWORK_RES_APK");
   const std::string window_scale = Env("DARWIN_ART_WINDOW_SCALE");
@@ -140,6 +141,7 @@ int LoadProcessOptions(ProcessOptions* options, std::string* error) {
       options->apk_app_descriptor.front() == 'L' &&
       options->apk_app_descriptor.back() == ';' &&
       Present(options->apk_app_support_dex) &&
+      options->apk_app_resource_apk.starts_with('/') &&
       options->framework_res_apk.starts_with('/');
   options->run_framework_button = !options->has_apk_app_identity_environment &&
                                   has_test_fonts_xml &&

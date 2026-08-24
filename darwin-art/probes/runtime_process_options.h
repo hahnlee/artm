@@ -26,6 +26,7 @@ struct ProcessOptions final {
   std::string apk_app_activity;
   std::string apk_app_descriptor;
   std::string apk_app_support_dex;
+  std::string apk_app_resource_apk;
   std::string apk_app_native_path;
   std::string framework_res_apk;
 

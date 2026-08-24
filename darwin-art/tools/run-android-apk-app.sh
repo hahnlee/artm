@@ -18,17 +18,34 @@ apk="$(cd "$(dirname "$apk")" && pwd)/$(basename "$apk")"
   exit 64
 }
 
-metadata="$(cargo run -q \
-  --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$apk")"
+app_dex="$apk"
+external_dex="${apk%.apk}.dex"
+if ! unzip -Z1 "$apk" | grep -Fx 'classes.dex' >/dev/null; then
+  [[ -f "$external_dex" ]] || {
+    echo "preoptimized APK requires its deoptimized DEX sidecar: $external_dex" >&2
+    exit 69
+  }
+  app_dex="$external_dex"
+fi
+if [[ "$app_dex" == "$apk" ]]; then
+  metadata="$(cargo run -q \
+    --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$apk")"
+else
+  metadata="$(cargo run -q \
+    --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$apk" "$app_dex")"
+fi
 package="$(sed -n 's/^apk-app-runtime: package=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 application="$(sed -n 's/^apk-app-runtime: .* application=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 activity="$(sed -n 's/^apk-app-runtime: .* activity=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 descriptor="$(sed -n 's/^apk-app-runtime: .* descriptor=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+version_code="$(sed -n 's/^apk-app-runtime: .* version_code=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+version_name="$(sed -n 's/^apk-app-runtime: .* version_name=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 theme="$(sed -n 's/^apk-app-runtime: .* theme=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 target_sdk="$(sed -n 's/^apk-app-runtime: .* target_sdk=\([^ ]*\) .*/\1/p' <<<"$metadata")"
-label="$(sed -n 's/^apk-app-runtime: .* label=\(.*\) icon=.*/\1/p' <<<"$metadata")"
+label="$(sed -n 's/^apk-app-runtime: .* label=\(.*\) label_res=.*/\1/p' <<<"$metadata")"
+label_res="$(sed -n 's/^apk-app-runtime: .* label_res=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 icon="$(sed -n 's/^apk-app-runtime: .* icon=\([^ ]*\) .*/\1/p' <<<"$metadata")"
-[[ -n "$package" && -n "$application" && -n "$activity" && -n "$descriptor" && -n "$theme" && -n "$target_sdk" && -n "$label" && -n "$icon" ]] || {
+[[ -n "$package" && -n "$application" && -n "$activity" && -n "$descriptor" && -n "$version_code" && -n "$version_name" && -n "$theme" && -n "$target_sdk" && -n "$label" && -n "$label_res" && -n "$icon" ]] || {
   echo "could not decode inspected APK metadata" >&2
   exit 65
 }
@@ -71,11 +88,14 @@ cleanup_system_root() {
   [[ -z "$icon_file" ]] || rm -f "$icon_file"
 }
 trap cleanup_system_root EXIT
-mkdir -p "$system_root/etc" "$system_root/fonts"
+mkdir -p "$system_root/etc" "$system_root/fonts" "$system_root/framework"
 cp "$fonts_xml" "$system_root/etc/fonts.xml"
 cp "$roboto" "$system_root/fonts/Roboto-Regular.ttf"
-chmod 0400 "$system_root/etc/fonts.xml" "$system_root/fonts/Roboto-Regular.ttf"
-chmod 0500 "$system_root" "$system_root/etc" "$system_root/fonts"
+cp "$framework_res" "$system_root/framework/framework-res.apk"
+chmod 0400 "$system_root/etc/fonts.xml" "$system_root/fonts/Roboto-Regular.ttf" \
+  "$system_root/framework/framework-res.apk"
+chmod 0500 "$system_root" "$system_root/etc" "$system_root/fonts" \
+  "$system_root/framework"
 
 icu_runtime="$root/_build/icu-runtime-adapters/runtime"
 export ANDROID_I18N_ROOT="$icu_runtime/i18n"
@@ -85,9 +105,16 @@ export DARWIN_ART_APK_APP_PACKAGE="$package"
 export DARWIN_ART_APK_APP_APPLICATION="$application"
 export DARWIN_ART_APK_APP_ACTIVITY="$activity"
 export DARWIN_ART_APK_APP_DESCRIPTOR="$descriptor"
+export DARWIN_ART_APK_APP_VERSION_CODE="$version_code"
+export DARWIN_ART_APK_APP_VERSION_NAME="$version_name"
 export DARWIN_ART_APK_APP_THEME="$theme"
 export DARWIN_ART_APK_APP_TARGET_SDK="$target_sdk"
 export DARWIN_ART_APK_APP_LABEL="$label"
+export DARWIN_ART_APK_APP_LABEL_RES="$label_res"
+app_data_root="${DARWIN_ART_APP_DATA_ROOT:-$root/_build/app-data}"
+app_data_dir="$app_data_root/$package"
+mkdir -p "$app_data_dir"
+export DARWIN_ART_APK_APP_DATA_DIR="$app_data_dir"
 if [[ "$icon" != "none" ]]; then
   icon_file="$(mktemp "${TMPDIR:-/tmp}/darwin-art-apk-icon.XXXXXX")"
   unzip -p "$apk" "$icon" >"$icon_file"
@@ -97,6 +124,7 @@ else
   unset DARWIN_ART_APK_APP_ICON
 fi
 export DARWIN_ART_APK_APP_SUPPORT_DEX="$support_dex"
+export DARWIN_ART_APK_APP_RESOURCE_APK="$apk"
 export DARWIN_ART_FRAMEWORK_RES_APK="$framework_res"
 export DARWIN_ART_TEST_FONTS_XML="$fonts_xml"
 export DARWIN_ART_TEST_FONT="$roboto"
@@ -105,4 +133,4 @@ export DARWIN_ART_WINDOW_SCALE=2
 
 echo "$metadata"
 exec "$host" --window-seconds "$seconds" \
-  "$runtime" "$core_oj" "$core_libart" "$framework" "$core_icu" "$apk"
+  "$runtime" "$core_oj" "$core_libart" "$framework" "$core_icu" "$app_dex"

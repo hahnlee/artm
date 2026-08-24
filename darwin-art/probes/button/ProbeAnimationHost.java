@@ -7,6 +7,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import android.content.Context;
+import android.graphics.Rect;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.Looper;
@@ -14,6 +15,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.MotionEvent;
 import android.view.ViewTreeObserver;
+import android.widget.AbsListView;
 
 /** Creates the hidden RenderNode.AnimationHost without hidden compile stubs. */
 public final class ProbeAnimationHost {
@@ -59,6 +61,13 @@ public final class ProbeAnimationHost {
     public static void prepareViewPagers(Object root) {
         if (!(root instanceof View)) {
             return;
+        }
+        // A normal hardware ViewRoot never enables AbsListView's legacy
+        // software scrolling cache. This detached owner flattens the hierarchy
+        // into one hardware RecordingCanvas, so explicitly retain the same
+        // no-cache behavior while child RenderNode ownership is process-local.
+        if (root instanceof AbsListView) {
+            ((AbsListView) root).setScrollingCacheEnabled(false);
         }
         Class<?> type = root.getClass();
         while (type != null) {
@@ -233,6 +242,19 @@ public final class ProbeAnimationHost {
                     Context.class, displayType);
             viewRootConstructor.setAccessible(true);
             Object viewRoot = viewRootConstructor.newInstance(context, display);
+            // PopupWindow asks the owning ViewRoot for the usable display
+            // frame before it builds dropdown LayoutParams. The detached root
+            // has not received a WMS relayout, so seed the physical-pixel frame
+            // exposed by the process-local display service. Resources keep the
+            // corresponding 360x640 dp configuration through density.
+            Field tmpFramesField = viewRootType.getDeclaredField("mTmpFrames");
+            tmpFramesField.setAccessible(true);
+            Object tmpFrames = tmpFramesField.get(viewRoot);
+            Field displayFrameField = tmpFrames.getClass().getField("displayFrame");
+            int displayScale = "2".equals(System.getenv("DARWIN_ART_WINDOW_SCALE"))
+                    ? 2 : 1;
+            ((Rect) displayFrameField.get(tmpFrames)).set(
+                    0, 0, 360 * displayScale, 640 * displayScale);
             Constructor<?> attachConstructor = attachType.getDeclaredConstructor(
                     iWindowSession, iWindow, displayType,
                     viewRootType, Handler.class,
@@ -244,11 +266,11 @@ public final class ProbeAnimationHost {
             Field hardwareField = attachInfo.getClass().getDeclaredField(
                     "mHardwareAccelerated");
             hardwareField.setAccessible(true);
-            // The target Canvas is still a hardware RecordingCanvas backed by
-            // Metal. Keep per-View display lists disabled because this direct
-            // owner does not run RenderThread.prepareTree(); children therefore
-            // flatten into the one GPU display list instead of producing stale
-            // or unprepared nested RenderNodes.
+            // Child views flatten into this root RecordingCanvas until the
+            // direct owner supports ViewRoot's complete child-RenderNode
+            // preparation transaction. prepareViewPagers() disables legacy
+            // list caches so this remains GPU drawing rather than bitmap cache
+            // fallback during scrolling.
             hardwareField.setBoolean(attachInfo, false);
             Field requestedField = attachInfo.getClass().getDeclaredField(
                     "mHardwareAccelerationRequested");

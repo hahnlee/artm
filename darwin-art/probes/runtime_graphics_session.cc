@@ -208,6 +208,22 @@ int32_t dispatch_pointer_v2(darwin_art_graphics_session_t* session,
   return dispatch_pointer_v2(&session->state, event);
 }
 
+int32_t dispatch_key_v1(darwin_art_graphics_session_t* session,
+                        const DarwinArtKeyEventV1* event) {
+  if (session == nullptr || event == nullptr) {
+    return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+  }
+  std::lock_guard<std::mutex> lock(g_session_mutex);
+  int32_t status = check_active_locked(session);
+  if (status != 0) return status;
+  status = check_owner(session);
+  if (status != 0) return status;
+  if (!session->bound_to_process || session->closed || session->finalized) {
+    return DARWIN_ART_STATUS_GRAPHICS_SESSION_CLOSED;
+  }
+  return dispatch_key_v1(&session->state, event);
+}
+
 int32_t pump_frame(darwin_art_graphics_session_t* session,
                    int64_t frame_time_nanos) {
   {
@@ -246,6 +262,12 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_graphics_session_dispatch_pointe
     darwin_art_graphics_session_t* session,
     const DarwinArtPointerEventV2* event) {
   return darwin_art_graphics::dispatch_pointer_v2(session, event);
+}
+
+extern "C" DARWIN_ART_EXPORT int32_t darwin_art_graphics_session_dispatch_key_v1(
+    darwin_art_graphics_session_t* session,
+    const DarwinArtKeyEventV1* event) {
+  return darwin_art_graphics::dispatch_key_v1(session, event);
 }
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_graphics_session_pump_frame(

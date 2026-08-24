@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -7,6 +8,7 @@
 #include <time.h>
 
 #include "base/locks.h"
+#include "darwin_framework_natives.h"
 #include "darwin_art/darwin_art.h"
 #include "runtime_hwui_probe.h"
 #include "runtime_graphics_probe.h"
@@ -167,6 +169,113 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
   return ok;
 }
 
+void DebugWindowManagerViews(JNIEnv* env) {
+  static bool dumped = false;
+  if (dumped || std::getenv("DARWIN_ART_DEBUG_WINDOW_LAYERS") == nullptr) return;
+  jclass global_class = env->FindClass("android/view/WindowManagerGlobal");
+  jmethodID get_instance =
+      global_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(global_class, "getInstance",
+                                   "()Landroid/view/WindowManagerGlobal;");
+  jobject global = get_instance == nullptr
+                       ? nullptr
+                       : env->CallStaticObjectMethod(global_class, get_instance);
+  jfieldID views_field =
+      global_class == nullptr
+          ? nullptr
+          : env->GetFieldID(global_class, "mViews", "Ljava/util/ArrayList;");
+  jfieldID params_field =
+      global_class == nullptr
+          ? nullptr
+          : env->GetFieldID(global_class, "mParams", "Ljava/util/ArrayList;");
+  jobject views = global == nullptr || views_field == nullptr
+                      ? nullptr
+                      : env->GetObjectField(global, views_field);
+  jobject params = global == nullptr || params_field == nullptr
+                       ? nullptr
+                       : env->GetObjectField(global, params_field);
+  jclass list_class = env->FindClass("java/util/ArrayList");
+  jmethodID size = list_class == nullptr
+                       ? nullptr
+                       : env->GetMethodID(list_class, "size", "()I");
+  jmethodID get = list_class == nullptr
+                      ? nullptr
+                      : env->GetMethodID(list_class, "get", "(I)Ljava/lang/Object;");
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID get_width = view_class == nullptr
+                            ? nullptr
+                            : env->GetMethodID(view_class, "getWidth", "()I");
+  jmethodID get_height = view_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(view_class, "getHeight", "()I");
+  jmethodID get_measured_width =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "getMeasuredWidth", "()I");
+  jmethodID get_measured_height =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "getMeasuredHeight", "()I");
+  jclass params_class = env->FindClass("android/view/WindowManager$LayoutParams");
+  jfieldID x_field = params_class == nullptr
+                         ? nullptr
+                         : env->GetFieldID(params_class, "x", "I");
+  jfieldID y_field = params_class == nullptr
+                         ? nullptr
+                         : env->GetFieldID(params_class, "y", "I");
+  jfieldID gravity_field = params_class == nullptr
+                               ? nullptr
+                               : env->GetFieldID(params_class, "gravity", "I");
+  jfieldID width_field = params_class == nullptr
+                             ? nullptr
+                             : env->GetFieldID(params_class, "width", "I");
+  jfieldID height_field = params_class == nullptr
+                              ? nullptr
+                              : env->GetFieldID(params_class, "height", "I");
+  if (!env->ExceptionCheck() && views != nullptr && params != nullptr &&
+      size != nullptr && get != nullptr) {
+    const jint count = env->CallIntMethod(views, size);
+    if (count > 0 && !env->ExceptionCheck()) {
+      bool any_sized = false;
+      std::cerr << "ART Android windows: count=" << count << "\n";
+      for (jint index = 0; index < count; ++index) {
+        jobject window_view = env->CallObjectMethod(views, get, index);
+        jobject window_params = env->CallObjectMethod(params, get, index);
+        if (window_view != nullptr && window_params != nullptr &&
+            !env->ExceptionCheck()) {
+          const jint window_width = env->CallIntMethod(window_view, get_width);
+          const jint window_height = env->CallIntMethod(window_view, get_height);
+          any_sized = any_sized || (window_width > 0 && window_height > 0);
+          std::cerr << "ART Android window[" << index << "] view=" << window_view
+                    << " size=" << window_width
+                    << "x" << window_height
+                    << " measured="
+                    << env->CallIntMethod(window_view, get_measured_width) << "x"
+                    << env->CallIntMethod(window_view, get_measured_height)
+                    << " pos=" << env->GetIntField(window_params, x_field) << ","
+                    << env->GetIntField(window_params, y_field)
+                    << " layout=" << env->GetIntField(window_params, width_field)
+                    << "x" << env->GetIntField(window_params, height_field)
+                    << " gravity="
+                    << env->GetIntField(window_params, gravity_field) << "\n";
+        }
+        if (window_params != nullptr) env->DeleteLocalRef(window_params);
+        if (window_view != nullptr) env->DeleteLocalRef(window_view);
+      }
+      dumped = any_sized;
+    }
+  }
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  if (params_class != nullptr) env->DeleteLocalRef(params_class);
+  if (view_class != nullptr) env->DeleteLocalRef(view_class);
+  if (list_class != nullptr) env->DeleteLocalRef(list_class);
+  if (params != nullptr) env->DeleteLocalRef(params);
+  if (views != nullptr) env->DeleteLocalRef(views);
+  if (global != nullptr) env->DeleteLocalRef(global);
+  if (global_class != nullptr) env->DeleteLocalRef(global_class);
+}
+
 bool sync_interactive_surface_size(GraphicsState* state, JNIEnv* env) {
   if (state == nullptr || env == nullptr || state->gpu_surface == nullptr ||
       state->interactive_root == nullptr) {
@@ -238,6 +347,127 @@ jclass LoadProbeAnimationHost(JNIEnv* env) {
   return helper;
 }
 
+void ClearPointerDispatchRoot(GraphicsState* state, JNIEnv* env) {
+  if (state->pointer_dispatch_root != nullptr) {
+    env->DeleteGlobalRef(state->pointer_dispatch_root);
+    state->pointer_dispatch_root = nullptr;
+  }
+  if (state->pointer_dispatch_view_root != nullptr) {
+    env->DeleteGlobalRef(state->pointer_dispatch_view_root);
+    state->pointer_dispatch_view_root = nullptr;
+  }
+  state->pointer_dispatch_offset_x = 0.0f;
+  state->pointer_dispatch_offset_y = 0.0f;
+  state->pointer_dispatch_is_window = false;
+}
+
+bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
+                               jobject main_root, jfloat x, jfloat y) {
+  ClearPointerDispatchRoot(state, env);
+  jobject selected = nullptr;
+  jobject selected_view_root = nullptr;
+  jint selected_x = 0;
+  jint selected_y = 0;
+  jclass global_class = env->FindClass("android/view/WindowManagerGlobal");
+  jmethodID get_instance =
+      global_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(global_class, "getInstance",
+                                   "()Landroid/view/WindowManagerGlobal;");
+  jobject global = get_instance == nullptr
+                       ? nullptr
+                       : env->CallStaticObjectMethod(global_class, get_instance);
+  jfieldID views_field =
+      global_class == nullptr
+          ? nullptr
+          : env->GetFieldID(global_class, "mViews", "Ljava/util/ArrayList;");
+  jfieldID params_field =
+      global_class == nullptr
+          ? nullptr
+          : env->GetFieldID(global_class, "mParams", "Ljava/util/ArrayList;");
+  jfieldID roots_field =
+      global_class == nullptr
+          ? nullptr
+          : env->GetFieldID(global_class, "mRoots", "Ljava/util/ArrayList;");
+  jobject views = global == nullptr || views_field == nullptr
+                      ? nullptr
+                      : env->GetObjectField(global, views_field);
+  jobject params = global == nullptr || params_field == nullptr
+                       ? nullptr
+                       : env->GetObjectField(global, params_field);
+  jobject roots = global == nullptr || roots_field == nullptr
+                      ? nullptr
+                      : env->GetObjectField(global, roots_field);
+  jclass list_class = env->FindClass("java/util/ArrayList");
+  jmethodID size = list_class == nullptr
+                       ? nullptr
+                       : env->GetMethodID(list_class, "size", "()I");
+  jmethodID get = list_class == nullptr
+                      ? nullptr
+                      : env->GetMethodID(list_class, "get", "(I)Ljava/lang/Object;");
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID get_width = view_class == nullptr
+                            ? nullptr
+                            : env->GetMethodID(view_class, "getWidth", "()I");
+  jmethodID get_height = view_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(view_class, "getHeight", "()I");
+  jclass params_class = env->FindClass("android/view/WindowManager$LayoutParams");
+  jfieldID x_field = params_class == nullptr
+                         ? nullptr
+                         : env->GetFieldID(params_class, "x", "I");
+  jfieldID y_field = params_class == nullptr
+                         ? nullptr
+                         : env->GetFieldID(params_class, "y", "I");
+  if (!env->ExceptionCheck() && views != nullptr && params != nullptr &&
+      roots != nullptr &&
+      size != nullptr && get != nullptr && get_width != nullptr &&
+      get_height != nullptr && x_field != nullptr && y_field != nullptr) {
+    const jint count = env->CallIntMethod(views, size);
+    for (jint index = count - 1; index >= 0 && selected == nullptr; --index) {
+      jobject layer = env->CallObjectMethod(views, get, index);
+      jobject layout_params = env->CallObjectMethod(params, get, index);
+      if (layer != nullptr && layout_params != nullptr && !env->ExceptionCheck()) {
+        const jint left = env->GetIntField(layout_params, x_field);
+        const jint top = env->GetIntField(layout_params, y_field);
+        const jint width = env->CallIntMethod(layer, get_width);
+        const jint height = env->CallIntMethod(layer, get_height);
+        if (x >= left && y >= top && x < left + width && y < top + height) {
+          selected = env->NewLocalRef(layer);
+          selected_view_root = env->CallObjectMethod(roots, get, index);
+          selected_x = left;
+          selected_y = top;
+        }
+      }
+      if (layout_params != nullptr) env->DeleteLocalRef(layout_params);
+      if (layer != nullptr) env->DeleteLocalRef(layer);
+    }
+  }
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  if (params_class != nullptr) env->DeleteLocalRef(params_class);
+  if (view_class != nullptr) env->DeleteLocalRef(view_class);
+  if (list_class != nullptr) env->DeleteLocalRef(list_class);
+  if (params != nullptr) env->DeleteLocalRef(params);
+  if (roots != nullptr) env->DeleteLocalRef(roots);
+  if (views != nullptr) env->DeleteLocalRef(views);
+  if (global != nullptr) env->DeleteLocalRef(global);
+  if (global_class != nullptr) env->DeleteLocalRef(global_class);
+  jobject dispatch_root = selected == nullptr ? main_root : selected;
+  state->pointer_dispatch_root = env->NewGlobalRef(dispatch_root);
+  jobject dispatch_view_root = selected_view_root == nullptr
+                                   ? state->interactive_view_root
+                                   : selected_view_root;
+  if (dispatch_view_root != nullptr) {
+    state->pointer_dispatch_view_root = env->NewGlobalRef(dispatch_view_root);
+  }
+  state->pointer_dispatch_offset_x = static_cast<jfloat>(selected_x);
+  state->pointer_dispatch_offset_y = static_cast<jfloat>(selected_y);
+  state->pointer_dispatch_is_window = selected != nullptr;
+  if (selected != nullptr) env->DeleteLocalRef(selected);
+  if (selected_view_root != nullptr) env->DeleteLocalRef(selected_view_root);
+  return state->pointer_dispatch_root != nullptr && !env->ExceptionCheck();
+}
+
 int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
                               uint32_t action, float x, float y,
                               uint64_t event_time_hint,
@@ -293,28 +523,98 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     env->DeleteLocalRef(motion_event_class);
     return 81;
   }
-  jclass root_class = env->GetObjectClass(root);
+  if (down && !SelectPointerDispatchRoot(state, env, root, x, y)) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(event);
+    env->DeleteLocalRef(motion_event_class);
+    return 82;
+  }
+  jobject dispatch_root = state->pointer_dispatch_root == nullptr
+                              ? root
+                              : state->pointer_dispatch_root;
+  const jfloat local_x = x - state->pointer_dispatch_offset_x;
+  const jfloat local_y = y - state->pointer_dispatch_offset_y;
+  if (down) {
+    state->pointer_down_x = x;
+    state->pointer_down_y = y;
+    state->pointer_click_candidate = true;
+    state->pointer_touch_slop = 8;
+    jclass view_class = env->FindClass("android/view/View");
+    jmethodID get_context =
+        view_class == nullptr
+            ? nullptr
+            : env->GetMethodID(view_class, "getContext",
+                               "()Landroid/content/Context;");
+    jobject context = get_context == nullptr
+                          ? nullptr
+                          : env->CallObjectMethod(dispatch_root, get_context);
+    jclass config_class = env->FindClass("android/view/ViewConfiguration");
+    jmethodID get_config =
+        config_class == nullptr
+            ? nullptr
+            : env->GetStaticMethodID(
+                  config_class, "get",
+                  "(Landroid/content/Context;)Landroid/view/ViewConfiguration;");
+    jobject config = context == nullptr || get_config == nullptr
+                         ? nullptr
+                         : env->CallStaticObjectMethod(config_class, get_config, context);
+    jmethodID get_touch_slop =
+        config_class == nullptr
+            ? nullptr
+            : env->GetMethodID(config_class, "getScaledTouchSlop", "()I");
+    if (config != nullptr && get_touch_slop != nullptr &&
+        !env->ExceptionCheck()) {
+      state->pointer_touch_slop =
+          std::max<jint>(1, env->CallIntMethod(config, get_touch_slop));
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (config != nullptr) env->DeleteLocalRef(config);
+    if (config_class != nullptr) env->DeleteLocalRef(config_class);
+    if (context != nullptr) env->DeleteLocalRef(context);
+    if (view_class != nullptr) env->DeleteLocalRef(view_class);
+  } else if (action == 2u && state->pointer_click_candidate) {
+    const float dx = x - state->pointer_down_x;
+    const float dy = y - state->pointer_down_y;
+    const float slop = static_cast<float>(state->pointer_touch_slop);
+    if (dx * dx + dy * dy > slop * slop) {
+      state->pointer_click_candidate = false;
+    }
+  }
+  jmethodID offset_location =
+      env->GetMethodID(motion_event_class, "offsetLocation", "(FF)V");
+  if (offset_location == nullptr || env->ExceptionCheck()) {
+    env->ExceptionClear();
+    ClearPointerDispatchRoot(state, env);
+    env->DeleteLocalRef(event);
+    env->DeleteLocalRef(motion_event_class);
+    return 82;
+  }
+  if (state->pointer_dispatch_offset_x != 0.0f ||
+      state->pointer_dispatch_offset_y != 0.0f) {
+    env->CallVoidMethod(event, offset_location,
+                        -state->pointer_dispatch_offset_x,
+                        -state->pointer_dispatch_offset_y);
+  }
+  jclass root_class = env->GetObjectClass(dispatch_root);
   jmethodID recycle = env->GetMethodID(motion_event_class, "recycle", "()V");
   if (recycle == nullptr || env->ExceptionCheck()) {
     env->ExceptionClear();
+    ClearPointerDispatchRoot(state, env);
     env->DeleteLocalRef(root_class);
     env->DeleteLocalRef(event);
     env->DeleteLocalRef(motion_event_class);
     return 82;
   }
-  const bool use_viewroot_input =
-      std::getenv("DARWIN_ART_USE_VIEWROOT_INPUT") != nullptr;
-  // A detached DecorView still posts View$PerformClick on ACTION_UP, but its
-  // synthetic ViewRoot has no attached input-finish traversal in which to run
-  // that boot-framework callback with the APK execution context. Retain the
-  // exact clickable target so the fallback can cancel that one queued runnable
-  // and complete the same click synchronously exactly once.
-  if (!use_viewroot_input && down) {
+  const bool has_view_root = state->pointer_dispatch_view_root != nullptr;
+  // Legacy probes can still run without a WindowManager attachment. Keep
+  // their bounded click shim isolated from the APK path; a real ViewRoot owns
+  // click cancellation, touch slop, and PerformClick scheduling itself.
+  if (!has_view_root && down) {
     if (state->pressed_view != nullptr) {
       env->DeleteGlobalRef(state->pressed_view);
       state->pressed_view = nullptr;
     }
-    jobject hit = find_clickable_view_at(env, root, x, y);
+    jobject hit = find_clickable_view_at(env, dispatch_root, local_x, local_y);
     if (hit != nullptr && !env->ExceptionCheck()) {
       state->pressed_view = env->NewGlobalRef(hit);
     }
@@ -339,33 +639,59 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     }
     if (env->ExceptionCheck()) env->ExceptionClear();
   }
-  jmethodID enqueue = input_host == nullptr
-                          ? nullptr
-                          : env->GetStaticMethodID(
-                                input_host, "enqueueInputEvent",
-                                "(Ljava/lang/Object;)Z");
-  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr &&
-      (input_host == nullptr || enqueue == nullptr)) {
-    std::cerr << "ART Android MotionEvent: ViewRoot enqueue helper unavailable host="
-              << input_host << " method=" << enqueue << "\n";
+  jclass view_root_class =
+      has_view_root ? env->GetObjectClass(state->pointer_dispatch_view_root)
+                    : nullptr;
+  // Product APKs enter through the InputChannel-bound
+  // WindowInputEventReceiver created by ViewRootImpl.setView(). This mirrors
+  // Android's native input transport boundary and keeps ViewRoot's input
+  // stages, finish acknowledgements, touch mode, and gesture ownership intact.
+  if (has_view_root) {
+    bool framework_handled = false;
+    enqueued = darwin_art::DispatchFrameworkInputEvent(
+        env, state->pointer_dispatch_view_root, event, &framework_handled);
+    consumed = framework_handled ? JNI_TRUE : JNI_FALSE;
   }
-  // This detached launcher constructs ViewRootImpl/AttachInfo for hardware
-  // rendering, but intentionally does not call ViewRootImpl.setView().  Its
-  // InputStage chain is therefore absent; enqueueInputEvent() can report
-  // success while dropping the packet before DecorView.  Keep the true
-  // ViewRoot route available for an attached host, but use synchronous
-  // DecorView dispatch by default so real APK widgets receive ACTION_UP in
-  // the same owner-thread turn as the native event.
-  if (use_viewroot_input && enqueue != nullptr && !env->ExceptionCheck()) {
-    enqueued = env->CallStaticBooleanMethod(input_host, enqueue, event) == JNI_TRUE;
-    if (env->ExceptionCheck()) {
+  if (env->ExceptionCheck()) {
+    if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+      std::cerr << "ART Android MotionEvent: InputChannel delivery failed\n";
+      jthrowable error = env->ExceptionOccurred();
       env->ExceptionClear();
-      enqueued = false;
+      jclass throwable_class = env->FindClass("java/lang/Throwable");
+      jmethodID to_string =
+          throwable_class == nullptr
+              ? nullptr
+              : env->GetMethodID(throwable_class, "toString",
+                                 "()Ljava/lang/String;");
+      jstring description =
+          error == nullptr || to_string == nullptr
+              ? nullptr
+              : static_cast<jstring>(env->CallObjectMethod(error, to_string));
+      if (description != nullptr && !env->ExceptionCheck()) {
+        const char* utf = env->GetStringUTFChars(description, nullptr);
+        if (utf != nullptr) {
+          std::cerr << "ART Android MotionEvent exception=" << utf << "\n";
+          env->ReleaseStringUTFChars(description, utf);
+        }
+      }
+      if (env->ExceptionCheck()) env->ExceptionClear();
+      if (description != nullptr) env->DeleteLocalRef(description);
+      if (throwable_class != nullptr) env->DeleteLocalRef(throwable_class);
+      if (error != nullptr) env->DeleteLocalRef(error);
     }
-  } else if (env->ExceptionCheck()) {
     env->ExceptionClear();
+    enqueued = false;
   }
-  if (!enqueued) {
+  if (has_view_root && !enqueued) {
+    ClearPointerDispatchRoot(state, env);
+    env->DeleteLocalRef(view_root_class);
+    env->DeleteLocalRef(input_host);
+    env->DeleteLocalRef(root_class);
+    env->DeleteLocalRef(event);
+    env->DeleteLocalRef(motion_event_class);
+    return 84;
+  }
+  if (!has_view_root) {
     jmethodID dispatch_touch = root_class == nullptr
                                    ? nullptr
                                    : env->GetMethodID(
@@ -373,24 +699,25 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
                                          "(Landroid/view/MotionEvent;)Z");
     if (dispatch_touch == nullptr || env->ExceptionCheck()) {
       env->ExceptionClear();
+      ClearPointerDispatchRoot(state, env);
+      env->DeleteLocalRef(view_root_class);
       env->DeleteLocalRef(input_host);
       env->DeleteLocalRef(root_class);
       env->DeleteLocalRef(event);
       env->DeleteLocalRef(motion_event_class);
       return 82;
     }
-    consumed = env->CallBooleanMethod(root, dispatch_touch, event);
-  } else {
-    consumed = JNI_TRUE;
+    consumed = env->CallBooleanMethod(dispatch_root, dispatch_touch, event);
   }
-  if (!use_viewroot_input && terminal && state->pressed_view != nullptr) {
+  if (!enqueued && terminal && state->pressed_view != nullptr) {
     jobject hit = action == 1u && !env->ExceptionCheck()
-                      ? find_clickable_view_at(env, root, x, y)
+                      ? find_clickable_view_at(env, dispatch_root, local_x, local_y)
                       : nullptr;
     const bool same_target =
         hit != nullptr && !env->ExceptionCheck() &&
         env->IsSameObject(hit, state->pressed_view) == JNI_TRUE;
-    if (same_target && !env->ExceptionCheck()) {
+    if (state->pointer_click_candidate && same_target &&
+        !env->ExceptionCheck()) {
       jclass view_class = env->FindClass("android/view/View");
       jfieldID perform_click_runnable =
           view_class == nullptr
@@ -446,7 +773,8 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
     std::cerr << "ART Android MotionEvent ABI2 action=" << action
               << " consumed=" << (consumed == JNI_TRUE ? 1 : 0)
-              << " path=" << (enqueued ? "viewroot" : "decor")
+              << " path=" << (enqueued ? "input-channel" : "decor")
+              << " window=" << (state->pointer_dispatch_is_window ? 1 : 0)
               << " dispatch_us="
               << (dispatch_end > dispatch_start
                       ? (dispatch_end - dispatch_start) / 1000
@@ -455,6 +783,8 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   }
   if (!dispatch_ok || !recycle_ok) {
     env->ExceptionClear();
+    ClearPointerDispatchRoot(state, env);
+    env->DeleteLocalRef(view_root_class);
     env->DeleteLocalRef(input_host);
     env->DeleteLocalRef(root_class);
     env->DeleteLocalRef(event);
@@ -465,6 +795,8 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   if (terminal) {
     state->pointer_stream_active = false;
     state->pointer_down_time_nanos = 0;
+    state->pointer_click_candidate = false;
+    ClearPointerDispatchRoot(state, env);
   }
   state->gpu_ripple_overlay_active = action != 3u;
   if (down) {
@@ -473,6 +805,7 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     state->gpu_ripple_overlay_started = std::chrono::steady_clock::now();
   }
   if (action != 2u) state->gpu_render_node_recorded = false;
+  env->DeleteLocalRef(view_root_class);
   env->DeleteLocalRef(root_class);
   env->DeleteLocalRef(input_host);
   env->DeleteLocalRef(event);
@@ -710,6 +1043,64 @@ int32_t dispatch_pointer_v2(GraphicsState* state,
                                    event->down_time_nanos);
 }
 
+int32_t dispatch_key_v1(GraphicsState* state,
+                        const DarwinArtKeyEventV1* event) {
+  if (state == nullptr || event == nullptr || event->version != 1 ||
+      event->size < sizeof(DarwinArtKeyEventV1) || event->action > 1 ||
+      state->interactive_view_root == nullptr) {
+    return 85;
+  }
+  art::Thread* art_thread = darwin_art_process::owner_thread_for_callback();
+  if (art_thread == nullptr || art::Thread::Current() != art_thread ||
+      art_thread->GetState() != art::ThreadState::kNative) {
+    return 73;
+  }
+  art::ScopedObjectAccess soa(art_thread);
+  JNIEnv* env = art_thread->GetJniEnv();
+  jclass key_event_class = env->FindClass("android/view/KeyEvent");
+  jmethodID constructor =
+      key_event_class == nullptr
+          ? nullptr
+          : env->GetMethodID(key_event_class, "<init>", "(JJIIIIIIII)V");
+  jobject key_event =
+      constructor == nullptr
+          ? nullptr
+          : env->NewObject(
+                key_event_class, constructor,
+                static_cast<jlong>(event->down_time_nanos / 1000000ULL),
+                static_cast<jlong>(event->event_time_nanos / 1000000ULL),
+                static_cast<jint>(event->action),
+                static_cast<jint>(event->key_code),
+                static_cast<jint>(event->repeat_count),
+                static_cast<jint>(event->meta_state),
+                static_cast<jint>(event->device_id),
+                static_cast<jint>(event->scan_code),
+                static_cast<jint>(event->flags),
+                static_cast<jint>(event->source));
+  bool handled = false;
+  const bool delivered =
+      key_event != nullptr && !env->ExceptionCheck() &&
+      darwin_art::DispatchFrameworkInputEvent(
+          env, state->interactive_view_root, key_event, &handled);
+  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android KeyEvent action=" << event->action
+              << " key=" << event->key_code
+              << " device=" << event->device_id
+              << " path=input-channel delivered=" << (delivered ? 1 : 0)
+              << " handled=" << (handled ? 1 : 0)
+              << "\n";
+  }
+  env->DeleteLocalRef(key_event);
+  env->DeleteLocalRef(key_event_class);
+  if (env->ExceptionCheck()) {
+    if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+      env->ExceptionDescribe();
+    }
+    env->ExceptionClear();
+  }
+  return delivered ? 0 : 86;
+}
+
 int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
   if (state == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   if (frame_time_nanos <= 0) {
@@ -735,6 +1126,7 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
     }
     return 75;
   }
+  DebugWindowManagerViews(env);
 #if defined(DARWIN_ART_REAL_GRAPHICS)
   auto* animation_context = state->hwui_animation_context.get();
   auto* time_lord = state->hwui_time_lord.get();
@@ -850,6 +1242,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer(
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_pointer_v2(
     const DarwinArtPointerEventV2*) {
+  return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+}
+
+extern "C" DARWIN_ART_EXPORT int32_t darwin_art_dispatch_key_v1(
+    const DarwinArtKeyEventV1*) {
   return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
 }
 

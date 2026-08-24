@@ -13,7 +13,7 @@ pub const RUNTIME_CACHE_IDENTITY: &str =
 /// Identity of the generated native Ninja graph. Keeping this beside the
 /// runtime cache contract prevents the canonical builder and graph emitter
 /// from silently disagreeing about graph format or edge ownership.
-pub const NATIVE_GRAPH_VERSION: &str = "darwin-art-native-graph-v14-shared-adapter-manifest";
+pub const NATIVE_GRAPH_VERSION: &str = "darwin-art-native-graph-v15-framework-sqlite";
 
 /// Canonical adapter translation units for the two runtime flavors.  Keeping
 /// this list in the dependency-free contract crate prevents the Cargo
@@ -27,6 +27,7 @@ pub const HEADLESS_ADAPTER_SOURCES: &[&str] = &[
     "darwin_framework_natives.cc",
     "darwin_motion_event_natives.cc",
     "darwin_framework_binder_natives.cc",
+    "darwin_framework_sqlite_natives.cc",
     "darwin_framework_system_property_natives.cc",
     "darwin_framework_asset_manager_natives.cc",
     "darwin_framework_render_node_natives.cc",
@@ -59,6 +60,7 @@ pub const GRAPHICS_ADAPTER_SOURCES: &[&str] = &[
     "darwin_framework_natives.cc",
     "darwin_motion_event_natives.cc",
     "darwin_framework_binder_natives.cc",
+    "darwin_framework_sqlite_natives.cc",
     "darwin_framework_system_property_natives.cc",
     "darwin_framework_asset_manager_natives.cc",
     "darwin_framework_render_node_natives.cc",

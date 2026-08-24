@@ -53,3 +53,11 @@ pub fn owned_surface_next_pointer_event_v2(
     event.size_value = 1.0;
     true
 }
+
+#[cfg(target_os = "macos")]
+pub fn owned_surface_next_key_event_v1(
+    runtime: &HostRuntime,
+    event: &mut darwin_art_engine_sys::KeyEventV1,
+) -> bool {
+    owned_surface(runtime).is_some_and(|surface| surface.next_key_event_v1(event))
+}

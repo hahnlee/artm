@@ -5,12 +5,12 @@ use std::path::Path;
 
 use darwin_art_engine_sys::{
     GraphicsSessionCloseFn, GraphicsSessionCreateFn, GraphicsSessionDestroyFn,
-    GraphicsSessionDispatchPointerFn, GraphicsSessionDispatchPointerV2Fn,
-    GraphicsSessionPumpFrameFn, ProviderClearHooksFn, ProviderInstallHooksFn,
-    ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn, ShutdownProcessFn,
-    SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn, SurfaceGetSizeFn,
-    SurfaceNextPointerEventFn, SurfaceNextPointerEventV2Fn, SurfacePresentFn, SurfacePumpEventsFn,
-    SurfaceResizeFn, SurfaceUpdateFn,
+    GraphicsSessionDispatchKeyV1Fn, GraphicsSessionDispatchPointerFn,
+    GraphicsSessionDispatchPointerV2Fn, GraphicsSessionPumpFrameFn, ProviderClearHooksFn,
+    ProviderInstallHooksFn, ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn,
+    ShutdownProcessFn, SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn, SurfaceGetSizeFn,
+    SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn, SurfaceNextPointerEventV2Fn,
+    SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn, SurfaceUpdateFn,
 };
 
 #[derive(Clone, Copy)]
@@ -29,6 +29,7 @@ pub(crate) struct SurfaceSymbols {
     pub pump_events: SurfacePumpEventsFn,
     pub next_pointer_event: SurfaceNextPointerEventFn,
     pub next_pointer_event_v2: Option<SurfaceNextPointerEventV2Fn>,
+    pub next_key_event_v1: Option<SurfaceNextKeyEventV1Fn>,
     pub destroy: SurfaceDestroyFn,
     pub active: SurfaceActiveFn,
 }
@@ -40,6 +41,7 @@ pub(crate) struct GraphicsSymbols {
     pub destroy: Option<GraphicsSessionDestroyFn>,
     pub dispatch_pointer: Option<GraphicsSessionDispatchPointerFn>,
     pub dispatch_pointer_v2: Option<GraphicsSessionDispatchPointerV2Fn>,
+    pub dispatch_key_v1: Option<GraphicsSessionDispatchKeyV1Fn>,
     pub pump_frame: Option<GraphicsSessionPumpFrameFn>,
 }
 
@@ -86,6 +88,9 @@ impl LoadedEngine {
                     next_pointer_event_v2: library
                         .symbol(b"darwin_art_surface_next_pointer_event_v2\0")
                         .ok(),
+                    next_key_event_v1: library
+                        .symbol(b"darwin_art_surface_next_key_event_v1\0")
+                        .ok(),
                     destroy: library.symbol(b"darwin_art_surface_destroy\0")?,
                     active: library.symbol(b"darwin_art_surface_active_gpu\0")?,
                 },
@@ -100,6 +105,9 @@ impl LoadedEngine {
                         .ok(),
                     dispatch_pointer_v2: library
                         .symbol(b"darwin_art_graphics_session_dispatch_pointer_v2\0")
+                        .ok(),
+                    dispatch_key_v1: library
+                        .symbol(b"darwin_art_graphics_session_dispatch_key_v1\0")
                         .ok(),
                     pump_frame: library
                         .symbol(b"darwin_art_graphics_session_pump_frame\0")

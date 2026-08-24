@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <sys/mman.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -85,6 +86,31 @@ jobject MakeStructStat(JNIEnv* env, const struct stat& status) {
   return result;
 }
 
+jobject MakeStructStatVfs(JNIEnv* env, const struct statvfs& status) {
+  jclass klass = env->FindClass("android/system/StructStatVfs");
+  jmethodID constructor =
+      klass == nullptr
+          ? nullptr
+          : env->GetMethodID(klass, "<init>", "(JJJJJJJJJJJ)V");
+  jobject result =
+      constructor == nullptr
+          ? nullptr
+          : env->NewObject(
+                klass, constructor, static_cast<jlong>(status.f_bsize),
+                static_cast<jlong>(status.f_frsize),
+                static_cast<jlong>(status.f_blocks),
+                static_cast<jlong>(status.f_bfree),
+                static_cast<jlong>(status.f_bavail),
+                static_cast<jlong>(status.f_files),
+                static_cast<jlong>(status.f_ffree),
+                static_cast<jlong>(status.f_favail),
+                static_cast<jlong>(status.f_fsid),
+                static_cast<jlong>(status.f_flag),
+                static_cast<jlong>(status.f_namemax));
+  env->DeleteLocalRef(klass);
+  return result;
+}
+
 void DarwinUnsupported(JNIEnv* env, const char* operation) {
   ThrowErrno(env, operation, ENOTSUP);
 }
@@ -119,6 +145,46 @@ jobject DarwinLinuxStat(JNIEnv* env, jobject, jstring java_path) {
     return nullptr;
   }
   return MakeStructStat(env, status);
+}
+
+jobject DarwinLinuxStatvfs(JNIEnv* env, jobject, jstring java_path) {
+  ScopedUtfChars path(env, java_path);
+  if (path.c_str() == nullptr) return nullptr;
+  const char* native_path = path.c_str();
+  if (std::strcmp(native_path, "/data") == 0) {
+    const char* app_data = std::getenv("DARWIN_ART_APK_APP_DATA_DIR");
+    if (app_data != nullptr && *app_data != '\0') native_path = app_data;
+  }
+  struct statvfs status {};
+  if (statvfs(native_path, &status) == -1) {
+    ThrowErrno(env, "statvfs", errno);
+    return nullptr;
+  }
+  return MakeStructStatVfs(env, status);
+}
+
+jobject DarwinLinuxFstatvfs(JNIEnv* env, jobject, jobject java_fd) {
+  struct statvfs status {};
+  if (fstatvfs(jniGetFDFromFileDescriptor(env, java_fd), &status) == -1) {
+    ThrowErrno(env, "fstatvfs", errno);
+    return nullptr;
+  }
+  return MakeStructStatVfs(env, status);
+}
+
+void DarwinLinuxChmod(JNIEnv* env, jobject, jstring java_path, jint mode) {
+  ScopedUtfChars path(env, java_path);
+  if (path.c_str() == nullptr) return;
+  if (chmod(path.c_str(), static_cast<mode_t>(mode)) == -1) {
+    ThrowErrno(env, "chmod", errno);
+  }
+}
+
+void DarwinLinuxFchmod(JNIEnv* env, jobject, jobject java_fd, jint mode) {
+  if (fchmod(jniGetFDFromFileDescriptor(env, java_fd),
+             static_cast<mode_t>(mode)) == -1) {
+    ThrowErrno(env, "fchmod", errno);
+  }
 }
 
 void DarwinLinuxFdsanExchangeOwnerTag(JNIEnv*, jclass, jobject, jlong,

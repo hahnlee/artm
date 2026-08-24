@@ -53,29 +53,49 @@ public final class ProbeResources extends Resources {
 
     @Override
     public boolean getBoolean(int id) {
-        return frameworkResources ? super.getBoolean(id) : false;
+        try {
+            return super.getBoolean(id);
+        } catch (Resources.NotFoundException missing) {
+            return false;
+        }
     }
 
     @Override
     public int getDimensionPixelSize(int id) {
-        return frameworkResources ? super.getDimensionPixelSize(id) : 8;
+        try {
+            return super.getDimensionPixelSize(id);
+        } catch (Resources.NotFoundException missing) {
+            return 8;
+        }
     }
 
     @Override
     public int getColor(int id) {
-        return frameworkResources ? super.getColor(id) : 0xff2563eb;
+        try {
+            return super.getColor(id);
+        } catch (Resources.NotFoundException missing) {
+            return 0xff2563eb;
+        }
     }
 
     @Override
     public int getColor(int id, Theme theme) {
-        return frameworkResources ? super.getColor(id, theme) : 0xff2563eb;
+        try {
+            return super.getColor(id, theme);
+        } catch (Resources.NotFoundException missing) {
+            return 0xff2563eb;
+        }
     }
 
     @Override
     public int getInteger(int id) {
-        // ViewConfiguration's config_overrideHasPermanentMenuKey=false value;
-        // this avoids consulting a remote IWindowManager during the host gate.
-        return 2;
+        try {
+            return super.getInteger(id);
+        } catch (Resources.NotFoundException missing) {
+            // Preserve the small standalone probe's historical fallback for
+            // IDs that are intentionally absent from its synthetic table.
+            return 2;
+        }
     }
 
     @Override
@@ -85,9 +105,11 @@ public final class ProbeResources extends Resources {
 
     @Override
     public void getValue(int id, TypedValue outValue, boolean resolveRefs) {
-        if (frameworkResources) {
+        try {
             super.getValue(id, outValue, resolveRefs);
             return;
+        } catch (Resources.NotFoundException missing) {
+            // Synthetic probe-only resources have no backing table.
         }
         outValue.type = TypedValue.TYPE_FLOAT;
         outValue.data = Float.floatToRawIntBits(2.0f);

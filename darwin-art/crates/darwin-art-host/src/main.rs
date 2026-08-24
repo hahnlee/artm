@@ -13,6 +13,9 @@ fn main() {
 }
 
 fn main_result() -> Result<(), Box<dyn Error>> {
+    if let Ok(delay) = env::var("DARWIN_ART_DEBUG_ATTACH_DELAY_MS") {
+        std::thread::sleep(std::time::Duration::from_millis(delay.parse()?));
+    }
     let mut arguments = env::args_os();
     let program = arguments.next().unwrap_or_else(|| "darwin-art-host".into());
     let mut values = arguments.collect::<Vec<_>>();

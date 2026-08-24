@@ -43,6 +43,8 @@ struct ActivityCandidate {
     depth: usize,
     name: String,
     theme: Option<u32>,
+    label: Option<String>,
+    label_res: Option<u32>,
     main: bool,
     launcher: bool,
 }
@@ -51,9 +53,12 @@ struct ManifestInfo {
     package: String,
     application: String,
     activity: String,
+    version_code: u32,
+    version_name: String,
     theme: u32,
     target_sdk: u32,
     label: String,
+    label_res: u32,
     icon: Option<String>,
 }
 
@@ -467,7 +472,10 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
     let mut depth = 0_usize;
     let mut package = None;
     let mut application = None;
+    let mut version_code = None;
+    let mut version_name = None;
     let mut label = None;
+    let mut label_res = None;
     let mut application_theme = None;
     let mut target_sdk = None;
     let mut current: Option<ActivityCandidate> = None;
@@ -508,6 +516,22 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                 "manifest" => {
                     package =
                         find_attribute(input, strings, attrs, attr_count, attr_size, "package")?;
+                    version_code = find_integer_attribute(
+                        input,
+                        strings,
+                        attrs,
+                        attr_count,
+                        attr_size,
+                        "versionCode",
+                    )?;
+                    version_name = find_attribute(
+                        input,
+                        strings,
+                        attrs,
+                        attr_count,
+                        attr_size,
+                        "versionName",
+                    )?;
                 }
                 "uses-sdk" => {
                     target_sdk = find_integer_attribute(
@@ -523,6 +547,9 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                     application =
                         find_attribute(input, strings, attrs, attr_count, attr_size, "name")?;
                     label = find_attribute(input, strings, attrs, attr_count, attr_size, "label")?;
+                    label_res = find_resource_attribute(
+                        input, strings, attrs, attr_count, attr_size, "label",
+                    )?;
                     application_theme = find_resource_attribute(
                         input, strings, attrs, attr_count, attr_size, "theme",
                     )?;
@@ -537,10 +564,17 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                     let theme = find_resource_attribute(
                         input, strings, attrs, attr_count, attr_size, "theme",
                     )?;
+                    let activity_label =
+                        find_attribute(input, strings, attrs, attr_count, attr_size, "label")?;
+                    let activity_label_res = find_resource_attribute(
+                        input, strings, attrs, attr_count, attr_size, "label",
+                    )?;
                     current = Some(ActivityCandidate {
                         depth,
                         name,
                         theme,
+                        label: activity_label,
+                        label_res: activity_label_res,
                         main: false,
                         launcher: false,
                     });
@@ -601,16 +635,22 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
         .ok_or_else(|| "launcher Activity is missing".to_owned())?;
     let activity = normalize_activity(&package, &launcher.name)?;
     let theme = launcher.theme.or(application_theme).unwrap_or(0);
-    let label = label
+    let label_res = launcher.label_res.or(label_res).unwrap_or(0);
+    let label = launcher
+        .label
+        .or(label)
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| activity_label(&activity));
     Ok(ManifestInfo {
         package,
         application,
         activity,
+        version_code: version_code.unwrap_or(0),
+        version_name: version_name.unwrap_or_default(),
         theme,
         target_sdk: target_sdk.unwrap_or(1),
         label,
+        label_res,
         icon: None,
     })
 }
@@ -661,7 +701,7 @@ fn validate_dex(input: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn inspect(path: &Path) -> Result<ManifestInfo> {
+fn inspect(path: &Path, external_dex: Option<&Path>) -> Result<(ManifestInfo, &'static str)> {
     let metadata = fs::metadata(path).map_err(|error| format!("APK metadata failed: {error}"))?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_APK_SIZE as u64 {
         return Err(format!("APK is outside the 1..={MAX_APK_SIZE} byte cap"));
@@ -686,15 +726,47 @@ fn inspect(path: &Path) -> Result<ManifestInfo> {
             && entry.name.ends_with(b".dex")
             && entry.name != b"classes.dex"
     });
-    if manifest_entries.len() != 1 || dex_entries.len() != 1 || secondary_dex {
-        return Err("APK must contain one manifest and one primary classes.dex only".to_owned());
+    if manifest_entries.len() != 1 || secondary_dex {
+        return Err("APK must contain one manifest and no secondary DEX files".to_owned());
     }
     let manifest = entry_bytes(&input, manifest_entries[0], MAX_MANIFEST_SIZE)?;
-    let dex = entry_bytes(&input, dex_entries[0], MAX_DEX_SIZE)?;
+    let (dex, dex_source) = match external_dex {
+        Some(dex_path) => {
+            if !dex_entries.is_empty() {
+                return Err(
+                    "external DEX is only valid for a preoptimized APK without classes.dex"
+                        .to_owned(),
+                );
+            }
+            let metadata = fs::metadata(dex_path)
+                .map_err(|error| format!("external DEX metadata failed: {error}"))?;
+            if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_DEX_SIZE as u64 {
+                return Err(format!(
+                    "external DEX is outside the 1..={MAX_DEX_SIZE} byte cap"
+                ));
+            }
+            (
+                fs::read(dex_path).map_err(|error| format!("external DEX read failed: {error}"))?,
+                "external",
+            )
+        }
+        None => {
+            if dex_entries.len() != 1 {
+                return Err(
+                    "APK must contain one primary classes.dex or provide an external DEX"
+                        .to_owned(),
+                );
+            }
+            (
+                entry_bytes(&input, dex_entries[0], MAX_DEX_SIZE)?,
+                "primary",
+            )
+        }
+    };
     validate_dex(&dex)?;
     let mut info = parse_manifest(&manifest)?;
     info.icon = icon_entry(&entries);
-    Ok(info)
+    Ok((info, dex_source))
 }
 
 fn descriptor(class_name: &str) -> String {
@@ -708,21 +780,29 @@ fn run() -> Result<()> {
         .unwrap_or_else(|| "android-apk-app-runtime".into());
     let path = args
         .next()
-        .ok_or_else(|| format!("usage: {} APK", Path::new(&program).display()))?;
+        .ok_or_else(|| format!("usage: {} APK [APP_DEX]", Path::new(&program).display()))?;
+    let external_dex = args.next();
     if args.next().is_some() {
-        return Err(format!("usage: {} APK", Path::new(&program).display()));
+        return Err(format!(
+            "usage: {} APK [APP_DEX]",
+            Path::new(&program).display()
+        ));
     }
-    let info = inspect(Path::new(&path))?;
+    let (info, dex_source) = inspect(Path::new(&path), external_dex.as_deref().map(Path::new))?;
     println!(
-        "apk-app-runtime: package={} application={} activity={} descriptor={} theme={:#x} target_sdk={} label={} icon={} dex=primary native=0",
+        "apk-app-runtime: package={} application={} activity={} descriptor={} version_code={} version_name={} theme={:#x} target_sdk={} label={} label_res={:#x} icon={} dex={} native=0",
         info.package,
         info.application,
         info.activity,
         descriptor(&info.activity),
+        info.version_code,
+        info.version_name,
         info.theme,
         info.target_sdk,
         info.label,
-        info.icon.as_deref().unwrap_or("none")
+        info.label_res,
+        info.icon.as_deref().unwrap_or("none"),
+        dex_source
     );
     Ok(())
 }

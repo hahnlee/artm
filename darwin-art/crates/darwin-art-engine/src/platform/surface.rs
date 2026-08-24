@@ -1,9 +1,9 @@
 use super::abi::EngineSymbols;
 use core::ffi::c_void;
 use darwin_art_engine_sys::{
-    PointerEvent, PointerEventV2, SurfaceDestroyFn, SurfaceGetSizeFn, SurfaceNextPointerEventFn,
-    SurfaceNextPointerEventV2Fn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn,
-    SurfaceUpdateFn,
+    KeyEventV1, PointerEvent, PointerEventV2, SurfaceDestroyFn, SurfaceGetSizeFn,
+    SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn, SurfaceNextPointerEventV2Fn,
+    SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn, SurfaceUpdateFn,
 };
 use darwin_art_runtime::NativeResource;
 use std::{mem::size_of, ptr::NonNull};
@@ -20,6 +20,7 @@ pub struct SurfaceSession {
     pump_events: SurfacePumpEventsFn,
     next_pointer_event: SurfaceNextPointerEventFn,
     next_pointer_event_v2: Option<SurfaceNextPointerEventV2Fn>,
+    next_key_event_v1: Option<SurfaceNextKeyEventV1Fn>,
     destroy: SurfaceDestroyFn,
     armed: bool,
     close_status: Option<i32>,
@@ -36,6 +37,7 @@ impl SurfaceSession {
             pump_events: symbols.surface.pump_events,
             next_pointer_event: symbols.surface.next_pointer_event,
             next_pointer_event_v2: symbols.surface.next_pointer_event_v2,
+            next_key_event_v1: symbols.surface.next_key_event_v1,
             destroy: symbols.surface.destroy,
             armed: true,
             close_status: None,
@@ -132,6 +134,17 @@ impl SurfaceSession {
             return false;
         };
         let Some(next) = self.next_pointer_event_v2 else {
+            return false;
+        };
+        // SAFETY: event is writable POD and the handle is live.
+        unsafe { next(handle.as_ptr(), event) }
+    }
+
+    pub fn next_key_event_v1(&self, event: &mut KeyEventV1) -> bool {
+        let Some(handle) = self.handle.filter(|_| self.armed) else {
+            return false;
+        };
+        let Some(next) = self.next_key_event_v1 else {
             return false;
         };
         // SAFETY: event is writable POD and the handle is live.

@@ -466,6 +466,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_destroy")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_dispatch_pointer")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_dispatch_pointer_v2")
+        .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_dispatch_key_v1")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_pump_frame")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_resize")
@@ -477,6 +478,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event_v2")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_next_key_event_v1")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_gpu_active_canvas")
@@ -566,6 +568,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
             "-L/opt/homebrew/opt/icu4c@78/lib",
             "-lfmt",
             "-llz4",
+            "-lsqlite3",
             "-licui18n",
             "-licuuc",
             "-licudata",

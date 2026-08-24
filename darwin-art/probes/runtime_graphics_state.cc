@@ -1,5 +1,7 @@
 #include "runtime_graphics_state.h"
 
+#include "darwin_framework_natives.h"
+
 #if defined(DARWIN_ART_REAL_GRAPHICS)
 #define private public
 #define protected public
@@ -55,6 +57,20 @@ bool retain_interactive_root(GraphicsState* state, JNIEnv* env, jobject root,
   return state->interactive_root != nullptr && !env->ExceptionCheck();
 }
 
+bool retain_interactive_view_root(GraphicsState* state, JNIEnv* env,
+                                  jobject view_root) {
+  if (state == nullptr || env == nullptr || view_root == nullptr) return false;
+  if (state->interactive_view_root != nullptr) {
+    env->DeleteGlobalRef(state->interactive_view_root);
+    state->interactive_view_root = nullptr;
+  }
+  state->interactive_view_root = env->NewGlobalRef(view_root);
+  if (state->interactive_view_root == nullptr || env->ExceptionCheck()) {
+    return false;
+  }
+  return darwin_art::FocusFrameworkViewRoot(env, view_root);
+}
+
 bool retain_hardware_context(GraphicsState* state, JNIEnv* env, jobject context) {
   if (state == nullptr || env == nullptr || context == nullptr ||
       env->ExceptionCheck()) {
@@ -85,6 +101,25 @@ void shutdown(GraphicsState* state, JNIEnv* env) {
     env->DeleteGlobalRef(state->pressed_view);
     state->pressed_view = nullptr;
   }
+  if (state->interactive_view_root != nullptr) {
+    env->DeleteGlobalRef(state->interactive_view_root);
+    state->interactive_view_root = nullptr;
+  }
+  if (state->pointer_dispatch_root != nullptr) {
+    env->DeleteGlobalRef(state->pointer_dispatch_root);
+    state->pointer_dispatch_root = nullptr;
+  }
+  if (state->pointer_dispatch_view_root != nullptr) {
+    env->DeleteGlobalRef(state->pointer_dispatch_view_root);
+    state->pointer_dispatch_view_root = nullptr;
+  }
+  state->pointer_dispatch_offset_x = 0.0f;
+  state->pointer_dispatch_offset_y = 0.0f;
+  state->pointer_dispatch_is_window = false;
+  state->pointer_down_x = 0.0f;
+  state->pointer_down_y = 0.0f;
+  state->pointer_touch_slop = 8;
+  state->pointer_click_candidate = false;
   if (state->interactive_root != nullptr) {
     env->DeleteGlobalRef(state->interactive_root);
     state->interactive_root = nullptr;

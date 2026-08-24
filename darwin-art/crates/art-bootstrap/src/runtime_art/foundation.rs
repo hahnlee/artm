@@ -99,6 +99,7 @@ pub(crate) fn build_runtime_core(root: &Path) -> Result<()> {
     for patch in [
         "patches/art/0003-darwin-allow-pthread-monitors.patch",
         "patches/art/0004-darwin-uncontended-monitor-lock.patch",
+        "patches/art/0004b-darwin-cross-thread-monitor-lock.patch",
         "patches/art/0026-darwin-base-relative-object-references-only.patch",
     ] {
         run_command(

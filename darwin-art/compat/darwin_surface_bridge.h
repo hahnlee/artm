@@ -81,6 +81,26 @@ typedef struct DarwinArtPointerEventV2 {
   float size_value;
 } DarwinArtPointerEventV2;
 
+// Host keyboard packet. macOS key events are modeled as an external Android
+// physical keyboard (device 1, SOURCE_KEYBOARD), while the framework's
+// VIRTUAL_KEYBOARD id remains only a default KeyCharacterMap fallback.
+typedef struct DarwinArtKeyEventV1 {
+  uint32_t version;
+  uint32_t size;
+  uint32_t action;
+  uint32_t flags;
+  uint64_t sequence;
+  uint64_t event_time_nanos;
+  uint64_t down_time_nanos;
+  uint32_t key_code;
+  uint32_t scan_code;
+  uint32_t meta_state;
+  uint32_t repeat_count;
+  int32_t device_id;
+  uint32_t source;
+  uint32_t unicode_char;
+} DarwinArtKeyEventV1;
+
 // Creates persistent Apple graphics objects. The returned handle owns them
 // until darwin_art_surface_destroy(). Returns null on failure and writes the
 // reason to out_result when it is non-null.
@@ -100,6 +120,10 @@ bool darwin_art_surface_get_size(
     DarwinArtSurface* surface,
     uint32_t* width,
     uint32_t* height);
+
+DarwinArtSurfaceResult darwin_art_surface_set_title(
+    DarwinArtSurface* surface,
+    const char* title);
 
 // Waits for the previous GPU presentation to finish, then locks the IOSurface
 // for a CPU producer. Only one producer mapping may be active per surface.
@@ -161,6 +185,10 @@ bool darwin_art_surface_next_pointer_event(
 bool darwin_art_surface_next_pointer_event_v2(
     DarwinArtSurface* surface,
     DarwinArtPointerEventV2* out_event);
+
+bool darwin_art_surface_next_key_event_v1(
+    DarwinArtSurface* surface,
+    DarwinArtKeyEventV1* out_event);
 
 // Waits for the most recently submitted command buffer, closes the window,
 // and releases all owned Apple objects.

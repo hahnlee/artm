@@ -1,7 +1,9 @@
 use crate::config::{HostError, HostOutcome, RunOptions};
 use crate::runtime::HostRuntime;
-use crate::surface::{owned_surface_next_pointer_event_v2, owned_surface_pump_events};
-use darwin_art_engine_sys::{PointerEventV2, ProcessResult};
+use crate::surface::{
+    owned_surface_next_key_event_v1, owned_surface_next_pointer_event_v2, owned_surface_pump_events,
+};
+use darwin_art_engine_sys::{KeyEventV1, PointerEventV2, ProcessResult};
 use darwin_art_runtime::Subsystem;
 use std::time::Instant;
 
@@ -53,6 +55,16 @@ fn dispatch_queued_events(runtime: &mut HostRuntime) -> Result<u64, HostError> {
     }
     if let Some(move_event) = pending_move {
         dispatch(move_event)?;
+    }
+    let mut key_event = KeyEventV1::default();
+    while owned_surface_next_key_event_v1(runtime, &mut key_event) {
+        let dispatch_status = runtime
+            .graphics()
+            .map_or(-1, |graphics| graphics.dispatch_key_v1(&key_event));
+        if dispatch_status != 0 {
+            return Err(HostError::RuntimeFailed(dispatch_status));
+        }
+        dispatched += 1;
     }
     Ok(dispatched)
 }
@@ -115,16 +127,24 @@ pub(super) fn run(
             let (x, y) = sample.split_once(',')?;
             Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))
         });
+    let parse_drag = |path: String| {
+        path.split(';')
+            .filter_map(|sample| {
+                let (x, y) = sample.split_once(',')?;
+                Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))
+            })
+            .collect::<Vec<_>>()
+    };
     let test_drag = std::env::var("DARWIN_ART_TEST_POINTER_DRAG")
         .ok()
-        .map(|path| {
-            path.split(';')
-                .filter_map(|sample| {
-                    let (x, y) = sample.split_once(',')?;
-                    Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))
-                })
-                .collect::<Vec<_>>()
-        })
+        .map(&parse_drag)
+        .filter(|points| points.len() >= 2);
+    // Acceptance scripts may need ordinary taps to reach a gesture surface
+    // first (for example selecting Calendar's Month view). This remains the
+    // same MotionEvent ABI path; it only schedules a drag after the tap list.
+    let post_sequence_drag = std::env::var("DARWIN_ART_TEST_POINTER_AFTER_SEQUENCE_DRAG")
+        .ok()
+        .map(&parse_drag)
         .filter(|points| points.len() >= 2);
     // Test-only multi-tap input uses the same MotionEvent/DecorView route as
     // native mouse input. Samples after the first wait for their third field
@@ -154,6 +174,8 @@ pub(super) fn run(
                 .and_then(|samples| samples.first().map(|&(x, y, _)| (x, y)))
         })
         .or(test_pointer);
+    let replay_standalone_pointer =
+        test_drag.is_none() && test_tap_sequence.is_none() && post_sequence_drag.is_none();
     let test_hold_ms = std::env::var("DARWIN_ART_TEST_POINTER_HOLD_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -165,17 +187,43 @@ pub(super) fn run(
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .filter(|hz| *hz > 0);
+    let test_key_sequence = std::env::var("DARWIN_ART_TEST_KEY_SEQUENCE")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .filter_map(|sample| {
+                    let (code, meta) = sample.split_once(':').unwrap_or((sample, "0"));
+                    Some((code.parse::<u32>().ok()?, meta.parse::<u32>().ok()?))
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|sequence| !sequence.is_empty())
+        .or_else(|| {
+            std::env::var("DARWIN_ART_TEST_KEY_CODE")
+                .ok()
+                .and_then(|value| value.parse::<u32>().ok())
+                .map(|code| vec![(code, 0)])
+        });
     let mut synthetic_moves = 0_u64;
     eprintln!(
-        "DARWIN_ART gpu test pointer={test_pointer:?} drag_points={} hold_ms={test_hold_ms} cancel={test_cancel} hz={test_pointer_hz:?}",
+        "DARWIN_ART gpu test pointer={test_pointer:?} drag_points={} hold_ms={test_hold_ms} cancel={test_cancel} hz={test_pointer_hz:?} keys={}",
         test_drag.as_ref().map_or(0, Vec::len),
+        test_key_sequence.as_ref().map_or(0, Vec::len),
     );
 
+    let synthetic_clock = Instant::now();
     let synthetic_event = |action: u32, x: f32, y: f32| {
         let mut event = PointerEventV2::default();
         event.version = 2;
         event.size = std::mem::size_of::<PointerEventV2>() as u32;
         event.action = action;
+        // Zero delegates timestamping to the native input bridge, which uses
+        // CLOCK_MONOTONIC just like NSEvent.timestamp. An Instant elapsed from
+        // this loop's start is not Android uptime and is treated as stale by
+        // ViewRoot's input stages.
+        event.event_time_nanos = 0;
+        event.down_time_nanos = 0;
         event.pointer_count = 1;
         event.x = x;
         event.y = y;
@@ -185,6 +233,22 @@ pub(super) fn run(
         event.size_value = 1.0;
         event
     };
+
+    // WindowManager assigns focus when the ViewRoot is attached. Drain that
+    // focus/touch-mode work before admitting the first host event, preserving
+    // Android InputDispatcher's focus-before-input ordering. This is also
+    // important for synthetic acceptance tests, which otherwise can inject a
+    // DOWN in the same host turn that made the window visible.
+    if loop_error.is_none()
+        && let Err(error) = pump_frame_with_latency(
+            runtime,
+            debug_latency,
+            &mut last_input_dispatch,
+            &mut frame_latencies_us,
+        )
+    {
+        loop_error = Some(error);
+    }
 
     if loop_error.is_none()
         && let Some((x, y)) = test_pointer
@@ -303,6 +367,49 @@ pub(super) fn run(
         }
     }
     if loop_error.is_none()
+        && let Some(key_sequence) = test_key_sequence
+    {
+        eprintln!(
+            "DARWIN_ART gpu synthetic key dispatch count={}",
+            key_sequence.len()
+        );
+        for (key_code, meta_state) in key_sequence {
+            let key_down_time_nanos = synthetic_clock.elapsed().as_nanos() as u64 + 1;
+            for action in [0_u32, 1_u32] {
+                let mut event = KeyEventV1::default();
+                event.version = 1;
+                event.size = std::mem::size_of::<KeyEventV1>() as u32;
+                event.action = action;
+                event.event_time_nanos = synthetic_clock.elapsed().as_nanos() as u64 + 1;
+                event.down_time_nanos = key_down_time_nanos;
+                event.key_code = key_code;
+                event.meta_state = meta_state;
+                event.device_id = 1;
+                event.source = 0x101;
+                let dispatch_status = runtime
+                    .graphics()
+                    .map_or(-1, |graphics| graphics.dispatch_key_v1(&event));
+                if dispatch_status != 0 {
+                    loop_error = Some(HostError::RuntimeFailed(dispatch_status));
+                    break;
+                }
+            }
+            if loop_error.is_some() {
+                break;
+            }
+        }
+        if loop_error.is_none()
+            && let Err(error) = pump_frame_with_latency(
+                runtime,
+                debug_latency,
+                &mut last_input_dispatch,
+                &mut frame_latencies_us,
+            )
+        {
+            loop_error = Some(error);
+        }
+    }
+    if loop_error.is_none()
         && let Some(sequence) = test_tap_sequence.as_ref()
     {
         for &(x, y, delay_ms) in sequence.iter().skip(1) {
@@ -357,6 +464,74 @@ pub(super) fn run(
             }
         }
     }
+    if loop_error.is_none()
+        && let Some(points) = post_sequence_drag.as_ref()
+    {
+        let (down_x, down_y) = points[0];
+        let down = synthetic_event(0, down_x, down_y);
+        let status = runtime
+            .graphics()
+            .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&down));
+        if status != 0 {
+            loop_error = Some(HostError::RuntimeFailed(status));
+        } else {
+            frames_presented += 1;
+            for &(move_x, move_y) in points.iter().skip(1) {
+                if loop_error.is_some() {
+                    break;
+                }
+                let pump_status = owned_surface_pump_events(runtime, 0.016);
+                if pump_status != 0 {
+                    loop_error = Some(HostError::SurfaceFailed {
+                        operation: "gpu_test_post_sequence_drag_pump",
+                        status: pump_status,
+                    });
+                    break;
+                }
+                if let Err(error) = dispatch_queued_events(runtime) {
+                    loop_error = Some(error);
+                    break;
+                }
+                let move_event = synthetic_event(2, move_x, move_y);
+                let status = runtime
+                    .graphics()
+                    .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&move_event));
+                if status != 0 {
+                    loop_error = Some(HostError::RuntimeFailed(status));
+                    break;
+                }
+                frames_presented += 1;
+                if let Err(error) = pump_frame_with_latency(
+                    runtime,
+                    debug_latency,
+                    &mut last_input_dispatch,
+                    &mut frame_latencies_us,
+                ) {
+                    loop_error = Some(error);
+                }
+            }
+            if loop_error.is_none() {
+                let (up_x, up_y) = *points.last().expect("post drag has points");
+                let up = synthetic_event(1, up_x, up_y);
+                let status = runtime
+                    .graphics()
+                    .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&up));
+                if status != 0 {
+                    loop_error = Some(HostError::RuntimeFailed(status));
+                } else {
+                    frames_presented += 1;
+                    if let Err(error) = pump_frame_with_latency(
+                        runtime,
+                        debug_latency,
+                        &mut last_input_dispatch,
+                        &mut frame_latencies_us,
+                    ) {
+                        loop_error = Some(error);
+                    }
+                }
+            }
+        }
+    }
     while remaining > 0.0 {
         let slice = remaining.min(0.016);
         let pump_status = owned_surface_pump_events(runtime, slice);
@@ -395,6 +570,7 @@ pub(super) fn run(
         // and GPU RenderNode replay alive for the test pointer so the
         // real ripple/compatibility bridge can finish on-screen.
         if loop_error.is_none()
+            && replay_standalone_pointer
             && let Some((x, y)) = test_pointer
         {
             let move_event = synthetic_event(2, x, y);

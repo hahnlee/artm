@@ -40,6 +40,7 @@ common_archive="$foundation_dir/libicuuc-common-darwin.a"
 i18n_archive="$foundation_dir/libicui18n-darwin.a"
 stubdata_archive="$foundation_dir/libicuuc-stubdata-darwin.a"
 init_archive="$foundation_dir/libandroidicuinit-darwin.a"
+zlib_archive="$project_root/_build/graphics-codecs/libz-darwin.a"
 archives=("$common_archive" "$i18n_archive" "$stubdata_archive" "$init_archive")
 counts=("$ICU_COMMON_MEMBER_COUNT" "$ICU_I18N_MEMBER_COUNT" \
         "$ICU_STUBDATA_MEMBER_COUNT" "$ICU_INIT_MEMBER_COUNT")
@@ -52,6 +53,8 @@ for ((index = 0; index < ${#archives[@]}; ++index)); do
   [[ "$members" == "${counts[$index]}" ]] ||
     fail_gate "archive member count mismatch file=$archive expected=${counts[$index]} actual=$members"
 done
+[[ -f "$zlib_archive" && "$(lipo -archs "$zlib_archive")" == arm64 ]] ||
+  fail_gate "Android zlib provider archive is missing or not arm64: $zlib_archive"
 
 source_data="$icu_root/icu4c/source/stubdata/$ICU_DATA_FILE"
 verify_sha "$source_data" "$ICU_DATA_SHA256"
@@ -112,7 +115,7 @@ link_map="$stage/android16-icu-runtime-adapter-smoke.map"
 "$cxx" -arch arm64 -isysroot "$sdk_root" "$probe_object" \
   "$framework_stub_object" \
   "${adapter_objects[@]}" "$i18n_archive" "$common_archive" \
-  -Wl,-force_load,"$init_archive" "$stubdata_archive" \
+  -Wl,-force_load,"$init_archive" "$stubdata_archive" "$zlib_archive" \
   -Wl,-map,"$link_map" -o "$executable"
 
 [[ "$(lipo -archs "$executable")" == arm64 ]] ||
@@ -132,7 +135,7 @@ if grep -E '/opt/homebrew|/usr/local|libicu(uc|i18n|data)' <<<"$dependencies" >/
   fail_gate "forbidden host ICU dependency"
 fi
 for consumed_archive in "$common_archive" "$i18n_archive" \
-                        "$stubdata_archive" "$init_archive"; do
+                        "$stubdata_archive" "$init_archive" "$zlib_archive"; do
   grep -F "$consumed_archive(" "$link_map" >/dev/null ||
     fail_gate "link map did not consume $consumed_archive"
 done
@@ -144,6 +147,48 @@ runtime="$stage/runtime"
 mkdir -p "$runtime/i18n/etc/icu" "$runtime/data" "$runtime/tzdata"
 cp "$source_data" "$runtime/i18n/etc/icu/$ICU_DATA_FILE"
 verify_sha "$runtime/i18n/etc/icu/$ICU_DATA_FILE" "$ICU_DATA_SHA256"
+
+# Android 16 keeps the Olson database and ICU timezone resources in the
+# timezone APEX, separate from the i18n APEX / ICU common data.  The managed
+# TimeZoneDataFiles owner selects format-major 9, so preserve that exact APEX
+# layout under ANDROID_TZDATA_ROOT instead of falling back to host zoneinfo.
+android_sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
+if [[ -n "${DARWIN_ART_ANDROID16_SYSTEM_IMAGE:-}" ]]; then
+  system_image="$DARWIN_ART_ANDROID16_SYSTEM_IMAGE"
+else
+  system_image=""
+  for candidate in \
+    "$android_sdk/system-images/android-36/google_apis_playstore/arm64-v8a/system.img" \
+    "$android_sdk/system-images/android-36/google_apis_playstore_ps16k/arm64-v8a/system.img"; do
+    if [[ -f "$candidate" ]]; then
+      system_image="$candidate"
+      break
+    fi
+  done
+fi
+[[ -f "$system_image" ]] ||
+  fail_gate "Android 16 system image is required for timezone APEX data"
+timezone_apex="$stage/com.google.android.tzdata6.apex"
+cargo run --quiet --release \
+  --manifest-path "$project_root/tools/super-i18n-apex-extract/Cargo.toml" -- \
+  "$system_image" "$timezone_apex" com.google.android.tzdata6.apex >/dev/null
+timezone_files=(
+  tz_version tzdata telephonylookup.xml tzlookup.xml
+  icu/metaZones.res icu/timezoneTypes.res icu/windowsZones.res icu/zoneinfo64.res
+)
+for relative in "${timezone_files[@]}"; do
+  destination="$runtime/tzdata/etc/tz/versioned/9/$relative"
+  mkdir -p "$(dirname "$destination")"
+  cargo run --quiet \
+    --manifest-path "$project_root/tools/apex-ext2-extract/Cargo.toml" -- \
+    "$timezone_apex" "$destination" "/etc/tz/versioned/9/$relative" >/dev/null
+  [[ -s "$destination" ]] || fail_gate "empty timezone APEX file: $relative"
+done
+[[ "$(stat -f '%z' "$runtime/tzdata/etc/tz/versioned/9/tz_version")" == 17 ]] ||
+  fail_gate "unexpected Android 16 tz_version size"
+[[ "$(head -c 6 "$runtime/tzdata/etc/tz/versioned/9/tzdata")" == "tzdata" ]] ||
+  fail_gate "unexpected Android 16 tzdata magic"
+
 output="$(ANDROID_DATA="$runtime/data" ANDROID_TZDATA_ROOT="$runtime/tzdata" \
   ANDROID_I18N_ROOT="$runtime/i18n" "$executable")"
 [[ "$output" == "$EXPECTED_SMOKE_PREFIX"* && "$output" == *' data=76.'* ]] ||

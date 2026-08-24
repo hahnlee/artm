@@ -128,6 +128,30 @@ int prepare(JNIEnv* env, jclass probe_resources_class,
           : env->NewObject(probe_resources_class, probe_resources_constructor,
                            out->asset_manager,
                            use_framework_resources ? JNI_TRUE : JNI_FALSE);
+  if (use_framework_resources && out->asset_manager != nullptr &&
+      out->probe_resources != nullptr && !env->ExceptionCheck()) {
+    // Zygote normally initializes these process-wide singletons before any
+    // application or background worker can call Resources.getSystem(). The
+    // Darwin process has no Zygote, so publish the already validated pinned
+    // framework resources at the equivalent bootstrap boundary.
+    jfieldID system_assets = env->GetStaticFieldID(
+        out->asset_manager_class, "sSystem",
+        "Landroid/content/res/AssetManager;");
+    jclass resources_class = env->FindClass("android/content/res/Resources");
+    jfieldID system_resources =
+        resources_class == nullptr
+            ? nullptr
+            : env->GetStaticFieldID(resources_class, "mSystem",
+                                    "Landroid/content/res/Resources;");
+    if (system_assets != nullptr && system_resources != nullptr &&
+        !env->ExceptionCheck()) {
+      env->SetStaticObjectField(out->asset_manager_class, system_assets,
+                                out->asset_manager);
+      env->SetStaticObjectField(resources_class, system_resources,
+                                out->probe_resources);
+    }
+    env->DeleteLocalRef(resources_class);
+  }
   if (out->activity_info == nullptr || out->application == nullptr ||
       out->asset_manager == nullptr || out->configured_apk_assets == nullptr ||
       out->probe_resources == nullptr || env->ExceptionCheck()) {

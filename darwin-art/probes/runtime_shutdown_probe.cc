@@ -79,6 +79,179 @@ bool ShutdownAndroidAsyncTaskExecutor(JNIEnv* env) {
   return succeeded;
 }
 
+bool StopAndroidApplicationThreads(JNIEnv* env) {
+  jclass thread_class = env->FindClass("java/lang/Thread");
+  jclass handler_thread_class = env->FindClass("android/os/HandlerThread");
+  if (thread_class == nullptr || handler_thread_class == nullptr) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(thread_class);
+    env->DeleteLocalRef(handler_thread_class);
+    return false;
+  }
+  jmethodID current_thread =
+      env->GetStaticMethodID(thread_class, "currentThread", "()Ljava/lang/Thread;");
+  jmethodID all_stacks = env->GetStaticMethodID(
+      thread_class, "getAllStackTraces", "()Ljava/util/Map;");
+  jmethodID is_daemon = env->GetMethodID(thread_class, "isDaemon", "()Z");
+  jmethodID get_name =
+      env->GetMethodID(thread_class, "getName", "()Ljava/lang/String;");
+  jmethodID interrupt = env->GetMethodID(thread_class, "interrupt", "()V");
+  jfieldID thread_target =
+      env->GetFieldID(thread_class, "target", "Ljava/lang/Runnable;");
+  jmethodID quit_safely =
+      env->GetMethodID(handler_thread_class, "quitSafely", "()Z");
+  jclass thread_pool_class =
+      env->FindClass("java/util/concurrent/ThreadPoolExecutor");
+  jmethodID shutdown_pool =
+      thread_pool_class == nullptr
+          ? nullptr
+          : env->GetMethodID(thread_pool_class, "shutdownNow", "()Ljava/util/List;");
+  if (current_thread == nullptr || all_stacks == nullptr ||
+      is_daemon == nullptr || get_name == nullptr || interrupt == nullptr ||
+      thread_target == nullptr ||
+      quit_safely == nullptr || thread_pool_class == nullptr ||
+      shutdown_pool == nullptr) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(thread_class);
+    env->DeleteLocalRef(handler_thread_class);
+    env->DeleteLocalRef(thread_pool_class);
+    return false;
+  }
+  jobject current = env->CallStaticObjectMethod(thread_class, current_thread);
+  jobject stacks = env->CallStaticObjectMethod(thread_class, all_stacks);
+  jclass map_class = env->FindClass("java/util/Map");
+  jmethodID key_set = map_class == nullptr
+                          ? nullptr
+                          : env->GetMethodID(map_class, "keySet", "()Ljava/util/Set;");
+  jobject threads = key_set == nullptr ? nullptr
+                                       : env->CallObjectMethod(stacks, key_set);
+  jclass collection_class = env->FindClass("java/util/Collection");
+  jmethodID to_array =
+      collection_class == nullptr
+          ? nullptr
+          : env->GetMethodID(collection_class, "toArray", "()[Ljava/lang/Object;");
+  jobjectArray array = to_array == nullptr
+                           ? nullptr
+                           : static_cast<jobjectArray>(
+                                 env->CallObjectMethod(threads, to_array));
+  bool succeeded = array != nullptr && !env->ExceptionCheck();
+  if (succeeded) {
+    const jsize count = env->GetArrayLength(array);
+    for (jsize index = 0; index < count; ++index) {
+      jobject thread = env->GetObjectArrayElement(array, index);
+      if (thread == nullptr || env->IsSameObject(thread, current) ||
+          env->CallBooleanMethod(thread, is_daemon) == JNI_TRUE) {
+        env->DeleteLocalRef(thread);
+        continue;
+      }
+      if (env->IsInstanceOf(thread, handler_thread_class)) {
+        env->CallBooleanMethod(thread, quit_safely);
+      }
+      jobject target = env->GetObjectField(thread, thread_target);
+      jstring name =
+          static_cast<jstring>(env->CallObjectMethod(thread, get_name));
+      const char* native_name =
+          name == nullptr ? nullptr : env->GetStringUTFChars(name, nullptr);
+      jclass concrete_thread_class = env->GetObjectClass(thread);
+      jclass class_class_for_thread = env->FindClass("java/lang/Class");
+      jmethodID class_name_for_thread =
+          class_class_for_thread == nullptr
+              ? nullptr
+              : env->GetMethodID(class_class_for_thread, "getName",
+                                 "()Ljava/lang/String;");
+      jstring concrete_name =
+          class_name_for_thread == nullptr
+              ? nullptr
+              : static_cast<jstring>(env->CallObjectMethod(
+                    concrete_thread_class, class_name_for_thread));
+      const char* native_concrete_name =
+          concrete_name == nullptr
+              ? nullptr
+              : env->GetStringUTFChars(concrete_name, nullptr);
+      std::cerr << "ART Darwin shutdown: stopping non-daemon thread="
+                << (native_name == nullptr ? "<unnamed>" : native_name)
+                << " class="
+                << (native_concrete_name == nullptr ? "<unknown>"
+                                                    : native_concrete_name)
+                << " target=" << (target == nullptr ? 0 : 1) << "\n";
+      if (native_name != nullptr) env->ReleaseStringUTFChars(name, native_name);
+      if (native_concrete_name != nullptr) {
+        env->ReleaseStringUTFChars(concrete_name, native_concrete_name);
+      }
+      env->DeleteLocalRef(name);
+      env->DeleteLocalRef(concrete_name);
+      env->DeleteLocalRef(class_class_for_thread);
+      jmethodID shutdown_method =
+          env->GetMethodID(concrete_thread_class, "shutdown", "()V");
+      if (shutdown_method == nullptr) {
+        env->ExceptionClear();
+      } else {
+        env->CallVoidMethod(thread, shutdown_method);
+      }
+      if (target != nullptr) {
+        jclass target_class = env->GetObjectClass(target);
+        jclass class_class = env->FindClass("java/lang/Class");
+        jmethodID class_name =
+            class_class == nullptr
+                ? nullptr
+                : env->GetMethodID(class_class, "getName", "()Ljava/lang/String;");
+        jstring target_name =
+            class_name == nullptr
+                ? nullptr
+                : static_cast<jstring>(
+                      env->CallObjectMethod(target_class, class_name));
+        const char* native_target_name =
+            target_name == nullptr
+                ? nullptr
+                : env->GetStringUTFChars(target_name, nullptr);
+        std::cerr << "ART Darwin shutdown: thread target class="
+                  << (native_target_name == nullptr ? "<unknown>"
+                                                    : native_target_name)
+                  << "\n";
+        if (native_target_name != nullptr) {
+          env->ReleaseStringUTFChars(target_name, native_target_name);
+        }
+        env->DeleteLocalRef(target_name);
+        env->DeleteLocalRef(class_class);
+        jfieldID owner = env->GetFieldID(
+            target_class, "this$0", "Ljava/util/concurrent/ThreadPoolExecutor;");
+        if (owner == nullptr) {
+          env->ExceptionClear();
+        } else {
+          jobject pool = env->GetObjectField(target, owner);
+          if (pool != nullptr && env->IsInstanceOf(pool, thread_pool_class)) {
+            jobject abandoned = env->CallObjectMethod(pool, shutdown_pool);
+            env->DeleteLocalRef(abandoned);
+          }
+          env->DeleteLocalRef(pool);
+        }
+        env->DeleteLocalRef(target_class);
+      }
+      env->DeleteLocalRef(target);
+      env->DeleteLocalRef(concrete_thread_class);
+      env->CallVoidMethod(thread, interrupt);
+      if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        succeeded = false;
+      }
+      env->DeleteLocalRef(thread);
+    }
+  } else {
+    env->ExceptionClear();
+  }
+  env->DeleteLocalRef(array);
+  env->DeleteLocalRef(collection_class);
+  env->DeleteLocalRef(threads);
+  env->DeleteLocalRef(map_class);
+  env->DeleteLocalRef(stacks);
+  env->DeleteLocalRef(current);
+  env->DeleteLocalRef(handler_thread_class);
+  env->DeleteLocalRef(thread_pool_class);
+  env->DeleteLocalRef(thread_class);
+  return succeeded;
+}
+
 }  // namespace
 
 int32_t run_shutdown(const ShutdownState& state) {
@@ -116,6 +289,11 @@ int32_t run_shutdown(const ShutdownState& state) {
       // state so a loader worker cannot keep shutdown blocked indefinitely.
       if (!ShutdownAndroidAsyncTaskExecutor(art_thread->GetJniEnv())) {
         std::cerr << "ART Darwin shutdown: AsyncTask executor shutdown failed\n";
+        darwin_art_process::mark_shutdown_failed();
+        return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+      }
+      if (!StopAndroidApplicationThreads(art_thread->GetJniEnv())) {
+        std::cerr << "ART Darwin shutdown: application thread stop failed\n";
         darwin_art_process::mark_shutdown_failed();
         return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
       }

@@ -254,6 +254,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event_v2")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_next_key_event_v1")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_destroy")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_active_gpu")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_gpu_active_canvas")
@@ -343,6 +344,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
             "-L/opt/homebrew/opt/icu4c@78/lib",
             "-lfmt",
             "-llz4",
+            "-lsqlite3",
             "-licui18n",
             "-licuuc",
             "-licudata",

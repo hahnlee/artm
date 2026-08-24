@@ -469,7 +469,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
         content_root_class, package_manager, true, use_framework_resources,
         expect_apk_widgets, !process_options.apk_app_native_path.empty(),
         run_framework_button, window_scale, framework_res_apk, apk_app_package,
-        apk_app_activity, config->app_dex, graphics_state);
+        apk_app_activity, process_options.apk_app_resource_apk.c_str(),
+        graphics_state);
   } else {
     presentation_status = darwin_art_presentation::run(
         env, self, activity_instance, probe_activity_class, probe_context_class,
@@ -477,10 +478,16 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
         content_root_class, package_manager, false, use_framework_resources,
         expect_apk_widgets, !process_options.apk_app_native_path.empty(),
         run_framework_button, window_scale, framework_res_apk, apk_app_package,
-        apk_app_activity, config->app_dex, graphics_state);
+        apk_app_activity, process_options.apk_app_resource_apk.c_str(),
+        graphics_state);
   }
   if (presentation_status != 0) {
     return presentation_status;
+  }
+  if (run_apk_app &&
+      darwin_art_graphics::refresh_gpu_surface_identity(graphics_state) != 0) {
+    std::cerr << "ART Android GPU: application identity update failed\n";
+    return 33;
   }
 
   darwin_art_jni_acceptance_phase::Results jni_results;

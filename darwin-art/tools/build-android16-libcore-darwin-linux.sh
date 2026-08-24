@@ -131,6 +131,8 @@ my %supported = (
   sysconf => 'DarwinLinuxSysconf',
   getenv => 'DarwinLinuxGetenv', getpwuid => 'DarwinLinuxGetpwuid',
   stat => 'DarwinLinuxStat', lseek => 'DarwinLinuxLseek',
+  statvfs => 'DarwinLinuxStatvfs', fstatvfs => 'DarwinLinuxFstatvfs',
+  chmod => 'DarwinLinuxChmod', fchmod => 'DarwinLinuxFchmod',
   uname => 'DarwinLinuxUname',
   strerror => 'DarwinLinuxStrerror', strsignal => 'DarwinLinuxStrsignal',
   android_fdsan_exchange_owner_tag => 'DarwinLinuxFdsanExchangeOwnerTag',
@@ -202,7 +204,6 @@ if grep -F '...' "$wrappers" >/dev/null; then
   fail "generated wrapper contains a variadic parameter"
 fi
 for expected in \
-  $'chmod\t(Ljava/lang/String;I)V\tvoid\tJNIEnv* env,jobject,jstring,jint' \
   $'fcntlInt\t(Ljava/io/FileDescriptor;II)I\tjint\tJNIEnv* env,jobject,jobject,jint,jint' \
   $'gai_strerror\t(I)Ljava/lang/String;\tjstring\tJNIEnv* env,jobject,jint' \
   $'access\t(Ljava/lang/String;I)Z\tjboolean\tJNIEnv* env,jobject,jstring,jint'; do

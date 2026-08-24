@@ -14,7 +14,9 @@ mkdir -p "$classes" "$out/input"
 }
 
 javac --release 8 -encoding UTF-8 -d "$classes" -classpath "$android_jar" \
-  "$root/tools/android-framework-compat/src/android/provider/DeviceConfig.java"
+  "$root/tools/android-framework-compat/src/android/provider/DeviceConfig.java" \
+  "$root/tools/android-framework-compat/src/android/util/StatsEvent.java" \
+  "$root/tools/android-framework-compat/src/android/util/StatsLog.java"
 unzip -p "$framework" classes.dex > "$out/input/framework.dex"
 if [[ -f "$out/framework-compat.jar" ]]; then
   mv "$out/framework-compat.jar" "$out/framework-compat.previous.jar"
@@ -24,7 +26,10 @@ fi
   "$out/input/framework.dex" \
   "$classes/android/provider/DeviceConfig.class" \
   "$classes/android/provider/DeviceConfig\$Properties.class" \
-  "$classes/android/provider/DeviceConfig\$OnPropertiesChangedListener.class"
+  "$classes/android/provider/DeviceConfig\$OnPropertiesChangedListener.class" \
+  "$classes/android/util/StatsEvent.class" \
+  "$classes/android/util/StatsEvent\$Builder.class" \
+  "$classes/android/util/StatsLog.class"
 mv "$out/classes.dex" "$out/framework-compat.raw.dex"
 staged="$(mktemp -d "$out/staged.XXXXXX")"
 unzip -q "$framework" -d "$staged"

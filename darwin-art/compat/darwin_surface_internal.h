@@ -17,6 +17,7 @@
                  contentScale:(CGFloat)contentScale;
 - (BOOL)nextPointerEvent:(DarwinArtPointerEvent*)outEvent;
 - (BOOL)nextPointerEventV2:(DarwinArtPointerEventV2*)outEvent;
+- (BOOL)nextKeyEventV1:(DarwinArtKeyEventV1*)outEvent;
 - (void)cancelPointerStream;
 - (void)updateDrawableSize;
 @end

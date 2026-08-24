@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <string>
 
 #include "mirror/throwable.h"
 #include "thread-current-inl.h"
@@ -33,6 +34,25 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
       configured_target_sdk == nullptr
           ? 36
           : static_cast<jint>(std::strtoul(configured_target_sdk, nullptr, 10));
+  const char* configured_version_code =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_APP_VERSION_CODE") : nullptr;
+  const jint app_version_code =
+      configured_version_code == nullptr
+          ? 0
+          : static_cast<jint>(
+                std::strtoul(configured_version_code, nullptr, 10));
+  const char* configured_version_name =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_APP_VERSION_NAME") : nullptr;
+  std::string app_label = run_apk_app &&
+                                  std::getenv("DARWIN_ART_APK_APP_LABEL") != nullptr
+                              ? std::getenv("DARWIN_ART_APK_APP_LABEL")
+                              : "Darwin ART APK";
+  const char* configured_label_res =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_APP_LABEL_RES") : nullptr;
+  const jint app_label_res =
+      configured_label_res == nullptr
+          ? 0
+          : static_cast<jint>(std::strtoul(configured_label_res, nullptr, 0));
   if (run_apk_app) {
     jclass vm_runtime_class = env->FindClass("dalvik/system/VMRuntime");
     jmethodID get_vm_runtime =
@@ -65,6 +85,38 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
       env->SetIntField(resources->activity_info, activity_theme, app_theme);
     }
   }
+  if (run_apk_app && app_label_res != 0 && resources->probe_resources != nullptr &&
+      resources->activity_info != nullptr) {
+    jclass resources_class = env->FindClass("android/content/res/Resources");
+    jmethodID get_string =
+        resources_class == nullptr
+            ? nullptr
+            : env->GetMethodID(resources_class, "getString",
+                               "(I)Ljava/lang/String;");
+    jstring resolved_string =
+        get_string == nullptr || env->ExceptionCheck()
+            ? nullptr
+            : static_cast<jstring>(env->CallObjectMethod(
+                  resources->probe_resources, get_string, app_label_res));
+    if (resolved_string != nullptr && !env->ExceptionCheck()) {
+      const char* utf = env->GetStringUTFChars(resolved_string, nullptr);
+      if (utf != nullptr) {
+        app_label = utf;
+        env->ReleaseStringUTFChars(resolved_string, utf);
+        setenv("DARWIN_ART_APK_APP_LABEL", app_label.c_str(), 1);
+      }
+      jfieldID non_localized_label = env->GetFieldID(
+          resources->activity_info_class, "nonLocalizedLabel",
+          "Ljava/lang/CharSequence;");
+      if (non_localized_label != nullptr && !env->ExceptionCheck()) {
+        env->SetObjectField(resources->activity_info, non_localized_label,
+                            resolved_string);
+      }
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (resolved_string != nullptr) env->DeleteLocalRef(resolved_string);
+    if (resources_class != nullptr) env->DeleteLocalRef(resources_class);
+  }
   out->activity_class = env->GetSuperclass(probe_activity_class);
   jclass package_manager_class = env->GetObjectClass(package_manager);
   jmethodID configure_package_manager =
@@ -73,21 +125,29 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
           : env->GetMethodID(
                 package_manager_class, "configure",
                 "(Ljava/lang/String;Ljava/lang/String;"
-                "Landroid/content/pm/ActivityInfo;I)V");
+                "Landroid/content/pm/ActivityInfo;I"
+                "Landroid/content/res/Resources;ILjava/lang/String;)V");
   jstring configured_package = env->NewStringUTF(
       run_apk_app ? apk_app_package : "dev.darwinart.probe");
   jstring configured_activity = env->NewStringUTF(
       run_apk_app ? apk_app_activity : "dev.darwinart.probe.ProbeActivity");
+  jstring configured_version = env->NewStringUTF(
+      configured_version_name == nullptr ? "0" : configured_version_name);
   if (configure_package_manager != nullptr && configured_package != nullptr &&
-      configured_activity != nullptr && resources->activity_info != nullptr) {
+      configured_activity != nullptr && configured_version != nullptr &&
+      resources->activity_info != nullptr) {
     env->CallVoidMethod(package_manager, configure_package_manager,
                         configured_package, configured_activity,
-                        resources->activity_info, app_target_sdk);
+                        resources->activity_info, app_target_sdk,
+                        resources->probe_resources, app_version_code,
+                        configured_version);
   }
+  env->DeleteLocalRef(configured_version);
   env->DeleteLocalRef(configured_activity);
   env->DeleteLocalRef(configured_package);
   env->DeleteLocalRef(package_manager_class);
-  if (configure_package_manager == nullptr || env->ExceptionCheck()) {
+  if (configure_package_manager == nullptr || configured_version == nullptr ||
+      env->ExceptionCheck()) {
     std::cerr << "ART Android window: package metadata setup failed\n";
     return 27;
   }
@@ -169,8 +229,11 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
   jobject apk_application = nullptr;
   const char* application_name =
       run_apk_app ? std::getenv("DARWIN_ART_APK_APP_APPLICATION") : nullptr;
-  if (application_name != nullptr &&
-      std::strcmp(application_name, "android.app.Application") != 0) {
+  // ActivityThread attaches every Application, including the base
+  // android.app.Application class, to the process Context before any Activity
+  // lifecycle callback. Do not special-case the framework class: apps that do
+  // not declare a subclass still rely on its database/files/services context.
+  if (application_name != nullptr) {
     jclass class_class = env->FindClass("java/lang/Class");
     jmethodID get_class_loader =
         class_class == nullptr
@@ -320,8 +383,8 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
       run_apk_app ? apk_app_package : "dev.darwinart.probe");
   jstring class_name = env->NewStringUTF(
       run_apk_app ? apk_app_activity : "dev.darwinart.probe.ProbeActivity");
-  jstring title =
-      env->NewStringUTF(run_apk_app ? "Darwin ART APK" : "Darwin ART Probe");
+  jstring title = env->NewStringUTF(run_apk_app ? app_label.c_str()
+                                                : "Darwin ART Probe");
   jobject component_name =
       component_name_constructor == nullptr
           ? nullptr

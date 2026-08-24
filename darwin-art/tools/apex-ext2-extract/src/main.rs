@@ -4,7 +4,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 const TARGET_APEX_ENTRY: &[u8] = b"apex_payload.img";
-const TARGET_EXT4_PATH: &str = "/javalib/core-icu4j.jar";
+const DEFAULT_EXT4_PATH: &str = "/javalib/core-icu4j.jar";
 const MAX_APEX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_ZIP_ENTRIES: u16 = 16_384;
 const MAX_EXTRACTED_BYTES: u64 = 256 * 1024 * 1024;
@@ -517,12 +517,57 @@ impl Ext4Image {
         }
         self.read_inode_data(&inode, MAX_EXTRACTED_BYTES)
     }
+
+    fn list_directory(&mut self, path: &str) -> Result<Vec<String>> {
+        if !path.starts_with('/') || path.contains("//") {
+            return Err(invalid("internal ext4 path must be absolute and normalized").into());
+        }
+        let components: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+        if components
+            .iter()
+            .any(|component| *component == "." || *component == "..")
+        {
+            return Err(invalid("invalid internal ext4 path").into());
+        }
+        let mut inode = self.read_inode(2)?;
+        for component in components {
+            let child_number = self.find_directory_entry(&inode, component.as_bytes())?;
+            inode = self.read_inode(child_number)?;
+        }
+        if !inode.is_directory() {
+            return Err(invalid("target ext4 path is not a directory").into());
+        }
+        let bytes = self.read_inode_data(&inode, MAX_DIRECTORY_BYTES)?;
+        let mut names = Vec::new();
+        let mut cursor = 0_usize;
+        while cursor < bytes.len() {
+            if bytes.len() - cursor < 8 {
+                return Err(invalid("truncated ext4 directory entry").into());
+            }
+            let inode_number = le32(&bytes, cursor)?;
+            let record_length = usize::from(le16(&bytes, cursor + 4)?);
+            let name_length = usize::from(bytes[cursor + 6]);
+            if record_length < 8
+                || record_length % 4 != 0
+                || record_length > bytes.len() - cursor
+                || name_length > record_length - 8
+            {
+                return Err(invalid("invalid ext4 directory entry").into());
+            }
+            if inode_number != 0 {
+                let name = std::str::from_utf8(&bytes[cursor + 8..cursor + 8 + name_length])?;
+                if name != "." && name != ".." {
+                    names.push(name.to_owned());
+                }
+            }
+            cursor += record_length;
+        }
+        names.sort();
+        Ok(names)
+    }
 }
 
 fn write_new_file(path: &Path, bytes: &[u8]) -> Result<()> {
-    if bytes.get(0..4) != Some(b"PK\x03\x04") {
-        return Err(invalid("extracted core-icu4j.jar is not a ZIP/JAR file").into());
-    }
     let mut output = OpenOptions::new().write(true).create_new(true).open(path)?;
     if let Err(error) = output.write_all(bytes).and_then(|_| output.sync_all()) {
         drop(output);
@@ -533,7 +578,7 @@ fn write_new_file(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 fn usage(program: &str) -> String {
-    format!("usage: {program} INPUT.apex OUTPUT.jar")
+    format!("usage: {program} INPUT.apex OUTPUT [INTERNAL_PATH]")
 }
 
 fn run() -> Result<()> {
@@ -551,6 +596,10 @@ fn run() -> Result<()> {
         .next()
         .map(PathBuf::from)
         .ok_or_else(|| invalid(usage(&program)))?;
+    let internal_path = arguments
+        .next()
+        .and_then(|value| value.into_string().ok())
+        .unwrap_or_else(|| DEFAULT_EXT4_PATH.to_owned());
     if arguments.next().is_some() {
         return Err(invalid(usage(&program)).into());
     }
@@ -558,14 +607,23 @@ fn run() -> Result<()> {
     let mut file = File::open(&input)?;
     let payload = find_stored_zip_entry(&mut file, TARGET_APEX_ENTRY)?;
     let mut filesystem = Ext4Image::open(file, payload)?;
-    let jar = filesystem.read_path(TARGET_EXT4_PATH)?;
-    write_new_file(&output, &jar)?;
+    if output == Path::new("-") {
+        for name in filesystem.list_directory(&internal_path)? {
+            println!("{name}");
+        }
+        return Ok(());
+    }
+    let bytes = filesystem.read_path(&internal_path)?;
+    if internal_path == DEFAULT_EXT4_PATH && bytes.get(0..4) != Some(b"PK\x03\x04") {
+        return Err(invalid("extracted core-icu4j.jar is not a ZIP/JAR file").into());
+    }
+    write_new_file(&output, &bytes)?;
     println!(
         "apex-ext2-extract: {} -> {} bytes={} internal={}",
         input.display(),
         output.display(),
-        jar.len(),
-        TARGET_EXT4_PATH
+        bytes.len(),
+        internal_path
     );
     Ok(())
 }

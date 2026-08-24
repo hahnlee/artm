@@ -1,7 +1,9 @@
 package dev.darwinart.simple;
 
 import android.os.Binder;
+import android.graphics.Rect;
 import android.util.Log;
+import java.util.ArrayList;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -10,6 +12,12 @@ import java.lang.reflect.Constructor;
 
 /** Minimal in-process display service used by Choreographer on the host. */
 final class DarwinServiceBridge {
+    private static final int DISPLAY_SCALE =
+            "2".equals(System.getenv("DARWIN_ART_WINDOW_SCALE")) ? 2 : 1;
+    private static final int DISPLAY_WIDTH = 360 * DISPLAY_SCALE;
+    private static final int DISPLAY_HEIGHT = 640 * DISPLAY_SCALE;
+    private static final int DISPLAY_DENSITY_DPI = 160 * DISPLAY_SCALE;
+
     private DarwinServiceBridge() {}
 
     static Binder createContextBinder() {
@@ -64,10 +72,27 @@ final class DarwinServiceBridge {
             // does not fall back to a null system_server object.
             Binder inputBinder = new Binder();
             Class<?> inputInterface = Class.forName("android.hardware.input.IInputManager");
+            Object hostKeyboard = createKeyboard(
+                    1, "Darwin host keyboard", "darwin-art-host-keyboard", true, 4);
+            Object virtualKeyboard = createKeyboard(
+                    -1, "Android virtual keyboard", "darwin-art-virtual-keyboard", false, 5);
             Object inputService = Proxy.newProxyInstance(
                     inputInterface.getClassLoader(),
                     new Class<?>[] {inputInterface},
-                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+                    (proxy, method, args) -> {
+                        if ("getInputDeviceIds".equals(method.getName())) {
+                            // Android always keeps VIRTUAL_KEYBOARD (-1) as a
+                            // KeyCharacterMap fallback even when a physical
+                            // keyboard is connected. Host NSEvents use id 1;
+                            // -1 only satisfies framework default-map lookup.
+                            return new int[] {1, -1};
+                        }
+                        if ("getInputDevice".equals(method.getName())) {
+                            int id = ((Integer) args[0]).intValue();
+                            return id == -1 ? virtualKeyboard : hostKeyboard;
+                        }
+                        return defaultValue(method.getReturnType());
+                    });
             attach(inputBinder, inputService, "android.hardware.input.IInputManager");
 
             Binder windowBinder = new Binder();
@@ -75,7 +100,7 @@ final class DarwinServiceBridge {
             Object windowService = Proxy.newProxyInstance(
                     windowInterface.getClassLoader(),
                     new Class<?>[] {windowInterface},
-                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+                    new WindowManagerHandler());
             attach(windowBinder, windowService, "android.view.IWindowManager");
 
             // ViewRootImpl asks AccessibilityManager for the high-contrast
@@ -135,6 +160,21 @@ final class DarwinServiceBridge {
             attach(voiceInteractionBinder, voiceInteractionService,
                     "com.android.internal.app.IVoiceInteractionManagerService");
 
+            Binder searchBinder = new Binder();
+            Class<?> searchInterface = Class.forName("android.app.ISearchManager");
+            Object searchService = Proxy.newProxyInstance(
+                    searchInterface.getClassLoader(), new Class<?>[] {searchInterface},
+                    Proxy.getInvocationHandler(activityManagerService));
+            attach(searchBinder, searchService, "android.app.ISearchManager");
+
+            Binder clipboardBinder = new Binder();
+            Class<?> clipboardInterface = Class.forName("android.content.IClipboard");
+            Object clipboardService = Proxy.newProxyInstance(
+                    clipboardInterface.getClassLoader(),
+                    new Class<?>[] {clipboardInterface},
+                    Proxy.getInvocationHandler(activityManagerService));
+            attach(clipboardBinder, clipboardService, "android.content.IClipboard");
+
             Class<?> metadataClass = Class.forName("android.os.ServiceWithMetadata");
             Class<?> serviceClass = Class.forName("android.os.Service");
             Object displayServiceValue = serviceValue(
@@ -158,6 +198,10 @@ final class DarwinServiceBridge {
                     metadataClass, serviceClass, notificationBinder);
             Object voiceInteractionServiceValue = serviceValue(
                     metadataClass, serviceClass, voiceInteractionBinder);
+            Object searchServiceValue = serviceValue(
+                    metadataClass, serviceClass, searchBinder);
+            Object clipboardServiceValue = serviceValue(
+                    metadataClass, serviceClass, clipboardBinder);
 
             Class<?> managerInterface = Class.forName("android.os.IServiceManager");
             Object manager = Proxy.newProxyInstance(
@@ -168,7 +212,8 @@ final class DarwinServiceBridge {
                             inputMethodServiceValue, inputServiceValue, windowServiceValue,
                             accessibilityServiceValue, sensitiveContentServiceValue,
                             contentServiceValue, notificationServiceValue,
-                            voiceInteractionServiceValue));
+                            voiceInteractionServiceValue, searchServiceValue,
+                            clipboardServiceValue));
             Binder context = new Binder();
             attach(context, manager, "android.os.IServiceManager");
             return context;
@@ -192,6 +237,33 @@ final class DarwinServiceBridge {
         return serviceCtor.newInstance(0, metadata);
     }
 
+    private static Object createKeyboard(int id, String name, String descriptor,
+            boolean external, int keyboardType) throws Exception {
+        Class<?> keyMapClass = Class.forName("android.view.KeyCharacterMap");
+        Method emptyMap = keyMapClass.getMethod("obtainEmptyMap", int.class);
+        Object keyMap = emptyMap.invoke(null, Integer.valueOf(id));
+        Class<?> builderClass = Class.forName("android.view.InputDevice$Builder");
+        Object builder = builderClass.getDeclaredConstructor().newInstance();
+        builderClass.getMethod("setId", int.class).invoke(builder, Integer.valueOf(id));
+        builderClass.getMethod("setGeneration", int.class)
+                .invoke(builder, Integer.valueOf(1));
+        builderClass.getMethod("setName", String.class)
+                .invoke(builder, name);
+        builderClass.getMethod("setDescriptor", String.class)
+                .invoke(builder, descriptor);
+        builderClass.getMethod("setExternal", boolean.class)
+                .invoke(builder, Boolean.valueOf(external));
+        builderClass.getMethod("setSources", int.class)
+                .invoke(builder, Integer.valueOf(0x101));
+        builderClass.getMethod("setKeyboardType", int.class)
+                .invoke(builder, Integer.valueOf(keyboardType));
+        builderClass.getMethod("setKeyCharacterMap", keyMapClass)
+                .invoke(builder, keyMap);
+        builderClass.getMethod("setEnabled", boolean.class)
+                .invoke(builder, Boolean.TRUE);
+        return builderClass.getMethod("build").invoke(builder);
+    }
+
     private static void attach(Binder binder, Object owner, String descriptor)
             throws Exception {
         Class<?> iInterface = Class.forName("android.os.IInterface");
@@ -213,13 +285,16 @@ final class DarwinServiceBridge {
         private final Object contentService;
         private final Object notificationService;
         private final Object voiceInteractionService;
+        private final Object searchService;
+        private final Object clipboardService;
 
         ManagerHandler(Object displayService, Object activityManagerService,
                 Object activityService,
                 Object inputMethodService, Object inputService, Object windowService,
                 Object accessibilityService, Object sensitiveContentService,
                 Object contentService, Object notificationService,
-                Object voiceInteractionService) {
+                Object voiceInteractionService, Object searchService,
+                Object clipboardService) {
             this.displayService = displayService;
             this.activityManagerService = activityManagerService;
             this.activityService = activityService;
@@ -231,6 +306,8 @@ final class DarwinServiceBridge {
             this.contentService = contentService;
             this.notificationService = notificationService;
             this.voiceInteractionService = voiceInteractionService;
+            this.searchService = searchService;
+            this.clipboardService = clipboardService;
         }
 
         @Override
@@ -256,6 +333,8 @@ final class DarwinServiceBridge {
                 if ("voiceinteraction".equals(args[0])) {
                     return voiceInteractionService;
                 }
+                if ("search".equals(args[0])) return searchService;
+                if ("clipboard".equals(args[0])) return clipboardService;
             }
             return defaultValue(method.getReturnType());
         }
@@ -305,8 +384,13 @@ final class DarwinServiceBridge {
                 Constructor<?> constructor = infoClass.getDeclaredConstructor();
                 constructor.setAccessible(true);
                 Object info = constructor.newInstance();
-                put(infoClass, info, "logicalWidth", 360);
-                put(infoClass, info, "logicalHeight", 640);
+                put(infoClass, info, "logicalWidth", DISPLAY_WIDTH);
+                put(infoClass, info, "logicalHeight", DISPLAY_HEIGHT);
+                put(infoClass, info, "appWidth", DISPLAY_WIDTH);
+                put(infoClass, info, "appHeight", DISPLAY_HEIGHT);
+                put(infoClass, info, "logicalDensityDpi", DISPLAY_DENSITY_DPI);
+                put(infoClass, info, "physicalXDpi", (float) DISPLAY_DENSITY_DPI);
+                put(infoClass, info, "physicalYDpi", (float) DISPLAY_DENSITY_DPI);
                 // Android 16 derives DisplayInfo.getRefreshRate() from these
                 // fields (the old single refreshRate field no longer exists).
                 put(infoClass, info, "refreshRateOverride", 60.0f);
@@ -323,6 +407,140 @@ final class DarwinServiceBridge {
             Field field = type.getDeclaredField(name);
             field.setAccessible(true);
             field.set(target, value);
+        }
+    }
+
+    /** Supplies the process-local IWindowSession used by popup ViewRoots. */
+    private static final class WindowManagerHandler implements InvocationHandler {
+        private final Object session;
+        private final ArrayList<Object> serverInputChannels = new ArrayList<>();
+
+        WindowManagerHandler() throws ClassNotFoundException {
+            Class<?> sessionInterface = Class.forName("android.view.IWindowSession");
+            session = Proxy.newProxyInstance(sessionInterface.getClassLoader(),
+                    new Class<?>[] {sessionInterface}, this);
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) {
+            if (System.getenv("DARWIN_ART_DEBUG_WINDOW_LAYERS") != null) {
+                Log.i("DarwinServiceBridge", "window " + method.getName()
+                        + " argc=" + (args == null ? 0 : args.length)
+                        + " session=" + (proxy == session));
+            }
+            if (proxy != session && "openSession".equals(method.getName())) {
+                return session;
+            }
+            if (proxy == session && method.getName().startsWith("addToDisplay")) {
+                initializeAddOutputs(args);
+                return Integer.valueOf(0);
+            }
+            if (proxy == session && "relayout".equals(method.getName())) {
+                configureRelayout(args);
+                // RELAYOUT_RES_FIRST_TIME: ViewRoot must complete its first
+                // traversal even though CAMetalLayer owns the real surface.
+                return Integer.valueOf(2);
+            }
+            return defaultValue(method.getReturnType());
+        }
+
+        private void initializeAddOutputs(Object[] args) {
+            if (args == null) return;
+            for (Object value : args) {
+                if (value != null && value.getClass().getName().equals(
+                        "android.view.WindowManager$LayoutParams")) {
+                    normalizeLayoutParams(value);
+                } else if (value instanceof Rect) {
+                    ((Rect) value).set(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+                } else if (value instanceof float[] && ((float[]) value).length > 0) {
+                    ((float[]) value)[0] = 1.0f;
+                } else if (value != null && value.getClass().getName().equals(
+                        "android.view.InputChannel")) {
+                    try {
+                        Class<?> inputChannelClass = value.getClass();
+                        Method openPair = inputChannelClass.getDeclaredMethod(
+                                "openInputChannelPair", String.class);
+                        openPair.setAccessible(true);
+                        Object[] pair = (Object[]) openPair.invoke(null,
+                                "darwin-art-window-" + serverInputChannels.size());
+                        inputChannelClass.getMethod("copyTo", inputChannelClass)
+                                .invoke(pair[0], value);
+                        inputChannelClass.getMethod("dispose").invoke(pair[0]);
+                        serverInputChannels.add(pair[1]);
+                    } catch (Throwable error) {
+                        Log.e("DarwinServiceBridge", "input channel setup failed", error);
+                    }
+                }
+            }
+        }
+
+        private static void normalizeLayoutParams(Object attrs) {
+            try {
+                Field width = attrs.getClass().getField("width");
+                Field height = attrs.getClass().getField("height");
+                Field type = attrs.getClass().getField("type");
+                int windowType = type.getInt(attrs);
+                if (width.getInt(attrs) <= 0) width.setInt(attrs, DISPLAY_WIDTH);
+                if (height.getInt(attrs) <= 0) {
+                    height.setInt(attrs, windowType >= 1 && windowType < 1000
+                            ? DISPLAY_HEIGHT : 120 * DISPLAY_SCALE);
+                }
+            } catch (Throwable error) {
+                Log.e("DarwinServiceBridge", "window layout normalization failed", error);
+            }
+        }
+
+        private static void configureRelayout(Object[] args) {
+            if (args == null || args.length < 9 || args[8] == null) return;
+            try {
+                Object attrs = args[1];
+                int requestedWidth = ((Integer) args[2]).intValue();
+                int requestedHeight = ((Integer) args[3]).intValue();
+                int x = intField(attrs, "x", 0);
+                int y = intField(attrs, "y", 0);
+                int layoutWidth = intField(attrs, "width", requestedWidth);
+                int layoutHeight = intField(attrs, "height", requestedHeight);
+                int width = requestedWidth > 0 && requestedWidth <= DISPLAY_WIDTH
+                        ? requestedWidth
+                        : (layoutWidth > 0 && layoutWidth <= DISPLAY_WIDTH
+                                ? layoutWidth : DISPLAY_WIDTH);
+                int height = requestedHeight > 0 && requestedHeight <= DISPLAY_HEIGHT
+                        ? requestedHeight
+                        : (layoutHeight > 0 && layoutHeight <= DISPLAY_HEIGHT
+                                ? layoutHeight : 120 * DISPLAY_SCALE);
+                width = Math.min(width, DISPLAY_WIDTH - Math.max(0, x));
+                height = Math.min(height, DISPLAY_HEIGHT - Math.max(0, y));
+                if (System.getenv("DARWIN_ART_DEBUG_WINDOW_LAYERS") != null) {
+                    Log.i("DarwinServiceBridge", "window frame request="
+                            + requestedWidth + "x" + requestedHeight
+                            + " layout=" + layoutWidth + "x" + layoutHeight
+                            + " output=" + width + "x" + height + " at=" + x + "," + y);
+                }
+
+                Object result = args[8];
+                Field framesField = result.getClass().getField("frames");
+                Object frames = framesField.get(result);
+                setRectField(frames, "frame", x, y, x + width, y + height);
+                setRectField(frames, "displayFrame", 0, 0,
+                        DISPLAY_WIDTH, DISPLAY_HEIGHT);
+                setRectField(frames, "parentFrame", 0, 0,
+                        DISPLAY_WIDTH, DISPLAY_HEIGHT);
+            } catch (Throwable error) {
+                Log.e("DarwinServiceBridge", "window relayout output failed", error);
+            }
+        }
+
+        private static int intField(Object value, String name, int fallback)
+                throws Exception {
+            if (value == null) return fallback;
+            Field field = value.getClass().getField(name);
+            return field.getInt(value);
+        }
+
+        private static void setRectField(Object value, String name,
+                int left, int top, int right, int bottom) throws Exception {
+            Field field = value.getClass().getField(name);
+            ((Rect) field.get(value)).set(left, top, right, bottom);
         }
     }
 
