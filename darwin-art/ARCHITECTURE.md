@@ -69,6 +69,20 @@ for binaries that require real kernel behavior, but VM implementation is
 explicitly later work. The current native path neither embeds a Linux kernel
 nor silently crosses between VM pointers and host ART/JNI pointers.
 
+### Input and physical keyboards
+
+Host mouse and keyboard events must enter Android's normal window input path:
+`InputChannel -> InputEventReceiver -> ViewRootImpl -> View`. The Mac keyboard
+is exposed as an external Android `FULL` keyboard, while Android's virtual
+device id remains a fallback rather than an alias for the host device.
+
+The common event path is implemented, but the current US-QWERTY
+`KeyMapGetCharacter` table is explicitly a bootstrap bridge. Android uses
+per-device `.kl` and `.kcm` data for scan-code, key-code, modifier, character,
+dead-key, label, and fallback semantics. The compatibility gaps, Rust-owned
+replacement architecture, milestones, and completion criteria are tracked in
+[`docs/physical-keyboard-compatibility.md`](docs/physical-keyboard-compatibility.md).
+
 ## Virtual Android prefix
 
 Android code must never depend on host absolute paths. Each runtime profile has

@@ -11,6 +11,10 @@ directly mapped ARM64 ELF, and a Bionic ABI facade. Mainstream Tier 1 includes
 ordinary third-party JNI `.so` libraries; Java-only execution is a bootstrap
 gate, not the intended application compatibility boundary.
 
+Physical-keyboard status and the remaining Android `.kl`/`.kcm` compatibility
+work are documented in
+[`docs/physical-keyboard-compatibility.md`](docs/physical-keyboard-compatibility.md).
+
 ## Current gate
 
 The current gate is intentionally smaller than `dalvikvm`. It links and runs a
