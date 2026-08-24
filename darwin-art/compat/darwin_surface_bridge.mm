@@ -217,6 +217,10 @@ CGFloat WindowScale(bool visible) {
   const CGFloat y_scale = bounds.size.height > 0.0
                               ? drawable_size.height / bounds.size.height
                               : 1.0;
+  // AppKit view coordinates grow upward from the bottom-left. Android input
+  // coordinates grow downward from the top-left, matching the retained view
+  // hierarchy and its backing-pixel layout.
+  const CGFloat android_y = bounds.size.height - point.y;
   const uint64_t event_time_nanos =
       event.timestamp > 0.0 ? static_cast<uint64_t>(event.timestamp * 1000000000.0) : 0;
   if (action == DARWIN_ART_POINTER_DOWN) _downTimeNanos = event_time_nanos;
@@ -231,9 +235,9 @@ CGFloat WindowScale(bool visible) {
       .pointer_id = 0,
       .pointer_count = 1,
       .x = static_cast<float>(point.x * x_scale),
-      .y = static_cast<float>(point.y * y_scale),
+      .y = static_cast<float>(android_y * y_scale),
       .raw_x = static_cast<float>(point.x * x_scale),
-      .raw_y = static_cast<float>(point.y * y_scale),
+      .raw_y = static_cast<float>(android_y * y_scale),
       .pressure = 1.0f,
       .size_value = 1.0f,
   });

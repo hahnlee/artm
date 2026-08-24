@@ -176,6 +176,25 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     env->DeleteLocalRef(motion_event_class);
     return 82;
   }
+  const bool use_viewroot_input =
+      std::getenv("DARWIN_ART_USE_VIEWROOT_INPUT") != nullptr;
+  // Until this launcher owns a WindowManager-attached ViewRootImpl, its
+  // synchronous DecorView route lacks the InputStage finish callback that
+  // completes a tap. Preserve the Android MotionEvent dispatch for widget
+  // state/gestures, and retain the real clickable target so ACTION_UP can
+  // complete exactly one click. The bridge is disabled for the attached
+  // ViewRoot path, where Android owns click completion end to end.
+  if (!use_viewroot_input && down) {
+    if (state->pressed_view != nullptr) {
+      env->DeleteGlobalRef(state->pressed_view);
+      state->pressed_view = nullptr;
+    }
+    jobject hit = find_clickable_view_at(env, root, x, y);
+    if (hit != nullptr && !env->ExceptionCheck()) {
+      state->pressed_view = env->NewGlobalRef(hit);
+    }
+    env->DeleteLocalRef(hit);
+  }
   const int64_t dispatch_start = MonotonicNanos();
   jboolean consumed = JNI_FALSE;
   bool enqueued = false;
@@ -212,8 +231,6 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   // ViewRoot route available for an attached host, but use synchronous
   // DecorView dispatch by default so real APK widgets receive ACTION_UP in
   // the same owner-thread turn as the native event.
-  const bool use_viewroot_input =
-      std::getenv("DARWIN_ART_USE_VIEWROOT_INPUT") != nullptr;
   if (use_viewroot_input && enqueue != nullptr && !env->ExceptionCheck()) {
     enqueued = env->CallStaticBooleanMethod(input_host, enqueue, event) == JNI_TRUE;
     if (env->ExceptionCheck()) {
@@ -240,6 +257,28 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     consumed = env->CallBooleanMethod(root, dispatch_touch, event);
   } else {
     consumed = JNI_TRUE;
+  }
+  if (!use_viewroot_input && terminal && state->pressed_view != nullptr) {
+    jobject hit = action == 1u && !env->ExceptionCheck()
+                      ? find_clickable_view_at(env, root, x, y)
+                      : nullptr;
+    const bool same_target =
+        hit != nullptr && !env->ExceptionCheck() &&
+        env->IsSameObject(hit, state->pressed_view) == JNI_TRUE;
+    if (same_target && !env->ExceptionCheck()) {
+      jclass view_class = env->FindClass("android/view/View");
+      jmethodID perform_click =
+          view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(view_class, "performClick", "()Z");
+      if (perform_click != nullptr && !env->ExceptionCheck()) {
+        env->CallBooleanMethod(state->pressed_view, perform_click);
+      }
+      env->DeleteLocalRef(view_class);
+    }
+    env->DeleteLocalRef(hit);
+    env->DeleteGlobalRef(state->pressed_view);
+    state->pressed_view = nullptr;
   }
   const int64_t dispatch_end = MonotonicNanos();
   const bool dispatch_ok = !env->ExceptionCheck();
@@ -618,11 +657,28 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
             .count());
     env->CallVoidMethod(instance, do_frame, monotonic_nanos, 0, vsync_data);
   }
-  const bool ok = !env->ExceptionCheck();
+  bool ok = !env->ExceptionCheck();
   if (!ok) {
     std::cerr << "ART Android frame pulse threw\n"
               << art_thread->GetException()->Dump() << "\n";
     art_thread->ClearException();
+  }
+  // Detached ViewRootImpl has no WindowManager traversal scheduler to turn an
+  // invalidated Android hierarchy into a new display list.  Input listeners
+  // still mutate the real APK views synchronously, so complete the same frame
+  // by recording/replaying the retained root after Choreographer callbacks.
+  // ACTION_DOWN/UP marked the RenderNode dirty; MOVE keeps the persistent
+  // replay path and avoids a full display-list rebuild.
+  if (ok && state->interactive_root != nullptr) {
+    ok = present_content(state, env, nullptr, state->interactive_root,
+                         state->interactive_width,
+                         state->interactive_height) == JNI_TRUE &&
+         !env->ExceptionCheck();
+    if (!ok && env->ExceptionCheck()) {
+      std::cerr << "ART Android frame presentation threw\n"
+                << art_thread->GetException()->Dump() << "\n";
+      art_thread->ClearException();
+    }
   }
   env->DeleteLocalRef(vsync_data);
   env->DeleteLocalRef(vsync_data_class);
