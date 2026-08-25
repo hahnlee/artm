@@ -39,9 +39,12 @@ void* darwin_art_bionic_malloc(size_t size);
 void* darwin_art_bionic_calloc(size_t count, size_t size);
 void darwin_art_bionic_free(void* pointer);
 void* darwin_art_bionic_realloc(void* pointer, size_t size);
+void* darwin_art_bionic_aligned_alloc(size_t alignment, size_t size);
 int darwin_art_bionic_mallopt(int param, int value);
 size_t darwin_art_bionic_malloc_usable_size(const void* pointer);
 int darwin_art_bionic_posix_memalign(void** output, size_t alignment, size_t size);
+void* darwin_art_bionic_memalign(size_t alignment, size_t size);
+char* darwin_art_bionic_strdup(const char* source);
 
 /* Non-import seam carrying Android errno numbers without exposing Darwin TLS. */
 DarwinArtBionicAllocationResult darwin_art_bionic_malloc_result(size_t size);

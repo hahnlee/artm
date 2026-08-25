@@ -1,6 +1,9 @@
+#include <dlfcn.h>
+
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <cstdio>
 #include <sstream>
 #include <string>
 
@@ -24,10 +27,12 @@ std::string ElfError(DarwinArtElfStatus status,
 
 void DestroyRuntimeElfTrampolines(ElfLibrary* library) {
   if (library == nullptr) return;
+  std::lock_guard<std::mutex> lock(library->trampoline_mutex);
   for (auto* trampolines : library->trampoline_sets) {
     darwin_art::android_jni::DestroyRegularTrampolines(trampolines);
   }
   library->trampoline_sets.clear();
+  library->exported_jni_trampolines.clear();
   library->trampolines = nullptr;
 }
 
@@ -41,6 +46,9 @@ int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
   }
   if (darwin_art_bionic_dso_lifecycle_publish_image(
           library->dso_lifecycle, start, end) == 0) {
+    std::fprintf(stderr, "DARWIN ELF loader: published image=[0x%llx,0x%llx)\n",
+                 static_cast<unsigned long long>(start),
+                 static_cast<unsigned long long>(end));
     return 0;
   }
   if (darwin_art_image_registry::RollbackPublish(library->image_registry, start,
@@ -78,6 +86,19 @@ int DropRuntimeElfGraph(void* value, void* context) {
   return status == DARWIN_ART_ELF_OK ? 0 : -1;
 }
 
+int DropRuntimeAndroidUnwindProvider(void* value, void* context) {
+  auto* handle = static_cast<DarwinArtElfHandle*>(value);
+  auto* library = static_cast<ElfLibrary*>(context);
+  if (handle == nullptr) return -1;
+  std::array<char, 1024> storage{};
+  DarwinArtElfErrorBuffer error{storage.data(), storage.size(), 0};
+  const DarwinArtElfStatus status = darwin_art_elf_unload(&handle, &error);
+  if (status == DARWIN_ART_ELF_OK && library != nullptr) {
+    library->android_unwind_provider = nullptr;
+  }
+  return status == DARWIN_ART_ELF_OK ? 0 : -1;
+}
+
 int DropRuntimeElfLibrary(void* value, void*) {
   auto* library = static_cast<ElfLibrary*>(value);
   if (library == nullptr || library->magic != kElfLibraryMagic) return -1;
@@ -89,6 +110,13 @@ int DropRuntimeElfLibrary(void* value, void*) {
   }
   DestroyRuntimeElfTrampolines(library);
   TeardownProviderNamespace(library);
+  for (void** handle : {&library->gles_provider, &library->egl_provider,
+                        &library->z_provider}) {
+    if (*handle != nullptr) {
+      dlclose(*handle);
+      *handle = nullptr;
+    }
+  }
   library->magic = 0;
   delete library;
   return 0;
@@ -143,6 +171,9 @@ int DropRuntimeProviderKind(void* value, void*) {
     case static_cast<uint32_t>(darwin_art::providers::Kind::Sendfile):
       darwin_art::providers::release_sendfile();
       return 0;
+    case static_cast<uint32_t>(darwin_art::providers::Kind::Vm):
+      darwin_art::providers::release_vm();
+      return 0;
     default:
       return -1;
   }
@@ -154,6 +185,7 @@ void TeardownProviderNamespace(ElfLibrary* library) {
     const int status = darwin_art_runtime_native_owner_destroy(library->native_owner);
     library->native_owner = nullptr;
     library->graph = nullptr;
+    library->android_unwind_provider = nullptr;
     library->provider_namespace = nullptr;
     library->image_registry = nullptr;
     library->dso_lifecycle = nullptr;
@@ -163,7 +195,8 @@ void TeardownProviderNamespace(ElfLibrary* library) {
   // Provider installation is only reachable after the Rust native-owner slot
   // has been created. Reaching this branch with any graph resource would mean
   // that a C++ fallback has escaped the Rust ownership boundary.
-  if (library->graph != nullptr || library->provider_namespace != nullptr ||
+  if (library->graph != nullptr || library->android_unwind_provider != nullptr ||
+      library->provider_namespace != nullptr ||
       library->image_registry != nullptr || library->dso_lifecycle != nullptr) {
     std::abort();
   }

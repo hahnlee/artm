@@ -49,6 +49,14 @@ name = "darwin-art-abi"
 version = "0.1.0"
 
 [[package]]
+name = "darwin-art-apk-install"
+version = "0.1.0"
+dependencies = [
+ "darwin-art-native-artifact",
+ "sha2",
+]
+
+[[package]]
 name = "darwin-art-build-contract"
 version = "0.1.0"
 
@@ -57,6 +65,7 @@ name = "darwin-art-elf-loader"
 version = "0.1.0"
 dependencies = [
  "darwin-art-fs-broker",
+ "sha2",
 ]
 
 [[package]]
@@ -86,6 +95,13 @@ dependencies = [
  "darwin-art-engine",
  "darwin-art-engine-sys",
  "darwin-art-runtime",
+]
+
+[[package]]
+name = "darwin-art-native-artifact"
+version = "0.1.0"
+dependencies = [
+ "sha2",
 ]
 
 [[package]]

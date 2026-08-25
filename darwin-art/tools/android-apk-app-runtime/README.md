@@ -1,12 +1,14 @@
 # Android APK app runtime gate
 
 This gate builds and inspects a real Android APK whose launcher Activity is
-declared in binary `AndroidManifest.xml`, whose code lives in the APK's single
-`classes.dex`, and which contains no native `.so` entry.
+declared in binary `AndroidManifest.xml`. The inspector accepts and verifies
+primary/secondary DEX entries and identifies packaged ARM64 native libraries
+without rewriting the APK.
 
 The bounded inspector rejects ZIP64, encryption, duplicate or unsafe paths,
-secondary DEX files, malformed binary XML, ambiguous launchers, and any native
-library. The fixture programmatically creates real `TextView`, `CheckBox`,
+malformed DEX, malformed binary XML, and ambiguous launchers. Packaged native
+libraries are passed through the separate sealed extraction/ELF boundary. The
+fixture programmatically creates real `TextView`, `CheckBox`,
 `RadioButton`, `ToggleButton`, `SeekBar`, `ProgressBar`, and `Button` instances.
 It loads the pinned Android 16 `framework-res.apk` and applies the framework's
 built-in Material Light theme. The fixture adds only a restrained Material You
@@ -89,9 +91,9 @@ execute `View.performClick()` and the resulting framework state is rerendered.
 This is intentionally narrower than Android `MotionEvent` gesture dispatch, so
 dragging the `SeekBar`, multitouch, scrolling, and long-press remain unsupported.
 
-The runner never extracts or rewrites the APK. It rejects APKs containing
-native libraries, secondary DEX files, or an ambiguous launcher before ART is
-created. The current fixture proves an app-owned string resource through the
+The runner never rewrites the APK. It verifies all DEX entries and extracts
+`lib/arm64-v8a` into a private, sealed runtime directory consumed by the
+Android ELF loader. The current fixture proves an app-owned string resource through the
 real `AssetManager2` APK asset graph; arbitrary XML layout inflation and
 application resource overlays are the next resource milestone. The first
 supported APK class builds its view hierarchy in Java from framework widgets or

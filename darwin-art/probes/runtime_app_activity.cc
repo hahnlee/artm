@@ -124,25 +124,42 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
           ? nullptr
           : env->GetMethodID(
                 package_manager_class, "configure",
-                "(Ljava/lang/String;Ljava/lang/String;"
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
+                "Ljava/lang/String;"
                 "Landroid/content/pm/ActivityInfo;I"
                 "Landroid/content/res/Resources;ILjava/lang/String;)V");
   jstring configured_package = env->NewStringUTF(
       run_apk_app ? apk_app_package : "dev.darwinart.probe");
   jstring configured_activity = env->NewStringUTF(
       run_apk_app ? apk_app_activity : "dev.darwinart.probe.ProbeActivity");
+  const char* configured_activities =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_APP_ACTIVITIES") : nullptr;
+  jstring configured_activity_names = env->NewStringUTF(
+      configured_activities == nullptr
+          ? "dev.darwinart.probe.ProbeActivity=0x0"
+          : configured_activities);
+  const char* configured_services =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_APP_SERVICES") : "none";
+  jstring configured_service_names = env->NewStringUTF(
+      configured_services == nullptr ? "none" : configured_services);
   jstring configured_version = env->NewStringUTF(
       configured_version_name == nullptr ? "0" : configured_version_name);
   if (configure_package_manager != nullptr && configured_package != nullptr &&
-      configured_activity != nullptr && configured_version != nullptr &&
+      configured_activity != nullptr && configured_service_names != nullptr &&
+      configured_activity_names != nullptr &&
+      configured_version != nullptr &&
       resources->activity_info != nullptr) {
     env->CallVoidMethod(package_manager, configure_package_manager,
                         configured_package, configured_activity,
+                        configured_activity_names,
+                        configured_service_names,
                         resources->activity_info, app_target_sdk,
                         resources->probe_resources, app_version_code,
                         configured_version);
   }
   env->DeleteLocalRef(configured_version);
+  env->DeleteLocalRef(configured_service_names);
+  env->DeleteLocalRef(configured_activity_names);
   env->DeleteLocalRef(configured_activity);
   env->DeleteLocalRef(configured_package);
   env->DeleteLocalRef(package_manager_class);
@@ -282,6 +299,15 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
         application_on_create != nullptr && !env->ExceptionCheck()) {
       env->SetObjectField(apk_application, application_base,
                           out->probe_context);
+      jmethodID set_application_context = env->GetMethodID(
+          probe_context_class, "setApplicationContext",
+          "(Landroid/content/Context;)V");
+      if (set_application_context == nullptr || env->ExceptionCheck()) {
+        std::cerr << "ART Android window: application context identity setup failed\n";
+        return 27;
+      }
+      env->CallVoidMethod(out->probe_context, set_application_context,
+                          apk_application);
       jclass activity_thread_class = env->FindClass("android/app/ActivityThread");
       jfieldID current_activity_thread =
           activity_thread_class == nullptr

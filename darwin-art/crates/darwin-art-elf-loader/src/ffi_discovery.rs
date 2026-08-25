@@ -149,35 +149,42 @@ pub(super) fn discover_sibling_graph(
             )));
         }
         let metadata = inspect_elf_metadata(&bytes).map_err(FfiFailure::Load)?;
-        let embedded = metadata
+        if let Some(embedded) = metadata.soname.as_ref() {
+            validate_discovery_component(embedded, "embedded DT_SONAME")?;
+            if let Some(expected) = expected_soname.as_ref()
+                && embedded != expected
+            {
+                return Err(FfiFailure::Format(format!(
+                    "dependency embedded DT_SONAME does not exactly match requested sibling {}",
+                    String::from_utf8_lossy(expected)
+                )));
+            }
+        }
+        // DT_SONAME is optional for Android DSOs loaded by an explicit APK
+        // path. Bionic retains the requested filename as that object's lookup
+        // identity when it is absent. Dependencies similarly inherit their
+        // exact DT_NEEDED component.
+        let logical_soname = metadata
             .soname
-            .ok_or_else(|| FfiFailure::Format("ELF graph member lacks DT_SONAME".to_owned()))?;
-        validate_discovery_component(&embedded, "embedded DT_SONAME")?;
-        if providers.contains(&embedded) {
+            .clone()
+            .unwrap_or_else(|| expected_soname.clone().unwrap_or_else(|| component.clone()));
+        validate_discovery_component(&logical_soname, "logical ELF SONAME")?;
+        if providers.contains(&logical_soname) {
             return Err(FfiFailure::Format(
                 "real ELF graph member collides with a builtin provider SONAME".to_owned(),
             ));
         }
-        if let Some(expected) = expected_soname.as_ref()
-            && embedded != *expected
-        {
-            return Err(FfiFailure::Format(format!(
-                "dependency embedded DT_SONAME does not exactly match requested sibling {}",
-                String::from_utf8_lossy(expected)
-            )));
-        }
-        if !discovered_sonames.insert(embedded.clone()) {
+        if !discovered_sonames.insert(logical_soname.clone()) {
             return Err(FfiFailure::Format(
-                "two graph paths produced the same embedded DT_SONAME".to_owned(),
+                "two graph paths produced the same logical SONAME".to_owned(),
             ));
         }
-        std::str::from_utf8(&embedded).map_err(|_| {
+        std::str::from_utf8(&logical_soname).map_err(|_| {
             FfiFailure::Format(
-                "embedded DT_SONAME is not UTF-8; the closed graph namespace cannot key it"
-                    .to_owned(),
+                "logical SONAME is not UTF-8; the closed graph namespace cannot key it".to_owned(),
             )
         })?;
-        let name = cstring_from_dynamic(embedded.clone(), "DT_SONAME")?;
+        let name = cstring_from_dynamic(logical_soname, "logical SONAME")?;
         if root_soname.is_none() {
             root_soname = Some(name.clone());
         }

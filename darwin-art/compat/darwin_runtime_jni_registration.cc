@@ -16,7 +16,7 @@ int32_t ProxyRegisterNatives(void* context,
                              const DarwinArtJniNativeMethod* methods,
                              int32_t count) {
   auto* library = static_cast<ElfLibrary*>(context);
-  constexpr int32_t kMaxRegularMethodsPerGraph = 32;
+  constexpr int32_t kMaxRegularMethodsPerGraph = 4096;
   if (library == nullptr || clazz == nullptr || methods == nullptr ||
       count <= 0 || count > kMaxRegularMethodsPerGraph) {
     std::cerr << "DARWIN JNI RegisterNatives reject: bad arguments count=" << count << "\n";
@@ -92,7 +92,13 @@ int32_t ProxyRegisterNatives(void* context,
     if (!DescriptorToShorty(methods[index].signature, &shorties[index])) {
       return DARWIN_ART_JNI_ERR;
     }
-    requests[index] = {methods[index].function, shorties[index].c_str(), uint32_t{1} << index};
+    const uint32_t entry_mask =
+        library->fixture_graph ? (uint32_t{1} << index) : uint32_t{1};
+    requests[index] = {
+        methods[index].function, shorties[index].c_str(), entry_mask};
+    std::cerr << "DARWIN JNI RegisterNatives method name="
+              << methods[index].name << " sig=" << methods[index].signature
+              << " target=" << methods[index].function << "\n";
   }
   std::string trampoline_error;
   auto* trampolines = darwin_art::android_jni::CreateRegularTrampolines(
@@ -107,7 +113,7 @@ int32_t ProxyRegisterNatives(void* context,
     void* entry = darwin_art::android_jni::TrampolineEntry(trampolines, index);
     all_entries_valid = all_entries_valid && entry != nullptr &&
                         darwin_art::android_jni::TrampolineEntryMask(entry) ==
-                            (uint32_t{1} << index);
+                            requests[index].entry_mask;
   }
   if (darwin_art::android_jni::TrampolineGeneration(trampolines) == 0 ||
       darwin_art::android_jni::TrampolineCount(trampolines) != requests.size() ||
@@ -162,10 +168,13 @@ int32_t ProxyRegisterNatives(void* context,
     art_env->DeleteLocalRef(rollback_failure);
     return DARWIN_ART_JNI_ERR;
   }
-  if (library->trampolines == nullptr) {
-    library->trampolines = trampolines;
+  {
+    std::lock_guard<std::mutex> lock(library->trampoline_mutex);
+    if (library->trampolines == nullptr) {
+      library->trampolines = trampolines;
+    }
+    library->trampoline_sets.push_back(trampolines);
   }
-  library->trampoline_sets.push_back(trampolines);
   std::cerr << "DARWIN JNI RegisterNatives installed count=" << count
             << " sets=" << library->trampoline_sets.size() << "\n";
   if (library->fixture_graph) {

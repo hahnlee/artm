@@ -3,3 +3,4 @@ freeaddrinfo	libc.so	LIBC	bionic-dns-facade-retire-owner
 gai_strerror	libc.so	LIBC	bionic-dns-facade
 getaddrinfo	libc.so	LIBC	bionic-dns-facade-closed-policy
 getnameinfo	libc.so	LIBC	bionic-dns-facade-numeric-only
+inet_ntop	libc.so	LIBC	bionic-dns-facade-family-translation

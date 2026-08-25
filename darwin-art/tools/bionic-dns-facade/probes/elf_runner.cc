@@ -57,7 +57,8 @@ int main(int argc, char** argv) {
   if (bytes.empty() || input.bad()) return 11;
 
   const char* symbols[] = {
-      "freeaddrinfo", "gai_strerror", "getaddrinfo", "getnameinfo"};
+      "freeaddrinfo", "gai_strerror", "getaddrinfo", "getnameinfo",
+      "inet_ntop"};
   for (const char* symbol : symbols) {
     Check(darwin_art_bionic_dns_resolve("libc.so", symbol, "LIBC") != nullptr,
           "exact resolver entry");
@@ -91,6 +92,7 @@ int main(int argc, char** argv) {
                                   size_t);
   using Free = void (*)(DarwinArtAndroidAddrinfo*);
   using ErrorString = const char* (*)(int);
+  using Ntop = const char* (*)(int, const void*, char*, uint32_t);
   LookupAddress lookup = Lookup<LookupAddress>(image, "DnsFixtureLookup");
   LookupPassive passive = Lookup<LookupPassive>(image, "DnsFixtureLookupPassive");
   Count count = Lookup<Count>(image, "DnsFixtureCount");
@@ -99,6 +101,7 @@ int main(int argc, char** argv) {
       Lookup<ReverseRejected>(image, "DnsFixtureReversePolicyRejected");
   Free free_result = Lookup<Free>(image, "DnsFixtureFree");
   ErrorString error_string = Lookup<ErrorString>(image, "DnsFixtureErrorString");
+  Ntop ntop = Lookup<Ntop>(image, "DnsFixtureNtop");
 
   constexpr int kAfUnspec = 0;
   constexpr int kAfInet = 2;
@@ -107,6 +110,20 @@ int main(int argc, char** argv) {
   constexpr int kAiNumericHost = 0x4;
   constexpr int kAiNumericServ = 0x8;
   errno = EDOM;
+
+  const uint8_t loopback4[] = {127, 0, 0, 1};
+  const uint8_t loopback6[] = {0, 0, 0, 0, 0, 0, 0, 0,
+                               0, 0, 0, 0, 0, 0, 0, 1};
+  char presentation[64]{};
+  Check(ntop(kAfInet, loopback4, presentation, sizeof(presentation)) ==
+                presentation &&
+            std::strcmp(presentation, "127.0.0.1") == 0,
+        "inet_ntop Android IPv4 family");
+  std::memset(presentation, 0, sizeof(presentation));
+  Check(ntop(kAfInet6, loopback6, presentation, sizeof(presentation)) ==
+                presentation &&
+            std::strcmp(presentation, "::1") == 0,
+        "inet_ntop Android IPv6 family");
 
   DarwinArtAndroidAddrinfo* ipv4 = nullptr;
   Check(lookup("127.0.0.1", "443", kAfInet,

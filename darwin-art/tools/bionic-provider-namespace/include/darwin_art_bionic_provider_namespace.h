@@ -44,7 +44,8 @@ typedef enum DarwinArtBionicProviderId {
   DARWIN_ART_BIONIC_PROVIDER_SOCKET = 30,
   DARWIN_ART_BIONIC_PROVIDER_DNS = 31,
   DARWIN_ART_BIONIC_PROVIDER_MATH = 32,
-  DARWIN_ART_BIONIC_PROVIDER_COUNT = 33,
+  DARWIN_ART_BIONIC_PROVIDER_VM = 33,
+  DARWIN_ART_BIONIC_PROVIDER_COUNT = 34,
 } DarwinArtBionicProviderId;
 
 typedef enum DarwinArtBionicNamespaceStatus {
@@ -92,8 +93,9 @@ darwin_art_bionic_namespace_bind(DarwinArtBionicNamespace *namespace_instance,
 DarwinArtBionicNamespaceStatus
 darwin_art_bionic_namespace_seal(DarwinArtBionicNamespace *namespace_instance);
 
-/* Exact closed lookup. libc.so and libdl.so require version "LIBC"; liblog.so
- * requires an absent/empty version. No host lookup or fallback occurs. */
+/* Exact closed lookup. Version aliases are explicit manifest triples: NDK
+ * liblog imports are unversioned while reviewed system/APEX imports may use
+ * LIBLOG. No host lookup or fallback occurs. */
 DarwinArtBionicNamespaceResult darwin_art_bionic_namespace_resolve(
     DarwinArtBionicNamespace *namespace_instance, const char *soname,
     const char *symbol, const char *version);

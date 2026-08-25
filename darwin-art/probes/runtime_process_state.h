@@ -56,6 +56,7 @@ std::vector<std::unique_ptr<const art::DexFile>>& app_dex_files();
 void clear_app_dex_files();
 
 art::Thread* owner_thread_for_callback();
+darwin_art_graphics::GraphicsState* graphics_state_for_callback();
 ShutdownBeginResult begin_shutdown(ShutdownSnapshot* snapshot);
 void mark_shutdown_failed();
 void mark_shutdown_complete();

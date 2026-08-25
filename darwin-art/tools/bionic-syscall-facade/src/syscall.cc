@@ -20,6 +20,7 @@ namespace {
 constexpr uint64_t kFutex = 98;
 constexpr uint64_t kRtSigprocmask = 135;
 constexpr uint64_t kGettid = 178;
+constexpr uint64_t kGetrandom = 278;
 constexpr uint32_t kFutexWaitPrivate = 128;
 constexpr uint32_t kFutexWakePrivate = 129;
 constexpr int32_t kWakeOne = 1;
@@ -29,6 +30,9 @@ constexpr int32_t kAndroidEfault = 14;
 constexpr int32_t kAndroidEinval = 22;
 constexpr int32_t kAndroidEnosys = 38;
 constexpr int32_t kAndroidEtimedout = 110;
+constexpr uint32_t kGrndNonblock = 0x1;
+constexpr uint32_t kGrndRandom = 0x2;
+constexpr uint32_t kGrndInsecure = 0x4;
 constexpr size_t kWaitEntryCount = 257;
 
 struct AndroidTimespec {
@@ -55,7 +59,8 @@ void InitializeWaitEntries() {
   }
 }
 
-bool IsReadableRange(const void* pointer, size_t length) {
+bool HasRangeProtection(const void* pointer, size_t length,
+                        vm_prot_t required) {
   const uintptr_t begin = reinterpret_cast<uintptr_t>(pointer);
   if (begin == 0 || length == 0 || begin > UINTPTR_MAX - length) return false;
   const uintptr_t end = begin + length;
@@ -70,11 +75,19 @@ bool IsReadableRange(const void* pointer, size_t length) {
   if (object != MACH_PORT_NULL) {
     (void)mach_port_deallocate(mach_task_self(), object);
   }
-  if (status != KERN_SUCCESS || (info.protection & VM_PROT_READ) == 0 ||
+  if (status != KERN_SUCCESS || (info.protection & required) != required ||
       region > begin || region_size > UINT64_MAX - region) {
     return false;
   }
   return end <= region + region_size;
+}
+
+bool IsReadableRange(const void* pointer, size_t length) {
+  return HasRangeProtection(pointer, length, VM_PROT_READ);
+}
+
+bool IsWritableRange(const void* pointer, size_t length) {
+  return HasRangeProtection(pointer, length, VM_PROT_WRITE);
 }
 
 WaitEntry* FindWaitEntry(const int32_t* address, bool create) {
@@ -106,6 +119,30 @@ long GetTid() {
     g_thread_tid = candidate;
   }
   return static_cast<long>(g_thread_tid);
+}
+
+long GetRandom(const uint64_t* arguments) {
+  void* buffer = reinterpret_cast<void*>(arguments[1]);
+  const uint64_t length = arguments[2];
+  const uint32_t flags = static_cast<uint32_t>(arguments[3]);
+  constexpr uint32_t kKnownFlags =
+      kGrndNonblock | kGrndRandom | kGrndInsecure;
+  if ((flags & ~kKnownFlags) != 0 ||
+      (flags & (kGrndRandom | kGrndInsecure)) ==
+          (kGrndRandom | kGrndInsecure) ||
+      length > static_cast<uint64_t>(std::numeric_limits<long>::max())) {
+    return Fail(kAndroidEinval);
+  }
+  if (length == 0) return 0;
+  if (!IsWritableRange(buffer, static_cast<size_t>(length))) {
+    return Fail(kAndroidEfault);
+  }
+  // Darwin's arc4random_buf is backed by the host CSPRNG and cannot expose a
+  // Linux entropy-pool-not-ready state. Consequently GRND_NONBLOCK has the
+  // same successful result as a blocking request while preserving secure
+  // randomness and never forwarding an Android syscall number to Darwin.
+  arc4random_buf(buffer, static_cast<size_t>(length));
+  return static_cast<long>(length);
 }
 
 bool MonotonicDeadline(const AndroidTimespec& relative, timespec* deadline) {
@@ -265,6 +302,8 @@ extern "C" long darwin_art_bionic_syscall_captured(const uint64_t* registers,
     result = Futex(registers);
   } else if (registers[0] == kRtSigprocmask) {
     result = ReadabilityProbe(registers);
+  } else if (registers[0] == kGetrandom) {
+    result = GetRandom(registers);
   } else {
     result = Fail(kAndroidEnosys);
   }
@@ -311,6 +350,7 @@ extern "C" const char* darwin_art_bionic_syscall_capability(
   if (capability == nullptr) return "invalid-capability";
   if (strcmp(capability, "android-aapcs64-varargs-capture") == 0 ||
       strcmp(capability, "provider-owned-stable-tid") == 0 ||
+      strcmp(capability, "host-csprng-getrandom") == 0 ||
       strcmp(capability, "futex-private-wait-wake") == 0 ||
       strcmp(capability, "libunwind-readability-probe") == 0) {
     return "supported";

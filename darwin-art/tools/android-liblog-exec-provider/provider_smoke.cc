@@ -44,7 +44,8 @@ int main() {
   if (darwin_art_liblog_provider_name(DARWIN_ART_LIBLOG_PROVIDER_COUNT) != nullptr ||
       darwin_art_liblog_provider_address(DARWIN_ART_LIBLOG_PROVIDER_COUNT) != 0 ||
       darwin_art_liblog_provider_resolve("android_log_private", nullptr) != 0 ||
-      darwin_art_liblog_provider_resolve("__android_log_write", "LIBLOG") != 0) {
+      darwin_art_liblog_provider_resolve("__android_log_write", "LIBLOG") == 0 ||
+      darwin_art_liblog_provider_resolve("__android_log_write", "LIBC") != 0) {
     return 13;
   }
 

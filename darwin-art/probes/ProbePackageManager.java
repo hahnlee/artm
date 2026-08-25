@@ -7,6 +7,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageInfo;
 import android.content.pm.ResolveInfo;
+import android.content.pm.ServiceInfo;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -25,14 +26,20 @@ public final class ProbePackageManager extends MockPackageManager {
     private String versionName;
     private Map<ComponentName, Integer> componentEnabledSettings;
     private Map<String, Integer> applicationEnabledSettings;
+    private Map<ComponentName, ServiceInfo> serviceInfos;
+    private Map<String, Integer> activityThemes;
 
     public ProbePackageManager() {}
 
     /** Installs metadata for the unmodified APK selected by the native launcher. */
-    public void configure(String packageName, String activityName, ActivityInfo source,
-            int targetSdkVersion, Resources resources, int versionCode, String versionName) {
+    public void configure(String packageName, String activityName, String activityNames,
+            String serviceNames,
+            ActivityInfo source, int targetSdkVersion, Resources resources,
+            int versionCode, String versionName) {
         componentEnabledSettings = new HashMap<>();
         applicationEnabledSettings = new HashMap<>();
+        serviceInfos = new HashMap<>();
+        activityThemes = new HashMap<>();
         this.packageName = packageName;
         this.activityName = activityName;
         ActivityInfo configured = source == null ? new ActivityInfo() : source;
@@ -44,9 +51,36 @@ public final class ProbePackageManager extends MockPackageManager {
         configured.applicationInfo.packageName = packageName;
         configured.applicationInfo.targetSdkVersion = targetSdkVersion;
         activityInfo = new ActivityInfo(configured);
+        if (activityNames != null && !"none".equals(activityNames)) {
+            for (String entry : activityNames.split(",")) {
+                int separator = entry.lastIndexOf('=');
+                if (separator <= 0 || separator == entry.length() - 1) continue;
+                String name = entry.substring(0, separator);
+                int theme = Long.decode(entry.substring(separator + 1)).intValue();
+                activityThemes.put(name, Integer.valueOf(theme));
+            }
+        }
+        if (serviceNames != null && !"none".equals(serviceNames)) {
+            for (String serviceName : serviceNames.split(",")) {
+                if (serviceName.isEmpty()) continue;
+                ServiceInfo service = new ServiceInfo();
+                service.packageName = packageName;
+                service.name = serviceName;
+                service.applicationInfo = new ApplicationInfo(activityInfo.applicationInfo);
+                serviceInfos.put(new ComponentName(packageName, serviceName), service);
+            }
+        }
         this.resources = resources;
         this.versionCode = versionCode;
         this.versionName = versionName;
+    }
+
+    @Override
+    public ServiceInfo getServiceInfo(ComponentName component, int flags)
+            throws PackageManager.NameNotFoundException {
+        ServiceInfo service = serviceInfos.get(component);
+        if (service != null) return new ServiceInfo(service);
+        throw new PackageManager.NameNotFoundException(String.valueOf(component));
     }
 
     @Override
@@ -55,9 +89,11 @@ public final class ProbePackageManager extends MockPackageManager {
         if (component != null
                 && packageName != null
                 && packageName.equals(component.getPackageName())
-                && activityName != null
-                && activityName.equals(component.getClassName())) {
-            return new ActivityInfo(activityInfo);
+                && activityThemes.containsKey(component.getClassName())) {
+            ActivityInfo result = new ActivityInfo(activityInfo);
+            result.name = component.getClassName();
+            result.theme = activityThemes.get(component.getClassName()).intValue();
+            return result;
         }
         throw new PackageManager.NameNotFoundException(String.valueOf(component));
     }
@@ -83,7 +119,14 @@ public final class ProbePackageManager extends MockPackageManager {
         info.versionCode = versionCode;
         info.setLongVersionCode(versionCode & 0xffff_ffffL);
         info.versionName = versionName;
-        info.activities = new ActivityInfo[] {new ActivityInfo(activityInfo)};
+        info.activities = new ActivityInfo[activityThemes.size()];
+        int index = 0;
+        for (Map.Entry<String, Integer> entry : activityThemes.entrySet()) {
+            ActivityInfo declared = new ActivityInfo(activityInfo);
+            declared.name = entry.getKey();
+            declared.theme = entry.getValue().intValue();
+            info.activities[index++] = declared;
+        }
         return info;
     }
 
@@ -94,11 +137,13 @@ public final class ProbePackageManager extends MockPackageManager {
         }
         ComponentName component = intent.getComponent();
         if (packageName == null || !packageName.equals(component.getPackageName())
-                || activityName == null || !activityName.equals(component.getClassName())) {
+                || !activityThemes.containsKey(component.getClassName())) {
             return null;
         }
         ResolveInfo resolved = new ResolveInfo();
         resolved.activityInfo = new ActivityInfo(activityInfo);
+        resolved.activityInfo.name = component.getClassName();
+        resolved.activityInfo.theme = activityThemes.get(component.getClassName()).intValue();
         return resolved;
     }
 

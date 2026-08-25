@@ -193,10 +193,23 @@ owns per-Darwin-thread guest TLS blocks without replacing `TPIDR_EL0`.
 Imported/static TLS models, graph-wide module indexes, C++ thread-local
 destructors, and general ELF unwind registration remain open.
 
-The loader maps ELF directly; it does not convert it permanently to Mach-O.
-Rust is suitable for parsing, validation, dependency policy, and the mount
-namespace. C/C++ and small ARM64 assembly thunks own varargs, TLS, unwind, and
-ABI entrypoints where exact Bionic layout is required.
+The compatibility loader maps the original ELF directly when no complete
+Darwin installation artifact exists. Installation may additionally produce a
+Mach-O accelerator, but that product is admitted only as a fully Darwin arm64
+dependency graph: dyld loading, Darwin PCS, libSystem/pthread/TLS/unwind, and
+macOS platform metadata throughout. Renaming or repacking an Android-ABI image
+as `.dylib` is forbidden. Rust owns artifact admission, graph selection,
+dependency policy, and the mount namespace. C/C++ and small ARM64 assembly
+thunks own varargs, TLS, unwind, and ABI entrypoints where the fallback ELF
+path requires exact Bionic layout.
+
+The guest-visible identity remains Android's `lib*.so`. The installer stores
+Darwin products in a separate hash- and runtime-ABI-bound namespace. Selection
+is graph-atomic: either every library in the closed graph passes the complete
+Darwin contract and dyld owns the graph, or the entire graph uses the Android
+ELF compatibility loader. A mixed ELF/Mach-O graph is not a supported backend.
+The exact install and admission contract is documented in
+`docs/apk-native-artifacts.md`.
 
 ### Dual ARM64 calling conventions
 
@@ -401,8 +414,10 @@ Tier 1 must support those libraries.
 
 An APK classifier records ABI, `DT_NEEDED`, imports, TLS, relocations, executable
 memory requirements, raw `svc` instructions, graphics APIs, and known restricted
-SDKs. Backend selection is capability-based: native Darwin when the required
-surface is implemented, Linux VM fallback otherwise.
+SDKs. Backend selection is capability-based: a complete installed Darwin graph
+is preferred, otherwise the original Android ELF graph uses the compatibility
+loader when its required surface is implemented, and a Linux VM is the later
+fallback for kernel-coupled binaries.
 
 ## Current state
 

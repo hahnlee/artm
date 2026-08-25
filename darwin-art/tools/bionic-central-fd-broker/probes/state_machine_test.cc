@@ -39,6 +39,7 @@ struct Fake {
   bool release_blocked_socket = false;
   size_t socket_calls = 0;
   size_t accept_calls = 0;
+  int last_poll_timeout = -2;
   uint64_t next_accepted_object = 200;
   uint32_t accepted_kind = DARWIN_ART_FD_SOCKET;
 };
@@ -131,6 +132,24 @@ int Poll(void *context, uint64_t object, int16_t events, int16_t *revents,
   *android_errno = 0;
   fake->events.push_back(std::to_string(object) + ":poll");
   return events == 0 ? 0 : 1;
+}
+
+int PollMany(void *context, const uint64_t *objects, const int16_t *events,
+             int16_t *revents, size_t count, int timeout_ms,
+             int *android_errno) {
+  Fake *fake = static_cast<Fake *>(context);
+  std::lock_guard lock(fake->mutex);
+  fake->last_poll_timeout = timeout_ms;
+  int ready = 0;
+  for (size_t index = 0; index < count; ++index) {
+    assert(!fake->objects.at(objects[index]).closed);
+    revents[index] = events[index];
+    if (revents[index] != 0)
+      ++ready;
+    fake->events.push_back(std::to_string(objects[index]) + ":poll-many");
+  }
+  *android_errno = 0;
+  return ready;
 }
 
 int Ioctl(void *context, uint64_t object, uint64_t request, void *argument,
@@ -241,7 +260,7 @@ intptr_t SocketOperation(void *context, uint64_t object,
 }
 
 DarwinArtFdOwnerV1 Callbacks(Fake *fake) {
-  return DarwinArtFdOwnerV1{DARWIN_ART_FD_OWNER_ABI_V3,
+  return DarwinArtFdOwnerV1{DARWIN_ART_FD_OWNER_ABI_V4,
                             sizeof(DarwinArtFdOwnerV1),
                             fake,
                             Read,
@@ -251,7 +270,8 @@ DarwinArtFdOwnerV1 Callbacks(Fake *fake) {
                             Close,
                             ReadAt,
                             WriteAt,
-                            SocketOperation};
+                            SocketOperation,
+                            PollMany};
 }
 
 size_t FindEvent(const std::vector<std::string> &events,
@@ -664,6 +684,11 @@ int main() {
          DARWIN_ART_FD_BROKER_OK);
   assert(result.value == 2 && poll_entries[0].revents == 1 &&
          poll_entries[1].revents == 0 && poll_entries[2].revents == 0x20);
+  poll_entries[0].revents = 0;
+  Expect(darwin_art_fd_broker_poll_wait(broker, poll_entries, 1, 37, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 1 && poll_entries[0].revents == 1 &&
+         fake.last_poll_timeout == 37);
 
   const int stale_file_fd = second_file_fd;
   Expect(darwin_art_fd_broker_close(broker, second_file_fd, &result),

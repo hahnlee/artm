@@ -37,7 +37,7 @@ pub struct DarwinArtElfSymbolRequest {
     pub version_name: *const c_char,
     pub version_flags: u16,
     pub version_hidden: u8,
-    pub reserved: u8,
+    pub symbol_weak: u8,
     pub needed_libraries: *const *const c_char,
     pub needed_library_count: usize,
 }

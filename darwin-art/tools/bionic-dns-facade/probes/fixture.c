@@ -1,5 +1,6 @@
 #include <netdb.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <stdint.h>
 
 __attribute__((visibility("default"))) int DnsFixtureLookup(
@@ -62,4 +63,9 @@ __attribute__((visibility("default"))) void DnsFixtureFree(
 __attribute__((visibility("default"))) const char* DnsFixtureErrorString(
     int error) {
   return gai_strerror(error);
+}
+
+__attribute__((visibility("default"))) const char* DnsFixtureNtop(
+    int family, const void* address, char* output, socklen_t output_length) {
+  return inet_ntop(family, address, output, output_length);
 }

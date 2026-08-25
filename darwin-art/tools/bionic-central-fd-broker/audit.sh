@@ -133,4 +133,4 @@ while IFS= read -r -d '' file; do
 done < <(git -C "$root" ls-files --others --exclude-standard -z -- \
          tools/bionic-central-fd-broker)
 
-echo 'bionic-central-fd-broker: PASS C-ABI=v1+v2+v3 AndroidELF=dup+fcntl+epoll+socket-control OFD=shared-offset+status refclose=last descriptor-flags=independent epoll=socket-readiness socket=typed-leased+accept-atomic token=generation-tagged ASan+UBSan+TSan host-fd=0'
+echo 'bionic-central-fd-broker: PASS C-ABI=v1+v2+v3+v4 AndroidELF=dup+fcntl+epoll+socket-control OFD=shared-offset+status refclose=last descriptor-flags=independent poll=owner-batched-wait epoll=socket-readiness socket=typed-leased+accept-atomic token=generation-tagged ASan+UBSan+TSan host-fd=0'

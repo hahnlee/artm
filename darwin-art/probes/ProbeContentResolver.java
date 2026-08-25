@@ -15,6 +15,7 @@ import java.lang.reflect.Proxy;
 final class ProbeContentResolver extends ContentResolver {
     private final IContentProvider settingsProvider;
     private final IContentProvider calendarProvider;
+    private final IContentProvider hostDocumentProvider;
 
     ProbeContentResolver(Context context) {
         super(context);
@@ -53,13 +54,21 @@ final class ProbeContentResolver extends ContentResolver {
                     return null;
                 });
         calendarProvider = attachCalendarProvider(context);
+        hostDocumentProvider = attachProvider(
+                context, new ProbeHostDocumentProvider(),
+                ProbeHostDocumentProvider.AUTHORITY);
     }
 
     private static IContentProvider attachCalendarProvider(Context context) {
+        return attachProvider(context, new ProbeCalendarProvider(),
+                CalendarContract.AUTHORITY);
+    }
+
+    private static IContentProvider attachProvider(
+            Context context, ContentProvider provider, String authority) {
         try {
-            ProbeCalendarProvider provider = new ProbeCalendarProvider();
             ProviderInfo info = new ProviderInfo();
-            info.authority = CalendarContract.AUTHORITY;
+            info.authority = authority;
             info.exported = true;
             provider.attachInfo(context, info);
             Method transport = ContentProvider.class.getDeclaredMethod("getIContentProvider");
@@ -72,11 +81,17 @@ final class ProbeContentResolver extends ContentResolver {
 
     protected IContentProvider acquireProvider(Context context, String name) {
         if (CalendarContract.AUTHORITY.equals(name)) return calendarProvider;
+        if (ProbeHostDocumentProvider.AUTHORITY.equals(name)) {
+            return hostDocumentProvider;
+        }
         return settingsProvider;
     }
 
     protected IContentProvider acquireUnstableProvider(Context context, String name) {
         if (CalendarContract.AUTHORITY.equals(name)) return calendarProvider;
+        if (ProbeHostDocumentProvider.AUTHORITY.equals(name)) {
+            return hostDocumentProvider;
+        }
         return settingsProvider;
     }
 

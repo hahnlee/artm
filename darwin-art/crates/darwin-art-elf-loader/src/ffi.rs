@@ -120,7 +120,7 @@ impl FfiFailure {
 
 fn load_error_status(error: &LoadError) -> DarwinArtElfStatus {
     match error {
-        LoadError::Format(_) => DarwinArtElfStatus::Format,
+        LoadError::Format(_) | LoadError::Integrity(_) => DarwinArtElfStatus::Format,
         LoadError::Bounds(_) => DarwinArtElfStatus::Bounds,
         LoadError::Capability(_) => DarwinArtElfStatus::Capability,
         LoadError::Protection(_) => DarwinArtElfStatus::Protection,
@@ -240,7 +240,7 @@ impl SymbolResolver for CallbackResolver {
                 .map_or(ptr::null(), |value| value.as_ptr()),
             version_flags: request.version.map_or(0, |version| version.flags),
             version_hidden: u8::from(request.version.is_some_and(|version| version.hidden)),
-            reserved: 0,
+            symbol_weak: u8::from(request.is_weak),
             needed_libraries: if needed_pointers.is_empty() {
                 ptr::null()
             } else {

@@ -114,6 +114,7 @@ pub(crate) fn build_direct_apk_runtime_fixture(root: &Path) -> Result<PathBuf> {
 }
 
 pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
+    let elf_loader = build_elf_loader(root)?;
     audit_runtime_link(root)?;
     let runtime = root.join("_aosp/art/runtime");
     let build_dir = root.join("_build/runtime-direct-apk-link-probe");
@@ -544,7 +545,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         ))
         .arg(root.join("_build/icu-foundation/libicuuc-common-darwin.a"))
         .arg(root.join("_build/icu-foundation/libicuuc-stubdata-darwin.a"))
-        .arg(root.join("crates/darwin-art-elf-loader/target/release/libdarwin_art_elf_loader.a"))
+        .arg(&elf_loader)
         .arg(format!(
             "-Wl,-force_load,{}",
             runtime_native_owner_archive.display()

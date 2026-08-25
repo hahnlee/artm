@@ -176,6 +176,24 @@ pub(crate) fn emit_cached_native_graph_with_inputs(
     rules_emitted: &mut bool,
     extra_archive_inputs: &[PathBuf],
 ) {
+    let mut object_paths = emit_cached_native_object_edges(graph, objects, rules_emitted);
+    object_paths.extend(extra_archive_inputs.iter().map(|path| ninja_path(path)));
+    graph.push_str("build ");
+    graph.push_str(archive);
+    graph.push_str(": native_cached_archive ");
+    graph.push_str(&object_paths.join(" "));
+    graph.push('\n');
+}
+
+/// Emit source-owning edges without creating an archive. Shared runtime-core
+/// objects are members of both the headless and graphics archives, but each
+/// object must have exactly one Ninja producer so edits invalidate both
+/// consumers without duplicate output declarations.
+pub(crate) fn emit_cached_native_object_edges(
+    graph: &mut String,
+    objects: &[CachedNativeObject],
+    rules_emitted: &mut bool,
+) -> Vec<String> {
     if !*rules_emitted {
         graph.push_str("rule native_cached_cpp\n");
         graph.push_str("  command = $compile_command\n");
@@ -203,7 +221,7 @@ pub(crate) fn emit_cached_native_graph_with_inputs(
         graph.push_str("  restat = 1\n\n");
         *rules_emitted = true;
     }
-    let mut object_paths = Vec::with_capacity(objects.len() + extra_archive_inputs.len());
+    let mut object_paths = Vec::with_capacity(objects.len());
     for object in objects {
         let output = ninja_path(&object.object);
         let source = ninja_path(&object.source);
@@ -261,12 +279,7 @@ pub(crate) fn emit_cached_native_graph_with_inputs(
         graph.push('\n');
         object_paths.push(output);
     }
-    object_paths.extend(extra_archive_inputs.iter().map(|path| ninja_path(path)));
-    graph.push_str("build ");
-    graph.push_str(archive);
-    graph.push_str(": native_cached_archive ");
-    graph.push_str(&object_paths.join(" "));
-    graph.push('\n');
+    object_paths
 }
 
 #[cfg(test)]

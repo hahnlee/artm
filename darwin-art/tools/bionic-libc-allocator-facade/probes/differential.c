@@ -107,6 +107,22 @@ static int CheckPosixMemalign(void) {
   return 0;
 }
 
+static int CheckAlignedAlloc(void) {
+  CHECK(darwin_art_bionic_aligned_alloc(3, 12) == NULL);
+  CHECK(darwin_art_bionic_aligned_alloc(16, 17) == NULL);
+  for (size_t alignment = 8; alignment <= 4096; alignment *= 2) {
+    void* pointer = darwin_art_bionic_aligned_alloc(alignment, alignment * 2);
+    CHECK(pointer != NULL);
+    CHECK((uintptr_t)pointer % alignment == 0);
+    darwin_art_bionic_free(pointer);
+  }
+  void* zero = darwin_art_bionic_aligned_alloc(64, 0);
+  CHECK(zero != NULL);
+  CHECK((uintptr_t)zero % 64 == 0);
+  darwin_art_bionic_free(zero);
+  return 0;
+}
+
 static int CheckResolver(void) {
   typedef void* (*MallocFunction)(size_t);
   typedef void (*FreeFunction)(void*);
@@ -116,24 +132,23 @@ static int CheckResolver(void) {
   const DarwinArtBionicAllocatorBinding* table =
       darwin_art_bionic_allocator_table(&count);
   CHECK(table != NULL);
-  CHECK(count == 4);
-  CHECK(strcmp(table[0].import_name, "free") == 0);
-  CHECK(strcmp(table[1].import_name, "malloc") == 0);
-  CHECK(strcmp(table[2].import_name, "posix_memalign") == 0);
-  CHECK(strcmp(table[3].import_name, "realloc") == 0);
-  CHECK(darwin_art_bionic_allocator_resolve("free") == table[0].address);
-  CHECK(darwin_art_bionic_allocator_resolve("malloc") == table[1].address);
-  CHECK(darwin_art_bionic_allocator_resolve("posix_memalign") == table[2].address);
-  CHECK(darwin_art_bionic_allocator_resolve("realloc") == table[3].address);
+  const char* expected[] = {"aligned_alloc", "calloc", "free", "malloc",
+                            "malloc_usable_size", "mallopt", "memalign",
+                            "posix_memalign", "realloc", "strdup"};
+  CHECK(count == sizeof(expected) / sizeof(expected[0]));
+  for (size_t index = 0; index < count; ++index) {
+    CHECK(strcmp(table[index].import_name, expected[index]) == 0);
+    CHECK(darwin_art_bionic_allocator_resolve(expected[index]) ==
+          table[index].address);
+  }
   CHECK(darwin_art_bionic_allocator_resolve(NULL) == NULL);
   CHECK(darwin_art_bionic_allocator_resolve("malloc_size") == NULL);
-  CHECK(darwin_art_bionic_allocator_resolve("calloc") == NULL);
 
-  MallocFunction resolved_malloc = (MallocFunction)table[1].address;
-  FreeFunction resolved_free = (FreeFunction)table[0].address;
+  MallocFunction resolved_malloc = (MallocFunction)table[3].address;
+  FreeFunction resolved_free = (FreeFunction)table[2].address;
   PosixMemalignFunction resolved_posix_memalign =
-      (PosixMemalignFunction)table[2].address;
-  ReallocFunction resolved_realloc = (ReallocFunction)table[3].address;
+      (PosixMemalignFunction)table[7].address;
+  ReallocFunction resolved_realloc = (ReallocFunction)table[8].address;
   void* direct = resolved_malloc(29);
   CHECK(direct != NULL);
   direct = resolved_realloc(direct, 57);
@@ -144,17 +159,19 @@ static int CheckResolver(void) {
   CHECK((uintptr_t)aligned % 64 == 0);
   resolved_free(aligned);
 
-  CHECK((table[0].capabilities & DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE) != 0);
-  CHECK((table[1].capabilities &
-         DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM) != 0);
   CHECK((table[2].capabilities & DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE) != 0);
   CHECK((table[3].capabilities &
+         DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM) != 0);
+  CHECK((table[7].capabilities & DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE) != 0);
+  CHECK((table[8].capabilities &
          DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM) != 0);
   for (size_t index = 0; index < count; ++index) {
     CHECK((table[index].capabilities &
            DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI) != 0);
-    CHECK((table[index].capabilities &
-           DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK) != 0);
+    if (index != 4 && index != 5) {
+      CHECK((table[index].capabilities &
+             DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK) != 0);
+    }
   }
   return 0;
 }
@@ -162,6 +179,7 @@ static int CheckResolver(void) {
 int main(void) {
   CHECK(CheckSizeZeroAndRealloc() == 0);
   CHECK(CheckPosixMemalign() == 0);
+  CHECK(CheckAlignedAlloc() == 0);
   CHECK(CheckHostErrnoIsolation() == 0);
   CHECK(CheckResolver() == 0);
   puts("allocator differential: PASS");

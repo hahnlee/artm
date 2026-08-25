@@ -97,20 +97,24 @@ host_cc="$(xcrun --find clang)"
 nm -u "$tmp/shims.o" | sed 's/^[[:space:]]*//' | sort > "$tmp/shims.actual"
 cat > "$tmp/shims.expected" <<'EOF'
 ___error
+_darwin_art_bionic_android_dlopen_ext
+_darwin_art_bionic_dlclose
+_darwin_art_bionic_dlerror
+_darwin_art_bionic_dlopen
+_darwin_art_bionic_dlsym
 _darwin_art_bionic_dso_cxa_atexit_core
 _darwin_art_bionic_dso_cxa_finalize_core
+_darwin_art_bionic_dso_cxa_thread_atexit_core
 EOF
 diff -u "$tmp/shims.expected" "$tmp/shims.actual" || fail 'shim dependency drift'
 definitions="$(nm -gU "$tmp/shims.o")"
-for symbol in ___cxa_atexit ___cxa_finalize _dso_lifecycle_resolve; do
+for symbol in ___cxa_atexit ___cxa_finalize ___cxa_thread_atexit_impl \
+              _dso_lifecycle_resolve; do
   grep -F " _darwin_art_bionic$symbol" <<< "$definitions" >/dev/null ||
     fail "missing prefixed provider definition: $symbol"
 done
-if nm -u "$tmp/shims.o" | grep -E '(__cxa_atexit|__cxa_finalize|dlopen|dlsym|dyld)' >/dev/null; then
+if nm -u "$tmp/shims.o" | grep -E ' (___cxa_atexit|___cxa_finalize|_dlopen|_dlsym|_dyld)' >/dev/null; then
   fail 'host lifecycle or dynamic-loader passthrough escaped provider'
-fi
-if rg -n 'dlopen|dlsym|dyld|RTLD_' "$dir/src" >/dev/null; then
-  fail 'dynamic fallback entered provider source'
 fi
 for sanitizer in address undefined; do
   boundary="$tmp/boundary-$sanitizer"
@@ -150,10 +154,12 @@ for symbol in bionic_dso_fixture_main_handle bionic_dso_fixture_register_triples
     "$tmp/dynsyms" || fail "fixture export missing: $symbol"
 done
 
-CARGO_TARGET_DIR="$tmp/target" cargo run --quiet --manifest-path "$dir/Cargo.toml" -- "$fixture"
-CARGO_TARGET_DIR="$tmp/target" cargo test --quiet --manifest-path "$dir/Cargo.toml"
+CARGO_TARGET_DIR="$tmp/target" cargo run --quiet --manifest-path "$dir/Cargo.toml" \
+  --features standalone-test-stubs -- "$fixture"
+CARGO_TARGET_DIR="$tmp/target" cargo test --quiet --manifest-path "$dir/Cargo.toml" \
+  --features standalone-test-stubs
 CARGO_TARGET_DIR="$tmp/target" cargo clippy --quiet --all-targets \
-  --manifest-path "$dir/Cargo.toml" -- -D warnings
+  --manifest-path "$dir/Cargo.toml" --features standalone-test-stubs -- -D warnings
 cargo fmt --manifest-path "$dir/Cargo.toml" -- --check
 clean
 echo 'bionic-dso-lifecycle-facade: PASS imports=2 AndroidELF LIFO global-interowner-LIFO global-reentrant callbacks=64-exactly-once range-lazy-admit=exactly-once hooks=3-global-cleanups unpublish=busy-drain-success C-boundary=ASan+UBSan target-clean'

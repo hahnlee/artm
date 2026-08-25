@@ -1,6 +1,7 @@
 #include "darwin_art_bionic_pthread.h"
 
 #include <cstdio>
+#include <cstring>
 #include <thread>
 
 namespace {
@@ -84,7 +85,22 @@ int RunRound() {
       kAndroidEnotsup) {
     return 9;
   }
-  if (darwin_art_bionic_pthread_provider_reset() != 0) return 10;
+  DarwinArtAndroidPthreadMutex reused{};
+  if (darwin_art_bionic_pthread_mutex_lock(&reused) != 0 ||
+      darwin_art_bionic_pthread_mutex_unlock(&reused) != 0 ||
+      darwin_art_bionic_pthread_mutex_destroy(&reused) != 0) {
+    return 10;
+  }
+  // Android libc++ default-constructs std::mutex from the all-zero static
+  // initializer. Simulate allocator address reuse after the previous lifetime
+  // was destroyed; the provider must create a fresh host generation.
+  std::memset(&reused, 0, sizeof(reused));
+  if (darwin_art_bionic_pthread_mutex_lock(&reused) != 0 ||
+      darwin_art_bionic_pthread_mutex_unlock(&reused) != 0 ||
+      darwin_art_bionic_pthread_mutex_destroy(&reused) != 0) {
+    return 11;
+  }
+  if (darwin_art_bionic_pthread_provider_reset() != 0) return 12;
   return 0;
 }
 
@@ -95,6 +111,6 @@ int main() {
     const int result = RunRound();
     if (result != 0) return result;
   }
-  std::puts("pthread-mutex-attr-stress: PASS rounds=100 normal+recursive+errorcheck recursive-depth=2 self=EDEADLK wrong-owner=EPERM held-destroy=EBUSY destroyed-attr=EINVAL pshared+PI=ENOTSUP ASan=clean");
+  std::puts("pthread-mutex-attr-stress: PASS rounds=100 normal+recursive+errorcheck recursive-depth=2 self=EDEADLK wrong-owner=EPERM held-destroy=EBUSY address-reuse=fresh-generation destroyed-attr=EINVAL pshared+PI=ENOTSUP ASan=clean");
   return 0;
 }

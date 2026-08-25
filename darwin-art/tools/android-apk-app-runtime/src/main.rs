@@ -23,6 +23,7 @@ const TYPE_REFERENCE: u8 = 0x01;
 const TYPE_STRING: u8 = 0x03;
 const TYPE_INT_DEC: u8 = 0x10;
 const TYPE_INT_HEX: u8 = 0x11;
+const TYPE_INT_BOOLEAN: u8 = 0x12;
 
 #[derive(Clone)]
 struct ZipEntry {
@@ -39,6 +40,7 @@ struct StringPool {
     strings: Vec<String>,
 }
 
+#[derive(Clone)]
 struct ActivityCandidate {
     depth: usize,
     name: String,
@@ -47,12 +49,15 @@ struct ActivityCandidate {
     label_res: Option<u32>,
     main: bool,
     launcher: bool,
+    alias: bool,
 }
 
 struct ManifestInfo {
     package: String,
     application: String,
     activity: String,
+    activity_themes: Vec<(String, u32)>,
+    services: Vec<String>,
     version_code: u32,
     version_name: String,
     theme: u32,
@@ -85,11 +90,18 @@ fn u32le(input: &[u8], offset: usize, label: &str) -> Result<u32> {
 }
 
 fn safe_name(name: &[u8]) -> Result<()> {
+    let directory = name.ends_with(b"/");
+    let body = if directory {
+        &name[..name.len().saturating_sub(1)]
+    } else {
+        name
+    };
     if name.is_empty()
         || name[0] == b'/'
         || name.contains(&0)
         || name.contains(&b'\\')
-        || name
+        || body.is_empty()
+        || body
             .split(|byte| *byte == b'/')
             .any(|part| part.is_empty() || part == b"." || part == b"..")
     {
@@ -429,6 +441,36 @@ fn find_integer_attribute(
     Ok(None)
 }
 
+fn find_boolean_attribute(
+    input: &[u8],
+    pool: &StringPool,
+    attrs: usize,
+    count: usize,
+    attr_size: usize,
+    wanted: &str,
+) -> Result<Option<bool>> {
+    if attr_size < 20 {
+        return Err("manifest attribute record is too small".to_owned());
+    }
+    for index in 0..count {
+        let attr = checked_add(attrs, index * attr_size, "manifest attribute")?;
+        let name = pool_string(pool, u32le(input, attr + 4, "attribute name")?)?;
+        if name != wanted {
+            continue;
+        }
+        let value_size = u16le(input, attr + 12, "attribute value size")?;
+        let value_type = *bytes(input, attr + 15, 1, "attribute type")?
+            .first()
+            .ok_or_else(|| "attribute type is absent".to_owned())?;
+        return if value_size == 8 && value_type == TYPE_INT_BOOLEAN {
+            Ok(Some(u32le(input, attr + 16, "attribute boolean")? != 0))
+        } else {
+            Ok(None)
+        };
+    }
+    Ok(None)
+}
+
 fn normalize_activity(package: &str, name: &str) -> Result<String> {
     let full = if name.starts_with('.') {
         format!("{package}{name}")
@@ -480,6 +522,8 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
     let mut target_sdk = None;
     let mut current: Option<ActivityCandidate> = None;
     let mut launchers = Vec::new();
+    let mut activities = Vec::new();
+    let mut service_names = Vec::new();
     while offset < input.len() {
         let chunk_type = u16le(input, offset, "XML chunk type")?;
         let header_size = usize::from(u16le(input, offset + 2, "XML chunk header")?);
@@ -554,13 +598,24 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                         input, strings, attrs, attr_count, attr_size, "theme",
                     )?;
                 }
-                "activity" => {
+                "activity" | "activity-alias" => {
                     if current.is_some() {
                         return Err("nested activity declarations are invalid".to_owned());
                     }
-                    let name =
-                        find_attribute(input, strings, attrs, attr_count, attr_size, "name")?
-                            .ok_or_else(|| "activity is missing android:name".to_owned())?;
+                    let name_attribute = if tag == "activity-alias" {
+                        "targetActivity"
+                    } else {
+                        "name"
+                    };
+                    let name = find_attribute(
+                        input,
+                        strings,
+                        attrs,
+                        attr_count,
+                        attr_size,
+                        name_attribute,
+                    )?
+                    .ok_or_else(|| format!("{tag} is missing android:{name_attribute}"))?;
                     let theme = find_resource_attribute(
                         input, strings, attrs, attr_count, attr_size, "theme",
                     )?;
@@ -577,7 +632,20 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                         label_res: activity_label_res,
                         main: false,
                         launcher: false,
+                        alias: tag == "activity-alias",
                     });
+                }
+                "service" => {
+                    let enabled = find_boolean_attribute(
+                        input, strings, attrs, attr_count, attr_size, "enabled",
+                    )?
+                    .unwrap_or(true);
+                    if enabled {
+                        let name =
+                            find_attribute(input, strings, attrs, attr_count, attr_size, "name")?
+                                .ok_or_else(|| "service is missing android:name".to_owned())?;
+                        service_names.push(name);
+                    }
                 }
                 "action" if current.is_some() => {
                     if find_attribute(input, strings, attrs, attr_count, attr_size, "name")?
@@ -602,7 +670,7 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                 .as_ref()
                 .ok_or_else(|| "XML node precedes string pool".to_owned())?;
             let tag = pool_string(strings, u32le(input, offset + 20, "end element name")?)?;
-            if tag == "activity" {
+            if tag == "activity" || tag == "activity-alias" {
                 let candidate = current
                     .take()
                     .ok_or_else(|| "activity end without start".to_owned())?;
@@ -610,7 +678,10 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                     return Err("activity element depth mismatch".to_owned());
                 }
                 if candidate.main && candidate.launcher {
-                    launchers.push(candidate);
+                    launchers.push(candidate.clone());
+                }
+                if !candidate.alias {
+                    activities.push(candidate);
                 }
             }
             depth = depth
@@ -634,6 +705,19 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
         .pop()
         .ok_or_else(|| "launcher Activity is missing".to_owned())?;
     let activity = normalize_activity(&package, &launcher.name)?;
+    let activity_themes = activities
+        .into_iter()
+        .map(|candidate| {
+            Ok((
+                normalize_activity(&package, &candidate.name)?,
+                candidate.theme.or(application_theme).unwrap_or(0),
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let services = service_names
+        .into_iter()
+        .map(|name| normalize_activity(&package, &name))
+        .collect::<Result<Vec<_>>>()?;
     let theme = launcher.theme.or(application_theme).unwrap_or(0);
     let label_res = launcher.label_res.or(label_res).unwrap_or(0);
     let label = launcher
@@ -645,6 +729,8 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
         package,
         application,
         activity,
+        activity_themes,
+        services,
         version_code: version_code.unwrap_or(0),
         version_name: version_name.unwrap_or_default(),
         theme,
@@ -701,33 +787,46 @@ fn validate_dex(input: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn inspect(path: &Path, external_dex: Option<&Path>) -> Result<(ManifestInfo, &'static str)> {
+fn inspect(
+    path: &Path,
+    external_dex: Option<&Path>,
+) -> Result<(ManifestInfo, &'static str, usize, Vec<String>)> {
     let metadata = fs::metadata(path).map_err(|error| format!("APK metadata failed: {error}"))?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_APK_SIZE as u64 {
         return Err(format!("APK is outside the 1..={MAX_APK_SIZE} byte cap"));
     }
     let input = fs::read(path).map_err(|error| format!("APK read failed: {error}"))?;
     let entries = parse_zip(&input)?;
-    if entries.iter().any(|entry| {
-        entry.name.ends_with(b".so") || entry.name.windows(4).any(|window| window == b".so/")
-    }) {
-        return Err("APK contains a native .so entry".to_owned());
-    }
+    let mut native_libraries = entries
+        .iter()
+        .filter_map(|entry| {
+            let leaf = entry.name.strip_prefix(b"lib/arm64-v8a/")?;
+            if leaf.is_empty() || leaf.contains(&b'/') || !leaf.ends_with(b".so") {
+                return None;
+            }
+            std::str::from_utf8(leaf).ok().map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    native_libraries.sort();
+    native_libraries.dedup();
     let manifest_entries = entries
         .iter()
         .filter(|entry| entry.name == b"AndroidManifest.xml")
         .collect::<Vec<_>>();
-    let dex_entries = entries
+    let mut dex_entries = entries
         .iter()
-        .filter(|entry| entry.name == b"classes.dex")
+        .filter(|entry| {
+            entry.name == b"classes.dex"
+                || (entry.name.starts_with(b"classes")
+                    && entry.name.ends_with(b".dex")
+                    && entry.name[7..entry.name.len() - 4]
+                        .iter()
+                        .all(u8::is_ascii_digit))
+        })
         .collect::<Vec<_>>();
-    let secondary_dex = entries.iter().any(|entry| {
-        entry.name.starts_with(b"classes")
-            && entry.name.ends_with(b".dex")
-            && entry.name != b"classes.dex"
-    });
-    if manifest_entries.len() != 1 || secondary_dex {
-        return Err("APK must contain one manifest and no secondary DEX files".to_owned());
+    dex_entries.sort_by(|left, right| left.name.cmp(&right.name));
+    if manifest_entries.len() != 1 {
+        return Err("APK must contain exactly one manifest".to_owned());
     }
     let manifest = entry_bytes(&input, manifest_entries[0], MAX_MANIFEST_SIZE)?;
     let (dex, dex_source) = match external_dex {
@@ -751,22 +850,38 @@ fn inspect(path: &Path, external_dex: Option<&Path>) -> Result<(ManifestInfo, &'
             )
         }
         None => {
-            if dex_entries.len() != 1 {
+            if !dex_entries.iter().any(|entry| entry.name == b"classes.dex") {
                 return Err(
-                    "APK must contain one primary classes.dex or provide an external DEX"
-                        .to_owned(),
+                    "APK must contain primary classes.dex or provide an external DEX".to_owned(),
                 );
             }
             (
-                entry_bytes(&input, dex_entries[0], MAX_DEX_SIZE)?,
-                "primary",
+                entry_bytes(
+                    &input,
+                    dex_entries
+                        .iter()
+                        .find(|entry| entry.name == b"classes.dex")
+                        .expect("primary DEX presence was checked"),
+                    MAX_DEX_SIZE,
+                )?,
+                "apk",
             )
         }
     };
     validate_dex(&dex)?;
+    if external_dex.is_none() {
+        for entry in &dex_entries {
+            validate_dex(&entry_bytes(&input, entry, MAX_DEX_SIZE)?)?;
+        }
+    }
     let mut info = parse_manifest(&manifest)?;
     info.icon = icon_entry(&entries);
-    Ok((info, dex_source))
+    let dex_count = if external_dex.is_some() {
+        1
+    } else {
+        dex_entries.len()
+    };
+    Ok((info, dex_source, dex_count, native_libraries))
 }
 
 fn descriptor(class_name: &str) -> String {
@@ -788,13 +903,24 @@ fn run() -> Result<()> {
             Path::new(&program).display()
         ));
     }
-    let (info, dex_source) = inspect(Path::new(&path), external_dex.as_deref().map(Path::new))?;
+    let (info, dex_source, dex_count, native_libraries) =
+        inspect(Path::new(&path), external_dex.as_deref().map(Path::new))?;
     println!(
-        "apk-app-runtime: package={} application={} activity={} descriptor={} version_code={} version_name={} theme={:#x} target_sdk={} label={} label_res={:#x} icon={} dex={} native=0",
+        "apk-app-runtime: package={} application={} activity={} descriptor={} activities={} services={} version_code={} version_name={} theme={:#x} target_sdk={} label={} label_res={:#x} icon={} dex={}-{} native={} native_root={}",
         info.package,
         info.application,
         info.activity,
         descriptor(&info.activity),
+        info.activity_themes
+            .iter()
+            .map(|(name, theme)| format!("{name}={theme:#x}"))
+            .collect::<Vec<_>>()
+            .join(","),
+        if info.services.is_empty() {
+            "none".to_owned()
+        } else {
+            info.services.join(",")
+        },
         info.version_code,
         info.version_name,
         info.theme,
@@ -802,7 +928,10 @@ fn run() -> Result<()> {
         info.label,
         info.label_res,
         info.icon.as_deref().unwrap_or("none"),
-        dex_source
+        dex_source,
+        dex_count,
+        native_libraries.len(),
+        native_libraries.first().map(String::as_str).unwrap_or("none")
     );
     Ok(())
 }

@@ -8,6 +8,12 @@
 
 static int Sign(int value) { return (value > 0) - (value < 0); }
 
+static int CompareInt(const void* left, const void* right) {
+  const int a = *(const int*)left;
+  const int b = *(const int*)right;
+  return (a > b) - (a < b);
+}
+
 static uint32_t Next(uint32_t* state) {
   *state = *state * 1664525u + 1013904223u;
   return *state;
@@ -18,8 +24,24 @@ static void TestBionicContractEdges(void) {
   const unsigned char low[] = {0x7f, 0};
   assert(darwin_art_bionic_memcmp(high, low, 1) > 0);
   assert(darwin_art_bionic_strcmp((const char*)high, (const char*)low) > 0);
+  assert(darwin_art_bionic_strcasecmp("ConScRyPt", "conscrypt") == 0);
+  assert(darwin_art_bionic_strcasecmp("abc", "ABd") < 0);
+  assert(darwin_art_bionic_strcasecmp((const char*)high, (const char*)low) > 0);
   assert(darwin_art_bionic_strncmp("same", "different", 0) == 0);
   assert(darwin_art_bionic_memchr("abc", 'z', 3) == NULL);
+
+  char checked[8] = {0};
+  assert(darwin_art_bionic___memcpy_chk(checked, "abc", 4,
+                                        sizeof(checked)) == checked);
+  assert(darwin_art_bionic___memmove_chk(checked + 1, checked, 4,
+                                         sizeof(checked) - 1) == checked + 1);
+  assert(darwin_art_bionic___memset_chk(checked, 'x', 2,
+                                        sizeof(checked)) == checked);
+  int unsorted[] = {7, -2, 7, 0, 42, -100, 5};
+  const int sorted[] = {-100, -2, 0, 5, 7, 7, 42};
+  darwin_art_bionic_qsort(unsorted, sizeof(unsorted) / sizeof(unsorted[0]),
+                          sizeof(unsorted[0]), CompareInt);
+  assert(memcmp(unsorted, sorted, sizeof(sorted)) == 0);
 
   char overlap[] = "0123456789";
   assert(darwin_art_bionic_memmove(overlap + 2, overlap, 8) == overlap + 2);
@@ -95,7 +117,7 @@ static void TestWideMemory(void) {
 static void TestResolver(void) {
   size_t count = 0;
   const DarwinArtBionicLeafBinding* table = darwin_art_bionic_libc_leaf_table(&count);
-  assert(table != NULL && count == 11);
+  assert(table != NULL && count == 33);
   for (size_t index = 0; index < count; ++index) {
     assert(table[index].address != NULL);
     assert(darwin_art_bionic_libc_leaf_resolve(table[index].import_name) == table[index].address);
@@ -112,6 +134,6 @@ int main(void) {
   TestMemoryAndStrings();
   TestWideMemory();
   TestResolver();
-  puts("bionic-libc-leaf differential: PASS cases=4096 bindings=11");
+  puts("bionic-libc-leaf differential: PASS cases=4096 bindings=33");
   return 0;
 }

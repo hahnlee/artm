@@ -21,7 +21,7 @@ lifecycle, plus Linux-offset sendfile over the process filesystem owner.
 `generate_manifests.py` derives the
 table directly from those provider manifests, the canonical 160-import
 classification, and the reviewed extension manifest. It refuses a duplicate
-owner or an unreviewed extension. 159 pinned imports plus eight reviewed
+owner or an unreviewed extension. The pinned imports plus reviewed
 extensions (`pthread_create`, central `close`, socket, DNS, and the Android
 `stdout` object) are
 owned by `libc.so`; loader-owned
@@ -58,9 +58,9 @@ after namespace composition.
 
 Run `tools/bionic-provider-namespace/audit.sh`. It regenerates and diffs every
 table, re-derives all 160 libc imports from the hash-pinned real NDK ELF,
-checks 186 unique `(SONAME, symbol)` routes and zero unsupported libc
+checks 296 unique `libc.so` routes and zero unsupported libc
 imports, rejects wrong SONAMEs and versions, performs 12-thread lookup stress,
-routes all 186 entries through the typed adapters with exact per-provider
+routes all 371 versioned entries through the typed adapters with exact per-provider
 counts (including the distinct `libdl.so` contract),
 proves teardown waits for a blocked resolver and releases every provider once
 in order, scans for host-loader escape hatches, and repeats the C++ boundary

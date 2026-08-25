@@ -35,6 +35,7 @@ extern "C" void *darwin_art_bionic_socket_broker_dns_resolve(const char *,
                                                              const char *);
 extern "C" void *darwin_art_bionic_math_resolve(const char *, const char *,
                                                  const char *);
+extern "C" SymbolFunction darwin_art_bionic_vm_resolve(const char *);
 extern "C" void *darwin_art_bionic_locale_resolve(const char *, const char *,
                                                   const char *);
 extern "C" SymbolFunction darwin_art_bionic_numeric_resolve(const char *);
@@ -149,6 +150,9 @@ uintptr_t Math(void *, const char *soname, const char *symbol,
   return reinterpret_cast<uintptr_t>(
       darwin_art_bionic_math_resolve(soname, symbol, version));
 }
+uintptr_t Vm(void *, const char *, const char *symbol, const char *) {
+  return Address(darwin_art_bionic_vm_resolve(symbol));
+}
 uintptr_t Locale(void *, const char *soname, const char *symbol,
                  const char *version) {
   return reinterpret_cast<uintptr_t>(
@@ -243,6 +247,7 @@ constexpr DarwinArtBionicProviderResolve kResolvers[] = {
     Socket,
     Dns,
     Math,
+    Vm,
 };
 static_assert(sizeof(kResolvers) / sizeof(kResolvers[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);

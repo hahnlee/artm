@@ -52,8 +52,10 @@ flags=(-arch arm64 -isysroot "$sdk_root" -std=c17 -O2 -fno-builtin
 nm -u "$temp_root/allocator.o" | sed 's/^[[:space:]]*//' | sort >"$temp_root/undefined"
 cat >"$temp_root/expected-undefined" <<'EOF'
 ___error
+_calloc
 _free
 _malloc
+_malloc_size
 _posix_memalign
 _realloc
 EOF
@@ -61,7 +63,7 @@ diff -u "$temp_root/expected-undefined" "$temp_root/undefined" ||
   fail 'Darwin allocator backend dependency drift'
 
 definitions="$(nm -gU "$temp_root/allocator.o")"
-for symbol in free malloc malloc_result posix_memalign posix_memalign_result \
+for symbol in aligned_alloc free malloc malloc_result posix_memalign posix_memalign_result \
               realloc realloc_result allocator_resolve allocator_table; do
   grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
     fail "missing prefixed definition $symbol"
@@ -70,7 +72,7 @@ if awk '$2 ~ /^[TDS]$/ {print $3}' <<<"$definitions" |
    grep -Ev '^_darwin_art_bionic_' >/dev/null; then
   fail 'unprefixed global definition escaped facade'
 fi
-if rg -n 'dlsym|malloc_size|malloc_usable_size' "$script_dir/src" "$script_dir/include" \
+if rg -n 'dlsym' "$script_dir/src" "$script_dir/include" \
    >/dev/null; then
   fail 'forbidden interposition or allocator scope expansion'
 fi

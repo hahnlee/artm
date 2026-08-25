@@ -128,6 +128,18 @@ art::Thread* owner_thread_for_callback() {
   return g_state.art_thread;
 }
 
+darwin_art_graphics::GraphicsState* graphics_state_for_callback() {
+  std::lock_guard<std::mutex> lock(g_state.mutex);
+  if (!g_state.runtime_created || g_state.failed || g_state.shutdown_started ||
+      !g_state.owner_thread_valid ||
+      pthread_equal(g_state.owner_thread, pthread_self()) == 0 ||
+      g_state.art_thread == nullptr ||
+      art::Thread::Current() != g_state.art_thread) {
+    return nullptr;
+  }
+  return g_state.graphics_state;
+}
+
 ShutdownBeginResult begin_shutdown(ShutdownSnapshot* snapshot) {
   const struct darwin_art_lifecycle_hooks* lifecycle_hooks = nullptr;
   {

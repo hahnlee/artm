@@ -18,6 +18,9 @@ unsafe extern "C" {
         version: *const c_char,
     ) -> Option<unsafe extern "C" fn()>;
     static mut darwin_art_bionic___sF: [u8; 456];
+    static mut darwin_art_bionic_stdin: *mut u8;
+    static mut darwin_art_bionic_stdout: *mut u8;
+    static mut darwin_art_bionic_stderr: *mut u8;
 }
 struct Resolver;
 impl SymbolResolver for Resolver {
@@ -27,6 +30,12 @@ impl SymbolResolver for Resolver {
         }
         let address = if r.symbol == "__sF" {
             Some(std::ptr::addr_of_mut!(darwin_art_bionic___sF) as usize)
+        } else if r.symbol == "stdin" {
+            Some(std::ptr::addr_of_mut!(darwin_art_bionic_stdin) as usize)
+        } else if r.symbol == "stdout" {
+            Some(std::ptr::addr_of_mut!(darwin_art_bionic_stdout) as usize)
+        } else if r.symbol == "stderr" {
+            Some(std::ptr::addr_of_mut!(darwin_art_bionic_stderr) as usize)
         } else {
             let n = match r.symbol {
                 "__errno" => c"__errno",
@@ -35,14 +44,18 @@ impl SymbolResolver for Resolver {
                 "fileno" => c"fileno",
                 "fopen" => c"fopen",
                 "fputc" => c"fputc",
+                "fputs" => c"fputs",
+                "ferror" => c"ferror",
                 "fputwc" => c"fputwc",
                 "fread" => c"fread",
                 "fseek" => c"fseek",
                 "fseeko" => c"fseeko",
                 "ftello" => c"ftello",
+                "ftell" => c"ftell",
                 "fwrite" => c"fwrite",
                 "getc" => c"getc",
                 "getwc" => c"getwc",
+                "setbuf" => c"setbuf",
                 "ungetc" => c"ungetc",
                 "ungetwc" => c"ungetwc",
                 _ => return Ok(None),
@@ -76,6 +89,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err("formatted stdio escaped central resolver rejection".into());
         }
     }
+    if unsafe { darwin_art_bionic_stdio_resolve(c"perror".as_ptr()) }.is_none() {
+        return Err("perror resolver".into());
+    }
     let bytes = fs::read(fixture)?;
     let mut resolver = Resolver;
     let mut image = LoadedElf::load_with_resolver(&bytes, &mut resolver)?;
@@ -91,6 +107,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if provider.stdout_bytes() != b"!" {
         return Err("stdout capture".into());
+    }
+    if provider.stderr_bytes() != b"ok" {
+        return Err("stderr capture".into());
     }
     if image.call_exported_i32("bionic_stdio_fixture_race_setup")? != 42 {
         return Err("race setup".into());

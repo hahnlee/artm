@@ -91,11 +91,13 @@ cp "$smoke" "$build_dir/android-liblog-exec-provider-smoke"
 
 "$build_dir/android-liblog-exec-provider-smoke" > "$stage/provider-manifest.tsv"
 cut -f1 "$stage/provider-manifest.tsv" > "$stage/provider-names.txt"
-cmp -s "$stage/provider-names.txt" "$stage/ndk-public.txt" ||
-  fail "executable provider manifest differs from NDK API 35 public surface"
-[[ "$(wc -l < "$stage/provider-manifest.tsv" | tr -d ' ')" == "$NDK_LIBLOG_EXPORT_COUNT" ]] ||
+{ cat "$stage/ndk-public.txt"; printf '%s\n' __android_log_error_write; } |
+  sort -u > "$stage/expected-provider-names.txt"
+cmp -s "$stage/provider-names.txt" "$stage/expected-provider-names.txt" ||
+  fail "executable provider manifest differs from NDK API 35 plus reviewed extension"
+[[ "$(wc -l < "$stage/provider-manifest.tsv" | tr -d ' ')" == "$((NDK_LIBLOG_EXPORT_COUNT + 1))" ]] ||
   fail "executable provider count drift"
 
-echo "android-liblog-exec-provider: PASS arm64=1 public=18 nonzero=18 unique=18 calls=3"
+echo "android-liblog-exec-provider: PASS arm64=1 ndk-public=18 extensions=1 nonzero=19 unique=19 calls=3 versions=unversioned+LIBLOG"
 echo "android-liblog-exec-provider: archive=$build_dir/libandroid-liblog-provider-table-darwin.a"
 echo "android-liblog-exec-provider: dylib=$build_dir/libandroid-liblog-exec-provider.dylib private-mach-o-exports=0"

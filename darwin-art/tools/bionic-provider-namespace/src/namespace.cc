@@ -67,6 +67,7 @@ constexpr const char *kProviderNames[] = {
     "socket",
     "dns",
     "math",
+    "vm",
 };
 static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);
@@ -76,6 +77,7 @@ static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
  * Dependants are released before the shared errno/allocator/leaf substrate. */
 constexpr DarwinArtBionicProviderId kReleaseOrder[] = {
     DARWIN_ART_BIONIC_PROVIDER_DSO_LIFECYCLE,
+    DARWIN_ART_BIONIC_PROVIDER_VM,
     DARWIN_ART_BIONIC_PROVIDER_MATH,
     DARWIN_ART_BIONIC_PROVIDER_DNS,
     DARWIN_ART_BIONIC_PROVIDER_SOCKET,
@@ -119,7 +121,23 @@ int CompareKey(const Ownership &entry, const char *soname, const char *symbol) {
   return comparison != 0 ? comparison : std::strcmp(entry.symbol, symbol);
 }
 
-const Ownership *FindOwnership(const char *soname, const char *symbol) {
+bool VersionMatches(const Ownership &entry, const char *version) {
+  /* Some NDK-built compatibility DSOs carry mallopt without a version tag,
+   * while the Android stub advertises it as LIBC. Keep this reviewed route
+   * tolerant of both encodings. Other aliases are explicit manifest rows. */
+  if (std::strcmp(entry.symbol, "mallopt") == 0) return true;
+  if (entry.version[0] == '\0')
+    return version == nullptr || version[0] == '\0';
+  return version != nullptr && std::strcmp(entry.version, version) == 0;
+}
+
+struct OwnershipLookup {
+  const Ownership *matching_version;
+  const Ownership *first_symbol;
+};
+
+OwnershipLookup FindOwnership(const char *soname, const char *symbol,
+                              const char *version) {
   size_t first = 0;
   size_t count = sizeof(kOwnership) / sizeof(kOwnership[0]);
   while (count != 0) {
@@ -135,9 +153,17 @@ const Ownership *FindOwnership(const char *soname, const char *symbol) {
   }
   if (first == sizeof(kOwnership) / sizeof(kOwnership[0]) ||
       CompareKey(kOwnership[first], soname, symbol) != 0) {
-    return nullptr;
+    return {nullptr, nullptr};
   }
-  return &kOwnership[first];
+  const Ownership *first_symbol = &kOwnership[first];
+  for (size_t index = first;
+       index < sizeof(kOwnership) / sizeof(kOwnership[0]) &&
+       CompareKey(kOwnership[index], soname, symbol) == 0;
+       ++index) {
+    if (VersionMatches(kOwnership[index], version))
+      return {&kOwnership[index], first_symbol};
+  }
+  return {nullptr, first_symbol};
 }
 
 bool KnownSoname(const char *soname) {
@@ -145,17 +171,6 @@ bool KnownSoname(const char *soname) {
          std::strcmp(soname, "libdl.so") == 0 ||
          std::strcmp(soname, "liblog.so") == 0 ||
          std::strcmp(soname, "libm.so") == 0;
-}
-
-bool VersionMatches(const Ownership &entry, const char *version) {
-  /* Some NDK-built compatibility DSOs carry mallopt without a version tag,
-   * while the Android stub advertises it as LIBC.  Keep this one reviewed
-   * extension tolerant of both encodings; all pinned libc++ routes remain
-   * exact-version checked below. */
-  if (std::strcmp(entry.symbol, "mallopt") == 0) return true;
-  if (entry.version[0] == '\0')
-    return version == nullptr || version[0] == '\0';
-  return version != nullptr && std::strcmp(entry.version, version) == 0;
 }
 
 DarwinArtBionicNamespaceResult Result(DarwinArtBionicNamespaceStatus status,
@@ -230,15 +245,16 @@ darwin_art_bionic_namespace_resolve(DarwinArtBionicNamespace *instance,
     return Result(DARWIN_ART_BIONIC_NAMESPACE_UNKNOWN_SONAME,
                   DARWIN_ART_BIONIC_PROVIDER_COUNT);
   }
-  const Ownership *ownership = FindOwnership(soname, symbol);
-  if (ownership == nullptr) {
+  const OwnershipLookup lookup = FindOwnership(soname, symbol, version);
+  if (lookup.first_symbol == nullptr) {
     return Result(DARWIN_ART_BIONIC_NAMESPACE_UNSUPPORTED_SYMBOL,
                   DARWIN_ART_BIONIC_PROVIDER_COUNT);
   }
-  if (!VersionMatches(*ownership, version)) {
+  if (lookup.matching_version == nullptr) {
     return Result(DARWIN_ART_BIONIC_NAMESPACE_UNKNOWN_VERSION,
-                  ownership->owner);
+                  lookup.first_symbol->owner);
   }
+  const Ownership *ownership = lookup.matching_version;
 
   DarwinArtBionicProviderBinding binding{};
   {

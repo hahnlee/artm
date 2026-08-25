@@ -7,6 +7,10 @@ subset of the four floating conversion imports made by the pinned NDK r28c API
 - supported: `strtod`, `strtof`;
 - rejected: `strtold`, `strtold_l`.
 
+Android system `libc++.so` additionally imports `strtod_l@LIBC_O` and
+`strtof_l@LIBC_O`. Bionic implements both as locale-ignoring calls to the base
+parsers, so the same AOSP gdtoa implementations provide those two extensions.
+
 The supported functions are the pinned Bionic/OpenBSD gdtoa implementation,
 compiled under private names rather than forwarded to Darwin `strtod` or
 `strtof`. The thirteen-file parser closure preserves Bionic's C-locale grammar,
@@ -31,7 +35,7 @@ binary128 with 16-byte alignment; Apple arm64 defines `long double` as the
 8-byte double format. `strtold` and `strtold_l` therefore have incompatible
 return ABIs and representations. They are explicitly rejected rather than
 silently narrowed, and `strtold_l`'s otherwise locale-ignoring wrapper cannot
-make that ABI safe. The pinned libc++ does not import `strtod_l` or `strtof_l`.
+make that ABI safe.
 
 ## Provenance and gate
 
@@ -47,7 +51,8 @@ files without Git metadata. Those files include the Android.bp gdtoa closure,
 Bionic long-double and locale wrappers, and the AOSP stdlib test corpus.
 
 Acceptance includes Android and Darwin ABI assertions, a real Android arm64 ELF
-with exactly `strtod`, `strtof`, and `__errno@LIBC`, bit/end/errno differential
+with exactly `strtod`, `strtof`, `strtod_l`, `strtof_l`, and `__errno`,
+including the `LIBC_O` version boundary for the locale wrappers, bit/end/errno differential
 checks against the directly compiled AOSP implementation over 47 strings and
 all four rounding modes, NaN/hex/subnormal boundary cases, 8x1000 concurrent
 calls, C/C++ ASan plus UBSan, host errno/fenv preservation, Rust loader

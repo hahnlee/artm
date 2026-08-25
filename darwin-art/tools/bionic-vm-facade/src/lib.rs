@@ -138,6 +138,72 @@ impl Drop for Activation {
     }
 }
 
+struct ProcessOwner {
+    users: usize,
+    _provider: Arc<Provider>,
+    _activation: Activation,
+}
+
+static PROCESS_OWNER: OnceLock<Mutex<Option<ProcessOwner>>> = OnceLock::new();
+
+fn process_owner() -> &'static Mutex<Option<ProcessOwner>> {
+    PROCESS_OWNER.get_or_init(|| Mutex::new(None))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_vm_process_install() -> c_int {
+    let Ok(mut owner) = process_owner().lock() else {
+        set_errno(ANDROID_EIO);
+        return -1;
+    };
+    if let Some(active) = owner.as_mut() {
+        let Some(users) = active.users.checked_add(1) else {
+            set_errno(ANDROID_EOVERFLOW);
+            return -1;
+        };
+        active.users = users;
+        return 0;
+    }
+    let provider = match Provider::new() {
+        Ok(provider) => Arc::new(provider),
+        Err(_) => {
+            set_errno(ANDROID_EIO);
+            return -1;
+        }
+    };
+    let activation = match provider.activate() {
+        Ok(activation) => activation,
+        Err(_) => {
+            set_errno(ANDROID_EIO);
+            return -1;
+        }
+    };
+    *owner = Some(ProcessOwner {
+        users: 1,
+        _provider: provider,
+        _activation: activation,
+    });
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_vm_process_uninstall() -> c_int {
+    let removed = {
+        let Ok(mut owner) = process_owner().lock() else {
+            set_errno(ANDROID_EIO);
+            return -1;
+        };
+        let Some(active) = owner.as_mut() else {
+            set_errno(ANDROID_EINVAL);
+            return -1;
+        };
+        active.users -= 1;
+        if active.users == 0 { owner.take() } else { None }
+    };
+    drop(removed);
+    0
+}
+
 fn set_errno(error: i32) {
     // SAFETY: the errno provider accepts every 32-bit Android errno value.
     unsafe { darwin_art_bionic_errno_store(error) }

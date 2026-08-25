@@ -43,6 +43,7 @@ typedef struct DarwinArtAndroidLconv {
 } DarwinArtAndroidLconv;
 
 size_t darwin_art_bionic___ctype_get_mb_cur_max(void);
+extern const char* darwin_art_bionic__ctype_;
 uint32_t darwin_art_bionic_btowc(int byte);
 void darwin_art_bionic_freelocale(DarwinArtAndroidLocale locale);
 int darwin_art_bionic_iswalpha_l(uint32_t code_point,

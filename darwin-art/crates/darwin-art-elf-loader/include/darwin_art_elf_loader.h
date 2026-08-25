@@ -49,7 +49,8 @@ typedef struct DarwinArtElfSymbolRequest {
   const char* version_name;
   uint16_t version_flags;
   uint8_t version_hidden;
-  uint8_t reserved;
+  /* Non-zero when the undefined ELF symbol has STB_WEAK binding. */
+  uint8_t symbol_weak;
   const char* const* needed_libraries;
   size_t needed_library_count;
 } DarwinArtElfSymbolRequest;

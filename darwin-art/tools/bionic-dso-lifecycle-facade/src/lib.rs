@@ -1,5 +1,6 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{c_int, c_void};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -43,6 +44,32 @@ struct State {
     published: HashSet<usize>,
     images: Vec<PublishedImage>,
     active_callbacks: HashMap<usize, usize>,
+    thread_destructors: HashMap<usize, usize>,
+}
+
+struct ThreadDestructorEntry {
+    lifecycle: Arc<Lifecycle>,
+    function: Destructor,
+    argument: usize,
+    dso: usize,
+}
+
+#[derive(Default)]
+struct ThreadDestructorList(Vec<ThreadDestructorEntry>);
+
+impl Drop for ThreadDestructorList {
+    fn drop(&mut self) {
+        while let Some(entry) = self.0.pop() {
+            // SAFETY: the lifecycle keeps the owning image published until this count drops.
+            unsafe { (entry.function)(entry.argument as *mut c_void) };
+            entry.lifecycle.complete_thread_destructor(entry.dso);
+        }
+    }
+}
+
+thread_local! {
+    static THREAD_DESTRUCTORS: RefCell<ThreadDestructorList> =
+        RefCell::new(ThreadDestructorList::default());
 }
 
 pub struct Lifecycle {
@@ -158,16 +185,27 @@ impl Lifecycle {
     pub fn finalize_image(&self, start: usize, end: usize) -> Result<(), &'static str> {
         let handles = {
             let mut state = self.state.lock().map_err(|_| "state lock poisoned")?;
-            let image = state
+            let image_index = state
                 .images
-                .iter_mut()
-                .find(|image| image.start == start && image.end == end)
+                .iter()
+                .position(|image| image.start == start && image.end == end)
                 .ok_or("image address range is not published")?;
-            if image.finalizing {
+            if state.images[image_index].finalizing {
                 return Err("image address range is already finalizing");
             }
-            image.finalizing = true;
-            image.handles.iter().copied().collect::<HashSet<_>>()
+            let handles = state.images[image_index]
+                .handles
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>();
+            if handles
+                .iter()
+                .any(|handle| state.thread_destructors.get(handle).copied().unwrap_or(0) != 0)
+            {
+                return Err("image still owns live thread-local destructors");
+            }
+            state.images[image_index].finalizing = true;
+            handles
         };
 
         let mut state = loop {
@@ -261,6 +299,7 @@ impl Lifecycle {
             && state.images.is_empty()
             && state.published.is_empty()
             && state.active_callbacks.is_empty()
+            && state.thread_destructors.is_empty()
     }
 
     fn register(
@@ -317,6 +356,78 @@ impl Lifecycle {
             sequence,
         }));
         0
+    }
+
+    fn register_thread(
+        self: &Arc<Self>,
+        function: Option<Destructor>,
+        argument: *mut c_void,
+        dso: *mut c_void,
+    ) -> c_int {
+        let Some(function) = function else { return -1 };
+        let dso = dso as usize;
+        if dso == 0 {
+            return -1;
+        }
+        {
+            let Ok(mut state) = self.state.lock() else {
+                return -1;
+            };
+            if !state.published.contains(&dso) {
+                let Some(image_index) = state
+                    .images
+                    .iter()
+                    .position(|image| dso >= image.start && dso < image.end)
+                else {
+                    return -1;
+                };
+                if state.images[image_index].finalizing {
+                    return -1;
+                }
+                if !state.images[image_index].handles.contains(&dso) {
+                    if state.images[image_index].handles.try_reserve(1).is_err() {
+                        return -1;
+                    }
+                    state.images[image_index].handles.insert(dso);
+                }
+            }
+            *state.thread_destructors.entry(dso).or_insert(0) += 1;
+        }
+        let entry = ThreadDestructorEntry {
+            lifecycle: Arc::clone(self),
+            function,
+            argument: argument as usize,
+            dso,
+        };
+        let inserted = THREAD_DESTRUCTORS
+            .try_with(|entries| {
+                let mut entries = entries.borrow_mut();
+                if entries.0.try_reserve(1).is_err() {
+                    return false;
+                }
+                entries.0.push(entry);
+                true
+            })
+            .unwrap_or(false);
+        if !inserted {
+            self.complete_thread_destructor(dso);
+            return -1;
+        }
+        0
+    }
+
+    fn complete_thread_destructor(&self, dso: usize) {
+        let Ok(mut state) = self.state.lock() else {
+            std::process::abort();
+        };
+        let Some(count) = state.thread_destructors.get_mut(&dso) else {
+            std::process::abort();
+        };
+        *count -= 1;
+        if *count == 0 {
+            state.thread_destructors.remove(&dso);
+            self.quiesced.notify_all();
+        }
     }
 
     fn finalize(&self, dso: *mut c_void) {
@@ -499,6 +610,20 @@ pub extern "C" fn darwin_art_bionic_dso_cxa_finalize_core(dso: *mut c_void) {
     }
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_dso_cxa_thread_atexit_core(
+    function: Option<Destructor>,
+    argument: *mut c_void,
+    dso: *mut c_void,
+) -> c_int {
+    for lifecycle in active_lifecycles() {
+        if lifecycle.register_thread(function, argument, dso) == 0 {
+            return 0;
+        }
+    }
+    -1
+}
+
 pub struct DarwinArtBionicDsoLifecycleOwner {
     lifecycle: Arc<Lifecycle>,
     _activation: Activation,
@@ -637,6 +762,43 @@ mod tests {
         assert!(second.is_quiescent());
         drop(second_activation);
         drop(first_activation);
+    }
+
+    #[test]
+    fn runs_thread_local_destructors_in_reverse_order_on_thread_exit() {
+        let _serial = TEST_SERIAL.lock().unwrap();
+        LOG.lock().unwrap().clear();
+        let lifecycle = Arc::new(Lifecycle::new_image_owner());
+        let _activation = lifecycle.activate().unwrap();
+        lifecycle.publish_image(0x1000, 0x2000).unwrap();
+        std::thread::spawn(|| {
+            assert_eq!(
+                darwin_art_bionic_dso_cxa_thread_atexit_core(
+                    Some(record),
+                    std::ptr::from_ref(&ARGUMENT_ONE).cast_mut().cast(),
+                    0x1100_usize as *mut c_void,
+                ),
+                0
+            );
+            assert_eq!(
+                darwin_art_bionic_dso_cxa_thread_atexit_core(
+                    Some(record),
+                    std::ptr::from_ref(&ARGUMENT_TWO).cast_mut().cast(),
+                    0x1100_usize as *mut c_void,
+                ),
+                0
+            );
+        })
+        .join()
+        .unwrap();
+        assert_eq!(
+            *LOG.lock().unwrap(),
+            vec![
+                std::ptr::from_ref(&ARGUMENT_TWO) as usize,
+                std::ptr::from_ref(&ARGUMENT_ONE) as usize,
+            ]
+        );
+        lifecycle.finalize_image(0x1000, 0x2000).unwrap();
     }
 
     #[test]

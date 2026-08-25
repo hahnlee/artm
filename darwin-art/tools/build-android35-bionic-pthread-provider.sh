@@ -313,7 +313,7 @@ grep -F 'rounds=20 readers=4 concurrent>=2 writer=10000-progress wrong-unlock=EP
   "$module_root/src/provider.cc" "$module_root/mutex_attr_stress.cc" \
   -o "$stage/mutex-attr-stress"
 mutex_attr_stress_output="$("$stage/mutex-attr-stress")"
-grep -F 'rounds=100 normal+recursive+errorcheck recursive-depth=2 self=EDEADLK wrong-owner=EPERM held-destroy=EBUSY destroyed-attr=EINVAL pshared+PI=ENOTSUP ASan=clean' <<< "$mutex_attr_stress_output" >/dev/null ||
+grep -F 'rounds=100 normal+recursive+errorcheck recursive-depth=2 self=EDEADLK wrong-owner=EPERM held-destroy=EBUSY address-reuse=fresh-generation destroyed-attr=EINVAL pshared+PI=ENOTSUP ASan=clean' <<< "$mutex_attr_stress_output" >/dev/null ||
   fail "mutex attribute sanitizer stress failed"
 
 [[ "$(sha "$module_root/thread_lifecycle_stress.cc")" == "$THREAD_LIFECYCLE_STRESS_SHA256" ]] ||

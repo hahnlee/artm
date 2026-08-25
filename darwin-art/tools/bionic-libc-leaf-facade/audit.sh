@@ -43,8 +43,13 @@ flags=(-arch arm64 -isysroot "$sdk_root" -std=c17 -O2 -fno-builtin -Wall -Wextra
 "$ar" rcs "$temp_root/libdarwin-art-bionic-libc-leaf.a" "$temp_root/leaf.o"
 
 definitions="$(nm -gU "$temp_root/leaf.o")"
-for symbol in memchr memcmp memcpy memmove memset strcmp strlen strncmp wcslen wmemchr wmemcmp; do
+for symbol in atoi atol bsearch memchr memcmp memcpy memmove memset qsort strcasecmp strcat strchr \
+              strcmp strcpy strcspn strlen strncat strncmp strncpy strpbrk \
+              strrchr strspn strstr wcslen wmemchr wmemcmp wmemcpy wmemmove wmemset; do
   grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null || fail "missing facade definition $symbol"
+done
+for symbol in __memcpy_chk __memmove_chk __memset_chk; do
+  grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null || fail "missing fortified definition $symbol"
 done
 if awk '$2 ~ /^[TDS]$/ {print $3}' <<<"$definitions" | grep -Ev '^_darwin_art_bionic_' >/dev/null; then
   fail 'unprefixed global definition escaped facade'
@@ -55,4 +60,4 @@ fi
 "$cc" "${flags[@]}" -fsanitize=address,undefined "$script_dir/probes/differential.c" \
   "$script_dir/src/leaf.c" -o "$temp_root/differential-sanitized"
 "$temp_root/differential-sanitized" >/dev/null
-echo 'bionic-libc-leaf-facade: PASS functions=159 object=1 A=11 B=76 C=65 D=8 host-undefined=0'
+echo 'bionic-libc-leaf-facade: PASS functions=159 object=1 bindings=33 host-undefined=0'

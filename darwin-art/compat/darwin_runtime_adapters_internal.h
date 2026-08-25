@@ -3,8 +3,10 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
-#include <vector>
+#include <mutex>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "darwin_android_jni_trampoline.h"
 #include "darwin_android_elf_image_registry.h"
@@ -24,9 +26,11 @@ inline constexpr uint32_t kNativeOwnerIoctl = 40;
 inline constexpr uint32_t kNativeOwnerSendfile = 50;
 inline constexpr uint32_t kNativeOwnerStrftime = 60;
 inline constexpr uint32_t kNativeOwnerNetwork = 70;
+inline constexpr uint32_t kNativeOwnerVm = 75;
 inline constexpr uint32_t kNativeOwnerDso = 80;
 inline constexpr uint32_t kNativeOwnerImageRegistry = 90;
 inline constexpr uint32_t kNativeOwnerNamespace = 100;
+inline constexpr uint32_t kNativeOwnerAndroidUnwind = 105;
 inline constexpr uint32_t kNativeOwnerGraph = 110;
 inline constexpr uint32_t kNativeOwnerGraphHandle = 120;
 inline constexpr int kElfOpened = 1 << 0;
@@ -69,14 +73,19 @@ struct ElfLibrary {
   RuntimeNativeOwner* native_owner = nullptr;
   bool fixture_graph = false;
   DarwinArtElfGraphHandle* graph = nullptr;
+  DarwinArtElfHandle* android_unwind_provider = nullptr;
   DarwinArtBionicNamespace* provider_namespace = nullptr;
   DarwinArtBionicDsoLifecycleOwner* dso_lifecycle = nullptr;
   darwin_art_image_registry::Owner* image_registry = nullptr;
+  void* egl_provider = nullptr;
+  void* gles_provider = nullptr;
+  void* z_provider = nullptr;
   uintptr_t jni_on_load = 0;
   uintptr_t jni_on_unload = 0;
   alignas(DARWIN_ART_JNI_PROXY_STORAGE_ALIGNMENT)
       std::array<unsigned char, DARWIN_ART_JNI_PROXY_STORAGE_SIZE> proxy_storage{};
   DarwinArtJniProxy* proxy = nullptr;
+  JavaVM* art_vm = nullptr;
   // Initiating app loader for JNI_OnLoad/ProxyFindClass.  NativeBridge's
   // callback has no class-loader argument, so retain the lease per image.
   void* app_loader = nullptr;
@@ -84,7 +93,11 @@ struct ElfLibrary {
   // JNI_OnLoad may register methods on more than one app class.  Each
   // RegisterNatives call gets an independent executable trampoline mapping;
   // all mappings remain owned by the image until its graph is torn down.
+  std::mutex trampoline_mutex;
   std::vector<darwin_art::android_jni::TrampolineSet*> trampoline_sets;
+  std::unordered_map<std::string, void*> exported_jni_trampolines;
+  std::mutex method_descriptor_mutex;
+  std::unordered_map<void*, std::string> method_descriptors;
 };
 
 int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end);
@@ -103,6 +116,7 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     uintptr_t* out_address,
     DarwinArtElfErrorBuffer* error);
 int DropRuntimeElfGraph(void* value, void* context);
+int DropRuntimeAndroidUnwindProvider(void* value, void* context);
 void DestroyRuntimeElfTrampolines(ElfLibrary* library);
 int DropRuntimeElfLibrary(void* value, void* context);
 int DropRuntimeElfImageRegistry(void* value, void* context);
@@ -116,7 +130,15 @@ int32_t ProxyRegisterNatives(void* context,
                              int32_t count);
 
 void* ProxyCurrentEnv(void* context);
+int32_t ProxyAttachCurrentThread(void* context, void* arguments,
+                                 int32_t as_daemon);
+int32_t ProxyDetachCurrentThread(void* context);
 void* ProxyFindClass(void* context, const char* name);
 int32_t ProxyThrowNew(void* context, void* clazz, const char* message);
+void* ProxyGetMethodId(void* context, void* clazz, const char* name,
+                       const char* signature, int32_t is_static);
+uint64_t ProxyCallMethodV(void* context, void* object, void* method,
+                          void* android_va_list, int32_t return_shorty,
+                          int32_t is_static);
 
 }  // namespace android

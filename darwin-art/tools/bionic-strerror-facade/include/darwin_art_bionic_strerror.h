@@ -10,6 +10,9 @@ extern "C" {
 typedef void (*DarwinArtBionicStrerrorFunction)(void);
 
 int darwin_art_bionic_strerror_r(int android_errno, char* buffer, size_t size);
+char* darwin_art_bionic___gnu_strerror_r(int android_errno, char* buffer,
+                                        size_t size);
+char* darwin_art_bionic_strerror(int android_errno);
 DarwinArtBionicStrerrorFunction darwin_art_bionic_strerror_resolve(
     const char* import_name);
 

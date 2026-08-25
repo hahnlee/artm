@@ -17,6 +17,7 @@ constexpr int kRounds = 20;
 
 int RunRound() {
   DarwinArtAndroidPthreadRwlock rwlock{};
+  if (darwin_art_bionic_pthread_rwlock_init(&rwlock, nullptr) != 0) return 13;
   int guarded = 0;
   std::atomic<int> active_readers{};
   std::atomic<int> maximum_readers{};
@@ -75,6 +76,8 @@ int RunRound() {
   if (darwin_art_bionic_pthread_rwlock_destroy(&rwlock) != 0) return 10;
   if (darwin_art_bionic_pthread_rwlock_destroy(&rwlock) != kAndroidEbusy)
     return 11;
+  if (darwin_art_bionic_pthread_rwlock_init(&rwlock, nullptr) != 0) return 14;
+  if (darwin_art_bionic_pthread_rwlock_destroy(&rwlock) != 0) return 15;
   if (darwin_art_bionic_pthread_provider_reset() != 0) return 12;
   return 0;
 }

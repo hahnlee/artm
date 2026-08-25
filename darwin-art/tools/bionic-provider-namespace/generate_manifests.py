@@ -39,8 +39,8 @@ def main() -> int:
     claims.append(("__errno", "errno"))
     claims += [(name, "filesystem") for name in names(
         "tools/bionic-fs-facade/manifests/imports.tsv"
-    ) if name != "close"]
-    claims.append(("close", "central-fd-broker"))
+    ) if name not in {"close", "read"}]
+    claims += [(name, "central-fd-broker") for name in ("close", "read")]
     claims += [(name, "time") for name in names(
         "tools/bionic-time-facade/manifests/imports.tsv"
     )]
@@ -153,6 +153,7 @@ def main() -> int:
         "socket": "DARWIN_ART_BIONIC_PROVIDER_SOCKET",
         "dns": "DARWIN_ART_BIONIC_PROVIDER_DNS",
         "math": "DARWIN_ART_BIONIC_PROVIDER_MATH",
+        "vm": "DARWIN_ART_BIONIC_PROVIDER_VM",
     }
     extensions = rows("tools/bionic-provider-namespace/extensions.tsv")
     extension_keys: set[tuple[str, str, str]] = set()

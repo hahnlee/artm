@@ -1,8 +1,10 @@
 # Bionic syscall facade
 
 This standalone module owns the one `syscall@LIBC` import in the SHA-locked
-NDK r28c/API-35 arm64 `libc++_shared.so`. Ownership is deliberately limited to
-all nine call sites actually present in that ELF: two `gettid` calls from
+NDK r28c/API-35 arm64 `libc++_shared.so`, and the Android system-library
+`getrandom` calls reached through the same libc symbol. The pinned libc++
+surface remains limited to all nine call sites actually present in that ELF:
+two `gettid` calls from
 `__cxa_guard_acquire`, six private futex calls from libc++ atomic wait/notify,
 and libunwind's one `rt_sigprocmask` readability probe. `callsites.tsv` fixes
 every instruction address and argument form.
@@ -16,6 +18,11 @@ The supported behavior is:
 
 - syscall 178 (`gettid`) returns a positive, stable, provider-owned ID unique
   to each live host thread;
+- syscall 278 (`getrandom`) fills a writable guest buffer from Darwin's
+  cryptographically secure `arc4random_buf`. Linux `GRND_NONBLOCK`,
+  `GRND_RANDOM`, and `GRND_INSECURE` flags are validated; the mutually
+  exclusive RANDOM/INSECURE combination and unknown flags fail with Android
+  `EINVAL`, while inaccessible output memory fails with Android `EFAULT`;
 - syscall 98 accepts only `FUTEX_WAIT_PRIVATE` with a readable aligned word and
   relative timeout, or `FUTEX_WAKE_PRIVATE` with count 1/`INT_MAX`;
 - futex wait performs the compare and waiter admission under the same provider
@@ -40,7 +47,8 @@ success merely to satisfy eager relocation.
 
 `audit.sh` pins the NDK ELF, Linux UAPI constants, LLVM sources, all nine
 disassembly sites, and the exact libc++ import. Its real Android AArch64 ELF
-gate exercises stable/unique thread IDs, compare mismatch, wake-one, wake-all,
+gate exercises stable/unique thread IDs, host-CSPRNG `getrandom` including
+flags and inaccessible memory, compare mismatch, wake-one, wake-all,
 contention, relative timeout, readable/guard/unmapped/overflow libunwind
 probes, unreadable wake addresses, spurious wake deadline behavior, table
 exhaustion, wake-token cleanup, unknown operations, Bionic errno, and host

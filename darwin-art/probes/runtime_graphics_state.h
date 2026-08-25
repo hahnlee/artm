@@ -24,6 +24,7 @@ namespace darwin_art_graphics {
 // running on the ART owner thread.
 struct GraphicsState {
   jclass probe_canvas_class = nullptr;
+  jclass service_bridge_class = nullptr;
   jobject interactive_root = nullptr;
   jobject interactive_view_root = nullptr;
   jobject hardware_context = nullptr;
@@ -67,11 +68,14 @@ struct GraphicsState {
 // boundary.  The presentation, input, and shutdown translation units only
 // borrow these slots; this TU owns their storage and cleanup order.
 void set_probe_canvas_class(GraphicsState* state, JNIEnv* env, jclass canvas_class);
+bool retain_service_bridge_class(GraphicsState* state, JNIEnv* env,
+                                 jclass bridge_class);
 bool retain_interactive_root(GraphicsState* state, JNIEnv* env, jobject root,
                              jint width, jint height);
 bool retain_interactive_view_root(GraphicsState* state, JNIEnv* env,
                                   jobject view_root);
 bool retain_hardware_context(GraphicsState* state, JNIEnv* env, jobject context);
+void begin_activity_transition(GraphicsState* state, JNIEnv* env);
 void shutdown(GraphicsState* state, JNIEnv* env);
 
 #if defined(DARWIN_ART_REAL_GRAPHICS)

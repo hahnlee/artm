@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #include "darwin_android_jni_trampoline.h"
 
@@ -51,6 +52,31 @@ int main() {
   assert(TrampolineLiveCount() == 0);
   assert(!IsTrampolineEntry(TrampolineEntry(nullptr, 0)));
 
+  // Conscrypt registers hundreds of natives in one call. Prove that the
+  // generated W^X mapping spans as many host pages as needed rather than
+  // imposing a one-page implementation limit.
+  constexpr size_t kConscryptScaleCount = 309;
+  std::vector<TrampolineRequest> large_requests;
+  large_requests.reserve(kConscryptScaleCount);
+  for (size_t index = 0; index < kConscryptScaleCount; ++index) {
+    large_requests.push_back({
+        reinterpret_cast<void*>(uintptr_t{0x100000} + index * 0x10),
+        "IIL", 1u});
+  }
+  error.clear();
+  auto* large_set = CreateRegularTrampolines(
+      reinterpret_cast<void*>(uintptr_t{0x5000}), large_requests.data(),
+      large_requests.size(), &error);
+  assert(large_set != nullptr && error.empty());
+  assert(TrampolineLiveCount() == 1);
+  assert(TrampolineCount(large_set) == kConscryptScaleCount);
+  for (size_t index = 0; index < kConscryptScaleCount; ++index) {
+    assert(TrampolineEntry(large_set, index) != nullptr);
+    assert(TrampolineEntryMask(TrampolineEntry(large_set, index)) == 1u);
+  }
+  DestroyRegularTrampolines(large_set);
+  assert(TrampolineLiveCount() == 0);
+
   for (const char* rejected : {"IQ", "Q", "IV", ""}) {
     TrampolineRequest invalid = {
         reinterpret_cast<void*>(uintptr_t{0xb000}), rejected, 1u};
@@ -62,6 +88,7 @@ int main() {
   }
   std::puts("android-jni-trampoline: PASS scalar-ref=ZBCSIJFDL returns=all "
             "gp-fp=independent stack=darwin-natural-to-android-8byte "
-            "cache=target+shorty wx=rw-to-rx reject=aggregate+V-arg");
+            "cache=target+shorty wx=rw-to-rx multipage=309 "
+            "reject=aggregate+V-arg");
   return 0;
 }

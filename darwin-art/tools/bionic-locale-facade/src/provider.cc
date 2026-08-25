@@ -4,6 +4,7 @@
 #include <fenv.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <climits>
 #include <cstdlib>
@@ -40,6 +41,50 @@ constexpr size_t kIllegal = static_cast<size_t>(-1);
 constexpr size_t kIncomplete = static_cast<size_t>(-2);
 constexpr uint32_t kAndroidWeof = UINT32_MAX;
 constexpr int kEof = -1;
+
+constexpr char kCtypeUpper = 0x01;
+constexpr char kCtypeLower = 0x02;
+constexpr char kCtypeDigit = 0x04;
+constexpr char kCtypeSpace = 0x08;
+constexpr char kCtypePunct = 0x10;
+constexpr char kCtypeControl = 0x20;
+constexpr char kCtypeHex = 0x40;
+constexpr char kCtypeBlank = static_cast<char>(0x80);
+
+constexpr std::array<char, 257> MakeAndroidCtypeTable() {
+  std::array<char, 257> result{};
+  for (int value = 0; value < 32; ++value) {
+    result[static_cast<size_t>(value) + 1] = kCtypeControl;
+  }
+  for (int value = 9; value <= 13; ++value) {
+    result[static_cast<size_t>(value) + 1] |= kCtypeSpace;
+  }
+  result[static_cast<size_t>(' ') + 1] = kCtypeSpace | kCtypeBlank;
+  for (int value = '!'; value <= '~'; ++value) {
+    result[static_cast<size_t>(value) + 1] = kCtypePunct;
+  }
+  for (int value = '0'; value <= '9'; ++value) {
+    result[static_cast<size_t>(value) + 1] = kCtypeDigit;
+  }
+  for (int value = 'A'; value <= 'Z'; ++value) {
+    result[static_cast<size_t>(value) + 1] =
+        kCtypeUpper | (value <= 'F' ? kCtypeHex : 0);
+  }
+  for (int value = 'a'; value <= 'z'; ++value) {
+    result[static_cast<size_t>(value) + 1] =
+        kCtypeLower | (value <= 'f' ? kCtypeHex : 0);
+  }
+  result[128] = kCtypeControl;
+  for (size_t value = 128; value < 160; ++value) {
+    result[value + 1] = kCtypeControl;
+  }
+  for (size_t value = 160; value < 256; ++value) {
+    result[value + 1] = kCtypePunct;
+  }
+  return result;
+}
+
+constexpr auto kAndroidCtypeTable = MakeAndroidCtypeTable();
 
 static_assert(U_ICU_VERSION_MAJOR_NUM == 76);
 static_assert(U_ICU_VERSION_MINOR_NUM == 1);
@@ -278,6 +323,9 @@ DarwinArtAndroidLconv g_localeconv = {
 
 }  // namespace
 
+extern "C" const char* darwin_art_bionic__ctype_ =
+    kAndroidCtypeTable.data();
+
 extern "C" size_t darwin_art_bionic___ctype_get_mb_cur_max(void) {
   HostStateGuard guard;
   const LocaleMode mode =
@@ -335,6 +383,31 @@ extern "C" int darwin_art_bionic_iswalpha_l(
   HostStateGuard guard;
   EnsureAndroidIcu76();
   return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_ALPHABETIC);
+}
+
+extern "C" int darwin_art_bionic_isdigit_l(
+    int value, DarwinArtAndroidLocale /*locale*/) {
+  const unsigned code = static_cast<unsigned>(value);
+  return code < 256 && (kAndroidCtypeTable[code + 1] & kCtypeDigit) != 0;
+}
+
+extern "C" int darwin_art_bionic_islower_l(
+    int value, DarwinArtAndroidLocale /*locale*/) {
+  const unsigned code = static_cast<unsigned>(value);
+  return code < 256 && (kAndroidCtypeTable[code + 1] & kCtypeLower) != 0;
+}
+
+extern "C" int darwin_art_bionic_isupper_l(
+    int value, DarwinArtAndroidLocale /*locale*/) {
+  const unsigned code = static_cast<unsigned>(value);
+  return code < 256 && (kAndroidCtypeTable[code + 1] & kCtypeUpper) != 0;
+}
+
+extern "C" int darwin_art_bionic_isxdigit_l(
+    int value, DarwinArtAndroidLocale /*locale*/) {
+  const unsigned code = static_cast<unsigned>(value);
+  return code < 256 && (kAndroidCtypeTable[code + 1] &
+                         (kCtypeDigit | kCtypeHex)) != 0;
 }
 
 extern "C" int darwin_art_bionic_iswblank_l(
@@ -729,9 +802,13 @@ extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
 #define RESOLVE(name)                                                        \
   if (std::string_view(symbol) == #name)                                     \
     return reinterpret_cast<void*>(&darwin_art_bionic_##name)
+  RESOLVE(_ctype_);
   RESOLVE(__ctype_get_mb_cur_max);
   RESOLVE(btowc);
   RESOLVE(freelocale);
+  RESOLVE(isdigit_l);
+  RESOLVE(islower_l);
+  RESOLVE(isupper_l);
   RESOLVE(iswalpha_l);
   RESOLVE(iswblank_l);
   RESOLVE(iswcntrl_l);
@@ -742,6 +819,7 @@ extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
   RESOLVE(iswspace_l);
   RESOLVE(iswupper_l);
   RESOLVE(iswxdigit_l);
+  RESOLVE(isxdigit_l);
   RESOLVE(localeconv);
   RESOLVE(mbrlen);
   RESOLVE(mbrtowc);

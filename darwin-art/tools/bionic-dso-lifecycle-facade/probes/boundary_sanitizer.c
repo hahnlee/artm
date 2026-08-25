@@ -26,6 +26,24 @@ void darwin_art_bionic_dso_cxa_finalize_core(void* dso) {
   function(argument);
 }
 
+int darwin_art_bionic_dso_cxa_thread_atexit_core(
+    DarwinArtBionicDsoDestructor function, void* argument, void* dso) {
+  return darwin_art_bionic_dso_cxa_atexit_core(function, argument, dso);
+}
+
+void* darwin_art_bionic_android_dlopen_ext(const char* name, int flags,
+                                            const void* info) {
+  (void)name; (void)flags; (void)info; return NULL;
+}
+int darwin_art_bionic_dlclose(void* handle) { (void)handle; return -1; }
+char* darwin_art_bionic_dlerror(void) { return NULL; }
+void* darwin_art_bionic_dlopen(const char* name, int flags) {
+  (void)name; (void)flags; return NULL;
+}
+void* darwin_art_bionic_dlsym(void* handle, const char* name) {
+  (void)handle; (void)name; return NULL;
+}
+
 static void Destructor(void* argument) {
   if (argument != gArgument) abort();
   ++gCalls;
@@ -44,6 +62,8 @@ int main(void) {
           (DarwinArtBionicDsoFunction)darwin_art_bionic___cxa_atexit ||
       darwin_art_bionic_dso_lifecycle_resolve("__cxa_finalize") !=
           (DarwinArtBionicDsoFunction)darwin_art_bionic___cxa_finalize ||
+      darwin_art_bionic_dso_lifecycle_resolve("__cxa_thread_atexit_impl") !=
+          (DarwinArtBionicDsoFunction)darwin_art_bionic___cxa_thread_atexit_impl ||
       darwin_art_bionic_dso_lifecycle_resolve("cxa_finalize") != NULL)
     return 2;
   errno = 31002;

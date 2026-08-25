@@ -105,4 +105,4 @@ CARGO_TARGET_DIR="$temp_root/cargo-target" cargo clippy --quiet \
   --manifest-path "$script_dir/Cargo.toml" -- -D warnings
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
 
-echo 'android-jni-proxy: PASS Android16 slots=233+8 subset=22 strings+refs+byte-array+direct-buffer+exceptions=current-env-forwarded ELF=AArch64 proxy-only E2E ASAN+UBSAN'
+echo 'android-jni-proxy: PASS Android16 slots=233+8 subset=32 strings+refs+object-class+method-id+field-id+assignability+object-array+byte-array+direct-buffer+exceptions=current-env-forwarded ELF=AArch64 proxy-only E2E ASAN+UBSAN'

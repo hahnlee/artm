@@ -39,14 +39,16 @@ for generated in ownership.tsv unsupported-libc.tsv ownership.inc unsupported.in
     fail "generated $generated drift"
 done
 
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 185 ]] ||
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 296 ]] ||
   fail 'expected pinned libc++ owners plus reviewed extensions'
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libdl.so"{n++}END{print n+0}')" == 1 ]] ||
-  fail 'expected one libdl owner'
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="liblog.so"{n++}END{print n+0}')" == 19 ]] ||
-  fail 'expected 19 liblog owners'
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | cut -f1,2 | sort | uniq -d | wc -l | tr -d ' ')" == 0 ]] ||
-  fail 'duplicate SONAME/symbol owners'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libdl.so"{n++}END{print n+0}')" == 6 ]] ||
+  fail 'expected six closed guest libdl owners'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="liblog.so"{n++}END{print n+0}')" == 20 ]] ||
+  fail 'expected 19 liblog symbols plus one system version alias'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | cut -f1-3 | sort | uniq -d | wc -l | tr -d ' ')" == 0 ]] ||
+  fail 'duplicate SONAME/symbol/version owners'
+awk -F '\t' 'NR>1 {key=$1 FS $2; if (key in owner && owner[key]!=$4) exit 1; owner[key]=$4}' \
+  "$here/generated/ownership.tsv" || fail 'version aliases cross provider owners'
 [[ "$(tail -n +2 "$here/generated/unsupported-libc.tsv" | wc -l | tr -d ' ')" == 0 ]] ||
   fail 'expected no unsupported imports'
 
@@ -99,6 +101,7 @@ _darwin_art_bionic_swprintf_resolve
 _darwin_art_bionic_syscall_resolve
 _darwin_art_bionic_syslog_resolve
 _darwin_art_bionic_time_resolve
+_darwin_art_bionic_vm_resolve
 _darwin_art_bionic_wide_float_resolve
 _darwin_art_bionic_wide_integer_resolve
 _darwin_art_bionic_wide_stdio_resolve
@@ -128,4 +131,4 @@ if grep -E '(_dlopen|_dlsym|_dlvsym|_NSLookupSymbolInImage|__dyld_)' <<<"$undefi
   fail 'host loader undefined reference present'
 fi
 
-echo 'bionic-provider-namespace: PASS libcxx=160/160 extensions=65 liblog=19 owned=243 unsupported=0 duplicate-owner=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'
+echo 'bionic-provider-namespace: PASS libcxx=160/160 extensions=193 liblog-symbols=19 aliases=1 owned=371 unsupported=0 duplicate-triple=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'

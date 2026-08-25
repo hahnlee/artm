@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -38,6 +39,14 @@ __attribute__((optnone)) static void FillAbortMessageMagic(
 }
 
 __attribute__((noreturn)) void darwin_art_bionic_abort(void) {
+  static const char kMarker[] = "DARWIN Bionic abort entered\n";
+  (void)write(STDERR_FILENO, kMarker, sizeof(kMarker) - 1);
+  const uintptr_t* frame = (const uintptr_t*)__builtin_frame_address(0);
+  const uintptr_t* caller_frame =
+      frame != NULL ? (const uintptr_t*)frame[0] : NULL;
+  void* parent = caller_frame != NULL ? (void*)caller_frame[1] : NULL;
+  fprintf(stderr, "DARWIN Bionic abort: caller=%p parent=%p\n",
+          __builtin_return_address(0), parent);
   sigset_t mask;
   sigfillset(&mask);
   sigdelset(&mask, SIGABRT);
@@ -55,6 +64,12 @@ __attribute__((noreturn)) void darwin_art_bionic_abort(void) {
   (void)pthread_sigmask(SIG_SETMASK, &mask, NULL);
   (void)pthread_kill(pthread_self(), SIGABRT);
   _exit(127);
+}
+
+__attribute__((noreturn)) void darwin_art_bionic___stack_chk_fail(void) {
+  fprintf(stderr, "DARWIN Bionic stack check failure: caller=%p\n",
+          __builtin_return_address(0));
+  darwin_art_bionic_abort();
 }
 
 void darwin_art_bionic_android_set_abort_message(const char* message) {
@@ -103,6 +118,8 @@ void* darwin_art_bionic_abort_resolve(const char* soname,
     return NULL;
   if (strcmp(symbol, "abort") == 0)
     return (void*)(uintptr_t)&darwin_art_bionic_abort;
+  if (strcmp(symbol, "__stack_chk_fail") == 0)
+    return (void*)(uintptr_t)&darwin_art_bionic___stack_chk_fail;
   if (strcmp(symbol, "android_set_abort_message") == 0)
     return (void*)(uintptr_t)&darwin_art_bionic_android_set_abort_message;
   return NULL;

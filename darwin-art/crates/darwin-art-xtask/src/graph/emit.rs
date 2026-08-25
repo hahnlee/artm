@@ -1,6 +1,6 @@
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use darwin_art_build_contract::RUNTIME_CACHE_IDENTITY;
 use darwin_art_build_contract::{GRAPHICS_ADAPTER_SOURCES, HEADLESS_ADAPTER_SOURCES};
@@ -9,7 +9,8 @@ use super::super::*;
 use super::GRAPH_VERSION;
 use super::atomic;
 use super::cache::{
-    cached_native_objects_from_dirs, emit_cached_native_graph, emit_cached_native_graph_with_inputs,
+    cached_native_objects_from_dirs, emit_cached_native_graph,
+    emit_cached_native_graph_with_inputs, emit_cached_native_object_edges,
 };
 use super::foundation::{
     FoundationFamily, cached_foundation_objects, foundation_input_list, foundation_inputs,
@@ -249,15 +250,32 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     }
     graph.push('\n');
     let mut cached_rules_emitted = false;
+    // The runtime-common directory is shared by both archive flavors. It used
+    // to be passed only as an archive input, which made Ninja treat stale
+    // objects as source files and never rebuild them after their C++ source
+    // changed. Emit exactly one producer edge per common object, taking the
+    // first complete flavor cache as the authoritative persisted command set.
+    let shared_objects = cached_graphics_objects
+        .as_deref()
+        .or(cached_runtime_objects.as_deref())
+        .map(|objects| {
+            objects
+                .iter()
+                .filter(|object| object.object.starts_with(&runtime_common_objects))
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let shared_inputs =
+        emit_cached_native_object_edges(&mut graph, &shared_objects, &mut cached_rules_emitted)
+            .into_iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
     if let Some(cached_objects) = cached_graphics_objects.as_deref() {
-        let (shared_objects, flavor_objects): (Vec<_>, Vec<_>) = cached_objects
+        let (_, flavor_objects): (Vec<_>, Vec<_>) = cached_objects
             .iter()
             .cloned()
             .partition(|object| object.object.starts_with(&runtime_common_objects));
-        let shared_inputs = shared_objects
-            .iter()
-            .map(|object| object.object.clone())
-            .collect::<Vec<_>>();
         emit_cached_native_graph_with_inputs(
             &mut graph,
             &flavor_objects,
@@ -306,11 +324,16 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&archive);
     graph.push('\n');
     if let Some(cached_objects) = cached_runtime_objects.as_deref() {
-        emit_cached_native_graph(
+        let (_, flavor_objects): (Vec<_>, Vec<_>) = cached_objects
+            .iter()
+            .cloned()
+            .partition(|object| object.object.starts_with(&runtime_common_objects));
+        emit_cached_native_graph_with_inputs(
             &mut graph,
-            cached_objects,
+            &flavor_objects,
             &runtime_archive,
             &mut cached_rules_emitted,
+            &shared_inputs,
         );
         graph.push_str("build ");
         graph.push_str(&runtime_stamp);

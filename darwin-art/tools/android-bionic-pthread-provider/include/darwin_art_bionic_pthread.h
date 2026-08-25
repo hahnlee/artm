@@ -15,6 +15,16 @@ typedef int64_t DarwinArtAndroidPthread;
 typedef int32_t DarwinArtAndroidPthreadKey;
 typedef int32_t DarwinArtAndroidPthreadOnce;
 typedef int64_t DarwinArtAndroidPthreadMutexAttr;
+typedef int64_t DarwinArtAndroidPthreadRwlockAttr;
+typedef struct DarwinArtAndroidPthreadAttr {
+  uint32_t flags;
+  void* stack_base;
+  size_t stack_size;
+  size_t guard_size;
+  int32_t sched_policy;
+  int32_t sched_priority;
+  unsigned char reserved[16];
+} DarwinArtAndroidPthreadAttr;
 typedef struct DarwinArtAndroidPthreadMutex {
   int32_t opaque[10];
 } DarwinArtAndroidPthreadMutex;
@@ -40,6 +50,8 @@ int darwin_art_bionic_pthread_create(
 int darwin_art_bionic_pthread_join(DarwinArtAndroidPthread thread,
                                    void** return_value);
 int darwin_art_bionic_pthread_detach(DarwinArtAndroidPthread thread);
+int darwin_art_bionic_pthread_attr_init(DarwinArtAndroidPthreadAttr* attr);
+int darwin_art_bionic_pthread_attr_destroy(DarwinArtAndroidPthreadAttr* attr);
 int darwin_art_bionic_pthread_key_create(
     DarwinArtAndroidPthreadKey* key,
     DarwinArtAndroidTlsDestructor destructor);
@@ -77,9 +89,9 @@ int darwin_art_bionic_pthread_rwlock_wrlock(
     DarwinArtAndroidPthreadRwlock* rwlock);
 int darwin_art_bionic_pthread_rwlock_unlock(
     DarwinArtAndroidPthreadRwlock* rwlock);
-
-// Loader/test teardown API. pthread_rwlock_destroy is intentionally absent
-// from the libc.so resolver because it is not in the pinned libc++ import set.
+int darwin_art_bionic_pthread_rwlock_init(
+    DarwinArtAndroidPthreadRwlock* rwlock,
+    const DarwinArtAndroidPthreadRwlockAttr* attributes);
 int darwin_art_bionic_pthread_rwlock_destroy(
     DarwinArtAndroidPthreadRwlock* rwlock);
 

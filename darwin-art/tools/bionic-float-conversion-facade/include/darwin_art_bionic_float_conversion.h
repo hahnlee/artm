@@ -9,6 +9,11 @@ extern "C" {
 
 double darwin_art_bionic_strtod(const char* input, char** end_pointer);
 float darwin_art_bionic_strtof(const char* input, char** end_pointer);
+double darwin_art_bionic_strtod_l(const char* input, char** end_pointer,
+                                  void* locale);
+float darwin_art_bionic_strtof_l(const char* input, char** end_pointer,
+                                 void* locale);
+double darwin_art_bionic_atof(const char* input);
 
 void* darwin_art_bionic_float_conversion_resolve(const char* soname,
                                                   const char* symbol,

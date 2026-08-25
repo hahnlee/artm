@@ -117,9 +117,12 @@ extern "C" void *darwin_art_bionic_sendfile_resolve(const char *soname,
 extern "C" void *darwin_art_bionic_socket_broker_resolve(const char *soname,
                                                          const char *symbol,
                                                          const char *version) {
-  const auto owner = std::strcmp(symbol, "close") == 0
-                         ? DARWIN_ART_BIONIC_PROVIDER_CENTRAL_FD_BROKER
-                         : DARWIN_ART_BIONIC_PROVIDER_SOCKET;
+  const bool central =
+      std::strcmp(symbol, "close") == 0 || std::strcmp(symbol, "fcntl") == 0 ||
+      std::strcmp(symbol, "pipe") == 0 || std::strcmp(symbol, "poll") == 0 ||
+      std::strcmp(symbol, "read") == 0 || std::strcmp(symbol, "write") == 0;
+  const auto owner = central ? DARWIN_ART_BIONIC_PROVIDER_CENTRAL_FD_BROKER
+                             : DARWIN_ART_BIONIC_PROVIDER_SOCKET;
   return Triple(owner, "libc.so", soname, symbol, version);
 }
 extern "C" void *darwin_art_bionic_socket_broker_dns_resolve(
@@ -134,18 +137,36 @@ extern "C" void *darwin_art_bionic_locale_resolve(const char *soname,
                 version);
 }
 extern "C" void *darwin_art_bionic_math_resolve(const char *soname,
-                                                 const char *symbol,
-                                                 const char *version) {
+                                                const char *symbol,
+                                                const char *version) {
+  if (std::strcmp(soname, "libc.so") == 0 &&
+      std::strcmp(symbol, "ldexp") == 0) {
+    if (std::strcmp(version, "LIBC") != 0)
+      std::abort();
+    ++calls[DARWIN_ART_BIONIC_PROVIDER_MATH];
+    return reinterpret_cast<void *>(&Stub);
+  }
   return Triple(DARWIN_ART_BIONIC_PROVIDER_MATH, "libm.so", soname, symbol,
                 version);
+}
+extern "C" SymbolFunction darwin_art_bionic_vm_resolve(const char *s) {
+  return OneArg(DARWIN_ART_BIONIC_PROVIDER_VM, s);
 }
 extern "C" SymbolFunction darwin_art_bionic_numeric_resolve(const char *s) {
   return OneArg(DARWIN_ART_BIONIC_PROVIDER_NUMERIC, s);
 }
 extern "C" void *darwin_art_bionic_float_conversion_resolve(
     const char *soname, const char *symbol, const char *version) {
-  return Triple(DARWIN_ART_BIONIC_PROVIDER_FLOAT_CONVERSION, "libc.so", soname,
-                symbol, version);
+  const char *expected_version = std::strcmp(symbol, "strtod_l") == 0 ||
+                                         std::strcmp(symbol, "strtof_l") == 0
+                                     ? "LIBC_O"
+                                     : "LIBC";
+  if (soname == nullptr || version == nullptr ||
+      std::strcmp(soname, "libc.so") != 0 ||
+      std::strcmp(version, expected_version) != 0)
+    std::abort();
+  ++calls[DARWIN_ART_BIONIC_PROVIDER_FLOAT_CONVERSION];
+  return reinterpret_cast<void *>(&Stub);
 }
 extern "C" SymbolFunction darwin_art_bionic_format_resolve(const char *s) {
   return OneArg(DARWIN_ART_BIONIC_PROVIDER_FORMAT, s);
@@ -178,7 +199,8 @@ extern "C" void *darwin_art_bionic_abort_resolve(const char *soname,
 }
 extern "C" uintptr_t darwin_art_liblog_provider_resolve(const char *symbol,
                                                         const char *version) {
-  if (symbol == nullptr || (version != nullptr && version[0] != '\0'))
+  if (symbol == nullptr || (version != nullptr && version[0] != '\0' &&
+                            std::strcmp(version, "LIBLOG") != 0))
     std::abort();
   ++calls[DARWIN_ART_BIONIC_PROVIDER_LIBLOG];
   return reinterpret_cast<uintptr_t>(&Stub);
@@ -223,17 +245,22 @@ int main() {
       return 11;
   }
   constexpr size_t kExpectedCalls[] = {
-      20, 7, 1, 28, 3, 29, 3, 1, 15, 31, 6, 2, 3, 1, 4, 2, 19,
-      3,  2, 3, 2, 1, 3, 3, 2, 1, 1, 1, 1, 1, 4, 2, 38};
+      33, 10, 1, 34, 11, 50, 21, 1, 25, 36, 6, 5, 6, 3, 4, 3,  20,
+      9,  2,  3, 2,  1,  3,  3,  2, 1,  1,  1, 1, 6, 9, 4, 50, 4};
   for (size_t index = 0; index < calls.size(); ++index) {
-    if (calls[index] != kExpectedCalls[index])
+    if (calls[index] != kExpectedCalls[index]) {
+      std::fprintf(stderr,
+                   "bionic-provider-builtin-adapters: call-count mismatch "
+                   "provider=%zu expected=%zu actual=%zu\n",
+                   index, kExpectedCalls[index], calls[index]);
       return 12;
+    }
   }
   if (darwin_art_bionic_namespace_teardown(instance) !=
       DARWIN_ART_BIONIC_NAMESPACE_OK)
     return 13;
   darwin_art_bionic_namespace_destroy(instance);
-  std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=33 "
-                       "routes=243 libdl-soname=exact\n");
+  std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=34 "
+                       "routes=371 version-aliases=exact\n");
   return 0;
 }

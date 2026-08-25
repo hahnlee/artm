@@ -162,6 +162,58 @@ int darwin_art_bionic_nanosleep(const DarwinArtAndroidTimespec* request,
   return outcome;
 }
 
+int darwin_art_bionic_gettimeofday(struct timeval* result, void* timezone) {
+  const int saved_host_errno = errno;
+  const int outcome = gettimeofday(result, timezone);
+  if (outcome != 0) FailHost(errno);
+  errno = saved_host_errno;
+  return outcome;
+}
+
+int64_t darwin_art_bionic_time(int64_t* output) {
+  const int saved_host_errno = errno;
+  time_t value = time(NULL);
+  if (output != NULL) *output = (int64_t)value;
+  errno = saved_host_errno;
+  return (int64_t)value;
+}
+
+char* darwin_art_bionic_ctime(const int64_t* value) {
+  if (value == NULL) return NULL;
+  const time_t host = (time_t)*value;
+  return ctime(&host);
+}
+
+struct tm* darwin_art_bionic_gmtime(const int64_t* value) {
+  if (value == NULL) return NULL;
+  const time_t host = (time_t)*value;
+  return gmtime(&host);
+}
+
+struct tm* darwin_art_bionic_gmtime_r(const int64_t* value,
+                                      struct tm* output) {
+  if (value == NULL || output == NULL) return NULL;
+  const time_t host = (time_t)*value;
+  return gmtime_r(&host, output);
+}
+
+struct tm* darwin_art_bionic_localtime(const int64_t* value) {
+  if (value == NULL) return NULL;
+  const time_t host = (time_t)*value;
+  return localtime(&host);
+}
+
+struct tm* darwin_art_bionic_localtime_r(const int64_t* value,
+                                         struct tm* output) {
+  if (value == NULL || output == NULL) return NULL;
+  const time_t host = (time_t)*value;
+  return localtime_r(&host, output);
+}
+
+int64_t darwin_art_bionic_mktime(struct tm* value) {
+  return value == NULL ? -1 : (int64_t)mktime(value);
+}
+
 long darwin_art_bionic_sysconf(int android_name) {
   const int saved_host_errno = errno;
   int host_name;
@@ -207,8 +259,16 @@ typedef struct Binding {
 
 static const Binding kBindings[] = {
     {"clock_gettime", (DarwinArtBionicTimeFunction)darwin_art_bionic_clock_gettime},
+    {"ctime", (DarwinArtBionicTimeFunction)darwin_art_bionic_ctime},
+    {"gettimeofday", (DarwinArtBionicTimeFunction)darwin_art_bionic_gettimeofday},
+    {"gmtime", (DarwinArtBionicTimeFunction)darwin_art_bionic_gmtime},
+    {"gmtime_r", (DarwinArtBionicTimeFunction)darwin_art_bionic_gmtime_r},
+    {"localtime", (DarwinArtBionicTimeFunction)darwin_art_bionic_localtime},
+    {"localtime_r", (DarwinArtBionicTimeFunction)darwin_art_bionic_localtime_r},
+    {"mktime", (DarwinArtBionicTimeFunction)darwin_art_bionic_mktime},
     {"nanosleep", (DarwinArtBionicTimeFunction)darwin_art_bionic_nanosleep},
     {"sysconf", (DarwinArtBionicTimeFunction)darwin_art_bionic_sysconf},
+    {"time", (DarwinArtBionicTimeFunction)darwin_art_bionic_time},
 };
 
 DarwinArtBionicTimeFunction darwin_art_bionic_time_resolve(

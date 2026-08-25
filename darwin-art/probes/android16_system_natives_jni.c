@@ -37,7 +37,7 @@ static jint Smoke_run(JNIEnv* env, jclass ignored, jthrowable throwable) {
   const char* mapped_chars = (*env)->GetStringUTFChars(env, mapped, NULL);
   if (mapped_chars == NULL) return -5;
   const int valid_mapping = strstr(mapped_chars, "darwin_art_probe") != NULL &&
-                            strstr(mapped_chars, ".dylib") != NULL;
+                            strstr(mapped_chars, ".so") != NULL;
   (*env)->ReleaseStringUTFChars(env, mapped, mapped_chars);
   if (!valid_mapping) return -6;
 

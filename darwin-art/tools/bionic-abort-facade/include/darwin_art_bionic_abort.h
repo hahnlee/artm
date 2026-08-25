@@ -14,6 +14,7 @@ typedef struct DarwinArtBionicAbortMessage {
 } DarwinArtBionicAbortMessage;
 
 __attribute__((noreturn)) void darwin_art_bionic_abort(void);
+__attribute__((noreturn)) void darwin_art_bionic___stack_chk_fail(void);
 void darwin_art_bionic_android_set_abort_message(const char* message);
 
 void* darwin_art_bionic_abort_resolve(const char* soname,

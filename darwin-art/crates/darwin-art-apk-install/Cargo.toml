@@ -1,0 +1,9 @@
+[package]
+name = "darwin-art-apk-install"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+darwin-art-native-artifact = { path = "../darwin-art-native-artifact" }
+sha2 = "0.10"

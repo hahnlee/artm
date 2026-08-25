@@ -1,9 +1,12 @@
 #include <jni.h>
+#include <stddef.h>
+
+JNIIMPORT jint JNICALL DarwinArtChildAnswer(void);
 
 static jint NativeAnswer(JNIEnv* env, jclass clazz) {
   (void)env;
   (void)clazz;
-  return 42;
+  return DarwinArtChildAnswer();
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {

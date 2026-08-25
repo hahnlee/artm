@@ -6,6 +6,7 @@ use super::runtime_link_checks::validate_runtime_link;
 use super::*;
 
 pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
+    let elf_loader = build_elf_loader(root)?;
     let runtime = root.join("_aosp/art/runtime");
     let build_paths = BuildPaths::from_root(root);
     let build_dir = build_paths.native_output("runtime-link-probe");
@@ -320,7 +321,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         ))
         .arg(root.join("_build/icu-foundation/libicuuc-common-darwin.a"))
         .arg(root.join("_build/icu-foundation/libicuuc-stubdata-darwin.a"))
-        .arg(root.join("crates/darwin-art-elf-loader/target/release/libdarwin_art_elf_loader.a"))
+        .arg(&elf_loader)
         .arg(format!(
             "-Wl,-force_load,{}",
             runtime_native_owner_archive.display()

@@ -1,20 +1,308 @@
 #include "runtime_app_presentation.h"
 
+#include "darwin_angle_egl.h"
+#include "darwin_surface_bridge.h"
+
 #include <iostream>
 #include <cstdlib>
+#include <atomic>
+#include <cctype>
+#include <cstring>
+#include <filesystem>
+#include <iterator>
 
 #include "runtime_graphics_phase.h"
 #include "runtime_graphics_gpu.h"
+#include "runtime_graphics_probe.h"
 #include "runtime_graphics_state.h"
 #include "runtime_jni_scope.h"
 #include "runtime_app_resources.h"
 #include "runtime_app_activity.h"
+#include "runtime_process_state.h"
 #include "mirror/throwable.h"
 #include "thread-current-inl.h"
 
 namespace darwin_art_presentation {
 
 namespace {
+
+jobject find_view_root_for_decor(JNIEnv* env, jobject decor_view) {
+  if (env == nullptr || decor_view == nullptr) return nullptr;
+  jclass global_class = env->FindClass("android/view/WindowManagerGlobal");
+  jmethodID get_instance =
+      global_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(global_class, "getInstance",
+                                   "()Landroid/view/WindowManagerGlobal;");
+  jobject global = get_instance == nullptr
+                       ? nullptr
+                       : env->CallStaticObjectMethod(global_class, get_instance);
+  jfieldID views_field = global_class == nullptr
+                             ? nullptr
+                             : env->GetFieldID(global_class, "mViews",
+                                               "Ljava/util/ArrayList;");
+  jfieldID roots_field = global_class == nullptr
+                             ? nullptr
+                             : env->GetFieldID(global_class, "mRoots",
+                                               "Ljava/util/ArrayList;");
+  jobject views = views_field == nullptr || global == nullptr
+                      ? nullptr
+                      : env->GetObjectField(global, views_field);
+  jobject roots = roots_field == nullptr || global == nullptr
+                      ? nullptr
+                      : env->GetObjectField(global, roots_field);
+  jclass list_class = env->FindClass("java/util/ArrayList");
+  jmethodID size = list_class == nullptr
+                       ? nullptr
+                       : env->GetMethodID(list_class, "size", "()I");
+  jmethodID get = list_class == nullptr
+                      ? nullptr
+                      : env->GetMethodID(list_class, "get",
+                                         "(I)Ljava/lang/Object;");
+  jobject result = nullptr;
+  if (views != nullptr && roots != nullptr && size != nullptr && get != nullptr &&
+      !env->ExceptionCheck()) {
+    const jint count = env->CallIntMethod(views, size);
+    for (jint index = count - 1; index >= 0 && !env->ExceptionCheck(); --index) {
+      jobject candidate = env->CallObjectMethod(views, get, index);
+      const bool matches = candidate != nullptr &&
+                           env->IsSameObject(candidate, decor_view) == JNI_TRUE;
+      env->DeleteLocalRef(candidate);
+      if (matches) {
+        result = env->CallObjectMethod(roots, get, index);
+        break;
+      }
+    }
+  }
+  env->DeleteLocalRef(list_class);
+  env->DeleteLocalRef(roots);
+  env->DeleteLocalRef(views);
+  env->DeleteLocalRef(global);
+  env->DeleteLocalRef(global_class);
+  return result;
+}
+
+jboolean InstallTransitionedActivity(JNIEnv* env, jclass, jobject activity,
+                                     jobject decor_view) {
+  auto* state = darwin_art_process::graphics_state_for_callback();
+  if (state == nullptr || env == nullptr || activity == nullptr ||
+      decor_view == nullptr || env->ExceptionCheck()) {
+    return JNI_FALSE;
+  }
+  darwin_art_graphics::begin_activity_transition(state, env);
+  jobject view_root = find_view_root_for_decor(env, decor_view);
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID find_view_by_id =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "findViewById",
+                             "(I)Landroid/view/View;");
+  constexpr jint kAndroidContentId = 0x01020002;
+  jobject content_root =
+      find_view_by_id == nullptr
+          ? nullptr
+          : env->CallObjectMethod(decor_view, find_view_by_id,
+                                  kAndroidContentId);
+  const jint width = state->interactive_width;
+  const jint height = state->interactive_height;
+  const bool installed =
+      view_root != nullptr && content_root != nullptr && width > 0 && height > 0 &&
+      !env->ExceptionCheck() &&
+      darwin_art_graphics::retain_interactive_view_root(state, env, view_root) &&
+      darwin_art_graphics::retain_hardware_context(state, env, activity) &&
+      darwin_art_graphics::present_content(state, env, nullptr, content_root,
+                                           width, height) == JNI_TRUE &&
+      darwin_art_graphics::retain_interactive_root(state, env, decor_view,
+                                                   width, height);
+  env->DeleteLocalRef(content_root);
+  env->DeleteLocalRef(view_class);
+  env->DeleteLocalRef(view_root);
+  if (!installed && env->ExceptionCheck()) {
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+  }
+  return installed ? JNI_TRUE : JNI_FALSE;
+}
+
+jstring ChooseHostDocument(JNIEnv* env, jclass, jstring) {
+  const char* test_document = std::getenv("DARWIN_ART_TEST_OPEN_DOCUMENT");
+  char* selected =
+      test_document == nullptr || test_document[0] == '\0'
+          ? darwin_art_host_open_image_document()
+          : ::strdup(test_document);
+  if (selected == nullptr) return nullptr;
+  static std::atomic<uint64_t> next_document{1};
+  jstring result = nullptr;
+  try {
+    const std::filesystem::path source(selected);
+    const char* app_data = std::getenv("DARWIN_ART_APK_APP_DATA_DIR");
+    std::error_code error;
+    const uintmax_t size = std::filesystem::file_size(source, error);
+    constexpr uintmax_t kMaximumDocumentBytes = 512ull * 1024ull * 1024ull;
+    std::string extension = source.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char value) {
+                     return static_cast<char>(std::tolower(value));
+                   });
+    if (!error && size > 0 && size <= kMaximumDocumentBytes &&
+        app_data != nullptr && app_data[0] != '\0' &&
+        (extension == ".jpg" || extension == ".jpeg" || extension == ".png")) {
+      const std::filesystem::path directory =
+          std::filesystem::path(app_data) / "host_documents";
+      std::filesystem::create_directories(directory, error);
+      const std::filesystem::path destination =
+          directory /
+          ("import-" +
+           std::to_string(next_document.fetch_add(1, std::memory_order_relaxed)) +
+           extension);
+      if (!error && std::filesystem::copy_file(
+                        source, destination,
+                        std::filesystem::copy_options::overwrite_existing,
+                        error) &&
+          !error) {
+        result = env->NewStringUTF(destination.c_str());
+      }
+    }
+  } catch (...) {
+    result = nullptr;
+  }
+  darwin_art_host_document_path_free(selected);
+  return result;
+}
+
+jobjectArray ChooseHostSaveDocument(JNIEnv* env, jclass, jstring mime,
+                                    jstring suggested_name) {
+  const char* suggested = suggested_name == nullptr
+                              ? nullptr
+                              : env->GetStringUTFChars(suggested_name, nullptr);
+  const char* test_destination =
+      std::getenv("DARWIN_ART_TEST_SAVE_DOCUMENT");
+  char* selected =
+      test_destination == nullptr || test_destination[0] == '\0'
+          ? darwin_art_host_save_image_document(suggested)
+          : ::strdup(test_destination);
+  if (suggested != nullptr) {
+    env->ReleaseStringUTFChars(suggested_name, suggested);
+  }
+  if (selected == nullptr) return nullptr;
+  jobjectArray result = nullptr;
+  try {
+    static std::atomic<uint64_t> next_export{1};
+    const char* app_data = std::getenv("DARWIN_ART_APK_APP_DATA_DIR");
+    if (app_data != nullptr && app_data[0] != '\0') {
+      std::string extension = ".jpg";
+      if (mime != nullptr) {
+        const char* mime_value = env->GetStringUTFChars(mime, nullptr);
+        if (mime_value != nullptr) {
+          if (std::strcmp(mime_value, "image/png") == 0) extension = ".png";
+          env->ReleaseStringUTFChars(mime, mime_value);
+        }
+      }
+      std::error_code error;
+      const std::filesystem::path directory =
+          std::filesystem::path(app_data) / "host_documents" / "exports";
+      std::filesystem::create_directories(directory, error);
+      const std::filesystem::path staging =
+          directory / ("export-" +
+                       std::to_string(next_export.fetch_add(
+                           1, std::memory_order_relaxed)) +
+                       extension);
+      jclass string_class = env->FindClass("java/lang/String");
+      result = string_class == nullptr || error
+                   ? nullptr
+                   : env->NewObjectArray(2, string_class, nullptr);
+      if (result != nullptr) {
+        jstring staged_value = env->NewStringUTF(staging.c_str());
+        jstring destination_value = env->NewStringUTF(selected);
+        env->SetObjectArrayElement(result, 0, staged_value);
+        env->SetObjectArrayElement(result, 1, destination_value);
+        env->DeleteLocalRef(destination_value);
+        env->DeleteLocalRef(staged_value);
+      }
+      if (string_class != nullptr) env->DeleteLocalRef(string_class);
+    }
+  } catch (...) {
+    result = nullptr;
+  }
+  darwin_art_host_document_path_free(selected);
+  return result;
+}
+
+jclass load_activity_class(JNIEnv* env, jclass activity_class,
+                           const char* class_name) {
+  jclass class_class = env->FindClass("java/lang/Class");
+  jmethodID get_class_loader =
+      class_class == nullptr
+          ? nullptr
+          : env->GetMethodID(class_class, "getClassLoader",
+                             "()Ljava/lang/ClassLoader;");
+  jobject loader =
+      get_class_loader == nullptr
+          ? nullptr
+          : env->CallObjectMethod(reinterpret_cast<jobject>(activity_class),
+                                  get_class_loader);
+  jclass loader_class = loader == nullptr ? nullptr : env->GetObjectClass(loader);
+  jmethodID load_class =
+      loader_class == nullptr
+          ? nullptr
+          : env->GetMethodID(loader_class, "loadClass",
+                             "(Ljava/lang/String;)Ljava/lang/Class;");
+  jstring name = env->NewStringUTF(class_name);
+  jclass result =
+      load_class == nullptr || name == nullptr
+          ? nullptr
+          : reinterpret_cast<jclass>(
+                env->CallObjectMethod(loader, load_class, name));
+  env->DeleteLocalRef(name);
+  env->DeleteLocalRef(loader_class);
+  env->DeleteLocalRef(loader);
+  env->DeleteLocalRef(class_class);
+  return result;
+}
+
+void ConfigureHostSurface(JNIEnv*, jclass, jint x, jint y, jint width,
+                          jint height) {
+  darwin_art::ConfigureDarwinAngleHostSurface(x, y, width, height);
+}
+
+bool install_activity_bridge(JNIEnv* env, jclass activity_class,
+                             jobject activity,
+                             darwin_art_graphics::GraphicsState* graphics_state) {
+  jclass bridge = load_activity_class(
+      env, activity_class, "dev.darwinart.simple.DarwinServiceBridge");
+  JNINativeMethod methods[] = {
+      {const_cast<char*>("nativeInstallActivity"),
+       const_cast<char*>("(Landroid/app/Activity;Landroid/view/View;)Z"),
+       reinterpret_cast<void*>(&InstallTransitionedActivity)},
+      {const_cast<char*>("nativeChooseDocument"),
+       const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
+       reinterpret_cast<void*>(&ChooseHostDocument)},
+      {const_cast<char*>("nativeChooseSaveDocument"),
+       const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;"),
+       reinterpret_cast<void*>(&ChooseHostSaveDocument)},
+      {const_cast<char*>("nativeConfigureHostSurface"),
+       const_cast<char*>("(IIII)V"),
+       reinterpret_cast<void*>(&ConfigureHostSurface)},
+  };
+  const bool registered =
+      bridge != nullptr && !env->ExceptionCheck() &&
+      env->RegisterNatives(bridge, methods,
+                           static_cast<jint>(std::size(methods))) == JNI_OK;
+  jmethodID install_initial =
+      !registered
+          ? nullptr
+          : env->GetStaticMethodID(bridge, "installInitialActivity",
+                                   "(Landroid/app/Activity;)V");
+  if (install_initial != nullptr && !env->ExceptionCheck()) {
+    env->CallStaticVoidMethod(bridge, install_initial, activity);
+  }
+  const bool installed =
+      registered && install_initial != nullptr && !env->ExceptionCheck() &&
+      darwin_art_graphics::retain_service_bridge_class(graphics_state, env,
+                                                       bridge);
+  env->DeleteLocalRef(bridge);
+  return installed;
+}
 
 bool attach_android_window(JNIEnv* env, jobject activity, jobject window,
                            jobject decor_view, jobject window_attributes,
@@ -622,6 +910,16 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
           probe_view_class, probe_view, run_apk_app, expect_apk_widgets,
           run_apk_app || run_framework_button, kApkFrameWidth * window_scale,
           kApkFrameHeight * window_scale) != 0) {
+    return 33;
+  }
+  if (run_apk_app &&
+      !install_activity_bridge(env, probe_activity_class, activity_instance,
+                               graphics_state)) {
+    std::cerr << "ART Android activity: local task bridge install failed\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
+    }
     return 33;
   }
   darwin_art_app_activity::release(env, &activity);

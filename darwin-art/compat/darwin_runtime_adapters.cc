@@ -12,6 +12,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -67,6 +68,8 @@ jint ElfJniOnLoadTrampoline(JavaVM*, void*) {
   // closed proxy VM and never ART's real JavaVM function table.
   const jint result =
       function(static_cast<JavaVM*>(darwin_art_jni_proxy_java_vm(library->proxy)), nullptr);
+  std::cerr << "DARWIN ELF JNI_OnLoad: result=0x" << std::hex << result << std::dec
+            << "\n";
   return result;
 }
 
@@ -86,10 +89,14 @@ extern "C" {
 
 void* NativeBridgeGetTrampoline2(void* handle,
                                  const char* name,
-                                 const char*,
+                                 const char* shorty,
                                  uint32_t,
-                                 JNICallType) {
+                                 JNICallType call_type) {
   ElfLibrary* library = AsElfLibrary(handle);
+  std::cerr << "DARWIN NativeBridge trampoline: handle=" << handle
+            << " library=" << library << " name=" << (name == nullptr ? "(null)" : name)
+            << " shorty=" << (shorty == nullptr ? "(null)" : shorty)
+            << " call_type=" << static_cast<int>(call_type) << "\n";
   if (library == nullptr || name == nullptr) {
     return nullptr;
   }
@@ -107,10 +114,49 @@ void* NativeBridgeGetTrampoline2(void* handle,
     g_pending_on_unload = library;
     return reinterpret_cast<void*>(&ElfJniOnUnloadTrampoline);
   }
-  // Ordinary JNI methods need a NativeBridgeGetTrampoline2 per-shorty PCS
-  // repacker. Returning null is an explicit capability failure, never a raw
-  // Android function pointer or Darwin global-symbol fallback.
-  return nullptr;
+  // CriticalNative omits the regular JNI environment/class prefix and needs a
+  // distinct PCS bridge. Never expose a raw Android function while that ABI is
+  // unsupported.
+  if (call_type != kJNICallTypeRegular || shorty == nullptr || shorty[0] == '\0') {
+    return nullptr;
+  }
+
+  const std::string cache_key = std::string(name) + '\n' + shorty;
+  std::lock_guard<std::mutex> lock(library->trampoline_mutex);
+  if (auto cached = library->exported_jni_trampolines.find(cache_key);
+      cached != library->exported_jni_trampolines.end()) {
+    return cached->second;
+  }
+
+  uintptr_t target = 0;
+  std::string lookup_error;
+  if (!LookupOptionalElfSymbol(library, name, &target, &lookup_error) || target == 0) {
+    return nullptr;
+  }
+  JavaVM* proxy_vm =
+      static_cast<JavaVM*>(darwin_art_jni_proxy_java_vm(library->proxy));
+  void* proxy_env = nullptr;
+  if (proxy_vm == nullptr ||
+      proxy_vm->GetEnv(&proxy_env, JNI_VERSION_1_6) != JNI_OK ||
+      proxy_env == nullptr) {
+    return nullptr;
+  }
+  darwin_art::android_jni::TrampolineRequest request{
+      reinterpret_cast<void*>(target), shorty, 1u};
+  std::string trampoline_error;
+  auto* trampolines = darwin_art::android_jni::CreateRegularTrampolines(
+      proxy_env, &request, 1, &trampoline_error);
+  void* entry = darwin_art::android_jni::TrampolineEntry(trampolines, 0);
+  if (trampolines == nullptr || entry == nullptr) {
+    darwin_art::android_jni::DestroyRegularTrampolines(trampolines);
+    return nullptr;
+  }
+  if (library->trampolines == nullptr) {
+    library->trampolines = trampolines;
+  }
+  library->trampoline_sets.push_back(trampolines);
+  library->exported_jni_trampolines.emplace(cache_key, entry);
+  return entry;
 }
 
 bool NativeBridgeIsNativeBridgeFunctionPointer(const void* pointer) {

@@ -105,6 +105,8 @@ assert 'gethex(&s' in strtod and 'hexnan(&s' in strtod
 assert 'k = strtodg(s, sp, fpi, &exp, bits);' in strtof
 assert '__strtorQ(s, end_ptr, FLT_ROUNDS, &result)' in strtold
 assert 'long double strtold_l' in stdlib_l and 'return strtold(s, end_ptr);' in stdlib_l
+assert 'double strtod_l' in stdlib_l and 'return strtod(s, end_ptr);' in stdlib_l
+assert 'float strtof_l' in stdlib_l and 'return strtof(s, end_ptr);' in stdlib_l
 assert 'pthread_mutex_t __dtoa_locks[]' in support
 assert '#define _MUTEX_LOCK(l) pthread_mutex_lock((pthread_mutex_t*) l)' in thread_private
 for anchor in ('+nan(0xff)', '0x1.2p3', '7.0064923216240853546186479164495e-46',
@@ -175,7 +177,7 @@ build_objects normal "$temp_root/normal"
 normal_objects=("${built_objects[@]}")
 ar rcs "$temp_root/libdarwin-art-bionic-float-conversion.a" "${normal_objects[@]}"
 definitions="$(nm -gU "$temp_root/libdarwin-art-bionic-float-conversion.a")"
-for symbol in strtod strtof float_conversion_resolve float_conversion_capability; do
+for symbol in strtod strtod_l strtof strtof_l float_conversion_resolve float_conversion_capability; do
   grep -F " _darwin_art_bionic_$symbol" <<< "$definitions" >/dev/null ||
     fail "missing provider definition: $symbol"
 done
@@ -205,7 +207,7 @@ check_hash "$fixture" "$FIXTURE_ELF_SHA256"
 "$readelf" --dyn-syms --wide "$fixture" |
   awk '$7=="UND" && $8!="" {name=$8; sub(/@.*/,"",name); print name}' |
   sort -u > "$temp_root/fixture-imports"
-printf '%s\n' __errno strtod strtof | sort > "$temp_root/expected-imports"
+printf '%s\n' __errno strtod strtod_l strtof strtof_l | sort > "$temp_root/expected-imports"
 diff -u "$temp_root/expected-imports" "$temp_root/fixture-imports" ||
   fail 'Android ELF float import namespace drift'
 [[ "$($elf_nm -D --defined-only "$fixture" | awk '$2=="T" {n++} END {print n+0}')" == 2 ]] ||
@@ -233,4 +235,4 @@ mkdir -p "$build_dir"
 cp "$temp_root/libdarwin-art-bionic-float-conversion.a" "$build_dir/"
 cp "$fixture" "$build_dir/"
 printf '%s\n' "$differential_output"
-echo 'bionic-float-conversion-facade: PASS demand=4 supported=2 rejected=2 AndroidELF=2+errno AOSP-gdtoa host-strto=0 long-double=binary128-rejected'
+echo 'bionic-float-conversion-facade: PASS demand=4 supported=2 rejected=2 system-extensions=2 AndroidELF=4+errno AOSP-gdtoa locale-ignored host-strto=0 long-double=binary128-rejected'

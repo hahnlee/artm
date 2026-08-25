@@ -34,11 +34,7 @@ pub(crate) fn prepare(root: &Path, flavor: RuntimeFlavor) -> Result<RuntimeBoots
     let real_graphics = flavor.real_graphics();
     build_shell_gate(root, "build-android-elf-jni-fixture.sh")?;
     let build_paths = BuildPaths::from_root(root);
-    run_command(
-        Command::new("cargo")
-            .args(["build", "--release", "--lib", "--manifest-path"])
-            .arg(root.join("crates/darwin-art-elf-loader/Cargo.toml")),
-    )?;
+    build_elf_loader(root)?;
 
     let artbase = root.join("_aosp/art/libartbase");
     let patched_artbase = root.join("_build/foundation/patched-source/libartbase");

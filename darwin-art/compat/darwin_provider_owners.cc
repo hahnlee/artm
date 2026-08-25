@@ -15,6 +15,7 @@
 #include "darwin_art_bionic_socket_broker.h"
 #include "darwin_art_bionic_stdio.h"
 #include "darwin_art_bionic_strftime.h"
+#include "darwin_art_bionic_vm.h"
 
 extern "C" DarwinArtBionicSendfileTransferStatus
 darwin_art_bionic_fs_sendfile_transfer(
@@ -153,6 +154,16 @@ bool acquire_sendfile_direct(std::string* error) {
 void release_sendfile_direct() {
   if (darwin_art_bionic_sendfile_deactivate() !=
       DARWIN_ART_BIONIC_SENDFILE_LIFECYCLE_OK) std::abort();
+}
+
+bool acquire_vm_direct(std::string* error) {
+  if (darwin_art_bionic_vm_process_install() == 0) return true;
+  *error = "Bionic VM process-owner install failed";
+  return false;
+}
+
+void release_vm_direct() {
+  if (darwin_art_bionic_vm_process_uninstall() != 0) std::abort();
 }
 
 bool acquire_filesystem(int directory_fd, std::string* error) {
@@ -313,6 +324,30 @@ void release_sendfile() {
   release_sendfile_direct();
 }
 
+bool acquire_vm(std::string* error) {
+  const HookSnapshot hook = hooks();
+  if (hook.acquire != nullptr) {
+    const int32_t status =
+        hook.acquire(hook.context, static_cast<uint32_t>(Kind::Vm), -1);
+    if (status == 0) return true;
+    *error = "Rust VM provider owner rejected activation: " +
+             std::to_string(status);
+    return false;
+  }
+  return acquire_vm_direct(error);
+}
+
+void release_vm() {
+  const HookSnapshot hook = hooks();
+  if (hook.release != nullptr) {
+    if (hook.release(hook.context, static_cast<uint32_t>(Kind::Vm)) != 0) {
+      std::abort();
+    }
+    return;
+  }
+  release_vm_direct();
+}
+
 extern "C" void darwin_art_provider_install_hooks(
     void* context, AcquireHook acquire, ReleaseHook release) {
   std::lock_guard<std::mutex> lock(g_hooks.mutex);
@@ -351,6 +386,9 @@ extern "C" int32_t darwin_art_provider_native_acquire(uint32_t kind,
     case Kind::Sendfile:
       ok = acquire_sendfile_direct(&error);
       break;
+    case Kind::Vm:
+      ok = acquire_vm_direct(&error);
+      break;
   }
   return ok ? 0 : -1;
 }
@@ -374,6 +412,9 @@ extern "C" int32_t darwin_art_provider_native_release(uint32_t kind) {
       break;
     case Kind::Sendfile:
       release_sendfile_direct();
+      break;
+    case Kind::Vm:
+      release_vm_direct();
       break;
     default:
       return -1;

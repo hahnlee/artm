@@ -44,9 +44,18 @@ fn main() {
         "SDK lookup",
     );
     let shims = output_dir.join("shims.o");
+    let setjmp = output_dir.join("setjmp.o");
     let errno = output_dir.join("errno.o");
     let archive = output_dir.join("libdarwin_art_bionic_process_state.a");
     compile("src/shims.c", &shims, &sdk, &["include"]);
+    assert!(
+        Command::new("clang")
+            .args(["-arch", "arm64", "-isysroot", &sdk, "-c", "src/setjmp_arm64.S", "-o"])
+            .arg(&setjmp)
+            .status()
+            .unwrap()
+            .success()
+    );
     compile(
         "../bionic-errno-tls/src/errno_tls.c",
         &errno,
@@ -61,6 +70,7 @@ fn main() {
             .arg("rcs")
             .arg(&archive)
             .arg(&shims)
+            .arg(&setjmp)
             .arg(&errno)
             .status()
             .unwrap()
@@ -70,6 +80,7 @@ fn main() {
     println!("cargo:rustc-link-lib=static=darwin_art_bionic_process_state");
     for source in [
         "src/shims.c",
+        "src/setjmp_arm64.S",
         "include/darwin_art_bionic_process_state.h",
         "../bionic-errno-tls/src/errno_tls.c",
         "../bionic-errno-tls/include/darwin_art_bionic_errno.h",

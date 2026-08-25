@@ -131,6 +131,7 @@ pub(super) fn parse_image_with_policy(
         return Err(LoadError::Bounds("image reservation size"));
     }
     let mut protections = vec![PROT_NONE; image_size / page_size];
+    let mut protection_overlap = false;
     for load in &loads {
         let start = difference_to_usize(load.virtual_address & !page_mask, minimum)? / page_size;
         let end_address = load
@@ -147,12 +148,50 @@ pub(super) fn parse_image_with_policy(
         {
             *page |= protection;
             if *page & PROT_WRITE != 0 && *page & PROT_EXEC != 0 {
-                return Err(LoadError::Protection(
-                    "host page would be writable and executable",
-                ));
+                protection_overlap = true;
             }
         }
     }
+
+    let (image_offset, reservation_size, compat_boundary) = if protection_overlap {
+        let boundary = rx_rw_compat_boundary(&loads, relro.as_ref(), page_size)?.ok_or(
+            LoadError::Protection(
+                "host page permission overlap is not eligible for Android 16 RX|RW compat",
+            ),
+        )?;
+        let boundary_from_minimum = difference_to_usize(boundary, minimum)?;
+        let boundary_modulo = boundary_from_minimum % page_size;
+        let image_offset = if boundary_modulo == 0 {
+            0
+        } else {
+            page_size - boundary_modulo
+        };
+        let shifted_boundary = image_offset
+            .checked_add(boundary_from_minimum)
+            .ok_or(LoadError::Bounds("compat permission boundary overflow"))?;
+        if shifted_boundary % page_size != 0 {
+            return Err(LoadError::Bounds(
+                "compat permission boundary is not host-page aligned",
+            ));
+        }
+        let reservation_size = image_offset
+            .checked_add(image_size)
+            .and_then(|size| size.checked_add(page_mask as usize))
+            .map(|size| size & !(page_size - 1))
+            .ok_or(LoadError::Bounds("compat reservation size overflow"))?;
+        protections = vec![PROT_READ | PROT_EXEC; reservation_size / page_size];
+        for protection in protections.iter_mut().skip(shifted_boundary / page_size) {
+            *protection = PROT_READ | PROT_WRITE;
+        }
+        (image_offset, reservation_size, Some(boundary))
+    } else {
+        (0, image_size, None)
+    };
+    let stack_guard_offset = reservation_size;
+    let reservation_size = reservation_size
+        .checked_add(page_size)
+        .ok_or(LoadError::Bounds("stack-guard reservation size overflow"))?;
+    protections.push(PROT_READ);
 
     if let Some(relro) = relro {
         if relro.flags != PF_R || relro.memory_size == 0 || relro.file_size > relro.memory_size {
@@ -169,8 +208,26 @@ pub(super) fn parse_image_with_policy(
                     .checked_add(load.memory_size)
                     .is_some_and(|load_end| relro_end <= load_end)
         });
-        if !containing_load {
+        if !containing_load && compat_boundary.is_none() {
             return Err(LoadError::Format("PT_GNU_RELRO outside PT_LOAD"));
+        }
+
+        if compat_boundary.is_some() {
+            // Android 16's safe 4K-on-16K mode folds the RELRO prefix into the
+            // RX half of its single RX|RW boundary. There is no independently
+            // protectable host page at the guest RELRO edge.
+            return Ok(ParsedImage {
+                loads,
+                dynamic,
+                tls,
+                minimum_page: minimum,
+                image_size,
+                reservation_size,
+                image_offset,
+                stack_guard_offset,
+                page_size,
+                page_protections: protections,
+            });
         }
 
         let start = difference_to_usize(relro.virtual_address & !page_mask, minimum)? / page_size;
@@ -202,9 +259,70 @@ pub(super) fn parse_image_with_policy(
         tls,
         minimum_page: minimum,
         image_size,
+        reservation_size,
+        image_offset,
+        stack_guard_offset,
         page_size,
         page_protections: protections,
     })
+}
+
+const ANDROID_COMPAT_PAGE_SIZE: usize = 4096;
+
+/// Return the single guest RX|RW boundary accepted by Android 16's safe
+/// 4K-on-16K compatibility layout. Ineligible layouts remain fail-closed; we
+/// deliberately do not implement Android's legacy RWX fallback.
+fn rx_rw_compat_boundary(
+    loads: &[ProgramHeader],
+    relro: Option<&ProgramHeader>,
+    host_page_size: usize,
+) -> Result<Option<u64>, LoadError> {
+    if host_page_size != 16 * 1024
+        || loads
+            .iter()
+            .all(|load| load.alignment >= host_page_size as u64)
+    {
+        return Ok(None);
+    }
+    let mut first_rw = None;
+    let mut saw_rw = false;
+    for load in loads {
+        match load.flags {
+            flags if !saw_rw && (flags == PF_R || flags == (PF_R | PF_X)) => {}
+            flags if flags == PF_R | PF_W => {
+                saw_rw = true;
+                first_rw.get_or_insert(load);
+            }
+            _ => return Ok(None),
+        }
+    }
+    let Some(first_rw) = first_rw else {
+        return Ok(None);
+    };
+    let boundary = if let Some(relro) = relro {
+        let alignment = first_rw.alignment.max(ANDROID_COMPAT_PAGE_SIZE as u64);
+        let load_start = first_rw.virtual_address & !(alignment - 1);
+        let load_end = first_rw
+            .virtual_address
+            .checked_add(first_rw.memory_size)
+            .and_then(|end| end.checked_add(alignment - 1))
+            .map(|end| end & !(alignment - 1))
+            .ok_or(LoadError::Bounds("compat RW segment end overflow"))?;
+        let relro_start = relro.virtual_address & !(alignment - 1);
+        let relro_end = relro
+            .virtual_address
+            .checked_add(relro.memory_size)
+            .and_then(|end| end.checked_add(alignment - 1))
+            .map(|end| end & !(alignment - 1))
+            .ok_or(LoadError::Bounds("compat RELRO end overflow"))?;
+        if relro_start != load_start || relro_end > load_end {
+            return Ok(None);
+        }
+        relro_end
+    } else {
+        first_rw.virtual_address & !((ANDROID_COMPAT_PAGE_SIZE as u64) - 1)
+    };
+    Ok(Some(boundary))
 }
 
 fn validate_load(bytes: &[u8], load: &ProgramHeader) -> Result<(), LoadError> {
@@ -270,6 +388,30 @@ fn validate_tls_segment(
         .virtual_address
         .checked_add(tls.file_size)
         .ok_or(LoadError::Bounds("PT_TLS file range overflow"))?;
+    // A zero-initialized TLS block has no template bytes to map. Android's
+    // ps16k system libraries legitimately place that metadata in the reserved
+    // virtual gap between PT_LOAD segments. Keep it bounded by the complete
+    // image reservation, but do not invent a containing file mapping.
+    if tls.file_size == 0 {
+        let image_start = loads
+            .first()
+            .ok_or(LoadError::Bounds("PT_TLS without PT_LOAD"))?
+            .virtual_address;
+        let image_end = loads
+            .iter()
+            .map(|load| load.virtual_address.checked_add(load.memory_size))
+            .collect::<Option<Vec<_>>>()
+            .ok_or(LoadError::Bounds("PT_LOAD range overflow"))?
+            .into_iter()
+            .max()
+            .ok_or(LoadError::Bounds("PT_TLS without PT_LOAD"))?;
+        if tls.virtual_address < image_start || memory_end > image_end {
+            return Err(LoadError::Bounds(
+                "zero-fill PT_TLS is outside image reservation",
+            ));
+        }
+        return Ok(());
+    }
     let containing = loads.iter().find(|load| {
         load.virtual_address <= tls.virtual_address
             && load
@@ -377,6 +519,7 @@ pub(super) fn parse_dynamic_with_policy(
             DT_NEEDED => info.needed_offsets.push(value),
             DT_SONAME => set_once(&mut info.soname_offset, value, "duplicate DT_SONAME")?,
             DT_HASH => set_once(&mut info.hash, value, "duplicate DT_HASH")?,
+            DT_GNU_HASH => set_once(&mut info.gnu_hash, value, "duplicate DT_GNU_HASH")?,
             DT_STRTAB => set_once(&mut info.string_table, value, "duplicate DT_STRTAB")?,
             DT_STRSZ => set_once(&mut info.string_size, value, "duplicate DT_STRSZ")?,
             DT_SYMTAB => set_once(&mut info.symbol_table, value, "duplicate DT_SYMTAB")?,
@@ -388,6 +531,26 @@ pub(super) fn parse_dynamic_with_policy(
                 &mut info.relative_relocation_count,
                 value,
                 "duplicate DT_RELACOUNT",
+            )?,
+            DT_ANDROID_RELA => {
+                set_once(&mut info.android_rela, value, "duplicate DT_ANDROID_RELA")?
+            }
+            DT_ANDROID_RELASZ => set_once(
+                &mut info.android_rela_size,
+                value,
+                "duplicate DT_ANDROID_RELASZ",
+            )?,
+            DT_RELR | DT_ANDROID_RELR => set_once(&mut info.relr, value, "duplicate DT_RELR")?,
+            DT_RELRSZ | DT_ANDROID_RELRSZ => {
+                set_once(&mut info.relr_size, value, "duplicate DT_RELRSZ")?
+            }
+            DT_RELRENT | DT_ANDROID_RELRENT => {
+                set_once(&mut info.relr_entry_size, value, "duplicate DT_RELRENT")?
+            }
+            DT_ANDROID_RELRCOUNT => set_once(
+                &mut info.relr_count,
+                value,
+                "duplicate DT_ANDROID_RELRCOUNT",
             )?,
             DT_JMPREL => set_once(&mut info.plt_rela, value, "duplicate DT_JMPREL")?,
             DT_PLTRELSZ => set_once(&mut info.plt_rela_size, value, "duplicate DT_PLTRELSZ")?,
@@ -418,15 +581,10 @@ pub(super) fn parse_dynamic_with_policy(
                 value,
                 "duplicate DT_AARCH64_BTI_PLT",
             )?,
-            DT_PLTGOT | DT_DEBUG | DT_GNU_HASH => {}
-            DT_REL | DT_RELSZ | DT_RELENT => {
+            DT_PLTGOT | DT_DEBUG => {}
+            DT_REL | DT_RELSZ | DT_RELENT | DT_ANDROID_REL | DT_ANDROID_RELSZ => {
                 if value != 0 && !metadata_only {
                     return Err(LoadError::Capability(Capability::RelRelocations));
-                }
-            }
-            DT_RELR | DT_RELRSZ | DT_RELRENT => {
-                if value != 0 && !metadata_only {
-                    return Err(LoadError::Capability(Capability::RelrRelocations));
                 }
             }
             DT_INIT => {
@@ -465,7 +623,7 @@ pub(super) fn validate_dynamic_capabilities(info: &DynamicInfo) -> Result<(), Lo
             value,
         }));
     }
-    if info.hash.is_none() {
+    if info.hash.is_none() && info.gnu_hash.is_none() {
         return Err(LoadError::Capability(Capability::MissingSysvHash));
     }
     if info.string_table.is_none()
@@ -480,6 +638,24 @@ pub(super) fn validate_dynamic_capabilities(info: &DynamicInfo) -> Result<(), Lo
         if relative_count > relocation_count {
             return Err(LoadError::Format("DT_RELACOUNT exceeds DT_RELASZ"));
         }
+    }
+    let android_rela_address = info.android_rela.unwrap_or(0);
+    let android_rela_size = info.android_rela_size.unwrap_or(0);
+    if (android_rela_address == 0) != (android_rela_size == 0) {
+        return Err(LoadError::Format(
+            "incomplete DT_ANDROID_RELA/DT_ANDROID_RELASZ",
+        ));
+    }
+    let relr_address = info.relr.unwrap_or(0);
+    let relr_size = info.relr_size.unwrap_or(0);
+    if (relr_address == 0) != (relr_size == 0) {
+        return Err(LoadError::Format("incomplete DT_RELR/DT_RELRSZ"));
+    }
+    if relr_size != 0 && (info.relr_entry_size.unwrap_or(8) != 8 || relr_size % 8 != 0) {
+        return Err(LoadError::Format("invalid DT_RELRENT/DT_RELRSZ"));
+    }
+    if info.relr_count.is_some_and(|count| count > relr_size / 8) {
+        return Err(LoadError::Format("DT_ANDROID_RELRCOUNT exceeds DT_RELRSZ"));
     }
     let plt_address = info.plt_rela.unwrap_or(0);
     let plt_size = info.plt_rela_size.unwrap_or(0);
@@ -500,7 +676,7 @@ pub(super) fn validate_dynamic_capabilities(info: &DynamicInfo) -> Result<(), Lo
         return Err(LoadError::Format("DT_PLTREL without DT_JMPREL"));
     }
     if let Some(flags) = info.flags
-        && flags & !DF_BIND_NOW != 0
+        && flags & !(DF_BIND_NOW | DF_SYMBOLIC) != 0
     {
         return Err(LoadError::Capability(Capability::DynamicFlags {
             tag: DT_FLAGS,
@@ -516,4 +692,97 @@ pub(super) fn validate_dynamic_capabilities(info: &DynamicInfo) -> Result<(), Lo
         }));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_bounded_zero_fill_tls_between_loads() {
+        let loads = [
+            ProgramHeader {
+                kind: PT_LOAD,
+                flags: PF_R | PF_X,
+                offset: 0,
+                virtual_address: 0,
+                file_size: 0x1800,
+                memory_size: 0x1800,
+                alignment: 0x4000,
+            },
+            ProgramHeader {
+                kind: PT_LOAD,
+                flags: PF_R | PF_W,
+                offset: 0x4000,
+                virtual_address: 0x4000,
+                file_size: 0x1000,
+                memory_size: 0x2000,
+                alignment: 0x4000,
+            },
+        ];
+        let tls = ProgramHeader {
+            kind: PT_TLS,
+            flags: PF_R,
+            offset: 0x4000,
+            virtual_address: 0x1800,
+            file_size: 0,
+            memory_size: 16,
+            alignment: 8,
+        };
+        let bytes = vec![0; 0x4000];
+        assert!(validate_tls_segment(&bytes, &tls, &loads).is_ok());
+
+        let outside = ProgramHeader {
+            virtual_address: 0x6000,
+            ..tls
+        };
+        assert!(validate_tls_segment(&bytes, &outside, &loads).is_err());
+    }
+
+    #[test]
+    fn android16_rx_rw_compat_accepts_snapseed_segment_geometry() {
+        let loads = vec![
+            load(0, 0x10c1b40, PF_R | PF_X),
+            load(0x10c2000, 0x77640, PF_R | PF_W),
+            load(0x113a640, 0xdb730, PF_R | PF_W),
+        ];
+        let relro = ProgramHeader {
+            kind: PT_GNU_RELRO,
+            flags: PF_R,
+            offset: 0x10c2000,
+            virtual_address: 0x10c2000,
+            file_size: 0x77640,
+            memory_size: 0x78000,
+            alignment: 1,
+        };
+        assert_eq!(
+            rx_rw_compat_boundary(&loads, Some(&relro), 16 * 1024).unwrap(),
+            Some(0x113a000)
+        );
+    }
+
+    #[test]
+    fn android16_rx_rw_compat_rejects_code_after_writable_data() {
+        let loads = vec![
+            load(0, 0x1000, PF_R | PF_X),
+            load(0x1000, 0x1000, PF_R | PF_W),
+            load(0x2000, 0x1000, PF_R | PF_X),
+        ];
+        assert_eq!(
+            rx_rw_compat_boundary(&loads, None, 16 * 1024).unwrap(),
+            None
+        );
+    }
+
+    fn load(virtual_address: u64, memory_size: u64, flags: u32) -> ProgramHeader {
+        ProgramHeader {
+            kind: PT_LOAD,
+            flags,
+            offset: virtual_address,
+            virtual_address,
+            file_size: memory_size,
+            memory_size,
+            alignment: ANDROID_COMPAT_PAGE_SIZE as u64,
+        }
+    }
 }

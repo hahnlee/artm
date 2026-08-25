@@ -86,7 +86,8 @@ DarwinArtFdBrokerImpl *Impl(DarwinArtFdBroker *broker) {
   return reinterpret_cast<DarwinArtFdBrokerImpl *>(broker);
 }
 bool ValidOwnerKind(DarwinArtFdKind kind) {
-  return kind >= DARWIN_ART_FD_FS_FILE && kind <= DARWIN_ART_FD_SOCKET;
+  return kind >= DARWIN_ART_FD_FS_FILE && kind <= DARWIN_ART_FD_PIPE &&
+         kind != DARWIN_ART_FD_EPOLL;
 }
 uint32_t MakeToken(size_t slot, uint32_t generation) {
   return kTokenMarker | (generation << kSlotBits) | static_cast<uint32_t>(slot);
@@ -410,20 +411,23 @@ extern "C" DarwinArtFdBrokerStatus darwin_art_fd_broker_install_owner(
   if (!broker || !callbacks || !owner || !ValidOwnerKind(kind) ||
       (callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V1 &&
        callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V2 &&
-       callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V3))
+       callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V3 &&
+       callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V4))
     return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
   const size_t required_size =
       callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V1
           ? offsetof(DarwinArtFdOwnerV1, read_at)
       : callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V2
           ? offsetof(DarwinArtFdOwnerV1, socket_operation)
+      : callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V3
+          ? offsetof(DarwinArtFdOwnerV1, poll_many)
           : sizeof(DarwinArtFdOwnerV1);
   if (callbacks->struct_size < required_size)
     return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
   DarwinArtFdOwnerV1 copied{};
   std::memcpy(&copied, callbacks, required_size);
   if (kind == DARWIN_ART_FD_SOCKET &&
-      callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V3 &&
+      callbacks->abi_version >= DARWIN_ART_FD_OWNER_ABI_V3 &&
       (!copied.socket_operation || !copied.close))
     return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
   auto *impl = Impl(broker);
@@ -660,35 +664,117 @@ extern "C" DarwinArtFdBrokerStatus
 darwin_art_fd_broker_poll(DarwinArtFdBroker *broker,
                           DarwinArtFdPollEntry *entries, size_t count,
                           DarwinArtFdIoResult *result) {
+  return darwin_art_fd_broker_poll_wait(broker, entries, count, 0, result);
+}
+
+extern "C" DarwinArtFdBrokerStatus
+darwin_art_fd_broker_poll_wait(DarwinArtFdBroker *broker,
+                               DarwinArtFdPollEntry *entries, size_t count,
+                               int timeout_ms, DarwinArtFdIoResult *result) {
   if (!broker || !result || (count && !entries))
     return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
+  if (timeout_ms < -1)
+    return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
   auto *impl = Impl(broker);
-  intptr_t ready = 0;
-  for (size_t i = 0; i < count; ++i) {
-    entries[i].revents = 0;
-    if (entries[i].fd < 0)
-      continue;
-    DarwinArtFdIoResult one{};
-    auto status = DispatchOne(
-        impl, entries[i].fd, std::nullopt, &one, [&](const Lease &l, int *e) {
-          auto &c = l.description->callbacks;
-          if (!c.poll) {
-            entries[i].revents = kPollNval;
-            return intptr_t{1};
-          }
-          return static_cast<intptr_t>(c.poll(c.context, l.description->object,
-                                              entries[i].events,
-                                              &entries[i].revents, e));
-        });
-    if (status == DARWIN_ART_FD_BROKER_STALE) {
-      entries[i].revents = kPollNval;
-      ++ready;
-    } else if (status != DARWIN_ART_FD_BROKER_OK)
-      return status;
-    else if (one.value > 0 || entries[i].revents)
-      ++ready;
+  std::vector<Lease> leases(count);
+  std::vector<size_t> leased_indices;
+  leased_indices.reserve(count);
+  intptr_t invalid = 0;
+  {
+    std::lock_guard lock(impl->mutex);
+    for (size_t index = 0; index < count; ++index) {
+      entries[index].revents = 0;
+      if (entries[index].fd < 0)
+        continue;
+      const DarwinArtFdBrokerStatus status =
+          AcquireLocked(impl, entries[index].fd, std::nullopt, &leases[index]);
+      if (status == DARWIN_ART_FD_BROKER_STALE) {
+        entries[index].revents = kPollNval;
+        ++invalid;
+        continue;
+      }
+      if (status != DARWIN_ART_FD_BROKER_OK) {
+        for (size_t acquired : leased_indices)
+          ReleaseLocked(impl, leases[acquired]);
+        return status;
+      }
+      leased_indices.push_back(index);
+    }
   }
-  SetResult(result, ready, 0);
+
+  decltype(DarwinArtFdOwnerV1::poll_many) batch = nullptr;
+  void *batch_context = nullptr;
+  bool one_batch = !leased_indices.empty();
+  for (size_t index : leased_indices) {
+    const auto &callbacks = leases[index].description->callbacks;
+    if (callbacks.poll_many == nullptr) {
+      one_batch = false;
+      break;
+    }
+    if (batch == nullptr) {
+      batch = callbacks.poll_many;
+      batch_context = callbacks.context;
+    } else if (batch != callbacks.poll_many ||
+               batch_context != callbacks.context) {
+      one_batch = false;
+      break;
+    }
+  }
+
+  intptr_t ready = invalid;
+  int android_errno = 0;
+  if (one_batch) {
+    std::vector<uint64_t> objects;
+    std::vector<int16_t> events;
+    std::vector<int16_t> revents(leased_indices.size(), 0);
+    objects.reserve(leased_indices.size());
+    events.reserve(leased_indices.size());
+    for (size_t index : leased_indices) {
+      objects.push_back(leases[index].description->object);
+      events.push_back(entries[index].events);
+    }
+    const int value =
+        batch(batch_context, objects.data(), events.data(), revents.data(),
+              revents.size(), invalid == 0 ? timeout_ms : 0, &android_errno);
+    if (value < 0) {
+      ready = -1;
+    } else {
+      for (size_t position = 0; position < leased_indices.size(); ++position) {
+        entries[leased_indices[position]].revents = revents[position];
+        if (revents[position] != 0)
+          ++ready;
+      }
+    }
+  } else {
+    for (size_t index : leased_indices) {
+      auto &callbacks = leases[index].description->callbacks;
+      if (callbacks.poll == nullptr) {
+        entries[index].revents = kPollNval;
+        ++ready;
+        continue;
+      }
+      const int value = callbacks.poll(
+          callbacks.context, leases[index].description->object,
+          entries[index].events, &entries[index].revents, &android_errno);
+      if (value < 0) {
+        ready = -1;
+        break;
+      }
+      if (value > 0 || entries[index].revents != 0)
+        ++ready;
+    }
+    if (ready == 0 && timeout_ms != 0) {
+      android_errno = 38;
+      ready = -1;
+    }
+  }
+
+  {
+    std::lock_guard lock(impl->mutex);
+    for (size_t index : leased_indices)
+      ReleaseLocked(impl, leases[index]);
+  }
+  SetResult(result, ready, ready < 0 ? android_errno : 0);
   return DARWIN_ART_FD_BROKER_OK;
 }
 

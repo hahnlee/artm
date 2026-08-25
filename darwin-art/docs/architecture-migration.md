@@ -16,6 +16,7 @@ darwin-art-host (event loop and presentation only)
 darwin-art-runtime (Rust lifecycle + typed resources)
     ├── EngineOwner: loaded image + symbol table + shutdown
     ├── NativeGraphOwner: ELF graph/provider leases
+    ├── NativeArtifactOwner: graph-atomic Darwin/ELF selection
     ├── SurfaceOwner: CAMetalLayer/Metal drawable lease
     ├── FrameOwner: input/pulse scheduling
     └── rollback and reverse teardown
@@ -38,7 +39,9 @@ modules share command/context helpers but not ABI declarations or lifecycle
 policy.
 
 Rust owns resources, state transitions, leases, rollback, and build graph
-decisions. C++/ObjC++ owns only operations that require ART/HWUI/Skia/Metal
+decisions. It also owns content-based native-artifact admission: a complete
+Darwin graph is selected as one unit, otherwise the original Android ELF graph
+is selected as one unit. C++/ObjC++ owns only operations that require ART/HWUI/Skia/Metal
 ABI or platform object access. A C++ phase may not own a second lifecycle
 state machine or call a shutdown callback that is not held by the Rust owner.
 

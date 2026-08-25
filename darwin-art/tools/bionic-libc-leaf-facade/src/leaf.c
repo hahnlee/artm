@@ -30,6 +30,12 @@ void* darwin_art_bionic_memcpy(void* destination, const void* source, size_t len
   return destination;
 }
 
+void* darwin_art_bionic___memcpy_chk(void* destination, const void* source,
+                                     size_t length, size_t destination_size) {
+  if (length > destination_size) __builtin_trap();
+  return darwin_art_bionic_memcpy(destination, source, length);
+}
+
 void* darwin_art_bionic_memmove(void* destination, const void* source, size_t length) {
   unsigned char* output = (unsigned char*)destination;
   const unsigned char* input = (const unsigned char*)source;
@@ -45,10 +51,22 @@ void* darwin_art_bionic_memmove(void* destination, const void* source, size_t le
   return destination;
 }
 
+void* darwin_art_bionic___memmove_chk(void* destination, const void* source,
+                                      size_t length, size_t destination_size) {
+  if (length > destination_size) __builtin_trap();
+  return darwin_art_bionic_memmove(destination, source, length);
+}
+
 void* darwin_art_bionic_memset(void* destination, int value, size_t length) {
   unsigned char* output = (unsigned char*)destination;
   for (size_t index = 0; index < length; ++index) output[index] = (unsigned char)value;
   return destination;
+}
+
+void* darwin_art_bionic___memset_chk(void* destination, int value,
+                                     size_t length, size_t destination_size) {
+  if (length > destination_size) __builtin_trap();
+  return darwin_art_bionic_memset(destination, value, length);
 }
 
 int darwin_art_bionic_strcmp(const char* left, const char* right) {
@@ -59,6 +77,24 @@ int darwin_art_bionic_strcmp(const char* left, const char* right) {
     ++b;
   }
   return *a == *b ? 0 : (*a < *b ? -1 : 1);
+}
+
+static unsigned char FoldAscii(unsigned char value) {
+  return value >= 'A' && value <= 'Z' ? (unsigned char)(value + ('a' - 'A'))
+                                      : value;
+}
+
+int darwin_art_bionic_strcasecmp(const char* left, const char* right) {
+  const unsigned char* a = (const unsigned char*)left;
+  const unsigned char* b = (const unsigned char*)right;
+  for (;;) {
+    const unsigned char folded_a = FoldAscii(*a);
+    const unsigned char folded_b = FoldAscii(*b);
+    if (folded_a != folded_b) return (int)folded_a - (int)folded_b;
+    if (*a == 0) return 0;
+    ++a;
+    ++b;
+  }
 }
 
 const char* darwin_art_bionic_strchr(const char* string, int value) {
@@ -73,6 +109,12 @@ size_t darwin_art_bionic_strlen(const char* string) {
   const char* end = string;
   while (*end != '\0') ++end;
   return (size_t)(end - string);
+}
+
+size_t darwin_art_bionic___strlen_chk(const char* string, size_t buffer_size) {
+  const size_t length = darwin_art_bionic_strlen(string);
+  if (length >= buffer_size) __builtin_trap();
+  return length;
 }
 
 int darwin_art_bionic_strncmp(const char* left, const char* right, size_t length) {
@@ -148,6 +190,50 @@ int darwin_art_bionic_atoi(const char* string) {
   return sign * value;
 }
 
+long darwin_art_bionic_atol(const char* string) {
+  while (*string == ' ' || *string == '\t' || *string == '\n' ||
+         *string == '\r' || *string == '\f' || *string == '\v') {
+    ++string;
+  }
+  int negative = 0;
+  if (*string == '-' || *string == '+') negative = *string++ == '-';
+  unsigned long value = 0;
+  while (*string >= '0' && *string <= '9') {
+    value = value * 10 + (unsigned long)(*string++ - '0');
+  }
+  return negative ? -(long)value : (long)value;
+}
+
+char* darwin_art_bionic_strcat(char* destination, const char* source) {
+  char* result = destination;
+  while (*destination != '\0') ++destination;
+  while ((*destination++ = *source++) != '\0') {}
+  return result;
+}
+
+char* darwin_art_bionic_strncat(char* destination, const char* source,
+                                size_t length) {
+  char* result = destination;
+  while (*destination != '\0') ++destination;
+  while (length != 0 && *source != '\0') {
+    *destination++ = *source++;
+    --length;
+  }
+  *destination = '\0';
+  return result;
+}
+
+char* darwin_art_bionic_strncpy(char* destination, const char* source,
+                                size_t length) {
+  char* result = destination;
+  while (length != 0 && *source != '\0') {
+    *destination++ = *source++;
+    --length;
+  }
+  while (length-- != 0) *destination++ = '\0';
+  return result;
+}
+
 void* darwin_art_bionic_bsearch(const void* key, const void* base, size_t count,
                                 size_t size, int (*compare)(const void*, const void*)) {
   const unsigned char* bytes = (const unsigned char*)base;
@@ -161,6 +247,46 @@ void* darwin_art_bionic_bsearch(const void* key, const void* base, size_t count,
     else low = middle + 1;
   }
   return NULL;
+}
+
+static void SwapElements(unsigned char* left, unsigned char* right,
+                         size_t size) {
+  if (left == right) return;
+  for (size_t index = 0; index < size; ++index) {
+    const unsigned char byte = left[index];
+    left[index] = right[index];
+    right[index] = byte;
+  }
+}
+
+static void SiftDown(unsigned char* bytes, size_t root, size_t count,
+                     size_t size, int (*compare)(const void*, const void*)) {
+  while (root < count / 2) {
+    size_t child = root * 2 + 1;
+    if (child + 1 < count &&
+        compare(bytes + child * size, bytes + (child + 1) * size) < 0) {
+      ++child;
+    }
+    if (compare(bytes + root * size, bytes + child * size) >= 0) return;
+    SwapElements(bytes + root * size, bytes + child * size, size);
+    root = child;
+  }
+}
+
+void darwin_art_bionic_qsort(void* base, size_t count, size_t size,
+                             int (*compare)(const void*, const void*)) {
+  if (count < 2 || size == 0) return;
+  if (base == NULL || compare == NULL || count > SIZE_MAX / size) {
+    __builtin_trap();
+  }
+  unsigned char* bytes = (unsigned char*)base;
+  for (size_t start = count / 2; start != 0; --start) {
+    SiftDown(bytes, start - 1, count, size, compare);
+  }
+  for (size_t end = count; end > 1; --end) {
+    SwapElements(bytes, bytes + (end - 1) * size, size);
+    SiftDown(bytes, 0, end - 1, size, compare);
+  }
 }
 
 wchar_t* darwin_art_bionic_wmemchr(const wchar_t* source, wchar_t value, size_t length) {
@@ -185,6 +311,31 @@ size_t darwin_art_bionic_wcslen(const wchar_t* string) {
   return (size_t)(end - string);
 }
 
+wchar_t* darwin_art_bionic_wmemcpy(wchar_t* destination,
+                                    const wchar_t* source, size_t length) {
+  for (size_t index = 0; index < length; ++index) destination[index] = source[index];
+  return destination;
+}
+
+wchar_t* darwin_art_bionic_wmemmove(wchar_t* destination,
+                                     const wchar_t* source, size_t length) {
+  if ((uintptr_t)destination <= (uintptr_t)source ||
+      (uintptr_t)destination - (uintptr_t)source >= length * sizeof(wchar_t)) {
+    return darwin_art_bionic_wmemcpy(destination, source, length);
+  }
+  while (length != 0) {
+    --length;
+    destination[length] = source[length];
+  }
+  return destination;
+}
+
+wchar_t* darwin_art_bionic_wmemset(wchar_t* destination, wchar_t value,
+                                    size_t length) {
+  for (size_t index = 0; index < length; ++index) destination[index] = value;
+  return destination;
+}
+
 static int NameCompare(const char* left, const char* right) {
   while (*left == *right && *left != '\0') {
     ++left;
@@ -196,19 +347,29 @@ static int NameCompare(const char* left, const char* right) {
 }
 
 static const DarwinArtBionicLeafBinding kBindings[] = {
+    {"__memcpy_chk", (DarwinArtBionicFunction)darwin_art_bionic___memcpy_chk},
+    {"__memmove_chk", (DarwinArtBionicFunction)darwin_art_bionic___memmove_chk},
+    {"__memset_chk", (DarwinArtBionicFunction)darwin_art_bionic___memset_chk},
+    {"__strlen_chk", (DarwinArtBionicFunction)darwin_art_bionic___strlen_chk},
     {"atoi", (DarwinArtBionicFunction)darwin_art_bionic_atoi},
+    {"atol", (DarwinArtBionicFunction)darwin_art_bionic_atol},
     {"bsearch", (DarwinArtBionicFunction)darwin_art_bionic_bsearch},
     {"memchr", (DarwinArtBionicFunction)darwin_art_bionic_memchr},
     {"memcmp", (DarwinArtBionicFunction)darwin_art_bionic_memcmp},
     {"memcpy", (DarwinArtBionicFunction)darwin_art_bionic_memcpy},
     {"memmove", (DarwinArtBionicFunction)darwin_art_bionic_memmove},
     {"memset", (DarwinArtBionicFunction)darwin_art_bionic_memset},
+    {"qsort", (DarwinArtBionicFunction)darwin_art_bionic_qsort},
+    {"strcasecmp", (DarwinArtBionicFunction)darwin_art_bionic_strcasecmp},
+    {"strcat", (DarwinArtBionicFunction)darwin_art_bionic_strcat},
     {"strchr", (DarwinArtBionicFunction)darwin_art_bionic_strchr},
     {"strcmp", (DarwinArtBionicFunction)darwin_art_bionic_strcmp},
     {"strcpy", (DarwinArtBionicFunction)darwin_art_bionic_strcpy},
     {"strcspn", (DarwinArtBionicFunction)darwin_art_bionic_strcspn},
     {"strlen", (DarwinArtBionicFunction)darwin_art_bionic_strlen},
+    {"strncat", (DarwinArtBionicFunction)darwin_art_bionic_strncat},
     {"strncmp", (DarwinArtBionicFunction)darwin_art_bionic_strncmp},
+    {"strncpy", (DarwinArtBionicFunction)darwin_art_bionic_strncpy},
     {"strpbrk", (DarwinArtBionicFunction)darwin_art_bionic_strpbrk},
     {"strrchr", (DarwinArtBionicFunction)darwin_art_bionic_strrchr},
     {"strspn", (DarwinArtBionicFunction)darwin_art_bionic_strspn},
@@ -216,6 +377,9 @@ static const DarwinArtBionicLeafBinding kBindings[] = {
     {"wcslen", (DarwinArtBionicFunction)darwin_art_bionic_wcslen},
     {"wmemchr", (DarwinArtBionicFunction)darwin_art_bionic_wmemchr},
     {"wmemcmp", (DarwinArtBionicFunction)darwin_art_bionic_wmemcmp},
+    {"wmemcpy", (DarwinArtBionicFunction)darwin_art_bionic_wmemcpy},
+    {"wmemmove", (DarwinArtBionicFunction)darwin_art_bionic_wmemmove},
+    {"wmemset", (DarwinArtBionicFunction)darwin_art_bionic_wmemset},
 };
 
 const DarwinArtBionicLeafBinding* darwin_art_bionic_libc_leaf_table(size_t* count) {

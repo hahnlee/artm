@@ -30,9 +30,13 @@ impl SymbolResolver for Resolver {
         &mut self,
         request: SymbolRequest<'_>,
     ) -> Result<Option<ResolvedSymbol>, ResolveError> {
+        let expected_version = match request.symbol {
+            "strtod_l" | "strtof_l" => "LIBC_O",
+            _ => "LIBC",
+        };
         let valid_version = request.version.is_some_and(|version| {
             version.soname == "libc.so"
-                && version.name == "LIBC"
+                && version.name == expected_version
                 && !version.hidden
                 && version.flags == 0
         });
@@ -51,11 +55,13 @@ impl SymbolResolver for Resolver {
                 .map(|function| function as usize)
         } else {
             // SAFETY: all strings remain alive during the fixed resolver call.
+            let version = CString::new(expected_version)
+                .map_err(|error| ResolveError::Rejected(error.to_string()))?;
             let pointer = unsafe {
                 darwin_art_bionic_float_conversion_resolve(
                     c"libc.so".as_ptr(),
                     name.as_ptr(),
-                    c"LIBC".as_ptr(),
+                    version.as_ptr(),
                 )
             };
             (!pointer.is_null()).then_some(pointer as usize)
@@ -88,11 +94,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("unsupported conversion escaped: {rejected}").into());
         }
     }
+    for supported in ["strtod_l", "strtof_l"] {
+        let name = CString::new(supported)?;
+        // SAFETY: fixed strings remain alive during the resolver call.
+        let address = unsafe {
+            darwin_art_bionic_float_conversion_resolve(
+                c"libc.so".as_ptr(),
+                name.as_ptr(),
+                c"LIBC_O".as_ptr(),
+            )
+        };
+        if address.is_null() {
+            return Err(format!("missing locale wrapper: {supported}").into());
+        }
+    }
     for supported in [
         "strtod-binary64",
         "strtof-binary32",
         "AOSP-gdtoa",
         "C-locale-only",
+        "locale-argument-ignored",
     ] {
         if !capability(supported)? {
             return Err(format!("missing capability: {supported}").into());
@@ -136,7 +157,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             assert!(worker.join().expect("float worker"));
         }
     });
-    let expected = ["__errno", "strtod", "strtof"]
+    let expected = ["__errno", "strtod", "strtod_l", "strtof", "strtof_l"]
         .into_iter()
         .map(str::to_owned)
         .collect();
@@ -144,7 +165,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("float import drift: {:?}", resolver.requested).into());
     }
     println!(
-        "bionic-float-conversion-facade: PASS AndroidELF=2+errno AOSP-gdtoa binary32+binary64 threads=8x500 host-errno+fenv=preserved long-double=rejected"
+        "bionic-float-conversion-facade: PASS AndroidELF=4+errno AOSP-gdtoa binary32+binary64 locale-ignored threads=8x500 host-errno+fenv=preserved long-double=rejected"
     );
     Ok(())
 }

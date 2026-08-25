@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "darwin_provider_owners.h"
+#include "darwin_jni_shorty.h"
 #include "darwin_art_bionic_builtin_adapters.h"
 #include "darwin_runtime_adapters_internal.h"
 #include "nativebridge/native_bridge.h"
@@ -25,6 +26,7 @@ namespace {
 extern "C" uintptr_t darwin_art_bionic_rust_provider_closure_anchor();
 
 void SetNativeLoaderError(char** error_msg, const std::string& message) {
+  std::cerr << "DARWIN native loader error: " << message << "\n";
   if (error_msg != nullptr) *error_msg = strdup(message.c_str());
 }
 
@@ -50,6 +52,46 @@ bool SplitTrustedLibraryPath(const char* path,
             slash == 0 ? "/" : bytes.substr(0, slash);
   component->assign(bytes.begin() + component_offset, bytes.end());
   return true;
+}
+
+void* OpenSelectedDarwinArtifact(const char* requested_path,
+                                 bool* selected,
+                                 char** error_msg) {
+  *selected = false;
+  const char* backend = std::getenv("DARWIN_ART_APK_NATIVE_BACKEND");
+  if (backend == nullptr || std::strcmp(backend, "darwin") != 0) return nullptr;
+  *selected = true;
+  const char* directory = std::getenv("DARWIN_ART_APK_DARWIN_DIRECTORY");
+  if (requested_path == nullptr || directory == nullptr || directory[0] != '/') {
+    SetNativeLoaderError(error_msg,
+                         "Rust selected Darwin native graph without an absolute directory");
+    return nullptr;
+  }
+  std::string ignored_parent;
+  std::vector<uint8_t> component;
+  if (!SplitTrustedLibraryPath(requested_path, &ignored_parent, &component) ||
+      component.size() <= 3 ||
+      std::memcmp(component.data() + component.size() - 3, ".so", 3) != 0) {
+    SetNativeLoaderError(error_msg,
+                         "Darwin native request has no direct Android SONAME");
+    return nullptr;
+  }
+  std::string leaf(component.begin(), component.end() - 3);
+  if (leaf.find('/') != std::string::npos || leaf.find('\\') != std::string::npos) {
+    SetNativeLoaderError(error_msg, "Darwin native request has an unsafe SONAME");
+    return nullptr;
+  }
+  const std::string dylib_path = std::string(directory) + "/" + leaf + ".dylib";
+  void* handle = dlopen(dylib_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (handle == nullptr) {
+    const char* message = dlerror();
+    SetNativeLoaderError(
+        error_msg,
+        message == nullptr ? "complete Darwin native graph failed to load" : message);
+    return nullptr;
+  }
+  std::cerr << "DARWIN native loader: complete graph root=" << dylib_path << "\n";
+  return handle;
 }
 
 struct DiscoveredGraphDeleter {
@@ -96,6 +138,42 @@ bool AttachNativeOwner(ElfLibrary* library,
   return true;
 }
 
+bool LoadAndroidUnwindProvider(ElfLibrary* library, std::string* error) {
+  const char* path = std::getenv("DARWIN_ART_ANDROID_UNWIND_PROVIDER");
+  if (path == nullptr || path[0] == '\0') return true;
+  if (path[0] != '/') {
+    *error = "Android unwind provider path is not absolute";
+    return false;
+  }
+  DarwinArtElfLoadOptions options{DARWIN_ART_ELF_ABI_VERSION,
+                                  &ResolveRuntimeProvider, library};
+  std::array<char, 1024> storage{};
+  DarwinArtElfErrorBuffer error_buffer{storage.data(), storage.size(), 0};
+  DarwinArtElfHandle* handle = nullptr;
+  DarwinArtElfStatus status =
+      darwin_art_elf_load_path(path, &options, &handle, &error_buffer);
+  if (status == DARWIN_ART_ELF_OK) {
+    status = darwin_art_elf_run_initializers(handle, &error_buffer);
+  }
+  if (status != DARWIN_ART_ELF_OK) {
+    if (handle != nullptr) {
+      std::array<char, 256> unload_storage{};
+      DarwinArtElfErrorBuffer unload_error{unload_storage.data(),
+                                            unload_storage.size(), 0};
+      (void)darwin_art_elf_unload(&handle, &unload_error);
+    }
+    *error = "Android unwind provider load failed: " +
+             ElfError(status, error_buffer);
+    return false;
+  }
+  library->android_unwind_provider = handle;
+  if (!AttachNativeOwner(library, kNativeOwnerAndroidUnwind, handle,
+                         &DropRuntimeAndroidUnwindProvider, error)) {
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 ElfLibrary* AsElfLibrary(void* handle) {
@@ -114,8 +192,33 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
                                     bool* needs_native_bridge,
                                     char** error_msg) {
   if (needs_native_bridge != nullptr) *needs_native_bridge = false;
-  const char* providers[] = {kDarwinArtElfJniHostProviderSoname, "libc.so",
-                             "libdl.so", "liblog.so", "libm.so"};
+  // Boot-classpath modules (for example Conscrypt) resolve JNI from their
+  // APEX namespace, not from an APK's nativeLibraryPath.  NativeLoader gives
+  // those requests a null class loader and may pass only the SONAME.  Map that
+  // narrow case into the immutable Android system-native directory so it can
+  // use the same fd-relative ELF graph discovery as APK libraries.
+  std::string system_native_path;
+  const char* resolved_path = path;
+  if (loader == nullptr && path != nullptr && std::strchr(path, '/') == nullptr &&
+      std::strchr(path, '\\') == nullptr) {
+    const char* system_directory =
+        std::getenv("DARWIN_ART_ANDROID_SYSTEM_NATIVE_DIR");
+    if (system_directory != nullptr && system_directory[0] == '/' &&
+        std::strstr(path, "..") == nullptr) {
+      system_native_path = std::string(system_directory) + "/" + path;
+      resolved_path = system_native_path.c_str();
+    }
+  }
+  bool selected_darwin = false;
+  void* selected_handle =
+      system_native_path.empty()
+          ? OpenSelectedDarwinArtifact(resolved_path, &selected_darwin, error_msg)
+          : nullptr;
+  if (selected_darwin) return selected_handle;
+  const char* providers[] = {
+      kDarwinArtElfJniHostProviderSoname, "libc.so",       "libdl.so",
+      "liblog.so",                       "libm.so",       "libEGL.so",
+      "libGLESv2.so",                    "libjnigraphics.so", "libz.so"};
   std::array<char, 1024> discovery_error_storage{};
   DarwinArtElfErrorBuffer discovery_error{discovery_error_storage.data(),
                                            discovery_error_storage.size(), 0};
@@ -125,7 +228,7 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
   std::string parent_path;
   std::vector<uint8_t> root_component;
   ScopedFd trusted_directory;
-  if (SplitTrustedLibraryPath(path, &parent_path, &root_component)) {
+  if (SplitTrustedLibraryPath(resolved_path, &parent_path, &root_component)) {
     ScopedFd opened_directory(open(parent_path.c_str(),
                                    O_RDONLY | O_DIRECTORY | O_CLOEXEC |
                                        O_NOFOLLOW));
@@ -240,6 +343,20 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
     if (library->fixture_graph) {
       g_elf_fixture_namespace_lifecycle.store(2, std::memory_order_relaxed);
     }
+    if (!darwin_art::providers::acquire_vm(&error)) {
+      SetNativeLoaderError(error_msg, "Bionic VM setup failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    if (!AttachNativeOwner(
+            library.get(), kNativeOwnerVm,
+            reinterpret_cast<void*>(
+                static_cast<uintptr_t>(darwin_art::providers::Kind::Vm)),
+            &DropRuntimeProviderKind, &error)) {
+      SetNativeLoaderError(error_msg, "Rust native owner VM slot failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     if (!darwin_art::providers::acquire_filesystem(trusted_directory.get(), &error)) {
       SetNativeLoaderError(error_msg, "Bionic filesystem setup failed: " + error);
       TeardownProviderNamespace(library.get());
@@ -324,6 +441,11 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
+    if (!LoadAndroidUnwindProvider(library.get(), &error)) {
+      SetNativeLoaderError(error_msg, error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
     DarwinArtElfLoadOptions options{DARWIN_ART_ELF_ABI_VERSION,
                                     &ResolveRuntimeProvider, library.get()};
     DarwinArtElfLifecycleCallbacks lifecycle{DARWIN_ART_ELF_ABI_VERSION,
@@ -341,6 +463,8 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
+    std::cerr << "DARWIN ELF loader: graph loaded root=" << root_soname
+              << " sources=" << source_count << "\n";
     if (!AttachNativeOwner(library.get(), kNativeOwnerGraph, library->graph,
                            &DropRuntimeElfGraph, &error)) {
       SetNativeLoaderError(error_msg, "Rust native owner graph slot failed: " + error);
@@ -355,8 +479,17 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       return nullptr;
     }
     if (library->fixture_graph) g_elf_fixture_namespace_lifecycle.store(3, std::memory_order_relaxed);
-    DarwinArtJniBackend backend{library.get(), &ProxyCurrentEnv, &ProxyFindClass,
-                                &ProxyRegisterNatives, &ProxyThrowNew};
+    JNIEnv* art_env = CurrentArtEnv();
+    if (art_env == nullptr || art_env->GetJavaVM(&library->art_vm) != JNI_OK ||
+        library->art_vm == nullptr) {
+      SetNativeLoaderError(error_msg, "Android JNI proxy could not retain ART JavaVM");
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    DarwinArtJniBackend backend{
+        library.get(), &ProxyCurrentEnv, &ProxyAttachCurrentThread,
+        &ProxyDetachCurrentThread, &ProxyFindClass, &ProxyRegisterNatives,
+        &ProxyThrowNew, &ProxyGetMethodId, &ProxyCallMethodV};
     library->proxy = darwin_art_jni_proxy_init(
         library->proxy_storage.data(), library->proxy_storage.size(), &backend);
     if (library->proxy == nullptr ||
@@ -394,14 +527,19 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       SetNativeLoaderError(error_msg, "Rust graph handle publication failed");
       return nullptr;
     }
+    std::cerr << "DARWIN ELF loader: published handle=" << graph_handle
+              << " JNI_OnLoad=" << reinterpret_cast<void*>(library_value->jni_on_load)
+              << "\n";
     return graph_handle;
   }
-  if (path != nullptr && root_is_elf != 0) {
+  if (resolved_path != nullptr && root_is_elf != 0) {
     SetNativeLoaderError(error_msg, "Android ELF discovery failed: " +
                                      ElfError(discovery_status, discovery_error));
     return nullptr;
   }
-  void* handle = path == nullptr ? nullptr : dlopen(path, RTLD_NOW | RTLD_LOCAL);
+  void* handle = resolved_path == nullptr
+                     ? nullptr
+                     : dlopen(resolved_path, RTLD_NOW | RTLD_LOCAL);
   if (handle == nullptr && error_msg != nullptr) {
     const char* message = dlerror();
     *error_msg = strdup(message == nullptr ? "Darwin native library load failed" : message);

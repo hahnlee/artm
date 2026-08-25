@@ -2,20 +2,24 @@
 
 _Static_assert(DARWIN_ART_FD_OWNER_ABI_V1 == 1 &&
                    DARWIN_ART_FD_OWNER_ABI_V2 == 2 &&
-                   DARWIN_ART_FD_OWNER_ABI_V3 == 3,
+                   DARWIN_ART_FD_OWNER_ABI_V3 == 3 &&
+                   DARWIN_ART_FD_OWNER_ABI_V4 == 4,
                "owner ABI drift");
 _Static_assert(DARWIN_ART_FD_FS_FILE == 1, "file kind drift");
 _Static_assert(DARWIN_ART_FD_FS_RANDOM == 2, "random kind drift");
 _Static_assert(DARWIN_ART_FD_STDIO == 3, "stdio kind drift");
 _Static_assert(DARWIN_ART_FD_SOCKET == 4, "socket kind drift");
 _Static_assert(DARWIN_ART_FD_EPOLL == 5, "epoll kind drift");
+_Static_assert(DARWIN_ART_FD_PIPE == 6, "pipe kind drift");
 _Static_assert(sizeof(((DarwinArtFdPollEntry *)0)->fd) == sizeof(int),
                "guest descriptor width drift");
 _Static_assert(offsetof(DarwinArtFdOwnerV1, read_at) == 56,
                "owner v1 prefix drift");
 _Static_assert(offsetof(DarwinArtFdOwnerV1, socket_operation) == 72,
                "owner v2 prefix drift");
-_Static_assert(sizeof(DarwinArtFdOwnerV1) == 80, "owner v3 size drift");
+_Static_assert(offsetof(DarwinArtFdOwnerV1, poll_many) == 80,
+               "owner v3 prefix drift");
+_Static_assert(sizeof(DarwinArtFdOwnerV1) == 88, "owner v4 size drift");
 _Static_assert(sizeof(DarwinArtFdSocketRequestV1) == 136,
                "socket request size drift");
 _Static_assert(offsetof(DarwinArtFdSocketRequestV1, address) == 16 &&
@@ -47,8 +51,12 @@ static DarwinArtFdBrokerStatus (*const socket_operation_signature)(
     DarwinArtFdBroker *, DarwinArtFdOwnerHandle, int,
     const DarwinArtFdSocketRequestV1 *,
     DarwinArtFdIoResult *) = darwin_art_fd_broker_socket_operation;
+static DarwinArtFdBrokerStatus (*const poll_wait_signature)(
+    DarwinArtFdBroker *, DarwinArtFdPollEntry *, size_t, int,
+    DarwinArtFdIoResult *) = darwin_art_fd_broker_poll_wait;
 
 int main(void) {
   return publish_signature == 0 || sendfile_signature == 0 ||
-         duplicate_with_flags_signature == 0 || socket_operation_signature == 0;
+         duplicate_with_flags_signature == 0 ||
+         socket_operation_signature == 0 || poll_wait_signature == 0;
 }

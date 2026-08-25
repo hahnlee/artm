@@ -91,6 +91,14 @@ static int ValidPosixAlignment(size_t alignment) {
   return alignment >= sizeof(void*) && (alignment & (alignment - 1)) == 0;
 }
 
+void* darwin_art_bionic_aligned_alloc(size_t alignment, size_t size) {
+  if (!ValidPosixAlignment(alignment) || size % alignment != 0) return NULL;
+  void* pointer = NULL;
+  const int backend_result = DarwinPosixMemalign(
+      &pointer, alignment, size == 0 ? alignment : size);
+  return backend_result == 0 ? pointer : NULL;
+}
+
 DarwinArtBionicAllocationResult darwin_art_bionic_posix_memalign_result(
     size_t alignment, size_t size) {
   if (!ValidPosixAlignment(alignment)) {
@@ -118,6 +126,24 @@ int darwin_art_bionic_posix_memalign(void** output, size_t alignment, size_t siz
   return result.bionic_errno;
 }
 
+void* darwin_art_bionic_memalign(size_t alignment, size_t size) {
+  void* result = NULL;
+  if (darwin_art_bionic_posix_memalign(&result, alignment, size) != 0) {
+    return NULL;
+  }
+  return result;
+}
+
+char* darwin_art_bionic_strdup(const char* source) {
+  if (source == NULL) return NULL;
+  size_t length = 0;
+  while (source[length] != '\0') ++length;
+  char* result = (char*)darwin_art_bionic_malloc(length + 1);
+  if (result == NULL) return NULL;
+  for (size_t index = 0; index <= length; ++index) result[index] = source[index];
+  return result;
+}
+
 static int NameCompare(const char* left, const char* right) {
   while (*left == *right && *left != '\0') {
     ++left;
@@ -129,6 +155,11 @@ static int NameCompare(const char* left, const char* right) {
 }
 
 static const DarwinArtBionicAllocatorBinding kBindings[] = {
+    {"aligned_alloc",
+     (DarwinArtBionicAllocatorFunction)darwin_art_bionic_aligned_alloc,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
+         DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
+         DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM},
     {"calloc", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_calloc,
      DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
          DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
@@ -148,12 +179,20 @@ static const DarwinArtBionicAllocatorBinding kBindings[] = {
     {"mallopt", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_mallopt,
      DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
          DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE},
+    {"memalign", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_memalign,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
+         DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
+         DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM},
     {"posix_memalign",
      (DarwinArtBionicAllocatorFunction)darwin_art_bionic_posix_memalign,
      DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
          DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
          DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE},
     {"realloc", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_realloc,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
+         DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
+         DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM},
+    {"strdup", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_strdup,
      DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
          DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
          DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM},

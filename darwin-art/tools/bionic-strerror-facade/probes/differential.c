@@ -40,8 +40,9 @@ static int Reference(int number, char* buffer, size_t size) {
 }
 
 int main(void) {
-  if (darwin_art_bionic_strerror_resolve("strerror_r") == NULL ||
-      darwin_art_bionic_strerror_resolve("strerror") != NULL ||
+  if (darwin_art_bionic_strerror_resolve("__gnu_strerror_r") == NULL ||
+      darwin_art_bionic_strerror_resolve("strerror_r") == NULL ||
+      darwin_art_bionic_strerror_resolve("strerror") == NULL ||
       darwin_art_bionic_strerror_resolve("strsignal") != NULL)
     return 1;
   for (int number = -256; number <= 512; ++number) {
@@ -57,6 +58,14 @@ int main(void) {
       if (errno != 1234 || actual_result != expected_result ||
           memcmp(expected, actual, sizeof(actual)) != 0)
         return 2;
+
+      memset(actual, 0x5a, sizeof(actual));
+      errno = 2345;
+      char* returned =
+          darwin_art_bionic___gnu_strerror_r(number, actual, size);
+      if (errno != 2345 || returned != actual ||
+          memcmp(expected, actual, sizeof(actual)) != 0)
+        return 3;
     }
   }
   return 0;

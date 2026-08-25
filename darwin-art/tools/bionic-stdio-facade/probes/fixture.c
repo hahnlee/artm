@@ -11,14 +11,16 @@ static int Equal(const unsigned char* a,const unsigned char* b,size_t n){for(siz
 
 __attribute__((visibility("default"))) int bionic_stdio_fixture_basic(void){
  FILE* in=&__sF[0];FILE* out=&__sF[1];FILE* err=&__sF[2];
+ if(stdin!=in||stdout!=out||stderr!=err)return 36;
+ setbuf(err,NULL);
  if(fileno(in)!=0||fileno(out)!=1||fileno(err)!=2)return 1;
  if(getc(in)!='i'||ungetc('Z',in)!='Z'||getc(in)!='Z'||getc(in)!='n')return 2;
- if(fputc('!',out)!='!'||fflush(out)!=0||fflush(NULL)!=0)return 3;
+ if(fputs("ok",err)<0||fputc('!',out)!='!'||ferror(out)!=0||ftell(out)!=1||fflush(out)!=0||fflush(NULL)!=0)return 3;
  FILE* f=fopen("/system/input.bin","rb");if(f==NULL||fileno(f)<20000)return 4;
  unsigned char b[8]={0};if(fread(b,2,2,f)!=2||!Equal(b,(const unsigned char*)"abcd",4)||ftello(f)!=4)return 5;
  if(getc(f)!='e'||ungetc('Q',f)!='Q'||getc(f)!='Q')return 6;
  if(fseek(f,0,SEEK_SET)!=0||getc(f)!='a')return 7;
- errno=0;if(fwrite("x",1,1,f)!=0||errno!=EBADF)return 8;
+ errno=0;if(fwrite("x",1,1,f)!=0||errno!=EBADF||ferror(f)==0)return 8;
  if(fclose(f)!=0)return 9;
  errno=0;if(getc(f)!=EOF||errno!=EBADF)return 10;
  f=fopen("/private/output.bin","w+b");if(f==NULL)return 11;

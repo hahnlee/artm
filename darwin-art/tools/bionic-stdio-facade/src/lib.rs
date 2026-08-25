@@ -1,6 +1,7 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 use std::collections::BTreeMap;
 use std::ffi::{CStr, c_char, c_int, c_void};
+use std::io::Write;
 use std::ptr;
 use std::slice;
 use std::sync::{Arc, Condvar, Mutex, OnceLock, RwLock};
@@ -160,12 +161,18 @@ impl Provider {
         })
     }
     pub fn stdout_bytes(&self) -> Vec<u8> {
+        self.standard_stream_bytes(1)
+    }
+    pub fn stderr_bytes(&self) -> Vec<u8> {
+        self.standard_stream_bytes(2)
+    }
+    fn standard_stream_bytes(&self, index: usize) -> Vec<u8> {
         let base = ptr::addr_of_mut!(darwin_art_bionic___sF).cast::<AndroidFile>() as usize;
         self.table
             .lock()
             .unwrap()
             .streams
-            .get(&(base + 152))
+            .get(&(base + 152 * index))
             .map(|s| s.data.clone())
             .unwrap_or_default()
     }
@@ -803,7 +810,8 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fwrite_core(
         return 0;
     }
     let input = unsafe { slice::from_raw_parts(b.cast::<u8>(), total) };
-    with_stream(f, 0, |s| {
+    let mut mirror_stderr = false;
+    let written = with_stream(f, 0, |s| {
         orient_byte(s);
         if !s.writable {
             s.error = true;
@@ -827,8 +835,13 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fwrite_core(
         }
         s.data[s.position..end].copy_from_slice(input);
         s.position = end;
+        mirror_stderr = s.fd == 2;
         count
-    })
+    });
+    if written == count && mirror_stderr {
+        let _ = std::io::stderr().write_all(input);
+    }
+    written
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_stdio_fseek_core(
@@ -993,4 +1006,14 @@ pub extern "C" fn darwin_art_bionic_stdio_ungetc_core(c: c_int, f: *mut AndroidF
         s.eof = false;
         v as i32
     })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_stdio_feof_core(f: *mut AndroidFile) -> c_int {
+    with_stream(f, 0, |stream| i32::from(stream.eof))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_stdio_ferror_core(f: *mut AndroidFile) -> c_int {
+    with_stream(f, 0, |stream| i32::from(stream.error))
 }

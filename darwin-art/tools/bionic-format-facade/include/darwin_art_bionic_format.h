@@ -11,6 +11,8 @@ extern "C" {
 typedef void (*DarwinArtBionicFormatFunction)(void);
 
 int darwin_art_bionic_snprintf(char* dst, size_t size, const char* format, ...);
+int darwin_art_bionic_sprintf(char* dst, const char* format, ...);
+int darwin_art_bionic_asprintf(char** output, const char* format, ...);
 int darwin_art_bionic_vsnprintf(char* dst, size_t size, const char* format,
                                 const void* android_va_list);
 int darwin_art_bionic_vasprintf(char** output, const char* format,

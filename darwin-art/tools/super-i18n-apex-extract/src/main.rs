@@ -11,7 +11,7 @@ const LP_HEADER_MAGIC: u32 = 0x414c_5030;
 const EROFS_MAGIC: u32 = 0xe0f5_e1e2;
 const DEFAULT_APEX_NAME: &str = "com.android.i18n.apex";
 const MAX_TABLE_BYTES: usize = 1024 * 1024;
-const MAX_APEX_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_TARGET_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_PCLUSTER_BYTES: usize = 1024 * 1024;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -467,20 +467,24 @@ impl<'a> Erofs<'a> {
         ))
         .into())
     }
-    fn target(&mut self, apex_name: &str) -> Result<Inode> {
-        if apex_name.is_empty()
-            || apex_name == "."
-            || apex_name == ".."
-            || apex_name.as_bytes().contains(&b'/')
+    fn target_path(&mut self, path: &str) -> Result<Inode> {
+        if !path.starts_with('/') || path.ends_with('/') || path.contains("//") {
+            return Err(invalid("target path must be absolute and normalized").into());
+        }
+        let components: Vec<&str> = path.split('/').skip(1).collect();
+        if components.is_empty()
+            || components
+                .iter()
+                .any(|component| component.is_empty() || *component == "." || *component == "..")
         {
-            return Err(invalid("target APEX name must be one normalized path component").into());
+            return Err(invalid("target path must contain normalized components").into());
         }
         let mut inode = self.inode(self.root)?;
-        for component in [b"system".as_slice(), b"apex".as_slice(), apex_name.as_bytes()] {
-            inode = self.child(&inode, component)?;
+        for component in components {
+            inode = self.child(&inode, component.as_bytes())?;
         }
         if inode.mode & 0xf000 != 0x8000 {
-            return Err(invalid("target APEX is not regular").into());
+            return Err(invalid("target path is not a regular file").into());
         }
         Ok(inode)
     }
@@ -663,9 +667,23 @@ fn extract(
     fs: &mut Erofs<'_>,
     inode: &Inode,
     output_path: &Path,
+    expected_prefix: Option<&[u8]>,
 ) -> Result<(u64, [u8; 32], usize)> {
-    if inode.layout != 3 || inode.size == 0 || inode.size > MAX_APEX_BYTES {
+    if inode.size == 0 || inode.size > MAX_TARGET_BYTES {
         return Err(invalid("unsupported target EROFS layout or size").into());
+    }
+    if inode.layout != 3 {
+        let decoded = fs.flat_data(inode, MAX_TARGET_BYTES)?;
+        if expected_prefix.is_some_and(|prefix| !decoded.starts_with(prefix)) {
+            return Err(invalid("target file has an unexpected format").into());
+        }
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(output_path)?;
+        output.write_all(&decoded)?;
+        output.sync_all()?;
+        return Ok((decoded.len() as u64, sha256(&decoded), 0));
     }
     let header_pos = align(
         add(
@@ -762,8 +780,8 @@ fn extract(
         physical_blocks = physical_blocks
             .checked_add(extent_blocks as u64)
             .ok_or_else(|| invalid("physical block count overflow"))?;
-        if written == 0 && decoded.get(..4) != Some(b"PK\x03\x04") {
-            return Err(invalid("target is not an APEX ZIP").into());
+        if written == 0 && expected_prefix.is_some_and(|prefix| !decoded.starts_with(prefix)) {
+            return Err(invalid("target file has an unexpected format").into());
         }
         output.write_all(&decoded)?;
         hasher.update(&decoded);
@@ -899,7 +917,7 @@ fn run() -> Result<()> {
     let program = args.next().unwrap_or_default();
     let input = args.next().map(PathBuf::from).ok_or_else(|| {
         invalid(format!(
-            "usage: {} INPUT-system.img OUTPUT.apex [APEX_NAME]",
+            "usage: {} INPUT-system.img OUTPUT [APEX_NAME | --path INTERNAL_PATH]",
             PathBuf::from(program).display()
         ))
     })?;
@@ -907,10 +925,27 @@ fn run() -> Result<()> {
         .next()
         .map(PathBuf::from)
         .ok_or_else(|| invalid("missing OUTPUT.apex"))?;
-    let apex_name = args
-        .next()
-        .and_then(|value| value.into_string().ok())
-        .unwrap_or_else(|| DEFAULT_APEX_NAME.to_owned());
+    let selector = args.next().and_then(|value| value.into_string().ok());
+    let (target_path, expected_prefix) = if selector.as_deref() == Some("--path") {
+        let path = args
+            .next()
+            .and_then(|value| value.into_string().ok())
+            .ok_or_else(|| invalid("--path requires an internal absolute path"))?;
+        (path, None)
+    } else {
+        let apex_name = selector.unwrap_or_else(|| DEFAULT_APEX_NAME.to_owned());
+        if apex_name.is_empty()
+            || apex_name == "."
+            || apex_name == ".."
+            || apex_name.as_bytes().contains(&b'/')
+        {
+            return Err(invalid("target APEX name must be one normalized path component").into());
+        }
+        (
+            format!("/system/apex/{apex_name}"),
+            Some(b"PK\x03\x04".as_slice()),
+        )
+    };
     if args.next().is_some() {
         return Err(invalid("too many arguments").into());
     }
@@ -925,8 +960,8 @@ fn run() -> Result<()> {
         bytes: 0,
     };
     let mut fs = Erofs::open(view)?;
-    let inode = fs.target(&apex_name)?;
-    let (bytes, digest, pclusters) = extract(&mut fs, &inode, &output)?;
+    let inode = fs.target_path(&target_path)?;
+    let (bytes, digest, pclusters) = extract(&mut fs, &inode, &output, expected_prefix)?;
     println!(
         "super-i18n-apex-extract: input={} output={}",
         input.display(),
@@ -948,7 +983,7 @@ fn run() -> Result<()> {
         fs.block, fs.incompat, inode.nid, inode.compressed_blocks, pclusters
     );
     println!(
-        "target.path=/system/apex/{apex_name} target.bytes={bytes} target.sha256={}",
+        "target.path={target_path} target.bytes={bytes} target.sha256={}",
         hex(&digest),
     );
     println!(

@@ -13,6 +13,9 @@ pub extern "C" fn darwin_art_bionic_rust_provider_closure_anchor() -> usize {
         | (bionic_process_state_facade::darwin_art_bionic_process_getauxval_core as usize)
         | (bionic_stdio_facade::darwin_art_bionic_stdio_fclose_core as usize)
         | (bionic_dso_lifecycle_facade::darwin_art_bionic_dso_cxa_finalize_core as usize)
+        | (bionic_vm_facade::darwin_art_bionic_vm_mmap_core as usize)
+        | (bionic_vm_facade::darwin_art_bionic_vm_process_install as usize)
+        | (android_dso_namespace::darwin_art_bionic_dlopen as usize)
 }
 
 #[allow(dead_code)]

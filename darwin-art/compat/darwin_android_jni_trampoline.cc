@@ -3,7 +3,6 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include <array>
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
@@ -19,8 +18,8 @@
 namespace darwin_art::android_jni {
 namespace {
 
-constexpr size_t kRegistryCapacity = 8;
-constexpr size_t kMaxRequests = 32;
+constexpr size_t kMaxRequests = 4096;
+constexpr size_t kMaxExecutableBytes = 16u * 1024u * 1024u;
 constexpr size_t kMaxShortyLength = 256;
 constexpr size_t kDarwinSavedFrameSize = 16;
 constexpr size_t kInstructionSize = sizeof(uint32_t);
@@ -49,7 +48,10 @@ struct ShortyPlan {
   size_t android_stack_size = 0;
 };
 
-std::array<RegistryEntry, kRegistryCapacity> g_registry;
+// Android libraries commonly register one native table per Java class. Keep
+// the executable-range registry proportional to the loaded app instead of
+// imposing an artificial per-process class limit.
+std::vector<RegistryEntry> g_registry;
 std::mutex g_registry_mutex;
 std::atomic<uint64_t> g_next_generation{1};
 std::atomic<size_t> g_live_count{0};
@@ -214,7 +216,8 @@ bool Publish(const RegistryEntry& entry) {
       return true;
     }
   }
-  return false;
+  g_registry.push_back(entry);
+  return true;
 }
 
 void Unpublish(const RegistryEntry& entry) {
@@ -320,15 +323,22 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
   }
 
   const long page_size_result = sysconf(_SC_PAGESIZE);
-  if (page_size_result <= 0 ||
-      generated_size > static_cast<size_t>(page_size_result)) {
+  if (page_size_result <= 0 || generated_size == 0 ||
+      generated_size > kMaxExecutableBytes) {
     if (error != nullptr) {
-      *error = "generated regular JNI thunks exceed one executable page";
+      *error = "generated regular JNI thunks exceed executable mapping limit";
     }
     return nullptr;
   }
   const size_t page_size = static_cast<size_t>(page_size_result);
-  void* mapping = mmap(nullptr, page_size, PROT_READ | PROT_WRITE,
+  const size_t mapping_size = RoundUp(generated_size, page_size);
+  if (mapping_size < generated_size || mapping_size > kMaxExecutableBytes) {
+    if (error != nullptr) {
+      *error = "round regular JNI trampoline mapping size";
+    }
+    return nullptr;
+  }
+  void* mapping = mmap(nullptr, mapping_size, PROT_READ | PROT_WRITE,
                        MAP_PRIVATE | MAP_ANON, -1, 0);
   if (mapping == MAP_FAILED) {
     if (error != nullptr) {
@@ -381,7 +391,7 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
       if (error != nullptr) {
         *error = "internal regular JNI thunk layout mismatch";
       }
-      munmap(mapping, page_size);
+      munmap(mapping, mapping_size);
       return nullptr;
     }
     Write64(bytes, proxy_literal, reinterpret_cast<uintptr_t>(proxy_jni_env));
@@ -392,11 +402,11 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
 
   __builtin___clear_cache(reinterpret_cast<char*>(mapping),
                           reinterpret_cast<char*>(mapping) + generated_size);
-  if (mprotect(mapping, page_size, PROT_READ | PROT_EXEC) != 0) {
+  if (mprotect(mapping, mapping_size, PROT_READ | PROT_EXEC) != 0) {
     if (error != nullptr) {
       *error = ErrnoMessage("mprotect regular JNI trampoline page RX");
     }
-    munmap(mapping, page_size);
+    munmap(mapping, mapping_size);
     return nullptr;
   }
 
@@ -405,12 +415,12 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
     if (error != nullptr) {
       *error = "allocate regular JNI trampoline owner";
     }
-    munmap(mapping, page_size);
+    munmap(mapping, mapping_size);
     return nullptr;
   }
   const uintptr_t start = reinterpret_cast<uintptr_t>(mapping);
   trampolines->mapping = mapping;
-  trampolines->mapping_size = page_size;
+  trampolines->mapping_size = mapping_size;
   trampolines->requested_entries.reserve(request_count);
   trampolines->registry.start = start;
   trampolines->registry.end = start + generated_size;
@@ -429,7 +439,7 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
     if (error != nullptr) {
       *error = "publish regular JNI trampoline range";
     }
-    munmap(mapping, page_size);
+    munmap(mapping, mapping_size);
     delete trampolines;
     return nullptr;
   }

@@ -8,6 +8,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 
 #include <cstddef>
+#include <atomic>
 
 @interface DarwinArtMetalView : NSView
 @property(nonatomic, readonly) CAMetalLayer* metalLayer;
@@ -40,6 +41,14 @@ struct DarwinArtSurface {
   bool visible = false;
   bool producer_mapped = false;
   void* gpu_state = nullptr;
+  // Geometry and publication state for a SurfaceView whose EGL producer
+  // renders directly into io_surface.  The Android GL thread publishes only
+  // after eglWaitGL(), while the HWUI/Metal thread samples the same texture.
+  std::atomic<int32_t> embedded_surface_x{0};
+  std::atomic<int32_t> embedded_surface_y{0};
+  std::atomic<uint32_t> embedded_surface_width{0};
+  std::atomic<uint32_t> embedded_surface_height{0};
+  std::atomic<uint64_t> embedded_surface_frame{0};
 
   ~DarwinArtSurface();
 };

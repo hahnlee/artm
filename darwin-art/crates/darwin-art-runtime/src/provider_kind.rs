@@ -15,6 +15,7 @@ pub enum ProviderKind {
     Ioctl = 4,
     Strftime = 5,
     Sendfile = 6,
+    Vm = 7,
 }
 
 impl ProviderKind {
@@ -38,6 +39,7 @@ impl TryFrom<u32> for ProviderKind {
             4 => Ok(Self::Ioctl),
             5 => Ok(Self::Strftime),
             6 => Ok(Self::Sendfile),
+            7 => Ok(Self::Vm),
             _ => Err(()),
         }
     }
@@ -52,6 +54,7 @@ mod tests {
         assert_eq!(ProviderKind::Filesystem.raw(), 1);
         assert_eq!(ProviderKind::Sendfile.raw(), 6);
         assert!(ProviderKind::try_from(0).is_err());
-        assert!(ProviderKind::try_from(7).is_err());
+        assert_eq!(ProviderKind::Vm.raw(), 7);
+        assert!(ProviderKind::try_from(8).is_err());
     }
 }

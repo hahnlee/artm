@@ -401,6 +401,11 @@ darwin_shared_object="$object_dir/platform_darwin_utils_SharedLib.o"
 compile_cached "platform/darwin/utils/SharedLib.cpp" \
   "$patched_hwui/platform/darwin/utils/SharedLib.cpp" "$darwin_shared_object"
 objects+=("$darwin_shared_object")
+android_bitmap_provider_object="$object_dir/darwin_android_bitmap_provider.o"
+compile_cached "compat/darwin_android_bitmap_provider.cc" \
+  "$project_root/compat/darwin_android_bitmap_provider.cc" \
+  "$android_bitmap_provider_object"
+objects+=("$android_bitmap_provider_object")
 
 jni_archive="$build_dir/libandroid-graphics-jni-darwin.a"
 registrar_archive="$build_dir/libandroid-graphics-layoutlib-registrar-darwin.a"
@@ -408,7 +413,7 @@ rm -f "$jni_archive" "$registrar_archive"
 "$ar" rcs "$jni_archive" "${objects[@]}"
 "$ar" rcs "$registrar_archive" "$registrar_object"
 jni_members="$({ "$ar" -t "$jni_archive" || true; } | grep -v '^__\.SYMDEF' | wc -l | tr -d ' ')"
-[[ "$jni_members" == 61 ]] || { echo "android-graphics-jni: JNI archive member count=$jni_members expected=61" >&2; exit 3; }
+[[ "$jni_members" == 62 ]] || { echo "android-graphics-jni: JNI archive member count=$jni_members expected=62" >&2; exit 3; }
 
 combined_object="$build_dir/android-graphics-jni-force-loaded.o"
 "$cxx" -r -arch arm64 -Wl,-force_load,"$registrar_archive" \

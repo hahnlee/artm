@@ -74,6 +74,16 @@ __attribute__((visibility("default"))) int bionic_float_fixture_basic(void) {
   if (DoubleBits(strtod(input, &end)) != UINT64_C(0x3ff0000000000000) ||
       Offset(input, end) != 1)
     return 11;
+  input = "2.5tail";
+  if (DoubleBits(strtod_l(input, &end, (locale_t)(uintptr_t)0x12345)) !=
+          UINT64_C(0x4004000000000000) ||
+      Offset(input, end) != 3)
+    return 12;
+  input = "3.25tail";
+  if (FloatBits(strtof_l(input, &end, (locale_t)(uintptr_t)0x54321)) !=
+          UINT32_C(0x40500000) ||
+      Offset(input, end) != 4)
+    return 13;
   return 42;
 }
 

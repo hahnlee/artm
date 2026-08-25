@@ -467,6 +467,11 @@ bool render_node_to_surface(
   android::uirenderer::skiapipeline::RenderNodeDrawable drawable(
       node, canvas, false);
   drawable.forceDraw(canvas);
+  // SurfaceView content is produced by the APK's ordinary EGL/GL thread into
+  // the host IOSurface. Composite that same Metal texture after HWUI paints
+  // the framework's SurfaceView hole, matching SurfaceFlinger's layer order
+  // without a readback or staging copy.
+  darwin_art_surface_gpu_composite_embedded(surface, canvas);
   // The framework display list owns the opaque SurfaceView/TextureView
   // placeholder and may paint its white background. Replay the APK's native
   // Skottie content once more after that display list so the animation is the

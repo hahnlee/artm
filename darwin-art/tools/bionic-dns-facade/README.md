@@ -1,9 +1,9 @@
 # Bionic DNS facade
 
 This standalone provider owns the minimum coherent Bionic name/address cluster:
-`getaddrinfo`, `freeaddrinfo`, `gai_strerror`, and `getnameinfo` under the exact
-`libc.so`/`LIBC` namespace. A real NDK r28c/API-35 Android AArch64 ELF exercises
-all four imports through the repository ELF loader. Resolution is closed; no
+`getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `getnameinfo`, and `inet_ntop`
+under the exact `libc.so`/`LIBC` namespace. A real NDK r28c/API-35 Android
+AArch64 ELF exercises all five imports through the repository ELF loader. Resolution is closed; no
 dyld, `dlsym`, legacy `gethostbyname`, or alternate SONAME path exists.
 
 ## Closed policy
@@ -28,6 +28,10 @@ host/service flags for whichever outputs are requested. It translates the
 address to Darwin and returns numeric reverse text only. `NI_DGRAM` is mapped;
 name-requiring flags and a request without `NI_NUMERICHOST` return a Bionic EAI
 failure instead of entering host PTR or mDNS policy.
+
+`inet_ntop` translates Android `AF_INET6=10` to Darwin `AF_INET6=30` before
+using the BSD numeric formatter; address bytes and caller-buffer ownership are
+unchanged. Host failures are translated into the Bionic errno cell.
 
 ## ABI and ownership
 
@@ -59,7 +63,7 @@ numbers, and `gai_strerror` returns provider-owned static Android messages.
 `audit.sh` SHA-pins the exact NDK netdb/socket headers plus AOSP Bionic
 `getaddrinfo`, `getnameinfo`, netdb, and public ABI sources. It statically
 asserts Android/Darwin constants, sizes, and offsets, verifies that the actual
-fixture has exactly four `@LIBC` imports, and rejects dynamic lookup. Runtime
+fixture has exactly five `@LIBC` imports, and rejects dynamic lookup. Runtime
 tests cover localhost, passive wildcard, numeric IPv4/IPv6, numeric reverse,
 closed external/name-service policy, result ownership, duplicate concurrent
 free with an active reader, host errno preservation, and quiescent reclamation

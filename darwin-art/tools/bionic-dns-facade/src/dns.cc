@@ -83,6 +83,7 @@ int32_t AndroidErrno(int error) {
     case ERANGE: return 34;
     case ENOSYS: return 38;
     case EOVERFLOW: return 75;
+    case EAFNOSUPPORT: return 97;
     default: return 5;
   }
 }
@@ -486,6 +487,21 @@ extern "C" int darwin_art_bionic_dns_getnameinfo(
   return AndroidEai(status);
 }
 
+extern "C" const char* darwin_art_bionic_dns_inet_ntop(
+    int family, const void* address, char* output, uint32_t output_length) {
+  PreserveErrno preserve;
+  int host_family = 0;
+  if (!TranslateFamilyToHost(family, &host_family) ||
+      host_family == AF_UNSPEC) {
+    darwin_art_bionic_errno_store(97);
+    return nullptr;
+  }
+  const char* result =
+      inet_ntop(host_family, address, output, static_cast<socklen_t>(output_length));
+  if (result == nullptr) darwin_art_bionic_errno_store(AndroidErrno(errno));
+  return result;
+}
+
 extern "C" DarwinArtBionicDnsFunction darwin_art_bionic_dns_resolve(
     const char* soname, const char* symbol, const char* version) {
   if (soname == nullptr || symbol == nullptr || version == nullptr ||
@@ -501,6 +517,7 @@ extern "C" DarwinArtBionicDnsFunction darwin_art_bionic_dns_resolve(
   DNS_SYMBOL(freeaddrinfo);
   DNS_SYMBOL(gai_strerror);
   DNS_SYMBOL(getnameinfo);
+  DNS_SYMBOL(inet_ntop);
 #undef DNS_SYMBOL
   return nullptr;
 }
@@ -511,6 +528,7 @@ extern "C" const char* darwin_art_bionic_dns_capability(
   if (std::strcmp(capability, "localhost-numeric-policy") == 0 ||
       std::strcmp(capability, "android-addrinfo-deep-copy") == 0 ||
       std::strcmp(capability, "numeric-reverse") == 0 ||
+      std::strcmp(capability, "numeric-presentation") == 0 ||
       std::strcmp(capability, "retire-then-quiescent-reclaim") == 0) {
     return "supported";
   }

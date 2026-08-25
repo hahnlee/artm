@@ -10,6 +10,8 @@ members = [
     "crates/darwin-art-engine",
     "crates/darwin-art-runtime",
     "crates/darwin-art-build-contract",
+    "crates/darwin-art-apk-install",
+    "crates/darwin-art-native-artifact",
     "crates/darwin-art-xtask",
 ]
 default-members = ["crates/art-bootstrap", "crates/darwin-art-host", "crates/darwin-art-prefix"]

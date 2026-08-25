@@ -63,7 +63,10 @@ extern "C" uintptr_t darwin_art_liblog_provider_address(uint32_t ordinal) {
 
 extern "C" uintptr_t darwin_art_liblog_provider_resolve(const char* symbol,
                                                           const char* version) {
-  if (symbol == nullptr || (version != nullptr && version[0] != '\0')) return 0;
+  if (symbol == nullptr ||
+      (version != nullptr && version[0] != '\0' &&
+       std::strcmp(version, "LIBLOG") != 0))
+    return 0;
   for (const Entry& entry : kEntries) {
     if (std::strcmp(entry.name, symbol) == 0) return entry.address;
   }

@@ -5,6 +5,7 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -32,6 +33,16 @@ struct HttpFixtureResult {
   int32_t last_android_errno;
   uint32_t response_length;
   char response[256];
+};
+
+struct PipeFixtureResult {
+  int32_t empty_ready;
+  int32_t readable_ready;
+  int32_t read_revents;
+  int32_t last_android_errno;
+  intptr_t write_count;
+  intptr_t read_count;
+  uint8_t value;
 };
 
 void Check(bool condition, const char *message) {
@@ -112,6 +123,16 @@ extern "C" int darwin_art_bionic_fs_close_core(int) {
   return -1;
 }
 
+extern "C" intptr_t darwin_art_bionic_fs_read_core(int, void *, size_t) {
+  darwin_art_bionic_errno_store(9);
+  return -1;
+}
+
+extern "C" intptr_t darwin_art_bionic_fs_write_core(int, const void *, size_t) {
+  darwin_art_bionic_errno_store(9);
+  return -1;
+}
+
 int main(int argc, char **argv) {
   if (argc != 2)
     return 10;
@@ -170,6 +191,20 @@ int main(int argc, char **argv) {
             std::strstr(result.response, "\r\n\r\nHELLO") != nullptr,
         "Android ELF loopback HTTP through broker");
   server.join();
+  address_value = 0;
+  Check(darwin_art_elf_lookup(image, "PipeFixtureRoundTrip", &address_value,
+                              &error) == DARWIN_ART_ELF_OK &&
+            address_value != 0,
+        "lookup Android pipe/poll function");
+  using PipeRoundTrip = int (*)(PipeFixtureResult *);
+  PipeFixtureResult pipe_result{};
+  auto pipe_round_trip = reinterpret_cast<PipeRoundTrip>(address_value);
+  Check(pipe_round_trip(&pipe_result) == 0 && pipe_result.empty_ready == 0 &&
+            pipe_result.readable_ready == 1 &&
+            (pipe_result.read_revents & POLLIN) != 0 &&
+            pipe_result.write_count == 1 && pipe_result.read_count == 1 &&
+            pipe_result.value == 0xa5,
+        "Android ELF pipe/read/write/blocking-poll round trip");
   Check(darwin_art_bionic_socket_broker_live_objects() == 0,
         "all central socket objects closed");
   Check(darwin_art_bionic_socket_broker_close(123) == -1,
@@ -241,7 +276,8 @@ int main(int argc, char **argv) {
         "DNS free drains before reset and deactivate");
   std::fprintf(stderr,
                "bionic-socket-broker-adapter: PASS Android-ELF=yes "
-               "HTTP=127.0.0.1 central-token=yes owner=v3 close=generic "
+               "HTTP=127.0.0.1 pipe-poll=blocking central-token=yes owner=v4 "
+               "close=generic "
                "DNS=retired deactivate-race=100 host-errno=preserved "
                "Internet=no\n");
   return 0;

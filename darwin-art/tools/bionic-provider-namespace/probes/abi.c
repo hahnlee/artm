@@ -1,7 +1,7 @@
 #include "darwin_art_bionic_builtin_adapters.h"
 #include "darwin_art_bionic_provider_namespace.h"
 
-_Static_assert(DARWIN_ART_BIONIC_PROVIDER_COUNT == 33, "provider count");
+_Static_assert(DARWIN_ART_BIONIC_PROVIDER_COUNT == 34, "provider count");
 _Static_assert(sizeof(uintptr_t) == sizeof(void *), "address width");
 
 int main(void) {

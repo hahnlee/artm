@@ -31,6 +31,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     run_upstream_gates: bool,
     incremental: bool,
 ) -> Result<()> {
+    let elf_loader = build_elf_loader(root)?;
     run_command(
         Command::new("bash")
             .arg(root.join("tools/android-managed-native-load/audit.sh"))
@@ -409,6 +410,15 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_attach")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_lookup")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_destroy")
+        // libjnigraphics is a virtual Android platform DSO. Keep its fixed C
+        // ABI entry points dynamically visible so the ELF provider resolver
+        // can bind AndroidBitmap_* without manufacturing a host dylib.
+        .arg("-Wl,-u,_AndroidBitmap_getInfo")
+        .arg("-Wl,-u,_AndroidBitmap_lockPixels")
+        .arg("-Wl,-u,_AndroidBitmap_unlockPixels")
+        .arg("-Wl,-exported_symbol,_AndroidBitmap_getInfo")
+        .arg("-Wl,-exported_symbol,_AndroidBitmap_lockPixels")
+        .arg("-Wl,-exported_symbol,_AndroidBitmap_unlockPixels")
         .arg("-Wl,-dead_strip")
         .arg(format!("-Wl,-map,{}", link_map.display()))
         .arg(&object)
@@ -472,7 +482,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
             ),
         )
         .arg(root.join("_build/icu-foundation/libandroidicuinit-darwin.a"))
-        .arg(root.join("crates/darwin-art-elf-loader/target/release/libdarwin_art_elf_loader.a"))
+        .arg(&elf_loader)
         .arg(format!(
             "-Wl,-force_load,{}",
             runtime_native_owner_archive.display()

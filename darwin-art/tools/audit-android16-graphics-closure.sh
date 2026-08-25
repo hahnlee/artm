@@ -69,10 +69,10 @@ fi
 # force-load module ownership; N means normal provider extraction.
 archive_specs=(
   'F|1|_build/android-graphics-jni/libandroid-graphics-layoutlib-registrar-darwin.a'
-  'F|61|_build/android-graphics-jni/libandroid-graphics-jni-darwin.a'
+  'F|62|_build/android-graphics-jni/libandroid-graphics-jni-darwin.a'
   'F|81|_build/hwui-static-foundation/libhwui-static-darwin.a'
   'F|5|_build/hwui-static-foundation/libandroid-graphics-apex-common-darwin.a'
-  'F|523|_build/skia-hwui-force-load/libskia.a'
+  'F|528|_build/skia-hwui-force-load/libskia.a'
   'N|2|_build/skia-hwui-force-load/libskcms.a'
   'N|36|_build/androidfw-foundation/libandroidfw-darwin.a'
   'N|5|_build/hostgraphics/libhostgraphics-darwin.a'

@@ -56,6 +56,51 @@ intptr_t darwin_art_bionic_read(int fd, void* buffer, size_t count) {
   return result;
 }
 
+intptr_t darwin_art_bionic_write(int fd, const void* buffer, size_t count) {
+  const int saved_host_errno = errno;
+  const intptr_t result = darwin_art_bionic_fs_write_core(fd, buffer, count);
+  errno = saved_host_errno;
+  return result;
+}
+
+int64_t darwin_art_bionic_lseek(int fd, int64_t offset, int whence) {
+  const int saved_host_errno = errno;
+  const int64_t result = darwin_art_bionic_fs_lseek_core(fd, offset, whence);
+  errno = saved_host_errno;
+  return result;
+}
+
+int darwin_art_bionic_access(const char* path, int mode) {
+  if ((mode & ~7) != 0) return -1;
+  DarwinArtAndroidStat status;
+  return darwin_art_bionic_stat(path, &status);
+}
+
+int darwin_art_bionic_unlink(const char* path) {
+  return darwin_art_bionic_unlinkat(DARWIN_ART_ANDROID_AT_FDCWD, path, 0);
+}
+
+int darwin_art_bionic_rmdir(const char* path) {
+  return darwin_art_bionic_unlinkat(DARWIN_ART_ANDROID_AT_FDCWD, path,
+                                    DARWIN_ART_ANDROID_AT_REMOVEDIR);
+}
+
+int darwin_art_bionic___open_2(const char* path, int flags) {
+  return darwin_art_bionic_open(path, flags, 0);
+}
+
+intptr_t darwin_art_bionic___read_chk(int fd, void* buffer, size_t count,
+                                      size_t buffer_size) {
+  if (count > buffer_size) return -1;
+  return darwin_art_bionic_read(fd, buffer, count);
+}
+
+intptr_t darwin_art_bionic___write_chk(int fd, const void* buffer,
+                                       size_t count, size_t buffer_size) {
+  if (count > buffer_size) return -1;
+  return darwin_art_bionic_write(fd, buffer, count);
+}
+
 int darwin_art_bionic_close(int fd) {
   const int saved_host_errno = errno;
   const int result = darwin_art_bionic_fs_close_core(fd);
@@ -365,6 +410,10 @@ typedef struct Binding {
 } Binding;
 
 static const Binding kBindings[] = {
+    {"__open_2", (DarwinArtBionicFsFunction)darwin_art_bionic___open_2},
+    {"__read_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___read_chk},
+    {"__write_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___write_chk},
+    {"access", (DarwinArtBionicFsFunction)darwin_art_bionic_access},
     {"chdir", (DarwinArtBionicFsFunction)darwin_art_bionic_chdir},
     {"close", (DarwinArtBionicFsFunction)darwin_art_bionic_close},
     {"closedir", (DarwinArtBionicFsFunction)darwin_art_bionic_closedir},
@@ -376,6 +425,7 @@ static const Binding kBindings[] = {
     {"getcwd", (DarwinArtBionicFsFunction)darwin_art_bionic_getcwd},
     {"isatty", (DarwinArtBionicFsFunction)darwin_art_bionic_isatty},
     {"link", (DarwinArtBionicFsFunction)darwin_art_bionic_link},
+    {"lseek", (DarwinArtBionicFsFunction)darwin_art_bionic_lseek},
     {"lstat", (DarwinArtBionicFsFunction)darwin_art_bionic_lstat},
     {"mkdir", (DarwinArtBionicFsFunction)darwin_art_bionic_mkdir},
     {"open", (DarwinArtBionicFsFunction)darwin_art_bionic_open},
@@ -388,12 +438,15 @@ static const Binding kBindings[] = {
     {"realpath", (DarwinArtBionicFsFunction)darwin_art_bionic_realpath},
     {"remove", (DarwinArtBionicFsFunction)darwin_art_bionic_remove},
     {"rename", (DarwinArtBionicFsFunction)darwin_art_bionic_rename},
+    {"rmdir", (DarwinArtBionicFsFunction)darwin_art_bionic_rmdir},
     {"stat", (DarwinArtBionicFsFunction)darwin_art_bionic_stat},
     {"statvfs", (DarwinArtBionicFsFunction)darwin_art_bionic_statvfs},
     {"symlink", (DarwinArtBionicFsFunction)darwin_art_bionic_symlink},
     {"truncate", (DarwinArtBionicFsFunction)darwin_art_bionic_truncate},
+    {"unlink", (DarwinArtBionicFsFunction)darwin_art_bionic_unlink},
     {"unlinkat", (DarwinArtBionicFsFunction)darwin_art_bionic_unlinkat},
     {"utimensat", (DarwinArtBionicFsFunction)darwin_art_bionic_utimensat},
+    {"write", (DarwinArtBionicFsFunction)darwin_art_bionic_write},
 };
 
 DarwinArtBionicFsFunction darwin_art_bionic_fs_resolve(const char* import_name) {

@@ -41,6 +41,21 @@ void set_probe_canvas_class(GraphicsState* state, JNIEnv* env,
   }
 }
 
+bool retain_service_bridge_class(GraphicsState* state, JNIEnv* env,
+                                 jclass bridge_class) {
+  if (state == nullptr || env == nullptr || bridge_class == nullptr ||
+      env->ExceptionCheck()) {
+    return false;
+  }
+  if (state->service_bridge_class != nullptr) {
+    env->DeleteGlobalRef(state->service_bridge_class);
+    state->service_bridge_class = nullptr;
+  }
+  state->service_bridge_class =
+      static_cast<jclass>(env->NewGlobalRef(bridge_class));
+  return state->service_bridge_class != nullptr && !env->ExceptionCheck();
+}
+
 bool retain_interactive_root(GraphicsState* state, JNIEnv* env, jobject root,
                              jint width, jint height) {
   if (state == nullptr || env == nullptr || root == nullptr ||
@@ -82,6 +97,25 @@ bool retain_hardware_context(GraphicsState* state, JNIEnv* env, jobject context)
   }
   state->hardware_context = env->NewGlobalRef(context);
   return state->hardware_context != nullptr && !env->ExceptionCheck();
+}
+
+void begin_activity_transition(GraphicsState* state, JNIEnv* env) {
+  if (state == nullptr || env == nullptr) return;
+  auto clear = [env](jobject* reference) {
+    if (*reference != nullptr) {
+      env->DeleteGlobalRef(*reference);
+      *reference = nullptr;
+    }
+  };
+  clear(&state->gpu_render_node);
+  clear(&state->pressed_view);
+  clear(&state->pointer_dispatch_root);
+  clear(&state->pointer_dispatch_view_root);
+  state->gpu_render_node_recorded = false;
+  state->gpu_ripple_overlay_active = false;
+  state->pointer_stream_active = false;
+  state->pointer_click_candidate = false;
+  state->pointer_dispatch_is_window = false;
 }
 
 void shutdown(GraphicsState* state, JNIEnv* env) {
@@ -131,6 +165,10 @@ void shutdown(GraphicsState* state, JNIEnv* env) {
   if (state->probe_canvas_class != nullptr) {
     env->DeleteGlobalRef(state->probe_canvas_class);
     state->probe_canvas_class = nullptr;
+  }
+  if (state->service_bridge_class != nullptr) {
+    env->DeleteGlobalRef(state->service_bridge_class);
+    state->service_bridge_class = nullptr;
   }
   state->gpu_render_node_recorded = false;
   state->gpu_ripple_overlay_active = false;

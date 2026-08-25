@@ -2,14 +2,19 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error as StdError;
 use std::ffi::{c_int, c_void};
 use std::fmt;
+use std::hash::{BuildHasher, Hasher, RandomState};
 use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::ptr::{self, NonNull};
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
+
+mod direct_tls;
 mod ffi;
 mod mapping;
 mod namespace;
+mod packed_relocations;
 mod parser;
 mod tls;
 
@@ -174,6 +179,14 @@ const DT_PREINIT_ARRAYSZ: i64 = 33;
 const DT_RELR: i64 = 36;
 const DT_RELRSZ: i64 = 35;
 const DT_RELRENT: i64 = 37;
+const DT_ANDROID_REL: i64 = 0x6000_000f;
+const DT_ANDROID_RELSZ: i64 = 0x6000_0010;
+const DT_ANDROID_RELA: i64 = 0x6000_0011;
+const DT_ANDROID_RELASZ: i64 = 0x6000_0012;
+const DT_ANDROID_RELR: i64 = 0x6fff_e000;
+const DT_ANDROID_RELRSZ: i64 = 0x6fff_e001;
+const DT_ANDROID_RELRENT: i64 = 0x6fff_e003;
+const DT_ANDROID_RELRCOUNT: i64 = 0x6fff_e005;
 const DT_GNU_HASH: i64 = 0x6fff_fef5;
 const DT_RELACOUNT: i64 = 0x6fff_fff9;
 const DT_FLAGS_1: i64 = 0x6fff_fffb;
@@ -193,6 +206,7 @@ const R_AARCH64_JUMP_SLOT: u32 = 1026;
 const R_AARCH64_RELATIVE: u32 = 1027;
 const R_AARCH64_TLSDESC: u32 = 1031;
 const DF_BIND_NOW: u64 = 0x8;
+const DF_SYMBOLIC: u64 = 0x2;
 const DF_1_NOW: u64 = 0x1;
 const SHN_UNDEF: u16 = 0;
 const SHN_ABS: u16 = 0xfff1;
@@ -236,6 +250,7 @@ unsafe extern "C" {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Capability {
     HostArchitecture,
+    DirectThreadPointer,
     Tls,
     Relro,
     LazyBinding,
@@ -320,6 +335,10 @@ pub struct SymbolRequest<'a> {
     pub symbol: &'a str,
     pub needed_libraries: &'a [String],
     pub version: Option<VersionRequirement<'a>>,
+    /// True for an ELF `STB_WEAK` undefined symbol. A resolver may use this
+    /// to decline an optional platform capability without turning absence
+    /// into a hard resolver error.
+    pub is_weak: bool,
 }
 
 /// A closed symbol namespace supplied by the caller.
@@ -340,6 +359,7 @@ pub enum LoadError {
     Bounds(&'static str),
     Capability(Capability),
     Protection(&'static str),
+    Integrity(&'static str),
     Resolver {
         symbol: String,
         source: ResolveError,
@@ -371,6 +391,7 @@ impl fmt::Display for LoadError {
                 write!(formatter, "unsupported ELF capability: {capability:?}")
             }
             Self::Protection(message) => write!(formatter, "ELF protection error: {message}"),
+            Self::Integrity(message) => write!(formatter, "ELF integrity error: {message}"),
             Self::Resolver { symbol, source } => {
                 write!(formatter, "resolver failed for {symbol}: {source}")
             }
@@ -405,6 +426,23 @@ impl fmt::Display for LoadError {
 
 impl StdError for LoadError {}
 
+fn boringssl_integrity_hmac(text: &[u8], rodata: &[u8]) -> [u8; 32] {
+    let inner_pad = [0x36_u8; 64];
+    let outer_pad = [0x5c_u8; 64];
+    let mut inner = Sha256::new();
+    inner.update(inner_pad);
+    inner.update((text.len() as u64).to_le_bytes());
+    inner.update(text);
+    inner.update((rodata.len() as u64).to_le_bytes());
+    inner.update(rodata);
+    let inner_digest = inner.finalize();
+
+    let mut outer = Sha256::new();
+    outer.update(outer_pad);
+    outer.update(inner_digest);
+    outer.finalize().into()
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ProgramHeader {
     kind: u32,
@@ -421,6 +459,7 @@ struct DynamicInfo {
     needed_offsets: Vec<u64>,
     soname_offset: Option<u64>,
     hash: Option<u64>,
+    gnu_hash: Option<u64>,
     string_table: Option<u64>,
     string_size: Option<u64>,
     symbol_table: Option<u64>,
@@ -429,6 +468,12 @@ struct DynamicInfo {
     rela_size: Option<u64>,
     rela_entry_size: Option<u64>,
     relative_relocation_count: Option<u64>,
+    android_rela: Option<u64>,
+    android_rela_size: Option<u64>,
+    relr: Option<u64>,
+    relr_size: Option<u64>,
+    relr_entry_size: Option<u64>,
+    relr_count: Option<u64>,
     plt_rela: Option<u64>,
     plt_rela_size: Option<u64>,
     plt_relocation_kind: Option<u64>,
@@ -455,13 +500,20 @@ struct ParsedImage {
     tls: Option<ProgramHeader>,
     minimum_page: u64,
     image_size: usize,
+    reservation_size: usize,
+    image_offset: usize,
+    stack_guard_offset: usize,
     page_size: usize,
     page_protections: Vec<c_int>,
 }
 
 pub struct LoadedElf {
+    reservation: NonNull<u8>,
+    reservation_size: usize,
     mapping: NonNull<u8>,
     mapping_size: usize,
+    stack_guard: NonNull<u64>,
+    stack_guard_rewrites: Vec<(u64, u32)>,
     minimum_page: u64,
     loads: Vec<ProgramHeader>,
     dynamic: DynamicInfo,
@@ -533,7 +585,7 @@ impl LoadedElf {
             return Err(LoadError::Capability(Capability::HostArchitecture));
         }
         let parsed = parse_image(bytes)?;
-        let mapping = Mapping::reserve(parsed.image_size)?;
+        let mapping = Mapping::reserve(parsed.reservation_size)?;
 
         for (index, protection) in parsed.page_protections.iter().copied().enumerate() {
             if protection != PROT_NONE {
@@ -546,8 +598,13 @@ impl LoadedElf {
         }
 
         for load in &parsed.loads {
-            let destination_offset =
-                difference_to_usize(load.virtual_address, parsed.minimum_page)?;
+            let destination_offset = parsed
+                .image_offset
+                .checked_add(difference_to_usize(
+                    load.virtual_address,
+                    parsed.minimum_page,
+                )?)
+                .ok_or(LoadError::Bounds("PT_LOAD shifted destination overflow"))?;
             let file_offset = to_usize(load.offset, "PT_LOAD file offset")?;
             let file_size = to_usize(load.file_size, "PT_LOAD file size")?;
             let memory_size = to_usize(load.memory_size, "PT_LOAD memory size")?;
@@ -578,9 +635,26 @@ impl LoadedElf {
             .map(|header| TlsModule::new(header, bytes))
             .transpose()?;
 
+        let reservation = mapping.pointer();
+        let logical_mapping =
+            NonNull::new(unsafe { reservation.as_ptr().add(parsed.image_offset) })
+                .expect("offset into a non-null reservation remains non-null");
+        let stack_guard = NonNull::new(
+            unsafe { reservation.as_ptr().add(parsed.stack_guard_offset + 0x28) }.cast::<u64>(),
+        )
+        .expect("offset into a non-null reservation remains non-null");
+        let mut guard_hasher = RandomState::new().build_hasher();
+        guard_hasher.write_usize(stack_guard.as_ptr() as usize);
+        let guard = guard_hasher.finish() | 1;
+        // SAFETY: the dedicated compatibility page is writable during staging and aligned.
+        unsafe { stack_guard.as_ptr().write(guard) };
         let mut loaded = Self {
-            mapping: mapping.pointer(),
-            mapping_size: mapping.length(),
+            reservation,
+            reservation_size: mapping.length(),
+            mapping: logical_mapping,
+            mapping_size: parsed.image_size,
+            stack_guard,
+            stack_guard_rewrites: Vec::new(),
             minimum_page: parsed.minimum_page,
             loads: parsed.loads,
             dynamic,
@@ -611,7 +685,19 @@ impl LoadedElf {
         page_size: usize,
         page_protections: &[c_int],
     ) -> Result<(), LoadError> {
+        self.rewrite_android_stack_guard_tls()?;
+        if self.soname() == Some("libcrypto.so")
+            && std::env::var_os("DARWIN_ART_ELF_PREFLIGHT_BORINGSSL_BOUNDS").is_some()
+        {
+            let destination = self.loaded_pointer(0xd35b4, 8)?;
+            // Diagnostic-only: replace the integrity function with a known-returning leaf.
+            unsafe {
+                ptr::write_unaligned(destination.cast::<u32>(), 0x5280_0020);
+                ptr::write_unaligned(destination.add(4).cast::<u32>(), 0xd65f_03c0);
+            }
+        }
         self.validate_symbols_and_apply_relocations(resolver)?;
+        self.refresh_boringssl_integrity_after_rewrite()?;
         self.refresh_tls_template()?;
         self.validate_initializer_entries()?;
         self.prepare_finalizers()?;
@@ -620,6 +706,143 @@ impl LoadedElf {
 
     pub fn needed_libraries(&self) -> &[String] {
         &self.needed_libraries
+    }
+
+    fn refresh_boringssl_integrity_after_rewrite(&mut self) -> Result<(), LoadError> {
+        let has_fips_hash = self
+            .exported_symbols()?
+            .iter()
+            .any(|symbol| symbol.name == "FIPS_module_hash");
+        if !has_fips_hash {
+            return Ok(());
+        }
+
+        let text_start = self.exported_address("BORINGSSL_bcm_text_start")?;
+        let text_end = self.exported_address("BORINGSSL_bcm_text_end")?;
+        let rodata_start = self.exported_address("BORINGSSL_bcm_rodata_start")?;
+        let rodata_end = self.exported_address("BORINGSSL_bcm_rodata_end")?;
+        let text = self.host_slice(text_start, text_end, Some(PF_X), "BoringSSL text span")?;
+        let rodata = self.host_slice(
+            rodata_start,
+            rodata_end,
+            Some(PF_R),
+            "BoringSSL rodata span",
+        )?;
+
+        let hash_function = self.resolve_function("FIPS_module_hash")?;
+        self.host_span_to_virtual(
+            hash_function,
+            12,
+            Some(PF_X),
+            "BoringSSL FIPS hash accessor",
+        )?;
+        let accessor = unsafe { std::slice::from_raw_parts(hash_function as *const u8, 12) };
+        let adrp = u32::from_le_bytes(accessor[0..4].try_into().unwrap());
+        let ldr = u32::from_le_bytes(accessor[4..8].try_into().unwrap());
+        let ret = u32::from_le_bytes(accessor[8..12].try_into().unwrap());
+        if adrp & 0x9f00_001f != 0x9000_0000
+            || ldr & 0xffc0_03ff != 0xf940_0000
+            || ret != 0xd65f_03c0
+        {
+            return Err(LoadError::Integrity(
+                "BoringSSL FIPS hash accessor has an unsupported shape",
+            ));
+        }
+        let immediate = u64::from((adrp >> 29) & 0x3) | (u64::from((adrp >> 5) & 0x7ffff) << 2);
+        let signed_pages = if immediate & (1 << 20) != 0 {
+            i64::try_from(immediate).unwrap() - (1 << 21)
+        } else {
+            i64::try_from(immediate).unwrap()
+        };
+        let function_page = hash_function & !0xfff;
+        let got_page = (function_page as i128)
+            .checked_add(i128::from(signed_pages) << 12)
+            .and_then(|address| usize::try_from(address).ok())
+            .ok_or(LoadError::Bounds("BoringSSL FIPS hash GOT page"))?;
+        let got_address = got_page
+            .checked_add(usize::try_from((ldr >> 10) & 0xfff).unwrap() * 8)
+            .ok_or(LoadError::Bounds("BoringSSL FIPS hash GOT slot"))?;
+        self.host_span_to_virtual(got_address, 8, Some(PF_R), "BoringSSL FIPS hash GOT slot")?;
+        let expected_pointer = unsafe { ptr::read_unaligned(got_address as *const *mut u8) };
+        if expected_pointer.is_null() {
+            return Err(LoadError::Integrity("BoringSSL FIPS hash pointer is null"));
+        }
+        let expected_address = expected_pointer as usize;
+        self.host_span_to_virtual(expected_address, 32, Some(PF_R), "BoringSSL FIPS hash")?;
+        let expected = unsafe { std::slice::from_raw_parts(expected_pointer, 32) };
+
+        let mut original_text = text.to_vec();
+        for &(virtual_address, instruction) in &self.stack_guard_rewrites {
+            let host = self.loaded_pointer(virtual_address, 4)? as usize;
+            if host < text_start || host.checked_add(4).is_none_or(|end| end > text_end) {
+                continue;
+            }
+            let offset = host - text_start;
+            original_text[offset..offset + 4].copy_from_slice(&instruction.to_le_bytes());
+        }
+        let original_digest = boringssl_integrity_hmac(&original_text, rodata);
+        if expected != original_digest {
+            return Err(LoadError::Integrity(
+                "BoringSSL FIPS hash did not authenticate the original Android image",
+            ));
+        }
+
+        if !self.stack_guard_rewrites.is_empty() {
+            let transformed_digest = boringssl_integrity_hmac(text, rodata);
+            // SAFETY: staging keeps every populated PT_LOAD page writable until final
+            // protections are applied, and the validated hash span is 32 bytes long.
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    transformed_digest.as_ptr(),
+                    expected_pointer,
+                    transformed_digest.len(),
+                )
+            };
+        }
+        Ok(())
+    }
+
+    fn exported_address(&self, name: &str) -> Result<usize, LoadError> {
+        self.exported_symbols()?
+            .into_iter()
+            .find(|symbol| symbol.name == name)
+            .map(|symbol| symbol.address)
+            .ok_or_else(|| LoadError::SymbolNotFound(name.to_owned()))
+    }
+
+    fn host_span_to_virtual(
+        &self,
+        start: usize,
+        size: usize,
+        required_flag: Option<u32>,
+        what: &'static str,
+    ) -> Result<u64, LoadError> {
+        let offset = start
+            .checked_sub(self.mapping.as_ptr() as usize)
+            .ok_or(LoadError::Bounds(what))?;
+        let virtual_address = self
+            .minimum_page
+            .checked_add(u64::try_from(offset).map_err(|_| LoadError::Bounds(what))?)
+            .ok_or(LoadError::Bounds(what))?;
+        self.require_loaded_range(
+            virtual_address,
+            u64::try_from(size).map_err(|_| LoadError::Bounds(what))?,
+            required_flag,
+            what,
+        )?;
+        Ok(virtual_address)
+    }
+
+    fn host_slice(
+        &self,
+        start: usize,
+        end: usize,
+        required_flag: Option<u32>,
+        what: &'static str,
+    ) -> Result<&[u8], LoadError> {
+        let size = end.checked_sub(start).ok_or(LoadError::Bounds(what))?;
+        self.host_span_to_virtual(start, size, required_flag, what)?;
+        Ok(unsafe { std::slice::from_raw_parts(start as *const u8, size) })
     }
 
     pub fn soname(&self) -> Option<&str> {
@@ -633,6 +856,21 @@ impl LoadedElf {
     /// first. This method performs symbol visibility/type and executable-range validation only.
     pub fn lookup_exported(&self, name: &str) -> Result<usize, LoadError> {
         self.resolve_function(name)
+    }
+
+    pub(crate) fn debug_mapped_pointer(&self, virtual_address: u64) -> Result<usize, LoadError> {
+        Ok(self.loaded_pointer(virtual_address, 1)? as usize)
+    }
+
+    pub(crate) fn debug_read_mapped_u64(&self, virtual_address: u64) -> Result<u64, LoadError> {
+        self.read_loaded_u64(virtual_address)
+    }
+
+    pub(crate) fn debug_stack_guard(&self) -> (usize, u64) {
+        // SAFETY: the loader-owned guard page remains mapped for the image lifetime.
+        (self.stack_guard.as_ptr() as usize, unsafe {
+            self.stack_guard.as_ptr().read()
+        })
     }
 
     pub fn run_initializers(&mut self) -> Result<(), LoadError> {
@@ -775,6 +1013,13 @@ impl LoadedElf {
         if !self.initializers_run {
             return Err(LoadError::InitializersNotRun);
         }
+        self.call_exported_i32_before_initializers(name)
+    }
+
+    pub(crate) fn call_exported_i32_before_initializers(
+        &self,
+        name: &str,
+    ) -> Result<i32, LoadError> {
         let pointer = self.resolve_function(name)?;
         // SAFETY: resolve_function validates a defined function symbol inside executable
         // mapped memory. This API deliberately supports only the no-argument/i32 ABI slice.
@@ -834,6 +1079,24 @@ impl LoadedElf {
         self.parse_version_definitions(symbol_count)?;
         let versions = self.parse_version_requirements(symbol_count)?;
         let mut resolved = HashMap::new();
+        let relr_address = self.dynamic.relr.unwrap_or(0);
+        let relr_size = self.dynamic.relr_size.unwrap_or(0);
+        if relr_size != 0 {
+            self.apply_relr_table(relr_address, relr_size)?;
+        }
+
+        let android_rela_address = self.dynamic.android_rela.unwrap_or(0);
+        let android_rela_size = self.dynamic.android_rela_size.unwrap_or(0);
+        if android_rela_size != 0 {
+            self.apply_android_packed_relocations(
+                android_rela_address,
+                android_rela_size,
+                symbol_count,
+                &versions,
+                &mut resolved,
+                resolver,
+            )?;
+        }
         let rela_address = self.dynamic.rela.unwrap_or(0);
         let rela_size = self.dynamic.rela_size.unwrap_or(0);
         if (rela_address == 0) != (rela_size == 0) {
@@ -923,51 +1186,189 @@ impl LoadedElf {
                     "DT_RELACOUNT prefix contains non-relative relocation",
                 ));
             }
-            if plt_only && relocation_type != R_AARCH64_JUMP_SLOT {
+            self.apply_one_relocation(
+                offset,
+                info,
+                addend,
+                plt_only,
+                symbol_count,
+                versions,
+                resolved,
+                resolver,
+            )?;
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_android_packed_relocations(
+        &mut self,
+        table_address: u64,
+        table_size: u64,
+        symbol_count: u32,
+        versions: &HashMap<u16, OwnedVersionRequirement>,
+        resolved: &mut HashMap<u32, usize>,
+        resolver: &mut dyn SymbolResolver,
+    ) -> Result<(), LoadError> {
+        self.require_loaded_range(
+            table_address,
+            table_size,
+            Some(PF_R),
+            "Android packed RELA table",
+        )?;
+        let bytes = self
+            .loaded_slice(table_address, to_usize(table_size, "DT_ANDROID_RELASZ")?)?
+            .to_vec();
+        let relocations =
+            packed_relocations::decode_aps2_rela(&bytes).map_err(LoadError::Format)?;
+        for relocation in relocations {
+            self.apply_one_relocation(
+                relocation.offset,
+                relocation.info,
+                relocation.addend,
+                false,
+                symbol_count,
+                versions,
+                resolved,
+                resolver,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn apply_relr_table(&mut self, table_address: u64, table_size: u64) -> Result<(), LoadError> {
+        self.require_loaded_range(table_address, table_size, Some(PF_R), "RELR table")?;
+        let count = table_size / 8;
+        let mut entries = Vec::with_capacity(
+            usize::try_from(count).map_err(|_| LoadError::Bounds("RELR entry count"))?,
+        );
+        for index in 0..count {
+            entries.push(
+                self.read_loaded_u64(
+                    table_address
+                        .checked_add(index * 8)
+                        .ok_or(LoadError::Bounds("RELR entry overflow"))?,
+                )?,
+            );
+        }
+        let mut cursor = None;
+        let mut applied = 0_u64;
+        for entry in entries {
+            if entry & 1 == 0 {
+                self.apply_relr_target(entry)?;
+                applied = applied
+                    .checked_add(1)
+                    .ok_or(LoadError::Bounds("RELR relocation count"))?;
+                cursor = Some(
+                    entry
+                        .checked_add(8)
+                        .ok_or(LoadError::Bounds("RELR cursor overflow"))?,
+                );
+                continue;
+            }
+            let base = cursor.ok_or(LoadError::Format("RELR bitmap precedes address"))?;
+            let bitmap = entry >> 1;
+            for bit in 0..63_u64 {
+                if bitmap & (1_u64 << bit) == 0 {
+                    continue;
+                }
+                let target = base
+                    .checked_add(bit * 8)
+                    .ok_or(LoadError::Bounds("RELR bitmap target overflow"))?;
+                self.apply_relr_target(target)?;
+                applied = applied
+                    .checked_add(1)
+                    .ok_or(LoadError::Bounds("RELR relocation count"))?;
+            }
+            cursor = Some(
+                base.checked_add(63 * 8)
+                    .ok_or(LoadError::Bounds("RELR bitmap cursor overflow"))?,
+            );
+        }
+        if self
+            .dynamic
+            .relr_count
+            .is_some_and(|expected| expected != applied)
+        {
+            return Err(LoadError::Format("DT_ANDROID_RELRCOUNT mismatch"));
+        }
+        Ok(())
+    }
+
+    fn apply_relr_target(&mut self, target: u64) -> Result<(), LoadError> {
+        if target % 8 != 0 {
+            return Err(LoadError::Format("unaligned RELR target"));
+        }
+        self.require_loaded_range(target, 8, Some(PF_W), "RELR target")?;
+        let addend = self.read_loaded_u64(target)?;
+        let bias = self.mapping.as_ptr() as i128 - self.minimum_page as i128;
+        let value = i128::from(addend)
+            .checked_add(bias)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or(LoadError::Bounds("RELR value overflow"))?;
+        let destination = self.loaded_pointer(target, 8)?;
+        // SAFETY: the target is an eight-byte writable mapped-image slot.
+        unsafe { ptr::write_unaligned(destination.cast::<usize>(), value) };
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_one_relocation(
+        &mut self,
+        offset: u64,
+        info: u64,
+        addend: i64,
+        plt_only: bool,
+        symbol_count: u32,
+        versions: &HashMap<u16, OwnedVersionRequirement>,
+        resolved: &mut HashMap<u32, usize>,
+        resolver: &mut dyn SymbolResolver,
+    ) -> Result<(), LoadError> {
+        let relocation_type = info as u32;
+        let symbol_index = (info >> 32) as u32;
+        if plt_only && relocation_type != R_AARCH64_JUMP_SLOT {
+            return Err(LoadError::Capability(Capability::UnsupportedRelocation {
+                relocation_type,
+                symbol: symbol_index,
+            }));
+        }
+        if relocation_type == R_AARCH64_TLSDESC {
+            if plt_only {
                 return Err(LoadError::Capability(Capability::UnsupportedRelocation {
                     relocation_type,
                     symbol: symbol_index,
                 }));
             }
-            if relocation_type == R_AARCH64_TLSDESC {
-                if plt_only {
-                    return Err(LoadError::Capability(Capability::UnsupportedRelocation {
-                        relocation_type,
-                        symbol: symbol_index,
-                    }));
-                }
-                self.apply_tlsdesc_relocation(offset, symbol_index, symbol_count, addend)?;
-                continue;
-            }
-            self.require_loaded_range(offset, 8, Some(PF_W), "RELA target")?;
-            let value = match relocation_type {
-                R_AARCH64_RELATIVE if symbol_index == 0 => self.load_bias_add(addend)?,
-                R_AARCH64_ABS64 | R_AARCH64_GLOB_DAT | R_AARCH64_JUMP_SLOT => {
-                    if symbol_index == 0 && relocation_type != R_AARCH64_ABS64 {
-                        return Err(LoadError::Format(
-                            "GLOB_DAT/JUMP_SLOT relocation has STN_UNDEF symbol index",
-                        ));
-                    }
-                    let symbol_address = self.resolve_relocation_symbol(
-                        symbol_index,
-                        symbol_count,
-                        versions,
-                        resolved,
-                        resolver,
-                    )?;
-                    checked_signed_add(symbol_address, addend, "symbol relocation value")?
-                }
-                _ => {
-                    return Err(LoadError::Capability(Capability::UnsupportedRelocation {
-                        relocation_type,
-                        symbol: symbol_index,
-                    }));
-                }
-            };
-            let destination = self.loaded_pointer(offset, 8)?;
-            // SAFETY: require_loaded_range proves an aligned-size writable destination.
-            unsafe { ptr::write_unaligned(destination.cast::<usize>(), value) };
+            return self.apply_tlsdesc_relocation(offset, symbol_index, symbol_count, addend);
         }
+        self.require_loaded_range(offset, 8, Some(PF_W), "RELA target")?;
+        let value = match relocation_type {
+            R_AARCH64_RELATIVE if symbol_index == 0 => self.load_bias_add(addend)?,
+            R_AARCH64_ABS64 | R_AARCH64_GLOB_DAT | R_AARCH64_JUMP_SLOT => {
+                if symbol_index == 0 && relocation_type != R_AARCH64_ABS64 {
+                    return Err(LoadError::Format(
+                        "GLOB_DAT/JUMP_SLOT relocation has STN_UNDEF symbol index",
+                    ));
+                }
+                let symbol_address = self.resolve_relocation_symbol(
+                    symbol_index,
+                    symbol_count,
+                    versions,
+                    resolved,
+                    resolver,
+                )?;
+                checked_signed_add(symbol_address, addend, "symbol relocation value")?
+            }
+            _ => {
+                return Err(LoadError::Capability(Capability::UnsupportedRelocation {
+                    relocation_type,
+                    symbol: symbol_index,
+                }));
+            }
+        };
+        let destination = self.loaded_pointer(offset, 8)?;
+        // SAFETY: require_loaded_range proves an eight-byte writable destination.
+        unsafe { ptr::write_unaligned(destination.cast::<usize>(), value) };
         Ok(())
     }
 
@@ -1051,6 +1452,9 @@ impl LoadedElf {
         let (Some(header), Some(module)) = (self.tls_header, self.tls_module.as_ref()) else {
             return Ok(());
         };
+        if header.file_size == 0 {
+            return Ok(());
+        }
         let template = self.loaded_slice(
             header.virtual_address,
             to_usize(header.file_size, "PT_TLS file size")?,
@@ -1118,6 +1522,7 @@ impl LoadedElf {
                 symbol: &name,
                 needed_libraries: &self.needed_libraries,
                 version: request_version,
+                is_weak: symbol.binding == STB_WEAK,
             })
             .map_err(|source| LoadError::Resolver {
                 symbol: name.clone(),
@@ -1452,10 +1857,16 @@ impl LoadedElf {
     }
 
     fn symbol_count(&self) -> Result<u32, LoadError> {
-        let hash = self
-            .dynamic
-            .hash
-            .ok_or(LoadError::Capability(Capability::MissingSysvHash))?;
+        if let Some(hash) = self.dynamic.hash {
+            return self.sysv_hash_symbol_count(hash);
+        }
+        if let Some(hash) = self.dynamic.gnu_hash {
+            return self.gnu_hash_symbol_count(hash);
+        }
+        Err(LoadError::Capability(Capability::MissingSysvHash))
+    }
+
+    fn sysv_hash_symbol_count(&self, hash: u64) -> Result<u32, LoadError> {
         self.require_loaded_range(hash, 8, Some(PF_R), "DT_HASH header")?;
         let bucket_count = self.read_loaded_u32(hash)? as u64;
         let chain_count = self.read_loaded_u32(hash + 4)?;
@@ -1465,6 +1876,94 @@ impl LoadedElf {
             .ok_or(LoadError::Bounds("DT_HASH size overflow"))?;
         self.require_loaded_range(hash, words * 4, Some(PF_R), "DT_HASH table")?;
         Ok(chain_count)
+    }
+
+    fn gnu_hash_symbol_count(&self, hash: u64) -> Result<u32, LoadError> {
+        self.require_loaded_range(hash, 16, Some(PF_R), "DT_GNU_HASH header")?;
+        let bucket_count = self.read_loaded_u32(hash)?;
+        let symbol_offset = self.read_loaded_u32(hash + 4)?;
+        let bloom_count = self.read_loaded_u32(hash + 8)?;
+        if bucket_count == 0 || bloom_count == 0 || !bloom_count.is_power_of_two() {
+            return Err(LoadError::Format("invalid DT_GNU_HASH header"));
+        }
+        let buckets = hash
+            .checked_add(16)
+            .and_then(|value| value.checked_add(u64::from(bloom_count) * 8))
+            .ok_or(LoadError::Bounds("DT_GNU_HASH bloom overflow"))?;
+        let chains = buckets
+            .checked_add(u64::from(bucket_count) * 4)
+            .ok_or(LoadError::Bounds("DT_GNU_HASH buckets overflow"))?;
+        self.require_loaded_range(
+            hash,
+            chains
+                .checked_sub(hash)
+                .ok_or(LoadError::Bounds("DT_GNU_HASH prefix"))?,
+            Some(PF_R),
+            "DT_GNU_HASH prefix",
+        )?;
+
+        let symbol_table = self
+            .dynamic
+            .symbol_table
+            .ok_or(LoadError::Format("missing DT_SYMTAB"))?;
+        let entry_size = self
+            .dynamic
+            .symbol_entry_size
+            .unwrap_or(ELF64_SYM_SIZE as u64);
+        if entry_size != ELF64_SYM_SIZE as u64 {
+            return Err(LoadError::Format("invalid DT_SYMENT"));
+        }
+        let load = self
+            .loads
+            .iter()
+            .find(|load| {
+                load.virtual_address <= symbol_table
+                    && load
+                        .virtual_address
+                        .checked_add(load.memory_size)
+                        .is_some_and(|end| symbol_table < end)
+            })
+            .ok_or(LoadError::Bounds("DT_SYMTAB outside PT_LOAD"))?;
+        let load_end = load
+            .virtual_address
+            .checked_add(load.memory_size)
+            .ok_or(LoadError::Bounds("DT_SYMTAB load end"))?;
+        let symbol_limit = (load_end - symbol_table) / entry_size;
+        if u64::from(symbol_offset) > symbol_limit {
+            return Err(LoadError::Bounds("DT_GNU_HASH symbol offset"));
+        }
+
+        let mut highest = None;
+        for index in 0..bucket_count {
+            let symbol = self.read_loaded_u32(buckets + u64::from(index) * 4)?;
+            if symbol == 0 {
+                continue;
+            }
+            if symbol < symbol_offset || u64::from(symbol) >= symbol_limit {
+                return Err(LoadError::Bounds("DT_GNU_HASH bucket symbol"));
+            }
+            highest = Some(highest.map_or(symbol, |current: u32| current.max(symbol)));
+        }
+        let Some(mut symbol) = highest else {
+            return Ok(symbol_offset);
+        };
+        loop {
+            if u64::from(symbol) >= symbol_limit {
+                return Err(LoadError::Bounds("DT_GNU_HASH chain symbol"));
+            }
+            let chain_index = u64::from(symbol - symbol_offset);
+            let value = self.read_loaded_u32(
+                chains
+                    .checked_add(chain_index * 4)
+                    .ok_or(LoadError::Bounds("DT_GNU_HASH chain overflow"))?,
+            )?;
+            symbol = symbol
+                .checked_add(1)
+                .ok_or(LoadError::Bounds("DT_GNU_HASH symbol count"))?;
+            if value & 1 != 0 {
+                return Ok(symbol);
+            }
+        }
     }
 
     fn dynamic_symbol(&self, index: u32) -> Result<DynamicSymbol, LoadError> {
@@ -1530,7 +2029,7 @@ impl LoadedElf {
             while end < page_protections.len() && page_protections[end] == protection {
                 end += 1;
             }
-            let address = unsafe { self.mapping.as_ptr().add(start * page_size) };
+            let address = unsafe { self.reservation.as_ptr().add(start * page_size) };
             let length = (end - start) * page_size;
             if protection & PROT_EXEC != 0 {
                 // SAFETY: this is a live portion of the loader-owned reservation. Apple
@@ -1541,6 +2040,35 @@ impl LoadedElf {
                 return Err(system_error("mprotect(final)"));
             }
             start = end;
+        }
+        Ok(())
+    }
+
+    fn rewrite_android_stack_guard_tls(&mut self) -> Result<(), LoadError> {
+        let executable_ranges = self
+            .loads
+            .iter()
+            .filter(|load| load.flags & PF_X != 0)
+            .map(|load| (load.virtual_address, load.file_size))
+            .collect::<Vec<_>>();
+        for (virtual_address, file_size) in executable_ranges {
+            let size = to_usize(file_size, "executable PT_LOAD file size")?;
+            let pointer = self.loaded_pointer(virtual_address, size)?;
+            // SAFETY: staging made every populated PT_LOAD page writable. This unique `&mut self`
+            // owns the image, and final executable protections/cache invalidation happen later.
+            let code = unsafe { std::slice::from_raw_parts_mut(pointer, size) };
+            let rewrites = direct_tls::rewrite_android_stack_guard_tls(
+                code,
+                self.stack_guard.as_ptr() as usize,
+            )?;
+            for rewrite in rewrites {
+                let offset = u64::try_from(rewrite.instruction_index)
+                    .ok()
+                    .and_then(|index| index.checked_mul(4))
+                    .and_then(|offset| virtual_address.checked_add(offset))
+                    .ok_or(LoadError::Bounds("stack-guard rewrite address"))?;
+                self.stack_guard_rewrites.push((offset, rewrite.original));
+            }
         }
         Ok(())
     }
@@ -1631,7 +2159,7 @@ impl Drop for LoadedElf {
             }
         }
         // SAFETY: LoadedElf exclusively owns this complete mmap reservation.
-        let result = unsafe { munmap(self.mapping.as_ptr().cast(), self.mapping_size) };
+        let result = unsafe { munmap(self.reservation.as_ptr().cast(), self.reservation_size) };
         debug_assert_eq!(result, 0, "munmap failed while dropping LoadedElf");
     }
 }

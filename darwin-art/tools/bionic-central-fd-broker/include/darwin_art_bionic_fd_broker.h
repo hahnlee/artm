@@ -16,6 +16,7 @@ typedef enum DarwinArtFdKind {
   DARWIN_ART_FD_STDIO = 3,
   DARWIN_ART_FD_SOCKET = 4,
   DARWIN_ART_FD_EPOLL = 5,
+  DARWIN_ART_FD_PIPE = 6,
 } DarwinArtFdKind;
 
 typedef enum DarwinArtFdBrokerStatus {
@@ -116,12 +117,16 @@ typedef struct DarwinArtFdOwnerV1 {
                                const DarwinArtFdSocketRequestV1 *request,
                                DarwinArtFdSocketAcceptResultV1 *accepted,
                                int *android_errno);
+  int (*poll_many)(void *context, const uint64_t *objects,
+                   const int16_t *events, int16_t *revents, size_t count,
+                   int timeout_ms, int *android_errno);
 } DarwinArtFdOwnerV1;
 
 enum {
   DARWIN_ART_FD_OWNER_ABI_V1 = 1,
   DARWIN_ART_FD_OWNER_ABI_V2 = 2,
   DARWIN_ART_FD_OWNER_ABI_V3 = 3,
+  DARWIN_ART_FD_OWNER_ABI_V4 = 4,
   DARWIN_ART_FD_SOCKET_REQUEST_ABI_V1 = 1,
   DARWIN_ART_FD_SOCKET_ACCEPT_RESULT_ABI_V1 = 1,
   DARWIN_ART_FD_CLOEXEC = 1,
@@ -198,6 +203,10 @@ DarwinArtFdBrokerStatus darwin_art_fd_broker_poll(DarwinArtFdBroker *broker,
                                                   DarwinArtFdPollEntry *entries,
                                                   size_t count,
                                                   DarwinArtFdIoResult *result);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_poll_wait(DarwinArtFdBroker *broker,
+                               DarwinArtFdPollEntry *entries, size_t count,
+                               int timeout_ms, DarwinArtFdIoResult *result);
 DarwinArtFdBrokerStatus
 darwin_art_fd_broker_sendfile(DarwinArtFdBroker *broker, int output_fd,
                               int input_fd, size_t count,

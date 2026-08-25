@@ -1,4 +1,5 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -41,6 +42,7 @@ fn main() {
     assert_eq!(env::var("CARGO_CFG_TARGET_OS").as_deref(), Ok("macos"));
     assert_eq!(env::var("CARGO_CFG_TARGET_ARCH").as_deref(), Ok("aarch64"));
     let output_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    let standalone_test_stubs = env::var_os("CARGO_FEATURE_STANDALONE_TEST_STUBS").is_some();
     let sdk = output(
         Command::new("xcrun").args(["--sdk", "macosx", "--show-sdk-path"]),
         "SDK lookup",
@@ -48,18 +50,24 @@ fn main() {
     let shims = output_dir.join("shims.o");
     let archive = output_dir.join("libdarwin_art_bionic_dso_lifecycle.a");
     compile("src/shims.c", &shims, &sdk);
-    assert!(
-        Command::new("ar")
-            .arg("rcs")
-            .arg(&archive)
-            .arg(&shims)
-            .status()
-            .unwrap()
-            .success()
-    );
+    if archive.exists() {
+        fs::remove_file(&archive).expect("failed to replace lifecycle archive");
+    }
+    let mut archive_command = Command::new("ar");
+    archive_command.arg("rcs").arg(&archive).arg(&shims);
+    if standalone_test_stubs {
+        let standalone_stubs = output_dir.join("standalone_libdl_stubs.o");
+        compile("src/standalone_libdl_stubs.c", &standalone_stubs, &sdk);
+        archive_command.arg(&standalone_stubs);
+    }
+    assert!(archive_command.status().unwrap().success());
     println!("cargo:rustc-link-search=native={}", output_dir.display());
     println!("cargo:rustc-link-lib=static=darwin_art_bionic_dso_lifecycle");
-    for source in ["src/shims.c", "include/darwin_art_bionic_dso_lifecycle.h"] {
+    for source in [
+        "src/shims.c",
+        "src/standalone_libdl_stubs.c",
+        "include/darwin_art_bionic_dso_lifecycle.h",
+    ] {
         println!("cargo:rerun-if-changed={source}");
     }
 }

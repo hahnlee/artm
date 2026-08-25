@@ -9,6 +9,7 @@ source_root="$project_root/_aosp/libcore-system-natives"
 native_root="$source_root/libcore/ojluni/src/main/native"
 build_dir="$project_root/_build/system-natives-darwin"
 patch_file="$project_root/patches/libcore-openjdk/0004-darwin-system-boringssl-version-header.patch"
+library_name_patch="$project_root/patches/libcore-openjdk/0005-android-guest-jni-library-suffix.patch"
 
 # shellcheck disable=SC1090
 source "$lock_file"
@@ -74,16 +75,23 @@ grep -F '#define OPENSSL_VERSION_TEXT "OpenSSL 1.1.1 (compatible; BoringSSL)"' \
   fail "pinned BoringSSL compatibility version drift"
 [[ "$(sha256 "$patch_file")" == "$DARWIN_PATCH_SHA256" ]] ||
   fail "Darwin BoringSSL header patch checksum mismatch"
+[[ "$(sha256 "$library_name_patch")" == "$ANDROID_LIBRARY_NAME_PATCH_SHA256" ]] ||
+  fail "Android JNI library-name patch checksum mismatch"
 
 stage="$(mktemp -d "${TMPDIR:-/tmp}/darwin-art-system.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 patched_root="$stage/source"
 mkdir -p "$patched_root/ojluni/src/main/native"
 cp "$native_root/System.c" "$patched_root/ojluni/src/main/native/System.c"
+cp "$native_root/jvm_md.h" "$patched_root/ojluni/src/main/native/jvm_md.h"
 patch --batch --forward -p1 -d "$patched_root" < "$patch_file" >/dev/null
+patch --batch --forward -p1 -d "$patched_root" < "$library_name_patch" >/dev/null
 patched_source="$patched_root/ojluni/src/main/native/System.c"
+patched_jvm_md="$patched_root/ojluni/src/main/native/jvm_md.h"
 [[ "$(sha256 "$patched_source")" == "$PATCHED_SYSTEM_C_SHA256" ]] ||
   fail "patched System.c checksum mismatch"
+[[ "$(sha256 "$patched_jvm_md")" == "$PATCHED_JVM_MD_H_SHA256" ]] ||
+  fail "patched jvm_md.h checksum mismatch"
 
 python3 - "$native_root/Android.bp" <<'PY'
 import re
@@ -213,9 +221,11 @@ mkdir -p "$objects"
 common_flags=(
   -std=gnu11 -arch arm64 -isysroot "$sdk_root" -fPIC
   -ffunction-sections -fdata-sections -DMACOSX -D_ALLBSD_SOURCE
+  -include "$patched_jvm_md"
   -Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-variable
   -Wno-sign-compare -Wno-deprecated-declarations
   -Wno-incompatible-pointer-types-discards-qualifiers
+  -I"$patched_root/ojluni/src/main/native"
   -I"$native_root"
   -I"$nativehelper_source/include_jni"
   -I"$nativehelper_source/include"

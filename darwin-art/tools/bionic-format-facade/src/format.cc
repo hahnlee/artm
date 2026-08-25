@@ -127,6 +127,12 @@ Cursor FromVa(const void* opaque) { AndroidVaList v{};std::memcpy(&v,opaque,size
 extern "C" int darwin_art_bionic_snprintf_captured(char* dst,size_t size,const char* format,const uint64_t* gp,const uint8_t* fp,uint8_t* stack,uint32_t gp_index) {
   if((dst==nullptr&&size!=0)||format==nullptr){Fail(kEinval);return -1;} Cursor c{stack,reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(gp))+64,const_cast<uint8_t*>(fp)+128,int32_t(gp_index*8)-64,-128}; Sink s{dst,size};return Format(&s,format,c);
 }
+extern "C" int darwin_art_bionic_sprintf_captured(char* dst,const char* format,const uint64_t* gp,const uint8_t* fp,uint8_t* stack) {
+  if(dst==nullptr||format==nullptr){Fail(kEinval);return -1;} Cursor c{stack,reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(gp))+64,const_cast<uint8_t*>(fp)+128,-48,-128}; Sink s{dst,SIZE_MAX};return Format(&s,format,c);
+}
+extern "C" int darwin_art_bionic_asprintf_captured(char** output,const char* format,const uint64_t* gp,const uint8_t* fp,uint8_t* stack) {
+  AndroidVaList va{stack,reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(gp))+64,const_cast<uint8_t*>(fp)+128,-48,-128};return darwin_art_bionic_vasprintf(output,format,&va);
+}
 extern "C" int darwin_art_bionic_vsnprintf(char* dst,size_t size,const char* format,const void* ap) {
   if((dst==nullptr&&size!=0)||!format||!ap){Fail(kEinval);return -1;} Sink s{dst,size};return Format(&s,format,FromVa(ap));
 }
@@ -134,8 +140,14 @@ extern "C" int darwin_art_bionic_vasprintf(char** output,const char* format,cons
   if(!output||!format||!ap){Fail(kEinval);return -1;} *output=nullptr; Sink count{nullptr,0};int n=Format(&count,format,FromVa(ap));if(n<0)return -1;
   DarwinArtBionicAllocationResult a=darwin_art_bionic_malloc_result(size_t(n)+1);if(!a.pointer){Fail(a.bionic_errno);return -1;} Sink sink{static_cast<char*>(a.pointer),size_t(n)+1};int written=Format(&sink,format,FromVa(ap));if(written<0){darwin_art_bionic_free(a.pointer);return -1;}*output=static_cast<char*>(a.pointer);return written;
 }
+extern "C" int darwin_art_bionic___vsnprintf_chk(char* dst,size_t size,int flags,size_t destination_size,const char* format,const void* ap) {
+  (void)flags;if(size>destination_size){Fail(kEinval);return -1;}return darwin_art_bionic_vsnprintf(dst,size,format,ap);
+}
 extern "C" DarwinArtBionicFormatFunction darwin_art_bionic_format_resolve(const char* s) {
-  if(!s)return nullptr;if(std::strcmp(s,"snprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_snprintf);
+  if(!s)return nullptr;if(std::strcmp(s,"__vsnprintf_chk")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic___vsnprintf_chk);
+  if(std::strcmp(s,"asprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_asprintf);
+  if(std::strcmp(s,"snprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_snprintf);
+  if(std::strcmp(s,"sprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_sprintf);
   if(std::strcmp(s,"vasprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_vasprintf);
   if(std::strcmp(s,"vsnprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_vsnprintf);return nullptr;
 }

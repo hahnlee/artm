@@ -118,11 +118,11 @@ host_flags=(-arch arm64 -isysroot "$sdk" -std=c17 -O2 -fno-builtin
 "$host_cc" "${host_flags[@]}" -c "$dir/src/strerror.c" \
   -o "$tmp/strerror.o"
 nm -u "$tmp/strerror.o" | sed 's/^[[:space:]]*//' | sort >"$tmp/undefined"
-printf '%s\n' ___error >"$tmp/expected-undefined"
+printf '%s\n' ___error __tlv_bootstrap >"$tmp/expected-undefined"
 diff -u "$tmp/expected-undefined" "$tmp/undefined" ||
   fail 'provider dependency drift or host strerror forwarding'
 definitions="$(nm -gU "$tmp/strerror.o")"
-for symbol in strerror_r strerror_r_core strerror_resolve; do
+for symbol in __gnu_strerror_r strerror_r strerror_r_core strerror_resolve; do
   grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
     fail "missing prefixed definition: $symbol"
 done
@@ -182,4 +182,4 @@ UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
   cargo run --quiet --manifest-path "$dir/Cargo.toml" -- "$fixture"
 cargo fmt --manifest-path "$dir/Cargo.toml" -- --check
 
-echo 'bionic-strerror-facade: PASS demand=1 XSI=int GNU=__gnu_strerror_r messages=132 errno-census=80 unknown+NUL+ERANGE host-errno-preserved AndroidELF imports=2 AOSP-differential ASan+UBSan'
+echo 'bionic-strerror-facade: PASS demand=1 XSI=int GNU=__gnu_strerror_r+caller-buffer messages=132 errno-census=80 unknown+NUL+ERANGE host-errno-preserved AndroidELF imports=2 AOSP-differential ASan+UBSan'

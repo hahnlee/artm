@@ -1,6 +1,7 @@
 #include "darwin_framework_system_natives.h"
 
 #include <mach/mach_time.h>
+#include <sys/resource.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -62,7 +63,17 @@ jlong MachTicksToNanos(std::uint64_t ticks) {
       timebase.denom);
 }
 
+jlong TimevalToMillis(const timeval& value) {
+  return static_cast<jlong>(value.tv_sec) * 1000 + value.tv_usec / 1000;
+}
+
 }  // namespace
+
+jlong process_get_elapsed_cpu_time(JNIEnv*, jclass) {
+  rusage usage{};
+  if (getrusage(RUSAGE_SELF, &usage) != 0) return 0;
+  return TimevalToMillis(usage.ru_utime) + TimevalToMillis(usage.ru_stime);
+}
 
 jint event_log_write_event(JNIEnv*, jclass, jint, jobjectArray) {
   // ServiceManager latency diagnostics are optional on the host; preserve

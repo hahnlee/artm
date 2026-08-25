@@ -38,7 +38,10 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/bionic-stdio.XXXXXX")";trap 'find "$tmp" -dept
 clang -arch arm64 -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -std=c17 -O2 -Wall -Wextra -Werror -Wpedantic -I"$dir/include" -c "$dir/src/shims.c" -o "$tmp/shims.o"
 nm -u "$tmp/shims.o"|sed 's/^[[:space:]]*//'|sort >"$tmp/u";cat >"$tmp/e" <<'EOF'
 ___error
+_darwin_art_bionic_errno_load
 _darwin_art_bionic_stdio_fclose_core
+_darwin_art_bionic_stdio_feof_core
+_darwin_art_bionic_stdio_ferror_core
 _darwin_art_bionic_stdio_fflush_core
 _darwin_art_bionic_stdio_fileno_core
 _darwin_art_bionic_stdio_fopen_core
@@ -57,18 +60,25 @@ awk '$7=="UND"&&$8!=""{print $8}' "$tmp/d"|sort -u >"$tmp/iu";cat >"$tmp/ie" <<'
 __errno
 __sF
 fclose
+ferror
 fflush
 fileno
 fopen
 fputc
+fputs
 fputwc
 fread
 fseek
 fseeko
+ftell
 ftello
 fwrite
 getc
 getwc
+setbuf
+stderr
+stdin
+stdout
 ungetc
 ungetwc
 EOF
@@ -82,4 +92,4 @@ UBSAN_OPTIONS=halt_on_error=1 BIONIC_STDIO_C_SANITIZER=undefined CARGO_TARGET_DI
 BIONIC_STDIO_C_SANITIZER=thread CARGO_TARGET_DIR="$tmp/tsan" cargo run --quiet --manifest-path "$integration" -- "$fixture"
 cargo fmt --manifest-path "$dir/Cargo.toml" -- --check
 cargo fmt --manifest-path "$integration" -- --check;clean
-echo 'bionic-stdio-facade: PASS imports=17 FILE152 __sF binary+wide lease close/seek/reset+reuse C-ASan C-UBSan C-TSan target-clean'
+echo 'bionic-stdio-facade: PASS imports=18 FILE152 API23-stream-objects fputs binary+wide lease close/seek/reset+reuse C-ASan C-UBSan C-TSan target-clean'

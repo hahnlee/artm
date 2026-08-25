@@ -123,6 +123,10 @@ int darwin_art_bionic_open(const char* path, int flags, uint32_t mode);
 int darwin_art_bionic_openat(int directory_fd, const char* path, int flags,
                              uint32_t mode);
 intptr_t darwin_art_bionic_read(int fd, void* buffer, size_t count);
+intptr_t darwin_art_bionic_write(int fd, const void* buffer, size_t count);
+intptr_t darwin_art_bionic___write_chk(int fd, const void* buffer,
+                                       size_t count, size_t buffer_size);
+int64_t darwin_art_bionic_lseek(int fd, int64_t offset, int whence);
 int darwin_art_bionic_close(int fd);
 int darwin_art_bionic_fstat(int fd, DarwinArtAndroidStat* status);
 int darwin_art_bionic_stat(const char* path, DarwinArtAndroidStat* status);
@@ -168,6 +172,9 @@ int darwin_art_bionic_fs_open_core(const char* path, int flags, uint32_t mode);
 int darwin_art_bionic_fs_openat_core(int directory_fd, const char* path,
                                      int flags, uint32_t mode);
 intptr_t darwin_art_bionic_fs_read_core(int fd, void* buffer, size_t count);
+intptr_t darwin_art_bionic_fs_write_core(int fd, const void* buffer,
+                                         size_t count);
+int64_t darwin_art_bionic_fs_lseek_core(int fd, int64_t offset, int whence);
 int darwin_art_bionic_fs_close_core(int fd);
 int darwin_art_bionic_fs_fstat_core(int fd, DarwinArtAndroidStat* status);
 int darwin_art_bionic_fs_stat_core(const char* path,

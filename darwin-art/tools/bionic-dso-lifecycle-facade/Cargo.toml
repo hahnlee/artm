@@ -5,6 +5,14 @@ edition = "2024"
 publish = false
 build = "build.rs"
 
+[features]
+standalone-test-stubs = []
+
+[[bin]]
+name = "bionic-dso-lifecycle-facade"
+path = "src/main.rs"
+required-features = ["standalone-test-stubs"]
+
 [dependencies]
 darwin-art-elf-loader = { path = "../../crates/darwin-art-elf-loader" }
 

@@ -42,6 +42,16 @@ jlong BinderClearCallingIdentity() { return 0; }
 void BinderRestoreCallingIdentity(jlong) {}
 void BinderFlushPendingCommands() {}
 
+thread_local jint g_binder_thread_strict_mode_policy = 0;
+
+jint BinderGetThreadStrictModePolicy() {
+  return g_binder_thread_strict_mode_policy;
+}
+
+void BinderSetThreadStrictModePolicy(jint policy) {
+  g_binder_thread_strict_mode_policy = policy;
+}
+
 struct DarwinInputChannelState {
   explicit DarwinInputChannelState(std::string channel_name)
       : name(std::move(channel_name)) {}
@@ -563,6 +573,10 @@ bool RegisterFrameworkBinderNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&BinderRestoreCallingIdentity)},
       {const_cast<char*>("flushPendingCommands"), const_cast<char*>("()V"),
        reinterpret_cast<void*>(&BinderFlushPendingCommands)},
+      {const_cast<char*>("getThreadStrictModePolicy"), const_cast<char*>("()I"),
+       reinterpret_cast<void*>(&BinderGetThreadStrictModePolicy)},
+      {const_cast<char*>("setThreadStrictModePolicy"), const_cast<char*>("(I)V"),
+       reinterpret_cast<void*>(&BinderSetThreadStrictModePolicy)},
   };
   if (!Register(env, "android/os/Binder", binder_methods,
                 static_cast<jint>(std::size(binder_methods)))) {

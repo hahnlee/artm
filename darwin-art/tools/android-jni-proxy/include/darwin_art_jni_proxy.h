@@ -11,6 +11,7 @@ extern "C" {
 enum {
   DARWIN_ART_JNI_OK = 0,
   DARWIN_ART_JNI_ERR = -1,
+  DARWIN_ART_JNI_EDETACHED = -2,
   DARWIN_ART_JNI_EVERSION = -3,
   DARWIN_ART_JNI_VERSION_1_6 = 0x00010006,
   DARWIN_ART_JNI_PROXY_STORAGE_SIZE = 256,
@@ -29,6 +30,9 @@ typedef struct DarwinArtJniBackend {
    * receives this pointer or its function table. It may be null when the
    * forwarding subset is intentionally unavailable. */
   void* (*current_env)(void* context);
+  int32_t (*attach_current_thread)(void* context, void* arguments,
+                                   int32_t as_daemon);
+  int32_t (*detach_current_thread)(void* context);
   void* (*find_class)(void* context, const char* name);
   /* methods[].function points to Android ELF code. The backend must retain its
    * Android ABI ownership and route later calls through a signature-audited
@@ -37,6 +41,14 @@ typedef struct DarwinArtJniBackend {
                               const DarwinArtJniNativeMethod* methods,
                               int32_t count);
   int32_t (*throw_new)(void* context, void* clazz, const char* message);
+  /* Android arm64 and Darwin arm64 use different va_list layouts. These
+   * callbacks retain the Java descriptor at method lookup time and translate
+   * guest ...V calls to the host's jvalue[] (...A) ABI. */
+  void* (*get_method_id)(void* context, void* clazz, const char* name,
+                         const char* signature, int32_t is_static);
+  uint64_t (*call_method_v)(void* context, void* object, void* method,
+                            void* android_va_list, int32_t return_shorty,
+                            int32_t is_static);
 } DarwinArtJniBackend;
 
 typedef struct DarwinArtJniProxy DarwinArtJniProxy;

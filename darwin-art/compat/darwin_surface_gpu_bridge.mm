@@ -5,10 +5,14 @@
 #include "darwin_surface_internal.h"
 
 #include "include/core/SkColorSpace.h"
+#include "include/core/SkCanvas.h"
+#include "include/core/SkImage.h"
+#include "include/core/SkSamplingOptions.h"
 #include "include/core/SkSurface.h"
 #include "include/gpu/ganesh/GrBackendSurface.h"
 #include "include/gpu/ganesh/GrDirectContext.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
+#include "include/gpu/ganesh/SkImageGanesh.h"
 #include "include/gpu/ganesh/mtl/GrMtlBackendContext.h"
 #include "include/gpu/ganesh/mtl/GrMtlBackendSurface.h"
 #include "include/gpu/ganesh/mtl/GrMtlDirectContext.h"
@@ -26,6 +30,8 @@ namespace {
 
 struct DarwinArtGpuState {
   sk_sp<GrDirectContext> context;
+  sk_sp<SkImage> embedded_image;
+  id<MTLTexture> embedded_texture = nil;
 };
 
 bool IsMainThread() {
@@ -133,11 +139,59 @@ void darwin_art_surface_set_active_gpu(DarwinArtSurface* surface) {
   g_active_gpu_surface = surface;
 }
 
+bool darwin_art_surface_gpu_composite_embedded(
+    DarwinArtSurface* surface, void* sk_canvas) {
+  auto* state = State(surface);
+  auto* canvas = static_cast<SkCanvas*>(sk_canvas);
+  if (surface == nullptr || state == nullptr || canvas == nullptr ||
+      surface->embedded_surface_frame.load(std::memory_order_acquire) == 0) {
+    return false;
+  }
+  const uint32_t width =
+      surface->embedded_surface_width.load(std::memory_order_relaxed);
+  const uint32_t height =
+      surface->embedded_surface_height.load(std::memory_order_acquire);
+  if (width == 0 || height == 0 || surface->io_surface_texture == nil) {
+    return false;
+  }
+  if (state->embedded_image == nullptr ||
+      state->embedded_texture != surface->io_surface_texture) {
+    GrMtlTextureInfo texture_info = {};
+    texture_info.fTexture.retain(
+        (__bridge GrMTLHandle)surface->io_surface_texture);
+    const GrBackendTexture backend = GrBackendTextures::MakeMtl(
+        surface->width, surface->height, skgpu::Mipmapped::kNo, texture_info,
+        "Darwin ART SurfaceView IOSurface");
+    state->embedded_image = SkImages::BorrowTextureFrom(
+        state->context.get(), backend, kBottomLeft_GrSurfaceOrigin,
+        kBGRA_8888_SkColorType, kPremul_SkAlphaType,
+        SkColorSpace::MakeSRGB());
+    if (state->embedded_image == nullptr) return false;
+    state->embedded_texture = surface->io_surface_texture;
+  }
+  const int32_t x =
+      surface->embedded_surface_x.load(std::memory_order_relaxed);
+  const int32_t y =
+      surface->embedded_surface_y.load(std::memory_order_relaxed);
+  const SkRect source = SkRect::MakeWH(
+      std::min<uint32_t>(width, surface->width),
+      std::min<uint32_t>(height, surface->height));
+  const SkRect destination = SkRect::MakeXYWH(
+      static_cast<SkScalar>(x), static_cast<SkScalar>(y), source.width(),
+      source.height());
+  canvas->drawImageRect(state->embedded_image, source, destination,
+                        SkSamplingOptions(SkFilterMode::kLinear), nullptr,
+                        SkCanvas::kStrict_SrcRectConstraint);
+  return true;
+}
+
 void darwin_art_surface_gpu_forget(DarwinArtSurface* surface) {
   if (surface == nullptr) return;
   auto* state = State(surface);
   if (state != nullptr) {
     state->context->flushAndSubmit();
+    state->embedded_image.reset();
+    state->embedded_texture = nil;
     state->context->abandonContext();
     delete state;
     surface->gpu_state = nullptr;

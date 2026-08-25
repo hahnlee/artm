@@ -10,8 +10,9 @@ use std::sync::Arc;
 
 /// An explicitly populated, closed ELF namespace.
 ///
-/// Every ELF object is supplied as bytes under its exact `DT_SONAME`. No path search, dyld
-/// lookup, `dlopen`, or process-global symbol fallback is performed.
+/// Every ELF object is supplied under its Android logical SONAME. An embedded
+/// `DT_SONAME`, when present, must match; Android path-loaded DSOs may omit it.
+/// No path search, dyld lookup, `dlopen`, or process-global symbol fallback is performed.
 #[derive(Default)]
 pub struct ClosedElfNamespace {
     sources: HashMap<String, Vec<u8>>,
@@ -84,7 +85,7 @@ impl ClosedElfNamespace {
         Self::default()
     }
 
-    /// Adds one immutable ELF byte source. The embedded `DT_SONAME` is checked at load time.
+    /// Adds one immutable ELF byte source. An embedded `DT_SONAME` is checked at load time.
     pub fn add_elf(
         &mut self,
         soname: impl Into<String>,
@@ -184,6 +185,84 @@ impl ClosedElfNamespace {
                         soname: builder.objects[index].soname.clone(),
                         message,
                     })?;
+            }
+        }
+
+        if let Ok(specification) = std::env::var("DARWIN_ART_ELF_PREFLIGHT_I32") {
+            if let Some((soname, symbol)) = specification.split_once(':') {
+                if let Some(object) = builder
+                    .objects
+                    .iter()
+                    .find(|object| object.soname == soname)
+                {
+                    if soname == "libcrypto.so" {
+                        let base =
+                            object
+                                .staged
+                                .image
+                                .debug_mapped_pointer(0)
+                                .map_err(|source| NamespaceError::Load {
+                                    soname: object.soname.clone(),
+                                    source,
+                                })?;
+                        for slot in [
+                            0x17ab70, 0x17abd0, 0x17abe0, 0x17ac38, 0x17ad90, 0x17adf8, 0x17ae00,
+                            0x17ae08, 0x17ae10,
+                        ] {
+                            let value = object.staged.image.debug_read_mapped_u64(slot).map_err(
+                                |source| NamespaceError::Load {
+                                    soname: object.soname.clone(),
+                                    source,
+                                },
+                            )?;
+                            eprintln!(
+                                "DARWIN ELF preflight slot: base={base:#x} slot={slot:#x} value={value:#x} offset={:#x}",
+                                value.wrapping_sub(base as u64)
+                            );
+                        }
+                        let instructions =
+                            object.staged.image.debug_read_mapped_u64(0xd35dc).map_err(
+                                |source| NamespaceError::Load {
+                                    soname: object.soname.clone(),
+                                    source,
+                                },
+                            )?;
+                        let (guard_address, guard_value) = object.staged.image.debug_stack_guard();
+                        let entry = object.staged.image.debug_read_mapped_u64(0xd35b4).map_err(
+                            |source| NamespaceError::Load {
+                                soname: object.soname.clone(),
+                                source,
+                            },
+                        )?;
+                        let diagnostic_patch =
+                            object.staged.image.debug_read_mapped_u64(0xd36ec).map_err(
+                                |source| NamespaceError::Load {
+                                    soname: object.soname.clone(),
+                                    source,
+                                },
+                            )?;
+                        let epilogue = object.staged.image.debug_read_mapped_u64(0xd3940).map_err(
+                            |source| NamespaceError::Load {
+                                soname: object.soname.clone(),
+                                source,
+                            },
+                        )?;
+                        eprintln!(
+                            "DARWIN ELF preflight guard: address={guard_address:#x} value={guard_value:#x} entry={entry:#018x} instructions={instructions:#018x} diagnostic={diagnostic_patch:#018x} epilogue={epilogue:#018x}"
+                        );
+                    }
+                    let result = object
+                        .staged
+                        .image
+                        .call_exported_i32_before_initializers(symbol)
+                        .map_err(|source| NamespaceError::Load {
+                            soname: object.soname.clone(),
+                            source,
+                        })?;
+                    eprintln!(
+                        "DARWIN ELF preflight: soname={soname} symbol={symbol} result={result}"
+                    );
+                }
             }
         }
 
@@ -344,7 +423,11 @@ impl GraphBuilder {
             soname: soname.to_owned(),
             source,
         })?;
-        if staged.image.soname() != Some(soname) {
+        if staged
+            .image
+            .soname()
+            .is_some_and(|embedded| embedded != soname)
+        {
             return Err(NamespaceError::SonameMismatch {
                 supplied: soname.to_owned(),
                 embedded: staged.image.soname().map(ToOwned::to_owned),

@@ -159,6 +159,10 @@ for symbol in "${symbols[@]}" fs_resolve; do
   grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
     fail "missing prefixed definition $symbol"
 done
+for symbol in __read_chk __write_chk; do
+  grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
+    fail "missing fortified definition $symbol"
+done
 if awk '$2 ~ /^[TDS]$/ {print $3}' <<<"$definitions" |
    grep -Ev '^_darwin_art_bionic_' >/dev/null; then
   fail 'unprefixed global definition escaped filesystem facade'

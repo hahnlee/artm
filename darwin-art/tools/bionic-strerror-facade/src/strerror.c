@@ -90,6 +90,23 @@ int darwin_art_bionic_strerror_r(int android_errno, char* buffer, size_t size) {
   return result;
 }
 
+char* darwin_art_bionic___gnu_strerror_r(int android_errno, char* buffer,
+                                        size_t size) {
+  const int saved_host_errno = errno;
+  (void)darwin_art_bionic_strerror_r_core(android_errno, buffer, size);
+  errno = saved_host_errno;
+  return buffer;
+}
+
+char* darwin_art_bionic_strerror(int android_errno) {
+  static _Thread_local char message[64];
+  const int saved_host_errno = errno;
+  (void)darwin_art_bionic_strerror_r_core(android_errno, message,
+                                          sizeof(message));
+  errno = saved_host_errno;
+  return message;
+}
+
 static int NameEquals(const char* left, const char* right) {
   if (left == NULL || right == NULL) return 0;
   while (*left == *right && *left != '\0') {
@@ -101,7 +118,11 @@ static int NameEquals(const char* left, const char* right) {
 
 DarwinArtBionicStrerrorFunction darwin_art_bionic_strerror_resolve(
     const char* import_name) {
-  return NameEquals(import_name, "strerror_r")
-             ? (DarwinArtBionicStrerrorFunction)darwin_art_bionic_strerror_r
-             : NULL;
+  if (NameEquals(import_name, "__gnu_strerror_r"))
+    return (DarwinArtBionicStrerrorFunction)darwin_art_bionic___gnu_strerror_r;
+  if (NameEquals(import_name, "strerror"))
+    return (DarwinArtBionicStrerrorFunction)darwin_art_bionic_strerror;
+  if (NameEquals(import_name, "strerror_r"))
+    return (DarwinArtBionicStrerrorFunction)darwin_art_bionic_strerror_r;
+  return NULL;
 }

@@ -86,6 +86,7 @@ pub(super) fn adapter_jobs(
                 "tools/bionic-stdio-facade/include",
                 "tools/bionic-ioctl-facade/include",
                 "tools/bionic-strftime-facade/include",
+                "tools/bionic-vm-facade/include",
             ] {
                 adapter_command.arg("-I").arg(staged.root.join(include));
             }

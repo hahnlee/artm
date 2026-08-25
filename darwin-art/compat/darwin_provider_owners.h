@@ -13,6 +13,7 @@ enum class Kind : uint32_t {
   Ioctl = 4,
   Strftime = 5,
   Sendfile = 6,
+  Vm = 7,
 };
 
 using AcquireHook = int32_t (*)(void* context, uint32_t kind, int32_t authority_fd);
@@ -45,6 +46,9 @@ void release_strftime();
 
 bool acquire_sendfile(std::string* error);
 void release_sendfile();
+
+bool acquire_vm(std::string* error);
+void release_vm();
 
 }  // namespace darwin_art::providers
 

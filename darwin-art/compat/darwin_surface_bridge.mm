@@ -552,6 +552,58 @@ __attribute__((weak)) DarwinArtSurface* darwin_art_surface_active_gpu() {
 __attribute__((weak)) void darwin_art_surface_set_active_gpu(
     DarwinArtSurface*) {}
 
+bool darwin_art_surface_gpu_acquire_iosurface(
+    DarwinArtSurface* surface, void** iosurface, uint32_t* width,
+    uint32_t* height) {
+  if (surface == nullptr || surface->io_surface == nullptr ||
+      iosurface == nullptr || width == nullptr || height == nullptr) {
+    return false;
+  }
+  CFRetain(surface->io_surface);
+  *iosurface = surface->io_surface;
+  *width = surface->width;
+  *height = surface->height;
+  return true;
+}
+
+void darwin_art_surface_gpu_release_iosurface(void* iosurface) {
+  if (iosurface != nullptr) CFRelease(static_cast<CFTypeRef>(iosurface));
+}
+
+void darwin_art_surface_gpu_configure_embedded(
+    DarwinArtSurface* surface, int32_t x, int32_t y, uint32_t width,
+    uint32_t height) {
+  if (surface == nullptr) return;
+  surface->embedded_surface_x.store(x, std::memory_order_relaxed);
+  surface->embedded_surface_y.store(y, std::memory_order_relaxed);
+  surface->embedded_surface_width.store(width, std::memory_order_relaxed);
+  surface->embedded_surface_height.store(height, std::memory_order_release);
+}
+
+bool darwin_art_surface_gpu_get_embedded_geometry(
+    DarwinArtSurface* surface, int32_t* x, int32_t* y, uint32_t* width,
+    uint32_t* height) {
+  if (surface == nullptr || x == nullptr || y == nullptr || width == nullptr ||
+      height == nullptr) {
+    return false;
+  }
+  *height = surface->embedded_surface_height.load(std::memory_order_acquire);
+  *width = surface->embedded_surface_width.load(std::memory_order_relaxed);
+  *x = surface->embedded_surface_x.load(std::memory_order_relaxed);
+  *y = surface->embedded_surface_y.load(std::memory_order_relaxed);
+  return *width > 0 && *height > 0;
+}
+
+void darwin_art_surface_gpu_publish_embedded(DarwinArtSurface* surface) {
+  if (surface == nullptr) return;
+  surface->embedded_surface_frame.fetch_add(1, std::memory_order_release);
+}
+
+__attribute__((weak)) bool darwin_art_surface_gpu_composite_embedded(
+    DarwinArtSurface*, void*) {
+  return false;
+}
+
 DarwinArtSurfaceResult darwin_art_surface_map_producer(
     DarwinArtSurface* surface,
     DarwinArtSurfaceProducerMapping* out_mapping) {
@@ -823,6 +875,49 @@ DarwinArtSurfaceResult darwin_art_surface_set_title(
   }
   if (surface->window != nil) surface->window.title = WindowTitle(title);
   return DARWIN_ART_SURFACE_OK;
+}
+
+char* darwin_art_host_open_image_document(void) {
+  if (!IsMainThread()) return nullptr;
+  @autoreleasepool {
+    NSOpenPanel* panel = [NSOpenPanel openPanel];
+    panel.canChooseFiles = YES;
+    panel.canChooseDirectories = NO;
+    panel.allowsMultipleSelection = NO;
+    panel.resolvesAliases = YES;
+    panel.title = @"Open image";
+    panel.prompt = @"Open";
+    panel.allowedFileTypes = @[@"jpg", @"jpeg", @"png"];
+    if ([panel runModal] != NSModalResponseOK || panel.URL == nil) {
+      return nullptr;
+    }
+    const char* path = panel.URL.fileSystemRepresentation;
+    return path == nullptr ? nullptr : strdup(path);
+  }
+}
+
+char* darwin_art_host_save_image_document(const char* suggested_name) {
+  if (!IsMainThread()) return nullptr;
+  @autoreleasepool {
+    NSSavePanel* panel = [NSSavePanel savePanel];
+    panel.canCreateDirectories = YES;
+    panel.title = @"Export image";
+    panel.prompt = @"Export";
+    panel.allowedFileTypes = @[@"jpg", @"jpeg", @"png"];
+    if (suggested_name != nullptr && suggested_name[0] != '\0') {
+      NSString* name = [NSString stringWithUTF8String:suggested_name];
+      if (name != nil) panel.nameFieldStringValue = name;
+    }
+    if ([panel runModal] != NSModalResponseOK || panel.URL == nil) {
+      return nullptr;
+    }
+    const char* path = panel.URL.fileSystemRepresentation;
+    return path == nullptr ? nullptr : strdup(path);
+  }
+}
+
+void darwin_art_host_document_path_free(char* path) {
+  free(path);
 }
 
 bool darwin_art_surface_get_size(DarwinArtSurface* surface,

@@ -267,8 +267,10 @@ smoke="$build/full-link-smoke"
   -I"$root/tools/bionic-provider-namespace/generated" \
   -I"$root/tools/bionic-fs-facade/include" \
   -I"$root/tools/bionic-ioctl-facade/include" \
+  -I"$root/tools/bionic-central-fd-broker/include" \
   -I"$root/tools/bionic-socket-broker-adapter/include" \
   -I"$root/tools/bionic-dns-facade/include" \
+  -I"$root/tools/bionic-vm-facade/include" \
   -I"$root/_aosp/system/logging/liblog/include" \
   "$module/full_link_smoke.cc" -Wl,-force_load,"$binary128" \
   "$native" "$float" "$rust" \
@@ -305,6 +307,7 @@ _darwin_art_bionic_strerror_resolve
 _darwin_art_bionic_syslog_resolve
 _darwin_art_bionic_syscall_resolve
 _darwin_art_bionic_time_resolve
+_darwin_art_bionic_vm_resolve
 _darwin_art_bionic_swprintf_resolve
 _darwin_art_bionic_ioctl_resolve
 _darwin_art_bionic_wide_float_resolve
@@ -383,6 +386,10 @@ for symbol in _darwin_art_bionic_malloc_result _darwin_art_bionic_free \
               _darwin_art_bionic_wide_float_resolve __Z16android_icu_initv \
               _u_hasBinaryProperty_76 \
               _darwin_art_bionic_binary128_conversion_resolve \
+              _darwin_art_bionic_vm_resolve \
+              _darwin_art_bionic_vm_process_install \
+              _darwin_art_bionic_vm_process_uninstall \
+              _darwin_art_bionic_vm_mmap_core \
               _darwin_art_bionic_strtold _darwin_art_bionic_strtold_l \
               _darwin_art_bionic_wcstold _darwin_art_aosp_strtorQ; do
   [[ "$(grep -Ec " [TDS] ${symbol}$" "$build/ownership-symbols.txt")" == 1 ]] || {
@@ -394,4 +401,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=33 bind_builtins=sealed routes=243 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=34 bind_builtins=sealed routes=371 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'

@@ -23,5 +23,6 @@ jlong system_clock_elapsed_realtime(JNIEnv*, jclass);
 jlong system_clock_elapsed_realtime_nanos(JNIEnv*, jclass);
 jlong system_clock_uptime_millis(JNIEnv*, jclass);
 jlong system_clock_uptime_nanos(JNIEnv*, jclass);
+jlong process_get_elapsed_cpu_time(JNIEnv*, jclass);
 
 }  // namespace darwin_art::framework_system

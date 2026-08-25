@@ -24,15 +24,16 @@ fixture="$tmp/libnetwork_stack_acceptance.so"
   -fuse-ld=lld -Wl,--build-id=none -Wl,--hash-style=sysv -Wl,-z,now \
   -Wl,-z,norelro -Wl,-z,max-page-size=16384 \
   -Wl,-soname,libnetwork_stack_acceptance.so \
-  -Wl,--version-script,"$root/tools/bionic-network-stack-acceptance/probes/exports.map" \
-  "$root/tools/bionic-network-stack-acceptance/probes/fixture.c" -lc -o "$fixture"
+  -Wl,--version-script,"$dir/probes/exports.map" \
+  "$root/tools/bionic-network-stack-acceptance/probes/fixture.c" \
+  "$dir/probes/pipe_fixture.c" -lc -o "$fixture"
 "$readelf" --dyn-syms --wide "$fixture" |
   awk '$7=="UND"&&$8!=""{name=$8;sub(/@.*/,"",name);print name}' | sort -u \
   > "$tmp/imports"
-[[ "$(wc -l < "$tmp/imports" | tr -d ' ')" == 8 ]] || fail 'fixture import count drift'
+[[ "$(wc -l < "$tmp/imports" | tr -d ' ')" == 12 ]] || fail 'fixture import count drift'
 while IFS= read -r symbol; do
   case "$symbol" in
-    __errno|getaddrinfo|freeaddrinfo|socket|connect|send|recv|close) ;;
+    __errno|getaddrinfo|freeaddrinfo|socket|connect|send|recv|close|pipe|poll|read|write) ;;
     *) fail "unexpected fixture import: $symbol" ;;
   esac
 done < "$tmp/imports"
@@ -89,4 +90,4 @@ if rg -n 'kTokenMarker|g_slots|F_DUPFD_CLOEXEC' "$dir/src/adapter.cc" >/dev/null
 fi
 mkdir -p "$root/_build/bionic-socket-broker-adapter"
 cp "$fixture" "$root/_build/bionic-socket-broker-adapter/"
-echo 'bionic-socket-broker-adapter: PASS AndroidELF=HTTP broker=v3 token=central socket+connect+send+recv+close DNS=numeric lifecycle=quiescent deactivate-race=100 Internet=no ASan+UBSan+TSan'
+echo 'bionic-socket-broker-adapter: PASS AndroidELF=HTTP+pipe-poll broker=v4 token=central socket+pipe+read+write+poll+close DNS=numeric lifecycle=quiescent deactivate-race=100 Internet=no ASan+UBSan+TSan'

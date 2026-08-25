@@ -31,11 +31,11 @@ struct ProviderCallbacks {
 }
 
 struct LeaseState {
-    counts: [u32; 7],
+    counts: [u32; 8],
     /// A provider transition is reserved before crossing the native ABI. This
     /// keeps concurrent graph loads from both observing a zero count and
     /// installing the same process-global provider.
-    transitioning: [bool; 7],
+    transitioning: [bool; 8],
     in_flight: usize,
     clearing: bool,
     /// Once the process-global callback table has been cleared, this bridge
@@ -59,8 +59,8 @@ impl ProviderLeaseTable {
                 clear: Box::new(clear),
             },
             state: Mutex::new(LeaseState {
-                counts: [0; 7],
-                transitioning: [false; 7],
+                counts: [0; 8],
+                transitioning: [false; 8],
                 in_flight: 0,
                 clearing: false,
                 cleared: false,

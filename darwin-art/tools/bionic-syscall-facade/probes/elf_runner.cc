@@ -72,10 +72,13 @@ int main(int argc, char** argv) {
         "run initializers");
 
   using Gettid = long (*)();
+  using Getrandom = long (*)(void*, uint64_t, uint32_t);
   using Wait = long (*)(int32_t*, int32_t, int64_t);
   using Wake = long (*)(int32_t*);
   using Readable = long (*)(const void*);
   Gettid gettid = Lookup<Gettid>(image, "SyscallFixtureGettid");
+  Getrandom getrandom =
+      Lookup<Getrandom>(image, "SyscallFixtureGetrandom");
   Wait wait = Lookup<Wait>(image, "SyscallFixtureWait");
   Wake wake_one = Lookup<Wake>(image, "SyscallFixtureWakeOne");
   Wake wake_all = Lookup<Wake>(image, "SyscallFixtureWakeAll");
@@ -101,6 +104,25 @@ int main(int argc, char** argv) {
   std::set<long> distinct(tids.begin(), tids.end());
   Check(distinct.size() == tids.size() && distinct.count(main_tid) == 0,
         "unique per-thread gettid");
+
+  uint8_t random_bytes[32];
+  std::fill(std::begin(random_bytes), std::end(random_bytes), uint8_t{0xa5});
+  darwin_art_bionic_errno_store(0);
+  Check(getrandom(random_bytes, sizeof(random_bytes), 1) ==
+            static_cast<long>(sizeof(random_bytes)) &&
+            darwin_art_bionic_errno_load() == 0 &&
+            !std::all_of(std::begin(random_bytes), std::end(random_bytes),
+                         [](uint8_t byte) { return byte == 0xa5; }),
+        "getrandom host CSPRNG and GRND_NONBLOCK");
+  Check(getrandom(nullptr, 0, 0) == 0, "getrandom empty buffer");
+  darwin_art_bionic_errno_store(0);
+  Check(getrandom(random_bytes, sizeof(random_bytes), 0x80000000u) == -1 &&
+            darwin_art_bionic_errno_load() == 22,
+        "getrandom unknown flags EINVAL");
+  darwin_art_bionic_errno_store(0);
+  Check(getrandom(random_bytes, sizeof(random_bytes), 2u | 4u) == -1 &&
+            darwin_art_bionic_errno_load() == 22,
+        "getrandom RANDOM plus INSECURE EINVAL");
 
   alignas(4) int32_t word = 0;
   constexpr size_t kWaiters = 4;
@@ -236,6 +258,10 @@ int main(int argc, char** argv) {
   void* guard = mmap(nullptr, 16384, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
   Check(guard != MAP_FAILED, "guard map");
   darwin_art_bionic_errno_store(0);
+  Check(getrandom(guard, 1, 0) == -1 &&
+            darwin_art_bionic_errno_load() == 14,
+        "getrandom guard EFAULT");
+  darwin_art_bionic_errno_store(0);
   Check(wake_one(static_cast<int32_t*>(guard)) == -1 &&
             darwin_art_bionic_errno_load() == 14,
         "futex wake guard EFAULT");
@@ -269,6 +295,7 @@ int main(int argc, char** argv) {
   std::fprintf(stderr,
                "bionic-syscall-facade: ELF PASS gettid=threads futex="
                "wait+wake-one+wake-all timeout=monotonic-spurious "
+               "getrandom=host-csprng "
                "capacity=257 invalid-wake=EFAULT rt_sigprocmask=readability "
                "unknown=closed\n");
   return 0;

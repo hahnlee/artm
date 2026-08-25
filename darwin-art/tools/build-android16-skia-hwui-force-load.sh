@@ -14,6 +14,8 @@ freetype="$project_root/_aosp/external/freetype"
 freetype_archive="$codecs_dir/libft2-darwin.a"
 libpng_archive="$codecs_dir/libpng-darwin.a"
 zlib_archive="$codecs_dir/libz-darwin.a"
+libjpeg_root="$project_root/_aosp/external/libjpeg-turbo"
+libjpeg_archive="$project_root/_build/codec-foundation/libjpeg-darwin.a"
 liblog_archive="$project_root/_build/graphics-foundations/liblog-darwin.a"
 libcutils_archive="$project_root/_build/graphics-foundations/libcutils-darwin.a"
 libcutils_include="$project_root/_aosp/system/core/libcutils/include"
@@ -53,6 +55,7 @@ verify_sha "$skia/client_utils/android/FrontBufferedStream.cpp" \
 verify_sha "$coretext_patch" "$DARWIN_CORETEXT_PATCH_SHA256"
 
 required_archives=("$freetype_archive" "$libpng_archive" "$zlib_archive" \
+  "$libjpeg_archive" \
   "$liblog_archive" "$libcutils_archive")
 for archive in "${required_archives[@]}"; do
   [[ -f "$archive" ]] || fail_input "missing module archive $archive"
@@ -89,7 +92,7 @@ skia_system_freetype2_include_path=\"$freetype/include\" \
 skia_system_freetype2_lib=\"$freetype_archive\" \
 skia_use_fontconfig=false skia_use_harfbuzz=false skia_use_icu=false \
 skia_use_perfetto=false skia_disable_tracing=false skia_use_gl=false \
-skia_use_metal=false skia_use_vulkan=false skia_use_libjpeg_turbo_decode=false \
+skia_use_metal=false skia_use_vulkan=false skia_use_libjpeg_turbo_decode=true \
 skia_use_libjpeg_turbo_encode=false skia_use_no_jpeg_encode=true \
 skia_use_libpng_decode=true skia_use_libpng_encode=false \
 skia_use_no_png_encode=true skia_use_libwebp_decode=false \
@@ -99,7 +102,7 @@ skia_use_system_libpng=true skia_use_system_zlib=true \
 skia_use_dng_sdk=false skia_use_libheif=false skia_use_crabbyavif=false \
 skia_use_libjxl_decode=false skia_use_libavif=false skia_use_bidi=false \
 skia_use_libgrapheme=false skia_build_rust_targets=false \
-extra_cflags=[\"-I$libcutils_include\",\"-I$liblog_include\",\"-I$project_root/_aosp/external/libpng\",\"-I$project_root/_aosp/external/zlib\",\"-DSK_USER_CONFIG_HEADER=\\\"include/config/SkUserConfigManual.h\\\"\"]"
+extra_cflags=[\"-I$libcutils_include\",\"-I$liblog_include\",\"-I$libjpeg_root\",\"-I$project_root/_aosp/external/libpng\",\"-I$project_root/_aosp/external/zlib\",\"-DSK_USER_CONFIG_HEADER=\\\"include/config/SkUserConfigManual.h\\\"\"]"
 
 (cd "$shadow_skia" && "$gn" gen "$build_dir" --args="$gn_args")
 "$ninja" -C "$build_dir" skia
@@ -111,6 +114,7 @@ for required in \
   'skia_include_multiframe_procs = true' \
   'skia_use_fonthost_mac = false' \
   'skia_use_freetype = true' \
+  'skia_use_libjpeg_turbo_decode = true' \
   'skia_use_libpng_decode = true' \
   'skia_use_system_libpng = true' \
   'skia_use_system_zlib = true'; do
@@ -172,11 +176,13 @@ link_map="$build_dir/skia-hwui-force-load-smoke.map"
   -I"$liblog_include" -I"$skia" \
   "$project_root/probes/skia_hwui_force_load_smoke.cc" \
   -Wl,-force_load,"$archive" "$skcms" "$freetype_archive" \
-  "$libpng_archive" "$zlib_archive" "$liblog_archive" "$libcutils_archive" \
+  "$libpng_archive" "$zlib_archive" "$libjpeg_archive" \
+  "$liblog_archive" "$libcutils_archive" \
   -framework CoreGraphics -framework CoreFoundation -framework ImageIO \
   -Wl,-map,"$link_map" -o "$probe"
 
 for consumed_archive in "$freetype_archive" "$libpng_archive" "$zlib_archive" \
+                        "$libjpeg_archive" \
                         "$liblog_archive" "$libcutils_archive"; do
   grep -F "$consumed_archive(" "$link_map" >/dev/null ||
     fail_input "force-load executable did not consume $consumed_archive"

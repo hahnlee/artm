@@ -125,6 +125,15 @@ DarwinArtSurfaceResult darwin_art_surface_set_title(
     DarwinArtSurface* surface,
     const char* title);
 
+// Presents the native macOS document picker on the AppKit main thread.
+// The returned UTF-8 filesystem path is allocated with malloc and must be
+// released with darwin_art_host_document_path_free(). A null return means
+// cancellation or an invalid calling thread. Android code never sees this
+// host path directly; the runtime stages it behind a content:// provider.
+char* darwin_art_host_open_image_document(void);
+char* darwin_art_host_save_image_document(const char* suggested_name);
+void darwin_art_host_document_path_free(char* path);
+
 // Waits for the previous GPU presentation to finish, then locks the IOSurface
 // for a CPU producer. Only one producer mapping may be active per surface.
 DarwinArtSurfaceResult darwin_art_surface_map_producer(
@@ -165,6 +174,34 @@ DarwinArtSurfaceResult darwin_art_surface_gpu_end(
 // Runtime-owned GPU surface hand-off used by the in-process Android renderer.
 DarwinArtSurface* darwin_art_surface_active_gpu(void);
 void darwin_art_surface_set_active_gpu(DarwinArtSurface* surface);
+
+// SurfaceView/ANGLE zero-copy bridge. The acquired handle is a retained
+// IOSurfaceRef represented as an opaque pointer and must be released with the
+// matching function. ANGLE renders into that IOSurface, then publishes a
+// completed frame. HWUI samples the already-existing Metal texture in its
+// normal GPU pass; no CPU mapping or pixel copy occurs.
+bool darwin_art_surface_gpu_acquire_iosurface(
+    DarwinArtSurface* surface,
+    void** iosurface,
+    uint32_t* width,
+    uint32_t* height);
+void darwin_art_surface_gpu_release_iosurface(void* iosurface);
+void darwin_art_surface_gpu_configure_embedded(
+    DarwinArtSurface* surface,
+    int32_t x,
+    int32_t y,
+    uint32_t width,
+    uint32_t height);
+bool darwin_art_surface_gpu_get_embedded_geometry(
+    DarwinArtSurface* surface,
+    int32_t* x,
+    int32_t* y,
+    uint32_t* width,
+    uint32_t* height);
+void darwin_art_surface_gpu_publish_embedded(DarwinArtSurface* surface);
+bool darwin_art_surface_gpu_composite_embedded(
+    DarwinArtSurface* surface,
+    void* sk_canvas);
 
 // Runs the NSApplication event pump in slices no longer than 16 ms. seconds
 // must be finite and in the inclusive range 0..30. A zero duration performs

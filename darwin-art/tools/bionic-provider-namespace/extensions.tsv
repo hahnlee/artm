@@ -1,8 +1,33 @@
 soname	symbol	version	owner	rationale
+libc.so	_ctype_	LIBC	locale	legacy Bionic C-locale classification table required by Android NDK native consumers
+libc.so	__stack_chk_fail	LIBC	abort	Bionic stack protector failure terminates with SIGABRT
+libc.so	atof	LIBC	float-conversion	AOSP gdtoa-backed floating parser required by Android native consumers
+libc.so	atol	LIBC	leaf	fixed-width Android long integer parsing required by native consumers
+libc.so	memalign	LIBC	allocator	Android aligned allocation backed by the owned Darwin allocation domain
+libc.so	strcat	LIBC	leaf	byte-string concatenation required by Android native consumers
+libc.so	strdup	LIBC	allocator	owned duplicate allocation required by Android native consumers
+libc.so	strncat	LIBC	leaf	bounded byte-string concatenation required by Android native consumers
+libc.so	strncpy	LIBC	leaf	bounded byte-string copy required by Android native consumers
+libc.so	wmemcpy	LIBC	leaf	Android 32-bit wchar memory copy required by native consumers
+libc.so	wmemmove	LIBC	leaf	Android 32-bit wchar overlap-safe move required by native consumers
+libc.so	wmemset	LIBC	leaf	Android 32-bit wchar fill required by native consumers
+libc.so	rand	LIBC	process-state	process-owned thread-safe C pseudo-random state for Android native consumers
+libc.so	srand	LIBC	process-state	process-owned C pseudo-random seed state for Android native consumers
+libc.so	strerror	LIBC	strerror	Bionic errno-number message lookup with thread-local result storage
+libc.so	mmap	LIBC	vm	bounded anonymous-private Android mapping with W^X enforcement
+libc.so	munmap	LIBC	vm	whole-mapping retirement for VM-provider-owned mappings
+libc.so	madvise	LIBC	vm	bounded advice for VM-provider-owned mappings
+libc.so	mprotect	LIBC	vm	whole-mapping protection transition with W^X enforcement
 libc.so	pthread_create	LIBC	pthread	provider-owned thread creation required by general Android DSOs but absent from pinned libc++ imports
+libc.so	pthread_rwlock_init	LIBC	pthread	Android rwlock initialization required by Conscrypt
+libc.so	pthread_rwlock_destroy	LIBC	pthread	Android rwlock lifecycle required by Conscrypt
 libc.so	atoi	LIBC	leaf	integer parsing required by AOSP Skia native consumers
 libc.so	bsearch	LIBC	leaf	binary search required by AOSP Skia native consumers
+libc.so	qsort	LIBC	leaf	allocation-free heapsort required by Conscrypt and BoringSSL
 libc.so	stdout	LIBC	stdio	Android stdio stdout object required by AOSP native consumers
+libc.so	stdin	LIBC	stdio	Android API 23+ stdin FILE pointer object required by native consumers
+libc.so	stderr	LIBC	stdio	Android API 23+ stderr FILE pointer object required by Conscrypt and native consumers
+libc.so	fputs	LIBC	stdio	Android FILE string output required by Conscrypt and native consumers
 libc.so	strchr	LIBC	leaf	byte-string search required by AOSP Skia native consumers
 libc.so	strcspn	LIBC	leaf	byte-string search required by AOSP Skia native consumers
 libc.so	strcpy	LIBC	leaf	byte-string copy required by AOSP Skia native consumers
@@ -16,10 +41,27 @@ libc.so	malloc_usable_size	LIBC	allocator	Android allocation size compatibility 
 libc.so	vprintf	LIBC	stdio	Bounded Android vprintf compatibility for AOSP Skia native consumers
 libc.so	__register_atfork	LIBC	dso-lifecycle	Android libc startup hook required by native ELF constructors
 libc.so	connect	LIBC	socket	central-broker socket owner v3
+libc.so	fcntl	LIBC	central-fd-broker	Android descriptor and status flag control over the central virtual FD table
+libc.so	aligned_alloc	LIBC_P	allocator	Android C11 aligned allocation in the owned Darwin allocation domain
+libc.so	__cxa_thread_atexit_impl	LIBC	dso-lifecycle	per-thread C++ destructor registration retaining the owning Android ELF image
+libc.so	__gnu_strerror_r	LIBC	strerror	Bionic GNU strerror_r companion returning the caller buffer
+libc.so	setbuf	LIBC	stdio	Bionic FILE buffering policy; compatibility streams are already immediately visible
+libc.so	strtod_l	LIBC_O	float-conversion	Bionic locale-ignoring binary64 conversion wrapper
+libc.so	strtof_l	LIBC_O	float-conversion	Bionic locale-ignoring binary32 conversion wrapper
+libc.so	strcasecmp	LIBC	leaf	Bionic byte-string ASCII case-insensitive comparison required by Conscrypt
+libc.so	inet_ntop	LIBC	dns	Android IPv4/IPv6 numeric presentation with family translation for Conscrypt
+libc.so	pipe	LIBC	central-fd-broker	atomic host pipe publication into the central virtual descriptor table
+libc.so	poll	LIBC	central-fd-broker	blocking readiness wait across leased central virtual descriptors
 libc.so	freeaddrinfo	LIBC	dns	bounded resolver result retirement
+libc.so	gai_strerror	LIBC	dns	Android resolver error strings required by Conscrypt
 libc.so	getaddrinfo	LIBC	dns	bounded numeric and localhost resolution
 libc.so	recv	LIBC	socket	central-broker socket owner v3
+libc.so	recvfrom	LIBC	socket	central-broker datagram receive with address translation
 libc.so	send	LIBC	socket	central-broker socket owner v3
+libc.so	sendto	LIBC	socket	central-broker datagram send with address translation
+libc.so	getsockopt	LIBC	socket	central-broker socket option query with Android translation
+libc.so	setsockopt	LIBC	socket	central-broker socket option mutation with Android translation
+libc.so	shutdown	LIBC	socket	central-broker socket half-close
 libc.so	socket	LIBC	socket	central-broker socket publication
 libc.so	sem_destroy	LIBC	pthread	Android semaphore compatibility for AOSP native Skia workers
 libc.so	sem_init	LIBC	pthread	Android semaphore compatibility for AOSP native Skia workers
@@ -48,19 +90,105 @@ libm.so	exp2f	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	expf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	fmod	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	fmodf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	frexp	LIBC	math	Darwin binary exponent decomposition for Android native consumers
+libm.so	hypot	LIBC	math	Darwin Euclidean norm compatibility for Android native consumers
+libm.so	hypotf	LIBC	math	Darwin Euclidean norm compatibility for Android native consumers
 libm.so	ilogbf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	ldexp	LIBC	math	Darwin binary exponent scaling for Android native consumers
 libm.so	log	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	log10	LIBC	math	Darwin base-ten logarithm compatibility for Android native consumers
 libm.so	log2	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	log2f	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	logbf	LIBC	math	Darwin exponent extraction compatibility for Android native consumers
+libm.so	logf	LIBC	math	Darwin logarithm compatibility for Android native consumers
+libm.so	nextafter	LIBC	math	Darwin adjacent double compatibility for Android native consumers
 libm.so	nextafterf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	pow	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	powf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	remainder	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	sin	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	scalbnf	LIBC	math	Darwin binary exponent scaling for Android native consumers
+libm.so	sincos	LIBC	math	Darwin paired sine/cosine compatibility for Android native consumers
 libm.so	sincosf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	sinf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	sinh	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	tan	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	tanf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	tanh	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	tanhf	LIBC	math	Darwin hyperbolic tangent compatibility for Android native consumers
 liblog.so	__android_log_error_write		liblog	Android liblog error-write compatibility for AOSP Skia native consumers
+liblog.so	__android_log_print	LIBLOG	liblog	Android system/APEX symbol-version alias for libjavacrypto
+libc.so	__open_2	LIBC	filesystem	Bionic fortified two-argument open over the capability filesystem
+libc.so	__read_chk	LIBC	filesystem	Bionic bounded read over the capability filesystem
+libc.so	__write_chk	LIBC_N	filesystem	Bionic bounded write over the central descriptor owner
+libc.so	__strlen_chk	LIBC	leaf	Bionic fortified string length validation
+libc.so	__memcpy_chk	LIBC	leaf	Bionic fortified copy with destination bound enforcement
+libc.so	__memmove_chk	LIBC	leaf	Bionic fortified overlapping copy with destination bound enforcement
+libc.so	__memset_chk	LIBC	leaf	Bionic fortified fill with destination bound enforcement
+libc.so	__vsnprintf_chk	LIBC	format	Bionic fortified Android va_list formatting
+libc.so	access	LIBC	filesystem	capability-rooted path accessibility query
+libc.so	asprintf	LIBC	format	Android AAPCS64 allocating formatted output
+libc.so	ctime	LIBC	time	Android time conversion on Darwin
+libc.so	exit	LIBC	process-state	Android process termination
+libc.so	_exit	LIBC	process-state	Android immediate process termination
+libc.so	feof	LIBC	stdio	provider-owned Android FILE EOF state
+libc.so	fgets	LIBC	stdio	provider-owned Android FILE line input
+libc.so	ferror	LIBC	stdio	provider-owned Android FILE error state
+libc.so	ftell	LIBC	stdio	Android long-width stream position query
+libc.so	perror	LIBC	stdio	Android errno message output through provider-owned stderr
+libc.so	geteuid	LIBC	process-state	process effective user identity
+libc.so	getpagesize	LIBC	process-state	Android logical page size contract
+libc.so	getpid	LIBC	process-state	process identity
+libc.so	gettimeofday	LIBC	time	Android wall clock query
+libc.so	gmtime	LIBC	time	UTC broken-down time
+libc.so	gmtime_r	LIBC	time	reentrant UTC broken-down time
+libc.so	isdigit_l	LIBC	locale	Android byte classification with explicit locale
+libc.so	islower_l	LIBC	locale	Android byte classification with explicit locale
+libc.so	isupper_l	LIBC	locale	Android byte classification with explicit locale
+libc.so	isxdigit_l	LIBC	locale	Android byte classification with explicit locale
+libc.so	kill	LIBC	process-state	Android process signal delivery
+libc.so	ldexp	LIBC	math	Bionic exports ldexp from the libc version namespace for legacy NDK binaries
+libc.so	localtime	LIBC	time	local broken-down time
+libc.so	localtime_r	LIBC	time	reentrant local broken-down time
+libc.so	longjmp	LIBC	process-state	AAPCS64 nonlocal control transfer using owned buffer storage
+libc.so	lseek	LIBC	filesystem	capability descriptor offset control
+libc.so	mktime	LIBC	time	local broken-down time conversion
+libc.so	nice	LIBC	process-state	process scheduling adjustment
+libc.so	prctl	LIBC	process-state	bounded Android process control surface
+libc.so	pthread_attr_destroy	LIBC	pthread	Android pthread attribute lifecycle
+libc.so	pthread_attr_getguardsize	LIBC	pthread	Android pthread guard query
+libc.so	pthread_attr_getschedparam	LIBC	pthread	Android pthread scheduling query
+libc.so	pthread_attr_init	LIBC	pthread	Android pthread attribute lifecycle
+libc.so	pthread_attr_setdetachstate	LIBC	pthread	Android pthread detach policy
+libc.so	pthread_attr_setguardsize	LIBC	pthread	Android pthread guard configuration
+libc.so	pthread_attr_setschedparam	LIBC	pthread	Android pthread scheduling configuration
+libc.so	pthread_attr_setschedpolicy	LIBC	pthread	Android pthread scheduling policy
+libc.so	pthread_attr_setscope	LIBC	pthread	Android pthread scope validation
+libc.so	pthread_attr_setstacksize	LIBC	pthread	Android pthread stack sizing
+libc.so	pthread_cond_init	LIBC	pthread	Android condition variable initialization
+libc.so	pthread_equal	LIBC	pthread	Android thread token equality
+libc.so	pthread_getschedparam	LIBC	pthread	Android thread scheduling query
+libc.so	pthread_kill	LIBC	pthread	Android thread signal delivery
+libc.so	pthread_setname_np	LIBC	pthread	Android thread naming
+libc.so	pthread_sigmask	LIBC	pthread	Android signal mask translation
+libc.so	__pthread_cleanup_pop	LIBC	pthread	Android pthread cleanup stack pop
+libc.so	__pthread_cleanup_push	LIBC	pthread	Android pthread cleanup stack push
+libc.so	puts	LIBC	stdio	provider-owned Android stdout line output
+libc.so	rmdir	LIBC	filesystem	capability-rooted directory removal
+libc.so	sched_get_priority_max	LIBC	process-state	Android scheduling priority query
+libc.so	sched_yield	LIBC	process-state	Android scheduler yield
+libc.so	sem_timedwait	LIBC	pthread	Android semaphore realtime deadline wait
+libc.so	setjmp	LIBC	process-state	AAPCS64 nonlocal control transfer checkpoint
+libc.so	sigaction	LIBC	process-state	Android to Darwin signal action translation
+libc.so	sigaltstack	LIBC	process-state	Android to Darwin alternate stack translation
+libc.so	sigdelset	LIBC	process-state	Android signal set mutation
+libc.so	sigfillset	LIBC	process-state	Android signal set initialization
+libc.so	sprintf	LIBC	format	Android AAPCS64 formatted output
+libc.so	time	LIBC	time	Unix epoch clock
+libc.so	unlink	LIBC	filesystem	capability-rooted file removal
+libc.so	write	LIBC	central-fd-broker	generic central descriptor output with filesystem delegation
+libdl.so	android_dlopen_ext	LIBC	dso-lifecycle	Android guest DSO namespace extended open
+libdl.so	dlclose	LIBC	dso-lifecycle	Android guest DSO namespace close
+libdl.so	dlerror	LIBC	dso-lifecycle	Android guest DSO namespace error channel
+libdl.so	dlopen	LIBC	dso-lifecycle	Android guest DSO namespace open
+libdl.so	dlsym	LIBC	dso-lifecycle	Android guest DSO namespace lookup

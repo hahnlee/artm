@@ -230,20 +230,6 @@ int install_native_library_path(JNIEnv* env, jobject app_loader,
     return 46;
   }
   const std::string directory = path.substr(0, slash);
-  const std::string basename = path.substr(slash + 1);
-  std::string mapped_name = basename;
-  if (mapped_name.size() >= 3 &&
-      mapped_name.compare(mapped_name.size() - 3, 3, ".so") == 0) {
-    // The host ojluni System.c was compiled for Darwin and therefore maps
-    // System.loadLibrary("x") to libx.dylib. Android APKs conventionally
-    // ship libx.so. Keep the APK untouched: create a runtime-owned alias in
-    // the sealed native directory, then let Runtime.nativeLoad consume it.
-    mapped_name.replace(mapped_name.size() - 3, 3, ".dylib");
-    const std::string alias = directory + "/" + mapped_name;
-    if (symlink(path.c_str(), alias.c_str()) != 0 && errno != EEXIST) {
-      return 46;
-    }
-  }
   jclass array_list_class = env->FindClass("java/util/ArrayList");
   jclass loader_class = env->GetObjectClass(app_loader);
   if (array_list_class == nullptr || loader_class == nullptr) {

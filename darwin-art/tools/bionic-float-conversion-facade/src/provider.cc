@@ -59,21 +59,47 @@ extern "C" float darwin_art_bionic_strtof(const char* input,
   return ParseWithAosp(darwin_art_aosp_strtof, input, end_pointer);
 }
 
+extern "C" double darwin_art_bionic_strtod_l(const char* input,
+                                               char** end_pointer,
+                                               void* locale) {
+  (void)locale;
+  return darwin_art_bionic_strtod(input, end_pointer);
+}
+
+extern "C" float darwin_art_bionic_strtof_l(const char* input,
+                                              char** end_pointer,
+                                              void* locale) {
+  (void)locale;
+  return darwin_art_bionic_strtof(input, end_pointer);
+}
+
+extern "C" double darwin_art_bionic_atof(const char* input) {
+  return darwin_art_bionic_strtod(input, nullptr);
+}
+
 extern "C" void* darwin_art_bionic_float_conversion_resolve(
     const char* soname,
     const char* symbol,
     const char* version) {
   if (soname == nullptr || symbol == nullptr || version == nullptr ||
-      std::string_view(soname) != "libc.so" ||
-      std::string_view(version) != "LIBC") {
+      std::string_view(soname) != "libc.so") {
     return nullptr;
   }
-  if (std::string_view(symbol) == "strtod") {
+  const std::string_view name(symbol);
+  const std::string_view abi_version(version);
+  if (name == "strtod" && abi_version == "LIBC") {
     return reinterpret_cast<void*>(&darwin_art_bionic_strtod);
   }
-  if (std::string_view(symbol) == "strtof") {
+  if (name == "atof" && abi_version == "LIBC") {
+    return reinterpret_cast<void*>(&darwin_art_bionic_atof);
+  }
+  if (name == "strtof" && abi_version == "LIBC") {
     return reinterpret_cast<void*>(&darwin_art_bionic_strtof);
   }
+  if (name == "strtod_l" && abi_version == "LIBC_O")
+    return reinterpret_cast<void*>(&darwin_art_bionic_strtod_l);
+  if (name == "strtof_l" && abi_version == "LIBC_O")
+    return reinterpret_cast<void*>(&darwin_art_bionic_strtof_l);
   return nullptr;
 }
 
@@ -82,7 +108,8 @@ extern "C" int darwin_art_bionic_float_conversion_capability(
   if (capability == nullptr) return 0;
   const std::string_view name(capability);
   return name == "strtod-binary64" || name == "strtof-binary32" ||
-         name == "AOSP-gdtoa" || name == "C-locale-only";
+         name == "AOSP-gdtoa" || name == "C-locale-only" ||
+         name == "locale-argument-ignored";
 }
 
 extern "C" void darwin_art_bionic_float_conversion_test_prepare_host_state(

@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::fs::{File, Metadata};
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd};
 use std::os::unix::fs::FileExt;
@@ -776,6 +776,105 @@ impl Facade {
                     descriptor.offset += copied as u64;
                 }
                 copied as isize
+            }
+        }
+    }
+
+    unsafe fn write(&self, fd: c_int, buffer: *const c_void, count: usize) -> isize {
+        if count > isize::MAX as usize {
+            return self.fail(ANDROID_EINVAL) as isize;
+        }
+        if buffer.is_null() && count != 0 {
+            return self.fail(ANDROID_EFAULT) as isize;
+        }
+        let pointer = if count == 0 {
+            ptr::NonNull::<u8>::dangling().as_ptr()
+        } else {
+            buffer.cast::<u8>()
+        };
+        // SAFETY: the guest ABI requires a readable buffer for count bytes.
+        let bytes = unsafe { slice::from_raw_parts(pointer, count) };
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability() as isize,
+        };
+        let Some(descriptor) = descriptors.entries.get_mut(&fd) else {
+            return self.fail(ANDROID_EBADF) as isize;
+        };
+        match descriptor {
+            Descriptor::File(file) => match file.write(bytes) {
+                Ok(written) => written as isize,
+                Err(error) => self.fail_io(&error) as isize,
+            },
+            Descriptor::Random(_) => self.fail(ANDROID_EBADF) as isize,
+            Descriptor::Overlay(descriptor) => {
+                if !descriptor.writable {
+                    return self.fail(ANDROID_EBADF) as isize;
+                }
+                let mut file = match descriptor.node.lock() {
+                    Ok(file) => file,
+                    Err(_) => return self.fail_capability() as isize,
+                };
+                let start = match usize::try_from(descriptor.offset) {
+                    Ok(start) => start,
+                    Err(_) => return self.fail(ANDROID_EINVAL) as isize,
+                };
+                let Some(end) = start.checked_add(bytes.len()) else {
+                    return self.fail(ANDROID_EINVAL) as isize;
+                };
+                if start > file.data.len() {
+                    file.data.resize(start, 0);
+                }
+                if end > file.data.len() {
+                    file.data.resize(end, 0);
+                }
+                file.data[start..end].copy_from_slice(bytes);
+                descriptor.offset = end as u64;
+                bytes.len() as isize
+            }
+        }
+    }
+
+    fn lseek(&self, fd: c_int, offset: i64, whence: c_int) -> i64 {
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability() as i64,
+        };
+        let Some(descriptor) = descriptors.entries.get_mut(&fd) else {
+            return self.fail(ANDROID_EBADF) as i64;
+        };
+        match descriptor {
+            Descriptor::File(file) => {
+                let seek = match whence {
+                    0 if offset >= 0 => SeekFrom::Start(offset as u64),
+                    1 => SeekFrom::Current(offset),
+                    2 => SeekFrom::End(offset),
+                    _ => return self.fail(ANDROID_EINVAL) as i64,
+                };
+                match file.seek(seek) {
+                    Ok(position) => i64::try_from(position)
+                        .unwrap_or_else(|_| self.fail(ANDROID_EINVAL) as i64),
+                    Err(error) => self.fail_io(&error) as i64,
+                }
+            }
+            Descriptor::Random(_) => self.fail(ANDROID_EINVAL) as i64,
+            Descriptor::Overlay(descriptor) => {
+                let length = match descriptor.node.lock() {
+                    Ok(file) => file.data.len() as i128,
+                    Err(_) => return self.fail_capability() as i64,
+                };
+                let base = match whence {
+                    0 => 0,
+                    1 => descriptor.offset as i128,
+                    2 => length,
+                    _ => return self.fail(ANDROID_EINVAL) as i64,
+                };
+                let next = base + offset as i128;
+                if !(0..=i64::MAX as i128).contains(&next) {
+                    return self.fail(ANDROID_EINVAL) as i64;
+                }
+                descriptor.offset = next as u64;
+                next as i64
             }
         }
     }
@@ -2050,6 +2149,24 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_read_core(
     count: usize,
 ) -> isize {
     with_active(-1, |facade| unsafe { facade.read(fd, buffer, count) })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_bionic_fs_write_core(
+    fd: c_int,
+    buffer: *const c_void,
+    count: usize,
+) -> isize {
+    with_active(-1, |facade| unsafe { facade.write(fd, buffer, count) })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_fs_lseek_core(
+    fd: c_int,
+    offset: i64,
+    whence: c_int,
+) -> i64 {
+    with_active(-1, |facade| facade.lseek(fd, offset, whence))
 }
 
 #[unsafe(no_mangle)]

@@ -8,6 +8,7 @@ typedef void (*RawSlot)(void);
 typedef int32_t (*GetEnvFunction)(void*, void**, int32_t);
 typedef int32_t (*GetVersionFunction)(void*);
 typedef void* (*FindClassFunction)(void*, const char*);
+typedef uint8_t (*IsAssignableFromFunction)(void*, void*, void*);
 typedef int32_t (*RegisterNativesFunction)(void*, void*,
                                            const DarwinArtJniNativeMethod*,
                                            int32_t);
@@ -16,6 +17,7 @@ typedef void* (*ExceptionOccurredFunction)(void*);
 typedef void (*ExceptionClearFunction)(void*);
 typedef uint8_t (*ExceptionCheckFunction)(void*);
 typedef void* (*NewReferenceFunction)(void*, void*);
+typedef void* (*GetFieldIdFunction)(void*, void*, const char*, const char*);
 typedef void (*DeleteReferenceFunction)(void*, void*);
 typedef void (*DeleteLocalRefFunction)(void*, void*);
 typedef void* (*NewStringUtfFunction)(void*, const char*);
@@ -23,11 +25,19 @@ typedef int32_t (*GetStringUtfLengthFunction)(void*, void*);
 typedef const char* (*GetStringUtfCharsFunction)(void*, void*, uint8_t*);
 typedef void (*ReleaseStringUtfCharsFunction)(void*, void*, const char*);
 typedef int32_t (*GetArrayLengthFunction)(void*, void*);
+typedef void* (*NewObjectArrayFunction)(void*, int32_t, void*, void*);
+typedef void* (*GetObjectArrayElementFunction)(void*, void*, int32_t);
+typedef void (*SetObjectArrayElementFunction)(void*, void*, int32_t, void*);
 typedef void* (*NewByteArrayFunction)(void*, int32_t);
+typedef int8_t* (*GetByteArrayElementsFunction)(void*, void*, uint8_t*);
+typedef void (*ReleaseByteArrayElementsFunction)(void*, void*, int8_t*,
+                                                  int32_t);
 typedef void (*GetByteArrayRegionFunction)(void*, void*, int32_t, int32_t,
                                            int8_t*);
 typedef void (*SetByteArrayRegionFunction)(void*, void*, int32_t, int32_t,
                                            const int8_t*);
+typedef int32_t (*MonitorFunction)(void*, void*);
+typedef int32_t (*GetJavaVmFunction)(void*, void**);
 
 extern void darwin_art_jni_fixture_reset(void);
 extern void* darwin_art_jni_fixture_vm(void);
@@ -58,6 +68,8 @@ int main(void) {
       (GetVersionFunction)native[DARWIN_ART_JNI_SLOT_GetVersion];
   FindClassFunction find_class =
       (FindClassFunction)native[DARWIN_ART_JNI_SLOT_FindClass];
+  IsAssignableFromFunction is_assignable_from =
+      (IsAssignableFromFunction)native[DARWIN_ART_JNI_SLOT_IsAssignableFrom];
   ThrowNewFunction throw_new =
       (ThrowNewFunction)native[DARWIN_ART_JNI_SLOT_ThrowNew];
   ExceptionOccurredFunction exception_occurred =
@@ -66,6 +78,12 @@ int main(void) {
       (ExceptionClearFunction)native[DARWIN_ART_JNI_SLOT_ExceptionClear];
   RegisterNativesFunction register_natives =
       (RegisterNativesFunction)native[DARWIN_ART_JNI_SLOT_RegisterNatives];
+  MonitorFunction monitor_enter =
+      (MonitorFunction)native[DARWIN_ART_JNI_SLOT_MonitorEnter];
+  MonitorFunction monitor_exit =
+      (MonitorFunction)native[DARWIN_ART_JNI_SLOT_MonitorExit];
+  GetJavaVmFunction get_java_vm =
+      (GetJavaVmFunction)native[DARWIN_ART_JNI_SLOT_GetJavaVM];
   ExceptionCheckFunction exception_check =
       (ExceptionCheckFunction)native[DARWIN_ART_JNI_SLOT_ExceptionCheck];
   DeleteLocalRefFunction delete_local_ref =
@@ -76,6 +94,14 @@ int main(void) {
       (DeleteReferenceFunction)native[DARWIN_ART_JNI_SLOT_DeleteGlobalRef];
   NewReferenceFunction new_local_ref =
       (NewReferenceFunction)native[DARWIN_ART_JNI_SLOT_NewLocalRef];
+  NewReferenceFunction get_object_class =
+      (NewReferenceFunction)native[DARWIN_ART_JNI_SLOT_GetObjectClass];
+  GetFieldIdFunction get_field_id =
+      (GetFieldIdFunction)native[DARWIN_ART_JNI_SLOT_GetFieldID];
+  GetFieldIdFunction get_method_id =
+      (GetFieldIdFunction)native[DARWIN_ART_JNI_SLOT_GetMethodID];
+  GetFieldIdFunction get_static_method_id =
+      (GetFieldIdFunction)native[DARWIN_ART_JNI_SLOT_GetStaticMethodID];
   NewStringUtfFunction new_string_utf =
       (NewStringUtfFunction)native[DARWIN_ART_JNI_SLOT_NewStringUTF];
   GetStringUtfLengthFunction get_string_utf_length =
@@ -88,8 +114,22 @@ int main(void) {
           native[DARWIN_ART_JNI_SLOT_ReleaseStringUTFChars];
   GetArrayLengthFunction get_array_length =
       (GetArrayLengthFunction)native[DARWIN_ART_JNI_SLOT_GetArrayLength];
+  NewObjectArrayFunction new_object_array =
+      (NewObjectArrayFunction)native[DARWIN_ART_JNI_SLOT_NewObjectArray];
+  GetObjectArrayElementFunction get_object_array_element =
+      (GetObjectArrayElementFunction)
+          native[DARWIN_ART_JNI_SLOT_GetObjectArrayElement];
+  SetObjectArrayElementFunction set_object_array_element =
+      (SetObjectArrayElementFunction)
+          native[DARWIN_ART_JNI_SLOT_SetObjectArrayElement];
   NewByteArrayFunction new_byte_array =
       (NewByteArrayFunction)native[DARWIN_ART_JNI_SLOT_NewByteArray];
+  GetByteArrayElementsFunction get_byte_array_elements =
+      (GetByteArrayElementsFunction)
+          native[DARWIN_ART_JNI_SLOT_GetByteArrayElements];
+  ReleaseByteArrayElementsFunction release_byte_array_elements =
+      (ReleaseByteArrayElementsFunction)
+          native[DARWIN_ART_JNI_SLOT_ReleaseByteArrayElements];
   GetByteArrayRegionFunction get_byte_array_region =
       (GetByteArrayRegionFunction)
           native[DARWIN_ART_JNI_SLOT_GetByteArrayRegion];
@@ -98,6 +138,11 @@ int main(void) {
           native[DARWIN_ART_JNI_SLOT_SetByteArrayRegion];
 
   CHECK(get_version(env) == DARWIN_ART_JNI_VERSION_1_6);
+  void* returned_vm = NULL;
+  CHECK(get_java_vm(env, &returned_vm) == DARWIN_ART_JNI_OK);
+  CHECK(returned_vm == vm);
+  CHECK(monitor_enter(env, (void*)(uintptr_t)1) == DARWIN_ART_JNI_ERR);
+  CHECK(monitor_exit(env, (void*)(uintptr_t)1) == DARWIN_ART_JNI_ERR);
   CHECK(exception_check(env) == 0);
   CHECK(new_string_utf(env, "unavailable") == NULL);
   CHECK(get_string_utf_length(env, (void*)(uintptr_t)1) == 0);
@@ -106,8 +151,21 @@ int main(void) {
   CHECK(new_global_ref(env, (void*)(uintptr_t)1) == NULL);
   delete_global_ref(env, (void*)(uintptr_t)1);
   CHECK(new_local_ref(env, (void*)(uintptr_t)1) == NULL);
+  CHECK(get_object_class(env, (void*)(uintptr_t)1) == NULL);
+  CHECK(get_field_id(env, (void*)(uintptr_t)1, "field", "I") == NULL);
+  CHECK(get_method_id(env, (void*)(uintptr_t)1, "method", "()V") == NULL);
+  CHECK(get_static_method_id(env, (void*)(uintptr_t)1, "staticMethod", "()V") ==
+        NULL);
+  CHECK(is_assignable_from(env, (void*)(uintptr_t)1,
+                           (void*)(uintptr_t)2) == 0);
   delete_local_ref(env, (void*)(uintptr_t)1);
   CHECK(new_byte_array(env, 4) == NULL);
+  CHECK(get_byte_array_elements(env, (void*)(uintptr_t)1, NULL) == NULL);
+  release_byte_array_elements(env, (void*)(uintptr_t)1, NULL, 0);
+  CHECK(new_object_array(env, 4, (void*)(uintptr_t)1, NULL) == NULL);
+  CHECK(get_object_array_element(env, (void*)(uintptr_t)1, 0) == NULL);
+  set_object_array_element(env, (void*)(uintptr_t)1, 0,
+                           (void*)(uintptr_t)2);
   CHECK(get_array_length(env, (void*)(uintptr_t)1) == 0);
   int8_t region[2] = {1, 2};
   set_byte_array_region(env, (void*)(uintptr_t)1, 0, 2, region);

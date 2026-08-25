@@ -6,8 +6,10 @@ import android.content.ContentResolver;
 import android.content.ContentCaptureOptions;
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -17,6 +19,8 @@ import android.content.res.Resources;
 import android.content.res.Configuration;
 import android.os.Looper;
 import android.os.Handler;
+import android.os.Binder;
+import android.os.IBinder;
 import android.os.Process;
 import android.os.ProbeUserManager;
 import android.os.UserHandle;
@@ -30,12 +34,17 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Executor;
+import android.app.Application;
+import android.app.Service;
 
 public final class ProbeContext extends ContextWrapper {
     private final ApplicationInfo applicationInfo;
     private final AttributionSource attributionSource;
     private final ContentResolver contentResolver;
+    private final Object activityManager;
     private final Resources resources;
     private final Resources.Theme theme;
     private final PackageManager packageManager;
@@ -45,7 +54,24 @@ public final class ProbeContext extends ContextWrapper {
     private final String packageName;
     private final ClassLoader classLoader;
     private volatile Display display;
+    private volatile Context applicationContext;
+    private int nextAutofillId = 1;
     private static volatile ClassLoader applicationClassLoader;
+    private final Map<ComponentName, LocalServiceRecord> localServices = new HashMap<>();
+    private final Map<ServiceConnection, LocalServiceRecord> serviceConnections =
+            new HashMap<>();
+
+    private static final class LocalServiceRecord {
+        final ComponentName component;
+        final Service service;
+        int nextStartId = 1;
+        IBinder binder;
+
+        LocalServiceRecord(ComponentName component, Service service) {
+            this.component = component;
+            this.service = service;
+        }
+    }
 
     private static final class MainExecutor implements Executor {
         @Override
@@ -87,6 +113,7 @@ public final class ProbeContext extends ContextWrapper {
                 .setPackageName(getPackageName())
                 .build();
         contentResolver = new ProbeContentResolver(this);
+        activityManager = constructActivityManager();
     }
 
     @Override
@@ -140,6 +167,10 @@ public final class ProbeContext extends ContextWrapper {
     private static final class DefaultServiceHandler implements InvocationHandler {
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
+            if ("isInteractive".equals(method.getName())
+                    || "isDisplayInteractive".equals(method.getName())) {
+                return Boolean.TRUE;
+            }
             Class<?> type = method.getReturnType();
             if (!type.isPrimitive()) return null;
             if (type == boolean.class) return Boolean.FALSE;
@@ -156,11 +187,88 @@ public final class ProbeContext extends ContextWrapper {
 
     @Override
     public Context getApplicationContext() {
-        // The detached launcher has no separately constructed Application
-        // ContextImpl.  Returning this stable, process-owned context matches
-        // the identity callers observe on Android and keeps framework widget
-        // construction from dereferencing a null application context.
-        return this;
+        Context installed = applicationContext;
+        return installed == null ? this : installed;
+    }
+
+    /** Installs the manifest Application identity normally owned by LoadedApk. */
+    public void setApplicationContext(Context application) {
+        if (application == null) throw new NullPointerException("application");
+        applicationContext = application;
+    }
+
+    @Override
+    public ComponentName startService(Intent intent) {
+        LocalServiceRecord record = ensureLocalService(intent);
+        record.service.onStartCommand(new Intent(intent), 0, record.nextStartId++);
+        return record.component;
+    }
+
+    @Override
+    public boolean bindService(Intent intent, ServiceConnection connection, int flags) {
+        if (connection == null) throw new NullPointerException("connection");
+        LocalServiceRecord record = ensureLocalService(intent);
+        if (record.binder == null) record.binder = record.service.onBind(new Intent(intent));
+        if (record.binder == null) return false;
+        serviceConnections.put(connection, record);
+        connection.onServiceConnected(record.component, record.binder);
+        return true;
+    }
+
+    @Override
+    public void unbindService(ServiceConnection connection) {
+        LocalServiceRecord record = serviceConnections.remove(connection);
+        if (record == null) throw new IllegalArgumentException("Service not registered");
+        record.service.onUnbind(new Intent().setComponent(record.component));
+    }
+
+    @Override
+    public boolean stopService(Intent intent) {
+        ComponentName component = requireServiceComponent(intent);
+        LocalServiceRecord record = localServices.remove(component);
+        if (record == null) return false;
+        serviceConnections.entrySet().removeIf(entry -> entry.getValue() == record);
+        record.service.onDestroy();
+        return true;
+    }
+
+    private LocalServiceRecord ensureLocalService(Intent intent) {
+        ComponentName component = requireServiceComponent(intent);
+        LocalServiceRecord existing = localServices.get(component);
+        if (existing != null) return existing;
+        try {
+            Class<?> serviceClass = Class.forName(
+                    component.getClassName(), true, getClassLoader());
+            Service service = (Service) serviceClass.getDeclaredConstructor().newInstance();
+            Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
+            Method attach = Service.class.getDeclaredMethod("attach",
+                    Context.class, activityThreadClass, String.class,
+                    IBinder.class, Application.class, Object.class);
+            attach.setAccessible(true);
+            Context installed = getApplicationContext();
+            Application application = installed instanceof Application
+                    ? (Application) installed : null;
+            if (application == null) {
+                throw new IllegalStateException("Application context is not installed");
+            }
+            attach.invoke(service, this, null, component.getClassName(),
+                    new Binder(), application, null);
+            service.onCreate();
+            LocalServiceRecord created = new LocalServiceRecord(component, service);
+            localServices.put(component, created);
+            return created;
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Could not create local Service " + component,
+                    error);
+        }
+    }
+
+    private ComponentName requireServiceComponent(Intent intent) {
+        ComponentName component = intent == null ? null : intent.getComponent();
+        if (component == null || !packageName.equals(component.getPackageName())) {
+            throw new IllegalArgumentException("Only explicit in-package Services are supported");
+        }
+        return component;
     }
 
     @Override
@@ -288,6 +396,36 @@ public final class ProbeContext extends ContextWrapper {
     }
 
     @Override
+    public int checkPermission(String permission, int pid, int uid) {
+        if (permission == null || pid != Process.myPid() || uid != Process.myUid()) {
+            return PackageManager.PERMISSION_DENIED;
+        }
+        // Dangerous host-resource permissions remain denied until a runtime
+        // permission controller exists. This matches a fresh Android install
+        // and makes apps use Storage Access Framework/document-provider flows
+        // rather than treating the macOS filesystem as shared storage.
+        if ("android.permission.READ_EXTERNAL_STORAGE".equals(permission)
+                || "android.permission.WRITE_EXTERNAL_STORAGE".equals(permission)
+                || "android.permission.READ_MEDIA_VIDEO".equals(permission)
+                || "android.permission.CAMERA".equals(permission)
+                || "android.permission.RECORD_AUDIO".equals(permission)
+                || permission.startsWith("android.permission.ACCESS_")) {
+            return PackageManager.PERMISSION_DENIED;
+        }
+        return PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Override
+    public int checkCallingOrSelfPermission(String permission) {
+        return checkPermission(permission, Process.myPid(), Process.myUid());
+    }
+
+    @Override
+    public int checkSelfPermission(String permission) {
+        return checkPermission(permission, Process.myPid(), Process.myUid());
+    }
+
+    @Override
     public Looper getMainLooper() {
         return Looper.getMainLooper();
     }
@@ -341,6 +479,9 @@ public final class ProbeContext extends ContextWrapper {
 
     @Override
     public Object getSystemService(String name) {
+        if (ACTIVITY_SERVICE.equals(name)) {
+            return activityManager;
+        }
         if (INPUT_METHOD_SERVICE.equals(name)) {
             try {
                 Class<?> type = Class.forName("android.view.inputmethod.InputMethodManager");
@@ -385,6 +526,9 @@ public final class ProbeContext extends ContextWrapper {
             return constructProxyManager("android.app.AlarmManager",
                     "android.app.IAlarmManager");
         }
+        if (POWER_SERVICE.equals(name)) {
+            return constructPowerManager();
+        }
         if (AUDIO_SERVICE.equals(name)) {
             return new ProbeAudioManager(this);
         }
@@ -405,6 +549,9 @@ public final class ProbeContext extends ContextWrapper {
     @Override
     public String getSystemServiceName(Class<?> serviceClass) {
         String className = serviceClass.getName();
+        if ("android.app.ActivityManager".equals(className)) {
+            return ACTIVITY_SERVICE;
+        }
         if ("android.view.inputmethod.InputMethodManager".equals(className)) {
             return INPUT_METHOD_SERVICE;
         }
@@ -435,10 +582,25 @@ public final class ProbeContext extends ContextWrapper {
         if ("android.app.AlarmManager".equals(className)) {
             return ALARM_SERVICE;
         }
+        if ("android.os.PowerManager".equals(className)) {
+            return POWER_SERVICE;
+        }
         if ("android.media.AudioManager".equals(className)) {
             return AUDIO_SERVICE;
         }
         return null;
+    }
+
+    private Object constructActivityManager() {
+        try {
+            Class<?> type = Class.forName("android.app.ActivityManager");
+            Constructor<?> constructor = type.getDeclaredConstructor(
+                    Context.class, Handler.class);
+            constructor.setAccessible(true);
+            return constructor.newInstance(this, new Handler(Looper.getMainLooper()));
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Could not construct activity manager", error);
+        }
     }
 
     // Hidden Context hooks called by Activity.attachBaseContext(). The Darwin
@@ -447,6 +609,11 @@ public final class ProbeContext extends ContextWrapper {
     public void setAutofillClient(AutofillManager.AutofillClient client) {}
 
     public void setContentCaptureOptions(ContentCaptureOptions options) {}
+
+    /** ContextImpl's process-local virtual-id allocator used by View autofill identity. */
+    public synchronized int getNextAutofillId() {
+        return nextAutofillId++;
+    }
 
     @Override
     public String getPackageName() {
@@ -548,6 +715,27 @@ public final class ProbeContext extends ContextWrapper {
             return constructor.newInstance(service, this);
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException("Could not construct " + className, error);
+        }
+    }
+
+    private Object constructPowerManager() {
+        try {
+            Class<?> powerInterface = Class.forName("android.os.IPowerManager");
+            Class<?> thermalInterface = Class.forName("android.os.IThermalService");
+            Object powerService = Proxy.newProxyInstance(
+                    powerInterface.getClassLoader(), new Class<?>[] {powerInterface},
+                    new DefaultServiceHandler());
+            Object thermalService = Proxy.newProxyInstance(
+                    thermalInterface.getClassLoader(), new Class<?>[] {thermalInterface},
+                    new DefaultServiceHandler());
+            Class<?> type = Class.forName("android.os.PowerManager");
+            Constructor<?> constructor = type.getDeclaredConstructor(
+                    Context.class, powerInterface, thermalInterface, Handler.class);
+            constructor.setAccessible(true);
+            return constructor.newInstance(
+                    this, powerService, thermalService, new Handler(Looper.getMainLooper()));
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Could not construct android.os.PowerManager", error);
         }
     }
 

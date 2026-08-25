@@ -9,6 +9,19 @@ pub(crate) use crate::native_cache::{
 };
 use crate::support::run_command;
 
+pub(crate) fn build_elf_loader(root: &Path) -> Result<PathBuf> {
+    run_command(
+        Command::new("cargo")
+            .args(["build", "-q", "--release", "-p", "darwin-art-elf-loader"])
+            .current_dir(root),
+    )?;
+    let archive = root.join("target/release/libdarwin_art_elf_loader.a");
+    if !archive.is_file() {
+        return Err(format!("Rust ELF loader archive is missing: {}", archive.display()).into());
+    }
+    Ok(archive)
+}
+
 pub(crate) struct PendingNativeCompile {
     pub(crate) command: Command,
     pub(crate) object: PathBuf,
