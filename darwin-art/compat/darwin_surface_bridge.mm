@@ -555,10 +555,12 @@ __attribute__((weak)) void darwin_art_surface_set_active_gpu(
 bool darwin_art_surface_gpu_acquire_iosurface(
     DarwinArtSurface* surface, void** iosurface, uint32_t* width,
     uint32_t* height) {
-  if (surface == nullptr || surface->io_surface == nullptr ||
-      iosurface == nullptr || width == nullptr || height == nullptr) {
+  if (surface == nullptr || iosurface == nullptr || width == nullptr ||
+      height == nullptr) {
     return false;
   }
+  std::lock_guard<std::mutex> lock(surface->backing_mutex);
+  if (surface->io_surface == nullptr) return false;
   CFRetain(surface->io_surface);
   *iosurface = surface->io_surface;
   *width = surface->width;
@@ -597,6 +599,13 @@ bool darwin_art_surface_gpu_get_embedded_geometry(
 void darwin_art_surface_gpu_publish_embedded(DarwinArtSurface* surface) {
   if (surface == nullptr) return;
   surface->embedded_surface_frame.fetch_add(1, std::memory_order_release);
+}
+
+void darwin_art_surface_gpu_set_embedded_buffer_extent(
+    DarwinArtSurface* surface, uint32_t width, uint32_t height) {
+  if (surface == nullptr) return;
+  surface->embedded_buffer_width.store(width, std::memory_order_relaxed);
+  surface->embedded_buffer_height.store(height, std::memory_order_release);
 }
 
 __attribute__((weak)) bool darwin_art_surface_gpu_composite_embedded(
@@ -840,13 +849,17 @@ static DarwinArtSurfaceResult ResizeSurfaceBacking(DarwinArtSurface* surface,
   if (!AllocateSurfaceBacking(surface->device, width, height, &backing)) {
     return DARWIN_ART_SURFACE_ALLOCATION_FAILED;
   }
-  IOSurfaceRef old_surface = surface->io_surface;
-  surface->io_surface = backing.io_surface;
-  surface->io_surface_texture = backing.texture;
-  surface->bytes_per_row = backing.bytes_per_row;
-  surface->width = width;
-  surface->height = height;
-  surface->last_command_buffer = nil;
+  IOSurfaceRef old_surface = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(surface->backing_mutex);
+    old_surface = surface->io_surface;
+    surface->io_surface = backing.io_surface;
+    surface->io_surface_texture = backing.texture;
+    surface->bytes_per_row = backing.bytes_per_row;
+    surface->width = width;
+    surface->height = height;
+    surface->last_command_buffer = nil;
+  }
   if (old_surface != nullptr) CFRelease(old_surface);
   if (surface->view != nil) {
     [surface->view updateDrawableSize];
@@ -923,6 +936,7 @@ void darwin_art_host_document_path_free(char* path) {
 bool darwin_art_surface_get_size(DarwinArtSurface* surface,
                                  uint32_t* width, uint32_t* height) {
   if (surface == nullptr || width == nullptr || height == nullptr) return false;
+  std::lock_guard<std::mutex> lock(surface->backing_mutex);
   *width = surface->width;
   *height = surface->height;
   return true;

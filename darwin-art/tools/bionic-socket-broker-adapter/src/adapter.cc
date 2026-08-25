@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <net/if.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -80,6 +81,30 @@ struct AndroidSockaddrIn6 {
 
 struct HostFdObject {
   int fd = -1;
+  int peer_fd = -1;
+};
+
+struct AndroidIovec {
+  void *base;
+  size_t length;
+};
+
+struct AndroidMsghdr {
+  void *name;
+  uint32_t name_length;
+  uint32_t padding;
+  AndroidIovec *vectors;
+  size_t vector_count;
+  void *control;
+  size_t control_length;
+  int32_t flags;
+  uint32_t tail_padding;
+};
+
+struct AndroidCmsghdr {
+  size_t length;
+  int32_t level;
+  int32_t type;
 };
 
 struct Process {
@@ -206,6 +231,35 @@ int32_t AndroidErrno(int error) {
 template <typename T> T Fail(int error, T value) {
   darwin_art_bionic_errno_store(error);
   return value;
+}
+
+extern "C" AndroidCmsghdr *darwin_art_bionic_socket_broker_cmsg_nxthdr(
+    AndroidMsghdr *message, AndroidCmsghdr *current) {
+  if (message == nullptr || current == nullptr || message->control == nullptr)
+    return nullptr;
+  constexpr size_t alignment = sizeof(size_t);
+  if (current->length < sizeof(AndroidCmsghdr))
+    return nullptr;
+  const size_t aligned =
+      (current->length + alignment - 1) & ~(alignment - 1);
+  const uintptr_t base = reinterpret_cast<uintptr_t>(message->control);
+  const uintptr_t end = base + message->control_length;
+  const uintptr_t next = reinterpret_cast<uintptr_t>(current) + aligned;
+  if (next < base || next > end || end - next < sizeof(AndroidCmsghdr))
+    return nullptr;
+  auto *result = reinterpret_cast<AndroidCmsghdr *>(next);
+  if (result->length < sizeof(AndroidCmsghdr) || result->length > end - next)
+    return nullptr;
+  return result;
+}
+
+extern "C" unsigned darwin_art_bionic_socket_broker_if_nametoindex(
+    const char *name) {
+  PreserveErrno preserve;
+  if (name == nullptr)
+    return Fail(14, 0u);
+  const unsigned result = if_nametoindex(name);
+  return result == 0 ? Fail(AndroidErrno(errno), 0u) : result;
 }
 
 Process *AcquireProcess() {
@@ -483,7 +537,8 @@ intptr_t PipeOwnerRead(void *, uint64_t object, void *bytes, size_t count,
 intptr_t PipeOwnerWrite(void *, uint64_t object, const void *bytes,
                         size_t count, int *android_errno) {
   auto *pipe = reinterpret_cast<HostFdObject *>(object);
-  const ssize_t result = write(pipe->fd, bytes, count);
+  const ssize_t result = write(pipe->peer_fd >= 0 ? pipe->peer_fd : pipe->fd,
+                               bytes, count);
   *android_errno = result < 0 ? AndroidErrno(errno) : 0;
   return result;
 }
@@ -498,6 +553,8 @@ int OwnerClose(void *context, uint64_t object, int *android_errno) {
   auto *socket = reinterpret_cast<HostFdObject *>(object);
   const int result = close(socket->fd);
   const int saved = errno;
+  if (socket->peer_fd >= 0)
+    (void)close(socket->peer_fd);
   delete socket;
   if (process->objects.fetch_sub(1, std::memory_order_acq_rel) == 0)
     std::abort();
@@ -505,11 +562,25 @@ int OwnerClose(void *context, uint64_t object, int *android_errno) {
   return result;
 }
 
-intptr_t OwnerSocketOperation(void *, uint64_t object,
+intptr_t OwnerSocketOperation(void *context, uint64_t object,
                               const DarwinArtFdSocketRequestV1 *request,
-                              DarwinArtFdSocketAcceptResultV1 *,
+                              DarwinArtFdSocketAcceptResultV1 *accepted_result,
                               int *android_errno) {
+  auto *process = static_cast<Process *>(context);
   auto *socket = reinterpret_cast<HostFdObject *>(object);
+  if (request->operation == DARWIN_ART_FD_SOCKET_BIND) {
+    sockaddr_storage storage{};
+    socklen_t length = 0;
+    if (!ToHostAddress(request->address, request->address_length, &storage,
+                       &length)) {
+      *android_errno = 22;
+      return -1;
+    }
+    const int result =
+        bind(socket->fd, reinterpret_cast<const sockaddr *>(&storage), length);
+    *android_errno = result < 0 ? AndroidErrno(errno) : 0;
+    return result;
+  }
   if (request->operation == DARWIN_ART_FD_SOCKET_CONNECT) {
     sockaddr_storage storage{};
     socklen_t length = 0;
@@ -522,6 +593,83 @@ intptr_t OwnerSocketOperation(void *, uint64_t object,
         connect(socket->fd, reinterpret_cast<sockaddr *>(&storage), length);
     *android_errno = result < 0 ? AndroidErrno(errno) : 0;
     return result;
+  }
+  if (request->operation == DARWIN_ART_FD_SOCKET_LISTEN) {
+    const int result = listen(socket->fd, request->argument);
+    *android_errno = result < 0 ? AndroidErrno(errno) : 0;
+    return result;
+  }
+  if (request->operation == DARWIN_ART_FD_SOCKET_GETPEERNAME ||
+      request->operation == DARWIN_ART_FD_SOCKET_GETSOCKNAME) {
+    sockaddr_storage storage{};
+    socklen_t length = sizeof(storage);
+    const int result = request->operation == DARWIN_ART_FD_SOCKET_GETPEERNAME
+                           ? getpeername(socket->fd,
+                                         reinterpret_cast<sockaddr *>(&storage),
+                                         &length)
+                           : getsockname(socket->fd,
+                                         reinterpret_cast<sockaddr *>(&storage),
+                                         &length);
+    if (result < 0) {
+      *android_errno = AndroidErrno(errno);
+      return -1;
+    }
+    if (!FromHostAddress(reinterpret_cast<const sockaddr *>(&storage), length,
+                         request->output_address,
+                         request->output_address_capacity,
+                         request->output_address_length)) {
+      *android_errno = 14;
+      return -1;
+    }
+    *android_errno = 0;
+    return 0;
+  }
+  if (request->operation == DARWIN_ART_FD_SOCKET_ACCEPT4) {
+    if ((request->flags & ~(kAndroidSockNonblock | kAndroidSockCloexec)) != 0) {
+      *android_errno = 22;
+      return -1;
+    }
+    sockaddr_storage storage{};
+    socklen_t length = sizeof(storage);
+    const int accepted =
+        accept(socket->fd, reinterpret_cast<sockaddr *>(&storage), &length);
+    if (accepted < 0) {
+      *android_errno = AndroidErrno(errno);
+      return -1;
+    }
+    const bool nonblocking = (request->flags & kAndroidSockNonblock) != 0;
+    if (fcntl(accepted, F_SETFD, FD_CLOEXEC) < 0 ||
+        (nonblocking &&
+         fcntl(accepted, F_SETFL, fcntl(accepted, F_GETFL) | O_NONBLOCK) < 0)) {
+      const int error = AndroidErrno(errno);
+      (void)close(accepted);
+      *android_errno = error;
+      return -1;
+    }
+    if (request->output_address != nullptr &&
+        !FromHostAddress(reinterpret_cast<const sockaddr *>(&storage), length,
+                         request->output_address,
+                         request->output_address_capacity,
+                         request->output_address_length)) {
+      (void)close(accepted);
+      *android_errno = 14;
+      return -1;
+    }
+    auto *accepted_object = new (std::nothrow) HostFdObject{accepted};
+    if (accepted_object == nullptr) {
+      (void)close(accepted);
+      *android_errno = 12;
+      return -1;
+    }
+    process->objects.fetch_add(1, std::memory_order_release);
+    accepted_result->object = reinterpret_cast<uint64_t>(accepted_object);
+    accepted_result->kind = DARWIN_ART_FD_SOCKET;
+    accepted_result->status_flags =
+        nonblocking ? DARWIN_ART_FD_STATUS_NONBLOCK : 0;
+    accepted_result->descriptor_flags =
+        (request->flags & kAndroidSockCloexec) != 0 ? DARWIN_ART_FD_CLOEXEC : 0;
+    *android_errno = 0;
+    return 0;
   }
   int flags = 0;
   if ((request->operation == DARWIN_ART_FD_SOCKET_SEND ||
@@ -827,10 +975,14 @@ extern "C" int darwin_art_bionic_socket_broker_socket(int domain, int type,
   return guest_fd;
 }
 
-extern "C" int darwin_art_bionic_socket_broker_pipe(int32_t descriptors[2]) {
+extern "C" int darwin_art_bionic_socket_broker_pipe2(int32_t descriptors[2],
+                                                      int flags) {
   PreserveErrno preserve;
   if (descriptors == nullptr)
     return Fail(14, -1);
+  constexpr int kAllowed = kAndroidONonblock | 02000000;
+  if ((flags & ~kAllowed) != 0)
+    return Fail(22, -1);
   ProcessLease lease;
   Process *process = lease.get();
   if (process == nullptr)
@@ -840,7 +992,10 @@ extern "C" int darwin_art_bionic_socket_broker_pipe(int32_t descriptors[2]) {
   if (pipe(host) != 0)
     return Fail(AndroidErrno(errno), -1);
   if (fcntl(host[0], F_SETFD, FD_CLOEXEC) != 0 ||
-      fcntl(host[1], F_SETFD, FD_CLOEXEC) != 0) {
+      fcntl(host[1], F_SETFD, FD_CLOEXEC) != 0 ||
+      ((flags & kAndroidONonblock) != 0 &&
+       (fcntl(host[0], F_SETFL, fcntl(host[0], F_GETFL) | O_NONBLOCK) != 0 ||
+        fcntl(host[1], F_SETFL, fcntl(host[1], F_GETFL) | O_NONBLOCK) != 0))) {
     const int error = AndroidErrno(errno);
     (void)close(host[0]);
     (void)close(host[1]);
@@ -859,18 +1014,24 @@ extern "C" int darwin_art_bionic_socket_broker_pipe(int32_t descriptors[2]) {
   process->objects.fetch_add(2, std::memory_order_release);
 
   int guest[2] = {-1, -1};
-  DarwinArtFdBrokerStatus status = darwin_art_fd_broker_publish(
+  const int status_flags =
+      (flags & kAndroidONonblock) != 0 ? DARWIN_ART_FD_STATUS_NONBLOCK : 0;
+  const int descriptor_flags =
+      (flags & 02000000) != 0 ? DARWIN_ART_FD_CLOEXEC : 0;
+  DarwinArtFdBrokerStatus status = darwin_art_fd_broker_publish_with_flags(
       process->broker, process->pipe_owner,
-      reinterpret_cast<uint64_t>(read_end), &guest[0]);
+      reinterpret_cast<uint64_t>(read_end), status_flags, descriptor_flags,
+      &guest[0]);
   if (status != DARWIN_ART_FD_BROKER_OK) {
     int ignored = 0;
     (void)OwnerClose(process, reinterpret_cast<uint64_t>(read_end), &ignored);
     (void)OwnerClose(process, reinterpret_cast<uint64_t>(write_end), &ignored);
     return Fail(BrokerFailure(status), -1);
   }
-  status = darwin_art_fd_broker_publish(process->broker, process->pipe_owner,
-                                        reinterpret_cast<uint64_t>(write_end),
-                                        &guest[1]);
+  status = darwin_art_fd_broker_publish_with_flags(
+      process->broker, process->pipe_owner,
+      reinterpret_cast<uint64_t>(write_end), status_flags, descriptor_flags,
+      &guest[1]);
   if (status != DARWIN_ART_FD_BROKER_OK) {
     DarwinArtFdIoResult ignored_result{};
     (void)darwin_art_fd_broker_close_owned(process->broker, process->pipe_owner,
@@ -883,6 +1044,196 @@ extern "C" int darwin_art_bionic_socket_broker_pipe(int32_t descriptors[2]) {
   descriptors[0] = guest[0];
   descriptors[1] = guest[1];
   return 0;
+}
+
+extern "C" int darwin_art_bionic_socket_broker_pipe(int32_t descriptors[2]) {
+  return darwin_art_bionic_socket_broker_pipe2(descriptors, 0);
+}
+
+extern "C" int darwin_art_bionic_socket_broker_eventfd(uint32_t initial_value,
+                                                        int flags) {
+  PreserveErrno preserve;
+  constexpr int kAllowed = kAndroidONonblock | 02000000 | 1;
+  if ((flags & ~kAllowed) != 0)
+    return Fail(22, -1);
+  ProcessLease lease;
+  Process *process = lease.get();
+  if (process == nullptr)
+    return Fail(38, -1);
+  int host[2] = {-1, -1};
+  if (socketpair(AF_UNIX, SOCK_DGRAM, 0, host) != 0)
+    return Fail(AndroidErrno(errno), -1);
+  const bool nonblocking = (flags & kAndroidONonblock) != 0;
+  if (fcntl(host[0], F_SETFD, FD_CLOEXEC) != 0 ||
+      fcntl(host[1], F_SETFD, FD_CLOEXEC) != 0 ||
+      (nonblocking &&
+       (fcntl(host[0], F_SETFL, fcntl(host[0], F_GETFL) | O_NONBLOCK) != 0 ||
+        fcntl(host[1], F_SETFL, fcntl(host[1], F_GETFL) | O_NONBLOCK) != 0))) {
+    const int error = AndroidErrno(errno);
+    (void)close(host[0]);
+    (void)close(host[1]);
+    return Fail(error, -1);
+  }
+  auto *object = new (std::nothrow) HostFdObject{host[0], host[1]};
+  if (object == nullptr) {
+    (void)close(host[0]);
+    (void)close(host[1]);
+    return Fail(12, -1);
+  }
+  if (initial_value != 0) {
+    const uint64_t value = initial_value;
+    if (write(host[1], &value, sizeof(value)) != sizeof(value)) {
+      const int error = AndroidErrno(errno);
+      delete object;
+      (void)close(host[0]);
+      (void)close(host[1]);
+      return Fail(error, -1);
+    }
+  }
+  process->objects.fetch_add(1, std::memory_order_release);
+  int guest_fd = -1;
+  const auto status = darwin_art_fd_broker_publish_with_flags(
+      process->broker, process->pipe_owner,
+      reinterpret_cast<uint64_t>(object),
+      nonblocking ? DARWIN_ART_FD_STATUS_NONBLOCK : 0,
+      (flags & 02000000) != 0 ? DARWIN_ART_FD_CLOEXEC : 0, &guest_fd);
+  if (status != DARWIN_ART_FD_BROKER_OK) {
+    int ignored = 0;
+    (void)OwnerClose(process, reinterpret_cast<uint64_t>(object), &ignored);
+    return Fail(BrokerFailure(status), -1);
+  }
+  return guest_fd;
+}
+
+extern "C" intptr_t darwin_art_bionic_socket_broker_readv(
+    int fd, const void *vectors, int count) {
+  PreserveErrno preserve;
+  if (count < 0 || count > 1024 || (count != 0 && vectors == nullptr))
+    return Fail(22, intptr_t{-1});
+  const auto *iov = static_cast<const AndroidIovec *>(vectors);
+  intptr_t total = 0;
+  for (int index = 0; index < count; ++index) {
+    const intptr_t result = darwin_art_bionic_socket_broker_read(
+        fd, iov[index].base, iov[index].length);
+    if (result < 0)
+      return total == 0 ? -1 : total;
+    total += result;
+    if (static_cast<size_t>(result) != iov[index].length)
+      break;
+  }
+  return total;
+}
+
+extern "C" intptr_t darwin_art_bionic_socket_broker_writev(
+    int fd, const void *vectors, int count) {
+  PreserveErrno preserve;
+  if (count < 0 || count > 1024 || (count != 0 && vectors == nullptr))
+    return Fail(22, intptr_t{-1});
+  const auto *iov = static_cast<const AndroidIovec *>(vectors);
+  intptr_t total = 0;
+  for (int index = 0; index < count; ++index) {
+    const intptr_t result = darwin_art_bionic_socket_broker_write(
+        fd, iov[index].base, iov[index].length);
+    if (result < 0)
+      return total == 0 ? -1 : total;
+    total += result;
+    if (static_cast<size_t>(result) != iov[index].length)
+      break;
+  }
+  return total;
+}
+
+extern "C" int darwin_art_bionic_socket_broker_socketpair(
+    int domain, int type, int protocol, int32_t descriptors[2]) {
+  PreserveErrno preserve;
+  if (descriptors == nullptr)
+    return Fail(14, -1);
+  if (domain != 1 || protocol != 0)
+    return Fail(domain != 1 ? 97 : 93, -1);
+  int host_type = 0;
+  bool nonblocking = false;
+  if (!TranslateType(type, &host_type, &nonblocking))
+    return Fail(94, -1);
+  ProcessLease lease;
+  Process *process = lease.get();
+  if (process == nullptr)
+    return Fail(38, -1);
+  int host[2] = {-1, -1};
+  if (socketpair(AF_UNIX, host_type, 0, host) != 0)
+    return Fail(AndroidErrno(errno), -1);
+  for (int index = 0; index < 2; ++index) {
+    if (fcntl(host[index], F_SETFD, FD_CLOEXEC) != 0 ||
+        (nonblocking && fcntl(host[index], F_SETFL,
+                              fcntl(host[index], F_GETFL) | O_NONBLOCK) != 0)) {
+      const int error = AndroidErrno(errno);
+      (void)close(host[0]);
+      (void)close(host[1]);
+      return Fail(error, -1);
+    }
+  }
+  auto *first = new (std::nothrow) HostFdObject{host[0]};
+  auto *second = new (std::nothrow) HostFdObject{host[1]};
+  if (first == nullptr || second == nullptr) {
+    delete first;
+    delete second;
+    (void)close(host[0]);
+    (void)close(host[1]);
+    return Fail(12, -1);
+  }
+  process->objects.fetch_add(2, std::memory_order_release);
+  const int status_flags = nonblocking ? DARWIN_ART_FD_STATUS_NONBLOCK : 0;
+  const int descriptor_flags =
+      (type & kAndroidSockCloexec) != 0 ? DARWIN_ART_FD_CLOEXEC : 0;
+  int guest[2] = {-1, -1};
+  auto status = darwin_art_fd_broker_publish_with_flags(
+      process->broker, process->socket_owner,
+      reinterpret_cast<uint64_t>(first), status_flags, descriptor_flags,
+      &guest[0]);
+  if (status != DARWIN_ART_FD_BROKER_OK) {
+    int ignored = 0;
+    (void)OwnerClose(process, reinterpret_cast<uint64_t>(first), &ignored);
+    (void)OwnerClose(process, reinterpret_cast<uint64_t>(second), &ignored);
+    return Fail(BrokerFailure(status), -1);
+  }
+  status = darwin_art_fd_broker_publish_with_flags(
+      process->broker, process->socket_owner,
+      reinterpret_cast<uint64_t>(second), status_flags, descriptor_flags,
+      &guest[1]);
+  if (status != DARWIN_ART_FD_BROKER_OK) {
+    DarwinArtFdIoResult ignored_result{};
+    (void)darwin_art_fd_broker_close_owned(process->broker,
+                                           process->socket_owner, guest[0],
+                                           &ignored_result);
+    int ignored = 0;
+    (void)OwnerClose(process, reinterpret_cast<uint64_t>(second), &ignored);
+    return Fail(BrokerFailure(status), -1);
+  }
+  descriptors[0] = guest[0];
+  descriptors[1] = guest[1];
+  return 0;
+}
+
+extern "C" intptr_t darwin_art_bionic_socket_broker_message_unsupported() {
+  PreserveErrno preserve;
+  return Fail(95, intptr_t{-1});
+}
+
+extern "C" int darwin_art_bionic_socket_broker_dup(int fd) {
+  PreserveErrno preserve;
+  ProcessLease lease;
+  Process *process = lease.get();
+  if (process == nullptr)
+    return Fail(38, -1);
+  int duplicate = -1;
+  const auto status = darwin_art_fd_broker_dup(process->broker, fd, &duplicate);
+  return status == DARWIN_ART_FD_BROKER_OK
+             ? duplicate
+             : Fail(BrokerFailure(status), -1);
+}
+
+extern "C" int darwin_art_bionic_socket_broker_unsupported_int() {
+  PreserveErrno preserve;
+  return Fail(38, -1);
 }
 
 extern "C" intptr_t darwin_art_bionic_socket_broker_read(int fd, void *bytes,
@@ -983,6 +1334,79 @@ extern "C" int darwin_art_bionic_socket_broker_connect(int fd,
   if (result.value < 0)
     return Fail(result.android_errno, -1);
   return static_cast<int>(result.value);
+}
+
+static int SocketIntegerOperation(int fd, DarwinArtFdSocketRequestV1 *request) {
+  ProcessLease lease;
+  Process *process = lease.get();
+  if (process == nullptr)
+    return Fail(38, -1);
+  DarwinArtFdIoResult result{};
+  const auto status = darwin_art_fd_broker_socket_operation(
+      process->broker, process->socket_owner, fd, request, &result);
+  if (status != DARWIN_ART_FD_BROKER_OK)
+    return Fail(BrokerFailure(status), -1);
+  return result.value < 0 ? Fail(result.android_errno, -1)
+                          : static_cast<int>(result.value);
+}
+
+extern "C" int darwin_art_bionic_socket_broker_bind(int fd,
+                                                     const void *address,
+                                                     uint32_t length) {
+  PreserveErrno preserve;
+  auto request = Request(DARWIN_ART_FD_SOCKET_BIND);
+  request.address = address;
+  request.address_length = length;
+  return SocketIntegerOperation(fd, &request);
+}
+
+extern "C" int darwin_art_bionic_socket_broker_listen(int fd, int backlog) {
+  PreserveErrno preserve;
+  auto request = Request(DARWIN_ART_FD_SOCKET_LISTEN);
+  request.argument = backlog;
+  return SocketIntegerOperation(fd, &request);
+}
+
+extern "C" int darwin_art_bionic_socket_broker_accept4(int fd, void *address,
+                                                        uint32_t *length,
+                                                        int flags) {
+  PreserveErrno preserve;
+  auto request = Request(DARWIN_ART_FD_SOCKET_ACCEPT4);
+  request.flags = flags;
+  request.output_address = address;
+  request.output_address_capacity = length == nullptr ? 0 : *length;
+  request.output_address_length = length;
+  return SocketIntegerOperation(fd, &request);
+}
+
+extern "C" int darwin_art_bionic_socket_broker_accept(int fd, void *address,
+                                                       uint32_t *length) {
+  return darwin_art_bionic_socket_broker_accept4(fd, address, length, 0);
+}
+
+static int SocketName(int fd, void *address, uint32_t *length,
+                      uint32_t operation) {
+  if (address == nullptr || length == nullptr)
+    return Fail(14, -1);
+  auto request = Request(operation);
+  request.output_address = address;
+  request.output_address_capacity = *length;
+  request.output_address_length = length;
+  return SocketIntegerOperation(fd, &request);
+}
+
+extern "C" int darwin_art_bionic_socket_broker_getsockname(int fd,
+                                                            void *address,
+                                                            uint32_t *length) {
+  PreserveErrno preserve;
+  return SocketName(fd, address, length, DARWIN_ART_FD_SOCKET_GETSOCKNAME);
+}
+
+extern "C" int darwin_art_bionic_socket_broker_getpeername(int fd,
+                                                            void *address,
+                                                            uint32_t *length) {
+  PreserveErrno preserve;
+  return SocketName(fd, address, length, DARWIN_ART_FD_SOCKET_GETPEERNAME);
 }
 
 extern "C" intptr_t darwin_art_bionic_socket_broker_send(int fd,
@@ -1260,9 +1684,36 @@ darwin_art_bionic_socket_broker_resolve(const char *soname, const char *symbol,
   if (std::strcmp(symbol, "socket") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_socket);
+  if (std::strcmp(symbol, "__cmsg_nxthdr") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_cmsg_nxthdr);
+  if (std::strcmp(symbol, "if_nametoindex") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_if_nametoindex);
+  if (std::strcmp(symbol, "socketpair") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_socketpair);
   if (std::strcmp(symbol, "pipe") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_pipe);
+  if (std::strcmp(symbol, "pipe2") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_pipe2);
+  if (std::strcmp(symbol, "eventfd") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_eventfd);
+  if (std::strcmp(symbol, "dup") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_dup);
+  if (std::strcmp(symbol, "dup2") == 0 || std::strcmp(symbol, "select") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_unsupported_int);
+  if (std::strcmp(symbol, "readv") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_readv);
+  if (std::strcmp(symbol, "writev") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_writev);
   if (std::strcmp(symbol, "read") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_read);
@@ -1275,6 +1726,24 @@ darwin_art_bionic_socket_broker_resolve(const char *soname, const char *symbol,
   if (std::strcmp(symbol, "connect") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_connect);
+  if (std::strcmp(symbol, "bind") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_bind);
+  if (std::strcmp(symbol, "listen") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_listen);
+  if (std::strcmp(symbol, "accept4") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_accept4);
+  if (std::strcmp(symbol, "accept") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_accept);
+  if (std::strcmp(symbol, "getsockname") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_getsockname);
+  if (std::strcmp(symbol, "getpeername") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_getpeername);
   if (std::strcmp(symbol, "send") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_send);
@@ -1287,6 +1756,11 @@ darwin_art_bionic_socket_broker_resolve(const char *soname, const char *symbol,
   if (std::strcmp(symbol, "recvfrom") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_recvfrom);
+  if (std::strcmp(symbol, "sendmsg") == 0 ||
+      std::strcmp(symbol, "recvmsg") == 0 ||
+      std::strcmp(symbol, "recvmmsg") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_message_unsupported);
   if (std::strcmp(symbol, "getsockopt") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_getsockopt);
@@ -1324,6 +1798,18 @@ darwin_art_bionic_socket_broker_dns_resolve(const char *soname,
   if (std::strcmp(symbol, "inet_ntop") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_dns_inet_ntop);
+  if (std::strcmp(symbol, "getnameinfo") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_dns_getnameinfo);
+  if (std::strcmp(symbol, "inet_pton") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_dns_inet_pton);
+  if (std::strcmp(symbol, "inet_addr") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_dns_inet_addr);
+  if (std::strcmp(symbol, "inet_ntoa") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_dns_inet_ntoa);
   return nullptr;
 }
 

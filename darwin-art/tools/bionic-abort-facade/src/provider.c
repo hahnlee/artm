@@ -72,6 +72,15 @@ __attribute__((noreturn)) void darwin_art_bionic___stack_chk_fail(void) {
   darwin_art_bionic_abort();
 }
 
+__attribute__((noreturn)) static void DarwinArtBionicAssert2(
+    const char* file, int line, const char* function, const char* expression) {
+  fprintf(stderr, "%s:%d: %s: assertion \"%s\" failed\n",
+          file != NULL ? file : "<unknown>", line,
+          function != NULL ? function : "<unknown>",
+          expression != NULL ? expression : "<unknown>");
+  darwin_art_bionic_abort();
+}
+
 void darwin_art_bionic_android_set_abort_message(const char* message) {
   const int saved_errno = errno;
   (void)pthread_mutex_lock(&gAbortMessageLock);
@@ -120,6 +129,8 @@ void* darwin_art_bionic_abort_resolve(const char* soname,
     return (void*)(uintptr_t)&darwin_art_bionic_abort;
   if (strcmp(symbol, "__stack_chk_fail") == 0)
     return (void*)(uintptr_t)&darwin_art_bionic___stack_chk_fail;
+  if (strcmp(symbol, "__assert2") == 0)
+    return (void*)(uintptr_t)&DarwinArtBionicAssert2;
   if (strcmp(symbol, "android_set_abort_message") == 0)
     return (void*)(uintptr_t)&darwin_art_bionic_android_set_abort_message;
   return NULL;

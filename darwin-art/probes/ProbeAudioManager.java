@@ -8,6 +8,9 @@ import android.content.Context;
  * still receives a correctly typed AudioManager from Context.
  */
 public final class ProbeAudioManager extends AudioManager {
+    private static final int MAX_VOLUME = 15;
+    private int musicVolume = 10;
+
     public ProbeAudioManager(Context context) {
         // The public SDK surface exposes only the no-argument constructor;
         // the host intentionally has no ContextImpl-backed audio service.
@@ -26,4 +29,61 @@ public final class ProbeAudioManager extends AudioManager {
 
     @Override
     public void playSoundEffect(int effectType, float volume) {}
+
+    @Override
+    public int getStreamMaxVolume(int streamType) {
+        return MAX_VOLUME;
+    }
+
+    @Override
+    public int getStreamMinVolume(int streamType) {
+        return 0;
+    }
+
+    @Override
+    public int getStreamVolume(int streamType) {
+        return musicVolume;
+    }
+
+    @Override
+    public void setStreamVolume(int streamType, int index, int flags) {
+        musicVolume = Math.max(0, Math.min(MAX_VOLUME, index));
+    }
+
+    @Override
+    public void adjustStreamVolume(int streamType, int direction, int flags) {
+        if (direction > 0) setStreamVolume(streamType, musicVolume + 1, flags);
+        if (direction < 0) setStreamVolume(streamType, musicVolume - 1, flags);
+    }
+
+    @Override
+    public boolean isVolumeFixed() {
+        return false;
+    }
+
+    @Override
+    public boolean isMusicActive() {
+        return false;
+    }
+
+    @Override
+    public int requestAudioFocus(OnAudioFocusChangeListener listener,
+            int streamType, int durationHint) {
+        return AUDIOFOCUS_REQUEST_GRANTED;
+    }
+
+    @Override
+    public int requestAudioFocus(AudioFocusRequest focusRequest) {
+        return AUDIOFOCUS_REQUEST_GRANTED;
+    }
+
+    @Override
+    public int abandonAudioFocus(OnAudioFocusChangeListener listener) {
+        return AUDIOFOCUS_REQUEST_GRANTED;
+    }
+
+    @Override
+    public int abandonAudioFocusRequest(AudioFocusRequest focusRequest) {
+        return AUDIOFOCUS_REQUEST_GRANTED;
+    }
 }

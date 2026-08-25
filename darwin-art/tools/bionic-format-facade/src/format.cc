@@ -143,13 +143,25 @@ extern "C" int darwin_art_bionic_vasprintf(char** output,const char* format,cons
 extern "C" int darwin_art_bionic___vsnprintf_chk(char* dst,size_t size,int flags,size_t destination_size,const char* format,const void* ap) {
   (void)flags;if(size>destination_size){Fail(kEinval);return -1;}return darwin_art_bionic_vsnprintf(dst,size,format,ap);
 }
+extern "C" int darwin_art_bionic___vsprintf_chk(char* dst,int flags,size_t destination_size,const char* format,const void* ap) {
+  (void)flags;
+  int result=darwin_art_bionic_vsnprintf(dst,destination_size,format,ap);
+  if(result<0||static_cast<size_t>(result)>=destination_size){Fail(kEoverflow);return -1;}
+  return result;
+}
+extern "C" int darwin_art_bionic_vsprintf(char* dst,const char* format,const void* ap) {
+  return darwin_art_bionic_vsnprintf(dst,SIZE_MAX,format,ap);
+}
 extern "C" DarwinArtBionicFormatFunction darwin_art_bionic_format_resolve(const char* s) {
   if(!s)return nullptr;if(std::strcmp(s,"__vsnprintf_chk")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic___vsnprintf_chk);
+  if(std::strcmp(s,"__vsprintf_chk")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic___vsprintf_chk);
   if(std::strcmp(s,"asprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_asprintf);
   if(std::strcmp(s,"snprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_snprintf);
   if(std::strcmp(s,"sprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_sprintf);
   if(std::strcmp(s,"vasprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_vasprintf);
-  if(std::strcmp(s,"vsnprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_vsnprintf);return nullptr;
+  if(std::strcmp(s,"vsnprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_vsnprintf);
+  if(std::strcmp(s,"vsprintf")==0)return reinterpret_cast<DarwinArtBionicFormatFunction>(darwin_art_bionic_vsprintf);
+  return nullptr;
 }
 extern "C" const char* darwin_art_bionic_format_capability(const char* s) {
   if(!s)return "invalid-symbol";if(std::strcmp(s,"fprintf")==0||std::strcmp(s,"vfprintf")==0)return "Bionic-FILE-layout-not-owned";

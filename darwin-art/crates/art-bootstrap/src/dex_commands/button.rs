@@ -111,6 +111,9 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
                 "dev/darwinart/simple/DarwinServiceBridge$ManagerHandler.class",
             ))
             .arg(button(
+                "dev/darwinart/simple/DarwinServiceBridge$MediaSessionInterfaceHandler.class",
+            ))
+            .arg(button(
                 "dev/darwinart/simple/DarwinServiceBridge$WindowManagerHandler.class",
             ))
             .arg(button(
@@ -128,6 +131,12 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
             .arg(button(
                 "dev/darwinart/simple/DarwinServiceBridge$ActivityManagerHandler.class",
             ))
+            .arg(button(
+                "dev/darwinart/simple/DarwinServiceBridge$AudioServiceBinder.class",
+            ))
+            .arg(button(
+                "dev/darwinart/simple/DarwinServiceBridge$HostSurfaceState.class",
+            ))
             .arg(button("javax/microedition/khronos/egl/EGL.class"))
             .arg(button("javax/microedition/khronos/egl/EGL10.class"))
             .arg(button("javax/microedition/khronos/egl/EGLConfig.class"))
@@ -140,7 +149,7 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
     let classes_dex = dex_dir.join("classes.dex");
     let dex_probe = root.join("_build/dex-probe/dex-probe");
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=58 methods=855 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=64 methods=925 \
                     class[0]=Landroid/content/pm/ProbeShortcutManager; \
                     class[1]=Landroid/media/ProbeAudioManager; \
                     class[2]=Landroid/os/ProbeUserManager; \
@@ -159,46 +168,52 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
                     class[15]=Ldev/darwinart/probe/ProbeContentResolver; \
                     class[16]=Ldev/darwinart/probe/ProbeContentRoot; \
                     class[17]=Ldev/darwinart/probe/ProbeContext$$ExternalSyntheticLambda0; \
-                    class[18]=Ldev/darwinart/probe/ProbeContext$CompatibilityHandler; \
-                    class[19]=Ldev/darwinart/probe/ProbeContext$DefaultServiceHandler; \
-                    class[20]=Ldev/darwinart/probe/ProbeContext$LocalServiceRecord; \
-                    class[21]=Ldev/darwinart/probe/ProbeContext$MainExecutor; \
-                    class[22]=Ldev/darwinart/probe/ProbeContext; \
-                    class[23]=Ldev/darwinart/probe/ProbeHostDocumentProvider$Document; \
-                    class[24]=Ldev/darwinart/probe/ProbeHostDocumentProvider; \
-                    class[25]=Ldev/darwinart/probe/ProbePackageManager; \
-                    class[26]=Ldev/darwinart/probe/ProbeResources; \
-                    class[27]=Ldev/darwinart/probe/ProbeSharedPreferences$EditorImpl; \
-                    class[28]=Ldev/darwinart/probe/ProbeSharedPreferences; \
-                    class[29]=Ldev/darwinart/probe/ProbeView; \
-                    class[30]=Ldev/darwinart/probe/ProbeXmlResourceParser; \
-                    class[31]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda0; \
-                    class[32]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda1; \
-                    class[33]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda2; \
-                    class[34]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda3; \
-                    class[35]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda4; \
-                    class[36]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda5; \
-                    class[37]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda6; \
-                    class[38]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda7; \
-                    class[39]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda8; \
-                    class[40]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda9; \
-                    class[41]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityClientHandler$$ExternalSyntheticLambda0; \
-                    class[42]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityClientHandler; \
-                    class[43]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityManagerHandler; \
-                    class[44]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityRecord; \
-                    class[45]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler$$ExternalSyntheticLambda0; \
-                    class[46]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler; \
-                    class[47]=Ldev/darwinart/simple/DarwinServiceBridge$DisplayHandler; \
-                    class[48]=Ldev/darwinart/simple/DarwinServiceBridge$ManagerHandler; \
-                    class[49]=Ldev/darwinart/simple/DarwinServiceBridge$WindowManagerHandler; \
-                    class[50]=Ldev/darwinart/simple/DarwinServiceBridge; \
-                    class[51]=Ljavax/microedition/khronos/egl/EGL; \
-                    class[52]=Ljavax/microedition/khronos/egl/EGL10; \
-                    class[53]=Ljavax/microedition/khronos/egl/DarwinEGL10; \
-                    class[54]=Ljavax/microedition/khronos/egl/EGLConfig; \
-                    class[55]=Ljavax/microedition/khronos/egl/EGLContext; \
-                    class[56]=Ljavax/microedition/khronos/egl/EGLDisplay; \
-                    class[57]=Ljavax/microedition/khronos/egl/EGLSurface;";
+                    class[18]=Ldev/darwinart/probe/ProbeContext$$ExternalSyntheticLambda1; \
+                    class[19]=Ldev/darwinart/probe/ProbeContext$CompatibilityHandler; \
+                    class[20]=Ldev/darwinart/probe/ProbeContext$DefaultServiceHandler; \
+                    class[21]=Ldev/darwinart/probe/ProbeContext$LocalServiceRecord; \
+                    class[22]=Ldev/darwinart/probe/ProbeContext$MainExecutor; \
+                    class[23]=Ldev/darwinart/probe/ProbeContext; \
+                    class[24]=Ldev/darwinart/probe/ProbeHostDocumentProvider$Document; \
+                    class[25]=Ldev/darwinart/probe/ProbeHostDocumentProvider; \
+                    class[26]=Ldev/darwinart/probe/ProbePackageManager; \
+                    class[27]=Ldev/darwinart/probe/ProbeResources; \
+                    class[28]=Ldev/darwinart/probe/ProbeSharedPreferences$EditorImpl; \
+                    class[29]=Ldev/darwinart/probe/ProbeSharedPreferences; \
+                    class[30]=Ldev/darwinart/probe/ProbeView; \
+                    class[31]=Ldev/darwinart/probe/ProbeXmlResourceParser; \
+                    class[32]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda0; \
+                    class[33]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda10; \
+                    class[34]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda1; \
+                    class[35]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda2; \
+                    class[36]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda3; \
+                    class[37]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda4; \
+                    class[38]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda5; \
+                    class[39]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda6; \
+                    class[40]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda7; \
+                    class[41]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda8; \
+                    class[42]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda9; \
+                    class[43]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityClientHandler$$ExternalSyntheticLambda0; \
+                    class[44]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityClientHandler; \
+                    class[45]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityManagerHandler; \
+                    class[46]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityRecord; \
+                    class[47]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler$$ExternalSyntheticLambda0; \
+                    class[48]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler; \
+                    class[49]=Ldev/darwinart/simple/DarwinServiceBridge$AudioServiceBinder; \
+                    class[50]=Ldev/darwinart/simple/DarwinServiceBridge$DisplayHandler; \
+                    class[51]=Ldev/darwinart/simple/DarwinServiceBridge$HostSurfaceState; \
+                    class[52]=Ldev/darwinart/simple/DarwinServiceBridge$ManagerHandler; \
+                    class[53]=Ldev/darwinart/simple/DarwinServiceBridge$MediaSessionInterfaceHandler; \
+                    class[54]=Ldev/darwinart/simple/DarwinServiceBridge$WindowManagerHandler$$ExternalSyntheticLambda0; \
+                    class[55]=Ldev/darwinart/simple/DarwinServiceBridge$WindowManagerHandler; \
+                    class[56]=Ldev/darwinart/simple/DarwinServiceBridge; \
+                    class[57]=Ljavax/microedition/khronos/egl/EGL; \
+                    class[58]=Ljavax/microedition/khronos/egl/EGL10; \
+                    class[59]=Ljavax/microedition/khronos/egl/DarwinEGL10; \
+                    class[60]=Ljavax/microedition/khronos/egl/EGLConfig; \
+                    class[61]=Ljavax/microedition/khronos/egl/EGLContext; \
+                    class[62]=Ljavax/microedition/khronos/egl/EGLDisplay; \
+                    class[63]=Ljavax/microedition/khronos/egl/EGLSurface;";
     if output.trim() != expected {
         return Err(format!("unexpected Button DEX probe output: {output:?}").into());
     }

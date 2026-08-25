@@ -55,7 +55,10 @@ host_flags=(-arch arm64 -isysroot "$sdk_root" -std=c17 -O2 -Wall -Wextra
 
 "$host_cc" "${host_flags[@]}" -c "$script_dir/src/proxy.c" \
   -o "$temp_root/proxy.o"
-[[ -z "$(nm -u "$temp_root/proxy.o")" ]] || fail 'proxy has unexpected host dependencies'
+"$host_cc" -arch arm64 -isysroot "$sdk_root" -c \
+  "$script_dir/src/aapcs64_call.S" -o "$temp_root/aapcs64_call.o"
+[[ "$(nm -u "$temp_root/proxy.o")" == *'_darwin_art_jni_proxy_call_void_method'* ]] ||
+  fail 'proxy direct-call entry dependency missing'
 definitions="$(nm -gU "$temp_root/proxy.o")"
 grep -F ' _darwin_art_jni_proxy_init' <<<"$definitions" >/dev/null ||
   fail 'missing proxy init export'
@@ -71,11 +74,13 @@ if rg -n 'dlsym|JNIEnvExt|JavaVMExt|ArtMethod|art::' "$script_dir/src" \
 fi
 
 "$host_cc" "${host_flags[@]}" "$script_dir/src/proxy.c" \
+  "$script_dir/src/aapcs64_call.S" \
   "$script_dir/probes/fake_backend.c" "$script_dir/probes/native_smoke.c" \
   -o "$temp_root/native-smoke"
 "$temp_root/native-smoke"
 "$host_cc" "${host_flags[@]}" -O1 -g -fsanitize=address,undefined \
   "$script_dir/src/proxy.c" "$script_dir/probes/fake_backend.c" \
+  "$script_dir/src/aapcs64_call.S" \
   "$script_dir/probes/native_smoke.c" -o "$temp_root/native-smoke-sanitized"
 "$temp_root/native-smoke-sanitized" >/dev/null
 

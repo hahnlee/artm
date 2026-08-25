@@ -122,5 +122,20 @@ pub(super) fn bootstrap_jobs(
         command: jni_proxy_command,
         object: jni_proxy_object,
     });
+    let jni_proxy_call_object = staged.object_dir.join("darwin_art_jni_proxy_call.S.o");
+    let mut jni_proxy_call_command = Command::new("clang");
+    jni_proxy_call_command
+        .args(["-arch", "arm64", "-c"])
+        .arg(
+            staged
+                .root
+                .join("tools/android-jni-proxy/src/aapcs64_call.S"),
+        )
+        .arg("-o")
+        .arg(&jni_proxy_call_object);
+    jobs.push(PendingNativeCompile {
+        command: jni_proxy_call_command,
+        object: jni_proxy_call_object,
+    });
     jobs
 }

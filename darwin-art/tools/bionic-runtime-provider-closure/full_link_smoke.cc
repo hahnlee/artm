@@ -23,6 +23,20 @@ extern "C" int darwin_art_bionic_stdio_process_uninstall(void);
 extern "C" uint32_t darwin_art_bionic_getwc(void *file);
 extern "C" uint32_t darwin_art_bionic_ungetwc(uint32_t wc, void *file);
 extern "C" unsigned char darwin_art_bionic___sF[456];
+extern "C" void *darwin_art_android_ANativeWindow_fromSurface(void *, void *) {
+  return nullptr;
+}
+extern "C" void darwin_art_android_ANativeWindow_release(void *) {}
+extern "C" int darwin_art_android_ANativeWindow_lock(void *, void *, void *) {
+  return -1;
+}
+extern "C" int darwin_art_android_ANativeWindow_unlockAndPost(void *) {
+  return -1;
+}
+extern "C" int darwin_art_android_ANativeWindow_setBuffersGeometry(
+    void *, int, int, int) {
+  return 0;
+}
 
 namespace {
 
@@ -230,7 +244,7 @@ int main() {
   close(root_fd);
   rmdir(root_path);
   std::fprintf(stderr, "bionic-runtime-provider-closure: PASS bind_builtins=34 "
-                       "routes=371 actual-resolvers=yes fd=fs+pipe-poll "
+                       "routes=534 actual-resolvers=yes fd=fs+pipe-poll "
                        "wide-stdio=central-lease syslog-tag=owned-copy\n");
   return 0;
 }

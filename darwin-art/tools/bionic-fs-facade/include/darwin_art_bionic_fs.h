@@ -123,12 +123,16 @@ int darwin_art_bionic_open(const char* path, int flags, uint32_t mode);
 int darwin_art_bionic_openat(int directory_fd, const char* path, int flags,
                              uint32_t mode);
 intptr_t darwin_art_bionic_read(int fd, void* buffer, size_t count);
+intptr_t darwin_art_bionic_pread(int fd, void* buffer, size_t count,
+                                 int64_t offset);
 intptr_t darwin_art_bionic_write(int fd, const void* buffer, size_t count);
 intptr_t darwin_art_bionic___write_chk(int fd, const void* buffer,
                                        size_t count, size_t buffer_size);
 int64_t darwin_art_bionic_lseek(int fd, int64_t offset, int whence);
 int darwin_art_bionic_close(int fd);
 int darwin_art_bionic_fstat(int fd, DarwinArtAndroidStat* status);
+int darwin_art_bionic_fdatasync(int fd);
+int darwin_art_bionic_fsync(int fd);
 int darwin_art_bionic_stat(const char* path, DarwinArtAndroidStat* status);
 int darwin_art_bionic_lstat(const char* path, DarwinArtAndroidStat* status);
 intptr_t darwin_art_bionic_readlink(const char* path, char* buffer,
@@ -138,6 +142,7 @@ int darwin_art_bionic_chdir(const char* path);
 void* darwin_art_bionic_opendir(const char* path);
 void* darwin_art_bionic_fdopendir(int fd);
 DarwinArtAndroidDirent* darwin_art_bionic_readdir(void* directory);
+void darwin_art_bionic_rewinddir(void* directory);
 int darwin_art_bionic_closedir(void* directory);
 int darwin_art_bionic_fchmod(int fd, uint32_t mode);
 int darwin_art_bionic_fchmodat(int directory_fd, const char* path,
@@ -146,6 +151,8 @@ int darwin_art_bionic_ftruncate(int fd, int64_t length);
 int darwin_art_bionic_isatty(int fd);
 int darwin_art_bionic_link(const char* old_path, const char* new_path);
 int darwin_art_bionic_mkdir(const char* path, uint32_t mode);
+int darwin_art_bionic_mkstemp(char* path_template);
+int darwin_art_bionic_mkstemp64(char* path_template);
 int64_t darwin_art_bionic_pathconf(const char* path, int name);
 char* darwin_art_bionic_realpath(const char* path, char* resolved);
 int darwin_art_bionic_remove(const char* path);
@@ -172,6 +179,8 @@ int darwin_art_bionic_fs_open_core(const char* path, int flags, uint32_t mode);
 int darwin_art_bionic_fs_openat_core(int directory_fd, const char* path,
                                      int flags, uint32_t mode);
 intptr_t darwin_art_bionic_fs_read_core(int fd, void* buffer, size_t count);
+intptr_t darwin_art_bionic_fs_pread_core(int fd, void* buffer, size_t count,
+                                         int64_t offset);
 intptr_t darwin_art_bionic_fs_write_core(int fd, const void* buffer,
                                          size_t count);
 int64_t darwin_art_bionic_fs_lseek_core(int fd, int64_t offset, int whence);
@@ -188,6 +197,7 @@ int darwin_art_bionic_fs_chdir_core(const char* path);
 void* darwin_art_bionic_fs_opendir_core(const char* path);
 void* darwin_art_bionic_fs_fdopendir_core(int fd);
 DarwinArtAndroidDirent* darwin_art_bionic_fs_readdir_core(void* directory);
+void darwin_art_bionic_fs_rewinddir_core(void* directory);
 int darwin_art_bionic_fs_closedir_core(void* directory);
 int darwin_art_bionic_fs_fchmod_core(int fd, uint32_t mode);
 int darwin_art_bionic_fs_fchmodat_core(int directory_fd, const char* path,

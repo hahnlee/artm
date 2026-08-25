@@ -858,6 +858,10 @@ impl LoadedElf {
         self.resolve_function(name)
     }
 
+    pub(crate) fn lookup_any_exported(&self, name: &str) -> Result<usize, LoadError> {
+        self.exported_address(name)
+    }
+
     pub(crate) fn debug_mapped_pointer(&self, virtual_address: u64) -> Result<usize, LoadError> {
         Ok(self.loaded_pointer(virtual_address, 1)? as usize)
     }

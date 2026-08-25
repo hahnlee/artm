@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <atomic>
+#include <mutex>
 
 @interface DarwinArtMetalView : NSView
 @property(nonatomic, readonly) CAMetalLayer* metalLayer;
@@ -27,6 +28,9 @@
 // this header can be compiled by the CPU surface bridge without any Skia
 // dependency. The GPU bridge owns the object stored in gpu_state.
 struct DarwinArtSurface {
+  // Protects the IOSurface/Metal backing tuple while a native producer on a
+  // separate Android GL thread refreshes its retained target during resize.
+  mutable std::mutex backing_mutex;
   uint32_t width = 0;
   uint32_t height = 0;
   size_t bytes_per_row = 0;
@@ -48,6 +52,8 @@ struct DarwinArtSurface {
   std::atomic<int32_t> embedded_surface_y{0};
   std::atomic<uint32_t> embedded_surface_width{0};
   std::atomic<uint32_t> embedded_surface_height{0};
+  std::atomic<uint32_t> embedded_buffer_width{0};
+  std::atomic<uint32_t> embedded_buffer_height{0};
   std::atomic<uint64_t> embedded_surface_frame{0};
 
   ~DarwinArtSurface();

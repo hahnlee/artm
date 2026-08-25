@@ -466,6 +466,10 @@ extern "C" int darwin_art_bionic_iswspace_l(
   return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_WHITE_SPACE);
 }
 
+extern "C" int darwin_art_bionic_iswspace(uint32_t code_point) {
+  return darwin_art_bionic_iswspace_l(code_point, GlobalLocale());
+}
+
 extern "C" int darwin_art_bionic_iswupper_l(
     uint32_t code_point,
     DarwinArtAndroidLocale /*locale*/) {
@@ -729,6 +733,11 @@ extern "C" int darwin_art_bionic_strcoll_l(
   return std::strcmp(left, right);
 }
 
+extern "C" int darwin_art_bionic_strcoll(const char* left,
+                                            const char* right) {
+  return darwin_art_bionic_strcoll_l(left, right, GlobalLocale());
+}
+
 extern "C" size_t darwin_art_bionic_strxfrm_l(
     char* destination,
     const char* source,
@@ -754,6 +763,25 @@ extern "C" uint32_t darwin_art_bionic_towlower_l(
   }
   EnsureAndroidIcu76();
   return static_cast<uint32_t>(u_tolower(IcuCodePoint(code_point)));
+}
+
+extern "C" uint32_t darwin_art_bionic_towlower(uint32_t code_point) {
+  return darwin_art_bionic_towlower_l(code_point, GlobalLocale());
+}
+
+extern "C" int darwin_art_bionic_wcwidth(uint32_t code_point) {
+  HostStateGuard guard;
+  EnsureAndroidIcu76();
+  const UChar32 value = IcuCodePoint(code_point);
+  if (value == 0) return 0;
+  if (!U_IS_UNICODE_CHAR(value) || u_iscntrl(value)) return -1;
+  const int8_t category = u_charType(value);
+  if (category == U_NON_SPACING_MARK || category == U_ENCLOSING_MARK ||
+      category == U_FORMAT_CHAR) {
+    return 0;
+  }
+  const int32_t width = u_getIntPropertyValue(value, UCHAR_EAST_ASIAN_WIDTH);
+  return width == U_EA_WIDE || width == U_EA_FULLWIDTH ? 2 : 1;
 }
 
 extern "C" uint32_t darwin_art_bionic_towupper_l(
@@ -817,6 +845,7 @@ extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
   RESOLVE(iswprint_l);
   RESOLVE(iswpunct_l);
   RESOLVE(iswspace_l);
+  RESOLVE(iswspace);
   RESOLVE(iswupper_l);
   RESOLVE(iswxdigit_l);
   RESOLVE(isxdigit_l);
@@ -829,8 +858,10 @@ extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
   RESOLVE(newlocale);
   RESOLVE(setlocale);
   RESOLVE(strcoll_l);
+  RESOLVE(strcoll);
   RESOLVE(strxfrm_l);
   RESOLVE(towlower_l);
+  RESOLVE(towlower);
   RESOLVE(towupper_l);
   RESOLVE(uselocale);
   RESOLVE(wcrtomb);
@@ -838,6 +869,7 @@ extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
   RESOLVE(wcsnrtombs);
   RESOLVE(wcsxfrm_l);
   RESOLVE(wctob);
+  RESOLVE(wcwidth);
 #undef RESOLVE
   return nullptr;
 }

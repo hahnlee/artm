@@ -3,10 +3,13 @@
 #import <QuartzCore/CAMetalLayer.h>
 
 #include "darwin_surface_internal.h"
+#include "darwin_android_native_window.h"
 
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkCanvas.h"
+#include "include/core/SkData.h"
 #include "include/core/SkImage.h"
+#include "include/core/SkImageInfo.h"
 #include "include/core/SkSamplingOptions.h"
 #include "include/core/SkSurface.h"
 #include "include/gpu/ganesh/GrBackendSurface.h"
@@ -17,6 +20,8 @@
 #include "include/gpu/ganesh/mtl/GrMtlBackendSurface.h"
 #include "include/gpu/ganesh/mtl/GrMtlDirectContext.h"
 
+#include <cstdlib>
+#include <iostream>
 #include <new>
 
 struct DarwinArtGpuFrame {
@@ -32,11 +37,9 @@ struct DarwinArtGpuState {
   sk_sp<GrDirectContext> context;
   sk_sp<SkImage> embedded_image;
   id<MTLTexture> embedded_texture = nil;
+  sk_sp<SkImage> native_window_image;
+  uint64_t native_window_generation = 0;
 };
-
-bool IsMainThread() {
-  return [NSThread isMainThread];
-}
 
 DarwinArtGpuState* State(DarwinArtSurface* surface) {
   return surface == nullptr
@@ -143,15 +146,82 @@ bool darwin_art_surface_gpu_composite_embedded(
     DarwinArtSurface* surface, void* sk_canvas) {
   auto* state = State(surface);
   auto* canvas = static_cast<SkCanvas*>(sk_canvas);
-  if (surface == nullptr || state == nullptr || canvas == nullptr ||
-      surface->embedded_surface_frame.load(std::memory_order_acquire) == 0) {
+  if (surface == nullptr || state == nullptr || canvas == nullptr) {
     return false;
+  }
+  DarwinArtAndroidNativeWindowFrame native_frame{};
+  if (darwin_art_android_ANativeWindow_acquire_frame(&native_frame)) {
+    if (native_frame.generation != state->native_window_generation) {
+      const SkColorType color_type = native_frame.format == 4
+                                         ? kRGB_565_SkColorType
+                                         : kRGBA_8888_SkColorType;
+      const SkAlphaType alpha_type = native_frame.format == 1
+                                         ? kPremul_SkAlphaType
+                                         : kOpaque_SkAlphaType;
+      const SkImageInfo info = SkImageInfo::Make(
+          static_cast<int>(native_frame.width),
+          static_cast<int>(native_frame.height), color_type, alpha_type,
+          SkColorSpace::MakeSRGB());
+      auto release_frame = [](const void*, void* context) {
+        auto* held = static_cast<DarwinArtAndroidNativeWindowFrame*>(context);
+        darwin_art_android_ANativeWindow_release_frame(held);
+        delete held;
+      };
+      auto* held = new (std::nothrow)
+          DarwinArtAndroidNativeWindowFrame(native_frame);
+      if (held != nullptr) {
+        const size_t bytes_per_pixel = native_frame.format == 4 ? 2u : 4u;
+        sk_sp<SkData> data = SkData::MakeWithProc(
+            native_frame.pixels, native_frame.size, release_frame, held);
+        native_frame.owner = nullptr;
+        state->native_window_image = SkImages::RasterFromData(
+            info, std::move(data),
+            static_cast<size_t>(native_frame.stride_pixels) * bytes_per_pixel);
+        if (state->native_window_image != nullptr) {
+          state->native_window_generation = native_frame.generation;
+        }
+      }
+    }
+    darwin_art_android_ANativeWindow_release_frame(&native_frame);
   }
   const uint32_t width =
       surface->embedded_surface_width.load(std::memory_order_relaxed);
   const uint32_t height =
       surface->embedded_surface_height.load(std::memory_order_acquire);
-  if (width == 0 || height == 0 || surface->io_surface_texture == nil) {
+  if (width == 0 || height == 0) {
+    return false;
+  }
+  const int32_t x =
+      surface->embedded_surface_x.load(std::memory_order_relaxed);
+  const int32_t y =
+      surface->embedded_surface_y.load(std::memory_order_relaxed);
+  if (std::getenv("DARWIN_ART_DEBUG_RESIZE") != nullptr) {
+    static uint32_t reported_width = 0;
+    static uint32_t reported_height = 0;
+    if (reported_width != width || reported_height != height) {
+      reported_width = width;
+      reported_height = height;
+      const SkIRect clip = canvas->getDeviceClipBounds();
+      std::cerr << "ART Android GPU composite: geometry=" << x << "," << y
+                << " " << width << "x" << height << " backing="
+                << surface->width << "x" << surface->height << " clip="
+                << clip.left() << "," << clip.top() << "-" << clip.right()
+                << "," << clip.bottom() << "\n";
+    }
+  }
+  if (state->native_window_image != nullptr) {
+    const SkRect source = SkRect::MakeWH(
+        state->native_window_image->width(), state->native_window_image->height());
+    const SkRect destination = SkRect::MakeXYWH(
+        static_cast<SkScalar>(x), static_cast<SkScalar>(y),
+        static_cast<SkScalar>(width), static_cast<SkScalar>(height));
+    canvas->drawImageRect(state->native_window_image, source, destination,
+                          SkSamplingOptions(SkFilterMode::kLinear), nullptr,
+                          SkCanvas::kStrict_SrcRectConstraint);
+    return true;
+  }
+  if (surface->embedded_surface_frame.load(std::memory_order_acquire) == 0 ||
+      surface->io_surface_texture == nil) {
     return false;
   }
   if (state->embedded_image == nullptr ||
@@ -169,16 +239,18 @@ bool darwin_art_surface_gpu_composite_embedded(
     if (state->embedded_image == nullptr) return false;
     state->embedded_texture = surface->io_surface_texture;
   }
-  const int32_t x =
-      surface->embedded_surface_x.load(std::memory_order_relaxed);
-  const int32_t y =
-      surface->embedded_surface_y.load(std::memory_order_relaxed);
+  const uint32_t buffer_height =
+      surface->embedded_buffer_height.load(std::memory_order_acquire);
+  const uint32_t buffer_width =
+      surface->embedded_buffer_width.load(std::memory_order_relaxed);
   const SkRect source = SkRect::MakeWH(
-      std::min<uint32_t>(width, surface->width),
-      std::min<uint32_t>(height, surface->height));
+      std::min<uint32_t>(buffer_width == 0 ? width : buffer_width,
+                         surface->width),
+      std::min<uint32_t>(buffer_height == 0 ? height : buffer_height,
+                         surface->height));
   const SkRect destination = SkRect::MakeXYWH(
-      static_cast<SkScalar>(x), static_cast<SkScalar>(y), source.width(),
-      source.height());
+      static_cast<SkScalar>(x), static_cast<SkScalar>(y),
+      static_cast<SkScalar>(width), static_cast<SkScalar>(height));
   canvas->drawImageRect(state->embedded_image, source, destination,
                         SkSamplingOptions(SkFilterMode::kLinear), nullptr,
                         SkCanvas::kStrict_SrcRectConstraint);
@@ -192,6 +264,7 @@ void darwin_art_surface_gpu_forget(DarwinArtSurface* surface) {
     state->context->flushAndSubmit();
     state->embedded_image.reset();
     state->embedded_texture = nil;
+    state->native_window_image.reset();
     state->context->abandonContext();
     delete state;
     surface->gpu_state = nullptr;

@@ -7,12 +7,13 @@
 /// Bump when the common runtime/adapters include or command contract changes.
 /// A mismatch disables cache promotion until the canonical builder repopulates
 /// `_build/runtime-common`.
-pub const RUNTIME_CACHE_IDENTITY: &str = "darwin-art-runtime-core-cache-v4-angle-egl-surface";
+pub const RUNTIME_CACHE_IDENTITY: &str =
+    "darwin-art-runtime-core-cache-v5-angle-egl-surface-coreaudio";
 
 /// Identity of the generated native Ninja graph. Keeping this beside the
 /// runtime cache contract prevents the canonical builder and graph emitter
 /// from silently disagreeing about graph format or edge ownership.
-pub const NATIVE_GRAPH_VERSION: &str = "darwin-art-native-graph-v17-angle-egl-surface";
+pub const NATIVE_GRAPH_VERSION: &str = "darwin-art-native-graph-v18-angle-egl-surface-coreaudio";
 
 /// Canonical adapter translation units for the two runtime flavors.  Keeping
 /// this list in the dependency-free contract crate prevents the Cargo
@@ -24,6 +25,7 @@ pub const HEADLESS_ADAPTER_SOURCES: &[&str] = &[
     "darwin_android_elf_image_registry.cc",
     "darwin_provider_owners.cc",
     "darwin_angle_egl.cc",
+    "darwin_audio_track.mm",
     "darwin_framework_natives.cc",
     "darwin_motion_event_natives.cc",
     "darwin_framework_binder_natives.cc",
@@ -58,6 +60,7 @@ pub const GRAPHICS_ADAPTER_SOURCES: &[&str] = &[
     "darwin_android_elf_image_registry.cc",
     "darwin_provider_owners.cc",
     "darwin_angle_egl.cc",
+    "darwin_audio_track.mm",
     "darwin_framework_natives.cc",
     "darwin_motion_event_natives.cc",
     "darwin_framework_binder_natives.cc",

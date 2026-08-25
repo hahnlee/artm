@@ -114,8 +114,7 @@ int present_and_retain(darwin_art_graphics::GraphicsState* state,
           : env->GetMethodID(probe_view_class, "wasPresented", "()Z");
   const jboolean view_presented =
       run_apk_app
-          ? (decor_presented == JNI_TRUE && probe_view != nullptr ? JNI_TRUE
-                                                                  : JNI_FALSE)
+          ? decor_presented
           : (decor_presented != JNI_TRUE || probe_view == nullptr ||
                      !env->IsInstanceOf(probe_view, probe_view_class) ||
                      was_presented == nullptr || env->ExceptionCheck()

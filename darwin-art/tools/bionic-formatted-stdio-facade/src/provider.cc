@@ -115,6 +115,19 @@ extern "C" int darwin_art_bionic_fprintf_captured(
   return darwin_art_bionic_vfprintf(file, format, &android_va_list);
 }
 
+extern "C" int darwin_art_bionic_printf_captured(
+    const char* format, const uint64_t* gp, const uint8_t* fp, uint8_t* stack) {
+  AndroidVaList android_va_list{
+      stack,
+      reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(gp) + 64),
+      reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(fp) + 128),
+      -56,
+      -128,
+  };
+  return darwin_art_bionic_vfprintf(darwin_art_bionic_stdout, format,
+                                    &android_va_list);
+}
+
 extern "C" DarwinArtBionicFormattedStdioFunction
 darwin_art_bionic_formatted_stdio_resolve(const char* soname,
                                           const char* symbol,
@@ -127,6 +140,10 @@ darwin_art_bionic_formatted_stdio_resolve(const char* soname,
   if (Equal(symbol, "vfprintf")) {
     return reinterpret_cast<DarwinArtBionicFormattedStdioFunction>(
         darwin_art_bionic_vfprintf);
+  }
+  if (Equal(symbol, "printf")) {
+    return reinterpret_cast<DarwinArtBionicFormattedStdioFunction>(
+        darwin_art_bionic_printf);
   }
   return nullptr;
 }

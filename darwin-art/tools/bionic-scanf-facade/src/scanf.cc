@@ -422,6 +422,14 @@ extern "C" int darwin_art_bionic_vsscanf(const char* input,
   return Scan(input, format, FromVa(android_va_list));
 }
 
+extern "C" int darwin_art_bionic_fscanf_unsupported(void* stream,
+                                                     const char* format, ...) {
+  (void)stream;
+  (void)format;
+  Fail(kEnotsup);
+  return -1;
+}
+
 extern "C" void* darwin_art_bionic_scanf_resolve(const char* soname,
                                                    const char* symbol,
                                                    const char* version) {
@@ -433,6 +441,8 @@ extern "C" void* darwin_art_bionic_scanf_resolve(const char* soname,
     return reinterpret_cast<void*>(darwin_art_bionic_sscanf);
   if (std::string_view(symbol) == "vsscanf")
     return reinterpret_cast<void*>(&darwin_art_bionic_vsscanf);
+  if (std::string_view(symbol) == "fscanf")
+    return reinterpret_cast<void*>(&darwin_art_bionic_fscanf_unsupported);
   return nullptr;
 }
 

@@ -80,6 +80,7 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("compat/darwin_surface_bridge.h"),
         PathBuf::from("compat/darwin_surface_internal.h"),
         PathBuf::from("compat/darwin_surface_gpu_bridge.mm"),
+        PathBuf::from("compat/darwin_audio_track.h"),
         PathBuf::from("compat/darwin_provider_owners.cc"),
         PathBuf::from("compat/darwin_provider_owners.h"),
         // The libcore Linux archive is produced by a standalone shell edge,
@@ -158,6 +159,7 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/android-elf-jni-fixture/host_provider.c"),
         PathBuf::from("probes/android-elf-jni-fixture/native_fixture.c"),
         PathBuf::from("tools/android-jni-proxy/src/proxy.c"),
+        PathBuf::from("tools/android-jni-proxy/src/aapcs64_call.S"),
         PathBuf::from("tools/android-jni-proxy/sources.lock"),
     ]);
     paths.sort();

@@ -21,14 +21,15 @@ import android.view.ViewGroup;
 import android.view.Window;
 import dev.darwinart.probe.ProbeHostDocumentProvider;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.WeakHashMap;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.lang.reflect.Constructor;
+import java.io.File;
 
 /** Minimal in-process display service used by Choreographer on the host. */
 final class DarwinServiceBridge {
@@ -40,8 +41,8 @@ final class DarwinServiceBridge {
     // ActivityTaskManager transactions originate outside the app main queue
     // on Android and must cross Choreographer's traversal sync barriers.
     private static final Handler MAIN_HANDLER = Handler.createAsync(Looper.getMainLooper());
-    private static final Set<SurfaceView> HOST_SURFACES =
-            Collections.newSetFromMap(new WeakHashMap<SurfaceView, Boolean>());
+    private static final Map<SurfaceView, HostSurfaceState> HOST_SURFACES =
+            new WeakHashMap<>();
     private static final ArrayList<ActivityRecord> ACTIVITY_STACK = new ArrayList<>();
     private static volatile Activity currentActivity;
 
@@ -54,6 +55,23 @@ final class DarwinServiceBridge {
             this.activity = activity;
             this.token = token;
             this.requestCode = requestCode;
+        }
+    }
+
+    private static final class HostSurfaceState {
+        final int[] geometry = new int[4];
+        final WeakHashMap<SurfaceHolder.Callback, Boolean> announced =
+                new WeakHashMap<>();
+
+        HostSurfaceState(int x, int y, int width, int height) {
+            setGeometry(x, y, width, height);
+        }
+
+        void setGeometry(int x, int y, int width, int height) {
+            geometry[0] = x;
+            geometry[1] = y;
+            geometry[2] = width;
+            geometry[3] = height;
         }
     }
 
@@ -88,25 +106,52 @@ final class DarwinServiceBridge {
     private static void activateHostSurfaces(View view) {
         if (view instanceof SurfaceView) {
             SurfaceView surfaceView = (SurfaceView) view;
-            if (HOST_SURFACES.add(surfaceView)) {
-                SurfaceHolder holder = surfaceView.getHolder();
+            int width = surfaceView.getWidth();
+            int height = surfaceView.getHeight();
+            // SurfaceFlinger does not publish a producer until layout has
+            // produced a real frame. In particular, never turn a transient
+            // 0x0 SurfaceView into a permanently "activated" host surface.
+            if (width > 0 && height > 0 && surfaceView.isAttachedToWindow()) {
                 int[] location = new int[2];
                 surfaceView.getLocationInWindow(location);
-                nativeConfigureHostSurface(location[0], location[1],
-                        Math.max(1, surfaceView.getWidth()),
-                        Math.max(1, surfaceView.getHeight()));
-                Log.i("DarwinServiceBridge", "activating host SurfaceView "
-                        + surfaceView.getClass().getName() + " callback="
-                        + (surfaceView instanceof SurfaceHolder.Callback)
-                        + " size=" + surfaceView.getWidth() + "x"
-                        + surfaceView.getHeight());
-                if (surfaceView instanceof SurfaceHolder.Callback) {
-                    SurfaceHolder.Callback callback =
-                            (SurfaceHolder.Callback) surfaceView;
-                    callback.surfaceCreated(holder);
-                    callback.surfaceChanged(holder, 1,
-                            Math.max(1, surfaceView.getWidth()),
-                            Math.max(1, surfaceView.getHeight()));
+                HostSurfaceState state = HOST_SURFACES.get(surfaceView);
+                boolean geometryChanged = state == null
+                        || state.geometry[0] != location[0]
+                        || state.geometry[1] != location[1]
+                        || state.geometry[2] != width
+                        || state.geometry[3] != height;
+                SurfaceHolder holder = surfaceView.getHolder();
+                ArrayList<SurfaceHolder.Callback> callbacks =
+                        hostSurfaceCallbacks(surfaceView);
+                boolean hasNewCallback = false;
+                if (state == null) {
+                    state = new HostSurfaceState(
+                            location[0], location[1], width, height);
+                    HOST_SURFACES.put(surfaceView, state);
+                }
+                takeOverHostSurfaceLifecycle(surfaceView);
+                // SurfaceFlinger publishes a valid producer before delivering
+                // surfaceCreated(). Do the same: native renderers may reject
+                // the callback permanently when Surface.isValid() is false.
+                nativeConfigureHostSurface(surfaceView, holder.getSurface(),
+                        location[0], location[1], width, height);
+                for (SurfaceHolder.Callback callback : callbacks) {
+                    if (!state.announced.containsKey(callback)) {
+                        callback.surfaceCreated(holder);
+                        state.announced.put(callback, Boolean.TRUE);
+                        hasNewCallback = true;
+                    }
+                }
+                if (geometryChanged || hasNewCallback) {
+                    for (SurfaceHolder.Callback callback : callbacks) {
+                        callback.surfaceChanged(holder, 1, width, height);
+                    }
+                    state.setGeometry(location[0], location[1], width, height);
+                    Log.i("DarwinServiceBridge", "host SurfaceView "
+                            + (hasNewCallback ? "created " : "changed ")
+                            + surfaceView.getClass().getName() + " callbacks="
+                            + callbacks.size() + " geometry=" + location[0] + ","
+                            + location[1] + " " + width + "x" + height);
                 }
             }
         }
@@ -115,6 +160,31 @@ final class DarwinServiceBridge {
             for (int index = 0; index < group.getChildCount(); ++index) {
                 activateHostSurfaces(group.getChildAt(index));
             }
+        }
+    }
+
+    private static void takeOverHostSurfaceLifecycle(SurfaceView surfaceView) {
+        try {
+            Field haveFrame = SurfaceView.class.getDeclaredField("mHaveFrame");
+            Field drawListener = SurfaceView.class.getDeclaredField("mDrawListener");
+            Field scrollListener =
+                    SurfaceView.class.getDeclaredField("mScrollChangedListener");
+            haveFrame.setAccessible(true);
+            drawListener.setAccessible(true);
+            scrollListener.setAccessible(true);
+            android.view.ViewTreeObserver observer = surfaceView.getViewTreeObserver();
+            observer.removeOnPreDrawListener(
+                    (android.view.ViewTreeObserver.OnPreDrawListener)
+                            drawListener.get(surfaceView));
+            observer.removeOnScrollChangedListener(
+                    (android.view.ViewTreeObserver.OnScrollChangedListener)
+                            scrollListener.get(surfaceView));
+            // Every framework updateSurface() path returns before touching
+            // SurfaceControl while the detached compositor owns the producer.
+            haveFrame.setBoolean(surfaceView, false);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException(
+                    "could not acquire detached SurfaceView lifecycle", error);
         }
     }
 
@@ -129,10 +199,12 @@ final class DarwinServiceBridge {
     private static void deactivateHostSurfaces(View view) {
         if (view instanceof SurfaceView) {
             SurfaceView surfaceView = (SurfaceView) view;
-            if (HOST_SURFACES.remove(surfaceView)
-                    && surfaceView instanceof SurfaceHolder.Callback) {
-                ((SurfaceHolder.Callback) surfaceView).surfaceDestroyed(
-                        surfaceView.getHolder());
+            HostSurfaceState state = HOST_SURFACES.remove(surfaceView);
+            if (state != null) {
+                SurfaceHolder holder = surfaceView.getHolder();
+                for (SurfaceHolder.Callback callback : state.announced.keySet()) {
+                    callback.surfaceDestroyed(holder);
+                }
             }
         }
         if (view instanceof ViewGroup) {
@@ -143,6 +215,23 @@ final class DarwinServiceBridge {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private static ArrayList<SurfaceHolder.Callback> hostSurfaceCallbacks(
+            SurfaceView surfaceView) {
+        try {
+            Field callbacks = SurfaceView.class.getDeclaredField("mCallbacks");
+            callbacks.setAccessible(true);
+            ArrayList<SurfaceHolder.Callback> registered =
+                    (ArrayList<SurfaceHolder.Callback>) callbacks.get(surfaceView);
+            // Match SurfaceView.getSurfaceCallbacks(): take a stable snapshot
+            // because callbacks may add/remove registrations while notified.
+            return new ArrayList<>(registered);
+        } catch (Throwable error) {
+            Log.e("DarwinServiceBridge", "could not enumerate SurfaceHolder callbacks", error);
+            return new ArrayList<>();
+        }
+    }
+
     /** Rebinds the Metal/HWUI owner after an Android-owned Activity launch. */
     private static native boolean nativeInstallActivity(
             Activity activity, View decorView);
@@ -150,6 +239,7 @@ final class DarwinServiceBridge {
     private static native String[] nativeChooseSaveDocument(
             String mimeType, String suggestedName);
     private static native void nativeConfigureHostSurface(
+            SurfaceView surfaceView, android.view.Surface surface,
             int x, int y, int width, int height);
 
     static Binder createContextBinder() {
@@ -282,6 +372,12 @@ final class DarwinServiceBridge {
             attach(notificationBinder, notificationService,
                     "android.app.INotificationManager");
 
+            // PlayerBase registers every AudioTrack with system_server's
+            // IAudioService before AudioTrack.native_setup is usable.  Keep
+            // that Android lifecycle intact and allocate stable process-local
+            // player ids for media apps running without system_server.
+            Binder audioBinder = new AudioServiceBinder();
+
             Binder voiceInteractionBinder = new Binder();
             Class<?> voiceInteractionInterface = Class.forName(
                     "com.android.internal.app.IVoiceInteractionManagerService");
@@ -307,6 +403,48 @@ final class DarwinServiceBridge {
                     Proxy.getInvocationHandler(activityManagerService));
             attach(clipboardBinder, clipboardService, "android.content.IClipboard");
 
+            // Environment.UserEnvironment obtains shared-storage roots from
+            // the system_server mount service. Keep that Android contract and
+            // expose one primary emulated volume backed only by this app's
+            // runtime-owned data directory; never expose the host filesystem
+            // root as Android shared storage.
+            Object primaryVolume = createPrimaryStorageVolume();
+            Binder storageBinder = new Binder();
+            Class<?> storageInterface = Class.forName(
+                    "android.os.storage.IStorageManager");
+            Object storageService = Proxy.newProxyInstance(
+                    storageInterface.getClassLoader(),
+                    new Class<?>[] {storageInterface},
+                    (proxy, method, args) -> {
+                        if ("getVolumeList".equals(method.getName())) {
+                            Object array = java.lang.reflect.Array.newInstance(
+                                    primaryVolume.getClass(), 1);
+                            java.lang.reflect.Array.set(array, 0, primaryVolume);
+                            return array;
+                        }
+                        if ("getVolumeState".equals(method.getName())) {
+                            return android.os.Environment.MEDIA_MOUNTED;
+                        }
+                        return defaultValue(method.getReturnType());
+                    });
+            attach(storageBinder, storageService,
+                    "android.os.storage.IStorageManager");
+
+            // MediaSession is a framework facade over the system_server
+            // ISessionManager service. Keep that Android boundary intact for
+            // media apps: MediaSessionManager creates a process-local ISession,
+            // whose token exposes the paired ISessionController interface.
+            // Playback remains app-owned (for example libvlc); this service
+            // only supplies Android's session/control coordination contract.
+            MediaSessionInterfaceHandler mediaSessionManagerHandler =
+                    new MediaSessionInterfaceHandler(
+                            "android.media.session.ISessionManager", null);
+            Binder mediaSessionBinder = mediaSessionManagerHandler.binder;
+            MediaSessionInterfaceHandler trustManagerHandler =
+                    new MediaSessionInterfaceHandler(
+                            "android.app.trust.ITrustManager", null);
+            Binder trustBinder = trustManagerHandler.binder;
+
             Class<?> metadataClass = Class.forName("android.os.ServiceWithMetadata");
             Class<?> serviceClass = Class.forName("android.os.Service");
             Object displayServiceValue = serviceValue(
@@ -328,12 +466,20 @@ final class DarwinServiceBridge {
                     metadataClass, serviceClass, contentBinder);
             Object notificationServiceValue = serviceValue(
                     metadataClass, serviceClass, notificationBinder);
+            Object audioServiceValue = serviceValue(
+                    metadataClass, serviceClass, audioBinder);
             Object voiceInteractionServiceValue = serviceValue(
                     metadataClass, serviceClass, voiceInteractionBinder);
             Object searchServiceValue = serviceValue(
                     metadataClass, serviceClass, searchBinder);
             Object clipboardServiceValue = serviceValue(
                     metadataClass, serviceClass, clipboardBinder);
+            Object storageServiceValue = serviceValue(
+                    metadataClass, serviceClass, storageBinder);
+            Object mediaSessionServiceValue = serviceValue(
+                    metadataClass, serviceClass, mediaSessionBinder);
+            Object trustServiceValue = serviceValue(
+                    metadataClass, serviceClass, trustBinder);
             Object missingServiceValue = serviceValue(
                     metadataClass, serviceClass, null);
 
@@ -345,9 +491,11 @@ final class DarwinServiceBridge {
                             activityServiceValue,
                             inputMethodServiceValue, inputServiceValue, windowServiceValue,
                             accessibilityServiceValue, sensitiveContentServiceValue,
-                            contentServiceValue, notificationServiceValue,
+                            contentServiceValue, notificationServiceValue, audioServiceValue,
                             voiceInteractionServiceValue, searchServiceValue,
-                            clipboardServiceValue, missingServiceValue));
+                            clipboardServiceValue, storageServiceValue,
+                            mediaSessionServiceValue, trustServiceValue,
+                            missingServiceValue));
             Binder context = new Binder();
             attach(context, manager, "android.os.IServiceManager");
             return context;
@@ -398,6 +546,30 @@ final class DarwinServiceBridge {
         return builderClass.getMethod("build").invoke(builder);
     }
 
+    private static Object createPrimaryStorageVolume() throws Exception {
+        String appData = System.getenv("DARWIN_ART_APK_APP_DATA_DIR");
+        if (appData == null || appData.isEmpty()) {
+            throw new IllegalStateException("app data directory is unavailable");
+        }
+        File root = new File(appData, "external");
+        if (!root.isDirectory() && !root.mkdirs()) {
+            throw new IllegalStateException(
+                    "could not create app-scoped external storage");
+        }
+        Class<?> type = Class.forName("android.os.storage.StorageVolume");
+        Constructor<?> constructor = type.getDeclaredConstructor(
+                String.class, File.class, File.class, String.class,
+                boolean.class, boolean.class, boolean.class, boolean.class,
+                boolean.class, long.class, android.os.UserHandle.class,
+                java.util.UUID.class, String.class, String.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(
+                "emulated;0", root, root, "Darwin ART shared storage",
+                Boolean.TRUE, Boolean.FALSE, Boolean.TRUE, Boolean.FALSE,
+                Boolean.FALSE, Long.valueOf(0L), android.os.Process.myUserHandle(),
+                null, null, android.os.Environment.MEDIA_MOUNTED);
+    }
+
     private static void attach(Binder binder, Object owner, String descriptor)
             throws Exception {
         Class<?> iInterface = Class.forName("android.os.IInterface");
@@ -418,9 +590,13 @@ final class DarwinServiceBridge {
         private final Object sensitiveContentService;
         private final Object contentService;
         private final Object notificationService;
+        private final Object audioService;
         private final Object voiceInteractionService;
         private final Object searchService;
         private final Object clipboardService;
+        private final Object storageService;
+        private final Object mediaSessionService;
+        private final Object trustService;
         private final Object missingService;
 
         ManagerHandler(Object displayService, Object activityManagerService,
@@ -428,8 +604,11 @@ final class DarwinServiceBridge {
                 Object inputMethodService, Object inputService, Object windowService,
                 Object accessibilityService, Object sensitiveContentService,
                 Object contentService, Object notificationService,
+                Object audioService,
                 Object voiceInteractionService, Object searchService,
-                Object clipboardService, Object missingService) {
+                Object clipboardService, Object storageService,
+                Object mediaSessionService, Object trustService,
+                Object missingService) {
             this.displayService = displayService;
             this.activityManagerService = activityManagerService;
             this.activityService = activityService;
@@ -440,9 +619,13 @@ final class DarwinServiceBridge {
             this.sensitiveContentService = sensitiveContentService;
             this.contentService = contentService;
             this.notificationService = notificationService;
+            this.audioService = audioService;
             this.voiceInteractionService = voiceInteractionService;
             this.searchService = searchService;
             this.clipboardService = clipboardService;
+            this.storageService = storageService;
+            this.mediaSessionService = mediaSessionService;
+            this.trustService = trustService;
             this.missingService = missingService;
         }
 
@@ -466,13 +649,82 @@ final class DarwinServiceBridge {
                 }
                 if ("content".equals(args[0])) return contentService;
                 if ("notification".equals(args[0])) return notificationService;
+                if ("audio".equals(args[0])) return audioService;
                 if ("voiceinteraction".equals(args[0])) {
                     return voiceInteractionService;
                 }
                 if ("search".equals(args[0])) return searchService;
                 if ("clipboard".equals(args[0])) return clipboardService;
+                if ("mount".equals(args[0])) return storageService;
+                if ("media_session".equals(args[0])) return mediaSessionService;
+                if ("trust".equals(args[0])) return trustService;
                 return missingService;
             }
+            return defaultValue(method.getReturnType());
+        }
+    }
+
+    /** Minimal remote-style audio binder consumed by IAudioService.Stub.Proxy. */
+    private static final class AudioServiceBinder extends Binder {
+        private int nextPlayerId = 1;
+
+        AudioServiceBinder() {
+            attachInterface(null, "android.media.IAudioService");
+        }
+
+        @Override
+        protected boolean onTransact(int code, android.os.Parcel data,
+                android.os.Parcel reply, int flags) {
+            if (reply != null) {
+                reply.writeNoException();
+                // trackPlayer is the first synchronous call made by
+                // PlayerBase and expects a positive player id. Extra reply
+                // data is ignored by void lifecycle transactions.
+                reply.writeInt(nextPlayerId++);
+            }
+            return true;
+        }
+    }
+
+    /** Process-local implementations of Android's media-session binder graph. */
+    private static final class MediaSessionInterfaceHandler implements InvocationHandler {
+        final Binder binder = new Binder();
+        final Object proxy;
+        private final String descriptor;
+        private final String packageName;
+        private Object controller;
+
+        MediaSessionInterfaceHandler(String descriptor, String packageName) throws Exception {
+            this.descriptor = descriptor;
+            this.packageName = packageName;
+            Class<?> interfaceClass = Class.forName(descriptor);
+            proxy = Proxy.newProxyInstance(interfaceClass.getClassLoader(),
+                    new Class<?>[] {interfaceClass}, this);
+            attach(binder, proxy, descriptor);
+        }
+
+        @Override
+        public Object invoke(Object ignored, Method method, Object[] args) throws Exception {
+            String name = method.getName();
+            if ("asBinder".equals(name)) return binder;
+            if ("createSession".equals(name)
+                    && "android.media.session.ISessionManager".equals(descriptor)) {
+                String owner = args != null && args.length > 0 && args[0] instanceof String
+                        ? (String) args[0] : packageName;
+                return new MediaSessionInterfaceHandler(
+                        "android.media.session.ISession", owner).proxy;
+            }
+            if ("getController".equals(name)
+                    && "android.media.session.ISession".equals(descriptor)) {
+                if (controller == null) {
+                    controller = new MediaSessionInterfaceHandler(
+                            "android.media.session.ISessionController", packageName).proxy;
+                }
+                return controller;
+            }
+            if ("getBinderForSetQueue".equals(name)) return new Binder();
+            if ("getPackageName".equals(name)) return packageName;
+            if ("isTransportControlEnabled".equals(name)) return Boolean.TRUE;
             return defaultValue(method.getReturnType());
         }
     }
@@ -872,6 +1124,25 @@ final class DarwinServiceBridge {
     private static final class ActivityManagerHandler implements InvocationHandler {
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) throws Exception {
+            if (method.getName().startsWith("getIntentSender")) {
+                // PendingIntent factories are backed by an IIntentSender token
+                // allocated by ActivityManager on Android.  Keep that contract
+                // process-local so framework PendingIntent APIs return a real,
+                // stable binder object instead of null when system_server is
+                // absent.  The sender remains conservative: send() is a no-op
+                // until host activity/broadcast delivery is connected.
+                String owner = null;
+                if (args != null) {
+                    for (Object argument : args) {
+                        if (argument instanceof String && !((String) argument).isEmpty()) {
+                            owner = (String) argument;
+                            break;
+                        }
+                    }
+                }
+                return new MediaSessionInterfaceHandler(
+                        "android.content.IIntentSender", owner).proxy;
+            }
             if ("getRunningAppProcesses".equals(method.getName())) {
                 Class<?> processInfoType = Class.forName(
                         "android.app.ActivityManager$RunningAppProcessInfo");
@@ -939,10 +1210,13 @@ final class DarwinServiceBridge {
     /** Supplies the process-local IWindowSession used by popup ViewRoots. */
     private static final class WindowManagerHandler implements InvocationHandler {
         private final Object session;
+        private final Class<?> windowIdInterface;
+        private final Map<Object, Object> windowIds = new HashMap<>();
         private final ArrayList<Object> serverInputChannels = new ArrayList<>();
 
         WindowManagerHandler() throws ClassNotFoundException {
             Class<?> sessionInterface = Class.forName("android.view.IWindowSession");
+            windowIdInterface = Class.forName("android.view.IWindowId");
             session = Proxy.newProxyInstance(sessionInterface.getClassLoader(),
                     new Class<?>[] {sessionInterface}, this);
         }
@@ -966,6 +1240,20 @@ final class DarwinServiceBridge {
                 // RELAYOUT_RES_FIRST_TIME: ViewRoot must complete its first
                 // traversal even though CAMetalLayer owns the real surface.
                 return Integer.valueOf(2);
+            }
+            if (proxy == session && "getWindowId".equals(method.getName())) {
+                Object token = args == null || args.length == 0 ? session : args[0];
+                Object existing = windowIds.get(token);
+                if (existing != null) return existing;
+                Binder binder = new Binder();
+                Object created = Proxy.newProxyInstance(windowIdInterface.getClassLoader(),
+                        new Class<?>[] {windowIdInterface}, (idProxy, idMethod, idArgs) -> {
+                            if ("asBinder".equals(idMethod.getName())) return binder;
+                            if ("isFocused".equals(idMethod.getName())) return Boolean.TRUE;
+                            return defaultValue(idMethod.getReturnType());
+                        });
+                windowIds.put(token, created);
+                return created;
             }
             return defaultValue(method.getReturnType());
         }

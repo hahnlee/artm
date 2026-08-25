@@ -16,8 +16,12 @@
 #define DARWIN_ART_JNI_SLOT_IsSameObject 24u
 #define DARWIN_ART_JNI_SLOT_NewLocalRef 25u
 #define DARWIN_ART_JNI_SLOT_GetObjectClass 31u
+#define DARWIN_ART_JNI_SLOT_NewObject 28u
 #define DARWIN_ART_JNI_SLOT_IsInstanceOf 32u
 #define DARWIN_ART_JNI_SLOT_GetMethodID 33u
+#define DARWIN_ART_JNI_SLOT_CallObjectMethod 34u
+#define DARWIN_ART_JNI_SLOT_CallIntMethod 49u
+#define DARWIN_ART_JNI_SLOT_CallVoidMethod 61u
 #define DARWIN_ART_JNI_SLOT_CallObjectMethodV 35u
 #define DARWIN_ART_JNI_SLOT_CallBooleanMethodV 38u
 #define DARWIN_ART_JNI_SLOT_CallByteMethodV 41u
@@ -48,6 +52,9 @@
 #define DARWIN_ART_JNI_SLOT_SetFloatField 111u
 #define DARWIN_ART_JNI_SLOT_SetDoubleField 112u
 #define DARWIN_ART_JNI_SLOT_GetStaticMethodID 113u
+#define DARWIN_ART_JNI_SLOT_CallStaticObjectMethod 114u
+#define DARWIN_ART_JNI_SLOT_CallStaticIntMethod 129u
+#define DARWIN_ART_JNI_SLOT_CallStaticVoidMethod 141u
 #define DARWIN_ART_JNI_SLOT_CallStaticObjectMethodV 115u
 #define DARWIN_ART_JNI_SLOT_CallStaticBooleanMethodV 118u
 #define DARWIN_ART_JNI_SLOT_CallStaticByteMethodV 121u

@@ -153,6 +153,10 @@ unsigned long long darwin_art_bionic_strtoull(const char* input, char** end,
                        (unsigned long long)ParseUnsigned(input, end, base));
 }
 
+uint64_t darwin_art_bionic_strtoumax(const char* input, char** end, int base) {
+  return (uint64_t)darwin_art_bionic_strtoull(input, end, base);
+}
+
 long long darwin_art_bionic_strtoll_l(const char* input, char** end, int base,
                                      DarwinArtAndroidLocale locale) {
   (void)locale;
@@ -163,6 +167,23 @@ unsigned long long darwin_art_bionic_strtoull_l(
     const char* input, char** end, int base, DarwinArtAndroidLocale locale) {
   (void)locale;
   return darwin_art_bionic_strtoull(input, end, base);
+}
+
+long long darwin_art_bionic_atoll(const char* input) {
+  return darwin_art_bionic_strtoll(input, NULL, 10);
+}
+
+DarwinArtBionicDiv darwin_art_bionic_div(int numerator, int denominator) {
+  DarwinArtBionicDiv result = {numerator / denominator,
+                               numerator % denominator};
+  return result;
+}
+
+DarwinArtBionicLongLongDiv darwin_art_bionic_lldiv(long long numerator,
+                                                    long long denominator) {
+  DarwinArtBionicLongLongDiv result = {numerator / denominator,
+                                       numerator % denominator};
+  return result;
 }
 
 static int NameEquals(const char* left, const char* right) {
@@ -176,6 +197,12 @@ static int NameEquals(const char* left, const char* right) {
 
 DarwinArtBionicNumericFunction darwin_art_bionic_numeric_resolve(
     const char* name) {
+  if (NameEquals(name, "atoll"))
+    return (DarwinArtBionicNumericFunction)darwin_art_bionic_atoll;
+  if (NameEquals(name, "div"))
+    return (DarwinArtBionicNumericFunction)darwin_art_bionic_div;
+  if (NameEquals(name, "lldiv"))
+    return (DarwinArtBionicNumericFunction)darwin_art_bionic_lldiv;
   if (NameEquals(name, "strtol"))
     return (DarwinArtBionicNumericFunction)darwin_art_bionic_strtol;
   if (NameEquals(name, "strtoll"))
@@ -186,6 +213,8 @@ DarwinArtBionicNumericFunction darwin_art_bionic_numeric_resolve(
     return (DarwinArtBionicNumericFunction)darwin_art_bionic_strtoul;
   if (NameEquals(name, "strtoull"))
     return (DarwinArtBionicNumericFunction)darwin_art_bionic_strtoull;
+  if (NameEquals(name, "strtoumax"))
+    return (DarwinArtBionicNumericFunction)darwin_art_bionic_strtoumax;
   if (NameEquals(name, "strtoull_l"))
     return (DarwinArtBionicNumericFunction)darwin_art_bionic_strtoull_l;
   return NULL;

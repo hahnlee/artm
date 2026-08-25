@@ -43,6 +43,12 @@ int darwin_art_bionic___register_atfork(void* prepare, void* parent,
   return 0;
 }
 
+int darwin_art_bionic_dladdr_unsupported(const void* address, void* info) {
+  (void)address;
+  (void)info;
+  return 0;
+}
+
 static int NameCompare(const char* left, const char* right) {
   while (*left == *right && *left != '\0') {
     ++left;
@@ -69,6 +75,7 @@ static const Binding kBindings[] = {
      (DarwinArtBionicDsoFunction)darwin_art_bionic___register_atfork},
     {"android_dlopen_ext",
      (DarwinArtBionicDsoFunction)darwin_art_bionic_android_dlopen_ext},
+    {"dladdr", (DarwinArtBionicDsoFunction)darwin_art_bionic_dladdr_unsupported},
     {"dlclose", (DarwinArtBionicDsoFunction)darwin_art_bionic_dlclose},
     {"dlerror", (DarwinArtBionicDsoFunction)darwin_art_bionic_dlerror},
     {"dlopen", (DarwinArtBionicDsoFunction)darwin_art_bionic_dlopen},

@@ -245,8 +245,8 @@ int main() {
       return 11;
   }
   constexpr size_t kExpectedCalls[] = {
-      33, 10, 1, 34, 11, 50, 21, 1, 25, 36, 6, 5, 6, 3, 4, 3,  20,
-      9,  2,  3, 2,  1,  3,  3,  2, 1,  1,  1, 1, 6, 9, 4, 50, 4};
+      62, 12, 1, 49, 17, 52, 60, 1, 45, 40, 10, 5, 8, 3, 4, 4,  20,
+      10, 2,  4, 3,  1,  3,  3,  3, 1,  1,  2, 1, 13, 21, 8, 60, 5};
   for (size_t index = 0; index < calls.size(); ++index) {
     if (calls[index] != kExpectedCalls[index]) {
       std::fprintf(stderr,
@@ -261,6 +261,6 @@ int main() {
     return 13;
   darwin_art_bionic_namespace_destroy(instance);
   std::fprintf(stderr, "bionic-provider-builtin-adapters: PASS providers=34 "
-                       "routes=371 version-aliases=exact\n");
+                       "routes=534 version-aliases=exact\n");
   return 0;
 }

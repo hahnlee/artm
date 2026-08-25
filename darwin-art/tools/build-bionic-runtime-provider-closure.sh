@@ -221,8 +221,12 @@ strftime_source="$root/_aosp/bionic-strftime-facade/platform/bionic/libc/tzcode/
   -c "$root/tools/bionic-abort-facade/src/provider.c" -o "$objects/abort.o"
 "$cxx" "${cxxflags[@]}" \
   -I"$root/tools/android-liblog-exec-provider/include" \
+  -I"$root/tools/bionic-format-facade/include" \
   -I"$root/_aosp/system/logging/liblog/include" \
   -c "$root/tools/android-liblog-exec-provider/liblog_provider.cc" -o "$objects/liblog.o"
+"$cc" "${cflags[@]}" \
+  -c "$root/tools/android-liblog-exec-provider/aapcs64_log.S" \
+  -o "$objects/liblog-aapcs64.o"
 "$cxx" "${cxxflags[@]}" \
   -I"$root/tools/bionic-provider-namespace/include" \
   -I"$root/tools/bionic-provider-namespace/generated" \
@@ -254,7 +258,7 @@ native="$build/libdarwin-art-bionic-native-providers.a"
   "$objects/syscall.o" "$objects/syscall-entry.o" \
   "$objects/strerror.o" "$objects/wide-integer.o" "$objects/wide-float.o" \
   "$objects/abort.o" \
-  "$objects/liblog.o" "$objects/namespace.o" \
+  "$objects/liblog.o" "$objects/liblog-aapcs64.o" "$objects/namespace.o" \
   "$objects/builtin_adapters.o" \
   "$objects/math.o"
 

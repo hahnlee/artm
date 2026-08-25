@@ -18,7 +18,12 @@ const MOV_X_REGISTER_MASK: u32 = 0xffe0_ffe0;
 const LDR_X_REGISTER_OFFSET: u32 = 0xf860_6800;
 const LDR_X_REGISTER_OFFSET_MASK: u32 = 0xffe0_fc00;
 const ANDROID_TLS_SLOT_STACK_GUARD_OFFSET: u32 = 0x28;
-const MAX_STACK_GUARD_DISTANCE_IN_INSTRUCTIONS: usize = 12;
+// LLVM normally emits the guard load immediately after reading TPIDR_EL0, but
+// highly optimized third-party code can schedule independent arithmetic between
+// the two. Real optimized DSOs can have dozens of intervening instructions.
+// Keep this bounded to a small basic-block-sized window: the second half of the
+// pair must still be an exact `LDR Xt, [Xthread, #0x28]` using the same register.
+const MAX_STACK_GUARD_DISTANCE_IN_INSTRUCTIONS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct StackGuardRewrite {
@@ -235,6 +240,23 @@ mod tests {
             rewrite_android_stack_guard_tls(&mut code, guard),
             Err(LoadError::Capability(Capability::DirectThreadPointer))
         ));
+    }
+
+    #[test]
+    fn accepts_a_scheduled_stack_guard_load() {
+        let mut values = vec![MRS_TPIDR_EL0 | 19];
+        values.extend(std::iter::repeat_n(0xd503_201f, 33));
+        values.push(LDR_X_UNSIGNED_IMMEDIATE | (5 << 10) | (19 << 5) | 8);
+        let mut code = instructions(&values);
+        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+
+        assert_eq!(
+            rewrite_android_stack_guard_tls(&mut code, guard)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(read_instruction(&code, 0), ADRP | 19);
     }
 
     #[test]

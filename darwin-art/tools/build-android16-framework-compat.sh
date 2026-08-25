@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 framework="$root/_prebuilt/android-16/bootclasspath/framework.jar"
+core_oj="$root/_prebuilt/android-16/bootclasspath/core-oj.jar"
 android_jar="$HOME/Library/Android/sdk/platforms/android-36/android.jar"
 out="$root/_build/android16-framework-compat"
 classes="$out/classes"
@@ -33,7 +34,7 @@ patch --batch --forward -p1 -d "$patched_root" < "$sdkextensions_patch" >/dev/nu
 patched_sdkextensions="$patched_root/$SDKEXTENSIONS_SOURCE"
 [[ "$(sha256 "$patched_sdkextensions")" == "$PATCHED_SDKEXTENSIONS_SHA256" ]]
 
-[[ -f "$framework" && -f "$android_jar" ]] || {
+[[ -f "$framework" && -f "$core_oj" && -f "$android_jar" ]] || {
   echo "android16-framework-compat: framework/android.jar missing" >&2
   exit 69
 }
@@ -45,7 +46,14 @@ javac --release 8 -encoding UTF-8 -d "$classes" -classpath "$android_jar" \
   "$patched_sdkextensions" \
   "$root/tools/android-framework-compat/src/android/provider/DeviceConfig.java" \
   "$root/tools/android-framework-compat/src/android/util/StatsEvent.java" \
-  "$root/tools/android-framework-compat/src/android/util/StatsLog.java"
+  "$root/tools/android-framework-compat/src/android/util/StatsLog.java" \
+  "$root/compat/java/android/media/MediaCommunicationManager.java" \
+  "$root/compat/java/android/net/ConnectivityManager.java" \
+  "$root/compat/java/android/net/Network.java" \
+  "$root/compat/java/android/net/NetworkCapabilities.java" \
+  "$root/compat/java/android/net/NetworkInfo.java" \
+  "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinSecurityProvider.java" \
+  "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinSecureRandom.java"
 unzip -p "$framework" classes.dex > "$out/input/framework.dex"
 if [[ -f "$out/framework-compat.jar" ]]; then
   mv "$out/framework-compat.jar" "$out/framework-compat.previous.jar"
@@ -59,10 +67,28 @@ fi
   "$classes/android/util/StatsEvent.class" \
   "$classes/android/util/StatsEvent\$Builder.class" \
   "$classes/android/util/StatsLog.class" \
+  "$classes/android/media/MediaCommunicationManager.class" \
+  "$classes/android/media/MediaCommunicationManager\$SessionCallback.class" \
+  "$classes/android/net/ConnectivityManager.class" \
+  "$classes/android/net/ConnectivityManager\$NetworkCallback.class" \
+  "$classes/android/net/Network.class" \
+  "$classes/android/net/NetworkCapabilities.class" \
+  "$classes/android/net/NetworkInfo.class" \
+  "$classes/dev/darwinart/security/DarwinSecurityProvider.class" \
+  "$classes/dev/darwinart/security/DarwinSecureRandom.class" \
   "$classes/android/os/ext/SdkExtensions.class"
 mv "$out/classes.dex" "$out/framework-compat.raw.dex"
 staged="$(mktemp -d "$out/staged.XXXXXX")"
 unzip -q "$framework" -d "$staged"
 cp "$out/framework-compat.raw.dex" "$staged/classes.dex"
 (cd "$staged" && zip -q -qr "$out/framework-compat.jar" .)
+core_out="$root/_build/android16-core-oj-compat"
+mkdir -p "$core_out"
+core_staged="$(mktemp -d "$core_out/staged.XXXXXX")"
+unzip -q "$core_oj" -d "$core_staged"
+cat > "$core_staged/java/security/security.properties" <<'EOF'
+security.provider.1=dev.darwinart.security.DarwinSecurityProvider
+securerandom.source=file:/dev/urandom
+EOF
+(cd "$core_staged" && zip -q -qr "$core_out/core-oj-compat.jar" .)
 echo "android16-framework-compat: PASS $out/framework-compat.jar"

@@ -37,6 +37,10 @@ int darwin_art_bionic_dns_getnameinfo(
 const char* darwin_art_bionic_dns_inet_ntop(
     int family, const void* address, char* output,
     DarwinArtAndroidSocklen output_length);
+int darwin_art_bionic_dns_inet_pton(int family, const char* source,
+                                    void* destination);
+uint32_t darwin_art_bionic_dns_inet_addr(const char* source);
+char* darwin_art_bionic_dns_inet_ntoa(uint32_t address);
 
 DarwinArtBionicDnsFunction darwin_art_bionic_dns_resolve(
     const char* soname, const char* symbol, const char* version);

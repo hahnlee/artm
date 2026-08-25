@@ -42,6 +42,15 @@ fn compile(source: &str, object: &Path, sdk: &str) {
     assert!(status.success(), "clang failed for {source}");
 }
 
+fn compile_assembly(source: &str, object: &Path, sdk: &str) {
+    let status = Command::new("clang")
+        .args(["-arch", "arm64", "-isysroot", sdk, "-c", source, "-o"])
+        .arg(object)
+        .status()
+        .unwrap_or_else(|error| panic!("failed to launch clang: {error}"));
+    assert!(status.success(), "clang failed for {source}");
+}
+
 fn main() {
     assert_eq!(env::var("CARGO_CFG_TARGET_OS").as_deref(), Ok("macos"));
     assert_eq!(env::var("CARGO_CFG_TARGET_ARCH").as_deref(), Ok("aarch64"));
@@ -51,14 +60,17 @@ fn main() {
         "xcrun SDK lookup",
     );
     let proxy = output_dir.join("proxy.o");
+    let call_entry = output_dir.join("aapcs64_call.o");
     let fake = output_dir.join("fake_backend.o");
     let archive = output_dir.join("libdarwin_art_jni_proxy.a");
     compile("src/proxy.c", &proxy, &sdk);
+    compile_assembly("src/aapcs64_call.S", &call_entry, &sdk);
     compile("probes/fake_backend.c", &fake, &sdk);
     let status = Command::new("ar")
         .arg("rcs")
         .arg(&archive)
         .arg(&proxy)
+        .arg(&call_entry)
         .arg(&fake)
         .status()
         .expect("failed to launch ar");
@@ -67,6 +79,7 @@ fn main() {
     println!("cargo:rustc-link-lib=static=darwin_art_jni_proxy");
     for source in [
         "src/proxy.c",
+        "src/aapcs64_call.S",
         "probes/fake_backend.c",
         "include/darwin_art_jni_proxy.h",
         "generated/jni_slots.h",

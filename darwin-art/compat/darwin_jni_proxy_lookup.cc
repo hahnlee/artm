@@ -226,6 +226,9 @@ uint64_t ProxyCallMethodV(void* context, void* object, void* method,
   const jobject receiver = static_cast<jobject>(object);
   const jclass clazz = static_cast<jclass>(object);
   const jmethodID id = static_cast<jmethodID>(method);
+  if (is_static == 2) {
+    return reinterpret_cast<uint64_t>(art_env->NewObjectA(clazz, id, values));
+  }
   if (is_static != 0) {
     switch (return_shorty) {
       case 'L':
@@ -271,7 +274,8 @@ uint64_t ProxyCallMethodV(void* context, void* object, void* method,
     case 'B': return static_cast<uint64_t>(art_env->CallByteMethodA(receiver, id, values));
     case 'C': return art_env->CallCharMethodA(receiver, id, values);
     case 'S': return static_cast<uint64_t>(art_env->CallShortMethodA(receiver, id, values));
-    case 'I': return static_cast<uint64_t>(art_env->CallIntMethodA(receiver, id, values));
+    case 'I':
+      return static_cast<uint64_t>(art_env->CallIntMethodA(receiver, id, values));
     case 'J': return static_cast<uint64_t>(art_env->CallLongMethodA(receiver, id, values));
     case 'F': {
       const jfloat value = art_env->CallFloatMethodA(receiver, id, values);

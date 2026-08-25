@@ -502,6 +502,34 @@ extern "C" const char* darwin_art_bionic_dns_inet_ntop(
   return result;
 }
 
+extern "C" int darwin_art_bionic_dns_inet_pton(int family,
+                                                const char* source,
+                                                void* destination) {
+  PreserveErrno preserve;
+  int host_family = 0;
+  if (!TranslateFamilyToHost(family, &host_family) ||
+      host_family == AF_UNSPEC) {
+    darwin_art_bionic_errno_store(97);
+    return -1;
+  }
+  const int result = inet_pton(host_family, source, destination);
+  if (result == -1) darwin_art_bionic_errno_store(AndroidErrno(errno));
+  return result;
+}
+
+extern "C" uint32_t darwin_art_bionic_dns_inet_addr(const char* source) {
+  uint32_t address = UINT32_MAX;
+  return darwin_art_bionic_dns_inet_pton(kAndroidAfInet, source, &address) == 1
+             ? address
+             : UINT32_MAX;
+}
+
+extern "C" char* darwin_art_bionic_dns_inet_ntoa(uint32_t address) {
+  static thread_local char output[INET_ADDRSTRLEN];
+  return const_cast<char*>(darwin_art_bionic_dns_inet_ntop(
+      kAndroidAfInet, &address, output, sizeof(output)));
+}
+
 extern "C" DarwinArtBionicDnsFunction darwin_art_bionic_dns_resolve(
     const char* soname, const char* symbol, const char* version) {
   if (soname == nullptr || symbol == nullptr || version == nullptr ||
@@ -518,6 +546,9 @@ extern "C" DarwinArtBionicDnsFunction darwin_art_bionic_dns_resolve(
   DNS_SYMBOL(gai_strerror);
   DNS_SYMBOL(getnameinfo);
   DNS_SYMBOL(inet_ntop);
+  DNS_SYMBOL(inet_pton);
+  DNS_SYMBOL(inet_addr);
+  DNS_SYMBOL(inet_ntoa);
 #undef DNS_SYMBOL
   return nullptr;
 }

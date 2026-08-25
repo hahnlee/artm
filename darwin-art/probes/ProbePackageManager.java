@@ -14,6 +14,8 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.test.mock.MockPackageManager;
 import java.util.HashMap;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /** Minimal package policy for framework feature gates before system_server exists. */
@@ -30,6 +32,51 @@ public final class ProbePackageManager extends MockPackageManager {
     private Map<String, Integer> activityThemes;
 
     public ProbePackageManager() {}
+
+    @Override
+    public String[] getPackagesForUid(int uid) {
+        // This runtime currently hosts exactly one installed Android package
+        // per process, matching PackageManager's caller-identity check used by
+        // MediaBrowserService and other Binder services.
+        return packageName == null ? null : new String[] {packageName};
+    }
+
+    @Override
+    public String getNameForUid(int uid) {
+        return packageName;
+    }
+
+    @Override
+    public List<ResolveInfo> queryBroadcastReceivers(Intent intent, int flags) {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public List<ResolveInfo> queryBroadcastReceivers(Intent intent,
+            PackageManager.ResolveInfoFlags flags) {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public List<ResolveInfo> queryIntentServices(Intent intent, int flags) {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public List<ResolveInfo> queryIntentServices(Intent intent,
+            PackageManager.ResolveInfoFlags flags) {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public ResolveInfo resolveService(Intent intent, int flags) {
+        return null;
+    }
+
+    @Override
+    public ResolveInfo resolveService(Intent intent, PackageManager.ResolveInfoFlags flags) {
+        return null;
+    }
 
     /** Installs metadata for the unmodified APK selected by the native launcher. */
     public void configure(String packageName, String activityName, String activityNames,
@@ -50,6 +97,8 @@ public final class ProbePackageManager extends MockPackageManager {
         }
         configured.applicationInfo.packageName = packageName;
         configured.applicationInfo.targetSdkVersion = targetSdkVersion;
+        configured.applicationInfo.nativeLibraryDir = System.getenv(
+                "DARWIN_ART_APK_APP_NATIVE_DIR");
         activityInfo = new ActivityInfo(configured);
         if (activityNames != null && !"none".equals(activityNames)) {
             for (String entry : activityNames.split(",")) {
@@ -84,6 +133,13 @@ public final class ProbePackageManager extends MockPackageManager {
     }
 
     @Override
+    public ServiceInfo getServiceInfo(ComponentName component,
+            PackageManager.ComponentInfoFlags flags)
+            throws PackageManager.NameNotFoundException {
+        return getServiceInfo(component, (int) flags.getValue());
+    }
+
+    @Override
     public ActivityInfo getActivityInfo(ComponentName component, int flags)
             throws PackageManager.NameNotFoundException {
         if (component != null
@@ -99,12 +155,26 @@ public final class ProbePackageManager extends MockPackageManager {
     }
 
     @Override
+    public ActivityInfo getActivityInfo(ComponentName component,
+            PackageManager.ComponentInfoFlags flags)
+            throws PackageManager.NameNotFoundException {
+        return getActivityInfo(component, (int) flags.getValue());
+    }
+
+    @Override
     public ApplicationInfo getApplicationInfo(String requestedPackage, int flags)
             throws PackageManager.NameNotFoundException {
         if (packageName != null && packageName.equals(requestedPackage)) {
             return new ApplicationInfo(activityInfo.applicationInfo);
         }
         throw new PackageManager.NameNotFoundException(requestedPackage);
+    }
+
+    @Override
+    public ApplicationInfo getApplicationInfo(String requestedPackage,
+            PackageManager.ApplicationInfoFlags flags)
+            throws PackageManager.NameNotFoundException {
+        return getApplicationInfo(requestedPackage, (int) flags.getValue());
     }
 
     @Override
@@ -131,6 +201,13 @@ public final class ProbePackageManager extends MockPackageManager {
     }
 
     @Override
+    public PackageInfo getPackageInfo(String requestedPackage,
+            PackageManager.PackageInfoFlags flags)
+            throws PackageManager.NameNotFoundException {
+        return getPackageInfo(requestedPackage, (int) flags.getValue());
+    }
+
+    @Override
     public ResolveInfo resolveActivity(Intent intent, int flags) {
         if (intent == null || intent.getComponent() == null) {
             return null;
@@ -149,12 +226,12 @@ public final class ProbePackageManager extends MockPackageManager {
 
     @Override
     public boolean hasSystemFeature(String name) {
-        return false;
+        return PackageManager.FEATURE_TOUCHSCREEN.equals(name);
     }
 
     @Override
     public boolean hasSystemFeature(String name, int version) {
-        return false;
+        return hasSystemFeature(name);
     }
 
     @Override

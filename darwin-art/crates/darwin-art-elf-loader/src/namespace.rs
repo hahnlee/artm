@@ -362,6 +362,13 @@ impl LoadedElfGraph {
             .lookup_exported(name)
     }
 
+    pub fn lookup_root_symbol(&self, name: &str) -> Result<usize, LoadError> {
+        self.inner.objects[self.inner.root_index]
+            .as_ref()
+            .expect("live graph object")
+            .lookup_any_exported(name)
+    }
+
     pub fn close(self) {}
 }
 

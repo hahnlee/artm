@@ -527,7 +527,7 @@ std::shared_ptr<MutexEntry> FindOrCreateMutex(
   auto entry = std::make_shared<MutexEntry>();
   const int result = InitializeHostMutex(
       entry, static_cast<MutexEntry::Kind>(type));
-  if (result != 0) {
+  if (result != 0 && std::getenv("DARWIN_ART_PTHREAD_TRACE") != nullptr) {
     *error_out = result;
     return nullptr;
   }
@@ -579,7 +579,7 @@ std::shared_ptr<CondEntry> FindOrCreateCond(
   }
   auto entry = std::make_shared<CondEntry>();
   const int result = pthread_cond_init(&entry->host, nullptr);
-  if (result != 0) {
+  if (result != 0 && std::getenv("DARWIN_ART_PTHREAD_TRACE") != nullptr) {
     *error_out = AndroidError(result);
     return nullptr;
   }
@@ -919,6 +919,22 @@ extern "C" int darwin_art_bionic_pthread_getschedparam(
                           : AndroidError(pthread_getschedparam(entry->host, policy, param));
 }
 
+extern "C" int darwin_art_bionic_pthread_setschedparam(
+    DarwinArtAndroidPthread token, int policy, const sched_param* param) {
+  if (param == nullptr) return kAndroidEinval;
+  if (token == CurrentThreadToken())
+    return AndroidError(pthread_setschedparam(pthread_self(), policy, param));
+  auto entry = FindThreadEntry(token);
+  return entry == nullptr
+             ? kAndroidEsrch
+             : AndroidError(pthread_setschedparam(entry->host, policy, param));
+}
+
+extern "C" [[noreturn]] void darwin_art_bionic_pthread_exit(void* value) {
+  pthread_exit(value);
+  __builtin_unreachable();
+}
+
 extern "C" int darwin_art_bionic_pthread_setname_np(
     DarwinArtAndroidPthread token, const char* name) {
   if (name == nullptr) return kAndroidEinval;
@@ -1226,7 +1242,7 @@ extern "C" int darwin_art_bionic_pthread_mutex_lock(
   std::shared_ptr<MutexEntry> entry = FindOrCreateMutex(mutex, &error);
   const int result =
       entry == nullptr ? error : WithLiveMutex(entry, pthread_mutex_lock);
-  if (result != 0) {
+  if (result != 0 && std::getenv("DARWIN_ART_PTHREAD_TRACE") != nullptr) {
     std::fprintf(stderr,
                  "DARWIN pthread mutex_lock failure mutex=%p visible=0x%04x "
                  "result=%d entry=%p\n",
@@ -1625,6 +1641,8 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
   RESOLVE(attr_setstacksize);
   RESOLVE(equal);
   RESOLVE(getschedparam);
+  RESOLVE(setschedparam);
+  RESOLVE(exit);
   RESOLVE(kill);
   RESOLVE(setname_np);
   RESOLVE(sigmask);

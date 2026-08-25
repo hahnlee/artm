@@ -1,6 +1,7 @@
 #include "darwin_framework_natives.h"
 
 #include <cstdint>
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -10,9 +11,250 @@
 #include <new>
 #include <string>
 #include <utility>
+#include <vector>
 #include <unistd.h>
 
 namespace {
+
+struct DarwinParcel {
+  std::vector<uint8_t> data;
+  size_t position = 0;
+  bool allow_fds = true;
+  std::vector<jobject> binders;
+};
+
+DarwinParcel* Parcel(jlong pointer) {
+  return reinterpret_cast<DarwinParcel*>(static_cast<std::uintptr_t>(pointer));
+}
+
+template <typename T>
+jint ParcelWriteScalar(jlong pointer, T value) {
+  auto* parcel = Parcel(pointer);
+  if (parcel == nullptr) return -1;
+  const size_t end = parcel->position + sizeof(T);
+  if (end > parcel->data.size()) parcel->data.resize(end);
+  std::memcpy(parcel->data.data() + parcel->position, &value, sizeof(T));
+  parcel->position = end;
+  return 0;
+}
+
+template <typename T>
+T ParcelReadScalar(jlong pointer) {
+  auto* parcel = Parcel(pointer);
+  T value{};
+  if (parcel == nullptr || parcel->position + sizeof(T) > parcel->data.size()) {
+    return value;
+  }
+  std::memcpy(&value, parcel->data.data() + parcel->position, sizeof(T));
+  parcel->position += sizeof(T);
+  return value;
+}
+
+jlong ParcelCreate(JNIEnv*, jclass) {
+  return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(
+      new (std::nothrow) DarwinParcel()));
+}
+
+void ParcelDestroy(JNIEnv* env, jclass, jlong pointer) {
+  auto* parcel = Parcel(pointer);
+  if (parcel == nullptr) return;
+  for (jobject binder : parcel->binders) env->DeleteGlobalRef(binder);
+  delete parcel;
+}
+
+void ParcelFreeBuffer(JNIEnv*, jclass, jlong pointer) {
+  if (auto* parcel = Parcel(pointer); parcel != nullptr) {
+    parcel->data.clear();
+    parcel->position = 0;
+  }
+}
+
+void ParcelMarkSensitive(jlong) {}
+void ParcelMarkForBinder(JNIEnv*, jclass, jlong, jobject) {}
+jboolean ParcelIsForRpc(jlong) { return JNI_FALSE; }
+jint ParcelDataSize(jlong p) { return Parcel(p) == nullptr ? 0 : Parcel(p)->data.size(); }
+jint ParcelDataAvail(jlong p) {
+  auto* parcel = Parcel(p);
+  return parcel == nullptr || parcel->position >= parcel->data.size()
+      ? 0 : static_cast<jint>(parcel->data.size() - parcel->position);
+}
+jint ParcelDataPosition(jlong p) {
+  return Parcel(p) == nullptr ? 0 : static_cast<jint>(Parcel(p)->position);
+}
+jint ParcelDataCapacity(jlong p) {
+  return Parcel(p) == nullptr ? 0 : static_cast<jint>(Parcel(p)->data.capacity());
+}
+void ParcelSetDataSize(JNIEnv*, jclass, jlong p, jint size) {
+  if (auto* parcel = Parcel(p); parcel != nullptr && size >= 0) {
+    parcel->data.resize(static_cast<size_t>(size));
+    if (parcel->position > parcel->data.size()) parcel->position = parcel->data.size();
+  }
+}
+void ParcelSetDataPosition(jlong p, jint position) {
+  if (auto* parcel = Parcel(p); parcel != nullptr && position >= 0) {
+    parcel->position = std::min(static_cast<size_t>(position), parcel->data.size());
+  }
+}
+void ParcelSetDataCapacity(JNIEnv*, jclass, jlong p, jint capacity) {
+  if (auto* parcel = Parcel(p); parcel != nullptr && capacity >= 0) {
+    parcel->data.reserve(static_cast<size_t>(capacity));
+  }
+}
+jboolean ParcelPushAllowFds(jlong p, jboolean allow) {
+  auto* parcel = Parcel(p);
+  if (parcel == nullptr) return JNI_FALSE;
+  const bool previous = parcel->allow_fds;
+  parcel->allow_fds = allow == JNI_TRUE;
+  return previous ? JNI_TRUE : JNI_FALSE;
+}
+void ParcelRestoreAllowFds(jlong p, jboolean allow) {
+  if (auto* parcel = Parcel(p); parcel != nullptr) parcel->allow_fds = allow == JNI_TRUE;
+}
+jint ParcelWriteInt(jlong p, jint v) { return ParcelWriteScalar(p, v); }
+jint ParcelWriteLong(jlong p, jlong v) { return ParcelWriteScalar(p, v); }
+jint ParcelWriteFloat(jlong p, jfloat v) { return ParcelWriteScalar(p, v); }
+jint ParcelWriteDouble(jlong p, jdouble v) { return ParcelWriteScalar(p, v); }
+jint ParcelReadInt(jlong p) { return ParcelReadScalar<jint>(p); }
+jlong ParcelReadLong(jlong p) { return ParcelReadScalar<jlong>(p); }
+jfloat ParcelReadFloat(jlong p) { return ParcelReadScalar<jfloat>(p); }
+jdouble ParcelReadDouble(jlong p) { return ParcelReadScalar<jdouble>(p); }
+
+void ParcelWriteBytes(JNIEnv* env, jclass, jlong p, jbyteArray bytes,
+                      jint offset, jint length) {
+  auto* parcel = Parcel(p);
+  if (parcel == nullptr || bytes == nullptr || offset < 0 || length < 0) return;
+  ParcelWriteInt(p, length);
+  const size_t end = parcel->position + static_cast<size_t>(length);
+  if (end > parcel->data.size()) parcel->data.resize(end);
+  env->GetByteArrayRegion(bytes, offset, length,
+                          reinterpret_cast<jbyte*>(parcel->data.data() + parcel->position));
+  parcel->position = end;
+}
+
+jbyteArray ParcelCreateByteArray(JNIEnv* env, jclass, jlong p) {
+  const jint length = ParcelReadInt(p);
+  auto* parcel = Parcel(p);
+  if (parcel == nullptr || length < 0 ||
+      parcel->position + static_cast<size_t>(length) > parcel->data.size()) return nullptr;
+  jbyteArray result = env->NewByteArray(length);
+  if (result != nullptr) {
+    env->SetByteArrayRegion(result, 0, length,
+        reinterpret_cast<const jbyte*>(parcel->data.data() + parcel->position));
+    parcel->position += static_cast<size_t>(length);
+  }
+  return result;
+}
+
+jboolean ParcelReadByteArray(JNIEnv* env, jclass, jlong p, jbyteArray output,
+                             jint length) {
+  auto* parcel = Parcel(p);
+  if (parcel == nullptr || output == nullptr || length < 0 ||
+      parcel->position + static_cast<size_t>(length) > parcel->data.size()) {
+    return JNI_FALSE;
+  }
+  env->SetByteArrayRegion(output, 0, length,
+      reinterpret_cast<const jbyte*>(parcel->data.data() + parcel->position));
+  parcel->position += static_cast<size_t>(length);
+  return JNI_TRUE;
+}
+
+void ParcelWriteString(JNIEnv* env, jclass, jlong p, jstring value) {
+  if (value == nullptr) { ParcelWriteInt(p, -1); return; }
+  const char* utf = env->GetStringUTFChars(value, nullptr);
+  if (utf == nullptr) { ParcelWriteInt(p, -1); return; }
+  const jint length = static_cast<jint>(std::strlen(utf));
+  ParcelWriteInt(p, length);
+  auto* parcel = Parcel(p);
+  const size_t end = parcel->position + static_cast<size_t>(length);
+  if (end > parcel->data.size()) parcel->data.resize(end);
+  std::memcpy(parcel->data.data() + parcel->position, utf, length);
+  parcel->position = end;
+  env->ReleaseStringUTFChars(value, utf);
+}
+
+jstring ParcelReadString(JNIEnv* env, jclass, jlong p) {
+  const jint length = ParcelReadInt(p);
+  auto* parcel = Parcel(p);
+  if (parcel == nullptr || length < 0 ||
+      parcel->position + static_cast<size_t>(length) > parcel->data.size()) return nullptr;
+  std::string value(reinterpret_cast<const char*>(parcel->data.data() + parcel->position),
+                    static_cast<size_t>(length));
+  parcel->position += static_cast<size_t>(length);
+  return env->NewStringUTF(value.c_str());
+}
+
+void ParcelWriteStrongBinder(JNIEnv* env, jclass, jlong p, jobject binder) {
+  auto* parcel = Parcel(p);
+  if (parcel == nullptr) return;
+  if (binder == nullptr) { ParcelWriteInt(p, -1); return; }
+  parcel->binders.push_back(env->NewGlobalRef(binder));
+  ParcelWriteInt(p, static_cast<jint>(parcel->binders.size() - 1));
+}
+
+jobject ParcelReadStrongBinder(JNIEnv* env, jclass, jlong p) {
+  auto* parcel = Parcel(p);
+  const jint index = ParcelReadInt(p);
+  return parcel == nullptr || index < 0 ||
+      static_cast<size_t>(index) >= parcel->binders.size()
+      ? nullptr : env->NewLocalRef(parcel->binders[static_cast<size_t>(index)]);
+}
+
+jbyteArray ParcelMarshall(JNIEnv* env, jclass, jlong p) {
+  auto* parcel = Parcel(p);
+  if (parcel == nullptr) return nullptr;
+  jbyteArray result = env->NewByteArray(static_cast<jsize>(parcel->data.size()));
+  if (result != nullptr && !parcel->data.empty()) {
+    env->SetByteArrayRegion(result, 0, static_cast<jsize>(parcel->data.size()),
+        reinterpret_cast<const jbyte*>(parcel->data.data()));
+  }
+  return result;
+}
+
+void ParcelUnmarshall(JNIEnv* env, jclass, jlong p, jbyteArray bytes,
+                      jint offset, jint length) {
+  auto* parcel = Parcel(p);
+  if (parcel == nullptr || bytes == nullptr || offset < 0 || length < 0) return;
+  parcel->data.resize(static_cast<size_t>(length));
+  env->GetByteArrayRegion(bytes, offset, length,
+                          reinterpret_cast<jbyte*>(parcel->data.data()));
+  parcel->position = 0;
+}
+
+jint ParcelCompareData(JNIEnv*, jclass, jlong left, jlong right) {
+  auto* a = Parcel(left);
+  auto* b = Parcel(right);
+  if (a == nullptr || b == nullptr) return a == b ? 0 : a == nullptr ? -1 : 1;
+  if (a->data == b->data) return 0;
+  return std::lexicographical_compare(a->data.begin(), a->data.end(),
+                                      b->data.begin(), b->data.end()) ? -1 : 1;
+}
+
+void ParcelAppendFrom(JNIEnv*, jclass, jlong destination, jlong source,
+                      jint offset, jint length) {
+  auto* to = Parcel(destination);
+  auto* from = Parcel(source);
+  if (to == nullptr || from == nullptr || offset < 0 || length < 0 ||
+      static_cast<size_t>(offset) + static_cast<size_t>(length) > from->data.size()) return;
+  to->data.insert(to->data.end(), from->data.begin() + offset,
+                  from->data.begin() + offset + length);
+  to->position = to->data.size();
+}
+
+void ParcelSignalException(JNIEnv*, jclass, jint) {}
+
+jboolean ParcelHasBinders(JNIEnv*, jclass, jlong p) {
+  return Parcel(p) != nullptr && !Parcel(p)->binders.empty() ? JNI_TRUE : JNI_FALSE;
+}
+jboolean ParcelHasBindersRange(JNIEnv* env, jclass cls, jlong p, jint, jint) {
+  return ParcelHasBinders(env, cls, p);
+}
+jboolean ParcelHasFileDescriptors(jlong) { return JNI_FALSE; }
+jboolean ParcelHasFileDescriptorsRange(JNIEnv*, jclass, jlong, jint, jint) {
+  return JNI_FALSE;
+}
+jboolean ParcelReplaceWorkSource(jlong, jint) { return JNI_FALSE; }
+jint ParcelReadWorkSource(jlong) { return -1; }
+jlong ParcelOpenAshmemSize(jlong) { return 0; }
 
 struct DarwinBinderHolder {};
 
@@ -558,6 +800,120 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
 }
 
 bool RegisterFrameworkBinderNatives(JNIEnv* env) {
+  JNINativeMethod parcel_methods[] = {
+      {const_cast<char*>("nativeMarkSensitive"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&ParcelMarkSensitive)},
+      {const_cast<char*>("nativeMarkForBinder"),
+       const_cast<char*>("(JLandroid/os/IBinder;)V"),
+       reinterpret_cast<void*>(&ParcelMarkForBinder)},
+      {const_cast<char*>("nativeIsForRpc"), const_cast<char*>("(J)Z"),
+       reinterpret_cast<void*>(&ParcelIsForRpc)},
+      {const_cast<char*>("nativeDataSize"), const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&ParcelDataSize)},
+      {const_cast<char*>("nativeDataAvail"), const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&ParcelDataAvail)},
+      {const_cast<char*>("nativeDataPosition"), const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&ParcelDataPosition)},
+      {const_cast<char*>("nativeDataCapacity"), const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&ParcelDataCapacity)},
+      {const_cast<char*>("nativeSetDataSize"), const_cast<char*>("(JI)V"),
+       reinterpret_cast<void*>(&ParcelSetDataSize)},
+      {const_cast<char*>("nativeSetDataPosition"), const_cast<char*>("(JI)V"),
+       reinterpret_cast<void*>(&ParcelSetDataPosition)},
+      {const_cast<char*>("nativeSetDataCapacity"), const_cast<char*>("(JI)V"),
+       reinterpret_cast<void*>(&ParcelSetDataCapacity)},
+      {const_cast<char*>("nativePushAllowFds"), const_cast<char*>("(JZ)Z"),
+       reinterpret_cast<void*>(&ParcelPushAllowFds)},
+      {const_cast<char*>("nativeRestoreAllowFds"), const_cast<char*>("(JZ)V"),
+       reinterpret_cast<void*>(&ParcelRestoreAllowFds)},
+      {const_cast<char*>("nativeWriteByteArray"), const_cast<char*>("(J[BII)V"),
+       reinterpret_cast<void*>(&ParcelWriteBytes)},
+      {const_cast<char*>("nativeWriteBlob"), const_cast<char*>("(J[BII)V"),
+       reinterpret_cast<void*>(&ParcelWriteBytes)},
+      {const_cast<char*>("nativeWriteInt"), const_cast<char*>("(JI)I"),
+       reinterpret_cast<void*>(&ParcelWriteInt)},
+      {const_cast<char*>("nativeWriteLong"), const_cast<char*>("(JJ)I"),
+       reinterpret_cast<void*>(&ParcelWriteLong)},
+      {const_cast<char*>("nativeWriteFloat"), const_cast<char*>("(JF)I"),
+       reinterpret_cast<void*>(&ParcelWriteFloat)},
+      {const_cast<char*>("nativeWriteDouble"), const_cast<char*>("(JD)I"),
+       reinterpret_cast<void*>(&ParcelWriteDouble)},
+      {const_cast<char*>("nativeSignalExceptionForError"), const_cast<char*>("(I)V"),
+       reinterpret_cast<void*>(&ParcelSignalException)},
+      {const_cast<char*>("nativeWriteString8"),
+       const_cast<char*>("(JLjava/lang/String;)V"),
+       reinterpret_cast<void*>(&ParcelWriteString)},
+      {const_cast<char*>("nativeWriteString16"),
+       const_cast<char*>("(JLjava/lang/String;)V"),
+       reinterpret_cast<void*>(&ParcelWriteString)},
+      {const_cast<char*>("nativeWriteStrongBinder"),
+       const_cast<char*>("(JLandroid/os/IBinder;)V"),
+       reinterpret_cast<void*>(&ParcelWriteStrongBinder)},
+      {const_cast<char*>("nativeCreateByteArray"), const_cast<char*>("(J)[B"),
+       reinterpret_cast<void*>(&ParcelCreateByteArray)},
+      {const_cast<char*>("nativeReadByteArray"), const_cast<char*>("(J[BI)Z"),
+       reinterpret_cast<void*>(&ParcelReadByteArray)},
+      {const_cast<char*>("nativeReadBlob"), const_cast<char*>("(J)[B"),
+       reinterpret_cast<void*>(&ParcelCreateByteArray)},
+      {const_cast<char*>("nativeReadInt"), const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&ParcelReadInt)},
+      {const_cast<char*>("nativeReadLong"), const_cast<char*>("(J)J"),
+       reinterpret_cast<void*>(&ParcelReadLong)},
+      {const_cast<char*>("nativeReadFloat"), const_cast<char*>("(J)F"),
+       reinterpret_cast<void*>(&ParcelReadFloat)},
+      {const_cast<char*>("nativeReadDouble"), const_cast<char*>("(J)D"),
+       reinterpret_cast<void*>(&ParcelReadDouble)},
+      {const_cast<char*>("nativeReadString8"),
+       const_cast<char*>("(J)Ljava/lang/String;"),
+       reinterpret_cast<void*>(&ParcelReadString)},
+      {const_cast<char*>("nativeReadString16"),
+       const_cast<char*>("(J)Ljava/lang/String;"),
+       reinterpret_cast<void*>(&ParcelReadString)},
+      {const_cast<char*>("nativeReadStrongBinder"),
+       const_cast<char*>("(J)Landroid/os/IBinder;"),
+       reinterpret_cast<void*>(&ParcelReadStrongBinder)},
+      {const_cast<char*>("nativeCreate"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&ParcelCreate)},
+      {const_cast<char*>("nativeFreeBuffer"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&ParcelFreeBuffer)},
+      {const_cast<char*>("nativeDestroy"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&ParcelDestroy)},
+      {const_cast<char*>("nativeMarshall"), const_cast<char*>("(J)[B"),
+       reinterpret_cast<void*>(&ParcelMarshall)},
+      {const_cast<char*>("nativeUnmarshall"), const_cast<char*>("(J[BII)V"),
+       reinterpret_cast<void*>(&ParcelUnmarshall)},
+      {const_cast<char*>("nativeCompareData"), const_cast<char*>("(JJ)I"),
+       reinterpret_cast<void*>(&ParcelCompareData)},
+      {const_cast<char*>("nativeAppendFrom"), const_cast<char*>("(JJII)V"),
+       reinterpret_cast<void*>(&ParcelAppendFrom)},
+      {const_cast<char*>("nativeHasFileDescriptors"), const_cast<char*>("(J)Z"),
+       reinterpret_cast<void*>(&ParcelHasFileDescriptors)},
+      {const_cast<char*>("nativeHasFileDescriptorsInRange"),
+       const_cast<char*>("(JII)Z"),
+       reinterpret_cast<void*>(&ParcelHasFileDescriptorsRange)},
+      {const_cast<char*>("nativeHasBinders"), const_cast<char*>("(J)Z"),
+       reinterpret_cast<void*>(&ParcelHasBinders)},
+      {const_cast<char*>("nativeHasBindersInRange"), const_cast<char*>("(JII)Z"),
+       reinterpret_cast<void*>(&ParcelHasBindersRange)},
+      {const_cast<char*>("nativeWriteInterfaceToken"),
+       const_cast<char*>("(JLjava/lang/String;)V"),
+       reinterpret_cast<void*>(&ParcelWriteString)},
+      {const_cast<char*>("nativeEnforceInterface"),
+       const_cast<char*>("(JLjava/lang/String;)V"),
+       reinterpret_cast<void*>(&ParcelWriteString)},
+      {const_cast<char*>("nativeReplaceCallingWorkSourceUid"),
+       const_cast<char*>("(JI)Z"),
+       reinterpret_cast<void*>(&ParcelReplaceWorkSource)},
+      {const_cast<char*>("nativeReadCallingWorkSourceUid"), const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&ParcelReadWorkSource)},
+      {const_cast<char*>("nativeGetOpenAshmemSize"), const_cast<char*>("(J)J"),
+       reinterpret_cast<void*>(&ParcelOpenAshmemSize)},
+  };
+  if (!Register(env, "android/os/Parcel", parcel_methods,
+                static_cast<jint>(std::size(parcel_methods)))) {
+    return false;
+  }
+
   JNINativeMethod binder_methods[] = {
       {const_cast<char*>("getNativeBBinderHolder"), const_cast<char*>("()J"),
        reinterpret_cast<void*>(&BinderGetNativeHolder)},

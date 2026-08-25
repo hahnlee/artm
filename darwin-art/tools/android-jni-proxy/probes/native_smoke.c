@@ -59,6 +59,9 @@ int main(void) {
   void* env = (void*)(uintptr_t)1;
   CHECK(get_env(vm, &env, 0x00010008) == DARWIN_ART_JNI_EVERSION);
   CHECK(env == NULL);
+  CHECK(get_env(vm, &env, DARWIN_ART_JNI_VERSION_1_2) == DARWIN_ART_JNI_OK);
+  CHECK(env != NULL);
+  env = NULL;
   CHECK(get_env(vm, &env, DARWIN_ART_JNI_VERSION_1_6) == DARWIN_ART_JNI_OK);
   CHECK(env != NULL);
 

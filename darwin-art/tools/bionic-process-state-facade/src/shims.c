@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 extern int darwin_art_bionic_setjmp(void* environment);
@@ -52,9 +53,53 @@ int darwin_art_bionic_rand(void) {
   return (int)((next >> 33) & UINT64_C(0x7fffffff));
 }
 
+long darwin_art_bionic_random(void) { return darwin_art_bionic_rand(); }
+void darwin_art_bionic_srandom(unsigned seed) { darwin_art_bionic_srand(seed); }
+
+int darwin_art_bionic_rand_r(unsigned* seed) {
+  if (seed == NULL) return 0;
+  *seed = *seed * UINT32_C(1103515245) + UINT32_C(12345);
+  return (int)((*seed >> 1) & UINT32_C(0x7fffffff));
+}
+
+static uint64_t Advance48(unsigned short state[3]) {
+  uint64_t value = (uint64_t)state[0] | ((uint64_t)state[1] << 16) |
+                   ((uint64_t)state[2] << 32);
+  value = (value * UINT64_C(0x5deece66d) + UINT64_C(0xb)) &
+          UINT64_C(0xffffffffffff);
+  state[0] = (unsigned short)value;
+  state[1] = (unsigned short)(value >> 16);
+  state[2] = (unsigned short)(value >> 32);
+  return value;
+}
+
+double darwin_art_bionic_erand48(unsigned short state[3]) {
+  return (double)Advance48(state) / 281474976710656.0;
+}
+
+long darwin_art_bionic_nrand48(unsigned short state[3]) {
+  return (long)(Advance48(state) >> 17);
+}
+
+long darwin_art_bionic_jrand48(unsigned short state[3]) {
+  return (long)(int32_t)(Advance48(state) >> 16);
+}
+
+uint32_t darwin_art_bionic_arc4random(void) {
+  const uint32_t high = (uint32_t)darwin_art_bionic_rand();
+  const uint32_t low = (uint32_t)darwin_art_bionic_rand();
+  return (high << 1) ^ low;
+}
+
 int darwin_art_bionic_getpid(void) { return (int)getpid(); }
 unsigned darwin_art_bionic_geteuid(void) { return (unsigned)geteuid(); }
 int darwin_art_bionic_getpagesize(void) { return 4096; }
+int darwin_art_bionic_daemon(int nochdir, int noclose) {
+  (void)nochdir;
+  (void)noclose;
+  darwin_art_bionic_errno_store(38);
+  return -1;
+}
 int darwin_art_bionic_sched_yield(void) { return sched_yield(); }
 int darwin_art_bionic_sched_get_priority_max(int policy) {
   return sched_get_priority_max(policy);
@@ -123,6 +168,157 @@ static uint64_t MaskFromHost(const sigset_t* host) {
       result |= UINT64_C(1) << (signal_number - 1);
   }
   return result;
+}
+
+static int AndroidSignal(int host_signal) {
+  for (int signal_number = 1; signal_number < 32; ++signal_number)
+    if (HostSignal(signal_number) == host_signal) return signal_number;
+  return 0;
+}
+
+int darwin_art_bionic_sigemptyset(uint64_t* set) {
+  if (set == NULL) return -1;
+  *set = 0;
+  return 0;
+}
+
+int darwin_art_bionic_sigaddset(uint64_t* set, int signal_number) {
+  if (set == NULL || signal_number <= 0 || signal_number > 64) return -1;
+  *set |= UINT64_C(1) << (signal_number - 1);
+  return 0;
+}
+
+int darwin_art_bionic_sigismember(const uint64_t* set, int signal_number) {
+  if (set == NULL || signal_number <= 0 || signal_number > 64) return -1;
+  return (*set & (UINT64_C(1) << (signal_number - 1))) != 0;
+}
+
+int darwin_art_bionic_sigpending(uint64_t* set) {
+  if (set == NULL) return -1;
+  sigset_t host;
+  if (sigpending(&host) != 0) return -1;
+  *set = MaskFromHost(&host);
+  return 0;
+}
+
+int darwin_art_bionic_sigwait(const uint64_t* set, int* signal_number) {
+  if (set == NULL || signal_number == NULL) return 22;
+  sigset_t host;
+  MaskToHost(*set, &host);
+  int delivered = 0;
+  const int result = sigwait(&host, &delivered);
+  if (result == 0) *signal_number = AndroidSignal(delivered);
+  return result;
+}
+
+int darwin_art_bionic_raise(int signal_number) {
+  const int translated = HostSignal(signal_number);
+  if (translated == 0) return -1;
+  return raise(translated);
+}
+
+void (*darwin_art_bionic_signal(int signal_number, void (*handler)(int)))(int) {
+  const int translated = HostSignal(signal_number);
+  if (translated == 0) return SIG_ERR;
+  return signal(translated, handler);
+}
+
+unsigned darwin_art_bionic_getuid(void) { return (unsigned)getuid(); }
+unsigned darwin_art_bionic_getgid(void) { return (unsigned)getgid(); }
+unsigned darwin_art_bionic_getegid(void) { return (unsigned)getegid(); }
+int darwin_art_bionic_setuid(unsigned uid) { return setuid((uid_t)uid); }
+int darwin_art_bionic_gethostname(char* name, size_t length) {
+  return gethostname(name, length);
+}
+
+typedef struct AndroidUtsname {
+  char sysname[65];
+  char nodename[65];
+  char release[65];
+  char version[65];
+  char machine[65];
+  char domainname[65];
+} AndroidUtsname;
+
+int darwin_art_bionic_uname(AndroidUtsname* value) {
+  if (value == NULL) return -1;
+  memset(value, 0, sizeof(*value));
+  strcpy(value->sysname, "Linux");
+  if (gethostname(value->nodename, sizeof(value->nodename)) != 0)
+    strcpy(value->nodename, "darwin-art");
+  strcpy(value->release, "6.12.0-darwin-art");
+  strcpy(value->version, "Darwin ART Android compatibility layer");
+  strcpy(value->machine, "aarch64");
+  return 0;
+}
+
+int darwin_art_bionic_process_unsupported(void) {
+  darwin_art_bionic_errno_store(38);
+  return -1;
+}
+
+int darwin_art_bionic__setjmp(void* environment) {
+  return darwin_art_bionic_setjmp(environment);
+}
+
+int darwin_art_bionic_sigsetjmp(void* environment, int save_mask) {
+  (void)save_mask;
+  return darwin_art_bionic_setjmp(environment);
+}
+
+void darwin_art_bionic__longjmp(void* environment, int value) {
+  darwin_art_bionic_longjmp(environment, value);
+}
+
+void darwin_art_bionic_siglongjmp(void* environment, int value) {
+  darwin_art_bionic_longjmp(environment, value);
+}
+
+int darwin_art_bionic_sched_get_priority_min(int policy) {
+  return sched_get_priority_min(policy);
+}
+
+int darwin_art_bionic_sched_getparam(int pid, struct sched_param* param) {
+  (void)pid;
+  (void)param;
+  darwin_art_bionic_errno_store(38);
+  return -1;
+}
+
+int darwin_art_bionic_sched_setscheduler(int pid, int policy,
+                                         const struct sched_param* param) {
+  (void)pid;
+  (void)policy;
+  (void)param;
+  darwin_art_bionic_errno_store(38);
+  return -1;
+}
+
+int darwin_art_bionic_getpwuid_r_unsupported(
+    unsigned uid, void* password, char* buffer, size_t capacity,
+    void** result) {
+  (void)uid;
+  (void)password;
+  (void)buffer;
+  (void)capacity;
+  if (result != NULL) *result = NULL;
+  return 2;
+}
+
+void* darwin_art_bionic_getservbyport_unsupported(int port,
+                                                  const char* protocol) {
+  (void)port;
+  (void)protocol;
+  return NULL;
+}
+
+int darwin_art_bionic_setenv(const char* name, const char* value,
+                             int overwrite) {
+  return setenv(name, value, overwrite);
+}
+
+int darwin_art_bionic_getrusage(int who, struct rusage* usage) {
+  return getrusage(who, usage);
 }
 
 int darwin_art_bionic_sigfillset(uint64_t* set) {
@@ -211,25 +407,64 @@ static const Binding kBindings[] = {
     {"__system_property_get",
      (DarwinArtBionicProcessFunction)darwin_art_bionic___system_property_get},
     {"_exit", (DarwinArtBionicProcessFunction)darwin_art_bionic__exit},
+    {"_longjmp", (DarwinArtBionicProcessFunction)darwin_art_bionic__longjmp},
+    {"_setjmp", (DarwinArtBionicProcessFunction)darwin_art_bionic__setjmp},
+    {"arc4random", (DarwinArtBionicProcessFunction)darwin_art_bionic_arc4random},
+    {"daemon", (DarwinArtBionicProcessFunction)darwin_art_bionic_daemon},
+    {"erand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_erand48},
+    {"execlp", (DarwinArtBionicProcessFunction)darwin_art_bionic_process_unsupported},
+    {"execvp", (DarwinArtBionicProcessFunction)darwin_art_bionic_process_unsupported},
     {"exit", (DarwinArtBionicProcessFunction)darwin_art_bionic_exit},
+    {"fork", (DarwinArtBionicProcessFunction)darwin_art_bionic_process_unsupported},
     {"getauxval", (DarwinArtBionicProcessFunction)darwin_art_bionic_getauxval},
+    {"getegid", (DarwinArtBionicProcessFunction)darwin_art_bionic_getegid},
     {"getenv", (DarwinArtBionicProcessFunction)darwin_art_bionic_getenv},
     {"geteuid", (DarwinArtBionicProcessFunction)darwin_art_bionic_geteuid},
+    {"getgid", (DarwinArtBionicProcessFunction)darwin_art_bionic_getgid},
+    {"gethostname", (DarwinArtBionicProcessFunction)darwin_art_bionic_gethostname},
     {"getpagesize", (DarwinArtBionicProcessFunction)darwin_art_bionic_getpagesize},
     {"getpid", (DarwinArtBionicProcessFunction)darwin_art_bionic_getpid},
+    {"getpwuid_r", (DarwinArtBionicProcessFunction)darwin_art_bionic_getpwuid_r_unsupported},
+    {"getrusage", (DarwinArtBionicProcessFunction)darwin_art_bionic_getrusage},
+    {"getservbyport", (DarwinArtBionicProcessFunction)darwin_art_bionic_getservbyport_unsupported},
+    {"getuid", (DarwinArtBionicProcessFunction)darwin_art_bionic_getuid},
+    {"jrand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_jrand48},
     {"kill", (DarwinArtBionicProcessFunction)darwin_art_bionic_kill},
     {"longjmp", (DarwinArtBionicProcessFunction)darwin_art_bionic_longjmp},
     {"nice", (DarwinArtBionicProcessFunction)darwin_art_bionic_nice},
+    {"nrand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_nrand48},
     {"prctl", (DarwinArtBionicProcessFunction)darwin_art_bionic_prctl},
+    {"raise", (DarwinArtBionicProcessFunction)darwin_art_bionic_raise},
     {"rand", (DarwinArtBionicProcessFunction)darwin_art_bionic_rand},
+    {"rand_r", (DarwinArtBionicProcessFunction)darwin_art_bionic_rand_r},
+    {"random", (DarwinArtBionicProcessFunction)darwin_art_bionic_random},
     {"sched_get_priority_max", (DarwinArtBionicProcessFunction)darwin_art_bionic_sched_get_priority_max},
+    {"sched_get_priority_min", (DarwinArtBionicProcessFunction)darwin_art_bionic_sched_get_priority_min},
+    {"sched_getparam", (DarwinArtBionicProcessFunction)darwin_art_bionic_sched_getparam},
+    {"sched_setscheduler", (DarwinArtBionicProcessFunction)darwin_art_bionic_sched_setscheduler},
     {"sched_yield", (DarwinArtBionicProcessFunction)darwin_art_bionic_sched_yield},
+    {"setenv", (DarwinArtBionicProcessFunction)darwin_art_bionic_setenv},
     {"setjmp", (DarwinArtBionicProcessFunction)darwin_art_bionic_setjmp},
+    {"setuid", (DarwinArtBionicProcessFunction)darwin_art_bionic_setuid},
     {"sigaction", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigaction},
+    {"sigaddset", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigaddset},
     {"sigaltstack", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigaltstack},
     {"sigdelset", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigdelset},
+    {"sigemptyset", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigemptyset},
     {"sigfillset", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigfillset},
+    {"sigismember", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigismember},
+    {"siglongjmp", (DarwinArtBionicProcessFunction)darwin_art_bionic_siglongjmp},
+    {"signal", (DarwinArtBionicProcessFunction)darwin_art_bionic_signal},
+    {"sigpending", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigpending},
+    {"sigsetjmp", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigsetjmp},
+    {"sigwait", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigwait},
     {"srand", (DarwinArtBionicProcessFunction)darwin_art_bionic_srand},
+    {"srandom", (DarwinArtBionicProcessFunction)darwin_art_bionic_srandom},
+    {"system", (DarwinArtBionicProcessFunction)darwin_art_bionic_process_unsupported},
+    {"uname", (DarwinArtBionicProcessFunction)darwin_art_bionic_uname},
+    {"vfork", (DarwinArtBionicProcessFunction)darwin_art_bionic_process_unsupported},
+    {"vmsplice", (DarwinArtBionicProcessFunction)darwin_art_bionic_process_unsupported},
+    {"waitpid", (DarwinArtBionicProcessFunction)darwin_art_bionic_process_unsupported},
 };
 
 DarwinArtBionicProcessFunction darwin_art_bionic_process_state_resolve(

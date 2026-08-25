@@ -11,6 +11,7 @@ const MAX_APK_SIZE: usize = 512 * 1024 * 1024;
 const MAX_ENTRIES: usize = 4096;
 const MAX_MANIFEST_SIZE: usize = 4 * 1024 * 1024;
 const MAX_DEX_SIZE: usize = 128 * 1024 * 1024;
+const MAX_NATIVE_LIBRARY_SIZE: usize = 64 * 1024 * 1024;
 const EOCD: u32 = 0x0605_4b50;
 const CENTRAL: u32 = 0x0201_4b50;
 const LOCAL: u32 = 0x0403_4b50;
@@ -87,6 +88,11 @@ fn u16le(input: &[u8], offset: usize, label: &str) -> Result<u16> {
 fn u32le(input: &[u8], offset: usize, label: &str) -> Result<u32> {
     let value = bytes(input, offset, 4, label)?;
     Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
+}
+
+fn u64le(input: &[u8], offset: usize, label: &str) -> Result<u64> {
+    let value = bytes(input, offset, 8, label)?;
+    Ok(u64::from_le_bytes(value.try_into().unwrap()))
 }
 
 fn safe_name(name: &[u8]) -> Result<()> {
@@ -787,10 +793,116 @@ fn validate_dex(input: &[u8]) -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct NativeEntrySignals {
+    java_exports: usize,
+    jni_on_load: bool,
+}
+
+fn dynamic_jni_signals(input: &[u8]) -> Result<NativeEntrySignals> {
+    if input.len() < 64
+        || &input[..4] != b"\x7fELF"
+        || input[4] != 2
+        || input[5] != 1
+        || u16le(input, 18, "ELF machine")? != 183
+    {
+        return Err("arm64-v8a entry is not ELF64 little-endian AArch64".to_owned());
+    }
+    let section_offset = usize::try_from(u64le(input, 40, "ELF section offset")?)
+        .map_err(|_| "ELF section offset exceeds addressable size".to_owned())?;
+    let section_size = usize::from(u16le(input, 58, "ELF section size")?);
+    let section_count = usize::from(u16le(input, 60, "ELF section count")?);
+    if section_offset == 0 || section_count == 0 {
+        return Ok(NativeEntrySignals::default());
+    }
+    if section_size < 64 || section_count > 16_384 {
+        return Err("ELF section table shape is invalid".to_owned());
+    }
+    bytes(
+        input,
+        section_offset,
+        section_size
+            .checked_mul(section_count)
+            .ok_or_else(|| "ELF section table size overflows".to_owned())?,
+        "ELF section table",
+    )?;
+    let section = |index: usize| -> Result<usize> {
+        if index >= section_count {
+            return Err("ELF section link is out of range".to_owned());
+        }
+        checked_add(section_offset, index * section_size, "ELF section")
+    };
+    let mut signals = NativeEntrySignals::default();
+    for index in 0..section_count {
+        let symbol_section = section(index)?;
+        if u32le(input, symbol_section + 4, "ELF section type")? != 11 {
+            continue;
+        }
+        let symbols_offset = usize::try_from(u64le(input, symbol_section + 24, "dynsym offset")?)
+            .map_err(|_| "ELF dynsym offset exceeds addressable size".to_owned())?;
+        let symbols_size = usize::try_from(u64le(input, symbol_section + 32, "dynsym size")?)
+            .map_err(|_| "ELF dynsym size exceeds addressable size".to_owned())?;
+        let symbol_size = usize::try_from(u64le(input, symbol_section + 56, "dynsym entry size")?)
+            .map_err(|_| "ELF dynsym entry size exceeds addressable size".to_owned())?;
+        if symbol_size < 24 || symbols_size % symbol_size != 0 {
+            return Err("ELF dynamic symbol table shape is invalid".to_owned());
+        }
+        bytes(input, symbols_offset, symbols_size, "ELF dynamic symbols")?;
+        let strings_index = u32le(input, symbol_section + 40, "dynsym string link")? as usize;
+        let strings_section = section(strings_index)?;
+        let strings_offset = usize::try_from(u64le(input, strings_section + 24, "dynstr offset")?)
+            .map_err(|_| "ELF dynstr offset exceeds addressable size".to_owned())?;
+        let strings_size = usize::try_from(u64le(input, strings_section + 32, "dynstr size")?)
+            .map_err(|_| "ELF dynstr size exceeds addressable size".to_owned())?;
+        let strings = bytes(input, strings_offset, strings_size, "ELF dynamic strings")?;
+        for symbol in (0..symbols_size).step_by(symbol_size) {
+            let record = symbols_offset + symbol;
+            let name_offset = u32le(input, record, "dynamic symbol name")? as usize;
+            let info = *bytes(input, record + 4, 1, "dynamic symbol info")?
+                .first()
+                .expect("one-byte slice");
+            let section_index = u16le(input, record + 6, "dynamic symbol section")?;
+            if name_offset >= strings.len()
+                || section_index == 0
+                || !matches!(info >> 4, 1 | 2)
+            {
+                continue;
+            }
+            let tail = &strings[name_offset..];
+            let length = tail.iter().position(|byte| *byte == 0).ok_or_else(|| {
+                "ELF dynamic symbol has an unterminated name".to_owned()
+            })?;
+            let name = &tail[..length];
+            if name == b"JNI_OnLoad" {
+                signals.jni_on_load = true;
+            }
+            if name.starts_with(b"Java_") {
+                signals.java_exports += 1;
+            }
+        }
+    }
+    Ok(signals)
+}
+
+fn select_native_root(candidates: &[(String, NativeEntrySignals)]) -> Option<String> {
+    candidates
+        .iter()
+        .max_by_key(|(name, signals)| {
+            (
+                signals.java_exports > 0,
+                signals.java_exports,
+                signals.jni_on_load,
+                name.ends_with("jni.so"),
+                name.as_str(),
+            )
+        })
+        .map(|(name, _)| name.clone())
+}
+
 fn inspect(
     path: &Path,
     external_dex: Option<&Path>,
-) -> Result<(ManifestInfo, &'static str, usize, Vec<String>)> {
+) -> Result<(ManifestInfo, &'static str, usize, Vec<String>, Option<String>)> {
     let metadata = fs::metadata(path).map_err(|error| format!("APK metadata failed: {error}"))?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_APK_SIZE as u64 {
         return Err(format!("APK is outside the 1..={MAX_APK_SIZE} byte cap"));
@@ -809,6 +921,19 @@ fn inspect(
         .collect::<Vec<_>>();
     native_libraries.sort();
     native_libraries.dedup();
+    let native_candidates = native_libraries
+        .iter()
+        .map(|name| {
+            let archive_name = format!("lib/arm64-v8a/{name}");
+            let entry = entries
+                .iter()
+                .find(|entry| entry.name == archive_name.as_bytes())
+                .ok_or_else(|| "native APK entry disappeared during inspection".to_owned())?;
+            let library = entry_bytes(&input, entry, MAX_NATIVE_LIBRARY_SIZE)?;
+            Ok((name.clone(), dynamic_jni_signals(&library)?))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let native_root = select_native_root(&native_candidates);
     let manifest_entries = entries
         .iter()
         .filter(|entry| entry.name == b"AndroidManifest.xml")
@@ -881,7 +1006,13 @@ fn inspect(
     } else {
         dex_entries.len()
     };
-    Ok((info, dex_source, dex_count, native_libraries))
+    Ok((
+        info,
+        dex_source,
+        dex_count,
+        native_libraries,
+        native_root,
+    ))
 }
 
 fn descriptor(class_name: &str) -> String {
@@ -903,7 +1034,7 @@ fn run() -> Result<()> {
             Path::new(&program).display()
         ));
     }
-    let (info, dex_source, dex_count, native_libraries) =
+    let (info, dex_source, dex_count, native_libraries, native_root) =
         inspect(Path::new(&path), external_dex.as_deref().map(Path::new))?;
     println!(
         "apk-app-runtime: package={} application={} activity={} descriptor={} activities={} services={} version_code={} version_name={} theme={:#x} target_sdk={} label={} label_res={:#x} icon={} dex={}-{} native={} native_root={}",
@@ -931,7 +1062,7 @@ fn run() -> Result<()> {
         dex_source,
         dex_count,
         native_libraries.len(),
-        native_libraries.first().map(String::as_str).unwrap_or("none")
+        native_root.as_deref().unwrap_or("none")
     );
     Ok(())
 }
@@ -940,5 +1071,47 @@ fn main() {
     if let Err(error) = run() {
         eprintln!("android-apk-app-runtime: {error}");
         std::process::exit(2);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_root_prefers_java_jni_entry_over_runtime_and_dependency() {
+        let candidates = vec![
+            ("libc++_shared.so".to_owned(), NativeEntrySignals::default()),
+            (
+                "libvlc.so".to_owned(),
+                NativeEntrySignals {
+                    java_exports: 0,
+                    jni_on_load: true,
+                },
+            ),
+            (
+                "libvlcjni.so".to_owned(),
+                NativeEntrySignals {
+                    java_exports: 240,
+                    jni_on_load: false,
+                },
+            ),
+        ];
+        assert_eq!(select_native_root(&candidates).as_deref(), Some("libvlcjni.so"));
+    }
+
+    #[test]
+    fn native_root_uses_jni_on_load_for_registered_native_library() {
+        let candidates = vec![
+            ("libchild.so".to_owned(), NativeEntrySignals::default()),
+            (
+                "libroot.so".to_owned(),
+                NativeEntrySignals {
+                    java_exports: 0,
+                    jni_on_load: true,
+                },
+            ),
+        ];
+        assert_eq!(select_native_root(&candidates).as_deref(), Some("libroot.so"));
     }
 }

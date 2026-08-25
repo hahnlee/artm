@@ -360,6 +360,8 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
             "QuartzCore",
             "-framework",
             "Security",
+            "-framework",
+            "AudioToolbox",
             "-o",
         ])
         .arg(&runtime_library);

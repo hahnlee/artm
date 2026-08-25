@@ -61,6 +61,51 @@ struct DarwinInflaterState {
   z_stream stream{};
 };
 
+jfieldID g_file_key_device = nullptr;
+jfieldID g_file_key_inode = nullptr;
+
+void FileKeyInitIds(JNIEnv* env, jclass file_key_class) {
+  g_file_key_device = env->GetFieldID(file_key_class, "st_dev", "J");
+  g_file_key_inode = env->GetFieldID(file_key_class, "st_ino", "J");
+}
+
+void FileKeyInit(JNIEnv* env, jobject file_key, jobject file_descriptor) {
+  if (file_key == nullptr || file_descriptor == nullptr) return;
+  jclass descriptor_class = env->GetObjectClass(file_descriptor);
+  jfieldID descriptor_field = descriptor_class == nullptr
+                                  ? nullptr
+                                  : env->GetFieldID(descriptor_class,
+                                                    "descriptor", "I");
+  const jint descriptor = descriptor_field == nullptr
+                              ? -1
+                              : env->GetIntField(file_descriptor,
+                                                 descriptor_field);
+  if (descriptor_class != nullptr) env->DeleteLocalRef(descriptor_class);
+  struct stat status {};
+  if (descriptor < 0 || fstat(descriptor, &status) != 0) {
+    jclass exception = env->FindClass("java/io/IOException");
+    if (exception != nullptr) {
+      env->ThrowNew(exception, "fstat failed while constructing FileKey");
+      env->DeleteLocalRef(exception);
+    }
+    return;
+  }
+  if (g_file_key_device == nullptr || g_file_key_inode == nullptr) {
+    jclass file_key_class = env->GetObjectClass(file_key);
+    if (file_key_class != nullptr) {
+      FileKeyInitIds(env, file_key_class);
+      env->DeleteLocalRef(file_key_class);
+    }
+  }
+  if (g_file_key_device != nullptr && g_file_key_inode != nullptr &&
+      !env->ExceptionCheck()) {
+    env->SetLongField(file_key, g_file_key_device,
+                      static_cast<jlong>(status.st_dev));
+    env->SetLongField(file_key, g_file_key_inode,
+                      static_cast<jlong>(status.st_ino));
+  }
+}
+
 jlong InflaterInit(JNIEnv*, jclass, jboolean nowrap) {
   auto* state = new DarwinInflaterState();
   const int window_bits = nowrap == JNI_TRUE ? -MAX_WBITS : MAX_WBITS;
@@ -641,7 +686,16 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
       return false;
     }
     register_sun_nio_ch_NativeThread(env);
-    return !env->ExceptionCheck();
+    if (env->ExceptionCheck()) {
+      return false;
+    }
+    const JNINativeMethod file_key_methods[] = {
+        {const_cast<char*>("init"),
+         const_cast<char*>("(Ljava/io/FileDescriptor;)V"),
+         reinterpret_cast<void*>(&FileKeyInit)},
+    };
+    return Register(env, "sun/nio/ch/FileKey", file_key_methods,
+                    static_cast<jint>(std::size(file_key_methods)));
 #else
     return true;
 #endif

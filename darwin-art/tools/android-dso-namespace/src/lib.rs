@@ -60,6 +60,55 @@ unsafe impl Send for LoaderCallbacks {}
 unsafe impl Sync for LoaderCallbacks {}
 
 static LOADER: OnceLock<LoaderCallbacks> = OnceLock::new();
+static mut LIBANDROID_HANDLE_TOKEN: u8 = 0;
+
+#[cfg(not(test))]
+unsafe extern "C" {
+    #[link_name = "darwin_art_android_ANativeWindow_fromSurface"]
+    fn host_anative_window_from_surface(env: *mut c_void, surface: *mut c_void) -> *mut c_void;
+    #[link_name = "darwin_art_android_ANativeWindow_release"]
+    fn host_anative_window_release(window: *mut c_void);
+    #[link_name = "darwin_art_android_ANativeWindow_lock"]
+    fn host_anative_window_lock(
+        window: *mut c_void,
+        buffer: *mut c_void,
+        bounds: *mut c_void,
+    ) -> c_int;
+    #[link_name = "darwin_art_android_ANativeWindow_unlockAndPost"]
+    fn host_anative_window_unlock_and_post(window: *mut c_void) -> c_int;
+    #[link_name = "darwin_art_android_ANativeWindow_setBuffersGeometry"]
+    fn host_anative_window_set_buffers_geometry(
+        window: *mut c_void,
+        width: c_int,
+        height: c_int,
+        format: c_int,
+    ) -> c_int;
+}
+
+fn libandroid_handle() -> *mut c_void {
+    ptr::addr_of_mut!(LIBANDROID_HANDLE_TOKEN).cast()
+}
+
+unsafe fn libandroid_symbol(name: &CStr) -> *mut c_void {
+    #[cfg(test)]
+    {
+        let _ = name;
+        return 1usize as *mut c_void;
+    }
+    #[cfg(not(test))]
+    {
+        match name.to_bytes() {
+            b"ANativeWindow_fromSurface" => host_anative_window_from_surface as *mut c_void,
+            b"ANativeWindow_release" => host_anative_window_release as *mut c_void,
+            b"ANativeWindow_lock" => host_anative_window_lock as *mut c_void,
+            b"ANativeWindow_unlockAndPost" => host_anative_window_unlock_and_post as *mut c_void,
+            b"ANativeWindow_setBuffersGeometry" => {
+                host_anative_window_set_buffers_geometry as *mut c_void
+            }
+            _ => ptr::null_mut(),
+        }
+    }
+}
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
@@ -144,6 +193,15 @@ pub unsafe extern "C" fn darwin_art_bionic_android_dlopen_ext(
     flags: c_int,
     extinfo: *const AndroidDlExtInfo,
 ) -> *mut c_void {
+    if !filename.is_null() {
+        let name = unsafe { CStr::from_ptr(filename) }.to_bytes();
+        if name.rsplit(|byte| *byte == b'/').next() == Some(b"libandroid.so") {
+            if std::env::var_os("DARWIN_ART_DEBUG_ANATIVEWINDOW").is_some() {
+                eprintln!("ART Android libdl: opened virtual libandroid.so");
+            }
+            return libandroid_handle();
+        }
+    }
     let Some(loader) = loader() else {
         return ptr::null_mut();
     };
@@ -180,13 +238,28 @@ pub unsafe extern "C" fn darwin_art_bionic_dlsym(
     handle: *mut c_void,
     symbol: *const c_char,
 ) -> *mut c_void {
-    let Some(loader) = loader() else {
-        return ptr::null_mut();
-    };
     if symbol.is_null() {
         set_error("dlsym symbol is null");
         return ptr::null_mut();
     }
+    if handle == libandroid_handle() {
+        let name = unsafe { CStr::from_ptr(symbol) };
+        let result = unsafe { libandroid_symbol(name) };
+        if std::env::var_os("DARWIN_ART_DEBUG_ANATIVEWINDOW").is_some() {
+            eprintln!(
+                "ART Android libdl: libandroid dlsym {} resolved={}",
+                name.to_string_lossy(),
+                !result.is_null()
+            );
+        }
+        if result.is_null() {
+            set_error("libandroid.so symbol is unsupported");
+        }
+        return result;
+    }
+    let Some(loader) = loader() else {
+        return ptr::null_mut();
+    };
     let mut error = [0 as c_char; ERROR_CAPACITY];
     let result = unsafe {
         (loader.lookup.expect("validated"))(
@@ -216,6 +289,9 @@ pub unsafe extern "C" fn darwin_art_bionic_dlsym(
 ///
 /// `handle` must be null or a handle accepted by the bound loader.
 pub unsafe extern "C" fn darwin_art_bionic_dlclose(handle: *mut c_void) -> c_int {
+    if handle == libandroid_handle() {
+        return 0;
+    }
     let Some(loader) = loader() else { return -1 };
     let mut error = [0 as c_char; ERROR_CAPACITY];
     let result = unsafe {

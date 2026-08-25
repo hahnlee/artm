@@ -3,6 +3,45 @@
 #include <android/log.h>
 
 #include <cstring>
+#include <cstdint>
+
+extern "C" int darwin_art_bionic_vsnprintf(char*, size_t, const char*,
+                                             const void*);
+
+struct AndroidArm64VaList {
+  void* stack;
+  void* gr_top;
+  void* vr_top;
+  int32_t gr_offs;
+  int32_t vr_offs;
+};
+
+extern "C" int darwin_art_android_log_print(int priority, const char* tag,
+                                             const char* format, ...);
+
+extern "C" int darwin_art_android_log_print_captured(
+    int priority, const char* tag, const char* format, uint8_t* gp_registers,
+    uint8_t* fp_registers, uint8_t* caller_stack) {
+  if (format == nullptr) return -1;
+  AndroidArm64VaList arguments{caller_stack, gp_registers + 64,
+                               fp_registers + 128, -40, -128};
+  char message[4096];
+  const int count = darwin_art_bionic_vsnprintf(
+      message, sizeof(message), format, &arguments);
+  if (count < 0) return count;
+  return __android_log_write(priority, tag, message);
+}
+
+extern "C" int darwin_art_android_log_vprint(int priority, const char* tag,
+                                                const char* format,
+                                                const void* arguments) {
+  if (format == nullptr || arguments == nullptr) return -1;
+  char message[4096];
+  const int count = darwin_art_bionic_vsnprintf(
+      message, sizeof(message), format, arguments);
+  if (count < 0) return count;
+  return __android_log_write(priority, tag, message);
+}
 
 namespace {
 
@@ -34,13 +73,15 @@ const Entry kEntries[] = {
     LIBLOG_ENTRY(__android_log_is_loggable),
     LIBLOG_ENTRY(__android_log_is_loggable_len),
     LIBLOG_ENTRY(__android_log_logd_logger),
-    LIBLOG_ENTRY(__android_log_print),
+    {"__android_log_print",
+     reinterpret_cast<uintptr_t>(&darwin_art_android_log_print)},
     LIBLOG_ENTRY(__android_log_set_aborter),
     LIBLOG_ENTRY(__android_log_set_default_tag),
     LIBLOG_ENTRY(__android_log_set_logger),
     LIBLOG_ENTRY(__android_log_set_minimum_priority),
     LIBLOG_ENTRY(__android_log_stderr_logger),
-    LIBLOG_ENTRY(__android_log_vprint),
+    {"__android_log_vprint",
+     reinterpret_cast<uintptr_t>(&darwin_art_android_log_vprint)},
     LIBLOG_ENTRY(__android_log_write),
     LIBLOG_ENTRY(__android_log_write_log_message),
 };

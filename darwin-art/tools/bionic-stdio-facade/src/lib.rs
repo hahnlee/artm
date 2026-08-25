@@ -1017,3 +1017,11 @@ pub extern "C" fn darwin_art_bionic_stdio_feof_core(f: *mut AndroidFile) -> c_in
 pub extern "C" fn darwin_art_bionic_stdio_ferror_core(f: *mut AndroidFile) -> c_int {
     with_stream(f, 0, |stream| i32::from(stream.error))
 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_stdio_clearerr_core(f: *mut AndroidFile) {
+    with_stream(f, (), |stream| {
+        stream.error = false;
+        stream.eof = false;
+    });
+}

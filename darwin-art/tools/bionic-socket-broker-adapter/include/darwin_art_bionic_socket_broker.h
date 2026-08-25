@@ -21,6 +21,12 @@ int darwin_art_bionic_socket_broker_deactivate(void);
 
 int darwin_art_bionic_socket_broker_socket(int domain, int type, int protocol);
 int darwin_art_bionic_socket_broker_pipe(int32_t descriptors[2]);
+int darwin_art_bionic_socket_broker_pipe2(int32_t descriptors[2], int flags);
+int darwin_art_bionic_socket_broker_eventfd(uint32_t initial_value, int flags);
+intptr_t darwin_art_bionic_socket_broker_readv(int fd, const void *vectors,
+                                               int count);
+intptr_t darwin_art_bionic_socket_broker_writev(int fd, const void *vectors,
+                                                int count);
 intptr_t darwin_art_bionic_socket_broker_read(int fd, void *bytes,
                                               size_t count);
 intptr_t darwin_art_bionic_socket_broker_write(int fd, const void *bytes,
@@ -29,6 +35,20 @@ int darwin_art_bionic_socket_broker_poll(DarwinArtBionicPollFd *descriptors,
                                          size_t count, int timeout_ms);
 int darwin_art_bionic_socket_broker_connect(int fd, const void *address,
                                             uint32_t length);
+int darwin_art_bionic_socket_broker_bind(int fd, const void *address,
+                                         uint32_t length);
+int darwin_art_bionic_socket_broker_listen(int fd, int backlog);
+int darwin_art_bionic_socket_broker_accept4(int fd, void *address,
+                                            uint32_t *length, int flags);
+int darwin_art_bionic_socket_broker_accept(int fd, void *address,
+                                           uint32_t *length);
+int darwin_art_bionic_socket_broker_getsockname(int fd, void *address,
+                                                uint32_t *length);
+int darwin_art_bionic_socket_broker_getpeername(int fd, void *address,
+                                                uint32_t *length);
+int darwin_art_bionic_socket_broker_socketpair(int domain, int type,
+                                               int protocol,
+                                               int32_t descriptors[2]);
 intptr_t darwin_art_bionic_socket_broker_send(int fd, const void *bytes,
                                               size_t count, int flags);
 intptr_t darwin_art_bionic_socket_broker_recv(int fd, void *bytes, size_t count,

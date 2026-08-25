@@ -199,6 +199,8 @@ bool darwin_art_surface_gpu_get_embedded_geometry(
     uint32_t* width,
     uint32_t* height);
 void darwin_art_surface_gpu_publish_embedded(DarwinArtSurface* surface);
+void darwin_art_surface_gpu_set_embedded_buffer_extent(
+    DarwinArtSurface* surface, uint32_t width, uint32_t height);
 bool darwin_art_surface_gpu_composite_embedded(
     DarwinArtSurface* surface,
     void* sk_canvas);

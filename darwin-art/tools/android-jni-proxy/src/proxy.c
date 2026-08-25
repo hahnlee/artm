@@ -21,6 +21,14 @@ typedef struct HostEnvHandle {
   const RawJniSlot* functions;
 } HostEnvHandle;
 
+typedef struct AndroidArm64VaList {
+  void* stack;
+  void* gr_top;
+  void* vr_top;
+  int32_t gr_offs;
+  int32_t vr_offs;
+} AndroidArm64VaList;
+
 struct DarwinArtJniProxy {
   uint64_t magic;
   DarwinArtJniBackend backend;
@@ -82,6 +90,14 @@ static int32_t ProxyGetVersion(void* raw_env) {
 static void* ProxyFindClass(void* raw_env, const char* name) {
   struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
   if (proxy == NULL || name == NULL) return NULL;
+  // Android media clients use DynamicsProcessing as an optional hardware
+  // audio-effect capability and fall back to software gain when it is absent.
+  // The detached host does not yet publish libaudioeffect_jni, so do not let
+  // resolving this optional class initialize AudioEffect and poison the core
+  // AudioTrack JNI bootstrap with an UnsatisfiedLinkError.
+  if (strcmp(name, "android/media/audiofx/DynamicsProcessing") == 0) {
+    return NULL;
+  }
   return proxy->backend.find_class(proxy->backend.context, name);
 }
 
@@ -381,6 +397,73 @@ static void ProxyCallVoidMethodV(void* raw_env, void* object, void* method,
   (void)ProxyCallMethodVBits(raw_env, object, method, arguments, 'V');
 }
 
+extern void darwin_art_jni_proxy_call_void_method(void* raw_env, void* object,
+                                                   void* method, ...);
+extern int32_t darwin_art_jni_proxy_call_int_method(void* raw_env, void* object,
+                                                    void* method, ...);
+extern void* darwin_art_jni_proxy_call_object_method(void* raw_env,
+                                                     void* object,
+                                                     void* method, ...);
+extern void* darwin_art_jni_proxy_new_object(void* raw_env, void* clazz,
+                                             void* method, ...);
+
+static uint64_t ProxyCallCaptured(
+    void* raw_env, void* object, void* method, uint8_t* gp_registers,
+    uint8_t* fp_registers, uint8_t* caller_stack, int32_t return_shorty) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  if (proxy == NULL || proxy->backend.call_method_v == NULL || object == NULL ||
+      method == NULL)
+    return 0;
+  AndroidArm64VaList arguments = {
+      .stack = caller_stack,
+      .gr_top = gp_registers + 64,
+      .vr_top = fp_registers + 128,
+      .gr_offs = -40,
+      .vr_offs = -128,
+  };
+  return proxy->backend.call_method_v(proxy->backend.context, object, method,
+                                      &arguments, return_shorty, 0);
+}
+
+void darwin_art_jni_proxy_call_void_method_captured(
+    void* raw_env, void* object, void* method, uint8_t* gp_registers,
+    uint8_t* fp_registers, uint8_t* caller_stack) {
+  (void)ProxyCallCaptured(raw_env, object, method, gp_registers, fp_registers,
+                          caller_stack, 'V');
+}
+
+int32_t darwin_art_jni_proxy_call_int_method_captured(
+    void* raw_env, void* object, void* method, uint8_t* gp_registers,
+    uint8_t* fp_registers, uint8_t* caller_stack) {
+  return (int32_t)ProxyCallCaptured(raw_env, object, method, gp_registers,
+                                    fp_registers, caller_stack, 'I');
+}
+
+void* darwin_art_jni_proxy_call_object_method_captured(
+    void* raw_env, void* object, void* method, uint8_t* gp_registers,
+    uint8_t* fp_registers, uint8_t* caller_stack) {
+  return (void*)(uintptr_t)ProxyCallCaptured(
+      raw_env, object, method, gp_registers, fp_registers, caller_stack, 'L');
+}
+
+void* darwin_art_jni_proxy_new_object_captured(
+    void* raw_env, void* clazz, void* method, uint8_t* gp_registers,
+    uint8_t* fp_registers, uint8_t* caller_stack) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  if (proxy == NULL || proxy->backend.call_method_v == NULL || clazz == NULL ||
+      method == NULL)
+    return NULL;
+  AndroidArm64VaList arguments = {
+      .stack = caller_stack,
+      .gr_top = gp_registers + 64,
+      .vr_top = fp_registers + 128,
+      .gr_offs = -40,
+      .vr_offs = -128,
+  };
+  return (void*)(uintptr_t)proxy->backend.call_method_v(
+      proxy->backend.context, clazz, method, &arguments, 'L', 2);
+}
+
 #undef DEFINE_CALL_METHOD_V
 
 static uint64_t ProxyCallStaticMethodVBits(void* raw_env, void* clazz,
@@ -430,6 +513,52 @@ static double ProxyCallStaticDoubleMethodV(void* raw_env, void* clazz,
 static void ProxyCallStaticVoidMethodV(void* raw_env, void* clazz, void* method,
                                        va_list arguments) {
   (void)ProxyCallStaticMethodVBits(raw_env, clazz, method, arguments, 'V');
+}
+
+extern void darwin_art_jni_proxy_call_static_void_method(
+    void* raw_env, void* clazz, void* method, ...);
+extern int32_t darwin_art_jni_proxy_call_static_int_method(
+    void* raw_env, void* clazz, void* method, ...);
+extern void* darwin_art_jni_proxy_call_static_object_method(
+    void* raw_env, void* clazz, void* method, ...);
+
+static uint64_t ProxyCallStaticCaptured(
+    void* raw_env, void* clazz, void* method, uint8_t* gp_registers,
+    uint8_t* fp_registers, uint8_t* caller_stack, int32_t return_shorty) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  if (proxy == NULL || proxy->backend.call_method_v == NULL || clazz == NULL ||
+      method == NULL)
+    return 0;
+  AndroidArm64VaList arguments = {
+      .stack = caller_stack,
+      .gr_top = gp_registers + 64,
+      .vr_top = fp_registers + 128,
+      .gr_offs = -40,
+      .vr_offs = -128,
+  };
+  return proxy->backend.call_method_v(proxy->backend.context, clazz, method,
+                                      &arguments, return_shorty, 1);
+}
+
+void darwin_art_jni_proxy_call_static_void_method_captured(
+    void* raw_env, void* clazz, void* method, uint8_t* gp_registers,
+    uint8_t* fp_registers, uint8_t* caller_stack) {
+  (void)ProxyCallStaticCaptured(raw_env, clazz, method, gp_registers,
+                                fp_registers, caller_stack, 'V');
+}
+
+int32_t darwin_art_jni_proxy_call_static_int_method_captured(
+    void* raw_env, void* clazz, void* method, uint8_t* gp_registers,
+    uint8_t* fp_registers, uint8_t* caller_stack) {
+  return (int32_t)ProxyCallStaticCaptured(raw_env, clazz, method, gp_registers,
+                                          fp_registers, caller_stack, 'I');
+}
+
+void* darwin_art_jni_proxy_call_static_object_method_captured(
+    void* raw_env, void* clazz, void* method, uint8_t* gp_registers,
+    uint8_t* fp_registers, uint8_t* caller_stack) {
+  return (void*)(uintptr_t)ProxyCallStaticCaptured(
+      raw_env, clazz, method, gp_registers, fp_registers, caller_stack, 'L');
 }
 
 #undef DEFINE_CALL_STATIC_METHOD_V
@@ -774,7 +903,11 @@ static int32_t ProxyGetEnv(void* raw_vm, void** output, int32_t version) {
   if (output == NULL) return DARWIN_ART_JNI_ERR;
   *output = NULL;
   if (proxy == NULL) return DARWIN_ART_JNI_ERR;
-  if (version != DARWIN_ART_JNI_VERSION_1_6) return DARWIN_ART_JNI_EVERSION;
+  if (version != DARWIN_ART_JNI_VERSION_1_1 &&
+      version != DARWIN_ART_JNI_VERSION_1_2 &&
+      version != DARWIN_ART_JNI_VERSION_1_4 &&
+      version != DARWIN_ART_JNI_VERSION_1_6)
+    return DARWIN_ART_JNI_EVERSION;
   if (proxy->backend.current_env != NULL &&
       proxy->backend.current_env(proxy->backend.context) == NULL)
     return DARWIN_ART_JNI_EDETACHED;
@@ -840,6 +973,14 @@ static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
     [DARWIN_ART_JNI_SLOT_GetObjectClass] = (RawJniSlot)ProxyGetObjectClass,
     [DARWIN_ART_JNI_SLOT_IsInstanceOf] = (RawJniSlot)ProxyIsInstanceOf,
     [DARWIN_ART_JNI_SLOT_GetMethodID] = (RawJniSlot)ProxyGetMethodID,
+    [DARWIN_ART_JNI_SLOT_NewObject] =
+        (RawJniSlot)darwin_art_jni_proxy_new_object,
+    [DARWIN_ART_JNI_SLOT_CallVoidMethod] =
+        (RawJniSlot)darwin_art_jni_proxy_call_void_method,
+    [DARWIN_ART_JNI_SLOT_CallObjectMethod] =
+        (RawJniSlot)darwin_art_jni_proxy_call_object_method,
+    [DARWIN_ART_JNI_SLOT_CallIntMethod] =
+        (RawJniSlot)darwin_art_jni_proxy_call_int_method,
     [DARWIN_ART_JNI_SLOT_CallObjectMethodV] =
         (RawJniSlot)ProxyCallObjectMethodV,
     [DARWIN_ART_JNI_SLOT_CallBooleanMethodV] =
@@ -871,6 +1012,12 @@ static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
 #undef INSTALL_FIELD_PROXY
     [DARWIN_ART_JNI_SLOT_GetStaticMethodID] =
         (RawJniSlot)ProxyGetStaticMethodID,
+    [DARWIN_ART_JNI_SLOT_CallStaticVoidMethod] =
+        (RawJniSlot)darwin_art_jni_proxy_call_static_void_method,
+    [DARWIN_ART_JNI_SLOT_CallStaticObjectMethod] =
+        (RawJniSlot)darwin_art_jni_proxy_call_static_object_method,
+    [DARWIN_ART_JNI_SLOT_CallStaticIntMethod] =
+        (RawJniSlot)darwin_art_jni_proxy_call_static_int_method,
     [DARWIN_ART_JNI_SLOT_CallStaticObjectMethodV] =
         (RawJniSlot)ProxyCallStaticObjectMethodV,
     [DARWIN_ART_JNI_SLOT_CallStaticBooleanMethodV] =

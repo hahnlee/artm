@@ -1,17 +1,44 @@
 #include <dlfcn.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <sstream>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "darwin_provider_owners.h"
 #include "darwin_runtime_adapters_internal.h"
 
 namespace android {
 namespace {
+
+std::mutex& CachedElfMutex() {
+  static auto* mutex = new std::mutex();
+  return *mutex;
+}
+
+std::unordered_map<std::string, DarwinArtElfGraphHandle*>& CachedElfGraphs() {
+  // Android app native namespaces normally live for the ClassLoader/process
+  // lifetime. Retained graph handles deliberately follow that lifetime so a
+  // later dlopen can bind against the exact earlier DSO mapping and state.
+  static auto* graphs =
+      new std::unordered_map<std::string, DarwinArtElfGraphHandle*>();
+  return *graphs;
+}
+
+void SetCacheError(DarwinArtElfErrorBuffer* error, const std::string& message) {
+  if (error == nullptr) return;
+  error->required = message.size() + 1;
+  if (error->data == nullptr || error->capacity == 0) return;
+  const size_t copied = std::min(message.size(), error->capacity - 1);
+  std::memcpy(error->data, message.data(), copied);
+  error->data[copied] = '\0';
+}
 
 std::string ElfError(DarwinArtElfStatus status,
                      const DarwinArtElfErrorBuffer& error) {
@@ -24,6 +51,72 @@ std::string ElfError(DarwinArtElfStatus status,
 }
 
 }  // namespace
+
+std::vector<std::string> SnapshotCachedElfSonames() {
+  std::lock_guard<std::mutex> lock(CachedElfMutex());
+  std::vector<std::string> result;
+  result.reserve(CachedElfGraphs().size());
+  for (const auto& [soname, graph] : CachedElfGraphs()) {
+    if (graph != nullptr) result.push_back(soname);
+  }
+  std::sort(result.begin(), result.end());
+  return result;
+}
+
+bool RegisterCachedElfGraph(const char* root_soname,
+                            DarwinArtElfGraphHandle* graph,
+                            std::string* error) {
+  if (root_soname == nullptr || root_soname[0] == '\0' || graph == nullptr) {
+    if (error != nullptr) *error = "invalid ELF namespace cache registration";
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(CachedElfMutex());
+  if (CachedElfGraphs().contains(root_soname)) return true;
+  DarwinArtElfGraphHandle* retained = nullptr;
+  std::array<char, 1024> storage{};
+  DarwinArtElfErrorBuffer buffer{storage.data(), storage.size(), 0};
+  const DarwinArtElfStatus status =
+      darwin_art_elf_graph_clone(graph, &retained, &buffer);
+  if (status != DARWIN_ART_ELF_OK || retained == nullptr) {
+    if (error != nullptr) *error = ElfError(status, buffer);
+    return false;
+  }
+  CachedElfGraphs().emplace(root_soname, retained);
+  std::fprintf(stderr, "DARWIN ELF namespace: retained root=%s\n", root_soname);
+  return true;
+}
+
+DarwinArtElfResolveStatus ResolveCachedElfProvider(
+    const DarwinArtElfSymbolRequest* request,
+    uintptr_t* out_address,
+    DarwinArtElfErrorBuffer* error) {
+  if (request == nullptr || request->symbol == nullptr || out_address == nullptr) {
+    return DARWIN_ART_ELF_RESOLVE_ERROR;
+  }
+  std::lock_guard<std::mutex> lock(CachedElfMutex());
+  auto lookup = [&](const char* soname) -> DarwinArtElfResolveStatus {
+    const auto found = soname == nullptr ? CachedElfGraphs().end()
+                                         : CachedElfGraphs().find(soname);
+    if (found == CachedElfGraphs().end()) return DARWIN_ART_ELF_RESOLVE_NOT_FOUND;
+    std::array<char, 1024> storage{};
+    DarwinArtElfErrorBuffer buffer{storage.data(), storage.size(), 0};
+    const DarwinArtElfStatus status = darwin_art_elf_graph_lookup_root_symbol(
+        found->second, request->symbol, out_address, &buffer);
+    if (status == DARWIN_ART_ELF_OK) return DARWIN_ART_ELF_RESOLVE_FOUND;
+    if (status == DARWIN_ART_ELF_SYMBOL_NOT_FOUND) {
+      return DARWIN_ART_ELF_RESOLVE_NOT_FOUND;
+    }
+    SetCacheError(error, ElfError(status, buffer));
+    return DARWIN_ART_ELF_RESOLVE_ERROR;
+  };
+  if (request->version_soname != nullptr) return lookup(request->version_soname);
+  for (size_t index = 0; index < request->needed_library_count; ++index) {
+    const DarwinArtElfResolveStatus status =
+        lookup(request->needed_libraries[index]);
+    if (status != DARWIN_ART_ELF_RESOLVE_NOT_FOUND) return status;
+  }
+  return DARWIN_ART_ELF_RESOLVE_NOT_FOUND;
+}
 
 void DestroyRuntimeElfTrampolines(ElfLibrary* library) {
   if (library == nullptr) return;

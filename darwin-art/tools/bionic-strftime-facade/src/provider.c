@@ -303,14 +303,23 @@ size_t darwin_art_bionic_strftime_l(char* destination, size_t capacity,
   return result;
 }
 
+size_t darwin_art_bionic_strftime(char* destination, size_t capacity,
+                                  const char* format,
+                                  const DarwinArtAndroidTm* broken_down) {
+  return darwin_art_bionic_strftime_l(destination, capacity, format,
+                                      broken_down, NULL);
+}
+
 DarwinArtBionicStrftimeFunction darwin_art_bionic_strftime_resolve(
     const char* soname, const char* symbol, const char* version) {
   const int saved_errno = errno;
   DarwinArtBionicStrftimeFunction result = NULL;
   if (soname != NULL && symbol != NULL && version != NULL &&
-      strcmp(soname, "libc.so") == 0 && strcmp(symbol, "strftime_l") == 0 &&
-      strcmp(version, "LIBC") == 0) {
-    result = (DarwinArtBionicStrftimeFunction)darwin_art_bionic_strftime_l;
+      strcmp(soname, "libc.so") == 0 && strcmp(version, "LIBC") == 0) {
+    if (strcmp(symbol, "strftime") == 0)
+      result = (DarwinArtBionicStrftimeFunction)darwin_art_bionic_strftime;
+    else if (strcmp(symbol, "strftime_l") == 0)
+      result = (DarwinArtBionicStrftimeFunction)darwin_art_bionic_strftime_l;
   }
   errno = saved_errno;
   return result;

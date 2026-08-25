@@ -584,6 +584,8 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
             "QuartzCore",
             "-framework",
             "Security",
+            "-framework",
+            "AudioToolbox",
             "-o",
         ])
         .arg(&runtime_library);

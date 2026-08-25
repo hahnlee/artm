@@ -864,6 +864,54 @@ pub unsafe extern "C" fn darwin_art_elf_graph_lookup_root(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_graph_lookup_root_symbol(
+    handle: *mut DarwinArtElfGraphHandle,
+    name: *const c_char,
+    out_address: *mut usize,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if out_address.is_null() {
+            return Err(FfiFailure::Invalid("out_address is null"));
+        }
+        unsafe { *out_address = 0 };
+        if name.is_null() {
+            return Err(FfiFailure::Invalid("name is null"));
+        }
+        let handle = unsafe { handle.as_ref() }.ok_or(FfiFailure::Invalid("handle is null"))?;
+        let name = unsafe { CStr::from_ptr(name) }
+            .to_str()
+            .map_err(|_| FfiFailure::Invalid("symbol name is not UTF-8"))?;
+        let address = lock_graph(handle)?
+            .lookup_root_symbol(name)
+            .map_err(FfiFailure::Load)?;
+        unsafe { *out_address = address };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_elf_graph_clone(
+    handle: *mut DarwinArtElfGraphHandle,
+    out_handle: *mut *mut DarwinArtElfGraphHandle,
+    error: *mut DarwinArtElfErrorBuffer,
+) -> DarwinArtElfStatus {
+    ffi_call(error, || {
+        if out_handle.is_null() {
+            return Err(FfiFailure::Invalid("out_handle is null"));
+        }
+        unsafe { *out_handle = std::ptr::null_mut() };
+        let handle = unsafe { handle.as_ref() }.ok_or(FfiFailure::Invalid("handle is null"))?;
+        let graph = lock_graph(handle)?.clone();
+        let clone = Box::new(DarwinArtElfGraphHandle {
+            graph: Mutex::new(graph),
+        });
+        unsafe { *out_handle = Box::into_raw(clone) };
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn darwin_art_elf_graph_unload(
     handle: *mut *mut DarwinArtElfGraphHandle,
     error: *mut DarwinArtElfErrorBuffer,

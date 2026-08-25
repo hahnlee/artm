@@ -10,16 +10,24 @@
 #include "darwin_art_bionic_fs.h"
 
 bool InstallProbeAndroidSystemRoot() {
-  const char* root = std::getenv("DARWIN_ART_ANDROID_SYSTEM_ROOT");
+  const char* filesystem_root =
+      std::getenv("DARWIN_ART_ANDROID_FILESYSTEM_ROOT");
+  const char* root = filesystem_root != nullptr
+                         ? filesystem_root
+                         : std::getenv("DARWIN_ART_ANDROID_SYSTEM_ROOT");
   if (root == nullptr || root[0] == '\0') return true;
   const int fd = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
   if (fd < 0) {
     std::cerr << "ART Android filesystem: cannot open test root " << root << "\n";
     return false;
   }
-  constexpr uint8_t kMount[] = {'/', 's', 'y', 's', 't', 'e', 'm'};
+  constexpr uint8_t kSystemMount[] = {'/', 's', 'y', 's', 't', 'e', 'm'};
+  constexpr uint8_t kRootMount[] = {'/'};
+  const uint8_t* mount = filesystem_root != nullptr ? kRootMount : kSystemMount;
+  const size_t mount_size =
+      filesystem_root != nullptr ? sizeof(kRootMount) : sizeof(kSystemMount);
   const auto status = darwin_art_bionic_fs_process_install(
-      fd, kMount, sizeof(kMount), kMount, sizeof(kMount));
+      fd, mount, mount_size, mount, mount_size);
   close(fd);
   std::cerr << "ART Android filesystem: test root status="
             << static_cast<int>(status) << " root=" << root << "\n";

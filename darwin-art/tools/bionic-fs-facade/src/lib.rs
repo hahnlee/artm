@@ -75,6 +75,7 @@ unsafe extern "C" {
         entry: *mut HostDirent,
         host_errno: *mut c_int,
     ) -> c_int;
+    fn darwin_art_bionic_fs_host_rewinddir(directory: *mut c_void);
     fn darwin_art_bionic_fs_host_closedir(directory: *mut c_void, host_errno: *mut c_int) -> c_int;
     fn darwin_art_bionic_fs_host_fpathconf(
         fd: c_int,
@@ -432,6 +433,13 @@ impl Facade {
         cwd: &[u8],
         entropy: Arc<dyn EntropyBackend>,
     ) -> Result<Self, &'static str> {
+        if std::env::var_os("DARWIN_ART_FS_TRACE").is_some() {
+            eprintln!(
+                "DARWIN FS: install mount={} cwd={}",
+                String::from_utf8_lossy(guest_mount),
+                String::from_utf8_lossy(cwd)
+            );
+        }
         let mut prefix = MountTable::new();
         prefix
             .add_mount(1, MountKind::Immutable, false, guest_mount)
@@ -521,7 +529,18 @@ impl Facade {
             {
                 Ok(resolution)
             }
-            Ok(_) | Err(PrefixError::NoMount) => Err(ANDROID_EACCES),
+            Ok(resolution) => {
+                if std::env::var_os("DARWIN_ART_FS_TRACE").is_some() {
+                    eprintln!(
+                        "DARWIN FS: rejected mount path={} id={} writable={}",
+                        String::from_utf8_lossy(path),
+                        resolution.mount_id,
+                        resolution.writable
+                    );
+                }
+                Err(ANDROID_EACCES)
+            }
+            Err(PrefixError::NoMount) => Err(ANDROID_EACCES),
             Err(_) => Err(ANDROID_EINVAL),
         }
     }
@@ -618,7 +637,15 @@ impl Facade {
         }
         let resolution = match self.resolve(path) {
             Ok(resolution) => resolution,
-            Err(error) => return self.fail(error),
+            Err(error) => {
+                if std::env::var_os("DARWIN_ART_FS_TRACE").is_some() {
+                    eprintln!(
+                        "DARWIN FS: open resolve failed path={} errno={error}",
+                        String::from_utf8_lossy(path)
+                    );
+                }
+                return self.fail(error);
+            }
         };
         if resolution.mount_id == 2 {
             return self.open_overlay(resolution, flags, mode);
@@ -632,7 +659,16 @@ impl Facade {
         }
         let opened = match self.broker.open(&relative) {
             Ok(opened) => opened,
-            Err(error) => return self.fail_broker(&error),
+            Err(error) => {
+                if std::env::var_os("DARWIN_ART_FS_TRACE").is_some() {
+                    eprintln!(
+                        "DARWIN FS: open broker failed path={} relative={} error={error}",
+                        String::from_utf8_lossy(path),
+                        String::from_utf8_lossy(&relative)
+                    );
+                }
+                return self.fail_broker(&error);
+            }
         };
         if flags & O_DIRECTORY != 0 && !opened.metadata().is_dir() {
             return self.fail(ANDROID_ENOTDIR);
@@ -831,6 +867,53 @@ impl Facade {
                 file.data[start..end].copy_from_slice(bytes);
                 descriptor.offset = end as u64;
                 bytes.len() as isize
+            }
+        }
+    }
+
+    unsafe fn pread(&self, fd: c_int, buffer: *mut c_void, count: usize, offset: i64) -> isize {
+        if count > isize::MAX as usize || offset < 0 {
+            return self.fail(ANDROID_EINVAL) as isize;
+        }
+        if buffer.is_null() && count != 0 {
+            return self.fail(ANDROID_EFAULT) as isize;
+        }
+        let pointer = if count == 0 {
+            ptr::NonNull::<u8>::dangling().as_ptr()
+        } else {
+            buffer.cast::<u8>()
+        };
+        let bytes = unsafe { slice::from_raw_parts_mut(pointer, count) };
+        let descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability() as isize,
+        };
+        let Some(descriptor) = descriptors.entries.get(&fd) else {
+            return self.fail(ANDROID_EBADF) as isize;
+        };
+        match descriptor {
+            Descriptor::File(file) => match file.read_at(bytes, offset as u64) {
+                Ok(read) => read as isize,
+                Err(error) => self.fail_io(&error) as isize,
+            },
+            Descriptor::Random(_) => match self.entropy.fill(bytes) {
+                Ok(()) => count as isize,
+                Err(()) => self.fail(ANDROID_EIO) as isize,
+            },
+            Descriptor::Overlay(descriptor) => {
+                if !descriptor.readable {
+                    return self.fail(ANDROID_EBADF) as isize;
+                }
+                let file = match descriptor.node.lock() {
+                    Ok(file) => file,
+                    Err(_) => return self.fail_capability() as isize,
+                };
+                let start = offset as usize;
+                let copied = file.data.len().saturating_sub(start).min(bytes.len());
+                if copied != 0 {
+                    bytes[..copied].copy_from_slice(&file.data[start..start + copied]);
+                }
+                copied as isize
             }
         }
     }
@@ -1530,6 +1613,26 @@ impl Facade {
         }
     }
 
+    fn rewinddir(&self, directory: *mut c_void) {
+        if directory.is_null() {
+            self.fail(ANDROID_EBADF);
+            return;
+        }
+        let mut directories = match self.directories.lock() {
+            Ok(directories) => directories,
+            Err(_) => {
+                self.fail_capability();
+                return;
+            }
+        };
+        let Some(state) = directories.streams.get_mut(&(directory as usize)) else {
+            self.fail(ANDROID_EBADF);
+            return;
+        };
+        unsafe { darwin_art_bionic_fs_host_rewinddir(state.host_directory as *mut c_void) };
+        state.offset = 0;
+    }
+
     fn sendfile_transfer(&self, request: &SendfileRequest, result: &mut SendfileResult) -> c_int {
         *result = SendfileResult {
             abi_version: SENDFILE_ABI_VERSION,
@@ -2161,6 +2264,16 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_write_core(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn darwin_art_bionic_fs_pread_core(
+    fd: c_int,
+    buffer: *mut c_void,
+    count: usize,
+    offset: i64,
+) -> isize {
+    with_active(-1, |facade| unsafe { facade.pread(fd, buffer, count, offset) })
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_fs_lseek_core(
     fd: c_int,
     offset: i64,
@@ -2281,6 +2394,11 @@ pub extern "C" fn darwin_art_bionic_fs_fdopendir_core(fd: c_int) -> *mut c_void 
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_fs_readdir_core(directory: *mut c_void) -> *mut AndroidDirent {
     with_active(ptr::null_mut(), |facade| facade.readdir(directory))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_fs_rewinddir_core(directory: *mut c_void) {
+    with_active((), |facade| facade.rewinddir(directory))
 }
 
 #[unsafe(no_mangle)]

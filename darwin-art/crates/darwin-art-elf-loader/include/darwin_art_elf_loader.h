@@ -214,6 +214,19 @@ DarwinArtElfStatus darwin_art_elf_graph_lookup_root(
     uintptr_t* out_address,
     DarwinArtElfErrorBuffer* error);
 
+/* Looks up a root DSO export of any supported ELF symbol type. */
+DarwinArtElfStatus darwin_art_elf_graph_lookup_root_symbol(
+    DarwinArtElfGraphHandle* handle,
+    const char* name,
+    uintptr_t* out_address,
+    DarwinArtElfErrorBuffer* error);
+
+/* Retains the complete graph and all of its mappings in a new unique handle. */
+DarwinArtElfStatus darwin_art_elf_graph_clone(
+    DarwinArtElfGraphHandle* handle,
+    DarwinArtElfGraphHandle** out_handle,
+    DarwinArtElfErrorBuffer* error);
+
 /* Finalizes dependents before dependencies, then nulls the unique handle. */
 DarwinArtElfStatus darwin_art_elf_graph_unload(
     DarwinArtElfGraphHandle** handle,

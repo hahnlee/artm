@@ -405,6 +405,17 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
           : env->GetMethodID(intent_class, "setComponent",
                              "(Landroid/content/ComponentName;)"
                              "Landroid/content/Intent;");
+  jmethodID set_action =
+      intent_class == nullptr
+          ? nullptr
+          : env->GetMethodID(intent_class, "setAction",
+                             "(Ljava/lang/String;)Landroid/content/Intent;");
+  jmethodID set_data_and_type =
+      intent_class == nullptr
+          ? nullptr
+          : env->GetMethodID(intent_class, "setDataAndType",
+                             "(Landroid/net/Uri;Ljava/lang/String;)"
+                             "Landroid/content/Intent;");
   jstring package_name = env->NewStringUTF(
       run_apk_app ? apk_app_package : "dev.darwinart.probe");
   jstring class_name = env->NewStringUTF(
@@ -473,6 +484,43 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
     jobject configured_intent =
         env->CallObjectMethod(intent, set_component, component_name);
     env->DeleteLocalRef(configured_intent);
+  }
+  const char* launch_action =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_APP_INTENT_ACTION") : nullptr;
+  if (intent != nullptr && set_action != nullptr && launch_action != nullptr &&
+      *launch_action != '\0') {
+    jstring action = env->NewStringUTF(launch_action);
+    jobject configured_intent = env->CallObjectMethod(intent, set_action, action);
+    env->DeleteLocalRef(configured_intent);
+    env->DeleteLocalRef(action);
+  }
+  const char* launch_uri =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_APP_INTENT_URI") : nullptr;
+  const char* launch_type =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_APP_INTENT_TYPE") : nullptr;
+  if (intent != nullptr && set_data_and_type != nullptr && launch_uri != nullptr &&
+      *launch_uri != '\0') {
+    jclass uri_class = env->FindClass("android/net/Uri");
+    jmethodID parse_uri =
+        uri_class == nullptr
+            ? nullptr
+            : env->GetStaticMethodID(uri_class, "parse",
+                                     "(Ljava/lang/String;)Landroid/net/Uri;");
+    jstring uri_text = env->NewStringUTF(launch_uri);
+    jobject uri = parse_uri == nullptr
+                      ? nullptr
+                      : env->CallStaticObjectMethod(uri_class, parse_uri, uri_text);
+    jstring mime_type = env->NewStringUTF(
+        launch_type == nullptr || *launch_type == '\0' ? "*/*" : launch_type);
+    if (uri != nullptr && !env->ExceptionCheck()) {
+      jobject configured_intent =
+          env->CallObjectMethod(intent, set_data_and_type, uri, mime_type);
+      env->DeleteLocalRef(configured_intent);
+    }
+    env->DeleteLocalRef(mime_type);
+    env->DeleteLocalRef(uri);
+    env->DeleteLocalRef(uri_text);
+    env->DeleteLocalRef(uri_class);
   }
   static constexpr const char* kActivityAttachSignature =
       "(Landroid/content/Context;Landroid/app/ActivityThread;"

@@ -70,6 +70,42 @@ fn dispatch_queued_events(runtime: &mut HostRuntime) -> Result<u64, HostError> {
 }
 
 #[cfg(target_os = "macos")]
+fn dispatch_synthetic_keys(
+    runtime: &mut HostRuntime,
+    sequence: &[(u32, u32)],
+    clock: &Instant,
+) -> Result<u64, HostError> {
+    eprintln!(
+        "DARWIN_ART gpu synthetic key dispatch count={}",
+        sequence.len()
+    );
+    let mut dispatched = 0_u64;
+    for &(key_code, meta_state) in sequence {
+        let down_time_nanos = clock.elapsed().as_nanos() as u64 + 1;
+        for action in [0_u32, 1_u32] {
+            let mut event = KeyEventV1::default();
+            event.version = 1;
+            event.size = std::mem::size_of::<KeyEventV1>() as u32;
+            event.action = action;
+            event.event_time_nanos = clock.elapsed().as_nanos() as u64 + 1;
+            event.down_time_nanos = down_time_nanos;
+            event.key_code = key_code;
+            event.meta_state = meta_state;
+            event.device_id = 1;
+            event.source = 0x101;
+            let status = runtime
+                .graphics()
+                .map_or(-1, |graphics| graphics.dispatch_key_v1(&event));
+            if status != 0 {
+                return Err(HostError::RuntimeFailed(status));
+            }
+            dispatched += 1;
+        }
+    }
+    Ok(dispatched)
+}
+
+#[cfg(target_os = "macos")]
 pub(super) fn run(
     runtime: &mut HostRuntime,
     process: ProcessResult,
@@ -94,6 +130,7 @@ pub(super) fn run(
     let mut frames_presented = 1_u64;
     let mut remaining = options.visible_seconds;
     let mut loop_error: Option<HostError> = None;
+    let host_loop_clock = Instant::now();
     let debug_latency = std::env::var_os("DARWIN_ART_DEBUG_INPUT_LATENCY").is_some();
     let mut last_input_dispatch: Option<Instant> = None;
     let mut frame_latencies_us = Vec::new();
@@ -103,7 +140,13 @@ pub(super) fn run(
             let (width, height) = value.split_once('x').or_else(|| value.split_once(','))?;
             Some((width.parse::<u32>().ok()?, height.parse::<u32>().ok()?))
         });
-    if let Some((width, height)) = test_resize {
+    let test_resize_after_ms = std::env::var("DARWIN_ART_TEST_WINDOW_RESIZE_AFTER_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok());
+    let mut pending_test_resize = test_resize;
+    if test_resize_after_ms.is_none()
+        && let Some((width, height)) = pending_test_resize.take()
+    {
         let status = runtime
             .surface()
             .map_or(-1, |surface| surface.resize(width, height));
@@ -212,7 +255,29 @@ pub(super) fn run(
                 .and_then(|value| value.parse::<u32>().ok())
                 .map(|code| vec![(code, 0)])
         });
+    let post_pointer_key_sequence = std::env::var("DARWIN_ART_TEST_KEY_AFTER_POINTER_SEQUENCE")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .filter_map(|sample| {
+                    let (code, meta) = sample.split_once(':').unwrap_or((sample, "0"));
+                    Some((code.parse::<u32>().ok()?, meta.parse::<u32>().ok()?))
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|sequence| !sequence.is_empty());
     let mut synthetic_moves = 0_u64;
+    // Test coordinates are expressed in the same logical AppKit points used
+    // by mouse events and capture scripts. Android lays the retained view out
+    // in backing pixels, so apply the live launch scale before entering the
+    // common MotionEvent bridge. Real NSEvents receive the equivalent
+    // drawable-size transform in DarwinArtMetalView.
+    let synthetic_pointer_scale = std::env::var("DARWIN_ART_WINDOW_SCALE")
+        .ok()
+        .and_then(|value| value.parse::<f32>().ok())
+        .filter(|scale| scale.is_finite() && *scale > 0.0)
+        .unwrap_or(1.0);
     eprintln!(
         "DARWIN_ART gpu test pointer={test_pointer:?} drag_points={} hold_ms={test_hold_ms} cancel={test_cancel} hz={test_pointer_hz:?} keys={}",
         test_drag.as_ref().map_or(0, Vec::len),
@@ -232,10 +297,10 @@ pub(super) fn run(
         event.event_time_nanos = 0;
         event.down_time_nanos = 0;
         event.pointer_count = 1;
-        event.x = x;
-        event.y = y;
-        event.raw_x = x;
-        event.raw_y = y;
+        event.x = x * synthetic_pointer_scale;
+        event.y = y * synthetic_pointer_scale;
+        event.raw_x = event.x;
+        event.raw_y = event.y;
         event.pressure = 1.0;
         event.size_value = 1.0;
         event
@@ -376,34 +441,9 @@ pub(super) fn run(
     if loop_error.is_none()
         && let Some(key_sequence) = test_key_sequence
     {
-        eprintln!(
-            "DARWIN_ART gpu synthetic key dispatch count={}",
-            key_sequence.len()
-        );
-        for (key_code, meta_state) in key_sequence {
-            let key_down_time_nanos = synthetic_clock.elapsed().as_nanos() as u64 + 1;
-            for action in [0_u32, 1_u32] {
-                let mut event = KeyEventV1::default();
-                event.version = 1;
-                event.size = std::mem::size_of::<KeyEventV1>() as u32;
-                event.action = action;
-                event.event_time_nanos = synthetic_clock.elapsed().as_nanos() as u64 + 1;
-                event.down_time_nanos = key_down_time_nanos;
-                event.key_code = key_code;
-                event.meta_state = meta_state;
-                event.device_id = 1;
-                event.source = 0x101;
-                let dispatch_status = runtime
-                    .graphics()
-                    .map_or(-1, |graphics| graphics.dispatch_key_v1(&event));
-                if dispatch_status != 0 {
-                    loop_error = Some(HostError::RuntimeFailed(dispatch_status));
-                    break;
-                }
-            }
-            if loop_error.is_some() {
-                break;
-            }
+        match dispatch_synthetic_keys(runtime, &key_sequence, &synthetic_clock) {
+            Ok(dispatched) => frames_presented += dispatched,
+            Err(error) => loop_error = Some(error),
         }
         if loop_error.is_none()
             && let Err(error) = pump_frame_with_latency(
@@ -469,6 +509,24 @@ pub(super) fn run(
                     break;
                 }
             }
+        }
+    }
+    if loop_error.is_none()
+        && let Some(sequence) = post_pointer_key_sequence.as_ref()
+    {
+        match dispatch_synthetic_keys(runtime, sequence, &synthetic_clock) {
+            Ok(dispatched) => frames_presented += dispatched,
+            Err(error) => loop_error = Some(error),
+        }
+        if loop_error.is_none()
+            && let Err(error) = pump_frame_with_latency(
+                runtime,
+                debug_latency,
+                &mut last_input_dispatch,
+                &mut frame_latencies_us,
+            )
+        {
+            loop_error = Some(error);
         }
     }
     if loop_error.is_none()
@@ -595,6 +653,26 @@ pub(super) fn run(
         }
     }
     while remaining > 0.0 {
+        if loop_error.is_none()
+            && let (Some((width, height)), Some(after_ms)) =
+                (pending_test_resize, test_resize_after_ms)
+            && host_loop_clock.elapsed().as_millis() >= u128::from(after_ms)
+        {
+            let status = runtime
+                .surface()
+                .map_or(-1, |surface| surface.resize(width, height));
+            if status != 0 {
+                loop_error = Some(HostError::SurfaceFailed {
+                    operation: "gpu_delayed_test_window_resize",
+                    status,
+                });
+            } else {
+                eprintln!(
+                    "DARWIN_ART gpu delayed test resize={width}x{height} after_ms={after_ms}"
+                );
+                pending_test_resize = None;
+            }
+        }
         let slice = remaining.min(0.016);
         let pump_status = owned_surface_pump_events(runtime, slice);
         if pump_status == 7 {

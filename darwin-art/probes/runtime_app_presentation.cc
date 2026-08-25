@@ -260,9 +260,58 @@ jclass load_activity_class(JNIEnv* env, jclass activity_class,
   return result;
 }
 
-void ConfigureHostSurface(JNIEnv*, jclass, jint x, jint y, jint width,
+void EnsureJavaSurfaceValid(JNIEnv* env, jobject surface) {
+  if (surface == nullptr) return;
+  jclass surface_class = env->GetObjectClass(surface);
+  jfieldID native_object =
+      surface_class == nullptr
+          ? nullptr
+          : env->GetFieldID(surface_class, "mNativeObject", "J");
+  if (native_object != nullptr &&
+      env->GetLongField(surface, native_object) == 0) {
+    // Surface Java code only treats zero as detached. The object itself is
+    // the JNI identity handed to native renderers; the process-local token is
+    // validated by the framework Surface native table.
+    env->SetLongField(surface, native_object, 1);
+  }
+  if (surface_class != nullptr) env->DeleteLocalRef(surface_class);
+}
+
+void EnsureViewRootSurfaceValid(JNIEnv* env, jobject view) {
+  if (view == nullptr) return;
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID get_view_root =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "getViewRootImpl",
+                             "()Landroid/view/ViewRootImpl;");
+  jobject view_root = get_view_root == nullptr
+                          ? nullptr
+                          : env->CallObjectMethod(view, get_view_root);
+  jclass view_root_class =
+      view_root == nullptr ? nullptr : env->GetObjectClass(view_root);
+  jfieldID root_surface_field =
+      view_root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(view_root_class, "mSurface",
+                            "Landroid/view/Surface;");
+  jobject root_surface = root_surface_field == nullptr
+                             ? nullptr
+                             : env->GetObjectField(view_root,
+                                                   root_surface_field);
+  EnsureJavaSurfaceValid(env, root_surface);
+  if (root_surface != nullptr) env->DeleteLocalRef(root_surface);
+  if (view_root_class != nullptr) env->DeleteLocalRef(view_root_class);
+  if (view_root != nullptr) env->DeleteLocalRef(view_root);
+  if (view_class != nullptr) env->DeleteLocalRef(view_class);
+}
+
+void ConfigureHostSurface(JNIEnv* env, jclass, jobject surface_view,
+                          jobject surface, jint x, jint y, jint width,
                           jint height) {
   darwin_art::ConfigureDarwinAngleHostSurface(x, y, width, height);
+  EnsureViewRootSurfaceValid(env, surface_view);
+  EnsureJavaSurfaceValid(env, surface);
 }
 
 bool install_activity_bridge(JNIEnv* env, jclass activity_class,
@@ -281,7 +330,8 @@ bool install_activity_bridge(JNIEnv* env, jclass activity_class,
        const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;"),
        reinterpret_cast<void*>(&ChooseHostSaveDocument)},
       {const_cast<char*>("nativeConfigureHostSurface"),
-       const_cast<char*>("(IIII)V"),
+       const_cast<char*>(
+           "(Landroid/view/SurfaceView;Landroid/view/Surface;IIII)V"),
        reinterpret_cast<void*>(&ConfigureHostSurface)},
   };
   const bool registered =
@@ -364,6 +414,12 @@ bool attach_android_window(JNIEnv* env, jobject activity, jobject window,
   }
   env->CallVoidMethod(global, add_view, decor_view, window_attributes, display,
                       window, static_cast<jint>(0));
+  // ViewRootImpl normally receives a valid BufferQueue producer from
+  // WindowManager before its first traversal.  The detached compositor owns
+  // that producer, so publish the process-local token at the same boundary.
+  // SurfaceView.updateSurface() checks the root Surface before creating child
+  // surfaces and otherwise dispatches surfaceDestroyed() to app callbacks.
+  EnsureViewRootSurfaceValid(env, decor_view);
   if (env->ExceptionCheck()) {
     std::cerr << "ART Android window: WindowManagerGlobal.addView failed\n";
     env->ExceptionDescribe();
@@ -862,6 +918,16 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
     std::cerr << "ART Android window: real ViewRoot attachment failed\n";
     return 31;
   }
+  if (run_apk_app &&
+      !install_activity_bridge(env, probe_activity_class, activity_instance,
+                               graphics_state)) {
+    std::cerr << "ART Android activity: local task bridge install failed\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
+    }
+    return 33;
+  }
   // A real ViewRootImpl performs the final DecorView layout before input
   // dispatch.  The detached launcher has no ViewRoot, so mirror that one
   // ownership step explicitly; without it DecorView remains 0x0 even though
@@ -910,16 +976,6 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
           probe_view_class, probe_view, run_apk_app, expect_apk_widgets,
           run_apk_app || run_framework_button, kApkFrameWidth * window_scale,
           kApkFrameHeight * window_scale) != 0) {
-    return 33;
-  }
-  if (run_apk_app &&
-      !install_activity_bridge(env, probe_activity_class, activity_instance,
-                               graphics_state)) {
-    std::cerr << "ART Android activity: local task bridge install failed\n";
-    if (env->ExceptionCheck()) {
-      env->ExceptionDescribe();
-      env->ExceptionClear();
-    }
     return 33;
   }
   darwin_art_app_activity::release(env, &activity);

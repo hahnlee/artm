@@ -30,6 +30,7 @@ import android.view.autofill.AutofillManager;
 import android.view.Display;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -51,6 +52,7 @@ public final class ProbeContext extends ContextWrapper {
     private final SharedPreferences sharedPreferences;
     private final ShortcutManager shortcutManager;
     private final UserManager userManager;
+    private Object mediaSessionManager;
     private final String packageName;
     private final ClassLoader classLoader;
     private volatile Display display;
@@ -109,6 +111,8 @@ public final class ProbeContext extends ContextWrapper {
         applicationInfo = new ApplicationInfo();
         applicationInfo.packageName = this.packageName;
         applicationInfo.targetSdkVersion = 36;
+        applicationInfo.nativeLibraryDir = System.getenv(
+                "DARWIN_ART_APK_APP_NATIVE_DIR");
         attributionSource = new AttributionSource.Builder(1000)
                 .setPackageName(getPackageName())
                 .build();
@@ -205,13 +209,37 @@ public final class ProbeContext extends ContextWrapper {
     }
 
     @Override
+    public ComponentName startForegroundService(Intent intent) {
+        try {
+            ComponentName component = startService(intent);
+            android.util.Log.i("DarwinServiceBridge",
+                    "started local foreground Service " + component);
+            return component;
+        } catch (RuntimeException error) {
+            android.util.Log.e("DarwinServiceBridge",
+                    "could not start local foreground Service", error);
+            throw error;
+        }
+    }
+
+    @Override
     public boolean bindService(Intent intent, ServiceConnection connection, int flags) {
         if (connection == null) throw new NullPointerException("connection");
         LocalServiceRecord record = ensureLocalService(intent);
         if (record.binder == null) record.binder = record.service.onBind(new Intent(intent));
+        android.util.Log.i("DarwinServiceBridge",
+                "bind local Service " + record.component + " action=" + intent.getAction()
+                        + " binder=" + record.binder);
         if (record.binder == null) return false;
         serviceConnections.put(connection, record);
-        connection.onServiceConnected(record.component, record.binder);
+        // ActivityManager reports service connections asynchronously after
+        // bindService() returns. MediaBrowser (and many AndroidX clients)
+        // establishes its CONNECTING state only after that return, so a
+        // synchronous callback is observably invalid even in-process.
+        ComponentName connectedComponent = record.component;
+        IBinder connectedBinder = record.binder;
+        new Handler(Looper.getMainLooper()).post(
+                () -> connection.onServiceConnected(connectedComponent, connectedBinder));
         return true;
     }
 
@@ -251,8 +279,19 @@ public final class ProbeContext extends ContextWrapper {
             if (application == null) {
                 throw new IllegalStateException("Application context is not installed");
             }
+            // Service.attach receives the process IActivityManager directly on
+            // Android. Passing null leaves startForeground/stopSelf unusable
+            // even though ServiceManager already exposes our typed local
+            // activity service, so resolve the same framework singleton here.
+            Method getActivityManager = android.app.ActivityManager.class
+                    .getDeclaredMethod("getService");
+            getActivityManager.setAccessible(true);
+            Object activityManagerService = getActivityManager.invoke(null);
+            if (activityManagerService == null) {
+                throw new IllegalStateException("IActivityManager is not installed");
+            }
             attach.invoke(service, this, null, component.getClassName(),
-                    new Binder(), application, null);
+                    new Binder(), application, activityManagerService);
             service.onCreate();
             LocalServiceRecord created = new LocalServiceRecord(component, service);
             localServices.put(component, created);
@@ -345,6 +384,36 @@ public final class ProbeContext extends ContextWrapper {
     }
 
     @Override
+    public File getExternalFilesDir(String type) {
+        return appDataPath(type == null || type.isEmpty()
+                ? "external/files" : "external/files/" + type);
+    }
+
+    @Override
+    public File[] getExternalFilesDirs(String type) {
+        return new File[] {getExternalFilesDir(type)};
+    }
+
+    @Override
+    public File getExternalCacheDir() {
+        return appDataPath("external/cache");
+    }
+
+    @Override
+    public File[] getExternalCacheDirs() {
+        return new File[] {getExternalCacheDir()};
+    }
+
+    @Override
+    public File getDir(String name, int mode) {
+        if (name == null || name.isEmpty() || name.indexOf('/') >= 0
+                || name.indexOf('\\') >= 0) {
+            throw new IllegalArgumentException("Invalid app directory name: " + name);
+        }
+        return appDataPath("app_" + name);
+    }
+
+    @Override
     public File getDatabasePath(String name) {
         File databases = appDataPath("databases");
         return new File(databases, name);
@@ -360,6 +429,23 @@ public final class ProbeContext extends ContextWrapper {
         // A detached app process has no ActivityManager broadcast registry.
         // Registration succeeds locally; no sticky broadcast is pending.
         return null;
+    }
+
+    @Override
+    public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter, int flags) {
+        return registerReceiver(receiver, filter);
+    }
+
+    @Override
+    public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter,
+            String broadcastPermission, Handler scheduler) {
+        return registerReceiver(receiver, filter);
+    }
+
+    @Override
+    public Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter,
+            String broadcastPermission, Handler scheduler, int flags) {
+        return registerReceiver(receiver, filter);
     }
 
     public Intent registerReceiverAsUser(BroadcastReceiver receiver, UserHandle user,
@@ -400,14 +486,11 @@ public final class ProbeContext extends ContextWrapper {
         if (permission == null || pid != Process.myPid() || uid != Process.myUid()) {
             return PackageManager.PERMISSION_DENIED;
         }
-        // Dangerous host-resource permissions remain denied until a runtime
-        // permission controller exists. This matches a fresh Android install
-        // and makes apps use Storage Access Framework/document-provider flows
-        // rather than treating the macOS filesystem as shared storage.
-        if ("android.permission.READ_EXTERNAL_STORAGE".equals(permission)
-                || "android.permission.WRITE_EXTERNAL_STORAGE".equals(permission)
-                || "android.permission.READ_MEDIA_VIDEO".equals(permission)
-                || "android.permission.CAMERA".equals(permission)
+        // Android shared storage is a runtime-owned, per-app virtual volume in
+        // this host, so its legacy and media-scoped permissions are safe to
+        // grant at install time. Hardware and host-resource capabilities stay
+        // denied until their permission controller is connected.
+        if ("android.permission.CAMERA".equals(permission)
                 || "android.permission.RECORD_AUDIO".equals(permission)
                 || permission.startsWith("android.permission.ACCESS_")) {
             return PackageManager.PERMISSION_DENIED;
@@ -482,6 +565,9 @@ public final class ProbeContext extends ContextWrapper {
         if (ACTIVITY_SERVICE.equals(name)) {
             return activityManager;
         }
+        if (APP_OPS_SERVICE.equals(name)) {
+            return constructAppOpsManager();
+        }
         if (INPUT_METHOD_SERVICE.equals(name)) {
             try {
                 Class<?> type = Class.forName("android.view.inputmethod.InputMethodManager");
@@ -532,6 +618,15 @@ public final class ProbeContext extends ContextWrapper {
         if (AUDIO_SERVICE.equals(name)) {
             return new ProbeAudioManager(this);
         }
+        if (MEDIA_SESSION_SERVICE.equals(name)) {
+            return constructMediaSessionManager();
+        }
+        if (KEYGUARD_SERVICE.equals(name)) {
+            return construct("android.app.KeyguardManager");
+        }
+        if (CONNECTIVITY_SERVICE.equals(name)) {
+            return construct("android.net.ConnectivityManager");
+        }
         if (CLIPBOARD_SERVICE.equals(name)) {
             try {
                 Class<?> type = Class.forName("android.content.ClipboardManager");
@@ -551,6 +646,9 @@ public final class ProbeContext extends ContextWrapper {
         String className = serviceClass.getName();
         if ("android.app.ActivityManager".equals(className)) {
             return ACTIVITY_SERVICE;
+        }
+        if ("android.app.AppOpsManager".equals(className)) {
+            return APP_OPS_SERVICE;
         }
         if ("android.view.inputmethod.InputMethodManager".equals(className)) {
             return INPUT_METHOD_SERVICE;
@@ -588,6 +686,15 @@ public final class ProbeContext extends ContextWrapper {
         if ("android.media.AudioManager".equals(className)) {
             return AUDIO_SERVICE;
         }
+        if ("android.media.session.MediaSessionManager".equals(className)) {
+            return MEDIA_SESSION_SERVICE;
+        }
+        if ("android.app.KeyguardManager".equals(className)) {
+            return KEYGUARD_SERVICE;
+        }
+        if ("android.net.ConnectivityManager".equals(className)) {
+            return CONNECTIVITY_SERVICE;
+        }
         return null;
     }
 
@@ -600,6 +707,27 @@ public final class ProbeContext extends ContextWrapper {
             return constructor.newInstance(this, new Handler(Looper.getMainLooper()));
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException("Could not construct activity manager", error);
+        }
+    }
+
+    private synchronized Object constructMediaSessionManager() {
+        // ContextImpl caches service fetchers per Context. MediaFramework's
+        // process initializer is deliberately one-shot, so constructing this
+        // manager for every getSystemService() call breaks the second media
+        // key dispatched through PhoneFallbackEventHandler.
+        if (mediaSessionManager != null) return mediaSessionManager;
+        try {
+            Class<?> serviceManager = Class.forName("android.media.MediaServiceManager");
+            Object services = serviceManager.getDeclaredConstructor().newInstance();
+            Class<?> initializer = Class.forName(
+                    "android.media.MediaFrameworkPlatformInitializer");
+            Method install = initializer.getMethod(
+                    "setMediaServiceManager", serviceManager);
+            install.invoke(null, services);
+            mediaSessionManager = construct("android.media.session.MediaSessionManager");
+            return mediaSessionManager;
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Could not initialize media services", error);
         }
     }
 
@@ -696,7 +824,8 @@ public final class ProbeContext extends ContextWrapper {
     private Object construct(String className) {
         try {
             Class<?> type = Class.forName(className);
-            Constructor<?> constructor = type.getConstructor(Context.class);
+            Constructor<?> constructor = type.getDeclaredConstructor(Context.class);
+            constructor.setAccessible(true);
             return constructor.newInstance(this);
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException("Could not construct " + className, error);
@@ -736,6 +865,25 @@ public final class ProbeContext extends ContextWrapper {
                     this, powerService, thermalService, new Handler(Looper.getMainLooper()));
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException("Could not construct android.os.PowerManager", error);
+        }
+    }
+
+    private Object constructAppOpsManager() {
+        try {
+            Class<?> interfaceType = Class.forName(
+                    "com.android.internal.app.IAppOpsService");
+            Object service = Proxy.newProxyInstance(interfaceType.getClassLoader(),
+                    new Class<?>[] {interfaceType}, new DefaultServiceHandler());
+            Class<?> type = Class.forName("android.app.AppOpsManager");
+            Field staticService = type.getDeclaredField("sService");
+            staticService.setAccessible(true);
+            staticService.set(null, service);
+            Constructor<?> constructor = type.getDeclaredConstructor(
+                    Context.class, interfaceType);
+            constructor.setAccessible(true);
+            return constructor.newInstance(this, service);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Could not construct app-ops manager", error);
         }
     }
 

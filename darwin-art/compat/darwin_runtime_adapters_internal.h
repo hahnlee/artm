@@ -107,6 +107,14 @@ bool LookupOptionalElfSymbol(ElfLibrary* library,
                              const char* name,
                              uintptr_t* address,
                              std::string* error);
+std::vector<std::string> SnapshotCachedElfSonames();
+bool RegisterCachedElfGraph(const char* root_soname,
+                            DarwinArtElfGraphHandle* graph,
+                            std::string* error);
+DarwinArtElfResolveStatus ResolveCachedElfProvider(
+    const DarwinArtElfSymbolRequest* request,
+    uintptr_t* out_address,
+    DarwinArtElfErrorBuffer* error);
 bool IsExactFixtureGraph(const char* root_soname,
                          const DarwinArtElfGraphSource* sources,
                          size_t source_count);

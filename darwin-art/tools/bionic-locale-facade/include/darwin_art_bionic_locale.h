@@ -62,6 +62,7 @@ int darwin_art_bionic_iswpunct_l(uint32_t code_point,
                                  DarwinArtAndroidLocale locale);
 int darwin_art_bionic_iswspace_l(uint32_t code_point,
                                  DarwinArtAndroidLocale locale);
+int darwin_art_bionic_iswspace(uint32_t code_point);
 int darwin_art_bionic_iswupper_l(uint32_t code_point,
                                  DarwinArtAndroidLocale locale);
 int darwin_art_bionic_iswxdigit_l(uint32_t code_point,
@@ -94,12 +95,14 @@ char* darwin_art_bionic_setlocale(int category, const char* locale_name);
 int darwin_art_bionic_strcoll_l(const char* left,
                                const char* right,
                                DarwinArtAndroidLocale locale);
+int darwin_art_bionic_strcoll(const char* left, const char* right);
 size_t darwin_art_bionic_strxfrm_l(char* destination,
                                   const char* source,
                                   size_t length,
                                   DarwinArtAndroidLocale locale);
 uint32_t darwin_art_bionic_towlower_l(uint32_t code_point,
                                       DarwinArtAndroidLocale locale);
+uint32_t darwin_art_bionic_towlower(uint32_t code_point);
 uint32_t darwin_art_bionic_towupper_l(uint32_t code_point,
                                       DarwinArtAndroidLocale locale);
 DarwinArtAndroidLocale darwin_art_bionic_uselocale(
@@ -120,6 +123,7 @@ size_t darwin_art_bionic_wcsxfrm_l(uint32_t* destination,
                                   size_t length,
                                   DarwinArtAndroidLocale locale);
 int darwin_art_bionic_wctob(uint32_t code_point);
+int darwin_art_bionic_wcwidth(uint32_t code_point);
 
 void* darwin_art_bionic_locale_resolve(const char* soname,
                                        const char* symbol,

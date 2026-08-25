@@ -105,7 +105,11 @@ fn validate_request(request: &InstallRequest) -> Result<(), String> {
         return Err("package, version code, or runtime ABI is not a safe component".to_owned());
     }
     if let Some(root) = &request.native_root
-        && (!root.starts_with("lib") || !root.ends_with(".so") || !component(root, true))
+        && (!root.starts_with("lib")
+            || !root.ends_with(".so")
+            || root
+                .bytes()
+                .any(|byte| !byte.is_ascii_graphic() || matches!(byte, b'/' | b'\\' | b'\0')))
     {
         return Err("native root is not a direct Android SONAME".to_owned());
     }

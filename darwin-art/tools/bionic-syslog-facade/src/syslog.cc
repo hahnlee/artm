@@ -150,6 +150,13 @@ extern "C" void darwin_art_bionic_syslog_captured(
   errno = saved_errno;
 }
 
+extern "C" int darwin_art_bionic_setlogmask(int mask) {
+  static int current = 0xff;
+  const int previous = current;
+  if (mask != 0) current = mask;
+  return previous;
+}
+
 extern "C" DarwinArtBionicSyslogFunction darwin_art_bionic_syslog_resolve(
     const char* soname, const char* symbol, const char* version) {
   if (soname == nullptr || symbol == nullptr || version == nullptr ||
@@ -163,6 +170,10 @@ extern "C" DarwinArtBionicSyslogFunction darwin_art_bionic_syslog_resolve(
   if (strcmp(symbol, "openlog") == 0) {
     return reinterpret_cast<DarwinArtBionicSyslogFunction>(
         darwin_art_bionic_openlog);
+  }
+  if (strcmp(symbol, "setlogmask") == 0) {
+    return reinterpret_cast<DarwinArtBionicSyslogFunction>(
+        darwin_art_bionic_setlogmask);
   }
   if (strcmp(symbol, "syslog") == 0) {
     return reinterpret_cast<DarwinArtBionicSyslogFunction>(

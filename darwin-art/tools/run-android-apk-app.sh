@@ -53,6 +53,18 @@ native_root="$(sed -n 's/^apk-app-runtime: .* native_root=\([^ ]*\)$/\1/p' <<<"$
   echo "could not decode inspected APK metadata" >&2
   exit 65
 }
+if [[ -n "${DARWIN_ART_APK_ACTIVITY_OVERRIDE:-}" ]]; then
+  requested_activity="$DARWIN_ART_APK_ACTIVITY_OVERRIDE"
+  requested_entry="$(tr ',' '\n' <<<"$activities" | \
+    sed -n "s#^${requested_activity}=##p" | head -1)"
+  [[ -n "$requested_entry" ]] || {
+    echo "requested Activity is not declared by the APK: $requested_activity" >&2
+    exit 65
+  }
+  activity="$requested_activity"
+  descriptor="L$(tr '.' '/' <<<"$activity");"
+  theme="$requested_entry"
+fi
 
 runtime_abi="darwin-art-darwin-native-v1"
 install_root="${DARWIN_ART_APK_INSTALL_ROOT:-$root/_build/installed-apps}"
@@ -90,9 +102,14 @@ fi
 host="$root/target/debug/darwin-art-host"
 runtime="$root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib"
 core_oj="${DARWIN_ART_CORE_OJ_JAR:-$root/_prebuilt/android-16/bootclasspath/core-oj.jar}"
+if [[ -z "${DARWIN_ART_CORE_OJ_JAR:-}" && \
+      -f "$root/_build/android16-core-oj-compat/core-oj-compat.jar" ]]; then
+  core_oj="$root/_build/android16-core-oj-compat/core-oj-compat.jar"
+fi
 core_libart="$root/_prebuilt/android-16/bootclasspath/core-libart.jar"
-framework="$root/_prebuilt/android-16/bootclasspath/framework.jar"
-if [[ -f "$root/_build/android16-framework-compat/framework-compat.jar" ]]; then
+framework="${DARWIN_ART_FRAMEWORK_JAR:-$root/_prebuilt/android-16/bootclasspath/framework.jar}"
+if [[ -z "${DARWIN_ART_FRAMEWORK_JAR:-}" && \
+      -f "$root/_build/android16-framework-compat/framework-compat.jar" ]]; then
   # The detached host has no DeviceConfig service manager.  Use the merged
   # framework boot image whose no-service DeviceConfig seam preserves AOSP
   # default-valued feature flags during widget construction.
@@ -125,14 +142,17 @@ cleanup_system_root() {
   [[ -z "$icon_file" ]] || rm -f "$icon_file"
 }
 trap cleanup_system_root EXIT
-mkdir -p "$system_root/etc" "$system_root/fonts" "$system_root/framework"
-cp "$fonts_xml" "$system_root/etc/fonts.xml"
-cp "$roboto" "$system_root/fonts/Roboto-Regular.ttf"
-cp "$framework_res" "$system_root/framework/framework-res.apk"
-chmod 0400 "$system_root/etc/fonts.xml" "$system_root/fonts/Roboto-Regular.ttf" \
-  "$system_root/framework/framework-res.apk"
-chmod 0500 "$system_root" "$system_root/etc" "$system_root/fonts" \
-  "$system_root/framework"
+mkdir -p "$system_root/system/etc" "$system_root/system/fonts" \
+  "$system_root/system/framework"
+cp "$fonts_xml" "$system_root/system/etc/fonts.xml"
+cp "$roboto" "$system_root/system/fonts/Roboto-Regular.ttf"
+cp "$framework_res" "$system_root/system/framework/framework-res.apk"
+chmod 0400 "$system_root/system/etc/fonts.xml" \
+  "$system_root/system/fonts/Roboto-Regular.ttf" \
+  "$system_root/system/framework/framework-res.apk"
+chmod 0700 "$system_root"
+chmod 0500 "$system_root/system" "$system_root/system/etc" \
+  "$system_root/system/fonts" "$system_root/system/framework"
 
 icu_runtime="$root/_build/icu-runtime-adapters/runtime"
 export ANDROID_I18N_ROOT="$icu_runtime/i18n"
@@ -156,6 +176,20 @@ app_data_root="${DARWIN_ART_APP_DATA_ROOT:-$root/_build/app-data}"
 app_data_dir="$app_data_root/$package"
 mkdir -p "$app_data_dir"
 export DARWIN_ART_APK_APP_DATA_DIR="$app_data_dir"
+
+# Publish only this application's authorized external-storage directory inside
+# the sealed guest root. Native Android libraries must see Android paths rather
+# than arbitrary Darwin paths; the filesystem facade keeps the host authority
+# rooted at this temporary capability tree.
+external_storage_dir="$app_data_dir/external"
+guest_external_root="$system_root/storage/emulated/0"
+mkdir -p "$external_storage_dir" "$guest_external_root"
+if [[ -n "$(find "$external_storage_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+  cp -R "$external_storage_dir/." "$guest_external_root/"
+fi
+chmod -R u=rX,go= "$system_root/storage"
+chmod 0500 "$system_root"
+export DARWIN_ART_APK_APP_EXTERNAL_DIR="/storage/emulated/0/Android/data/$package/files"
 if [[ "$icon" != "none" ]]; then
   icon_file="$(mktemp "${TMPDIR:-/tmp}/darwin-art-apk-icon.XXXXXX")"
   unzip -p "$apk" "$icon" >"$icon_file"
@@ -169,8 +203,19 @@ export DARWIN_ART_APK_APP_RESOURCE_APK="$apk"
 export DARWIN_ART_FRAMEWORK_RES_APK="$framework_res"
 export DARWIN_ART_TEST_FONTS_XML="$fonts_xml"
 export DARWIN_ART_TEST_FONT="$roboto"
-export DARWIN_ART_ANDROID_SYSTEM_ROOT="$system_root"
+export DARWIN_ART_ANDROID_FILESYSTEM_ROOT="$system_root"
+export DARWIN_ART_ANDROID_SYSTEM_ROOT="$system_root/system"
 export DARWIN_ART_WINDOW_SCALE=2
+
+# Android Studio's emulator packages ANGLE's native Metal backend. Prefer an
+# explicit runtime bundle, then use the configured SDK copy for local builds.
+if [[ -z "${DARWIN_ART_ANGLE_DIRECTORY:-}" && -n "${ANDROID_HOME:-}" ]]; then
+  angle_candidate="$ANDROID_HOME/emulator/lib64/gles_angle"
+  if [[ -f "$angle_candidate/libEGL.dylib" &&
+        -f "$angle_candidate/libGLESv2.dylib" ]]; then
+    export DARWIN_ART_ANGLE_DIRECTORY="$angle_candidate"
+  fi
+fi
 
 if [[ "$native_count" != "0" ]]; then
   unwind_provider="$root/_build/android-unwind-provider/libdarwin_art_android_unwind.so"
@@ -186,6 +231,7 @@ if [[ "$native_count" != "0" ]]; then
     exit 69
   }
   export DARWIN_ART_APK_APP_NATIVE_PATH="$native_directory/$native_root"
+  export DARWIN_ART_APK_APP_NATIVE_DIR="$native_directory"
   darwin_directory="$native_cache_root/$apk_sha256/$runtime_abi"
   native_resolution="$("$native_resolver" "$apk_sha256" "$runtime_abi" \
     "$native_directory" "$darwin_directory")"
@@ -209,6 +255,7 @@ if [[ "$native_count" != "0" ]]; then
 else
   unset DARWIN_ART_ANDROID_UNWIND_PROVIDER
   unset DARWIN_ART_APK_APP_NATIVE_PATH
+  unset DARWIN_ART_APK_APP_NATIVE_DIR
   unset DARWIN_ART_APK_MANAGED_NATIVE_LOAD
   unset DARWIN_ART_APK_NATIVE_BACKEND
   unset DARWIN_ART_APK_DARWIN_DIRECTORY

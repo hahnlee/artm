@@ -11,6 +11,7 @@
 #include <string>
 
 #include "darwin_runtime_adapters_internal.h"
+#include "darwin_angle_egl.h"
 
 extern "C" void AndroidBitmap_getInfo(void) __attribute__((weak_import));
 extern "C" void AndroidBitmap_lockPixels(void) __attribute__((weak_import));
@@ -108,12 +109,42 @@ DarwinArtElfResolveStatus ResolvePlatformProvider(
   };
   if (NeedsLibrary(request, "libGLESv2.so") &&
       std::strncmp(request->symbol, "gl", 2) == 0) {
-    consider(OpenAngleProvider("libGLESv2.dylib",
-                               &library->gles_provider, error));
+    const bool debug_angle = std::getenv("DARWIN_ART_DEBUG_ANGLE") != nullptr;
+    if (debug_angle && std::strcmp(request->symbol, "glTexImage2D") == 0) {
+      consider_address(reinterpret_cast<void*>(&darwin_art_android_glTexImage2D));
+    } else if (debug_angle &&
+               std::strcmp(request->symbol, "glTexSubImage2D") == 0) {
+      consider_address(
+          reinterpret_cast<void*>(&darwin_art_android_glTexSubImage2D));
+    } else if (debug_angle &&
+               std::strcmp(request->symbol, "glDrawArrays") == 0) {
+      consider_address(reinterpret_cast<void*>(&darwin_art_android_glDrawArrays));
+    } else if (debug_angle &&
+               std::strcmp(request->symbol, "glDrawElements") == 0) {
+      consider_address(
+          reinterpret_cast<void*>(&darwin_art_android_glDrawElements));
+    } else if (debug_angle &&
+               std::strcmp(request->symbol, "glUseProgram") == 0) {
+      consider_address(reinterpret_cast<void*>(&darwin_art_android_glUseProgram));
+    } else {
+      consider(OpenAngleProvider("libGLESv2.dylib",
+                                 &library->gles_provider, error));
+    }
   }
   if (NeedsLibrary(request, "libEGL.so") &&
       std::strncmp(request->symbol, "egl", 3) == 0) {
-    consider(OpenAngleProvider("libEGL.dylib", &library->egl_provider, error));
+    if (std::strcmp(request->symbol, "eglCreateWindowSurface") == 0) {
+      consider_address(reinterpret_cast<void*>(
+          &darwin_art_android_eglCreateWindowSurface));
+    } else if (std::strcmp(request->symbol, "eglSwapBuffers") == 0) {
+      consider_address(
+          reinterpret_cast<void*>(&darwin_art_android_eglSwapBuffers));
+    } else if (std::strcmp(request->symbol, "eglDestroySurface") == 0) {
+      consider_address(
+          reinterpret_cast<void*>(&darwin_art_android_eglDestroySurface));
+    } else {
+      consider(OpenAngleProvider("libEGL.dylib", &library->egl_provider, error));
+    }
   }
   const bool zlib_symbol = std::strncmp(request->symbol, "inflate", 7) == 0 ||
                            std::strncmp(request->symbol, "deflate", 7) == 0 ||
@@ -233,6 +264,9 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     SetResolverError(error, "Bionic provider namespace is unavailable");
     return DARWIN_ART_ELF_RESOLVE_ERROR;
   }
+  const DarwinArtElfResolveStatus cached =
+      ResolveCachedElfProvider(request, out_address, error);
+  if (cached != DARWIN_ART_ELF_RESOLVE_NOT_FOUND) return cached;
   if (request->version_soname != nullptr && request->version_name != nullptr &&
       std::strcmp(request->version_soname, "libc.so") == 0 &&
       std::strcmp(request->version_name, "LIBC_R") == 0) {

@@ -215,7 +215,7 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
           ? OpenSelectedDarwinArtifact(resolved_path, &selected_darwin, error_msg)
           : nullptr;
   if (selected_darwin) return selected_handle;
-  const char* providers[] = {
+  const char* builtin_providers[] = {
       kDarwinArtElfJniHostProviderSoname, "libc.so",       "libdl.so",
       "liblog.so",                       "libm.so",       "libEGL.so",
       "libGLESv2.so",                    "libjnigraphics.so", "libz.so"};
@@ -229,6 +229,14 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
   std::vector<uint8_t> root_component;
   ScopedFd trusted_directory;
   if (SplitTrustedLibraryPath(resolved_path, &parent_path, &root_component)) {
+    std::vector<std::string> cached_sonames = SnapshotCachedElfSonames();
+    std::vector<const char*> providers(std::begin(builtin_providers),
+                                       std::end(builtin_providers));
+    const std::string requested_component(root_component.begin(),
+                                          root_component.end());
+    for (const std::string& soname : cached_sonames) {
+      if (soname != requested_component) providers.push_back(soname.c_str());
+    }
     ScopedFd opened_directory(open(parent_path.c_str(),
                                    O_RDONLY | O_DIRECTORY | O_CLOEXEC |
                                        O_NOFOLLOW));
@@ -237,7 +245,7 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
     } else {
       discovery_status = darwin_art_elf_discover_sibling_graph(
           opened_directory.get(), root_component.data(), root_component.size(),
-          providers, std::size(providers), &root_is_elf, &discovered_raw,
+          providers.data(), providers.size(), &root_is_elf, &discovered_raw,
           &discovery_error);
       if (discovery_status == DARWIN_ART_ELF_OK) {
         trusted_directory = std::move(opened_directory);
@@ -297,8 +305,15 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
+    std::vector<std::string> cached_sonames = SnapshotCachedElfSonames();
+    std::vector<const char*> graph_providers(std::begin(builtin_providers),
+                                             std::end(builtin_providers));
+    for (const std::string& soname : cached_sonames) {
+      if (soname != root_soname) graph_providers.push_back(soname.c_str());
+    }
     library->image_registry = darwin_art_image_registry::Create(
-        root_soname, sources, source_count, providers, std::size(providers), &error);
+        root_soname, sources, source_count, graph_providers.data(),
+        graph_providers.size(), &error);
     if (library->image_registry == nullptr) {
       SetNativeLoaderError(error_msg,
                            "Android ELF image registry setup failed: " + error);
@@ -357,7 +372,25 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
-    if (!darwin_art::providers::acquire_filesystem(trusted_directory.get(), &error)) {
+    // The ELF sibling directory is authority for native-library discovery only.
+    // Guest filesystem access must be rooted at the separately authorized
+    // Android filesystem tree; otherwise an app can see its .so directory but
+    // cannot resolve normal paths such as /system or /storage/emulated/0.
+    ScopedFd filesystem_directory;
+    const char* filesystem_root =
+        std::getenv("DARWIN_ART_ANDROID_FILESYSTEM_ROOT");
+    if (filesystem_root == nullptr || filesystem_root[0] == '\0') {
+      filesystem_root = std::getenv("DARWIN_ART_ANDROID_SYSTEM_ROOT");
+    }
+    if (filesystem_root != nullptr && filesystem_root[0] == '/') {
+      filesystem_directory = ScopedFd(open(filesystem_root,
+                                           O_RDONLY | O_DIRECTORY | O_CLOEXEC |
+                                               O_NOFOLLOW));
+    }
+    const int filesystem_fd = filesystem_directory.get() >= 0
+                                  ? filesystem_directory.get()
+                                  : trusted_directory.get();
+    if (!darwin_art::providers::acquire_filesystem(filesystem_fd, &error)) {
       SetNativeLoaderError(error_msg, "Bionic filesystem setup failed: " + error);
       TeardownProviderNamespace(library.get());
       return nullptr;
@@ -455,7 +488,8 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
     std::array<char, 1024> error_storage{};
     DarwinArtElfErrorBuffer error_buffer{error_storage.data(), error_storage.size(), 0};
     status = darwin_art_elf_graph_load_with_lifecycle(
-        root_soname, sources, source_count, providers, std::size(providers),
+        root_soname, sources, source_count, graph_providers.data(),
+        graph_providers.size(),
         &options, &lifecycle, &library->graph, &error_buffer);
     if (status != DARWIN_ART_ELF_OK) {
       SetNativeLoaderError(error_msg,
@@ -468,6 +502,11 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
     if (!AttachNativeOwner(library.get(), kNativeOwnerGraph, library->graph,
                            &DropRuntimeElfGraph, &error)) {
       SetNativeLoaderError(error_msg, "Rust native owner graph slot failed: " + error);
+      TeardownProviderNamespace(library.get());
+      return nullptr;
+    }
+    if (!RegisterCachedElfGraph(root_soname, library->graph, &error)) {
+      SetNativeLoaderError(error_msg, "Android ELF namespace cache failed: " + error);
       TeardownProviderNamespace(library.get());
       return nullptr;
     }

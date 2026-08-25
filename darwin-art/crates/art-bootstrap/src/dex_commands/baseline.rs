@@ -208,7 +208,7 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=27 methods=623 \
+    let expected = "AOSP DEX: verified=yes version=35 classes=28 methods=669 \
                     class[0]=Landroid/content/pm/ProbeShortcutManager; \
                     class[1]=Landroid/media/ProbeAudioManager; \
                     class[2]=Landroid/os/ProbeUserManager; \
@@ -223,19 +223,20 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
                     class[11]=Ldev/darwinart/probe/ProbeContentResolver; \
                     class[12]=Ldev/darwinart/probe/ProbeContentRoot; \
                     class[13]=Ldev/darwinart/probe/ProbeContext$$ExternalSyntheticLambda0; \
-                    class[14]=Ldev/darwinart/probe/ProbeContext$CompatibilityHandler; \
-                    class[15]=Ldev/darwinart/probe/ProbeContext$DefaultServiceHandler; \
-                    class[16]=Ldev/darwinart/probe/ProbeContext$LocalServiceRecord; \
-                    class[17]=Ldev/darwinart/probe/ProbeContext$MainExecutor; \
-                    class[18]=Ldev/darwinart/probe/ProbeContext; \
-                    class[19]=Ldev/darwinart/probe/ProbeHostDocumentProvider$Document; \
-                    class[20]=Ldev/darwinart/probe/ProbeHostDocumentProvider; \
-                    class[21]=Ldev/darwinart/probe/ProbePackageManager; \
-                    class[22]=Ldev/darwinart/probe/ProbeResources; \
-                    class[23]=Ldev/darwinart/probe/ProbeSharedPreferences$EditorImpl; \
-                    class[24]=Ldev/darwinart/probe/ProbeSharedPreferences; \
-                    class[25]=Ldev/darwinart/probe/ProbeView; \
-                    class[26]=Ldev/darwinart/probe/ProbeXmlResourceParser;";
+                    class[14]=Ldev/darwinart/probe/ProbeContext$$ExternalSyntheticLambda1; \
+                    class[15]=Ldev/darwinart/probe/ProbeContext$CompatibilityHandler; \
+                    class[16]=Ldev/darwinart/probe/ProbeContext$DefaultServiceHandler; \
+                    class[17]=Ldev/darwinart/probe/ProbeContext$LocalServiceRecord; \
+                    class[18]=Ldev/darwinart/probe/ProbeContext$MainExecutor; \
+                    class[19]=Ldev/darwinart/probe/ProbeContext; \
+                    class[20]=Ldev/darwinart/probe/ProbeHostDocumentProvider$Document; \
+                    class[21]=Ldev/darwinart/probe/ProbeHostDocumentProvider; \
+                    class[22]=Ldev/darwinart/probe/ProbePackageManager; \
+                    class[23]=Ldev/darwinart/probe/ProbeResources; \
+                    class[24]=Ldev/darwinart/probe/ProbeSharedPreferences$EditorImpl; \
+                    class[25]=Ldev/darwinart/probe/ProbeSharedPreferences; \
+                    class[26]=Ldev/darwinart/probe/ProbeView; \
+                    class[27]=Ldev/darwinart/probe/ProbeXmlResourceParser;";
     if output.trim() != expected {
         return Err(format!("unexpected DEX probe output: {output:?}").into());
     }

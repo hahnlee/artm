@@ -214,6 +214,24 @@ int64_t darwin_art_bionic_mktime(struct tm* value) {
   return value == NULL ? -1 : (int64_t)mktime(value);
 }
 
+int64_t darwin_art_bionic_timegm(struct tm* value) {
+  return value == NULL ? -1 : (int64_t)timegm(value);
+}
+
+char* darwin_art_bionic_asctime_r(const struct tm* value, char* buffer) {
+  return value == NULL || buffer == NULL ? NULL : asctime_r(value, buffer);
+}
+
+double darwin_art_bionic_difftime(int64_t left, int64_t right) {
+  return difftime((time_t)left, (time_t)right);
+}
+
+int64_t darwin_art_bionic_clock(void) { return (int64_t)clock(); }
+unsigned darwin_art_bionic_sleep(unsigned seconds) { return sleep(seconds); }
+int darwin_art_bionic_usleep(unsigned microseconds) {
+  return usleep(microseconds);
+}
+
 long darwin_art_bionic_sysconf(int android_name) {
   const int saved_host_errno = errno;
   int host_name;
@@ -258,8 +276,11 @@ typedef struct Binding {
 } Binding;
 
 static const Binding kBindings[] = {
+    {"asctime_r", (DarwinArtBionicTimeFunction)darwin_art_bionic_asctime_r},
+    {"clock", (DarwinArtBionicTimeFunction)darwin_art_bionic_clock},
     {"clock_gettime", (DarwinArtBionicTimeFunction)darwin_art_bionic_clock_gettime},
     {"ctime", (DarwinArtBionicTimeFunction)darwin_art_bionic_ctime},
+    {"difftime", (DarwinArtBionicTimeFunction)darwin_art_bionic_difftime},
     {"gettimeofday", (DarwinArtBionicTimeFunction)darwin_art_bionic_gettimeofday},
     {"gmtime", (DarwinArtBionicTimeFunction)darwin_art_bionic_gmtime},
     {"gmtime_r", (DarwinArtBionicTimeFunction)darwin_art_bionic_gmtime_r},
@@ -267,8 +288,11 @@ static const Binding kBindings[] = {
     {"localtime_r", (DarwinArtBionicTimeFunction)darwin_art_bionic_localtime_r},
     {"mktime", (DarwinArtBionicTimeFunction)darwin_art_bionic_mktime},
     {"nanosleep", (DarwinArtBionicTimeFunction)darwin_art_bionic_nanosleep},
+    {"sleep", (DarwinArtBionicTimeFunction)darwin_art_bionic_sleep},
     {"sysconf", (DarwinArtBionicTimeFunction)darwin_art_bionic_sysconf},
     {"time", (DarwinArtBionicTimeFunction)darwin_art_bionic_time},
+    {"timegm", (DarwinArtBionicTimeFunction)darwin_art_bionic_timegm},
+    {"usleep", (DarwinArtBionicTimeFunction)darwin_art_bionic_usleep},
 };
 
 DarwinArtBionicTimeFunction darwin_art_bionic_time_resolve(

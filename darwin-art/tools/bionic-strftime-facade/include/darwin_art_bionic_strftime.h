@@ -43,6 +43,9 @@ size_t darwin_art_bionic_strftime_l(char* destination, size_t capacity,
                                     const char* format,
                                     const DarwinArtAndroidTm* broken_down,
                                     void* locale);
+size_t darwin_art_bionic_strftime(char* destination, size_t capacity,
+                                  const char* format,
+                                  const DarwinArtAndroidTm* broken_down);
 
 typedef void (*DarwinArtBionicStrftimeFunction)(void);
 DarwinArtBionicStrftimeFunction darwin_art_bionic_strftime_resolve(

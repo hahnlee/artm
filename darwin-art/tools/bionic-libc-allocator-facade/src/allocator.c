@@ -144,6 +144,27 @@ char* darwin_art_bionic_strdup(const char* source) {
   return result;
 }
 
+char* darwin_art_bionic_strndup(const char* source, size_t maximum) {
+  if (source == NULL) return NULL;
+  size_t length = 0;
+  while (length < maximum && source[length] != '\0') ++length;
+  char* result = (char*)darwin_art_bionic_malloc(length + 1);
+  if (result == NULL) return NULL;
+  for (size_t index = 0; index < length; ++index) result[index] = source[index];
+  result[length] = '\0';
+  return result;
+}
+
+extern void darwin_art_bionic_errno_store(int32_t android_errno);
+
+char* darwin_art_bionic_tempnam_unsupported(const char* directory,
+                                            const char* prefix) {
+  (void)directory;
+  (void)prefix;
+  darwin_art_bionic_errno_store(38);
+  return NULL;
+}
+
 static int NameCompare(const char* left, const char* right) {
   while (*left == *right && *left != '\0') {
     ++left;
@@ -195,6 +216,13 @@ static const DarwinArtBionicAllocatorBinding kBindings[] = {
     {"strdup", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_strdup,
      DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
          DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
+         DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM},
+    {"strndup", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_strndup,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
+         DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
+         DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM},
+    {"tempnam", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_tempnam_unsupported,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
          DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM},
 };
 
