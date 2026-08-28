@@ -96,6 +96,7 @@ constexpr int kAndroidFDupfdCloexec = 1030;
 constexpr int kAndroidFdCloexec = 1;
 constexpr int kAndroidOAppend = 1024;
 constexpr int kAndroidONonblock = 2048;
+constexpr uint32_t kAndroidFionread = 0x541b;
 constexpr uint32_t kAndroidFionbio = 0x5421;
 
 struct AndroidSockaddrIn {
@@ -645,10 +646,14 @@ intptr_t OwnerRead(void *, uint64_t object, void *bytes, size_t count,
   auto *socket = reinterpret_cast<HostFdObject *>(object);
   const ssize_t result = recv(socket->fd, bytes, count, 0);
   if (SocketDebugEnabled()) {
+    uint32_t control = 0;
+    if (result == sizeof(control))
+      std::memcpy(&control, bytes, sizeof(control));
     std::fprintf(stderr,
-                 "DARWIN socket read host_fd=%d count=%zu result=%zd "
-                 "host_errno=%d android_errno=%d\n",
-                 socket->fd, count, result, result < 0 ? errno : 0,
+                 "DARWIN socket read pid=%d host_fd=%d count=%zu result=%zd "
+                 "control=%u host_errno=%d android_errno=%d\n",
+                 getpid(), socket->fd, count, result, control,
+                 result < 0 ? errno : 0,
                  result < 0 ? AndroidErrno(errno) : 0);
   }
   *android_errno = result < 0 ? AndroidErrno(errno) : 0;
@@ -660,10 +665,15 @@ intptr_t OwnerWrite(void *, uint64_t object, const void *bytes, size_t count,
   auto *socket = reinterpret_cast<HostFdObject *>(object);
   const ssize_t result = send(socket->fd, bytes, count, 0);
   if (SocketDebugEnabled()) {
+    uint32_t control = 0;
+    if (count == sizeof(control))
+      std::memcpy(&control, bytes, sizeof(control));
     std::fprintf(
         stderr,
-        "DARWIN socket write host_fd=%d count=%zu result=%zd host_errno=%d\n",
-        socket->fd, count, result, result < 0 ? errno : 0);
+        "DARWIN socket write pid=%d host_fd=%d count=%zu result=%zd "
+        "control=%u host_errno=%d\n",
+        getpid(), socket->fd, count, result, control,
+        result < 0 ? errno : 0);
   }
   *android_errno = result < 0 ? AndroidErrno(errno) : 0;
   return result;
@@ -870,6 +880,15 @@ int OwnerIoctl(void *context, uint64_t object, uint64_t request, void *argument,
                int *android_errno) {
   auto *process = static_cast<Process *>(context);
   auto *descriptor = reinterpret_cast<HostFdObject *>(object);
+  if (request == kAndroidFionread) {
+    if (argument == nullptr) {
+      *android_errno = 14;
+      return -1;
+    }
+    const int result = ioctl(descriptor->fd, FIONREAD, argument);
+    *android_errno = result < 0 ? AndroidErrno(errno) : 0;
+    return result;
+  }
   if (request == kSyncIocMerge && argument != nullptr && process != nullptr) {
     auto *merge = static_cast<AndroidSyncMergeData *>(argument);
     if (merge->flags != 0 || merge->pad != 0) {

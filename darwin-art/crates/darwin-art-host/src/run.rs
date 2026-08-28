@@ -104,12 +104,14 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 Ok(inputs) => inputs,
                 Err(error) => {
                     drop(network_lease);
+                    let _ = service_processes.shutdown_all();
                     let _ = shutdown_guard.shutdown();
                     return Err(error);
                 }
             };
             let Some(engine) = runtime.engine() else {
                 drop(network_lease);
+                let _ = service_processes.shutdown_all();
                 let _ = shutdown_guard.shutdown();
                 return Err(HostError::RuntimeFailed(-1));
             };
@@ -117,6 +119,7 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 Ok(result) => result,
                 Err(error) => {
                     drop(network_lease);
+                    let _ = service_processes.shutdown_all();
                     let _ = shutdown_guard.shutdown();
                     return Err(HostError::RuntimeFailed(error));
                 }
@@ -155,10 +158,25 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 options,
                 graphics_attached,
             );
-            return match (outcome, shutdown_guard.shutdown()) {
-                (Ok(outcome), Ok(())) => Ok(outcome),
-                (Err(error), Ok(())) => Err(error),
-                (_, Err(error)) => Err(error),
+            let service_cleanup = service_processes
+                .shutdown_all()
+                .map_err(HostError::HostService);
+            if options.terminate_android_process {
+                let status = match (&outcome, &service_cleanup) {
+                    (Ok(_), Ok(())) => 0,
+                    (Err(error), _) | (_, Err(error)) => {
+                        eprintln!("darwin-art-host: {error}");
+                        1
+                    }
+                };
+                std::process::exit(status);
+            }
+            let runtime_cleanup = shutdown_guard.shutdown();
+            return match (outcome, service_cleanup, runtime_cleanup) {
+                (Ok(outcome), Ok(()), Ok(())) => Ok(outcome),
+                (Err(error), Ok(()), Ok(())) => Err(error),
+                (_, Err(error), Ok(())) => Err(error),
+                (_, _, Err(error)) => Err(error),
             };
         }
 
@@ -183,6 +201,12 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             frames_presented: 0,
             last_frame: frame_host.last_frame,
         };
+        service_processes
+            .shutdown_all()
+            .map_err(HostError::HostService)?;
+        if options.terminate_android_process {
+            std::process::exit(0);
+        }
         shutdown_guard.shutdown()?;
         Ok(outcome)
     }

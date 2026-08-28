@@ -201,6 +201,26 @@ int main(int argc, char **argv) {
             darwin_art_bionic_socket_broker_close(nonblocking_pair[1]) == 0,
         "FIONBIO clears shared broker socket status");
 
+  int32_t readable_pair[2]{-1, -1};
+  const uint32_t readable_value = 0x12345678;
+  int available = -1;
+  ioctl_handled = 0;
+  ioctl_result = -1;
+  ioctl_errno = 0;
+  Check(darwin_art_bionic_socket_broker_socketpair(1, 1, 0, readable_pair) ==
+                0 &&
+            darwin_art_bionic_socket_broker_write(
+                readable_pair[0], &readable_value, sizeof(readable_value)) ==
+                static_cast<intptr_t>(sizeof(readable_value)) &&
+            darwin_art_bionic_socket_broker_ioctl_dispatch(
+                readable_pair[1], 0x541b, &available, &ioctl_handled,
+                &ioctl_result, &ioctl_errno) == 0 &&
+            ioctl_handled == 1 && ioctl_result == 0 && ioctl_errno == 0 &&
+            available == static_cast<int>(sizeof(readable_value)) &&
+            darwin_art_bionic_socket_broker_close(readable_pair[0]) == 0 &&
+            darwin_art_bionic_socket_broker_close(readable_pair[1]) == 0,
+        "FIONREAD reports bytes queued on broker socket");
+
   const int listener = socket(AF_INET, SOCK_STREAM, 0);
   Check(listener >= 0, "create host listener");
   sockaddr_in address{};

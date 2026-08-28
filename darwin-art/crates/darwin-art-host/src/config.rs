@@ -31,6 +31,9 @@ pub struct RunOptions {
     pub heap_initial_bytes: u64,
     pub heap_maximum_bytes: u64,
     pub visible_seconds: f64,
+    /// Android app processes are one-shot zygote children and are not reused
+    /// after destroying their JavaVM.
+    pub terminate_android_process: bool,
 }
 
 const MAX_VISIBLE_SECONDS: f64 = 86_400.0;

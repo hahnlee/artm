@@ -47,6 +47,7 @@ fn visible_duration_matches_surface_contract() {
         heap_initial_bytes: 0,
         heap_maximum_bytes: 0,
         visible_seconds: 86_400.001,
+        terminate_android_process: false,
     };
     assert!(matches!(
         run(&options),

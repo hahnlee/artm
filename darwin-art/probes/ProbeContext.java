@@ -112,6 +112,7 @@ public final class ProbeContext extends ContextWrapper {
     private final ShortcutManager shortcutManager;
     private final UserManager userManager;
     private final IBinder activityToken = new Binder();
+    private Object mediaRouter;
     private Object mediaSessionManager;
     private Object accountManager;
     private Object cameraManager;
@@ -1117,6 +1118,12 @@ public final class ProbeContext extends ContextWrapper {
         if (AUDIO_SERVICE.equals(name)) {
             return new ProbeAudioManager(this);
         }
+        if (MEDIA_ROUTER_SERVICE.equals(name)) {
+            if (mediaRouter == null) {
+                mediaRouter = construct("android.media.MediaRouter");
+            }
+            return mediaRouter;
+        }
         if (MEDIA_SESSION_SERVICE.equals(name)) {
             return constructMediaSessionManager();
         }
@@ -1231,6 +1238,9 @@ public final class ProbeContext extends ContextWrapper {
         }
         if ("android.media.AudioManager".equals(className)) {
             return AUDIO_SERVICE;
+        }
+        if ("android.media.MediaRouter".equals(className)) {
+            return MEDIA_ROUTER_SERVICE;
         }
         if ("android.media.session.MediaSessionManager".equals(className)) {
             return MEDIA_SESSION_SERVICE;

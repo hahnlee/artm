@@ -1146,6 +1146,25 @@ public final class DarwinServiceBridge {
                     new MediaSessionInterfaceHandler(
                             "android.media.session.ISessionManager", null);
             Binder mediaSessionBinder = mediaSessionManagerHandler.binder;
+            // The legacy framework MediaRouter still obtains its coordination
+            // endpoint directly from ServiceManager.  Publish a typed service
+            // that represents this host's single local audio/video route.
+            // MediaRouter itself creates and owns that default route; null
+            // state here means there are no additional remote routes.
+            Binder mediaRouterBinder = new Binder();
+            Class<?> mediaRouterInterface = Class.forName(
+                    "android.media.IMediaRouterService");
+            Object mediaRouterService = Proxy.newProxyInstance(
+                    mediaRouterInterface.getClassLoader(),
+                    new Class<?>[] {mediaRouterInterface},
+                    (proxy, method, args) -> {
+                        if ("asBinder".equals(method.getName())) {
+                            return mediaRouterBinder;
+                        }
+                        return defaultValue(method.getReturnType());
+                    });
+            attach(mediaRouterBinder, mediaRouterService,
+                    "android.media.IMediaRouterService");
             MediaSessionInterfaceHandler trustManagerHandler =
                     new MediaSessionInterfaceHandler(
                             "android.app.trust.ITrustManager", null);
@@ -1202,6 +1221,8 @@ public final class DarwinServiceBridge {
                     metadataClass, serviceClass, storageBinder);
             Object mediaSessionServiceValue = serviceValue(
                     metadataClass, serviceClass, mediaSessionBinder);
+            Object mediaRouterServiceValue = serviceValue(
+                    metadataClass, serviceClass, mediaRouterBinder);
             Object trustServiceValue = serviceValue(
                     metadataClass, serviceClass, trustBinder);
             Object missingServiceValue = serviceValue(
@@ -1224,7 +1245,8 @@ public final class DarwinServiceBridge {
                             voiceInteractionServiceValue, searchServiceValue,
                             clipboardServiceValue, uriGrantsServiceValue,
                             accountServiceValue, storageServiceValue,
-                            mediaSessionServiceValue, trustServiceValue,
+                            mediaSessionServiceValue, mediaRouterServiceValue,
+                            trustServiceValue,
                             missingServiceValue));
             Binder context = new Binder();
             attach(context, manager, "android.os.IServiceManager");
@@ -1342,6 +1364,7 @@ public final class DarwinServiceBridge {
         private final Object accountService;
         private final Object storageService;
         private final Object mediaSessionService;
+        private final Object mediaRouterService;
         private final Object trustService;
         private final Object missingService;
 
@@ -1359,7 +1382,8 @@ public final class DarwinServiceBridge {
                 Object voiceInteractionService, Object searchService,
                 Object clipboardService, Object uriGrantsService,
                 Object accountService, Object storageService,
-                Object mediaSessionService, Object trustService,
+                Object mediaSessionService, Object mediaRouterService,
+                Object trustService,
                 Object missingService) {
             this.displayService = displayService;
             this.activityManagerService = activityManagerService;
@@ -1386,6 +1410,7 @@ public final class DarwinServiceBridge {
             this.accountService = accountService;
             this.storageService = storageService;
             this.mediaSessionService = mediaSessionService;
+            this.mediaRouterService = mediaRouterService;
             this.trustService = trustService;
             this.missingService = missingService;
         }
@@ -1432,6 +1457,7 @@ public final class DarwinServiceBridge {
                 }
                 if ("mount".equals(args[0])) return storageService;
                 if ("media_session".equals(args[0])) return mediaSessionService;
+                if ("media_router".equals(args[0])) return mediaRouterService;
                 if ("trust".equals(args[0])) return trustService;
                 return missingService;
             }
@@ -2093,6 +2119,21 @@ public final class DarwinServiceBridge {
             if (method.getName().equals("getDisplayInfo")) {
                 Log.i("DarwinServiceBridge", "display getDisplayInfo");
                 return displayInfo();
+            }
+            if (method.getName().equals("getWifiDisplayStatus")) {
+                // Android always returns a status object, including on
+                // devices without Wi-Fi display hardware. MediaRouter reads
+                // it unconditionally while creating the local default route.
+                try {
+                    Class<?> status = Class.forName(
+                            "android.hardware.display.WifiDisplayStatus");
+                    Constructor<?> constructor = status.getDeclaredConstructor();
+                    constructor.setAccessible(true);
+                    return constructor.newInstance();
+                } catch (ReflectiveOperationException error) {
+                    throw new IllegalStateException(
+                            "could not construct Wi-Fi display status", error);
+                }
             }
             return defaultValue(method.getReturnType());
         }

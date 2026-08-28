@@ -128,20 +128,41 @@ impl ServiceProcessManager {
         child.wait().map_err(|error| error.to_string())?;
         Ok(())
     }
+
+    pub(crate) fn shutdown_all(&mut self) -> Result<(), String> {
+        let children = self
+            .children
+            .get_mut()
+            .map_err(|_| "service child table poisoned".to_owned())?;
+        let mut first_error = None;
+        for (_, mut managed) in children.drain() {
+            match managed.child.try_wait() {
+                Ok(Some(_)) => continue,
+                Ok(None) => {
+                    if let Err(error) = managed.child.kill()
+                        && first_error.is_none()
+                    {
+                        first_error = Some(error.to_string());
+                    }
+                }
+                Err(error) if first_error.is_none() => {
+                    first_error = Some(error.to_string());
+                }
+                Err(_) => {}
+            }
+            if let Err(error) = managed.child.wait()
+                && first_error.is_none()
+            {
+                first_error = Some(error.to_string());
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
 }
 
 impl Drop for ServiceProcessManager {
     fn drop(&mut self) {
-        let Ok(children) = self.children.get_mut() else {
-            return;
-        };
-        for managed in children.values_mut() {
-            if managed.child.try_wait().ok().flatten().is_none() {
-                let _ = managed.child.kill();
-            }
-            let _ = managed.child.wait();
-        }
-        children.clear();
+        let _ = self.shutdown_all();
     }
 }
 
@@ -270,6 +291,7 @@ pub fn run_service_child(control_fd: RawFd) -> Result<(), String> {
         heap_initial_bytes: 64 * 1024 * 1024,
         heap_maximum_bytes: 256 * 1024 * 1024,
         visible_seconds: 0.0,
+        terminate_android_process: true,
     };
     crate::run(&options)
         .map(|_| ())

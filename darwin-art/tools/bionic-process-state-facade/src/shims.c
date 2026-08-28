@@ -1,5 +1,6 @@
 #include "darwin_art_bionic_process_state.h"
 
+#include <dlfcn.h>
 #include <errno.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
@@ -307,7 +308,42 @@ static int AndroidSignal(int host_signal) {
 
 static _Atomic(uintptr_t) gAndroidSignalHandlers[NSIG];
 static _Atomic(int) gAndroidSignalFlags[NSIG];
+static _Atomic(uint64_t) gAndroidSignalMasks[NSIG];
+static _Atomic(uintptr_t) gAndroidSignalRestorers[NSIG];
 static _Atomic(uintptr_t) gJitFaultRecovery;
+
+typedef int (*DarwinArtSigchainOwnsSignal)(int signal_number);
+typedef void (*DarwinArtEnsureFrontOfChain)(int signal_number);
+
+static int RecoverAndroidReadableSystemRegister(ucontext_t* context) {
+#if defined(__aarch64__)
+  if (context == NULL || context->uc_mcontext == NULL) return 0;
+  _STRUCT_ARM_THREAD_STATE64* state = &context->uc_mcontext->__ss;
+  const uint32_t* instruction_pointer =
+      (const uint32_t*)(uintptr_t)state->__pc;
+  const uint32_t instruction = *instruction_pointer;
+  // Linux exposes CTR_EL0 to EL0. Darwin traps the same architectural read,
+  // even though Android libraries use it to select cache-maintenance code.
+  // Report 64-byte I/D cache lines with DIC+IDC: translated code and Apple's
+  // coherent unified cache do not require guest dc cvau/ic ivau operations.
+  if ((instruction & UINT32_C(0xffffffe0)) == UINT32_C(0xd53b0020)) {
+    const unsigned destination = instruction & 31;
+    const uint64_t ctr_el0 = UINT64_C(0x30040004);
+    if (destination < 29) {
+      state->__x[destination] = ctr_el0;
+    } else if (destination == 29) {
+      state->__fp = ctr_el0;
+    } else if (destination == 30) {
+      state->__lr = ctr_el0;
+    }
+    state->__pc += sizeof(instruction);
+    return 1;
+  }
+#else
+  (void)context;
+#endif
+  return 0;
+}
 
 void darwin_art_bionic_process_state_bind_jit_fault_recovery(
     DarwinArtBionicJitFaultRecovery recovery) {
@@ -323,6 +359,10 @@ static void DarwinArtAndroidSignalTrampoline(int host_signal,
       &gAndroidSignalHandlers[host_signal], memory_order_acquire);
   if (address == (uintptr_t)SIG_DFL || address == (uintptr_t)SIG_IGN) return;
   const int android_signal = AndroidSignal(host_signal);
+  if (android_signal == 4 &&
+      RecoverAndroidReadableSystemRegister((ucontext_t*)host_context)) {
+    return;
+  }
   const int flags = atomic_load_explicit(&gAndroidSignalFlags[host_signal],
                                          memory_order_relaxed);
 #if defined(__aarch64__)
@@ -804,6 +844,20 @@ int darwin_art_bionic_sigaction(int signal_number,
   struct sigaction* host_action_pointer = NULL;
   uintptr_t previous_guest_handler = atomic_load_explicit(
       &gAndroidSignalHandlers[host_signal], memory_order_acquire);
+  const int previous_guest_flags = atomic_load_explicit(
+      &gAndroidSignalFlags[host_signal], memory_order_relaxed);
+  const uint64_t previous_guest_mask = atomic_load_explicit(
+      &gAndroidSignalMasks[host_signal], memory_order_relaxed);
+  const uintptr_t previous_guest_restorer = atomic_load_explicit(
+      &gAndroidSignalRestorers[host_signal], memory_order_relaxed);
+  DarwinArtSigchainOwnsSignal sigchain_owns_signal =
+      (DarwinArtSigchainOwnsSignal)dlsym(RTLD_DEFAULT,
+                                         "darwin_art_sigchain_owns_signal");
+  DarwinArtEnsureFrontOfChain ensure_front_of_chain =
+      (DarwinArtEnsureFrontOfChain)dlsym(RTLD_DEFAULT,
+                                         "EnsureFrontOfChain");
+  const int sigchain_owned = sigchain_owns_signal != NULL &&
+                             sigchain_owns_signal(host_signal) != 0;
   if (action != NULL) {
     memset(&host_action, 0, sizeof(host_action));
     if (action->handler == SIG_DFL || action->handler == SIG_IGN) {
@@ -826,19 +880,36 @@ int darwin_art_bionic_sigaction(int signal_number,
                           (uintptr_t)action->handler, memory_order_release);
     atomic_store_explicit(&gAndroidSignalFlags[host_signal], action->flags,
                           memory_order_relaxed);
+    atomic_store_explicit(&gAndroidSignalMasks[host_signal], action->mask,
+                          memory_order_relaxed);
+    atomic_store_explicit(&gAndroidSignalRestorers[host_signal],
+                          (uintptr_t)action->restorer, memory_order_relaxed);
+    if (sigchain_owned && ensure_front_of_chain != NULL)
+      ensure_front_of_chain(host_signal);
   }
   if (old_action != NULL) {
     memset(old_action, 0, sizeof(*old_action));
-    old_action->handler =
-        host_old.sa_sigaction == DarwinArtAndroidSignalTrampoline
-            ? (void (*)(int))previous_guest_handler
-            : host_old.sa_handler;
-    old_action->mask = MaskFromHost(&host_old.sa_mask);
-    if ((host_old.sa_flags & SA_ONSTACK) != 0) old_action->flags |= 0x08000000;
-    if ((host_old.sa_flags & SA_RESTART) != 0) old_action->flags |= 0x10000000;
-    if ((host_old.sa_flags & SA_NODEFER) != 0) old_action->flags |= 0x40000000;
-    if ((host_old.sa_flags & SA_RESETHAND) != 0) old_action->flags |= (int)UINT32_C(0x80000000);
-    if ((host_old.sa_flags & SA_SIGINFO) != 0) old_action->flags |= 4;
+    if (sigchain_owned ||
+        host_old.sa_sigaction == DarwinArtAndroidSignalTrampoline) {
+      old_action->handler = previous_guest_handler == 0
+                                ? SIG_DFL
+                                : (void (*)(int))previous_guest_handler;
+      old_action->flags = previous_guest_flags;
+      old_action->mask = previous_guest_mask;
+      old_action->restorer = (void (*)(void))previous_guest_restorer;
+    } else {
+      old_action->handler = host_old.sa_handler;
+      old_action->mask = MaskFromHost(&host_old.sa_mask);
+      if ((host_old.sa_flags & SA_ONSTACK) != 0)
+        old_action->flags |= 0x08000000;
+      if ((host_old.sa_flags & SA_RESTART) != 0)
+        old_action->flags |= 0x10000000;
+      if ((host_old.sa_flags & SA_NODEFER) != 0)
+        old_action->flags |= 0x40000000;
+      if ((host_old.sa_flags & SA_RESETHAND) != 0)
+        old_action->flags |= (int)UINT32_C(0x80000000);
+      if ((host_old.sa_flags & SA_SIGINFO) != 0) old_action->flags |= 4;
+    }
   }
   return 0;
 }

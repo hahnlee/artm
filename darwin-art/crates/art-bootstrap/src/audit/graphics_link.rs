@@ -416,6 +416,8 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_attach")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_lookup")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_destroy")
+        .arg("-Wl,-exported_symbol,_EnsureFrontOfChain")
+        .arg("-Wl,-exported_symbol,_darwin_art_sigchain_owns_signal")
         // libjnigraphics is a virtual Android platform DSO. Keep its fixed C
         // ABI entry points dynamically visible so the ELF provider resolver
         // can bind AndroidBitmap_* without manufacturing a host dylib.

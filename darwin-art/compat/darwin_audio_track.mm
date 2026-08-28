@@ -41,6 +41,9 @@ struct DarwinAudioTrack {
   uint32_t sample_rate = 48000;
   int32_t audio_format = 2;
   std::atomic<uint64_t> frames_consumed{0};
+  std::atomic<bool> first_write_reported{false};
+  std::atomic<bool> first_non_silent_write_reported{false};
+  std::atomic<bool> first_render_reported{false};
   std::atomic<float> left_volume{1.0f};
   std::atomic<float> right_volume{1.0f};
   std::atomic<bool> released{false};
@@ -114,8 +117,13 @@ OSStatus RenderAudio(void* context, AudioUnitRenderActionFlags* flags,
     }
   }
   if (consumed != 0) {
-    track->frames_consumed.fetch_add(consumed / track->bytes_per_frame,
-                                     std::memory_order_relaxed);
+    const uint64_t frames = consumed / track->bytes_per_frame;
+    track->frames_consumed.fetch_add(frames, std::memory_order_relaxed);
+    if (!track->first_render_reported.exchange(true,
+                                                std::memory_order_relaxed)) {
+      std::cerr << "ART Android AudioTrack: CoreAudio consumed frames="
+                << frames << "\n";
+    }
     track->space_available.notify_all();
   } else if (flags != nullptr) {
     *flags |= kAudioUnitRenderAction_OutputIsSilence;
@@ -281,6 +289,7 @@ void darwin_audio_track_start(DarwinAudioTrack* track) {
   if (status == noErr) {
     std::lock_guard<std::mutex> lock(track->mutex);
     track->started = true;
+    std::cerr << "ART Android AudioTrack: CoreAudio started\n";
   } else {
     ReportAudioError("AudioOutputUnitStart", status);
   }
@@ -332,6 +341,8 @@ size_t darwin_audio_track_write(DarwinAudioTrack* track, const void* data,
                                 size_t size, bool blocking) {
   if (track == nullptr || data == nullptr || size == 0) return 0;
   const auto* source = static_cast<const uint8_t*>(data);
+  const bool has_signal =
+      std::any_of(source, source + size, [](uint8_t sample) { return sample != 0; });
   size_t written = 0;
   std::unique_lock<std::mutex> lock(track->mutex);
   while (written < size &&
@@ -349,6 +360,17 @@ size_t darwin_audio_track_write(DarwinAudioTrack* track, const void* data,
     track->write_offset = (track->write_offset + contiguous) % track->ring.size();
     track->queued_bytes += contiguous;
     written += contiguous;
+  }
+  if (written != 0 &&
+      !track->first_write_reported.exchange(true, std::memory_order_relaxed)) {
+    std::cerr << "ART Android AudioTrack: first PCM write bytes=" << written
+              << "\n";
+  }
+  if (written != 0 && has_signal &&
+      !track->first_non_silent_write_reported.exchange(
+          true, std::memory_order_relaxed)) {
+    std::cerr << "ART Android AudioTrack: first non-silent PCM write bytes="
+              << written << "\n";
   }
   return written;
 }

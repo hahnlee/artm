@@ -66,7 +66,8 @@ extern "C" void RemoveSpecialSignalHandlerFn(
   }
 }
 
-extern "C" void EnsureFrontOfChain(int signal_number) {
+extern "C" __attribute__((visibility("default"))) void EnsureFrontOfChain(
+    int signal_number) {
   if (signal_number <= 0 || signal_number >= NSIG) {
     return;
   }
@@ -92,6 +93,14 @@ extern "C" void EnsureFrontOfChain(int signal_number) {
   dispatcher.sa_mask = slot.special.sc_mask;
   dispatcher.sa_flags = SA_SIGINFO | SA_RESTART;
   sigaction(signal_number, &dispatcher, nullptr);
+}
+
+extern "C" __attribute__((visibility("default"))) int
+darwin_art_sigchain_owns_signal(int signal_number) {
+  return signal_number > 0 && signal_number < NSIG &&
+                 g_signal_slots[signal_number].installed
+             ? 1
+             : 0;
 }
 
 }  // namespace art
