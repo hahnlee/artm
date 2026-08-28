@@ -329,6 +329,7 @@ dependencies = [
  "darwin-art-abi",
  "darwin-art-engine",
  "darwin-art-engine-sys",
+ "darwin-art-profile",
  "darwin-art-runtime",
 ]
 
@@ -341,6 +342,10 @@ dependencies = [
 
 [[package]]
 name = "darwin-art-prefix"
+version = "0.1.0"
+
+[[package]]
+name = "darwin-art-profile"
 version = "0.1.0"
 
 [[package]]

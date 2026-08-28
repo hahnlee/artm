@@ -71,7 +71,21 @@ if [[ -n "${DARWIN_ART_APK_ACTIVITY_OVERRIDE:-}" ]]; then
 fi
 
 runtime_abi="darwin-art-darwin-native-v1"
-install_root="${DARWIN_ART_APK_INSTALL_ROOT:-$root/_build/installed-apps}"
+profile_mount=""
+if [[ -z "${DARWIN_ART_APP_DATA_ROOT:-}" ]]; then
+  cargo build -q --release -p darwin-art-profile --bins
+  profile_ctl="$root/target/release/darwin-artctl"
+  profile_mount="$("$profile_ctl" ensure)"
+  export DARWIN_ART_PROFILE_SOCKET
+  DARWIN_ART_PROFILE_SOCKET="$("$profile_ctl" socket)"
+fi
+if [[ -n "${DARWIN_ART_APK_INSTALL_ROOT:-}" ]]; then
+  install_root="$DARWIN_ART_APK_INSTALL_ROOT"
+elif [[ -n "$profile_mount" ]]; then
+  install_root="$profile_mount/packages"
+else
+  install_root="$root/_build/installed-apps"
+fi
 native_cache_root="${DARWIN_ART_NATIVE_CACHE_ROOT:-$root/_build/native-artifact-cache}"
 native_converter="${DARWIN_ART_NATIVE_CONVERTER:-none}"
 cargo build -q --release -p darwin-art-apk-install
@@ -161,7 +175,11 @@ done
 # no-native APKs the same immutable, minimal system root as the in-tree gate;
 # pointing the process at the host filesystem would bypass the guest path
 # policy and make results depend on the developer machine.
-system_root="$(mktemp -d "${TMPDIR:-/tmp}/darwin-art-apk-system-root.XXXXXX")"
+if [[ -n "$profile_mount" ]]; then
+  system_root="$(mktemp -d "$profile_mount/run/app.XXXXXX")"
+else
+  system_root="$(mktemp -d "${TMPDIR:-/tmp}/darwin-art-apk-system-root.XXXXXX")"
+fi
 icon_file=""
 cleanup_system_root() {
   chmod -R u+w "$system_root" 2>/dev/null || true
@@ -207,7 +225,11 @@ export DARWIN_ART_APK_APP_APK_SHA256="$apk_sha256"
 export DARWIN_ART_NATIVE_RUNTIME_ABI="$runtime_abi"
 export DARWIN_ART_APK_APP_LABEL="$label"
 export DARWIN_ART_APK_APP_LABEL_RES="$label_res"
-app_data_root="${DARWIN_ART_APP_DATA_ROOT:-$root/_build/app-data}"
+if [[ -n "${DARWIN_ART_APP_DATA_ROOT:-}" ]]; then
+  app_data_root="$DARWIN_ART_APP_DATA_ROOT"
+else
+  app_data_root="$profile_mount/data/apps"
+fi
 app_data_dir="$app_data_root/$package"
 mkdir -p "$app_data_dir"
 private_data_root="$app_data_dir/private-data"

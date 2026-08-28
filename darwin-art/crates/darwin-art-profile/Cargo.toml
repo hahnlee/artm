@@ -1,0 +1,17 @@
+[package]
+name = "darwin-art-profile"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "darwin_art_profile"
+path = "src/lib.rs"
+
+[[bin]]
+name = "darwin-artd"
+path = "src/bin/darwin-artd.rs"
+
+[[bin]]
+name = "darwin-artctl"
+path = "src/bin/darwin-artctl.rs"

@@ -12,6 +12,7 @@ members = [
     "crates/darwin-art-build-contract",
     "crates/darwin-art-apk-install",
     "crates/darwin-art-native-artifact",
+    "crates/darwin-art-profile",
     "crates/darwin-art-xtask",
     "tools/android-aaudio-provider",
     "tools/android-apk-app-runtime",

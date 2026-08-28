@@ -24,6 +24,11 @@ directly mapped ARM64 ELF, and a Bionic ABI facade. Mainstream Tier 1 includes
 ordinary third-party JNI `.so` libraries; Java-only execution is a bootstrap
 gate, not the intended application compatibility boundary.
 
+Shared per-profile state is owned by the Rust `darwin-artd` process. Application
+and service processes hold versioned IPC leases while the daemon mounts their
+case-sensitive APFS Android volume; see
+[`docs/profile-daemon.md`](docs/profile-daemon.md).
+
 Physical-keyboard status and the remaining Android `.kl`/`.kcm` compatibility
 work are documented in
 [`docs/physical-keyboard-compatibility.md`](docs/physical-keyboard-compatibility.md).

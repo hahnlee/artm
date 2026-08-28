@@ -16,6 +16,9 @@ fn main_result() -> Result<(), Box<dyn Error>> {
     if let Ok(delay) = env::var("DARWIN_ART_DEBUG_ATTACH_DELAY_MS") {
         std::thread::sleep(std::time::Duration::from_millis(delay.parse()?));
     }
+    // The profile daemon owns the shared Android volume. Every application
+    // and service process holds its own connection for its entire lifetime.
+    let _profile_lease = darwin_art_profile::ProfileLease::connect_from_environment()?;
     let mut arguments = env::args_os();
     let program = arguments.next().unwrap_or_else(|| "darwin-art-host".into());
     let mut values = arguments.collect::<Vec<_>>();
