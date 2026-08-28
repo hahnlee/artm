@@ -840,11 +840,13 @@ struct WireMessage {
 };
 
 struct WireConnection {
+  uint64_t generation = 0;
   uint32_t next_sequence = 1;
   uint32_t next_local_target = 2;
   bool ready = false;
   bool dispatcher_active = false;
   std::thread::id dispatcher_thread;
+  jobject class_loader = nullptr;
   std::unordered_map<uint32_t, jobject> local_binders;
   std::unordered_map<uint32_t, std::unique_ptr<WireMessage>> pending_replies;
 };
@@ -852,6 +854,7 @@ struct WireConnection {
 std::recursive_mutex g_wire_mutex;
 std::condition_variable_any g_wire_condition;
 std::unordered_map<int, WireConnection> g_wire_connections;
+std::atomic<uint64_t> g_next_wire_generation{1};
 
 bool WriteAll(int fd, const uint8_t* bytes, size_t size) {
   while (size != 0) {
@@ -1316,31 +1319,85 @@ bool DispatchWireTransaction(JNIEnv* env, int fd, WireMessage* request) {
   return success;
 }
 
-void RunRemoteBinderDispatcher(JavaVM* vm, int fd) {
+void CloseRemoteBinderChannelGeneration(JNIEnv* env, int control_fd,
+                                        uint64_t generation) {
+  std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+  auto connection = g_wire_connections.find(control_fd);
+  if (connection == g_wire_connections.end() ||
+      connection->second.generation != generation) {
+    return;
+  }
+  for (const auto& [target, binder] : connection->second.local_binders) {
+    static_cast<void>(target);
+    env->DeleteGlobalRef(binder);
+  }
+  if (connection->second.class_loader != nullptr) {
+    env->DeleteGlobalRef(connection->second.class_loader);
+  }
+  g_wire_connections.erase(connection);
+  g_wire_condition.notify_all();
+}
+
+void RunRemoteBinderDispatcher(JavaVM* vm, int fd, uint64_t generation) {
   JNIEnv* env = nullptr;
   if (vm == nullptr || vm->AttachCurrentThread(&env, nullptr) != JNI_OK ||
       env == nullptr) {
     std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
-    g_wire_connections.erase(fd);
+    auto connection = g_wire_connections.find(fd);
+    if (connection != g_wire_connections.end() &&
+        connection->second.generation == generation) {
+      g_wire_connections.erase(connection);
+    }
     g_wire_condition.notify_all();
     return;
   }
+  jobject class_loader = nullptr;
   {
     std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
     auto connection = g_wire_connections.find(fd);
-    if (connection == g_wire_connections.end()) {
+    if (connection == g_wire_connections.end() ||
+        connection->second.generation != generation) {
       vm->DetachCurrentThread();
       return;
     }
     connection->second.dispatcher_thread = std::this_thread::get_id();
+    class_loader = env->NewLocalRef(connection->second.class_loader);
     g_wire_condition.notify_all();
+  }
+  if (class_loader != nullptr) {
+    jclass thread_class = env->FindClass("java/lang/Thread");
+    jmethodID current_thread = thread_class == nullptr
+                                   ? nullptr
+                                   : env->GetStaticMethodID(
+                                         thread_class, "currentThread",
+                                         "()Ljava/lang/Thread;");
+    jmethodID set_context_loader =
+        thread_class == nullptr
+            ? nullptr
+            : env->GetMethodID(thread_class, "setContextClassLoader",
+                               "(Ljava/lang/ClassLoader;)V");
+    jobject thread = current_thread == nullptr
+                         ? nullptr
+                         : env->CallStaticObjectMethod(thread_class,
+                                                       current_thread);
+    if (thread != nullptr && set_context_loader != nullptr &&
+        !env->ExceptionCheck()) {
+      env->CallVoidMethod(thread, set_context_loader, class_loader);
+    }
+    env->DeleteLocalRef(thread);
+    env->DeleteLocalRef(thread_class);
+    env->DeleteLocalRef(class_loader);
+    if (env->ExceptionCheck()) env->ExceptionClear();
   }
   for (;;) {
     auto incoming = std::make_unique<WireMessage>();
     if (!ReceiveWireMessage(fd, incoming.get())) break;
     std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
     auto connection = g_wire_connections.find(fd);
-    if (connection == g_wire_connections.end()) break;
+    if (connection == g_wire_connections.end() ||
+        connection->second.generation != generation) {
+      break;
+    }
     if (incoming->header.type == kWireReady) {
       connection->second.ready = true;
       g_wire_condition.notify_all();
@@ -1357,7 +1414,7 @@ void RunRemoteBinderDispatcher(JavaVM* vm, int fd) {
       break;
     }
   }
-  darwin_art::CloseRemoteBinderChannel(env, fd);
+  CloseRemoteBinderChannelGeneration(env, fd, generation);
   vm->DetachCurrentThread();
 }
 
@@ -1369,20 +1426,83 @@ bool StartRemoteBinderDispatcher(JNIEnv* env, jint control_fd) {
   if (env == nullptr || control_fd < 0) return false;
   JavaVM* vm = nullptr;
   if (env->GetJavaVM(&vm) != JNI_OK || vm == nullptr) return false;
+  uint64_t generation = 0;
   {
     std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
     WireConnection& connection = g_wire_connections[control_fd];
     if (connection.dispatcher_active) return true;
+    if (connection.generation == 0) {
+      connection.generation =
+          g_next_wire_generation.fetch_add(1, std::memory_order_relaxed);
+    }
+    generation = connection.generation;
     connection.dispatcher_active = true;
   }
   try {
-    std::thread(RunRemoteBinderDispatcher, vm, control_fd).detach();
+    std::thread(RunRemoteBinderDispatcher, vm, control_fd, generation).detach();
   } catch (...) {
     std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
-    g_wire_connections.erase(control_fd);
+    auto connection = g_wire_connections.find(control_fd);
+    if (connection != g_wire_connections.end() &&
+        connection->second.generation == generation) {
+      g_wire_connections.erase(connection);
+    }
     return false;
   }
   return true;
+}
+
+bool StartServingRemoteBinder(JNIEnv* env, jint control_fd,
+                              jobject local_binder) {
+  if (env == nullptr || control_fd < 0 || local_binder == nullptr) return false;
+  {
+    std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+    WireConnection& connection = g_wire_connections[control_fd];
+    if (connection.generation == 0) {
+      connection.generation =
+          g_next_wire_generation.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (!connection.local_binders.contains(1)) {
+      jobject published = env->NewGlobalRef(local_binder);
+      if (published == nullptr) return false;
+      connection.local_binders.emplace(1, published);
+    }
+    if (connection.class_loader == nullptr) {
+      jclass binder_class = env->GetObjectClass(local_binder);
+      jclass class_class = env->FindClass("java/lang/Class");
+      jmethodID get_class_loader =
+          class_class == nullptr
+              ? nullptr
+              : env->GetMethodID(class_class, "getClassLoader",
+                                 "()Ljava/lang/ClassLoader;");
+      jobject loader = binder_class == nullptr || get_class_loader == nullptr
+                           ? nullptr
+                           : env->CallObjectMethod(binder_class,
+                                                   get_class_loader);
+      if (loader != nullptr && !env->ExceptionCheck()) {
+        connection.class_loader = env->NewGlobalRef(loader);
+      }
+      env->DeleteLocalRef(loader);
+      env->DeleteLocalRef(class_class);
+      env->DeleteLocalRef(binder_class);
+      if (env->ExceptionCheck()) env->ExceptionClear();
+    }
+    WireHeader ready;
+    ready.type = kWireReady;
+    if (!SendWireMessage(control_fd, ready, {}, {}, {})) {
+      for (const auto& [target, binder] : connection.local_binders) {
+        static_cast<void>(target);
+        env->DeleteGlobalRef(binder);
+      }
+      if (connection.class_loader != nullptr) {
+        env->DeleteGlobalRef(connection.class_loader);
+      }
+      g_wire_connections.erase(control_fd);
+      return false;
+    }
+    connection.ready = true;
+  }
+  return StartRemoteBinderDispatcher(env, control_fd);
 }
 
 bool SendServiceBindIntent(JNIEnv* env, jint control_fd, jobject intent) {
@@ -1605,6 +1725,9 @@ void CloseRemoteBinderChannel(JNIEnv* env, jint control_fd) {
   for (const auto& [target, binder] : connection->second.local_binders) {
     static_cast<void>(target);
     env->DeleteGlobalRef(binder);
+  }
+  if (connection->second.class_loader != nullptr) {
+    env->DeleteGlobalRef(connection->second.class_loader);
   }
   g_wire_connections.erase(connection);
   g_wire_condition.notify_all();

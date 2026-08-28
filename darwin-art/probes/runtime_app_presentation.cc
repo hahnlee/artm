@@ -29,6 +29,12 @@ namespace darwin_art_presentation {
 
 namespace {
 
+std::atomic<jlong> g_next_java_surface_identity{0x1000};
+
+jlong NextJavaSurfaceIdentity() {
+  return g_next_java_surface_identity.fetch_add(1, std::memory_order_relaxed);
+}
+
 jobject find_view_root_for_decor(JNIEnv* env, jobject decor_view) {
   if (env == nullptr || decor_view == nullptr) return nullptr;
   jclass global_class = env->FindClass("android/view/WindowManagerGlobal");
@@ -335,10 +341,11 @@ void EnsureJavaSurfaceValid(JNIEnv* env, jobject surface) {
           : env->GetFieldID(surface_class, "mNativeObject", "J");
   if (native_object != nullptr &&
       env->GetLongField(surface, native_object) == 0) {
-    // Surface Java code only treats zero as detached. The object itself is
-    // the JNI identity handed to native renderers; the process-local token is
-    // validated by the framework Surface native table.
-    env->SetLongField(surface, native_object, 1);
+    // Android assigns every BufferQueue producer its own native identity.
+    // Chromium keeps two SurfaceViews with different pixel formats and swaps
+    // between them; collapsing both to token 1 makes a later detach/switch
+    // invalidate the active producer.
+    env->SetLongField(surface, native_object, NextJavaSurfaceIdentity());
   }
   if (surface_class != nullptr) env->DeleteLocalRef(surface_class);
 }
@@ -388,7 +395,8 @@ void EnsureViewRootSurfaceValid(JNIEnv* env, jobject view) {
     // WindowSession.relayout() normally installs SurfaceFlinger's layer here.
     // The Darwin compositor owns the CAMetalLayer directly, but ViewRootImpl
     // must still observe a live layer identity for its transaction lifecycle.
-    env->SetLongField(root_surface_control, surface_control_native, 1);
+    env->SetLongField(root_surface_control, surface_control_native,
+                      NextJavaSurfaceIdentity());
   }
   env->DeleteLocalRef(surface_control_class);
   env->DeleteLocalRef(root_surface_control);
@@ -1250,12 +1258,42 @@ int run_service(JNIEnv* env, art::Thread* self, jclass service_class,
   }
   std::cerr << "ART Android service: attached " << service_class_name
             << " pid=" << getpid() << " binder=ready\n";
-  const int serve_status =
-      darwin_art::ServeRemoteBinder(env, control_fd, binder);
+  if (!darwin_art::StartServingRemoteBinder(env, control_fd, binder)) {
+    std::cerr << "ART Android service: Binder dispatcher failed\n";
+    return 27;
+  }
+  jclass looper_class = env->FindClass("android/os/Looper");
+  jmethodID my_looper = looper_class == nullptr
+                            ? nullptr
+                            : env->GetStaticMethodID(
+                                  looper_class, "myLooper",
+                                  "()Landroid/os/Looper;");
+  jmethodID loop = looper_class == nullptr
+                       ? nullptr
+                       : env->GetStaticMethodID(looper_class, "loop", "()V");
+  jobject owner_looper = my_looper == nullptr
+                             ? nullptr
+                             : env->CallStaticObjectMethod(looper_class,
+                                                           my_looper);
+  if (owner_looper == nullptr || loop == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Android service: owner Looper unavailable\n";
+    if (env->ExceptionCheck()) env->ExceptionDescribe();
+    return 27;
+  }
+  std::cerr << "ART Android service: entering owner Looper "
+            << service_class_name << " pid=" << getpid() << "\n";
+  env->CallStaticVoidMethod(looper_class, loop);
+  const bool loop_failed = env->ExceptionCheck();
+  if (loop_failed) {
+    std::cerr << "ART Android service: owner Looper failed\n";
+    env->ExceptionDescribe();
+  }
+  env->DeleteLocalRef(owner_looper);
+  env->DeleteLocalRef(looper_class);
   if (on_destroy != nullptr && !env->ExceptionCheck()) {
     env->CallVoidMethod(service, on_destroy);
   }
-  return serve_status == 0 ? 0 : 27;
+  return loop_failed ? 27 : 0;
 }
 
 }  // namespace darwin_art_presentation

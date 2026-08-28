@@ -255,7 +255,7 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
     verify_dex_contract(
         &output,
         87,
-        1309,
+        1314,
         &[
             "Ldev/darwinart/probe/ProbeActivity;",
             "Ldev/darwinart/probe/ProbeContext$BaseContext;",

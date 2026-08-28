@@ -8,6 +8,12 @@ namespace darwin_art {
 // remote Android Service after the initiating Java transact() has returned.
 bool StartRemoteBinderDispatcher(JNIEnv* env, jint control_fd);
 
+// Publishes the child Service binder and moves socket dispatch onto an
+// attached Binder worker. The service owner thread must remain in its Android
+// Looper, matching ActivityThread rather than blocking on the transport.
+bool StartServingRemoteBinder(JNIEnv* env, jint control_fd,
+                              jobject local_binder);
+
 // Sends the original Context.bindService() Intent to a newly spawned service
 // process using the same versioned Parcel/Binder/FD transport as transactions.
 bool SendServiceBindIntent(JNIEnv* env, jint control_fd, jobject intent);
@@ -23,8 +29,8 @@ jboolean TransactRemoteBinder(JNIEnv* env, jint control_fd, jint target_id,
                               jint code, jobject data, jobject reply,
                               jint flags);
 
-// Runs the child-side Binder endpoint on the ART owner thread until the
-// browser closes the channel. local_binder is published as target 1.
+// Legacy synchronous child endpoint. New service processes should use
+// StartServingRemoteBinder and keep their owner thread in Looper.loop().
 int ServeRemoteBinder(JNIEnv* env, jint control_fd, jobject local_binder);
 
 // Releases browser-side global Binder references associated with a channel.

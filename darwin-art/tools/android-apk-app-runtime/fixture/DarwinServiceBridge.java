@@ -16,9 +16,11 @@ import android.graphics.Rect;
 import android.util.Log;
 import android.view.Display;
 import android.view.SurfaceHolder;
+import android.view.Surface;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.Window;
 import dev.darwinart.probe.ProbeHostDocumentProvider;
 import java.util.ArrayList;
@@ -214,7 +216,7 @@ public final class DarwinServiceBridge {
                             "post-resume View traversal failed", error);
                 }
             }
-            activateHostSurfaces(root);
+            syncHostSurfaces(root);
             scheduleHostSurfaceScans(owner, root, remaining - 1);
         }, 16L);
     }
@@ -632,6 +634,57 @@ public final class DarwinServiceBridge {
         }
     }
 
+    private static boolean isInViewTree(View view, View root) {
+        View current = view;
+        while (current != null) {
+            if (current == root) return true;
+            ViewParent parent = current.getParent();
+            current = parent instanceof View ? (View) parent : null;
+        }
+        return false;
+    }
+
+    private static void destroyHostSurface(SurfaceView surfaceView) {
+        HostSurfaceState state = HOST_SURFACES.remove(surfaceView);
+        if (state == null) return;
+        SurfaceHolder holder = surfaceView.getHolder();
+        Surface surface = holder.getSurface();
+        try {
+            // SurfaceView replaces its BufferQueue producer before notifying
+            // callbacks. Match that ordering so clients observe !isValid()
+            // from surfaceDestroyed() and receive a fresh native identity if
+            // the same Java SurfaceView is attached again.
+            Field nativeObject = Surface.class.getDeclaredField("mNativeObject");
+            nativeObject.setAccessible(true);
+            nativeObject.setLong(surface, 0L);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException(
+                    "could not invalidate detached host Surface", error);
+        }
+        for (SurfaceHolder.Callback callback :
+                new ArrayList<>(state.announced.keySet())) {
+            callback.surfaceDestroyed(holder);
+        }
+        Log.i("DarwinServiceBridge", "host SurfaceView destroyed "
+                + surfaceView.getClass().getName());
+    }
+
+    private static void syncHostSurfaces(View root) {
+        // SurfaceView removal is independent from Activity destruction. Chrome
+        // swaps opaque/translucent compositor SurfaceViews by removeView() and
+        // waits for surfaceDestroyed() before reattaching the selected one.
+        // Reconcile the retained producer table against the real View tree on
+        // every display pulse, just as SurfaceFlinger/WindowManager would.
+        for (SurfaceView surfaceView :
+                new ArrayList<>(HOST_SURFACES.keySet())) {
+            if (surfaceView == null || !surfaceView.isAttachedToWindow()
+                    || !isInViewTree(surfaceView, root)) {
+                if (surfaceView != null) destroyHostSurface(surfaceView);
+            }
+        }
+        activateHostSurfaces(root);
+    }
+
     private static void takeOverHostSurfaceLifecycle(SurfaceView surfaceView) {
         try {
             Field haveFrame = SurfaceView.class.getDeclaredField("mHaveFrame");
@@ -679,20 +732,14 @@ public final class DarwinServiceBridge {
         if (activity != null) {
             View decor = activity.getWindow().getDecorView();
             repairZeroSizedLayouts(decor);
-            activateHostSurfaces(decor);
+            syncHostSurfaces(decor);
         }
     }
 
     private static void deactivateHostSurfaces(View view) {
         if (view instanceof SurfaceView) {
             SurfaceView surfaceView = (SurfaceView) view;
-            HostSurfaceState state = HOST_SURFACES.remove(surfaceView);
-            if (state != null) {
-                SurfaceHolder holder = surfaceView.getHolder();
-                for (SurfaceHolder.Callback callback : state.announced.keySet()) {
-                    callback.surfaceDestroyed(holder);
-                }
-            }
+            destroyHostSurface(surfaceView);
         }
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;

@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <vector>
 
 #ifdef HIDDEN
 #undef HIDDEN
@@ -22,10 +23,78 @@
 #undef private
 #include "darwin_surface_bridge.h"
 #include "include/core/SkCanvas.h"
+#include "include/core/SkPaint.h"
 #include "pipeline/skia/RenderNodeDrawable.h"
 #include "runtime_frame_probe.h"
 
 namespace {
+
+std::vector<SkRect> gather_transparent_regions(JNIEnv* env, jobject root_view) {
+  std::vector<SkRect> rectangles;
+  if (env == nullptr || root_view == nullptr) return rectangles;
+  jclass region_class = env->FindClass("android/graphics/Region");
+  jclass iterator_class = env->FindClass("android/graphics/RegionIterator");
+  jclass rect_class = env->FindClass("android/graphics/Rect");
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID region_constructor =
+      region_class == nullptr ? nullptr : env->GetMethodID(region_class, "<init>", "()V");
+  jmethodID rect_constructor =
+      rect_class == nullptr ? nullptr : env->GetMethodID(rect_class, "<init>", "()V");
+  jmethodID iterator_constructor =
+      iterator_class == nullptr || region_class == nullptr
+          ? nullptr
+          : env->GetMethodID(iterator_class, "<init>",
+                             "(Landroid/graphics/Region;)V");
+  jmethodID gather =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "gatherTransparentRegion",
+                             "(Landroid/graphics/Region;)Z");
+  jmethodID next =
+      iterator_class == nullptr || rect_class == nullptr
+          ? nullptr
+          : env->GetMethodID(iterator_class, "next",
+                             "(Landroid/graphics/Rect;)Z");
+  jobject region = region_constructor == nullptr
+                       ? nullptr
+                       : env->NewObject(region_class, region_constructor);
+  jobject rect = rect_constructor == nullptr
+                     ? nullptr
+                     : env->NewObject(rect_class, rect_constructor);
+  if (region != nullptr && rect != nullptr && iterator_constructor != nullptr &&
+      gather != nullptr && next != nullptr && !env->ExceptionCheck()) {
+    env->CallBooleanMethod(root_view, gather, region);
+    jobject iterator = env->ExceptionCheck()
+                           ? nullptr
+                           : env->NewObject(iterator_class, iterator_constructor,
+                                            region);
+    jfieldID left = env->GetFieldID(rect_class, "left", "I");
+    jfieldID top = env->GetFieldID(rect_class, "top", "I");
+    jfieldID right = env->GetFieldID(rect_class, "right", "I");
+    jfieldID bottom = env->GetFieldID(rect_class, "bottom", "I");
+    while (iterator != nullptr && left != nullptr && top != nullptr &&
+           right != nullptr && bottom != nullptr && !env->ExceptionCheck() &&
+           env->CallBooleanMethod(iterator, next, rect) == JNI_TRUE) {
+      const jint l = env->GetIntField(rect, left);
+      const jint t = env->GetIntField(rect, top);
+      const jint r = env->GetIntField(rect, right);
+      const jint b = env->GetIntField(rect, bottom);
+      if (l < r && t < b) rectangles.push_back(SkRect::MakeLTRB(l, t, r, b));
+    }
+    if (iterator != nullptr) env->DeleteLocalRef(iterator);
+  }
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    rectangles.clear();
+  }
+  if (rect != nullptr) env->DeleteLocalRef(rect);
+  if (region != nullptr) env->DeleteLocalRef(region);
+  if (view_class != nullptr) env->DeleteLocalRef(view_class);
+  if (rect_class != nullptr) env->DeleteLocalRef(rect_class);
+  if (iterator_class != nullptr) env->DeleteLocalRef(iterator_class);
+  if (region_class != nullptr) env->DeleteLocalRef(region_class);
+  return rectangles;
+}
 
 class DarwinHwuiTreeObserver final : public android::uirenderer::TreeObserver {
  public:
@@ -474,11 +543,53 @@ bool render_node_to_surface(
   // clear the parent layer rather than the already-composited child image.
   // This mirrors SurfaceFlinger's separate parent/child buffers without a CPU
   // readback.
-  darwin_art_surface_gpu_composite_embedded(surface, canvas);
+  std::vector<SkRect> transparent_regions =
+      node->hasHolePunches() ? std::vector<SkRect>()
+                             : gather_transparent_regions(env, root_view);
+  const bool embedded_composited =
+      darwin_art_surface_gpu_composite_embedded(surface, canvas);
+  // ViewRootImpl retains the window's transparent region until a later
+  // traversal publishes a replacement. Our standalone recording pass can run
+  // between SurfaceView's state updates, where gatherTransparentRegion()
+  // transiently reports empty even though the child SurfaceControl and its
+  // last buffer are still visible. Preserve the last non-empty region for the
+  // same embedded producer, matching WindowManager's retained-region contract.
+  static thread_local std::vector<SkRect> retained_transparent_regions;
+  if (!embedded_composited) {
+    retained_transparent_regions.clear();
+  } else if (!transparent_regions.empty()) {
+    retained_transparent_regions = transparent_regions;
+  } else if (!node->hasHolePunches()) {
+    transparent_regions = retained_transparent_regions;
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS") != nullptr) {
+    static thread_local size_t last_region_count = std::numeric_limits<size_t>::max();
+    static thread_local bool last_embedded = false;
+    if (last_region_count != transparent_regions.size() ||
+        last_embedded != embedded_composited) {
+      last_region_count = transparent_regions.size();
+      last_embedded = embedded_composited;
+      std::cerr << "ART HWUI GPU: embedded composition="
+                << embedded_composited << " transparentRegions="
+                << transparent_regions.size();
+      for (const SkRect& region : transparent_regions) {
+        std::cerr << " [" << region.left() << "," << region.top() << ","
+                  << region.right() << "," << region.bottom() << "]";
+      }
+      std::cerr << "\n";
+    }
+  }
   canvas->saveLayer(nullptr, nullptr);
   android::uirenderer::skiapipeline::RenderNodeDrawable drawable(
       node, canvas, false);
   drawable.forceDraw(canvas);
+  if (!transparent_regions.empty()) {
+    SkPaint clear;
+    clear.setBlendMode(SkBlendMode::kClear);
+    for (const SkRect& region : transparent_regions) {
+      canvas->drawRect(region, clear);
+    }
+  }
   canvas->restore();
   // The framework display list owns the opaque SurfaceView/TextureView
   // placeholder and may paint its white background. Replay the APK's native

@@ -281,6 +281,12 @@ struct SurfaceControl {
   std::atomic<uint32_t> references{1};
   std::string name;
   SurfaceControl* parent = nullptr;
+  // A control obtained from a Java Surface or an ANativeWindow is attached
+  // to SurfaceFlinger's display tree even though its NDK parent is null.
+  // Controls created through ASurfaceControl_create are ordinary children;
+  // reparent(child, nullptr) detaches them and they must stop contributing to
+  // composition until attached to a rooted ancestor again.
+  bool composition_root = false;
   AHardwareBuffer* buffer = nullptr;
   ARect source{};
   ARect destination{};
@@ -299,6 +305,22 @@ struct SurfaceControl {
 
 std::mutex g_surface_controls_mutex;
 std::vector<SurfaceControl*> g_surface_controls;
+
+bool IsAttachedToCompositionRoot(
+    const SurfaceControl* control,
+    const std::vector<SurfaceControl*>& controls) {
+  // Parent links are runtime-owned identities. Bound the walk by the number
+  // of live controls so a malformed/cyclic guest transaction fails detached
+  // rather than looping forever or following a released pointer.
+  for (size_t depth = 0; control != nullptr && depth <= controls.size();
+       ++depth) {
+    if (std::find(controls.begin(), controls.end(), control) == controls.end())
+      return false;
+    if (control->composition_root) return true;
+    control = control->parent;
+  }
+  return false;
+}
 
 struct SurfacePresentation {
   SurfaceControl* control = nullptr;
@@ -443,19 +465,22 @@ SurfaceTransaction::Update* FindUpdate(SurfaceTransaction* transaction,
 }
 
 ASurfaceControl* CreateSurfaceControl(ASurfaceControl* parent,
-                                      const char* name) {
+                                      const char* name,
+                                      bool composition_root) {
   auto* control = new (std::nothrow) SurfaceControl();
   if (control != nullptr) {
     if (name != nullptr) control->name = name;
     control->parent = reinterpret_cast<SurfaceControl*>(parent);
+    control->composition_root = composition_root;
     std::lock_guard<std::mutex> lock(g_surface_controls_mutex);
     g_surface_controls.push_back(control);
     if (std::getenv("DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS") != nullptr) {
       std::fprintf(stderr,
                    "ART Android SurfaceControl: create pid=%d control=%p "
-                   "parent=%p name=%s\n",
+                   "parent=%p root=%d name=%s\n",
                    getpid(), static_cast<void*>(control),
-                   static_cast<void*>(parent), control->name.c_str());
+                   static_cast<void*>(parent), composition_root ? 1 : 0,
+                   control->name.c_str());
     }
   }
   return reinterpret_cast<ASurfaceControl*>(control);
@@ -1130,16 +1155,16 @@ extern "C" int ASensor_getMinDelay(ASensor const*) { return 0; }
 
 extern "C" ASurfaceControl* ASurfaceControl_createFromWindow(ANativeWindow*,
                                                                const char* name) {
-  return CreateSurfaceControl(nullptr, name);
+  return CreateSurfaceControl(nullptr, name, true);
 }
 
 extern "C" ASurfaceControl* ASurfaceControl_create(ASurfaceControl* parent,
                                                      const char* name) {
-  return CreateSurfaceControl(parent, name);
+  return CreateSurfaceControl(parent, name, false);
 }
 
 extern "C" ASurfaceControl* ASurfaceControl_fromJava(JNIEnv*, jobject) {
-  return CreateSurfaceControl(nullptr, "java-surface-control");
+  return CreateSurfaceControl(nullptr, "java-surface-control", true);
 }
 
 extern "C" void ASurfaceControl_release(ASurfaceControl* opaque) {
@@ -1149,6 +1174,9 @@ extern "C" void ASurfaceControl_release(ASurfaceControl* opaque) {
     {
       std::lock_guard<std::mutex> lock(g_surface_controls_mutex);
       std::erase(g_surface_controls, control);
+      for (SurfaceControl* child : g_surface_controls) {
+        if (child->parent == control) child->parent = nullptr;
+      }
     }
     if (control->buffer != nullptr) AHardwareBuffer_release(control->buffer);
     delete control;
@@ -1211,8 +1239,14 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
         control->scale_y = update.scale_y;
       }
       if (update.has_alpha) control->alpha = update.alpha;
-      if (update.has_parent)
+      if (update.has_parent) {
         control->parent = reinterpret_cast<SurfaceControl*>(update.parent);
+        // createFromWindow/fromJava controls start attached to the display,
+        // but an explicit reparent replaces that initial attachment. In
+        // particular, reparent(control, nullptr) means detach; retaining the
+        // root bit would keep Chromium's old tab surface in composition.
+        control->composition_root = false;
+      }
     }
 
     // SurfaceFlinger composes the current layer tree, not just the controls
@@ -1222,7 +1256,8 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
     // as the retained layer backing, then rebuild the host target entirely on
     // the GPU for every committed transaction.
     for (SurfaceControl* control : g_surface_controls) {
-      if (control->visible && control->buffer != nullptr)
+      if (control->visible && control->buffer != nullptr &&
+          IsAttachedToCompositionRoot(control, g_surface_controls))
         presentations.push_back(MakePresentation(control));
     }
   }

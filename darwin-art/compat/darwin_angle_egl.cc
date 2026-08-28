@@ -1356,6 +1356,7 @@ struct DarwinAndroidNativeWindow {
   // uses its Android native-base refcount/query ABI before handing it to the
   // render thread.
   AndroidNativeWindowAbi abi{};
+  jlong java_surface_identity = 0;
   std::atomic<uint32_t> references{1};
   std::atomic<int32_t> width{0};
   std::atomic<int32_t> height{0};
@@ -1376,6 +1377,8 @@ struct AndroidNativeWindowBufferAbi {
 
 std::mutex g_android_native_window_mutex;
 DarwinAndroidNativeWindow* g_android_native_window_published = nullptr;
+std::unordered_map<jlong, DarwinAndroidNativeWindow*>
+    g_android_native_windows_by_surface;
 std::atomic<uint64_t> g_android_native_window_generation{0};
 
 bool DebugAndroidNativeWindow() {
@@ -1406,6 +1409,14 @@ void ReleaseNativeWindow(DarwinAndroidNativeWindow* window) {
     std::lock_guard<std::mutex> global_lock(g_android_native_window_mutex);
     if (g_android_native_window_published == window) {
       g_android_native_window_published = nullptr;
+    }
+    if (window->java_surface_identity != 0) {
+      auto found = g_android_native_windows_by_surface.find(
+          window->java_surface_identity);
+      if (found != g_android_native_windows_by_surface.end() &&
+          found->second == window) {
+        g_android_native_windows_by_surface.erase(found);
+      }
     }
   }
   delete window;
@@ -1495,17 +1506,53 @@ void InitializeNativeWindowAbi(DarwinAndroidNativeWindow* window) {
 }
 }  // namespace
 
-extern "C" void* darwin_art_android_ANativeWindow_fromSurface(void*,
+extern "C" void* darwin_art_android_ANativeWindow_fromSurface(void* opaque_env,
                                                                 void* surface) {
+  auto* env = static_cast<JNIEnv*>(opaque_env);
+  const jobject java_surface = static_cast<jobject>(surface);
+  jlong identity = 0;
+  jclass surface_class =
+      env == nullptr || java_surface == nullptr
+          ? nullptr
+          : env->GetObjectClass(java_surface);
+  jfieldID native_object =
+      surface_class == nullptr
+          ? nullptr
+          : env->GetFieldID(surface_class, "mNativeObject", "J");
+  if (native_object != nullptr && !env->ExceptionCheck()) {
+    identity = env->GetLongField(java_surface, native_object);
+  }
+  if (surface_class != nullptr) env->DeleteLocalRef(surface_class);
+  if (env != nullptr && env->ExceptionCheck()) env->ExceptionClear();
+  if (identity != 0) {
+    std::lock_guard<std::mutex> lock(g_android_native_window_mutex);
+    auto found = g_android_native_windows_by_surface.find(identity);
+    if (found != g_android_native_windows_by_surface.end()) {
+      found->second->references.fetch_add(1, std::memory_order_relaxed);
+      return found->second;
+    }
+  }
   auto* window = new DarwinAndroidNativeWindow();
   InitializeNativeWindowAbi(window);
+  window->java_surface_identity = identity;
   window->width.store(darwin_art::DarwinAngleHostSurfaceWidth(),
                       std::memory_order_relaxed);
   window->height.store(darwin_art::DarwinAngleHostSurfaceHeight(),
                        std::memory_order_relaxed);
+  if (identity != 0) {
+    std::lock_guard<std::mutex> lock(g_android_native_window_mutex);
+    auto [found, inserted] =
+        g_android_native_windows_by_surface.emplace(identity, window);
+    if (!inserted) {
+      found->second->references.fetch_add(1, std::memory_order_relaxed);
+      delete window;
+      return found->second;
+    }
+  }
   if (DebugAndroidNativeWindow()) {
     std::cerr << "ART Android ANativeWindow: fromSurface pid=" << getpid()
-              << " javaSurface=" << surface << " window=" << window
+              << " javaSurface=" << surface << " identity=0x" << std::hex
+              << identity << std::dec << " window=" << window
               << " size=" << window->width.load(std::memory_order_relaxed)
               << "x" << window->height.load(std::memory_order_relaxed)
               << "\n";
