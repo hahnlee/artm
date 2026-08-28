@@ -310,6 +310,18 @@ size_t darwin_art_bionic_strftime(char* destination, size_t capacity,
                                       broken_down, NULL);
 }
 
+char* darwin_art_bionic_strptime(const char* input, const char* format,
+                                 DarwinArtAndroidTm* broken_down) {
+  const int saved_errno = errno;
+  char* result = strptime(input, format, (struct tm*)broken_down);
+  errno = saved_errno;
+  return result;
+}
+
+void darwin_art_bionic_tzset(void) {
+  /* Timezone state is installed explicitly by the process owner. */
+}
+
 DarwinArtBionicStrftimeFunction darwin_art_bionic_strftime_resolve(
     const char* soname, const char* symbol, const char* version) {
   const int saved_errno = errno;
@@ -320,6 +332,10 @@ DarwinArtBionicStrftimeFunction darwin_art_bionic_strftime_resolve(
       result = (DarwinArtBionicStrftimeFunction)darwin_art_bionic_strftime;
     else if (strcmp(symbol, "strftime_l") == 0)
       result = (DarwinArtBionicStrftimeFunction)darwin_art_bionic_strftime_l;
+    else if (strcmp(symbol, "strptime") == 0)
+      result = (DarwinArtBionicStrftimeFunction)darwin_art_bionic_strptime;
+    else if (strcmp(symbol, "tzset") == 0)
+      result = (DarwinArtBionicStrftimeFunction)darwin_art_bionic_tzset;
   }
   errno = saved_errno;
   return result;

@@ -19,10 +19,16 @@ pub(crate) fn audit_runtime_graphics_link_fast(root: &Path) -> Result<()> {
 }
 
 /// Reuse successful source-pinned foundation artifacts while still running
-/// the graphics closure audit and final dylib/symbol checks. This is the
-/// development path between the strict full gate and the artifact-only fast
-/// link check.
+/// the per-object Ninja graph, graphics closure audit, and final dylib/symbol
+/// checks. This is the development path between the strict full gate and the
+/// artifact-only fast link check.
 pub(crate) fn audit_runtime_graphics_link_incremental(root: &Path) -> Result<()> {
+    // The final link consumes the bootstrap archive, not individual adapter
+    // sources. Running only the cached upstream gates can therefore relink a
+    // stale archive after a compat C++ edit. Refresh the persisted per-object
+    // graph first; Ninja recompiles only the affected translation units and
+    // rebuilds the archive when necessary.
+    build_native_graph(root, "graphics-bootstrap")?;
     audit_runtime_graphics_link_mode(root, true, true)
 }
 
@@ -548,6 +554,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
             "-llz4",
             "-lsqlite3",
             "-lz",
+            "-lresolv",
             "-framework",
             "CoreFoundation",
             "-framework",
@@ -568,6 +575,8 @@ pub(crate) fn audit_runtime_graphics_link_mode(
             "Security",
             "-framework",
             "AudioToolbox",
+            "-framework",
+            "CoreAudio",
             "-o",
         ])
         .arg(&runtime_library);

@@ -7,6 +7,7 @@ aosp="$project_root/_aosp"
 source_root="$aosp/frameworks/base/core/jni"
 lock_file="$project_root/upstream/android16-resource-jni.lock"
 critical_patch="$project_root/patches/frameworks-base/0004-darwin-core-critical-jni-abi.patch"
+asset_fd_patch="$project_root/patches/frameworks-base/0005-darwin-virtual-asset-fd.patch"
 build_dir="$project_root/_build/resource-jni-foundation"
 
 # shellcheck disable=SC1090
@@ -44,6 +45,7 @@ verify_hash "$source_root/include/android_runtime/AndroidRuntime.h" "$ANDROID_RU
 verify_hash "$source_root/include/android_runtime/android_util_AssetManager.h" \
   "$ANDROID_UTIL_ASSET_MANAGER_H_SHA256"
 verify_hash "$critical_patch" "$CRITICAL_JNI_PATCH_SHA256"
+verify_hash "$asset_fd_patch" "$ASSET_FD_PATCH_SHA256"
 
 stage_parent="$build_dir/stage"
 mkdir -p "$stage_parent"
@@ -68,6 +70,7 @@ cp "$source_root/include/android_runtime/AndroidRuntime.h" \
 cp "$source_root/include/android_runtime/android_util_AssetManager.h" \
   "$patched/include/android_runtime/android_util_AssetManager.h"
 patch -s -d "$patched" -p1 < "$critical_patch"
+patch -s -d "$patched" -p1 < "$asset_fd_patch"
 verify_hash "$patched/core_jni_helpers.h" "$CORE_JNI_HELPERS_PATCHED_SHA256"
 
 sources_file="$stage/resource-jni-sources.txt"
@@ -296,8 +299,9 @@ else
   quoted_undefined="$stage/provider-undefined.txt"
   sed -n 's/^  "\(.*\)", referenced from:$/\1/p' "$closure_log" > "$quoted_undefined"
   blocker_count="$(wc -l < "$quoted_undefined" | tr -d ' ')"
-  if [[ "$blocker_count" != 1 ]] ||
-     ! grep -Fx 'android::AndroidRuntime::getJNIEnv()' "$quoted_undefined" >/dev/null; then
+  if [[ "$blocker_count" != 2 ]] ||
+     ! grep -Fx 'android::AndroidRuntime::getJNIEnv()' "$quoted_undefined" >/dev/null ||
+     ! grep -Fx '_darwin_art_bionic_fs_adopt_host_fd_core' "$quoted_undefined" >/dev/null; then
     echo "resource-jni: unexpected provider closure failure" >&2
     cat "$closure_log" >&2
     exit 3
@@ -306,7 +310,7 @@ else
     echo "resource-jni: expected mangled provider blocker missing" >&2
     exit 3
   fi
-  provider_blocker='android::AndroidRuntime::getJNIEnv()'
+  provider_blocker='AndroidRuntime::getJNIEnv()+virtual-asset-fd'
 fi
 
 mkdir -p "$build_dir"

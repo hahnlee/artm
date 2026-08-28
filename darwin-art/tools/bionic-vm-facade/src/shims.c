@@ -38,6 +38,36 @@ int darwin_art_bionic_madvise(void* address, size_t length, int advice) {
   WRAP(saved, darwin_art_bionic_vm_madvise_core(address, length, advice));
 }
 
+int darwin_art_bionic_msync(void* address, size_t length, int flags) {
+  (void)flags;
+  // Owned mappings are anonymous/private, so validation plus a no-op is the
+  // complete synchronization behavior until file-backed VM mappings exist.
+  return darwin_art_bionic_madvise(address, length, 0);
+}
+
+int darwin_art_bionic_posix_madvise(void* address, size_t length, int advice) {
+  return darwin_art_bionic_madvise(address, length, advice) == 0 ? 0 : 22;
+}
+
+int darwin_art_bionic_mincore(void* address, size_t length,
+                              unsigned char* residency) {
+  if (residency == NULL) {
+    darwin_art_bionic_errno_store(14);
+    return -1;
+  }
+  if (darwin_art_bionic_madvise(address, length, 0) != 0) return -1;
+  const size_t pages = (length + 4095) / 4096;
+  for (size_t index = 0; index < pages; ++index) residency[index] = 1;
+  return 0;
+}
+
+void* darwin_art_bionic_mremap(void* old_address, size_t old_length,
+                               size_t new_length, int flags,
+                               void* new_address) {
+  WRAP(saved, darwin_art_bionic_vm_mremap_core(
+                  old_address, old_length, new_length, flags, new_address));
+}
+
 int darwin_art_bionic_mlock_unsupported(const void* address, size_t length) {
   (void)address;
   (void)length;
@@ -62,11 +92,15 @@ typedef struct Binding {
 
 static const Binding kBindings[] = {
     {"madvise", (DarwinArtBionicVmFunction)darwin_art_bionic_madvise},
+    {"mincore", (DarwinArtBionicVmFunction)darwin_art_bionic_mincore},
     {"mlock", (DarwinArtBionicVmFunction)darwin_art_bionic_mlock_unsupported},
     {"mmap", (DarwinArtBionicVmFunction)darwin_art_bionic_mmap},
     {"mmap64", (DarwinArtBionicVmFunction)darwin_art_bionic_mmap64},
     {"mprotect", (DarwinArtBionicVmFunction)darwin_art_bionic_mprotect},
+    {"mremap", (DarwinArtBionicVmFunction)darwin_art_bionic_mremap},
+    {"msync", (DarwinArtBionicVmFunction)darwin_art_bionic_msync},
     {"munmap", (DarwinArtBionicVmFunction)darwin_art_bionic_munmap},
+    {"posix_madvise", (DarwinArtBionicVmFunction)darwin_art_bionic_posix_madvise},
 };
 
 DarwinArtBionicVmFunction darwin_art_bionic_vm_resolve(

@@ -33,3 +33,19 @@ _darwin_art_bionic_wcstold:
   ldr q0, [sp, #16]
   ldp x29, x30, [sp], #32
   ret
+
+/* Android binary128 powl(q0, q1) -> q0. Keep Darwin's binary64 long double
+ * ABI completely outside the guest boundary. */
+.globl _darwin_art_bionic_powl
+_darwin_art_bionic_powl:
+  stp x29, x30, [sp, #-64]!
+  mov x29, sp
+  str q0, [sp, #16]
+  str q1, [sp, #32]
+  add x0, sp, #16
+  add x1, sp, #32
+  add x2, sp, #48
+  bl _darwin_art_bionic_powl_raw
+  ldr q0, [sp, #48]
+  ldp x29, x30, [sp], #64
+  ret

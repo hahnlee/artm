@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -40,8 +41,8 @@ __attribute__((visibility("default"))) int bionic_time_fixture_basic(void) {
   if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu) != 0 || cpu.tv_sec < 0 ||
       cpu.tv_nsec < 0 || cpu.tv_nsec >= 1000000000L) return 8;
 
-  errno = 0;
-  if (clock_gettime(CLOCK_MONOTONIC_RAW, &cpu) != -1 || errno != EINVAL)
+  if (clock_gettime(CLOCK_MONOTONIC_RAW, &cpu) != 0 || cpu.tv_sec < 0 ||
+      cpu.tv_nsec < 0 || cpu.tv_nsec >= 1000000000L)
     return 9;
   const struct timespec invalid = {-1, 0};
   errno = 0;
@@ -55,6 +56,12 @@ __attribute__((visibility("default"))) int bionic_time_fixture_basic(void) {
   if (configured < 1 || online < 1 || online > configured) return 12;
   errno = 0;
   if (sysconf(0x7fffffff) != -1 || errno != EINVAL) return 13;
+  struct timeval wall = {.tv_sec = -1, .tv_usec = -1};
+  if (gettimeofday(&wall, NULL) != 0 || wall.tv_sec < 1600000000LL ||
+      wall.tv_sec > 4102444800LL || wall.tv_usec < 0 ||
+      wall.tv_usec >= 1000000L || wall.tv_sec < realtime.tv_sec - 2 ||
+      wall.tv_sec > realtime.tv_sec + 2)
+    return 14;
   return 42;
 }
 

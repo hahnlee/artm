@@ -78,20 +78,40 @@ nm -u "$temp_root/shims.o" | sed 's/^[[:space:]]*//' | sort \
 cat >"$temp_root/expected-undefined" <<'EOF'
 ___error
 ___udivti3
+_asctime_r
+_clock
 _clock_gettime
+_ctime
 _darwin_art_bionic_errno_set_from_darwin
 _darwin_art_bionic_errno_store
+_daylight
+_difftime
+_gettimeofday
+_gmtime
+_gmtime_r
+_localtime
+_localtime_r
 _mach_continuous_time
 _mach_timebase_info
+_mktime
 _nanosleep
+_pthread_once
 _setitimer
 _sigaction
+_sleep
+_strcmp
 _sysconf
+_time
+_timegm
+_timezone
+_tzname
+_tzset
+_usleep
 EOF
 diff -u "$temp_root/expected-undefined" "$temp_root/undefined" ||
   fail 'shim dependency drift'
 definitions="$(nm -gU "$temp_root/shims.o")"
-for symbol in clock_gettime nanosleep sysconf time_resolve time_capability_failed; do
+for symbol in clock_gettime nanosleep sysconf time_resolve time_data_resolve time_capability_failed; do
   grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
     fail "missing prefixed definition $symbol"
 done
@@ -123,6 +143,7 @@ awk '$7=="UND" && $8!="" {print $8}' "$temp_root/dynsyms" | sort -u \
 cat >"$temp_root/expected-fixture-undefined" <<'EOF'
 __errno
 clock_gettime
+gettimeofday
 nanosleep
 sysconf
 EOF
@@ -139,4 +160,4 @@ CARGO_TARGET_DIR="$temp_root/cargo-target" cargo clippy --quiet \
   --manifest-path "$script_dir/Cargo.toml" -- -D warnings
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
 
-echo 'bionic-time-facade: PASS AndroidELF imports=4 clocks=5 nanosleep-EINTR sysconf=4 closed-resolver'
+echo 'bionic-time-facade: PASS AndroidELF imports=5 clocks=5 timeval=64-bit-usec nanosleep-EINTR sysconf=4 closed-resolver'

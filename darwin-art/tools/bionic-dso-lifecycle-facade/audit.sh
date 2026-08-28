@@ -109,7 +109,7 @@ EOF
 diff -u "$tmp/shims.expected" "$tmp/shims.actual" || fail 'shim dependency drift'
 definitions="$(nm -gU "$tmp/shims.o")"
 for symbol in ___cxa_atexit ___cxa_finalize ___cxa_thread_atexit_impl \
-              _dso_lifecycle_resolve; do
+              _dladdr _dso_install_dladdr _dso_lifecycle_resolve; do
   grep -F " _darwin_art_bionic$symbol" <<< "$definitions" >/dev/null ||
     fail "missing prefixed provider definition: $symbol"
 done

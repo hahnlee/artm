@@ -116,6 +116,9 @@ DarwinArtBionicFsProcessOwnerStatus
 darwin_art_bionic_fs_process_uninstall(void);
 /* Returns one/zero for the live owner and -1 when no owner is available. */
 int darwin_art_bionic_fs_process_has_capability_failure(void);
+/* Seeds one process-authorized app directory hierarchy in the private /data
+ * overlay. Immutable mounts are rejected. */
+int darwin_art_bionic_fs_seed_private_directory(const char* path);
 
 /* Fixed-register forms intentionally capture the Android AAPCS64 mode slot.
  * Calls without O_CREAT leave mode unspecified and the implementation ignores it. */
@@ -125,26 +128,32 @@ int darwin_art_bionic_openat(int directory_fd, const char* path, int flags,
 intptr_t darwin_art_bionic_read(int fd, void* buffer, size_t count);
 intptr_t darwin_art_bionic_pread(int fd, void* buffer, size_t count,
                                  int64_t offset);
+intptr_t darwin_art_bionic_pwrite(int fd, const void* buffer, size_t count,
+                                  int64_t offset);
 intptr_t darwin_art_bionic_write(int fd, const void* buffer, size_t count);
 intptr_t darwin_art_bionic___write_chk(int fd, const void* buffer,
                                        size_t count, size_t buffer_size);
 int64_t darwin_art_bionic_lseek(int fd, int64_t offset, int whence);
 int darwin_art_bionic_close(int fd);
+int darwin_art_bionic_access(const char* path, int mode);
 int darwin_art_bionic_fstat(int fd, DarwinArtAndroidStat* status);
 int darwin_art_bionic_fdatasync(int fd);
 int darwin_art_bionic_fsync(int fd);
+int darwin_art_bionic_fs_fsync_core(int fd);
 int darwin_art_bionic_stat(const char* path, DarwinArtAndroidStat* status);
 int darwin_art_bionic_lstat(const char* path, DarwinArtAndroidStat* status);
 intptr_t darwin_art_bionic_readlink(const char* path, char* buffer,
                                     size_t size);
 char* darwin_art_bionic_getcwd(char* buffer, size_t size);
 int darwin_art_bionic_chdir(const char* path);
+int darwin_art_bionic_chmod(const char* path, uint32_t mode);
 void* darwin_art_bionic_opendir(const char* path);
 void* darwin_art_bionic_fdopendir(int fd);
 DarwinArtAndroidDirent* darwin_art_bionic_readdir(void* directory);
 void darwin_art_bionic_rewinddir(void* directory);
 int darwin_art_bionic_closedir(void* directory);
 int darwin_art_bionic_fchmod(int fd, uint32_t mode);
+int darwin_art_bionic_fchown(int fd, uint32_t owner, uint32_t group);
 int darwin_art_bionic_fchmodat(int directory_fd, const char* path,
                                uint32_t mode, int flags);
 int darwin_art_bionic_ftruncate(int fd, int64_t length);
@@ -174,6 +183,19 @@ DarwinArtBionicFsFunction darwin_art_bionic_fs_resolve(const char* import_name);
 DarwinArtBionicIoctlFdLookupStatus darwin_art_bionic_fs_ioctl_fd_lookup(
     void* context, int32_t fd, DarwinArtBionicIoctlFdInfo* info);
 
+/* Returns 1 and transfers a duplicate Darwin descriptor to the caller when
+ * `fd` names a host-backed file, 0 when this facade does not own `fd`, and -1
+ * with Android errno set when an owned descriptor cannot be represented. */
+int darwin_art_bionic_fs_dup_host_fd_core(int fd, int* host_fd);
+
+/* Consumes one host descriptor returned by an in-process Android platform
+ * component and publishes it in the same virtual file table used by Bionic.
+ * The descriptor is closed on every failure path. */
+int darwin_art_bionic_fs_adopt_host_fd_core(int host_fd);
+/* Returns one when `fd` belongs to this process filesystem table and zero for
+ * host descriptors or descriptors owned by another central-broker provider. */
+int darwin_art_bionic_fs_owns_fd_core(int fd);
+
 /* Rust implementation boundary called only by the errno-preserving shims. */
 int darwin_art_bionic_fs_open_core(const char* path, int flags, uint32_t mode);
 int darwin_art_bionic_fs_openat_core(int directory_fd, const char* path,
@@ -181,10 +203,14 @@ int darwin_art_bionic_fs_openat_core(int directory_fd, const char* path,
 intptr_t darwin_art_bionic_fs_read_core(int fd, void* buffer, size_t count);
 intptr_t darwin_art_bionic_fs_pread_core(int fd, void* buffer, size_t count,
                                          int64_t offset);
+intptr_t darwin_art_bionic_fs_pwrite_core(int fd, const void* buffer,
+                                          size_t count, int64_t offset);
 intptr_t darwin_art_bionic_fs_write_core(int fd, const void* buffer,
                                          size_t count);
 int64_t darwin_art_bionic_fs_lseek_core(int fd, int64_t offset, int whence);
 int darwin_art_bionic_fs_close_core(int fd);
+int darwin_art_bionic_fs_flock_core(int fd, int operation);
+int darwin_art_bionic_fs_fcntl_core(int fd, int command, intptr_t argument);
 int darwin_art_bionic_fs_fstat_core(int fd, DarwinArtAndroidStat* status);
 int darwin_art_bionic_fs_stat_core(const char* path,
                                    DarwinArtAndroidStat* status);
@@ -194,12 +220,14 @@ intptr_t darwin_art_bionic_fs_readlink_core(const char* path, char* buffer,
                                             size_t size);
 char* darwin_art_bionic_fs_getcwd_core(char* buffer, size_t size);
 int darwin_art_bionic_fs_chdir_core(const char* path);
+int darwin_art_bionic_fs_chmod_core(const char* path, uint32_t mode);
 void* darwin_art_bionic_fs_opendir_core(const char* path);
 void* darwin_art_bionic_fs_fdopendir_core(int fd);
 DarwinArtAndroidDirent* darwin_art_bionic_fs_readdir_core(void* directory);
 void darwin_art_bionic_fs_rewinddir_core(void* directory);
 int darwin_art_bionic_fs_closedir_core(void* directory);
 int darwin_art_bionic_fs_fchmod_core(int fd, uint32_t mode);
+int darwin_art_bionic_fs_fchown_core(int fd, uint32_t owner, uint32_t group);
 int darwin_art_bionic_fs_fchmodat_core(int directory_fd, const char* path,
                                       uint32_t mode, int flags);
 int darwin_art_bionic_fs_ftruncate_core(int fd, int64_t length);
@@ -234,6 +262,10 @@ __attribute__((visibility("hidden"))) int darwin_art_bionic_fs_host_fpathconf(
     int fd, int semantic_name, int64_t* value, int* host_errno);
 __attribute__((visibility("hidden"))) int darwin_art_bionic_fs_host_fstatvfs(
     int fd, DarwinArtHostStatvfs* status, int* host_errno);
+__attribute__((visibility("hidden"))) int
+darwin_art_bionic_fs_host_record_lock(int host_fd, int android_command,
+                                      intptr_t android_lock,
+                                      int* host_errno);
 
 #ifdef __cplusplus
 }

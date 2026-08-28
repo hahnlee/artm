@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
@@ -42,6 +43,13 @@ struct Fake {
   int last_poll_timeout = -2;
   uint64_t next_accepted_object = 200;
   uint32_t accepted_kind = DARWIN_ART_FD_SOCKET;
+  bool wake_wait_entered = false;
+};
+
+struct FakePollWake {
+  std::mutex mutex;
+  std::condition_variable changed;
+  bool signaled = false;
 };
 
 intptr_t Read(void *context, uint64_t object, void *bytes, size_t count,
@@ -152,6 +160,60 @@ int PollMany(void *context, const uint64_t *objects, const int16_t *events,
   return ready;
 }
 
+uint64_t CreatePollWake(void *, int *android_errno) {
+  auto *wake = new FakePollWake();
+  *android_errno = 0;
+  return reinterpret_cast<uint64_t>(wake);
+}
+
+int SignalPollWake(void *, uint64_t object, int *android_errno) {
+  auto *wake = reinterpret_cast<FakePollWake *>(object);
+  {
+    std::lock_guard lock(wake->mutex);
+    wake->signaled = true;
+  }
+  wake->changed.notify_one();
+  *android_errno = 0;
+  return 0;
+}
+
+int ClosePollWake(void *, uint64_t object, int *android_errno) {
+  delete reinterpret_cast<FakePollWake *>(object);
+  *android_errno = 0;
+  return 0;
+}
+
+int PollManyWithWake(void *context, const uint64_t *objects,
+                     const int16_t *events, int16_t *revents, size_t count,
+                     int timeout_ms, uint64_t wake_object, int *woke,
+                     int *android_errno) {
+  bool ready = false;
+  for (size_t index = 0; index < count; ++index)
+    ready = ready || events[index] != 0;
+  if (ready) {
+    *woke = 0;
+    return PollMany(context, objects, events, revents, count, timeout_ms,
+                    android_errno);
+  }
+  auto *fake = static_cast<Fake *>(context);
+  {
+    std::lock_guard lock(fake->mutex);
+    fake->wake_wait_entered = true;
+  }
+  fake->changed.notify_all();
+  auto *wake = reinterpret_cast<FakePollWake *>(wake_object);
+  std::unique_lock lock(wake->mutex);
+  if (timeout_ms < 0) {
+    wake->changed.wait(lock, [&] { return wake->signaled; });
+  } else {
+    (void)wake->changed.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+                                 [&] { return wake->signaled; });
+  }
+  *woke = wake->signaled ? 1 : 0;
+  *android_errno = 0;
+  return *woke;
+}
+
 int Ioctl(void *context, uint64_t object, uint64_t request, void *argument,
           int *android_errno) {
   Fake *fake = static_cast<Fake *>(context);
@@ -260,7 +322,7 @@ intptr_t SocketOperation(void *context, uint64_t object,
 }
 
 DarwinArtFdOwnerV1 Callbacks(Fake *fake) {
-  return DarwinArtFdOwnerV1{DARWIN_ART_FD_OWNER_ABI_V4,
+  return DarwinArtFdOwnerV1{DARWIN_ART_FD_OWNER_ABI_V6,
                             sizeof(DarwinArtFdOwnerV1),
                             fake,
                             Read,
@@ -271,7 +333,13 @@ DarwinArtFdOwnerV1 Callbacks(Fake *fake) {
                             ReadAt,
                             WriteAt,
                             SocketOperation,
-                            PollMany};
+                            PollMany,
+                            nullptr,
+                            CreatePollWake,
+                            SignalPollWake,
+                            ClosePollWake,
+                            PollManyWithWake,
+                            nullptr};
 }
 
 size_t FindEvent(const std::vector<std::string> &events,
@@ -805,12 +873,62 @@ int main() {
   DarwinArtFdEpollEvent ready[4]{};
   Expect(
       darwin_art_fd_broker_epoll_wait(broker, epoll_fd, ready, 4, 1, &result),
-      DARWIN_ART_FD_BROKER_UNSUPPORTED);
+      DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 2 && fake.last_poll_timeout == 1 &&
+         ready[0].data == 0x1111 && ready[1].data == 0x3333);
+
+  int wake_epoll_fd = -1;
+  Expect(darwin_art_fd_broker_epoll_create1(broker, 0, &wake_epoll_fd),
+         DARWIN_ART_FD_BROKER_OK);
+  DarwinArtFdEpollEvent dormant_registration{0, 0x4444};
+  Expect(darwin_art_fd_broker_epoll_ctl(broker, wake_epoll_fd,
+                                        DARWIN_ART_EPOLL_CTL_ADD, socket_fd,
+                                        &dormant_registration, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  DarwinArtFdIoResult wake_wait_result{};
+  DarwinArtFdEpollEvent wake_ready{};
+  std::thread wake_waiter([&] {
+    Expect(darwin_art_fd_broker_epoll_wait(broker, wake_epoll_fd, &wake_ready,
+                                           1, 2000, &wake_wait_result),
+           DARWIN_ART_FD_BROKER_OK);
+  });
+  {
+    std::unique_lock lock(fake.mutex);
+    fake.changed.wait(lock, [&] { return fake.wake_wait_entered; });
+  }
+  DarwinArtFdEpollEvent new_registration{1, 0x5555};
+  Expect(darwin_art_fd_broker_epoll_ctl(broker, wake_epoll_fd,
+                                        DARWIN_ART_EPOLL_CTL_ADD, socket_dup,
+                                        &new_registration, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  wake_waiter.join();
+  assert(wake_wait_result.value == 1 && wake_ready.data == 0x5555);
+  Expect(darwin_art_fd_broker_close(broker, wake_epoll_fd, &result),
+         DARWIN_ART_FD_BROKER_OK);
+
   Expect(
       darwin_art_fd_broker_epoll_wait(broker, epoll_fd, ready, 4, 0, &result),
       DARWIN_ART_FD_BROKER_OK);
   assert(result.value == 2 && ready[0].data == 0x1111 &&
          ready[1].data == 0x3333);
+  registration.events = 0x40000001U;
+  registration.data = 0x3333;
+  Expect(darwin_art_fd_broker_epoll_ctl(broker, epoll_fd,
+                                        DARWIN_ART_EPOLL_CTL_MOD, socket_dup,
+                                        &registration, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(
+      darwin_art_fd_broker_epoll_wait(broker, epoll_fd, ready, 4, 0, &result),
+      DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 2);
+  Expect(
+      darwin_art_fd_broker_epoll_wait(broker, epoll_fd, ready, 4, 0, &result),
+      DARWIN_ART_FD_BROKER_OK);
+  assert(result.value == 1 && ready[0].data == 0x1111);
+  Expect(darwin_art_fd_broker_epoll_ctl(broker, epoll_fd,
+                                        DARWIN_ART_EPOLL_CTL_MOD, socket_dup,
+                                        &registration, &result),
+         DARWIN_ART_FD_BROKER_OK);
   Expect(darwin_art_fd_broker_epoll_ctl(broker, epoll_fd,
                                         DARWIN_ART_EPOLL_CTL_DEL, socket_dup,
                                         nullptr, &result),
@@ -819,6 +937,7 @@ int main() {
       darwin_art_fd_broker_epoll_wait(broker, epoll_fd, ready, 4, 0, &result),
       DARWIN_ART_FD_BROKER_OK);
   assert(result.value == 1 && ready[0].data == 0x1111);
+  registration.events = 1;
   registration.data = 0x2222;
   Expect(darwin_art_fd_broker_epoll_ctl(broker, epoll_fd,
                                         DARWIN_ART_EPOLL_CTL_ADD, socket_dup,

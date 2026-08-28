@@ -47,6 +47,16 @@ __attribute__((noreturn)) void darwin_art_bionic_abort(void) {
   void* parent = caller_frame != NULL ? (void*)caller_frame[1] : NULL;
   fprintf(stderr, "DARWIN Bionic abort: caller=%p parent=%p\n",
           __builtin_return_address(0), parent);
+  const uintptr_t* walk = frame;
+  for (size_t depth = 0; depth < 16 && walk != NULL; ++depth) {
+    fprintf(stderr, "DARWIN Bionic abort frame[%zu]=%p fp=%p\n", depth,
+            (void*)walk[1], (const void*)walk);
+    const uintptr_t* next = (const uintptr_t*)walk[0];
+    if (next <= walk || (uintptr_t)next - (uintptr_t)walk > 1024 * 1024) {
+      break;
+    }
+    walk = next;
+  }
   sigset_t mask;
   sigfillset(&mask);
   sigdelset(&mask, SIGABRT);
@@ -79,6 +89,11 @@ __attribute__((noreturn)) static void DarwinArtBionicAssert2(
           function != NULL ? function : "<unknown>",
           expression != NULL ? expression : "<unknown>");
   darwin_art_bionic_abort();
+}
+
+__attribute__((noreturn)) static void DarwinArtBionicAssert(
+    const char* file, int line, const char* expression) {
+  DarwinArtBionicAssert2(file, line, "<unknown>", expression);
 }
 
 void darwin_art_bionic_android_set_abort_message(const char* message) {
@@ -129,6 +144,8 @@ void* darwin_art_bionic_abort_resolve(const char* soname,
     return (void*)(uintptr_t)&darwin_art_bionic_abort;
   if (strcmp(symbol, "__stack_chk_fail") == 0)
     return (void*)(uintptr_t)&darwin_art_bionic___stack_chk_fail;
+  if (strcmp(symbol, "__assert") == 0)
+    return (void*)(uintptr_t)&DarwinArtBionicAssert;
   if (strcmp(symbol, "__assert2") == 0)
     return (void*)(uintptr_t)&DarwinArtBionicAssert2;
   if (strcmp(symbol, "android_set_abort_message") == 0)

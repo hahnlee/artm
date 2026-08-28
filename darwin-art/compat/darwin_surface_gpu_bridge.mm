@@ -146,6 +146,15 @@ bool darwin_art_surface_gpu_composite_embedded(
     DarwinArtSurface* surface, void* sk_canvas) {
   auto* state = State(surface);
   auto* canvas = static_cast<SkCanvas*>(sk_canvas);
+  if (std::getenv("DARWIN_ART_DEBUG_RESIZE") != nullptr) {
+    static std::atomic<uint32_t> calls{0};
+    const uint32_t call = calls.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (call <= 4) {
+      std::cerr << "ART Android GPU composite: entry pid=" << getpid()
+                << " surface=" << surface << " state=" << state
+                << " canvas=" << canvas << "\n";
+    }
+  }
   if (surface == nullptr || state == nullptr || canvas == nullptr) {
     return false;
   }
@@ -233,7 +242,7 @@ bool darwin_art_surface_gpu_composite_embedded(
         surface->width, surface->height, skgpu::Mipmapped::kNo, texture_info,
         "Darwin ART SurfaceView IOSurface");
     state->embedded_image = SkImages::BorrowTextureFrom(
-        state->context.get(), backend, kBottomLeft_GrSurfaceOrigin,
+        state->context.get(), backend, kTopLeft_GrSurfaceOrigin,
         kBGRA_8888_SkColorType, kPremul_SkAlphaType,
         SkColorSpace::MakeSRGB());
     if (state->embedded_image == nullptr) return false;

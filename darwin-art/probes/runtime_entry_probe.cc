@@ -1,5 +1,8 @@
 #include <mach-o/dyld.h>
 
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -78,6 +81,16 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     std::cerr << "darwin_art_run_process: process already started\n";
     return DARWIN_ART_STATUS_PROCESS_ALREADY_STARTED;
   }
+  const darwin_art_host_services_t* host_services =
+      config->struct_size >=
+              offsetof(darwin_art_process_config_t, host_services) +
+                  sizeof(config->host_services)
+          ? config->host_services
+          : nullptr;
+  if (!darwin_art_process::record_host_services(host_services)) {
+    std::cerr << "darwin_art_run_process: invalid host-services sidecar\n";
+    return 64;
+  }
   // The graphics sidecar is an additive tail of the ABI. Never read it from
   // a legacy prefix, and never overload host_context with graphics state.
   if (config->struct_size >=
@@ -129,6 +142,24 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   const bool has_apk_app_identity_environment =
       process_options.has_apk_app_identity_environment;
   const bool run_apk_app = process_options.run_apk_app;
+  const char* service_component =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_SERVICE_COMPONENT") : nullptr;
+  const char* service_control =
+      run_apk_app ? std::getenv("DARWIN_ART_SERVICE_CONTROL_FD") : nullptr;
+  const bool run_service_process = service_component != nullptr &&
+                                   *service_component != '\0' &&
+                                   service_control != nullptr;
+  std::string service_class_name;
+  std::string service_descriptor;
+  if (run_service_process) {
+    const char* slash = std::strchr(service_component, '/');
+    service_class_name = slash == nullptr ? service_component : slash + 1;
+    if (!service_class_name.empty() && service_class_name.front() == '.') {
+      service_class_name = process_options.apk_app_package + service_class_name;
+    }
+    service_descriptor = "L" + service_class_name + ";";
+    std::replace(service_descriptor.begin(), service_descriptor.end(), '.', '/');
+  }
   const bool run_framework_button = process_options.run_framework_button;
   const bool use_framework_resources = process_options.use_framework_resources;
   const jint window_scale = process_options.window_scale;
@@ -163,11 +194,13 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
               art::ParseStringList<':'>::Split(boot_class_path));
   options.Set(art::RuntimeArgumentMap::Interpret, true);
   options.Set(art::RuntimeArgumentMap::UseJitCompilation, false);
-  // Android's normal launcher always supplies a concrete growth limit. A
-  // directly constructed RuntimeArgumentMap leaves this key at zero, which
-  // MallocSpace interprets as zero capacity rather than "unlimited".
-  options.Set(art::RuntimeArgumentMap::HeapGrowthLimit,
+  options.Set(art::RuntimeArgumentMap::MemoryInitialSize,
               art::MemoryKiB(heap_initial));
+  // Android's normal launcher supplies Xms, HeapGrowthLimit, and Xmx as
+  // separate values. The detached runtime previously used Xms as the growth
+  // limit, permanently capping apps at 64 MiB even when Xmx was 256 MiB.
+  options.Set(art::RuntimeArgumentMap::HeapGrowthLimit,
+              art::MemoryKiB(heap_maximum));
   options.Set(art::RuntimeArgumentMap::MemoryMaximumSize,
               art::MemoryKiB(heap_maximum));
   art::LogVerbosity verbosity{};
@@ -215,7 +248,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   art::ClassLinker* class_linker = art::Runtime::Current()->GetClassLinker();
   art::StackHandleScope<32> hs(self);
   const char* activity_descriptor =
-      run_apk_app ? apk_app_descriptor : "Ldev/darwinart/probe/ProbeActivity;";
+      run_service_process
+          ? service_descriptor.c_str()
+          : (run_apk_app ? apk_app_descriptor
+                         : "Ldev/darwinart/probe/ProbeActivity;");
   darwin_art_app::ClassSet app_classes;
   const int app_status = darwin_art_app::load_classes(
       self->GetJniEnv(), self, class_linker, soa, hs, run_apk_app, config->app_dex,
@@ -372,6 +408,29 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   }
   jint lifecycle_result = 43;
   int presentation_status = 0;
+  if (run_service_process) {
+    if (darwin_art_install_context_loader(env, app_loader_ref) != 0) {
+      std::cerr << "ART Android service: context ClassLoader setup failed\n";
+      return 27;
+    }
+    const jint control_fd = static_cast<jint>(std::strtol(
+        service_control, nullptr, 10));
+    presentation_status = darwin_art_presentation::run_service(
+        env, self, probe_activity_class, probe_context_class,
+        probe_resources_class, package_manager, use_framework_resources,
+        window_scale, framework_res_apk, apk_app_package,
+        service_class_name.c_str(),
+        process_options.apk_app_resource_apk.c_str(), control_fd);
+    if (presentation_status != 0) return presentation_status;
+    run_result->hello_answer = 0;
+    run_result->native_round_trip = 0;
+    run_result->arraycopy_result = 0;
+    run_result->activity_probe_result = 0;
+    run_result->lifecycle_result = 0;
+    run_result->frame_width = 0;
+    run_result->frame_height = 0;
+    return 0;
+  }
   if (run_apk_app) {
     // NSWindow/CAMetalLayer and the ART process owner are both the host's
     // current thread. Keep the Android application owner on that same thread:
@@ -451,18 +510,6 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     env->DeleteLocalRef(context_binder);
     env->DeleteLocalRef(binder_internal);
 
-    activity_instance = activity_constructor == nullptr
-                            ? nullptr
-                            : env->NewObject(probe_activity_class,
-                                             activity_constructor);
-    if (activity_instance == nullptr || env->ExceptionCheck()) {
-      std::cerr << "ART Android owner: Activity construction failed\n";
-      if (env->ExceptionCheck()) {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-      }
-      return 23;
-    }
     presentation_status = darwin_art_presentation::run(
         env, self, activity_instance, probe_activity_class, probe_context_class,
         probe_resources_class, probe_view_class, probe_canvas_class,

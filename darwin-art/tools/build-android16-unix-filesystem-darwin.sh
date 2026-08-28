@@ -151,6 +151,8 @@ for required in \
   "$liblog_include/android/log.h" \
   "$liblog_archive" \
   "$project_root/probes/android16_unix_filesystem_jni.c" \
+  "$project_root/compat/darwin_libcore_filesystem_bridge.c" \
+  "$project_root/compat/darwin_libcore_filesystem_bridge.h" \
   "$project_root/probes/unix-filesystem/UnixFileSystemDarwinSmoke.java"; do
   [[ -e "$required" ]] || fail "missing build dependency: $required"
 done
@@ -175,19 +177,32 @@ common_flags=(
   -I"$nativehelper_source/include_platform_header_only"
   -I"$nativehelper_source/header_only_include"
   -I"$liblog_include"
+  -I"$project_root/compat"
+  -I"$project_root/tools/bionic-fs-facade/include"
+  -I"$project_root/tools/bionic-ioctl-facade/include"
+  -I"$project_root/tools/bionic-errno-tls/include"
 )
 
 while IFS= read -r source; do
   object="$objects/${source%.*}.o"
-  "$cc" "${common_flags[@]}" -c "$native_root/$source" -o "$object"
+  "$cc" "${common_flags[@]}" \
+    -include "$project_root/compat/darwin_libcore_filesystem_bridge.h" \
+    -Dstat=darwin_art_libcore_stat \
+    -Dmkdir=darwin_art_libcore_mkdir \
+    -Dchmod=darwin_art_libcore_chmod \
+    -c "$native_root/$source" -o "$object"
   [[ "$(file "$object")" == *"Mach-O 64-bit object arm64"* ]] ||
     fail "non-arm64 object: $source"
 done < "$closure_manifest"
 
+"$cc" "${common_flags[@]}" \
+  -c "$project_root/compat/darwin_libcore_filesystem_bridge.c" \
+  -o "$objects/darwin_libcore_filesystem_bridge.o"
+
 archive="$stage/libopenjdk-unix-filesystem-darwin.a"
 "$libtool_bin" -static -o "$archive" "$objects"/*.o
 member_count="$({ ar -t "$archive" || true; } | grep -v '^__\.SYMDEF' | wc -l | tr -d ' ')"
-[[ "$member_count" == "$UNIX_FILESYSTEM_CLOSURE_SOURCE_COUNT" &&
+[[ "$member_count" == "$((UNIX_FILESYSTEM_CLOSURE_SOURCE_COUNT + 1))" &&
    "$(lipo -archs "$archive")" == arm64 ]] ||
   fail "archive identity members=$member_count archs=$(lipo -archs "$archive")"
 

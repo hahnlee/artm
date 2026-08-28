@@ -121,7 +121,7 @@ fn expect_closed_resolver_negatives() -> Result<(), Box<dyn std::error::Error>> 
     let wrong_soname = CString::new("libSystem.B.dylib")?;
     let wrong_version = CString::new("DARWIN")?;
     let unknown = CString::new("pthread_cancel")?;
-    let unowned_rwlock = CString::new("pthread_rwlock_destroy")?;
+    let unowned_barrier = CString::new("pthread_barrier_init")?;
     unsafe {
         if !darwin_art_bionic_pthread_resolve(
             wrong_soname.as_ptr(),
@@ -139,7 +139,7 @@ fn expect_closed_resolver_negatives() -> Result<(), Box<dyn std::error::Error>> 
                 .is_null()
             || !darwin_art_bionic_pthread_resolve(
                 libc.as_ptr(),
-                unowned_rwlock.as_ptr(),
+                unowned_barrier.as_ptr(),
                 version.as_ptr(),
             )
             .is_null()

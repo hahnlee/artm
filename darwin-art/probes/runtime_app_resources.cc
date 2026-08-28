@@ -1,6 +1,89 @@
 #include "runtime_app_resources.h"
 
 namespace darwin_art_app_resources {
+namespace {
+
+bool InstallInitialDisplayConfiguration(JNIEnv* env, jobject resources,
+                                        jint window_scale) {
+  jclass resources_class = env->FindClass("android/content/res/Resources");
+  jmethodID get_configuration =
+      resources_class == nullptr
+          ? nullptr
+          : env->GetMethodID(resources_class, "getConfiguration",
+                             "()Landroid/content/res/Configuration;");
+  jobject configuration =
+      get_configuration == nullptr
+          ? nullptr
+          : env->CallObjectMethod(resources, get_configuration);
+  jclass configuration_class =
+      env->FindClass("android/content/res/Configuration");
+  jfieldID window_configuration_field =
+      configuration_class == nullptr
+          ? nullptr
+          : env->GetFieldID(configuration_class, "windowConfiguration",
+                            "Landroid/app/WindowConfiguration;");
+  jobject window_configuration =
+      window_configuration_field == nullptr || configuration == nullptr
+          ? nullptr
+          : env->GetObjectField(configuration, window_configuration_field);
+  jclass window_configuration_class =
+      env->FindClass("android/app/WindowConfiguration");
+  jclass rect_class = env->FindClass("android/graphics/Rect");
+  jmethodID rect_constructor =
+      rect_class == nullptr
+          ? nullptr
+          : env->GetMethodID(rect_class, "<init>", "(IIII)V");
+  jobject bounds = rect_constructor == nullptr
+                       ? nullptr
+                       : env->NewObject(rect_class, rect_constructor, 0, 0,
+                                        360 * window_scale,
+                                        640 * window_scale);
+  jmethodID set_bounds =
+      window_configuration_class == nullptr
+          ? nullptr
+          : env->GetMethodID(window_configuration_class, "setBounds",
+                             "(Landroid/graphics/Rect;)V");
+  jmethodID set_max_bounds =
+      window_configuration_class == nullptr
+          ? nullptr
+          : env->GetMethodID(window_configuration_class, "setMaxBounds",
+                             "(Landroid/graphics/Rect;)V");
+  if (window_configuration == nullptr || bounds == nullptr ||
+      set_bounds == nullptr || set_max_bounds == nullptr ||
+      env->ExceptionCheck()) {
+    return false;
+  }
+  env->CallVoidMethod(window_configuration, set_bounds, bounds);
+  env->CallVoidMethod(window_configuration, set_max_bounds, bounds);
+
+  jclass resources_manager_class =
+      env->FindClass("android/app/ResourcesManager");
+  jmethodID get_instance =
+      resources_manager_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(resources_manager_class, "getInstance",
+                                   "()Landroid/app/ResourcesManager;");
+  jobject resources_manager =
+      get_instance == nullptr
+          ? nullptr
+          : env->CallStaticObjectMethod(resources_manager_class, get_instance);
+  jmethodID apply_configuration =
+      resources_manager_class == nullptr
+          ? nullptr
+          : env->GetMethodID(
+                resources_manager_class, "applyConfigurationToResources",
+                "(Landroid/content/res/Configuration;"
+                "Landroid/content/res/CompatibilityInfo;)Z");
+  if (resources_manager == nullptr || apply_configuration == nullptr ||
+      env->ExceptionCheck()) {
+    return false;
+  }
+  env->CallBooleanMethod(resources_manager, apply_configuration, configuration,
+                         nullptr);
+  return !env->ExceptionCheck();
+}
+
+}  // namespace
 
 int prepare(JNIEnv* env, jclass probe_resources_class,
             bool use_framework_resources, jint window_scale,
@@ -128,6 +211,11 @@ int prepare(JNIEnv* env, jclass probe_resources_class,
           : env->NewObject(probe_resources_class, probe_resources_constructor,
                            out->asset_manager,
                            use_framework_resources ? JNI_TRUE : JNI_FALSE);
+  if (out->probe_resources != nullptr && !env->ExceptionCheck() &&
+      !InstallInitialDisplayConfiguration(env, out->probe_resources,
+                                          window_scale)) {
+    return 27;
+  }
   if (use_framework_resources && out->asset_manager != nullptr &&
       out->probe_resources != nullptr && !env->ExceptionCheck()) {
     // Zygote normally initializes these process-wide singletons before any

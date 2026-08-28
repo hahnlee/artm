@@ -8,6 +8,7 @@
 #include <time.h>
 
 #include "base/locks.h"
+#include "darwin_android_platform.h"
 #include "darwin_framework_natives.h"
 #include "darwin_art/darwin_art.h"
 #include "runtime_hwui_probe.h"
@@ -50,6 +51,21 @@ int64_t MonotonicNanos() {
 // lets the host interleave due Handler work with native events and Metal
 // frames just like one ViewRoot traversal.
 bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
+  static bool logged_sync_barrier = false;
+  static bool logged_native_poll_error = false;
+  const int initial_native_dispatch =
+      darwin_art_android_platform_poll_current_looper();
+  if (initial_native_dispatch < 0) {
+    // Android's MessageQueue does not terminate the Java loop when the native
+    // Looper reports POLL_ERROR (for example, an interrupted or concurrently
+    // closed native registration). Keep Handler/Choreographer work alive and
+    // let the next non-blocking poll recover.
+    if (!logged_native_poll_error) {
+      logged_native_poll_error = true;
+      std::cerr << "ART Android Looper: native poll failed; continuing main "
+                   "queue\n";
+    }
+  }
   jclass looper_class = env->FindClass("android/os/Looper");
   jclass queue_class = env->FindClass("android/os/MessageQueue");
   jclass message_class = env->FindClass("android/os/Message");
@@ -71,6 +87,9 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
   jfieldID message_when = message_class == nullptr
                               ? nullptr
                               : env->GetFieldID(message_class, "when", "J");
+  jfieldID message_what = message_class == nullptr
+                              ? nullptr
+                              : env->GetFieldID(message_class, "what", "I");
   jfieldID message_next =
       message_class == nullptr
           ? nullptr
@@ -98,6 +117,7 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
           : env->GetStaticMethodID(clock_class, "uptimeMillis", "()J");
   const bool resolved = my_queue != nullptr && queue_next != nullptr &&
                         queue_messages != nullptr && message_when != nullptr &&
+                        message_what != nullptr &&
                         message_next != nullptr && message_target != nullptr &&
                         is_asynchronous != nullptr && recycle != nullptr &&
                         dispatch != nullptr && uptime_millis != nullptr &&
@@ -106,16 +126,37 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
                       ? env->CallStaticObjectMethod(looper_class, my_queue)
                       : nullptr;
   bool ok = resolved && queue != nullptr && !env->ExceptionCheck();
+  static int debug_queue_frames = 20;
   for (size_t dispatched = 0; ok && dispatched < limit; ++dispatched) {
     jobject head = env->GetObjectField(queue, queue_messages);
     if (head == nullptr || env->ExceptionCheck()) {
+      if (debug_queue_frames > 0 &&
+          std::getenv("DARWIN_ART_DEBUG_MAIN_QUEUE") != nullptr) {
+        --debug_queue_frames;
+        std::cerr << "ART Android Looper: queue empty\n";
+      }
       if (head != nullptr) env->DeleteLocalRef(head);
       break;
     }
     const jlong now = env->CallStaticLongMethod(clock_class, uptime_millis);
     jobject target = env->GetObjectField(head, message_target);
+    if (debug_queue_frames > 0 &&
+        std::getenv("DARWIN_ART_DEBUG_MAIN_QUEUE") != nullptr) {
+      --debug_queue_frames;
+      std::cerr << "ART Android Looper: head what="
+                << env->GetIntField(head, message_what)
+                << " when=" << env->GetLongField(head, message_when)
+                << " now=" << now << " target=" << target << "\n";
+    }
     bool selectable = target != nullptr &&
                       env->GetLongField(head, message_when) <= now;
+    if (target == nullptr && !logged_sync_barrier &&
+        std::getenv("DARWIN_ART_DEBUG_MAIN_QUEUE") != nullptr) {
+      logged_sync_barrier = true;
+      std::cerr << "ART Android Looper: pending synchronization barrier when="
+                << env->GetLongField(head, message_when) << " now=" << now
+                << "\n";
+    }
     if (target != nullptr) env->DeleteLocalRef(target);
     if (!selectable) {
       // A null target is a synchronization barrier. MessageQueue.next() may
@@ -166,6 +207,12 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
   if (message_class != nullptr) env->DeleteLocalRef(message_class);
   if (queue_class != nullptr) env->DeleteLocalRef(queue_class);
   if (looper_class != nullptr) env->DeleteLocalRef(looper_class);
+  if (ok && darwin_art_android_platform_poll_current_looper() < 0 &&
+      !logged_native_poll_error) {
+    logged_native_poll_error = true;
+    std::cerr << "ART Android Looper: native poll failed; continuing main "
+                 "queue\n";
+  }
   return ok;
 }
 
@@ -1134,7 +1181,14 @@ int32_t dispatch_pointer_internal(GraphicsState* state, uint32_t action, float x
   if (action == 1u && pressed_view != nullptr) {
     if (same_pressed_view && perform_click != nullptr &&
         !env->ExceptionCheck()) {
-      env->CallBooleanMethod(pressed_view, perform_click);
+      const jboolean clicked =
+          env->CallBooleanMethod(pressed_view, perform_click);
+      if (std::getenv("DARWIN_ART_DEBUG_POINTER") != nullptr) {
+        std::cerr << "ART Android input debug performClick="
+                  << (clicked == JNI_TRUE ? 1 : 0)
+                  << " exception=" << (env->ExceptionCheck() ? 1 : 0)
+                  << "\n";
+      }
     }
     env->DeleteGlobalRef(pressed_view);
     pressed_view = nullptr;
@@ -1157,6 +1211,375 @@ int32_t dispatch_pointer_v2(GraphicsState* state,
   return dispatch_pointer_internal(state, event->action, event->x, event->y,
                                    event->event_time_nanos,
                                    event->down_time_nanos);
+}
+
+void DebugChromeOmniboxState(JNIEnv* env, jobject view_root) {
+  if (std::getenv("DARWIN_ART_DEBUG_CHROME_OMNIBOX") == nullptr) return;
+  jclass root_class = env->GetObjectClass(view_root);
+  jmethodID get_view =
+      root_class == nullptr
+          ? nullptr
+          : env->GetMethodID(root_class, "getView", "()Landroid/view/View;");
+  jobject root = get_view == nullptr
+                     ? nullptr
+                     : env->CallObjectMethod(view_root, get_view);
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID find_focus =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "findFocus", "()Landroid/view/View;");
+  jobject focus = root == nullptr || find_focus == nullptr
+                      ? nullptr
+                      : env->CallObjectMethod(root, find_focus);
+  jclass focus_class = focus == nullptr ? nullptr : env->GetObjectClass(focus);
+  jfieldID listener_field =
+      focus_class == nullptr
+          ? nullptr
+          : env->GetFieldID(focus_class, "D", "Landroid/view/View$OnKeyListener;");
+  if (listener_field == nullptr || env->ExceptionCheck()) {
+    env->ExceptionClear();
+    std::cerr << "ART Chrome omnibox: focused view is not UrlBar focus="
+              << focus << "\n";
+    env->DeleteLocalRef(focus_class);
+    env->DeleteLocalRef(focus);
+    env->DeleteLocalRef(view_class);
+    env->DeleteLocalRef(root);
+    env->DeleteLocalRef(root_class);
+    return;
+  }
+  jobject listener = listener_field == nullptr
+                         ? nullptr
+                         : env->GetObjectField(focus, listener_field);
+  if (listener == nullptr && !env->ExceptionCheck()) {
+    jfieldID tab_listener_field =
+        env->GetFieldID(focus_class, "K", "Landroid/view/View$OnKeyListener;");
+    if (tab_listener_field != nullptr && !env->ExceptionCheck()) {
+      listener = env->GetObjectField(focus, tab_listener_field);
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+  }
+  jclass listener_class =
+      listener == nullptr ? nullptr : env->GetObjectClass(listener);
+  jfieldID mediator_field =
+      listener_class == nullptr
+          ? nullptr
+          : env->GetFieldID(listener_class, "q0", "Lum0;");
+  jobject mediator = mediator_field == nullptr
+                         ? nullptr
+                         : env->GetObjectField(listener, mediator_field);
+  jclass mediator_class =
+      mediator == nullptr ? nullptr : env->GetObjectClass(mediator);
+  jfieldID model_field =
+      mediator_class == nullptr
+          ? nullptr
+          : env->GetFieldID(mediator_class, "d", "Lon0;");
+  jobject model = model_field == nullptr
+                      ? nullptr
+                      : env->GetObjectField(mediator, model_field);
+  jclass model_class = model == nullptr ? nullptr : env->GetObjectClass(model);
+  jmethodID ready_method =
+      model_class == nullptr ? nullptr : env->GetMethodID(model_class, "p", "()Z");
+  jmethodID count_method =
+      model_class == nullptr ? nullptr : env->GetMethodID(model_class, "n", "()I");
+  const jboolean ready = ready_method == nullptr
+                             ? JNI_FALSE
+                             : env->CallBooleanMethod(model, ready_method);
+  const jint count = count_method == nullptr ? -1 : env->CallIntMethod(model, count_method);
+  jfieldID controller_field =
+      model_class == nullptr
+          ? nullptr
+          : env->GetFieldID(
+                model_class, "U",
+                "Lorg/chromium/chrome/browser/omnibox/suggestions/AutocompleteController;");
+  jobject controller = controller_field == nullptr
+                           ? nullptr
+                           : env->GetObjectField(model, controller_field);
+  jclass controller_class =
+      controller == nullptr ? nullptr : env->GetObjectClass(controller);
+  jfieldID native_field = controller_class == nullptr
+                              ? nullptr
+                              : env->GetFieldID(controller_class, "b", "J");
+  const jlong native_pointer = native_field == nullptr
+                                   ? 0
+                                   : env->GetLongField(controller, native_field);
+  jfieldID state_field =
+      model_class == nullptr
+          ? nullptr
+          : env->GetFieldID(model_class, "I", "Lym0;");
+  jobject omnibox_state = state_field == nullptr
+                              ? nullptr
+                              : env->GetObjectField(model, state_field);
+  jclass omnibox_state_class =
+      omnibox_state == nullptr ? nullptr : env->GetObjectClass(omnibox_state);
+  jmethodID state_method =
+      omnibox_state_class == nullptr
+          ? nullptr
+          : env->GetMethodID(omnibox_state_class, "e", "()I");
+  jmethodID input_mode_method =
+      omnibox_state_class == nullptr
+          ? nullptr
+          : env->GetMethodID(omnibox_state_class, "f", "()I");
+  const jint page_state = state_method == nullptr
+                              ? -1
+                              : env->CallIntMethod(omnibox_state, state_method);
+  const jint input_mode = input_mode_method == nullptr
+                              ? -1
+                              : env->CallIntMethod(omnibox_state, input_mode_method);
+  jfieldID loading_field = model_class == nullptr
+                               ? nullptr
+                               : env->GetFieldID(model_class, "c0", "Z");
+  const jboolean loading = loading_field == nullptr
+                               ? JNI_FALSE
+                               : env->GetBooleanField(model, loading_field);
+  jfieldID text_provider_field =
+      model_class == nullptr
+          ? nullptr
+          : env->GetFieldID(model_class, "u", "Lyzg;");
+  jobject text_provider = text_provider_field == nullptr
+                              ? nullptr
+                              : env->GetObjectField(model, text_provider_field);
+  jclass text_provider_class =
+      text_provider == nullptr ? nullptr : env->GetObjectClass(text_provider);
+  jmethodID text_method =
+      text_provider_class == nullptr
+          ? nullptr
+          : env->GetMethodID(text_provider_class, "b", "()Ljava/lang/String;");
+  jstring typed = text_method == nullptr
+                      ? nullptr
+                      : static_cast<jstring>(
+                            env->CallObjectMethod(text_provider, text_method));
+  const char* typed_utf =
+      typed == nullptr ? nullptr : env->GetStringUTFChars(typed, nullptr);
+  jmethodID match_method =
+      controller_class == nullptr
+          ? nullptr
+          : env->GetMethodID(
+                controller_class, "a",
+                "(Ljava/lang/String;)Lorg/chromium/components/omnibox/AutocompleteMatch;");
+  jobject match = match_method == nullptr || typed == nullptr
+                      ? nullptr
+                      : env->CallObjectMethod(controller, match_method, typed);
+  jclass match_class = match == nullptr ? nullptr : env->GetObjectClass(match);
+  jfieldID destination_field =
+      match_class == nullptr
+          ? nullptr
+          : env->GetFieldID(match_class, "l", "Lorg/chromium/url/GURL;");
+  jobject destination = destination_field == nullptr
+                            ? nullptr
+                            : env->GetObjectField(match, destination_field);
+  jclass gurl_class = destination == nullptr ? nullptr : env->GetObjectClass(destination);
+  jmethodID gurl_spec_method =
+      gurl_class == nullptr
+          ? nullptr
+          : env->GetMethodID(gurl_class, "k", "()Ljava/lang/String;");
+  jstring destination_spec =
+      gurl_spec_method == nullptr
+          ? nullptr
+          : static_cast<jstring>(
+                env->CallObjectMethod(destination, gurl_spec_method));
+  const char* destination_utf =
+      destination_spec == nullptr
+          ? nullptr
+          : env->GetStringUTFChars(destination_spec, nullptr);
+  jclass class_class = env->FindClass("java/lang/Class");
+  jmethodID get_class_loader =
+      class_class == nullptr
+          ? nullptr
+          : env->GetMethodID(class_class, "getClassLoader",
+                             "()Ljava/lang/ClassLoader;");
+  jobject app_loader = get_class_loader == nullptr
+                           ? nullptr
+                           : env->CallObjectMethod(focus_class,
+                                                   get_class_loader);
+  jclass loader_class =
+      app_loader == nullptr ? nullptr : env->GetObjectClass(app_loader);
+  jmethodID load_class =
+      loader_class == nullptr
+          ? nullptr
+          : env->GetMethodID(loader_class, "loadClass",
+                             "(Ljava/lang/String;)Ljava/lang/Class;");
+  jstring native_mux_name = env->NewStringUTF("J.N");
+  jclass native_mux_class =
+      load_class == nullptr || native_mux_name == nullptr
+          ? nullptr
+          : static_cast<jclass>(env->CallObjectMethod(
+                app_loader, load_class, native_mux_name));
+  jmethodID should_handle_method =
+      native_mux_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(native_mux_class, "ZO", "(ILjava/lang/Object;)Z");
+  const jboolean handled_without_navigation =
+      should_handle_method == nullptr || destination == nullptr
+          ? JNI_FALSE
+          : env->CallStaticBooleanMethod(native_mux_class, should_handle_method,
+                                         66, destination);
+  jfieldID native_ready_field =
+      listener_class == nullptr ? nullptr
+                                : env->GetFieldID(listener_class, "v0", "Z");
+  const jboolean native_ready =
+      native_ready_field == nullptr
+          ? JNI_FALSE
+          : env->GetBooleanField(listener, native_ready_field);
+  jfieldID tab_provider_field =
+      listener_class == nullptr
+          ? nullptr
+          : env->GetFieldID(listener_class, "t", "Lx28;");
+  jobject tab_provider = tab_provider_field == nullptr
+                             ? nullptr
+                             : env->GetObjectField(listener, tab_provider_field);
+  jclass tab_provider_class =
+      tab_provider == nullptr ? nullptr : env->GetObjectClass(tab_provider);
+  jmethodID get_tab_method =
+      tab_provider_class == nullptr
+          ? nullptr
+          : env->GetMethodID(
+                tab_provider_class, "h",
+                "()Lorg/chromium/chrome/browser/tab/Tab;");
+  jobject tab = get_tab_method == nullptr
+                    ? nullptr
+                    : env->CallObjectMethod(tab_provider, get_tab_method);
+  jclass tab_class = tab == nullptr ? nullptr : env->GetObjectClass(tab);
+  jmethodID get_web_contents_method =
+      tab_class == nullptr
+          ? nullptr
+          : env->GetMethodID(
+                tab_class, "getWebContents",
+                "()Lorg/chromium/content_public/browser/WebContents;");
+  jobject web_contents = get_web_contents_method == nullptr
+                             ? nullptr
+                             : env->CallObjectMethod(tab, get_web_contents_method);
+  jclass web_contents_class =
+      web_contents == nullptr ? nullptr : env->GetObjectClass(web_contents);
+  jmethodID get_navigation_controller_method =
+      web_contents_class == nullptr
+          ? nullptr
+          : env->GetMethodID(
+                web_contents_class, "v",
+                "()Lorg/chromium/content_public/browser/NavigationController;");
+  jobject navigation_controller =
+      get_navigation_controller_method == nullptr
+          ? nullptr
+          : env->CallObjectMethod(web_contents,
+                                  get_navigation_controller_method);
+  jclass navigation_controller_class =
+      navigation_controller == nullptr
+          ? nullptr
+          : env->GetObjectClass(navigation_controller);
+  jfieldID navigation_native_field =
+      navigation_controller_class == nullptr
+          ? nullptr
+          : env->GetFieldID(navigation_controller_class, "a", "J");
+  const jlong navigation_native =
+      navigation_native_field == nullptr
+          ? 0
+          : env->GetLongField(navigation_controller, navigation_native_field);
+  jmethodID current_url_method =
+      web_contents_class == nullptr
+          ? nullptr
+          : env->GetMethodID(web_contents_class, "L",
+                             "()Lorg/chromium/url/GURL;");
+  jobject current_url = current_url_method == nullptr
+                            ? nullptr
+                            : env->CallObjectMethod(web_contents,
+                                                    current_url_method);
+  jclass current_url_class =
+      current_url == nullptr ? nullptr : env->GetObjectClass(current_url);
+  jmethodID current_url_spec_method =
+      current_url_class == nullptr
+          ? nullptr
+          : env->GetMethodID(current_url_class, "k", "()Ljava/lang/String;");
+  jstring current_url_spec =
+      current_url_spec_method == nullptr
+          ? nullptr
+          : static_cast<jstring>(
+                env->CallObjectMethod(current_url, current_url_spec_method));
+  const char* current_url_utf =
+      current_url_spec == nullptr
+          ? nullptr
+          : env->GetStringUTFChars(current_url_spec, nullptr);
+  jclass object_class = env->FindClass("java/lang/Object");
+  jmethodID to_string =
+      object_class == nullptr
+          ? nullptr
+          : env->GetMethodID(object_class, "toString", "()Ljava/lang/String;");
+  jstring text = focus == nullptr || to_string == nullptr
+                     ? nullptr
+                     : static_cast<jstring>(env->CallObjectMethod(focus, to_string));
+  const char* utf = text == nullptr ? nullptr : env->GetStringUTFChars(text, nullptr);
+  std::cerr << "ART Chrome omnibox: focus=" << focus
+            << " listener=" << listener << " mediator=" << mediator
+            << " model=" << model << " ready=" << (ready == JNI_TRUE ? 1 : 0)
+            << " suggestions=" << count << " controller=" << controller
+            << " native=" << native_pointer
+            << " page_state=" << page_state
+            << " input_mode=" << input_mode
+            << " loading=" << (loading == JNI_TRUE ? 1 : 0)
+            << " location_native=" << (native_ready == JNI_TRUE ? 1 : 0)
+            << " tab=" << tab << " web_contents=" << web_contents
+            << " navigation=" << navigation_controller
+            << " navigation_native=" << navigation_native
+            << " typed=" << (typed_utf == nullptr ? "(null)" : typed_utf)
+            << " match=" << match
+            << " destination="
+            << (destination_utf == nullptr ? "(null)" : destination_utf)
+            << " native_handled="
+            << (handled_without_navigation == JNI_TRUE ? 1 : 0)
+            << " current_url="
+            << (current_url_utf == nullptr ? "(null)" : current_url_utf)
+            << " text=" << (utf == nullptr ? "(null)" : utf) << "\n";
+  if (typed_utf != nullptr) env->ReleaseStringUTFChars(typed, typed_utf);
+  if (destination_utf != nullptr) {
+    env->ReleaseStringUTFChars(destination_spec, destination_utf);
+  }
+  if (current_url_utf != nullptr) {
+    env->ReleaseStringUTFChars(current_url_spec, current_url_utf);
+  }
+  if (utf != nullptr) env->ReleaseStringUTFChars(text, utf);
+  env->DeleteLocalRef(match);
+  env->DeleteLocalRef(current_url_spec);
+  env->DeleteLocalRef(current_url_class);
+  env->DeleteLocalRef(current_url);
+  env->DeleteLocalRef(native_mux_class);
+  env->DeleteLocalRef(native_mux_name);
+  env->DeleteLocalRef(loader_class);
+  env->DeleteLocalRef(app_loader);
+  env->DeleteLocalRef(class_class);
+  env->DeleteLocalRef(destination_spec);
+  env->DeleteLocalRef(gurl_class);
+  env->DeleteLocalRef(destination);
+  env->DeleteLocalRef(match_class);
+  env->DeleteLocalRef(typed);
+  env->DeleteLocalRef(navigation_controller_class);
+  env->DeleteLocalRef(navigation_controller);
+  env->DeleteLocalRef(web_contents_class);
+  env->DeleteLocalRef(web_contents);
+  env->DeleteLocalRef(tab_class);
+  env->DeleteLocalRef(tab);
+  env->DeleteLocalRef(tab_provider_class);
+  env->DeleteLocalRef(tab_provider);
+  env->DeleteLocalRef(text_provider_class);
+  env->DeleteLocalRef(text_provider);
+  env->DeleteLocalRef(omnibox_state_class);
+  env->DeleteLocalRef(omnibox_state);
+  env->DeleteLocalRef(text);
+  env->DeleteLocalRef(object_class);
+  env->DeleteLocalRef(controller_class);
+  env->DeleteLocalRef(controller);
+  env->DeleteLocalRef(model_class);
+  env->DeleteLocalRef(model);
+  env->DeleteLocalRef(mediator_class);
+  env->DeleteLocalRef(mediator);
+  env->DeleteLocalRef(listener_class);
+  env->DeleteLocalRef(listener);
+  env->DeleteLocalRef(focus_class);
+  env->DeleteLocalRef(focus);
+  env->DeleteLocalRef(view_class);
+  env->DeleteLocalRef(root);
+  env->DeleteLocalRef(root_class);
+  if (env->ExceptionCheck()) {
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+  }
 }
 
 int32_t dispatch_key_v1(GraphicsState* state,
@@ -1198,11 +1621,57 @@ int32_t dispatch_key_v1(GraphicsState* state,
       key_event != nullptr && !env->ExceptionCheck() &&
       darwin_art::DispatchFrameworkInputEvent(
           env, state->interactive_view_root, key_event, &handled);
+  bool delivered_to_focused_view = false;
+  if (delivered && !handled) {
+    // The compatibility InputChannel owns a detached receiver, so an event that
+    // finishes unhandled does not continue through ViewPostImeInputStage as it
+    // would under Android's WindowManager-managed ViewRootImpl. Complete that
+    // terminal stage generically by dispatching to the currently focused View.
+    // The finished-event result prevents a second delivery when the channel
+    // path already consumed the event.
+    jclass root_class = env->GetObjectClass(state->interactive_view_root);
+    jmethodID get_view = root_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(root_class, "getView",
+                                                "()Landroid/view/View;");
+    jobject root = get_view == nullptr
+                       ? nullptr
+                       : env->CallObjectMethod(state->interactive_view_root,
+                                               get_view);
+    jclass view_class = root == nullptr ? nullptr : env->GetObjectClass(root);
+    jmethodID find_focus = view_class == nullptr
+                               ? nullptr
+                               : env->GetMethodID(view_class, "findFocus",
+                                                  "()Landroid/view/View;");
+    jobject focus = find_focus == nullptr
+                        ? nullptr
+                        : env->CallObjectMethod(root, find_focus);
+    jclass focus_class = focus == nullptr ? nullptr : env->GetObjectClass(focus);
+    jmethodID dispatch = focus_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(focus_class, "dispatchKeyEvent",
+                                                "(Landroid/view/KeyEvent;)Z");
+    if (dispatch != nullptr && !env->ExceptionCheck()) {
+      delivered_to_focused_view = true;
+      handled = env->CallBooleanMethod(focus, dispatch, key_event) == JNI_TRUE;
+    }
+    env->DeleteLocalRef(focus_class);
+    env->DeleteLocalRef(focus);
+    env->DeleteLocalRef(view_class);
+    env->DeleteLocalRef(root);
+    env->DeleteLocalRef(root_class);
+  }
+  if (event->action == 0 &&
+      (event->key_code == 66 || event->key_code == 131)) {
+    DebugChromeOmniboxState(env, state->interactive_view_root);
+  }
   if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
     std::cerr << "ART Android KeyEvent action=" << event->action
               << " key=" << event->key_code
               << " device=" << event->device_id
-              << " path=input-channel delivered=" << (delivered ? 1 : 0)
+              << " path=input-channel"
+              << (delivered_to_focused_view ? "+focused-view" : "")
+              << " delivered=" << (delivered ? 1 : 0)
               << " handled=" << (handled ? 1 : 0)
               << "\n";
   }
@@ -1270,61 +1739,22 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
     env->DeleteLocalRef(render_node_class);
   }
 #endif
-  jclass choreographer = env->FindClass("android/view/Choreographer");
-  jmethodID get_instance = choreographer == nullptr
-                                ? nullptr
-                                : env->GetStaticMethodID(
-                                      choreographer, "getInstance",
-                                      "()Landroid/view/Choreographer;");
-  jmethodID do_frame = choreographer == nullptr
-                           ? nullptr
-                           : env->GetMethodID(
-                                 choreographer, "doFrame",
-                                 "(JILandroid/view/DisplayEventReceiver$VsyncEventData;)V");
-  jclass vsync_data_class =
-      env->FindClass("android/view/DisplayEventReceiver$VsyncEventData");
-  jmethodID vsync_data_ctor =
-      vsync_data_class == nullptr
-          ? nullptr
-          : env->GetMethodID(vsync_data_class, "<init>", "()V");
-  jfieldID frame_interval =
-      vsync_data_class == nullptr
-          ? nullptr
-          : env->GetFieldID(vsync_data_class, "frameInterval", "J");
-  jfieldID frame_timelines_length =
-      vsync_data_class == nullptr
-          ? nullptr
-          : env->GetFieldID(vsync_data_class, "frameTimelinesLength", "I");
-  jfieldID preferred_frame_timeline =
-      vsync_data_class == nullptr
-          ? nullptr
-          : env->GetFieldID(vsync_data_class, "preferredFrameTimelineIndex", "I");
-  jobject instance = get_instance == nullptr || env->ExceptionCheck()
-                         ? nullptr
-                         : env->CallStaticObjectMethod(choreographer, get_instance);
-  jobject vsync_data =
-      vsync_data_ctor == nullptr || env->ExceptionCheck()
-          ? nullptr
-          : env->NewObject(vsync_data_class, vsync_data_ctor);
-  if (vsync_data != nullptr && !env->ExceptionCheck()) {
-    env->SetLongField(vsync_data, frame_interval, 16666666);
-    env->SetIntField(vsync_data, frame_timelines_length, 1);
-    env->SetIntField(vsync_data, preferred_frame_timeline, 0);
-  }
-  if (instance != nullptr && do_frame != nullptr && vsync_data != nullptr &&
-      !env->ExceptionCheck()) {
-    const jlong monotonic_nanos = static_cast<jlong>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count());
-    env->CallVoidMethod(instance, do_frame, monotonic_nanos, 0, vsync_data);
-  }
-  bool ok = !env->ExceptionCheck();
+  // SurfaceFlinger normally signals DisplayEventReceiver on its registered
+  // Looper. The Darwin surface loop is the display clock, so publish exactly
+  // one pending edge here on the Android owner thread and let the framework's
+  // normal async onVsync -> Handler -> Choreographer.doFrame path run below.
+  const int delivered_vsyncs =
+      darwin_art::DispatchFrameworkPendingVsyncs(env, frame_time_nanos);
+  bool ok = delivered_vsyncs >= 0 && !env->ExceptionCheck();
   if (ok) ok = DispatchDueMainMessages(env);
   if (!ok) {
-    std::cerr << "ART Android frame pulse threw\n"
-              << art_thread->GetException()->Dump() << "\n";
-    art_thread->ClearException();
+    if (env->ExceptionCheck() && art_thread->GetException() != nullptr) {
+      std::cerr << "ART Android frame pulse threw\n"
+                << art_thread->GetException()->Dump() << "\n";
+      art_thread->ClearException();
+    } else {
+      std::cerr << "ART Android frame pulse failed without a pending Java exception\n";
+    }
   }
   // Detached ViewRootImpl has no WindowManager traversal scheduler to turn an
   // invalidated Android hierarchy into a new display list.  Input listeners
@@ -1343,11 +1773,7 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
       art_thread->ClearException();
     }
   }
-  env->DeleteLocalRef(vsync_data);
-  env->DeleteLocalRef(vsync_data_class);
-  env->DeleteLocalRef(instance);
-  env->DeleteLocalRef(choreographer);
-  return ok && do_frame != nullptr ? 0 : 75;
+  return ok ? 0 : 75;
 }
 
 }  // namespace darwin_art_graphics

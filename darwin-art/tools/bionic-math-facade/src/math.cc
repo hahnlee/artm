@@ -28,13 +28,25 @@ extern "C" long double darwin_art_bionic_ldexpl_compat(long double value,
   return 0.0L;
 }
 
+extern "C" int darwin_art_bionic_feclearexcept(int exceptions) {
+  (void)exceptions;
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_feraiseexcept(int exceptions) {
+  (void)exceptions;
+  return 0;
+}
+
 extern "C" void* darwin_art_bionic_math_resolve(const char* soname,
                                                  const char* symbol,
                                                  const char* version) {
   if (soname == nullptr || symbol == nullptr || version == nullptr ||
       (std::strcmp(soname, "libm.so") != 0 &&
        !(std::strcmp(soname, "libc.so") == 0 &&
-         std::strcmp(symbol, "ldexp") == 0)) ||
+         (std::strcmp(symbol, "ldexp") == 0 ||
+          std::strcmp(symbol, "feclearexcept") == 0 ||
+          std::strcmp(symbol, "feraiseexcept") == 0))) ||
       std::strcmp(version, "LIBC") != 0)
     return nullptr;
 #define D(name) \
@@ -49,13 +61,21 @@ extern "C" void* darwin_art_bionic_math_resolve(const char* soname,
 #define FF(name) \
   if (std::strcmp(symbol, #name) == 0) \
     return Address(static_cast<float (*)(float, float)>(&name))
-  D(acos); F(acosf); D(acosh); D(asin); F(asinf); D(asinh);
-  D(atan); DD(atan2); FF(atan2f); F(atanf); D(atanh);
-  D(cbrt); F(cbrtf); D(cos); F(cosf); D(cosh); F(erff);
-  D(exp); D(expm1); D(exp2); F(exp2f); F(expf); D(fabs); DD(fmod); FF(fmodf);
+  if (std::strcmp(symbol, "feclearexcept") == 0)
+    return Address(&darwin_art_bionic_feclearexcept);
+  if (std::strcmp(symbol, "feraiseexcept") == 0)
+    return Address(&darwin_art_bionic_feraiseexcept);
+  D(acos); F(acosf); D(acosh); F(acoshf); D(asin); F(asinf); D(asinh); F(asinhf);
+  D(atan); DD(atan2); FF(atan2f); F(atanf); D(atanh); F(atanhf);
+  D(cbrt); F(cbrtf); F(ceilf); D(cos); F(cosf); D(cosh); F(coshf);
+  D(erf); F(erff); F(erfcf);
+  D(exp); D(expm1); F(expm1f); D(exp2); F(exp2f); F(expf); D(fabs);
+  F(floorf); DD(fmod); FF(fmodf);
   DD(hypot); FF(hypotf);
   if (std::strcmp(symbol, "frexp") == 0)
     return Address(static_cast<double (*)(double, int*)>(&frexp));
+  if (std::strcmp(symbol, "frexpf") == 0)
+    return Address(static_cast<float (*)(float, int*)>(&frexpf));
   if (std::strcmp(symbol, "ldexp") == 0)
     return Address(static_cast<double (*)(double, int)>(&ldexp));
   if (std::strcmp(symbol, "ldexpf") == 0)
@@ -64,14 +84,17 @@ extern "C" void* darwin_art_bionic_math_resolve(const char* soname,
     return Address(&darwin_art_bionic_ldexpl_compat);
   if (std::strcmp(symbol, "ilogbf") == 0)
     return Address(static_cast<int (*)(float)>(&ilogbf));
-  D(log); D(log10); F(log10f); D(log1p); D(log2); F(log2f); F(logbf); F(logf);
+  D(log); D(log10); F(log10f); D(log1p); F(log1pf); D(log2); F(log2f);
+  F(logbf); F(logf);
   if (std::strcmp(symbol, "modf") == 0)
     return Address(static_cast<double (*)(double, double*)>(&modf));
   if (std::strcmp(symbol, "modff") == 0)
     return Address(static_cast<float (*)(float, float*)>(&modff));
+  if (std::strcmp(symbol, "nan") == 0)
+    return Address(static_cast<double (*)(const char*)>(&nan));
   if (std::strcmp(symbol, "nanf") == 0)
     return Address(static_cast<float (*)(const char*)>(&nanf));
-  DD(nextafter); FF(nextafterf);
+  F(nearbyintf); DD(nextafter); FF(nextafterf);
   DD(pow); FF(powf); DD(remainder); D(sin);
   if (std::strcmp(symbol, "scalbnf") == 0)
     return Address(static_cast<float (*)(float, int)>(&scalbnf));
@@ -79,7 +102,8 @@ extern "C" void* darwin_art_bionic_math_resolve(const char* soname,
     return Address(static_cast<double (*)(double, int)>(&scalbn));
   if (std::strcmp(symbol, "sincos") == 0) return Address(&DarwinSincos);
   if (std::strcmp(symbol, "sincosf") == 0) return Address(&DarwinSincosf);
-  F(sinf); D(sinh); D(tan); F(tanf); D(tanh); F(tanhf);
+  F(roundf); F(sinf); D(sinh); F(sinhf); D(tan); F(tanf); D(tanh); F(tanhf);
+  F(truncf);
 #undef D
 #undef F
 #undef DD

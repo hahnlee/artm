@@ -1,18 +1,16 @@
-diff --git a/ojluni/src/main/native/FileDescriptor_md.c b/ojluni/src/main/native/FileDescriptor_md.c
-index a838507e1..000000000 100644
 --- a/ojluni/src/main/native/FileDescriptor_md.c
 +++ b/ojluni/src/main/native/FileDescriptor_md.c
-@@ -25,6 +25,22 @@
+@@ -25,6 +25,28 @@
  #include <sys/socket.h>
  #include <sys/types.h>
-
+ 
 +#if defined(__APPLE__)
 +#include <errno.h>
 +#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <unistd.h>
 +
-+// Bionic supplies TEMP_FAILURE_RETRY. Darwin does not, but the Android
-+// FileDescriptor contract still requires retrying interrupted descriptor
-+// queries rather than translating EINTR into a false result.
 +#ifndef TEMP_FAILURE_RETRY
 +#define TEMP_FAILURE_RETRY(expression)          \
 +    ({ __typeof__(expression) result;           \
@@ -20,18 +18,71 @@ index a838507e1..000000000 100644
 +       while (result == -1 && errno == EINTR);  \
 +       result; })
 +#endif
++
++extern int darwin_art_bionic_fs_owns_fd_core(int fd)
++    __attribute__((weak_import));
++extern int darwin_art_bionic_fsync(int fd) __attribute__((weak_import));
++extern int darwin_art_bionic_fd_export_for_scm(int fd)
++    __attribute__((weak_import));
 +#endif
 +
  #include "jni.h"
  #include "jni_util.h"
  #include "jvm.h"
-@@ -61,11 +77,20 @@ FileDescriptor_sync(JNIEnv *env, jobject this) {
+@@ -32,6 +54,41 @@
+ #include <nativehelper/JNIHelp.h>
+ #include <nativehelper/jni_macros.h>
+ 
++static int DarwinArtFileDescriptorSync(int fd) {
++#if defined(__APPLE__)
++    const int debug = getenv("DARWIN_ART_DEBUG_LIBCORE_IO") != NULL;
++    if ((((unsigned int)fd) & 0x40000000u) != 0) {
++        if (darwin_art_bionic_fd_export_for_scm == NULL) {
++            if (debug) fprintf(stderr, "DARWIN FileDescriptor.sync broker fd=%d unavailable\n", fd);
++            return -1;
++        }
++        int host_fd = darwin_art_bionic_fd_export_for_scm(fd);
++        if (host_fd < 0) {
++            if (debug) fprintf(stderr, "DARWIN FileDescriptor.sync broker fd=%d export failed errno=%d\n", fd, errno);
++            return -1;
++        }
++        int result = TEMP_FAILURE_RETRY(fsync(host_fd));
++        int saved_errno = errno;
++        close(host_fd);
++        errno = saved_errno;
++        if (debug) fprintf(stderr, "DARWIN FileDescriptor.sync broker fd=%d host_fd=%d result=%d errno=%d\n", fd, host_fd, result, saved_errno);
++        return result;
++    }
++    if (darwin_art_bionic_fsync != NULL) {
++        const int result = darwin_art_bionic_fsync(fd);
++        if (debug) fprintf(stderr, "DARWIN FileDescriptor.sync guest fd=%d result=%d errno=%d\n", fd, result, errno);
++        if (result == 0) return 0;
++    }
++    if (darwin_art_bionic_fs_owns_fd_core != NULL &&
++        darwin_art_bionic_fs_owns_fd_core(fd) != 0) return -1;
++#endif
++    const int result = JVM_Sync(fd);
++#if defined(__APPLE__)
++    if (debug) fprintf(stderr, "DARWIN FileDescriptor.sync host fd=%d result=%d errno=%d\n", fd, result, errno);
++#endif
++    return result;
++}
++
+ /*******************************************************************/
+ /*  BEGIN JNI ********* BEGIN JNI *********** BEGIN JNI ************/
+ /*******************************************************************/
+@@ -55,21 +112,42 @@
+ JNIEXPORT void JNICALL
+ FileDescriptor_sync(JNIEnv *env, jobject this) {
+     int fd = (*env)->GetIntField(env, this, IO_fd_fdID);
+-    if (JVM_Sync(fd) == -1) {
++    if (DarwinArtFileDescriptorSync(fd) == -1) {
+         JNU_ThrowByName(env, "java/io/SyncFailedException", "sync failed");
+     }
  }
-
+ 
  JNIEXPORT jboolean JNICALL FileDescriptor_isSocket(jint fd) {
 +#if defined(__APPLE__)
-+    // Darwin has no SO_DOMAIN. SO_TYPE has the same property needed by this
-+    // predicate: getsockopt succeeds for sockets and fails for other fds.
 +    int socket_type;
 +    socklen_t socket_type_length = sizeof(socket_type);
 +    return TEMP_FAILURE_RETRY(getsockopt(fd, SOL_SOCKET, SO_TYPE, &socket_type,
@@ -44,5 +95,24 @@ index a838507e1..000000000 100644
      // END Android-changed: isSocket - do not clear socket error code
 +#endif
  }
-
+ 
  JNIEXPORT jboolean JNICALL
+ FileDescriptor_getAppend(jint fd) {
+-    int flags = TEMP_FAILURE_RETRY(fcntl(fd, F_GETFL));
++#if defined(__APPLE__)
++    int host_fd = fd;
++    const int is_virtual = ((((unsigned int)fd) & 0x40000000u) != 0) ||
++        (darwin_art_bionic_fs_owns_fd_core != NULL &&
++         darwin_art_bionic_fs_owns_fd_core(fd) != 0);
++    if (is_virtual) {
++        if (darwin_art_bionic_fd_export_for_scm == NULL) return JNI_FALSE;
++        host_fd = darwin_art_bionic_fd_export_for_scm(fd);
++        if (host_fd < 0) return JNI_FALSE;
++    }
++    int flags = TEMP_FAILURE_RETRY(fcntl(host_fd, F_GETFL));
++    if (host_fd != fd) close(host_fd);
++#else
++    int flags = TEMP_FAILURE_RETRY(fcntl(fd, F_GETFL));
++#endif
+     return ((flags & O_APPEND) == 0) ? JNI_FALSE : JNI_TRUE;
+ }

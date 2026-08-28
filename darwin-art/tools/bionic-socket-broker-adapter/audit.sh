@@ -30,10 +30,10 @@ fixture="$tmp/libnetwork_stack_acceptance.so"
 "$readelf" --dyn-syms --wide "$fixture" |
   awk '$7=="UND"&&$8!=""{name=$8;sub(/@.*/,"",name);print name}' | sort -u \
   > "$tmp/imports"
-[[ "$(wc -l < "$tmp/imports" | tr -d ' ')" == 12 ]] || fail 'fixture import count drift'
+[[ "$(wc -l < "$tmp/imports" | tr -d ' ')" == 13 ]] || fail 'fixture import count drift'
 while IFS= read -r symbol; do
   case "$symbol" in
-    __errno|getaddrinfo|freeaddrinfo|socket|connect|send|recv|close|pipe|poll|read|write) ;;
+    __errno|getaddrinfo|freeaddrinfo|socket|connect|send|sendto|recv|close|pipe|poll|read|write) ;;
     *) fail "unexpected fixture import: $symbol" ;;
   esac
 done < "$tmp/imports"
@@ -75,7 +75,8 @@ build_runner() {
     -I"$root/crates/darwin-art-elf-loader/include" \
     "$dir/probes/runner.cc" "$tmp/adapter-$sanitizer.o" \
     "$tmp/broker-$sanitizer.o" "$tmp/dns-$sanitizer.o" \
-    "$tmp/errno-$sanitizer.o" "$loader" -framework Security -o "$output"
+    "$tmp/errno-$sanitizer.o" "$loader" -framework Security -lresolv \
+    -o "$output"
 }
 build_runner address,undefined "$tmp/runner-asan"
 ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
@@ -90,4 +91,4 @@ if rg -n 'kTokenMarker|g_slots|F_DUPFD_CLOEXEC' "$dir/src/adapter.cc" >/dev/null
 fi
 mkdir -p "$root/_build/bionic-socket-broker-adapter"
 cp "$fixture" "$root/_build/bionic-socket-broker-adapter/"
-echo 'bionic-socket-broker-adapter: PASS AndroidELF=HTTP+pipe-poll broker=v4 token=central socket+pipe+read+write+poll+close DNS=numeric lifecycle=quiescent deactivate-race=100 Internet=no ASan+UBSan+TSan'
+echo 'bionic-socket-broker-adapter: PASS AndroidELF=HTTP+pipe-poll broker=v6 token=central socket+pipe+read+write+poll+close+fcntl-status DNS=async lifecycle=quiescent deactivate-race=100 Internet=no ASan+UBSan+TSan'

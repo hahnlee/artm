@@ -16,6 +16,8 @@ _Static_assert(offsetof(struct JNINativeInterface, GetVersion) == 4 * 8,
                "GetVersion slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, FindClass) == 6 * 8,
                "FindClass slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, GetSuperclass) == 10 * 8,
+               "GetSuperclass slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, IsAssignableFrom) == 11 * 8,
                "IsAssignableFrom slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, ThrowNew) == 14 * 8,
@@ -26,6 +28,10 @@ _Static_assert(offsetof(struct JNINativeInterface, ExceptionDescribe) == 16 * 8,
                "ExceptionDescribe slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, ExceptionClear) == 17 * 8,
                "ExceptionClear slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, PushLocalFrame) == 19 * 8,
+               "PushLocalFrame slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, PopLocalFrame) == 20 * 8,
+               "PopLocalFrame slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, NewGlobalRef) == 21 * 8,
                "NewGlobalRef slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, DeleteGlobalRef) == 22 * 8,
@@ -34,6 +40,8 @@ _Static_assert(offsetof(struct JNINativeInterface, DeleteLocalRef) == 23 * 8,
                "DeleteLocalRef slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, NewLocalRef) == 25 * 8,
                "NewLocalRef slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, NewObjectV) == 29 * 8,
+               "NewObjectV slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, GetObjectClass) == 31 * 8,
                "GetObjectClass slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, CallLongMethodV) == 53 * 8,
@@ -42,6 +50,14 @@ _Static_assert(offsetof(struct JNINativeInterface, CallVoidMethodV) == 62 * 8,
                "CallVoidMethodV slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, GetLongField) == 101 * 8,
                "GetLongField slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, NewString) == 163 * 8,
+               "NewString slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, GetStringLength) == 164 * 8,
+               "GetStringLength slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, GetStringChars) == 165 * 8,
+               "GetStringChars slot drift");
+_Static_assert(offsetof(struct JNINativeInterface, ReleaseStringChars) == 166 * 8,
+               "ReleaseStringChars slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, NewStringUTF) == 167 * 8,
                "NewStringUTF slot drift");
 _Static_assert(offsetof(struct JNINativeInterface, GetStringUTFLength) ==
@@ -96,6 +112,14 @@ _Static_assert(_Generic(((struct JNINativeInterface*)0)->ExceptionClear,
                    void (*)(JNIEnv*): 1,
                    default: 0),
                "ExceptionClear prototype drift");
+_Static_assert(_Generic(((struct JNINativeInterface*)0)->PushLocalFrame,
+                   jint (*)(JNIEnv*, jint): 1,
+                   default: 0),
+               "PushLocalFrame prototype drift");
+_Static_assert(_Generic(((struct JNINativeInterface*)0)->PopLocalFrame,
+                   jobject (*)(JNIEnv*, jobject): 1,
+                   default: 0),
+               "PopLocalFrame prototype drift");
 _Static_assert(_Generic(((struct JNINativeInterface*)0)->NewGlobalRef,
                    jobject (*)(JNIEnv*, jobject): 1,
                    default: 0),

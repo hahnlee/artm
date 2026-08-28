@@ -188,10 +188,18 @@ pub(super) fn parse_image_with_policy(
         (0, image_size, None)
     };
     let stack_guard_offset = reservation_size;
-    let reservation_size = reservation_size
+    let direct_syscall_shim_offset = reservation_size
         .checked_add(page_size)
-        .ok_or(LoadError::Bounds("stack-guard reservation size overflow"))?;
+        .ok_or(LoadError::Bounds("direct-syscall shim offset overflow"))?;
+    let reservation_size = reservation_size
+        .checked_add(page_size.checked_mul(2).ok_or(LoadError::Bounds(
+            "compatibility page reservation size overflow",
+        ))?)
+        .ok_or(LoadError::Bounds(
+            "compatibility page reservation size overflow",
+        ))?;
     protections.push(PROT_READ);
+    protections.push(PROT_READ | PROT_EXEC);
 
     if let Some(relro) = relro {
         if relro.flags != PF_R || relro.memory_size == 0 || relro.file_size > relro.memory_size {
@@ -225,6 +233,7 @@ pub(super) fn parse_image_with_policy(
                 reservation_size,
                 image_offset,
                 stack_guard_offset,
+                direct_syscall_shim_offset,
                 page_size,
                 page_protections: protections,
             });
@@ -262,6 +271,7 @@ pub(super) fn parse_image_with_policy(
         reservation_size,
         image_offset,
         stack_guard_offset,
+        direct_syscall_shim_offset,
         page_size,
         page_protections: protections,
     })
@@ -672,7 +682,9 @@ pub(super) fn validate_dynamic_capabilities(info: &DynamicInfo) -> Result<(), Lo
         if !now {
             return Err(LoadError::Capability(Capability::LazyBinding));
         }
-    } else if info.plt_relocation_kind.is_some() {
+    } else if info.plt_relocation_kind.is_some()
+        && (info.plt_rela.is_none() || info.plt_rela_size.is_none())
+    {
         return Err(LoadError::Format("DT_PLTREL without DT_JMPREL"));
     }
     if let Some(flags) = info.flags

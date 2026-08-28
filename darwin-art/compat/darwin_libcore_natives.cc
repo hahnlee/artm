@@ -1,5 +1,26 @@
 #include "darwin_libcore_natives.h"
 #include "darwin_framework_natives.h"
+#include "darwin_libcore_filesystem_bridge.h"
+
+extern "C" int darwin_art_bionic_fs_stat_core(
+    const char*, DarwinArtAndroidStat*);
+extern "C" int darwin_art_bionic_fs_mkdir_core(const char*, uint32_t);
+extern "C" int darwin_art_bionic_fs_chmod_core(const char*, uint32_t);
+extern "C" int32_t darwin_art_bionic_errno_load(void);
+extern "C" int darwin_art_bionic_open(const char*, int, uint32_t);
+extern "C" int darwin_art_bionic_socket_broker_dup(int);
+extern "C" int darwin_art_bionic_socket_broker_fcntl(int, int, intptr_t);
+extern "C" int darwin_art_bionic_close(int);
+extern "C" intptr_t darwin_art_bionic_read(int, void*, size_t);
+extern "C" intptr_t darwin_art_bionic_write(int, const void*, size_t);
+extern "C" int darwin_art_bionic_fstat(int, DarwinArtAndroidStat*);
+extern "C" int darwin_art_bionic_stat(const char*, DarwinArtAndroidStat*);
+extern "C" int64_t darwin_art_bionic_lseek(int, int64_t, int);
+extern "C" int darwin_art_bionic_access(const char*, int);
+extern "C" int darwin_art_bionic_remove(const char*);
+extern "C" int darwin_art_bionic_rename(const char*, const char*);
+extern "C" int darwin_art_bionic_fs_adopt_host_fd_core(int);
+extern "C" intptr_t darwin_art_bionic_sendfile(int, int, int64_t*, size_t);
 
 #if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
 #include "darwin_os_constants.h"
@@ -555,6 +576,32 @@ bool Register(JNIEnv* env, const char* class_name,
 namespace darwin_art {
 
 bool RegisterLibcoreNatives(JNIEnv* env) {
+  // The standalone managed smoke intentionally uses host filesystem paths.
+  // A real Android process installs its capability-scoped guest provider
+  // before java.io.UnixFileSystem is registered, making silent host fallback
+  // impossible for /data and /system paths.
+  darwin_art_libcore_install_filesystem_provider(
+      &darwin_art_bionic_fs_stat_core, &darwin_art_bionic_fs_mkdir_core,
+      &darwin_art_bionic_fs_chmod_core, &darwin_art_bionic_errno_load);
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+  darwin_art::libcore_darwin::InstallLinuxSyscallProviders({
+      &darwin_art_bionic_open,
+      &darwin_art_bionic_socket_broker_dup,
+      &darwin_art_bionic_socket_broker_fcntl,
+      &darwin_art_bionic_close,
+      &darwin_art_bionic_read,
+      &darwin_art_bionic_write,
+      &darwin_art_bionic_fstat,
+      &darwin_art_bionic_stat,
+      &darwin_art_bionic_lseek,
+      &darwin_art_bionic_sendfile,
+      &darwin_art_bionic_access,
+      &darwin_art_bionic_remove,
+      &darwin_art_bionic_rename,
+      &darwin_art_bionic_fs_adopt_host_fd_core,
+      &darwin_art_bionic_errno_load,
+  });
+#endif
   // NativeAllocationRegistry is part of libcore's boot class path rather than
   // framework.jar. Register its free-function ABI from the libcore owner so
   // Cleaner can release RippleShader/VectorDrawable allocations.
@@ -582,7 +629,6 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
     return false;
   }
 #endif
-
 #if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
   JNINativeMethod os_constants_methods[] = {
       {const_cast<char*>("initConstants"), const_cast<char*>("()V"),

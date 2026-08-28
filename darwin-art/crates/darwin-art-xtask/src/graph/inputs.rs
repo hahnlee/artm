@@ -81,6 +81,8 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("compat/darwin_surface_internal.h"),
         PathBuf::from("compat/darwin_surface_gpu_bridge.mm"),
         PathBuf::from("compat/darwin_audio_track.h"),
+        PathBuf::from("compat/darwin_android_asset_manager.h"),
+        PathBuf::from("compat/darwin_android_platform.h"),
         PathBuf::from("compat/darwin_provider_owners.cc"),
         PathBuf::from("compat/darwin_provider_owners.h"),
         // The libcore Linux archive is produced by a standalone shell edge,

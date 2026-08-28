@@ -1,8 +1,11 @@
 #include "darwin_android_elf_image_registry.h"
 
 #include <unistd.h>
+#include <signal.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -14,6 +17,8 @@
 #include <vector>
 
 #include "darwin_art_dl_iterate_phdr.h"
+extern "C" void darwin_art_bionic_dso_install_dladdr(
+    int (*callback)(const void*, void*));
 
 namespace android::darwin_art_image_registry {
 namespace {
@@ -44,7 +49,10 @@ struct Image {
   uint64_t image_id = 0;
   uint64_t generation = 0;
   uint64_t load_bias = 0;
+  uintptr_t start = 0;
+  uintptr_t end = 0;
   std::string soname;
+  std::string path;
   std::vector<DarwinArtAndroidElf64Phdr> phdrs;
 };
 
@@ -117,6 +125,27 @@ class Registry {
     return -1;
   }
 
+  int Lookup(uintptr_t address, void* opaque_info) {
+    if (address == 0 || opaque_info == nullptr) return 0;
+    struct DlInfo {
+      const char* fname;
+      void* fbase;
+      const char* sname;
+      void* saddr;
+    };
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto& image : images_) {
+      if (address < image->start || address >= image->end) continue;
+      auto* info = static_cast<DlInfo*>(opaque_info);
+      info->fname = image->path.c_str();
+      info->fbase = reinterpret_cast<void*>(image->load_bias);
+      info->sname = nullptr;
+      info->saddr = nullptr;
+      return 1;
+    }
+    return 0;
+  }
+
  private:
   std::mutex mutex_;
   std::vector<std::shared_ptr<const Image>> images_;
@@ -152,6 +181,9 @@ bool BindProcessSource(std::string* error) {
     source.acquire = &AcquireSnapshot;
     source.release = &ReleaseSnapshot;
     bound = darwin_art_dl_phdr_bind_source(&source) == 0;
+    if (bound) {
+      darwin_art_bionic_dso_install_dladdr(&darwin_art_android_elf_dladdr);
+    }
   });
   if (!bound && error != nullptr) {
     *error = "Android dl_iterate_phdr snapshot source bind failed";
@@ -278,17 +310,20 @@ class Owner {
   };
 
   std::vector<PreparedImage> publication_order;
+  std::string library_directory;
   size_t next_publication = 0;
   std::vector<PublishedImage> published;
 };
 
 Owner* Create(const char* root_soname,
+              const char* library_directory,
               const DarwinArtElfGraphSource* sources,
               size_t source_count,
               const char* const* provider_sonames,
               size_t provider_count,
               std::string* error) try {
-  if (root_soname == nullptr || sources == nullptr || source_count == 0 ||
+  if (root_soname == nullptr || library_directory == nullptr ||
+      library_directory[0] != '/' || sources == nullptr || source_count == 0 ||
       (provider_count != 0 && provider_sonames == nullptr) ||
       !BindProcessSource(error)) {
     if (error != nullptr && error->empty()) {
@@ -344,6 +379,7 @@ Owner* Create(const char* root_soname,
     return nullptr;
   }
   auto owner = std::make_unique<Owner>();
+  owner->library_directory = library_directory;
   owner->publication_order.reserve(order.size());
   owner->published.reserve(order.size());
   for (size_t index : order) {
@@ -368,8 +404,26 @@ int Publish(Owner* owner, uintptr_t start, uintptr_t end) try {
   }
   auto image = std::make_shared<Image>();
   image->load_bias = start - prepared.minimum_page;
+  image->start = start;
+  image->end = end;
   image->soname = prepared.soname;
+  image->path = owner->library_directory + "/" + prepared.soname;
   image->phdrs = prepared.phdrs;
+  if (std::getenv("DARWIN_ART_DEBUG_ELF_IMAGES") != nullptr) {
+    std::fprintf(stderr,
+                 "DARWIN ELF image: soname=%s start=%#lx end=%#lx "
+                 "load_bias=%#lx\n",
+                 image->soname.c_str(), static_cast<unsigned long>(start),
+                 static_cast<unsigned long>(end),
+                 static_cast<unsigned long>(image->load_bias));
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_STOP_AT_CHROME") != nullptr &&
+      image->soname == "libchrome.so") {
+    // Diagnostic-only attach point. The image has been mapped and relocated,
+    // but no Chromium entry point has run yet, so LLDB can install breakpoints
+    // in the custom-loaded Android ELF text safely.
+    (void)raise(SIGSTOP);
+  }
   const uint64_t image_id = ProcessRegistry().Publish(std::move(image));
   if (image_id == 0) return -1;
   owner->published.push_back(Owner::PublishedImage{image_id, start, end});
@@ -377,6 +431,11 @@ int Publish(Owner* owner, uintptr_t start, uintptr_t end) try {
   return 0;
 } catch (...) {
   return -1;
+}
+
+extern "C" int darwin_art_android_elf_dladdr(const void* address,
+                                               void* info) {
+  return ProcessRegistry().Lookup(reinterpret_cast<uintptr_t>(address), info);
 }
 
 int RollbackPublish(Owner* owner, uintptr_t start, uintptr_t end) {

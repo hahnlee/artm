@@ -5,7 +5,7 @@ use bionic_fs_facade::{
     darwin_art_bionic_fs_ioctl_fd_lookup, darwin_art_bionic_fs_open_core,
     darwin_art_bionic_fs_process_has_capability_failure, darwin_art_bionic_fs_process_install,
     darwin_art_bionic_fs_process_uninstall, darwin_art_bionic_fs_read_core,
-    darwin_art_bionic_fs_sendfile_transfer,
+    darwin_art_bionic_fs_seed_private_directory, darwin_art_bionic_fs_sendfile_transfer,
 };
 use darwin_art_elf_loader::{
     LoadedElf, ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver,
@@ -157,6 +157,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("process owner install failed: {install_status}").into());
     }
     let mut process_owner = ProcessOwnerGuard(true);
+    // SAFETY: the static app-data path is a readable NUL-terminated string.
+    if unsafe { darwin_art_bionic_fs_seed_private_directory(c"/data/user/0/probe".as_ptr()) } != 0 {
+        return Err("private app directory seed failed".into());
+    }
     let guest_thread = std::thread::spawn(|| {
         // SAFETY: static path and local output remain live through each call.
         let fd = unsafe { darwin_art_bionic_fs_open_core(c"/dev/random".as_ptr(), 0, 0) };

@@ -3,7 +3,9 @@
 #include "darwin_art_elf_loader.h"
 
 #include <errno.h>
+#include <signal.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -17,6 +19,10 @@
 #include <vector>
 
 namespace {
+
+volatile sig_atomic_t g_signal_delivered = 0;
+
+void RecordSignal(int signal_number) { g_signal_delivered = signal_number; }
 
 DarwinArtElfResolveStatus Resolve(void*,
                                   const DarwinArtElfSymbolRequest* request,
@@ -72,16 +78,25 @@ int main(int argc, char** argv) {
         "run initializers");
 
   using Gettid = long (*)();
+  using RtTgSigqueueinfo = long (*)(int, int, int, const void*);
   using Getrandom = long (*)(void*, uint64_t, uint32_t);
   using Wait = long (*)(int32_t*, int32_t, int64_t);
   using Wake = long (*)(int32_t*);
+  using CountedWake = long (*)(int32_t*, int32_t);
   using Readable = long (*)(const void*);
   Gettid gettid = Lookup<Gettid>(image, "SyscallFixtureGettid");
+  RtTgSigqueueinfo rt_tgsigqueueinfo = Lookup<RtTgSigqueueinfo>(
+      image, "SyscallFixtureRtTgSigqueueinfo");
   Getrandom getrandom =
       Lookup<Getrandom>(image, "SyscallFixtureGetrandom");
   Wait wait = Lookup<Wait>(image, "SyscallFixtureWait");
   Wake wake_one = Lookup<Wake>(image, "SyscallFixtureWakeOne");
   Wake wake_all = Lookup<Wake>(image, "SyscallFixtureWakeAll");
+  Wait plain_wait = Lookup<Wait>(image, "SyscallFixturePlainWait");
+  CountedWake plain_wake =
+      Lookup<CountedWake>(image, "SyscallFixturePlainWake");
+  Wake wait_bitset = Lookup<Wake>(image, "SyscallFixtureWaitBitset");
+  Wake wake_bitset = Lookup<Wake>(image, "SyscallFixtureWakeBitset");
   Readable readable = Lookup<Readable>(image, "SyscallFixtureReadable");
   Gettid unknown = Lookup<Gettid>(image, "SyscallFixtureUnknown");
   Wake bad_futex = Lookup<Wake>(image, "SyscallFixtureBadFutex");
@@ -104,6 +119,26 @@ int main(int argc, char** argv) {
   std::set<long> distinct(tids.begin(), tids.end());
   Check(distinct.size() == tids.size() && distinct.count(main_tid) == 0,
         "unique per-thread gettid");
+
+  uint8_t android_siginfo[128]{};
+  darwin_art_bionic_errno_store(0);
+  Check(rt_tgsigqueueinfo(getpid(), static_cast<int>(main_tid), 0,
+                          android_siginfo) == -1 &&
+            darwin_art_bionic_errno_load() == 22,
+        "rt_tgsigqueueinfo rejects signal zero");
+  darwin_art_bionic_errno_store(0);
+  Check(rt_tgsigqueueinfo(getpid(), INT32_MAX, 10, android_siginfo) == -1 &&
+            darwin_art_bionic_errno_load() == 3,
+        "rt_tgsigqueueinfo unknown virtual tid ESRCH");
+  struct sigaction action {};
+  action.sa_handler = RecordSignal;
+  sigemptyset(&action.sa_mask);
+  Check(sigaction(SIGUSR1, &action, nullptr) == 0,
+        "install rt_tgsigqueueinfo probe handler");
+  Check(rt_tgsigqueueinfo(getpid(), static_cast<int>(main_tid), 10,
+                          android_siginfo) == 0 &&
+            g_signal_delivered == SIGUSR1,
+        "rt_tgsigqueueinfo translates and targets virtual tid");
 
   uint8_t random_bytes[32];
   std::fill(std::begin(random_bytes), std::end(random_bytes), uint8_t{0xa5});
@@ -174,6 +209,27 @@ int main(int argc, char** argv) {
   Check(wake_all(&word) == 1, "final wake count");
   first.join();
   second.join();
+
+  word = 0;
+  std::thread plain_waiter([&] {
+    Check(plain_wait(&word, 0, 2000000000LL) == 0,
+          "plain futex wait result");
+  });
+  while (darwin_art_bionic_syscall_waiter_count(&word) != 1) {
+    std::this_thread::yield();
+  }
+  Check(plain_wake(&word, 3) == 1, "plain futex wake count");
+  plain_waiter.join();
+
+  word = 0;
+  std::thread bitset_waiter([&] {
+    Check(wait_bitset(&word) == 0, "bitset futex wait result");
+  });
+  while (darwin_art_bionic_syscall_waiter_count(&word) != 1) {
+    std::this_thread::yield();
+  }
+  Check(wake_bitset(&word) == 1, "bitset futex wake count");
+  bitset_waiter.join();
 
   word = 7;
   darwin_art_bionic_errno_store(0);
@@ -297,6 +353,7 @@ int main(int argc, char** argv) {
                "wait+wake-one+wake-all timeout=monotonic-spurious "
                "getrandom=host-csprng "
                "capacity=257 invalid-wake=EFAULT rt_sigprocmask=readability "
+               "rt_tgsigqueueinfo=virtual-tid-delivery "
                "unknown=closed\n");
   return 0;
 }

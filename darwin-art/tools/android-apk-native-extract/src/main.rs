@@ -16,9 +16,12 @@ const CENTRAL_SIGNATURE: u32 = 0x0201_4b50;
 const LOCAL_SIGNATURE: u32 = 0x0403_4b50;
 const ABI_PREFIX: &[u8] = b"lib/arm64-v8a/";
 const MAX_ARCHIVE_SIZE: usize = 512 * 1024 * 1024;
-const MAX_ARCHIVE_ENTRIES: usize = 4096;
+// Current Chromium APKs contain more than 4,096 resource entries while still
+// using the classic (non-ZIP64) directory format.
+const MAX_ARCHIVE_ENTRIES: usize = 8192;
 const MAX_NATIVE_FILES: usize = 64;
-const MAX_NATIVE_FILE_SIZE: usize = 64 * 1024 * 1024;
+// libchrome.so is intentionally monolithic and currently about 240 MiB.
+const MAX_NATIVE_FILE_SIZE: usize = 256 * 1024 * 1024;
 const MAX_NATIVE_TOTAL_SIZE: usize = 256 * 1024 * 1024;
 
 type Result<T> = std::result::Result<T, String>;

@@ -10,4 +10,9 @@ public final class ProbeUserManager extends UserManager {
     public boolean isUserUnlocked() {
         return true;
     }
+
+    @Override
+    public Bundle getApplicationRestrictions(String packageName) {
+        return new Bundle();
+    }
 }

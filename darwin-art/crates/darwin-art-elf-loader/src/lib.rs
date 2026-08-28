@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
+mod direct_syscall;
 mod direct_tls;
 mod ffi;
 mod mapping;
@@ -205,6 +206,7 @@ const R_AARCH64_GLOB_DAT: u32 = 1025;
 const R_AARCH64_JUMP_SLOT: u32 = 1026;
 const R_AARCH64_RELATIVE: u32 = 1027;
 const R_AARCH64_TLSDESC: u32 = 1031;
+const R_AARCH64_IRELATIVE: u32 = 1032;
 const DF_BIND_NOW: u64 = 0x8;
 const DF_SYMBOLIC: u64 = 0x2;
 const DF_1_NOW: u64 = 0x1;
@@ -250,6 +252,7 @@ unsafe extern "C" {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Capability {
     HostArchitecture,
+    DirectSyscall,
     DirectThreadPointer,
     Tls,
     Relro,
@@ -503,6 +506,7 @@ struct ParsedImage {
     reservation_size: usize,
     image_offset: usize,
     stack_guard_offset: usize,
+    direct_syscall_shim_offset: usize,
     page_size: usize,
     page_protections: Vec<c_int>,
 }
@@ -514,6 +518,8 @@ pub struct LoadedElf {
     mapping_size: usize,
     stack_guard: NonNull<u64>,
     stack_guard_rewrites: Vec<(u64, u32)>,
+    direct_syscall_shim: NonNull<u8>,
+    direct_syscall_rewrites: Vec<(u64, u32)>,
     minimum_page: u64,
     loads: Vec<ProgramHeader>,
     dynamic: DynamicInfo,
@@ -527,6 +533,7 @@ pub struct LoadedElf {
     tls_header: Option<ProgramHeader>,
     tls_module: Option<Arc<TlsModule>>,
     tls_descriptor_tokens: Vec<u64>,
+    pending_irelative: Vec<(u64, usize)>,
 }
 
 /// Per-image lifecycle boundary for Bionic `__cxa_atexit` registrations.
@@ -643,6 +650,9 @@ impl LoadedElf {
             unsafe { reservation.as_ptr().add(parsed.stack_guard_offset + 0x28) }.cast::<u64>(),
         )
         .expect("offset into a non-null reservation remains non-null");
+        let direct_syscall_shim =
+            NonNull::new(unsafe { reservation.as_ptr().add(parsed.direct_syscall_shim_offset) })
+                .expect("offset into a non-null reservation remains non-null");
         let mut guard_hasher = RandomState::new().build_hasher();
         guard_hasher.write_usize(stack_guard.as_ptr() as usize);
         let guard = guard_hasher.finish() | 1;
@@ -655,6 +665,8 @@ impl LoadedElf {
             mapping_size: parsed.image_size,
             stack_guard,
             stack_guard_rewrites: Vec::new(),
+            direct_syscall_shim,
+            direct_syscall_rewrites: Vec::new(),
             minimum_page: parsed.minimum_page,
             loads: parsed.loads,
             dynamic,
@@ -668,6 +680,7 @@ impl LoadedElf {
             tls_header: parsed.tls,
             tls_module,
             tls_descriptor_tokens: Vec::new(),
+            pending_irelative: Vec::new(),
         };
         std::mem::forget(mapping);
 
@@ -686,6 +699,7 @@ impl LoadedElf {
         page_protections: &[c_int],
     ) -> Result<(), LoadError> {
         self.rewrite_android_stack_guard_tls()?;
+        self.rewrite_direct_android_syscalls(resolver)?;
         if self.soname() == Some("libcrypto.so")
             && std::env::var_os("DARWIN_ART_ELF_PREFLIGHT_BORINGSSL_BOUNDS").is_some()
         {
@@ -697,6 +711,7 @@ impl LoadedElf {
             }
         }
         self.validate_symbols_and_apply_relocations(resolver)?;
+        self.apply_irelative_relocations(page_size, page_protections)?;
         self.refresh_boringssl_integrity_after_rewrite()?;
         self.refresh_tls_template()?;
         self.validate_initializer_entries()?;
@@ -772,7 +787,11 @@ impl LoadedElf {
         let expected = unsafe { std::slice::from_raw_parts(expected_pointer, 32) };
 
         let mut original_text = text.to_vec();
-        for &(virtual_address, instruction) in &self.stack_guard_rewrites {
+        for &(virtual_address, instruction) in self
+            .stack_guard_rewrites
+            .iter()
+            .chain(self.direct_syscall_rewrites.iter())
+        {
             let host = self.loaded_pointer(virtual_address, 4)? as usize;
             if host < text_start || host.checked_add(4).is_none_or(|end| end > text_end) {
                 continue;
@@ -787,7 +806,7 @@ impl LoadedElf {
             ));
         }
 
-        if !self.stack_guard_rewrites.is_empty() {
+        if !self.stack_guard_rewrites.is_empty() || !self.direct_syscall_rewrites.is_empty() {
             let transformed_digest = boringssl_integrity_hmac(text, rodata);
             // SAFETY: staging keeps every populated PT_LOAD page writable until final
             // protections are applied, and the validated hash span is 32 bytes long.
@@ -1330,7 +1349,7 @@ impl LoadedElf {
     ) -> Result<(), LoadError> {
         let relocation_type = info as u32;
         let symbol_index = (info >> 32) as u32;
-        if plt_only && relocation_type != R_AARCH64_JUMP_SLOT {
+        if plt_only && !matches!(relocation_type, R_AARCH64_JUMP_SLOT | R_AARCH64_IRELATIVE) {
             return Err(LoadError::Capability(Capability::UnsupportedRelocation {
                 relocation_type,
                 symbol: symbol_index,
@@ -1344,6 +1363,22 @@ impl LoadedElf {
                 }));
             }
             return self.apply_tlsdesc_relocation(offset, symbol_index, symbol_count, addend);
+        }
+        if relocation_type == R_AARCH64_IRELATIVE {
+            if symbol_index != 0 {
+                return Err(LoadError::Format(
+                    "R_AARCH64_IRELATIVE must be a symbol-free relocation",
+                ));
+            }
+            self.require_loaded_range(offset, 8, Some(PF_W), "R_AARCH64_IRELATIVE target")?;
+            let resolver = self.load_bias_add(addend)?;
+            self.require_host_executable(
+                u64::try_from(resolver)
+                    .map_err(|_| LoadError::Bounds("R_AARCH64_IRELATIVE resolver"))?,
+                "R_AARCH64_IRELATIVE resolver",
+            )?;
+            self.pending_irelative.push((offset, resolver));
+            return Ok(());
         }
         self.require_loaded_range(offset, 8, Some(PF_W), "RELA target")?;
         let value = match relocation_type {
@@ -1373,6 +1408,55 @@ impl LoadedElf {
         let destination = self.loaded_pointer(offset, 8)?;
         // SAFETY: require_loaded_range proves an eight-byte writable destination.
         unsafe { ptr::write_unaligned(destination.cast::<usize>(), value) };
+        Ok(())
+    }
+
+    fn apply_irelative_relocations(
+        &mut self,
+        page_size: usize,
+        page_protections: &[c_int],
+    ) -> Result<(), LoadError> {
+        if self.pending_irelative.is_empty() {
+            return Ok(());
+        }
+
+        // Android resolves IRELATIVE after ordinary relocations. Staging pages are RW, so make
+        // only executable runs RX before calling guest resolvers; GOT/data stays writable until
+        // the normal final-protection pass.
+        let mut start = 0;
+        while start < page_protections.len() {
+            if page_protections[start] & PROT_EXEC == 0 {
+                start += 1;
+                continue;
+            }
+            let mut end = start + 1;
+            while end < page_protections.len() && page_protections[end] & PROT_EXEC != 0 {
+                end += 1;
+            }
+            let address = unsafe { self.reservation.as_ptr().add(start * page_size) };
+            let length = (end - start) * page_size;
+            unsafe { sys_icache_invalidate(address.cast(), length) };
+            if unsafe { mprotect(address.cast(), length, PROT_READ | PROT_EXEC) } != 0 {
+                return Err(system_error("mprotect(IRELATIVE resolver)"));
+            }
+            start = end;
+        }
+
+        let relocations = std::mem::take(&mut self.pending_irelative);
+        for (target, resolver) in relocations {
+            // SAFETY: the address is in this image's executable PT_LOAD, ordinary relocations
+            // are complete, and ELF specifies the resolver ABI as no arguments -> address.
+            let function: unsafe extern "C" fn() -> usize =
+                unsafe { std::mem::transmute(resolver) };
+            let implementation = unsafe { function() };
+            if implementation == 0 {
+                return Err(LoadError::Format(
+                    "R_AARCH64_IRELATIVE resolver returned null",
+                ));
+            }
+            let destination = self.loaded_pointer(target, 8)?;
+            unsafe { ptr::write_unaligned(destination.cast::<usize>(), implementation) };
+        }
         Ok(())
     }
 
@@ -1440,6 +1524,7 @@ impl LoadedElf {
             module,
             offset,
             descriptor_address: destination as usize,
+            thread_pointer_base: (self.stack_guard.as_ptr() as usize) & !0xfff,
         })?;
         let descriptor = TlsDescriptor {
             resolver: darwin_art_tlsdesc_resolver as usize,
@@ -2074,6 +2159,76 @@ impl LoadedElf {
                 self.stack_guard_rewrites.push((offset, rewrite.original));
             }
         }
+        Ok(())
+    }
+
+    fn rewrite_direct_android_syscalls(
+        &mut self,
+        resolver: &mut dyn SymbolResolver,
+    ) -> Result<(), LoadError> {
+        let executable_ranges = self
+            .loads
+            .iter()
+            .filter(|load| load.flags & PF_X != 0)
+            .map(|load| (load.virtual_address, load.file_size))
+            .collect::<Vec<_>>();
+        let has_direct_syscall = executable_ranges.iter().try_fold(false, |found, range| {
+            let size = to_usize(range.1, "executable PT_LOAD file size")?;
+            let code = self.loaded_slice(range.0, size)?;
+            Ok::<_, LoadError>(found || direct_syscall::contains_linux_svc(code))
+        })?;
+        if !has_direct_syscall {
+            return Ok(());
+        }
+
+        let target = resolver
+            .resolve(SymbolRequest {
+                symbol: "syscall",
+                needed_libraries: &self.needed_libraries,
+                version: Some(VersionRequirement {
+                    soname: "libc.so",
+                    name: "LIBC",
+                    hidden: false,
+                    flags: 0,
+                }),
+                is_weak: false,
+            })
+            .map_err(|source| LoadError::Resolver {
+                symbol: "syscall".to_owned(),
+                source,
+            })?
+            .ok_or(LoadError::Capability(Capability::DirectSyscall))?
+            .address();
+
+        // SAFETY: the parser reserves a dedicated page which remains writable until final
+        // protections are applied and is never exposed as guest data.
+        unsafe {
+            direct_syscall::write_shim(self.direct_syscall_shim.as_ptr(), target)?;
+        }
+        for (virtual_address, file_size) in executable_ranges {
+            let size = to_usize(file_size, "executable PT_LOAD file size")?;
+            let pointer = self.loaded_pointer(virtual_address, size)?;
+            // SAFETY: staging made every executable PT_LOAD page writable and this unique
+            // mutable image owner serializes all instruction rewrites.
+            let code = unsafe { std::slice::from_raw_parts_mut(pointer, size) };
+            let rewrites = direct_syscall::rewrite_linux_svc(
+                code,
+                self.direct_syscall_shim.as_ptr() as usize,
+            )?;
+            for rewrite in rewrites {
+                let offset = u64::try_from(rewrite.instruction_index)
+                    .ok()
+                    .and_then(|index| index.checked_mul(4))
+                    .and_then(|offset| virtual_address.checked_add(offset))
+                    .ok_or(LoadError::Bounds("direct-syscall rewrite address"))?;
+                self.direct_syscall_rewrites
+                    .push((offset, rewrite.original));
+            }
+        }
+        eprintln!(
+            "DARWIN ELF syscall: rewrote {} direct Linux svc instruction(s)",
+            self.direct_syscall_rewrites.len()
+        );
         Ok(())
     }
 

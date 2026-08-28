@@ -175,6 +175,15 @@ static int NameCompare(const char* left, const char* right) {
              : ((unsigned char)*left != (unsigned char)*right);
 }
 
+typedef struct DarwinArtAndroidMallinfo {
+  size_t values[10];
+} DarwinArtAndroidMallinfo;
+
+DarwinArtAndroidMallinfo darwin_art_bionic_mallinfo(void) {
+  DarwinArtAndroidMallinfo value = {{0}};
+  return value;
+}
+
 static const DarwinArtBionicAllocatorBinding kBindings[] = {
     {"aligned_alloc",
      (DarwinArtBionicAllocatorFunction)darwin_art_bionic_aligned_alloc,
@@ -188,6 +197,9 @@ static const DarwinArtBionicAllocatorBinding kBindings[] = {
     {"free", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_free,
      DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
          DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK |
+         DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE},
+    {"mallinfo", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_mallinfo,
+     DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |
          DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE},
     {"malloc", (DarwinArtBionicAllocatorFunction)darwin_art_bionic_malloc,
      DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI |

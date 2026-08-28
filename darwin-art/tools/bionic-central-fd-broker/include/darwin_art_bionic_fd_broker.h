@@ -120,6 +120,17 @@ typedef struct DarwinArtFdOwnerV1 {
   int (*poll_many)(void *context, const uint64_t *objects,
                    const int16_t *events, int16_t *revents, size_t count,
                    int timeout_ms, int *android_errno);
+  int (*set_status_flags)(void *context, uint64_t object, int flags,
+                          int *android_errno);
+  uint64_t (*create_poll_wake)(void *context, int *android_errno);
+  int (*signal_poll_wake)(void *context, uint64_t wake, int *android_errno);
+  int (*close_poll_wake)(void *context, uint64_t wake, int *android_errno);
+  int (*poll_many_with_wake)(void *context, const uint64_t *objects,
+                             const int16_t *events, int16_t *revents,
+                             size_t count, int timeout_ms, uint64_t wake,
+                             int *woke, int *android_errno);
+  int (*export_host_fd)(void *context, uint64_t object, int *host_fd,
+                        int *android_errno);
 } DarwinArtFdOwnerV1;
 
 enum {
@@ -127,6 +138,9 @@ enum {
   DARWIN_ART_FD_OWNER_ABI_V2 = 2,
   DARWIN_ART_FD_OWNER_ABI_V3 = 3,
   DARWIN_ART_FD_OWNER_ABI_V4 = 4,
+  DARWIN_ART_FD_OWNER_ABI_V5 = 5,
+  DARWIN_ART_FD_OWNER_ABI_V6 = 6,
+  DARWIN_ART_FD_OWNER_ABI_V7 = 7,
   DARWIN_ART_FD_SOCKET_REQUEST_ABI_V1 = 1,
   DARWIN_ART_FD_SOCKET_ACCEPT_RESULT_ABI_V1 = 1,
   DARWIN_ART_FD_CLOEXEC = 1,
@@ -176,8 +190,15 @@ DarwinArtFdBrokerStatus
 darwin_art_fd_broker_set_status_flags(DarwinArtFdBroker *broker, int guest_fd,
                                       int flags);
 DarwinArtFdBrokerStatus
+darwin_art_fd_broker_set_status_flags_io(DarwinArtFdBroker *broker,
+                                         int guest_fd, int flags,
+                                         DarwinArtFdIoResult *result);
+DarwinArtFdBrokerStatus
 darwin_art_fd_broker_get_offset(DarwinArtFdBroker *broker, int guest_fd,
                                 int64_t *offset);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_export_host_fd(DarwinArtFdBroker *broker, int guest_fd,
+                                    int *host_fd, DarwinArtFdIoResult *result);
 DarwinArtFdBrokerStatus darwin_art_fd_broker_close(DarwinArtFdBroker *broker,
                                                    int guest_fd,
                                                    DarwinArtFdIoResult *result);

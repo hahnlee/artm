@@ -7,6 +7,7 @@
 #include <vector>
 
 struct darwin_art_lifecycle_hooks;
+struct darwin_art_host_services;
 
 namespace art {
 class DexFile;
@@ -49,6 +50,11 @@ struct AcceptanceSnapshot {
 bool begin_run(const struct darwin_art_lifecycle_hooks* lifecycle_hooks = nullptr);
 void record_created_runtime(art::Thread* art_thread);
 void record_graphics_state(darwin_art_graphics::GraphicsState* state);
+bool record_host_services(const struct darwin_art_host_services* services);
+int32_t spawn_service_process(const char* component, const char* instance_name,
+                              const char* process_name, bool isolated,
+                              int32_t* host_pid, int32_t* control_fd);
+int32_t release_service_process(int32_t host_pid);
 void record_resource_runtime_installed();
 void finish_run(bool runtime_created);
 void record_app_dex_file(std::unique_ptr<const art::DexFile> dex_file);

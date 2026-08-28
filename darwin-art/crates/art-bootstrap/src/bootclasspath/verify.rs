@@ -127,6 +127,48 @@ pub(crate) fn verify_bootclasspath(root: &Path) -> Result<()> {
             output.trim()
         );
     }
+    let framework_location = prebuilt.join("framework-location.jar");
+    if !framework_location.exists() {
+        return Err(format!(
+            "{} is missing; pull /system/framework/framework-location.jar from the matching Android 16 image",
+            framework_location.display()
+        )
+        .into());
+    }
+    verify_sha256(
+        &framework_location,
+        lock_value(&manifest, "FRAMEWORK_LOCATION_SHA256")?,
+    )?;
+    let expected_location_size: u64 = lock_value(&manifest, "FRAMEWORK_LOCATION_SIZE")?.parse()?;
+    if fs::metadata(&framework_location)?.len() != expected_location_size {
+        return Err(format!("size mismatch for {}", framework_location.display()).into());
+    }
+    let location_extract_dir = root.join("_build/bootclasspath/framework-location");
+    fs::create_dir_all(&location_extract_dir)?;
+    run_command(
+        Command::new("unzip")
+            .args(["-o", "-q"])
+            .arg(&framework_location)
+            .arg("classes.dex")
+            .arg("-d")
+            .arg(&location_extract_dir),
+    )?;
+    let location_output = command_output(
+        Command::new(&probe)
+            .arg("--summary")
+            .arg(location_extract_dir.join("classes.dex")),
+    )?;
+    let expected_location = "AOSP DEX: verified=yes version=39 classes=493 methods=4411 \
+             class[0]=Landroid/location/Address$1;";
+    if location_output.trim() != expected_location {
+        return Err(
+            format!("unexpected framework-location DEX summary: {location_output:?}").into(),
+        );
+    }
+    println!(
+        "verify-bootclasspath: framework-location {}",
+        location_output.trim()
+    );
     let icu_source = prebuilt.join("core-icu4j.jar");
     let expected_icu_size: u64 = lock_value(&manifest, "CORE_ICU4J_SOURCE_SIZE")?.parse()?;
     if fs::metadata(&icu_source)?.len() != expected_icu_size {

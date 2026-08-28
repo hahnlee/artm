@@ -16,6 +16,7 @@ final class ProbeContentResolver extends ContentResolver {
     private final IContentProvider settingsProvider;
     private final IContentProvider calendarProvider;
     private final IContentProvider hostDocumentProvider;
+    private final IContentProvider mediaStoreProvider;
 
     ProbeContentResolver(Context context) {
         super(context);
@@ -57,6 +58,9 @@ final class ProbeContentResolver extends ContentResolver {
         hostDocumentProvider = attachProvider(
                 context, new ProbeHostDocumentProvider(),
                 ProbeHostDocumentProvider.AUTHORITY);
+        mediaStoreProvider = attachProvider(
+                context, new ProbeMediaStoreProvider(),
+                ProbeMediaStoreProvider.AUTHORITY);
     }
 
     private static IContentProvider attachCalendarProvider(Context context) {
@@ -84,6 +88,9 @@ final class ProbeContentResolver extends ContentResolver {
         if (ProbeHostDocumentProvider.AUTHORITY.equals(name)) {
             return hostDocumentProvider;
         }
+        if (ProbeMediaStoreProvider.AUTHORITY.equals(name)) {
+            return mediaStoreProvider;
+        }
         return settingsProvider;
     }
 
@@ -91,6 +98,9 @@ final class ProbeContentResolver extends ContentResolver {
         if (CalendarContract.AUTHORITY.equals(name)) return calendarProvider;
         if (ProbeHostDocumentProvider.AUTHORITY.equals(name)) {
             return hostDocumentProvider;
+        }
+        if (ProbeMediaStoreProvider.AUTHORITY.equals(name)) {
+            return mediaStoreProvider;
         }
         return settingsProvider;
     }

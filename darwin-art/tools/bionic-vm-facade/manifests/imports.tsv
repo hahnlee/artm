@@ -3,4 +3,5 @@ madvise	FUNC	absent	whole-anonymous-private-only
 mmap	FUNC	absent	whole-anonymous-private-only
 mmap64	FUNC	absent	whole-anonymous-private-only
 mprotect	FUNC	absent	whole-mapping-wx-deny
+mremap	FUNC	absent	owned-anonymous-mapping-move-or-logical-shrink
 munmap	FUNC	absent	whole-mapping-only

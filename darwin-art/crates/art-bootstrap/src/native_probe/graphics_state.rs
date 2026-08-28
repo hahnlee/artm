@@ -5,12 +5,6 @@ pub(crate) fn compile_runtime_graphics_input_probe(
     build_dir: &Path,
     includes: &[&Path],
 ) -> Result<PathBuf> {
-    if let Some(path) = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_INPUT_OBJECT") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
-        }
-    }
     let object = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_INPUT_OBJECT")
         .map(PathBuf::from)
         .unwrap_or_else(|| build_dir.join("darwin_art_runtime_graphics_input.cc.o"));

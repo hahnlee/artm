@@ -223,10 +223,28 @@ while IFS= read -r source; do
   if [[ "$source" == NativeThread.c ]]; then
     source_path="$patched_native_root/NativeThread.c"
   fi
-  "$cc" "${common_flags[@]}" -c "$source_path" -o "$object"
+  if [[ "$source" == FileDispatcherImpl.c || "$source" == FileChannelImpl.c ]]; then
+    "$cc" "${common_flags[@]}" \
+      -I"$project_root/tools/bionic-errno-tls/include" \
+      -I"$project_root/tools/bionic-fs-facade/include" \
+      -I"$project_root/tools/bionic-ioctl-facade/include" \
+      -I"$project_root/tools/bionic-socket-broker-adapter/include" \
+      -include "$project_root/compat/darwin_openjdk_nio_fs_redirect.h" \
+      -c "$source_path" -o "$object"
+  else
+    "$cc" "${common_flags[@]}" -c "$source_path" -o "$object"
+  fi
   [[ "$(file "$object")" == *"Mach-O 64-bit object arm64"* ]] ||
     fail "non-arm64 target object: $source"
 done < "$stage/target-sources.txt"
+
+# The managed acceptance probe passes real host descriptors and intentionally
+# exercises the unmodified OpenJDK implementation. Keep that probe isolated
+# from the production virtual-fd redirect compiled above.
+"$cc" "${common_flags[@]}" -c "$native_root/FileChannelImpl.c" \
+  -o "$objects/FileChannelImpl-host-probe.o"
+"$cc" "${common_flags[@]}" -c "$native_root/FileDispatcherImpl.c" \
+  -o "$objects/FileDispatcherImpl-host-probe.o"
 
 target_archive="$stage/libopenjdk-nio-mapping-darwin.a"
 "$libtool_bin" -static -o "$target_archive" \
@@ -237,6 +255,11 @@ target_archive="$stage/libopenjdk-nio-mapping-darwin.a"
 [[ "$({ ar -t "$target_archive" || true; } | grep -v '^__\.SYMDEF' | \
       wc -l | tr -d ' ')" == "$TARGET_SOURCE_COUNT" ]] ||
   fail "target archive member count drift"
+host_probe_archive="$stage/libopenjdk-nio-mapping-host-probe.a"
+"$libtool_bin" -static -o "$host_probe_archive" \
+  "$objects/FileChannelImpl-host-probe.o" \
+  "$objects/FileDispatcherImpl-host-probe.o" \
+  "$objects/NativeThread.o"
 target_symbols="$stage/target-symbols.txt"
 nm -g "$target_archive" > "$target_symbols"
 for registrar in register_sun_nio_ch_FileChannelImpl \
@@ -297,7 +320,7 @@ PY
 managed_library="$stage/libandroid16-openjdk-nio-mapping-smoke.dylib"
 "$cc" -arch arm64 -isysroot "$sdk_root" -dynamiclib \
   "$objects/android16_openjdk_nio_mapping_jni.o" \
-  -Wl,-force_load,"$target_archive" \
+  -Wl,-force_load,"$host_probe_archive" \
   "$objects/IOUtil-host-probe.o" "$objects/jni_util.o" \
   "$objects/jni_util_md.o" \
   -Wl,-force_load,"$nativehelper_archive" "$liblog_archive" \

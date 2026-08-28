@@ -68,6 +68,8 @@ constexpr const char *kProviderNames[] = {
     "dns",
     "math",
     "vm",
+    "binder-ndk",
+    "aaudio",
 };
 static_assert(sizeof(kProviderNames) / sizeof(kProviderNames[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);
@@ -81,6 +83,8 @@ constexpr DarwinArtBionicProviderId kReleaseOrder[] = {
     DARWIN_ART_BIONIC_PROVIDER_MATH,
     DARWIN_ART_BIONIC_PROVIDER_DNS,
     DARWIN_ART_BIONIC_PROVIDER_SOCKET,
+    DARWIN_ART_BIONIC_PROVIDER_AAUDIO,
+    DARWIN_ART_BIONIC_PROVIDER_BINDER_NDK,
     DARWIN_ART_BIONIC_PROVIDER_CENTRAL_FD_BROKER,
     DARWIN_ART_BIONIC_PROVIDER_ABORT,
     DARWIN_ART_BIONIC_PROVIDER_SYSLOG,
@@ -170,7 +174,10 @@ bool KnownSoname(const char *soname) {
   return std::strcmp(soname, "libc.so") == 0 ||
          std::strcmp(soname, "libdl.so") == 0 ||
          std::strcmp(soname, "liblog.so") == 0 ||
-         std::strcmp(soname, "libm.so") == 0;
+         std::strcmp(soname, "libm.so") == 0 ||
+         std::strcmp(soname, "libbinder_ndk.so") == 0 ||
+         std::strcmp(soname, "libaaudio.so") == 0 ||
+         std::strcmp(soname, "libandroid.so") == 0;
 }
 
 DarwinArtBionicNamespaceResult Result(DarwinArtBionicNamespaceStatus status,

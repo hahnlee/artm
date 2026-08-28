@@ -1,5 +1,6 @@
 #include "libcore_darwin_linux.h"
 
+#include "darwin_art_bionic_fs.h"
 #include "darwin_os_constants.h"
 
 #include <fcntl.h>
@@ -7,13 +8,20 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <unordered_set>
 
 namespace darwin_art::libcore_darwin {
 namespace {
+
+LinuxSyscallProviders g_providers{};
+std::mutex g_host_fd_mutex;
+std::unordered_set<int> g_host_fds;
 
 constexpr int kLinuxMapShared = 0x01;
 constexpr int kLinuxMapPrivate = 0x02;
@@ -22,6 +30,52 @@ constexpr int kLinuxMapAnonymous = 0x20;
 constexpr int kAndroidSeekSet = 0;
 constexpr int kAndroidSeekCur = 1;
 constexpr int kAndroidSeekEnd = 2;
+
+bool IsPathWithin(const char* path, const char* root) {
+  if (path == nullptr || root == nullptr || *root == '\0') return false;
+  const size_t root_length = std::strlen(root);
+  return std::strncmp(path, root, root_length) == 0 &&
+         (path[root_length] == '\0' || path[root_length] == '/');
+}
+
+bool IsExplicitHostFile(const char* path, const char* environment_name) {
+  const char* file = std::getenv(environment_name);
+  return file != nullptr && path != nullptr && std::strcmp(path, file) == 0;
+}
+
+bool IsListedHostFile(const char* path) {
+  const char* list = std::getenv("DARWIN_ART_RUNTIME_HOST_FILES");
+  if (path == nullptr || list == nullptr) return false;
+  const size_t path_length = std::strlen(path);
+  const char* entry = list;
+  while (*entry != '\0') {
+    const char* end = std::strchr(entry, ':');
+    const size_t length = end == nullptr ? std::strlen(entry)
+                                         : static_cast<size_t>(end - entry);
+    if (length == path_length && std::strncmp(path, entry, length) == 0) {
+      return true;
+    }
+    if (end == nullptr) break;
+    entry = end + 1;
+  }
+  return false;
+}
+
+void RememberHostFd(int fd) {
+  if (fd < 0) return;
+  std::lock_guard<std::mutex> lock(g_host_fd_mutex);
+  g_host_fds.insert(fd);
+}
+
+bool IsHostFd(int fd) {
+  std::lock_guard<std::mutex> lock(g_host_fd_mutex);
+  return g_host_fds.find(fd) != g_host_fds.end();
+}
+
+bool ForgetHostFd(int fd) {
+  std::lock_guard<std::mutex> lock(g_host_fd_mutex);
+  return g_host_fds.erase(fd) != 0;
+}
 
 bool DarwinWhenceFromAndroid(int android_whence, int* darwin_whence) {
   if (darwin_whence == nullptr) {
@@ -40,6 +94,36 @@ bool DarwinWhenceFromAndroid(int android_whence, int* darwin_whence) {
     default:
       return false;
   }
+}
+
+void PublishAndroidErrno() {
+  errno = g_providers.load_errno == nullptr ? EIO : g_providers.load_errno();
+}
+
+int AdoptHostFd(int host_fd) {
+  RememberHostFd(host_fd);
+  return host_fd;
+}
+
+void AndroidStatToDarwin(const DarwinArtAndroidStat& source,
+                         struct stat* destination) {
+  std::memset(destination, 0, sizeof(*destination));
+  destination->st_dev = static_cast<dev_t>(source.st_dev);
+  destination->st_ino = static_cast<ino_t>(source.st_ino);
+  destination->st_mode = static_cast<mode_t>(source.st_mode);
+  destination->st_nlink = static_cast<nlink_t>(source.st_nlink);
+  destination->st_uid = static_cast<uid_t>(source.st_uid);
+  destination->st_gid = static_cast<gid_t>(source.st_gid);
+  destination->st_rdev = static_cast<dev_t>(source.st_rdev);
+  destination->st_size = static_cast<off_t>(source.st_size);
+  destination->st_blksize = static_cast<blksize_t>(source.st_blksize);
+  destination->st_blocks = static_cast<blkcnt_t>(source.st_blocks);
+  destination->st_atimespec.tv_sec = static_cast<time_t>(source.st_atim.tv_sec);
+  destination->st_atimespec.tv_nsec = source.st_atim.tv_nsec;
+  destination->st_mtimespec.tv_sec = static_cast<time_t>(source.st_mtim.tv_sec);
+  destination->st_mtimespec.tv_nsec = source.st_mtim.tv_nsec;
+  destination->st_ctimespec.tv_sec = static_cast<time_t>(source.st_ctim.tv_sec);
+  destination->st_ctimespec.tv_nsec = source.st_ctim.tv_nsec;
 }
 
 int TranslateMmapFlags(int linux_flags) {
@@ -72,17 +156,46 @@ int TranslateMmapFlags(int linux_flags) {
 
 }  // namespace
 
+void InstallLinuxSyscallProviders(const LinuxSyscallProviders& providers) {
+  g_providers = providers;
+}
+
+bool IsAuthorizedHostRuntimePath(const char* path) {
+  return IsListedHostFile(path) ||
+         IsPathWithin(path, std::getenv("ANDROID_I18N_ROOT")) ||
+         IsPathWithin(path, std::getenv("ANDROID_DATA")) ||
+         IsPathWithin(path, std::getenv("ANDROID_TZDATA_ROOT")) ||
+         IsPathWithin(path, std::getenv("DARWIN_ART_APK_APP_NATIVE_DIR")) ||
+         IsExplicitHostFile(path, "DARWIN_ART_APK_APP_RESOURCE_APK") ||
+         IsExplicitHostFile(path, "DARWIN_ART_APK_APP_SUPPORT_DEX") ||
+         IsExplicitHostFile(path, "DARWIN_ART_FRAMEWORK_RES_APK");
+}
+
 int Open(const char* path, int linux_flags, mode_t mode) {
+  const char* system_root = std::getenv("DARWIN_ART_ANDROID_SYSTEM_ROOT");
+  const bool use_sealed_system_file =
+      system_root != nullptr && path != nullptr &&
+      std::strncmp(path, "/system/", 8) == 0;
+  if (g_providers.open != nullptr && !IsAuthorizedHostRuntimePath(path) &&
+      !use_sealed_system_file) {
+    const int result = g_providers.open(
+        path, linux_flags, static_cast<uint32_t>(mode));
+    if (result == -1) PublishAndroidErrno();
+    if (std::getenv("DARWIN_ART_DEBUG_LIBCORE_IO") != nullptr) {
+      std::fprintf(stderr, "DARWIN libcore IO: guest open path=%s fd=%d errno=%d\n",
+                   path == nullptr ? "<null>" : path, result, errno);
+    }
+    return result;
+  }
   int flags = 0;
   if (!os_constants::DarwinOpenFlagsFromAndroid(linux_flags, &flags)) {
     errno = ENOTSUP;
     return -1;
   }
-  // This is a probe-only sealed-root authority. Production callers never set
-  // it and therefore cannot inherit a host fallback for arbitrary guest paths.
-  const char* test_root = std::getenv("DARWIN_ART_ANDROID_SYSTEM_ROOT");
-  if (test_root != nullptr && path != nullptr &&
-      std::strncmp(path, "/system/", 8) == 0) {
+  // /system is an immutable, capability-scoped host directory. Keeping its
+  // descriptor native lets OpenJDK FileChannel and Android font mmap share the
+  // same file without exposing arbitrary host paths.
+  if (use_sealed_system_file) {
     const char* relative = path + 8;
     if (*relative == '\0' || std::strstr(relative, "/../") != nullptr ||
         std::strncmp(relative, "../", 3) == 0 ||
@@ -95,25 +208,110 @@ int Open(const char* path, int linux_flags, mode_t mode) {
       errno = EINVAL;
       return -1;
     }
-    std::string redirected(test_root);
+    std::string redirected(system_root);
     redirected.push_back('/');
     redirected.append(relative);
     int result;
     do {
       result = open(redirected.c_str(), flags, mode);
     } while (result == -1 && errno == EINTR);
-    return result;
+    return AdoptHostFd(result);
   }
   int result;
   do {
     result = open(path, flags, mode);
   } while (result == -1 && errno == EINTR);
+  return AdoptHostFd(result);
+}
+
+int Dup(int fd) {
+  if (g_providers.dup != nullptr && !IsHostFd(fd)) {
+    const int result = g_providers.dup(fd);
+    if (result == -1) PublishAndroidErrno();
+    if (std::getenv("DARWIN_ART_DEBUG_LIBCORE_IO") != nullptr) {
+      std::fprintf(stderr,
+                   "DARWIN libcore IO: guest dup fd=%d result=%d errno=%d\n",
+                   fd, result, errno);
+    }
+    return result;
+  }
+  int result;
+  do {
+    result = dup(fd);
+  } while (result == -1 && errno == EINTR);
+  if (std::getenv("DARWIN_ART_DEBUG_LIBCORE_IO") != nullptr) {
+    std::fprintf(stderr,
+                 "DARWIN libcore IO: host dup fd=%d result=%d errno=%d\n", fd,
+                 result, errno);
+  }
+  return AdoptHostFd(result);
+}
+
+int Fcntl(int fd, int android_command, intptr_t argument) {
+  if (g_providers.fcntl != nullptr && !IsHostFd(fd)) {
+    const int result = g_providers.fcntl(fd, android_command, argument);
+    if (result == -1) PublishAndroidErrno();
+    if (std::getenv("DARWIN_ART_DEBUG_LIBCORE_IO") != nullptr) {
+      std::fprintf(stderr,
+                   "DARWIN libcore IO: guest fcntl fd=%d command=%d "
+                   "argument=%lld result=%d errno=%d\n",
+                   fd, android_command, static_cast<long long>(argument),
+                   result, errno);
+    }
+    return result;
+  }
+
+  constexpr int kAndroidFDupfd = 0;
+  constexpr int kAndroidFGetfd = 1;
+  constexpr int kAndroidFSetfd = 2;
+  constexpr int kAndroidFGetfl = 3;
+  constexpr int kAndroidFSetfl = 4;
+  constexpr int kAndroidFDupfdCloexec = 1030;
+  int darwin_command = -1;
+  switch (android_command) {
+    case kAndroidFDupfd: darwin_command = F_DUPFD; break;
+    case kAndroidFDupfdCloexec: darwin_command = F_DUPFD_CLOEXEC; break;
+    case kAndroidFGetfd: darwin_command = F_GETFD; break;
+    case kAndroidFSetfd: darwin_command = F_SETFD; break;
+    case kAndroidFGetfl: darwin_command = F_GETFL; break;
+    case kAndroidFSetfl: darwin_command = F_SETFL; break;
+    default:
+      errno = ENOTSUP;
+      return -1;
+  }
+  int result;
+  do {
+    result = (android_command == kAndroidFGetfd ||
+              android_command == kAndroidFGetfl)
+                 ? fcntl(fd, darwin_command)
+                 : fcntl(fd, darwin_command, argument);
+  } while (result == -1 && errno == EINTR);
+  if (result >= 0 && (android_command == kAndroidFDupfd ||
+                      android_command == kAndroidFDupfdCloexec)) {
+    RememberHostFd(result);
+  }
   return result;
 }
 
-int Close(int fd) { return close(fd); }
+int Close(int fd) {
+  if (g_providers.close != nullptr && !ForgetHostFd(fd)) {
+    const int result = g_providers.close(fd);
+    if (result == -1) PublishAndroidErrno();
+    return result;
+  }
+  return close(fd);
+}
 
 ssize_t Read(int fd, void* bytes, size_t byte_count) {
+  if (g_providers.read != nullptr && !IsHostFd(fd)) {
+    const intptr_t result = g_providers.read(fd, bytes, byte_count);
+    if (result == -1) PublishAndroidErrno();
+    if (std::getenv("DARWIN_ART_DEBUG_LIBCORE_IO") != nullptr && result == -1) {
+      std::fprintf(stderr, "DARWIN libcore IO: read fd=%d count=%zu result=%ld errno=%d\n",
+                   fd, byte_count, static_cast<long>(result), errno);
+    }
+    return static_cast<ssize_t>(result);
+  }
   ssize_t result;
   do {
     result = read(fd, bytes, byte_count);
@@ -122,6 +320,11 @@ ssize_t Read(int fd, void* bytes, size_t byte_count) {
 }
 
 ssize_t Write(int fd, const void* bytes, size_t byte_count) {
+  if (g_providers.write != nullptr && !IsHostFd(fd)) {
+    const intptr_t result = g_providers.write(fd, bytes, byte_count);
+    if (result == -1) PublishAndroidErrno();
+    return static_cast<ssize_t>(result);
+  }
   ssize_t result;
   do {
     result = write(fd, bytes, byte_count);
@@ -130,6 +333,16 @@ ssize_t Write(int fd, const void* bytes, size_t byte_count) {
 }
 
 int Fstat(int fd, struct stat* status) {
+  if (g_providers.fstat != nullptr && !IsHostFd(fd)) {
+    DarwinArtAndroidStat android_status{};
+    const int result = g_providers.fstat(fd, &android_status);
+    if (result == -1) {
+      PublishAndroidErrno();
+      return -1;
+    }
+    AndroidStatToDarwin(android_status, status);
+    return 0;
+  }
   int result;
   do {
     result = fstat(fd, status);
@@ -138,6 +351,16 @@ int Fstat(int fd, struct stat* status) {
 }
 
 int Stat(const char* path, struct stat* status) {
+  if (g_providers.stat != nullptr && !IsAuthorizedHostRuntimePath(path)) {
+    DarwinArtAndroidStat android_status{};
+    const int result = g_providers.stat(path, &android_status);
+    if (result == -1) {
+      PublishAndroidErrno();
+      return -1;
+    }
+    AndroidStatToDarwin(android_status, status);
+    return 0;
+  }
   int result;
   do {
     result = stat(path, status);
@@ -146,6 +369,11 @@ int Stat(const char* path, struct stat* status) {
 }
 
 int64_t Lseek(int fd, int64_t offset, int android_whence) {
+  if (g_providers.lseek != nullptr && !IsHostFd(fd)) {
+    const int64_t result = g_providers.lseek(fd, offset, android_whence);
+    if (result == -1) PublishAndroidErrno();
+    return result;
+  }
   int darwin_whence = 0;
   if (!DarwinWhenceFromAndroid(android_whence, &darwin_whence)) {
     errno = EINVAL;
@@ -166,6 +394,57 @@ int64_t Lseek(int fd, int64_t offset, int android_whence) {
     return -1;
   }
   return static_cast<int64_t>(result);
+}
+
+intptr_t Sendfile(int output_fd, int input_fd, int64_t* offset,
+                  size_t byte_count) {
+  if (g_providers.sendfile == nullptr || IsHostFd(output_fd) ||
+      IsHostFd(input_fd)) {
+    errno = ENOTSUP;
+    return -1;
+  }
+  const intptr_t result =
+      g_providers.sendfile(output_fd, input_fd, offset, byte_count);
+  if (result == -1) PublishAndroidErrno();
+  return result;
+}
+
+int Access(const char* path, int mode) {
+  if ((mode & ~7) != 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (g_providers.access != nullptr && !IsAuthorizedHostRuntimePath(path)) {
+    const int result = g_providers.access(path, mode);
+    if (result == -1) PublishAndroidErrno();
+    return result;
+  }
+  return access(path, mode);
+}
+
+int Remove(const char* path) {
+  if (g_providers.remove != nullptr && !IsAuthorizedHostRuntimePath(path)) {
+    const int result = g_providers.remove(path);
+    if (result == -1) PublishAndroidErrno();
+    return result;
+  }
+  return remove(path);
+}
+
+int Rename(const char* old_path, const char* new_path) {
+  const bool guest_paths = !IsAuthorizedHostRuntimePath(old_path) &&
+                           !IsAuthorizedHostRuntimePath(new_path);
+  if (g_providers.rename != nullptr && guest_paths) {
+    const int result = g_providers.rename(old_path, new_path);
+    if (result == -1) PublishAndroidErrno();
+    return result;
+  }
+  if (!guest_paths && IsAuthorizedHostRuntimePath(old_path) !=
+                          IsAuthorizedHostRuntimePath(new_path)) {
+    errno = EXDEV;
+    return -1;
+  }
+  return rename(old_path, new_path);
 }
 
 void* Mmap(void* address, size_t byte_count, int linux_prot,

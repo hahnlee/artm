@@ -3,7 +3,7 @@ use darwin_art_elf_loader::{
     LoadedElf, ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver,
 };
 use std::env;
-use std::ffi::{c_char, c_void};
+use std::ffi::{CStr, c_char, c_void};
 use std::fs;
 use std::num::NonZeroUsize;
 use std::process::ExitCode;
@@ -11,10 +11,49 @@ use std::sync::Arc;
 
 unsafe extern "C" {
     fn __error() -> *mut i32;
+    fn mmap(
+        address: *mut c_void,
+        length: usize,
+        protection: i32,
+        flags: i32,
+        descriptor: i32,
+        offset: i64,
+    ) -> *mut c_void;
+    fn mprotect(address: *mut c_void, length: usize, protection: i32) -> i32;
+    fn munmap(address: *mut c_void, length: usize) -> i32;
+    fn darwin_art_bionic_getrlimit(resource: i32, limit: *mut c_void) -> i32;
+    fn darwin_art_bionic_errno_load() -> i32;
     fn darwin_art_bionic_process_state_resolve(
         name: *const c_char,
     ) -> Option<unsafe extern "C" fn()>;
     fn darwin_art_bionic_errno_resolve(name: *const c_char) -> Option<unsafe extern "C" fn()>;
+    fn darwin_art_bionic___system_property_find(name: *const c_char) -> *const c_void;
+    fn darwin_art_bionic___system_property_read_callback(
+        property: *const c_void,
+        callback: unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char, u32),
+        cookie: *mut c_void,
+    );
+}
+
+#[derive(Default)]
+struct PropertyCapture {
+    name: Vec<u8>,
+    value: Vec<u8>,
+    serial: u32,
+}
+
+unsafe extern "C" fn capture_property(
+    cookie: *mut c_void,
+    name: *const c_char,
+    value: *const c_char,
+    serial: u32,
+) {
+    // SAFETY: this callback is invoked synchronously with the local capture
+    // cookie and snapshot-owned NUL-terminated strings.
+    let capture = unsafe { &mut *cookie.cast::<PropertyCapture>() };
+    capture.name = unsafe { CStr::from_ptr(name) }.to_bytes().to_vec();
+    capture.value = unsafe { CStr::from_ptr(value) }.to_bytes().to_vec();
+    capture.serial = serial;
 }
 
 struct ClosedResolver;
@@ -81,6 +120,46 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         },
     )?);
     let activation = snapshot.activate()?;
+
+    const PAGE_SIZE: usize = 16_384;
+    // Chromium verifies protected memory by asking getrlimit() to copy its
+    // result into a read-only page. Linux returns EFAULT for that kernel
+    // copy-to-user; the compatibility syscall must not fault the host process.
+    let probe_page = unsafe { mmap(std::ptr::null_mut(), PAGE_SIZE, 3, 0x1002, -1, 0) };
+    if probe_page as isize == -1 {
+        return Err("protected getrlimit probe mmap failed".into());
+    }
+    if unsafe { darwin_art_bionic_getrlimit(6, probe_page) } != 0 {
+        return Err("writable getrlimit copy-out failed".into());
+    }
+    if unsafe { mprotect(probe_page, PAGE_SIZE, 1) } != 0 {
+        return Err("protected getrlimit probe mprotect failed".into());
+    }
+    if unsafe { darwin_art_bionic_getrlimit(6, probe_page) } != -1
+        || unsafe { darwin_art_bionic_errno_load() } != 14
+    {
+        return Err("read-only getrlimit copy-out did not return EFAULT".into());
+    }
+    if unsafe { munmap(probe_page, PAGE_SIZE) } != 0 {
+        return Err("protected getrlimit probe munmap failed".into());
+    }
+    let mut property = PropertyCapture::default();
+    // SAFETY: the active snapshot and local callback cookie outlive the
+    // synchronous property lookup and callback.
+    unsafe {
+        let token = darwin_art_bionic___system_property_find(c"ro.build.version.sdk".as_ptr());
+        if token.is_null() {
+            return Err("property token lookup failed".into());
+        }
+        darwin_art_bionic___system_property_read_callback(
+            token,
+            capture_property,
+            (&mut property as *mut PropertyCapture).cast(),
+        );
+    }
+    if property.name != b"ro.build.version.sdk" || property.value != b"36" {
+        return Err("property callback snapshot mismatch".into());
+    }
     let bytes = fs::read(fixture)?;
     let mut resolver = ClosedResolver;
     let mut image = LoadedElf::load_with_resolver(&bytes, &mut resolver)?;

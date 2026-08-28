@@ -574,6 +574,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
             "-licuuc",
             "-licudata",
             "-lz",
+            "-lresolv",
             "-framework",
             "AppKit",
             "-framework",
@@ -586,6 +587,8 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
             "Security",
             "-framework",
             "AudioToolbox",
+            "-framework",
+            "CoreAudio",
             "-o",
         ])
         .arg(&runtime_library);

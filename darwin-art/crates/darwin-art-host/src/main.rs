@@ -1,4 +1,4 @@
-use darwin_art_host::{RunOptions, run};
+use darwin_art_host::{RunOptions, run, run_service_child};
 use std::env;
 use std::error::Error;
 use std::fs::File;
@@ -19,6 +19,16 @@ fn main_result() -> Result<(), Box<dyn Error>> {
     let mut arguments = env::args_os();
     let program = arguments.next().unwrap_or_else(|| "darwin-art-host".into());
     let mut values = arguments.collect::<Vec<_>>();
+    if values
+        .first()
+        .is_some_and(|value| value == "--service-child")
+    {
+        if values.len() != 2 {
+            return Err("--service-child requires exactly one control fd".into());
+        }
+        let control_fd = values[1].to_string_lossy().parse::<i32>()?;
+        return run_service_child(control_fd).map_err(Into::into);
+    }
     let frame_output = if values.first().is_some_and(|value| value == "--frame-ppm") {
         if values.len() < 2 {
             return Err("--frame-ppm requires a path".into());
@@ -58,7 +68,7 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         core_icu4j_jar: PathBuf::from(&values[4]),
         app_dex: PathBuf::from(&values[5]),
         heap_initial_bytes: 64 * 1024 * 1024,
-        heap_maximum_bytes: 64 * 1024 * 1024,
+        heap_maximum_bytes: 256 * 1024 * 1024,
         visible_seconds,
     };
     let outcome = run(&options)?;

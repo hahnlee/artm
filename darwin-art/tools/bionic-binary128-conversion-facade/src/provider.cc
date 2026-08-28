@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <cmath>
+#include <limits>
 #include <string_view>
 
 #include <androidicuinit/android_icu_init.h>
@@ -91,6 +93,69 @@ bool IsAllowedAscii(DarwinArtAndroidWchar code_point) {
 
 }  // namespace
 
+namespace {
+double Binary128ToDouble(const void* input) {
+  uint64_t words[2]{};
+  std::memcpy(words, input, sizeof(words));
+  const bool negative = (words[1] >> 63) != 0;
+  const unsigned exponent = static_cast<unsigned>((words[1] >> 48) & 0x7fff);
+  const uint64_t fraction_high = words[1] & UINT64_C(0x0000ffffffffffff);
+  if (exponent == 0x7fff) {
+    if (fraction_high != 0 || words[0] != 0)
+      return std::numeric_limits<double>::quiet_NaN();
+    return negative ? -INFINITY : INFINITY;
+  }
+  double significand = std::ldexp(static_cast<double>(fraction_high), -48) +
+                       std::ldexp(static_cast<double>(words[0]), -112);
+  int power = 1 - 16383;
+  if (exponent != 0) {
+    significand += 1.0;
+    power = static_cast<int>(exponent) - 16383;
+  }
+  const double value = std::ldexp(significand, power);
+  return negative ? -value : value;
+}
+
+void DoubleToBinary128(double value, void* output) {
+  uint64_t words[2]{};
+  uint64_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  const uint64_t sign = bits >> 63;
+  const unsigned exponent = static_cast<unsigned>((bits >> 52) & 0x7ff);
+  const uint64_t fraction = bits & UINT64_C(0x000fffffffffffff);
+  if (exponent == 0x7ff) {
+    words[1] = (sign << 63) | (UINT64_C(0x7fff) << 48);
+    if (fraction != 0) words[1] |= UINT64_C(0x0000800000000000);
+  } else if (exponent == 0 && fraction == 0) {
+    words[1] = sign << 63;
+  } else {
+    int binary_exponent = 0;
+    const double normalized = std::frexp(std::fabs(value), &binary_exponent) * 2.0;
+    const uint64_t normalized_bits = [&] {
+      uint64_t result = 0;
+      std::memcpy(&result, &normalized, sizeof(result));
+      return result;
+    }();
+    const uint64_t normalized_fraction =
+        normalized_bits & UINT64_C(0x000fffffffffffff);
+    const uint64_t quad_exponent =
+        static_cast<uint64_t>(binary_exponent - 1 + 16383);
+    words[0] = normalized_fraction << 60;
+    words[1] = (sign << 63) | (quad_exponent << 48) |
+               (normalized_fraction >> 4);
+  }
+  std::memcpy(output, words, sizeof(words));
+}
+}  // namespace
+
+extern "C" void darwin_art_bionic_powl_raw(const void* base,
+                                             const void* exponent,
+                                             void* output) {
+  const double result =
+      std::pow(Binary128ToDouble(base), Binary128ToDouble(exponent));
+  DoubleToBinary128(result, output);
+}
+
 extern "C" void darwin_art_bionic_strtold_raw(const char* input,
                                                 char** end_pointer,
                                                 void* output) {
@@ -157,11 +222,15 @@ extern "C" void* darwin_art_bionic_binary128_conversion_resolve(
     const char* symbol,
     const char* version) {
   if (soname == nullptr || symbol == nullptr || version == nullptr ||
-      std::string_view(soname) != "libc.so" ||
+      (std::string_view(soname) != "libc.so" &&
+       std::string_view(soname) != "libm.so") ||
       std::string_view(version) != "LIBC") {
     return nullptr;
   }
   const std::string_view name(symbol);
+  if (std::string_view(soname) == "libm.so" && name == "powl")
+    return (void*)darwin_art_bionic_powl;
+  if (std::string_view(soname) != "libc.so") return nullptr;
   if (name == "strtold") return (void*)darwin_art_bionic_strtold;
   if (name == "strtold_l") return (void*)darwin_art_bionic_strtold_l;
   if (name == "wcstold") return (void*)darwin_art_bionic_wcstold;

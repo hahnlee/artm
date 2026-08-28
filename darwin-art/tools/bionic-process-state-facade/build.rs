@@ -50,7 +50,15 @@ fn main() {
     compile("src/shims.c", &shims, &sdk, &["include"]);
     assert!(
         Command::new("clang")
-            .args(["-arch", "arm64", "-isysroot", &sdk, "-c", "src/setjmp_arm64.S", "-o"])
+            .args([
+                "-arch",
+                "arm64",
+                "-isysroot",
+                &sdk,
+                "-c",
+                "src/setjmp_arm64.S",
+                "-o"
+            ])
             .arg(&setjmp)
             .status()
             .unwrap()

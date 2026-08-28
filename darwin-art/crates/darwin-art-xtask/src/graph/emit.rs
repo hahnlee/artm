@@ -71,6 +71,15 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let icu_stubdata_archive_path = native_output_root.join(ICU_STUBDATA_FOUNDATION_ARCHIVE);
     let icu_init_archive_path = native_output_root.join(ICU_INIT_FOUNDATION_ARCHIVE);
     let runtime_library_path = native_output_root.join(GRAPHICS_RUNTIME_LIBRARY);
+    let bionic_provider_root = native_output_root.join("bionic-runtime-provider-closure");
+    let bionic_rust_provider_archive_path =
+        bionic_provider_root.join("libdarwin-art-bionic-rust-providers.a");
+    let bionic_native_provider_archive_path =
+        bionic_provider_root.join("libdarwin-art-bionic-native-providers.a");
+    let bionic_float_provider_archive_path =
+        bionic_provider_root.join("libdarwin-art-bionic-float-conversion.a");
+    let bionic_binary128_provider_archive_path =
+        bionic_provider_root.join("libdarwin-art-bionic-binary128-conversion.a");
     let filesystem_object_path =
         native_output_root.join("runtime-probes/darwin_art_runtime_filesystem_probe.cc.o");
     let network_object_path =
@@ -117,6 +126,10 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let icu_stubdata_archive = ninja_path(&icu_stubdata_archive_path);
     let icu_init_archive = ninja_path(&icu_init_archive_path);
     let runtime_library = ninja_path(&runtime_library_path);
+    let bionic_rust_provider_archive = ninja_path(&bionic_rust_provider_archive_path);
+    let bionic_native_provider_archive = ninja_path(&bionic_native_provider_archive_path);
+    let bionic_float_provider_archive = ninja_path(&bionic_float_provider_archive_path);
+    let bionic_binary128_provider_archive = ninja_path(&bionic_binary128_provider_archive_path);
     let runtime_owner_archive = ninja_path(&runtime_owner_archive_path);
     let filesystem_object = ninja_path(&filesystem_object_path);
     let network_object = ninja_path(&network_object_path);
@@ -177,6 +190,42 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         foundation_input_list(&root, &foundation_inputs, FoundationFamily::GraphicsJni);
     let icu_foundation_input_list =
         foundation_input_list(&root, &foundation_inputs, FoundationFamily::Icu);
+    // The provider closure is linked directly into the final runtime dylib,
+    // rather than copied into the large ART/HWUI bootstrap archive. Keep it
+    // on its own narrow Ninja edge so a Rust facade edit rebuilds four small
+    // provider archives and relinks, without recompiling the C++ runtime.
+    let mut bionic_provider_inputs = vec![
+        PathBuf::from("tools/build-bionic-runtime-provider-closure.sh"),
+        PathBuf::from("upstream/android35-libcxx-provider-coverage.lock"),
+    ];
+    if let Ok(entries) = fs::read_dir(root.join("tools")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if path.is_dir()
+                && (name.starts_with("bionic-")
+                    || matches!(
+                        name,
+                        "android-bionic-pthread-provider"
+                            | "android-dl-iterate-phdr-provider"
+                            | "android-liblog-exec-provider"
+                    ))
+            {
+                collect_files(&path, &root, &mut bionic_provider_inputs);
+            }
+        }
+    }
+    bionic_provider_inputs.sort();
+    bionic_provider_inputs.dedup();
+    let bionic_provider_input_list = bionic_provider_inputs
+        .iter()
+        .filter(|path| root.join(path).is_file())
+        .map(|path| ninja_path(&root.join(path)))
+        .collect::<Vec<_>>()
+        .join(" ");
     // Probe objects are separate graph products.  Do not attach the complete
     // bootstrap input closure to each one: that turns an edit to an unrelated
     // probe/provider into a rebuild of every probe.  The compiler writes the
@@ -612,6 +661,24 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push('\n');
     graph.push_str("build foundation: phony graphics-foundation icu-foundation\n\n");
 
+    graph.push_str("rule bionic_provider_closure\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && tools/build-bionic-runtime-provider-closure.sh\n");
+    graph.push_str("  description = RUST/C Bionic provider closure\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&bionic_rust_provider_archive);
+    graph.push(' ');
+    graph.push_str(&bionic_native_provider_archive);
+    graph.push(' ');
+    graph.push_str(&bionic_float_provider_archive);
+    graph.push(' ');
+    graph.push_str(&bionic_binary128_provider_archive);
+    graph.push_str(": bionic_provider_closure ");
+    graph.push_str(&bionic_provider_input_list);
+    graph.push('\n');
+
     graph.push_str("rule runtime_filesystem_probe\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
@@ -1033,6 +1100,14 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&probe_only_input_list);
     graph.push(' ');
     graph.push_str(&runtime_owner_archive);
+    graph.push(' ');
+    graph.push_str(&bionic_rust_provider_archive);
+    graph.push(' ');
+    graph.push_str(&bionic_native_provider_archive);
+    graph.push(' ');
+    graph.push_str(&bionic_float_provider_archive);
+    graph.push(' ');
+    graph.push_str(&bionic_binary128_provider_archive);
     graph.push(' ');
     graph.push_str(&ninja_path(&runtime_entry_stamp));
     graph.push('\n');

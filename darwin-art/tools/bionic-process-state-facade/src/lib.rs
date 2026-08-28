@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::ffi::{CStr, c_char, c_int};
 use std::ptr;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -24,6 +25,17 @@ unsafe extern "C" {
 static ACTIVE: OnceLock<RwLock<Option<Arc<Snapshot>>>> = OnceLock::new();
 static CAPABILITY_FAILURE: AtomicBool = AtomicBool::new(false);
 static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+static PROCESS_OWNER: Mutex<Option<ProcessOwner>> = Mutex::new(None);
+
+// A process always exposes a valid, NUL-terminated environment vector, even
+// before the host installs its capability-filtered Android snapshot. This is
+// the same empty environment shape accepted by execve and prevents native
+// code from having to special-case a null `environ` pointer.
+static mut EMPTY_ENVIRONMENT: [*mut c_char; 1] = [ptr::null_mut()];
+
+#[unsafe(no_mangle)]
+pub static mut darwin_art_bionic_environ: *mut *mut c_char =
+    (&raw mut EMPTY_ENVIRONMENT).cast::<*mut c_char>();
 
 fn active_slot() -> &'static RwLock<Option<Arc<Snapshot>>> {
     ACTIVE.get_or_init(|| RwLock::new(None))
@@ -40,9 +52,22 @@ pub struct AuxSnapshot {
 
 pub struct Snapshot {
     environment: BTreeMap<Vec<u8>, Box<[u8]>>,
-    properties: BTreeMap<Vec<u8>, Box<[u8]>>,
+    _environment_strings: Vec<Box<[u8]>>,
+    environment_pointers: Vec<usize>,
+    properties: BTreeMap<Vec<u8>, PropertyEntry>,
     auxv: BTreeMap<u64, u64>,
     _random: Box<[u8; 16]>,
+}
+
+struct ProcessOwner {
+    // Activation must be dropped before its snapshot storage.
+    activation: Activation,
+    _snapshot: Arc<Snapshot>,
+}
+
+struct PropertyEntry {
+    name: Box<[u8]>,
+    value: Box<[u8]>,
 }
 
 impl Snapshot {
@@ -58,7 +83,35 @@ impl Snapshot {
             return Err("unsupported Android arm64 hardware capability claim");
         }
         let environment = collect_snapshot(environment, false)?;
-        let properties = collect_snapshot(properties, true)?;
+        let environment_strings = environment
+            .iter()
+            .map(|(name, value)| {
+                let mut entry = Vec::with_capacity(name.len() + value.len() + 1);
+                entry.extend_from_slice(name);
+                entry.push(b'=');
+                entry.extend_from_slice(value);
+                entry.into_boxed_slice()
+            })
+            .collect::<Vec<_>>();
+        let mut environment_pointers = environment_strings
+            .iter()
+            .map(|entry| entry.as_ptr() as usize)
+            .collect::<Vec<_>>();
+        environment_pointers.push(0);
+        let properties = collect_snapshot(properties, true)?
+            .into_iter()
+            .map(|(name, value)| {
+                let mut terminated_name = name.clone();
+                terminated_name.push(0);
+                (
+                    name,
+                    PropertyEntry {
+                        name: terminated_name.into_boxed_slice(),
+                        value,
+                    },
+                )
+            })
+            .collect();
         let random = Box::new(aux.random);
         let random_address = (&*random as *const [u8; 16]) as usize as u64;
         let auxv = BTreeMap::from([
@@ -70,6 +123,8 @@ impl Snapshot {
         ]);
         Ok(Self {
             environment,
+            _environment_strings: environment_strings,
+            environment_pointers,
             properties,
             auxv,
             _random: random,
@@ -82,6 +137,12 @@ impl Snapshot {
             .map_err(|_| "activation lock poisoned")?;
         if active.is_some() {
             return Err("another process snapshot is active");
+        }
+        // SAFETY: activation is serialized by ACTIVE's write lock. The pointer
+        // array and its strings are owned by the Arc installed below and remain
+        // stable until Activation clears the exported slot before dropping it.
+        unsafe {
+            darwin_art_bionic_environ = self.environment_pointers.as_ptr().cast_mut().cast();
         }
         *active = Some(Arc::clone(self));
         Ok(Activation { active: true })
@@ -103,6 +164,11 @@ impl Drop for Activation {
         if self.active {
             match active_slot().write() {
                 Ok(mut active) => {
+                    // SAFETY: teardown holds the same exclusive activation lock.
+                    unsafe {
+                        darwin_art_bionic_environ =
+                            (&raw mut EMPTY_ENVIRONMENT).cast::<*mut c_char>()
+                    };
                     active.take();
                 }
                 Err(_) => CAPABILITY_FAILURE.store(true, Ordering::Release),
@@ -211,8 +277,80 @@ pub unsafe extern "C" fn darwin_art_bionic_process_property_get_core(
         return 0;
     };
     // SAFETY: construction bounds source to at most PROP_VALUE_MAX bytes including NUL.
-    unsafe { ptr::copy_nonoverlapping(source.as_ptr().cast::<c_char>(), value, source.len()) };
-    (source.len() - 1) as c_int
+    unsafe {
+        ptr::copy_nonoverlapping(
+            source.value.as_ptr().cast::<c_char>(),
+            value,
+            source.value.len(),
+        )
+    };
+    (source.value.len() - 1) as c_int
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `name` must point to a readable NUL-terminated property name.
+pub unsafe extern "C" fn darwin_art_bionic_process_property_find_core(
+    name: *const c_char,
+) -> *const std::ffi::c_void {
+    let Some(name) = (unsafe { c_bytes(name) }) else {
+        set_errno(ANDROID_EFAULT);
+        return ptr::null();
+    };
+    let Some(snapshot) = active_snapshot() else {
+        missing_snapshot();
+        return ptr::null();
+    };
+    snapshot
+        .properties
+        .get(name)
+        .map_or(ptr::null(), |property| {
+            (property as *const PropertyEntry).cast()
+        })
+}
+
+type PropertyReadCallback = unsafe extern "C" fn(
+    cookie: *mut std::ffi::c_void,
+    name: *const c_char,
+    value: *const c_char,
+    serial: u32,
+);
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `property` must be a token returned by the active snapshot's find call and
+/// `callback`, when present, must be callable for the duration of this call.
+pub unsafe extern "C" fn darwin_art_bionic_process_property_read_callback_core(
+    property: *const std::ffi::c_void,
+    callback: Option<PropertyReadCallback>,
+    cookie: *mut std::ffi::c_void,
+) {
+    if property.is_null() || callback.is_none() {
+        set_errno(ANDROID_EFAULT);
+        return;
+    }
+    let Some(snapshot) = active_snapshot() else {
+        missing_snapshot();
+        return;
+    };
+    let Some(entry) = snapshot
+        .properties
+        .values()
+        .find(|entry| std::ptr::eq(*entry as *const PropertyEntry, property.cast()))
+    else {
+        set_errno(ANDROID_EFAULT);
+        return;
+    };
+    // SAFETY: entry storage belongs to the active snapshot and the callback is
+    // required by the guest ABI to consume both strings synchronously.
+    unsafe {
+        callback.unwrap_unchecked()(
+            cookie,
+            entry.name.as_ptr().cast(),
+            entry.value.as_ptr().cast(),
+            0,
+        )
+    };
 }
 
 #[unsafe(no_mangle)]
@@ -236,4 +374,74 @@ pub fn capability_failed() -> bool {
 
 pub fn drop_count() -> usize {
     DROP_COUNT.load(Ordering::Acquire)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_process_state_process_install() -> c_int {
+    let mut owner = match PROCESS_OWNER.lock() {
+        Ok(owner) => owner,
+        Err(_) => return -1,
+    };
+    if owner.is_some() {
+        return -1;
+    }
+    let mut random = [0_u8; 16];
+    unsafe extern "C" {
+        fn getentropy(buffer: *mut std::ffi::c_void, length: usize) -> c_int;
+    }
+    // SAFETY: random is writable for exactly the requested byte count.
+    if unsafe { getentropy(random.as_mut_ptr().cast(), random.len()) } != 0 {
+        return -1;
+    }
+    let snapshot = match Snapshot::new(
+        vec![
+            (b"ANDROID_ROOT".to_vec(), b"/system".to_vec()),
+            (b"ANDROID_DATA".to_vec(), b"/data".to_vec()),
+            (b"ANDROID_STORAGE".to_vec(), b"/storage".to_vec()),
+            (
+                b"EXTERNAL_STORAGE".to_vec(),
+                b"/storage/emulated/0".to_vec(),
+            ),
+            (b"LANG".to_vec(), b"en-US".to_vec()),
+        ],
+        vec![
+            (b"ro.build.version.sdk".to_vec(), b"36".to_vec()),
+            (b"ro.build.version.release".to_vec(), b"16".to_vec()),
+            (b"ro.product.cpu.abi".to_vec(), b"arm64-v8a".to_vec()),
+            (b"ro.product.cpu.abilist".to_vec(), b"arm64-v8a".to_vec()),
+        ],
+        AuxSnapshot {
+            page_size: 16_384,
+            hwcap: SAFE_HWCAP,
+            hwcap2: 0,
+            secure: false,
+            random,
+        },
+    ) {
+        Ok(snapshot) => Arc::new(snapshot),
+        Err(_) => return -1,
+    };
+    let activation = match snapshot.activate() {
+        Ok(activation) => activation,
+        Err(_) => return -1,
+    };
+    *owner = Some(ProcessOwner {
+        activation,
+        _snapshot: snapshot,
+    });
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_process_state_process_uninstall() -> c_int {
+    let mut owner = match PROCESS_OWNER.lock() {
+        Ok(owner) => owner,
+        Err(_) => return -1,
+    };
+    let Some(process) = owner.take() else {
+        return -1;
+    };
+    drop(process.activation);
+    drop(process._snapshot);
+    0
 }

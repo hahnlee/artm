@@ -3,22 +3,143 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <iterator>
 #include <string>
+#include <unistd.h>
 
 #include "mirror/throwable.h"
+#include "darwin_binder_wire.h"
+#include "runtime_process_state.h"
 #include "thread-current-inl.h"
 
 namespace darwin_art_app_activity {
+namespace {
 
-int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
+std::string JavaString(JNIEnv* env, jstring value) {
+  if (value == nullptr) return {};
+  const char* utf = env->GetStringUTFChars(value, nullptr);
+  if (utf == nullptr) return {};
+  std::string result(utf);
+  env->ReleaseStringUTFChars(value, utf);
+  return result;
+}
+
+jintArray SpawnService(JNIEnv* env, jclass, jstring component,
+                       jstring instance_name, jstring process_name,
+                       jboolean isolated, jobject intent) {
+  const std::string component_utf = JavaString(env, component);
+  const std::string instance_utf = JavaString(env, instance_name);
+  const std::string process_utf = JavaString(env, process_name);
+  if (component_utf.empty() || process_utf.empty() || env->ExceptionCheck()) {
+    return nullptr;
+  }
+  int32_t host_pid = -1;
+  int32_t control_fd = -1;
+  if (darwin_art_process::spawn_service_process(
+          component_utf.c_str(), instance_utf.c_str(), process_utf.c_str(),
+          isolated == JNI_TRUE, &host_pid, &control_fd) != 0) {
+    return nullptr;
+  }
+  if (intent == nullptr ||
+      !darwin_art::SendServiceBindIntent(env, control_fd, intent) ||
+      !darwin_art::StartRemoteBinderDispatcher(env, control_fd)) {
+    close(control_fd);
+    darwin_art_process::release_service_process(host_pid);
+    return nullptr;
+  }
+  jint values[2] = {host_pid, control_fd};
+  jintArray result = env->NewIntArray(2);
+  if (result == nullptr || env->ExceptionCheck()) {
+    close(control_fd);
+    darwin_art_process::release_service_process(host_pid);
+    return nullptr;
+  }
+  env->SetIntArrayRegion(result, 0, 2, values);
+  return env->ExceptionCheck() ? nullptr : result;
+}
+
+jint ReleaseRemoteService(JNIEnv* env, jclass, jint host_pid, jint control_fd) {
+  darwin_art::CloseRemoteBinderChannel(env, control_fd);
+  const int close_status = control_fd < 0 ? -1 : close(control_fd);
+  const int32_t release_status =
+      darwin_art_process::release_service_process(host_pid);
+  return close_status == 0 && release_status == 0 ? 0 : -1;
+}
+
+jboolean RemoteTransact(JNIEnv* env, jclass, jint control_fd, jint target_id,
+                        jint code, jobject data, jobject reply, jint flags) {
+  return darwin_art::TransactRemoteBinder(env, control_fd, target_id, code,
+                                         data, reply, flags);
+}
+
+bool InstallHostServiceNatives(JNIEnv* env, jclass probe_context_class) {
+  JNINativeMethod methods[] = {
+      {const_cast<char*>("nativeSpawnService"),
+       const_cast<char*>(
+           "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
+           "ZLandroid/content/Intent;)[I"),
+       reinterpret_cast<void*>(&SpawnService)},
+      {const_cast<char*>("nativeReleaseRemoteService"),
+       const_cast<char*>("(II)I"),
+       reinterpret_cast<void*>(&ReleaseRemoteService)},
+      {const_cast<char*>("nativeRemoteTransact"),
+       const_cast<char*>(
+           "(IIILandroid/os/Parcel;Landroid/os/Parcel;I)Z"),
+       reinterpret_cast<void*>(&RemoteTransact)},
+  };
+  return env->RegisterNatives(probe_context_class, methods,
+                              static_cast<jint>(std::size(methods))) == JNI_OK;
+}
+
+bool EnsureActivityThreadConfigurationController(JNIEnv* env,
+                                                 jobject activity_thread) {
+  if (env == nullptr || activity_thread == nullptr) return false;
+  jclass activity_thread_class = env->FindClass("android/app/ActivityThread");
+  jclass controller_class =
+      env->FindClass("android/app/ConfigurationController");
+  jfieldID controller_field =
+      activity_thread_class == nullptr
+          ? nullptr
+          : env->GetFieldID(activity_thread_class, "mConfigurationController",
+                            "Landroid/app/ConfigurationController;");
+  if (controller_class == nullptr || controller_field == nullptr ||
+      env->ExceptionCheck()) {
+    return false;
+  }
+  jobject controller =
+      env->GetObjectField(activity_thread, controller_field);
+  if (controller != nullptr) return !env->ExceptionCheck();
+  jmethodID constructor = env->GetMethodID(
+      controller_class, "<init>", "(Landroid/app/ActivityThreadInternal;)V");
+  controller = constructor == nullptr
+                   ? nullptr
+                   : env->NewObject(controller_class, constructor,
+                                    activity_thread);
+  if (controller == nullptr || env->ExceptionCheck()) return false;
+  env->SetObjectField(activity_thread, controller_field, controller);
+  return !env->ExceptionCheck();
+}
+
+}  // namespace
+
+int prepare(JNIEnv* env, art::Thread* self, jobject* activity_instance_out,
             jclass probe_activity_class, jclass probe_context_class,
             const darwin_art_app_resources::Bundle* resources,
             jobject package_manager, bool run_apk_app,
             bool use_framework_resources, const char* apk_app_package,
-            const char* apk_app_activity, Bundle* out) {
-  if (env == nullptr || self == nullptr || activity_instance == nullptr ||
+            const char* apk_app_activity, bool application_only, Bundle* out) {
+  if (env == nullptr || self == nullptr || activity_instance_out == nullptr ||
       probe_activity_class == nullptr || probe_context_class == nullptr ||
       resources == nullptr || package_manager == nullptr || out == nullptr) {
+    return 27;
+  }
+  jobject activity_instance = *activity_instance_out;
+  if (!run_apk_app && activity_instance == nullptr) {
+    return 27;
+  }
+  if (!InstallHostServiceNatives(env, probe_context_class) ||
+      env->ExceptionCheck()) {
+    std::cerr << "ART Android process: host service JNI setup failed\n";
     return 27;
   }
   *out = {};
@@ -126,6 +247,7 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
                 package_manager_class, "configure",
                 "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
                 "Ljava/lang/String;"
+                "Ljava/lang/String;"
                 "Landroid/content/pm/ActivityInfo;I"
                 "Landroid/content/res/Resources;ILjava/lang/String;)V");
   jstring configured_package = env->NewStringUTF(
@@ -138,6 +260,10 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
       configured_activities == nullptr
           ? "dev.darwinart.probe.ProbeActivity=0x0"
           : configured_activities);
+  const char* configured_aliases =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_APP_ACTIVITY_ALIASES") : nullptr;
+  jstring configured_activity_aliases = env->NewStringUTF(
+      configured_aliases == nullptr ? "none" : configured_aliases);
   const char* configured_services =
       run_apk_app ? std::getenv("DARWIN_ART_APK_APP_SERVICES") : "none";
   jstring configured_service_names = env->NewStringUTF(
@@ -147,11 +273,13 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
   if (configure_package_manager != nullptr && configured_package != nullptr &&
       configured_activity != nullptr && configured_service_names != nullptr &&
       configured_activity_names != nullptr &&
+      configured_activity_aliases != nullptr &&
       configured_version != nullptr &&
       resources->activity_info != nullptr) {
     env->CallVoidMethod(package_manager, configure_package_manager,
                         configured_package, configured_activity,
                         configured_activity_names,
+                        configured_activity_aliases,
                         configured_service_names,
                         resources->activity_info, app_target_sdk,
                         resources->probe_resources, app_version_code,
@@ -159,6 +287,7 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
   }
   env->DeleteLocalRef(configured_version);
   env->DeleteLocalRef(configured_service_names);
+  env->DeleteLocalRef(configured_activity_aliases);
   env->DeleteLocalRef(configured_activity_names);
   env->DeleteLocalRef(configured_activity);
   env->DeleteLocalRef(configured_package);
@@ -291,14 +420,153 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
             ? nullptr
             : env->GetFieldID(context_wrapper_class, "mBase",
                               "Landroid/content/Context;");
+    jmethodID application_attach_base =
+        context_wrapper_class == nullptr
+            ? nullptr
+            : env->GetMethodID(context_wrapper_class, "attachBaseContext",
+                               "(Landroid/content/Context;)V");
     jmethodID application_on_create =
         resources->application_class == nullptr
             ? nullptr
             : env->GetMethodID(resources->application_class, "onCreate", "()V");
+    jclass activity_thread_class = env->FindClass("android/app/ActivityThread");
+    jfieldID current_activity_thread =
+        activity_thread_class == nullptr
+            ? nullptr
+            : env->GetStaticFieldID(activity_thread_class,
+                                    "sCurrentActivityThread",
+                                    "Landroid/app/ActivityThread;");
+    jfieldID initial_application =
+        activity_thread_class == nullptr
+            ? nullptr
+            : env->GetFieldID(activity_thread_class, "mInitialApplication",
+                              "Landroid/app/Application;");
+    jfieldID bound_application =
+        activity_thread_class == nullptr
+            ? nullptr
+            : env->GetFieldID(activity_thread_class, "mBoundApplication",
+                              "Landroid/app/ActivityThread$AppBindData;");
+    jobject activity_thread =
+        current_activity_thread == nullptr
+            ? nullptr
+            : env->GetStaticObjectField(activity_thread_class,
+                                        current_activity_thread);
+    if (activity_thread == nullptr && activity_thread_class != nullptr &&
+        !env->ExceptionCheck()) {
+      jmethodID activity_thread_constructor =
+          env->GetMethodID(activity_thread_class, "<init>", "()V");
+      if (activity_thread_constructor != nullptr && !env->ExceptionCheck()) {
+        activity_thread =
+            env->NewObject(activity_thread_class, activity_thread_constructor);
+        if (activity_thread != nullptr && !env->ExceptionCheck()) {
+          env->SetStaticObjectField(activity_thread_class,
+                                    current_activity_thread, activity_thread);
+        }
+      }
+    }
+    if (!EnsureActivityThreadConfigurationController(env, activity_thread)) {
+      std::cerr << "ART Android process: ActivityThread configuration setup "
+                   "failed\n";
+      if (env->ExceptionCheck()) env->ExceptionDescribe();
+      return 27;
+    }
+    // bindApplication() publishes this record before Application.attach().
+    // Application.getProcessName/currentPackageName intentionally read it.
+    jclass bind_data_class =
+        env->FindClass("android/app/ActivityThread$AppBindData");
+    jmethodID bind_data_constructor =
+        bind_data_class == nullptr
+            ? nullptr
+            : env->GetMethodID(bind_data_class, "<init>", "()V");
+    jobject bind_data =
+        bind_data_constructor == nullptr
+            ? nullptr
+            : env->NewObject(bind_data_class, bind_data_constructor);
+    jfieldID bind_process_name =
+        bind_data_class == nullptr
+            ? nullptr
+            : env->GetFieldID(bind_data_class, "processName",
+                              "Ljava/lang/String;");
+    jclass application_info_class =
+        env->FindClass("android/content/pm/ApplicationInfo");
+    jmethodID application_info_constructor =
+        application_info_class == nullptr
+            ? nullptr
+            : env->GetMethodID(application_info_class, "<init>", "()V");
+    jobject application_info =
+        application_info_constructor == nullptr
+            ? nullptr
+            : env->NewObject(application_info_class,
+                             application_info_constructor);
+    jfieldID bind_app_info =
+        bind_data_class == nullptr
+            ? nullptr
+            : env->GetFieldID(bind_data_class, "appInfo",
+                              "Landroid/content/pm/ApplicationInfo;");
+    jfieldID app_info_package =
+        application_info_class == nullptr
+            ? nullptr
+            : env->GetFieldID(application_info_class, "packageName",
+                              "Ljava/lang/String;");
+    jfieldID app_info_process =
+        application_info_class == nullptr
+            ? nullptr
+            : env->GetFieldID(application_info_class, "processName",
+                              "Ljava/lang/String;");
+    const char* configured_process_name =
+        std::getenv("DARWIN_ART_APK_PROCESS_NAME");
+    jstring process_name = env->NewStringUTF(
+        configured_process_name == nullptr ? apk_app_package
+                                           : configured_process_name);
+    jstring application_package = env->NewStringUTF(apk_app_package);
+    if (activity_thread != nullptr && bind_data != nullptr &&
+        application_info != nullptr && bound_application != nullptr &&
+        bind_process_name != nullptr && bind_app_info != nullptr &&
+        app_info_package != nullptr && app_info_process != nullptr &&
+        process_name != nullptr && application_package != nullptr &&
+        !env->ExceptionCheck()) {
+      env->SetObjectField(bind_data, bind_process_name, process_name);
+      env->SetObjectField(application_info, app_info_package,
+                          application_package);
+      env->SetObjectField(application_info, app_info_process, process_name);
+      env->SetObjectField(bind_data, bind_app_info, application_info);
+      env->SetObjectField(activity_thread, bound_application, bind_data);
+    }
     if (apk_application != nullptr && application_base != nullptr &&
-        application_on_create != nullptr && !env->ExceptionCheck()) {
-      env->SetObjectField(apk_application, application_base,
+        application_attach_base != nullptr && application_on_create != nullptr &&
+        activity_thread != nullptr && bind_data != nullptr &&
+        !env->ExceptionCheck()) {
+      // ActivityThread's Application.attach() invokes the application's
+      // virtual attachBaseContext() before onCreate(). Calling the virtual hook
+      // here preserves application bootstrap logic (Chromium publishes its
+      // process Context from this callback) while avoiding Application.attach's
+      // ContextImpl-only LoadedApk bookkeeping in the detached host.
+      env->CallVoidMethod(apk_application, application_attach_base,
                           out->probe_context);
+      if (env->ExceptionCheck()) {
+        std::cerr << "ART Android window: application attachBaseContext failed\n";
+        if (self->IsExceptionPending()) {
+          std::cerr << self->GetException()->Dump() << "\n";
+        }
+        return 27;
+      }
+      // Application.attach() guarantees a usable ContextWrapper base before
+      // returning to ActivityThread. Some split-aware Applications publish
+      // themselves from an override before eventually delegating to the
+      // framework implementation; preserve the callback, then establish the
+      // framework invariant if that delegation did not attach the base.
+      jobject application_context_base =
+          env->GetObjectField(apk_application, application_base);
+      if (application_context_base == nullptr && !env->ExceptionCheck()) {
+        env->CallNonvirtualVoidMethod(apk_application, context_wrapper_class,
+                                      application_attach_base,
+                                      out->probe_context);
+      }
+      env->DeleteLocalRef(application_context_base);
+      if (env->ExceptionCheck()) {
+        std::cerr << "ART Android window: Application base Context setup failed\n";
+        return 27;
+      }
       jmethodID set_application_context = env->GetMethodID(
           probe_context_class, "setApplicationContext",
           "(Landroid/content/Context;)V");
@@ -308,37 +576,6 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
       }
       env->CallVoidMethod(out->probe_context, set_application_context,
                           apk_application);
-      jclass activity_thread_class = env->FindClass("android/app/ActivityThread");
-      jfieldID current_activity_thread =
-          activity_thread_class == nullptr
-              ? nullptr
-              : env->GetStaticFieldID(
-                    activity_thread_class, "sCurrentActivityThread",
-                    "Landroid/app/ActivityThread;");
-      jfieldID initial_application =
-          activity_thread_class == nullptr
-              ? nullptr
-              : env->GetFieldID(activity_thread_class, "mInitialApplication",
-                                "Landroid/app/Application;");
-      jobject activity_thread =
-          current_activity_thread == nullptr
-              ? nullptr
-              : env->GetStaticObjectField(activity_thread_class,
-                                          current_activity_thread);
-      if (activity_thread == nullptr && activity_thread_class != nullptr &&
-          !env->ExceptionCheck()) {
-        jmethodID activity_thread_constructor =
-            env->GetMethodID(activity_thread_class, "<init>", "()V");
-        if (activity_thread_constructor != nullptr && !env->ExceptionCheck()) {
-          activity_thread = env->NewObject(activity_thread_class,
-                                           activity_thread_constructor);
-          if (activity_thread != nullptr && !env->ExceptionCheck()) {
-            env->SetStaticObjectField(activity_thread_class,
-                                      current_activity_thread,
-                                      activity_thread);
-          }
-        }
-      }
       if (activity_thread == nullptr || initial_application == nullptr ||
           env->ExceptionCheck()) {
         std::cerr << "ART Android window: ActivityThread application setup failed\n";
@@ -346,6 +583,12 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
       }
       env->SetObjectField(activity_thread, initial_application,
                           apk_application);
+      env->DeleteLocalRef(application_package);
+      env->DeleteLocalRef(process_name);
+      env->DeleteLocalRef(application_info);
+      env->DeleteLocalRef(application_info_class);
+      env->DeleteLocalRef(bind_data);
+      env->DeleteLocalRef(bind_data_class);
       env->DeleteLocalRef(activity_thread);
       env->DeleteLocalRef(activity_thread_class);
       jobject installed_base =
@@ -371,6 +614,28 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
       env->DeleteLocalRef(installed_application_context);
       env->DeleteLocalRef(context_class);
       if (!env->ExceptionCheck()) {
+        // Zygote initializes Typeface before Application.onCreate(). Arbitrary
+        // APKs, including Chromium, can resolve fonts from their Application
+        // callback, so the detached process must establish the same invariant
+        // before entering app code rather than waiting for Activity creation.
+        jstring font_bootstrap_name =
+            env->NewStringUTF("dev.darwinart.probe.FontBootstrap");
+        jclass font_bootstrap =
+            load_class == nullptr || font_bootstrap_name == nullptr
+                ? nullptr
+                : reinterpret_cast<jclass>(env->CallObjectMethod(
+                      app_loader, load_class, font_bootstrap_name));
+        jmethodID install_fonts =
+            font_bootstrap == nullptr
+                ? nullptr
+                : env->GetStaticMethodID(font_bootstrap, "install", "()V");
+        if (install_fonts != nullptr && !env->ExceptionCheck()) {
+          env->CallStaticVoidMethod(font_bootstrap, install_fonts);
+        }
+        env->DeleteLocalRef(font_bootstrap);
+        env->DeleteLocalRef(font_bootstrap_name);
+      }
+      if (!env->ExceptionCheck()) {
         env->CallVoidMethod(apk_application, application_on_create);
       }
     }
@@ -388,6 +653,29 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
       return 27;
     }
     application = apk_application;
+  }
+
+  // ActivityThread creates and attaches the Application before invoking the
+  // Activity constructor. Chromium consults process-wide application state
+  // directly from ChromeTabbedActivity's constructor, so constructing it in
+  // the caller would invert a platform lifecycle guarantee.
+  if (run_apk_app && activity_instance == nullptr) {
+    out->application = application;
+    if (application_only) return 0;
+    jmethodID activity_constructor =
+        env->GetMethodID(probe_activity_class, "<init>", "()V");
+    activity_instance = activity_constructor == nullptr
+                            ? nullptr
+                            : env->NewObject(probe_activity_class,
+                                             activity_constructor);
+    if (activity_instance == nullptr || env->ExceptionCheck()) {
+      std::cerr << "ART Android owner: Activity construction failed\n";
+      if (self->IsExceptionPending()) {
+        std::cerr << self->GetException()->Dump() << "\n";
+      }
+      return 23;
+    }
+    *activity_instance_out = activity_instance;
   }
 
   jmethodID intent_constructor =
@@ -410,16 +698,36 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
           ? nullptr
           : env->GetMethodID(intent_class, "setAction",
                              "(Ljava/lang/String;)Landroid/content/Intent;");
+  jmethodID add_category =
+      intent_class == nullptr
+          ? nullptr
+          : env->GetMethodID(intent_class, "addCategory",
+                             "(Ljava/lang/String;)Landroid/content/Intent;");
+  jmethodID add_flags =
+      intent_class == nullptr
+          ? nullptr
+          : env->GetMethodID(intent_class, "addFlags",
+                             "(I)Landroid/content/Intent;");
   jmethodID set_data_and_type =
       intent_class == nullptr
           ? nullptr
           : env->GetMethodID(intent_class, "setDataAndType",
                              "(Landroid/net/Uri;Ljava/lang/String;)"
                              "Landroid/content/Intent;");
+  jmethodID set_data =
+      intent_class == nullptr
+          ? nullptr
+          : env->GetMethodID(intent_class, "setData",
+                             "(Landroid/net/Uri;)Landroid/content/Intent;");
   jstring package_name = env->NewStringUTF(
       run_apk_app ? apk_app_package : "dev.darwinart.probe");
+  const char* configured_launch_component =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_APP_LAUNCH_COMPONENT") : nullptr;
   jstring class_name = env->NewStringUTF(
-      run_apk_app ? apk_app_activity : "dev.darwinart.probe.ProbeActivity");
+      run_apk_app && configured_launch_component != nullptr
+          ? configured_launch_component
+          : (run_apk_app ? apk_app_activity
+                         : "dev.darwinart.probe.ProbeActivity"));
   jstring title = env->NewStringUTF(run_apk_app ? app_label.c_str()
                                                 : "Darwin ART Probe");
   jobject component_name =
@@ -461,6 +769,12 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
       }
     }
   }
+  if (!EnsureActivityThreadConfigurationController(env, activity_thread)) {
+    std::cerr << "ART Android process: ActivityThread configuration setup "
+                 "failed\n";
+    if (env->ExceptionCheck()) env->ExceptionDescribe();
+    return 27;
+  }
   jclass instrumentation_class = env->FindClass("android/app/Instrumentation");
   jmethodID instrumentation_constructor =
       instrumentation_class == nullptr
@@ -487,19 +801,37 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
   }
   const char* launch_action =
       run_apk_app ? std::getenv("DARWIN_ART_APK_APP_INTENT_ACTION") : nullptr;
-  if (intent != nullptr && set_action != nullptr && launch_action != nullptr &&
-      *launch_action != '\0') {
-    jstring action = env->NewStringUTF(launch_action);
+  const bool default_launcher_intent =
+      run_apk_app && (launch_action == nullptr || *launch_action == '\0');
+  if (intent != nullptr && set_action != nullptr && run_apk_app) {
+    jstring action = env->NewStringUTF(
+        default_launcher_intent ? "android.intent.action.MAIN" : launch_action);
     jobject configured_intent = env->CallObjectMethod(intent, set_action, action);
     env->DeleteLocalRef(configured_intent);
     env->DeleteLocalRef(action);
+  }
+  if (intent != nullptr && add_category != nullptr && default_launcher_intent &&
+      !env->ExceptionCheck()) {
+    jstring category =
+        env->NewStringUTF("android.intent.category.LAUNCHER");
+    jobject configured_intent =
+        env->CallObjectMethod(intent, add_category, category);
+    env->DeleteLocalRef(configured_intent);
+    env->DeleteLocalRef(category);
+  }
+  if (intent != nullptr && add_flags != nullptr && default_launcher_intent &&
+      !env->ExceptionCheck()) {
+    constexpr jint kFlagActivityNewTask = 0x10000000;
+    jobject configured_intent =
+        env->CallObjectMethod(intent, add_flags, kFlagActivityNewTask);
+    env->DeleteLocalRef(configured_intent);
   }
   const char* launch_uri =
       run_apk_app ? std::getenv("DARWIN_ART_APK_APP_INTENT_URI") : nullptr;
   const char* launch_type =
       run_apk_app ? std::getenv("DARWIN_ART_APK_APP_INTENT_TYPE") : nullptr;
-  if (intent != nullptr && set_data_and_type != nullptr && launch_uri != nullptr &&
-      *launch_uri != '\0') {
+  if (intent != nullptr && launch_uri != nullptr && *launch_uri != '\0' &&
+      (set_data != nullptr || set_data_and_type != nullptr)) {
     jclass uri_class = env->FindClass("android/net/Uri");
     jmethodID parse_uri =
         uri_class == nullptr
@@ -510,14 +842,20 @@ int prepare(JNIEnv* env, art::Thread* self, jobject activity_instance,
     jobject uri = parse_uri == nullptr
                       ? nullptr
                       : env->CallStaticObjectMethod(uri_class, parse_uri, uri_text);
-    jstring mime_type = env->NewStringUTF(
-        launch_type == nullptr || *launch_type == '\0' ? "*/*" : launch_type);
     if (uri != nullptr && !env->ExceptionCheck()) {
-      jobject configured_intent =
-          env->CallObjectMethod(intent, set_data_and_type, uri, mime_type);
+      const bool has_explicit_type =
+          launch_type != nullptr && *launch_type != '\0';
+      jstring mime_type = has_explicit_type ? env->NewStringUTF(launch_type)
+                                            : nullptr;
+      jobject configured_intent = has_explicit_type && set_data_and_type != nullptr
+                                      ? env->CallObjectMethod(
+                                            intent, set_data_and_type, uri,
+                                            mime_type)
+                                      : env->CallObjectMethod(intent, set_data,
+                                                              uri);
       env->DeleteLocalRef(configured_intent);
+      env->DeleteLocalRef(mime_type);
     }
-    env->DeleteLocalRef(mime_type);
     env->DeleteLocalRef(uri);
     env->DeleteLocalRef(uri_text);
     env->DeleteLocalRef(uri_class);

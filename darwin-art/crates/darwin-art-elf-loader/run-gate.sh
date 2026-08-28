@@ -53,6 +53,9 @@ common_flags=(
   "$fixture_dir/libdarwin_art_provider.so" -o "$fixture_dir/relro.so"
 "$clang" "${common_flags[@]}" -Wl,-z,norelro -Wl,-soname,libdarwin_art_tls.so \
   "$crate_root/fixtures/tls.c" -o "$fixture_dir/tls.so"
+"$clang" "${common_flags[@]}" -O0 -Wl,-z,now -Wl,-z,norelro -Wl,-Bsymbolic \
+  -Wl,-soname,libdarwin_art_ifunc.so \
+  "$crate_root/fixtures/ifunc.c" -o "$fixture_dir/ifunc.so"
 "$clang" "${common_flags[@]}" -O0 -Wl,-z,now -Wl,-z,norelro \
   -Wl,-soname,libdarwin_art_finalizer.so -Wl,-fini,finalizer_dt_fini \
   "$crate_root/fixtures/finalizer.c" "$fixture_dir/liblifecycle_sink.so" \
@@ -112,7 +115,7 @@ cp "$libcxx" "$fixture_dir/libc++_shared.so"
   "$crate_root/fixtures/cycle_a.c" "$fixture_dir/libgraph_cycle_b.so" \
   -o "$fixture_dir/libgraph_cycle_a.so"
 
-for fixture in positive import weak lazy relro tls finalizer; do
+for fixture in positive import weak lazy relro tls ifunc finalizer; do
   file "$fixture_dir/$fixture.so" | grep -F 'ELF 64-bit LSB shared object, ARM aarch64' >/dev/null
 done
 for fixture in libgraph_parent libgraph_dep_a libgraph_dep_a_alt \
@@ -156,6 +159,9 @@ grep -E '^  TLS ' "$fixture_dir/tls.readelf.txt" >/dev/null
 ! grep -E 'R_AARCH64_TLS_(DTPMOD|DTPREL|TPREL)' "$fixture_dir/tls.readelf.txt" >/dev/null
 grep -E 'TLS +GLOBAL +PROTECTED.*fixture_tls_state$' "$fixture_dir/tls.readelf.txt" >/dev/null
 grep -E 'GLOBAL +DEFAULT.*fixture_tls_exchange$' "$fixture_dir/tls.readelf.txt" >/dev/null
+"$readelf" -d -r --dyn-syms "$fixture_dir/ifunc.so" > "$fixture_dir/ifunc.readelf.txt"
+grep -E 'R_AARCH64_IRELATIVE' "$fixture_dir/ifunc.readelf.txt" >/dev/null
+grep -E 'GLOBAL +DEFAULT.*fixture_ifunc_value$' "$fixture_dir/ifunc.readelf.txt" >/dev/null
 "$readelf" -d -r "$fixture_dir/finalizer.so" > "$fixture_dir/finalizer.readelf.txt"
 grep -E '\(FINI\).*0x[0-9a-f]+' "$fixture_dir/finalizer.readelf.txt" >/dev/null
 grep -E 'FINI_ARRAYSZ.*16 \(bytes\)' "$fixture_dir/finalizer.readelf.txt" >/dev/null
@@ -190,7 +196,7 @@ cargo test --manifest-path "$crate_root/Cargo.toml"
 cargo run --quiet --release --manifest-path "$crate_root/Cargo.toml" --bin elf-loader-gate -- \
   "$fixture_dir/positive.so" "$fixture_dir/import.so" "$fixture_dir/weak.so" \
   "$fixture_dir/lazy.so" "$fixture_dir/relro.so" "$fixture_dir/tls.so" \
-  "$fixture_dir/finalizer.so" "$fixture_dir/libc++_shared.so"
+  "$fixture_dir/ifunc.so" "$fixture_dir/finalizer.so" "$fixture_dir/libc++_shared.so"
 cargo run --quiet --release --manifest-path "$crate_root/Cargo.toml" --bin elf-namespace-gate -- \
   "$fixture_dir/libgraph_parent.so" "$fixture_dir/libgraph_dep_a.so" \
   "$fixture_dir/libgraph_dep_a_alt.so" "$fixture_dir/libgraph_dep_a_wrong.so" \

@@ -3,9 +3,11 @@
 #include <errno.h>
 #include <limits.h>
 #include <mach/mach_time.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
 #include <stddef.h>
+#include <string.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -15,6 +17,9 @@ enum {
   ANDROID_CLOCK_MONOTONIC = 1,
   ANDROID_CLOCK_PROCESS_CPUTIME_ID = 2,
   ANDROID_CLOCK_THREAD_CPUTIME_ID = 3,
+  ANDROID_CLOCK_MONOTONIC_RAW = 4,
+  ANDROID_CLOCK_REALTIME_COARSE = 5,
+  ANDROID_CLOCK_MONOTONIC_COARSE = 6,
   ANDROID_CLOCK_BOOTTIME = 7,
   ANDROID_EIO = 5,
   ANDROID_EFAULT = 14,
@@ -30,6 +35,10 @@ _Static_assert(sizeof(DarwinArtAndroidTimespec) == 16,
                "Android arm64 timespec size drift");
 _Static_assert(offsetof(DarwinArtAndroidTimespec, tv_nsec) == 8,
                "Android arm64 timespec offset drift");
+_Static_assert(sizeof(DarwinArtAndroidTimeval) == 16,
+               "Android arm64 timeval size drift");
+_Static_assert(offsetof(DarwinArtAndroidTimeval, tv_usec) == 8,
+               "Android arm64 timeval offset drift");
 _Static_assert(sizeof(time_t) == 8 && sizeof(long) == 8,
                "Darwin arm64 time ABI drift");
 _Static_assert(CLOCK_REALTIME == 0 && CLOCK_MONOTONIC == 6 &&
@@ -44,6 +53,18 @@ extern int darwin_art_bionic_errno_set_from_darwin(int darwin_errno);
 extern void darwin_art_bionic_errno_store(int32_t android_errno);
 
 static _Atomic int gCapabilityFailure;
+static pthread_once_t gTimezoneOnce = PTHREAD_ONCE_INIT;
+long darwin_art_bionic_timezone;
+int darwin_art_bionic_daylight;
+char* darwin_art_bionic_tzname[2];
+
+static void InitializeTimezone(void) {
+  tzset();
+  darwin_art_bionic_timezone = timezone;
+  darwin_art_bionic_daylight = daylight;
+  darwin_art_bionic_tzname[0] = tzname[0];
+  darwin_art_bionic_tzname[1] = tzname[1];
+}
 
 static int FailAndroid(int android_errno) {
   darwin_art_bionic_errno_store(android_errno);
@@ -73,7 +94,12 @@ static int HostClockForAndroid(int android_clock, clockid_t* host_clock) {
       *host_clock = CLOCK_REALTIME;
       return 1;
     case ANDROID_CLOCK_MONOTONIC:
+    case ANDROID_CLOCK_MONOTONIC_RAW:
+    case ANDROID_CLOCK_MONOTONIC_COARSE:
       *host_clock = CLOCK_MONOTONIC;
+      return 1;
+    case ANDROID_CLOCK_REALTIME_COARSE:
+      *host_clock = CLOCK_REALTIME;
       return 1;
     case ANDROID_CLOCK_PROCESS_CPUTIME_ID:
       *host_clock = CLOCK_PROCESS_CPUTIME_ID;
@@ -162,9 +188,16 @@ int darwin_art_bionic_nanosleep(const DarwinArtAndroidTimespec* request,
   return outcome;
 }
 
-int darwin_art_bionic_gettimeofday(struct timeval* result, void* timezone) {
+int darwin_art_bionic_gettimeofday(DarwinArtAndroidTimeval* result,
+                                   void* timezone) {
   const int saved_host_errno = errno;
-  const int outcome = gettimeofday(result, timezone);
+  struct timeval host_result;
+  const int outcome = gettimeofday(result == NULL ? NULL : &host_result,
+                                   timezone);
+  if (outcome == 0 && result != NULL) {
+    result->tv_sec = (int64_t)host_result.tv_sec;
+    result->tv_usec = (int64_t)host_result.tv_usec;
+  }
   if (outcome != 0) FailHost(errno);
   errno = saved_host_errno;
   return outcome;
@@ -310,6 +343,18 @@ DarwinArtBionicTimeFunction darwin_art_bionic_time_resolve(
       low = middle + 1;
   }
   return NULL;
+}
+
+uintptr_t darwin_art_bionic_time_data_resolve(const char* import_name) {
+  if (import_name == NULL) return 0;
+  (void)pthread_once(&gTimezoneOnce, InitializeTimezone);
+  if (strcmp(import_name, "daylight") == 0)
+    return (uintptr_t)&darwin_art_bionic_daylight;
+  if (strcmp(import_name, "timezone") == 0)
+    return (uintptr_t)&darwin_art_bionic_timezone;
+  if (strcmp(import_name, "tzname") == 0)
+    return (uintptr_t)&darwin_art_bionic_tzname;
+  return 0;
 }
 
 int darwin_art_bionic_time_capability_failed(void) {

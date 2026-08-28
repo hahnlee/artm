@@ -65,53 +65,26 @@ class DarwinDisplayEventReceiver {
   }
 
   void Schedule() {
-    std::shared_ptr<DarwinDisplayEventReceiver> keep_alive = SharedFromThis();
-    if (keep_alive == nullptr) {
-      return;
-    }
-    std::thread([keep_alive = std::move(keep_alive)] {
-      std::this_thread::sleep_for(std::chrono::milliseconds(16));
-      keep_alive->Dispatch();
-    }).detach();
+    std::lock_guard lock(mutex_);
+    if (!disposed_) pending_vsync_ = true;
   }
 
-  void Dispatch() {
-    JNIEnv* env = nullptr;
-    bool attached = false;
-    if (vm_->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) ==
-        JNI_EDETACHED) {
-      if (vm_->AttachCurrentThread(&env, nullptr) != JNI_OK) {
-        return;
-      }
-      attached = true;
-    }
-
+  bool DispatchPending(JNIEnv* env, jlong timestamp) {
     jobject weak = nullptr;
     {
       std::lock_guard lock(mutex_);
-      if (disposed_ || receiver_weak_ == nullptr) {
-        if (attached) {
-          vm_->DetachCurrentThread();
-        }
-        return;
+      if (disposed_ || !pending_vsync_ || receiver_weak_ == nullptr) {
+        return false;
       }
+      pending_vsync_ = false;
       ++callbacks_;
       weak = receiver_weak_;
     }
 
     jobject receiver = env->CallObjectMethod(weak, reference_get_);
     if (receiver != nullptr && !env->ExceptionCheck()) {
-      timespec now{};
-      clock_gettime(CLOCK_MONOTONIC, &now);
-      const jlong timestamp = static_cast<jlong>(now.tv_sec) * 1'000'000'000LL +
-                             static_cast<jlong>(now.tv_nsec);
       env->CallVoidMethod(receiver, dispatch_vsync_, timestamp, 0, 0);
-      if (env->ExceptionCheck()) {
-        env->ExceptionClear();
-      }
       env->DeleteLocalRef(receiver);
-    } else if (env->ExceptionCheck()) {
-      env->ExceptionClear();
     }
 
     {
@@ -120,9 +93,7 @@ class DarwinDisplayEventReceiver {
         condition_.notify_all();
       }
     }
-    if (attached) {
-      vm_->DetachCurrentThread();
-    }
+    return !env->ExceptionCheck();
   }
 
   void SetSelf(const std::shared_ptr<DarwinDisplayEventReceiver>& self) {
@@ -148,6 +119,7 @@ class DarwinDisplayEventReceiver {
   std::condition_variable condition_;
   std::weak_ptr<DarwinDisplayEventReceiver> self_;
   size_t callbacks_ = 0;
+  bool pending_vsync_ = false;
   bool disposed_ = false;
 };
 
@@ -243,6 +215,26 @@ void DisplayEventReceiverNativeScheduleVsync(JNIEnv*, jclass, jlong handle) {
   if (auto receiver = FindDisplayReceiver(handle); receiver != nullptr) {
     receiver->Schedule();
   }
+}
+
+int DispatchPendingVsyncs(JNIEnv* env, jlong frame_time_nanos) {
+  std::vector<std::shared_ptr<DarwinDisplayEventReceiver>> receivers;
+  {
+    std::lock_guard lock(g_display_receiver_mutex);
+    receivers.reserve(g_display_receivers.size());
+    for (const auto& [handle, receiver] : g_display_receivers) {
+      (void)handle;
+      receivers.push_back(receiver);
+    }
+  }
+  int delivered = 0;
+  for (const auto& receiver : receivers) {
+    if (receiver != nullptr && receiver->DispatchPending(env, frame_time_nanos)) {
+      ++delivered;
+    }
+    if (env->ExceptionCheck()) return -1;
+  }
+  return delivered;
 }
 
 jobject DisplayEventReceiverNativeGetLatestVsyncEventData(JNIEnv*, jclass,
@@ -424,6 +416,10 @@ bool Register(JNIEnv* env, const char* class_name, JNINativeMethod* methods,
 }  // namespace
 
 namespace darwin_art {
+
+int DispatchFrameworkPendingVsyncs(JNIEnv* env, jlong frame_time_nanos) {
+  return DispatchPendingVsyncs(env, frame_time_nanos);
+}
 
 bool RegisterFrameworkAnimationNatives(JNIEnv* env) {
   JNINativeMethod display_event_receiver_methods[] = {

@@ -32,6 +32,111 @@ namespace darwin_art_graphics {
 #if defined(DARWIN_ART_REAL_GRAPHICS)
 namespace {
 
+void debug_chromium_initialization(JNIEnv* env, jobject view) {
+  static int remaining = 8;
+  if (remaining <= 0 || std::getenv("DARWIN_ART_DEBUG_CHROME_INIT") == nullptr)
+    return;
+  --remaining;
+  jclass context_wrapper = env->FindClass("android/content/ContextWrapper");
+  jclass activity_class = env->FindClass("android/app/Activity");
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID get_context = view_class == nullptr
+                              ? nullptr
+                              : env->GetMethodID(view_class, "getContext",
+                                                 "()Landroid/content/Context;");
+  jmethodID get_base = context_wrapper == nullptr
+                           ? nullptr
+                           : env->GetMethodID(context_wrapper, "getBaseContext",
+                                              "()Landroid/content/Context;");
+  jobject context = get_context == nullptr
+                        ? nullptr
+                        : env->CallObjectMethod(view, get_context);
+  for (int depth = 0; context != nullptr && depth < 8 &&
+                      !env->IsInstanceOf(context, activity_class);
+       ++depth) {
+    if (!env->IsInstanceOf(context, context_wrapper) || get_base == nullptr) break;
+    jobject base = env->CallObjectMethod(context, get_base);
+    env->DeleteLocalRef(context);
+    context = base;
+  }
+  if (context == nullptr || !env->IsInstanceOf(context, activity_class)) {
+    if (context != nullptr) env->DeleteLocalRef(context);
+    context = nullptr;
+    jclass thread = env->FindClass("android/app/ActivityThread");
+    jmethodID current = thread == nullptr
+                            ? nullptr
+                            : env->GetStaticMethodID(
+                                  thread, "currentActivityThread",
+                                  "()Landroid/app/ActivityThread;");
+    jobject instance = current == nullptr
+                           ? nullptr
+                           : env->CallStaticObjectMethod(thread, current);
+    jfieldID activities = thread == nullptr
+                              ? nullptr
+                              : env->GetFieldID(thread, "mActivities",
+                                                "Landroid/util/ArrayMap;");
+    jobject records = instance == nullptr || activities == nullptr
+                          ? nullptr
+                          : env->GetObjectField(instance, activities);
+    jclass map = env->FindClass("android/util/ArrayMap");
+    jmethodID size = map == nullptr ? nullptr : env->GetMethodID(map, "size", "()I");
+    jmethodID value_at = map == nullptr
+                             ? nullptr
+                             : env->GetMethodID(map, "valueAt",
+                                                "(I)Ljava/lang/Object;");
+    const jint count = records == nullptr || size == nullptr
+                           ? 0
+                           : env->CallIntMethod(records, size);
+    for (jint index = count - 1; index >= 0 && context == nullptr; --index) {
+      jobject record = env->CallObjectMethod(records, value_at, index);
+      jclass record_class = record == nullptr ? nullptr : env->GetObjectClass(record);
+      jfieldID activity = record_class == nullptr
+                              ? nullptr
+                              : env->GetFieldID(record_class, "activity",
+                                                "Landroid/app/Activity;");
+      if (activity != nullptr) context = env->GetObjectField(record, activity);
+      if (record_class != nullptr) env->DeleteLocalRef(record_class);
+      if (record != nullptr) env->DeleteLocalRef(record);
+    }
+    if (map != nullptr) env->DeleteLocalRef(map);
+    if (records != nullptr) env->DeleteLocalRef(records);
+    if (instance != nullptr) env->DeleteLocalRef(instance);
+    if (thread != nullptr) env->DeleteLocalRef(thread);
+  }
+  if (context != nullptr && env->IsInstanceOf(context, activity_class)) {
+    jclass concrete = env->GetObjectClass(context);
+    jfieldID initializer =
+        env->GetFieldID(concrete, "i0", "Ldefpackage/b99;");
+    jobject state = initializer == nullptr
+                        ? nullptr
+                        : env->GetObjectField(context, initializer);
+    jclass state_class = state == nullptr ? nullptr : env->GetObjectClass(state);
+    jfieldID phase = state_class == nullptr ? nullptr
+                                             : env->GetFieldID(state_class, "f", "B");
+    jfieldID first_draw = state_class == nullptr
+                              ? nullptr
+                              : env->GetFieldID(state_class, "g", "Z");
+    jfieldID started = state_class == nullptr
+                           ? nullptr
+                           : env->GetFieldID(state_class, "h", "Z");
+    if (state != nullptr && phase != nullptr && first_draw != nullptr &&
+        started != nullptr && !env->ExceptionCheck()) {
+      std::cerr << "ART Chromium init diagnostic: phase="
+                << static_cast<int>(env->GetByteField(state, phase))
+                << " first_draw=" << env->GetBooleanField(state, first_draw)
+                << " started=" << env->GetBooleanField(state, started) << "\n";
+    }
+    if (state_class != nullptr) env->DeleteLocalRef(state_class);
+    if (state != nullptr) env->DeleteLocalRef(state);
+    env->DeleteLocalRef(concrete);
+  }
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  if (context != nullptr) env->DeleteLocalRef(context);
+  if (view_class != nullptr) env->DeleteLocalRef(view_class);
+  if (activity_class != nullptr) env->DeleteLocalRef(activity_class);
+  if (context_wrapper != nullptr) env->DeleteLocalRef(context_wrapper);
+}
+
 bool view_subtree_needs_recording(JNIEnv* env, jobject view, jclass group_class,
                                   jmethodID is_dirty,
                                   jmethodID is_layout_requested,
@@ -183,6 +288,16 @@ int prepare_gpu_surface(GraphicsState* state, jint width, jint height) {
     return static_cast<int>(result);
   }
   darwin_art_surface_set_active_gpu(state->gpu_surface);
+  const uint32_t surface_id =
+      darwin_art_surface_gpu_iosurface_id(state->gpu_surface);
+  if (surface_id != 0) {
+    const std::string encoded = std::to_string(surface_id);
+    setenv("DARWIN_ART_HOST_IOSURFACE_ID", encoded.c_str(), 1);
+    if (std::getenv("DARWIN_ART_DEBUG_ANGLE") != nullptr) {
+      std::cerr << "ART HWUI GPU: exported host IOSurface id=" << surface_id
+                << "\n";
+    }
+  }
   return 0;
 }
 
@@ -423,6 +538,16 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
           ? nullptr
           : env->GetStaticMethodID(animation_host_class, "dispatchPreDraw",
                                    "(Ljava/lang/Object;)Z");
+  jmethodID begin_host_traversal =
+      animation_host_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(animation_host_class, "beginHostTraversal",
+                                   "(Ljava/lang/Object;)V");
+  jmethodID dispatch_on_draw =
+      animation_host_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(animation_host_class, "dispatchOnDraw",
+                                   "(Ljava/lang/Object;)V");
   jmethodID invalidate_view_tree =
       animation_host_class == nullptr
           ? nullptr
@@ -563,6 +688,10 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   jmethodID layout = view_class == nullptr
                          ? nullptr
                          : env->GetMethodID(view_class, "layout", "(IIII)V");
+  jmethodID is_laid_out =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "isLaidOut", "()Z");
   jmethodID set_pressed = view_class == nullptr
                               ? nullptr
                               : env->GetMethodID(view_class, "setPressed", "(Z)V");
@@ -583,6 +712,7 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   jfieldID view_right = get_view_field("mRight");
   jfieldID view_bottom = get_view_field("mBottom");
   if (draw == nullptr || measure == nullptr || layout == nullptr ||
+      is_laid_out == nullptr || is_layout_requested == nullptr ||
       view_left == nullptr || view_top == nullptr || view_right == nullptr ||
       view_bottom == nullptr ||
       env->ExceptionCheck()) {
@@ -595,22 +725,25 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     env->DeleteLocalRef(render_node_class);
     return JNI_FALSE;
   }
-  // The standalone probe has no ViewRoot/ThreadedRenderer to perform the
-  // normal measure/layout pass. Give the real widget an exact portrait
-  // viewport before recording so Button/TextView emits its display list.
-  constexpr jint kMeasureExactly = 0x40000000;
-  const jint width_spec = kMeasureExactly | (width & 0x3fffffff);
-  const jint height_spec = kMeasureExactly | (height & 0x3fffffff);
-  env->CallVoidMethod(view, measure, width_spec, height_spec);
-  dump_pending_exception("View.measure");
-  // Match the ViewRoot traversal contract used by the existing raster probe:
-  // seed detached root bounds before layout so its children receive a stable
-  // first hardware-recording pass without window-service callbacks.
-  env->SetIntField(view, view_left, 0);
-  env->SetIntField(view, view_top, 0);
-  env->SetIntField(view, view_right, width);
-  env->SetIntField(view, view_bottom, height);
-  env->CallVoidMethod(view, layout, 0, 0, width, height);
+  // Recording a dirty display list is not itself a layout traversal. Android
+  // ViewRootImpl measures/layouts only when the hierarchy requests it; doing
+  // so on every Metal frame cancels ViewPager's active fake drag and its
+  // ValueAnimator. Preserve the same distinction for the detached owner.
+  const bool needs_layout =
+      env->CallBooleanMethod(view, is_laid_out) != JNI_TRUE ||
+      env->CallBooleanMethod(view, is_layout_requested) == JNI_TRUE;
+  if (needs_layout && !env->ExceptionCheck()) {
+    constexpr jint kMeasureExactly = 0x40000000;
+    const jint width_spec = kMeasureExactly | (width & 0x3fffffff);
+    const jint height_spec = kMeasureExactly | (height & 0x3fffffff);
+    env->CallVoidMethod(view, measure, width_spec, height_spec);
+    dump_pending_exception("View.measure");
+    env->SetIntField(view, view_left, 0);
+    env->SetIntField(view, view_top, 0);
+    env->SetIntField(view, view_right, width);
+    env->SetIntField(view, view_bottom, height);
+    env->CallVoidMethod(view, layout, 0, 0, width, height);
+  }
   if (env->ExceptionCheck()) {
     dump_pending_exception("View.layout");
     env->ExceptionClear();
@@ -635,10 +768,17 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   // A real ViewRoot owns an app Looper and window-system thread. This
   // detached host intentionally does not synthesize one; the content root
   // is measured/layouted directly and recorded into the persistent RenderNode.
-  if (prepare_view_pagers != nullptr && !env->ExceptionCheck()) {
+  if (needs_layout && prepare_view_pagers != nullptr && !env->ExceptionCheck()) {
     env->CallStaticVoidMethod(animation_host_class, prepare_view_pagers, view);
     if (env->ExceptionCheck()) {
       dump_pending_exception("ProbeAnimationHost.prepareViewPagers");
+      env->ExceptionClear();
+    }
+  }
+  if (begin_host_traversal != nullptr && !env->ExceptionCheck()) {
+    env->CallStaticVoidMethod(animation_host_class, begin_host_traversal, view);
+    if (env->ExceptionCheck()) {
+      dump_pending_exception("ProbeAnimationHost.beginHostTraversal");
       env->ExceptionClear();
     }
   }
@@ -671,6 +811,14 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
                         pending_pressed_action == 1 ? JNI_TRUE : JNI_FALSE);
     dump_pending_exception("View.setPressed");
   }
+  if (dispatch_on_draw != nullptr && !env->ExceptionCheck()) {
+    env->CallStaticVoidMethod(animation_host_class, dispatch_on_draw, view);
+    if (env->ExceptionCheck()) {
+      dump_pending_exception("ProbeAnimationHost.dispatchOnDraw");
+      env->ExceptionClear();
+    }
+  }
+  debug_chromium_initialization(env, view);
   env->CallVoidMethod(view, draw, java_canvas);
   dump_pending_exception("View.draw");
   const bool layers_ok = !env->ExceptionCheck() &&
@@ -707,6 +855,7 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
       darwin_art_hwui::sync_recorded_render_node_tree(node);
   std::cerr << "ART HWUI GPU: synchronized RenderNodes=" << synchronized_nodes
             << " activeSize=" << node->mDisplayList.getUsedSize()
+            << " holePunches=" << node->hasHolePunches()
             << " childNodes="
             << (node->mDisplayList.asSkiaDl() == nullptr
                     ? 0

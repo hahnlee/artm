@@ -5,7 +5,7 @@ use crate::surface::{
 };
 use darwin_art_engine_sys::{KeyEventV1, PointerEventV2, ProcessResult};
 use darwin_art_runtime::Subsystem;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[cfg(target_os = "macos")]
 fn pump_frame_with_latency(
@@ -75,9 +75,15 @@ fn dispatch_synthetic_keys(
     sequence: &[(u32, u32)],
     clock: &Instant,
 ) -> Result<u64, HostError> {
+    let interval = std::env::var("DARWIN_ART_TEST_KEY_INTERVAL_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or_default();
     eprintln!(
-        "DARWIN_ART gpu synthetic key dispatch count={}",
-        sequence.len()
+        "DARWIN_ART gpu synthetic key dispatch count={} interval_ms={}",
+        sequence.len(),
+        interval.as_millis()
     );
     let mut dispatched = 0_u64;
     for &(key_code, meta_state) in sequence {
@@ -100,6 +106,15 @@ fn dispatch_synthetic_keys(
                 return Err(HostError::RuntimeFailed(status));
             }
             dispatched += 1;
+        }
+        if !interval.is_zero() {
+            std::thread::sleep(interval);
+            let pulse_status = runtime
+                .graphics()
+                .map_or(-1, |graphics| graphics.pump_frame(0));
+            if pulse_status != 0 {
+                return Err(HostError::RuntimeFailed(pulse_status));
+            }
         }
     }
     Ok(dispatched)
@@ -460,9 +475,11 @@ pub(super) fn run(
         && let Some(sequence) = test_tap_sequence.as_ref()
     {
         for &(x, y, delay_ms) in sequence.iter().skip(1) {
-            let mut waited_ms = 0_u64;
-            while waited_ms < delay_ms && loop_error.is_none() {
-                let slice_ms = (delay_ms - waited_ms).min(16);
+            let wait_started = Instant::now();
+            while wait_started.elapsed() < Duration::from_millis(delay_ms) && loop_error.is_none() {
+                let remaining =
+                    Duration::from_millis(delay_ms).saturating_sub(wait_started.elapsed());
+                let slice_ms = remaining.as_millis().min(16).max(1) as u64;
                 let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
                 if pump_status != 0 {
                     loop_error = Some(HostError::SurfaceFailed {
@@ -484,7 +501,6 @@ pub(super) fn run(
                     loop_error = Some(error);
                     break;
                 }
-                waited_ms += slice_ms;
             }
             if loop_error.is_some() {
                 break;
@@ -507,6 +523,39 @@ pub(super) fn run(
                 ) {
                     loop_error = Some(error);
                     break;
+                }
+                // Preserve a real tap interval for every sample, not only the
+                // first one dispatched above. Blink's Android gesture path
+                // legitimately consumes an instantaneous DOWN/UP pair but
+                // does not promote it to a click when both timestamps fall
+                // in the same millisecond. Real NSEvents naturally have this
+                // spacing; synthetic acceptance taps must model it too.
+                if action == 0 && test_hold_ms > 0 {
+                    let pump_status =
+                        owned_surface_pump_events(runtime, test_hold_ms as f64 / 1000.0);
+                    if pump_status != 0 {
+                        loop_error = Some(HostError::SurfaceFailed {
+                            operation: "gpu_test_pointer_sequence_hold",
+                            status: pump_status,
+                        });
+                        break;
+                    }
+                    match dispatch_queued_events(runtime) {
+                        Ok(dispatched) => frames_presented += dispatched,
+                        Err(error) => {
+                            loop_error = Some(error);
+                            break;
+                        }
+                    }
+                    if let Err(error) = pump_frame_with_latency(
+                        runtime,
+                        debug_latency,
+                        &mut last_input_dispatch,
+                        &mut frame_latencies_us,
+                    ) {
+                        loop_error = Some(error);
+                        break;
+                    }
                 }
             }
         }

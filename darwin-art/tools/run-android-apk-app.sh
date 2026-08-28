@@ -28,18 +28,21 @@ if ! unzip -Z1 "$source_apk" | grep -Fx 'classes.dex' >/dev/null; then
   app_dex="$external_dex"
 fi
 if [[ "$app_dex" == "$source_apk" ]]; then
-  metadata="$(cargo run -q \
+  metadata="$(cargo run -q --release \
     --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk")"
 else
-  metadata="$(cargo run -q \
+  metadata="$(cargo run -q --release \
     --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk" "$app_dex")"
 fi
 package="$(sed -n 's/^apk-app-runtime: package=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 application="$(sed -n 's/^apk-app-runtime: .* application=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 activity="$(sed -n 's/^apk-app-runtime: .* activity=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+launch_component="$(sed -n 's/^apk-app-runtime: .* launch_component=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 descriptor="$(sed -n 's/^apk-app-runtime: .* descriptor=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 activities="$(sed -n 's/^apk-app-runtime: .* activities=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+activity_aliases="$(sed -n 's/^apk-app-runtime: .* activity_aliases=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 services="$(sed -n 's/^apk-app-runtime: .* services=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+application_metadata="$(sed -n 's/^apk-app-runtime: .* application_metadata=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 version_code="$(sed -n 's/^apk-app-runtime: .* version_code=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 version_name="$(sed -n 's/^apk-app-runtime: .* version_name=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 theme="$(sed -n 's/^apk-app-runtime: .* theme=\([^ ]*\) .*/\1/p' <<<"$metadata")"
@@ -49,7 +52,7 @@ label_res="$(sed -n 's/^apk-app-runtime: .* label_res=\([^ ]*\) .*/\1/p' <<<"$me
 icon="$(sed -n 's/^apk-app-runtime: .* icon=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 native_count="$(sed -n 's/^apk-app-runtime: .* native=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 native_root="$(sed -n 's/^apk-app-runtime: .* native_root=\([^ ]*\)$/\1/p' <<<"$metadata")"
-[[ -n "$package" && -n "$application" && -n "$activity" && -n "$descriptor" && -n "$activities" && -n "$services" && -n "$version_code" && -n "$theme" && -n "$target_sdk" && -n "$label" && -n "$label_res" && -n "$icon" && -n "$native_count" && -n "$native_root" ]] || {
+[[ -n "$package" && -n "$application" && -n "$activity" && -n "$launch_component" && -n "$descriptor" && -n "$activities" && -n "$activity_aliases" && -n "$services" && -n "$application_metadata" && -n "$version_code" && -n "$theme" && -n "$target_sdk" && -n "$label" && -n "$label_res" && -n "$icon" && -n "$native_count" && -n "$native_root" ]] || {
   echo "could not decode inspected APK metadata" >&2
   exit 65
 }
@@ -62,6 +65,7 @@ if [[ -n "${DARWIN_ART_APK_ACTIVITY_OVERRIDE:-}" ]]; then
     exit 65
   }
   activity="$requested_activity"
+  launch_component="$requested_activity"
   descriptor="L$(tr '.' '/' <<<"$activity");"
   theme="$requested_entry"
 fi
@@ -70,10 +74,10 @@ runtime_abi="darwin-art-darwin-native-v1"
 install_root="${DARWIN_ART_APK_INSTALL_ROOT:-$root/_build/installed-apps}"
 native_cache_root="${DARWIN_ART_NATIVE_CACHE_ROOT:-$root/_build/native-artifact-cache}"
 native_converter="${DARWIN_ART_NATIVE_CONVERTER:-none}"
-cargo build -q -p darwin-art-apk-install
-cargo build -q -p darwin-art-native-artifact --bin darwin-art-native-resolve
-installer="$root/target/debug/darwin-art-apk-install"
-native_resolver="$root/target/debug/darwin-art-native-resolve"
+cargo build -q --release -p darwin-art-apk-install
+cargo build -q --release -p darwin-art-native-artifact --bin darwin-art-native-resolve
+installer="$root/target/release/darwin-art-apk-install"
+native_resolver="$root/target/release/darwin-art-native-resolve"
 extractor="none"
 if [[ "$native_count" != "0" ]]; then
   cargo build -q --release \
@@ -100,6 +104,15 @@ if [[ "$app_dex" == "$source_apk" ]]; then
 fi
 
 host="$root/target/debug/darwin-art-host"
+[[ -x "$host" ]] || {
+  echo "darwin-art host is missing: $host" >&2
+  exit 69
+}
+# Android's V8 reserves and later commits executable CodeRange pages. Sign the
+# detached host with the narrow hardened-runtime JIT entitlements before any
+# browser/service child is spawned; every child execs this same binary.
+codesign --force --sign - --options runtime \
+  --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
 runtime="$root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib"
 core_oj="${DARWIN_ART_CORE_OJ_JAR:-$root/_prebuilt/android-16/bootclasspath/core-oj.jar}"
 if [[ -z "${DARWIN_ART_CORE_OJ_JAR:-}" && \
@@ -115,15 +128,28 @@ if [[ -z "${DARWIN_ART_FRAMEWORK_JAR:-}" && \
   # default-valued feature flags during widget construction.
   framework="$root/_build/android16-framework-compat/framework-compat.jar"
 fi
+framework_location="$root/_prebuilt/android-16/bootclasspath/framework-location.jar"
 core_icu="$root/_build/bootclasspath/core-icu4j-api36.jar"
+conscrypt="$root/_build/android16-ps16k-r07/extracted/conscrypt/javalib/conscrypt.jar"
+conscrypt_native="$root/_build/android16-ps16k-r07/extracted/conscrypt/lib64"
+framework_bluetooth="$root/_build/android16-ps16k-r07/extracted/bt/javalib/framework-bluetooth.jar"
+framework_mediaprovider="$root/_build/android16-ps16k-r07/extracted/mediaprovider/javalib/framework-mediaprovider.jar"
+framework_permission="$root/_build/android16-ps16k-r07/extracted/permission/javalib/framework-permission.jar"
+framework_permission_s="$root/_build/android16-ps16k-r07/extracted/permission/javalib/framework-permission-s.jar"
+# Match Android 16's boot-class-path ordering: framework-location follows the
+# core framework (and framework-graphics, once split out here) before APEX
+# framework modules.  The host ABI accepts the remaining colon-separated
+# components through its boot-tail field.
+boot_tail="$framework_location:$conscrypt:$framework_bluetooth:$framework_mediaprovider:$framework_permission:$framework_permission_s:$core_icu"
 support_dex="$root/_build/button-dex/dex/classes.dex"
+export DARWIN_ART_RUNTIME_HOST_FILES="$core_oj:$core_libart:$framework:$boot_tail:$support_dex:$app_dex"
 fonts_xml="$root/probes/button/fonts.xml"
 roboto="$root/_aosp/external/skia/resources/fonts/Roboto-Regular.ttf"
 framework_res="$root/_prebuilt/android-16/resources/framework-res.apk"
 if [[ ! -f "$support_dex" ]]; then
   cargo run -q -p art-bootstrap -- build-button-dex >/dev/null
 fi
-for input in "$host" "$runtime" "$core_oj" "$core_libart" "$framework" "$core_icu" "$support_dex" "$fonts_xml" "$roboto" "$framework_res"; do
+for input in "$host" "$runtime" "$core_oj" "$core_libart" "$framework" "$framework_location" "$core_icu" "$conscrypt" "$framework_bluetooth" "$framework_mediaprovider" "$framework_permission" "$framework_permission_s" "$support_dex" "$fonts_xml" "$roboto" "$framework_res"; do
   [[ -f "$input" ]] || {
     echo "runtime input is missing: $input" >&2
     echo "run the bootstrap/graphics build gates first" >&2
@@ -138,21 +164,27 @@ done
 system_root="$(mktemp -d "${TMPDIR:-/tmp}/darwin-art-apk-system-root.XXXXXX")"
 icon_file=""
 cleanup_system_root() {
+  chmod -R u+w "$system_root" 2>/dev/null || true
   rm -rf "$system_root"
   [[ -z "$icon_file" ]] || rm -f "$icon_file"
 }
 trap cleanup_system_root EXIT
 mkdir -p "$system_root/system/etc" "$system_root/system/fonts" \
-  "$system_root/system/framework"
+  "$system_root/system/framework" "$system_root/system/lib64"
 cp "$fonts_xml" "$system_root/system/etc/fonts.xml"
 cp "$roboto" "$system_root/system/fonts/Roboto-Regular.ttf"
 cp "$framework_res" "$system_root/system/framework/framework-res.apk"
+for library in libc++.so libcrypto.so libjavacrypto.so libssl.so; do
+  cp "$conscrypt_native/$library" "$system_root/system/lib64/$library"
+done
 chmod 0400 "$system_root/system/etc/fonts.xml" \
   "$system_root/system/fonts/Roboto-Regular.ttf" \
-  "$system_root/system/framework/framework-res.apk"
+  "$system_root/system/framework/framework-res.apk" \
+  "$system_root/system/lib64/"*.so
 chmod 0700 "$system_root"
 chmod 0500 "$system_root/system" "$system_root/system/etc" \
   "$system_root/system/fonts" "$system_root/system/framework"
+chmod 0500 "$system_root/system/lib64"
 
 icu_runtime="$root/_build/icu-runtime-adapters/runtime"
 export ANDROID_I18N_ROOT="$icu_runtime/i18n"
@@ -161,9 +193,12 @@ export ANDROID_TZDATA_ROOT="$icu_runtime/tzdata"
 export DARWIN_ART_APK_APP_PACKAGE="$package"
 export DARWIN_ART_APK_APP_APPLICATION="$application"
 export DARWIN_ART_APK_APP_ACTIVITY="$activity"
+export DARWIN_ART_APK_APP_LAUNCH_COMPONENT="$launch_component"
 export DARWIN_ART_APK_APP_DESCRIPTOR="$descriptor"
 export DARWIN_ART_APK_APP_ACTIVITIES="$activities"
+export DARWIN_ART_APK_APP_ACTIVITY_ALIASES="$activity_aliases"
 export DARWIN_ART_APK_APP_SERVICES="$services"
+export DARWIN_ART_APK_APP_METADATA="$application_metadata"
 export DARWIN_ART_APK_APP_VERSION_CODE="$version_code"
 export DARWIN_ART_APK_APP_VERSION_NAME="$version_name"
 export DARWIN_ART_APK_APP_THEME="$theme"
@@ -175,7 +210,81 @@ export DARWIN_ART_APK_APP_LABEL_RES="$label_res"
 app_data_root="${DARWIN_ART_APP_DATA_ROOT:-$root/_build/app-data}"
 app_data_dir="$app_data_root/$package"
 mkdir -p "$app_data_dir"
+private_data_root="$app_data_dir/private-data"
+mkdir -p "$private_data_root"
+chmod 0700 "$private_data_root"
+export DARWIN_ART_ANDROID_PRIVATE_DATA_ROOT="$private_data_root"
 export DARWIN_ART_APK_APP_DATA_DIR="$app_data_dir"
+export DARWIN_ART_APK_APP_DATA_GUEST_DIR="/data/user/0/$package"
+
+# ContextImpl creates these package-private directories before app code runs.
+# The detached host exposes the same writable subtree inside the sealed guest
+# root; Java and native code therefore agree on the Android /data path.
+chmod 0700 "$system_root"
+guest_app_data="$private_data_root/user/0/$package"
+mkdir -p "$guest_app_data/files" "$guest_app_data/cache" \
+  "$guest_app_data/code_cache" "$guest_app_data/no_backup" \
+  "$guest_app_data/databases" "$guest_app_data/shared_prefs"
+chmod 0500 "$private_data_root/user" "$private_data_root/user/0"
+chmod 0700 "$guest_app_data" "$guest_app_data/files" \
+  "$guest_app_data/cache" "$guest_app_data/code_cache" \
+  "$guest_app_data/no_backup" "$guest_app_data/databases" \
+  "$guest_app_data/shared_prefs"
+
+# This runtime currently exposes GLES through ANGLE/Metal but no Android
+# Vulkan/Dawn device. Chromium otherwise enables Graphite and Android's
+# cross-thread display compositor from the SDK level alone. That combination
+# asks SharedImage for cross-thread software-decoded I420 storage, which the
+# truthful GLES backend cannot share. Select Chromium's supported GLES
+# fallback until the compatibility layer grows multiplanar Vulkan images.
+if [[ "$package" == "org.chromium.chrome" &&
+      "${DARWIN_ART_CHROMIUM_GPU_COMPATIBILITY:-1}" != "0" ]]; then
+  export DARWIN_ART_APP_COMMAND_LINE_FILE="${DARWIN_ART_APP_COMMAND_LINE_FILE:-chrome-command-line}"
+  chromium_command_line="${DARWIN_ART_APP_COMMAND_LINE:-}"
+  chromium_disabled_features="SkiaGraphite,EnableDrDc"
+  if [[ "$chromium_command_line" =~ (^|[[:space:]])--disable-features=([^[:space:]]*) ]]; then
+    existing_disabled_features="${BASH_REMATCH[2]}"
+    for feature in SkiaGraphite EnableDrDc; do
+      if [[ ",$existing_disabled_features," != *",$feature,"* ]]; then
+        existing_disabled_features="${existing_disabled_features:+$existing_disabled_features,}$feature"
+      fi
+    done
+    old_switch="--disable-features=${BASH_REMATCH[2]}"
+    chromium_command_line="${chromium_command_line/"$old_switch"/"--disable-features=$existing_disabled_features"}"
+  else
+    chromium_command_line="${chromium_command_line:+$chromium_command_line }--disable-features=$chromium_disabled_features"
+  fi
+  export DARWIN_ART_APP_COMMAND_LINE="$chromium_command_line"
+fi
+if [[ -n "${DARWIN_ART_APP_COMMAND_LINE_FILE:-}" ]]; then
+  [[ "$DARWIN_ART_APP_COMMAND_LINE_FILE" == "$(basename "$DARWIN_ART_APP_COMMAND_LINE_FILE")" ]] || {
+    echo "app command-line filename must be a basename" >&2
+    exit 64
+  }
+  [[ -n "${DARWIN_ART_APP_COMMAND_LINE:-}" ]] || {
+    echo "DARWIN_ART_APP_COMMAND_LINE_FILE requires DARWIN_ART_APP_COMMAND_LINE" >&2
+    exit 64
+  }
+  command_line_dir="$private_data_root/local"
+  command_line_file="$command_line_dir/$DARWIN_ART_APP_COMMAND_LINE_FILE"
+  command_line_debug_dir="$command_line_dir/tmp"
+  command_line_debug_file="$command_line_debug_dir/$DARWIN_ART_APP_COMMAND_LINE_FILE"
+  mkdir -p "$command_line_dir"
+  chmod 0700 "$command_line_dir"
+  mkdir -p "$command_line_debug_dir"
+  chmod 0700 "$command_line_debug_dir"
+  command_line_payload="$(tr '\n' ' ' <<<"$DARWIN_ART_APP_COMMAND_LINE")"
+  [[ ! -e "$command_line_file" ]] || chmod 0600 "$command_line_file"
+  [[ ! -e "$command_line_debug_file" ]] || chmod 0600 "$command_line_debug_file"
+  printf '_ %s\n' "$command_line_payload" >"$command_line_file"
+  printf '_ %s\n' "$command_line_payload" >"$command_line_debug_file"
+  chmod 0400 "$command_line_file"
+  chmod 0400 "$command_line_debug_file"
+  chmod 0500 "$command_line_debug_dir"
+  chmod 0500 "$command_line_dir"
+fi
+chmod 0500 "$private_data_root"
+chmod 0500 "$system_root"
 
 # Publish only this application's authorized external-storage directory inside
 # the sealed guest root. Native Android libraries must see Android paths rather
@@ -183,7 +292,9 @@ export DARWIN_ART_APK_APP_DATA_DIR="$app_data_dir"
 # rooted at this temporary capability tree.
 external_storage_dir="$app_data_dir/external"
 guest_external_root="$system_root/storage/emulated/0"
-mkdir -p "$external_storage_dir" "$guest_external_root"
+chmod 0700 "$system_root"
+guest_external_app="$guest_external_root/Android/data/$package/files"
+mkdir -p "$external_storage_dir" "$guest_external_app"
 if [[ -n "$(find "$external_storage_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
   cp -R "$external_storage_dir/." "$guest_external_root/"
 fi
@@ -201,14 +312,23 @@ fi
 export DARWIN_ART_APK_APP_SUPPORT_DEX="$support_dex"
 export DARWIN_ART_APK_APP_RESOURCE_APK="$apk"
 export DARWIN_ART_FRAMEWORK_RES_APK="$framework_res"
-export DARWIN_ART_TEST_FONTS_XML="$fonts_xml"
-export DARWIN_ART_TEST_FONT="$roboto"
+export DARWIN_ART_TEST_FONTS_XML="/system/etc/fonts.xml"
+export DARWIN_ART_TEST_FONT="/system/fonts/Roboto-Regular.ttf"
 export DARWIN_ART_ANDROID_FILESYSTEM_ROOT="$system_root"
 export DARWIN_ART_ANDROID_SYSTEM_ROOT="$system_root/system"
+export DARWIN_ART_ANDROID_SYSTEM_NATIVE_DIR="$system_root/system/lib64"
 export DARWIN_ART_WINDOW_SCALE=2
 
-# Android Studio's emulator packages ANGLE's native Metal backend. Prefer an
-# explicit runtime bundle, then use the configured SDK copy for local builds.
+# A project-built ANGLE exposes Metal textures as EGLImages, which is required
+# for Android AHardwareBuffer storage identity. Prefer it over the older ANGLE
+# bundled with Android Studio; an explicit environment override remains first.
+if [[ -z "${DARWIN_ART_ANGLE_DIRECTORY:-}" ]]; then
+  angle_candidate="$root/_build/angle-source/out/DarwinArtRelease"
+  if [[ -f "$angle_candidate/libEGL.dylib" &&
+        -f "$angle_candidate/libGLESv2.dylib" ]]; then
+    export DARWIN_ART_ANGLE_DIRECTORY="$angle_candidate"
+  fi
+fi
 if [[ -z "${DARWIN_ART_ANGLE_DIRECTORY:-}" && -n "${ANDROID_HOME:-}" ]]; then
   angle_candidate="$ANDROID_HOME/emulator/lib64/gles_angle"
   if [[ -f "$angle_candidate/libEGL.dylib" &&
@@ -264,5 +384,39 @@ fi
 echo "$metadata"
 echo "$install_output"
 [[ "$native_count" == "0" ]] || echo "$native_resolution"
-exec "$host" --window-seconds "$seconds" \
-  "$runtime" "$core_oj" "$core_libart" "$framework" "$core_icu" "$app_dex"
+if [[ "${DARWIN_ART_LLDB:-0}" == "1" ]]; then
+  exec lldb --batch -o run -k bt -k 'register read' -- "$host" --window-seconds "$seconds" \
+    "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
+fi
+if [[ "${DARWIN_ART_LLDB:-0}" == "exit" ]]; then
+  exec lldb --batch \
+    -o 'breakpoint set -n exit' -o 'breakpoint set -n _exit' \
+    -o 'breakpoint set -n pthread_exit' \
+    -o 'breakpoint set -n darwin_art_bionic_exit' \
+    -o 'breakpoint set -n darwin_art_bionic__exit' \
+    -o run -k 'thread backtrace all -c 40' -k 'register read' -- "$host" --window-seconds "$seconds" \
+    "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
+fi
+if [[ "${DARWIN_ART_LLDB:-0}" == "dex" ]]; then
+  exec lldb --batch \
+    -o 'breakpoint set -n _ZN3artL25DexFile_defineClassNativeEP7_JNIEnvP7_jclassP8_jstringP8_jobjectS7_S7_' \
+    -o run -o 'register read x0 x1 x2 x3 x4 x5' \
+    -o 'thread backtrace -c 30' -- "$host" --window-seconds "$seconds" \
+    "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
+fi
+if [[ "${DARWIN_ART_LLDB:-0}" == "syscall-240" ]]; then
+  exec lldb --batch \
+    -o 'breakpoint set -n darwin_art_bionic_syscall_captured -c "*(unsigned long long*)$x0 == 240"' \
+    -o run -o 'memory read -fx -s8 -c6 $x0' \
+    -o 'thread backtrace -c 20' -- "$host" --window-seconds "$seconds" \
+    "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
+fi
+if [[ "${DARWIN_ART_LLDB:-0}" == "fs-stat" ]]; then
+  exec lldb --batch \
+    -o 'breakpoint set -n darwin_art_libcore_stat -c "(int)strncmp((char*)$x0, \"/data/local\", 11) == 0"' \
+    -o run -o 'memory read -s1 -c128 $x0' \
+    -o 'thread backtrace -c 24' -- "$host" --window-seconds "$seconds" \
+    "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
+fi
+"$host" --window-seconds "$seconds" \
+  "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"

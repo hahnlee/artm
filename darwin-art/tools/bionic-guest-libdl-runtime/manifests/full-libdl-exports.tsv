@@ -5,7 +5,7 @@ __cfi_slowpath_diag	LIBC_OMR1	unsupported
 android_dlopen_ext	LIBC	supported
 android_get_application_target_sdk_version	LIBC_N	unsupported
 dl_iterate_phdr	LIBC	existing-separate-provider
-dladdr	LIBC	unsupported
+dladdr	LIBC	dso-lifecycle
 dlclose	LIBC	supported
 dlerror	LIBC	supported
 dlopen	LIBC	supported

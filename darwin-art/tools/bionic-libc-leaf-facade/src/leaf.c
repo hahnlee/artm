@@ -14,6 +14,12 @@ void* darwin_art_bionic_memchr(const void* source, int value, size_t length) {
   return NULL;
 }
 
+void* darwin_art_bionic___memchr_chk(const void* source, int value,
+                                     size_t length, size_t source_size) {
+  if (length > source_size) return NULL;
+  return darwin_art_bionic_memchr(source, value, length);
+}
+
 int darwin_art_bionic_memcmp(const void* left, const void* right, size_t length) {
   const unsigned char* a = (const unsigned char*)left;
   const unsigned char* b = (const unsigned char*)right;
@@ -690,6 +696,7 @@ static const DarwinArtBionicLeafBinding kBindings[] = {
     {"__FD_CLR_chk", (DarwinArtBionicFunction)darwin_art_bionic___FD_CLR_chk},
     {"__FD_ISSET_chk", (DarwinArtBionicFunction)darwin_art_bionic___FD_ISSET_chk},
     {"__FD_SET_chk", (DarwinArtBionicFunction)darwin_art_bionic___FD_SET_chk},
+    {"__memchr_chk", (DarwinArtBionicFunction)darwin_art_bionic___memchr_chk},
     {"__memcpy_chk", (DarwinArtBionicFunction)darwin_art_bionic___memcpy_chk},
     {"__memmove_chk", (DarwinArtBionicFunction)darwin_art_bionic___memmove_chk},
     {"__memset_chk", (DarwinArtBionicFunction)darwin_art_bionic___memset_chk},

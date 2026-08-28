@@ -1,7 +1,21 @@
 #include "darwin_audio_track.h"
 
+extern "C" bool darwin_art_android_aaudio_install_output_backend(
+    DarwinAudioTrack* (*create)(int32_t, int32_t, int32_t, int32_t),
+    void (*destroy)(DarwinAudioTrack*), void (*start)(DarwinAudioTrack*),
+    void (*stop)(DarwinAudioTrack*),
+    size_t (*write)(DarwinAudioTrack*, const void*, size_t, bool));
+
+__attribute__((constructor)) static void InstallAAudioOutputBackend() {
+  darwin_art_android_aaudio_install_output_backend(
+      &darwin_audio_track_create, &darwin_audio_track_destroy,
+      &darwin_audio_track_start, &darwin_audio_track_stop,
+      &darwin_audio_track_write);
+}
+
 #include <AudioToolbox/AudioToolbox.h>
 #include <AudioUnit/AudioUnit.h>
+#include <CoreAudio/CoreAudio.h>
 
 #include <algorithm>
 #include <atomic>
@@ -115,6 +129,62 @@ void ReportAudioError(const char* operation, OSStatus status) {
 }
 
 }  // namespace
+
+int32_t darwin_audio_primary_output_sample_rate(void) {
+  AudioDeviceID device = kAudioObjectUnknown;
+  UInt32 size = sizeof(device);
+  AudioObjectPropertyAddress address{
+      kAudioHardwarePropertyDefaultOutputDevice,
+      kAudioObjectPropertyScopeGlobal,
+      kAudioObjectPropertyElementMain,
+  };
+  if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &address, 0, nullptr,
+                                 &size, &device) != noErr ||
+      device == kAudioObjectUnknown) {
+    return 48000;
+  }
+  Float64 rate = 0.0;
+  size = sizeof(rate);
+  address = {
+      kAudioDevicePropertyNominalSampleRate,
+      kAudioObjectPropertyScopeGlobal,
+      kAudioObjectPropertyElementMain,
+  };
+  if (AudioObjectGetPropertyData(device, &address, 0, nullptr, &size, &rate) !=
+          noErr ||
+      rate < 4000.0 || rate > 384000.0) {
+    return 48000;
+  }
+  return static_cast<int32_t>(rate + 0.5);
+}
+
+int32_t darwin_audio_primary_output_frame_count(void) {
+  AudioDeviceID device = kAudioObjectUnknown;
+  UInt32 size = sizeof(device);
+  AudioObjectPropertyAddress address{
+      kAudioHardwarePropertyDefaultOutputDevice,
+      kAudioObjectPropertyScopeGlobal,
+      kAudioObjectPropertyElementMain,
+  };
+  if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &address, 0, nullptr,
+                                 &size, &device) != noErr ||
+      device == kAudioObjectUnknown) {
+    return 512;
+  }
+  UInt32 frames = 0;
+  size = sizeof(frames);
+  address = {
+      kAudioDevicePropertyBufferFrameSize,
+      kAudioObjectPropertyScopeGlobal,
+      kAudioObjectPropertyElementMain,
+  };
+  if (AudioObjectGetPropertyData(device, &address, 0, nullptr, &size, &frames) !=
+          noErr ||
+      frames == 0 || frames > static_cast<UInt32>(INT32_MAX)) {
+    return 512;
+  }
+  return static_cast<int32_t>(frames);
+}
 
 DarwinAudioTrack* darwin_audio_track_create(int32_t sample_rate,
                                             int32_t channel_mask,

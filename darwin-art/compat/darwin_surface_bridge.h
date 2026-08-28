@@ -130,8 +130,9 @@ DarwinArtSurfaceResult darwin_art_surface_set_title(
 // released with darwin_art_host_document_path_free(). A null return means
 // cancellation or an invalid calling thread. Android code never sees this
 // host path directly; the runtime stages it behind a content:// provider.
-char* darwin_art_host_open_image_document(void);
-char* darwin_art_host_save_image_document(const char* suggested_name);
+char* darwin_art_host_open_document(const char* mime_type);
+char* darwin_art_host_save_document(const char* mime_type,
+                                    const char* suggested_name);
 void darwin_art_host_document_path_free(char* path);
 
 // Waits for the previous GPU presentation to finish, then locks the IOSurface
@@ -182,6 +183,12 @@ void darwin_art_surface_set_active_gpu(DarwinArtSurface* surface);
 // normal GPU pass; no CPU mapping or pixel copy occurs.
 bool darwin_art_surface_gpu_acquire_iosurface(
     DarwinArtSurface* surface,
+    void** iosurface,
+    uint32_t* width,
+    uint32_t* height);
+uint32_t darwin_art_surface_gpu_iosurface_id(DarwinArtSurface* surface);
+bool darwin_art_surface_gpu_lookup_iosurface(
+    uint32_t surface_id,
     void** iosurface,
     uint32_t* width,
     uint32_t* height);

@@ -9,9 +9,11 @@ extern "C" SymbolFunction darwin_art_bionic_allocator_resolve(const char *);
 extern "C" SymbolFunction darwin_art_bionic_errno_resolve(const char *);
 extern "C" SymbolFunction darwin_art_bionic_fs_resolve(const char *);
 extern "C" SymbolFunction darwin_art_bionic_time_resolve(const char *);
+extern "C" uintptr_t darwin_art_bionic_time_data_resolve(const char *);
 extern "C" void *darwin_art_bionic_pthread_resolve(const char *, const char *,
                                                    const char *);
 extern "C" SymbolFunction darwin_art_bionic_process_state_resolve(const char *);
+extern "C" uintptr_t darwin_art_bionic_process_state_data_resolve(const char *);
 extern "C" void *darwin_art_dl_phdr_resolve(const char *, const char *,
                                             const char *);
 extern "C" SymbolFunction darwin_art_bionic_stdio_resolve(const char *);
@@ -30,6 +32,8 @@ extern "C" void *darwin_art_bionic_sendfile_resolve(const char *, const char *,
 extern "C" void *darwin_art_bionic_socket_broker_resolve(const char *,
                                                          const char *,
                                                          const char *);
+extern "C" uintptr_t darwin_art_bionic_socket_broker_data_resolve(
+    const char *, const char *, const char *);
 extern "C" void *darwin_art_bionic_socket_broker_dns_resolve(const char *,
                                                              const char *,
                                                              const char *);
@@ -54,6 +58,11 @@ extern "C" void *darwin_art_bionic_binary128_conversion_resolve(const char *,
                                                                 const char *);
 extern "C" void *darwin_art_bionic_abort_resolve(const char *, const char *,
                                                  const char *);
+extern "C" void *darwin_art_android_binder_ndk_resolve(const char *,
+                                                        const char *,
+                                                        const char *);
+extern "C" void *darwin_art_android_aaudio_resolve(const char *, const char *,
+                                                    const char *);
 extern "C" uintptr_t darwin_art_liblog_provider_resolve(const char *,
                                                         const char *);
 extern "C" SymbolFunction darwin_art_bionic_dso_lifecycle_resolve(const char *);
@@ -82,6 +91,8 @@ uintptr_t Filesystem(void *, const char *, const char *symbol, const char *) {
   return Address(darwin_art_bionic_fs_resolve(symbol));
 }
 uintptr_t Time(void *, const char *, const char *symbol, const char *) {
+  const uintptr_t data = darwin_art_bionic_time_data_resolve(symbol);
+  if (data != 0) return data;
   return Address(darwin_art_bionic_time_resolve(symbol));
 }
 uintptr_t Pthread(void *, const char *soname, const char *symbol,
@@ -90,6 +101,8 @@ uintptr_t Pthread(void *, const char *soname, const char *symbol,
       darwin_art_bionic_pthread_resolve(soname, symbol, version));
 }
 uintptr_t ProcessState(void *, const char *, const char *symbol, const char *) {
+  const uintptr_t data = darwin_art_bionic_process_state_data_resolve(symbol);
+  if (data != 0) return data;
   return Address(darwin_art_bionic_process_state_resolve(symbol));
 }
 uintptr_t Phdr(void *, const char *soname, const char *symbol,
@@ -137,6 +150,9 @@ uintptr_t CentralFdBroker(void *, const char *soname, const char *symbol,
 }
 uintptr_t Socket(void *, const char *soname, const char *symbol,
                  const char *version) {
+  const uintptr_t data =
+      darwin_art_bionic_socket_broker_data_resolve(soname, symbol, version);
+  if (data != 0) return data;
   return reinterpret_cast<uintptr_t>(
       darwin_art_bionic_socket_broker_resolve(soname, symbol, version));
 }
@@ -152,6 +168,16 @@ uintptr_t Math(void *, const char *soname, const char *symbol,
 }
 uintptr_t Vm(void *, const char *, const char *symbol, const char *) {
   return Address(darwin_art_bionic_vm_resolve(symbol));
+}
+uintptr_t BinderNdk(void *, const char *soname, const char *symbol,
+                    const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_android_binder_ndk_resolve(soname, symbol, version));
+}
+uintptr_t AAudio(void *, const char *soname, const char *symbol,
+                 const char *version) {
+  return reinterpret_cast<uintptr_t>(
+      darwin_art_android_aaudio_resolve(soname, symbol, version));
 }
 uintptr_t Locale(void *, const char *soname, const char *symbol,
                  const char *version) {
@@ -248,6 +274,8 @@ constexpr DarwinArtBionicProviderResolve kResolvers[] = {
     Dns,
     Math,
     Vm,
+    BinderNdk,
+    AAudio,
 };
 static_assert(sizeof(kResolvers) / sizeof(kResolvers[0]) ==
               DARWIN_ART_BIONIC_PROVIDER_COUNT);

@@ -15,11 +15,17 @@ typedef int32_t (*RegisterNativesFunction)(void*, void*,
 typedef int32_t (*ThrowNewFunction)(void*, void*, const char*);
 typedef void* (*ExceptionOccurredFunction)(void*);
 typedef void (*ExceptionClearFunction)(void*);
+typedef int32_t (*PushLocalFrameFunction)(void*, int32_t);
+typedef void* (*PopLocalFrameFunction)(void*, void*);
 typedef uint8_t (*ExceptionCheckFunction)(void*);
 typedef void* (*NewReferenceFunction)(void*, void*);
 typedef void* (*GetFieldIdFunction)(void*, void*, const char*, const char*);
 typedef void (*DeleteReferenceFunction)(void*, void*);
 typedef void (*DeleteLocalRefFunction)(void*, void*);
+typedef void* (*NewStringFunction)(void*, const uint16_t*, int32_t);
+typedef int32_t (*GetStringLengthFunction)(void*, void*);
+typedef const uint16_t* (*GetStringCharsFunction)(void*, void*, uint8_t*);
+typedef void (*ReleaseStringCharsFunction)(void*, void*, const uint16_t*);
 typedef void* (*NewStringUtfFunction)(void*, const char*);
 typedef int32_t (*GetStringUtfLengthFunction)(void*, void*);
 typedef const char* (*GetStringUtfCharsFunction)(void*, void*, uint8_t*);
@@ -71,6 +77,8 @@ int main(void) {
       (GetVersionFunction)native[DARWIN_ART_JNI_SLOT_GetVersion];
   FindClassFunction find_class =
       (FindClassFunction)native[DARWIN_ART_JNI_SLOT_FindClass];
+  NewReferenceFunction get_superclass =
+      (NewReferenceFunction)native[DARWIN_ART_JNI_SLOT_GetSuperclass];
   IsAssignableFromFunction is_assignable_from =
       (IsAssignableFromFunction)native[DARWIN_ART_JNI_SLOT_IsAssignableFrom];
   ThrowNewFunction throw_new =
@@ -79,6 +87,10 @@ int main(void) {
       (ExceptionOccurredFunction)native[DARWIN_ART_JNI_SLOT_ExceptionOccurred];
   ExceptionClearFunction exception_clear =
       (ExceptionClearFunction)native[DARWIN_ART_JNI_SLOT_ExceptionClear];
+  PushLocalFrameFunction push_local_frame =
+      (PushLocalFrameFunction)native[DARWIN_ART_JNI_SLOT_PushLocalFrame];
+  PopLocalFrameFunction pop_local_frame =
+      (PopLocalFrameFunction)native[DARWIN_ART_JNI_SLOT_PopLocalFrame];
   RegisterNativesFunction register_natives =
       (RegisterNativesFunction)native[DARWIN_ART_JNI_SLOT_RegisterNatives];
   MonitorFunction monitor_enter =
@@ -105,6 +117,14 @@ int main(void) {
       (GetFieldIdFunction)native[DARWIN_ART_JNI_SLOT_GetMethodID];
   GetFieldIdFunction get_static_method_id =
       (GetFieldIdFunction)native[DARWIN_ART_JNI_SLOT_GetStaticMethodID];
+  NewStringFunction new_string =
+      (NewStringFunction)native[DARWIN_ART_JNI_SLOT_NewString];
+  GetStringLengthFunction get_string_length =
+      (GetStringLengthFunction)native[DARWIN_ART_JNI_SLOT_GetStringLength];
+  GetStringCharsFunction get_string_chars =
+      (GetStringCharsFunction)native[DARWIN_ART_JNI_SLOT_GetStringChars];
+  ReleaseStringCharsFunction release_string_chars =
+      (ReleaseStringCharsFunction)native[DARWIN_ART_JNI_SLOT_ReleaseStringChars];
   NewStringUtfFunction new_string_utf =
       (NewStringUtfFunction)native[DARWIN_ART_JNI_SLOT_NewStringUTF];
   GetStringUtfLengthFunction get_string_utf_length =
@@ -147,6 +167,13 @@ int main(void) {
   CHECK(monitor_enter(env, (void*)(uintptr_t)1) == DARWIN_ART_JNI_ERR);
   CHECK(monitor_exit(env, (void*)(uintptr_t)1) == DARWIN_ART_JNI_ERR);
   CHECK(exception_check(env) == 0);
+  CHECK(push_local_frame(env, 16) == DARWIN_ART_JNI_ERR);
+  CHECK(pop_local_frame(env, NULL) == NULL);
+  const uint16_t utf16[] = {'o', 'k'};
+  CHECK(new_string(env, utf16, 2) == NULL);
+  CHECK(get_string_length(env, (void*)(uintptr_t)1) == 0);
+  CHECK(get_string_chars(env, (void*)(uintptr_t)1, NULL) == NULL);
+  release_string_chars(env, (void*)(uintptr_t)1, utf16);
   CHECK(new_string_utf(env, "unavailable") == NULL);
   CHECK(get_string_utf_length(env, (void*)(uintptr_t)1) == 0);
   CHECK(get_string_utf_chars(env, (void*)(uintptr_t)1, NULL) == NULL);
@@ -155,6 +182,7 @@ int main(void) {
   delete_global_ref(env, (void*)(uintptr_t)1);
   CHECK(new_local_ref(env, (void*)(uintptr_t)1) == NULL);
   CHECK(get_object_class(env, (void*)(uintptr_t)1) == NULL);
+  CHECK(get_superclass(env, (void*)(uintptr_t)1) == NULL);
   CHECK(get_field_id(env, (void*)(uintptr_t)1, "field", "I") == NULL);
   CHECK(get_method_id(env, (void*)(uintptr_t)1, "method", "()V") == NULL);
   CHECK(get_static_method_id(env, (void*)(uintptr_t)1, "staticMethod", "()V") ==

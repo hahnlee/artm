@@ -25,7 +25,7 @@ clean() {
 clean
 imports="$root/tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv"
 check "$imports" "$LIBC_IMPORT_MANIFEST_SHA256"
-[[ "$(tail -n +2 "$dir/manifests/imports.tsv" | wc -l | tr -d ' ')" == 5 ]] || fail 'manifest count'
+[[ "$(tail -n +2 "$dir/manifests/imports.tsv" | wc -l | tr -d ' ')" == 6 ]] || fail 'manifest count'
 while IFS=$'\t' read -r symbol kind demand policy; do
   [[ "$symbol" == symbol ]] && continue
   [[ "$kind" == FUNC && "$demand" == absent && -n "$policy" ]] || fail "manifest row: $symbol"
@@ -50,7 +50,7 @@ check "$libc" "$NDK_API35_ARM64_LIBC_SHA256"
 check "$root/tools/bionic-errno-tls/sources.lock" "$BIONIC_ERRNO_LOCK_SHA256"
 check "$root/tools/bionic-errno-tls/src/errno_tls.c" "$BIONIC_ERRNO_SOURCE_SHA256"
 check "$root/tools/bionic-errno-tls/generated/darwin_to_android.inc" "$BIONIC_ERRNO_MAPPING_SHA256"
-for symbol in madvise mmap mmap64 mprotect munmap; do
+for symbol in madvise mmap mmap64 mprotect mremap munmap; do
   "$readelf" --dyn-syms --wide "$libc" | awk -v wanted="$symbol@@LIBC" '$5=="GLOBAL"&&$4=="FUNC"&&$8==wanted{found=1}END{exit !found}' || fail "libc export: $symbol@@LIBC"
 done
 
@@ -64,20 +64,26 @@ done
 nm -u "$tmp/shims.o" | sed 's/^[[:space:]]*//' | sort > "$tmp/shims.actual"
 cat > "$tmp/shims.expected" <<'EOF'
 ___error
+_darwin_art_bionic_errno_store
 _darwin_art_bionic_vm_madvise_core
 _darwin_art_bionic_vm_mmap_core
 _darwin_art_bionic_vm_mprotect_core
+_darwin_art_bionic_vm_mremap_core
 _darwin_art_bionic_vm_munmap_core
+_memset
 EOF
 diff -u "$tmp/shims.expected" "$tmp/shims.actual" || fail 'shim dependencies'
 nm -u "$tmp/host.o" | sed 's/^[[:space:]]*//' | sort > "$tmp/host.actual"
 cat > "$tmp/host.expected" <<'EOF'
 ___error
+_close
 _getpagesize
 _madvise
 _mmap
 _mprotect
 _munmap
+_pthread_jit_write_protect_np
+_pthread_jit_write_protect_supported_np
 _sys_icache_invalidate
 EOF
 diff -u "$tmp/host.expected" "$tmp/host.actual" || fail 'host dependencies'
@@ -96,6 +102,7 @@ madvise@LIBC
 mmap64@LIBC
 mmap@LIBC
 mprotect@LIBC
+mremap@LIBC
 munmap@LIBC
 EOF
 diff -u "$tmp/imports.expected" "$tmp/imports.actual" || fail 'fixture imports'
@@ -115,4 +122,4 @@ BIONIC_VM_C_SANITIZER=address CARGO_TARGET_DIR="$tmp/asan" cargo run --quiet --m
 UBSAN_OPTIONS=halt_on_error=1 BIONIC_VM_C_SANITIZER=undefined CARGO_TARGET_DIR="$tmp/ubsan" cargo run --quiet --manifest-path "$dir/Cargo.toml" -- "$fixture"
 cargo fmt --manifest-path "$dir/Cargo.toml" -- --check
 clean
-echo "bionic-vm-facade: PASS libc++-demand=0 imports=6@LIBC anon-private RW-RX-exec DONTNEED-zero race C-ASan C-UBSan target-clean"
+echo "bionic-vm-facade: PASS libc++-demand=0 imports=7@LIBC anon-private+shared remap-move RW-RX-exec DONTNEED-zero race C-ASan C-UBSan target-clean"

@@ -21,6 +21,7 @@ constexpr uint32_t kGenerationMask = (1U << 20) - 1;
 constexpr size_t kSlotCount = 1U << kSlotBits;
 constexpr size_t kCopyChunk = 4096;
 constexpr int16_t kPollNval = 0x20;
+constexpr uint32_t kEpollOneShot = 0x40000000U;
 
 struct Description;
 struct Watch {
@@ -28,9 +29,36 @@ struct Watch {
   uint32_t events;
   uint64_t data;
   std::weak_ptr<Description> description;
+  bool enabled;
+};
+struct ActivePollWake {
+  DarwinArtFdOwnerV1 callbacks{};
+  uint64_t object = 0;
+  std::mutex mutex;
+  bool closed = false;
+
+  void Signal() {
+    std::lock_guard lock(mutex);
+    if (closed || callbacks.signal_poll_wake == nullptr)
+      return;
+    int ignored = 0;
+    (void)callbacks.signal_poll_wake(callbacks.context, object, &ignored);
+  }
+  void Close() {
+    std::lock_guard lock(mutex);
+    if (closed)
+      return;
+    closed = true;
+    if (callbacks.close_poll_wake != nullptr) {
+      int ignored = 0;
+      (void)callbacks.close_poll_wake(callbacks.context, object, &ignored);
+    }
+  }
 };
 struct EpollState {
   std::vector<Watch> watches;
+  uint64_t generation = 0;
+  std::vector<std::weak_ptr<ActivePollWake>> active_wakes;
 };
 struct Description {
   DarwinArtFdOwnerHandle owner = 0;
@@ -266,7 +294,9 @@ bool ValidSocketRequest(const DarwinArtFdSocketRequestV1 *request) {
   case DARWIN_ART_FD_SOCKET_RECV:
     return output_bytes;
   case DARWIN_ART_FD_SOCKET_SENDTO:
-    return input_bytes && request->address && request->address_length;
+    return input_bytes &&
+           ((request->address == nullptr && request->address_length == 0) ||
+            (request->address != nullptr && request->address_length != 0));
   case DARWIN_ART_FD_SOCKET_RECVFROM:
     return output_bytes && output_address;
   case DARWIN_ART_FD_SOCKET_GETSOCKOPT:
@@ -412,7 +442,10 @@ extern "C" DarwinArtFdBrokerStatus darwin_art_fd_broker_install_owner(
       (callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V1 &&
        callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V2 &&
        callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V3 &&
-       callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V4))
+       callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V4 &&
+       callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V5 &&
+       callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V6 &&
+       callbacks->abi_version != DARWIN_ART_FD_OWNER_ABI_V7))
     return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
   const size_t required_size =
       callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V1
@@ -421,6 +454,12 @@ extern "C" DarwinArtFdBrokerStatus darwin_art_fd_broker_install_owner(
           ? offsetof(DarwinArtFdOwnerV1, socket_operation)
       : callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V3
           ? offsetof(DarwinArtFdOwnerV1, poll_many)
+      : callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V4
+          ? offsetof(DarwinArtFdOwnerV1, set_status_flags)
+      : callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V5
+          ? offsetof(DarwinArtFdOwnerV1, create_poll_wake)
+      : callbacks->abi_version == DARWIN_ART_FD_OWNER_ABI_V6
+          ? offsetof(DarwinArtFdOwnerV1, export_host_fd)
           : sizeof(DarwinArtFdOwnerV1);
   if (callbacks->struct_size < required_size)
     return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
@@ -570,6 +609,34 @@ darwin_art_fd_broker_set_status_flags(DarwinArtFdBroker *broker, int fd,
     slot->description->status_flags = flags;
   return status;
 }
+extern "C" DarwinArtFdBrokerStatus darwin_art_fd_broker_set_status_flags_io(
+    DarwinArtFdBroker *broker, int fd, int flags, DarwinArtFdIoResult *result) {
+  if (!broker || !result)
+    return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
+  auto *impl = Impl(broker);
+  Lease lease;
+  {
+    std::lock_guard lock(impl->mutex);
+    const auto status = AcquireLocked(impl, fd, std::nullopt, &lease);
+    if (status != DARWIN_ART_FD_BROKER_OK)
+      return status;
+  }
+  int error = 0;
+  int value = 0;
+  if (lease.description->callbacks.set_status_flags != nullptr) {
+    value = lease.description->callbacks.set_status_flags(
+        lease.description->callbacks.context, lease.description->object, flags,
+        &error);
+  }
+  {
+    std::lock_guard lock(impl->mutex);
+    if (value == 0)
+      lease.description->status_flags = flags;
+    ReleaseLocked(impl, lease);
+  }
+  SetResult(result, value < 0 ? -1 : 0, value < 0 ? error : 0);
+  return DARWIN_ART_FD_BROKER_OK;
+}
 extern "C" DarwinArtFdBrokerStatus
 darwin_art_fd_broker_get_offset(DarwinArtFdBroker *broker, int fd,
                                 int64_t *offset) {
@@ -592,6 +659,35 @@ darwin_art_fd_broker_get_offset(DarwinArtFdBroker *broker, int fd,
     ReleaseLocked(impl, lease);
   }
   return DARWIN_ART_FD_BROKER_OK;
+}
+extern "C" DarwinArtFdBrokerStatus
+darwin_art_fd_broker_export_host_fd(DarwinArtFdBroker *broker, int fd,
+                                    int *host_fd, DarwinArtFdIoResult *result) {
+  if (!broker || !host_fd || !result)
+    return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
+  auto *impl = Impl(broker);
+  Lease lease;
+  {
+    std::lock_guard lock(impl->mutex);
+    const auto status = AcquireLocked(impl, fd, std::nullopt, &lease);
+    if (status != DARWIN_ART_FD_BROKER_OK)
+      return status;
+  }
+  int error = 0;
+  int value = -1;
+  if (lease.description->callbacks.export_host_fd != nullptr) {
+    value = lease.description->callbacks.export_host_fd(
+        lease.description->callbacks.context, lease.description->object,
+        host_fd, &error);
+  } else {
+    error = 95;
+  }
+  {
+    std::lock_guard lock(impl->mutex);
+    ReleaseLocked(impl, lease);
+  }
+  SetResult(result, value < 0 ? -1 : 0, value < 0 ? error : 0);
+  return value < 0 ? DARWIN_ART_FD_BROKER_UNSUPPORTED : DARWIN_ART_FD_BROKER_OK;
 }
 extern "C" DarwinArtFdBrokerStatus
 darwin_art_fd_broker_close(DarwinArtFdBroker *broker, int fd,
@@ -979,7 +1075,7 @@ extern "C" DarwinArtFdBrokerStatus darwin_art_fd_broker_epoll_ctl(
   if (!broker || !result || (operation != DARWIN_ART_EPOLL_CTL_DEL && !event))
     return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
   auto *impl = Impl(broker);
-  std::lock_guard lock(impl->mutex);
+  std::unique_lock lock(impl->mutex);
   size_t ei = 0, ti = 0;
   uint32_t eg = 0, tg = 0;
   Slot *es = nullptr;
@@ -992,7 +1088,8 @@ extern "C" DarwinArtFdBrokerStatus darwin_art_fd_broker_epoll_ctl(
   status = LookupSlotLocked(impl, target_fd, &ti, &tg, &ts);
   if (status != DARWIN_ART_FD_BROKER_OK)
     return status;
-  if (ts->description->kind != DARWIN_ART_FD_SOCKET)
+  if (ts->description->kind == DARWIN_ART_FD_EPOLL ||
+      ts->description->callbacks.poll == nullptr)
     return DARWIN_ART_FD_BROKER_WRONG_KIND;
   auto &watches = es->description->epoll->watches;
   auto found =
@@ -1003,19 +1100,35 @@ extern "C" DarwinArtFdBrokerStatus darwin_art_fd_broker_epoll_ctl(
     if (found != watches.end())
       return DARWIN_ART_FD_BROKER_ALREADY_EXISTS;
     watches.push_back(
-        Watch{target_fd, event->events, event->data, ts->description});
+        Watch{target_fd, event->events, event->data, ts->description, true});
   } else if (operation == DARWIN_ART_EPOLL_CTL_MOD) {
     if (found == watches.end())
       return DARWIN_ART_FD_BROKER_STALE;
     found->events = event->events;
     found->data = event->data;
+    found->enabled = true;
   } else if (operation == DARWIN_ART_EPOLL_CTL_DEL) {
     if (found == watches.end())
       return DARWIN_ART_FD_BROKER_STALE;
     watches.erase(found);
   } else
     return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
+  auto &epoll_state = *es->description->epoll;
+  ++epoll_state.generation;
+  std::vector<std::shared_ptr<ActivePollWake>> wakes;
+  auto wake = epoll_state.active_wakes.begin();
+  while (wake != epoll_state.active_wakes.end()) {
+    if (auto active = wake->lock()) {
+      wakes.push_back(std::move(active));
+      ++wake;
+    } else {
+      wake = epoll_state.active_wakes.erase(wake);
+    }
+  }
   SetResult(result, 0, 0);
+  lock.unlock();
+  for (const auto &active : wakes)
+    active->Signal();
   return DARWIN_ART_FD_BROKER_OK;
 }
 extern "C" DarwinArtFdBrokerStatus
@@ -1024,23 +1137,159 @@ darwin_art_fd_broker_epoll_wait(DarwinArtFdBroker *broker, int epoll_fd,
                                 int timeout_ms, DarwinArtFdIoResult *result) {
   if (!broker || !events || !capacity || !result || timeout_ms < -1)
     return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
-  if (timeout_ms != 0)
-    return DARWIN_ART_FD_BROKER_UNSUPPORTED;
   auto *impl = Impl(broker);
   Lease epoll;
   std::vector<Watch> watches;
+  uint64_t generation = 0;
   {
     std::lock_guard lock(impl->mutex);
     auto s = AcquireLocked(impl, epoll_fd, DARWIN_ART_FD_EPOLL, &epoll);
     if (s != DARWIN_ART_FD_BROKER_OK)
       return s;
     watches = epoll.description->epoll->watches;
+    generation = epoll.description->epoll->generation;
+  }
+  if (timeout_ms != 0 && !watches.empty()) {
+    std::vector<std::shared_ptr<Description>> descriptions;
+    std::vector<Watch> active_watches;
+    std::vector<DarwinArtFdOwnerV1> callbacks;
+    std::vector<uint64_t> objects;
+    std::vector<int16_t> requested;
+    descriptions.reserve(watches.size());
+    active_watches.reserve(watches.size());
+    callbacks.reserve(watches.size());
+    objects.reserve(watches.size());
+    requested.reserve(watches.size());
+    {
+      std::lock_guard lock(impl->mutex);
+      for (const Watch &watch : watches) {
+        if (!watch.enabled)
+          continue;
+        auto description = watch.description.lock();
+        if (!AcquireDescriptionLocked(impl, description))
+          continue;
+        descriptions.push_back(description);
+        active_watches.push_back(watch);
+        callbacks.push_back(description->callbacks);
+        objects.push_back(description->object);
+        requested.push_back(static_cast<int16_t>(watch.events));
+      }
+    }
+    bool homogeneous = !callbacks.empty() &&
+                       callbacks[0].create_poll_wake != nullptr &&
+                       callbacks[0].signal_poll_wake != nullptr &&
+                       callbacks[0].close_poll_wake != nullptr &&
+                       callbacks[0].poll_many_with_wake != nullptr;
+    for (size_t index = 1; homogeneous && index < callbacks.size(); ++index) {
+      homogeneous =
+          callbacks[index].context == callbacks[0].context &&
+          callbacks[index].create_poll_wake == callbacks[0].create_poll_wake &&
+          callbacks[index].signal_poll_wake == callbacks[0].signal_poll_wake &&
+          callbacks[index].close_poll_wake == callbacks[0].close_poll_wake &&
+          callbacks[index].poll_many_with_wake ==
+              callbacks[0].poll_many_with_wake;
+    }
+    if (homogeneous) {
+      std::vector<int16_t> returned(callbacks.size());
+      int error = 0;
+      auto active_wake = std::make_shared<ActivePollWake>();
+      active_wake->callbacks = callbacks[0];
+      active_wake->object =
+          callbacks[0].create_poll_wake(callbacks[0].context, &error);
+      if (active_wake->object == 0) {
+        std::lock_guard lock(impl->mutex);
+        for (const auto &description : descriptions)
+          ReleaseDescriptionLocked(impl, description);
+        ReleaseLocked(impl, epoll);
+        SetResult(result, -1, error);
+        return DARWIN_ART_FD_BROKER_OK;
+      }
+      bool retry = false;
+      {
+        std::lock_guard lock(impl->mutex);
+        if (epoll.description->epoll->generation != generation) {
+          retry = true;
+        } else {
+          epoll.description->epoll->active_wakes.push_back(active_wake);
+        }
+      }
+      if (retry) {
+        active_wake->Close();
+        {
+          std::lock_guard lock(impl->mutex);
+          for (const auto &description : descriptions)
+            ReleaseDescriptionLocked(impl, description);
+          ReleaseLocked(impl, epoll);
+        }
+        return darwin_art_fd_broker_epoll_wait(broker, epoll_fd, events,
+                                               capacity, timeout_ms, result);
+      }
+      int woke = 0;
+      const int polled = callbacks[0].poll_many_with_wake(
+          callbacks[0].context, objects.data(), requested.data(),
+          returned.data(), returned.size(), timeout_ms, active_wake->object,
+          &woke, &error);
+      size_t ready = 0;
+      std::vector<int> consumed_one_shot;
+      for (size_t index = 0;
+           polled >= 0 && index < returned.size() && ready < capacity;
+           ++index) {
+        const uint32_t matched =
+            static_cast<uint16_t>(returned[index]) &
+            (active_watches[index].events | 0x0008u | 0x0010u);
+        if (matched != 0) {
+          events[ready++] =
+              DarwinArtFdEpollEvent{matched, active_watches[index].data};
+          if ((active_watches[index].events & kEpollOneShot) != 0)
+            consumed_one_shot.push_back(active_watches[index].registration_fd);
+        }
+      }
+      {
+        std::lock_guard lock(impl->mutex);
+        auto &active_wakes = epoll.description->epoll->active_wakes;
+        active_wakes.erase(
+            std::remove_if(active_wakes.begin(), active_wakes.end(),
+                           [&](const auto &candidate) {
+                             auto shared = candidate.lock();
+                             return !shared || shared == active_wake;
+                           }),
+            active_wakes.end());
+        for (int registration_fd : consumed_one_shot) {
+          auto found = std::find_if(
+              epoll.description->epoll->watches.begin(),
+              epoll.description->epoll->watches.end(), [&](const Watch &watch) {
+                return watch.registration_fd == registration_fd;
+              });
+          if (found != epoll.description->epoll->watches.end())
+            found->enabled = false;
+        }
+        for (const auto &description : descriptions)
+          ReleaseDescriptionLocked(impl, description);
+        ReleaseLocked(impl, epoll);
+      }
+      active_wake->Close();
+      if (polled >= 0 && woke != 0 && ready == 0)
+        return darwin_art_fd_broker_epoll_wait(broker, epoll_fd, events,
+                                               capacity, timeout_ms, result);
+      SetResult(result, polled < 0 ? -1 : static_cast<intptr_t>(ready),
+                polled < 0 ? error : 0);
+      return DARWIN_ART_FD_BROKER_OK;
+    }
+    {
+      std::lock_guard lock(impl->mutex);
+      for (const auto &description : descriptions)
+        ReleaseDescriptionLocked(impl, description);
+      ReleaseLocked(impl, epoll);
+    }
+    return DARWIN_ART_FD_BROKER_UNSUPPORTED;
   }
   size_t ready = 0;
   int error = 0;
   for (const Watch &watch : watches) {
     if (ready == capacity)
       break;
+    if (!watch.enabled)
+      continue;
     auto d = watch.description.lock();
     DarwinArtFdOwnerV1 c{};
     uint64_t object = 0;
@@ -1056,8 +1305,21 @@ darwin_art_fd_broker_epoll_wait(DarwinArtFdBroker *broker, int epoll_fd,
                  ? c.poll(c.context, object, static_cast<int16_t>(watch.events),
                           &revents, &error)
                  : 0;
+    const uint32_t requested_events = watch.events | 0x0008u | 0x0010u;
+    const uint32_t matched =
+        pr < 0 ? 0 : static_cast<uint16_t>(revents) & requested_events;
     {
       std::lock_guard lock(impl->mutex);
+      if (matched != 0 && (watch.events & kEpollOneShot) != 0) {
+        auto found = std::find_if(epoll.description->epoll->watches.begin(),
+                                  epoll.description->epoll->watches.end(),
+                                  [&](const Watch &candidate) {
+                                    return candidate.registration_fd ==
+                                           watch.registration_fd;
+                                  });
+        if (found != epoll.description->epoll->watches.end())
+          found->enabled = false;
+      }
       ReleaseDescriptionLocked(impl, d);
     }
     if (pr < 0) {
@@ -1066,7 +1328,6 @@ darwin_art_fd_broker_epoll_wait(DarwinArtFdBroker *broker, int epoll_fd,
       SetResult(result, -1, error);
       return DARWIN_ART_FD_BROKER_OK;
     }
-    uint32_t matched = static_cast<uint16_t>(revents) & watch.events;
     if (matched)
       events[ready++] = DarwinArtFdEpollEvent{matched, watch.data};
   }

@@ -1,6 +1,7 @@
 package dev.darwinart.simple;
 
 import android.os.Binder;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.app.Activity;
@@ -29,15 +30,19 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Array;
 import java.io.File;
 
 /** Minimal in-process display service used by Choreographer on the host. */
-final class DarwinServiceBridge {
+public final class DarwinServiceBridge {
     private static final int DISPLAY_SCALE =
             "2".equals(System.getenv("DARWIN_ART_WINDOW_SCALE")) ? 2 : 1;
     private static final int DISPLAY_WIDTH = 360 * DISPLAY_SCALE;
     private static final int DISPLAY_HEIGHT = 640 * DISPLAY_SCALE;
     private static final int DISPLAY_DENSITY_DPI = 160 * DISPLAY_SCALE;
+    // android.view.Display.TYPE_INTERNAL is a hidden framework constant. Keep
+    // the platform ABI value here because android.jar intentionally omits it.
+    private static final int DISPLAY_TYPE_INTERNAL = 1;
     // ActivityTaskManager transactions originate outside the app main queue
     // on Android and must cross Choreographer's traversal sync barriers.
     private static final Handler MAIN_HANDLER = Handler.createAsync(Looper.getMainLooper());
@@ -45,6 +50,64 @@ final class DarwinServiceBridge {
             new WeakHashMap<>();
     private static final ArrayList<ActivityRecord> ACTIVITY_STACK = new ArrayList<>();
     private static volatile Activity currentActivity;
+
+    private static final class DebugClickListener implements View.OnClickListener {
+        final View.OnClickListener delegate;
+        final Activity owner;
+
+        DebugClickListener(View.OnClickListener delegate, Activity owner) {
+            this.delegate = delegate;
+            this.owner = owner;
+        }
+
+        @Override
+        public void onClick(View view) {
+            try {
+                Object runnable = delegate.getClass().getField("s").get(delegate);
+                Object presenter = runnable.getClass().getField("s").get(runnable);
+                Object controller = presenter.getClass().getField("w").get(presenter);
+                Object promise = controller.getClass().getMethod("H0").invoke(controller);
+                Object model = presenter.getClass().getField("A").get(presenter);
+                ClassLoader loader = view.getContext().getClassLoader();
+                Class<?> properties = Class.forName("ov5", true, loader);
+                Method getBoolean = model.getClass().getMethod(
+                        "j", Class.forName("iob", true, loader));
+                StringBuilder state = new StringBuilder("first-run click entry native=")
+                        .append(promise.getClass().getMethod("f").invoke(promise));
+                for (String property : new String[] {"e", "f", "g", "l"}) {
+                    state.append('/').append(property).append('=').append(
+                            getBoolean.invoke(model, properties.getField(property).get(null)));
+                }
+                Log.i("DarwinServiceBridge", state.toString());
+            } catch (Throwable error) {
+                Log.w("DarwinServiceBridge", "first-run click entry inspection failed", error);
+            }
+            delegate.onClick(view);
+            try {
+                if ("1".equals(System.getenv(
+                        "DARWIN_ART_DEBUG_FORCE_REFLECTIVE_CLICK"))) {
+                    Object runnable = delegate.getClass().getField("s").get(delegate);
+                    Object presenter = runnable.getClass().getField("s").get(runnable);
+                    Object controller = presenter.getClass().getField("w").get(presenter);
+                    Object activity = controller.getClass().getMethod("L0")
+                            .invoke(controller);
+                    Object advanced = activity.getClass().getMethod(
+                            "l2", boolean.class).invoke(activity, Boolean.TRUE);
+                    Object sent = activity.getClass().getMethod("j2").invoke(activity);
+                    Log.i("DarwinServiceBridge", "first-run reflective l2="
+                            + advanced + " j2=" + sent);
+                }
+                Object pager = owner.getClass().getField("X0").get(owner);
+                Log.i("DarwinServiceBridge", "first-run click returned page="
+                        + pager.getClass().getField("u").getInt(pager)
+                        + " animator="
+                        + (owner.getClass().getField("Y0").get(owner) != null)
+                        + " finishing=" + owner.isFinishing());
+            } catch (Throwable error) {
+                Log.w("DarwinServiceBridge", "first-run click inspection failed", error);
+            }
+        }
+    }
 
     private static final class ActivityRecord {
         final Activity activity;
@@ -79,10 +142,56 @@ final class DarwinServiceBridge {
 
     /** Installs the Activity already launched by the native process bootstrap. */
     static void installInitialActivity(Activity activity) {
+        if (System.getenv("DARWIN_ART_DEBUG_COMMAND_LINE") != null) {
+            try {
+                File protectedFile = new File("/data/local/chrome-command-line");
+                File debugFile = new File("/data/local/tmp/chrome-command-line");
+                Class<?> commandLine = Class.forName(
+                        "org.chromium.base.CommandLine", true,
+                        activity.getClassLoader());
+                boolean loaded = ((Boolean) commandLine
+                        .getMethod("wasFlagsLoadedFromFile").invoke(null)).booleanValue();
+                Log.i("DarwinServiceBridge", "command line protected="
+                        + protectedFile.exists() + "/" + protectedFile.canRead()
+                        + "/" + protectedFile.length() + " debug="
+                        + debugFile.exists() + "/" + debugFile.canRead()
+                        + "/" + debugFile.length() + " loaded=" + loaded);
+            } catch (Throwable error) {
+                Log.e("DarwinServiceBridge", "command-line diagnostic failed", error);
+            }
+        }
+        if (System.getenv("DARWIN_ART_DEBUG_SECURITY") != null) {
+            try {
+                String algorithm = javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm();
+                javax.net.ssl.TrustManagerFactory factory =
+                        javax.net.ssl.TrustManagerFactory.getInstance(algorithm);
+                factory.init((java.security.KeyStore) null);
+                StringBuilder managers = new StringBuilder();
+                for (javax.net.ssl.TrustManager manager : factory.getTrustManagers()) {
+                    if (managers.length() != 0) managers.append(',');
+                    managers.append(manager.getClass().getName());
+                }
+                Log.i("DarwinServiceBridge", "security default=" + algorithm
+                        + " provider=" + factory.getProvider().getName()
+                        + " managers=" + managers);
+            } catch (Throwable error) {
+                Log.e("DarwinServiceBridge", "security provider diagnostic failed", error);
+            }
+        }
         currentActivity = activity;
         ACTIVITY_STACK.clear();
         ACTIVITY_STACK.add(new ActivityRecord(activity, activityToken(activity), -1));
         scheduleHostSurfaceScans(activity, activity.getWindow().getDecorView(), 300);
+    }
+
+    /** ContextImpl-style entry into the process ActivityTaskManager service. */
+    public static void startActivityFromContext(Intent intent, Bundle options) {
+        if (intent == null) throw new NullPointerException("intent");
+        Intent launchIntent = new Intent(intent);
+        Log.i("DarwinServiceBridge", "context startActivity action="
+                + launchIntent.getAction() + " component="
+                + launchIntent.getComponent());
+        MAIN_HANDLER.post(() -> launchLocalActivity(launchIntent, -1));
     }
 
     private static void scheduleHostSurfaceScans(
@@ -90,9 +199,369 @@ final class DarwinServiceBridge {
         if (remaining <= 0) return;
         MAIN_HANDLER.postDelayed(() -> {
             if (currentActivity != owner) return;
+            if (remaining == 300) {
+                // Activity.onResume() and its Fragment transactions may add
+                // content after the launch-time traversal. On Android,
+                // Choreographer consumes the resulting ViewRootImpl traversal
+                // request on the next frame. The detached compositor has no
+                // system vsync source, so consume that first request here on
+                // the main Looper before publishing embedded surfaces.
+                try {
+                    root.requestLayout();
+                    performHostTraversal(root);
+                } catch (ReflectiveOperationException error) {
+                    Log.w("DarwinServiceBridge",
+                            "post-resume View traversal failed", error);
+                }
+            }
             activateHostSurfaces(root);
             scheduleHostSurfaceScans(owner, root, remaining - 1);
         }, 16L);
+    }
+
+    private static void scheduleViewTreeDump(Activity owner, View root) {
+        if (!"1".equals(System.getenv("DARWIN_ART_DEBUG_VIEW_TREE"))) return;
+        scheduleViewTreeDump(owner, root, 8);
+        scheduleFirstRunStatePoll(owner, 400, false, -1);
+    }
+
+    private static void scheduleFirstRunStatePoll(
+            Activity owner, int remaining, boolean previousAnimator, int previousPage) {
+        if (remaining <= 0 || currentActivity != owner) return;
+        MAIN_HANDLER.postDelayed(() -> {
+            if (currentActivity != owner) return;
+            try {
+                Object pager = owner.getClass().getField("X0").get(owner);
+                int page = pager.getClass().getField("u").getInt(pager);
+                boolean animator = owner.getClass().getField("Y0").get(owner) != null;
+                if (animator != previousAnimator || page != previousPage) {
+                    Log.i("DarwinServiceBridge", "first-run pulse page=" + page
+                            + " animator=" + animator);
+                }
+                scheduleFirstRunStatePoll(owner, remaining - 1, animator, page);
+            } catch (Throwable ignored) {
+            }
+        }, 16L);
+    }
+
+    private static void scheduleViewTreeDump(Activity owner, View root, int remaining) {
+        if (remaining <= 0) return;
+        MAIN_HANDLER.postDelayed(() -> {
+            if (currentActivity != owner) return;
+            StringBuilder tree = new StringBuilder("Android view tree:\n");
+            appendViewTree(root, tree, 0, new int[] {0});
+            Log.i("DarwinServiceBridge", tree.toString());
+            try {
+                Object nativePromise = owner.getClass().getField("N0").get(owner);
+                byte nativeState = nativePromise.getClass().getField("a")
+                        .getByte(nativePromise);
+                Object childSupplier = owner.getClass().getField("I0").get(owner);
+                Object childValue = childSupplier == null ? null
+                        : childSupplier.getClass().getField("r").get(childSupplier);
+                Object childPromise = childValue == null ? null
+                        : childValue.getClass().getField("r").get(childValue);
+                byte childState = childPromise == null ? -1
+                        : childPromise.getClass().getField("a").getByte(childPromise);
+                Object policyListener = owner.getClass().getField("G0").get(owner);
+                Object policySupplier = policyListener.getClass().getField("s")
+                        .get(policyListener);
+                Object policyPromise = policySupplier.getClass().getField("r")
+                        .get(policySupplier);
+                byte policyState = policyPromise.getClass().getField("a")
+                        .getByte(policyPromise);
+                Class<?> provider = Class.forName(
+                        "org.chromium.components.signin.AccountManagerFacadeProvider",
+                        true, owner.getClassLoader());
+                Object facade = provider.getMethod("getInstance").invoke(null);
+                Object accountsPromise = facade.getClass().getField("f").get(facade);
+                byte accountsState = accountsPromise.getClass().getField("a")
+                        .getByte(accountsPromise);
+                Object accountSource = facade.getClass().getField("c").get(facade);
+                Object accountRestrictions = facade.getClass().getField("e").get(facade);
+                Class<?> postTaskClass = Class.forName(
+                        "org.chromium.base.task.PostTask", true,
+                        owner.getClassLoader());
+                Object postTaskPool = postTaskClass.getField("e").get(null);
+                java.util.concurrent.ThreadPoolExecutor executor =
+                        (java.util.concurrent.ThreadPoolExecutor) postTaskPool;
+                Object[] taskRunners = (Object[]) postTaskClass.getField("g").get(null);
+                Object uiTaskRunner = taskRunners[7];
+                Field preNativeTasks = uiTaskRunner.getClass().getSuperclass()
+                        .getField("y");
+                Object pendingUiTasks = preNativeTasks.get(uiTaskRunner);
+                Object viewRoot = View.class.getDeclaredMethod("getViewRootImpl")
+                        .invoke(root);
+                Field traversalScheduled = viewRoot.getClass().getDeclaredField(
+                        "mTraversalScheduled");
+                Field traversalBarrier = viewRoot.getClass().getDeclaredField(
+                        "mTraversalBarrier");
+                traversalScheduled.setAccessible(true);
+                traversalBarrier.setAccessible(true);
+                Object queue = Looper.class.getMethod("myQueue").invoke(null);
+                Field messages = queue.getClass().getDeclaredField("mMessages");
+                messages.setAccessible(true);
+                Object message = messages.get(queue);
+                Field target = Class.forName("android.os.Message")
+                        .getDeclaredField("target");
+                Field next = Class.forName("android.os.Message")
+                        .getDeclaredField("next");
+                Field when = Class.forName("android.os.Message")
+                        .getDeclaredField("when");
+                target.setAccessible(true);
+                next.setAccessible(true);
+                when.setAccessible(true);
+                StringBuilder queueHead = new StringBuilder();
+                long queueNow = android.os.SystemClock.uptimeMillis();
+                for (int index = 0; message != null && index < 8; ++index) {
+                    Object messageTarget = target.get(message);
+                    queueHead.append(index == 0 ? "" : ",").append(
+                            messageTarget == null ? "barrier" : "message")
+                            .append('@').append(when.getLong(message) - queueNow)
+                            .append(message.getClass().getMethod("isAsynchronous")
+                                    .invoke(message).equals(Boolean.TRUE) ? 'a' : 's');
+                    message = next.get(message);
+                }
+                Log.i("DarwinServiceBridge", "first-run gates native=" + nativeState
+                        + " accounts=" + accountsState + " child=" + childState
+                        + " policy=" + policyState + " flow="
+                        + (owner.getClass().getField("P0").get(owner) != null)
+                        + " configured=" + owner.getClass().getField("M0")
+                                .getBoolean(owner)
+                        + " page=" + owner.getClass().getField("X0").get(owner)
+                                .getClass().getField("u").getInt(
+                                        owner.getClass().getField("X0").get(owner))
+                        + " animator="
+                        + (owner.getClass().getField("Y0").get(owner) != null)
+                        + " pages="
+                        + ((java.util.ArrayList) owner.getClass().getField("U0")
+                                .get(owner)).size()
+                        + " launchExtra=" + owner.getIntent().hasExtra(
+                                "Extra.FreChromeLaunchIntent")
+                        + " launchValue=" + owner.getIntent().getParcelableExtra(
+                                "Extra.FreChromeLaunchIntent")
+                        + " template=" + owner.getClass().getField("S0")
+                                .getBoolean(owner) + " accountSource="
+                        + ((java.util.concurrent.atomic.AtomicReference) accountSource).get()
+                        + " restrictions="
+                        + ((java.util.concurrent.atomic.AtomicReference) accountRestrictions).get()
+                        + " postTaskPool=" + executor.getPoolSize() + '/'
+                        + executor.getActiveCount() + " queued="
+                        + executor.getQueue().size() + " completed="
+                        + executor.getCompletedTaskCount() + " uiTasks="
+                        + (pendingUiTasks == null ? -1
+                                : ((java.util.ArrayDeque) pendingUiTasks).size())
+                        + " traversal="
+                        + traversalScheduled.getBoolean(viewRoot) + '/'
+                        + traversalBarrier.getInt(viewRoot) + " queue=" + queueHead);
+            } catch (Throwable error) {
+                Log.w("DarwinServiceBridge", "first-run gate inspection failed", error);
+            }
+            scheduleViewTreeDump(owner, root, remaining - 1);
+        }, 750L);
+    }
+
+    private static void appendViewTree(
+            View view, StringBuilder tree, int depth, int[] count) {
+        if (view == null || count[0]++ >= 256) return;
+        for (int index = 0; index < depth; ++index) tree.append("  ");
+        tree.append(view.getClass().getName())
+                .append(" id=0x").append(Integer.toHexString(view.getId()))
+                .append(" visibility=").append(view.getVisibility())
+                .append(" bounds=").append(view.getLeft()).append(',')
+                .append(view.getTop()).append('-').append(view.getRight())
+                .append(',').append(view.getBottom())
+                .append(" measured=").append(view.getMeasuredWidth()).append('x')
+                .append(view.getMeasuredHeight())
+                .append(" alpha=").append(view.getAlpha())
+                .append(" attached=").append(view.isAttachedToWindow())
+                .append(" laidOut=").append(view.isLaidOut());
+        if (view.isClickable()) {
+            try {
+                Field listenerInfoField = View.class.getDeclaredField("mListenerInfo");
+                listenerInfoField.setAccessible(true);
+                Object listenerInfo = listenerInfoField.get(view);
+                Field clickField = listenerInfo == null ? null
+                        : listenerInfo.getClass().getDeclaredField("mOnClickListener");
+                if (clickField != null) clickField.setAccessible(true);
+                Object listener = clickField == null ? null : clickField.get(listenerInfo);
+                tree.append(" clickListener=").append(
+                        listener == null ? "null" : listener.getClass().getName());
+                if (listener != null && "nv5".equals(listener.getClass().getSimpleName())) {
+                    Field listenerVariant = listener.getClass().getField("r");
+                    Field runnableField = listener.getClass().getField("s");
+                    Object runnable = runnableField.get(listener);
+                    tree.append('[').append(listenerVariant.getByte(listener));
+                    if (runnable != null) {
+                        Field runnableVariant = runnable.getClass().getField("r");
+                        Field presenterField = runnable.getClass().getField("s");
+                        Object presenter = presenterField.get(runnable);
+                        tree.append("/run=").append(runnableVariant.getByte(runnable));
+                        if (presenter != null) {
+                            Object controller = presenter.getClass().getField("w")
+                                    .get(presenter);
+                            Object fragmentActivity = controller == null ? null
+                                    : controller.getClass().getMethod("L0")
+                                            .invoke(controller);
+                            tree.append("/controller=").append(controller == null
+                                    ? "null" : controller.getClass().getName())
+                                    .append("/activity=").append(fragmentActivity == null
+                                            ? "null"
+                                            : fragmentActivity.getClass().getName());
+                            if (fragmentActivity instanceof Activity) {
+                                view.setOnClickListener(new DebugClickListener(
+                                        (View.OnClickListener) listener,
+                                        (Activity) fragmentActivity));
+                            }
+                            Object model = presenter.getClass().getField("A").get(presenter);
+                            Class<?> properties = Class.forName("ov5", true,
+                                    view.getContext().getClassLoader());
+                            java.lang.reflect.Method getBoolean = model.getClass()
+                                    .getMethod("j", Class.forName("iob", true,
+                                            view.getContext().getClassLoader()));
+                            for (String property : new String[] {"e", "f", "g", "l"}) {
+                                tree.append('/').append(property).append('=')
+                                        .append(getBoolean.invoke(model,
+                                                properties.getField(property).get(null)));
+                            }
+                        }
+                    }
+                    tree.append(']');
+                }
+            } catch (ReflectiveOperationException ignored) {
+                tree.append(" clickListener=<unavailable>");
+            }
+        }
+        if (view instanceof android.widget.TextView) {
+            tree.append(" text=")
+                    .append(((android.widget.TextView) view).getText());
+        }
+        if ("x64".equals(view.getClass().getSimpleName())) {
+            for (String name : new String[] {"r", "s", "t", "u"}) {
+                try {
+                    Field field = view.getClass().getDeclaredField(name);
+                    field.setAccessible(true);
+                    android.util.TypedValue value =
+                            (android.util.TypedValue) field.get(view);
+                    tree.append(' ').append(name).append(".type=")
+                            .append(value == null ? -1 : value.type)
+                            .append(".data=0x")
+                            .append(value == null ? "null"
+                                    : Integer.toHexString(value.data));
+                } catch (ReflectiveOperationException ignored) {
+                    tree.append(' ').append(name).append("=<unavailable>");
+                }
+            }
+        }
+        tree.append('\n');
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); ++index) {
+                appendViewTree(group.getChildAt(index), tree, depth + 1, count);
+            }
+        }
+    }
+
+    /** Runs the ViewRoot traversal that SurfaceFlinger/Choreographer schedule on Android. */
+    private static void performHostTraversal(View decor)
+            throws ReflectiveOperationException {
+        Method getViewRootImpl = View.class.getDeclaredMethod("getViewRootImpl");
+        getViewRootImpl.setAccessible(true);
+        Object viewRoot = getViewRootImpl.invoke(decor);
+        if (viewRoot == null) {
+            Object global = Class.forName("android.view.WindowManagerGlobal")
+                    .getMethod("getInstance").invoke(null);
+            Field viewsField = global.getClass().getDeclaredField("mViews");
+            Field rootsField = global.getClass().getDeclaredField("mRoots");
+            viewsField.setAccessible(true);
+            rootsField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            ArrayList<View> views = (ArrayList<View>) viewsField.get(global);
+            @SuppressWarnings("unchecked")
+            ArrayList<Object> roots = (ArrayList<Object>) rootsField.get(global);
+            int index = views.indexOf(decor);
+            if (index >= 0 && index < roots.size()) viewRoot = roots.get(index);
+        }
+        if (viewRoot != null) {
+            // requestLayout()/scheduleTraversals() installs a MessageQueue
+            // synchronization barrier. Always enter through doTraversal(): it
+            // clears mTraversalScheduled and removes that barrier before
+            // performTraversals(), exactly as Android's Choreographer callback
+            // does. Calling performTraversals() directly leaves ordinary app
+            // Handler callbacks blocked behind a permanent barrier.
+            Method traversal = viewRoot.getClass().getDeclaredMethod("doTraversal");
+            traversal.setAccessible(true);
+            traversal.invoke(viewRoot);
+            repairZeroSizedLayouts(decor);
+            return;
+        }
+        // The detached WindowManager currently has no system_server-owned
+        // ViewRoot. Preserve Android's exact measure contract so arbitrary
+        // nested layouts still receive a real traversal before HWUI records.
+        int widthSpec = View.MeasureSpec.makeMeasureSpec(
+                DISPLAY_WIDTH, View.MeasureSpec.EXACTLY);
+        int heightSpec = View.MeasureSpec.makeMeasureSpec(
+                DISPLAY_HEIGHT, View.MeasureSpec.EXACTLY);
+        decor.measure(widthSpec, heightSpec);
+        decor.layout(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        repairZeroSizedLayouts(decor);
+        Log.i("DarwinServiceBridge", "performed detached View measure/layout traversal");
+    }
+
+    private static void repairZeroSizedLayouts(View view) {
+        if (!(view instanceof ViewGroup)) return;
+        ViewGroup parent = (ViewGroup) view;
+        for (int index = 0; index < parent.getChildCount(); ++index) {
+            View child = parent.getChildAt(index);
+            // A zero-sized SurfaceView is a real Android lifecycle state: its
+            // BufferQueue must not be created until ViewRoot lays it out.
+            // Measuring it against the parent here fabricates a fullscreen
+            // compositor layer (and can activate Chromium's spare tab surface
+            // ahead of the visible one).
+            if (!(child instanceof SurfaceView)
+                    && child.getVisibility() == View.VISIBLE
+                    && child.getMeasuredWidth() == 0
+                    && child.getMeasuredHeight() == 0
+                    && parent.getMeasuredWidth() > 0
+                    && parent.getMeasuredHeight() > 0) {
+                int widthSpec = View.MeasureSpec.makeMeasureSpec(
+                        parent.getMeasuredWidth(), View.MeasureSpec.AT_MOST);
+                int heightSpec = View.MeasureSpec.makeMeasureSpec(
+                        parent.getMeasuredHeight(), View.MeasureSpec.AT_MOST);
+                try {
+                    child.forceLayout();
+                    child.measure(widthSpec, heightSpec);
+                } catch (Throwable error) {
+                    Log.w("DarwinServiceBridge", "zero-sized View measure failed for "
+                            + child.getClass().getName() + " with parent "
+                            + parent.getMeasuredWidth() + "x"
+                            + parent.getMeasuredHeight(), error);
+                }
+                if (child.getMeasuredWidth() > 0 && child.getMeasuredHeight() > 0) {
+                    int centerX = child.getLeft() == child.getRight()
+                            ? child.getLeft() : parent.getMeasuredWidth() / 2;
+                    int centerY = child.getTop() == child.getBottom()
+                            ? child.getTop() : parent.getMeasuredHeight() / 2;
+                    int left = Math.max(0, Math.min(
+                            parent.getMeasuredWidth() - child.getMeasuredWidth(),
+                            centerX - child.getMeasuredWidth() / 2));
+                    int top = Math.max(0, Math.min(
+                            parent.getMeasuredHeight() - child.getMeasuredHeight(),
+                            centerY - child.getMeasuredHeight() / 2));
+                    child.layout(left, top, left + child.getMeasuredWidth(),
+                            top + child.getMeasuredHeight());
+                    Log.i("DarwinServiceBridge", "repaired zero-sized View layout "
+                            + child.getClass().getName() + " to "
+                            + child.getMeasuredWidth() + "x"
+                            + child.getMeasuredHeight());
+                } else if ("1".equals(System.getenv("DARWIN_ART_DEBUG_VIEW_TREE"))) {
+                    Log.i("DarwinServiceBridge", "zero-sized View remained after AT_MOST measure "
+                            + child.getClass().getName() + " parent="
+                            + parent.getMeasuredWidth() + "x"
+                            + parent.getMeasuredHeight());
+                }
+            }
+            repairZeroSizedLayouts(child);
+        }
     }
 
     /**
@@ -166,10 +635,12 @@ final class DarwinServiceBridge {
     private static void takeOverHostSurfaceLifecycle(SurfaceView surfaceView) {
         try {
             Field haveFrame = SurfaceView.class.getDeclaredField("mHaveFrame");
+            Field drawFinished = SurfaceView.class.getDeclaredField("mDrawFinished");
             Field drawListener = SurfaceView.class.getDeclaredField("mDrawListener");
             Field scrollListener =
                     SurfaceView.class.getDeclaredField("mScrollChangedListener");
             haveFrame.setAccessible(true);
+            drawFinished.setAccessible(true);
             drawListener.setAccessible(true);
             scrollListener.setAccessible(true);
             android.view.ViewTreeObserver observer = surfaceView.getViewTreeObserver();
@@ -182,6 +653,20 @@ final class DarwinServiceBridge {
             // Every framework updateSurface() path returns before touching
             // SurfaceControl while the detached compositor owns the producer.
             haveFrame.setBoolean(surfaceView, false);
+            // updateSurface() normally reaches performDrawFinished() after
+            // SurfaceFlinger commits the child layer. The Darwin compositor
+            // has already published that layer before callbacks are delivered,
+            // so complete the same framework state transition here. Without
+            // it SurfaceView never records Canvas.punchHole(), causing the
+            // parent HWUI background to cover the child surface (or forcing a
+            // child-last workaround that incorrectly covers overlay controls).
+            if (!drawFinished.getBoolean(surfaceView)) {
+                drawFinished.setBoolean(surfaceView, true);
+                if (surfaceView.getParent() != null) {
+                    surfaceView.getParent().requestTransparentRegion(surfaceView);
+                }
+                surfaceView.invalidate();
+            }
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException(
                     "could not acquire detached SurfaceView lifecycle", error);
@@ -192,7 +677,9 @@ final class DarwinServiceBridge {
     static void activateCurrentHostSurfaces() {
         Activity activity = currentActivity;
         if (activity != null) {
-            activateHostSurfaces(activity.getWindow().getDecorView());
+            View decor = activity.getWindow().getDecorView();
+            repairZeroSizedLayouts(decor);
+            activateHostSurfaces(decor);
         }
     }
 
@@ -274,6 +761,68 @@ final class DarwinServiceBridge {
                     new ActivityManagerHandler());
             attach(activityManagerBinder, activityManagerService, "android.app.IActivityManager");
 
+            Binder userBinder = new Binder();
+            Class<?> userInterface = Class.forName("android.os.IUserManager");
+            Object userService = Proxy.newProxyInstance(
+                    userInterface.getClassLoader(), new Class<?>[] {userInterface},
+                    new UserManagerHandler());
+            attach(userBinder, userService, "android.os.IUserManager");
+
+            Binder devicePolicyBinder = new DevicePolicyServiceBinder();
+
+            Binder usageStatsBinder = new Binder();
+            Class<?> usageStatsInterface = Class.forName(
+                    "android.app.usage.IUsageStatsManager");
+            Object usageStatsService = Proxy.newProxyInstance(
+                    usageStatsInterface.getClassLoader(),
+                    new Class<?>[] {usageStatsInterface},
+                    (proxy, method, args) -> {
+                        if ("asBinder".equals(method.getName())) return usageStatsBinder;
+                        if ("getAppStandbyBucket".equals(method.getName())) {
+                            return Integer.valueOf(
+                                    android.app.usage.UsageStatsManager.STANDBY_BUCKET_ACTIVE);
+                        }
+                        if ("isAppStandbyEnabled".equals(method.getName())) {
+                            return Boolean.TRUE;
+                        }
+                        if ("isAppInactive".equals(method.getName())) {
+                            return Boolean.FALSE;
+                        }
+                        return defaultValue(method.getReturnType());
+                    });
+            attach(usageStatsBinder, usageStatsService,
+                    "android.app.usage.IUsageStatsManager");
+
+            Binder roleBinder = new Binder();
+            Class<?> roleInterface = Class.forName("android.app.role.IRoleManager");
+            Object roleService = Proxy.newProxyInstance(
+                    roleInterface.getClassLoader(), new Class<?>[] {roleInterface},
+                    (proxy, method, args) -> {
+                        String name = method.getName();
+                        if ("asBinder".equals(name)) return roleBinder;
+                        if ("isRoleAvailableAsUser".equals(name)
+                                || "isRoleVisibleAsUser".equals(name)
+                                || "isApplicationVisibleForRoleAsUser".equals(name)) {
+                            return Boolean.TRUE;
+                        }
+                        if ("isRoleHeldAsUser".equals(name)
+                                || "isBypassingRoleQualification".equals(name)) {
+                            return Boolean.FALSE;
+                        }
+                        if ("getRoleHoldersAsUser".equals(name)
+                                || "getHeldRolesFromControllerAsUser".equals(name)
+                                || "getDefaultHoldersForTestAsUser".equals(name)) {
+                            return new ArrayList<>();
+                        }
+                        if ("setBrowserRoleHolder".equals(name)
+                                || "addRoleHolderFromControllerAsUser".equals(name)
+                                || "removeRoleHolderFromControllerAsUser".equals(name)) {
+                            return Boolean.TRUE;
+                        }
+                        return defaultValue(method.getReturnType());
+                    });
+            attach(roleBinder, roleService, "android.app.role.IRoleManager");
+
             // ViewRootImpl construction also obtains InputMethodManager.  A
             // real app window receives this binder from system_server; the
             // host has no server, so provide the same typed interface with
@@ -284,9 +833,35 @@ final class DarwinServiceBridge {
             Object inputMethodService = Proxy.newProxyInstance(
                     inputMethodInterface.getClassLoader(),
                     new Class<?>[] {inputMethodInterface},
-                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+                    (proxy, method, args) -> {
+                        String name = method.getName();
+                        if ("asBinder".equals(name)) return inputMethodBinder;
+                        if ("getInputMethodList".equals(name)
+                                || "getEnabledInputMethodList".equals(name)) {
+                            return emptyFrameworkContainer(method.getReturnType(), "empty");
+                        }
+                        return defaultValue(method.getReturnType());
+                    });
             attach(inputMethodBinder, inputMethodService,
                     "com.android.internal.view.IInputMethodManager");
+
+            // Editable Chromium content obtains TextServicesManager before it
+            // creates the renderer-side InputConnection. Android always
+            // publishes this system_server service even when spell checking
+            // is disabled. Expose that same disabled-but-present contract:
+            // isSpellCheckerEnabled() is false and every optional object is
+            // null, so TextServicesManager.newSpellCheckerSession() returns
+            // null normally instead of the application dereferencing a null
+            // manager returned by Context.getSystemService().
+            Binder textServicesBinder = new Binder();
+            Class<?> textServicesInterface = Class.forName(
+                    "com.android.internal.textservice.ITextServicesManager");
+            Object textServicesService = Proxy.newProxyInstance(
+                    textServicesInterface.getClassLoader(),
+                    new Class<?>[] {textServicesInterface},
+                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+            attach(textServicesBinder, textServicesService,
+                    "com.android.internal.textservice.ITextServicesManager");
 
             // ViewGroup's native MotionEvent path creates a VelocityTracker.
             // Android obtains its device metadata through the input service;
@@ -316,6 +891,64 @@ final class DarwinServiceBridge {
                         return defaultValue(method.getReturnType());
                     });
             attach(inputBinder, inputService, "android.hardware.input.IInputManager");
+
+            // UiModeManager is a framework facade over IUiModeManager.  Keep
+            // Chromium on Android's normal accessibility/theme path and
+            // describe the Darwin desktop as a normal, light-mode display
+            // with the platform's default contrast.
+            Binder uiModeBinder = new Binder();
+            Class<?> uiModeInterface = Class.forName("android.app.IUiModeManager");
+            Object uiModeService = Proxy.newProxyInstance(
+                    uiModeInterface.getClassLoader(),
+                    new Class<?>[] {uiModeInterface},
+                    (proxy, method, args) -> {
+                        String name = method.getName();
+                        if ("asBinder".equals(name)) return uiModeBinder;
+                        if ("getCurrentModeType".equals(name)) {
+                            return Integer.valueOf(Configuration.UI_MODE_TYPE_NORMAL);
+                        }
+                        if ("getNightMode".equals(name)) {
+                            return Integer.valueOf(android.app.UiModeManager.MODE_NIGHT_NO);
+                        }
+                        if ("getProjectingPackages".equals(name)) {
+                            return new ArrayList<String>();
+                        }
+                        if ("getContrast".equals(name)) return Float.valueOf(0.0f);
+                        return defaultValue(method.getReturnType());
+                    });
+            attach(uiModeBinder, uiModeService, "android.app.IUiModeManager");
+
+            // Android's modular Bluetooth framework obtains its manager
+            // binder through BluetoothFrameworkInitializer rather than the
+            // ordinary SystemServiceRegistry. Publish an adapter in the OFF
+            // state: callers receive a real BluetoothAdapter object while no
+            // host radio capability is fabricated.
+            Binder bluetoothManagerBinder = new Binder();
+            Class<?> bluetoothManagerInterface =
+                    Class.forName("android.bluetooth.IBluetoothManager");
+            Object bluetoothManagerService = Proxy.newProxyInstance(
+                    bluetoothManagerInterface.getClassLoader(),
+                    new Class<?>[] {bluetoothManagerInterface},
+                    (proxy, method, args) -> {
+                        String name = method.getName();
+                        if ("asBinder".equals(name)) return bluetoothManagerBinder;
+                        if ("getState".equals(name)) return Integer.valueOf(10);
+                        return defaultValue(method.getReturnType());
+                    });
+            attach(bluetoothManagerBinder, bluetoothManagerService,
+                    "android.bluetooth.IBluetoothManager");
+            Class<?> serviceManagerType = Class.forName(
+                    "android.os.BluetoothServiceManager");
+            Object bluetoothServiceManager =
+                    serviceManagerType.getDeclaredConstructor().newInstance();
+            Class<?> initializer = Class.forName(
+                    "android.bluetooth.BluetoothFrameworkInitializer");
+            Method getBluetoothServiceManager = initializer.getMethod(
+                    "getBluetoothServiceManager");
+            if (getBluetoothServiceManager.invoke(null) == null) {
+                initializer.getMethod("setBluetoothServiceManager", serviceManagerType)
+                        .invoke(null, bluetoothServiceManager);
+            }
 
             Binder windowBinder = new Binder();
             Class<?> windowInterface = Class.forName("android.view.IWindowManager");
@@ -368,7 +1001,17 @@ final class DarwinServiceBridge {
             Object notificationService = Proxy.newProxyInstance(
                     notificationInterface.getClassLoader(),
                     new Class<?>[] {notificationInterface},
-                    (proxy, method, args) -> defaultValue(method.getReturnType()));
+                    (proxy, method, args) -> {
+                        if ("asBinder".equals(method.getName())) {
+                            return notificationBinder;
+                        }
+                        if ("android.content.pm.ParceledListSlice".equals(
+                                method.getReturnType().getName())) {
+                            return emptyFrameworkContainer(
+                                    method.getReturnType(), "emptyList");
+                        }
+                        return defaultValue(method.getReturnType());
+                    });
             attach(notificationBinder, notificationService,
                     "android.app.INotificationManager");
 
@@ -402,6 +1045,69 @@ final class DarwinServiceBridge {
                     new Class<?>[] {clipboardInterface},
                     Proxy.getInvocationHandler(activityManagerService));
             attach(clipboardBinder, clipboardService, "android.content.IClipboard");
+
+            Binder uriGrantsBinder = new Binder();
+            Class<?> uriGrantsInterface = Class.forName(
+                    "android.app.IUriGrantsManager");
+            Object uriGrantsService = Proxy.newProxyInstance(
+                    uriGrantsInterface.getClassLoader(),
+                    new Class<?>[] {uriGrantsInterface},
+                    Proxy.getInvocationHandler(activityManagerService));
+            attach(uriGrantsBinder, uriGrantsService,
+                    "android.app.IUriGrantsManager");
+
+            // AccountManagerFacade is one of Chrome's first-run readiness
+            // gates. Keep the framework AccountManager/IAccountManager Binder
+            // contract intact and publish an empty physical-user account set;
+            // returning a null/missing service leaves Chromium's account
+            // Promise pending forever.
+            Binder accountBinder = new Binder();
+            Class<?> accountInterface = Class.forName(
+                    "android.accounts.IAccountManager");
+            Object accountService = Proxy.newProxyInstance(
+                    accountInterface.getClassLoader(),
+                    new Class<?>[] {accountInterface},
+                    (proxy, method, args) -> {
+                        String name = method.getName();
+                        Log.i("DarwinServiceBridge", "IAccountManager " + name);
+                        if ("asBinder".equals(name)) return accountBinder;
+                        if ("getAuthenticatorTypes".equals(name)) {
+                            return new android.accounts.AuthenticatorDescription[0];
+                        }
+                        if ("getAccountsForPackage".equals(name)
+                                || "getAccountsByTypeForPackage".equals(name)
+                                || "getAccountsAsUser".equals(name)) {
+                            return new android.accounts.Account[0];
+                        }
+                        if ("getPackagesAndVisibilityForAccount".equals(name)
+                                || "getAccountsAndVisibilityForPackage".equals(name)) {
+                            return new java.util.HashMap<>();
+                        }
+                        if (args != null && args.length > 0 && args[0] != null) {
+                            Bundle result = new Bundle();
+                            if ("getAccountsByFeatures".equals(name)) {
+                                result.putParcelableArray(
+                                        android.accounts.AccountManager.KEY_ACCOUNTS,
+                                        new android.accounts.Account[0]);
+                            } else if ("hasFeatures".equals(name)) {
+                                result.putBoolean(
+                                        android.accounts.AccountManager.KEY_BOOLEAN_RESULT,
+                                        false);
+                            }
+                            try {
+                                Method onResult = args[0].getClass().getMethod(
+                                        "onResult", Bundle.class);
+                                onResult.setAccessible(true);
+                                onResult.invoke(args[0], result);
+                                return null;
+                            } catch (NoSuchMethodException ignored) {
+                                // Synchronous IAccountManager calls continue
+                                // through the typed defaults below.
+                            }
+                        }
+                        return defaultValue(method.getReturnType());
+                    });
+            attach(accountBinder, accountService, "android.accounts.IAccountManager");
 
             // Environment.UserEnvironment obtains shared-storage roots from
             // the system_server mount service. Keep that Android contract and
@@ -453,9 +1159,23 @@ final class DarwinServiceBridge {
                     metadataClass, serviceClass, activityBinder);
             Object activityManagerServiceValue = serviceValue(
                     metadataClass, serviceClass, activityManagerBinder);
+            Object userServiceValue = serviceValue(
+                    metadataClass, serviceClass, userBinder);
+            Object devicePolicyServiceValue = serviceValue(
+                    metadataClass, serviceClass, devicePolicyBinder);
+            Object usageStatsServiceValue = serviceValue(
+                    metadataClass, serviceClass, usageStatsBinder);
+            Object roleServiceValue = serviceValue(
+                    metadataClass, serviceClass, roleBinder);
             Object inputMethodServiceValue = serviceValue(
                     metadataClass, serviceClass, inputMethodBinder);
+            Object textServicesServiceValue = serviceValue(
+                    metadataClass, serviceClass, textServicesBinder);
             Object inputServiceValue = serviceValue(metadataClass, serviceClass, inputBinder);
+            Object uiModeServiceValue = serviceValue(
+                    metadataClass, serviceClass, uiModeBinder);
+            Object bluetoothManagerServiceValue = serviceValue(
+                    metadataClass, serviceClass, bluetoothManagerBinder);
             Object windowServiceValue = serviceValue(
                     metadataClass, serviceClass, windowBinder);
             Object accessibilityServiceValue = serviceValue(
@@ -474,6 +1194,10 @@ final class DarwinServiceBridge {
                     metadataClass, serviceClass, searchBinder);
             Object clipboardServiceValue = serviceValue(
                     metadataClass, serviceClass, clipboardBinder);
+            Object uriGrantsServiceValue = serviceValue(
+                    metadataClass, serviceClass, uriGrantsBinder);
+            Object accountServiceValue = serviceValue(
+                    metadataClass, serviceClass, accountBinder);
             Object storageServiceValue = serviceValue(
                     metadataClass, serviceClass, storageBinder);
             Object mediaSessionServiceValue = serviceValue(
@@ -488,12 +1212,18 @@ final class DarwinServiceBridge {
                     managerInterface.getClassLoader(),
                     new Class<?>[] {managerInterface},
                     new ManagerHandler(displayServiceValue, activityManagerServiceValue,
-                            activityServiceValue,
-                            inputMethodServiceValue, inputServiceValue, windowServiceValue,
+                            activityServiceValue, userServiceValue,
+                            devicePolicyServiceValue,
+                            usageStatsServiceValue, roleServiceValue,
+                            inputMethodServiceValue, textServicesServiceValue,
+                            inputServiceValue, uiModeServiceValue,
+                            bluetoothManagerServiceValue,
+                            windowServiceValue,
                             accessibilityServiceValue, sensitiveContentServiceValue,
                             contentServiceValue, notificationServiceValue, audioServiceValue,
                             voiceInteractionServiceValue, searchServiceValue,
-                            clipboardServiceValue, storageServiceValue,
+                            clipboardServiceValue, uriGrantsServiceValue,
+                            accountServiceValue, storageServiceValue,
                             mediaSessionServiceValue, trustServiceValue,
                             missingServiceValue));
             Binder context = new Binder();
@@ -547,11 +1277,18 @@ final class DarwinServiceBridge {
     }
 
     private static Object createPrimaryStorageVolume() throws Exception {
-        String appData = System.getenv("DARWIN_ART_APK_APP_DATA_DIR");
-        if (appData == null || appData.isEmpty()) {
-            throw new IllegalStateException("app data directory is unavailable");
+        String externalDirectory =
+                System.getenv("DARWIN_ART_APK_APP_EXTERNAL_DIR");
+        if (externalDirectory == null || externalDirectory.isEmpty()) {
+            throw new IllegalStateException(
+                    "app external-storage directory is unavailable");
         }
-        File root = new File(appData, "external");
+        // Java File operations are Android guest operations once libcore is
+        // attached to the filesystem facade.  Publishing the Darwin backing
+        // directory here would both fail capability resolution and leak a
+        // host path into Environment.  The launcher creates this exact guest
+        // directory before sealing the immutable storage mount.
+        File root = new File(externalDirectory);
         if (!root.isDirectory() && !root.mkdirs()) {
             throw new IllegalStateException(
                     "could not create app-scoped external storage");
@@ -583,8 +1320,15 @@ final class DarwinServiceBridge {
         private final Object displayService;
         private final Object activityService;
         private final Object activityManagerService;
+        private final Object userService;
+        private final Object devicePolicyService;
+        private final Object usageStatsService;
+        private final Object roleService;
         private final Object inputMethodService;
+        private final Object textServicesService;
         private final Object inputService;
+        private final Object uiModeService;
+        private final Object bluetoothManagerService;
         private final Object windowService;
         private final Object accessibilityService;
         private final Object sensitiveContentService;
@@ -594,26 +1338,41 @@ final class DarwinServiceBridge {
         private final Object voiceInteractionService;
         private final Object searchService;
         private final Object clipboardService;
+        private final Object uriGrantsService;
+        private final Object accountService;
         private final Object storageService;
         private final Object mediaSessionService;
         private final Object trustService;
         private final Object missingService;
 
         ManagerHandler(Object displayService, Object activityManagerService,
-                Object activityService,
-                Object inputMethodService, Object inputService, Object windowService,
+                Object activityService, Object userService,
+                Object devicePolicyService,
+                Object usageStatsService, Object roleService,
+                Object inputMethodService, Object textServicesService,
+                Object inputService, Object uiModeService,
+                Object bluetoothManagerService,
+                Object windowService,
                 Object accessibilityService, Object sensitiveContentService,
                 Object contentService, Object notificationService,
                 Object audioService,
                 Object voiceInteractionService, Object searchService,
-                Object clipboardService, Object storageService,
+                Object clipboardService, Object uriGrantsService,
+                Object accountService, Object storageService,
                 Object mediaSessionService, Object trustService,
                 Object missingService) {
             this.displayService = displayService;
             this.activityManagerService = activityManagerService;
             this.activityService = activityService;
+            this.userService = userService;
+            this.devicePolicyService = devicePolicyService;
+            this.usageStatsService = usageStatsService;
+            this.roleService = roleService;
             this.inputMethodService = inputMethodService;
+            this.textServicesService = textServicesService;
             this.inputService = inputService;
+            this.uiModeService = uiModeService;
+            this.bluetoothManagerService = bluetoothManagerService;
             this.windowService = windowService;
             this.accessibilityService = accessibilityService;
             this.sensitiveContentService = sensitiveContentService;
@@ -623,6 +1382,8 @@ final class DarwinServiceBridge {
             this.voiceInteractionService = voiceInteractionService;
             this.searchService = searchService;
             this.clipboardService = clipboardService;
+            this.uriGrantsService = uriGrantsService;
+            this.accountService = accountService;
             this.storageService = storageService;
             this.mediaSessionService = mediaSessionService;
             this.trustService = trustService;
@@ -637,11 +1398,20 @@ final class DarwinServiceBridge {
                     && args[0] instanceof String) {
                 if ("display".equals(args[0])) return displayService;
                 if ("activity".equals(args[0])) return activityManagerService;
+                if ("user".equals(args[0])) return userService;
+                if ("device_policy".equals(args[0])) return devicePolicyService;
+                if ("usagestats".equals(args[0])) return usageStatsService;
+                if ("role".equals(args[0])) return roleService;
                 if ("activity_task".equals(args[0])) {
                     return activityService;
                 }
                 if ("input_method".equals(args[0])) return inputMethodService;
+                if ("textservices".equals(args[0])) return textServicesService;
                 if ("input".equals(args[0])) return inputService;
+                if ("uimode".equals(args[0])) return uiModeService;
+                if ("bluetooth_manager".equals(args[0])) {
+                    return bluetoothManagerService;
+                }
                 if ("window".equals(args[0])) return windowService;
                 if ("accessibility".equals(args[0])) return accessibilityService;
                 if ("sensitive_content_protection_service".equals(args[0])) {
@@ -655,12 +1425,58 @@ final class DarwinServiceBridge {
                 }
                 if ("search".equals(args[0])) return searchService;
                 if ("clipboard".equals(args[0])) return clipboardService;
+                if ("uri_grants".equals(args[0])) return uriGrantsService;
+                if ("account".equals(args[0])) {
+                    Log.i("DarwinServiceBridge", "ServiceManager account");
+                    return accountService;
+                }
                 if ("mount".equals(args[0])) return storageService;
                 if ("media_session".equals(args[0])) return mediaSessionService;
                 if ("trust".equals(args[0])) return trustService;
                 return missingService;
             }
             return defaultValue(method.getReturnType());
+        }
+    }
+
+    /** Android's single primary physical user as exposed by system_server. */
+    private static final class UserManagerHandler implements InvocationHandler {
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) {
+            String name = method.getName();
+            if ("getProfileIds".equals(name) || "getEnabledProfileIds".equals(name)) {
+                return new int[] {0};
+            }
+            if ("getApplicationRestrictionsForUser".equals(name)
+                    || "getUserRestrictions".equals(name)) {
+                return new Bundle();
+            }
+            if ("isUserUnlocked".equals(name) || "isUserRunning".equals(name)
+                    || "isUserForeground".equals(name)) {
+                return Boolean.TRUE;
+            }
+            if ("getUserSerialNumber".equals(name)) return Long.valueOf(0L);
+            if ("getUserHandle".equals(name)) return Integer.valueOf(0);
+            return defaultValue(method.getReturnType());
+        }
+    }
+
+    /** Remote-style system_server endpoint for an unmanaged physical device. */
+    private static final class DevicePolicyServiceBinder extends Binder {
+        DevicePolicyServiceBinder() {
+            attachInterface(null, "android.app.admin.IDevicePolicyManager");
+        }
+
+        @Override
+        protected boolean onTransact(int code, android.os.Parcel data,
+                android.os.Parcel reply, int flags) {
+            if (reply != null) {
+                reply.writeNoException();
+                // Zero is a valid empty/false/null marker for the policy calls
+                // consumed during app startup, including getActiveAdmins().
+                reply.writeLong(0L);
+            }
+            return true;
         }
     }
 
@@ -753,16 +1569,23 @@ final class DarwinServiceBridge {
             if (method.getName().equals("getActivityClientController")) {
                 return controller;
             }
+            if (method.getName().equals("getAppTasks")) {
+                return new ArrayList<>();
+            }
             if (method.getName().startsWith("startActivity")) {
                 Intent intent = findArgument(args, Intent.class);
-                ComponentName component = intent == null ? null : intent.getComponent();
+                Intent resolvedIntent = resolveChooserTarget(intent);
+                ComponentName component = resolvedIntent == null
+                        ? null : resolvedIntent.getComponent();
                 Log.i("DarwinServiceBridge", "activity task " + method.getName()
                         + " action=" + (intent == null ? null : intent.getAction())
+                        + " resolvedAction=" + (resolvedIntent == null
+                                ? null : resolvedIntent.getAction())
                         + " component=" + component);
                 String packageName = System.getenv("DARWIN_ART_APK_APP_PACKAGE");
                 if (component != null && packageName != null
                         && packageName.equals(component.getPackageName())) {
-                    Intent launchIntent = new Intent(intent);
+                    Intent launchIntent = new Intent(resolvedIntent);
                     int requestCode = findRequestCode(method, args, intent);
                     MAIN_HANDLER.post(() -> launchLocalActivity(launchIntent, requestCode));
                     // ActivityManager.START_SUCCESS. The transition itself is
@@ -770,14 +1593,14 @@ final class DarwinServiceBridge {
                     // lifecycle callback returns to the main Looper.
                     return Integer.valueOf(0);
                 }
-                if (isOpenDocumentIntent(intent)) {
+                if (isOpenDocumentIntent(resolvedIntent)) {
                     int requestCode = findRequestCode(method, args, intent);
-                    deliverOpenDocumentResult(intent, requestCode);
+                    deliverOpenDocumentResult(resolvedIntent, requestCode);
                     return Integer.valueOf(0);
                 }
-                if (isCreateDocumentIntent(intent)) {
+                if (isCreateDocumentIntent(resolvedIntent)) {
                     int requestCode = findRequestCode(method, args, intent);
-                    deliverCreateDocumentResult(intent, requestCode);
+                    deliverCreateDocumentResult(resolvedIntent, requestCode);
                     return Integer.valueOf(0);
                 }
             }
@@ -807,6 +1630,14 @@ final class DarwinServiceBridge {
         return Intent.ACTION_GET_CONTENT.equals(action)
                 || Intent.ACTION_OPEN_DOCUMENT.equals(action)
                 || Intent.ACTION_PICK.equals(action);
+    }
+
+    private static Intent resolveChooserTarget(Intent intent) {
+        if (intent == null || !Intent.ACTION_CHOOSER.equals(intent.getAction())) {
+            return intent;
+        }
+        android.os.Parcelable target = intent.getParcelableExtra(Intent.EXTRA_INTENT);
+        return target instanceof Intent ? (Intent) target : intent;
     }
 
     private static boolean isCreateDocumentIntent(Intent intent) {
@@ -921,14 +1752,7 @@ final class DarwinServiceBridge {
         if (previous == null || component == null) return;
         try {
             ClassLoader loader = previous.getClassLoader();
-            Class<?> targetClass = Class.forName(component.getClassName(), true, loader);
-            Activity next = (Activity) targetClass.getDeclaredConstructor().newInstance();
-
             Class<?> activityClass = Activity.class;
-            Object activityThread = getField(activityClass, previous, "mMainThread");
-            Object instrumentation = getField(activityClass, previous, "mInstrumentation");
-            Application application = previous.getApplication();
-            Context baseContext = previous.getBaseContext();
             ActivityInfo info;
             try {
                 info = previous.getPackageManager().getActivityInfo(component, 0);
@@ -937,6 +1761,15 @@ final class DarwinServiceBridge {
                         activityClass, previous, "mActivityInfo"));
                 info.name = component.getClassName();
             }
+            String targetName = info.targetActivity == null
+                    ? info.name : info.targetActivity;
+            Class<?> targetClass = Class.forName(targetName, true, loader);
+            Activity next = (Activity) targetClass.getDeclaredConstructor().newInstance();
+
+            Object activityThread = getField(activityClass, previous, "mMainThread");
+            Object instrumentation = getField(activityClass, previous, "mInstrumentation");
+            Application application = previous.getApplication();
+            Context baseContext = previous.getBaseContext();
             Configuration configuration = new Configuration(
                     previous.getResources().getConfiguration());
             Binder token = new Binder();
@@ -987,13 +1820,16 @@ final class DarwinServiceBridge {
                     "performResume", boolean.class, String.class);
             Method performStop = activityClass.getDeclaredMethod(
                     "performStop", boolean.class, String.class);
+            Method performDestroy = activityClass.getDeclaredMethod("performDestroy");
             performPause.setAccessible(true);
             performCreate.setAccessible(true);
             performStart.setAccessible(true);
             performResume.setAccessible(true);
             performStop.setAccessible(true);
+            performDestroy.setAccessible(true);
 
-            performPause.invoke(previous);
+            boolean previousFinishing = previous.isFinishing();
+            if (!previousFinishing) performPause.invoke(previous);
             performCreate.invoke(next, new Object[] {null});
             performStart.invoke(next, "darwin-art activity launch");
 
@@ -1007,7 +1843,7 @@ final class DarwinServiceBridge {
             addView.setAccessible(true);
             addView.invoke(global, decor, window.getAttributes(), next.getDisplay(),
                     window, Integer.valueOf(0));
-            decor.layout(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+            performHostTraversal(decor);
             if (!nativeInstallActivity(next, decor)) {
                 throw new IllegalStateException("native graphics Activity install failed");
             }
@@ -1018,7 +1854,24 @@ final class DarwinServiceBridge {
             // materialize their SurfaceViews only after performResume().
             // Queue the compositor announcement behind those transactions.
             scheduleHostSurfaceScans(next, decor, 300);
-            performStop.invoke(previous, Boolean.FALSE, "darwin-art activity launch");
+            scheduleViewTreeDump(next, decor);
+            // ActivityThread does not dispatch onStop() when an Activity calls
+            // finish() from onCreate() before it ever reaches STARTED. Chrome's
+            // launcher deliberately follows that path while redirecting to the
+            // first-run Activity. Calling onStop() here enters Chrome lifecycle
+            // observers that were never initialized. Once the new Activity is
+            // committed, keep cleanup failures isolated from that transaction.
+            try {
+                if (previousFinishing) {
+                    performDestroy.invoke(previous);
+                } else {
+                    performStop.invoke(previous, Boolean.FALSE,
+                            "darwin-art activity launch");
+                }
+            } catch (Throwable cleanupError) {
+                Log.w("DarwinServiceBridge",
+                        "previous Activity lifecycle cleanup failed", cleanupError);
+            }
             deactivateHostSurfaces(previous.getWindow().getDecorView());
 
             try {
@@ -1120,28 +1973,88 @@ final class DarwinServiceBridge {
         return field.get(target);
     }
 
+    /** ActivityManager-owned token behind framework PendingIntent. */
+    private static final class IntentSenderHandler implements InvocationHandler {
+        final Binder binder = new Binder();
+        final Object proxy;
+        final int type;
+        final Intent original;
+
+        IntentSenderHandler(int type, Intent original) throws Exception {
+            this.type = type;
+            this.original = original == null ? null : new Intent(original);
+            Class<?> senderInterface = Class.forName("android.content.IIntentSender");
+            proxy = Proxy.newProxyInstance(senderInterface.getClassLoader(),
+                    new Class<?>[] {senderInterface}, this);
+            attach(binder, proxy, "android.content.IIntentSender");
+        }
+
+        @Override
+        public Object invoke(Object ignored, Method method, Object[] args) {
+            if ("asBinder".equals(method.getName())) return binder;
+            if (method.getName().startsWith("send")) {
+                deliver(findArgument(args, Intent.class));
+            }
+            return defaultValue(method.getReturnType());
+        }
+
+        void deliver(Intent fillIn) {
+            Intent delivered = original == null ? null : new Intent(original);
+            if (delivered != null && fillIn != null && fillIn != original) {
+                delivered.fillIn(fillIn, 0);
+            }
+            Log.i("DarwinServiceBridge", "intent sender send type=" + type
+                    + " component="
+                    + (delivered == null ? null : delivered.getComponent()));
+            // ActivityManager.INTENT_SENDER_ACTIVITY. Broadcast and service
+            // senders remain separate system-server transactions.
+            if (type == 2 && delivered != null) {
+                Intent launchIntent = delivered;
+                MAIN_HANDLER.post(() -> launchLocalActivity(launchIntent, -1));
+            }
+        }
+    }
+
     /** Process-local ActivityManager state normally supplied by system_server. */
     private static final class ActivityManagerHandler implements InvocationHandler {
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) throws Exception {
+            if ("sendIntentSender".equals(method.getName())) {
+                Class<?> senderInterface = Class.forName(
+                        "android.content.IIntentSender");
+                Object sender = findArgument(args, senderInterface);
+                if (sender != null && Proxy.isProxyClass(sender.getClass())) {
+                    InvocationHandler handler = Proxy.getInvocationHandler(sender);
+                    if (handler instanceof IntentSenderHandler) {
+                        ((IntentSenderHandler) handler).deliver(
+                                findArgument(args, Intent.class));
+                        // ActivityManager.START_SUCCESS.
+                        return Integer.valueOf(0);
+                    }
+                }
+                return Integer.valueOf(-1);
+            }
             if (method.getName().startsWith("getIntentSender")) {
                 // PendingIntent factories are backed by an IIntentSender token
                 // allocated by ActivityManager on Android.  Keep that contract
                 // process-local so framework PendingIntent APIs return a real,
                 // stable binder object instead of null when system_server is
-                // absent.  The sender remains conservative: send() is a no-op
-                // until host activity/broadcast delivery is connected.
-                String owner = null;
+                // absent. Activity senders re-enter the same ActivityManager
+                // transaction path used by ordinary startActivity calls.
+                int type = 0;
+                Intent original = null;
                 if (args != null) {
                     for (Object argument : args) {
-                        if (argument instanceof String && !((String) argument).isEmpty()) {
-                            owner = (String) argument;
-                            break;
+                        if (type == 0 && argument instanceof Integer) {
+                            type = ((Integer) argument).intValue();
+                        } else if (argument instanceof Intent[]
+                                && ((Intent[]) argument).length > 0) {
+                            Intent[] intents = (Intent[]) argument;
+                            original = intents[intents.length - 1];
                         }
                     }
                 }
-                return new MediaSessionInterfaceHandler(
-                        "android.content.IIntentSender", owner).proxy;
+                return new IntentSenderHandler(type, original).proxy;
             }
             if ("getRunningAppProcesses".equals(method.getName())) {
                 Class<?> processInfoType = Class.forName(
@@ -1161,6 +2074,12 @@ final class DarwinServiceBridge {
                 processes.add(processInfo);
                 return processes;
             }
+            if ("getAppTasks".equals(method.getName())) {
+                // IActivityManager returns an empty list, never null, when the
+                // caller owns no recent tasks. ActivityManager.getAppTasks()
+                // iterates this result directly.
+                return new ArrayList<>();
+            }
             return defaultValue(method.getReturnType());
         }
     }
@@ -1168,6 +2087,9 @@ final class DarwinServiceBridge {
     private static final class DisplayHandler implements InvocationHandler {
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
+            if (method.getName().equals("getDisplayIds")) {
+                return new int[] {0};
+            }
             if (method.getName().equals("getDisplayInfo")) {
                 Log.i("DarwinServiceBridge", "display getDisplayInfo");
                 return displayInfo();
@@ -1181,17 +2103,49 @@ final class DarwinServiceBridge {
                 Constructor<?> constructor = infoClass.getDeclaredConstructor();
                 constructor.setAccessible(true);
                 Object info = constructor.newInstance();
+                // Populate the same minimum invariants DisplayManagerService
+                // publishes for Android's built-in, powered-on display.  A
+                // zero-initialized DisplayInfo is not a valid display: in
+                // particular TYPE_UNKNOWN/STATE_UNKNOWN and a null identity
+                // propagate into Chromium's cross-process ScreenInfos and can
+                // make Widget.UpdateVisualProperties fail Mojo validation.
+                put(infoClass, info, "displayId", Display.DEFAULT_DISPLAY);
+                put(infoClass, info, "layerStack", Display.DEFAULT_DISPLAY);
+                put(infoClass, info, "name", "Built-in Display");
+                put(infoClass, info, "uniqueId", "local:darwin-art:0");
+                put(infoClass, info, "type", DISPLAY_TYPE_INTERNAL);
+                put(infoClass, info, "state", Display.STATE_ON);
+                put(infoClass, info, "committedState", Display.STATE_ON);
                 put(infoClass, info, "logicalWidth", DISPLAY_WIDTH);
                 put(infoClass, info, "logicalHeight", DISPLAY_HEIGHT);
                 put(infoClass, info, "appWidth", DISPLAY_WIDTH);
                 put(infoClass, info, "appHeight", DISPLAY_HEIGHT);
+                put(infoClass, info, "smallestNominalAppWidth", DISPLAY_WIDTH);
+                put(infoClass, info, "smallestNominalAppHeight", DISPLAY_HEIGHT);
+                put(infoClass, info, "largestNominalAppWidth", DISPLAY_WIDTH);
+                put(infoClass, info, "largestNominalAppHeight", DISPLAY_HEIGHT);
                 put(infoClass, info, "logicalDensityDpi", DISPLAY_DENSITY_DPI);
                 put(infoClass, info, "physicalXDpi", (float) DISPLAY_DENSITY_DPI);
                 put(infoClass, info, "physicalYDpi", (float) DISPLAY_DENSITY_DPI);
+                Class<?> modeClass = Class.forName("android.view.Display$Mode");
+                Constructor<?> modeConstructor = modeClass.getDeclaredConstructor(
+                        int.class, int.class, int.class, float.class);
+                modeConstructor.setAccessible(true);
+                Object mode = modeConstructor.newInstance(
+                        1, DISPLAY_WIDTH, DISPLAY_HEIGHT, 60.0f);
+                Object modes = Array.newInstance(modeClass, 1);
+                Array.set(modes, 0, mode);
+                put(infoClass, info, "modeId", 1);
+                put(infoClass, info, "defaultModeId", 1);
+                put(infoClass, info, "supportedModes", modes);
+                put(infoClass, info, "appsSupportedModes", modes);
+                put(infoClass, info, "supportedRefreshRates", new float[] {60.0f});
                 // Android 16 derives DisplayInfo.getRefreshRate() from these
                 // fields (the old single refreshRate field no longer exists).
                 put(infoClass, info, "refreshRateOverride", 60.0f);
                 put(infoClass, info, "renderFrameRate", 60.0f);
+                put(infoClass, info, "presentationDeadlineNanos", 16_666_666L);
+                put(infoClass, info, "canHostTasks", true);
                 return info;
             } catch (Throwable ignored) {
                 Log.e("DarwinServiceBridge", "display info construction failed", ignored);
@@ -1369,5 +2323,16 @@ final class DarwinServiceBridge {
         if (type == float.class) return 0.0f;
         if (type == double.class) return 0.0d;
         return null;
+    }
+
+    private static Object emptyFrameworkContainer(Class<?> type, String methodName) {
+        try {
+            Method empty = type.getDeclaredMethod(methodName);
+            empty.setAccessible(true);
+            return empty.invoke(null);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException(
+                    "could not create empty framework container " + type.getName(), error);
+        }
     }
 }

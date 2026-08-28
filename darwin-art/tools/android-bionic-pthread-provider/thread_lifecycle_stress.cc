@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <memory>
 #include <thread>
 
 namespace {
@@ -11,7 +12,6 @@ constexpr int kAndroidEsrch = 3;
 constexpr int kAndroidEbusy = 16;
 constexpr int kAndroidEinval = 22;
 constexpr int kAndroidEdeadlk = 35;
-constexpr int kAndroidEnotsup = 95;
 constexpr int kRounds = 100;
 
 struct Gate {
@@ -27,8 +27,9 @@ void* WaitAndReturn(void* opaque) {
   while (!gate->release.load(std::memory_order_acquire)) {
     std::this_thread::yield();
   }
+  void* result = gate->result;
   gate->done.store(true, std::memory_order_release);
-  return gate->result;
+  return result;
 }
 
 int WaitForReset() {
@@ -63,24 +64,30 @@ int RunRound() {
           kAndroidEsrch) {
     return 2;
   }
-  int fake_attributes = 0;
-  if (darwin_art_bionic_pthread_create(&token, &fake_attributes,
-                                       &ReturnArgument, nullptr) !=
-      kAndroidEnotsup) {
+  DarwinArtAndroidPthreadAttr attributes{};
+  if (darwin_art_bionic_pthread_attr_init(&attributes) != 0 ||
+      darwin_art_bionic_pthread_create(
+          &token, &attributes, &ReturnArgument,
+          reinterpret_cast<void*>(static_cast<uintptr_t>(0xa771))) != 0 ||
+      darwin_art_bionic_pthread_join(token, &result) != 0 ||
+      result != reinterpret_cast<void*>(static_cast<uintptr_t>(0xa771)) ||
+      darwin_art_bionic_pthread_attr_destroy(&attributes) != 0) {
     return 3;
   }
 
-  Gate detached;
-  detached.result = reinterpret_cast<void*>(static_cast<uintptr_t>(0xd37a));
+  auto detached = std::make_unique<Gate>();
+  detached->result = reinterpret_cast<void*>(static_cast<uintptr_t>(0xd37a));
   if (darwin_art_bionic_pthread_create(&token, nullptr, &WaitAndReturn,
-                                       &detached) != 0 ||
+                                       detached.get()) != 0 ||
       darwin_art_bionic_pthread_detach(token) != 0 ||
       darwin_art_bionic_pthread_join(token, nullptr) != kAndroidEinval) {
     return 4;
   }
-  detached.release.store(true, std::memory_order_release);
-  while (!detached.done.load(std::memory_order_acquire)) std::this_thread::yield();
+  detached->release.store(true, std::memory_order_release);
+  while (!detached->done.load(std::memory_order_acquire))
+    std::this_thread::yield();
   if (WaitForReset() != 0) return 5;
+  detached.reset();
 
   Gate race;
   race.result = reinterpret_cast<void*>(static_cast<uintptr_t>(0xface));

@@ -61,6 +61,8 @@ unsafe impl Sync for LoaderCallbacks {}
 
 static LOADER: OnceLock<LoaderCallbacks> = OnceLock::new();
 static mut LIBANDROID_HANDLE_TOKEN: u8 = 0;
+static mut LIBEGL_HANDLE_TOKEN: u8 = 0;
+static mut LIBGLESV2_HANDLE_TOKEN: u8 = 0;
 
 #[cfg(not(test))]
 unsafe extern "C" {
@@ -83,10 +85,24 @@ unsafe extern "C" {
         height: c_int,
         format: c_int,
     ) -> c_int;
+    #[link_name = "ASharedMemory_create"]
+    fn host_ashared_memory_create(name: *const c_char, size: usize) -> c_int;
+    #[link_name = "ASharedMemory_setProt"]
+    fn host_ashared_memory_set_prot(fd: c_int, protection: c_int) -> c_int;
+    fn darwin_art_android_platform_symbol(symbol: *const c_char) -> *mut c_void;
+    fn darwin_art_angle_dso_symbol(soname: *const c_char, symbol: *const c_char) -> *mut c_void;
 }
 
 fn libandroid_handle() -> *mut c_void {
     ptr::addr_of_mut!(LIBANDROID_HANDLE_TOKEN).cast()
+}
+
+fn virtual_graphics_handle(name: &[u8]) -> Option<*mut c_void> {
+    match name {
+        b"libEGL.so" => Some(ptr::addr_of_mut!(LIBEGL_HANDLE_TOKEN).cast()),
+        b"libGLESv2.so" => Some(ptr::addr_of_mut!(LIBGLESV2_HANDLE_TOKEN).cast()),
+        _ => None,
+    }
 }
 
 unsafe fn libandroid_symbol(name: &CStr) -> *mut c_void {
@@ -105,7 +121,12 @@ unsafe fn libandroid_symbol(name: &CStr) -> *mut c_void {
             b"ANativeWindow_setBuffersGeometry" => {
                 host_anative_window_set_buffers_geometry as *mut c_void
             }
-            _ => ptr::null_mut(),
+            b"ASharedMemory_create" => host_ashared_memory_create as *mut c_void,
+            b"ASharedMemory_setProt" => host_ashared_memory_set_prot as *mut c_void,
+            // Android feature detection commonly dlopen()s libandroid.so and
+            // resolves newer NDK APIs lazily. Keep that virtual DSO backed by
+            // the same capability table used for regular ELF imports.
+            _ => darwin_art_android_platform_symbol(name.as_ptr()),
         }
     }
 }
@@ -195,11 +216,21 @@ pub unsafe extern "C" fn darwin_art_bionic_android_dlopen_ext(
 ) -> *mut c_void {
     if !filename.is_null() {
         let name = unsafe { CStr::from_ptr(filename) }.to_bytes();
-        if name.rsplit(|byte| *byte == b'/').next() == Some(b"libandroid.so") {
+        let leaf = name.rsplit(|byte| *byte == b'/').next().unwrap_or(name);
+        if leaf == b"libandroid.so" {
             if std::env::var_os("DARWIN_ART_DEBUG_ANATIVEWINDOW").is_some() {
                 eprintln!("ART Android libdl: opened virtual libandroid.so");
             }
             return libandroid_handle();
+        }
+        if let Some(handle) = virtual_graphics_handle(leaf) {
+            if std::env::var_os("DARWIN_ART_DEBUG_GRAPHICS_DSO").is_some() {
+                eprintln!(
+                    "ART Android libdl: opened virtual {}",
+                    String::from_utf8_lossy(leaf)
+                );
+            }
+            return handle;
         }
     }
     let Some(loader) = loader() else {
@@ -238,6 +269,39 @@ pub unsafe extern "C" fn darwin_art_bionic_dlsym(
     handle: *mut c_void,
     symbol: *const c_char,
 ) -> *mut c_void {
+    let egl_handle = ptr::addr_of_mut!(LIBEGL_HANDLE_TOKEN).cast();
+    let gles_handle = ptr::addr_of_mut!(LIBGLESV2_HANDLE_TOKEN).cast();
+    if handle == egl_handle || handle == gles_handle {
+        if symbol.is_null() {
+            set_error("null Android graphics DSO symbol");
+            return ptr::null_mut();
+        }
+        let soname = if handle == egl_handle {
+            c"libEGL.so"
+        } else {
+            c"libGLESv2.so"
+        };
+        #[cfg(not(test))]
+        let result = unsafe { darwin_art_angle_dso_symbol(soname.as_ptr(), symbol) };
+        #[cfg(test)]
+        let result = {
+            let _ = soname;
+            1usize as *mut c_void
+        };
+        if std::env::var_os("DARWIN_ART_DEBUG_GRAPHICS_DSO").is_some() {
+            let name = unsafe { CStr::from_ptr(symbol) };
+            eprintln!(
+                "ART Android libdl: {} dlsym {} resolved={}",
+                soname.to_string_lossy(),
+                name.to_string_lossy(),
+                !result.is_null()
+            );
+        }
+        if result.is_null() {
+            set_error("Android graphics DSO symbol is unavailable");
+        }
+        return result;
+    }
     if symbol.is_null() {
         set_error("dlsym symbol is null");
         return ptr::null_mut();
@@ -289,7 +353,10 @@ pub unsafe extern "C" fn darwin_art_bionic_dlsym(
 ///
 /// `handle` must be null or a handle accepted by the bound loader.
 pub unsafe extern "C" fn darwin_art_bionic_dlclose(handle: *mut c_void) -> c_int {
-    if handle == libandroid_handle() {
+    if handle == libandroid_handle()
+        || handle == ptr::addr_of_mut!(LIBEGL_HANDLE_TOKEN).cast()
+        || handle == ptr::addr_of_mut!(LIBGLESV2_HANDLE_TOKEN).cast()
+    {
         return 0;
     }
     let Some(loader) = loader() else { return -1 };

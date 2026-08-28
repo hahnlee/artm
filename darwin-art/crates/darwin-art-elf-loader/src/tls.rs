@@ -30,6 +30,7 @@ pub(crate) struct TlsDescriptorContext {
     pub(crate) module: Arc<TlsModule>,
     pub(crate) offset: usize,
     pub(crate) descriptor_address: usize,
+    pub(crate) thread_pointer_base: usize,
 }
 
 pub(crate) struct TlsModule {
@@ -288,8 +289,8 @@ unsafe extern "C" fn darwin_art_tlsdesc_resolve_impl(
             unsafe { allocation.pointer.as_ptr().add(context.offset) as usize }
         })
         .unwrap_or_else(|_| std::process::abort());
-    let thread_pointer: usize;
-    // SAFETY: reading TPIDR_EL0 is side-effect free and does not expose or replace Darwin TLS.
-    unsafe { core::arch::asm!("mrs {value}, TPIDR_EL0", value = out(reg) thread_pointer) };
-    storage.wrapping_sub(thread_pointer) as isize
+    // Guest MRS instructions are rewritten to this image-local compatibility
+    // base. Returning an offset from the same base preserves the AArch64
+    // TLSDESC contract while leaving Darwin's TPIDR_EL0 ownership untouched.
+    storage.wrapping_sub(context.thread_pointer_base) as isize
 }

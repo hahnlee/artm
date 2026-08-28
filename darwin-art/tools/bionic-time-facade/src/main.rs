@@ -31,6 +31,7 @@ impl ClosedResolver {
         let bytes = match name {
             "__errno" => c"__errno",
             "clock_gettime" => c"clock_gettime",
+            "gettimeofday" => c"gettimeofday",
             "nanosleep" => c"nanosleep",
             "sysconf" => c"sysconf",
             _ => return None,

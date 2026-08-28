@@ -125,12 +125,16 @@ my %critical = (
   nativeGetuid => 'DarwinNativeGetuid',
 );
 my %supported = (
-  open => 'DarwinLinuxOpen', fstat => 'DarwinLinuxFstat',
+  access => 'DarwinLinuxAccess', open => 'DarwinLinuxOpen', dup => 'DarwinLinuxDup',
+  fcntlInt => 'DarwinLinuxFcntlInt', fcntlVoid => 'DarwinLinuxFcntlVoid',
+  fstat => 'DarwinLinuxFstat',
   readBytes => 'DarwinLinuxReadBytes', close => 'DarwinLinuxClose',
   mmap => 'DarwinLinuxMmap', munmap => 'DarwinLinuxMunmap',
   sysconf => 'DarwinLinuxSysconf',
   getenv => 'DarwinLinuxGetenv', getpwuid => 'DarwinLinuxGetpwuid',
   stat => 'DarwinLinuxStat', lseek => 'DarwinLinuxLseek',
+  sendfile => 'DarwinLinuxSendfile',
+  remove => 'DarwinLinuxRemove', rename => 'DarwinLinuxRename',
   statvfs => 'DarwinLinuxStatvfs', fstatvfs => 'DarwinLinuxFstatvfs',
   chmod => 'DarwinLinuxChmod', fchmod => 'DarwinLinuxFchmod',
   uname => 'DarwinLinuxUname',
@@ -204,9 +208,8 @@ if grep -F '...' "$wrappers" >/dev/null; then
   fail "generated wrapper contains a variadic parameter"
 fi
 for expected in \
-  $'fcntlInt\t(Ljava/io/FileDescriptor;II)I\tjint\tJNIEnv* env,jobject,jobject,jint,jint' \
-  $'gai_strerror\t(I)Ljava/lang/String;\tjstring\tJNIEnv* env,jobject,jint' \
-  $'access\t(Ljava/lang/String;I)Z\tjboolean\tJNIEnv* env,jobject,jstring,jint'; do
+  $'getsockoptByte\t(Ljava/io/FileDescriptor;II)I\tjint\tJNIEnv* env,jobject,jobject,jint,jint' \
+  $'gai_strerror\t(I)Ljava/lang/String;\tjstring\tJNIEnv* env,jobject,jint'; do
   grep -F "$expected" "$abi_manifest" >/dev/null ||
     fail "representative fixed ABI missing: $expected"
 done
@@ -249,6 +252,8 @@ done
 common_flags=(
   -std=c++20 -arch arm64 -isysroot "$sdk_root" -fPIC -Wall -Wextra -Werror
   -I"$project_root/compat"
+  -I"$project_root/tools/bionic-fs-facade/include"
+  -I"$project_root/tools/bionic-ioctl-facade/include"
   -I"$stage"
   -I"$nativehelper/include_jni"
   -I"$nativehelper/include"
@@ -286,7 +291,7 @@ smoke="$stage/libcore-darwin-linux-smoke"
   "$project_root/probes/android16_libcore_darwin_linux_smoke.cc" \
   "$object" "$system_object" "$syscalls_object" "$async_close_archive" "$os_constants_archive" \
   -Wl,-force_load,"$nativehelper_archive" \
-  "$liblog_archive" -o "$smoke"
+  "$liblog_archive" -Wl,-undefined,dynamic_lookup -o "$smoke"
 smoke_output="$($smoke "$source_file")"
 [[ "$smoke_output" == libcore-darwin-linux:* ]] || fail "smoke output mismatch"
 
@@ -298,7 +303,7 @@ abi_library="$stage/libcore-darwin-linux-abi-smoke.dylib"
   "$system_object" "$syscalls_object" \
   "$async_close_archive" "$os_constants_archive" \
   -Wl,-force_load,"$nativehelper_archive" \
-  "$liblog_archive" -o "$abi_library"
+  "$liblog_archive" -Wl,-undefined,dynamic_lookup -o "$abi_library"
 nm -gU "$abi_library" | grep -F ' _JNI_OnLoad' >/dev/null ||
   fail "managed ABI smoke JNI_OnLoad is missing"
 
@@ -378,6 +383,7 @@ public final class LibcoreDarwinAbiSmoke {
     private native long availableProcessors() throws ErrnoException;
     private native String environment(String name) throws ErrnoException;
     private native StructStat statPath(String path) throws ErrnoException;
+    private native boolean accessPath(String path, int mode) throws ErrnoException;
     private native int writeFile(String path, byte[] bytes) throws ErrnoException;
     private native StructUtsname unameView() throws ErrnoException;
     private native String errorMessage(int errorNumber);
@@ -445,6 +451,13 @@ public final class LibcoreDarwinAbiSmoke {
                 .getBytes(StandardCharsets.ISO_8859_1);
         File temporary = File.createTempFile("darwin-art-libcore-", ".tmp");
         try {
+            if (!smoke.accessPath(temporary.getAbsolutePath(), 0)) {
+                throw new AssertionError("access(F_OK) rejected an existing path");
+            }
+            expectErrno(2, "access missing", () ->
+                    smoke.accessPath(temporary.getAbsolutePath() + ".missing", 0));
+            expectErrno(22, "access mode", () ->
+                    smoke.accessPath(temporary.getAbsolutePath(), 8));
             int written = smoke.writeFile(temporary.getAbsolutePath(), payload);
             StructStat status = smoke.statPath(temporary.getAbsolutePath());
             if (written != payload.length || status == null || status.st_size != payload.length) {
@@ -506,7 +519,7 @@ public final class LibcoreDarwinAbiSmoke {
             throw new AssertionError("non-Bionic fdsan contract failed");
         }
         System.out.println("managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP)"
-                + " lseek=set/cur/end+zip+overflow strerror(EINVAL)=pass"
+                + " access=existing/missing/mode lseek=set/cur/end+zip+overflow strerror(EINVAL)=pass"
                 + " strsignal(SIGTERM)=pass fdsan=non-Bionic"
                 + " processors=" + processors);
     }
@@ -521,7 +534,7 @@ javac --release 17 -encoding UTF-8 -d "$java_classes" \
 managed_abi_output="$(DARWIN_ART_MANAGED_SMOKE=present java -cp "$java_classes" \
   dev.darwinart.probe.LibcoreDarwinAbiSmoke "$abi_library")"
 [[ "$managed_abi_output" == \
-   'managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP) lseek=set/cur/end+zip+overflow strerror(EINVAL)=pass strsignal(SIGTERM)=pass fdsan=non-Bionic processors='* ]] ||
+   'managed-abi: V/I/J/L/Z ErrnoException(ENOTSUP) access=existing/missing/mode lseek=set/cur/end+zip+overflow strerror(EINVAL)=pass strsignal(SIGTERM)=pass fdsan=non-Bionic processors='* ]] ||
   fail "managed ABI smoke output mismatch: $managed_abi_output"
 managed_processors="${managed_abi_output##*=}"
 [[ "$managed_processors" =~ ^[1-9][0-9]*$ ]] ||
@@ -532,4 +545,4 @@ mkdir -p "$build_dir"
 cp "$archive" "$build_dir/libcore-darwin-linux.a"
 cp "$smoke" "$build_dir/libcore-darwin-linux-smoke"
 
-echo "libcore-darwin-linux: methods=$method_count regular=$supported_regular critical=$supported_critical enotsup=$unsupported_count fixed-abi=$unsupported_count managed=V/I/J/L/Z+getenv/stat/write/lseek/uname/strerror/strsignal/fdsan managed-processors=$managed_processors archive=Mach-O-arm64 $smoke_output"
+echo "libcore-darwin-linux: methods=$method_count regular=$supported_regular critical=$supported_critical enotsup=$unsupported_count fixed-abi=$unsupported_count managed=V/I/J/L/Z+getenv/access/stat/write/lseek/uname/strerror/strsignal/fdsan managed-processors=$managed_processors archive=Mach-O-arm64 $smoke_output"

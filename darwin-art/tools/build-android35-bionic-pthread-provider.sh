@@ -295,7 +295,7 @@ grep -F 'repeated-delete=10000 peak-cells=1 reset-cells=0' <<< "$tls_stress_outp
   "$module_root/src/provider.cc" "$module_root/cond_stress.cc" \
   -o "$stage/cond-stress"
 cond_stress_output="$("$stage/cond-stress")"
-grep -F 'rounds=100 waiters=8 destroy-wait=EBUSY ASan=clean monotonic-timeout=110 relock=owned' <<< "$cond_stress_output" >/dev/null ||
+grep -F 'rounds=100 waiters=8 destroy-wait=EBUSY ASan=clean monotonic-timeout=110 monotonic-attr-timeout=110 relock=owned' <<< "$cond_stress_output" >/dev/null ||
   fail "condition sanitizer stress failed"
 
 [[ "$(sha "$module_root/rwlock_stress.cc")" == "$RWLOCK_STRESS_SHA256" ]] ||
@@ -304,7 +304,7 @@ grep -F 'rounds=100 waiters=8 destroy-wait=EBUSY ASan=clean monotonic-timeout=11
   "$module_root/src/provider.cc" "$module_root/rwlock_stress.cc" \
   -o "$stage/rwlock-stress"
 rwlock_stress_output="$("$stage/rwlock-stress")"
-grep -F 'rounds=20 readers=4 concurrent>=2 writer=10000-progress wrong-unlock=EPERM destroy-held=EBUSY lazy-reset=clean ASan=clean' <<< "$rwlock_stress_output" >/dev/null ||
+grep -F 'rounds=20 readers=4 concurrent>=2 writer=10000-progress wrong-unlock=EPERM destroy-held=EBUSY double-destroy=Bionic-0 lazy-reset=clean ASan=clean' <<< "$rwlock_stress_output" >/dev/null ||
   fail "rwlock sanitizer stress failed"
 
 [[ "$(sha "$module_root/mutex_attr_stress.cc")" == "$MUTEX_ATTR_STRESS_SHA256" ]] ||

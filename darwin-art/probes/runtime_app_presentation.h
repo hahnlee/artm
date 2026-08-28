@@ -24,4 +24,13 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
          const char* apk_app_activity, const char* app_apk_path,
          darwin_art_graphics::GraphicsState* graphics_state);
 
+// Boots an APK Application and one manifest Service without creating a
+// Window, then serves its Binder on the inherited isolated-process channel.
+int run_service(JNIEnv* env, art::Thread* self, jclass service_class,
+                jclass probe_context_class, jclass probe_resources_class,
+                jobject package_manager, bool use_framework_resources,
+                jint window_scale, const char* framework_res_apk,
+                const char* apk_app_package, const char* service_class_name,
+                const char* app_apk_path, jint control_fd);
+
 }  // namespace darwin_art_presentation

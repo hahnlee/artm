@@ -77,6 +77,8 @@ int load_classes(JNIEnv* env,
     std::cerr << "ART Darwin DEX: PathClassLoader creation failed\n";
     return 4;
   }
+  std::cerr << "ART Darwin DEX: application ClassLoader="
+            << static_cast<void*>(app_loader.Get()) << "\n";
   out->app_loader = soa.AddLocalReference<jobject>(app_loader.Get());
   // ClassLinker::CreatePathClassLoader is an ART test helper: it allocates and
   // wires BaseDexClassLoader fields directly, without running ClassLoader's
@@ -108,6 +110,75 @@ int load_classes(JNIEnv* env,
   env->DeleteLocalRef(class_loader_class);
   if (class_loader_constructor == nullptr || self->IsExceptionPending()) {
     std::cerr << "ART Darwin DEX: ClassLoader base initialization failed\n";
+    return 4;
+  }
+
+  // CreatePathClassLoader is a test helper and bypasses the Java
+  // BaseDexClassLoader/DexPathList constructors.  In particular its
+  // DexPathList.definingContext remains null.  Normal Java-side class lookup
+  // later passes that field to DexFile.defineClassNative; leaving it null
+  // attempts to register the APK dex files against the boot loader.  Complete
+  // the constructor invariant before any app class can perform a lazy lookup.
+  jclass base_dex_class_loader = env->FindClass("dalvik/system/BaseDexClassLoader");
+  jfieldID path_list_field =
+      base_dex_class_loader == nullptr
+          ? nullptr
+          : env->GetFieldID(base_dex_class_loader, "pathList",
+                            "Ldalvik/system/DexPathList;");
+  jobject path_list =
+      path_list_field == nullptr
+          ? nullptr
+          : env->GetObjectField(out->app_loader, path_list_field);
+  jclass dex_path_list = env->FindClass("dalvik/system/DexPathList");
+  jfieldID defining_context_field =
+      dex_path_list == nullptr
+          ? nullptr
+          : env->GetFieldID(dex_path_list, "definingContext",
+                            "Ljava/lang/ClassLoader;");
+  jfieldID native_library_directories_field =
+      dex_path_list == nullptr
+          ? nullptr
+          : env->GetFieldID(dex_path_list, "nativeLibraryDirectories",
+                            "Ljava/util/List;");
+  jfieldID system_native_library_directories_field =
+      dex_path_list == nullptr
+          ? nullptr
+          : env->GetFieldID(dex_path_list, "systemNativeLibraryDirectories",
+                            "Ljava/util/List;");
+  jclass array_list = env->FindClass("java/util/ArrayList");
+  jmethodID array_list_constructor =
+      array_list == nullptr
+          ? nullptr
+          : env->GetMethodID(array_list, "<init>", "()V");
+  jobject native_library_directories =
+      array_list_constructor == nullptr
+          ? nullptr
+          : env->NewObject(array_list, array_list_constructor);
+  jobject system_native_library_directories =
+      array_list_constructor == nullptr
+          ? nullptr
+          : env->NewObject(array_list, array_list_constructor);
+  if (path_list == nullptr || defining_context_field == nullptr ||
+      native_library_directories_field == nullptr ||
+      system_native_library_directories_field == nullptr ||
+      native_library_directories == nullptr ||
+      system_native_library_directories == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Darwin DEX: DexPathList constructor state lookup failed\n";
+    return 4;
+  }
+  env->SetObjectField(path_list, defining_context_field, out->app_loader);
+  env->SetObjectField(path_list, native_library_directories_field,
+                      native_library_directories);
+  env->SetObjectField(path_list, system_native_library_directories_field,
+                      system_native_library_directories);
+  env->DeleteLocalRef(system_native_library_directories);
+  env->DeleteLocalRef(native_library_directories);
+  env->DeleteLocalRef(array_list);
+  env->DeleteLocalRef(dex_path_list);
+  env->DeleteLocalRef(path_list);
+  env->DeleteLocalRef(base_dex_class_loader);
+  if (env->ExceptionCheck()) {
+    std::cerr << "ART Darwin DEX: DexPathList defining context setup failed\n";
     return 4;
   }
   for (const auto& dex_file : app_dex_files) {

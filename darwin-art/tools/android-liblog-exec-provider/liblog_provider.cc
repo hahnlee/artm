@@ -2,8 +2,10 @@
 
 #include <android/log.h>
 
-#include <cstring>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 extern "C" int darwin_art_bionic_vsnprintf(char*, size_t, const char*,
                                              const void*);
@@ -45,6 +47,39 @@ extern "C" int darwin_art_android_log_vprint(int priority, const char* tag,
 
 namespace {
 
+void TraceTransferBufferFailure(const char* message) {
+  if (message != nullptr &&
+      std::getenv("DARWIN_ART_DEBUG_TRANSFER_BUFFER_LOG") != nullptr &&
+      std::strstr(message, "TransferBuffer::Initialize() failed") != nullptr) {
+    std::fprintf(stderr,
+                 "DARWIN liblog: TransferBuffer failure caller=%p message=%s\n",
+                 __builtin_return_address(0), message);
+    void** frame = static_cast<void**>(__builtin_frame_address(0));
+    for (int depth = 0; depth != 12 && frame != nullptr; ++depth) {
+      std::fprintf(stderr, "DARWIN liblog: frame[%d]=%p fp=%p\n", depth,
+                   frame[1], frame);
+      void** parent = static_cast<void**>(frame[0]);
+      if (parent <= frame || reinterpret_cast<uintptr_t>(parent) -
+                                 reinterpret_cast<uintptr_t>(frame) >
+                             (1u << 20)) {
+        break;
+      }
+      frame = parent;
+    }
+  }
+}
+
+int DarwinArtAndroidLogWrite(int priority, const char* tag,
+                             const char* message) {
+  TraceTransferBufferFailure(message);
+  return __android_log_write(priority, tag, message);
+}
+
+void DarwinArtAndroidLogWriteMessage(__android_log_message* message) {
+  TraceTransferBufferFailure(message == nullptr ? nullptr : message->message);
+  __android_log_write_log_message(message);
+}
+
 struct Entry {
   const char* name;
   uintptr_t address;
@@ -82,8 +117,9 @@ const Entry kEntries[] = {
     LIBLOG_ENTRY(__android_log_stderr_logger),
     {"__android_log_vprint",
      reinterpret_cast<uintptr_t>(&darwin_art_android_log_vprint)},
-    LIBLOG_ENTRY(__android_log_write),
-    LIBLOG_ENTRY(__android_log_write_log_message),
+    {"__android_log_write", reinterpret_cast<uintptr_t>(&DarwinArtAndroidLogWrite)},
+    {"__android_log_write_log_message",
+     reinterpret_cast<uintptr_t>(&DarwinArtAndroidLogWriteMessage)},
 };
 
 static_assert(sizeof(kEntries) / sizeof(kEntries[0]) == DARWIN_ART_LIBLOG_PROVIDER_COUNT);

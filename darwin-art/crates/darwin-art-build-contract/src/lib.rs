@@ -7,13 +7,12 @@
 /// Bump when the common runtime/adapters include or command contract changes.
 /// A mismatch disables cache promotion until the canonical builder repopulates
 /// `_build/runtime-common`.
-pub const RUNTIME_CACHE_IDENTITY: &str =
-    "darwin-art-runtime-core-cache-v5-angle-egl-surface-coreaudio";
+pub const RUNTIME_CACHE_IDENTITY: &str = "darwin-art-runtime-core-cache-v9-security-trust";
 
 /// Identity of the generated native Ninja graph. Keeping this beside the
 /// runtime cache contract prevents the canonical builder and graph emitter
 /// from silently disagreeing about graph format or edge ownership.
-pub const NATIVE_GRAPH_VERSION: &str = "darwin-art-native-graph-v18-angle-egl-surface-coreaudio";
+pub const NATIVE_GRAPH_VERSION: &str = "darwin-art-native-graph-v22-security-trust";
 
 /// Canonical adapter translation units for the two runtime flavors.  Keeping
 /// this list in the dependency-free contract crate prevents the Cargo
@@ -23,10 +22,15 @@ pub const HEADLESS_ADAPTER_SOURCES: &[&str] = &[
     "darwin_art_abi_layout.cc",
     "darwin_android_jni_trampoline.cc",
     "darwin_android_elf_image_registry.cc",
+    "darwin_android_system_fonts.cc",
+    "darwin_android_asset_manager.cc",
+    "darwin_android_platform.mm",
+    "darwin_android_media_ndk.cc",
     "darwin_provider_owners.cc",
     "darwin_angle_egl.cc",
     "darwin_audio_track.mm",
     "darwin_framework_natives.cc",
+    "darwin_security_trust.mm",
     "darwin_motion_event_natives.cc",
     "darwin_framework_binder_natives.cc",
     "darwin_framework_sqlite_natives.cc",
@@ -58,10 +62,15 @@ pub const GRAPHICS_ADAPTER_SOURCES: &[&str] = &[
     "darwin_art_abi_layout.cc",
     "darwin_android_jni_trampoline.cc",
     "darwin_android_elf_image_registry.cc",
+    "darwin_android_system_fonts.cc",
+    "darwin_android_asset_manager.cc",
+    "darwin_android_platform.mm",
+    "darwin_android_media_ndk.cc",
     "darwin_provider_owners.cc",
     "darwin_angle_egl.cc",
     "darwin_audio_track.mm",
     "darwin_framework_natives.cc",
+    "darwin_security_trust.mm",
     "darwin_motion_event_natives.cc",
     "darwin_framework_binder_natives.cc",
     "darwin_framework_sqlite_natives.cc",
@@ -93,6 +102,10 @@ pub const COMMON_ADAPTER_SOURCES: &[&str] = &[
     "darwin_art_abi_layout.cc",
     "darwin_android_jni_trampoline.cc",
     "darwin_android_elf_image_registry.cc",
+    "darwin_android_system_fonts.cc",
+    "darwin_android_asset_manager.cc",
+    "darwin_android_platform.mm",
+    "darwin_android_media_ndk.cc",
     "darwin_provider_owners.cc",
     "darwin_framework_animation_natives.cc",
     "darwin_runtime_adapters.cc",

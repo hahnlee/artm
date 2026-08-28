@@ -4,6 +4,7 @@
 #include <signal.h>
 
 #include <atomic>
+#include <array>
 #include <climits>
 #include <condition_variable>
 #include <cstdio>
@@ -72,6 +73,23 @@ int AndroidError(int error) {
   if (error == ESRCH) return kAndroidEsrch;
   if (error == ENOTSUP) return kAndroidEnotsup;
   return kAndroidEinval;
+}
+
+int HostSignal(int android_signal) {
+  static constexpr unsigned char kMap[32] = {
+      0,        SIGHUP,  SIGINT,  SIGQUIT, SIGILL,  SIGTRAP,   SIGABRT,
+      SIGBUS,   SIGFPE,  SIGKILL, SIGUSR1, SIGSEGV, SIGUSR2,   SIGPIPE,
+      SIGALRM,  SIGTERM, 0,       SIGCHLD, SIGCONT, SIGSTOP,   SIGTSTP,
+      SIGTTIN,  SIGTTOU, SIGURG,  SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF,
+      SIGWINCH, SIGINFO, SIGUSR1, SIGUSR2};
+  return android_signal > 0 && android_signal < 32 ? kMap[android_signal] : 0;
+}
+
+int AndroidSignal(int host_signal) {
+  for (int android_signal = 1; android_signal < 32; ++android_signal) {
+    if (HostSignal(android_signal) == host_signal) return android_signal;
+  }
+  return 0;
 }
 
 struct KeyEntry {
@@ -166,16 +184,35 @@ struct ThreadEntry {
   void* return_value{};
 };
 
-struct ProviderState {
+struct ConditionShard {
   std::mutex mutex;
+  std::unordered_map<DarwinArtAndroidPthreadCond*, std::shared_ptr<CondEntry>>
+      entries;
+};
+
+constexpr size_t kConditionShardCount = 64;
+
+size_t ConditionShardIndex(const DarwinArtAndroidPthreadCond* address) {
+  uintptr_t value = reinterpret_cast<uintptr_t>(address);
+  value ^= value >> 17;
+  value *= UINT64_C(0xed5ad4bb);
+  value ^= value >> 11;
+  return value % kConditionShardCount;
+}
+
+struct ProviderState {
+  std::mutex keys_mutex;
+  std::mutex mutexes_mutex;
+  std::mutex once_mutex;
+  std::mutex rwlocks_mutex;
+  std::mutex threads_mutex;
   KeySlot key_slots[kAndroidKeySlots];
   std::unordered_set<ThreadTlsState*> thread_tls_states;
   std::unordered_map<DarwinArtAndroidPthreadMutex*, std::shared_ptr<MutexEntry>>
       mutexes;
   std::unordered_map<DarwinArtAndroidPthreadOnce*, std::shared_ptr<OnceEntry>>
       once_controls;
-  std::unordered_map<DarwinArtAndroidPthreadCond*, std::shared_ptr<CondEntry>>
-      conditions;
+  std::array<ConditionShard, kConditionShardCount> conditions;
   std::unordered_map<DarwinArtAndroidPthreadRwlock*,
                      std::shared_ptr<RwlockEntry>>
       rwlocks;
@@ -190,9 +227,16 @@ ProviderState& State() {
   return *state;
 }
 
+thread_local std::unordered_map<DarwinArtAndroidPthreadMutex*,
+                                std::shared_ptr<MutexEntry>>
+    mutex_lookup_cache;
+thread_local std::unordered_map<DarwinArtAndroidPthreadCond*,
+                                std::shared_ptr<CondEntry>>
+    cond_lookup_cache;
+
 void RemoveThreadEntry(const std::shared_ptr<ThreadEntry>& entry) {
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
+  std::lock_guard<std::mutex> lock(state.threads_mutex);
   const auto found = state.threads.find(entry->token);
   if (found != state.threads.end() && found->second.get() == entry.get()) {
     state.threads.erase(found);
@@ -203,7 +247,7 @@ std::shared_ptr<ThreadEntry> FindThreadEntry(DarwinArtAndroidPthread token) {
   ProviderState& state = State();
   std::shared_ptr<ThreadEntry> entry;
   {
-    std::lock_guard<std::mutex> lock(state.mutex);
+    std::lock_guard<std::mutex> lock(state.threads_mutex);
     const auto found = state.threads.find(token);
     if (found == state.threads.end()) return nullptr;
     entry = found->second;
@@ -314,7 +358,7 @@ ThreadTlsState* GetThreadTlsState(bool create) {
     return nullptr;
   }
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
+  std::lock_guard<std::mutex> lock(state.keys_mutex);
   state.thread_tls_states.insert(thread_state);
   return thread_state;
 }
@@ -351,7 +395,7 @@ void HostThreadTlsDestructor(void* opaque) {
     size_t count = 0;
     {
       ProviderState& state = State();
-      std::lock_guard<std::mutex> lock(state.mutex);
+      std::lock_guard<std::mutex> lock(state.keys_mutex);
       for (uint32_t slot = 0; slot < kAndroidKeySlots; ++slot) {
         const std::shared_ptr<KeyEntry>& entry = state.key_slots[slot].active;
         ThreadTlsValue& value = thread_state->values[slot];
@@ -373,7 +417,7 @@ void HostThreadTlsDestructor(void* opaque) {
   tls_destructor_state = nullptr;
   ProviderState& state = State();
   {
-    std::lock_guard<std::mutex> lock(state.mutex);
+    std::lock_guard<std::mutex> lock(state.keys_mutex);
     state.thread_tls_states.erase(thread_state);
   }
   delete thread_state;
@@ -482,8 +526,18 @@ std::shared_ptr<MutexEntry> FindOrCreateMutex(
     *error_out = kAndroidEinval;
     return nullptr;
   }
+  const auto cached_mutex = mutex_lookup_cache.find(mutex);
+  if (cached_mutex != mutex_lookup_cache.end()) {
+    const std::shared_ptr<MutexEntry> cached = cached_mutex->second;
+    std::lock_guard<std::mutex> lifecycle_lock(cached->lifecycle_mutex);
+    if (cached->lifecycle != MutexEntry::Lifecycle::kDestroyed ||
+        AndroidMutexState(mutex) == kAndroidMutexDestroyed) {
+      *error_out = 0;
+      return cached;
+    }
+  }
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
+  std::lock_guard<std::mutex> lock(state.mutexes_mutex);
   const auto found = state.mutexes.find(mutex);
   if (found != state.mutexes.end()) {
     const std::shared_ptr<MutexEntry> existing = found->second;
@@ -491,6 +545,7 @@ std::shared_ptr<MutexEntry> FindOrCreateMutex(
     if (existing->lifecycle != MutexEntry::Lifecycle::kDestroyed ||
         AndroidMutexState(mutex) == kAndroidMutexDestroyed) {
       *error_out = 0;
+      mutex_lookup_cache[mutex] = existing;
       return existing;
     }
     // libc++'s Android std::mutex uses the all-zero static initializer. A
@@ -532,6 +587,7 @@ std::shared_ptr<MutexEntry> FindOrCreateMutex(
     return nullptr;
   }
   state.mutexes[mutex] = entry;
+  mutex_lookup_cache[mutex] = entry;
   *error_out = 0;
   return entry;
 }
@@ -543,15 +599,27 @@ std::shared_ptr<CondEntry> FindOrCreateCond(
     *error_out = kAndroidEinval;
     return nullptr;
   }
+  const auto cached_cond = cond_lookup_cache.find(cond);
+  if (cached_cond != cond_lookup_cache.end()) {
+    const std::shared_ptr<CondEntry> cached = cached_cond->second;
+    std::lock_guard<std::mutex> lifecycle_lock(cached->lifecycle_mutex);
+    if (cached->lifecycle != CondEntry::Lifecycle::kDestroyed ||
+        AndroidCondState(cond) == kAndroidCondDestroyed) {
+      *error_out = 0;
+      return cached;
+    }
+  }
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
-  const auto found = state.conditions.find(cond);
-  if (found != state.conditions.end()) {
+  ConditionShard& shard = state.conditions[ConditionShardIndex(cond)];
+  std::lock_guard<std::mutex> lock(shard.mutex);
+  const auto found = shard.entries.find(cond);
+  if (found != shard.entries.end()) {
     const std::shared_ptr<CondEntry> existing = found->second;
     std::lock_guard<std::mutex> lifecycle_lock(existing->lifecycle_mutex);
     if (existing->lifecycle != CondEntry::Lifecycle::kDestroyed ||
         AndroidCondState(cond) == kAndroidCondDestroyed) {
       *error_out = 0;
+      cond_lookup_cache[cond] = existing;
       return existing;
     }
     // Match the mutex generation rule above for a zero-initialized condition
@@ -585,7 +653,8 @@ std::shared_ptr<CondEntry> FindOrCreateCond(
   }
   entry->host_initialized = true;
   entry->monotonic = (visible & kAndroidCondClockMask) != 0;
-  state.conditions[cond] = entry;
+  shard.entries[cond] = entry;
+  cond_lookup_cache[cond] = entry;
   *error_out = 0;
   return entry;
 }
@@ -660,7 +729,29 @@ int CondWait(DarwinArtAndroidPthreadCond* visible_cond,
         &cond->host, &mutex->host, absolute_timeout);
   }
   EndCondWait(visible_cond, cond, mutex);
-  return AndroidError(result);
+  const int android_result = AndroidError(result);
+  if (android_result != 0 &&
+      std::getenv("DARWIN_ART_PTHREAD_TRACE") != nullptr) {
+    static std::atomic<uint32_t> failure_count{0};
+    const uint32_t ordinal =
+        failure_count.fetch_add(1, std::memory_order_relaxed);
+    if (ordinal < 32) {
+      std::fprintf(stderr,
+                   "DARWIN pthread cond_wait failure cond=%p mutex=%p "
+                   "timed=%d monotonic=%d host=%d android=%d deadline=%lld.%09ld\n",
+                   static_cast<void*>(visible_cond),
+                   static_cast<void*>(visible_mutex),
+                   absolute_timeout != nullptr,
+                   cond->monotonic,
+                   result,
+                   android_result,
+                   absolute_timeout == nullptr
+                       ? 0LL
+                       : static_cast<long long>(absolute_timeout->tv_sec),
+                   absolute_timeout == nullptr ? 0L : absolute_timeout->tv_nsec);
+    }
+  }
+  return android_result;
 }
 
 int CondPulse(DarwinArtAndroidPthreadCond* visible_cond, bool broadcast) {
@@ -695,7 +786,7 @@ std::shared_ptr<RwlockEntry> FindOrCreateRwlock(
     return nullptr;
   }
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
+  std::lock_guard<std::mutex> lock(state.rwlocks_mutex);
   const auto found = state.rwlocks.find(rwlock);
   if (found != state.rwlocks.end()) {
     const std::shared_ptr<RwlockEntry> existing = found->second;
@@ -782,7 +873,7 @@ extern "C" int darwin_art_bionic_pthread_create(
   if (owner == nullptr) return kAndroidEnomem;
   try {
     ProviderState& state = State();
-    std::lock_guard<std::mutex> lock(state.mutex);
+    std::lock_guard<std::mutex> lock(state.threads_mutex);
     for (;;) {
       const uint64_t raw_token =
           NextThreadToken().fetch_add(1, std::memory_order_relaxed);
@@ -857,6 +948,22 @@ extern "C" int darwin_art_bionic_pthread_attr_getguardsize(
   return 0;
 }
 
+extern "C" int darwin_art_bionic_pthread_attr_getstack(
+    const DarwinArtAndroidPthreadAttr* attr, void** address, size_t* size) {
+  if (attr == nullptr || address == nullptr || size == nullptr)
+    return kAndroidEinval;
+  *address = attr->stack_base;
+  *size = attr->stack_size;
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_attr_getstacksize(
+    const DarwinArtAndroidPthreadAttr* attr, size_t* size) {
+  if (attr == nullptr || size == nullptr) return kAndroidEinval;
+  *size = attr->stack_size;
+  return 0;
+}
+
 extern "C" int darwin_art_bionic_pthread_attr_getschedparam(
     const DarwinArtAndroidPthreadAttr* attr, sched_param* param) {
   if (attr == nullptr || param == nullptr) return kAndroidEinval;
@@ -904,6 +1011,65 @@ extern "C" int darwin_art_bionic_pthread_attr_setstacksize(
   return 0;
 }
 
+extern "C" int darwin_art_bionic_pthread_getattr_np(
+    DarwinArtAndroidPthread token, DarwinArtAndroidPthreadAttr* attr) {
+  if (attr == nullptr) return kAndroidEinval;
+  pthread_t host;
+  if (token == CurrentThreadToken()) {
+    host = pthread_self();
+  } else {
+    auto entry = FindThreadEntry(token);
+    if (entry == nullptr) return kAndroidEsrch;
+    host = entry->host;
+  }
+  std::memset(attr, 0, sizeof(*attr));
+  attr->stack_size = pthread_get_stacksize_np(host);
+  // Darwin reports the initial stack address (the high, downward-growing
+  // end), while Android pthread_attr_getstack() reports the low base of the
+  // mapped interval.  Publishing Darwin's value unchanged makes Android
+  // callers such as V8 believe every frame is outside the central stack.
+  void* stack_top = pthread_get_stackaddr_np(host);
+  attr->stack_base = stack_top == nullptr
+                         ? nullptr
+                         : static_cast<void*>(
+                               static_cast<char*>(stack_top) - attr->stack_size);
+  attr->guard_size = 4096;
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_gettid_np(
+    DarwinArtAndroidPthread token) {
+  if (token == CurrentThreadToken() || FindThreadEntry(token) != nullptr)
+    return static_cast<int>(static_cast<uint64_t>(token) & UINT32_C(0x7fffffff));
+  return -1;
+}
+
+extern "C" int darwin_art_bionic_pthread_condattr_init(uint32_t* attr) {
+  if (attr == nullptr) return kAndroidEinval;
+  *attr = 0;
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_condattr_destroy(uint32_t* attr) {
+  if (attr == nullptr) return kAndroidEinval;
+  *attr = UINT32_MAX;
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_condattr_setclock(uint32_t* attr,
+                                                            int clock_id) {
+  if (attr == nullptr || (clock_id != 0 && clock_id != 1))
+    return kAndroidEinval;
+  *attr = clock_id == 1 ? kAndroidCondClockMask : 0;
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_pthread_mutexattr_setprotocol(
+    DarwinArtAndroidPthreadMutexAttr* attributes, int protocol) {
+  if (attributes == nullptr) return kAndroidEinval;
+  return protocol == 0 ? 0 : kAndroidEnotsup;
+}
+
 extern "C" int darwin_art_bionic_pthread_equal(
     DarwinArtAndroidPthread left, DarwinArtAndroidPthread right) {
   return left == right;
@@ -944,11 +1110,14 @@ extern "C" int darwin_art_bionic_pthread_setname_np(
 
 extern "C" int darwin_art_bionic_pthread_kill(
     DarwinArtAndroidPthread token, int signal_number) {
+  if (signal_number < 0 || signal_number >= 32) return kAndroidEinval;
+  const int host_signal = signal_number == 0 ? 0 : HostSignal(signal_number);
+  if (signal_number != 0 && host_signal == 0) return kAndroidEinval;
   if (token == CurrentThreadToken())
-    return AndroidError(pthread_kill(pthread_self(), signal_number));
+    return AndroidError(pthread_kill(pthread_self(), host_signal));
   auto entry = FindThreadEntry(token);
   return entry == nullptr ? kAndroidEsrch
-                          : AndroidError(pthread_kill(entry->host, signal_number));
+                          : AndroidError(pthread_kill(entry->host, host_signal));
 }
 
 extern "C" int darwin_art_bionic_pthread_sigmask(
@@ -964,10 +1133,10 @@ extern "C" int darwin_art_bionic_pthread_sigmask(
   sigset_t host_old;
   sigemptyset(&host_set);
   if (android_set != nullptr) {
-    for (int signal_number = 1; signal_number < NSIG; ++signal_number) {
+    for (int signal_number = 1; signal_number < 32; ++signal_number) {
       if ((*android_set & (UINT64_C(1) << (signal_number - 1))) != 0 &&
-          signal_number < 32) {
-        sigaddset(&host_set, signal_number);
+          HostSignal(signal_number) != 0) {
+        sigaddset(&host_set, HostSignal(signal_number));
       }
     }
   }
@@ -977,9 +1146,10 @@ extern "C" int darwin_art_bionic_pthread_sigmask(
   if (result != 0) return AndroidError(result);
   if (android_old_set != nullptr) {
     uint64_t result_set = 0;
-    for (int signal_number = 1; signal_number < 32; ++signal_number) {
-      if (sigismember(&host_old, signal_number) == 1)
-        result_set |= UINT64_C(1) << (signal_number - 1);
+    for (int host_signal = 1; host_signal < NSIG; ++host_signal) {
+      const int android_signal = AndroidSignal(host_signal);
+      if (android_signal != 0 && sigismember(&host_old, host_signal) == 1)
+        result_set |= UINT64_C(1) << (android_signal - 1);
     }
     *android_old_set = result_set;
   }
@@ -1004,8 +1174,18 @@ extern "C" void darwin_art_bionic___pthread_cleanup_pop(
 
 extern "C" int darwin_art_bionic_pthread_cond_init(
     DarwinArtAndroidPthreadCond* cond, const void* attr) {
-  if (cond == nullptr || attr != nullptr) return kAndroidEnotsup;
+  if (cond == nullptr) return kAndroidEinval;
+  uint32_t visible = 0;
+  if (attr != nullptr) {
+    std::memcpy(&visible, attr, sizeof(visible));
+    if (visible == UINT32_MAX ||
+        (visible & ~(kAndroidCondSharedMask | kAndroidCondClockMask)) != 0) {
+      return kAndroidEinval;
+    }
+    if ((visible & kAndroidCondSharedMask) != 0) return kAndroidEnotsup;
+  }
   std::memset(cond, 0, sizeof(*cond));
+  SetAndroidCondState(cond, visible);
   int error = 0;
   return FindOrCreateCond(cond, &error) == nullptr ? error : 0;
 }
@@ -1077,7 +1257,7 @@ extern "C" int darwin_art_bionic_pthread_key_create(
     DarwinArtAndroidTlsDestructor destructor) {
   if (key == nullptr) return kAndroidEinval;
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
+  std::lock_guard<std::mutex> lock(state.keys_mutex);
   for (uint32_t slot = 0; slot < kAndroidKeySlots; ++slot) {
     KeySlot& key_slot = state.key_slots[slot];
     if (key_slot.active != nullptr) continue;
@@ -1097,7 +1277,7 @@ extern "C" int darwin_art_bionic_pthread_key_delete(
   uint32_t slot = 0;
   if (!DecodeKey(key, &slot)) return kAndroidEinval;
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
+  std::lock_guard<std::mutex> lock(state.keys_mutex);
   if (state.key_slots[slot].active == nullptr) return kAndroidEinval;
   // POSIX deletion does not call destructors. Per-thread values retain only a
   // generation number and raw application value, never an owning KeyEntry.
@@ -1113,7 +1293,7 @@ extern "C" void* darwin_art_bionic_pthread_getspecific(
   ThreadTlsState* thread_state = GetThreadTlsState(false);
   if (thread_state == nullptr) return nullptr;
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
+  std::lock_guard<std::mutex> lock(state.keys_mutex);
   const std::shared_ptr<KeyEntry>& entry = state.key_slots[slot].active;
   if (entry == nullptr ||
       thread_state->values[slot].generation != entry->generation) {
@@ -1129,7 +1309,7 @@ extern "C" int darwin_art_bionic_pthread_setspecific(
   if (!DecodeKey(key, &slot)) return kAndroidEinval;
   ThreadTlsState* thread_state = GetThreadTlsState(value != nullptr);
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
+  std::lock_guard<std::mutex> lock(state.keys_mutex);
   const std::shared_ptr<KeyEntry>& entry = state.key_slots[slot].active;
   if (entry == nullptr) return kAndroidEinval;
   if (thread_state == nullptr) {
@@ -1153,7 +1333,7 @@ extern "C" int darwin_art_bionic_pthread_once(
   ProviderState& state = State();
   std::shared_ptr<OnceEntry> entry;
   {
-    std::lock_guard<std::mutex> lock(state.mutex);
+    std::lock_guard<std::mutex> lock(state.once_mutex);
     const auto found = state.once_controls.find(once);
     if (found == state.once_controls.end()) {
       if (visible != kOnceNotStarted) return kAndroidEinval;
@@ -1216,7 +1396,7 @@ extern "C" int darwin_art_bionic_pthread_mutex_init(
   const int parsed = ParseAndroidMutexAttributes(android_attributes, &kind);
   if (parsed != 0) return parsed;
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
+  std::lock_guard<std::mutex> lock(state.mutexes_mutex);
   const auto found = state.mutexes.find(mutex);
   if (found != state.mutexes.end()) {
     std::lock_guard<std::mutex> lifecycle_lock(
@@ -1466,7 +1646,7 @@ extern "C" int darwin_art_bionic_pthread_rwlock_init(
   }
   ProviderState& state = State();
   try {
-    std::lock_guard<std::mutex> state_lock(state.mutex);
+    std::lock_guard<std::mutex> state_lock(state.rwlocks_mutex);
     const auto found = state.rwlocks.find(visible);
     if (found != state.rwlocks.end()) {
       const std::shared_ptr<RwlockEntry> existing = found->second;
@@ -1603,9 +1783,13 @@ extern "C" int darwin_art_bionic_sem_timedwait(
 extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
                                                     const char* symbol,
                                                     const char* version) {
+  const bool protocol_version_alias =
+      symbol != nullptr && version != nullptr &&
+      std::string_view(symbol) == "pthread_mutexattr_setprotocol" &&
+      std::string_view(version) == "LIBC_P";
   if (soname == nullptr || symbol == nullptr || version == nullptr ||
       std::string_view(soname) != "libc.so" ||
-      std::string_view(version) != "LIBC") {
+      (std::string_view(version) != "LIBC" && !protocol_version_alias)) {
     return nullptr;
   }
   if (std::string_view(symbol) == "sem_init")
@@ -1631,6 +1815,8 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
   RESOLVE(detach);
   RESOLVE(attr_destroy);
   RESOLVE(attr_getguardsize);
+  RESOLVE(attr_getstack);
+  RESOLVE(attr_getstacksize);
   RESOLVE(attr_getschedparam);
   RESOLVE(attr_init);
   RESOLVE(attr_setdetachstate);
@@ -1640,6 +1826,8 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
   RESOLVE(attr_setscope);
   RESOLVE(attr_setstacksize);
   RESOLVE(equal);
+  RESOLVE(getattr_np);
+  RESOLVE(gettid_np);
   RESOLVE(getschedparam);
   RESOLVE(setschedparam);
   RESOLVE(exit);
@@ -1654,12 +1842,16 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
   RESOLVE(mutexattr_init);
   RESOLVE(mutexattr_destroy);
   RESOLVE(mutexattr_settype);
+  RESOLVE(mutexattr_setprotocol);
   RESOLVE(mutex_init);
   RESOLVE(mutex_lock);
   RESOLVE(mutex_trylock);
   RESOLVE(mutex_unlock);
   RESOLVE(mutex_destroy);
   RESOLVE(cond_wait);
+  RESOLVE(condattr_destroy);
+  RESOLVE(condattr_init);
+  RESOLVE(condattr_setclock);
   RESOLVE(cond_init);
   RESOLVE(cond_timedwait);
   RESOLVE(cond_signal);
@@ -1676,7 +1868,11 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
 
 extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
+  std::scoped_lock lock(state.keys_mutex,
+                        state.mutexes_mutex,
+                        state.once_mutex,
+                        state.rwlocks_mutex,
+                        state.threads_mutex);
   if (!state.threads.empty()) return kAndroidEbusy;
   for (const KeySlot& slot : state.key_slots) {
     if (slot.active != nullptr) return kAndroidEbusy;
@@ -1688,11 +1884,14 @@ extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
       return kAndroidEbusy;
     }
   }
-  for (const auto& [address, entry] : state.conditions) {
-    (void)address;
-    std::lock_guard<std::mutex> lifecycle_lock(entry->lifecycle_mutex);
-    if (entry->lifecycle != CondEntry::Lifecycle::kDestroyed) {
-      return kAndroidEbusy;
+  for (ConditionShard& shard : state.conditions) {
+    std::lock_guard<std::mutex> shard_lock(shard.mutex);
+    for (const auto& [address, entry] : shard.entries) {
+      (void)address;
+      std::lock_guard<std::mutex> lifecycle_lock(entry->lifecycle_mutex);
+      if (entry->lifecycle != CondEntry::Lifecycle::kDestroyed) {
+        return kAndroidEbusy;
+      }
     }
   }
   for (const auto& [address, entry] : state.rwlocks) {
@@ -1721,7 +1920,7 @@ extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
     delete current;
   }
   state.mutexes.clear();
-  state.conditions.clear();
+  for (ConditionShard& shard : state.conditions) shard.entries.clear();
   state.rwlocks.clear();
   state.once_controls.clear();
   return 0;
@@ -1729,7 +1928,7 @@ extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
 
 extern "C" size_t darwin_art_bionic_pthread_provider_retired_cell_count(void) {
   ProviderState& state = State();
-  std::lock_guard<std::mutex> lock(state.mutex);
+  std::lock_guard<std::mutex> lock(state.keys_mutex);
   size_t count = 0;
   for (const ThreadTlsState* thread_state : state.thread_tls_states) {
     for (const ThreadTlsValue& value : thread_state->values) {

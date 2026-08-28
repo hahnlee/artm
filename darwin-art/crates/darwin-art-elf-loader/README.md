@@ -3,8 +3,8 @@
 This standalone crate proves a bounded Android `.so` execution path on Apple
 Silicon. It reserves one Darwin virtual-address range for an AArch64 `ET_DYN`,
 copies and zero-fills checked `PT_LOAD` segments, applies
-`R_AARCH64_RELATIVE`, `R_AARCH64_ABS64`, `R_AARCH64_GLOB_DAT`, and
-`R_AARCH64_JUMP_SLOT` RELA entries, installs final page protections, executes
+`R_AARCH64_RELATIVE`, `R_AARCH64_ABS64`, `R_AARCH64_GLOB_DAT`,
+`R_AARCH64_JUMP_SLOT`, and deferred `R_AARCH64_IRELATIVE` RELA entries, installs final page protections, executes
 `DT_INIT_ARRAY` once in table order, calls a defined no-argument export, and
 executes `DT_FINI_ARRAY` in reverse table order followed by `DT_FINI` at unload.
 

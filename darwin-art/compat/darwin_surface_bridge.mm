@@ -11,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <new>
+#include <time.h>
 #include <unordered_map>
 
 namespace {
@@ -34,6 +35,18 @@ constexpr uint32_t kBgraPixelFormat =
 
 bool IsMainThread() {
   return [NSThread isMainThread];
+}
+
+uint64_t AndroidEventTimeNanos() {
+  // NSEvent.timestamp uses AppKit's uptime domain, whose treatment of system
+  // sleep differs from CLOCK_MONOTONIC on macOS. Android InputReader and
+  // Chromium's base::TimeTicks share the latter domain; passing the AppKit
+  // value through unchanged can make an otherwise current key event appear
+  // several days older than the document loader and abort the renderer.
+  timespec now = {};
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
+  return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000000) +
+         static_cast<uint64_t>(now.tv_nsec);
 }
 
 bool IsValidDimension(uint32_t value) {
@@ -68,6 +81,7 @@ bool AllocateSurfaceBacking(id<MTLDevice> device, uint32_t width,
     (__bridge NSString*)kIOSurfaceBytesPerElement : @(kBytesPerPixel),
     (__bridge NSString*)kIOSurfaceBytesPerRow : @(bytes_per_row),
     (__bridge NSString*)kIOSurfacePixelFormat : @(kBgraPixelFormat),
+    (__bridge NSString*)kIOSurfaceIsGlobal : @YES,
   };
   IOSurfaceRef io_surface = IOSurfaceCreate(
       (__bridge CFDictionaryRef)surface_properties);
@@ -322,12 +336,12 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   const CGFloat y_scale = bounds.size.height > 0.0
                               ? drawable_size.height / bounds.size.height
                               : 1.0;
-  // AppKit view coordinates grow upward from the bottom-left. Android input
-  // coordinates grow downward from the top-left, matching the retained view
-  // hierarchy and its backing-pixel layout.
-  const CGFloat android_y = bounds.size.height - point.y;
-  const uint64_t event_time_nanos =
-      event.timestamp > 0.0 ? static_cast<uint64_t>(event.timestamp * 1000000000.0) : 0;
+  // DarwinArtMetalView is flipped, so convertPoint already returns a
+  // top-left-origin Y coordinate. Flipping it a second time made a click near
+  // the top of the window arrive near the bottom of Android/Blink (for
+  // example input-field y=188 became body y=888 on a 1280 px surface).
+  const CGFloat android_y = point.y;
+  const uint64_t event_time_nanos = AndroidEventTimeNanos();
   if (action == DARWIN_ART_POINTER_DOWN) _downTimeNanos = event_time_nanos;
   _pointerEvents.push_back(DarwinArtPointerEventV2{
       .version = 2,
@@ -371,10 +385,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   const unsigned short scan_code = event.keyCode;
   const uint32_t key_code = AndroidKeyCode(scan_code);
   if (key_code == 0) return;
-  const uint64_t event_time_nanos =
-      event.timestamp > 0.0
-          ? static_cast<uint64_t>(event.timestamp * 1000000000.0)
-          : 0;
+  const uint64_t event_time_nanos = AndroidEventTimeNanos();
   if (action == 0 && !event.isARepeat) {
     _keyDownTimes[scan_code] = event_time_nanos;
     _keyRepeatCounts[scan_code] = 0;
@@ -450,13 +461,14 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
 
 - (void)cancelPointerStream {
   if (!_pointerActive) return;
+  const uint64_t event_time_nanos = AndroidEventTimeNanos();
   _pointerEvents.push_back(DarwinArtPointerEventV2{
       .version = 2,
       .size = static_cast<uint32_t>(sizeof(DarwinArtPointerEventV2)),
       .action = DARWIN_ART_POINTER_CANCEL,
       .flags = 0,
       .sequence = _nextPointerSequence++,
-      .event_time_nanos = _downTimeNanos,
+      .event_time_nanos = event_time_nanos,
       .down_time_nanos = _downTimeNanos,
       .pointer_id = 0,
       .pointer_count = 1,
@@ -565,6 +577,34 @@ bool darwin_art_surface_gpu_acquire_iosurface(
   *iosurface = surface->io_surface;
   *width = surface->width;
   *height = surface->height;
+  return true;
+}
+
+uint32_t darwin_art_surface_gpu_iosurface_id(DarwinArtSurface* surface) {
+  if (surface == nullptr) return 0;
+  std::lock_guard<std::mutex> lock(surface->backing_mutex);
+  return surface->io_surface == nullptr ? 0 : IOSurfaceGetID(surface->io_surface);
+}
+
+bool darwin_art_surface_gpu_lookup_iosurface(
+    uint32_t surface_id, void** iosurface, uint32_t* width,
+    uint32_t* height) {
+  if (surface_id == 0 || iosurface == nullptr || width == nullptr ||
+      height == nullptr) {
+    return false;
+  }
+  IOSurfaceRef found = IOSurfaceLookup(surface_id);
+  if (found == nullptr) return false;
+  const size_t found_width = IOSurfaceGetWidth(found);
+  const size_t found_height = IOSurfaceGetHeight(found);
+  if (found_width == 0 || found_height == 0 ||
+      found_width > UINT32_MAX || found_height > UINT32_MAX) {
+    CFRelease(found);
+    return false;
+  }
+  *iosurface = found;
+  *width = static_cast<uint32_t>(found_width);
+  *height = static_cast<uint32_t>(found_height);
   return true;
 }
 
@@ -713,6 +753,7 @@ DarwinArtSurface* darwin_art_surface_create(
       (__bridge NSString*)kIOSurfaceBytesPerElement : @(kBytesPerPixel),
       (__bridge NSString*)kIOSurfaceBytesPerRow : @(bytes_per_row),
       (__bridge NSString*)kIOSurfacePixelFormat : @(kBgraPixelFormat),
+      (__bridge NSString*)kIOSurfaceIsGlobal : @YES,
     };
     IOSurfaceRef io_surface = IOSurfaceCreate(
         (__bridge CFDictionaryRef)surface_properties);
@@ -867,9 +908,20 @@ static DarwinArtSurfaceResult ResizeSurfaceBacking(DarwinArtSurface* surface,
       const CGFloat scale = surface->view.metalLayer.contentsScale > 0.0
                                 ? surface->view.metalLayer.contentsScale
                                 : 1.0;
+      // NSWindow's setContentSize: preserves the lower-left frame origin.
+      // Android relayouts can transiently grow a Surface and then restore its
+      // previous size (Chromium does this while creating a tab).  Anchoring
+      // that sequence at the lower edge walks the window upward, eventually
+      // leaving its title bar off-screen.  Desktop windows conventionally
+      // keep their top-left placement across content-size changes, so retain
+      // that point explicitly while the Android buffer is reallocated.
+      const NSPoint top_left =
+          NSMakePoint(NSMinX(surface->window.frame),
+                      NSMaxY(surface->window.frame));
       [surface->window setContentSize:
                          NSMakeSize(static_cast<CGFloat>(width) / scale,
                                     static_cast<CGFloat>(height) / scale)];
+      [surface->window setFrameTopLeftPoint:top_left];
     }
   }
   return DARWIN_ART_SURFACE_OK;
@@ -890,7 +942,7 @@ DarwinArtSurfaceResult darwin_art_surface_set_title(
   return DARWIN_ART_SURFACE_OK;
 }
 
-char* darwin_art_host_open_image_document(void) {
+char* darwin_art_host_open_document(const char* mime_type) {
   if (!IsMainThread()) return nullptr;
   @autoreleasepool {
     NSOpenPanel* panel = [NSOpenPanel openPanel];
@@ -898,9 +950,11 @@ char* darwin_art_host_open_image_document(void) {
     panel.canChooseDirectories = NO;
     panel.allowsMultipleSelection = NO;
     panel.resolvesAliases = YES;
-    panel.title = @"Open image";
+    panel.title = @"Open Android document";
     panel.prompt = @"Open";
-    panel.allowedFileTypes = @[@"jpg", @"jpeg", @"png"];
+    if (mime_type != nullptr && strncmp(mime_type, "image/", 6) == 0) {
+      panel.allowedFileTypes = @[@"jpg", @"jpeg", @"png", @"gif", @"webp"];
+    }
     if ([panel runModal] != NSModalResponseOK || panel.URL == nil) {
       return nullptr;
     }
@@ -909,14 +963,17 @@ char* darwin_art_host_open_image_document(void) {
   }
 }
 
-char* darwin_art_host_save_image_document(const char* suggested_name) {
+char* darwin_art_host_save_document(const char* mime_type,
+                                    const char* suggested_name) {
   if (!IsMainThread()) return nullptr;
   @autoreleasepool {
     NSSavePanel* panel = [NSSavePanel savePanel];
     panel.canCreateDirectories = YES;
-    panel.title = @"Export image";
-    panel.prompt = @"Export";
-    panel.allowedFileTypes = @[@"jpg", @"jpeg", @"png"];
+    panel.title = @"Save Android document";
+    panel.prompt = @"Save";
+    if (mime_type != nullptr && strncmp(mime_type, "image/", 6) == 0) {
+      panel.allowedFileTypes = @[@"jpg", @"jpeg", @"png", @"gif", @"webp"];
+    }
     if (suggested_name != nullptr && suggested_name[0] != '\0') {
       NSString* name = [NSString stringWithUTF8String:suggested_name];
       if (name != nil) panel.nameFieldStringValue = name;

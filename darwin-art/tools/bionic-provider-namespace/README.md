@@ -58,9 +58,9 @@ after namespace composition.
 
 Run `tools/bionic-provider-namespace/audit.sh`. It regenerates and diffs every
 table, re-derives all 160 libc imports from the hash-pinned real NDK ELF,
-checks 448 unique `libc.so` routes and zero unsupported libc
+checks 545 unique `libc.so` routes and zero unsupported libc
 imports, rejects wrong SONAMEs and versions, performs 12-thread lookup stress,
-routes all 534 versioned entries through the typed adapters with exact per-provider
+routes all 689 versioned entries through the typed adapters with exact per-provider
 counts (including the distinct `libdl.so` contract),
 proves teardown waits for a blocked resolver and releases every provider once
 in order, scans for host-loader escape hatches, and repeats the C++ boundary

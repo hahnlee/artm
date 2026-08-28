@@ -71,6 +71,43 @@ typedef struct darwin_art_lifecycle_hooks {
   darwin_art_lifecycle_failed_t mark_failed;
 } darwin_art_lifecycle_hooks_t;
 
+// Requests a real host process for one Android Service instance. Strings are
+// borrowed for the duration of spawn_service. The returned control_fd is a
+// connected Unix-domain stream owned by the engine until release_service;
+// Android Binder parcels and descriptor rights travel over that stream.
+typedef struct darwin_art_service_spawn_request {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  const char* component;
+  const char* instance_name;
+  const char* process_name;
+  int32_t isolated;
+} darwin_art_service_spawn_request_t;
+
+typedef struct darwin_art_service_spawn_result {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  int32_t host_pid;
+  int32_t control_fd;
+} darwin_art_service_spawn_result_t;
+
+typedef int32_t (*darwin_art_spawn_service_t)(
+    void* context, const darwin_art_service_spawn_request_t* request,
+    darwin_art_service_spawn_result_t* result);
+typedef int32_t (*darwin_art_release_service_t)(void* context,
+                                                int32_t host_pid);
+
+// Optional Rust-owned ActivityManager process sidecar. Native Android code
+// describes the service it needs; process creation, PID ownership, waiting,
+// and forced teardown remain entirely in the host.
+typedef struct darwin_art_host_services {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  void* context;
+  darwin_art_spawn_service_t spawn_service;
+  darwin_art_release_service_t release_service;
+} darwin_art_host_services_t;
+
 typedef struct darwin_art_process_config {
   uint32_t struct_size;
   uint32_t abi_version;
@@ -93,6 +130,9 @@ typedef struct darwin_art_process_config {
   // Optional additive Rust lifecycle owner. Older callers may provide a
   // prefix ending at graphics_session_context.
   const darwin_art_lifecycle_hooks_t* lifecycle_hooks;
+  // Optional additive Rust ActivityManager/process owner. Older callers may
+  // provide a prefix ending at lifecycle_hooks.
+  const darwin_art_host_services_t* host_services;
 } darwin_art_process_config_t;
 
 typedef struct darwin_art_process_result {

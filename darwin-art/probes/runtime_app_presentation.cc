@@ -5,11 +5,13 @@
 
 #include <iostream>
 #include <cstdlib>
+#include <cstdio>
 #include <atomic>
 #include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <iterator>
+#include <unistd.h>
 
 #include "runtime_graphics_phase.h"
 #include "runtime_graphics_gpu.h"
@@ -18,6 +20,7 @@
 #include "runtime_jni_scope.h"
 #include "runtime_app_resources.h"
 #include "runtime_app_activity.h"
+#include "darwin_binder_wire.h"
 #include "runtime_process_state.h"
 #include "mirror/throwable.h"
 #include "thread-current-inl.h"
@@ -103,8 +106,21 @@ jboolean InstallTransitionedActivity(JNIEnv* env, jclass, jobject activity,
           ? nullptr
           : env->CallObjectMethod(decor_view, find_view_by_id,
                                   kAndroidContentId);
-  const jint width = state->interactive_width;
-  const jint height = state->interactive_height;
+  // ActivityTaskManager may replace the launcher from inside onCreate(),
+  // before the launcher's first present_and_retain call has published frame
+  // dimensions. Android's WindowManager already knows the display at this
+  // point; use the same configured display contract instead of rejecting the
+  // legitimate early transition as a zero-sized window.
+  jint width = state->interactive_width;
+  jint height = state->interactive_height;
+  if (width <= 0 || height <= 0) {
+    const char* scale_text = std::getenv("DARWIN_ART_WINDOW_SCALE");
+    const jint scale = scale_text != nullptr && std::strcmp(scale_text, "2") == 0
+                           ? 2
+                           : 1;
+    width = 360 * scale;
+    height = 640 * scale;
+  }
   const bool installed =
       view_root != nullptr && content_root != nullptr && width > 0 && height > 0 &&
       !env->ExceptionCheck() &&
@@ -124,18 +140,25 @@ jboolean InstallTransitionedActivity(JNIEnv* env, jclass, jobject activity,
   return installed ? JNI_TRUE : JNI_FALSE;
 }
 
-jstring ChooseHostDocument(JNIEnv* env, jclass, jstring) {
+jstring ChooseHostDocument(JNIEnv* env, jclass, jstring mime) {
   const char* test_document = std::getenv("DARWIN_ART_TEST_OPEN_DOCUMENT");
+  const char* mime_value =
+      mime == nullptr ? nullptr : env->GetStringUTFChars(mime, nullptr);
   char* selected =
       test_document == nullptr || test_document[0] == '\0'
-          ? darwin_art_host_open_image_document()
+          ? darwin_art_host_open_document(mime_value)
           : ::strdup(test_document);
+  if (mime_value != nullptr) env->ReleaseStringUTFChars(mime, mime_value);
   if (selected == nullptr) return nullptr;
   static std::atomic<uint64_t> next_document{1};
   jstring result = nullptr;
   try {
     const std::filesystem::path source(selected);
-    const char* app_data = std::getenv("DARWIN_ART_APK_APP_DATA_DIR");
+    const char* private_data =
+        std::getenv("DARWIN_ART_ANDROID_PRIVATE_DATA_ROOT");
+    const char* guest_data =
+        std::getenv("DARWIN_ART_APK_APP_DATA_GUEST_DIR");
+    const char* package_name = std::getenv("DARWIN_ART_APK_APP_PACKAGE");
     std::error_code error;
     const uintmax_t size = std::filesystem::file_size(source, error);
     constexpr uintmax_t kMaximumDocumentBytes = 512ull * 1024ull * 1024ull;
@@ -144,23 +167,37 @@ jstring ChooseHostDocument(JNIEnv* env, jclass, jstring) {
                    [](unsigned char value) {
                      return static_cast<char>(std::tolower(value));
                    });
-    if (!error && size > 0 && size <= kMaximumDocumentBytes &&
-        app_data != nullptr && app_data[0] != '\0' &&
-        (extension == ".jpg" || extension == ".jpeg" || extension == ".png")) {
+    const bool safe_extension =
+        extension.size() <= 32 &&
+        std::all_of(extension.begin(), extension.end(), [](unsigned char value) {
+          return value == '.' || value == '_' || value == '-' ||
+                 std::isalnum(value) != 0;
+        });
+    if (!safe_extension) extension.clear();
+    if (!error && size <= kMaximumDocumentBytes &&
+        std::filesystem::is_regular_file(source, error) && !error &&
+        private_data != nullptr && private_data[0] != '\0' &&
+        guest_data != nullptr && guest_data[0] != '\0' &&
+        package_name != nullptr && package_name[0] != '\0') {
       const std::filesystem::path directory =
-          std::filesystem::path(app_data) / "host_documents";
+          std::filesystem::path(private_data) / "user" / "0" / package_name /
+          "files" / "host_documents";
       std::filesystem::create_directories(directory, error);
+      const std::string filename =
+          "import-" +
+          std::to_string(next_document.fetch_add(1, std::memory_order_relaxed)) +
+          extension;
       const std::filesystem::path destination =
-          directory /
-          ("import-" +
-           std::to_string(next_document.fetch_add(1, std::memory_order_relaxed)) +
-           extension);
+          directory / filename;
       if (!error && std::filesystem::copy_file(
                         source, destination,
                         std::filesystem::copy_options::overwrite_existing,
                         error) &&
           !error) {
-        result = env->NewStringUTF(destination.c_str());
+        const std::filesystem::path guest_path =
+            std::filesystem::path(guest_data) / "files" / "host_documents" /
+            filename;
+        result = env->NewStringUTF(guest_path.c_str());
       }
     }
   } catch (...) {
@@ -175,12 +212,17 @@ jobjectArray ChooseHostSaveDocument(JNIEnv* env, jclass, jstring mime,
   const char* suggested = suggested_name == nullptr
                               ? nullptr
                               : env->GetStringUTFChars(suggested_name, nullptr);
+  const std::string suggested_copy =
+      suggested == nullptr ? std::string() : std::string(suggested);
   const char* test_destination =
       std::getenv("DARWIN_ART_TEST_SAVE_DOCUMENT");
+  const char* mime_value =
+      mime == nullptr ? nullptr : env->GetStringUTFChars(mime, nullptr);
   char* selected =
       test_destination == nullptr || test_destination[0] == '\0'
-          ? darwin_art_host_save_image_document(suggested)
+          ? darwin_art_host_save_document(mime_value, suggested)
           : ::strdup(test_destination);
+  if (mime_value != nullptr) env->ReleaseStringUTFChars(mime, mime_value);
   if (suggested != nullptr) {
     env->ReleaseStringUTFChars(suggested_name, suggested);
   }
@@ -190,13 +232,37 @@ jobjectArray ChooseHostSaveDocument(JNIEnv* env, jclass, jstring mime,
     static std::atomic<uint64_t> next_export{1};
     const char* app_data = std::getenv("DARWIN_ART_APK_APP_DATA_DIR");
     if (app_data != nullptr && app_data[0] != '\0') {
-      std::string extension = ".jpg";
+      std::string extension;
+      if (!suggested_copy.empty()) {
+        extension =
+            std::filesystem::path(suggested_copy).extension().string();
+      }
       if (mime != nullptr) {
         const char* mime_value = env->GetStringUTFChars(mime, nullptr);
         if (mime_value != nullptr) {
-          if (std::strcmp(mime_value, "image/png") == 0) extension = ".png";
+          if (extension.empty()) {
+            if (std::strcmp(mime_value, "image/png") == 0) extension = ".png";
+            else if (std::strcmp(mime_value, "image/jpeg") == 0)
+              extension = ".jpg";
+            else if (std::strcmp(mime_value, "text/plain") == 0)
+              extension = ".txt";
+            else if (std::strcmp(mime_value, "application/pdf") == 0)
+              extension = ".pdf";
+            else if (std::strcmp(mime_value, "audio/mpeg") == 0)
+              extension = ".mp3";
+            else if (std::strcmp(mime_value, "video/mp4") == 0)
+              extension = ".mp4";
+          }
           env->ReleaseStringUTFChars(mime, mime_value);
         }
+      }
+      if (extension.size() > 32 ||
+          !std::all_of(
+              extension.begin(), extension.end(), [](unsigned char value) {
+                return value == '.' || value == '_' || value == '-' ||
+                       std::isalnum(value) != 0;
+              })) {
+        extension.clear();
       }
       std::error_code error;
       const std::filesystem::path directory =
@@ -300,6 +366,32 @@ void EnsureViewRootSurfaceValid(JNIEnv* env, jobject view) {
                              : env->GetObjectField(view_root,
                                                    root_surface_field);
   EnsureJavaSurfaceValid(env, root_surface);
+  jfieldID root_surface_control_field =
+      view_root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(view_root_class, "mSurfaceControl",
+                            "Landroid/view/SurfaceControl;");
+  jobject root_surface_control =
+      root_surface_control_field == nullptr
+          ? nullptr
+          : env->GetObjectField(view_root, root_surface_control_field);
+  jclass surface_control_class =
+      root_surface_control == nullptr
+          ? nullptr
+          : env->GetObjectClass(root_surface_control);
+  jfieldID surface_control_native =
+      surface_control_class == nullptr
+          ? nullptr
+          : env->GetFieldID(surface_control_class, "mNativeObject", "J");
+  if (surface_control_native != nullptr &&
+      env->GetLongField(root_surface_control, surface_control_native) == 0) {
+    // WindowSession.relayout() normally installs SurfaceFlinger's layer here.
+    // The Darwin compositor owns the CAMetalLayer directly, but ViewRootImpl
+    // must still observe a live layer identity for its transaction lifecycle.
+    env->SetLongField(root_surface_control, surface_control_native, 1);
+  }
+  env->DeleteLocalRef(surface_control_class);
+  env->DeleteLocalRef(root_surface_control);
   if (root_surface != nullptr) env->DeleteLocalRef(root_surface);
   if (view_root_class != nullptr) env->DeleteLocalRef(view_root_class);
   if (view_root != nullptr) env->DeleteLocalRef(view_root);
@@ -309,6 +401,15 @@ void EnsureViewRootSurfaceValid(JNIEnv* env, jobject view) {
 void ConfigureHostSurface(JNIEnv* env, jclass, jobject surface_view,
                           jobject surface, jint x, jint y, jint width,
                           jint height) {
+  if (std::getenv("DARWIN_ART_DEBUG_SURFACE_JNI") != nullptr) {
+    jobject global = surface == nullptr ? nullptr : env->NewGlobalRef(surface);
+    std::fprintf(stderr,
+                 "ART Android Surface JNI: configure pid=%d local=%p global=%p "
+                 "geometry=%d,%d %dx%d\n",
+                 getpid(), static_cast<void*>(surface), static_cast<void*>(global),
+                 x, y, width, height);
+    if (global != nullptr) env->DeleteGlobalRef(global);
+  }
   darwin_art::ConfigureDarwinAngleHostSurface(x, y, width, height);
   EnsureViewRootSurfaceValid(env, surface_view);
   EnsureJavaSurfaceValid(env, surface);
@@ -514,10 +615,10 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   }
   darwin_art_app_activity::Bundle activity;
   if (darwin_art_app_activity::prepare(
-          env, self, activity_instance, probe_activity_class,
+          env, self, &activity_instance, probe_activity_class,
           probe_context_class, &resources, package_manager, run_apk_app,
           use_framework_resources, apk_app_package, apk_app_activity,
-          &activity) != 0) {
+          false, &activity) != 0) {
     return 27;
   }
   if (run_apk_app) {
@@ -771,6 +872,21 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
     return 31;
   }
 
+  // ActivityTaskManager is live before Instrumentation invokes onCreate() on
+  // Android. An Activity may redirect to another Activity and finish itself
+  // from onCreate (Chrome's FRE is one example), so publish the initial task
+  // record before app lifecycle code can issue that transaction.
+  if (run_apk_app &&
+      !install_activity_bridge(env, probe_activity_class, activity_instance,
+                               graphics_state)) {
+    std::cerr << "ART Android activity: local task bridge install failed\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
+    }
+    return 33;
+  }
+
   jmethodID probe_on_create =
       run_apk_app
           ? env->GetMethodID(probe_activity_class, "performCreate",
@@ -786,7 +902,12 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
           ? env->GetMethodID(probe_activity_class, "performResume",
                              "(ZLjava/lang/String;)V")
           : nullptr;
+  jmethodID is_finishing =
+      run_apk_app
+          ? env->GetMethodID(probe_activity_class, "isFinishing", "()Z")
+          : nullptr;
   jint lifecycle_result = -1;
+  bool launcher_finishing = false;
   if (probe_on_create != nullptr) {
     if (run_apk_app) {
       // A device initializes Typeface's system font map during framework
@@ -848,11 +969,15 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
     if (run_apk_app) {
       env->CallVoidMethod(activity_instance, probe_on_create, nullptr);
       jstring lifecycle_reason = env->NewStringUTF("darwin-art launch");
-      if (!env->ExceptionCheck() && perform_start != nullptr) {
+      const bool finishing =
+          !env->ExceptionCheck() && is_finishing != nullptr &&
+          env->CallBooleanMethod(activity_instance, is_finishing) == JNI_TRUE;
+      launcher_finishing = finishing;
+      if (!finishing && !env->ExceptionCheck() && perform_start != nullptr) {
         env->CallVoidMethod(activity_instance, perform_start,
                             lifecycle_reason);
       }
-      if (!env->ExceptionCheck() && perform_resume != nullptr) {
+      if (!finishing && !env->ExceptionCheck() && perform_resume != nullptr) {
         env->CallVoidMethod(activity_instance, perform_resume, JNI_FALSE,
                             lifecycle_reason);
       }
@@ -918,16 +1043,6 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
     std::cerr << "ART Android window: real ViewRoot attachment failed\n";
     return 31;
   }
-  if (run_apk_app &&
-      !install_activity_bridge(env, probe_activity_class, activity_instance,
-                               graphics_state)) {
-    std::cerr << "ART Android activity: local task bridge install failed\n";
-    if (env->ExceptionCheck()) {
-      env->ExceptionDescribe();
-      env->ExceptionClear();
-    }
-    return 33;
-  }
   // A real ViewRootImpl performs the final DecorView layout before input
   // dispatch.  The detached launcher has no ViewRoot, so mirror that one
   // ownership step explicitly; without it DecorView remains 0x0 even though
@@ -970,7 +1085,12 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
     std::cerr << "ART Android graphics: activity context retention failed\n";
     return 33;
   }
-  if (graphics_state != nullptr &&
+  // A startActivity() issued from onCreate() has already installed and
+  // presented the replacement task through InstallTransitionedActivity.
+  // Do not paint the now-finished launcher's empty content over it or replace
+  // the authoritative input root.
+  if (graphics_state != nullptr && !launcher_finishing &&
+      graphics_state->interactive_root == nullptr &&
       darwin_art_graphics_phase::present_and_retain(
           graphics_state, env, decor_view, content_root_class, content_root,
           probe_view_class, probe_view, run_apk_app, expect_apk_widgets,
@@ -995,6 +1115,147 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   }
 
   return 0;
+}
+
+int run_service(JNIEnv* env, art::Thread* self, jclass service_class,
+                jclass probe_context_class, jclass probe_resources_class,
+                jobject package_manager, bool use_framework_resources,
+                jint window_scale, const char* framework_res_apk,
+                const char* apk_app_package, const char* service_class_name,
+                const char* app_apk_path, jint control_fd) {
+  darwin_art_jni_scope::ScopedLocalFrame local_frame(env);
+  if (!local_frame.valid() || env == nullptr || self == nullptr ||
+      service_class == nullptr || control_fd < 0) {
+    return 26;
+  }
+  darwin_art_app_resources::Bundle resources;
+  if (darwin_art_app_resources::prepare(
+          env, probe_resources_class, use_framework_resources, window_scale,
+          framework_res_apk, app_apk_path, &resources) != 0) {
+    std::cerr << "ART Android service: resource bootstrap failed\n";
+    return 27;
+  }
+  jobject no_activity = nullptr;
+  darwin_art_app_activity::Bundle application;
+  if (darwin_art_app_activity::prepare(
+          env, self, &no_activity, service_class, probe_context_class,
+          &resources, package_manager, true, use_framework_resources,
+          apk_app_package, service_class_name, true, &application) != 0 ||
+      application.probe_context == nullptr || application.application == nullptr) {
+    std::cerr << "ART Android service: Application bootstrap failed\n";
+    return 27;
+  }
+  jmethodID service_constructor = env->GetMethodID(service_class, "<init>", "()V");
+  jobject service = service_constructor == nullptr
+                        ? nullptr
+                        : env->NewObject(service_class, service_constructor);
+  jclass service_base = env->FindClass("android/app/Service");
+  jclass activity_thread_class = env->FindClass("android/app/ActivityThread");
+  jfieldID current_thread =
+      activity_thread_class == nullptr
+          ? nullptr
+          : env->GetStaticFieldID(activity_thread_class, "sCurrentActivityThread",
+                                  "Landroid/app/ActivityThread;");
+  jobject activity_thread = current_thread == nullptr
+                                ? nullptr
+                                : env->GetStaticObjectField(activity_thread_class,
+                                                            current_thread);
+  jclass binder_class = env->FindClass("android/os/Binder");
+  jmethodID binder_constructor = binder_class == nullptr
+                                     ? nullptr
+                                     : env->GetMethodID(binder_class, "<init>", "()V");
+  jobject token = binder_constructor == nullptr
+                      ? nullptr
+                      : env->NewObject(binder_class, binder_constructor);
+  jmethodID attach =
+      service_base == nullptr
+          ? nullptr
+          : env->GetMethodID(
+        service_base, "attach",
+        "(Landroid/content/Context;Landroid/app/ActivityThread;"
+        "Ljava/lang/String;Landroid/os/IBinder;Landroid/app/Application;"
+        "Ljava/lang/Object;)V");
+  jstring service_name = env->NewStringUTF(service_class_name);
+  if (service == nullptr || activity_thread == nullptr || token == nullptr ||
+      attach == nullptr || service_name == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Android service: Service.attach lookup failed\n";
+    if (env->ExceptionCheck()) env->ExceptionDescribe();
+    return 27;
+  }
+  env->CallVoidMethod(service, attach, application.probe_context,
+                      activity_thread, service_name, token,
+                      application.application, nullptr);
+  jmethodID on_create = env->GetMethodID(service_base, "onCreate", "()V");
+  jmethodID on_bind = env->GetMethodID(
+      service_base, "onBind", "(Landroid/content/Intent;)Landroid/os/IBinder;");
+  jmethodID on_destroy = env->GetMethodID(service_base, "onDestroy", "()V");
+  jobject intent = darwin_art::ReceiveServiceBindIntent(env, control_fd);
+  if (intent != nullptr && !env->ExceptionCheck()) {
+    jclass class_class = env->FindClass("java/lang/Class");
+    jmethodID get_class_loader = class_class == nullptr
+                                     ? nullptr
+                                     : env->GetMethodID(
+                                           class_class, "getClassLoader",
+                                           "()Ljava/lang/ClassLoader;");
+    jobject class_loader = get_class_loader == nullptr
+                               ? nullptr
+                               : env->CallObjectMethod(service_class,
+                                                       get_class_loader);
+    jclass intent_class = env->FindClass("android/content/Intent");
+    jmethodID set_extras_class_loader =
+        intent_class == nullptr
+            ? nullptr
+            : env->GetMethodID(intent_class, "setExtrasClassLoader",
+                               "(Ljava/lang/ClassLoader;)V");
+    if (set_extras_class_loader != nullptr && !env->ExceptionCheck()) {
+      env->CallVoidMethod(intent, set_extras_class_loader, class_loader);
+    }
+    env->DeleteLocalRef(intent_class);
+    env->DeleteLocalRef(class_loader);
+    env->DeleteLocalRef(class_class);
+  }
+  if (!env->ExceptionCheck() && on_create != nullptr) {
+    env->CallVoidMethod(service, on_create);
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_COMMAND_LINE") != nullptr &&
+      !env->ExceptionCheck()) {
+    jclass command_line_class = load_activity_class(
+        env, service_class, "org.chromium.base.CommandLine");
+    jmethodID flags_loaded =
+        command_line_class == nullptr
+            ? nullptr
+            : env->GetStaticMethodID(command_line_class,
+                                     "wasFlagsLoadedFromFile", "()Z");
+    const bool loaded = flags_loaded != nullptr && !env->ExceptionCheck() &&
+                        env->CallStaticBooleanMethod(command_line_class,
+                                                     flags_loaded) == JNI_TRUE;
+    std::cerr << "ART Android service: command-line file loaded=" << loaded
+              << " service=" << service_class_name << " pid=" << getpid()
+              << "\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
+    }
+    env->DeleteLocalRef(command_line_class);
+  }
+  jobject binder = on_bind == nullptr || intent == nullptr || env->ExceptionCheck()
+                       ? nullptr
+                       : env->CallObjectMethod(service, on_bind, intent);
+  if (binder == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART Android service: onCreate/onBind failed\n";
+    if (self->IsExceptionPending()) {
+      std::cerr << self->GetException()->Dump() << "\n";
+    }
+    return 27;
+  }
+  std::cerr << "ART Android service: attached " << service_class_name
+            << " pid=" << getpid() << " binder=ready\n";
+  const int serve_status =
+      darwin_art::ServeRemoteBinder(env, control_fd, binder);
+  if (on_destroy != nullptr && !env->ExceptionCheck()) {
+    env->CallVoidMethod(service, on_destroy);
+  }
+  return serve_status == 0 ? 0 : 27;
 }
 
 }  // namespace darwin_art_presentation

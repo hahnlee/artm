@@ -30,6 +30,8 @@ extern "C" int32_t darwin_art_provider_native_acquire(uint32_t kind,
 extern "C" int32_t darwin_art_provider_native_release(uint32_t kind);
 
 bool acquire_filesystem(int directory_fd, std::string* error);
+bool seed_filesystem_private_directory(const char* guest_path,
+                                       std::string* error);
 void release_filesystem();
 
 bool acquire_network(std::string* error);

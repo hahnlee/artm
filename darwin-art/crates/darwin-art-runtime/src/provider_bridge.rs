@@ -18,6 +18,14 @@ pub struct ProviderBridge {
     leases: ProviderLeaseTable,
 }
 
+/// A process- or subsystem-scoped lease on one process-global native
+/// provider.  Keeping the release in Drop makes early-return paths obey the
+/// same zero-to-one/one-to-zero transition contract as ELF-owned leases.
+pub struct ProviderLease<'a> {
+    bridge: &'a ProviderBridge,
+    kind: ProviderKind,
+}
+
 impl ProviderBridge {
     pub fn from_callbacks(
         acquire: ProviderNativeAcquireFn,
@@ -58,6 +66,26 @@ impl ProviderBridge {
 
     pub fn clear(&self) -> Result<(), ProviderLeaseError> {
         self.leases.clear()
+    }
+
+    pub fn acquire_lease(
+        &self,
+        kind: ProviderKind,
+        authority_fd: i32,
+    ) -> Result<ProviderLease<'_>, i32> {
+        let status = self.leases.acquire(kind, authority_fd);
+        if status != 0 {
+            return Err(status);
+        }
+        Ok(ProviderLease { bridge: self, kind })
+    }
+}
+
+impl Drop for ProviderLease<'_> {
+    fn drop(&mut self) {
+        if self.bridge.leases.release(self.kind) != 0 {
+            std::process::abort();
+        }
     }
 }
 

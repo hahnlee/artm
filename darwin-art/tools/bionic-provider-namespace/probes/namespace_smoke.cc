@@ -70,8 +70,10 @@ uintptr_t Resolve(void *opaque, const char *soname, const char *symbol,
     }
   }
   const uintptr_t version_hash = version == nullptr ? 17 : Hash(version);
-  return ((static_cast<uintptr_t>(context->owner) + 1) << 56) ^ Hash(soname) ^
-         Hash(symbol) ^ version_hash;
+  const uintptr_t value =
+      ((static_cast<uintptr_t>(context->owner) + 1) << 56) ^ Hash(soname) ^
+      Hash(symbol) ^ version_hash;
+  return value == 0 ? 1 : value;
 }
 
 void Release(void *opaque) {
@@ -112,10 +114,10 @@ DarwinArtBionicNamespace *Build(Context *contexts, Shared *shared) {
 } // namespace
 
 int main() {
-  Check(darwin_art_bionic_namespace_owned_count() == 534, "owned count");
+  Check(darwin_art_bionic_namespace_owned_count() == 733, "owned count");
   Check(darwin_art_bionic_namespace_unsupported_libc_count() == 0,
         "unsupported count");
-  Check(sizeof(kExpected) / sizeof(kExpected[0]) == 534, "fixture count");
+  Check(sizeof(kExpected) / sizeof(kExpected[0]) == 733, "fixture count");
   Check(kUnsupported.empty(), "unsupported fixture count");
 
   {
@@ -265,6 +267,8 @@ int main() {
       DARWIN_ART_BIONIC_PROVIDER_MATH,
       DARWIN_ART_BIONIC_PROVIDER_DNS,
       DARWIN_ART_BIONIC_PROVIDER_SOCKET,
+      DARWIN_ART_BIONIC_PROVIDER_AAUDIO,
+      DARWIN_ART_BIONIC_PROVIDER_BINDER_NDK,
       DARWIN_ART_BIONIC_PROVIDER_CENTRAL_FD_BROKER,
       DARWIN_ART_BIONIC_PROVIDER_ABORT,
       DARWIN_ART_BIONIC_PROVIDER_SYSLOG,
@@ -307,8 +311,8 @@ int main() {
 
   std::fprintf(
       stderr,
-      "bionic-provider-namespace: PASS libcxx=160/160 extensions=356 "
-      "liblog-symbols=19 aliases=1 owned=534 duplicate-triple=0 threads=12 "
+      "bionic-provider-namespace: PASS libcxx=160/160 extensions=557 "
+      "liblog-symbols=20 binder-ndk=39 aaudio=30 aliases=13 owned=733 duplicate-triple=0 threads=12 "
       "teardown=ordered+quiescent host-fallback=denied\n");
   return 0;
 }

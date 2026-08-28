@@ -24,7 +24,7 @@ pub use native_owner::{
     darwin_art_runtime_native_owner_lookup,
 };
 pub use provider::{ProviderLeaseError, ProviderLeaseTable};
-pub use provider_bridge::ProviderBridge;
+pub use provider_bridge::{ProviderBridge, ProviderLease};
 pub use provider_kind::ProviderKind;
 pub use session::{NativeResource, RuntimeSession};
 pub use shutdown::ShutdownGuard;

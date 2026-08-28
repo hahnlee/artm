@@ -3,6 +3,8 @@
 
 #include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef void (*RawJniSlot)(void);
@@ -101,6 +103,14 @@ static void* ProxyFindClass(void* raw_env, const char* name) {
   return proxy->backend.find_class(proxy->backend.context, name);
 }
 
+static void* ProxyGetSuperclass(void* raw_env, void* clazz) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_GetSuperclass);
+  if (raw == NULL || clazz == NULL) return NULL;
+  return ((void* (*)(void*, void*))raw)(host_env, clazz);
+}
+
 static uint8_t ProxyIsAssignableFrom(void* raw_env, void* clazz1,
                                      void* clazz2) {
   struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
@@ -142,6 +152,22 @@ static void ProxyExceptionDescribe(void* raw_env) {
   void* host_env = HostEnv(proxy);
   RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_ExceptionDescribe);
   if (raw != NULL) ((void (*)(void*))raw)(host_env);
+}
+
+static int32_t ProxyPushLocalFrame(void* raw_env, int32_t capacity) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_PushLocalFrame);
+  if (raw == NULL) return DARWIN_ART_JNI_ERR;
+  return ((int32_t(*)(void*, int32_t))raw)(host_env, capacity);
+}
+
+static void* ProxyPopLocalFrame(void* raw_env, void* result) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_PopLocalFrame);
+  if (raw == NULL) return NULL;
+  return ((void* (*)(void*, void*))raw)(host_env, result);
 }
 
 static int32_t ProxyRegisterNatives(void* raw_env, void* clazz,
@@ -258,7 +284,13 @@ static void* ProxyNewGlobalRef(void* raw_env, void* reference) {
   void* host_env = HostEnv(proxy);
   RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_NewGlobalRef);
   if (raw == NULL) return NULL;
-  return ((void* (*)(void*, void*))raw)(host_env, reference);
+  void* result = ((void* (*)(void*, void*))raw)(host_env, reference);
+  if (getenv("DARWIN_ART_DEBUG_JNI_GLOBAL_REFS") != NULL) {
+    fprintf(stderr,
+            "ART Android JNI proxy: NewGlobalRef reference=%p result=%p\n",
+            reference, result);
+  }
+  return result;
 }
 
 static void ProxyDeleteGlobalRef(void* raw_env, void* reference) {
@@ -464,6 +496,61 @@ void* darwin_art_jni_proxy_new_object_captured(
       proxy->backend.context, clazz, method, &arguments, 'L', 2);
 }
 
+static void* ProxyNewObjectV(void* raw_env, void* clazz, void* method,
+                             va_list arguments) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  if (proxy == NULL || proxy->backend.call_method_v == NULL || clazz == NULL ||
+      method == NULL)
+    return NULL;
+  return (void*)(uintptr_t)proxy->backend.call_method_v(
+      proxy->backend.context, clazz, method, (void*)arguments, 'L', 2);
+}
+
+static void* ProxyNewObjectA(void* raw_env, void* clazz, void* method,
+                             const void* arguments) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_NewObjectA);
+  if (raw == NULL || clazz == NULL || method == NULL) return NULL;
+  return ((void* (*)(void*, void*, void*, const void*))raw)(
+      host_env, clazz, method, arguments);
+}
+
+#define DEFINE_CALL_METHOD_A(Name, CType)                                    \
+  static CType ProxyCall##Name##MethodA(void* raw_env, void* object,          \
+                                         void* method,                        \
+                                         const void* arguments) {             \
+    struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);                     \
+    void* host_env = HostEnv(proxy);                                          \
+    RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_Call##Name##MethodA); \
+    if (raw == NULL || object == NULL || method == NULL) return (CType)0;      \
+    return ((CType(*)(void*, void*, void*, const void*))raw)(                 \
+        host_env, object, method, arguments);                                 \
+  }
+
+DEFINE_CALL_METHOD_A(Object, void*)
+DEFINE_CALL_METHOD_A(Boolean, uint8_t)
+DEFINE_CALL_METHOD_A(Byte, int8_t)
+DEFINE_CALL_METHOD_A(Char, uint16_t)
+DEFINE_CALL_METHOD_A(Short, int16_t)
+DEFINE_CALL_METHOD_A(Int, int32_t)
+DEFINE_CALL_METHOD_A(Long, int64_t)
+DEFINE_CALL_METHOD_A(Float, float)
+DEFINE_CALL_METHOD_A(Double, double)
+
+static void ProxyCallVoidMethodA(void* raw_env, void* object, void* method,
+                                 const void* arguments) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_CallVoidMethodA);
+  if (raw != NULL && object != NULL && method != NULL) {
+    ((void (*)(void*, void*, void*, const void*))raw)(host_env, object, method,
+                                                      arguments);
+  }
+}
+
+#undef DEFINE_CALL_METHOD_A
+
 #undef DEFINE_CALL_METHOD_V
 
 static uint64_t ProxyCallStaticMethodVBits(void* raw_env, void* clazz,
@@ -560,6 +647,42 @@ void* darwin_art_jni_proxy_call_static_object_method_captured(
   return (void*)(uintptr_t)ProxyCallStaticCaptured(
       raw_env, clazz, method, gp_registers, fp_registers, caller_stack, 'L');
 }
+
+#define DEFINE_CALL_STATIC_METHOD_A(Name, CType)                             \
+  static CType ProxyCallStatic##Name##MethodA(                              \
+      void* raw_env, void* clazz, void* method, const void* arguments) {     \
+    struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);                    \
+    void* host_env = HostEnv(proxy);                                         \
+    RawJniSlot raw =                                                        \
+        HostSlot(host_env, DARWIN_ART_JNI_SLOT_CallStatic##Name##MethodA);   \
+    if (raw == NULL || clazz == NULL || method == NULL) return (CType)0;     \
+    return ((CType(*)(void*, void*, void*, const void*))raw)(                \
+        host_env, clazz, method, arguments);                                 \
+  }
+
+DEFINE_CALL_STATIC_METHOD_A(Object, void*)
+DEFINE_CALL_STATIC_METHOD_A(Boolean, uint8_t)
+DEFINE_CALL_STATIC_METHOD_A(Byte, int8_t)
+DEFINE_CALL_STATIC_METHOD_A(Char, uint16_t)
+DEFINE_CALL_STATIC_METHOD_A(Short, int16_t)
+DEFINE_CALL_STATIC_METHOD_A(Int, int32_t)
+DEFINE_CALL_STATIC_METHOD_A(Long, int64_t)
+DEFINE_CALL_STATIC_METHOD_A(Float, float)
+DEFINE_CALL_STATIC_METHOD_A(Double, double)
+
+static void ProxyCallStaticVoidMethodA(void* raw_env, void* clazz,
+                                       void* method, const void* arguments) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw =
+      HostSlot(host_env, DARWIN_ART_JNI_SLOT_CallStaticVoidMethodA);
+  if (raw != NULL && clazz != NULL && method != NULL) {
+    ((void (*)(void*, void*, void*, const void*))raw)(host_env, clazz, method,
+                                                      arguments);
+  }
+}
+
+#undef DEFINE_CALL_STATIC_METHOD_A
 
 #undef DEFINE_CALL_STATIC_METHOD_V
 
@@ -705,6 +828,48 @@ DEFINE_SET_STATIC_FIELD(Float, float)
 DEFINE_SET_STATIC_FIELD(Double, double)
 
 #undef DEFINE_SET_STATIC_FIELD
+
+static void* ProxyNewString(void* raw_env, const uint16_t* characters,
+                            int32_t length) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_NewString);
+  // Android ART accepts NewString(nullptr, 0), which jni_zero uses while
+  // initializing its process-wide empty-string singleton. A null character
+  // buffer is invalid only when there are characters to read.
+  if (raw == NULL || length < 0 || (characters == NULL && length != 0)) {
+    return NULL;
+  }
+  return ((void* (*)(void*, const uint16_t*, int32_t))raw)(host_env,
+                                                           characters, length);
+}
+
+static int32_t ProxyGetStringLength(void* raw_env, void* string) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_GetStringLength);
+  if (raw == NULL || string == NULL) return 0;
+  return ((int32_t (*)(void*, void*))raw)(host_env, string);
+}
+
+static const uint16_t* ProxyGetStringChars(void* raw_env, void* string,
+                                            uint8_t* is_copy) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_GetStringChars);
+  if (raw == NULL || string == NULL) return NULL;
+  return ((const uint16_t* (*)(void*, void*, uint8_t*))raw)(host_env, string,
+                                                            is_copy);
+}
+
+static void ProxyReleaseStringChars(void* raw_env, void* string,
+                                     const uint16_t* characters) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_ReleaseStringChars);
+  if (raw == NULL || string == NULL || characters == NULL) return;
+  ((void (*)(void*, void*, const uint16_t*))raw)(host_env, string, characters);
+}
 
 static void* ProxyNewStringUTF(void* raw_env, const char* bytes) {
   struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
@@ -894,7 +1059,15 @@ static uint8_t ProxyExceptionCheck(void* raw_env) {
   if (proxy == NULL) return 1;
   void* host_env = HostEnv(proxy);
   RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_ExceptionCheck);
-  if (raw != NULL) return ((uint8_t (*)(void*))raw)(host_env);
+  if (raw != NULL) {
+    const uint8_t pending = ((uint8_t (*)(void*))raw)(host_env);
+    if (pending != 0 && getenv("DARWIN_ART_DEBUG_JNI_EXCEPTION") != NULL) {
+      RawJniSlot describe =
+          HostSlot(host_env, DARWIN_ART_JNI_SLOT_ExceptionDescribe);
+      if (describe != NULL) ((void (*)(void*))describe)(host_env);
+    }
+    return pending;
+  }
   return proxy->exception_pending;
 }
 
@@ -951,6 +1124,7 @@ static int32_t ProxyDetachCurrentThread(void* raw_vm) {
 static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
     [DARWIN_ART_JNI_SLOT_GetVersion] = (RawJniSlot)ProxyGetVersion,
     [DARWIN_ART_JNI_SLOT_FindClass] = (RawJniSlot)ProxyFindClass,
+    [DARWIN_ART_JNI_SLOT_GetSuperclass] = (RawJniSlot)ProxyGetSuperclass,
     [DARWIN_ART_JNI_SLOT_IsAssignableFrom] =
         (RawJniSlot)ProxyIsAssignableFrom,
     [DARWIN_ART_JNI_SLOT_ThrowNew] = (RawJniSlot)ProxyThrowNew,
@@ -959,6 +1133,8 @@ static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
     [DARWIN_ART_JNI_SLOT_ExceptionDescribe] =
         (RawJniSlot)ProxyExceptionDescribe,
     [DARWIN_ART_JNI_SLOT_ExceptionClear] = (RawJniSlot)ProxyExceptionClear,
+    [DARWIN_ART_JNI_SLOT_PushLocalFrame] = (RawJniSlot)ProxyPushLocalFrame,
+    [DARWIN_ART_JNI_SLOT_PopLocalFrame] = (RawJniSlot)ProxyPopLocalFrame,
     [DARWIN_ART_JNI_SLOT_NewGlobalRef] = (RawJniSlot)ProxyNewGlobalRef,
     [DARWIN_ART_JNI_SLOT_DeleteGlobalRef] = (RawJniSlot)ProxyDeleteGlobalRef,
     [DARWIN_ART_JNI_SLOT_DeleteLocalRef] = (RawJniSlot)ProxyDeleteLocalRef,
@@ -975,6 +1151,8 @@ static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
     [DARWIN_ART_JNI_SLOT_GetMethodID] = (RawJniSlot)ProxyGetMethodID,
     [DARWIN_ART_JNI_SLOT_NewObject] =
         (RawJniSlot)darwin_art_jni_proxy_new_object,
+    [DARWIN_ART_JNI_SLOT_NewObjectV] = (RawJniSlot)ProxyNewObjectV,
+    [DARWIN_ART_JNI_SLOT_NewObjectA] = (RawJniSlot)ProxyNewObjectA,
     [DARWIN_ART_JNI_SLOT_CallVoidMethod] =
         (RawJniSlot)darwin_art_jni_proxy_call_void_method,
     [DARWIN_ART_JNI_SLOT_CallObjectMethod] =
@@ -996,6 +1174,20 @@ static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
         (RawJniSlot)ProxyCallDoubleMethodV,
     [DARWIN_ART_JNI_SLOT_CallVoidMethodV] =
         (RawJniSlot)ProxyCallVoidMethodV,
+#define INSTALL_CALL_METHOD_A(Name)                                          \
+  [DARWIN_ART_JNI_SLOT_Call##Name##MethodA] =                                \
+      (RawJniSlot)ProxyCall##Name##MethodA,
+    INSTALL_CALL_METHOD_A(Object)
+    INSTALL_CALL_METHOD_A(Boolean)
+    INSTALL_CALL_METHOD_A(Byte)
+    INSTALL_CALL_METHOD_A(Char)
+    INSTALL_CALL_METHOD_A(Short)
+    INSTALL_CALL_METHOD_A(Int)
+    INSTALL_CALL_METHOD_A(Long)
+    INSTALL_CALL_METHOD_A(Float)
+    INSTALL_CALL_METHOD_A(Double)
+    INSTALL_CALL_METHOD_A(Void)
+#undef INSTALL_CALL_METHOD_A
     [DARWIN_ART_JNI_SLOT_GetFieldID] = (RawJniSlot)ProxyGetFieldID,
 #define INSTALL_FIELD_PROXY(Name)                                             \
   [DARWIN_ART_JNI_SLOT_Get##Name##Field] = (RawJniSlot)ProxyGet##Name##Field, \
@@ -1038,6 +1230,20 @@ static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
         (RawJniSlot)ProxyCallStaticDoubleMethodV,
     [DARWIN_ART_JNI_SLOT_CallStaticVoidMethodV] =
         (RawJniSlot)ProxyCallStaticVoidMethodV,
+#define INSTALL_CALL_STATIC_METHOD_A(Name)                                   \
+  [DARWIN_ART_JNI_SLOT_CallStatic##Name##MethodA] =                          \
+      (RawJniSlot)ProxyCallStatic##Name##MethodA,
+    INSTALL_CALL_STATIC_METHOD_A(Object)
+    INSTALL_CALL_STATIC_METHOD_A(Boolean)
+    INSTALL_CALL_STATIC_METHOD_A(Byte)
+    INSTALL_CALL_STATIC_METHOD_A(Char)
+    INSTALL_CALL_STATIC_METHOD_A(Short)
+    INSTALL_CALL_STATIC_METHOD_A(Int)
+    INSTALL_CALL_STATIC_METHOD_A(Long)
+    INSTALL_CALL_STATIC_METHOD_A(Float)
+    INSTALL_CALL_STATIC_METHOD_A(Double)
+    INSTALL_CALL_STATIC_METHOD_A(Void)
+#undef INSTALL_CALL_STATIC_METHOD_A
     [DARWIN_ART_JNI_SLOT_GetStaticFieldID] =
         (RawJniSlot)ProxyGetStaticFieldID,
 #define INSTALL_STATIC_FIELD_PROXY(Name)                                      \
@@ -1055,6 +1261,11 @@ static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
     INSTALL_STATIC_FIELD_PROXY(Float)
     INSTALL_STATIC_FIELD_PROXY(Double)
 #undef INSTALL_STATIC_FIELD_PROXY
+    [DARWIN_ART_JNI_SLOT_NewString] = (RawJniSlot)ProxyNewString,
+    [DARWIN_ART_JNI_SLOT_GetStringLength] = (RawJniSlot)ProxyGetStringLength,
+    [DARWIN_ART_JNI_SLOT_GetStringChars] = (RawJniSlot)ProxyGetStringChars,
+    [DARWIN_ART_JNI_SLOT_ReleaseStringChars] =
+        (RawJniSlot)ProxyReleaseStringChars,
     [DARWIN_ART_JNI_SLOT_NewStringUTF] = (RawJniSlot)ProxyNewStringUTF,
     [DARWIN_ART_JNI_SLOT_GetStringUTFLength] =
         (RawJniSlot)ProxyGetStringUTFLength,

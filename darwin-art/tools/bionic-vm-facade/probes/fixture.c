@@ -1,3 +1,4 @@
+#define _GNU_SOURCE 1
 #include <errno.h>
 #include <stdint.h>
 #include <sys/mman.h>
@@ -37,6 +38,20 @@ __attribute__((visibility("default"))) int bionic_vm_fixture_basic(void) {
                    -1, 0);
   if (mapping == MAP_FAILED || munmap(mapping, length) != 0) return 8;
 
+  mapping = mmap(NULL, 16 * 1024 * 1024, PROT_NONE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  if (mapping == MAP_FAILED || munmap(mapping, 16 * 1024 * 1024) != 0)
+    return 47;
+
+  mapping = mmap(NULL, length, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (mapping == MAP_FAILED) return 37;
+  ((volatile unsigned char*)mapping)[0] = 0x5a;
+  mapping = mremap(mapping, length, length * 2, MREMAP_MAYMOVE);
+  if (mapping == MAP_FAILED || ((volatile unsigned char*)mapping)[0] != 0x5a)
+    return 38;
+  if (munmap(mapping, length * 2) != 0) return 39;
+
   errno = 0;
   if (mmap(NULL, 0, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) !=
           MAP_FAILED ||
@@ -47,19 +62,21 @@ __attribute__((visibility("default"))) int bionic_vm_fixture_basic(void) {
           MAP_FAILED ||
       errno != EOVERFLOW)
     return 10;
-  errno = 0;
-  if (mmap(NULL, length, PROT_READ, MAP_SHARED | MAP_ANONYMOUS, -1, 0) !=
-          MAP_FAILED ||
-      errno != EOPNOTSUPP)
-    return 11;
+  mapping = mmap(NULL, length, PROT_READ | PROT_WRITE,
+                 MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+  if (mapping == MAP_FAILED) return 11;
+  ((volatile unsigned char*)mapping)[0] = 0x6d;
+  if (((volatile unsigned char*)mapping)[0] != 0x6d ||
+      munmap(mapping, length) != 0)
+    return 41;
   errno = 0;
   if (mmap((void*)4096, length, PROT_READ,
            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) != MAP_FAILED ||
-      errno != EOPNOTSUPP)
+      errno != ENOMEM)
     return 12;
   errno = 0;
-  if (mmap(NULL, length, PROT_READ, MAP_PRIVATE, 3, 0) != MAP_FAILED ||
-      errno != EOPNOTSUPP)
+  if (mmap(NULL, length, PROT_READ, MAP_PRIVATE, -1, 0) != MAP_FAILED ||
+      errno != EBADF)
     return 13;
   errno = 0;
   if (mmap(NULL, length, PROT_READ | PROT_WRITE | PROT_EXEC,
@@ -96,12 +113,6 @@ __attribute__((visibility("default"))) int bionic_vm_fixture_basic(void) {
       errno != EINVAL)
     return 16;
   errno = 0;
-  if (mprotect(mapping, length / 2, PROT_READ) != -1 ||
-      errno != EOPNOTSUPP)
-    return 17;
-  errno = 0;
-  if (munmap(mapping, length / 2) != -1 || errno != EOPNOTSUPP) return 34;
-  errno = 0;
   if (mprotect((void*)16384, 16384, PROT_READ) != -1 || errno != ENOMEM)
     return 35;
   errno = 0;
@@ -115,6 +126,47 @@ __attribute__((visibility("default"))) int bionic_vm_fixture_basic(void) {
   errno = 0;
   if (madvise(mapping, length, 999) != -1 || errno != EINVAL) return 19;
   if (munmap(mapping, length) != 0) return 20;
+
+  mapping = mmap(NULL, 32768, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (mapping == MAP_FAILED) return 47;
+  ((volatile unsigned char*)mapping)[0] = 0x5a;
+  ((volatile unsigned char*)mapping)[16384] = 0x6b;
+  if (madvise((unsigned char*)mapping + 16384, 16384, MADV_DONTNEED) != 0)
+    return 48;
+  if (((volatile unsigned char*)mapping)[0] != 0x5a ||
+      ((volatile unsigned char*)mapping)[16384] != 0)
+    return 49;
+  if (mprotect((unsigned char*)mapping + 16384, 16384, PROT_NONE) != 0 ||
+      madvise((unsigned char*)mapping + 16384, 16384, MADV_DONTNEED) != 0 ||
+      mprotect((unsigned char*)mapping + 16384, 16384,
+               PROT_READ | PROT_WRITE) != 0 ||
+      ((volatile unsigned char*)mapping)[16384] != 0)
+    return 50;
+  if (munmap(mapping, 32768) != 0) return 51;
+
+  mapping = mmap(NULL, length, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (mapping == MAP_FAILED) return 43;
+  ((volatile unsigned char*)mapping)[0] = 0x7e;
+  void* fixed = mmap(mapping, length, PROT_NONE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+  if (fixed != mapping) return 44;
+  if (mprotect(fixed, length, PROT_READ | PROT_WRITE) != 0 ||
+      ((volatile unsigned char*)fixed)[0] != 0)
+    return 45;
+  if (munmap(fixed, length) != 0) return 46;
+
+  const size_t host_page = 16384;
+  mapping = mmap(NULL, host_page * 2, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (mapping == MAP_FAILED) return 17;
+  void* second_page = (unsigned char*)mapping + host_page;
+  if (mprotect(second_page, host_page, PROT_READ) != 0 ||
+      mprotect(second_page, host_page, PROT_READ | PROT_WRITE) != 0)
+    return 34;
+  if (munmap(mapping, host_page) != 0 || munmap(second_page, host_page) != 0)
+    return 40;
   return 42;
 }
 

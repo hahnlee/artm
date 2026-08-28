@@ -40,6 +40,7 @@ impl SymbolResolver for Resolver {
             "mmap" => c"mmap",
             "mmap64" => c"mmap64",
             "mprotect" => c"mprotect",
+            "mremap" => c"mremap",
             "munmap" => c"munmap",
             _ => return Ok(None),
         };
@@ -62,7 +63,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if provider.page_size() < 4096 || !provider.page_size().is_power_of_two() {
         return Err("unexpected Darwin page size".into());
     }
-    for rejected in [c"msync", c"mremap", c"mlock", c"ashmem_create_region"] {
+    for rejected in [c"ashmem_create_region"] {
         // SAFETY: resolver reads only the static NUL-terminated name.
         if unsafe { darwin_art_bionic_vm_resolve(rejected.as_ptr()) }.is_some() {
             return Err("unsupported VM symbol escaped closed resolver".into());

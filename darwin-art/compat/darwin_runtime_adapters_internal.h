@@ -98,6 +98,7 @@ struct ElfLibrary {
   std::unordered_map<std::string, void*> exported_jni_trampolines;
   std::mutex method_descriptor_mutex;
   std::unordered_map<void*, std::string> method_descriptors;
+  std::unordered_map<void*, std::string> method_names;
 };
 
 int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end);

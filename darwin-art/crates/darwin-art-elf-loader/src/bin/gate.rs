@@ -113,9 +113,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = unsafe { resolver_fn(forged.as_ptr()) };
         return Err("forged TLS descriptor address was accepted".into());
     }
-    if arguments.len() != 9 {
+    if arguments.len() != 10 {
         return Err(
-            "usage: elf-loader-gate POSITIVE.so IMPORT.so WEAK.so LAZY.so RELRO.so TLS.so FINALIZER.so LIBCXX.so".into(),
+            "usage: elf-loader-gate POSITIVE.so IMPORT.so WEAK.so LAZY.so RELRO.so TLS.so IFUNC.so FINALIZER.so LIBCXX.so".into(),
         );
     }
     let positive = fs::read(&arguments[1])?;
@@ -124,8 +124,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let lazy = fs::read(&arguments[4])?;
     let relro = fs::read(&arguments[5])?;
     let tls = fs::read(&arguments[6])?;
-    let finalizer = fs::read(&arguments[7])?;
-    let libcxx = fs::read(&arguments[8])?;
+    let ifunc = fs::read(&arguments[7])?;
+    let finalizer = fs::read(&arguments[8])?;
+    let libcxx = fs::read(&arguments[9])?;
 
     run_positive(&positive)?;
     run_import(&import)?;
@@ -136,6 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     run_relro(&relro, &arguments[5])?;
     run_tls(&tls, &arguments[6])?;
+    run_ifunc(&ifunc)?;
     run_malformed_matrix(&positive)?;
     run_finalizer_lifecycle(&finalizer)?;
     run_aarch64_bti_plt(&libcxx)?;
@@ -144,10 +146,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "elf-loader-gate: positive=constructor-order import=ABS64+GLOB_DAT+JUMP_SLOT \
          resolver=closed+versioned weak=zero NOW=required RELRO=read-only \
          TLS=TLSDESC+per-thread-template+quiescent-unload \
+         IFUNC=IRELATIVE-resolver \
          wx=reject overflow=reject overlap=reject bounds=reject \
          finalizers=array-reverse+DT_FINI exactly-once cleanup=drop \
          DT_AARCH64_BTI_PLT=zero-presence real-libcxx=relocated-without-init"
     );
+    Ok(())
+}
+
+fn run_ifunc(bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut image = LoadedElf::load(bytes)?;
+    image.run_initializers()?;
+    if image.call_exported_i32("fixture_ifunc_value")? != 1032 {
+        return Err("R_AARCH64_IRELATIVE resolver result mismatch".into());
+    }
     Ok(())
 }
 

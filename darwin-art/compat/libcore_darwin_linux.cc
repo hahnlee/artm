@@ -20,6 +20,13 @@
 #include <nativehelper/JNIPlatformHelp.h>
 #include <nativehelper/ScopedUtfChars.h>
 
+extern "C" int darwin_art_bionic_fs_chmod_core(
+    const char*, uint32_t) __attribute__((weak_import));
+extern "C" int darwin_art_bionic_fs_fchmod_core(
+    int, uint32_t) __attribute__((weak_import));
+extern "C" int32_t darwin_art_bionic_errno_load(void)
+    __attribute__((weak_import));
+
 namespace darwin_art::libcore_darwin {
 
 void ThrowErrno(JNIEnv* env, const char* operation, int error) {
@@ -147,6 +154,39 @@ jobject DarwinLinuxStat(JNIEnv* env, jobject, jstring java_path) {
   return MakeStructStat(env, status);
 }
 
+jboolean DarwinLinuxAccess(JNIEnv* env, jobject, jstring java_path, jint mode) {
+  ScopedUtfChars path(env, java_path);
+  if (path.c_str() == nullptr) {
+    return JNI_FALSE;
+  }
+  if ((mode & ~7) != 0) {
+    jniThrowErrnoException(env, "access", 22);
+    return JNI_FALSE;
+  }
+  if (Access(path.c_str(), mode) == -1) {
+    ThrowErrno(env, "access", errno);
+    return JNI_FALSE;
+  }
+  return JNI_TRUE;
+}
+
+void DarwinLinuxRemove(JNIEnv* env, jobject, jstring java_path) {
+  ScopedUtfChars path(env, java_path);
+  if (path.c_str() != nullptr && Remove(path.c_str()) == -1) {
+    ThrowErrno(env, "remove", errno);
+  }
+}
+
+void DarwinLinuxRename(JNIEnv* env, jobject, jstring java_old_path,
+                       jstring java_new_path) {
+  ScopedUtfChars old_path(env, java_old_path);
+  ScopedUtfChars new_path(env, java_new_path);
+  if (old_path.c_str() != nullptr && new_path.c_str() != nullptr &&
+      Rename(old_path.c_str(), new_path.c_str()) == -1) {
+    ThrowErrno(env, "rename", errno);
+  }
+}
+
 jobject DarwinLinuxStatvfs(JNIEnv* env, jobject, jstring java_path) {
   ScopedUtfChars path(env, java_path);
   if (path.c_str() == nullptr) return nullptr;
@@ -175,14 +215,30 @@ jobject DarwinLinuxFstatvfs(JNIEnv* env, jobject, jobject java_fd) {
 void DarwinLinuxChmod(JNIEnv* env, jobject, jstring java_path, jint mode) {
   ScopedUtfChars path(env, java_path);
   if (path.c_str() == nullptr) return;
-  if (chmod(path.c_str(), static_cast<mode_t>(mode)) == -1) {
+  if (darwin_art_bionic_fs_chmod_core != nullptr) {
+    if (darwin_art_bionic_fs_chmod_core(path.c_str(),
+                                        static_cast<uint32_t>(mode)) == -1) {
+      const int android_error = darwin_art_bionic_errno_load == nullptr
+                                    ? EIO
+                                    : darwin_art_bionic_errno_load();
+      jniThrowErrnoException(env, "chmod", android_error);
+    }
+  } else if (chmod(path.c_str(), static_cast<mode_t>(mode)) == -1) {
     ThrowErrno(env, "chmod", errno);
   }
 }
 
 void DarwinLinuxFchmod(JNIEnv* env, jobject, jobject java_fd, jint mode) {
-  if (fchmod(jniGetFDFromFileDescriptor(env, java_fd),
-             static_cast<mode_t>(mode)) == -1) {
+  const int fd = jniGetFDFromFileDescriptor(env, java_fd);
+  if (darwin_art_bionic_fs_fchmod_core != nullptr) {
+    if (darwin_art_bionic_fs_fchmod_core(fd, static_cast<uint32_t>(mode)) ==
+        -1) {
+      const int android_error = darwin_art_bionic_errno_load == nullptr
+                                    ? EIO
+                                    : darwin_art_bionic_errno_load();
+      jniThrowErrnoException(env, "fchmod", android_error);
+    }
+  } else if (fchmod(fd, static_cast<mode_t>(mode)) == -1) {
     ThrowErrno(env, "fchmod", errno);
   }
 }
@@ -251,7 +307,7 @@ jint DarwinLinuxWriteBytes(JNIEnv* env, jobject, jobject java_fd,
   bool was_signaled = false;
   const ssize_t result = RunInterruptibleIo(
       fd,
-      [&] { return write(fd, bytes, static_cast<size_t>(byte_count)); },
+      [&] { return Write(fd, bytes, static_cast<size_t>(byte_count)); },
       &was_signaled);
   const int saved_errno = errno;
   if (array_elements != nullptr) {
@@ -348,6 +404,38 @@ jobject DarwinLinuxOpen(JNIEnv* env, jobject, jstring java_path, jint flags,
   return result;
 }
 
+jobject DarwinLinuxDup(JNIEnv* env, jobject, jobject java_fd) {
+  if (java_fd == nullptr) {
+    jniThrowNullPointerException(env, "null fd");
+    return nullptr;
+  }
+  const int duplicate = Dup(jniGetFDFromFileDescriptor(env, java_fd));
+  if (duplicate == -1) {
+    ThrowErrno(env, "dup", errno);
+    return nullptr;
+  }
+  jobject result = jniCreateFileDescriptor(env, duplicate);
+  if (result == nullptr) Close(duplicate);
+  return result;
+}
+
+jint DarwinLinuxFcntlInt(JNIEnv* env, jobject, jobject java_fd, jint command,
+                         jint argument) {
+  if (java_fd == nullptr) {
+    jniThrowNullPointerException(env, "null fd");
+    return -1;
+  }
+  const int result =
+      Fcntl(jniGetFDFromFileDescriptor(env, java_fd), command, argument);
+  if (result == -1) ThrowErrno(env, "fcntl", errno);
+  return result;
+}
+
+jint DarwinLinuxFcntlVoid(JNIEnv* env, jobject, jobject java_fd,
+                          jint command) {
+  return DarwinLinuxFcntlInt(env, nullptr, java_fd, command, 0);
+}
+
 void DarwinLinuxClose(JNIEnv* env, jobject, jobject java_fd) {
   if (java_fd == nullptr) {
     jniThrowNullPointerException(env, "null fd");
@@ -417,7 +505,7 @@ jint DarwinLinuxReadBytes(JNIEnv* env, jobject, jobject java_fd,
   const ssize_t result = RunInterruptibleIo(
       fd,
       [&] {
-        return read(fd, static_cast<char*>(bytes) + byte_offset,
+        return Read(fd, static_cast<char*>(bytes) + byte_offset,
                     static_cast<size_t>(byte_count));
       },
       &was_signaled);
@@ -449,6 +537,53 @@ jlong DarwinLinuxLseek(JNIEnv* env, jobject, jobject java_fd, jlong offset,
     ThrowErrno(env, "lseek", errno);
     return -1;
   }
+  return static_cast<jlong>(result);
+}
+
+jlong DarwinLinuxSendfile(JNIEnv* env, jobject, jobject java_output_fd,
+                          jobject java_input_fd, jobject java_offset,
+                          jlong byte_count) {
+  if (java_output_fd == nullptr || java_input_fd == nullptr) {
+    jniThrowNullPointerException(env, "null fd");
+    return -1;
+  }
+  if (byte_count < 0 ||
+      static_cast<unsigned long long>(byte_count) >
+          std::numeric_limits<size_t>::max()) {
+    ThrowErrno(env, "sendfile", EINVAL);
+    return -1;
+  }
+
+  int64_t offset = 0;
+  int64_t* offset_pointer = nullptr;
+  jclass offset_class = nullptr;
+  jfieldID value_field = nullptr;
+  if (java_offset != nullptr) {
+    offset_class = env->GetObjectClass(java_offset);
+    value_field = offset_class == nullptr
+                      ? nullptr
+                      : env->GetFieldID(offset_class, "value", "J");
+    if (value_field == nullptr) {
+      env->DeleteLocalRef(offset_class);
+      return -1;
+    }
+    offset = env->GetLongField(java_offset, value_field);
+    offset_pointer = &offset;
+  }
+
+  const intptr_t result = Sendfile(
+      jniGetFDFromFileDescriptor(env, java_output_fd),
+      jniGetFDFromFileDescriptor(env, java_input_fd), offset_pointer,
+      static_cast<size_t>(byte_count));
+  if (result == -1) {
+    env->DeleteLocalRef(offset_class);
+    ThrowErrno(env, "sendfile", errno);
+    return -1;
+  }
+  if (java_offset != nullptr) {
+    env->SetLongField(java_offset, value_field, offset);
+  }
+  env->DeleteLocalRef(offset_class);
   return static_cast<jlong>(result);
 }
 
@@ -522,6 +657,8 @@ JNINativeMethod kAbiSmokeMethods[] = {
     {const_cast<char*>("statPath"),
      const_cast<char*>("(Ljava/lang/String;)Landroid/system/StructStat;"),
      reinterpret_cast<void*>(&DarwinLinuxStat)},
+    {const_cast<char*>("accessPath"), const_cast<char*>("(Ljava/lang/String;I)Z"),
+     reinterpret_cast<void*>(&DarwinLinuxAccess)},
     {const_cast<char*>("writeFile"), const_cast<char*>("(Ljava/lang/String;[B)I"),
      reinterpret_cast<void*>(&AbiSmokeWriteFile)},
     {const_cast<char*>("unameView"),

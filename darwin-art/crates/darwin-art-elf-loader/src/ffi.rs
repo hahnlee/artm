@@ -28,7 +28,10 @@ use ffi_discovery::{discover_sibling_graph, inspection_from_bytes, validate_disc
 const ABI_VERSION: u32 = 1;
 const MAX_INPUT_SIZE: usize = 1024 * 1024 * 1024;
 const MAX_DISCOVERY_FILES: usize = 64;
-const MAX_DISCOVERY_FILE_SIZE: usize = 64 * 1024 * 1024;
+// Chromium ships its arm64 engine as a monolithic libchrome.so (~240 MiB).
+// Discovery remains bounded by both this per-file ceiling and the 64-member
+// graph cap; mappings still use validated read-only file descriptors.
+const MAX_DISCOVERY_FILE_SIZE: usize = 256 * 1024 * 1024;
 const MAX_DISCOVERY_TOTAL_SIZE: usize = 256 * 1024 * 1024;
 const MAX_DISCOVERY_COMPONENT_SIZE: usize = 255;
 

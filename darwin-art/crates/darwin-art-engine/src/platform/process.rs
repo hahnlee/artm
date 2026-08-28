@@ -7,7 +7,8 @@
 
 use core::ffi::c_void;
 use darwin_art_engine_sys::{
-    FrameCallback, LifecycleHooks, ProcessConfig, ProviderAcquireFn, ProviderReleaseFn,
+    FrameCallback, HostServices, LifecycleHooks, ProcessConfig, ProviderAcquireFn,
+    ProviderReleaseFn,
 };
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
@@ -37,6 +38,7 @@ pub struct CallbackBindings<'a> {
     provider_release: Option<ProviderReleaseFn>,
     graphics_session: Option<&'a GraphicsSession>,
     lifecycle_hooks: Option<&'a LifecycleHooks>,
+    host_services: Option<&'a HostServices>,
 }
 
 impl<'a> CallbackBindings<'a> {
@@ -70,6 +72,7 @@ impl<'a> CallbackBindings<'a> {
             provider_release,
             graphics_session: None,
             lifecycle_hooks: None,
+            host_services: None,
         })
     }
 
@@ -86,6 +89,11 @@ impl<'a> CallbackBindings<'a> {
     /// machine retained inside the probe.
     pub fn with_lifecycle_hooks(mut self, hooks: Option<&'a LifecycleHooks>) -> Self {
         self.lifecycle_hooks = hooks;
+        self
+    }
+
+    pub fn with_host_services(mut self, services: Option<&'a HostServices>) -> Self {
+        self.host_services = services;
         self
     }
 }
@@ -133,6 +141,11 @@ impl<'a> ProcessRequest<'a> {
         self
     }
 
+    pub fn with_host_services(mut self, services: Option<&'a HostServices>) -> Self {
+        self.callbacks.host_services = services;
+        self
+    }
+
     pub(crate) fn as_config(&self) -> ProcessConfig {
         ProcessConfig::new(
             self.core_oj_jar.as_ptr(),
@@ -159,6 +172,13 @@ impl<'a> ProcessRequest<'a> {
             self.callbacks
                 .lifecycle_hooks
                 .map_or(core::ptr::null(), |hooks| hooks as *const LifecycleHooks),
+        )
+        .with_host_services(
+            self.callbacks
+                .host_services
+                .map_or(core::ptr::null(), |services| {
+                    services as *const HostServices
+                }),
         )
     }
 }

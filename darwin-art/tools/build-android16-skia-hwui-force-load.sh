@@ -15,6 +15,7 @@ freetype_archive="$codecs_dir/libft2-darwin.a"
 libpng_archive="$codecs_dir/libpng-darwin.a"
 zlib_archive="$codecs_dir/libz-darwin.a"
 libjpeg_root="$project_root/_aosp/external/libjpeg-turbo"
+libwebp_root="$project_root/_aosp/external/webp"
 libjpeg_archive="$project_root/_build/codec-foundation/libjpeg-darwin.a"
 liblog_archive="$project_root/_build/graphics-foundations/liblog-darwin.a"
 libcutils_archive="$project_root/_build/graphics-foundations/libcutils-darwin.a"
@@ -52,6 +53,11 @@ verify_sha "$skia/client_utils/android/BitmapRegionDecoder.cpp" \
   "$SKIA_BITMAP_REGION_DECODER_SHA256"
 verify_sha "$skia/client_utils/android/FrontBufferedStream.cpp" \
   "$SKIA_FRONT_BUFFERED_STREAM_SHA256"
+[[ -f "$libwebp_root/.source-revision" ]] || fail_input "missing WebP revision marker"
+[[ "$(tr -d '[:space:]' < "$libwebp_root/.source-revision")" == "$WEBP_REVISION" ]] ||
+  fail_input "WebP revision mismatch expected=$WEBP_REVISION"
+verify_sha "$libwebp_root/Android.bp" "$WEBP_ANDROID_BP_SHA256"
+verify_sha "$libwebp_root/src/webp/decode.h" "$WEBP_DECODE_HEADER_SHA256"
 verify_sha "$coretext_patch" "$DARWIN_CORETEXT_PATCH_SHA256"
 
 required_archives=("$freetype_archive" "$libpng_archive" "$zlib_archive" \
@@ -74,7 +80,16 @@ mkdir -p "$shadow_skia"
 while IFS= read -r entry; do
   name="$(basename "$entry")"
   [[ "$name" == BUILD.gn ]] && continue
-  ln -s "$entry" "$shadow_skia/$name"
+  if [[ "$name" == third_party ]]; then
+    mkdir -p "$shadow_skia/third_party/externals"
+    while IFS= read -r third_party_entry; do
+      ln -s "$third_party_entry" \
+        "$shadow_skia/third_party/$(basename "$third_party_entry")"
+    done < <(find "$entry" -mindepth 1 -maxdepth 1 -print | sort)
+    ln -s "$libwebp_root" "$shadow_skia/third_party/externals/libwebp"
+  else
+    ln -s "$entry" "$shadow_skia/$name"
+  fi
 done < <(find "$skia" -mindepth 1 -maxdepth 1 -print | sort)
 cp "$skia/BUILD.gn" "$shadow_skia/BUILD.gn"
 patch -d "$shadow_skia" -p1 < "$coretext_patch"
@@ -95,8 +110,9 @@ skia_use_perfetto=false skia_disable_tracing=false skia_use_gl=false \
 skia_use_metal=false skia_use_vulkan=false skia_use_libjpeg_turbo_decode=true \
 skia_use_libjpeg_turbo_encode=false skia_use_no_jpeg_encode=true \
 skia_use_libpng_decode=true skia_use_libpng_encode=false \
-skia_use_no_png_encode=true skia_use_libwebp_decode=false \
+skia_use_no_png_encode=true skia_use_libwebp_decode=true \
 skia_use_libwebp_encode=false skia_use_no_webp_encode=true skia_use_wuffs=false \
+skia_use_system_libwebp=false \
 skia_use_piex=false skia_use_xps=false skia_use_zlib=true \
 skia_use_system_libpng=true skia_use_system_zlib=true \
 skia_use_dng_sdk=false skia_use_libheif=false skia_use_crabbyavif=false \
@@ -116,6 +132,8 @@ for required in \
   'skia_use_freetype = true' \
   'skia_use_libjpeg_turbo_decode = true' \
   'skia_use_libpng_decode = true' \
+  'skia_use_libwebp_decode = true' \
+  'skia_use_system_libwebp = false' \
   'skia_use_system_libpng = true' \
   'skia_use_system_zlib = true'; do
   grep -Fx "$required" "$args_file" >/dev/null || fail_input "missing GN selection: $required"

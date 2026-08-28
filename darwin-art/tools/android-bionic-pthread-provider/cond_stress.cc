@@ -85,6 +85,35 @@ int RunMonotonicTimeout() {
   return 0;
 }
 
+int RunMonotonicAttributeTimeout() {
+  DarwinArtAndroidPthreadCond cond{};
+  DarwinArtAndroidPthreadMutex mutex{};
+  uint32_t attributes = 0;
+  if (darwin_art_bionic_pthread_condattr_init(&attributes) != 0) return 20;
+  if (darwin_art_bionic_pthread_condattr_setclock(&attributes, 1) != 0) {
+    return 21;
+  }
+  if (darwin_art_bionic_pthread_cond_init(&cond, &attributes) != 0) return 22;
+  if (darwin_art_bionic_pthread_condattr_destroy(&attributes) != 0) return 23;
+  timespec deadline{};
+  if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0) return 24;
+  deadline.tv_nsec += 2000000L;
+  if (deadline.tv_nsec >= 1000000000L) {
+    ++deadline.tv_sec;
+    deadline.tv_nsec -= 1000000000L;
+  }
+  if (darwin_art_bionic_pthread_mutex_lock(&mutex) != 0) return 25;
+  if (darwin_art_bionic_pthread_cond_timedwait(&cond, &mutex, &deadline) !=
+      kAndroidEtimedout) {
+    return 26;
+  }
+  if (darwin_art_bionic_pthread_mutex_unlock(&mutex) != 0) return 27;
+  if (darwin_art_bionic_pthread_cond_destroy(&cond) != 0) return 28;
+  if (darwin_art_bionic_pthread_mutex_destroy(&mutex) != 0) return 29;
+  if (darwin_art_bionic_pthread_provider_reset() != 0) return 30;
+  return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -94,6 +123,8 @@ int main() {
   }
   const int timeout = RunMonotonicTimeout();
   if (timeout != 0) return timeout;
-  std::puts("pthread-cond-stress: PASS rounds=100 waiters=8 destroy-wait=EBUSY ASan=clean monotonic-timeout=110 relock=owned");
+  const int attribute_timeout = RunMonotonicAttributeTimeout();
+  if (attribute_timeout != 0) return attribute_timeout;
+  std::puts("pthread-cond-stress: PASS rounds=100 waiters=8 destroy-wait=EBUSY ASan=clean monotonic-timeout=110 monotonic-attr-timeout=110 relock=owned");
   return 0;
 }

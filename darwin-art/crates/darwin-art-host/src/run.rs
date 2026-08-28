@@ -6,12 +6,14 @@ use crate::config::{HostError, HostOutcome, RunOptions, build_process_request};
 use crate::frame::{FrameHost, receive_frame};
 #[cfg(target_os = "macos")]
 use crate::gpu_loop::run as run_gpu_loop;
+#[cfg(target_os = "macos")]
+use crate::host_services::ServiceProcessManager;
 use crate::runtime::HostRuntime;
 #[cfg(target_os = "macos")]
 use crate::teardown::RuntimeShutdownGuard;
 #[cfg(target_os = "macos")]
 use darwin_art_engine::EngineSession;
-use darwin_art_runtime::{ProviderBridge, Subsystem};
+use darwin_art_runtime::{ProviderBridge, ProviderKind, Subsystem};
 
 pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
     options.validate()?;
@@ -64,6 +66,9 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
         // reports ART-specific runtime handles and never owns the production
         // phase machine.
         let lifecycle_hooks = shutdown_guard.runtime().native_lifecycle_hooks();
+        let mut service_processes =
+            ServiceProcessManager::new(options.clone()).map_err(HostError::HostService)?;
+        let host_services = service_processes.native_services();
 
         let mut frame_host = FrameHost {
             frames_received: 0,
@@ -75,6 +80,16 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 let _ = shutdown_guard.shutdown();
                 return Err(HostError::RuntimeFailed(-1));
             };
+            // Socket and pipe descriptors can arrive in the first Binder
+            // transaction that starts an Android service process, before its
+            // native library is loaded.  Own the network provider for the
+            // whole Android process so SCM_RIGHTS import is available at that
+            // bootstrap boundary.  Native-library loads take additional
+            // Rust-counted leases without reinstalling the process-global
+            // broker.
+            let network_lease = provider
+                .acquire_lease(ProviderKind::Network, -1)
+                .map_err(HostError::RuntimeFailed)?;
             let request = match build_process_request(
                 options,
                 ptr::from_mut(&mut frame_host).cast(),
@@ -84,24 +99,30 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 Some(ProviderBridge::release_callback()),
                 runtime.graphics(),
                 Some(&lifecycle_hooks),
+                Some(&host_services),
             ) {
                 Ok(inputs) => inputs,
                 Err(error) => {
+                    drop(network_lease);
                     let _ = shutdown_guard.shutdown();
                     return Err(error);
                 }
             };
             let Some(engine) = runtime.engine() else {
+                drop(network_lease);
                 let _ = shutdown_guard.shutdown();
                 return Err(HostError::RuntimeFailed(-1));
             };
-            match engine.run_request(&request) {
+            let result = match engine.run_request(&request) {
                 Ok(result) => result,
                 Err(error) => {
+                    drop(network_lease);
                     let _ = shutdown_guard.shutdown();
                     return Err(HostError::RuntimeFailed(error));
                 }
-            }
+            };
+            drop(network_lease);
+            result
         };
 
         // The graphics engine publishes its drawable during run_process.

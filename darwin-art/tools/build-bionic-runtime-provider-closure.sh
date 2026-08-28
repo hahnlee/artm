@@ -281,13 +281,15 @@ smoke="$build/full-link-smoke"
   -Wl,-force_load,"$icu/libandroidicuinit-darwin.a" \
   "$icu/libicuuc-common-darwin.a" "$icu/libicuuc-stubdata-darwin.a" \
   "$root/_build/graphics-foundations/liblog-darwin.a" \
-  -framework Security -o "$smoke"
+  -framework Security -lresolv -o "$smoke"
 
 "$smoke"
 symbols="$build/provider-resolvers.txt"
 nm -gU "$native" "$binary128" "$float" "$rust" > "$build/all-symbols.txt" 2>/dev/null
 cat > "$symbols" <<'EOF'
 _darwin_art_bionic_abort_resolve
+_darwin_art_android_binder_ndk_resolve
+_darwin_art_android_aaudio_resolve
 _darwin_art_bionic_allocator_resolve
 _darwin_art_bionic_binary128_conversion_resolve
 _darwin_art_bionic_dso_lifecycle_resolve
@@ -354,6 +356,7 @@ for symbol in _darwin_art_bionic_malloc_result _darwin_art_bionic_free \
               _darwin_art_bionic_fprintf _darwin_art_bionic_vfprintf \
               _darwin_art_bionic_fs_process_install \
               _darwin_art_bionic_fs_process_uninstall \
+              _darwin_art_bionic_fs_seed_private_directory \
               _darwin_art_bionic_socket_broker_activate \
               _darwin_art_bionic_socket_broker_deactivate \
               _darwin_art_bionic_socket_broker_is_active \
@@ -405,4 +408,4 @@ if otool -L "$smoke" | grep -E '(/opt/homebrew|/usr/local|libicu(uc|i18n))' >/de
   echo 'bionic-runtime-provider-closure: host/dynamic ICU escaped' >&2
   exit 2
 fi
-echo 'bionic-runtime-provider-closure: PASS providers=34 bind_builtins=sealed routes=371 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'
+echo 'bionic-runtime-provider-closure: PASS providers=36 bind_builtins=sealed routes=412 Rust+C+C++=linked duplicate-provider=0 ICU-owner=1 host-fallback=0'

@@ -51,16 +51,6 @@ final class FontBootstrap {
             Object typefaces = buildTypefaces.invoke(null, config, fallback);
 
             Class<?> typeface = Class.forName("android.graphics.Typeface");
-            Method installMap = typeface.getMethod("setSystemFontMap", Map.class);
-            installMap.invoke(null, typefaces);
-            // Typeface's static defaults may have been touched by framework
-            // startup before this detached launcher installs SystemFonts.  A
-            // real zygote initializes these fields from the same map; restore
-            // that invariant explicitly so TextView/EditText constructors do
-            // not call Typeface.create(null, style).
-            Method create = typeface.getMethod("create", String.class, int.class);
-            Object regularTypeface = create.invoke(null, "sans-serif", 0);
-            Object boldTypeface = create.invoke(null, "sans-serif", 1);
             java.lang.reflect.Field defaultField = typeface.getField("DEFAULT");
             java.lang.reflect.Field defaultBoldField = typeface.getField("DEFAULT_BOLD");
             java.lang.reflect.Field defaultTypefaceField =
@@ -71,6 +61,35 @@ final class FontBootstrap {
             defaultBoldField.setAccessible(true);
             defaultTypefaceField.setAccessible(true);
             defaultsField.setAccessible(true);
+
+            // setSystemFontMap derives styled defaults from sDefaultTypeface.
+            // Zygote normally assigns that field while constructing this same
+            // map; the detached startup must establish the seed before calling
+            // the public replacement hook, not after it.
+            Object seedTypeface = ((Map<?, ?>) typefaces).get("sans-serif");
+            if (seedTypeface == null && !((Map<?, ?>) typefaces).isEmpty()) {
+                seedTypeface = ((Map<?, ?>) typefaces).values().iterator().next();
+            }
+            if (seedTypeface != null) {
+                defaultField.set(null, seedTypeface);
+                defaultBoldField.set(null, seedTypeface);
+                defaultTypefaceField.set(null, seedTypeface);
+                Object defaults = java.lang.reflect.Array.newInstance(typeface, 4);
+                for (int index = 0; index < 4; index++) {
+                    java.lang.reflect.Array.set(defaults, index, seedTypeface);
+                }
+                defaultsField.set(null, defaults);
+            }
+            Method installMap = typeface.getMethod("setSystemFontMap", Map.class);
+            installMap.invoke(null, typefaces);
+            // Typeface's static defaults may have been touched by framework
+            // startup before this detached launcher installs SystemFonts.  A
+            // real zygote initializes these fields from the same map; restore
+            // that invariant explicitly so TextView/EditText constructors do
+            // not call Typeface.create(null, style).
+            Method create = typeface.getMethod("create", String.class, int.class);
+            Object regularTypeface = create.invoke(null, "sans-serif", 0);
+            Object boldTypeface = create.invoke(null, "sans-serif", 1);
             if (regularTypeface != null) {
                 defaultField.set(null, regularTypeface);
                 defaultTypefaceField.set(null, regularTypeface);

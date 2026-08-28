@@ -1,5 +1,53 @@
 use super::*;
 
+fn collect_provider_gate_inputs(directory: &Path, inputs: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_provider_gate_inputs(&path, inputs)?;
+        } else if path.is_file() {
+            inputs.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn cached_bionic_provider_gate(root: &Path) -> Result<()> {
+    let outputs = [
+        "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-rust-providers.a",
+        "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a",
+        "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-float-conversion.a",
+        "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-binary128-conversion.a",
+    ]
+    .map(|path| root.join(path));
+    let mut inputs = vec![root.join("upstream/android35-libcxx-provider-coverage.lock")];
+    for entry in fs::read_dir(root.join("tools"))? {
+        let path = entry?.path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        if path.is_dir()
+            && (name.starts_with("bionic-")
+                || matches!(
+                    name,
+                    "android-bionic-pthread-provider"
+                        | "android-dl-iterate-phdr-provider"
+                        | "android-liblog-exec-provider"
+                ))
+        {
+            collect_provider_gate_inputs(&path, &mut inputs)?;
+        }
+    }
+    build_shell_gate_cached(
+        root,
+        "build-bionic-runtime-provider-closure.sh",
+        &[],
+        &inputs,
+        &outputs,
+    )
+}
+
 fn cached_foundation_gate(root: &Path, script: &str, lock: &str, outputs: &[&str]) -> Result<()> {
     let output_paths = outputs
         .iter()
@@ -23,17 +71,7 @@ fn cached_foundation_gate(root: &Path, script: &str, lock: &str, outputs: &[&str
 /// audit can reuse the already-materialized archives.
 pub(super) fn run_graphics_upstream_gates(root: &Path, incremental: bool) -> Result<()> {
     if incremental {
-        cached_foundation_gate(
-            root,
-            "build-bionic-runtime-provider-closure.sh",
-            "upstream/android35-libcxx-provider-coverage.lock",
-            &[
-                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-rust-providers.a",
-                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a",
-                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-float-conversion.a",
-                "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-binary128-conversion.a",
-            ],
-        )?;
+        cached_bionic_provider_gate(root)?;
     } else {
         build_shell_gate(root, "build-bionic-runtime-provider-closure.sh")?;
     }

@@ -38,7 +38,18 @@ public final class ProbeResources extends Resources {
         CONFIGURATION.screenWidthDp = 360;
         CONFIGURATION.screenHeightDp = 640;
         CONFIGURATION.smallestScreenWidthDp = 360;
+        // The macOS host is a touch-capable Android display paired with a
+        // permanently connected physical keyboard.  Android publishes this
+        // through Configuration in addition to InputManager device records;
+        // applications use these qualifiers to enable their hardware-key
+        // navigation paths and to avoid assuming a software IME is required.
+        CONFIGURATION.touchscreen = Configuration.TOUCHSCREEN_FINGER;
+        CONFIGURATION.keyboard = Configuration.KEYBOARD_QWERTY;
+        CONFIGURATION.keyboardHidden = Configuration.KEYBOARDHIDDEN_NO;
+        CONFIGURATION.hardKeyboardHidden = Configuration.HARDKEYBOARDHIDDEN_NO;
         DISPLAY_METRICS.setToDefaults();
+        DISPLAY_METRICS.widthPixels = 360 * scale;
+        DISPLAY_METRICS.heightPixels = 640 * scale;
         DISPLAY_METRICS.density = scale;
         DISPLAY_METRICS.densityDpi = densityDpi;
         DISPLAY_METRICS.scaledDensity = scale;
@@ -109,6 +120,11 @@ public final class ProbeResources extends Resources {
             super.getValue(id, outValue, resolveRefs);
             return;
         } catch (Resources.NotFoundException missing) {
+            // Never disguise an installed APK resource as the probe's
+            // synthetic float. App code commonly catches NotFoundException
+            // and applies its own default; returning TYPE_FLOAT here breaks
+            // type-sensitive values such as Chromium's window fractions.
+            if (frameworkResources && (id >>> 24) == 0x7f) throw missing;
             // Synthetic probe-only resources have no backing table.
         }
         outValue.type = TypedValue.TYPE_FLOAT;

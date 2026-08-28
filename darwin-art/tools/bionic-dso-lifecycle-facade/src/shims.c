@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <stdatomic.h>
 
 extern void* darwin_art_bionic_android_dlopen_ext(const char*, int,
                                                    const void*);
@@ -43,10 +44,17 @@ int darwin_art_bionic___register_atfork(void* prepare, void* parent,
   return 0;
 }
 
-int darwin_art_bionic_dladdr_unsupported(const void* address, void* info) {
-  (void)address;
-  (void)info;
-  return 0;
+typedef int (*DarwinArtDladdrCallback)(const void*, void*);
+static _Atomic(DarwinArtDladdrCallback) g_dladdr_callback;
+
+void darwin_art_bionic_dso_install_dladdr(DarwinArtDladdrCallback callback) {
+  atomic_store_explicit(&g_dladdr_callback, callback, memory_order_release);
+}
+
+int darwin_art_bionic_dladdr(const void* address, void* info) {
+  DarwinArtDladdrCallback callback =
+      atomic_load_explicit(&g_dladdr_callback, memory_order_acquire);
+  return callback == NULL ? 0 : callback(address, info);
 }
 
 static int NameCompare(const char* left, const char* right) {
@@ -75,7 +83,7 @@ static const Binding kBindings[] = {
      (DarwinArtBionicDsoFunction)darwin_art_bionic___register_atfork},
     {"android_dlopen_ext",
      (DarwinArtBionicDsoFunction)darwin_art_bionic_android_dlopen_ext},
-    {"dladdr", (DarwinArtBionicDsoFunction)darwin_art_bionic_dladdr_unsupported},
+    {"dladdr", (DarwinArtBionicDsoFunction)darwin_art_bionic_dladdr},
     {"dlclose", (DarwinArtBionicDsoFunction)darwin_art_bionic_dlclose},
     {"dlerror", (DarwinArtBionicDsoFunction)darwin_art_bionic_dlerror},
     {"dlopen", (DarwinArtBionicDsoFunction)darwin_art_bionic_dlopen},

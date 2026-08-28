@@ -3,13 +3,17 @@
 #include "darwin_surface_bridge.h"
 
 #include <android/bitmap.h>
+#include <android/hardware_buffer.h>
 #include <dlfcn.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
+#include <cstdarg>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <cstdlib>
 #include <iostream>
 #include <iterator>
@@ -17,24 +21,48 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
+
+namespace darwin_art {
+const char* EglQueryStringAndroid(void* display, std::int32_t name);
+}
 
 namespace {
 
 using EGLBoolean = std::uint32_t;
 using EGLint = std::int32_t;
 using EGLenum = std::uint32_t;
+using EGLAttrib = std::intptr_t;
 using EGLDisplay = void*;
 using EGLConfig = void*;
 using EGLContext = void*;
 using EGLSurface = void*;
+using EGLImage = void*;
+using EGLSync = void*;
 
 constexpr EGLint kEglNone = 0x3038;
 constexpr EGLint kEglWidth = 0x3057;
 constexpr EGLint kEglHeight = 0x3056;
+constexpr EGLint kEglExtensions = 0x3055;
+constexpr EGLint kEglSurfaceType = 0x3033;
+constexpr EGLint kEglPbufferBit = 0x0001;
+constexpr EGLint kEglBindToTextureRgba = 0x303B;
+constexpr EGLint kEglTrue = 1;
 constexpr EGLint kEglNotInitialized = 0x3001;
+constexpr EGLenum kEglNativeBufferAndroid = 0x3140;
+constexpr EGLenum kEglSyncNativeFenceAndroid = 0x3144;
+constexpr EGLint kEglSyncNativeFenceFdAndroid = 0x3145;
+constexpr EGLint kEglNoNativeFenceFdAndroid = -1;
+constexpr EGLenum kEglPlatformAngle = 0x3202;
+constexpr EGLint kEglPlatformAngleType = 0x3203;
+constexpr EGLint kEglPlatformAngleTypeOpenGles = 0x320E;
+constexpr EGLint kEglPlatformAngleTypeMetal = 0x3489;
 constexpr EGLenum kEglIosurfaceAngle = 0x3454;
+constexpr EGLint kEglDeviceExt = 0x322C;
+constexpr EGLint kEglMetalDeviceAngle = 0x34A6;
+constexpr EGLenum kEglMetalTextureAngle = 0x34A7;
 constexpr EGLint kEglIosurfacePlaneAngle = 0x345A;
 constexpr EGLint kEglTextureTypeAngle = 0x345C;
 constexpr EGLint kEglTextureInternalFormatAngle = 0x345D;
@@ -49,10 +77,32 @@ constexpr EGLint kGlBgraExt = 0x80E1;
 constexpr EGLint kGlUnsignedByte = 0x1401;
 constexpr std::uint32_t kGlTexture2d = 0x0DE1;
 constexpr std::uint32_t kGlTextureRectangleAngle = 0x84F5;
+constexpr std::int32_t kGlFramebufferAttachmentTexture = 0x1702;
 constexpr std::uint32_t kGlFramebuffer = 0x8D40;
 constexpr std::uint32_t kGlDrawFramebuffer = 0x8CA9;
 constexpr std::uint32_t kGlColorAttachment0 = 0x8CE0;
 constexpr std::uint32_t kGlFramebufferComplete = 0x8CD5;
+constexpr std::uint32_t kGlFramebufferAttachmentObjectType = 0x8CD0;
+constexpr std::uint32_t kGlFramebufferAttachmentObjectName = 0x8CD1;
+constexpr std::uint32_t kGlExtensions = 0x1F03;
+constexpr std::uint32_t kGlNumExtensions = 0x821D;
+
+extern "C" void* darwin_art_android_hardware_buffer_iosurface(
+    AHardwareBuffer* buffer);
+extern "C" AHardwareBuffer*
+darwin_art_android_hardware_buffer_from_client_buffer(void* client_buffer);
+extern "C" void* darwin_art_android_hardware_buffer_metal_texture(
+    AHardwareBuffer* buffer, void* metal_device);
+extern "C" void* darwin_art_android_iosurface_metal_texture(
+    void* iosurface, std::uint32_t width, std::uint32_t height,
+    void* metal_device);
+extern "C" void darwin_art_android_metal_texture_release(void* texture);
+extern "C" int darwin_art_bionic_fd_import_from_scm(int host_fd);
+extern "C" int darwin_art_bionic_socket_broker_pipe(
+    std::int32_t descriptors[2]);
+extern "C" std::intptr_t darwin_art_bionic_socket_broker_write(
+    int fd, const void* bytes, std::size_t count);
+extern "C" int darwin_art_bionic_socket_broker_close(int fd);
 
 struct AngleApi {
   void* egl_library = nullptr;
@@ -87,6 +137,7 @@ struct AngleApi {
   EGLContext (*get_current_context)() = nullptr;
   EGLSurface (*get_current_surface)(EGLint) = nullptr;
   EGLint (*get_error)() = nullptr;
+  void* (*get_proc_address)(const char*) = nullptr;
   EGLBoolean (*release_thread)() = nullptr;
   EGLBoolean (*wait_gl)() = nullptr;
   EGLBoolean (*wait_native)(EGLint) = nullptr;
@@ -108,6 +159,8 @@ struct AngleApi {
   void (*gl_bind_texture)(std::uint32_t, std::uint32_t) = nullptr;
   void (*gl_tex_parameter_i)(std::uint32_t, std::uint32_t, std::int32_t) =
       nullptr;
+  void (*gl_get_tex_parameter_iv)(std::uint32_t, std::uint32_t,
+                                  std::int32_t*) = nullptr;
   std::uint32_t (*gl_get_error)() = nullptr;
   void (*gl_delete_textures)(std::int32_t, const std::uint32_t*) = nullptr;
   void (*gl_tex_image_2d)(std::uint32_t, std::int32_t, std::int32_t,
@@ -118,6 +171,16 @@ struct AngleApi {
                               std::uint32_t, std::uint32_t, const void*) =
       nullptr;
   void (*gl_get_integer_v)(std::uint32_t, std::int32_t*) = nullptr;
+  void (*gl_get_boolean_v)(std::uint32_t, std::uint8_t*) = nullptr;
+  void (*gl_color_mask)(std::uint8_t, std::uint8_t, std::uint8_t,
+                        std::uint8_t) = nullptr;
+  void (*gl_tex_storage_1d_ext)(std::uint32_t, std::int32_t, std::uint32_t,
+                                std::int32_t) = nullptr;
+  void (*gl_tex_storage_2d_ext)(std::uint32_t, std::int32_t, std::uint32_t,
+                                std::int32_t, std::int32_t) = nullptr;
+  void (*gl_tex_storage_3d_ext)(std::uint32_t, std::int32_t, std::uint32_t,
+                                std::int32_t, std::int32_t,
+                                std::int32_t) = nullptr;
   void (*gl_read_pixels)(std::int32_t, std::int32_t, std::int32_t,
                          std::int32_t, std::uint32_t, std::uint32_t,
                          void*) = nullptr;
@@ -127,11 +190,39 @@ struct AngleApi {
                                     std::uint32_t, std::uint32_t,
                                     std::int32_t) = nullptr;
   std::uint32_t (*gl_check_framebuffer_status)(std::uint32_t) = nullptr;
+  void (*gl_get_framebuffer_attachment_parameter_iv)(
+      std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t*) = nullptr;
   void (*gl_delete_framebuffers)(std::int32_t, const std::uint32_t*) = nullptr;
   void (*gl_blit_framebuffer_angle)(std::int32_t, std::int32_t, std::int32_t,
                                     std::int32_t, std::int32_t, std::int32_t,
                                     std::int32_t, std::int32_t, std::uint32_t,
                                     std::uint32_t) = nullptr;
+  std::uint32_t (*gl_create_shader)(std::uint32_t) = nullptr;
+  void (*gl_shader_source)(std::uint32_t, std::int32_t, const char* const*,
+                           const std::int32_t*) = nullptr;
+  void (*gl_compile_shader)(std::uint32_t) = nullptr;
+  void (*gl_get_shader_iv)(std::uint32_t, std::uint32_t, std::int32_t*) =
+      nullptr;
+  void (*gl_get_shader_info_log)(std::uint32_t, std::int32_t, std::int32_t*,
+                                 char*) = nullptr;
+  void (*gl_delete_shader)(std::uint32_t) = nullptr;
+  std::uint32_t (*gl_create_program)() = nullptr;
+  void (*gl_attach_shader)(std::uint32_t, std::uint32_t) = nullptr;
+  void (*gl_link_program)(std::uint32_t) = nullptr;
+  void (*gl_get_program_iv)(std::uint32_t, std::uint32_t, std::int32_t*) =
+      nullptr;
+  void (*gl_get_program_info_log)(std::uint32_t, std::int32_t, std::int32_t*,
+                                  char*) = nullptr;
+  void (*gl_delete_program)(std::uint32_t) = nullptr;
+  void (*gl_use_program)(std::uint32_t) = nullptr;
+  std::int32_t (*gl_get_uniform_location)(std::uint32_t, const char*) = nullptr;
+  void (*gl_uniform_1i)(std::int32_t, std::int32_t) = nullptr;
+  void (*gl_uniform_1f)(std::int32_t, float) = nullptr;
+  void (*gl_uniform_4f)(std::int32_t, float, float, float, float) = nullptr;
+  void (*gl_blend_func_separate)(std::uint32_t, std::uint32_t, std::uint32_t,
+                                 std::uint32_t) = nullptr;
+  void (*gl_blend_equation_separate)(std::uint32_t, std::uint32_t) = nullptr;
+  void (*gl_draw_arrays)(std::uint32_t, std::int32_t, std::int32_t) = nullptr;
 
   bool ready = false;
 };
@@ -187,6 +278,7 @@ AngleApi& GetAngleApi() {
     LOAD_EGL(get_current_context, "eglGetCurrentContext");
     LOAD_EGL(get_current_surface, "eglGetCurrentSurface");
     LOAD_EGL(get_error, "eglGetError");
+    LOAD_EGL(get_proc_address, "eglGetProcAddress");
     LOAD_EGL(release_thread, "eglReleaseThread");
     LOAD_EGL(wait_gl, "eglWaitGL");
     LOAD_EGL(wait_native, "eglWaitNative");
@@ -207,18 +299,46 @@ AngleApi& GetAngleApi() {
     LOAD_GL(gl_active_texture, "glActiveTexture");
     LOAD_GL(gl_bind_texture, "glBindTexture");
     LOAD_GL(gl_tex_parameter_i, "glTexParameteri");
+    LOAD_GL(gl_get_tex_parameter_iv, "glGetTexParameteriv");
     LOAD_GL(gl_get_error, "glGetError");
     LOAD_GL(gl_delete_textures, "glDeleteTextures");
     LOAD_GL(gl_tex_image_2d, "glTexImage2D");
     LOAD_GL(gl_tex_sub_image_2d, "glTexSubImage2D");
     LOAD_GL(gl_get_integer_v, "glGetIntegerv");
+    LOAD_GL(gl_get_boolean_v, "glGetBooleanv");
+    LOAD_GL(gl_color_mask, "glColorMask");
+    LOAD_GL(gl_tex_storage_1d_ext, "glTexStorage1DEXT");
+    LOAD_GL(gl_tex_storage_2d_ext, "glTexStorage2DEXT");
+    LOAD_GL(gl_tex_storage_3d_ext, "glTexStorage3DEXT");
     LOAD_GL(gl_read_pixels, "glReadPixels");
     LOAD_GL(gl_gen_framebuffers, "glGenFramebuffers");
     LOAD_GL(gl_bind_framebuffer, "glBindFramebuffer");
     LOAD_GL(gl_framebuffer_texture_2d, "glFramebufferTexture2D");
     LOAD_GL(gl_check_framebuffer_status, "glCheckFramebufferStatus");
+    LOAD_GL(gl_get_framebuffer_attachment_parameter_iv,
+            "glGetFramebufferAttachmentParameteriv");
     LOAD_GL(gl_delete_framebuffers, "glDeleteFramebuffers");
     LOAD_GL(gl_blit_framebuffer_angle, "glBlitFramebufferANGLE");
+    LOAD_GL(gl_create_shader, "glCreateShader");
+    LOAD_GL(gl_shader_source, "glShaderSource");
+    LOAD_GL(gl_compile_shader, "glCompileShader");
+    LOAD_GL(gl_get_shader_iv, "glGetShaderiv");
+    LOAD_GL(gl_get_shader_info_log, "glGetShaderInfoLog");
+    LOAD_GL(gl_delete_shader, "glDeleteShader");
+    LOAD_GL(gl_create_program, "glCreateProgram");
+    LOAD_GL(gl_attach_shader, "glAttachShader");
+    LOAD_GL(gl_link_program, "glLinkProgram");
+    LOAD_GL(gl_get_program_iv, "glGetProgramiv");
+    LOAD_GL(gl_get_program_info_log, "glGetProgramInfoLog");
+    LOAD_GL(gl_delete_program, "glDeleteProgram");
+    LOAD_GL(gl_use_program, "glUseProgram");
+    LOAD_GL(gl_get_uniform_location, "glGetUniformLocation");
+    LOAD_GL(gl_uniform_1i, "glUniform1i");
+    LOAD_GL(gl_uniform_1f, "glUniform1f");
+    LOAD_GL(gl_uniform_4f, "glUniform4f");
+    LOAD_GL(gl_blend_func_separate, "glBlendFuncSeparate");
+    LOAD_GL(gl_blend_equation_separate, "glBlendEquationSeparate");
+    LOAD_GL(gl_draw_arrays, "glDrawArrays");
 #undef LOAD_GL
     api.ready = api.get_display != nullptr && api.initialize != nullptr &&
                 api.choose_config != nullptr &&
@@ -236,6 +356,7 @@ AngleApi& GetAngleApi() {
                 api.get_current_display != nullptr &&
                 api.get_current_context != nullptr &&
                 api.get_current_surface != nullptr && api.get_error != nullptr &&
+                api.get_proc_address != nullptr &&
                 api.release_thread != nullptr && api.wait_gl != nullptr &&
                 api.wait_native != nullptr && api.gl_pixel_store_i != nullptr &&
                 api.gl_disable != nullptr && api.gl_depth_mask != nullptr &&
@@ -379,9 +500,28 @@ EGLSurface CreateHostWindowSurface(EGLDisplay native_display,
   uint32_t backing_width = 0;
   uint32_t backing_height = 0;
   EGLSurface surface = nullptr;
-  if (host != nullptr && darwin_art_surface_gpu_acquire_iosurface(
+  bool has_iosurface =
+      host != nullptr && darwin_art_surface_gpu_acquire_iosurface(
                              host, &iosurface, &backing_width,
-                             &backing_height)) {
+                             &backing_height);
+  if (!has_iosurface) {
+    const char* inherited_id = std::getenv("DARWIN_ART_HOST_IOSURFACE_ID");
+    if (inherited_id != nullptr) {
+      char* end = nullptr;
+      const unsigned long parsed = std::strtoul(inherited_id, &end, 10);
+      if (end != inherited_id && *end == '\0' && parsed <= UINT32_MAX) {
+        has_iosurface = darwin_art_surface_gpu_lookup_iosurface(
+            static_cast<uint32_t>(parsed), &iosurface, &backing_width,
+            &backing_height);
+        if (has_iosurface) {
+          std::cerr << "ART Android EGL: imported host IOSurface id="
+                    << parsed << " " << backing_width << "x"
+                    << backing_height << "\n";
+        }
+      }
+    }
+  }
+  if (has_iosurface) {
     EGLint bind_target = 0;
     int32_t embedded_x = 0;
     int32_t embedded_y = 0;
@@ -943,12 +1083,8 @@ jboolean EglQuerySurface(JNIEnv* env, jobject, jobject display, jobject surface,
   return ok ? JNI_TRUE : JNI_FALSE;
 }
 jstring EglQueryString(JNIEnv* env, jobject, jobject display, jint name) {
-  auto& api = GetAngleApi();
-  const char* value =
-      !api.ready
-          ? nullptr
-          : api.query_string(
-                HandleAs<EGLDisplay>(env, display, "mEGLDisplay"), name);
+  const char* value = darwin_art::EglQueryStringAndroid(
+      HandleAs<EGLDisplay>(env, display, "mEGLDisplay"), name);
   return value == nullptr ? nullptr : env->NewStringUTF(value);
 }
 jint EglGetError(JNIEnv*, jobject) {
@@ -1187,7 +1323,39 @@ struct DarwinAndroidNativeWindowBuffer {
   uint64_t generation = 0;
 };
 
+struct AndroidNativeBaseAbi {
+  int32_t magic;
+  int32_t version;
+  void* reserved[4];
+  void (*inc_ref)(AndroidNativeBaseAbi* base);
+  void (*dec_ref)(AndroidNativeBaseAbi* base);
+};
+
+struct AndroidNativeWindowAbi {
+  AndroidNativeBaseAbi common;
+  uint32_t flags;
+  int32_t min_swap_interval;
+  int32_t max_swap_interval;
+  float xdpi;
+  float ydpi;
+  intptr_t oem[4];
+  int (*set_swap_interval)(AndroidNativeWindowAbi*, int);
+  int (*dequeue_buffer_deprecated)(AndroidNativeWindowAbi*, void**);
+  int (*lock_buffer_deprecated)(AndroidNativeWindowAbi*, void*);
+  int (*queue_buffer_deprecated)(AndroidNativeWindowAbi*, void*);
+  int (*query)(const AndroidNativeWindowAbi*, int, int*);
+  int (*perform)(AndroidNativeWindowAbi*, int, ...);
+  int (*cancel_buffer_deprecated)(AndroidNativeWindowAbi*, void*);
+  int (*dequeue_buffer)(AndroidNativeWindowAbi*, void**, int*);
+  int (*queue_buffer)(AndroidNativeWindowAbi*, void*, int);
+  int (*cancel_buffer)(AndroidNativeWindowAbi*, void*, int);
+};
+
 struct DarwinAndroidNativeWindow {
+  // Must remain first. HWUI receives this object as a real ANativeWindow and
+  // uses its Android native-base refcount/query ABI before handing it to the
+  // render thread.
+  AndroidNativeWindowAbi abi{};
   std::atomic<uint32_t> references{1};
   std::atomic<int32_t> width{0};
   std::atomic<int32_t> height{0};
@@ -1219,29 +1387,161 @@ uint32_t AndroidNativeWindowBytesPerPixel(int32_t format) {
   // android/native_window.h: RGBA_8888=1, RGBX_8888=2, RGB_565=4.
   return format == 4 ? 2u : 4u;
 }
+
+DarwinAndroidNativeWindow* WindowFromAbi(AndroidNativeWindowAbi* abi) {
+  return reinterpret_cast<DarwinAndroidNativeWindow*>(abi);
+}
+
+const DarwinAndroidNativeWindow* WindowFromAbi(
+    const AndroidNativeWindowAbi* abi) {
+  return reinterpret_cast<const DarwinAndroidNativeWindow*>(abi);
+}
+
+void ReleaseNativeWindow(DarwinAndroidNativeWindow* window) {
+  if (window == nullptr ||
+      window->references.fetch_sub(1, std::memory_order_acq_rel) != 1) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> global_lock(g_android_native_window_mutex);
+    if (g_android_native_window_published == window) {
+      g_android_native_window_published = nullptr;
+    }
+  }
+  delete window;
+}
+
+void NativeWindowIncRef(AndroidNativeBaseAbi* base) {
+  if (base == nullptr) return;
+  auto* window = reinterpret_cast<DarwinAndroidNativeWindow*>(base);
+  window->references.fetch_add(1, std::memory_order_relaxed);
+}
+
+void NativeWindowDecRef(AndroidNativeBaseAbi* base) {
+  ReleaseNativeWindow(
+      reinterpret_cast<DarwinAndroidNativeWindow*>(base));
+}
+
+int NativeWindowSetSwapInterval(AndroidNativeWindowAbi*, int) { return 0; }
+int NativeWindowUnsupportedDequeue(AndroidNativeWindowAbi*, void**, int*) {
+  return -ENOSYS;
+}
+int NativeWindowUnsupportedDequeueDeprecated(AndroidNativeWindowAbi*, void**) {
+  return -ENOSYS;
+}
+int NativeWindowUnsupportedBuffer(AndroidNativeWindowAbi*, void*) {
+  return -ENOSYS;
+}
+int NativeWindowUnsupportedBufferWithFence(AndroidNativeWindowAbi*, void*,
+                                           int) {
+  return -ENOSYS;
+}
+
+int NativeWindowQuery(const AndroidNativeWindowAbi* abi, int what, int* value) {
+  if (abi == nullptr || value == nullptr) return -EINVAL;
+  const auto* window = WindowFromAbi(abi);
+  switch (what) {
+    case 0:  // NATIVE_WINDOW_WIDTH
+    case 7:  // NATIVE_WINDOW_DEFAULT_WIDTH
+      *value = window->width.load(std::memory_order_relaxed);
+      return 0;
+    case 1:  // NATIVE_WINDOW_HEIGHT
+    case 8:  // NATIVE_WINDOW_DEFAULT_HEIGHT
+      *value = window->height.load(std::memory_order_relaxed);
+      return 0;
+    case 2:  // NATIVE_WINDOW_FORMAT
+      *value = window->format.load(std::memory_order_relaxed);
+      return 0;
+    case 3:  // NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS
+      *value = 0;
+      return 0;
+    case 4:  // NATIVE_WINDOW_QUEUES_TO_WINDOW_COMPOSER
+      *value = 1;
+      return 0;
+    case 6:  // NATIVE_WINDOW_TRANSFORM_HINT
+      *value = 0;
+      return 0;
+    default:
+      return -ENOENT;
+  }
+}
+
+int NativeWindowPerform(AndroidNativeWindowAbi*, int, ...) {
+  // The detached Metal compositor has no BufferQueue producer configuration.
+  // Accept advisory configuration requests; queries continue through query().
+  return 0;
+}
+
+void InitializeNativeWindowAbi(DarwinAndroidNativeWindow* window) {
+  constexpr int32_t kAndroidNativeWindowMagic =
+      ('_' << 24) | ('w' << 16) | ('n' << 8) | 'd';
+  window->abi.common.magic = kAndroidNativeWindowMagic;
+  window->abi.common.version = sizeof(AndroidNativeWindowAbi);
+  window->abi.common.inc_ref = &NativeWindowIncRef;
+  window->abi.common.dec_ref = &NativeWindowDecRef;
+  window->abi.min_swap_interval = 0;
+  window->abi.max_swap_interval = 1;
+  window->abi.set_swap_interval = &NativeWindowSetSwapInterval;
+  window->abi.dequeue_buffer_deprecated =
+      &NativeWindowUnsupportedDequeueDeprecated;
+  window->abi.lock_buffer_deprecated = &NativeWindowUnsupportedBuffer;
+  window->abi.queue_buffer_deprecated = &NativeWindowUnsupportedBuffer;
+  window->abi.query = &NativeWindowQuery;
+  window->abi.perform = &NativeWindowPerform;
+  window->abi.cancel_buffer_deprecated = &NativeWindowUnsupportedBuffer;
+  window->abi.dequeue_buffer = &NativeWindowUnsupportedDequeue;
+  window->abi.queue_buffer = &NativeWindowUnsupportedBufferWithFence;
+  window->abi.cancel_buffer = &NativeWindowUnsupportedBufferWithFence;
+}
 }  // namespace
 
-extern "C" void* darwin_art_android_ANativeWindow_fromSurface(void*, void*) {
+extern "C" void* darwin_art_android_ANativeWindow_fromSurface(void*,
+                                                                void* surface) {
   auto* window = new DarwinAndroidNativeWindow();
+  InitializeNativeWindowAbi(window);
   window->width.store(darwin_art::DarwinAngleHostSurfaceWidth(),
                       std::memory_order_relaxed);
   window->height.store(darwin_art::DarwinAngleHostSurfaceHeight(),
                        std::memory_order_relaxed);
+  if (DebugAndroidNativeWindow()) {
+    std::cerr << "ART Android ANativeWindow: fromSurface pid=" << getpid()
+              << " javaSurface=" << surface << " window=" << window
+              << " size=" << window->width.load(std::memory_order_relaxed)
+              << "x" << window->height.load(std::memory_order_relaxed)
+              << "\n";
+  }
   return window;
 }
 
-extern "C" void darwin_art_android_ANativeWindow_release(void* opaque) {
+extern "C" void* darwin_art_android_ANativeWindow_create(
+    int32_t width, int32_t height, int32_t format) {
+  auto* window = new (std::nothrow) DarwinAndroidNativeWindow();
+  if (window == nullptr) return nullptr;
+  InitializeNativeWindowAbi(window);
+  window->width.store(width, std::memory_order_relaxed);
+  window->height.store(height, std::memory_order_relaxed);
+  window->format.store(format, std::memory_order_relaxed);
+  return window;
+}
+
+extern "C" void darwin_art_android_ANativeWindow_acquire(void* opaque) {
   auto* window = static_cast<DarwinAndroidNativeWindow*>(opaque);
-  if (window != nullptr &&
-      window->references.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-    {
-      std::lock_guard<std::mutex> global_lock(g_android_native_window_mutex);
-      if (g_android_native_window_published == window) {
-        g_android_native_window_published = nullptr;
-      }
-    }
-    delete window;
-  }
+  if (window != nullptr) window->references.fetch_add(1, std::memory_order_relaxed);
+}
+
+extern "C" int32_t darwin_art_android_ANativeWindow_getFormat(void* opaque) {
+  auto* window = static_cast<DarwinAndroidNativeWindow*>(opaque);
+  return window == nullptr ? 0 : window->format.load(std::memory_order_relaxed);
+}
+
+extern "C" void* darwin_art_android_ANativeWindow_toSurface(void*, void*) {
+  // The framework Surface wrapper is created by the Java bridge. Native
+  // callers still retain and render through the stable ANativeWindow token.
+  return nullptr;
+}
+
+extern "C" void darwin_art_android_ANativeWindow_release(void* opaque) {
+  ReleaseNativeWindow(static_cast<DarwinAndroidNativeWindow*>(opaque));
 }
 
 extern "C" int32_t darwin_art_android_ANativeWindow_lock(
@@ -1515,13 +1815,24 @@ std::atomic<jint> g_host_surface_height{0};
 }  // namespace
 
 void ConfigureDarwinAngleHostSurface(jint x, jint y, jint width, jint height) {
-  DarwinArtSurface* surface = darwin_art_surface_active_gpu();
-  if (surface == nullptr || width <= 0 || height <= 0) return;
+  if (width <= 0 || height <= 0) return;
   g_host_surface_width.store(width, std::memory_order_release);
   g_host_surface_height.store(height, std::memory_order_release);
+  DarwinArtSurface* surface = darwin_art_surface_active_gpu();
+  // Service children do not own the browser's embedded Metal surface, but
+  // ANativeWindow still needs the dimensions transported in Surface's Parcel.
+  if (surface == nullptr) return;
   darwin_art_surface_gpu_configure_embedded(
       surface, x, y, static_cast<uint32_t>(width),
       static_cast<uint32_t>(height));
+  darwin_art_surface_gpu_set_embedded_buffer_extent(
+      surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+  darwin_art_surface_gpu_publish_embedded(surface);
+  const uint32_t surface_id = darwin_art_surface_gpu_iosurface_id(surface);
+  if (surface_id != 0) {
+    const std::string encoded = std::to_string(surface_id);
+    setenv("DARWIN_ART_HOST_IOSURFACE_ID", encoded.c_str(), 1);
+  }
   if (std::getenv("DARWIN_ART_DEBUG_RESIZE") != nullptr) {
     std::cerr << "ART Android EGL: embedded geometry=" << x << "," << y
               << " " << width << "x" << height << "\n";
@@ -1678,6 +1989,3002 @@ bool RegisterDarwinAngleEglNatives(JNIEnv* env) {
   };
   return Register(env, "android/opengl/GLUtils", gl_utils_methods,
                   static_cast<jint>(std::size(gl_utils_methods)));
+}
+
+template <typename Attribute>
+std::vector<Attribute> MetalPlatformAttributes(const Attribute* attributes) {
+  std::vector<Attribute> translated;
+  if (attributes == nullptr) return translated;
+  for (std::size_t index = 0; index < 128; index += 2) {
+    const Attribute name = attributes[index];
+    translated.push_back(name);
+    if (name == static_cast<Attribute>(kEglNone)) break;
+    Attribute value = attributes[index + 1];
+    if (name == static_cast<Attribute>(kEglPlatformAngleType) &&
+        value == static_cast<Attribute>(kEglPlatformAngleTypeOpenGles)) {
+      value = static_cast<Attribute>(kEglPlatformAngleTypeMetal);
+    }
+    translated.push_back(value);
+  }
+  return translated;
+}
+
+EGLDisplay EglGetPlatformDisplayExtMetal(EGLenum platform, void* display,
+                                         const EGLint* attributes) {
+  auto& api = GetAngleApi();
+  using Function = EGLDisplay (*)(EGLenum, void*, const EGLint*);
+  auto function = reinterpret_cast<Function>(
+      api.get_proc_address("eglGetPlatformDisplayEXT"));
+  if (function == nullptr) return nullptr;
+  if (platform != kEglPlatformAngle) {
+    return function(platform, display, attributes);
+  }
+  const auto translated = MetalPlatformAttributes(attributes);
+  if (std::getenv("DARWIN_ART_DEBUG_GRAPHICS_DSO") != nullptr) {
+    std::cerr << "ART Android EGL: translated ANGLE OpenGL ES platform to "
+                 "Metal\n";
+  }
+  return function(platform, display,
+                  translated.empty() ? attributes : translated.data());
+}
+
+EGLDisplay EglGetPlatformDisplayMetal(EGLenum platform, void* display,
+                                      const EGLAttrib* attributes) {
+  auto& api = GetAngleApi();
+  using Function = EGLDisplay (*)(EGLenum, void*, const EGLAttrib*);
+  auto function = reinterpret_cast<Function>(
+      api.get_proc_address("eglGetPlatformDisplay"));
+  if (function == nullptr) return nullptr;
+  if (platform != kEglPlatformAngle) {
+    return function(platform, display, attributes);
+  }
+  const auto translated = MetalPlatformAttributes(attributes);
+  if (std::getenv("DARWIN_ART_DEBUG_GRAPHICS_DSO") != nullptr) {
+    std::cerr << "ART Android EGL: translated ANGLE OpenGL ES platform to "
+                 "Metal\n";
+  }
+  return function(platform, display,
+                  translated.empty() ? attributes : translated.data());
+}
+
+bool DebugGraphicsDso() {
+  return std::getenv("DARWIN_ART_DEBUG_GRAPHICS_DSO") != nullptr;
+}
+
+EGLDisplay EglGetDisplayHost(void* display) {
+  auto& api = GetAngleApi();
+  EGLDisplay result = api.get_display(display);
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglGetDisplay result=" << result << "\n";
+  }
+  return result;
+}
+
+EGLBoolean EglInitializeHost(EGLDisplay display, EGLint* major,
+                             EGLint* minor) {
+  auto& api = GetAngleApi();
+  EGLBoolean result = api.initialize(display, major, minor);
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglInitialize result=" << result
+              << " version=" << (major == nullptr ? -1 : *major) << "."
+              << (minor == nullptr ? -1 : *minor) << " host_extensions="
+              << (result == 0 ? "<unavailable>"
+                              : api.query_string(display, kEglExtensions))
+              << "\n";
+  }
+  return result;
+}
+
+EGLBoolean EglChooseConfigHost(EGLDisplay display, const EGLint* attributes,
+                               EGLConfig* configs, EGLint config_size,
+                               EGLint* count) {
+  auto& api = GetAngleApi();
+  EGLBoolean result =
+      api.choose_config(display, attributes, configs, config_size, count);
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglChooseConfig result=" << result
+              << " count=" << (count == nullptr ? -1 : *count) << "\n";
+  }
+  return result;
+}
+
+EGLContext EglCreateContextHost(EGLDisplay display, EGLConfig config,
+                                EGLContext share, const EGLint* attributes) {
+  auto& api = GetAngleApi();
+  EGLContext result = api.create_context(display, config, share, attributes);
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglCreateContext result=" << result
+              << "\n";
+  }
+  return result;
+}
+
+EGLSurface EglCreatePbufferSurfaceHost(EGLDisplay display, EGLConfig config,
+                                       const EGLint* attributes) {
+  auto& api = GetAngleApi();
+  EGLSurface result = api.create_pbuffer_surface(display, config, attributes);
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglCreatePbufferSurface result=" << result
+              << "\n";
+  }
+  return result;
+}
+
+EGLBoolean EglMakeCurrentHost(EGLDisplay display, EGLSurface draw,
+                              EGLSurface read, EGLContext context) {
+  auto& api = GetAngleApi();
+  EGLBoolean result = api.make_current(display, draw, read, context);
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglMakeCurrent result=" << result << "\n";
+  }
+  return result;
+}
+
+const std::uint8_t* GlGetStringHost(std::uint32_t name) {
+  using Function = const std::uint8_t* (*)(std::uint32_t);
+  auto function = reinterpret_cast<Function>(
+      GetAngleApi().get_proc_address("glGetString"));
+  const std::uint8_t* result = function == nullptr ? nullptr : function(name);
+  if (name == kGlExtensions && result != nullptr &&
+      std::strstr(reinterpret_cast<const char*>(result),
+                  "GL_OES_EGL_image") == nullptr) {
+    static std::string extensions;
+    extensions = reinterpret_cast<const char*>(result);
+    extensions += " GL_OES_EGL_image";
+    result = reinterpret_cast<const std::uint8_t*>(extensions.c_str());
+  }
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: glGetString name=0x" << std::hex << name
+              << std::dec << " result="
+              << (result == nullptr
+                      ? "<null>"
+                      : reinterpret_cast<const char*>(result))
+              << "\n";
+  }
+  return result;
+}
+
+const std::uint8_t* GlGetStringiHost(std::uint32_t name,
+                                    std::uint32_t index) {
+  if (name == kGlExtensions) {
+    std::int32_t host_count = 0;
+    GetAngleApi().gl_get_integer_v(kGlNumExtensions, &host_count);
+    if (index == static_cast<std::uint32_t>(std::max(0, host_count))) {
+      return reinterpret_cast<const std::uint8_t*>("GL_OES_EGL_image");
+    }
+  }
+  using Function = const std::uint8_t* (*)(std::uint32_t, std::uint32_t);
+  auto function = reinterpret_cast<Function>(
+      GetAngleApi().get_proc_address("glGetStringi"));
+  const std::uint8_t* result =
+      function == nullptr ? nullptr : function(name, index);
+  if (DebugGraphicsDso() &&
+      (result == nullptr || name == 0x1F03 /* GL_EXTENSIONS */)) {
+    std::cerr << "ART Android EGL: glGetStringi name=0x" << std::hex << name
+              << std::dec << " index=" << index << " result="
+              << (result == nullptr
+                      ? "<null>"
+                      : reinterpret_cast<const char*>(result))
+              << "\n";
+  }
+  return result;
+}
+
+std::uint32_t GuestTextureForHostTexture(std::uint32_t host_texture);
+
+void GlGetIntegervHost(std::uint32_t name, std::int32_t* value) {
+  auto& api = GetAngleApi();
+  api.gl_get_integer_v(name, value);
+  if (value != nullptr &&
+      (name == 0x8069 ||  // GL_TEXTURE_BINDING_2D
+       name == 0x8C1D ||  // GL_TEXTURE_BINDING_2D_ARRAY
+       name == 0x8D67)) { // GL_TEXTURE_BINDING_EXTERNAL_OES
+    *value = static_cast<std::int32_t>(
+        GuestTextureForHostTexture(static_cast<std::uint32_t>(*value)));
+  }
+  if (name == kGlNumExtensions && value != nullptr) ++*value;
+}
+
+const char* EglQueryStringAndroid(EGLDisplay display, EGLint name) {
+  auto& api = GetAngleApi();
+  const char* result = api.query_string(display, name);
+  if (name != kEglExtensions || result == nullptr) return result;
+  thread_local std::string extensions;
+  extensions.clear();
+  // ANGLE's native display supports damage tracking for its own window
+  // surfaces. Android producers in this compatibility layer instead render
+  // into a rotating set of AHardwareBuffer-backed IOSurfaces. Until the
+  // BufferQueue buffer-age contract is implemented, advertising any of the
+  // partial-update extensions lets Chromium redraw only the damaged region of
+  // a fresh buffer and leaves its preserved region black. Hide those
+  // capabilities so clients submit complete frames, which is the EGL-defined
+  // fallback when buffer age is unavailable.
+  constexpr std::array<std::string_view, 4> unsupported{
+      "EGL_EXT_buffer_age",
+      "EGL_KHR_partial_update",
+      "EGL_KHR_swap_buffers_with_damage",
+      "EGL_EXT_swap_buffers_with_damage",
+  };
+  std::string_view remaining(result);
+  while (!remaining.empty()) {
+    const std::size_t first = remaining.find_first_not_of(' ');
+    if (first == std::string_view::npos) break;
+    remaining.remove_prefix(first);
+    const std::size_t separator = remaining.find(' ');
+    const std::string_view extension = remaining.substr(0, separator);
+    if (std::find(unsupported.begin(), unsupported.end(), extension) ==
+        unsupported.end()) {
+      if (!extensions.empty()) extensions.push_back(' ');
+      extensions.append(extension);
+    }
+    if (separator == std::string_view::npos) break;
+    remaining.remove_prefix(separator + 1);
+  }
+  if (extensions.find("EGL_KHR_image_base") == std::string::npos)
+    extensions += " EGL_KHR_image_base";
+  if (extensions.find("EGL_ANDROID_image_native_buffer") == std::string::npos)
+    extensions += " EGL_ANDROID_image_native_buffer";
+  if (extensions.find("EGL_KHR_fence_sync") == std::string::npos)
+    extensions += " EGL_KHR_fence_sync";
+  if (extensions.find("EGL_KHR_wait_sync") == std::string::npos)
+    extensions += " EGL_KHR_wait_sync";
+  if (extensions.find("EGL_ANDROID_native_fence_sync") == std::string::npos)
+    extensions += " EGL_ANDROID_native_fence_sync";
+  return extensions.c_str();
+}
+
+std::mutex& NativeFenceSyncMutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+struct DarwinNativeFenceSync {
+  EGLDisplay display = nullptr;
+  void* gl_sync = nullptr;
+};
+
+std::unordered_map<EGLSync, std::unique_ptr<DarwinNativeFenceSync>>&
+NativeFenceSyncs() {
+  static std::unordered_map<EGLSync, std::unique_ptr<DarwinNativeFenceSync>>
+      syncs;
+  return syncs;
+}
+
+void SynchronizeAhbImagesToIosurface();
+void SynchronizeIosurfaceToAhbClientTextures();
+
+EGLint NativeFenceAttributeFd(const EGLint* attributes) {
+  if (attributes == nullptr) return kEglNoNativeFenceFdAndroid;
+  for (const EGLint* attribute = attributes; attribute[0] != kEglNone;
+       attribute += 2) {
+    if (attribute[0] == kEglSyncNativeFenceFdAndroid) return attribute[1];
+  }
+  return kEglNoNativeFenceFdAndroid;
+}
+
+EGLSync EglCreateSyncKhrAndroid(EGLDisplay display, EGLenum type,
+                                const EGLint* attributes) {
+  using Function = EGLSync (*)(EGLDisplay, EGLenum, const EGLint*);
+  auto function = LoadSymbol<Function>(GetAngleApi().egl_library,
+                                       "eglCreateSyncKHR");
+  const bool native_fence = type == kEglSyncNativeFenceAndroid;
+  const EGLint imported_fence_fd =
+      native_fence ? NativeFenceAttributeFd(attributes)
+                   : kEglNoNativeFenceFdAndroid;
+  const bool acquire_fence = imported_fence_fd >= 0;
+  EGLSync sync = nullptr;
+  if (native_fence) {
+    if (acquire_fence) {
+      // Ownership of EGL_SYNC_NATIVE_FENCE_FD_ANDROID transfers to EGL. The
+      // broker descriptor is signaled only after the remote Metal producer
+      // completed, so refresh consumer compatibility textures from IOSurface.
+      SynchronizeIosurfaceToAhbClientTextures();
+      (void)darwin_art_bionic_socket_broker_close(imported_fence_fd);
+    } else {
+      // A producer fence publishes Android GL_TEXTURE_2D staging storage into
+      // the AHardwareBuffer's IOSurface before exporting the completion FD.
+      SynchronizeAhbImagesToIosurface();
+    }
+    using Fence = void* (*)(std::uint32_t, std::uint32_t);
+    auto fence = reinterpret_cast<Fence>(
+        GetAngleApi().get_proc_address("glFenceSync"));
+    auto owned = std::make_unique<DarwinNativeFenceSync>();
+    owned->display = display;
+    owned->gl_sync =
+        fence == nullptr ? nullptr : fence(0x9117, 0);  // GPU_COMMANDS_COMPLETE
+    sync = owned.get();
+    std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
+    NativeFenceSyncs().emplace(sync, std::move(owned));
+  } else if (function != nullptr) {
+    sync = function(display, type, attributes);
+  }
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglCreateSyncKHR pid=" << getpid()
+              << " type=0x" << std::hex << type << std::dec
+              << " translated=" << native_fence
+              << " acquire=" << acquire_fence
+              << " imported_fd=" << imported_fence_fd << " sync=" << sync
+              << " gl_sync="
+              << (native_fence && sync != nullptr
+                      ? static_cast<DarwinNativeFenceSync*>(sync)->gl_sync
+                      : nullptr)
+              << "\n";
+  }
+  return sync;
+}
+
+EGLBoolean EglDestroySyncKhrAndroid(EGLDisplay display, EGLSync sync) {
+  std::unique_ptr<DarwinNativeFenceSync> owned;
+  {
+    std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
+    auto found = NativeFenceSyncs().find(sync);
+    if (found != NativeFenceSyncs().end()) {
+      owned = std::move(found->second);
+      NativeFenceSyncs().erase(found);
+    }
+  }
+  if (owned != nullptr) {
+    using Delete = void (*)(void*);
+    auto destroy = reinterpret_cast<Delete>(
+        GetAngleApi().get_proc_address("glDeleteSync"));
+    if (destroy != nullptr && owned->gl_sync != nullptr)
+      destroy(owned->gl_sync);
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android EGL: eglDestroySyncKHR pid=" << getpid()
+                << " sync=" << sync << " translated=1\n";
+    }
+    return 1;
+  }
+  using Function = EGLBoolean (*)(EGLDisplay, EGLSync);
+  auto function = LoadSymbol<Function>(GetAngleApi().egl_library,
+                                       "eglDestroySyncKHR");
+  const EGLBoolean result =
+      function == nullptr ? 0 : function(display, sync);
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglDestroySyncKHR pid=" << getpid()
+              << " sync=" << sync << " translated=0 result=" << result
+              << "\n";
+  }
+  return result;
+}
+
+EGLint EglClientWaitSyncKhrAndroid(EGLDisplay display, EGLSync sync,
+                                   EGLint flags, std::uint64_t timeout) {
+  {
+    std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
+    auto found = NativeFenceSyncs().find(sync);
+    if (found != NativeFenceSyncs().end()) {
+      if (found->second->gl_sync == nullptr) return 0x30F6;
+      using Wait = std::uint32_t (*)(void*, std::uint32_t, std::uint64_t);
+      auto wait = reinterpret_cast<Wait>(
+          GetAngleApi().get_proc_address("glClientWaitSync"));
+      if (wait == nullptr) return 0;
+      const std::uint32_t result = wait(found->second->gl_sync,
+                                        (flags & 1) != 0 ? 1 : 0, timeout);
+      if (result == 0x911A || result == 0x911C) return 0x30F6;
+      if (result == 0x911B) return 0x30F5;
+      return 0;
+    }
+  }
+  using Function = EGLint (*)(EGLDisplay, EGLSync, EGLint, std::uint64_t);
+  auto function = LoadSymbol<Function>(GetAngleApi().egl_library,
+                                       "eglClientWaitSyncKHR");
+  return function == nullptr ? 0 : function(display, sync, flags, timeout);
+}
+
+EGLBoolean EglWaitSyncKhrAndroid(EGLDisplay display, EGLSync sync,
+                                 EGLint flags) {
+  {
+    std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
+    auto found = NativeFenceSyncs().find(sync);
+    if (found != NativeFenceSyncs().end()) {
+      using Wait = void (*)(void*, std::uint32_t, std::uint64_t);
+      auto wait = reinterpret_cast<Wait>(
+          GetAngleApi().get_proc_address("glWaitSync"));
+      if (wait != nullptr && found->second->gl_sync != nullptr)
+        wait(found->second->gl_sync, 0, UINT64_MAX);
+      return 1;
+    }
+  }
+  using Function = EGLBoolean (*)(EGLDisplay, EGLSync, EGLint);
+  auto function = LoadSymbol<Function>(GetAngleApi().egl_library,
+                                       "eglWaitSyncKHR");
+  return function == nullptr ? 0 : function(display, sync, flags);
+}
+
+EGLBoolean EglGetSyncAttribKhrAndroid(EGLDisplay display, EGLSync sync,
+                                      EGLint attribute, EGLint* value) {
+  {
+    std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
+    if (NativeFenceSyncs().contains(sync)) {
+      if (value == nullptr) return 0;
+      switch (attribute) {
+        case 0x30F1:  // EGL_SYNC_STATUS_KHR
+          *value = 0x30F2;  // EGL_SIGNALED_KHR
+          return 1;
+        case 0x30F7:  // EGL_SYNC_TYPE_KHR
+          *value = kEglSyncNativeFenceAndroid;
+          return 1;
+        case 0x30F8:  // EGL_SYNC_CONDITION_KHR
+          *value = 0x30F0;  // EGL_SYNC_PRIOR_COMMANDS_COMPLETE_KHR
+          return 1;
+        default:
+          return 0;
+      }
+    }
+  }
+  using Function = EGLBoolean (*)(EGLDisplay, EGLSync, EGLint, EGLint*);
+  auto function = LoadSymbol<Function>(GetAngleApi().egl_library,
+                                       "eglGetSyncAttribKHR");
+  return function == nullptr ? 0 : function(display, sync, attribute, value);
+}
+
+EGLSync EglCreateSyncAndroid(EGLDisplay display, EGLenum type,
+                             const EGLAttrib* attributes) {
+  if (attributes != nullptr &&
+      attributes[0] == kEglSyncNativeFenceFdAndroid) {
+    const EGLint narrow[] = {
+        kEglSyncNativeFenceFdAndroid, static_cast<EGLint>(attributes[1]),
+        kEglNone};
+    return EglCreateSyncKhrAndroid(display, type, narrow);
+  }
+  return EglCreateSyncKhrAndroid(display, type, nullptr);
+}
+
+EGLBoolean EglGetSyncAttribAndroid(EGLDisplay display, EGLSync sync,
+                                   EGLint attribute, EGLAttrib* value) {
+  EGLint narrow = 0;
+  const EGLBoolean result =
+      EglGetSyncAttribKhrAndroid(display, sync, attribute, &narrow);
+  if (result != 0 && value != nullptr) *value = narrow;
+  return value == nullptr ? 0 : result;
+}
+
+EGLint EglDupNativeFenceFdAndroid(EGLDisplay display, EGLSync sync) {
+  bool translated = false;
+  {
+    std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
+    translated = NativeFenceSyncs().contains(sync);
+  }
+  if (translated) {
+    // ANGLE Metal orders the IOSurface blit after the producer commands on the
+    // same context. There is no Linux sync_file fd to export on Darwin, so -1
+    // carries Android's "already synchronized/no fence" sentinel across
+    // SurfaceControl without introducing a CPU wait or readback.
+    using Finish = void (*)();
+    auto finish = reinterpret_cast<Finish>(
+        GetAngleApi().get_proc_address("glFinish"));
+    if (finish != nullptr) finish();
+    if (std::getenv("DARWIN_ART_DEBUG_NATIVE_FENCE_WAIT") != nullptr) {
+      (void)EglClientWaitSyncKhrAndroid(display, sync, 1, UINT64_MAX);
+    }
+    // Chromium requires eglDupNativeFenceFDANDROID to return a real descriptor
+    // and treats Android's otherwise-valid -1 sentinel as duplication failure.
+    // Publish an already-signaled central-broker pipe after glFinish. The
+    // broker exposes this exact 64-bit marker as a Linux sync_file to libsync,
+    // including after dup and SCM_RIGHTS transfer to another Android process.
+    std::int32_t descriptors[2]{-1, -1};
+    constexpr std::uint64_t kSignaledMetalFence =
+        UINT64_C(0x44415257494e4653);  // "DARWINFS"
+    EGLint result = kEglNoNativeFenceFdAndroid;
+    if (darwin_art_bionic_socket_broker_pipe(descriptors) == 0) {
+      const std::intptr_t written = darwin_art_bionic_socket_broker_write(
+          descriptors[1], &kSignaledMetalFence, sizeof(kSignaledMetalFence));
+      (void)darwin_art_bionic_socket_broker_close(descriptors[1]);
+      descriptors[1] = -1;
+      if (written == static_cast<std::intptr_t>(sizeof(kSignaledMetalFence))) {
+        result = descriptors[0];
+        descriptors[0] = -1;
+      }
+    }
+    if (descriptors[0] >= 0)
+      (void)darwin_art_bionic_socket_broker_close(descriptors[0]);
+    if (descriptors[1] >= 0)
+      (void)darwin_art_bionic_socket_broker_close(descriptors[1]);
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android EGL: eglDupNativeFenceFDANDROID pid="
+                << getpid() << " sync=" << sync
+                << " translated=1 result=" << result
+                << "\n";
+    }
+    return result;
+  }
+  using Function = EGLint (*)(EGLDisplay, EGLSync);
+  auto function = LoadSymbol<Function>(GetAngleApi().egl_library,
+                                       "eglDupNativeFenceFDANDROID");
+  const EGLint result = function == nullptr
+                            ? kEglNoNativeFenceFdAndroid
+                            : function(display, sync);
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglDupNativeFenceFDANDROID pid=" << getpid()
+              << " sync=" << sync << " translated=0 result=" << result
+              << "\n";
+  }
+  return result;
+}
+
+struct DarwinAhbEglImage {
+  EGLDisplay display = nullptr;
+  EGLContext owner_context = nullptr;
+  EGLSurface owner_draw_surface = nullptr;
+  EGLSurface owner_read_surface = nullptr;
+  EGLSurface pbuffer = nullptr;
+  AHardwareBuffer* buffer = nullptr;
+  // Newer ANGLE versions can expose a Metal texture as an EGLImage. The Metal
+  // texture and AHardwareBuffer wrap the same IOSurface, matching Android's
+  // EGL_NATIVE_BUFFER_ANDROID storage identity without an intermediate copy.
+  EGLImage metal_image = nullptr;
+  void* metal_texture = nullptr;
+  EGLint bind_target = 0;
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  std::uint64_t usage = 0;
+  // Name owned by the Android GL client. It remains a valid ANGLE texture
+  // object for the complete lifetime expected by Chromium's SharedImage
+  // representation.
+  std::uint32_t client_texture = 0;
+  // Private render-target-capable GL_TEXTURE_2D storage used only by this
+  // compatibility layer. Guest bind/attach/query operations translate
+  // client_texture to this name without deleting or redefining the client's
+  // object.
+  std::uint32_t client_staging_texture = 0;
+  std::uint32_t iosurface_texture = 0;
+  std::uint64_t association_generation = 0;
+  // The IOSurface is the persistent backing store for one BufferQueue slot.
+  // ANGLE's GL_TEXTURE_2D staging texture is recreated whenever Chromium
+  // binds the EGLImage, so track the contents independently from the texture
+  // association.  A non-zero IOSurface generation means this process has
+  // observed published contents for the slot.  The staging generation says
+  // whether those exact contents have been restored into the current 2D
+  // texture before a partial producer update.
+  std::uint64_t iosurface_content_generation = 0;
+  std::uint64_t staging_content_generation = 0;
+  // The BufferQueue slot whose published IOSurface currently seeds the 2D
+  // staging texture. Android's preserved-buffer semantics allow a producer to
+  // submit only accumulated damage even when it rotates to another slot.
+  AHardwareBuffer* staging_source_buffer = nullptr;
+  bool bound = false;
+};
+
+std::atomic<std::uint64_t>& NextAhbTextureAssociation() {
+  static std::atomic<std::uint64_t> generation{1};
+  return generation;
+}
+
+struct DarwinSurfaceControlTarget {
+  uint32_t surface_id = 0;
+  EGLDisplay display = nullptr;
+  EGLSurface pbuffer = nullptr;
+  EGLImage metal_image = nullptr;
+  void* metal_texture = nullptr;
+  void* iosurface = nullptr;
+  EGLint bind_target = 0;
+  std::uint32_t texture_target = 0;
+  std::uint32_t texture = 0;
+  std::uint32_t framebuffer = 0;
+  std::uint32_t composite_program = 0;
+  std::int32_t composite_source_uniform = -1;
+  std::int32_t composite_texture_uniform = -1;
+  std::int32_t composite_alpha_uniform = -1;
+  bool composite_program_attempted = false;
+  std::uint32_t composite_2d_program = 0;
+  std::int32_t composite_2d_source_uniform = -1;
+  std::int32_t composite_2d_texture_uniform = -1;
+  std::int32_t composite_2d_alpha_uniform = -1;
+  bool composite_2d_program_attempted = false;
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  bool bound = false;
+  bool has_content = false;
+};
+
+thread_local DarwinSurfaceControlTarget g_surface_control_target;
+
+struct DarwinSurfaceControlContextScope {
+  EGLDisplay activated_display = nullptr;
+  EGLDisplay previous_display = nullptr;
+  EGLContext previous_context = nullptr;
+  EGLSurface previous_draw_surface = nullptr;
+  EGLSurface previous_read_surface = nullptr;
+  bool switched = false;
+};
+
+thread_local DarwinSurfaceControlContextScope g_surface_control_context_scope;
+
+std::mutex& AhbEglImageMutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::unordered_map<EGLImage, std::unique_ptr<DarwinAhbEglImage>>&
+AhbEglImages() {
+  static std::unordered_map<EGLImage, std::unique_ptr<DarwinAhbEglImage>>
+      images;
+  return images;
+}
+
+std::uint32_t GuestTextureForHostTextureLocked(EGLContext context,
+                                                std::uint32_t host_texture) {
+  if (host_texture == 0) return 0;
+  for (const auto& [handle, image] : AhbEglImages()) {
+    (void)handle;
+    if (image->owner_context == context &&
+        image->client_staging_texture == host_texture &&
+        image->client_texture != 0) {
+      return image->client_texture;
+    }
+  }
+  return host_texture;
+}
+
+std::uint32_t HostTextureForGuestTextureLocked(EGLContext context,
+                                                std::uint32_t guest_texture) {
+  if (guest_texture == 0) return 0;
+  for (const auto& [handle, image] : AhbEglImages()) {
+    (void)handle;
+    if (image->owner_context == context &&
+        image->client_texture == guest_texture &&
+        image->client_staging_texture != 0) {
+      return image->client_staging_texture;
+    }
+  }
+  return guest_texture;
+}
+
+std::uint32_t GuestTextureForHostTexture(std::uint32_t host_texture) {
+  auto& api = GetAngleApi();
+  const EGLContext current =
+      api.get_current_context == nullptr ? nullptr : api.get_current_context();
+  std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+  return GuestTextureForHostTextureLocked(current, host_texture);
+}
+
+std::unordered_map<EGLContext, AHardwareBuffer*>&
+LastPresentedAhbByContext() {
+  static std::unordered_map<EGLContext, AHardwareBuffer*> buffers;
+  return buffers;
+}
+
+std::unordered_map<EGLContext, std::uint64_t>&
+PresentedGenerationByContext() {
+  static std::unordered_map<EGLContext, std::uint64_t> generations;
+  return generations;
+}
+
+std::unordered_map<AHardwareBuffer*, void*>& QueueByAhb() {
+  static std::unordered_map<AHardwareBuffer*, void*> queues;
+  return queues;
+}
+
+std::unordered_map<void*, AHardwareBuffer*>& LastPresentedAhbByQueue() {
+  static std::unordered_map<void*, AHardwareBuffer*> buffers;
+  return buffers;
+}
+
+std::unordered_map<void*, std::uint64_t>& PresentedGenerationByQueue() {
+  static std::unordered_map<void*, std::uint64_t> generations;
+  return generations;
+}
+
+EGLConfig ChooseIosurfaceTextureConfig(EGLDisplay display,
+                                        EGLint* bind_target) {
+  auto& api = GetAngleApi();
+  const EGLint attributes[] = {kEglSurfaceType, kEglPbufferBit,
+                               kEglBindToTextureRgba, kEglTrue, kEglNone};
+  std::array<EGLConfig, 64> configs{};
+  EGLint count = 0;
+  if (!api.choose_config(display, attributes, configs.data(), configs.size(),
+                         &count)) {
+    return nullptr;
+  }
+  for (EGLint index = 0;
+       index < std::min<EGLint>(count, static_cast<EGLint>(configs.size()));
+       ++index) {
+    EGLint target = 0;
+    if (api.get_config_attrib(display, configs[index],
+                              kEglBindToTextureTargetAngle, &target) &&
+        target == kEglTexture2d) {
+      *bind_target = target;
+      return configs[index];
+    }
+  }
+  for (EGLint index = 0;
+       index < std::min<EGLint>(count, static_cast<EGLint>(configs.size()));
+       ++index) {
+    EGLint target = 0;
+    if (api.get_config_attrib(display, configs[index],
+                              kEglBindToTextureTargetAngle, &target) &&
+        target == kEglTextureRectangleAngle) {
+      *bind_target = target;
+      return configs[index];
+    }
+  }
+  return nullptr;
+}
+
+bool EnsureSurfaceControlTarget(EGLDisplay display) {
+  auto& api = GetAngleApi();
+  auto& target = g_surface_control_target;
+  if (target.bound && target.display == display) return true;
+  const char* encoded = std::getenv("DARWIN_ART_HOST_IOSURFACE_ID");
+  if (encoded == nullptr || encoded[0] == '\0') {
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android SurfaceControl: missing host IOSurface id pid="
+                << getpid() << "\n";
+    }
+    return false;
+  }
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(encoded, &end, 10);
+  if (end == encoded || *end != '\0' || parsed == 0 || parsed > UINT32_MAX) {
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android SurfaceControl: invalid host IOSurface id pid="
+                << getpid() << " value=" << encoded << "\n";
+    }
+    return false;
+  }
+  void* iosurface = nullptr;
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  if (!darwin_art_surface_gpu_lookup_iosurface(
+          static_cast<std::uint32_t>(parsed), &iosurface, &width, &height)) {
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android SurfaceControl: host IOSurface lookup failed "
+                   "pid="
+                << getpid() << " id=" << parsed << "\n";
+    }
+    return false;
+  }
+
+  // ANGLE's Metal display intentionally does not expose the legacy
+  // EGL_IOSURFACE_ANGLE pbuffer configs. Import the host compositor surface
+  // through the native Metal device, exactly like Android HardwareBuffers,
+  // and attach that EGLImage to an FBO. Both the Chromium source and the host
+  // destination then stay IOSurface-backed GPU resources throughout.
+  using QueryDisplayAttrib = EGLBoolean (*)(EGLDisplay, EGLint, EGLAttrib*);
+  using QueryDeviceAttrib = EGLBoolean (*)(void*, EGLint, EGLAttrib*);
+  using CreateImage = EGLImage (*)(EGLDisplay, EGLContext, EGLenum, void*,
+                                   const EGLint*);
+  using DestroyImage = EGLBoolean (*)(EGLDisplay, EGLImage);
+  using ImageTargetTexture2d = void (*)(std::uint32_t, void*);
+  auto query_display_attrib = reinterpret_cast<QueryDisplayAttrib>(
+      api.get_proc_address("eglQueryDisplayAttribEXT"));
+  auto query_device_attrib = reinterpret_cast<QueryDeviceAttrib>(
+      api.get_proc_address("eglQueryDeviceAttribEXT"));
+  auto create_image =
+      reinterpret_cast<CreateImage>(api.get_proc_address("eglCreateImageKHR"));
+  auto destroy_image = reinterpret_cast<DestroyImage>(
+      api.get_proc_address("eglDestroyImageKHR"));
+  auto image_target_texture = reinterpret_cast<ImageTargetTexture2d>(
+      api.get_proc_address("glEGLImageTargetTexture2DOES"));
+  EGLAttrib egl_device = 0;
+  EGLAttrib metal_device = 0;
+  void* metal_texture = nullptr;
+  EGLImage metal_image = nullptr;
+  if (query_display_attrib != nullptr && query_device_attrib != nullptr &&
+      create_image != nullptr && image_target_texture != nullptr &&
+      query_display_attrib(display, kEglDeviceExt, &egl_device) != 0 &&
+      query_device_attrib(reinterpret_cast<void*>(egl_device),
+                          kEglMetalDeviceAngle, &metal_device) != 0) {
+    metal_texture = darwin_art_android_iosurface_metal_texture(
+        iosurface, width, height, reinterpret_cast<void*>(metal_device));
+    if (metal_texture != nullptr) {
+      const EGLint image_attributes[] = {kEglNone};
+      metal_image = create_image(display, nullptr, kEglMetalTextureAngle,
+                                 metal_texture, image_attributes);
+    }
+  }
+  if (metal_image != nullptr) {
+    std::int32_t previous_texture = 0;
+    std::int32_t previous_framebuffer = 0;
+    api.gl_get_integer_v(0x8069, &previous_texture);  // GL_TEXTURE_BINDING_2D
+    api.gl_get_integer_v(0x8CA6,
+                         &previous_framebuffer);  // GL_DRAW_FRAMEBUFFER_BINDING
+    std::uint32_t texture = 0;
+    std::uint32_t framebuffer = 0;
+    api.gl_gen_textures(1, &texture);
+    api.gl_bind_texture(kGlTexture2d, texture);
+    image_target_texture(kGlTexture2d, metal_image);
+    api.gl_gen_framebuffers(1, &framebuffer);
+    api.gl_bind_framebuffer(kGlFramebuffer, framebuffer);
+    api.gl_framebuffer_texture_2d(kGlFramebuffer, kGlColorAttachment0,
+                                  kGlTexture2d, texture, 0);
+    const std::uint32_t framebuffer_status =
+        api.gl_check_framebuffer_status(kGlFramebuffer);
+    const std::uint32_t gl_error = api.gl_get_error();
+    api.gl_bind_framebuffer(
+        kGlFramebuffer, static_cast<std::uint32_t>(previous_framebuffer));
+    api.gl_bind_texture(kGlTexture2d,
+                        static_cast<std::uint32_t>(previous_texture));
+    if (framebuffer_status == kGlFramebufferComplete && gl_error == 0) {
+      target = DarwinSurfaceControlTarget{
+          .surface_id = static_cast<std::uint32_t>(parsed),
+          .display = display,
+          .metal_image = metal_image,
+          .metal_texture = metal_texture,
+          .iosurface = iosurface,
+          .texture_target = kGlTexture2d,
+          .texture = texture,
+          .framebuffer = framebuffer,
+          .width = width,
+          .height = height,
+          .bound = true,
+      };
+      if (DebugGraphicsDso()) {
+        std::cerr
+            << "ART Android SurfaceControl: imported compositor IOSurface="
+            << target.surface_id << " through Metal size=" << width << "x"
+            << height << "\n";
+      }
+      return true;
+    }
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android SurfaceControl: host Metal target failed pid="
+                << getpid() << " framebuffer_status=0x" << std::hex
+                << framebuffer_status << " gl_error=0x" << gl_error
+                << std::dec << "\n";
+    }
+    if (framebuffer != 0) api.gl_delete_framebuffers(1, &framebuffer);
+    if (texture != 0) api.gl_delete_textures(1, &texture);
+    if (destroy_image != nullptr) destroy_image(display, metal_image);
+    darwin_art_android_metal_texture_release(metal_texture);
+    metal_image = nullptr;
+    metal_texture = nullptr;
+  } else if (metal_texture != nullptr) {
+    darwin_art_android_metal_texture_release(metal_texture);
+    metal_texture = nullptr;
+  }
+
+  EGLint bind_target = 0;
+  EGLConfig config = ChooseIosurfaceTextureConfig(display, &bind_target);
+  const std::uint32_t texture_target =
+      bind_target == kEglTextureRectangleAngle
+          ? kGlTextureRectangleAngle
+          : (bind_target == kEglTexture2d ? kGlTexture2d : 0);
+  if (config == nullptr || texture_target == 0) {
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android SurfaceControl: no IOSurface texture config "
+                   "pid="
+                << getpid() << " display=" << display
+                << " bind_target=0x" << std::hex << bind_target << std::dec
+                << "\n";
+    }
+    darwin_art_surface_gpu_release_iosurface(iosurface);
+    return false;
+  }
+  const EGLint attributes[] = {
+      kEglWidth, static_cast<EGLint>(width),
+      kEglHeight, static_cast<EGLint>(height),
+      kEglIosurfacePlaneAngle, 0,
+      kEglTextureTarget, bind_target,
+      kEglTextureInternalFormatAngle, kGlBgraExt,
+      kEglTextureFormat, kEglTextureRgba,
+      kEglTextureTypeAngle, kGlUnsignedByte,
+      kEglNone,
+  };
+  EGLSurface pbuffer = api.create_pbuffer_from_client_buffer(
+      display, kEglIosurfaceAngle, iosurface, config, attributes);
+  if (pbuffer == nullptr) {
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android SurfaceControl: host IOSurface pbuffer failed "
+                   "pid="
+                << getpid() << " size=" << width << "x" << height
+                << " bind_target=0x" << std::hex << bind_target
+                << " error=0x" << api.get_error() << std::dec << "\n";
+    }
+    darwin_art_surface_gpu_release_iosurface(iosurface);
+    return false;
+  }
+  std::int32_t previous_texture = 0;
+  api.gl_get_integer_v(texture_target == kGlTextureRectangleAngle ? 0x84F6
+                                                                  : 0x8069,
+                       &previous_texture);
+  std::uint32_t texture = 0;
+  std::uint32_t framebuffer = 0;
+  api.gl_gen_textures(1, &texture);
+  api.gl_bind_texture(texture_target, texture);
+  const bool bound =
+      api.bind_tex_image(display, pbuffer, kEglBackBuffer) != 0;
+  if (bound) {
+    api.gl_gen_framebuffers(1, &framebuffer);
+    api.gl_bind_framebuffer(kGlFramebuffer, framebuffer);
+    api.gl_framebuffer_texture_2d(kGlFramebuffer, kGlColorAttachment0,
+                                  texture_target, texture, 0);
+  }
+  const bool complete =
+      bound && api.gl_check_framebuffer_status(kGlFramebuffer) ==
+                   kGlFramebufferComplete;
+  if (!complete && DebugGraphicsDso()) {
+    const std::uint32_t framebuffer_status =
+        bound ? api.gl_check_framebuffer_status(kGlFramebuffer) : 0;
+    std::cerr << "ART Android SurfaceControl: host IOSurface target failed "
+                 "pid="
+              << getpid() << " bind_tex_image=" << bound
+              << " texture_target=0x" << std::hex << texture_target
+              << " framebuffer_status=0x" << framebuffer_status
+              << " egl_error=0x" << api.get_error() << std::dec << "\n";
+  }
+  api.gl_bind_texture(texture_target,
+                      static_cast<std::uint32_t>(previous_texture));
+  if (!complete) {
+    if (framebuffer != 0) api.gl_delete_framebuffers(1, &framebuffer);
+    if (texture != 0) api.gl_delete_textures(1, &texture);
+    if (bound) api.release_tex_image(display, pbuffer, kEglBackBuffer);
+    api.destroy_surface(display, pbuffer);
+    darwin_art_surface_gpu_release_iosurface(iosurface);
+    return false;
+  }
+  target = DarwinSurfaceControlTarget{
+      .surface_id = static_cast<std::uint32_t>(parsed),
+      .display = display,
+      .pbuffer = pbuffer,
+      .iosurface = iosurface,
+      .bind_target = bind_target,
+      .texture_target = texture_target,
+      .texture = texture,
+      .framebuffer = framebuffer,
+      .width = width,
+      .height = height,
+      .bound = true,
+  };
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android SurfaceControl: imported compositor IOSurface="
+              << target.surface_id << " size=" << width << "x" << height
+              << "\n";
+  }
+  return true;
+}
+
+bool EnsureSurfaceControlCompositeProgram(DarwinSurfaceControlTarget& target,
+                                          bool rectangle_source) {
+  auto& program = rectangle_source ? target.composite_program
+                                   : target.composite_2d_program;
+  auto& source_uniform = rectangle_source
+                             ? target.composite_source_uniform
+                             : target.composite_2d_source_uniform;
+  auto& texture_uniform = rectangle_source
+                              ? target.composite_texture_uniform
+                              : target.composite_2d_texture_uniform;
+  auto& alpha_uniform = rectangle_source ? target.composite_alpha_uniform
+                                         : target.composite_2d_alpha_uniform;
+  auto& attempted = rectangle_source ? target.composite_program_attempted
+                                     : target.composite_2d_program_attempted;
+  if (program != 0) return true;
+  if (attempted) return false;
+  attempted = true;
+  auto& api = GetAngleApi();
+  if (api.gl_create_shader == nullptr || api.gl_shader_source == nullptr ||
+      api.gl_compile_shader == nullptr || api.gl_get_shader_iv == nullptr ||
+      api.gl_delete_shader == nullptr || api.gl_create_program == nullptr ||
+      api.gl_attach_shader == nullptr || api.gl_link_program == nullptr ||
+      api.gl_get_program_iv == nullptr || api.gl_delete_program == nullptr ||
+      api.gl_get_uniform_location == nullptr) {
+    return false;
+  }
+  constexpr char kVertexShader[] = R"(#version 300 es
+precision highp float;
+uniform vec4 u_source;
+out vec2 v_tex_coord;
+void main() {
+  vec2 position = gl_VertexID == 0 ? vec2(-1.0, -1.0) :
+                  (gl_VertexID == 1 ? vec2(3.0, -1.0) : vec2(-1.0, 3.0));
+  vec2 unit_position = position * 0.5 + 0.5;
+  v_tex_coord = mix(u_source.xy, u_source.zw, unit_position);
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+)";
+  constexpr char kFragmentShader[] = R"(#version 300 es
+#extension GL_ARB_texture_rectangle : require
+precision highp float;
+uniform sampler2DRect u_texture;
+uniform float u_alpha;
+in vec2 v_tex_coord;
+out vec4 o_color;
+void main() {
+  o_color = texture(u_texture, v_tex_coord) * u_alpha;
+}
+)";
+  constexpr char kFragmentShader2d[] = R"(#version 300 es
+precision highp float;
+uniform sampler2D u_texture;
+uniform float u_alpha;
+in vec2 v_tex_coord;
+out vec4 o_color;
+void main() {
+  o_color = texture(u_texture, v_tex_coord) * u_alpha;
+}
+)";
+  auto compile = [&](std::uint32_t type, const char* source) {
+    const std::uint32_t shader = api.gl_create_shader(type);
+    api.gl_shader_source(shader, 1, &source, nullptr);
+    api.gl_compile_shader(shader);
+    std::int32_t compiled = 0;
+    api.gl_get_shader_iv(shader, 0x8B81, &compiled);  // GL_COMPILE_STATUS
+    if (compiled != 0) return shader;
+    if (api.gl_get_shader_info_log != nullptr) {
+      std::array<char, 2048> log{};
+      std::int32_t length = 0;
+      api.gl_get_shader_info_log(shader, log.size(), &length, log.data());
+      std::cerr << "ART Android SurfaceControl: composite shader failed: "
+                << log.data() << "\n";
+    }
+    api.gl_delete_shader(shader);
+    return std::uint32_t{0};
+  };
+  const std::uint32_t vertex = compile(0x8B31, kVertexShader);
+  const std::uint32_t fragment = compile(
+      0x8B30, rectangle_source ? kFragmentShader : kFragmentShader2d);
+  if (vertex == 0 || fragment == 0) {
+    if (vertex != 0) api.gl_delete_shader(vertex);
+    if (fragment != 0) api.gl_delete_shader(fragment);
+    return false;
+  }
+  program = api.gl_create_program();
+  api.gl_attach_shader(program, vertex);
+  api.gl_attach_shader(program, fragment);
+  api.gl_link_program(program);
+  api.gl_delete_shader(vertex);
+  api.gl_delete_shader(fragment);
+  std::int32_t linked = 0;
+  api.gl_get_program_iv(program, 0x8B82, &linked);  // GL_LINK_STATUS
+  if (linked == 0) {
+    if (api.gl_get_program_info_log != nullptr) {
+      std::array<char, 2048> log{};
+      std::int32_t length = 0;
+      api.gl_get_program_info_log(program, log.size(), &length, log.data());
+      std::cerr << "ART Android SurfaceControl: composite link failed: "
+                << log.data() << "\n";
+    }
+    api.gl_delete_program(program);
+    return false;
+  }
+  source_uniform = api.gl_get_uniform_location(program, "u_source");
+  texture_uniform = api.gl_get_uniform_location(program, "u_texture");
+  alpha_uniform = api.gl_get_uniform_location(program, "u_alpha");
+  return source_uniform >= 0 && texture_uniform >= 0 && alpha_uniform >= 0;
+}
+
+bool CompositeSurfaceControlImageLocked(
+    DarwinAhbEglImage& image, DarwinSurfaceControlTarget& target,
+    std::int32_t source_left, std::int32_t source_top,
+    std::int32_t source_right, std::int32_t source_bottom,
+    std::int32_t destination_left, std::int32_t destination_top,
+    std::int32_t destination_right, std::int32_t destination_bottom,
+    float alpha) {
+  auto& api = GetAngleApi();
+  const bool rectangle_source = image.metal_image == nullptr;
+  const std::uint32_t source_target =
+      rectangle_source ? kGlTextureRectangleAngle : kGlTexture2d;
+  const std::uint32_t source_texture =
+      rectangle_source ? image.iosurface_texture
+                       : image.client_staging_texture;
+  if (source_texture == 0 ||
+      !EnsureSurfaceControlCompositeProgram(target, rectangle_source) ||
+      api.gl_use_program == nullptr || api.gl_uniform_1i == nullptr ||
+      api.gl_uniform_1f == nullptr || api.gl_uniform_4f == nullptr ||
+      api.gl_blend_func_separate == nullptr ||
+      api.gl_blend_equation_separate == nullptr ||
+      api.gl_draw_arrays == nullptr) {
+    return false;
+  }
+  std::int32_t previous_program = 0;
+  std::int32_t previous_active_texture = 0;
+  std::int32_t previous_source_texture = 0;
+  std::int32_t previous_viewport[4]{};
+  std::int32_t previous_blend_src_rgb = 0;
+  std::int32_t previous_blend_dst_rgb = 0;
+  std::int32_t previous_blend_src_alpha = 0;
+  std::int32_t previous_blend_dst_alpha = 0;
+  std::int32_t previous_blend_equation_rgb = 0;
+  std::int32_t previous_blend_equation_alpha = 0;
+  std::uint8_t previous_color_mask[4]{1, 1, 1, 1};
+  api.gl_get_integer_v(0x8B8D, &previous_program);       // GL_CURRENT_PROGRAM
+  api.gl_get_integer_v(0x84E0, &previous_active_texture);  // GL_ACTIVE_TEXTURE
+  api.gl_get_integer_v(0x0BA2, previous_viewport);       // GL_VIEWPORT
+  api.gl_get_integer_v(0x80C9, &previous_blend_src_rgb);
+  api.gl_get_integer_v(0x80C8, &previous_blend_dst_rgb);
+  api.gl_get_integer_v(0x80CB, &previous_blend_src_alpha);
+  api.gl_get_integer_v(0x80CA, &previous_blend_dst_alpha);
+  api.gl_get_integer_v(0x8009, &previous_blend_equation_rgb);
+  api.gl_get_integer_v(0x883D, &previous_blend_equation_alpha);
+  if (api.gl_get_boolean_v != nullptr)
+    api.gl_get_boolean_v(0x0C23, previous_color_mask);  // GL_COLOR_WRITEMASK
+  const bool blend_enabled = api.gl_is_enabled(0x0BE2) != 0;
+  const bool depth_enabled = api.gl_is_enabled(0x0B71) != 0;
+  const bool stencil_enabled = api.gl_is_enabled(0x0B90) != 0;
+  const bool cull_enabled = api.gl_is_enabled(0x0B44) != 0;
+  const bool rasterizer_discard_enabled = api.gl_is_enabled(0x8C89) != 0;
+  api.gl_active_texture(0x84C0);  // GL_TEXTURE0
+  api.gl_get_integer_v(rectangle_source ? 0x84F6 : 0x8069,
+                       &previous_source_texture);
+  api.gl_bind_texture(source_target, source_texture);
+  api.gl_tex_parameter_i(source_target, 0x2801, 0x2601);
+  api.gl_tex_parameter_i(source_target, 0x2800, 0x2601);
+  api.gl_tex_parameter_i(source_target, 0x2802, 0x812F);
+  api.gl_tex_parameter_i(source_target, 0x2803, 0x812F);
+  api.gl_viewport(destination_left, destination_top,
+                  destination_right - destination_left,
+                  destination_bottom - destination_top);
+  api.gl_disable(0x0B71);  // GL_DEPTH_TEST
+  api.gl_disable(0x0B90);  // GL_STENCIL_TEST
+  api.gl_disable(0x0B44);  // GL_CULL_FACE
+  api.gl_disable(0x8C89);  // GL_RASTERIZER_DISCARD
+  if (api.gl_color_mask != nullptr) api.gl_color_mask(1, 1, 1, 1);
+  api.gl_enable(0x0BE2);   // GL_BLEND
+  api.gl_blend_equation_separate(0x8006, 0x8006);  // GL_FUNC_ADD
+  api.gl_blend_func_separate(1, 0x0303, 1, 0x0303);  // premultiplied source-over
+  api.gl_use_program(rectangle_source ? target.composite_program
+                                      : target.composite_2d_program);
+  api.gl_uniform_1i(rectangle_source ? target.composite_texture_uniform
+                                     : target.composite_2d_texture_uniform,
+                    0);
+  api.gl_uniform_1f(rectangle_source ? target.composite_alpha_uniform
+                                     : target.composite_2d_alpha_uniform,
+                    std::clamp(alpha, 0.0f, 1.0f));
+  const float coordinate_scale_x =
+      rectangle_source ? 1.0f : 1.0f / static_cast<float>(image.width);
+  const float coordinate_scale_y =
+      rectangle_source ? 1.0f : 1.0f / static_cast<float>(image.height);
+  api.gl_uniform_4f(
+      rectangle_source ? target.composite_source_uniform
+                       : target.composite_2d_source_uniform,
+      static_cast<float>(source_left) * coordinate_scale_x,
+      static_cast<float>(image.height - source_bottom) * coordinate_scale_y,
+      static_cast<float>(source_right) * coordinate_scale_x,
+      static_cast<float>(image.height - source_top) * coordinate_scale_y);
+  (void)api.gl_get_error();
+  api.gl_draw_arrays(0x0004, 0, 3);  // GL_TRIANGLES
+  const std::uint32_t draw_error = api.gl_get_error();
+  if (draw_error != 0) {
+    std::cerr << "ART Android SurfaceControl: composite draw error=0x"
+              << std::hex << draw_error << std::dec << "\n";
+  }
+  api.gl_use_program(static_cast<std::uint32_t>(previous_program));
+  api.gl_blend_equation_separate(
+      static_cast<std::uint32_t>(previous_blend_equation_rgb),
+      static_cast<std::uint32_t>(previous_blend_equation_alpha));
+  api.gl_blend_func_separate(
+      static_cast<std::uint32_t>(previous_blend_src_rgb),
+      static_cast<std::uint32_t>(previous_blend_dst_rgb),
+      static_cast<std::uint32_t>(previous_blend_src_alpha),
+      static_cast<std::uint32_t>(previous_blend_dst_alpha));
+  if (!blend_enabled) api.gl_disable(0x0BE2);
+  if (depth_enabled) api.gl_enable(0x0B71);
+  if (stencil_enabled) api.gl_enable(0x0B90);
+  if (cull_enabled) api.gl_enable(0x0B44);
+  if (rasterizer_discard_enabled) api.gl_enable(0x8C89);
+  if (api.gl_color_mask != nullptr) {
+    api.gl_color_mask(previous_color_mask[0], previous_color_mask[1],
+                      previous_color_mask[2], previous_color_mask[3]);
+  }
+  api.gl_viewport(previous_viewport[0], previous_viewport[1],
+                  previous_viewport[2], previous_viewport[3]);
+  api.gl_bind_texture(source_target,
+                      static_cast<std::uint32_t>(previous_source_texture));
+  api.gl_active_texture(static_cast<std::uint32_t>(previous_active_texture));
+  return draw_error == 0;
+}
+
+void* EglGetNativeClientBufferAndroid(AHardwareBuffer* buffer) {
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglGetNativeClientBufferANDROID buffer="
+              << buffer << "\n";
+  }
+  // bionic's AHardwareBuffer is the owning GraphicBuffer object, while EGL's
+  // native client buffer is its embedded ANativeWindowBuffer view.  Android's
+  // conversion helper advances by two pointer-sized fields on arm64.  Keep
+  // that public ABI here; EglCreateImageAndroid resolves the alias back to the
+  // owning object before importing its IOSurface.
+  return buffer == nullptr ? nullptr
+                           : reinterpret_cast<char*>(buffer) + 0x10;
+}
+
+EGLImage EglCreateImageAndroid(EGLDisplay display, EGLContext context,
+                               EGLenum target, void* client_buffer,
+                               const EGLint* attributes) {
+  auto& api = GetAngleApi();
+  // EGLImage names are display-local in ANGLE. Android's loader can hand this
+  // bridge the public EGLDisplay while Chromium's passthrough decoder is
+  // current on the corresponding host display. Always create an imported AHB
+  // image on that current host display when one exists; otherwise a small
+  // image ID can alias an unrelated (often YUV) image in the decoder's display.
+  const EGLDisplay current_display =
+      api.get_current_display == nullptr ? nullptr : api.get_current_display();
+  const EGLDisplay image_display =
+      current_display == nullptr ? display : current_display;
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglCreateImageKHR target=0x" << std::hex
+              << target << std::dec << " client=" << client_buffer
+              << " display=" << display << " current=" << current_display
+              << " image_display=" << image_display << "\n";
+  }
+  if (target != kEglNativeBufferAndroid) {
+    using Function = EGLImage (*)(EGLDisplay, EGLContext, EGLenum, void*,
+                                  const EGLint*);
+    auto function = reinterpret_cast<Function>(
+        api.get_proc_address("eglCreateImageKHR"));
+    return function == nullptr
+               ? nullptr
+               : function(display, context, target, client_buffer, attributes);
+  }
+  auto* buffer =
+      darwin_art_android_hardware_buffer_from_client_buffer(client_buffer);
+  AHardwareBuffer_Desc description{};
+  AHardwareBuffer_describe(buffer, &description);
+  void* iosurface = darwin_art_android_hardware_buffer_iosurface(buffer);
+  if (iosurface == nullptr || description.width == 0 ||
+      description.height == 0) {
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android EGL: invalid AHardwareBuffer client=" << buffer
+                << " iosurface=" << iosurface << " size="
+                << description.width << "x" << description.height
+                << " format=" << description.format << "\n";
+    }
+    return nullptr;
+  }
+  using QueryDisplayAttrib = EGLBoolean (*)(EGLDisplay, EGLint, EGLAttrib*);
+  using QueryDeviceAttrib = EGLBoolean (*)(void*, EGLint, EGLAttrib*);
+  using CreateImage = EGLImage (*)(EGLDisplay, EGLContext, EGLenum, void*,
+                                   const EGLint*);
+  auto query_display_attrib = reinterpret_cast<QueryDisplayAttrib>(
+      api.get_proc_address("eglQueryDisplayAttribEXT"));
+  auto query_device_attrib = reinterpret_cast<QueryDeviceAttrib>(
+      api.get_proc_address("eglQueryDeviceAttribEXT"));
+  auto create_image =
+      reinterpret_cast<CreateImage>(api.get_proc_address("eglCreateImageKHR"));
+  EGLAttrib egl_device = 0;
+  EGLAttrib metal_device = 0;
+  void* metal_texture = nullptr;
+  EGLImage metal_image = nullptr;
+  if (query_display_attrib != nullptr && query_device_attrib != nullptr &&
+      create_image != nullptr &&
+      query_display_attrib(image_display, kEglDeviceExt, &egl_device) != 0 &&
+      query_device_attrib(reinterpret_cast<void*>(egl_device),
+                          kEglMetalDeviceAngle, &metal_device) != 0) {
+    metal_texture = darwin_art_android_hardware_buffer_metal_texture(
+        buffer, reinterpret_cast<void*>(metal_device));
+    if (metal_texture != nullptr) {
+      const EGLint image_attributes[] = {kEglNone};
+      metal_image = create_image(image_display, nullptr, kEglMetalTextureAngle,
+                                 metal_texture, image_attributes);
+      if (metal_image == nullptr) {
+        darwin_art_android_metal_texture_release(metal_texture);
+        metal_texture = nullptr;
+      }
+    }
+  }
+  if (metal_image != nullptr) {
+    AHardwareBuffer_acquire(buffer);
+    auto image = std::make_unique<DarwinAhbEglImage>();
+    image->display = image_display;
+    image->buffer = buffer;
+    image->metal_image = metal_image;
+    image->metal_texture = metal_texture;
+    image->width = description.width;
+    image->height = description.height;
+    image->usage = description.usage;
+    // Preserve the host EGL ABI at the boundary. Chromium obtains some GLES
+    // entry points directly from libGLESv2 rather than exclusively through
+    // our eglGetProcAddress wrapper. Returning the metadata object's address
+    // therefore lets a direct glEGLImageTargetTexture2DOES call hand ANGLE a
+    // non-EGL pointer (which ANGLE can misclassify as a YUV image). Key the
+    // compatibility metadata by, and return, the actual Metal EGLImage. Calls
+    // that pass through our wrapper still recover the Android buffer state,
+    // while direct GLES calls now receive a valid native image as required by
+    // EGL's opaque-handle contract.
+    EGLImage handle = metal_image;
+    {
+      std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+      AhbEglImages().emplace(handle, std::move(image));
+    }
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android EGL: AHardwareBuffer Metal EGLImage=" << handle
+                << " native=" << metal_image << " size=" << description.width
+                << "x" << description.height << "\n";
+    }
+    return handle;
+  }
+  EGLint bind_target = 0;
+  EGLConfig config = ChooseIosurfaceTextureConfig(image_display, &bind_target);
+  if (config == nullptr) {
+    if (DebugGraphicsDso())
+      std::cerr << "ART Android EGL: no IOSurface texture config\n";
+    return nullptr;
+  }
+  const EGLint iosurface_attributes[] = {
+      kEglWidth,
+      static_cast<EGLint>(description.width),
+      kEglHeight,
+      static_cast<EGLint>(description.height),
+      kEglIosurfacePlaneAngle,
+      0,
+      kEglTextureTarget,
+      bind_target,
+      kEglTextureInternalFormatAngle,
+      kGlBgraExt,
+      kEglTextureFormat,
+      kEglTextureRgba,
+      kEglTextureTypeAngle,
+      kGlUnsignedByte,
+      kEglNone,
+  };
+  EGLSurface pbuffer = api.create_pbuffer_from_client_buffer(
+      image_display, kEglIosurfaceAngle, iosurface, config,
+      iosurface_attributes);
+  if (pbuffer == nullptr) {
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android EGL: IOSurface image pbuffer failed size="
+                << description.width << "x" << description.height
+                << " error=0x" << std::hex << api.get_error() << std::dec
+                << "\n";
+    }
+    return nullptr;
+  }
+  AHardwareBuffer_acquire(buffer);
+  auto image = std::make_unique<DarwinAhbEglImage>();
+  image->display = image_display;
+  image->pbuffer = pbuffer;
+  image->buffer = buffer;
+  image->bind_target = bind_target;
+  image->width = description.width;
+  image->height = description.height;
+  image->usage = description.usage;
+  EGLImage handle = image.get();
+  {
+    std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+    AhbEglImages().emplace(handle, std::move(image));
+  }
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: AHardwareBuffer IOSurface image=" << handle
+              << " size=" << description.width << "x" << description.height
+              << "\n";
+  }
+  return handle;
+}
+
+EGLImage EglCreateImageAndroidCore(EGLDisplay display, EGLContext context,
+                                   EGLenum target, void* client_buffer,
+                                   const EGLAttrib* attributes) {
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: eglCreateImage target=0x" << std::hex
+              << target << std::dec << " client=" << client_buffer << "\n";
+  }
+  if (target == kEglNativeBufferAndroid) {
+    return EglCreateImageAndroid(display, context, target, client_buffer,
+                                 nullptr);
+  }
+  using Function = EGLImage (*)(EGLDisplay, EGLContext, EGLenum, void*,
+                                const EGLAttrib*);
+  auto function =
+      LoadSymbol<Function>(GetAngleApi().egl_library, "eglCreateImage");
+  return function == nullptr
+             ? nullptr
+             : function(display, context, target, client_buffer, attributes);
+}
+
+EGLBoolean EglDestroyImageAndroid(EGLDisplay display, EGLImage image) {
+  std::unique_ptr<DarwinAhbEglImage> owned;
+  {
+    std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+    auto found = AhbEglImages().find(image);
+    if (found != AhbEglImages().end()) {
+      owned = std::move(found->second);
+      AhbEglImages().erase(found);
+    }
+  }
+  if (owned != nullptr) {
+    auto& api = GetAngleApi();
+    {
+      std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+      for (auto iterator = LastPresentedAhbByContext().begin();
+           iterator != LastPresentedAhbByContext().end();) {
+        if (iterator->second == owned->buffer) {
+          iterator = LastPresentedAhbByContext().erase(iterator);
+        } else {
+          ++iterator;
+        }
+      }
+      auto queue = QueueByAhb().find(owned->buffer);
+      if (queue != QueueByAhb().end()) {
+        auto last = LastPresentedAhbByQueue().find(queue->second);
+        if (last != LastPresentedAhbByQueue().end() &&
+            last->second == owned->buffer) {
+          LastPresentedAhbByQueue().erase(last);
+        }
+        QueueByAhb().erase(queue);
+      }
+    }
+    if (owned->metal_image != nullptr) {
+      using Function = EGLBoolean (*)(EGLDisplay, EGLImage);
+      auto function = reinterpret_cast<Function>(
+          api.get_proc_address("eglDestroyImageKHR"));
+      if (function != nullptr) function(owned->display, owned->metal_image);
+      darwin_art_android_metal_texture_release(owned->metal_texture);
+      owned->metal_image = nullptr;
+      owned->metal_texture = nullptr;
+    }
+    if (owned->bound)
+      api.release_tex_image(owned->display, owned->pbuffer, kEglBackBuffer);
+    if (owned->client_staging_texture != 0)
+      api.gl_delete_textures(1, &owned->client_staging_texture);
+    if (owned->iosurface_texture != 0)
+      api.gl_delete_textures(1, &owned->iosurface_texture);
+    const EGLBoolean result =
+        owned->pbuffer == nullptr
+            ? 1
+            : api.destroy_surface(owned->display, owned->pbuffer);
+    AHardwareBuffer_release(owned->buffer);
+    return result;
+  }
+  using Function = EGLBoolean (*)(EGLDisplay, EGLImage);
+  auto function = reinterpret_cast<Function>(
+      GetAngleApi().get_proc_address("eglDestroyImageKHR"));
+  return function == nullptr ? 0 : function(display, image);
+}
+
+EGLBoolean EglDestroyImageAndroidCore(EGLDisplay display, EGLImage image) {
+  bool is_android_image = false;
+  {
+    std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+    is_android_image = AhbEglImages().contains(image);
+  }
+  if (is_android_image) return EglDestroyImageAndroid(display, image);
+  using Function = EGLBoolean (*)(EGLDisplay, EGLImage);
+  auto function =
+      LoadSymbol<Function>(GetAngleApi().egl_library, "eglDestroyImage");
+  return function == nullptr ? 0 : function(display, image);
+}
+
+bool CopyIosurfaceToAhbClientTextureLocked(DarwinAhbEglImage& source,
+                                           DarwinAhbEglImage& destination);
+void RestoreBufferQueueSlotIfNeeded(std::uint32_t texture);
+
+void GlEglImageTargetTexture2dOes(std::uint32_t target, EGLImage image) {
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: glEGLImageTargetTexture2DOES target=0x"
+              << std::hex << target << std::dec << " image=" << image
+              << "\n";
+  }
+  {
+    std::unique_lock<std::mutex> lock(AhbEglImageMutex());
+    auto found = AhbEglImages().find(image);
+    if (found != AhbEglImages().end()) {
+      DarwinAhbEglImage& owned = *found->second;
+      if (target != kGlTexture2d) return;
+      auto& api = GetAngleApi();
+      owned.owner_context =
+          api.get_current_context == nullptr ? nullptr
+                                             : api.get_current_context();
+      owned.owner_draw_surface = api.get_current_surface == nullptr
+                                     ? nullptr
+                                     : api.get_current_surface(0x3059);
+      owned.owner_read_surface = api.get_current_surface == nullptr
+                                     ? nullptr
+                                     : api.get_current_surface(0x305A);
+      std::int32_t client_texture = 0;
+      api.gl_get_integer_v(0x8069, &client_texture);  // GL_TEXTURE_BINDING_2D
+      if (owned.metal_image != nullptr) {
+        using Function = void (*)(std::uint32_t, EGLImage);
+        auto function = reinterpret_cast<Function>(
+            api.get_proc_address("glEGLImageTargetTexture2DOES"));
+        const std::uint32_t guest_texture = GuestTextureForHostTextureLocked(
+            owned.owner_context, static_cast<std::uint32_t>(client_texture));
+        // One Chromium texture name is rebound across rotating BufferQueue
+        // slots. Keep a private GL name permanently attached to each slot's
+        // Metal EGLImage; otherwise rebinding the guest name destroys access
+        // to the previous IOSurface and a partial update starts from black.
+        for (auto& [other_handle, other] : AhbEglImages()) {
+          (void)other_handle;
+          if (other.get() != &owned &&
+              other->owner_context == owned.owner_context &&
+              other->client_texture == guest_texture) {
+            other->client_texture = 0;
+          }
+        }
+        owned.client_texture = guest_texture;
+        if (owned.client_staging_texture == 0) {
+          api.gl_gen_textures(1, &owned.client_staging_texture);
+        }
+        api.gl_bind_texture(kGlTexture2d, owned.client_staging_texture);
+        while (api.gl_get_error() != 0) {
+        }
+        if (function != nullptr) function(target, owned.metal_image);
+        owned.association_generation = NextAhbTextureAssociation().fetch_add(
+            1, std::memory_order_relaxed);
+        owned.bound = function != nullptr && api.gl_get_error() == 0;
+        if (DebugGraphicsDso()) {
+          std::cerr << "ART Android EGL: bound Metal AHB image texture="
+                    << guest_texture << " staging="
+                    << owned.client_staging_texture << " native_image="
+                    << owned.metal_image
+                    << " success=" << owned.bound << "\n";
+        }
+        // Chromium commonly attaches the texture name to its draw FBO before
+        // replacing that name's storage with the EGLImage.  Consequently the
+        // framebuffer wrapper cannot observe the AHB association yet.  Treat
+        // the successful image bind as the acquisition boundary as well, and
+        // seed a rotating Metal/IOSurface slot before any partial raster.
+        const std::uint32_t acquired_texture = guest_texture;
+        const bool acquired = owned.bound;
+        lock.unlock();
+        if (acquired) RestoreBufferQueueSlotIfNeeded(acquired_texture);
+        return;
+      }
+      client_texture = static_cast<std::int32_t>(GuestTextureForHostTextureLocked(
+          owned.owner_context, static_cast<std::uint32_t>(client_texture)));
+      for (auto& [other_handle, other] : AhbEglImages()) {
+        (void)other_handle;
+        if (other.get() != &owned &&
+            other->owner_context == owned.owner_context &&
+            other->client_texture ==
+                static_cast<std::uint32_t>(client_texture)) {
+          other->client_texture = 0;
+          if (other->client_staging_texture != 0) {
+            api.gl_delete_textures(1, &other->client_staging_texture);
+            other->client_staging_texture = 0;
+          }
+          other->association_generation = 0;
+          other->staging_content_generation = 0;
+          other->staging_source_buffer = nullptr;
+        }
+      }
+      owned.client_texture = static_cast<std::uint32_t>(client_texture);
+      owned.association_generation =
+          NextAhbTextureAssociation().fetch_add(1, std::memory_order_relaxed);
+      owned.staging_content_generation = 0;
+      owned.staging_source_buffer = nullptr;
+      if (owned.bind_target == kEglTexture2d) {
+        if (owned.bound) {
+          api.release_tex_image(owned.display, owned.pbuffer, kEglBackBuffer);
+        }
+        owned.bound =
+            api.bind_tex_image(owned.display, owned.pbuffer, kEglBackBuffer) !=
+            0;
+        return;
+      }
+      // ANGLE's Metal IOSurface backend exposes rectangle textures. Android's
+      // EGLImage contract exposes a render-target-capable 2D texture. Keep the
+      // client's texture object intact and bind a private 2D staging object
+      // behind that guest name; deleting/recreating Chromium's service object
+      // breaks SharedImage representation identity across partial rasters.
+      constexpr std::array<std::uint32_t, 4> kTextureParameters{
+          0x2801,  // GL_TEXTURE_MIN_FILTER
+          0x2800,  // GL_TEXTURE_MAG_FILTER
+          0x2802,  // GL_TEXTURE_WRAP_S
+          0x2803,  // GL_TEXTURE_WRAP_T
+      };
+      std::array<std::int32_t, 4> texture_parameter_values{
+          0x2601, 0x2601, 0x812F, 0x812F};  // LINEAR / CLAMP_TO_EDGE
+      if (api.gl_get_tex_parameter_iv != nullptr) {
+        for (std::size_t index = 0; index < kTextureParameters.size(); ++index) {
+          api.gl_get_tex_parameter_iv(kGlTexture2d,
+                                      kTextureParameters[index],
+                                      &texture_parameter_values[index]);
+        }
+      }
+      while (api.gl_get_error() != 0) {
+      }
+      if (owned.client_staging_texture == 0)
+        api.gl_gen_textures(1, &owned.client_staging_texture);
+      api.gl_bind_texture(kGlTexture2d, owned.client_staging_texture);
+      api.gl_tex_image_2d(kGlTexture2d, 0, 0x1908, owned.width, owned.height,
+                          0, 0x1908, kGlUnsignedByte, nullptr);
+      const std::uint32_t storage_error = api.gl_get_error();
+      for (std::size_t index = 0; index < kTextureParameters.size(); ++index) {
+        api.gl_tex_parameter_i(kGlTexture2d, kTextureParameters[index],
+                               texture_parameter_values[index]);
+      }
+      if (DebugGraphicsDso()) {
+        std::cerr << "ART Android EGL: defined AHB texture context="
+                  << owned.owner_context << " texture=" << client_texture
+                  << " staging=" << owned.client_staging_texture
+                  << " size=" << owned.width << "x" << owned.height
+                  << " storage_error=0x" << std::hex << storage_error
+                  << std::dec << "\n";
+      }
+      std::int32_t previous_rectangle = 0;
+      api.gl_get_integer_v(0x84F6, &previous_rectangle);
+      if (owned.iosurface_texture == 0)
+        api.gl_gen_textures(1, &owned.iosurface_texture);
+      api.gl_bind_texture(kGlTextureRectangleAngle, owned.iosurface_texture);
+      if (!owned.bound) {
+        owned.bound = api.bind_tex_image(owned.display, owned.pbuffer,
+                                         kEglBackBuffer) != 0;
+      }
+      api.gl_bind_texture(kGlTextureRectangleAngle,
+                          static_cast<std::uint32_t>(previous_rectangle));
+      // Do not blit here: Chromium can bind an EGLImage while ANGLE already
+      // has an active Metal render encoder. The acquire-fence path below is
+      // the safe Android synchronization boundary for IOSurface -> 2D refresh.
+      return;
+    }
+  }
+  using Function = void (*)(std::uint32_t, EGLImage);
+  auto function = reinterpret_cast<Function>(
+      GetAngleApi().get_proc_address("glEGLImageTargetTexture2DOES"));
+  if (function != nullptr) function(target, image);
+}
+
+bool CopyIosurfaceToAhbClientTextureLocked(DarwinAhbEglImage& source,
+                                           DarwinAhbEglImage& destination) {
+  const bool direct_metal = source.metal_image != nullptr &&
+                            destination.metal_image != nullptr &&
+                            source.client_staging_texture != 0 &&
+                            destination.client_staging_texture != 0;
+  const bool staged_iosurface =
+      source.bind_target == kEglTextureRectangleAngle &&
+      source.iosurface_texture != 0 &&
+      destination.client_staging_texture != 0;
+  if (!source.bound || !destination.bound ||
+      (!direct_metal && !staged_iosurface) ||
+      source.width != destination.width ||
+      source.height != destination.height) {
+    return false;
+  }
+  // ANGLE's Metal EGLImage path already gives the guest GL texture the exact
+  // IOSurface storage identity.  A different BufferQueue slot is still a
+  // different IOSurface, though, and Chromium may render only accumulated
+  // damage into it.  Preserve Android's buffer-age contract with a GPU blit
+  // between those two IOSurface-backed textures before the destination is
+  // attached for drawing.  The older pbuffer path performs the equivalent
+  // rectangle-to-staging copy below.
+  const std::uint32_t source_target =
+      direct_metal ? kGlTexture2d : kGlTextureRectangleAngle;
+  const std::uint32_t source_texture =
+      direct_metal ? source.client_staging_texture : source.iosurface_texture;
+  const std::uint32_t destination_texture =
+      destination.client_staging_texture;
+  if (source_texture == 0 || destination_texture == 0) return false;
+  if (direct_metal && source_texture == destination_texture) return true;
+  auto& api = GetAngleApi();
+  std::int32_t previous_read_framebuffer = 0;
+  std::int32_t previous_draw_framebuffer = 0;
+  const bool scissor_enabled = api.gl_is_enabled(0x0C11) != 0;
+  api.gl_get_integer_v(0x8CAA, &previous_read_framebuffer);
+  api.gl_get_integer_v(0x8CA6, &previous_draw_framebuffer);
+  std::uint32_t framebuffers[2]{};
+  api.gl_gen_framebuffers(2, framebuffers);
+  api.gl_bind_framebuffer(0x8CA8, framebuffers[0]);  // GL_READ_FRAMEBUFFER
+  api.gl_framebuffer_texture_2d(0x8CA8, kGlColorAttachment0, source_target,
+                                source_texture, 0);
+  api.gl_bind_framebuffer(0x8CA9, framebuffers[1]);  // GL_DRAW_FRAMEBUFFER
+  api.gl_framebuffer_texture_2d(0x8CA9, kGlColorAttachment0, kGlTexture2d,
+                                destination_texture, 0);
+  const std::uint32_t read_status =
+      api.gl_check_framebuffer_status(0x8CA8);
+  const std::uint32_t draw_status =
+      api.gl_check_framebuffer_status(0x8CA9);
+  if (read_status == kGlFramebufferComplete &&
+      draw_status == kGlFramebufferComplete) {
+    auto debug_samples = [&](const char* phase, std::uint32_t framebuffer) {
+      if (std::getenv("DARWIN_ART_DEBUG_AHB_PIXELS") == nullptr) return;
+      api.gl_bind_framebuffer(0x8CA8, framebuffer);  // GL_READ_FRAMEBUFFER
+      std::cerr << "ART Android EGL: AHB acquire " << phase
+                << " client=" << destination.client_texture << " size="
+                << destination.width << "x" << destination.height;
+      for (float y : std::array<float, 3>{0.25f, 0.5f, 0.75f}) {
+        std::uint8_t pixel[4]{};
+        api.gl_read_pixels(static_cast<std::int32_t>(destination.width / 2),
+                           static_cast<std::int32_t>(destination.height * y),
+                           1, 1, 0x1908, kGlUnsignedByte, pixel);
+        std::cerr << " [0.5," << y << "]="
+                  << static_cast<int>(pixel[0]) << ","
+                  << static_cast<int>(pixel[1]) << ","
+                  << static_cast<int>(pixel[2]) << ","
+                  << static_cast<int>(pixel[3]);
+      }
+      std::cerr << "\n";
+    };
+    debug_samples("source", framebuffers[0]);
+    api.gl_disable(0x0C11);  // GL_SCISSOR_TEST
+    api.gl_blit_framebuffer_angle(
+        0, 0, source.width, source.height, 0, 0, destination.width,
+        destination.height, 0x00004000, 0x2600);
+    if (std::getenv("DARWIN_ART_DEBUG_AHB_DUMP") != nullptr &&
+        (destination.height == 1280 || destination.height == 352)) {
+      static std::atomic<std::uint32_t> dump_index{0};
+      const std::uint32_t index =
+          dump_index.fetch_add(1, std::memory_order_relaxed);
+      api.gl_bind_framebuffer(0x8CA8, framebuffers[1]);
+      std::vector<std::uint8_t> pixels(
+          static_cast<std::size_t>(destination.width) * destination.height * 4);
+      api.gl_read_pixels(0, 0, destination.width, destination.height, 0x1908,
+                         kGlUnsignedByte, pixels.data());
+      const std::string path = "/tmp/darwin-art-restored-ahb-" +
+          std::to_string(getpid()) + "-" + std::to_string(index) + "-" +
+          std::to_string(destination.width) + "x" +
+          std::to_string(destination.height) + ".ppm";
+      std::ofstream output(path, std::ios::binary);
+      output << "P6\n" << destination.width << " " << destination.height
+             << "\n255\n";
+      for (std::uint32_t y = 0; y < destination.height; ++y) {
+        const std::size_t row =
+            static_cast<std::size_t>(y) * destination.width * 4;
+        for (std::uint32_t x = 0; x < destination.width; ++x) {
+          output.write(
+              reinterpret_cast<const char*>(pixels.data() + row + x * 4), 3);
+        }
+      }
+    }
+    debug_samples("destination", framebuffers[1]);
+  } else if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: AHB import blit incomplete read=0x"
+              << std::hex << read_status << " draw=0x" << draw_status
+              << std::dec << " size=" << destination.width << "x"
+              << destination.height << "\n";
+  }
+  api.gl_bind_framebuffer(0x8CA8,
+                          static_cast<std::uint32_t>(previous_read_framebuffer));
+  api.gl_bind_framebuffer(0x8CA9,
+                          static_cast<std::uint32_t>(previous_draw_framebuffer));
+  if (scissor_enabled) api.gl_enable(0x0C11);
+  api.gl_delete_framebuffers(2, framebuffers);
+  return read_status == kGlFramebufferComplete &&
+         draw_status == kGlFramebufferComplete;
+}
+
+bool CopyAhbImageToIosurfaceLocked(DarwinAhbEglImage& image) {
+  if (!image.bound || image.bind_target != kEglTextureRectangleAngle ||
+      image.client_staging_texture == 0 || image.iosurface_texture == 0) {
+    return false;
+  }
+  auto& api = GetAngleApi();
+  std::int32_t previous_read_framebuffer = 0;
+  std::int32_t previous_draw_framebuffer = 0;
+  const bool scissor_enabled = api.gl_is_enabled(0x0C11) != 0;
+  api.gl_get_integer_v(0x8CAA, &previous_read_framebuffer);
+  api.gl_get_integer_v(0x8CA6, &previous_draw_framebuffer);
+  std::uint32_t framebuffers[2]{};
+  api.gl_gen_framebuffers(2, framebuffers);
+  api.gl_bind_framebuffer(0x8CA8, framebuffers[0]);  // GL_READ_FRAMEBUFFER
+  api.gl_framebuffer_texture_2d(0x8CA8, kGlColorAttachment0, kGlTexture2d,
+                                image.client_staging_texture, 0);
+  if (std::getenv("DARWIN_ART_DEBUG_AHB_DUMP") != nullptr &&
+      (image.height == 1280 || image.height == 352)) {
+    static std::atomic<std::uint32_t> dump_index{0};
+    const std::uint32_t index =
+        dump_index.fetch_add(1, std::memory_order_relaxed);
+    std::vector<std::uint8_t> pixels(
+        static_cast<std::size_t>(image.width) * image.height * 4);
+    api.gl_read_pixels(0, 0, image.width, image.height, 0x1908,
+                       kGlUnsignedByte, pixels.data());
+    const std::string path = "/tmp/darwin-art-client-ahb-" +
+        std::to_string(getpid()) + "-" + std::to_string(index) + "-" +
+        std::to_string(image.width) + "x" + std::to_string(image.height) +
+        ".ppm";
+    std::ofstream output(path, std::ios::binary);
+    output << "P6\n" << image.width << " " << image.height << "\n255\n";
+    for (std::uint32_t y = 0; y < image.height; ++y) {
+      const std::size_t row = static_cast<std::size_t>(y) * image.width * 4;
+      for (std::uint32_t x = 0; x < image.width; ++x) {
+        output.write(reinterpret_cast<const char*>(pixels.data() + row + x * 4),
+                     3);
+      }
+    }
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_AHB_PIXELS") != nullptr) {
+    constexpr std::array<float, 3> positions{0.25f, 0.5f, 0.75f};
+    std::cerr << "ART Android EGL: AHB producer samples client="
+              << image.client_texture << " size=" << image.width << "x"
+              << image.height;
+    for (float y : positions) {
+      for (float x : positions) {
+        std::uint8_t pixel[4]{};
+        api.gl_read_pixels(static_cast<std::int32_t>(image.width * x),
+                           static_cast<std::int32_t>(image.height * y), 1, 1,
+                           0x1908, kGlUnsignedByte, pixel);
+        std::cerr << " [" << x << "," << y << "]="
+                  << static_cast<int>(pixel[0]) << ","
+                  << static_cast<int>(pixel[1]) << ","
+                  << static_cast<int>(pixel[2]) << ","
+                  << static_cast<int>(pixel[3]);
+      }
+    }
+    std::cerr << "\n";
+  }
+  api.gl_bind_framebuffer(0x8CA9, framebuffers[1]);  // GL_DRAW_FRAMEBUFFER
+  api.gl_framebuffer_texture_2d(0x8CA9, kGlColorAttachment0,
+                                kGlTextureRectangleAngle,
+                                image.iosurface_texture, 0);
+  api.gl_disable(0x0C11);  // GL_SCISSOR_TEST
+  api.gl_blit_framebuffer_angle(0, 0, image.width, image.height, 0, 0,
+                                image.width, image.height, 0x00004000,
+                                0x2600);
+  api.gl_bind_framebuffer(0x8CA8,
+                          static_cast<std::uint32_t>(previous_read_framebuffer));
+  api.gl_bind_framebuffer(0x8CA9,
+                          static_cast<std::uint32_t>(previous_draw_framebuffer));
+  if (scissor_enabled) api.gl_enable(0x0C11);
+  api.gl_delete_framebuffers(2, framebuffers);
+  return true;
+}
+
+void SynchronizeIosurfaceToAhbClientTextures() {
+  std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+  auto& api = GetAngleApi();
+  const EGLContext current =
+      api.get_current_context == nullptr ? nullptr : api.get_current_context();
+  if (current == nullptr) return;
+  std::int32_t bound_client_texture = 0;
+  api.gl_get_integer_v(0x8069, &bound_client_texture);  // GL_TEXTURE_BINDING_2D
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: acquire-fence refresh context=" << current
+              << " bound=" << bound_client_texture;
+  }
+  for (auto& [handle, image] : AhbEglImages()) {
+    (void)handle;
+    if (image->owner_context != current) continue;
+    if (bound_client_texture == 0 ||
+        image->client_staging_texture !=
+            static_cast<std::uint32_t>(bound_client_texture)) {
+      continue;
+    }
+    if (DebugGraphicsDso()) {
+      std::cerr << " {client=" << image->client_texture << " " << image->width
+                << "x" << image->height << " buffer=" << image->buffer
+                << " source=" << image->buffer
+                << "}";
+    }
+    if (CopyIosurfaceToAhbClientTextureLocked(*image, *image)) {
+      // An imported acquire fence is the authoritative notification that the
+      // shared IOSurface contains a newer producer frame, including when this
+      // process did not create that frame and has no local generation history.
+      ++image->iosurface_content_generation;
+      image->staging_content_generation =
+          image->iosurface_content_generation;
+      image->staging_source_buffer = image->buffer;
+    }
+  }
+  if (DebugGraphicsDso()) std::cerr << "\n";
+}
+
+void SynchronizeAhbImagesToIosurface() {
+  std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+  auto& api = GetAngleApi();
+  const EGLContext current =
+      api.get_current_context == nullptr ? nullptr : api.get_current_context();
+  if (current == nullptr) return;
+  std::int32_t draw_framebuffer = 0;
+  std::int32_t attachment_type = 0;
+  std::int32_t attachment_name = 0;
+  std::int32_t viewport[4]{};
+  std::int32_t scissor[4]{};
+  api.gl_get_integer_v(0x8CA6, &draw_framebuffer);  // GL_DRAW_FRAMEBUFFER_BINDING
+  api.gl_get_integer_v(0x0BA2, viewport);  // GL_VIEWPORT
+  api.gl_get_integer_v(0x0C10, scissor);   // GL_SCISSOR_BOX
+  if (api.gl_get_framebuffer_attachment_parameter_iv != nullptr) {
+    api.gl_get_framebuffer_attachment_parameter_iv(
+        kGlDrawFramebuffer, kGlColorAttachment0,
+        kGlFramebufferAttachmentObjectType, &attachment_type);
+    api.gl_get_framebuffer_attachment_parameter_iv(
+        kGlDrawFramebuffer, kGlColorAttachment0,
+        kGlFramebufferAttachmentObjectName, &attachment_name);
+  }
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android EGL: native-fence source context=" << current
+              << " draw_fbo=" << draw_framebuffer << " attachment_type=0x"
+              << std::hex << attachment_type << std::dec
+              << " attachment_name=" << attachment_name << " viewport=["
+              << viewport[0] << "," << viewport[1] << "," << viewport[2]
+              << "," << viewport[3] << "] scissor_enabled="
+              << (api.gl_is_enabled(0x0C11) != 0) << " scissor=["
+              << scissor[0] << "," << scissor[1] << "," << scissor[2]
+              << "," << scissor[3] << "] ahb_images=";
+    for (const auto& [handle, image] : AhbEglImages()) {
+      (void)handle;
+      if (image->owner_context == current) {
+        std::cerr << " {client=" << image->client_texture
+                  << " iosurface=" << image->iosurface_texture << " "
+                  << image->width << "x" << image->height << "}";
+      }
+    }
+    std::cerr << "\n";
+  }
+  for (auto& [handle, image] : AhbEglImages()) {
+    (void)handle;
+    // A native fence publishes the commands which precede it in the current
+    // GL context.  Chromium keeps several AHardwareBuffer-backed textures
+    // alive in one context, but only the texture attached to the current draw
+    // framebuffer is the producer for this fence.  Copying every live image
+    // here lets stale swapchain slots overwrite their IOSurfaces and turns a
+    // later SurfaceControl frame black.
+    if (image->owner_context == current &&
+        attachment_type == kGlFramebufferAttachmentTexture &&
+        attachment_name != 0) {
+      const bool direct_metal_attachment =
+          image->metal_image != nullptr &&
+          image->client_staging_texture ==
+              static_cast<std::uint32_t>(attachment_name);
+      const bool staged_attachment =
+          image->client_staging_texture ==
+          static_cast<std::uint32_t>(attachment_name);
+      if (direct_metal_attachment) {
+        // The client texture is the IOSurface itself. Fence creation publishes
+        // a new generation without a copy, allowing the next rotating slot to
+        // distinguish newer contents from the same predecessor buffer.
+        ++image->iosurface_content_generation;
+        image->staging_content_generation =
+            image->iosurface_content_generation;
+        image->staging_source_buffer = image->buffer;
+      } else if (staged_attachment && CopyAhbImageToIosurfaceLocked(*image)) {
+        ++image->iosurface_content_generation;
+        image->staging_content_generation =
+            image->iosurface_content_generation;
+        image->staging_source_buffer = image->buffer;
+      }
+    }
+  }
+}
+
+extern "C" bool darwin_art_android_begin_hardware_buffer_composition(
+    void* opaque, bool clear) {
+  std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+  auto& api = GetAngleApi();
+  auto* buffer = static_cast<AHardwareBuffer*>(opaque);
+  EGLDisplay display = api.get_current_display == nullptr
+                           ? nullptr
+                           : api.get_current_display();
+  EGLContext context = api.get_current_context == nullptr
+                           ? nullptr
+                           : api.get_current_context();
+  g_surface_control_context_scope = {};
+  if (display == nullptr || context == nullptr) {
+    auto found = std::find_if(
+        AhbEglImages().begin(), AhbEglImages().end(),
+        [buffer](const auto& entry) { return entry.second->buffer == buffer; });
+    if (found == AhbEglImages().end() ||
+        found->second->display == nullptr ||
+        found->second->owner_context == nullptr) {
+      if (DebugGraphicsDso()) {
+        std::cerr << "ART Android SurfaceControl: no producer context pid="
+                  << getpid() << " buffer=" << buffer
+                  << " current_display=" << display
+                  << " current_context=" << context << "\n";
+      }
+      return false;
+    }
+    DarwinAhbEglImage& image = *found->second;
+    auto& scope = g_surface_control_context_scope;
+    scope.activated_display = image.display;
+    scope.previous_display = display;
+    scope.previous_context = context;
+    scope.previous_draw_surface =
+        api.get_current_surface == nullptr ? nullptr
+                                           : api.get_current_surface(0x3059);
+    scope.previous_read_surface =
+        api.get_current_surface == nullptr ? nullptr
+                                           : api.get_current_surface(0x305A);
+    if (api.make_current(image.display, image.owner_draw_surface,
+                         image.owner_read_surface, image.owner_context) == 0) {
+      if (DebugGraphicsDso()) {
+        std::cerr << "ART Android SurfaceControl: producer context activation "
+                     "failed pid="
+                  << getpid() << " context=" << image.owner_context
+                  << " draw=" << image.owner_draw_surface << " read="
+                  << image.owner_read_surface << " error=0x" << std::hex
+                  << api.get_error() << std::dec << "\n";
+      }
+      g_surface_control_context_scope = {};
+      return false;
+    }
+    scope.switched = true;
+    display = image.display;
+    context = image.owner_context;
+  }
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Android SurfaceControl: begin pid=" << getpid()
+              << " buffer=" << buffer << " display=" << display
+              << " context=" << context << " switched="
+              << g_surface_control_context_scope.switched << " clear="
+              << clear << "\n";
+  }
+  if (!EnsureSurfaceControlTarget(display)) {
+    darwin_art_android_end_hardware_buffer_composition();
+    return false;
+  }
+  // `clear` describes a fresh Android transaction target, not the host
+  // display's persistent framebuffer. SurfaceFlinger retains undamaged
+  // display pixels and redraws only transaction damage; clearing our single
+  // host IOSurface on every commit erased all regions not present in that
+  // commit and produced the black bands seen around animated web content.
+  // A newly-created/resized host target still starts transparent because
+  // EnsureSurfaceControlTarget resets has_content.
+  if (g_surface_control_target.has_content) return true;
+  std::int32_t previous_draw_framebuffer = 0;
+  const bool scissor_enabled = api.gl_is_enabled(0x0C11) != 0;
+  api.gl_get_integer_v(0x8CA6, &previous_draw_framebuffer);
+  api.gl_bind_framebuffer(0x8CA9, g_surface_control_target.framebuffer);
+  api.gl_disable(0x0C11);  // GL_SCISSOR_TEST
+  api.gl_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
+  api.gl_clear(0x00004000);  // GL_COLOR_BUFFER_BIT
+  api.gl_bind_framebuffer(
+      0x8CA9, static_cast<std::uint32_t>(previous_draw_framebuffer));
+  if (scissor_enabled) api.gl_enable(0x0C11);
+  g_surface_control_target.has_content = true;
+  return true;
+}
+
+extern "C" void darwin_art_android_end_hardware_buffer_composition() {
+  // ASurfaceTransaction's commit callback runs immediately after this call
+  // and may hand Chromium a release fence for the displaced BufferQueue
+  // slot.  The compatibility fence is represented by an already-signaled
+  // broker descriptor, so it is only truthful after ANGLE's Metal queue has
+  // finished sampling every IOSurface used by this composition.  Merely
+  // flushing here races the producer's next partial update with the pending
+  // compositor read; verbose logging used to hide that race and left later
+  // tiles black in normal-speed Chrome runs.
+  //
+  // This remains a GPU-to-GPU path: glFinish supplies the completion boundary
+  // required by Android's release-fence contract and performs no CPU readback
+  // or framebuffer copy.  Replace the synchronous boundary with a Metal
+  // shared-event-backed broker fence once the fence provider can publish an
+  // unsignaled descriptor.
+  using Finish = void (*)();
+  auto finish = reinterpret_cast<Finish>(
+      GetAngleApi().get_proc_address("glFinish"));
+  if (finish != nullptr) finish();
+
+  auto& scope = g_surface_control_context_scope;
+  if (!scope.switched) return;
+  auto& api = GetAngleApi();
+  const EGLDisplay restore_display =
+      scope.previous_display == nullptr ? scope.activated_display
+                                        : scope.previous_display;
+  api.make_current(restore_display, scope.previous_draw_surface,
+                   scope.previous_read_surface, scope.previous_context);
+  scope = {};
+}
+
+extern "C" void darwin_art_android_mark_hardware_buffer_released(
+    void* opaque) {
+  auto* buffer = static_cast<AHardwareBuffer*>(opaque);
+  if (buffer == nullptr) return;
+  std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+  for (auto& [handle, image] : AhbEglImages()) {
+    (void)handle;
+    if (image->buffer != buffer) continue;
+    // The release fence belongs to this exact BufferQueue slot.  Do not copy
+    // immediately: Chromium may still have an active Metal render encoder.
+    // Invalidating the staging generation makes the next producer FBO bind
+    // restore the slot's persistent IOSurface before partial damage is drawn.
+    image->staging_content_generation = 0;
+    image->staging_source_buffer = nullptr;
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android EGL: released AHB slot buffer=" << buffer
+                << " context=" << image->owner_context
+                << " texture=" << image->client_texture << " content="
+                << image->iosurface_content_generation << "\n";
+    }
+  }
+}
+
+extern "C" void darwin_art_android_present_hardware_buffer(
+    void* queue, void* opaque, std::int32_t source_left,
+    std::int32_t source_top,
+    std::int32_t source_right, std::int32_t source_bottom,
+    std::int32_t destination_left, std::int32_t destination_top,
+    std::int32_t destination_right, std::int32_t destination_bottom,
+    bool has_damage, std::int32_t damage_left, std::int32_t damage_top,
+    std::int32_t damage_right, std::int32_t damage_bottom, float alpha) {
+  auto* buffer = static_cast<AHardwareBuffer*>(opaque);
+  std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+  auto found = std::find_if(
+      AhbEglImages().begin(), AhbEglImages().end(),
+      [buffer](const auto& entry) { return entry.second->buffer == buffer; });
+  if (found == AhbEglImages().end()) return;
+  DarwinAhbEglImage& image = *found->second;
+  const bool direct_metal =
+      image.metal_image != nullptr && image.client_staging_texture != 0;
+  const bool staged_rectangle =
+      image.bind_target == kEglTextureRectangleAngle &&
+      image.client_staging_texture != 0 && image.iosurface_texture != 0;
+  if (!image.bound || (!direct_metal && !staged_rectangle)) {
+    return;
+  }
+  // BufferQueue preserves the last presented pixels when a producer receives
+  // a buffer with a positive age. Remember that source per producer context;
+  // the next acquire-fence refresh performs the equivalent preservation as a
+  // GPU blit before Chromium applies its damage region.
+  LastPresentedAhbByContext()[image.owner_context] = image.buffer;
+  ++PresentedGenerationByContext()[image.owner_context];
+  if (queue != nullptr) {
+    QueueByAhb()[image.buffer] = queue;
+    LastPresentedAhbByQueue()[queue] = image.buffer;
+    ++PresentedGenerationByQueue()[queue];
+  }
+  auto& api = GetAngleApi();
+  std::int32_t previous_read_framebuffer = 0;
+  std::int32_t previous_draw_framebuffer = 0;
+  std::int32_t previous_scissor[4]{};
+  const bool scissor_enabled = api.gl_is_enabled(0x0C11) != 0;
+  api.gl_get_integer_v(0x8CAA, &previous_read_framebuffer);
+  api.gl_get_integer_v(0x8CA6, &previous_draw_framebuffer);
+  api.gl_get_integer_v(0x0C10, previous_scissor);  // GL_SCISSOR_BOX
+  std::uint32_t framebuffers[2]{};
+  api.gl_gen_framebuffers(2, framebuffers);
+  api.gl_bind_framebuffer(0x8CA8, framebuffers[0]);  // GL_READ_FRAMEBUFFER
+  // SurfaceTransaction can run after Chromium has released or reused the
+  // producer's temporary 2D texture. Read the persistent AHardwareBuffer
+  // IOSurface snapshot made at native-fence creation instead.
+  api.gl_framebuffer_texture_2d(
+      0x8CA8, kGlColorAttachment0,
+      direct_metal ? kGlTexture2d : kGlTextureRectangleAngle,
+      direct_metal ? image.client_staging_texture : image.iosurface_texture,
+      0);
+  if (std::getenv("DARWIN_ART_DEBUG_AHB_DUMP") != nullptr) {
+    static std::atomic<std::uint32_t> dump_index{0};
+    const std::uint32_t index =
+        dump_index.fetch_add(1, std::memory_order_relaxed);
+    std::vector<std::uint8_t> pixels(
+        static_cast<std::size_t>(image.width) * image.height * 4);
+    api.gl_read_pixels(0, 0, image.width, image.height, 0x1908,
+                       kGlUnsignedByte, pixels.data());
+    const std::string path = "/tmp/darwin-art-root-ahb-" +
+        std::to_string(getpid()) + "-" + std::to_string(index) + "-" +
+        std::to_string(image.width) + "x" + std::to_string(image.height) +
+        ".ppm";
+    std::ofstream output(path, std::ios::binary);
+    output << "P6\n" << image.width << " " << image.height << "\n255\n";
+    for (std::uint32_t y = 0; y < image.height; ++y) {
+      const std::size_t row = static_cast<std::size_t>(y) * image.width * 4;
+      for (std::uint32_t x = 0; x < image.width; ++x) {
+        output.write(reinterpret_cast<const char*>(pixels.data() + row + x * 4),
+                     3);
+      }
+    }
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_SURFACECONTROL_PIXELS") != nullptr) {
+    constexpr std::array<float, 3> positions{0.25f, 0.5f, 0.75f};
+    std::cerr << "ART Android SurfaceControl: source samples";
+    for (float y : positions) {
+      for (float x : positions) {
+        std::uint8_t pixel[4]{};
+        api.gl_read_pixels(
+            static_cast<std::int32_t>(image.width * x),
+            static_cast<std::int32_t>(image.height * y), 1, 1, 0x1908,
+            kGlUnsignedByte, pixel);
+        std::cerr << " [" << x << "," << y << "]="
+                  << static_cast<int>(pixel[0]) << ","
+                  << static_cast<int>(pixel[1]) << ","
+                  << static_cast<int>(pixel[2]) << ","
+                  << static_cast<int>(pixel[3]);
+      }
+    }
+    std::cerr << " error=0x" << std::hex << api.gl_get_error() << std::dec
+              << "\n";
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_SURFACECONTROL_CLEAR") != nullptr) {
+    api.gl_bind_framebuffer(kGlFramebuffer, framebuffers[0]);
+    api.gl_clear_color(1.0f, 0.0f, 0.0f, 1.0f);
+    api.gl_clear(0x00004000);  // GL_COLOR_BUFFER_BIT
+  }
+  bool submitted_to_compositor = false;
+  if (EnsureSurfaceControlTarget(image.display)) {
+    auto& target = g_surface_control_target;
+    api.gl_bind_framebuffer(0x8CA9, target.framebuffer);
+    api.gl_bind_framebuffer(0x8CA8, framebuffers[0]);
+    const auto image_width = static_cast<std::int32_t>(image.width);
+    const auto image_height = static_cast<std::int32_t>(image.height);
+    source_left = std::clamp(source_left, 0, image_width);
+    source_right = std::clamp(source_right, 0, image_width);
+    source_top = std::clamp(source_top, 0, image_height);
+    source_bottom = std::clamp(source_bottom, 0, image_height);
+    destination_left = std::clamp(
+        destination_left, 0, static_cast<std::int32_t>(target.width));
+    destination_right = std::clamp(
+        destination_right, 0, static_cast<std::int32_t>(target.width));
+    destination_top = std::clamp(
+        destination_top, 0, static_cast<std::int32_t>(target.height));
+    destination_bottom = std::clamp(
+        destination_bottom, 0, static_cast<std::int32_t>(target.height));
+    // Damage is buffer-coordinate compositor metadata, never layer geometry.
+    // Preserve the complete source-to-destination mapping and limit writes
+    // with a destination scissor, matching SurfaceFlinger's composition model.
+    std::int32_t composite_source_left = source_left;
+    std::int32_t composite_source_top = source_top;
+    std::int32_t composite_source_right = source_right;
+    std::int32_t composite_source_bottom = source_bottom;
+    std::int32_t composite_destination_left = destination_left;
+    std::int32_t composite_destination_top = destination_top;
+    std::int32_t composite_destination_right = destination_right;
+    std::int32_t composite_destination_bottom = destination_bottom;
+    api.gl_disable(0x0C11);  // Never inherit the producer's damage scissor.
+    if (has_damage && source_right > source_left &&
+        source_bottom > source_top) {
+      damage_left = std::clamp(damage_left, source_left, source_right);
+      damage_right = std::clamp(damage_right, source_left, source_right);
+      damage_top = std::clamp(damage_top, source_top, source_bottom);
+      damage_bottom = std::clamp(damage_bottom, source_top, source_bottom);
+      if (damage_left < damage_right && damage_top < damage_bottom) {
+        const double scale_x =
+            static_cast<double>(destination_right - destination_left) /
+            static_cast<double>(source_right - source_left);
+        const double scale_y =
+            static_cast<double>(destination_bottom - destination_top) /
+            static_cast<double>(source_bottom - source_top);
+        const std::int32_t clip_left = destination_left +
+            static_cast<std::int32_t>((damage_left - source_left) * scale_x);
+        const std::int32_t clip_right = destination_left +
+            static_cast<std::int32_t>((damage_right - source_left) * scale_x);
+        const std::int32_t clip_top = destination_top +
+            static_cast<std::int32_t>((damage_top - source_top) * scale_y);
+        const std::int32_t clip_bottom = destination_top +
+            static_cast<std::int32_t>((damage_bottom - source_top) * scale_y);
+        // A SurfaceControl damage rect uses top-left buffer coordinates, while
+        // the producer rendered the partial update in GL bottom-left storage.
+        // Crop the mirrored source region and place it into the top-left
+        // destination region, exactly as SurfaceFlinger does. A destination
+        // scissor alone selects the wrong source rows for partial buffers.
+        composite_source_left = damage_left;
+        composite_source_top = damage_top;
+        composite_source_right = damage_right;
+        composite_source_bottom = damage_bottom;
+        composite_destination_left = clip_left;
+        composite_destination_top = clip_top;
+        composite_destination_right = clip_right;
+        composite_destination_bottom = clip_bottom;
+      } else {
+        has_damage = false;
+      }
+    }
+    const bool debug_damage_pixels =
+        std::getenv("DARWIN_ART_DEBUG_SURFACECONTROL_DAMAGE_PIXELS") != nullptr &&
+        has_damage;
+    auto sample_damage = [&](const char* phase, std::uint32_t framebuffer,
+                             std::int32_t width, std::int32_t height,
+                             std::int32_t left, std::int32_t top,
+                             std::int32_t right, std::int32_t bottom) {
+      if (!debug_damage_pixels) return;
+      api.gl_bind_framebuffer(0x8CA8, framebuffer);
+      std::cerr << "ART Android SurfaceControl: damage " << phase << " rect=["
+                << left << "," << top << "," << right << "," << bottom
+                << "]";
+      for (float y : std::array<float, 3>{0.1f, 0.5f, 0.9f}) {
+        for (float x : std::array<float, 3>{0.1f, 0.5f, 0.9f}) {
+          const std::int32_t sample_x =
+              std::clamp(left + static_cast<std::int32_t>((right - left) * x),
+                         0, width - 1);
+          const std::int32_t sample_y_top =
+              std::clamp(top + static_cast<std::int32_t>((bottom - top) * y),
+                         0, height - 1);
+          std::uint8_t pixel[4]{};
+          const std::int32_t sample_y =
+              std::strcmp(phase, "source") == 0
+                  ? height - 1 - sample_y_top
+                  : sample_y_top;
+          api.gl_read_pixels(sample_x, sample_y, 1, 1, 0x1908, kGlUnsignedByte,
+                             pixel);
+          std::cerr << " [" << sample_x << "," << sample_y_top << "]="
+                    << static_cast<int>(pixel[0]) << ","
+                    << static_cast<int>(pixel[1]) << ","
+                    << static_cast<int>(pixel[2]) << ","
+                    << static_cast<int>(pixel[3]);
+        }
+      }
+      std::cerr << "\n";
+    };
+    sample_damage("source", framebuffers[0], image_width, image_height,
+                  source_left, source_top, source_right, source_bottom);
+    if (!CompositeSurfaceControlImageLocked(
+            image, target, composite_source_left, composite_source_top,
+            composite_source_right, composite_source_bottom,
+            composite_destination_left, composite_destination_top,
+            composite_destination_right, composite_destination_bottom,
+            alpha)) {
+      // Keep a visible diagnostic fallback for ANGLE builds which lack the
+      // rectangle-texture shader extension. Normal Chromium composition uses
+      // the premultiplied source-over path above and never copies transparent
+      // RGB into the host surface.
+      api.gl_blit_framebuffer_angle(
+          composite_source_left, image_height - composite_source_bottom,
+          composite_source_right, image_height - composite_source_top,
+          composite_destination_left, composite_destination_top,
+          composite_destination_right, composite_destination_bottom,
+          0x00004000, 0x2600);  // GL_COLOR_BUFFER_BIT / GL_NEAREST
+    }
+    sample_damage("target", target.framebuffer,
+                  static_cast<std::int32_t>(target.width),
+                  static_cast<std::int32_t>(target.height), destination_left,
+                  destination_top, destination_right, destination_bottom);
+    submitted_to_compositor = true;
+    if (std::getenv("DARWIN_ART_DEBUG_SURFACECONTROL_PIXELS") != nullptr) {
+      constexpr std::array<float, 3> positions{0.25f, 0.5f, 0.75f};
+      api.gl_bind_framebuffer(0x8CA8, target.framebuffer);
+      std::cerr << "ART Android SurfaceControl: target samples";
+      for (float y : positions) {
+        for (float x : positions) {
+          std::uint8_t pixel[4]{};
+          api.gl_read_pixels(static_cast<std::int32_t>(target.width * x),
+                             static_cast<std::int32_t>(target.height * y), 1,
+                             1, 0x1908, kGlUnsignedByte, pixel);
+          std::cerr << " [" << x << "," << y << "]="
+                    << static_cast<int>(pixel[0]) << ","
+                    << static_cast<int>(pixel[1]) << ","
+                    << static_cast<int>(pixel[2]) << ","
+                    << static_cast<int>(pixel[3]);
+        }
+      }
+      std::cerr << " error=0x" << std::hex << api.gl_get_error() << std::dec
+                << "\n";
+    }
+    if (std::getenv("DARWIN_ART_DEBUG_SURFACECONTROL_CLEAR") != nullptr) {
+      std::uint8_t pixel[4]{};
+      api.gl_bind_framebuffer(0x8CA8, target.framebuffer);
+      api.gl_read_pixels(static_cast<std::int32_t>(target.width / 2),
+                         static_cast<std::int32_t>(target.height / 2), 1, 1,
+                         0x1908, kGlUnsignedByte, pixel);
+      std::cerr << "ART Android SurfaceControl: compositor center rgba="
+                << static_cast<int>(pixel[0]) << ","
+                << static_cast<int>(pixel[1]) << ","
+                << static_cast<int>(pixel[2]) << ","
+                << static_cast<int>(pixel[3]) << " error=0x" << std::hex
+                << api.gl_get_error() << std::dec << "\n";
+    }
+  }
+  api.gl_bind_framebuffer(0x8CA8,
+                          static_cast<std::uint32_t>(previous_read_framebuffer));
+  api.gl_bind_framebuffer(0x8CA9,
+                          static_cast<std::uint32_t>(previous_draw_framebuffer));
+  api.gl_scissor(previous_scissor[0], previous_scissor[1],
+                 previous_scissor[2], previous_scissor[3]);
+  if (scissor_enabled)
+    api.gl_enable(0x0C11);  // GL_SCISSOR_TEST
+  else
+    api.gl_disable(0x0C11);
+  api.gl_delete_framebuffers(2, framebuffers);
+  using Flush = void (*)();
+  auto flush = reinterpret_cast<Flush>(api.get_proc_address("glFlush"));
+  if (flush != nullptr) flush();
+  if (DebugGraphicsDso()) {
+    static std::atomic<std::uint32_t> submissions{0};
+    const std::uint32_t frame =
+        submissions.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (frame <= 4 || frame % 60 == 0) {
+      std::cerr << "ART Android SurfaceControl: submitted GPU frame=" << frame
+                << " compositor=" << submitted_to_compositor << " size="
+                << image.width << "x" << image.height
+                << " context=" << image.owner_context
+                << " buffer=" << image.buffer << "\n";
+    }
+  }
+  (void)alpha;
+}
+
+void RestoreBufferQueueSlotIfNeeded(std::uint32_t texture) {
+  // Chromium's SurfaceControl output uses rotating AHB slots for both the root
+  // compositor surface and renderer tile surfaces. A producer may redraw only
+  // accumulated damage when it reattaches a slot with a positive buffer age.
+  // This path has no imported EGL acquire fence, so use the actual FBO
+  // attachment as the BufferQueue acquisition boundary. Restore the acquired
+  // slot's own persistent IOSurface before Chromium issues any partial draw
+  // commands. Its buffer age already tells Chromium which intervening damage
+  // regions to accumulate; another slot is never a valid preservation source.
+  if (texture == 0) return;
+  std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+  auto& api = GetAngleApi();
+  const EGLContext current = api.get_current_context == nullptr
+                                 ? nullptr
+                                 : api.get_current_context();
+  if (current != nullptr) {
+    DarwinAhbEglImage* destination = nullptr;
+    for (auto& [handle, image] : AhbEglImages()) {
+      (void)handle;
+      if (image->owner_context == current &&
+          image->client_texture == texture) {
+        destination = image.get();
+      }
+    }
+    if (destination == nullptr) return;
+    // A newly-associated AHB has no slot history in this process. Chromium's
+    // SurfaceControl SharedImage path can nevertheless begin with partial
+    // raster because the logical image already had contents before the AHB
+    // representation was installed. Seed that one transition from the last
+    // published image in the same producer context. Once this slot has ever
+    // been published, its own IOSurface is authoritative: copying a different
+    // rotating slot over it destroys the accumulated-damage history and makes
+    // small text/caret updates retain stale pixels.
+    if (destination->iosurface_content_generation == 0) {
+      DarwinAhbEglImage* predecessor = nullptr;
+      const auto last = LastPresentedAhbByContext().find(current);
+      if (last != LastPresentedAhbByContext().end() &&
+          last->second != destination->buffer) {
+        for (auto& [handle, candidate] : AhbEglImages()) {
+          (void)handle;
+          if (candidate->buffer == last->second &&
+              candidate->owner_context == current &&
+              candidate->width == destination->width &&
+              candidate->height == destination->height &&
+              candidate->iosurface_content_generation != 0) {
+            predecessor = candidate.get();
+            break;
+          }
+        }
+      }
+      if (predecessor != nullptr &&
+          CopyIosurfaceToAhbClientTextureLocked(*predecessor, *destination)) {
+        destination->staging_content_generation =
+            predecessor->iosurface_content_generation;
+        destination->staging_source_buffer = predecessor->buffer;
+        if (DebugGraphicsDso()) {
+          std::cerr << "ART Android EGL: seeded new AHB representation context="
+                    << current << " texture=" << texture << " previous="
+                    << predecessor->buffer << " destination="
+                    << destination->buffer << " content="
+                    << predecessor->iosurface_content_generation << "\n";
+        }
+      }
+      return;
+    }
+    // Metal EGLImages already share the slot IOSurface directly. The
+    // rectangle fallback performs the equivalent self restore below.
+    if (destination->association_generation != 0 &&
+        destination->iosurface_content_generation != 0 &&
+        destination->staging_content_generation !=
+            destination->iosurface_content_generation &&
+        CopyIosurfaceToAhbClientTextureLocked(*destination, *destination)) {
+      destination->staging_content_generation =
+          destination->iosurface_content_generation;
+      destination->staging_source_buffer = destination->buffer;
+      if (DebugGraphicsDso()) {
+        std::cerr << "ART Android EGL: restored own AHB slot context="
+                  << current << " texture=" << texture << " previous="
+                  << destination->buffer << " destination="
+                  << destination->buffer << " association="
+                  << destination->association_generation << " content="
+                  << destination->iosurface_content_generation << "\n";
+      }
+    }
+  }
+}
+
+void GlFramebufferTexture2dAndroid(std::uint32_t target,
+                                   std::uint32_t attachment,
+                                   std::uint32_t texture_target,
+                                   std::uint32_t texture,
+                                   std::int32_t level) {
+  if ((target == kGlFramebuffer || target == kGlDrawFramebuffer) &&
+      attachment == kGlColorAttachment0 && texture_target == kGlTexture2d &&
+      level == 0) {
+    // Seed the rotating slot before attaching it to Chromium's draw FBO.
+    // Reattaching the same texture to a temporary blit FBO after this point
+    // can invalidate ANGLE's active Metal render-pass bookkeeping.
+    RestoreBufferQueueSlotIfNeeded(texture);
+  }
+  if (texture_target == kGlTexture2d && texture != 0) {
+    auto& api = GetAngleApi();
+    const EGLContext current = api.get_current_context == nullptr
+                                   ? nullptr
+                                   : api.get_current_context();
+    std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+    texture = HostTextureForGuestTextureLocked(current, texture);
+  }
+  GetAngleApi().gl_framebuffer_texture_2d(target, attachment, texture_target,
+                                          texture, level);
+}
+
+void GlFramebufferTexture2dMultisampleExtAndroid(
+    std::uint32_t target, std::uint32_t attachment,
+    std::uint32_t texture_target, std::uint32_t texture, std::int32_t level,
+    std::int32_t samples) {
+  if ((target == kGlFramebuffer || target == kGlDrawFramebuffer) &&
+      attachment == kGlColorAttachment0 && texture_target == kGlTexture2d &&
+      level == 0) {
+    RestoreBufferQueueSlotIfNeeded(texture);
+  }
+  if (texture_target == kGlTexture2d && texture != 0) {
+    auto& api = GetAngleApi();
+    const EGLContext current = api.get_current_context == nullptr
+                                   ? nullptr
+                                   : api.get_current_context();
+    std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+    texture = HostTextureForGuestTextureLocked(current, texture);
+  }
+  using Function = void (*)(std::uint32_t, std::uint32_t, std::uint32_t,
+                            std::uint32_t, std::int32_t, std::int32_t);
+  auto function = reinterpret_cast<Function>(
+      GetAngleApi().get_proc_address("glFramebufferTexture2DMultisampleEXT"));
+  if (function != nullptr) {
+    function(target, attachment, texture_target, texture, level, samples);
+  }
+}
+
+void GlBindTextureAndroid(std::uint32_t target, std::uint32_t texture) {
+  auto& api = GetAngleApi();
+  if (target == kGlTexture2d && texture != 0) {
+    const EGLContext current = api.get_current_context == nullptr
+                                   ? nullptr
+                                   : api.get_current_context();
+    std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+    texture = HostTextureForGuestTextureLocked(current, texture);
+  }
+  api.gl_bind_texture(target, texture);
+}
+
+void GlGetFramebufferAttachmentParameterivAndroid(
+    std::uint32_t target, std::uint32_t attachment, std::uint32_t pname,
+    std::int32_t* params) {
+  auto& api = GetAngleApi();
+  if (api.gl_get_framebuffer_attachment_parameter_iv == nullptr) return;
+  api.gl_get_framebuffer_attachment_parameter_iv(target, attachment, pname,
+                                                  params);
+  if (params != nullptr && pname == kGlFramebufferAttachmentObjectName) {
+    *params = static_cast<std::int32_t>(GuestTextureForHostTexture(
+        static_cast<std::uint32_t>(*params)));
+  }
+}
+
+void GlBindFramebufferAndroid(std::uint32_t target, std::uint32_t framebuffer) {
+  auto& api = GetAngleApi();
+  api.gl_bind_framebuffer(target, framebuffer);
+  if ((target != kGlFramebuffer && target != kGlDrawFramebuffer) ||
+      framebuffer == 0 ||
+      api.gl_get_framebuffer_attachment_parameter_iv == nullptr) {
+    return;
+  }
+  // Chromium attaches each BufferQueue slot once, then rotates by rebinding
+  // the already-complete FBO. Treat that bind as the acquire boundary too;
+  // waiting only for glFramebufferTexture2D preserves the first use but lets
+  // every later partial update accumulate over stale/black slot contents.
+  std::int32_t attachment_type = 0;
+  std::int32_t attachment_name = 0;
+  api.gl_get_framebuffer_attachment_parameter_iv(
+      target, kGlColorAttachment0, kGlFramebufferAttachmentObjectType,
+      &attachment_type);
+  api.gl_get_framebuffer_attachment_parameter_iv(
+      target, kGlColorAttachment0, kGlFramebufferAttachmentObjectName,
+      &attachment_name);
+  if (attachment_type == kGlFramebufferAttachmentTexture &&
+      attachment_name != 0) {
+    RestoreBufferQueueSlotIfNeeded(GuestTextureForHostTexture(
+        static_cast<std::uint32_t>(attachment_name)));
+  }
+}
+
+void GlDeleteTexturesAndroid(std::int32_t count,
+                             const std::uint32_t* textures) {
+  if (count <= 0 || textures == nullptr) return;
+  auto& api = GetAngleApi();
+  const EGLContext current = api.get_current_context == nullptr
+                                 ? nullptr
+                                 : api.get_current_context();
+  {
+    std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+    for (auto& [handle, image] : AhbEglImages()) {
+      (void)handle;
+      if (image->owner_context != current || image->client_texture == 0)
+        continue;
+      if (std::find(textures, textures + count, image->client_texture) ==
+          textures + count) {
+        continue;
+      }
+      if (DebugGraphicsDso()) {
+        std::cerr << "ART Android EGL: detached deleted AHB texture context="
+                  << current << " texture=" << image->client_texture
+                  << " buffer=" << image->buffer << " size=" << image->width
+                  << "x" << image->height << "\n";
+      }
+      // glDeleteTextures only retires Chromium's guest name.  The private
+      // texture is owned by the EGLImage/AHardwareBuffer and must remain
+      // alive until eglDestroyImage: SurfaceControl commits the buffer after
+      // SharedImage has deleted its temporary client texture.  Dropping the
+      // private texture here made the transaction silently skip the web
+      // layer, leaving Chrome's Android chrome visible over a black page.
+      image->client_texture = 0;
+    }
+  }
+  api.gl_delete_textures(count, textures);
+}
+
+void DetachBoundAhbTextureForStorage(std::uint32_t target,
+                                     const char* operation,
+                                     std::int32_t width,
+                                     std::int32_t height) {
+  if (target != kGlTexture2d) return;
+  auto& api = GetAngleApi();
+  std::int32_t host_texture = 0;
+  api.gl_get_integer_v(0x8069, &host_texture);  // GL_TEXTURE_BINDING_2D
+  if (host_texture == 0) return;
+  const EGLContext current = api.get_current_context == nullptr
+                                 ? nullptr
+                                 : api.get_current_context();
+  std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+  for (auto& [handle, image] : AhbEglImages()) {
+    (void)handle;
+    if (image->owner_context != current ||
+        image->client_staging_texture !=
+            static_cast<std::uint32_t>(host_texture)) {
+      continue;
+    }
+    if (DebugGraphicsDso()) {
+      std::cerr << "ART Android EGL: detached redefined AHB texture context="
+                << current << " texture=" << image->client_texture
+                << " operation=" << operation << " new_size=" << width
+                << "x" << height << " buffer=" << image->buffer
+                << " old_size=" << image->width << "x" << image->height
+                << "\n";
+    }
+    const std::uint32_t guest_texture = image->client_texture;
+    const std::uint32_t staging_texture = image->client_staging_texture;
+    // The explicit storage operation supersedes the EGLImage association.
+    // Restore the guest object as the physical binding before forwarding it.
+    api.gl_bind_texture(kGlTexture2d, guest_texture);
+    image->client_texture = 0;
+    image->client_staging_texture = 0;
+    image->association_generation = 0;
+    image->staging_content_generation = 0;
+    image->staging_source_buffer = nullptr;
+    api.gl_delete_textures(1, &staging_texture);
+    break;
+  }
+}
+
+void GlTexImage2dAndroid(std::uint32_t target, std::int32_t level,
+                         std::int32_t internal_format, std::int32_t width,
+                         std::int32_t height, std::int32_t border,
+                         std::uint32_t format, std::uint32_t type,
+                         const void* pixels) {
+  if (level == 0) {
+    DetachBoundAhbTextureForStorage(target, "glTexImage2D", width, height);
+  }
+  GetAngleApi().gl_tex_image_2d(target, level, internal_format, width, height,
+                                border, format, type, pixels);
+}
+
+void GlTexStorage2dAndroid(std::uint32_t target, std::int32_t levels,
+                           std::uint32_t internal_format,
+                           std::int32_t width, std::int32_t height) {
+  DetachBoundAhbTextureForStorage(target, "glTexStorage2D", width, height);
+  using Function = void (*)(std::uint32_t, std::int32_t, std::uint32_t,
+                            std::int32_t, std::int32_t);
+  auto function = reinterpret_cast<Function>(
+      GetAngleApi().get_proc_address("glTexStorage2D"));
+  if (function != nullptr) function(target, levels, internal_format, width, height);
+}
+
+void GlTexStorage2dExtAndroid(std::uint32_t target, std::int32_t levels,
+                              std::uint32_t internal_format,
+                              std::int32_t width, std::int32_t height) {
+  DetachBoundAhbTextureForStorage(target, "glTexStorage2DEXT", width, height);
+  GetAngleApi().gl_tex_storage_2d_ext(target, levels, internal_format, width,
+                                      height);
+}
+
+void* EglGetProcAddressMetal(const char* symbol) {
+  if (symbol == nullptr) return nullptr;
+  if (std::getenv("DARWIN_ART_DEBUG_ANGLE") != nullptr) {
+    std::cerr << "ART Android EGL: eglGetProcAddress pid=" << getpid()
+              << " symbol=" << symbol << "\n";
+  }
+  if (std::strcmp(symbol, "eglGetPlatformDisplayEXT") == 0) {
+    return reinterpret_cast<void*>(&EglGetPlatformDisplayExtMetal);
+  }
+  if (std::strcmp(symbol, "eglGetPlatformDisplay") == 0) {
+    return reinterpret_cast<void*>(&EglGetPlatformDisplayMetal);
+  }
+  if (std::strcmp(symbol, "eglQueryString") == 0) {
+    return reinterpret_cast<void*>(&EglQueryStringAndroid);
+  }
+  if (std::strcmp(symbol, "eglGetNativeClientBufferANDROID") == 0) {
+    return reinterpret_cast<void*>(&EglGetNativeClientBufferAndroid);
+  }
+  if (std::strcmp(symbol, "eglCreateImageKHR") == 0) {
+    return reinterpret_cast<void*>(&EglCreateImageAndroid);
+  }
+  if (std::strcmp(symbol, "eglCreateImage") == 0) {
+    return reinterpret_cast<void*>(&EglCreateImageAndroidCore);
+  }
+  if (std::strcmp(symbol, "eglDestroyImageKHR") == 0) {
+    return reinterpret_cast<void*>(&EglDestroyImageAndroid);
+  }
+  if (std::strcmp(symbol, "eglDestroyImage") == 0) {
+    return reinterpret_cast<void*>(&EglDestroyImageAndroidCore);
+  }
+  if (std::strcmp(symbol, "eglCreateSyncKHR") == 0) {
+    return reinterpret_cast<void*>(&EglCreateSyncKhrAndroid);
+  }
+  if (std::strcmp(symbol, "eglDestroySyncKHR") == 0) {
+    return reinterpret_cast<void*>(&EglDestroySyncKhrAndroid);
+  }
+  if (std::strcmp(symbol, "eglClientWaitSyncKHR") == 0) {
+    return reinterpret_cast<void*>(&EglClientWaitSyncKhrAndroid);
+  }
+  if (std::strcmp(symbol, "eglWaitSyncKHR") == 0) {
+    return reinterpret_cast<void*>(&EglWaitSyncKhrAndroid);
+  }
+  if (std::strcmp(symbol, "eglGetSyncAttribKHR") == 0) {
+    return reinterpret_cast<void*>(&EglGetSyncAttribKhrAndroid);
+  }
+  if (std::strcmp(symbol, "eglDupNativeFenceFDANDROID") == 0) {
+    return reinterpret_cast<void*>(&EglDupNativeFenceFdAndroid);
+  }
+  if (std::strcmp(symbol, "eglCreateSync") == 0) {
+    return reinterpret_cast<void*>(&EglCreateSyncAndroid);
+  }
+  if (std::strcmp(symbol, "eglDestroySync") == 0) {
+    return reinterpret_cast<void*>(&EglDestroySyncKhrAndroid);
+  }
+  if (std::strcmp(symbol, "eglClientWaitSync") == 0) {
+    return reinterpret_cast<void*>(&EglClientWaitSyncKhrAndroid);
+  }
+  if (std::strcmp(symbol, "eglWaitSync") == 0) {
+    return reinterpret_cast<void*>(&EglWaitSyncKhrAndroid);
+  }
+  if (std::strcmp(symbol, "eglGetSyncAttrib") == 0) {
+    return reinterpret_cast<void*>(&EglGetSyncAttribAndroid);
+  }
+  if (std::strcmp(symbol, "eglGetDisplay") == 0) {
+    return reinterpret_cast<void*>(&EglGetDisplayHost);
+  }
+  if (std::strcmp(symbol, "eglInitialize") == 0) {
+    return reinterpret_cast<void*>(&EglInitializeHost);
+  }
+  if (std::strcmp(symbol, "eglChooseConfig") == 0) {
+    return reinterpret_cast<void*>(&EglChooseConfigHost);
+  }
+  if (std::strcmp(symbol, "eglCreateContext") == 0) {
+    return reinterpret_cast<void*>(&EglCreateContextHost);
+  }
+  if (std::strcmp(symbol, "eglCreatePbufferSurface") == 0) {
+    return reinterpret_cast<void*>(&EglCreatePbufferSurfaceHost);
+  }
+  if (std::strcmp(symbol, "eglCreateWindowSurface") == 0) {
+    return reinterpret_cast<void*>(&darwin_art_android_eglCreateWindowSurface);
+  }
+  if (std::strcmp(symbol, "eglSwapBuffers") == 0) {
+    return reinterpret_cast<void*>(&darwin_art_android_eglSwapBuffers);
+  }
+  if (std::strcmp(symbol, "eglDestroySurface") == 0) {
+    return reinterpret_cast<void*>(&darwin_art_android_eglDestroySurface);
+  }
+  if (std::strcmp(symbol, "eglMakeCurrent") == 0) {
+    return reinterpret_cast<void*>(&EglMakeCurrentHost);
+  }
+  if (std::strcmp(symbol, "glGetString") == 0) {
+    return reinterpret_cast<void*>(&GlGetStringHost);
+  }
+  if (std::strcmp(symbol, "glGetStringi") == 0) {
+    return reinterpret_cast<void*>(&GlGetStringiHost);
+  }
+  if (std::strcmp(symbol, "glGetIntegerv") == 0) {
+    return reinterpret_cast<void*>(&GlGetIntegervHost);
+  }
+  if (std::strcmp(symbol, "glBindTexture") == 0) {
+    return reinterpret_cast<void*>(&GlBindTextureAndroid);
+  }
+  if (std::strcmp(symbol, "glEGLImageTargetTexture2DOES") == 0) {
+    return reinterpret_cast<void*>(&GlEglImageTargetTexture2dOes);
+  }
+  if (std::strcmp(symbol, "glFramebufferTexture2D") == 0) {
+    return reinterpret_cast<void*>(&GlFramebufferTexture2dAndroid);
+  }
+  if (std::strcmp(symbol, "glFramebufferTexture2DMultisampleEXT") == 0) {
+    return reinterpret_cast<void*>(
+        &GlFramebufferTexture2dMultisampleExtAndroid);
+  }
+  if (std::strcmp(symbol, "glBindFramebuffer") == 0) {
+    return reinterpret_cast<void*>(&GlBindFramebufferAndroid);
+  }
+  if (std::strcmp(symbol, "glGetFramebufferAttachmentParameteriv") == 0) {
+    return reinterpret_cast<void*>(
+        &GlGetFramebufferAttachmentParameterivAndroid);
+  }
+  if (std::strcmp(symbol, "glDeleteTextures") == 0) {
+    return reinterpret_cast<void*>(&GlDeleteTexturesAndroid);
+  }
+  if (std::strcmp(symbol, "glTexImage2D") == 0) {
+    return reinterpret_cast<void*>(&GlTexImage2dAndroid);
+  }
+  if (std::strcmp(symbol, "glTexStorage2D") == 0) {
+    return reinterpret_cast<void*>(&GlTexStorage2dAndroid);
+  }
+  if (std::strcmp(symbol, "glTexStorage2DEXT") == 0) {
+    return reinterpret_cast<void*>(&GlTexStorage2dExtAndroid);
+  }
+  return GetAngleApi().get_proc_address(symbol);
+}
+
+std::uint32_t TextureBindingEnum(std::uint32_t target) {
+  switch (target) {
+    case 0x0DE0:  // GL_TEXTURE_1D
+      return 0x8068;  // GL_TEXTURE_BINDING_1D
+    case 0x0DE1:  // GL_TEXTURE_2D
+      return 0x8069;  // GL_TEXTURE_BINDING_2D
+    case 0x806F:  // GL_TEXTURE_3D
+      return 0x806A;  // GL_TEXTURE_BINDING_3D
+    case 0x8513:  // GL_TEXTURE_CUBE_MAP
+      return 0x8514;  // GL_TEXTURE_BINDING_CUBE_MAP
+    case 0x8C1A:  // GL_TEXTURE_2D_ARRAY
+      return 0x8C1D;  // GL_TEXTURE_BINDING_2D_ARRAY
+    default:
+      return 0;
+  }
+}
+
+template <typename StorageCall>
+void WithBoundTexture(std::uint32_t texture, std::uint32_t target,
+                      StorageCall&& storage_call) {
+  auto& api = GetAngleApi();
+  const std::uint32_t binding = TextureBindingEnum(target);
+  if (!api.ready || binding == 0) return;
+  std::int32_t previous = 0;
+  api.gl_get_integer_v(binding, &previous);
+  api.gl_bind_texture(target, texture);
+  storage_call(api);
+  api.gl_bind_texture(target, static_cast<std::uint32_t>(previous));
+}
+
+void GlTextureStorage1dExt(std::uint32_t texture, std::uint32_t target,
+                           std::int32_t levels, std::uint32_t internal_format,
+                           std::int32_t width) {
+  WithBoundTexture(texture, target, [&](AngleApi& api) {
+    api.gl_tex_storage_1d_ext(target, levels, internal_format, width);
+  });
+}
+
+void GlTextureStorage2dExt(std::uint32_t texture, std::uint32_t target,
+                           std::int32_t levels, std::uint32_t internal_format,
+                           std::int32_t width, std::int32_t height) {
+  WithBoundTexture(texture, target, [&](AngleApi& api) {
+    api.gl_tex_storage_2d_ext(target, levels, internal_format, width, height);
+  });
+}
+
+void GlTextureStorage3dExt(std::uint32_t texture, std::uint32_t target,
+                           std::int32_t levels, std::uint32_t internal_format,
+                           std::int32_t width, std::int32_t height,
+                           std::int32_t depth) {
+  WithBoundTexture(texture, target, [&](AngleApi& api) {
+    api.gl_tex_storage_3d_ext(target, levels, internal_format, width, height,
+                              depth);
+  });
+}
+
+extern "C" void* darwin_art_angle_dso_symbol(const char* soname,
+                                              const char* symbol) {
+  if (soname == nullptr || symbol == nullptr) return nullptr;
+  auto& api = GetAngleApi();
+  if (!api.ready) return nullptr;
+  if (std::strcmp(soname, "libEGL.so") == 0) {
+    if (std::strcmp(symbol, "eglGetProcAddress") == 0) {
+      return reinterpret_cast<void*>(&EglGetProcAddressMetal);
+    }
+    if (std::strcmp(symbol, "eglGetPlatformDisplayEXT") == 0) {
+      return reinterpret_cast<void*>(&EglGetPlatformDisplayExtMetal);
+    }
+    if (std::strcmp(symbol, "eglGetPlatformDisplay") == 0) {
+      return reinterpret_cast<void*>(&EglGetPlatformDisplayMetal);
+    }
+    if (std::strcmp(symbol, "eglQueryString") == 0) {
+      return reinterpret_cast<void*>(&EglQueryStringAndroid);
+    }
+    if (std::strcmp(symbol, "eglGetNativeClientBufferANDROID") == 0) {
+      return reinterpret_cast<void*>(&EglGetNativeClientBufferAndroid);
+    }
+    if (std::strcmp(symbol, "eglCreateImageKHR") == 0) {
+      return reinterpret_cast<void*>(&EglCreateImageAndroid);
+    }
+    if (std::strcmp(symbol, "eglCreateImage") == 0) {
+      return reinterpret_cast<void*>(&EglCreateImageAndroidCore);
+    }
+    if (std::strcmp(symbol, "eglDestroyImageKHR") == 0) {
+      return reinterpret_cast<void*>(&EglDestroyImageAndroid);
+    }
+    if (std::strcmp(symbol, "eglDestroyImage") == 0) {
+      return reinterpret_cast<void*>(&EglDestroyImageAndroidCore);
+    }
+    if (std::strcmp(symbol, "eglCreateSyncKHR") == 0) {
+      return reinterpret_cast<void*>(&EglCreateSyncKhrAndroid);
+    }
+    if (std::strcmp(symbol, "eglDestroySyncKHR") == 0) {
+      return reinterpret_cast<void*>(&EglDestroySyncKhrAndroid);
+    }
+    if (std::strcmp(symbol, "eglClientWaitSyncKHR") == 0) {
+      return reinterpret_cast<void*>(&EglClientWaitSyncKhrAndroid);
+    }
+    if (std::strcmp(symbol, "eglWaitSyncKHR") == 0) {
+      return reinterpret_cast<void*>(&EglWaitSyncKhrAndroid);
+    }
+    if (std::strcmp(symbol, "eglGetSyncAttribKHR") == 0) {
+      return reinterpret_cast<void*>(&EglGetSyncAttribKhrAndroid);
+    }
+    if (std::strcmp(symbol, "eglDupNativeFenceFDANDROID") == 0) {
+      return reinterpret_cast<void*>(&EglDupNativeFenceFdAndroid);
+    }
+    if (std::strcmp(symbol, "eglCreateSync") == 0) {
+      return reinterpret_cast<void*>(&EglCreateSyncAndroid);
+    }
+    if (std::strcmp(symbol, "eglDestroySync") == 0) {
+      return reinterpret_cast<void*>(&EglDestroySyncKhrAndroid);
+    }
+    if (std::strcmp(symbol, "eglClientWaitSync") == 0) {
+      return reinterpret_cast<void*>(&EglClientWaitSyncKhrAndroid);
+    }
+    if (std::strcmp(symbol, "eglWaitSync") == 0) {
+      return reinterpret_cast<void*>(&EglWaitSyncKhrAndroid);
+    }
+    if (std::strcmp(symbol, "eglGetSyncAttrib") == 0) {
+      return reinterpret_cast<void*>(&EglGetSyncAttribAndroid);
+    }
+    // Chromium's Android GL loader opens libEGL.so and probes GLES extension
+    // entry points with dlsym on that same handle before falling back to
+    // eglGetProcAddress. Android's libEGL is a dispatch DSO, so preserve the
+    // same behavior in the virtual namespace instead of exposing ANGLE's raw
+    // host entry point and bypassing the AHardwareBuffer metadata bridge.
+    if (std::strcmp(symbol, "glEGLImageTargetTexture2DOES") == 0) {
+      return reinterpret_cast<void*>(&GlEglImageTargetTexture2dOes);
+    }
+    if (std::strcmp(symbol, "glFramebufferTexture2D") == 0) {
+      return reinterpret_cast<void*>(&GlFramebufferTexture2dAndroid);
+    }
+    if (std::strcmp(symbol, "glFramebufferTexture2DMultisampleEXT") == 0) {
+      return reinterpret_cast<void*>(
+          &GlFramebufferTexture2dMultisampleExtAndroid);
+    }
+    if (std::strcmp(symbol, "glBindFramebuffer") == 0) {
+      return reinterpret_cast<void*>(&GlBindFramebufferAndroid);
+    }
+    if (std::strcmp(symbol, "glGetFramebufferAttachmentParameteriv") == 0) {
+      return reinterpret_cast<void*>(
+          &GlGetFramebufferAttachmentParameterivAndroid);
+    }
+    void* result = dlsym(api.egl_library, symbol);
+    if (result != nullptr) return result;
+    if (std::strcmp(symbol, "glTextureStorage1DEXT") == 0) {
+      return reinterpret_cast<void*>(&GlTextureStorage1dExt);
+    }
+    if (std::strcmp(symbol, "glTextureStorage2DEXT") == 0) {
+      return reinterpret_cast<void*>(&GlTextureStorage2dExt);
+    }
+    if (std::strcmp(symbol, "glTextureStorage3DEXT") == 0) {
+      return reinterpret_cast<void*>(&GlTextureStorage3dExt);
+    }
+    return nullptr;
+  }
+  if (std::strcmp(soname, "libGLESv2.so") == 0) {
+    if (std::strcmp(symbol, "glGetString") == 0) {
+      return reinterpret_cast<void*>(&GlGetStringHost);
+    }
+    if (std::strcmp(symbol, "glGetStringi") == 0) {
+      return reinterpret_cast<void*>(&GlGetStringiHost);
+    }
+    if (std::strcmp(symbol, "glGetIntegerv") == 0) {
+      return reinterpret_cast<void*>(&GlGetIntegervHost);
+    }
+    if (std::strcmp(symbol, "glBindTexture") == 0) {
+      return reinterpret_cast<void*>(&GlBindTextureAndroid);
+    }
+    if (std::strcmp(symbol, "glEGLImageTargetTexture2DOES") == 0) {
+      return reinterpret_cast<void*>(&GlEglImageTargetTexture2dOes);
+    }
+    if (std::strcmp(symbol, "glFramebufferTexture2D") == 0) {
+      return reinterpret_cast<void*>(&GlFramebufferTexture2dAndroid);
+    }
+    if (std::strcmp(symbol, "glFramebufferTexture2DMultisampleEXT") == 0) {
+      return reinterpret_cast<void*>(
+          &GlFramebufferTexture2dMultisampleExtAndroid);
+    }
+    if (std::strcmp(symbol, "glBindFramebuffer") == 0) {
+      return reinterpret_cast<void*>(&GlBindFramebufferAndroid);
+    }
+    if (std::strcmp(symbol, "glGetFramebufferAttachmentParameteriv") == 0) {
+      return reinterpret_cast<void*>(
+          &GlGetFramebufferAttachmentParameterivAndroid);
+    }
+    if (std::strcmp(symbol, "glDeleteTextures") == 0) {
+      return reinterpret_cast<void*>(&GlDeleteTexturesAndroid);
+    }
+    if (std::strcmp(symbol, "glTexImage2D") == 0) {
+      return reinterpret_cast<void*>(&GlTexImage2dAndroid);
+    }
+    if (std::strcmp(symbol, "glTexStorage2D") == 0) {
+      return reinterpret_cast<void*>(&GlTexStorage2dAndroid);
+    }
+    if (std::strcmp(symbol, "glTexStorage2DEXT") == 0) {
+      return reinterpret_cast<void*>(&GlTexStorage2dExtAndroid);
+    }
+    return dlsym(api.gles_library, symbol);
+  }
+  return nullptr;
 }
 
 }  // namespace darwin_art

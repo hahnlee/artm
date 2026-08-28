@@ -101,6 +101,9 @@ upstream_archive="$stage/libandroid-runtime-upstream-host.a"
 resource_archive="$project_root/_build/resource-jni-foundation/libandroid-resource-jni-darwin.a"
 [[ -f "$resource_archive" ]] || fail "resource JNI archive missing"
 provider_archives=(
+  "$project_root/_build/bionic-runtime-provider-closure/libdarwin-art-bionic-rust-providers.a"
+  "$project_root/_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a"
+  "$project_root/_build/bionic-runtime-provider-closure/libdarwin-art-bionic-float-conversion.a"
   "$project_root/_build/androidfw-foundation/libandroidfw-darwin.a"
   "$project_root/_build/nativehelper-device-foundation/libnativehelper-device-darwin.a"
   "$project_root/_build/graphics-foundations/libutils-darwin.a"
@@ -131,7 +134,8 @@ EOF
 # This is an intentional negative gate. HostRuntime.cpp compiles, but its
 # unordered_map has a live global constructor. Pulling getJNIEnv from the same
 # archive member therefore retains 17 unrelated registrar references even with
-# dead stripping enabled.
+# dead stripping enabled. The resource and Bionic provider closures satisfy the
+# virtual AssetManager descriptor adoption boundary below.
 upstream_link_log="$stage/upstream-host-link.log"
 set +e
 "$cxx" -arch arm64 -bundle -Wl,-undefined,error -Wl,-dead_strip \

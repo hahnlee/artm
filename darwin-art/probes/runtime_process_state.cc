@@ -13,6 +13,9 @@
 #include "scoped_thread_state_change-inl.h"
 #include "thread-current-inl.h"
 
+extern "C" int darwin_art_bionic_process_state_process_install(void);
+extern "C" int darwin_art_bionic_process_state_process_uninstall(void);
+
 namespace darwin_art_process {
 namespace {
 
@@ -34,6 +37,7 @@ struct State {
   bool resource_runtime_installed = false;
   darwin_art_graphics::GraphicsState* graphics_state = nullptr;
   const darwin_art_lifecycle_hooks_t* lifecycle_hooks = nullptr;
+  const darwin_art_host_services_t* host_services = nullptr;
   AcceptanceSnapshot acceptance;
   std::vector<std::unique_ptr<const art::DexFile>> app_dex_files;
 };
@@ -43,6 +47,9 @@ State g_state;
 }  // namespace
 
 bool begin_run(const struct darwin_art_lifecycle_hooks* lifecycle_hooks) {
+  if (darwin_art_bionic_process_state_process_install() != 0) {
+    return false;
+  }
   if (lifecycle_hooks != nullptr) {
     if (lifecycle_hooks->struct_size < sizeof(*lifecycle_hooks) ||
         lifecycle_hooks->abi_version != DARWIN_ART_ABI_VERSION ||
@@ -52,11 +59,15 @@ bool begin_run(const struct darwin_art_lifecycle_hooks* lifecycle_hooks) {
         lifecycle_hooks->begin_shutdown == nullptr ||
         lifecycle_hooks->mark_failed == nullptr ||
         lifecycle_hooks->begin_run(lifecycle_hooks->context) != 0) {
+      (void)darwin_art_bionic_process_state_process_uninstall();
       return false;
     }
   }
   std::lock_guard<std::mutex> lock(g_state.mutex);
-  if (g_state.run_started) return false;
+  if (g_state.run_started) {
+    (void)darwin_art_bionic_process_state_process_uninstall();
+    return false;
+  }
   g_state.run_started = true;
   g_state.owner_thread = pthread_self();
   g_state.owner_thread_valid = true;
@@ -77,6 +88,56 @@ void record_graphics_state(darwin_art_graphics::GraphicsState* state) {
   std::lock_guard<std::mutex> lock(g_state.mutex);
   CHECK(g_state.run_started && !g_state.failed && !g_state.shutdown_started);
   g_state.graphics_state = state;
+}
+
+bool record_host_services(const struct darwin_art_host_services* services) {
+  if (services != nullptr &&
+      (services->struct_size < sizeof(*services) ||
+       services->abi_version != DARWIN_ART_ABI_VERSION ||
+       services->context == nullptr || services->spawn_service == nullptr ||
+       services->release_service == nullptr)) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(g_state.mutex);
+  CHECK(g_state.run_started && !g_state.failed && !g_state.shutdown_started);
+  g_state.host_services = services;
+  return true;
+}
+
+int32_t spawn_service_process(const char* component, const char* instance_name,
+                              const char* process_name, bool isolated,
+                              int32_t* host_pid, int32_t* control_fd) {
+  const darwin_art_host_services_t* services = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_state.mutex);
+    if (!g_state.run_started || g_state.failed || g_state.shutdown_started ||
+        g_state.host_services == nullptr) {
+      return -2;
+    }
+    services = g_state.host_services;
+  }
+  darwin_art_service_spawn_request_t request{
+      sizeof(request), DARWIN_ART_ABI_VERSION, component, instance_name,
+      process_name, isolated ? 1 : 0};
+  darwin_art_service_spawn_result_t result{
+      sizeof(result), DARWIN_ART_ABI_VERSION, -1, -1};
+  const int32_t status =
+      services->spawn_service(services->context, &request, &result);
+  if (status == 0 && host_pid != nullptr && control_fd != nullptr) {
+    *host_pid = result.host_pid;
+    *control_fd = result.control_fd;
+  }
+  return status;
+}
+
+int32_t release_service_process(int32_t host_pid) {
+  const darwin_art_host_services_t* services = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_state.mutex);
+    if (g_state.host_services == nullptr) return -2;
+    services = g_state.host_services;
+  }
+  return services->release_service(services->context, host_pid);
 }
 
 void record_resource_runtime_installed() {
@@ -192,7 +253,11 @@ void mark_shutdown_complete() {
   g_state.resource_runtime_installed = false;
   g_state.graphics_state = nullptr;
   g_state.lifecycle_hooks = nullptr;
+  g_state.host_services = nullptr;
   g_state.shutdown_complete = true;
+  if (darwin_art_bionic_process_state_process_uninstall() != 0) {
+    std::abort();
+  }
 }
 
 void record_network_elf_loaded() {

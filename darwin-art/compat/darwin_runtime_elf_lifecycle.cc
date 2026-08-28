@@ -13,6 +13,7 @@
 
 #include "darwin_provider_owners.h"
 #include "darwin_runtime_adapters_internal.h"
+#include "darwin_art_bionic_vm.h"
 
 namespace android {
 namespace {
@@ -137,12 +138,24 @@ int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
           0) {
     return -1;
   }
+  if (darwin_art_bionic_vm_register_borrowed_range(
+          reinterpret_cast<void*>(start), end - start) != 0) {
+    if (darwin_art_image_registry::RollbackPublish(library->image_registry,
+                                                    start, end) != 0) {
+      std::abort();
+    }
+    return -1;
+  }
   if (darwin_art_bionic_dso_lifecycle_publish_image(
           library->dso_lifecycle, start, end) == 0) {
     std::fprintf(stderr, "DARWIN ELF loader: published image=[0x%llx,0x%llx)\n",
                  static_cast<unsigned long long>(start),
                  static_cast<unsigned long long>(end));
     return 0;
+  }
+  if (darwin_art_bionic_vm_unregister_borrowed_range(
+          reinterpret_cast<void*>(start), end - start) != 0) {
+    std::abort();
   }
   if (darwin_art_image_registry::RollbackPublish(library->image_registry, start,
                                                   end) != 0) {
@@ -157,6 +170,10 @@ int FinalizeRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
       library->image_registry == nullptr ||
       darwin_art_bionic_dso_lifecycle_finalize_image(
           library->dso_lifecycle, start, end) != 0) {
+    return -1;
+  }
+  if (darwin_art_bionic_vm_unregister_borrowed_range(
+          reinterpret_cast<void*>(start), end - start) != 0) {
     return -1;
   }
   return darwin_art_image_registry::Finalize(library->image_registry, start,

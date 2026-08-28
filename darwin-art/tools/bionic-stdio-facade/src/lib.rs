@@ -22,12 +22,53 @@ pub struct AndroidFile {
 unsafe extern "C" {
     static mut darwin_art_bionic___sF: [AndroidFile; 3];
     fn darwin_art_bionic_errno_store(value: i32);
+    fn darwin_art_bionic_open(path: *const c_char, flags: c_int, mode: u32) -> c_int;
+    fn darwin_art_bionic_read(fd: c_int, buffer: *mut c_void, count: usize) -> isize;
+    fn darwin_art_bionic_lseek(fd: c_int, offset: i64, whence: c_int) -> i64;
+    fn darwin_art_bionic_close(fd: c_int) -> c_int;
     fn darwin_art_bionic_wide_stdio_install(
         backend: *const WideStdioBackend,
     ) -> *mut WideStdioActivation;
     fn darwin_art_bionic_wide_stdio_uninstall(activation: *mut *mut WideStdioActivation) -> c_int;
     fn darwin_art_bionic_wide_stdio_reset(file: *mut AndroidFile) -> c_int;
     fn darwin_art_bionic_wide_stdio_forget(file: *mut AndroidFile) -> c_int;
+}
+
+unsafe fn read_guest_file(path: *const c_char) -> Option<(Vec<u8>, c_int)> {
+    // Android fopen ultimately opens through the same guest VFS as open(2).
+    // Keep the Android FILE ABI private to this facade, but snapshot regular
+    // files through the filesystem provider instead of maintaining a second,
+    // unrelated namespace of files.
+    let fd = unsafe { darwin_art_bionic_open(path, 0, 0) };
+    if fd < 0 {
+        return None;
+    }
+    let mut data = Vec::new();
+    let mut chunk = [0_u8; 16 * 1024];
+    loop {
+        let count = unsafe { darwin_art_bionic_read(fd, chunk.as_mut_ptr().cast(), chunk.len()) };
+        if count < 0 {
+            unsafe { darwin_art_bionic_close(fd) };
+            return None;
+        }
+        if count == 0 {
+            break;
+        }
+        if data.len() > MAX_STREAM_BYTES - count as usize {
+            unsafe { darwin_art_bionic_close(fd) };
+            errno(EFBIG);
+            return None;
+        }
+        data.extend_from_slice(&chunk[..count as usize]);
+    }
+    // The descriptor exposed by fileno() must start at the same position as
+    // the new FILE.  Native Android clients such as Skia/FreeType commonly
+    // open through stdio and then switch to descriptor I/O.
+    if unsafe { darwin_art_bionic_lseek(fd, 0, 0) } != 0 {
+        unsafe { darwin_art_bionic_close(fd) };
+        return None;
+    }
+    Some((data, fd))
 }
 
 #[repr(C)]
@@ -57,6 +98,7 @@ struct Stream {
     writable: bool,
     pushback: Option<u8>,
     fd: i32,
+    owns_fd: bool,
     orientation: i8,
     error: bool,
     eof: bool,
@@ -112,6 +154,7 @@ impl Provider {
                     writable: index != 0,
                     pushback: None,
                     fd: index as i32,
+                    owns_fd: false,
                     orientation: 0,
                     error: false,
                     eof: false,
@@ -210,6 +253,18 @@ impl Drop for Activation {
                 std::process::abort();
             }
         }
+        let owned_fds: Vec<i32> = table
+            .streams
+            .values()
+            .filter(|stream| stream.owns_fd)
+            .map(|stream| stream.fd)
+            .collect();
+        for fd in owned_fds {
+            // SAFETY: shutdown holds the exclusive lease for every stream,
+            // and each VFS fallback descriptor has exactly one owner.
+            unsafe { darwin_art_bionic_close(fd) };
+        }
+        table.streams.retain(|_, stream| !stream.owns_fd);
         drop(table);
         // SAFETY: all central leases and side-table entries were drained.
         if unsafe { darwin_art_bionic_wide_stdio_uninstall(&mut self.wide) } != 0
@@ -579,21 +634,34 @@ unsafe fn fopen(path: *const c_char, mode: *const c_char) -> *mut AndroidFile {
         errno(EIO);
         return ptr::null_mut();
     }
+    let mut guest_fd = None;
     let data = if truncate {
         Vec::new()
     } else {
         match table.files.get(path) {
             Some(v) => v.clone(),
             None => {
-                errno(2);
-                return ptr::null_mut();
+                if writable {
+                    errno(2);
+                    return ptr::null_mut();
+                }
+                // SAFETY: fopen's path argument remains a readable C string
+                // for the duration of this call.
+                let Some((data, fd)) = (unsafe { read_guest_file(path.as_ptr().cast()) }) else {
+                    return ptr::null_mut();
+                };
+                guest_fd = Some(fd);
+                data
             }
         }
     };
     let token = Box::new(AndroidFile { opaque: [0; 152] });
     let pointer = (&*token as *const AndroidFile).cast_mut();
-    let fd = table.next_fd;
-    table.next_fd += 1;
+    let fd = guest_fd.unwrap_or_else(|| {
+        let fd = table.next_fd;
+        table.next_fd += 1;
+        fd
+    });
     table.streams.insert(
         pointer as usize,
         Stream {
@@ -604,6 +672,7 @@ unsafe fn fopen(path: *const c_char, mode: *const c_char) -> *mut AndroidFile {
             writable,
             pushback: None,
             fd,
+            owns_fd: guest_fd.is_some(),
             orientation: 0,
             error: false,
             eof: false,
@@ -719,6 +788,13 @@ pub extern "C" fn darwin_art_bionic_stdio_fclose_core(f: *mut AndroidFile) -> c_
     let removed = t.streams.remove(&token);
     p.idle.notify_all();
     drop(t);
+    if let Some(stream) = removed.as_ref()
+        && stream.owns_fd
+    {
+        // SAFETY: this stream exclusively owns the guest descriptor returned
+        // by the VFS fallback in fopen.
+        unsafe { darwin_art_bionic_close(stream.fd) };
+    }
     drop(removed);
     0
 }
@@ -921,6 +997,14 @@ pub extern "C" fn darwin_art_bionic_stdio_fseek_core(
         return EOF;
     }
     let stream = table.streams.get_mut(&token).expect("exclusive stream");
+    if stream.owns_fd
+        && unsafe { darwin_art_bionic_lseek(stream.fd, result as i64, 0) } != result as i64
+    {
+        stream.error = true;
+        stream.exclusive = false;
+        provider.idle.notify_all();
+        return EOF;
+    }
     stream.position = result;
     stream.pushback = None;
     stream.eof = false;

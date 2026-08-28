@@ -1,27 +1,55 @@
 #include "darwin_framework_natives.h"
+#include "darwin_binder_wire.h"
+#include "darwin_android_platform.h"
 
 #include <cstdint>
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <string>
+#include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
+#include <sys/socket.h>
 #include <unistd.h>
 
+extern "C" int darwin_art_bionic_socket_broker_dup(int);
+extern "C" int darwin_art_bionic_socket_broker_close(int);
+extern "C" int darwin_art_bionic_fd_export_for_scm(int);
+extern "C" int darwin_art_bionic_fd_import_from_scm(int);
+
 namespace {
+
+std::mutex g_context_binder_mutex;
+jobject g_context_binder = nullptr;
 
 struct DarwinParcel {
   std::vector<uint8_t> data;
   size_t position = 0;
   bool allow_fds = true;
   std::vector<jobject> binders;
+  std::vector<int> file_descriptors;
 };
+
+void ClearParcel(JNIEnv* env, DarwinParcel* parcel) {
+  if (parcel == nullptr) return;
+  for (jobject binder : parcel->binders) env->DeleteGlobalRef(binder);
+  for (int descriptor : parcel->file_descriptors)
+    (void)darwin_art_bionic_socket_broker_close(descriptor);
+  parcel->data.clear();
+  parcel->position = 0;
+  parcel->binders.clear();
+  parcel->file_descriptors.clear();
+}
 
 DarwinParcel* Parcel(jlong pointer) {
   return reinterpret_cast<DarwinParcel*>(static_cast<std::uintptr_t>(pointer));
@@ -58,14 +86,13 @@ jlong ParcelCreate(JNIEnv*, jclass) {
 void ParcelDestroy(JNIEnv* env, jclass, jlong pointer) {
   auto* parcel = Parcel(pointer);
   if (parcel == nullptr) return;
-  for (jobject binder : parcel->binders) env->DeleteGlobalRef(binder);
+  ClearParcel(env, parcel);
   delete parcel;
 }
 
-void ParcelFreeBuffer(JNIEnv*, jclass, jlong pointer) {
+void ParcelFreeBuffer(JNIEnv* env, jclass, jlong pointer) {
   if (auto* parcel = Parcel(pointer); parcel != nullptr) {
-    parcel->data.clear();
-    parcel->position = 0;
+    ClearParcel(env, parcel);
   }
 }
 
@@ -180,7 +207,36 @@ jstring ParcelReadString(JNIEnv* env, jclass, jlong p) {
   std::string value(reinterpret_cast<const char*>(parcel->data.data() + parcel->position),
                     static_cast<size_t>(length));
   parcel->position += static_cast<size_t>(length);
+  if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr &&
+      (value.find("IChildProcessService") != std::string::npos ||
+       value.find("base.apk") != std::string::npos ||
+       value.find("partial-raster") != std::string::npos ||
+       value.find("type=gpu") != std::string::npos)) {
+    std::cerr << "ART Binder parcel: read string length=" << length
+              << " value=" << value << " remaining="
+              << (parcel->data.size() - parcel->position) << "\n";
+  }
   return env->NewStringUTF(value.c_str());
+}
+
+void ParcelEnforceInterface(JNIEnv* env, jclass, jlong p, jstring expected) {
+  jstring actual = ParcelReadString(env, nullptr, p);
+  const char* expected_utf =
+      expected == nullptr ? nullptr : env->GetStringUTFChars(expected, nullptr);
+  const char* actual_utf =
+      actual == nullptr ? nullptr : env->GetStringUTFChars(actual, nullptr);
+  const bool matches = expected_utf != nullptr && actual_utf != nullptr &&
+                       std::strcmp(expected_utf, actual_utf) == 0;
+  if (actual_utf != nullptr) env->ReleaseStringUTFChars(actual, actual_utf);
+  if (expected_utf != nullptr) env->ReleaseStringUTFChars(expected, expected_utf);
+  env->DeleteLocalRef(actual);
+  if (!matches && !env->ExceptionCheck()) {
+    jclass security_exception = env->FindClass("java/lang/SecurityException");
+    if (security_exception != nullptr) {
+      env->ThrowNew(security_exception, "Binder interface token mismatch");
+    }
+    env->DeleteLocalRef(security_exception);
+  }
 }
 
 void ParcelWriteStrongBinder(JNIEnv* env, jclass, jlong p, jobject binder) {
@@ -199,6 +255,70 @@ jobject ParcelReadStrongBinder(JNIEnv* env, jclass, jlong p) {
       ? nullptr : env->NewLocalRef(parcel->binders[static_cast<size_t>(index)]);
 }
 
+void ParcelWriteFileDescriptor(JNIEnv* env, jclass, jlong p,
+                               jobject file_descriptor) {
+  auto* parcel = Parcel(p);
+  if (parcel == nullptr || file_descriptor == nullptr || !parcel->allow_fds) {
+    return;
+  }
+  jclass descriptor_class = env->GetObjectClass(file_descriptor);
+  jfieldID descriptor_field =
+      descriptor_class == nullptr
+          ? nullptr
+          : env->GetFieldID(descriptor_class, "descriptor", "I");
+  const int source = descriptor_field == nullptr
+                         ? -1
+                         : env->GetIntField(file_descriptor, descriptor_field);
+  env->DeleteLocalRef(descriptor_class);
+  const int duplicate =
+      source < 0 ? -1 : darwin_art_bionic_socket_broker_dup(source);
+  if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+    std::cerr << "ART Binder parcel: write fd source=" << source
+              << " duplicate=" << duplicate << " errno=" << errno << "\n";
+  }
+  if (duplicate < 0) {
+    ParcelWriteInt(p, -1);
+    return;
+  }
+  parcel->file_descriptors.push_back(duplicate);
+  ParcelWriteInt(p, static_cast<jint>(parcel->file_descriptors.size() - 1));
+}
+
+jobject ParcelReadFileDescriptor(JNIEnv* env, jclass, jlong p) {
+  auto* parcel = Parcel(p);
+  const jint index = ParcelReadInt(p);
+  if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+    std::cerr << "ART Binder parcel: read fd index=" << index
+              << " count="
+              << (parcel == nullptr ? 0 : parcel->file_descriptors.size())
+              << " position=" << (parcel == nullptr ? 0 : parcel->position)
+              << "\n";
+  }
+  if (parcel == nullptr || index < 0 ||
+      static_cast<size_t>(index) >= parcel->file_descriptors.size()) {
+    return nullptr;
+  }
+  const int duplicate = darwin_art_bionic_socket_broker_dup(
+      parcel->file_descriptors[static_cast<size_t>(index)]);
+  if (duplicate < 0) return nullptr;
+  jclass descriptor_class = env->FindClass("java/io/FileDescriptor");
+  jmethodID constructor = descriptor_class == nullptr
+                              ? nullptr
+                              : env->GetMethodID(descriptor_class, "<init>", "()V");
+  jfieldID descriptor_field =
+      descriptor_class == nullptr
+          ? nullptr
+          : env->GetFieldID(descriptor_class, "descriptor", "I");
+  jobject result = constructor == nullptr || descriptor_field == nullptr
+                       ? nullptr
+                       : env->NewObject(descriptor_class, constructor);
+  if (result != nullptr) env->SetIntField(result, descriptor_field, duplicate);
+  if (result == nullptr)
+    (void)darwin_art_bionic_socket_broker_close(duplicate);
+  env->DeleteLocalRef(descriptor_class);
+  return result;
+}
+
 jbyteArray ParcelMarshall(JNIEnv* env, jclass, jlong p) {
   auto* parcel = Parcel(p);
   if (parcel == nullptr) return nullptr;
@@ -214,6 +334,7 @@ void ParcelUnmarshall(JNIEnv* env, jclass, jlong p, jbyteArray bytes,
                       jint offset, jint length) {
   auto* parcel = Parcel(p);
   if (parcel == nullptr || bytes == nullptr || offset < 0 || length < 0) return;
+  ClearParcel(env, parcel);
   parcel->data.resize(static_cast<size_t>(length));
   env->GetByteArrayRegion(bytes, offset, length,
                           reinterpret_cast<jbyte*>(parcel->data.data()));
@@ -248,9 +369,13 @@ jboolean ParcelHasBinders(JNIEnv*, jclass, jlong p) {
 jboolean ParcelHasBindersRange(JNIEnv* env, jclass cls, jlong p, jint, jint) {
   return ParcelHasBinders(env, cls, p);
 }
-jboolean ParcelHasFileDescriptors(jlong) { return JNI_FALSE; }
-jboolean ParcelHasFileDescriptorsRange(JNIEnv*, jclass, jlong, jint, jint) {
-  return JNI_FALSE;
+jboolean ParcelHasFileDescriptors(jlong p) {
+  return Parcel(p) != nullptr && !Parcel(p)->file_descriptors.empty()
+             ? JNI_TRUE
+             : JNI_FALSE;
+}
+jboolean ParcelHasFileDescriptorsRange(JNIEnv*, jclass, jlong p, jint, jint) {
+  return ParcelHasFileDescriptors(p);
 }
 jboolean ParcelReplaceWorkSource(jlong, jint) { return JNI_FALSE; }
 jint ParcelReadWorkSource(jlong) { return -1; }
@@ -277,6 +402,13 @@ jint BinderGetCallingUid() {
 }
 
 jint BinderGetCallingPid() { return static_cast<jint>(getpid()); }
+
+jboolean BinderIsDirectlyHandlingTransactionNative() {
+  // Java Binder.transact() invokes local Binder.onTransact() directly. AOSP's
+  // native predicate is true only while the kernel Binder driver is delivering
+  // an incoming transaction, which this process-local path is not.
+  return JNI_FALSE;
+}
 
 // These identity operations are @CriticalNative in Android 16, so their
 // callback ABI intentionally has no JNIEnv/jclass pair.
@@ -458,6 +590,10 @@ jboolean KeyMapEquals(JNIEnv*, jclass, jlong left, jlong right) {
 }
 jchar KeyMapGetCharacter(JNIEnv*, jclass, jlong, jint key_code,
                          jint meta_state) {
+  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android KeyCharacterMap: character key=" << key_code
+              << " meta=" << meta_state << "\n";
+  }
   const bool shift = (meta_state & 0x1) != 0;
   if (key_code >= 29 && key_code <= 54) {
     const char base = static_cast<char>('a' + (key_code - 29));
@@ -547,6 +683,12 @@ jstring KeyEventCodeToString(JNIEnv* env, jclass, jint key_code) {
 }
 
 jobject CreateDarwinContextBinder(JNIEnv* env) {
+  {
+    std::lock_guard<std::mutex> lock(g_context_binder_mutex);
+    if (g_context_binder != nullptr) {
+      return env->NewLocalRef(g_context_binder);
+    }
+  }
   // There is no system_server on the Darwin host. The fixture installs a
   // process-local IServiceManager/IDisplayManager pair whose only real answer
   // is a 360x640, 60 Hz display; all unrelated services return null/defaults.
@@ -605,6 +747,17 @@ jobject CreateDarwinContextBinder(JNIEnv* env) {
   if (env->ExceptionCheck()) {
     env->ExceptionClear();
   }
+  if (result != nullptr) {
+    jobject candidate = env->NewGlobalRef(result);
+    if (candidate != nullptr) {
+      std::lock_guard<std::mutex> lock(g_context_binder_mutex);
+      if (g_context_binder == nullptr) {
+        g_context_binder = candidate;
+      } else {
+        env->DeleteGlobalRef(candidate);
+      }
+    }
+  }
   env->DeleteLocalRef(bridge);
   return result;
 }
@@ -629,9 +782,833 @@ bool Register(JNIEnv* env, const char* class_name, JNINativeMethod* methods,
   return registered;
 }
 
+constexpr uint32_t kWireMagic = 0x44414252;  // DABR
+constexpr uint32_t kWireVersion = 1;
+constexpr uint32_t kWireReady = 1;
+constexpr uint32_t kWireTransaction = 2;
+constexpr uint32_t kWireReply = 3;
+constexpr uint32_t kWireServiceBindIntent = 4;
+constexpr uint32_t kWireBinderReturnsHome = 1;
+constexpr uint32_t kBinderFlagOneWay = 1;
+constexpr size_t kMaxWireBytes = 64 * 1024 * 1024;
+constexpr size_t kMaxWireObjects = 1024;
+
+struct WireHeader {
+  uint32_t magic = kWireMagic;
+  uint32_t version = kWireVersion;
+  uint32_t type = 0;
+  uint32_t sequence = 0;
+  uint32_t target = 0;
+  uint32_t code = 0;
+  uint32_t flags = 0;
+  int32_t status = 0;
+  uint32_t data_size = 0;
+  uint32_t binder_count = 0;
+  uint32_t fd_count = 0;
+  uint32_t reserved = 0;
+};
+static_assert(sizeof(WireHeader) == 48);
+
+struct WireBinder {
+  uint32_t target = 0;
+  uint32_t flags = 0;
+};
+
+enum : uint32_t { kWireFdRegular = 0, kWireFdSharedMemory = 1 };
+
+struct WireFd {
+  uint32_t kind = kWireFdRegular;
+  int32_t protection = 0;
+  uint64_t size = 0;
+};
+static_assert(sizeof(WireFd) == 16);
+
+struct WireMessage {
+  WireHeader header;
+  std::vector<uint8_t> data;
+  std::vector<WireBinder> binders;
+  std::vector<WireFd> fd_metadata;
+  std::vector<int> file_descriptors;
+
+  ~WireMessage() {
+    for (int descriptor : file_descriptors)
+      (void)darwin_art_bionic_socket_broker_close(descriptor);
+  }
+  WireMessage() = default;
+  WireMessage(const WireMessage&) = delete;
+  WireMessage& operator=(const WireMessage&) = delete;
+};
+
+struct WireConnection {
+  uint32_t next_sequence = 1;
+  uint32_t next_local_target = 2;
+  bool ready = false;
+  bool dispatcher_active = false;
+  std::thread::id dispatcher_thread;
+  std::unordered_map<uint32_t, jobject> local_binders;
+  std::unordered_map<uint32_t, std::unique_ptr<WireMessage>> pending_replies;
+};
+
+std::recursive_mutex g_wire_mutex;
+std::condition_variable_any g_wire_condition;
+std::unordered_map<int, WireConnection> g_wire_connections;
+
+bool WriteAll(int fd, const uint8_t* bytes, size_t size) {
+  while (size != 0) {
+    const ssize_t written = write(fd, bytes, size);
+    if (written > 0) {
+      bytes += static_cast<size_t>(written);
+      size -= static_cast<size_t>(written);
+    } else if (written < 0 && errno == EINTR) {
+      continue;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ReadAll(int fd, uint8_t* bytes, size_t size) {
+  while (size != 0) {
+    const ssize_t received = read(fd, bytes, size);
+    if (received > 0) {
+      bytes += static_cast<size_t>(received);
+      size -= static_cast<size_t>(received);
+    } else if (received < 0 && errno == EINTR) {
+      continue;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool SendWireMessage(int fd, const WireHeader& header,
+                     const std::vector<WireBinder>& binders,
+                     const std::vector<uint8_t>& data,
+                     const std::vector<int>& file_descriptors) {
+  const size_t binder_bytes = binders.size() * sizeof(WireBinder);
+  const size_t fd_metadata_bytes = file_descriptors.size() * sizeof(WireFd);
+  std::vector<uint8_t> bytes(sizeof(header) + binder_bytes +
+                             fd_metadata_bytes + data.size());
+  std::memcpy(bytes.data(), &header, sizeof(header));
+  if (binder_bytes != 0) {
+    std::memcpy(bytes.data() + sizeof(header), binders.data(), binder_bytes);
+  }
+  auto* fd_metadata = reinterpret_cast<WireFd*>(
+      bytes.data() + sizeof(header) + binder_bytes);
+  for (size_t index = 0; index < file_descriptors.size(); ++index) {
+    size_t size = 0;
+    int protection = 0;
+    if (darwin_art_android_shared_memory_get_info(
+            file_descriptors[index], &size, &protection) == 1) {
+      fd_metadata[index] = {kWireFdSharedMemory, protection,
+                            static_cast<uint64_t>(size)};
+    }
+  }
+  if (!data.empty()) {
+    std::memcpy(bytes.data() + sizeof(header) + binder_bytes +
+                    fd_metadata_bytes,
+                data.data(), data.size());
+  }
+  iovec vector{bytes.data(), bytes.size()};
+  msghdr message{};
+  message.msg_iov = &vector;
+  message.msg_iovlen = 1;
+  std::vector<uint8_t> control;
+  std::vector<int> host_descriptors;
+  if (!file_descriptors.empty()) {
+    host_descriptors.reserve(file_descriptors.size());
+    for (int guest_fd : file_descriptors) {
+      const int host_fd = darwin_art_bionic_fd_export_for_scm(guest_fd);
+      if (host_fd < 0) {
+        if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+          std::cerr << "ART Binder wire: SCM export failed guest_fd="
+                    << guest_fd << " errno=" << errno << "\n";
+        }
+        for (int exported : host_descriptors) (void)close(exported);
+        return false;
+      }
+      host_descriptors.push_back(host_fd);
+    }
+    control.resize(CMSG_SPACE(file_descriptors.size() * sizeof(int)));
+    message.msg_control = control.data();
+    message.msg_controllen = control.size();
+    cmsghdr* rights = CMSG_FIRSTHDR(&message);
+    rights->cmsg_level = SOL_SOCKET;
+    rights->cmsg_type = SCM_RIGHTS;
+    rights->cmsg_len = CMSG_LEN(file_descriptors.size() * sizeof(int));
+    std::memcpy(CMSG_DATA(rights), host_descriptors.data(),
+                host_descriptors.size() * sizeof(int));
+  }
+  ssize_t sent;
+  do {
+    sent = sendmsg(fd, &message, 0);
+  } while (sent < 0 && errno == EINTR);
+  for (int exported : host_descriptors) (void)close(exported);
+  if (sent <= 0) return false;
+  const size_t prefix = static_cast<size_t>(sent);
+  return prefix >= bytes.size() ||
+         WriteAll(fd, bytes.data() + prefix, bytes.size() - prefix);
+}
+
+bool ReceiveWireMessage(int fd, WireMessage* out) {
+  if (out == nullptr) return false;
+  WireHeader header{};
+  iovec vector{&header, sizeof(header)};
+  std::vector<uint8_t> control(CMSG_SPACE(kMaxWireObjects * sizeof(int)));
+  msghdr message{};
+  message.msg_iov = &vector;
+  message.msg_iovlen = 1;
+  message.msg_control = control.data();
+  message.msg_controllen = control.size();
+  ssize_t received;
+  do {
+    received = recvmsg(fd, &message, MSG_WAITALL);
+  } while (received < 0 && errno == EINTR);
+  if (received != static_cast<ssize_t>(sizeof(header)) ||
+      header.magic != kWireMagic || header.version != kWireVersion ||
+      header.data_size > kMaxWireBytes ||
+      header.binder_count > kMaxWireObjects ||
+      header.fd_count > kMaxWireObjects) {
+    return false;
+  }
+  std::vector<int> host_descriptors;
+  for (cmsghdr* item = CMSG_FIRSTHDR(&message); item != nullptr;
+       item = CMSG_NXTHDR(&message, item)) {
+    if (item->cmsg_level != SOL_SOCKET || item->cmsg_type != SCM_RIGHTS) {
+      continue;
+    }
+    const size_t count =
+        (item->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+    const auto* descriptors = reinterpret_cast<const int*>(CMSG_DATA(item));
+    for (size_t index = 0; index < count; ++index) {
+      host_descriptors.push_back(descriptors[index]);
+    }
+  }
+  if (host_descriptors.size() != header.fd_count) return false;
+  out->header = header;
+  out->binders.resize(header.binder_count);
+  out->fd_metadata.resize(header.fd_count);
+  out->data.resize(header.data_size);
+  bool received_payload =
+      (out->binders.empty() ||
+       ReadAll(fd, reinterpret_cast<uint8_t*>(out->binders.data()),
+               out->binders.size() * sizeof(WireBinder))) &&
+      (out->fd_metadata.empty() ||
+       ReadAll(fd, reinterpret_cast<uint8_t*>(out->fd_metadata.data()),
+               out->fd_metadata.size() * sizeof(WireFd))) &&
+      (out->data.empty() || ReadAll(fd, out->data.data(), out->data.size()));
+  if (!received_payload) {
+    for (int host_fd : host_descriptors) (void)close(host_fd);
+    return false;
+  }
+  for (size_t index = 0; index < host_descriptors.size(); ++index) {
+    const int host_fd = host_descriptors[index];
+    int guest_fd = -1;
+    if (out->fd_metadata[index].kind == kWireFdSharedMemory) {
+      const WireFd& metadata = out->fd_metadata[index];
+      guest_fd = metadata.size <= std::numeric_limits<size_t>::max() &&
+                         darwin_art_android_shared_memory_adopt(
+                             host_fd, static_cast<size_t>(metadata.size),
+                             metadata.protection) == 0
+                     ? host_fd
+                     : -1;
+    } else {
+      guest_fd = darwin_art_bionic_fd_import_from_scm(host_fd);
+    }
+    if (guest_fd < 0) {
+      (void)close(host_fd);
+      for (size_t remaining = index + 1; remaining < host_descriptors.size();
+           ++remaining) {
+        (void)close(host_descriptors[remaining]);
+      }
+      return false;
+    }
+    out->file_descriptors.push_back(guest_fd);
+  }
+  return true;
+}
+
+DarwinParcel* JavaParcel(JNIEnv* env, jobject parcel) {
+  jclass parcel_class = parcel == nullptr ? nullptr : env->GetObjectClass(parcel);
+  jfieldID native_pointer =
+      parcel_class == nullptr ? nullptr : env->GetFieldID(parcel_class, "mNativePtr", "J");
+  const jlong pointer = native_pointer == nullptr
+                            ? 0
+                            : env->GetLongField(parcel, native_pointer);
+  env->DeleteLocalRef(parcel_class);
+  return Parcel(pointer);
+}
+
+uint32_t RegisterLocalBinder(JNIEnv* env, int fd, jobject binder) {
+  WireConnection& connection = g_wire_connections[fd];
+  for (const auto& [target, candidate] : connection.local_binders) {
+    if (env->IsSameObject(candidate, binder)) return target;
+  }
+  const uint32_t target = connection.next_local_target++;
+  connection.local_binders.emplace(target, env->NewGlobalRef(binder));
+  return target;
+}
+
+bool RemoteTarget(JNIEnv* env, int fd, jobject binder, uint32_t* target) {
+  jclass binder_class = env->GetObjectClass(binder);
+  jfieldID control =
+      binder_class == nullptr ? nullptr : env->GetFieldID(binder_class, "controlFd", "I");
+  if (control == nullptr) env->ExceptionClear();
+  jfieldID remote_target = binder_class == nullptr
+                               ? nullptr
+                               : env->GetFieldID(binder_class, "targetId", "I");
+  if (remote_target == nullptr) env->ExceptionClear();
+  const bool matches = control != nullptr && remote_target != nullptr &&
+                       env->GetIntField(binder, control) == fd;
+  if (matches) {
+    *target = static_cast<uint32_t>(env->GetIntField(binder, remote_target));
+  }
+  env->DeleteLocalRef(binder_class);
+  return matches && !env->ExceptionCheck();
+}
+
+bool ExportParcel(JNIEnv* env, int fd, DarwinParcel* parcel,
+                  WireHeader* header, std::vector<WireBinder>* binders,
+                  std::vector<uint8_t>* data,
+                  std::vector<int>* descriptors) {
+  if (parcel == nullptr || header == nullptr || binders == nullptr ||
+      data == nullptr || descriptors == nullptr ||
+      parcel->data.size() > std::numeric_limits<uint32_t>::max()) {
+    return false;
+  }
+  *data = parcel->data;
+  binders->reserve(parcel->binders.size());
+  for (jobject binder : parcel->binders) {
+    uint32_t target = 0;
+    if (RemoteTarget(env, fd, binder, &target)) {
+      binders->push_back({target, kWireBinderReturnsHome});
+    } else {
+      if (env->ExceptionCheck()) env->ExceptionClear();
+      binders->push_back({RegisterLocalBinder(env, fd, binder), 0});
+    }
+  }
+  *descriptors = parcel->file_descriptors;
+  header->data_size = static_cast<uint32_t>(data->size());
+  header->binder_count = static_cast<uint32_t>(binders->size());
+  header->fd_count = static_cast<uint32_t>(descriptors->size());
+  return !env->ExceptionCheck();
+}
+
+jobject NewRemoteBinder(JNIEnv* env, int fd, uint32_t target) {
+  jclass remote_class =
+      env->FindClass("dev/darwinart/probe/ProbeContext$RemoteServiceBinder");
+  if (remote_class == nullptr) {
+    env->ExceptionClear();
+    jclass thread_class = env->FindClass("java/lang/Thread");
+    jmethodID current_thread =
+        thread_class == nullptr
+            ? nullptr
+            : env->GetStaticMethodID(thread_class, "currentThread",
+                                     "()Ljava/lang/Thread;");
+    jobject thread = current_thread == nullptr
+                         ? nullptr
+                         : env->CallStaticObjectMethod(thread_class,
+                                                       current_thread);
+    jmethodID get_loader =
+        thread_class == nullptr
+            ? nullptr
+            : env->GetMethodID(thread_class, "getContextClassLoader",
+                               "()Ljava/lang/ClassLoader;");
+    jobject loader = get_loader == nullptr
+                         ? nullptr
+                         : env->CallObjectMethod(thread, get_loader);
+    jclass loader_class = loader == nullptr ? nullptr : env->GetObjectClass(loader);
+    jmethodID load_class =
+        loader_class == nullptr
+            ? nullptr
+            : env->GetMethodID(loader_class, "loadClass",
+                               "(Ljava/lang/String;)Ljava/lang/Class;");
+    jstring name = env->NewStringUTF(
+        "dev.darwinart.probe.ProbeContext$RemoteServiceBinder");
+    jobject loaded = load_class == nullptr
+                         ? nullptr
+                         : env->CallObjectMethod(loader, load_class, name);
+    if (!env->ExceptionCheck()) {
+      remote_class = static_cast<jclass>(loaded);
+    }
+    env->DeleteLocalRef(name);
+    env->DeleteLocalRef(loader_class);
+    env->DeleteLocalRef(loader);
+    env->DeleteLocalRef(thread);
+    env->DeleteLocalRef(thread_class);
+  }
+  jmethodID constructor =
+      remote_class == nullptr
+          ? nullptr
+          : env->GetMethodID(remote_class, "<init>", "(III)V");
+  jobject result = constructor == nullptr
+                       ? nullptr
+                       : env->NewObject(remote_class, constructor, -1, fd,
+                                        static_cast<jint>(target));
+  env->DeleteLocalRef(remote_class);
+  return result;
+}
+
+bool ImportParcel(JNIEnv* env, int fd, WireMessage* message,
+                  DarwinParcel* parcel) {
+  if (message == nullptr || parcel == nullptr) return false;
+  if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+    std::cerr << "ART Binder parcel: import fd=" << fd
+              << " bytes=" << message->data.size()
+              << " binders=" << message->binders.size()
+              << " descriptors=" << message->file_descriptors.size() << "\n";
+  }
+  ClearParcel(env, parcel);
+  parcel->data = std::move(message->data);
+  parcel->position = 0;
+  for (const WireBinder& wire_binder : message->binders) {
+    if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+      std::cerr << "ART Binder parcel: binder target=" << wire_binder.target
+                << " flags=" << wire_binder.flags << "\n";
+    }
+    jobject binder = nullptr;
+    if ((wire_binder.flags & kWireBinderReturnsHome) != 0) {
+      auto connection = g_wire_connections.find(fd);
+      auto local = connection == g_wire_connections.end()
+                       ? decltype(connection->second.local_binders)::iterator{}
+                       : connection->second.local_binders.find(wire_binder.target);
+      if (connection != g_wire_connections.end() &&
+          local != connection->second.local_binders.end()) {
+        binder = env->NewLocalRef(local->second);
+      }
+    } else {
+      binder = NewRemoteBinder(env, fd, wire_binder.target);
+    }
+    if (binder == nullptr || env->ExceptionCheck()) return false;
+    parcel->binders.push_back(env->NewGlobalRef(binder));
+    env->DeleteLocalRef(binder);
+  }
+  parcel->file_descriptors = std::move(message->file_descriptors);
+  message->file_descriptors.clear();
+  return !env->ExceptionCheck();
+}
+
+jobject ObtainJavaParcel(JNIEnv* env) {
+  jclass parcel_class = env->FindClass("android/os/Parcel");
+  jmethodID obtain = parcel_class == nullptr
+                         ? nullptr
+                         : env->GetStaticMethodID(parcel_class, "obtain",
+                                                  "()Landroid/os/Parcel;");
+  jobject result = obtain == nullptr
+                       ? nullptr
+                       : env->CallStaticObjectMethod(parcel_class, obtain);
+  env->DeleteLocalRef(parcel_class);
+  return result;
+}
+
+void RecycleJavaParcel(JNIEnv* env, jobject parcel) {
+  jclass parcel_class = parcel == nullptr ? nullptr : env->GetObjectClass(parcel);
+  jmethodID recycle = parcel_class == nullptr
+                          ? nullptr
+                          : env->GetMethodID(parcel_class, "recycle", "()V");
+  if (recycle != nullptr) env->CallVoidMethod(parcel, recycle);
+  env->DeleteLocalRef(parcel_class);
+  env->DeleteLocalRef(parcel);
+}
+
+bool DispatchWireTransaction(JNIEnv* env, int fd, WireMessage* request) {
+  if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+    std::cerr << "ART Binder wire: dispatch fd=" << fd
+              << " target=" << request->header.target
+              << " code=" << request->header.code
+              << " flags=" << request->header.flags << "\n";
+  }
+  auto connection = g_wire_connections.find(fd);
+  auto local = connection == g_wire_connections.end()
+                   ? decltype(connection->second.local_binders)::iterator{}
+                   : connection->second.local_binders.find(request->header.target);
+  if (connection == g_wire_connections.end() ||
+      local == connection->second.local_binders.end()) {
+    return false;
+  }
+  jobject data = ObtainJavaParcel(env);
+  jobject reply = ObtainJavaParcel(env);
+  DarwinParcel* data_native = JavaParcel(env, data);
+  DarwinParcel* reply_native = JavaParcel(env, reply);
+  bool success = data != nullptr && reply != nullptr && data_native != nullptr &&
+                 reply_native != nullptr &&
+                 ImportParcel(env, fd, request, data_native);
+  if (success) {
+    jclass binder_class = env->FindClass("android/os/IBinder");
+    jmethodID transact = binder_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(
+                                   binder_class, "transact",
+                                   "(ILandroid/os/Parcel;Landroid/os/Parcel;I)Z");
+    const jboolean transacted =
+        transact == nullptr
+            ? JNI_FALSE
+            : env->CallBooleanMethod(
+                  local->second, transact,
+                  static_cast<jint>(request->header.code), data, reply,
+                  static_cast<jint>(request->header.flags));
+    success = transact != nullptr && transacted == JNI_TRUE &&
+              !env->ExceptionCheck();
+    if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+      std::cerr << "ART Binder wire: dispatched fd=" << fd
+                << " code=" << request->header.code
+                << " transacted=" << (transacted == JNI_TRUE)
+                << " exception=" << env->ExceptionCheck() << "\n";
+    }
+    env->DeleteLocalRef(binder_class);
+  }
+  if (env->ExceptionCheck()) {
+    jthrowable exception = env->ExceptionOccurred();
+    env->ExceptionClear();
+    jclass exception_class =
+        exception == nullptr ? nullptr : env->GetObjectClass(exception);
+    jmethodID to_string =
+        exception_class == nullptr
+            ? nullptr
+            : env->GetMethodID(exception_class, "toString",
+                               "()Ljava/lang/String;");
+    jstring description =
+        to_string == nullptr
+            ? nullptr
+            : static_cast<jstring>(env->CallObjectMethod(exception, to_string));
+    const char* description_utf =
+        description == nullptr ? nullptr
+                               : env->GetStringUTFChars(description, nullptr);
+    std::cerr << "ART Binder wire: dispatch exception="
+              << (description_utf == nullptr ? "<unavailable>" : description_utf)
+              << "\n";
+    if (description_utf != nullptr) {
+      env->ReleaseStringUTFChars(description, description_utf);
+    }
+    env->DeleteLocalRef(description);
+    env->DeleteLocalRef(exception_class);
+    env->DeleteLocalRef(exception);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    success = false;
+  }
+  // Even a Binder one-way call gets an internal transport ACK. Android's
+  // driver can deliver nested callbacks while dispatching it; the ACK keeps
+  // this socket's caller reading until those callbacks have been drained.
+  WireHeader response;
+  response.type = kWireReply;
+  response.sequence = request->header.sequence;
+  response.status = success ? 0 : -1;
+  std::vector<WireBinder> binders;
+  std::vector<uint8_t> bytes;
+  std::vector<int> descriptors;
+  if (success && (request->header.flags & kBinderFlagOneWay) == 0) {
+    success = ExportParcel(env, fd, reply_native, &response, &binders, &bytes,
+                           &descriptors);
+    response.status = success ? 0 : -1;
+  }
+  success = SendWireMessage(fd, response, binders, bytes, descriptors) && success;
+  if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+    std::cerr << "ART Binder wire: reply fd=" << fd
+              << " sequence=" << response.sequence
+              << " status=" << response.status
+              << " bytes=" << response.data_size << " sent=" << success
+              << "\n";
+  }
+  RecycleJavaParcel(env, reply);
+  RecycleJavaParcel(env, data);
+  return success;
+}
+
+void RunRemoteBinderDispatcher(JavaVM* vm, int fd) {
+  JNIEnv* env = nullptr;
+  if (vm == nullptr || vm->AttachCurrentThread(&env, nullptr) != JNI_OK ||
+      env == nullptr) {
+    std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+    g_wire_connections.erase(fd);
+    g_wire_condition.notify_all();
+    return;
+  }
+  {
+    std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+    auto connection = g_wire_connections.find(fd);
+    if (connection == g_wire_connections.end()) {
+      vm->DetachCurrentThread();
+      return;
+    }
+    connection->second.dispatcher_thread = std::this_thread::get_id();
+    g_wire_condition.notify_all();
+  }
+  for (;;) {
+    auto incoming = std::make_unique<WireMessage>();
+    if (!ReceiveWireMessage(fd, incoming.get())) break;
+    std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+    auto connection = g_wire_connections.find(fd);
+    if (connection == g_wire_connections.end()) break;
+    if (incoming->header.type == kWireReady) {
+      connection->second.ready = true;
+      g_wire_condition.notify_all();
+      continue;
+    }
+    if (incoming->header.type == kWireReply) {
+      connection->second.pending_replies.insert_or_assign(
+          incoming->header.sequence, std::move(incoming));
+      g_wire_condition.notify_all();
+      continue;
+    }
+    if (incoming->header.type != kWireTransaction ||
+        !DispatchWireTransaction(env, fd, incoming.get())) {
+      break;
+    }
+  }
+  darwin_art::CloseRemoteBinderChannel(env, fd);
+  vm->DetachCurrentThread();
+}
+
 }  // namespace
 
 namespace darwin_art {
+
+bool StartRemoteBinderDispatcher(JNIEnv* env, jint control_fd) {
+  if (env == nullptr || control_fd < 0) return false;
+  JavaVM* vm = nullptr;
+  if (env->GetJavaVM(&vm) != JNI_OK || vm == nullptr) return false;
+  {
+    std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+    WireConnection& connection = g_wire_connections[control_fd];
+    if (connection.dispatcher_active) return true;
+    connection.dispatcher_active = true;
+  }
+  try {
+    std::thread(RunRemoteBinderDispatcher, vm, control_fd).detach();
+  } catch (...) {
+    std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+    g_wire_connections.erase(control_fd);
+    return false;
+  }
+  return true;
+}
+
+bool SendServiceBindIntent(JNIEnv* env, jint control_fd, jobject intent) {
+  if (env == nullptr || control_fd < 0 || intent == nullptr) return false;
+  std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+  jobject parcel = ObtainJavaParcel(env);
+  jclass intent_class = env->GetObjectClass(intent);
+  jmethodID write_to_parcel =
+      intent_class == nullptr
+          ? nullptr
+          : env->GetMethodID(intent_class, "writeToParcel",
+                             "(Landroid/os/Parcel;I)V");
+  if (parcel == nullptr || write_to_parcel == nullptr || env->ExceptionCheck()) {
+    env->DeleteLocalRef(intent_class);
+    if (parcel != nullptr) RecycleJavaParcel(env, parcel);
+    return false;
+  }
+  env->CallVoidMethod(intent, write_to_parcel, parcel, 0);
+  env->DeleteLocalRef(intent_class);
+  WireHeader message;
+  message.type = kWireServiceBindIntent;
+  std::vector<WireBinder> binders;
+  std::vector<uint8_t> bytes;
+  std::vector<int> descriptors;
+  const bool success =
+      !env->ExceptionCheck() &&
+      ExportParcel(env, control_fd, JavaParcel(env, parcel), &message, &binders,
+                   &bytes, &descriptors) &&
+      SendWireMessage(control_fd, message, binders, bytes, descriptors);
+  RecycleJavaParcel(env, parcel);
+  return success && !env->ExceptionCheck();
+}
+
+jobject ReceiveServiceBindIntent(JNIEnv* env, jint control_fd) {
+  if (env == nullptr || control_fd < 0) return nullptr;
+  std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+  WireMessage message;
+  jobject parcel = nullptr;
+  jobject intent = nullptr;
+  if (!ReceiveWireMessage(control_fd, &message) ||
+      message.header.type != kWireServiceBindIntent ||
+      (parcel = ObtainJavaParcel(env)) == nullptr ||
+      !ImportParcel(env, control_fd, &message, JavaParcel(env, parcel))) {
+    if (parcel != nullptr) RecycleJavaParcel(env, parcel);
+    return nullptr;
+  }
+  jclass intent_class = env->FindClass("android/content/Intent");
+  jfieldID creator_field =
+      intent_class == nullptr
+          ? nullptr
+          : env->GetStaticFieldID(intent_class, "CREATOR",
+                                  "Landroid/os/Parcelable$Creator;");
+  jobject creator = creator_field == nullptr
+                        ? nullptr
+                        : env->GetStaticObjectField(intent_class, creator_field);
+  jclass creator_class = creator == nullptr ? nullptr : env->GetObjectClass(creator);
+  jmethodID create_from_parcel =
+      creator_class == nullptr
+          ? nullptr
+          : env->GetMethodID(creator_class, "createFromParcel",
+                             "(Landroid/os/Parcel;)Ljava/lang/Object;");
+  if (create_from_parcel != nullptr && !env->ExceptionCheck()) {
+    intent = env->CallObjectMethod(creator, create_from_parcel, parcel);
+  }
+  env->DeleteLocalRef(creator_class);
+  env->DeleteLocalRef(creator);
+  env->DeleteLocalRef(intent_class);
+  RecycleJavaParcel(env, parcel);
+  return env->ExceptionCheck() ? nullptr : intent;
+}
+
+jboolean TransactRemoteBinder(JNIEnv* env, jint control_fd, jint target_id,
+                              jint code, jobject data, jobject reply,
+                              jint flags) {
+  if (env == nullptr || control_fd < 0 || target_id <= 0 || data == nullptr) {
+    return JNI_FALSE;
+  }
+  std::unique_lock<std::recursive_mutex> lock(g_wire_mutex);
+  if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+    std::cerr << "ART Binder wire: transact fd=" << control_fd
+              << " target=" << target_id << " code=" << code
+              << " flags=" << flags << "\n";
+  }
+  WireConnection& connection = g_wire_connections[control_fd];
+  if (!connection.ready) {
+    if (connection.dispatcher_active &&
+        connection.dispatcher_thread != std::this_thread::get_id()) {
+      g_wire_condition.wait(lock, [&] {
+        auto current = g_wire_connections.find(control_fd);
+        return current == g_wire_connections.end() || current->second.ready;
+      });
+      auto current = g_wire_connections.find(control_fd);
+      if (current == g_wire_connections.end() || !current->second.ready) {
+        return JNI_FALSE;
+      }
+    } else {
+      WireMessage ready;
+      if (!ReceiveWireMessage(control_fd, &ready) ||
+          ready.header.type != kWireReady) {
+        return JNI_FALSE;
+      }
+      connection.ready = true;
+    }
+  }
+  WireHeader request;
+  request.type = kWireTransaction;
+  request.sequence = connection.next_sequence++;
+  request.target = static_cast<uint32_t>(target_id);
+  request.code = static_cast<uint32_t>(code);
+  request.flags = static_cast<uint32_t>(flags);
+  std::vector<WireBinder> binders;
+  std::vector<uint8_t> bytes;
+  std::vector<int> descriptors;
+  if (!ExportParcel(env, control_fd, JavaParcel(env, data), &request, &binders,
+                    &bytes, &descriptors) ||
+      !SendWireMessage(control_fd, request, binders, bytes, descriptors)) {
+    return JNI_FALSE;
+  }
+  // The service owner thread is the sole socket reader. Android Binder calls
+  // may originate from any Chromium thread after IChildProcessService.setup()
+  // returns (notably IGpuProcessCallback.getViewSurface()). Let that owner
+  // dispatch the reply instead of racing two recvmsg() calls on one stream.
+  if (connection.dispatcher_active &&
+      connection.dispatcher_thread != std::this_thread::get_id()) {
+    const uint32_t sequence = request.sequence;
+    g_wire_condition.wait(lock, [&] {
+      auto current = g_wire_connections.find(control_fd);
+      return current == g_wire_connections.end() ||
+             current->second.pending_replies.contains(sequence);
+    });
+    auto current = g_wire_connections.find(control_fd);
+    if (current == g_wire_connections.end()) return JNI_FALSE;
+    auto pending = current->second.pending_replies.find(sequence);
+    if (pending == current->second.pending_replies.end()) return JNI_FALSE;
+    std::unique_ptr<WireMessage> incoming = std::move(pending->second);
+    current->second.pending_replies.erase(pending);
+    if (incoming->header.type != kWireReply ||
+        incoming->header.status != 0) {
+      return JNI_FALSE;
+    }
+    return (flags & kBinderFlagOneWay) != 0 || reply == nullptr ||
+                   ImportParcel(env, control_fd, incoming.get(),
+                                JavaParcel(env, reply))
+               ? JNI_TRUE
+               : JNI_FALSE;
+  }
+  // Wait for the transport ACK even though Java observes one-way semantics.
+  // Nested callback transactions are dispatched by the loop before the ACK.
+  for (;;) {
+    WireMessage incoming;
+    if (!ReceiveWireMessage(control_fd, &incoming)) return JNI_FALSE;
+    if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+      std::cerr << "ART Binder wire: response fd=" << control_fd
+                << " type=" << incoming.header.type
+                << " sequence=" << incoming.header.sequence
+                << " status=" << incoming.header.status
+                << " bytes=" << incoming.header.data_size << "\n";
+    }
+    if (incoming.header.type == kWireTransaction) {
+      if (!DispatchWireTransaction(env, control_fd, &incoming)) return JNI_FALSE;
+      continue;
+    }
+    if (incoming.header.type != kWireReply ||
+        incoming.header.sequence != request.sequence ||
+        incoming.header.status != 0) {
+      return JNI_FALSE;
+    }
+    return (flags & kBinderFlagOneWay) != 0 || reply == nullptr ||
+                   ImportParcel(env, control_fd, &incoming,
+                                JavaParcel(env, reply))
+               ? JNI_TRUE
+               : JNI_FALSE;
+  }
+}
+
+int ServeRemoteBinder(JNIEnv* env, jint control_fd, jobject local_binder) {
+  if (env == nullptr || control_fd < 0 || local_binder == nullptr) return -1;
+  {
+    std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+    WireConnection& connection = g_wire_connections[control_fd];
+    connection.dispatcher_active = true;
+    connection.dispatcher_thread = std::this_thread::get_id();
+    connection.local_binders.emplace(1, env->NewGlobalRef(local_binder));
+    WireHeader ready;
+    ready.type = kWireReady;
+    if (!SendWireMessage(control_fd, ready, {}, {}, {})) return -1;
+    connection.ready = true;
+  }
+  for (;;) {
+    auto incoming = std::make_unique<WireMessage>();
+    if (!ReceiveWireMessage(control_fd, incoming.get())) break;
+    if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+      std::cerr << "ART Binder wire: received fd=" << control_fd
+                << " type=" << incoming->header.type
+                << " code=" << incoming->header.code << "\n";
+    }
+    std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+    if (incoming->header.type == kWireReply) {
+      auto connection = g_wire_connections.find(control_fd);
+      if (connection == g_wire_connections.end()) return -1;
+      connection->second.pending_replies.insert_or_assign(
+          incoming->header.sequence, std::move(incoming));
+      g_wire_condition.notify_all();
+      continue;
+    }
+    if (incoming->header.type != kWireTransaction ||
+        !DispatchWireTransaction(env, control_fd, incoming.get())) {
+      CloseRemoteBinderChannel(env, control_fd);
+      return -1;
+    }
+  }
+  CloseRemoteBinderChannel(env, control_fd);
+  return 0;
+}
+
+void CloseRemoteBinderChannel(JNIEnv* env, jint control_fd) {
+  std::lock_guard<std::recursive_mutex> lock(g_wire_mutex);
+  auto connection = g_wire_connections.find(control_fd);
+  if (connection == g_wire_connections.end()) return;
+  for (const auto& [target, binder] : connection->second.local_binders) {
+    static_cast<void>(target);
+    env->DeleteGlobalRef(binder);
+  }
+  g_wire_connections.erase(connection);
+  g_wire_condition.notify_all();
+}
 
 bool FocusFrameworkViewRoot(JNIEnv* env, jobject view_root) {
   if (env == nullptr || view_root == nullptr) return false;
@@ -849,6 +1826,9 @@ bool RegisterFrameworkBinderNatives(JNIEnv* env) {
       {const_cast<char*>("nativeWriteStrongBinder"),
        const_cast<char*>("(JLandroid/os/IBinder;)V"),
        reinterpret_cast<void*>(&ParcelWriteStrongBinder)},
+      {const_cast<char*>("nativeWriteFileDescriptor"),
+       const_cast<char*>("(JLjava/io/FileDescriptor;)V"),
+       reinterpret_cast<void*>(&ParcelWriteFileDescriptor)},
       {const_cast<char*>("nativeCreateByteArray"), const_cast<char*>("(J)[B"),
        reinterpret_cast<void*>(&ParcelCreateByteArray)},
       {const_cast<char*>("nativeReadByteArray"), const_cast<char*>("(J[BI)Z"),
@@ -872,6 +1852,9 @@ bool RegisterFrameworkBinderNatives(JNIEnv* env) {
       {const_cast<char*>("nativeReadStrongBinder"),
        const_cast<char*>("(J)Landroid/os/IBinder;"),
        reinterpret_cast<void*>(&ParcelReadStrongBinder)},
+      {const_cast<char*>("nativeReadFileDescriptor"),
+       const_cast<char*>("(J)Ljava/io/FileDescriptor;"),
+       reinterpret_cast<void*>(&ParcelReadFileDescriptor)},
       {const_cast<char*>("nativeCreate"), const_cast<char*>("()J"),
        reinterpret_cast<void*>(&ParcelCreate)},
       {const_cast<char*>("nativeFreeBuffer"), const_cast<char*>("(J)V"),
@@ -900,7 +1883,7 @@ bool RegisterFrameworkBinderNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&ParcelWriteString)},
       {const_cast<char*>("nativeEnforceInterface"),
        const_cast<char*>("(JLjava/lang/String;)V"),
-       reinterpret_cast<void*>(&ParcelWriteString)},
+       reinterpret_cast<void*>(&ParcelEnforceInterface)},
       {const_cast<char*>("nativeReplaceCallingWorkSourceUid"),
        const_cast<char*>("(JI)Z"),
        reinterpret_cast<void*>(&ParcelReplaceWorkSource)},
@@ -923,6 +1906,9 @@ bool RegisterFrameworkBinderNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&BinderGetCallingUid)},
       {const_cast<char*>("getCallingPid"), const_cast<char*>("()I"),
        reinterpret_cast<void*>(&BinderGetCallingPid)},
+      {const_cast<char*>("isDirectlyHandlingTransactionNative"),
+       const_cast<char*>("()Z"),
+       reinterpret_cast<void*>(&BinderIsDirectlyHandlingTransactionNative)},
       {const_cast<char*>("clearCallingIdentity"), const_cast<char*>("()J"),
        reinterpret_cast<void*>(&BinderClearCallingIdentity)},
       {const_cast<char*>("restoreCallingIdentity"), const_cast<char*>("(J)V"),

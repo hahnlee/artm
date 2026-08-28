@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 #[cfg(target_os = "macos")]
 use darwin_art_engine::{CallbackBindings, GraphicsSession, ProcessRequest, ProcessRequestError};
-use darwin_art_engine_sys::LifecycleHooks;
 use darwin_art_engine_sys::ProcessResult;
+use darwin_art_engine_sys::{HostServices, LifecycleHooks};
 use darwin_art_runtime::ProviderBridge;
 
 use crate::OwnedFrame;
@@ -58,6 +58,7 @@ pub(crate) fn build_process_request<'a>(
     provider_release: Option<darwin_art_engine_sys::ProviderReleaseFn>,
     graphics_session: Option<&'a GraphicsSession>,
     lifecycle_hooks: Option<&'a LifecycleHooks>,
+    host_services: Option<&'a HostServices>,
 ) -> Result<ProcessRequest<'a>, HostError> {
     // SAFETY: FrameHost, ProviderBridge, and the optional graphics session are
     // owned by the caller for the complete synchronous engine invocation.
@@ -93,7 +94,9 @@ pub(crate) fn build_process_request<'a>(
             HostError::InvalidCallbackBinding(kind)
         }
     })?;
-    Ok(request.with_lifecycle_hooks(lifecycle_hooks))
+    Ok(request
+        .with_lifecycle_hooks(lifecycle_hooks)
+        .with_host_services(host_services))
 }
 
 #[derive(Debug)]
@@ -109,6 +112,7 @@ pub enum HostError {
         operation: &'static str,
         status: i32,
     },
+    HostService(String),
 }
 
 impl fmt::Display for HostError {
@@ -145,6 +149,7 @@ impl fmt::Display for HostError {
             Self::SurfaceFailed { operation, status } => {
                 write!(formatter, "surface {operation} failed with status {status}")
             }
+            Self::HostService(message) => write!(formatter, "host service: {message}"),
         }
     }
 }

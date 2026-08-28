@@ -2,12 +2,14 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{c_int, c_void};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 const ANDROID_EIO: i32 = 5;
+const ANDROID_EBADF: i32 = 9;
 const ANDROID_ENOMEM: i32 = 12;
 const ANDROID_EACCES: i32 = 13;
+const ANDROID_EEXIST: i32 = 17;
 const ANDROID_EINVAL: i32 = 22;
 const ANDROID_EOVERFLOW: i32 = 75;
 const ANDROID_EOPNOTSUPP: i32 = 95;
@@ -17,14 +19,48 @@ const ANDROID_PROT_WRITE: i32 = 0x2;
 const ANDROID_PROT_EXEC: i32 = 0x4;
 const ANDROID_PROT_MASK: i32 = 0x7;
 const ANDROID_MAP_PRIVATE: i32 = 0x02;
+const ANDROID_MAP_SHARED: i32 = 0x01;
+const ANDROID_MAP_FIXED: i32 = 0x10;
 const ANDROID_MAP_ANONYMOUS: i32 = 0x20;
+const ANDROID_MAP_NORESERVE: i32 = 0x4000;
+const ANDROID_MREMAP_MAYMOVE: i32 = 0x1;
 
 const MAX_MAPPINGS: usize = 1024;
 const MAP_FAILED: *mut c_void = usize::MAX as *mut c_void;
 
+struct JitRange {
+    start: AtomicUsize,
+    end: AtomicUsize,
+}
+
+// SIGBUS can arrive on a V8 execution thread while another thread is changing
+// CodeRange protections. The ordinary mapping table is mutex-owned and cannot
+// be consulted safely from a signal handler: try_lock() loses legitimate
+// faults under contention, while lock() can deadlock. Publish the executable
+// JIT subset through a fixed-size seqlock instead. Every writer already owns
+// Provider::mappings, so there is only one publisher at a time; the faulting
+// execution thread may spin until that short publication completes without
+// invoking an allocator or taking a lock.
+static JIT_RANGE_EPOCH: AtomicUsize = AtomicUsize::new(0);
+static JIT_RANGE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static JIT_RANGES: [JitRange; MAX_MAPPINGS] = [const {
+    JitRange {
+        start: AtomicUsize::new(0),
+        end: AtomicUsize::new(0),
+    }
+}; MAX_MAPPINGS];
+
 unsafe extern "C" {
     fn darwin_art_host_vm_page_size() -> usize;
-    fn darwin_art_host_vm_map(length: usize, protection: c_int, error: *mut c_int) -> *mut c_void;
+    fn darwin_art_host_vm_map(
+        address: *mut c_void,
+        length: usize,
+        protection: c_int,
+        flags: c_int,
+        fd: c_int,
+        offset: i64,
+        error: *mut c_int,
+    ) -> *mut c_void;
     fn darwin_art_host_vm_unmap(address: *mut c_void, length: usize, error: *mut c_int) -> c_int;
     fn darwin_art_host_vm_protect(
         address: *mut c_void,
@@ -32,13 +68,21 @@ unsafe extern "C" {
         protection: c_int,
         error: *mut c_int,
     ) -> c_int;
+    fn darwin_art_host_vm_jit_write_protect(enabled: c_int);
     fn darwin_art_host_vm_advise(
         address: *mut c_void,
         length: usize,
         advice: c_int,
         error: *mut c_int,
     ) -> c_int;
+    fn darwin_art_host_vm_remap_zero(
+        address: *mut c_void,
+        length: usize,
+        protection: c_int,
+        error: *mut c_int,
+    ) -> *mut c_void;
     fn darwin_art_host_vm_invalidate_icache(address: *mut c_void, length: usize);
+    fn darwin_art_host_vm_close_fd(fd: c_int, error: *mut c_int) -> c_int;
     fn darwin_art_bionic_errno_set_from_darwin(error: c_int) -> c_int;
     fn darwin_art_bionic_errno_store(error: i32);
 }
@@ -48,18 +92,40 @@ struct Mapping {
     requested_length: usize,
     mapped_length: usize,
     protection: i32,
+    anonymous: bool,
+    jit_capable: bool,
+    jit_activated: bool,
 }
 
 pub struct Provider {
     page_size: usize,
     mappings: Mutex<BTreeMap<usize, Mapping>>,
+    borrowed_ranges: Mutex<BTreeMap<usize, usize>>,
     capability_failure: AtomicBool,
 }
 
 static ACTIVE: OnceLock<RwLock<Option<Arc<Provider>>>> = OnceLock::new();
+type FileDescriptorResolver = unsafe extern "C" fn(c_int, *mut c_int) -> c_int;
+static FILE_DESCRIPTOR_RESOLVER: OnceLock<RwLock<Option<FileDescriptorResolver>>> = OnceLock::new();
 
 fn active_slot() -> &'static RwLock<Option<Arc<Provider>>> {
     ACTIVE.get_or_init(|| RwLock::new(None))
+}
+
+fn file_descriptor_resolver() -> &'static RwLock<Option<FileDescriptorResolver>> {
+    FILE_DESCRIPTOR_RESOLVER.get_or_init(|| RwLock::new(None))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_vm_bind_file_descriptor_resolver(
+    resolver: Option<FileDescriptorResolver>,
+) -> c_int {
+    let Ok(mut active) = file_descriptor_resolver().write() else {
+        set_errno(ANDROID_EIO);
+        return -1;
+    };
+    *active = resolver;
+    0
 }
 
 impl Provider {
@@ -72,6 +138,7 @@ impl Provider {
         Ok(Self {
             page_size,
             mappings: Mutex::new(BTreeMap::new()),
+            borrowed_ranges: Mutex::new(BTreeMap::new()),
             capability_failure: AtomicBool::new(false),
         })
     }
@@ -110,6 +177,13 @@ impl Provider {
 
 impl Drop for Provider {
     fn drop(&mut self) {
+        let borrowed = match self.borrowed_ranges.get_mut() {
+            Ok(value) => value,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if !borrowed.is_empty() {
+            self.capability_failure.store(true, Ordering::Release);
+        }
         let mappings = match self.mappings.get_mut() {
             Ok(value) => value,
             Err(poisoned) => poisoned.into_inner(),
@@ -134,6 +208,7 @@ impl Drop for Activation {
     fn drop(&mut self) {
         if let Ok(mut active) = active_slot().write() {
             active.take();
+            clear_jit_ranges();
         }
     }
 }
@@ -198,9 +273,88 @@ pub extern "C" fn darwin_art_bionic_vm_process_uninstall() -> c_int {
             return -1;
         };
         active.users -= 1;
-        if active.users == 0 { owner.take() } else { None }
+        if active.users == 0 {
+            owner.take()
+        } else {
+            None
+        }
     };
+    let final_owner = removed.is_some();
     drop(removed);
+    if final_owner {
+        let Ok(mut resolver) = file_descriptor_resolver().write() else {
+            set_errno(ANDROID_EIO);
+            return -1;
+        };
+        *resolver = None;
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_vm_register_borrowed_range(
+    address: *mut c_void,
+    length: usize,
+) -> c_int {
+    let Some(provider) = provider() else {
+        return -1;
+    };
+    if address.is_null()
+        || length == 0
+        || address as usize % provider.page_size != 0
+        || length % provider.page_size != 0
+    {
+        set_errno(ANDROID_EINVAL);
+        return -1;
+    }
+    let start = address as usize;
+    let Some(end) = start.checked_add(length) else {
+        set_errno(ANDROID_EOVERFLOW);
+        return -1;
+    };
+    let Ok(mappings) = provider.mappings.lock() else {
+        set_errno(ANDROID_EIO);
+        return -1;
+    };
+    if mappings
+        .iter()
+        .any(|(&base, mapping)| base < end && start < base + mapping.mapped_length)
+    {
+        set_errno(ANDROID_EEXIST);
+        return -1;
+    }
+    let Ok(mut borrowed) = provider.borrowed_ranges.lock() else {
+        set_errno(ANDROID_EIO);
+        return -1;
+    };
+    if borrowed
+        .iter()
+        .any(|(&base, &range_length)| base < end && start < base + range_length)
+    {
+        set_errno(ANDROID_EEXIST);
+        return -1;
+    }
+    borrowed.insert(start, length);
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_vm_unregister_borrowed_range(
+    address: *mut c_void,
+    length: usize,
+) -> c_int {
+    let Some(provider) = provider() else {
+        return -1;
+    };
+    let Ok(mut borrowed) = provider.borrowed_ranges.lock() else {
+        set_errno(ANDROID_EIO);
+        return -1;
+    };
+    if borrowed.get(&(address as usize)) != Some(&length) {
+        set_errno(ANDROID_EINVAL);
+        return -1;
+    }
+    borrowed.remove(&(address as usize));
     0
 }
 
@@ -260,8 +414,183 @@ fn round_length(length: usize, page_size: usize) -> Option<usize> {
         .map(|value| value & !(page_size - 1))
 }
 
+fn owned_range(mappings: &BTreeMap<usize, Mapping>, start: usize, length: usize) -> bool {
+    let Some(end) = start.checked_add(length) else {
+        return false;
+    };
+    let mut cursor = start;
+    while cursor < end {
+        let Some((&base, mapping)) = mappings.range(..=cursor).next_back() else {
+            return false;
+        };
+        let Some(mapping_end) = base.checked_add(mapping.mapped_length) else {
+            return false;
+        };
+        if cursor < base || cursor >= mapping_end {
+            return false;
+        }
+        cursor = mapping_end.min(end);
+    }
+    true
+}
+
+fn jit_capable_range(mappings: &BTreeMap<usize, Mapping>, start: usize, length: usize) -> bool {
+    let Some(end) = start.checked_add(length) else {
+        return false;
+    };
+    let mut cursor = start;
+    while cursor < end {
+        let Some((&base, mapping)) = mappings.range(..=cursor).next_back() else {
+            return false;
+        };
+        let Some(mapping_end) = base.checked_add(mapping.mapped_length) else {
+            return false;
+        };
+        if cursor < base || cursor >= mapping_end || !mapping.jit_capable {
+            return false;
+        }
+        cursor = mapping_end.min(end);
+    }
+    true
+}
+
+fn jit_activated_range(mappings: &BTreeMap<usize, Mapping>, start: usize, length: usize) -> bool {
+    let Some(end) = start.checked_add(length) else {
+        return false;
+    };
+    let mut cursor = start;
+    while cursor < end {
+        let Some((&base, mapping)) = mappings.range(..=cursor).next_back() else {
+            return false;
+        };
+        let Some(mapping_end) = base.checked_add(mapping.mapped_length) else {
+            return false;
+        };
+        if cursor < base || cursor >= mapping_end || !mapping.jit_activated {
+            return false;
+        }
+        cursor = mapping_end.min(end);
+    }
+    true
+}
+
+fn borrowed_range(ranges: &BTreeMap<usize, usize>, start: usize, length: usize) -> bool {
+    let Some(end) = start.checked_add(length) else {
+        return false;
+    };
+    let Some((&base, &range_length)) = ranges.range(..=start).next_back() else {
+        return false;
+    };
+    base <= start
+        && base
+            .checked_add(range_length)
+            .is_some_and(|limit| end <= limit)
+}
+
+fn publish_jit_ranges(mappings: &BTreeMap<usize, Mapping>) {
+    let previous_count = JIT_RANGE_COUNT.load(Ordering::Relaxed);
+    JIT_RANGE_EPOCH.fetch_add(1, Ordering::AcqRel);
+    let mut count = 0;
+    for (&base, mapping) in mappings {
+        if !mapping.jit_capable
+            || !mapping.jit_activated
+            || mapping.protection & ANDROID_PROT_EXEC == 0
+        {
+            continue;
+        }
+        let Some(end) = base.checked_add(mapping.mapped_length) else {
+            continue;
+        };
+        JIT_RANGES[count].start.store(base, Ordering::Relaxed);
+        JIT_RANGES[count].end.store(end, Ordering::Relaxed);
+        count += 1;
+    }
+    if count < previous_count {
+        for range in &JIT_RANGES[count..previous_count] {
+            range.start.store(0, Ordering::Relaxed);
+            range.end.store(0, Ordering::Relaxed);
+        }
+    }
+    JIT_RANGE_COUNT.store(count, Ordering::Relaxed);
+    JIT_RANGE_EPOCH.fetch_add(1, Ordering::Release);
+}
+
+fn clear_jit_ranges() {
+    JIT_RANGE_EPOCH.fetch_add(1, Ordering::AcqRel);
+    JIT_RANGE_COUNT.store(0, Ordering::Relaxed);
+    JIT_RANGE_EPOCH.fetch_add(1, Ordering::Release);
+}
+
+fn replace_range(
+    mappings: &mut BTreeMap<usize, Mapping>,
+    start: usize,
+    length: usize,
+    replacement_protection: Option<i32>,
+) {
+    let end = start + length;
+    let affected: Vec<(usize, Mapping)> = mappings
+        .range(..end)
+        .filter_map(|(&base, mapping)| {
+            (base + mapping.mapped_length > start).then_some((base, *mapping))
+        })
+        .collect();
+    for (base, mapping) in affected {
+        mappings.remove(&base);
+        let mapping_end = base + mapping.mapped_length;
+        if base < start {
+            let prefix_length = start - base;
+            mappings.insert(
+                base,
+                Mapping {
+                    requested_length: prefix_length,
+                    mapped_length: prefix_length,
+                    protection: mapping.protection,
+                    anonymous: mapping.anonymous,
+                    jit_capable: mapping.jit_capable,
+                    jit_activated: mapping.jit_activated,
+                },
+            );
+        }
+        let overlap_start = base.max(start);
+        let overlap_end = mapping_end.min(end);
+        if let Some(protection) = replacement_protection {
+            let overlap_length = overlap_end - overlap_start;
+            mappings.insert(
+                overlap_start,
+                Mapping {
+                    requested_length: overlap_length,
+                    mapped_length: overlap_length,
+                    protection,
+                    anonymous: mapping.anonymous,
+                    jit_capable: mapping.jit_capable,
+                    jit_activated: mapping.jit_activated,
+                },
+            );
+        }
+        if mapping_end > end {
+            let suffix_length = mapping_end - end;
+            mappings.insert(
+                end,
+                Mapping {
+                    requested_length: suffix_length,
+                    mapped_length: suffix_length,
+                    protection: mapping.protection,
+                    anonymous: mapping.anonymous,
+                    jit_capable: mapping.jit_capable,
+                    jit_activated: mapping.jit_activated,
+                },
+            );
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
-pub extern "C" fn darwin_art_bionic_vm_mmap_core(
+/// # Safety
+///
+/// `address` is an opaque Android mapping hint. `MAP_FIXED` is honored only
+/// when the complete replacement range is already owned by this provider;
+/// otherwise the host may choose a different free range.
+pub unsafe extern "C" fn darwin_art_bionic_vm_mmap_core(
     address: *mut c_void,
     length: usize,
     protection: c_int,
@@ -269,6 +598,12 @@ pub extern "C" fn darwin_art_bionic_vm_mmap_core(
     fd: c_int,
     offset: i64,
 ) -> *mut c_void {
+    let trace = std::env::var_os("DARWIN_ART_VM_TRACE").is_some();
+    if trace {
+        eprintln!(
+            "DARWIN VM: mmap address={address:p} length={length:#x} protection={protection:#x} flags={flags:#x} fd={fd} offset={offset:#x}"
+        );
+    }
     let Some(provider) = provider() else {
         return MAP_FAILED;
     };
@@ -284,11 +619,24 @@ pub extern "C" fn darwin_art_bionic_vm_mmap_core(
         set_errno(ANDROID_EINVAL);
         return MAP_FAILED;
     }
-    if !address.is_null() || flags != ANDROID_MAP_PRIVATE | ANDROID_MAP_ANONYMOUS || offset != 0 {
+    let fixed = flags & ANDROID_MAP_FIXED != 0;
+    // MAP_NORESERVE changes the host's commit policy, not the mapping kind.
+    // V8 uses it for the multi-gigabyte sandbox cage reservation.
+    let mapping_flags = flags & !(ANDROID_MAP_FIXED | ANDROID_MAP_NORESERVE);
+    let anonymous = mapping_flags == ANDROID_MAP_PRIVATE | ANDROID_MAP_ANONYMOUS
+        || mapping_flags == ANDROID_MAP_SHARED | ANDROID_MAP_ANONYMOUS;
+    let file_backed = mapping_flags == ANDROID_MAP_PRIVATE || mapping_flags == ANDROID_MAP_SHARED;
+    if (!anonymous && !file_backed) || (anonymous && offset != 0) {
+        if trace {
+            eprintln!("DARWIN VM: mmap rejected unsupported address/flags/offset");
+        }
         set_errno(ANDROID_EOPNOTSUPP);
         return MAP_FAILED;
     }
-    let _ignored_anonymous_fd = fd;
+    if file_backed && fd < 0 {
+        set_errno(ANDROID_EBADF);
+        return MAP_FAILED;
+    }
     let Some(host_protection) = host_protection(protection) else {
         set_errno(ANDROID_EINVAL);
         return MAP_FAILED;
@@ -309,16 +657,108 @@ pub extern "C" fn darwin_art_bionic_vm_mmap_core(
             return MAP_FAILED;
         }
     };
-    if mappings.len() >= MAX_MAPPINGS {
+    if !fixed && mappings.len() >= MAX_MAPPINGS {
+        set_errno(ANDROID_ENOMEM);
+        return MAP_FAILED;
+    }
+    if fixed
+        && (address.is_null()
+            || address as usize % provider.page_size != 0
+            || !owned_range(&mappings, address as usize, mapped_length))
+    {
         set_errno(ANDROID_ENOMEM);
         return MAP_FAILED;
     }
     let mut host_error = 0;
-    // SAFETY: mapped_length is nonzero and rounded; the host helper fixes anonymous/private flags.
-    let result = unsafe { darwin_art_host_vm_map(mapped_length, host_protection, &mut host_error) };
+    let mut mapped_fd = fd;
+    let mut close_mapped_fd = false;
+    if file_backed {
+        let resolver = match file_descriptor_resolver().read() {
+            Ok(resolver) => *resolver,
+            Err(_) => {
+                provider.capability_failure.store(true, Ordering::Release);
+                set_errno(ANDROID_EIO);
+                return MAP_FAILED;
+            }
+        };
+        if let Some(resolver) = resolver {
+            let mut resolved_fd = -1;
+            // SAFETY: the callback consumes the writable out-parameter before
+            // returning and retains no pointer.
+            let resolution = unsafe { resolver(fd, &mut resolved_fd) };
+            if trace {
+                eprintln!(
+                    "DARWIN VM: fd resolver guest_fd={fd} status={resolution} host_fd={resolved_fd}"
+                );
+            }
+            match resolution {
+                1 if resolved_fd >= 0 => {
+                    mapped_fd = resolved_fd;
+                    close_mapped_fd = true;
+                }
+                0 => {}
+                -1 => return MAP_FAILED,
+                _ => {
+                    provider.capability_failure.store(true, Ordering::Release);
+                    set_errno(ANDROID_EIO);
+                    return MAP_FAILED;
+                }
+            }
+        }
+    }
+    // SAFETY: mapped_length is nonzero and rounded; the host helper fixes
+    // anonymous/private flags and treats address as a non-fixed hint.
+    let result = unsafe {
+        darwin_art_host_vm_map(
+            address,
+            mapped_length,
+            host_protection,
+            flags,
+            if anonymous { -1 } else { mapped_fd },
+            offset,
+            &mut host_error,
+        )
+    };
+    if close_mapped_fd {
+        let mut close_error = 0;
+        // SAFETY: a successful resolver transferred this duplicate to us.
+        if unsafe { darwin_art_host_vm_close_fd(mapped_fd, &mut close_error) } != 0 {
+            if result != MAP_FAILED {
+                let mut ignored = 0;
+                // SAFETY: this is the complete mapping just returned above.
+                unsafe { darwin_art_host_vm_unmap(result, mapped_length, &mut ignored) };
+            }
+            fail_host(&provider, close_error);
+            return MAP_FAILED;
+        }
+    }
     if result == MAP_FAILED {
+        if trace {
+            eprintln!("DARWIN VM: host mmap failed errno={host_error}");
+        }
         fail_host(&provider, host_error);
         return MAP_FAILED;
+    }
+    if fixed {
+        if result != address {
+            provider.capability_failure.store(true, Ordering::Release);
+            set_errno(ANDROID_EIO);
+            return MAP_FAILED;
+        }
+        replace_range(
+            &mut mappings,
+            address as usize,
+            mapped_length,
+            Some(protection),
+        );
+        publish_jit_ranges(&mappings);
+        if trace {
+            eprintln!("DARWIN VM: mmap fixed result={result:p} mapped_length={mapped_length:#x}");
+        }
+        return result;
+    }
+    if trace {
+        eprintln!("DARWIN VM: mmap result={result:p} mapped_length={mapped_length:#x}");
     }
     let old = mappings.insert(
         result as usize,
@@ -326,6 +766,11 @@ pub extern "C" fn darwin_art_bionic_vm_mmap_core(
             requested_length: length,
             mapped_length,
             protection,
+            anonymous,
+            jit_capable: anonymous
+                && mapping_flags == ANDROID_MAP_PRIVATE | ANDROID_MAP_ANONYMOUS
+                && protection == 0,
+            jit_activated: false,
         },
     );
     if old.is_some() {
@@ -362,22 +807,161 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_munmap_core(
             return -1;
         }
     };
-    let Some(mapping) = mappings.get(&(address as usize)).copied() else {
-        set_errno(ANDROID_EINVAL);
+    let Some(mapped_length) = round_length(length, provider.page_size) else {
+        set_errno(ANDROID_EOVERFLOW);
         return -1;
     };
-    if !whole_mapping(mapping, length) {
-        set_errno(ANDROID_EOPNOTSUPP);
+    if !owned_range(&mappings, address as usize, mapped_length) {
+        set_errno(ANDROID_EINVAL);
         return -1;
     }
     let mut host_error = 0;
-    // SAFETY: the side table proves this is the complete live owned mapping.
-    if unsafe { darwin_art_host_vm_unmap(address, mapping.mapped_length, &mut host_error) } != 0 {
+    // SAFETY: the side table proves every page in this rounded range is owned.
+    if unsafe { darwin_art_host_vm_unmap(address, mapped_length, &mut host_error) } != 0 {
         fail_host(&provider, host_error);
         return -1;
     }
-    mappings.remove(&(address as usize));
+    replace_range(&mut mappings, address as usize, mapped_length, None);
+    publish_jit_ranges(&mappings);
     0
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `old_address` is dereferenced only after the side table proves ownership
+/// of the complete mapping. Fixed-address remapping is not accepted.
+pub unsafe extern "C" fn darwin_art_bionic_vm_mremap_core(
+    old_address: *mut c_void,
+    old_length: usize,
+    new_length: usize,
+    flags: c_int,
+    _new_address: *mut c_void,
+) -> *mut c_void {
+    let Some(provider) = provider() else {
+        return MAP_FAILED;
+    };
+    if old_address.is_null()
+        || old_length == 0
+        || new_length == 0
+        || old_address as usize % provider.page_size != 0
+    {
+        set_errno(ANDROID_EINVAL);
+        return MAP_FAILED;
+    }
+    // The fifth AAPCS64 register is unspecified unless MREMAP_FIXED is set.
+    // Unsupported flag bits are rejected before that optional value matters.
+    if flags & !ANDROID_MREMAP_MAYMOVE != 0 {
+        set_errno(ANDROID_EOPNOTSUPP);
+        return MAP_FAILED;
+    }
+    let Some(new_mapped_length) = round_length(new_length, provider.page_size) else {
+        set_errno(ANDROID_EOVERFLOW);
+        return MAP_FAILED;
+    };
+    let mut mappings = match provider.mappings.lock() {
+        Ok(value) => value,
+        Err(_) => {
+            provider.capability_failure.store(true, Ordering::Release);
+            set_errno(ANDROID_EIO);
+            return MAP_FAILED;
+        }
+    };
+    let Some(old_mapping) = mappings.get(&(old_address as usize)).copied() else {
+        set_errno(ANDROID_EINVAL);
+        return MAP_FAILED;
+    };
+    if !whole_mapping(old_mapping, old_length) {
+        set_errno(ANDROID_EOPNOTSUPP);
+        return MAP_FAILED;
+    }
+    if new_mapped_length <= old_mapping.mapped_length {
+        if let Some(mapping) = mappings.get_mut(&(old_address as usize)) {
+            mapping.requested_length = new_length;
+        }
+        return old_address;
+    }
+    if flags & ANDROID_MREMAP_MAYMOVE == 0 || mappings.len() >= MAX_MAPPINGS {
+        set_errno(ANDROID_ENOMEM);
+        return MAP_FAILED;
+    }
+
+    let mut host_error = 0;
+    // Allocate writable storage for the copy, then restore the guest's exact
+    // protection before publishing the moved mapping.
+    let moved = unsafe {
+        darwin_art_host_vm_map(
+            std::ptr::null_mut(),
+            new_mapped_length,
+            3,
+            ANDROID_MAP_PRIVATE | ANDROID_MAP_ANONYMOUS,
+            -1,
+            0,
+            &mut host_error,
+        )
+    };
+    if moved == MAP_FAILED {
+        fail_host(&provider, host_error);
+        return MAP_FAILED;
+    }
+    if old_mapping.protection & ANDROID_PROT_READ == 0 {
+        let readable = host_protection(old_mapping.protection | ANDROID_PROT_READ)
+            .expect("validated protection");
+        if unsafe {
+            darwin_art_host_vm_protect(
+                old_address,
+                old_mapping.mapped_length,
+                readable,
+                &mut host_error,
+            )
+        } != 0
+        {
+            let mut ignored = 0;
+            unsafe { darwin_art_host_vm_unmap(moved, new_mapped_length, &mut ignored) };
+            fail_host(&provider, host_error);
+            return MAP_FAILED;
+        }
+    }
+    // SAFETY: both complete mappings are live and non-overlapping under the
+    // ownership lock; the copied range is bounded by both requested sizes.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            old_address.cast::<u8>(),
+            moved.cast::<u8>(),
+            old_mapping.requested_length.min(new_length),
+        )
+    };
+    let target_protection = host_protection(old_mapping.protection).expect("validated protection");
+    if unsafe {
+        darwin_art_host_vm_protect(moved, new_mapped_length, target_protection, &mut host_error)
+    } != 0
+    {
+        let mut ignored = 0;
+        unsafe { darwin_art_host_vm_unmap(moved, new_mapped_length, &mut ignored) };
+        fail_host(&provider, host_error);
+        return MAP_FAILED;
+    }
+    if unsafe { darwin_art_host_vm_unmap(old_address, old_mapping.mapped_length, &mut host_error) }
+        != 0
+    {
+        let mut ignored = 0;
+        unsafe { darwin_art_host_vm_unmap(moved, new_mapped_length, &mut ignored) };
+        fail_host(&provider, host_error);
+        return MAP_FAILED;
+    }
+    mappings.remove(&(old_address as usize));
+    mappings.insert(
+        moved as usize,
+        Mapping {
+            requested_length: new_length,
+            mapped_length: new_mapped_length,
+            protection: old_mapping.protection,
+            anonymous: old_mapping.anonymous,
+            jit_capable: old_mapping.jit_capable,
+            jit_activated: old_mapping.jit_activated,
+        },
+    );
+    publish_jit_ranges(&mappings);
+    moved
 }
 
 #[unsafe(no_mangle)]
@@ -389,6 +973,12 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_mprotect_core(
     length: usize,
     protection: c_int,
 ) -> c_int {
+    let trace = std::env::var_os("DARWIN_ART_VM_TRACE").is_some();
+    if trace {
+        eprintln!(
+            "DARWIN VM: mprotect address={address:p} length={length:#x} protection={protection:#x}"
+        );
+    }
     let Some(provider) = provider() else {
         return -1;
     };
@@ -400,10 +990,6 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_mprotect_core(
         set_errno(ANDROID_EINVAL);
         return -1;
     };
-    if protection & ANDROID_PROT_WRITE != 0 && protection & ANDROID_PROT_EXEC != 0 {
-        set_errno(ANDROID_EACCES);
-        return -1;
-    }
     let mut mappings = match provider.mappings.lock() {
         Ok(value) => value,
         Err(_) => {
@@ -412,34 +998,123 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_mprotect_core(
             return -1;
         }
     };
-    let Some(mapping) = mappings.get_mut(&(address as usize)) else {
-        set_errno(ANDROID_ENOMEM);
+    let Some(mapped_length) = round_length(length, provider.page_size) else {
+        set_errno(ANDROID_EOVERFLOW);
         return -1;
     };
-    if !whole_mapping(*mapping, length) {
-        set_errno(ANDROID_EOPNOTSUPP);
+    let borrowed = match provider.borrowed_ranges.lock() {
+        Ok(value) => value,
+        Err(_) => {
+            provider.capability_failure.store(true, Ordering::Release);
+            set_errno(ANDROID_EIO);
+            return -1;
+        }
+    };
+    let provider_owned = owned_range(&mappings, address as usize, mapped_length);
+    if !provider_owned && !borrowed_range(&borrowed, address as usize, mapped_length) {
+        if trace {
+            eprintln!("DARWIN VM: mprotect rejected range is not provider-owned");
+        }
+        set_errno(ANDROID_ENOMEM);
         return -1;
     }
+    if protection & ANDROID_PROT_WRITE != 0
+        && protection & ANDROID_PROT_EXEC != 0
+        && (!provider_owned || !jit_capable_range(&mappings, address as usize, mapped_length))
+    {
+        set_errno(ANDROID_EACCES);
+        return -1;
+    }
+    let jit_capable =
+        provider_owned && jit_capable_range(&mappings, address as usize, mapped_length);
+    let jit_activated =
+        jit_capable && jit_activated_range(&mappings, address as usize, mapped_length);
+    if jit_activated {
+        // MAP_JIT remains host-RWX. Android V8 expresses its write/execute
+        // phases with mprotect; Apple silicon expresses the same W^X boundary
+        // as a per-thread switch. A thread that next enters the executable
+        // CodeRange is switched back lazily by the SIGBUS recovery hook below.
+        unsafe {
+            darwin_art_host_vm_jit_write_protect(i32::from(protection & ANDROID_PROT_WRITE == 0))
+        };
+        replace_range(
+            &mut mappings,
+            address as usize,
+            mapped_length,
+            Some(protection),
+        );
+        publish_jit_ranges(&mappings);
+        if protection & ANDROID_PROT_EXEC != 0 {
+            unsafe { darwin_art_host_vm_invalidate_icache(address, mapped_length) };
+        }
+        return 0;
+    }
     let mut host_error = 0;
-    // SAFETY: the side table proves this is the complete live owned mapping.
+    // SAFETY: the side table proves every page in this rounded range is owned.
     if unsafe {
-        darwin_art_host_vm_protect(
-            address,
-            mapping.mapped_length,
-            host_protection,
-            &mut host_error,
-        )
+        darwin_art_host_vm_protect(address, mapped_length, host_protection, &mut host_error)
     } != 0
     {
+        if trace {
+            eprintln!("DARWIN VM: host mprotect failed errno={host_error}");
+        }
         fail_host(&provider, host_error);
         return -1;
     }
-    mapping.protection = protection;
+    if provider_owned {
+        replace_range(
+            &mut mappings,
+            address as usize,
+            mapped_length,
+            Some(protection),
+        );
+        if jit_capable && protection & ANDROID_PROT_WRITE != 0 {
+            let end = address as usize + mapped_length;
+            for (_, mapping) in mappings.range_mut(address as usize..end) {
+                mapping.jit_activated = true;
+            }
+            unsafe { darwin_art_host_vm_jit_write_protect(0) };
+        }
+        publish_jit_ranges(&mappings);
+    }
     if protection & ANDROID_PROT_EXEC != 0 {
-        // SAFETY: the mapping remains live under the table lock for this complete range.
-        unsafe { darwin_art_host_vm_invalidate_icache(address, mapping.mapped_length) };
+        // SAFETY: the mapping remains live under the table lock for this range.
+        unsafe { darwin_art_host_vm_invalidate_icache(address, mapped_length) };
     }
     0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_vm_recover_jit_execution_fault(
+    program_counter: usize,
+) -> c_int {
+    loop {
+        let epoch = JIT_RANGE_EPOCH.load(Ordering::Acquire);
+        if epoch & 1 != 0 {
+            std::hint::spin_loop();
+            continue;
+        }
+        let count = JIT_RANGE_COUNT.load(Ordering::Acquire).min(MAX_MAPPINGS);
+        let mut executable = false;
+        for range in &JIT_RANGES[..count] {
+            let start = range.start.load(Ordering::Relaxed);
+            let end = range.end.load(Ordering::Relaxed);
+            executable |= program_counter >= start && program_counter < end;
+        }
+        if JIT_RANGE_EPOCH.load(Ordering::Acquire) != epoch {
+            std::hint::spin_loop();
+            continue;
+        }
+        if !executable {
+            return 0;
+        }
+        break;
+    }
+    // Darwin reports execution from a write-enabled MAP_JIT thread as SIGBUS
+    // with the program counter as the fault address. Re-enable execution for
+    // this thread and retry the interrupted instruction.
+    unsafe { darwin_art_host_vm_jit_write_protect(1) };
+    1
 }
 
 #[unsafe(no_mangle)]
@@ -451,6 +1126,7 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_madvise_core(
     length: usize,
     advice: c_int,
 ) -> c_int {
+    let trace = std::env::var_os("DARWIN_ART_VM_TRACE").is_some();
     let Some(provider) = provider() else {
         return -1;
     };
@@ -460,7 +1136,11 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_madvise_core(
     }
     let host_advice = match advice {
         0..=3 => advice,
-        4 => 11,
+        // Linux MADV_DONTNEED on a private anonymous mapping guarantees
+        // zero-fill on the next access. Darwin MADV_ZERO rejects some of
+        // PartitionAlloc's ranges with EPERM, so those ranges are replaced
+        // in place below instead of passing either platform's value through.
+        4 => 4,
         8 => 5,
         9..=25 | 100 | 101 => {
             set_errno(ANDROID_EOPNOTSUPP);
@@ -479,22 +1159,122 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_madvise_core(
             return -1;
         }
     };
-    let Some(mapping) = mappings.get(&(address as usize)).copied() else {
-        set_errno(ANDROID_ENOMEM);
+    let Some(mapped_length) = round_length(length, provider.page_size) else {
+        set_errno(ANDROID_EOVERFLOW);
         return -1;
     };
-    if !whole_mapping(mapping, length) {
-        set_errno(ANDROID_EOPNOTSUPP);
+    if !owned_range(&mappings, address as usize, mapped_length) {
+        set_errno(ANDROID_ENOMEM);
         return -1;
+    }
+    if advice == 4 {
+        let start = address as usize;
+        let end = start + mapped_length;
+        let segments: Vec<(usize, usize, Mapping)> = mappings
+            .range(..end)
+            .filter_map(|(&base, mapping)| {
+                let mapping_end = base + mapping.mapped_length;
+                if mapping_end <= start {
+                    return None;
+                }
+                let segment_start = base.max(start);
+                let segment_end = mapping_end.min(end);
+                Some((segment_start, segment_end - segment_start, *mapping))
+            })
+            .collect();
+        for (segment_start, segment_length, mapping) in segments {
+            let mut host_error = 0;
+            let result = if mapping.anonymous && !mapping.jit_capable {
+                let host_protection =
+                    host_protection(mapping.protection).expect("registered protection is valid");
+                // SAFETY: ownership was proven for this page-aligned segment;
+                // MAP_FIXED atomically replaces it with zero-filled anonymous
+                // pages while preserving the guest protection.
+                let remapped = unsafe {
+                    darwin_art_host_vm_remap_zero(
+                        segment_start as *mut c_void,
+                        segment_length,
+                        host_protection,
+                        &mut host_error,
+                    )
+                };
+                if remapped == segment_start as *mut c_void {
+                    0
+                } else {
+                    -1
+                }
+            } else {
+                // SAFETY: ownership was proven. File mappings retain their
+                // backing-object semantics. MAP_JIT reservations cannot be
+                // replaced with MAP_FIXED on Darwin, so use native DONTNEED;
+                // V8 treats this as a discard hint and recommits before use.
+                unsafe {
+                    darwin_art_host_vm_advise(
+                        segment_start as *mut c_void,
+                        segment_length,
+                        host_advice,
+                        &mut host_error,
+                    )
+                }
+            };
+            if result != 0 {
+                if trace {
+                    eprintln!(
+                        "DARWIN VM: MADV_DONTNEED failed address={segment_start:#x} length={segment_length:#x} anonymous={} errno={host_error}",
+                        mapping.anonymous
+                    );
+                }
+                fail_host(&provider, host_error);
+                return -1;
+            }
+        }
+        return 0;
     }
     let mut host_error = 0;
     // SAFETY: the side table proves this is the complete live owned mapping.
-    if unsafe {
-        darwin_art_host_vm_advise(address, mapping.mapped_length, host_advice, &mut host_error)
-    } != 0
+    if unsafe { darwin_art_host_vm_advise(address, mapped_length, host_advice, &mut host_error) }
+        != 0
     {
         fail_host(&provider, host_error);
         return -1;
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn executable_jit_mapping(length: usize) -> Mapping {
+        Mapping {
+            requested_length: length,
+            mapped_length: length,
+            protection: ANDROID_PROT_READ | ANDROID_PROT_EXEC,
+            anonymous: true,
+            jit_capable: true,
+            jit_activated: true,
+        }
+    }
+
+    #[test]
+    fn jit_signal_snapshot_grows_and_shrinks() {
+        clear_jit_ranges();
+        let mut mappings = BTreeMap::new();
+        mappings.insert(0x10000, executable_jit_mapping(0x4000));
+        publish_jit_ranges(&mappings);
+        assert_eq!(JIT_RANGE_COUNT.load(Ordering::Acquire), 1);
+        assert_eq!(JIT_RANGES[0].start.load(Ordering::Acquire), 0x10000);
+        assert_eq!(JIT_RANGES[0].end.load(Ordering::Acquire), 0x14000);
+
+        mappings.insert(0x20000, executable_jit_mapping(0x8000));
+        publish_jit_ranges(&mappings);
+        assert_eq!(JIT_RANGE_COUNT.load(Ordering::Acquire), 2);
+
+        mappings.remove(&0x10000);
+        publish_jit_ranges(&mappings);
+        assert_eq!(JIT_RANGE_COUNT.load(Ordering::Acquire), 1);
+        assert_eq!(JIT_RANGES[0].start.load(Ordering::Acquire), 0x20000);
+        assert_eq!(JIT_RANGES[1].start.load(Ordering::Acquire), 0);
+        clear_jit_ranges();
+    }
 }

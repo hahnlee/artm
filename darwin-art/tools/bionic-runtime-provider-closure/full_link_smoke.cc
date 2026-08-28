@@ -37,6 +37,14 @@ extern "C" int darwin_art_android_ANativeWindow_setBuffersGeometry(
     void *, int, int, int) {
   return 0;
 }
+extern "C" int ASharedMemory_create(const char *, size_t) { return -1; }
+extern "C" int ASharedMemory_setProt(int, int) { return 0; }
+extern "C" void* darwin_art_angle_dso_symbol(const char*, const char*) {
+  return nullptr;
+}
+extern "C" void* darwin_art_android_platform_symbol(const char*) {
+  return nullptr;
+}
 
 namespace {
 
@@ -243,8 +251,8 @@ int main() {
   unlinkat(root_fd, "fixture", 0);
   close(root_fd);
   rmdir(root_path);
-  std::fprintf(stderr, "bionic-runtime-provider-closure: PASS bind_builtins=34 "
-                       "routes=534 actual-resolvers=yes fd=fs+pipe-poll "
+  std::fprintf(stderr, "bionic-runtime-provider-closure: PASS bind_builtins=36 "
+                       "routes=733 actual-resolvers=yes fd=fs+pipe-poll "
                        "wide-stdio=central-lease syslog-tag=owned-copy\n");
   return 0;
 }

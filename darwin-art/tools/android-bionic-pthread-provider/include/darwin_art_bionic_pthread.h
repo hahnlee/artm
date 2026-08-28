@@ -40,8 +40,8 @@ typedef void (*DarwinArtAndroidOnceRoutine)(void);
 typedef void* (*DarwinArtAndroidThreadRoutine)(void* argument);
 
 DarwinArtAndroidPthread darwin_art_bionic_pthread_self(void);
-// Coherent lifecycle owner seam. Only null attributes are currently accepted;
-// returned tokens are the sole valid inputs to join/detach.
+// Coherent lifecycle owner seam. Attributes use the Android arm64 transport
+// layout above; returned tokens are the sole valid inputs to join/detach.
 int darwin_art_bionic_pthread_create(
     DarwinArtAndroidPthread* thread,
     const void* android_attributes,
@@ -74,6 +74,12 @@ int darwin_art_bionic_pthread_mutex_lock(DarwinArtAndroidPthreadMutex* mutex);
 int darwin_art_bionic_pthread_mutex_trylock(DarwinArtAndroidPthreadMutex* mutex);
 int darwin_art_bionic_pthread_mutex_unlock(DarwinArtAndroidPthreadMutex* mutex);
 int darwin_art_bionic_pthread_mutex_destroy(DarwinArtAndroidPthreadMutex* mutex);
+int darwin_art_bionic_pthread_condattr_init(uint32_t* attributes);
+int darwin_art_bionic_pthread_condattr_destroy(uint32_t* attributes);
+int darwin_art_bionic_pthread_condattr_setclock(uint32_t* attributes,
+                                                int android_clock_id);
+int darwin_art_bionic_pthread_cond_init(DarwinArtAndroidPthreadCond* cond,
+                                        const void* attributes);
 int darwin_art_bionic_pthread_cond_wait(DarwinArtAndroidPthreadCond* cond,
                                         DarwinArtAndroidPthreadMutex* mutex);
 int darwin_art_bionic_pthread_cond_timedwait(

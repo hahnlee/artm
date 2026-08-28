@@ -3,6 +3,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <mutex>
@@ -15,7 +16,23 @@
 #include "darwin_art_bionic_socket_broker.h"
 #include "darwin_art_bionic_stdio.h"
 #include "darwin_art_bionic_strftime.h"
-#include "darwin_art_bionic_vm.h"
+extern "C" void darwin_art_bionic_process_state_bind_jit_fault_recovery(
+    int (*recovery)(uintptr_t program_counter));
+extern "C" int darwin_art_bionic_vm_bind_file_descriptor_resolver(
+    int (*resolver)(int guest_fd, int* host_fd));
+extern "C" int darwin_art_bionic_vm_process_install();
+extern "C" int darwin_art_bionic_vm_process_uninstall();
+extern "C" int darwin_art_bionic_vm_recover_jit_execution_fault(
+    uintptr_t program_counter);
+
+__attribute__((constructor)) static void BindJitFaultRecovery() {
+  darwin_art_bionic_process_state_bind_jit_fault_recovery(
+      &darwin_art_bionic_vm_recover_jit_execution_fault);
+}
+
+__attribute__((destructor)) static void UnbindJitFaultRecovery() {
+  darwin_art_bionic_process_state_bind_jit_fault_recovery(nullptr);
+}
 
 extern "C" DarwinArtBionicSendfileTransferStatus
 darwin_art_bionic_fs_sendfile_transfer(
@@ -69,6 +86,37 @@ bool acquire_filesystem_direct(int directory_fd, std::string* error) {
   if (status_code != DARWIN_ART_BIONIC_FS_PROCESS_OWNER_OK) {
     *error = "Bionic filesystem process-owner install failed: " +
              std::to_string(static_cast<int>(status_code));
+    return false;
+  }
+  const char* app_data_guest_dir =
+      std::getenv("DARWIN_ART_APK_APP_DATA_GUEST_DIR");
+  if (app_data_guest_dir != nullptr && app_data_guest_dir[0] != '\0') {
+    constexpr std::array<const char*, 6> kAppDataDirectories = {
+        "files", "cache", "code_cache", "no_backup", "databases",
+        "shared_prefs"};
+    if (darwin_art_bionic_fs_seed_private_directory(app_data_guest_dir) != 0) {
+      *error = "Bionic private app directory seed failed";
+      (void)darwin_art_bionic_fs_process_uninstall();
+      return false;
+    }
+    for (const char* child : kAppDataDirectories) {
+      const std::string guest_path =
+          std::string(app_data_guest_dir) + "/" + child;
+      if (darwin_art_bionic_fs_seed_private_directory(guest_path.c_str()) != 0) {
+        *error = "Bionic standard app directory seed failed";
+        (void)darwin_art_bionic_fs_process_uninstall();
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool seed_filesystem_private_directory(const char* guest_path,
+                                       std::string* error) {
+  if (guest_path == nullptr || guest_path[0] != '/' ||
+      darwin_art_bionic_fs_seed_private_directory(guest_path) != 0) {
+    *error = "Bionic private app directory seed failed";
     return false;
   }
   return true;
@@ -157,7 +205,13 @@ void release_sendfile_direct() {
 }
 
 bool acquire_vm_direct(std::string* error) {
+  if (darwin_art_bionic_vm_bind_file_descriptor_resolver(
+          &darwin_art_bionic_fs_dup_host_fd_core) != 0) {
+    *error = "Bionic VM filesystem descriptor bridge failed";
+    return false;
+  }
   if (darwin_art_bionic_vm_process_install() == 0) return true;
+  (void)darwin_art_bionic_vm_bind_file_descriptor_resolver(nullptr);
   *error = "Bionic VM process-owner install failed";
   return false;
 }

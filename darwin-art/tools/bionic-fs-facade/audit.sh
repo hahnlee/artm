@@ -38,8 +38,8 @@ check_hash "$project_root/tools/bionic-ioctl-facade/include/darwin_art_bionic_io
 check_hash "$script_dir/manifests/synthetic-devices.tsv" \
   "$SYNTHETIC_DEVICES_SHA256"
 diff -u <(printf '%s\n' \
-  $'/dev/random\trandom-device\tO_RDONLY\tSecRandomCopyBytes\tS_IFCHR|0666\tmakedev(1,8)' \
-  $'/dev/urandom\trandom-device\tO_RDONLY\tSecRandomCopyBytes\tS_IFCHR|0666\tmakedev(1,9)') \
+  $'/dev/random\trandom-device\tO_RDONLY|O_CLOEXEC|O_NONBLOCK|O_LARGEFILE\tSecRandomCopyBytes\tS_IFCHR|0666\tmakedev(1,8)' \
+  $'/dev/urandom\trandom-device\tO_RDONLY|O_CLOEXEC|O_NONBLOCK|O_LARGEFILE\tSecRandomCopyBytes\tS_IFCHR|0666\tmakedev(1,9)') \
   <(tail -n +2 "$script_dir/manifests/synthetic-devices.tsv") ||
   fail 'synthetic device policy drift'
 
@@ -118,39 +118,56 @@ nm -u "$temp_root/shims.o" | sed 's/^[[:space:]]*//' | sort \
 cat >"$temp_root/expected-undefined" <<'EOF'
 ___error
 _closedir
+_darwin_art_bionic_errno_load
+_darwin_art_bionic_errno_store
 _darwin_art_bionic_fs_chdir_core
+_darwin_art_bionic_fs_chmod_core
 _darwin_art_bionic_fs_close_core
 _darwin_art_bionic_fs_closedir_core
 _darwin_art_bionic_fs_fchmod_core
 _darwin_art_bionic_fs_fchmodat_core
+_darwin_art_bionic_fs_fchown_core
 _darwin_art_bionic_fs_fdopendir_core
+_darwin_art_bionic_fs_flock_core
 _darwin_art_bionic_fs_fstat_core
+_darwin_art_bionic_fs_fsync_core
 _darwin_art_bionic_fs_ftruncate_core
 _darwin_art_bionic_fs_getcwd_core
 _darwin_art_bionic_fs_isatty_core
 _darwin_art_bionic_fs_link_core
+_darwin_art_bionic_fs_lseek_core
 _darwin_art_bionic_fs_lstat_core
 _darwin_art_bionic_fs_mkdir_core
 _darwin_art_bionic_fs_open_core
 _darwin_art_bionic_fs_openat_core
 _darwin_art_bionic_fs_opendir_core
 _darwin_art_bionic_fs_pathconf_core
+_darwin_art_bionic_fs_pread_core
+_darwin_art_bionic_fs_pwrite_core
 _darwin_art_bionic_fs_read_core
 _darwin_art_bionic_fs_readdir_core
 _darwin_art_bionic_fs_readlink_core
 _darwin_art_bionic_fs_realpath_core
 _darwin_art_bionic_fs_remove_core
 _darwin_art_bionic_fs_rename_core
+_darwin_art_bionic_fs_rewinddir_core
 _darwin_art_bionic_fs_stat_core
 _darwin_art_bionic_fs_statvfs_core
 _darwin_art_bionic_fs_symlink_core
 _darwin_art_bionic_fs_truncate_core
 _darwin_art_bionic_fs_unlinkat_core
 _darwin_art_bionic_fs_utimensat_core
+_darwin_art_bionic_fs_write_core
+_fcntl
 _fdopendir
 _fpathconf
 _fstatvfs
+_mach_task_self_
+_mach_vm_region_recurse
+_memcpy
 _readdir
+_rewinddir
+_strlen
 EOF
 diff -u "$temp_root/expected-undefined" "$temp_root/undefined" ||
   fail 'shim dependency drift'
@@ -162,6 +179,10 @@ done
 for symbol in __read_chk __write_chk; do
   grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
     fail "missing fortified definition $symbol"
+done
+for symbol in chmod lseek lseek64 pread pwrite rewinddir write; do
+  grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
+    fail "missing extended prefixed definition $symbol"
 done
 if awk '$2 ~ /^[TDS]$/ {print $3}' <<<"$definitions" |
    grep -Ev '^_darwin_art_bionic_' >/dev/null; then
@@ -248,7 +269,7 @@ nm -gU "$temp_root/cargo-target/debug/bionic-fs-facade" |
 nm -gU "$temp_root/cargo-target/debug/bionic-fs-facade" |
   grep -F ' _darwin_art_bionic_fs_sendfile_transfer' >/dev/null ||
   fail 'sendfile transfer callback missing'
-for symbol in process_install process_uninstall process_has_capability_failure; do
+for symbol in process_install process_uninstall process_has_capability_failure seed_private_directory; do
   nm -gU "$temp_root/cargo-target/debug/bionic-fs-facade" |
     grep -F " _darwin_art_bionic_fs_${symbol}" >/dev/null ||
     fail "process owner lifecycle symbol missing: $symbol"

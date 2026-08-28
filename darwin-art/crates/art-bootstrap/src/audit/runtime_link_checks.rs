@@ -72,6 +72,7 @@ pub(crate) fn validate_runtime_link(
             "darwin_art_bionic_syscall_resolve",
             "darwin_art_bionic_fs_process_install",
             "darwin_art_bionic_fs_process_uninstall",
+            "darwin_art_bionic_fs_seed_private_directory",
             "darwin_art_bionic_socket_broker_activate",
             "darwin_art_bionic_socket_broker_deactivate",
             "darwin_art_bionic_socket_broker_is_active",

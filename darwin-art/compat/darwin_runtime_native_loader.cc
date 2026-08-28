@@ -188,7 +188,7 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
                                     const char* path,
                                     jobject loader,
                                     const char*,
-                                    jstring,
+                                    jstring library_path,
                                     bool* needs_native_bridge,
                                     char** error_msg) {
   if (needs_native_bridge != nullptr) *needs_native_bridge = false;
@@ -198,6 +198,7 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
   // narrow case into the immutable Android system-native directory so it can
   // use the same fd-relative ELF graph discovery as APK libraries.
   std::string system_native_path;
+  std::string app_native_path;
   const char* resolved_path = path;
   if (loader == nullptr && path != nullptr && std::strchr(path, '/') == nullptr &&
       std::strchr(path, '\\') == nullptr) {
@@ -209,6 +210,73 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       resolved_path = system_native_path.c_str();
     }
   }
+  // Framework media classes load libmedia_jni only to install their JNI
+  // table. The Darwin runtime registers the deliberately unsupported MediaDrm
+  // table during framework bootstrap, so publish the already-loaded process
+  // image for this exact boot-classpath SONAME instead of requiring an Android
+  // media server DSO in the guest filesystem.
+  if (loader == nullptr && path != nullptr &&
+      std::strcmp(path, "libmedia_jni.so") == 0) {
+    void* handle = dlopen(nullptr, RTLD_NOW | RTLD_LOCAL);
+    if (handle == nullptr) {
+      SetNativeLoaderError(error_msg,
+                           "Darwin platform media JNI image is unavailable");
+    } else {
+      std::cerr << "DARWIN native loader: platform JNI SONAME=" << path
+                << " provider=runtime\n";
+    }
+    return handle;
+  }
+  // Android's NativeLoader searches the ClassLoader namespace when
+  // Runtime.loadLibrary0 deliberately falls back to a bare SONAME.  There is
+  // no bionic linker namespace on Darwin, so resolve that SONAME against the
+  // exact library search path JavaVMExt obtained from this ClassLoader before
+  // entering the fd-relative ELF loader.
+  if (loader != nullptr && path != nullptr && std::strchr(path, '/') == nullptr &&
+      std::strchr(path, '\\') == nullptr && std::strstr(path, "..") == nullptr) {
+    const char* search_path =
+        env == nullptr || library_path == nullptr
+            ? nullptr
+            : env->GetStringUTFChars(library_path, nullptr);
+    if (search_path != nullptr) {
+      std::string directories(search_path);
+      env->ReleaseStringUTFChars(library_path, search_path);
+      size_t begin = 0;
+      while (begin <= directories.size()) {
+        const size_t end = directories.find(':', begin);
+        const std::string directory = directories.substr(
+            begin, end == std::string::npos ? std::string::npos : end - begin);
+        if (!directory.empty() && directory[0] == '/') {
+          const std::string candidate = directory + "/" + path;
+          struct stat candidate_status {};
+          if (stat(candidate.c_str(), &candidate_status) == 0 &&
+              S_ISREG(candidate_status.st_mode)) {
+            app_native_path = candidate;
+            resolved_path = app_native_path.c_str();
+            break;
+          }
+        }
+        if (end == std::string::npos) break;
+        begin = end + 1;
+      }
+    }
+    // The detached runtime's PathClassLoader path is installed from this
+    // already-authorized directory. Keep the same narrow authority as a
+    // fallback for platform ClassLoader implementations that return an empty
+    // library search path while still passing a bare SONAME.
+    if (app_native_path.empty()) {
+      const char* directory = std::getenv("DARWIN_ART_APK_APP_NATIVE_DIR");
+      if (directory != nullptr && directory[0] == '/') {
+        const std::string candidate = std::string(directory) + "/" + path;
+        struct stat candidate_status {};
+        if (stat(candidate.c_str(), &candidate_status) == 0 &&
+            S_ISREG(candidate_status.st_mode)) {
+          app_native_path = candidate;
+          resolved_path = app_native_path.c_str();
+        }
+      }
+    }
+  }
   bool selected_darwin = false;
   void* selected_handle =
       system_native_path.empty()
@@ -216,9 +284,21 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
           : nullptr;
   if (selected_darwin) return selected_handle;
   const char* builtin_providers[] = {
-      kDarwinArtElfJniHostProviderSoname, "libc.so",       "libdl.so",
-      "liblog.so",                       "libm.so",       "libEGL.so",
-      "libGLESv2.so",                    "libjnigraphics.so", "libz.so"};
+      kDarwinArtElfJniHostProviderSoname,
+      "libc.so",
+      "libdl.so",
+      "liblog.so",
+      "libm.so",
+      "libandroid.so",
+      "libbinder_ndk.so",
+      "libaaudio.so",
+      "libmediandk.so",
+      "libnativewindow.so",
+      "libEGL.so",
+      "libGLESv2.so",
+      "libGLESv3.so",
+      "libjnigraphics.so",
+      "libz.so"};
   std::array<char, 1024> discovery_error_storage{};
   DarwinArtElfErrorBuffer discovery_error{discovery_error_storage.data(),
                                            discovery_error_storage.size(), 0};
@@ -312,7 +392,7 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       if (soname != root_soname) graph_providers.push_back(soname.c_str());
     }
     library->image_registry = darwin_art_image_registry::Create(
-        root_soname, sources, source_count, graph_providers.data(),
+        root_soname, parent_path.c_str(), sources, source_count, graph_providers.data(),
         graph_providers.size(), &error);
     if (library->image_registry == nullptr) {
       SetNativeLoaderError(error_msg,

@@ -8,6 +8,12 @@ events enter the same `InputChannel`/`InputEventReceiver` path used by Android
 window input. Device id `-1` remains the Android virtual-keyboard fallback; it
 does not represent the host keyboard.
 
+Input event timestamps are sampled from `CLOCK_MONOTONIC`, matching Android's
+InputReader clock and Chromium's `base::TimeTicks`. `NSEvent.timestamp` is not
+forwarded directly: on macOS it can differ from that clock by accumulated
+system-sleep time, which makes a current event appear older than a renderer's
+document time origin.
+
 This establishes the correct framework event route, but character mapping is
 not complete. `KeyMapGetCharacter` in
 `compat/darwin_framework_binder_natives.cc` currently contains a small,
@@ -128,3 +134,5 @@ This work is complete only when all of the following hold:
   pass through the production input path without fixture-specific shortcuts.
 - IME composition tests pass through `InputConnection` rather than extending
   the physical-key character-map bridge.
+- Pointer and key event times stay in Android's monotonic clock domain across
+  host sleep/wake and never regress relative to renderer/document time.

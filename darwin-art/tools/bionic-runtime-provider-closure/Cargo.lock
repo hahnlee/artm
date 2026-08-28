@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "android-aaudio-provider"
+version = "0.1.0"
+
+[[package]]
+name = "android-binder-ndk-provider"
+version = "0.1.0"
+
+[[package]]
 name = "android-dso-namespace"
 version = "0.1.0"
 
@@ -33,6 +41,8 @@ dependencies = [
 name = "bionic-runtime-provider-closure"
 version = "0.1.0"
 dependencies = [
+ "android-aaudio-provider",
+ "android-binder-ndk-provider",
  "android-dso-namespace",
  "bionic-dso-lifecycle-facade",
  "bionic-fs-facade",

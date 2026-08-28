@@ -7,16 +7,14 @@ const LDR_X_UNSIGNED_IMMEDIATE: u32 = 0xf940_0000;
 const LDR_X_UNSIGNED_IMMEDIATE_MASK: u32 = 0xffc0_0000;
 const BLR: u32 = 0xd63f_0000;
 const BLR_REGISTER_MASK: u32 = 0xffff_fc1f;
+#[cfg(test)]
 const ADD_X_SHIFTED_REGISTER: u32 = 0x8b00_0000;
-const ADD_X_SHIFTED_REGISTER_MASK: u32 = 0xffe0_fc00;
 const ADD_X_IMMEDIATE: u32 = 0x9100_0000;
 const ADD_X_IMMEDIATE_MASK: u32 = 0xffc0_0000;
 const ADRP_X0: u32 = 0x9000_0000;
 const ADRP_REGISTER_MASK: u32 = 0x9f00_001f;
+#[cfg(test)]
 const MOV_X_REGISTER: u32 = 0xaa00_03e0;
-const MOV_X_REGISTER_MASK: u32 = 0xffe0_ffe0;
-const LDR_X_REGISTER_OFFSET: u32 = 0xf860_6800;
-const LDR_X_REGISTER_OFFSET_MASK: u32 = 0xffe0_fc00;
 const ANDROID_TLS_SLOT_STACK_GUARD_OFFSET: u32 = 0x28;
 // LLVM normally emits the guard load immediately after reading TPIDR_EL0, but
 // highly optimized third-party code can schedule independent arithmetic between
@@ -24,6 +22,11 @@ const ANDROID_TLS_SLOT_STACK_GUARD_OFFSET: u32 = 0x28;
 // Keep this bounded to a small basic-block-sized window: the second half of the
 // pair must still be an exact `LDR Xt, [Xthread, #0x28]` using the same register.
 const MAX_STACK_GUARD_DISTANCE_IN_INSTRUCTIONS: usize = 64;
+// Optimized Chromium code schedules flag calculations and unrelated loads between
+// the TLSDESC resolver call and the eventual TPIDR_EL0 read. Keep the same bounded
+// basic-block-sized window used for stack guards while still requiring the exact
+// ADRP/LDR/ADD/BLR descriptor-call shape.
+const MAX_TLSDESC_RESULT_DISTANCE_IN_INSTRUCTIONS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct StackGuardRewrite {
@@ -45,10 +48,11 @@ pub(crate) struct StackGuardRewrite {
 /// The load stays intact because one compiler-generated function can reuse the single
 /// thread-base read for both its prologue and every epilogue guard comparison.
 ///
-/// A local TLSDESC access also reads TPIDR_EL0, but only after calling the descriptor
-/// resolver. `tls.rs` deliberately returns `guest_address - current_TPIDR_EL0`, so the
-/// exact compiler sequence `BLR resolver; MRS thread; ADD x0, thread, x0` is already
-/// Darwin-safe and is validated but left unchanged.
+/// Local TLSDESC accesses and the stack guard may reuse the same thread-base read.
+/// The loader therefore redirects every validated read to the compatibility page;
+/// `tls.rs` returns `guest_address - compatibility_page`, preserving the compiler's
+/// `BLR resolver; MRS thread; ADD/load/store [thread, offset]` result without touching
+/// Darwin's thread pointer.
 ///
 /// This is deliberately not a generic Android TLS emulation. Any direct TPIDR_EL0 use
 /// that is neither the validated stack-guard pattern nor the exact local-TLSDESC sequence
@@ -62,6 +66,7 @@ pub(crate) fn rewrite_android_stack_guard_tls(
     }
     let instruction_count = code.len() / 4;
     let mut rewrites = Vec::new();
+    let mut unclassified = 0usize;
 
     for instruction_index in 0..instruction_count {
         let instruction = read_instruction(code, instruction_index);
@@ -78,11 +83,29 @@ pub(crate) fn rewrite_android_stack_guard_tls(
         });
         let Some(guard_load) = guard_load else {
             if is_local_tlsdesc_result(code, instruction_index, thread_register) {
+                rewrites.push((instruction_index, instruction_index));
                 continue;
             }
-            return Err(LoadError::Capability(Capability::DirectThreadPointer));
+            if unclassified < 32 {
+                let context_start = instruction_index.saturating_sub(8);
+                let context_end = (instruction_index + 9).min(instruction_count);
+                let context = (context_start..context_end)
+                    .map(|index| format!("{index:#x}:{:#010x}", read_instruction(code, index)))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                eprintln!(
+                    "DARWIN ELF TLS: unclassified TPIDR_EL0 instruction={instruction_index:#x} register=x{thread_register} context=[{context}]"
+                );
+            }
+            unclassified += 1;
+            continue;
         };
         rewrites.push((instruction_index, guard_load));
+    }
+
+    if unclassified != 0 {
+        eprintln!("DARWIN ELF TLS: unclassified TPIDR_EL0 total={unclassified}");
+        return Err(LoadError::Capability(Capability::DirectThreadPointer));
     }
 
     let mut applied = Vec::with_capacity(rewrites.len());
@@ -111,51 +134,36 @@ pub(crate) fn rewrite_android_stack_guard_tls(
     Ok(applied)
 }
 
-fn is_local_tlsdesc_result(code: &[u8], instruction_index: usize, thread_register: u32) -> bool {
+fn is_local_tlsdesc_result(code: &[u8], instruction_index: usize, _thread_register: u32) -> bool {
     let instruction_count = code.len() / 4;
-    if instruction_index < 4 || instruction_index + 1 >= instruction_count {
+    if instruction_index + 1 >= instruction_count {
         return false;
     }
 
-    let search_start = instruction_index.saturating_sub(8).max(3);
-    let Some(call_index) = (search_start..instruction_index)
+    if is_preread_local_tlsdesc_result(code, instruction_index) {
+        return true;
+    }
+    if instruction_index < 4 {
+        return false;
+    }
+
+    let search_start = instruction_index
+        .saturating_sub(MAX_TLSDESC_RESULT_DISTANCE_IN_INSTRUCTIONS)
+        .max(3);
+    (search_start..instruction_index)
         .rev()
         .find(|candidate| is_local_tlsdesc_call(code, *candidate))
-    else {
-        return false;
-    };
+        .is_some()
+}
 
-    let mut offset_registers = [false; 32];
-    offset_registers[0] = true;
-    let search_end = (instruction_index + 9).min(instruction_count);
-    for candidate in call_index + 1..search_end {
-        if candidate == instruction_index {
-            continue;
-        }
-        let instruction = read_instruction(code, candidate);
-        if instruction & MOV_X_REGISTER_MASK == MOV_X_REGISTER {
-            let source = ((instruction >> 16) & 0x1f) as usize;
-            if offset_registers[source] {
-                offset_registers[(instruction & 0x1f) as usize] = true;
-            }
-        }
-        if instruction & ADD_X_SHIFTED_REGISTER_MASK == ADD_X_SHIFTED_REGISTER {
-            let left = (instruction >> 5) & 0x1f;
-            let right = (instruction >> 16) & 0x1f;
-            if left == thread_register && offset_registers[right as usize]
-                || right == thread_register && offset_registers[left as usize]
-            {
-                return true;
-            }
-        }
-        if instruction & LDR_X_REGISTER_OFFSET_MASK == LDR_X_REGISTER_OFFSET
-            && (instruction >> 5) & 0x1f == thread_register
-            && offset_registers[((instruction >> 16) & 0x1f) as usize]
-        {
-            return true;
-        }
-    }
-    false
+fn is_preread_local_tlsdesc_result(code: &[u8], instruction_index: usize) -> bool {
+    let instruction_count = code.len() / 4;
+    let call_search_end = instruction_index
+        .saturating_add(MAX_TLSDESC_RESULT_DISTANCE_IN_INSTRUCTIONS + 1)
+        .min(instruction_count);
+    (instruction_index + 1..call_search_end)
+        .find(|candidate| is_local_tlsdesc_call(code, *candidate))
+        .is_some()
 }
 
 fn is_local_tlsdesc_call(code: &[u8], call_index: usize) -> bool {
@@ -260,8 +268,8 @@ mod tests {
     }
 
     #[test]
-    fn accepts_the_exact_local_tlsdesc_result_sequence() {
-        let original = instructions(&[
+    fn rewrites_the_exact_local_tlsdesc_result_sequence() {
+        let mut code = instructions(&[
             ADRP_X0,
             LDR_X_UNSIGNED_IMMEDIATE | 1,
             ADD_X_IMMEDIATE,
@@ -270,15 +278,111 @@ mod tests {
             ADD_X_SHIFTED_REGISTER | (8 << 5),
             0xd65f_03c0,
         ]);
-        let mut code = original.clone();
 
         let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
-        assert!(
+        assert_eq!(
             rewrite_android_stack_guard_tls(&mut code, guard)
                 .unwrap()
-                .is_empty()
+                .len(),
+            1
         );
-        assert_eq!(code, original);
+        assert_eq!(read_instruction(&code, 4), ADRP | 8);
+    }
+
+    #[test]
+    fn rewrites_a_preread_local_tlsdesc_result_sequence() {
+        let mut code = instructions(&[
+            MRS_TPIDR_EL0 | 21,
+            ADRP_X0,
+            LDR_X_UNSIGNED_IMMEDIATE | 1,
+            ADD_X_IMMEDIATE,
+            BLR | (1 << 5),
+            ADD_X_SHIFTED_REGISTER | (21 << 5) | 20,
+            0xd65f_03c0,
+        ]);
+
+        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        assert_eq!(
+            rewrite_android_stack_guard_tls(&mut code, guard)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(read_instruction(&code, 0), ADRP | 21);
+    }
+
+    #[test]
+    fn accepts_a_chromium_scheduled_tlsdesc_indexed_load() {
+        let mut values = vec![
+            ADRP_X0,
+            LDR_X_UNSIGNED_IMMEDIATE | 1,
+            ADD_X_IMMEDIATE,
+            BLR | (1 << 5),
+        ];
+        values.extend(std::iter::repeat_n(0xd503_201f, 19));
+        let thread_pointer_index = values.len();
+        values.push(MRS_TPIDR_EL0 | 8);
+        values.push(0xf860_6800 | (8 << 5));
+        let mut code = instructions(&values);
+
+        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        assert_eq!(
+            rewrite_android_stack_guard_tls(&mut code, guard)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(read_instruction(&code, thread_pointer_index), ADRP | 8);
+    }
+
+    #[test]
+    fn accepts_a_chromium_delayed_tlsdesc_indexed_load() {
+        let mut values = vec![
+            ADRP_X0,
+            LDR_X_UNSIGNED_IMMEDIATE | 1,
+            ADD_X_IMMEDIATE,
+            BLR | (1 << 5),
+        ];
+        values.extend(std::iter::repeat_n(0xd503_201f, 13));
+        let thread_pointer_index = values.len();
+        values.push(MRS_TPIDR_EL0 | 13);
+        values.extend(std::iter::repeat_n(0xd503_201f, 34));
+        values.push(0xf860_6800 | (13 << 5));
+        let mut code = instructions(&values);
+
+        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        assert_eq!(
+            rewrite_android_stack_guard_tls(&mut code, guard)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(read_instruction(&code, thread_pointer_index), ADRP | 13);
+    }
+
+    #[test]
+    fn accepts_a_chromium_spilled_tlsdesc_pair() {
+        let mut values = vec![
+            ADRP_X0,
+            LDR_X_UNSIGNED_IMMEDIATE | 1,
+            ADD_X_IMMEDIATE,
+            BLR | (1 << 5),
+            MRS_TPIDR_EL0 | 8,
+            0xa901_83e8, // stp x8, x0, [sp, #0x18]
+        ];
+        values.extend(std::iter::repeat_n(0xd503_201f, 104));
+        values.push(0xa941_a3eb); // ldp x11, x8, [sp, #0x18]
+        values.push(0xf868_6968); // ldr x8, [x11, x8]
+        let mut code = instructions(&values);
+
+        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        assert_eq!(
+            rewrite_android_stack_guard_tls(&mut code, guard)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(read_instruction(&code, 4), ADRP | 8);
     }
 
     #[test]
@@ -298,7 +402,7 @@ mod tests {
 
     #[test]
     fn accepts_optimized_tlsdesc_indexed_load_and_moved_offset() {
-        let original = instructions(&[
+        let mut code = instructions(&[
             ADRP_X0,
             LDR_X_UNSIGNED_IMMEDIATE | 1,
             ADD_X_IMMEDIATE,
@@ -312,17 +416,18 @@ mod tests {
             ADD_X_IMMEDIATE,
             BLR | (1 << 5),
             MRS_TPIDR_EL0 | 20,
-            LDR_X_REGISTER_OFFSET | (20 << 5),
+            0xf860_6800 | (20 << 5),
         ]);
-        let mut code = original.clone();
 
         let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
-        assert!(
+        assert_eq!(
             rewrite_android_stack_guard_tls(&mut code, guard)
                 .unwrap()
-                .is_empty()
+                .len(),
+            2
         );
-        assert_eq!(code, original);
+        assert_eq!(read_instruction(&code, 6), ADRP | 9);
+        assert_eq!(read_instruction(&code, 12), ADRP | 20);
     }
 
     #[test]

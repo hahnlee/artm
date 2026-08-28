@@ -172,6 +172,7 @@ device_library="$stage/libfile-descriptor-device-closure.dylib"
 "$cxx" -arch arm64 -isysroot "$sdk_root" -dynamiclib \
   "$device_probe" -Wl,-force_load,"$archive" \
   "$file_input_stream" "$openjdkjvm" "$device_nativehelper" "$liblog" \
+  -Wl,-undefined,dynamic_lookup \
   -Wl,-exported_symbol,_register_java_io_FileDescriptor \
   -Wl,-exported_symbol,_darwin_art_file_descriptor_device_contract \
   -Wl,-dead_strip -framework CoreFoundation -o "$device_library"
@@ -201,6 +202,7 @@ managed_probe="$objects/managed-probe.o"
 managed_library="$stage/libfile-descriptor-managed.dylib"
 "$cxx" -arch arm64 -isysroot "$sdk_root" -dynamiclib \
   "$managed_probe" "$archive" "$file_input_stream" "$openjdkjvm" \
+  -Wl,-undefined,dynamic_lookup \
   -Wl,-exported_symbol,_JNI_OnLoad -Wl,-dead_strip -o "$managed_library"
 classes="$stage/classes"
 mkdir -p "$classes"

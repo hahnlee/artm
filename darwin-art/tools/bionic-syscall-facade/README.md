@@ -23,8 +23,11 @@ The supported behavior is:
   `GRND_RANDOM`, and `GRND_INSECURE` flags are validated; the mutually
   exclusive RANDOM/INSECURE combination and unknown flags fail with Android
   `EINVAL`, while inaccessible output memory fails with Android `EFAULT`;
-- syscall 98 accepts only `FUTEX_WAIT_PRIVATE` with a readable aligned word and
-  relative timeout, or `FUTEX_WAKE_PRIVATE` with count 1/`INT_MAX`;
+- syscall 98 accepts `FUTEX_WAIT`/`FUTEX_WAIT_PRIVATE` with a readable aligned
+  word and optional relative timeout, and `FUTEX_WAKE`/`FUTEX_WAKE_PRIVATE`
+  with any non-negative wake count;
+- `FUTEX_WAIT_BITSET[_PRIVATE]` and `FUTEX_WAKE_BITSET[_PRIVATE]` support the
+  Android/Chromium match-any bitset, including absolute realtime deadlines;
 - futex wait performs the compare and waiter admission under the same provider
   lock used by wake, then uses a fixed 257-address condition side table. It
   returns Android `EAGAIN` on compare mismatch or table exhaustion and
@@ -37,11 +40,16 @@ The supported behavior is:
   always returns -1 with Android `EINVAL` for readable memory or `EFAULT` for
   an unreadable, unmapped, or overflowing range, matching the Linux probe's
   observed contract without changing a signal mask.
+- syscall 240 (`rt_tgsigqueueinfo`) resolves the Android virtual TID through
+  the provider's live thread registry, translates the Android signal number,
+  and delivers it to the corresponding Darwin pthread. Darwin cannot consume
+  Linux `siginfo_t`, so the payload is intentionally not forwarded; the
+  installed host handler constructs its own signal context.
 
 All other syscall numbers fail with Bionic `ENOSYS`; unowned futex operations
 and argument forms fail with Bionic `EINVAL`/`EFAULT`. Host errno is preserved.
 This is not a general Linux syscall translator, shared-process futex service,
-robust-list implementation, PI futex implementation, or signal API. The exact
+robust-list implementation, PI futex implementation, or complete signal API. The exact
 unsupported boundary is recorded in `manifests/unsupported.tsv`; no path fakes
 success merely to satisfy eager relocation.
 
@@ -51,5 +59,5 @@ gate exercises stable/unique thread IDs, host-CSPRNG `getrandom` including
 flags and inaccessible memory, compare mismatch, wake-one, wake-all,
 contention, relative timeout, readable/guard/unmapped/overflow libunwind
 probes, unreadable wake addresses, spurious wake deadline behavior, table
-exhaustion, wake-token cleanup, unknown operations, Bionic errno, and host
-errno under ASan/UBSan.
+exhaustion, wake-token cleanup, targeted signal translation, unknown
+operations, Bionic errno, and host errno under ASan/UBSan.

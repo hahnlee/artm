@@ -464,14 +464,22 @@ bool render_node_to_surface(
   jmethodID get_top = view_class == nullptr
                           ? nullptr
                           : env->GetMethodID(view_class, "getTop", "()I");
+  // SurfaceView/SurfaceControl content is a child compositor layer. Draw it
+  // before the parent HWUI display list so ordinary Android controls (Chrome's
+  // toolbar, dialogs, selection handles) retain their framework z-order. A
+  // SurfaceView punches a transparent hole in the parent display list, while
+  // opaque parent views naturally cover the child exactly as SurfaceFlinger
+  // would. Record the parent into a GPU saveLayer before blending it over the
+  // embedded surface: SurfaceView's punch-hole uses a clear blend, which must
+  // clear the parent layer rather than the already-composited child image.
+  // This mirrors SurfaceFlinger's separate parent/child buffers without a CPU
+  // readback.
+  darwin_art_surface_gpu_composite_embedded(surface, canvas);
+  canvas->saveLayer(nullptr, nullptr);
   android::uirenderer::skiapipeline::RenderNodeDrawable drawable(
       node, canvas, false);
   drawable.forceDraw(canvas);
-  // SurfaceView content is produced by the APK's ordinary EGL/GL thread into
-  // the host IOSurface. Composite that same Metal texture after HWUI paints
-  // the framework's SurfaceView hole, matching SurfaceFlinger's layer order
-  // without a readback or staging copy.
-  darwin_art_surface_gpu_composite_embedded(surface, canvas);
+  canvas->restore();
   // The framework display list owns the opaque SurfaceView/TextureView
   // placeholder and may paint its white background. Replay the APK's native
   // Skottie content once more after that display list so the animation is the

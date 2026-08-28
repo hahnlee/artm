@@ -334,10 +334,8 @@ __attribute__((visibility("default"))) int bionic_fs_fixture_run(void) {
     return 83;
   if (close(urandom_fd) != 0) return 84;
 
-  errno = 0;
-  if (open("/dev/random", O_RDONLY | O_CLOEXEC) != -1 ||
-      errno != EOPNOTSUPP)
-    return 85;
+  int cloexec_random_fd = open("/dev/random", O_RDONLY | O_CLOEXEC);
+  if (cloexec_random_fd < 0 || close(cloexec_random_fd) != 0) return 85;
   errno = 0;
   if (open("/dev/random", O_WRONLY) != -1 || errno != EROFS) return 86;
   errno = 0;

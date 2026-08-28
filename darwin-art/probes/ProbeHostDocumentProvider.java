@@ -10,6 +10,7 @@ import android.provider.OpenableColumns;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.net.URLConnection;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -68,7 +69,8 @@ public final class ProbeHostDocumentProvider extends ContentProvider {
         if (document == null) return null;
         File file = document.writable() ? document.destination : document.staging;
         String name = file.getName().toLowerCase();
-        return name.endsWith(".png") ? "image/png" : "image/jpeg";
+        String guessed = URLConnection.guessContentTypeFromName(name);
+        return guessed == null ? "application/octet-stream" : guessed;
     }
 
     @Override

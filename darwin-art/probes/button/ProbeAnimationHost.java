@@ -11,6 +11,7 @@ import android.graphics.Rect;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.MessageQueue;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.MotionEvent;
@@ -147,6 +148,49 @@ public final class ProbeAnimationHost {
         if (!(root instanceof View)) return false;
         ViewTreeObserver observer = ((View) root).getViewTreeObserver();
         return observer != null && observer.isAlive() && observer.dispatchOnPreDraw();
+    }
+
+    /**
+     * Notifies listeners at the same point as ViewRootImpl, immediately before
+     * the hierarchy is drawn. Chromium uses the first onDraw callback as the
+     * gate for starting its native browser process.
+     */
+    public static void dispatchOnDraw(Object root) {
+        if (!(root instanceof View)) return;
+        ViewTreeObserver observer = ((View) root).getViewTreeObserver();
+        if (observer != null && observer.isAlive()) observer.dispatchOnDraw();
+    }
+
+    /**
+     * Consumes the synchronization barrier installed by ViewRootImpl when the
+     * host performs that pending traversal on its behalf.  Leaving the barrier
+     * queued would indefinitely block ordinary Handler work behind it.
+     */
+    public static void beginHostTraversal(Object root) {
+        if (!(root instanceof View)) return;
+        try {
+            Method getViewRoot = View.class.getDeclaredMethod("getViewRootImpl");
+            getViewRoot.setAccessible(true);
+            Object viewRoot = getViewRoot.invoke(root);
+            if (viewRoot == null) return;
+            Field scheduled = viewRoot.getClass().getDeclaredField("mTraversalScheduled");
+            Field barrier = viewRoot.getClass().getDeclaredField("mTraversalBarrier");
+            scheduled.setAccessible(true);
+            barrier.setAccessible(true);
+            if (!scheduled.getBoolean(viewRoot)) return;
+            int token = barrier.getInt(viewRoot);
+            Handler handler = ((View) root).getHandler();
+            if (handler == null) return;
+            MessageQueue queue = handler.getLooper().getQueue();
+            Method removeBarrier = MessageQueue.class.getDeclaredMethod(
+                    "removeSyncBarrier", int.class);
+            removeBarrier.setAccessible(true);
+            removeBarrier.invoke(queue, Integer.valueOf(token));
+            scheduled.setBoolean(viewRoot, false);
+            barrier.setInt(viewRoot, -1);
+        } catch (Throwable ignored) {
+            // Detached probe roots have no WindowManager-owned ViewRootImpl.
+        }
     }
 
     /** Mark every child dirty before replacing the flattened GPU display list. */

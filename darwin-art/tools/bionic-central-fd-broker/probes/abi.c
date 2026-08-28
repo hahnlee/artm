@@ -3,7 +3,10 @@
 _Static_assert(DARWIN_ART_FD_OWNER_ABI_V1 == 1 &&
                    DARWIN_ART_FD_OWNER_ABI_V2 == 2 &&
                    DARWIN_ART_FD_OWNER_ABI_V3 == 3 &&
-                   DARWIN_ART_FD_OWNER_ABI_V4 == 4,
+                   DARWIN_ART_FD_OWNER_ABI_V4 == 4 &&
+                   DARWIN_ART_FD_OWNER_ABI_V5 == 5 &&
+                   DARWIN_ART_FD_OWNER_ABI_V6 == 6 &&
+                   DARWIN_ART_FD_OWNER_ABI_V7 == 7,
                "owner ABI drift");
 _Static_assert(DARWIN_ART_FD_FS_FILE == 1, "file kind drift");
 _Static_assert(DARWIN_ART_FD_FS_RANDOM == 2, "random kind drift");
@@ -19,7 +22,13 @@ _Static_assert(offsetof(DarwinArtFdOwnerV1, socket_operation) == 72,
                "owner v2 prefix drift");
 _Static_assert(offsetof(DarwinArtFdOwnerV1, poll_many) == 80,
                "owner v3 prefix drift");
-_Static_assert(sizeof(DarwinArtFdOwnerV1) == 88, "owner v4 size drift");
+_Static_assert(offsetof(DarwinArtFdOwnerV1, set_status_flags) == 88,
+               "owner v4 prefix drift");
+_Static_assert(offsetof(DarwinArtFdOwnerV1, create_poll_wake) == 96,
+               "owner v5 size drift");
+_Static_assert(offsetof(DarwinArtFdOwnerV1, export_host_fd) == 128,
+               "owner v6 size drift");
+_Static_assert(sizeof(DarwinArtFdOwnerV1) == 136, "owner v7 size drift");
 _Static_assert(sizeof(DarwinArtFdSocketRequestV1) == 136,
                "socket request size drift");
 _Static_assert(offsetof(DarwinArtFdSocketRequestV1, address) == 16 &&

@@ -68,6 +68,9 @@ pub(super) fn adapter_jobs(
         if matches!(
             adapter_source,
             "darwin_runtime_adapters.cc"
+                | "darwin_android_asset_manager.cc"
+                | "darwin_android_platform.mm"
+                | "darwin_android_media_ndk.cc"
                 | "darwin_runtime_elf_lifecycle.cc"
                 | "darwin_runtime_elf_resolver.cc"
                 | "darwin_runtime_native_loader.cc"
@@ -97,6 +100,26 @@ pub(super) fn adapter_jobs(
                     .root
                     .join("tools/android-dl-iterate-phdr-provider/include"),
             );
+        }
+        if adapter_source == "darwin_android_asset_manager.cc" {
+            adapter_command
+                .arg("-DDARWIN_ART_AOSP_COMPAT_LSEEK64")
+                .arg("-I")
+                .arg(&staged.liblog_include)
+                .args(["-include", "log/log.h"]);
+            for include in [
+                "frameworks/base/libs/androidfw/include",
+                "frameworks/base/core/jni/include",
+                "frameworks/native/include",
+                "system/incremental_delivery/incfs/util/include",
+                "system/core/libutils/include",
+                "system/core/libsystem/include",
+                "system/core/libcutils/include",
+            ] {
+                adapter_command
+                    .arg("-I")
+                    .arg(staged.root.join("_aosp").join(include));
+            }
         }
         adapter_command
             .arg("-idirafter")

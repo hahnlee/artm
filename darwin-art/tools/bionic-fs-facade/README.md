@@ -72,7 +72,9 @@ As with virtual fds, another provider must not invent or accept these tokens.
   rejection, and `fdopendir` share the same typed descriptor table.
 - `stat` for admitted regular files/directories; the no-follow authorization
   policy means it deliberately does not implement Linux symlink following.
-- `lstat` for admitted non-symlink nodes. A final symlink rejected with host
+- `lstat` for admitted non-symlink nodes. `/proc/self/exe` and
+  `/proc/thread-self/exe` have Android's virtual `app_process64` readlink
+  identity without exposing the Darwin host executable. A final symlink rejected with host
   `ELOOP` becomes `EOPNOTSUPP`, because the broker cannot safely return symlink
   metadata. `readlink` returns `EINVAL` for securely opened regular files and
   directories, matching Linux/Bionic, and the same final-symlink capability

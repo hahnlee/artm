@@ -819,6 +819,41 @@ extern "C" size_t darwin_art_bionic_wcsxfrm_l(
   return source_length;
 }
 
+namespace {
+bool MatchPattern(const char* pattern, const char* text, int flags) {
+  while (*pattern != '\0') {
+    if (*pattern == '*') {
+      while (*pattern == '*') ++pattern;
+      if (*pattern == '\0')
+        return (flags & 1) == 0 || std::strchr(text, '/') == nullptr;
+      do {
+        if (MatchPattern(pattern, text, flags)) return true;
+      } while (*text != '\0' && ((flags & 1) == 0 || *text++ != '/'));
+      return false;
+    }
+    if (*text == '\0') return false;
+    if (*pattern == '?') {
+      if ((flags & 1) != 0 && *text == '/') return false;
+    } else if (*pattern == '\\' && (flags & 2) == 0 && pattern[1] != '\0') {
+      ++pattern;
+      if (*pattern != *text) return false;
+    } else if (*pattern != *text) {
+      return false;
+    }
+    ++pattern;
+    ++text;
+  }
+  return *text == '\0';
+}
+}  // namespace
+
+extern "C" int darwin_art_bionic_fnmatch(const char* pattern,
+                                           const char* text, int flags) {
+  if (pattern == nullptr || text == nullptr) return 1;
+  if ((flags & 4) != 0 && text[0] == '.' && pattern[0] != '.') return 1;
+  return MatchPattern(pattern, text, flags) ? 0 : 1;
+}
+
 extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
                                                     const char* symbol,
                                                     const char* version) {
@@ -834,6 +869,7 @@ extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
   RESOLVE(__ctype_get_mb_cur_max);
   RESOLVE(btowc);
   RESOLVE(freelocale);
+  RESOLVE(fnmatch);
   RESOLVE(isdigit_l);
   RESOLVE(islower_l);
   RESOLVE(isupper_l);

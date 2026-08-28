@@ -2,6 +2,9 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 #include <stddef.h>
 #include <stdatomic.h>
 #include <sys/statvfs.h>
@@ -9,6 +12,35 @@
 
 extern void darwin_art_bionic_errno_store(int32_t android_errno);
 extern int32_t darwin_art_bionic_errno_load(void);
+
+typedef int (*DarwinArtProcMapsRegionCallback)(void* context, uint64_t start,
+                                               uint64_t end,
+                                               int protection);
+
+int darwin_art_bionic_fs_host_enumerate_regions(
+    DarwinArtProcMapsRegionCallback callback, void* context) {
+  if (callback == NULL) return EINVAL;
+  mach_vm_address_t address = 0;
+  natural_t depth = 0;
+  for (;;) {
+    mach_vm_size_t size = 0;
+    vm_region_submap_info_data_64_t info = {0};
+    mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
+    kern_return_t result = mach_vm_region_recurse(
+        mach_task_self(), &address, &size, &depth,
+        (vm_region_recurse_info_t)&info, &count);
+    if (result == KERN_INVALID_ADDRESS) return 0;
+    if (result != KERN_SUCCESS || size == 0) return EIO;
+    if (info.is_submap) {
+      ++depth;
+      continue;
+    }
+    if (address > UINT64_MAX - size) return EOVERFLOW;
+    const uint64_t end = address + size;
+    if (callback(context, address, end, info.protection) != 0) return ENOMEM;
+    address = end;
+  }
+}
 
 _Static_assert(sizeof(void*) == 8, "Android and Darwin arm64 pointer width drift");
 _Static_assert(sizeof(size_t) == 8, "Android and Darwin arm64 size_t width drift");
@@ -37,6 +69,73 @@ _Static_assert(DT_UNKNOWN == 0 && DT_FIFO == 1 && DT_CHR == 2 && DT_DIR == 4 &&
                    DT_SOCK == 12 && DT_WHT == 14,
                "Darwin directory type values drifted from explicit translator");
 
+typedef struct DarwinArtAndroidFlock {
+  int16_t l_type;
+  int16_t l_whence;
+  int32_t __pad0;
+  int64_t l_start;
+  int64_t l_len;
+  int32_t l_pid;
+  int32_t __pad1;
+} DarwinArtAndroidFlock;
+
+_Static_assert(sizeof(DarwinArtAndroidFlock) == 32,
+               "Android arm64 flock size drift");
+_Static_assert(offsetof(DarwinArtAndroidFlock, l_start) == 8,
+               "Android arm64 flock start offset drift");
+
+int darwin_art_bionic_fs_host_record_lock(int host_fd, int android_command,
+                                          intptr_t android_lock,
+                                          int* host_errno) {
+  if (android_lock == 0 || host_errno == NULL) return -2;
+  DarwinArtAndroidFlock* android = (DarwinArtAndroidFlock*)android_lock;
+  struct flock host = {0};
+  switch (android->l_type) {
+    case 0:
+      host.l_type = F_RDLCK;
+      break;
+    case 1:
+      host.l_type = F_WRLCK;
+      break;
+    case 2:
+      host.l_type = F_UNLCK;
+      break;
+    default:
+      return -2;
+  }
+  if (android->l_whence < 0 || android->l_whence > 2) return -2;
+  host.l_whence = android->l_whence;
+  host.l_start = android->l_start;
+  host.l_len = android->l_len;
+  int command = 0;
+  switch (android_command) {
+    case 5:
+      command = F_GETLK;
+      break;
+    case 6:
+      command = F_SETLK;
+      break;
+    case 7:
+      command = F_SETLKW;
+      break;
+    default:
+      return -2;
+  }
+  const int result = fcntl(host_fd, command, &host);
+  *host_errno = result == 0 ? 0 : errno;
+  if (result != 0) return -1;
+  if (android_command == 5) {
+    android->l_type = host.l_type == F_RDLCK ? 0
+                      : host.l_type == F_WRLCK ? 1
+                                               : 2;
+    android->l_whence = host.l_whence;
+    android->l_start = host.l_start;
+    android->l_len = host.l_len;
+    android->l_pid = host.l_pid;
+  }
+  return 0;
+}
+
 int darwin_art_bionic_open(const char* path, int flags, uint32_t mode) {
   const int saved_host_errno = errno;
   const int result = darwin_art_bionic_fs_open_core(path, flags, mode);
@@ -49,6 +148,13 @@ int darwin_art_bionic_openat(int directory_fd, const char* path, int flags,
   const int saved_host_errno = errno;
   const int result =
       darwin_art_bionic_fs_openat_core(directory_fd, path, flags, mode);
+  errno = saved_host_errno;
+  return result;
+}
+
+int darwin_art_bionic_chmod(const char* path, uint32_t mode) {
+  const int saved_host_errno = errno;
+  const int result = darwin_art_bionic_fs_chmod_core(path, mode);
   errno = saved_host_errno;
   return result;
 }
@@ -69,6 +175,15 @@ intptr_t darwin_art_bionic_pread(int fd, void* buffer, size_t count,
   return result;
 }
 
+intptr_t darwin_art_bionic_pwrite(int fd, const void* buffer, size_t count,
+                                  int64_t offset) {
+  const int saved_host_errno = errno;
+  const intptr_t result =
+      darwin_art_bionic_fs_pwrite_core(fd, buffer, count, offset);
+  errno = saved_host_errno;
+  return result;
+}
+
 intptr_t darwin_art_bionic_write(int fd, const void* buffer, size_t count) {
   const int saved_host_errno = errno;
   const intptr_t result = darwin_art_bionic_fs_write_core(fd, buffer, count);
@@ -84,7 +199,10 @@ int64_t darwin_art_bionic_lseek(int fd, int64_t offset, int whence) {
 }
 
 int darwin_art_bionic_access(const char* path, int mode) {
-  if ((mode & ~7) != 0) return -1;
+  if ((mode & ~7) != 0) {
+    darwin_art_bionic_errno_store(22);
+    return -1;
+  }
   DarwinArtAndroidStat status;
   return darwin_art_bionic_stat(path, &status);
 }
@@ -95,7 +213,11 @@ int darwin_art_bionic_fdatasync(int fd) {
 }
 
 int darwin_art_bionic_fsync(int fd) {
-  return darwin_art_bionic_fdatasync(fd);
+  if (fd < 0) {
+    errno = EBADF;
+    return -1;
+  }
+  return darwin_art_bionic_fs_fsync_core(fd);
 }
 
 int darwin_art_bionic_unlink(const char* path) {
@@ -111,6 +233,11 @@ int darwin_art_bionic___open_2(const char* path, int flags) {
   return darwin_art_bionic_open(path, flags, 0);
 }
 
+int darwin_art_bionic___openat_2(int directory_fd, const char* path,
+                                 int flags) {
+  return darwin_art_bionic_openat(directory_fd, path, flags, 0);
+}
+
 intptr_t darwin_art_bionic___read_chk(int fd, void* buffer, size_t count,
                                       size_t buffer_size) {
   if (count > buffer_size) return -1;
@@ -121,6 +248,29 @@ intptr_t darwin_art_bionic___write_chk(int fd, const void* buffer,
                                        size_t count, size_t buffer_size) {
   if (count > buffer_size) return -1;
   return darwin_art_bionic_write(fd, buffer, count);
+}
+
+intptr_t darwin_art_bionic___pread_chk(int fd, void* buffer, size_t count,
+                                       int64_t offset, size_t buffer_size) {
+  if (count > buffer_size) return -1;
+  return darwin_art_bionic_pread(fd, buffer, count, offset);
+}
+
+intptr_t darwin_art_bionic___pwrite_chk(int fd, const void* buffer,
+                                        size_t count, int64_t offset,
+                                        size_t buffer_size) {
+  if (count > buffer_size) return -1;
+  return darwin_art_bionic_pwrite(fd, buffer, count, offset);
+}
+
+intptr_t darwin_art_bionic___readlink_chk(const char* path, char* buffer,
+                                          size_t size, size_t buffer_size) {
+  if (size > buffer_size) return -1;
+  return darwin_art_bionic_readlink(path, buffer, size);
+}
+
+int darwin_art_bionic_creat(const char* path, uint32_t mode) {
+  return darwin_art_bionic_open(path, 1 | 64 | 512, mode);
 }
 
 int darwin_art_bionic_close(int fd) {
@@ -261,11 +411,69 @@ int darwin_art_bionic_mkstemp64(char* path_template) {
   return darwin_art_bionic_mkstemp(path_template);
 }
 
-int darwin_art_bionic_flock_unsupported(int fd, int operation) {
-  (void)fd;
-  (void)operation;
+char* darwin_art_bionic_mkdtemp(char* path_template) {
+  static _Atomic uint32_t sequence = UINT32_C(0x2468ace1);
+  if (path_template == NULL) {
+    darwin_art_bionic_errno_store(14);
+    return NULL;
+  }
+  size_t length = 0;
+  while (path_template[length] != '\0') ++length;
+  if (length < 6) {
+    darwin_art_bionic_errno_store(22);
+    return NULL;
+  }
+  for (size_t index = length - 6; index < length; ++index)
+    if (path_template[index] != 'X') {
+      darwin_art_bionic_errno_store(22);
+      return NULL;
+    }
+  static const char alphabet[] =
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  for (uint32_t attempt = 0; attempt < 256; ++attempt) {
+    uint32_t value = atomic_fetch_add_explicit(
+        &sequence, UINT32_C(0x9e3779b9), memory_order_relaxed);
+    for (size_t index = 0; index < 6; ++index) {
+      value = value * UINT32_C(1664525) + UINT32_C(1013904223);
+      path_template[length - 6 + index] = alphabet[value % 62];
+    }
+    if (darwin_art_bionic_mkdir(path_template, 0700) == 0)
+      return path_template;
+  }
+  for (size_t index = length - 6; index < length; ++index)
+    path_template[index] = 'X';
+  return NULL;
+}
+
+int darwin_art_bionic_fs_path_unsupported(const char* path, void* value) {
+  (void)path;
+  (void)value;
   darwin_art_bionic_errno_store(38);
   return -1;
+}
+
+unsigned darwin_art_bionic_cfget_speed(const void* termios_value) {
+  (void)termios_value;
+  return 0;
+}
+
+int darwin_art_bionic_cfset_speed(void* termios_value, unsigned speed) {
+  (void)termios_value;
+  (void)speed;
+  return 0;
+}
+
+int darwin_art_bionic_terminal_unsupported(int fd, uintptr_t value,
+                                           uintptr_t extra) {
+  (void)fd;
+  (void)value;
+  (void)extra;
+  darwin_art_bionic_errno_store(25);
+  return -1;
+}
+
+int darwin_art_bionic_flock_unsupported(int fd, int operation) {
+  return darwin_art_bionic_fs_flock_core(fd, operation);
 }
 
 int darwin_art_bionic_fstatfs_unsupported(int fd, void* status) {
@@ -316,6 +524,13 @@ int darwin_art_bionic_closedir(void* directory) {
 int darwin_art_bionic_fchmod(int fd, uint32_t mode) {
   const int saved_host_errno = errno;
   const int result = darwin_art_bionic_fs_fchmod_core(fd, mode);
+  errno = saved_host_errno;
+  return result;
+}
+
+int darwin_art_bionic_fchown(int fd, uint32_t owner, uint32_t group) {
+  const int saved_host_errno = errno;
+  const int result = darwin_art_bionic_fs_fchown_core(fd, owner, group);
   errno = saved_host_errno;
   return result;
 }
@@ -549,15 +764,28 @@ typedef struct Binding {
 
 static const Binding kBindings[] = {
     {"__open_2", (DarwinArtBionicFsFunction)darwin_art_bionic___open_2},
+    {"__openat_2", (DarwinArtBionicFsFunction)darwin_art_bionic___openat_2},
+    {"__pread64_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___pread_chk},
+    {"__pread_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___pread_chk},
+    {"__pwrite64_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___pwrite_chk},
+    {"__pwrite_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___pwrite_chk},
     {"__read_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___read_chk},
+    {"__readlink_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___readlink_chk},
     {"__write_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___write_chk},
     {"access", (DarwinArtBionicFsFunction)darwin_art_bionic_access},
+    {"cfgetispeed", (DarwinArtBionicFsFunction)darwin_art_bionic_cfget_speed},
+    {"cfgetospeed", (DarwinArtBionicFsFunction)darwin_art_bionic_cfget_speed},
+    {"cfsetispeed", (DarwinArtBionicFsFunction)darwin_art_bionic_cfset_speed},
+    {"cfsetospeed", (DarwinArtBionicFsFunction)darwin_art_bionic_cfset_speed},
     {"chdir", (DarwinArtBionicFsFunction)darwin_art_bionic_chdir},
+    {"chmod", (DarwinArtBionicFsFunction)darwin_art_bionic_chmod},
     {"close", (DarwinArtBionicFsFunction)darwin_art_bionic_close},
     {"closedir", (DarwinArtBionicFsFunction)darwin_art_bionic_closedir},
+    {"creat", (DarwinArtBionicFsFunction)darwin_art_bionic_creat},
     {"dirfd", (DarwinArtBionicFsFunction)darwin_art_bionic_dirfd_unsupported},
     {"fchmod", (DarwinArtBionicFsFunction)darwin_art_bionic_fchmod},
     {"fchmodat", (DarwinArtBionicFsFunction)darwin_art_bionic_fchmodat},
+    {"fchown", (DarwinArtBionicFsFunction)darwin_art_bionic_fchown},
     {"fdatasync", (DarwinArtBionicFsFunction)darwin_art_bionic_fdatasync},
     {"fdopendir", (DarwinArtBionicFsFunction)darwin_art_bionic_fdopendir},
     {"flock", (DarwinArtBionicFsFunction)darwin_art_bionic_flock_unsupported},
@@ -567,6 +795,8 @@ static const Binding kBindings[] = {
     {"fstatfs", (DarwinArtBionicFsFunction)darwin_art_bionic_fstatfs_unsupported},
     {"fsync", (DarwinArtBionicFsFunction)darwin_art_bionic_fsync},
     {"ftruncate", (DarwinArtBionicFsFunction)darwin_art_bionic_ftruncate},
+    {"ftruncate64", (DarwinArtBionicFsFunction)darwin_art_bionic_ftruncate},
+    {"futimes", (DarwinArtBionicFsFunction)darwin_art_bionic_fs_path_unsupported},
     {"getcwd", (DarwinArtBionicFsFunction)darwin_art_bionic_getcwd},
     {"isatty", (DarwinArtBionicFsFunction)darwin_art_bionic_isatty},
     {"link", (DarwinArtBionicFsFunction)darwin_art_bionic_link},
@@ -575,6 +805,7 @@ static const Binding kBindings[] = {
     {"lstat", (DarwinArtBionicFsFunction)darwin_art_bionic_lstat},
     {"lstat64", (DarwinArtBionicFsFunction)darwin_art_bionic_lstat64},
     {"mkdir", (DarwinArtBionicFsFunction)darwin_art_bionic_mkdir},
+    {"mkdtemp", (DarwinArtBionicFsFunction)darwin_art_bionic_mkdtemp},
     {"mkstemp", (DarwinArtBionicFsFunction)darwin_art_bionic_mkstemp},
     {"mkstemp64", (DarwinArtBionicFsFunction)darwin_art_bionic_mkstemp64},
     {"open", (DarwinArtBionicFsFunction)darwin_art_bionic_open},
@@ -583,6 +814,7 @@ static const Binding kBindings[] = {
     {"pathconf", (DarwinArtBionicFsFunction)darwin_art_bionic_pathconf},
     {"posix_fadvise", (DarwinArtBionicFsFunction)darwin_art_bionic_posix_fadvise},
     {"pread", (DarwinArtBionicFsFunction)darwin_art_bionic_pread},
+    {"pwrite", (DarwinArtBionicFsFunction)darwin_art_bionic_pwrite},
     {"read", (DarwinArtBionicFsFunction)darwin_art_bionic_read},
     {"readdir", (DarwinArtBionicFsFunction)darwin_art_bionic_readdir},
     {"readdir_r", (DarwinArtBionicFsFunction)darwin_art_bionic_readdir_r},
@@ -593,12 +825,18 @@ static const Binding kBindings[] = {
     {"rewinddir", (DarwinArtBionicFsFunction)darwin_art_bionic_rewinddir},
     {"rmdir", (DarwinArtBionicFsFunction)darwin_art_bionic_rmdir},
     {"stat", (DarwinArtBionicFsFunction)darwin_art_bionic_stat},
+    {"statfs", (DarwinArtBionicFsFunction)darwin_art_bionic_fs_path_unsupported},
     {"statvfs", (DarwinArtBionicFsFunction)darwin_art_bionic_statvfs},
     {"symlink", (DarwinArtBionicFsFunction)darwin_art_bionic_symlink},
+    {"tcdrain", (DarwinArtBionicFsFunction)darwin_art_bionic_terminal_unsupported},
+    {"tcflush", (DarwinArtBionicFsFunction)darwin_art_bionic_terminal_unsupported},
+    {"tcgetattr", (DarwinArtBionicFsFunction)darwin_art_bionic_terminal_unsupported},
+    {"tcsetattr", (DarwinArtBionicFsFunction)darwin_art_bionic_terminal_unsupported},
     {"truncate", (DarwinArtBionicFsFunction)darwin_art_bionic_truncate},
     {"unlink", (DarwinArtBionicFsFunction)darwin_art_bionic_unlink},
     {"unlinkat", (DarwinArtBionicFsFunction)darwin_art_bionic_unlinkat},
     {"utimensat", (DarwinArtBionicFsFunction)darwin_art_bionic_utimensat},
+    {"utimes", (DarwinArtBionicFsFunction)darwin_art_bionic_fs_path_unsupported},
     {"write", (DarwinArtBionicFsFunction)darwin_art_bionic_write},
 };
 

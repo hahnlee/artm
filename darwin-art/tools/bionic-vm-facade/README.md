@@ -4,7 +4,7 @@ This standalone Tier-1 provider owns a deliberately narrow Android arm64
 virtual-memory namespace. The pinned NDK r28c/API35 `libc++_shared.so` imports
 none of these functions, so this is an explicit general-JNI extension rather
 than part of the 160-symbol libc++ closure. A normally linked API35 fixture
-imports `mmap`, `mmap64`, `munmap`, `mprotect`, `madvise`, and `__errno`, all at
+imports `mmap`, `mmap64`, `mremap`, `munmap`, `mprotect`, `madvise`, and `__errno`, all at
 the public `libc.so` `LIBC` symbol version.
 
 `mmap` and `mmap64` accept only a null address, nonzero length no greater than
@@ -24,15 +24,30 @@ without invoking a host syscall. The acceptance gate checks the table is empty
 after unmap and never reads, writes, or executes a retired pointer. Provider
 drop unmaps any remaining complete mappings.
 
-W^X is mandatory: simultaneous write and execute permission returns Android
-`EACCES`; RW to RX and RX to RW transitions are supported. RX transitions
-invalidate Darwin's instruction cache. The Android ELF fixture writes AArch64
-instructions into RW memory, changes it to RX, and executes them.
+Direct simultaneous write and execute mappings return Android `EACCES`; RW to
+RX and RX to RW transitions are supported. An ownership-checked subset of an
+anonymous private `PROT_NONE` reservation may later become RWX for Android V8
+CodeRange compatibility. Such reservations carry Darwin `MAP_JIT`, and the host
+executable carries macOS's narrow JIT and unsigned-executable-memory
+entitlements. Other RWX transitions still fail closed. RX transitions
+invalidate Darwin's instruction cache. Once a JIT reservation is host-RWX,
+later Android `mprotect` write/execute phases translate to
+`pthread_jit_write_protect_np` on the calling thread while the side table keeps
+the guest-visible protection. Android's process-wide RWX contract does not map
+directly onto Darwin's per-thread JIT mode: after a writing thread publishes
+code, its first attempted entry into the MAP_JIT range raises Darwin `SIGBUS`.
+The process signal bridge recognizes only an execute fault whose program
+counter is inside a live, executable, provider-owned JIT range, switches that
+thread back to execute mode, and retries the interrupted instruction. Other
+`SIGBUS` faults remain ordinary Android signals. The Android ELF fixture writes
+AArch64 instructions into RW memory, changes it to RX, and executes them.
 
 Advice values are translated explicitly. Android `NORMAL/RANDOM/SEQUENTIAL/
-WILLNEED` map to Darwin 0..3, Android `DONTNEED=4` maps to Darwin
-`MADV_ZERO=11` to preserve Linux anonymous zero-fill semantics, and Android
-`FREE=8` maps to Darwin `MADV_FREE=5`. Other known Android advice is
+WILLNEED` map to Darwin 0..3. Android `DONTNEED=4` uses an in-place fixed
+anonymous remap to preserve Linux zero-fill semantics even
+for protected PartitionAlloc ranges, and Android `FREE=8` maps to Darwin
+`MADV_FREE=5`. File-backed `DONTNEED` remains file-backed and uses Darwin's
+corresponding advice. Other known Android advice is
 `EOPNOTSUPP`; unknown advice is `EINVAL`.
 
 All guest failures publish Bionic pthread-local errno while C shims preserve

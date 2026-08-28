@@ -15,6 +15,7 @@ typedef uint32_t DarwinArtAndroidWchar;
 extern const unsigned char darwin_art_bionic_strtold[];
 extern const unsigned char darwin_art_bionic_strtold_l[];
 extern const unsigned char darwin_art_bionic_wcstold[];
+extern const unsigned char darwin_art_bionic_powl[];
 
 void* darwin_art_bionic_binary128_conversion_resolve(const char* soname,
                                                       const char* symbol,

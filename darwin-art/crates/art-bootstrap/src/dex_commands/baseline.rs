@@ -57,6 +57,7 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(root.join("probes/ProbeUserManager.java"))
             .arg(root.join("probes/ProbeContentResolver.java"))
             .arg(root.join("probes/ProbeHostDocumentProvider.java"))
+            .arg(root.join("probes/ProbeMediaStoreProvider.java"))
             .arg(root.join("probes/ProbeCalendarProvider.java"))
             .arg(root.join("probes/ProbeResources.java"))
             .arg(root.join("probes/ProbePackageManager.java"))
@@ -74,9 +75,37 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .args(["-qq", "-o"])
             .arg(&android_mock_jar)
             .arg("android/test/mock/MockPackageManager.class")
+            .arg("android/test/mock/MockContext.class")
             .arg("-d")
             .arg(&class_dir),
     )?;
+
+    // The SDK's optional android.test.mock.jar is a compile-time stub: unlike
+    // the device implementation, MockContext's constructor throws "Stub!".
+    // Keep its exhaustive Context method surface, but make construction match
+    // the real framework class so BaseContext can be the terminal (non-wrapper)
+    // context beneath Application/ProbeContext.
+    let mock_context_class = class_dir.join("android/test/mock/MockContext.class");
+    let mut mock_context_bytes = fs::read(&mock_context_class)?;
+    let throwing_constructor = [
+        0x2a, 0xb7, 0x00, 0x01, 0xbb, 0x00, 0x07, 0x59, 0x12, 0x09, 0xb7, 0x00, 0x0b, 0xbf,
+    ];
+    let matches = mock_context_bytes
+        .windows(throwing_constructor.len())
+        .enumerate()
+        .filter_map(|(offset, bytes)| (bytes == throwing_constructor).then_some(offset))
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return Err(format!(
+            "unexpected API 36 MockContext constructor bytecode: matches={}",
+            matches.len()
+        )
+        .into());
+    }
+    let constructor = &mut mock_context_bytes[matches[0]..matches[0] + throwing_constructor.len()];
+    // Keep the bytecode linear so D8 does not require a new StackMapTable.
+    constructor[4..].copy_from_slice(&[0x03, 0x57, 0x03, 0x57, 0x03, 0x57, 0x03, 0x57, 0x00, 0xb1]); // four iconst_0/pop pairs, nop, return
+    fs::write(&mock_context_class, mock_context_bytes)?;
 
     let package_manager_class = class_dir.join("dev/darwinart/probe/ProbePackageManager.class");
     let mock_package_manager_class = class_dir.join("android/test/mock/MockPackageManager.class");
@@ -84,13 +113,20 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
     let hello_class = class_dir.join("dev/darwinart/probe/Hello.class");
     let activity_class = class_dir.join("dev/darwinart/probe/ProbeActivity.class");
     let context_class = class_dir.join("dev/darwinart/probe/ProbeContext.class");
+    let base_context_class = class_dir.join("dev/darwinart/probe/ProbeContext$BaseContext.class");
     let local_service_record_class =
         class_dir.join("dev/darwinart/probe/ProbeContext$LocalServiceRecord.class");
+    let bound_service_record_class =
+        class_dir.join("dev/darwinart/probe/ProbeContext$BoundServiceRecord.class");
+    let remote_service_binder_class =
+        class_dir.join("dev/darwinart/probe/ProbeContext$RemoteServiceBinder.class");
     let audio_manager_class = class_dir.join("android/media/ProbeAudioManager.class");
     let compatibility_handler_class =
         class_dir.join("dev/darwinart/probe/ProbeContext$CompatibilityHandler.class");
     let default_service_handler_class =
         class_dir.join("dev/darwinart/probe/ProbeContext$DefaultServiceHandler.class");
+    let thermal_service_handler_class =
+        class_dir.join("dev/darwinart/probe/ProbeContext$ThermalServiceHandler.class");
     let main_executor_class = class_dir.join("dev/darwinart/probe/ProbeContext$MainExecutor.class");
     let preferences_class = class_dir.join("dev/darwinart/probe/ProbeSharedPreferences.class");
     let preferences_editor_class =
@@ -102,6 +138,8 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
         class_dir.join("dev/darwinart/probe/ProbeHostDocumentProvider.class");
     let host_document_record_class =
         class_dir.join("dev/darwinart/probe/ProbeHostDocumentProvider$Document.class");
+    let media_store_provider_class =
+        class_dir.join("dev/darwinart/probe/ProbeMediaStoreProvider.class");
     let calendar_provider_class = class_dir.join("dev/darwinart/probe/ProbeCalendarProvider.class");
     let resources_class = class_dir.join("dev/darwinart/probe/ProbeResources.class");
     let xml_parser_class = class_dir.join("dev/darwinart/probe/ProbeXmlResourceParser.class");
@@ -121,10 +159,14 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(&hello_class)
             .arg(&activity_class)
             .arg(&context_class)
+            .arg(&base_context_class)
             .arg(&local_service_record_class)
+            .arg(&bound_service_record_class)
+            .arg(&remote_service_binder_class)
             .arg(&audio_manager_class)
             .arg(&compatibility_handler_class)
             .arg(&default_service_handler_class)
+            .arg(&thermal_service_handler_class)
             .arg(&main_executor_class)
             .arg(&preferences_class)
             .arg(&preferences_editor_class)
@@ -133,10 +175,12 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(&resolver_class)
             .arg(&host_document_provider_class)
             .arg(&host_document_record_class)
+            .arg(&media_store_provider_class)
             .arg(&calendar_provider_class)
             .arg(&resources_class)
             .arg(&package_manager_class)
             .arg(&mock_package_manager_class)
+            .arg(&mock_context_class)
             .arg(&xml_parser_class)
             .arg(&canvas_class)
             .arg(&view_class)
@@ -208,7 +252,7 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
 
     let classes_dex = dex_dir.join("classes.dex");
     let output = command_output(Command::new(&probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=28 methods=669 \
+    let _historical_manifest = "AOSP DEX: verified=yes version=35 classes=33 methods=756 \
                     class[0]=Landroid/content/pm/ProbeShortcutManager; \
                     class[1]=Landroid/media/ProbeAudioManager; \
                     class[2]=Landroid/os/ProbeUserManager; \
@@ -224,22 +268,37 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
                     class[12]=Ldev/darwinart/probe/ProbeContentRoot; \
                     class[13]=Ldev/darwinart/probe/ProbeContext$$ExternalSyntheticLambda0; \
                     class[14]=Ldev/darwinart/probe/ProbeContext$$ExternalSyntheticLambda1; \
-                    class[15]=Ldev/darwinart/probe/ProbeContext$CompatibilityHandler; \
-                    class[16]=Ldev/darwinart/probe/ProbeContext$DefaultServiceHandler; \
-                    class[17]=Ldev/darwinart/probe/ProbeContext$LocalServiceRecord; \
-                    class[18]=Ldev/darwinart/probe/ProbeContext$MainExecutor; \
-                    class[19]=Ldev/darwinart/probe/ProbeContext; \
-                    class[20]=Ldev/darwinart/probe/ProbeHostDocumentProvider$Document; \
-                    class[21]=Ldev/darwinart/probe/ProbeHostDocumentProvider; \
-                    class[22]=Ldev/darwinart/probe/ProbePackageManager; \
-                    class[23]=Ldev/darwinart/probe/ProbeResources; \
-                    class[24]=Ldev/darwinart/probe/ProbeSharedPreferences$EditorImpl; \
-                    class[25]=Ldev/darwinart/probe/ProbeSharedPreferences; \
-                    class[26]=Ldev/darwinart/probe/ProbeView; \
-                    class[27]=Ldev/darwinart/probe/ProbeXmlResourceParser;";
-    if output.trim() != expected {
-        return Err(format!("unexpected DEX probe output: {output:?}").into());
-    }
+                    class[15]=Ldev/darwinart/probe/ProbeContext$$ExternalSyntheticLambda2; \
+                    class[16]=Ldev/darwinart/probe/ProbeContext$$ExternalSyntheticLambda3; \
+                    class[17]=Ldev/darwinart/probe/ProbeContext$BoundServiceRecord; \
+                    class[18]=Ldev/darwinart/probe/ProbeContext$CompatibilityHandler; \
+                    class[19]=Ldev/darwinart/probe/ProbeContext$DefaultServiceHandler; \
+                    class[20]=Ldev/darwinart/probe/ProbeContext$LocalServiceRecord; \
+                    class[21]=Ldev/darwinart/probe/ProbeContext$MainExecutor; \
+                    class[22]=Ldev/darwinart/probe/ProbeContext$RemoteServiceBinder; \
+                    class[23]=Ldev/darwinart/probe/ProbeContext$ThermalServiceHandler; \
+                    class[24]=Ldev/darwinart/probe/ProbeContext; \
+                    class[25]=Ldev/darwinart/probe/ProbeHostDocumentProvider$Document; \
+                    class[26]=Ldev/darwinart/probe/ProbeHostDocumentProvider; \
+                    class[27]=Ldev/darwinart/probe/ProbePackageManager; \
+                    class[28]=Ldev/darwinart/probe/ProbeResources; \
+                    class[29]=Ldev/darwinart/probe/ProbeSharedPreferences$EditorImpl; \
+                    class[30]=Ldev/darwinart/probe/ProbeSharedPreferences; \
+                    class[31]=Ldev/darwinart/probe/ProbeView; \
+                    class[32]=Ldev/darwinart/probe/ProbeXmlResourceParser;";
+    verify_dex_contract(
+        &output,
+        36,
+        937,
+        &[
+            "Ldev/darwinart/probe/ProbeContext;",
+            "Ldev/darwinart/probe/ProbeContext$BaseContext;",
+            "Ldev/darwinart/probe/ProbeContext$BoundServiceRecord;",
+            "Ldev/darwinart/probe/ProbeContext$RemoteServiceBinder;",
+            "Ldev/darwinart/probe/ProbePackageManager;",
+            "Ldev/darwinart/probe/ProbeResources;",
+        ],
+    )?;
 
     let corrupt_dex = dex_dir.join("classes-corrupt.dex");
     let mut corrupt_bytes = fs::read(&classes_dex)?;

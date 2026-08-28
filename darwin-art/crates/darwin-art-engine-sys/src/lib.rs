@@ -27,6 +27,39 @@ pub type LifecycleFinishFn =
 pub type LifecycleFailedFn = unsafe extern "C" fn(context: *mut c_void, status: i32);
 
 #[repr(C)]
+pub struct ServiceSpawnRequest {
+    pub header: AbiHeader,
+    pub component: *const c_char,
+    pub instance_name: *const c_char,
+    pub process_name: *const c_char,
+    pub isolated: i32,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(C)]
+pub struct ServiceSpawnResult {
+    pub header: AbiHeader,
+    pub host_pid: i32,
+    pub control_fd: i32,
+}
+
+pub type SpawnServiceFn = unsafe extern "C" fn(
+    context: *mut c_void,
+    request: *const ServiceSpawnRequest,
+    result: *mut ServiceSpawnResult,
+) -> i32;
+pub type ReleaseServiceFn = unsafe extern "C" fn(context: *mut c_void, host_pid: i32) -> i32;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct HostServices {
+    pub header: AbiHeader,
+    pub context: *mut c_void,
+    pub spawn_service: Option<SpawnServiceFn>,
+    pub release_service: Option<ReleaseServiceFn>,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct LifecycleHooks {
     pub struct_size: u32,
@@ -55,6 +88,7 @@ pub struct ProcessConfig {
     pub provider_release: Option<ProviderReleaseFn>,
     pub graphics_session_context: *mut c_void,
     pub lifecycle_hooks: *const LifecycleHooks,
+    pub host_services: *const HostServices,
 }
 
 impl ProcessConfig {
@@ -89,6 +123,7 @@ impl ProcessConfig {
             provider_release,
             graphics_session_context: core::ptr::null_mut(),
             lifecycle_hooks: core::ptr::null(),
+            host_services: core::ptr::null(),
         }
     }
 
@@ -103,6 +138,11 @@ impl ProcessConfig {
 
     pub const fn with_lifecycle_hooks(mut self, hooks: *const LifecycleHooks) -> Self {
         self.lifecycle_hooks = hooks;
+        self
+    }
+
+    pub const fn with_host_services(mut self, services: *const HostServices) -> Self {
+        self.host_services = services;
         self
     }
 }
@@ -165,7 +205,7 @@ mod tests {
 
     #[test]
     fn process_config_layout_is_owned_by_raw_ffi_crate() {
-        assert_eq!(size_of::<ProcessConfig>(), 120);
+        assert_eq!(size_of::<ProcessConfig>(), 128);
         assert_eq!(align_of::<ProcessConfig>(), 8);
         assert_eq!(offset_of!(ProcessConfig, header), 0);
         assert_eq!(
@@ -190,6 +230,23 @@ mod tests {
         assert_eq!(offset_of!(ProcessConfig, provider_release), 96);
         assert_eq!(offset_of!(ProcessConfig, graphics_session_context), 104);
         assert_eq!(offset_of!(ProcessConfig, lifecycle_hooks), 112);
+        assert_eq!(offset_of!(ProcessConfig, host_services), 120);
+    }
+
+    #[test]
+    fn host_services_layout_matches_native_abi() {
+        assert_eq!(size_of::<ServiceSpawnRequest>(), 40);
+        assert_eq!(offset_of!(ServiceSpawnRequest, component), 8);
+        assert_eq!(offset_of!(ServiceSpawnRequest, instance_name), 16);
+        assert_eq!(offset_of!(ServiceSpawnRequest, process_name), 24);
+        assert_eq!(offset_of!(ServiceSpawnRequest, isolated), 32);
+        assert_eq!(size_of::<ServiceSpawnResult>(), 16);
+        assert_eq!(offset_of!(ServiceSpawnResult, host_pid), 8);
+        assert_eq!(offset_of!(ServiceSpawnResult, control_fd), 12);
+        assert_eq!(size_of::<HostServices>(), 32);
+        assert_eq!(offset_of!(HostServices, context), 8);
+        assert_eq!(offset_of!(HostServices, spawn_service), 16);
+        assert_eq!(offset_of!(HostServices, release_service), 24);
     }
 
     #[test]

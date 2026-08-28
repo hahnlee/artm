@@ -116,8 +116,8 @@ def main() -> int:
 
     liblog_source = (ROOT / "tools/android-liblog-exec-provider/liblog_provider.cc").read_text()
     liblog = re.findall(r"^\s*LIBLOG_ENTRY\(([^)]+)\),", liblog_source, re.MULTILINE)
-    if len(liblog) != 18 or len(set(liblog)) != 18:
-        raise SystemExit("liblog provider surface is not exactly 18 unique symbols")
+    if len(liblog) != 16 or len(set(liblog)) != 16:
+        raise SystemExit("liblog provider surface is not exactly 16 unique symbols")
 
     owner_enum = {
         "leaf": "DARWIN_ART_BIONIC_PROVIDER_LEAF",
@@ -154,6 +154,8 @@ def main() -> int:
         "dns": "DARWIN_ART_BIONIC_PROVIDER_DNS",
         "math": "DARWIN_ART_BIONIC_PROVIDER_MATH",
         "vm": "DARWIN_ART_BIONIC_PROVIDER_VM",
+        "binder-ndk": "DARWIN_ART_BIONIC_PROVIDER_BINDER_NDK",
+        "aaudio": "DARWIN_ART_BIONIC_PROVIDER_AAUDIO",
     }
     extensions = rows("tools/bionic-provider-namespace/extensions.tsv")
     extension_keys: set[tuple[str, str, str]] = set()

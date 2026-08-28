@@ -28,6 +28,11 @@ bool RegisterFrameworkSupportNatives(JNIEnv* env);
 bool RegisterFrameworkResourceNatives(JNIEnv* env);
 bool RegisterFrameworkGraphicsNatives(JNIEnv* env);
 
+// SurfaceFlinger's display edge is supplied by the host frame clock. Pending
+// DisplayEventReceivers are delivered on the Android owner/Looper thread;
+// their normal asynchronous Handler path then invokes Choreographer.doFrame.
+int DispatchFrameworkPendingVsyncs(JNIEnv* env, jlong frame_time_nanos);
+
 // Delivers a host-created Android InputEvent through the WindowInputEventReceiver
 // owned by a real ViewRootImpl. The receiver must have been initialized from a
 // Darwin InputChannel supplied by IWindowSession.addToDisplay.

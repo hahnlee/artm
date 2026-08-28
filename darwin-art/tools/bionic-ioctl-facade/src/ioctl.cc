@@ -7,7 +7,15 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <atomic>
+
 extern "C" void darwin_art_bionic_errno_store(int32_t android_errno);
+extern "C" int darwin_art_bionic_socket_broker_ioctl_dispatch(
+    int fd, uint32_t request, void* argument, int* handled, int* result,
+    int* android_errno) __attribute__((weak_import));
+
+using SharedMemoryIoctl = int (*)(int, uint32_t, void*, int*, int*);
+std::atomic<SharedMemoryIoctl> g_shared_memory_ioctl{nullptr};
 
 namespace {
 
@@ -93,6 +101,36 @@ void ReleaseProvider() {
 }
 
 int Dispatch(int32_t fd, uint32_t request, void* argument) {
+  int shared_result = -1;
+  int shared_errno = 0;
+  const SharedMemoryIoctl shared_memory_ioctl =
+      g_shared_memory_ioctl.load(std::memory_order_acquire);
+  if (shared_memory_ioctl != nullptr &&
+      shared_memory_ioctl(fd, request, argument, &shared_result,
+                          &shared_errno) != 0) {
+    return shared_result < 0
+               ? Fail(shared_errno == 0 ? kAndroidEio : shared_errno)
+               : shared_result;
+  }
+  // Socket, pipe, eventfd, timerfd, and SCM-imported descriptors live in the
+  // central fd broker rather than the filesystem table. Give that owner the
+  // first chance to implement Linux device ioctls (notably sync_file fences)
+  // before classifying the descriptor through the filesystem provider.
+  if (darwin_art_bionic_socket_broker_ioctl_dispatch != nullptr) {
+    int handled = 0;
+    int broker_result = -1;
+    int broker_errno = 0;
+    if (darwin_art_bionic_socket_broker_ioctl_dispatch(
+            fd, request, argument, &handled, &broker_result,
+            &broker_errno) != 0) {
+      return Fail(kAndroidEio);
+    }
+    if (handled != 0) {
+      return broker_result < 0
+                 ? Fail(broker_errno == 0 ? kAndroidEio : broker_errno)
+                 : broker_result;
+    }
+  }
   DarwinArtBionicIoctlFdLookup lookup = nullptr;
   void* context = nullptr;
   if (!AcquireProvider(&lookup, &context)) return Fail(kAndroidEnosys);
@@ -123,6 +161,18 @@ int Dispatch(int32_t fd, uint32_t request, void* argument) {
 }
 
 }  // namespace
+
+extern "C" int darwin_art_bionic_ioctl_bind_shared_memory(
+    SharedMemoryIoctl callback) {
+  if (callback == nullptr) return -1;
+  SharedMemoryIoctl expected = nullptr;
+  if (g_shared_memory_ioctl.compare_exchange_strong(
+          expected, callback, std::memory_order_release,
+          std::memory_order_acquire)) {
+    return 0;
+  }
+  return expected == callback ? 0 : -1;
+}
 
 extern "C" DarwinArtBionicIoctlLifecycleStatus
 darwin_art_bionic_ioctl_activate(DarwinArtBionicIoctlFdLookup lookup,

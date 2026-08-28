@@ -11,6 +11,7 @@ extern "C" {
 typedef void (*DarwinArtBionicSyscallFunction)(void);
 
 long darwin_art_bionic_syscall(long number, ...);
+int darwin_art_bionic_gettid(void);
 DarwinArtBionicSyscallFunction darwin_art_bionic_syscall_resolve(
     const char* soname, const char* symbol, const char* version);
 const char* darwin_art_bionic_syscall_capability(const char* capability);

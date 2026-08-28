@@ -8,10 +8,16 @@ use std::path::Path;
 type Result<T> = std::result::Result<T, String>;
 
 const MAX_APK_SIZE: usize = 512 * 1024 * 1024;
-const MAX_ENTRIES: usize = 4096;
+// Modern resource-heavy applications such as Chromium exceed 4,096 archive
+// members without using ZIP64. Keep a bounded ceiling above that real-world
+// shape; the classic EOCD entry count still provides a hard 65,535 limit.
+const MAX_ENTRIES: usize = 8192;
 const MAX_MANIFEST_SIZE: usize = 4 * 1024 * 1024;
 const MAX_DEX_SIZE: usize = 128 * 1024 * 1024;
-const MAX_NATIVE_LIBRARY_SIZE: usize = 64 * 1024 * 1024;
+// Chromium's monolithic arm64 libchrome.so is roughly 240 MiB. This remains
+// bounded below the APK-wide 512 MiB cap and is only allocated while examining
+// a selected native entry.
+const MAX_NATIVE_LIBRARY_SIZE: usize = 256 * 1024 * 1024;
 const EOCD: u32 = 0x0605_4b50;
 const CENTRAL: u32 = 0x0201_4b50;
 const LOCAL: u32 = 0x0403_4b50;
@@ -44,6 +50,7 @@ struct StringPool {
 #[derive(Clone)]
 struct ActivityCandidate {
     depth: usize,
+    component_name: String,
     name: String,
     theme: Option<u32>,
     label: Option<String>,
@@ -53,12 +60,35 @@ struct ActivityCandidate {
     alias: bool,
 }
 
+#[derive(Clone)]
+struct ServiceCandidate {
+    name: String,
+    process: Option<String>,
+}
+
+#[derive(Clone)]
+enum ManifestMetadataValue {
+    Resource(u32),
+    Integer(u32),
+    Boolean(bool),
+    String(String),
+}
+
+#[derive(Clone)]
+struct ManifestMetadata {
+    name: String,
+    value: ManifestMetadataValue,
+}
+
 struct ManifestInfo {
     package: String,
     application: String,
     activity: String,
+    launch_component: String,
     activity_themes: Vec<(String, u32)>,
-    services: Vec<String>,
+    activity_aliases: Vec<(String, String)>,
+    services: Vec<(String, String)>,
+    application_metadata: Vec<ManifestMetadata>,
     version_code: u32,
     version_name: String,
     theme: u32,
@@ -66,6 +96,46 @@ struct ManifestInfo {
     label: String,
     label_res: u32,
     icon: Option<String>,
+}
+
+fn find_metadata_value(
+    input: &[u8],
+    pool: &StringPool,
+    attrs: usize,
+    count: usize,
+    attr_size: usize,
+) -> Result<Option<ManifestMetadataValue>> {
+    if attr_size < 20 {
+        return Err("manifest attribute record is too small".to_owned());
+    }
+    for index in 0..count {
+        let attr = checked_add(attrs, index * attr_size, "manifest attribute")?;
+        if pool_string(pool, u32le(input, attr + 4, "attribute name")?)? != "value" {
+            continue;
+        }
+        let raw = u32le(input, attr + 8, "attribute raw value")?;
+        let value_size = u16le(input, attr + 12, "attribute value size")?;
+        let value_type = *bytes(input, attr + 15, 1, "attribute type")?
+            .first()
+            .ok_or_else(|| "attribute type is absent".to_owned())?;
+        let data = u32le(input, attr + 16, "attribute data")?;
+        if value_size != 8 {
+            return Ok(None);
+        }
+        return Ok(match value_type {
+            TYPE_REFERENCE => Some(ManifestMetadataValue::Resource(data)),
+            TYPE_INT_DEC | TYPE_INT_HEX => Some(ManifestMetadataValue::Integer(data)),
+            TYPE_INT_BOOLEAN => Some(ManifestMetadataValue::Boolean(data != 0)),
+            TYPE_STRING => Some(ManifestMetadataValue::String(
+                pool_string(pool, data)?.to_owned(),
+            )),
+            _ if raw != u32::MAX => Some(ManifestMetadataValue::String(
+                pool_string(pool, raw)?.to_owned(),
+            )),
+            _ => None,
+        });
+    }
+    Ok(None)
 }
 
 fn checked_add(a: usize, b: usize, label: &str) -> Result<usize> {
@@ -520,6 +590,7 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
     let mut depth = 0_usize;
     let mut package = None;
     let mut application = None;
+    let mut application_process = None;
     let mut version_code = None;
     let mut version_name = None;
     let mut label = None;
@@ -529,7 +600,10 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
     let mut current: Option<ActivityCandidate> = None;
     let mut launchers = Vec::new();
     let mut activities = Vec::new();
+    let mut activity_aliases = Vec::new();
     let mut service_names = Vec::new();
+    let mut application_depth = None;
+    let mut application_metadata = Vec::new();
     while offset < input.len() {
         let chunk_type = u16le(input, offset, "XML chunk type")?;
         let header_size = usize::from(u16le(input, offset + 2, "XML chunk header")?);
@@ -594,8 +668,11 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                     )?;
                 }
                 "application" => {
+                    application_depth = Some(depth);
                     application =
                         find_attribute(input, strings, attrs, attr_count, attr_size, "name")?;
+                    application_process =
+                        find_attribute(input, strings, attrs, attr_count, attr_size, "process")?;
                     label = find_attribute(input, strings, attrs, attr_count, attr_size, "label")?;
                     label_res = find_resource_attribute(
                         input, strings, attrs, attr_count, attr_size, "label",
@@ -604,24 +681,36 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                         input, strings, attrs, attr_count, attr_size, "theme",
                     )?;
                 }
+                "meta-data" if application_depth == depth.checked_sub(1) => {
+                    if let (Some(name), Some(value)) = (
+                        find_attribute(input, strings, attrs, attr_count, attr_size, "name")?,
+                        find_metadata_value(input, strings, attrs, attr_count, attr_size)?,
+                    ) {
+                        application_metadata.push(ManifestMetadata { name, value });
+                    }
+                }
                 "activity" | "activity-alias" => {
                     if current.is_some() {
                         return Err("nested activity declarations are invalid".to_owned());
                     }
-                    let name_attribute = if tag == "activity-alias" {
-                        "targetActivity"
+                    let component_name =
+                        find_attribute(input, strings, attrs, attr_count, attr_size, "name")?
+                            .ok_or_else(|| format!("{tag} is missing android:name"))?;
+                    let name = if tag == "activity-alias" {
+                        find_attribute(
+                            input,
+                            strings,
+                            attrs,
+                            attr_count,
+                            attr_size,
+                            "targetActivity",
+                        )?
+                        .ok_or_else(|| {
+                            "activity-alias is missing android:targetActivity".to_owned()
+                        })?
                     } else {
-                        "name"
+                        component_name.clone()
                     };
-                    let name = find_attribute(
-                        input,
-                        strings,
-                        attrs,
-                        attr_count,
-                        attr_size,
-                        name_attribute,
-                    )?
-                    .ok_or_else(|| format!("{tag} is missing android:{name_attribute}"))?;
                     let theme = find_resource_attribute(
                         input, strings, attrs, attr_count, attr_size, "theme",
                     )?;
@@ -632,6 +721,7 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                     )?;
                     current = Some(ActivityCandidate {
                         depth,
+                        component_name,
                         name,
                         theme,
                         label: activity_label,
@@ -650,7 +740,10 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                         let name =
                             find_attribute(input, strings, attrs, attr_count, attr_size, "name")?
                                 .ok_or_else(|| "service is missing android:name".to_owned())?;
-                        service_names.push(name);
+                        let process = find_attribute(
+                            input, strings, attrs, attr_count, attr_size, "process",
+                        )?;
+                        service_names.push(ServiceCandidate { name, process });
                     }
                 }
                 "action" if current.is_some() => {
@@ -686,7 +779,9 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                 if candidate.main && candidate.launcher {
                     launchers.push(candidate.clone());
                 }
-                if !candidate.alias {
+                if candidate.alias {
+                    activity_aliases.push(candidate);
+                } else {
                     activities.push(candidate);
                 }
             }
@@ -711,6 +806,7 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
         .pop()
         .ok_or_else(|| "launcher Activity is missing".to_owned())?;
     let activity = normalize_activity(&package, &launcher.name)?;
+    let launch_component = normalize_activity(&package, &launcher.component_name)?;
     let activity_themes = activities
         .into_iter()
         .map(|candidate| {
@@ -720,11 +816,43 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
             ))
         })
         .collect::<Result<Vec<_>>>()?;
+    let activity_aliases = activity_aliases
+        .into_iter()
+        .map(|candidate| {
+            Ok((
+                normalize_activity(&package, &candidate.component_name)?,
+                normalize_activity(&package, &candidate.name)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let services = service_names
         .into_iter()
-        .map(|name| normalize_activity(&package, &name))
+        .map(|service| {
+            let name = normalize_activity(&package, &service.name)?;
+            let declared = service
+                .process
+                .as_deref()
+                .or(application_process.as_deref())
+                .unwrap_or(&package);
+            let process = if let Some(suffix) = declared.strip_prefix(':') {
+                format!("{package}:{suffix}")
+            } else {
+                declared.to_owned()
+            };
+            Ok((name, process))
+        })
         .collect::<Result<Vec<_>>>()?;
-    let theme = launcher.theme.or(application_theme).unwrap_or(0);
+    // The MAIN/LAUNCHER declaration can be an alias (or a second manifest
+    // occurrence) without its own theme. Android resolves the effective
+    // ActivityInfo for the target activity, including the theme declared on
+    // that activity, before launching it. Keep the launcher-selected class but
+    // take its already-resolved theme from the activity table when available.
+    let theme = activity_themes
+        .iter()
+        .find_map(|(name, theme)| (name == &activity).then_some(*theme))
+        .or(launcher.theme)
+        .or(application_theme)
+        .unwrap_or(0);
     let label_res = launcher.label_res.or(label_res).unwrap_or(0);
     let label = launcher
         .label
@@ -735,8 +863,11 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
         package,
         application,
         activity,
+        launch_component,
         activity_themes,
+        activity_aliases,
         services,
+        application_metadata,
         version_code: version_code.unwrap_or(0),
         version_name: version_name.unwrap_or_default(),
         theme,
@@ -745,6 +876,40 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
         label_res,
         icon: None,
     })
+}
+
+fn hex_bytes(value: &str) -> String {
+    value
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn encode_application_metadata(entries: &[ManifestMetadata]) -> String {
+    if entries.is_empty() {
+        return "none".to_owned();
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            let (kind, data) = match &entry.value {
+                ManifestMetadataValue::Resource(value) => ("r", format!("{value:08x}")),
+                ManifestMetadataValue::Integer(value) => ("i", format!("{value:08x}")),
+                ManifestMetadataValue::Boolean(value) => (
+                    "b",
+                    if *value {
+                        "1".to_owned()
+                    } else {
+                        "0".to_owned()
+                    },
+                ),
+                ManifestMetadataValue::String(value) => ("s", hex_bytes(value)),
+            };
+            format!("{}:{kind}:{data}", hex_bytes(&entry.name))
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn icon_entry(entries: &[ZipEntry]) -> Option<String> {
@@ -838,8 +1003,9 @@ fn dynamic_jni_signals(input: &[u8]) -> Result<NativeEntrySignals> {
         if u32le(input, symbol_section + 4, "ELF section type")? != 11 {
             continue;
         }
-        let symbols_offset = usize::try_from(u64le(input, symbol_section + 24, "dynsym offset")?)
-            .map_err(|_| "ELF dynsym offset exceeds addressable size".to_owned())?;
+        let symbols_offset =
+            usize::try_from(u64le(input, symbol_section + 24, "dynsym offset")?)
+                .map_err(|_| "ELF dynsym offset exceeds addressable size".to_owned())?;
         let symbols_size = usize::try_from(u64le(input, symbol_section + 32, "dynsym size")?)
             .map_err(|_| "ELF dynsym size exceeds addressable size".to_owned())?;
         let symbol_size = usize::try_from(u64le(input, symbol_section + 56, "dynsym entry size")?)
@@ -862,16 +1028,14 @@ fn dynamic_jni_signals(input: &[u8]) -> Result<NativeEntrySignals> {
                 .first()
                 .expect("one-byte slice");
             let section_index = u16le(input, record + 6, "dynamic symbol section")?;
-            if name_offset >= strings.len()
-                || section_index == 0
-                || !matches!(info >> 4, 1 | 2)
-            {
+            if name_offset >= strings.len() || section_index == 0 || !matches!(info >> 4, 1 | 2) {
                 continue;
             }
             let tail = &strings[name_offset..];
-            let length = tail.iter().position(|byte| *byte == 0).ok_or_else(|| {
-                "ELF dynamic symbol has an unterminated name".to_owned()
-            })?;
+            let length = tail
+                .iter()
+                .position(|byte| *byte == 0)
+                .ok_or_else(|| "ELF dynamic symbol has an unterminated name".to_owned())?;
             let name = &tail[..length];
             if name == b"JNI_OnLoad" {
                 signals.jni_on_load = true;
@@ -902,7 +1066,13 @@ fn select_native_root(candidates: &[(String, NativeEntrySignals)]) -> Option<Str
 fn inspect(
     path: &Path,
     external_dex: Option<&Path>,
-) -> Result<(ManifestInfo, &'static str, usize, Vec<String>, Option<String>)> {
+) -> Result<(
+    ManifestInfo,
+    &'static str,
+    usize,
+    Vec<String>,
+    Option<String>,
+)> {
     let metadata = fs::metadata(path).map_err(|error| format!("APK metadata failed: {error}"))?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_APK_SIZE as u64 {
         return Err(format!("APK is outside the 1..={MAX_APK_SIZE} byte cap"));
@@ -1006,13 +1176,7 @@ fn inspect(
     } else {
         dex_entries.len()
     };
-    Ok((
-        info,
-        dex_source,
-        dex_count,
-        native_libraries,
-        native_root,
-    ))
+    Ok((info, dex_source, dex_count, native_libraries, native_root))
 }
 
 fn descriptor(class_name: &str) -> String {
@@ -1037,21 +1201,36 @@ fn run() -> Result<()> {
     let (info, dex_source, dex_count, native_libraries, native_root) =
         inspect(Path::new(&path), external_dex.as_deref().map(Path::new))?;
     println!(
-        "apk-app-runtime: package={} application={} activity={} descriptor={} activities={} services={} version_code={} version_name={} theme={:#x} target_sdk={} label={} label_res={:#x} icon={} dex={}-{} native={} native_root={}",
+        "apk-app-runtime: package={} application={} activity={} launch_component={} descriptor={} activities={} activity_aliases={} services={} application_metadata={} version_code={} version_name={} theme={:#x} target_sdk={} label={} label_res={:#x} icon={} dex={}-{} native={} native_root={}",
         info.package,
         info.application,
         info.activity,
+        info.launch_component,
         descriptor(&info.activity),
         info.activity_themes
             .iter()
             .map(|(name, theme)| format!("{name}={theme:#x}"))
             .collect::<Vec<_>>()
             .join(","),
+        if info.activity_aliases.is_empty() {
+            "none".to_owned()
+        } else {
+            info.activity_aliases
+                .iter()
+                .map(|(alias, target)| format!("{alias}>{target}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        },
         if info.services.is_empty() {
             "none".to_owned()
         } else {
-            info.services.join(",")
+            info.services
+                .iter()
+                .map(|(name, process)| format!("{name}>{process}"))
+                .collect::<Vec<_>>()
+                .join(",")
         },
+        encode_application_metadata(&info.application_metadata),
         info.version_code,
         info.version_name,
         info.theme,
@@ -1097,7 +1276,10 @@ mod tests {
                 },
             ),
         ];
-        assert_eq!(select_native_root(&candidates).as_deref(), Some("libvlcjni.so"));
+        assert_eq!(
+            select_native_root(&candidates).as_deref(),
+            Some("libvlcjni.so")
+        );
     }
 
     #[test]
@@ -1112,6 +1294,9 @@ mod tests {
                 },
             ),
         ];
-        assert_eq!(select_native_root(&candidates).as_deref(), Some("libroot.so"));
+        assert_eq!(
+            select_native_root(&candidates).as_deref(),
+            Some("libroot.so")
+        );
     }
 }

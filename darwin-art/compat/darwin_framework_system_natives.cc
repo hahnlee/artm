@@ -1,12 +1,13 @@
 #include "darwin_framework_system_natives.h"
 
+#include "darwin_android_platform.h"
+
 #include <mach/mach_time.h>
 #include <sys/resource.h>
 
 #include <chrono>
-#include <condition_variable>
+#include <atomic>
 #include <cstdint>
-#include <mutex>
 #include <time.h>
 
 namespace darwin_art::framework_system {
@@ -14,37 +15,27 @@ namespace {
 
 class DarwinMessageQueue {
  public:
+  DarwinMessageQueue()
+      : looper_(darwin_art_android_platform_prepare_current_looper()) {}
+
   void Poll(jint timeout_millis) {
-    std::unique_lock lock(mutex_);
-    polling_ = true;
-    if (!wake_pending_) {
-      if (timeout_millis < 0) {
-        condition_.wait(lock, [this] { return wake_pending_; });
-      } else if (timeout_millis > 0) {
-        condition_.wait_for(lock, std::chrono::milliseconds(timeout_millis),
-                            [this] { return wake_pending_; });
-      }
-    }
-    wake_pending_ = false;
-    polling_ = false;
+    polling_.store(true, std::memory_order_release);
+    (void)darwin_art_android_platform_poll_current_looper_timeout(
+        timeout_millis);
+    polling_.store(false, std::memory_order_release);
   }
 
   void Wake() {
-    std::lock_guard lock(mutex_);
-    wake_pending_ = true;
-    condition_.notify_one();
+    darwin_art_android_platform_wake_looper(looper_);
   }
 
   bool IsPolling() {
-    std::lock_guard lock(mutex_);
-    return polling_;
+    return polling_.load(std::memory_order_acquire);
   }
 
  private:
-  std::mutex mutex_;
-  std::condition_variable condition_;
-  bool wake_pending_ = false;
-  bool polling_ = false;
+  void* looper_ = nullptr;
+  std::atomic<bool> polling_{false};
 };
 
 DarwinMessageQueue* ToMessageQueue(jlong handle) {

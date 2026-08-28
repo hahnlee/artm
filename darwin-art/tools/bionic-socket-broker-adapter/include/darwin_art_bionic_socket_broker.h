@@ -23,6 +23,14 @@ int darwin_art_bionic_socket_broker_socket(int domain, int type, int protocol);
 int darwin_art_bionic_socket_broker_pipe(int32_t descriptors[2]);
 int darwin_art_bionic_socket_broker_pipe2(int32_t descriptors[2], int flags);
 int darwin_art_bionic_socket_broker_eventfd(uint32_t initial_value, int flags);
+int darwin_art_bionic_socket_broker_timerfd_create(int clock_id, int flags);
+int darwin_art_bionic_socket_broker_epoll_create(int size);
+int darwin_art_bionic_socket_broker_epoll_create1(int flags);
+int darwin_art_bionic_socket_broker_epoll_ctl(int epoll_fd, int operation,
+                                               int target_fd,
+                                               const void* event);
+int darwin_art_bionic_socket_broker_epoll_wait(int epoll_fd, void* events,
+                                                int capacity, int timeout_ms);
 intptr_t darwin_art_bionic_socket_broker_readv(int fd, const void *vectors,
                                                int count);
 intptr_t darwin_art_bionic_socket_broker_writev(int fd, const void *vectors,
@@ -67,13 +75,23 @@ int darwin_art_bionic_socket_broker_setsockopt(int fd, int level, int option,
                                                const void *value,
                                                uint32_t length);
 int darwin_art_bionic_socket_broker_shutdown(int fd, int how);
+int darwin_art_bionic_socket_broker_dup(int fd);
 int darwin_art_bionic_socket_broker_close(int fd);
 int darwin_art_bionic_socket_broker_fcntl(int fd, int command,
                                           intptr_t argument);
+int darwin_art_bionic_fd_export_for_scm(int guest_fd);
+int darwin_art_bionic_fd_import_from_scm(int host_fd);
+/* Returns zero after reporting whether a central-broker descriptor handled the
+ * ioctl. This is the device-owner seam used by the Bionic ioctl facade. */
+int darwin_art_bionic_socket_broker_ioctl_dispatch(
+    int fd, uint32_t request, void* argument, int* handled, int* result,
+    int* android_errno);
 
 DarwinArtBionicSocketBrokerFunction
 darwin_art_bionic_socket_broker_resolve(const char *soname, const char *symbol,
                                         const char *version);
+uintptr_t darwin_art_bionic_socket_broker_data_resolve(
+    const char *soname, const char *symbol, const char *version);
 DarwinArtBionicSocketBrokerFunction darwin_art_bionic_socket_broker_dns_resolve(
     const char *soname, const char *symbol, const char *version);
 size_t darwin_art_bionic_socket_broker_live_objects(void);

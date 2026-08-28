@@ -10,6 +10,7 @@ extern "C" {
 
 typedef void (*DarwinArtBionicDsoDestructor)(void*);
 typedef void (*DarwinArtBionicDsoFunction)(void);
+typedef int (*DarwinArtBionicDladdrCallback)(const void*, void*);
 
 int darwin_art_bionic___cxa_atexit(DarwinArtBionicDsoDestructor function,
                                    void* argument, void* dso);
@@ -18,6 +19,8 @@ int darwin_art_bionic___cxa_thread_atexit_impl(
 void darwin_art_bionic___cxa_finalize(void* dso);
 DarwinArtBionicDsoFunction darwin_art_bionic_dso_lifecycle_resolve(
     const char* name);
+void darwin_art_bionic_dso_install_dladdr(
+    DarwinArtBionicDladdrCallback callback);
 
 int darwin_art_bionic_dso_cxa_atexit_core(
     DarwinArtBionicDsoDestructor function, void* argument, void* dso);

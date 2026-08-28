@@ -74,8 +74,8 @@ int RunRound() {
   if (wrong_unlock != 1) return 8;
   if (darwin_art_bionic_pthread_rwlock_unlock(&rwlock) != 0) return 9;
   if (darwin_art_bionic_pthread_rwlock_destroy(&rwlock) != 0) return 10;
-  if (darwin_art_bionic_pthread_rwlock_destroy(&rwlock) != kAndroidEbusy)
-    return 11;
+  // Bionic leaves an idle rwlock unchanged, so repeated destroy succeeds.
+  if (darwin_art_bionic_pthread_rwlock_destroy(&rwlock) != 0) return 11;
   if (darwin_art_bionic_pthread_rwlock_init(&rwlock, nullptr) != 0) return 14;
   if (darwin_art_bionic_pthread_rwlock_destroy(&rwlock) != 0) return 15;
   if (darwin_art_bionic_pthread_provider_reset() != 0) return 12;
@@ -105,6 +105,6 @@ int main() {
   }
   const int boundary = CheckLazyResetAndPshared();
   if (boundary != 0) return boundary;
-  std::puts("pthread-rwlock-stress: PASS rounds=20 readers=4 concurrent>=2 writer=10000-progress wrong-unlock=EPERM destroy-held=EBUSY lazy-reset=clean ASan=clean");
+  std::puts("pthread-rwlock-stress: PASS rounds=20 readers=4 concurrent>=2 writer=10000-progress wrong-unlock=EPERM destroy-held=EBUSY double-destroy=Bionic-0 lazy-reset=clean ASan=clean");
   return 0;
 }

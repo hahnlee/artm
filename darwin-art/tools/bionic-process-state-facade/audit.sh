@@ -66,14 +66,60 @@ host_cc="$(xcrun --find clang)"; sdk="$(xcrun --sdk macosx --show-sdk-path)"
   -Wpedantic -I"$script_dir/include" -c "$script_dir/src/shims.c" -o "$temp_root/shims.o"
 nm -u "$temp_root/shims.o" | sed 's/^[[:space:]]*//' | sort >"$temp_root/undefined"
 cat >"$temp_root/expected-undefined" <<'EOF'
+___chkstk_darwin
 ___error
+___stack_chk_fail
+___stack_chk_guard
+__exit
+__tlv_bootstrap
+_bzero
+_darwin_art_bionic_environ
+_darwin_art_bionic_errno_store
+_darwin_art_bionic_longjmp
 _darwin_art_bionic_process_getauxval_core
 _darwin_art_bionic_process_getenv_core
+_darwin_art_bionic_process_property_find_core
 _darwin_art_bionic_process_property_get_core
+_darwin_art_bionic_process_property_read_callback_core
+_darwin_art_bionic_setjmp
+_exit
+_fork
+_getegid
+_geteuid
+_getgid
+_gethostname
+_getpagesize
+_getpid
+_getrusage
+_getuid
+_kill
+_mach_task_self_
+_mach_vm_read_overwrite
+_mach_vm_write
+_nice
+_pthread_getname_np
+_pthread_self
+_pthread_setname_np
+_raise
+_sched_get_priority_max
+_sched_get_priority_min
+_sched_yield
+_setenv
+_setuid
+_sigaction
+_sigaltstack
+_sigpending
+_sigwait
+_snprintf
+_strcmp
+_unsetenv
+_waitpid
+_write
 EOF
 diff -u "$temp_root/expected-undefined" "$temp_root/undefined" || fail 'host dependency drift'
 definitions="$(nm -gU "$temp_root/shims.o")"
-for symbol in __system_property_get getauxval getenv process_state_resolve; do
+for symbol in __system_property_find __system_property_get \
+              __system_property_read_callback getauxval getenv process_state_resolve; do
   grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
     fail "missing prefixed C ABI definition: $symbol"
 done
@@ -113,4 +159,4 @@ CARGO_TARGET_DIR="$temp_root/target" cargo clippy --quiet --manifest-path "$scri
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
 check_target_clean
 check_diff_clean
-echo 'bionic-process-state-facade: PASS AndroidELF imports=4 threads=8x1000 stable-pointers teardown target-clean diff-clean'
+echo 'bionic-process-state-facade: PASS AndroidELF imports=4 threads=8x1000 getrlimit-copyout-EFAULT stable-pointers teardown target-clean diff-clean'

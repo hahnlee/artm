@@ -5,9 +5,18 @@
 #include <stddef.h>
 
 typedef void (*DarwinArtBionicProcessFunction)(void);
+typedef int (*DarwinArtBionicJitFaultRecovery)(uintptr_t program_counter);
 
 char* darwin_art_bionic_getenv(const char* name);
+int darwin_art_bionic_process_state_process_install(void);
+int darwin_art_bionic_process_state_process_uninstall(void);
+void darwin_art_bionic_process_state_bind_jit_fault_recovery(
+    DarwinArtBionicJitFaultRecovery recovery);
 int darwin_art_bionic___system_property_get(const char* name, char* value);
+const void* darwin_art_bionic___system_property_find(const char* name);
+void darwin_art_bionic___system_property_read_callback(
+    const void* property,
+    void (*callback)(void*, const char*, const char*, uint32_t), void* cookie);
 unsigned long darwin_art_bionic_getauxval(unsigned long type);
 int darwin_art_bionic_rand(void);
 void darwin_art_bionic_srand(unsigned seed);
@@ -22,13 +31,22 @@ int darwin_art_bionic_getpid(void);
 unsigned darwin_art_bionic_geteuid(void);
 int darwin_art_bionic_getpagesize(void);
 int darwin_art_bionic_daemon(int nochdir, int noclose);
+int darwin_art_bionic_posix_spawn(int* process_id, const char* path,
+                                  const void* file_actions,
+                                  const void* attributes, char* const argv[],
+                                  char* const environment[]);
 int darwin_art_bionic_setjmp(void* environment);
 void darwin_art_bionic_longjmp(void* environment, int value);
 DarwinArtBionicProcessFunction darwin_art_bionic_process_state_resolve(
     const char* name);
+uintptr_t darwin_art_bionic_process_state_data_resolve(const char* name);
 
 char* darwin_art_bionic_process_getenv_core(const char* name);
 int darwin_art_bionic_process_property_get_core(const char* name, char* value);
+const void* darwin_art_bionic_process_property_find_core(const char* name);
+void darwin_art_bionic_process_property_read_callback_core(
+    const void* property,
+    void (*callback)(void*, const char*, const char*, uint32_t), void* cookie);
 unsigned long darwin_art_bionic_process_getauxval_core(unsigned long type);
 
 #endif

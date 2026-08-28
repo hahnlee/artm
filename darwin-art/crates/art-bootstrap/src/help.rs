@@ -68,7 +68,7 @@ pub(crate) fn print_help() {
         "  audit-runtime-graphics-link-fast  validate existing graphics artifacts without upstream rebuilds"
     );
     println!(
-        "  audit-runtime-graphics-link-incremental  reuse pinned foundation artifacts, then rerun closure/link checks"
+        "  audit-runtime-graphics-link-incremental  rebuild changed native objects, then rerun cached closure/link checks"
     );
     println!("  audit-graphics-closure  verify the 32-archive Android graphics closure");
     println!("  probe-runtime-dex  launch Java main(String[]) with Android stdout");

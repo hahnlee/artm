@@ -45,6 +45,14 @@ struct PipeFixtureResult {
   uint8_t value;
 };
 
+struct AndroidEpollEvent {
+  uint32_t events;
+  uint64_t data;
+};
+
+static_assert(offsetof(AndroidEpollEvent, data) == 8);
+static_assert(sizeof(AndroidEpollEvent) == 16);
+
 void Check(bool condition, const char *message) {
   if (!condition) {
     std::fprintf(stderr, "bionic-socket-broker-adapter: FAIL %s\n", message);
@@ -133,6 +141,19 @@ extern "C" intptr_t darwin_art_bionic_fs_write_core(int, const void *, size_t) {
   return -1;
 }
 
+extern "C" int darwin_art_bionic_fs_fcntl_core(int, int, intptr_t) {
+  darwin_art_bionic_errno_store(9);
+  return -1;
+}
+
+extern "C" int darwin_art_bionic_fs_dup_host_fd_core(int, int *) { return 0; }
+
+extern "C" int darwin_art_bionic_fs_adopt_host_fd_core(int host_fd) {
+  (void)close(host_fd);
+  darwin_art_bionic_errno_store(9);
+  return -1;
+}
+
 int main(int argc, char **argv) {
   if (argc != 2)
     return 10;
@@ -147,6 +168,38 @@ int main(int argc, char **argv) {
         "stale central token cannot fall through before activation");
   Check(darwin_art_bionic_socket_broker_activate() == 0,
         "activate socket broker owner");
+
+  int32_t nonblocking_pair[2]{-1, -1};
+  int nonblocking = 1;
+  int ioctl_handled = 0;
+  int ioctl_result = -1;
+  int ioctl_errno = 0;
+  uint8_t empty_byte = 0;
+  Check(darwin_art_bionic_socket_broker_socketpair(1, 1, 0, nonblocking_pair) ==
+                0 &&
+            darwin_art_bionic_socket_broker_ioctl_dispatch(
+                nonblocking_pair[0], 0x5421, &nonblocking, &ioctl_handled,
+                &ioctl_result, &ioctl_errno) == 0 &&
+            ioctl_handled == 1 && ioctl_result == 0 && ioctl_errno == 0 &&
+            (darwin_art_bionic_socket_broker_fcntl(nonblocking_pair[0], 3, 0) &
+             2048) != 0 &&
+            darwin_art_bionic_socket_broker_read(nonblocking_pair[0],
+                                                 &empty_byte, 1) == -1 &&
+            darwin_art_bionic_errno_load() == 11,
+        "FIONBIO makes empty broker socket return EAGAIN");
+  nonblocking = 0;
+  ioctl_handled = 0;
+  ioctl_result = -1;
+  ioctl_errno = 0;
+  Check(darwin_art_bionic_socket_broker_ioctl_dispatch(
+            nonblocking_pair[0], 0x5421, &nonblocking, &ioctl_handled,
+            &ioctl_result, &ioctl_errno) == 0 &&
+            ioctl_handled == 1 && ioctl_result == 0 && ioctl_errno == 0 &&
+            (darwin_art_bionic_socket_broker_fcntl(nonblocking_pair[0], 3, 0) &
+             2048) == 0 &&
+            darwin_art_bionic_socket_broker_close(nonblocking_pair[0]) == 0 &&
+            darwin_art_bionic_socket_broker_close(nonblocking_pair[1]) == 0,
+        "FIONBIO clears shared broker socket status");
 
   const int listener = socket(AF_INET, SOCK_STREAM, 0);
   Check(listener >= 0, "create host listener");
@@ -205,6 +258,28 @@ int main(int argc, char **argv) {
             pipe_result.write_count == 1 && pipe_result.read_count == 1 &&
             pipe_result.value == 0xa5,
         "Android ELF pipe/read/write/blocking-poll round trip");
+  const int event_fd = darwin_art_bionic_socket_broker_eventfd(0, 0x800);
+  const int epoll_fd = darwin_art_bionic_socket_broker_epoll_create1(0x80000);
+  AndroidEpollEvent registration{1, UINT64_C(0x1122334455667788)};
+  AndroidEpollEvent ready{};
+  uint64_t event_value = 1;
+  Check(event_fd >= 0 && epoll_fd >= 0 &&
+            darwin_art_bionic_socket_broker_epoll_ctl(epoll_fd, 1, event_fd,
+                                                      &registration) == 0 &&
+            darwin_art_bionic_socket_broker_epoll_wait(epoll_fd, &ready, 1,
+                                                       0) == 0 &&
+            darwin_art_bionic_socket_broker_write(event_fd, &event_value,
+                                                  sizeof(event_value)) ==
+                sizeof(event_value) &&
+            darwin_art_bionic_socket_broker_epoll_wait(epoll_fd, &ready, 1,
+                                                       0) == 1 &&
+            ready.events == 1 && ready.data == registration.data &&
+            darwin_art_bionic_socket_broker_read(event_fd, &event_value,
+                                                 sizeof(event_value)) ==
+                sizeof(event_value) &&
+            darwin_art_bionic_socket_broker_close(event_fd) == 0 &&
+            darwin_art_bionic_socket_broker_close(epoll_fd) == 0,
+        "eventfd readiness through epoll");
   Check(darwin_art_bionic_socket_broker_live_objects() == 0,
         "all central socket objects closed");
   Check(darwin_art_bionic_socket_broker_close(123) == -1,
@@ -274,11 +349,11 @@ int main(int argc, char **argv) {
             darwin_art_bionic_dns_live_results_for_test() == 0 &&
             darwin_art_bionic_dns_retired_results_for_test() == 0,
         "DNS free drains before reset and deactivate");
-  std::fprintf(stderr,
-               "bionic-socket-broker-adapter: PASS Android-ELF=yes "
-               "HTTP=127.0.0.1 pipe-poll=blocking central-token=yes owner=v4 "
-               "close=generic "
-               "DNS=retired deactivate-race=100 host-errno=preserved "
-               "Internet=no\n");
+  std::fprintf(stderr, "bionic-socket-broker-adapter: PASS Android-ELF=yes "
+                       "HTTP=127.0.0.1 pipe-poll=blocking eventfd-epoll=yes "
+                       "central-token=yes owner=v6 "
+                       "close=generic "
+                       "DNS=retired deactivate-race=100 host-errno=preserved "
+                       "Internet=no\n");
   return 0;
 }

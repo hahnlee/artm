@@ -350,6 +350,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
             "-licuuc",
             "-licudata",
             "-lz",
+            "-lresolv",
             "-framework",
             "AppKit",
             "-framework",
@@ -362,6 +363,8 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
             "Security",
             "-framework",
             "AudioToolbox",
+            "-framework",
+            "CoreAudio",
             "-o",
         ])
         .arg(&runtime_library);

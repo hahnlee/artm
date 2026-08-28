@@ -39,12 +39,16 @@ for generated in ownership.tsv unsupported-libc.tsv ownership.inc unsupported.in
     fail "generated $generated drift"
 done
 
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 448 ]] ||
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 557 ]] ||
   fail 'expected pinned libc++ owners plus reviewed extensions'
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libdl.so"{n++}END{print n+0}')" == 6 ]] ||
-  fail 'expected six closed guest libdl owners'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libdl.so"{n++}END{print n+0}')" == 7 ]] ||
+  fail 'expected seven closed guest libdl owners'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="liblog.so"{n++}END{print n+0}')" == 20 ]] ||
   fail 'expected 19 liblog symbols plus one system version alias'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libbinder_ndk.so"{n++}END{print n+0}')" == 39 ]] ||
+  fail 'expected complete Chromium Binder NDK surface'
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libaaudio.so"{n++}END{print n+0}')" == 30 ]] ||
+  fail 'expected complete Chromium AAudio surface'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | cut -f1-3 | sort | uniq -d | wc -l | tr -d ' ')" == 0 ]] ||
   fail 'duplicate SONAME/symbol/version owners'
 awk -F '\t' 'NR>1 {key=$1 FS $2; if (key in owner && owner[key]!=$4) exit 1; owner[key]=$4}' \
@@ -73,6 +77,8 @@ flags=(-arch arm64 -isysroot "$sdk" -std=c++17 -O2 -Wall -Wextra -Werror
 "$cxx" "${flags[@]}" -c "$here/src/builtin_adapters.cc" -o "$tmp/builtin-adapters.o"
 expected_resolvers="$tmp/expected-resolvers"
 cat >"$expected_resolvers" <<'EOF'
+_darwin_art_android_aaudio_resolve
+_darwin_art_android_binder_ndk_resolve
 _darwin_art_bionic_abort_resolve
 _darwin_art_bionic_allocator_resolve
 _darwin_art_bionic_binary128_conversion_resolve
@@ -88,10 +94,12 @@ _darwin_art_bionic_locale_resolve
 _darwin_art_bionic_math_resolve
 _darwin_art_bionic_namespace_bind
 _darwin_art_bionic_numeric_resolve
+_darwin_art_bionic_process_state_data_resolve
 _darwin_art_bionic_process_state_resolve
 _darwin_art_bionic_pthread_resolve
 _darwin_art_bionic_scanf_resolve
 _darwin_art_bionic_sendfile_resolve
+_darwin_art_bionic_socket_broker_data_resolve
 _darwin_art_bionic_socket_broker_dns_resolve
 _darwin_art_bionic_socket_broker_resolve
 _darwin_art_bionic_stdio_resolve
@@ -100,6 +108,7 @@ _darwin_art_bionic_strftime_resolve
 _darwin_art_bionic_swprintf_resolve
 _darwin_art_bionic_syscall_resolve
 _darwin_art_bionic_syslog_resolve
+_darwin_art_bionic_time_data_resolve
 _darwin_art_bionic_time_resolve
 _darwin_art_bionic_vm_resolve
 _darwin_art_bionic_wide_float_resolve
@@ -131,4 +140,4 @@ if grep -E '(_dlopen|_dlsym|_dlvsym|_NSLookupSymbolInImage|__dyld_)' <<<"$undefi
   fail 'host loader undefined reference present'
 fi
 
-echo 'bionic-provider-namespace: PASS libcxx=160/160 extensions=356 liblog-symbols=19 aliases=1 owned=534 unsupported=0 duplicate-triple=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'
+echo 'bionic-provider-namespace: PASS libcxx=160/160 extensions=557 liblog-symbols=20 binder-ndk=39 aaudio=30 aliases=13 owned=733 unsupported=0 duplicate-triple=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'

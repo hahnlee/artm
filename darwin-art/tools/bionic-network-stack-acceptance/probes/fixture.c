@@ -70,7 +70,10 @@ __attribute__((visibility("default"))) int NetworkFixtureHttp(
   while (sent < sizeof(request) - 1) {
     size_t chunk = sizeof(request) - 1 - sent;
     if (chunk > 3) chunk = 3;
-    ssize_t count = send(fd, request + sent, chunk, MSG_NOSIGNAL);
+    ssize_t count = sent == 0
+                        ? sendto(fd, request + sent, chunk, MSG_NOSIGNAL,
+                                 (const struct sockaddr*)0, 0)
+                        : send(fd, request + sent, chunk, MSG_NOSIGNAL);
     if (count < 0) {
       if (errno == EINTR) {
         ++result->eintr_retries;

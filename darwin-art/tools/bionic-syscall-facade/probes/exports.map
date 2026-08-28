@@ -1,10 +1,15 @@
 LIBCXX_SYSCALL_FIXTURE {
   global:
     SyscallFixtureGettid;
+    SyscallFixtureRtTgSigqueueinfo;
     SyscallFixtureGetrandom;
     SyscallFixtureWait;
     SyscallFixtureWakeOne;
     SyscallFixtureWakeAll;
+    SyscallFixturePlainWait;
+    SyscallFixturePlainWake;
+    SyscallFixtureWaitBitset;
+    SyscallFixtureWakeBitset;
     SyscallFixtureReadable;
     SyscallFixtureUnknown;
     SyscallFixtureBadFutex;

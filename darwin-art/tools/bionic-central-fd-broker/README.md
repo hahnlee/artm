@@ -53,8 +53,10 @@ Run the standalone acceptance gate with:
   ADD/MOD/DEL for socket descriptions, rejects a duplicate registration key,
   and stores a weak OFD reference plus event data. Distinct dup tokens may be
   registered separately, and readiness remains attached to the OFD after one
-  token closes. `epoll_wait(..., timeout=0)` fans out to socket owner poll
-  callbacks while holding active OFD leases; blocking timeouts fail closed.
+  token closes. `epoll_wait(..., timeout=0)` fans out to owner poll callbacks;
+  blocking waits use one owner `poll_many` transaction when every watched OFD
+  shares that owner (the Android eventfd/timerfd/pipe case). Mixed-owner
+  blocking waits fail closed until the broker gains a cross-owner wake queue.
 - ABI-v3 adds one tagged socket-operation callback covering bind, connect,
   listen, shutdown, send, recv, sendto, recvfrom, get/setsockopt,
   getpeername, getsockname, and accept4. The fixed-width request explicitly

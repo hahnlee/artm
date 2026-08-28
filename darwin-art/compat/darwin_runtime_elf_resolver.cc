@@ -11,6 +11,10 @@
 #include <string>
 
 #include "darwin_runtime_adapters_internal.h"
+#include "darwin_android_asset_manager.h"
+#include "darwin_android_system_fonts.h"
+#include "darwin_android_platform.h"
+#include "darwin_android_media_ndk.h"
 #include "darwin_angle_egl.h"
 
 extern "C" void AndroidBitmap_getInfo(void) __attribute__((weak_import));
@@ -127,24 +131,15 @@ DarwinArtElfResolveStatus ResolvePlatformProvider(
                std::strcmp(request->symbol, "glUseProgram") == 0) {
       consider_address(reinterpret_cast<void*>(&darwin_art_android_glUseProgram));
     } else {
-      consider(OpenAngleProvider("libGLESv2.dylib",
-                                 &library->gles_provider, error));
+      consider_address(
+          darwin_art::darwin_art_angle_dso_symbol("libGLESv2.so",
+                                                  request->symbol));
     }
   }
   if (NeedsLibrary(request, "libEGL.so") &&
       std::strncmp(request->symbol, "egl", 3) == 0) {
-    if (std::strcmp(request->symbol, "eglCreateWindowSurface") == 0) {
-      consider_address(reinterpret_cast<void*>(
-          &darwin_art_android_eglCreateWindowSurface));
-    } else if (std::strcmp(request->symbol, "eglSwapBuffers") == 0) {
-      consider_address(
-          reinterpret_cast<void*>(&darwin_art_android_eglSwapBuffers));
-    } else if (std::strcmp(request->symbol, "eglDestroySurface") == 0) {
-      consider_address(
-          reinterpret_cast<void*>(&darwin_art_android_eglDestroySurface));
-    } else {
-      consider(OpenAngleProvider("libEGL.dylib", &library->egl_provider, error));
-    }
+    consider_address(darwin_art::darwin_art_angle_dso_symbol(
+        "libEGL.so", request->symbol));
   }
   const bool zlib_symbol = std::strncmp(request->symbol, "inflate", 7) == 0 ||
                            std::strncmp(request->symbol, "deflate", 7) == 0 ||
@@ -171,6 +166,14 @@ DarwinArtElfResolveStatus ResolvePlatformProvider(
     } else {
       consider_address(reinterpret_cast<void*>(&AndroidBitmap_unlockPixels));
     }
+  }
+  if (NeedsLibrary(request, "libandroid.so")) {
+    consider_address(darwin_art_android_asset_manager_symbol(request->symbol));
+    consider_address(darwin_art_android_platform_symbol(request->symbol));
+    consider_address(darwin_art_android_system_font_symbol(request->symbol));
+  }
+  if (NeedsLibrary(request, "libmediandk.so")) {
+    consider_address(darwin_art_android_media_ndk_symbol(request->symbol));
   }
   if (matches == 1) {
     *out_address = result;
@@ -296,14 +299,30 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     return DARWIN_ART_ELF_RESOLVE_ERROR;
   }
   if (provider_soname == nullptr) {
+    DarwinArtBionicNamespaceResult unique{};
+    size_t matches = 0;
     for (size_t index = 0; index < request->needed_library_count; ++index) {
       const char* soname = request->needed_libraries[index];
-      if (soname != nullptr && std::strcmp(soname, "liblog.so") == 0) {
-        provider_soname = soname;
-        break;
+      if (soname == nullptr) continue;
+      const DarwinArtBionicNamespaceResult candidate =
+          darwin_art_bionic_namespace_resolve(
+              library->provider_namespace, soname, request->symbol, nullptr);
+      if (candidate.status == DARWIN_ART_BIONIC_NAMESPACE_OK &&
+          candidate.address != 0) {
+        unique = candidate;
+        ++matches;
       }
     }
-    if (provider_soname == nullptr) {
+    if (matches == 1) {
+      *out_address = unique.address;
+      return DARWIN_ART_ELF_RESOLVE_FOUND;
+    }
+    if (matches > 1) {
+      SetResolverError(error,
+                       "unversioned Bionic import has multiple exact providers");
+      return DARWIN_ART_ELF_RESOLVE_ERROR;
+    }
+    {
       if (request->symbol_weak != 0) {
         return DARWIN_ART_ELF_RESOLVE_NOT_FOUND;
       }

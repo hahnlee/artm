@@ -72,7 +72,7 @@ archive_specs=(
   'F|62|_build/android-graphics-jni/libandroid-graphics-jni-darwin.a'
   'F|81|_build/hwui-static-foundation/libhwui-static-darwin.a'
   'F|5|_build/hwui-static-foundation/libandroid-graphics-apex-common-darwin.a'
-  'F|528|_build/skia-hwui-force-load/libskia.a'
+  'F|652|_build/skia-hwui-force-load/libskia.a'
   'N|2|_build/skia-hwui-force-load/libskcms.a'
   'N|36|_build/androidfw-foundation/libandroidfw-darwin.a'
   'N|5|_build/hostgraphics/libhostgraphics-darwin.a'
@@ -274,9 +274,27 @@ printf '%s\n' 'int main() { return 0; }' > "$main_source"
 "$cxx" -std=c++20 -arch arm64 -mmacosx-version-min="$sdk_version" \
   -c "$main_source" -o "$main_object"
 
+# android_graphics_jni obtains ANativeWindow_fromSurface from libandroid on an
+# Android device. The Darwin ART executable owns the equivalent libandroid
+# compatibility provider, outside this graphics-only archive closure. Model
+# that single, named executable seam explicitly so every other new import
+# remains an audit failure.
+executable_provider_objects=()
+if [[ "$audit_mode" == art-runtime ]]; then
+  runtime_surface_provider_source="$stage_dir/runtime-surface-provider.cpp"
+  runtime_surface_provider_object="$stage_dir/runtime-surface-provider.o"
+  printf '%s\n' \
+    'extern "C" void* darwin_art_android_ANativeWindow_fromSurface(void*, void*) {' \
+    '  return nullptr;' \
+    '}' > "$runtime_surface_provider_source"
+  "$cxx" -std=c++20 -arch arm64 -mmacosx-version-min="$sdk_version" \
+    -c "$runtime_surface_provider_source" -o "$runtime_surface_provider_object"
+  executable_provider_objects+=( "$runtime_surface_provider_object" )
+fi
+
 set +e
 "$cxx" -arch arm64 -mmacosx-version-min="$sdk_version" \
-  "$main_object" "$closure_object" \
+  "$main_object" "$closure_object" "${executable_provider_objects[@]}" \
   -framework CoreFoundation -framework CoreGraphics -framework ImageIO \
   -framework Foundation -framework AppKit \
   -L/opt/homebrew/lib -llz4 -lz \
