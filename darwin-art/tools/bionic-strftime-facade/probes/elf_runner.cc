@@ -84,6 +84,12 @@ int main(int argc, char** argv) {
             darwin_art_bionic_strftime_resolve("libc.so", "strftime_l",
                                                 nullptr) == nullptr &&
             darwin_art_bionic_strftime_resolve("libc.so", "strftime",
+                                                "LIBC") != nullptr &&
+            darwin_art_bionic_strftime_resolve("libc.so", "strptime",
+                                                "LIBC") != nullptr &&
+            darwin_art_bionic_strftime_resolve("libc.so", "tzset", "LIBC") !=
+                nullptr &&
+            darwin_art_bionic_strftime_resolve("libc.so", "unknown",
                                                 "LIBC") == nullptr,
         "closed resolver");
   Check(darwin_art_bionic_strftime_activate(nullptr, 0, "DST", 0) ==

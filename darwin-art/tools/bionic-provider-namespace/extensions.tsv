@@ -471,10 +471,7 @@ libm.so	tan	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	tanf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	tanh	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	tanhf	LIBC	math	Darwin hyperbolic tangent compatibility for Android native consumers
-liblog.so	__android_log_error_write		liblog	Android liblog error-write compatibility for AOSP Skia native consumers
-liblog.so	__android_log_print		liblog	Unversioned NDK variadic log formatting through the Android AAPCS64 capture shim
 liblog.so	__android_log_print	LIBLOG	liblog	Android system/APEX symbol-version alias for libjavacrypto
-liblog.so	__android_log_vprint		liblog	Unversioned NDK va_list log formatting through the Android AAPCS64 compatibility shim
 libc.so	__open_2	LIBC	filesystem	Bionic fortified two-argument open over the capability filesystem
 libc.so	__read_chk	LIBC	central-fd-broker	Bionic bounded read over the central descriptor owner
 libc.so	__write_chk	LIBC_N	central-fd-broker	Bionic bounded write over the central descriptor owner

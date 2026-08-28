@@ -6,4 +6,5 @@ freeaddrinfo	libc.so	LIBC	bionic-dns-facade
 getaddrinfo	libc.so	LIBC	bionic-dns-facade
 recv	libc.so	LIBC	bionic-socket-facade
 send	libc.so	LIBC	bionic-socket-facade
+sendto	libc.so	LIBC	bionic-socket-facade
 socket	libc.so	LIBC	bionic-socket-facade

@@ -45,7 +45,7 @@ for soname in libdarwin-art-generic-root.so libdarwin-art-generic-child.so \
 done
 
 cargo build --quiet --release --manifest-path "$loader_root/Cargo.toml" --lib
-staticlib="$loader_root/target/release/libdarwin_art_elf_loader.a"
+staticlib="$project_root/target/release/libdarwin_art_elf_loader.a"
 [[ -f "$staticlib" ]] || fail "existing ELF loader static library is missing"
 xcrun clang++ -std=c++17 -arch arm64 -Wall -Wextra -Werror \
   -I "$loader_root/include" "$tool_root/discovery_smoke.cc" "$staticlib" \

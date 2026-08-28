@@ -16,5 +16,3 @@ bionic-vm-facade = { path = "../bionic-vm-facade" }
 android-dso-namespace = { path = "../android-dso-namespace" }
 android-binder-ndk-provider = { path = "../android-binder-ndk-provider" }
 android-aaudio-provider = { path = "../android-aaudio-provider" }
-
-[workspace]

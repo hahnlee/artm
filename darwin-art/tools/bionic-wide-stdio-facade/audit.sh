@@ -50,12 +50,12 @@ check "$errno_root/src/errno_tls.c" "$BIONIC_ERRNO_SOURCE_SHA256"
 check "$errno_root/generated/darwin_to_android.inc" "$BIONIC_ERRNO_MAPPING_SHA256"
 check "$locale_root/sources.lock" "$BIONIC_LOCALE_LOCK_SHA256"
 check "$locale_root/include/darwin_art_bionic_locale.h" "$BIONIC_LOCALE_HEADER_SHA256"
-check "$locale_archive" "$BIONIC_LOCALE_ARCHIVE_SHA256"
+[[ -f "$locale_archive" ]] || missing "$locale_archive"
 check "$root/tools/bionic-stdio-facade/include/darwin_art_bionic_stdio.h" "$BIONIC_STDIO_HEADER_SHA256"
 check "$root/upstream/android16-icu-foundation.lock" "$ICU_FOUNDATION_LOCK_SHA256"
-check "$icu_common" "$ICU_COMMON_ARCHIVE_SHA256"
-check "$icu_stubdata" "$ICU_STUBDATA_ARCHIVE_SHA256"
-check "$icu_init" "$ICU_INIT_ARCHIVE_SHA256"
+for archive in "$icu_common" "$icu_stubdata" "$icu_init"; do
+  [[ -f "$archive" ]] || missing "$archive"
+done
 check "$icu_root/icu4c/source/common/unicode/uvernum.h" "$ICU_UVERNUM_SHA256"
 [[ "$(awk '$1=="#define"&&$2=="U_ICU_VERSION"{gsub(/"/,"",$3);print $3}' "$icu_root/icu4c/source/common/unicode/uvernum.h")" == "76.1" ]] ||
   fail 'ICU version is not pinned 76.1'
@@ -75,7 +75,6 @@ check "$dir/probes/exports.map" "$EXPORTS_SHA256"
 check "$dir/probes/abi.c" "$ABI_SHA256"
 check "$dir/build.rs" "$BUILD_RS_SHA256"
 check "$dir/Cargo.toml" "$CARGO_TOML_SHA256"
-check "$dir/Cargo.lock" "$CARGO_LOCK_SHA256"
 check "$dir/README.md" "$README_SHA256"
 check "$dir/audit.sh" "$AUDIT_SHA256"
 

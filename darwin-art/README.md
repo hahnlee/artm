@@ -1,5 +1,18 @@
 # Darwin ART
 
+For normal development, start with the unified build interface:
+
+```sh
+cargo xtask status
+cargo xtask check
+cargo xtask build
+```
+
+Cargo owns the shared Rust workspace and Ninja owns the incremental AOSP native
+graph. Package ownership and rebuild boundaries are documented in
+[`docs/build-system.md`](docs/build-system.md). Individual provider manifests
+and bootstrap subcommands are internal diagnostic interfaces.
+
 Experimental Apple Silicon port of Android Runtime. ART remains C++/ARM64
 assembly and is compiled as Mach-O. Rust owns the bootstrap tooling, Darwin
 integration, launcher, and eventually the Android ELF compatibility loader.

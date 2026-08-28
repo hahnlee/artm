@@ -152,8 +152,7 @@ fn is_local_tlsdesc_result(code: &[u8], instruction_index: usize, _thread_regist
         .max(3);
     (search_start..instruction_index)
         .rev()
-        .find(|candidate| is_local_tlsdesc_call(code, *candidate))
-        .is_some()
+        .any(|candidate| is_local_tlsdesc_call(code, candidate))
 }
 
 fn is_preread_local_tlsdesc_result(code: &[u8], instruction_index: usize) -> bool {
@@ -161,9 +160,7 @@ fn is_preread_local_tlsdesc_result(code: &[u8], instruction_index: usize) -> boo
     let call_search_end = instruction_index
         .saturating_add(MAX_TLSDESC_RESULT_DISTANCE_IN_INSTRUCTIONS + 1)
         .min(instruction_count);
-    (instruction_index + 1..call_search_end)
-        .find(|candidate| is_local_tlsdesc_call(code, *candidate))
-        .is_some()
+    (instruction_index + 1..call_search_end).any(|candidate| is_local_tlsdesc_call(code, candidate))
 }
 
 fn is_local_tlsdesc_call(code: &[u8], call_index: usize) -> bool {

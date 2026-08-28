@@ -481,12 +481,17 @@ bool render_node_to_surface(
   // same native method here while our Metal canvas is active. The method is
   // private in the APK but JNI method lookup is class-scoped and does not
   // require changing the APK.
+  const bool skottie_metal = std::getenv("DARWIN_ART_SKOTTIE_METAL") != nullptr;
   jclass skottie_view_class =
-      load_context_class(env, "org.skia.skottie.SkottieView");
+      skottie_metal ? load_context_class(env, "org.skia.skottie.SkottieView")
+                    : nullptr;
   jclass skottie_animation_class =
-      load_context_class(env, "org.skia.skottie.SkottieAnimation");
+      skottie_metal
+          ? load_context_class(env, "org.skia.skottie.SkottieAnimation")
+          : nullptr;
   jclass skottie_runner_class =
-      load_context_class(env, "org.skia.skottie.SkottieRunner");
+      skottie_metal ? load_context_class(env, "org.skia.skottie.SkottieRunner")
+                    : nullptr;
   jclass view_group_class = env->FindClass("android/view/ViewGroup");
   jclass view_class = env->FindClass("android/view/View");
   jfieldID animation_field =
@@ -595,8 +600,7 @@ bool render_node_to_surface(
   // placeholder and may paint its white background. Replay the APK's native
   // Skottie content once more after that display list so the animation is the
   // topmost content in the same GPU pass.
-  if (std::getenv("DARWIN_ART_SKOTTIE_METAL") != nullptr &&
-      !env->ExceptionCheck() && skottie_view_class != nullptr &&
+  if (skottie_metal && !env->ExceptionCheck() && skottie_view_class != nullptr &&
       skottie_animation_class != nullptr && animation_field != nullptr &&
       native_proxy_field != nullptr && draw_frame != nullptr) {
     const bool skottie_drew = render_skottie_view_tree(

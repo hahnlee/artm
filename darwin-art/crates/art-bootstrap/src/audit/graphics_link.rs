@@ -18,18 +18,15 @@ pub(crate) fn audit_runtime_graphics_link_fast(root: &Path) -> Result<()> {
     audit_runtime_graphics_link_mode(root, false, false)
 }
 
-/// Reuse successful source-pinned foundation artifacts while still running
-/// the per-object Ninja graph, graphics closure audit, and final dylib/symbol
-/// checks. This is the development path between the strict full gate and the
-/// artifact-only fast link check.
+/// Build the developer graph through its final dylib/symbol-check edge.
+///
+/// Ninja owns invalidation here: an unchanged tree is a no-op, a narrow TU
+/// edit recompiles only that object, and an input affecting the final closure
+/// relinks and runs the fast symbol checks. Expensive source-pinned upstream
+/// audits remain exclusive to `audit-runtime-graphics-link` (the release/CI
+/// gate) instead of running after every local edit.
 pub(crate) fn audit_runtime_graphics_link_incremental(root: &Path) -> Result<()> {
-    // The final link consumes the bootstrap archive, not individual adapter
-    // sources. Running only the cached upstream gates can therefore relink a
-    // stale archive after a compat C++ edit. Refresh the persisted per-object
-    // graph first; Ninja recompiles only the affected translation units and
-    // rebuilds the archive when necessary.
-    build_native_graph(root, "graphics-bootstrap")?;
-    audit_runtime_graphics_link_mode(root, true, true)
+    build_native_graph(root, "graphics-audit")
 }
 
 pub(crate) fn audit_runtime_graphics_link_mode(

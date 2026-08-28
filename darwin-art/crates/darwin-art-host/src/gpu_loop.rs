@@ -1,190 +1,11 @@
 use crate::config::{HostError, HostOutcome, RunOptions};
+use crate::gpu_input::{dispatch_queued_events, dispatch_synthetic_keys, pump_frame_with_latency};
+use crate::gpu_test_config::GpuTestConfig;
 use crate::runtime::HostRuntime;
-use crate::surface::{
-    owned_surface_next_key_event_v1, owned_surface_next_pointer_event_v2, owned_surface_pump_events,
-};
-use darwin_art_engine_sys::{KeyEventV1, PointerEventV2, ProcessResult};
+use crate::surface::owned_surface_pump_events;
+use darwin_art_engine_sys::{PointerEventV2, ProcessResult};
 use darwin_art_runtime::Subsystem;
 use std::time::{Duration, Instant};
-
-#[cfg(target_os = "macos")]
-fn pump_frame_with_latency(
-    runtime: &mut HostRuntime,
-    debug_latency: bool,
-    last_input_dispatch: &mut Option<Instant>,
-    frame_latencies_us: &mut Vec<u64>,
-) -> Result<(), HostError> {
-    let pulse_status = runtime
-        .graphics()
-        .map_or(-1, |graphics| graphics.pump_frame(0));
-    if pulse_status != 0 {
-        return Err(HostError::RuntimeFailed(pulse_status));
-    }
-    if debug_latency && let Some(dispatched_at) = last_input_dispatch.take() {
-        frame_latencies_us.push(dispatched_at.elapsed().as_micros() as u64);
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn dispatch_queued_events(runtime: &mut HostRuntime) -> Result<u64, HostError> {
-    let mut dispatched = 0_u64;
-    let mut event = PointerEventV2::default();
-    let mut pending_move: Option<PointerEventV2> = None;
-    let mut dispatch = |event: PointerEventV2| -> Result<(), HostError> {
-        let dispatch_status = runtime
-            .graphics()
-            .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&event));
-        if dispatch_status != 0 {
-            return Err(HostError::RuntimeFailed(dispatch_status));
-        }
-        dispatched += 1;
-        Ok(())
-    };
-    while owned_surface_next_pointer_event_v2(runtime, &mut event) {
-        if event.action == 2 {
-            // MOVE is latest-wins within one host poll. DOWN/UP/CANCEL
-            // are never coalesced, so gesture boundaries remain exact.
-            pending_move = Some(event);
-            continue;
-        }
-        if let Some(move_event) = pending_move.take() {
-            dispatch(move_event)?;
-        }
-        dispatch(event)?;
-    }
-    if let Some(move_event) = pending_move {
-        dispatch(move_event)?;
-    }
-    let mut key_event = KeyEventV1::default();
-    while owned_surface_next_key_event_v1(runtime, &mut key_event) {
-        let dispatch_status = runtime
-            .graphics()
-            .map_or(-1, |graphics| graphics.dispatch_key_v1(&key_event));
-        if dispatch_status != 0 {
-            return Err(HostError::RuntimeFailed(dispatch_status));
-        }
-        dispatched += 1;
-    }
-    Ok(dispatched)
-}
-
-#[cfg(target_os = "macos")]
-fn dispatch_synthetic_keys(
-    runtime: &mut HostRuntime,
-    sequence: &[(u32, u32)],
-    _clock: &Instant,
-) -> Result<u64, HostError> {
-    let linux_scan_code = |key_code: u32| match key_code {
-        7 => 11,
-        8..=16 => key_code - 6,
-        29 => 30,
-        30 => 48,
-        31 => 46,
-        32 => 32,
-        33 => 18,
-        34 => 33,
-        35 => 34,
-        36 => 35,
-        37 => 23,
-        38 => 36,
-        39 => 37,
-        40 => 38,
-        41 => 50,
-        42 => 49,
-        43 => 24,
-        44 => 25,
-        45 => 16,
-        46 => 19,
-        47 => 31,
-        48 => 20,
-        49 => 22,
-        50 => 47,
-        51 => 17,
-        52 => 45,
-        53 => 21,
-        54 => 44,
-        55 => 51,
-        56 => 52,
-        62 => 57,
-        66 => 28,
-        67 => 14,
-        68 => 41,
-        69 => 12,
-        70 => 13,
-        71 => 26,
-        72 => 27,
-        73 => 43,
-        74 => 39,
-        75 => 40,
-        76 => 53,
-        111 => 1,
-        _ => 0,
-    };
-    let interval = std::env::var("DARWIN_ART_TEST_KEY_INTERVAL_MS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .unwrap_or_default();
-    eprintln!(
-        "DARWIN_ART gpu synthetic key dispatch count={} interval_ms={}",
-        sequence.len(),
-        interval.as_millis()
-    );
-    let mut dispatched = 0_u64;
-    for &(key_code, meta_state) in sequence {
-        for action in [0_u32, 1_u32] {
-            let mut event = KeyEventV1::default();
-            event.version = 1;
-            event.size = std::mem::size_of::<KeyEventV1>() as u32;
-            event.action = action;
-            // InputDispatcher marks hardware events as originating from the
-            // system. Chromium uses that Android contract when deciding
-            // whether a physical key may be forwarded into focused web
-            // content.
-            event.flags = 0x8;
-            // Zero delegates to the runtime's CLOCK_MONOTONIC input clock.
-            // An Instant elapsed from this host loop starts near zero and is
-            // not Android uptime; Blink discards such stale hardware keys.
-            event.event_time_nanos = 0;
-            event.down_time_nanos = 0;
-            event.key_code = key_code;
-            event.scan_code = linux_scan_code(key_code);
-            event.meta_state = meta_state;
-            event.device_id = 1;
-            event.source = 0x101;
-            let status = runtime
-                .graphics()
-                .map_or(-1, |graphics| graphics.dispatch_key_v1(&event));
-            if status != 0 {
-                return Err(HostError::RuntimeFailed(status));
-            }
-            dispatched += 1;
-            if !interval.is_zero() {
-                // Keep the owner run loop alive after every hardware event.
-                // Android's InputDispatcher returns to Looper between DOWN
-                // and UP as well as between keys, which lets Chromium consume
-                // the renderer ACK that gates its next keyboard event.
-                let event_interval = (interval.as_secs_f64() / 2.0).max(0.001);
-                let pump_status = owned_surface_pump_events(runtime, event_interval);
-                if pump_status != 0 {
-                    return Err(HostError::SurfaceFailed {
-                        operation: "gpu_test_key_interval_pump",
-                        status: pump_status,
-                    });
-                }
-                dispatched += dispatch_queued_events(runtime)?;
-                let pulse_status = runtime
-                    .graphics()
-                    .map_or(-1, |graphics| graphics.pump_frame(0));
-                if pulse_status != 0 {
-                    return Err(HostError::RuntimeFailed(pulse_status));
-                }
-            }
-        }
-    }
-    Ok(dispatched)
-}
 
 #[cfg(target_os = "macos")]
 pub(super) fn run(
@@ -215,15 +36,23 @@ pub(super) fn run(
     let debug_latency = std::env::var_os("DARWIN_ART_DEBUG_INPUT_LATENCY").is_some();
     let mut last_input_dispatch: Option<Instant> = None;
     let mut frame_latencies_us = Vec::new();
-    let test_resize = std::env::var("DARWIN_ART_TEST_WINDOW_RESIZE")
-        .ok()
-        .and_then(|value| {
-            let (width, height) = value.split_once('x').or_else(|| value.split_once(','))?;
-            Some((width.parse::<u32>().ok()?, height.parse::<u32>().ok()?))
-        });
-    let test_resize_after_ms = std::env::var("DARWIN_ART_TEST_WINDOW_RESIZE_AFTER_MS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok());
+    let test_config = GpuTestConfig::from_env();
+    let replay_standalone_pointer = test_config.standalone_pointer_replay();
+    let GpuTestConfig {
+        resize: test_resize,
+        resize_after_ms: test_resize_after_ms,
+        pointer: test_pointer,
+        drag: test_drag,
+        post_sequence_drag,
+        tap_sequence: test_tap_sequence,
+        post_drag_tap_sequence,
+        hold_ms: test_hold_ms,
+        cancel: test_cancel,
+        pointer_hz: test_pointer_hz,
+        key_sequence: test_key_sequence,
+        post_pointer_key_sequence,
+        post_pointer_key_delay_ms,
+    } = test_config;
     let mut pending_test_resize = test_resize;
     if test_resize_after_ms.is_none()
         && let Some((width, height)) = pending_test_resize.take()
@@ -245,113 +74,12 @@ pub(super) fn run(
     // cadence: the pointer state is dispatched into Android, then
     // View.draw()/HWUI presents the updated RenderNode directly to
     // the CAMetalLayer drawable.  No CPU framebuffer is involved.
-    let test_pointer = std::env::var("DARWIN_ART_TEST_POINTER_CLICK")
-        .ok()
-        .and_then(|sample| {
-            let (x, y) = sample.split_once(',')?;
-            Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))
-        });
-    let parse_drag = |path: String| {
-        path.split(';')
-            .filter_map(|sample| {
-                let (x, y) = sample.split_once(',')?;
-                Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))
-            })
-            .collect::<Vec<_>>()
-    };
-    let test_drag = std::env::var("DARWIN_ART_TEST_POINTER_DRAG")
-        .ok()
-        .map(&parse_drag)
-        .filter(|points| points.len() >= 2);
     // Acceptance scripts may need ordinary taps to reach a gesture surface
     // first (for example selecting Calendar's Month view). This remains the
     // same MotionEvent ABI path; it only schedules a drag after the tap list.
-    let post_sequence_drag = std::env::var("DARWIN_ART_TEST_POINTER_AFTER_SEQUENCE_DRAG")
-        .ok()
-        .map(&parse_drag)
-        .filter(|points| points.len() >= 2);
-    let parse_taps = |sequence: String| {
-        sequence
-            .split(';')
-            .filter_map(|sample| {
-                let mut values = sample.split(',');
-                Some((
-                    values.next()?.parse::<f32>().ok()?,
-                    values.next()?.parse::<f32>().ok()?,
-                    values.next()?.parse::<u64>().ok()?,
-                ))
-            })
-            .collect::<Vec<_>>()
-    };
     // Test-only multi-tap input uses the same MotionEvent/DecorView route as
     // native mouse input. Samples after the first wait for their third field
     // (milliseconds) before dispatch: "x,y,0;x,y,500".
-    let test_tap_sequence = std::env::var("DARWIN_ART_TEST_POINTER_SEQUENCE")
-        .ok()
-        .map(&parse_taps)
-        .filter(|samples| !samples.is_empty());
-    let post_drag_tap_sequence = std::env::var("DARWIN_ART_TEST_POINTER_AFTER_DRAG_SEQUENCE")
-        .ok()
-        .map(&parse_taps)
-        .filter(|samples| !samples.is_empty());
-    let test_pointer = test_drag
-        .as_ref()
-        .and_then(|points| points.first().copied())
-        .or_else(|| {
-            test_tap_sequence
-                .as_ref()
-                .and_then(|samples| samples.first().map(|&(x, y, _)| (x, y)))
-        })
-        .or(test_pointer);
-    let replay_standalone_pointer = test_drag.is_none()
-        && test_tap_sequence.is_none()
-        && post_sequence_drag.is_none()
-        && post_drag_tap_sequence.is_none();
-    let test_hold_ms = std::env::var("DARWIN_ART_TEST_POINTER_HOLD_MS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0);
-    let test_cancel = std::env::var("DARWIN_ART_TEST_POINTER_CANCEL")
-        .ok()
-        .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
-    let test_pointer_hz = std::env::var("DARWIN_ART_TEST_POINTER_HZ")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        .filter(|hz| *hz > 0);
-    let test_key_sequence = std::env::var("DARWIN_ART_TEST_KEY_SEQUENCE")
-        .ok()
-        .map(|value| {
-            value
-                .split(',')
-                .filter_map(|sample| {
-                    let (code, meta) = sample.split_once(':').unwrap_or((sample, "0"));
-                    Some((code.parse::<u32>().ok()?, meta.parse::<u32>().ok()?))
-                })
-                .collect::<Vec<_>>()
-        })
-        .filter(|sequence| !sequence.is_empty())
-        .or_else(|| {
-            std::env::var("DARWIN_ART_TEST_KEY_CODE")
-                .ok()
-                .and_then(|value| value.parse::<u32>().ok())
-                .map(|code| vec![(code, 0)])
-        });
-    let post_pointer_key_sequence = std::env::var("DARWIN_ART_TEST_KEY_AFTER_POINTER_SEQUENCE")
-        .ok()
-        .map(|value| {
-            value
-                .split(',')
-                .filter_map(|sample| {
-                    let (code, meta) = sample.split_once(':').unwrap_or((sample, "0"));
-                    Some((code.parse::<u32>().ok()?, meta.parse::<u32>().ok()?))
-                })
-                .collect::<Vec<_>>()
-        })
-        .filter(|sequence| !sequence.is_empty());
-    let post_pointer_key_delay_ms = std::env::var("DARWIN_ART_TEST_KEY_AFTER_POINTER_DELAY_MS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0);
     let mut synthetic_moves = 0_u64;
     // Test coordinates are expressed in the same logical AppKit points used
     // by mouse events and capture scripts. Android lays the retained view out
@@ -369,7 +97,6 @@ pub(super) fn run(
         test_key_sequence.as_ref().map_or(0, Vec::len),
     );
 
-    let synthetic_clock = Instant::now();
     let synthetic_event = |action: u32, x: f32, y: f32| {
         let mut event = PointerEventV2::default();
         event.version = 2;
@@ -526,7 +253,7 @@ pub(super) fn run(
     if loop_error.is_none()
         && let Some(key_sequence) = test_key_sequence
     {
-        match dispatch_synthetic_keys(runtime, &key_sequence, &synthetic_clock) {
+        match dispatch_synthetic_keys(runtime, &key_sequence) {
             Ok(dispatched) => frames_presented += dispatched,
             Err(error) => loop_error = Some(error),
         }
@@ -661,7 +388,7 @@ pub(super) fn run(
                 loop_error = Some(error);
             }
         }
-        match dispatch_synthetic_keys(runtime, sequence, &synthetic_clock) {
+        match dispatch_synthetic_keys(runtime, sequence) {
             Ok(dispatched) => frames_presented += dispatched,
             Err(error) => loop_error = Some(error),
         }

@@ -260,7 +260,7 @@ diff -u "$stage/fixture-expected-imports.txt" "$stage/fixture-imports.txt" ||
 
 export DARWIN_ART_PTHREAD_PROVIDER_LIBDIR="$stage"
 export CARGO_TARGET_DIR="$stage/cargo-target"
-cargo build --quiet --manifest-path "$runner_root/Cargo.toml"
+cargo build --quiet --manifest-path "$runner_root/Cargo.toml" --features provider-link
 runner="$CARGO_TARGET_DIR/debug/android-bionic-pthread-provider-runner"
 output="$("$runner" "$fixture")"
 grep -F 'ELF=executed resolver=libc.so@LIBC imports=24/24 extra-owner=pthread_create' <<< "$output" >/dev/null ||

@@ -15,7 +15,11 @@ use crate::support::run_command;
 pub(crate) fn build_native_graph(root: &Path, target: &str) -> Result<()> {
     if !matches!(
         target,
-        "graphics-bootstrap" | "runtime-bootstrap" | "graphics-foundation" | "foundation"
+        "graphics-audit"
+            | "graphics-bootstrap"
+            | "runtime-bootstrap"
+            | "graphics-foundation"
+            | "foundation"
     ) {
         return Err(format!("unsupported native graph target: {target}").into());
     }

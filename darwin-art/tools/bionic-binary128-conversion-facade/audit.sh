@@ -34,7 +34,6 @@ check_hash "$script_dir/probes/differential.cc" "$DIFFERENTIAL_SHA256"
 check_hash "$script_dir/probes/exports.map" "$EXPORTS_SHA256"
 check_hash "$script_dir/build.rs" "$BUILD_RS_SHA256"
 check_hash "$script_dir/Cargo.toml" "$CARGO_TOML_SHA256"
-check_hash "$script_dir/Cargo.lock" "$CARGO_LOCK_SHA256"
 check_hash "$script_dir/README.md" "$README_SHA256"
 
 while IFS=$'\t' read -r relative size digest; do

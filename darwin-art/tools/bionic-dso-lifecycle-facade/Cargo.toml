@@ -15,5 +15,3 @@ required-features = ["standalone-test-stubs"]
 
 [dependencies]
 darwin-art-elf-loader = { path = "../../crates/darwin-art-elf-loader" }
-
-[workspace]

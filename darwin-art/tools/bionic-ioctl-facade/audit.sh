@@ -43,6 +43,7 @@ check "$dir/probes/abi.c" "$ABI_SHA256"
 check "$dir/probes/elf_runner.cc" "$ELF_RUNNER_SHA256"
 check "$dir/probes/exports.map" "$EXPORTS_SHA256"
 check "$dir/probes/fixture.c" "$FIXTURE_SHA256"
+check "$dir/probes/socket_broker_stub.cc" "$SOCKET_BROKER_STUB_SHA256"
 check "$dir/src/aapcs64_entry.S" "$ENTRY_SHA256"
 check "$dir/src/ioctl.cc" "$PROVIDER_SHA256"
 
@@ -203,7 +204,8 @@ san=(-fsanitize=address,undefined -fno-omit-frame-pointer)
 "$host_cxx" -arch arm64 -isysroot "$sdk" -std=c++20 -O1 -g \
   -Wall -Wextra -Werror -Wpedantic "${san[@]}" "${includes[@]}" \
   -I"$root/crates/darwin-art-elf-loader/include" \
-  "$dir/probes/elf_runner.cc" "$tmp/ioctl-san.o" "$tmp/entry.o" \
+  "$dir/probes/elf_runner.cc" "$dir/probes/socket_broker_stub.cc" \
+  "$tmp/ioctl-san.o" "$tmp/entry.o" \
   "$tmp/errno-san.o" "$loader_target/release/libdarwin_art_elf_loader.a" \
   -framework Security -o "$tmp/elf-runner"
 ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \

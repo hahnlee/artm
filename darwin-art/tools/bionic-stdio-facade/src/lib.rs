@@ -272,13 +272,12 @@ impl Drop for Activation {
         {
             std::process::abort();
         }
-        if let Ok(mut active) = slot().write() {
-            if active
+        if let Ok(mut active) = slot().write()
+            && active
                 .as_ref()
                 .is_some_and(|provider| Arc::ptr_eq(provider, &self.provider))
-            {
-                active.take();
-            }
+        {
+            active.take();
         }
     }
 }
@@ -735,7 +734,9 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fopen_core(
     unsafe { fopen(p, m) }
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn darwin_art_bionic_stdio_fclose_core(f: *mut AndroidFile) -> c_int {
+/// # Safety
+/// `f` must be null or a live stream token owned by the active provider.
+pub unsafe extern "C" fn darwin_art_bionic_stdio_fclose_core(f: *mut AndroidFile) -> c_int {
     let Some(p) = provider() else { return EOF };
     let mut t = match p.table.lock() {
         Ok(v) => v,
@@ -920,7 +921,9 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fwrite_core(
     written
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn darwin_art_bionic_stdio_fseek_core(
+/// # Safety
+/// `f` must be a live stream token owned by the active provider.
+pub unsafe extern "C" fn darwin_art_bionic_stdio_fseek_core(
     f: *mut AndroidFile,
     offset: i64,
     whence: c_int,

@@ -82,7 +82,7 @@ extractor="none"
 if [[ "$native_count" != "0" ]]; then
   cargo build -q --release \
     --manifest-path "$root/tools/android-apk-native-extract/Cargo.toml"
-  extractor="$root/tools/android-apk-native-extract/target/release/android-apk-native-extract"
+  extractor="$root/target/release/android-apk-native-extract"
 fi
 install_output="$("$installer" "$source_apk" "$install_root" "$package" \
   "$version_code" "$native_root" "$extractor" "$runtime_abi" \

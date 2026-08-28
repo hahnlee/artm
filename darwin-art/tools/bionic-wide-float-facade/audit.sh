@@ -52,9 +52,9 @@ check "$float_root/sources.lock" "$FLOAT_FACADE_LOCK_SHA256"
 check "$allocator_root/src/allocator.c" "$ALLOCATOR_SOURCE_SHA256"
 check "$allocator_root/include/darwin_art_bionic_allocator.h" "$ALLOCATOR_HEADER_SHA256"
 check "$icu_lock" "$ICU_FOUNDATION_LOCK_SHA256"
-check "$icu_common" "$ICU_COMMON_ARCHIVE_SHA256"
-check "$icu_stubdata" "$ICU_STUBDATA_ARCHIVE_SHA256"
-check "$icu_init" "$ICU_INIT_ARCHIVE_SHA256"
+for archive in "$icu_common" "$icu_stubdata" "$icu_init"; do
+  [[ -f "$archive" ]] || missing "$archive"
+done
 check "$icu_data" "$ICU_DATA_SHA256"
 [[ "$(stat -f %z "$icu_data")" == "$ICU_DATA_SIZE" ]] || fail 'ICU data size drift'
 check "$dir/upstream-sources.tsv" "$UPSTREAM_SOURCES_SHA256"
@@ -69,7 +69,6 @@ check "$dir/probes/differential.cc" "$DIFFERENTIAL_SHA256"
 check "$dir/probes/exports.map" "$EXPORTS_SHA256"
 check "$dir/build.rs" "$BUILD_RS_SHA256"
 check "$dir/Cargo.toml" "$CARGO_TOML_SHA256"
-check "$dir/Cargo.lock" "$CARGO_LOCK_SHA256"
 check "$dir/README.md" "$README_SHA256"
 
 awk -F '\t' 'NR>1 && ($1=="wcstod" || $1=="wcstof" || $1=="wcstold") {

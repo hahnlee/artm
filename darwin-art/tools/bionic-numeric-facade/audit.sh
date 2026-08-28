@@ -44,7 +44,6 @@ check "$dir/probes/differential.cc" "$DIFFERENTIAL_SHA256"
 check "$dir/probes/exports.map" "$EXPORTS_SHA256"
 check "$dir/build.rs" "$BUILD_RS_SHA256"
 check "$dir/Cargo.toml" "$CARGO_TOML_SHA256"
-check "$dir/Cargo.lock" "$CARGO_LOCK_SHA256"
 check "$dir/README.md" "$README_SHA256"
 check "$dir/audit.sh" "$AUDIT_SHA256"
 

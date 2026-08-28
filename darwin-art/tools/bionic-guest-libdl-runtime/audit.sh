@@ -137,7 +137,8 @@ build_runner() {
     -Wall -Wextra -Werror -Wpedantic -fsanitize="$sanitizer" \
     -fno-omit-frame-pointer -I"$root/crates/darwin-art-elf-loader/include" \
     -I"$root/tools/android-dso-namespace/include" \
-    "$dir/probes/runner.cc" "$libdl" "$loader" -framework Security -o "$output"
+    "$dir/probes/runner.cc" "$dir/probes/platform_stubs.cc" "$libdl" \
+    "$loader" -framework Security -o "$output"
 }
 build_runner address,undefined "$tmp/runner-asan"
 ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \

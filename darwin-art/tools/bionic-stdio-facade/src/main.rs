@@ -98,8 +98,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     image.run_initializers()?;
     // SAFETY: host errno is audit-only and never guest-resolved.
     unsafe { *__error() = 33_301 };
-    if image.call_exported_i32("bionic_stdio_fixture_basic")? != 42 {
-        return Err("basic fixture".into());
+    let basic_result = image.call_exported_i32("bionic_stdio_fixture_basic")?;
+    if basic_result != 42 {
+        return Err(format!("basic fixture returned {basic_result}").into());
     }
     // SAFETY: same current pthread errno cell.
     if unsafe { *__error() } != 33_301 {

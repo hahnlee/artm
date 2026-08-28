@@ -108,8 +108,11 @@ rg -q 'darwin_art_bionic_socket_broker_dns_resolve' "$adapter" ||
   fail 'DNS lifecycle wrapper missing'
 rg -q 'kCentralBrokerTokenMarker' "$adapter" ||
   fail 'central close token classification missing'
-rg -q 'DARWIN_ART_ANDROID_NETWORK_FIXTURE' "$root/probes/runtime_entry_probe.cc" ||
-  fail 'actual ART network execution path missing'
+rg -q 'DARWIN_ART_ANDROID_NETWORK_FIXTURE' \
+  "$root/probes/runtime_process_options.cc" ||
+  fail 'actual ART network fixture option missing'
+rg -q 'nativeLoopbackHttp' "$root/probes/runtime_acceptance_phases.cc" ||
+  fail 'actual ART network acceptance phase missing'
 rg -q '127\.0\.0\.1' "$dir/probes/network_jni.c" || fail 'loopback target missing'
 if rg -n 'localhost|https?://|8\.8\.8\.8|AF_INET6' "$dir/probes/network_jni.c" >/dev/null; then
   fail 'fixture escaped numeric IPv4 loopback scope'

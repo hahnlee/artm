@@ -6,6 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+mod dev;
 mod graph;
 
 use darwin_art_build_contract::RUNTIME_CACHE_IDENTITY;
@@ -51,6 +52,7 @@ fn main() {
 fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
+        Some("dev") => dev::run(args),
         Some("native-graph") => {
             let mut out = None;
             while let Some(arg) = args.next() {

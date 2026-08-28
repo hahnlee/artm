@@ -65,7 +65,7 @@ version_code="$(sed -n 's/^apk-app-runtime: .* version_code=\([^ ]*\) .*/\1/p' <
 install_output="$(DARWIN_ART_FIXTURE_ROOT="$root" \
   "$root/target/debug/darwin-art-apk-install" \
   "$apk" "$install_root" "$package" "$version_code" "$logical" \
-  "$root/tools/android-apk-native-extract/target/release/android-apk-native-extract" \
+  "$root/target/release/android-apk-native-extract" \
   "$runtime_abi" "$cache_root" "$converter")"
 grep -F 'native_backend=darwin conversion=published:2' <<<"$install_output" >/dev/null
 apk_sha="$(sed -n 's/^apk-install: .* apk_sha256=\([^ ]*\) .*/\1/p' \
@@ -103,13 +103,13 @@ grep -F 'ART Android APK JNI: JavaVMExt+NativeBridge load ok' "$run_log" >/dev/n
 # Android graph without considering any Darwin member.
 fallback_first="$("$root/target/debug/darwin-art-apk-install" \
   "$apk" "$fallback_install_root" "$package" "$version_code" "$logical" \
-  "$root/tools/android-apk-native-extract/target/release/android-apk-native-extract" \
+  "$root/target/release/android-apk-native-extract" \
   "$runtime_abi" "$fallback_cache_root" /usr/bin/true)"
 grep -F 'native_backend=elf conversion=attempted:incomplete-conversion:2' \
   <<<"$fallback_first" >/dev/null
 fallback_second="$("$root/target/debug/darwin-art-apk-install" \
   "$apk" "$fallback_install_root" "$package" "$version_code" "$logical" \
-  "$root/tools/android-apk-native-extract/target/release/android-apk-native-extract" \
+  "$root/target/release/android-apk-native-extract" \
   "$runtime_abi" "$fallback_cache_root" /usr/bin/true)"
 grep -F 'native_backend=elf conversion=cached:cached-incomplete-conversion:2' \
   <<<"$fallback_second" >/dev/null

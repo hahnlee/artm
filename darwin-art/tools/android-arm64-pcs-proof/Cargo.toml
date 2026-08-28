@@ -7,5 +7,3 @@ publish = false
 [dependencies]
 darwin-art-elf-loader = { path = "../../crates/darwin-art-elf-loader" }
 
-[workspace]
-

@@ -128,4 +128,4 @@ TSAN_OPTIONS=halt_on_error=1 "$tmp/runner-tsan" "$fixture"
 mkdir -p "$root/_build/bionic-network-stack-acceptance"
 cp "$fixture" "$root/_build/bionic-network-stack-acceptance/"
 clean
-echo 'bionic-network-stack-acceptance: PASS imports=8 Android-ELF=yes HTTP/1.0=IPv4+IPv6+localhost concurrent-clients=4 short-IO=3 EINTR=actual DNS-free=yes server-teardown=yes resolver=closed host-errno=preserved Internet=no ASan+UBSan+TSan'
+echo 'bionic-network-stack-acceptance: PASS imports=9 Android-ELF=yes HTTP/1.0=IPv4+IPv6+localhost concurrent-clients=4 short-IO=3 EINTR=actual DNS-free=yes server-teardown=yes resolver=closed host-errno=preserved Internet=no ASan+UBSan+TSan'

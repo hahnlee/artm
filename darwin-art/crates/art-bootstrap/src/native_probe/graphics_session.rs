@@ -42,12 +42,6 @@ fn compile_runtime_graphics_session_probe_flavor(
     ndk_arch_include: &Path,
     real_graphics: bool,
 ) -> Result<PathBuf> {
-    if real_graphics && let Some(path) = env::var_os("DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
-        }
-    }
     let object = if real_graphics {
         env::var_os("DARWIN_ART_NATIVE_GRAPHICS_SESSION_OBJECT")
             .map(PathBuf::from)

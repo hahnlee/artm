@@ -6,10 +6,3 @@ publish = false
 
 [dependencies]
 flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
-
-[workspace]
-
-[profile.release]
-strip = true
-lto = true
-codegen-units = 1

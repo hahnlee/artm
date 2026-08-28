@@ -39,7 +39,16 @@ ar="$(xcrun --find ar)"
 sdk_root="$(xcrun --sdk macosx --show-sdk-path)"
 flags=(-arch arm64 -isysroot "$sdk_root" -std=c17 -O2 -fno-builtin -Wall -Wextra -Werror -Wpedantic -I"$script_dir/include")
 "$cc" "${flags[@]}" -c "$script_dir/src/leaf.c" -o "$temp_root/leaf.o"
-[[ -z "$(nm -u "$temp_root/leaf.o")" ]] || fail 'facade object has host symbol dependencies'
+nm -u "$temp_root/leaf.o" | sed 's/^[[:space:]]*//' | sort \
+  > "$temp_root/undefined"
+cat > "$temp_root/expected-undefined" <<'EOF'
+__tlv_bootstrap
+_darwin_art_bionic___stack_chk_fail
+_darwin_art_bionic_free
+_darwin_art_bionic_malloc
+EOF
+diff -u "$temp_root/expected-undefined" "$temp_root/undefined" ||
+  fail 'facade dependency boundary drift'
 "$ar" rcs "$temp_root/libdarwin-art-bionic-libc-leaf.a" "$temp_root/leaf.o"
 
 definitions="$(nm -gU "$temp_root/leaf.o")"
@@ -60,4 +69,4 @@ fi
 "$cc" "${flags[@]}" -fsanitize=address,undefined "$script_dir/probes/differential.c" \
   "$script_dir/src/leaf.c" -o "$temp_root/differential-sanitized"
 "$temp_root/differential-sanitized" >/dev/null
-echo 'bionic-libc-leaf-facade: PASS functions=159 object=1 bindings=33 host-undefined=0'
+echo 'bionic-libc-leaf-facade: PASS functions=159 object=1 bindings=63 dependencies=allocator+stack-check+Darwin-TLV'

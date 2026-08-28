@@ -27,7 +27,7 @@ for pair in \
   "src/scanf.cc:$SCANF_SHA256" "src/aapcs64_entry.S:$ENTRY_SHA256" \
   "src/main.rs:$MAIN_SHA256" "probes/fixture.c:$FIXTURE_SHA256" \
   "probes/exports.map:$EXPORTS_SHA256" "build.rs:$BUILD_RS_SHA256" \
-  "Cargo.toml:$CARGO_TOML_SHA256" "Cargo.lock:$CARGO_LOCK_SHA256" \
+  "Cargo.toml:$CARGO_TOML_SHA256" \
   "README.md:$README_SHA256"; do
   check_hash "$script_dir/${pair%%:*}" "${pair#*:}"
 done

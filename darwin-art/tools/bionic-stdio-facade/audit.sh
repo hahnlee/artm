@@ -38,7 +38,13 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/bionic-stdio.XXXXXX")";trap 'find "$tmp" -dept
 clang -arch arm64 -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -std=c17 -O2 -Wall -Wextra -Werror -Wpedantic -I"$dir/include" -c "$dir/src/shims.c" -o "$tmp/shims.o"
 nm -u "$tmp/shims.o"|sed 's/^[[:space:]]*//'|sort >"$tmp/u";cat >"$tmp/e" <<'EOF'
 ___error
+___stack_chk_fail
+___stack_chk_guard
+_darwin_art_bionic_atoi
 _darwin_art_bionic_errno_load
+_darwin_art_bionic_errno_store
+_darwin_art_bionic_realloc
+_darwin_art_bionic_stdio_clearerr_core
 _darwin_art_bionic_stdio_fclose_core
 _darwin_art_bionic_stdio_feof_core
 _darwin_art_bionic_stdio_ferror_core
@@ -52,6 +58,14 @@ _darwin_art_bionic_stdio_ftello_core
 _darwin_art_bionic_stdio_fwrite_core
 _darwin_art_bionic_stdio_getc_core
 _darwin_art_bionic_stdio_ungetc_core
+_pthread_mutex_init
+_pthread_mutex_lock
+_pthread_mutex_trylock
+_pthread_mutex_unlock
+_pthread_mutexattr_destroy
+_pthread_mutexattr_init
+_pthread_mutexattr_settype
+_pthread_once
 EOF
 diff -u "$tmp/e" "$tmp/u"||fail 'shim dependency'
 fixture="$tmp/f.so";"$cc" -std=c17 -O2 -fno-builtin -fPIC -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wall -Wextra -Werror -Wpedantic -shared -nostdlib -Wl,-z,now -Wl,-z,norelro -Wl,--hash-style=sysv "$dir/probes/fixture.c" -o "$fixture"

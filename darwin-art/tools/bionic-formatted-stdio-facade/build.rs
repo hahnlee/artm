@@ -61,6 +61,7 @@ fn main() {
     let format = out.join("format.o");
     let format_entry = out.join("format-entry.o");
     let allocator = out.join("allocator.o");
+    let audit_dependencies = out.join("audit-dependency-shims.o");
     compile(
         "clang++",
         Some("c++20"),
@@ -116,6 +117,15 @@ fn main() {
         &["../bionic-libc-allocator-facade/include"],
         sanitizer.as_deref(),
     );
+    compile(
+        "clang",
+        Some("c17"),
+        "../bionic-stdio-facade/probes/audit_dependency_shims.c",
+        &audit_dependencies,
+        &sdk,
+        &[],
+        sanitizer.as_deref(),
+    );
 
     let archive = out.join("libbionic_formatted_stdio.a");
     assert!(
@@ -128,6 +138,7 @@ fn main() {
                 &format,
                 &format_entry,
                 &allocator,
+                &audit_dependencies,
             ])
             .status()
             .expect("archive")
@@ -158,6 +169,7 @@ fn main() {
         "../bionic-format-facade/src/format.cc",
         "../bionic-format-facade/src/aapcs64_entry.S",
         "../bionic-libc-allocator-facade/src/allocator.c",
+        "../bionic-stdio-facade/probes/audit_dependency_shims.c",
     ] {
         println!("cargo:rerun-if-changed={source}");
     }

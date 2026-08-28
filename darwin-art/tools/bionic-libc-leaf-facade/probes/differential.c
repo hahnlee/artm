@@ -3,8 +3,13 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+
+void* darwin_art_bionic_malloc(size_t size) { return malloc(size); }
+void darwin_art_bionic_free(void* pointer) { free(pointer); }
+_Noreturn void darwin_art_bionic___stack_chk_fail(void) { abort(); }
 
 static int Sign(int value) { return (value > 0) - (value < 0); }
 
@@ -117,7 +122,7 @@ static void TestWideMemory(void) {
 static void TestResolver(void) {
   size_t count = 0;
   const DarwinArtBionicLeafBinding* table = darwin_art_bionic_libc_leaf_table(&count);
-  assert(table != NULL && count == 33);
+  assert(table != NULL && count == 63);
   for (size_t index = 0; index < count; ++index) {
     assert(table[index].address != NULL);
     assert(darwin_art_bionic_libc_leaf_resolve(table[index].import_name) == table[index].address);
@@ -134,6 +139,6 @@ int main(void) {
   TestMemoryAndStrings();
   TestWideMemory();
   TestResolver();
-  puts("bionic-libc-leaf differential: PASS cases=4096 bindings=33");
+  puts("bionic-libc-leaf differential: PASS cases=4096 bindings=63");
   return 0;
 }

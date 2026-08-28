@@ -15,6 +15,21 @@
     }                                                                           \
   } while (0)
 
+static int32_t g_bionic_errno;
+
+void darwin_art_bionic_errno_store(int32_t android_errno) {
+  g_bionic_errno = android_errno;
+}
+
+extern char* darwin_art_bionic_tempnam_unsupported(const char*, const char*);
+
+static int CheckUnsupportedTempnam(void) {
+  g_bionic_errno = 0;
+  CHECK(darwin_art_bionic_tempnam_unsupported("/tmp", "audit") == NULL);
+  CHECK(g_bionic_errno == 38);
+  return 0;
+}
+
 static int CheckHostErrnoIsolation(void) {
   volatile size_t impossible = SIZE_MAX;
 
@@ -132,9 +147,12 @@ static int CheckResolver(void) {
   const DarwinArtBionicAllocatorBinding* table =
       darwin_art_bionic_allocator_table(&count);
   CHECK(table != NULL);
-  const char* expected[] = {"aligned_alloc", "calloc", "free", "malloc",
-                            "malloc_usable_size", "mallopt", "memalign",
-                            "posix_memalign", "realloc", "strdup"};
+  const char* expected[] = {
+      "aligned_alloc",      "calloc",          "free",    "mallinfo",
+      "malloc",             "malloc_usable_size", "mallopt", "memalign",
+      "posix_memalign",     "realloc",         "strdup",  "strndup",
+      "tempnam",
+  };
   CHECK(count == sizeof(expected) / sizeof(expected[0]));
   for (size_t index = 0; index < count; ++index) {
     CHECK(strcmp(table[index].import_name, expected[index]) == 0);
@@ -144,11 +162,11 @@ static int CheckResolver(void) {
   CHECK(darwin_art_bionic_allocator_resolve(NULL) == NULL);
   CHECK(darwin_art_bionic_allocator_resolve("malloc_size") == NULL);
 
-  MallocFunction resolved_malloc = (MallocFunction)table[3].address;
+  MallocFunction resolved_malloc = (MallocFunction)table[4].address;
   FreeFunction resolved_free = (FreeFunction)table[2].address;
   PosixMemalignFunction resolved_posix_memalign =
-      (PosixMemalignFunction)table[7].address;
-  ReallocFunction resolved_realloc = (ReallocFunction)table[8].address;
+      (PosixMemalignFunction)table[8].address;
+  ReallocFunction resolved_realloc = (ReallocFunction)table[9].address;
   void* direct = resolved_malloc(29);
   CHECK(direct != NULL);
   direct = resolved_realloc(direct, 57);
@@ -160,15 +178,18 @@ static int CheckResolver(void) {
   resolved_free(aligned);
 
   CHECK((table[2].capabilities & DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE) != 0);
-  CHECK((table[3].capabilities &
+  CHECK((table[4].capabilities &
          DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM) != 0);
-  CHECK((table[7].capabilities & DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE) != 0);
-  CHECK((table[8].capabilities &
+  CHECK((table[8].capabilities & DARWIN_ART_BIONIC_ALLOC_FULL_RETURN_CODE) != 0);
+  CHECK((table[9].capabilities &
          DARWIN_ART_BIONIC_ALLOC_NEEDS_ERRNO_RESULT_SEAM) != 0);
   for (size_t index = 0; index < count; ++index) {
     CHECK((table[index].capabilities &
            DARWIN_ART_BIONIC_ALLOC_FIXED_REGISTER_ABI) != 0);
-    if (index != 4 && index != 5) {
+    if (strcmp(table[index].import_name, "mallinfo") != 0 &&
+        strcmp(table[index].import_name, "malloc_usable_size") != 0 &&
+        strcmp(table[index].import_name, "mallopt") != 0 &&
+        strcmp(table[index].import_name, "tempnam") != 0) {
       CHECK((table[index].capabilities &
              DARWIN_ART_BIONIC_ALLOC_DARWIN_OWNS_BLOCK) != 0);
     }
@@ -181,6 +202,7 @@ int main(void) {
   CHECK(CheckPosixMemalign() == 0);
   CHECK(CheckAlignedAlloc() == 0);
   CHECK(CheckHostErrnoIsolation() == 0);
+  CHECK(CheckUnsupportedTempnam() == 0);
   CHECK(CheckResolver() == 0);
   puts("allocator differential: PASS");
   return 0;

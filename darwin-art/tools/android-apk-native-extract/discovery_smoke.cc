@@ -83,23 +83,18 @@ int main(int argc, char** argv) {
     darwin_art_elf_graph_unload(&graph, &error.value);
     return Fail("lookup JNI_OnLoad", status, error);
   }
-  using OnLoad = int (*)(void*, void*);
-  const int version = reinterpret_cast<OnLoad>(address)(
-      reinterpret_cast<void*>(static_cast<uintptr_t>(1)), nullptr);
-  if (version != 0x00010006) {
-    std::fprintf(stderr,
-                 "apk-native-discovery-smoke: JNI_OnLoad returned %#x\n",
-                 version);
-    darwin_art_elf_graph_unload(&graph, &error.value);
-    return 1;
-  }
+  // This gate owns extraction, closed-namespace discovery, and symbol lookup.
+  // The shared fixture's JNI_OnLoad intentionally dereferences a real
+  // JavaVM/JNIEnv to test RegisterNatives, so invoking it with a sentinel VM
+  // here would be undefined behavior. Managed-native-load owns that separate
+  // execution contract.
   status = darwin_art_elf_graph_unload(&graph, &error.value);
   if (status != DARWIN_ART_ELF_OK || graph != nullptr) {
     return Fail("graph-unload", status, error);
   }
   std::puts(
       "apk-native-discovery-smoke: PASS extracted=APK graph=root+child+grandchild "
-      "discovery=dirfd+no-follow load=closed-no-provider JNI_OnLoad=0x00010006 "
+      "discovery=dirfd+no-follow load=closed-no-provider JNI_OnLoad=located "
       "fallback=none");
   return 0;
 }

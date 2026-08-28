@@ -3,7 +3,11 @@ mod bootstrap;
 mod config;
 mod frame;
 #[cfg(target_os = "macos")]
+mod gpu_input;
+#[cfg(target_os = "macos")]
 mod gpu_loop;
+#[cfg(target_os = "macos")]
+mod gpu_test_config;
 #[cfg(target_os = "macos")]
 mod host_services;
 mod run;

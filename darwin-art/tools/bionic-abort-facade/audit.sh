@@ -52,7 +52,6 @@ check "$dir/probes/death_support.c" "$DEATH_SUPPORT_SHA256"
 check "$dir/probes/exports.map" "$EXPORTS_SHA256"
 check "$dir/build.rs" "$BUILD_RS_SHA256"
 check "$dir/Cargo.toml" "$CARGO_TOML_SHA256"
-check "$dir/Cargo.lock" "$CARGO_LOCK_SHA256"
 check "$dir/README.md" "$README_SHA256"
 
 awk -F '\t' 'NR>1 && ($1=="abort" || $1=="android_set_abort_message") {
@@ -157,8 +156,10 @@ host_flags=(-arch arm64 -isysroot "$sdk" -std=c17 -O1 -g -Wall -Wextra -Werror -
 nm -u "$tmp/provider.o" | sed 's/^[[:space:]]*//' | sort > "$tmp/provider.undefined"
 cat > "$tmp/provider.expected" <<'EOF'
 ___error
+___stderrp
 __exit
 _darwin_art_bionic_errno_set_from_darwin
+_fprintf
 _memcpy
 _mmap
 _pthread_kill
@@ -169,6 +170,7 @@ _pthread_sigmask
 _sigaction
 _strcmp
 _strlen
+_write
 EOF
 diff -u "$tmp/provider.expected" "$tmp/provider.undefined" ||
   fail 'provider host dependency drift'

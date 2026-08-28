@@ -8,5 +8,3 @@ build = "build.rs"
 [dependencies]
 bionic-stdio-facade = { path = "../bionic-stdio-facade" }
 darwin-art-elf-loader = { path = "../../crates/darwin-art-elf-loader" }
-
-[workspace]

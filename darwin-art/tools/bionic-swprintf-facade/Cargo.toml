@@ -7,11 +7,3 @@ build = "build.rs"
 
 [dependencies]
 darwin-art-elf-loader = { path = "../../crates/darwin-art-elf-loader" }
-
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
-
-[workspace]

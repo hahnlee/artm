@@ -53,6 +53,7 @@ nm -u "$temp_root/allocator.o" | sed 's/^[[:space:]]*//' | sort >"$temp_root/und
 cat >"$temp_root/expected-undefined" <<'EOF'
 ___error
 _calloc
+_darwin_art_bionic_errno_store
 _free
 _malloc
 _malloc_size

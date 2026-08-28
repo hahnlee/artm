@@ -12,5 +12,3 @@ name = "android-dso-namespace-smoke"
 path = "src/main.rs"
 
 [dependencies]
-
-[workspace]

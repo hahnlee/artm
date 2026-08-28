@@ -54,6 +54,7 @@ fn main() {
     let sdk = output(Command::new("xcrun").args(["--sdk", "macosx", "--show-sdk-path"]));
     let provider = out.join("wide-provider.o");
     let shims = out.join("wide-shims.o");
+    let audit_dependencies = out.join("audit-dependency-shims.o");
     compile(
         "clang++",
         "-std=c++20",
@@ -68,13 +69,20 @@ fn main() {
         &shims,
         &sdk,
     );
+    compile(
+        "clang",
+        "-std=c17",
+        "../bionic-stdio-facade/probes/audit_dependency_shims.c",
+        &audit_dependencies,
+        &sdk,
+    );
     let archive = out.join("libbionic_stdio_wide_integration.a");
     let _ = fs::remove_file(&archive);
     assert!(
         Command::new("ar")
             .arg("rcs")
             .arg(&archive)
-            .args([&provider, &shims])
+            .args([&provider, &shims, &audit_dependencies])
             .status()
             .expect("archive wide stdio integration")
             .success()
@@ -117,6 +125,7 @@ fn main() {
         "../bionic-wide-stdio-facade/include/darwin_art_bionic_wide_stdio.h",
         "../bionic-locale-facade/include/darwin_art_bionic_locale.h",
         "../bionic-stdio-facade/src/main.rs",
+        "../bionic-stdio-facade/probes/audit_dependency_shims.c",
     ] {
         println!("cargo:rerun-if-changed={source}");
     }

@@ -7,12 +7,12 @@
 /// Bump when the common runtime/adapters include or command contract changes.
 /// A mismatch disables cache promotion until the canonical builder repopulates
 /// `_build/runtime-common`.
-pub const RUNTIME_CACHE_IDENTITY: &str = "darwin-art-runtime-core-cache-v9-security-trust";
+pub const RUNTIME_CACHE_IDENTITY: &str = "darwin-art-runtime-core-cache-v10-native-window-split";
 
 /// Identity of the generated native Ninja graph. Keeping this beside the
 /// runtime cache contract prevents the canonical builder and graph emitter
 /// from silently disagreeing about graph format or edge ownership.
-pub const NATIVE_GRAPH_VERSION: &str = "darwin-art-native-graph-v22-security-trust";
+pub const NATIVE_GRAPH_VERSION: &str = "darwin-art-native-graph-v23-native-window-split";
 
 /// Canonical adapter translation units for the two runtime flavors.  Keeping
 /// this list in the dependency-free contract crate prevents the Cargo
@@ -28,6 +28,7 @@ pub const HEADLESS_ADAPTER_SOURCES: &[&str] = &[
     "darwin_android_media_ndk.cc",
     "darwin_provider_owners.cc",
     "darwin_angle_egl.cc",
+    "darwin_android_native_window.cc",
     "darwin_audio_track.mm",
     "darwin_framework_natives.cc",
     "darwin_security_trust.mm",
@@ -68,6 +69,7 @@ pub const GRAPHICS_ADAPTER_SOURCES: &[&str] = &[
     "darwin_android_media_ndk.cc",
     "darwin_provider_owners.cc",
     "darwin_angle_egl.cc",
+    "darwin_android_native_window.cc",
     "darwin_audio_track.mm",
     "darwin_framework_natives.cc",
     "darwin_security_trust.mm",

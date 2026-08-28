@@ -20,9 +20,12 @@ class TimeLord;
 
 namespace darwin_art_graphics {
 
-// All JNI/HWUI references belong to one GraphicsSession.  The session owns
-// this object; probe/input/phase code only receives a borrowed pointer while
-// running on the ART owner thread.
+// All JNI/HWUI references belong to one GraphicsSession. The session owns
+// this object as a single ABI unit; every native consumer includes this header
+// and must be rebuilt when its layout changes. Probe/input/phase code only
+// receives a borrowed pointer while running on the ART owner thread. The
+// incremental graph treats this header as an ABI dependency of the session
+// allocator and every field-accessing translation unit.
 struct GraphicsState {
   jclass probe_canvas_class = nullptr;
   jclass service_bridge_class = nullptr;

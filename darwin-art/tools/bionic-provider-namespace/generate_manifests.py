@@ -103,11 +103,21 @@ def main() -> int:
         claims += [(line.split("\t", 1)[0], "dso-lifecycle")
                    for line in stream if line.strip()]
 
+    extensions = rows("tools/bionic-provider-namespace/extensions.tsv")
+    extension_claims = {
+        (row["symbol"], row["owner"])
+        for row in extensions
+        if row["soname"] in {"libc.so", "libdl.so"}
+    }
     claimed: dict[str, str] = {}
     duplicates: list[str] = []
     for symbol, owner in claims:
         if symbol not in universe:
-            raise SystemExit(f"provider claims symbol outside libc++ universe: {symbol}")
+            if (symbol, owner) not in extension_claims:
+                raise SystemExit(
+                    f"provider claims unreviewed namespace extension: {symbol} ({owner})"
+                )
+            continue
         if symbol in claimed:
             duplicates.append(f"{symbol}: {claimed[symbol]}, {owner}")
         claimed[symbol] = owner
@@ -115,9 +125,13 @@ def main() -> int:
         raise SystemExit("duplicate owners:\n" + "\n".join(duplicates))
 
     liblog_source = (ROOT / "tools/android-liblog-exec-provider/liblog_provider.cc").read_text()
-    liblog = re.findall(r"^\s*LIBLOG_ENTRY\(([^)]+)\),", liblog_source, re.MULTILINE)
-    if len(liblog) != 16 or len(set(liblog)) != 16:
-        raise SystemExit("liblog provider surface is not exactly 16 unique symbols")
+    liblog_block = liblog_source.split("const Entry kEntries[] = {", 1)[1].split("};", 1)[0]
+    liblog = re.findall(r"^\s*LIBLOG_ENTRY\(([^)]+)\),", liblog_block, re.MULTILINE)
+    liblog += re.findall(
+        r'^\s*\{"(__android_log_[^"]+)"\s*,', liblog_block, re.MULTILINE
+    )
+    if len(liblog) != 19 or len(set(liblog)) != 19:
+        raise SystemExit("liblog provider surface is not exactly 19 unique symbols")
 
     owner_enum = {
         "leaf": "DARWIN_ART_BIONIC_PROVIDER_LEAF",
@@ -157,7 +171,6 @@ def main() -> int:
         "binder-ndk": "DARWIN_ART_BIONIC_PROVIDER_BINDER_NDK",
         "aaudio": "DARWIN_ART_BIONIC_PROVIDER_AAUDIO",
     }
-    extensions = rows("tools/bionic-provider-namespace/extensions.tsv")
     extension_keys: set[tuple[str, str, str]] = set()
     for row in extensions:
         key = (row["soname"], row["symbol"], row["version"])

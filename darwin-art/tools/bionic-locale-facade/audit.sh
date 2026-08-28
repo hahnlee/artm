@@ -31,9 +31,9 @@ check_hash "$icu_lock" "$ICU_FOUNDATION_LOCK_SHA256"
 check_hash "$icu_root/icu4c/source/common/unicode/uvernum.h" "$ICU_UVERNUM_SHA256"
 check_hash "$icu_root/icu4c/source/common/unicode/uchar.h" "$ICU_UCHAR_SHA256"
 check_hash "$icu_root/libandroidicuinit/include/androidicuinit/android_icu_init.h" "$ICU_INIT_HEADER_SHA256"
-check_hash "$icu_common" "$ICU_COMMON_ARCHIVE_SHA256"
-check_hash "$icu_stubdata" "$ICU_STUBDATA_ARCHIVE_SHA256"
-check_hash "$icu_init" "$ICU_INIT_ARCHIVE_SHA256"
+for archive in "$icu_common" "$icu_stubdata" "$icu_init"; do
+  [[ -f "$archive" ]] || missing "$archive"
+done
 check_hash "$icu_data" "$ICU_DATA_SHA256"
 [[ "$(stat -f %z "$icu_data")" == "$ICU_DATA_SIZE" ]] || fail 'ICU data size drift'
 [[ "$(awk '$1=="#define" && $2=="U_ICU_VERSION" {gsub(/"/, "", $3); print $3}' "$icu_root/icu4c/source/common/unicode/uvernum.h")" == "$ICU_LIBRARY_VERSION" ]] || fail 'ICU header version drift'

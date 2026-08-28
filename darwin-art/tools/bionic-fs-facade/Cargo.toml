@@ -9,5 +9,3 @@ build = "build.rs"
 darwin-art-elf-loader = { path = "../../crates/darwin-art-elf-loader" }
 darwin-art-fs-broker = { path = "../../crates/darwin-art-fs-broker" }
 darwin-art-prefix = { path = "../../crates/darwin-art-prefix" }
-
-[workspace]

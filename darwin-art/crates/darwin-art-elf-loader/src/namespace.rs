@@ -188,82 +188,90 @@ impl ClosedElfNamespace {
             }
         }
 
-        if let Ok(specification) = std::env::var("DARWIN_ART_ELF_PREFLIGHT_I32") {
-            if let Some((soname, symbol)) = specification.split_once(':') {
-                if let Some(object) = builder
-                    .objects
-                    .iter()
-                    .find(|object| object.soname == soname)
-                {
-                    if soname == "libcrypto.so" {
-                        let base =
-                            object
-                                .staged
-                                .image
-                                .debug_mapped_pointer(0)
-                                .map_err(|source| NamespaceError::Load {
-                                    soname: object.soname.clone(),
-                                    source,
-                                })?;
-                        for slot in [
-                            0x17ab70, 0x17abd0, 0x17abe0, 0x17ac38, 0x17ad90, 0x17adf8, 0x17ae00,
-                            0x17ae08, 0x17ae10,
-                        ] {
-                            let value = object.staged.image.debug_read_mapped_u64(slot).map_err(
-                                |source| NamespaceError::Load {
-                                    soname: object.soname.clone(),
-                                    source,
-                                },
-                            )?;
-                            eprintln!(
-                                "DARWIN ELF preflight slot: base={base:#x} slot={slot:#x} value={value:#x} offset={:#x}",
-                                value.wrapping_sub(base as u64)
-                            );
-                        }
-                        let instructions =
-                            object.staged.image.debug_read_mapped_u64(0xd35dc).map_err(
-                                |source| NamespaceError::Load {
-                                    soname: object.soname.clone(),
-                                    source,
-                                },
-                            )?;
-                        let (guard_address, guard_value) = object.staged.image.debug_stack_guard();
-                        let entry = object.staged.image.debug_read_mapped_u64(0xd35b4).map_err(
-                            |source| NamespaceError::Load {
+        if let Ok(specification) = std::env::var("DARWIN_ART_ELF_PREFLIGHT_I32")
+            && let Some((soname, symbol)) = specification.split_once(':')
+            && let Some(object) = builder
+                .objects
+                .iter()
+                .find(|object| object.soname == soname)
+        {
+            if soname == "libcrypto.so" {
+                let base = object
+                    .staged
+                    .image
+                    .debug_mapped_pointer(0)
+                    .map_err(|source| NamespaceError::Load {
+                        soname: object.soname.clone(),
+                        source,
+                    })?;
+                for slot in [
+                    0x17ab70, 0x17abd0, 0x17abe0, 0x17ac38, 0x17ad90, 0x17adf8, 0x17ae00, 0x17ae08,
+                    0x17ae10,
+                ] {
+                    let value =
+                        object
+                            .staged
+                            .image
+                            .debug_read_mapped_u64(slot)
+                            .map_err(|source| NamespaceError::Load {
                                 soname: object.soname.clone(),
                                 source,
-                            },
-                        )?;
-                        let diagnostic_patch =
-                            object.staged.image.debug_read_mapped_u64(0xd36ec).map_err(
-                                |source| NamespaceError::Load {
-                                    soname: object.soname.clone(),
-                                    source,
-                                },
-                            )?;
-                        let epilogue = object.staged.image.debug_read_mapped_u64(0xd3940).map_err(
-                            |source| NamespaceError::Load {
-                                soname: object.soname.clone(),
-                                source,
-                            },
-                        )?;
-                        eprintln!(
-                            "DARWIN ELF preflight guard: address={guard_address:#x} value={guard_value:#x} entry={entry:#018x} instructions={instructions:#018x} diagnostic={diagnostic_patch:#018x} epilogue={epilogue:#018x}"
-                        );
-                    }
-                    let result = object
+                            })?;
+                    eprintln!(
+                        "DARWIN ELF preflight slot: base={base:#x} slot={slot:#x} value={value:#x} offset={:#x}",
+                        value.wrapping_sub(base as u64)
+                    );
+                }
+                let instructions =
+                    object
                         .staged
                         .image
-                        .call_exported_i32_before_initializers(symbol)
+                        .debug_read_mapped_u64(0xd35dc)
                         .map_err(|source| NamespaceError::Load {
                             soname: object.soname.clone(),
                             source,
                         })?;
-                    eprintln!(
-                        "DARWIN ELF preflight: soname={soname} symbol={symbol} result={result}"
-                    );
-                }
+                let (guard_address, guard_value) = object.staged.image.debug_stack_guard();
+                let entry =
+                    object
+                        .staged
+                        .image
+                        .debug_read_mapped_u64(0xd35b4)
+                        .map_err(|source| NamespaceError::Load {
+                            soname: object.soname.clone(),
+                            source,
+                        })?;
+                let diagnostic_patch =
+                    object
+                        .staged
+                        .image
+                        .debug_read_mapped_u64(0xd36ec)
+                        .map_err(|source| NamespaceError::Load {
+                            soname: object.soname.clone(),
+                            source,
+                        })?;
+                let epilogue =
+                    object
+                        .staged
+                        .image
+                        .debug_read_mapped_u64(0xd3940)
+                        .map_err(|source| NamespaceError::Load {
+                            soname: object.soname.clone(),
+                            source,
+                        })?;
+                eprintln!(
+                    "DARWIN ELF preflight guard: address={guard_address:#x} value={guard_value:#x} entry={entry:#018x} instructions={instructions:#018x} diagnostic={diagnostic_patch:#018x} epilogue={epilogue:#018x}"
+                );
             }
+            let result = object
+                .staged
+                .image
+                .call_exported_i32_before_initializers(symbol)
+                .map_err(|source| NamespaceError::Load {
+                    soname: object.soname.clone(),
+                    source,
+                })?;
+            eprintln!("DARWIN ELF preflight: soname={soname} symbol={symbol} result={result}");
         }
 
         for &index in &builder.dependency_order {

@@ -154,7 +154,7 @@ helper_value="$("$elf_nm" -D --defined-only "$helper" | awk '$3=="phdr_helper_ma
 
 export DARWIN_ART_DL_PHDR_PROVIDER_LIBDIR="$stage"
 export CARGO_TARGET_DIR="$stage/cargo-target"
-cargo build --quiet --locked --manifest-path "$runner_root/Cargo.toml"
+cargo build --quiet --locked --manifest-path "$runner_root/Cargo.toml" --features provider-link
 runner="$CARGO_TARGET_DIR/debug/android-dl-iterate-phdr-runner"
 output="$("$runner" "$target" "$helper" "$target_value" "$helper_value")"
 grep -F 'ELF-callback=PT_LOAD+SONAME records=2->1' <<< "$output" >/dev/null ||

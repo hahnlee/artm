@@ -73,7 +73,7 @@ dyn_exports "$liblog_stub" > "$work/liblog.exports"
 
 cargo test --quiet --manifest-path "$project_root/tools/android-dso-namespace/Cargo.toml"
 cargo build --quiet --manifest-path "$project_root/tools/android-dso-namespace/Cargo.toml" --lib
-facade_archive="$project_root/tools/android-dso-namespace/target/debug/libandroid_dso_namespace.a"
+facade_archive="$project_root/target/debug/libandroid_dso_namespace.a"
 [[ "$(lipo -archs "$facade_archive")" == "arm64" ]] || die "Rust facade archive is not Darwin arm64"
 facade_definitions="$(nm -gU "$facade_archive" 2>/dev/null)"
 for symbol in darwin_art_loader_bind darwin_art_dso_resolve darwin_art_bionic_dlopen \
