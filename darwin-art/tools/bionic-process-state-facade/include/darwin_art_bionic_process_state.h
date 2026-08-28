@@ -5,13 +5,19 @@
 #include <stddef.h>
 
 typedef void (*DarwinArtBionicProcessFunction)(void);
-typedef int (*DarwinArtBionicJitFaultRecovery)(uintptr_t program_counter);
+typedef int (*DarwinArtBionicJitFaultRecovery)(uintptr_t fault_address,
+                                                int execution_fault);
+typedef int (*DarwinArtBionicSigchainOwnsSignal)(int signal_number);
+typedef void (*DarwinArtBionicEnsureFrontOfChain)(int signal_number);
 
 char* darwin_art_bionic_getenv(const char* name);
 int darwin_art_bionic_process_state_process_install(void);
 int darwin_art_bionic_process_state_process_uninstall(void);
 void darwin_art_bionic_process_state_bind_jit_fault_recovery(
     DarwinArtBionicJitFaultRecovery recovery);
+void darwin_art_bionic_process_state_bind_sigchain(
+    DarwinArtBionicSigchainOwnsSignal owns_signal,
+    DarwinArtBionicEnsureFrontOfChain ensure_front);
 int darwin_art_bionic___system_property_get(const char* name, char* value);
 const void* darwin_art_bionic___system_property_find(const char* name);
 void darwin_art_bionic___system_property_read_callback(

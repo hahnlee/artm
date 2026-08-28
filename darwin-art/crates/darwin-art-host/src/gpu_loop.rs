@@ -73,8 +73,54 @@ fn dispatch_queued_events(runtime: &mut HostRuntime) -> Result<u64, HostError> {
 fn dispatch_synthetic_keys(
     runtime: &mut HostRuntime,
     sequence: &[(u32, u32)],
-    clock: &Instant,
+    _clock: &Instant,
 ) -> Result<u64, HostError> {
+    let linux_scan_code = |key_code: u32| match key_code {
+        7 => 11,
+        8..=16 => key_code - 6,
+        29 => 30,
+        30 => 48,
+        31 => 46,
+        32 => 32,
+        33 => 18,
+        34 => 33,
+        35 => 34,
+        36 => 35,
+        37 => 23,
+        38 => 36,
+        39 => 37,
+        40 => 38,
+        41 => 50,
+        42 => 49,
+        43 => 24,
+        44 => 25,
+        45 => 16,
+        46 => 19,
+        47 => 31,
+        48 => 20,
+        49 => 22,
+        50 => 47,
+        51 => 17,
+        52 => 45,
+        53 => 21,
+        54 => 44,
+        55 => 51,
+        56 => 52,
+        62 => 57,
+        66 => 28,
+        67 => 14,
+        68 => 41,
+        69 => 12,
+        70 => 13,
+        71 => 26,
+        72 => 27,
+        73 => 43,
+        74 => 39,
+        75 => 40,
+        76 => 53,
+        111 => 1,
+        _ => 0,
+    };
     let interval = std::env::var("DARWIN_ART_TEST_KEY_INTERVAL_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -87,15 +133,23 @@ fn dispatch_synthetic_keys(
     );
     let mut dispatched = 0_u64;
     for &(key_code, meta_state) in sequence {
-        let down_time_nanos = clock.elapsed().as_nanos() as u64 + 1;
         for action in [0_u32, 1_u32] {
             let mut event = KeyEventV1::default();
             event.version = 1;
             event.size = std::mem::size_of::<KeyEventV1>() as u32;
             event.action = action;
-            event.event_time_nanos = clock.elapsed().as_nanos() as u64 + 1;
-            event.down_time_nanos = down_time_nanos;
+            // InputDispatcher marks hardware events as originating from the
+            // system. Chromium uses that Android contract when deciding
+            // whether a physical key may be forwarded into focused web
+            // content.
+            event.flags = 0x8;
+            // Zero delegates to the runtime's CLOCK_MONOTONIC input clock.
+            // An Instant elapsed from this host loop starts near zero and is
+            // not Android uptime; Blink discards such stale hardware keys.
+            event.event_time_nanos = 0;
+            event.down_time_nanos = 0;
             event.key_code = key_code;
+            event.scan_code = linux_scan_code(key_code);
             event.meta_state = meta_state;
             event.device_id = 1;
             event.source = 0x101;
@@ -106,14 +160,26 @@ fn dispatch_synthetic_keys(
                 return Err(HostError::RuntimeFailed(status));
             }
             dispatched += 1;
-        }
-        if !interval.is_zero() {
-            std::thread::sleep(interval);
-            let pulse_status = runtime
-                .graphics()
-                .map_or(-1, |graphics| graphics.pump_frame(0));
-            if pulse_status != 0 {
-                return Err(HostError::RuntimeFailed(pulse_status));
+            if !interval.is_zero() {
+                // Keep the owner run loop alive after every hardware event.
+                // Android's InputDispatcher returns to Looper between DOWN
+                // and UP as well as between keys, which lets Chromium consume
+                // the renderer ACK that gates its next keyboard event.
+                let event_interval = (interval.as_secs_f64() / 2.0).max(0.001);
+                let pump_status = owned_surface_pump_events(runtime, event_interval);
+                if pump_status != 0 {
+                    return Err(HostError::SurfaceFailed {
+                        operation: "gpu_test_key_interval_pump",
+                        status: pump_status,
+                    });
+                }
+                dispatched += dispatch_queued_events(runtime)?;
+                let pulse_status = runtime
+                    .graphics()
+                    .map_or(-1, |graphics| graphics.pump_frame(0));
+                if pulse_status != 0 {
+                    return Err(HostError::RuntimeFailed(pulse_status));
+                }
             }
         }
     }
@@ -282,6 +348,10 @@ pub(super) fn run(
                 .collect::<Vec<_>>()
         })
         .filter(|sequence| !sequence.is_empty());
+    let post_pointer_key_delay_ms = std::env::var("DARWIN_ART_TEST_KEY_AFTER_POINTER_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
     let mut synthetic_moves = 0_u64;
     // Test coordinates are expressed in the same logical AppKit points used
     // by mouse events and capture scripts. Android lays the retained view out
@@ -563,6 +633,34 @@ pub(super) fn run(
     if loop_error.is_none()
         && let Some(sequence) = post_pointer_key_sequence.as_ref()
     {
+        let wait_started = Instant::now();
+        while wait_started.elapsed() < Duration::from_millis(post_pointer_key_delay_ms)
+            && loop_error.is_none()
+        {
+            let remaining = Duration::from_millis(post_pointer_key_delay_ms)
+                .saturating_sub(wait_started.elapsed());
+            let slice_ms = remaining.as_millis().min(16).max(1) as u64;
+            let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
+            if pump_status != 0 {
+                loop_error = Some(HostError::SurfaceFailed {
+                    operation: "gpu_test_post_pointer_key_wait",
+                    status: pump_status,
+                });
+                break;
+            }
+            if let Err(error) = dispatch_queued_events(runtime) {
+                loop_error = Some(error);
+                break;
+            }
+            if let Err(error) = pump_frame_with_latency(
+                runtime,
+                debug_latency,
+                &mut last_input_dispatch,
+                &mut frame_latencies_us,
+            ) {
+                loop_error = Some(error);
+            }
+        }
         match dispatch_synthetic_keys(runtime, sequence, &synthetic_clock) {
             Ok(dispatched) => frames_presented += dispatched,
             Err(error) => loop_error = Some(error),
@@ -697,6 +795,33 @@ pub(super) fn run(
                 ) {
                     loop_error = Some(error);
                     break;
+                }
+                if action == 0 && test_hold_ms > 0 {
+                    let pump_status =
+                        owned_surface_pump_events(runtime, test_hold_ms as f64 / 1000.0);
+                    if pump_status != 0 {
+                        loop_error = Some(HostError::SurfaceFailed {
+                            operation: "gpu_test_post_drag_pointer_sequence_hold",
+                            status: pump_status,
+                        });
+                        break;
+                    }
+                    match dispatch_queued_events(runtime) {
+                        Ok(dispatched) => frames_presented += dispatched,
+                        Err(error) => {
+                            loop_error = Some(error);
+                            break;
+                        }
+                    }
+                    if let Err(error) = pump_frame_with_latency(
+                        runtime,
+                        debug_latency,
+                        &mut last_input_dispatch,
+                        &mut frame_latencies_us,
+                    ) {
+                        loop_error = Some(error);
+                        break;
+                    }
                 }
             }
         }

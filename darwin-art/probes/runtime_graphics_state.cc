@@ -120,6 +120,16 @@ void begin_activity_transition(GraphicsState* state, JNIEnv* env) {
 
 void shutdown(GraphicsState* state, JNIEnv* env) {
   if (state == nullptr || env == nullptr) return;
+  if (state->service_bridge_class != nullptr) {
+    jmethodID shutdown_activities =
+        env->GetStaticMethodID(state->service_bridge_class,
+                               "shutdownActivities", "()V");
+    if (shutdown_activities != nullptr) {
+      env->CallStaticVoidMethod(state->service_bridge_class,
+                                shutdown_activities);
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+  }
 #if defined(DARWIN_ART_REAL_GRAPHICS)
   if (state->hwui_animation_context != nullptr) {
     state->hwui_animation_context->destroy();

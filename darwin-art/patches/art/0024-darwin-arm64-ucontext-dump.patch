@@ -1,30 +1,59 @@
 diff --git a/runtime/runtime_common.cc b/runtime/runtime_common.cc
 --- a/runtime/runtime_common.cc
 +++ b/runtime/runtime_common.cc
-@@ -17,5 +17,9 @@
- #include "runtime_common.h"
+@@ -132,6 +132,28 @@ const char* GetSignalCodeName(int signal_number, int signal_code) {
+ struct UContext {
++#if defined(__APPLE__) && defined(__aarch64__)
++  struct AndroidSignalMachineContext {
++    uint64_t fault_address;
++    uint64_t registers[31];
++    uint64_t stack_pointer;
++    uint64_t program_counter;
++    uint64_t processor_state;
++    alignas(16) uint8_t reserved[4096];
++  };
++  struct AndroidSignalContext {
++    uint64_t flags;
++    AndroidSignalContext* link;
++    uint8_t stack[24];
++    uint64_t signal_mask;
++    uint8_t signal_mask_padding[120];
++    AndroidSignalMachineContext machine;
++  };
++
++  explicit UContext(void* raw_context)
++      : context(*reinterpret_cast<AndroidSignalContext*>(raw_context)) {}
++#else
+   explicit UContext(void* raw_context)
+       : context(reinterpret_cast<ucontext_t*>(raw_context)->uc_mcontext) {}
++#endif
+
+   void Dump(std::ostream& os) const;
+
+@@ -143,11 +165,29 @@ struct UContext {
+   template <typename RegisterType>
+   void DumpArmStatusRegister(std::ostream& os, RegisterType status_register) const;
  
 +#if defined(__APPLE__) && defined(__aarch64__)
-+#include <mach/arm/thread_status.h>
-+#endif
++  uint64_t GetFramePointer() const { return context.machine.registers[29]; }
 +
- #include <signal.h>
- 
- #include <cinttypes>
-@@ -147,7 +151,19 @@ struct UContext {
++  AndroidSignalContext& context;
++#else
+   mcontext_t& context;
++#endif
  };
  
  void UContext::Dump(std::ostream& os) const {
 -#if defined(__APPLE__) && defined(__i386__)
 +#if defined(__APPLE__) && defined(__aarch64__)
-+  DumpRegister64(os, "pc", arm_thread_state64_get_pc(context->__ss));
-+  DumpRegister64(os, "lr", arm_thread_state64_get_lr(context->__ss));
++  DumpRegister64(os, "pc", context.machine.program_counter);
++  DumpRegister64(os, "lr", context.machine.registers[30]);
 +  os << '\n';
-+  DumpRegister64(os, "sp", arm_thread_state64_get_sp(context->__ss));
-+  DumpRegister64(os, "fp", arm_thread_state64_get_fp(context->__ss));
++  DumpRegister64(os, "sp", context.machine.stack_pointer);
++  DumpRegister64(os, "fp", context.machine.registers[29]);
 +  os << '\n';
 +  for (size_t i = 0; i != 29; ++i) {
-+    DumpRegister64(os, StringPrintf("x%zu", i).c_str(), context->__ss.__x[i]);
++    DumpRegister64(os, StringPrintf("x%zu", i).c_str(), context.machine.registers[i]);
 +    os << ((i % 4u) == 3u ? '\n' : ' ');
 +  }
 +  os << '\n';
@@ -32,3 +61,52 @@ diff --git a/runtime/runtime_common.cc b/runtime/runtime_common.cc
    DumpRegister32(os, "eax", context->__ss.__eax);
    DumpRegister32(os, "ebx", context->__ss.__ebx);
    DumpRegister32(os, "ecx", context->__ss.__ecx);
+@@ -386,6 +426,16 @@ static void HandleUnexpectedSignalCommonDump(int signal_number,
+                                              bool dump_on_stderr) {
+   auto logger = [&](auto& stream) {
+     bool has_address = (signal_number == SIGILL || signal_number == SIGBUS ||
+                         signal_number == SIGFPE || signal_number == SIGSEGV);
++    void* fault_address = info->si_addr;
++#if defined(__APPLE__) && defined(__aarch64__)
++    // The Bionic facade passes Android siginfo_t.  Linux arm64 stores
++    // si_addr at byte 16, unlike Darwin's native siginfo_t layout.
++    if (signal_number == 4 || signal_number == 7 || signal_number == 8 ||
++        signal_number == 11) {
++      has_address = true;
++      memcpy(&fault_address, reinterpret_cast<const uint8_t*>(info) + 16, sizeof(fault_address));
++    }
++#endif
+     OsInfo os_info;
+     const char* cmd_line = GetCmdLine();
+@@ -398,5 +448,21 @@ static void HandleUnexpectedSignalCommonDump(int signal_number,
+     std::string thread_name(GetThreadName(tid));
+     UContext thread_context(raw_context);
+     Backtrace thread_backtrace(raw_context);
++#if defined(__APPLE__) && defined(__aarch64__)
++    if (std::getenv("DARWIN_ART_DEBUG_SIGNAL_FRAMES") != nullptr) {
++      stream << "Frame-pointer chain:" << std::endl;
++      uint64_t frame = thread_context.GetFramePointer();
++      for (size_t depth = 0; depth != 32 && frame != 0; ++depth) {
++        const uint64_t* record = reinterpret_cast<const uint64_t*>(frame);
++        stream << StringPrintf("  #%02zu fp=%p lr=%p", depth,
++                               reinterpret_cast<void*>(frame),
++                               reinterpret_cast<void*>(record[1])) << std::endl;
++        const uint64_t previous = record[0];
++        if (previous <= frame || previous - frame > (1u << 20)) break;
++        frame = previous;
++      }
++    }
++#endif
++
+     stream << "*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***" << std::endl
+            << StringPrintf("Fatal signal %d (%s), code %d (%s)",
+@@ -402,7 +467,8 @@ static void HandleUnexpectedSignalCommonDump(int signal_number,
+                              GetSignalName(signal_number),
+                              info->si_code,
+                              GetSignalCodeName(signal_number, info->si_code))
+-           << (has_address ? StringPrintf(" fault addr %p", info->si_addr) : "") << std::endl
++           << (has_address ? StringPrintf(" fault addr %p", fault_address) : "") << std::endl
+            << "OS: " << Dumpable<OsInfo>(os_info) << std::endl
++           << "Process: " << getpid() << std::endl
+            << "Cmdline: " << cmd_line << std::endl
+            << "Thread: " << tid << " \"" << thread_name << "\"" << std::endl

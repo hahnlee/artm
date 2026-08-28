@@ -17,20 +17,28 @@
 #include "darwin_art_bionic_stdio.h"
 #include "darwin_art_bionic_strftime.h"
 extern "C" void darwin_art_bionic_process_state_bind_jit_fault_recovery(
-    int (*recovery)(uintptr_t program_counter));
+    int (*recovery)(uintptr_t fault_address, int execution_fault));
+extern "C" void darwin_art_bionic_process_state_bind_sigchain(
+    int (*owns_signal)(int signal_number),
+    void (*ensure_front)(int signal_number));
+extern "C" int darwin_art_sigchain_owns_signal(int signal_number);
+extern "C" void EnsureFrontOfChain(int signal_number);
 extern "C" int darwin_art_bionic_vm_bind_file_descriptor_resolver(
     int (*resolver)(int guest_fd, int* host_fd));
 extern "C" int darwin_art_bionic_vm_process_install();
 extern "C" int darwin_art_bionic_vm_process_uninstall();
 extern "C" int darwin_art_bionic_vm_recover_jit_execution_fault(
-    uintptr_t program_counter);
+    uintptr_t fault_address, int execution_fault);
 
 __attribute__((constructor)) static void BindJitFaultRecovery() {
   darwin_art_bionic_process_state_bind_jit_fault_recovery(
       &darwin_art_bionic_vm_recover_jit_execution_fault);
+  darwin_art_bionic_process_state_bind_sigchain(
+      &darwin_art_sigchain_owns_signal, &EnsureFrontOfChain);
 }
 
 __attribute__((destructor)) static void UnbindJitFaultRecovery() {
+  darwin_art_bionic_process_state_bind_sigchain(nullptr, nullptr);
   darwin_art_bionic_process_state_bind_jit_fault_recovery(nullptr);
 }
 

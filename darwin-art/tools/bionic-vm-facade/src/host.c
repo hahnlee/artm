@@ -2,7 +2,6 @@
 
 #include <errno.h>
 #include <libkern/OSCacheControl.h>
-#include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -12,7 +11,6 @@ _Static_assert(PROT_NONE == 0 && PROT_READ == 1 && PROT_WRITE == 2 &&
 _Static_assert(MAP_PRIVATE == 2 && MAP_FIXED == 0x10 && MAP_ANON == 0x1000,
                "Darwin mapping constants drift");
 _Static_assert(MAP_NORESERVE == 0x40, "Darwin MAP_NORESERVE drift");
-_Static_assert(MAP_JIT == 0x800, "Darwin MAP_JIT drift");
 _Static_assert(MADV_NORMAL == 0 && MADV_RANDOM == 1 && MADV_SEQUENTIAL == 2 &&
                    MADV_WILLNEED == 3 && MADV_DONTNEED == 4 &&
                    MADV_FREE == 5 && MADV_ZERO == 11,
@@ -34,12 +32,6 @@ void* darwin_art_host_vm_map(void* address, size_t length, int protection,
   if ((android_flags & 0x20) != 0) flags |= MAP_ANON;
   if ((android_flags & 0x10) != 0) flags |= MAP_FIXED;
   if ((android_flags & 0x4000) != 0) flags |= MAP_NORESERVE;
-  /* V8 reserves its executable CodeRange as inert anonymous memory and later
-   * commits it RWX. Apple silicon requires the original reservation to carry
-   * MAP_JIT; the Rust side table limits RWX to these exact reservations. */
-  if (protection == PROT_NONE && flags == (MAP_PRIVATE | MAP_ANON)) {
-    flags |= MAP_JIT;
-  }
   void* result = mmap(address, length, protection, flags, fd, offset);
   *host_error = result == MAP_FAILED ? errno : 0;
   errno = saved;
@@ -63,12 +55,6 @@ int darwin_art_host_vm_protect(void* address, size_t length, int protection,
   *host_error = result == -1 ? errno : 0;
   errno = saved;
   return result;
-}
-
-void darwin_art_host_vm_jit_write_protect(int enabled) {
-  if (pthread_jit_write_protect_supported_np()) {
-    pthread_jit_write_protect_np(enabled != 0);
-  }
 }
 
 int darwin_art_host_vm_advise(void* address, size_t length, int advice,

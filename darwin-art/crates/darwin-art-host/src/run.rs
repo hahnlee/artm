@@ -15,6 +15,19 @@ use crate::teardown::RuntimeShutdownGuard;
 use darwin_art_engine::EngineSession;
 use darwin_art_runtime::{ProviderBridge, ProviderKind, Subsystem};
 
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn _exit(status: i32) -> !;
+}
+
+#[cfg(target_os = "macos")]
+fn exit_android_process(status: i32) -> ! {
+    // Android application processes are disposed as one OS lifetime. libc
+    // `exit` would run host C++ static destructors while Chromium task runners
+    // are still live, which is neither Android behavior nor race-free.
+    unsafe { _exit(status) }
+}
+
 pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
     options.validate()?;
 
@@ -158,10 +171,10 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                 options,
                 graphics_attached,
             );
-            let service_cleanup = service_processes
-                .shutdown_all()
-                .map_err(HostError::HostService);
             if options.terminate_android_process {
+                let service_cleanup = service_processes
+                    .terminate_for_process_exit()
+                    .map_err(HostError::HostService);
                 let status = match (&outcome, &service_cleanup) {
                     (Ok(_), Ok(())) => 0,
                     (Err(error), _) | (_, Err(error)) => {
@@ -169,9 +182,16 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
                         1
                     }
                 };
-                std::process::exit(status);
+                exit_android_process(status);
             }
+            // Keep Android Service processes and their Binder channels alive
+            // while the browser runtime stops its native/Java threads. Killing
+            // renderers first makes Chromium treat an orderly host timeout as
+            // an unexpected child death and race its PartitionAlloc teardown.
             let runtime_cleanup = shutdown_guard.shutdown();
+            let service_cleanup = service_processes
+                .shutdown_all()
+                .map_err(HostError::HostService);
             return match (outcome, service_cleanup, runtime_cleanup) {
                 (Ok(outcome), Ok(()), Ok(())) => Ok(outcome),
                 (Err(error), Ok(()), Ok(())) => Err(error),
@@ -201,13 +221,16 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             frames_presented: 0,
             last_frame: frame_host.last_frame,
         };
+        if options.terminate_android_process {
+            service_processes
+                .terminate_for_process_exit()
+                .map_err(HostError::HostService)?;
+            exit_android_process(0);
+        }
+        shutdown_guard.shutdown()?;
         service_processes
             .shutdown_all()
             .map_err(HostError::HostService)?;
-        if options.terminate_android_process {
-            std::process::exit(0);
-        }
-        shutdown_guard.shutdown()?;
         Ok(outcome)
     }
 }

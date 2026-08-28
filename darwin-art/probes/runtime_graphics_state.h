@@ -2,6 +2,7 @@
 
 #include <jni.h>
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -44,6 +45,7 @@ struct GraphicsState {
   jfloat pending_pressed_x = 0.0f;
   jfloat pending_pressed_y = 0.0f;
   int64_t pointer_down_time_nanos = 0;
+  std::array<int64_t, 512> key_down_time_nanos{};
   bool pointer_stream_active = false;
   jfloat pointer_down_x = 0.0f;
   jfloat pointer_down_y = 0.0f;

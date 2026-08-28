@@ -158,6 +158,36 @@ impl ServiceProcessManager {
         }
         first_error.map_or(Ok(()), Err)
     }
+
+    /// Signal every Android service process immediately before the browser
+    /// process exits. Waiting for each child here gives Chromium time to
+    /// observe renderer death and run callbacks against a process that is
+    /// already being torn down. Android instead removes the whole process
+    /// group as one lifetime boundary.
+    pub(crate) fn terminate_for_process_exit(&mut self) -> Result<(), String> {
+        let children = self
+            .children
+            .get_mut()
+            .map_err(|_| "service child table poisoned".to_owned())?;
+        let mut first_error = None;
+        for managed in children.values_mut() {
+            match managed.child.try_wait() {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    if let Err(error) = managed.child.kill()
+                        && first_error.is_none()
+                    {
+                        first_error = Some(error.to_string());
+                    }
+                }
+                Err(error) if first_error.is_none() => {
+                    first_error = Some(error.to_string());
+                }
+                Err(_) => {}
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
 }
 
 impl Drop for ServiceProcessManager {

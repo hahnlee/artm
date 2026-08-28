@@ -156,7 +156,17 @@ int TranslateMmapFlags(int linux_flags) {
 
 }  // namespace
 
-void InstallLinuxSyscallProviders(const LinuxSyscallProviders& providers) {
+void InstallLinuxSyscallProviders(uint32_t abi_version, size_t provider_size,
+                                  const LinuxSyscallProviders& providers) {
+  if (abi_version != kLinuxSyscallProviderAbiVersion ||
+      provider_size != sizeof(LinuxSyscallProviders)) {
+    std::fprintf(stderr,
+                 "DARWIN libcore: syscall provider ABI mismatch version=%u "
+                 "size=%zu expected_version=%u expected_size=%zu\n",
+                 abi_version, provider_size, kLinuxSyscallProviderAbiVersion,
+                 sizeof(LinuxSyscallProviders));
+    std::abort();
+  }
   g_providers = providers;
 }
 
@@ -328,6 +338,32 @@ ssize_t Write(int fd, const void* bytes, size_t byte_count) {
   ssize_t result;
   do {
     result = write(fd, bytes, byte_count);
+  } while (result == -1 && errno == EINTR);
+  return result;
+}
+
+ssize_t Pread(int fd, void* bytes, size_t byte_count, int64_t offset) {
+  if (g_providers.pread != nullptr && !IsHostFd(fd)) {
+    const intptr_t result = g_providers.pread(fd, bytes, byte_count, offset);
+    if (result == -1) PublishAndroidErrno();
+    return static_cast<ssize_t>(result);
+  }
+  ssize_t result;
+  do {
+    result = pread(fd, bytes, byte_count, static_cast<off_t>(offset));
+  } while (result == -1 && errno == EINTR);
+  return result;
+}
+
+ssize_t Pwrite(int fd, const void* bytes, size_t byte_count, int64_t offset) {
+  if (g_providers.pwrite != nullptr && !IsHostFd(fd)) {
+    const intptr_t result = g_providers.pwrite(fd, bytes, byte_count, offset);
+    if (result == -1) PublishAndroidErrno();
+    return static_cast<ssize_t>(result);
+  }
+  ssize_t result;
+  do {
+    result = pwrite(fd, bytes, byte_count, static_cast<off_t>(offset));
   } while (result == -1 && errno == EINTR);
   return result;
 }

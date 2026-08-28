@@ -20,6 +20,8 @@ int Fcntl(int fd, int android_command, intptr_t argument);
 int Close(int fd);
 ssize_t Read(int fd, void* bytes, size_t byte_count);
 ssize_t Write(int fd, const void* bytes, size_t byte_count);
+ssize_t Pread(int fd, void* bytes, size_t byte_count, int64_t offset);
+ssize_t Pwrite(int fd, const void* bytes, size_t byte_count, int64_t offset);
 int Fstat(int fd, struct stat* status);
 int Stat(const char* path, struct stat* status);
 int Access(const char* path, int mode);
@@ -41,6 +43,8 @@ struct LinuxSyscallProviders {
   int (*close)(int);
   intptr_t (*read)(int, void*, size_t);
   intptr_t (*write)(int, const void*, size_t);
+  intptr_t (*pread)(int, void*, size_t, int64_t);
+  intptr_t (*pwrite)(int, const void*, size_t, int64_t);
   int (*fstat)(int, DarwinArtAndroidStat*);
   int (*stat)(const char*, DarwinArtAndroidStat*);
   int64_t (*lseek)(int, int64_t, int);
@@ -52,7 +56,9 @@ struct LinuxSyscallProviders {
   int32_t (*load_errno)();
 };
 
-void InstallLinuxSyscallProviders(const LinuxSyscallProviders& providers);
+inline constexpr uint32_t kLinuxSyscallProviderAbiVersion = 2;
+void InstallLinuxSyscallProviders(uint32_t abi_version, size_t provider_size,
+                                  const LinuxSyscallProviders& providers);
 
 // System/metadata JNI phase. Keeping these definitions out of the generated
 // registrar TU lets edits to environment, identity, and diagnostic policy

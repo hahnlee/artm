@@ -128,7 +128,9 @@ my %supported = (
   access => 'DarwinLinuxAccess', open => 'DarwinLinuxOpen', dup => 'DarwinLinuxDup',
   fcntlInt => 'DarwinLinuxFcntlInt', fcntlVoid => 'DarwinLinuxFcntlVoid',
   fstat => 'DarwinLinuxFstat',
-  readBytes => 'DarwinLinuxReadBytes', close => 'DarwinLinuxClose',
+  readBytes => 'DarwinLinuxReadBytes', preadBytes => 'DarwinLinuxPreadBytes',
+  writeBytes => 'DarwinLinuxWriteBytes', pwriteBytes => 'DarwinLinuxPwriteBytes',
+  close => 'DarwinLinuxClose',
   mmap => 'DarwinLinuxMmap', munmap => 'DarwinLinuxMunmap',
   sysconf => 'DarwinLinuxSysconf',
   getenv => 'DarwinLinuxGetenv', getpwuid => 'DarwinLinuxGetpwuid',
@@ -143,7 +145,6 @@ my %supported = (
   android_fdsan_get_owner_tag => 'DarwinLinuxFdsanGetOwnerTag',
   android_fdsan_get_tag_type => 'DarwinLinuxFdsanGetTagType',
   android_fdsan_get_tag_value => 'DarwinLinuxFdsanGetTagValue',
-  writeBytes => 'DarwinLinuxWriteBytes',
 );
 my ($index, $regular_count, $critical_count, $unsupported_count) = (0, 0, 0, 0);
 while (my $line = <$input>) {

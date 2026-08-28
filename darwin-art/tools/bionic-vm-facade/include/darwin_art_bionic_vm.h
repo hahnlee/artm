@@ -20,7 +20,8 @@ void* darwin_art_bionic_mremap(void*, size_t, size_t, int, void*);
 DarwinArtBionicVmFunction darwin_art_bionic_vm_resolve(const char*);
 int darwin_art_bionic_vm_process_install(void);
 int darwin_art_bionic_vm_process_uninstall(void);
-int darwin_art_bionic_vm_recover_jit_execution_fault(uintptr_t program_counter);
+int darwin_art_bionic_vm_recover_jit_execution_fault(uintptr_t fault_address,
+                                                       int execution_fault);
 /* A null callback clears the process filesystem descriptor bridge. */
 int darwin_art_bionic_vm_bind_file_descriptor_resolver(
     DarwinArtBionicVmFdResolver resolver);

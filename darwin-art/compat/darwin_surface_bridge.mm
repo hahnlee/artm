@@ -236,6 +236,31 @@ uint32_t AndroidKeyCode(unsigned short code) {
   }
 }
 
+uint32_t AndroidScanCode(uint32_t key_code) {
+  // Linux evdev scan codes carried by Android's native InputDispatcher.
+  // AppKit virtual key codes are a different namespace and must not leak into
+  // KeyEvent.getScanCode().
+  if (key_code == 7) return 11;
+  if (key_code >= 8 && key_code <= 16) return key_code - 6;
+  switch (key_code) {
+    case 29: return 30; case 30: return 48; case 31: return 46;
+    case 32: return 32; case 33: return 18; case 34: return 33;
+    case 35: return 34; case 36: return 35; case 37: return 23;
+    case 38: return 36; case 39: return 37; case 40: return 38;
+    case 41: return 50; case 42: return 49; case 43: return 24;
+    case 44: return 25; case 45: return 16; case 46: return 19;
+    case 47: return 31; case 48: return 20; case 49: return 22;
+    case 50: return 47; case 51: return 17; case 52: return 45;
+    case 53: return 21; case 54: return 44; case 55: return 51;
+    case 56: return 52; case 62: return 57; case 66: return 28;
+    case 67: return 14; case 68: return 41; case 69: return 12;
+    case 70: return 13; case 71: return 26; case 72: return 27;
+    case 73: return 43; case 74: return 39; case 75: return 40;
+    case 76: return 53; case 111: return 1;
+    default: return 0;
+  }
+}
+
 NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   switch (code) {
     case 54:
@@ -404,12 +429,14 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
       .version = 1,
       .size = static_cast<uint32_t>(sizeof(DarwinArtKeyEventV1)),
       .action = action,
-      .flags = 0,
+      // KeyEvent.FLAG_FROM_SYSTEM, as set by Android InputDispatcher for a
+      // connected physical keyboard.
+      .flags = 0x8,
       .sequence = _nextKeySequence++,
       .event_time_nanos = event_time_nanos,
       .down_time_nanos = down_time_nanos,
       .key_code = key_code,
-      .scan_code = scan_code,
+      .scan_code = AndroidScanCode(key_code),
       .meta_state = AndroidMetaState(event.modifierFlags),
       .repeat_count = repeat_count,
       .device_id = 1,

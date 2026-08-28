@@ -1063,16 +1063,15 @@ fn select_native_root(candidates: &[(String, NativeEntrySignals)]) -> Option<Str
         .map(|(name, _)| name.clone())
 }
 
-fn inspect(
-    path: &Path,
-    external_dex: Option<&Path>,
-) -> Result<(
+type Inspection = (
     ManifestInfo,
     &'static str,
     usize,
     Vec<String>,
     Option<String>,
-)> {
+);
+
+fn inspect(path: &Path, external_dex: Option<&Path>) -> Result<Inspection> {
     let metadata = fs::metadata(path).map_err(|error| format!("APK metadata failed: {error}"))?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_APK_SIZE as u64 {
         return Err(format!("APK is outside the 1..={MAX_APK_SIZE} byte cap"));

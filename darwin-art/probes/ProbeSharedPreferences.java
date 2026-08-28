@@ -1,6 +1,7 @@
 package dev.darwinart.probe;
 
 import android.content.SharedPreferences;
+import android.util.Log;
 import android.util.Xml;
 
 import org.xmlpull.v1.XmlPullParser;
@@ -240,7 +241,8 @@ public final class ProbeSharedPreferences implements SharedPreferences {
                     setValue = null;
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception error) {
+            Log.e("DarwinSharedPreferences", "Could not read " + file, error);
             values.clear();
         } finally {
             if (input != null) {

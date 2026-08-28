@@ -325,6 +325,63 @@ jint DarwinLinuxWriteBytes(JNIEnv* env, jobject, jobject java_fd,
   return static_cast<jint>(result);
 }
 
+jint DarwinLinuxPwriteBytes(JNIEnv* env, jobject, jobject java_fd,
+                            jobject java_bytes, jint byte_offset,
+                            jint byte_count, jlong offset) {
+  if (java_bytes == nullptr) {
+    jniThrowNullPointerException(env, "null byte storage");
+    return -1;
+  }
+  if (byte_offset < 0 || byte_count < 0 || offset < 0) {
+    jniThrowException(env, "java/lang/ArrayIndexOutOfBoundsException",
+                      "negative offset or byte count");
+    return -1;
+  }
+  const void* bytes = nullptr;
+  jbyteArray array = nullptr;
+  jbyte* array_elements = nullptr;
+  jclass byte_array_class = env->FindClass("[B");
+  if (byte_array_class != nullptr &&
+      env->IsInstanceOf(java_bytes, byte_array_class)) {
+    array = static_cast<jbyteArray>(java_bytes);
+    const jsize length = env->GetArrayLength(array);
+    if (byte_offset > length || byte_count > length - byte_offset) {
+      env->DeleteLocalRef(byte_array_class);
+      jniThrowException(env, "java/lang/ArrayIndexOutOfBoundsException",
+                        "byte range exceeds array");
+      return -1;
+    }
+    array_elements = env->GetByteArrayElements(array, nullptr);
+    bytes = array_elements == nullptr
+                ? nullptr
+                : static_cast<const void*>(array_elements + byte_offset);
+  } else {
+    const jlong capacity = env->GetDirectBufferCapacity(java_bytes);
+    const void* direct = env->GetDirectBufferAddress(java_bytes);
+    if (direct == nullptr || byte_offset > capacity ||
+        byte_count > capacity - byte_offset) {
+      env->DeleteLocalRef(byte_array_class);
+      jniThrowException(env, "java/lang/IllegalArgumentException",
+                        "storage is neither byte[] nor a valid direct buffer range");
+      return -1;
+    }
+    bytes = static_cast<const char*>(direct) + byte_offset;
+  }
+  env->DeleteLocalRef(byte_array_class);
+  if (bytes == nullptr) return -1;
+  const ssize_t result = Pwrite(jniGetFDFromFileDescriptor(env, java_fd), bytes,
+                                static_cast<size_t>(byte_count), offset);
+  const int saved_errno = errno;
+  if (array_elements != nullptr) {
+    env->ReleaseByteArrayElements(array, array_elements, JNI_ABORT);
+  }
+  if (result == -1) {
+    ThrowErrno(env, "pwrite", saved_errno);
+    return -1;
+  }
+  return static_cast<jint>(result);
+}
+
 #if defined(DARWIN_LIBCORE_LINUX_MANAGED_ABI_SMOKE)
 void AbiSmokeVoid(JNIEnv* env, jobject, jstring, jint) {
   DarwinUnsupported(env, "abi.void");
@@ -523,6 +580,60 @@ jint DarwinLinuxReadBytes(JNIEnv* env, jobject, jobject java_fd,
   }
   if (result > std::numeric_limits<jint>::max()) {
     ThrowErrno(env, "read", EOVERFLOW);
+    return -1;
+  }
+  return static_cast<jint>(result);
+}
+
+jint DarwinLinuxPreadBytes(JNIEnv* env, jobject, jobject java_fd,
+                           jobject java_bytes, jint byte_offset,
+                           jint byte_count, jlong offset) {
+  if (java_bytes == nullptr) {
+    jniThrowNullPointerException(env, "null byte storage");
+    return -1;
+  }
+  if (byte_offset < 0 || byte_count < 0 || offset < 0) {
+    jniThrowException(env, "java/lang/ArrayIndexOutOfBoundsException",
+                      "negative offset or byte count");
+    return -1;
+  }
+  void* bytes = nullptr;
+  jbyteArray array = nullptr;
+  jclass byte_array_class = env->FindClass("[B");
+  if (byte_array_class != nullptr &&
+      env->IsInstanceOf(java_bytes, byte_array_class)) {
+    array = static_cast<jbyteArray>(java_bytes);
+    const jsize length = env->GetArrayLength(array);
+    if (byte_offset > length || byte_count > length - byte_offset) {
+      env->DeleteLocalRef(byte_array_class);
+      jniThrowException(env, "java/lang/ArrayIndexOutOfBoundsException",
+                        "byte range exceeds array");
+      return -1;
+    }
+    bytes = env->GetByteArrayElements(array, nullptr);
+  } else {
+    const jlong capacity = env->GetDirectBufferCapacity(java_bytes);
+    bytes = env->GetDirectBufferAddress(java_bytes);
+    if (bytes == nullptr || byte_offset > capacity ||
+        byte_count > capacity - byte_offset) {
+      env->DeleteLocalRef(byte_array_class);
+      jniThrowException(env, "java/lang/IllegalArgumentException",
+                        "storage is neither byte[] nor a valid direct buffer range");
+      return -1;
+    }
+  }
+  env->DeleteLocalRef(byte_array_class);
+  if (bytes == nullptr) return -1;
+  const ssize_t result =
+      Pread(jniGetFDFromFileDescriptor(env, java_fd),
+            static_cast<char*>(bytes) + byte_offset,
+            static_cast<size_t>(byte_count), offset);
+  const int saved_errno = errno;
+  if (array != nullptr) {
+    env->ReleaseByteArrayElements(array, static_cast<jbyte*>(bytes), 0);
+  }
+  if (result == -1) {
+    ThrowErrno(env, "pread", saved_errno);
     return -1;
   }
   return static_cast<jint>(result);

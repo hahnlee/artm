@@ -2,8 +2,9 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{c_int, c_void};
+use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, RwLockReadGuard};
 
 const ANDROID_EIO: i32 = 5;
 const ANDROID_EBADF: i32 = 9;
@@ -31,24 +32,44 @@ const MAP_FAILED: *mut c_void = usize::MAX as *mut c_void;
 struct JitRange {
     start: AtomicUsize,
     end: AtomicUsize,
+    executable: AtomicBool,
+    writable: AtomicBool,
+    emulated_rwx: AtomicBool,
+}
+
+struct JitSnapshot {
+    ranges: [JitRange; MAX_MAPPINGS],
+    count: AtomicUsize,
+    readers: AtomicUsize,
 }
 
 // SIGBUS can arrive on a V8 execution thread while another thread is changing
 // CodeRange protections. The ordinary mapping table is mutex-owned and cannot
-// be consulted safely from a signal handler: try_lock() loses legitimate
-// faults under contention, while lock() can deadlock. Publish the executable
-// JIT subset through a fixed-size seqlock instead. Every writer already owns
-// Provider::mappings, so there is only one publisher at a time; the faulting
-// execution thread may spin until that short publication completes without
-// invoking an allocator or taking a lock.
-static JIT_RANGE_EPOCH: AtomicUsize = AtomicUsize::new(0);
-static JIT_RANGE_COUNT: AtomicUsize = AtomicUsize::new(0);
-static JIT_RANGES: [JitRange; MAX_MAPPINGS] = [const {
-    JitRange {
-        start: AtomicUsize::new(0),
-        end: AtomicUsize::new(0),
+// be consulted safely from a signal handler. Every inert anonymous reservation
+// can become a V8 CodeRange because Linux provides no flag identifying it at
+// reservation time, so publish all candidates and their guest permissions.
+//
+// Writers fill the inactive snapshot and publish it with one release store.
+// A reader pins the active slot before scanning it; a later writer waits before
+// reusing that slot. Unlike a seqlock this cannot deadlock when SIGBUS interrupts
+// the publishing thread, and the handler never allocates or takes a mutex.
+static JIT_SNAPSHOTS: [JitSnapshot; 2] = [const {
+    JitSnapshot {
+        ranges: [const {
+            JitRange {
+                start: AtomicUsize::new(0),
+                end: AtomicUsize::new(0),
+                executable: AtomicBool::new(false),
+                writable: AtomicBool::new(false),
+                emulated_rwx: AtomicBool::new(false),
+            }
+        }; MAX_MAPPINGS],
+        count: AtomicUsize::new(0),
+        readers: AtomicUsize::new(0),
     }
-}; MAX_MAPPINGS];
+}; 2];
+static ACTIVE_JIT_SNAPSHOT: AtomicUsize = AtomicUsize::new(0);
+static JIT_PAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
 
 unsafe extern "C" {
     fn darwin_art_host_vm_page_size() -> usize;
@@ -68,7 +89,6 @@ unsafe extern "C" {
         protection: c_int,
         error: *mut c_int,
     ) -> c_int;
-    fn darwin_art_host_vm_jit_write_protect(enabled: c_int);
     fn darwin_art_host_vm_advise(
         address: *mut c_void,
         length: usize,
@@ -150,6 +170,7 @@ impl Provider {
         if active.is_some() {
             return Err("VM provider already active");
         }
+        JIT_PAGE_SIZE.store(self.page_size, Ordering::Release);
         *active = Some(Arc::clone(self));
         Ok(Activation)
     }
@@ -209,6 +230,7 @@ impl Drop for Activation {
         if let Ok(mut active) = active_slot().write() {
             active.take();
             clear_jit_ranges();
+            JIT_PAGE_SIZE.store(0, Ordering::Release);
         }
     }
 }
@@ -363,10 +385,26 @@ fn set_errno(error: i32) {
     unsafe { darwin_art_bionic_errno_store(error) }
 }
 
-fn provider() -> Option<Arc<Provider>> {
+struct ProviderLease {
+    _active: RwLockReadGuard<'static, Option<Arc<Provider>>>,
+    provider: Arc<Provider>,
+}
+
+impl Deref for ProviderLease {
+    type Target = Provider;
+
+    fn deref(&self) -> &Self::Target {
+        &self.provider
+    }
+}
+
+fn provider() -> Option<ProviderLease> {
     match active_slot().read() {
-        Ok(active) => match active.clone() {
-            Some(provider) => Some(provider),
+        Ok(active) => match active.as_ref().cloned() {
+            Some(provider) => Some(ProviderLease {
+                _active: active,
+                provider,
+            }),
             None => {
                 set_errno(ANDROID_EIO);
                 None
@@ -454,26 +492,6 @@ fn jit_capable_range(mappings: &BTreeMap<usize, Mapping>, start: usize, length: 
     true
 }
 
-fn jit_activated_range(mappings: &BTreeMap<usize, Mapping>, start: usize, length: usize) -> bool {
-    let Some(end) = start.checked_add(length) else {
-        return false;
-    };
-    let mut cursor = start;
-    while cursor < end {
-        let Some((&base, mapping)) = mappings.range(..=cursor).next_back() else {
-            return false;
-        };
-        let Some(mapping_end) = base.checked_add(mapping.mapped_length) else {
-            return false;
-        };
-        if cursor < base || cursor >= mapping_end || !mapping.jit_activated {
-            return false;
-        }
-        cursor = mapping_end.min(end);
-    }
-    true
-}
-
 fn borrowed_range(ranges: &BTreeMap<usize, usize>, start: usize, length: usize) -> bool {
     let Some(end) = start.checked_add(length) else {
         return false;
@@ -488,37 +506,63 @@ fn borrowed_range(ranges: &BTreeMap<usize, usize>, start: usize, length: usize) 
 }
 
 fn publish_jit_ranges(mappings: &BTreeMap<usize, Mapping>) {
-    let previous_count = JIT_RANGE_COUNT.load(Ordering::Relaxed);
-    JIT_RANGE_EPOCH.fetch_add(1, Ordering::AcqRel);
+    debug_assert!(mappings.len() <= MAX_MAPPINGS);
+    let active = ACTIVE_JIT_SNAPSHOT.load(Ordering::Acquire) & 1;
+    let target_index = active ^ 1;
+    let snapshot = &JIT_SNAPSHOTS[target_index];
+    while snapshot.readers.load(Ordering::Acquire) != 0 {
+        std::thread::yield_now();
+    }
+    let previous_count = snapshot.count.load(Ordering::Relaxed).min(MAX_MAPPINGS);
     let mut count = 0;
     for (&base, mapping) in mappings {
-        if !mapping.jit_capable
-            || !mapping.jit_activated
-            || mapping.protection & ANDROID_PROT_EXEC == 0
-        {
+        if !mapping.jit_capable {
             continue;
         }
         let Some(end) = base.checked_add(mapping.mapped_length) else {
             continue;
         };
-        JIT_RANGES[count].start.store(base, Ordering::Relaxed);
-        JIT_RANGES[count].end.store(end, Ordering::Relaxed);
+        let range = &snapshot.ranges[count];
+        range.start.store(base, Ordering::Relaxed);
+        range.end.store(end, Ordering::Relaxed);
+        range.executable.store(
+            mapping.protection & ANDROID_PROT_EXEC != 0,
+            Ordering::Relaxed,
+        );
+        range.writable.store(
+            mapping.protection & ANDROID_PROT_WRITE != 0,
+            Ordering::Relaxed,
+        );
+        range.emulated_rwx.store(
+            mapping.jit_activated
+                && mapping.protection & ANDROID_PROT_WRITE != 0
+                && mapping.protection & ANDROID_PROT_EXEC != 0,
+            Ordering::Relaxed,
+        );
         count += 1;
     }
     if count < previous_count {
-        for range in &JIT_RANGES[count..previous_count] {
+        for range in &snapshot.ranges[count..previous_count] {
             range.start.store(0, Ordering::Relaxed);
             range.end.store(0, Ordering::Relaxed);
+            range.executable.store(false, Ordering::Relaxed);
+            range.writable.store(false, Ordering::Relaxed);
+            range.emulated_rwx.store(false, Ordering::Relaxed);
         }
     }
-    JIT_RANGE_COUNT.store(count, Ordering::Relaxed);
-    JIT_RANGE_EPOCH.fetch_add(1, Ordering::Release);
+    snapshot.count.store(count, Ordering::Relaxed);
+    ACTIVE_JIT_SNAPSHOT.store(target_index, Ordering::Release);
 }
 
 fn clear_jit_ranges() {
-    JIT_RANGE_EPOCH.fetch_add(1, Ordering::AcqRel);
-    JIT_RANGE_COUNT.store(0, Ordering::Relaxed);
-    JIT_RANGE_EPOCH.fetch_add(1, Ordering::Release);
+    let active = ACTIVE_JIT_SNAPSHOT.load(Ordering::Acquire) & 1;
+    let target_index = active ^ 1;
+    let snapshot = &JIT_SNAPSHOTS[target_index];
+    while snapshot.readers.load(Ordering::Acquire) != 0 {
+        std::thread::yield_now();
+    }
+    snapshot.count.store(0, Ordering::Relaxed);
+    ACTIVE_JIT_SNAPSHOT.store(target_index, Ordering::Release);
 }
 
 fn replace_range(
@@ -582,6 +626,18 @@ fn replace_range(
             );
         }
     }
+}
+
+fn replacement_table(
+    mappings: &BTreeMap<usize, Mapping>,
+    start: usize,
+    length: usize,
+    replacement_protection: Option<i32>,
+) -> Option<BTreeMap<usize, Mapping>> {
+    start.checked_add(length)?;
+    let mut replacement = mappings.clone();
+    replace_range(&mut replacement, start, length, replacement_protection);
+    (replacement.len() <= MAX_MAPPINGS).then_some(replacement)
 }
 
 #[unsafe(no_mangle)]
@@ -669,6 +725,34 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_mmap_core(
         set_errno(ANDROID_ENOMEM);
         return MAP_FAILED;
     }
+    let fixed_replacement = if fixed {
+        let Some(mut replacement) =
+            replacement_table(&mappings, address as usize, mapped_length, None)
+        else {
+            set_errno(ANDROID_ENOMEM);
+            return MAP_FAILED;
+        };
+        replacement.insert(
+            address as usize,
+            Mapping {
+                requested_length: length,
+                mapped_length,
+                protection,
+                anonymous,
+                jit_capable: anonymous
+                    && mapping_flags == ANDROID_MAP_PRIVATE | ANDROID_MAP_ANONYMOUS
+                    && protection == 0,
+                jit_activated: false,
+            },
+        );
+        if replacement.len() > MAX_MAPPINGS {
+            set_errno(ANDROID_ENOMEM);
+            return MAP_FAILED;
+        }
+        Some(replacement)
+    } else {
+        None
+    };
     let mut host_error = 0;
     let mut mapped_fd = fd;
     let mut close_mapped_fd = false;
@@ -745,12 +829,7 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_mmap_core(
             set_errno(ANDROID_EIO);
             return MAP_FAILED;
         }
-        replace_range(
-            &mut mappings,
-            address as usize,
-            mapped_length,
-            Some(protection),
-        );
+        *mappings = fixed_replacement.expect("fixed mapping has replacement metadata");
         publish_jit_ranges(&mappings);
         if trace {
             eprintln!("DARWIN VM: mmap fixed result={result:p} mapped_length={mapped_length:#x}");
@@ -815,13 +894,18 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_munmap_core(
         set_errno(ANDROID_EINVAL);
         return -1;
     }
+    let Some(replacement) = replacement_table(&mappings, address as usize, mapped_length, None)
+    else {
+        set_errno(ANDROID_ENOMEM);
+        return -1;
+    };
     let mut host_error = 0;
     // SAFETY: the side table proves every page in this rounded range is owned.
     if unsafe { darwin_art_host_vm_unmap(address, mapped_length, &mut host_error) } != 0 {
         fail_host(&provider, host_error);
         return -1;
     }
-    replace_range(&mut mappings, address as usize, mapped_length, None);
+    *mappings = replacement;
     publish_jit_ranges(&mappings);
     0
 }
@@ -986,7 +1070,7 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_mprotect_core(
         set_errno(ANDROID_EINVAL);
         return -1;
     }
-    let Some(host_protection) = host_protection(protection) else {
+    let Some(mut host_protection) = host_protection(protection) else {
         set_errno(ANDROID_EINVAL);
         return -1;
     };
@@ -1027,27 +1111,26 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_mprotect_core(
     }
     let jit_capable =
         provider_owned && jit_capable_range(&mappings, address as usize, mapped_length);
-    let jit_activated =
-        jit_capable && jit_activated_range(&mappings, address as usize, mapped_length);
-    if jit_activated {
-        // MAP_JIT remains host-RWX. Android V8 expresses its write/execute
-        // phases with mprotect; Apple silicon expresses the same W^X boundary
-        // as a per-thread switch. A thread that next enters the executable
-        // CodeRange is switched back lazily by the SIGBUS recovery hook below.
-        unsafe {
-            darwin_art_host_vm_jit_write_protect(i32::from(protection & ANDROID_PROT_WRITE == 0))
+    let replacement = if provider_owned {
+        let Some(replacement) =
+            replacement_table(&mappings, address as usize, mapped_length, Some(protection))
+        else {
+            set_errno(ANDROID_ENOMEM);
+            return -1;
         };
-        replace_range(
-            &mut mappings,
-            address as usize,
-            mapped_length,
-            Some(protection),
-        );
-        publish_jit_ranges(&mappings);
-        if protection & ANDROID_PROT_EXEC != 0 {
-            unsafe { darwin_art_host_vm_invalidate_icache(address, mapped_length) };
-        }
-        return 0;
+        Some(replacement)
+    } else {
+        None
+    };
+    let emulated_rwx =
+        jit_capable && protection & ANDROID_PROT_WRITE != 0 && protection & ANDROID_PROT_EXEC != 0;
+    if emulated_rwx {
+        // Darwin's hardened runtime rejects simultaneous writable+executable
+        // protection for ordinary anonymous memory. Start the requested range
+        // writable; signal recovery later toggles only the faulting host page
+        // between RW and RX. Page-granular W^X avoids a process-wide phase
+        // race when independent V8 compilation threads fault concurrently.
+        host_protection = ANDROID_PROT_READ | ANDROID_PROT_WRITE;
     }
     let mut host_error = 0;
     // SAFETY: the side table proves every page in this rounded range is owned.
@@ -1062,22 +1145,17 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_mprotect_core(
         return -1;
     }
     if provider_owned {
-        replace_range(
-            &mut mappings,
-            address as usize,
-            mapped_length,
-            Some(protection),
-        );
-        if jit_capable && protection & ANDROID_PROT_WRITE != 0 {
+        let mut replacement = replacement.expect("provider-owned range has replacement metadata");
+        if emulated_rwx {
             let end = address as usize + mapped_length;
-            for (_, mapping) in mappings.range_mut(address as usize..end) {
+            for (_, mapping) in replacement.range_mut(address as usize..end) {
                 mapping.jit_activated = true;
             }
-            unsafe { darwin_art_host_vm_jit_write_protect(0) };
         }
+        *mappings = replacement;
         publish_jit_ranges(&mappings);
     }
-    if protection & ANDROID_PROT_EXEC != 0 {
+    if protection & ANDROID_PROT_EXEC != 0 && !emulated_rwx {
         // SAFETY: the mapping remains live under the table lock for this range.
         unsafe { darwin_art_host_vm_invalidate_icache(address, mapped_length) };
     }
@@ -1086,35 +1164,72 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_mprotect_core(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_vm_recover_jit_execution_fault(
-    program_counter: usize,
+    fault_address: usize,
+    execution_fault: c_int,
 ) -> c_int {
     loop {
-        let epoch = JIT_RANGE_EPOCH.load(Ordering::Acquire);
-        if epoch & 1 != 0 {
-            std::hint::spin_loop();
+        let snapshot_index = ACTIVE_JIT_SNAPSHOT.load(Ordering::Acquire) & 1;
+        let snapshot = &JIT_SNAPSHOTS[snapshot_index];
+        snapshot.readers.fetch_add(1, Ordering::Acquire);
+        if ACTIVE_JIT_SNAPSHOT.load(Ordering::Acquire) & 1 != snapshot_index {
+            snapshot.readers.fetch_sub(1, Ordering::Release);
             continue;
         }
-        let count = JIT_RANGE_COUNT.load(Ordering::Acquire).min(MAX_MAPPINGS);
-        let mut executable = false;
-        for range in &JIT_RANGES[..count] {
+        let count = snapshot.count.load(Ordering::Relaxed).min(MAX_MAPPINGS);
+        let mut fault_matches = false;
+        for range in &snapshot.ranges[..count] {
             let start = range.start.load(Ordering::Relaxed);
             let end = range.end.load(Ordering::Relaxed);
-            executable |= program_counter >= start && program_counter < end;
+            let executable = range.executable.load(Ordering::Relaxed);
+            let writable = range.writable.load(Ordering::Relaxed);
+            let emulated_rwx = range.emulated_rwx.load(Ordering::Relaxed);
+            if fault_address >= start
+                && fault_address < end
+                && emulated_rwx
+                && if execution_fault != 0 {
+                    executable
+                } else {
+                    writable
+                }
+            {
+                fault_matches = true;
+                break;
+            }
         }
-        if JIT_RANGE_EPOCH.load(Ordering::Acquire) != epoch {
-            std::hint::spin_loop();
-            continue;
-        }
-        if !executable {
+        if !fault_matches {
+            snapshot.readers.fetch_sub(1, Ordering::Release);
             return 0;
         }
-        break;
+        let page_size = JIT_PAGE_SIZE.load(Ordering::Acquire);
+        if page_size == 0 || !page_size.is_power_of_two() {
+            snapshot.readers.fetch_sub(1, Ordering::Release);
+            return 0;
+        }
+        let page_start = fault_address & !(page_size - 1);
+        let host_protection = if execution_fault != 0 {
+            ANDROID_PROT_READ | ANDROID_PROT_EXEC
+        } else {
+            ANDROID_PROT_READ | ANDROID_PROT_WRITE
+        };
+        let mut host_error = 0;
+        if unsafe {
+            darwin_art_host_vm_protect(
+                page_start as *mut c_void,
+                page_size,
+                host_protection,
+                &mut host_error,
+            )
+        } != 0
+        {
+            snapshot.readers.fetch_sub(1, Ordering::Release);
+            return 0;
+        }
+        if execution_fault != 0 {
+            unsafe { darwin_art_host_vm_invalidate_icache(page_start as *mut c_void, page_size) };
+        }
+        snapshot.readers.fetch_sub(1, Ordering::Release);
+        return 1;
     }
-    // Darwin reports execution from a write-enabled MAP_JIT thread as SIGBUS
-    // with the program counter as the fault address. Re-enable execution for
-    // this thread and retry the interrupted instruction.
-    unsafe { darwin_art_host_vm_jit_write_protect(1) };
-    1
 }
 
 #[unsafe(no_mangle)]
@@ -1205,9 +1320,9 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_madvise_core(
                 }
             } else {
                 // SAFETY: ownership was proven. File mappings retain their
-                // backing-object semantics. MAP_JIT reservations cannot be
-                // replaced with MAP_FIXED on Darwin, so use native DONTNEED;
-                // V8 treats this as a discard hint and recommits before use.
+                // backing-object semantics. Potential/emulated RWX ranges use
+                // native DONTNEED so a fixed remap cannot accidentally request
+                // simultaneous host write+execute permission.
                 unsafe {
                     darwin_art_host_vm_advise(
                         segment_start as *mut c_void,
@@ -1245,6 +1360,8 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_madvise_core(
 mod tests {
     use super::*;
 
+    static JIT_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     fn executable_jit_mapping(length: usize) -> Mapping {
         Mapping {
             requested_length: length,
@@ -1256,25 +1373,122 @@ mod tests {
         }
     }
 
+    fn writable_jit_mapping(length: usize) -> Mapping {
+        Mapping {
+            requested_length: length,
+            mapped_length: length,
+            protection: ANDROID_PROT_READ | ANDROID_PROT_WRITE,
+            anonymous: true,
+            jit_capable: true,
+            jit_activated: false,
+        }
+    }
+
     #[test]
     fn jit_signal_snapshot_grows_and_shrinks() {
+        let _serial = JIT_TEST_LOCK.lock().unwrap();
         clear_jit_ranges();
         let mut mappings = BTreeMap::new();
         mappings.insert(0x10000, executable_jit_mapping(0x4000));
         publish_jit_ranges(&mappings);
-        assert_eq!(JIT_RANGE_COUNT.load(Ordering::Acquire), 1);
-        assert_eq!(JIT_RANGES[0].start.load(Ordering::Acquire), 0x10000);
-        assert_eq!(JIT_RANGES[0].end.load(Ordering::Acquire), 0x14000);
+        let snapshot = &JIT_SNAPSHOTS[ACTIVE_JIT_SNAPSHOT.load(Ordering::Acquire) & 1];
+        assert_eq!(snapshot.count.load(Ordering::Acquire), 1);
+        assert_eq!(snapshot.ranges[0].start.load(Ordering::Acquire), 0x10000);
+        assert_eq!(snapshot.ranges[0].end.load(Ordering::Acquire), 0x14000);
+        assert!(snapshot.ranges[0].executable.load(Ordering::Acquire));
+        assert!(!snapshot.ranges[0].writable.load(Ordering::Acquire));
 
-        mappings.insert(0x20000, executable_jit_mapping(0x8000));
+        mappings.insert(0x20000, writable_jit_mapping(0x8000));
         publish_jit_ranges(&mappings);
-        assert_eq!(JIT_RANGE_COUNT.load(Ordering::Acquire), 2);
+        let snapshot = &JIT_SNAPSHOTS[ACTIVE_JIT_SNAPSHOT.load(Ordering::Acquire) & 1];
+        assert_eq!(snapshot.count.load(Ordering::Acquire), 2);
+        assert!(!snapshot.ranges[1].executable.load(Ordering::Acquire));
+        assert!(snapshot.ranges[1].writable.load(Ordering::Acquire));
 
         mappings.remove(&0x10000);
         publish_jit_ranges(&mappings);
-        assert_eq!(JIT_RANGE_COUNT.load(Ordering::Acquire), 1);
-        assert_eq!(JIT_RANGES[0].start.load(Ordering::Acquire), 0x20000);
-        assert_eq!(JIT_RANGES[1].start.load(Ordering::Acquire), 0);
+        let snapshot = &JIT_SNAPSHOTS[ACTIVE_JIT_SNAPSHOT.load(Ordering::Acquire) & 1];
+        assert_eq!(snapshot.count.load(Ordering::Acquire), 1);
+        assert_eq!(snapshot.ranges[0].start.load(Ordering::Acquire), 0x20000);
         clear_jit_ranges();
+        let snapshot = &JIT_SNAPSHOTS[ACTIVE_JIT_SNAPSHOT.load(Ordering::Acquire) & 1];
+        assert_eq!(snapshot.count.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn mapping_split_fails_closed_at_snapshot_capacity() {
+        let mut mappings = BTreeMap::new();
+        for index in 0..MAX_MAPPINGS {
+            mappings.insert(0x10000 + index * 0x4000, writable_jit_mapping(0x4000));
+        }
+        assert!(replacement_table(&mappings, 0x11000, 0x1000, None).is_none());
+    }
+
+    #[test]
+    fn fixed_replacement_does_not_inherit_jit_metadata() {
+        let mut mappings = BTreeMap::new();
+        mappings.insert(0x10000, writable_jit_mapping(0x4000));
+        let mut replacement = replacement_table(&mappings, 0x11000, 0x1000, None).unwrap();
+        replacement.insert(
+            0x11000,
+            Mapping {
+                requested_length: 0x1000,
+                mapped_length: 0x1000,
+                protection: ANDROID_PROT_READ,
+                anonymous: false,
+                jit_capable: false,
+                jit_activated: false,
+            },
+        );
+        assert!(!replacement[&0x11000].jit_capable);
+        assert!(replacement[&0x10000].jit_capable);
+        assert!(replacement[&0x12000].jit_capable);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn emulated_rwx_changes_faulting_host_page() {
+        let _serial = JIT_TEST_LOCK.lock().unwrap();
+        let provider = Arc::new(Provider::new().unwrap());
+        let activation = provider.activate().unwrap();
+        let length = provider.page_size();
+        let address = unsafe {
+            darwin_art_bionic_vm_mmap_core(
+                std::ptr::null_mut(),
+                length,
+                0,
+                ANDROID_MAP_PRIVATE | ANDROID_MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        assert_ne!(address, MAP_FAILED);
+        assert_eq!(
+            unsafe {
+                darwin_art_bionic_vm_mprotect_core(
+                    address,
+                    length,
+                    ANDROID_PROT_READ | ANDROID_PROT_WRITE | ANDROID_PROT_EXEC,
+                )
+            },
+            0
+        );
+        unsafe { address.cast::<u32>().write(0xd65f03c0) };
+        assert_eq!(
+            darwin_art_bionic_vm_recover_jit_execution_fault(address as usize, 1),
+            1
+        );
+        let function: unsafe extern "C" fn() = unsafe { std::mem::transmute(address) };
+        unsafe { function() };
+        assert_eq!(
+            darwin_art_bionic_vm_recover_jit_execution_fault(address as usize, 0),
+            1
+        );
+        unsafe { address.cast::<u32>().write(0xd65f03c0) };
+        assert_eq!(
+            unsafe { darwin_art_bionic_vm_munmap_core(address, length) },
+            0
+        );
+        drop(activation);
     }
 }

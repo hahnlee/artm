@@ -621,7 +621,13 @@ jchar KeyMapGetCharacter(JNIEnv*, jclass, jlong, jint key_code,
     default: return 0;
   }
 }
-jchar KeyMapGetDisplayLabel(JNIEnv*, jclass, jlong, jint) { return 0; }
+jchar KeyMapGetDisplayLabel(JNIEnv* env, jclass klass, jlong pointer,
+                            jint key_code) {
+  // Android's physical KeyCharacterMap exposes an unmodified printable label
+  // in addition to the meta-state-dependent character. KeyEvent.isPrintingKey
+  // (and Chromium's hardware keyboard path) relies on this value.
+  return KeyMapGetCharacter(env, klass, pointer, key_code, 0);
+}
 jobjectArray KeyMapGetEvents(JNIEnv*, jclass, jlong, jcharArray) { return nullptr; }
 jboolean KeyMapGetFallbackAction(JNIEnv*, jclass, jlong, jint, jint, jobject) {
   return JNI_FALSE;

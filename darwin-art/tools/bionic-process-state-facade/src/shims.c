@@ -1,6 +1,5 @@
 #include "darwin_art_bionic_process_state.h"
 
-#include <dlfcn.h>
 #include <errno.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
@@ -10,6 +9,9 @@
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
+#if defined(__APPLE__) && defined(__aarch64__)
+#include <mach/arm/thread_status.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -200,16 +202,16 @@ int darwin_art_bionic_kill(int pid, int signal_number) {
 void darwin_art_bionic_exit(int status) {
   char message[128];
   int length = snprintf(message, sizeof(message),
-                        "DARWIN Bionic exit status=%d caller=%p\n", status,
-                        __builtin_return_address(0));
+                        "DARWIN Bionic exit pid=%d status=%d caller=%p\n",
+                        getpid(), status, __builtin_return_address(0));
   if (length > 0) (void)write(STDERR_FILENO, message, (size_t)length);
   exit(status);
 }
 void darwin_art_bionic__exit(int status) {
   char message[128];
   int length = snprintf(message, sizeof(message),
-                        "DARWIN Bionic _exit status=%d caller=%p\n", status,
-                        __builtin_return_address(0));
+                        "DARWIN Bionic _exit pid=%d status=%d caller=%p\n",
+                        getpid(), status, __builtin_return_address(0));
   if (length > 0) (void)write(STDERR_FILENO, message, (size_t)length);
   _exit(status);
 }
@@ -311,9 +313,24 @@ static _Atomic(int) gAndroidSignalFlags[NSIG];
 static _Atomic(uint64_t) gAndroidSignalMasks[NSIG];
 static _Atomic(uintptr_t) gAndroidSignalRestorers[NSIG];
 static _Atomic(uintptr_t) gJitFaultRecovery;
+static _Atomic(uintptr_t) gSigchainOwnsSignal;
+static _Atomic(uintptr_t) gEnsureFrontOfChain;
 
-typedef int (*DarwinArtSigchainOwnsSignal)(int signal_number);
-typedef void (*DarwinArtEnsureFrontOfChain)(int signal_number);
+#if defined(__aarch64__)
+static uintptr_t DarwinFaultAddress(const siginfo_t* info,
+                                    const ucontext_t* context) {
+  const uintptr_t signal_address =
+      info == NULL ? 0 : (uintptr_t)info->si_addr;
+  if (context == NULL || context->uc_mcontext == NULL) return signal_address;
+  // Darwin leaves siginfo.si_addr null for some arm64 protection faults while
+  // the architectural FAR still contains the precise address. Linux/Bionic
+  // reports that address to handlers and the JIT W^X recovery path requires
+  // it to identify the protected guest mapping.
+  const uintptr_t architectural_address =
+      (uintptr_t)context->uc_mcontext->__es.__far;
+  return architectural_address != 0 ? architectural_address : signal_address;
+}
+#endif
 
 static int RecoverAndroidReadableSystemRegister(ucontext_t* context) {
 #if defined(__aarch64__)
@@ -351,37 +368,93 @@ void darwin_art_bionic_process_state_bind_jit_fault_recovery(
                         memory_order_release);
 }
 
+void darwin_art_bionic_process_state_bind_sigchain(
+    DarwinArtBionicSigchainOwnsSignal owns_signal,
+    DarwinArtBionicEnsureFrontOfChain ensure_front) {
+  atomic_store_explicit(&gSigchainOwnsSignal, (uintptr_t)owns_signal,
+                        memory_order_release);
+  atomic_store_explicit(&gEnsureFrontOfChain, (uintptr_t)ensure_front,
+                        memory_order_release);
+}
+
 static void DarwinArtAndroidSignalTrampoline(int host_signal,
                                               siginfo_t* host_info,
                                               void* host_context) {
   if (host_signal <= 0 || host_signal >= NSIG) return;
+  const int android_signal = AndroidSignal(host_signal);
+#if defined(__aarch64__)
+  uint32_t unresolved_syndrome = 0;
+  uintptr_t unresolved_pc = 0;
+  // Guest RWX translation is runtime-internal and must precede Android's
+  // guest disposition: V8 does not need to install an app SIGBUS/SIGSEGV
+  // handler for an otherwise recoverable per-thread permission transition.
+  if ((android_signal == 7 || android_signal == 11) && host_info != NULL &&
+      host_context != NULL) {
+    const ucontext_t* recovery_context = (const ucontext_t*)host_context;
+    if (recovery_context->uc_mcontext != NULL) {
+      const uint32_t syndrome = recovery_context->uc_mcontext->__es.__esr;
+      unresolved_syndrome = syndrome;
+      const uint32_t exception_class = syndrome >> 26;
+      const uintptr_t program_counter =
+          (uintptr_t)arm_thread_state64_get_pc(
+              recovery_context->uc_mcontext->__ss);
+      unresolved_pc = program_counter;
+      const uintptr_t fault_address =
+          DarwinFaultAddress(host_info, recovery_context);
+      const uintptr_t recovery = atomic_load_explicit(
+          &gJitFaultRecovery, memory_order_acquire);
+      const bool instruction_abort =
+          exception_class == 0x20 || exception_class == 0x21;
+      const bool write_abort =
+          (exception_class == 0x24 || exception_class == 0x25) &&
+          (syndrome & (UINT32_C(1) << 6)) != 0;
+      // Linux permits an RWX JIT mapping to alternate writes and execution.
+      // The VM facade emulates that contract one host page at a time, so
+      // translate both architectural transitions: write faults select writable
+      // mode; instruction aborts synchronize code and select executable mode.
+      // Read faults remain genuine application faults.
+      // arm64e can expose a signed/raw PC which does not compare byte-for-byte
+      // with si_addr. The recovery callback itself accepts only a
+      // permission-matching published guest range, so prefer the kernel
+      // fault address and keep the normalized PC as a fallback.
+      if ((instruction_abort || write_abort) && recovery != 0 &&
+          (((DarwinArtBionicJitFaultRecovery)recovery)(
+               fault_address, instruction_abort ? 1 : 0) == 1 ||
+           (instruction_abort && fault_address != program_counter &&
+            ((DarwinArtBionicJitFaultRecovery)recovery)(program_counter, 1) ==
+                1))) {
+        return;
+      }
+    }
+  }
+  if ((android_signal == 7 || android_signal == 11) && host_info != NULL &&
+      unresolved_pc != 0) {
+    char message[256];
+    const int length = snprintf(
+        message, sizeof(message),
+        "DARWIN signal: unresolved pid=%d host=%d android=%d code=%d "
+        "esr=0x%08x ec=0x%x wnr=%d addr=%p pc=%p\n",
+        getpid(), host_signal, android_signal, host_info->si_code,
+        unresolved_syndrome, unresolved_syndrome >> 26,
+        (unresolved_syndrome & (UINT32_C(1) << 6)) != 0,
+        (void*)DarwinFaultAddress(host_info, (const ucontext_t*)host_context),
+        (void*)unresolved_pc);
+    if (length > 0) {
+      const size_t bytes =
+          (size_t)length < sizeof(message) ? (size_t)length : sizeof(message) - 1;
+      (void)write(STDERR_FILENO, message, bytes);
+    }
+  }
+#endif
   const uintptr_t address = atomic_load_explicit(
       &gAndroidSignalHandlers[host_signal], memory_order_acquire);
   if (address == (uintptr_t)SIG_DFL || address == (uintptr_t)SIG_IGN) return;
-  const int android_signal = AndroidSignal(host_signal);
   if (android_signal == 4 &&
       RecoverAndroidReadableSystemRegister((ucontext_t*)host_context)) {
     return;
   }
   const int flags = atomic_load_explicit(&gAndroidSignalFlags[host_signal],
                                          memory_order_relaxed);
-#if defined(__aarch64__)
-  if (android_signal == 7 && host_info != NULL && host_context != NULL) {
-    const ucontext_t* recovery_context = (const ucontext_t*)host_context;
-    if (recovery_context->uc_mcontext != NULL) {
-      const uintptr_t program_counter =
-          (uintptr_t)recovery_context->uc_mcontext->__ss.__pc;
-      if ((uintptr_t)host_info->si_addr == program_counter) {
-        const uintptr_t recovery = atomic_load_explicit(
-            &gJitFaultRecovery, memory_order_acquire);
-        if (recovery != 0 &&
-            ((DarwinArtBionicJitFaultRecovery)recovery)(program_counter) == 1) {
-          return;
-        }
-      }
-    }
-  }
-#endif
   if ((flags & 4) != 0) {
     _Alignas(16) unsigned char android_info[128];
     AndroidSignalContext android_context;
@@ -398,6 +471,10 @@ static void DarwinArtAndroidSignalTrampoline(int host_signal,
       if (android_signal == 4 || android_signal == 5 || android_signal == 7 ||
           android_signal == 8 || android_signal == 11) {
         void* fault_address = host_info->si_addr;
+#if defined(__aarch64__)
+        fault_address = (void*)DarwinFaultAddress(
+            host_info, (const ucontext_t*)host_context);
+#endif
         memcpy(android_info + 16, &fault_address, sizeof(fault_address));
       } else {
         const int sender_pid = host_info->si_pid;
@@ -418,14 +495,14 @@ static void DarwinArtAndroidSignalTrampoline(int host_signal,
         const _STRUCT_ARM_THREAD_STATE64* state = &context->uc_mcontext->__ss;
         for (size_t index = 0; index < 29; ++index)
           android_context.machine.registers[index] = state->__x[index];
-        android_context.machine.registers[29] = state->__fp;
-        android_context.machine.registers[30] = state->__lr;
-        android_context.machine.stack_pointer = state->__sp;
-        android_context.machine.program_counter = state->__pc;
+        android_context.machine.registers[29] = arm_thread_state64_get_fp(*state);
+        android_context.machine.registers[30] = arm_thread_state64_get_lr(*state);
+        android_context.machine.stack_pointer = arm_thread_state64_get_sp(*state);
+        android_context.machine.program_counter = arm_thread_state64_get_pc(*state);
         android_context.machine.processor_state = state->__cpsr;
         if (host_info != NULL)
-          android_context.machine.fault_address =
-              (uint64_t)(uintptr_t)host_info->si_addr;
+          android_context.machine.fault_address = (uint64_t)DarwinFaultAddress(
+              host_info, context);
       }
 #endif
     }
@@ -850,12 +927,12 @@ int darwin_art_bionic_sigaction(int signal_number,
       &gAndroidSignalMasks[host_signal], memory_order_relaxed);
   const uintptr_t previous_guest_restorer = atomic_load_explicit(
       &gAndroidSignalRestorers[host_signal], memory_order_relaxed);
-  DarwinArtSigchainOwnsSignal sigchain_owns_signal =
-      (DarwinArtSigchainOwnsSignal)dlsym(RTLD_DEFAULT,
-                                         "darwin_art_sigchain_owns_signal");
-  DarwinArtEnsureFrontOfChain ensure_front_of_chain =
-      (DarwinArtEnsureFrontOfChain)dlsym(RTLD_DEFAULT,
-                                         "EnsureFrontOfChain");
+  DarwinArtBionicSigchainOwnsSignal sigchain_owns_signal =
+      (DarwinArtBionicSigchainOwnsSignal)atomic_load_explicit(
+          &gSigchainOwnsSignal, memory_order_acquire);
+  DarwinArtBionicEnsureFrontOfChain ensure_front_of_chain =
+      (DarwinArtBionicEnsureFrontOfChain)atomic_load_explicit(
+          &gEnsureFrontOfChain, memory_order_acquire);
   const int sigchain_owned = sigchain_owns_signal != NULL &&
                              sigchain_owns_signal(host_signal) != 0;
   if (action != NULL) {

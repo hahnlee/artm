@@ -74,6 +74,8 @@ unsafe extern "C" {
     fn host_close(fd: c_int) -> c_int;
     #[link_name = "flock"]
     fn host_flock(fd: c_int, operation: c_int) -> c_int;
+    #[link_name = "fcntl"]
+    fn host_fcntl(fd: c_int, command: c_int, ...) -> c_int;
     fn darwin_art_bionic_fs_host_record_lock(
         host_fd: c_int,
         android_command: c_int,
@@ -1294,6 +1296,10 @@ impl Facade {
 
     fn fcntl(&self, fd: c_int, command: c_int, argument: isize) -> c_int {
         const F_DUPFD: c_int = 0;
+        const F_GETFD: c_int = 1;
+        const F_SETFD: c_int = 2;
+        const F_GETFL: c_int = 3;
+        const F_SETFL: c_int = 4;
         const F_DUPFD_CLOEXEC: c_int = 1030;
         if matches!(command, F_DUPFD | F_DUPFD_CLOEXEC) {
             if argument < 0 {
@@ -1323,6 +1329,87 @@ impl Facade {
                     self.fail(ANDROID_EMFILE)
                 }
                 Err(()) => self.fail(ANDROID_EMFILE),
+            };
+        }
+        if matches!(command, F_GETFD | F_SETFD | F_GETFL | F_SETFL) {
+            if command == F_SETFD && argument & !1 != 0 {
+                return self.fail(ANDROID_EINVAL);
+            }
+            if command == F_SETFL && argument & !(O_APPEND | O_NONBLOCK) as isize != 0 {
+                return self.fail(ANDROID_EINVAL);
+            }
+            let descriptors = match self.descriptors.lock() {
+                Ok(descriptors) => descriptors,
+                Err(_) => return self.fail_capability(),
+            };
+            let Some(descriptor) = descriptors.entries.get(&fd) else {
+                return self.fail(ANDROID_EBADF);
+            };
+            if command == F_GETFD {
+                // Facade descriptors never cross exec; mirror Android's
+                // close-on-exec ownership contract independently of the
+                // private host descriptor number.
+                return 1;
+            }
+            if command == F_SETFD {
+                return 0;
+            }
+            let access = match descriptor {
+                Descriptor::File(_) | Descriptor::Random(_) => O_RDONLY,
+                Descriptor::PrivateFile(file) => {
+                    // Darwin and Android share the access-mode low bits. The
+                    // remaining status flags are translated explicitly below.
+                    let flags = unsafe { host_fcntl(file.as_raw_fd(), F_GETFL) };
+                    if flags < 0 {
+                        return self.fail_io(&std::io::Error::last_os_error());
+                    }
+                    flags & O_ACCMODE
+                }
+                Descriptor::Overlay(file) => match (file.readable, file.writable) {
+                    (true, true) => O_RDWR,
+                    (false, true) => O_WRONLY,
+                    _ => O_RDONLY,
+                },
+            };
+            if command == F_GETFL {
+                let mut android_flags = access;
+                if let Descriptor::PrivateFile(file) = descriptor {
+                    let host_flags = unsafe { host_fcntl(file.as_raw_fd(), F_GETFL) };
+                    if host_flags < 0 {
+                        return self.fail_io(&std::io::Error::last_os_error());
+                    }
+                    const DARWIN_O_NONBLOCK: c_int = 0x4;
+                    const DARWIN_O_APPEND: c_int = 0x8;
+                    if host_flags & DARWIN_O_NONBLOCK != 0 {
+                        android_flags |= O_NONBLOCK;
+                    }
+                    if host_flags & DARWIN_O_APPEND != 0 {
+                        android_flags |= O_APPEND;
+                    }
+                }
+                return android_flags;
+            }
+            let Descriptor::PrivateFile(file) = descriptor else {
+                return 0;
+            };
+            const DARWIN_O_NONBLOCK: c_int = 0x4;
+            const DARWIN_O_APPEND: c_int = 0x8;
+            let current = unsafe { host_fcntl(file.as_raw_fd(), F_GETFL) };
+            if current < 0 {
+                return self.fail_io(&std::io::Error::last_os_error());
+            }
+            let mut updated = current & !(DARWIN_O_NONBLOCK | DARWIN_O_APPEND);
+            if argument as c_int & O_NONBLOCK != 0 {
+                updated |= DARWIN_O_NONBLOCK;
+            }
+            if argument as c_int & O_APPEND != 0 {
+                updated |= DARWIN_O_APPEND;
+            }
+            let result = unsafe { host_fcntl(file.as_raw_fd(), F_SETFL, updated) };
+            return if result == 0 {
+                0
+            } else {
+                self.fail_io(&std::io::Error::last_os_error())
             };
         }
         if !matches!(command, 5..=7) {
@@ -2414,10 +2501,9 @@ impl Facade {
                     if !output_descriptor.writable {
                         return Err(ANDROID_EBADF);
                     }
-                    let mut output_file =
-                        output_descriptor.node.lock().map_err(|_| ANDROID_EIO)?;
-                    let output_start = usize::try_from(output_descriptor.offset)
-                        .map_err(|_| ANDROID_EINVAL)?;
+                    let mut output_file = output_descriptor.node.lock().map_err(|_| ANDROID_EIO)?;
+                    let output_start =
+                        usize::try_from(output_descriptor.offset).map_err(|_| ANDROID_EINVAL)?;
                     let output_end = output_start
                         .checked_add(bytes.len())
                         .ok_or(ANDROID_EINVAL)?;
@@ -2706,10 +2792,19 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_process_install(
     let guest_mount = unsafe { slice::from_raw_parts(guest_mount, guest_mount_length) };
     // SAFETY: same byte-slice contract as guest_mount.
     let cwd = unsafe { slice::from_raw_parts(cwd, cwd_length) };
-    let facade = duplicate
-        .ok()
-        .and_then(|fd| Facade::new(File::from(fd), guest_mount, cwd).ok())
-        .map(Arc::new);
+    let facade = match duplicate {
+        Ok(fd) => match Facade::new(File::from(fd), guest_mount, cwd) {
+            Ok(facade) => Some(Arc::new(facade)),
+            Err(error) => {
+                eprintln!("DARWIN FS: process owner creation failed: {error}");
+                None
+            }
+        },
+        Err(error) => {
+            eprintln!("DARWIN FS: process owner descriptor duplication failed: {error}");
+            None
+        }
+    };
 
     let mut state = process_owner_state();
     assert!(state.installing, "process owner install reservation lost");
@@ -3704,6 +3799,33 @@ mod tests {
         let fd = facade.open(b"/dev/urandom", O_RDONLY | O_CLOEXEC | O_NONBLOCK);
         assert!(fd >= 10_000);
         assert_eq!(facade.close(fd), 0);
+    }
+
+    #[test]
+    fn private_file_fcntl_translates_android_descriptor_and_status_flags() {
+        let private_root = std::env::temp_dir().join(format!(
+            "darwin-art-fcntl-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        fs::create_dir_all(&private_root).unwrap();
+        let mut facade = Facade::new(File::open("/").unwrap(), b"/", b"/").unwrap();
+        facade.private_root = Some(private_root.clone());
+        assert_eq!(facade.mkdir(b"/data/fcntl", 0o755), 0);
+        let fd = facade.open(b"/data/fcntl/file", O_RDWR | O_CREAT | O_TRUNC);
+        assert!(fd >= 10_000);
+
+        assert_eq!(facade.fcntl(fd, 1, 0), 1);
+        assert_eq!(facade.fcntl(fd, 2, 1), 0);
+        assert_eq!(facade.fcntl(fd, 3, 0) & O_ACCMODE, O_RDWR);
+        assert_eq!(facade.fcntl(fd, 4, (O_APPEND | O_NONBLOCK) as isize), 0);
+        let status = facade.fcntl(fd, 3, 0);
+        assert_eq!(status & O_ACCMODE, O_RDWR);
+        assert_ne!(status & O_APPEND, 0);
+        assert_ne!(status & O_NONBLOCK, 0);
+        assert_eq!(facade.fcntl(fd, 4, O_CREAT as isize), -1);
+        assert_eq!(facade.close(fd), 0);
+        fs::remove_dir_all(private_root).unwrap();
     }
 
     #[test]

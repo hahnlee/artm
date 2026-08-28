@@ -27,20 +27,19 @@ drop unmaps any remaining complete mappings.
 Direct simultaneous write and execute mappings return Android `EACCES`; RW to
 RX and RX to RW transitions are supported. An ownership-checked subset of an
 anonymous private `PROT_NONE` reservation may later become RWX for Android V8
-CodeRange compatibility. Such reservations carry Darwin `MAP_JIT`, and the host
-executable carries macOS's narrow JIT and unsigned-executable-memory
-entitlements. Other RWX transitions still fail closed. RX transitions
-invalidate Darwin's instruction cache. Once a JIT reservation is host-RWX,
-later Android `mprotect` write/execute phases translate to
-`pthread_jit_write_protect_np` on the calling thread while the side table keeps
-the guest-visible protection. Android's process-wide RWX contract does not map
-directly onto Darwin's per-thread JIT mode: after a writing thread publishes
-code, its first attempted entry into the MAP_JIT range raises Darwin `SIGBUS`.
-The process signal bridge recognizes only an execute fault whose program
-counter is inside a live, executable, provider-owned JIT range, switches that
-thread back to execute mode, and retries the interrupted instruction. Other
-`SIGBUS` faults remain ordinary Android signals. The Android ELF fixture writes
-AArch64 instructions into RW memory, changes it to RX, and executes them.
+CodeRange compatibility. The host never creates an RWX or `MAP_JIT` mapping:
+guest RWX starts as host RW, and an instruction/write protection fault changes
+the faulting host page between RX and RW. This preserves page-level W^X across
+renderer threads without a process-wide transition race and avoids Darwin's
+thread-global `pthread_jit_write_protect_np` state. Ordinary guest RW, RX, R,
+and `PROT_NONE` always use the exact host page permission. RX transitions and
+RWX execution-fault recovery invalidate Darwin's instruction cache. The signal bridge
+consumes only a permission fault inside a live guest-RWX range; other faults
+remain ordinary Android signals. Truly concurrent write and execute activity
+on the same host page can permission-ping-pong and is an explicitly unsupported tier; V8's coordinated
+write scopes are covered by the Chromium acceptance gate. The Android ELF
+fixture also writes AArch64 instructions into RW memory, changes it to RX, and
+executes them.
 
 Advice values are translated explicitly. Android `NORMAL/RANDOM/SEQUENTIAL/
 WILLNEED` map to Darwin 0..3. Android `DONTNEED=4` uses an in-place fixed

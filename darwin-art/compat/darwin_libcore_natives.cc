@@ -13,6 +13,8 @@ extern "C" int darwin_art_bionic_socket_broker_fcntl(int, int, intptr_t);
 extern "C" int darwin_art_bionic_close(int);
 extern "C" intptr_t darwin_art_bionic_read(int, void*, size_t);
 extern "C" intptr_t darwin_art_bionic_write(int, const void*, size_t);
+extern "C" intptr_t darwin_art_bionic_pread(int, void*, size_t, int64_t);
+extern "C" intptr_t darwin_art_bionic_pwrite(int, const void*, size_t, int64_t);
 extern "C" int darwin_art_bionic_fstat(int, DarwinArtAndroidStat*);
 extern "C" int darwin_art_bionic_stat(const char*, DarwinArtAndroidStat*);
 extern "C" int64_t darwin_art_bionic_lseek(int, int64_t, int);
@@ -584,23 +586,28 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
       &darwin_art_bionic_fs_stat_core, &darwin_art_bionic_fs_mkdir_core,
       &darwin_art_bionic_fs_chmod_core, &darwin_art_bionic_errno_load);
 #if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
-  darwin_art::libcore_darwin::InstallLinuxSyscallProviders({
-      &darwin_art_bionic_open,
-      &darwin_art_bionic_socket_broker_dup,
-      &darwin_art_bionic_socket_broker_fcntl,
-      &darwin_art_bionic_close,
-      &darwin_art_bionic_read,
-      &darwin_art_bionic_write,
-      &darwin_art_bionic_fstat,
-      &darwin_art_bionic_stat,
-      &darwin_art_bionic_lseek,
-      &darwin_art_bionic_sendfile,
-      &darwin_art_bionic_access,
-      &darwin_art_bionic_remove,
-      &darwin_art_bionic_rename,
-      &darwin_art_bionic_fs_adopt_host_fd_core,
-      &darwin_art_bionic_errno_load,
-  });
+  using namespace darwin_art::libcore_darwin;
+  InstallLinuxSyscallProviders(
+      kLinuxSyscallProviderAbiVersion, sizeof(LinuxSyscallProviders),
+      {
+          .open = &darwin_art_bionic_open,
+          .dup = &darwin_art_bionic_socket_broker_dup,
+          .fcntl = &darwin_art_bionic_socket_broker_fcntl,
+          .close = &darwin_art_bionic_close,
+          .read = &darwin_art_bionic_read,
+          .write = &darwin_art_bionic_write,
+          .pread = &darwin_art_bionic_pread,
+          .pwrite = &darwin_art_bionic_pwrite,
+          .fstat = &darwin_art_bionic_fstat,
+          .stat = &darwin_art_bionic_stat,
+          .lseek = &darwin_art_bionic_lseek,
+          .sendfile = &darwin_art_bionic_sendfile,
+          .access = &darwin_art_bionic_access,
+          .remove = &darwin_art_bionic_remove,
+          .rename = &darwin_art_bionic_rename,
+          .adopt_host_fd = &darwin_art_bionic_fs_adopt_host_fd_core,
+          .load_errno = &darwin_art_bionic_errno_load,
+      });
 #endif
   // NativeAllocationRegistry is part of libcore's boot class path rather than
   // framework.jar. Register its free-function ABI from the libcore owner so

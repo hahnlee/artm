@@ -82,8 +82,6 @@ _madvise
 _mmap
 _mprotect
 _munmap
-_pthread_jit_write_protect_np
-_pthread_jit_write_protect_supported_np
 _sys_icache_invalidate
 EOF
 diff -u "$tmp/host.expected" "$tmp/host.actual" || fail 'host dependencies'

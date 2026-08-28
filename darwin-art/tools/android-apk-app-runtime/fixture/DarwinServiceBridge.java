@@ -196,6 +196,45 @@ public final class DarwinServiceBridge {
         MAIN_HANDLER.post(() -> launchLocalActivity(launchIntent, -1));
     }
 
+    /** Mirrors ActivityThread's process teardown before the host destroys ART. */
+    public static void shutdownActivities() {
+        try {
+            Class<?> activityClass = Activity.class;
+            Method performPause = activityClass.getDeclaredMethod("performPause");
+            Method performStop = activityClass.getDeclaredMethod(
+                    "performStop", boolean.class, String.class);
+            Method performDestroy = activityClass.getDeclaredMethod("performDestroy");
+            performPause.setAccessible(true);
+            performStop.setAccessible(true);
+            performDestroy.setAccessible(true);
+            Object global = Class.forName("android.view.WindowManagerGlobal")
+                    .getMethod("getInstance").invoke(null);
+            Method removeView = global.getClass().getDeclaredMethod(
+                    "removeView", View.class, boolean.class);
+            removeView.setAccessible(true);
+            for (int index = ACTIVITY_STACK.size() - 1; index >= 0; --index) {
+                Activity activity = ACTIVITY_STACK.get(index).activity;
+                if (activity == null) continue;
+                if (activity == currentActivity) performPause.invoke(activity);
+                View decor = activity.getWindow().getDecorView();
+                deactivateHostSurfaces(decor);
+                try {
+                    removeView.invoke(global, decor, Boolean.TRUE);
+                } catch (Throwable ignored) {
+                    // A finishing Activity may already have removed its decor.
+                }
+                performStop.invoke(activity, Boolean.FALSE,
+                        "darwin-art process shutdown");
+                performDestroy.invoke(activity);
+            }
+            ACTIVITY_STACK.clear();
+            currentActivity = null;
+            Log.i("DarwinServiceBridge", "destroyed Activities for process shutdown");
+        } catch (Throwable error) {
+            Log.e("DarwinServiceBridge", "Activity process shutdown failed", error);
+        }
+    }
+
     private static void scheduleHostSurfaceScans(
             Activity owner, View root, int remaining) {
         if (remaining <= 0) return;
@@ -883,9 +922,41 @@ public final class DarwinServiceBridge {
                     (proxy, method, args) -> {
                         String name = method.getName();
                         if ("asBinder".equals(name)) return inputMethodBinder;
+                        if (System.getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != null
+                                && (name.contains("Input") || name.contains("Client"))) {
+                            Log.i("DarwinInputMethod", "system service call " + name);
+                        }
                         if ("getInputMethodList".equals(name)
                                 || "getEnabledInputMethodList".equals(name)) {
                             return emptyFrameworkContainer(method.getReturnType(), "empty");
+                        }
+                        if ("startInputOrWindowGainedFocus".equals(name)
+                                || "startInputOrWindowGainedFocusAsync".equals(name)) {
+                            // A connected physical keyboard does not require a
+                            // soft IME session, but Android system_server still
+                            // returns a non-null result. InputMethodManager uses
+                            // that result to retain the served View and its
+                            // renderer InputConnection. Returning null leaves
+                            // Chromium's ImeAdapter detached, so hardware key
+                            // events are consumed without reaching Blink.
+                            Class<?> resultClass = Class.forName(
+                                    "com.android.internal.inputmethod.InputBindResult");
+                            Object result = resultClass.getField("NO_IME").get(null);
+                            if ("startInputOrWindowGainedFocusAsync".equals(name)) {
+                                Object client = args[1];
+                                int sequence = -1;
+                                for (int index = args.length - 1; index >= 0; index--) {
+                                    if (args[index] instanceof Integer) {
+                                        sequence = (Integer) args[index];
+                                        break;
+                                    }
+                                }
+                                client.getClass()
+                                        .getMethod("onStartInputResult", resultClass, int.class)
+                                        .invoke(client, result, sequence);
+                                return null;
+                            }
+                            return result;
                         }
                         return defaultValue(method.getReturnType());
                     });

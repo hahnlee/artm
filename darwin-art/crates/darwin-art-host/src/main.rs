@@ -70,6 +70,9 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         heap_initial_bytes: 64 * 1024 * 1024,
         heap_maximum_bytes: 256 * 1024 * 1024,
         visible_seconds,
+        // Android application VMs are process-scoped zygote children. The OS
+        // terminates that process instead of calling DestroyJavaVM, which is
+        // unsafe for Chromium's still-live native task runners.
         terminate_android_process: env::var_os("DARWIN_ART_APK_APP_PACKAGE").is_some(),
     };
     let outcome = run(&options)?;

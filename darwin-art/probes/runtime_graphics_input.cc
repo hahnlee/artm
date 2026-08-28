@@ -1601,13 +1601,32 @@ int32_t dispatch_key_v1(GraphicsState* state,
       key_event_class == nullptr
           ? nullptr
           : env->GetMethodID(key_event_class, "<init>", "(JJIIIIIIII)V");
+  const int64_t event_time_nanos = event->event_time_nanos > 0
+                                       ? static_cast<int64_t>(event->event_time_nanos)
+                                       : MonotonicNanos();
+  if (event_time_nanos <= 0) {
+    env->DeleteLocalRef(key_event_class);
+    return 87;
+  }
+  int64_t down_time_nanos = event->down_time_nanos > 0
+                                ? static_cast<int64_t>(event->down_time_nanos)
+                                : event_time_nanos;
+  const size_t key_index = static_cast<size_t>(event->key_code);
+  if (key_index < state->key_down_time_nanos.size()) {
+    if (event->action == 0) {
+      state->key_down_time_nanos[key_index] = down_time_nanos;
+    } else if (event->down_time_nanos == 0 &&
+               state->key_down_time_nanos[key_index] > 0) {
+      down_time_nanos = state->key_down_time_nanos[key_index];
+    }
+  }
   jobject key_event =
       constructor == nullptr
           ? nullptr
           : env->NewObject(
                 key_event_class, constructor,
-                static_cast<jlong>(event->down_time_nanos / 1000000ULL),
-                static_cast<jlong>(event->event_time_nanos / 1000000ULL),
+                static_cast<jlong>(down_time_nanos / 1000000LL),
+                static_cast<jlong>(event_time_nanos / 1000000LL),
                 static_cast<jint>(event->action),
                 static_cast<jint>(event->key_code),
                 static_cast<jint>(event->repeat_count),
@@ -1616,6 +1635,9 @@ int32_t dispatch_key_v1(GraphicsState* state,
                 static_cast<jint>(event->scan_code),
                 static_cast<jint>(event->flags),
                 static_cast<jint>(event->source));
+  if (event->action == 1 && key_index < state->key_down_time_nanos.size()) {
+    state->key_down_time_nanos[key_index] = 0;
+  }
   bool handled = false;
   const bool delivered =
       key_event != nullptr && !env->ExceptionCheck() &&
