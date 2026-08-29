@@ -42,6 +42,22 @@ applications use this same operation, so closing the AppKit process does not
 terminate Android applications. Their output is redirected to the selected
 profile's `managed-apps.log`.
 
+## macOS application exposure
+
+The AppKit manager projects the installed-package registry into signed `.app`
+bundles at `~/Applications/Darwin ART Apps.localized`. These are Chrome-style
+application shims, not copied runtimes. Their Info.plist records the Android
+package and profile plus the Android label, version, and extracted APK icon. A
+small native launcher locates the installed manager bundle, selects the profile,
+asks `darwin-artd` to resolve the immutable launch record, and daemonizes the
+normal package launcher. The Android process therefore remains daemon-owned
+after the shim exits.
+
+Synchronization rewrites a bundle only when its metadata, icon, launcher, or
+manager location changes. Stale-package and deleted-profile cleanup first
+validates the `DARManagedAppShim` ownership marker and exact profile, so it can
+never remove an unrelated application from the user's Applications directory.
+
 ## ART system services
 
 The first persistent framework process is `android.system`, an ART-backed

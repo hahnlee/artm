@@ -69,6 +69,16 @@ and processes are spawned by `darwin-artd`, so applications and
 System sheet reports daemon/system-service state and allocated profile size,
 and optionally registers the manager as a macOS login item.
 
+Installed Android packages are also exposed as signed macOS application shims
+under `~/Applications/Darwin ART Apps.localized`. Each `.app` carries the
+Android label, version, and APK icon, so Finder, Spotlight, and Launchpad can
+discover and launch it without opening the manager first. A shim contains only
+the profile/package identity and a small native launcher; all applications
+share the compatibility runtime embedded in Darwin ART Manager. Non-default
+profiles receive a profile suffix in the macOS app name. Refresh/install keeps
+these bundles synchronized, uninstall removes stale package shims, and profile
+deletion removes only bundles carrying Darwin ART's matching ownership marker.
+
 Physical-keyboard status and the remaining Android `.kl`/`.kcm` compatibility
 work are documented in
 [`docs/physical-keyboard-compatibility.md`](docs/physical-keyboard-compatibility.md).

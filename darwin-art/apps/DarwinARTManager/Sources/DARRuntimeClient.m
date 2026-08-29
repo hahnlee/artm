@@ -1,4 +1,5 @@
 #import "DARRuntimeClient.h"
+#import "DARRuntimeClient+AppShims.h"
 
 #import <AppKit/AppKit.h>
 
@@ -69,9 +70,12 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
     environment[@"DARWIN_ART_ANGLE_DIRECTORY"] =
         [self.runtimeRootURL URLByAppendingPathComponent:
                                  @"_build/angle-source/out/DarwinArtRelease"].path;
-    NSString *profileRoot = [NSHomeDirectory() stringByAppendingPathComponent:
-        [NSString stringWithFormat:@"Library/Application Support/DarwinART/profiles/%@",
-                                   profile]];
+    NSString *profilesRoot = environment[@"DARWIN_ART_PROFILE_ROOT"];
+    if (!profilesRoot.length) {
+        profilesRoot = [NSHomeDirectory() stringByAppendingPathComponent:
+            @"Library/Application Support/DarwinART/profiles"];
+    }
+    NSString *profileRoot = [profilesRoot stringByAppendingPathComponent:profile];
     environment[@"DARWIN_ART_NATIVE_CACHE_ROOT"] =
         [profileRoot stringByAppendingPathComponent:@"native-cache"];
     environment[@"DARWIN_ART_DAEMONIZED_LOG"] =
@@ -149,7 +153,10 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
 - (void)deleteProfile:(NSString *)profile completion:(DARRuntimeActionHandler)handler {
     [self runActionProgram:self.controlProgram
                  arguments:@[@"delete-profile", profile]
-                completion:handler];
+                completion:^(NSError *error) {
+                    if (!error) [self removeAppShimsForProfile:profile];
+                    handler(error);
+                }];
 }
 
 - (NSString *)recordValue:(NSString *)key record:(NSString *)record {
@@ -241,6 +248,16 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
                                 arguments:@[@"profile-size", self.profileName]
                                     error:&error];
         snapshot.allocatedBytes = error ? 0 : strtoull(size.UTF8String, NULL, 10);
+        NSError *shimError = nil;
+        NSString *profile = nil;
+        @synchronized(self) { profile = self.profileName; }
+        if (![self synchronizeAppShims:apps profile:profile error:&shimError] && self.logHandler) {
+            NSString *warning = [NSString stringWithFormat:@"macOS 앱 동기화 실패: %@\n",
+                                                         shimError.localizedDescription];
+            NSLog(@"%@", [warning stringByTrimmingCharactersInSet:
+                                      NSCharacterSet.whitespaceAndNewlineCharacterSet]);
+            dispatch_async(dispatch_get_main_queue(), ^{ self.logHandler(warning); });
+        }
         dispatch_async(dispatch_get_main_queue(), ^{ handler(snapshot, nil); });
     });
 }

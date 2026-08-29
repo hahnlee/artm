@@ -6,6 +6,7 @@ source_root="$project_root/apps/DarwinARTManager"
 app="$project_root/_build/Darwin ART Manager.app"
 contents="$app/Contents"
 binary="$contents/MacOS/DarwinARTManager"
+shim_launcher="$contents/Resources/DarwinARTAppLauncher"
 sdk="$(xcrun --sdk macosx --show-sdk-path)"
 
 [[ "$app" == "$project_root/_build/Darwin ART Manager.app" ]] || {
@@ -19,6 +20,10 @@ xcrun clang -arch arm64 -isysroot "$sdk" -mmacosx-version-min=14.0 \
   -fobjc-arc -fmodules -Wall -Wextra -Werror \
   -framework AppKit -framework ServiceManagement -framework UniformTypeIdentifiers \
   "$source_root"/Sources/*.m -o "$binary"
+xcrun clang -arch arm64 -isysroot "$sdk" -mmacosx-version-min=14.0 \
+  -fobjc-arc -fmodules -Wall -Wextra -Werror \
+  -framework AppKit \
+  "$source_root/AppShim/DARAppShimMain.m" -o "$shim_launcher"
 
 cargo build --manifest-path "$project_root/Cargo.toml" -q --release \
   -p darwin-art-host \
@@ -116,6 +121,7 @@ find "$runtime" -type f \( -name '*.dylib' -o -name '*.so' \) -print0 |
 for helper in "$runtime/target/release/"*; do
   codesign --force --sign - --timestamp=none "$helper" >/dev/null
 done
+codesign --force --sign - --timestamp=none "$shim_launcher" >/dev/null
 codesign --force --sign - --timestamp=none "$app" >/dev/null
 plutil -lint "$contents/Info.plist" >/dev/null
 codesign --verify --deep --strict "$app"
