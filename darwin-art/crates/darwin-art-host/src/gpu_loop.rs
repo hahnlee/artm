@@ -553,7 +553,7 @@ pub(super) fn run(
             }
         }
     }
-    while remaining > 0.0 {
+    while remaining > 0.0 && !crate::process_signal::termination_requested() {
         if loop_error.is_none()
             && let (Some((width, height)), Some(after_ms)) =
                 (pending_test_resize, test_resize_after_ms)
@@ -628,6 +628,9 @@ pub(super) fn run(
             break;
         }
         remaining -= slice;
+    }
+    if crate::process_signal::termination_requested() {
+        eprintln!("DARWIN_ART host received graceful termination request");
     }
     if let Some(error) = loop_error {
         return Err(error);

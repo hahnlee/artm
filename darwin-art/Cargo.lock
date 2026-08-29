@@ -330,6 +330,7 @@ dependencies = [
  "darwin-art-engine",
  "darwin-art-engine-sys",
  "darwin-art-runtime",
+ "libc",
 ]
 
 [[package]]

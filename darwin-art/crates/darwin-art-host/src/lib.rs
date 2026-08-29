@@ -10,6 +10,8 @@ mod gpu_loop;
 mod gpu_test_config;
 #[cfg(target_os = "macos")]
 mod host_services;
+#[cfg(target_os = "macos")]
+mod process_signal;
 mod run;
 #[cfg(target_os = "macos")]
 mod runtime;

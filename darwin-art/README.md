@@ -43,6 +43,21 @@ tools/darwin-art run com.example.app
 tools/darwin-art ps
 ```
 
+The native macOS manager uses AppKit (no SwiftUI or storyboard) and the same
+profile daemon/CLI contract. It lists installed packages and live PIDs,
+installs unchanged APKs, launches and gracefully terminates applications, and
+opens their private data directory:
+
+```sh
+tools/build-darwin-art-manager.sh
+open "_build/Darwin ART Manager.app"
+```
+
+Set `DARWIN_ART_PROFILE` before launching the executable directly to select a
+non-default profile. Managed application output is appended to
+`~/Library/Application Support/DarwinART/profiles/<profile>/managed-apps.log`
+so applications remain independent of the manager window's lifetime.
+
 Physical-keyboard status and the remaining Android `.kl`/`.kcm` compatibility
 work are documented in
 [`docs/physical-keyboard-compatibility.md`](docs/physical-keyboard-compatibility.md).

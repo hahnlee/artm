@@ -39,6 +39,8 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
 
     #[cfg(target_os = "macos")]
     {
+        crate::process_signal::install()
+            .map_err(|error| HostError::HostService(format!("install SIGTERM handler: {error}")))?;
         let mut runtime = HostRuntime::new();
         runtime
             .start()
