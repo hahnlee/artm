@@ -365,6 +365,12 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
             "AudioToolbox",
             "-framework",
             "CoreAudio",
+            "-framework",
+            "CoreMedia",
+            "-framework",
+            "CoreVideo",
+            "-framework",
+            "VideoToolbox",
             "-o",
         ])
         .arg(&runtime_library);

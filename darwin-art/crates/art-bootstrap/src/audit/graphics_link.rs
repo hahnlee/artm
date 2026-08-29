@@ -576,6 +576,12 @@ pub(crate) fn audit_runtime_graphics_link_mode(
             "AudioToolbox",
             "-framework",
             "CoreAudio",
+            "-framework",
+            "CoreMedia",
+            "-framework",
+            "CoreVideo",
+            "-framework",
+            "VideoToolbox",
             "-o",
         ])
         .arg(&runtime_library);

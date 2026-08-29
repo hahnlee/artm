@@ -589,6 +589,12 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
             "AudioToolbox",
             "-framework",
             "CoreAudio",
+            "-framework",
+            "CoreMedia",
+            "-framework",
+            "CoreVideo",
+            "-framework",
+            "VideoToolbox",
             "-o",
         ])
         .arg(&runtime_library);

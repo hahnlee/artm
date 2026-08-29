@@ -3,6 +3,7 @@
 #include "darwin_angle_egl.h"
 #include "darwin_framework_system_natives.h"
 #include "darwin_motion_event_natives.h"
+#include "darwin_media_codec.h"
 #include "darwin_security_trust.h"
 
 #include <cstdint>
@@ -606,40 +607,6 @@ bool Register(JNIEnv* env, const char* class_name, JNINativeMethod* methods,
 
 void MediaDrmNativeInit(JNIEnv*, jclass) {}
 
-// The Android framework keeps MediaCodecList's registry behind media_jni.  A
-// Darwin host does not expose Android's mediaserver/codecs, but callers still
-// expect the class to initialize successfully and observe an empty registry.
-// Returning zero codecs is the framework contract for an unavailable media
-// provider; it is preferable to leaving native_init unresolved, which turns a
-// capability probe into UnsatisfiedLinkError and can abort Chromium's service
-// process while it is bringing up its renderer.
-void MediaCodecListNativeInit(JNIEnv*, jclass) {}
-jint MediaCodecListNativeGetCodecCount(JNIEnv*, jclass) { return 0; }
-jint MediaCodecListFindCodecByName(JNIEnv*, jclass, jstring) { return -1; }
-jint MediaCodecListGetAttributes(JNIEnv*, jclass, jint) { return 0; }
-jstring MediaCodecListGetCanonicalName(JNIEnv*, jclass, jint) { return nullptr; }
-jobject MediaCodecListGetCodecCapabilities(JNIEnv*, jclass, jint, jstring) {
-  return nullptr;
-}
-jstring MediaCodecListGetCodecName(JNIEnv*, jclass, jint) { return nullptr; }
-jobjectArray MediaCodecListGetSupportedTypes(JNIEnv* env, jclass, jint) {
-  jclass string_class = env->FindClass("java/lang/String");
-  if (string_class == nullptr) return nullptr;
-  jobjectArray result = env->NewObjectArray(0, string_class, nullptr);
-  env->DeleteLocalRef(string_class);
-  return result;
-}
-jobject MediaCodecListGetGlobalSettings(JNIEnv* env, jclass) {
-  jclass map_class = env->FindClass("java/util/HashMap");
-  if (map_class == nullptr) return nullptr;
-  jmethodID constructor = env->GetMethodID(map_class, "<init>", "()V");
-  jobject result = constructor == nullptr
-                       ? nullptr
-                       : env->NewObject(map_class, constructor);
-  env->DeleteLocalRef(map_class);
-  return result;
-}
-
 jboolean MediaDrmIsCryptoSchemeSupported(JNIEnv*, jclass, jbyteArray,
                                          jstring, jint) {
   return JNI_FALSE;
@@ -744,30 +711,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
                 static_cast<jint>(std::size(media_drm_methods)))) {
     return false;
   }
-  JNINativeMethod media_codec_list_methods[] = {
-      {const_cast<char*>("findCodecByName"), const_cast<char*>("(Ljava/lang/String;)I"),
-       reinterpret_cast<void*>(&MediaCodecListFindCodecByName)},
-      {const_cast<char*>("getAttributes"), const_cast<char*>("(I)I"),
-       reinterpret_cast<void*>(&MediaCodecListGetAttributes)},
-      {const_cast<char*>("getCanonicalName"), const_cast<char*>("(I)Ljava/lang/String;"),
-       reinterpret_cast<void*>(&MediaCodecListGetCanonicalName)},
-      {const_cast<char*>("getCodecCapabilities"),
-       const_cast<char*>("(ILjava/lang/String;)Landroid/media/MediaCodecInfo$CodecCapabilities;"),
-       reinterpret_cast<void*>(&MediaCodecListGetCodecCapabilities)},
-      {const_cast<char*>("getCodecName"), const_cast<char*>("(I)Ljava/lang/String;"),
-       reinterpret_cast<void*>(&MediaCodecListGetCodecName)},
-      {const_cast<char*>("getSupportedTypes"), const_cast<char*>("(I)[Ljava/lang/String;"),
-       reinterpret_cast<void*>(&MediaCodecListGetSupportedTypes)},
-      {const_cast<char*>("native_getCodecCount"), const_cast<char*>("()I"),
-       reinterpret_cast<void*>(&MediaCodecListNativeGetCodecCount)},
-      {const_cast<char*>("native_getGlobalSettings"),
-       const_cast<char*>("()Ljava/util/Map;"),
-       reinterpret_cast<void*>(&MediaCodecListGetGlobalSettings)},
-      {const_cast<char*>("native_init"), const_cast<char*>("()V"),
-       reinterpret_cast<void*>(&MediaCodecListNativeInit)},
-  };
-  if (!Register(env, "android/media/MediaCodecList", media_codec_list_methods,
-                static_cast<jint>(std::size(media_codec_list_methods)))) {
+  if (!darwin_art::RegisterDarwinMediaCodecNatives(env)) {
     return false;
   }
   if (!RegisterMotionEventNatives(env)) {

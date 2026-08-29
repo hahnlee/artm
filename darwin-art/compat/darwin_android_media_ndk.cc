@@ -4,22 +4,52 @@
 #include "darwin_art_bionic_socket_broker.h"
 
 #include <android/hardware_buffer.h>
+#include <CoreMedia/CoreMedia.h>
 #include <media/NdkImage.h>
 #include <media/NdkImageReader.h>
+#include <VideoToolbox/VideoToolbox.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
+#include <deque>
+#include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
+#include <sys/types.h>
 
 struct AMediaFormat {
   std::unordered_map<std::string, int32_t> integers;
   std::unordered_map<std::string, float> floats;
   std::unordered_map<std::string, std::string> strings;
+  std::unordered_map<std::string, std::vector<uint8_t>> buffers;
 };
 
-struct AMediaCodec;
+struct AMediaCodec {
+  std::mutex mutex;
+  std::string name;
+  std::string mime;
+  bool configured = false;
+  bool started = false;
+  std::vector<uint8_t> input;
+  std::deque<std::vector<uint8_t>> output;
+  CMVideoFormatDescriptionRef format = nullptr;
+  VTDecompressionSessionRef session = nullptr;
+};
+struct AMediaCodecBufferInfo {
+  int32_t offset;
+  int32_t size;
+  int64_t presentationTimeUs;
+  uint32_t flags;
+};
+struct AMediaCodecOnAsyncNotifyCallback {
+  void (*on_async_input_available)(AMediaCodec*, void*, int32_t);
+  void (*on_async_output_available)(AMediaCodec*, void*, int32_t, void*);
+  void (*on_async_format_changed)(AMediaCodec*, void*, AMediaFormat*);
+  void (*on_async_error)(AMediaCodec*, void*, int32_t, int32_t, const char*);
+};
 struct ANativeWindow;
 struct AMediaCrypto;
 
@@ -37,13 +67,6 @@ struct AImageReader {
   int32_t max_images = 0;
   ANativeWindow* window = nullptr;
   AImageReader_ImageListener listener{};
-};
-
-struct AMediaCodecOnAsyncNotifyCallback {
-  void (*on_async_input_available)(AMediaCodec*, void*, int32_t);
-  void (*on_async_output_available)(AMediaCodec*, void*, int32_t, void*);
-  void (*on_async_format_changed)(AMediaCodec*, void*, AMediaFormat*);
-  void (*on_async_error)(AMediaCodec*, void*, int32_t, int32_t, const char*);
 };
 
 namespace {
@@ -111,26 +134,153 @@ extern "C" void AMediaFormat_setString(AMediaFormat* format,
   }
 }
 
-extern "C" AMediaCodec* AMediaCodec_createCodecByName(const char*) {
-  // Chromium can fall back to its software decoder when no Android codec is
-  // advertised. A VideoToolbox-backed codec will replace this explicit
-  // unsupported result without changing the exported NDK boundary.
+extern "C" bool AMediaFormat_getBuffer(AMediaFormat* format, const char* name,
+                                         void** output, size_t* size) {
+  if (format == nullptr || name == nullptr || output == nullptr || size == nullptr)
+    return false;
+  auto found = format->buffers.find(name);
+  if (found == format->buffers.end()) return false;
+  *output = found->second.data();
+  *size = found->second.size();
+  return true;
+}
+
+extern "C" void AMediaFormat_setBuffer(AMediaFormat* format, const char* name,
+                                         const void* data, size_t size) {
+  if (format == nullptr || name == nullptr || data == nullptr) return;
+  const auto* bytes = static_cast<const uint8_t*>(data);
+  format->buffers[name] = std::vector<uint8_t>(bytes, bytes + size);
+}
+
+std::vector<uint8_t> StripCodecStartCode(const std::vector<uint8_t>& value) {
+  size_t offset = 0;
+  if (value.size() >= 4 && value[0] == 0 && value[1] == 0 && value[2] == 0 &&
+      value[3] == 1) offset = 4;
+  else if (value.size() >= 3 && value[0] == 0 && value[1] == 0 && value[2] == 1)
+    offset = 3;
+  return std::vector<uint8_t>(value.begin() + offset, value.end());
+}
+
+void NdkDecodeCallback(void* refcon, void*, OSStatus status, VTDecodeInfoFlags,
+                       CVImageBufferRef image, CMTime, CMTime) {
+  auto* codec = static_cast<AMediaCodec*>(refcon);
+  if (codec == nullptr || status != noErr || image == nullptr) return;
+  auto pixel = static_cast<CVPixelBufferRef>(image);
+  CVPixelBufferLockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
+  const size_t width = CVPixelBufferGetWidth(pixel);
+  const size_t height = CVPixelBufferGetHeight(pixel);
+  std::vector<uint8_t> frame(width * height * 3 / 2);
+  if (CVPixelBufferGetPlaneCount(pixel) >= 2) {
+    auto* y = static_cast<uint8_t*>(CVPixelBufferGetBaseAddressOfPlane(pixel, 0));
+    auto* uv = static_cast<uint8_t*>(CVPixelBufferGetBaseAddressOfPlane(pixel, 1));
+    const size_t y_stride = CVPixelBufferGetBytesPerRowOfPlane(pixel, 0);
+    const size_t uv_stride = CVPixelBufferGetBytesPerRowOfPlane(pixel, 1);
+    for (size_t row = 0; row < height; ++row)
+      std::memcpy(frame.data() + row * width, y + row * y_stride, width);
+    for (size_t row = 0; row < height / 2; ++row)
+      std::memcpy(frame.data() + width * height + row * width,
+                  uv + row * uv_stride, width);
+  } else {
+    frame.clear();
+  }
+  CVPixelBufferUnlockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
+  if (!frame.empty()) {
+    std::lock_guard<std::mutex> lock(codec->mutex);
+    codec->output.push_back(std::move(frame));
+  }
+}
+
+extern "C" AMediaCodec* AMediaCodec_createCodecByName(const char* name) {
+  if (name == nullptr || (std::strcmp(name, "c2.darwin.avc.decoder") != 0 &&
+                          std::strcmp(name, "c2.darwin.hevc.decoder") != 0))
+    return nullptr;
+  auto* codec = new (std::nothrow) AMediaCodec();
+  if (codec != nullptr) codec->name = name;
+  return codec;
+}
+
+extern "C" AMediaCodec* AMediaCodec_createDecoderByType(const char* mime) {
+  if (mime == nullptr) return nullptr;
+  if (std::strcmp(mime, "video/hevc") == 0)
+    return AMediaCodec_createCodecByName("c2.darwin.hevc.decoder");
+  if (std::strcmp(mime, "video/avc") == 0)
+    return AMediaCodec_createCodecByName("c2.darwin.avc.decoder");
   return nullptr;
 }
 
-extern "C" int32_t AMediaCodec_delete(AMediaCodec*) { return 0; }
+extern "C" AMediaCodec* AMediaCodec_createEncoderByType(const char*) {
+  return nullptr;
+}
+
+extern "C" int32_t AMediaCodec_delete(AMediaCodec* codec) {
+  if (codec == nullptr) return kMediaErrorInvalidObject;
+  if (codec->session != nullptr) {
+    VTDecompressionSessionWaitForAsynchronousFrames(codec->session);
+    VTDecompressionSessionInvalidate(codec->session);
+    CFRelease(codec->session);
+  }
+  if (codec->format != nullptr) CFRelease(codec->format);
+  delete codec;
+  return 0;
+}
 extern "C" int32_t AMediaCodec_configure(AMediaCodec* codec,
-                                          const AMediaFormat*,
+                                          const AMediaFormat* format,
                                           ANativeWindow*,
                                           AMediaCrypto*,
                                           uint32_t) {
-  return codec == nullptr ? kMediaErrorInvalidObject : kMediaErrorUnsupported;
+  if (codec == nullptr || format == nullptr) return kMediaErrorInvalidObject;
+  auto mime = format->strings.find("mime");
+  auto sps_it = format->buffers.find("csd-0");
+  auto pps_it = format->buffers.find("csd-1");
+  auto vps_it = format->buffers.find("csd-2");
+  const bool hevc = codec->name.find("hevc") != std::string::npos;
+  if (mime == format->strings.end() || sps_it == format->buffers.end() ||
+      pps_it == format->buffers.end() || (hevc && vps_it == format->buffers.end()))
+    return kMediaErrorUnsupported;
+  codec->mime = mime->second;
+  const auto sps = StripCodecStartCode(sps_it->second);
+  const auto pps = StripCodecStartCode(pps_it->second);
+  OSStatus status = noErr;
+  if (!hevc) {
+    const uint8_t* sets[] = {sps.data(), pps.data()};
+    size_t sizes[] = {sps.size(), pps.size()};
+    status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
+        kCFAllocatorDefault, 2, sets, sizes, 4, &codec->format);
+  } else {
+    const auto vps = StripCodecStartCode(vps_it->second);
+    const uint8_t* sets[] = {vps.data(), sps.data(), pps.data()};
+    size_t sizes[] = {vps.size(), sps.size(), pps.size()};
+    status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+        kCFAllocatorDefault, 3, sets, sizes, 4, nullptr, &codec->format);
+  }
+  if (status != noErr) return kMediaErrorUnsupported;
+  VTDecompressionOutputCallbackRecord callback = {
+      .decompressionOutputCallback = &NdkDecodeCallback,
+      .decompressionOutputRefCon = codec};
+  status = VTDecompressionSessionCreate(kCFAllocatorDefault, codec->format,
+                                         nullptr, nullptr, &callback,
+                                         &codec->session);
+  if (status != noErr) return kMediaErrorUnsupported;
+  codec->input.resize(4 * 1024 * 1024);
+  codec->configured = true;
+  return 0;
 }
 extern "C" int32_t AMediaCodec_start(AMediaCodec* codec) {
-  return codec == nullptr ? kMediaErrorInvalidObject : kMediaErrorUnsupported;
+  if (codec == nullptr) return kMediaErrorInvalidObject;
+  if (!codec->configured) return kMediaErrorUnsupported;
+  codec->started = true;
+  return 0;
 }
 extern "C" int32_t AMediaCodec_stop(AMediaCodec* codec) {
-  return codec == nullptr ? kMediaErrorInvalidObject : kMediaErrorUnsupported;
+  if (codec == nullptr) return kMediaErrorInvalidObject;
+  codec->started = false;
+  return 0;
+}
+extern "C" int32_t AMediaCodec_flush(AMediaCodec* codec) {
+  if (codec == nullptr) return kMediaErrorInvalidObject;
+  std::lock_guard<std::mutex> lock(codec->mutex);
+  codec->output.clear();
+  return 0;
 }
 extern "C" int32_t AMediaCodec_setAsyncNotifyCallback(
     AMediaCodec* codec, AMediaCodecOnAsyncNotifyCallback, void*) {
@@ -140,36 +290,94 @@ extern "C" int32_t AMediaCodec_setParameters(AMediaCodec* codec,
                                               const AMediaFormat*) {
   return codec == nullptr ? kMediaErrorInvalidObject : kMediaErrorUnsupported;
 }
-extern "C" uint8_t* AMediaCodec_getInputBuffer(AMediaCodec*, size_t, size_t*) {
-  return nullptr;
+extern "C" uint8_t* AMediaCodec_getInputBuffer(AMediaCodec* codec, size_t index,
+                                                 size_t* size) {
+  if (size != nullptr) *size = 0;
+  if (codec == nullptr || index != 0 || !codec->started) return nullptr;
+  if (size != nullptr) *size = codec->input.size();
+  return codec->input.data();
 }
-extern "C" uint8_t* AMediaCodec_getOutputBuffer(AMediaCodec*, size_t, size_t*) {
-  return nullptr;
+extern "C" uint8_t* AMediaCodec_getOutputBuffer(AMediaCodec* codec, size_t index,
+                                                  size_t* size) {
+  if (size != nullptr) *size = 0;
+  if (codec == nullptr || index != 0) return nullptr;
+  std::lock_guard<std::mutex> lock(codec->mutex);
+  if (codec->output.empty()) return nullptr;
+  if (size != nullptr) *size = codec->output.front().size();
+  return codec->output.front().data();
 }
 extern "C" AMediaFormat* AMediaCodec_getInputFormat(AMediaCodec*) {
-  return nullptr;
+  return AMediaFormat_new();
 }
 extern "C" AMediaFormat* AMediaCodec_getBufferFormat(AMediaCodec*, size_t) {
-  return nullptr;
+  return AMediaFormat_new();
+}
+extern "C" ssize_t AMediaCodec_dequeueInputBuffer(AMediaCodec* codec, int64_t) {
+  return codec != nullptr && codec->started ? 0 : -1;
+}
+extern "C" ssize_t AMediaCodec_dequeueOutputBuffer(
+    AMediaCodec* codec, AMediaCodecBufferInfo* info, int64_t) {
+  if (codec == nullptr || info == nullptr) return -1;
+  std::lock_guard<std::mutex> lock(codec->mutex);
+  if (codec->output.empty()) return -1;
+  info->offset = 0;
+  info->size = static_cast<int32_t>(codec->output.front().size());
+  info->presentationTimeUs = 0;
+  info->flags = 0;
+  return 0;
 }
 extern "C" int32_t AMediaCodec_queueInputBuffer(AMediaCodec* codec,
-                                                 size_t,
-                                                 size_t,
-                                                 size_t,
-                                                 uint64_t,
-                                                 uint32_t) {
-  return codec == nullptr ? kMediaErrorInvalidObject : kMediaErrorUnsupported;
+                                                 size_t index,
+                                                 size_t offset,
+                                                 size_t size,
+                                                 uint64_t pts,
+                                                 uint32_t flags) {
+  if (codec == nullptr) return kMediaErrorInvalidObject;
+  if (index != 0 || !codec->started || codec->session == nullptr ||
+      offset + size > codec->input.size()) return kMediaErrorUnsupported;
+  CMBlockBufferRef block = nullptr;
+  OSStatus status = CMBlockBufferCreateWithMemoryBlock(
+      kCFAllocatorDefault, nullptr, size, kCFAllocatorDefault, nullptr, 0,
+      size, 0, &block);
+  if (status == kCMBlockBufferNoErr)
+    status = CMBlockBufferReplaceDataBytes(codec->input.data() + offset, block,
+                                            0, size);
+  if (status != kCMBlockBufferNoErr) return kMediaErrorUnsupported;
+  CMSampleTimingInfo timing = {kCMTimeInvalid, CMTimeMake(pts, 1000000),
+                               kCMTimeInvalid};
+  CMSampleBufferRef sample = nullptr;
+  status = CMSampleBufferCreateReady(kCFAllocatorDefault, block, codec->format,
+                                      1, 1, &timing, 0, nullptr, &sample);
+  if (status == noErr) {
+    VTDecompressionSessionDecodeFrame(codec->session, sample, 0, nullptr,
+                                      nullptr);
+    CFRelease(sample);
+  }
+  CFRelease(block);
+  return status == noErr ? 0 : kMediaErrorUnsupported;
 }
 extern "C" int32_t AMediaCodec_releaseOutputBuffer(AMediaCodec* codec,
-                                                    size_t,
+                                                    size_t index,
                                                     bool) {
-  return codec == nullptr ? kMediaErrorInvalidObject : kMediaErrorUnsupported;
+  if (codec == nullptr) return kMediaErrorInvalidObject;
+  if (index != 0) return kMediaErrorUnsupported;
+  std::lock_guard<std::mutex> lock(codec->mutex);
+  if (codec->output.empty()) return kMediaErrorUnsupported;
+  codec->output.pop_front();
+  return 0;
 }
 extern "C" int32_t AMediaCodec_getName(AMediaCodec* codec, char** name) {
-  if (name != nullptr) *name = nullptr;
-  return codec == nullptr ? kMediaErrorInvalidObject : kMediaErrorUnsupported;
+  if (name == nullptr) return kMediaErrorInvalidObject;
+  *name = nullptr;
+  if (codec == nullptr) return kMediaErrorInvalidObject;
+  *name = static_cast<char*>(std::malloc(codec->name.size() + 1));
+  if (*name == nullptr) return -12;
+  std::memcpy(*name, codec->name.c_str(), codec->name.size() + 1);
+  return 0;
 }
-extern "C" void AMediaCodec_releaseName(AMediaCodec*, char*) {}
+extern "C" void AMediaCodec_releaseName(AMediaCodec*, char* name) {
+  std::free(name);
+}
 
 extern "C" media_status_t AImageReader_newWithUsage(
     int32_t width, int32_t height, int32_t format, uint64_t usage,
@@ -269,8 +477,13 @@ void* darwin_art_android_media_ndk_symbol(const char* symbol) {
     return reinterpret_cast<void*>(&name);           \
   }
   MEDIA_FUNCTION(AMediaCodec_configure)
+  MEDIA_FUNCTION(AMediaCodec_createDecoderByType)
   MEDIA_FUNCTION(AMediaCodec_createCodecByName)
+  MEDIA_FUNCTION(AMediaCodec_createEncoderByType)
   MEDIA_FUNCTION(AMediaCodec_delete)
+  MEDIA_FUNCTION(AMediaCodec_dequeueInputBuffer)
+  MEDIA_FUNCTION(AMediaCodec_dequeueOutputBuffer)
+  MEDIA_FUNCTION(AMediaCodec_flush)
   MEDIA_FUNCTION(AMediaCodec_getBufferFormat)
   MEDIA_FUNCTION(AMediaCodec_getInputBuffer)
   MEDIA_FUNCTION(AMediaCodec_getInputFormat)
@@ -285,9 +498,11 @@ void* darwin_art_android_media_ndk_symbol(const char* symbol) {
   MEDIA_FUNCTION(AMediaCodec_stop)
   MEDIA_FUNCTION(AMediaFormat_delete)
   MEDIA_FUNCTION(AMediaFormat_getInt32)
+  MEDIA_FUNCTION(AMediaFormat_getBuffer)
   MEDIA_FUNCTION(AMediaFormat_new)
   MEDIA_FUNCTION(AMediaFormat_setFloat)
   MEDIA_FUNCTION(AMediaFormat_setInt32)
+  MEDIA_FUNCTION(AMediaFormat_setBuffer)
   MEDIA_FUNCTION(AMediaFormat_setString)
   MEDIA_FUNCTION(AImageReader_acquireLatestImageAsync)
   MEDIA_FUNCTION(AImageReader_acquireNextImageAsync)
