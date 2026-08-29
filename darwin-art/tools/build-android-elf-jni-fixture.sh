@@ -18,6 +18,14 @@ host_objdump="$(xcrun --find llvm-objdump)"
 
 fail() { echo "android-elf-jni-fixture: $*" >&2; exit 3; }
 missing() { echo "android-elf-jni-fixture: missing $*" >&2; exit 2; }
+publish_if_changed() {
+  local source="$1"
+  local destination="$2"
+  if [[ -f "$destination" ]] && cmp -s "$source" "$destination"; then
+    return
+  fi
+  cp "$source" "$destination"
+}
 
 for tool in "$android_clang" "$readelf" "$nm" "$objdump" "$host_clang" "$host_objdump"; do
   [[ -x "$tool" ]] || missing "$tool"
@@ -198,12 +206,12 @@ darwin_stack_loads="$(grep -Ec '(ldr[[:space:]]+[wx][0-9]+|ldp[[:space:]]+w[0-9]
   fail "Darwin NativeSpill has $darwin_stack_loads stack loads, expected exactly 3"
 
 mkdir -p "$build_dir"
-cp "$output" "$build_dir/libdarwin-art-jni-fixture.so"
-cp "$child" "$build_dir/libdarwin-art-jni-child.so"
-cp "$grandchild" "$build_dir/libdarwin-art-jni-grandchild.so"
-cp "$generic_root" "$build_dir/libdarwin-art-generic-root.so"
-cp "$generic_child" "$build_dir/libdarwin-art-generic-child.so"
-cp "$generic_grandchild" "$build_dir/libdarwin-art-generic-grandchild.so"
+publish_if_changed "$output" "$build_dir/libdarwin-art-jni-fixture.so"
+publish_if_changed "$child" "$build_dir/libdarwin-art-jni-child.so"
+publish_if_changed "$grandchild" "$build_dir/libdarwin-art-jni-grandchild.so"
+publish_if_changed "$generic_root" "$build_dir/libdarwin-art-generic-root.so"
+publish_if_changed "$generic_child" "$build_dir/libdarwin-art-generic-child.so"
+publish_if_changed "$generic_grandchild" "$build_dir/libdarwin-art-generic-grandchild.so"
 fixture_sha="$(shasum -a 256 "$output" | awk '{print $1}')"
 fixture_size="$(stat -f '%z' "$output")"
 child_sha="$(shasum -a 256 "$child" | awk '{print $1}')"
@@ -241,5 +249,5 @@ identity="$stage/darwin_art_elf_jni_fixture_identity.h"
   echo 'inline constexpr size_t kDarwinArtElfJniFixtureDarwinD4StackOffset = 16u;'
   echo '#endif'
 } > "$identity"
-cp "$identity" "$generated_dir/darwin_art_elf_jni_fixture_identity.h"
+publish_if_changed "$identity" "$generated_dir/darwin_art_elf_jni_fixture_identity.h"
 echo "android-elf-jni-fixture: PASS graph=root+child+grandchild+virtual-provider+libc ctor=child-first cxa=root-first-before-fini fini=root-first bionic=__errno+strlen+open+read+close+sendfile+sscanf+vsscanf+swprintf+ioctl+strftime_l+__cxa_atexit random=ctor sendfile=/data-create-truncate+null+explicit-offset+reopen ioctl=RNDGETENTCNT scanf=binary128+va_list32 swprintf=Android-wchar32 strftime=UTC dso-handle=local exports=JNI_OnLoad+JNI_OnUnload relro=0 tls=0 register=generic1+fixture8+foreign-reject pcs=android(ref@0,f4@8,f5@16,d4@24)+darwin(ref@0,f4@8,f5@12,d4@16) root_size=$fixture_size root_sha256=$fixture_sha child_size=$child_size child_sha256=$child_sha grandchild_size=$grandchild_size grandchild_sha256=$grandchild_sha"

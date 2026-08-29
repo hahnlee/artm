@@ -30,8 +30,8 @@ graphics_cpp="$(grep -Ec '_build/android-graphics-jni/objects/.*: native_cached_
   echo "native-graph: ART runtime cache not promotable ($runtime_cpp TUs)" >&2
   exit 1
 }
-(( graphics_cpp >= 62 )) || {
-  echo "native-graph: GraphicsJNI cache incomplete ($graphics_cpp TUs)" >&2
+(( graphics_cpp >= 63 )) || {
+  echo "native-graph: GraphicsJNI cache incomplete ($graphics_cpp/63 TUs)" >&2
   exit 1
 }
 grep -q 'depfile = \$out.d' "$graph"

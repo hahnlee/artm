@@ -77,6 +77,7 @@ warm direct-CLI sample measured:
 | 2026-08-21 | warm/no-op | `target/debug/art-bootstrap audit-runtime-link` | 0 | 14.60 |
 | 2026-08-21 | warm/no-op | `target/debug/art-bootstrap audit-runtime-graphics-link-fast` | 0 | 3.41 |
 | 2026-08-21 | warm/incremental | `target/debug/art-bootstrap audit-runtime-graphics-link-incremental` | 0 | 24.81 |
+| 2026-08-29 | warm/no-op | `cargo run -q -p art-bootstrap -- build-foundation` | 0 | 1.47 |
 
 The six flavor-neutral core probe objects are now shared under
 `_build/native-probes/core`; the warm samples therefore do not recompile those
@@ -86,6 +87,9 @@ compared to the 58.88 s full upstream graphics audit as if they were the same
 workload. The incremental row includes the graphics closure audit and final
 link/symbol checks while reusing all 14 source-pinned foundation products; its
 first run after a stamp/input change remains a cold foundation build.
+The 2026-08-29 foundation sample also preserved the patched-source and archive
+mtimes; regenerating the native graph immediately afterward reported
+`ninja: no work to do` for `graphics-bootstrap`.
 
 ## Known bottlenecks
 

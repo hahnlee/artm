@@ -485,7 +485,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         .cloned()
         .collect::<Vec<_>>();
     let hwui_ready = hwui_main.len() == 81 && hwui_apex.len() == 5;
-    let graphics_ready = graphics_main.len() == 61 && graphics_registrar.len() == 1;
+    let graphics_ready = graphics_main.len() == 62 && graphics_registrar.len() == 1;
     let icu_cached = cached_foundation_objects(&native_output_root.join("icu-foundation/objects"))?;
     let icu_common = icu_cached
         .iter()

@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
 pub(crate) fn build_foundation(root: &Path) -> Result<()> {
     let artbase = root.join("_aosp/art/libartbase");
@@ -15,37 +16,56 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
     let object_dir = build_dir.join("objects");
     fs::create_dir_all(patched_artbase.join("base"))?;
     fs::create_dir_all(&object_dir)?;
-    fs::copy(
-        artbase.join("base/globals.h"),
-        patched_artbase.join("base/globals.h"),
-    )?;
-    let stale_mem_map_overlay = patched_artbase.join("base/mem_map.h");
-    if stale_mem_map_overlay.exists() {
-        fs::remove_file(stale_mem_map_overlay)?;
-    }
-    let stale_utils_overlay = patched_artbase.join("base/utils.h");
-    if stale_utils_overlay.exists() {
-        fs::remove_file(stale_utils_overlay)?;
-    }
-    fs::copy(
-        artbase.join("base/mem_map.cc"),
-        patched_artbase.join("base/mem_map.cc"),
-    )?;
-    fs::copy(
-        artbase.join("base/mem_map_unix.cc"),
-        patched_artbase.join("base/mem_map_unix.cc"),
-    )?;
-    for patch in [
+    let foundation_patches = [
         "patches/art/0002-darwin-dynamic-page-size.patch",
         "patches/art/0020-darwin-low4g-mach-reservation.patch",
         "patches/art/0021-darwin-compressed-reference-window.patch",
-    ] {
-        run_command(
-            Command::new("patch")
-                .args(["--batch", "--forward", "-p1", "-i"])
-                .arg(root.join(patch))
-                .current_dir(&patched_source_dir),
-        )?;
+    ];
+    let shadow_identity = foundation_shadow_identity(root, &artbase, &foundation_patches)?;
+    let shadow_identity_path = patched_source_dir.join(".darwin-art-shadow-identity");
+    let shadow_current = fs::read_to_string(&shadow_identity_path)
+        .is_ok_and(|cached| cached.trim() == shadow_identity)
+        && ["globals.h", "mem_map.cc", "mem_map_unix.cc"]
+            .iter()
+            .all(|source| patched_artbase.join("base").join(source).is_file());
+    if !shadow_current {
+        let candidate_dir =
+            build_dir.join(format!("patched-source.candidate-{}", std::process::id()));
+        let candidate_artbase = candidate_dir.join("libartbase/base");
+        if candidate_dir.exists() {
+            fs::remove_dir_all(&candidate_dir)?;
+        }
+        fs::create_dir_all(&candidate_artbase)?;
+        for source in ["globals.h", "mem_map.cc", "mem_map_unix.cc"] {
+            fs::copy(
+                artbase.join("base").join(source),
+                candidate_artbase.join(source),
+            )?;
+        }
+        for patch in foundation_patches {
+            run_command(
+                Command::new("patch")
+                    .args(["--batch", "--forward", "-p1", "-i"])
+                    .arg(root.join(patch))
+                    .current_dir(&candidate_dir),
+            )?;
+        }
+        for source in ["globals.h", "mem_map.cc", "mem_map_unix.cc"] {
+            publish_if_changed(
+                &candidate_artbase.join(source),
+                &patched_artbase.join("base").join(source),
+            )?;
+        }
+        fs::remove_dir_all(candidate_dir)?;
+        for stale in ["mem_map.h", "utils.h"] {
+            let overlay = patched_artbase.join("base").join(stale);
+            if overlay.exists() {
+                fs::remove_file(overlay)?;
+            }
+        }
+        let temporary = shadow_identity_path.with_extension(format!("tmp-{}", std::process::id()));
+        fs::write(&temporary, format!("{shadow_identity}\n"))?;
+        fs::rename(temporary, shadow_identity_path)?;
     }
     let libbase_include = libbase.join("include");
     let artbase_base = artbase.join("base");
@@ -73,12 +93,19 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
         libbase.join("stringprintf.cpp"),
         libbase.join("strings.cpp"),
     ];
-    let mut android_base_objects = Vec::new();
-    for source in android_base_sources {
-        android_base_objects.push(compile_cpp(&source, &object_dir, &includes)?);
-    }
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let android_base_jobs = android_base_sources
+        .into_iter()
+        .map(|source| pending_compile(common_cpp_command(&includes), source, &object_dir))
+        .collect::<Result<Vec<_>>>()?;
+    let (android_base_objects, android_base_compiled, _) =
+        compile_pending_native(android_base_jobs, &compiler_identity)?;
     let android_base_archive = build_dir.join("libandroid-base-darwin.a");
-    create_archive(&android_base_archive, &android_base_objects)?;
+    create_archive_if_needed(
+        &android_base_archive,
+        &android_base_objects,
+        android_base_compiled,
+    )?;
 
     let zip_object_dir = build_dir.join("zip-objects");
     fs::create_dir_all(&zip_object_dir)?;
@@ -88,23 +115,24 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
         "zip_cd_entry_map.cc",
         "zip_error.cpp",
     ];
-    let mut zip_objects = Vec::new();
+    let mut zip_jobs = Vec::new();
     for source in zip_sources {
         let source_path = libziparchive.join(source);
         let object = zip_object_dir.join(format!("{source}.o"));
-        run_command(
-            common_cpp_command(&includes)
-                .arg("-DZLIB_CONST")
-                .arg("-D_FILE_OFFSET_BITS=64")
-                .arg("-DINCFS_SUPPORT_DISABLED=1")
-                .arg("-c")
-                .arg(&source_path)
-                .arg("-o")
-                .arg(&object),
-        )?;
-        zip_objects.push(object);
+        let mut command = common_cpp_command(&includes);
+        command
+            .arg("-DZLIB_CONST")
+            .arg("-D_FILE_OFFSET_BITS=64")
+            .arg("-DINCFS_SUPPORT_DISABLED=1")
+            .arg("-c")
+            .arg(&source_path)
+            .arg("-o")
+            .arg(&object);
+        zip_jobs.push(PendingNativeCompile { command, object });
     }
-    create_archive(&build_dir.join("libziparchive-darwin.a"), &zip_objects)?;
+    let (zip_objects, zip_compiled, _) = compile_pending_native(zip_jobs, &compiler_identity)?;
+    let zip_archive = build_dir.join("libziparchive-darwin.a");
+    create_archive_if_needed(&zip_archive, &zip_objects, zip_compiled)?;
 
     let artbase_operator_source = build_dir.join("generated/artbase_operator_out.cc");
     generate_operator_source(
@@ -152,23 +180,14 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
         patched_artbase.join("base/mem_map_unix.cc"),
         tinyxml2.join("tinyxml2.cpp"),
     ];
-    let mut artbase_objects = Vec::new();
-    for source in artbase_sources {
-        let file_name = source
-            .file_name()
-            .ok_or_else(|| format!("source has no file name: {}", source.display()))?;
-        let object = object_dir.join(format!("{}.o", file_name.to_string_lossy()));
-        run_command(
-            runtime_cpp_command(&includes)
-                .arg("-c")
-                .arg(&source)
-                .arg("-o")
-                .arg(&object),
-        )?;
-        artbase_objects.push(object);
-    }
+    let artbase_jobs = artbase_sources
+        .into_iter()
+        .map(|source| pending_compile(runtime_cpp_command(&includes), source, &object_dir))
+        .collect::<Result<Vec<_>>>()?;
+    let (artbase_objects, artbase_compiled, _) =
+        compile_pending_native(artbase_jobs, &compiler_identity)?;
     let artbase_archive = build_dir.join("libartbase-darwin.a");
-    create_archive(&artbase_archive, &artbase_objects)?;
+    create_archive_if_needed(&artbase_archive, &artbase_objects, artbase_compiled)?;
 
     let probe = build_dir.join("foundation-probe");
     run_command(
@@ -184,5 +203,69 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
         return Err(format!("unexpected foundation probe output: {output:?}").into());
     }
     println!("build-foundation: {}", output.trim());
+    Ok(())
+}
+
+fn pending_compile(
+    mut command: Command,
+    source: PathBuf,
+    object_dir: &Path,
+) -> Result<PendingNativeCompile> {
+    let file_name = source
+        .file_name()
+        .ok_or_else(|| format!("source has no file name: {}", source.display()))?;
+    let object = object_dir.join(format!("{}.o", file_name.to_string_lossy()));
+    command.arg("-c").arg(source).arg("-o").arg(&object);
+    Ok(PendingNativeCompile { command, object })
+}
+
+fn foundation_shadow_identity(root: &Path, artbase: &Path, patches: &[&str]) -> Result<String> {
+    let mut digest = Sha256::new();
+    for path in ["globals.h", "mem_map.cc", "mem_map_unix.cc"]
+        .iter()
+        .map(|source| artbase.join("base").join(source))
+        .chain(patches.iter().map(|patch| root.join(patch)))
+    {
+        digest.update(path.to_string_lossy().as_bytes());
+        digest.update([0]);
+        digest.update(fs::read(path)?);
+        digest.update([0]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn publish_if_changed(candidate: &Path, destination: &Path) -> Result<()> {
+    let bytes = fs::read(candidate)?;
+    if destination.is_file() && fs::read(destination)? == bytes {
+        return Ok(());
+    }
+    let temporary =
+        destination.with_extension(format!("darwin-art-copy-tmp-{}", std::process::id()));
+    fs::write(&temporary, bytes)?;
+    fs::rename(temporary, destination)?;
+    Ok(())
+}
+
+fn create_archive_if_needed(archive: &Path, objects: &[PathBuf], compiled: usize) -> Result<()> {
+    let expected = objects
+        .iter()
+        .map(|object| {
+            object
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .ok_or_else(|| format!("object has no file name: {}", object.display()))
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let current = if archive.is_file() {
+        command_output(Command::new("ar").arg("-t").arg(archive))?
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    if compiled > 0 || current != expected {
+        create_archive(archive, objects)?;
+    }
     Ok(())
 }

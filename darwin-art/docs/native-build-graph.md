@@ -49,6 +49,11 @@ The patched ART shadow tree also has a content identity manifest. Preparation
 does not rewrite an unchanged staged source or header, so a canonical fallback
 after graph promotion preserves existing depfile mtimes and reuses the old
 object fingerprints instead of recompiling the full ART archive.
+The libartbase foundation follows the same rule: patches are applied in a
+temporary candidate tree, only byte-different results are published, and its
+native objects use dependency fingerprints. Repeating a DEX/probe command
+therefore neither rewrites the global ART headers nor recreates unchanged
+archives, which keeps the promoted runtime graph warm.
 
 Standalone libcore Linux is also represented by explicit graph inputs for its
 three native phases (`libcore_darwin_linux.cc`,
@@ -105,7 +110,7 @@ ninja -f _build/native-graph/build.ninja -n graphics-foundation
 cargo run -p art-bootstrap -- build-graphics-foundation
 ```
 
-GraphicsJNI promotion is active after its command/depfile materialization: 61
+GraphicsJNI promotion is active after its command/depfile materialization: 62
 JNI objects plus the registrar are compiled in parallel and archived directly,
 with the force-loaded object as a separate link edge. HWUI keeps the
 shell-owned fallback only until its command stamps are materialized. Its source

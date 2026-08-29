@@ -10,8 +10,8 @@ use std::process::Command;
 use crate::build_context::BuildPaths;
 use crate::help;
 use crate::native_build::{
-    FileHashCache, build_elf_loader, common_cpp_command, compile_cpp,
-    compile_with_dependency_cache, create_archive, link_with_cache,
+    FileHashCache, PendingNativeCompile, build_elf_loader, common_cpp_command, compile_cpp,
+    compile_pending_native, compile_with_dependency_cache, create_archive, link_with_cache,
 };
 use crate::support::{command_output, describe_command, run_command};
 
