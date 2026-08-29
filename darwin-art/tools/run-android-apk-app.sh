@@ -386,6 +386,16 @@ if [[ "$package" == "org.chromium.chrome" &&
       "${DARWIN_ART_CHROMIUM_GPU_COMPATIBILITY:-1}" != "0" ]]; then
   export DARWIN_ART_APP_COMMAND_LINE_FILE="${DARWIN_ART_APP_COMMAND_LINE_FILE:-chrome-command-line}"
   chromium_command_line="${DARWIN_ART_APP_COMMAND_LINE:-}"
+  # A standalone compatibility runtime has no Play Store/FRE account broker.
+  # Match the non-interactive first-run configuration used by the acceptance
+  # harness so the real ChromeTabbedActivity can replace its splash screen
+  # when launched from the Manager/Finder shim as well.
+  for chromium_switch in --no-first-run --disable-fre --disable-background-networking; do
+    case " $chromium_command_line " in
+      *" $chromium_switch "*) ;;
+      *) chromium_command_line="${chromium_command_line:+$chromium_command_line }$chromium_switch" ;;
+    esac
+  done
   chromium_disabled_features="SkiaGraphite,EnableDrDc"
   if [[ "$chromium_command_line" =~ (^|[[:space:]])--disable-features=([^[:space:]]*) ]]; then
     existing_disabled_features="${BASH_REMATCH[2]}"

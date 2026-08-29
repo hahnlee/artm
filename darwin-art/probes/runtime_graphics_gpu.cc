@@ -688,6 +688,10 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   jmethodID layout = view_class == nullptr
                          ? nullptr
                          : env->GetMethodID(view_class, "layout", "(IIII)V");
+  jmethodID request_layout =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "requestLayout", "()V");
   jmethodID is_laid_out =
       view_class == nullptr
           ? nullptr
@@ -712,6 +716,7 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   jfieldID view_right = get_view_field("mRight");
   jfieldID view_bottom = get_view_field("mBottom");
   if (draw == nullptr || measure == nullptr || layout == nullptr ||
+      request_layout == nullptr ||
       is_laid_out == nullptr || is_layout_requested == nullptr ||
       view_left == nullptr || view_top == nullptr || view_right == nullptr ||
       view_bottom == nullptr ||
@@ -725,17 +730,35 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     env->DeleteLocalRef(render_node_class);
     return JNI_FALSE;
   }
+  const bool first_recording = !state->gpu_render_node_recorded;
   // Recording a dirty display list is not itself a layout traversal. Android
   // ViewRootImpl measures/layouts only when the hierarchy requests it; doing
   // so on every Metal frame cancels ViewPager's active fake drag and its
   // ValueAnimator. Preserve the same distinction for the detached owner.
   const bool needs_layout =
-      env->CallBooleanMethod(view, is_laid_out) != JNI_TRUE ||
+      first_recording || env->CallBooleanMethod(view, is_laid_out) != JNI_TRUE ||
       env->CallBooleanMethod(view, is_layout_requested) == JNI_TRUE;
+  // ViewPager populates its page children during Activity setup, after the
+  // detached content root may already have received its one synthetic layout.
+  // A real ViewRoot would schedule a second traversal; force that same initial
+  // measure/layout before recording so weighted GridLayout pages get bounds.
+  if (animation_host_class != nullptr && prepare_view_pagers != nullptr &&
+      !env->ExceptionCheck()) {
+    env->CallStaticVoidMethod(animation_host_class, prepare_view_pagers, view);
+    if (env->ExceptionCheck()) {
+      dump_pending_exception("ProbeAnimationHost.prepareViewPagers");
+      env->ExceptionClear();
+    }
+  }
   if (needs_layout && !env->ExceptionCheck()) {
     constexpr jint kMeasureExactly = 0x40000000;
     const jint width_spec = kMeasureExactly | (width & 0x3fffffff);
     const jint height_spec = kMeasureExactly | (height & 0x3fffffff);
+    // View.measure() may legitimately return early when the detached root
+    // still carries the previous specs. requestLayout() sets the same force
+    // bit that ViewRootImpl would set before its follow-up traversal, allowing
+    // ViewPager/GridLayout descendants to recompute their page widths.
+    env->CallVoidMethod(view, request_layout);
     env->CallVoidMethod(view, measure, width_spec, height_spec);
     dump_pending_exception("View.measure");
     env->SetIntField(view, view_left, 0);
@@ -756,6 +779,23 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     std::cerr << "ART HWUI GPU: View measure/layout failed\n";
     return JNI_FALSE;
   }
+  // The first pass establishes the ViewPager client width. Populate once
+  // more after that width is known, then repeat layout so its page adapter can
+  // assign widthFactor and concrete bounds to GridLayout/button descendants.
+  if (first_recording && animation_host_class != nullptr &&
+      prepare_view_pagers != nullptr && !env->ExceptionCheck()) {
+    env->CallStaticVoidMethod(animation_host_class, prepare_view_pagers, view);
+    if (env->ExceptionCheck()) {
+      dump_pending_exception("ProbeAnimationHost.prepareViewPagers(post-measure)");
+      env->ExceptionClear();
+    } else {
+      env->CallVoidMethod(view, request_layout);
+      env->CallVoidMethod(view, measure,
+                          0x40000000 | (width & 0x3fffffff),
+                          0x40000000 | (height & 0x3fffffff));
+      env->CallVoidMethod(view, layout, 0, 0, width, height);
+    }
+  }
   if (std::getenv("DARWIN_ART_SKOTTIE_METAL") != nullptr) {
     darwin_art_hwui::hide_skottie_backing_views(env, view);
   }
@@ -768,13 +808,6 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   // A real ViewRoot owns an app Looper and window-system thread. This
   // detached host intentionally does not synthesize one; the content root
   // is measured/layouted directly and recorded into the persistent RenderNode.
-  if (needs_layout && prepare_view_pagers != nullptr && !env->ExceptionCheck()) {
-    env->CallStaticVoidMethod(animation_host_class, prepare_view_pagers, view);
-    if (env->ExceptionCheck()) {
-      dump_pending_exception("ProbeAnimationHost.prepareViewPagers");
-      env->ExceptionClear();
-    }
-  }
   if (begin_host_traversal != nullptr && !env->ExceptionCheck()) {
     env->CallStaticVoidMethod(animation_host_class, begin_host_traversal, view);
     if (env->ExceptionCheck()) {

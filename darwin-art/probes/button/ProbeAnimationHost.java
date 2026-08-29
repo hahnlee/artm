@@ -56,8 +56,8 @@ public final class ProbeAnimationHost {
 
     /**
      * Mirrors the first attached ViewRoot traversal for support ViewPager.
-     * The calculator APK is unchanged; this only supplies the missing window
-     * attachment preparation in the host-side probe hierarchy.
+     * The APK is unchanged; this only supplies the missing window attachment
+     * preparation in the compatibility-owned hierarchy.
      */
     public static void prepareViewPagers(Object root) {
         if (!(root instanceof View)) {
@@ -75,7 +75,18 @@ public final class ProbeAnimationHost {
             try {
                 Method populate = type.getDeclaredMethod("populate");
                 populate.setAccessible(true);
+                Field items = type.getDeclaredField("mItems");
+                items.setAccessible(true);
+                int previousItemCount = ((ArrayList<?>) items.get(root)).size();
                 populate.invoke(root);
+                int populatedItemCount = ((ArrayList<?>) items.get(root)).size();
+                if (populatedItemCount > previousItemCount) {
+                    // ViewPager normally requests this traversal from
+                    // ViewRootImpl after its window token admits population.
+                    // The Metal owner performs that pending traversal on the
+                    // next frame so page margins and offsets remain app-owned.
+                    ((View) root).requestLayout();
+                }
                 break;
             } catch (NoSuchMethodException ignored) {
                 type = type.getSuperclass();
@@ -121,6 +132,18 @@ public final class ProbeAnimationHost {
         }
         if (root instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) root;
+            Object pagerAdapter = null;
+            Method pageWidth = null;
+            try {
+                Method getAdapter = root.getClass().getMethod("getAdapter");
+                pagerAdapter = getAdapter.invoke(root);
+                if (pagerAdapter != null) {
+                    pageWidth = pagerAdapter.getClass().getMethod("getPageWidth", int.class);
+                    pageWidth.setAccessible(true);
+                }
+            } catch (Throwable ignored) {
+                // Ordinary ViewGroups do not expose a pager adapter.
+            }
             for (int i = 0; i < group.getChildCount(); ++i) {
                 View child = group.getChildAt(i);
                 try {
@@ -129,11 +152,103 @@ public final class ProbeAnimationHost {
                         Field index = params.getClass().getDeclaredField("childIndex");
                         index.setAccessible(true);
                         index.setInt(params, i);
+                        try {
+                            Field widthFactor = params.getClass().getDeclaredField("widthFactor");
+                            widthFactor.setAccessible(true);
+                            if (widthFactor.getFloat(params) == 0.0f) {
+                                float factor = 1.0f;
+                                if (pageWidth != null && pagerAdapter != null) {
+                                    try {
+                                        factor = ((Float) pageWidth.invoke(pagerAdapter, i)).floatValue();
+                                    } catch (Throwable ignored) {
+                                        // A non-public adapter implementation may reject reflection;
+                                        // the Android default page width is still one full viewport.
+                                    }
+                                }
+                                widthFactor.setFloat(params, factor);
+                                Field position = params.getClass().getDeclaredField("position");
+                                position.setAccessible(true);
+                                position.setInt(params, i);
+                                Field needsMeasure = params.getClass().getDeclaredField("needsMeasure");
+                                needsMeasure.setAccessible(true);
+                                needsMeasure.setBoolean(params, true);
+                            }
+                        } catch (Throwable ignored) {
+                            // Non-pager LayoutParams have no width factor.
+                        }
                     }
                 } catch (Throwable ignored) {
                     // Non-ViewPager children have ordinary LayoutParams.
                 }
+                // Some framework versions keep childIndex in a superclass or
+                // omit it until the first attached traversal. Seed the page
+                // sizing fields independently so a missing ordering field
+                // cannot leave a whole ViewPager at width zero.
+                try {
+                    Object params = child.getLayoutParams();
+                    Field widthFactor = params.getClass().getDeclaredField("widthFactor");
+                    widthFactor.setAccessible(true);
+                    if (widthFactor.getFloat(params) == 0.0f) {
+                        float factor = 1.0f;
+                        if (pageWidth != null && pagerAdapter != null) {
+                            try {
+                                factor = ((Float) pageWidth.invoke(pagerAdapter, i)).floatValue();
+                            } catch (Throwable ignored) {
+                                // Default to one full viewport when adapter reflection is blocked.
+                            }
+                        }
+                        widthFactor.setFloat(params, factor);
+                        Field position = params.getClass().getDeclaredField("position");
+                        position.setAccessible(true);
+                        position.setInt(params, i);
+                        Field needsMeasure = params.getClass().getDeclaredField("needsMeasure");
+                        needsMeasure.setAccessible(true);
+                        needsMeasure.setBoolean(params, true);
+                    }
+                } catch (Throwable ignored) {
+                    // Not a ViewPager page; leave its ordinary params untouched.
+                }
                 prepareViewPagers(child);
+            }
+            // A detached ViewPager can have its adapter's ItemInfo list empty
+            // when the first Android traversal ran before it had a client
+            // width. In that case the normal onLayout loop intentionally skips
+            // pages. Once the pager itself has real bounds, lay out each
+            // existing page exactly like a full-width ViewPager item so its
+            // GridLayout descendants receive finite button bounds.
+            if (root.getClass().getName().contains("ViewPager") &&
+                    ((View) root).getWindowToken() == null &&
+                    group.getMeasuredWidth() > 0 && group.getMeasuredHeight() > 0) {
+                int viewportWidth = group.getMeasuredWidth();
+                int pageHeight = group.getMeasuredHeight();
+                int heightSpec = View.MeasureSpec.makeMeasureSpec(pageHeight, View.MeasureSpec.EXACTLY);
+                int pageMargin = 0;
+                try {
+                    Method getPageMargin = root.getClass().getMethod("getPageMargin");
+                    pageMargin = ((Integer) getPageMargin.invoke(root)).intValue();
+                } catch (Throwable ignored) {
+                    // Zero is the ViewPager default.
+                }
+                int pageLeft = 0;
+                for (int i = 0; i < group.getChildCount(); ++i) {
+                    View child = group.getChildAt(i);
+                    if (child.getVisibility() != View.GONE) {
+                        float factor = 1.0f;
+                        if (pageWidth != null && pagerAdapter != null) {
+                            try {
+                                factor = ((Float) pageWidth.invoke(pagerAdapter, i)).floatValue();
+                            } catch (Throwable ignored) {
+                                // One full viewport is the adapter default.
+                            }
+                        }
+                        int childWidth = Math.round(viewportWidth * factor);
+                        int widthSpec = View.MeasureSpec.makeMeasureSpec(
+                                childWidth, View.MeasureSpec.EXACTLY);
+                        child.measure(widthSpec, heightSpec);
+                        child.layout(pageLeft, 0, pageLeft + childWidth, pageHeight);
+                        pageLeft += childWidth + pageMargin;
+                    }
+                }
             }
         }
     }
@@ -310,12 +425,12 @@ public final class ProbeAnimationHost {
             Field hardwareField = attachInfo.getClass().getDeclaredField(
                     "mHardwareAccelerated");
             hardwareField.setAccessible(true);
-            // Child views flatten into this root RecordingCanvas until the
-            // direct owner supports ViewRoot's complete child-RenderNode
-            // preparation transaction. prepareViewPagers() disables legacy
-            // list caches so this remains GPU drawing rather than bitmap cache
-            // fallback during scrolling.
-            hardwareField.setBoolean(attachInfo, false);
+            // The detached owner still records into the same hardware
+            // RecordingCanvas that a real ViewRoot uses. Keep AttachInfo's
+            // hardware bit truthful as well: support-library pagers and other
+            // framework widgets select software/bitmap fallbacks when this flag
+            // is false, leaving their content black or absent.
+            hardwareField.setBoolean(attachInfo, true);
             Field requestedField = attachInfo.getClass().getDeclaredField(
                     "mHardwareAccelerationRequested");
             requestedField.setAccessible(true);
