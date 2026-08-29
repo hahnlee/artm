@@ -3678,6 +3678,13 @@ extern "C" void darwin_art_android_end_hardware_buffer_composition() {
   scope = {};
 }
 
+extern "C" void darwin_art_android_set_hardware_buffer_composition_active(
+    bool active) {
+  if (g_surface_control_target.iosurface == nullptr) return;
+  darwin_art_surface_gpu_set_iosurface_composition_active(
+      g_surface_control_target.iosurface, active);
+}
+
 extern "C" void darwin_art_android_mark_hardware_buffer_released(
     void* opaque) {
   auto* buffer = static_cast<AHardwareBuffer*>(opaque);

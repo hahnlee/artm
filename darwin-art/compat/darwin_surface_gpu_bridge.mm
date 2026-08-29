@@ -193,6 +193,10 @@ bool darwin_art_surface_gpu_composite_embedded(
     }
     darwin_art_android_ANativeWindow_release_frame(&native_frame);
   }
+  if (!darwin_art_surface_gpu_is_iosurface_composition_active(
+          surface->io_surface)) {
+    return false;
+  }
   const uint32_t width =
       surface->embedded_surface_width.load(std::memory_order_relaxed);
   const uint32_t height =

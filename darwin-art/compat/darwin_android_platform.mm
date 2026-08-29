@@ -1297,6 +1297,11 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
     }
     darwin_art_android_end_hardware_buffer_composition();
   }
+  // The host and Chromium renderer import the same IOSurface in different
+  // processes. Publish SurfaceFlinger's retained-layer visibility with that
+  // shared object so parent HWUI never samples a detached child layer.
+  darwin_art_android_set_hardware_buffer_composition_active(
+      composition_started);
   for (const auto& presentation : presentations) {
     AHardwareBuffer_release(presentation.buffer);
   }

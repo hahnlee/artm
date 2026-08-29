@@ -663,6 +663,27 @@ bool darwin_art_surface_gpu_get_embedded_geometry(
   return *width > 0 && *height > 0;
 }
 
+void darwin_art_surface_gpu_set_iosurface_composition_active(
+    void* iosurface, bool active) {
+  if (iosurface == nullptr) return;
+  IOSurfaceSetValue(static_cast<IOSurfaceRef>(iosurface),
+                    CFSTR("dev.darwinart.surface-composition-active"),
+                    active ? kCFBooleanTrue : kCFBooleanFalse);
+}
+
+bool darwin_art_surface_gpu_is_iosurface_composition_active(void* iosurface) {
+  if (iosurface == nullptr) return true;
+  CFTypeRef value = IOSurfaceCopyValue(
+      static_cast<IOSurfaceRef>(iosurface),
+      CFSTR("dev.darwinart.surface-composition-active"));
+  if (value == nullptr) return true;
+  const bool active = value == kCFBooleanTrue ||
+                      (CFGetTypeID(value) == CFBooleanGetTypeID() &&
+                       CFBooleanGetValue(static_cast<CFBooleanRef>(value)));
+  CFRelease(value);
+  return active;
+}
+
 void darwin_art_surface_gpu_publish_embedded(DarwinArtSurface* surface) {
   if (surface == nullptr) return;
   surface->embedded_surface_frame.fetch_add(1, std::memory_order_release);

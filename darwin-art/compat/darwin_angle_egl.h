@@ -63,6 +63,7 @@ void darwin_art_android_glDrawElements(uint32_t mode, int32_t count,
 void darwin_art_android_glUseProgram(uint32_t program);
 bool darwin_art_android_begin_hardware_buffer_composition(void* buffer,
                                                           bool clear);
+void darwin_art_android_set_hardware_buffer_composition_active(bool active);
 void darwin_art_android_end_hardware_buffer_composition();
 // Marks the exact BufferQueue slot displaced by a SurfaceControl transaction.
 // Its persistent IOSurface remains canonical until the producer reacquires the

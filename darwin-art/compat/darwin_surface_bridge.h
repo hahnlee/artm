@@ -205,6 +205,9 @@ bool darwin_art_surface_gpu_get_embedded_geometry(
     int32_t* y,
     uint32_t* width,
     uint32_t* height);
+void darwin_art_surface_gpu_set_iosurface_composition_active(
+    void* iosurface, bool active);
+bool darwin_art_surface_gpu_is_iosurface_composition_active(void* iosurface);
 void darwin_art_surface_gpu_publish_embedded(DarwinArtSurface* surface);
 void darwin_art_surface_gpu_set_embedded_buffer_extent(
     DarwinArtSurface* surface, uint32_t width, uint32_t height);
