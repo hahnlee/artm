@@ -5,6 +5,7 @@
 
 use core::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Mutex;
 
 use darwin_art_engine_sys::{
     ProviderAcquireFn, ProviderClearHooksFn, ProviderNativeAcquireFn, ProviderNativeReleaseFn,
@@ -16,6 +17,7 @@ use super::{ProviderKind, ProviderLeaseError, ProviderLeaseTable};
 /// Rust-owned bridge for the process-global provider callbacks.
 pub struct ProviderBridge {
     leases: ProviderLeaseTable,
+    process_leases: Mutex<Vec<ProviderKind>>,
 }
 
 /// A process- or subsystem-scoped lease on one process-global native
@@ -49,6 +51,7 @@ impl ProviderBridge {
                     unsafe { clear() }
                 },
             ),
+            process_leases: Mutex::new(Vec::new()),
         }
     }
 
@@ -65,7 +68,36 @@ impl ProviderBridge {
     }
 
     pub fn clear(&self) -> Result<(), ProviderLeaseError> {
+        let mut process_leases = self
+            .process_leases
+            .lock()
+            .map_err(|_| ProviderLeaseError::Poisoned)?;
+        while let Some(kind) = process_leases.pop() {
+            if self.leases.release(kind) != 0 {
+                process_leases.push(kind);
+                return Err(ProviderLeaseError::ActiveLeases);
+            }
+        }
         self.leases.clear()
+    }
+
+    /// Acquire a provider for the lifetime of the Android process.
+    ///
+    /// Unlike a temporary `ProviderLease`, this ownership is retained by the
+    /// bridge itself and released by the runtime shutdown transaction after
+    /// ART and its service processes have stopped using provider-backed
+    /// objects.
+    pub fn acquire_process_lease(&self, kind: ProviderKind, authority_fd: i32) -> Result<(), i32> {
+        let mut process_leases = self.process_leases.lock().map_err(|_| -1)?;
+        if process_leases.contains(&kind) {
+            return Ok(());
+        }
+        let status = self.leases.acquire(kind, authority_fd);
+        if status != 0 {
+            return Err(status);
+        }
+        process_leases.push(kind);
+        Ok(())
     }
 
     pub fn acquire_lease(
@@ -155,4 +187,48 @@ unsafe extern "C" fn release_provider(context: *mut c_void, kind: u32) -> i32 {
             .release(kind)
     }))
     .unwrap_or(-1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static ACQUIRES: AtomicU32 = AtomicU32::new(0);
+    static RELEASES: AtomicU32 = AtomicU32::new(0);
+    static CLEARS: AtomicU32 = AtomicU32::new(0);
+
+    unsafe extern "C" fn acquire(_: u32, _: i32) -> i32 {
+        ACQUIRES.fetch_add(1, Ordering::SeqCst);
+        0
+    }
+
+    unsafe extern "C" fn release(_: u32) -> i32 {
+        RELEASES.fetch_add(1, Ordering::SeqCst);
+        0
+    }
+
+    unsafe extern "C" fn clear() {
+        CLEARS.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn process_lease_survives_temporary_borrows_until_bridge_clear() {
+        ACQUIRES.store(0, Ordering::SeqCst);
+        RELEASES.store(0, Ordering::SeqCst);
+        CLEARS.store(0, Ordering::SeqCst);
+        let bridge = ProviderBridge::from_callbacks(acquire, release, clear);
+
+        bridge
+            .acquire_process_lease(ProviderKind::Network, -1)
+            .unwrap();
+        let temporary = bridge.acquire_lease(ProviderKind::Network, -1).unwrap();
+        drop(temporary);
+        assert_eq!(ACQUIRES.load(Ordering::SeqCst), 1);
+        assert_eq!(RELEASES.load(Ordering::SeqCst), 0);
+
+        bridge.clear().unwrap();
+        assert_eq!(RELEASES.load(Ordering::SeqCst), 1);
+        assert_eq!(CLEARS.load(Ordering::SeqCst), 1);
+    }
 }

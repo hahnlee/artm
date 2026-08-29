@@ -100,8 +100,8 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             // bootstrap boundary.  Native-library loads take additional
             // Rust-counted leases without reinstalling the process-global
             // broker.
-            let network_lease = provider
-                .acquire_lease(ProviderKind::Network, -1)
+            provider
+                .acquire_process_lease(ProviderKind::Network, -1)
                 .map_err(HostError::RuntimeFailed)?;
             let request = match build_process_request(
                 options,
@@ -116,29 +116,24 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
             ) {
                 Ok(inputs) => inputs,
                 Err(error) => {
-                    drop(network_lease);
                     let _ = service_processes.shutdown_all();
                     let _ = shutdown_guard.shutdown();
                     return Err(error);
                 }
             };
             let Some(engine) = runtime.engine() else {
-                drop(network_lease);
                 let _ = service_processes.shutdown_all();
                 let _ = shutdown_guard.shutdown();
                 return Err(HostError::RuntimeFailed(-1));
             };
-            let result = match engine.run_request(&request) {
+            match engine.run_request(&request) {
                 Ok(result) => result,
                 Err(error) => {
-                    drop(network_lease);
                     let _ = service_processes.shutdown_all();
                     let _ = shutdown_guard.shutdown();
                     return Err(HostError::RuntimeFailed(error));
                 }
-            };
-            drop(network_lease);
-            result
+            }
         };
 
         // The graphics engine publishes its drawable during run_process.

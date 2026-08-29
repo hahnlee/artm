@@ -53,7 +53,16 @@ impl ServiceProcessManager {
         let (browser_stream, child_stream) =
             UnixStream::pair().map_err(|error| format!("service socketpair failed: {error}"))?;
         let inherited_fd = child_stream.into_raw_fd();
-        let mut command = Command::new(&self.executable);
+        let profile_ctl = env::var_os("DARWIN_ART_PROFILE_CTL");
+        let package = env::var_os("DARWIN_ART_APK_APP_PACKAGE");
+        let mut command = match (profile_ctl, package) {
+            (Some(profile_ctl), Some(package)) => {
+                let mut command = Command::new(profile_ctl);
+                command.arg("exec").arg(package).arg(&self.executable);
+                command
+            }
+            _ => Command::new(&self.executable),
+        };
         command
             .arg("--service-child")
             .arg(CHILD_CONTROL_FD.to_string())

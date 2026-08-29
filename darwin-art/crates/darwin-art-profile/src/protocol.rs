@@ -8,6 +8,10 @@ pub(crate) const OP_ENSURE: u16 = 1;
 pub(crate) const OP_ACQUIRE: u16 = 2;
 pub(crate) const OP_STATUS: u16 = 3;
 pub(crate) const OP_SHUTDOWN: u16 = 4;
+pub(crate) const OP_REGISTER: u16 = 5;
+pub(crate) const OP_RESOLVE: u16 = 6;
+pub(crate) const OP_LIST: u16 = 7;
+pub(crate) const OP_PROCESSES: u16 = 8;
 const RESPONSE_BIT: u16 = 0x8000;
 
 pub(crate) struct Message {

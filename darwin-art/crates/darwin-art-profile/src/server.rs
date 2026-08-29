@@ -1,5 +1,7 @@
 use crate::filesystem::ProfileFilesystem;
+use crate::registry::PackageRegistry;
 use crate::{ProfileError, ProfilePaths, protocol, write_path};
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
 use std::os::fd::AsRawFd;
@@ -18,6 +20,8 @@ pub struct DaemonConfig {
 struct State {
     filesystem: Mutex<ProfileFilesystem>,
     paths: ProfilePaths,
+    registry: Mutex<PackageRegistry>,
+    processes: Mutex<BTreeMap<u32, ProcessEntry>>,
     lease_gate: Mutex<()>,
     leases: AtomicUsize,
     handlers: AtomicUsize,
@@ -25,8 +29,16 @@ struct State {
     last_activity: Mutex<Instant>,
 }
 
+struct ProcessEntry {
+    package: String,
+    leases: usize,
+}
+
 struct HandlerGuard(Arc<State>);
-struct LeaseGuard(Arc<State>);
+struct LeaseGuard {
+    state: Arc<State>,
+    pid: Option<u32>,
+}
 
 impl Drop for HandlerGuard {
     fn drop(&mut self) {
@@ -37,7 +49,16 @@ impl Drop for HandlerGuard {
 
 impl Drop for LeaseGuard {
     fn drop(&mut self) {
-        self.0.leases.fetch_sub(1, Ordering::SeqCst);
+        self.state.leases.fetch_sub(1, Ordering::SeqCst);
+        if let Some(pid) = self.pid {
+            let mut processes = self.state.processes.lock().unwrap();
+            if let Some(process) = processes.get_mut(&pid) {
+                process.leases -= 1;
+                if process.leases == 0 {
+                    processes.remove(&pid);
+                }
+            }
+        }
     }
 }
 
@@ -61,6 +82,8 @@ pub fn run_daemon(config: DaemonConfig) -> Result<(), ProfileError> {
     let state = Arc::new(State {
         filesystem: Mutex::new(ProfileFilesystem::new(config.paths.clone())),
         paths: config.paths.clone(),
+        registry: Mutex::new(PackageRegistry::new(&config.paths)),
+        processes: Mutex::new(BTreeMap::new()),
         lease_gate: Mutex::new(()),
         leases: AtomicUsize::new(0),
         handlers: AtomicUsize::new(0),
@@ -107,12 +130,9 @@ pub fn run_daemon(config: DaemonConfig) -> Result<(), ProfileError> {
 fn handle(mut stream: UnixStream, state: &Arc<State>) -> Result<(), ProfileError> {
     verify_same_user(&stream)?;
     let message = protocol::read_message(&mut stream)?;
-    if !message.payload.is_empty() {
-        protocol::write_response(&mut stream, message.operation, 22, b"unexpected payload")?;
-        return Ok(());
-    }
     match message.operation {
         protocol::OP_ENSURE => {
+            require_empty(&message.payload)?;
             let filesystem = state.filesystem.lock().unwrap();
             match filesystem.ensure() {
                 Ok(path) => protocol::write_response(
@@ -130,6 +150,7 @@ fn handle(mut stream: UnixStream, state: &Arc<State>) -> Result<(), ProfileError
             }
         }
         protocol::OP_ACQUIRE => {
+            let identity = parse_process_identity(&message.payload)?;
             let gate = state.lease_gate.lock().unwrap();
             if state.shutdown.load(Ordering::SeqCst) {
                 protocol::write_response(
@@ -150,13 +171,35 @@ fn handle(mut stream: UnixStream, state: &Arc<State>) -> Result<(), ProfileError
                 return Ok(());
             }
             state.leases.fetch_add(1, Ordering::SeqCst);
-            let _lease = LeaseGuard(Arc::clone(state));
+            if let Some((pid, package)) = &identity {
+                let mut processes = state.processes.lock().unwrap();
+                let process = processes.entry(*pid).or_insert_with(|| ProcessEntry {
+                    package: package.clone(),
+                    leases: 0,
+                });
+                if process.package != *package {
+                    state.leases.fetch_sub(1, Ordering::SeqCst);
+                    protocol::write_response(
+                        &mut stream,
+                        message.operation,
+                        22,
+                        b"PID is already registered to another package",
+                    )?;
+                    return Ok(());
+                }
+                process.leases += 1;
+            }
+            let _lease = LeaseGuard {
+                state: Arc::clone(state),
+                pid: identity.map(|(pid, _)| pid),
+            };
             drop(gate);
             protocol::write_response(&mut stream, message.operation, 0, b"")?;
             let mut byte = [0_u8; 1];
             while stream.read(&mut byte).is_ok_and(|count| count != 0) {}
         }
         protocol::OP_STATUS => {
+            require_empty(&message.payload)?;
             let mounted = state.filesystem.lock().unwrap().is_mounted()?;
             let status = format!(
                 "profile={} mounted={} leases={}",
@@ -167,6 +210,7 @@ fn handle(mut stream: UnixStream, state: &Arc<State>) -> Result<(), ProfileError
             protocol::write_response(&mut stream, message.operation, 0, status.as_bytes())?;
         }
         protocol::OP_SHUTDOWN => {
+            require_empty(&message.payload)?;
             let _gate = state.lease_gate.lock().unwrap();
             let leases = state.leases.load(Ordering::SeqCst);
             if leases == 0 {
@@ -181,9 +225,75 @@ fn handle(mut stream: UnixStream, state: &Arc<State>) -> Result<(), ProfileError
                 )?;
             }
         }
+        protocol::OP_REGISTER => {
+            let separator = message
+                .payload
+                .iter()
+                .position(|byte| *byte == 0)
+                .ok_or_else(|| ProfileError::Daemon("register request has no package".into()))?;
+            let package = std::str::from_utf8(&message.payload[..separator])
+                .map_err(|_| ProfileError::Daemon("package is not UTF-8".into()))?;
+            let record = &message.payload[separator + 1..];
+            state.filesystem.lock().unwrap().ensure()?;
+            state.registry.lock().unwrap().register(package, record)?;
+            protocol::write_response(&mut stream, message.operation, 0, b"")?;
+        }
+        protocol::OP_RESOLVE => {
+            let package = std::str::from_utf8(&message.payload)
+                .map_err(|_| ProfileError::Daemon("package is not UTF-8".into()))?;
+            state.filesystem.lock().unwrap().ensure()?;
+            let record = state.registry.lock().unwrap().resolve(package)?;
+            protocol::write_response(&mut stream, message.operation, 0, &record)?;
+        }
+        protocol::OP_LIST => {
+            require_empty(&message.payload)?;
+            state.filesystem.lock().unwrap().ensure()?;
+            let packages = state.registry.lock().unwrap().list()?;
+            protocol::write_response(&mut stream, message.operation, 0, &packages)?;
+        }
+        protocol::OP_PROCESSES => {
+            require_empty(&message.payload)?;
+            let mut processes = state
+                .processes
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(pid, process)| format!("{pid}\t{}", process.package))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !processes.is_empty() {
+                processes.push('\n');
+            }
+            protocol::write_response(&mut stream, message.operation, 0, processes.as_bytes())?;
+        }
         _ => protocol::write_response(&mut stream, message.operation, 38, b"unknown operation")?,
     }
     Ok(())
+}
+
+fn require_empty(payload: &[u8]) -> Result<(), ProfileError> {
+    if payload.is_empty() {
+        Ok(())
+    } else {
+        Err(ProfileError::Daemon("unexpected request payload".into()))
+    }
+}
+
+fn parse_process_identity(payload: &[u8]) -> Result<Option<(u32, String)>, ProfileError> {
+    if payload.is_empty() {
+        return Ok(None);
+    }
+    if payload.len() < 5 {
+        return Err(ProfileError::Daemon("process identity is truncated".into()));
+    }
+    let pid = u32::from_le_bytes(payload[..4].try_into().unwrap());
+    if pid == 0 {
+        return Err(ProfileError::Daemon("process PID must be non-zero".into()));
+    }
+    let package = std::str::from_utf8(&payload[4..])
+        .map_err(|_| ProfileError::Daemon("package is not UTF-8".into()))?;
+    crate::registry::validate_package(package)?;
+    Ok(Some((pid, package.to_owned())))
 }
 
 fn acquire_lock(paths: &ProfilePaths) -> Result<File, ProfileError> {

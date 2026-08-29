@@ -329,7 +329,6 @@ dependencies = [
  "darwin-art-abi",
  "darwin-art-engine",
  "darwin-art-engine-sys",
- "darwin-art-profile",
  "darwin-art-runtime",
 ]
 

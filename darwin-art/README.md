@@ -24,10 +24,21 @@ directly mapped ARM64 ELF, and a Bionic ABI facade. Mainstream Tier 1 includes
 ordinary third-party JNI `.so` libraries; Java-only execution is a bootstrap
 gate, not the intended application compatibility boundary.
 
-Shared per-profile state is owned by the Rust `darwin-artd` process. Application
-and service processes hold versioned IPC leases while the daemon mounts their
-case-sensitive APFS Android volume; see
+Shared per-profile state is owned by the Rust `darwin-artd` process. Rust
+launchers carry versioned IPC leases through `exec(2)` for application and
+service lifetimes while the daemon mounts their case-sensitive APFS Android volume; see
 [`docs/profile-daemon.md`](docs/profile-daemon.md).
+
+After one unified build, install APKs once and launch them by Android package
+name without APK re-analysis or recompilation:
+
+```sh
+cargo xtask build
+tools/darwin-art install path/to/app.apk
+tools/darwin-art list
+tools/darwin-art run com.example.app
+tools/darwin-art ps
+```
 
 Physical-keyboard status and the remaining Android `.kl`/`.kcm` compatibility
 work are documented in

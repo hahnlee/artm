@@ -6,12 +6,15 @@ compile_error!("darwin-art-profile requires macOS; no weaker filesystem fallback
 
 mod filesystem;
 mod protocol;
+mod registry;
 mod server;
 
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
+use std::mem;
+use std::os::fd::AsRawFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
@@ -118,8 +121,33 @@ pub struct ProfileLease {
 
 impl ProfileLease {
     pub fn connect(socket: &Path) -> Result<Self, ProfileError> {
+        Self::connect_with_identity(socket, None)
+    }
+
+    pub fn connect_process(socket: &Path, package: &str) -> Result<Self, ProfileError> {
+        Self::connect_process_pid(socket, std::process::id(), package)
+    }
+
+    pub fn connect_process_pid(
+        socket: &Path,
+        pid: u32,
+        package: &str,
+    ) -> Result<Self, ProfileError> {
+        registry::validate_package(package)?;
+        Self::connect_with_identity(socket, Some((pid, package)))
+    }
+
+    fn connect_with_identity(
+        socket: &Path,
+        identity: Option<(u32, &str)>,
+    ) -> Result<Self, ProfileError> {
         let mut stream = UnixStream::connect(socket)?;
-        protocol::write_request(&mut stream, protocol::OP_ACQUIRE, &[])?;
+        let mut payload = Vec::new();
+        if let Some((pid, package)) = identity {
+            payload.extend_from_slice(&pid.to_le_bytes());
+            payload.extend_from_slice(package.as_bytes());
+        }
+        protocol::write_request(&mut stream, protocol::OP_ACQUIRE, &payload)?;
         protocol::expect_ok(&mut stream, protocol::OP_ACQUIRE)?;
         Ok(Self { stream })
     }
@@ -128,7 +156,24 @@ impl ProfileLease {
         let Some(socket) = env::var_os(PROFILE_SOCKET_ENV) else {
             return Ok(None);
         };
-        Self::connect(Path::new(&socket)).map(Some)
+        match env::var("DARWIN_ART_APK_APP_PACKAGE") {
+            Ok(package) => Self::connect_process(Path::new(&socket), &package).map(Some),
+            Err(_) => Self::connect(Path::new(&socket)).map(Some),
+        }
+    }
+
+    /// Keep the lease connection open across a following `exec(2)`.
+    ///
+    /// The daemon then observes the socket lifetime of the replacement image,
+    /// so its registered PID is the Android process rather than a wrapper.
+    pub fn preserve_for_exec(self) -> Result<i32, ProfileError> {
+        let descriptor = self.stream.as_raw_fd();
+        let flags = unsafe { fcntl(descriptor, F_GETFD) };
+        if flags < 0 || unsafe { fcntl(descriptor, F_SETFD, flags & !FD_CLOEXEC) } < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        mem::forget(self);
+        Ok(descriptor)
     }
 }
 
@@ -180,6 +225,34 @@ pub fn shutdown_daemon(paths: &ProfilePaths) -> Result<(), ProfileError> {
     request(paths, protocol::OP_SHUTDOWN, &[]).map(|_| ())
 }
 
+pub fn register_package(
+    paths: &ProfilePaths,
+    package: &str,
+    record: &[u8],
+) -> Result<(), ProfileError> {
+    registry::validate_package(package)?;
+    let mut payload = Vec::with_capacity(package.len() + 1 + record.len());
+    payload.extend_from_slice(package.as_bytes());
+    payload.push(0);
+    payload.extend_from_slice(record);
+    request(paths, protocol::OP_REGISTER, &payload).map(|_| ())
+}
+
+pub fn resolve_package(paths: &ProfilePaths, package: &str) -> Result<Vec<u8>, ProfileError> {
+    registry::validate_package(package)?;
+    request(paths, protocol::OP_RESOLVE, package.as_bytes())
+}
+
+pub fn list_packages(paths: &ProfilePaths) -> Result<String, ProfileError> {
+    let bytes = request(paths, protocol::OP_LIST, &[])?;
+    String::from_utf8(bytes).map_err(|error| ProfileError::InvalidResponse(error.to_string()))
+}
+
+pub fn list_processes(paths: &ProfilePaths) -> Result<String, ProfileError> {
+    let bytes = request(paths, protocol::OP_PROCESSES, &[])?;
+    String::from_utf8(bytes).map_err(|error| ProfileError::InvalidResponse(error.to_string()))
+}
+
 fn request(paths: &ProfilePaths, operation: u16, payload: &[u8]) -> Result<Vec<u8>, ProfileError> {
     let mut stream = UnixStream::connect(&paths.socket)?;
     protocol::write_request(&mut stream, operation, payload)?;
@@ -226,7 +299,12 @@ fn spawn_daemon(paths: &ProfilePaths) -> Result<(), ProfileError> {
 
 unsafe extern "C" {
     fn setsid() -> i32;
+    fn fcntl(descriptor: i32, command: i32, ...) -> i32;
 }
+
+const F_GETFD: i32 = 1;
+const F_SETFD: i32 = 2;
+const FD_CLOEXEC: i32 = 1;
 
 pub fn write_path(path: &OsStr) -> &[u8] {
     path.as_bytes()

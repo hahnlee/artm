@@ -2,10 +2,27 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-apk="${1:-}"
-seconds="${2:-86400}"
+installed_record=""
+if [[ "${1:-}" == "--record" ]]; then
+  installed_record="${2:-}"
+  seconds="${3:-86400}"
+  [[ -f "$installed_record" ]] || {
+    echo "installed launch record does not exist: $installed_record" >&2
+    exit 66
+  }
+  [[ "$(sed -n '1p' "$installed_record")" == "darwin-art-launch-v1" ]] || {
+    echo "installed launch record version is unsupported" >&2
+    exit 65
+  }
+  apk="$(sed -n 's/^apk=//p' "$installed_record")"
+  app_dex="$(sed -n 's/^dex=//p' "$installed_record")"
+  metadata="$(sed -n 's/^metadata=//p' "$installed_record")"
+else
+  apk="${1:-}"
+  seconds="${2:-86400}"
+fi
 [[ -n "$apk" ]] || {
-  echo "usage: $0 APK [VISIBLE_SECONDS]" >&2
+  echo "usage: $0 APK [VISIBLE_SECONDS] | --record RECORD [VISIBLE_SECONDS]" >&2
   exit 64
 }
 source_apk="$(cd "$(dirname "$apk")" && pwd)/$(basename "$apk")"
@@ -18,21 +35,23 @@ source_apk="$(cd "$(dirname "$apk")" && pwd)/$(basename "$apk")"
   exit 64
 }
 
-app_dex="$source_apk"
-external_dex="${source_apk%.apk}.dex"
-if ! unzip -Z1 "$source_apk" | grep -Fx 'classes.dex' >/dev/null; then
-  [[ -f "$external_dex" ]] || {
-    echo "preoptimized APK requires its deoptimized DEX sidecar: $external_dex" >&2
-    exit 69
-  }
-  app_dex="$external_dex"
-fi
-if [[ "$app_dex" == "$source_apk" ]]; then
-  metadata="$(cargo run -q --release \
-    --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk")"
-else
-  metadata="$(cargo run -q --release \
-    --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk" "$app_dex")"
+if [[ -z "$installed_record" ]]; then
+  app_dex="$source_apk"
+  external_dex="${source_apk%.apk}.dex"
+  if ! unzip -Z1 "$source_apk" | grep -Fx 'classes.dex' >/dev/null; then
+    [[ -f "$external_dex" ]] || {
+      echo "preoptimized APK requires its deoptimized DEX sidecar: $external_dex" >&2
+      exit 69
+    }
+    app_dex="$external_dex"
+  fi
+  if [[ "$app_dex" == "$source_apk" ]]; then
+    metadata="$(cargo run -q --release \
+      --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk")"
+  else
+    metadata="$(cargo run -q --release \
+      --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk" "$app_dex")"
+  fi
 fi
 package="$(sed -n 's/^apk-app-runtime: package=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 application="$(sed -n 's/^apk-app-runtime: .* application=\([^ ]*\) .*/\1/p' <<<"$metadata")"
@@ -73,9 +92,15 @@ fi
 runtime_abi="darwin-art-darwin-native-v1"
 profile_mount=""
 if [[ -z "${DARWIN_ART_APP_DATA_ROOT:-}" ]]; then
-  cargo build -q --release -p darwin-art-profile --bins
+  if [[ -z "$installed_record" ]]; then
+    cargo build -q --release -p darwin-art-profile --bins
+  elif [[ ! -x "$root/target/release/darwin-artctl" ]]; then
+    echo "installed run requires a prebuilt darwin-artctl; run cargo xtask build" >&2
+    exit 69
+  fi
   profile_ctl="$root/target/release/darwin-artctl"
   profile_mount="$("$profile_ctl" ensure)"
+  export DARWIN_ART_PROFILE_CTL="$profile_ctl"
   export DARWIN_ART_PROFILE_SOCKET
   DARWIN_ART_PROFILE_SOCKET="$("$profile_ctl" socket)"
 fi
@@ -88,33 +113,87 @@ else
 fi
 native_cache_root="${DARWIN_ART_NATIVE_CACHE_ROOT:-$root/_build/native-artifact-cache}"
 native_converter="${DARWIN_ART_NATIVE_CONVERTER:-none}"
-cargo build -q --release -p darwin-art-apk-install
-cargo build -q --release -p darwin-art-native-artifact --bin darwin-art-native-resolve
 installer="$root/target/release/darwin-art-apk-install"
 native_resolver="$root/target/release/darwin-art-native-resolve"
-extractor="none"
-if [[ "$native_count" != "0" ]]; then
-  cargo build -q --release \
-    --manifest-path "$root/tools/android-apk-native-extract/Cargo.toml"
-  extractor="$root/target/release/android-apk-native-extract"
+if [[ -z "$installed_record" ]]; then
+  cargo build -q --release -p darwin-art-apk-install
+  cargo build -q --release -p darwin-art-native-artifact --bin darwin-art-native-resolve
+  extractor="none"
+  if [[ "$native_count" != "0" ]]; then
+    cargo build -q --release \
+      --manifest-path "$root/tools/android-apk-native-extract/Cargo.toml"
+    extractor="$root/target/release/android-apk-native-extract"
+  fi
+  install_output="$("$installer" "$source_apk" "$install_root" "$package" \
+    "$version_code" "$native_root" "$extractor" "$runtime_abi" \
+    "$native_cache_root" "$native_converter")"
+  apk_sha256="$(sed -n 's/^apk-install: .* apk_sha256=\([^ ]*\) .*/\1/p' \
+    <<<"$install_output")"
+elif [[ -n "$installed_record" ]]; then
+  apk_sha256="$(sed -n 's/^sha256=//p' "$installed_record")"
+  install_output="apk-install: cached package=$package apk_sha256=$apk_sha256"
 fi
-install_output="$("$installer" "$source_apk" "$install_root" "$package" \
-  "$version_code" "$native_root" "$extractor" "$runtime_abi" \
-  "$native_cache_root" "$native_converter")"
-apk_sha256="$(sed -n 's/^apk-install: .* apk_sha256=\([^ ]*\) .*/\1/p' \
-  <<<"$install_output")"
 [[ "$apk_sha256" =~ ^[0-9a-f]{64}$ ]] || {
   echo "could not decode installed APK identity" >&2
   exit 65
 }
-installed_directory="$install_root/$package/$version_code/$apk_sha256"
-apk="$installed_directory/base.apk"
+if [[ -z "$installed_record" ]]; then
+  installed_directory="$install_root/$package/$version_code/$apk_sha256"
+  apk="$installed_directory/base.apk"
+else
+  installed_directory="$(dirname "$apk")"
+fi
 [[ -f "$apk" ]] || {
   echo "installed APK is missing: $apk" >&2
   exit 69
 }
-if [[ "$app_dex" == "$source_apk" ]]; then
+if [[ -z "$installed_record" && "$app_dex" == "$source_apk" ]]; then
   app_dex="$apk"
+fi
+
+if [[ -z "$installed_record" && -n "$profile_mount" ]]; then
+  if [[ "$app_dex" != "$apk" ]]; then
+    code_directory="$profile_mount/system/package-code/$package/$apk_sha256"
+    mkdir -p "$code_directory"
+    persistent_dex="$code_directory/classes.dex"
+    if [[ ! -f "$persistent_dex" ]]; then
+      dex_stage="$code_directory/.classes.dex.$$.stage"
+      cp "$app_dex" "$dex_stage"
+      chmod 0400 "$dex_stage"
+      mv "$dex_stage" "$persistent_dex"
+    fi
+    app_dex="$persistent_dex"
+  fi
+  record_stage="$(mktemp "$profile_mount/run/launch-record.XXXXXX")"
+  {
+    printf 'darwin-art-launch-v1\n'
+    printf 'apk=%s\n' "$apk"
+    printf 'dex=%s\n' "$app_dex"
+    printf 'sha256=%s\n' "$apk_sha256"
+    printf 'metadata=%s\n' "$metadata"
+  } >"$record_stage"
+  "$profile_ctl" register "$package" "$record_stage"
+  rm -f "$record_stage"
+  if [[ "${DARWIN_ART_INSTALL_ONLY:-0}" == "1" ]]; then
+    host="$root/target/debug/darwin-art-host"
+    [[ -x "$host" ]] || {
+      echo "darwin-art host is missing; run cargo xtask build before installing" >&2
+      exit 69
+    }
+    codesign --force --sign - --options runtime \
+      --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
+    echo "$metadata"
+    echo "$install_output"
+    echo "darwin-art: installed package=$package"
+    exit 0
+  fi
+else
+  for runtime_binary in "$native_resolver"; do
+    [[ -x "$runtime_binary" ]] || {
+      echo "installed run requires a prebuilt runtime; run cargo xtask build" >&2
+      exit 69
+    }
+  done
 fi
 
 host="$root/target/debug/darwin-art-host"
@@ -122,11 +201,15 @@ host="$root/target/debug/darwin-art-host"
   echo "darwin-art host is missing: $host" >&2
   exit 69
 }
-# Android's V8 reserves and later commits executable CodeRange pages. Sign the
-# detached host with the narrow hardened-runtime JIT entitlements before any
-# browser/service child is spawned; every child execs this same binary.
-codesign --force --sign - --options runtime \
-  --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
+# Installation signs the shared host once. Re-signing here would atomically
+# replace the executable underneath concurrent launches. Legacy direct-APK
+# runs still sign because they do not pass through the install command.
+if [[ -z "$installed_record" ]]; then
+  codesign --force --sign - --options runtime \
+    --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
+else
+  codesign --verify --strict "$host"
+fi
 runtime="$root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib"
 core_oj="${DARWIN_ART_CORE_OJ_JAR:-$root/_prebuilt/android-16/bootclasspath/core-oj.jar}"
 if [[ -z "${DARWIN_ART_CORE_OJ_JAR:-}" && \
@@ -161,6 +244,10 @@ fonts_xml="$root/probes/button/fonts.xml"
 roboto="$root/_aosp/external/skia/resources/fonts/Roboto-Regular.ttf"
 framework_res="$root/_prebuilt/android-16/resources/framework-res.apk"
 if [[ ! -f "$support_dex" ]]; then
+  if [[ -n "$installed_record" ]]; then
+    echo "installed run requires prebuilt support DEX; run cargo xtask build" >&2
+    exit 69
+  fi
   cargo run -q -p art-bootstrap -- build-button-dex >/dev/null
 fi
 for input in "$host" "$runtime" "$core_oj" "$core_libart" "$framework" "$framework_location" "$core_icu" "$conscrypt" "$framework_bluetooth" "$framework_mediaprovider" "$framework_permission" "$framework_permission_s" "$support_dex" "$fonts_xml" "$roboto" "$framework_res"; do
@@ -361,7 +448,12 @@ fi
 
 if [[ "$native_count" != "0" ]]; then
   unwind_provider="$root/_build/android-unwind-provider/libdarwin_art_android_unwind.so"
-  "$root/tools/build-android-unwind-provider.sh" "$unwind_provider" >/dev/null
+  if [[ -n "$installed_record" && ! -f "$unwind_provider" ]]; then
+    echo "installed native run requires prebuilt Android unwind provider" >&2
+    exit 69
+  elif [[ -z "$installed_record" ]]; then
+    "$root/tools/build-android-unwind-provider.sh" "$unwind_provider" >/dev/null
+  fi
   export DARWIN_ART_ANDROID_UNWIND_PROVIDER="$unwind_provider"
   [[ "$native_root" != "none" ]] || {
     echo "APK native metadata did not select an arm64 root library" >&2
@@ -440,5 +532,9 @@ if [[ "${DARWIN_ART_LLDB:-0}" == "fs-stat" ]]; then
     -o 'thread backtrace -c 24' -- "$host" --window-seconds "$seconds" \
     "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
 fi
-"$host" --window-seconds "$seconds" \
-  "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
+host_command=("$host" --window-seconds "$seconds" \
+  "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex")
+if [[ -n "$profile_mount" ]]; then
+  exec "$profile_ctl" exec "$package" "${host_command[@]}"
+fi
+exec "${host_command[@]}"

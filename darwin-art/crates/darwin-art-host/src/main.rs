@@ -13,12 +13,19 @@ fn main() {
 }
 
 fn main_result() -> Result<(), Box<dyn Error>> {
+    // darwin-artctl deliberately carries the daemon lease through exec. Make
+    // it close-on-exec again immediately so a service child receives its own
+    // PID lease instead of extending its parent's registration accidentally.
+    if let Ok(value) = env::var("DARWIN_ART_PROFILE_LEASE_FD") {
+        let descriptor = value.parse::<i32>()?;
+        let flags = unsafe { fcntl(descriptor, F_GETFD) };
+        if flags < 0 || unsafe { fcntl(descriptor, F_SETFD, flags | FD_CLOEXEC) } < 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+    }
     if let Ok(delay) = env::var("DARWIN_ART_DEBUG_ATTACH_DELAY_MS") {
         std::thread::sleep(std::time::Duration::from_millis(delay.parse()?));
     }
-    // The profile daemon owns the shared Android volume. Every application
-    // and service process holds its own connection for its entire lifetime.
-    let _profile_lease = darwin_art_profile::ProfileLease::connect_from_environment()?;
     let mut arguments = env::args_os();
     let program = arguments.next().unwrap_or_else(|| "darwin-art-host".into());
     let mut values = arguments.collect::<Vec<_>>();
@@ -186,4 +193,9 @@ fn main_result() -> Result<(), Box<dyn Error>> {
 
 unsafe extern "C" {
     fn getpagesize() -> i32;
+    fn fcntl(descriptor: i32, command: i32, ...) -> i32;
 }
+
+const F_GETFD: i32 = 1;
+const F_SETFD: i32 = 2;
+const FD_CLOEXEC: i32 = 1;
