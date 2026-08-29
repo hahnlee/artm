@@ -1132,15 +1132,11 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
 
   @autoreleasepool {
     NSApplication* application = NSApplication.sharedApplication;
-    // A host process does not run AppKit's default NSApplication event loop;
-    // another desktop application can therefore reclaim frontmost status
-    // between pump slices even though our window remains visible. Reassert
-    // the same ownership that surface creation establishes so screenshots
-    // and pointer events observe the Android surface, not the desktop.
-    if (surface->visible && surface->window != nil) {
-      [application activateIgnoringOtherApps:YES];
-      [surface->window makeKeyAndOrderFront:nil];
-    }
+    // Window creation establishes the initial key window. Do not reassert
+    // activation here: doing so every pump slice steals focus from other
+    // macOS applications and, after a close event, can immediately bring the
+    // closing Android window back in front. AppKit naturally makes the
+    // surface key again when the user explicitly clicks it.
     NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
     while (deadline.timeIntervalSinceNow > 0.0) {
       if (surface->visible && !surface->window.visible) {
@@ -1157,11 +1153,6 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
                                                   dequeue:YES];
       if (event != nil) {
         [application sendEvent:event];
-      }
-      if (surface->visible && surface->window != nil &&
-          !surface->window.isKeyWindow) {
-        [application activateIgnoringOtherApps:YES];
-        [surface->window makeKeyAndOrderFront:nil];
       }
       [application updateWindows];
     }

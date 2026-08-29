@@ -63,6 +63,7 @@ static LOADER: OnceLock<LoaderCallbacks> = OnceLock::new();
 static mut LIBANDROID_HANDLE_TOKEN: u8 = 0;
 static mut LIBEGL_HANDLE_TOKEN: u8 = 0;
 static mut LIBGLESV2_HANDLE_TOKEN: u8 = 0;
+static mut LIBVULKAN_HANDLE_TOKEN: u8 = 0;
 
 #[cfg(not(test))]
 unsafe extern "C" {
@@ -101,7 +102,82 @@ fn virtual_graphics_handle(name: &[u8]) -> Option<*mut c_void> {
     match name {
         b"libEGL.so" => Some(ptr::addr_of_mut!(LIBEGL_HANDLE_TOKEN).cast()),
         b"libGLESv2.so" => Some(ptr::addr_of_mut!(LIBGLESV2_HANDLE_TOKEN).cast()),
+        // Vulkan is deliberately a virtual, capability-only DSO.  The
+        // runtime has an ANGLE GLES implementation, but no Vulkan device;
+        // exposing the loader entrypoints lets Android clients observe that
+        // capability through the normal Vulkan API instead of receiving the
+        // misleading "Android ELF loader is not bound" error.
+        b"libvulkan.so" => Some(ptr::addr_of_mut!(LIBVULKAN_HANDLE_TOKEN).cast()),
         _ => None,
+    }
+}
+
+// Vulkan loader ABI surface used for capability discovery.  This is not a
+// software Vulkan implementation: every operation that would require a
+// physical device returns VK_ERROR_INCOMPATIBLE_DRIVER, and enumeration
+// reports no extensions/layers.  Keeping this ABI-level facade virtual means
+// Chromium and other Android clients take their regular "Vulkan unavailable"
+// path while GLES/ANGLE remains the graphics backend.
+const VK_SUCCESS: i32 = 0;
+const VK_ERROR_INCOMPATIBLE_DRIVER: i32 = -9;
+
+unsafe extern "C" fn vulkan_enumerate_instance_version(_version: *mut u32) -> i32 {
+    // This is the Vulkan loader's standard result when no ICD/device is
+    // present.  Do not advertise a fake API version: callers should classify
+    // Vulkan as unavailable and select their GLES/ANGLE path.
+    VK_ERROR_INCOMPATIBLE_DRIVER
+}
+
+unsafe extern "C" fn vulkan_enumerate_instance_extension_properties(
+    _layer_name: *const c_char,
+    property_count: *mut u32,
+    _properties: *mut c_void,
+) -> i32 {
+    if !property_count.is_null() {
+        unsafe { *property_count = 0 };
+    }
+    VK_ERROR_INCOMPATIBLE_DRIVER
+}
+
+unsafe extern "C" fn vulkan_enumerate_instance_layer_properties(
+    property_count: *mut u32,
+    _properties: *mut c_void,
+) -> i32 {
+    if !property_count.is_null() {
+        unsafe { *property_count = 0 };
+    }
+    VK_SUCCESS
+}
+
+unsafe extern "C" fn vulkan_create_instance(
+    _create_info: *const c_void,
+    _allocator: *const c_void,
+    _instance: *mut *mut c_void,
+) -> i32 {
+    VK_ERROR_INCOMPATIBLE_DRIVER
+}
+
+unsafe extern "C" fn vulkan_get_instance_proc_addr(
+    _instance: *mut c_void,
+    name: *const c_char,
+) -> *mut c_void {
+    if name.is_null() {
+        return ptr::null_mut();
+    }
+    // SAFETY: callers provide a Vulkan function-name C string, as required by
+    // vkGetInstanceProcAddr.  Invalid UTF-8 is irrelevant; compare bytes.
+    let name = unsafe { CStr::from_ptr(name) }.to_bytes();
+    match name {
+        b"vkGetInstanceProcAddr" => vulkan_get_instance_proc_addr as *mut c_void,
+        b"vkEnumerateInstanceVersion" => vulkan_enumerate_instance_version as *mut c_void,
+        b"vkEnumerateInstanceExtensionProperties" => {
+            vulkan_enumerate_instance_extension_properties as *mut c_void
+        }
+        b"vkEnumerateInstanceLayerProperties" => {
+            vulkan_enumerate_instance_layer_properties as *mut c_void
+        }
+        b"vkCreateInstance" => vulkan_create_instance as *mut c_void,
+        _ => ptr::null_mut(),
     }
 }
 
@@ -271,6 +347,7 @@ pub unsafe extern "C" fn darwin_art_bionic_dlsym(
 ) -> *mut c_void {
     let egl_handle = ptr::addr_of_mut!(LIBEGL_HANDLE_TOKEN).cast();
     let gles_handle = ptr::addr_of_mut!(LIBGLESV2_HANDLE_TOKEN).cast();
+    let vulkan_handle = ptr::addr_of_mut!(LIBVULKAN_HANDLE_TOKEN).cast();
     if handle == egl_handle || handle == gles_handle {
         if symbol.is_null() {
             set_error("null Android graphics DSO symbol");
@@ -299,6 +376,25 @@ pub unsafe extern "C" fn darwin_art_bionic_dlsym(
         }
         if result.is_null() {
             set_error("Android graphics DSO symbol is unavailable");
+        }
+        return result;
+    }
+    if handle == vulkan_handle {
+        if symbol.is_null() {
+            set_error("null Android Vulkan DSO symbol");
+            return ptr::null_mut();
+        }
+        let result = unsafe { vulkan_get_instance_proc_addr(ptr::null_mut(), symbol) };
+        if std::env::var_os("DARWIN_ART_DEBUG_GRAPHICS_DSO").is_some() {
+            let name = unsafe { CStr::from_ptr(symbol) };
+            eprintln!(
+                "ART Android libdl: libvulkan.so dlsym {} resolved={}",
+                name.to_string_lossy(),
+                !result.is_null()
+            );
+        }
+        if result.is_null() {
+            set_error("Android Vulkan entrypoint is unavailable");
         }
         return result;
     }
@@ -356,6 +452,7 @@ pub unsafe extern "C" fn darwin_art_bionic_dlclose(handle: *mut c_void) -> c_int
     if handle == libandroid_handle()
         || handle == ptr::addr_of_mut!(LIBEGL_HANDLE_TOKEN).cast()
         || handle == ptr::addr_of_mut!(LIBGLESV2_HANDLE_TOKEN).cast()
+        || handle == ptr::addr_of_mut!(LIBVULKAN_HANDLE_TOKEN).cast()
     {
         return 0;
     }
@@ -620,6 +717,23 @@ mod tests {
         );
         assert_eq!(unsafe { darwin_art_bionic_dlclose(handle) }, 0);
         assert!(darwin_art_bionic_dlerror().is_null());
+
+        let vulkan = CString::new("libvulkan.so").unwrap();
+        let vulkan_handle = unsafe { darwin_art_bionic_dlopen(vulkan.as_ptr(), 2) };
+        assert!(!vulkan_handle.is_null());
+        let get_proc_name = CString::new("vkGetInstanceProcAddr").unwrap();
+        let get_proc = unsafe { darwin_art_bionic_dlsym(vulkan_handle, get_proc_name.as_ptr()) };
+        assert!(!get_proc.is_null());
+        let enumerate_name = CString::new("vkEnumerateInstanceVersion").unwrap();
+        let enumerate = unsafe { darwin_art_bionic_dlsym(vulkan_handle, enumerate_name.as_ptr()) };
+        assert!(!enumerate.is_null());
+        let enumerate: unsafe extern "C" fn(*mut u32) -> i32 =
+            unsafe { std::mem::transmute(enumerate) };
+        assert_eq!(
+            unsafe { enumerate(ptr::null_mut()) },
+            VK_ERROR_INCOMPATIBLE_DRIVER
+        );
+        assert_eq!(unsafe { darwin_art_bionic_dlclose(vulkan_handle) }, 0);
 
         let bad = CString::new("bad.so").unwrap();
         assert!(unsafe { darwin_art_bionic_dlopen(bad.as_ptr(), 2) }.is_null());
