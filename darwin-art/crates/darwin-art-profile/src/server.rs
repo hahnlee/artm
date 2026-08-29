@@ -323,6 +323,13 @@ fn handle(mut stream: UnixStream, state: &Arc<State>) -> Result<(), ProfileError
                 .args(&arguments[1..])
                 .env_clear()
                 .envs(environment)
+                // Never inherit the daemon's current directory. The manager
+                // bundle is replaced atomically during upgrades, so an older
+                // daemon may still point at a deleted bundle/worktree. A
+                // stable profile directory is sufficient for the launcher
+                // (which resolves paths from its own executable) and keeps
+                // getcwd()/shell helpers valid for the Android host.
+                .current_dir(&state.paths.profile_root)
                 .stdin(Stdio::null());
             if let Some(log_path) = log_path {
                 let log = OpenOptions::new()

@@ -497,6 +497,7 @@ fn spawn_daemon(paths: &ProfilePaths) -> Result<(), ProfileError> {
         .arg(&paths.profiles_root)
         .arg("--profile")
         .arg(&paths.profile_id)
+        .current_dir(&paths.profile_root)
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(error_log));
