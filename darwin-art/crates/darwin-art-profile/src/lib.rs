@@ -16,6 +16,7 @@ use std::io;
 use std::mem;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -113,6 +114,175 @@ pub fn default_profiles_root() -> Result<PathBuf, ProfileError> {
     }
     let home = env::var_os("HOME").ok_or(ProfileError::MissingHome)?;
     Ok(PathBuf::from(home).join("Library/Application Support/DarwinART/profiles"))
+}
+
+pub fn list_profile_ids(profiles_root: &Path) -> Result<Vec<String>, ProfileError> {
+    let mut profiles = Vec::new();
+    match std::fs::read_dir(profiles_root) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                let Some(profile_id) = entry.file_name().to_str().map(str::to_owned) else {
+                    continue;
+                };
+                if entry.file_type()?.is_dir() && validate_profile_id(&profile_id).is_ok() {
+                    profiles.push(profile_id);
+                }
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    if !profiles.iter().any(|profile| profile == "default") {
+        profiles.push("default".to_owned());
+    }
+    profiles.sort();
+    Ok(profiles)
+}
+
+pub fn create_profile(
+    profiles_root: &Path,
+    profile_id: &str,
+) -> Result<ProfilePaths, ProfileError> {
+    let paths = ProfilePaths::new(profiles_root.to_owned(), profile_id)?;
+    reject_profile_control_symlink(profiles_root)?;
+    reject_profile_control_symlink(&paths.profile_root)?;
+    if paths.profile_root.exists() {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, "profile already exists").into());
+    }
+    std::fs::create_dir_all(&paths.profile_root)?;
+    std::fs::set_permissions(&paths.profile_root, std::fs::Permissions::from_mode(0o700))?;
+    Ok(paths)
+}
+
+pub fn delete_profile(profiles_root: &Path, profile_id: &str) -> Result<(), ProfileError> {
+    let paths = ProfilePaths::new(profiles_root.to_owned(), profile_id)?;
+    reject_profile_control_symlink(profiles_root)?;
+    reject_profile_control_symlink(&paths.profile_root)?;
+    if !paths.profile_root.exists() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "profile does not exist").into());
+    }
+    let socket_is_endpoint = std::fs::symlink_metadata(&paths.socket)
+        .map(|metadata| metadata.file_type().is_socket())
+        .unwrap_or(false);
+    let processes = if socket_is_endpoint {
+        match list_processes(&paths) {
+            Ok(processes) => Some(processes),
+            Err(ProfileError::Io(error))
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound
+                        | io::ErrorKind::ConnectionRefused
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::NotConnected
+                ) =>
+            {
+                None
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        None
+    };
+    if let Some(processes) = processes {
+        let mut resident_pids = Vec::new();
+        for line in processes.lines() {
+            let Some((pid, package)) = line.split_once('\t') else {
+                return Err(ProfileError::InvalidResponse("bad process listing".into()));
+            };
+            if package != "android.system" {
+                return Err(ProfileError::Daemon(format!(
+                    "profile has a running application: {package}"
+                )));
+            }
+            resident_pids.push(pid.to_owned());
+        }
+        if !resident_pids.is_empty() {
+            let status = Command::new("/bin/kill")
+                .arg("-TERM")
+                .args(&resident_pids)
+                .status()?;
+            if !status.success() {
+                return Err(ProfileError::Daemon(
+                    "could not stop profile services".into(),
+                ));
+            }
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !list_processes(&paths)?.is_empty() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(50));
+            }
+            if !list_processes(&paths)?.is_empty() {
+                return Err(ProfileError::Daemon("profile services did not stop".into()));
+            }
+        }
+        shutdown_daemon(&paths)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while paths.socket.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+        if paths.socket.exists() {
+            return Err(ProfileError::Daemon("profile daemon did not stop".into()));
+        }
+    }
+    let filesystem = filesystem::ProfileFilesystem::new(paths.clone());
+    filesystem.detach()?;
+    std::fs::remove_dir_all(&paths.profile_root)?;
+    if profiles_root.exists() {
+        std::fs::File::open(profiles_root)?.sync_all()?;
+    }
+    Ok(())
+}
+
+pub fn profile_allocated_bytes(
+    profiles_root: &Path,
+    profile_id: &str,
+) -> Result<u64, ProfileError> {
+    let paths = ProfilePaths::new(profiles_root.to_owned(), profile_id)?;
+    reject_profile_control_symlink(&paths.profile_root)?;
+    let mut total = 0_u64;
+    match std::fs::read_dir(&paths.profile_root) {
+        Ok(entries) => {
+            for entry in entries {
+                let path = entry?.path();
+                if path != paths.mount {
+                    total = total.saturating_add(allocated_bytes(&path)?);
+                }
+            }
+            Ok(total)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn allocated_bytes(path: &Path) -> Result<u64, ProfileError> {
+    use std::os::unix::fs::MetadataExt;
+
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Ok(0),
+        Ok(metadata) if metadata.is_dir() => {
+            let mut total = metadata.blocks().saturating_mul(512);
+            for entry in std::fs::read_dir(path)? {
+                total = total.saturating_add(allocated_bytes(&entry?.path())?);
+            }
+            Ok(total)
+        }
+        Ok(metadata) => Ok(metadata.blocks().saturating_mul(512)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn reject_profile_control_symlink(path: &Path) -> Result<(), ProfileError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(ProfileError::Daemon(format!(
+            "refusing symlink in profile control path: {}",
+            path.display()
+        ))),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub struct ProfileLease {
@@ -381,5 +551,23 @@ mod tests {
         );
         assert_eq!(paths.mount, PathBuf::from("/profiles/default/mnt"));
         assert!(!paths.socket.starts_with(&paths.mount));
+    }
+
+    #[test]
+    fn profile_catalog_is_canonical_and_reports_allocated_bytes() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("darwin-art-catalog-{nonce}"));
+        create_profile(&root, "work").unwrap();
+        std::fs::write(root.join("work/payload"), b"profile data").unwrap();
+        std::fs::create_dir(root.join("Not-A-Profile")).unwrap();
+        assert_eq!(list_profile_ids(&root).unwrap(), ["default", "work"]);
+        assert!(profile_allocated_bytes(&root, "work").unwrap() > 0);
+        std::fs::write(root.join("work/control.sock"), b"stale").unwrap();
+        delete_profile(&root, "work").unwrap();
+        assert!(!root.join("work").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

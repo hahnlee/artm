@@ -37,7 +37,10 @@ argument vector and allowlisted environment. It owns the child handle, records
 the real PID/package in `darwin-artctl ps`, holds a profile lease for the whole
 lifetime, and reaps the child on exit. This is how `android.system` remains
 alive after the application that first caused startup has exited; shell
-backgrounding is not part of the lifetime contract.
+backgrounding is not part of the lifetime contract. Manager-launched
+applications use this same operation, so closing the AppKit process does not
+terminate Android applications. Their output is redirected to the selected
+profile's `managed-apps.log`.
 
 ## ART system services
 
@@ -116,8 +119,12 @@ profile daemon.
 cargo build --release -p darwin-art-profile --bins
 target/release/darwin-artctl ensure
 target/release/darwin-artctl status
+target/release/darwin-artctl profiles
+target/release/darwin-artctl create-profile work
+target/release/darwin-artctl profile-size work
 target/release/darwin-artctl list
 target/release/darwin-artctl ps
+target/release/darwin-artctl delete-profile work
 target/release/darwin-artctl shutdown
 tools/audit-profile-daemon.sh
 ```
@@ -125,3 +132,6 @@ tools/audit-profile-daemon.sh
 The IPC envelope is versioned (`DARTD001`, protocol version 1). Privileged host
 capabilities belong in the daemon; Android-observable shared services belong in
 the persistent ART system process and reach applications through Binder.
+Profile deletion refuses while an application lease is active, stops the
+profile-owned `android.system`, detaches the APFSX volume, and only then removes
+the exact validated profile directory.

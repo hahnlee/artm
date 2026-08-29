@@ -314,12 +314,25 @@ fn handle(mut stream: UnixStream, state: &Arc<State>) -> Result<(), ProfileError
             let (package, arguments, environment) = parse_daemonize(&message.payload)?;
             crate::registry::validate_package(&package)?;
             state.filesystem.lock().unwrap().ensure()?;
+            let log_path = environment
+                .iter()
+                .find(|(key, _)| key.to_str() == Some("DARWIN_ART_DAEMONIZED_LOG"))
+                .map(|(_, value)| std::path::PathBuf::from(value));
             let mut command = Command::new(&arguments[0]);
             command
                 .args(&arguments[1..])
                 .env_clear()
                 .envs(environment)
                 .stdin(Stdio::null());
+            if let Some(log_path) = log_path {
+                let log = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .mode(0o600)
+                    .open(log_path)?;
+                command.stdout(Stdio::from(log.try_clone()?));
+                command.stderr(Stdio::from(log));
+            }
             let mut child = command.spawn()?;
             let pid = child.id();
             {

@@ -4,14 +4,15 @@
 
 static NSString *const DARErrorDomain = @"dev.darwinart.manager";
 
+@implementation DARInstalledApp
+@end
+
 @implementation DARRuntimeSnapshot
 @end
 
 @interface DARRuntimeClient ()
 @property(nonatomic, readwrite) NSURL *runtimeRootURL;
 @property(nonatomic, readwrite) NSString *profileName;
-@property(nonatomic) NSMutableSet<NSTask *> *launchTasks;
-@property(nonatomic) NSMapTable<NSTask *, NSURL *> *launchRecords;
 @end
 
 @implementation DARRuntimeClient
@@ -32,8 +33,6 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
     }
     _runtimeRootURL = root;
     _profileName = NSProcessInfo.processInfo.environment[@"DARWIN_ART_PROFILE"] ?: @"default";
-    _launchTasks = [NSMutableSet set];
-    _launchRecords = [NSMapTable strongToStrongObjectsMapTable];
     return self;
 }
 
@@ -61,22 +60,33 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
 
 - (NSMutableDictionary<NSString *, NSString *> *)taskEnvironment {
     NSMutableDictionary *environment = [NSProcessInfo.processInfo.environment mutableCopy];
-    environment[@"DARWIN_ART_PROFILE"] = self.profileName;
+    NSString *profile = nil;
+    @synchronized(self) {
+        profile = self.profileName;
+    }
+    environment[@"DARWIN_ART_PROFILE"] = profile;
     environment[@"DARWIN_ART_PACKAGED_RUNTIME"] = @"1";
     environment[@"DARWIN_ART_ANGLE_DIRECTORY"] =
         [self.runtimeRootURL URLByAppendingPathComponent:
                                  @"_build/angle-source/out/DarwinArtRelease"].path;
     NSString *profileRoot = [NSHomeDirectory() stringByAppendingPathComponent:
         [NSString stringWithFormat:@"Library/Application Support/DarwinART/profiles/%@",
-                                   self.profileName]];
+                                   profile]];
     environment[@"DARWIN_ART_NATIVE_CACHE_ROOT"] =
         [profileRoot stringByAppendingPathComponent:@"native-cache"];
+    environment[@"DARWIN_ART_DAEMONIZED_LOG"] =
+        [profileRoot stringByAppendingPathComponent:@"managed-apps.log"];
     return environment;
 }
 
-- (NSString *)runProgram:(NSString *)program
-                arguments:(NSArray<NSString *> *)arguments
-                     error:(NSError **)error {
+- (NSString *)controlProgram {
+    return [self.runtimeRootURL URLByAppendingPathComponent:
+                                     @"target/release/darwin-artctl"].path;
+}
+
+- (nullable NSData *)runDataProgram:(NSString *)program
+                          arguments:(NSArray<NSString *> *)arguments
+                              error:(NSError **)error {
     NSTask *task = [[NSTask alloc] init];
     NSPipe *output = [NSPipe pipe];
     task.executableURL = [NSURL fileURLWithPath:program];
@@ -85,12 +95,12 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
     task.currentDirectoryURL = self.runtimeRootURL;
     task.standardOutput = output;
     task.standardError = output;
-    if (![task launchAndReturnError:error]) return @"";
+    if (![task launchAndReturnError:error]) return nil;
     NSData *data = [output.fileHandleForReading readDataToEndOfFile];
     [task waitUntilExit];
-    NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
     if (task.terminationStatus != 0) {
         if (error) {
+            NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
             NSString *detail = [text stringByTrimmingCharactersInSet:
                                          NSCharacterSet.whitespaceAndNewlineCharacterSet];
             *error = [NSError errorWithDomain:DARErrorDomain
@@ -98,16 +108,101 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
                                      userInfo:@{NSLocalizedDescriptionKey:
                                                     detail.length ? detail : @"명령 실행에 실패했습니다."}];
         }
-        return @"";
+        return nil;
     }
-    return text;
+    return data;
+}
+
+- (NSString *)runProgram:(NSString *)program
+                arguments:(NSArray<NSString *> *)arguments
+                     error:(NSError **)error {
+    NSData *data = [self runDataProgram:program arguments:arguments error:error];
+    return data ? ([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"") : @"";
+}
+
+- (void)fetchProfiles:(DARProfilesHandler)handler {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSError *error = nil;
+        NSString *text = [self runProgram:self.controlProgram arguments:@[@"profiles"] error:&error];
+        if (error) return dispatch_async(dispatch_get_main_queue(), ^{ handler(nil, error); });
+        NSMutableArray<NSString *> *profiles = [NSMutableArray array];
+        [text enumerateLinesUsingBlock:^(NSString *line, BOOL *stop) {
+            (void)stop;
+            if (line.length) [profiles addObject:line];
+        }];
+        dispatch_async(dispatch_get_main_queue(), ^{ handler(profiles, nil); });
+    });
+}
+
+- (void)switchToProfile:(NSString *)profile {
+    @synchronized(self) {
+        self.profileName = [profile copy];
+    }
+}
+
+- (void)createProfile:(NSString *)profile completion:(DARRuntimeActionHandler)handler {
+    [self runActionProgram:self.controlProgram
+                 arguments:@[@"create-profile", profile]
+                completion:handler];
+}
+
+- (void)deleteProfile:(NSString *)profile completion:(DARRuntimeActionHandler)handler {
+    [self runActionProgram:self.controlProgram
+                 arguments:@[@"delete-profile", profile]
+                completion:handler];
+}
+
+- (NSString *)recordValue:(NSString *)key record:(NSString *)record {
+    NSString *prefix = [key stringByAppendingString:@"="];
+    __block NSString *value = nil;
+    [record enumerateLinesUsingBlock:^(NSString *line, BOOL *stop) {
+        if ([line hasPrefix:prefix]) {
+            value = [line substringFromIndex:prefix.length];
+            *stop = YES;
+        }
+    }];
+    return value ?: @"";
+}
+
+- (NSString *)metadataValue:(NSString *)metadata
+                       after:(NSString *)start
+                      before:(NSString *)end {
+    NSRange begin = [metadata rangeOfString:start];
+    if (begin.location == NSNotFound) return @"";
+    NSUInteger location = NSMaxRange(begin);
+    NSRange finish = [metadata rangeOfString:end
+                                     options:0
+                                       range:NSMakeRange(location, metadata.length - location)];
+    if (finish.location == NSNotFound) return @"";
+    return [metadata substringWithRange:NSMakeRange(location, finish.location - location)];
+}
+
+- (DARInstalledApp *)installedAppForPackage:(NSString *)package
+                                     record:(NSString *)record {
+    NSString *metadata = [self recordValue:@"metadata" record:record];
+    DARInstalledApp *app = [[DARInstalledApp alloc] init];
+    app.packageName = package;
+    app.displayName = [self metadataValue:metadata after:@" label=" before:@" label_res="];
+    if (!app.displayName.length) app.displayName = package;
+    NSString *versionName = [self metadataValue:metadata after:@" version_name=" before:@" theme="];
+    NSString *versionCode = [self metadataValue:metadata after:@" version_code=" before:@" version_name="];
+    app.version = versionName.length ? versionName : versionCode;
+    NSString *icon = [self metadataValue:metadata after:@" icon=" before:@" dex="];
+    NSString *apk = [self recordValue:@"apk" record:record];
+    if (apk.length && icon.length && ![icon isEqualToString:@"none"]) {
+        NSError *iconError = nil;
+        NSData *data = [self runDataProgram:@"/usr/bin/unzip"
+                                  arguments:@[@"-p", apk, icon]
+                                      error:&iconError];
+        if (!iconError && data.length && [[NSImage alloc] initWithData:data]) app.iconData = data;
+    }
+    return app;
 }
 
 - (void)fetchSnapshot:(DARRuntimeSnapshotHandler)handler {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSError *error = nil;
-        NSString *ctl = [self.runtimeRootURL URLByAppendingPathComponent:
-                                                  @"target/release/darwin-artctl"].path;
+        NSString *ctl = self.controlProgram;
         [self runProgram:ctl arguments:@[@"ensure"] error:&error];
         if (error) return dispatch_async(dispatch_get_main_queue(), ^{ handler(nil, error); });
         NSString *packagesText = [self runProgram:ctl arguments:@[@"list"] error:&error];
@@ -117,10 +212,13 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
         NSString *status = [self runProgram:ctl arguments:@[@"status"] error:&error];
         if (error) return dispatch_async(dispatch_get_main_queue(), ^{ handler(nil, error); });
 
-        NSMutableArray<NSString *> *packages = [NSMutableArray array];
+        NSMutableArray<DARInstalledApp *> *apps = [NSMutableArray array];
         [packagesText enumerateLinesUsingBlock:^(NSString *line, BOOL *stop) {
             (void)stop;
-            if (line.length) [packages addObject:line];
+            if (!line.length) return;
+            NSError *recordError = nil;
+            NSString *record = [self runProgram:ctl arguments:@[@"resolve", line] error:&recordError];
+            [apps addObject:[self installedAppForPackage:line record:recordError ? @"" : record]];
         }];
         NSMutableDictionary<NSString *, NSMutableArray<NSNumber *> *> *processes =
             [NSMutableDictionary dictionary];
@@ -135,10 +233,14 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
             [values addObject:@(pid)];
         }];
         DARRuntimeSnapshot *snapshot = [[DARRuntimeSnapshot alloc] init];
-        snapshot.packages = packages;
+        snapshot.apps = apps;
         snapshot.processes = processes;
         snapshot.daemonStatus = [status stringByTrimmingCharactersInSet:
                                             NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        NSString *size = [self runProgram:ctl
+                                arguments:@[@"profile-size", self.profileName]
+                                    error:&error];
+        snapshot.allocatedBytes = error ? 0 : strtoull(size.UTF8String, NULL, 10);
         dispatch_async(dispatch_get_main_queue(), ^{ handler(snapshot, nil); });
     });
 }
@@ -167,8 +269,7 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
 - (void)uninstallPackage:(NSString *)package
               removeData:(BOOL)removeData
               completion:(DARRuntimeActionHandler)handler {
-    NSString *ctl = [self.runtimeRootURL URLByAppendingPathComponent:
-                                              @"target/release/darwin-artctl"].path;
+    NSString *ctl = self.controlProgram;
     NSArray<NSString *> *arguments = removeData
                                          ? @[@"uninstall", package]
                                          : @[@"uninstall", package, @"--keep-data"];
@@ -176,8 +277,7 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
 }
 
 - (void)launchPackage:(NSString *)package completion:(DARRuntimeActionHandler)handler {
-    NSString *ctl = [self.runtimeRootURL URLByAppendingPathComponent:
-                                              @"target/release/darwin-artctl"].path;
+    NSString *ctl = self.controlProgram;
     NSError *error = nil;
     NSString *record = [self runProgram:ctl arguments:@[@"resolve", package] error:&error];
     if (error) {
@@ -193,61 +293,16 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
     }
     NSString *launcher = [self.runtimeRootURL URLByAppendingPathComponent:
                                                    @"tools/run-android-apk-app.sh"].path;
-    NSTask *task = [[NSTask alloc] init];
-    NSString *profileRoot = [NSHomeDirectory() stringByAppendingPathComponent:
-        [NSString stringWithFormat:@"Library/Application Support/DarwinART/profiles/%@",
-                                   self.profileName]];
-    if (![NSFileManager.defaultManager createDirectoryAtPath:profileRoot
-                                  withIntermediateDirectories:YES
-                                                   attributes:nil
-                                                        error:&error]) {
-        handler(error);
-        return;
-    }
-    NSString *logPath = [profileRoot stringByAppendingPathComponent:@"managed-apps.log"];
-    if (![NSFileManager.defaultManager fileExistsAtPath:logPath]) {
-        [NSFileManager.defaultManager createFileAtPath:logPath contents:nil attributes:nil];
-    }
-    NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:logPath];
-    if (!log) {
-        handler([NSError errorWithDomain:DARErrorDomain
-                                    code:4
-                                userInfo:@{NSLocalizedDescriptionKey:
-                                               @"프로필 로그 파일을 열지 못했습니다."}]);
-        return;
-    }
-    [log seekToEndOfFile];
-    task.executableURL = [NSURL fileURLWithPath:launcher];
-    task.arguments = @[@"--record", recordURL.path, @"86400"];
-    task.environment = [self taskEnvironment];
-    task.currentDirectoryURL = self.runtimeRootURL;
-    task.standardOutput = log;
-    task.standardError = log;
-    if (![task launchAndReturnError:&error]) {
-        [log closeFile];
-        [NSFileManager.defaultManager removeItemAtURL:recordURL error:nil];
-        handler(error);
-        return;
-    }
-    [log closeFile];
-    [self.launchTasks addObject:task];
-    [self.launchRecords setObject:recordURL forKey:task];
-    __weak typeof(self) weakSelf = self;
-    task.terminationHandler = ^(NSTask *finished) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            NSURL *finishedRecord = [weakSelf.launchRecords objectForKey:finished];
-            if (finishedRecord) {
-                [NSFileManager.defaultManager removeItemAtURL:finishedRecord error:nil];
-                [weakSelf.launchRecords removeObjectForKey:finished];
-            }
-            [weakSelf.launchTasks removeObject:finished];
-            if (weakSelf.logHandler) {
-                weakSelf.logHandler([NSString stringWithFormat:@"%@ 종료 (status %d)\n",
-                                                               package, finished.terminationStatus]);
-            }
-        });
-    };
-    handler(nil);
+    [self runActionProgram:ctl
+                 arguments:@[@"daemonize", package, launcher, @"--record", recordURL.path,
+                             @"86400"]
+                completion:^(NSError *launchError) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
+                                   dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                        [NSFileManager.defaultManager removeItemAtURL:recordURL error:nil];
+                    });
+                    handler(launchError);
+                }];
 }
 
 - (void)stopPackage:(NSString *)package
@@ -272,8 +327,7 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
 - (void)revealDataForPackage:(NSString *)package completion:(DARRuntimeActionHandler)handler {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSError *error = nil;
-        NSString *ctl = [self.runtimeRootURL URLByAppendingPathComponent:
-                                                  @"target/release/darwin-artctl"].path;
+        NSString *ctl = self.controlProgram;
         NSString *mount = [self runProgram:ctl arguments:@[@"ensure"] error:&error];
         if (error) return dispatch_async(dispatch_get_main_queue(), ^{ handler(error); });
         mount = [mount stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -290,8 +344,7 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
 - (void)restartSystem:(DARRuntimeActionHandler)handler {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSError *error = nil;
-        NSString *ctl = [self.runtimeRootURL URLByAppendingPathComponent:
-                                                  @"target/release/darwin-artctl"].path;
+        NSString *ctl = self.controlProgram;
         NSString *processText = [self runProgram:ctl arguments:@[@"ps"] error:&error];
         if (error) return dispatch_async(dispatch_get_main_queue(), ^{ handler(error); });
         NSMutableArray<NSString *> *pids = [NSMutableArray arrayWithObject:@"-TERM"];
@@ -318,8 +371,7 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
 - (void)revealProfile:(DARRuntimeActionHandler)handler {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSError *error = nil;
-        NSString *ctl = [self.runtimeRootURL URLByAppendingPathComponent:
-                                                  @"target/release/darwin-artctl"].path;
+        NSString *ctl = self.controlProgram;
         NSString *mount = [self runProgram:ctl arguments:@[@"ensure"] error:&error];
         if (error) return dispatch_async(dispatch_get_main_queue(), ^{ handler(error); });
         mount = [mount stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];

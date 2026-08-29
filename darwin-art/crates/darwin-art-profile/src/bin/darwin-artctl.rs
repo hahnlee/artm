@@ -1,6 +1,7 @@
 use darwin_art_profile::{
-    ProfileLease, ProfilePaths, daemon_status, daemonize_process, ensure_daemon, list_packages,
-    list_processes, register_package, resolve_package, shutdown_daemon, unregister_package,
+    ProfileLease, ProfilePaths, create_profile, daemon_status, daemonize_process, delete_profile,
+    ensure_daemon, list_packages, list_processes, list_profile_ids, profile_allocated_bytes,
+    register_package, resolve_package, shutdown_daemon, unregister_package,
 };
 use std::env;
 use std::error::Error;
@@ -31,6 +32,26 @@ fn main_result() -> Result<(), Box<dyn Error>> {
             println!();
         }
         Some("status") => println!("{}", daemon_status(&paths)?),
+        Some("profiles") => {
+            for profile in list_profile_ids(&paths.profiles_root)? {
+                println!("{profile}");
+            }
+        }
+        Some("create-profile") => {
+            let profile = env::args().nth(2).ok_or("create-profile requires id")?;
+            create_profile(&paths.profiles_root, &profile)?;
+        }
+        Some("delete-profile") => {
+            let profile = env::args().nth(2).ok_or("delete-profile requires id")?;
+            delete_profile(&paths.profiles_root, &profile)?;
+        }
+        Some("profile-size") => {
+            let profile = env::args().nth(2).ok_or("profile-size requires id")?;
+            println!(
+                "{}",
+                profile_allocated_bytes(&paths.profiles_root, &profile)?
+            );
+        }
         Some("shutdown") => shutdown_daemon(&paths)?,
         Some("register") => {
             let package = env::args().nth(2).ok_or("register requires package")?;
@@ -122,7 +143,7 @@ fn main_result() -> Result<(), Box<dyn Error>> {
                 .into());
         }
         _ => {
-            return Err("usage: darwin-artctl {ensure|socket|status|shutdown|register PACKAGE RECORD|resolve PACKAGE|uninstall PACKAGE [--keep-data]|list|ps|hold SECONDS|supervise PACKAGE COMMAND [ARGS...]|daemonize PACKAGE COMMAND [ARGS...]|exec PACKAGE COMMAND [ARGS...]}".into());
+            return Err("usage: darwin-artctl {ensure|socket|status|profiles|create-profile ID|delete-profile ID|profile-size ID|shutdown|register PACKAGE RECORD|resolve PACKAGE|uninstall PACKAGE [--keep-data]|list|ps|hold SECONDS|supervise PACKAGE COMMAND [ARGS...]|daemonize PACKAGE COMMAND [ARGS...]|exec PACKAGE COMMAND [ARGS...]}".into());
         }
     }
     Ok(())

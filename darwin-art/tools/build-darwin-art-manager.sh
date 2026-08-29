@@ -17,7 +17,7 @@ mkdir -p "$contents/MacOS" "$contents/Resources/DarwinART"
 cp "$source_root/Info.plist" "$contents/Info.plist"
 xcrun clang -arch arm64 -isysroot "$sdk" -mmacosx-version-min=14.0 \
   -fobjc-arc -fmodules -Wall -Wextra -Werror \
-  -framework AppKit -framework UniformTypeIdentifiers \
+  -framework AppKit -framework ServiceManagement -framework UniformTypeIdentifiers \
   "$source_root"/Sources/*.m -o "$binary"
 
 cargo build --manifest-path "$project_root/Cargo.toml" -q --release \

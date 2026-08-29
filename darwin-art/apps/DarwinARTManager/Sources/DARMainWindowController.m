@@ -1,6 +1,7 @@
 #import "DARMainWindowController.h"
 
 #import "DARRuntimeClient.h"
+#import <ServiceManagement/ServiceManagement.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 static NSToolbarItemIdentifier const DARInstallItem = @"dev.darwinart.manager.install";
@@ -8,12 +9,16 @@ static NSToolbarItemIdentifier const DARRefreshItem = @"dev.darwinart.manager.re
 static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.system";
 
 @interface DARMainWindowController () <NSTableViewDataSource, NSTableViewDelegate,
-                                        NSToolbarDelegate>
+                                        NSToolbarDelegate, NSDraggingDestination>
 @property(nonatomic) DARRuntimeClient *client;
 @property(nonatomic) DARRuntimeSnapshot *snapshot;
-@property(nonatomic) NSArray<NSString *> *packages;
+@property(nonatomic) NSArray<DARInstalledApp *> *apps;
+@property(nonatomic) NSArray<NSString *> *profiles;
 @property(nonatomic) NSString *selectedPackage;
+@property(nonatomic) NSPopUpButton *profilePopup;
+@property(nonatomic) NSButton *removeProfileButton;
 @property(nonatomic) NSTableView *tableView;
+@property(nonatomic) NSImageView *appIconView;
 @property(nonatomic) NSTextField *packageLabel;
 @property(nonatomic) NSTextField *stateLabel;
 @property(nonatomic) NSTextField *daemonLabel;
@@ -39,7 +44,8 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     self = [super initWithWindow:window];
     if (!self) return nil;
     _client = client;
-    _packages = @[];
+    _apps = @[];
+    _profiles = @[];
     _pendingLogText = [NSMutableString string];
     window.title = @"Darwin ART";
     window.subtitle = [NSString stringWithFormat:@"%@ 프로필", client.profileName];
@@ -49,6 +55,7 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     window.tabbingMode = NSWindowTabbingModeDisallowed;
     [window center];
     [self buildInterface];
+    [window registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
     [self configureToolbar];
     __weak typeof(self) weakSelf = self;
     client.logHandler = ^(NSString *text) { [weakSelf appendLog:text]; };
@@ -77,13 +84,35 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     sidebar.state = NSVisualEffectStateFollowsWindowActiveState;
     sidebar.translatesAutoresizingMaskIntoConstraints = NO;
 
+    self.profilePopup = [[NSPopUpButton alloc] init];
+    self.profilePopup.target = self;
+    self.profilePopup.action = @selector(profileChanged:);
+    self.profilePopup.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+    self.profilePopup.translatesAutoresizingMaskIntoConstraints = NO;
+    NSButton *addProfile = [NSButton buttonWithImage:
+                                      [NSImage imageWithSystemSymbolName:@"plus"
+                                               accessibilityDescription:@"프로필 추가"]
+                                          target:self
+                                          action:@selector(addProfile:)];
+    addProfile.bezelStyle = NSBezelStyleAccessoryBarAction;
+    addProfile.toolTip = @"프로필 추가";
+    addProfile.translatesAutoresizingMaskIntoConstraints = NO;
+    self.removeProfileButton = [NSButton buttonWithImage:
+                                          [NSImage imageWithSystemSymbolName:@"minus"
+                                                   accessibilityDescription:@"프로필 삭제"]
+                                              target:self
+                                              action:@selector(removeProfile:)];
+    self.removeProfileButton.bezelStyle = NSBezelStyleAccessoryBarAction;
+    self.removeProfileButton.toolTip = @"현재 프로필 삭제";
+    self.removeProfileButton.translatesAutoresizingMaskIntoConstraints = NO;
+
     NSScrollView *listScroll = [[NSScrollView alloc] init];
     listScroll.drawsBackground = NO;
     listScroll.hasVerticalScroller = YES;
     listScroll.translatesAutoresizingMaskIntoConstraints = NO;
     self.tableView = [[NSTableView alloc] init];
     self.tableView.headerView = nil;
-    self.tableView.rowHeight = 36;
+    self.tableView.rowHeight = 48;
     self.tableView.backgroundColor = NSColor.clearColor;
     self.tableView.style = NSTableViewStyleSourceList;
     self.tableView.delegate = self;
@@ -92,24 +121,35 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     column.resizingMask = NSTableColumnAutoresizingMask;
     [self.tableView addTableColumn:column];
     listScroll.documentView = self.tableView;
+    [sidebar addSubview:self.profilePopup];
+    [sidebar addSubview:addProfile];
+    [sidebar addSubview:self.removeProfileButton];
     [sidebar addSubview:listScroll];
     [NSLayoutConstraint activateConstraints:@[
+        [self.profilePopup.leadingAnchor constraintEqualToAnchor:sidebar.leadingAnchor constant:12],
+        [self.profilePopup.topAnchor constraintEqualToAnchor:sidebar.topAnchor constant:12],
+        [addProfile.leadingAnchor constraintEqualToAnchor:self.profilePopup.trailingAnchor constant:6],
+        [addProfile.centerYAnchor constraintEqualToAnchor:self.profilePopup.centerYAnchor],
+        [self.removeProfileButton.leadingAnchor constraintEqualToAnchor:addProfile.trailingAnchor constant:4],
+        [self.removeProfileButton.trailingAnchor constraintEqualToAnchor:sidebar.trailingAnchor constant:-10],
+        [self.removeProfileButton.centerYAnchor constraintEqualToAnchor:self.profilePopup.centerYAnchor],
         [listScroll.leadingAnchor constraintEqualToAnchor:sidebar.leadingAnchor],
         [listScroll.trailingAnchor constraintEqualToAnchor:sidebar.trailingAnchor],
-        [listScroll.topAnchor constraintEqualToAnchor:sidebar.topAnchor],
+        [listScroll.topAnchor constraintEqualToAnchor:self.profilePopup.bottomAnchor constant:10],
         [listScroll.bottomAnchor constraintEqualToAnchor:sidebar.bottomAnchor],
         [sidebar.widthAnchor constraintEqualToConstant:280],
     ]];
 
     NSView *detail = [[NSView alloc] init];
     detail.translatesAutoresizingMaskIntoConstraints = NO;
-    NSImageView *icon = [[NSImageView alloc] init];
-    icon.image = [NSImage imageWithSystemSymbolName:@"apps.iphone"
-                           accessibilityDescription:@"Android applications"];
-    icon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:38
-                                                                                weight:NSFontWeightRegular];
-    icon.contentTintColor = NSColor.controlAccentColor;
-    icon.translatesAutoresizingMaskIntoConstraints = NO;
+    self.appIconView = [[NSImageView alloc] init];
+    self.appIconView.image = [NSImage imageWithSystemSymbolName:@"apps.iphone"
+                                      accessibilityDescription:@"Android applications"];
+    self.appIconView.symbolConfiguration =
+        [NSImageSymbolConfiguration configurationWithPointSize:38 weight:NSFontWeightRegular];
+    self.appIconView.contentTintColor = NSColor.controlAccentColor;
+    self.appIconView.imageScaling = NSImageScaleProportionallyUpOrDown;
+    self.appIconView.translatesAutoresizingMaskIntoConstraints = NO;
     self.packageLabel = [self labelWithFont:[NSFont systemFontOfSize:24 weight:NSFontWeightSemibold]
                                       color:NSColor.labelColor];
     self.packageLabel.stringValue = @"앱을 선택하세요";
@@ -162,23 +202,23 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     self.progress.displayedWhenStopped = NO;
     self.progress.translatesAutoresizingMaskIntoConstraints = NO;
 
-    for (NSView *view in @[icon, self.packageLabel, self.stateLabel, actions, logTitle,
+    for (NSView *view in @[self.appIconView, self.packageLabel, self.stateLabel, actions, logTitle,
                             logScroll, self.daemonLabel, self.progress]) {
         [detail addSubview:view];
     }
     [NSLayoutConstraint activateConstraints:@[
-        [icon.leadingAnchor constraintEqualToAnchor:detail.leadingAnchor constant:32],
-        [icon.topAnchor constraintEqualToAnchor:detail.topAnchor constant:36],
-        [icon.widthAnchor constraintEqualToConstant:52],
-        [icon.heightAnchor constraintEqualToConstant:52],
-        [self.packageLabel.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:16],
+        [self.appIconView.leadingAnchor constraintEqualToAnchor:detail.leadingAnchor constant:32],
+        [self.appIconView.topAnchor constraintEqualToAnchor:detail.topAnchor constant:36],
+        [self.appIconView.widthAnchor constraintEqualToConstant:52],
+        [self.appIconView.heightAnchor constraintEqualToConstant:52],
+        [self.packageLabel.leadingAnchor constraintEqualToAnchor:self.appIconView.trailingAnchor constant:16],
         [self.packageLabel.trailingAnchor constraintLessThanOrEqualToAnchor:detail.trailingAnchor constant:-24],
-        [self.packageLabel.topAnchor constraintEqualToAnchor:icon.topAnchor constant:2],
+        [self.packageLabel.topAnchor constraintEqualToAnchor:self.appIconView.topAnchor constant:2],
         [self.stateLabel.leadingAnchor constraintEqualToAnchor:self.packageLabel.leadingAnchor],
         [self.stateLabel.trailingAnchor constraintEqualToAnchor:detail.trailingAnchor constant:-24],
         [self.stateLabel.topAnchor constraintEqualToAnchor:self.packageLabel.bottomAnchor constant:4],
         [actions.leadingAnchor constraintEqualToAnchor:detail.leadingAnchor constant:32],
-        [actions.topAnchor constraintEqualToAnchor:icon.bottomAnchor constant:24],
+        [actions.topAnchor constraintEqualToAnchor:self.appIconView.bottomAnchor constant:24],
         [logTitle.leadingAnchor constraintEqualToAnchor:detail.leadingAnchor constant:32],
         [logTitle.topAnchor constraintEqualToAnchor:actions.bottomAnchor constant:28],
         [logScroll.leadingAnchor constraintEqualToAnchor:detail.leadingAnchor constant:32],
@@ -244,11 +284,28 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
 
 - (void)showWindow:(id)sender {
     [super showWindow:sender];
-    [self refresh:nil];
+    [self refreshProfilesAndSnapshot];
+}
+
+- (void)refreshProfilesAndSnapshot {
+    __weak typeof(self) weakSelf = self;
+    [self.client fetchProfiles:^(NSArray<NSString *> *profiles, NSError *error) {
+        if (error) {
+            [weakSelf presentActionError:error];
+            return;
+        }
+        weakSelf.profiles = profiles;
+        [weakSelf.profilePopup removeAllItems];
+        [weakSelf.profilePopup addItemsWithTitles:profiles];
+        [weakSelf.profilePopup selectItemWithTitle:weakSelf.client.profileName];
+        weakSelf.removeProfileButton.enabled =
+            ![weakSelf.client.profileName isEqualToString:@"default"];
+        [weakSelf refresh:nil];
+    }];
 }
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
-    return self.packages.count;
+    return self.apps.count;
 }
 
 - (NSView *)tableView:(NSTableView *)tableView
@@ -264,13 +321,20 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
         image.contentTintColor = NSColor.controlAccentColor;
         image.translatesAutoresizingMaskIntoConstraints = NO;
         NSTextField *text = [NSTextField labelWithString:@""];
-        text.font = [NSFont systemFontOfSize:13];
+        text.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
         text.lineBreakMode = NSLineBreakByTruncatingMiddle;
         text.translatesAutoresizingMaskIntoConstraints = NO;
+        NSTextField *detail = [NSTextField labelWithString:@""];
+        detail.tag = 100;
+        detail.font = [NSFont systemFontOfSize:10];
+        detail.textColor = NSColor.secondaryLabelColor;
+        detail.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        detail.translatesAutoresizingMaskIntoConstraints = NO;
         cell.imageView = image;
         cell.textField = text;
         [cell addSubview:image];
         [cell addSubview:text];
+        [cell addSubview:detail];
         [NSLayoutConstraint activateConstraints:@[
             [image.leadingAnchor constraintEqualToAnchor:cell.leadingAnchor constant:8],
             [image.centerYAnchor constraintEqualToAnchor:cell.centerYAnchor],
@@ -278,21 +342,31 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
             [image.heightAnchor constraintEqualToConstant:20],
             [text.leadingAnchor constraintEqualToAnchor:image.trailingAnchor constant:8],
             [text.trailingAnchor constraintEqualToAnchor:cell.trailingAnchor constant:-8],
-            [text.centerYAnchor constraintEqualToAnchor:cell.centerYAnchor],
+            [text.topAnchor constraintEqualToAnchor:cell.topAnchor constant:7],
+            [detail.leadingAnchor constraintEqualToAnchor:text.leadingAnchor],
+            [detail.trailingAnchor constraintEqualToAnchor:text.trailingAnchor],
+            [detail.topAnchor constraintEqualToAnchor:text.bottomAnchor constant:1],
         ]];
     }
-    NSString *package = self.packages[row];
-    cell.textField.stringValue = package;
-    cell.imageView.contentTintColor = self.snapshot.processes[package].count
-                                          ? NSColor.systemGreenColor
-                                          : NSColor.controlAccentColor;
+    DARInstalledApp *app = self.apps[row];
+    cell.textField.stringValue = app.displayName;
+    NSTextField *detail = [cell viewWithTag:100];
+    detail.stringValue = app.version.length
+                             ? [NSString stringWithFormat:@"%@ · %@", app.packageName, app.version]
+                             : app.packageName;
+    NSImage *icon = app.iconData ? [[NSImage alloc] initWithData:app.iconData] : nil;
+    cell.imageView.image = icon ?: [NSImage imageWithSystemSymbolName:@"app"
+                                         accessibilityDescription:@"Android app"];
+    cell.imageView.contentTintColor = icon ? nil : (self.snapshot.processes[app.packageName].count
+                                                         ? NSColor.systemGreenColor
+                                                         : NSColor.controlAccentColor);
     return cell;
 }
 
 - (void)tableViewSelectionDidChange:(NSNotification *)notification {
     NSInteger row = self.tableView.selectedRow;
-    self.selectedPackage = row >= 0 && row < (NSInteger)self.packages.count
-                               ? self.packages[row]
+    self.selectedPackage = row >= 0 && row < (NSInteger)self.apps.count
+                               ? self.apps[row].packageName
                                : nil;
     [self updateControls];
 }
@@ -301,18 +375,33 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     if (busy) [self.progress startAnimation:nil]; else [self.progress stopAnimation:nil];
 }
 
+- (DARInstalledApp *)selectedApp {
+    for (DARInstalledApp *app in self.apps) {
+        if ([app.packageName isEqualToString:self.selectedPackage]) return app;
+    }
+    return nil;
+}
+
 - (void)updateControls {
     NSString *package = self.selectedPackage;
+    DARInstalledApp *app = self.selectedApp;
     NSArray<NSNumber *> *pids = package ? self.snapshot.processes[package] : @[];
-    self.packageLabel.stringValue = package ?: @"앱을 선택하세요";
+    self.packageLabel.stringValue = app.displayName ?: @"앱을 선택하세요";
+    NSImage *icon = app.iconData ? [[NSImage alloc] initWithData:app.iconData] : nil;
+    self.appIconView.image = icon ?: [NSImage imageWithSystemSymbolName:@"apps.iphone"
+                                           accessibilityDescription:@"Android applications"];
+    self.appIconView.contentTintColor = icon ? nil : NSColor.controlAccentColor;
     if (!package) {
         self.stateLabel.stringValue = @"설치된 Android 앱을 관리할 수 있습니다.";
     } else if (pids.count) {
         NSString *pidList = [[pids valueForKey:@"stringValue"] componentsJoinedByString:@", "];
-        self.stateLabel.stringValue = [NSString stringWithFormat:@"실행 중 · PID %@",
-                                                                 pidList];
+        self.stateLabel.stringValue = [NSString stringWithFormat:@"%@ · 실행 중 · PID %@",
+                                                                 package, pidList];
     } else {
-        self.stateLabel.stringValue = @"설치됨 · 실행 중이 아님";
+        self.stateLabel.stringValue = app.version.length
+                                          ? [NSString stringWithFormat:@"%@ · 버전 %@ · 설치됨",
+                                                                       package, app.version]
+                                          : [NSString stringWithFormat:@"%@ · 설치됨", package];
     }
     self.runButton.enabled = package.length > 0 && pids.count == 0;
     self.stopButton.enabled = package.length > 0 && pids.count > 0;
@@ -362,20 +451,95 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
             return;
         }
         weakSelf.snapshot = snapshot;
-        weakSelf.packages = snapshot.packages;
-        weakSelf.daemonLabel.stringValue = [NSString stringWithFormat:@"darwin-artd: %@ · profile: %@",
-                                                                       snapshot.daemonStatus,
-                                                                       weakSelf.client.profileName];
+        weakSelf.apps = snapshot.apps;
+        NSString *size = [NSByteCountFormatter stringFromByteCount:(long long)snapshot.allocatedBytes
+                                                        countStyle:NSByteCountFormatterCountStyleFile];
+        weakSelf.daemonLabel.stringValue =
+            [NSString stringWithFormat:@"darwin-artd: %@ · 디스크 %@",
+                                       snapshot.daemonStatus, size];
         [weakSelf.tableView reloadData];
-        NSInteger row = [weakSelf.packages indexOfObject:weakSelf.selectedPackage];
+        NSInteger row = NSNotFound;
+        for (NSUInteger index = 0; index < weakSelf.apps.count; index++) {
+            if ([weakSelf.apps[index].packageName isEqualToString:weakSelf.selectedPackage]) {
+                row = index;
+                break;
+            }
+        }
         if (row != NSNotFound) {
             [weakSelf.tableView selectRowIndexes:[NSIndexSet indexSetWithIndex:row]
                             byExtendingSelection:NO];
-        } else if (weakSelf.packages.count) {
+        } else if (weakSelf.apps.count) {
             [weakSelf.tableView selectRowIndexes:[NSIndexSet indexSetWithIndex:0]
                             byExtendingSelection:NO];
         }
         [weakSelf updateControls];
+    }];
+}
+
+- (IBAction)profileChanged:(id)sender {
+    NSString *profile = self.profilePopup.selectedItem.title;
+    if (!profile.length || [profile isEqualToString:self.client.profileName]) return;
+    self.selectedPackage = nil;
+    self.snapshot = nil;
+    self.apps = @[];
+    [self.client switchToProfile:profile];
+    self.window.subtitle = [NSString stringWithFormat:@"%@ 프로필", profile];
+    self.removeProfileButton.enabled = ![profile isEqualToString:@"default"];
+    [self.tableView reloadData];
+    [self updateControls];
+    [self refresh:nil];
+}
+
+- (IBAction)addProfile:(id)sender {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"새 Android 프로필";
+    alert.informativeText = @"소문자 영문, 숫자, '.', '_' 또는 '-'를 사용하세요.";
+    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 280, 24)];
+    field.placeholderString = @"예: work";
+    alert.accessoryView = field;
+    [alert addButtonWithTitle:@"생성"];
+    [alert addButtonWithTitle:@"취소"];
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSAlertFirstButtonReturn || !field.stringValue.length) return;
+        NSString *profile = field.stringValue.lowercaseString;
+        [self setBusy:YES];
+        [self.client createProfile:profile completion:^(NSError *error) {
+            [self setBusy:NO];
+            if (error) {
+                [self presentActionError:error];
+                return;
+            }
+            [self.client switchToProfile:profile];
+            self.window.subtitle = [NSString stringWithFormat:@"%@ 프로필", profile];
+            self.selectedPackage = nil;
+            [self refreshProfilesAndSnapshot];
+        }];
+    }];
+}
+
+- (IBAction)removeProfile:(id)sender {
+    NSString *profile = self.client.profileName;
+    if ([profile isEqualToString:@"default"]) return;
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = [NSString stringWithFormat:@"%@ 프로필을 삭제하시겠습니까?", profile];
+    alert.informativeText = @"설치된 앱, 앱 데이터, 네이티브 캐시와 프로필 디스크가 모두 삭제됩니다.";
+    alert.alertStyle = NSAlertStyleCritical;
+    [alert addButtonWithTitle:@"프로필 삭제"];
+    [alert addButtonWithTitle:@"취소"];
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response != NSAlertFirstButtonReturn) return;
+        [self setBusy:YES];
+        [self.client deleteProfile:profile completion:^(NSError *error) {
+            [self setBusy:NO];
+            if (error) {
+                [self presentActionError:error];
+                return;
+            }
+            [self.client switchToProfile:@"default"];
+            self.window.subtitle = @"default 프로필";
+            self.selectedPackage = nil;
+            [self refreshProfilesAndSnapshot];
+        }];
     }];
 }
 
@@ -384,20 +548,42 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     panel.title = @"Android APK 설치";
     panel.prompt = @"설치";
     panel.canChooseDirectories = NO;
-    panel.allowsMultipleSelection = NO;
+    panel.allowsMultipleSelection = YES;
     panel.allowedContentTypes = @[[UTType typeWithFilenameExtension:@"apk"]];
     [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
         if (result != NSModalResponseOK) return;
-        [self setBusy:YES];
-        [self.client installAPKAtURL:panel.URL completion:^(NSError *error) {
+        [self installAPKURLs:panel.URLs];
+    }];
+}
+
+- (void)installAPKURLs:(NSArray<NSURL *> *)URLs {
+    NSMutableArray<NSURL *> *APKs = [NSMutableArray array];
+    for (NSURL *URL in URLs) {
+        if (URL.isFileURL && [URL.pathExtension.lowercaseString isEqualToString:@"apk"]) {
+            [APKs addObject:URL];
+        }
+    }
+    if (!APKs.count) return;
+    [self setBusy:YES];
+    [self installAPKs:APKs index:0];
+}
+
+- (void)installAPKs:(NSArray<NSURL *> *)APKs index:(NSUInteger)index {
+    if (index >= APKs.count) {
+        [self setBusy:NO];
+        [self refresh:nil];
+        return;
+    }
+    NSURL *URL = APKs[index];
+    [self appendLog:[NSString stringWithFormat:@"%@ 설치 중…\n", URL.lastPathComponent]];
+    [self.client installAPKAtURL:URL completion:^(NSError *error) {
+        if (error) {
             [self setBusy:NO];
-            if (error) {
-                [self presentActionError:error];
-                return;
-            }
-            [self appendLog:[NSString stringWithFormat:@"%@ 설치 완료\n", panel.URL.lastPathComponent]];
-            [self refresh:nil];
-        }];
+            [self presentActionError:error];
+            return;
+        }
+        [self appendLog:[NSString stringWithFormat:@"%@ 설치 완료\n", URL.lastPathComponent]];
+        [self installAPKs:APKs index:index + 1];
     }];
 }
 
@@ -468,9 +654,27 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
 - (IBAction)manageSystem:(id)sender {
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = @"Darwin ART 시스템";
+    NSArray<NSNumber *> *systemPIDs = self.snapshot.processes[@"android.system"] ?: @[];
+    NSString *systemStatus = systemPIDs.count
+                                 ? [NSString stringWithFormat:@"실행 중 (PID %@)",
+                                                              [[systemPIDs valueForKey:@"stringValue"]
+                                                                  componentsJoinedByString:@", "]]
+                                 : @"대기 중 · 앱 실행 시 자동 시작";
+    NSString *size = [NSByteCountFormatter stringFromByteCount:
+                                               (long long)self.snapshot.allocatedBytes
+                                                        countStyle:NSByteCountFormatterCountStyleFile];
     alert.informativeText = [NSString stringWithFormat:
-        @"프로필: %@\n%@\n\n런타임과 호환성 계층은 이 앱 번들에 포함되어 있습니다.",
-        self.client.profileName, self.snapshot.daemonStatus ?: @"상태 확인 중"];
+        @"프로필: %@\n프로필 디스크: %@\n관리 서비스: %@\nandroid.system: %@\n\n런타임과 호환성 계층은 이 앱 번들에 포함되어 있습니다.",
+        self.client.profileName, size, self.snapshot.daemonStatus ?: @"상태 확인 중",
+        systemStatus];
+    NSButton *loginItem = [NSButton checkboxWithTitle:@"로그인할 때 Darwin ART 열기"
+                                               target:self
+                                               action:@selector(toggleLoginItem:)];
+    loginItem.state = SMAppService.mainAppService.status == SMAppServiceStatusEnabled
+                          ? NSControlStateValueOn
+                          : NSControlStateValueOff;
+    loginItem.frame = NSMakeRect(0, 0, 320, 24);
+    alert.accessoryView = loginItem;
     [alert addButtonWithTitle:@"프로필 열기"];
     [alert addButtonWithTitle:@"서비스 재시작"];
     [alert addButtonWithTitle:@"취소"];
@@ -492,6 +696,37 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
             }];
         }
     }];
+}
+
+- (IBAction)toggleLoginItem:(NSButton *)sender {
+    NSError *error = nil;
+    BOOL enabled = sender.state == NSControlStateValueOn;
+    BOOL success = enabled
+                       ? [SMAppService.mainAppService registerAndReturnError:&error]
+                       : [SMAppService.mainAppService unregisterAndReturnError:&error];
+    if (!success) {
+        sender.state = enabled ? NSControlStateValueOff : NSControlStateValueOn;
+        [self presentActionError:error];
+    }
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+    NSPasteboard *pasteboard = sender.draggingPasteboard;
+    NSArray<NSURL *> *URLs = [pasteboard readObjectsForClasses:@[NSURL.class]
+                                                       options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+    for (NSURL *URL in URLs) {
+        if ([URL.pathExtension.lowercaseString isEqualToString:@"apk"]) {
+            return NSDragOperationCopy;
+        }
+    }
+    return NSDragOperationNone;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+    NSArray<NSURL *> *URLs = [sender.draggingPasteboard readObjectsForClasses:@[NSURL.class]
+                                                                    options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+    [self installAPKURLs:URLs];
+    return URLs.count > 0;
 }
 
 @end

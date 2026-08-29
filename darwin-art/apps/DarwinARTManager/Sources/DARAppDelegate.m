@@ -5,6 +5,7 @@
 
 @interface DARAppDelegate ()
 @property(nonatomic) DARMainWindowController *mainWindowController;
+@property(nonatomic) NSMutableArray<NSURL *> *pendingAPKURLs;
 @end
 
 @implementation DARAppDelegate
@@ -21,7 +22,29 @@
     }
     self.mainWindowController = [[DARMainWindowController alloc] initWithRuntimeClient:client];
     [self.mainWindowController showWindow:nil];
+    if (self.pendingAPKURLs.count) {
+        [self.mainWindowController installAPKURLs:self.pendingAPKURLs];
+        [self.pendingAPKURLs removeAllObjects];
+    }
     [NSApp activateIgnoringOtherApps:YES];
+}
+
+- (void)application:(NSApplication *)application openURLs:(NSArray<NSURL *> *)URLs {
+    NSMutableArray<NSURL *> *APKs = [NSMutableArray array];
+    for (NSURL *URL in URLs) {
+        if (URL.isFileURL && [URL.pathExtension.lowercaseString isEqualToString:@"apk"]) {
+            [APKs addObject:URL];
+        }
+    }
+    if (!APKs.count) return;
+    if (self.mainWindowController) {
+        [self.mainWindowController installAPKURLs:APKs];
+        [self.mainWindowController showWindow:nil];
+        [NSApp activateIgnoringOtherApps:YES];
+    } else {
+        if (!self.pendingAPKURLs) self.pendingAPKURLs = [NSMutableArray array];
+        [self.pendingAPKURLs addObjectsFromArray:APKs];
+    }
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {

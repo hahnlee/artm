@@ -48,7 +48,10 @@ CLI. Its AppKit bundle contains the runtime, compatibility libraries, graphics
 backend, profile daemon, APK tools, framework resources, fonts, and ICU data.
 It installs unchanged APKs, launches and gracefully terminates applications,
 uninstalls code with an explicit keep/delete-data choice, opens private data,
-and exposes profile/service management from one window:
+and exposes profile/service management from one window. Profiles can be
+created, switched, and safely deleted; installed apps use their Android label,
+version, and APK icon. APKs can be selected in batches, dragged onto the
+window, or opened from Finder:
 
 ```sh
 tools/build-darwin-art-manager.sh
@@ -61,7 +64,10 @@ ART installation. `DARWIN_ART_PROFILE` remains an internal testing override;
 normal launches use the manager-owned default profile. Managed application
 output is appended to
 `~/Library/Application Support/DarwinART/profiles/<profile>/managed-apps.log`
-so applications remain independent of the manager window's lifetime.
+and processes are spawned by `darwin-artd`, so applications and
+`android.system` remain independent of the manager window's lifetime. The
+System sheet reports daemon/system-service state and allocated profile size,
+and optionally registers the manager as a macOS login item.
 
 Physical-keyboard status and the remaining Android `.kl`/`.kcm` compatibility
 work are documented in
