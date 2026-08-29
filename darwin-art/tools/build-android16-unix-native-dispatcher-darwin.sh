@@ -128,6 +128,9 @@ for required in \
   "$nativehelper_source/include_jni/jni.h" \
   "$nativehelper_source/include/nativehelper/JNIHelp.h" \
   "$liblog_include/android/log.h" \
+  "$project_root/compat/darwin_openjdk_nio_fs_redirect.h" \
+  "$project_root/tools/bionic-errno-tls/include/darwin_art_bionic_errno.h" \
+  "$project_root/tools/bionic-fs-facade/include/darwin_art_bionic_fs.h" \
   "$project_root/probes/android16_unix_native_dispatcher_jni.c" \
   "$project_root/probes/unix-native-dispatcher/UnixNativeDispatcherDarwinSmoke.java"; do
   [[ -e "$required" ]] || fail "missing build dependency: $required"
@@ -152,12 +155,21 @@ common_flags=(
   -I"$nativehelper_source/include_platform_header_only"
   -I"$nativehelper_source/header_only_include"
   -I"$liblog_include"
+  -I"$project_root/tools/bionic-errno-tls/include"
+  -I"$project_root/tools/bionic-fs-facade/include"
+  -I"$project_root/tools/bionic-ioctl-facade/include"
+  -I"$project_root/tools/bionic-socket-broker-adapter/include"
 )
 
 source_object="$objects/UnixNativeDispatcher.o"
-"$cc" "${common_flags[@]}" -c "$patched_source" -o "$source_object"
+"$cc" "${common_flags[@]}" \
+  -DDARWIN_ART_OPENJDK_RUNTIME_ROOT=\"$project_root\" \
+  -include "$project_root/compat/darwin_openjdk_nio_fs_redirect.h" \
+  -c "$patched_source" -o "$source_object"
 [[ "$(file "$source_object")" == *"Mach-O 64-bit object arm64"* ]] ||
   fail "UnixNativeDispatcher object is not Darwin arm64"
+host_source_object="$objects/UnixNativeDispatcher-host-probe.o"
+"$cc" "${common_flags[@]}" -c "$patched_source" -o "$host_source_object"
 archive="$stage/libopenjdk-unix-native-dispatcher-darwin.a"
 "$libtool_bin" -static -o "$archive" "$source_object"
 [[ "$(lipo -archs "$archive")" == arm64 ]] || fail "archive is not arm64"
@@ -177,7 +189,7 @@ done < "$methods"
 
 device_library="$stage/libunix-native-dispatcher-device-closure.dylib"
 "$cxx" -arch arm64 -isysroot "$sdk_root" -dynamiclib \
-  -Wl,-force_load,"$archive" "$file_input_stream" \
+  "$host_source_object" "$file_input_stream" \
   "$device_nativehelper" "$liblog" \
   -Wl,-exported_symbol,_register_java_sun_nio_fs_UnixNativeDispatcher \
   -Wl,-dead_strip -framework CoreFoundation -o "$device_library"
@@ -196,7 +208,7 @@ managed_probe="$objects/managed-probe.o"
   -o "$managed_probe"
 managed_library="$stage/libunix-native-dispatcher-managed.dylib"
 "$cxx" -arch arm64 -isysroot "$sdk_root" -dynamiclib \
-  "$managed_probe" -Wl,-force_load,"$archive" "$file_input_stream" \
+  "$managed_probe" "$host_source_object" "$file_input_stream" \
   -Wl,-exported_symbol,_JNI_OnLoad -Wl,-dead_strip -o "$managed_library"
 classes="$stage/classes"
 mkdir -p "$classes"
@@ -240,6 +252,11 @@ EOF
 
 undefined="$stage/archive-undefined.txt"
 nm -u "$archive" | sed 's/^[[:space:]]*//' | sort -u > "$undefined"
+for redirected in _darwin_art_bionic_open _darwin_art_bionic_mkdir \
+  _darwin_art_bionic_stat _darwin_art_bionic_write; do
+  grep -Fx "$redirected" "$undefined" >/dev/null ||
+    fail "production NIO redirect missing $redirected"
+done
 mkdir -p "$build_dir"
 cp "$archive" "$build_dir/libopenjdk-unix-native-dispatcher-darwin.a"
 cp "$methods" "$build_dir/unix-native-dispatcher-methods.tsv"

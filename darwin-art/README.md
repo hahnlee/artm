@@ -192,7 +192,12 @@ owners. The Button probe now passes the complete Android 16 `FileInputStream`,
 `FileChannelImpl`, `FileDispatcherImpl`, `IOUtil`, and `NativeThread` owners,
 the complementary ART/libcore `libcore.io.Memory` owners, the 47-entry
 `UnixNativeDispatcher`, the complete libcore half of `java.lang.System`, and
-Darwin `lseek`. With a source-coherent ICU76 Java/native/data set it maps the
+Darwin `lseek`. Production OpenJDK NIO routes Android mounts and relative app
+paths through the Rust-owned Bionic filesystem facade, while explicit Darwin
+bootstrap paths (for example the pinned bootclasspath under the workspace)
+remain host libc paths. This preserves one guest descriptor/path namespace
+without hiding ART's host-side runtime inputs. With a source-coherent
+ICU76 Java/native/data set it maps the
 pinned Android font data, constructs a real `android.widget.Button`, renders
 through HWUI/Minikin/Skia, exports a frame, and shuts ART down cleanly.
 Compiled app-resource inflation and direct GPU HWUI are live. Full Android

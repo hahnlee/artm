@@ -11,17 +11,52 @@
 #include "darwin_art_bionic_socket_broker.h"
 
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <sys/time.h>
 #include <sys/uio.h>
 #include <unistd.h>
 
 static inline void darwin_art_openjdk_nio_publish_errno(intptr_t result) {
   if (result < 0) errno = darwin_art_bionic_errno_load();
+}
+
+static inline int darwin_art_openjdk_nio_is_guest_path(const char* path) {
+  if (path == NULL || path[0] != '/') return 1;
+  // ART receives a small set of absolute Darwin paths for immutable runtime
+  // products. Do not turn every other absolute path into host passthrough:
+  // application-supplied /Users or /etc paths still belong to the guest
+  // namespace and must fail through its mount policy.
+#ifndef DARWIN_ART_OPENJDK_RUNTIME_ROOT
+#define DARWIN_ART_OPENJDK_RUNTIME_ROOT ""
+#endif
+  static const char* const runtime_roots[] = {
+      DARWIN_ART_OPENJDK_RUNTIME_ROOT "/_build/",
+      DARWIN_ART_OPENJDK_RUNTIME_ROOT "/_prebuilt/",
+      DARWIN_ART_OPENJDK_RUNTIME_ROOT "/target/",
+  };
+  const size_t root_length = strlen(DARWIN_ART_OPENJDK_RUNTIME_ROOT);
+  for (size_t index = 0;
+       index < sizeof(runtime_roots) / sizeof(runtime_roots[0]); ++index) {
+    if (root_length != 0 && strncmp(path, runtime_roots[index],
+                                    strlen(runtime_roots[index])) == 0)
+      return 0;
+  }
+  return 1;
+}
+
+static inline int darwin_art_openjdk_nio_is_runtime_read(int flags) {
+  const int android_access_mode = flags & 3;
+  const int android_write_effects = flags & (0x40 | 0x80 | 0x200 | 0x400);
+  return android_access_mode == 0 && android_write_effects == 0;
 }
 
 static inline int darwin_art_openjdk_nio_is_virtual_fd(int fd) {
@@ -163,7 +198,56 @@ static inline int darwin_art_openjdk_nio_fstat(int fd, struct stat* status) {
   status->st_size = (off_t)android_status.st_size;
   status->st_blksize = (blksize_t)android_status.st_blksize;
   status->st_blocks = (blkcnt_t)android_status.st_blocks;
+  status->st_atimespec.tv_sec = (time_t)android_status.st_atim.tv_sec;
+  status->st_atimespec.tv_nsec = android_status.st_atim.tv_nsec;
+  status->st_mtimespec.tv_sec = (time_t)android_status.st_mtim.tv_sec;
+  status->st_mtimespec.tv_nsec = android_status.st_mtim.tv_nsec;
+  status->st_ctimespec.tv_sec = (time_t)android_status.st_ctim.tv_sec;
+  status->st_ctimespec.tv_nsec = android_status.st_ctim.tv_nsec;
+  status->st_birthtimespec = status->st_ctimespec;
   return 0;
+}
+
+static inline int darwin_art_openjdk_nio_copy_stat(
+    int result, const DarwinArtAndroidStat* android_status,
+    struct stat* status) {
+  darwin_art_openjdk_nio_publish_errno(result);
+  if (result != 0) return result;
+  memset(status, 0, sizeof(*status));
+  status->st_dev = (dev_t)android_status->st_dev;
+  status->st_ino = (ino_t)android_status->st_ino;
+  status->st_mode = (mode_t)android_status->st_mode;
+  status->st_nlink = (nlink_t)android_status->st_nlink;
+  status->st_uid = (uid_t)android_status->st_uid;
+  status->st_gid = (gid_t)android_status->st_gid;
+  status->st_rdev = (dev_t)android_status->st_rdev;
+  status->st_size = (off_t)android_status->st_size;
+  status->st_blksize = (blksize_t)android_status->st_blksize;
+  status->st_blocks = (blkcnt_t)android_status->st_blocks;
+  status->st_atimespec.tv_sec = (time_t)android_status->st_atim.tv_sec;
+  status->st_atimespec.tv_nsec = android_status->st_atim.tv_nsec;
+  status->st_mtimespec.tv_sec = (time_t)android_status->st_mtim.tv_sec;
+  status->st_mtimespec.tv_nsec = android_status->st_mtim.tv_nsec;
+  status->st_ctimespec.tv_sec = (time_t)android_status->st_ctim.tv_sec;
+  status->st_ctimespec.tv_nsec = android_status->st_ctim.tv_nsec;
+  status->st_birthtimespec = status->st_ctimespec;
+  return 0;
+}
+
+static inline int darwin_art_openjdk_nio_stat(const char* path,
+                                               struct stat* status) {
+  if (!darwin_art_openjdk_nio_is_guest_path(path)) return stat(path, status);
+  DarwinArtAndroidStat android_status;
+  const int result = darwin_art_bionic_stat(path, &android_status);
+  return darwin_art_openjdk_nio_copy_stat(result, &android_status, status);
+}
+
+static inline int darwin_art_openjdk_nio_lstat(const char* path,
+                                                struct stat* status) {
+  if (!darwin_art_openjdk_nio_is_guest_path(path)) return lstat(path, status);
+  DarwinArtAndroidStat android_status;
+  const int result = darwin_art_bionic_lstat(path, &android_status);
+  return darwin_art_openjdk_nio_copy_stat(result, &android_status, status);
 }
 
 static inline off_t darwin_art_openjdk_nio_lseek(int fd, off_t offset,
@@ -221,7 +305,169 @@ static inline int darwin_art_openjdk_nio_open(const char* path, int flags,
     mode = (uint32_t)va_arg(arguments, int);
     va_end(arguments);
   }
-  return open(path, flags, mode);
+  if (!darwin_art_openjdk_nio_is_guest_path(path) &&
+      darwin_art_openjdk_nio_is_runtime_read(flags))
+    return open(path, flags, (mode_t)mode);
+  const int result = darwin_art_bionic_open(path, flags, mode);
+  darwin_art_openjdk_nio_publish_errno(result);
+  return result;
+}
+
+static inline int darwin_art_openjdk_nio_dup(int fd) {
+  if (!darwin_art_openjdk_nio_is_virtual_fd(fd)) return dup(fd);
+  const int result = darwin_art_bionic_fs_fcntl_core(fd, 0, 0);
+  darwin_art_openjdk_nio_publish_errno(result);
+  return result;
+}
+
+static inline char* darwin_art_openjdk_nio_getcwd(char* buffer, size_t size) {
+  char* const result = darwin_art_bionic_getcwd(buffer, size);
+  if (result == NULL) errno = darwin_art_bionic_errno_load();
+  return result;
+}
+
+static inline int darwin_art_openjdk_nio_chmod(const char* path, mode_t mode) {
+  const int result = darwin_art_bionic_chmod(path, (uint32_t)mode);
+  darwin_art_openjdk_nio_publish_errno(result);
+  return result;
+}
+
+static inline int darwin_art_openjdk_nio_fchmod(int fd, mode_t mode) {
+  const int result = darwin_art_bionic_fchmod(fd, (uint32_t)mode);
+  darwin_art_openjdk_nio_publish_errno(result);
+  return result;
+}
+
+static inline int darwin_art_openjdk_nio_fchown(int fd, uid_t owner,
+                                                 gid_t group) {
+  const int result = darwin_art_bionic_fchown(fd, (uint32_t)owner,
+                                               (uint32_t)group);
+  darwin_art_openjdk_nio_publish_errno(result);
+  return result;
+}
+
+static inline int darwin_art_openjdk_nio_utimes(
+    const char* path, const struct timeval times[2]) {
+  DarwinArtAndroidTimespec android_times[2];
+  for (size_t index = 0; index < 2; ++index) {
+    android_times[index].tv_sec = times[index].tv_sec;
+    android_times[index].tv_nsec = (int64_t)times[index].tv_usec * 1000;
+  }
+  const int result = darwin_art_bionic_utimensat(
+      DARWIN_ART_ANDROID_AT_FDCWD, path, android_times, 0);
+  darwin_art_openjdk_nio_publish_errno(result);
+  return result;
+}
+
+static inline DIR* darwin_art_openjdk_nio_opendir(const char* path) {
+  void* const result = darwin_art_bionic_opendir(path);
+  if (result == NULL) errno = darwin_art_bionic_errno_load();
+  return (DIR*)result;
+}
+
+static inline struct dirent* darwin_art_openjdk_nio_readdir(DIR* directory) {
+  DarwinArtAndroidDirent* const android_entry =
+      darwin_art_bionic_readdir((void*)directory);
+  if (android_entry == NULL) return NULL;
+  static _Thread_local struct dirent entry;
+  memset(&entry, 0, sizeof(entry));
+  entry.d_ino = (ino_t)android_entry->d_ino;
+  entry.d_type = android_entry->d_type;
+  const size_t length = strnlen(android_entry->d_name,
+                                sizeof(android_entry->d_name));
+  const size_t copied = length < sizeof(entry.d_name) - 1
+                            ? length
+                            : sizeof(entry.d_name) - 1;
+  memcpy(entry.d_name, android_entry->d_name, copied);
+  entry.d_name[copied] = '\0';
+  entry.d_namlen = (uint16_t)copied;
+  return &entry;
+}
+
+static inline int darwin_art_openjdk_nio_closedir(DIR* directory) {
+  const int result = darwin_art_bionic_closedir((void*)directory);
+  darwin_art_openjdk_nio_publish_errno(result);
+  return result;
+}
+
+#define DARWIN_ART_OPENJDK_NIO_PATH_CALL(name, guest_expression) \
+  static inline int darwin_art_openjdk_nio_##name {              \
+    const int result = (guest_expression);                        \
+    darwin_art_openjdk_nio_publish_errno(result);                 \
+    return result;                                                \
+  }
+
+DARWIN_ART_OPENJDK_NIO_PATH_CALL(
+    mkdir(const char* path, mode_t mode),
+    darwin_art_bionic_mkdir(path, (uint32_t)mode))
+DARWIN_ART_OPENJDK_NIO_PATH_CALL(
+    rmdir(const char* path),
+    darwin_art_bionic_unlinkat(DARWIN_ART_ANDROID_AT_FDCWD, path,
+                               DARWIN_ART_ANDROID_AT_REMOVEDIR))
+DARWIN_ART_OPENJDK_NIO_PATH_CALL(
+    link(const char* old_path, const char* new_path),
+    darwin_art_bionic_link(old_path, new_path))
+DARWIN_ART_OPENJDK_NIO_PATH_CALL(
+    unlink(const char* path),
+    darwin_art_bionic_unlinkat(DARWIN_ART_ANDROID_AT_FDCWD, path, 0))
+DARWIN_ART_OPENJDK_NIO_PATH_CALL(
+    rename(const char* old_path, const char* new_path),
+    darwin_art_bionic_rename(old_path, new_path))
+DARWIN_ART_OPENJDK_NIO_PATH_CALL(
+    symlink(const char* target, const char* link_path),
+    darwin_art_bionic_symlink(target, link_path))
+DARWIN_ART_OPENJDK_NIO_PATH_CALL(
+    access(const char* path, int mode), darwin_art_bionic_access(path, mode))
+
+#undef DARWIN_ART_OPENJDK_NIO_PATH_CALL
+
+static inline ssize_t darwin_art_openjdk_nio_readlink(const char* path,
+                                                       char* buffer,
+                                                       size_t size) {
+  if (!darwin_art_openjdk_nio_is_guest_path(path))
+    return readlink(path, buffer, size);
+  const intptr_t result = darwin_art_bionic_readlink(path, buffer, size);
+  darwin_art_openjdk_nio_publish_errno(result);
+  return (ssize_t)result;
+}
+
+static inline char* darwin_art_openjdk_nio_realpath(const char* path,
+                                                     char* resolved) {
+  if (!darwin_art_openjdk_nio_is_guest_path(path))
+    return realpath(path, resolved);
+  char* const result = darwin_art_bionic_realpath(path, resolved);
+  if (result == NULL) errno = darwin_art_bionic_errno_load();
+  return result;
+}
+
+static inline int darwin_art_openjdk_nio_statvfs(
+    const char* path, struct statvfs* status) {
+  if (!darwin_art_openjdk_nio_is_guest_path(path)) return statvfs(path, status);
+  DarwinArtAndroidStatvfs android_status;
+  const int result = darwin_art_bionic_statvfs(path, &android_status);
+  darwin_art_openjdk_nio_publish_errno(result);
+  if (result != 0) return result;
+  memset(status, 0, sizeof(*status));
+  status->f_bsize = (unsigned long)android_status.f_bsize;
+  status->f_frsize = (unsigned long)android_status.f_frsize;
+  status->f_blocks = (fsblkcnt_t)android_status.f_blocks;
+  status->f_bfree = (fsblkcnt_t)android_status.f_bfree;
+  status->f_bavail = (fsblkcnt_t)android_status.f_bavail;
+  status->f_files = (fsfilcnt_t)android_status.f_files;
+  status->f_ffree = (fsfilcnt_t)android_status.f_ffree;
+  status->f_favail = (fsfilcnt_t)android_status.f_favail;
+  status->f_fsid = (unsigned long)android_status.f_fsid;
+  status->f_flag = (unsigned long)android_status.f_flag;
+  status->f_namemax = (unsigned long)android_status.f_namemax;
+  return 0;
+}
+
+static inline long darwin_art_openjdk_nio_pathconf(const char* path,
+                                                    int name) {
+  if (!darwin_art_openjdk_nio_is_guest_path(path)) return pathconf(path, name);
+  const int64_t result = darwin_art_bionic_pathconf(path, name);
+  darwin_art_openjdk_nio_publish_errno(result);
+  return (long)result;
 }
 
 static inline int darwin_art_openjdk_nio_dup2(int old_fd, int new_fd) {
@@ -281,6 +527,28 @@ static inline int darwin_art_openjdk_nio_fcntl(int fd, int command, ...) {
 #define lseek darwin_art_openjdk_nio_lseek
 #define mmap darwin_art_openjdk_nio_mmap
 #define open darwin_art_openjdk_nio_open
+#define dup darwin_art_openjdk_nio_dup
+#define getcwd darwin_art_openjdk_nio_getcwd
+#define stat(...) darwin_art_openjdk_nio_stat(__VA_ARGS__)
+#define lstat(...) darwin_art_openjdk_nio_lstat(__VA_ARGS__)
+#define chmod darwin_art_openjdk_nio_chmod
+#define fchmod darwin_art_openjdk_nio_fchmod
+#define fchown darwin_art_openjdk_nio_fchown
+#define utimes darwin_art_openjdk_nio_utimes
+#define opendir darwin_art_openjdk_nio_opendir
+#define readdir darwin_art_openjdk_nio_readdir
+#define closedir darwin_art_openjdk_nio_closedir
+#define mkdir darwin_art_openjdk_nio_mkdir
+#define rmdir darwin_art_openjdk_nio_rmdir
+#define link darwin_art_openjdk_nio_link
+#define unlink darwin_art_openjdk_nio_unlink
+#define rename darwin_art_openjdk_nio_rename
+#define symlink darwin_art_openjdk_nio_symlink
+#define readlink darwin_art_openjdk_nio_readlink
+#define realpath darwin_art_openjdk_nio_realpath
+#define access darwin_art_openjdk_nio_access
+#define statvfs(...) darwin_art_openjdk_nio_statvfs(__VA_ARGS__)
+#define pathconf darwin_art_openjdk_nio_pathconf
 #define dup2 darwin_art_openjdk_nio_dup2
 #define fcntl darwin_art_openjdk_nio_fcntl
 
