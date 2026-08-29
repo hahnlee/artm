@@ -243,6 +243,18 @@ pub fn resolve_package(paths: &ProfilePaths, package: &str) -> Result<Vec<u8>, P
     request(paths, protocol::OP_RESOLVE, package.as_bytes())
 }
 
+pub fn unregister_package(
+    paths: &ProfilePaths,
+    package: &str,
+    remove_data: bool,
+) -> Result<(), ProfileError> {
+    registry::validate_package(package)?;
+    let mut payload = Vec::with_capacity(package.len() + 1);
+    payload.push(u8::from(remove_data));
+    payload.extend_from_slice(package.as_bytes());
+    request(paths, protocol::OP_UNREGISTER, &payload).map(|_| ())
+}
+
 pub fn list_packages(paths: &ProfilePaths) -> Result<String, ProfileError> {
     let bytes = request(paths, protocol::OP_LIST, &[])?;
     String::from_utf8(bytes).map_err(|error| ProfileError::InvalidResponse(error.to_string()))

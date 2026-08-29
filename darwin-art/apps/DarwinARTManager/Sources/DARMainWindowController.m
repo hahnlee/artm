@@ -5,6 +5,7 @@
 
 static NSToolbarItemIdentifier const DARInstallItem = @"dev.darwinart.manager.install";
 static NSToolbarItemIdentifier const DARRefreshItem = @"dev.darwinart.manager.refresh";
+static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.system";
 
 @interface DARMainWindowController () <NSTableViewDataSource, NSTableViewDelegate,
                                         NSToolbarDelegate>
@@ -19,6 +20,7 @@ static NSToolbarItemIdentifier const DARRefreshItem = @"dev.darwinart.manager.re
 @property(nonatomic) NSButton *runButton;
 @property(nonatomic) NSButton *stopButton;
 @property(nonatomic) NSButton *dataButton;
+@property(nonatomic) NSButton *deleteButton;
 @property(nonatomic) NSTextView *logView;
 @property(nonatomic) NSProgressIndicator *progress;
 @property(nonatomic) NSMutableString *pendingLogText;
@@ -124,8 +126,13 @@ static NSToolbarItemIdentifier const DARRefreshItem = @"dev.darwinart.manager.re
                                          target:self
                                          action:@selector(revealSelected:)];
     self.dataButton.bezelStyle = NSBezelStyleRounded;
+    self.deleteButton = [NSButton buttonWithTitle:@"삭제"
+                                           target:self
+                                           action:@selector(uninstallSelected:)];
+    self.deleteButton.bezelStyle = NSBezelStyleRounded;
     NSStackView *actions = [NSStackView stackViewWithViews:
-                                      @[self.runButton, self.stopButton, self.dataButton]];
+                                      @[self.runButton, self.stopButton, self.dataButton,
+                                        self.deleteButton]];
     actions.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     actions.spacing = 8;
     actions.translatesAutoresizingMaskIntoConstraints = NO;
@@ -198,11 +205,12 @@ static NSToolbarItemIdentifier const DARRefreshItem = @"dev.darwinart.manager.re
 }
 
 - (NSArray<NSToolbarItemIdentifier> *)toolbarAllowedItemIdentifiers:(NSToolbar *)toolbar {
-    return @[DARInstallItem, DARRefreshItem, NSToolbarFlexibleSpaceItemIdentifier];
+    return @[DARInstallItem, DARRefreshItem, DARSystemItem,
+             NSToolbarFlexibleSpaceItemIdentifier];
 }
 
 - (NSArray<NSToolbarItemIdentifier> *)toolbarDefaultItemIdentifiers:(NSToolbar *)toolbar {
-    return @[DARInstallItem, DARRefreshItem, NSToolbarFlexibleSpaceItemIdentifier];
+    return @[DARInstallItem, DARRefreshItem, NSToolbarFlexibleSpaceItemIdentifier, DARSystemItem];
 }
 
 - (NSToolbarItem *)toolbar:(NSToolbar *)toolbar
@@ -216,13 +224,20 @@ static NSToolbarItemIdentifier const DARRefreshItem = @"dev.darwinart.manager.re
                                accessibilityDescription:item.label];
         item.target = self;
         item.action = @selector(installAPK:);
-    } else {
+    } else if ([identifier isEqualToString:DARRefreshItem]) {
         item.label = @"새로 고침";
         item.toolTip = @"앱과 프로세스 상태 새로 고침";
         item.image = [NSImage imageWithSystemSymbolName:@"arrow.clockwise"
                                accessibilityDescription:item.label];
         item.target = self;
         item.action = @selector(refresh:);
+    } else {
+        item.label = @"시스템";
+        item.toolTip = @"프로필과 런타임 시스템 관리";
+        item.image = [NSImage imageWithSystemSymbolName:@"gearshape.2"
+                               accessibilityDescription:item.label];
+        item.target = self;
+        item.action = @selector(manageSystem:);
     }
     return item;
 }
@@ -302,6 +317,7 @@ static NSToolbarItemIdentifier const DARRefreshItem = @"dev.darwinart.manager.re
     self.runButton.enabled = package.length > 0 && pids.count == 0;
     self.stopButton.enabled = package.length > 0 && pids.count > 0;
     self.dataButton.enabled = package.length > 0;
+    self.deleteButton.enabled = package.length > 0 && pids.count == 0;
 }
 
 - (void)appendLog:(NSString *)text {
@@ -419,6 +435,62 @@ static NSToolbarItemIdentifier const DARRefreshItem = @"dev.darwinart.manager.re
     if (!package) return;
     [self.client revealDataForPackage:package completion:^(NSError *error) {
         if (error) [self presentActionError:error];
+    }];
+}
+
+- (IBAction)uninstallSelected:(id)sender {
+    NSString *package = self.selectedPackage;
+    if (!package) return;
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = [NSString stringWithFormat:@"%@을 삭제하시겠습니까?", package];
+    alert.informativeText = @"APK와 최적화된 코드를 제거합니다. 앱 데이터도 함께 삭제하거나 보관할 수 있습니다.";
+    [alert addButtonWithTitle:@"앱과 데이터 삭제"];
+    [alert addButtonWithTitle:@"데이터 보관"];
+    [alert addButtonWithTitle:@"취소"];
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response == NSAlertThirdButtonReturn) return;
+        BOOL removeData = response == NSAlertFirstButtonReturn;
+        [self setBusy:YES];
+        [self.client uninstallPackage:package removeData:removeData completion:^(NSError *error) {
+            [self setBusy:NO];
+            if (error) {
+                [self presentActionError:error];
+                return;
+            }
+            [self appendLog:[NSString stringWithFormat:@"%@ 삭제 완료%@\n", package,
+                                                       removeData ? @"" : @" (데이터 보관)"]];
+            self.selectedPackage = nil;
+            [self refresh:nil];
+        }];
+    }];
+}
+
+- (IBAction)manageSystem:(id)sender {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Darwin ART 시스템";
+    alert.informativeText = [NSString stringWithFormat:
+        @"프로필: %@\n%@\n\n런타임과 호환성 계층은 이 앱 번들에 포함되어 있습니다.",
+        self.client.profileName, self.snapshot.daemonStatus ?: @"상태 확인 중"];
+    [alert addButtonWithTitle:@"프로필 열기"];
+    [alert addButtonWithTitle:@"서비스 재시작"];
+    [alert addButtonWithTitle:@"취소"];
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+        if (response == NSAlertFirstButtonReturn) {
+            [self.client revealProfile:^(NSError *error) {
+                if (error) [self presentActionError:error];
+            }];
+        } else if (response == NSAlertSecondButtonReturn) {
+            [self setBusy:YES];
+            [self.client restartSystem:^(NSError *error) {
+                [self setBusy:NO];
+                if (error) {
+                    [self presentActionError:error];
+                    return;
+                }
+                [self appendLog:@"Darwin ART 시스템 서비스 재시작 완료\n"];
+                [self refresh:nil];
+            }];
+        }
     }];
 }
 

@@ -45,12 +45,21 @@ if [[ -z "$installed_record" ]]; then
     }
     app_dex="$external_dex"
   fi
+  metadata_tool="$root/target/release/android-apk-app-runtime"
   if [[ "$app_dex" == "$source_apk" ]]; then
-    metadata="$(cargo run -q --release \
-      --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk")"
+    if [[ -x "$metadata_tool" ]]; then
+      metadata="$("$metadata_tool" "$source_apk")"
+    else
+      metadata="$(cargo run -q --release \
+        --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk")"
+    fi
   else
-    metadata="$(cargo run -q --release \
-      --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk" "$app_dex")"
+    if [[ -x "$metadata_tool" ]]; then
+      metadata="$("$metadata_tool" "$source_apk" "$app_dex")"
+    else
+      metadata="$(cargo run -q --release \
+        --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk" "$app_dex")"
+    fi
   fi
 fi
 package="$(sed -n 's/^apk-app-runtime: package=\([^ ]*\) .*/\1/p' <<<"$metadata")"
@@ -92,18 +101,24 @@ fi
 runtime_abi="darwin-art-darwin-native-v1"
 profile_mount=""
 if [[ -z "${DARWIN_ART_APP_DATA_ROOT:-}" ]]; then
-  if [[ -z "$installed_record" ]]; then
+  if [[ ! -x "$root/target/release/darwin-artctl" ||
+        ! -x "$root/target/release/darwin-artd" ]]; then
     cargo build -q --release -p darwin-art-profile --bins
-  elif [[ ! -x "$root/target/release/darwin-artctl" ]]; then
-    echo "installed run requires a prebuilt darwin-artctl; run cargo xtask build" >&2
-    exit 69
   fi
   profile_ctl="$root/target/release/darwin-artctl"
   profile_mount="$("$profile_ctl" ensure)"
   export DARWIN_ART_PROFILE_CTL="$profile_ctl"
   export DARWIN_ART_PROFILE_SOCKET
   DARWIN_ART_PROFILE_SOCKET="$("$profile_ctl" socket)"
-  export DARWIN_ART_SYSTEM_SERVER_SOCKET="$profile_mount/run/system-server-lite.sock"
+  # Darwin's sockaddr_un.sun_path is only 104 bytes. Application Support and
+  # user-selected profile names can exceed that before the socket filename is
+  # appended, so keep process-control endpoints in a short, user-private
+  # runtime directory while all durable profile data remains in profile_mount.
+  system_socket_dir="/tmp/darwin-art-$(id -u)"
+  mkdir -p "$system_socket_dir"
+  chmod 0700 "$system_socket_dir"
+  profile_socket_id="$(printf '%s' "$profile_mount" | shasum -a 256 | awk '{print substr($1, 1, 16)}')"
+  export DARWIN_ART_SYSTEM_SERVER_SOCKET="$system_socket_dir/$profile_socket_id.system.sock"
 fi
 if [[ -n "${DARWIN_ART_APK_INSTALL_ROOT:-}" ]]; then
   install_root="$DARWIN_ART_APK_INSTALL_ROOT"
@@ -117,13 +132,17 @@ native_converter="${DARWIN_ART_NATIVE_CONVERTER:-none}"
 installer="$root/target/release/darwin-art-apk-install"
 native_resolver="$root/target/release/darwin-art-native-resolve"
 if [[ -z "$installed_record" ]]; then
-  cargo build -q --release -p darwin-art-apk-install
-  cargo build -q --release -p darwin-art-native-artifact --bin darwin-art-native-resolve
+  if [[ ! -x "$installer" || ! -x "$native_resolver" ]]; then
+    cargo build -q --release -p darwin-art-apk-install
+    cargo build -q --release -p darwin-art-native-artifact --bin darwin-art-native-resolve
+  fi
   extractor="none"
   if [[ "$native_count" != "0" ]]; then
-    cargo build -q --release \
-      --manifest-path "$root/tools/android-apk-native-extract/Cargo.toml"
     extractor="$root/target/release/android-apk-native-extract"
+    if [[ ! -x "$extractor" ]]; then
+      cargo build -q --release \
+        --manifest-path "$root/tools/android-apk-native-extract/Cargo.toml"
+    fi
   fi
   install_output="$("$installer" "$source_apk" "$install_root" "$package" \
     "$version_code" "$native_root" "$extractor" "$runtime_abi" \
@@ -176,13 +195,21 @@ if [[ -z "$installed_record" && -n "$profile_mount" ]]; then
   "$profile_ctl" register "$package" "$record_stage"
   rm -f "$record_stage"
   if [[ "${DARWIN_ART_INSTALL_ONLY:-0}" == "1" ]]; then
-    host="$root/target/debug/darwin-art-host"
+    if [[ "${DARWIN_ART_PACKAGED_RUNTIME:-0}" == "1" ]]; then
+      host="$root/target/release/darwin-art-host"
+    else
+      host="$root/target/debug/darwin-art-host"
+    fi
     [[ -x "$host" ]] || {
       echo "darwin-art host is missing; run cargo xtask build before installing" >&2
       exit 69
     }
-    codesign --force --sign - --options runtime \
-      --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
+    if [[ "${DARWIN_ART_PACKAGED_RUNTIME:-0}" == "1" ]]; then
+      codesign --verify --strict "$host"
+    else
+      codesign --force --sign - --options runtime \
+        --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
+    fi
     echo "$metadata"
     echo "$install_output"
     echo "darwin-art: installed package=$package"
@@ -197,7 +224,11 @@ else
   done
 fi
 
-host="$root/target/debug/darwin-art-host"
+if [[ "${DARWIN_ART_PACKAGED_RUNTIME:-0}" == "1" ]]; then
+  host="$root/target/release/darwin-art-host"
+else
+  host="$root/target/debug/darwin-art-host"
+fi
 [[ -x "$host" ]] || {
   echo "darwin-art host is missing: $host" >&2
   exit 69
@@ -206,8 +237,12 @@ host="$root/target/debug/darwin-art-host"
 # replace the executable underneath concurrent launches. Legacy direct-APK
 # runs still sign because they do not pass through the install command.
 if [[ -z "$installed_record" ]]; then
-  codesign --force --sign - --options runtime \
-    --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
+  if [[ "${DARWIN_ART_PACKAGED_RUNTIME:-0}" == "1" ]]; then
+    codesign --verify --strict "$host"
+  else
+    codesign --force --sign - --options runtime \
+      --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
+  fi
 else
   codesign --verify --strict "$host"
 fi

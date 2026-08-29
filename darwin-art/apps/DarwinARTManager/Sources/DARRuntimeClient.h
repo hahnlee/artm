@@ -17,18 +17,23 @@ typedef void (^DARRuntimeLogHandler)(NSString *line);
 
 @interface DARRuntimeClient : NSObject
 
-@property(nonatomic, readonly) NSURL *projectRootURL;
+@property(nonatomic, readonly) NSURL *runtimeRootURL;
 @property(nonatomic, readonly) NSString *profileName;
 @property(nonatomic, copy, nullable) DARRuntimeLogHandler logHandler;
 
 - (nullable instancetype)initWithError:(NSError **)error;
 - (void)fetchSnapshot:(DARRuntimeSnapshotHandler)handler;
 - (void)installAPKAtURL:(NSURL *)url completion:(DARRuntimeActionHandler)handler;
+- (void)uninstallPackage:(NSString *)package
+              removeData:(BOOL)removeData
+              completion:(DARRuntimeActionHandler)handler;
 - (void)launchPackage:(NSString *)package completion:(DARRuntimeActionHandler)handler;
 - (void)stopPackage:(NSString *)package
                 pids:(NSArray<NSNumber *> *)pids
           completion:(DARRuntimeActionHandler)handler;
 - (void)revealDataForPackage:(NSString *)package completion:(DARRuntimeActionHandler)handler;
+- (void)restartSystem:(DARRuntimeActionHandler)handler;
+- (void)revealProfile:(DARRuntimeActionHandler)handler;
 
 @end
 

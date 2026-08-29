@@ -268,6 +268,48 @@ fn handle(mut stream: UnixStream, state: &Arc<State>) -> Result<(), ProfileError
             }
             protocol::write_response(&mut stream, message.operation, 0, processes.as_bytes())?;
         }
+        protocol::OP_UNREGISTER => {
+            if message.payload.len() < 2 || message.payload[0] > 1 {
+                protocol::write_response(
+                    &mut stream,
+                    message.operation,
+                    22,
+                    b"unregister requires a data policy and package",
+                )?;
+                return Ok(());
+            }
+            let remove_data = message.payload[0] == 1;
+            let package = std::str::from_utf8(&message.payload[1..])
+                .map_err(|_| ProfileError::Daemon("package is not UTF-8".into()))?;
+            crate::registry::validate_package(package)?;
+            let _gate = state.lease_gate.lock().unwrap();
+            if state
+                .processes
+                .lock()
+                .unwrap()
+                .values()
+                .any(|process| process.package == package)
+            {
+                protocol::write_response(
+                    &mut stream,
+                    message.operation,
+                    16,
+                    b"package is running",
+                )?;
+                return Ok(());
+            }
+            state.filesystem.lock().unwrap().ensure()?;
+            let registry = state.registry.lock().unwrap();
+            match unregister_package_files(&state.paths, &registry, package, remove_data) {
+                Ok(()) => protocol::write_response(&mut stream, message.operation, 0, b"")?,
+                Err(error) => protocol::write_response(
+                    &mut stream,
+                    message.operation,
+                    5,
+                    error.to_string().as_bytes(),
+                )?,
+            }
+        }
         protocol::OP_DAEMONIZE => {
             let (package, arguments, environment) = parse_daemonize(&message.payload)?;
             crate::registry::validate_package(&package)?;
@@ -300,6 +342,81 @@ fn handle(mut stream: UnixStream, state: &Arc<State>) -> Result<(), ProfileError
             protocol::write_response(&mut stream, message.operation, 0, &pid.to_le_bytes())?;
         }
         _ => protocol::write_response(&mut stream, message.operation, 38, b"unknown operation")?,
+    }
+    Ok(())
+}
+
+fn unregister_package_files(
+    paths: &ProfilePaths,
+    registry: &PackageRegistry,
+    package: &str,
+    remove_data: bool,
+) -> Result<(), ProfileError> {
+    registry.resolve(package)?;
+    let trash = paths.mount.join("run").join(format!(
+        ".uninstall.{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    fs::create_dir(&trash)?;
+    let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
+    let mut candidates = vec![
+        (
+            paths.mount.join("packages").join(package),
+            trash.join("package"),
+        ),
+        (
+            paths.mount.join("system/package-code").join(package),
+            trash.join("code"),
+        ),
+    ];
+    if remove_data {
+        candidates.push((
+            paths.mount.join("data/apps").join(package),
+            trash.join("data"),
+        ));
+    }
+    for (source, destination) in candidates {
+        if !source.exists() {
+            continue;
+        }
+        if let Err(error) = fs::rename(&source, &destination) {
+            for (restore_from, restore_to) in moved.into_iter().rev() {
+                let _ = fs::rename(restore_from, restore_to);
+            }
+            let _ = fs::remove_dir(&trash);
+            return Err(error.into());
+        }
+        moved.push((destination, source));
+    }
+    if let Err(error) = registry.unregister(package) {
+        for (restore_from, restore_to) in moved.into_iter().rev() {
+            let _ = fs::rename(restore_from, restore_to);
+        }
+        let _ = fs::remove_dir(&trash);
+        return Err(error);
+    }
+    if make_tree_removable(&trash).is_ok() {
+        let _ = fs::remove_dir_all(&trash);
+    }
+    Ok(())
+}
+
+fn make_tree_removable(path: &std::path::Path) -> Result<(), ProfileError> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    if metadata.is_dir() {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        for entry in fs::read_dir(path)? {
+            make_tree_removable(&entry?.path())?;
+        }
+    } else {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
 }
@@ -455,6 +572,18 @@ mod tests {
     use super::*;
     use std::os::unix::ffi::OsStrExt;
 
+    fn temporary_paths(test: &str) -> ProfilePaths {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        ProfilePaths::new(
+            std::env::temp_dir().join(format!("darwin-art-profile-{test}-{nonce}")),
+            "test",
+        )
+        .unwrap()
+    }
+
     fn field(payload: &mut Vec<u8>, value: &[u8]) {
         payload.extend_from_slice(&(value.len() as u32).to_le_bytes());
         payload.extend_from_slice(value);
@@ -495,5 +624,40 @@ mod tests {
         valid.extend_from_slice(&0_u32.to_le_bytes());
         valid.push(0);
         assert!(parse_daemonize(&valid).is_err());
+    }
+
+    #[test]
+    fn unregister_removes_code_and_honors_the_data_policy() {
+        let paths = temporary_paths("unregister");
+        let package = "com.example.app";
+        fs::create_dir_all(paths.mount.join("run")).unwrap();
+        fs::create_dir_all(paths.mount.join("packages").join(package)).unwrap();
+        fs::create_dir_all(paths.mount.join("system/package-code").join(package)).unwrap();
+        fs::create_dir_all(paths.mount.join("data/apps").join(package)).unwrap();
+        let registry = PackageRegistry::new(&paths);
+        registry
+            .register(package, b"darwin-art-launch-v1\npackage=com.example.app\n")
+            .unwrap();
+
+        unregister_package_files(&paths, &registry, package, false).unwrap();
+
+        assert!(registry.resolve(package).is_err());
+        assert!(!paths.mount.join("packages").join(package).exists());
+        assert!(
+            !paths
+                .mount
+                .join("system/package-code")
+                .join(package)
+                .exists()
+        );
+        assert!(paths.mount.join("data/apps").join(package).exists());
+
+        fs::create_dir_all(paths.mount.join("packages").join(package)).unwrap();
+        registry
+            .register(package, b"darwin-art-launch-v1\npackage=com.example.app\n")
+            .unwrap();
+        unregister_package_files(&paths, &registry, package, true).unwrap();
+        assert!(!paths.mount.join("data/apps").join(package).exists());
+        fs::remove_dir_all(paths.profiles_root).unwrap();
     }
 }

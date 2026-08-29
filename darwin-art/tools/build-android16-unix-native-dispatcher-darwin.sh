@@ -163,7 +163,6 @@ common_flags=(
 
 source_object="$objects/UnixNativeDispatcher.o"
 "$cc" "${common_flags[@]}" \
-  -DDARWIN_ART_OPENJDK_RUNTIME_ROOT=\"$project_root\" \
   -include "$project_root/compat/darwin_openjdk_nio_fs_redirect.h" \
   -c "$patched_source" -o "$source_object"
 [[ "$(file "$source_object")" == *"Mach-O 64-bit object arm64"* ]] ||

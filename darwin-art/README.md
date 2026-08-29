@@ -43,18 +43,23 @@ tools/darwin-art run com.example.app
 tools/darwin-art ps
 ```
 
-The native macOS manager uses AppKit (no SwiftUI or storyboard) and the same
-profile daemon/CLI contract. It lists installed packages and live PIDs,
-installs unchanged APKs, launches and gracefully terminates applications, and
-opens their private data directory:
+The native macOS manager is the product owner, not a front end for a source-tree
+CLI. Its AppKit bundle contains the runtime, compatibility libraries, graphics
+backend, profile daemon, APK tools, framework resources, fonts, and ICU data.
+It installs unchanged APKs, launches and gracefully terminates applications,
+uninstalls code with an explicit keep/delete-data choice, opens private data,
+and exposes profile/service management from one window:
 
 ```sh
 tools/build-darwin-art-manager.sh
 open "_build/Darwin ART Manager.app"
 ```
 
-Set `DARWIN_ART_PROFILE` before launching the executable directly to select a
-non-default profile. Managed application output is appended to
+The build command above is a developer packaging step; the resulting `.app`
+can be moved and launched without Cargo, the repository, or an external Darwin
+ART installation. `DARWIN_ART_PROFILE` remains an internal testing override;
+normal launches use the manager-owned default profile. Managed application
+output is appended to
 `~/Library/Application Support/DarwinART/profiles/<profile>/managed-apps.log`
 so applications remain independent of the manager window's lifetime.
 
@@ -208,9 +213,9 @@ owners. The Button probe now passes the complete Android 16 `FileInputStream`,
 the complementary ART/libcore `libcore.io.Memory` owners, the 47-entry
 `UnixNativeDispatcher`, the complete libcore half of `java.lang.System`, and
 Darwin `lseek`. Production OpenJDK NIO routes Android mounts and relative app
-paths through the Rust-owned Bionic filesystem facade, while explicit Darwin
-bootstrap paths (for example the pinned bootclasspath under the workspace)
-remain host libc paths. This preserves one guest descriptor/path namespace
+paths through the Rust-owned Bionic filesystem facade, while exact immutable
+runtime files passed as launch capabilities remain host libc paths. This
+preserves one guest descriptor/path namespace and keeps app bundles relocatable
 without hiding ART's host-side runtime inputs. With a source-coherent
 ICU76 Java/native/data set it maps the
 pinned Android font data, constructs a real `android.widget.Button`, renders

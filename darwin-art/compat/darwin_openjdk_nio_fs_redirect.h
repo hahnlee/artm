@@ -31,24 +31,16 @@ static inline void darwin_art_openjdk_nio_publish_errno(intptr_t result) {
 
 static inline int darwin_art_openjdk_nio_is_guest_path(const char* path) {
   if (path == NULL || path[0] != '/') return 1;
-  // ART receives a small set of absolute Darwin paths for immutable runtime
-  // products. Do not turn every other absolute path into host passthrough:
-  // application-supplied /Users or /etc paths still belong to the guest
-  // namespace and must fail through its mount policy.
-#ifndef DARWIN_ART_OPENJDK_RUNTIME_ROOT
-#define DARWIN_ART_OPENJDK_RUNTIME_ROOT ""
-#endif
-  static const char* const runtime_roots[] = {
-      DARWIN_ART_OPENJDK_RUNTIME_ROOT "/_build/",
-      DARWIN_ART_OPENJDK_RUNTIME_ROOT "/_prebuilt/",
-      DARWIN_ART_OPENJDK_RUNTIME_ROOT "/target/",
-  };
-  const size_t root_length = strlen(DARWIN_ART_OPENJDK_RUNTIME_ROOT);
-  for (size_t index = 0;
-       index < sizeof(runtime_roots) / sizeof(runtime_roots[0]); ++index) {
-    if (root_length != 0 && strncmp(path, runtime_roots[index],
-                                    strlen(runtime_roots[index])) == 0)
-      return 0;
+  // Runtime inputs are immutable capabilities passed as exact paths. This is
+  // relocatable with the application bundle and does not turn a workspace
+  // prefix (or an application-created lookalike) into host filesystem access.
+  const char* cursor = getenv("DARWIN_ART_RUNTIME_HOST_FILES");
+  while (cursor != NULL && *cursor != '\0') {
+    const char* separator = strchr(cursor, ':');
+    const size_t length = separator == NULL ? strlen(cursor)
+                                             : (size_t)(separator - cursor);
+    if (length == strlen(path) && memcmp(cursor, path, length) == 0) return 0;
+    cursor = separator == NULL ? NULL : separator + 1;
   }
   return 1;
 }

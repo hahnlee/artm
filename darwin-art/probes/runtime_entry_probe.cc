@@ -1,6 +1,7 @@
 #include <mach-o/dyld.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -175,7 +176,10 @@ jclass LoadApplicationClass(JNIEnv* env, jobject loader, const char* name) {
 
 int RunSystemServerLite(JNIEnv* env, jobject app_loader) {
   const char* socket_path = std::getenv("DARWIN_ART_SYSTEM_SERVER_SOCKET");
-  if (socket_path == nullptr || *socket_path == '\0') return 70;
+  if (socket_path == nullptr || *socket_path == '\0') {
+    std::cerr << "ART system_server-lite: socket capability missing\n";
+    return 70;
+  }
   jclass server = LoadApplicationClass(
       env, app_loader, "dev.darwinart.system.DarwinSystemServer");
   JNINativeMethod methods[] = {
@@ -185,7 +189,13 @@ int RunSystemServerLite(JNIEnv* env, jobject app_loader) {
   };
   if (server == nullptr || env->ExceptionCheck() ||
       env->RegisterNatives(server, methods, 1) != JNI_OK) {
-    if (env->ExceptionCheck()) env->ExceptionDescribe();
+    std::cerr << "ART system_server-lite: could not load/register DarwinSystemServer"
+              << " class=" << server << " exception=" << env->ExceptionCheck()
+              << "\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
+    }
     return 70;
   }
   jmethodID create = env->GetStaticMethodID(
@@ -193,13 +203,28 @@ int RunSystemServerLite(JNIEnv* env, jobject app_loader) {
   jobject registry = create == nullptr
                          ? nullptr
                          : env->CallStaticObjectMethod(server, create);
-  if (registry == nullptr || env->ExceptionCheck()) return 70;
+  if (registry == nullptr || env->ExceptionCheck()) {
+    std::cerr << "ART system_server-lite: could not create package registry"
+              << " method=" << create << " registry=" << registry
+              << " exception=" << env->ExceptionCheck() << "\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
+    }
+    return 70;
+  }
 
   const int listener = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (listener < 0) return 70;
+  if (listener < 0) {
+    std::cerr << "ART system_server-lite: socket() failed: "
+              << std::strerror(errno) << "\n";
+    return 70;
+  }
   sockaddr_un address{};
   address.sun_family = AF_UNIX;
   if (std::strlen(socket_path) >= sizeof(address.sun_path)) {
+    std::cerr << "ART system_server-lite: socket path exceeds Darwin limit: "
+              << socket_path << "\n";
     close(listener);
     return 70;
   }
@@ -215,6 +240,8 @@ int RunSystemServerLite(JNIEnv* env, jobject app_loader) {
   unlink(socket_path);
   if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
       chmod(socket_path, 0600) != 0 || listen(listener, 16) != 0) {
+    std::cerr << "ART system_server-lite: publish failed for " << socket_path
+              << ": " << std::strerror(errno) << "\n";
     close(listener);
     return 70;
   }
@@ -442,6 +469,13 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
           darwin_art::FrameworkGraphicsBackend::kProbeCanvas,
       &app_classes);
   if (app_status != 0) {
+    std::cerr << "ART application class load failed status=" << app_status
+              << " process_dex=" << process_dex
+              << " support_dex=" << apk_app_support_dex << "\n";
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
+    }
     return app_status;
   }
   jobject app_loader_ref = app_classes.app_loader;

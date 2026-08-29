@@ -1,6 +1,6 @@
 use darwin_art_profile::{
     ProfileLease, ProfilePaths, daemon_status, daemonize_process, ensure_daemon, list_packages,
-    list_processes, register_package, resolve_package, shutdown_daemon,
+    list_processes, register_package, resolve_package, shutdown_daemon, unregister_package,
 };
 use std::env;
 use std::error::Error;
@@ -42,6 +42,13 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         Some("resolve") => {
             let package = env::args().nth(2).ok_or("resolve requires package")?;
             io::stdout().write_all(&resolve_package(&paths, &package)?)?;
+        }
+        Some("uninstall") => {
+            let package = env::args().nth(2).ok_or("uninstall requires package")?;
+            let keep_data = env::args()
+                .nth(3)
+                .is_some_and(|value| value == "--keep-data");
+            unregister_package(&paths, &package, !keep_data)?;
         }
         Some("list") => print!("{}", list_packages(&paths)?),
         Some("ps") => print!("{}", list_processes(&paths)?),
@@ -115,7 +122,7 @@ fn main_result() -> Result<(), Box<dyn Error>> {
                 .into());
         }
         _ => {
-            return Err("usage: darwin-artctl {ensure|socket|status|shutdown|register PACKAGE RECORD|resolve PACKAGE|list|ps|hold SECONDS|supervise PACKAGE COMMAND [ARGS...]|daemonize PACKAGE COMMAND [ARGS...]|exec PACKAGE COMMAND [ARGS...]}".into());
+            return Err("usage: darwin-artctl {ensure|socket|status|shutdown|register PACKAGE RECORD|resolve PACKAGE|uninstall PACKAGE [--keep-data]|list|ps|hold SECONDS|supervise PACKAGE COMMAND [ARGS...]|daemonize PACKAGE COMMAND [ARGS...]|exec PACKAGE COMMAND [ARGS...]}".into());
         }
     }
     Ok(())

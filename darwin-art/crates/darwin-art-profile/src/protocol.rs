@@ -13,6 +13,7 @@ pub(crate) const OP_RESOLVE: u16 = 6;
 pub(crate) const OP_LIST: u16 = 7;
 pub(crate) const OP_PROCESSES: u16 = 8;
 pub(crate) const OP_DAEMONIZE: u16 = 9;
+pub(crate) const OP_UNREGISTER: u16 = 10;
 const RESPONSE_BIT: u16 = 0x8000;
 
 pub(crate) struct Message {

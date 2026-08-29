@@ -51,6 +51,13 @@ impl PackageRegistry {
         Ok(record)
     }
 
+    pub(crate) fn unregister(&self, package: &str) -> Result<(), ProfileError> {
+        validate_package(package)?;
+        fs::remove_file(self.directory.join(format!("{package}.launch")))?;
+        File::open(&self.directory)?.sync_all()?;
+        Ok(())
+    }
+
     pub(crate) fn list(&self) -> Result<Vec<u8>, ProfileError> {
         let mut packages = Vec::new();
         match fs::read_dir(&self.directory) {
