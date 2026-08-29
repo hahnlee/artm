@@ -26,7 +26,10 @@ gate, not the intended application compatibility boundary.
 
 Shared per-profile state is owned by the Rust `darwin-artd` process. Rust
 launchers carry versioned IPC leases through `exec(2)` for application and
-service lifetimes while the daemon mounts their case-sensitive APFS Android volume; see
+service lifetimes while the daemon mounts their case-sensitive APFS Android
+volume. The daemon also owns a persistent ART-backed `android.system` process;
+cross-package metadata and component resolution use its Android Binder service
+rather than per-app APK inspection or environment hardcoding. See
 [`docs/profile-daemon.md`](docs/profile-daemon.md).
 
 After one unified build, install APKs once and launch them by Android package

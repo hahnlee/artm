@@ -32,6 +32,58 @@ host link also avoids coupling runtime rebuilds to daemon implementation
 changes. A single advisory lock makes one daemon authoritative for a profile,
 and peer credentials restrict IPC to the profile owner.
 
+The daemon can also spawn a registered long-lived process with an explicit
+argument vector and allowlisted environment. It owns the child handle, records
+the real PID/package in `darwin-artctl ps`, holds a profile lease for the whole
+lifetime, and reaps the child on exit. This is how `android.system` remains
+alive after the application that first caused startup has exited; shell
+backgrounding is not part of the lifetime contract.
+
+## ART system services
+
+The first persistent framework process is `android.system`, an ART-backed
+`system_server-lite` started by `darwin-artd`. It publishes an Android
+Binder/Parcel endpoint at `mnt/run/system-server-lite.sock`. The initial
+`IPackageRegistry` service resolves immutable package launch records by asking
+the daemon, while application-side `PackageManager` uses Binder to resolve
+installed packages, explicit Activity and Service components, and
+package-scoped launcher intents.
+
+This separation is intentional:
+
+- `darwin-artd` owns macOS authority, filesystem mounts, install records, and
+  process handles;
+- `android.system` owns Android-observable service APIs and Java object state;
+- application/service ART processes consume those APIs over Binder and never
+  read another package's registry files directly.
+
+Android Service instances use the existing framework lifecycle bridge. Local
+services execute in their application process; declared remote and isolated
+services receive distinct ART host processes, Binder channels, and daemon
+leases. `onCreate`, `onBind`, asynchronous `ServiceConnection`, rebind,
+`onUnbind`, and final process release remain Android-side decisions. Moving
+additional ActivityManager policy into `android.system` is an extension of the
+same Binder boundary, not a new per-app environment bridge.
+
+## Persistent application data
+
+Each installed package receives private storage below
+`mnt/data/apps/<package>/private-data/user/0/<package>`. Guest paths remain
+`/data/user/0/<package>`. The Rust filesystem facade validates and translates
+only that writable `/data` mount before a host SQLite connection is opened;
+immutable mounts cannot be converted into writable host paths. Framework
+SharedPreferences uses atomic XML in `shared_prefs`, and SQLite databases plus
+journals live in `databases`. Both survive application and daemon relaunch.
+
+The compatibility gate uses unchanged installed AOSP Calculator, Calendar, and
+DeskClock packages. Each package must launch twice by package name with no
+reinstall, while `darwin-artctl ps` continues to report exactly one
+`android.system`. Calculator must retain a valid `Expressions.db` schema;
+Calendar and DeskClock must reopen their Android binary-XML (`ABX`) preference
+files without a SharedPreferences read error. A cross-package
+`PackageManager.getPackageInfo()` request must complete through the system
+Binder after the originating app and system process have different PIDs.
+
 ## Install and launch
 
 The normal interface separates one-time APK inspection/installation from
@@ -70,6 +122,6 @@ target/release/darwin-artctl shutdown
 tools/audit-profile-daemon.sh
 ```
 
-The IPC envelope is versioned (`DARTD001`, protocol version 1). Future shared
-Android services should be added as daemon capabilities rather than recreated
-inside each application process.
+The IPC envelope is versioned (`DARTD001`, protocol version 1). Privileged host
+capabilities belong in the daemon; Android-observable shared services belong in
+the persistent ART system process and reach applications through Binder.

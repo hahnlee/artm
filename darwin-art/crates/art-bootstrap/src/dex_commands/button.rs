@@ -40,6 +40,7 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
             .arg(root.join("probes/button/ProbeActivity.java"))
             .arg(root.join("probes/button/ProbeView.java"))
             .arg(root.join("tools/android-apk-app-runtime/fixture/DarwinServiceBridge.java"))
+            .arg(root.join("tools/android-apk-app-runtime/fixture/DarwinSystemServer.java"))
             .arg(root.join("probes/apk_support/java/javax/microedition/khronos/egl/EGL.java"))
             .arg(root.join("probes/apk_support/java/javax/microedition/khronos/egl/EGL10.java"))
             .arg(root.join("probes/apk_support/java/javax/microedition/khronos/egl/EGLConfig.java"))
@@ -123,6 +124,10 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
             .arg(button("dev/darwinart/probe/ProbeActivity.class"))
             .arg(button("dev/darwinart/probe/ProbeView.class"))
             .arg(button("dev/darwinart/simple/DarwinServiceBridge.class"))
+            .arg(button("dev/darwinart/system/DarwinSystemServer.class"))
+            .arg(button(
+                "dev/darwinart/system/DarwinSystemServer$PackageRegistryBinder.class",
+            ))
             .arg(button(
                 "dev/darwinart/simple/DarwinServiceBridge$ManagerHandler.class",
             ))
@@ -254,13 +259,14 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
                     class[73]=Ljavax/microedition/khronos/egl/EGLSurface;";
     verify_dex_contract(
         &output,
-        87,
-        1314,
+        89,
+        1338,
         &[
             "Ldev/darwinart/probe/ProbeActivity;",
             "Ldev/darwinart/probe/ProbeContext$BaseContext;",
             "Ldev/darwinart/probe/ProbeContext$RemoteServiceBinder;",
             "Ldev/darwinart/simple/DarwinServiceBridge;",
+            "Ldev/darwinart/system/DarwinSystemServer;",
             "Ljavax/microedition/khronos/egl/DarwinEGL10;",
         ],
     )?;

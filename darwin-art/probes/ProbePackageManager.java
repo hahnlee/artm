@@ -24,6 +24,7 @@ import java.util.Map;
 
 /** Minimal package policy for framework feature gates before system_server exists. */
 public final class ProbePackageManager extends MockPackageManager {
+    private static native String nativeResolveInstalledPackage(String packageName);
     private String packageName;
     private String activityName;
     private ActivityInfo activityInfo;
@@ -35,6 +36,94 @@ public final class ProbePackageManager extends MockPackageManager {
     private Map<ComponentName, ServiceInfo> serviceInfos;
     private Map<String, Integer> activityThemes;
     private Map<String, String> activityAliases;
+
+    private static String recordValue(String record, String key) {
+        if (record == null) return null;
+        String prefix = key + "=";
+        for (String line : record.split("\\n")) {
+            if (line.startsWith(prefix)) return line.substring(prefix.length());
+        }
+        return null;
+    }
+
+    private static String metadataValue(String record, String key) {
+        String metadata = recordValue(record, "metadata");
+        if (metadata == null) return null;
+        String marker = " " + key + "=";
+        int start = metadata.indexOf(marker);
+        if (start < 0) return null;
+        start += marker.length();
+        int end = metadata.indexOf(' ', start);
+        return end < 0 ? metadata.substring(start) : metadata.substring(start, end);
+    }
+
+    private static ApplicationInfo installedApplicationInfo(
+            String requestedPackage, String record) {
+        if (record == null) return null;
+        ApplicationInfo info = new ApplicationInfo();
+        info.packageName = requestedPackage;
+        info.sourceDir = recordValue(record, "apk");
+        info.publicSourceDir = info.sourceDir;
+        info.dataDir = "/data/user/0/" + requestedPackage;
+        String target = metadataValue(record, "target_sdk");
+        if (target != null) {
+            try {
+                info.targetSdkVersion = Integer.parseInt(target);
+            } catch (NumberFormatException ignored) {}
+        }
+        return info;
+    }
+
+    private static ActivityInfo installedActivityInfo(ComponentName component, String record) {
+        if (component == null || record == null) return null;
+        String requestedName = component.getClassName();
+        String resolvedName = requestedName;
+        String aliases = metadataValue(record, "activity_aliases");
+        if (aliases != null && !"none".equals(aliases)) {
+            for (String entry : aliases.split(",")) {
+                int separator = entry.indexOf('>');
+                if (separator > 0 && requestedName.equals(entry.substring(0, separator))) {
+                    resolvedName = entry.substring(separator + 1);
+                    break;
+                }
+            }
+        }
+        String activities = metadataValue(record, "activities");
+        if (activities == null || "none".equals(activities)) return null;
+        for (String entry : activities.split(",")) {
+            int separator = entry.lastIndexOf('=');
+            if (separator <= 0 || !resolvedName.equals(entry.substring(0, separator))) continue;
+            ActivityInfo info = new ActivityInfo();
+            info.packageName = component.getPackageName();
+            info.name = requestedName;
+            info.targetActivity = requestedName.equals(resolvedName) ? null : resolvedName;
+            info.applicationInfo = installedApplicationInfo(info.packageName, record);
+            try {
+                info.theme = Long.decode(entry.substring(separator + 1)).intValue();
+            } catch (NumberFormatException ignored) {}
+            return info;
+        }
+        return null;
+    }
+
+    private static ServiceInfo installedServiceInfo(ComponentName component, String record) {
+        if (component == null || record == null) return null;
+        String services = metadataValue(record, "services");
+        if (services == null || "none".equals(services)) return null;
+        for (String entry : services.split(",")) {
+            int separator = entry.indexOf('>');
+            String name = separator < 0 ? entry : entry.substring(0, separator);
+            if (!component.getClassName().equals(name)) continue;
+            ServiceInfo info = new ServiceInfo();
+            info.packageName = component.getPackageName();
+            info.name = name;
+            info.processName = separator < 0
+                    ? info.packageName : entry.substring(separator + 1);
+            info.applicationInfo = installedApplicationInfo(info.packageName, record);
+            return info;
+        }
+        return null;
+    }
 
     public ProbePackageManager() {}
 
@@ -157,7 +246,9 @@ public final class ProbePackageManager extends MockPackageManager {
 
     @Override
     public List<ResolveInfo> queryIntentServices(Intent intent, int flags) {
-        return Collections.emptyList();
+        ResolveInfo resolved = resolveService(intent, flags);
+        return resolved == null
+                ? Collections.emptyList() : Collections.singletonList(resolved);
     }
 
     @Override
@@ -168,12 +259,19 @@ public final class ProbePackageManager extends MockPackageManager {
 
     @Override
     public ResolveInfo resolveService(Intent intent, int flags) {
-        return null;
+        if (intent == null || intent.getComponent() == null) return null;
+        try {
+            ResolveInfo resolved = new ResolveInfo();
+            resolved.serviceInfo = getServiceInfo(intent.getComponent(), flags);
+            return resolved;
+        } catch (PackageManager.NameNotFoundException ignored) {
+            return null;
+        }
     }
 
     @Override
     public ResolveInfo resolveService(Intent intent, PackageManager.ResolveInfoFlags flags) {
-        return null;
+        return resolveService(intent, (int) flags.getValue());
     }
 
     @Override
@@ -272,6 +370,10 @@ public final class ProbePackageManager extends MockPackageManager {
             throws PackageManager.NameNotFoundException {
         ServiceInfo service = serviceInfos.get(component);
         if (service != null) return new ServiceInfo(service);
+        String record = component == null ? null
+                : nativeResolveInstalledPackage(component.getPackageName());
+        ServiceInfo installed = installedServiceInfo(component, record);
+        if (installed != null) return installed;
         throw new PackageManager.NameNotFoundException(String.valueOf(component));
     }
 
@@ -298,6 +400,10 @@ public final class ProbePackageManager extends MockPackageManager {
             result.theme = activityThemes.get(resolvedName).intValue();
             return result;
         }
+        String record = component == null ? null
+                : nativeResolveInstalledPackage(component.getPackageName());
+        ActivityInfo installed = installedActivityInfo(component, record);
+        if (installed != null) return installed;
         throw new PackageManager.NameNotFoundException(String.valueOf(component));
     }
 
@@ -314,6 +420,9 @@ public final class ProbePackageManager extends MockPackageManager {
         if (packageName != null && packageName.equals(requestedPackage)) {
             return new ApplicationInfo(activityInfo.applicationInfo);
         }
+        ApplicationInfo installed = installedApplicationInfo(
+                requestedPackage, nativeResolveInstalledPackage(requestedPackage));
+        if (installed != null) return installed;
         throw new PackageManager.NameNotFoundException(requestedPackage);
     }
 
@@ -331,18 +440,39 @@ public final class ProbePackageManager extends MockPackageManager {
 
     @Override
     public CharSequence getApplicationLabel(ApplicationInfo info) {
-        if (info == null || packageName == null || !packageName.equals(info.packageName)) {
+        if (info == null || info.packageName == null) {
             throw new IllegalArgumentException("Unknown application");
         }
-        String configured = System.getenv("DARWIN_ART_APK_APP_LABEL");
-        return configured == null || configured.isEmpty() ? packageName : configured;
+        if (packageName != null && packageName.equals(info.packageName)) {
+            String configured = System.getenv("DARWIN_ART_APK_APP_LABEL");
+            return configured == null || configured.isEmpty() ? packageName : configured;
+        }
+        String record = nativeResolveInstalledPackage(info.packageName);
+        String installed = metadataValue(record, "label");
+        if (installed != null) return installed;
+        throw new IllegalArgumentException("Unknown application");
     }
 
     @Override
     public PackageInfo getPackageInfo(String requestedPackage, int flags)
             throws PackageManager.NameNotFoundException {
         if (packageName == null || !packageName.equals(requestedPackage)) {
-            throw new PackageManager.NameNotFoundException(requestedPackage);
+            String record = nativeResolveInstalledPackage(requestedPackage);
+            ApplicationInfo installed = installedApplicationInfo(requestedPackage, record);
+            if (installed == null) {
+                throw new PackageManager.NameNotFoundException(requestedPackage);
+            }
+            PackageInfo external = new PackageInfo();
+            external.packageName = requestedPackage;
+            external.applicationInfo = installed;
+            String code = metadataValue(record, "version_code");
+            if (code != null) {
+                try {
+                    external.setLongVersionCode(Long.parseLong(code));
+                } catch (NumberFormatException ignored) {}
+            }
+            external.versionName = metadataValue(record, "version_name");
+            return external;
         }
         PackageInfo info = new PackageInfo();
         info.packageName = packageName;
@@ -378,23 +508,45 @@ public final class ProbePackageManager extends MockPackageManager {
 
     @Override
     public ResolveInfo resolveActivity(Intent intent, int flags) {
-        if (intent == null || intent.getComponent() == null) {
-            return null;
+        if (intent == null) return null;
+        ComponentName requestedComponent = intent.getComponent();
+        if (requestedComponent == null && intent.getPackage() != null) {
+            Intent launch = getLaunchIntentForPackage(intent.getPackage());
+            requestedComponent = launch == null ? null : launch.getComponent();
         }
-        ComponentName component = intent.getComponent();
+        if (requestedComponent == null) return null;
+        ComponentName component = requestedComponent;
         String requestedName = component.getClassName();
         String targetName = activityAliases.get(requestedName);
         String resolvedName = targetName == null ? requestedName : targetName;
-        if (packageName == null || !packageName.equals(component.getPackageName())
-                || !activityThemes.containsKey(resolvedName)) {
-            return null;
+        if (packageName == null || !packageName.equals(component.getPackageName())) {
+            try {
+                ResolveInfo installed = new ResolveInfo();
+                installed.activityInfo = getActivityInfo(component, flags);
+                return installed;
+            } catch (PackageManager.NameNotFoundException ignored) {
+                return null;
+            }
         }
+        if (!activityThemes.containsKey(resolvedName)) return null;
         ResolveInfo resolved = new ResolveInfo();
         resolved.activityInfo = new ActivityInfo(activityInfo);
         resolved.activityInfo.name = requestedName;
         resolved.activityInfo.targetActivity = targetName;
         resolved.activityInfo.theme = activityThemes.get(resolvedName).intValue();
         return resolved;
+    }
+
+    @Override
+    public Intent getLaunchIntentForPackage(String requestedPackage) {
+        String record = nativeResolveInstalledPackage(requestedPackage);
+        String component = metadataValue(record, "launch_component");
+        if (component == null || "none".equals(component)) return null;
+        Intent launch = new Intent(Intent.ACTION_MAIN);
+        launch.addCategory(Intent.CATEGORY_LAUNCHER);
+        launch.setComponent(new ComponentName(requestedPackage, component));
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return launch;
     }
 
     @Override

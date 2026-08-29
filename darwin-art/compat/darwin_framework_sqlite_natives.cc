@@ -12,6 +12,9 @@
 #include <variant>
 #include <vector>
 
+extern "C" intptr_t darwin_art_bionic_fs_resolve_private_host_path(
+    const char* path, char* output, size_t capacity);
+
 namespace {
 
 using Cell = std::variant<std::monostate, std::int64_t, double, std::string,
@@ -80,7 +83,26 @@ bool StepToCompletion(JNIEnv* env, sqlite3* database, sqlite3_stmt* statement,
 
 jlong SqliteOpen(JNIEnv* env, jclass, jstring path, jint open_flags, jstring,
                  jboolean, jboolean, jint, jint) {
-  const std::string native_path = Utf8(env, path);
+  const std::string guest_path = Utf8(env, path);
+  std::string native_path = guest_path;
+  if (guest_path != ":memory:" && !guest_path.empty()) {
+    const intptr_t length = darwin_art_bionic_fs_resolve_private_host_path(
+        guest_path.c_str(), nullptr, 0);
+    if (length < 0) {
+      ThrowSqlite(env, nullptr, SQLITE_CANTOPEN,
+                  "resolve private database path");
+      return 0;
+    }
+    native_path.resize(static_cast<std::size_t>(length) + 1);
+    if (darwin_art_bionic_fs_resolve_private_host_path(
+            guest_path.c_str(), native_path.data(), native_path.size()) !=
+        length) {
+      ThrowSqlite(env, nullptr, SQLITE_CANTOPEN,
+                  "resolve private database path");
+      return 0;
+    }
+    native_path.resize(static_cast<std::size_t>(length));
+  }
   int flags = (open_flags & 1) != 0 ? SQLITE_OPEN_READONLY
                                     : SQLITE_OPEN_READWRITE;
   if ((open_flags & 0x10000000) != 0) flags |= SQLITE_OPEN_CREATE;

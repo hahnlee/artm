@@ -72,6 +72,48 @@ jboolean RemoteTransact(JNIEnv* env, jclass, jint control_fd, jint target_id,
                                          data, reply, flags);
 }
 
+jstring ResolveInstalledPackage(JNIEnv* env, jclass, jstring package_name) {
+  const std::string package = JavaString(env, package_name);
+  const char* socket_path = std::getenv("DARWIN_ART_SYSTEM_SERVER_SOCKET");
+  const std::string record = darwin_art::QuerySystemPackageRecord(
+      env, socket_path, package.c_str());
+  return record.empty() ? nullptr : env->NewStringUTF(record.c_str());
+}
+
+bool InstallPackageManagerNatives(JNIEnv* env, jobject package_manager) {
+  jclass package_manager_class = env->GetObjectClass(package_manager);
+  JNINativeMethod methods[] = {
+      {const_cast<char*>("nativeResolveInstalledPackage"),
+       const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
+       reinterpret_cast<void*>(&ResolveInstalledPackage)},
+  };
+  const bool installed = package_manager_class != nullptr &&
+                         env->RegisterNatives(package_manager_class, methods, 1) == JNI_OK;
+  const char* verify_package = std::getenv("DARWIN_ART_VERIFY_SYSTEM_PACKAGE");
+  if (installed && verify_package != nullptr && *verify_package != '\0') {
+    jmethodID get_package_info = env->GetMethodID(
+        package_manager_class, "getPackageInfo",
+        "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;");
+    jstring requested = env->NewStringUTF(verify_package);
+    jobject info = get_package_info == nullptr
+                       ? nullptr
+                       : env->CallObjectMethod(package_manager, get_package_info,
+                                               requested, 0);
+    env->DeleteLocalRef(requested);
+    if (info == nullptr || env->ExceptionCheck()) {
+      if (env->ExceptionCheck()) env->ExceptionClear();
+      env->DeleteLocalRef(info);
+      env->DeleteLocalRef(package_manager_class);
+      return false;
+    }
+    std::cerr << "ART system_server-lite: PackageManager resolved "
+              << verify_package << " over Binder\n";
+    env->DeleteLocalRef(info);
+  }
+  env->DeleteLocalRef(package_manager_class);
+  return installed;
+}
+
 bool InstallHostServiceNatives(JNIEnv* env, jclass probe_context_class) {
   JNINativeMethod methods[] = {
       {const_cast<char*>("nativeSpawnService"),
@@ -138,6 +180,7 @@ int prepare(JNIEnv* env, art::Thread* self, jobject* activity_instance_out,
     return 27;
   }
   if (!InstallHostServiceNatives(env, probe_context_class) ||
+      !InstallPackageManagerNatives(env, package_manager) ||
       env->ExceptionCheck()) {
     std::cerr << "ART Android process: host service JNI setup failed\n";
     return 27;

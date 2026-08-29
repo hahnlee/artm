@@ -10,7 +10,7 @@ use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd};
-use std::os::unix::ffi::OsStringExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::FileExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
@@ -641,6 +641,14 @@ impl Facade {
             return Err(ANDROID_EINVAL);
         }
         Ok(root.join(std::ffi::OsString::from_vec(relative.to_vec())))
+    }
+
+    fn resolve_private_host_path(&self, path: &[u8]) -> Result<PathBuf, c_int> {
+        let resolution = self.resolve(path)?;
+        if resolution.mount_id != 2 || !resolution.writable {
+            return Err(ANDROID_EACCES);
+        }
+        self.private_path(&resolution.relative_path)
     }
 
     fn open_private(&self, resolution: Resolution, flags: c_int, mode: u32) -> c_int {

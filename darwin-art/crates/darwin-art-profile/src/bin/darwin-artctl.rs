@@ -1,6 +1,6 @@
 use darwin_art_profile::{
-    ProfileLease, ProfilePaths, daemon_status, ensure_daemon, list_packages, list_processes,
-    register_package, resolve_package, shutdown_daemon,
+    ProfileLease, ProfilePaths, daemon_status, daemonize_process, ensure_daemon, list_packages,
+    list_processes, register_package, resolve_package, shutdown_daemon,
 };
 use std::env;
 use std::error::Error;
@@ -74,6 +74,30 @@ fn main_result() -> Result<(), Box<dyn Error>> {
                 std::process::exit(status.code().unwrap_or(1));
             }
         }
+        Some("daemonize") => {
+            let mut arguments = env::args_os().skip(2);
+            let package = arguments
+                .next()
+                .ok_or("daemonize requires package")?
+                .into_string()
+                .map_err(|_| "package is not UTF-8")?;
+            let arguments = arguments.collect::<Vec<_>>();
+            let environment = env::vars_os()
+                .filter(|(key, _)| {
+                    let key = key.to_string_lossy();
+                    key.starts_with("DARWIN_ART_")
+                        || key.starts_with("ANDROID_")
+                        || matches!(
+                            key.as_ref(),
+                            "PATH" | "HOME" | "TMPDIR" | "LANG" | "LC_ALL" | "SHELL"
+                        )
+                })
+                .collect::<Vec<_>>();
+            println!(
+                "{}",
+                daemonize_process(&paths, &package, &arguments, &environment)?
+            );
+        }
         Some("exec") => {
             let mut arguments = env::args_os().skip(2);
             let package = arguments
@@ -91,7 +115,7 @@ fn main_result() -> Result<(), Box<dyn Error>> {
                 .into());
         }
         _ => {
-            return Err("usage: darwin-artctl {ensure|socket|status|shutdown|register PACKAGE RECORD|resolve PACKAGE|list|ps|hold SECONDS|supervise PACKAGE COMMAND [ARGS...]|exec PACKAGE COMMAND [ARGS...]}".into());
+            return Err("usage: darwin-artctl {ensure|socket|status|shutdown|register PACKAGE RECORD|resolve PACKAGE|list|ps|hold SECONDS|supervise PACKAGE COMMAND [ARGS...]|daemonize PACKAGE COMMAND [ARGS...]|exec PACKAGE COMMAND [ARGS...]}".into());
         }
     }
     Ok(())

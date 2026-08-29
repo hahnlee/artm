@@ -103,6 +103,7 @@ if [[ -z "${DARWIN_ART_APP_DATA_ROOT:-}" ]]; then
   export DARWIN_ART_PROFILE_CTL="$profile_ctl"
   export DARWIN_ART_PROFILE_SOCKET
   DARWIN_ART_PROFILE_SOCKET="$("$profile_ctl" socket)"
+  export DARWIN_ART_SYSTEM_SERVER_SOCKET="$profile_mount/run/system-server-lite.sock"
 fi
 if [[ -n "${DARWIN_ART_APK_INSTALL_ROOT:-}" ]]; then
   install_root="$DARWIN_ART_APK_INSTALL_ROOT"
@@ -535,6 +536,62 @@ fi
 host_command=("$host" --window-seconds "$seconds" \
   "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex")
 if [[ -n "$profile_mount" ]]; then
+  system_server_pid="$("$profile_ctl" ps | awk '$2 == "android.system" { print $1; exit }')"
+  if [[ -z "$system_server_pid" ]] || ! kill -0 "$system_server_pid" 2>/dev/null; then
+    system_server_log="${profile_mount%/mnt}/darwin-artd.log"
+    system_server_root="$profile_mount/system-server-root"
+    system_server_private="$profile_mount/data/apps/android.system/private-data"
+    if [[ ! -d "$system_server_root/system" ]]; then
+      mkdir -p "$system_server_root" "$system_server_private/user/0/android"
+      cp -R "$system_root/system" "$system_server_root/system"
+      mkdir -p "$system_server_root/storage/emulated/0"
+      chmod -R u=rX,go= "$system_server_root/system" "$system_server_root/storage"
+    else
+      mkdir -p "$system_server_private/user/0/android"
+    fi
+    chmod 0700 "$system_server_private" "$system_server_private/user/0/android"
+    chmod 0500 "$system_server_root" "$system_server_private"
+    system_server_command=("$host" --window-seconds 0 \
+      "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$support_dex")
+    system_server_launcher_pid="$( \
+      DARWIN_ART_SYSTEM_SERVER_MODE=1 \
+      DARWIN_ART_APK_APP_PACKAGE=android \
+      DARWIN_ART_APK_APP_APPLICATION=android.app.Application \
+      DARWIN_ART_APK_APP_ACTIVITY=dev.darwinart.probe.ProbeActivity \
+      DARWIN_ART_APK_APP_LAUNCH_COMPONENT=none \
+      DARWIN_ART_APK_APP_DESCRIPTOR=Ldev/darwinart/probe/ProbeActivity\; \
+      DARWIN_ART_APK_APP_ACTIVITIES=none \
+      DARWIN_ART_APK_APP_ACTIVITY_ALIASES=none \
+      DARWIN_ART_APK_APP_SERVICES=none \
+      DARWIN_ART_APK_APP_METADATA=none \
+      DARWIN_ART_APK_APP_VERSION_CODE=1 \
+      DARWIN_ART_APK_APP_VERSION_NAME=1 \
+      DARWIN_ART_APK_APP_THEME=0 \
+      DARWIN_ART_APK_APP_TARGET_SDK=36 \
+      DARWIN_ART_APK_APP_LABEL=Android \
+      DARWIN_ART_APK_APP_LABEL_RES=0 \
+      DARWIN_ART_APK_APP_RESOURCE_APK="$framework_res" \
+      DARWIN_ART_ANDROID_PRIVATE_DATA_ROOT="$system_server_private" \
+      DARWIN_ART_APK_APP_DATA_DIR="${system_server_private%/private-data}" \
+      DARWIN_ART_APK_APP_DATA_GUEST_DIR=/data/user/0/android \
+      DARWIN_ART_APK_APP_EXTERNAL_DIR=/storage/emulated/0 \
+      DARWIN_ART_ANDROID_FILESYSTEM_ROOT="$system_server_root" \
+      DARWIN_ART_ANDROID_SYSTEM_ROOT="$system_server_root/system" \
+      DARWIN_ART_ANDROID_SYSTEM_NATIVE_DIR="$system_server_root/system/lib64" \
+      DARWIN_ART_RUNTIME_HOST_FILES="$core_oj:$core_libart:$framework:$boot_tail:$support_dex" \
+      "$profile_ctl" daemonize android.system "${system_server_command[@]}" \
+    )"
+    for _ in {1..100}; do
+      [[ -S "$DARWIN_ART_SYSTEM_SERVER_SOCKET" ]] && break
+      kill -0 "$system_server_launcher_pid" 2>/dev/null || break
+      sleep 0.05
+    done
+    [[ -S "$DARWIN_ART_SYSTEM_SERVER_SOCKET" ]] || {
+      echo "system_server-lite did not publish its package Binder" >&2
+      tail -40 "$system_server_log" >&2 || true
+      exit 70
+    }
+  fi
   exec "$profile_ctl" exec "$package" "${host_command[@]}"
 fi
 exec "${host_command[@]}"

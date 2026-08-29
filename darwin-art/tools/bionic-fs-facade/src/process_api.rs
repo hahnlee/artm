@@ -195,6 +195,55 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_seed_private_directory(path: *cons
     with_active(-1, |facade| facade.seed_private_directory(path))
 }
 
+#[unsafe(no_mangle)]
+/// Resolves an Android `/data` path to the process-authorized host backing path.
+///
+/// This is intentionally narrower than a general guest-to-host escape hatch:
+/// immutable mounts and paths outside the private overlay are rejected. Passing
+/// a null/zero output buffer returns the required byte count without a trailing
+/// NUL. A non-null buffer receives a NUL-terminated path.
+///
+/// # Safety
+///
+/// `path` must be a readable NUL-terminated Android byte path. When `output` is
+/// non-null, it must be writable for `capacity` bytes.
+pub unsafe extern "C" fn darwin_art_bionic_fs_resolve_private_host_path(
+    path: *const c_char,
+    output: *mut c_char,
+    capacity: usize,
+) -> isize {
+    let Some(path) = (unsafe { path_bytes(path) }) else {
+        Facade::set_android_errno(ANDROID_EFAULT);
+        return -1;
+    };
+    with_active(-1, |facade| {
+        let host_path = match facade.resolve_private_host_path(path) {
+            Ok(path) => path,
+            Err(error) => return facade.fail(error) as isize,
+        };
+        let bytes = host_path.as_os_str().as_bytes();
+        if output.is_null() || capacity == 0 {
+            return isize::try_from(bytes.len()).unwrap_or_else(|_| {
+                facade.fail(ANDROID_ERANGE);
+                -1
+            });
+        }
+        let Some(required) = bytes.len().checked_add(1) else {
+            return facade.fail(ANDROID_ERANGE) as isize;
+        };
+        if capacity < required {
+            return facade.fail(ANDROID_ERANGE) as isize;
+        }
+        // SAFETY: the caller's writable-buffer contract and capacity check
+        // cover both the byte path and its trailing NUL.
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), output.cast(), bytes.len());
+            *output.add(bytes.len()) = 0;
+        }
+        bytes.len() as isize
+    })
+}
+
 pub const IOCTL_FD_INFO_ABI_VERSION: u32 = 1;
 pub const IOCTL_FD_OTHER: c_int = 0;
 pub const IOCTL_FD_RANDOM_DEVICE: c_int = 1;

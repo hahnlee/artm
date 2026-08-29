@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 extern "C" int darwin_art_bionic_socket_broker_dup(int);
@@ -1737,6 +1738,80 @@ void CloseRemoteBinderChannel(JNIEnv* env, jint control_fd) {
   }
   g_wire_connections.erase(connection);
   g_wire_condition.notify_all();
+}
+
+std::string QuerySystemPackageRecord(JNIEnv* env, const char* socket_path,
+                                     const char* package_name) {
+  if (env == nullptr || socket_path == nullptr || *socket_path == '\0' ||
+      package_name == nullptr || *package_name == '\0') {
+    return {};
+  }
+  const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd < 0) return {};
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  if (std::strlen(socket_path) >= sizeof(address.sun_path)) {
+    close(fd);
+    return {};
+  }
+  std::memcpy(address.sun_path, socket_path, std::strlen(socket_path) + 1);
+  if (connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+    close(fd);
+    return {};
+  }
+  jobject data = ObtainJavaParcel(env);
+  jobject reply = ObtainJavaParcel(env);
+  jclass parcel_class = data == nullptr ? nullptr : env->GetObjectClass(data);
+  jmethodID write_token = parcel_class == nullptr
+                              ? nullptr
+                              : env->GetMethodID(parcel_class, "writeInterfaceToken",
+                                                 "(Ljava/lang/String;)V");
+  jmethodID write_string = parcel_class == nullptr
+                               ? nullptr
+                               : env->GetMethodID(parcel_class, "writeString",
+                                                  "(Ljava/lang/String;)V");
+  jmethodID read_exception = parcel_class == nullptr
+                                 ? nullptr
+                                 : env->GetMethodID(parcel_class, "readException", "()V");
+  jmethodID read_string = parcel_class == nullptr
+                              ? nullptr
+                              : env->GetMethodID(parcel_class, "readString",
+                                                 "()Ljava/lang/String;");
+  std::string result;
+  if (data != nullptr && reply != nullptr && write_token != nullptr &&
+      write_string != nullptr && read_exception != nullptr &&
+      read_string != nullptr && !env->ExceptionCheck()) {
+    jstring descriptor = env->NewStringUTF(
+        "dev.darwinart.system.IPackageRegistry");
+    jstring package = env->NewStringUTF(package_name);
+    env->CallVoidMethod(data, write_token, descriptor);
+    env->CallVoidMethod(data, write_string, package);
+    if (!env->ExceptionCheck() &&
+        TransactRemoteBinder(env, fd, 1, 1, data, reply, 0) == JNI_TRUE) {
+      env->CallVoidMethod(reply, read_exception);
+      jstring record = env->ExceptionCheck()
+                           ? nullptr
+                           : static_cast<jstring>(
+                                 env->CallObjectMethod(reply, read_string));
+      if (record != nullptr && !env->ExceptionCheck()) {
+        const char* utf = env->GetStringUTFChars(record, nullptr);
+        if (utf != nullptr) {
+          result = utf;
+          env->ReleaseStringUTFChars(record, utf);
+        }
+      }
+      env->DeleteLocalRef(record);
+    }
+    env->DeleteLocalRef(package);
+    env->DeleteLocalRef(descriptor);
+  }
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  env->DeleteLocalRef(parcel_class);
+  if (data != nullptr) RecycleJavaParcel(env, data);
+  if (reply != nullptr) RecycleJavaParcel(env, reply);
+  CloseRemoteBinderChannel(env, fd);
+  close(fd);
+  return result;
 }
 
 bool FocusFrameworkViewRoot(JNIEnv* env, jobject view_root) {

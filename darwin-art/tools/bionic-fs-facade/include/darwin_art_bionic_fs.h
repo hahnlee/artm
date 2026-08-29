@@ -119,6 +119,11 @@ int darwin_art_bionic_fs_process_has_capability_failure(void);
 /* Seeds one process-authorized app directory hierarchy in the private /data
  * overlay. Immutable mounts are rejected. */
 int darwin_art_bionic_fs_seed_private_directory(const char* path);
+/* Resolves only an authorized Android /data path to its host backing path.
+ * A null/zero output buffer queries the required byte length (excluding NUL).
+ * Immutable mounts and traversal outside the private overlay are rejected. */
+intptr_t darwin_art_bionic_fs_resolve_private_host_path(
+    const char* path, char* output, size_t capacity);
 
 /* Fixed-register forms intentionally capture the Android AAPCS64 mode slot.
  * Calls without O_CREAT leave mode unspecified and the implementation ignores it. */

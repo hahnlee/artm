@@ -2,6 +2,8 @@
 
 #include <jni.h>
 
+#include <string>
+
 namespace darwin_art {
 
 // Starts the process-local Binder reader used to receive callbacks from a
@@ -35,5 +37,10 @@ int ServeRemoteBinder(JNIEnv* env, jint control_fd, jobject local_binder);
 
 // Releases browser-side global Binder references associated with a channel.
 void CloseRemoteBinderChannel(JNIEnv* env, jint control_fd);
+
+// Connects to system_server-lite's package-registry Binder and returns the
+// daemon-owned immutable launch record. Empty means unavailable/not installed.
+std::string QuerySystemPackageRecord(JNIEnv* env, const char* socket_path,
+                                     const char* package_name);
 
 }  // namespace darwin_art

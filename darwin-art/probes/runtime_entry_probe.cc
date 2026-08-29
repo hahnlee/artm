@@ -1,15 +1,21 @@
 #include <mach-o/dyld.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
 #include <iostream>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <cstddef>
 #include <pthread.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 #include "art_method-inl.h"
 #include "base/locks.h"
@@ -19,8 +25,8 @@
 #include "cmdline_types.h"
 #include "darwin_art/darwin_art.h"
 #include "darwin_framework_natives.h"
+#include "darwin_binder_wire.h"
 #include "darwin_provider_owners.h"
-#include "darwin_art/darwin_art.h"
 #include "runtime_network_probe.h"
 #include "runtime_hwui_probe.h"
 #include "runtime_elf_probe.h"
@@ -56,6 +62,174 @@
 
 extern "C" int darwin_art_install_context_loader(JNIEnv* env,
                                                    jobject app_loader);
+
+namespace {
+
+bool WriteAll(int fd, const void* data, size_t size) {
+  const auto* bytes = static_cast<const uint8_t*>(data);
+  while (size != 0) {
+    const ssize_t written = write(fd, bytes, size);
+    if (written <= 0) return false;
+    bytes += written;
+    size -= static_cast<size_t>(written);
+  }
+  return true;
+}
+
+bool ReadAll(int fd, void* data, size_t size) {
+  auto* bytes = static_cast<uint8_t*>(data);
+  while (size != 0) {
+    const ssize_t read_count = read(fd, bytes, size);
+    if (read_count <= 0) return false;
+    bytes += read_count;
+    size -= static_cast<size_t>(read_count);
+  }
+  return true;
+}
+
+std::string ResolveDaemonPackage(const char* package_name) {
+  const char* socket_path = std::getenv("DARWIN_ART_PROFILE_SOCKET");
+  if (socket_path == nullptr || package_name == nullptr) return {};
+  const std::string package(package_name);
+  if (package.empty() || package.size() > 255 ||
+      !std::all_of(package.begin(), package.end(), [](unsigned char byte) {
+        return std::isalnum(byte) || byte == '.' || byte == '_' || byte == '-';
+      })) {
+    return {};
+  }
+  const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd < 0) return {};
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  if (std::strlen(socket_path) >= sizeof(address.sun_path)) {
+    close(fd);
+    return {};
+  }
+  std::memcpy(address.sun_path, socket_path, std::strlen(socket_path) + 1);
+  if (connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+    close(fd);
+    return {};
+  }
+  uint8_t header[16]{};
+  std::memcpy(header, "DARTD001", 8);
+  const uint16_t version = 1;
+  const uint16_t operation = 6;
+  std::memcpy(header + 8, &version, sizeof(version));
+  std::memcpy(header + 10, &operation, sizeof(operation));
+  const uint32_t length = static_cast<uint32_t>(package.size());
+  std::memcpy(header + 12, &length, sizeof(length));
+  if (!WriteAll(fd, header, sizeof(header)) ||
+      !WriteAll(fd, package.data(), package.size()) ||
+      !ReadAll(fd, header, sizeof(header)) ||
+      std::memcmp(header, "DARTD001", 8) != 0) {
+    close(fd);
+    return {};
+  }
+  uint16_t response_version = 0;
+  uint16_t response_operation = 0;
+  std::memcpy(&response_version, header + 8, sizeof(response_version));
+  std::memcpy(&response_operation, header + 10, sizeof(response_operation));
+  if (response_version != version || response_operation != (operation | 0x8000)) {
+    close(fd);
+    return {};
+  }
+  uint32_t response_length = 0;
+  std::memcpy(&response_length, header + 12, sizeof(response_length));
+  if (response_length < 4 || response_length > 64 * 1024) {
+    close(fd);
+    return {};
+  }
+  std::vector<uint8_t> response(response_length);
+  const bool received = ReadAll(fd, response.data(), response.size());
+  close(fd);
+  uint32_t status = 1;
+  if (received) std::memcpy(&status, response.data(), sizeof(status));
+  return received && status == 0
+             ? std::string(response.begin() + 4, response.end())
+             : std::string();
+}
+
+jstring NativeResolveDaemonPackage(JNIEnv* env, jclass, jstring package_name) {
+  if (package_name == nullptr) return nullptr;
+  const char* utf = env->GetStringUTFChars(package_name, nullptr);
+  if (utf == nullptr) return nullptr;
+  const std::string record = ResolveDaemonPackage(utf);
+  env->ReleaseStringUTFChars(package_name, utf);
+  return record.empty() ? nullptr : env->NewStringUTF(record.c_str());
+}
+
+jclass LoadApplicationClass(JNIEnv* env, jobject loader, const char* name) {
+  jclass loader_class = env->GetObjectClass(loader);
+  jmethodID load = loader_class == nullptr
+                       ? nullptr
+                       : env->GetMethodID(loader_class, "loadClass",
+                                          "(Ljava/lang/String;)Ljava/lang/Class;");
+  jstring class_name = env->NewStringUTF(name);
+  jobject loaded = load == nullptr
+                       ? nullptr
+                       : env->CallObjectMethod(loader, load, class_name);
+  env->DeleteLocalRef(class_name);
+  env->DeleteLocalRef(loader_class);
+  return static_cast<jclass>(loaded);
+}
+
+int RunSystemServerLite(JNIEnv* env, jobject app_loader) {
+  const char* socket_path = std::getenv("DARWIN_ART_SYSTEM_SERVER_SOCKET");
+  if (socket_path == nullptr || *socket_path == '\0') return 70;
+  jclass server = LoadApplicationClass(
+      env, app_loader, "dev.darwinart.system.DarwinSystemServer");
+  JNINativeMethod methods[] = {
+      {const_cast<char*>("nativeResolvePackage"),
+       const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
+       reinterpret_cast<void*>(&NativeResolveDaemonPackage)},
+  };
+  if (server == nullptr || env->ExceptionCheck() ||
+      env->RegisterNatives(server, methods, 1) != JNI_OK) {
+    if (env->ExceptionCheck()) env->ExceptionDescribe();
+    return 70;
+  }
+  jmethodID create = env->GetStaticMethodID(
+      server, "createPackageRegistry", "()Landroid/os/Binder;");
+  jobject registry = create == nullptr
+                         ? nullptr
+                         : env->CallStaticObjectMethod(server, create);
+  if (registry == nullptr || env->ExceptionCheck()) return 70;
+
+  const int listener = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (listener < 0) return 70;
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  if (std::strlen(socket_path) >= sizeof(address.sun_path)) {
+    close(listener);
+    return 70;
+  }
+  std::memcpy(address.sun_path, socket_path, std::strlen(socket_path) + 1);
+  const int probe = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (probe >= 0 &&
+      connect(probe, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0) {
+    close(probe);
+    close(listener);
+    return 0;
+  }
+  if (probe >= 0) close(probe);
+  unlink(socket_path);
+  if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
+      chmod(socket_path, 0600) != 0 || listen(listener, 16) != 0) {
+    close(listener);
+    return 70;
+  }
+  std::cerr << "ART system_server-lite: package registry ready socket="
+            << socket_path << "\n";
+  for (;;) {
+    const int client = accept(listener, nullptr, nullptr);
+    if (client < 0) continue;
+    if (!darwin_art::StartServingRemoteBinder(env, client, registry)) {
+      close(client);
+    }
+  }
+}
+
+}  // namespace
 
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     const darwin_art_process_config_t* config,
@@ -142,6 +316,8 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   const bool has_apk_app_identity_environment =
       process_options.has_apk_app_identity_environment;
   const bool run_apk_app = process_options.run_apk_app;
+  const bool run_system_server =
+      run_apk_app && std::getenv("DARWIN_ART_SYSTEM_SERVER_MODE") != nullptr;
   const char* service_component =
       run_apk_app ? std::getenv("DARWIN_ART_APK_SERVICE_COMPONENT") : nullptr;
   const char* service_control =
@@ -250,11 +426,15 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   const char* activity_descriptor =
       run_service_process
           ? service_descriptor.c_str()
-          : (run_apk_app ? apk_app_descriptor
-                         : "Ldev/darwinart/probe/ProbeActivity;");
+          : (run_apk_app && !run_system_server
+                 ? apk_app_descriptor
+                 : "Ldev/darwinart/probe/ProbeActivity;");
+  const char* process_dex =
+      run_system_server ? apk_app_support_dex : config->app_dex;
   darwin_art_app::ClassSet app_classes;
   const int app_status = darwin_art_app::load_classes(
-      self->GetJniEnv(), self, class_linker, soa, hs, run_apk_app, config->app_dex,
+      self->GetJniEnv(), self, class_linker, soa, hs,
+      run_apk_app && !run_system_server, process_dex,
       apk_app_support_dex, apk_app_native_path, activity_descriptor,
       run_direct_apk, direct_apk_path,
       run_elf_jni_fixture, run_network_acceptance,
@@ -323,6 +503,22 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
        .graphics_state = graphics_state});
   if (registration_status != 0) {
     return registration_status;
+  }
+
+  if (run_system_server) {
+    if (darwin_art_install_context_loader(env, app_loader_ref) != 0) {
+      std::cerr << "ART system_server-lite: ClassLoader setup failed\n";
+      return 70;
+    }
+    const int status = RunSystemServerLite(env, app_loader_ref);
+    run_result->hello_answer = 0;
+    run_result->native_round_trip = 0;
+    run_result->arraycopy_result = 0;
+    run_result->activity_probe_result = 0;
+    run_result->lifecycle_result = 0;
+    run_result->frame_width = 0;
+    run_result->frame_height = 0;
+    return status;
   }
 
   // Android's managed System.load/Runtime.nativeLoad path reaches

@@ -5,8 +5,10 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
 use std::os::fd::AsRawFd;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::{FileTypeExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -266,9 +268,107 @@ fn handle(mut stream: UnixStream, state: &Arc<State>) -> Result<(), ProfileError
             }
             protocol::write_response(&mut stream, message.operation, 0, processes.as_bytes())?;
         }
+        protocol::OP_DAEMONIZE => {
+            let (package, arguments, environment) = parse_daemonize(&message.payload)?;
+            crate::registry::validate_package(&package)?;
+            state.filesystem.lock().unwrap().ensure()?;
+            let mut command = Command::new(&arguments[0]);
+            command
+                .args(&arguments[1..])
+                .env_clear()
+                .envs(environment)
+                .stdin(Stdio::null());
+            let mut child = command.spawn()?;
+            let pid = child.id();
+            {
+                let _gate = state.lease_gate.lock().unwrap();
+                state.leases.fetch_add(1, Ordering::SeqCst);
+                state
+                    .processes
+                    .lock()
+                    .unwrap()
+                    .insert(pid, ProcessEntry { package, leases: 1 });
+            }
+            let owner = Arc::clone(state);
+            thread::spawn(move || {
+                let _ = child.wait();
+                let _gate = owner.lease_gate.lock().unwrap();
+                owner.processes.lock().unwrap().remove(&pid);
+                owner.leases.fetch_sub(1, Ordering::SeqCst);
+                *owner.last_activity.lock().unwrap() = Instant::now();
+            });
+            protocol::write_response(&mut stream, message.operation, 0, &pid.to_le_bytes())?;
+        }
         _ => protocol::write_response(&mut stream, message.operation, 38, b"unknown operation")?,
     }
     Ok(())
+}
+
+fn parse_daemonize(
+    payload: &[u8],
+) -> Result<
+    (
+        String,
+        Vec<std::ffi::OsString>,
+        Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    ),
+    ProfileError,
+> {
+    let mut cursor = 0_usize;
+    let package = String::from_utf8(read_field(payload, &mut cursor)?.to_vec())
+        .map_err(|_| ProfileError::Daemon("daemonize package is not UTF-8".into()))?;
+    let argument_count = read_u32(payload, &mut cursor)? as usize;
+    if argument_count == 0 || argument_count > 64 {
+        return Err(ProfileError::Daemon(
+            "invalid daemonize argument count".into(),
+        ));
+    }
+    let mut arguments = Vec::with_capacity(argument_count);
+    for _ in 0..argument_count {
+        arguments.push(std::ffi::OsString::from_vec(
+            read_field(payload, &mut cursor)?.to_vec(),
+        ));
+    }
+    let environment_count = read_u32(payload, &mut cursor)? as usize;
+    if environment_count > 256 {
+        return Err(ProfileError::Daemon(
+            "invalid daemonize environment count".into(),
+        ));
+    }
+    let mut environment = Vec::with_capacity(environment_count);
+    for _ in 0..environment_count {
+        let key = std::ffi::OsString::from_vec(read_field(payload, &mut cursor)?.to_vec());
+        let value = std::ffi::OsString::from_vec(read_field(payload, &mut cursor)?.to_vec());
+        environment.push((key, value));
+    }
+    if cursor != payload.len() {
+        return Err(ProfileError::Daemon("trailing daemonize payload".into()));
+    }
+    Ok((package, arguments, environment))
+}
+
+fn read_u32(payload: &[u8], cursor: &mut usize) -> Result<u32, ProfileError> {
+    let end = cursor
+        .checked_add(4)
+        .filter(|end| *end <= payload.len())
+        .ok_or_else(|| ProfileError::Daemon("truncated daemonize payload".into()))?;
+    let value = u32::from_le_bytes(payload[*cursor..end].try_into().unwrap());
+    *cursor = end;
+    Ok(value)
+}
+
+fn read_field<'a>(payload: &'a [u8], cursor: &mut usize) -> Result<&'a [u8], ProfileError> {
+    let length = read_u32(payload, cursor)? as usize;
+    let end = cursor
+        .checked_add(length)
+        .filter(|end| *end <= payload.len())
+        .ok_or_else(|| ProfileError::Daemon("truncated daemonize field".into()))?;
+    let field = &payload[*cursor..end];
+    if field.contains(&0) {
+        return Err(ProfileError::Daemon("NUL in daemonize field".into()));
+    }
+    *cursor = end;
+    Ok(field)
 }
 
 fn require_empty(payload: &[u8]) -> Result<(), ProfileError> {
@@ -348,4 +448,52 @@ unsafe extern "C" {
     fn flock(fd: i32, operation: i32) -> i32;
     fn getpeereid(socket: i32, effective_user: *mut u32, effective_group: *mut u32) -> i32;
     fn geteuid() -> u32;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::ffi::OsStrExt;
+
+    fn field(payload: &mut Vec<u8>, value: &[u8]) {
+        payload.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        payload.extend_from_slice(value);
+    }
+
+    #[test]
+    fn daemonize_payload_preserves_argv_and_environment_bytes() {
+        let mut payload = Vec::new();
+        field(&mut payload, b"android.system");
+        payload.extend_from_slice(&2_u32.to_le_bytes());
+        field(&mut payload, b"/runtime host");
+        field(&mut payload, b"--window-seconds=0");
+        payload.extend_from_slice(&1_u32.to_le_bytes());
+        field(&mut payload, b"DARWIN_ART_MODE");
+        field(&mut payload, b"system server");
+
+        let (package, arguments, environment) = parse_daemonize(&payload).unwrap();
+        assert_eq!(package, "android.system");
+        assert_eq!(arguments[0].as_bytes(), b"/runtime host");
+        assert_eq!(arguments[1].as_bytes(), b"--window-seconds=0");
+        assert_eq!(environment[0].0.as_bytes(), b"DARWIN_ART_MODE");
+        assert_eq!(environment[0].1.as_bytes(), b"system server");
+    }
+
+    #[test]
+    fn daemonize_payload_rejects_nul_and_trailing_bytes() {
+        let mut payload = Vec::new();
+        field(&mut payload, b"android.system");
+        payload.extend_from_slice(&1_u32.to_le_bytes());
+        field(&mut payload, b"bad\0program");
+        payload.extend_from_slice(&0_u32.to_le_bytes());
+        assert!(parse_daemonize(&payload).is_err());
+
+        let mut valid = Vec::new();
+        field(&mut valid, b"android.system");
+        valid.extend_from_slice(&1_u32.to_le_bytes());
+        field(&mut valid, b"/runtime");
+        valid.extend_from_slice(&0_u32.to_le_bytes());
+        valid.push(0);
+        assert!(parse_daemonize(&valid).is_err());
+    }
 }

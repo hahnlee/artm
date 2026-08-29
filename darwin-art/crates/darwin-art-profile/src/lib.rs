@@ -253,6 +253,42 @@ pub fn list_processes(paths: &ProfilePaths) -> Result<String, ProfileError> {
     String::from_utf8(bytes).map_err(|error| ProfileError::InvalidResponse(error.to_string()))
 }
 
+pub fn daemonize_process(
+    paths: &ProfilePaths,
+    package: &str,
+    arguments: &[std::ffi::OsString],
+    environment: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> Result<u32, ProfileError> {
+    registry::validate_package(package)?;
+    if arguments.is_empty() {
+        return Err(ProfileError::Daemon("daemonize requires a program".into()));
+    }
+    let mut payload = Vec::new();
+    encode_field(&mut payload, package.as_bytes())?;
+    payload.extend_from_slice(&(arguments.len() as u32).to_le_bytes());
+    for argument in arguments {
+        encode_field(&mut payload, argument.as_encoded_bytes())?;
+    }
+    payload.extend_from_slice(&(environment.len() as u32).to_le_bytes());
+    for (key, value) in environment {
+        encode_field(&mut payload, key.as_encoded_bytes())?;
+        encode_field(&mut payload, value.as_encoded_bytes())?;
+    }
+    let response = request(paths, protocol::OP_DAEMONIZE, &payload)?;
+    if response.len() != 4 {
+        return Err(ProfileError::InvalidResponse("bad daemonized PID".into()));
+    }
+    Ok(u32::from_le_bytes(response.try_into().unwrap()))
+}
+
+fn encode_field(output: &mut Vec<u8>, value: &[u8]) -> Result<(), ProfileError> {
+    let length = u32::try_from(value.len())
+        .map_err(|_| ProfileError::Daemon("daemonize field is too large".into()))?;
+    output.extend_from_slice(&length.to_le_bytes());
+    output.extend_from_slice(value);
+    Ok(())
+}
+
 fn request(paths: &ProfilePaths, operation: u16, payload: &[u8]) -> Result<Vec<u8>, ProfileError> {
     let mut stream = UnixStream::connect(&paths.socket)?;
     protocol::write_request(&mut stream, operation, payload)?;

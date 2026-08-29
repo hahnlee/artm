@@ -38,16 +38,20 @@ falling through to a similarly named Darwin symbol.
 
 ## Target process model
 
-The current proof of concept loads a one-shot ART dynamic library into the Rust
-host. The product design separates untrusted application code from privileged
-macOS integration:
+The runtime loads ART into a Rust-owned Darwin process. Profile-global state and
+Android framework services are deliberately split so privileged host ownership
+does not move into Java:
 
 ```text
-darwin-androidd (Rust service broker)
+darwin-artd (per-profile Rust broker)
   ├─ package and prefix ownership
-  ├─ permissions and security-scoped bookmarks
-  ├─ clipboard, notifications, URL and file-panel integration
-  └─ shared Android service state
+  ├─ process leases and persistent child ownership
+  └─ case-sensitive Android filesystem lifetime
+
+android.system (persistent ART system_server-lite)
+  ├─ Android Binder package registry
+  ├─ installed package, Activity, Service, and launch-Intent resolution
+  └─ future Android framework service implementations
 
 Android application process (sandboxed Darwin process)
   ├─ ART and Android Framework
@@ -68,6 +72,18 @@ it does not execute application JNI. A Linux VM remains the planned fallback
 for binaries that require real kernel behavior, but VM implementation is
 explicitly later work. The current native path neither embeds a Linux kernel
 nor silently crosses between VM pointers and host ART/JNI pointers.
+
+`darwin-artd` is the privileged mechanism owner, not an Android API surface.
+It starts and reaps `android.system`, stores immutable install records, and
+keeps the profile mounted while processes hold leases. The ART-backed
+`android.system` process exposes those records through Android `Binder` and
+`Parcel` contracts. Application `PackageManager` calls therefore cross a
+process boundary before resolving another installed package or component;
+they do not inspect another APK or inherit its launch metadata as environment
+variables. Android Service instances retain normal `Service.onCreate`,
+`onBind`, Binder transaction, rebind, unbind, and process teardown semantics;
+the Rust host only performs the Darwin process creation requested by that
+framework lifecycle.
 
 ### Input and physical keyboards
 
@@ -117,15 +133,15 @@ matching after Android-compatible normalization:
 | `/mnt/host/<name>` | explicit macOS share backed by a security-scoped bookmark |
 | `/proc`, `/sys`, `/dev` | synthetic providers, never host directories |
 
-The implemented native-library slice installs one process-wide filesystem
-owner before any ELF constructor runs. It exposes a caller-authorized,
-preopened directory as an immutable guest root, a private in-memory writable
-`/data` overlay, and exact synthetic `/dev/random` and `/dev/urandom` devices.
-The overlay grants no host write authority; its files and directories disappear
-with the process owner. Every operation takes a short owner lease, and teardown
-stops admission and drains those leases only after ELF finalizers and unmapping.
-The on-disk multi-mount prefix above remains the product layout as package and
-persistent-data support expands.
+The implemented runtime installs one process-wide filesystem owner before app
+code or ELF constructors run. Immutable runtime assets and installed package
+code are separate from package-private, writable `/data`. The latter resolves
+through the Rust filesystem facade to the profile's case-sensitive APFS volume;
+SQLite databases, journals, and atomic SharedPreferences XML therefore survive
+application exit, daemon restart, and relaunch. Exact synthetic `/dev/random`
+and `/dev/urandom` devices remain namespace-owned. Every operation takes a short
+owner lease, and teardown stops admission and drains those leases only after
+ELF finalizers and unmapping.
 
 The private prefix must be case-sensitive even when the user's main APFS volume
 is not. The preferred product representation is a sparse, case-sensitive APFS
