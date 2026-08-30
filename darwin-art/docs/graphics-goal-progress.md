@@ -514,3 +514,11 @@ Completion state / next command:
 - Review the staged goal diff, commit it, and push `main` to `origin`; then
   record the resulting commit id here if another turn resumes:
   `git diff --stat && git status --short && git add -A && git commit ... && git push origin main`.
+
+## Progress 2026-08-30 18:17 KST — goal implementation pushed
+
+- Goal implementation committed as `0fd8b42` (`feat(graphics): complete
+  Android-owned Metal composition`) and pushed to `origin/main`.
+- All completion evidence is in the immediately preceding progress entry. No
+  implementation work remains for this goal; the next turn should start a new
+  compatibility target rather than reopen the graphics ownership migration.
