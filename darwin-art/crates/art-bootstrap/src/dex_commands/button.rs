@@ -24,6 +24,16 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
     let build_dir = root.join("_build/button-dex");
     let class_dir = build_dir.join("classes");
     let dex_dir = build_dir.join("dex");
+    // javac and d8 do not remove outputs for source types that were deleted or
+    // renamed. Reusing these directories silently kept obsolete compatibility
+    // classes in the product support DEX, so every build starts from an empty
+    // generated-output boundary.
+    if class_dir.exists() {
+        fs::remove_dir_all(&class_dir)?;
+    }
+    if dex_dir.exists() {
+        fs::remove_dir_all(&dex_dir)?;
+    }
     fs::create_dir_all(&class_dir)?;
     fs::create_dir_all(&dex_dir)?;
 
@@ -141,6 +151,9 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
                 "dev/darwinart/simple/DarwinServiceBridge$WindowManagerHandler.class",
             ))
             .arg(button(
+                "dev/darwinart/simple/DarwinServiceBridge$WindowManagerHandler$WindowLayoutState.class",
+            ))
+            .arg(button(
                 "dev/darwinart/simple/DarwinServiceBridge$DisplayHandler.class",
             ))
             .arg(button(
@@ -160,9 +173,6 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
             ))
             .arg(button(
                 "dev/darwinart/simple/DarwinServiceBridge$DevicePolicyServiceBinder.class",
-            ))
-            .arg(button(
-                "dev/darwinart/simple/DarwinServiceBridge$DebugClickListener.class",
             ))
             .arg(button(
                 "dev/darwinart/simple/DarwinServiceBridge$HostSurfaceState.class",
@@ -260,7 +270,7 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
     verify_dex_contract(
         &output,
         88,
-        1343,
+        1332,
         &[
             "Ldev/darwinart/probe/ProbeActivity;",
             "Ldev/darwinart/probe/ProbeContext$BaseContext;",

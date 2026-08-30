@@ -153,6 +153,7 @@ public final class DarwinServiceBridge {
             if (visibleFromClient.getBoolean(activity)) {
                 makeVisible.invoke(activity);
             }
+            scheduleViewTreeDump(activity, decor);
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException(
                     "could not complete Activity window visibility", error);
@@ -2005,7 +2006,19 @@ public final class DarwinServiceBridge {
         private final Class<?> windowIdInterface;
         private final Map<Object, Object> windowIds = new HashMap<>();
         private final Map<Object, SurfaceControl> windowSurfaces = new HashMap<>();
+        private final Map<Object, int[]> windowSurfaceSizes = new HashMap<>();
+        private final Map<Object, WindowLayoutState> windowLayouts = new HashMap<>();
         private final ArrayList<Object> serverInputChannels = new ArrayList<>();
+
+        private static final class WindowLayoutState {
+            int x;
+            int y;
+            int width;
+            int height;
+            int type;
+            int gravity;
+            int flags;
+        }
 
         WindowManagerHandler() throws ClassNotFoundException {
             Class<?> sessionInterface = Class.forName("android.view.IWindowSession");
@@ -2037,6 +2050,15 @@ public final class DarwinServiceBridge {
                 // traversal even though CAMetalLayer owns the real surface.
                 return Integer.valueOf(2);
             }
+            if (proxy == session && "remove".equals(method.getName())) {
+                Object windowToken = args == null || args.length == 0 ? null : args[0];
+                SurfaceControl surface = windowSurfaces.remove(windowToken);
+                if (surface != null && surface.isValid()) surface.release();
+                windowSurfaceSizes.remove(windowToken);
+                windowLayouts.remove(windowToken);
+                windowIds.remove(windowToken);
+                return defaultValue(method.getReturnType());
+            }
             if (proxy == session && "getWindowId".equals(method.getName())) {
                 Object token = args == null || args.length == 0 ? session : args[0];
                 Object existing = windowIds.get(token);
@@ -2056,10 +2078,11 @@ public final class DarwinServiceBridge {
 
         private void initializeAddOutputs(Object[] args) {
             if (args == null) return;
+            Object windowToken = args.length == 0 ? null : args[0];
             for (Object value : args) {
                 if (value != null && value.getClass().getName().equals(
                         "android.view.WindowManager$LayoutParams")) {
-                    normalizeLayoutParams(value);
+                    rememberLayout(windowToken, value);
                 } else if (value instanceof Rect) {
                     ((Rect) value).set(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
                 } else if (value instanceof float[] && ((float[]) value).length > 0) {
@@ -2084,32 +2107,39 @@ public final class DarwinServiceBridge {
             }
         }
 
-        private static void normalizeLayoutParams(Object attrs) {
+        private void rememberLayout(Object windowToken, Object attrs) {
+            if (windowToken == null || attrs == null) return;
             try {
-                Field width = attrs.getClass().getField("width");
-                Field height = attrs.getClass().getField("height");
-                Field type = attrs.getClass().getField("type");
-                int windowType = type.getInt(attrs);
-                if (width.getInt(attrs) <= 0) width.setInt(attrs, DISPLAY_WIDTH);
-                if (height.getInt(attrs) <= 0) {
-                    height.setInt(attrs, windowType >= 1 && windowType < 1000
-                            ? DISPLAY_HEIGHT : 120 * DISPLAY_SCALE);
-                }
+                WindowLayoutState state = windowLayouts.computeIfAbsent(
+                        windowToken, ignored -> new WindowLayoutState());
+                state.x = intField(attrs, "x", state.x);
+                state.y = intField(attrs, "y", state.y);
+                state.width = intField(attrs, "width", state.width);
+                state.height = intField(attrs, "height", state.height);
+                state.type = intField(attrs, "type", state.type);
+                state.gravity = intField(attrs, "gravity", state.gravity);
+                state.flags = intField(attrs, "flags", state.flags);
             } catch (Throwable error) {
-                Log.e("DarwinServiceBridge", "window layout normalization failed", error);
+                Log.e("DarwinServiceBridge", "window layout state failed", error);
             }
         }
 
         private void configureRelayout(Object[] args) {
             if (args == null || args.length < 9 || args[8] == null) return;
             try {
+                Object windowToken = args[0];
                 Object attrs = args[1];
+                if (attrs != null) rememberLayout(windowToken, attrs);
+                WindowLayoutState state = windowLayouts.get(windowToken);
                 int requestedWidth = ((Integer) args[2]).intValue();
                 int requestedHeight = ((Integer) args[3]).intValue();
-                int x = intField(attrs, "x", 0);
-                int y = intField(attrs, "y", 0);
-                int layoutWidth = intField(attrs, "width", requestedWidth);
-                int layoutHeight = intField(attrs, "height", requestedHeight);
+                int x = state == null ? 0 : state.x;
+                int y = state == null ? 0 : state.y;
+                int type = state == null ? 0 : state.type;
+                int gravity = state == null ? 0 : state.gravity;
+                int flags = state == null ? 0 : state.flags;
+                int layoutWidth = state == null ? requestedWidth : state.width;
+                int layoutHeight = state == null ? requestedHeight : state.height;
                 int width = requestedWidth > 0 && requestedWidth <= DISPLAY_WIDTH
                         ? requestedWidth
                         : (layoutWidth > 0 && layoutWidth <= DISPLAY_WIDTH
@@ -2118,13 +2148,28 @@ public final class DarwinServiceBridge {
                         ? requestedHeight
                         : (layoutHeight > 0 && layoutHeight <= DISPLAY_HEIGHT
                                 ? layoutHeight : 120 * DISPLAY_SCALE);
-                width = Math.min(width, DISPLAY_WIDTH - Math.max(0, x));
-                height = Math.min(height, DISPLAY_HEIGHT - Math.max(0, y));
+                width = Math.min(width, DISPLAY_WIDTH);
+                height = Math.min(height, DISPLAY_HEIGHT);
+                // WMS fits an application sub-window into its display frame.
+                // Clipping the buffer to the small remainder below an anchor
+                // loses almost the entire popup; move the full window above
+                // the edge instead, preserving its measured content size.
+                x = Math.max(0, Math.min(x, DISPLAY_WIDTH - width));
+                y = Math.max(0, Math.min(y, DISPLAY_HEIGHT - height));
+                if (state != null) {
+                    state.x = x;
+                    state.y = y;
+                    state.width = width;
+                    state.height = height;
+                }
                 if (System.getenv("DARWIN_ART_DEBUG_WINDOW_LAYERS") != null) {
                     Log.i("DarwinServiceBridge", "window frame request="
                             + requestedWidth + "x" + requestedHeight
                             + " layout=" + layoutWidth + "x" + layoutHeight
-                            + " output=" + width + "x" + height + " at=" + x + "," + y);
+                            + " output=" + width + "x" + height + " at=" + x + "," + y
+                            + " type=" + type + " gravity=0x"
+                            + Integer.toHexString(gravity) + " flags=0x"
+                            + Integer.toHexString(flags));
                 }
 
                 Object result = args[8];
@@ -2135,15 +2180,23 @@ public final class DarwinServiceBridge {
                         DISPLAY_WIDTH, DISPLAY_HEIGHT);
                 setRectField(frames, "parentFrame", 0, 0,
                         DISPLAY_WIDTH, DISPLAY_HEIGHT);
-                Object windowToken = args[0];
                 SurfaceControl producer = windowSurfaces.get(windowToken);
-                if (producer == null || !producer.isValid()) {
+                int[] producerSize = windowSurfaceSizes.get(windowToken);
+                if (producer == null || !producer.isValid()
+                        || producerSize == null || producerSize[0] != width
+                        || producerSize[1] != height) {
+                    if (producer != null && producer.isValid()) producer.release();
                     producer = new SurfaceControl.Builder()
                             .setName("Darwin ART ViewRoot")
                             .setBufferSize(width, height)
                             .build();
                     windowSurfaces.put(windowToken, producer);
+                    windowSurfaceSizes.put(windowToken, new int[] {width, height});
                 }
+                new SurfaceControl.Transaction()
+                        .setPosition(producer, x, y)
+                        .setLayer(producer, type >= 1000 ? 1000 : 0)
+                        .apply();
                 Field surfaceControlField = result.getClass().getField("surfaceControl");
                 SurfaceControl output =
                         (SurfaceControl) surfaceControlField.get(result);

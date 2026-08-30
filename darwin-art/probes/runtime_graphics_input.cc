@@ -670,6 +670,18 @@ bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
       params_class == nullptr
           ? nullptr
           : env->GetFieldID(params_class, "token", "Landroid/os/IBinder;");
+  jclass view_root_class = env->FindClass("android/view/ViewRootImpl");
+  jfieldID window_frame_field =
+      view_root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(view_root_class, "mWinFrame", "Landroid/graphics/Rect;");
+  jclass rect_class = env->FindClass("android/graphics/Rect");
+  jfieldID rect_left_field =
+      rect_class == nullptr ? nullptr : env->GetFieldID(rect_class, "left", "I");
+  jfieldID rect_top_field =
+      rect_class == nullptr
+          ? nullptr
+          : env->GetFieldID(rect_class, "top", "I");
   jobject current_activity_token = nullptr;
   if (!env->ExceptionCheck() && views != nullptr && params != nullptr &&
       roots != nullptr &&
@@ -692,9 +704,22 @@ bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
     for (jint index = count - 1; index >= 0 && selected == nullptr; --index) {
       jobject layer = env->CallObjectMethod(views, get, index);
       jobject layout_params = env->CallObjectMethod(params, get, index);
+      jobject layer_root = env->CallObjectMethod(roots, get, index);
       if (layer != nullptr && layout_params != nullptr && !env->ExceptionCheck()) {
-        const jint left = env->GetIntField(layout_params, x_field);
-        const jint top = env->GetIntField(layout_params, y_field);
+        // LayoutParams.x/y are the client's requested gravity offsets. WMS
+        // may fit a popup elsewhere on screen; ViewRootImpl retains that
+        // resolved frame in mWinFrame and InputDispatcher uses
+        // the resolved input window, not the original request.
+        jobject window_frame =
+            layer_root != nullptr && window_frame_field != nullptr
+                ? env->GetObjectField(layer_root, window_frame_field)
+                : nullptr;
+        const jint left = window_frame != nullptr && rect_left_field != nullptr
+                              ? env->GetIntField(window_frame, rect_left_field)
+                              : env->GetIntField(layout_params, x_field);
+        const jint top = window_frame != nullptr && rect_top_field != nullptr
+                             ? env->GetIntField(window_frame, rect_top_field)
+                             : env->GetIntField(layout_params, y_field);
         const jint type = env->GetIntField(layout_params, type_field);
         const jint width = env->CallIntMethod(layer, get_width);
         const jint height = env->CallIntMethod(layer, get_height);
@@ -723,12 +748,14 @@ bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
         if (eligible && x >= left && y >= top && x < left + width &&
             y < top + height) {
           selected = env->NewLocalRef(layer);
-          selected_view_root = env->CallObjectMethod(roots, get, index);
+          selected_view_root = env->NewLocalRef(layer_root);
           selected_x = left;
           selected_y = top;
         }
         if (layer_token != nullptr) env->DeleteLocalRef(layer_token);
+        if (window_frame != nullptr) env->DeleteLocalRef(window_frame);
       }
+      if (layer_root != nullptr) env->DeleteLocalRef(layer_root);
       if (layout_params != nullptr) env->DeleteLocalRef(layout_params);
       if (layer != nullptr) env->DeleteLocalRef(layer);
     }
@@ -737,6 +764,8 @@ bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
   if (current_activity_token != nullptr)
     env->DeleteLocalRef(current_activity_token);
   if (params_class != nullptr) env->DeleteLocalRef(params_class);
+  if (view_root_class != nullptr) env->DeleteLocalRef(view_root_class);
+  if (rect_class != nullptr) env->DeleteLocalRef(rect_class);
   if (view_class != nullptr) env->DeleteLocalRef(view_class);
   if (list_class != nullptr) env->DeleteLocalRef(list_class);
   if (params != nullptr) env->DeleteLocalRef(params);
