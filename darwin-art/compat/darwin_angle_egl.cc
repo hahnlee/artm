@@ -1,6 +1,8 @@
 #include "darwin_angle_egl.h"
 
 #include "darwin_surface_bridge.h"
+#include "surfaceflinger/metal_composer.h"
+#include "surfaceflinger/service_darwin.h"
 
 #include <android/bitmap.h>
 #include <android/hardware_buffer.h>
@@ -29,6 +31,8 @@ namespace darwin_art {
 const char* EglQueryStringAndroid(void* display, std::int32_t name);
 }
 
+void eglBeginFrame(void* display, void* surface);
+
 namespace {
 
 using EGLBoolean = std::uint32_t;
@@ -55,6 +59,10 @@ constexpr EGLenum kEglNativeBufferAndroid = 0x3140;
 constexpr EGLenum kEglSyncNativeFenceAndroid = 0x3144;
 constexpr EGLint kEglSyncNativeFenceFdAndroid = 0x3145;
 constexpr EGLint kEglNoNativeFenceFdAndroid = -1;
+constexpr EGLenum kEglSyncMetalSharedEventAngle = 0x34D8;
+constexpr EGLint kEglSyncMetalSharedEventObjectAngle = 0x34D9;
+constexpr EGLint kEglSyncMetalSharedEventSignalValueLoAngle = 0x34DA;
+constexpr EGLint kEglSyncMetalSharedEventSignalValueHiAngle = 0x34DB;
 constexpr EGLenum kEglPlatformAngle = 0x3202;
 constexpr EGLint kEglPlatformAngleType = 0x3203;
 constexpr EGLint kEglPlatformAngleTypeOpenGles = 0x320E;
@@ -97,12 +105,19 @@ extern "C" void* darwin_art_android_iosurface_metal_texture(
     void* iosurface, std::uint32_t width, std::uint32_t height,
     void* metal_device);
 extern "C" void darwin_art_android_metal_texture_release(void* texture);
+extern "C" void* darwin_art_android_metal_shared_event_create(
+    void* metal_device, std::uint64_t* signal_value);
+extern "C" int darwin_art_android_metal_shared_event_fence_fd(
+    void* shared_event, std::uint64_t signal_value);
+extern "C" void darwin_art_android_metal_shared_event_release(
+    void* shared_event);
 extern "C" int darwin_art_bionic_fd_import_from_scm(int host_fd);
 extern "C" int darwin_art_bionic_socket_broker_pipe(
     std::int32_t descriptors[2]);
 extern "C" std::intptr_t darwin_art_bionic_socket_broker_write(
     int fd, const void* bytes, std::size_t count);
 extern "C" int darwin_art_bionic_socket_broker_close(int fd);
+extern "C" int sync_wait(int fd, int timeout_ms);
 
 struct AngleApi {
   void* egl_library = nullptr;
@@ -467,6 +482,8 @@ std::array<EGLint, 5> HostPbufferAttributes() {
 
 struct HostWindowSurface {
   DarwinArtSurface* host = nullptr;
+  void* native_window = nullptr;
+  void* native_buffer = nullptr;
   EGLConfig config = nullptr;
   EGLint bind_target = 0;
   void* iosurface = nullptr;
@@ -479,6 +496,7 @@ struct HostWindowSurface {
   std::uint32_t width = 0;
   std::uint32_t height = 0;
   bool target_bound = false;
+  bool owns_iosurface_ref = false;
 };
 
 std::mutex& HostWindowSurfaceMutex() {
@@ -492,7 +510,8 @@ std::unordered_map<EGLSurface, HostWindowSurface>& HostWindowSurfaces() {
 }
 
 EGLSurface CreateHostWindowSurface(EGLDisplay native_display,
-                                   EGLConfig native_config) {
+                                   EGLConfig native_config,
+                                   void* native_window = nullptr) {
   auto& api = GetAngleApi();
   if (!api.ready) return nullptr;
   DarwinArtSurface* host = darwin_art_surface_active_gpu();
@@ -500,10 +519,40 @@ EGLSurface CreateHostWindowSurface(EGLDisplay native_display,
   uint32_t backing_width = 0;
   uint32_t backing_height = 0;
   EGLSurface surface = nullptr;
-  bool has_iosurface =
-      host != nullptr && darwin_art_surface_gpu_acquire_iosurface(
-                             host, &iosurface, &backing_width,
-                             &backing_height);
+  void* native_buffer = nullptr;
+  int acquire_fence = -1;
+  AHardwareBuffer* hardware_buffer = nullptr;
+  bool owns_iosurface_ref = false;
+  bool has_iosurface = false;
+  if (native_window != nullptr &&
+      darwin_art_android_ANativeWindow_dequeue_hardware_buffer(
+          native_window, &hardware_buffer, &native_buffer, &acquire_fence) ==
+          0) {
+    if (acquire_fence >= 0) {
+      (void)sync_wait(acquire_fence, -1);
+      (void)darwin_art_bionic_socket_broker_close(acquire_fence);
+      acquire_fence = -1;
+    }
+    AHardwareBuffer_Desc description{};
+    AHardwareBuffer_describe(hardware_buffer, &description);
+    iosurface = darwin_art_android_hardware_buffer_iosurface(hardware_buffer);
+    backing_width = description.width;
+    backing_height = description.height;
+    has_iosurface = iosurface != nullptr && backing_width != 0 &&
+                    backing_height != 0;
+    if (!has_iosurface) {
+      (void)darwin_art_android_ANativeWindow_cancel_hardware_buffer(
+          native_window, native_buffer, -1);
+      native_buffer = nullptr;
+    }
+  }
+  if (!has_iosurface) {
+    has_iosurface =
+        host != nullptr && darwin_art_surface_gpu_acquire_iosurface(
+                               host, &iosurface, &backing_width,
+                               &backing_height);
+    owns_iosurface_ref = has_iosurface;
+  }
   if (!has_iosurface) {
     const char* inherited_id = std::getenv("DARWIN_ART_HOST_IOSURFACE_ID");
     if (inherited_id != nullptr) {
@@ -527,8 +576,10 @@ EGLSurface CreateHostWindowSurface(EGLDisplay native_display,
     int32_t embedded_y = 0;
     uint32_t embedded_width = backing_width;
     uint32_t embedded_height = backing_height;
-    darwin_art_surface_gpu_get_embedded_geometry(
-        host, &embedded_x, &embedded_y, &embedded_width, &embedded_height);
+    if (native_window == nullptr) {
+      darwin_art_surface_gpu_get_embedded_geometry(
+          host, &embedded_x, &embedded_y, &embedded_width, &embedded_height);
+    }
     (void)embedded_x;
     (void)embedded_y;
     const uint32_t requested_width = std::min(
@@ -574,6 +625,8 @@ EGLSurface CreateHostWindowSurface(EGLDisplay native_display,
           HostWindowSurfaces().emplace(
               surface,
               HostWindowSurface{.host = host,
+                                .native_window = native_window,
+                                .native_buffer = native_buffer,
                                 .config = native_config,
                                 .bind_target = bind_target,
                                 .iosurface = iosurface,
@@ -582,7 +635,11 @@ EGLSurface CreateHostWindowSurface(EGLDisplay native_display,
                                 .render_width = requested_width,
                                 .render_height = requested_height,
                                 .width = requested_width,
-                                .height = requested_height});
+                                .height = requested_height,
+                                .owns_iosurface_ref = owns_iosurface_ref});
+          if (native_window != nullptr) {
+            darwin_art_android_ANativeWindow_acquire(native_window);
+          }
           std::cerr << "ART Android EGL: SurfaceView uses GPU blit into shared "
                        "IOSurface "
                     << requested_width << "x" << requested_height << "\n";
@@ -596,7 +653,14 @@ EGLSurface CreateHostWindowSurface(EGLDisplay native_display,
       }
     }
     if (surface == nullptr) {
-      darwin_art_surface_gpu_release_iosurface(iosurface);
+      if (owns_iosurface_ref) {
+        darwin_art_surface_gpu_release_iosurface(iosurface);
+      }
+      if (native_buffer != nullptr) {
+        (void)darwin_art_android_ANativeWindow_cancel_hardware_buffer(
+            native_window, native_buffer, -1);
+        native_buffer = nullptr;
+      }
       iosurface = nullptr;
       std::cerr << "ART Android EGL: IOSurface EGL target unavailable error=0x"
                 << std::hex << api.get_error() << std::dec
@@ -616,7 +680,7 @@ jlong EglCreateWindowSurface(JNIEnv* env, jobject, jobject display,
   return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(
       CreateHostWindowSurface(
           HandleAs<EGLDisplay>(env, display, "mEGLDisplay"),
-          HandleAs<EGLConfig>(env, config, "mEGLConfig"))));
+          HandleAs<EGLConfig>(env, config, "mEGLConfig"), nullptr)));
 }
 
 void EglCreatePixmapSurface(JNIEnv* env, jobject self, jobject result,
@@ -789,15 +853,31 @@ bool DestroyHostWindowSurface(EGLDisplay native_display,
     }
   }
   if (window.target_bound) {
+    std::int32_t previous_texture = 0;
+    api.gl_get_integer_v(window.texture_target == kGlTexture2d ? 0x8069
+                                                               : 0x84F6,
+                         &previous_texture);
+    api.gl_bind_texture(window.texture_target, window.texture);
     api.release_tex_image(native_display, window.iosurface_target,
                           kEglBackBuffer);
     api.gl_delete_framebuffers(1, &window.framebuffer);
     api.gl_delete_textures(1, &window.texture);
+    api.gl_bind_texture(window.texture_target,
+                        static_cast<std::uint32_t>(previous_texture));
   }
   if (window.iosurface_target != nullptr) {
     api.destroy_surface(native_display, window.iosurface_target);
   }
-  darwin_art_surface_gpu_release_iosurface(window.iosurface);
+  if (window.owns_iosurface_ref) {
+    darwin_art_surface_gpu_release_iosurface(window.iosurface);
+  }
+  if (window.native_buffer != nullptr) {
+    (void)darwin_art_android_ANativeWindow_cancel_hardware_buffer(
+        window.native_window, window.native_buffer, -1);
+  }
+  if (window.native_window != nullptr) {
+    darwin_art_android_ANativeWindow_release(window.native_window);
+  }
   return api.ready && api.destroy_surface(native_display, native_surface);
 }
 jboolean EglDestroySurface(JNIEnv* env, jobject, jobject display,
@@ -820,6 +900,9 @@ bool SwapHostWindowSurface(EGLDisplay native_display,
   auto& api = GetAngleApi();
   if (!api.ready) return false;
   DarwinArtSurface* host = nullptr;
+  void* native_window = nullptr;
+  EGLConfig native_config = nullptr;
+  EGLint native_bind_target = 0;
   bool transferred = false;
   uint32_t transferred_width = 0;
   uint32_t transferred_height = 0;
@@ -829,6 +912,9 @@ bool SwapHostWindowSurface(EGLDisplay native_display,
     if (found != HostWindowSurfaces().end()) {
       HostWindowSurface& window = found->second;
       host = window.host;
+      native_window = window.native_window;
+      native_config = window.config;
+      native_bind_target = window.bind_target;
       std::int32_t previous_active_texture = 0;
       std::int32_t previous_texture = 0;
       std::int32_t previous_framebuffer = 0;
@@ -850,7 +936,8 @@ bool SwapHostWindowSurface(EGLDisplay native_display,
       void* current_iosurface = nullptr;
       uint32_t current_width = 0;
       uint32_t current_height = 0;
-      if (darwin_art_surface_gpu_acquire_iosurface(
+      if (window.native_window == nullptr &&
+          darwin_art_surface_gpu_acquire_iosurface(
               host, &current_iosurface, &current_width, &current_height)) {
         // A BufferQueue producer keeps its negotiated buffer dimensions when
         // only the consumer's window grows; SurfaceFlinger scales that buffer
@@ -903,6 +990,7 @@ bool SwapHostWindowSurface(EGLDisplay native_display,
             window.width = requested_width;
             window.height = requested_height;
             window.target_bound = false;
+            window.owns_iosurface_ref = true;
             current_iosurface = nullptr;
             std::cerr << "ART Android EGL: refreshed resized IOSurface target "
                       << requested_width << "x" << requested_height << "\n";
@@ -950,6 +1038,17 @@ bool SwapHostWindowSurface(EGLDisplay native_display,
             static_cast<int32_t>(window.width),
             static_cast<int32_t>(window.height), 0x00004000,
             0x2600);  // GL_COLOR_BUFFER_BIT / GL_NEAREST
+        if (std::getenv("DARWIN_ART_DEBUG_GRAPHICS_DSO") != nullptr) {
+          const std::uint32_t transfer_error = api.gl_get_error();
+          if (transfer_error != 0) {
+            std::cerr << "ART Android EGL: IOSurface blit error=0x" << std::hex
+                      << transfer_error << std::dec
+                      << " source_fbo=0 target_fbo=" << window.framebuffer
+                      << " source=" << window.render_width << "x"
+                      << window.render_height << " target=" << window.width
+                      << "x" << window.height << "\n";
+          }
+        }
         // GL error state belongs to the guest context. Reading it here both
         // steals an app-visible error and can misattribute an earlier guest
         // error to this transfer, which used to suppress every publication
@@ -1029,7 +1128,15 @@ bool SwapHostWindowSurface(EGLDisplay native_display,
   if (!api.swap_buffers(native_display, native_surface)) return false;
   // Establish completion and visibility between ANGLE's Metal command queue
   // and the independent Skia/Metal queue before publishing this texture.
-  if (host != nullptr && transferred && api.wait_gl()) {
+  const bool wait_complete = transferred && api.wait_gl();
+  const bool gpu_complete = transferred && wait_complete;
+  if (std::getenv("DARWIN_ART_DEBUG_GRAPHICS_DSO") != nullptr) {
+    std::cerr << "ART Android EGL: swap publication transferred="
+              << (transferred ? 1 : 0)
+              << " wait_complete=" << (wait_complete ? 1 : 0)
+              << " native_window=" << native_window << "\n";
+  }
+  if (host != nullptr && native_window == nullptr && gpu_complete) {
     darwin_art_surface_gpu_set_embedded_buffer_extent(
         host, transferred_width, transferred_height);
     darwin_art_surface_gpu_publish_embedded(host);
@@ -1042,6 +1149,98 @@ bool SwapHostWindowSurface(EGLDisplay native_display,
                   << " gl_error=0x" << std::hex << api.gl_get_error()
                   << std::dec << "\n";
       }
+    }
+  }
+  if (native_window != nullptr && gpu_complete) {
+    void* queued_native_buffer = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(HostWindowSurfaceMutex());
+      auto found = HostWindowSurfaces().find(native_surface);
+      if (found != HostWindowSurfaces().end()) {
+        queued_native_buffer = found->second.native_buffer;
+        found->second.native_buffer = nullptr;
+      }
+    }
+    if (queued_native_buffer == nullptr ||
+        darwin_art_android_ANativeWindow_queue_hardware_buffer(
+            native_window, queued_native_buffer, -1) != 0) {
+      return false;
+    }
+
+    AHardwareBuffer* next_buffer = nullptr;
+    void* next_native_buffer = nullptr;
+    int acquire_fence = -1;
+    if (darwin_art_android_ANativeWindow_dequeue_hardware_buffer(
+            native_window, &next_buffer, &next_native_buffer,
+            &acquire_fence) != 0) {
+      return false;
+    }
+    if (acquire_fence >= 0) {
+      (void)sync_wait(acquire_fence, -1);
+      (void)darwin_art_bionic_socket_broker_close(acquire_fence);
+    }
+    AHardwareBuffer_Desc description{};
+    AHardwareBuffer_describe(next_buffer, &description);
+    void* next_iosurface =
+        darwin_art_android_hardware_buffer_iosurface(next_buffer);
+    EGLint bind_target = native_bind_target;
+    const EGLint attributes[] = {
+        kEglWidth,
+        static_cast<EGLint>(description.width),
+        kEglHeight,
+        static_cast<EGLint>(description.height),
+        kEglIosurfacePlaneAngle,
+        0,
+        kEglTextureTarget,
+        bind_target,
+        kEglTextureInternalFormatAngle,
+        kGlBgraExt,
+        kEglTextureFormat,
+        kEglTextureRgba,
+        kEglTextureTypeAngle,
+        kGlUnsignedByte,
+        kEglNone,
+    };
+    EGLSurface next_target =
+        next_iosurface == nullptr
+            ? nullptr
+            : api.create_pbuffer_from_client_buffer(
+                  native_display, kEglIosurfaceAngle, next_iosurface,
+                  native_config, attributes);
+    if (next_target == nullptr) {
+      (void)darwin_art_android_ANativeWindow_cancel_hardware_buffer(
+          native_window, next_native_buffer, -1);
+      return false;
+    }
+    {
+      std::lock_guard<std::mutex> lock(HostWindowSurfaceMutex());
+      auto found = HostWindowSurfaces().find(native_surface);
+      if (found == HostWindowSurfaces().end()) {
+        api.destroy_surface(native_display, next_target);
+        (void)darwin_art_android_ANativeWindow_cancel_hardware_buffer(
+            native_window, next_native_buffer, -1);
+        return false;
+      }
+      HostWindowSurface& current = found->second;
+      if (current.target_bound) {
+        api.gl_bind_texture(current.texture_target, current.texture);
+        api.release_tex_image(native_display, current.iosurface_target,
+                              kEglBackBuffer);
+        api.gl_delete_framebuffers(1, &current.framebuffer);
+        api.gl_delete_textures(1, &current.texture);
+      }
+      api.destroy_surface(native_display, current.iosurface_target);
+      current.native_buffer = next_native_buffer;
+      current.iosurface = next_iosurface;
+      current.iosurface_target = next_target;
+      current.texture = 0;
+      current.framebuffer = 0;
+      current.width = description.width;
+      current.height = description.height;
+      current.render_width = description.width;
+      current.render_height = description.height;
+      current.target_bound = false;
+      current.owns_iosurface_ref = false;
     }
   }
   return true;
@@ -1314,8 +1513,15 @@ bool Register(JNIEnv* env, const char* class_name, JNINativeMethod* methods,
 }  // namespace
 
 extern "C" void* darwin_art_android_eglCreateWindowSurface(
-    void* display, void* config, void*, const int32_t*) {
-  return CreateHostWindowSurface(display, config);
+    void* display, void* config, void* native_window, const int32_t*) {
+  void* surface = CreateHostWindowSurface(display, config, native_window);
+  if (std::getenv("DARWIN_ART_DEBUG_GRAPHICS_DSO") != nullptr) {
+    std::cerr << "ART Android EGL: eglCreateWindowSurface window="
+              << native_window << " result=" << surface << " error=0x"
+              << std::hex << (surface == nullptr ? GetAngleApi().get_error() : 0)
+              << std::dec << "\n";
+  }
+  return surface;
 }
 
 extern "C" uint32_t darwin_art_android_eglSwapBuffers(void* display,
@@ -1326,6 +1532,66 @@ extern "C" uint32_t darwin_art_android_eglSwapBuffers(void* display,
 extern "C" uint32_t darwin_art_android_eglDestroySurface(void* display,
                                                            void* surface) {
   return DestroyHostWindowSurface(display, surface) ? 1u : 0u;
+}
+
+extern "C" uint32_t darwin_art_android_eglMakeCurrent(
+    void* display, void* draw, void* read, void* context) {
+  auto& api = GetAngleApi();
+  const uint32_t result =
+      api.ready && api.make_current(display, draw, read, context) ? 1u : 0u;
+  if (std::getenv("DARWIN_ART_DEBUG_GRAPHICS_DSO") != nullptr) {
+    std::cerr << "ART Android EGL: eglMakeCurrent draw=" << draw
+              << " read=" << read << " context=" << context
+              << " result=" << result << "\n";
+  }
+  return result;
+}
+
+extern "C" uint32_t darwin_art_android_eglQuerySurface(
+    void* display, void* surface, int32_t attribute, int32_t* value) {
+  auto& api = GetAngleApi();
+  const uint32_t result =
+      api.ready && api.query_surface(display, surface, attribute, value) ? 1u
+                                                                        : 0u;
+  if (std::getenv("DARWIN_ART_DEBUG_GRAPHICS_DSO") != nullptr) {
+    std::cerr << "ART Android EGL: eglQuerySurface surface=" << surface
+              << " attribute=0x" << std::hex << attribute << std::dec
+              << " value=" << (value == nullptr ? -1 : *value)
+              << " result=" << result << "\n";
+  }
+  return result;
+}
+
+extern "C" uint32_t darwin_art_android_eglSurfaceAttrib(
+    void* display, void* surface, int32_t attribute, int32_t value) {
+  using Function = EGLBoolean (*)(EGLDisplay, EGLSurface, EGLint, EGLint);
+  auto function = LoadSymbol<Function>(GetAngleApi().egl_library,
+                                       "eglSurfaceAttrib");
+  const uint32_t result =
+      function != nullptr && function(display, surface, attribute, value) ? 1u
+                                                                          : 0u;
+  if (std::getenv("DARWIN_ART_DEBUG_GRAPHICS_DSO") != nullptr) {
+    std::cerr << "ART Android EGL: eglSurfaceAttrib surface=" << surface
+              << " attribute=0x" << std::hex << attribute << " value=0x"
+              << value << std::dec << " result=" << result << "\n";
+  }
+  return result;
+}
+
+extern "C" uint32_t darwin_art_android_eglSwapInterval(void* display,
+                                                         int32_t interval) {
+  using Function = EGLBoolean (*)(EGLDisplay, EGLint);
+  auto function =
+      LoadSymbol<Function>(GetAngleApi().egl_library, "eglSwapInterval");
+  return function != nullptr && function(display, interval) ? 1u : 0u;
+}
+
+extern "C" uint32_t darwin_art_android_eglSetDamageRegion(
+    void*, void*, const int32_t*, int32_t) {
+  // The persistent render pbuffer preserves untouched pixels. Every swap is
+  // copied on the GPU into a freshly dequeued IOSurface, so Android damage is
+  // scheduling metadata rather than an ANGLE pbuffer mutation.
+  return 1u;
 }
 
 extern "C" void darwin_art_android_glTexImage2D(
@@ -1842,11 +2108,9 @@ const char* EglQueryStringAndroid(EGLDisplay display, EGLint name) {
   // a fresh buffer and leaves its preserved region black. Hide those
   // capabilities so clients submit complete frames, which is the EGL-defined
   // fallback when buffer age is unavailable.
-  constexpr std::array<std::string_view, 4> unsupported{
+  constexpr std::array<std::string_view, 2> unsupported{
       "EGL_EXT_buffer_age",
       "EGL_KHR_partial_update",
-      "EGL_KHR_swap_buffers_with_damage",
-      "EGL_EXT_swap_buffers_with_damage",
   };
   std::string_view remaining(result);
   while (!remaining.empty()) {
@@ -1873,6 +2137,18 @@ const char* EglQueryStringAndroid(EGLDisplay display, EGLint name) {
     extensions += " EGL_KHR_wait_sync";
   if (extensions.find("EGL_ANDROID_native_fence_sync") == std::string::npos)
     extensions += " EGL_ANDROID_native_fence_sync";
+  // The Darwin Android window adapter keeps a persistent ANGLE render
+  // pbuffer and copies its complete contents into each dequeued IOSurface.
+  // Damage rectangles are therefore accepted as scheduling metadata without
+  // relying on undefined contents in a fresh BufferQueue slot.
+  if (extensions.find("EGL_KHR_swap_buffers_with_damage") ==
+      std::string::npos) {
+    extensions += " EGL_KHR_swap_buffers_with_damage";
+  }
+  if (extensions.find("EGL_EXT_swap_buffers_with_damage") ==
+      std::string::npos) {
+    extensions += " EGL_EXT_swap_buffers_with_damage";
+  }
   return extensions.c_str();
 }
 
@@ -1883,7 +2159,9 @@ std::mutex& NativeFenceSyncMutex() {
 
 struct DarwinNativeFenceSync {
   EGLDisplay display = nullptr;
-  void* gl_sync = nullptr;
+  EGLSync angle_sync = nullptr;
+  void* metal_shared_event = nullptr;
+  std::uint64_t signal_value = 0;
 };
 
 std::unordered_map<EGLSync, std::unique_ptr<DarwinNativeFenceSync>>&
@@ -1907,6 +2185,7 @@ EGLint NativeFenceAttributeFd(const EGLint* attributes) {
 
 EGLSync EglCreateSyncKhrAndroid(EGLDisplay display, EGLenum type,
                                 const EGLint* attributes) {
+  auto& api = GetAngleApi();
   using Function = EGLSync (*)(EGLDisplay, EGLenum, const EGLint*);
   auto function = LoadSymbol<Function>(GetAngleApi().egl_library,
                                        "eglCreateSyncKHR");
@@ -1921,6 +2200,7 @@ EGLSync EglCreateSyncKhrAndroid(EGLDisplay display, EGLenum type,
       // Ownership of EGL_SYNC_NATIVE_FENCE_FD_ANDROID transfers to EGL. The
       // broker descriptor is signaled only after the remote Metal producer
       // completed, so refresh consumer compatibility textures from IOSurface.
+      (void)sync_wait(imported_fence_fd, -1);
       SynchronizeIosurfaceToAhbClientTextures();
       (void)darwin_art_bionic_socket_broker_close(imported_fence_fd);
     } else {
@@ -1928,13 +2208,56 @@ EGLSync EglCreateSyncKhrAndroid(EGLDisplay display, EGLenum type,
       // the AHardwareBuffer's IOSurface before exporting the completion FD.
       SynchronizeAhbImagesToIosurface();
     }
-    using Fence = void* (*)(std::uint32_t, std::uint32_t);
-    auto fence = reinterpret_cast<Fence>(
-        GetAngleApi().get_proc_address("glFenceSync"));
     auto owned = std::make_unique<DarwinNativeFenceSync>();
     owned->display = display;
-    owned->gl_sync =
-        fence == nullptr ? nullptr : fence(0x9117, 0);  // GPU_COMMANDS_COMPLETE
+    if (acquire_fence) {
+      // The imported broker fence has already established the cross-process
+      // completion boundary. Preserve EGLSync query/wait behavior with a
+      // native ANGLE fence for subsequent commands in this context.
+      owned->angle_sync =
+          function == nullptr ? nullptr : function(display, 0x30F9, nullptr);
+    } else {
+      using QueryDisplayAttrib = EGLBoolean (*)(EGLDisplay, EGLint,
+                                                 EGLAttrib*);
+      using QueryDeviceAttrib = EGLBoolean (*)(void*, EGLint, EGLAttrib*);
+      using CreateSync = EGLSync (*)(EGLDisplay, EGLenum, const EGLAttrib*);
+      auto query_display_attrib = reinterpret_cast<QueryDisplayAttrib>(
+          api.get_proc_address("eglQueryDisplayAttribEXT"));
+      auto query_device_attrib = reinterpret_cast<QueryDeviceAttrib>(
+          api.get_proc_address("eglQueryDeviceAttribEXT"));
+      auto create_sync = reinterpret_cast<CreateSync>(
+          api.get_proc_address("eglCreateSync"));
+      EGLAttrib egl_device = 0;
+      EGLAttrib metal_device = 0;
+      if (query_display_attrib != nullptr && query_device_attrib != nullptr &&
+          create_sync != nullptr &&
+          query_display_attrib(display, kEglDeviceExt, &egl_device) != 0 &&
+          query_device_attrib(reinterpret_cast<void*>(egl_device),
+                              kEglMetalDeviceAngle, &metal_device) != 0) {
+        owned->metal_shared_event =
+            darwin_art_android_metal_shared_event_create(
+                reinterpret_cast<void*>(metal_device), &owned->signal_value);
+        if (owned->metal_shared_event != nullptr) {
+          const EGLAttrib event_value = reinterpret_cast<EGLAttrib>(
+              owned->metal_shared_event);
+          const EGLAttrib attributes[] = {
+              kEglSyncMetalSharedEventObjectAngle, event_value,
+              kEglSyncMetalSharedEventSignalValueLoAngle,
+              static_cast<EGLAttrib>(owned->signal_value & UINT32_MAX),
+              kEglSyncMetalSharedEventSignalValueHiAngle,
+              static_cast<EGLAttrib>(owned->signal_value >> 32), kEglNone};
+          owned->angle_sync = create_sync(
+              display, kEglSyncMetalSharedEventAngle, attributes);
+        }
+      }
+    }
+    if (owned->angle_sync == nullptr) {
+      if (owned->metal_shared_event != nullptr) {
+        darwin_art_android_metal_shared_event_release(
+            owned->metal_shared_event);
+      }
+      return nullptr;
+    }
     sync = owned.get();
     std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
     NativeFenceSyncs().emplace(sync, std::move(owned));
@@ -1947,9 +2270,14 @@ EGLSync EglCreateSyncKhrAndroid(EGLDisplay display, EGLenum type,
               << " translated=" << native_fence
               << " acquire=" << acquire_fence
               << " imported_fd=" << imported_fence_fd << " sync=" << sync
-              << " gl_sync="
+              << " angle_sync="
               << (native_fence && sync != nullptr
-                      ? static_cast<DarwinNativeFenceSync*>(sync)->gl_sync
+                      ? static_cast<DarwinNativeFenceSync*>(sync)->angle_sync
+                      : nullptr)
+              << " shared_event="
+              << (native_fence && sync != nullptr
+                      ? static_cast<DarwinNativeFenceSync*>(sync)
+                            ->metal_shared_event
                       : nullptr)
               << "\n";
   }
@@ -1967,11 +2295,14 @@ EGLBoolean EglDestroySyncKhrAndroid(EGLDisplay display, EGLSync sync) {
     }
   }
   if (owned != nullptr) {
-    using Delete = void (*)(void*);
-    auto destroy = reinterpret_cast<Delete>(
-        GetAngleApi().get_proc_address("glDeleteSync"));
-    if (destroy != nullptr && owned->gl_sync != nullptr)
-      destroy(owned->gl_sync);
+    using Destroy = EGLBoolean (*)(EGLDisplay, EGLSync);
+    auto destroy = reinterpret_cast<Destroy>(
+        GetAngleApi().get_proc_address("eglDestroySync"));
+    if (destroy != nullptr && owned->angle_sync != nullptr)
+      (void)destroy(display, owned->angle_sync);
+    if (owned->metal_shared_event != nullptr)
+      darwin_art_android_metal_shared_event_release(
+          owned->metal_shared_event);
     if (DebugGraphicsDso()) {
       std::cerr << "ART Android EGL: eglDestroySyncKHR pid=" << getpid()
                 << " sync=" << sync << " translated=1\n";
@@ -1997,16 +2328,12 @@ EGLint EglClientWaitSyncKhrAndroid(EGLDisplay display, EGLSync sync,
     std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
     auto found = NativeFenceSyncs().find(sync);
     if (found != NativeFenceSyncs().end()) {
-      if (found->second->gl_sync == nullptr) return 0x30F6;
-      using Wait = std::uint32_t (*)(void*, std::uint32_t, std::uint64_t);
+      using Wait = EGLint (*)(EGLDisplay, EGLSync, EGLint, std::uint64_t);
       auto wait = reinterpret_cast<Wait>(
-          GetAngleApi().get_proc_address("glClientWaitSync"));
-      if (wait == nullptr) return 0;
-      const std::uint32_t result = wait(found->second->gl_sync,
-                                        (flags & 1) != 0 ? 1 : 0, timeout);
-      if (result == 0x911A || result == 0x911C) return 0x30F6;
-      if (result == 0x911B) return 0x30F5;
-      return 0;
+          GetAngleApi().get_proc_address("eglClientWaitSync"));
+      return wait == nullptr
+                 ? 0
+                 : wait(display, found->second->angle_sync, flags, timeout);
     }
   }
   using Function = EGLint (*)(EGLDisplay, EGLSync, EGLint, std::uint64_t);
@@ -2021,12 +2348,12 @@ EGLBoolean EglWaitSyncKhrAndroid(EGLDisplay display, EGLSync sync,
     std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
     auto found = NativeFenceSyncs().find(sync);
     if (found != NativeFenceSyncs().end()) {
-      using Wait = void (*)(void*, std::uint32_t, std::uint64_t);
+      using Wait = EGLBoolean (*)(EGLDisplay, EGLSync, EGLint);
       auto wait = reinterpret_cast<Wait>(
-          GetAngleApi().get_proc_address("glWaitSync"));
-      if (wait != nullptr && found->second->gl_sync != nullptr)
-        wait(found->second->gl_sync, 0, UINT64_MAX);
-      return 1;
+          GetAngleApi().get_proc_address("eglWaitSync"));
+      return wait == nullptr
+                 ? 0
+                 : wait(display, found->second->angle_sync, flags);
     }
   }
   using Function = EGLBoolean (*)(EGLDisplay, EGLSync, EGLint);
@@ -2039,21 +2366,17 @@ EGLBoolean EglGetSyncAttribKhrAndroid(EGLDisplay display, EGLSync sync,
                                       EGLint attribute, EGLint* value) {
   {
     std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
-    if (NativeFenceSyncs().contains(sync)) {
-      if (value == nullptr) return 0;
-      switch (attribute) {
-        case 0x30F1:  // EGL_SYNC_STATUS_KHR
-          *value = 0x30F2;  // EGL_SIGNALED_KHR
-          return 1;
-        case 0x30F7:  // EGL_SYNC_TYPE_KHR
-          *value = kEglSyncNativeFenceAndroid;
-          return 1;
-        case 0x30F8:  // EGL_SYNC_CONDITION_KHR
-          *value = 0x30F0;  // EGL_SYNC_PRIOR_COMMANDS_COMPLETE_KHR
-          return 1;
-        default:
-          return 0;
-      }
+    auto found = NativeFenceSyncs().find(sync);
+    if (found != NativeFenceSyncs().end()) {
+      using Get = EGLBoolean (*)(EGLDisplay, EGLSync, EGLint, EGLAttrib*);
+      auto get = reinterpret_cast<Get>(
+          GetAngleApi().get_proc_address("eglGetSyncAttrib"));
+      EGLAttrib wide = 0;
+      if (value == nullptr || get == nullptr ||
+          get(display, found->second->angle_sync, attribute, &wide) == 0)
+        return 0;
+      *value = static_cast<EGLint>(wide);
+      return 1;
     }
   }
   using Function = EGLBoolean (*)(EGLDisplay, EGLSync, EGLint, EGLint*);
@@ -2084,53 +2407,28 @@ EGLBoolean EglGetSyncAttribAndroid(EGLDisplay display, EGLSync sync,
 }
 
 EGLint EglDupNativeFenceFdAndroid(EGLDisplay display, EGLSync sync) {
-  bool translated = false;
   {
     std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
-    translated = NativeFenceSyncs().contains(sync);
-  }
-  if (translated) {
-    // ANGLE Metal orders the IOSurface blit after the producer commands on the
-    // same context. There is no Linux sync_file fd to export on Darwin, so -1
-    // carries Android's "already synchronized/no fence" sentinel across
-    // SurfaceControl without introducing a CPU wait or readback.
-    using Finish = void (*)();
-    auto finish = reinterpret_cast<Finish>(
-        GetAngleApi().get_proc_address("glFinish"));
-    if (finish != nullptr) finish();
-    if (std::getenv("DARWIN_ART_DEBUG_NATIVE_FENCE_WAIT") != nullptr) {
-      (void)EglClientWaitSyncKhrAndroid(display, sync, 1, UINT64_MAX);
-    }
-    // Chromium requires eglDupNativeFenceFDANDROID to return a real descriptor
-    // and treats Android's otherwise-valid -1 sentinel as duplication failure.
-    // Publish an already-signaled central-broker pipe after glFinish. The
-    // broker exposes this exact 64-bit marker as a Linux sync_file to libsync,
-    // including after dup and SCM_RIGHTS transfer to another Android process.
-    std::int32_t descriptors[2]{-1, -1};
-    constexpr std::uint64_t kSignaledMetalFence =
-        UINT64_C(0x44415257494e4653);  // "DARWINFS"
-    EGLint result = kEglNoNativeFenceFdAndroid;
-    if (darwin_art_bionic_socket_broker_pipe(descriptors) == 0) {
-      const std::intptr_t written = darwin_art_bionic_socket_broker_write(
-          descriptors[1], &kSignaledMetalFence, sizeof(kSignaledMetalFence));
-      (void)darwin_art_bionic_socket_broker_close(descriptors[1]);
-      descriptors[1] = -1;
-      if (written == static_cast<std::intptr_t>(sizeof(kSignaledMetalFence))) {
-        result = descriptors[0];
-        descriptors[0] = -1;
+    auto found = NativeFenceSyncs().find(sync);
+    if (found != NativeFenceSyncs().end()) {
+      DarwinNativeFenceSync& translated = *found->second;
+      const EGLint result =
+          translated.metal_shared_event == nullptr
+              ? kEglNoNativeFenceFdAndroid
+              : darwin_art_android_metal_shared_event_fence_fd(
+                    translated.metal_shared_event, translated.signal_value);
+      if (DebugGraphicsDso()) {
+        const bool initially_signaled = result >= 0 && sync_wait(result, 0) == 0;
+        std::cerr << "ART Android EGL: eglDupNativeFenceFDANDROID pid="
+                  << getpid() << " sync=" << sync
+                  << " translated=1 shared_event="
+                  << translated.metal_shared_event << " value="
+                  << translated.signal_value << " result=" << result
+                  << " initially_signaled=" << initially_signaled
+                  << "\n";
       }
+      return result;
     }
-    if (descriptors[0] >= 0)
-      (void)darwin_art_bionic_socket_broker_close(descriptors[0]);
-    if (descriptors[1] >= 0)
-      (void)darwin_art_bionic_socket_broker_close(descriptors[1]);
-    if (DebugGraphicsDso()) {
-      std::cerr << "ART Android EGL: eglDupNativeFenceFDANDROID pid="
-                << getpid() << " sync=" << sync
-                << " translated=1 result=" << result
-                << "\n";
-    }
-    return result;
   }
   using Function = EGLint (*)(EGLDisplay, EGLSync);
   auto function = LoadSymbol<Function>(GetAngleApi().egl_library,
@@ -2201,6 +2499,7 @@ struct DarwinSurfaceControlTarget {
   EGLImage metal_image = nullptr;
   void* metal_texture = nullptr;
   void* iosurface = nullptr;
+  void* metal_device = nullptr;
   EGLint bind_target = 0;
   std::uint32_t texture_target = 0;
   std::uint32_t texture = 0;
@@ -2222,6 +2521,9 @@ struct DarwinSurfaceControlTarget {
 };
 
 thread_local DarwinSurfaceControlTarget g_surface_control_target;
+thread_local std::vector<DarwinArtMetalComposerLayer>
+    g_metal_composer_layers;
+thread_local std::uint64_t g_metal_composer_transaction_id = 0;
 
 struct DarwinSurfaceControlContextScope {
   EGLDisplay activated_display = nullptr;
@@ -2574,6 +2876,63 @@ bool EnsureSurfaceControlTarget(EGLDisplay display) {
     std::cerr << "ART Android SurfaceControl: imported compositor IOSurface="
               << target.surface_id << " size=" << width << "x" << height
               << "\n";
+  }
+  return true;
+}
+
+bool EnsureMetalComposerTarget(EGLDisplay display) {
+  const char* encoded = std::getenv("DARWIN_ART_HOST_IOSURFACE_ID");
+  if (encoded == nullptr || encoded[0] == '\0') return false;
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(encoded, &end, 10);
+  if (end == encoded || *end != '\0' || parsed == 0 || parsed > UINT32_MAX)
+    return false;
+  auto& target = g_surface_control_target;
+  if (target.bound && target.display == display &&
+      target.surface_id == static_cast<std::uint32_t>(parsed) &&
+      target.iosurface != nullptr && target.metal_device != nullptr) {
+    return true;
+  }
+  if (target.iosurface != nullptr)
+    darwin_art_surface_gpu_release_iosurface(target.iosurface);
+  target = {};
+  void* iosurface = nullptr;
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  if (!darwin_art_surface_gpu_lookup_iosurface(
+          static_cast<std::uint32_t>(parsed), &iosurface, &width, &height)) {
+    return false;
+  }
+  using QueryDisplayAttrib = EGLBoolean (*)(EGLDisplay, EGLint, EGLAttrib*);
+  using QueryDeviceAttrib = EGLBoolean (*)(void*, EGLint, EGLAttrib*);
+  auto& api = GetAngleApi();
+  auto query_display_attrib = reinterpret_cast<QueryDisplayAttrib>(
+      api.get_proc_address("eglQueryDisplayAttribEXT"));
+  auto query_device_attrib = reinterpret_cast<QueryDeviceAttrib>(
+      api.get_proc_address("eglQueryDeviceAttribEXT"));
+  EGLAttrib egl_device = 0;
+  EGLAttrib metal_device = 0;
+  if (query_display_attrib == nullptr || query_device_attrib == nullptr ||
+      query_display_attrib(display, kEglDeviceExt, &egl_device) == 0 ||
+      query_device_attrib(reinterpret_cast<void*>(egl_device),
+                          kEglMetalDeviceAngle, &metal_device) == 0 ||
+      metal_device == 0) {
+    darwin_art_surface_gpu_release_iosurface(iosurface);
+    return false;
+  }
+  target = DarwinSurfaceControlTarget{
+      .surface_id = static_cast<std::uint32_t>(parsed),
+      .display = display,
+      .iosurface = iosurface,
+      .metal_device = reinterpret_cast<void*>(metal_device),
+      .width = width,
+      .height = height,
+      .bound = true,
+  };
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Metal Composer: target IOSurface=" << target.surface_id
+              << " size=" << width << "x" << height
+              << " device=" << target.metal_device << "\n";
   }
   return true;
 }
@@ -3495,7 +3854,12 @@ void SynchronizeAhbImagesToIosurface() {
   api.gl_get_integer_v(0x8CA6, &draw_framebuffer);  // GL_DRAW_FRAMEBUFFER_BINDING
   api.gl_get_integer_v(0x0BA2, viewport);  // GL_VIEWPORT
   api.gl_get_integer_v(0x0C10, scissor);   // GL_SCISSOR_BOX
-  if (api.gl_get_framebuffer_attachment_parameter_iv != nullptr) {
+  // GL_COLOR_ATTACHMENT0 only names an attachment on a user-created FBO.
+  // The default framebuffer (name zero) uses GL_BACK; querying it as a color
+  // attachment generates GL_INVALID_OPERATION and poisons HWUI's next GL
+  // checkpoint during a SurfaceView transition.
+  if (draw_framebuffer != 0 &&
+      api.gl_get_framebuffer_attachment_parameter_iv != nullptr) {
     api.gl_get_framebuffer_attachment_parameter_iv(
         kGlDrawFramebuffer, kGlColorAttachment0,
         kGlFramebufferAttachmentObjectType, &attachment_type);
@@ -3560,7 +3924,7 @@ void SynchronizeAhbImagesToIosurface() {
 }
 
 extern "C" bool darwin_art_android_begin_hardware_buffer_composition(
-    void* opaque, bool clear) {
+    void* opaque, bool clear, std::uint64_t transaction_id) {
   std::lock_guard<std::mutex> lock(AhbEglImageMutex());
   auto& api = GetAngleApi();
   auto* buffer = static_cast<AHardwareBuffer*>(opaque);
@@ -3621,18 +3985,24 @@ extern "C" bool darwin_art_android_begin_hardware_buffer_composition(
               << g_surface_control_context_scope.switched << " clear="
               << clear << "\n";
   }
-  if (!EnsureSurfaceControlTarget(display)) {
-    darwin_art_android_end_hardware_buffer_composition();
+  if (!EnsureMetalComposerTarget(display)) {
+    const int fence = darwin_art_android_end_hardware_buffer_composition();
+    if (fence >= 0) (void)darwin_art_bionic_socket_broker_close(fence);
     return false;
   }
-  // `clear` describes a fresh Android transaction target, not the host
-  // display's persistent framebuffer. SurfaceFlinger retains undamaged
-  // display pixels and redraws only transaction damage; clearing our single
-  // host IOSurface on every commit erased all regions not present in that
-  // commit and produced the black bands seen around animated web content.
-  // A newly-created/resized host target still starts transparent because
-  // EnsureSurfaceControlTarget resets has_content.
-  if (g_surface_control_target.has_content) return true;
+  g_metal_composer_layers.clear();
+  g_metal_composer_transaction_id = transaction_id;
+  g_surface_control_target.has_content = true;
+  return true;
+
+  // The transaction bridge now retains every attached SurfaceControl backing
+  // and submits the complete sorted layer tree on each commit. `clear=true`
+  // therefore means a full SurfaceFlinger-style recomposition: discard pixels
+  // from hidden, detached, or moved layers before drawing the retained tree.
+  // Keeping the previous target here left Chromium's old full-screen web
+  // surface underneath the tab switcher even after its layer was resized into
+  // a thumbnail. Partial producers pass clear=false and retain their target.
+  if (!clear && g_surface_control_target.has_content) return true;
   std::int32_t previous_draw_framebuffer = 0;
   const bool scissor_enabled = api.gl_is_enabled(0x0C11) != 0;
   api.gl_get_integer_v(0x8CA6, &previous_draw_framebuffer);
@@ -3647,35 +4017,91 @@ extern "C" bool darwin_art_android_begin_hardware_buffer_composition(
   return true;
 }
 
-extern "C" void darwin_art_android_end_hardware_buffer_composition() {
-  // ASurfaceTransaction's commit callback runs immediately after this call
-  // and may hand Chromium a release fence for the displaced BufferQueue
-  // slot.  The compatibility fence is represented by an already-signaled
-  // broker descriptor, so it is only truthful after ANGLE's Metal queue has
-  // finished sampling every IOSurface used by this composition.  Merely
-  // flushing here races the producer's next partial update with the pending
-  // compositor read; verbose logging used to hide that race and left later
-  // tiles black in normal-speed Chrome runs.
-  //
-  // This remains a GPU-to-GPU path: glFinish supplies the completion boundary
-  // required by Android's release-fence contract and performs no CPU readback
-  // or framebuffer copy.  Replace the synchronous boundary with a Metal
-  // shared-event-backed broker fence once the fence provider can publish an
-  // unsignaled descriptor.
-  using Finish = void (*)();
-  auto finish = reinterpret_cast<Finish>(
-      GetAngleApi().get_proc_address("glFinish"));
-  if (finish != nullptr) finish();
+extern "C" int darwin_art_android_end_hardware_buffer_composition() {
+  // Publish preceding producer work, then wait for that exact value from the
+  // direct Metal HWC command buffer without stalling the CPU.
+  auto& api = GetAngleApi();
+  const EGLDisplay display = api.get_current_display();
+  EGLSync producer_sync =
+      display == nullptr
+          ? nullptr
+          : EglCreateSyncKhrAndroid(display, kEglSyncNativeFenceAndroid,
+                                    nullptr);
+  void* producer_event = nullptr;
+  std::uint64_t producer_value = 0;
+  if (producer_sync != nullptr) {
+    std::lock_guard<std::mutex> lock(NativeFenceSyncMutex());
+    auto found = NativeFenceSyncs().find(producer_sync);
+    if (found != NativeFenceSyncs().end()) {
+      producer_event = found->second->metal_shared_event;
+      producer_value = found->second->signal_value;
+    }
+  }
+  if (producer_event != nullptr) {
+    // EGL_ANDROID_native_fence_sync requires the producer to flush after
+    // inserting the fence. The central SurfaceFlinger waits on this Metal
+    // event before latching the IOSurface; entering its IPC first leaves the
+    // signal command buffered in ANGLE and deadlocks the remote composer.
+    // glFlush submits GPU work without adding a CPU wait or a pixel copy.
+    using Flush = void (*)();
+    auto flush = reinterpret_cast<Flush>(api.get_proc_address("glFlush"));
+    if (flush != nullptr) flush();
+  }
+  void* completion_event = nullptr;
+  std::uint64_t completion_value = 0;
+  const auto& target = g_surface_control_target;
+  const char* service_socket =
+      std::getenv("DARWIN_ART_SURFACEFLINGER_SOCKET");
+  const bool remote = service_socket != nullptr && service_socket[0] != '\0';
+  const char* app_package = std::getenv("DARWIN_ART_APK_APP_PACKAGE");
+  const bool application_runtime = app_package != nullptr && app_package[0] != '\0';
+  bool composed = false;
+  int completion_fence = kEglNoNativeFenceFdAndroid;
+  if (remote && producer_event != nullptr && target.bound) {
+    completion_fence = darwin_art_surfaceflinger_service_present(
+        target.surface_id, target.width, target.height,
+        g_metal_composer_transaction_id, g_metal_composer_layers.data(),
+        g_metal_composer_layers.size(), producer_event, producer_value);
+    composed = completion_fence >= 0;
+  } else if (!application_runtime && !remote &&
+             !g_metal_composer_layers.empty() &&
+             producer_event != nullptr && target.bound &&
+             target.iosurface != nullptr && target.metal_device != nullptr) {
+    composed = darwin_art_metal_composer_compose(
+        target.metal_device, target.iosurface, target.width, target.height,
+        g_metal_composer_layers.data(), g_metal_composer_layers.size(),
+        producer_event, producer_value, &completion_event,
+        &completion_value);
+    completion_fence =
+        !composed || completion_event == nullptr
+            ? kEglNoNativeFenceFdAndroid
+            : darwin_art_android_metal_shared_event_fence_fd(
+                  completion_event, completion_value);
+  }
+  if (completion_event != nullptr)
+    darwin_art_android_metal_shared_event_release(completion_event);
+  if (producer_sync != nullptr)
+    (void)EglDestroySyncKhrAndroid(display, producer_sync);
+  if (DebugGraphicsDso()) {
+    std::cerr << "ART Metal Composer: submit layers="
+              << g_metal_composer_layers.size() << " composed=" << composed
+              << " remote=" << remote
+              << " producer_value=" << producer_value
+              << " completion_value=" << completion_value
+              << " fence=" << completion_fence << "\n";
+  }
+  g_metal_composer_layers.clear();
+  g_metal_composer_transaction_id = 0;
 
   auto& scope = g_surface_control_context_scope;
-  if (!scope.switched) return;
-  auto& api = GetAngleApi();
+  if (!scope.switched) return completion_fence;
   const EGLDisplay restore_display =
       scope.previous_display == nullptr ? scope.activated_display
                                         : scope.previous_display;
   api.make_current(restore_display, scope.previous_draw_surface,
                    scope.previous_read_surface, scope.previous_context);
   scope = {};
+  return completion_fence;
 }
 
 extern "C" void darwin_art_android_set_hardware_buffer_composition_active(
@@ -3709,7 +4135,10 @@ extern "C" void darwin_art_android_mark_hardware_buffer_released(
 }
 
 extern "C" void darwin_art_android_present_hardware_buffer(
-    void* queue, void* opaque, std::int32_t source_left,
+    void* queue, std::uint32_t owner_process_id, std::uint32_t layer_id,
+    std::uint32_t parent_owner_process_id, std::uint32_t parent_id,
+    std::uint64_t what, std::int32_t z, void* opaque,
+    std::int32_t source_left,
     std::int32_t source_top,
     std::int32_t source_right, std::int32_t source_bottom,
     std::int32_t destination_left, std::int32_t destination_top,
@@ -3717,7 +4146,66 @@ extern "C" void darwin_art_android_present_hardware_buffer(
     bool has_damage, std::int32_t damage_left, std::int32_t damage_top,
     std::int32_t damage_right, std::int32_t damage_bottom, float alpha) {
   auto* buffer = static_cast<AHardwareBuffer*>(opaque);
+  if (buffer == nullptr) return;
   std::lock_guard<std::mutex> lock(AhbEglImageMutex());
+  const char* surfaceflinger_socket =
+      std::getenv("DARWIN_ART_SURFACEFLINGER_SOCKET");
+  const bool remote_surfaceflinger =
+      surfaceflinger_socket != nullptr && surfaceflinger_socket[0] != '\0';
+  if (remote_surfaceflinger) {
+    // SurfaceFlinger consumes the gralloc contract, not ANGLE's EGLImage
+    // bookkeeping. ViewRoot/HWUI buffers are valid AHardwareBuffers backed by
+    // IOSurface even when no client EGLImage was ever created for them.
+    AHardwareBuffer_Desc description{};
+    AHardwareBuffer_describe(buffer, &description);
+    void* iosurface = darwin_art_android_hardware_buffer_iosurface(buffer);
+    if (iosurface == nullptr || description.width == 0 ||
+        description.height == 0) {
+      return;
+    }
+    const auto width = static_cast<std::int32_t>(description.width);
+    const auto height = static_cast<std::int32_t>(description.height);
+    source_left = std::clamp(source_left, 0, width);
+    source_right = std::clamp(source_right, 0, width);
+    source_top = std::clamp(source_top, 0, height);
+    source_bottom = std::clamp(source_bottom, 0, height);
+    const auto& target = g_surface_control_target;
+    destination_left = std::clamp(
+        destination_left, 0, static_cast<std::int32_t>(target.width));
+    destination_right = std::clamp(
+        destination_right, 0, static_cast<std::int32_t>(target.width));
+    destination_top = std::clamp(
+        destination_top, 0, static_cast<std::int32_t>(target.height));
+    destination_bottom = std::clamp(
+        destination_bottom, 0, static_cast<std::int32_t>(target.height));
+    g_metal_composer_layers.push_back({
+        .owner_process_id = owner_process_id,
+        .layer_id = layer_id,
+        .parent_owner_process_id = parent_owner_process_id,
+        .parent_id = parent_id,
+        .what = what,
+        .iosurface = iosurface,
+        .width = description.width,
+        .height = description.height,
+        .source_left = source_left,
+        .source_top = source_top,
+        .source_right = source_right,
+        .source_bottom = source_bottom,
+        .destination_left = destination_left,
+        .destination_top = destination_top,
+        .destination_right = destination_right,
+        .destination_bottom = destination_bottom,
+        .z = z,
+        .alpha = alpha,
+    });
+    (void)queue;
+    (void)has_damage;
+    (void)damage_left;
+    (void)damage_top;
+    (void)damage_right;
+    (void)damage_bottom;
+    return;
+  }
   auto found = std::find_if(
       AhbEglImages().begin(), AhbEglImages().end(),
       [buffer](const auto& entry) { return entry.second->buffer == buffer; });
@@ -3742,6 +4230,50 @@ extern "C" void darwin_art_android_present_hardware_buffer(
     LastPresentedAhbByQueue()[queue] = image.buffer;
     ++PresentedGenerationByQueue()[queue];
   }
+  const auto& target = g_surface_control_target;
+  const auto image_width = static_cast<std::int32_t>(image.width);
+  const auto image_height = static_cast<std::int32_t>(image.height);
+  source_left = std::clamp(source_left, 0, image_width);
+  source_right = std::clamp(source_right, 0, image_width);
+  source_top = std::clamp(source_top, 0, image_height);
+  source_bottom = std::clamp(source_bottom, 0, image_height);
+  destination_left = std::clamp(
+      destination_left, 0, static_cast<std::int32_t>(target.width));
+  destination_right = std::clamp(
+      destination_right, 0, static_cast<std::int32_t>(target.width));
+  destination_top = std::clamp(
+      destination_top, 0, static_cast<std::int32_t>(target.height));
+  destination_bottom = std::clamp(
+      destination_bottom, 0, static_cast<std::int32_t>(target.height));
+  g_metal_composer_layers.push_back({
+      .owner_process_id = owner_process_id,
+      .layer_id = layer_id,
+      .parent_owner_process_id = parent_owner_process_id,
+      .parent_id = parent_id,
+      .what = what,
+      .iosurface = darwin_art_android_hardware_buffer_iosurface(image.buffer),
+      .width = image.width,
+      .height = image.height,
+      .source_left = source_left,
+      .source_top = source_top,
+      .source_right = source_right,
+      .source_bottom = source_bottom,
+      .destination_left = destination_left,
+      .destination_top = destination_top,
+      .destination_right = destination_right,
+      .destination_bottom = destination_bottom,
+      .z = z,
+      .alpha = alpha,
+  });
+  // Damage remains scheduling metadata. SurfaceFlinger supplies the complete
+  // retained layer tree here, and Metal clips the destination geometry.
+  (void)has_damage;
+  (void)damage_left;
+  (void)damage_top;
+  (void)damage_right;
+  (void)damage_bottom;
+  return;
+
   auto& api = GetAngleApi();
   std::int32_t previous_read_framebuffer = 0;
   std::int32_t previous_draw_framebuffer = 0;
@@ -3998,6 +4530,31 @@ extern "C" void darwin_art_android_present_hardware_buffer(
     }
   }
   (void)alpha;
+}
+
+extern "C" void darwin_art_android_present_surface_control_state(
+    std::uint32_t owner_process_id, std::uint32_t layer_id,
+    std::uint32_t parent_owner_process_id, std::uint32_t parent_id,
+    std::uint64_t what, std::uint32_t flags, std::uint32_t mask,
+    std::int32_t destination_left, std::int32_t destination_top,
+    std::int32_t destination_right, std::int32_t destination_bottom,
+    std::int32_t z, float alpha) {
+  g_metal_composer_layers.push_back({
+      .owner_process_id = owner_process_id,
+      .layer_id = layer_id,
+      .parent_owner_process_id = parent_owner_process_id,
+      .parent_id = parent_id,
+      .what = what,
+      .flags = flags,
+      .mask = mask,
+      .iosurface = nullptr,
+      .destination_left = destination_left,
+      .destination_top = destination_top,
+      .destination_right = destination_right,
+      .destination_bottom = destination_bottom,
+      .z = z,
+      .alpha = alpha,
+  });
 }
 
 void RestoreBufferQueueSlotIfNeeded(std::uint32_t texture) {
@@ -4299,6 +4856,17 @@ void GlTexStorage2dExtAndroid(std::uint32_t target, std::int32_t levels,
                                       height);
 }
 
+void GlBlitFramebufferAndroid(std::int32_t source_x0,
+                              std::int32_t source_y0,
+                              std::int32_t source_x1,
+                              std::int32_t source_y1,
+                              std::int32_t destination_x0,
+                              std::int32_t destination_y0,
+                              std::int32_t destination_x1,
+                              std::int32_t destination_y1,
+                              std::uint64_t android_mask_slot,
+                              std::uint32_t filter);
+
 void* EglGetProcAddressMetal(const char* symbol) {
   if (symbol == nullptr) return nullptr;
   if (std::getenv("DARWIN_ART_DEBUG_ANGLE") != nullptr) {
@@ -4313,6 +4881,9 @@ void* EglGetProcAddressMetal(const char* symbol) {
   }
   if (std::strcmp(symbol, "eglQueryString") == 0) {
     return reinterpret_cast<void*>(&EglQueryStringAndroid);
+  }
+  if (std::strcmp(symbol, "eglBeginFrame") == 0) {
+    return reinterpret_cast<void*>(&eglBeginFrame);
   }
   if (std::strcmp(symbol, "eglGetNativeClientBufferANDROID") == 0) {
     return reinterpret_cast<void*>(&EglGetNativeClientBufferAndroid);
@@ -4398,6 +4969,12 @@ void* EglGetProcAddressMetal(const char* symbol) {
   if (std::strcmp(symbol, "glGetIntegerv") == 0) {
     return reinterpret_cast<void*>(&GlGetIntegervHost);
   }
+  if (std::strcmp(symbol, "glBlitFramebuffer") == 0 ||
+      std::strcmp(symbol, "glBlitFramebufferANGLE") == 0 ||
+      std::strcmp(symbol, "glBlitFramebufferCHROMIUM") == 0 ||
+      std::strcmp(symbol, "glBlitFramebufferNV") == 0) {
+    return reinterpret_cast<void*>(&GlBlitFramebufferAndroid);
+  }
   if (std::strcmp(symbol, "glBindTexture") == 0) {
     return reinterpret_cast<void*>(&GlBindTextureAndroid);
   }
@@ -4431,6 +5008,41 @@ void* EglGetProcAddressMetal(const char* symbol) {
     return reinterpret_cast<void*>(&GlTexStorage2dExtAndroid);
   }
   return GetAngleApi().get_proc_address(symbol);
+}
+
+void GlBlitFramebufferAndroid(std::int32_t source_x0,
+                              std::int32_t source_y0,
+                              std::int32_t source_x1,
+                              std::int32_t source_y1,
+                              std::int32_t destination_x0,
+                              std::int32_t destination_y0,
+                              std::int32_t destination_x1,
+                              std::int32_t destination_y1,
+                              std::uint64_t android_mask_slot,
+                              std::uint32_t filter) {
+  auto& api = GetAngleApi();
+  // AAPCS64 assigns every stack argument an eight-byte slot. Darwin arm64
+  // packs 32-bit stack arguments at four-byte alignment. The first stack
+  // argument is deliberately widened so Darwin reads Chromium's tenth
+  // argument from sp+8, where Android placed it, rather than from AAPCS
+  // padding at sp+4.
+  const auto mask = static_cast<std::uint32_t>(android_mask_slot);
+  if (DebugGraphicsDso()) {
+    std::int32_t read_framebuffer = 0;
+    std::int32_t draw_framebuffer = 0;
+    api.gl_get_integer_v(0x8CAA, &read_framebuffer);
+    api.gl_get_integer_v(0x8CA6, &draw_framebuffer);
+    std::cerr << "ART Android GLES: blit read_fbo=" << read_framebuffer
+              << " draw_fbo=" << draw_framebuffer << " source=["
+              << source_x0 << "," << source_y0 << "," << source_x1 << ","
+              << source_y1 << "] destination=[" << destination_x0 << ","
+              << destination_y0 << "," << destination_x1 << ","
+              << destination_y1 << "] mask=0x" << std::hex << mask
+              << " filter=0x" << filter << std::dec << "\n";
+  }
+  api.gl_blit_framebuffer_angle(
+      source_x0, source_y0, source_x1, source_y1, destination_x0,
+      destination_y0, destination_x1, destination_y1, mask, filter);
 }
 
 std::uint32_t TextureBindingEnum(std::uint32_t target) {
@@ -4577,6 +5189,12 @@ extern "C" void* darwin_art_angle_dso_symbol(const char* soname,
       return reinterpret_cast<void*>(
           &GlGetFramebufferAttachmentParameterivAndroid);
     }
+    if (std::strcmp(symbol, "glBlitFramebuffer") == 0 ||
+        std::strcmp(symbol, "glBlitFramebufferANGLE") == 0 ||
+        std::strcmp(symbol, "glBlitFramebufferCHROMIUM") == 0 ||
+        std::strcmp(symbol, "glBlitFramebufferNV") == 0) {
+      return reinterpret_cast<void*>(&GlBlitFramebufferAndroid);
+    }
     void* result = dlsym(api.egl_library, symbol);
     if (result != nullptr) return result;
     if (std::strcmp(symbol, "glTextureStorage1DEXT") == 0) {
@@ -4599,6 +5217,12 @@ extern "C" void* darwin_art_angle_dso_symbol(const char* soname,
     }
     if (std::strcmp(symbol, "glGetIntegerv") == 0) {
       return reinterpret_cast<void*>(&GlGetIntegervHost);
+    }
+    if (std::strcmp(symbol, "glBlitFramebuffer") == 0 ||
+        std::strcmp(symbol, "glBlitFramebufferANGLE") == 0 ||
+        std::strcmp(symbol, "glBlitFramebufferCHROMIUM") == 0 ||
+        std::strcmp(symbol, "glBlitFramebufferNV") == 0) {
+      return reinterpret_cast<void*>(&GlBlitFramebufferAndroid);
     }
     if (std::strcmp(symbol, "glBindTexture") == 0) {
       return reinterpret_cast<void*>(&GlBindTextureAndroid);

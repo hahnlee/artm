@@ -49,6 +49,38 @@ fn dependency_scan_command(object: &CachedNativeObject, depfile: &Path) -> Strin
     )
 }
 
+fn depfile_dependencies(depfile: &Path) -> io::Result<Vec<PathBuf>> {
+    let contents = fs::read_to_string(depfile)?;
+    let flattened = contents.replace("\\\n", " ");
+    let Some((_, prerequisites)) = flattened.split_once(':') else {
+        return Ok(Vec::new());
+    };
+    let mut dependencies = Vec::new();
+    let mut token = String::new();
+    let mut escaped = false;
+    for character in prerequisites.chars() {
+        if escaped {
+            token.push(character);
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character.is_whitespace() {
+            if !token.is_empty() {
+                dependencies.push(PathBuf::from(std::mem::take(&mut token)));
+            }
+        } else {
+            token.push(character);
+        }
+    }
+    if escaped {
+        token.push('\\');
+    }
+    if !token.is_empty() {
+        dependencies.push(PathBuf::from(token));
+    }
+    Ok(dependencies)
+}
+
 /// Recover the compiler command and source identity persisted by
 /// `compile_with_dependency_cache`. This lets a later graph generation turn
 /// an already materialized bootstrap into real per-object Ninja edges without
@@ -119,9 +151,10 @@ pub(crate) fn cached_native_objects_from_dirs(
         }
     }
     if required_sources.iter().any(|required| {
-        !by_name.values().any(|object| {
-            object.source.file_name().and_then(|name| name.to_str()) == Some(required)
-        })
+        let required_name = Path::new(required).file_name();
+        !by_name
+            .values()
+            .any(|object| object.source.file_name() == required_name)
     }) {
         // A source-list change must not be hidden by an older archive cache.
         // Let the canonical builder materialize the missing TU and its
@@ -196,7 +229,7 @@ pub(crate) fn emit_cached_native_object_edges(
 ) -> Vec<String> {
     if !*rules_emitted {
         graph.push_str("rule native_cached_cpp\n");
-        graph.push_str("  command = $compile_command\n");
+        graph.push_str("  command = $compile_command -MMD -MF $out.d\n");
         graph.push_str("  depfile = $out.d\n");
         graph.push_str("  deps = gcc\n");
         graph.push_str("  description = CXX $out\n");
@@ -208,8 +241,16 @@ pub(crate) fn emit_cached_native_object_edges(
         // above writes a depfile and the next graph generation promotes it to
         // dependency-aware scheduling.
         graph.push_str("rule native_cached_cpp_legacy\n");
-        graph.push_str("  command = $compile_command\n");
+        graph.push_str("  command = $compile_command -MMD -MF $out.d\n");
         graph.push_str("  description = CXX $out (legacy cache)\n");
+        graph.push_str("  restat = 1\n\n");
+        // A dependency scan performed outside Ninja cannot populate
+        // `.ninja_deps`.  Promote such an object with the scanned headers as
+        // explicit inputs so graph regeneration does not rebuild the whole
+        // ART archive merely to teach Ninja dependencies it already has.
+        graph.push_str("rule native_cached_cpp_promoted\n");
+        graph.push_str("  command = $compile_command -MMD -MF $out.d\n");
+        graph.push_str("  description = CXX $out\n");
         graph.push_str("  restat = 1\n\n");
         graph.push_str("rule native_dependency_scan\n");
         graph.push_str("  command = $dependency_scan_command\n");
@@ -249,12 +290,28 @@ pub(crate) fn emit_cached_native_object_edges(
         }
         graph.push_str("build ");
         graph.push_str(&output);
-        graph.push_str(if depfile.is_file() {
-            ": native_cached_cpp "
+        let promoted_dependencies = if depfile.is_file() {
+            depfile_dependencies(&depfile).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        graph.push_str(if !promoted_dependencies.is_empty() {
+            ": native_cached_cpp_promoted "
         } else {
             ": native_cached_cpp_legacy "
         });
         graph.push_str(&source);
+        if !promoted_dependencies.is_empty() {
+            graph.push_str(" | ");
+            graph.push_str(
+                &promoted_dependencies
+                    .iter()
+                    .filter(|dependency| **dependency != object.source)
+                    .map(|dependency| ninja_path(dependency))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+        }
         if needs_dependency_scan {
             graph.push_str(" || ");
             graph.push_str(&ninja_path(&depfile));
@@ -284,7 +341,8 @@ pub(crate) fn emit_cached_native_object_edges(
 
 #[cfg(test)]
 mod tests {
-    use super::{CachedNativeObject, dependency_scan_command};
+    use super::{CachedNativeObject, dependency_scan_command, depfile_dependencies};
+    use std::fs;
     use std::path::PathBuf;
 
     fn object(command: &str, shell_quoted: bool) -> CachedNativeObject {
@@ -294,6 +352,31 @@ mod tests {
             command: command.to_owned(),
             shell_quoted,
         }
+    }
+
+    #[test]
+    fn parses_continued_and_escaped_depfile_paths() {
+        let path = std::env::temp_dir().join(format!(
+            "darwin-art-depfile-{}-{}.d",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        fs::write(
+            &path,
+            "object.o: source.cc \\\n+ include/header.h path\\ with\\ spaces/header.h\n"
+                .replace("\n+ ", "\n "),
+        )
+        .unwrap();
+        let dependencies = depfile_dependencies(&path).unwrap();
+        assert_eq!(
+            dependencies,
+            vec![
+                PathBuf::from("source.cc"),
+                PathBuf::from("include/header.h"),
+                PathBuf::from("path with spaces/header.h")
+            ]
+        );
+        fs::remove_file(path).unwrap();
     }
 
     #[test]

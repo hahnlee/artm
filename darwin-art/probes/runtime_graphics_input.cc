@@ -6,12 +6,15 @@
 #include <pthread.h>
 #include <string>
 #include <time.h>
+#include <vector>
 
 #include "base/locks.h"
+#include "darwin_android_time.h"
 #include "darwin_android_platform.h"
 #include "darwin_framework_natives.h"
 #include "darwin_art/darwin_art.h"
 #include "runtime_hwui_probe.h"
+#include "runtime_graphics_gpu.h"
 #include "runtime_graphics_probe.h"
 #include "runtime_graphics_probe_internal.h"
 #include "runtime_process_state.h"
@@ -37,11 +40,10 @@ bool MotionEventBridgeEnabled() {
 }
 
 bool g_motion_event_archive_probe_done = false;
+size_t g_debug_main_queue_budget = 0;
 
 int64_t MonotonicNanos() {
-  struct timespec now = {};
-  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
-  return static_cast<int64_t>(now.tv_sec) * 1000000000LL + now.tv_nsec;
+  return darwin_art::AndroidUptimeNanos();
 }
 
 // Process only messages that Android's main Looper could dispatch without
@@ -49,10 +51,20 @@ int64_t MonotonicNanos() {
 // Looper.loop() would take over that thread permanently. Peeking at the queue
 // first preserves MessageQueue.next() semantics (including sync barriers) and
 // lets the host interleave due Handler work with native events and Metal
-// frames just like one ViewRoot traversal.
-bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
+// frames just like Android's Looper, which keeps dispatching already-due
+// messages instead of throttling the UI queue to the display refresh rate.
+// The finite budget is only a host safety bound; native registrations are
+// polled between Java messages, preserving Looper's message/native/message
+// ordering while draining startup bursts promptly.
+bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 64) {
   static bool logged_sync_barrier = false;
   static bool logged_native_poll_error = false;
+  static bool initialized_debug_budget = false;
+  if (!initialized_debug_budget &&
+      std::getenv("DARWIN_ART_DEBUG_MAIN_QUEUE") != nullptr) {
+    initialized_debug_budget = true;
+    g_debug_main_queue_budget = 96;
+  }
   const int initial_native_dispatch =
       darwin_art_android_platform_poll_current_looper();
   if (initial_native_dispatch < 0) {
@@ -98,6 +110,10 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
       message_class == nullptr
           ? nullptr
           : env->GetFieldID(message_class, "target", "Landroid/os/Handler;");
+  jfieldID message_callback =
+      message_class == nullptr
+          ? nullptr
+          : env->GetFieldID(message_class, "callback", "Ljava/lang/Runnable;");
   jmethodID is_asynchronous =
       message_class == nullptr
           ? nullptr
@@ -117,7 +133,7 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
           : env->GetStaticMethodID(clock_class, "uptimeMillis", "()J");
   const bool resolved = my_queue != nullptr && queue_next != nullptr &&
                         queue_messages != nullptr && message_when != nullptr &&
-                        message_what != nullptr &&
+                        message_what != nullptr && message_callback != nullptr &&
                         message_next != nullptr && message_target != nullptr &&
                         is_asynchronous != nullptr && recycle != nullptr &&
                         dispatch != nullptr && uptime_millis != nullptr &&
@@ -126,35 +142,66 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
                       ? env->CallStaticObjectMethod(looper_class, my_queue)
                       : nullptr;
   bool ok = resolved && queue != nullptr && !env->ExceptionCheck();
-  static int debug_queue_frames = 20;
+  // Bound one host turn to work that was already ready when it began. This
+  // keeps the temporary owner-thread pump responsive until the UI Looper is
+  // moved to its Android-style continuously running thread.
+  const jlong turn_cutoff =
+      ok ? env->CallStaticLongMethod(clock_class, uptime_millis) : 0;
+  ok = ok && !env->ExceptionCheck();
   for (size_t dispatched = 0; ok && dispatched < limit; ++dispatched) {
     jobject head = env->GetObjectField(queue, queue_messages);
     if (head == nullptr || env->ExceptionCheck()) {
-      if (debug_queue_frames > 0 &&
+      if (g_debug_main_queue_budget > 0 &&
           std::getenv("DARWIN_ART_DEBUG_MAIN_QUEUE") != nullptr) {
-        --debug_queue_frames;
+        --g_debug_main_queue_budget;
         std::cerr << "ART Android Looper: queue empty\n";
       }
       if (head != nullptr) env->DeleteLocalRef(head);
       break;
     }
-    const jlong now = env->CallStaticLongMethod(clock_class, uptime_millis);
     jobject target = env->GetObjectField(head, message_target);
-    if (debug_queue_frames > 0 &&
+    if (g_debug_main_queue_budget > 0 &&
         std::getenv("DARWIN_ART_DEBUG_MAIN_QUEUE") != nullptr) {
-      --debug_queue_frames;
+      --g_debug_main_queue_budget;
       std::cerr << "ART Android Looper: head what="
                 << env->GetIntField(head, message_what)
                 << " when=" << env->GetLongField(head, message_when)
-                << " now=" << now << " target=" << target << "\n";
+                << " cutoff=" << turn_cutoff << " target=" << target;
+      jobject callback = env->GetObjectField(head, message_callback);
+      if (callback != nullptr && !env->ExceptionCheck()) {
+        jclass callback_class = env->GetObjectClass(callback);
+        jclass class_class = env->FindClass("java/lang/Class");
+        jmethodID get_name =
+            class_class == nullptr
+                ? nullptr
+                : env->GetMethodID(class_class, "getName", "()Ljava/lang/String;");
+        jstring callback_name =
+            callback_class == nullptr || get_name == nullptr
+                ? nullptr
+                : static_cast<jstring>(
+                      env->CallObjectMethod(callback_class, get_name));
+        if (callback_name != nullptr && !env->ExceptionCheck()) {
+          const char* utf = env->GetStringUTFChars(callback_name, nullptr);
+          if (utf != nullptr) {
+            std::cerr << " callback=" << utf;
+            env->ReleaseStringUTFChars(callback_name, utf);
+          }
+        }
+        if (callback_name != nullptr) env->DeleteLocalRef(callback_name);
+        if (class_class != nullptr) env->DeleteLocalRef(class_class);
+        if (callback_class != nullptr) env->DeleteLocalRef(callback_class);
+      }
+      if (callback != nullptr) env->DeleteLocalRef(callback);
+      std::cerr << "\n";
     }
     bool selectable = target != nullptr &&
-                      env->GetLongField(head, message_when) <= now;
+                      env->GetLongField(head, message_when) <= turn_cutoff;
     if (target == nullptr && !logged_sync_barrier &&
         std::getenv("DARWIN_ART_DEBUG_MAIN_QUEUE") != nullptr) {
       logged_sync_barrier = true;
       std::cerr << "ART Android Looper: pending synchronization barrier when="
-                << env->GetLongField(head, message_when) << " now=" << now
+                << env->GetLongField(head, message_when)
+                << " cutoff=" << turn_cutoff
                 << "\n";
     }
     if (target != nullptr) env->DeleteLocalRef(target);
@@ -167,7 +214,8 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
         const bool due_async = candidate_target != nullptr &&
                                env->CallBooleanMethod(candidate, is_asynchronous) ==
                                    JNI_TRUE &&
-                               env->GetLongField(candidate, message_when) <= now;
+                               env->GetLongField(candidate, message_when) <=
+                                   turn_cutoff;
         if (candidate_target != nullptr) env->DeleteLocalRef(candidate_target);
         if (due_async) {
           selectable = true;
@@ -200,6 +248,12 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 128) {
     env->DeleteLocalRef(dispatch_target);
     env->DeleteLocalRef(message);
     ok = !env->ExceptionCheck();
+    if (ok && darwin_art_android_platform_poll_current_looper() < 0 &&
+        !logged_native_poll_error) {
+      logged_native_poll_error = true;
+      std::cerr << "ART Android Looper: native poll failed; continuing main "
+                   "queue\n";
+    }
   }
   if (queue != nullptr) env->DeleteLocalRef(queue);
   if (clock_class != nullptr) env->DeleteLocalRef(clock_class);
@@ -415,6 +469,22 @@ bool sync_interactive_surface_size(GraphicsState* state, JNIEnv* env) {
               << state->interactive_height << " -> " << width << "x"
               << height << "\n";
   }
+  if (state->interactive_view_root != nullptr &&
+      state->service_bridge_class != nullptr) {
+    jmethodID resize_display = env->GetStaticMethodID(
+        state->service_bridge_class, "resizeDisplay", "(II)V");
+    if (resize_display == nullptr || env->ExceptionCheck()) {
+      env->ExceptionClear();
+      return false;
+    }
+    env->CallStaticVoidMethod(state->service_bridge_class, resize_display,
+                              static_cast<jint>(width),
+                              static_cast<jint>(height));
+    if (env->ExceptionCheck()) return false;
+    state->interactive_width = static_cast<jint>(width);
+    state->interactive_height = static_cast<jint>(height);
+    return true;
+  }
   state->gpu_render_node_recorded = false;
   const jboolean rendered = present_content(
       state, env, nullptr, state->interactive_root, static_cast<jint>(width),
@@ -443,6 +513,96 @@ void ClearPointerDispatchRoot(GraphicsState* state, JNIEnv* env) {
   state->pointer_dispatch_offset_x = 0.0f;
   state->pointer_dispatch_offset_y = 0.0f;
   state->pointer_dispatch_is_window = false;
+}
+
+void DebugViewTextState(JNIEnv* env, jobject root) {
+  if (env == nullptr || root == nullptr ||
+      std::getenv("DARWIN_ART_DEBUG_VIEW_TEXT") == nullptr) {
+    return;
+  }
+  jclass view_class = env->FindClass("android/view/View");
+  jclass group_class = env->FindClass("android/view/ViewGroup");
+  jclass text_class = env->FindClass("android/widget/TextView");
+  jclass sequence_class = env->FindClass("java/lang/CharSequence");
+  jmethodID get_id = view_class == nullptr
+                         ? nullptr
+                         : env->GetMethodID(view_class, "getId", "()I");
+  jmethodID get_left = view_class == nullptr
+                           ? nullptr
+                           : env->GetMethodID(view_class, "getLeft", "()I");
+  jmethodID get_top = view_class == nullptr
+                          ? nullptr
+                          : env->GetMethodID(view_class, "getTop", "()I");
+  jmethodID get_right = view_class == nullptr
+                            ? nullptr
+                            : env->GetMethodID(view_class, "getRight", "()I");
+  jmethodID get_bottom = view_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(view_class, "getBottom", "()I");
+  jmethodID get_child_count =
+      group_class == nullptr
+          ? nullptr
+          : env->GetMethodID(group_class, "getChildCount", "()I");
+  jmethodID get_child_at =
+      group_class == nullptr
+          ? nullptr
+          : env->GetMethodID(group_class, "getChildAt", "(I)Landroid/view/View;");
+  jmethodID get_text = text_class == nullptr
+                           ? nullptr
+                           : env->GetMethodID(text_class, "getText",
+                                              "()Ljava/lang/CharSequence;");
+  jmethodID to_string =
+      sequence_class == nullptr
+          ? nullptr
+          : env->GetMethodID(sequence_class, "toString", "()Ljava/lang/String;");
+  const bool ready = view_class != nullptr && group_class != nullptr &&
+                     text_class != nullptr && sequence_class != nullptr &&
+                     get_id != nullptr && get_left != nullptr &&
+                     get_top != nullptr && get_right != nullptr &&
+                     get_bottom != nullptr && get_child_count != nullptr &&
+                     get_child_at != nullptr && get_text != nullptr &&
+                     to_string != nullptr && !env->ExceptionCheck();
+  std::vector<jobject> pending;
+  if (ready) pending.push_back(env->NewLocalRef(root));
+  size_t visited = 0;
+  while (!pending.empty() && visited++ < 256 && !env->ExceptionCheck()) {
+    jobject view = pending.back();
+    pending.pop_back();
+    if (env->IsInstanceOf(view, text_class)) {
+      jobject sequence = env->CallObjectMethod(view, get_text);
+      jstring text = sequence == nullptr
+                         ? nullptr
+                         : static_cast<jstring>(
+                               env->CallObjectMethod(sequence, to_string));
+      const char* utf = text == nullptr
+                            ? nullptr
+                            : env->GetStringUTFChars(text, nullptr);
+      std::cerr << "ART Android View text id=0x" << std::hex
+                << env->CallIntMethod(view, get_id) << std::dec
+                << " bounds=" << env->CallIntMethod(view, get_left) << ","
+                << env->CallIntMethod(view, get_top) << "-"
+                << env->CallIntMethod(view, get_right) << ","
+                << env->CallIntMethod(view, get_bottom) << " text="
+                << (utf == nullptr ? "(null)" : utf) << "\n";
+      if (utf != nullptr) env->ReleaseStringUTFChars(text, utf);
+      if (text != nullptr) env->DeleteLocalRef(text);
+      if (sequence != nullptr) env->DeleteLocalRef(sequence);
+    }
+    if (env->IsInstanceOf(view, group_class)) {
+      const jint count = env->CallIntMethod(view, get_child_count);
+      for (jint index = 0; index < count && !env->ExceptionCheck(); ++index) {
+        jobject child = env->CallObjectMethod(view, get_child_at, index);
+        if (child != nullptr) pending.push_back(child);
+      }
+    }
+    env->DeleteLocalRef(view);
+  }
+  for (jobject view : pending) env->DeleteLocalRef(view);
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  if (sequence_class != nullptr) env->DeleteLocalRef(sequence_class);
+  if (text_class != nullptr) env->DeleteLocalRef(text_class);
+  if (group_class != nullptr) env->DeleteLocalRef(group_class);
+  if (view_class != nullptr) env->DeleteLocalRef(view_class);
 }
 
 bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
@@ -602,6 +762,7 @@ bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
 
 int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
                               uint32_t action, float x, float y,
+                              uint32_t pointer_flags,
                               uint64_t event_time_hint,
                               uint64_t down_time_hint) {
   if (state == nullptr || env == nullptr || root == nullptr) return 72;
@@ -627,32 +788,121 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   }
 
   jclass motion_event_class = env->FindClass("android/view/MotionEvent");
-  jmethodID obtain = motion_event_class == nullptr
-                         ? nullptr
-                         : env->GetStaticMethodID(
-                               motion_event_class, "obtain",
-                               "(JJIFFI)Landroid/view/MotionEvent;");
-  if (obtain == nullptr || env->ExceptionCheck()) {
+  jclass pointer_properties_class =
+      env->FindClass("android/view/MotionEvent$PointerProperties");
+  jclass pointer_coords_class =
+      env->FindClass("android/view/MotionEvent$PointerCoords");
+  jmethodID properties_constructor =
+      pointer_properties_class == nullptr
+          ? nullptr
+          : env->GetMethodID(pointer_properties_class, "<init>", "()V");
+  jmethodID coords_constructor =
+      pointer_coords_class == nullptr
+          ? nullptr
+          : env->GetMethodID(pointer_coords_class, "<init>", "()V");
+  jfieldID pointer_id_field =
+      pointer_properties_class == nullptr
+          ? nullptr
+          : env->GetFieldID(pointer_properties_class, "id", "I");
+  jfieldID tool_type_field =
+      pointer_properties_class == nullptr
+          ? nullptr
+          : env->GetFieldID(pointer_properties_class, "toolType", "I");
+  jfieldID coords_x_field = pointer_coords_class == nullptr
+                                ? nullptr
+                                : env->GetFieldID(pointer_coords_class, "x", "F");
+  jfieldID coords_y_field = pointer_coords_class == nullptr
+                                ? nullptr
+                                : env->GetFieldID(pointer_coords_class, "y", "F");
+  jfieldID pressure_field =
+      pointer_coords_class == nullptr
+          ? nullptr
+          : env->GetFieldID(pointer_coords_class, "pressure", "F");
+  jfieldID size_field = pointer_coords_class == nullptr
+                            ? nullptr
+                            : env->GetFieldID(pointer_coords_class, "size", "F");
+  jmethodID obtain =
+      motion_event_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(
+                motion_event_class, "obtain",
+                "(JJII[Landroid/view/MotionEvent$PointerProperties;"
+                "[Landroid/view/MotionEvent$PointerCoords;IIFFIIIII)"
+                "Landroid/view/MotionEvent;");
+  if (obtain == nullptr || properties_constructor == nullptr ||
+      coords_constructor == nullptr || pointer_id_field == nullptr ||
+      tool_type_field == nullptr || coords_x_field == nullptr ||
+      coords_y_field == nullptr || pressure_field == nullptr ||
+      size_field == nullptr || env->ExceptionCheck()) {
     env->ExceptionClear();
+    if (pointer_coords_class != nullptr) env->DeleteLocalRef(pointer_coords_class);
+    if (pointer_properties_class != nullptr)
+      env->DeleteLocalRef(pointer_properties_class);
     env->DeleteLocalRef(motion_event_class);
     return 80;
   }
+  constexpr uint32_t kPointerFlagMouse = 1u << 0;
+  const bool mouse_source = (pointer_flags & kPointerFlagMouse) != 0;
+  const jint android_source = mouse_source ? 0x2002 : 0x1002;
+  const jfloat pressure = terminal ? 0.0f : 1.0f;
+  jobject properties =
+      env->NewObject(pointer_properties_class, properties_constructor);
+  jobject coords = env->NewObject(pointer_coords_class, coords_constructor);
+  jobjectArray properties_array =
+      env->NewObjectArray(1, pointer_properties_class, nullptr);
+  jobjectArray coords_array =
+      env->NewObjectArray(1, pointer_coords_class, nullptr);
+  if (properties != nullptr && coords != nullptr && properties_array != nullptr &&
+      coords_array != nullptr && !env->ExceptionCheck()) {
+    env->SetIntField(properties, pointer_id_field, 0);
+    // MotionEvent.TOOL_TYPE_MOUSE=3, TOOL_TYPE_FINGER=1.
+    env->SetIntField(properties, tool_type_field, mouse_source ? 3 : 1);
+    env->SetFloatField(coords, coords_x_field, x);
+    env->SetFloatField(coords, coords_y_field, y);
+    env->SetFloatField(coords, pressure_field, pressure);
+    env->SetFloatField(coords, size_field, 1.0f);
+    env->SetObjectArrayElement(properties_array, 0, properties);
+    env->SetObjectArrayElement(coords_array, 0, coords);
+  }
+  if (properties == nullptr || coords == nullptr || properties_array == nullptr ||
+      coords_array == nullptr || env->ExceptionCheck()) {
+    env->ExceptionClear();
+    if (coords_array != nullptr) env->DeleteLocalRef(coords_array);
+    if (properties_array != nullptr) env->DeleteLocalRef(properties_array);
+    if (coords != nullptr) env->DeleteLocalRef(coords);
+    if (properties != nullptr) env->DeleteLocalRef(properties);
+    env->DeleteLocalRef(pointer_coords_class);
+    env->DeleteLocalRef(pointer_properties_class);
+    env->DeleteLocalRef(motion_event_class);
+    return 81;
+  }
+  const jint button_state = mouse_source && !terminal ? 1 : 0;
   jobject event = env->CallStaticObjectMethod(
       motion_event_class, obtain, static_cast<jlong>(down_time_nanos / 1000000),
       static_cast<jlong>(event_time_nanos / 1000000), static_cast<jint>(action),
-      static_cast<jfloat>(x), static_cast<jfloat>(y), static_cast<jint>(0));
+      static_cast<jint>(1), properties_array, coords_array,
+      static_cast<jint>(0), button_state, static_cast<jfloat>(1.0f),
+      static_cast<jfloat>(1.0f), static_cast<jint>(mouse_source ? 1 : 0),
+      static_cast<jint>(0), android_source, static_cast<jint>(0),
+      static_cast<jint>(0));
+  if (coords_array != nullptr) env->DeleteLocalRef(coords_array);
+  if (properties_array != nullptr) env->DeleteLocalRef(properties_array);
+  if (coords != nullptr) env->DeleteLocalRef(coords);
+  if (properties != nullptr) env->DeleteLocalRef(properties);
+  env->DeleteLocalRef(pointer_coords_class);
+  env->DeleteLocalRef(pointer_properties_class);
   if (event == nullptr || env->ExceptionCheck()) {
     env->ExceptionClear();
     env->DeleteLocalRef(event);
     env->DeleteLocalRef(motion_event_class);
     return 81;
   }
-  // The compact obtain() overload defaults to a generic pointer source on
-  // this detached host. Mark the packet as a touchscreen event before it
-  // enters ViewRoot so source/tool filtering follows Android semantics.
+  // Preserve the host device class at Android's InputEvent boundary. AppKit
+  // mouse/trackpad clicks are external mouse input; synthetic acceptance
+  // packets retain the zero-flag touchscreen default.
   jmethodID set_source = env->GetMethodID(motion_event_class, "setSource", "(I)V");
   if (set_source != nullptr && !env->ExceptionCheck()) {
-    env->CallVoidMethod(event, set_source, static_cast<jint>(0x1002));
+    env->CallVoidMethod(event, set_source, android_source);
   }
   if (env->ExceptionCheck()) {
     env->ExceptionClear();
@@ -666,14 +916,90 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   const jfloat local_x = x - state->pointer_dispatch_offset_x;
   const jfloat local_y = y - state->pointer_dispatch_offset_y;
   if (down && std::getenv("DARWIN_ART_DEBUG_POINTER") != nullptr) {
+    jclass state_view_class = env->FindClass("android/view/View");
+    jmethodID has_window_focus =
+        state_view_class == nullptr
+            ? nullptr
+            : env->GetMethodID(state_view_class, "hasWindowFocus", "()Z");
+    jmethodID is_in_touch_mode =
+        state_view_class == nullptr
+            ? nullptr
+            : env->GetMethodID(state_view_class, "isInTouchMode", "()Z");
+    const bool window_focused =
+        has_window_focus != nullptr &&
+        env->CallBooleanMethod(dispatch_root, has_window_focus) == JNI_TRUE;
+    const bool touch_mode =
+        is_in_touch_mode != nullptr &&
+        env->CallBooleanMethod(dispatch_root, is_in_touch_mode) == JNI_TRUE;
     jobject debug_hit =
         find_clickable_view_at(env, dispatch_root, local_x, local_y);
     std::cerr << "ART Android MotionEvent target x=" << x << " y=" << y
               << " local_x=" << local_x << " local_y=" << local_y
               << " offset_x=" << state->pointer_dispatch_offset_x
               << " offset_y=" << state->pointer_dispatch_offset_y
+              << " focused=" << (window_focused ? 1 : 0)
+              << " touch_mode=" << (touch_mode ? 1 : 0)
               << " hit=" << debug_hit;
     if (debug_hit != nullptr) {
+      jmethodID is_focusable =
+          state_view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(state_view_class, "isFocusable", "()Z");
+      jmethodID is_focusable_in_touch_mode =
+          state_view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(state_view_class, "isFocusableInTouchMode",
+                                 "()Z");
+      jmethodID is_focused =
+          state_view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(state_view_class, "isFocused", "()Z");
+      jmethodID has_click_listener =
+          state_view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(state_view_class, "hasOnClickListeners", "()Z");
+      jmethodID get_location_in_window =
+          state_view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(state_view_class, "getLocationInWindow", "([I)V");
+      jmethodID get_width =
+          state_view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(state_view_class, "getWidth", "()I");
+      jmethodID get_height =
+          state_view_class == nullptr
+              ? nullptr
+              : env->GetMethodID(state_view_class, "getHeight", "()I");
+      if (is_focusable != nullptr && is_focusable_in_touch_mode != nullptr &&
+          is_focused != nullptr && has_click_listener != nullptr &&
+          !env->ExceptionCheck()) {
+        std::cerr << " focusable="
+                  << (env->CallBooleanMethod(debug_hit, is_focusable) == JNI_TRUE)
+                  << " focusable_touch="
+                  << (env->CallBooleanMethod(debug_hit,
+                                             is_focusable_in_touch_mode) == JNI_TRUE)
+                  << " view_focused="
+                  << (env->CallBooleanMethod(debug_hit, is_focused) == JNI_TRUE)
+                  << " click_listener="
+                  << (env->CallBooleanMethod(debug_hit,
+                                             has_click_listener) == JNI_TRUE);
+      }
+      if (get_location_in_window != nullptr && get_width != nullptr &&
+          get_height != nullptr && !env->ExceptionCheck()) {
+        jintArray location = env->NewIntArray(2);
+        if (location != nullptr && !env->ExceptionCheck()) {
+          env->CallVoidMethod(debug_hit, get_location_in_window, location);
+          jint bounds[2] = {0, 0};
+          env->GetIntArrayRegion(location, 0, 2, bounds);
+          if (!env->ExceptionCheck()) {
+            std::cerr << " bounds=" << bounds[0] << ',' << bounds[1] << '-'
+                      << bounds[0] + env->CallIntMethod(debug_hit, get_width)
+                      << ','
+                      << bounds[1] + env->CallIntMethod(debug_hit, get_height);
+          }
+        }
+        if (location != nullptr) env->DeleteLocalRef(location);
+      }
       jclass object_class = env->FindClass("java/lang/Object");
       jmethodID to_string =
           object_class == nullptr
@@ -695,6 +1021,7 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     }
     std::cerr << "\n";
     if (debug_hit != nullptr) env->DeleteLocalRef(debug_hit);
+    if (state_view_class != nullptr) env->DeleteLocalRef(state_view_class);
     if (env->ExceptionCheck()) env->ExceptionClear();
   }
   if (down) {
@@ -956,9 +1283,13 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   }
   if (down) state->pointer_stream_active = true;
   if (terminal) {
+    if (std::getenv("DARWIN_ART_DEBUG_MAIN_QUEUE") != nullptr) {
+      g_debug_main_queue_budget = 32;
+    }
     state->pointer_stream_active = false;
     state->pointer_down_time_nanos = 0;
     state->pointer_click_candidate = false;
+    DebugViewTextState(env, dispatch_root);
     ClearPointerDispatchRoot(state, env);
   }
   state->gpu_ripple_overlay_active = action != 3u;
@@ -1055,7 +1386,8 @@ jobject find_clickable_view_at(JNIEnv* env, jobject view, jfloat x, jfloat y) {
 }
 
 int32_t dispatch_pointer_internal(GraphicsState* state, uint32_t action, float x,
-                                  float y, uint64_t event_time_nanos,
+                                  float y, uint32_t pointer_flags,
+                                  uint64_t event_time_nanos,
                                   uint64_t down_time_nanos) {
   if (state == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   if (action > 3u || !std::isfinite(x) || !std::isfinite(y)) {
@@ -1084,7 +1416,8 @@ int32_t dispatch_pointer_internal(GraphicsState* state, uint32_t action, float x
       return 0;
     }
     const int32_t status = dispatch_motion_event(
-        state, env, root, action, x, y, event_time_nanos, down_time_nanos);
+        state, env, root, action, x, y, pointer_flags, event_time_nanos,
+        down_time_nanos);
     if (status == 0 || std::getenv("DARWIN_ART_INPUT_MODE") != nullptr ||
         std::getenv("DARWIN_ART_APK_APP_PACKAGE") != nullptr) {
       return status;
@@ -1198,7 +1531,7 @@ int32_t dispatch_pointer_internal(GraphicsState* state, uint32_t action, float x
 
 int32_t dispatch_pointer(GraphicsState* state, uint32_t action, float x,
                          float y) {
-  return dispatch_pointer_internal(state, action, x, y, 0, 0);
+  return dispatch_pointer_internal(state, action, x, y, 0, 0, 0);
 }
 
 int32_t dispatch_pointer_v2(GraphicsState* state,
@@ -1209,377 +1542,9 @@ int32_t dispatch_pointer_v2(GraphicsState* state,
     return 71;
   }
   return dispatch_pointer_internal(state, event->action, event->x, event->y,
+                                   event->flags,
                                    event->event_time_nanos,
                                    event->down_time_nanos);
-}
-
-void DebugChromeOmniboxState(JNIEnv* env, jobject view_root) {
-  if (std::getenv("DARWIN_ART_DEBUG_CHROME_OMNIBOX") == nullptr) return;
-  jclass root_class = env->GetObjectClass(view_root);
-  jmethodID get_view =
-      root_class == nullptr
-          ? nullptr
-          : env->GetMethodID(root_class, "getView", "()Landroid/view/View;");
-  jobject root = get_view == nullptr
-                     ? nullptr
-                     : env->CallObjectMethod(view_root, get_view);
-  jclass view_class = env->FindClass("android/view/View");
-  jmethodID find_focus =
-      view_class == nullptr
-          ? nullptr
-          : env->GetMethodID(view_class, "findFocus", "()Landroid/view/View;");
-  jobject focus = root == nullptr || find_focus == nullptr
-                      ? nullptr
-                      : env->CallObjectMethod(root, find_focus);
-  jclass focus_class = focus == nullptr ? nullptr : env->GetObjectClass(focus);
-  jfieldID listener_field =
-      focus_class == nullptr
-          ? nullptr
-          : env->GetFieldID(focus_class, "D", "Landroid/view/View$OnKeyListener;");
-  if (listener_field == nullptr || env->ExceptionCheck()) {
-    env->ExceptionClear();
-    std::cerr << "ART Chrome omnibox: focused view is not UrlBar focus="
-              << focus << "\n";
-    env->DeleteLocalRef(focus_class);
-    env->DeleteLocalRef(focus);
-    env->DeleteLocalRef(view_class);
-    env->DeleteLocalRef(root);
-    env->DeleteLocalRef(root_class);
-    return;
-  }
-  jobject listener = listener_field == nullptr
-                         ? nullptr
-                         : env->GetObjectField(focus, listener_field);
-  if (listener == nullptr && !env->ExceptionCheck()) {
-    jfieldID tab_listener_field =
-        env->GetFieldID(focus_class, "K", "Landroid/view/View$OnKeyListener;");
-    if (tab_listener_field != nullptr && !env->ExceptionCheck()) {
-      listener = env->GetObjectField(focus, tab_listener_field);
-    }
-    if (env->ExceptionCheck()) env->ExceptionClear();
-  }
-  jclass listener_class =
-      listener == nullptr ? nullptr : env->GetObjectClass(listener);
-  jfieldID mediator_field =
-      listener_class == nullptr
-          ? nullptr
-          : env->GetFieldID(listener_class, "q0", "Lum0;");
-  jobject mediator = mediator_field == nullptr
-                         ? nullptr
-                         : env->GetObjectField(listener, mediator_field);
-  jclass mediator_class =
-      mediator == nullptr ? nullptr : env->GetObjectClass(mediator);
-  jfieldID model_field =
-      mediator_class == nullptr
-          ? nullptr
-          : env->GetFieldID(mediator_class, "d", "Lon0;");
-  jobject model = model_field == nullptr
-                      ? nullptr
-                      : env->GetObjectField(mediator, model_field);
-  jclass model_class = model == nullptr ? nullptr : env->GetObjectClass(model);
-  jmethodID ready_method =
-      model_class == nullptr ? nullptr : env->GetMethodID(model_class, "p", "()Z");
-  jmethodID count_method =
-      model_class == nullptr ? nullptr : env->GetMethodID(model_class, "n", "()I");
-  const jboolean ready = ready_method == nullptr
-                             ? JNI_FALSE
-                             : env->CallBooleanMethod(model, ready_method);
-  const jint count = count_method == nullptr ? -1 : env->CallIntMethod(model, count_method);
-  jfieldID controller_field =
-      model_class == nullptr
-          ? nullptr
-          : env->GetFieldID(
-                model_class, "U",
-                "Lorg/chromium/chrome/browser/omnibox/suggestions/AutocompleteController;");
-  jobject controller = controller_field == nullptr
-                           ? nullptr
-                           : env->GetObjectField(model, controller_field);
-  jclass controller_class =
-      controller == nullptr ? nullptr : env->GetObjectClass(controller);
-  jfieldID native_field = controller_class == nullptr
-                              ? nullptr
-                              : env->GetFieldID(controller_class, "b", "J");
-  const jlong native_pointer = native_field == nullptr
-                                   ? 0
-                                   : env->GetLongField(controller, native_field);
-  jfieldID state_field =
-      model_class == nullptr
-          ? nullptr
-          : env->GetFieldID(model_class, "I", "Lym0;");
-  jobject omnibox_state = state_field == nullptr
-                              ? nullptr
-                              : env->GetObjectField(model, state_field);
-  jclass omnibox_state_class =
-      omnibox_state == nullptr ? nullptr : env->GetObjectClass(omnibox_state);
-  jmethodID state_method =
-      omnibox_state_class == nullptr
-          ? nullptr
-          : env->GetMethodID(omnibox_state_class, "e", "()I");
-  jmethodID input_mode_method =
-      omnibox_state_class == nullptr
-          ? nullptr
-          : env->GetMethodID(omnibox_state_class, "f", "()I");
-  const jint page_state = state_method == nullptr
-                              ? -1
-                              : env->CallIntMethod(omnibox_state, state_method);
-  const jint input_mode = input_mode_method == nullptr
-                              ? -1
-                              : env->CallIntMethod(omnibox_state, input_mode_method);
-  jfieldID loading_field = model_class == nullptr
-                               ? nullptr
-                               : env->GetFieldID(model_class, "c0", "Z");
-  const jboolean loading = loading_field == nullptr
-                               ? JNI_FALSE
-                               : env->GetBooleanField(model, loading_field);
-  jfieldID text_provider_field =
-      model_class == nullptr
-          ? nullptr
-          : env->GetFieldID(model_class, "u", "Lyzg;");
-  jobject text_provider = text_provider_field == nullptr
-                              ? nullptr
-                              : env->GetObjectField(model, text_provider_field);
-  jclass text_provider_class =
-      text_provider == nullptr ? nullptr : env->GetObjectClass(text_provider);
-  jmethodID text_method =
-      text_provider_class == nullptr
-          ? nullptr
-          : env->GetMethodID(text_provider_class, "b", "()Ljava/lang/String;");
-  jstring typed = text_method == nullptr
-                      ? nullptr
-                      : static_cast<jstring>(
-                            env->CallObjectMethod(text_provider, text_method));
-  const char* typed_utf =
-      typed == nullptr ? nullptr : env->GetStringUTFChars(typed, nullptr);
-  jmethodID match_method =
-      controller_class == nullptr
-          ? nullptr
-          : env->GetMethodID(
-                controller_class, "a",
-                "(Ljava/lang/String;)Lorg/chromium/components/omnibox/AutocompleteMatch;");
-  jobject match = match_method == nullptr || typed == nullptr
-                      ? nullptr
-                      : env->CallObjectMethod(controller, match_method, typed);
-  jclass match_class = match == nullptr ? nullptr : env->GetObjectClass(match);
-  jfieldID destination_field =
-      match_class == nullptr
-          ? nullptr
-          : env->GetFieldID(match_class, "l", "Lorg/chromium/url/GURL;");
-  jobject destination = destination_field == nullptr
-                            ? nullptr
-                            : env->GetObjectField(match, destination_field);
-  jclass gurl_class = destination == nullptr ? nullptr : env->GetObjectClass(destination);
-  jmethodID gurl_spec_method =
-      gurl_class == nullptr
-          ? nullptr
-          : env->GetMethodID(gurl_class, "k", "()Ljava/lang/String;");
-  jstring destination_spec =
-      gurl_spec_method == nullptr
-          ? nullptr
-          : static_cast<jstring>(
-                env->CallObjectMethod(destination, gurl_spec_method));
-  const char* destination_utf =
-      destination_spec == nullptr
-          ? nullptr
-          : env->GetStringUTFChars(destination_spec, nullptr);
-  jclass class_class = env->FindClass("java/lang/Class");
-  jmethodID get_class_loader =
-      class_class == nullptr
-          ? nullptr
-          : env->GetMethodID(class_class, "getClassLoader",
-                             "()Ljava/lang/ClassLoader;");
-  jobject app_loader = get_class_loader == nullptr
-                           ? nullptr
-                           : env->CallObjectMethod(focus_class,
-                                                   get_class_loader);
-  jclass loader_class =
-      app_loader == nullptr ? nullptr : env->GetObjectClass(app_loader);
-  jmethodID load_class =
-      loader_class == nullptr
-          ? nullptr
-          : env->GetMethodID(loader_class, "loadClass",
-                             "(Ljava/lang/String;)Ljava/lang/Class;");
-  jstring native_mux_name = env->NewStringUTF("J.N");
-  jclass native_mux_class =
-      load_class == nullptr || native_mux_name == nullptr
-          ? nullptr
-          : static_cast<jclass>(env->CallObjectMethod(
-                app_loader, load_class, native_mux_name));
-  jmethodID should_handle_method =
-      native_mux_class == nullptr
-          ? nullptr
-          : env->GetStaticMethodID(native_mux_class, "ZO", "(ILjava/lang/Object;)Z");
-  const jboolean handled_without_navigation =
-      should_handle_method == nullptr || destination == nullptr
-          ? JNI_FALSE
-          : env->CallStaticBooleanMethod(native_mux_class, should_handle_method,
-                                         66, destination);
-  jfieldID native_ready_field =
-      listener_class == nullptr ? nullptr
-                                : env->GetFieldID(listener_class, "v0", "Z");
-  const jboolean native_ready =
-      native_ready_field == nullptr
-          ? JNI_FALSE
-          : env->GetBooleanField(listener, native_ready_field);
-  jfieldID tab_provider_field =
-      listener_class == nullptr
-          ? nullptr
-          : env->GetFieldID(listener_class, "t", "Lx28;");
-  jobject tab_provider = tab_provider_field == nullptr
-                             ? nullptr
-                             : env->GetObjectField(listener, tab_provider_field);
-  jclass tab_provider_class =
-      tab_provider == nullptr ? nullptr : env->GetObjectClass(tab_provider);
-  jmethodID get_tab_method =
-      tab_provider_class == nullptr
-          ? nullptr
-          : env->GetMethodID(
-                tab_provider_class, "h",
-                "()Lorg/chromium/chrome/browser/tab/Tab;");
-  jobject tab = get_tab_method == nullptr
-                    ? nullptr
-                    : env->CallObjectMethod(tab_provider, get_tab_method);
-  jclass tab_class = tab == nullptr ? nullptr : env->GetObjectClass(tab);
-  jmethodID get_web_contents_method =
-      tab_class == nullptr
-          ? nullptr
-          : env->GetMethodID(
-                tab_class, "getWebContents",
-                "()Lorg/chromium/content_public/browser/WebContents;");
-  jobject web_contents = get_web_contents_method == nullptr
-                             ? nullptr
-                             : env->CallObjectMethod(tab, get_web_contents_method);
-  jclass web_contents_class =
-      web_contents == nullptr ? nullptr : env->GetObjectClass(web_contents);
-  jmethodID get_navigation_controller_method =
-      web_contents_class == nullptr
-          ? nullptr
-          : env->GetMethodID(
-                web_contents_class, "v",
-                "()Lorg/chromium/content_public/browser/NavigationController;");
-  jobject navigation_controller =
-      get_navigation_controller_method == nullptr
-          ? nullptr
-          : env->CallObjectMethod(web_contents,
-                                  get_navigation_controller_method);
-  jclass navigation_controller_class =
-      navigation_controller == nullptr
-          ? nullptr
-          : env->GetObjectClass(navigation_controller);
-  jfieldID navigation_native_field =
-      navigation_controller_class == nullptr
-          ? nullptr
-          : env->GetFieldID(navigation_controller_class, "a", "J");
-  const jlong navigation_native =
-      navigation_native_field == nullptr
-          ? 0
-          : env->GetLongField(navigation_controller, navigation_native_field);
-  jmethodID current_url_method =
-      web_contents_class == nullptr
-          ? nullptr
-          : env->GetMethodID(web_contents_class, "L",
-                             "()Lorg/chromium/url/GURL;");
-  jobject current_url = current_url_method == nullptr
-                            ? nullptr
-                            : env->CallObjectMethod(web_contents,
-                                                    current_url_method);
-  jclass current_url_class =
-      current_url == nullptr ? nullptr : env->GetObjectClass(current_url);
-  jmethodID current_url_spec_method =
-      current_url_class == nullptr
-          ? nullptr
-          : env->GetMethodID(current_url_class, "k", "()Ljava/lang/String;");
-  jstring current_url_spec =
-      current_url_spec_method == nullptr
-          ? nullptr
-          : static_cast<jstring>(
-                env->CallObjectMethod(current_url, current_url_spec_method));
-  const char* current_url_utf =
-      current_url_spec == nullptr
-          ? nullptr
-          : env->GetStringUTFChars(current_url_spec, nullptr);
-  jclass object_class = env->FindClass("java/lang/Object");
-  jmethodID to_string =
-      object_class == nullptr
-          ? nullptr
-          : env->GetMethodID(object_class, "toString", "()Ljava/lang/String;");
-  jstring text = focus == nullptr || to_string == nullptr
-                     ? nullptr
-                     : static_cast<jstring>(env->CallObjectMethod(focus, to_string));
-  const char* utf = text == nullptr ? nullptr : env->GetStringUTFChars(text, nullptr);
-  std::cerr << "ART Chrome omnibox: focus=" << focus
-            << " listener=" << listener << " mediator=" << mediator
-            << " model=" << model << " ready=" << (ready == JNI_TRUE ? 1 : 0)
-            << " suggestions=" << count << " controller=" << controller
-            << " native=" << native_pointer
-            << " page_state=" << page_state
-            << " input_mode=" << input_mode
-            << " loading=" << (loading == JNI_TRUE ? 1 : 0)
-            << " location_native=" << (native_ready == JNI_TRUE ? 1 : 0)
-            << " tab=" << tab << " web_contents=" << web_contents
-            << " navigation=" << navigation_controller
-            << " navigation_native=" << navigation_native
-            << " typed=" << (typed_utf == nullptr ? "(null)" : typed_utf)
-            << " match=" << match
-            << " destination="
-            << (destination_utf == nullptr ? "(null)" : destination_utf)
-            << " native_handled="
-            << (handled_without_navigation == JNI_TRUE ? 1 : 0)
-            << " current_url="
-            << (current_url_utf == nullptr ? "(null)" : current_url_utf)
-            << " text=" << (utf == nullptr ? "(null)" : utf) << "\n";
-  if (typed_utf != nullptr) env->ReleaseStringUTFChars(typed, typed_utf);
-  if (destination_utf != nullptr) {
-    env->ReleaseStringUTFChars(destination_spec, destination_utf);
-  }
-  if (current_url_utf != nullptr) {
-    env->ReleaseStringUTFChars(current_url_spec, current_url_utf);
-  }
-  if (utf != nullptr) env->ReleaseStringUTFChars(text, utf);
-  env->DeleteLocalRef(match);
-  env->DeleteLocalRef(current_url_spec);
-  env->DeleteLocalRef(current_url_class);
-  env->DeleteLocalRef(current_url);
-  env->DeleteLocalRef(native_mux_class);
-  env->DeleteLocalRef(native_mux_name);
-  env->DeleteLocalRef(loader_class);
-  env->DeleteLocalRef(app_loader);
-  env->DeleteLocalRef(class_class);
-  env->DeleteLocalRef(destination_spec);
-  env->DeleteLocalRef(gurl_class);
-  env->DeleteLocalRef(destination);
-  env->DeleteLocalRef(match_class);
-  env->DeleteLocalRef(typed);
-  env->DeleteLocalRef(navigation_controller_class);
-  env->DeleteLocalRef(navigation_controller);
-  env->DeleteLocalRef(web_contents_class);
-  env->DeleteLocalRef(web_contents);
-  env->DeleteLocalRef(tab_class);
-  env->DeleteLocalRef(tab);
-  env->DeleteLocalRef(tab_provider_class);
-  env->DeleteLocalRef(tab_provider);
-  env->DeleteLocalRef(text_provider_class);
-  env->DeleteLocalRef(text_provider);
-  env->DeleteLocalRef(omnibox_state_class);
-  env->DeleteLocalRef(omnibox_state);
-  env->DeleteLocalRef(text);
-  env->DeleteLocalRef(object_class);
-  env->DeleteLocalRef(controller_class);
-  env->DeleteLocalRef(controller);
-  env->DeleteLocalRef(model_class);
-  env->DeleteLocalRef(model);
-  env->DeleteLocalRef(mediator_class);
-  env->DeleteLocalRef(mediator);
-  env->DeleteLocalRef(listener_class);
-  env->DeleteLocalRef(listener);
-  env->DeleteLocalRef(focus_class);
-  env->DeleteLocalRef(focus);
-  env->DeleteLocalRef(view_class);
-  env->DeleteLocalRef(root);
-  env->DeleteLocalRef(root_class);
-  if (env->ExceptionCheck()) {
-    env->ExceptionDescribe();
-    env->ExceptionClear();
-  }
 }
 
 int32_t dispatch_key_v1(GraphicsState* state,
@@ -1683,10 +1648,6 @@ int32_t dispatch_key_v1(GraphicsState* state,
     env->DeleteLocalRef(root);
     env->DeleteLocalRef(root_class);
   }
-  if (event->action == 0 &&
-      (event->key_code == 66 || event->key_code == 131)) {
-    DebugChromeOmniboxState(env, state->interactive_view_root);
-  }
   if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
     std::cerr << "ART Android KeyEvent action=" << event->action
               << " key=" << event->key_code
@@ -1708,13 +1669,34 @@ int32_t dispatch_key_v1(GraphicsState* state,
   return delivered ? 0 : 86;
 }
 
+int32_t pump_main_looper(GraphicsState* state) {
+  if (state == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
+  art::Thread* art_thread = darwin_art_process::owner_thread_for_callback();
+  if (art_thread == nullptr) return 72;
+  if (art::Thread::Current() != art_thread ||
+      art_thread->GetState() != art::ThreadState::kNative) {
+    return 73;
+  }
+  art::ScopedObjectAccess soa(art_thread);
+  JNIEnv* env = art_thread->GetJniEnv();
+  if (!DispatchDueMainMessages(env)) {
+    if (env->ExceptionCheck() && art_thread->GetException() != nullptr) {
+      std::cerr << "ART Android main Looper dispatch threw\n"
+                << art_thread->GetException()->Dump() << "\n";
+      art_thread->ClearException();
+    }
+    return 75;
+  }
+  ActivateCurrentHostSurfaces(state, env);
+  DebugWindowManagerViews(env);
+  return 0;
+}
+
 int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
   if (state == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_INVALID;
   if (frame_time_nanos <= 0) {
-    struct timespec now = {};
-    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 74;
-    frame_time_nanos = static_cast<jlong>(now.tv_sec) * 1000000000LL +
-                       static_cast<jlong>(now.tv_nsec);
+    frame_time_nanos = darwin_art::AndroidUptimeNanos();
+    if (frame_time_nanos <= 0) return 74;
   }
   art::Thread* art_thread = darwin_art_process::owner_thread_for_callback();
   if (art_thread == nullptr) return 72;
@@ -1739,7 +1721,8 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
   auto* animation_context = state->hwui_animation_context.get();
   auto* time_lord = state->hwui_time_lord.get();
   jobject render_node = state->gpu_render_node;
-  if (animation_context != nullptr && time_lord != nullptr &&
+  if (state->interactive_view_root == nullptr && animation_context != nullptr &&
+      time_lord != nullptr &&
       render_node != nullptr) {
     jclass render_node_class = env->FindClass("android/graphics/RenderNode");
     jfieldID native_render_node =
@@ -1769,6 +1752,9 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
       darwin_art::DispatchFrameworkPendingVsyncs(env, frame_time_nanos);
   bool ok = delivered_vsyncs >= 0 && !env->ExceptionCheck();
   if (ok) ok = DispatchDueMainMessages(env);
+  if (ok && delivered_vsyncs > 0 && state->interactive_root != nullptr) {
+    debug_product_view_root(env, state->interactive_root);
+  }
   if (!ok) {
     if (env->ExceptionCheck() && art_thread->GetException() != nullptr) {
       std::cerr << "ART Android frame pulse threw\n"
@@ -1778,13 +1764,13 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
       std::cerr << "ART Android frame pulse failed without a pending Java exception\n";
     }
   }
-  // Detached ViewRootImpl has no WindowManager traversal scheduler to turn an
-  // invalidated Android hierarchy into a new display list.  Input listeners
-  // still mutate the real APK views synchronously, so complete the same frame
-  // by recording/replaying the retained root after Choreographer callbacks.
-  // ACTION_DOWN/UP marked the RenderNode dirty; MOVE keeps the persistent
-  // replay path and avoids a full display-list rebuild.
-  if (ok && state->interactive_root != nullptr) {
+  // Product windows are owned by ViewRootImpl/ThreadedRenderer. Their
+  // Choreographer traversal records and submits the retained tree through the
+  // ANativeWindow queue above; replaying that root here would submit every
+  // frame twice and bypass HWUI's damage tracking. Only detached legacy probes
+  // retain the bounded host presentation path.
+  if (ok && state->interactive_root != nullptr &&
+      state->interactive_view_root == nullptr) {
     ok = present_content(state, env, nullptr, state->interactive_root,
                          state->interactive_width,
                          state->interactive_height) == JNI_TRUE &&
@@ -1793,6 +1779,20 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
       std::cerr << "ART Android frame presentation threw\n"
                 << art_thread->GetException()->Dump() << "\n";
       art_thread->ClearException();
+    }
+  }
+  // ViewRootImpl/RenderThread and the central SurfaceFlinger own recording,
+  // buffer submission, latching, and composition. The Darwin HWC backend must
+  // still scan the completed display IOSurface out to CAMetalLayer. This is a
+  // GPU texture blit only: it neither calls View.draw nor replays a RenderNode.
+  if (ok && state->interactive_view_root != nullptr &&
+      state->gpu_surface != nullptr) {
+    const DarwinArtSurfaceResult present =
+        darwin_art_surface_present(state->gpu_surface);
+    ok = present == DARWIN_ART_SURFACE_OK ||
+         present == DARWIN_ART_SURFACE_DRAWABLE_UNAVAILABLE;
+    if (!ok) {
+      std::cerr << "ART Android HWC scanout failed status=" << present << "\n";
     }
   }
   return ok ? 0 : 75;

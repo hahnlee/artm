@@ -22,6 +22,7 @@ int32_t dispatch_pointer_v2(GraphicsState* state,
 int32_t dispatch_key_v1(GraphicsState* state,
                         const DarwinArtKeyEventV1* event);
 int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos);
+int32_t pump_main_looper(GraphicsState* state);
 }  // namespace darwin_art_graphics
 
 extern "C" int32_t darwin_art_dispatch_pointer(uint32_t action, float x,

@@ -2,6 +2,7 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include "darwin_surface_internal.h"
+#include "darwin_android_time.h"
 
 #include <algorithm>
 #include <cmath>
@@ -38,15 +39,7 @@ bool IsMainThread() {
 }
 
 uint64_t AndroidEventTimeNanos() {
-  // NSEvent.timestamp uses AppKit's uptime domain, whose treatment of system
-  // sleep differs from CLOCK_MONOTONIC on macOS. Android InputReader and
-  // Chromium's base::TimeTicks share the latter domain; passing the AppKit
-  // value through unchanged can make an otherwise current key event appear
-  // several days older than the document loader and abort the renderer.
-  timespec now = {};
-  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
-  return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000000) +
-         static_cast<uint64_t>(now.tv_nsec);
+  return static_cast<uint64_t>(darwin_art::AndroidUptimeNanos());
 }
 
 bool IsValidDimension(uint32_t value) {
@@ -372,6 +365,9 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
       .version = 2,
       .size = static_cast<uint32_t>(sizeof(DarwinArtPointerEventV2)),
       .action = static_cast<uint32_t>(action),
+      // Android app players conventionally translate the primary host click
+      // into a touchscreen stream. A distinct mouse packet remains available
+      // in ABI v2 for explicit external-mouse integrations.
       .flags = 0,
       .sequence = _nextPointerSequence++,
       .event_time_nanos = event_time_nanos,

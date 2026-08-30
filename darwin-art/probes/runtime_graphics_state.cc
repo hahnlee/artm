@@ -112,6 +112,7 @@ void begin_activity_transition(GraphicsState* state, JNIEnv* env) {
   clear(&state->pointer_dispatch_root);
   clear(&state->pointer_dispatch_view_root);
   state->gpu_render_node_recorded = false;
+  state->gpu_last_traversal_barrier = -1;
   state->gpu_ripple_overlay_active = false;
   state->pointer_stream_active = false;
   state->pointer_click_candidate = false;

@@ -71,6 +71,18 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let icu_stubdata_archive_path = native_output_root.join(ICU_STUBDATA_FOUNDATION_ARCHIVE);
     let icu_init_archive_path = native_output_root.join(ICU_INIT_FOUNDATION_ARCHIVE);
     let runtime_library_path = native_output_root.join(GRAPHICS_RUNTIME_LIBRARY);
+    let surfaceflinger_frontend_archive_path =
+        native_output_root.join("surfaceflinger-core/libsurfaceflinger-frontend-darwin.a");
+    let surfaceflinger_binder_archive_path =
+        native_output_root.join("surfaceflinger-core/libbinder-darwin.a");
+    let surfaceflinger_gui_archive_path =
+        native_output_root.join("surfaceflinger-core/libgui-transaction-darwin.a");
+    let surfaceflinger_fence_archive_path =
+        native_output_root.join("surfaceflinger-core/libui-fence-darwin.a");
+    let surfaceflinger_runtime_probe_path =
+        native_output_root.join("surfaceflinger-core/surfaceflinger-transaction-runtime");
+    let graphics_runtime_closure_path = native_output_root
+        .join("graphics-runtime-closure-audit/android16-graphics-runtime-closure.o");
     let bionic_provider_root = native_output_root.join("bionic-runtime-provider-closure");
     let bionic_rust_provider_archive_path =
         bionic_provider_root.join("libdarwin-art-bionic-rust-providers.a");
@@ -126,6 +138,12 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let icu_stubdata_archive = ninja_path(&icu_stubdata_archive_path);
     let icu_init_archive = ninja_path(&icu_init_archive_path);
     let runtime_library = ninja_path(&runtime_library_path);
+    let surfaceflinger_frontend_archive = ninja_path(&surfaceflinger_frontend_archive_path);
+    let surfaceflinger_binder_archive = ninja_path(&surfaceflinger_binder_archive_path);
+    let surfaceflinger_gui_archive = ninja_path(&surfaceflinger_gui_archive_path);
+    let surfaceflinger_fence_archive = ninja_path(&surfaceflinger_fence_archive_path);
+    let surfaceflinger_runtime_probe = ninja_path(&surfaceflinger_runtime_probe_path);
+    let graphics_runtime_closure = ninja_path(&graphics_runtime_closure_path);
     let bionic_rust_provider_archive = ninja_path(&bionic_rust_provider_archive_path);
     let bionic_native_provider_archive = ninja_path(&bionic_native_provider_archive_path);
     let bionic_float_provider_archive = ninja_path(&bionic_float_provider_archive_path);
@@ -190,6 +208,48 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         foundation_input_list(&root, &foundation_inputs, FoundationFamily::GraphicsJni);
     let icu_foundation_input_list =
         foundation_input_list(&root, &foundation_inputs, FoundationFamily::Icu);
+    let graphics_runtime_closure_inputs = [
+        "_build/android-graphics-jni/libandroid-graphics-layoutlib-registrar-darwin.a",
+        "_build/android-graphics-jni/libandroid-graphics-jni-darwin.a",
+        "_build/hwui-static-foundation/libhwui-static-darwin.a",
+        "_build/hwui-static-foundation/libandroid-graphics-apex-common-darwin.a",
+        "_build/skia-metal-gpu/libskia.a",
+        "_build/skia-metal-gpu/libskcms.a",
+        "_build/androidfw-foundation/libandroidfw-darwin.a",
+        "_build/hostgraphics/libhostgraphics-darwin.a",
+        "_build/codec-foundation/libimage_io-darwin.a",
+        "_build/codec-foundation/libmodpb64-darwin.a",
+        "_build/codec-foundation/libultrahdr-darwin.a",
+        "_build/codec-foundation/libjpegencoder-darwin.a",
+        "_build/codec-foundation/libjpegdecoder-darwin.a",
+        "_build/codec-foundation/libjpeg-darwin.a",
+        "_build/minikin-foundation/libminikin.a",
+        "_build/harfbuzz-foundation/libharfbuzz_ng-darwin.a",
+        "_build/graphics-codecs/libft2-darwin.a",
+        "_build/ui-types-foundation/libui-types.a",
+        "_build/nativehelper-device-foundation/libnativehelper-device-darwin.a",
+        "_build/nativehelper-foundation/libnativehelper_any_vm.a",
+        "_build/graphics-foundations/libutils-darwin.a",
+        "_build/graphics-foundations/libutils-binder-darwin.a",
+        "_build/graphics-foundations/libcutils-darwin.a",
+        "_build/graphics-foundations/liblog-darwin.a",
+        "_build/libbase-foundation/libandroid-base-darwin.a",
+        "_build/ziparchive-incfs/libziparchive-for-incfs-darwin.a",
+        "_build/graphics-codecs/libpng-darwin.a",
+        "_build/graphics-codecs/libz-darwin.a",
+        "_build/icu-foundation/libicui18n-darwin.a",
+        "_build/icu-foundation/libicuuc-common-darwin.a",
+        "_build/icu-foundation/libandroidicuinit-darwin.a",
+        "_build/icu-foundation/libicuuc-stubdata-darwin.a",
+        "_build/angle-source/out/DarwinArtRelease/libEGL.dylib",
+        "_build/angle-source/out/DarwinArtRelease/libGLESv2.dylib",
+        "tools/audit-android16-graphics-closure.sh",
+        "upstream/android16-graphics-closure-audit.lock",
+    ]
+    .iter()
+    .map(|path| ninja_path(&root.join(path)))
+    .collect::<Vec<_>>()
+    .join(" ");
     // The provider closure is linked directly into the final runtime dylib,
     // rather than copied into the large ART/HWUI bootstrap archive. Keep it
     // on its own narrow Ninja edge so a Rust facade edit rebuilds four small
@@ -210,6 +270,9 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
                     || matches!(
                         name,
                         "android-bionic-pthread-provider"
+                            | "android-aaudio-provider"
+                            | "android-binder-ndk-provider"
+                            | "android-dso-namespace"
                             | "android-dl-iterate-phdr-provider"
                             | "android-liblog-exec-provider"
                     ))
@@ -661,6 +724,22 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push('\n');
     graph.push_str("build foundation: phony graphics-foundation icu-foundation\n\n");
 
+    // The final dylib consumes the force-linked graphics closure object, not
+    // the individual archive members directly. Give that object a real
+    // producer edge so a rebuilt HWUI, Skia, GraphicsJNI, or text archive can
+    // never leave a stale closure in the developer inner loop.
+    graph.push_str("rule graphics_runtime_closure\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && tools/audit-android16-graphics-closure.sh --art-runtime\n");
+    graph.push_str("  description = LINK Android graphics runtime closure\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&graphics_runtime_closure);
+    graph.push_str(": graphics_runtime_closure ");
+    graph.push_str(&graphics_runtime_closure_inputs);
+    graph.push('\n');
+
     graph.push_str("rule bionic_provider_closure\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
@@ -1049,6 +1128,16 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     // The fast audit consumes these foundation artifacts directly.  Keep them
     // as real Ninja prerequisites so a missing or rebuilt foundation cannot
     // race the final dylib link/audit edge.
+    graph.push_str(&graphics_runtime_closure);
+    graph.push(' ');
+    graph.push_str(&surfaceflinger_frontend_archive);
+    graph.push(' ');
+    graph.push_str(&surfaceflinger_binder_archive);
+    graph.push(' ');
+    graph.push_str(&surfaceflinger_gui_archive);
+    graph.push(' ');
+    graph.push_str(&surfaceflinger_fence_archive);
+    graph.push(' ');
     graph.push_str(&hwui_foundation_archive);
     graph.push(' ');
     graph.push_str(&hwui_apex_foundation_archive);
@@ -1115,6 +1204,58 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&bootstrap_cli_target);
     graph.push(' ');
     graph.push_str(&runtime_library);
+    graph.push('\n');
+    graph.push_str("\nrule surfaceflinger_core\n");
+    graph.push_str("  command = ");
+    graph.push_str(&shell_quote(&format!(
+        "{root_for_shell}/tools/build-android16-surfaceflinger-core.sh"
+    )));
+    graph.push_str("\n  description = AOSP SurfaceFlinger frontend (Darwin)\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&surfaceflinger_frontend_archive);
+    graph.push_str(" | ");
+    for output in [
+        &surfaceflinger_binder_archive,
+        &surfaceflinger_gui_archive,
+        &surfaceflinger_fence_archive,
+        &surfaceflinger_runtime_probe,
+    ] {
+        graph.push_str(output);
+        graph.push(' ');
+    }
+    graph.push_str(": surfaceflinger_core ");
+    for input in [
+        "tools/build-android16-surfaceflinger-core.sh",
+        "tools/sync-android16-surfaceflinger-core.sh",
+        "upstream/android16-surfaceflinger-core.lock",
+        "patches/frameworks-native/0001-darwin-surfaceflinger-core.patch",
+        "compat/surfaceflinger/tracing_perfetto.h",
+        "compat/surfaceflinger/transaction_bridge.cc",
+        "compat/surfaceflinger/transaction_bridge.h",
+        "probes/surfaceflinger_transaction_handler_compile.cc",
+        "probes/surfaceflinger_transaction_handler_runtime.cc",
+        "compat/surfaceflinger/binder_os_darwin.cc",
+        "compat/surfaceflinger/binder_socket_darwin.h",
+        "compat/surfaceflinger/endian.h",
+        "compat/surfaceflinger/fence_sync_darwin.cc",
+        "compat/surfaceflinger/sync/sync.h",
+    ] {
+        graph.push_str(&ninja_path(&root.join(input)));
+        graph.push(' ');
+    }
+    graph.push('\n');
+    graph.push_str("build surfaceflinger-core: phony ");
+    for output in [
+        &surfaceflinger_frontend_archive,
+        &surfaceflinger_binder_archive,
+        &surfaceflinger_gui_archive,
+        &surfaceflinger_fence_archive,
+        &surfaceflinger_runtime_probe,
+    ] {
+        graph.push_str(output);
+        graph.push(' ');
+    }
     graph.push('\n');
     graph.push_str("build graph-input-digest: phony ");
     graph.push_str(&ninja_path(&digest_path));

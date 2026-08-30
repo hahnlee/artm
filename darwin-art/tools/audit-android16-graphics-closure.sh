@@ -70,10 +70,10 @@ fi
 archive_specs=(
   'F|1|_build/android-graphics-jni/libandroid-graphics-layoutlib-registrar-darwin.a'
   'F|62|_build/android-graphics-jni/libandroid-graphics-jni-darwin.a'
-  'F|81|_build/hwui-static-foundation/libhwui-static-darwin.a'
+  'F|88|_build/hwui-static-foundation/libhwui-static-darwin.a'
   'F|5|_build/hwui-static-foundation/libandroid-graphics-apex-common-darwin.a'
-  'F|652|_build/skia-hwui-force-load/libskia.a'
-  'N|2|_build/skia-hwui-force-load/libskcms.a'
+  'F|956|_build/skia-metal-gpu/libskia.a'
+  'N|2|_build/skia-metal-gpu/libskcms.a'
   'N|36|_build/androidfw-foundation/libandroidfw-darwin.a'
   'N|5|_build/hostgraphics/libhostgraphics-darwin.a'
   'N|36|_build/codec-foundation/libimage_io-darwin.a'
@@ -211,6 +211,13 @@ cxx="$(command -v clang++ || true)"
 [[ -n "$cxx" ]] || { echo "graphics-closure: clang++ is required" >&2; exit 2; }
 sdk_root="$(xcrun --sdk macosx --show-sdk-path)"
 sdk_version="$(xcrun --sdk macosx --show-sdk-version)"
+angle_dir="$project_root/_build/angle-source/out/DarwinArtRelease"
+for angle_library in libEGL.dylib libGLESv2.dylib; do
+  if [[ ! -f "$angle_dir/$angle_library" ]]; then
+    echo "graphics-closure: missing project ANGLE provider $angle_dir/$angle_library" >&2
+    exit 2
+  fi
+done
 closure_object="$stage_dir/$closure_object_name"
 "$ld_bin" -r -arch arm64 \
   -platform_version macos "$sdk_version" "$sdk_version" \
@@ -274,11 +281,11 @@ printf '%s\n' 'int main() { return 0; }' > "$main_source"
 "$cxx" -std=c++20 -arch arm64 -mmacosx-version-min="$sdk_version" \
   -c "$main_source" -o "$main_object"
 
-# android_graphics_jni obtains ANativeWindow_fromSurface from libandroid on an
-# Android device. The Darwin ART executable owns the equivalent libandroid
-# compatibility provider, outside this graphics-only archive closure. Model
-# that single, named executable seam explicitly so every other new import
-# remains an audit failure.
+# Android devices obtain these symbols from libandroid, libnativewindow,
+# libsurfacetexture and libsync. Darwin ART deliberately owns their equivalent
+# compatibility providers outside this graphics-only archive closure. Model
+# every named executable seam explicitly so any other new import remains an
+# audit failure; never use a broad undefined-symbol allowance here.
 executable_provider_objects=()
 if [[ "$audit_mode" == art-runtime ]]; then
   runtime_surface_provider_source="$stage_dir/runtime-surface-provider.cpp"
@@ -290,13 +297,59 @@ if [[ "$audit_mode" == art-runtime ]]; then
   "$cxx" -std=c++20 -arch arm64 -mmacosx-version-min="$sdk_version" \
     -c "$runtime_surface_provider_source" -o "$runtime_surface_provider_object"
   executable_provider_objects+=( "$runtime_surface_provider_object" )
+
+  runtime_graphics_provider_source="$stage_dir/runtime-graphics-providers.s"
+  runtime_graphics_provider_object="$stage_dir/runtime-graphics-providers.o"
+  printf '%s\n' \
+    '.text' \
+    '.p2align 2' \
+    '.globl _AHardwareBuffer_acquire' \
+    '_AHardwareBuffer_acquire:' \
+    '  ret' \
+    '.globl _AHardwareBuffer_describe' \
+    '_AHardwareBuffer_describe:' \
+    '  ret' \
+    '.globl _AHardwareBuffer_release' \
+    '_AHardwareBuffer_release:' \
+    '  ret' \
+    '.globl _ANativeWindow_setBuffersDataSpace' \
+    '_ANativeWindow_setBuffersDataSpace:' \
+    '  mov x0, #0' \
+    '  ret' \
+    '.globl _sync_wait' \
+    '_sync_wait:' \
+    '  mov x0, #0' \
+    '  ret' \
+    '.globl __Z13eglBeginFramePvS_' \
+    '__Z13eglBeginFramePvS_:' \
+    '  ret' \
+    '.globl __ZN7android29ASurfaceTexture_dequeueBufferEP15ASurfaceTexturePiP19android_dataspace_tP16AHdrMetadataTypeP25android_cta861_3_metadataP26android_smpte2086_metadataPfPjPbPFibPPvSF_S2_SE_EPFiiSE_ESE_P5ARect' \
+    '__ZN7android29ASurfaceTexture_dequeueBufferEP15ASurfaceTexturePiP19android_dataspace_tP16AHdrMetadataTypeP25android_cta861_3_metadataP26android_smpte2086_metadataPfPjPbPFibPPvSF_S2_SE_EPFiiSE_ESE_P5ARect:' \
+    '  mov x0, #0' \
+    '  ret' \
+    '.globl __ZN7android37ASurfaceTexture_takeConsumerOwnershipEP15ASurfaceTexture' \
+    '__ZN7android37ASurfaceTexture_takeConsumerOwnershipEP15ASurfaceTexture:' \
+    '  ret' \
+    '.globl __ZN7android39ASurfaceTexture_getCurrentTextureTargetEP15ASurfaceTexture' \
+    '__ZN7android39ASurfaceTexture_getCurrentTextureTargetEP15ASurfaceTexture:' \
+    '  mov x0, #3553' \
+    '  ret' \
+    '.globl __ZN7android40ASurfaceTexture_releaseConsumerOwnershipEP15ASurfaceTexture' \
+    '__ZN7android40ASurfaceTexture_releaseConsumerOwnershipEP15ASurfaceTexture:' \
+    '  ret' \
+    > "$runtime_graphics_provider_source"
+  "$cxx" -arch arm64 -mmacosx-version-min="$sdk_version" \
+    -c "$runtime_graphics_provider_source" -o "$runtime_graphics_provider_object"
+  executable_provider_objects+=( "$runtime_graphics_provider_object" )
 fi
 
 set +e
 "$cxx" -arch arm64 -mmacosx-version-min="$sdk_version" \
-  "$main_object" "$closure_object" "${executable_provider_objects[@]}" \
+  "$main_object" "$closure_object" \
+  ${executable_provider_objects[@]+"${executable_provider_objects[@]}"} \
   -framework CoreFoundation -framework CoreGraphics -framework ImageIO \
-  -framework Foundation -framework AppKit \
+  -framework Foundation -framework AppKit -framework Metal -framework QuartzCore \
+  -L"$angle_dir" -Wl,-rpath,"$angle_dir" -lEGL -lGLESv2 \
   -L/opt/homebrew/lib -llz4 -lz \
   -o "$closure_executable" 2> "$stage_dir/executable-link.err"
 executable_link_status=$?
@@ -350,7 +403,8 @@ if [[ "$missing_symbol_count" != 0 || "$expected_missing_module_count" != 0 ]]; 
   exit 3
 fi
 
-"$closure_executable"
+DYLD_LIBRARY_PATH="$angle_dir${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" \
+  "$closure_executable"
 linked_libraries="$(otool -L "$closure_executable")"
 if grep -E '(CoreText|libicu|libfreetype|libpng|libfmt|/opt/homebrew/opt/(icu|freetype|libpng|fmt))' \
   <<< "$linked_libraries" >/dev/null; then

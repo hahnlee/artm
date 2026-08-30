@@ -1,5 +1,8 @@
 use crate::config::{HostError, HostOutcome, RunOptions};
-use crate::gpu_input::{dispatch_queued_events, dispatch_synthetic_keys, pump_frame_with_latency};
+use crate::gpu_input::{
+    dispatch_queued_events, dispatch_synthetic_keys, pulse_frame_with_latency,
+    pump_frame_with_latency, pump_main_looper,
+};
 use crate::gpu_test_config::GpuTestConfig;
 use crate::runtime::HostRuntime;
 use crate::surface::owned_surface_pump_events;
@@ -30,7 +33,6 @@ pub(super) fn run(
         }
     }
     let mut frames_presented = 1_u64;
-    let mut remaining = options.visible_seconds;
     let mut loop_error: Option<HostError> = None;
     let host_loop_clock = Instant::now();
     let debug_latency = std::env::var_os("DARWIN_ART_DEBUG_INPUT_LATENCY").is_some();
@@ -69,11 +71,12 @@ pub(super) fn run(
             eprintln!("DARWIN_ART gpu test resize={width}x{height}");
         }
     }
-    // Keep the synthetic input path on the same owner thread as ART
-    // and the Metal surface.  Each 16 ms pump is the host-side frame
-    // cadence: the pointer state is dispatched into Android, then
-    // View.draw()/HWUI presents the updated RenderNode directly to
-    // the CAMetalLayer drawable.  No CPU framebuffer is involved.
+    // Keep native and synthetic input on the same owner thread as ART and the
+    // Metal surface. The host loop is only the display-clock/event source: a
+    // pump publishes a pending vsync, then Android's normal
+    // DisplayEventReceiver -> Choreographer -> ViewRootImpl -> ThreadedRenderer
+    // path decides whether there is damage to record and submit. Product APKs
+    // are never redrawn by a host-side View.draw() poll.
     // Acceptance scripts may need ordinary taps to reach a gesture surface
     // first (for example selecting Calendar's Month view). This remains the
     // same MotionEvent ABI path; it only schedules a drag after the tap list.
@@ -103,7 +106,7 @@ pub(super) fn run(
         event.size = std::mem::size_of::<PointerEventV2>() as u32;
         event.action = action;
         // Zero delegates timestamping to the native input bridge, which uses
-        // CLOCK_MONOTONIC just like NSEvent.timestamp. An Instant elapsed from
+        // Android's suspend-excluding uptime domain. An Instant elapsed from
         // this loop's start is not Android uptime and is treated as stale by
         // ViewRoot's input stages.
         event.event_time_nanos = 0;
@@ -271,12 +274,18 @@ pub(super) fn run(
     if loop_error.is_none()
         && let Some(sequence) = test_tap_sequence.as_ref()
     {
+        let display_interval = Duration::from_nanos(16_666_667);
+        let mut next_vsync = Instant::now();
         for &(x, y, delay_ms) in sequence.iter().skip(1) {
             let wait_started = Instant::now();
             while wait_started.elapsed() < Duration::from_millis(delay_ms) && loop_error.is_none() {
                 let remaining =
                     Duration::from_millis(delay_ms).saturating_sub(wait_started.elapsed());
-                let slice_ms = remaining.as_millis().min(16).max(1) as u64;
+                // AppKit and Android share the process main thread today, but
+                // Handler/Binder work must not be throttled to display rate.
+                // Service the owner Looper at a short event-loop cadence and
+                // publish Choreographer vsync only at the display cadence.
+                let slice_ms = remaining.as_millis().min(2).max(1) as u64;
                 let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
                 if pump_status != 0 {
                     loop_error = Some(HostError::SurfaceFailed {
@@ -289,14 +298,25 @@ pub(super) fn run(
                     loop_error = Some(error);
                     break;
                 }
-                if let Err(error) = pump_frame_with_latency(
-                    runtime,
-                    debug_latency,
-                    &mut last_input_dispatch,
-                    &mut frame_latencies_us,
-                ) {
+                if let Err(error) = pump_main_looper(runtime) {
                     loop_error = Some(error);
                     break;
+                }
+                let now = Instant::now();
+                if now >= next_vsync {
+                    if let Err(error) = pulse_frame_with_latency(
+                        runtime,
+                        debug_latency,
+                        &mut last_input_dispatch,
+                        &mut frame_latencies_us,
+                    ) {
+                        loop_error = Some(error);
+                        break;
+                    }
+                    next_vsync += display_interval;
+                    while next_vsync <= now {
+                        next_vsync += display_interval;
+                    }
                 }
             }
             if loop_error.is_some() {
@@ -553,7 +573,18 @@ pub(super) fn run(
             }
         }
     }
-    while remaining > 0.0 && !crate::process_signal::termination_requested() {
+    // Bound the visible lifetime by a monotonic deadline. Framework work can
+    // legitimately take longer than one display interval (for example a
+    // Binder service retry while Chromium initializes Graphite). Subtracting
+    // a nominal 16 ms per iteration made --window-seconds describe a frame
+    // count instead of wall time and could stretch a 9-second acceptance run
+    // into minutes.
+    let visible_deadline = Instant::now()
+        .checked_add(Duration::from_secs_f64(options.visible_seconds))
+        .unwrap_or_else(Instant::now);
+    let display_interval = Duration::from_nanos(16_666_667);
+    let mut next_vsync = Instant::now();
+    while Instant::now() < visible_deadline && !crate::process_signal::termination_requested() {
         if loop_error.is_none()
             && let (Some((width, height)), Some(after_ms)) =
                 (pending_test_resize, test_resize_after_ms)
@@ -574,7 +605,13 @@ pub(super) fn run(
                 pending_test_resize = None;
             }
         }
-        let slice = remaining.min(0.016);
+        let slice = visible_deadline
+            .saturating_duration_since(Instant::now())
+            .min(Duration::from_millis(2))
+            .as_secs_f64();
+        if slice <= 0.0 {
+            break;
+        }
         let pump_status = owned_surface_pump_events(runtime, slice);
         if pump_status == 7 {
             let _ = dispatch_queued_events(runtime);
@@ -596,14 +633,24 @@ pub(super) fn run(
             }
             Err(error) => loop_error = Some(error),
         }
-        if loop_error.is_none() {
-            if let Err(error) = pump_frame_with_latency(
+        if loop_error.is_none()
+            && let Err(error) = pump_main_looper(runtime)
+        {
+            loop_error = Some(error);
+        }
+        let now = Instant::now();
+        if loop_error.is_none() && now >= next_vsync {
+            if let Err(error) = pulse_frame_with_latency(
                 runtime,
                 debug_latency,
                 &mut last_input_dispatch,
                 &mut frame_latencies_us,
             ) {
                 loop_error = Some(error);
+            }
+            next_vsync += display_interval;
+            while next_vsync <= now {
+                next_vsync += display_interval;
             }
         }
         // The standalone capture gate has no Android ViewRoot to
@@ -627,7 +674,6 @@ pub(super) fn run(
         if loop_error.is_some() {
             break;
         }
-        remaining -= slice;
     }
     if crate::process_signal::termination_requested() {
         eprintln!("DARWIN_ART host received graceful termination request");

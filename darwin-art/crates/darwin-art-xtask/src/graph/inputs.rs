@@ -236,6 +236,12 @@ pub(crate) fn collect_files(directory: &Path, root: &Path, output: &mut Vec<Path
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
+            if matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("target" | ".git" | "__pycache__")
+            ) {
+                continue;
+            }
             collect_files(&path, root, output);
         } else if path.is_file()
             && let Ok(relative) = path.strip_prefix(root)

@@ -553,20 +553,12 @@ bool render_node_to_surface(
                              : gather_transparent_regions(env, root_view);
   const bool embedded_composited =
       darwin_art_surface_gpu_composite_embedded(surface, canvas);
-  // ViewRootImpl retains the window's transparent region until a later
-  // traversal publishes a replacement. Our standalone recording pass can run
-  // between SurfaceView's state updates, where gatherTransparentRegion()
-  // transiently reports empty even though the child SurfaceControl and its
-  // last buffer are still visible. Preserve the last non-empty region for the
-  // same embedded producer, matching WindowManager's retained-region contract.
-  static thread_local std::vector<SkRect> retained_transparent_regions;
-  if (!embedded_composited) {
-    retained_transparent_regions.clear();
-  } else if (!transparent_regions.empty()) {
-    retained_transparent_regions = transparent_regions;
-  } else if (!node->hasHolePunches()) {
-    transparent_regions = retained_transparent_regions;
-  }
+  // ViewRootImpl's current transparent region is authoritative for the parent
+  // buffer. Retaining an older hole after a traversal is not equivalent to
+  // SurfaceFlinger retention: it lets a still-buffered, now-covered child
+  // SurfaceView punch through the new parent frame. Chromium's tab switcher
+  // intentionally keeps its web surface alive while replacing the hole with
+  // opaque HWUI content, so always consume the region from this traversal.
   if (std::getenv("DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS") != nullptr) {
     static thread_local size_t last_region_count = std::numeric_limits<size_t>::max();
     static thread_local bool last_embedded = false;

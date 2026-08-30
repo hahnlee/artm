@@ -236,6 +236,17 @@ int32_t pump_frame(darwin_art_graphics_session_t* session,
   return pump_frame(&session->state, frame_time_nanos);
 }
 
+int32_t pump_main_looper(darwin_art_graphics_session_t* session) {
+  {
+    std::lock_guard<std::mutex> lock(g_session_mutex);
+    const int32_t active_status = check_active_locked(session);
+    if (active_status != 0) return active_status;
+    const int32_t owner_status = check_owner(session);
+    if (owner_status != 0) return owner_status;
+  }
+  return pump_main_looper(&session->state);
+}
+
 }  // namespace darwin_art_graphics
 
 extern "C" DARWIN_ART_EXPORT darwin_art_graphics_session_t*
@@ -273,4 +284,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_graphics_session_dispatch_key_v1
 extern "C" DARWIN_ART_EXPORT int32_t darwin_art_graphics_session_pump_frame(
     darwin_art_graphics_session_t* session, int64_t frame_time_nanos) {
   return darwin_art_graphics::pump_frame(session, frame_time_nanos);
+}
+
+extern "C" DARWIN_ART_EXPORT int32_t
+darwin_art_graphics_session_pump_main_looper(
+    darwin_art_graphics_session_t* session) {
+  return darwin_art_graphics::pump_main_looper(session);
 }

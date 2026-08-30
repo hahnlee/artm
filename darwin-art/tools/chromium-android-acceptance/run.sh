@@ -54,6 +54,9 @@ curl --silent --fail --cacert "$(mkcert -CAROOT)/rootCA.pem" \
   "https://127.0.0.1:$port/index.html" | rg -F 'Darwin ART Chromium E2E' >/dev/null
 
 common_command_line="--no-first-run --disable-fre --disable-background-networking"
+if [[ -n "${DARWIN_ART_CHROMIUM_ACCEPTANCE_EXTRA_SWITCHES:-}" ]]; then
+  common_command_line="$common_command_line $DARWIN_ART_CHROMIUM_ACCEPTANCE_EXTRA_SWITCHES"
+fi
 
 env DARWIN_ART_APP_DATA_ROOT="$app_data" \
   DARWIN_ART_APP_COMMAND_LINE="$common_command_line" \
@@ -129,9 +132,19 @@ if rg -a -- '--single-process' "$output/navigation.log" "$log" "$output/webgl.lo
   echo "forbidden --single-process flag detected" >&2
   exit 1
 fi
+if rg -a -- '--disable-features=[^ ]*(SkiaGraphite|EnableDrDc)' \
+    "$output/navigation.log" "$log" "$output/webgl.log" >/dev/null; then
+  echo "forbidden Chromium graphics compatibility flag detected" >&2
+  exit 1
+fi
 if rg -a 'Fatal signal|libc\+\+abi: terminating' \
     "$output/navigation.log" "$log" "$output/webgl.log" >/dev/null; then
   echo "Chromium or an Android service process crashed during acceptance" >&2
+  exit 1
+fi
+if rg -a 'Could not find SharedImageBackingFactory|Failed to create Dawn context provider' \
+    "$output/navigation.log" "$log" "$output/webgl.log" >/dev/null; then
+  echo "Chromium GPU service could not satisfy a requested SharedImage/Graphite contract" >&2
   exit 1
 fi
 

@@ -23,6 +23,7 @@ pub(super) fn validate_graphics_runtime_link(
         "_darwin_art_graphics_session_dispatch_pointer_v2",
         "_darwin_art_graphics_session_dispatch_key_v1",
         "_darwin_art_graphics_session_pump_frame",
+        "_darwin_art_graphics_session_pump_main_looper",
         "_darwin_art_surface_create",
         "_darwin_art_surface_resize",
         "_darwin_art_surface_get_size",
@@ -120,6 +121,10 @@ pub(super) fn validate_graphics_runtime_link(
         "TrampolineEntryMask",
         "IsTrampolineEntry",
         "TrampolineLiveCount",
+        "android::uirenderer::renderthread::RenderThread::threadLoop()",
+        "android::uirenderer::renderthread::RenderThread::requireGlContext()",
+        "android::uirenderer::renderthread::RenderThread::requireGrContext()",
+        "android::uirenderer::renderthread::RenderThread::postFrameCallback",
     ] {
         if !all_symbols.contains(registrar) {
             return Err(format!("real-graphics Runtime lacks registrar symbol {registrar}").into());
@@ -162,12 +167,30 @@ pub(super) fn validate_graphics_runtime_link(
         return Err("real-graphics registrar is not the verified 51-class set".into());
     }
     let dependencies = command_output(Command::new("otool").arg("-L").arg(runtime_library))?;
+    for required in ["@rpath/libEGL.dylib", "@rpath/libGLESv2.dylib"] {
+        if !dependencies.contains(required) {
+            return Err(format!("real-graphics Runtime lacks ANGLE dependency: {required}").into());
+        }
+    }
     for forbidden in ["CoreText", "libicu", "libfmt", "libfreetype"] {
         if dependencies.contains(forbidden) {
             return Err(format!("forbidden real-graphics host dependency: {forbidden}").into());
         }
     }
     let link_map_contents = fs::read_to_string(link_map)?;
+    if !link_map_contents.contains("(renderthread_RenderThread.cpp.o)")
+        || link_map_contents.contains("(platform_host_renderthread_RenderThread.cpp.o)")
+    {
+        return Err("real-graphics Runtime did not link the AOSP RenderThread owner".into());
+    }
+    let device_info_command = fs::read_to_string(
+        root.join("_build/hwui-static-foundation/objects/DeviceInfo.cpp.o.command"),
+    )?;
+    if device_info_command.contains("HWUI_NULL_GPU")
+        || device_info_command.contains("NULL_GPU_MAX_TEXTURE_SIZE")
+    {
+        return Err("real-graphics HWUI was compiled with the null-GPU contract".into());
+    }
     if link_map_contents.contains("/opt/homebrew/opt/icu")
         || link_map_contents.contains("/opt/homebrew/Cellar/icu")
         || link_map_contents.contains("/opt/homebrew/opt/fmt")

@@ -1,4 +1,5 @@
 #include "darwin_libcore_natives.h"
+#include "darwin_android_time.h"
 #include "darwin_framework_natives.h"
 #include "darwin_libcore_filesystem_bridge.h"
 
@@ -541,9 +542,7 @@ jlong SystemCurrentTimeMillis(JNIEnv*, jclass) {
 }
 
 jlong SystemNanoTime(JNIEnv*, jclass) {
-  return std::chrono::duration_cast<std::chrono::nanoseconds>(
-             std::chrono::steady_clock::now().time_since_epoch())
-      .count();
+  return darwin_art::AndroidUptimeNanos();
 }
 
 #if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)

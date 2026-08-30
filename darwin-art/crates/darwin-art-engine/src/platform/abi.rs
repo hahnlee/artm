@@ -6,11 +6,12 @@ use std::path::Path;
 use darwin_art_engine_sys::{
     GraphicsSessionCloseFn, GraphicsSessionCreateFn, GraphicsSessionDestroyFn,
     GraphicsSessionDispatchKeyV1Fn, GraphicsSessionDispatchPointerFn,
-    GraphicsSessionDispatchPointerV2Fn, GraphicsSessionPumpFrameFn, ProviderClearHooksFn,
-    ProviderInstallHooksFn, ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn,
-    ShutdownProcessFn, SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn, SurfaceGetSizeFn,
-    SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn, SurfaceNextPointerEventV2Fn,
-    SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn, SurfaceUpdateFn,
+    GraphicsSessionDispatchPointerV2Fn, GraphicsSessionPumpFrameFn,
+    GraphicsSessionPumpMainLooperFn, ProviderClearHooksFn, ProviderInstallHooksFn,
+    ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn, ShutdownProcessFn,
+    SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn, SurfaceGetSizeFn, SurfaceNextKeyEventV1Fn,
+    SurfaceNextPointerEventFn, SurfaceNextPointerEventV2Fn, SurfacePresentFn, SurfacePumpEventsFn,
+    SurfaceResizeFn, SurfaceUpdateFn,
 };
 
 #[derive(Clone, Copy)]
@@ -42,6 +43,7 @@ pub(crate) struct GraphicsSymbols {
     pub dispatch_pointer: Option<GraphicsSessionDispatchPointerFn>,
     pub dispatch_pointer_v2: Option<GraphicsSessionDispatchPointerV2Fn>,
     pub dispatch_key_v1: Option<GraphicsSessionDispatchKeyV1Fn>,
+    pub pump_main_looper: Option<GraphicsSessionPumpMainLooperFn>,
     pub pump_frame: Option<GraphicsSessionPumpFrameFn>,
 }
 
@@ -108,6 +110,9 @@ impl LoadedEngine {
                         .ok(),
                     dispatch_key_v1: library
                         .symbol(b"darwin_art_graphics_session_dispatch_key_v1\0")
+                        .ok(),
+                    pump_main_looper: library
+                        .symbol(b"darwin_art_graphics_session_pump_main_looper\0")
                         .ok(),
                     pump_frame: library
                         .symbol(b"darwin_art_graphics_session_pump_frame\0")

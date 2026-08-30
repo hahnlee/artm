@@ -14,6 +14,21 @@ pub(super) fn pump_frame_with_latency(
     last_input_dispatch: &mut Option<Instant>,
     frame_latencies_us: &mut Vec<u64>,
 ) -> Result<(), HostError> {
+    pump_main_looper(runtime)?;
+    pulse_frame_with_latency(
+        runtime,
+        debug_latency,
+        last_input_dispatch,
+        frame_latencies_us,
+    )
+}
+
+pub(super) fn pulse_frame_with_latency(
+    runtime: &mut HostRuntime,
+    debug_latency: bool,
+    last_input_dispatch: &mut Option<Instant>,
+    frame_latencies_us: &mut Vec<u64>,
+) -> Result<(), HostError> {
     let pulse_status = runtime
         .graphics()
         .map_or(-1, |graphics| graphics.pump_frame(0));
@@ -22,6 +37,16 @@ pub(super) fn pump_frame_with_latency(
     }
     if debug_latency && let Some(dispatched_at) = last_input_dispatch.take() {
         frame_latencies_us.push(dispatched_at.elapsed().as_micros() as u64);
+    }
+    Ok(())
+}
+
+pub(super) fn pump_main_looper(runtime: &mut HostRuntime) -> Result<(), HostError> {
+    let status = runtime
+        .graphics()
+        .map_or(-1, darwin_art_engine::GraphicsSession::pump_main_looper);
+    if status != 0 {
+        return Err(HostError::RuntimeFailed(status));
     }
     Ok(())
 }

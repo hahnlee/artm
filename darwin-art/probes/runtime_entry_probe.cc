@@ -43,6 +43,7 @@
 #include "runtime_graphics_phase.h"
 #include "runtime_jni_acceptance_probe.h"
 #include "runtime_registration_phase.h"
+#include "surfaceflinger/service_darwin.h"
 #include "runtime_app_bootstrap.h"
 #include "runtime_app_presentation.h"
 #include "handle_scope-inl.h"
@@ -540,6 +541,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   }
 
   if (run_system_server) {
+    if (!darwin_art_surfaceflinger_service_start()) {
+      std::cerr << "ART system_server-lite: SurfaceFlinger service setup failed\n";
+      return 70;
+    }
     if (darwin_art_install_context_loader(env, app_loader_ref) != 0) {
       std::cerr << "ART system_server-lite: ClassLoader setup failed\n";
       return 70;

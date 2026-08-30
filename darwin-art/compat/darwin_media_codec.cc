@@ -7,10 +7,12 @@
 #include <VideoToolbox/VideoToolbox.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <deque>
 #include <iterator>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -21,6 +23,7 @@ namespace {
 constexpr int32_t kInfoTryAgainLater = -1;
 constexpr int32_t kInfoOutputFormatChanged = -2;
 constexpr int32_t kBufferFlagEndOfStream = 4;
+constexpr int32_t kColorFormatSurface = 0x7f000789;
 constexpr int32_t kColorFormatYuv420Flexible = 0x7f420888;
 
 struct CodecDescription {
@@ -30,6 +33,7 @@ struct CodecDescription {
 };
 
 constexpr CodecDescription kCodecs[] = {
+    {"c2.darwin.vp9.decoder", "video/x-vnd.on2.vp9", 8},
     {"c2.darwin.avc.decoder", "video/avc", 8},
     {"c2.darwin.hevc.decoder", "video/hevc", 8},
 };
@@ -60,6 +64,10 @@ struct DarwinMediaCodec {
 };
 
 std::mutex g_registry_mutex;
+
+bool DebugMediaCodec() {
+  return std::getenv("DARWIN_ART_DEBUG_MEDIA_CODEC") != nullptr;
+}
 
 void Throw(JNIEnv* env, const char* class_name, const char* message) {
   if (env == nullptr || env->ExceptionCheck()) return;
@@ -284,7 +292,19 @@ void MediaCodecNativeSetup(JNIEnv* env, jobject self, jstring name,
   std::string value;
   if (name != nullptr) ReadString(env, name, &value);
   state->mime = name_is_type == JNI_TRUE ? value : "";
-  state->codec_name = name_is_type == JNI_TRUE ? "c2.darwin.avc.decoder" : value;
+  state->codec_name = value;
+  if (name_is_type == JNI_TRUE) {
+    const auto found = std::find_if(
+        std::begin(kCodecs), std::end(kCodecs),
+        [&value](const CodecDescription& codec) { return value == codec.mime; });
+    state->codec_name = found == std::end(kCodecs) ? "" : found->name;
+  }
+  if (DebugMediaCodec()) {
+    std::cerr << "ART Android MediaCodec: setup value=" << value
+              << " name_is_type=" << (name_is_type == JNI_TRUE)
+              << " codec=" << state->codec_name << " mime=" << state->mime
+              << " encoder=" << state->encoder << "\n";
+  }
   SetCodec(env, self, state);
 }
 
@@ -337,12 +357,20 @@ void MediaCodecNativeConfigure(JNIEnv* env, jobject self, jobjectArray keys,
     env->DeleteLocalRef(value);
   }
   if (surface != nullptr) codec->surface = env->NewGlobalRef(surface);
+  if (DebugMediaCodec()) {
+    std::cerr << "ART Android MediaCodec: configure codec="
+              << codec->codec_name << " mime=" << codec->mime << " size="
+              << codec->width << "x" << codec->height
+              << " surface=" << (surface != nullptr) << "\n";
+  }
   const bool is_avc = codec->mime == "video/avc" && !sps.empty() && !pps.empty();
   const bool is_hevc = codec->mime == "video/hevc" && !sps.empty() &&
                        !pps.empty() && !vps.empty();
-  if (!is_avc && !is_hevc) {
+  const bool is_vp9 = codec->mime == "video/x-vnd.on2.vp9" &&
+                      codec->width > 0 && codec->height > 0;
+  if (!is_avc && !is_hevc && !is_vp9) {
     Throw(env, "java/lang/IllegalArgumentException",
-          "Darwin MediaCodec requires AVC/HEVC codec initialization records");
+          "Darwin MediaCodec requires a supported video format");
     return;
   }
   OSStatus status = noErr;
@@ -352,12 +380,16 @@ void MediaCodecNativeConfigure(JNIEnv* env, jobject self, jobjectArray keys,
     status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
         kCFAllocatorDefault, 2, parameter_sets, parameter_sizes, 4,
         &codec->format);
-  } else {
+  } else if (is_hevc) {
     const uint8_t* parameter_sets[] = {vps.data(), sps.data(), pps.data()};
     size_t parameter_sizes[] = {vps.size(), sps.size(), pps.size()};
     status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
         kCFAllocatorDefault, 3, parameter_sets, parameter_sizes, 4, nullptr,
         &codec->format);
+  } else {
+    status = CMVideoFormatDescriptionCreate(
+        kCFAllocatorDefault, kCMVideoCodecType_VP9, codec->width,
+        codec->height, nullptr, &codec->format);
   }
   if (status != noErr) {
     Throw(env, "java/lang/IllegalArgumentException", "invalid H.264 codec config");
@@ -623,9 +655,10 @@ jobject MakeCapabilities(JNIEnv* env, const CodecDescription& codec,
   }
   env->DeleteLocalRef(format);
   env->DeleteLocalRef(format_class);
-  jintArray colors = env->NewIntArray(1);
-  const jint color = kColorFormatYuv420Flexible;
-  env->SetIntArrayRegion(colors, 0, 1, &color);
+  jintArray colors = env->NewIntArray(2);
+  const jint color_values[] = {kColorFormatSurface,
+                               kColorFormatYuv420Flexible};
+  env->SetIntArrayRegion(colors, 0, 2, color_values);
   env->SetObjectField(result, color_formats, colors);
   jclass profile = env->FindClass("android/media/MediaCodecInfo$CodecProfileLevel");
   jobjectArray levels = env->NewObjectArray(1, profile, nullptr);
@@ -644,6 +677,10 @@ jobject MakeCapabilities(JNIEnv* env, const CodecDescription& codec,
 }
 
 jint MediaCodecListCount(JNIEnv*, jclass) {
+  if (DebugMediaCodec()) {
+    std::cerr << "ART Android MediaCodecList: count=" << std::size(kCodecs)
+              << "\n";
+  }
   return static_cast<jint>(std::size(kCodecs));
 }
 jint MediaCodecListFind(JNIEnv* env, jclass, jstring name) {
@@ -687,6 +724,12 @@ jobject MediaCodecListCapabilities(JNIEnv* env, jclass, jint index, jstring type
     return nullptr;
   const char* value = env->GetStringUTFChars(type, nullptr);
   const bool match = value != nullptr && std::strcmp(value, kCodecs[index].mime) == 0;
+  if (DebugMediaCodec()) {
+    std::cerr << "ART Android MediaCodecList: capabilities index=" << index
+              << " requested=" << (value == nullptr ? "<null>" : value)
+              << " codec=" << kCodecs[index].name << " match=" << match
+              << "\n";
+  }
   if (value != nullptr) env->ReleaseStringUTFChars(type, value);
   return match ? MakeCapabilities(env, kCodecs[index], kCodecs[index].mime) : nullptr;
 }

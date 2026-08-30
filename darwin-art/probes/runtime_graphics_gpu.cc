@@ -32,119 +32,95 @@ namespace darwin_art_graphics {
 #if defined(DARWIN_ART_REAL_GRAPHICS)
 namespace {
 
-void debug_chromium_initialization(JNIEnv* env, jobject view) {
-  static int remaining = 8;
-  if (remaining <= 0 || std::getenv("DARWIN_ART_DEBUG_CHROME_INIT") == nullptr)
-    return;
-  --remaining;
-  jclass context_wrapper = env->FindClass("android/content/ContextWrapper");
-  jclass activity_class = env->FindClass("android/app/Activity");
+jobject view_root_render_node(JNIEnv* env, jobject view, bool* has_view_root,
+                              bool* has_display_list) {
+  if (has_view_root != nullptr) *has_view_root = false;
+  if (has_display_list != nullptr) *has_display_list = false;
   jclass view_class = env->FindClass("android/view/View");
-  jmethodID get_context = view_class == nullptr
-                              ? nullptr
-                              : env->GetMethodID(view_class, "getContext",
-                                                 "()Landroid/content/Context;");
-  jmethodID get_base = context_wrapper == nullptr
-                           ? nullptr
-                           : env->GetMethodID(context_wrapper, "getBaseContext",
-                                              "()Landroid/content/Context;");
-  jobject context = get_context == nullptr
-                        ? nullptr
-                        : env->CallObjectMethod(view, get_context);
-  for (int depth = 0; context != nullptr && depth < 8 &&
-                      !env->IsInstanceOf(context, activity_class);
-       ++depth) {
-    if (!env->IsInstanceOf(context, context_wrapper) || get_base == nullptr) break;
-    jobject base = env->CallObjectMethod(context, get_base);
-    env->DeleteLocalRef(context);
-    context = base;
-  }
-  if (context == nullptr || !env->IsInstanceOf(context, activity_class)) {
-    if (context != nullptr) env->DeleteLocalRef(context);
-    context = nullptr;
-    jclass thread = env->FindClass("android/app/ActivityThread");
-    jmethodID current = thread == nullptr
-                            ? nullptr
-                            : env->GetStaticMethodID(
-                                  thread, "currentActivityThread",
-                                  "()Landroid/app/ActivityThread;");
-    jobject instance = current == nullptr
-                           ? nullptr
-                           : env->CallStaticObjectMethod(thread, current);
-    jfieldID activities = thread == nullptr
-                              ? nullptr
-                              : env->GetFieldID(thread, "mActivities",
-                                                "Landroid/util/ArrayMap;");
-    jobject records = instance == nullptr || activities == nullptr
+  jmethodID get_view_root =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "getViewRootImpl",
+                             "()Landroid/view/ViewRootImpl;");
+  jobject view_root = get_view_root == nullptr || env->ExceptionCheck()
                           ? nullptr
-                          : env->GetObjectField(instance, activities);
-    jclass map = env->FindClass("android/util/ArrayMap");
-    jmethodID size = map == nullptr ? nullptr : env->GetMethodID(map, "size", "()I");
-    jmethodID value_at = map == nullptr
-                             ? nullptr
-                             : env->GetMethodID(map, "valueAt",
-                                                "(I)Ljava/lang/Object;");
-    const jint count = records == nullptr || size == nullptr
-                           ? 0
-                           : env->CallIntMethod(records, size);
-    for (jint index = count - 1; index >= 0 && context == nullptr; --index) {
-      jobject record = env->CallObjectMethod(records, value_at, index);
-      jclass record_class = record == nullptr ? nullptr : env->GetObjectClass(record);
-      jfieldID activity = record_class == nullptr
-                              ? nullptr
-                              : env->GetFieldID(record_class, "activity",
-                                                "Landroid/app/Activity;");
-      if (activity != nullptr) context = env->GetObjectField(record, activity);
-      if (record_class != nullptr) env->DeleteLocalRef(record_class);
-      if (record != nullptr) env->DeleteLocalRef(record);
-    }
-    if (map != nullptr) env->DeleteLocalRef(map);
-    if (records != nullptr) env->DeleteLocalRef(records);
-    if (instance != nullptr) env->DeleteLocalRef(instance);
-    if (thread != nullptr) env->DeleteLocalRef(thread);
+                          : env->CallObjectMethod(view, get_view_root);
+  if (has_view_root != nullptr) *has_view_root = view_root != nullptr;
+  jclass root_class =
+      view_root == nullptr ? nullptr : env->GetObjectClass(view_root);
+  jfieldID attach_info_field =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mAttachInfo",
+                            "Landroid/view/View$AttachInfo;");
+  jobject attach_info = attach_info_field == nullptr
+                            ? nullptr
+                            : env->GetObjectField(view_root, attach_info_field);
+  jclass attach_class =
+      attach_info == nullptr ? nullptr : env->GetObjectClass(attach_info);
+  jfieldID renderer_field =
+      attach_class == nullptr
+          ? nullptr
+          : env->GetFieldID(attach_class, "mThreadedRenderer",
+                            "Landroid/view/ThreadedRenderer;");
+  jobject renderer = renderer_field == nullptr
+                         ? nullptr
+                         : env->GetObjectField(attach_info, renderer_field);
+  jclass renderer_class =
+      renderer == nullptr ? nullptr : env->GetObjectClass(renderer);
+  jmethodID get_root_node =
+      renderer_class == nullptr
+          ? nullptr
+          : env->GetMethodID(renderer_class, "getRootNode",
+                             "()Landroid/graphics/RenderNode;");
+  jobject root_node = get_root_node == nullptr
+                          ? nullptr
+                          : env->CallObjectMethod(renderer, get_root_node);
+  jclass render_node_class =
+      root_node == nullptr ? nullptr : env->GetObjectClass(root_node);
+  jmethodID has_list =
+      render_node_class == nullptr
+          ? nullptr
+          : env->GetMethodID(render_node_class, "hasDisplayList", "()Z");
+  if (has_display_list != nullptr && has_list != nullptr &&
+      !env->ExceptionCheck()) {
+    *has_display_list =
+        env->CallBooleanMethod(root_node, has_list) == JNI_TRUE;
   }
-  if (context != nullptr && env->IsInstanceOf(context, activity_class)) {
-    jclass concrete = env->GetObjectClass(context);
-    jfieldID initializer =
-        env->GetFieldID(concrete, "i0", "Ldefpackage/b99;");
-    jobject state = initializer == nullptr
-                        ? nullptr
-                        : env->GetObjectField(context, initializer);
-    jclass state_class = state == nullptr ? nullptr : env->GetObjectClass(state);
-    jfieldID phase = state_class == nullptr ? nullptr
-                                             : env->GetFieldID(state_class, "f", "B");
-    jfieldID first_draw = state_class == nullptr
-                              ? nullptr
-                              : env->GetFieldID(state_class, "g", "Z");
-    jfieldID started = state_class == nullptr
-                           ? nullptr
-                           : env->GetFieldID(state_class, "h", "Z");
-    if (state != nullptr && phase != nullptr && first_draw != nullptr &&
-        started != nullptr && !env->ExceptionCheck()) {
-      std::cerr << "ART Chromium init diagnostic: phase="
-                << static_cast<int>(env->GetByteField(state, phase))
-                << " first_draw=" << env->GetBooleanField(state, first_draw)
-                << " started=" << env->GetBooleanField(state, started) << "\n";
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    if (root_node != nullptr) {
+      env->DeleteLocalRef(root_node);
+      root_node = nullptr;
     }
-    if (state_class != nullptr) env->DeleteLocalRef(state_class);
-    if (state != nullptr) env->DeleteLocalRef(state);
-    env->DeleteLocalRef(concrete);
   }
-  if (env->ExceptionCheck()) env->ExceptionClear();
-  if (context != nullptr) env->DeleteLocalRef(context);
+  if (render_node_class != nullptr) env->DeleteLocalRef(render_node_class);
+  if (renderer_class != nullptr) env->DeleteLocalRef(renderer_class);
+  if (renderer != nullptr) env->DeleteLocalRef(renderer);
+  if (attach_class != nullptr) env->DeleteLocalRef(attach_class);
+  if (attach_info != nullptr) env->DeleteLocalRef(attach_info);
+  if (root_class != nullptr) env->DeleteLocalRef(root_class);
+  if (view_root != nullptr) env->DeleteLocalRef(view_root);
   if (view_class != nullptr) env->DeleteLocalRef(view_class);
-  if (activity_class != nullptr) env->DeleteLocalRef(activity_class);
-  if (context_wrapper != nullptr) env->DeleteLocalRef(context_wrapper);
+  return root_node;
 }
 
 bool view_subtree_needs_recording(JNIEnv* env, jobject view, jclass group_class,
                                   jmethodID is_dirty,
                                   jmethodID is_layout_requested,
+                                  jmethodID get_visibility,
                                   jmethodID get_child_count,
                                   jmethodID get_child_at, int depth) {
   if (view == nullptr || depth > 32 || env->ExceptionCheck()) return true;
-  if (env->CallBooleanMethod(view, is_dirty) == JNI_TRUE ||
-      env->CallBooleanMethod(view, is_layout_requested) == JNI_TRUE) {
+  // GONE and INVISIBLE descendants do not participate in ViewRoot's draw
+  // traversal. In particular an uninflated ViewStub intentionally keeps its
+  // dirty/layout bits forever; treating that placeholder as frame damage
+  // forced large APK hierarchies such as Chromium to re-record at 60 Hz.
+  if (depth > 0 && env->CallIntMethod(view, get_visibility) != 0) return false;
+  const bool dirty = env->CallBooleanMethod(view, is_dirty) == JNI_TRUE;
+  const bool layout_requested =
+      env->CallBooleanMethod(view, is_layout_requested) == JNI_TRUE;
+  if (dirty || layout_requested) {
     return true;
   }
   if (!env->IsInstanceOf(view, group_class)) return false;
@@ -153,11 +129,307 @@ bool view_subtree_needs_recording(JNIEnv* env, jobject view, jclass group_class,
     jobject child = env->CallObjectMethod(view, get_child_at, index);
     const bool child_needs_recording = view_subtree_needs_recording(
         env, child, group_class, is_dirty, is_layout_requested,
-        get_child_count, get_child_at, depth + 1);
+        get_visibility, get_child_count, get_child_at, depth + 1);
     if (child != nullptr) env->DeleteLocalRef(child);
     if (child_needs_recording) return true;
   }
   return env->ExceptionCheck();
+}
+
+// Returns 0/1 when the view belongs to a real ViewRootImpl, and -1 for the
+// detached probe fallback. ViewRootImpl is Android's authoritative damage
+// scheduler: invalidate(), requestLayout(), and animation callbacks all
+// converge on mTraversalScheduled. Leaf View dirty bits are not equivalent;
+// placeholders and manually flattened recordings may retain them indefinitely.
+int view_root_traversal_pending(JNIEnv* env, jobject view) {
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID get_view_root =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "getViewRootImpl",
+                             "()Landroid/view/ViewRootImpl;");
+  jobject view_root = get_view_root == nullptr || env->ExceptionCheck()
+                          ? nullptr
+                          : env->CallObjectMethod(view, get_view_root);
+  jclass root_class =
+      view_root == nullptr ? nullptr : env->GetObjectClass(view_root);
+  jfieldID traversal_scheduled =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mTraversalScheduled", "Z");
+  int pending = -1;
+  if (traversal_scheduled != nullptr && !env->ExceptionCheck()) {
+    pending = env->GetBooleanField(view_root, traversal_scheduled) == JNI_TRUE
+                  ? 1
+                  : 0;
+  }
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  if (root_class != nullptr) env->DeleteLocalRef(root_class);
+  if (view_root != nullptr) env->DeleteLocalRef(view_root);
+  if (view_class != nullptr) env->DeleteLocalRef(view_class);
+  return pending;
+}
+
+int view_root_traversal_generation(JNIEnv* env, jobject view) {
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID get_view_root =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "getViewRootImpl",
+                             "()Landroid/view/ViewRootImpl;");
+  jobject view_root = get_view_root == nullptr || env->ExceptionCheck()
+                          ? nullptr
+                          : env->CallObjectMethod(view, get_view_root);
+  jclass root_class =
+      view_root == nullptr ? nullptr : env->GetObjectClass(view_root);
+  jfieldID traversal_barrier =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mTraversalBarrier", "I");
+  int generation = -1;
+  if (traversal_barrier != nullptr && !env->ExceptionCheck()) {
+    generation = env->GetIntField(view_root, traversal_barrier);
+  }
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  if (root_class != nullptr) env->DeleteLocalRef(root_class);
+  if (view_root != nullptr) env->DeleteLocalRef(view_root);
+  if (view_class != nullptr) env->DeleteLocalRef(view_class);
+  return generation;
+}
+
+void debug_view_root_renderer(JNIEnv* env, jobject view, int traversal_pending,
+                              int traversal_generation) {
+  static int remaining = 300;
+  if (remaining <= 0 ||
+      std::getenv("DARWIN_ART_DEBUG_VIEW_ROOT_RENDERER") == nullptr) {
+    return;
+  }
+  --remaining;
+  jclass view_class = env->FindClass("android/view/View");
+  jmethodID get_view_root =
+      view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(view_class, "getViewRootImpl",
+                             "()Landroid/view/ViewRootImpl;");
+  jobject view_root = get_view_root == nullptr
+                          ? nullptr
+                          : env->CallObjectMethod(view, get_view_root);
+  jclass root_class =
+      view_root == nullptr ? nullptr : env->GetObjectClass(view_root);
+  jfieldID attach_info_field =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mAttachInfo",
+                            "Landroid/view/View$AttachInfo;");
+  jfieldID surface_field =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mSurface", "Landroid/view/Surface;");
+  jfieldID choreographer_field =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mChoreographer",
+                            "Landroid/view/Choreographer;");
+  jfieldID full_redraw_field =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mFullRedrawNeeded", "Z");
+  jfieldID stopped_field =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mStopped", "Z");
+  jfieldID app_visible_field =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mAppVisible", "Z");
+  jfieldID view_visibility_field =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mViewVisibility", "I");
+  jfieldID root_width_field =
+      root_class == nullptr ? nullptr
+                            : env->GetFieldID(root_class, "mWidth", "I");
+  jfieldID root_height_field =
+      root_class == nullptr ? nullptr
+                            : env->GetFieldID(root_class, "mHeight", "I");
+  jfieldID traversal_skip_field =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mLastPerformTraversalsSkipDrawReason",
+                            "Ljava/lang/String;");
+  jfieldID draw_skip_field =
+      root_class == nullptr
+          ? nullptr
+          : env->GetFieldID(root_class, "mLastPerformDrawSkippedReason",
+                            "Ljava/lang/String;");
+  jobject attach_info =
+      attach_info_field == nullptr
+          ? nullptr
+          : env->GetObjectField(view_root, attach_info_field);
+  jobject surface =
+      surface_field == nullptr ? nullptr : env->GetObjectField(view_root, surface_field);
+  jobject choreographer =
+      choreographer_field == nullptr
+          ? nullptr
+          : env->GetObjectField(view_root, choreographer_field);
+  jstring traversal_skip =
+      traversal_skip_field == nullptr
+          ? nullptr
+          : static_cast<jstring>(
+                env->GetObjectField(view_root, traversal_skip_field));
+  jstring draw_skip =
+      draw_skip_field == nullptr
+          ? nullptr
+          : static_cast<jstring>(env->GetObjectField(view_root, draw_skip_field));
+  jclass choreographer_class =
+      choreographer == nullptr ? nullptr : env->GetObjectClass(choreographer);
+  jfieldID frame_scheduled_field =
+      choreographer_class == nullptr
+          ? nullptr
+          : env->GetFieldID(choreographer_class, "mFrameScheduled", "Z");
+  jfieldID display_receiver_field =
+      choreographer_class == nullptr
+          ? nullptr
+          : env->GetFieldID(
+                choreographer_class, "mDisplayEventReceiver",
+                "Landroid/view/Choreographer$FrameDisplayEventReceiver;");
+  jobject display_receiver =
+      display_receiver_field == nullptr
+          ? nullptr
+          : env->GetObjectField(choreographer, display_receiver_field);
+  jclass display_receiver_class =
+      display_receiver == nullptr ? nullptr : env->GetObjectClass(display_receiver);
+  jfieldID receiver_pointer_field =
+      display_receiver_class == nullptr
+          ? nullptr
+          : env->GetFieldID(display_receiver_class, "mReceiverPtr", "J");
+  jclass attach_class =
+      attach_info == nullptr ? nullptr : env->GetObjectClass(attach_info);
+  jfieldID renderer_field =
+      attach_class == nullptr
+          ? nullptr
+          : env->GetFieldID(attach_class, "mThreadedRenderer",
+                            "Landroid/view/ThreadedRenderer;");
+  jobject renderer = renderer_field == nullptr
+                         ? nullptr
+                         : env->GetObjectField(attach_info, renderer_field);
+  jclass renderer_class =
+      renderer == nullptr ? nullptr : env->GetObjectClass(renderer);
+  jmethodID is_enabled =
+      renderer_class == nullptr
+          ? nullptr
+          : env->GetMethodID(renderer_class, "isEnabled", "()Z");
+  jmethodID is_requested =
+      renderer_class == nullptr
+          ? nullptr
+          : env->GetMethodID(renderer_class, "isRequested", "()Z");
+  jmethodID get_root_node =
+      renderer_class == nullptr
+          ? nullptr
+          : env->GetMethodID(renderer_class, "getRootNode",
+                             "()Landroid/graphics/RenderNode;");
+  jclass surface_class =
+      surface == nullptr ? nullptr : env->GetObjectClass(surface);
+  jmethodID surface_valid =
+      surface_class == nullptr
+          ? nullptr
+          : env->GetMethodID(surface_class, "isValid", "()Z");
+  jobject root_node =
+      get_root_node == nullptr
+          ? nullptr
+          : env->CallObjectMethod(renderer, get_root_node);
+  jclass render_node_class =
+      root_node == nullptr ? nullptr : env->GetObjectClass(root_node);
+  jmethodID has_display_list =
+      render_node_class == nullptr
+          ? nullptr
+          : env->GetMethodID(render_node_class, "hasDisplayList", "()Z");
+  if (!env->ExceptionCheck()) {
+    const char* traversal_skip_utf =
+        traversal_skip == nullptr
+            ? nullptr
+            : env->GetStringUTFChars(traversal_skip, nullptr);
+    const char* draw_skip_utf =
+        draw_skip == nullptr ? nullptr : env->GetStringUTFChars(draw_skip, nullptr);
+    std::cerr << "ART ViewRoot renderer: root=" << view_root
+              << " traversal_pending=" << traversal_pending
+              << " traversal_generation=" << traversal_generation
+              << " frame_scheduled="
+              << (frame_scheduled_field != nullptr &&
+                          env->GetBooleanField(choreographer,
+                                               frame_scheduled_field) == JNI_TRUE)
+              << " receiver_ptr="
+              << (receiver_pointer_field == nullptr
+                      ? 0
+                      : env->GetLongField(display_receiver,
+                                          receiver_pointer_field))
+              << " surface_valid="
+              << (surface_valid != nullptr &&
+                          env->CallBooleanMethod(surface, surface_valid) == JNI_TRUE)
+              << " renderer=" << renderer
+              << " enabled="
+              << (is_enabled != nullptr &&
+                          env->CallBooleanMethod(renderer, is_enabled) == JNI_TRUE)
+              << " requested="
+              << (is_requested != nullptr &&
+                          env->CallBooleanMethod(renderer, is_requested) == JNI_TRUE)
+              << " render_node=" << root_node
+              << " display_list="
+              << (has_display_list != nullptr &&
+                          env->CallBooleanMethod(root_node, has_display_list) == JNI_TRUE)
+              << " size="
+              << (root_width_field == nullptr
+                      ? -1
+                      : env->GetIntField(view_root, root_width_field))
+              << "x"
+              << (root_height_field == nullptr
+                      ? -1
+                      : env->GetIntField(view_root, root_height_field))
+              << " visible="
+              << (app_visible_field != nullptr &&
+                          env->GetBooleanField(view_root, app_visible_field) == JNI_TRUE)
+              << "/"
+              << (view_visibility_field == nullptr
+                      ? -1
+                      : env->GetIntField(view_root, view_visibility_field))
+              << " stopped="
+              << (stopped_field != nullptr &&
+                          env->GetBooleanField(view_root, stopped_field) == JNI_TRUE)
+              << " full_redraw="
+              << (full_redraw_field != nullptr &&
+                          env->GetBooleanField(view_root, full_redraw_field) == JNI_TRUE)
+              << " skip_traversal="
+              << (traversal_skip_utf == nullptr ? "<none>" : traversal_skip_utf)
+              << " skip_draw="
+              << (draw_skip_utf == nullptr ? "<none>" : draw_skip_utf)
+              << "\n";
+    if (draw_skip_utf != nullptr) {
+      env->ReleaseStringUTFChars(draw_skip, draw_skip_utf);
+    }
+    if (traversal_skip_utf != nullptr) {
+      env->ReleaseStringUTFChars(traversal_skip, traversal_skip_utf);
+    }
+  }
+  if (env->ExceptionCheck()) env->ExceptionClear();
+  if (render_node_class != nullptr) env->DeleteLocalRef(render_node_class);
+  if (root_node != nullptr) env->DeleteLocalRef(root_node);
+  if (surface_class != nullptr) env->DeleteLocalRef(surface_class);
+  if (renderer_class != nullptr) env->DeleteLocalRef(renderer_class);
+  if (renderer != nullptr) env->DeleteLocalRef(renderer);
+  if (display_receiver_class != nullptr) {
+    env->DeleteLocalRef(display_receiver_class);
+  }
+  if (display_receiver != nullptr) env->DeleteLocalRef(display_receiver);
+  if (choreographer_class != nullptr) env->DeleteLocalRef(choreographer_class);
+  if (choreographer != nullptr) env->DeleteLocalRef(choreographer);
+  if (draw_skip != nullptr) env->DeleteLocalRef(draw_skip);
+  if (traversal_skip != nullptr) env->DeleteLocalRef(traversal_skip);
+  if (attach_class != nullptr) env->DeleteLocalRef(attach_class);
+  if (surface != nullptr) env->DeleteLocalRef(surface);
+  if (attach_info != nullptr) env->DeleteLocalRef(attach_info);
+  if (root_class != nullptr) env->DeleteLocalRef(root_class);
+  if (view_root != nullptr) env->DeleteLocalRef(view_root);
+  if (view_class != nullptr) env->DeleteLocalRef(view_class);
 }
 
 bool draw_window_manager_layers(JNIEnv* env, jobject canvas,
@@ -266,6 +538,10 @@ bool draw_window_manager_layers(JNIEnv* env, jobject canvas,
 }
 
 }  // namespace
+
+void debug_product_view_root(JNIEnv* env, jobject view) {
+  debug_view_root_renderer(env, view, -2, -2);
+}
 
 int prepare_gpu_surface(GraphicsState* state, jint width, jint height) {
   if (state == nullptr) return 1;
@@ -424,7 +700,95 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   // TextView or request layout without another pointer action (for example a
   // running stopwatch). Those frames must rebuild the display list; otherwise
   // state advances in Java while Metal keeps presenting stale pixels.
-  bool view_needs_recording = true;
+  const int pending_root_traversal = view_root_traversal_pending(env, view);
+  const int traversal_generation = view_root_traversal_generation(env, view);
+  debug_view_root_renderer(env, view, pending_root_traversal,
+                           traversal_generation);
+  bool has_real_view_root = false;
+  bool root_has_display_list = false;
+  jobject retained_root = view_root_render_node(
+      env, view, &has_real_view_root, &root_has_display_list);
+  if (has_real_view_root) {
+    if (std::getenv("DARWIN_ART_APK_APP_PACKAGE") != nullptr) {
+      // Product frames belong exclusively to ViewRootImpl/ThreadedRenderer.
+      // The compatibility host may observe that a root exists, but must not
+      // replay it or advance its animators independently of HWUI RenderThread.
+      if (retained_root != nullptr) env->DeleteLocalRef(retained_root);
+      darwin_art_frame_probe::record_dimensions(width, height);
+      return JNI_TRUE;
+    }
+    // ViewRootImpl/ThreadedRenderer owns recording, invalidation propagation,
+    // and child RenderNode retention. The host only consumes that root at the
+    // compositor boundary; it must never issue a second View.draw traversal.
+    if (retained_root == nullptr || !root_has_display_list) {
+      if (retained_root != nullptr) env->DeleteLocalRef(retained_root);
+      return JNI_TRUE;
+    }
+    if (state->gpu_render_node == nullptr ||
+        !env->IsSameObject(state->gpu_render_node, retained_root)) {
+      if (state->gpu_render_node != nullptr) {
+        env->DeleteGlobalRef(state->gpu_render_node);
+      }
+      state->gpu_render_node = env->NewGlobalRef(retained_root);
+    }
+    jclass retained_class = env->FindClass("android/graphics/RenderNode");
+    jfieldID native_field =
+        retained_class == nullptr
+            ? nullptr
+            : env->GetFieldID(retained_class, "mNativeRenderNode", "J");
+    auto* node = native_field == nullptr
+                     ? nullptr
+                     : reinterpret_cast<android::uirenderer::RenderNode*>(
+                           static_cast<std::uintptr_t>(env->GetLongField(
+                               retained_root, native_field)));
+    if (node != nullptr && !env->ExceptionCheck()) {
+      node->mValid = true;
+      darwin_art_hwui::sync_recorded_render_node_tree(node);
+      if (darwin_art_hwui::node_subtree_has_animators(node)) {
+        if (state->hwui_animation_context == nullptr) {
+          state->hwui_time_lord = std::make_unique<
+              android::uirenderer::renderthread::TimeLord>();
+          state->hwui_time_lord->setFrameInterval(16666666);
+          state->hwui_animation_context =
+              std::make_unique<android::uirenderer::AnimationContext>(
+                  *state->hwui_time_lord);
+        }
+        darwin_art_hwui::register_node_subtree_animators(
+            node, *state->hwui_animation_context);
+      }
+    }
+    const bool presented = node != nullptr && !env->ExceptionCheck() &&
+                           darwin_art_hwui::render_node_to_surface(
+                               env, view, retained_root, state->gpu_surface,
+                               width, height, state->gpu_ripple_overlay_active,
+                               state->gpu_ripple_overlay_x,
+                               state->gpu_ripple_overlay_y,
+                               state->gpu_ripple_overlay_started);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (retained_class != nullptr) env->DeleteLocalRef(retained_class);
+    env->DeleteLocalRef(retained_root);
+    if (!presented) return JNI_FALSE;
+    darwin_art_frame_probe::record_dimensions(width, height);
+    state->gpu_render_node_recorded = true;
+    if (traversal_generation >= 0) {
+      state->gpu_last_traversal_barrier = traversal_generation;
+    }
+    return JNI_TRUE;
+  }
+  if (retained_root != nullptr) env->DeleteLocalRef(retained_root);
+  if (std::getenv("DARWIN_ART_APK_APP_PACKAGE") != nullptr) {
+    // Product APK windows are always owned by WindowManagerGlobal. During the
+    // short interval before addView() publishes ViewRootImpl there is nothing
+    // valid to present; recording the DecorView here creates a second, host-
+    // owned rendering lifecycle. Wait for ThreadedRenderer instead.
+    darwin_art_frame_probe::record_dimensions(width, height);
+    return JNI_TRUE;
+  }
+  const bool completed_traversal =
+      traversal_generation >= 0 &&
+      traversal_generation != state->gpu_last_traversal_barrier;
+  bool view_needs_recording =
+      pending_root_traversal != 0 || completed_traversal;
   jclass dirty_view_class = env->FindClass("android/view/View");
   jclass dirty_group_class = env->FindClass("android/view/ViewGroup");
   jmethodID is_dirty = dirty_view_class == nullptr
@@ -434,6 +798,10 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
       dirty_view_class == nullptr
           ? nullptr
           : env->GetMethodID(dirty_view_class, "isLayoutRequested", "()Z");
+  jmethodID get_visibility =
+      dirty_view_class == nullptr
+          ? nullptr
+          : env->GetMethodID(dirty_view_class, "getVisibility", "()I");
   jmethodID get_child_count =
       dirty_group_class == nullptr
           ? nullptr
@@ -443,12 +811,14 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
           ? nullptr
           : env->GetMethodID(dirty_group_class, "getChildAt",
                              "(I)Landroid/view/View;");
-  if (is_dirty != nullptr && is_layout_requested != nullptr &&
+  if (pending_root_traversal < 0 && is_dirty != nullptr &&
+      is_layout_requested != nullptr &&
+      get_visibility != nullptr &&
       get_child_count != nullptr && get_child_at != nullptr &&
       !env->ExceptionCheck()) {
     view_needs_recording = view_subtree_needs_recording(
         env, view, dirty_group_class, is_dirty,
-        is_layout_requested, get_child_count, get_child_at, 0);
+        is_layout_requested, get_visibility, get_child_count, get_child_at, 0);
   }
   if (env->ExceptionCheck()) {
     env->ExceptionClear();
@@ -599,13 +969,13 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
       attached_view_class == nullptr
           ? nullptr
           : env->GetMethodID(attached_view_class, "isAttachedToWindow", "()Z");
-  const bool has_real_view_root =
+  const bool has_attached_view_root =
       is_attached_to_window != nullptr && !env->ExceptionCheck() &&
       env->CallBooleanMethod(view, is_attached_to_window) == JNI_TRUE;
   if (env->ExceptionCheck()) env->ExceptionClear();
   env->DeleteLocalRef(attached_view_class);
   if (state->gpu_render_node != nullptr && state->hardware_context != nullptr &&
-      !state->gpu_render_node_recorded && !has_real_view_root &&
+      !state->gpu_render_node_recorded && !has_attached_view_root &&
       state->interactive_view_root == nullptr) {
     attach_hardware_hierarchy_on_owner(state, env, view);
   }
@@ -808,7 +1178,8 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   // A real ViewRoot owns an app Looper and window-system thread. This
   // detached host intentionally does not synthesize one; the content root
   // is measured/layouted directly and recorded into the persistent RenderNode.
-  if (begin_host_traversal != nullptr && !env->ExceptionCheck()) {
+  if (pending_root_traversal < 0 && begin_host_traversal != nullptr &&
+      !env->ExceptionCheck()) {
     env->CallStaticVoidMethod(animation_host_class, begin_host_traversal, view);
     if (env->ExceptionCheck()) {
       dump_pending_exception("ProbeAnimationHost.beginHostTraversal");
@@ -822,13 +1193,14 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
       env->ExceptionClear();
     }
   }
-  if (invalidate_view_tree != nullptr && !env->ExceptionCheck()) {
-    env->CallStaticVoidMethod(animation_host_class, invalidate_view_tree, view);
-    if (env->ExceptionCheck()) {
-      dump_pending_exception("ProbeAnimationHost.invalidateViewTree");
-      env->ExceptionClear();
-    }
-  }
+  // Preserve Android's RenderNode invalidation model. A dirty child rebuilds
+  // its own display list and the retained root references that child node;
+  // forcing the entire hierarchy dirty here flattened every frame into a new
+  // root recording. Besides defeating HWUI's retained rendering, that made a
+  // Chromium tab transition submit tens of thousands of display-list bytes
+  // on every vsync. Detached legacy probes without hierarchy bookkeeping are
+  // initialized dirty by their first recording and no longer need this
+  // compatibility invalidation either.
   const uint32_t pending_pressed_action = state->pending_pressed_action;
   const jfloat pending_pressed_x = state->pending_pressed_x;
   const jfloat pending_pressed_y = state->pending_pressed_y;
@@ -851,7 +1223,6 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
       env->ExceptionClear();
     }
   }
-  debug_chromium_initialization(env, view);
   env->CallVoidMethod(view, draw, java_canvas);
   dump_pending_exception("View.draw");
   const bool layers_ok = !env->ExceptionCheck() &&
@@ -880,20 +1251,28 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
     return JNI_FALSE;
   }
   node->mValid = true;
-  std::cerr << "ART HWUI GPU: node staging needs=" << node->mNeedsDisplayListSync
-            << " stagingContent=" << node->mStagingDisplayList.hasContent()
-            << " stagingSize=" << node->mStagingDisplayList.getUsedSize()
-            << " activeContent=" << node->mDisplayList.hasContent() << "\n";
+  const bool debug_display_lists =
+      std::getenv("DARWIN_ART_DEBUG_HWUI_DISPLAY_LISTS") != nullptr;
+  if (debug_display_lists) {
+    std::cerr << "ART HWUI GPU: node staging needs="
+              << node->mNeedsDisplayListSync
+              << " stagingContent=" << node->mStagingDisplayList.hasContent()
+              << " stagingSize=" << node->mStagingDisplayList.getUsedSize()
+              << " activeContent=" << node->mDisplayList.hasContent() << "\n";
+  }
   const size_t synchronized_nodes =
       darwin_art_hwui::sync_recorded_render_node_tree(node);
-  std::cerr << "ART HWUI GPU: synchronized RenderNodes=" << synchronized_nodes
-            << " activeSize=" << node->mDisplayList.getUsedSize()
-            << " holePunches=" << node->hasHolePunches()
-            << " childNodes="
-            << (node->mDisplayList.asSkiaDl() == nullptr
-                    ? 0
-                    : node->mDisplayList.asSkiaDl()->mChildNodes.size())
-            << "\n";
+  if (debug_display_lists) {
+    std::cerr << "ART HWUI GPU: synchronized RenderNodes="
+              << synchronized_nodes
+              << " activeSize=" << node->mDisplayList.getUsedSize()
+              << " holePunches=" << node->hasHolePunches()
+              << " childNodes="
+              << (node->mDisplayList.asSkiaDl() == nullptr
+                      ? 0
+                      : node->mDisplayList.asSkiaDl()->mChildNodes.size())
+              << "\n";
+  }
   if (!node->mDisplayList || node->mDisplayList.isEmpty()) {
     std::cerr << "ART HWUI GPU: Java RenderNode produced empty display list\n";
     return JNI_FALSE;
@@ -923,11 +1302,15 @@ jboolean present_gpu_content(GraphicsState* state, JNIEnv* env, jobject view,
   // acceptance can validate the presented surface without a readback.
   darwin_art_frame_probe::record_dimensions(width, height);
   state->gpu_render_node_recorded = true;
+  if (traversal_generation >= 0) {
+    state->gpu_last_traversal_barrier = traversal_generation;
+  }
   return JNI_TRUE;
 }
 #else
 int prepare_gpu_surface(GraphicsState*, jint, jint) { return 0; }
 int refresh_gpu_surface_identity(GraphicsState*) { return 0; }
+void debug_product_view_root(JNIEnv*, jobject) {}
 #endif
 
 #if !defined(DARWIN_ART_REAL_GRAPHICS)

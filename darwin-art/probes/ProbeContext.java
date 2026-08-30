@@ -176,7 +176,27 @@ public final class ProbeContext extends ContextWrapper {
             // Generated AIDL stubs return a local service only when this
             // owner is non-null. A null owner deliberately selects the Proxy
             // path, matching a Binder in another Android process.
-            attachInterface(null, "org.chromium.base.process_launcher.IChildProcessService");
+            attachInterface(null, queryRemoteInterfaceDescriptor(controlFd, targetId));
+        }
+
+        private static String queryRemoteInterfaceDescriptor(int controlFd, int targetId) {
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            try {
+                if (!nativeRemoteTransact(controlFd, targetId,
+                        IBinder.INTERFACE_TRANSACTION, data, reply, 0)) {
+                    throw new IllegalStateException(
+                            "remote Binder rejected INTERFACE_TRANSACTION");
+                }
+                String descriptor = reply.readString();
+                if (descriptor == null || descriptor.isEmpty()) {
+                    throw new IllegalStateException("remote Binder has no descriptor");
+                }
+                return descriptor;
+            } finally {
+                reply.recycle();
+                data.recycle();
+            }
         }
 
         @Override

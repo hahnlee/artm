@@ -1,9 +1,13 @@
 #include "darwin_framework_natives.h"
 
+#include "darwin_android_time.h"
+
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -24,13 +28,32 @@ namespace {
 class DarwinDisplayEventReceiver {
  public:
   DarwinDisplayEventReceiver(JavaVM* vm, jobject receiver_weak,
-                             jclass receiver_class, jmethodID reference_get,
-                             jmethodID dispatch_vsync)
+                             jobject vsync_data_weak, jclass receiver_class,
+                             jclass vsync_data_class, jclass timeline_class,
+                             jmethodID reference_get, jmethodID dispatch_vsync,
+                             jfieldID frame_interval,
+                             jfieldID preferred_timeline_index,
+                             jfieldID frame_timelines_length,
+                             jfieldID number_queued_buffers,
+                             jfieldID frame_timelines, jfieldID timeline_vsync_id,
+                             jfieldID expected_presentation_time,
+                             jfieldID deadline)
       : vm_(vm),
         receiver_weak_(receiver_weak),
+        vsync_data_weak_(vsync_data_weak),
         receiver_class_(receiver_class),
+        vsync_data_class_(vsync_data_class),
+        timeline_class_(timeline_class),
         reference_get_(reference_get),
-        dispatch_vsync_(dispatch_vsync) {}
+        dispatch_vsync_(dispatch_vsync),
+        frame_interval_(frame_interval),
+        preferred_timeline_index_(preferred_timeline_index),
+        frame_timelines_length_(frame_timelines_length),
+        number_queued_buffers_(number_queued_buffers),
+        frame_timelines_(frame_timelines),
+        timeline_vsync_id_(timeline_vsync_id),
+        expected_presentation_time_(expected_presentation_time),
+        deadline_(deadline) {}
 
   ~DarwinDisplayEventReceiver() = default;
 
@@ -42,9 +65,21 @@ class DarwinDisplayEventReceiver {
       env->DeleteGlobalRef(receiver_weak_);
       receiver_weak_ = nullptr;
     }
+    if (vsync_data_weak_ != nullptr) {
+      env->DeleteGlobalRef(vsync_data_weak_);
+      vsync_data_weak_ = nullptr;
+    }
     if (receiver_class_ != nullptr) {
       env->DeleteGlobalRef(receiver_class_);
       receiver_class_ = nullptr;
+    }
+    if (vsync_data_class_ != nullptr) {
+      env->DeleteGlobalRef(vsync_data_class_);
+      vsync_data_class_ = nullptr;
+    }
+    if (timeline_class_ != nullptr) {
+      env->DeleteGlobalRef(timeline_class_);
+      timeline_class_ = nullptr;
     }
   }
 
@@ -81,8 +116,11 @@ class DarwinDisplayEventReceiver {
       weak = receiver_weak_;
     }
 
+    const jlong vsync_id = next_vsync_id_++;
     jobject receiver = env->CallObjectMethod(weak, reference_get_);
     if (receiver != nullptr && !env->ExceptionCheck()) {
+      jobject vsync_data = UpdateVsyncData(env, timestamp, vsync_id);
+      env->DeleteLocalRef(vsync_data);
       env->CallVoidMethod(receiver, dispatch_vsync_, timestamp, 0, 0);
       env->DeleteLocalRef(receiver);
     }
@@ -96,12 +134,48 @@ class DarwinDisplayEventReceiver {
     return !env->ExceptionCheck();
   }
 
+  jobject LatestVsyncData(JNIEnv* env) {
+    return UpdateVsyncData(env, darwin_art::AndroidUptimeNanos(),
+                           next_vsync_id_++);
+  }
+
   void SetSelf(const std::shared_ptr<DarwinDisplayEventReceiver>& self) {
     std::lock_guard lock(mutex_);
     self_ = self;
   }
 
  private:
+  jobject UpdateVsyncData(JNIEnv* env, jlong timestamp, jlong vsync_id) {
+    constexpr jlong kFrameIntervalNanos = 16'666'667;
+    constexpr jlong kGpuBudgetNanos = 2'000'000;
+    if (vsync_data_weak_ == nullptr) return nullptr;
+    jobject data = env->CallObjectMethod(vsync_data_weak_, reference_get_);
+    if (data == nullptr || env->ExceptionCheck()) return data;
+
+    env->SetLongField(data, frame_interval_, kFrameIntervalNanos);
+    env->SetIntField(data, preferred_timeline_index_, 0);
+    env->SetIntField(data, frame_timelines_length_, 1);
+    env->SetIntField(data, number_queued_buffers_, 0);
+    auto timelines = static_cast<jobjectArray>(
+        env->GetObjectField(data, frame_timelines_));
+    jobject timeline = timelines == nullptr
+                           ? nullptr
+                           : env->GetObjectArrayElement(timelines, 0);
+    if (timeline != nullptr && !env->ExceptionCheck()) {
+      const jlong expected = timestamp + kFrameIntervalNanos;
+      env->SetLongField(timeline, timeline_vsync_id_, vsync_id);
+      env->SetLongField(timeline, expected_presentation_time_, expected);
+      env->SetLongField(timeline, deadline_, expected - kGpuBudgetNanos);
+    }
+    env->DeleteLocalRef(timeline);
+    env->DeleteLocalRef(timelines);
+    if (env->ExceptionCheck()) {
+      env->DeleteLocalRef(data);
+      return nullptr;
+    }
+    return data;
+  }
+
   std::shared_ptr<DarwinDisplayEventReceiver> SharedFromThis() {
     std::lock_guard lock(mutex_);
     if (disposed_) {
@@ -112,13 +186,25 @@ class DarwinDisplayEventReceiver {
 
   JavaVM* vm_;
   jobject receiver_weak_;
+  jobject vsync_data_weak_;
   jclass receiver_class_;
+  jclass vsync_data_class_;
+  jclass timeline_class_;
   jmethodID reference_get_;
   jmethodID dispatch_vsync_;
+  jfieldID frame_interval_;
+  jfieldID preferred_timeline_index_;
+  jfieldID frame_timelines_length_;
+  jfieldID number_queued_buffers_;
+  jfieldID frame_timelines_;
+  jfieldID timeline_vsync_id_;
+  jfieldID expected_presentation_time_;
+  jfieldID deadline_;
   std::mutex mutex_;
   std::condition_variable condition_;
   std::weak_ptr<DarwinDisplayEventReceiver> self_;
   size_t callbacks_ = 0;
+  jlong next_vsync_id_ = 1;
   bool pending_vsync_ = false;
   bool disposed_ = false;
 };
@@ -153,8 +239,9 @@ void DisplayEventReceiverRelease(void* raw) {
 }
 
 jlong DisplayEventReceiverNativeInit(JNIEnv* env, jclass, jobject receiver_weak,
-                                     jobject, jobject, jint, jint, jlong) {
-  if (receiver_weak == nullptr) {
+                                     jobject vsync_data_weak, jobject, jint,
+                                     jint, jlong) {
+  if (receiver_weak == nullptr || vsync_data_weak == nullptr) {
     return 0;
   }
   JavaVM* vm = nullptr;
@@ -170,37 +257,103 @@ jlong DisplayEventReceiverNativeInit(JNIEnv* env, jclass, jobject receiver_weak,
   jobject receiver = reference_get == nullptr
                          ? nullptr
                          : env->CallObjectMethod(receiver_weak, reference_get);
-  if (receiver == nullptr || env->ExceptionCheck()) {
+  jobject vsync_data = reference_get == nullptr
+                           ? nullptr
+                           : env->CallObjectMethod(vsync_data_weak, reference_get);
+  if (receiver == nullptr || vsync_data == nullptr || env->ExceptionCheck()) {
     env->ExceptionClear();
     env->DeleteLocalRef(reference_class);
     env->DeleteLocalRef(receiver);
+    env->DeleteLocalRef(vsync_data);
     return 0;
   }
   jclass receiver_class_local = env->GetObjectClass(receiver);
+  jclass vsync_data_class_local = env->GetObjectClass(vsync_data);
+  jclass timeline_class_local = env->FindClass(
+      "android/view/DisplayEventReceiver$VsyncEventData$FrameTimeline");
   jmethodID dispatch_vsync =
       receiver_class_local == nullptr
           ? nullptr
           : env->GetMethodID(receiver_class_local, "dispatchVsync", "(JJI)V");
-  if (dispatch_vsync == nullptr || env->ExceptionCheck()) {
+  jfieldID frame_interval =
+      vsync_data_class_local == nullptr
+          ? nullptr
+          : env->GetFieldID(vsync_data_class_local, "frameInterval", "J");
+  jfieldID preferred_timeline_index =
+      vsync_data_class_local == nullptr
+          ? nullptr
+          : env->GetFieldID(vsync_data_class_local,
+                            "preferredFrameTimelineIndex", "I");
+  jfieldID frame_timelines_length =
+      vsync_data_class_local == nullptr
+          ? nullptr
+          : env->GetFieldID(vsync_data_class_local, "frameTimelinesLength", "I");
+  jfieldID number_queued_buffers =
+      vsync_data_class_local == nullptr
+          ? nullptr
+          : env->GetFieldID(vsync_data_class_local, "numberQueuedBuffers", "I");
+  jfieldID frame_timelines =
+      vsync_data_class_local == nullptr
+          ? nullptr
+          : env->GetFieldID(
+                vsync_data_class_local, "frameTimelines",
+                "[Landroid/view/DisplayEventReceiver$VsyncEventData$FrameTimeline;");
+  jfieldID timeline_vsync_id =
+      timeline_class_local == nullptr
+          ? nullptr
+          : env->GetFieldID(timeline_class_local, "vsyncId", "J");
+  jfieldID expected_presentation_time =
+      timeline_class_local == nullptr
+          ? nullptr
+          : env->GetFieldID(timeline_class_local, "expectedPresentationTime", "J");
+  jfieldID deadline = timeline_class_local == nullptr
+                          ? nullptr
+                          : env->GetFieldID(timeline_class_local, "deadline", "J");
+  if (dispatch_vsync == nullptr || frame_interval == nullptr ||
+      preferred_timeline_index == nullptr ||
+      frame_timelines_length == nullptr || number_queued_buffers == nullptr ||
+      frame_timelines == nullptr || timeline_vsync_id == nullptr ||
+      expected_presentation_time == nullptr || deadline == nullptr ||
+      env->ExceptionCheck()) {
     env->ExceptionClear();
+    env->DeleteLocalRef(timeline_class_local);
+    env->DeleteLocalRef(vsync_data_class_local);
     env->DeleteLocalRef(receiver_class_local);
     env->DeleteLocalRef(receiver);
+    env->DeleteLocalRef(vsync_data);
     env->DeleteLocalRef(reference_class);
     return 0;
   }
   jobject weak_global = env->NewGlobalRef(receiver_weak);
+  jobject vsync_data_weak_global = env->NewGlobalRef(vsync_data_weak);
   jclass receiver_class_global =
       static_cast<jclass>(env->NewGlobalRef(receiver_class_local));
+  jclass vsync_data_class_global =
+      static_cast<jclass>(env->NewGlobalRef(vsync_data_class_local));
+  jclass timeline_class_global =
+      static_cast<jclass>(env->NewGlobalRef(timeline_class_local));
+  env->DeleteLocalRef(timeline_class_local);
+  env->DeleteLocalRef(vsync_data_class_local);
   env->DeleteLocalRef(receiver_class_local);
   env->DeleteLocalRef(receiver);
+  env->DeleteLocalRef(vsync_data);
   env->DeleteLocalRef(reference_class);
-  if (weak_global == nullptr || receiver_class_global == nullptr) {
+  if (weak_global == nullptr || vsync_data_weak_global == nullptr ||
+      receiver_class_global == nullptr || vsync_data_class_global == nullptr ||
+      timeline_class_global == nullptr) {
     env->DeleteGlobalRef(weak_global);
+    env->DeleteGlobalRef(vsync_data_weak_global);
     env->DeleteGlobalRef(receiver_class_global);
+    env->DeleteGlobalRef(vsync_data_class_global);
+    env->DeleteGlobalRef(timeline_class_global);
     return 0;
   }
   auto receiver_state = std::make_shared<DarwinDisplayEventReceiver>(
-      vm, weak_global, receiver_class_global, reference_get, dispatch_vsync);
+      vm, weak_global, vsync_data_weak_global, receiver_class_global,
+      vsync_data_class_global, timeline_class_global, reference_get,
+      dispatch_vsync, frame_interval, preferred_timeline_index,
+      frame_timelines_length, number_queued_buffers, frame_timelines,
+      timeline_vsync_id, expected_presentation_time, deadline);
   const jlong handle = static_cast<jlong>(reinterpret_cast<std::uintptr_t>(
       receiver_state.get()));
   receiver_state->SetSelf(receiver_state);
@@ -214,6 +367,10 @@ jlong DisplayEventReceiverNativeInit(JNIEnv* env, jclass, jobject receiver_weak,
 void DisplayEventReceiverNativeScheduleVsync(JNIEnv*, jclass, jlong handle) {
   if (auto receiver = FindDisplayReceiver(handle); receiver != nullptr) {
     receiver->Schedule();
+    if (std::getenv("DARWIN_ART_DEBUG_VSYNC") != nullptr) {
+      std::cerr << "ART Choreographer vsync scheduled receiver=" << handle
+                << "\n";
+    }
   }
 }
 
@@ -234,13 +391,19 @@ int DispatchPendingVsyncs(JNIEnv* env, jlong frame_time_nanos) {
     }
     if (env->ExceptionCheck()) return -1;
   }
+  if (std::getenv("DARWIN_ART_DEBUG_VSYNC") != nullptr &&
+      (!receivers.empty() || delivered != 0)) {
+    std::cerr << "ART Choreographer vsync dispatch receivers="
+              << receivers.size() << " delivered=" << delivered << "\n";
+  }
   return delivered;
 }
 
-jobject DisplayEventReceiverNativeGetLatestVsyncEventData(JNIEnv*, jclass,
-                                                            jlong) {
-  // Choreographer accepts a null timeline and uses the timestamp/count path.
-  // A host display has no SurfaceFlinger frame-timeline prediction to expose.
+jobject DisplayEventReceiverNativeGetLatestVsyncEventData(JNIEnv* env, jclass,
+                                                            jlong handle) {
+  if (auto receiver = FindDisplayReceiver(handle); receiver != nullptr) {
+    return receiver->LatestVsyncData(env);
+  }
   return nullptr;
 }
 

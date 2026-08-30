@@ -12,6 +12,7 @@ namespace darwin_art {
 // used by GLSurfaceView. The implementation delegates to ANGLE's Darwin
 // dylibs and keeps Android's Java handle objects as the public ABI.
 bool RegisterDarwinAngleEglNatives(JNIEnv* env);
+const char* EglQueryStringAndroid(void* display, std::int32_t name);
 
 extern "C" void* darwin_art_angle_dso_symbol(const char* soname,
                                               const char* symbol);
@@ -24,6 +25,8 @@ jint DarwinAngleHostSurfaceHeight();
 
 }  // namespace darwin_art
 
+struct AHardwareBuffer;
+
 extern "C" {
 void* darwin_art_android_ANativeWindow_fromSurface(void* env, void* surface);
 void* darwin_art_android_ANativeWindow_create(int32_t width, int32_t height,
@@ -32,6 +35,29 @@ void darwin_art_android_ANativeWindow_acquire(void* window);
 int32_t darwin_art_android_ANativeWindow_getFormat(void* window);
 void* darwin_art_android_ANativeWindow_toSurface(void* env, void* window);
 void darwin_art_android_ANativeWindow_release(void* window);
+using DarwinArtAndroidNativeWindowQueueCallback = void (*)(
+    void* context, AHardwareBuffer* buffer, int32_t slot, int fence,
+    int32_t dataspace);
+void darwin_art_android_ANativeWindow_set_queue_callback(
+    void* window, DarwinArtAndroidNativeWindowQueueCallback callback,
+    void* context);
+void darwin_art_android_ANativeWindow_release_consumer_slot(
+    void* window, int32_t slot, int release_fence);
+void darwin_art_android_ANativeWindow_set_surface_control(void* window,
+                                                          void* control);
+bool darwin_art_android_ANativeWindow_get_surface_control_identity(
+    void* window, uint32_t* owner_process_id, uint32_t* layer_id);
+void darwin_art_android_ANativeWindow_register_imported_surface_identity(
+    int64_t surface_identity, uint32_t owner_process_id, uint32_t layer_id);
+bool darwin_art_android_ANativeWindow_get_imported_surface_identity(
+    void* window, uint32_t* owner_process_id, uint32_t* layer_id);
+bool darwin_art_android_ANativeWindow_release_if_managed(void* window);
+int32_t darwin_art_android_ANativeWindow_dequeue_hardware_buffer(
+    void* window, AHardwareBuffer** buffer, void** native_buffer, int* fence);
+int32_t darwin_art_android_ANativeWindow_queue_hardware_buffer(
+    void* window, void* native_buffer, int fence);
+int32_t darwin_art_android_ANativeWindow_cancel_hardware_buffer(
+    void* window, void* native_buffer, int fence);
 int32_t darwin_art_android_ANativeWindow_lock(void* window, void* buffer,
                                               void* dirty_bounds);
 int32_t darwin_art_android_ANativeWindow_unlockAndPost(void* window);
@@ -43,6 +69,16 @@ void* darwin_art_android_eglCreateWindowSurface(void* display, void* config,
                                                 const int32_t* attributes);
 uint32_t darwin_art_android_eglSwapBuffers(void* display, void* surface);
 uint32_t darwin_art_android_eglDestroySurface(void* display, void* surface);
+uint32_t darwin_art_android_eglMakeCurrent(void* display, void* draw,
+                                          void* read, void* context);
+uint32_t darwin_art_android_eglQuerySurface(void* display, void* surface,
+                                           int32_t attribute, int32_t* value);
+uint32_t darwin_art_android_eglSurfaceAttrib(void* display, void* surface,
+                                            int32_t attribute, int32_t value);
+uint32_t darwin_art_android_eglSwapInterval(void* display, int32_t interval);
+uint32_t darwin_art_android_eglSetDamageRegion(void* display, void* surface,
+                                              const int32_t* rects,
+                                              int32_t count);
 
 // Debug-only GLES forwarding hooks selected by the ELF resolver when
 // DARWIN_ART_DEBUG_ANGLE is enabled. They preserve the Android GLES ABI while
@@ -62,18 +98,30 @@ void darwin_art_android_glDrawElements(uint32_t mode, int32_t count,
                                        uint32_t type, const void* indices);
 void darwin_art_android_glUseProgram(uint32_t program);
 bool darwin_art_android_begin_hardware_buffer_composition(void* buffer,
-                                                          bool clear);
+                                                          bool clear,
+                                                          uint64_t transaction_id);
 void darwin_art_android_set_hardware_buffer_composition_active(bool active);
-void darwin_art_android_end_hardware_buffer_composition();
+// Finishes the current retained-layer submission and returns an Android-owned
+// fence descriptor that becomes readable when ANGLE's Metal queue completes.
+// The caller owns the descriptor. Returns -1 when no GPU work was submitted.
+int darwin_art_android_end_hardware_buffer_composition();
 // Marks the exact BufferQueue slot displaced by a SurfaceControl transaction.
 // Its persistent IOSurface remains canonical until the producer reacquires the
 // slot; the next draw-FBO bind restores it into ANGLE's 2D staging texture.
 void darwin_art_android_mark_hardware_buffer_released(void* buffer);
 void darwin_art_android_present_hardware_buffer(
-    void* queue, void* buffer, int32_t source_left, int32_t source_top,
+    void* queue, uint32_t owner_process_id, uint32_t layer_id,
+    uint32_t parent_owner_process_id, uint32_t parent_id, uint64_t what,
+    int32_t z, void* buffer, int32_t source_left, int32_t source_top,
     int32_t source_right, int32_t source_bottom, int32_t destination_left,
     int32_t destination_top, int32_t destination_right,
     int32_t destination_bottom, bool has_damage, int32_t damage_left,
     int32_t damage_top, int32_t damage_right, int32_t damage_bottom,
     float alpha);
+void darwin_art_android_present_surface_control_state(
+    uint32_t owner_process_id, uint32_t layer_id,
+    uint32_t parent_owner_process_id, uint32_t parent_id, uint64_t what,
+    uint32_t flags, uint32_t mask, int32_t destination_left,
+    int32_t destination_top, int32_t destination_right,
+    int32_t destination_bottom, int32_t z, float alpha);
 }

@@ -2,7 +2,7 @@ use super::abi::EngineSymbols;
 use darwin_art_engine_sys::{
     GraphicsSessionCloseFn, GraphicsSessionDestroyFn, GraphicsSessionDispatchKeyV1Fn,
     GraphicsSessionDispatchPointerFn, GraphicsSessionDispatchPointerV2Fn, GraphicsSessionHandle,
-    GraphicsSessionPumpFrameFn, KeyEventV1, PointerEventV2,
+    GraphicsSessionPumpFrameFn, GraphicsSessionPumpMainLooperFn, KeyEventV1, PointerEventV2,
 };
 use darwin_art_runtime::NativeResource;
 use std::ptr::NonNull;
@@ -18,6 +18,7 @@ pub struct GraphicsSession {
     dispatch_fn: GraphicsSessionDispatchPointerFn,
     dispatch_v2_fn: Option<GraphicsSessionDispatchPointerV2Fn>,
     dispatch_key_v1_fn: Option<GraphicsSessionDispatchKeyV1Fn>,
+    pump_main_looper_fn: GraphicsSessionPumpMainLooperFn,
     pump_fn: GraphicsSessionPumpFrameFn,
     closed: bool,
     close_attempted: bool,
@@ -26,13 +27,22 @@ pub struct GraphicsSession {
 impl GraphicsSession {
     pub(crate) fn create(symbols: EngineSymbols) -> Result<Self, i32> {
         // SAFETY: the function pointer belongs to the live engine image.
-        let (Some(create_fn), Some(close_fn), Some(destroy_fn), Some(dispatch_fn), Some(pump_fn)) = (
+        let (
+            Some(create_fn),
+            Some(close_fn),
+            Some(destroy_fn),
+            Some(dispatch_fn),
+            Some(pump_main_looper_fn),
+            Some(pump_fn),
+        ) = (
             symbols.graphics.create,
             symbols.graphics.close,
             symbols.graphics.destroy,
             symbols.graphics.dispatch_pointer,
+            symbols.graphics.pump_main_looper,
             symbols.graphics.pump_frame,
-        ) else {
+        )
+        else {
             return Err(darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE);
         };
         // SAFETY: the function pointer belongs to the live engine image.
@@ -47,6 +57,7 @@ impl GraphicsSession {
             dispatch_fn,
             dispatch_v2_fn: symbols.graphics.dispatch_pointer_v2,
             dispatch_key_v1_fn: symbols.graphics.dispatch_key_v1,
+            pump_main_looper_fn,
             pump_fn,
             closed: false,
             close_attempted: false,
@@ -118,6 +129,15 @@ impl GraphicsSession {
         unsafe { (self.pump_fn)(handle.as_ptr(), frame_time_nanos) }
     }
 
+    pub fn pump_main_looper(&self) -> i32 {
+        let Some(handle) = self.handle.filter(|_| !self.closed) else {
+            return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+        };
+        // SAFETY: the Android MessageQueue remains bound to this session's
+        // owner thread for the lifetime of the live handle.
+        unsafe { (self.pump_main_looper_fn)(handle.as_ptr()) }
+    }
+
     fn destroy(&mut self) -> i32 {
         if !self.closed || self.handle.is_none() {
             return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
@@ -187,6 +207,10 @@ mod graphics_session_tests {
         456
     }
 
+    unsafe extern "C" fn pump_main_looper(_: *mut c_void) -> i32 {
+        789
+    }
+
     unsafe extern "C" fn failing_close(_: *mut c_void) -> i32 {
         FAILED_CLOSE_CALLS.fetch_add(1, Ordering::SeqCst);
         -99
@@ -202,11 +226,13 @@ mod graphics_session_tests {
             dispatch_fn: dispatch,
             dispatch_v2_fn: None,
             dispatch_key_v1_fn: None,
+            pump_main_looper_fn: pump_main_looper,
             pump_fn: pump,
             closed: false,
             close_attempted: false,
         };
         assert_eq!(session.dispatch_pointer(0, 1.0, 1.0), 123);
+        assert_eq!(session.pump_main_looper(), 789);
         assert_eq!(session.pump_frame(10), 456);
         assert_eq!(session.close(), 0);
         assert_eq!(
@@ -215,6 +241,10 @@ mod graphics_session_tests {
         );
         assert_eq!(
             session.pump_frame(10),
+            darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE
+        );
+        assert_eq!(
+            session.pump_main_looper(),
             darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE
         );
         assert_eq!(
@@ -234,6 +264,7 @@ mod graphics_session_tests {
             dispatch_fn: dispatch,
             dispatch_v2_fn: None,
             dispatch_key_v1_fn: None,
+            pump_main_looper_fn: pump_main_looper,
             pump_fn: pump,
             closed: false,
             close_attempted: false,

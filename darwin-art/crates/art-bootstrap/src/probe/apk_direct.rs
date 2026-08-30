@@ -469,6 +469,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_dispatch_pointer_v2")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_dispatch_key_v1")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_pump_frame")
+        .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_pump_main_looper")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_resize")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_get_size")

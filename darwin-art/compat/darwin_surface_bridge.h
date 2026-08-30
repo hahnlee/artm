@@ -53,6 +53,13 @@ typedef enum DarwinArtPointerAction {
   DARWIN_ART_POINTER_CANCEL = 3,
 } DarwinArtPointerAction;
 
+typedef enum DarwinArtPointerFlags {
+  // The packet originated from an AppKit mouse/trackpad button stream. The
+  // Android bridge exposes it as SOURCE_MOUSE instead of forcing the window
+  // into touchscreen mode. Zero remains the synthetic touchscreen default.
+  DARWIN_ART_POINTER_FLAG_MOUSE = 1u << 0,
+} DarwinArtPointerFlags;
+
 typedef struct DarwinArtPointerEvent {
   uint32_t action;
   float x;

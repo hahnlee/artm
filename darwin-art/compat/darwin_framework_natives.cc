@@ -1,4 +1,6 @@
 #include "darwin_framework_natives.h"
+#include "darwin_android_platform.h"
+#include "darwin_android_surface_texture.h"
 #include "darwin_audio_track.h"
 #include "darwin_angle_egl.h"
 #include "darwin_framework_system_natives.h"
@@ -20,6 +22,8 @@
 #include <new>
 #include <unordered_map>
 #include <vector>
+
+#include <android/surface_control.h>
 
 namespace {
 
@@ -46,43 +50,236 @@ jint ProcessGetThreadPriority(JNIEnv*, jclass, jint) {
   return 0;
 }
 
-// SurfaceView is part of the stock Skottie layout.  The Darwin window owns
-// the actual CAMetalLayer, so SurfaceControl's server-side handle is not
-// materialized; keep the Java NativeAllocationRegistry contract valid with a
-// process-local no-op finalizer until a real compositor transaction is used.
-void SurfaceControlNoopFinalizer(void*) {}
+void SurfaceControlFinalizer(void* control) {
+  ASurfaceControl_release(reinterpret_cast<ASurfaceControl*>(control));
+}
+void SurfaceTransactionFinalizer(void* transaction) {
+  ASurfaceTransaction_delete(
+      reinterpret_cast<ASurfaceTransaction*>(transaction));
+}
 jlong SurfaceControlNativeGetFinalizer(JNIEnv*, jclass) {
-  return reinterpret_cast<jlong>(&SurfaceControlNoopFinalizer);
+  return reinterpret_cast<jlong>(&SurfaceControlFinalizer);
+}
+jlong SurfaceTransactionNativeGetFinalizer(JNIEnv*, jclass) {
+  return reinterpret_cast<jlong>(&SurfaceTransactionFinalizer);
 }
 jlong NextEglHandle();
-jlong SurfaceControlNativeCreateTransaction(JNIEnv*, jclass) { return NextEglHandle(); }
+jlong SurfaceControlNativeCreate(JNIEnv* env, jclass, jobject, jstring name,
+                                 jint, jint,
+                                 jint, jint, jlong parent, jobject) {
+  const char* utf = name == nullptr ? nullptr : env->GetStringUTFChars(name, nullptr);
+  ASurfaceControl* control =
+      parent == 0
+          ? reinterpret_cast<ASurfaceControl*>(
+                darwin_art_android_surface_control_create_root(
+                    utf == nullptr ? "SurfaceControl" : utf))
+          : ASurfaceControl_create(reinterpret_cast<ASurfaceControl*>(parent),
+                                   utf == nullptr ? "SurfaceControl" : utf);
+  if (utf != nullptr) env->ReleaseStringUTFChars(name, utf);
+  return reinterpret_cast<jlong>(control);
+}
+jlong SurfaceControlNativeGetHandle(JNIEnv*, jclass, jlong native_object) {
+  // SurfaceControl's public handle is a stable reference to the same native
+  // layer identity; Binder serialization is supplied by the compositor bridge.
+  return native_object;
+}
+jlong SurfaceControlNativeCopy(JNIEnv*, jclass, jlong native_object) {
+  auto* control = reinterpret_cast<ASurfaceControl*>(native_object);
+  if (control != nullptr) ASurfaceControl_acquire(control);
+  return native_object;
+}
+void SurfaceControlNativeDisconnect(JNIEnv*, jclass, jlong) {}
+jlong SurfaceControlNativeCreateTransaction(JNIEnv*, jclass) {
+  return reinterpret_cast<jlong>(ASurfaceTransaction_create());
+}
 void SurfaceControlNativeSetTransformHint(JNIEnv*, jclass, jlong, jint) {}
 void SurfaceControlNativeSetFrameRateCategory(JNIEnv*, jclass, jlong, jlong,
                                               jint, jboolean) {}
+void SurfaceControlNativeClearTransaction(JNIEnv*, jclass, jlong transaction) {
+  darwin_art_android_surface_transaction_clear(
+      reinterpret_cast<void*>(transaction));
+}
+void SurfaceControlNativeMergeTransaction(JNIEnv*, jclass, jlong destination,
+                                          jlong source) {
+  darwin_art_android_surface_transaction_merge(
+      reinterpret_cast<void*>(destination), reinterpret_cast<void*>(source));
+}
 void SurfaceControlNativeTransactionNoop1(JNIEnv*, jclass, jlong) {}
 void SurfaceControlNativeTransactionNoop2(JNIEnv*, jclass, jlong, jlong) {}
 void SurfaceControlNativeTransactionNoop3(JNIEnv*, jclass, jlong, jlong,
                                           jlong) {}
-void SurfaceControlNativeApplyTransaction(JNIEnv*, jclass, jlong, jboolean,
-                                          jboolean) {}
+ASurfaceTransaction* SurfaceTransaction(jlong handle) {
+  return reinterpret_cast<ASurfaceTransaction*>(handle);
+}
+ASurfaceControl* SurfaceControl(jlong handle) {
+  return reinterpret_cast<ASurfaceControl*>(handle);
+}
+
+constexpr jint kSurfaceControlLayerHidden = 0x01;
+constexpr bool SurfaceControlFlagsChangeVisibility(jint mask) {
+  return (mask & kSurfaceControlLayerHidden) != 0;
+}
+static_assert(SurfaceControlFlagsChangeVisibility(0x01));
+static_assert(!SurfaceControlFlagsChangeVisibility(0x02));  // OPAQUE
+static_assert(!SurfaceControlFlagsChangeVisibility(0x40));  // SKIP_SCREENSHOT
+static_assert(!SurfaceControlFlagsChangeVisibility(0x80));  // SECURE
+
+void SurfaceControlNativeSetFlags(JNIEnv*, jclass, jlong transaction,
+                                  jlong control, jint flags, jint mask) {
+  // layer_state_t::eLayerHidden is bit 0.  nativeSetFlags also carries
+  // independent state such as OPAQUE, SECURE, SKIP_SCREENSHOT, and
+  // backpressure; those bits must not change layer visibility.
+  if (!SurfaceControlFlagsChangeVisibility(mask)) return;
+  ASurfaceTransaction_setVisibility(
+      SurfaceTransaction(transaction), SurfaceControl(control),
+      (flags & kSurfaceControlLayerHidden) == 0
+          ? ASURFACE_TRANSACTION_VISIBILITY_SHOW
+          : ASURFACE_TRANSACTION_VISIBILITY_HIDE);
+}
+void SurfaceControlNativeSetPosition(JNIEnv*, jclass, jlong transaction,
+                                     jlong control, jfloat x, jfloat y) {
+  ASurfaceTransaction_setPosition(SurfaceTransaction(transaction),
+                                  SurfaceControl(control),
+                                  static_cast<int32_t>(std::lround(x)),
+                                  static_cast<int32_t>(std::lround(y)));
+}
+void SurfaceControlNativeSetScale(JNIEnv*, jclass, jlong transaction,
+                                  jlong control, jfloat x, jfloat y) {
+  ASurfaceTransaction_setScale(SurfaceTransaction(transaction),
+                               SurfaceControl(control), x, y);
+}
+void SurfaceControlNativeSetLayer(JNIEnv*, jclass, jlong transaction,
+                                  jlong control, jint layer) {
+  ASurfaceTransaction_setZOrder(SurfaceTransaction(transaction),
+                                SurfaceControl(control), layer);
+}
+void SurfaceControlNativeReparent(JNIEnv*, jclass, jlong transaction,
+                                  jlong control, jlong parent) {
+  ASurfaceTransaction_reparent(SurfaceTransaction(transaction),
+                               SurfaceControl(control), SurfaceControl(parent));
+}
+void SurfaceControlNativeSetAlpha(JNIEnv*, jclass, jlong transaction,
+                                  jlong control, jfloat alpha) {
+  ASurfaceTransaction_setBufferAlpha(SurfaceTransaction(transaction),
+                                     SurfaceControl(control), alpha);
+}
+void SurfaceControlNativeSetMatrix(JNIEnv*, jclass, jlong transaction,
+                                   jlong control, jfloat dsdx, jfloat,
+                                   jfloat, jfloat dtdy) {
+  ASurfaceTransaction_setScale(SurfaceTransaction(transaction),
+                               SurfaceControl(control), dsdx, dtdy);
+}
+void SurfaceControlNativeSetWindowCrop(JNIEnv*, jclass, jlong transaction,
+                                       jlong control, jint left, jint top,
+                                       jint right, jint bottom) {
+  const ARect crop{left, top, right, bottom};
+  ASurfaceTransaction_setCrop(SurfaceTransaction(transaction),
+                              SurfaceControl(control), crop);
+}
+void SurfaceControlNativeSetBufferTransform(JNIEnv*, jclass,
+                                            jlong transaction, jlong control,
+                                            jint transform) {
+  ASurfaceTransaction_setBufferTransform(SurfaceTransaction(transaction),
+                                         SurfaceControl(control), transform);
+}
+void SurfaceControlNativeApplyTransaction(JNIEnv*, jclass, jlong transaction,
+                                          jboolean, jboolean) {
+  ASurfaceTransaction_apply(
+      reinterpret_cast<ASurfaceTransaction*>(transaction));
+}
+void SurfaceControlNativeSetExtendedRangeBrightness(JNIEnv*, jclass, jlong,
+                                                    jlong, jfloat, jfloat);
+void SurfaceControlNativeSetExtendedRangeBrightness(JNIEnv*, jclass,
+                                                    jlong transaction,
+                                                    jlong control,
+                                                    jfloat current_ratio,
+                                                    jfloat desired_ratio) {
+  // Standard-dynamic-range windows require no headroom transform. The Metal
+  // composer will consume these values when HDR layer state is plumbed; the
+  // optional hint must not abort an otherwise valid HWUI transaction.
+  ASurfaceTransaction_setExtendedRangeBrightness(
+      SurfaceTransaction(transaction), SurfaceControl(control), current_ratio,
+      desired_ratio);
+}
+void SurfaceControlNativeSetColor(JNIEnv* env, jclass, jlong transaction,
+                                  jlong control, jfloatArray color) {
+  jfloat values[3]{0.0f, 0.0f, 0.0f};
+  if (color != nullptr && env->GetArrayLength(color) >= 3) {
+    env->GetFloatArrayRegion(color, 0, 3, values);
+  }
+  ASurfaceTransaction_setColor(
+      SurfaceTransaction(transaction), SurfaceControl(control), values[0],
+      values[1], values[2], 1.0f, ADATASPACE_UNKNOWN);
+}
+void SurfaceControlNativeSetDesiredHdrHeadroom(JNIEnv*, jclass,
+                                               jlong transaction,
+                                               jlong control, jfloat ratio) {
+  // The SDR Metal swapchain has a fixed headroom of 1.0. Keep the framework
+  // transaction valid; HDR negotiation belongs to the display backend.
+  ASurfaceTransaction_setDesiredHdrHeadroom(
+      SurfaceTransaction(transaction), SurfaceControl(control), ratio);
+}
+
+struct DarwinBlastBufferQueue {
+  void* native_window = nullptr;
+  ASurfaceControl* surface_control = nullptr;
+  jint width = 0;
+  jint height = 0;
+  jint format = 1;
+};
 
 jlong BlastBufferQueueNativeCreate(JNIEnv*, jclass, jstring, jboolean) {
-  return NextEglHandle();
+  return reinterpret_cast<jlong>(new (std::nothrow) DarwinBlastBufferQueue());
 }
 void BlastBufferQueueNativeNoop(JNIEnv*, jclass, jlong) {}
 void BlastBufferQueueNativeNoop2(JNIEnv*, jclass, jlong, jlong) {}
 void BlastBufferQueueNativeNoop3(JNIEnv*, jclass, jlong, jlong, jlong) {}
-void BlastBufferQueueNativeUpdate(JNIEnv*, jclass, jlong, jlong, jlong, jlong,
-                                  jint) {}
+void BlastBufferQueueNativeDestroy(JNIEnv*, jclass, jlong handle) {
+  auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
+  if (queue == nullptr) return;
+  if (queue->native_window != nullptr) {
+    darwin_art_android_ANativeWindow_release(queue->native_window);
+  }
+  delete queue;
+}
+void BlastBufferQueueNativeUpdate(JNIEnv*, jclass, jlong handle,
+                                  jlong surface_control, jlong width,
+                                  jlong height, jint format) {
+  auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
+  if (queue == nullptr || width <= 0 || height <= 0 || width > INT32_MAX ||
+      height > INT32_MAX) {
+    return;
+  }
+  queue->width = static_cast<jint>(width);
+  queue->height = static_cast<jint>(height);
+  queue->format = format == 0 ? 1 : format;
+  queue->surface_control = reinterpret_cast<ASurfaceControl*>(surface_control);
+  if (queue->native_window == nullptr) {
+    queue->native_window = darwin_art_android_ANativeWindow_create(
+        queue->width, queue->height, queue->format);
+  } else {
+    (void)darwin_art_android_ANativeWindow_setBuffersGeometry(
+        queue->native_window, queue->width, queue->height, queue->format);
+  }
+  darwin_art_android_ANativeWindow_set_surface_control(
+      queue->native_window, queue->surface_control);
+}
 jlong BlastBufferQueueNativeGetLastAcquiredFrameNum(JNIEnv*, jclass, jlong) {
   return 0;
 }
-jboolean BlastBufferQueueNativeIsSameSurfaceControl(JNIEnv*, jclass, jlong,
-                                                    jlong) {
-  return JNI_TRUE;
+jboolean BlastBufferQueueNativeIsSameSurfaceControl(JNIEnv*, jclass,
+                                                    jlong handle,
+                                                    jlong surface_control) {
+  const auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
+  return queue != nullptr &&
+                 queue->surface_control ==
+                     reinterpret_cast<ASurfaceControl*>(surface_control)
+             ? JNI_TRUE
+             : JNI_FALSE;
 }
-jobject BlastBufferQueueNativeGetSurface(JNIEnv* env, jclass, jlong,
+jobject BlastBufferQueueNativeGetSurface(JNIEnv* env, jclass, jlong handle,
                                          jboolean) {
+  auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
   jclass surface_class = env->FindClass("android/view/Surface");
   jmethodID constructor = surface_class == nullptr
                               ? nullptr
@@ -93,8 +290,12 @@ jobject BlastBufferQueueNativeGetSurface(JNIEnv* env, jclass, jlong,
   jfieldID native_object = surface_class == nullptr
                                ? nullptr
                                : env->GetFieldID(surface_class, "mNativeObject", "J");
-  if (surface != nullptr && native_object != nullptr && !env->ExceptionCheck()) {
-    env->SetLongField(surface, native_object, 1);
+  if (surface != nullptr && native_object != nullptr && queue != nullptr &&
+      queue->native_window != nullptr && !env->ExceptionCheck()) {
+    darwin_art_android_ANativeWindow_acquire(queue->native_window);
+    env->SetLongField(
+        surface, native_object,
+        reinterpret_cast<jlong>(queue->native_window));
   }
   env->DeleteLocalRef(surface_class);
   return surface;
@@ -144,7 +345,15 @@ DarwinAudioTrack* GetAudioTrack(JNIEnv* env, jobject track) {
 jboolean SurfaceNativeIsValid(JNIEnv*, jclass, jlong handle) {
   return handle != 0 ? JNI_TRUE : JNI_FALSE;
 }
-void SurfaceNativeRelease(JNIEnv*, jclass, jlong) {}
+void SurfaceNativeRelease(JNIEnv*, jclass, jlong handle) {
+  (void)darwin_art_android_ANativeWindow_release_if_managed(
+      reinterpret_cast<void*>(static_cast<uintptr_t>(handle)));
+}
+jlong SurfaceNativeCreateFromSurfaceTexture(JNIEnv* env, jclass,
+                                            jobject surface_texture) {
+  return darwin_art_android_surface_texture_acquire_producer(env,
+                                                             surface_texture);
+}
 jint SurfaceNativeGetWidth(JNIEnv*, jclass, jlong handle) {
   return handle == 0 ? 0 : darwin_art::DarwinAngleHostSurfaceWidth();
 }
@@ -159,6 +368,15 @@ jint SurfaceNativeForceDisconnect(JNIEnv*, jclass, jlong) { return 0; }
 jint SurfaceNativeSetBoolean(JNIEnv*, jclass, jlong, jboolean) { return 0; }
 jint SurfaceNativeSetFrameRate(JNIEnv*, jclass, jlong, jfloat, jint, jint) {
   return 0;
+}
+jlong SurfaceNativeGetFromBlastBufferQueue(JNIEnv*, jclass, jlong old_surface,
+                                           jlong blast_queue) {
+  // BLASTBufferQueue is the producer identity for this Java Surface. Reuse it
+  // across Surface.copyFrom() calls so producer replacement remains atomic.
+  auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(blast_queue);
+  if (queue == nullptr || queue->native_window == nullptr) return old_surface;
+  darwin_art_android_ANativeWindow_acquire(queue->native_window);
+  return reinterpret_cast<jlong>(queue->native_window);
 }
 
 constexpr uint64_t kDarwinSurfaceParcelMagic = 0x4441534600000000ull;
@@ -184,9 +402,18 @@ jlong SurfaceNativeReadFromParcel(JNIEnv* env, jclass, jlong old_handle,
       read_int == nullptr ? 0 : env->CallIntMethod(parcel, read_int);
   const jint height =
       read_int == nullptr ? 0 : env->CallIntMethod(parcel, read_int);
+  const jint owner_process_id =
+      read_int == nullptr ? 0 : env->CallIntMethod(parcel, read_int);
+  const jint layer_id =
+      read_int == nullptr ? 0 : env->CallIntMethod(parcel, read_int);
   env->DeleteLocalRef(parcel_class);
   if (width > 0 && height > 0 && !env->ExceptionCheck()) {
     darwin_art::ConfigureDarwinAngleHostSurface(0, 0, width, height);
+  }
+  if (owner_process_id > 0 && layer_id > 0 && !env->ExceptionCheck()) {
+    darwin_art_android_ANativeWindow_register_imported_surface_identity(
+        token, static_cast<uint32_t>(owner_process_id),
+        static_cast<uint32_t>(layer_id));
   }
   if (std::getenv("DARWIN_ART_DEBUG_ANATIVEWINDOW") != nullptr) {
     std::cerr << "ART Android Surface parcel: read pid=" << getpid()
@@ -220,10 +447,20 @@ void SurfaceNativeWriteToParcel(JNIEnv* env, jclass, jlong handle,
       const jint height = darwin_art::DarwinAngleHostSurfaceHeight();
       env->CallVoidMethod(parcel, write_int, width);
       env->CallVoidMethod(parcel, write_int, height);
+      uint32_t owner_process_id = 0;
+      uint32_t layer_id = 0;
+      (void)darwin_art_android_ANativeWindow_get_surface_control_identity(
+          reinterpret_cast<void*>(static_cast<uintptr_t>(handle)),
+          &owner_process_id, &layer_id);
+      env->CallVoidMethod(parcel, write_int,
+                          static_cast<jint>(owner_process_id));
+      env->CallVoidMethod(parcel, write_int, static_cast<jint>(layer_id));
       if (std::getenv("DARWIN_ART_DEBUG_ANATIVEWINDOW") != nullptr) {
         std::cerr << "ART Android Surface parcel: write pid=" << getpid()
                   << " token=0x" << std::hex << identity << std::dec
-                  << " size=" << width << "x" << height << "\n";
+                  << " size=" << width << "x" << height
+                  << " owner=" << owner_process_id
+                  << " layer=" << layer_id << "\n";
       }
     }
   }
@@ -868,12 +1105,24 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   }
 
   JNINativeMethod surface_control_methods[] = {
+      {const_cast<char*>("nativeCreate"),
+       const_cast<char*>(
+           "(Landroid/view/SurfaceSession;Ljava/lang/String;IIIIJ"
+           "Landroid/os/Parcel;)J"),
+       reinterpret_cast<void*>(&SurfaceControlNativeCreate)},
+      {const_cast<char*>("nativeGetHandle"), const_cast<char*>("(J)J"),
+       reinterpret_cast<void*>(&SurfaceControlNativeGetHandle)},
+      {const_cast<char*>("nativeCopyFromSurfaceControl"),
+       const_cast<char*>("(J)J"),
+       reinterpret_cast<void*>(&SurfaceControlNativeCopy)},
+      {const_cast<char*>("nativeDisconnect"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&SurfaceControlNativeDisconnect)},
       {const_cast<char*>("nativeGetNativeSurfaceControlFinalizer"),
        const_cast<char*>("()J"),
        reinterpret_cast<void*>(&SurfaceControlNativeGetFinalizer)},
       {const_cast<char*>("nativeGetNativeTransactionFinalizer"),
        const_cast<char*>("()J"),
-       reinterpret_cast<void*>(&SurfaceControlNativeGetFinalizer)},
+       reinterpret_cast<void*>(&SurfaceTransactionNativeGetFinalizer)},
       {const_cast<char*>("nativeCreateTransaction"), const_cast<char*>("()J"),
        reinterpret_cast<void*>(&SurfaceControlNativeCreateTransaction)},
       {const_cast<char*>("nativeApplyTransaction"),
@@ -885,9 +1134,9 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
        const_cast<char*>("(JJIZ)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeSetFrameRateCategory)},
       {const_cast<char*>("nativeClearTransaction"), const_cast<char*>("(J)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop1)},
+       reinterpret_cast<void*>(&SurfaceControlNativeClearTransaction)},
       {const_cast<char*>("nativeMergeTransaction"), const_cast<char*>("(JJ)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
+       reinterpret_cast<void*>(&SurfaceControlNativeMergeTransaction)},
       {const_cast<char*>("nativeSetAnimationTransaction"),
        const_cast<char*>("(J)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop1)},
@@ -896,26 +1145,31 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
       {const_cast<char*>("nativeSetEarlyWakeupEnd"), const_cast<char*>("(J)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop1)},
       {const_cast<char*>("nativeSetFlags"), const_cast<char*>("(JJII)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
+       reinterpret_cast<void*>(&SurfaceControlNativeSetFlags)},
       {const_cast<char*>("nativeSetPosition"), const_cast<char*>("(JJFF)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
+       reinterpret_cast<void*>(&SurfaceControlNativeSetPosition)},
       {const_cast<char*>("nativeSetScale"), const_cast<char*>("(JJFF)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
+       reinterpret_cast<void*>(&SurfaceControlNativeSetScale)},
       {const_cast<char*>("nativeSetLayer"), const_cast<char*>("(JJI)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
+       reinterpret_cast<void*>(&SurfaceControlNativeSetLayer)},
       {const_cast<char*>("nativeSetLayerStack"), const_cast<char*>("(JJI)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
       {const_cast<char*>("nativeSetRelativeLayer"), const_cast<char*>("(JJJI)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop3)},
       {const_cast<char*>("nativeReparent"), const_cast<char*>("(JJJ)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop3)},
+       reinterpret_cast<void*>(&SurfaceControlNativeReparent)},
       {const_cast<char*>("nativeSetAlpha"), const_cast<char*>("(JJF)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
+       reinterpret_cast<void*>(&SurfaceControlNativeSetAlpha)},
+      {const_cast<char*>("nativeSetColor"), const_cast<char*>("(JJ[F)V"),
+       reinterpret_cast<void*>(&SurfaceControlNativeSetColor)},
+      {const_cast<char*>("nativeSetDesiredHdrHeadroom"),
+       const_cast<char*>("(JJF)V"),
+       reinterpret_cast<void*>(&SurfaceControlNativeSetDesiredHdrHeadroom)},
       {const_cast<char*>("nativeSetMatrix"), const_cast<char*>("(JJFFFF)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
+       reinterpret_cast<void*>(&SurfaceControlNativeSetMatrix)},
       {const_cast<char*>("nativeSetWindowCrop"),
        const_cast<char*>("(JJIIII)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
+       reinterpret_cast<void*>(&SurfaceControlNativeSetWindowCrop)},
       {const_cast<char*>("nativeSetCrop"), const_cast<char*>("(JJFFFF)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
       {const_cast<char*>("nativeSetDestinationFrame"),
@@ -930,7 +1184,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
       {const_cast<char*>("nativeSetBufferTransform"),
        const_cast<char*>("(JJI)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
+       reinterpret_cast<void*>(&SurfaceControlNativeSetBufferTransform)},
       {const_cast<char*>("nativeSetDamageRegion"),
        const_cast<char*>("(JJLandroid/graphics/Region;)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
@@ -960,6 +1214,9 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
       {const_cast<char*>("nativeSetDimmingEnabled"),
        const_cast<char*>("(JJZ)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
+      {const_cast<char*>("nativeSetExtendedRangeBrightness"),
+       const_cast<char*>("(JJFF)V"),
+       reinterpret_cast<void*>(&SurfaceControlNativeSetExtendedRangeBrightness)},
       {const_cast<char*>("nativeSetTrustedOverlay"), const_cast<char*>("(JJI)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
       {const_cast<char*>("nativeSetDropInputMode"), const_cast<char*>("(JJI)V"),
@@ -980,7 +1237,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
        const_cast<char*>("(Ljava/lang/String;Z)J"),
        reinterpret_cast<void*>(&BlastBufferQueueNativeCreate)},
       {const_cast<char*>("nativeDestroy"), const_cast<char*>("(J)V"),
-       reinterpret_cast<void*>(&BlastBufferQueueNativeNoop)},
+       reinterpret_cast<void*>(&BlastBufferQueueNativeDestroy)},
       {const_cast<char*>("nativeGatherPendingTransactions"),
        const_cast<char*>("(JJ)Landroid/view/SurfaceControl$Transaction;"),
        reinterpret_cast<void*>(&BlastBufferQueueNativeGatherPendingTransactions)},
@@ -1023,6 +1280,12 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   }
 
   JNINativeMethod surface_methods[] = {
+      {const_cast<char*>("nativeCreateFromSurfaceTexture"),
+       const_cast<char*>("(Landroid/graphics/SurfaceTexture;)J"),
+       reinterpret_cast<void*>(&SurfaceNativeCreateFromSurfaceTexture)},
+      {const_cast<char*>("nativeGetFromBlastBufferQueue"),
+       const_cast<char*>("(JJ)J"),
+       reinterpret_cast<void*>(&SurfaceNativeGetFromBlastBufferQueue)},
       {const_cast<char*>("nativeIsValid"), const_cast<char*>("(J)Z"),
        reinterpret_cast<void*>(&SurfaceNativeIsValid)},
       {const_cast<char*>("nativeRelease"), const_cast<char*>("(J)V"),
@@ -1062,6 +1325,9 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   };
   if (!Register(env, "android/view/Surface", surface_methods,
                 static_cast<jint>(std::size(surface_methods)))) {
+    return false;
+  }
+  if (!RegisterDarwinSurfaceTextureNatives(env)) {
     return false;
   }
 

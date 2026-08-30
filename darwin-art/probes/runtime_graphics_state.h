@@ -34,6 +34,7 @@ struct GraphicsState {
   jobject hardware_context = nullptr;
   jobject gpu_render_node = nullptr;
   bool gpu_render_node_recorded = false;
+  jint gpu_last_traversal_barrier = -1;
   bool gpu_ripple_overlay_active = false;
   jfloat gpu_ripple_overlay_x = 0.0f;
   jfloat gpu_ripple_overlay_y = 0.0f;

@@ -391,6 +391,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_dispatch_pointer_v2")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_dispatch_key_v1")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_pump_frame")
+        .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_pump_main_looper")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_create")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_resize")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_get_size")
@@ -452,6 +453,14 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&hwui_object)
         .arg(&surface_object)
         .arg(&surface_gpu_object)
+        // SurfaceControl transactions cross the exact Android 16
+        // TransactionHandler/ResolvedComposerState boundary before the
+        // Darwin Composer consumes them. Keep the frontend and its AOSP
+        // Binder/libgui/Fence closure in the production graphics dylib.
+        .arg(root.join("_build/surfaceflinger-core/libsurfaceflinger-frontend-darwin.a"))
+        .arg(root.join("_build/surfaceflinger-core/libgui-transaction-darwin.a"))
+        .arg(root.join("_build/surfaceflinger-core/libbinder-darwin.a"))
+        .arg(root.join("_build/surfaceflinger-core/libui-fence-darwin.a"))
         .arg(root.join("_build/skia-metal-gpu/libskia.a"))
         .arg(root.join("_build/skia-metal-gpu/libskcms.a"))
         // RenderNode/RecordingCanvas are the real HWUI display-list path. Keep
@@ -459,6 +468,13 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         // cannot silently fall back to the bitmap/CPU bridge.
         .arg(root.join("_build/hwui-static-foundation/libhwui-static-darwin.a"))
         .arg(root.join("_build/android-graphics-jni/libandroid-graphics-jni-darwin.a"))
+        // HWUI is an Android EGL/GLES client.  Keep its standard C ABI bound
+        // to the project-built ANGLE dylibs instead of manufacturing another
+        // static GL implementation in the compatibility archive.  Android-
+        // specific ANativeWindow/AHardwareBuffer behavior remains in the
+        // platform dispatch bridge linked below.
+        .arg(root.join("_build/angle-source/out/DarwinArtRelease/libEGL.dylib"))
+        .arg(root.join("_build/angle-source/out/DarwinArtRelease/libGLESv2.dylib"))
         // This is the already-audited force/normal composition of all 32
         // graphics archives. Place its fixed definitions before ART's normal
         // archives so the latter extract only additional runtime providers.
@@ -554,6 +570,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
             "-lsqlite3",
             "-lz",
             "-lresolv",
+            "-Wl,-rpath,@loader_path/../angle-source/out/DarwinArtRelease",
             "-framework",
             "CoreFoundation",
             "-framework",

@@ -1,6 +1,7 @@
 #include "runtime_app_presentation.h"
 
 #include "darwin_angle_egl.h"
+#include "darwin_android_platform.h"
 #include "darwin_surface_bridge.h"
 
 #include <iostream>
@@ -132,8 +133,6 @@ jboolean InstallTransitionedActivity(JNIEnv* env, jclass, jobject activity,
       !env->ExceptionCheck() &&
       darwin_art_graphics::retain_interactive_view_root(state, env, view_root) &&
       darwin_art_graphics::retain_hardware_context(state, env, activity) &&
-      darwin_art_graphics::present_content(state, env, nullptr, content_root,
-                                           width, height) == JNI_TRUE &&
       darwin_art_graphics::retain_interactive_root(state, env, decor_view,
                                                    width, height);
   env->DeleteLocalRef(content_root);
@@ -395,8 +394,21 @@ void EnsureViewRootSurfaceValid(JNIEnv* env, jobject view) {
     // WindowSession.relayout() normally installs SurfaceFlinger's layer here.
     // The Darwin compositor owns the CAMetalLayer directly, but ViewRootImpl
     // must still observe a live layer identity for its transaction lifecycle.
-    env->SetLongField(root_surface_control, surface_control_native,
-                      NextJavaSurfaceIdentity());
+    const jlong native_root = reinterpret_cast<jlong>(
+        darwin_art_android_surface_control_create_root("ViewRoot"));
+    jmethodID assign_native = env->GetMethodID(
+        surface_control_class, "assignNativeObject", "(JLjava/lang/String;)V");
+    jstring callsite = env->NewStringUTF("Darwin WMS relayout");
+    if (assign_native != nullptr && callsite != nullptr &&
+        !env->ExceptionCheck()) {
+      env->CallVoidMethod(root_surface_control, assign_native, native_root,
+                          callsite);
+    } else {
+      env->ExceptionClear();
+      env->SetLongField(root_surface_control, surface_control_native,
+                        native_root);
+    }
+    if (callsite != nullptr) env->DeleteLocalRef(callsite);
   }
   env->DeleteLocalRef(surface_control_class);
   env->DeleteLocalRef(root_surface_control);
@@ -485,14 +497,15 @@ bool attach_android_window(JNIEnv* env, jobject activity, jobject window,
                              ? nullptr
                              : env->GetFieldID(params_class, "flags", "I");
   if (flags_field != nullptr && !env->ExceptionCheck()) {
-    // The Darwin compatibility runtime owns the Metal RenderNode target.  A
-    // framework ThreadedRenderer would try to allocate a second Android
-    // SurfaceControl, so keep ViewRoot's traversal/input lifecycle while the
-    // existing HWUI owner performs the sole GPU submission.
+    // Product windows follow Android's normal hardware-accelerated contract.
+    // ViewRootImpl must create ThreadedRenderer and own the retained root
+    // RenderNode; the Darwin Surface/SurfaceControl implementation routes its
+    // buffers to IOSurface and the Metal composer. Clearing this flag forced a
+    // host-owned View.draw() loop and severed Choreographer damage from HWUI.
     constexpr jint kFlagHardwareAccelerated = 0x01000000;
     const jint flags = env->GetIntField(window_attributes, flags_field);
     env->SetIntField(window_attributes, flags_field,
-                     flags & ~kFlagHardwareAccelerated);
+                     flags | kFlagHardwareAccelerated);
   }
   jclass global_class = env->FindClass("android/view/WindowManagerGlobal");
   jmethodID get_instance =
@@ -523,6 +536,17 @@ bool attach_android_window(JNIEnv* env, jobject activity, jobject window,
   }
   env->CallVoidMethod(global, add_view, decor_view, window_attributes, display,
                       window, static_cast<jint>(0));
+  jmethodID complete_visibility =
+      graphics_state->service_bridge_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(
+                graphics_state->service_bridge_class,
+                "completeActivityWindowVisibility",
+                "(Landroid/app/Activity;Landroid/view/View;)V");
+  if (complete_visibility != nullptr && !env->ExceptionCheck()) {
+    env->CallStaticVoidMethod(graphics_state->service_bridge_class,
+                              complete_visibility, activity, decor_view);
+  }
   // ViewRootImpl normally receives a valid BufferQueue producer from
   // WindowManager before its first traversal.  The detached compositor owns
   // that producer, so publish the process-local token at the same boundary.
@@ -1224,27 +1248,6 @@ int run_service(JNIEnv* env, art::Thread* self, jclass service_class,
   }
   if (!env->ExceptionCheck() && on_create != nullptr) {
     env->CallVoidMethod(service, on_create);
-  }
-  if (std::getenv("DARWIN_ART_DEBUG_COMMAND_LINE") != nullptr &&
-      !env->ExceptionCheck()) {
-    jclass command_line_class = load_activity_class(
-        env, service_class, "org.chromium.base.CommandLine");
-    jmethodID flags_loaded =
-        command_line_class == nullptr
-            ? nullptr
-            : env->GetStaticMethodID(command_line_class,
-                                     "wasFlagsLoadedFromFile", "()Z");
-    const bool loaded = flags_loaded != nullptr && !env->ExceptionCheck() &&
-                        env->CallStaticBooleanMethod(command_line_class,
-                                                     flags_loaded) == JNI_TRUE;
-    std::cerr << "ART Android service: command-line file loaded=" << loaded
-              << " service=" << service_class_name << " pid=" << getpid()
-              << "\n";
-    if (env->ExceptionCheck()) {
-      env->ExceptionDescribe();
-      env->ExceptionClear();
-    }
-    env->DeleteLocalRef(command_line_class);
   }
   jobject binder = on_bind == nullptr || intent == nullptr || env->ExceptionCheck()
                        ? nullptr

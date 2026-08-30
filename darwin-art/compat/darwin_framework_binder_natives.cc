@@ -1855,12 +1855,32 @@ bool FocusFrameworkViewRoot(JNIEnv* env, jobject view_root) {
       input_receiver_class == nullptr
           ? nullptr
           : env->GetMethodID(input_receiver_class, "onFocusEvent", "(Z)V");
+  jmethodID touch_mode =
+      input_receiver_class == nullptr
+          ? nullptr
+          : env->GetMethodID(input_receiver_class, "onTouchModeChanged", "(Z)V");
   if (target != nullptr && focus != nullptr && !env->ExceptionCheck()) {
     env->CallVoidMethod(target, focus, JNI_TRUE);
   }
+  // WindowManager.addWindow() normally returns ADD_FLAG_IN_TOUCH_MODE and
+  // ViewRootImpl applies it before the first pointer packet. Our local window
+  // session has no system_server result parcel, so publish the same initial
+  // state through WindowInputEventReceiver during attachment. Without it the
+  // first tap only moved focus into Chrome's focusable tab button and Android
+  // intentionally deferred performClick until the second tap.
+  if (target != nullptr && touch_mode != nullptr && !env->ExceptionCheck()) {
+    env->CallVoidMethod(target, touch_mode, JNI_TRUE);
+  }
+  // WindowInputEventReceiver.onFocusEvent is the AOSP boundary. It calls
+  // ViewRootImpl.windowFocusChanged(), which posts MSG_WINDOW_FOCUS_CHANGED to
+  // the main queue. Do not invoke ViewRootImpl a second time here; the owner
+  // Looper drains the posted message before host input is admitted.
   const bool focused = target != nullptr && focus != nullptr &&
-                       !env->ExceptionCheck();
-  if (receiver != nullptr && focused) receiver->focused = true;
+                       touch_mode != nullptr && !env->ExceptionCheck();
+  if (receiver != nullptr && focused) {
+    receiver->focused = true;
+    receiver->touch_mode = true;
+  }
   if (input_receiver_class != nullptr) {
     env->DeleteLocalRef(input_receiver_class);
   }
@@ -1923,33 +1943,34 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
   if (!receiver->focused && target != nullptr && focus != nullptr &&
       !env->ExceptionCheck()) {
     env->CallVoidMethod(target, focus, JNI_TRUE);
-    jmethodID window_focus_changed = env->GetMethodID(
-        view_root_class, "windowFocusChanged", "(Z)V");
-    jmethodID handle_focus = env->GetMethodID(
-        view_root_class, "handleWindowFocusChanged", "()V");
-    if (window_focus_changed != nullptr && handle_focus != nullptr &&
-        !env->ExceptionCheck()) {
-      env->CallVoidMethod(view_root, window_focus_changed, JNI_TRUE);
-      env->CallVoidMethod(view_root, handle_focus);
-    }
     receiver->focused = !env->ExceptionCheck();
   }
   jclass motion_event_class = env->FindClass("android/view/MotionEvent");
   const bool is_motion =
       motion_event_class != nullptr && env->IsInstanceOf(event, motion_event_class);
-  if (is_motion && !receiver->touch_mode && target != nullptr &&
+  jmethodID get_source =
+      motion_event_class == nullptr
+          ? nullptr
+          : env->GetMethodID(motion_event_class, "getSource", "()I");
+  const jint source =
+      is_motion && get_source != nullptr && !env->ExceptionCheck()
+          ? env->CallIntMethod(event, get_source)
+          : 0;
+  const bool is_touchscreen = source == 0x1002;
+  if (is_touchscreen && !receiver->touch_mode && target != nullptr &&
       input_receiver_class != nullptr && !env->ExceptionCheck()) {
     jmethodID touch_mode = env->GetMethodID(
         input_receiver_class, "onTouchModeChanged", "(Z)V");
-    jmethodID view_root_touch_mode = env->GetMethodID(
-        view_root_class, "touchModeChanged", "(Z)V");
     jmethodID handle_touch_mode = env->GetMethodID(
         view_root_class, "handleWindowTouchModeChanged", "()V");
-    if (touch_mode != nullptr && view_root_touch_mode != nullptr &&
-        handle_touch_mode != nullptr &&
+    if (touch_mode != nullptr && handle_touch_mode != nullptr &&
         !env->ExceptionCheck()) {
       env->CallVoidMethod(target, touch_mode, JNI_TRUE);
-      env->CallVoidMethod(view_root, view_root_touch_mode, JNI_TRUE);
+      // The native InputDispatcher sends touch-mode state before the following
+      // MotionEvent. Since this bridge delivers both on one owner-thread call,
+      // apply the state posted by WindowInputEventReceiver before dispatching
+      // the pointer; its queued MSG_WINDOW_TOUCH_MODE_CHANGED remains a benign
+      // idempotent confirmation on the next Looper iteration.
       env->CallVoidMethod(view_root, handle_touch_mode);
       receiver->touch_mode = !env->ExceptionCheck();
     }

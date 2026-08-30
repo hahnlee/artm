@@ -909,17 +909,20 @@ int OwnerIoctl(void *context, uint64_t object, uint64_t request, void *argument,
   if (request == kSyncIocFileInfo && argument != nullptr) {
     int available = 0;
     struct stat status{};
-    // Darwin has no Linux sync_file object. The EGL bridge publishes an
-    // already-signaled pipe containing one 64-bit marker. The marker survives
-    // dup and SCM_RIGHTS, while FIONREAD lets this ioctl identify it without
-    // consuming the readiness signal used by libsync's poll-based sync_wait.
+    // Darwin has no Linux sync_file object. The EGL bridge publishes a pipe
+    // whose write end is completed by an MTLSharedEvent listener. The marker
+    // survives dup and SCM_RIGHTS, while FIONREAD reports pending/signaled
+    // state without consuming the readiness used by libsync's sync_wait.
     if (fstat(descriptor->fd, &status) == 0 && S_ISFIFO(status.st_mode) &&
         ioctl(descriptor->fd, FIONREAD, &available) == 0 &&
-        available == static_cast<int>(sizeof(uint64_t))) {
+        (available == 0 ||
+         available == static_cast<int>(sizeof(uint64_t)))) {
+      const int fence_status =
+          available == static_cast<int>(sizeof(uint64_t)) ? 1 : 0;
       auto *info = static_cast<AndroidSyncFileInfo *>(argument);
       std::memset(info->name, 0, sizeof(info->name));
       std::memcpy(info->name, "darwin-metal", sizeof("darwin-metal") - 1);
-      info->status = 1;
+      info->status = fence_status;
       info->flags = 0;
       info->pad = 0;
       if (info->sync_fence_info == 0) {
@@ -932,12 +935,14 @@ int OwnerIoctl(void *context, uint64_t object, uint64_t request, void *argument,
                     sizeof("metal-command-buffer") - 1);
         std::memcpy(fence->driver_name, "darwin-angle",
                     sizeof("darwin-angle") - 1);
-        fence->status = 1;
+        fence->status = fence_status;
         struct timespec now{};
-        (void)clock_gettime(CLOCK_MONOTONIC, &now);
-        fence->timestamp_ns =
-            static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000000) +
-            static_cast<uint64_t>(now.tv_nsec);
+        if (fence_status == 1) {
+          (void)clock_gettime(CLOCK_MONOTONIC, &now);
+          fence->timestamp_ns =
+              static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000000) +
+              static_cast<uint64_t>(now.tv_nsec);
+        }
         info->num_fences = 1;
       }
       *android_errno = 0;

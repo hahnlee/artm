@@ -5,8 +5,9 @@ static-link ownership order. It neither builds a replacement symbol nor
 accepts an unresolved symbol merely because the count is below a threshold.
 
 The force-loaded roots are the Layoutlib registrar, all 61 GraphicsJNI host
-members, all 81 HWUI core/host members, the five common graphics APEX members,
-the framework/Freetype Skia archive required by HWUI's `whole_static_libs`, and
+members, all 88 HWUI core/host members, the five common graphics APEX members,
+the unified framework-configured macOS Skia archive with Ganesh GL and Metal
+required by HWUI's `whole_static_libs`, and
 the two-member Android ICU initialization archive. All other archives are
 normal static providers in Android.bp dependency order: skcms, androidfw,
 hostgraphics, the six codec modules, Minikin, HarfBuzz, FreeType, ui-types,
@@ -58,9 +59,18 @@ libc++, libSystem, lz4, and zlib resolve all 415 external imports. The final
 arm64 executable links and launches successfully, so the missing-module count
 is zero.
 
-The 523-member Skia archive includes the two Android.bp/GN `android_utils`
-translation units that previously owned six missing BitmapRegionDecoder and
-FrontBufferedStream definitions. The separate 19-member module-complete
+The 956-member Skia archive supplies one shared Skia definition set for both
+AOSP HWUI's Ganesh GL pipeline and the Darwin Metal compositor. It includes
+the Android framework configuration while retaining macOS as the target OS,
+so Android framework semantics do not make Metal compile through an iOS
+branch. It also retains the two AOSP `android_utils` translation units used by
+framework bitmap decoding, HWUI's custom empty font manager, and multi-frame
+picture sharing, AOSP FreeType, and the pinned framework image codecs. Its
+stable patched-source overlay makes a no-op incremental rebuild complete in
+about two seconds instead of invalidating the entire source graph. The
+four AOSP AHardwareBuffer Ganesh extension objects provide the zero-copy
+AHardwareBuffer/EGLImage path without changing the Metal core's OS target. The
+separate 19-member module-complete
 libbase archive includes its Android.bp whole-static fmt provider. The final
 link therefore does not fall back to a Homebrew fmt dylib.
 

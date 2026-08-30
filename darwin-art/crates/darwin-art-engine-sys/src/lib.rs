@@ -346,6 +346,8 @@ pub struct PointerEventV2 {
     pub size_value: f32,
 }
 
+pub const POINTER_EVENT_FLAG_MOUSE: u32 = 1 << 0;
+
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub struct KeyEventV1 {
@@ -384,6 +386,7 @@ pub type GraphicsSessionDispatchPointerV2Fn =
 pub type GraphicsSessionDispatchKeyV1Fn =
     unsafe extern "C" fn(*mut GraphicsSessionHandle, *const KeyEventV1) -> i32;
 pub type GraphicsSessionPumpFrameFn = unsafe extern "C" fn(*mut GraphicsSessionHandle, i64) -> i32;
+pub type GraphicsSessionPumpMainLooperFn = unsafe extern "C" fn(*mut GraphicsSessionHandle) -> i32;
 pub type ProviderInstallHooksFn = unsafe extern "C" fn(
     context: *mut c_void,
     acquire: Option<ProviderAcquireFn>,

@@ -100,26 +100,25 @@ fi
 
 runtime_abi="darwin-art-darwin-native-v1"
 profile_mount=""
-if [[ -z "${DARWIN_ART_APP_DATA_ROOT:-}" ]]; then
-  if [[ ! -x "$root/target/release/darwin-artctl" ||
-        ! -x "$root/target/release/darwin-artd" ]]; then
-    cargo build -q --release -p darwin-art-profile --bins
-  fi
-  profile_ctl="$root/target/release/darwin-artctl"
-  profile_mount="$("$profile_ctl" ensure)"
-  export DARWIN_ART_PROFILE_CTL="$profile_ctl"
-  export DARWIN_ART_PROFILE_SOCKET
-  DARWIN_ART_PROFILE_SOCKET="$("$profile_ctl" socket)"
-  # Darwin's sockaddr_un.sun_path is only 104 bytes. Application Support and
-  # user-selected profile names can exceed that before the socket filename is
-  # appended, so keep process-control endpoints in a short, user-private
-  # runtime directory while all durable profile data remains in profile_mount.
-  system_socket_dir="/tmp/darwin-art-$(id -u)"
-  mkdir -p "$system_socket_dir"
-  chmod 0700 "$system_socket_dir"
-  profile_socket_id="$(printf '%s' "$profile_mount" | shasum -a 256 | awk '{print substr($1, 1, 16)}')"
-  export DARWIN_ART_SYSTEM_SERVER_SOCKET="$system_socket_dir/$profile_socket_id.system.sock"
+if [[ ! -x "$root/target/release/darwin-artctl" ||
+      ! -x "$root/target/release/darwin-artd" ]]; then
+  cargo build -q --release -p darwin-art-profile --bins
 fi
+profile_ctl="$root/target/release/darwin-artctl"
+profile_mount="$("$profile_ctl" ensure)"
+export DARWIN_ART_PROFILE_CTL="$profile_ctl"
+export DARWIN_ART_PROFILE_SOCKET
+DARWIN_ART_PROFILE_SOCKET="$("$profile_ctl" socket)"
+# App-data isolation changes only the package sandbox. Android system services
+# remain profile-scoped and common to every APK, just as they are on a device.
+# Darwin's sockaddr_un.sun_path is only 104 bytes, so keep process-control
+# endpoints in a short private runtime directory.
+system_socket_dir="/tmp/darwin-art-$(id -u)"
+mkdir -p "$system_socket_dir"
+chmod 0700 "$system_socket_dir"
+profile_socket_id="$(printf '%s' "$profile_mount" | shasum -a 256 | awk '{print substr($1, 1, 16)}')"
+export DARWIN_ART_SYSTEM_SERVER_SOCKET="$system_socket_dir/$profile_socket_id.system.sock"
+export DARWIN_ART_SURFACEFLINGER_SOCKET="$system_socket_dir/$profile_socket_id.sf.sock"
 if [[ -n "${DARWIN_ART_APK_INSTALL_ROOT:-}" ]]; then
   install_root="$DARWIN_ART_APK_INSTALL_ROOT"
 elif [[ -n "$profile_mount" ]]; then
@@ -376,14 +375,11 @@ chmod 0700 "$guest_app_data" "$guest_app_data/files" \
   "$guest_app_data/no_backup" "$guest_app_data/databases" \
   "$guest_app_data/shared_prefs"
 
-# This runtime currently exposes GLES through ANGLE/Metal but no Android
-# Vulkan/Dawn device. Chromium otherwise enables Graphite and Android's
-# cross-thread display compositor from the SDK level alone. That combination
-# asks SharedImage for cross-thread software-decoded I420 storage, which the
-# truthful GLES backend cannot share. Select Chromium's supported GLES
-# fallback until the compatibility layer grows multiplanar Vulkan images.
-if [[ "$package" == "org.chromium.chrome" &&
-      "${DARWIN_ART_CHROMIUM_GPU_COMPATIBILITY:-1}" != "0" ]]; then
+# Chromium reads its Android command line from an app-private file. Keep that
+# transport independent from any temporary GPU policy: acceptance tests and
+# normal launches still need to deliver intents/FRE policy when a graphics
+# workaround is explicitly disabled.
+if [[ "$package" == "org.chromium.chrome" ]]; then
   export DARWIN_ART_APP_COMMAND_LINE_FILE="${DARWIN_ART_APP_COMMAND_LINE_FILE:-chrome-command-line}"
   chromium_command_line="${DARWIN_ART_APP_COMMAND_LINE:-}"
   # A standalone compatibility runtime has no Play Store/FRE account broker.
@@ -396,19 +392,6 @@ if [[ "$package" == "org.chromium.chrome" &&
       *) chromium_command_line="${chromium_command_line:+$chromium_command_line }$chromium_switch" ;;
     esac
   done
-  chromium_disabled_features="SkiaGraphite,EnableDrDc"
-  if [[ "$chromium_command_line" =~ (^|[[:space:]])--disable-features=([^[:space:]]*) ]]; then
-    existing_disabled_features="${BASH_REMATCH[2]}"
-    for feature in SkiaGraphite EnableDrDc; do
-      if [[ ",$existing_disabled_features," != *",$feature,"* ]]; then
-        existing_disabled_features="${existing_disabled_features:+$existing_disabled_features,}$feature"
-      fi
-    done
-    old_switch="--disable-features=${BASH_REMATCH[2]}"
-    chromium_command_line="${chromium_command_line/"$old_switch"/"--disable-features=$existing_disabled_features"}"
-  else
-    chromium_command_line="${chromium_command_line:+$chromium_command_line }--disable-features=$chromium_disabled_features"
-  fi
   export DARWIN_ART_APP_COMMAND_LINE="$chromium_command_line"
 fi
 if [[ -n "${DARWIN_ART_APP_COMMAND_LINE_FILE:-}" ]]; then
@@ -583,6 +566,11 @@ host_command=("$host" --window-seconds "$seconds" \
 if [[ -n "$profile_mount" ]]; then
   system_server_pid="$("$profile_ctl" ps | awk '$2 == "android.system" { print $1; exit }')"
   if [[ -z "$system_server_pid" ]] || ! kill -0 "$system_server_pid" 2>/dev/null; then
+    # A killed system_server leaves pathname sockets behind. Remove only this
+    # profile's two deterministic endpoints before launching its replacement;
+    # otherwise the readiness loop can accept a stale inode and start the app
+    # before Binder and SurfaceFlinger are listening.
+    rm -f "$DARWIN_ART_SYSTEM_SERVER_SOCKET" "$DARWIN_ART_SURFACEFLINGER_SOCKET"
     system_server_log="${profile_mount%/mnt}/darwin-artd.log"
     system_server_root="$profile_mount/system-server-root"
     system_server_private="$profile_mount/data/apps/android.system/private-data"
@@ -627,12 +615,14 @@ if [[ -n "$profile_mount" ]]; then
       "$profile_ctl" daemonize android.system "${system_server_command[@]}" \
     )"
     for _ in {1..100}; do
-      [[ -S "$DARWIN_ART_SYSTEM_SERVER_SOCKET" ]] && break
+      [[ -S "$DARWIN_ART_SYSTEM_SERVER_SOCKET" &&
+         -S "$DARWIN_ART_SURFACEFLINGER_SOCKET" ]] && break
       kill -0 "$system_server_launcher_pid" 2>/dev/null || break
       sleep 0.05
     done
-    [[ -S "$DARWIN_ART_SYSTEM_SERVER_SOCKET" ]] || {
-      echo "system_server-lite did not publish its package Binder" >&2
+    [[ -S "$DARWIN_ART_SYSTEM_SERVER_SOCKET" &&
+       -S "$DARWIN_ART_SURFACEFLINGER_SOCKET" ]] || {
+      echo "system_server-lite did not publish Binder and SurfaceFlinger" >&2
       tail -40 "$system_server_log" >&2 || true
       exit 70
     }

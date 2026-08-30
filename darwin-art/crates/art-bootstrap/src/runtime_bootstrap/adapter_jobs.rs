@@ -23,7 +23,11 @@ pub(super) fn adapter_jobs(
         } else {
             &staged.object_dir
         };
-        let adapter_object = adapter_object_dir.join(format!("{adapter_source}.o"));
+        // Adapter sources may live in responsibility-specific subdirectories.
+        // Keep the archive member namespace flat so the shared object cache
+        // never depends on pre-creating a parallel directory tree.
+        let adapter_object =
+            adapter_object_dir.join(format!("{}.o", adapter_source.replace(['/', '\\'], "_")));
         let compile_includes = if common { runtime_includes } else { includes };
         let mut adapter_command = if real_graphics
             && matches!(
@@ -70,6 +74,9 @@ pub(super) fn adapter_jobs(
             "darwin_runtime_adapters.cc"
                 | "darwin_android_asset_manager.cc"
                 | "darwin_android_platform.mm"
+                | "darwin_android_native_window.cc"
+                | "darwin_android_sync.cc"
+                | "darwin_android_surface_texture.cc"
                 | "darwin_android_media_ndk.cc"
                 | "darwin_runtime_elf_lifecycle.cc"
                 | "darwin_runtime_elf_resolver.cc"
@@ -100,6 +107,17 @@ pub(super) fn adapter_jobs(
                     .root
                     .join("tools/android-dl-iterate-phdr-provider/include"),
             );
+        }
+        if adapter_source == "darwin_android_surface_texture.cc" {
+            adapter_command
+                .arg("-I")
+                .arg(
+                    staged.root.join(
+                        "_aosp/hwui-static-deps/frameworks-native/libs/nativedisplay/include",
+                    ),
+                )
+                .arg("-I")
+                .arg(staged.root.join("_aosp/system/core/libsystem/include"));
         }
         if adapter_source == "darwin_android_asset_manager.cc" {
             adapter_command

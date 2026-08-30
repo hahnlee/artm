@@ -8,6 +8,9 @@ hwui="$aosp_root/frameworks/base/libs/hwui"
 lock_file="$project_root/upstream/android16-hwui-static-foundation.lock"
 output_dir="$project_root/_build/hwui-static-foundation"
 animation_patch="$project_root/patches/frameworks-base/0005-darwin-hwui-animation-pulse.patch"
+darwin_gpu_patch="$project_root/patches/frameworks-base/0006-darwin-hwui-gpu.patch"
+darwin_renderthread_patch="$project_root/patches/frameworks-base/0007-darwin-hwui-renderthread.patch"
+darwin_angle_surface_patch="$project_root/patches/frameworks-base/0008-darwin-hwui-angle-rgba-surface.patch"
 
 # shellcheck disable=SC1090
 source "$lock_file"
@@ -41,6 +44,9 @@ verify_sha "$hwui/HWUIProperties.sysprop" "$HWUI_SYSPROP_SHA256"
 verify_sha "$project_root/patches/frameworks-base/0001-darwin-android-critical-jni-abi.patch" \
   "$CRITICAL_JNI_PATCH_SHA256"
 verify_sha "$animation_patch" "$ANIMATION_PULSE_PATCH_SHA256"
+verify_sha "$darwin_gpu_patch" "$DARWIN_GPU_PATCH_SHA256"
+verify_sha "$darwin_renderthread_patch" "$DARWIN_RENDERTHREAD_PATCH_SHA256"
+verify_sha "$darwin_angle_surface_patch" "$DARWIN_ANGLE_SURFACE_PATCH_SHA256"
 
 sources=(
   canvas/CanvasFrontend.cpp
@@ -52,7 +58,10 @@ sources=(
   pipeline/skia/HolePunch.cpp
   pipeline/skia/SkiaCpuPipeline.cpp
   pipeline/skia/SkiaDisplayList.cpp
+  pipeline/skia/SkiaGpuPipeline.cpp
+  pipeline/skia/SkiaOpenGLPipeline.cpp
   pipeline/skia/SkiaPipeline.cpp
+  pipeline/skia/SkiaProfileRenderer.cpp
   pipeline/skia/SkiaRecordingCanvas.cpp
   pipeline/skia/StretchMask.cpp
   pipeline/skia/RenderNodeDrawable.cpp
@@ -61,9 +70,11 @@ sources=(
   renderstate/RenderState.cpp
   renderthread/CanvasContext.cpp
   renderthread/DrawFrameTask.cpp
+  renderthread/EglManager.cpp
   renderthread/Frame.cpp
   renderthread/RenderEffectCapabilityQuery.cpp
   renderthread/RenderProxy.cpp
+  renderthread/RenderThread.cpp
   renderthread/RenderTask.cpp
   renderthread/TimeLord.cpp
   hwui/AnimatedImageDrawable.cpp
@@ -79,6 +90,7 @@ sources=(
   thread/CommonPool.cpp
   utils/Blur.cpp
   utils/Color.cpp
+  utils/GLUtils.cpp
   utils/LinearAllocator.cpp
   utils/StringUtils.cpp
   utils/StatsUtils.cpp
@@ -87,9 +99,11 @@ sources=(
   AnimationContext.cpp
   Animator.cpp
   AnimatorManager.cpp
+  AutoBackendTextureRelease.cpp
   CanvasTransform.cpp
   DamageAccumulator.cpp
   DeviceInfo.cpp
+  DeferredLayerUpdater.cpp
   FrameInfo.cpp
   FrameInfoVisualizer.cpp
   FrameMetricsReporter.cpp
@@ -119,7 +133,6 @@ sources=(
   platform/host/renderthread/CacheManager.cpp
   platform/host/renderthread/HintSessionWrapper.cpp
   platform/host/renderthread/ReliableSurface.cpp
-  platform/host/renderthread/RenderThread.cpp
   platform/host/ProfileDataContainer.cpp
   platform/host/Readback.cpp
   platform/host/WebViewFunctorManager.cpp
@@ -232,13 +245,18 @@ mkdir -p "$cache_dir" "$generated_dir/include" "$generated_dir/source" "$generat
 # or pinned source identity changes.
 patched_hwui="$output_dir/patched-source"
 patched_marker="$patched_hwui/.darwin-art-patched-source"
-patch_identity="$(printf '%s\n%s\n' "$HWUI_SOURCE_MANIFEST_SHA256" \
-  "$ANIMATION_PULSE_PATCH_SHA256" | shasum -a 256 | awk '{print $1}')"
+patch_identity="$(printf '%s\n%s\n%s\n%s\n%s\n' "$HWUI_SOURCE_MANIFEST_SHA256" \
+  "$ANIMATION_PULSE_PATCH_SHA256" "$DARWIN_GPU_PATCH_SHA256" \
+  "$DARWIN_RENDERTHREAD_PATCH_SHA256" "$DARWIN_ANGLE_SURFACE_PATCH_SHA256" \
+  | shasum -a 256 | awk '{print $1}')"
 if [[ ! -f "$patched_marker" || "$(<"$patched_marker")" != "$patch_identity" ]]; then
   fresh_shadow="$output_dir/patched-source.new.$$"
   mkdir -p "$fresh_shadow"
   cp -R "$hwui/." "$fresh_shadow/"
   patch -d "$fresh_shadow" -p1 < "$animation_patch"
+  patch -d "$fresh_shadow" -p1 < "$darwin_gpu_patch"
+  patch -d "$fresh_shadow" -p1 < "$darwin_renderthread_patch"
+  patch -d "$fresh_shadow" -p1 < "$darwin_angle_surface_patch"
   printf '%s\n' "$patch_identity" > "$fresh_shadow/.darwin-art-patched-source"
   rm -rf "$patched_hwui"
   mv "$fresh_shadow" "$patched_hwui"
@@ -258,7 +276,6 @@ verify_sha "$generated_dir/include/HWUIProperties.sysprop.h" \
 flags=(
   -arch arm64 -isysroot "$sdk_root" -std=c++23 -O2 -fPIC -fno-rtti
   -fvisibility=hidden -Wall -Werror -Wextra -Wthread-safety
-  -DHWUI_NULL_GPU -DNULL_GPU_MAX_TEXTURE_SIZE=4096
   '-D__INTRODUCED_IN(n)='
   '-DSK_USER_CONFIG_HEADER="include/config/SkUserConfigManual.h"'
   '-DLOG_TAG="OpenGLRenderer"' -DGL_GLEXT_PROTOTYPES -DEGL_EGLEXT_PROTOTYPES
@@ -271,6 +288,7 @@ flags=(
   -Wno-inconsistent-missing-override -Wno-abstract-final-class
   -Wno-deprecated-literal-operator -Wno-missing-field-initializers
   -I"$generated_dir/include"
+  -I"$project_root/compat/hwui-android-platform"
   -I"$hwui_source" -I"$hwui_source/platform/host"
   -I"$aosp_root/frameworks/base/libs/androidfw/include"
   -I"$aosp_root/frameworks/native/include"
@@ -339,7 +357,21 @@ compile_cached() {
 }
 for source in "${sources[@]}"; do
   object="$cache_dir/${source//\//_}.o"
-  compile_cached "$source" "$hwui_source/$source" "$object"
+  source_flags=()
+  if [[ "$source" == DeferredLayerUpdater.cpp ||
+        "$source" == AutoBackendTextureRelease.cpp ]]; then
+    # This Android HWUI translation unit consumes Skia's AHardwareBuffer
+    # extension while the shared Skia core itself remains a macOS target.
+    source_flags+=( -DSK_BUILD_FOR_ANDROID -D__ANDROID_API__=36 )
+  fi
+  if [[ "$source" == renderthread/RenderThread.cpp ||
+        "$source" == platform/host/renderthread/CacheManager.cpp ]]; then
+    # These two units use Android HWUI's GPU-only CacheManager surface while
+    # retaining Darwin's platform implementation beneath that interface.
+    source_flags+=( -DDARWIN_ART_HWUI_GPU )
+  fi
+  compile_cached "$source" "$hwui_source/$source" "$object" \
+    ${source_flags[@]+"${source_flags[@]}"}
   objects+=("$object")
 done
 generated_object="$cache_dir/HWUIProperties.sysprop.cpp.o"
@@ -362,8 +394,8 @@ apex_archive="$stage/libandroid-graphics-apex-common-darwin.a"
 file "$archive" | grep -F 'current ar archive' >/dev/null
 lipo -info "$archive" | grep -F 'architecture: arm64' >/dev/null
 member_count="$("$ar" -t "$archive" | grep -v '^__\.SYMDEF' | wc -l | tr -d ' ')"
-[[ "$member_count" == 81 ]] || {
-  echo "hwui-static-foundation: archive member count expected=81 actual=$member_count" >&2
+[[ "$member_count" == 88 ]] || {
+    echo "hwui-static-foundation: archive member count expected=88 actual=$member_count" >&2
   exit 3
 }
 apex_member_count="$("$ar" -t "$apex_archive" | grep -v '^__\.SYMDEF' | wc -l | tr -d ' ')"
@@ -387,7 +419,7 @@ nm -u "$archive" | awk '$1 ~ /^_/ { print $1 }' | sort -u > "$stage/archive-unde
 mv "$archive" "$output_dir/libhwui-static-darwin.a"
 mv "$apex_archive" "$output_dir/libandroid-graphics-apex-common-darwin.a"
 mv "$stage/archive-undefined-symbols.txt" "$undefined_manifest"
-echo "hwui-static-foundation: objects=81 architecture=arm64"
+echo "hwui-static-foundation: objects=88 architecture=arm64"
 echo "hwui-static-foundation: archive=$output_dir/libhwui-static-darwin.a"
 echo "hwui-static-foundation: apex-common=$output_dir/libandroid-graphics-apex-common-darwin.a"
 echo "hwui-static-foundation: unresolved-manifest=$undefined_manifest"

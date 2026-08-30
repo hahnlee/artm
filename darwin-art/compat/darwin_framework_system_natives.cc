@@ -1,8 +1,8 @@
 #include "darwin_framework_system_natives.h"
 
 #include "darwin_android_platform.h"
+#include "darwin_android_time.h"
 
-#include <mach/mach_time.h>
 #include <sys/resource.h>
 
 #include <chrono>
@@ -41,17 +41,6 @@ class DarwinMessageQueue {
 DarwinMessageQueue* ToMessageQueue(jlong handle) {
   return reinterpret_cast<DarwinMessageQueue*>(
       static_cast<std::uintptr_t>(handle));
-}
-
-jlong MachTicksToNanos(std::uint64_t ticks) {
-  static mach_timebase_info_data_t timebase = [] {
-    mach_timebase_info_data_t value{};
-    mach_timebase_info(&value);
-    return value;
-  }();
-  return static_cast<jlong>(
-      (static_cast<unsigned __int128>(ticks) * timebase.numer) /
-      timebase.denom);
 }
 
 jlong TimevalToMillis(const timeval& value) {
@@ -116,7 +105,7 @@ jint log_println(JNIEnv* env, jclass, jint, jint, jstring, jstring message) {
 jboolean trace_is_tag_enabled(JNIEnv*, jclass, jlong) { return JNI_FALSE; }
 
 jlong system_clock_uptime_nanos(JNIEnv*, jclass) {
-  return MachTicksToNanos(mach_absolute_time());
+  return darwin_art::AndroidUptimeNanos();
 }
 
 jlong system_clock_uptime_millis(JNIEnv* env, jclass klass) {
@@ -124,7 +113,7 @@ jlong system_clock_uptime_millis(JNIEnv* env, jclass klass) {
 }
 
 jlong system_clock_elapsed_realtime_nanos(JNIEnv*, jclass) {
-  return MachTicksToNanos(mach_continuous_time());
+  return darwin_art::AndroidElapsedRealtimeNanos();
 }
 
 jlong system_clock_elapsed_realtime(JNIEnv* env, jclass klass) {
