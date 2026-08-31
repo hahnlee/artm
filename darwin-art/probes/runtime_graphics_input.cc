@@ -513,6 +513,7 @@ void ClearPointerDispatchRoot(GraphicsState* state, JNIEnv* env) {
   state->pointer_dispatch_offset_x = 0.0f;
   state->pointer_dispatch_offset_y = 0.0f;
   state->pointer_dispatch_is_window = false;
+  state->pointer_dispatch_outside_only = false;
 }
 
 void DebugViewTextState(JNIEnv* env, jobject root) {
@@ -666,6 +667,9 @@ bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
   jfieldID type_field = params_class == nullptr
                             ? nullptr
                             : env->GetFieldID(params_class, "type", "I");
+  jfieldID flags_field = params_class == nullptr
+                             ? nullptr
+                             : env->GetFieldID(params_class, "flags", "I");
   jfieldID token_field =
       params_class == nullptr
           ? nullptr
@@ -687,7 +691,7 @@ bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
       roots != nullptr &&
       size != nullptr && get != nullptr && get_width != nullptr &&
       get_height != nullptr && x_field != nullptr && y_field != nullptr &&
-      type_field != nullptr && token_field != nullptr) {
+      type_field != nullptr && flags_field != nullptr && token_field != nullptr) {
     const jint count = env->CallIntMethod(views, size);
     for (jint index = 0;
          index < count && current_activity_token == nullptr; ++index) {
@@ -721,6 +725,7 @@ bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
                              ? env->GetIntField(window_frame, rect_top_field)
                              : env->GetIntField(layout_params, y_field);
         const jint type = env->GetIntField(layout_params, type_field);
+        const jint flags = env->GetIntField(layout_params, flags_field);
         const jint width = env->CallIntMethod(layer, get_width);
         const jint height = env->CallIntMethod(layer, get_height);
         const bool current_activity =
@@ -737,20 +742,34 @@ bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
         // foreground Activity token in addition to ordinary sub-windows.
         const bool eligible = current_activity || current_activity_token_owner ||
                               type >= 1000;
+        const bool inside = x >= left && y >= top && x < left + width &&
+                            y < top + height;
+        constexpr jint kFlagWatchOutsideTouch = 0x00040000;
         if (std::getenv("DARWIN_ART_DEBUG_POINTER") != nullptr) {
           std::cerr << "ART Android input window index=" << index
                     << " type=" << type << " current=" << current_activity
                     << " token_owner=" << current_activity_token_owner
                     << " bounds=" << left << "," << top << "-"
                     << (left + width) << "," << (top + height)
+                    << " flags=0x" << std::hex << flags << std::dec
                     << " eligible=" << eligible << "\n";
         }
-        if (eligible && x >= left && y >= top && x < left + width &&
-            y < top + height) {
+        if (eligible && inside) {
           selected = env->NewLocalRef(layer);
           selected_view_root = env->NewLocalRef(layer_root);
           selected_x = left;
           selected_y = top;
+        } else if (eligible && type >= 1000 &&
+                   (flags & kFlagWatchOutsideTouch) != 0) {
+          // Android InputDispatcher sends ACTION_OUTSIDE to the topmost
+          // watched sub-window before a modal popup is dismissed. Keep that
+          // event on the popup's InputChannel instead of leaking the original
+          // DOWN into the Activity underneath it.
+          selected = env->NewLocalRef(layer);
+          selected_view_root = env->NewLocalRef(layer_root);
+          selected_x = left;
+          selected_y = top;
+          state->pointer_dispatch_outside_only = true;
         }
         if (layer_token != nullptr) env->DeleteLocalRef(layer_token);
         if (window_frame != nullptr) env->DeleteLocalRef(window_frame);
@@ -799,6 +818,18 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   const bool down = action == 0u;
   const bool terminal = action == 1u || action == 3u;
   if (!down && !state->pointer_stream_active) return 78;
+  if (!down && state->pointer_dispatch_outside_only) {
+    // ACTION_OUTSIDE is a one-shot Android window event. AppKit still closes
+    // its physical pointer stream with UP/CANCEL, so consume that tail rather
+    // than synthesizing an invalid gesture for the popup or Activity.
+    if (terminal) {
+      state->pointer_stream_active = false;
+      state->pointer_down_time_nanos = 0;
+      state->pointer_click_candidate = false;
+      ClearPointerDispatchRoot(state, env);
+    }
+    return 0;
+  }
   const int64_t event_time_nanos = event_time_hint > 0
                                        ? static_cast<int64_t>(event_time_hint)
                                        : MonotonicNanos();
@@ -873,7 +904,10 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   constexpr uint32_t kPointerFlagMouse = 1u << 0;
   const bool mouse_source = (pointer_flags & kPointerFlagMouse) != 0;
   const jint android_source = mouse_source ? 0x2002 : 0x1002;
-  const jfloat pressure = terminal ? 0.0f : 1.0f;
+  const jint android_action = state->pointer_dispatch_outside_only ? 4 : action;
+  const jfloat pressure = terminal || state->pointer_dispatch_outside_only
+                              ? 0.0f
+                              : 1.0f;
   jobject properties =
       env->NewObject(pointer_properties_class, properties_constructor);
   jobject coords = env->NewObject(pointer_coords_class, coords_constructor);
@@ -908,7 +942,7 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   const jint button_state = mouse_source && !terminal ? 1 : 0;
   jobject event = env->CallStaticObjectMethod(
       motion_event_class, obtain, static_cast<jlong>(down_time_nanos / 1000000),
-      static_cast<jlong>(event_time_nanos / 1000000), static_cast<jint>(action),
+      static_cast<jlong>(event_time_nanos / 1000000), android_action,
       static_cast<jint>(1), properties_array, coords_array,
       static_cast<jint>(0), button_state, static_cast<jfloat>(1.0f),
       static_cast<jfloat>(1.0f), static_cast<jint>(mouse_source ? 1 : 0),
@@ -968,6 +1002,7 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
               << " offset_y=" << state->pointer_dispatch_offset_y
               << " focused=" << (window_focused ? 1 : 0)
               << " touch_mode=" << (touch_mode ? 1 : 0)
+              << " outside=" << (state->pointer_dispatch_outside_only ? 1 : 0)
               << " hit=" << debug_hit;
     if (debug_hit != nullptr) {
       jmethodID is_focusable =
@@ -1056,7 +1091,7 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   if (down) {
     state->pointer_down_x = x;
     state->pointer_down_y = y;
-    state->pointer_click_candidate = true;
+    state->pointer_click_candidate = !state->pointer_dispatch_outside_only;
     state->pointer_touch_slop = 8;
     jclass view_class = env->FindClass("android/view/View");
     jmethodID get_context =

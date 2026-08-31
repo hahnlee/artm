@@ -15,6 +15,7 @@ import android.content.res.Resources;
 import android.graphics.Rect;
 import android.util.Log;
 import android.view.Display;
+import android.view.Gravity;
 import android.view.SurfaceHolder;
 import android.view.Surface;
 import android.view.SurfaceControl;
@@ -62,14 +63,33 @@ public final class DarwinServiceBridge {
         }
         DISPLAY_WIDTH = width;
         DISPLAY_HEIGHT = height;
-        Activity activity = currentActivity;
-        if (activity == null) return;
-        View decor = activity.getWindow().getDecorView();
-        // requestLayout crosses the ViewRootImpl traversal barrier. Its next
-        // WMS relayout reads the new display bounds below and lets
-        // ThreadedRenderer record/submit exactly one resized frame.
-        decor.requestLayout();
-        decor.invalidate();
+        requestAllWindowLayouts();
+    }
+
+    private static void requestAllWindowLayouts() {
+        try {
+            Class<?> globalClass = Class.forName("android.view.WindowManagerGlobal");
+            Method getInstance = globalClass.getDeclaredMethod("getInstance");
+            getInstance.setAccessible(true);
+            Object global = getInstance.invoke(null);
+            Field viewsField = globalClass.getDeclaredField("mViews");
+            viewsField.setAccessible(true);
+            ArrayList<?> views = (ArrayList<?>) viewsField.get(global);
+            for (Object value : views) {
+                if (value instanceof View) {
+                    View view = (View) value;
+                    view.requestLayout();
+                    view.invalidate();
+                }
+            }
+        } catch (Throwable error) {
+            Activity activity = currentActivity;
+            if (activity == null) return;
+            View decor = activity.getWindow().getDecorView();
+            decor.requestLayout();
+            decor.invalidate();
+            Log.e("DarwinServiceBridge", "could not relayout every Android window", error);
+        }
     }
 
     private static final class ActivityRecord {
@@ -2013,11 +2033,14 @@ public final class DarwinServiceBridge {
         private static final class WindowLayoutState {
             int x;
             int y;
-            int width;
-            int height;
+            int layoutWidth;
+            int layoutHeight;
             int type;
             int gravity;
             int flags;
+            float horizontalMargin;
+            float verticalMargin;
+            final Rect frame = new Rect();
         }
 
         WindowManagerHandler() throws ClassNotFoundException {
@@ -2042,7 +2065,10 @@ public final class DarwinServiceBridge {
                 // WindowManagerGlobal.ADD_FLAG_APP_VISIBLE. ViewRootImpl uses
                 // this WMS result to initialize mAppVisible; returning zero
                 // makes every real traversal skip draw as view_not_visible.
-                return Integer.valueOf(2);
+                // ADD_FLAG_APP_VISIBLE | ADD_FLAG_IN_TOUCH_MODE. Every
+                // ViewRoot, including a popup created after launch, starts in
+                // the same physical-pointer touch mode as Android WMS.
+                return Integer.valueOf(3);
             }
             if (proxy == session && "relayout".equals(method.getName())) {
                 configureRelayout(args);
@@ -2114,11 +2140,15 @@ public final class DarwinServiceBridge {
                         windowToken, ignored -> new WindowLayoutState());
                 state.x = intField(attrs, "x", state.x);
                 state.y = intField(attrs, "y", state.y);
-                state.width = intField(attrs, "width", state.width);
-                state.height = intField(attrs, "height", state.height);
+                state.layoutWidth = intField(attrs, "width", state.layoutWidth);
+                state.layoutHeight = intField(attrs, "height", state.layoutHeight);
                 state.type = intField(attrs, "type", state.type);
                 state.gravity = intField(attrs, "gravity", state.gravity);
                 state.flags = intField(attrs, "flags", state.flags);
+                state.horizontalMargin = floatField(
+                        attrs, "horizontalMargin", state.horizontalMargin);
+                state.verticalMargin = floatField(
+                        attrs, "verticalMargin", state.verticalMargin);
             } catch (Throwable error) {
                 Log.e("DarwinServiceBridge", "window layout state failed", error);
             }
@@ -2138,8 +2168,8 @@ public final class DarwinServiceBridge {
                 int type = state == null ? 0 : state.type;
                 int gravity = state == null ? 0 : state.gravity;
                 int flags = state == null ? 0 : state.flags;
-                int layoutWidth = state == null ? requestedWidth : state.width;
-                int layoutHeight = state == null ? requestedHeight : state.height;
+                int layoutWidth = state == null ? requestedWidth : state.layoutWidth;
+                int layoutHeight = state == null ? requestedHeight : state.layoutHeight;
                 int width = requestedWidth > 0 && requestedWidth <= DISPLAY_WIDTH
                         ? requestedWidth
                         : (layoutWidth > 0 && layoutWidth <= DISPLAY_WIDTH
@@ -2150,17 +2180,23 @@ public final class DarwinServiceBridge {
                                 ? layoutHeight : 120 * DISPLAY_SCALE);
                 width = Math.min(width, DISPLAY_WIDTH);
                 height = Math.min(height, DISPLAY_HEIGHT);
-                // WMS fits an application sub-window into its display frame.
-                // Clipping the buffer to the small remainder below an anchor
-                // loses almost the entire popup; move the full window above
-                // the edge instead, preserving its measured content size.
-                x = Math.max(0, Math.min(x, DISPLAY_WIDTH - width));
-                y = Math.max(0, Math.min(y, DISPLAY_HEIGHT - height));
+                Rect displayFrame = new Rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+                Rect resolvedFrame = state == null ? new Rect() : state.frame;
+                // This is the same Gravity.apply/applyDisplay contract used by
+                // AOSP WindowLayout.computeFrames. The compatibility WMS has
+                // an inset-free fullscreen display, so its parent/display
+                // frames are identical, but gravity, offsets, and margins
+                // must still be honored for dialogs and attached windows.
+                Gravity.apply(gravity, width, height, displayFrame,
+                        x + Math.round((state == null ? 0.0f : state.horizontalMargin)
+                                * DISPLAY_WIDTH),
+                        y + Math.round((state == null ? 0.0f : state.verticalMargin)
+                                * DISPLAY_HEIGHT), resolvedFrame);
+                Gravity.applyDisplay(gravity, displayFrame, resolvedFrame);
+                x = resolvedFrame.left;
+                y = resolvedFrame.top;
                 if (state != null) {
-                    state.x = x;
-                    state.y = y;
-                    state.width = width;
-                    state.height = height;
+                    state.frame.set(resolvedFrame);
                 }
                 if (System.getenv("DARWIN_ART_DEBUG_WINDOW_LAYERS") != null) {
                     Log.i("DarwinServiceBridge", "window frame request="
@@ -2215,6 +2251,13 @@ public final class DarwinServiceBridge {
             if (value == null) return fallback;
             Field field = value.getClass().getField(name);
             return field.getInt(value);
+        }
+
+        private static float floatField(Object value, String name, float fallback)
+                throws Exception {
+            if (value == null) return fallback;
+            Field field = value.getClass().getField(name);
+            return field.getFloat(value);
         }
 
         private static void setRectField(Object value, String name,

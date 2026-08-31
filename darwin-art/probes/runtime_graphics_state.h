@@ -45,6 +45,7 @@ struct GraphicsState {
   jfloat pointer_dispatch_offset_x = 0.0f;
   jfloat pointer_dispatch_offset_y = 0.0f;
   bool pointer_dispatch_is_window = false;
+  bool pointer_dispatch_outside_only = false;
   uint32_t pending_pressed_action = 0;
   jfloat pending_pressed_x = 0.0f;
   jfloat pending_pressed_y = 0.0f;

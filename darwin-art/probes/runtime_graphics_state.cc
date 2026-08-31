@@ -117,6 +117,7 @@ void begin_activity_transition(GraphicsState* state, JNIEnv* env) {
   state->pointer_stream_active = false;
   state->pointer_click_candidate = false;
   state->pointer_dispatch_is_window = false;
+  state->pointer_dispatch_outside_only = false;
 }
 
 void shutdown(GraphicsState* state, JNIEnv* env) {
@@ -161,6 +162,7 @@ void shutdown(GraphicsState* state, JNIEnv* env) {
   state->pointer_dispatch_offset_x = 0.0f;
   state->pointer_dispatch_offset_y = 0.0f;
   state->pointer_dispatch_is_window = false;
+  state->pointer_dispatch_outside_only = false;
   state->pointer_down_x = 0.0f;
   state->pointer_down_y = 0.0f;
   state->pointer_touch_slop = 8;

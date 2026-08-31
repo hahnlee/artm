@@ -12,6 +12,7 @@ pub(super) struct GpuTestConfig {
     pub(super) drag: Option<Vec<(f32, f32)>>,
     pub(super) post_sequence_drag: Option<Vec<(f32, f32)>>,
     pub(super) tap_sequence: Option<Vec<(f32, f32, u64)>>,
+    pub(super) pointer_sequence_post_delay_ms: u64,
     pub(super) post_drag_tap_sequence: Option<Vec<(f32, f32, u64)>>,
     pub(super) hold_ms: u64,
     pub(super) cancel: bool,
@@ -71,6 +72,10 @@ impl GpuTestConfig {
             drag,
             post_sequence_drag,
             tap_sequence,
+            pointer_sequence_post_delay_ms: parse_env(
+                "DARWIN_ART_TEST_POINTER_SEQUENCE_POST_DELAY_MS",
+            )
+            .unwrap_or(0),
             post_drag_tap_sequence,
             hold_ms: parse_env("DARWIN_ART_TEST_POINTER_HOLD_MS").unwrap_or(0),
             cancel: std::env::var("DARWIN_ART_TEST_POINTER_CANCEL")

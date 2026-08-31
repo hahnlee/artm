@@ -34,7 +34,6 @@ pub(super) fn run(
     }
     let mut frames_presented = 1_u64;
     let mut loop_error: Option<HostError> = None;
-    let host_loop_clock = Instant::now();
     let debug_latency = std::env::var_os("DARWIN_ART_DEBUG_INPUT_LATENCY").is_some();
     let mut last_input_dispatch: Option<Instant> = None;
     let mut frame_latencies_us = Vec::new();
@@ -47,6 +46,7 @@ pub(super) fn run(
         drag: test_drag,
         post_sequence_drag,
         tap_sequence: test_tap_sequence,
+        pointer_sequence_post_delay_ms,
         post_drag_tap_sequence,
         hold_ms: test_hold_ms,
         cancel: test_cancel,
@@ -377,6 +377,48 @@ pub(super) fn run(
             }
         }
     }
+    if loop_error.is_none() && pointer_sequence_post_delay_ms > 0 {
+        let delay = Duration::from_millis(pointer_sequence_post_delay_ms);
+        let wait_started = Instant::now();
+        let display_interval = Duration::from_nanos(16_666_667);
+        let mut next_vsync = Instant::now();
+        while wait_started.elapsed() < delay && loop_error.is_none() {
+            let remaining = delay.saturating_sub(wait_started.elapsed());
+            let slice_ms = remaining.as_millis().min(2).max(1) as u64;
+            let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
+            if pump_status != 0 {
+                loop_error = Some(HostError::SurfaceFailed {
+                    operation: "gpu_test_pointer_sequence_post_delay",
+                    status: pump_status,
+                });
+                break;
+            }
+            if let Err(error) = dispatch_queued_events(runtime) {
+                loop_error = Some(error);
+                break;
+            }
+            if let Err(error) = pump_main_looper(runtime) {
+                loop_error = Some(error);
+                break;
+            }
+            let now = Instant::now();
+            if now >= next_vsync {
+                if let Err(error) = pulse_frame_with_latency(
+                    runtime,
+                    debug_latency,
+                    &mut last_input_dispatch,
+                    &mut frame_latencies_us,
+                ) {
+                    loop_error = Some(error);
+                    break;
+                }
+                next_vsync += display_interval;
+                while next_vsync <= now {
+                    next_vsync += display_interval;
+                }
+            }
+        }
+    }
     if loop_error.is_none()
         && let Some(sequence) = post_pointer_key_sequence.as_ref()
     {
@@ -582,13 +624,17 @@ pub(super) fn run(
     let visible_deadline = Instant::now()
         .checked_add(Duration::from_secs_f64(options.visible_seconds))
         .unwrap_or_else(Instant::now);
+    // A delayed synthetic resize is relative to the completed input setup,
+    // not process launch. This lets an Android click finish creating its
+    // popup ViewRoot before the acceptance resize exercises every live root.
+    let test_resize_clock = Instant::now();
     let display_interval = Duration::from_nanos(16_666_667);
     let mut next_vsync = Instant::now();
     while Instant::now() < visible_deadline && !crate::process_signal::termination_requested() {
         if loop_error.is_none()
             && let (Some((width, height)), Some(after_ms)) =
                 (pending_test_resize, test_resize_after_ms)
-            && host_loop_clock.elapsed().as_millis() >= u128::from(after_ms)
+            && test_resize_clock.elapsed().as_millis() >= u128::from(after_ms)
         {
             let status = runtime
                 .surface()
