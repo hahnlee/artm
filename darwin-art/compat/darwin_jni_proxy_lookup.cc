@@ -139,6 +139,50 @@ bool LookupArguments(ElfLibrary *library, void *method, void *raw_args,
   return DecodeGuestArguments(descriptor, raw_args, output);
 }
 
+// Android native libraries own every thread that they attach to ART. Some
+// libraries rely on their Android pthread entry wrapper to detach that thread
+// on return instead of pairing every JavaVM::AttachCurrentThread call at the
+// call site. Our translated pthread entry cannot see the JavaVM hidden behind
+// the guest JNI proxy, so retain that ownership here and release it from the
+// host thread's C++ TLS teardown. This runs before ART's pthread-key teardown,
+// which intentionally aborts when an attached native thread disappears.
+//
+// Only attachments made by this proxy are owned. Java-created threads and a
+// thread that was already attached before entering the guest remain under
+// their original owner's control.
+class ProxyThreadAttachment {
+public:
+  ~ProxyThreadAttachment() { DetachIfOwned(); }
+
+  void Arm(JavaVM *vm) {
+    if (vm_ == nullptr)
+      vm_ = vm;
+  }
+
+  void Disarm(JavaVM *vm) {
+    if (vm_ == vm)
+      vm_ = nullptr;
+  }
+
+private:
+  void DetachIfOwned() {
+    JavaVM *vm = vm_;
+    vm_ = nullptr;
+    if (vm == nullptr)
+      return;
+    JNIEnv *env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK)
+      (void)vm->DetachCurrentThread();
+  }
+
+  JavaVM *vm_ = nullptr;
+};
+
+ProxyThreadAttachment &CurrentProxyThreadAttachment() {
+  thread_local ProxyThreadAttachment attachment;
+  return attachment;
+}
+
 } // namespace
 
 void *ProxyCurrentEnv(void *) { return CurrentArtEnv(); }
@@ -148,17 +192,29 @@ int32_t ProxyAttachCurrentThread(void *context, void *arguments,
   auto *library = static_cast<ElfLibrary *>(context);
   if (library == nullptr || library->art_vm == nullptr)
     return JNI_ERR;
+  JNIEnv *previous_env = nullptr;
+  const jint previous = library->art_vm->GetEnv(
+      reinterpret_cast<void **>(&previous_env), JNI_VERSION_1_6);
+  if (previous != JNI_OK && previous != JNI_EDETACHED)
+    return previous;
   JNIEnv *env = nullptr;
-  return as_daemon != 0
-             ? library->art_vm->AttachCurrentThreadAsDaemon(&env, arguments)
-             : library->art_vm->AttachCurrentThread(&env, arguments);
+  const jint result =
+      as_daemon != 0
+          ? library->art_vm->AttachCurrentThreadAsDaemon(&env, arguments)
+          : library->art_vm->AttachCurrentThread(&env, arguments);
+  if (result == JNI_OK && previous == JNI_EDETACHED)
+    CurrentProxyThreadAttachment().Arm(library->art_vm);
+  return result;
 }
 
 int32_t ProxyDetachCurrentThread(void *context) {
   auto *library = static_cast<ElfLibrary *>(context);
-  return library == nullptr || library->art_vm == nullptr
-             ? JNI_ERR
-             : library->art_vm->DetachCurrentThread();
+  if (library == nullptr || library->art_vm == nullptr)
+    return JNI_ERR;
+  const jint result = library->art_vm->DetachCurrentThread();
+  if (result == JNI_OK)
+    CurrentProxyThreadAttachment().Disarm(library->art_vm);
+  return result;
 }
 
 void *ProxyFindClass(void *context, const char *name) {
