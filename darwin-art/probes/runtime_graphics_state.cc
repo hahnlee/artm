@@ -83,7 +83,14 @@ bool retain_interactive_view_root(GraphicsState* state, JNIEnv* env,
   if (state->interactive_view_root == nullptr || env->ExceptionCheck()) {
     return false;
   }
-  return darwin_art::FocusFrameworkViewRoot(env, view_root);
+  if (state->focused_view_root != nullptr) {
+    darwin_art::SetFrameworkViewRootFocus(env, state->focused_view_root, false);
+    env->DeleteGlobalRef(state->focused_view_root);
+    state->focused_view_root = nullptr;
+  }
+  if (!darwin_art::FocusFrameworkViewRoot(env, view_root)) return false;
+  state->focused_view_root = env->NewGlobalRef(view_root);
+  return state->focused_view_root != nullptr && !env->ExceptionCheck();
 }
 
 bool retain_hardware_context(GraphicsState* state, JNIEnv* env, jobject context) {
@@ -111,6 +118,8 @@ void begin_activity_transition(GraphicsState* state, JNIEnv* env) {
   clear(&state->pressed_view);
   clear(&state->pointer_dispatch_root);
   clear(&state->pointer_dispatch_view_root);
+  clear(&state->focused_view_root);
+  state->focused_window_generation = -1;
   state->gpu_render_node_recorded = false;
   state->gpu_last_traversal_barrier = -1;
   state->gpu_ripple_overlay_active = false;
@@ -159,6 +168,13 @@ void shutdown(GraphicsState* state, JNIEnv* env) {
     env->DeleteGlobalRef(state->pointer_dispatch_view_root);
     state->pointer_dispatch_view_root = nullptr;
   }
+  if (state->focused_view_root != nullptr) {
+    env->DeleteGlobalRef(state->focused_view_root);
+    state->focused_view_root = nullptr;
+  }
+  state->focused_window_view_root_method = nullptr;
+  state->window_topology_generation_method = nullptr;
+  state->focused_window_generation = -1;
   state->pointer_dispatch_offset_x = 0.0f;
   state->pointer_dispatch_offset_y = 0.0f;
   state->pointer_dispatch_is_window = false;

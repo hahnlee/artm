@@ -1814,7 +1814,7 @@ std::string QuerySystemPackageRecord(JNIEnv* env, const char* socket_path,
   return result;
 }
 
-bool FocusFrameworkViewRoot(JNIEnv* env, jobject view_root) {
+bool SetFrameworkViewRootFocus(JNIEnv* env, jobject view_root, bool focused) {
   if (env == nullptr || view_root == nullptr) return false;
   jclass view_root_class = env->GetObjectClass(view_root);
   jfieldID receiver_field =
@@ -1860,7 +1860,7 @@ bool FocusFrameworkViewRoot(JNIEnv* env, jobject view_root) {
           ? nullptr
           : env->GetMethodID(input_receiver_class, "onTouchModeChanged", "(Z)V");
   if (target != nullptr && focus != nullptr && !env->ExceptionCheck()) {
-    env->CallVoidMethod(target, focus, JNI_TRUE);
+    env->CallVoidMethod(target, focus, focused ? JNI_TRUE : JNI_FALSE);
   }
   // WindowManager.addWindow() normally returns ADD_FLAG_IN_TOUCH_MODE and
   // ViewRootImpl applies it before the first pointer packet. Our local window
@@ -1868,18 +1868,24 @@ bool FocusFrameworkViewRoot(JNIEnv* env, jobject view_root) {
   // state through WindowInputEventReceiver during attachment. Without it the
   // first tap only moved focus into Chrome's focusable tab button and Android
   // intentionally deferred performClick until the second tap.
-  if (target != nullptr && touch_mode != nullptr && !env->ExceptionCheck()) {
+  if (focused && target != nullptr && touch_mode != nullptr &&
+      !env->ExceptionCheck()) {
     env->CallVoidMethod(target, touch_mode, JNI_TRUE);
   }
   // WindowInputEventReceiver.onFocusEvent is the AOSP boundary. It calls
   // ViewRootImpl.windowFocusChanged(), which posts MSG_WINDOW_FOCUS_CHANGED to
   // the main queue. Do not invoke ViewRootImpl a second time here; the owner
   // Looper drains the posted message before host input is admitted.
-  const bool focused = target != nullptr && focus != nullptr &&
-                       touch_mode != nullptr && !env->ExceptionCheck();
-  if (receiver != nullptr && focused) {
-    receiver->focused = true;
-    receiver->touch_mode = true;
+  const bool changed = target != nullptr && focus != nullptr &&
+                       (!focused || touch_mode != nullptr) &&
+                       !env->ExceptionCheck();
+  if (receiver != nullptr && changed) {
+    receiver->focused = focused;
+    if (focused) receiver->touch_mode = true;
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android window focus=" << (focused ? 1 : 0)
+              << " changed=" << (changed ? 1 : 0) << "\n";
   }
   if (input_receiver_class != nullptr) {
     env->DeleteLocalRef(input_receiver_class);
@@ -1889,7 +1895,11 @@ bool FocusFrameworkViewRoot(JNIEnv* env, jobject view_root) {
   if (receiver_class != nullptr) env->DeleteLocalRef(receiver_class);
   if (java_receiver != nullptr) env->DeleteLocalRef(java_receiver);
   if (view_root_class != nullptr) env->DeleteLocalRef(view_root_class);
-  return focused;
+  return changed;
+}
+
+bool FocusFrameworkViewRoot(JNIEnv* env, jobject view_root) {
+  return SetFrameworkViewRootFocus(env, view_root, true);
 }
 
 bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
@@ -1936,15 +1946,6 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
                        ? nullptr
                        : env->CallObjectMethod(receiver->weak_receiver, weak_get);
   jclass input_receiver_class = env->FindClass("android/view/InputEventReceiver");
-  jmethodID focus =
-      input_receiver_class == nullptr
-          ? nullptr
-          : env->GetMethodID(input_receiver_class, "onFocusEvent", "(Z)V");
-  if (!receiver->focused && target != nullptr && focus != nullptr &&
-      !env->ExceptionCheck()) {
-    env->CallVoidMethod(target, focus, JNI_TRUE);
-    receiver->focused = !env->ExceptionCheck();
-  }
   jclass motion_event_class = env->FindClass("android/view/MotionEvent");
   const bool is_motion =
       motion_event_class != nullptr && env->IsInstanceOf(event, motion_event_class);

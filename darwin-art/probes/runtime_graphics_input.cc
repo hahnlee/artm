@@ -808,6 +808,82 @@ bool SelectPointerDispatchRoot(GraphicsState* state, JNIEnv* env,
   return state->pointer_dispatch_root != nullptr && !env->ExceptionCheck();
 }
 
+bool RefreshFocusedWindowRoot(GraphicsState* state, JNIEnv* env) {
+  if (state == nullptr || env == nullptr ||
+      state->interactive_view_root == nullptr) {
+    return false;
+  }
+  jobject candidate = nullptr;
+  if (state->service_bridge_class != nullptr) {
+    if (state->window_topology_generation_method == nullptr) {
+      state->window_topology_generation_method = env->GetStaticMethodID(
+          state->service_bridge_class, "windowTopologyGeneration", "()I");
+    }
+    if (state->focused_window_view_root_method == nullptr) {
+      state->focused_window_view_root_method = env->GetStaticMethodID(
+          state->service_bridge_class, "focusedWindowViewRoot",
+          "()Ljava/lang/Object;");
+    }
+    const jint generation =
+        state->window_topology_generation_method == nullptr
+            ? -1
+            : env->CallStaticIntMethod(
+                  state->service_bridge_class,
+                  state->window_topology_generation_method);
+    if (!env->ExceptionCheck() && state->focused_view_root != nullptr &&
+        generation == state->focused_window_generation) {
+      return true;
+    }
+    if (state->focused_window_view_root_method != nullptr &&
+        !env->ExceptionCheck()) {
+      candidate = env->CallStaticObjectMethod(state->service_bridge_class,
+                                              state->focused_window_view_root_method);
+      state->focused_window_generation = generation;
+    }
+    if (env->ExceptionCheck()) {
+      env->ExceptionClear();
+      candidate = nullptr;
+    }
+  }
+  if (candidate == nullptr) {
+    candidate = env->NewLocalRef(state->interactive_view_root);
+    state->focused_window_generation = -1;
+  }
+  if (candidate == nullptr) return false;
+  const bool unchanged = state->focused_view_root != nullptr &&
+                         env->IsSameObject(state->focused_view_root,
+                                           candidate) == JNI_TRUE;
+  if (unchanged) {
+    env->DeleteLocalRef(candidate);
+    return true;
+  }
+  if (state->focused_view_root != nullptr) {
+    darwin_art::SetFrameworkViewRootFocus(env, state->focused_view_root, false);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteGlobalRef(state->focused_view_root);
+    state->focused_view_root = nullptr;
+  }
+  const bool focused =
+      darwin_art::SetFrameworkViewRootFocus(env, candidate, true);
+  if (focused && !env->ExceptionCheck()) {
+    state->focused_view_root = env->NewGlobalRef(candidate);
+  }
+  // InputDispatcher publishes focus before it releases the next key/pointer
+  // packet. onFocusEvent posts ViewRootImpl's focus message, so drain that
+  // owner-Looper work here before dispatching the event selected below.
+  if (state->focused_view_root != nullptr && !env->ExceptionCheck() &&
+      !DispatchDueMainMessages(env)) {
+    env->ExceptionClear();
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android focused window changed="
+              << (state->focused_view_root != nullptr ? 1 : 0)
+              << " root=" << candidate << "\n";
+  }
+  env->DeleteLocalRef(candidate);
+  return state->focused_view_root != nullptr && !env->ExceptionCheck();
+}
+
 int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
                               uint32_t action, float x, float y,
                               uint32_t pointer_flags,
@@ -845,6 +921,11 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
   if (down && !SelectPointerDispatchRoot(state, env, root, x, y)) {
     env->ExceptionClear();
     return 82;
+  }
+  if (down && !RefreshFocusedWindowRoot(state, env)) {
+    env->ExceptionClear();
+    ClearPointerDispatchRoot(state, env);
+    return 84;
   }
 
   jclass motion_event_class = env->FindClass("android/view/MotionEvent");
@@ -1625,6 +1706,11 @@ int32_t dispatch_key_v1(GraphicsState* state,
   }
   art::ScopedObjectAccess soa(art_thread);
   JNIEnv* env = art_thread->GetJniEnv();
+  if (!RefreshFocusedWindowRoot(state, env)) {
+    env->ExceptionClear();
+    return 86;
+  }
+  jobject dispatch_view_root = state->focused_view_root;
   jclass key_event_class = env->FindClass("android/view/KeyEvent");
   jmethodID constructor =
       key_event_class == nullptr
@@ -1671,7 +1757,7 @@ int32_t dispatch_key_v1(GraphicsState* state,
   const bool delivered =
       key_event != nullptr && !env->ExceptionCheck() &&
       darwin_art::DispatchFrameworkInputEvent(
-          env, state->interactive_view_root, key_event, &handled);
+          env, dispatch_view_root, key_event, &handled);
   bool delivered_to_focused_view = false;
   if (delivered && !handled) {
     // The compatibility InputChannel owns a detached receiver, so an event that
@@ -1680,15 +1766,14 @@ int32_t dispatch_key_v1(GraphicsState* state,
     // terminal stage generically by dispatching to the currently focused View.
     // The finished-event result prevents a second delivery when the channel
     // path already consumed the event.
-    jclass root_class = env->GetObjectClass(state->interactive_view_root);
+    jclass root_class = env->GetObjectClass(dispatch_view_root);
     jmethodID get_view = root_class == nullptr
                              ? nullptr
                              : env->GetMethodID(root_class, "getView",
                                                 "()Landroid/view/View;");
     jobject root = get_view == nullptr
                        ? nullptr
-                       : env->CallObjectMethod(state->interactive_view_root,
-                                               get_view);
+                       : env->CallObjectMethod(dispatch_view_root, get_view);
     jclass view_class = root == nullptr ? nullptr : env->GetObjectClass(root);
     jmethodID find_focus = view_class == nullptr
                                ? nullptr
@@ -1713,9 +1798,13 @@ int32_t dispatch_key_v1(GraphicsState* state,
     env->DeleteLocalRef(root_class);
   }
   if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    const bool activity_window =
+        env->IsSameObject(dispatch_view_root,
+                          state->interactive_view_root) == JNI_TRUE;
     std::cerr << "ART Android KeyEvent action=" << event->action
               << " key=" << event->key_code
               << " device=" << event->device_id
+              << " window=" << (activity_window ? "activity" : "subwindow")
               << " path=input-channel"
               << (delivered_to_focused_view ? "+focused-view" : "")
               << " delivered=" << (delivered ? 1 : 0)

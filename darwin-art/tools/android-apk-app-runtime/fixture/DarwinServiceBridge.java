@@ -54,6 +54,7 @@ public final class DarwinServiceBridge {
             new WeakHashMap<>();
     private static final ArrayList<ActivityRecord> ACTIVITY_STACK = new ArrayList<>();
     private static volatile Activity currentActivity;
+    private static volatile int windowTopologyGeneration;
 
     /** Publishes a host-window resize through WindowManager/ViewRootImpl. */
     static void resizeDisplay(int width, int height) {
@@ -90,6 +91,57 @@ public final class DarwinServiceBridge {
             decor.invalidate();
             Log.e("DarwinServiceBridge", "could not relayout every Android window", error);
         }
+    }
+
+    /** Returns the ViewRoot selected by Android's focused-window ordering. */
+    static int windowTopologyGeneration() {
+        return windowTopologyGeneration;
+    }
+
+    static Object focusedWindowViewRoot() {
+        try {
+            Activity activity = currentActivity;
+            if (activity == null) return null;
+            View activityRoot = activity.getWindow().getDecorView();
+            Class<?> globalClass = Class.forName("android.view.WindowManagerGlobal");
+            Method getInstance = globalClass.getDeclaredMethod("getInstance");
+            getInstance.setAccessible(true);
+            Object global = getInstance.invoke(null);
+            Field viewsField = globalClass.getDeclaredField("mViews");
+            Field paramsField = globalClass.getDeclaredField("mParams");
+            Field rootsField = globalClass.getDeclaredField("mRoots");
+            viewsField.setAccessible(true);
+            paramsField.setAccessible(true);
+            rootsField.setAccessible(true);
+            ArrayList<?> views = (ArrayList<?>) viewsField.get(global);
+            ArrayList<?> params = (ArrayList<?>) paramsField.get(global);
+            ArrayList<?> roots = (ArrayList<?>) rootsField.get(global);
+            Object activityToken = null;
+            for (int index = 0; index < views.size(); index++) {
+                if (views.get(index) == activityRoot) {
+                    activityToken = params.get(index).getClass().getField("token")
+                            .get(params.get(index));
+                    break;
+                }
+            }
+            for (int index = views.size() - 1; index >= 0; index--) {
+                Object attrs = params.get(index);
+                Class<?> attrsClass = attrs.getClass();
+                int type = attrsClass.getField("type").getInt(attrs);
+                int flags = attrsClass.getField("flags").getInt(attrs);
+                Object token = attrsClass.getField("token").get(attrs);
+                boolean eligible = views.get(index) == activityRoot
+                        || (activityToken != null && token == activityToken)
+                        || type >= 1000;
+                // WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.
+                if (eligible && (flags & 0x00000008) == 0) {
+                    return roots.get(index);
+                }
+            }
+        } catch (Throwable error) {
+            Log.e("DarwinServiceBridge", "could not select focused Android window", error);
+        }
+        return null;
     }
 
     private static final class ActivityRecord {
@@ -2081,7 +2133,9 @@ public final class DarwinServiceBridge {
                 SurfaceControl surface = windowSurfaces.remove(windowToken);
                 if (surface != null && surface.isValid()) surface.release();
                 windowSurfaceSizes.remove(windowToken);
-                windowLayouts.remove(windowToken);
+                if (windowLayouts.remove(windowToken) != null) {
+                    windowTopologyGeneration++;
+                }
                 windowIds.remove(windowToken);
                 return defaultValue(method.getReturnType());
             }
@@ -2136,8 +2190,10 @@ public final class DarwinServiceBridge {
         private void rememberLayout(Object windowToken, Object attrs) {
             if (windowToken == null || attrs == null) return;
             try {
+                boolean created = !windowLayouts.containsKey(windowToken);
                 WindowLayoutState state = windowLayouts.computeIfAbsent(
                         windowToken, ignored -> new WindowLayoutState());
+                int previousFlags = state.flags;
                 state.x = intField(attrs, "x", state.x);
                 state.y = intField(attrs, "y", state.y);
                 state.layoutWidth = intField(attrs, "width", state.layoutWidth);
@@ -2149,6 +2205,9 @@ public final class DarwinServiceBridge {
                         attrs, "horizontalMargin", state.horizontalMargin);
                 state.verticalMargin = floatField(
                         attrs, "verticalMargin", state.verticalMargin);
+                if (created || ((previousFlags ^ state.flags) & 0x00000008) != 0) {
+                    windowTopologyGeneration++;
+                }
             } catch (Throwable error) {
                 Log.e("DarwinServiceBridge", "window layout state failed", error);
             }

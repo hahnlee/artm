@@ -31,6 +31,10 @@ struct GraphicsState {
   jclass service_bridge_class = nullptr;
   jobject interactive_root = nullptr;
   jobject interactive_view_root = nullptr;
+  jobject focused_view_root = nullptr;
+  jmethodID focused_window_view_root_method = nullptr;
+  jmethodID window_topology_generation_method = nullptr;
+  jint focused_window_generation = -1;
   jobject hardware_context = nullptr;
   jobject gpu_render_node = nullptr;
   bool gpu_render_node_recorded = false;

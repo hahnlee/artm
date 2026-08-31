@@ -44,5 +44,6 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
 // host input is admitted, matching InputDispatcher's focus-before-pointer
 // ordering.
 bool FocusFrameworkViewRoot(JNIEnv* env, jobject view_root);
+bool SetFrameworkViewRootFocus(JNIEnv* env, jobject view_root, bool focused);
 
 }  // namespace darwin_art
