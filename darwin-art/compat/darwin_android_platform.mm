@@ -30,6 +30,7 @@
 #include <cstring>
 #include <condition_variable>
 #include <deque>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <limits>
 #include <memory>
@@ -152,6 +153,21 @@ uint64_t ThreadCpuNanos() {
   if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &value) != 0) return 0;
   return static_cast<uint64_t>(value.tv_sec) * UINT64_C(1000000000) +
          static_cast<uint64_t>(value.tv_nsec);
+}
+
+std::string NativeAddressDescription(const void* address) {
+  if (address == nullptr) return "<null>";
+  Dl_info info{};
+  if (dladdr(address, &info) == 0 || info.dli_fname == nullptr) {
+    return "<guest>";
+  }
+  const auto base = reinterpret_cast<uintptr_t>(info.dli_saddr);
+  const auto value = reinterpret_cast<uintptr_t>(address);
+  const auto offset = value >= base ? value - base : 0;
+  char buffer[32];
+  std::snprintf(buffer, sizeof(buffer), "%llx",
+                static_cast<unsigned long long>(offset));
+  return std::string(info.dli_fname) + "+0x" + buffer;
 }
 
 enum class ChoreographerCallbackKind {
@@ -1123,8 +1139,12 @@ extern "C" int ALooper_addFd(ALooper* looper, int fd, int ident, int events,
         darwin_art_bionic_socket_broker_fcntl(fd, /*F_GETFL*/ 3, 0);
     std::fprintf(stderr,
                  "DARWIN_ART looper-add-fd fd=%d ident=%d events=0x%x "
-                 "callback=%p data=%p status_flags=0x%x\n",
-                 fd, ident, events, reinterpret_cast<void*>(callback), data,
+                 "callback=%p (%s) caller=%p (%s) data=%p status_flags=0x%x\n",
+                 fd, ident, events, reinterpret_cast<void*>(callback),
+                 NativeAddressDescription(reinterpret_cast<void*>(callback)).c_str(),
+                 __builtin_return_address(0),
+                 NativeAddressDescription(__builtin_return_address(0)).c_str(),
+                 data,
                  status_flags);
   }
   auto found = std::find_if(looper->registrations.begin(),
@@ -1211,6 +1231,36 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
     const auto& registration = registrations[index - 1];
     if (registration.callback != nullptr) {
       invoked_callback = true;
+      if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr &&
+          std::getenv("DARWIN_ART_DEBUG_CALLBACK_VTABLE") != nullptr) {
+        // Chromium's NativeChildProcessService callback is a small guest
+        // thunk that dispatches through the service object's vtable. Read the
+        // same slot used by that thunk so a slow callback can be mapped back
+        // to its concrete method without changing callback affinity.
+        uintptr_t object_vtable = 0;
+        if (registration.data != nullptr) {
+          std::memcpy(&object_vtable, registration.data,
+                      sizeof(object_vtable));
+        }
+        int32_t vtable_offset = 0;
+        if (object_vtable != 0) {
+          std::memcpy(&vtable_offset,
+                      reinterpret_cast<const void*>(object_vtable + 0x2c),
+                      sizeof(vtable_offset));
+        }
+        const uintptr_t callback_target =
+            object_vtable == 0
+                ? 0
+                : object_vtable + static_cast<int64_t>(vtable_offset);
+        std::fprintf(stderr,
+                     "DARWIN_ART looper-callback-target fd=%d callback=%p "
+                     "data=%p vtable=%p slot_offset=%d target=%p\n",
+                     registration.fd,
+                     reinterpret_cast<void*>(registration.callback),
+                     registration.data,
+                     reinterpret_cast<void*>(object_vtable), vtable_offset,
+                     reinterpret_cast<void*>(callback_target));
+      }
       const auto callback_started = std::chrono::steady_clock::now();
       const uint64_t callback_cpu_started = ThreadCpuNanos();
       ++g_looper_callback_depth;
@@ -1231,12 +1281,14 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
           std::fprintf(stderr,
                        "DARWIN_ART slow-native-callback fd=%d events=0x%x "
                        "callback=%p data=%p result=%d elapsed_us=%lld "
-                       "cpu_us=%llu\n",
+                       "cpu_us=%llu callback_desc=%s\n",
                        registration.fd, events,
                        reinterpret_cast<void*>(registration.callback),
                        registration.data, callback_result,
                        static_cast<long long>(callback_us),
-                       static_cast<unsigned long long>(callback_cpu_us));
+                       static_cast<unsigned long long>(callback_cpu_us),
+                       NativeAddressDescription(reinterpret_cast<void*>(
+                           registration.callback)).c_str());
         }
       }
       if (callback_result == 0)

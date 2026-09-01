@@ -778,3 +778,24 @@ composed target states and Calculator/DeskClock acceptance; timing was
 The multi-second tail remains a single native Chromium callback, so the next
 step is still task-runner boundary identification rather than more host
 priority tuning.
+
+## 2026-09-01 scheduler-separation progress (Chromium callback target)
+
+The debug callback trace now records registration identity, callback address,
+caller address, fd status flags, and an optional vtable target. In a real
+Chromium run, fd `1073742850` uses the same stripped `libchrome.so` thunk at
+file offset `0x7ab7c60`; its object-vtable slot resolves to
+`libchrome.so+0x7ab7fbc`. Disassembly shows that target reading the registered
+fd and then dispatching a virtual native message-pump method. The slow samples
+(`~0.4--2.16s`, with substantial CPU time) therefore represent a large
+sequence-affine Chromium task/IPC batch, not a host socket wait.
+
+The vtable memory probe is now opt-in through
+`DARWIN_ART_DEBUG_CALLBACK_VTABLE=1` in addition to
+`DARWIN_ART_DEBUG_SLOW_FRAME=1`; ordinary debug runs only log opaque callback
+metadata and cannot dereference an arbitrary APK `data` pointer. The callback
+continues to execute on its registering Android Looper thread. Moving it to a
+generic helper would violate Android callback ordering and TLS/Looper
+semantics. The next implementation boundary is consequently Chromium's
+native message-pump/task-runner (or a proven non-UI process registration),
+with Calculator, DeskClock, and Chrome acceptance as the regression gate.
