@@ -300,6 +300,11 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   // Keep the ABI packets independent of the NSView and make the mailbox
   // safe to drain without touching AppKit objects.
   std::mutex _eventMutex;
+  // Edge-trigger the owner wake. The pending bit is cleared only while the
+  // event mutex is held and the mailbox is observed empty, so an AppKit
+  // producer cannot enqueue between the empty check and the clear without
+  // issuing a new wake.
+  std::atomic<bool> _ownerWakePending;
   std::unordered_map<unsigned short, uint64_t> _keyDownTimes;
   std::unordered_map<unsigned short, uint32_t> _keyRepeatCounts;
   BOOL _pointerActive;
@@ -325,6 +330,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
     _metalLayer.drawableSize = pixelSize;
     self.layer = _metalLayer;
     _pointerActive = NO;
+    _ownerWakePending.store(false, std::memory_order_relaxed);
     _ownerSurface = nullptr;
     _nextPointerSequence = 1;
     _nextKeySequence = 1;
@@ -338,8 +344,12 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
 }
 
 - (void)signalOwnerWake {
+  if (_ownerWakePending.exchange(true, std::memory_order_acq_rel)) return;
   DarwinArtSurface* surface = _ownerSurface;
-  if (surface == nullptr) return;
+  if (surface == nullptr) {
+    _ownerWakePending.store(false, std::memory_order_release);
+    return;
+  }
   DarwinArtSurfaceOwnerWakeCallback callback = nullptr;
   void* context = nullptr;
   {
@@ -347,7 +357,11 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
     callback = surface->owner_wake_callback;
     context = surface->owner_wake_context;
   }
-  if (callback != nullptr) callback(context);
+  if (callback != nullptr) {
+    callback(context);
+  } else {
+    _ownerWakePending.store(false, std::memory_order_release);
+  }
 }
 
 - (BOOL)isFlipped {
@@ -522,7 +536,11 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
 - (BOOL)nextPointerEventV2:(DarwinArtPointerEventV2*)outEvent {
   if (outEvent == nullptr) return NO;
   std::lock_guard<std::mutex> lock(_eventMutex);
-  if (_pointerEvents.empty()) return NO;
+  if (_pointerEvents.empty()) {
+    if (_keyEvents.empty())
+      _ownerWakePending.store(false, std::memory_order_release);
+    return NO;
+  }
   *outEvent = _pointerEvents.front();
   _pointerEvents.pop_front();
   return YES;
@@ -531,7 +549,11 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
 - (BOOL)nextKeyEventV1:(DarwinArtKeyEventV1*)outEvent {
   if (outEvent == nullptr) return NO;
   std::lock_guard<std::mutex> lock(_eventMutex);
-  if (_keyEvents.empty()) return NO;
+  if (_keyEvents.empty()) {
+    if (_pointerEvents.empty())
+      _ownerWakePending.store(false, std::memory_order_release);
+    return NO;
+  }
   *outEvent = _keyEvents.front();
   _keyEvents.pop_front();
   return YES;

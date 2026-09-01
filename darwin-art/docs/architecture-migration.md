@@ -997,3 +997,22 @@ click percentile. Synthetic acceptance remains separate and continues to pass;
 once permission is restored, `ingress_latency_us` plus the existing
 input-to-pulse samples will provide the physical baseline without changing the
 runtime path.
+
+## 2026-09-02 scheduler-separation progress (edge-triggered input wake)
+
+The AppKit surface mailbox now edge-triggers its owner wake: the first
+pointer/key packet after an empty mailbox signals `ALooper_wake`, while
+additional queued MOVE packets only update the bounded mailbox. The pending
+bit is cleared while the shared event mutex holds an empty check, so a producer
+cannot enqueue in the clear window and lose its wake. Pointer and key queues
+share the bit; draining either queue to empty arms the next producer edge.
+
+This reduces wake writes and owner wakeups during high-rate trackpad motion
+without coalescing Android gesture boundaries (DOWN/UP/CANCEL remain ordered
+packets). The callback remains the pointer-free `ALooper_wake` operation and
+does not move AppKit, JNI, or GraphicsSession state across threads.
+
+Verification: graphics-link audit PASS, Rust host tests 7/7, AOSP Calculator
+(`2+3=5`) and DeskClock Timer acceptance PASS, and Chrome tab-switcher/tab-grid
+acceptance PASS with ten composed target states and the full
+`GLES+ANGLE+Graphite+Dawn+MoltenVK+AHB+SurfaceFlinger+Metal` path.
