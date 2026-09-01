@@ -589,3 +589,30 @@ falls back to synchronous application to preserve ordering. The graphics link
 and AOSP Calculator/DeskClock acceptance both pass with this path enabled;
 long-tail timing must be remeasured on Chrome before considering the fence
 stage complete.
+
+## 2026-09-01 scheduler-separation progress (FIFO latch follow-up)
+
+The latch workers now use one process-lifetime FIFO queue rather than one
+detached thread per transaction. This preserves SurfaceFlinger transaction
+order when a producer fence is still pending: once one transaction is queued,
+later transactions join the same queue even when their own fence is already
+signalled. The queue is bounded to eight pending/active entries; saturation
+uses the synchronous path as an explicit correctness-preserving backpressure
+fallback. The public `ASurfaceTransaction` is cleared immediately after the
+deferred copy takes ownership, and the worker releases retained controls only
+after composition and callbacks finish.
+
+Validation after the FIFO change: graphics bootstrap, fast graphics-link audit,
+and `cargo build -p darwin-art-host` all pass. Real AOSP acceptance remains
+green (`Calculator=2+3=5`, `DeskClock=Timer`, common path
+`HWUI+SurfaceFlinger+Metal`). Chrome tab graphics acceptance also passes with
+10 composed target states and the real tab-switcher/tab-grid views. With
+`DARWIN_ART_DEBUG_FRAME_TIMING=1`, that run measured
+`looper count=13104 avg=660us max=395428us`,
+`graphics count=2063 avg=2235us max=2141265us`, and
+`handoff count=11 avg=261289us max=2141640us` (6 over 16ms, 3 over 50ms,
+1 over 500ms, 1 over 1s). The acceptance proves no functional regression, but
+the long-tail handoff still prevents declaring Chrome tab performance solved;
+the next slice must profile the first-frame startup stall and move the
+remaining Metal acquire/presentation waits onto the RenderThread-equivalent
+queue.

@@ -28,6 +28,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <condition_variable>
+#include <deque>
 #include <fcntl.h>
 #include <limits>
 #include <memory>
@@ -467,6 +469,26 @@ struct SurfaceTransaction {
   TransactionCallback complete = nullptr;
   void* complete_context = nullptr;
 };
+
+struct DeferredLatchTransaction {
+  std::unique_ptr<SurfaceTransaction> transaction;
+  std::vector<ASurfaceControl*> controls;
+};
+
+struct LatchQueueState {
+  std::mutex mutex;
+  std::condition_variable condition;
+  std::deque<DeferredLatchTransaction> pending;
+  bool started = false;
+};
+
+LatchQueueState& LatchQueue() {
+  // The queue intentionally lives until process exit. Android application
+  // processes are one-shot, and leaking this tiny coordinator avoids a static
+  // destructor racing a late producer during ART shutdown.
+  static auto* state = new LatchQueueState();
+  return *state;
+}
 
 SurfaceTransaction::Update* FindUpdate(SurfaceTransaction* transaction,
                                        ASurfaceControl* control) {
@@ -1460,7 +1482,7 @@ extern "C" void darwin_art_android_surface_transaction_merge(
   source->complete_context = nullptr;
 }
 
-static void ApplySurfaceTransaction(SurfaceTransaction* transaction) {
+static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
   if (transaction == nullptr) return;
   // A buffer may not be latched until its producer's acquire fence signals.
   // The descriptor is backed by the producer's MTLSharedEvent and remains
@@ -1872,6 +1894,39 @@ static void ApplySurfaceTransaction(SurfaceTransaction* transaction) {
   ReleaseTransactionBuffers(transaction);
 }
 
+static bool StartLatchWorker() {
+  auto& state = LatchQueue();
+  {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.started) return true;
+    state.started = true;
+  }
+  try {
+    std::thread([&state] {
+      for (;;) {
+        DeferredLatchTransaction item;
+        {
+          std::unique_lock<std::mutex> lock(state.mutex);
+          state.condition.wait(lock,
+                               [&] { return !state.pending.empty(); });
+          item = std::move(state.pending.front());
+          state.pending.pop_front();
+        }
+        ApplySurfaceTransactionImpl(item.transaction.get());
+        for (ASurfaceControl* control : item.controls) {
+          if (control != nullptr) ASurfaceControl_release(control);
+        }
+        g_pending_latch_workers.fetch_sub(1, std::memory_order_acq_rel);
+      }
+    }).detach();
+    return true;
+  } catch (...) {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.started = false;
+    return false;
+  }
+}
+
 extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
   auto* transaction = reinterpret_cast<SurfaceTransaction*>(opaque);
   if (transaction == nullptr) return;
@@ -1882,7 +1937,10 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
   // return immediately.  The public transaction is cleared so the caller may
   // delete it according to the Android API contract while the retained
   // buffers/controls remain owned by the deferred copy.
-  bool defer = false;
+  // Once a transaction is queued behind an unsignaled acquire fence, later
+  // transactions join the same FIFO so a fast producer cannot overtake the
+  // pending latch and reorder SurfaceFlinger state.
+  bool defer = g_pending_latch_workers.load(std::memory_order_acquire) != 0;
   for (const auto& update : transaction->updates) {
     if (update.acquire_fence < 0) continue;
     if (sync_wait(update.acquire_fence, 0) != 0 && errno == ETIMEDOUT) {
@@ -1891,7 +1949,7 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
     }
   }
   if (!defer) {
-    ApplySurfaceTransaction(transaction);
+    ApplySurfaceTransactionImpl(transaction);
     return;
   }
 
@@ -1905,7 +1963,7 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
     // Keep the latch queue bounded. This is an exceptional producer burst;
     // applying synchronously preserves Android transaction ordering while
     // preventing unbounded detached waiters.
-    ApplySurfaceTransaction(transaction);
+    ApplySurfaceTransactionImpl(transaction);
     return;
   }
 
@@ -1926,25 +1984,24 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
   for (ASurfaceControl* control : deferred->controls) {
     if (control != nullptr) ASurfaceControl_acquire(control);
   }
-  try {
-    std::thread([deferred = std::move(deferred)]() mutable {
-      const auto controls = deferred->controls;
-      ApplySurfaceTransaction(deferred.get());
-      for (ASurfaceControl* control : controls) {
-        if (control != nullptr) ASurfaceControl_release(control);
-      }
-      g_pending_latch_workers.fetch_sub(1, std::memory_order_acq_rel);
-    }).detach();
-  } catch (...) {
+  const auto controls = deferred->controls;
+  if (!StartLatchWorker()) {
     // A thread creation failure is exceptional; preserve correctness even if
     // latency temporarily regresses by applying on the caller as a fallback.
-    const auto controls = deferred->controls;
-    ApplySurfaceTransaction(deferred.get());
+    ApplySurfaceTransactionImpl(deferred.get());
     for (ASurfaceControl* control : controls) {
       if (control != nullptr) ASurfaceControl_release(control);
     }
     g_pending_latch_workers.fetch_sub(1, std::memory_order_acq_rel);
+    return;
   }
+  auto& state = LatchQueue();
+  {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.pending.push_back(
+        DeferredLatchTransaction{std::move(deferred), controls});
+  }
+  state.condition.notify_one();
 }
 
 extern "C" void ASurfaceTransaction_setOnCommit(ASurfaceTransaction* opaque,
