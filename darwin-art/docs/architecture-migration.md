@@ -833,3 +833,21 @@ process registration), not in generic Looper callback migration. The debug
 acceptance's tab-grid assertion remains timing-sensitive; a normal immediate
 retry passed with nine composed states, and the AOSP Calculator/DeskClock
 gate remains green.
+
+## 2026-09-02 scheduler-separation progress (per-turn native fairness)
+
+The host-only native Looper drain now tracks a registration generation and
+allows each `(fd, generation)` callback at most once per host turn. Different
+ready descriptors still run in the same turn; a descriptor that remains
+readable is deferred to the next turn. Public `ALooper_pollOnce` behavior and
+callback affinity are unchanged. This is the Android-compatible fairness
+boundary that avoids the earlier unsafe global budget reduction.
+
+After rebuilding, the broker ASan/UBSan/TSan probe and the AOSP
+Calculator/DeskClock gate pass. Chromium acceptance passes with real tab-grid
+input and ten composed target states. Debug timing remains dominated by the
+same single callback (`401ms`, `617ms`, `2135ms` samples;
+`looper avg=311us max=2142506us`, `graphics avg=104us max=988us`), so the
+fairness boundary prevents repeated wake starvation but cannot preempt the
+callback's internal task batch. Further latency work must target Chromium's
+own task-runner/IPC boundary.

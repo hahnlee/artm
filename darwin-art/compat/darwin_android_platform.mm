@@ -144,6 +144,8 @@ struct ALooperRegistration {
   int events;
   ALooper_callbackFunc callback;
   void* data;
+  uint64_t generation = 0;
+  uint64_t last_host_turn = 0;
 };
 
 thread_local uint32_t g_looper_callback_depth = 0;
@@ -188,6 +190,7 @@ struct ALooper {
   std::atomic<uint32_t> references{1};
   int options = 0;
   int wake_fd = -1;
+  uint64_t next_generation = 1;
   std::mutex mutex;
   std::vector<ALooperRegistration> registrations;
   std::vector<ChoreographerCallback> frame_callbacks;
@@ -209,6 +212,8 @@ struct AChoreographerFrameCallbackData {
 
 thread_local ALooper* g_thread_looper = nullptr;
 thread_local AChoreographer* g_thread_choreographer = nullptr;
+thread_local bool g_host_looper_turn_active = false;
+thread_local uint64_t g_host_looper_turn = 0;
 
 struct ASensorManager {};
 struct ASensorEventQueue {};
@@ -1150,7 +1155,8 @@ extern "C" int ALooper_addFd(ALooper* looper, int fd, int ident, int events,
   auto found = std::find_if(looper->registrations.begin(),
                             looper->registrations.end(),
                             [fd](const auto& value) { return value.fd == fd; });
-  const ALooperRegistration registration{fd, ident, events, callback, data};
+  const ALooperRegistration registration{fd, ident, events, callback, data,
+                                         looper->next_generation++, 0};
   if (found == looper->registrations.end())
     looper->registrations.push_back(registration);
   else
@@ -1219,6 +1225,7 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
     return ALOOPER_POLL_WAKE;
   }
   bool invoked_callback = false;
+  bool skipped_host_callback = false;
   for (size_t index = 1; index < descriptors.size(); ++index) {
     const int16_t poll_events = descriptors[index].revents;
     if (poll_events == 0) continue;
@@ -1230,6 +1237,27 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
     if ((poll_events & 0x0020) != 0) events |= ALOOPER_EVENT_INVALID;
     const auto& registration = registrations[index - 1];
     if (registration.callback != nullptr) {
+      if (g_host_looper_turn_active) {
+        bool already_dispatched = false;
+        {
+          std::lock_guard<std::mutex> lock(looper->mutex);
+          const auto found = std::find_if(
+              looper->registrations.begin(), looper->registrations.end(),
+              [&registration](const auto& current) {
+                return current.fd == registration.fd &&
+                       current.generation == registration.generation;
+              });
+          if (found != looper->registrations.end()) {
+            already_dispatched = found->last_host_turn == g_host_looper_turn;
+            if (!already_dispatched)
+              found->last_host_turn = g_host_looper_turn;
+          }
+        }
+        if (already_dispatched) {
+          skipped_host_callback = true;
+          continue;
+        }
+      }
       invoked_callback = true;
       if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr &&
           std::getenv("DARWIN_ART_DEBUG_CALLBACK_VTABLE") != nullptr) {
@@ -1300,7 +1328,8 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
       return registration.ident;
     }
   }
-  return invoked_callback ? ALOOPER_POLL_CALLBACK : ALOOPER_POLL_WAKE;
+  if (invoked_callback) return ALOOPER_POLL_CALLBACK;
+  return skipped_host_callback ? ALOOPER_POLL_TIMEOUT : ALOOPER_POLL_WAKE;
 }
 
 extern "C" AChoreographer* AChoreographer_getInstance() {
@@ -1405,19 +1434,27 @@ AChoreographerFrameCallbackData_getFrameTimelineDeadlineNanos(
 extern "C" int darwin_art_android_platform_poll_current_looper() {
   if (g_thread_looper == nullptr) return 0;
   int dispatched = 0;
+  ++g_host_looper_turn;
+  g_host_looper_turn_active = true;
   // Keep the bounded host drain separate from the public ALooper ABI. The
   // callback itself remains sequence-affine to the registering Looper thread.
   constexpr int kHostCallbackBudget = 128;
+  int status = 0;
   for (int iteration = 0; iteration < kHostCallbackBudget; ++iteration) {
     const int result = ALooper_pollOnce(0, nullptr, nullptr, nullptr);
     if (result == ALOOPER_POLL_CALLBACK || result == ALOOPER_POLL_WAKE) {
       ++dispatched;
       continue;
     }
-    if (result == ALOOPER_POLL_TIMEOUT) return dispatched;
-    return result == ALOOPER_POLL_ERROR ? -1 : dispatched;
+    if (result == ALOOPER_POLL_TIMEOUT) {
+      status = dispatched;
+      break;
+    }
+    status = result == ALOOPER_POLL_ERROR ? -1 : dispatched;
+    break;
   }
-  return dispatched;
+  g_host_looper_turn_active = false;
+  return status == 0 ? dispatched : status;
 }
 
 extern "C" void* darwin_art_android_platform_prepare_current_looper() {
