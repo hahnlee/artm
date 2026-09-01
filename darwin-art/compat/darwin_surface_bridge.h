@@ -116,9 +116,9 @@ DarwinArtSurface* darwin_art_surface_create(
     const DarwinArtSurfaceCreateInfo* create_info,
     DarwinArtSurfaceResult* out_result);
 
-// Updates the IOSurface/CAMetalLayer backing and pixel dimensions. The call
-// is main-thread-only and waits for the prior GPU submission before swapping
-// the backing, so the renderer never observes a partially resized texture.
+// Updates the IOSurface/CAMetalLayer backing and pixel dimensions. Calls from
+// an ART worker are synchronously marshalled to AppKit's main queue and wait
+// for the prior GPU submission before swapping the backing.
 DarwinArtSurfaceResult darwin_art_surface_resize(
     DarwinArtSurface* surface,
     uint32_t width,
@@ -163,7 +163,8 @@ DarwinArtSurfaceResult darwin_art_surface_update(
     size_t source_bytes_per_row);
 
 // Blits the persistent IOSurface-backed Metal texture into the next drawable
-// of the persistent CAMetalLayer and schedules it for presentation.
+// of the persistent CAMetalLayer and schedules it for presentation. Calls
+// from an ART worker are synchronously marshalled to AppKit's main queue.
 DarwinArtSurfaceResult darwin_art_surface_present(
     DarwinArtSurface* surface);
 
@@ -223,7 +224,8 @@ bool darwin_art_surface_gpu_composite_embedded(
     DarwinArtSurface* surface,
     void* sk_canvas);
 
-// Runs the NSApplication event pump in slices no longer than 16 ms. seconds
+// Runs the NSApplication event pump in slices no longer than 16 ms. Calls from
+// an ART worker are synchronously marshalled to AppKit's main queue. seconds
 // must be finite and in the inclusive range 0..30. A zero duration performs
 // only a close-state check. WINDOW_CLOSED means the user closed the window;
 // the handle remains valid and must still be destroyed by its owner.
@@ -250,7 +252,8 @@ bool darwin_art_surface_next_key_event_v1(
     DarwinArtKeyEventV1* out_event);
 
 // Waits for the most recently submitted command buffer, closes the window,
-// and releases all owned Apple objects.
+// and releases all owned Apple objects. Calls from an ART worker are
+// synchronously marshalled to AppKit's main queue.
 DarwinArtSurfaceResult darwin_art_surface_destroy(
     DarwinArtSurface* surface);
 

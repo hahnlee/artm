@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <dispatch/dispatch.h>
 #include <deque>
 #include <iostream>
 #include <limits>
@@ -36,6 +37,23 @@ constexpr uint32_t kBgraPixelFormat =
 
 bool IsMainThread() {
   return [NSThread isMainThread];
+}
+
+// Surface lifecycle and scanout are AppKit-owned, but ART will eventually run
+// on a dedicated owner pthread.  Keep the marshalling primitive in this small
+// bridge so callers never invoke AppKit from that worker.  The block is
+// synchronous by design for create/resize/present/destroy ordering; the main
+// thread must continue servicing its NSApplication run loop while a worker is
+// alive (a blocking join would deadlock this path).
+template <typename Function>
+auto RunOnMainSync(Function&& function) -> decltype(function()) {
+  if (IsMainThread()) return function();
+  using Result = decltype(function());
+  __block Result result{};
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    result = function();
+  });
+  return result;
 }
 
 uint64_t AndroidEventTimeNanos() {
@@ -772,7 +790,7 @@ DarwinArtSurfaceResult darwin_art_surface_unmap_producer(
   return DARWIN_ART_SURFACE_OK;
 }
 
-DarwinArtSurface* darwin_art_surface_create(
+static DarwinArtSurface* CreateSurfaceOnMain(
     const DarwinArtSurfaceCreateInfo* create_info,
     DarwinArtSurfaceResult* out_result) {
   auto finish = [out_result](DarwinArtSurfaceResult result,
@@ -930,6 +948,20 @@ DarwinArtSurface* darwin_art_surface_create(
   }
 }
 
+DarwinArtSurface* darwin_art_surface_create(
+    const DarwinArtSurfaceCreateInfo* create_info,
+    DarwinArtSurfaceResult* out_result) {
+  if (create_info == nullptr) {
+    if (out_result != nullptr) *out_result = DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+    return nullptr;
+  }
+  // The caller owns this POD for the duration of the synchronous dispatch.
+  // Copying it here prevents a worker from exposing a mutable request while
+  // the AppKit block is queued.
+  const DarwinArtSurfaceCreateInfo info = *create_info;
+  return RunOnMainSync([&] { return CreateSurfaceOnMain(&info, out_result); });
+}
+
 static DarwinArtSurfaceResult ResizeSurfaceBacking(DarwinArtSurface* surface,
                                                    uint32_t width,
                                                    uint32_t height,
@@ -991,17 +1023,20 @@ static DarwinArtSurfaceResult ResizeSurfaceBacking(DarwinArtSurface* surface,
 
 DarwinArtSurfaceResult darwin_art_surface_resize(
     DarwinArtSurface* surface, uint32_t width, uint32_t height) {
-  return ResizeSurfaceBacking(surface, width, height, true);
+  return RunOnMainSync([&] {
+    return ResizeSurfaceBacking(surface, width, height, true);
+  });
 }
 
 DarwinArtSurfaceResult darwin_art_surface_set_title(
     DarwinArtSurface* surface, const char* title) {
-  if (!IsMainThread()) return DARWIN_ART_SURFACE_NOT_MAIN_THREAD;
-  if (surface == nullptr || title == nullptr || title[0] == '\0') {
-    return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
-  }
-  if (surface->window != nil) surface->window.title = WindowTitle(title);
-  return DARWIN_ART_SURFACE_OK;
+  return RunOnMainSync([&] {
+    if (surface == nullptr || title == nullptr || title[0] == '\0') {
+      return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+    }
+    if (surface->window != nil) surface->window.title = WindowTitle(title);
+    return DARWIN_ART_SURFACE_OK;
+  });
 }
 
 char* darwin_art_host_open_document(const char* mime_type) {
@@ -1093,7 +1128,7 @@ DarwinArtSurfaceResult darwin_art_surface_update(
   return darwin_art_surface_unmap_producer(surface);
 }
 
-DarwinArtSurfaceResult darwin_art_surface_present(
+static DarwinArtSurfaceResult PresentSurfaceOnMain(
     DarwinArtSurface* surface) {
   if (!IsMainThread()) {
     return DARWIN_ART_SURFACE_NOT_MAIN_THREAD;
@@ -1147,7 +1182,11 @@ DarwinArtSurfaceResult darwin_art_surface_present(
   return DARWIN_ART_SURFACE_OK;
 }
 
-DarwinArtSurfaceResult darwin_art_surface_pump_events(
+DarwinArtSurfaceResult darwin_art_surface_present(DarwinArtSurface* surface) {
+  return RunOnMainSync([&] { return PresentSurfaceOnMain(surface); });
+}
+
+static DarwinArtSurfaceResult PumpSurfaceEventsOnMain(
     DarwinArtSurface* surface,
     double seconds) {
   if (!IsMainThread()) {
@@ -1199,6 +1238,11 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
   return DARWIN_ART_SURFACE_OK;
 }
 
+DarwinArtSurfaceResult darwin_art_surface_pump_events(
+    DarwinArtSurface* surface, double seconds) {
+  return RunOnMainSync([&] { return PumpSurfaceEventsOnMain(surface, seconds); });
+}
+
 bool darwin_art_surface_next_pointer_event(
     DarwinArtSurface* surface,
     DarwinArtPointerEvent* out_event) {
@@ -1226,7 +1270,7 @@ bool darwin_art_surface_next_key_event_v1(
   return [surface->view nextKeyEventV1:out_event] == YES;
 }
 
-DarwinArtSurfaceResult darwin_art_surface_destroy(
+static DarwinArtSurfaceResult DestroySurfaceOnMain(
     DarwinArtSurface* surface) {
   if (!IsMainThread()) {
     return DARWIN_ART_SURFACE_NOT_MAIN_THREAD;
@@ -1252,4 +1296,8 @@ DarwinArtSurfaceResult darwin_art_surface_destroy(
   }
   return gpu_failed ? DARWIN_ART_SURFACE_GPU_SUBMISSION_FAILED
                     : DARWIN_ART_SURFACE_OK;
+}
+
+DarwinArtSurfaceResult darwin_art_surface_destroy(DarwinArtSurface* surface) {
+  return RunOnMainSync([&] { return DestroySurfaceOnMain(surface); });
 }
