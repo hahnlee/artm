@@ -728,3 +728,16 @@ path. Chrome tab graphics acceptance and AOSP Calculator/DeskClock acceptance
 remain green after the change. The remaining long-tail is now confined to
 the sequence-affine native Looper callback itself and requires a Chromium
 task-batch boundary rather than host-thread migration.
+
+## 2026-09-01 scheduler-separation progress (native drain fairness experiment)
+
+An experiment that reduced the host native-drain budget from 128 callbacks to
+one callback per `pump_main_looper()` turn was reverted after the Chromium
+acceptance failed to select a real tab-grid card. This confirms that the
+current Chromium watcher setup depends on draining multiple ready callbacks
+before returning to the Java/UI queue; a generic count reduction is not an
+Android-compatible fairness policy. The production budget remains 128, while
+the owner-side AppKit wait stays removed. Any further latency reduction must
+be implemented at a known Chromium task-runner batch boundary (or by giving a
+proven non-UI registration its own sequence), not by moving opaque callbacks
+or truncating `ALooper` progress heuristically.
