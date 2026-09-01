@@ -1082,3 +1082,18 @@ registered native callbacks retain Android ordering. General Chrome acceptance
 after the attribution build passed with ten composed target states and the
 complete GPU capability path; the earlier debug run's SIGTRAP was an isolated
 startup/termination failure and was followed by a clean pass.
+
+## 2026-09-02 scheduler-separation progress (owner callback boundary)
+
+Thread-ID attribution confirms the long callback is genuinely executing on
+the ART owner Looper thread, not on the AppKit actor: the owner and callback
+Mach IDs match for the 0.4 s and 2.0 s guest watcher callbacks. A separate
+watcher registration uses another native thread. Therefore the runtime keeps
+Android sequence affinity and does not migrate callbacks by heuristic.
+
+The implemented safe boundary is now explicit: one native callback is returned
+per `ALooper_pollOnce`, with an eight-callback host-turn budget, while AppKit
+input, the display clock, and Metal HWC scanout remain independent. This
+prevents callback bursts from adding extra backpressure, but cannot interrupt
+one guest callback already running on the Android owner. Clean Chrome
+acceptance after rebuilding the native dylib passed with ten target states.
