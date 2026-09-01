@@ -1701,6 +1701,11 @@ that independent 60 Hz ticks are being collapsed into the bounded single
 AppKit command rather than queued as one block per frame; composition fences
 still gate the first eligible scanout.
 
+The same telemetry run reports Calculator `input->framework-pulse` p50=59 us,
+p95=26.8 ms and DeskClock p50=857 us, p95=331.6 ms. The DeskClock tail is a
+guest/UI transition bucket rather than scanout queue growth; scanout remains
+coalesced independently while the Android owner completes its Looper work.
+
 ## 2026-09-02 scheduler-separation progress (physical input permission probe)
 
 A longer-lived Calculator window was started without synthetic pointer

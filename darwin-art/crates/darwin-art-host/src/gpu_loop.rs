@@ -292,10 +292,10 @@ pub(super) fn run(
             while wait_started.elapsed() < Duration::from_millis(delay_ms) && loop_error.is_none() {
                 let remaining =
                     Duration::from_millis(delay_ms).saturating_sub(wait_started.elapsed());
-                // AppKit and Android share the process main thread today, but
-                // Handler/Binder work must not be throttled to display rate.
-                // Service the owner Looper at a short event-loop cadence and
-                // publish Choreographer vsync only at the display cadence.
+                // AppKit runs on its own actor; Handler/Binder work on the
+                // Android owner must not be throttled to display rate. Service
+                // the owner Looper at a short cadence and publish
+                // Choreographer vsync only at the display cadence.
                 let slice_ms = remaining.as_millis().min(OWNER_WAIT_MAX.as_millis()).max(1) as u64;
                 let pump_status = owned_surface_wait_slice(runtime, slice_ms as f64 / 1000.0);
                 if pump_status != 0 {
