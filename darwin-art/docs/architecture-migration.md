@@ -1669,3 +1669,17 @@ providers. The default Layoutlib mode still reports 34 additional definitions
 host-only nativehelper provider and does not affect the ART runtime graph. The
 repository lock remains unchanged until the host/Layoutlib archive is rebuilt
 from its pinned source and reviewed.
+
+## 2026-09-02 scheduler-separation progress (active-surface publication)
+
+The host-surface publication boundary now uses an acquire/release atomic
+pointer. Android GL/child-surface threads can resolve the current host without
+an unsynchronized raw-pointer read while the AppKit owner publishes or clears
+the surface; teardown uses compare-exchange so it cannot clear a replacement
+surface accidentally. This does not extend surface lifetime (the owner lease
+still bounds that contract), but removes the publication data race without
+moving any ART/JNI work across threads.
+
+The incremental graphics-link audit passes (`registrar=51`, fake symbols,
+host ICU, and host FMT all zero), and AOSP Calculator/DeskClock acceptance
+passes again (`Calculator=2+3=5`).

@@ -808,7 +808,7 @@ DarwinArtSurface::~DarwinArtSurface() {
     }
 }
 
-DarwinArtSurface* g_active_gpu_surface = nullptr;
+std::atomic<DarwinArtSurface*> g_active_gpu_surface{nullptr};
 
 __attribute__((weak)) void darwin_art_surface_gpu_forget(
     DarwinArtSurface*) {}
@@ -1686,7 +1686,10 @@ static DarwinArtSurfaceResult DestroySurfaceOnMain(
   }
   surface->window_closed.store(true, std::memory_order_release);
   darwin_art_surface_gpu_forget(surface);
-  if (g_active_gpu_surface == surface) g_active_gpu_surface = nullptr;
+  DarwinArtSurface* expected = surface;
+  (void)g_active_gpu_surface.compare_exchange_strong(
+      expected, nullptr, std::memory_order_acq_rel,
+      std::memory_order_acquire);
   DarwinArtSurfaceResult unmap_result = DARWIN_ART_SURFACE_OK;
   if (surface->producer_mapped) {
     unmap_result = darwin_art_surface_unmap_producer(surface);

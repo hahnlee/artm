@@ -106,7 +106,11 @@ struct DarwinArtSurface {
   ~DarwinArtSurface();
 };
 
-extern DarwinArtSurface* g_active_gpu_surface;
+// Published with release/acquire because Android GL/child-surface threads
+// may resolve the host surface while the AppKit owner creates or tears it
+// down. Lifetime is still bounded by the owner-thread surface lease; the
+// atomic only removes the raw-pointer data race at the publication boundary.
+extern std::atomic<DarwinArtSurface*> g_active_gpu_surface;
 
 // Weak no-op in the CPU bridge; the GPU bridge supplies the strong cleanup
 // implementation when it is linked into the graphics runtime.

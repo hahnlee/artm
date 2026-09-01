@@ -138,11 +138,11 @@ DarwinArtSurfaceResult darwin_art_surface_gpu_end(
 }
 
 DarwinArtSurface* darwin_art_surface_active_gpu(void) {
-  return g_active_gpu_surface;
+  return g_active_gpu_surface.load(std::memory_order_acquire);
 }
 
 void darwin_art_surface_set_active_gpu(DarwinArtSurface* surface) {
-  g_active_gpu_surface = surface;
+  g_active_gpu_surface.store(surface, std::memory_order_release);
 }
 
 bool darwin_art_surface_gpu_composite_embedded(
