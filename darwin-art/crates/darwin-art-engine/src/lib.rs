@@ -16,11 +16,11 @@ mod platform {
     pub use engine::EngineSession;
     pub use graphics::{GraphicsSession, LooperWakeToken};
     pub use process::{CallbackBindings, ProcessRequest, ProcessRequestError};
-    pub use surface::SurfaceSession;
+    pub use surface::{ScanoutToken, SurfaceSession};
 }
 
 #[cfg(target_os = "macos")]
 pub use platform::{
     CallbackBindings, EngineSession, GraphicsSession, LooperWakeToken, ProcessRequest,
-    ProcessRequestError, SurfaceSession,
+    ProcessRequestError, ScanoutToken, SurfaceSession,
 };

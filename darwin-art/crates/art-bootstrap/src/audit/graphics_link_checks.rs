@@ -31,6 +31,7 @@ pub(super) fn validate_graphics_runtime_link(
         "_darwin_art_surface_map_producer",
         "_darwin_art_surface_unmap_producer",
         "_darwin_art_surface_present",
+        "_darwin_art_surface_present_async",
         "_darwin_art_surface_pump_events",
         "_darwin_art_surface_close_requested",
         "_darwin_art_appkit_pump_events",

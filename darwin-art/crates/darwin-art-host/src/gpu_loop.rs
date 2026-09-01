@@ -26,7 +26,10 @@ pub(super) fn run(
     let owner_wake = runtime
         .graphics()
         .and_then(|graphics| graphics.looper_wake_token());
-    let frame_clock = FrameClock::start(owner_wake);
+    let scanout = runtime
+        .surface()
+        .and_then(|surface| surface.scanout_token());
+    let frame_clock = FrameClock::start(owner_wake, scanout);
     if runtime.surface().is_none() {
         return Err(HostError::SurfaceFailed {
             operation: "gpu_active_surface",

@@ -12,7 +12,7 @@ use darwin_art_engine_sys::{
     ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn, ShutdownProcessFn,
     SurfaceActiveFn, SurfaceCloseRequestedFn, SurfaceCreateFn, SurfaceDestroyFn, SurfaceGetSizeFn,
     SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn, SurfaceNextPointerEventV2Fn,
-    SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn, SurfaceUpdateFn,
+    SurfacePresentAsyncFn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn, SurfaceUpdateFn,
 };
 
 #[derive(Clone, Copy)]
@@ -28,6 +28,7 @@ pub(crate) struct SurfaceSymbols {
     pub get_size: Option<SurfaceGetSizeFn>,
     pub update: SurfaceUpdateFn,
     pub present: SurfacePresentFn,
+    pub present_async: Option<SurfacePresentAsyncFn>,
     pub pump_events: SurfacePumpEventsFn,
     pub close_requested: SurfaceCloseRequestedFn,
     pub next_pointer_event: SurfaceNextPointerEventFn,
@@ -89,6 +90,7 @@ impl LoadedEngine {
                     get_size: library.symbol(b"darwin_art_surface_get_size\0").ok(),
                     update: library.symbol(b"darwin_art_surface_update\0")?,
                     present: library.symbol(b"darwin_art_surface_present\0")?,
+                    present_async: library.symbol(b"darwin_art_surface_present_async\0").ok(),
                     pump_events: library.symbol(b"darwin_art_surface_pump_events\0")?,
                     close_requested: library.symbol(b"darwin_art_surface_close_requested\0")?,
                     next_pointer_event: library

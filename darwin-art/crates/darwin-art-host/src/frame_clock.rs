@@ -8,6 +8,7 @@
 //! consumed.
 
 use darwin_art_engine::LooperWakeToken;
+use darwin_art_engine::ScanoutToken;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -27,7 +28,7 @@ struct TickState {
 }
 
 impl FrameClock {
-    pub(crate) fn start(wake: Option<LooperWakeToken>) -> Self {
+    pub(crate) fn start(wake: Option<LooperWakeToken>, scanout: Option<ScanoutToken>) -> Self {
         let ticks = Arc::new(Mutex::new(TickState {
             latest: None,
             pending: false,
@@ -37,7 +38,7 @@ impl FrameClock {
         let worker_stop = Arc::clone(&stop);
         let worker = thread::Builder::new()
             .name("darwin-art-display-clock".to_owned())
-            .spawn(move || run_clock(worker_ticks, worker_stop, wake))
+            .spawn(move || run_clock(worker_ticks, worker_stop, wake, scanout))
             .expect("display clock thread must start");
         Self {
             ticks,
@@ -68,7 +69,12 @@ impl Drop for FrameClock {
     }
 }
 
-fn run_clock(ticks: Arc<Mutex<TickState>>, stop: Arc<AtomicBool>, wake: Option<LooperWakeToken>) {
+fn run_clock(
+    ticks: Arc<Mutex<TickState>>,
+    stop: Arc<AtomicBool>,
+    wake: Option<LooperWakeToken>,
+    scanout: Option<ScanoutToken>,
+) {
     let mut next = Instant::now();
     while !stop.load(Ordering::Acquire) {
         let now = Instant::now();
@@ -95,6 +101,14 @@ fn run_clock(ticks: Arc<Mutex<TickState>>, stop: Arc<AtomicBool>, wake: Option<L
                 token.wake();
             }
         }
+        // Scanout is a separate consumer from the ART owner pulse. It only
+        // appends a bounded latest-wins AppKit command; Android UI/JNI work
+        // stays on the owner while the main actor performs the actual blit.
+        if should_wake {
+            if let Some(token) = scanout {
+                let _ = token.present();
+            }
+        }
         next = now + DISPLAY_INTERVAL;
     }
 }
@@ -107,7 +121,7 @@ mod tests {
 
     #[test]
     fn clock_is_bounded_and_produces_edges() {
-        let clock = FrameClock::start(None);
+        let clock = FrameClock::start(None, None);
         thread::sleep(Duration::from_millis(20));
         assert!(clock.take_latest().is_some());
         thread::sleep(Duration::from_millis(40));

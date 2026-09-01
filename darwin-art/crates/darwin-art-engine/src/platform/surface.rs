@@ -3,8 +3,8 @@ use core::ffi::c_void;
 use darwin_art_engine_sys::{
     KeyEventV1, PointerEvent, PointerEventV2, SurfaceCloseRequestedFn, SurfaceDestroyFn,
     SurfaceGetSizeFn, SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn,
-    SurfaceNextPointerEventV2Fn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn,
-    SurfaceUpdateFn,
+    SurfaceNextPointerEventV2Fn, SurfacePresentAsyncFn, SurfacePresentFn, SurfacePumpEventsFn,
+    SurfaceResizeFn, SurfaceUpdateFn,
 };
 use darwin_art_runtime::NativeResource;
 use std::{mem::size_of, ptr::NonNull};
@@ -18,6 +18,7 @@ pub struct SurfaceSession {
     get_size: Option<SurfaceGetSizeFn>,
     update: SurfaceUpdateFn,
     present: SurfacePresentFn,
+    present_async: Option<SurfacePresentAsyncFn>,
     pump_events: SurfacePumpEventsFn,
     close_requested: SurfaceCloseRequestedFn,
     next_pointer_event: SurfaceNextPointerEventFn,
@@ -36,6 +37,7 @@ impl SurfaceSession {
             get_size: symbols.surface.get_size,
             update: symbols.surface.update,
             present: symbols.surface.present,
+            present_async: symbols.surface.present_async,
             pump_events: symbols.surface.pump_events,
             close_requested: symbols.surface.close_requested,
             next_pointer_event: symbols.surface.next_pointer_event,
@@ -116,6 +118,17 @@ impl SurfaceSession {
         unsafe { (self.present)(handle.as_ptr()) }
     }
 
+    /// Cross-thread scanout token for the Android RenderThread-equivalent.
+    /// The callback only enqueues a latest-wins AppKit blit and never enters
+    /// JNI or dereferences the owner-thread graphics state. The token is
+    /// dropped with FrameClock before this surface is closed.
+    pub fn scanout_token(&self) -> Option<ScanoutToken> {
+        Some(ScanoutToken {
+            handle: self.handle.filter(|_| self.armed)?.as_ptr(),
+            present: self.present_async?,
+        })
+    }
+
     pub fn pump_events(&self, visible_seconds: f64) -> i32 {
         let Some(handle) = self.handle.filter(|_| self.armed) else {
             return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
@@ -180,6 +193,26 @@ impl SurfaceSession {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct ScanoutToken {
+    handle: *mut c_void,
+    present: SurfacePresentAsyncFn,
+}
+
+// The async ABI only takes the opaque surface pointer and appends a bounded
+// request to its presentation mutex. The owner guarantees the token is
+// joined/dropped before SurfaceSession::close destroys that pointer.
+unsafe impl Send for ScanoutToken {}
+unsafe impl Sync for ScanoutToken {}
+
+impl ScanoutToken {
+    pub fn present(self) -> i32 {
+        // SAFETY: the token lifetime is bounded by FrameClock's join before
+        // the owning SurfaceSession is closed.
+        unsafe { (self.present)(self.handle) }
+    }
+}
+
 impl Drop for SurfaceSession {
     fn drop(&mut self) {
         let _ = self.close();
@@ -237,6 +270,7 @@ mod surface_session_tests {
             get_size: None,
             update,
             present,
+            present_async: None,
             pump_events: pump,
             next_pointer_event: next_event,
             next_pointer_event_v2: None,
@@ -260,6 +294,7 @@ mod surface_session_tests {
             get_size: None,
             update,
             present,
+            present_async: None,
             pump_events: pump,
             next_pointer_event: next_event,
             next_pointer_event_v2: None,

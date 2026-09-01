@@ -1489,3 +1489,20 @@ FIFO. Android-like previous-buffer retention and fence-readiness rechecking
 remain the next SurfaceFlinger slice. Separately, HWC scanout is still
 triggered from the owner frame pulse; Sol review identifies a ready-generation
 mailbox plus latest-wins AppKit consumer as the next high-priority split.
+
+## 2026-09-02 scheduler-separation progress (independent scanout tick)
+
+`SurfaceSession` now exposes a lifetime-bounded `ScanoutToken` for the
+optional async-present ABI. `FrameClock` consumes each display edge on its own
+thread and sends the token's latest-wins AppKit request independently of the
+ART owner `pump_frame()` call; the owner wake remains a separate consumer for
+UI-vsync/Looper work. The token carries only an opaque surface pointer and a
+thread-safe enqueue callback, and is joined before surface teardown.
+
+Graphics-link audit, host Rust tests, AOSP Calculator/DeskClock acceptance,
+and Chromium tab-grid acceptance (`target-states=10`) pass with this fan-out.
+This removes owner-to-AppKit scheduling inheritance, but it intentionally
+does not yet infer a new frame is ready: the AppKit blit may still present the
+last latched IOSurface while SurfaceFlinger is composing. The next correctness
+slice must publish SF completion/ready generations and gate the scanout token
+on that mailbox before claiming full Android latch semantics.
