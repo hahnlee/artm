@@ -479,6 +479,8 @@ struct DarwinInputChannelState {
   std::atomic<bool> last_finished_handled{false};
   std::mutex packet_mutex;
   std::deque<darwin_art::DarwinArtInputPacket> packets;
+  bool pointer_active = false;
+  DarwinArtPointerEventV2 last_pointer{};
   struct FinishAck {
     jint sequence = 0;
     bool handled = false;
@@ -494,6 +496,51 @@ struct DarwinInputChannelState {
 std::mutex g_focused_input_channel_mutex;
 std::weak_ptr<DarwinInputChannelState> g_focused_input_channel;
 
+// AOSP's InputDispatcher sends CANCEL when a focused window changes while a
+// pointer stream is active. Keep that boundary in the channel itself so the
+// event cannot be stranded behind the global focused-channel pointer.
+void QueueFocusLossCancel(
+    const std::shared_ptr<DarwinInputChannelState>& channel) {
+  if (channel == nullptr) return;
+  bool wake = false;
+  {
+    std::lock_guard<std::mutex> lock(channel->packet_mutex);
+    channel->packets.clear();
+    if (channel->pointer_active) {
+      DarwinArtPointerEventV2 cancel = channel->last_pointer;
+      cancel.action = DARWIN_ART_POINTER_CANCEL;
+      cancel.sequence = cancel.sequence == std::numeric_limits<uint64_t>::max()
+                            ? cancel.sequence
+                            : cancel.sequence + 1;
+      cancel.pressure = 0.0f;
+      cancel.size_value = 0.0f;
+      darwin_art::DarwinArtInputPacket packet;
+      packet.kind = darwin_art::DarwinArtInputPacketKind::kPointer;
+      packet.pointer = cancel;
+      channel->packets.push_back(packet);
+      channel->pointer_active = false;
+      wake = true;
+    }
+    // A registered receiver owns the payload callback; otherwise the ART
+    // owner loop remains the consumer for the queued CANCEL.
+    const bool receiver_alive =
+        channel->consumer != nullptr &&
+        channel->consumer->transport_registered &&
+        !channel->consumer->disposed.load(std::memory_order_acquire);
+    channel->looper_consumer.store(receiver_alive, std::memory_order_release);
+    if (channel->packets.empty() && channel->read_fd >= 0) {
+      uint8_t buffer[64];
+      while (recv(channel->read_fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
+      }
+    }
+    channel->pending_input.store(wake, std::memory_order_release);
+  }
+  if (wake && channel->write_fd >= 0) {
+    const uint8_t token = 1;
+    (void)send(channel->write_fd, &token, sizeof(token), MSG_DONTWAIT);
+  }
+}
+
 void SetFocusedInputChannel(
     const std::shared_ptr<DarwinInputChannelState>& channel) {
   std::shared_ptr<DarwinInputChannelState> previous;
@@ -503,15 +550,7 @@ void SetFocusedInputChannel(
     g_focused_input_channel = channel;
   }
   if (previous != nullptr && previous != channel) {
-    previous->looper_consumer.store(false, std::memory_order_release);
-    std::lock_guard<std::mutex> lock(previous->packet_mutex);
-    previous->packets.clear();
-    if (previous->read_fd >= 0) {
-      uint8_t buffer[64];
-      while (recv(previous->read_fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
-      }
-    }
-    previous->pending_input.store(false, std::memory_order_release);
+    QueueFocusLossCancel(previous);
   }
 }
 
@@ -524,15 +563,7 @@ void ClearFocusedInputChannel(
     if (focused == nullptr || focused == channel) g_focused_input_channel.reset();
   }
   if (focused != nullptr && focused == channel) {
-    focused->looper_consumer.store(false, std::memory_order_release);
-    std::lock_guard<std::mutex> lock(focused->packet_mutex);
-    focused->packets.clear();
-    if (focused->read_fd >= 0) {
-      uint8_t buffer[64];
-      while (recv(focused->read_fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
-      }
-    }
-    focused->pending_input.store(false, std::memory_order_release);
+    QueueFocusLossCancel(focused);
   }
 }
 
@@ -572,6 +603,7 @@ darwin_art::DarwinArtInputEnqueueResult EnqueueFocusedPacket(
             channel->packets.back().pointer.action ==
                 DARWIN_ART_POINTER_MOVE) {
           channel->packets.back() = packet;
+          channel->last_pointer = packet.pointer;
           channel->pending_input.store(true, std::memory_order_release);
           return darwin_art::DarwinArtInputEnqueueResult::kQueued;
         }
@@ -579,6 +611,15 @@ darwin_art::DarwinArtInputEnqueueResult EnqueueFocusedPacket(
       return darwin_art::DarwinArtInputEnqueueResult::kBackpressured;
     }
     channel->packets.push_back(packet);
+    if (packet.kind == darwin_art::DarwinArtInputPacketKind::kPointer) {
+      channel->last_pointer = packet.pointer;
+      if (packet.pointer.action == DARWIN_ART_POINTER_DOWN) {
+        channel->pointer_active = true;
+      } else if (packet.pointer.action == DARWIN_ART_POINTER_UP ||
+                 packet.pointer.action == DARWIN_ART_POINTER_CANCEL) {
+        channel->pointer_active = false;
+      }
+    }
   }
   channel->pending_input.store(true, std::memory_order_release);
   if (channel->write_fd >= 0) {

@@ -1342,3 +1342,20 @@ Native audit, AOSP Calculator/DeskClock acceptance, and Chrome tab-grid
 graphics acceptance (target states 10) pass after the lifetime change. The
 remaining gates are explicit focus-loss CANCEL delivery, outbound ACK retry,
 physical Chrome input timing, and only then enabling native batched consume.
+
+## 2026-09-02 scheduler-separation progress (focus-loss CANCEL)
+
+The channel now tracks the active pointer stream and its latest coordinates.
+When ViewRoot focus is cleared or ownership moves to another channel, queued
+stale packets are discarded and one Android `ACTION_CANCEL` is synthesized
+with the latest event time/coordinates and a monotonic sequence boundary. The
+cancel is queued on the old channel and wakes its registered Looper callback;
+if no fd consumer is registered, the ART owner loop remains the consumer.
+Pointer MOVE replacement updates the tracked coordinates as well, so a cancel
+after a saturated queue still describes the latest gesture state.
+
+`cargo fmt --all -- --check`, incremental graphics link audit, AOSP
+Calculator/DeskClock graphics acceptance, and Chromium tab-grid acceptance
+pass after this change. Native batched consume remains disabled. Outbound
+finish-ACK retry/overflow policy and physical Chrome click latency are still
+open validation gates; the synthetic acceptance does not measure the latter.
