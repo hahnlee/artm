@@ -1375,3 +1375,16 @@ rerun of Chromium tab-grid acceptance pass. One Chrome run showed the known
 startup-timing flake before the rerun passed (target states 9); no new runtime
 failure was observed. ACK overflow policy and physical Chrome latency remain
 open, and `nativeConsumeBatchedInputEvents` stays disabled.
+
+## 2026-09-02 scheduler-separation progress (physical-input measurement)
+
+An unmodified Chrome launch with all synthetic pointer variables unset reached
+the real `ChromeTabbedActivity` and spawned renderer/GPU service processes.
+The host remained on the normal AppKit event loop and emitted no pointer
+packets until an external click was supplied. The current automation session's
+`System Events` call was rejected with macOS error `-25211` (assistive access
+not granted to that caller), so no physical click latency sample can be
+claimed from this run. This is an environment permission boundary, not a
+runtime dispatch failure; the next measurement must use an accessibility-
+authorized caller or an in-app hardware event trace. Native batching remains
+disabled until that evidence and ACK overflow stress coverage exist.
