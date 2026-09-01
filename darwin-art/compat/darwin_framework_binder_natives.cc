@@ -667,7 +667,8 @@ int InputChannelTransportCallback(int fd, int events, void* data) {
   while (recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
   }
   // The token only wakes the owner Looper. The pending bit remains set until
-  // the host mailbox has delivered the corresponding framework event.
+  // the focused channel queue has delivered the corresponding framework
+  // packet.
   return 1;
 }
 
@@ -736,7 +737,7 @@ jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
   if (receiver->looper != nullptr && receiver->channel->read_fd >= 0) {
     // ALOOPER_EVENT_INPUT is the NDK value used by InputEventReceiver's
     // native transport. The callback drains only wake tokens; framework event
-    // payloads remain owned by the host mailbox and are dispatched in order.
+    // payloads remain owned by the channel queue and are dispatched in order.
     receiver->transport_registered =
         darwin_art_android_platform_add_fd(
             receiver->looper, receiver->channel->read_fd, 0, 0x0001,
