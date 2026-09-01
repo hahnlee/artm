@@ -66,7 +66,9 @@ int64_t MonotonicNanos() {
 // The finite budget is only a host safety bound; native registrations are
 // polled between Java messages, preserving Looper's message/native/message
 // ordering while draining startup bursts promptly.
-bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 64) {
+bool DispatchDueMainMessages(GraphicsState* state, JNIEnv* env,
+                             size_t limit = 64) {
+  if (state == nullptr || env == nullptr) return false;
   static bool logged_sync_barrier = false;
   static bool logged_native_poll_error = false;
   static bool initialized_debug_budget = false;
@@ -100,59 +102,83 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 64) {
                    "queue\n";
     }
   }
-  jclass looper_class = env->FindClass("android/os/Looper");
-  jclass queue_class = env->FindClass("android/os/MessageQueue");
-  jclass message_class = env->FindClass("android/os/Message");
-  jclass handler_class = env->FindClass("android/os/Handler");
-  jclass clock_class = env->FindClass("android/os/SystemClock");
-  jmethodID my_queue = looper_class == nullptr
-                           ? nullptr
-                           : env->GetStaticMethodID(
-                                 looper_class, "myQueue",
-                                 "()Landroid/os/MessageQueue;");
-  jmethodID queue_next = queue_class == nullptr
-                             ? nullptr
-                             : env->GetMethodID(queue_class, "next",
-                                                "()Landroid/os/Message;");
-  jfieldID queue_messages =
-      queue_class == nullptr
-          ? nullptr
-          : env->GetFieldID(queue_class, "mMessages", "Landroid/os/Message;");
-  jfieldID message_when = message_class == nullptr
-                              ? nullptr
-                              : env->GetFieldID(message_class, "when", "J");
-  jfieldID message_what = message_class == nullptr
-                              ? nullptr
-                              : env->GetFieldID(message_class, "what", "I");
-  jfieldID message_next =
-      message_class == nullptr
-          ? nullptr
-          : env->GetFieldID(message_class, "next", "Landroid/os/Message;");
-  jfieldID message_target =
-      message_class == nullptr
-          ? nullptr
-          : env->GetFieldID(message_class, "target", "Landroid/os/Handler;");
-  jfieldID message_callback =
-      message_class == nullptr
-          ? nullptr
-          : env->GetFieldID(message_class, "callback", "Ljava/lang/Runnable;");
-  jmethodID is_asynchronous =
-      message_class == nullptr
-          ? nullptr
-          : env->GetMethodID(message_class, "isAsynchronous", "()Z");
-  jmethodID recycle = message_class == nullptr
-                          ? nullptr
-                          : env->GetMethodID(message_class, "recycleUnchecked",
-                                             "()V");
-  jmethodID dispatch =
-      handler_class == nullptr
-          ? nullptr
-          : env->GetMethodID(handler_class, "dispatchMessage",
-                             "(Landroid/os/Message;)V");
-  jmethodID uptime_millis =
-      clock_class == nullptr
-          ? nullptr
-          : env->GetStaticMethodID(clock_class, "uptimeMillis", "()J");
+  auto& cache = state->main_looper;
+  if (cache.looper_class == nullptr) {
+    jclass looper = env->FindClass("android/os/Looper");
+    jclass queue = env->FindClass("android/os/MessageQueue");
+    jclass message = env->FindClass("android/os/Message");
+    jclass handler = env->FindClass("android/os/Handler");
+    jclass clock = env->FindClass("android/os/SystemClock");
+    if (env->ExceptionCheck() || looper == nullptr || queue == nullptr ||
+        message == nullptr || handler == nullptr || clock == nullptr) {
+      if (env->ExceptionCheck()) env->ExceptionClear();
+      if (looper != nullptr) env->DeleteLocalRef(looper);
+      if (queue != nullptr) env->DeleteLocalRef(queue);
+      if (message != nullptr) env->DeleteLocalRef(message);
+      if (handler != nullptr) env->DeleteLocalRef(handler);
+      if (clock != nullptr) env->DeleteLocalRef(clock);
+      return false;
+    }
+    cache.looper_class = static_cast<jclass>(env->NewGlobalRef(looper));
+    cache.queue_class = static_cast<jclass>(env->NewGlobalRef(queue));
+    cache.message_class = static_cast<jclass>(env->NewGlobalRef(message));
+    cache.handler_class = static_cast<jclass>(env->NewGlobalRef(handler));
+    cache.clock_class = static_cast<jclass>(env->NewGlobalRef(clock));
+    env->DeleteLocalRef(looper);
+    env->DeleteLocalRef(queue);
+    env->DeleteLocalRef(message);
+    env->DeleteLocalRef(handler);
+    env->DeleteLocalRef(clock);
+    if (cache.looper_class == nullptr || cache.queue_class == nullptr ||
+        cache.message_class == nullptr || cache.handler_class == nullptr ||
+        cache.clock_class == nullptr || env->ExceptionCheck()) {
+      if (env->ExceptionCheck()) env->ExceptionClear();
+      return false;
+    }
+    cache.my_queue = env->GetStaticMethodID(
+        cache.looper_class, "myQueue", "()Landroid/os/MessageQueue;");
+    cache.queue_next = env->GetMethodID(cache.queue_class, "next",
+                                        "()Landroid/os/Message;");
+    cache.queue_messages = env->GetFieldID(
+        cache.queue_class, "mMessages", "Landroid/os/Message;");
+    cache.message_when = env->GetFieldID(cache.message_class, "when", "J");
+    cache.message_what = env->GetFieldID(cache.message_class, "what", "I");
+    cache.message_next = env->GetFieldID(
+        cache.message_class, "next", "Landroid/os/Message;");
+    cache.message_target = env->GetFieldID(
+        cache.message_class, "target", "Landroid/os/Handler;");
+    cache.message_callback = env->GetFieldID(
+        cache.message_class, "callback", "Ljava/lang/Runnable;");
+    cache.is_asynchronous = env->GetMethodID(cache.message_class,
+                                             "isAsynchronous", "()Z");
+    cache.recycle = env->GetMethodID(cache.message_class, "recycleUnchecked",
+                                     "()V");
+    cache.dispatch = env->GetMethodID(cache.handler_class, "dispatchMessage",
+                                      "(Landroid/os/Message;)V");
+    cache.uptime_millis = env->GetStaticMethodID(cache.clock_class,
+                                                 "uptimeMillis", "()J");
+    if (env->ExceptionCheck()) {
+      env->ExceptionClear();
+      return false;
+    }
+  }
+  jclass looper_class = cache.looper_class;
+  jclass queue_class = cache.queue_class;
+  jclass message_class = cache.message_class;
+  jclass handler_class = cache.handler_class;
+  jclass clock_class = cache.clock_class;
+  jmethodID my_queue = cache.my_queue;
+  jmethodID queue_next = cache.queue_next;
+  jfieldID queue_messages = cache.queue_messages;
+  jfieldID message_when = cache.message_when;
+  jfieldID message_what = cache.message_what;
+  jfieldID message_next = cache.message_next;
+  jfieldID message_target = cache.message_target;
+  jfieldID message_callback = cache.message_callback;
+  jmethodID is_asynchronous = cache.is_asynchronous;
+  jmethodID recycle = cache.recycle;
+  jmethodID dispatch = cache.dispatch;
+  jmethodID uptime_millis = cache.uptime_millis;
   const bool resolved = my_queue != nullptr && queue_next != nullptr &&
                         queue_messages != nullptr && message_when != nullptr &&
                         message_what != nullptr && message_callback != nullptr &&
@@ -302,11 +328,6 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 64) {
     }
   }
   if (queue != nullptr) env->DeleteLocalRef(queue);
-  if (clock_class != nullptr) env->DeleteLocalRef(clock_class);
-  if (handler_class != nullptr) env->DeleteLocalRef(handler_class);
-  if (message_class != nullptr) env->DeleteLocalRef(message_class);
-  if (queue_class != nullptr) env->DeleteLocalRef(queue_class);
-  if (looper_class != nullptr) env->DeleteLocalRef(looper_class);
   if (ok && darwin_art_android_platform_poll_current_looper() < 0 &&
       !logged_native_poll_error) {
     logged_native_poll_error = true;
@@ -918,7 +939,7 @@ bool RefreshFocusedWindowRoot(GraphicsState* state, JNIEnv* env) {
   // packet. onFocusEvent posts ViewRootImpl's focus message, so drain that
   // owner-Looper work here before dispatching the event selected below.
   if (state->focused_view_root != nullptr && !env->ExceptionCheck() &&
-      !DispatchDueMainMessages(env)) {
+      !DispatchDueMainMessages(state, env)) {
     env->ExceptionClear();
   }
   if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
@@ -1883,7 +1904,7 @@ int32_t pump_main_looper(GraphicsState* state) {
   }
   art::ScopedObjectAccess soa(art_thread);
   JNIEnv* env = art_thread->GetJniEnv();
-  if (!DispatchDueMainMessages(env)) {
+  if (!DispatchDueMainMessages(state, env)) {
     if (env->ExceptionCheck() && art_thread->GetException() != nullptr) {
       std::cerr << "ART Android main Looper dispatch threw\n"
                 << art_thread->GetException()->Dump() << "\n";
@@ -1927,7 +1948,7 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
   };
   if (!sync_interactive_surface_size(state, env)) return 75;
   log_slow_frame_stage("sync_surface_size");
-  if (!DispatchDueMainMessages(env)) {
+  if (!DispatchDueMainMessages(state, env)) {
     if (env->ExceptionCheck()) {
       std::cerr << "ART Android main message dispatch threw\n"
                 << art_thread->GetException()->Dump() << "\n";

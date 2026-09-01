@@ -131,6 +131,18 @@ void begin_activity_transition(GraphicsState* state, JNIEnv* env) {
 
 void shutdown(GraphicsState* state, JNIEnv* env) {
   if (state == nullptr || env == nullptr) return;
+  auto clear_class = [env](jclass* reference) {
+    if (*reference != nullptr) {
+      env->DeleteGlobalRef(*reference);
+      *reference = nullptr;
+    }
+  };
+  clear_class(&state->main_looper.looper_class);
+  clear_class(&state->main_looper.queue_class);
+  clear_class(&state->main_looper.message_class);
+  clear_class(&state->main_looper.handler_class);
+  clear_class(&state->main_looper.clock_class);
+  state->main_looper = {};
   if (state->service_bridge_class != nullptr) {
     jmethodID shutdown_activities =
         env->GetStaticMethodID(state->service_bridge_class,

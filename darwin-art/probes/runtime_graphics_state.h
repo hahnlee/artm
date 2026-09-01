@@ -27,6 +27,25 @@ namespace darwin_art_graphics {
 // incremental graph treats this header as an ABI dependency of the session
 // allocator and every field-accessing translation unit.
 struct GraphicsState {
+  struct MainLooperCache {
+    jclass looper_class = nullptr;
+    jclass queue_class = nullptr;
+    jclass message_class = nullptr;
+    jclass handler_class = nullptr;
+    jclass clock_class = nullptr;
+    jmethodID my_queue = nullptr;
+    jmethodID queue_next = nullptr;
+    jfieldID queue_messages = nullptr;
+    jfieldID message_when = nullptr;
+    jfieldID message_what = nullptr;
+    jfieldID message_next = nullptr;
+    jfieldID message_target = nullptr;
+    jfieldID message_callback = nullptr;
+    jmethodID is_asynchronous = nullptr;
+    jmethodID recycle = nullptr;
+    jmethodID dispatch = nullptr;
+    jmethodID uptime_millis = nullptr;
+  } main_looper;
   jclass probe_canvas_class = nullptr;
   jclass service_bridge_class = nullptr;
   jobject interactive_root = nullptr;

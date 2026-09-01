@@ -753,3 +753,16 @@ watcher/task batch. Chrome acceptance passes with ten composed states and real
 tab-grid views, and Calculator/DeskClock remain green. Further improvement
 requires identifying the Chromium task-runner boundary inside that callback;
 the host scheduling split itself is now verified.
+
+## 2026-09-01 scheduler-separation progress (Looper JNI lookup cache)
+
+`DispatchDueMainMessages` now caches the five framework classes and their
+method/field IDs in the `GraphicsState` session and releases the global class
+references during shutdown. This removes repeated `FindClass`/
+`GetMethodID` work from every owner turn without changing queue ordering,
+sync-barrier handling, or callback affinity. After rebuilding, Chrome
+acceptance passes with real tab-grid views; timing is
+`looper avg=397us max=2127060us`, `graphics avg=393us max=6211us`.
+Calculator and DeskClock remain green. The long tail is unchanged and is
+therefore confirmed to be inside one native Chromium task batch, not JNI
+reflection or Metal scanout.
