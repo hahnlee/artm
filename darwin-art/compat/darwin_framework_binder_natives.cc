@@ -34,6 +34,7 @@ namespace {
 
 std::mutex g_context_binder_mutex;
 jobject g_context_binder = nullptr;
+JavaVM* g_framework_vm = nullptr;
 
 struct DarwinParcel {
   std::vector<uint8_t> data;
@@ -42,6 +43,8 @@ struct DarwinParcel {
   std::vector<jobject> binders;
   std::vector<int> file_descriptors;
 };
+
+struct DarwinInputReceiver;
 
 void ClearParcel(JNIEnv* env, DarwinParcel* parcel) {
   if (parcel == nullptr) return;
@@ -465,6 +468,8 @@ struct DarwinInputChannelState {
   };
   std::mutex finish_mutex;
   std::deque<FinishAck> finish_acks;
+  std::atomic<bool> looper_consumer{false};
+  std::atomic<DarwinInputReceiver*> consumer{nullptr};
   int read_fd = -1;
   int write_fd = -1;
 };
@@ -537,6 +542,29 @@ darwin_art::DarwinArtInputEnqueueResult EnqueueFocusedPacket(
   return darwin_art::DarwinArtInputEnqueueResult::kQueued;
 }
 
+bool DequeueChannelPacket(DarwinInputChannelState* channel,
+                          darwin_art::DarwinArtInputPacket* packet,
+                          darwin_art::DarwinArtInputPacketKind kind) {
+  if (channel == nullptr || packet == nullptr) return false;
+  std::lock_guard<std::mutex> lock(channel->packet_mutex);
+  if (channel->packets.empty() || channel->packets.front().kind != kind) {
+    return false;
+  }
+  *packet = channel->packets.front();
+  channel->packets.pop_front();
+  return true;
+}
+
+bool DequeueChannelPacketAny(DarwinInputChannelState* channel,
+                             darwin_art::DarwinArtInputPacket* packet) {
+  if (channel == nullptr || packet == nullptr) return false;
+  std::lock_guard<std::mutex> lock(channel->packet_mutex);
+  if (channel->packets.empty()) return false;
+  *packet = channel->packets.front();
+  channel->packets.pop_front();
+  return true;
+}
+
 bool DequeueFocusedPacket(darwin_art::DarwinArtInputPacket* packet,
                           darwin_art::DarwinArtInputPacketKind kind) {
   if (packet == nullptr) return false;
@@ -546,13 +574,8 @@ bool DequeueFocusedPacket(darwin_art::DarwinArtInputPacket* packet,
     channel = g_focused_input_channel.lock();
   }
   if (channel == nullptr) return false;
-  std::lock_guard<std::mutex> lock(channel->packet_mutex);
-  if (channel->packets.empty() || channel->packets.front().kind != kind) {
-    return false;
-  }
-  *packet = channel->packets.front();
-  channel->packets.pop_front();
-  return true;
+  if (channel->looper_consumer.load(std::memory_order_acquire)) return false;
+  return DequeueChannelPacket(channel.get(), packet, kind);
 }
 
 bool FocusedChannelHasPackets() {
@@ -584,6 +607,18 @@ void ClearFocusedInputChannelPending() {
     }
     channel->pending_input.store(false, std::memory_order_release);
   }
+}
+
+void ClearInputChannelPending(DarwinInputChannelState* channel) {
+  if (channel == nullptr) return;
+  std::lock_guard<std::mutex> packet_lock(channel->packet_mutex);
+  if (!channel->packets.empty()) return;
+  if (channel->read_fd >= 0) {
+    uint8_t buffer[64];
+    while (recv(channel->read_fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
+    }
+  }
+  channel->pending_input.store(false, std::memory_order_release);
 }
 
 struct DarwinInputChannel {
@@ -657,6 +692,7 @@ void InputChannelWriteParcel(JNIEnv*, jobject, jobject, jlong) {}
 
 struct DarwinInputReceiver {
   jobject weak_receiver = nullptr;
+  jobject view_root = nullptr;
   std::shared_ptr<DarwinInputChannelState> channel;
   jint next_sequence = 1;
   jint last_finished_sequence = 0;
@@ -667,6 +703,157 @@ struct DarwinInputReceiver {
   bool transport_registered = false;
 };
 
+// Build the same framework InputEvent objects used by the owner dispatch path.
+// The callback supplies the stored ViewRoot so focus, touch-mode, and finish
+// stages remain in ViewRootImpl rather than calling the receiver directly.
+jobject CreateChannelMotionEvent(JNIEnv* env,
+                                 const DarwinArtPointerEventV2& packet) {
+  if (env == nullptr) return nullptr;
+  jclass motion = env->FindClass("android/view/MotionEvent");
+  jclass properties = env->FindClass("android/view/MotionEvent$PointerProperties");
+  jclass coords = env->FindClass("android/view/MotionEvent$PointerCoords");
+  jmethodID properties_init = properties == nullptr
+                                  ? nullptr
+                                  : env->GetMethodID(properties, "<init>", "()V");
+  jmethodID coords_init = coords == nullptr
+                              ? nullptr
+                              : env->GetMethodID(coords, "<init>", "()V");
+  jfieldID id_field = properties == nullptr
+                          ? nullptr
+                          : env->GetFieldID(properties, "id", "I");
+  jfieldID tool_field = properties == nullptr
+                            ? nullptr
+                            : env->GetFieldID(properties, "toolType", "I");
+  jfieldID x_field = coords == nullptr ? nullptr : env->GetFieldID(coords, "x", "F");
+  jfieldID y_field = coords == nullptr ? nullptr : env->GetFieldID(coords, "y", "F");
+  jfieldID pressure_field =
+      coords == nullptr ? nullptr : env->GetFieldID(coords, "pressure", "F");
+  jfieldID size_field = coords == nullptr ? nullptr : env->GetFieldID(coords, "size", "F");
+  jmethodID obtain = motion == nullptr
+                        ? nullptr
+                        : env->GetStaticMethodID(
+                              motion, "obtain",
+                              "(JJII[Landroid/view/MotionEvent$PointerProperties;"
+                              "[Landroid/view/MotionEvent$PointerCoords;IIFFIIIII)"
+                              "Landroid/view/MotionEvent;");
+  if (obtain == nullptr || properties_init == nullptr || coords_init == nullptr ||
+      id_field == nullptr || tool_field == nullptr || x_field == nullptr ||
+      y_field == nullptr || pressure_field == nullptr || size_field == nullptr ||
+      env->ExceptionCheck()) {
+    env->ExceptionClear();
+    if (coords != nullptr) env->DeleteLocalRef(coords);
+    if (properties != nullptr) env->DeleteLocalRef(properties);
+    if (motion != nullptr) env->DeleteLocalRef(motion);
+    return nullptr;
+  }
+  jobject pointer = env->NewObject(properties, properties_init);
+  jobject point = env->NewObject(coords, coords_init);
+  jobjectArray pointer_array = env->NewObjectArray(1, properties, nullptr);
+  jobjectArray coords_array = env->NewObjectArray(1, coords, nullptr);
+  if (pointer == nullptr || point == nullptr || pointer_array == nullptr ||
+      coords_array == nullptr || env->ExceptionCheck()) {
+    env->ExceptionClear();
+    if (coords_array != nullptr) env->DeleteLocalRef(coords_array);
+    if (pointer_array != nullptr) env->DeleteLocalRef(pointer_array);
+    if (point != nullptr) env->DeleteLocalRef(point);
+    if (pointer != nullptr) env->DeleteLocalRef(pointer);
+    env->DeleteLocalRef(coords);
+    env->DeleteLocalRef(properties);
+    env->DeleteLocalRef(motion);
+    return nullptr;
+  }
+  env->SetIntField(pointer, id_field, 0);
+  env->SetIntField(pointer, tool_field, 1);
+  env->SetFloatField(point, x_field, packet.x);
+  env->SetFloatField(point, y_field, packet.y);
+  env->SetFloatField(point, pressure_field,
+                     packet.action == DARWIN_ART_POINTER_UP ||
+                             packet.action == DARWIN_ART_POINTER_CANCEL
+                         ? 0.0f
+                         : 1.0f);
+  env->SetFloatField(point, size_field, 1.0f);
+  env->SetObjectArrayElement(pointer_array, 0, pointer);
+  env->SetObjectArrayElement(coords_array, 0, point);
+  const uint64_t event_nanos = packet.event_time_nanos;
+  const uint64_t down_nanos = packet.down_time_nanos == 0
+                                  ? event_nanos
+                                  : packet.down_time_nanos;
+  jobject event = env->CallStaticObjectMethod(
+      motion, obtain, static_cast<jlong>(down_nanos / 1000000ULL),
+      static_cast<jlong>(event_nanos / 1000000ULL),
+      static_cast<jint>(packet.action), 1, pointer_array, coords_array, 0, 0,
+      1.0f, 1.0f, 0, 0x1002, 0, 0, 0);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(event);
+    event = nullptr;
+  }
+  env->DeleteLocalRef(coords_array);
+  env->DeleteLocalRef(pointer_array);
+  env->DeleteLocalRef(point);
+  env->DeleteLocalRef(pointer);
+  env->DeleteLocalRef(coords);
+  env->DeleteLocalRef(properties);
+  env->DeleteLocalRef(motion);
+  return event;
+}
+
+jobject CreateChannelKeyEvent(JNIEnv* env, const DarwinArtKeyEventV1& packet) {
+  if (env == nullptr) return nullptr;
+  jclass key = env->FindClass("android/view/KeyEvent");
+  jmethodID init = key == nullptr
+                       ? nullptr
+                       : env->GetMethodID(key, "<init>", "(JJIIIIIIII)V");
+  if (init == nullptr || env->ExceptionCheck()) {
+    env->ExceptionClear();
+    if (key != nullptr) env->DeleteLocalRef(key);
+    return nullptr;
+  }
+  const uint64_t event_nanos = packet.event_time_nanos;
+  const uint64_t down_nanos = packet.down_time_nanos == 0
+                                  ? event_nanos
+                                  : packet.down_time_nanos;
+  jobject event = env->NewObject(
+      key, init, static_cast<jlong>(down_nanos / 1000000ULL),
+      static_cast<jlong>(event_nanos / 1000000ULL),
+      static_cast<jint>(packet.action), static_cast<jint>(packet.key_code),
+      static_cast<jint>(packet.repeat_count), static_cast<jint>(packet.meta_state),
+      static_cast<jint>(packet.device_id), static_cast<jint>(packet.scan_code),
+      static_cast<jint>(packet.flags), static_cast<jint>(packet.source));
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    env->DeleteLocalRef(event);
+    event = nullptr;
+  }
+  env->DeleteLocalRef(key);
+  return event;
+}
+
+bool DispatchChannelPacket(JNIEnv* env, DarwinInputReceiver* receiver,
+                           const darwin_art::DarwinArtInputPacket& packet) {
+  if (env == nullptr || receiver == nullptr || receiver->view_root == nullptr)
+    return false;
+  jobject event = packet.kind == darwin_art::DarwinArtInputPacketKind::kPointer
+                      ? CreateChannelMotionEvent(env, packet.pointer)
+                      : CreateChannelKeyEvent(env, packet.key);
+  if (event == nullptr) return false;
+  bool handled = false;
+  const bool delivered = darwin_art::DispatchFrameworkInputEvent(
+      env, receiver->view_root, event, &handled);
+  if (packet.kind == darwin_art::DarwinArtInputPacketKind::kPointer) {
+    jclass motion = env->FindClass("android/view/MotionEvent");
+    jmethodID recycle = motion == nullptr
+                            ? nullptr
+                            : env->GetMethodID(motion, "recycle", "()V");
+    if (recycle != nullptr && !env->ExceptionCheck())
+      env->CallVoidMethod(event, recycle);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (motion != nullptr) env->DeleteLocalRef(motion);
+  }
+  env->DeleteLocalRef(event);
+  return delivered;
+}
+
 int InputChannelTransportCallback(int fd, int events, void* data) {
   (void)events;
   auto* channel = static_cast<DarwinInputChannelState*>(data);
@@ -674,9 +861,36 @@ int InputChannelTransportCallback(int fd, int events, void* data) {
   uint8_t buffer[64];
   while (recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
   }
-  // The token only wakes the owner Looper. The pending bit remains set until
-  // the focused channel queue has delivered the corresponding framework
-  // packet.
+  DarwinInputReceiver* receiver = channel->consumer.load(std::memory_order_acquire);
+  JNIEnv* env = nullptr;
+  if (receiver == nullptr || receiver->view_root == nullptr ||
+      g_framework_vm == nullptr ||
+      g_framework_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) !=
+          JNI_OK || env == nullptr) {
+    return 1;
+  }
+  constexpr size_t kMaxPacketsPerCallback = 64;
+  size_t consumed = 0;
+  darwin_art::DarwinArtInputPacket packet;
+  while (consumed < kMaxPacketsPerCallback &&
+         DequeueChannelPacketAny(channel, &packet)) {
+    if (!DispatchChannelPacket(env, receiver, packet)) {
+      // Keep a failed payload queued for the next owner turn. This avoids
+      // losing a boundary event when ViewRoot is being attached or a
+      // transient Java exception interrupts dispatch.
+      std::lock_guard<std::mutex> lock(channel->packet_mutex);
+      channel->packets.push_front(packet);
+      break;
+    }
+    ++consumed;
+  }
+  if (consumed > 0) ClearInputChannelPending(channel);
+  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android InputChannel callback consumed=" << consumed
+              << " pending="
+              << (channel->pending_input.load(std::memory_order_acquire) ? 1 : 0)
+              << "\n";
+  }
   return 1;
 }
 
@@ -687,6 +901,10 @@ void InputReceiverDispose(JNIEnv* env, jclass, jlong pointer) {
   auto* receiver = reinterpret_cast<DarwinInputReceiver*>(
       static_cast<std::uintptr_t>(pointer));
   if (receiver == nullptr) return;
+  if (receiver->channel != nullptr) {
+    receiver->channel->consumer.store(nullptr, std::memory_order_release);
+    receiver->channel->looper_consumer.store(false, std::memory_order_release);
+  }
   if (receiver->transport_registered && receiver->looper != nullptr &&
       receiver->channel != nullptr && receiver->channel->read_fd >= 0) {
     (void)darwin_art_android_platform_remove_fd(
@@ -694,6 +912,9 @@ void InputReceiverDispose(JNIEnv* env, jclass, jlong pointer) {
   }
   if (receiver->weak_receiver != nullptr) {
     env->DeleteGlobalRef(receiver->weak_receiver);
+  }
+  if (receiver->view_root != nullptr) {
+    env->DeleteGlobalRef(receiver->view_root);
   }
   delete receiver;
 }
@@ -761,8 +982,8 @@ jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
     return 0;
   }
   auto* receiver = new (std::nothrow) DarwinInputReceiver{
-      env->NewGlobalRef(weak_receiver), channel->state, 1, 0, false, false,
-      false};
+      env->NewGlobalRef(weak_receiver), nullptr, channel->state, 1, 0, false,
+      false, false, nullptr, false};
   if (receiver == nullptr || receiver->weak_receiver == nullptr) {
     delete receiver;
     return 0;
@@ -776,6 +997,10 @@ jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
         darwin_art_android_platform_add_fd(
             receiver->looper, receiver->channel->read_fd, 0, 0x0001,
             &InputChannelTransportCallback, receiver->channel.get()) == 1;
+    if (receiver->transport_registered) {
+      receiver->channel->consumer.store(receiver, std::memory_order_release);
+      receiver->channel->looper_consumer.store(true, std::memory_order_release);
+    }
   }
   return static_cast<jlong>(
       reinterpret_cast<std::uintptr_t>(receiver));
@@ -2160,6 +2385,13 @@ bool SetFrameworkViewRootFocus(JNIEnv* env, jobject view_root, bool focused) {
   // ViewRootImpl.windowFocusChanged(), which posts MSG_WINDOW_FOCUS_CHANGED to
   // the main queue. Do not invoke ViewRootImpl a second time here; the owner
   // Looper drains the posted message before host input is admitted.
+  if (receiver != nullptr && receiver->view_root == nullptr &&
+      !env->ExceptionCheck()) {
+    // The fd callback is registered before the host has a ViewRoot reference.
+    // Capture it at the same focus boundary that selects the channel so a
+    // future receiver-owned consumer can re-enter the complete ViewRoot path.
+    receiver->view_root = env->NewGlobalRef(view_root);
+  }
   const bool changed = target != nullptr && focus != nullptr &&
                        (!focused || touch_mode != nullptr) &&
                        !env->ExceptionCheck();
@@ -2310,6 +2542,10 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
 }
 
 bool RegisterFrameworkBinderNatives(JNIEnv* env) {
+  if (env == nullptr || env->GetJavaVM(&g_framework_vm) != JNI_OK ||
+      g_framework_vm == nullptr) {
+    return false;
+  }
   JNINativeMethod parcel_methods[] = {
       {const_cast<char*>("nativeMarkSensitive"), const_cast<char*>("(J)V"),
        reinterpret_cast<void*>(&ParcelMarkSensitive)},

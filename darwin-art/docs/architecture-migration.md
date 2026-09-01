@@ -1292,3 +1292,21 @@ graphics acceptance passed with 10 target states on a subsequent run (the
 first run was startup-timing flaky). The next implementation must route the
 receiver-owned callback through ViewRoot-equivalent dispatch state before
 disabling the Rust channel drain; physical Chrome latency is still unmeasured.
+
+## 2026-09-02 scheduler-separation progress (ViewRoot-preserving channel consumer)
+
+The channel transport now records the receiver's ViewRoot at the focus
+boundary and installs a receiver-owned Looper consumer after fd registration.
+The callback drains channel payloads on the ART owner thread, constructs the
+Android MotionEvent/KeyEvent, and re-enters `DispatchFrameworkInputEvent()` so
+ViewRoot focus, touch-mode, and finish ACK stages are preserved. The Rust
+surface dequeue yields while this consumer is active; failed dispatch pushes
+the packet back to the channel head instead of dropping it.
+
+Native link audit, AOSP Calculator/DeskClock acceptance, and Chrome tab-grid
+graphics acceptance passed after the change (Chrome target states 9). A manual
+physical launch reached the app process but hit the existing remote Binder
+`INTERFACE_TRANSACTION` rejection before a click could be injected, so the
+physical latency percentile is still an open validation gate. `nativeConsume-
+BatchedInputEvents` and MOVE batching remain disabled until this path has
+physical-input evidence and robust focus/dispose stress coverage.
