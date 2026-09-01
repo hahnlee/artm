@@ -1097,3 +1097,14 @@ input, the display clock, and Metal HWC scanout remain independent. This
 prevents callback bursts from adding extra backpressure, but cannot interrupt
 one guest callback already running on the Android owner. Clean Chrome
 acceptance after rebuilding the native dylib passed with ten target states.
+
+## 2026-09-02 scheduler-separation progress (Chromium callback identity)
+
+The callback address was matched against the packaged `libchrome.so`: it is
+the `NativeChildProcessService` ALooper thunk, which dispatches through the
+service object's vtable after registering the child-process pipe. The 0.4 s
+and 2.0 s samples therefore represent Chromium service work, not a runtime
+poll or Metal operation. The runtime preserves this callback's registering
+thread and only bounds how many callbacks a host turn may start; any further
+latency reduction must come from a cooperative boundary inside Chromium's
+MessagePump/service implementation rather than from unsafe runtime migration.
