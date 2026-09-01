@@ -1606,3 +1606,12 @@ the change (`target-states=10`, handled MotionEvent packets). Physical input
 percentiles under sustained load remain the final input-side measurement; the
 existing synthetic acceptance confirms functional delivery but is not that
 measurement.
+
+## 2026-09-02 scheduler-separation progress (custom-view regression)
+
+The SolitaireCG acceptance was rerun after the completion-generation gate and
+InputChannel callback rearm. Its real `SolitaireView` received a consumed
+DOWN plus drag MOVE packets through the InputChannel path, with no native or
+Java crash. This keeps a non-Chromium custom View interaction in the
+regression set while the remaining physical-ingress percentile measurement is
+collected separately.
