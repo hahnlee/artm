@@ -1706,6 +1706,16 @@ p95=26.8 ms and DeskClock p50=857 us, p95=331.6 ms. The DeskClock tail is a
 guest/UI transition bucket rather than scanout queue growth; scanout remains
 coalesced independently while the Android owner completes its Looper work.
 
+The official Chromium acceptance was then run with the same telemetry enabled
+(`run.V08MPT`). During the interaction phase the host recorded
+`requests=4,260`, `fence_gated=45`, `coalesced=3,905`, and `present_calls=2,814`;
+the bounded AppKit consumer therefore collapsed most 60 Hz requests while the
+renderer/child-surface graph remained active. Its mixed cold/warm
+`input->framework-pulse` sample was p50=9.15 ms and p95=2.223 s, matching the
+previously-attributed cold Chromium owner callback tail rather than scanout
+backpressure. The complete APK acceptance still passed all HTTPS, tabs,
+renderer/GPU, Binder-FD, WebGL, and media gates.
+
 ## 2026-09-02 scheduler-separation progress (physical input permission probe)
 
 A longer-lived Calculator window was started without synthetic pointer
