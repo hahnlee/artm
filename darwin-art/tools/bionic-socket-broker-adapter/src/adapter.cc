@@ -132,17 +132,31 @@ struct DnsQueryState {
   bool cancelled = false;
 };
 
+// Darwin has no eventfd primitive.  The host descriptor pair is only a
+// readiness transport; Android's counter semantics live here so repeated
+// writes coalesce into one readiness token and a read observes the complete
+// counter (or one for EFD_SEMAPHORE).
+struct EventFdState {
+  std::mutex mutex;
+  uint64_t counter = 0;
+  bool semaphore = false;
+  bool signaled = false;
+  int signal_fd = -1;
+};
+
 struct HostFdObject {
   explicit HostFdObject(int host_fd, int host_peer_fd = -1,
                         std::shared_ptr<TimerState> timer_state = nullptr,
-                        std::shared_ptr<DnsQueryState> dns_state = nullptr)
+                        std::shared_ptr<DnsQueryState> dns_state = nullptr,
+                        std::shared_ptr<EventFdState> event_state = nullptr)
       : fd(host_fd), peer_fd(host_peer_fd), timer(std::move(timer_state)),
-        dns(std::move(dns_state)) {}
+        dns(std::move(dns_state)), event(std::move(event_state)) {}
 
   int fd = -1;
   int peer_fd = -1;
   std::shared_ptr<TimerState> timer;
   std::shared_ptr<DnsQueryState> dns;
+  std::shared_ptr<EventFdState> event;
   std::atomic<bool> pass_credentials{false};
 };
 
@@ -641,9 +655,83 @@ bool TranslateOption(int android_level, int android_option, int *host_level,
   return false;
 }
 
+bool EnsureEventFdSignaled(const std::shared_ptr<EventFdState> &state) {
+  if (state == nullptr) return true;
+  std::lock_guard lock(state->mutex);
+  if (state->counter == 0 || state->signaled) return true;
+  const uint64_t token = 1;
+  const ssize_t result = send(state->signal_fd, &token, sizeof(token),
+                              MSG_DONTWAIT);
+  if (result == sizeof(token)) {
+    state->signaled = true;
+    return true;
+  }
+  return result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
+}
+
+intptr_t EventFdRead(HostFdObject *descriptor, void *bytes, size_t count,
+                     int *android_errno) {
+  if (count < sizeof(uint64_t) || bytes == nullptr) {
+    *android_errno = 22;
+    return -1;
+  }
+  auto state = descriptor->event;
+  std::lock_guard lock(state->mutex);
+  if (state->counter == 0) {
+    *android_errno = 11;
+    return -1;
+  }
+  uint64_t token = 0;
+  (void)recv(descriptor->fd, &token, sizeof(token), MSG_DONTWAIT);
+  state->signaled = false;
+  const uint64_t value = state->semaphore ? 1 : state->counter;
+  state->counter -= value;
+  std::memcpy(bytes, &value, sizeof(value));
+  if (state->counter != 0) {
+    const uint64_t next_token = 1;
+    const ssize_t result = send(state->signal_fd, &next_token,
+                                sizeof(next_token), MSG_DONTWAIT);
+    if (result == sizeof(next_token)) state->signaled = true;
+  }
+  *android_errno = 0;
+  return sizeof(uint64_t);
+}
+
+intptr_t EventFdWrite(HostFdObject *descriptor, const void *bytes, size_t count,
+                      int *android_errno) {
+  if (count != sizeof(uint64_t) || bytes == nullptr) {
+    *android_errno = 22;
+    return -1;
+  }
+  uint64_t value = 0;
+  std::memcpy(&value, bytes, sizeof(value));
+  if (value == UINT64_MAX) {
+    *android_errno = 22;
+    return -1;
+  }
+  auto state = descriptor->event;
+  std::lock_guard lock(state->mutex);
+  if (value > UINT64_MAX - state->counter) {
+    *android_errno = 11;
+    return -1;
+  }
+  const bool was_empty = state->counter == 0;
+  state->counter += value;
+  if (was_empty && value != 0 && !state->signaled) {
+    const uint64_t token = 1;
+    const ssize_t result = send(state->signal_fd, &token, sizeof(token),
+                                MSG_DONTWAIT);
+    if (result == sizeof(token)) state->signaled = true;
+  }
+  *android_errno = 0;
+  return sizeof(uint64_t);
+}
+
 intptr_t OwnerRead(void *, uint64_t object, void *bytes, size_t count,
                    int *android_errno) {
   auto *socket = reinterpret_cast<HostFdObject *>(object);
+  if (socket->event != nullptr)
+    return EventFdRead(socket, bytes, count, android_errno);
   const auto started = std::chrono::steady_clock::now();
   const int status_flags = fcntl(socket->fd, F_GETFL);
   const ssize_t result = recv(socket->fd, bytes, count, 0);
@@ -677,6 +765,8 @@ intptr_t OwnerRead(void *, uint64_t object, void *bytes, size_t count,
 intptr_t OwnerWrite(void *, uint64_t object, const void *bytes, size_t count,
                     int *android_errno) {
   auto *socket = reinterpret_cast<HostFdObject *>(object);
+  if (socket->event != nullptr)
+    return EventFdWrite(socket, bytes, count, android_errno);
   const ssize_t result = send(socket->fd, bytes, count, 0);
   if (SocketDebugEnabled()) {
     uint32_t control = 0;
@@ -696,6 +786,7 @@ intptr_t OwnerWrite(void *, uint64_t object, const void *bytes, size_t count,
 int OwnerPoll(void *, uint64_t object, int16_t events, int16_t *revents,
               int *android_errno) {
   auto *socket = reinterpret_cast<HostFdObject *>(object);
+  (void)EnsureEventFdSignaled(socket->event);
   pollfd descriptor{socket->fd, events, 0};
   const int result = poll(&descriptor, 1, 0);
   if (result < 0) {
@@ -729,6 +820,7 @@ int OwnerPollMany(void *, const uint64_t *objects, const int16_t *events,
   std::vector<pollfd> descriptors(count);
   for (size_t index = 0; index < count; ++index) {
     const auto *object = reinterpret_cast<const HostFdObject *>(objects[index]);
+    (void)EnsureEventFdSignaled(object->event);
     descriptors[index] = pollfd{object->fd, events[index], 0};
   }
   const int result =
@@ -827,6 +919,7 @@ int OwnerPollManyWithWake(void *, const uint64_t *objects,
   std::vector<pollfd> descriptors(count + 1);
   for (size_t index = 0; index < count; ++index) {
     const auto *object = reinterpret_cast<const HostFdObject *>(objects[index]);
+    (void)EnsureEventFdSignaled(object->event);
     descriptors[index] = pollfd{object->fd, events[index], 0};
   }
   descriptors[count] = pollfd{wake->read_fd, POLLIN, 0};
@@ -876,6 +969,8 @@ int OwnerSetStatusFlags(void *, uint64_t object, int flags,
 intptr_t PipeOwnerRead(void *, uint64_t object, void *bytes, size_t count,
                        int *android_errno) {
   auto *pipe = reinterpret_cast<HostFdObject *>(object);
+  if (pipe->event != nullptr)
+    return EventFdRead(pipe, bytes, count, android_errno);
   const auto started = std::chrono::steady_clock::now();
   const int status_flags = fcntl(pipe->fd, F_GETFL);
   const ssize_t result = read(pipe->fd, bytes, count);
@@ -898,6 +993,8 @@ intptr_t PipeOwnerRead(void *, uint64_t object, void *bytes, size_t count,
 intptr_t PipeOwnerWrite(void *, uint64_t object, const void *bytes,
                         size_t count, int *android_errno) {
   auto *pipe = reinterpret_cast<HostFdObject *>(object);
+  if (pipe->event != nullptr)
+    return EventFdWrite(pipe, bytes, count, android_errno);
   const ssize_t result =
       write(pipe->peer_fd >= 0 ? pipe->peer_fd : pipe->fd, bytes, count);
   *android_errno = result < 0 ? AndroidErrno(errno) : 0;
@@ -1097,6 +1194,12 @@ extern "C" int darwin_art_bionic_socket_broker_ioctl_dispatch(
 int OwnerClose(void *context, uint64_t object, int *android_errno) {
   auto *process = static_cast<Process *>(context);
   auto *socket = reinterpret_cast<HostFdObject *>(object);
+  if (socket->event != nullptr) {
+    std::lock_guard lock(socket->event->mutex);
+    socket->event->counter = 0;
+    socket->event->signaled = false;
+    socket->event->signal_fd = -1;
+  }
   if (socket->timer != nullptr) {
     std::lock_guard lock(socket->timer->mutex);
     socket->timer->closing = true;
@@ -1835,22 +1938,18 @@ extern "C" int darwin_art_bionic_socket_broker_eventfd(uint32_t initial_value,
     (void)close(host[1]);
     return Fail(error, -1);
   }
-  auto *object = new (std::nothrow) HostFdObject{host[0], host[1]};
+  auto event = std::make_shared<EventFdState>();
+  event->counter = initial_value;
+  event->semaphore = (flags & 1) != 0;
+  event->signal_fd = host[1];
+  auto *object = new (std::nothrow)
+      HostFdObject{host[0], host[1], nullptr, nullptr, event};
   if (object == nullptr) {
     (void)close(host[0]);
     (void)close(host[1]);
     return Fail(12, -1);
   }
-  if (initial_value != 0) {
-    const uint64_t value = initial_value;
-    if (write(host[1], &value, sizeof(value)) != sizeof(value)) {
-      const int error = AndroidErrno(errno);
-      delete object;
-      (void)close(host[0]);
-      (void)close(host[1]);
-      return Fail(error, -1);
-    }
-  }
+  (void)EnsureEventFdSignaled(event);
   process->objects.fetch_add(1, std::memory_order_release);
   int guest_fd = -1;
   const auto status = darwin_art_fd_broker_publish_with_flags(

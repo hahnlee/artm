@@ -302,6 +302,39 @@ int main(int argc, char **argv) {
         "eventfd readiness through epoll");
   Check(darwin_art_bionic_socket_broker_live_objects() == 0,
         "all central socket objects closed");
+  const int counter_fd =
+      darwin_art_bionic_socket_broker_eventfd(0, 0x800);
+  uint64_t one = 1;
+  uint64_t two = 2;
+  uint64_t counter_value = 0;
+  Check(counter_fd >= 0 &&
+            darwin_art_bionic_socket_broker_write(counter_fd, &one,
+                                                  sizeof(one)) == sizeof(one) &&
+            darwin_art_bionic_socket_broker_write(counter_fd, &two,
+                                                  sizeof(two)) == sizeof(two) &&
+            darwin_art_bionic_socket_broker_read(counter_fd, &counter_value,
+                                                 sizeof(counter_value)) ==
+                sizeof(counter_value) &&
+            counter_value == 3 &&
+            darwin_art_bionic_socket_broker_read(counter_fd, &counter_value,
+                                                 sizeof(counter_value)) == -1 &&
+            darwin_art_bionic_socket_broker_close(counter_fd) == 0,
+        "eventfd counter coalesces writes and drains once");
+  const int semaphore_fd =
+      darwin_art_bionic_socket_broker_eventfd(2, 0x801);
+  Check(semaphore_fd >= 0 &&
+            darwin_art_bionic_socket_broker_read(semaphore_fd, &counter_value,
+                                                 sizeof(counter_value)) ==
+                sizeof(counter_value) &&
+            counter_value == 1 &&
+            darwin_art_bionic_socket_broker_read(semaphore_fd, &counter_value,
+                                                 sizeof(counter_value)) ==
+                sizeof(counter_value) &&
+            counter_value == 1 &&
+            darwin_art_bionic_socket_broker_read(semaphore_fd, &counter_value,
+                                                 sizeof(counter_value)) == -1 &&
+            darwin_art_bionic_socket_broker_close(semaphore_fd) == 0,
+        "eventfd semaphore returns one per read");
   Check(darwin_art_bionic_socket_broker_close(123) == -1,
         "generic close fell back to filesystem owner");
   Check(g_filesystem_closes.load(std::memory_order_relaxed) == 2,

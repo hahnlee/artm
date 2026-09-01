@@ -799,3 +799,23 @@ generic helper would violate Android callback ordering and TLS/Looper
 semantics. The next implementation boundary is consequently Chromium's
 native message-pump/task-runner (or a proven non-UI process registration),
 with Calculator, DeskClock, and Chrome acceptance as the regression gate.
+
+## 2026-09-01 scheduler-separation progress (eventfd counter semantics)
+
+The Bionic socket broker now models eventfd state explicitly instead of using
+the datagram queue as the counter. Each descriptor owns a 64-bit counter and a
+single readiness token: writes accumulate (with overflow and zero-write
+validation), ordinary reads return and clear the accumulated value, and
+`EFD_SEMAPHORE` reads decrement by one. Poll paths re-arm the token only while
+the counter remains nonzero. This preserves the Android eventfd contract while
+preventing one wake write per packet from artificially extending a Chromium
+native watcher turn.
+
+The broker probe now covers accumulated writes and semaphore reads and passes
+under ASan/UBSan/TSan. A rebuilt graphics link audit and the AOSP
+Calculator/DeskClock acceptance pass. Chromium's first run missed the real
+tab-grid card (the test is known to be timing-sensitive); the immediate retry
+passed with real `MotionEvent` input, GPU child surfaces, and nine composed
+target states. The remaining long-tail measurement must be repeated with the
+callback-vtable probe enabled to determine whether a single callback body is
+still multi-second after wake coalescing.
