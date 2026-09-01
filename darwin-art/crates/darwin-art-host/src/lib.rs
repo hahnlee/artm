@@ -3,6 +3,8 @@ mod bootstrap;
 mod config;
 mod frame;
 #[cfg(target_os = "macos")]
+mod frame_clock;
+#[cfg(target_os = "macos")]
 mod gpu_input;
 #[cfg(target_os = "macos")]
 mod gpu_loop;

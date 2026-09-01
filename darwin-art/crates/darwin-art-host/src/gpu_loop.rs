@@ -1,4 +1,5 @@
 use crate::config::{HostError, HostOutcome, RunOptions};
+use crate::frame_clock::FrameClock;
 use crate::gpu_input::{
     dispatch_queued_events, dispatch_synthetic_keys, pulse_frame_with_latency,
     pump_frame_with_latency, pump_main_looper,
@@ -17,6 +18,7 @@ pub(super) fn run(
     options: &RunOptions,
     graphics_attached: bool,
 ) -> Result<HostOutcome, HostError> {
+    let frame_clock = FrameClock::start();
     if runtime.surface().is_none() {
         return Err(HostError::SurfaceFailed {
             operation: "gpu_active_surface",
@@ -274,8 +276,6 @@ pub(super) fn run(
     if loop_error.is_none()
         && let Some(sequence) = test_tap_sequence.as_ref()
     {
-        let display_interval = Duration::from_nanos(16_666_667);
-        let mut next_vsync = Instant::now();
         for &(x, y, delay_ms) in sequence.iter().skip(1) {
             let wait_started = Instant::now();
             while wait_started.elapsed() < Duration::from_millis(delay_ms) && loop_error.is_none() {
@@ -302,8 +302,7 @@ pub(super) fn run(
                     loop_error = Some(error);
                     break;
                 }
-                let now = Instant::now();
-                if now >= next_vsync {
+                if frame_clock.take_latest().is_some() {
                     if let Err(error) = pulse_frame_with_latency(
                         runtime,
                         debug_latency,
@@ -312,10 +311,6 @@ pub(super) fn run(
                     ) {
                         loop_error = Some(error);
                         break;
-                    }
-                    next_vsync += display_interval;
-                    while next_vsync <= now {
-                        next_vsync += display_interval;
                     }
                 }
             }
@@ -380,8 +375,6 @@ pub(super) fn run(
     if loop_error.is_none() && pointer_sequence_post_delay_ms > 0 {
         let delay = Duration::from_millis(pointer_sequence_post_delay_ms);
         let wait_started = Instant::now();
-        let display_interval = Duration::from_nanos(16_666_667);
-        let mut next_vsync = Instant::now();
         while wait_started.elapsed() < delay && loop_error.is_none() {
             let remaining = delay.saturating_sub(wait_started.elapsed());
             let slice_ms = remaining.as_millis().min(2).max(1) as u64;
@@ -401,8 +394,7 @@ pub(super) fn run(
                 loop_error = Some(error);
                 break;
             }
-            let now = Instant::now();
-            if now >= next_vsync {
+            if frame_clock.take_latest().is_some() {
                 if let Err(error) = pulse_frame_with_latency(
                     runtime,
                     debug_latency,
@@ -411,10 +403,6 @@ pub(super) fn run(
                 ) {
                     loop_error = Some(error);
                     break;
-                }
-                next_vsync += display_interval;
-                while next_vsync <= now {
-                    next_vsync += display_interval;
                 }
             }
         }
@@ -628,8 +616,6 @@ pub(super) fn run(
     // not process launch. This lets an Android click finish creating its
     // popup ViewRoot before the acceptance resize exercises every live root.
     let test_resize_clock = Instant::now();
-    let display_interval = Duration::from_nanos(16_666_667);
-    let mut next_vsync = Instant::now();
     while Instant::now() < visible_deadline && !crate::process_signal::termination_requested() {
         if loop_error.is_none()
             && let (Some((width, height)), Some(after_ms)) =
@@ -684,8 +670,7 @@ pub(super) fn run(
         {
             loop_error = Some(error);
         }
-        let now = Instant::now();
-        if loop_error.is_none() && now >= next_vsync {
+        if loop_error.is_none() && frame_clock.take_latest().is_some() {
             if let Err(error) = pulse_frame_with_latency(
                 runtime,
                 debug_latency,
@@ -693,10 +678,6 @@ pub(super) fn run(
                 &mut frame_latencies_us,
             ) {
                 loop_error = Some(error);
-            }
-            next_vsync += display_interval;
-            while next_vsync <= now {
-                next_vsync += display_interval;
             }
         }
         // The standalone capture gate has no Android ViewRoot to
