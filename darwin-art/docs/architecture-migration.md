@@ -1777,3 +1777,14 @@ display scheduler change does not invalidate or rebuild the native provider
 graph. The active follow-up remains real physical-ingress measurement and a
 multi-surface display policy review; neither is required to route the current
 single-host APK acceptance path.
+
+## 2026-09-02 scheduler-separation progress (concurrent host surfaces)
+
+Calculator and DeskClock were launched concurrently as two independent ART
+host processes. Both completed successfully, published visible buffers, and
+advanced their own SurfaceFlinger completion generations and Metal scanout
+statistics; their host PIDs and surface pointers remained distinct throughout
+the run. This confirms that active-surface publication is process-scoped and
+does not cross-talk between concurrently running APKs. A single host still
+uses one display surface by design; in-process multi-window composition is a
+separate policy layer rather than a scheduler ownership race.
