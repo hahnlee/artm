@@ -962,3 +962,20 @@ acceptance also passed with ten composed target states and
 `looper max=2.179 s`, `graphics max=289 us`, input-to-pulse `p50=37 ms`.
 The remaining multi-second sample is the known single Chromium native
 callback body, which cannot be preempted safely by the compatibility layer.
+
+## 2026-09-02 scheduler-separation progress (physical ingress telemetry)
+
+The v2 pointer and physical-key dispatch paths now report
+`ingress_latency_us` when `DARWIN_ART_DEBUG_INPUT_LATENCY=1` is enabled. The
+value is computed from the AppKit-produced Android uptime timestamp to the
+owner-thread dispatch boundary, while the existing host-side
+input-to-framework-pulse metric continues to cover the dispatch-to-vsync
+handoff. Synthetic packets intentionally carry a zero timestamp and are not
+included in this ingress metric, keeping physical and acceptance evidence
+distinct.
+
+The telemetry is observational only: it does not alter event ordering,
+coalescing, or Android `MotionEvent`/`KeyEvent` timestamps. A repeatable
+physical-click run through the Manager surface is still required to publish a
+real percentile baseline; the direct APK acceptance remains synthetic by
+design. Rust tests and the graphics-link audit pass after adding the logs.

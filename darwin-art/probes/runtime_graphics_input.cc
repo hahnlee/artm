@@ -1759,6 +1759,17 @@ int32_t dispatch_pointer_v2(GraphicsState* state,
       event->pointer_count == 0 || event->pointer_count > 16) {
     return 71;
   }
+  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr &&
+      event->event_time_nanos > 0) {
+    const int64_t now_nanos = MonotonicNanos();
+    const int64_t age_nanos =
+        now_nanos >= static_cast<int64_t>(event->event_time_nanos)
+            ? now_nanos - static_cast<int64_t>(event->event_time_nanos)
+            : 0;
+    std::cerr << "ART Android PointerEvent ingress action=" << event->action
+              << " sequence=" << event->sequence
+              << " ingress_latency_us=" << (age_nanos / 1000) << "\n";
+  }
   return dispatch_pointer_internal(state, event->action, event->x, event->y,
                                    event->flags,
                                    event->event_time_nanos,
@@ -1795,6 +1806,14 @@ int32_t dispatch_key_v1(GraphicsState* state,
   if (event_time_nanos <= 0) {
     env->DeleteLocalRef(key_event_class);
     return 87;
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    const int64_t now_nanos = MonotonicNanos();
+    const int64_t age_nanos =
+        now_nanos >= event_time_nanos ? now_nanos - event_time_nanos : 0;
+    std::cerr << "ART Android KeyEvent ingress action=" << event->action
+              << " sequence=" << event->sequence
+              << " ingress_latency_us=" << (age_nanos / 1000) << "\n";
   }
   int64_t down_time_nanos = event->down_time_nanos > 0
                                 ? static_cast<int64_t>(event->down_time_nanos)
