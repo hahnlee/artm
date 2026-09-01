@@ -1195,6 +1195,22 @@ event). The next slice is the bounded pointer/key packet queue on the channel,
 then Chrome physical-input latency measurement with cooperative callback yield
 enabled.
 
+## 2026-09-02 scheduler-separation progress (channel-owned payloads)
+
+When a focused `InputEventReceiver` exists, AppKit now places pointer and key
+packets directly into bounded queues owned by its `DarwinInputChannelState`.
+The surface dequeue APIs consume channel packets first and use the old
+AppKit-local mailbox only for legacy/headless probes. Queue saturation keeps
+the Android gesture contract: only a trailing MOVE may be replaced; DOWN,
+UP, CANCEL, and key transitions are retained.
+
+The channel pending bit and Looper token are published with the payload, so
+`probablyHasInput` no longer describes a wake without an event behind it.
+Native rebuild/link audit and AOSP Calculator/DeskClock acceptance pass. The
+queue is currently split by pointer/key API, so cross-kind ordering and
+`nativeConsumeBatchedInputEvents` remain before the channel transport is fully
+Android-compatible; Chrome physical latency is still unmeasured.
+
 ## 2026-09-02 scheduler-separation progress (channel payload queue)
 
 Focused AppKit pointer and key packets now enter bounded queues owned by the
