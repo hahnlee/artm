@@ -1769,3 +1769,11 @@ graphics closure completed with all 1,970 locked archive members. This keeps
 the scheduler work independent from the native provider graph; the separate
 host/Layoutlib 34-definition drift remains documented above and is not part
 of the production APK path.
+
+The same closure and incremental-link checks were repeated at the current
+HEAD after the phase-stable clock commit. Both remained clean (`ninja: no work
+to do`, ART-runtime closure `archive-members=1,970`), confirming that the
+display scheduler change does not invalidate or rebuild the native provider
+graph. The active follow-up remains real physical-ingress measurement and a
+multi-surface display policy review; neither is required to route the current
+single-host APK acceptance path.
