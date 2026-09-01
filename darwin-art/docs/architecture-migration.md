@@ -1638,3 +1638,11 @@ Calculator window using CoreGraphics event posting. No input packet reached
 the host in this caller context, so no physical latency percentile is claimed;
 the ingress telemetry hook remains ready for an authorized caller. Synthetic
 acceptance continues to cover functional MotionEvent delivery only.
+
+The post-change AOSP Calculator/DeskClock graphics acceptance passes again
+(`Calculator=2+3=5`). Two immediate Chromium tab-grid retries in this session
+stopped at the known startup/card-selection gate before a real tab-grid card
+was selected; the prior clean run at this same checkpoint reached
+`target-states=10`, so this is recorded as harness timing variance rather than
+a scheduler regression. A clean Chrome retry remains required before closing
+this validation slice.
