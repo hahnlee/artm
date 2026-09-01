@@ -1407,6 +1407,22 @@ would violate the Android Looper contract; the pending work is to expose
 stage-level timing and reduce synchronous service setup without moving View
 or Binder state across threads.
 
+## 2026-09-02 scheduler-separation progress (physical ingress timing hook)
+
+The receiver-owned channel callback now logs
+`ingress->dispatch kind=<pointer|key> sequence=<n> age_us=<n>` when
+`DARWIN_ART_DEBUG_INPUT_LATENCY=1`. The age uses the same Android uptime
+clock as `MotionEvent.eventTime`, so it measures AppKit/NSEvent enqueue to
+ViewRoot dispatch without introducing a second clock domain. Synthetic probe
+packets use a zero timestamp and are intentionally excluded. This provides a
+direct physical-input sample once an accessibility-authorized caller can click
+the real window; it does not alter dispatch or add synchronization to the
+normal path.
+
+Graphics link audit, Rust tests, AOSP Calculator/DeskClock acceptance, and
+Chromium tab-grid acceptance pass with the hook enabled. Cold-start callback
+occupancy and ACK overflow remain separate work items.
+
 ## 2026-09-02 scheduler-separation progress (Looper HUP backpressure)
 
 A real Chrome launch with input-latency logging exposed repeated

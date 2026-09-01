@@ -1,6 +1,7 @@
 #include "darwin_framework_natives.h"
 #include "darwin_binder_wire.h"
 #include "darwin_android_platform.h"
+#include "darwin_android_time.h"
 
 #include <cstdint>
 #include <algorithm>
@@ -909,6 +910,26 @@ bool DispatchChannelPacket(JNIEnv* env, DarwinInputReceiver* receiver,
                            const darwin_art::DarwinArtInputPacket& packet) {
   if (env == nullptr || receiver == nullptr || receiver->view_root == nullptr)
     return false;
+  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    const uint64_t event_time =
+        packet.kind == darwin_art::DarwinArtInputPacketKind::kPointer
+            ? packet.pointer.event_time_nanos
+            : packet.key.event_time_nanos;
+    const uint64_t now =
+        static_cast<uint64_t>(std::max<int64_t>(0, darwin_art::AndroidUptimeNanos()));
+    if (event_time != 0 && now >= event_time) {
+      const uint64_t sequence =
+          packet.kind == darwin_art::DarwinArtInputPacketKind::kPointer
+              ? packet.pointer.sequence
+              : packet.key.sequence;
+      std::cerr << "ART Android InputChannel ingress->dispatch kind="
+                << (packet.kind == darwin_art::DarwinArtInputPacketKind::kPointer
+                        ? "pointer"
+                        : "key")
+                << " sequence=" << sequence
+                << " age_us=" << ((now - event_time) / 1000) << "\n";
+    }
+  }
   jobject event = packet.kind == darwin_art::DarwinArtInputPacketKind::kPointer
                       ? CreateChannelMotionEvent(env, packet.pointer)
                       : CreateChannelKeyEvent(env, packet.key);
