@@ -232,11 +232,12 @@ bool darwin_art_surface_gpu_composite_embedded(
     DarwinArtSurface* surface,
     void* sk_canvas);
 
-// Runs the NSApplication event pump in slices no longer than 16 ms. Calls from
-// an ART worker are synchronously marshalled to AppKit's main queue. seconds
-// must be finite and in the inclusive range 0..30. A zero duration performs
-// only a close-state check. WINDOW_CLOSED means the user closed the window;
-// the handle remains valid and must still be destroyed by its owner.
+// Runs the NSApplication event pump in slices no longer than 16 ms. This is a
+// main-thread API; worker callers receive only the atomic close-state result
+// and must not use it as an event pump. seconds must be finite and in the
+// inclusive range 0..30. A zero duration performs only a close-state check.
+// WINDOW_CLOSED means the user closed the window; the handle remains valid
+// and must still be destroyed by its owner.
 DarwinArtSurfaceResult darwin_art_surface_pump_events(
     DarwinArtSurface* surface,
     double seconds);
@@ -245,6 +246,10 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
 // The host main thread uses this while ART is running on its owner worker and
 // before the Activity has created its first Window/Surface.
 int32_t darwin_art_appkit_pump_events(double seconds);
+
+// Worker-safe close-state snapshot. This never touches AppKit and is intended
+// for the ART owner while the process main actor owns event pumping.
+bool darwin_art_surface_close_requested(DarwinArtSurface* surface);
 
 // Removes the oldest pointer event captured by the surface's NSView mailbox.
 // This dequeue is safe from a non-main worker; it touches no AppKit object.

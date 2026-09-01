@@ -55,6 +55,10 @@ struct DarwinArtSurface {
   id window_delegate = nil;
   DarwinArtMetalView* view = nil;
   bool visible = false;
+  // Updated only by AppKit callbacks and read by the ART owner thread. This
+  // lets the owner observe a user close without synchronously entering the
+  // AppKit main queue (the main actor already owns event pumping).
+  std::atomic<bool> window_closed{false};
   bool producer_mapped = false;
   void* gpu_state = nullptr;
   // Geometry and publication state for a SurfaceView whose EGL producer

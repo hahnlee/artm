@@ -7,7 +7,7 @@ use crate::gpu_input::{
 };
 use crate::gpu_test_config::GpuTestConfig;
 use crate::runtime::HostRuntime;
-use crate::surface::owned_surface_pump_events;
+use crate::surface::owned_surface_wait_slice;
 use darwin_art_engine_sys::{PointerEventV2, ProcessResult};
 use darwin_art_runtime::Subsystem;
 use std::time::{Duration, Instant};
@@ -165,7 +165,7 @@ pub(super) fn run(
             let mut held_ms = 0_u64;
             while held_ms < test_hold_ms && loop_error.is_none() {
                 let slice_ms = (test_hold_ms - held_ms).min(16);
-                let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
+                let pump_status = owned_surface_wait_slice(runtime, slice_ms as f64 / 1000.0);
                 if pump_status == 7 {
                     // Surface shutdown enqueues a terminal CANCEL for an
                     // active pointer stream. Drain it before leaving so the
@@ -287,7 +287,7 @@ pub(super) fn run(
                 // Service the owner Looper at a short event-loop cadence and
                 // publish Choreographer vsync only at the display cadence.
                 let slice_ms = remaining.as_millis().min(2).max(1) as u64;
-                let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
+                let pump_status = owned_surface_wait_slice(runtime, slice_ms as f64 / 1000.0);
                 if pump_status != 0 {
                     loop_error = Some(HostError::SurfaceFailed {
                         operation: "gpu_test_pointer_sequence_wait",
@@ -345,7 +345,7 @@ pub(super) fn run(
                 // spacing; synthetic acceptance taps must model it too.
                 if action == 0 && test_hold_ms > 0 {
                     let pump_status =
-                        owned_surface_pump_events(runtime, test_hold_ms as f64 / 1000.0);
+                        owned_surface_wait_slice(runtime, test_hold_ms as f64 / 1000.0);
                     if pump_status != 0 {
                         loop_error = Some(HostError::SurfaceFailed {
                             operation: "gpu_test_pointer_sequence_hold",
@@ -379,7 +379,7 @@ pub(super) fn run(
         while wait_started.elapsed() < delay && loop_error.is_none() {
             let remaining = delay.saturating_sub(wait_started.elapsed());
             let slice_ms = remaining.as_millis().min(2).max(1) as u64;
-            let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
+            let pump_status = owned_surface_wait_slice(runtime, slice_ms as f64 / 1000.0);
             if pump_status != 0 {
                 loop_error = Some(HostError::SurfaceFailed {
                     operation: "gpu_test_pointer_sequence_post_delay",
@@ -418,7 +418,7 @@ pub(super) fn run(
             let remaining = Duration::from_millis(post_pointer_key_delay_ms)
                 .saturating_sub(wait_started.elapsed());
             let slice_ms = remaining.as_millis().min(16).max(1) as u64;
-            let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
+            let pump_status = owned_surface_wait_slice(runtime, slice_ms as f64 / 1000.0);
             if pump_status != 0 {
                 loop_error = Some(HostError::SurfaceFailed {
                     operation: "gpu_test_post_pointer_key_wait",
@@ -470,7 +470,7 @@ pub(super) fn run(
                 if loop_error.is_some() {
                     break;
                 }
-                let pump_status = owned_surface_pump_events(runtime, 0.016);
+                let pump_status = owned_surface_wait_slice(runtime, 0.016);
                 if pump_status != 0 {
                     loop_error = Some(HostError::SurfaceFailed {
                         operation: "gpu_test_post_sequence_drag_pump",
@@ -529,7 +529,7 @@ pub(super) fn run(
             let mut waited_ms = 0_u64;
             while waited_ms < delay_ms && loop_error.is_none() {
                 let slice_ms = (delay_ms - waited_ms).min(16);
-                let pump_status = owned_surface_pump_events(runtime, slice_ms as f64 / 1000.0);
+                let pump_status = owned_surface_wait_slice(runtime, slice_ms as f64 / 1000.0);
                 if pump_status != 0 {
                     loop_error = Some(HostError::SurfaceFailed {
                         operation: "gpu_test_post_drag_pointer_sequence_wait",
@@ -576,7 +576,7 @@ pub(super) fn run(
                 }
                 if action == 0 && test_hold_ms > 0 {
                     let pump_status =
-                        owned_surface_pump_events(runtime, test_hold_ms as f64 / 1000.0);
+                        owned_surface_wait_slice(runtime, test_hold_ms as f64 / 1000.0);
                     if pump_status != 0 {
                         loop_error = Some(HostError::SurfaceFailed {
                             operation: "gpu_test_post_drag_pointer_sequence_hold",
@@ -645,7 +645,7 @@ pub(super) fn run(
         if slice <= 0.0 {
             break;
         }
-        let pump_status = owned_surface_pump_events(runtime, slice);
+        let pump_status = owned_surface_wait_slice(runtime, slice);
         if pump_status == 7 {
             let _ = dispatch_queued_events(runtime);
             break;

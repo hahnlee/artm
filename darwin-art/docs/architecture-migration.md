@@ -706,3 +706,25 @@ must add a cooperative batch boundary at the native watcher/MessagePump layer
 frame latency and target-state acceptance. Any change must retain the current
 `O_NONBLOCK`/callback-return semantics and keep Calculator, DeskClock, and
 Chromium acceptance green.
+
+## 2026-09-01 scheduler-separation progress (AppKit wait removed from owner)
+
+The callback-stack sample identified an additional host-side stall: the ART
+owner spent roughly 3.2 seconds of a 4-second sample in
+`darwin_art_surface_pump_events -> RunOnMainSync -> __DISPATCH_WAIT_FOR_QUEUE`.
+This was not Android UI work; it was duplicate AppKit event pumping from the
+owner while the process main actor was already running
+`darwin_art_appkit_pump_events()`.
+
+The surface bridge now exposes a worker-safe atomic `close_requested` query.
+All owner-loop slices use that query plus a bounded sleep, while the main
+actor alone consumes NSEvents and sends them into the existing input mailbox.
+The legacy `darwin_art_surface_pump_events` entry point remains available for
+main-thread smoke callers, but no product owner path synchronously dispatches
+to AppKit. A post-change `sample` shows no `RunOnMainSync` or
+`__DISPATCH_WAIT_FOR_QUEUE` frames in `CrBrowserMain`; the owner samples are
+instead split between `nanosleep` and the normal Android `ALooper_pollOnce`
+path. Chrome tab graphics acceptance and AOSP Calculator/DeskClock acceptance
+remain green after the change. The remaining long-tail is now confined to
+the sequence-affine native Looper callback itself and requires a Chromium
+task-batch boundary rather than host-thread migration.

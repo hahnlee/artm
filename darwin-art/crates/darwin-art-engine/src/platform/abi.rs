@@ -9,9 +9,9 @@ use darwin_art_engine_sys::{
     GraphicsSessionDispatchPointerV2Fn, GraphicsSessionPumpFrameFn,
     GraphicsSessionPumpMainLooperFn, ProviderClearHooksFn, ProviderInstallHooksFn,
     ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn, ShutdownProcessFn,
-    SurfaceActiveFn, SurfaceCreateFn, SurfaceDestroyFn, SurfaceGetSizeFn, SurfaceNextKeyEventV1Fn,
-    SurfaceNextPointerEventFn, SurfaceNextPointerEventV2Fn, SurfacePresentFn, SurfacePumpEventsFn,
-    SurfaceResizeFn, SurfaceUpdateFn,
+    SurfaceActiveFn, SurfaceCloseRequestedFn, SurfaceCreateFn, SurfaceDestroyFn, SurfaceGetSizeFn,
+    SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn, SurfaceNextPointerEventV2Fn,
+    SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn, SurfaceUpdateFn,
 };
 
 #[derive(Clone, Copy)]
@@ -28,6 +28,7 @@ pub(crate) struct SurfaceSymbols {
     pub update: SurfaceUpdateFn,
     pub present: SurfacePresentFn,
     pub pump_events: SurfacePumpEventsFn,
+    pub close_requested: SurfaceCloseRequestedFn,
     pub next_pointer_event: SurfaceNextPointerEventFn,
     pub next_pointer_event_v2: Option<SurfaceNextPointerEventV2Fn>,
     pub next_key_event_v1: Option<SurfaceNextKeyEventV1Fn>,
@@ -86,6 +87,7 @@ impl LoadedEngine {
                     update: library.symbol(b"darwin_art_surface_update\0")?,
                     present: library.symbol(b"darwin_art_surface_present\0")?,
                     pump_events: library.symbol(b"darwin_art_surface_pump_events\0")?,
+                    close_requested: library.symbol(b"darwin_art_surface_close_requested\0")?,
                     next_pointer_event: library
                         .symbol(b"darwin_art_surface_next_pointer_event\0")?,
                     next_pointer_event_v2: library

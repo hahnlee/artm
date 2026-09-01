@@ -12,8 +12,21 @@ pub fn owned_surface(runtime: &HostRuntime) -> Option<&SurfaceSession> {
 }
 
 #[cfg(target_os = "macos")]
-pub fn owned_surface_pump_events(runtime: &HostRuntime, seconds: f64) -> i32 {
-    owned_surface(runtime).map_or(-1, |surface| surface.pump_events(seconds))
+pub fn owned_surface_wait_slice(runtime: &HostRuntime, seconds: f64) -> i32 {
+    // AppKit's main actor owns NSApplication event delivery. The ART owner
+    // only yields briefly, then observes the worker-safe close snapshot; it
+    // must never synchronously dispatch to the main queue from this path.
+    if owned_surface(runtime).is_none_or(SurfaceSession::close_requested) {
+        return 7;
+    }
+    if seconds.is_finite() && seconds > 0.0 {
+        std::thread::sleep(std::time::Duration::from_secs_f64(seconds.min(0.016)));
+    }
+    if owned_surface(runtime).is_none_or(SurfaceSession::close_requested) {
+        7
+    } else {
+        0
+    }
 }
 
 #[cfg(target_os = "macos")]

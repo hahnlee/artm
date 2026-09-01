@@ -33,6 +33,7 @@ pub(crate) fn validate_runtime_link(
             "_darwin_art_surface_unmap_producer",
             "_darwin_art_surface_present",
             "_darwin_art_surface_pump_events",
+            "_darwin_art_surface_close_requested",
             "_darwin_art_appkit_pump_events",
             "_darwin_art_surface_next_pointer_event",
             "_darwin_art_surface_next_pointer_event_v2",

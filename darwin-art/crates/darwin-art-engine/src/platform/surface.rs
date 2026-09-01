@@ -1,9 +1,10 @@
 use super::abi::EngineSymbols;
 use core::ffi::c_void;
 use darwin_art_engine_sys::{
-    KeyEventV1, PointerEvent, PointerEventV2, SurfaceDestroyFn, SurfaceGetSizeFn,
-    SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn, SurfaceNextPointerEventV2Fn,
-    SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn, SurfaceUpdateFn,
+    KeyEventV1, PointerEvent, PointerEventV2, SurfaceCloseRequestedFn, SurfaceDestroyFn,
+    SurfaceGetSizeFn, SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn,
+    SurfaceNextPointerEventV2Fn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn,
+    SurfaceUpdateFn,
 };
 use darwin_art_runtime::NativeResource;
 use std::{mem::size_of, ptr::NonNull};
@@ -18,6 +19,7 @@ pub struct SurfaceSession {
     update: SurfaceUpdateFn,
     present: SurfacePresentFn,
     pump_events: SurfacePumpEventsFn,
+    close_requested: SurfaceCloseRequestedFn,
     next_pointer_event: SurfaceNextPointerEventFn,
     next_pointer_event_v2: Option<SurfaceNextPointerEventV2Fn>,
     next_key_event_v1: Option<SurfaceNextKeyEventV1Fn>,
@@ -35,6 +37,7 @@ impl SurfaceSession {
             update: symbols.surface.update,
             present: symbols.surface.present,
             pump_events: symbols.surface.pump_events,
+            close_requested: symbols.surface.close_requested,
             next_pointer_event: symbols.surface.next_pointer_event,
             next_pointer_event_v2: symbols.surface.next_pointer_event_v2,
             next_key_event_v1: symbols.surface.next_key_event_v1,
@@ -119,6 +122,15 @@ impl SurfaceSession {
         };
         // SAFETY: same invariant as update.
         unsafe { (self.pump_events)(handle.as_ptr(), visible_seconds) }
+    }
+
+    pub fn close_requested(&self) -> bool {
+        let Some(handle) = self.handle.filter(|_| self.armed) else {
+            return true;
+        };
+        // SAFETY: the close-state query is an acquire-only worker-safe ABI
+        // and the handle remains paired with this session until close.
+        unsafe { (self.close_requested)(handle.as_ptr()) }
     }
 
     pub fn next_pointer_event(&self, event: &mut PointerEvent) -> bool {

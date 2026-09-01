@@ -38,6 +38,7 @@
 #include <string>
 #include <sys/mman.h>
 #include <sys/xattr.h>
+#include <time.h>
 #include <unistd.h>
 #include <thread>
 #include <unordered_map>
@@ -143,6 +144,15 @@ struct ALooperRegistration {
   ALooper_callbackFunc callback;
   void* data;
 };
+
+thread_local uint32_t g_looper_callback_depth = 0;
+
+uint64_t ThreadCpuNanos() {
+  timespec value{};
+  if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &value) != 0) return 0;
+  return static_cast<uint64_t>(value.tv_sec) * UINT64_C(1000000000) +
+         static_cast<uint64_t>(value.tv_nsec);
+}
 
 enum class ChoreographerCallbackKind {
   kFrame,
@@ -1148,6 +1158,12 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
   if (out_data != nullptr) *out_data = nullptr;
   ALooper* looper = g_thread_looper;
   if (looper == nullptr) return ALOOPER_POLL_ERROR;
+  if (g_looper_callback_depth != 0 &&
+      std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
+    std::fprintf(stderr,
+                 "DARWIN_ART nested-looper-poll depth=%u timeout_ms=%d\n",
+                 g_looper_callback_depth, timeout_ms);
+  }
   if (DispatchDueFrameCallbacks(looper) > 0) return ALOOPER_POLL_CALLBACK;
   const int frame_delay = NextFrameCallbackDelayMillis(looper);
   if (frame_delay >= 0 && (timeout_ms < 0 || frame_delay < timeout_ms))
@@ -1196,21 +1212,31 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
     if (registration.callback != nullptr) {
       invoked_callback = true;
       const auto callback_started = std::chrono::steady_clock::now();
+      const uint64_t callback_cpu_started = ThreadCpuNanos();
+      ++g_looper_callback_depth;
       const int callback_result =
           registration.callback(registration.fd, events, registration.data);
+      --g_looper_callback_depth;
       if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
         const auto callback_us =
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - callback_started)
                 .count();
         if (callback_us >= 100'000) {
+          const uint64_t callback_cpu_finished = ThreadCpuNanos();
+          const uint64_t callback_cpu_us =
+              callback_cpu_finished >= callback_cpu_started
+                  ? (callback_cpu_finished - callback_cpu_started) / 1000
+                  : 0;
           std::fprintf(stderr,
                        "DARWIN_ART slow-native-callback fd=%d events=0x%x "
-                       "callback=%p data=%p result=%d elapsed_us=%lld\n",
+                       "callback=%p data=%p result=%d elapsed_us=%lld "
+                       "cpu_us=%llu\n",
                        registration.fd, events,
                        reinterpret_cast<void*>(registration.callback),
                        registration.data, callback_result,
-                       static_cast<long long>(callback_us));
+                       static_cast<long long>(callback_us),
+                       static_cast<unsigned long long>(callback_cpu_us));
         }
       }
       if (callback_result == 0)

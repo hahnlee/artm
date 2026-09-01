@@ -197,6 +197,7 @@ pub type SurfaceGetSizeFn = unsafe extern "C" fn(*mut c_void, *mut u32, *mut u32
 pub type SurfaceUpdateFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> i32;
 pub type SurfacePresentFn = unsafe extern "C" fn(*mut c_void) -> i32;
 pub type SurfacePumpEventsFn = unsafe extern "C" fn(*mut c_void, f64) -> i32;
+pub type SurfaceCloseRequestedFn = unsafe extern "C" fn(*mut c_void) -> bool;
 pub type AppKitPumpEventsFn = unsafe extern "C" fn(f64) -> i32;
 
 #[cfg(test)]

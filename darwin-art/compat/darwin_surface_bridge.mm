@@ -562,6 +562,9 @@ static DarwinArtSurfaceResult ResizeSurfaceBacking(DarwinArtSurface* surface,
 }
 - (void)windowWillClose:(NSNotification*)notification {
   (void)notification;
+  if (self.surface != nullptr) {
+    self.surface->window_closed.store(true, std::memory_order_release);
+  }
   [self.view cancelPointerStream];
 }
 - (void)windowDidResize:(NSNotification*)notification {
@@ -892,6 +895,7 @@ static DarwinArtSurface* CreateSurfaceOnMain(
     surface->command_queue = command_queue;
     surface->io_surface_texture = io_surface_texture;
     surface->visible = create_info->visible;
+    surface->window_closed.store(false, std::memory_order_release);
 
     NSApplication* application = NSApplication.sharedApplication;
     if (create_info->visible) {
@@ -1283,6 +1287,7 @@ static DarwinArtSurfaceResult PumpSurfaceEventsOnMain(
     return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
   }
   if (surface->visible && !surface->window.visible) {
+    surface->window_closed.store(true, std::memory_order_release);
     [surface->view cancelPointerStream];
     return DARWIN_ART_SURFACE_WINDOW_CLOSED;
   }
@@ -1300,6 +1305,7 @@ static DarwinArtSurfaceResult PumpSurfaceEventsOnMain(
     NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
     while (deadline.timeIntervalSinceNow > 0.0) {
       if (surface->visible && !surface->window.visible) {
+        surface->window_closed.store(true, std::memory_order_release);
         [surface->view cancelPointerStream];
         return DARWIN_ART_SURFACE_WINDOW_CLOSED;
       }
@@ -1318,6 +1324,7 @@ static DarwinArtSurfaceResult PumpSurfaceEventsOnMain(
     }
   }
   if (surface->visible && !surface->window.visible) {
+    surface->window_closed.store(true, std::memory_order_release);
     [surface->view cancelPointerStream];
     return DARWIN_ART_SURFACE_WINDOW_CLOSED;
   }
@@ -1326,6 +1333,20 @@ static DarwinArtSurfaceResult PumpSurfaceEventsOnMain(
 
 DarwinArtSurfaceResult darwin_art_surface_pump_events(
     DarwinArtSurface* surface, double seconds) {
+  if (!std::isfinite(seconds) || seconds < 0.0 || seconds > 30.0) {
+    return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+  }
+  // In the split host architecture AppKit is pumped by the process main
+  // actor. The ART owner must never synchronously wait for that queue: doing
+  // so turns every Looper slice into a dispatch barrier and can stall Chrome
+  // for seconds. Preserve the close-state result for worker callers while
+  // retaining the full event pump for callers already on AppKit's thread.
+  if (!IsMainThread()) {
+    if (surface == nullptr) return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+    return surface->window_closed.load(std::memory_order_acquire)
+               ? DARWIN_ART_SURFACE_WINDOW_CLOSED
+               : DARWIN_ART_SURFACE_OK;
+  }
   return RunOnMainSync([&] { return PumpSurfaceEventsOnMain(surface, seconds); });
 }
 
@@ -1351,6 +1372,11 @@ int32_t darwin_art_appkit_pump_events(double seconds) {
     }
   }
   return DARWIN_ART_SURFACE_OK;
+}
+
+bool darwin_art_surface_close_requested(DarwinArtSurface* surface) {
+  if (surface == nullptr) return true;
+  return surface->window_closed.load(std::memory_order_acquire);
 }
 
 bool darwin_art_surface_next_pointer_event(
@@ -1388,6 +1414,7 @@ static DarwinArtSurfaceResult DestroySurfaceOnMain(
   if (surface == nullptr) {
     return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
   }
+  surface->window_closed.store(true, std::memory_order_release);
   darwin_art_surface_gpu_forget(surface);
   if (g_active_gpu_surface == surface) g_active_gpu_surface = nullptr;
   DarwinArtSurfaceResult unmap_result = DARWIN_ART_SURFACE_OK;

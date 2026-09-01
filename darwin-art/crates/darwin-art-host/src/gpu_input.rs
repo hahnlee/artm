@@ -4,7 +4,7 @@ use crate::config::HostError;
 use crate::frame_timing;
 use crate::runtime::HostRuntime;
 use crate::surface::{
-    owned_surface_next_key_event_v1, owned_surface_next_pointer_event_v2, owned_surface_pump_events,
+    owned_surface_next_key_event_v1, owned_surface_next_pointer_event_v2, owned_surface_wait_slice,
 };
 use darwin_art_engine_sys::{KeyEventV1, PointerEventV2};
 use std::time::{Duration, Instant};
@@ -149,7 +149,7 @@ pub(super) fn dispatch_synthetic_keys(
                 // Return to the owner Looper between hardware events so
                 // Chromium can consume the renderer ACK gating the next key.
                 let event_interval = (interval.as_secs_f64() / 2.0).max(0.001);
-                let pump_status = owned_surface_pump_events(runtime, event_interval);
+                let pump_status = owned_surface_wait_slice(runtime, event_interval);
                 if pump_status != 0 {
                     return Err(HostError::SurfaceFailed {
                         operation: "gpu_test_key_interval_pump",

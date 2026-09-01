@@ -400,6 +400,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_surface_unmap_producer")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_present")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_pump_events")
+        .arg("-Wl,-exported_symbol,_darwin_art_surface_close_requested")
         .arg("-Wl,-exported_symbol,_darwin_art_appkit_pump_events")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event")
         .arg("-Wl,-exported_symbol,_darwin_art_surface_next_pointer_event_v2")
