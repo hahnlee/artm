@@ -75,8 +75,20 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 64) {
     initialized_debug_budget = true;
     g_debug_main_queue_budget = 96;
   }
+  const auto initial_native_started = std::chrono::steady_clock::now();
   const int initial_native_dispatch =
       darwin_art_android_platform_poll_current_looper();
+  if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
+    const auto native_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - initial_native_started)
+            .count();
+    if (native_us >= 100'000) {
+      std::cerr << "DARWIN_ART slow-native-poll phase=initial result="
+                << initial_native_dispatch << " elapsed_us=" << native_us
+                << "\n";
+    }
+  }
   if (initial_native_dispatch < 0) {
     // Android's MessageQueue does not terminate the Java loop when the native
     // Looper reports POLL_ERROR (for example, an interrupted or concurrently
@@ -271,8 +283,19 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 64) {
     env->DeleteLocalRef(dispatch_target);
     env->DeleteLocalRef(message);
     ok = !env->ExceptionCheck();
-    if (ok && darwin_art_android_platform_poll_current_looper() < 0 &&
-        !logged_native_poll_error) {
+    const auto native_started = std::chrono::steady_clock::now();
+    const int native_result = darwin_art_android_platform_poll_current_looper();
+    if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
+      const auto native_us =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - native_started)
+              .count();
+      if (native_us >= 100'000) {
+        std::cerr << "DARWIN_ART slow-native-poll phase=message result="
+                  << native_result << " elapsed_us=" << native_us << "\n";
+      }
+    }
+    if (ok && native_result < 0 && !logged_native_poll_error) {
       logged_native_poll_error = true;
       std::cerr << "ART Android Looper: native poll failed; continuing main "
                    "queue\n";

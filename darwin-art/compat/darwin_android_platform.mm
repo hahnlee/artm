@@ -1186,7 +1186,25 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
     const auto& registration = registrations[index - 1];
     if (registration.callback != nullptr) {
       invoked_callback = true;
-      if (registration.callback(registration.fd, events, registration.data) == 0)
+      const auto callback_started = std::chrono::steady_clock::now();
+      const int callback_result =
+          registration.callback(registration.fd, events, registration.data);
+      if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
+        const auto callback_us =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - callback_started)
+                .count();
+        if (callback_us >= 100'000) {
+          std::fprintf(stderr,
+                       "DARWIN_ART slow-native-callback fd=%d events=0x%x "
+                       "callback=%p data=%p result=%d elapsed_us=%lld\n",
+                       registration.fd, events,
+                       reinterpret_cast<void*>(registration.callback),
+                       registration.data, callback_result,
+                       static_cast<long long>(callback_us));
+        }
+      }
+      if (callback_result == 0)
         ALooper_removeFd(looper, registration.fd);
     } else {
       if (out_fd != nullptr) *out_fd = registration.fd;
@@ -1300,7 +1318,10 @@ AChoreographerFrameCallbackData_getFrameTimelineDeadlineNanos(
 extern "C" int darwin_art_android_platform_poll_current_looper() {
   if (g_thread_looper == nullptr) return 0;
   int dispatched = 0;
-  for (int iteration = 0; iteration < 128; ++iteration) {
+  // Keep the bounded host drain separate from the public ALooper ABI. The
+  // callback itself remains sequence-affine to the registering Looper thread.
+  constexpr int kHostCallbackBudget = 128;
+  for (int iteration = 0; iteration < kHostCallbackBudget; ++iteration) {
     const int result = ALooper_pollOnce(0, nullptr, nullptr, nullptr);
     if (result == ALOOPER_POLL_CALLBACK || result == ALOOPER_POLL_WAKE) {
       ++dispatched;

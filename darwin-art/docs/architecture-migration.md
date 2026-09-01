@@ -663,3 +663,27 @@ than AppKit scanout. AOSP Calculator (`2+3=5`) and DeskClock Timer continue to
 pass. The next step is to identify that specific startup message batch and
 move only non-UI work (Binder/service setup or native polling) off the UI
 Looper, without reducing the Android message-delivery contract.
+
+## 2026-09-01 scheduler-separation progress (native callback stall audit)
+
+Slow-frame instrumentation on a real Chromium APK isolated the remaining
+long-tail from Java `Handler.dispatchMessage` and Metal scanout. The same
+guest `ALooper` callback thunk (registered with `ident=0` by Chromium's native
+watcher) occupied the ART owner thread for roughly 0.4--2.16 seconds; the
+public acceptance still passed with ten composed tab states. Android's
+`ALooper` contract invokes an opaque callback on its registering Looper
+thread, so dispatching this callback to an arbitrary helper thread would break
+sequence affinity, callback lifetime/remove ordering, and `ALooper_forThread`
+semantics. The callback body therefore remains on the owner thread pending
+fd-level blocking-syscall attribution.
+
+The host-only helper remains bounded at 128 responses for compatibility: a
+trial reduction to 32 changed Chrome's native watcher progress and failed the
+real tab-grid acceptance, so it is not safe to ship as a generic policy. The
+public `ALooper_pollOnce` behavior and callback return/remove semantics remain
+unchanged. The next diagnostic slice is to trace the registered fd's
+non-blocking flags
+and callback-internal read/IPC duration; if a broker operation loses
+`O_NONBLOCK`, fixing that provider is the Android-compatible remedy. A fresh
+Chrome acceptance and the Calculator/DeskClock acceptance must remain green
+before moving any callback work off the UI Looper.
