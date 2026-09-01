@@ -1108,6 +1108,15 @@ extern "C" int ALooper_addFd(ALooper* looper, int fd, int ident, int events,
        (looper->options & ALOOPER_PREPARE_ALLOW_NON_CALLBACKS) == 0))
     return -1;
   std::lock_guard<std::mutex> lock(looper->mutex);
+  if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
+    const int status_flags =
+        darwin_art_bionic_socket_broker_fcntl(fd, /*F_GETFL*/ 3, 0);
+    std::fprintf(stderr,
+                 "DARWIN_ART looper-add-fd fd=%d ident=%d events=0x%x "
+                 "callback=%p data=%p status_flags=0x%x\n",
+                 fd, ident, events, reinterpret_cast<void*>(callback), data,
+                 status_flags);
+  }
   auto found = std::find_if(looper->registrations.begin(),
                             looper->registrations.end(),
                             [fd](const auto& value) { return value.fd == fd; });

@@ -687,3 +687,22 @@ and callback-internal read/IPC duration; if a broker operation loses
 `O_NONBLOCK`, fixing that provider is the Android-compatible remedy. A fresh
 Chrome acceptance and the Calculator/DeskClock acceptance must remain green
 before moving any callback work off the UI Looper.
+
+## 2026-09-01 scheduler-separation progress (fd contract verified)
+
+The follow-up Chrome run records every native watcher registration with
+`status_flags=0x802`: the broker-preserved `O_NONBLOCK` bit is present on the
+read and write endpoints. Slow-I/O instrumentation also produced no broker
+`read`, `recv`, or pipe-read operation over 100 ms, while the same
+`ALooper` callback still occupied the owner thread for approximately 0.4--2.15
+seconds. This rules out a lost non-blocking flag or a host socket wait as the
+source of the long tail; the callback body is executing a large Chromium
+native task/IPC batch on its sequence-affine Looper thread.
+
+The implementation therefore keeps Android callback affinity and does not
+introduce a heuristic helper-thread dispatch. The next implementation slice
+must add a cooperative batch boundary at the native watcher/MessagePump layer
+(or move a proven non-UI service registration to its own Looper), then compare
+frame latency and target-state acceptance. Any change must retain the current
+`O_NONBLOCK`/callback-return semantics and keep Calculator, DeskClock, and
+Chromium acceptance green.

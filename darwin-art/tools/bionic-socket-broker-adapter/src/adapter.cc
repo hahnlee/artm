@@ -644,7 +644,21 @@ bool TranslateOption(int android_level, int android_option, int *host_level,
 intptr_t OwnerRead(void *, uint64_t object, void *bytes, size_t count,
                    int *android_errno) {
   auto *socket = reinterpret_cast<HostFdObject *>(object);
+  const auto started = std::chrono::steady_clock::now();
+  const int status_flags = fcntl(socket->fd, F_GETFL);
   const ssize_t result = recv(socket->fd, bytes, count, 0);
+  if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
+    const auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                std::chrono::steady_clock::now() - started)
+                                .count();
+    if (elapsed_us >= 100'000) {
+      std::fprintf(stderr,
+                   "DARWIN_ART slow-broker-read host_fd=%d count=%zu "
+                   "host_flags=0x%x result=%zd errno=%d elapsed_us=%lld\n",
+                   socket->fd, count, status_flags, result,
+                   result < 0 ? errno : 0, static_cast<long long>(elapsed_us));
+    }
+  }
   if (SocketDebugEnabled()) {
     uint32_t control = 0;
     if (result == sizeof(control))
@@ -862,7 +876,21 @@ int OwnerSetStatusFlags(void *, uint64_t object, int flags,
 intptr_t PipeOwnerRead(void *, uint64_t object, void *bytes, size_t count,
                        int *android_errno) {
   auto *pipe = reinterpret_cast<HostFdObject *>(object);
+  const auto started = std::chrono::steady_clock::now();
+  const int status_flags = fcntl(pipe->fd, F_GETFL);
   const ssize_t result = read(pipe->fd, bytes, count);
+  if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
+    const auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                std::chrono::steady_clock::now() - started)
+                                .count();
+    if (elapsed_us >= 100'000) {
+      std::fprintf(stderr,
+                   "DARWIN_ART slow-broker-pipe-read host_fd=%d count=%zu "
+                   "host_flags=0x%x result=%zd errno=%d elapsed_us=%lld\n",
+                   pipe->fd, count, status_flags, result,
+                   result < 0 ? errno : 0, static_cast<long long>(elapsed_us));
+    }
+  }
   *android_errno = result < 0 ? AndroidErrno(errno) : 0;
   return result;
 }
