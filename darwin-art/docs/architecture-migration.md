@@ -1244,3 +1244,19 @@ diff checks, and AOSP Calculator/DeskClock graphics acceptance all pass after
 this change. `nativeConsumeBatchedInputEvents` still needs a real consume/ACK
 implementation, and Chrome physical-input latency remains the final
 validation gate; synthetic/probe acceptance does not measure that percentile.
+
+## 2026-09-02 scheduler-separation progress (backpressure boundary)
+
+Enqueue now returns an explicit tri-state result: no focused channel permits
+the legacy mailbox fallback, a queued packet stays in the channel, and a full
+channel reports backpressure. A backpressured packet is no longer copied into
+the legacy mailbox, which would let a later pointer/key packet overtake the
+channel head. MOVE replacement remains limited to a trailing MOVE; boundary
+events are never rerouted across transports.
+
+The channel still has one logical payload queue, but its current sole consumer
+is the ART-owner Rust loop; the Looper fd callback only consumes wake tokens.
+Therefore `nativeConsumeBatchedInputEvents` remains disabled until the fd
+callback is converted to a receiver-owned consumer, avoiding a second reader
+and duplicate Java dispatch. Focus transition handling and sequence-indexed
+finish ACKs are the next transport boundaries before true Android batching.

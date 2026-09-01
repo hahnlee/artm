@@ -438,7 +438,9 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
       .pressure = 1.0f,
       .size_value = 1.0f,
   };
-  if (!darwin_art::EnqueueFrameworkPointerPacket(packet)) {
+  const auto enqueue_result = darwin_art::EnqueueFrameworkPointerPacket(packet);
+  if (enqueue_result ==
+      darwin_art::DarwinArtInputEnqueueResult::kNoFocusedChannel) {
     std::lock_guard<std::mutex> lock(_eventMutex);
     if (action == DARWIN_ART_POINTER_MOVE && !_pointerEvents.empty() &&
         _pointerEvents.back().action == DARWIN_ART_POINTER_MOVE) {
@@ -448,6 +450,12 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
     } else {
       _pointerEvents.push_back(packet);
     }
+  } else if (enqueue_result ==
+             darwin_art::DarwinArtInputEnqueueResult::kBackpressured &&
+             std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android InputChannel backpressure dropped pointer "
+              << "action=" << packet.action << " sequence="
+              << packet.sequence << "\n";
   }
   [self signalOwnerWake];
   if (action == DARWIN_ART_POINTER_DOWN) {
@@ -508,9 +516,17 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
         .source = 0x101,
         .unicode_char = unicode_char,
   };
-  if (!darwin_art::EnqueueFrameworkKeyPacket(packet)) {
+  const auto enqueue_result = darwin_art::EnqueueFrameworkKeyPacket(packet);
+  if (enqueue_result ==
+      darwin_art::DarwinArtInputEnqueueResult::kNoFocusedChannel) {
     std::lock_guard<std::mutex> lock(_eventMutex);
     _keyEvents.push_back(packet);
+  } else if (enqueue_result ==
+             darwin_art::DarwinArtInputEnqueueResult::kBackpressured &&
+             std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android InputChannel backpressure dropped key "
+              << "action=" << packet.action << " sequence="
+              << packet.sequence << "\n";
   }
   [self signalOwnerWake];
   if (action == 1) {
@@ -602,9 +618,16 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
         .pressure = 0.0f,
         .size_value = 0.0f,
   };
-  if (!darwin_art::EnqueueFrameworkPointerPacket(packet)) {
+  const auto enqueue_result = darwin_art::EnqueueFrameworkPointerPacket(packet);
+  if (enqueue_result ==
+      darwin_art::DarwinArtInputEnqueueResult::kNoFocusedChannel) {
     std::lock_guard<std::mutex> lock(_eventMutex);
     _pointerEvents.push_back(packet);
+  } else if (enqueue_result ==
+             darwin_art::DarwinArtInputEnqueueResult::kBackpressured &&
+             std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android InputChannel backpressure dropped cancel "
+              << "sequence=" << packet.sequence << "\n";
   }
   {
     _pointerActive = NO;
