@@ -1726,3 +1726,23 @@ the assistive-access event channel, so this is the same external permission
 boundary rather than evidence of an input-queue failure. No physical latency
 percentile is recorded; the runtime telemetry remains enabled for the first
 authorized run.
+
+## 2026-09-02 scheduler-separation progress (repeat acceptance)
+
+The full workspace Rust test and doc-test suite passed after the scheduler
+changes. A fresh AOSP graphics acceptance also passed for the unchanged
+Calculator and DeskClock APKs: Calculator reached `2+3=5`, DeskClock reached
+the Timer page, and both published visible HWUI buffers through the common
+SurfaceFlinger/Metal path. The latest scanout telemetry recorded Calculator
+`requests=720`, `fence_gated=1`, `coalesced=685`, `present_calls=462`, and
+DeskClock `requests=480`, `fence_gated=1`, `coalesced=440`,
+`present_calls=317`. This is the expected bounded latest-wins behavior: the
+independent display clock continues issuing edges while the ART owner handles
+framework work, and AppKit consumes only the coalesced ready generations.
+
+The remaining acceptance limitations are unchanged and explicit: physical
+CoreGraphics/System Events input requires Assistive Access permission in the
+calling process, and the default Layoutlib graphics-closure archive has a
+host-only 34-definition lock drift (`expected=48,795`, `actual=48,829`). The
+production ART-runtime closure remains locked and passing; neither limitation
+is a scheduler or APK-compatibility failure.
