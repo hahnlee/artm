@@ -13,6 +13,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <condition_variable>
+#include <deque>
 #include <fcntl.h>
 #include <libproc.h>
 #include <map>
@@ -92,6 +94,13 @@ struct ResponseHeader {
 static_assert(std::is_trivially_copyable_v<RequestHeader>);
 static_assert(std::is_trivially_copyable_v<WireLayer>);
 static_assert(std::is_trivially_copyable_v<ResponseHeader>);
+
+struct CompositionJob {
+  RequestHeader header{};
+  std::vector<WireLayer> incoming;
+  int producer_descriptor = -1;
+  int completion_descriptor = -1;
+};
 
 bool WriteAll(int fd, const void* data, size_t size) {
   const auto* bytes = static_cast<const uint8_t*>(data);
@@ -279,6 +288,71 @@ void SignalCompletion(int descriptor, bool successful) {
   close(descriptor);
 }
 
+void ProcessRequest(CompositionJob job);
+
+// SurfaceFlinger applies transactions in receive order and composes from the
+// latched state on one compositor thread.  The old Darwin shim detached one
+// thread per request, which allowed Metal submissions from transaction N+1 to
+// overtake N after the retained-state mutex was released.  Keep the central
+// service's ingress bounded and FIFO; the worker is intentionally leaked for
+// the profile lifetime because the service has no shutdown transaction.
+class CompositionQueue {
+ public:
+  static constexpr size_t kCapacity = 128;
+
+  bool Start() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (started_) return true;
+    try {
+      std::thread([this] { Run(); }).detach();
+    } catch (...) {
+      return false;
+    }
+    started_ = true;
+    return true;
+  }
+
+  bool Enqueue(CompositionJob job) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!started_) return false;
+    // Waiting here is the SurfaceFlinger-style backpressure boundary: a
+    // producer cannot create an unbounded set of composition threads/fences,
+    // while accepted requests retain strict transaction order.
+    not_full_.wait(lock, [this] { return queue_.size() < kCapacity; });
+    queue_.push_back(std::move(job));
+    not_empty_.notify_one();
+    return true;
+  }
+
+ private:
+  void Run() {
+    for (;;) {
+      CompositionJob job;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        not_empty_.wait(lock, [this] { return !queue_.empty(); });
+        job = std::move(queue_.front());
+        queue_.pop_front();
+        not_full_.notify_one();
+      }
+      ProcessRequest(std::move(job));
+    }
+  }
+
+  std::mutex mutex_;
+  std::condition_variable not_empty_;
+  std::condition_variable not_full_;
+  std::deque<CompositionJob> queue_;
+  bool started_ = false;
+};
+
+CompositionQueue& CompositionJobs() {
+  // The worker must outlive all client/service threads and is therefore
+  // intentionally process-lifetime storage rather than a destructed static.
+  static auto* queue = new CompositionQueue();
+  return *queue;
+}
+
 bool WaitForProducer(int descriptor) {
   if (descriptor < 0) return true;
   pollfd waiter{.fd = descriptor, .events = POLLIN | POLLHUP, .revents = 0};
@@ -439,8 +513,11 @@ void CaptureTargetPpm(IOSurfaceRef surface, uint64_t transaction_id) {
   IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, nullptr);
 }
 
-void ProcessRequest(RequestHeader header, std::vector<WireLayer> incoming,
-                    int producer_descriptor, int completion_descriptor) {
+void ProcessRequest(CompositionJob job) {
+  RequestHeader header = job.header;
+  std::vector<WireLayer> incoming = std::move(job.incoming);
+  int producer_descriptor = job.producer_descriptor;
+  int completion_descriptor = job.completion_descriptor;
   @autoreleasepool {
     if (!WaitForProducer(producer_descriptor)) {
       std::fprintf(stderr,
@@ -775,9 +852,15 @@ bool HandleRequest(int client) {
     if (producer_descriptor >= 0) close(producer_descriptor);
     return false;
   }
-  std::thread(ProcessRequest, header, std::move(incoming), producer_descriptor,
-              completion_pipe[1])
-      .detach();
+  if (!CompositionJobs().Enqueue(CompositionJob{
+          .header = header,
+          .incoming = std::move(incoming),
+          .producer_descriptor = producer_descriptor,
+          .completion_descriptor = completion_pipe[1]})) {
+    if (producer_descriptor >= 0) close(producer_descriptor);
+    SignalCompletion(completion_pipe[1], false);
+    return false;
+  }
   return true;
 }
 
@@ -816,6 +899,11 @@ extern "C" bool darwin_art_surfaceflinger_service_start() {
             0 ||
         chmod(path, 0600) != 0 || listen(listener, 32) != 0) {
       close(listener);
+      return;
+    }
+    if (!CompositionJobs().Start()) {
+      close(listener);
+      unlink(path);
       return;
     }
     std::thread(Serve, listener).detach();

@@ -1471,3 +1471,21 @@ preempting that opaque callback would risk reordering Binder/View work. Warm
 tab-grid runs continue to complete (target states 10); cold-start and warm
 interaction percentiles are reported separately. Physical ingress sampling
 and native batched consume remain pending.
+
+## 2026-09-02 scheduler-separation progress (SurfaceFlinger composition FIFO)
+
+The central Darwin SurfaceFlinger service no longer detaches one thread per
+transaction. Requests are copied into a process-lifetime, bounded FIFO
+`CompositionQueue` and composed by one worker, so Metal submissions cannot
+overtake one another after retained-state locking. Queue saturation is an
+explicit producer backpressure boundary, and the failure path closes both
+producer and completion descriptors.
+
+Graphics-link audit, AOSP Calculator/DeskClock graphics acceptance, and
+Chromium tab-grid acceptance pass after this change (`target-states=10`). This
+is the strict-ordering slice only: the worker still waits on an acquire fence
+before composing, so a permanently unsignaled fence can head-of-line block the
+FIFO. Android-like previous-buffer retention and fence-readiness rechecking
+remain the next SurfaceFlinger slice. Separately, HWC scanout is still
+triggered from the owner frame pulse; Sol review identifies a ready-generation
+mailbox plus latest-wins AppKit consumer as the next high-priority split.
