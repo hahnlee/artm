@@ -1310,3 +1310,19 @@ physical launch reached the app process but hit the existing remote Binder
 physical latency percentile is still an open validation gate. `nativeConsume-
 BatchedInputEvents` and MOVE batching remain disabled until this path has
 physical-input evidence and robust focus/dispose stress coverage.
+
+## 2026-09-02 scheduler-separation progress (receiver lifetime ownership)
+
+The receiver consumer is now held by `DarwinInputChannelState` through a
+`shared_ptr`; the Looper callback takes a strong snapshot before reading a
+payload, while dispose marks the receiver disposed, unregisters the fd, and
+releases the channel owner only after that snapshot is safe to finish. Channel
+consumer assignment/reset is serialized with the packet mutex, and failed
+dispatch still returns the packet to the queue head. This closes the raw
+receiver-pointer lifetime race without changing the ViewRoot dispatch path.
+
+Native audit, AOSP Calculator/DeskClock acceptance, and Chrome tab-grid
+graphics acceptance (target states 9) pass. The remaining transport work is
+focus handoff/CANCEL, outbound ACK retry, and physical Chrome input timing;
+`nativeConsumeBatchedInputEvents` remains intentionally disabled until those
+tests cover the receiver lifecycle.

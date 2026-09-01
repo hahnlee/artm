@@ -44,7 +44,21 @@ struct DarwinParcel {
   std::vector<int> file_descriptors;
 };
 
-struct DarwinInputReceiver;
+struct DarwinInputChannelState;
+
+struct DarwinInputReceiver {
+  jobject weak_receiver = nullptr;
+  jobject view_root = nullptr;
+  std::shared_ptr<DarwinInputChannelState> channel;
+  jint next_sequence = 1;
+  jint last_finished_sequence = 0;
+  bool last_finished_handled = false;
+  bool focused = false;
+  bool touch_mode = false;
+  void* looper = nullptr;
+  bool transport_registered = false;
+  std::atomic<bool> disposed{false};
+};
 
 void ClearParcel(JNIEnv* env, DarwinParcel* parcel) {
   if (parcel == nullptr) return;
@@ -469,7 +483,7 @@ struct DarwinInputChannelState {
   std::mutex finish_mutex;
   std::deque<FinishAck> finish_acks;
   std::atomic<bool> looper_consumer{false};
-  std::atomic<DarwinInputReceiver*> consumer{nullptr};
+  std::shared_ptr<DarwinInputReceiver> consumer;
   int read_fd = -1;
   int write_fd = -1;
 };
@@ -690,19 +704,6 @@ jlongArray InputChannelOpenPair(JNIEnv* env, jclass, jstring name) {
 jlong InputChannelReadParcel(JNIEnv*, jobject, jobject) { return 0; }
 void InputChannelWriteParcel(JNIEnv*, jobject, jobject, jlong) {}
 
-struct DarwinInputReceiver {
-  jobject weak_receiver = nullptr;
-  jobject view_root = nullptr;
-  std::shared_ptr<DarwinInputChannelState> channel;
-  jint next_sequence = 1;
-  jint last_finished_sequence = 0;
-  bool last_finished_handled = false;
-  bool focused = false;
-  bool touch_mode = false;
-  void* looper = nullptr;
-  bool transport_registered = false;
-};
-
 // Build the same framework InputEvent objects used by the owner dispatch path.
 // The callback supplies the stored ViewRoot so focus, touch-mode, and finish
 // stages remain in ViewRootImpl rather than calling the receiver directly.
@@ -861,9 +862,14 @@ int InputChannelTransportCallback(int fd, int events, void* data) {
   uint8_t buffer[64];
   while (recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
   }
-  DarwinInputReceiver* receiver = channel->consumer.load(std::memory_order_acquire);
+  std::shared_ptr<DarwinInputReceiver> receiver;
+  {
+    std::lock_guard<std::mutex> lock(channel->packet_mutex);
+    receiver = channel->consumer;
+  }
   JNIEnv* env = nullptr;
-  if (receiver == nullptr || receiver->view_root == nullptr ||
+  if (receiver == nullptr || receiver->disposed.load(std::memory_order_acquire) ||
+      receiver->view_root == nullptr ||
       g_framework_vm == nullptr ||
       g_framework_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) !=
           JNI_OK || env == nullptr) {
@@ -874,7 +880,7 @@ int InputChannelTransportCallback(int fd, int events, void* data) {
   darwin_art::DarwinArtInputPacket packet;
   while (consumed < kMaxPacketsPerCallback &&
          DequeueChannelPacketAny(channel, &packet)) {
-    if (!DispatchChannelPacket(env, receiver, packet)) {
+    if (!DispatchChannelPacket(env, receiver.get(), packet)) {
       // Keep a failed payload queued for the next owner turn. This avoids
       // losing a boundary event when ViewRoot is being attached or a
       // transient Java exception interrupts dispatch.
@@ -901,9 +907,19 @@ void InputReceiverDispose(JNIEnv* env, jclass, jlong pointer) {
   auto* receiver = reinterpret_cast<DarwinInputReceiver*>(
       static_cast<std::uintptr_t>(pointer));
   if (receiver == nullptr) return;
+  std::shared_ptr<DarwinInputReceiver> keep_alive;
   if (receiver->channel != nullptr) {
-    receiver->channel->consumer.store(nullptr, std::memory_order_release);
-    receiver->channel->looper_consumer.store(false, std::memory_order_release);
+    auto channel = receiver->channel;
+    {
+      std::lock_guard<std::mutex> lock(channel->packet_mutex);
+      if (channel->consumer.get() == receiver) keep_alive = channel->consumer;
+    }
+    receiver->disposed.store(true, std::memory_order_release);
+    channel->looper_consumer.store(false, std::memory_order_release);
+    {
+      std::lock_guard<std::mutex> lock(channel->packet_mutex);
+      if (channel->consumer.get() == receiver) channel->consumer.reset();
+    }
   }
   if (receiver->transport_registered && receiver->looper != nullptr &&
       receiver->channel != nullptr && receiver->channel->read_fd >= 0) {
@@ -981,12 +997,18 @@ jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
       weak_receiver == nullptr || env->ExceptionCheck()) {
     return 0;
   }
-  auto* receiver = new (std::nothrow) DarwinInputReceiver{
-      env->NewGlobalRef(weak_receiver), nullptr, channel->state, 1, 0, false,
-      false, false, nullptr, false};
-  if (receiver == nullptr || receiver->weak_receiver == nullptr) {
-    delete receiver;
+  std::shared_ptr<DarwinInputReceiver> receiver_shared(
+      new (std::nothrow) DarwinInputReceiver());
+  if (receiver_shared == nullptr) return 0;
+  receiver_shared->weak_receiver = env->NewGlobalRef(weak_receiver);
+  receiver_shared->channel = channel->state;
+  if (receiver_shared->weak_receiver == nullptr) {
     return 0;
+  }
+  auto* receiver = receiver_shared.get();
+  {
+    std::lock_guard<std::mutex> lock(receiver->channel->packet_mutex);
+    receiver->channel->consumer = receiver_shared;
   }
   receiver->looper = darwin_art_android_platform_prepare_current_looper();
   if (receiver->looper != nullptr && receiver->channel->read_fd >= 0) {
@@ -998,7 +1020,6 @@ jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
             receiver->looper, receiver->channel->read_fd, 0, 0x0001,
             &InputChannelTransportCallback, receiver->channel.get()) == 1;
     if (receiver->transport_registered) {
-      receiver->channel->consumer.store(receiver, std::memory_order_release);
       receiver->channel->looper_consumer.store(true, std::memory_order_release);
     }
   }
