@@ -741,3 +741,15 @@ the owner-side AppKit wait stays removed. Any further latency reduction must
 be implemented at a known Chromium task-runner batch boundary (or by giving a
 proven non-UI registration its own sequence), not by moving opaque callbacks
 or truncating `ALooper` progress heuristically.
+
+## 2026-09-01 scheduler-separation progress (post-fix measurement)
+
+With the owner-side AppKit wait removed and the production native-drain budget
+restored to 128, the latest Chrome run reports
+`looper avg=431us max=2117948us` and `graphics avg=403us max=4757us`.
+The Metal/SurfaceFlinger path therefore remains within a frame-scale budget;
+the approximately 2.12-second tail is still a single sequence-affine native
+watcher/task batch. Chrome acceptance passes with ten composed states and real
+tab-grid views, and Calculator/DeskClock remain green. Further improvement
+requires identifying the Chromium task-runner boundary inside that callback;
+the host scheduling split itself is now verified.
