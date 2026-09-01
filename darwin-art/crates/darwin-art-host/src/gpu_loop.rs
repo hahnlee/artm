@@ -19,7 +19,12 @@ pub(super) fn run(
     options: &RunOptions,
     graphics_attached: bool,
 ) -> Result<HostOutcome, HostError> {
-    let frame_clock = FrameClock::start();
+    // Only the wake token crosses into the display-clock helper. The opaque
+    // GraphicsSession remains owned and consumed by this ART owner thread.
+    let owner_wake = runtime
+        .graphics()
+        .and_then(|graphics| graphics.looper_wake_token());
+    let frame_clock = FrameClock::start(owner_wake);
     if runtime.surface().is_none() {
         return Err(HostError::SurfaceFailed {
             operation: "gpu_active_surface",

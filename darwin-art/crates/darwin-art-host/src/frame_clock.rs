@@ -7,28 +7,37 @@
 //! edges; Android work still runs on the ART owner thread when the edge is
 //! consumed.
 
-use std::sync::Arc;
+use darwin_art_engine::LooperWakeToken;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const DISPLAY_INTERVAL: Duration = Duration::from_nanos(16_666_667);
 
 pub(crate) struct FrameClock {
-    ticks: Receiver<Instant>,
+    ticks: Arc<Mutex<TickState>>,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
 }
 
+struct TickState {
+    latest: Option<Instant>,
+    pending: bool,
+}
+
 impl FrameClock {
-    pub(crate) fn start() -> Self {
-        let (sender, ticks) = mpsc::sync_channel(1);
+    pub(crate) fn start(wake: Option<LooperWakeToken>) -> Self {
+        let ticks = Arc::new(Mutex::new(TickState {
+            latest: None,
+            pending: false,
+        }));
         let stop = Arc::new(AtomicBool::new(false));
+        let worker_ticks = Arc::clone(&ticks);
         let worker_stop = Arc::clone(&stop);
         let worker = thread::Builder::new()
             .name("darwin-art-display-clock".to_owned())
-            .spawn(move || run_clock(sender, worker_stop))
+            .spawn(move || run_clock(worker_ticks, worker_stop, wake))
             .expect("display clock thread must start");
         Self {
             ticks,
@@ -43,13 +52,9 @@ impl FrameClock {
     /// becomes available; dropping intermediate edges matches Android's
     /// latest-vsync scheduling and keeps the queue bounded.
     pub(crate) fn take_latest(&self) -> Option<Instant> {
-        let mut latest = None;
-        loop {
-            match self.ticks.try_recv() {
-                Ok(tick) => latest = Some(tick),
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
-            }
-        }
+        let mut state = self.ticks.lock().expect("display clock state poisoned");
+        let latest = state.latest.take();
+        state.pending = false;
         latest
     }
 }
@@ -63,7 +68,7 @@ impl Drop for FrameClock {
     }
 }
 
-fn run_clock(sender: SyncSender<Instant>, stop: Arc<AtomicBool>) {
+fn run_clock(ticks: Arc<Mutex<TickState>>, stop: Arc<AtomicBool>, wake: Option<LooperWakeToken>) {
     let mut next = Instant::now();
     while !stop.load(Ordering::Acquire) {
         let now = Instant::now();
@@ -71,11 +76,25 @@ fn run_clock(sender: SyncSender<Instant>, stop: Arc<AtomicBool>) {
             thread::sleep(next - now);
             continue;
         }
-        // Publish one edge and reset from the actual send time.  If the
-        // consumer was blocked, do not replay a burst of missed display
-        // periods (or spin trying to catch up); the bounded channel and
-        // latest-tick consumer intentionally coalesce those periods.
-        let _ = sender.try_send(now);
+        // Publish the newest edge. A single pending bit makes the wake token
+        // edge-triggered: a blocked owner consumes one latest timestamp,
+        // while intermediate vsyncs replace the stale value without filling
+        // a queue or generating a wake storm.
+        let should_wake = {
+            let mut state = ticks.lock().expect("display clock state poisoned");
+            state.latest = Some(now);
+            if state.pending {
+                false
+            } else {
+                state.pending = true;
+                true
+            }
+        };
+        if should_wake {
+            if let Some(token) = wake {
+                token.wake();
+            }
+        }
         next = now + DISPLAY_INTERVAL;
     }
 }
@@ -88,7 +107,7 @@ mod tests {
 
     #[test]
     fn clock_is_bounded_and_produces_edges() {
-        let clock = FrameClock::start();
+        let clock = FrameClock::start(None);
         thread::sleep(Duration::from_millis(20));
         assert!(clock.take_latest().is_some());
         thread::sleep(Duration::from_millis(40));

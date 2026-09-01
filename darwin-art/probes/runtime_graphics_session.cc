@@ -19,6 +19,9 @@ struct darwin_art_graphics_session_t {
   darwin_art_graphics::GraphicsState state;
   pthread_t owner_thread{};
   art::Thread* owner_art_thread = nullptr;
+  // Opaque ALooper owned by owner_thread.  The FrameClock may signal this
+  // token from its helper thread, but never enters ART or JNI there.
+  void* owner_looper = nullptr;
   bool bound_to_process = false;
   bool closed = false;
   bool finalized = false;
@@ -244,8 +247,26 @@ int32_t pump_main_looper(darwin_art_graphics_session_t* session) {
     if (active_status != 0) return active_status;
     const int32_t owner_status = check_owner(session);
     if (owner_status != 0) return owner_status;
+    if (session->owner_looper == nullptr) {
+      session->owner_looper = darwin_art_android_platform_prepare_current_looper();
+    }
   }
   return pump_main_looper(&session->state);
+}
+
+int32_t wake_main_looper(darwin_art_graphics_session_t* session) {
+  void* looper = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_session_mutex);
+    const int32_t active_status = check_active_locked(session);
+    if (active_status != 0) return active_status;
+    looper = session->owner_looper;
+  }
+  if (looper == nullptr) return DARWIN_ART_STATUS_GRAPHICS_SESSION_NOT_READY;
+  // This is deliberately the only cross-thread operation: ALooper_wake is
+  // safe to call without entering the owner thread's ART/JNI state.
+  darwin_art_android_platform_wake_looper(looper);
+  return 0;
 }
 
 int32_t wait_main_looper(darwin_art_graphics_session_t* session,
@@ -304,4 +325,10 @@ extern "C" DARWIN_ART_EXPORT int32_t
 darwin_art_graphics_session_wait_main_looper(
     darwin_art_graphics_session_t* session, int32_t timeout_ms) {
   return darwin_art_graphics::wait_main_looper(session, timeout_ms);
+}
+
+extern "C" DARWIN_ART_EXPORT int32_t
+darwin_art_graphics_session_wake_main_looper(
+    darwin_art_graphics_session_t* session) {
+  return darwin_art_graphics::wake_main_looper(session);
 }

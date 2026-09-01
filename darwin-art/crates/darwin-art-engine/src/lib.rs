@@ -14,13 +14,13 @@ mod platform {
     pub(crate) mod surface;
 
     pub use engine::EngineSession;
-    pub use graphics::GraphicsSession;
+    pub use graphics::{GraphicsSession, LooperWakeToken};
     pub use process::{CallbackBindings, ProcessRequest, ProcessRequestError};
     pub use surface::SurfaceSession;
 }
 
 #[cfg(target_os = "macos")]
 pub use platform::{
-    CallbackBindings, EngineSession, GraphicsSession, ProcessRequest, ProcessRequestError,
-    SurfaceSession,
+    CallbackBindings, EngineSession, GraphicsSession, LooperWakeToken, ProcessRequest,
+    ProcessRequestError, SurfaceSession,
 };

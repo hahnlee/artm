@@ -391,6 +391,7 @@ pub type GraphicsSessionPumpFrameFn = unsafe extern "C" fn(*mut GraphicsSessionH
 pub type GraphicsSessionPumpMainLooperFn = unsafe extern "C" fn(*mut GraphicsSessionHandle) -> i32;
 pub type GraphicsSessionWaitMainLooperFn =
     unsafe extern "C" fn(*mut GraphicsSessionHandle, i32) -> i32;
+pub type GraphicsSessionWakeMainLooperFn = unsafe extern "C" fn(*mut GraphicsSessionHandle) -> i32;
 pub type ProviderInstallHooksFn = unsafe extern "C" fn(
     context: *mut c_void,
     acquire: Option<ProviderAcquireFn>,

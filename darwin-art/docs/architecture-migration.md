@@ -921,3 +921,27 @@ startup sample over 1 s). One first Chromium run missed the timing-sensitive
 tab-grid assertion and was rerun unchanged successfully with 10 target states.
 The next slice is to coalesce FrameClock latest-vsync into the same wake state
 and then measure physical-click latency separately from synthetic acceptance.
+
+## 2026-09-02 scheduler-separation progress (coalesced FrameClock wake)
+
+FrameClock now uses a bounded `latest + pending` POD state instead of a
+single-slot channel. Each display edge replaces the previous timestamp; the
+worker emits an owner `ALooper_wake` only on the `pending=false -> true`
+transition. The ART owner clears that bit while consuming one latest edge, so
+an owner stalled by application work neither replays stale vsyncs nor causes a
+wake storm. The wake token contains only the opaque session handle and the
+wake ABI function; no `JNIEnv`, `GraphicsSession` methods, or Surface state is
+used from the display-clock thread.
+
+The graphics session records its owner `ALooper` on the first owner-thread
+looper pump. Cross-thread wake validates the live session under the session
+mutex, copies the looper pointer, and calls only `ALooper_wake`; normal close
+and finalization ordering remains owner-thread-affine. The existing bounded
+16 ms wait remains the fallback when an older engine image lacks the optional
+wake symbol.
+
+Verification: `cargo fmt --all -- --check`, `cargo test -p darwin-art-host`
+(7/7), graphics-link audit PASS, and AOSP Calculator (`2+3=5`) plus DeskClock
+Timer acceptance PASS. Physical-click latency measurement and a cooperative
+Chromium MessagePump batch boundary remain the next slices; this change only
+coalesces display scheduling and does not preempt one opaque Chromium callback.

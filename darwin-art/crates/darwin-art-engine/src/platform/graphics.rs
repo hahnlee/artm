@@ -3,7 +3,7 @@ use darwin_art_engine_sys::{
     GraphicsSessionCloseFn, GraphicsSessionDestroyFn, GraphicsSessionDispatchKeyV1Fn,
     GraphicsSessionDispatchPointerFn, GraphicsSessionDispatchPointerV2Fn, GraphicsSessionHandle,
     GraphicsSessionPumpFrameFn, GraphicsSessionPumpMainLooperFn, GraphicsSessionWaitMainLooperFn,
-    KeyEventV1, PointerEventV2,
+    GraphicsSessionWakeMainLooperFn, KeyEventV1, PointerEventV2,
 };
 use darwin_art_runtime::NativeResource;
 use std::ptr::NonNull;
@@ -21,6 +21,7 @@ pub struct GraphicsSession {
     dispatch_key_v1_fn: Option<GraphicsSessionDispatchKeyV1Fn>,
     pump_main_looper_fn: GraphicsSessionPumpMainLooperFn,
     wait_main_looper_fn: Option<GraphicsSessionWaitMainLooperFn>,
+    wake_main_looper_fn: Option<GraphicsSessionWakeMainLooperFn>,
     pump_fn: GraphicsSessionPumpFrameFn,
     closed: bool,
     close_attempted: bool,
@@ -61,6 +62,7 @@ impl GraphicsSession {
             dispatch_key_v1_fn: symbols.graphics.dispatch_key_v1,
             pump_main_looper_fn,
             wait_main_looper_fn: symbols.graphics.wait_main_looper,
+            wake_main_looper_fn: symbols.graphics.wake_main_looper,
             pump_fn,
             closed: false,
             close_attempted: false,
@@ -156,6 +158,16 @@ impl GraphicsSession {
         unsafe { wait(handle.as_ptr(), timeout_ms) }
     }
 
+    /// Export only the cross-thread wake operation. The token is valid while
+    /// this session remains alive; FrameClock is dropped before session
+    /// shutdown, so it never carries JNI, graphics, or surface state.
+    pub fn looper_wake_token(&self) -> Option<LooperWakeToken> {
+        Some(LooperWakeToken {
+            handle: self.handle.filter(|_| !self.closed)?.as_ptr(),
+            wake: self.wake_main_looper_fn?,
+        })
+    }
+
     fn destroy(&mut self) -> i32 {
         if !self.closed || self.handle.is_none() {
             return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
@@ -168,6 +180,26 @@ impl GraphicsSession {
             self.handle = None;
         }
         status
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct LooperWakeToken {
+    handle: *mut GraphicsSessionHandle,
+    wake: GraphicsSessionWakeMainLooperFn,
+}
+
+// The native wake ABI stores only an opaque session pointer and writes to its
+// owner Looper's eventfd. It never dereferences JNI/session state on the
+// calling thread. The host drops all tokens before closing the session.
+unsafe impl Send for LooperWakeToken {}
+unsafe impl Sync for LooperWakeToken {}
+
+impl LooperWakeToken {
+    pub fn wake(self) {
+        // SAFETY: lifetime is bounded by FrameClock's owner-thread join before
+        // GraphicsSession shutdown; the callback itself is wake-only.
+        let _ = unsafe { (self.wake)(self.handle) };
     }
 }
 
@@ -246,6 +278,7 @@ mod graphics_session_tests {
             dispatch_key_v1_fn: None,
             pump_main_looper_fn: pump_main_looper,
             wait_main_looper_fn: None,
+            wake_main_looper_fn: None,
             pump_fn: pump,
             closed: false,
             close_attempted: false,
@@ -285,6 +318,7 @@ mod graphics_session_tests {
             dispatch_key_v1_fn: None,
             pump_main_looper_fn: pump_main_looper,
             wait_main_looper_fn: None,
+            wake_main_looper_fn: None,
             pump_fn: pump,
             closed: false,
             close_attempted: false,
