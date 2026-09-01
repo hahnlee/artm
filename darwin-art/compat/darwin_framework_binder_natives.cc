@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <cstring>
@@ -486,6 +487,7 @@ struct DarwinInputChannelState {
     bool handled = false;
   };
   std::mutex finish_mutex;
+  std::condition_variable finish_condition;
   std::deque<FinishAck> finish_acks;
   std::atomic<bool> looper_consumer{false};
   std::shared_ptr<DarwinInputReceiver> consumer;
@@ -1059,6 +1061,7 @@ void InputReceiverFinish(JNIEnv*, jclass, jlong pointer, jint sequence,
             DarwinInputChannelState::FinishAck{
                 .sequence = sequence, .handled = handled == JNI_TRUE});
       }
+      receiver->channel->finish_condition.notify_all();
       receiver->channel->last_finished_sequence.store(
           sequence, std::memory_order_release);
       receiver->channel->last_finished_handled.store(
@@ -1083,6 +1086,32 @@ bool TakeFinishedAck(const std::shared_ptr<DarwinInputChannelState>& channel,
     return true;
   }
   return false;
+}
+
+// ViewRoot normally finishes an event inline, but application code may defer
+// finishInputEvent() to another callback. Give that ACK a small bounded window
+// without holding the finish mutex across any Java call; a missing ACK still
+// falls back to the legacy atomic result below.
+bool WaitForFinishedAck(const std::shared_ptr<DarwinInputChannelState>& channel,
+                        jint sequence, bool* handled) {
+  if (TakeFinishedAck(channel, sequence, handled)) return true;
+  if (channel == nullptr) return false;
+  constexpr auto kAckRetryBudget = std::chrono::milliseconds(1);
+  const auto deadline = std::chrono::steady_clock::now() + kAckRetryBudget;
+  std::unique_lock<std::mutex> lock(channel->finish_mutex);
+  for (;;) {
+    for (auto it = channel->finish_acks.begin();
+         it != channel->finish_acks.end(); ++it) {
+      if (it->sequence != sequence) continue;
+      if (handled != nullptr) *handled = it->handled;
+      channel->finish_acks.erase(it);
+      return true;
+    }
+    if (channel->finish_condition.wait_until(lock, deadline) ==
+        std::cv_status::timeout) {
+      return false;
+    }
+  }
 }
 jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
                         jobject input_channel, jobject) {
@@ -2636,11 +2665,11 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
     env->CallVoidMethod(target, dispatch, sequence, event);
     bool finished = false;
     if (handled != nullptr) {
-      finished = TakeFinishedAck(receiver->channel, sequence, handled);
+      finished = WaitForFinishedAck(receiver->channel, sequence, handled);
     } else {
       bool ignored_handled = false;
-      finished = TakeFinishedAck(receiver->channel, sequence,
-                                 &ignored_handled);
+      finished = WaitForFinishedAck(receiver->channel, sequence,
+                                    &ignored_handled);
     }
     // Preserve the legacy atomic fast path for receivers built against an
     // older finish implementation that has not populated the channel queue.

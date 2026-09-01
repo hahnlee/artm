@@ -1359,3 +1359,19 @@ Calculator/DeskClock graphics acceptance, and Chromium tab-grid acceptance
 pass after this change. Native batched consume remains disabled. Outbound
 finish-ACK retry/overflow policy and physical Chrome click latency are still
 open validation gates; the synthetic acceptance does not measure the latter.
+
+## 2026-09-02 scheduler-separation progress (bounded finish ACK retry)
+
+`DispatchFrameworkInputEvent()` now performs a bounded, condition-variable
+retry when `finishInputEvent()` is posted just after the Java dispatch returns.
+The finish mutex is released before entering Java, and `InputReceiverFinish()`
+notifies the channel after appending its sequence-indexed ACK. A missing ACK
+still follows the existing atomic compatibility fallback after the 1 ms
+budget; this avoids an unbounded UI-thread stall while covering deferred Java
+callbacks during the migration.
+
+Incremental graphics link audit, AOSP Calculator/DeskClock acceptance, and a
+rerun of Chromium tab-grid acceptance pass. One Chrome run showed the known
+startup-timing flake before the rerun passed (target states 9); no new runtime
+failure was observed. ACK overflow policy and physical Chrome latency remain
+open, and `nativeConsumeBatchedInputEvents` stays disabled.
