@@ -1788,3 +1788,11 @@ the run. This confirms that active-surface publication is process-scoped and
 does not cross-talk between concurrently running APKs. A single host still
 uses one display surface by design; in-process multi-window composition is a
 separate policy layer rather than a scheduler ownership race.
+
+The next physical-ingress retry could enumerate the `darwin-art-host` process
+but did not expose a corresponding on-screen window before the host exited;
+the profile daemon also emitted transient missing-client errors. No
+CoreGraphics event was posted and no ingress percentile was recorded. This
+does not change the successful synthetic/APK evidence or establish an input
+queue failure; a Manager-launched, accessibility-authorized window remains
+the required source for the physical measurement.
