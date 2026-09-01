@@ -157,6 +157,11 @@ uint64_t ThreadCpuNanos() {
          static_cast<uint64_t>(value.tv_nsec);
 }
 
+uint64_t CurrentThreadId() {
+  uint64_t thread_id = 0;
+  return pthread_threadid_np(nullptr, &thread_id) == 0 ? thread_id : 0;
+}
+
 std::string NativeAddressDescription(const void* address) {
   if (address == nullptr) return "<null>";
   Dl_info info{};
@@ -1282,12 +1287,13 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
                 : object_vtable + static_cast<int64_t>(vtable_offset);
         std::fprintf(stderr,
                      "DARWIN_ART looper-callback-target pid=%d process=%s "
-                     "fd=%d callback=%p data=%p vtable=%p slot_offset=%d "
-                     "target=%p\n",
+                     "tid=%llu fd=%d callback=%p data=%p vtable=%p "
+                     "slot_offset=%d target=%p\n",
                      getpid(),
                      std::getenv("DARWIN_ART_APK_PROCESS_NAME") == nullptr
                          ? "<main>"
                          : std::getenv("DARWIN_ART_APK_PROCESS_NAME"),
+                     static_cast<unsigned long long>(CurrentThreadId()),
                      registration.fd,
                      reinterpret_cast<void*>(registration.callback),
                      registration.data,
@@ -1313,13 +1319,14 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
                   : 0;
           std::fprintf(stderr,
                        "DARWIN_ART slow-native-callback pid=%d process=%s "
-                       "fd=%d events=0x%x "
+                       "tid=%llu fd=%d events=0x%x "
                        "callback=%p data=%p result=%d elapsed_us=%lld "
                        "cpu_us=%llu callback_desc=%s\n",
                        getpid(),
                        std::getenv("DARWIN_ART_APK_PROCESS_NAME") == nullptr
                            ? "<main>"
                            : std::getenv("DARWIN_ART_APK_PROCESS_NAME"),
+                       static_cast<unsigned long long>(CurrentThreadId()),
                        registration.fd, events,
                        reinterpret_cast<void*>(registration.callback),
                        registration.data, callback_result,

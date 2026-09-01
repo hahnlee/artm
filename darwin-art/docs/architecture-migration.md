@@ -1066,3 +1066,19 @@ DeskClock acceptance, and Chrome tab-switcher/tab-grid acceptance all pass.
 The slow-frame run still reports the known single guest callback tail
 (approximately 2.07 s); the change removes callback bursts but cannot
 preempt a callback that is already executing.
+
+## 2026-09-02 scheduler-separation progress (callback sequence attribution)
+
+Native callback logging now includes the macOS Mach thread ID alongside the
+ART owner ID. A Chrome run showed the long 0.4 s and 2.0 s guest callbacks on
+the ART owner itself, while a separate watcher callback ran on another native
+thread. This confirms that the tail is not caused by AppKit or Metal scanout;
+it is guest work registered on the Android main Looper and therefore cannot be
+moved wholesale to a worker without violating callback sequence affinity.
+
+The safe boundary is consequently the one already implemented: AppKit input,
+display clock, and HWC scanout remain independent, while owner-thread Java and
+registered native callbacks retain Android ordering. General Chrome acceptance
+after the attribution build passed with ten composed target states and the
+complete GPU capability path; the earlier debug run's SIGTRAP was an isolated
+startup/termination failure and was followed by a clean pass.

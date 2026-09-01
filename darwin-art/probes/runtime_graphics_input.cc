@@ -57,6 +57,11 @@ int64_t MonotonicNanos() {
   return darwin_art::AndroidUptimeNanos();
 }
 
+uint64_t CurrentThreadId() {
+  uint64_t thread_id = 0;
+  return pthread_threadid_np(nullptr, &thread_id) == 0 ? thread_id : 0;
+}
+
 // Process only messages that Android's main Looper could dispatch without
 // blocking. The standalone host owns the ART/UI thread, so calling
 // Looper.loop() would take over that thread permanently. Peeking at the queue
@@ -88,8 +93,8 @@ bool DispatchDueMainMessages(GraphicsState* state, JNIEnv* env,
             .count();
     if (native_us >= 100'000) {
       std::cerr << "DARWIN_ART slow-native-poll phase=initial result="
-                << initial_native_dispatch << " elapsed_us=" << native_us
-                << "\n";
+                << initial_native_dispatch << " tid=" << CurrentThreadId()
+                << " elapsed_us=" << native_us << "\n";
     }
   }
   if (initial_native_dispatch < 0) {
@@ -319,7 +324,8 @@ bool DispatchDueMainMessages(GraphicsState* state, JNIEnv* env,
               .count();
       if (native_us >= 100'000) {
         std::cerr << "DARWIN_ART slow-native-poll phase=message result="
-                  << native_result << " elapsed_us=" << native_us << "\n";
+                  << native_result << " tid=" << CurrentThreadId()
+                  << " elapsed_us=" << native_us << "\n";
       }
     }
     if (ok && native_result < 0 && !logged_native_poll_error) {

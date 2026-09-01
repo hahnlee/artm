@@ -738,8 +738,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       env->ExceptionDescribe();
       env->ExceptionClear();
     }
+    uint64_t owner_thread_id = 0;
+    (void)pthread_threadid_np(nullptr, &owner_thread_id);
     std::cerr << "ART Android owner: thread="
               << reinterpret_cast<uintptr_t>(pthread_self())
+              << " tid=" << owner_thread_id
               << " art=" << self << " looper=main context_loader=1"
               << " service_bridge=" << (context_binder != nullptr) << "\n";
     env->DeleteLocalRef(context_binder);
