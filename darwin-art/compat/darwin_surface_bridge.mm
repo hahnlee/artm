@@ -417,28 +417,37 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   const CGFloat android_y = point.y;
   const uint64_t event_time_nanos = AndroidEventTimeNanos();
   if (action == DARWIN_ART_POINTER_DOWN) _downTimeNanos = event_time_nanos;
+  const DarwinArtPointerEventV2 packet{
+      .version = 2,
+      .size = static_cast<uint32_t>(sizeof(DarwinArtPointerEventV2)),
+      .action = static_cast<uint32_t>(action),
+      // Android app players conventionally translate the primary host click
+      // into a touchscreen stream. A distinct mouse packet remains available
+      // in ABI v2 for explicit external-mouse integrations.
+      .flags = 0,
+      .sequence = _nextPointerSequence++,
+      .event_time_nanos = event_time_nanos,
+      .down_time_nanos = _downTimeNanos,
+      .pointer_id = 0,
+      .pointer_count = 1,
+      .x = static_cast<float>(point.x * x_scale),
+      .y = static_cast<float>(android_y * y_scale),
+      .raw_x = static_cast<float>(point.x * x_scale),
+      .raw_y = static_cast<float>(android_y * y_scale),
+      .pressure = 1.0f,
+      .size_value = 1.0f,
+  };
   {
     std::lock_guard<std::mutex> lock(_eventMutex);
-    _pointerEvents.push_back(DarwinArtPointerEventV2{
-        .version = 2,
-        .size = static_cast<uint32_t>(sizeof(DarwinArtPointerEventV2)),
-        .action = static_cast<uint32_t>(action),
-        // Android app players conventionally translate the primary host click
-        // into a touchscreen stream. A distinct mouse packet remains available
-        // in ABI v2 for explicit external-mouse integrations.
-        .flags = 0,
-        .sequence = _nextPointerSequence++,
-        .event_time_nanos = event_time_nanos,
-        .down_time_nanos = _downTimeNanos,
-        .pointer_id = 0,
-        .pointer_count = 1,
-        .x = static_cast<float>(point.x * x_scale),
-        .y = static_cast<float>(android_y * y_scale),
-        .raw_x = static_cast<float>(point.x * x_scale),
-        .raw_y = static_cast<float>(android_y * y_scale),
-        .pressure = 1.0f,
-        .size_value = 1.0f,
-    });
+    if (action == DARWIN_ART_POINTER_MOVE && !_pointerEvents.empty() &&
+        _pointerEvents.back().action == DARWIN_ART_POINTER_MOVE) {
+      // Retain only the newest MOVE until the owner drains the mailbox. DOWN,
+      // UP, and CANCEL are never replaced, so Android gesture boundaries stay
+      // exact while high-rate trackpad motion cannot build an unbounded tail.
+      _pointerEvents.back() = packet;
+    } else {
+      _pointerEvents.push_back(packet);
+    }
   }
   [self signalOwnerWake];
   if (action == DARWIN_ART_POINTER_DOWN) {

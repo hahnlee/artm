@@ -1016,3 +1016,19 @@ Verification: graphics-link audit PASS, Rust host tests 7/7, AOSP Calculator
 (`2+3=5`) and DeskClock Timer acceptance PASS, and Chrome tab-switcher/tab-grid
 acceptance PASS with ten composed target states and the full
 `GLES+ANGLE+Graphite+Dawn+MoltenVK+AHB+SurfaceFlinger+Metal` path.
+
+## 2026-09-02 scheduler-separation progress (bounded pointer mailbox)
+
+High-rate AppKit pointer MOVE packets now replace only the current queue tail
+when that tail is also MOVE. This bounds motion backlog and keeps the owner
+looper focused on the newest coordinates; DOWN, UP, and CANCEL packets are
+always retained in order, so Android gesture boundaries and click semantics do
+not change. The edge-triggered wake bit remains protected by the same event
+mutex, avoiding both wake storms and lost notifications.
+
+Verification after the mailbox change: graphics-link audit PASS, `cargo fmt`
+PASS, all darwin-art-host tests PASS (7/7), and Chrome's physical acceptance
+flow reached the real tab-switcher and tab-grid with ten composed target states
+and the complete GPU capability path. The Manager still needs macOS
+Accessibility permission before physical-ingress percentile telemetry can be
+collected; synthetic acceptance is intentionally kept as a separate gate.
