@@ -12,6 +12,9 @@ struct DarwinArtMetalComposerLayer {
   uint32_t flags = 0;
   uint32_t mask = 0;
   uint32_t transform = 0;
+  // True when the native producer stored row zero at the bottom of its
+  // IOSurface. This is buffer metadata, independent of layer/window names.
+  bool producer_bottom_left = false;
   void* iosurface = nullptr;
   uint32_t width = 0;
   uint32_t height = 0;

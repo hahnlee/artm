@@ -37,9 +37,9 @@ extern "C" int darwin_art_android_metal_shared_event_fence_fd(
 
 namespace {
 
-constexpr std::array<char, 8> kRequestMagic{'D', 'A', 'R', 'T', 'S', 'F', '0', '5'};
-constexpr std::array<char, 8> kResponseMagic{'D', 'A', 'R', 'T', 'S', 'F', 'R', '5'};
-constexpr uint32_t kProtocolVersion = 5;
+constexpr std::array<char, 8> kRequestMagic{'D', 'A', 'R', 'T', 'S', 'F', '0', '6'};
+constexpr std::array<char, 8> kResponseMagic{'D', 'A', 'R', 'T', 'S', 'F', 'R', '6'};
+constexpr uint32_t kProtocolVersion = 6;
 constexpr uint32_t kMaximumLayers = 4096;
 
 struct RequestHeader {
@@ -66,6 +66,7 @@ struct WireLayer {
   uint32_t flags;
   uint32_t mask;
   uint32_t transform;
+  uint32_t producer_bottom_left;
   int32_t source_left;
   int32_t source_top;
   int32_t source_right;
@@ -318,6 +319,7 @@ void MergeRetainedLayer(WireLayer& destination, const WireLayer& source) {
     destination.iosurface_id = source.iosurface_id;
     destination.width = source.width;
     destination.height = source.height;
+    destination.producer_bottom_left = source.producer_bottom_left;
     destination.source_left = source.source_left;
     destination.source_top = source.source_top;
     destination.source_right = source.source_right;
@@ -587,6 +589,7 @@ void ProcessRequest(RequestHeader header, std::vector<WireLayer> incoming,
             .flags = layer.flags,
             .mask = layer.mask,
             .transform = layer.transform,
+            .producer_bottom_left = layer.producer_bottom_left != 0,
             .iosurface = surface,
             .width = layer.width,
             .height = layer.height,
@@ -839,6 +842,7 @@ extern "C" int darwin_art_surfaceflinger_service_present(
         .flags = layer.flags,
         .mask = layer.mask,
         .transform = layer.transform,
+        .producer_bottom_left = layer.producer_bottom_left ? 1u : 0u,
         .source_left = layer.source_left,
         .source_top = layer.source_top,
         .source_right = layer.source_right,

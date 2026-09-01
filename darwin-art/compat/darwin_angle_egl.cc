@@ -4173,6 +4173,11 @@ extern "C" void darwin_art_android_present_hardware_buffer(
     }
     const auto width = static_cast<std::int32_t>(description.width);
     const auto height = static_cast<std::int32_t>(description.height);
+    // The Darwin gralloc contract uses COMPOSER_OVERLAY to identify buffers
+    // that the EGL producer has already resolved into display-space. HWUI's
+    // Metal render target omits it and retains bottom-left native storage.
+    const bool producer_bottom_left =
+        (description.usage & AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY) == 0;
     source_left = std::clamp(source_left, 0, width);
     source_right = std::clamp(source_right, 0, width);
     source_top = std::clamp(source_top, 0, height);
@@ -4193,6 +4198,7 @@ extern "C" void darwin_art_android_present_hardware_buffer(
         .parent_id = parent_id,
         .what = what,
         .transform = transform,
+        .producer_bottom_left = producer_bottom_left,
         .iosurface = iosurface,
         .width = description.width,
         .height = description.height,
@@ -4261,6 +4267,8 @@ extern "C" void darwin_art_android_present_hardware_buffer(
       .parent_id = parent_id,
       .what = what,
       .transform = transform,
+      .producer_bottom_left =
+          (image.usage & AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY) == 0,
       .iosurface = darwin_art_android_hardware_buffer_iosurface(image.buffer),
       .width = image.width,
       .height = image.height,

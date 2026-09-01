@@ -243,14 +243,18 @@ extern "C" bool darwin_art_metal_composer_compose(
                    static_cast<float>(target_height);
     const float u0 = static_cast<float>(layer.source_left) / layer.width;
     const float u1 = static_cast<float>(layer.source_right) / layer.width;
-    // The IOSurface handed to SurfaceFlinger is ANGLE's display-space
-    // AHardwareBuffer. ANGLE has already resolved the guest GL bottom-left
-    // convention when it stores the frame, so Metal samples the same
-    // top-left source rectangle that Android's transaction carries. Flipping
-    // V here would apply a second transform (the Chrome/WebContents layers
-    // visibly become upside-down/180-degree mirrored).
-    const float v0 = static_cast<float>(layer.source_top) / layer.height;
-    const float v1 = static_cast<float>(layer.source_bottom) / layer.height;
+    // Surface transactions use top-left coordinates. Normalize the native
+    // producer storage origin once, before applying the explicit Android HAL
+    // transform. ANGLE composer-overlay buffers are already display-space;
+    // HWUI's Metal buffers retain a bottom-left storage origin.
+    const float v0 = layer.producer_bottom_left
+                         ? 1.0f - static_cast<float>(layer.source_top) /
+                               layer.height
+                         : static_cast<float>(layer.source_top) / layer.height;
+    const float v1 = layer.producer_bottom_left
+                         ? 1.0f - static_cast<float>(layer.source_bottom) /
+                               layer.height
+                         : static_cast<float>(layer.source_bottom) / layer.height;
     const auto texcoord = [&](size_t corner) {
       return TransformTexcoord(layer.transform, u0, v0, u1, v1, corner);
     };
