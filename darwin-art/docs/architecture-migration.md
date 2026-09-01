@@ -564,3 +564,28 @@ reported `looper avg=232us max=2806us`, `graphics avg=2267us max=330600us`, and
 `handoff avg=39915us max=331517us` with three over 16 ms and one over 50 ms.
 These values are a baseline for the upcoming dispatcher/fence slices, not a
 claim that the ART owner thread is already independent.
+
+The AppKit boundary is now executable. Surface lifecycle calls made from a
+non-main ART owner are synchronously marshalled to the AppKit main queue, and a
+new `darwin_art_appkit_pump_events` callback lets the host main actor service
+NSApplication before a Window exists. `run()` now launches the ART/JavaVM/
+GraphicsSession lifetime on a named `darwin-art-ui-owner` worker and keeps the
+calling main thread in the AppKit pump. The worker still owns the Android
+Looper and dispatches all framework work; the main actor never calls JNI.
+
+The worker topology passed the unchanged AOSP Calculator (`2+3=5`) and
+DeskClock Timer graphics acceptance after rebuilding the debug host. This is
+the first real owner-thread split, but Metal GPU begin/end and fence waits are
+not yet fully asynchronous; the next slice must move those presentation
+commands to the RenderThread-equivalent queue and remove caller-side waits.
+
+Acquire-fence latching is now non-blocking for the normal unsignaled case.
+`ASurfaceTransaction_apply` probes fences with a zero-timeout check and moves
+transactions with pending producers to a bounded (maximum eight) latch-worker
+set. The original transaction is immediately reusable/deletable, while the
+deferred copy retains its buffers and controls until the existing composition
+and callbacks complete. If the bounded set is saturated, the implementation
+falls back to synchronous application to preserve ordering. The graphics link
+and AOSP Calculator/DeskClock acceptance both pass with this path enabled;
+long-tail timing must be remeasured on Chrome before considering the fence
+stage complete.

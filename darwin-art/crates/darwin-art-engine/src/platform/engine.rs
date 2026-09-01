@@ -79,6 +79,21 @@ impl EngineSession {
         unsafe { !(self.engine.symbols().surface.active)().is_null() }
     }
 
+    /// Service AppKit while the ART owner is running on another thread.
+    /// Callers use this from the host's main actor, never from the ART worker.
+    pub fn pump_appkit_events(&self, seconds: f64) -> i32 {
+        // SAFETY: the callback belongs to this live engine image and accepts
+        // only a bounded duration value.
+        unsafe { (self.engine.symbols().surface.appkit_pump_events)(seconds) }
+    }
+
+    /// Returns the main-actor callback without borrowing the engine owner.
+    /// The image stays alive through `RuntimeSession`, so the host may call
+    /// this function pointer while the owner thread is running.
+    pub fn appkit_pump_callback(&self) -> darwin_art_engine_sys::AppKitPumpEventsFn {
+        self.engine.symbols().surface.appkit_pump_events
+    }
+
     pub fn create_surface(
         &self,
         info: &darwin_art_engine_sys::SurfaceCreateInfo,

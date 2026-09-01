@@ -30,6 +30,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <string>
@@ -327,6 +328,8 @@ std::mutex g_surface_controls_mutex;
 std::vector<SurfaceControl*> g_surface_controls;
 std::atomic<uint32_t> g_next_surface_layer_id{1};
 std::atomic<uint64_t> g_next_surface_transaction_id{1};
+std::atomic<uint32_t> g_pending_latch_workers{0};
+constexpr uint32_t kMaximumPendingLatchWorkers = 8;
 
 bool IsAttachedToCompositionRoot(
     const SurfaceControl* control,
@@ -1457,8 +1460,7 @@ extern "C" void darwin_art_android_surface_transaction_merge(
   source->complete_context = nullptr;
 }
 
-extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
-  auto* transaction = reinterpret_cast<SurfaceTransaction*>(opaque);
+static void ApplySurfaceTransaction(SurfaceTransaction* transaction) {
   if (transaction == nullptr) return;
   // A buffer may not be latched until its producer's acquire fence signals.
   // The descriptor is backed by the producer's MTLSharedEvent and remains
@@ -1868,6 +1870,81 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
     transaction->complete(transaction->complete_context, stats_opaque);
   transaction->controls.clear();
   ReleaseTransactionBuffers(transaction);
+}
+
+extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
+  auto* transaction = reinterpret_cast<SurfaceTransaction*>(opaque);
+  if (transaction == nullptr) return;
+
+  // SurfaceFlinger latches a buffer only after its acquire fence signals.  Do
+  // not park the ART/UI or renderer thread behind an unsignaled producer
+  // fence: transfer this transaction to a bounded one-shot latch worker and
+  // return immediately.  The public transaction is cleared so the caller may
+  // delete it according to the Android API contract while the retained
+  // buffers/controls remain owned by the deferred copy.
+  bool defer = false;
+  for (const auto& update : transaction->updates) {
+    if (update.acquire_fence < 0) continue;
+    if (sync_wait(update.acquire_fence, 0) != 0 && errno == ETIMEDOUT) {
+      defer = true;
+      break;
+    }
+  }
+  if (!defer) {
+    ApplySurfaceTransaction(transaction);
+    return;
+  }
+
+  uint32_t pending = g_pending_latch_workers.load(std::memory_order_relaxed);
+  while (pending < kMaximumPendingLatchWorkers &&
+         !g_pending_latch_workers.compare_exchange_weak(
+             pending, pending + 1, std::memory_order_acq_rel,
+             std::memory_order_relaxed)) {
+  }
+  if (pending >= kMaximumPendingLatchWorkers) {
+    // Keep the latch queue bounded. This is an exceptional producer burst;
+    // applying synchronously preserves Android transaction ordering while
+    // preventing unbounded detached waiters.
+    ApplySurfaceTransaction(transaction);
+    return;
+  }
+
+  if (DebugSurfaceTransactions()) {
+    std::fprintf(stderr,
+                 "ART Android SurfaceTransaction: defer acquire-fence "
+                 "updates=%zu pending=%u\n",
+                 transaction->updates.size(), pending + 1);
+  }
+
+  auto deferred = std::make_unique<SurfaceTransaction>(std::move(*transaction));
+  transaction->controls.clear();
+  transaction->updates.clear();
+  transaction->commit = nullptr;
+  transaction->commit_context = nullptr;
+  transaction->complete = nullptr;
+  transaction->complete_context = nullptr;
+  for (ASurfaceControl* control : deferred->controls) {
+    if (control != nullptr) ASurfaceControl_acquire(control);
+  }
+  try {
+    std::thread([deferred = std::move(deferred)]() mutable {
+      const auto controls = deferred->controls;
+      ApplySurfaceTransaction(deferred.get());
+      for (ASurfaceControl* control : controls) {
+        if (control != nullptr) ASurfaceControl_release(control);
+      }
+      g_pending_latch_workers.fetch_sub(1, std::memory_order_acq_rel);
+    }).detach();
+  } catch (...) {
+    // A thread creation failure is exceptional; preserve correctness even if
+    // latency temporarily regresses by applying on the caller as a fallback.
+    const auto controls = deferred->controls;
+    ApplySurfaceTransaction(deferred.get());
+    for (ASurfaceControl* control : controls) {
+      if (control != nullptr) ASurfaceControl_release(control);
+    }
+    g_pending_latch_workers.fetch_sub(1, std::memory_order_acq_rel);
+  }
 }
 
 extern "C" void ASurfaceTransaction_setOnCommit(ASurfaceTransaction* opaque,

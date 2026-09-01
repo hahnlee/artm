@@ -1243,6 +1243,30 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
   return RunOnMainSync([&] { return PumpSurfaceEventsOnMain(surface, seconds); });
 }
 
+int32_t darwin_art_appkit_pump_events(double seconds) {
+  if (!IsMainThread() || !std::isfinite(seconds) || seconds < 0.0 ||
+      seconds > 30.0) {
+    return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+  }
+  @autoreleasepool {
+    NSApplication* application = NSApplication.sharedApplication;
+    NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    while (deadline.timeIntervalSinceNow > 0.0) {
+      const NSTimeInterval slice_seconds =
+          std::min<NSTimeInterval>(0.016, deadline.timeIntervalSinceNow);
+      NSDate* slice_deadline =
+          [NSDate dateWithTimeIntervalSinceNow:slice_seconds];
+      NSEvent* event = [application nextEventMatchingMask:NSEventMaskAny
+                                                untilDate:slice_deadline
+                                                   inMode:NSDefaultRunLoopMode
+                                                  dequeue:YES];
+      if (event != nil) [application sendEvent:event];
+      [application updateWindows];
+    }
+  }
+  return DARWIN_ART_SURFACE_OK;
+}
+
 bool darwin_art_surface_next_pointer_event(
     DarwinArtSurface* surface,
     DarwinArtPointerEvent* out_event) {

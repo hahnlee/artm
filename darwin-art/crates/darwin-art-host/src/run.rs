@@ -13,7 +13,10 @@ use crate::runtime::HostRuntime;
 use crate::teardown::RuntimeShutdownGuard;
 #[cfg(target_os = "macos")]
 use darwin_art_engine::EngineSession;
+use darwin_art_engine_sys::AppKitPumpEventsFn;
 use darwin_art_runtime::{ProviderBridge, ProviderKind, Subsystem};
+use std::sync::mpsc::{self, SyncSender, TryRecvError};
+use std::thread;
 
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
@@ -29,6 +32,68 @@ fn exit_android_process(status: i32) -> ! {
 }
 
 pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
+    #[cfg(target_os = "macos")]
+    {
+        return run_with_appkit_actor(options.clone());
+    }
+    #[cfg(not(target_os = "macos"))]
+    run_owner(options, None)
+}
+
+#[cfg(target_os = "macos")]
+enum WorkerMessage {
+    AppKitPump(AppKitPumpEventsFn),
+    Finished(Result<HostOutcome, HostError>),
+}
+
+#[cfg(target_os = "macos")]
+fn run_with_appkit_actor(options: RunOptions) -> Result<HostOutcome, HostError> {
+    let (sender, receiver) = mpsc::sync_channel::<WorkerMessage>(2);
+    let worker = thread::Builder::new()
+        .name("darwin-art-ui-owner".to_owned())
+        .spawn(move || {
+            let result = run_owner(&options, Some(&sender));
+            let _ = sender.send(WorkerMessage::Finished(result));
+        })
+        .map_err(|error| HostError::HostService(format!("spawn ART UI owner: {error}")))?;
+
+    let mut appkit_pump: Option<AppKitPumpEventsFn> = None;
+    let result = loop {
+        match receiver.try_recv() {
+            Ok(WorkerMessage::AppKitPump(callback)) => appkit_pump = Some(callback),
+            Ok(WorkerMessage::Finished(result)) => break result,
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                break Err(HostError::HostService(
+                    "ART UI owner disconnected before completion".to_owned(),
+                ));
+            }
+        }
+
+        if let Some(callback) = appkit_pump {
+            // Keep NSApplication responsive while the ART worker is blocked
+            // in framework work or waiting for a marshalled Surface call.
+            // The callback itself is main-thread-only and never invokes JNI.
+            let status = unsafe { callback(0.008) };
+            if status != 0 {
+                break Err(HostError::SurfaceFailed {
+                    operation: "appkit_main_actor_pump",
+                    status,
+                });
+            }
+        } else {
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
+    };
+    let _ = worker.join();
+    result
+}
+
+fn run_owner(
+    options: &RunOptions,
+    #[cfg(target_os = "macos")] appkit_sender: Option<&SyncSender<WorkerMessage>>,
+    #[cfg(not(target_os = "macos"))] _appkit_sender: Option<&()>,
+) -> Result<HostOutcome, HostError> {
     options.validate()?;
 
     #[cfg(not(target_os = "macos"))]
@@ -55,6 +120,11 @@ pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
 
         let bootstrap = attach_runtime(shutdown_guard.runtime(), &options.library)?;
         let graphics_attached = bootstrap.graphics_attached;
+        if let (Some(sender), Some(engine)) = (appkit_sender, shutdown_guard.runtime().engine()) {
+            sender
+                .send(WorkerMessage::AppKitPump(engine.appkit_pump_callback()))
+                .map_err(|_| HostError::HostService("AppKit actor disconnected".to_owned()))?;
+        }
 
         if let Err(error) = shutdown_guard
             .runtime()

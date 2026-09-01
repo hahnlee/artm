@@ -4,7 +4,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use darwin_art_engine_sys::{
-    GraphicsSessionCloseFn, GraphicsSessionCreateFn, GraphicsSessionDestroyFn,
+    AppKitPumpEventsFn, GraphicsSessionCloseFn, GraphicsSessionCreateFn, GraphicsSessionDestroyFn,
     GraphicsSessionDispatchKeyV1Fn, GraphicsSessionDispatchPointerFn,
     GraphicsSessionDispatchPointerV2Fn, GraphicsSessionPumpFrameFn,
     GraphicsSessionPumpMainLooperFn, ProviderClearHooksFn, ProviderInstallHooksFn,
@@ -33,6 +33,7 @@ pub(crate) struct SurfaceSymbols {
     pub next_key_event_v1: Option<SurfaceNextKeyEventV1Fn>,
     pub destroy: SurfaceDestroyFn,
     pub active: SurfaceActiveFn,
+    pub appkit_pump_events: AppKitPumpEventsFn,
 }
 
 #[derive(Clone, Copy)]
@@ -95,6 +96,7 @@ impl LoadedEngine {
                         .ok(),
                     destroy: library.symbol(b"darwin_art_surface_destroy\0")?,
                     active: library.symbol(b"darwin_art_surface_active_gpu\0")?,
+                    appkit_pump_events: library.symbol(b"darwin_art_appkit_pump_events\0")?,
                 },
                 graphics: GraphicsSymbols {
                     create: library.symbol(b"darwin_art_graphics_session_create\0").ok(),

@@ -233,6 +233,11 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
     DarwinArtSurface* surface,
     double seconds);
 
+// Services the process NSApplication run loop without requiring a surface.
+// The host main thread uses this while ART is running on its owner worker and
+// before the Activity has created its first Window/Surface.
+int32_t darwin_art_appkit_pump_events(double seconds);
+
 // Removes the oldest pointer event captured by the surface's NSView mailbox.
 // This dequeue is safe from a non-main worker; it touches no AppKit object.
 // Event
