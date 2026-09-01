@@ -1331,6 +1331,11 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
       }
       if (callback_result == 0)
         ALooper_removeFd(looper, registration.fd);
+      // Android's Looper::pollOnce reports one callback per poll. Returning
+      // here preserves that scheduling boundary instead of walking every
+      // ready descriptor in one host turn and allowing a native callback
+      // burst to delay Java MessageQueue/Choreographer work.
+      return ALOOPER_POLL_CALLBACK;
     } else {
       if (out_fd != nullptr) *out_fd = registration.fd;
       if (out_events != nullptr) *out_events = events;
@@ -1446,9 +1451,11 @@ extern "C" int darwin_art_android_platform_poll_current_looper() {
   int dispatched = 0;
   ++g_host_looper_turn;
   g_host_looper_turn_active = true;
-  // Keep the bounded host drain separate from the public ALooper ABI. The
-  // callback itself remains sequence-affine to the registering Looper thread.
-  constexpr int kHostCallbackBudget = 128;
+  // Keep the bounded host drain separate from the public ALooper ABI. A
+  // callback is still sequence-affine to the registering Looper thread, but
+  // the small per-turn budget prevents a ready native-fd burst from consuming
+  // an entire ART/UI turn before Java MessageQueue and Choreographer work run.
+  constexpr int kHostCallbackBudget = 8;
   int status = 0;
   for (int iteration = 0; iteration < kHostCallbackBudget; ++iteration) {
     const int result = ALooper_pollOnce(0, nullptr, nullptr, nullptr);

@@ -1049,3 +1049,20 @@ Actor snapshots were approximately 2.5--2.9 ms average with an 88 ms maximum
 across the participating processes; owner metrics remained the known
 Chromium-callback-limited tail (`handoff` p95 about 2.06 s). This separates
 AppKit observation cost from the still-unpreemptible guest native callback.
+
+## 2026-09-02 scheduler-separation progress (Looper callback fairness)
+
+`ALooper_pollOnce` now returns immediately after dispatching one ready native
+callback, matching Android's one-callback poll boundary instead of invoking
+every ready descriptor in one call. The host-side native drain is additionally
+bounded to eight callbacks per owner turn, allowing Java MessageQueue and
+Choreographer work to regain scheduling opportunities during startup bursts.
+Callback affinity is unchanged: callbacks still execute on the Looper thread
+that registered them, so this is a fairness boundary rather than an unsafe
+thread migration.
+
+Verification: graphics-link audit, Rust host tests (7/7), AOSP Calculator and
+DeskClock acceptance, and Chrome tab-switcher/tab-grid acceptance all pass.
+The slow-frame run still reports the known single guest callback tail
+(approximately 2.07 s); the change removes callback bursts but cannot
+preempt a callback that is already executing.
