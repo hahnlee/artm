@@ -1326,3 +1326,19 @@ graphics acceptance (target states 9) pass. The remaining transport work is
 focus handoff/CANCEL, outbound ACK retry, and physical Chrome input timing;
 `nativeConsumeBatchedInputEvents` remains intentionally disabled until those
 tests cover the receiver lifecycle.
+
+## 2026-09-02 scheduler-separation progress (focus/dispose lifetime gate)
+
+Focus handoff now disables the previous channel consumer, clears its pending
+payload/token state, and installs the new focused channel; stale packets can no
+longer remain stranded behind the global focused-channel pointer. Receiver
+dispose marks the object disposed before unregistering its fd and retains a
+strong owner while a callback is active, deferring global-reference cleanup
+until the callback has returned. This closes the callback/dispose use-after-
+free window, while the Android CANCEL packet on focus loss remains a follow-up
+transport refinement.
+
+Native audit, AOSP Calculator/DeskClock acceptance, and Chrome tab-grid
+graphics acceptance (target states 10) pass after the lifetime change. The
+remaining gates are explicit focus-loss CANCEL delivery, outbound ACK retry,
+physical Chrome input timing, and only then enabling native batched consume.

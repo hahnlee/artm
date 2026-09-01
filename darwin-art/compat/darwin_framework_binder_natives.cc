@@ -58,6 +58,9 @@ struct DarwinInputReceiver {
   void* looper = nullptr;
   bool transport_registered = false;
   std::atomic<bool> disposed{false};
+  std::atomic<bool> dispose_requested{false};
+  std::atomic<bool> refs_cleaned{false};
+  std::atomic<uint32_t> active_callbacks{0};
 };
 
 void ClearParcel(JNIEnv* env, DarwinParcel* parcel) {
@@ -493,15 +496,44 @@ std::weak_ptr<DarwinInputChannelState> g_focused_input_channel;
 
 void SetFocusedInputChannel(
     const std::shared_ptr<DarwinInputChannelState>& channel) {
-  std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
-  g_focused_input_channel = channel;
+  std::shared_ptr<DarwinInputChannelState> previous;
+  {
+    std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
+    previous = g_focused_input_channel.lock();
+    g_focused_input_channel = channel;
+  }
+  if (previous != nullptr && previous != channel) {
+    previous->looper_consumer.store(false, std::memory_order_release);
+    std::lock_guard<std::mutex> lock(previous->packet_mutex);
+    previous->packets.clear();
+    if (previous->read_fd >= 0) {
+      uint8_t buffer[64];
+      while (recv(previous->read_fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
+      }
+    }
+    previous->pending_input.store(false, std::memory_order_release);
+  }
 }
 
 void ClearFocusedInputChannel(
     const std::shared_ptr<DarwinInputChannelState>& channel) {
-  std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
-  const auto focused = g_focused_input_channel.lock();
-  if (focused == nullptr || focused == channel) g_focused_input_channel.reset();
+  std::shared_ptr<DarwinInputChannelState> focused;
+  {
+    std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
+    focused = g_focused_input_channel.lock();
+    if (focused == nullptr || focused == channel) g_focused_input_channel.reset();
+  }
+  if (focused != nullptr && focused == channel) {
+    focused->looper_consumer.store(false, std::memory_order_release);
+    std::lock_guard<std::mutex> lock(focused->packet_mutex);
+    focused->packets.clear();
+    if (focused->read_fd >= 0) {
+      uint8_t buffer[64];
+      while (recv(focused->read_fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
+      }
+    }
+    focused->pending_input.store(false, std::memory_order_release);
+  }
 }
 
 void NotifyFocusedInputChannel() {
@@ -855,6 +887,23 @@ bool DispatchChannelPacket(JNIEnv* env, DarwinInputReceiver* receiver,
   return delivered;
 }
 
+void CleanupReceiverRefs(JNIEnv* env, DarwinInputReceiver* receiver) {
+  if (env == nullptr || receiver == nullptr) return;
+  bool expected = false;
+  if (!receiver->refs_cleaned.compare_exchange_strong(
+          expected, true, std::memory_order_acq_rel)) {
+    return;
+  }
+  if (receiver->weak_receiver != nullptr) {
+    env->DeleteGlobalRef(receiver->weak_receiver);
+    receiver->weak_receiver = nullptr;
+  }
+  if (receiver->view_root != nullptr) {
+    env->DeleteGlobalRef(receiver->view_root);
+    receiver->view_root = nullptr;
+  }
+}
+
 int InputChannelTransportCallback(int fd, int events, void* data) {
   (void)events;
   auto* channel = static_cast<DarwinInputChannelState*>(data);
@@ -873,6 +922,14 @@ int InputChannelTransportCallback(int fd, int events, void* data) {
       g_framework_vm == nullptr ||
       g_framework_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) !=
           JNI_OK || env == nullptr) {
+    return 1;
+  }
+  receiver->active_callbacks.fetch_add(1, std::memory_order_acq_rel);
+  if (receiver->disposed.load(std::memory_order_acquire)) {
+    const uint32_t previous =
+        receiver->active_callbacks.fetch_sub(1, std::memory_order_acq_rel);
+    if (previous == 1 && receiver->dispose_requested.load(std::memory_order_acquire))
+      CleanupReceiverRefs(env, receiver.get());
     return 1;
   }
   constexpr size_t kMaxPacketsPerCallback = 64;
@@ -897,6 +954,10 @@ int InputChannelTransportCallback(int fd, int events, void* data) {
               << (channel->pending_input.load(std::memory_order_acquire) ? 1 : 0)
               << "\n";
   }
+  const uint32_t previous =
+      receiver->active_callbacks.fetch_sub(1, std::memory_order_acq_rel);
+  if (previous == 1 && receiver->dispose_requested.load(std::memory_order_acquire))
+    CleanupReceiverRefs(env, receiver.get());
   return 1;
 }
 
@@ -908,13 +969,14 @@ void InputReceiverDispose(JNIEnv* env, jclass, jlong pointer) {
       static_cast<std::uintptr_t>(pointer));
   if (receiver == nullptr) return;
   std::shared_ptr<DarwinInputReceiver> keep_alive;
+  receiver->dispose_requested.store(true, std::memory_order_release);
+  receiver->disposed.store(true, std::memory_order_release);
   if (receiver->channel != nullptr) {
     auto channel = receiver->channel;
     {
       std::lock_guard<std::mutex> lock(channel->packet_mutex);
       if (channel->consumer.get() == receiver) keep_alive = channel->consumer;
     }
-    receiver->disposed.store(true, std::memory_order_release);
     channel->looper_consumer.store(false, std::memory_order_release);
     {
       std::lock_guard<std::mutex> lock(channel->packet_mutex);
@@ -926,13 +988,12 @@ void InputReceiverDispose(JNIEnv* env, jclass, jlong pointer) {
     (void)darwin_art_android_platform_remove_fd(
         receiver->looper, receiver->channel->read_fd);
   }
-  if (receiver->weak_receiver != nullptr) {
-    env->DeleteGlobalRef(receiver->weak_receiver);
+  if (receiver->active_callbacks.load(std::memory_order_acquire) == 0) {
+    CleanupReceiverRefs(env, receiver);
   }
-  if (receiver->view_root != nullptr) {
-    env->DeleteGlobalRef(receiver->view_root);
-  }
-  delete receiver;
+  // A channel-owned shared_ptr (or the callback's strong snapshot) performs
+  // the actual object destruction after any in-flight callback returns.
+  if (keep_alive == nullptr && receiver->channel == nullptr) delete receiver;
 }
 jstring InputReceiverDump(JNIEnv* env, jclass, jlong, jstring) {
   return env->NewStringUTF("");
