@@ -819,3 +819,17 @@ passed with real `MotionEvent` input, GPU child surfaces, and nine composed
 target states. The remaining long-tail measurement must be repeated with the
 callback-vtable probe enabled to determine whether a single callback body is
 still multi-second after wake coalescing.
+
+## 2026-09-02 scheduler-separation progress (post-eventfd measurement)
+
+With `DARWIN_ART_DEBUG_SLOW_FRAME=1`, `DARWIN_ART_DEBUG_CALLBACK_VTABLE=1`,
+and frame timing enabled after the eventfd change, the native callback still
+measured `414ms`, `635ms`, and `2053ms` on fd `1073742850`; the aggregate was
+`looper avg=314us max=2060817us`, `graphics avg=98us max=1020us`, with one
+sample over one second. This confirms wake-token coalescing is correct but
+does not shorten a single Chromium callback body. The safe next slice is
+inside Chromium's task-runner/IPC implementation (or a proven separate
+process registration), not in generic Looper callback migration. The debug
+acceptance's tab-grid assertion remains timing-sensitive; a normal immediate
+retry passed with nine composed states, and the AOSP Calculator/DeskClock
+gate remains green.
