@@ -1868,7 +1868,9 @@ int32_t pump_main_looper(GraphicsState* state) {
     }
     return 75;
   }
-  ActivateCurrentHostSurfaces(state, env);
+  // SurfaceView lifecycle repair is display-paced in pump_frame(). Keeping it
+  // out of this short owner-Looper poll avoids traversing the full
+  // WindowManager hierarchy on every 1–2 ms host turn.
   DebugWindowManagerViews(env);
   return 0;
 }
@@ -1911,8 +1913,6 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
     return 75;
   }
   log_slow_frame_stage("dispatch_main_before_vsync");
-  ActivateCurrentHostSurfaces(state, env);
-  log_slow_frame_stage("activate_surfaces");
   DebugWindowManagerViews(env);
 #if defined(DARWIN_ART_REAL_GRAPHICS)
   auto* animation_context = state->hwui_animation_context.get();
@@ -1949,6 +1949,14 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
       darwin_art::DispatchFrameworkPendingVsyncs(env, frame_time_nanos);
   log_slow_frame_stage("dispatch_vsync");
   bool ok = delivered_vsyncs >= 0 && !env->ExceptionCheck();
+  if (ok && delivered_vsyncs > 0) {
+    // Synchronize detached SurfaceView state at display cadence, after the
+    // framework has received its vsync, while keeping JNI reflection off the
+    // input/message fast path.
+    ActivateCurrentHostSurfaces(state, env);
+    ok = !env->ExceptionCheck();
+    log_slow_frame_stage("activate_surfaces");
+  }
   // The vsync callback posts Choreographer work onto the owner Looper. Do not
   // synchronously drain MessageQueue again inside this frame pulse: the host
   // turn before the next display edge will dispatch it, matching Android's

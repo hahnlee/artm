@@ -643,3 +643,23 @@ not AppKit/Metal backpressure. AOSP Calculator (`2+3=5`) and DeskClock Timer
 acceptance remain green after the change. The next scheduler slice should
 profile that Chrome startup message burst and avoid unnecessary per-frame JNI
 reflection, while preserving the current Android Looper ownership semantics.
+
+## 2026-09-01 scheduler-separation progress (display-paced surface sync)
+
+`ActivateCurrentHostSurfaces` no longer walks WindowManager/SurfaceView state on
+every short owner-Looper poll. It now runs only when a display-vsync was
+delivered, immediately before scanout, so the Android Looper can service input
+and Binder messages without repeated JNI reflection. The normal framework
+ownership remains unchanged: ViewRoot/View traversal still owns layout and
+SurfaceFlinger still owns buffer latching.
+
+Latest Chrome acceptance remains green (`target-states=10`, real tab-switcher
+and tab-grid views). Timing with the new dylib is
+`looper count=15332 avg=415us max=2168788us`,
+`graphics count=2044 avg=379us max=43637us`, and
+`handoff count=11 avg=257435us max=2169199us`. The average fast path improved
+again; the single ~2.17s maximum is still a startup UI message burst rather
+than AppKit scanout. AOSP Calculator (`2+3=5`) and DeskClock Timer continue to
+pass. The next step is to identify that specific startup message batch and
+move only non-UI work (Binder/service setup or native polling) off the UI
+Looper, without reducing the Android message-delivery contract.
