@@ -1947,6 +1947,17 @@ int32_t pump_main_looper(GraphicsState* state) {
     }
     return 75;
   }
+  // AppKit publishes the Android input hint before waking this owner. Clear
+  // it only while the surface mailbox is empty and its framework messages have
+  // been delivered; a producer racing this check reasserts the hint after the
+  // same mailbox mutex is released.
+  if (state->gpu_surface != nullptr) {
+    (void)darwin_art_surface_clear_input_hint_if_empty(state->gpu_surface);
+  } else {
+    // Headless runs have no AppKit mailbox, but must still leave a clean
+    // process-global hint for a subsequent owner session.
+    darwin_art::ClearFrameworkInputPending();
+  }
   // SurfaceView lifecycle repair is display-paced in pump_frame(). Keeping it
   // out of this short owner-Looper poll avoids traversing the full
   // WindowManager hierarchy on every 1–2 ms host turn.

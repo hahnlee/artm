@@ -1100,11 +1100,29 @@ acceptance after rebuilding the native dylib passed with ten target states.
 
 ## 2026-09-02 scheduler-separation progress (Chromium callback identity)
 
-The callback address was matched against the packaged `libchrome.so`: it is
-the `NativeChildProcessService` ALooper thunk, which dispatches through the
-service object's vtable after registering the child-process pipe. The 0.4 s
-and 2.0 s samples therefore represent Chromium service work, not a runtime
-poll or Metal operation. The runtime preserves this callback's registering
-thread and only bounds how many callbacks a host turn may start; any further
-latency reduction must come from a cooperative boundary inside Chromium's
-MessagePump/service implementation rather than from unsafe runtime migration.
+The callback address was matched against the packaged `libchrome.so`: the
+nearest stripped label is `NativeChildProcessService_onCreate`, but the
+disassembly is actually Chromium's `MessagePumpAndroid::NonDelayedLooperCallback`
+and its `DoNonDelayedLooperWork()` task batch (the label is only the closest
+surviving symbol). The 0.4 s and 2.0 s samples therefore represent browser
+MessagePump work, not a runtime poll or Metal operation. The callback remains
+on its registering Looper thread; further latency reduction must use
+Chromium's own cooperative input hint rather than unsafe runtime migration.
+
+## 2026-09-02 scheduler-separation progress (probablyHasInput bridge)
+
+Android's `InputEventReceiver.nativeProbablyHasInput()` is now connected to the
+host input mailbox. AppKit publishes an atomic pending hint after a packet is
+queued and wakes the owner Looper; the owner clears the hint after draining
+the mailbox and delivering framework input. Chromium's MessagePump can thus
+observe a newly arrived physical packet from inside a native callback, call
+`ScheduleWork()`, and return to the same owner Looper without violating
+sequence affinity. The bridge is intentionally atomic-only across AppKit and
+ART; no `JNIEnv`, `GraphicsSession`, or callback is moved between threads.
+
+This is the first runtime-side cooperative boundary for the previously
+unpreemptible callback tail. It does not claim to interrupt an already-running
+batch when no input is pending, and the final Android shape remains a focused
+InputChannel queue rather than one process-global hint. Rebuild and rerun
+Chrome physical-click timing to measure callback return latency, while
+Calculator/DeskClock acceptance remains a regression gate.

@@ -667,10 +667,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 0;
   }
   if (run_apk_app) {
-    // NSWindow/CAMetalLayer and the ART process owner are both the host's
-    // current thread. Keep the Android application owner on that same thread:
-    // this is the thread recorded by begin_run(), bound to the ART runtime,
-    // and later used by graphics/input callbacks.
+    // The ART process owner remains the Android main/UI Looper thread recorded
+    // by begin_run(). NSWindow/CAMetalLayer creation is marshalled to the
+    // AppKit actor, while graphics/input callbacks stay on this owner thread;
+    // no JNI or GraphicsSession state crosses into AppKit.
     if (darwin_art_graphics::prepare_gpu_surface(
             graphics_state, kApkFrameWidth * window_scale,
             kApkFrameHeight * window_scale) != 0) {

@@ -2,6 +2,8 @@
 
 #include <jni.h>
 
+#include "darwin_framework_input_hint.h"
+
 namespace darwin_art {
 
 enum class FrameworkGraphicsBackend {

@@ -3,6 +3,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 #include "darwin_surface_internal.h"
 #include "darwin_android_time.h"
+#include "darwin_framework_input_hint.h"
 
 #include <algorithm>
 #include <cmath>
@@ -449,6 +450,11 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
       _pointerEvents.push_back(packet);
     }
   }
+  // Publish the hint after the packet is visible under the mailbox mutex.
+  // Chromium's native MessagePump may sample it from its owner Looper before
+  // the owner gets a chance to drain the queue, matching Android's
+  // nativeProbablyHasInput cooperative return contract.
+  darwin_art::NotifyFrameworkInputPending();
   [self signalOwnerWake];
   if (action == DARWIN_ART_POINTER_DOWN) {
     _pointerActive = YES;
@@ -511,6 +517,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
         .unicode_char = unicode_char,
     });
   }
+  darwin_art::NotifyFrameworkInputPending();
   [self signalOwnerWake];
   if (action == 1) {
     _keyDownTimes.erase(scan_code);
@@ -568,6 +575,17 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   return YES;
 }
 
+- (BOOL)clearInputHintIfEmpty {
+  std::lock_guard<std::mutex> lock(_eventMutex);
+  if (!_pointerEvents.empty() || !_keyEvents.empty()) return NO;
+  // Keep the clear under the same mutex as the queue-empty check. AppKit
+  // producers publish their release-store hint only after pushing under this
+  // mutex, so an enqueue racing this operation reasserts the hint afterward.
+  darwin_art::ClearFrameworkInputPending();
+  _ownerWakePending.store(false, std::memory_order_release);
+  return YES;
+}
+
 - (void)cancelPointerStream {
   if (!_pointerActive) return;
   const uint64_t event_time_nanos = AndroidEventTimeNanos();
@@ -593,6 +611,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
     _pointerActive = NO;
     _downTimeNanos = 0;
   }
+  darwin_art::NotifyFrameworkInputPending();
   [self signalOwnerWake];
 }
 
@@ -1469,6 +1488,11 @@ bool darwin_art_surface_next_key_event_v1(
     return false;
   }
   return [surface->view nextKeyEventV1:out_event] == YES;
+}
+
+bool darwin_art_surface_clear_input_hint_if_empty(DarwinArtSurface* surface) {
+  if (surface == nullptr || surface->view == nil) return false;
+  return [surface->view clearInputHintIfEmpty] == YES;
 }
 
 static DarwinArtSurfaceResult DestroySurfaceOnMain(

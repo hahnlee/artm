@@ -22,6 +22,7 @@ struct DarwinArtSurface;
 - (BOOL)nextPointerEvent:(DarwinArtPointerEvent*)outEvent;
 - (BOOL)nextPointerEventV2:(DarwinArtPointerEventV2*)outEvent;
 - (BOOL)nextKeyEventV1:(DarwinArtKeyEventV1*)outEvent;
+- (BOOL)clearInputHintIfEmpty;
 - (void)cancelPointerStream;
 - (void)updateDrawableSize;
 - (void)setOwnerSurface:(DarwinArtSurface*)surface;

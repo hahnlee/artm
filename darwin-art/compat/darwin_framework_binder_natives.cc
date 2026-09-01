@@ -33,6 +33,13 @@ namespace {
 std::mutex g_context_binder_mutex;
 jobject g_context_binder = nullptr;
 
+// AppKit publishes input packets asynchronously while Chromium may be inside
+// a native MessagePump callback on the ART owner. Android exposes this as the
+// InputEventReceiver.nativeProbablyHasInput() hint; keeping the state in one
+// release/acquire bit gives the guest callback a safe cooperative boundary
+// without migrating it away from its registering Looper thread.
+std::atomic<bool> g_framework_input_pending{false};
+
 struct DarwinParcel {
   std::vector<uint8_t> data;
   size_t position = 0;
@@ -566,8 +573,18 @@ jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
   return static_cast<jlong>(
       reinterpret_cast<std::uintptr_t>(receiver));
 }
-jboolean InputReceiverProbablyHasInput(JNIEnv*, jclass, jlong) {
-  return JNI_FALSE;
+jboolean InputReceiverProbablyHasInput(JNIEnv*, jclass pointer_class,
+                                       jlong pointer) {
+  (void)pointer_class;
+  auto* receiver = reinterpret_cast<DarwinInputReceiver*>(
+      static_cast<std::uintptr_t>(pointer));
+  if (receiver == nullptr || receiver->channel == nullptr ||
+      receiver->weak_receiver == nullptr) {
+    return JNI_FALSE;
+  }
+  return g_framework_input_pending.load(std::memory_order_acquire)
+             ? JNI_TRUE
+             : JNI_FALSE;
 }
 void InputReceiverReportTimeline(JNIEnv*, jclass, jlong, jint, jlong, jlong) {}
 
@@ -1428,6 +1445,14 @@ void RunRemoteBinderDispatcher(JavaVM* vm, int fd, uint64_t generation) {
 }  // namespace
 
 namespace darwin_art {
+
+void NotifyFrameworkInputPending() {
+  g_framework_input_pending.store(true, std::memory_order_release);
+}
+
+void ClearFrameworkInputPending() {
+  g_framework_input_pending.store(false, std::memory_order_release);
+}
 
 bool StartRemoteBinderDispatcher(JNIEnv* env, jint control_fd) {
   if (env == nullptr || control_fd < 0) return false;

@@ -283,6 +283,11 @@ bool darwin_art_surface_next_key_event_v1(
     DarwinArtSurface* surface,
     DarwinArtKeyEventV1* out_event);
 
+// Atomically observes the AppKit mailbox and clears Android's
+// probablyHasInput hint only while it is empty. A producer that enqueues after
+// this check publishes a new hint after the mailbox mutex is released.
+bool darwin_art_surface_clear_input_hint_if_empty(DarwinArtSurface* surface);
+
 // Waits for the most recently submitted command buffer, closes the window,
 // and releases all owned Apple objects. Calls from an ART worker are
 // synchronously marshalled to AppKit's main queue.
