@@ -1389,6 +1389,24 @@ runtime dispatch failure; the next measurement must use an accessibility-
 authorized caller or an in-app hardware event trace. Native batching remains
 disabled until that evidence and ACK overflow stress coverage exist.
 
+## 2026-09-02 scheduler-separation progress (cold versus warm latency)
+
+Slow-frame tracing on Chromium showed the large percentile is dominated by
+cold startup: the first `MessagePumpAndroid::NonDelayedLooperCallback`-style
+guest callback occupied the ART owner for about 2.03 s while Chrome created
+its renderer/service graph, and another startup callback took about 447 ms.
+The recorded `input->framework-pulse` p95 was therefore about 2.04 s even
+though the later tab-grid interaction completed normally. A warm acceptance
+run recorded p95 about 8 ms, so the metric must be reported as cold-start and
+warm-interaction buckets rather than treated as a single tab-switch number.
+
+This confirms the scheduler boundary is functioning (the callback remains
+owner-affine as Android requires) but leaves cold-start Binder/service work as
+the next performance investigation. Preempting an opaque Chromium callback
+would violate the Android Looper contract; the pending work is to expose
+stage-level timing and reduce synchronous service setup without moving View
+or Binder state across threads.
+
 ## 2026-09-02 scheduler-separation progress (Looper HUP backpressure)
 
 A real Chrome launch with input-latency logging exposed repeated
