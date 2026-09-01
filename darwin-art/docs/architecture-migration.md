@@ -1146,6 +1146,22 @@ requires a Manager run with macOS Accessibility input enabled; the next
 runtime slice is a real fd-backed InputChannel queue and its finish/consume
 acknowledgement path.
 
+## 2026-09-02 scheduler-separation progress (fd transport registration)
+
+The channel wake token is now registered as a real owner-Looper source:
+`nativeInit` installs the channel read fd with `ALooper_addFd`, and
+`nativeDispose` removes it before releasing the receiver's shared channel
+state. The callback drains only transport tokens; the pending bit remains set
+until the host mailbox has delivered the corresponding Android event, so a
+native callback can still observe `probablyHasInput` and yield cooperatively.
+
+This preserves the current bounded mailbox payload and ACK ordering while
+eliminating the previous hint-only wake path. Native graphics bootstrap/link
+audit and AOSP Calculator/DeskClock acceptance pass after the change. The
+remaining work is to serialize MotionEvent/KeyEvent payloads and sequence
+finish/consume results on the channel itself, then collect Chrome physical
+latency percentiles under a real input load.
+
 ## 2026-09-02 scheduler-separation progress (InputChannel transport token)
 
 Each compatibility InputChannel now owns a nonblocking Unix socketpair. The
