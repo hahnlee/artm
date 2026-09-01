@@ -451,6 +451,11 @@ struct DarwinInputChannelState {
   // publishes this release/acquire bit after queueing a packet; the focused
   // InputEventReceiver reads it from Chromium's owner Looper.
   std::atomic<bool> pending_input{false};
+  // Finish acknowledgements are channel state, not receiver-local state. The
+  // client/server wrappers therefore observe one sequence result even while
+  // payload migration is still in progress.
+  std::atomic<jint> last_finished_sequence{0};
+  std::atomic<bool> last_finished_handled{false};
   int read_fd = -1;
   int write_fd = -1;
 };
@@ -622,6 +627,12 @@ void InputReceiverFinish(JNIEnv*, jclass, jlong pointer, jint sequence,
   if (receiver != nullptr) {
     receiver->last_finished_sequence = sequence;
     receiver->last_finished_handled = handled == JNI_TRUE;
+    if (receiver->channel != nullptr) {
+      receiver->channel->last_finished_sequence.store(
+          sequence, std::memory_order_release);
+      receiver->channel->last_finished_handled.store(
+          handled == JNI_TRUE, std::memory_order_release);
+    }
   }
   if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
     std::cerr << "ART Android InputEvent finish sequence=" << sequence
@@ -2105,9 +2116,16 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
     const jint sequence = receiver->next_sequence++;
     receiver->last_finished_sequence = 0;
     receiver->last_finished_handled = false;
+    receiver->channel->last_finished_sequence.store(
+        0, std::memory_order_release);
+    receiver->channel->last_finished_handled.store(
+        false, std::memory_order_release);
     env->CallVoidMethod(target, dispatch, sequence, event);
-    if (handled != nullptr && receiver->last_finished_sequence == sequence) {
-      *handled = receiver->last_finished_handled;
+    if (handled != nullptr &&
+        receiver->channel->last_finished_sequence.load(
+            std::memory_order_acquire) == sequence) {
+      *handled = receiver->channel->last_finished_handled.load(
+          std::memory_order_acquire);
     }
   }
   const bool delivered = target != nullptr && dispatch != nullptr &&

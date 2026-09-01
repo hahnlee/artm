@@ -1178,3 +1178,19 @@ InputChannel implementation. Native rebuild/audit and AOSP Calculator/
 DeskClock acceptance pass. The next step is moving packet payload and
 sequence/finish acknowledgement onto the channel queue, followed by a Chrome
 physical-input run that measures callback-return latency under load.
+
+## 2026-09-02 scheduler-separation progress (channel ACK ownership)
+
+`InputEventReceiver.nativeFinishInputEvent` now publishes its sequence and
+handled result into the shared `DarwinInputChannelState` with release stores;
+the framework dispatch path resets and reads that state with acquire loads.
+The client/server channel wrappers therefore share one ACK record instead of
+using receiver-local bookkeeping, matching Android's channel-level finish
+contract and preparing the payload queue migration.
+
+The native rebuild/link audit and AOSP Calculator/DeskClock acceptance pass.
+`nativeConsumeBatchedInputEvents` remains intentionally inert until channel
+payloads are serialized (returning success without dispatch would lose an
+event). The next slice is the bounded pointer/key packet queue on the channel,
+then Chrome physical-input latency measurement with cooperative callback yield
+enabled.
