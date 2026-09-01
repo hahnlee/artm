@@ -438,23 +438,17 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
       .pressure = 1.0f,
       .size_value = 1.0f,
   };
-  {
+  if (!darwin_art::EnqueueFrameworkPointerPacket(packet)) {
     std::lock_guard<std::mutex> lock(_eventMutex);
     if (action == DARWIN_ART_POINTER_MOVE && !_pointerEvents.empty() &&
         _pointerEvents.back().action == DARWIN_ART_POINTER_MOVE) {
-      // Retain only the newest MOVE until the owner drains the mailbox. DOWN,
-      // UP, and CANCEL are never replaced, so Android gesture boundaries stay
-      // exact while high-rate trackpad motion cannot build an unbounded tail.
+      // Legacy probes retain only the newest MOVE until the owner drains the
+      // mailbox. DOWN, UP, and CANCEL are never replaced.
       _pointerEvents.back() = packet;
     } else {
       _pointerEvents.push_back(packet);
     }
   }
-  // Publish the hint after the packet is visible under the mailbox mutex.
-  // Chromium's native MessagePump may sample it from its owner Looper before
-  // the owner gets a chance to drain the queue, matching Android's
-  // nativeProbablyHasInput cooperative return contract.
-  darwin_art::NotifyFrameworkInputPending();
   [self signalOwnerWake];
   if (action == DARWIN_ART_POINTER_DOWN) {
     _pointerActive = YES;
@@ -496,9 +490,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   NSString* characters = event.characters;
   const uint32_t unicode_char =
       characters.length == 0 ? 0 : [characters characterAtIndex:0];
-  {
-    std::lock_guard<std::mutex> lock(_eventMutex);
-    _keyEvents.push_back(DarwinArtKeyEventV1{
+  const DarwinArtKeyEventV1 packet{
         .version = 1,
         .size = static_cast<uint32_t>(sizeof(DarwinArtKeyEventV1)),
         .action = action,
@@ -515,9 +507,11 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
         .device_id = 1,
         .source = 0x101,
         .unicode_char = unicode_char,
-    });
+  };
+  if (!darwin_art::EnqueueFrameworkKeyPacket(packet)) {
+    std::lock_guard<std::mutex> lock(_eventMutex);
+    _keyEvents.push_back(packet);
   }
-  darwin_art::NotifyFrameworkInputPending();
   [self signalOwnerWake];
   if (action == 1) {
     _keyDownTimes.erase(scan_code);
@@ -551,6 +545,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
 
 - (BOOL)nextPointerEventV2:(DarwinArtPointerEventV2*)outEvent {
   if (outEvent == nullptr) return NO;
+  if (darwin_art::DequeueFrameworkPointerPacket(outEvent)) return YES;
   std::lock_guard<std::mutex> lock(_eventMutex);
   if (_pointerEvents.empty()) {
     if (_keyEvents.empty())
@@ -564,6 +559,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
 
 - (BOOL)nextKeyEventV1:(DarwinArtKeyEventV1*)outEvent {
   if (outEvent == nullptr) return NO;
+  if (darwin_art::DequeueFrameworkKeyPacket(outEvent)) return YES;
   std::lock_guard<std::mutex> lock(_eventMutex);
   if (_keyEvents.empty()) {
     if (_pointerEvents.empty())
@@ -589,9 +585,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
 - (void)cancelPointerStream {
   if (!_pointerActive) return;
   const uint64_t event_time_nanos = AndroidEventTimeNanos();
-  {
-    std::lock_guard<std::mutex> lock(_eventMutex);
-    _pointerEvents.push_back(DarwinArtPointerEventV2{
+  const DarwinArtPointerEventV2 packet{
         .version = 2,
         .size = static_cast<uint32_t>(sizeof(DarwinArtPointerEventV2)),
         .action = DARWIN_ART_POINTER_CANCEL,
@@ -607,11 +601,15 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
         .raw_y = 0.0f,
         .pressure = 0.0f,
         .size_value = 0.0f,
-    });
+  };
+  if (!darwin_art::EnqueueFrameworkPointerPacket(packet)) {
+    std::lock_guard<std::mutex> lock(_eventMutex);
+    _pointerEvents.push_back(packet);
+  }
+  {
     _pointerActive = NO;
     _downTimeNanos = 0;
   }
-  darwin_art::NotifyFrameworkInputPending();
   [self signalOwnerWake];
 }
 

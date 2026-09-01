@@ -1194,3 +1194,20 @@ payloads are serialized (returning success without dispatch would lose an
 event). The next slice is the bounded pointer/key packet queue on the channel,
 then Chrome physical-input latency measurement with cooperative callback yield
 enabled.
+
+## 2026-09-02 scheduler-separation progress (channel payload queue)
+
+Focused AppKit pointer and key packets now enter bounded queues owned by the
+focused `DarwinInputChannelState`; the surface dequeue APIs consume those
+packets before consulting the legacy mailbox. Pointer MOVE remains
+latest-wins only when the bounded queue is full, while DOWN/UP/CANCEL and all
+key boundaries are retained. Channel transport tokens and pending state are
+published with the same enqueue, so Chromium's cooperative hint describes the
+actual queued payload rather than a separate wake-only signal.
+
+The legacy mailbox remains as a fallback for probes without a focused
+`InputEventReceiver`, preserving existing APK and headless behavior. Native
+rebuild/link audit and AOSP Calculator/DeskClock acceptance pass. Cross-kind
+ordering and `nativeConsumeBatchedInputEvents` still need a unified packet
+queue/consumer before the channel migration is complete; Chrome physical
+latency measurement remains the final validation gate.
