@@ -290,6 +290,7 @@ void SignalCompletion(int descriptor, bool successful) {
 }
 
 void ProcessRequest(CompositionJob job);
+bool ConsumeProducerFence(int descriptor);
 
 // SurfaceFlinger applies transactions in receive order and composes from the
 // latched state on one compositor thread.  The old Darwin shim detached one
@@ -329,12 +330,64 @@ class CompositionQueue {
   void Run() {
     for (;;) {
       CompositionJob job;
+      bool fence_failed = false;
+      bool fence_timed_out = false;
       {
         std::unique_lock<std::mutex> lock(mutex_);
         not_empty_.wait(lock, [this] { return !queue_.empty(); });
-        job = std::move(queue_.front());
-        queue_.pop_front();
-        not_full_.notify_one();
+        // Keep the queue strictly ordered, but do not block the worker in an
+        // unbounded read. The head fence is rechecked in short slices; until
+        // it is ready the previous latched target remains untouched.
+        constexpr auto kFenceWaitBudget = std::chrono::milliseconds(250);
+        constexpr int kFenceWaitSliceMs = 4;
+        const auto deadline = std::chrono::steady_clock::now() +
+                              kFenceWaitBudget;
+        for (;;) {
+          CompositionJob& head = queue_.front();
+          if (head.producer_descriptor < 0) {
+            job = std::move(head);
+            queue_.pop_front();
+            not_full_.notify_one();
+            break;
+          }
+          pollfd waiter{.fd = head.producer_descriptor,
+                        .events = POLLIN | POLLHUP,
+                        .revents = 0};
+          lock.unlock();
+          int result = -1;
+          do {
+            result = poll(&waiter, 1, kFenceWaitSliceMs);
+          } while (result < 0 && errno == EINTR);
+          lock.lock();
+          if (result == 0) {
+            if (std::chrono::steady_clock::now() < deadline) continue;
+            fence_timed_out = true;
+          } else if (result <= 0 ||
+                     (waiter.revents & (POLLERR | POLLNVAL)) != 0 ||
+                     !ConsumeProducerFence(head.producer_descriptor)) {
+            fence_failed = true;
+          } else {
+            head.producer_descriptor = -1;
+            continue;
+          }
+          job = std::move(head);
+          queue_.pop_front();
+          not_full_.notify_one();
+          break;
+        }
+      }
+      if (fence_failed || fence_timed_out) {
+        if (fence_timed_out) {
+          std::fprintf(stderr,
+                       "ART SurfaceFlinger: acquire fence timed out after "
+                       "250 ms pid=%u transaction=%llu\n",
+                       job.header.process_id,
+                       static_cast<unsigned long long>(
+                           job.header.transaction_id));
+        }
+        if (job.producer_descriptor >= 0) close(job.producer_descriptor);
+        SignalCompletion(job.completion_descriptor, false);
+        continue;
       }
       ProcessRequest(std::move(job));
     }
@@ -354,35 +407,8 @@ CompositionQueue& CompositionJobs() {
   return *queue;
 }
 
-bool WaitForProducer(int descriptor) {
+bool ConsumeProducerFence(int descriptor) {
   if (descriptor < 0) return true;
-  // Android SurfaceFlinger does not let one broken acquire fence stall the
-  // compositor forever. Keep the previous latched target visible and bound
-  // this compatibility worker's wait; the caller's completion fence is then
-  // failed and the retained state remains unchanged because ProcessRequest
-  // waits before applying its incoming snapshot.
-  constexpr auto kFenceWaitBudget = std::chrono::milliseconds(250);
-  constexpr int kFenceWaitSliceMs = 4;
-  const auto deadline = std::chrono::steady_clock::now() + kFenceWaitBudget;
-  pollfd waiter{.fd = descriptor, .events = POLLIN | POLLHUP, .revents = 0};
-  int result = -1;
-  for (;;) {
-    do {
-      result = poll(&waiter, 1, kFenceWaitSliceMs);
-    } while (result < 0 && errno == EINTR);
-    if (result != 0 || std::chrono::steady_clock::now() >= deadline) break;
-  }
-  if (result == 0) {
-    std::fprintf(stderr,
-                 "ART SurfaceFlinger: acquire fence timed out after %lld ms\n",
-                 static_cast<long long>(kFenceWaitBudget.count()));
-    close(descriptor);
-    return false;
-  }
-  if (result <= 0 || (waiter.revents & (POLLERR | POLLNVAL)) != 0) {
-    close(descriptor);
-    return false;
-  }
   std::array<uint8_t, sizeof(uint64_t)> marker{};
   ssize_t received = -1;
   do {
@@ -535,19 +561,8 @@ void CaptureTargetPpm(IOSurfaceRef surface, uint64_t transaction_id) {
 void ProcessRequest(CompositionJob job) {
   RequestHeader header = job.header;
   std::vector<WireLayer> incoming = std::move(job.incoming);
-  int producer_descriptor = job.producer_descriptor;
   int completion_descriptor = job.completion_descriptor;
   @autoreleasepool {
-    if (!WaitForProducer(producer_descriptor)) {
-      std::fprintf(stderr,
-                   "ART SurfaceFlinger: producer fence failed pid=%u "
-                   "transaction=%llu\n",
-                   header.process_id,
-                   static_cast<unsigned long long>(header.transaction_id));
-      SignalCompletion(completion_descriptor, false);
-      return;
-    }
-
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     IOSurfaceRef target_surface = IOSurfaceLookup(header.target_iosurface_id);
     bool valid = device != nil && target_surface != nullptr;
