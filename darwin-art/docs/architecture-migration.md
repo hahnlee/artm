@@ -1540,3 +1540,30 @@ unready head; this matches the retained-buffer correctness boundary. The
 remaining Android fidelity gap is publishing the successful composition's
 completion generation so the independent scanout tick only blits a confirmed
 ready target.
+
+## 2026-09-02 scheduler-separation progress (persistent fence monitor landed)
+
+The pending/ready split is now the active implementation rather than a
+watchdog experiment. `CompositionQueue` starts one fence-monitor lane and one
+ready-compositor lane for the process lifetime. The monitor snapshots pending
+acquire descriptors, polls them outside the queue mutex, consumes signaled
+markers, and advances only the contiguous ready prefix. Valid fences may stay
+pending across any number of display ticks; dead or invalid descriptors fail
+closed and are removed without leaking the descriptor. The combined pending
+plus ready bound remains 128 entries, so a producer still receives explicit
+backpressure instead of creating unbounded worker threads.
+
+The compositor no longer performs a blocking acquire-fence read. It receives
+only fence-ready jobs, keeps retained state unchanged for failed jobs, and
+signals the existing completion contract after Metal composition. This keeps
+the ART/UI owner, SurfaceFlinger ordering, and independent Metal scanout paths
+separate while preserving strict transaction order at the ready-prefix
+boundary.
+
+`cargo fmt --all -- --check`, `git diff --check`, graphics-link audit,
+AOSP Calculator/DeskClock graphics acceptance, and Chromium tab-grid
+acceptance (`target-states=10`) pass on this implementation. The next
+correctness slice is still the completion/ready-generation mailbox: the
+independent scanout tick must consume a confirmed SurfaceFlinger generation,
+not merely the latest retained IOSurface. Physical-ingress sampling and
+native batched input consumption also remain pending.
