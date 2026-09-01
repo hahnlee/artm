@@ -213,12 +213,14 @@ extern "C" bool darwin_art_metal_composer_compose(
                    static_cast<float>(target_height);
     const float u0 = static_cast<float>(layer.source_left) / layer.width;
     const float u1 = static_cast<float>(layer.source_right) / layer.width;
-    // Android gralloc buffers rendered by HWUI carry the GL/Skia buffer
-    // origin used by SurfaceFlinger's RenderEngine. Metal texture sampling is
-    // top-left, so translate that producer convention at the HWC boundary.
-    // The destination geometry remains in Android's top-left display space.
-    const float v0 = static_cast<float>(layer.source_bottom) / layer.height;
-    const float v1 = static_cast<float>(layer.source_top) / layer.height;
+    // The IOSurface handed to SurfaceFlinger is ANGLE's display-space
+    // AHardwareBuffer. ANGLE has already resolved the guest GL bottom-left
+    // convention when it stores the frame, so Metal samples the same
+    // top-left source rectangle that Android's transaction carries. Flipping
+    // V here would apply a second transform (the Chrome/WebContents layers
+    // visibly become upside-down/180-degree mirrored).
+    const float v0 = static_cast<float>(layer.source_top) / layer.height;
+    const float v1 = static_cast<float>(layer.source_bottom) / layer.height;
     const std::array<Vertex, 6> vertices{{
         {{left, top}, {u0, v0}},
         {{left, bottom}, {u0, v1}},
