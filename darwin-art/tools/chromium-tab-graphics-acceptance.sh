@@ -44,14 +44,14 @@ app_log="$output/chrome.log"
 env \
   DARWIN_ART_APP_DATA_ROOT="$app_data" \
   DARWIN_ART_WINDOW_SCALE=2 \
-  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;225,610,10000;90,320,5000' \
+  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;225,610,15000;90,320,5000' \
   DARWIN_ART_TEST_POINTER_HOLD_MS=18 \
   DARWIN_ART_DEBUG_INPUT_LATENCY=1 \
   DARWIN_ART_DEBUG_POINTER=1 \
   DARWIN_ART_DEBUG_GRAPHICS_DSO=1 \
   DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS=1 \
   DARWIN_ART_DEBUG_SURFACECONTROL_PIXELS=1 \
-  "$root/tools/run-android-apk-app.sh" "$apk" 18 >"$app_log" 2>&1
+  "$root/tools/run-android-apk-app.sh" "$apk" 25 >"$app_log" 2>&1
 tail -n +"$start_line" "$central_log" >"$output/surfaceflinger.log"
 
 grep -a -F 'org.chromium.chrome.browser.ui.android.bars_common.TabSwitcherButtonView' \
