@@ -1506,3 +1506,16 @@ does not yet infer a new frame is ready: the AppKit blit may still present the
 last latched IOSurface while SurfaceFlinger is composing. The next correctness
 slice must publish SF completion/ready generations and gate the scanout token
 on that mailbox before claiming full Android latch semantics.
+
+## 2026-09-02 scheduler-separation progress (bounded acquire-fence wait)
+
+The FIFO composition worker now polls each acquire fence in 4 ms slices with
+a 250 ms watchdog. A permanently unsignaled or dead producer fence fails that
+transaction instead of holding the compositor forever; because the wait still
+happens before retained-layer mutation, the previous latched target remains
+visible and later FIFO work can proceed. Normal signaled fences keep the same
+ordering and completion-fence contract.
+
+This is a bounded safety gate, not yet the complete Android readiness model:
+the next step is a dedicated fence-readiness queue that rechecks pending
+buffers on later display ticks without dropping a valid long-running producer.

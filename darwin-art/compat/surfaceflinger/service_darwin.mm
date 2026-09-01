@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -355,11 +356,29 @@ CompositionQueue& CompositionJobs() {
 
 bool WaitForProducer(int descriptor) {
   if (descriptor < 0) return true;
+  // Android SurfaceFlinger does not let one broken acquire fence stall the
+  // compositor forever. Keep the previous latched target visible and bound
+  // this compatibility worker's wait; the caller's completion fence is then
+  // failed and the retained state remains unchanged because ProcessRequest
+  // waits before applying its incoming snapshot.
+  constexpr auto kFenceWaitBudget = std::chrono::milliseconds(250);
+  constexpr int kFenceWaitSliceMs = 4;
+  const auto deadline = std::chrono::steady_clock::now() + kFenceWaitBudget;
   pollfd waiter{.fd = descriptor, .events = POLLIN | POLLHUP, .revents = 0};
   int result = -1;
-  do {
-    result = poll(&waiter, 1, -1);
-  } while (result < 0 && errno == EINTR);
+  for (;;) {
+    do {
+      result = poll(&waiter, 1, kFenceWaitSliceMs);
+    } while (result < 0 && errno == EINTR);
+    if (result != 0 || std::chrono::steady_clock::now() >= deadline) break;
+  }
+  if (result == 0) {
+    std::fprintf(stderr,
+                 "ART SurfaceFlinger: acquire fence timed out after %lld ms\n",
+                 static_cast<long long>(kFenceWaitBudget.count()));
+    close(descriptor);
+    return false;
+  }
   if (result <= 0 || (waiter.revents & (POLLERR | POLLNVAL)) != 0) {
     close(descriptor);
     return false;
