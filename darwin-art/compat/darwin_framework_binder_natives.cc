@@ -490,6 +490,9 @@ struct DarwinInputChannelState {
   std::mutex finish_mutex;
   std::condition_variable finish_condition;
   std::deque<FinishAck> finish_acks;
+  std::deque<jint> pending_finish_sequences;
+  std::unordered_set<jint> pending_finish_set;
+  uint64_t finish_ack_overflows = 0;
   std::atomic<bool> looper_consumer{false};
   std::shared_ptr<DarwinInputReceiver> consumer;
   int read_fd = -1;
@@ -1080,19 +1083,25 @@ void InputReceiverFinish(JNIEnv*, jclass, jlong pointer, jint sequence,
     receiver->last_finished_sequence = sequence;
     receiver->last_finished_handled = handled == JNI_TRUE;
     if (receiver->channel != nullptr) {
+      bool queued = false;
       {
         std::lock_guard<std::mutex> lock(receiver->channel->finish_mutex);
-        constexpr size_t kMaxFinishAcks = 256;
-        if (receiver->channel->finish_acks.size() >= kMaxFinishAcks) {
-          // Keep the oldest in-flight result until its dispatch path observes
-          // it; dropping an ACK would make a later event look unhandled.
-          receiver->channel->finish_acks.pop_front();
+        if (receiver->channel->pending_finish_set.contains(sequence)) {
+          auto existing = std::find_if(
+              receiver->channel->finish_acks.begin(),
+              receiver->channel->finish_acks.end(),
+              [sequence](const auto& ack) { return ack.sequence == sequence; });
+          if (existing != receiver->channel->finish_acks.end()) {
+            existing->handled = handled == JNI_TRUE;
+          } else {
+            receiver->channel->finish_acks.push_back(
+                DarwinInputChannelState::FinishAck{
+                    .sequence = sequence, .handled = handled == JNI_TRUE});
+          }
+          queued = true;
         }
-        receiver->channel->finish_acks.push_back(
-            DarwinInputChannelState::FinishAck{
-                .sequence = sequence, .handled = handled == JNI_TRUE});
       }
-      receiver->channel->finish_condition.notify_all();
+      if (queued) receiver->channel->finish_condition.notify_all();
       receiver->channel->last_finished_sequence.store(
           sequence, std::memory_order_release);
       receiver->channel->last_finished_handled.store(
@@ -1105,18 +1114,59 @@ void InputReceiverFinish(JNIEnv*, jclass, jlong pointer, jint sequence,
   }
 }
 
-bool TakeFinishedAck(const std::shared_ptr<DarwinInputChannelState>& channel,
-                     jint sequence, bool* handled) {
-  if (channel == nullptr) return false;
+void RetireFinishSequenceLocked(DarwinInputChannelState* channel,
+                                jint sequence) {
+  if (channel == nullptr) return;
+  channel->pending_finish_set.erase(sequence);
+  auto pending = std::find(channel->pending_finish_sequences.begin(),
+                           channel->pending_finish_sequences.end(), sequence);
+  if (pending != channel->pending_finish_sequences.end()) {
+    channel->pending_finish_sequences.erase(pending);
+  }
+}
+
+void RegisterFinishSequence(
+    const std::shared_ptr<DarwinInputChannelState>& channel, jint sequence) {
+  if (channel == nullptr) return;
   std::lock_guard<std::mutex> lock(channel->finish_mutex);
+  constexpr size_t kMaxPendingFinishSequences = 256;
+  while (channel->pending_finish_sequences.size() >=
+         kMaxPendingFinishSequences) {
+    const jint evicted = channel->pending_finish_sequences.front();
+    channel->pending_finish_sequences.pop_front();
+    channel->pending_finish_set.erase(evicted);
+    std::erase_if(channel->finish_acks,
+                  [evicted](const auto& ack) { return ack.sequence == evicted; });
+    ++channel->finish_ack_overflows;
+    if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+      std::cerr << "ART Android InputEvent ACK overflow evicted sequence="
+                << evicted << " total=" << channel->finish_ack_overflows
+                << "\n";
+    }
+  }
+  channel->pending_finish_sequences.push_back(sequence);
+  channel->pending_finish_set.insert(sequence);
+}
+
+bool TakeFinishedAckLocked(DarwinInputChannelState* channel, jint sequence,
+                           bool* handled) {
+  if (channel == nullptr) return false;
   for (auto it = channel->finish_acks.begin();
        it != channel->finish_acks.end(); ++it) {
     if (it->sequence != sequence) continue;
     if (handled != nullptr) *handled = it->handled;
     channel->finish_acks.erase(it);
+    RetireFinishSequenceLocked(channel, sequence);
     return true;
   }
   return false;
+}
+
+bool TakeFinishedAck(const std::shared_ptr<DarwinInputChannelState>& channel,
+                     jint sequence, bool* handled) {
+  if (channel == nullptr) return false;
+  std::lock_guard<std::mutex> lock(channel->finish_mutex);
+  return TakeFinishedAckLocked(channel.get(), sequence, handled);
 }
 
 // ViewRoot normally finishes an event inline, but application code may defer
@@ -1131,13 +1181,7 @@ bool WaitForFinishedAck(const std::shared_ptr<DarwinInputChannelState>& channel,
   const auto deadline = std::chrono::steady_clock::now() + kAckRetryBudget;
   std::unique_lock<std::mutex> lock(channel->finish_mutex);
   for (;;) {
-    for (auto it = channel->finish_acks.begin();
-         it != channel->finish_acks.end(); ++it) {
-      if (it->sequence != sequence) continue;
-      if (handled != nullptr) *handled = it->handled;
-      channel->finish_acks.erase(it);
-      return true;
-    }
+    if (TakeFinishedAckLocked(channel.get(), sequence, handled)) return true;
     if (channel->finish_condition.wait_until(lock, deadline) ==
         std::cv_status::timeout) {
       return false;
@@ -2693,6 +2737,7 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
         0, std::memory_order_release);
     receiver->channel->last_finished_handled.store(
         false, std::memory_order_release);
+    RegisterFinishSequence(receiver->channel, sequence);
     env->CallVoidMethod(target, dispatch, sequence, event);
     bool finished = false;
     if (handled != nullptr) {

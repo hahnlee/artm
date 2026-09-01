@@ -1438,3 +1438,19 @@ after the fix. Chromium acceptance required one retry for its known startup
 timing variance and then passed with 10 target states. Physical click latency
 is still unmeasured because the automation caller lacks macOS assistive-access
 permission; native batched consume remains disabled.
+
+## 2026-09-02 scheduler-separation progress (sequence-indexed ACK bound)
+
+Finish ACK handling now tracks the set and order of in-flight receiver
+sequences. `finishInputEvent()` updates an existing sequence rather than
+creating duplicates; a bounded overflow retires the oldest in-flight sequence
+and any matching stale ACK together, with a debug counter. ACKs arriving after
+retirement are kept only in the legacy atomic compatibility slot and cannot
+overtake a newer sequence in the channel queue. This makes the loss policy
+explicit while preserving the 1 ms deferred-ACK retry and avoiding Java calls
+under the ACK mutex.
+
+Graphics link audit, Rust tests, AOSP Calculator/DeskClock acceptance, and a
+rerun of Chromium tab-grid acceptance pass (the first Chrome run had the
+known startup/card-selection flake; the rerun reached 10 target states).
+Physical ingress samples and native batched consume remain pending.
