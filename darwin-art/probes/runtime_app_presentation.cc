@@ -759,16 +759,20 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
                 "Landroid/view/WindowManager$LayoutParams;)V");
   jobject decor_view = nullptr;
   jobject content_root = nullptr;
+  jmethodID get_decor_view = nullptr;
+  jmethodID find_view_by_id = nullptr;
+  jint framework_content_id = 0;
   if (run_apk_app) {
-    // Let PhoneWindow install the framework decor selected by the APK theme.
-    // This is what requests FEATURE_ACTION_BAR and creates DecorContentParent;
-    // constructing DecorView directly leaves Activity.getActionBar() null.
-    jmethodID get_decor_view =
+    // ActivityThread does not install an APK's decor before onCreate(). The
+    // app's first setContentView() lets PhoneWindow select features and the
+    // window background from the final Activity theme. Cache only the method
+    // contract here; materialize the decor after performCreate() below.
+    get_decor_view =
         window_class == nullptr
             ? nullptr
             : env->GetMethodID(window_class, "getDecorView",
                                "()Landroid/view/View;");
-    jmethodID find_view_by_id =
+    find_view_by_id =
         window_class == nullptr
             ? nullptr
             : env->GetMethodID(window_class, "findViewById",
@@ -778,14 +782,9 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
         framework_id_class == nullptr
             ? nullptr
             : env->GetStaticFieldID(framework_id_class, "content", "I");
-    if (get_decor_view != nullptr && find_view_by_id != nullptr &&
-        content_id != nullptr && !env->ExceptionCheck()) {
-      decor_view = env->CallObjectMethod(window, get_decor_view);
-      if (!env->ExceptionCheck()) {
-        content_root = env->CallObjectMethod(
-            window, find_view_by_id,
-            env->GetStaticIntField(framework_id_class, content_id));
-      }
+    if (content_id != nullptr && !env->ExceptionCheck()) {
+      framework_content_id =
+          env->GetStaticIntField(framework_id_class, content_id);
     }
     env->DeleteLocalRef(framework_id_class);
   } else {
@@ -801,7 +800,7 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   // the same objects directly, so preserve that framework-owned resource path
   // explicitly instead of substituting a host color.
   jobject window_background = nullptr;
-  if (use_framework_resources && decor_view != nullptr) {
+  if (!run_apk_app && use_framework_resources && decor_view != nullptr) {
     jclass typed_value_class = env->FindClass("android/util/TypedValue");
     jmethodID typed_value_constructor =
         typed_value_class == nullptr
@@ -882,10 +881,16 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
           ? nullptr
           : env->GetFieldID(phone_window_class, "mContentParent",
                             "Landroid/view/ViewGroup;");
-  if (decor_view == nullptr ||
-      (use_framework_resources && window_background == nullptr) ||
-      content_root == nullptr || add_view == nullptr ||
-      phone_decor == nullptr || phone_content_parent == nullptr ||
+  const bool apk_decor_contract_missing =
+      run_apk_app &&
+      (get_decor_view == nullptr || find_view_by_id == nullptr ||
+       framework_content_id == 0);
+  const bool probe_decor_contract_missing =
+      !run_apk_app &&
+      (decor_view == nullptr || content_root == nullptr || add_view == nullptr ||
+       phone_decor == nullptr || phone_content_parent == nullptr ||
+       (use_framework_resources && window_background == nullptr));
+  if (apk_decor_contract_missing || probe_decor_contract_missing ||
       env->ExceptionCheck()) {
     std::cerr << "ART Android window: DecorView setup failed\n";
     if (self->IsExceptionPending()) {
@@ -1026,6 +1031,35 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
               << self->GetException()->Dump() << "\n";
     return 28;
   }
+  if (run_apk_app) {
+    // Match ActivityThread/PhoneWindow ordering: the Activity has now had the
+    // opportunity to apply its theme, request window features, and install
+    // content. Query the resulting framework-owned decor rather than freezing
+    // the pre-onCreate theme into a host-created root.
+    decor_view = env->CallObjectMethod(window, get_decor_view);
+    if (!env->ExceptionCheck()) {
+      content_root = env->CallObjectMethod(
+          window, find_view_by_id, framework_content_id);
+    }
+    jobject current_window_attributes =
+        env->ExceptionCheck() || get_window_attributes == nullptr
+            ? nullptr
+            : env->CallObjectMethod(window, get_window_attributes);
+    if (current_window_attributes != nullptr && !env->ExceptionCheck()) {
+      env->DeleteLocalRef(window_attributes);
+      window_attributes = current_window_attributes;
+    } else {
+      env->DeleteLocalRef(current_window_attributes);
+    }
+    if (decor_view == nullptr || content_root == nullptr ||
+        window_attributes == nullptr || env->ExceptionCheck()) {
+      std::cerr << "ART Android window: post-onCreate DecorView setup failed\n";
+      if (self->IsExceptionPending()) {
+        std::cerr << self->GetException()->Dump() << "\n";
+      }
+      return 31;
+    }
+  }
   const bool expect_apk_native_answer =
       std::getenv("DARWIN_ART_APK_EXPECT_NATIVE_ANSWER") != nullptr &&
       std::strcmp(std::getenv("DARWIN_ART_APK_EXPECT_NATIVE_ANSWER"), "1") == 0;
@@ -1050,7 +1084,7 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   // setContentView(), so finish the same Android-owned operation after the
   // activity has installed its content.  Going through PhoneWindow keeps the
   // Drawable callback/window-background state in the framework path.
-  if (use_framework_resources && window_background != nullptr) {
+  if (!run_apk_app && use_framework_resources && window_background != nullptr) {
     jmethodID set_window_background =
         phone_window_class == nullptr
             ? nullptr
