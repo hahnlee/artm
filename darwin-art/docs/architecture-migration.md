@@ -1689,3 +1689,14 @@ change and passed again: macOS-trust HTTPS, three-tab interaction,
 renderer/GPU service separation, Binder FD transfer, ANGLE-Metal WebGL, and
 WebM/Opus/CoreAudio media all remained green. This confirms the publication
 fix does not regress child-surface routing or the independent scanout path.
+
+## 2026-09-02 scheduler-separation progress (physical input permission probe)
+
+A longer-lived Calculator window was started without synthetic pointer
+variables. CoreGraphics confirmed the real window bounds, but the explicit
+`System Events` target process exposed no window elements and delivered no
+`ingress->dispatch` packet. The caller can enumerate processes but still lacks
+the assistive-access event channel, so this is the same external permission
+boundary rather than evidence of an input-queue failure. No physical latency
+percentile is recorded; the runtime telemetry remains enabled for the first
+authorized run.
