@@ -206,6 +206,14 @@ unsafe impl Send for ScanoutToken {}
 unsafe impl Sync for ScanoutToken {}
 
 impl ScanoutToken {
+    /// Construct a token for host-side scheduler tests. Production callers
+    /// should obtain tokens from `SurfaceSession::scanout_token`, which keeps
+    /// the opaque handle lifetime paired with the owning surface.
+    #[doc(hidden)]
+    pub unsafe fn from_raw_for_test(handle: *mut c_void, present: SurfacePresentAsyncFn) -> Self {
+        Self { handle, present }
+    }
+
     pub fn present(self) -> i32 {
         // SAFETY: the token lifetime is bounded by FrameClock's join before
         // the owning SurfaceSession is closed.

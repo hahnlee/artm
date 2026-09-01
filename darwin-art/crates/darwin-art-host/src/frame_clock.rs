@@ -101,13 +101,14 @@ fn run_clock(
                 token.wake();
             }
         }
-        // Scanout is a separate consumer from the ART owner pulse. It only
-        // appends a bounded latest-wins AppKit command; Android UI/JNI work
-        // stays on the owner while the main actor performs the actual blit.
-        if should_wake {
-            if let Some(token) = scanout {
-                let _ = token.present();
-            }
+        // Scanout is a separate consumer from the ART owner pulse. It must
+        // receive every display edge even when the owner already has a
+        // pending wake (for example while a Chromium Looper callback is
+        // busy). The native present_async path applies the ready-generation
+        // gate and coalesces these calls into one bounded latest-wins AppKit
+        // request; Android UI/JNI work stays on the owner thread.
+        if let Some(token) = scanout {
+            let _ = token.present();
         }
         next = now + DISPLAY_INTERVAL;
     }
@@ -115,9 +116,18 @@ fn run_clock(
 
 #[cfg(test)]
 mod tests {
-    use super::FrameClock;
+    use super::{FrameClock, ScanoutToken};
+    use core::ffi::c_void;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
     use std::time::Duration;
+
+    static SCANOUT_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn count_scanout(_: *mut c_void) -> i32 {
+        SCANOUT_CALLS.fetch_add(1, Ordering::Relaxed);
+        0
+    }
 
     #[test]
     fn clock_is_bounded_and_produces_edges() {
@@ -127,5 +137,18 @@ mod tests {
         thread::sleep(Duration::from_millis(40));
         assert!(clock.take_latest().is_some());
         assert!(clock.take_latest().is_none());
+    }
+
+    #[test]
+    fn scanout_ticks_continue_when_owner_wake_is_pending() {
+        SCANOUT_CALLS.store(0, Ordering::Relaxed);
+        // SAFETY: the test callback ignores the opaque handle and remains
+        // valid for the clock's bounded lifetime.
+        let token = unsafe { ScanoutToken::from_raw_for_test(std::ptr::null_mut(), count_scanout) };
+        // Do not consume the owner edge. A coupled implementation would
+        // invoke scanout only once because its pending bit stays set.
+        let _clock = FrameClock::start(None, Some(token));
+        thread::sleep(Duration::from_millis(55));
+        assert!(SCANOUT_CALLS.load(Ordering::Relaxed) >= 2);
     }
 }

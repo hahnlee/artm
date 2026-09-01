@@ -1615,3 +1615,26 @@ DOWN plus drag MOVE packets through the InputChannel path, with no native or
 Java crash. This keeps a non-Chromium custom View interaction in the
 regression set while the remaining physical-ingress percentile measurement is
 collected separately.
+
+## 2026-09-02 scheduler-separation progress (independent scanout cadence)
+
+The display clock no longer shares the ART-owner wake edge with scanout. The
+owner wake remains edge-triggered and latest-wins, while the scanout token is
+called on every display interval even when the owner has not consumed its
+pending wake. Native `present_async` still gates on the SurfaceFlinger
+completion generation and coalesces requests to one bounded AppKit turn, so
+this change adds no UI/JNI work or unbounded main-queue backlog.
+
+The new regression test holds the owner wake pending for 55 ms and verifies
+multiple scanout callbacks; all 8 `darwin-art-host` tests pass, as do format,
+diff checks, and the existing AOSP/Chrome acceptance suites from the preceding
+checkpoint. A fresh graphics-closure audit was attempted but the generated
+archive provider identity currently differs from the repository lock
+(`expected-count=48795`, `actual-count=48829`); the lock was left unchanged
+and this generated-artifact drift remains a separate build stabilization item.
+
+An accessibility-authorized physical click was also attempted against a real
+Calculator window using CoreGraphics event posting. No input packet reached
+the host in this caller context, so no physical latency percentile is claimed;
+the ingress telemetry hook remains ready for an authorized caller. Synthetic
+acceptance continues to cover functional MotionEvent delivery only.
