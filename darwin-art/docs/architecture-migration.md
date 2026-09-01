@@ -1755,3 +1755,10 @@ source. A delayed worker skips stale deadlines and resumes at the next future
 edge instead of emitting a catch-up burst; the owner wake remains latest-wins
 and scanout still receives its own edge on every interval. `darwin-art-host`
 unit/doc tests pass with this change.
+
+The post-change APK regression run also passed unchanged: Calculator produced
+`2+3=5` and DeskClock entered Timer. Its scanout counters remained bounded
+(`Calculator requests=720, fence_gated=0, coalesced=674, present_calls=458`;
+`DeskClock requests=480, fence_gated=1, coalesced=442, present_calls=316`).
+Owner input-to-pulse samples were Calculator p50=56 us/p95=26.0 ms and
+DeskClock p50=785 us/p95=337.0 ms, with no new scanout queue growth.
