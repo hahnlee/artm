@@ -15,6 +15,7 @@ extern "C" {
 typedef struct DarwinArtSurfaceFlingerLayerUpdate {
   uint32_t layer_id;
   uint32_t parent_id;
+  uint32_t relative_parent_id;
   uint64_t what;
   uint32_t flags;
   uint32_t mask;
@@ -35,6 +36,7 @@ typedef enum DarwinArtSurfaceFlingerLayerChange {
   DARWIN_ART_SF_ALPHA_CHANGED = UINT64_C(0x00000008),
   DARWIN_ART_SF_MATRIX_CHANGED = UINT64_C(0x00000010),
   DARWIN_ART_SF_FLAGS_CHANGED = UINT64_C(0x00000040),
+  DARWIN_ART_SF_RELATIVE_LAYER_CHANGED = UINT64_C(0x00004000),
   DARWIN_ART_SF_REPARENT = UINT64_C(0x00008000),
   DARWIN_ART_SF_BUFFER_TRANSFORM_CHANGED = UINT64_C(0x00040000),
   DARWIN_ART_SF_CROP_CHANGED = UINT64_C(0x00100000),

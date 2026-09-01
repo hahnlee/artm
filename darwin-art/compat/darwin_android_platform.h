@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 // Exact, closed libandroid.so provider used by the Android ELF resolver.
 // Returns null for every symbol not implemented by this compatibility layer.
@@ -79,3 +80,5 @@ extern "C" void darwin_art_android_surface_transaction_clear(
     void* transaction);
 extern "C" void darwin_art_android_surface_transaction_merge(
     void* destination, void* source);
+extern "C" void darwin_art_android_surface_transaction_set_relative_layer(
+    void* transaction, void* control, void* relative_to, int32_t z);

@@ -300,6 +300,7 @@ struct SurfaceControl {
   uint32_t layer_id = 0;
   std::string name;
   SurfaceControl* parent = nullptr;
+  SurfaceControl* relative_to = nullptr;
   // A control obtained from a Java Surface or an ANativeWindow is attached
   // to SurfaceFlinger's display tree even though its NDK parent is null.
   // Controls created through ASurfaceControl_create are ordinary children;
@@ -450,6 +451,8 @@ struct SurfaceTransaction {
     float alpha = 1.0f;
     bool has_parent = false;
     ASurfaceControl* parent = nullptr;
+    bool has_relative_layer = false;
+    ASurfaceControl* relative_to = nullptr;
     bool has_damage = false;
     std::vector<ARect> damage;
   };
@@ -1354,6 +1357,7 @@ extern "C" void ASurfaceControl_release(ASurfaceControl* opaque) {
       std::erase(g_surface_controls, control);
       for (SurfaceControl* child : g_surface_controls) {
         if (child->parent == control) child->parent = nullptr;
+        if (child->relative_to == control) child->relative_to = nullptr;
       }
     }
     if (control->buffer != nullptr) AHardwareBuffer_release(control->buffer);
@@ -1426,6 +1430,12 @@ extern "C" void darwin_art_android_surface_transaction_merge(
     MERGE_SURFACE_FIELD(has_alpha, alpha)
     MERGE_SURFACE_FIELD(has_parent, parent)
 #undef MERGE_SURFACE_FIELD
+    if (incoming.has_z_order || incoming.has_relative_layer) {
+      merged->has_z_order = incoming.has_z_order;
+      merged->has_relative_layer = incoming.has_relative_layer;
+      merged->relative_to = incoming.relative_to;
+      merged->z_order = incoming.z_order;
+    }
     if (incoming.has_damage) {
       merged->has_damage = true;
       merged->damage = std::move(incoming.damage);
@@ -1481,6 +1491,9 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
     if (update.has_scale) what |= DARWIN_ART_SF_MATRIX_CHANGED;
     if (update.has_visibility) what |= DARWIN_ART_SF_FLAGS_CHANGED;
     if (update.has_parent) what |= DARWIN_ART_SF_REPARENT;
+    if (update.has_relative_layer) {
+      what |= DARWIN_ART_SF_RELATIVE_LAYER_CHANGED;
+    }
     if (update.has_transform) what |= DARWIN_ART_SF_BUFFER_TRANSFORM_CHANGED;
     if (update.has_crop) what |= DARWIN_ART_SF_CROP_CHANGED;
     if (update.has_buffer) what |= DARWIN_ART_SF_BUFFER_CHANGED;
@@ -1490,11 +1503,17 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
         update.has_parent
             ? reinterpret_cast<const SurfaceControl*>(update.parent)
             : control->parent;
+    const auto* relative_to =
+        update.has_relative_layer
+            ? reinterpret_cast<const SurfaceControl*>(update.relative_to)
+            : control->relative_to;
     const ARect destination =
         update.has_geometry ? update.destination : control->destination;
     frontend_updates.push_back({
         .layer_id = control->layer_id,
         .parent_id = parent == nullptr ? 0 : parent->layer_id,
+        .relative_parent_id =
+            relative_to == nullptr ? 0 : relative_to->layer_id,
         .what = what,
         .flags = update.has_visibility
             ? (update.visible ? 0u : 1u)
@@ -1507,7 +1526,9 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
                                  : static_cast<float>(control->position_x),
         .y = update.has_position ? static_cast<float>(update.position_y)
                                  : static_cast<float>(control->position_y),
-        .z = update.has_z_order ? update.z_order : control->z_order,
+        .z = (update.has_z_order || update.has_relative_layer)
+            ? update.z_order
+            : control->z_order,
         .alpha = update.has_alpha ? update.alpha : control->alpha,
         .destination_left = destination.left,
         .destination_top = destination.top,
@@ -1521,6 +1542,10 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
           .parent_owner_process_id =
               parent == nullptr ? 0 : parent->owner_process_id,
           .parent_id = parent == nullptr ? 0 : parent->layer_id,
+          .relative_parent_owner_process_id =
+              relative_to == nullptr ? 0 : relative_to->owner_process_id,
+          .relative_parent_id =
+              relative_to == nullptr ? 0 : relative_to->layer_id,
           .what = what,
           .flags = update.has_visibility
               ? (update.visible ? 0u : 1u)
@@ -1534,7 +1559,9 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
           .destination_top = destination.top,
           .destination_right = destination.right,
           .destination_bottom = destination.bottom,
-          .z = update.has_z_order ? update.z_order : control->z_order,
+          .z = (update.has_z_order || update.has_relative_layer)
+              ? update.z_order
+              : control->z_order,
           .alpha = update.has_alpha ? update.alpha : control->alpha,
       });
     }
@@ -1544,7 +1571,8 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
           "ART Android SurfaceTransaction: update pid=%d control=%p "
           "layer=%u name=%s what=0x%llx parent=%u visible=%d "
           "flags[pos=%d,z=%d,alpha=%d,scale=%d,visibility=%d,parent=%d,"
-          "transform=%d(value=%d),crop=%d,buffer=%d,damage=%d,geometry=%d]\n",
+          "transform=%d(value=%d),relative=%d(to=%u),crop=%d,buffer=%d,"
+          "damage=%d,geometry=%d]\n",
           getpid(), static_cast<void*>(update.opaque), control->layer_id,
           control->name.c_str(), static_cast<unsigned long long>(what),
           parent == nullptr ? 0 : parent->layer_id,
@@ -1555,6 +1583,8 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
           update.has_visibility ? 1 : 0, update.has_parent ? 1 : 0,
           update.has_transform ? 1 : 0,
           update.has_transform ? update.transform : control->transform,
+          update.has_relative_layer ? 1 : 0,
+          relative_to == nullptr ? 0 : relative_to->layer_id,
           update.has_crop ? 1 : 0,
           update.has_buffer ? 1 : 0, update.has_damage ? 1 : 0,
           update.has_geometry ? 1 : 0);
@@ -1625,7 +1655,15 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
         control->position_y = update.position_y;
       }
       if (update.has_transform) control->transform = update.transform;
-      if (update.has_z_order) control->z_order = update.z_order;
+      if (update.has_z_order) {
+        control->z_order = update.z_order;
+        control->relative_to = nullptr;
+      }
+      if (update.has_relative_layer) {
+        control->z_order = update.z_order;
+        control->relative_to =
+            reinterpret_cast<SurfaceControl*>(update.relative_to);
+      }
       if (update.has_scale) {
         control->scale_x = update.scale_x;
         control->scale_y = update.scale_y;
@@ -1639,6 +1677,61 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
         // root bit would keep Chromium's old tab surface in composition.
         control->composition_root = false;
       }
+    }
+
+    // SurfaceControl creation carries structural state even when the layer
+    // never owns a buffer. Publish a complete snapshot for every locally
+    // owned structural control that this transaction did not otherwise
+    // mention. This mirrors SurfaceFlinger's handle graph and lets a renderer
+    // process attach a buffer to an imported BLAST parent without promoting
+    // that parent to an unrelated display root.
+    for (SurfaceControl* control : g_surface_controls) {
+      if (control == nullptr || control->buffer != nullptr ||
+          control->owner_process_id != static_cast<uint32_t>(getpid())) {
+        continue;
+      }
+      const bool already_present = std::any_of(
+          control_states.begin(), control_states.end(),
+          [control](const DarwinArtMetalComposerLayer& state) {
+            return state.owner_process_id == control->owner_process_id &&
+                state.layer_id == control->layer_id;
+          });
+      if (already_present) continue;
+      const uint64_t ordering_change =
+          control->relative_to == nullptr
+              ? DARWIN_ART_SF_LAYER_CHANGED
+              : DARWIN_ART_SF_RELATIVE_LAYER_CHANGED;
+      control_states.push_back({
+          .owner_process_id = control->owner_process_id,
+          .layer_id = control->layer_id,
+          .parent_owner_process_id =
+              control->parent == nullptr ? 0
+                                         : control->parent->owner_process_id,
+          .parent_id =
+              control->parent == nullptr ? 0 : control->parent->layer_id,
+          .relative_parent_owner_process_id =
+              control->relative_to == nullptr
+                  ? 0
+                  : control->relative_to->owner_process_id,
+          .relative_parent_id =
+              control->relative_to == nullptr ? 0
+                                               : control->relative_to->layer_id,
+          .what = DARWIN_ART_SF_POSITION_CHANGED | ordering_change |
+              DARWIN_ART_SF_ALPHA_CHANGED | DARWIN_ART_SF_FLAGS_CHANGED |
+              (control->parent == nullptr ? 0 : DARWIN_ART_SF_REPARENT) |
+              DARWIN_ART_SF_BUFFER_TRANSFORM_CHANGED |
+              DARWIN_ART_SF_DESTINATION_FRAME_CHANGED,
+          .flags = control->visible ? 0u : 1u,
+          .mask = 1u,
+          .transform = static_cast<uint32_t>(control->transform),
+          .iosurface = nullptr,
+          .destination_left = control->position_x,
+          .destination_top = control->position_y,
+          .destination_right = control->position_x,
+          .destination_bottom = control->position_y,
+          .z = control->z_order,
+          .alpha = control->alpha,
+      });
     }
 
     // SurfaceFlinger composes the current layer tree, not just the controls
@@ -1674,9 +1767,10 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
     for (const auto& state : control_states) {
       darwin_art_android_present_surface_control_state(
           state.owner_process_id, state.layer_id,
-          state.parent_owner_process_id, state.parent_id, state.what,
-          state.flags, state.mask, state.destination_left,
-          state.transform, state.destination_top, state.destination_right,
+          state.parent_owner_process_id, state.parent_id,
+          state.relative_parent_owner_process_id, state.relative_parent_id,
+          state.what, state.flags, state.mask, state.transform,
+          state.destination_left, state.destination_top, state.destination_right,
           state.destination_bottom, state.z, state.alpha);
     }
     for (const auto& presentation : presentations) {
@@ -1702,11 +1796,20 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
           presentation.control->parent == nullptr
               ? 0
               : presentation.control->parent->layer_id,
-          DARWIN_ART_SF_POSITION_CHANGED | DARWIN_ART_SF_LAYER_CHANGED |
+          DARWIN_ART_SF_POSITION_CHANGED |
+              (presentation.control->relative_to == nullptr
+                   ? DARWIN_ART_SF_LAYER_CHANGED
+                   : DARWIN_ART_SF_RELATIVE_LAYER_CHANGED) |
               DARWIN_ART_SF_ALPHA_CHANGED | DARWIN_ART_SF_FLAGS_CHANGED |
               DARWIN_ART_SF_BUFFER_CHANGED |
               DARWIN_ART_SF_DESTINATION_FRAME_CHANGED |
               (presentation.reparented ? DARWIN_ART_SF_REPARENT : 0),
+          presentation.control->relative_to == nullptr
+              ? 0
+              : presentation.control->relative_to->owner_process_id,
+          presentation.control->relative_to == nullptr
+              ? 0
+              : presentation.control->relative_to->layer_id,
           presentation.z_order, presentation.buffer,
           static_cast<uint32_t>(presentation.transform),
           presentation.source.left,
@@ -1899,7 +2002,28 @@ extern "C" void ASurfaceTransaction_setZOrder(ASurfaceTransaction* opaque,
   auto* update = FindUpdate(transaction, control);
   if (update != nullptr) {
     update->has_z_order = true;
+    update->has_relative_layer = false;
+    update->relative_to = nullptr;
     update->z_order = z_order;
+  }
+}
+extern "C" void darwin_art_android_surface_transaction_set_relative_layer(
+    void* opaque, void* opaque_control, void* opaque_relative_to, int32_t z) {
+  auto* transaction = reinterpret_cast<SurfaceTransaction*>(opaque);
+  auto* control = reinterpret_cast<ASurfaceControl*>(opaque_control);
+  Remember(transaction, control);
+  auto* update = FindUpdate(transaction, control);
+  if (update == nullptr) return;
+  update->has_z_order = false;
+  update->has_relative_layer = true;
+  update->relative_to =
+      reinterpret_cast<ASurfaceControl*>(opaque_relative_to);
+  update->z_order = z;
+  if (DebugSurfaceTransactions()) {
+    std::fprintf(stderr,
+                 "ART Android SurfaceTransaction: relative-layer pid=%d "
+                 "control=%p relative=%p z=%d\n",
+                 getpid(), opaque_control, opaque_relative_to, z);
   }
 }
 extern "C" void ASurfaceTransaction_setBuffer(

@@ -34,6 +34,9 @@ android::ResolvedComposerState ResolveLayerState(
   // a nonexistent layer 0.
   resolved.parentId =
       source.parent_id == 0 ? UNASSIGNED_LAYER_ID : source.parent_id;
+  resolved.relativeParentId = source.relative_parent_id == 0
+      ? UNASSIGNED_LAYER_ID
+      : source.relative_parent_id;
   resolved.state.layerId = static_cast<int32_t>(source.layer_id);
   resolved.state.what = source.what;
   resolved.state.flags = source.flags;

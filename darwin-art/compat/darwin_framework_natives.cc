@@ -153,6 +153,13 @@ void SurfaceControlNativeSetLayer(JNIEnv*, jclass, jlong transaction,
   ASurfaceTransaction_setZOrder(SurfaceTransaction(transaction),
                                 SurfaceControl(control), layer);
 }
+void SurfaceControlNativeSetRelativeLayer(JNIEnv*, jclass, jlong transaction,
+                                          jlong control, jlong relative_to,
+                                          jint layer) {
+  darwin_art_android_surface_transaction_set_relative_layer(
+      reinterpret_cast<void*>(transaction), reinterpret_cast<void*>(control),
+      reinterpret_cast<void*>(relative_to), layer);
+}
 void SurfaceControlNativeReparent(JNIEnv*, jclass, jlong transaction,
                                   jlong control, jlong parent) {
   ASurfaceTransaction_reparent(SurfaceTransaction(transaction),
@@ -1155,7 +1162,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
       {const_cast<char*>("nativeSetLayerStack"), const_cast<char*>("(JJI)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
       {const_cast<char*>("nativeSetRelativeLayer"), const_cast<char*>("(JJJI)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop3)},
+       reinterpret_cast<void*>(&SurfaceControlNativeSetRelativeLayer)},
       {const_cast<char*>("nativeReparent"), const_cast<char*>("(JJJ)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeReparent)},
       {const_cast<char*>("nativeSetAlpha"), const_cast<char*>("(JJF)V"),

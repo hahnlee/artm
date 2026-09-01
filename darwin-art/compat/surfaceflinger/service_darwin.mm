@@ -37,9 +37,9 @@ extern "C" int darwin_art_android_metal_shared_event_fence_fd(
 
 namespace {
 
-constexpr std::array<char, 8> kRequestMagic{'D', 'A', 'R', 'T', 'S', 'F', '0', '6'};
-constexpr std::array<char, 8> kResponseMagic{'D', 'A', 'R', 'T', 'S', 'F', 'R', '6'};
-constexpr uint32_t kProtocolVersion = 6;
+constexpr std::array<char, 8> kRequestMagic{'D', 'A', 'R', 'T', 'S', 'F', '0', '7'};
+constexpr std::array<char, 8> kResponseMagic{'D', 'A', 'R', 'T', 'S', 'F', 'R', '7'};
+constexpr uint32_t kProtocolVersion = 7;
 constexpr uint32_t kMaximumLayers = 4096;
 
 struct RequestHeader {
@@ -59,6 +59,8 @@ struct WireLayer {
   uint32_t layer_id;
   uint32_t parent_owner_process_id;
   uint32_t parent_id;
+  uint32_t relative_parent_owner_process_id;
+  uint32_t relative_parent_id;
   uint32_t iosurface_id;
   uint32_t width;
   uint32_t height;
@@ -305,6 +307,15 @@ void MergeRetainedLayer(WireLayer& destination, const WireLayer& source) {
     destination.parent_owner_process_id = source.parent_owner_process_id;
     destination.parent_id = source.parent_id;
   }
+  if ((source.what & DARWIN_ART_SF_RELATIVE_LAYER_CHANGED) != 0) {
+    destination.relative_parent_owner_process_id =
+        source.relative_parent_owner_process_id;
+    destination.relative_parent_id = source.relative_parent_id;
+  }
+  if ((source.what & DARWIN_ART_SF_LAYER_CHANGED) != 0) {
+    destination.relative_parent_owner_process_id = 0;
+    destination.relative_parent_id = 0;
+  }
   if ((source.what & DARWIN_ART_SF_FLAGS_CHANGED) != 0) {
     destination.flags =
         (destination.flags & ~source.mask) | (source.flags & source.mask);
@@ -489,10 +500,17 @@ void ProcessRequest(RequestHeader header, std::vector<WireLayer> incoming,
             layer.parent_owner_process_id == 0
                 ? owner_process_id
                 : layer.parent_owner_process_id;
+        const uint32_t relative_parent_owner_process_id =
+            layer.relative_parent_owner_process_id == 0
+                ? owner_process_id
+                : layer.relative_parent_owner_process_id;
         updates.push_back({
             .layer_id = GlobalLayerId(state, owner_process_id, layer.layer_id),
             .parent_id =
                 GlobalLayerId(state, parent_owner_process_id, layer.parent_id),
+            .relative_parent_id = GlobalLayerId(
+                state, relative_parent_owner_process_id,
+                layer.relative_parent_id),
             .what = layer.what,
             .flags = layer.flags,
             .mask = layer.mask,
@@ -575,6 +593,10 @@ void ProcessRequest(RequestHeader header, std::vector<WireLayer> incoming,
             layer.parent_owner_process_id == 0
                 ? owner_process_id
                 : layer.parent_owner_process_id;
+        const uint32_t relative_parent_owner_process_id =
+            layer.relative_parent_owner_process_id == 0
+                ? owner_process_id
+                : layer.relative_parent_owner_process_id;
         IOSurfaceRef surface = IOSurfaceLookup(layer.iosurface_id);
         if (surface == nullptr) continue;
         DebugSurfacePixels("source", header.transaction_id, global_id, surface);
@@ -585,6 +607,11 @@ void ProcessRequest(RequestHeader header, std::vector<WireLayer> incoming,
             .parent_owner_process_id = parent_owner_process_id,
             .parent_id = GlobalLayerId(state, parent_owner_process_id,
                                        layer.parent_id),
+            .relative_parent_owner_process_id =
+                relative_parent_owner_process_id,
+            .relative_parent_id = GlobalLayerId(
+                state, relative_parent_owner_process_id,
+                layer.relative_parent_id),
             .what = layer.what,
             .flags = layer.flags,
             .mask = layer.mask,
@@ -835,6 +862,9 @@ extern "C" int darwin_art_surfaceflinger_service_present(
         .layer_id = layer.layer_id,
         .parent_owner_process_id = layer.parent_owner_process_id,
         .parent_id = layer.parent_id,
+        .relative_parent_owner_process_id =
+            layer.relative_parent_owner_process_id,
+        .relative_parent_id = layer.relative_parent_id,
         .iosurface_id = surface_id,
         .width = layer.width,
         .height = layer.height,

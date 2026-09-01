@@ -8,6 +8,8 @@ struct DarwinArtMetalComposerLayer {
   uint32_t layer_id = 0;
   uint32_t parent_owner_process_id = 0;
   uint32_t parent_id = 0;
+  uint32_t relative_parent_owner_process_id = 0;
+  uint32_t relative_parent_id = 0;
   uint64_t what = 0;
   uint32_t flags = 0;
   uint32_t mask = 0;

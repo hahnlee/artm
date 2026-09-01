@@ -149,9 +149,42 @@ int main() {
     return 20;
   }
 
+  // SurfaceView uses relative Z to place its buffer subtree below ViewRoot
+  // while keeping both controls in the same display hierarchy.
+  const DarwinArtSurfaceFlingerLayerUpdate relative_roots[] = {
+      {.layer_id = 61,
+       .parent_id = 0,
+       .what = android::layer_state_t::eLayerChanged,
+       .z = 0,
+       .alpha = 1.0f},
+      {.layer_id = 62,
+       .parent_id = 0,
+       .relative_parent_id = 61,
+       .what = android::layer_state_t::eRelativeLayerChanged,
+       .z = -2,
+       .alpha = 1.0f},
+  };
+  if (!darwin_art_surfaceflinger_commit_transaction(
+          5, relative_roots, std::size(relative_roots), &result) ||
+      !darwin_art_surfaceflinger_copy_layer_order(nullptr, 0, &order_count) ||
+      order_count != 2) {
+    return 21;
+  }
+  std::array<uint32_t, 2> relative_order{};
+  if (!darwin_art_surfaceflinger_copy_layer_order(
+          relative_order.data(), relative_order.size(), &order_count) ||
+      relative_order != std::array<uint32_t, 2>{62, 61}) {
+    return 22;
+  }
+  const std::array<uint32_t, 2> relative_destroyed{61, 62};
+  if (!darwin_art_surfaceflinger_destroy_layer_handles(
+          relative_destroyed.data(), relative_destroyed.size())) {
+    return 23;
+  }
+
   std::puts(
       "surfaceflinger-transaction-runtime: queue=1 flush=1 pending=0 "
       "resolved-layers=2 hierarchy-order=PASS lifecycle=PASS "
-      "buffer-child-parent=PASS");
+      "buffer-child-parent=PASS relative-layer=PASS");
   return 0;
 }

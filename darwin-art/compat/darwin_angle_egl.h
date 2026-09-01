@@ -112,6 +112,7 @@ void darwin_art_android_mark_hardware_buffer_released(void* buffer);
 void darwin_art_android_present_hardware_buffer(
     void* queue, uint32_t owner_process_id, uint32_t layer_id,
     uint32_t parent_owner_process_id, uint32_t parent_id, uint64_t what,
+    uint32_t relative_parent_owner_process_id, uint32_t relative_parent_id,
     int32_t z, void* buffer, uint32_t transform, int32_t source_left,
     int32_t source_top,
     int32_t source_right, int32_t source_bottom, int32_t destination_left,
@@ -121,8 +122,10 @@ void darwin_art_android_present_hardware_buffer(
     float alpha);
 void darwin_art_android_present_surface_control_state(
     uint32_t owner_process_id, uint32_t layer_id,
-    uint32_t parent_owner_process_id, uint32_t parent_id, uint64_t what,
-    uint32_t flags, uint32_t mask, uint32_t transform, int32_t destination_left,
+    uint32_t parent_owner_process_id, uint32_t parent_id,
+    uint32_t relative_parent_owner_process_id, uint32_t relative_parent_id,
+    uint64_t what, uint32_t flags, uint32_t mask, uint32_t transform,
+    int32_t destination_left,
     int32_t destination_top, int32_t destination_right,
     int32_t destination_bottom, int32_t z, float alpha);
 }
