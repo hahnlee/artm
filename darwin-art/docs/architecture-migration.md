@@ -1388,3 +1388,19 @@ claimed from this run. This is an environment permission boundary, not a
 runtime dispatch failure; the next measurement must use an accessibility-
 authorized caller or an in-app hardware event trace. Native batching remains
 disabled until that evidence and ACK overflow stress coverage exist.
+
+## 2026-09-02 scheduler-separation progress (Looper HUP backpressure)
+
+A real Chrome launch with input-latency logging exposed repeated
+`InputChannel callback consumed=0 pending=0` wakeups after service/channel
+teardown. The fd callback was returning `1` for HUP/ERROR, leaving a readable
+dead peer registered and repeatedly preempting the ART owner loop. The callback
+now treats Looper error/hangup/invalid bits as terminal and returns `0`, which
+removes the registration and hands scheduling back to the owner without
+touching payload dispatch.
+
+Incremental graphics link audit and AOSP Calculator/DeskClock acceptance pass
+after the fix. Chromium acceptance required one retry for its known startup
+timing variance and then passed with 10 target states. Physical click latency
+is still unmeasured because the automation caller lacks macOS assistive-access
+permission; native batched consume remains disabled.

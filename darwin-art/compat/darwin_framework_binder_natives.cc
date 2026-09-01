@@ -948,9 +948,19 @@ void CleanupReceiverRefs(JNIEnv* env, DarwinInputReceiver* receiver) {
 }
 
 int InputChannelTransportCallback(int fd, int events, void* data) {
-  (void)events;
   auto* channel = static_cast<DarwinInputChannelState*>(data);
   if (channel == nullptr || fd < 0) return 0;
+  // A closed peer makes poll(2) report HUP/ERR forever on a registered fd.
+  // Remove the receiver at that boundary instead of returning 1 and waking
+  // the ART owner in a tight callback loop with no payload.
+  constexpr int kLooperEventError = 0x0004;
+  constexpr int kLooperEventHangup = 0x0008;
+  constexpr int kLooperEventInvalid = 0x0010;
+  if ((events & (kLooperEventError | kLooperEventHangup |
+                kLooperEventInvalid)) != 0) {
+    channel->looper_consumer.store(false, std::memory_order_release);
+    return 0;
+  }
   uint8_t buffer[64];
   while (recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
   }
