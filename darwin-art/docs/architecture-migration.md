@@ -1589,3 +1589,20 @@ audit, Rust host tests, `cargo fmt --all -- --check`, and `git diff --check`
 also pass. Remaining work is measuring physical input under load and refining
 the ready-generation mailbox to cover multi-surface display policy rather
 than the current single active host surface.
+
+## 2026-09-02 scheduler-separation progress (InputChannel callback rearm)
+
+The native `InputChannel` transport callback now re-arms its broker wake token
+when the bounded 64-packet callback budget is reached and payloads remain in
+the channel queue. Previously the callback drained the token, returned to the
+Looper, and could leave remaining DOWN/MOVE/UP or key packets dormant until
+an unrelated future enqueue. The rearm happens after payload dispatch, keeps
+packet ordering in the channel mutex, and still uses latest-wins only for MOVE
+overflow; gesture boundaries are never discarded.
+
+Graphics-link audit, all host Rust tests, AOSP Calculator/DeskClock graphics
+acceptance, and Chromium's real tab-switcher/tab-grid acceptance pass after
+the change (`target-states=10`, handled MotionEvent packets). Physical input
+percentiles under sustained load remain the final input-side measurement; the
+existing synthetic acceptance confirms functional delivery but is not that
+measurement.

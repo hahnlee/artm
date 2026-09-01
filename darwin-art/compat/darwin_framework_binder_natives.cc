@@ -714,6 +714,25 @@ void ClearInputChannelPending(DarwinInputChannelState* channel) {
   channel->pending_input.store(false, std::memory_order_release);
 }
 
+// ALooper callbacks are bounded so a burst cannot monopolize the ART owner.
+// If that bound is reached, the transport token must be re-armed after the
+// callback drains its current token; otherwise packets left in the channel
+// remain invisible until an unrelated future enqueue happens to send another
+// token. The queue itself remains the sole source of payload ordering.
+bool RearmInputChannelTransport(DarwinInputChannelState* channel) {
+  if (channel == nullptr) return false;
+  bool pending = false;
+  {
+    std::lock_guard<std::mutex> lock(channel->packet_mutex);
+    pending = !channel->packets.empty();
+    if (pending) channel->pending_input.store(true, std::memory_order_release);
+  }
+  if (!pending || channel->write_fd < 0) return false;
+  const uint8_t token = 1;
+  return send(channel->write_fd, &token, sizeof(token), MSG_DONTWAIT) ==
+         static_cast<ssize_t>(sizeof(token));
+}
+
 struct DarwinInputChannel {
   std::shared_ptr<DarwinInputChannelState> state;
   bool server = false;
@@ -1025,10 +1044,12 @@ int InputChannelTransportCallback(int fd, int events, void* data) {
     ++consumed;
   }
   if (consumed > 0) ClearInputChannelPending(channel);
+  const bool rearmed = RearmInputChannelTransport(channel);
   if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
     std::cerr << "ART Android InputChannel callback consumed=" << consumed
               << " pending="
               << (channel->pending_input.load(std::memory_order_acquire) ? 1 : 0)
+              << " rearmed=" << (rearmed ? 1 : 0)
               << "\n";
   }
   const uint32_t previous =
