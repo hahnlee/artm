@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <dispatch/dispatch.h>
@@ -748,8 +749,18 @@ DarwinArtSurfaceResult darwin_art_surface_map_producer(
   }
 
   [surface->last_command_buffer waitUntilCompleted];
+  id<MTLCommandBuffer> last_gpu_command_buffer = nil;
+  {
+    std::lock_guard<std::mutex> lock(surface->backing_mutex);
+    last_gpu_command_buffer = surface->last_gpu_command_buffer;
+  }
+  [last_gpu_command_buffer waitUntilCompleted];
   if (surface->last_command_buffer != nil &&
       surface->last_command_buffer.status == MTLCommandBufferStatusError) {
+    return DARWIN_ART_SURFACE_GPU_SUBMISSION_FAILED;
+  }
+  if (last_gpu_command_buffer != nil &&
+      last_gpu_command_buffer.status == MTLCommandBufferStatusError) {
     return DARWIN_ART_SURFACE_GPU_SUBMISSION_FAILED;
   }
   if (IOSurfaceLock(surface->io_surface, 0, nullptr) != kIOReturnSuccess) {
@@ -976,8 +987,18 @@ static DarwinArtSurfaceResult ResizeSurfaceBacking(DarwinArtSurface* surface,
     return DARWIN_ART_SURFACE_PRODUCER_ALREADY_MAPPED;
   }
   [surface->last_command_buffer waitUntilCompleted];
+  id<MTLCommandBuffer> last_gpu_command_buffer = nil;
+  {
+    std::lock_guard<std::mutex> lock(surface->backing_mutex);
+    last_gpu_command_buffer = surface->last_gpu_command_buffer;
+  }
+  [last_gpu_command_buffer waitUntilCompleted];
   if (surface->last_command_buffer != nil &&
       surface->last_command_buffer.status == MTLCommandBufferStatusError) {
+    return DARWIN_ART_SURFACE_GPU_SUBMISSION_FAILED;
+  }
+  if (last_gpu_command_buffer != nil &&
+      last_gpu_command_buffer.status == MTLCommandBufferStatusError) {
     return DARWIN_ART_SURFACE_GPU_SUBMISSION_FAILED;
   }
   SurfaceBacking backing;
@@ -1186,6 +1207,71 @@ DarwinArtSurfaceResult darwin_art_surface_present(DarwinArtSurface* surface) {
   return RunOnMainSync([&] { return PresentSurfaceOnMain(surface); });
 }
 
+static void RunAsyncPresentOnMain(DarwinArtSurface* surface);
+
+DarwinArtSurfaceResult darwin_art_surface_present_async(
+    DarwinArtSurface* surface) {
+  if (surface == nullptr) return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+  if (IsMainThread()) return PresentSurfaceOnMain(surface);
+
+  bool schedule = false;
+  {
+    std::lock_guard<std::mutex> lock(surface->presentation_mutex);
+    if (surface->presentation_closing) {
+      return DARWIN_ART_SURFACE_WINDOW_CLOSED;
+    }
+    ++surface->presentation_requested;
+    if (!surface->presentation_scheduled) {
+      surface->presentation_scheduled = true;
+      schedule = true;
+    }
+  }
+  if (schedule) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      RunAsyncPresentOnMain(surface);
+    });
+  }
+  return DARWIN_ART_SURFACE_OK;
+}
+
+static void RunAsyncPresentOnMain(DarwinArtSurface* surface) {
+  if (surface == nullptr || !IsMainThread()) return;
+  uint64_t request_generation = 0;
+  {
+    std::lock_guard<std::mutex> lock(surface->presentation_mutex);
+    if (surface->presentation_closing) {
+      surface->presentation_scheduled = false;
+      return;
+    }
+    request_generation = surface->presentation_requested;
+  }
+  const DarwinArtSurfaceResult result = PresentSurfaceOnMain(surface);
+  surface->last_scanout_status.store(result, std::memory_order_release);
+  bool schedule_next = false;
+  {
+    std::lock_guard<std::mutex> lock(surface->presentation_mutex);
+    if (surface->presentation_closing) {
+      surface->presentation_scheduled = false;
+    } else if (surface->presentation_requested != request_generation) {
+      // Keep one command outstanding and submit a trailing turn for requests
+      // that arrived during the blit. This avoids both a lost final frame and
+      // a continuously monopolized AppKit queue.
+      schedule_next = true;
+    } else {
+      surface->presentation_scheduled = false;
+    }
+  }
+  if (result != DARWIN_ART_SURFACE_OK &&
+      result != DARWIN_ART_SURFACE_DRAWABLE_UNAVAILABLE) {
+    std::fprintf(stderr, "ART Android async scanout failed status=%d\n", result);
+  }
+  if (schedule_next) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      RunAsyncPresentOnMain(surface);
+    });
+  }
+}
+
 static DarwinArtSurfaceResult PumpSurfaceEventsOnMain(
     DarwinArtSurface* surface,
     double seconds) {
@@ -1309,19 +1395,37 @@ static DarwinArtSurfaceResult DestroySurfaceOnMain(
     unmap_result = darwin_art_surface_unmap_producer(surface);
   }
   [surface->last_command_buffer waitUntilCompleted];
+  id<MTLCommandBuffer> last_gpu_command_buffer = nil;
+  {
+    std::lock_guard<std::mutex> lock(surface->backing_mutex);
+    last_gpu_command_buffer = surface->last_gpu_command_buffer;
+  }
+  [last_gpu_command_buffer waitUntilCompleted];
   const bool gpu_failed =
       surface->last_command_buffer != nil &&
       surface->last_command_buffer.status == MTLCommandBufferStatusError;
+  const bool direct_gpu_failed =
+      last_gpu_command_buffer != nil &&
+      last_gpu_command_buffer.status == MTLCommandBufferStatusError;
   [surface->window orderOut:nil];
   [surface->window close];
   delete surface;
   if (unmap_result != DARWIN_ART_SURFACE_OK) {
     return unmap_result;
   }
-  return gpu_failed ? DARWIN_ART_SURFACE_GPU_SUBMISSION_FAILED
+  return (gpu_failed || direct_gpu_failed)
+             ? DARWIN_ART_SURFACE_GPU_SUBMISSION_FAILED
                     : DARWIN_ART_SURFACE_OK;
 }
 
 DarwinArtSurfaceResult darwin_art_surface_destroy(DarwinArtSurface* surface) {
+  if (surface == nullptr) return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+  {
+    std::lock_guard<std::mutex> lock(surface->presentation_mutex);
+    // The owner must stop producing frames before this boundary. Requests
+    // already accepted by the main serial queue drain before this synchronous
+    // destroy block; later requests fail closed.
+    surface->presentation_closing = true;
+  }
   return RunOnMainSync([&] { return DestroySurfaceOnMain(surface); });
 }

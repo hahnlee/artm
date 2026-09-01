@@ -616,3 +616,30 @@ the long-tail handoff still prevents declaring Chrome tab performance solved;
 the next slice must profile the first-frame startup stall and move the
 remaining Metal acquire/presentation waits onto the RenderThread-equivalent
 queue.
+
+## 2026-09-01 scheduler-separation progress (AppKit scanout handoff)
+
+Product HWC scanout now uses `darwin_art_surface_present_async` from the ART
+owner. The bridge keeps the synchronous present ABI for smoke/CPU callers, but
+the product path submits a single latest-wins AppKit command protected by a
+surface mutex and request generation. A request arriving during a blit causes
+one trailing main turn, so the last frame is not lost while a slow main actor
+cannot accumulate an unbounded queue. Destroy marks the surface closing before
+its main-queue handoff; requests after that point fail closed. Direct GPU
+command-buffer completion is tracked separately from the main-actor IOSurface
+blit, avoiding cross-thread reuse of the old completion slot.
+
+The frame pulse no longer drains `MessageQueue.next()` synchronously a second
+time immediately after posting vsync. Choreographer work is left for the next
+owner-Looper turn, matching Android's callback-to-Handler ordering and keeping
+the RenderThread-equivalent pulse independent of arbitrary UI message bursts.
+With the latest dylib, Chrome tab graphics acceptance passes with 10 composed
+states and real tab-switcher/tab-grid views. The measured graphics pulse is
+`count=2048 avg=672us max=3992us`; this is the relevant scanout/frame path and
+is no longer multi-second. The complete owner handoff still reports
+`max=2165411us` because the UI Looper itself can spend about 2.16s draining a
+startup burst (`looper max=2165057us`). This is now isolated as Android UI work,
+not AppKit/Metal backpressure. AOSP Calculator (`2+3=5`) and DeskClock Timer
+acceptance remain green after the change. The next scheduler slice should
+profile that Chrome startup message burst and avoid unnecessary per-frame JNI
+reflection, while preserving the current Android Looper ownership semantics.

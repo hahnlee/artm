@@ -168,6 +168,14 @@ DarwinArtSurfaceResult darwin_art_surface_update(
 DarwinArtSurfaceResult darwin_art_surface_present(
     DarwinArtSurface* surface);
 
+// Latest-wins scanout request for the Android RenderThread-equivalent. It
+// returns after enqueueing at most one AppKit command, so the ART/UI owner is
+// never blocked behind nextDrawable or a busy main queue. The main actor
+// drains the command in order; callers must keep the surface alive until the
+// normal main-thread destroy dispatch runs.
+DarwinArtSurfaceResult darwin_art_surface_present_async(
+    DarwinArtSurface* surface);
+
 // GPU-only frame path. The returned frame wraps the CAMetalLayer drawable
 // directly; callers must submit it with darwin_art_surface_gpu_end(). No
 // IOSurface mapping or CPU pixel buffer is involved.

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -252,7 +253,20 @@ bool DispatchDueMainMessages(JNIEnv* env, size_t limit = 64) {
       ok = false;
       break;
     }
+    const int32_t dispatched_what = env->GetIntField(message, message_what);
+    const auto message_started = std::chrono::steady_clock::now();
     env->CallVoidMethod(dispatch_target, dispatch, message);
+    if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
+      const auto message_us =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - message_started)
+              .count();
+      if (message_us >= 100'000) {
+        std::cerr << "DARWIN_ART slow-looper-message what="
+                  << dispatched_what << " elapsed_us=" << message_us
+                  << "\n";
+      }
+    }
     if (!env->ExceptionCheck()) env->CallVoidMethod(message, recycle);
     env->DeleteLocalRef(dispatch_target);
     env->DeleteLocalRef(message);
@@ -1873,7 +1887,21 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
   }
   art::ScopedObjectAccess soa(art_thread);
   JNIEnv* env = art_thread->GetJniEnv();
+  const bool debug_slow_frame =
+      std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr;
+  const auto frame_started = std::chrono::steady_clock::now();
+  auto log_slow_frame_stage = [&](const char* stage) {
+    if (!debug_slow_frame) return;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                             std::chrono::steady_clock::now() - frame_started)
+                             .count();
+    if (elapsed >= 100'000) {
+      std::cerr << "DARWIN_ART slow-frame stage=" << stage
+                << " elapsed_us=" << elapsed << "\n";
+    }
+  };
   if (!sync_interactive_surface_size(state, env)) return 75;
+  log_slow_frame_stage("sync_surface_size");
   if (!DispatchDueMainMessages(env)) {
     if (env->ExceptionCheck()) {
       std::cerr << "ART Android main message dispatch threw\n"
@@ -1882,7 +1910,9 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
     }
     return 75;
   }
+  log_slow_frame_stage("dispatch_main_before_vsync");
   ActivateCurrentHostSurfaces(state, env);
+  log_slow_frame_stage("activate_surfaces");
   DebugWindowManagerViews(env);
 #if defined(DARWIN_ART_REAL_GRAPHICS)
   auto* animation_context = state->hwui_animation_context.get();
@@ -1917,8 +1947,14 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
   // normal async onVsync -> Handler -> Choreographer.doFrame path run below.
   const int delivered_vsyncs =
       darwin_art::DispatchFrameworkPendingVsyncs(env, frame_time_nanos);
+  log_slow_frame_stage("dispatch_vsync");
   bool ok = delivered_vsyncs >= 0 && !env->ExceptionCheck();
-  if (ok) ok = DispatchDueMainMessages(env);
+  // The vsync callback posts Choreographer work onto the owner Looper. Do not
+  // synchronously drain MessageQueue again inside this frame pulse: the host
+  // turn before the next display edge will dispatch it, matching Android's
+  // callback->Handler ordering and preventing MessageQueue.next() from
+  // blocking the RenderThread-equivalent pulse behind unrelated UI work.
+  log_slow_frame_stage("post_vsync_message_enqueue");
   if (ok && delivered_vsyncs > 0 && state->interactive_root != nullptr) {
     debug_product_view_root(env, state->interactive_root);
   }
@@ -1954,8 +1990,12 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
   // GPU texture blit only: it neither calls View.draw nor replays a RenderNode.
   if (ok && state->interactive_view_root != nullptr &&
       state->gpu_surface != nullptr) {
+    // HWC scanout is an AppKit-actor command. Do not synchronously wait for
+    // nextDrawable here: the ART owner must remain free to drain Android
+    // Looper work while the main actor presents the persistent IOSurface.
     const DarwinArtSurfaceResult present =
-        darwin_art_surface_present(state->gpu_surface);
+        darwin_art_surface_present_async(state->gpu_surface);
+    log_slow_frame_stage("enqueue_scanout");
     ok = present == DARWIN_ART_SURFACE_OK ||
          present == DARWIN_ART_SURFACE_DRAWABLE_UNAVAILABLE;
     if (!ok) {

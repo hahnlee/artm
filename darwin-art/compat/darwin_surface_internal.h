@@ -39,6 +39,18 @@ struct DarwinArtSurface {
   id<MTLCommandQueue> command_queue = nil;
   id<MTLTexture> io_surface_texture = nil;
   id<MTLCommandBuffer> last_command_buffer = nil;
+  // Direct RenderThread GPU submissions are produced off the AppKit actor;
+  // keep their completion handle separate from the main-actor IOSurface blit.
+  id<MTLCommandBuffer> last_gpu_command_buffer = nil;
+  mutable std::mutex presentation_mutex;
+  bool presentation_closing = false;
+  bool presentation_scheduled = false;
+  uint64_t presentation_requested = 0;
+  std::atomic<int32_t> last_scanout_status{DARWIN_ART_SURFACE_OK};
+  // Worker-thread frame pulses request scanout through a single latest-wins
+  // AppKit command. The generation/mutex pair bounds the main-queue backlog
+  // to one block while guaranteeing that a request arriving during a blit
+  // schedules one trailing main turn instead of being lost.
   NSWindow* window = nil;
   id window_delegate = nil;
   DarwinArtMetalView* view = nil;

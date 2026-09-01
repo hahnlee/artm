@@ -127,7 +127,10 @@ DarwinArtSurfaceResult darwin_art_surface_gpu_end(
     }
     [command_buffer presentDrawable:frame->drawable];
     [command_buffer commit];
-    surface->last_command_buffer = command_buffer;
+    {
+      std::lock_guard<std::mutex> lock(surface->backing_mutex);
+      surface->last_gpu_command_buffer = command_buffer;
+    }
   }
   g_active_gpu_canvas = nullptr;
   delete frame;
