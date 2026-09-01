@@ -122,9 +122,11 @@ fn virtual_graphics_handle(name: &[u8]) -> Option<*mut c_void> {
 }
 
 // Android Vulkan loader boundary. A bundled MoltenVK dylib is preferred and
-// converts Vulkan commands to Metal on the host GPU. If it is absent, the
-// closed provider keeps reporting Vulkan as unavailable instead of inventing
-// a software device or leaking a Darwin loader handle into the guest.
+// converts the offscreen Vulkan/AHardwareBuffer subset used by Graphite/Dawn
+// to Metal on the host GPU. It deliberately does not synthesize
+// VK_KHR_android_surface, so APK-facing Android Vulkan WSI stays unavailable.
+// If the provider is absent, the closed loader reports Vulkan as unavailable
+// instead of inventing a software device or leaking a Darwin loader handle.
 const VK_SUCCESS: i32 = 0;
 const VK_ERROR_INCOMPATIBLE_DRIVER: i32 = -9;
 
@@ -454,6 +456,9 @@ const QUEUE_FAMILY_FOREIGN_EXTENSION: &CStr = c"VK_EXT_queue_family_foreign";
 const METAL_EXTERNAL_MEMORY_EXTENSION: &CStr = c"VK_EXT_external_memory_metal";
 const EXTERNAL_SEMAPHORE_FD_EXTENSION: &CStr = c"VK_KHR_external_semaphore_fd";
 const METAL_OBJECTS_EXTENSION: &CStr = c"VK_EXT_metal_objects";
+const HOST_METAL_SURFACE_EXTENSION: &CStr = c"VK_EXT_metal_surface";
+const HOST_MACOS_SURFACE_EXTENSION: &CStr = c"VK_MVK_macos_surface";
+const ANDROID_SURFACE_EXTENSION: &CStr = c"VK_KHR_android_surface";
 
 #[cfg(not(test))]
 fn load_moltenvk() -> Option<MoltenVkProvider> {
@@ -628,6 +633,82 @@ unsafe extern "C" fn moltenvk_create_instance(
         VULKAN_INSTANCE.store(value, Ordering::Release);
     }
     result
+}
+
+fn is_host_surface_extension(property: &VulkanExtensionProperties) -> bool {
+    // SAFETY: VkExtensionProperties guarantees a NUL-terminated name.
+    let name = unsafe { CStr::from_ptr(property.extension_name.as_ptr()) };
+    name == HOST_METAL_SURFACE_EXTENSION || name == HOST_MACOS_SURFACE_EXTENSION
+}
+
+unsafe extern "C" fn moltenvk_enumerate_instance_extensions(
+    layer_name: *const c_char,
+    property_count: *mut u32,
+    properties: *mut VulkanExtensionProperties,
+) -> i32 {
+    type Enumerate =
+        unsafe extern "C" fn(*const c_char, *mut u32, *mut VulkanExtensionProperties) -> i32;
+    let Some(provider) = moltenvk() else {
+        return VK_ERROR_INCOMPATIBLE_DRIVER;
+    };
+    if property_count.is_null() {
+        return VK_ERROR_INCOMPATIBLE_DRIVER;
+    }
+    let address = unsafe {
+        (provider.get_instance_proc_addr)(
+            ptr::null_mut(),
+            c"vkEnumerateInstanceExtensionProperties".as_ptr(),
+        )
+    };
+    if address.is_null() {
+        return VK_ERROR_INCOMPATIBLE_DRIVER;
+    }
+    let enumerate: Enumerate = unsafe { std::mem::transmute(address) };
+    let mut native_count = 0;
+    let result = unsafe { enumerate(layer_name, &mut native_count, ptr::null_mut()) };
+    if result != VK_SUCCESS {
+        return result;
+    }
+    let empty = VulkanExtensionProperties {
+        extension_name: [0; 256],
+        spec_version: 0,
+    };
+    let mut native = vec![empty; native_count as usize];
+    let result = unsafe { enumerate(layer_name, &mut native_count, native.as_mut_ptr()) };
+    if result != VK_SUCCESS && result != VK_INCOMPLETE {
+        return result;
+    }
+    native.truncate(native_count as usize);
+    let native_count = native.len();
+    let advertised_android_surface = native.iter().any(|property| {
+        // SAFETY: VkExtensionProperties guarantees a NUL-terminated name.
+        (unsafe { CStr::from_ptr(property.extension_name.as_ptr()) }) == ANDROID_SURFACE_EXTENSION
+    });
+    native.retain(|property| !is_host_surface_extension(property));
+    if std::env::var_os("DARWIN_ART_DEBUG_GRAPHICS_DSO").is_some() {
+        eprintln!(
+            "ART Android Vulkan: instance-extensions native={} returned={} host-wsi=0 android-wsi={}",
+            native_count,
+            native.len(),
+            advertised_android_surface as u8
+        );
+    }
+
+    if properties.is_null() {
+        unsafe { *property_count = native.len() as u32 };
+        return VK_SUCCESS;
+    }
+    let capacity = unsafe { *property_count } as usize;
+    let written = capacity.min(native.len());
+    unsafe {
+        ptr::copy_nonoverlapping(native.as_ptr(), properties, written);
+        *property_count = written as u32;
+    }
+    if written < native.len() {
+        VK_INCOMPLETE
+    } else {
+        VK_SUCCESS
+    }
 }
 
 unsafe extern "C" fn moltenvk_enumerate_device_extensions(
@@ -1728,6 +1809,12 @@ unsafe extern "C" fn vulkan_get_instance_proc_addr(
         match value.to_bytes() {
             b"vkGetInstanceProcAddr" => return vulkan_get_instance_proc_addr as *mut c_void,
             b"vkCreateInstance" => return moltenvk_create_instance as *mut c_void,
+            b"vkEnumerateInstanceExtensionProperties" => {
+                return moltenvk_enumerate_instance_extensions as *mut c_void;
+            }
+            b"vkCreateMetalSurfaceEXT" | b"vkCreateMacOSSurfaceMVK" => {
+                return ptr::null_mut();
+            }
             b"vkEnumerateDeviceExtensionProperties" => {
                 return moltenvk_enumerate_device_extensions as *mut c_void;
             }

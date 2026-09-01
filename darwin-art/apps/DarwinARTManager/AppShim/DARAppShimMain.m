@@ -72,6 +72,8 @@ int main(void) {
         environment[@"DARWIN_ART_PACKAGED_RUNTIME"] = @"1";
         environment[@"DARWIN_ART_ANGLE_DIRECTORY"] =
             [runtime URLByAppendingPathComponent:@"_build/angle-source/out/DarwinArtRelease"].path;
+        environment[@"DARWIN_ART_MOLTENVK_DYLIB"] =
+            [runtime URLByAppendingPathComponent:@"_build/moltenvk/libMoltenVK.dylib"].path;
         NSString *profilesRoot = environment[@"DARWIN_ART_PROFILE_ROOT"];
         if (!profilesRoot.length) {
             profilesRoot = [NSHomeDirectory() stringByAppendingPathComponent:

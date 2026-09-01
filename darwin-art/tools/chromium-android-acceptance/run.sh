@@ -9,6 +9,7 @@ apk="${1:-}"
   exit 64
 }
 apk="$(cd "$(dirname "$apk")" && pwd)/$(basename "$apk")"
+"$root/tools/materialize-moltenvk.sh" >/dev/null
 command -v mkcert >/dev/null || { echo "mkcert is required" >&2; exit 69; }
 command -v ffmpeg >/dev/null || { echo "ffmpeg is required" >&2; exit 69; }
 

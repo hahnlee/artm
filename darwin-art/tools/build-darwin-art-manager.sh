@@ -34,6 +34,7 @@ cargo build -q --release \
   --manifest-path "$project_root/tools/android-apk-app-runtime/Cargo.toml"
 cargo build -q --release \
   --manifest-path "$project_root/tools/android-apk-native-extract/Cargo.toml"
+"$project_root/tools/materialize-moltenvk.sh" >/dev/null
 
 runtime="$contents/Resources/DarwinART"
 copy_file() {
@@ -103,6 +104,9 @@ fi
 for library in "$project_root/_build/angle-source/out/DarwinArtRelease/"*.dylib; do
   copy_file "$library" "_build/angle-source/out/DarwinArtRelease/$(basename "$library")"
 done
+copy_file "$project_root/_build/moltenvk/libMoltenVK.dylib" \
+  _build/moltenvk/libMoltenVK.dylib
+copy_file "$project_root/_build/moltenvk/LICENSE" _build/moltenvk/LICENSE
 
 runtime_dylib="$runtime/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib"
 lz4_source="$(brew --prefix lz4)/lib/liblz4.1.dylib"

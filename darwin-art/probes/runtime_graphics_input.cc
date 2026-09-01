@@ -39,6 +39,15 @@ bool MotionEventBridgeEnabled() {
   return std::getenv("DARWIN_ART_APK_APP_PACKAGE") != nullptr;
 }
 
+bool CompatRippleOverlayEnabled() {
+  // This overlay is a probe bridge for validating Metal frame cadence while
+  // HWUI CanvasProperty replay is incomplete. Product APKs must use the
+  // framework RippleDrawable attached to the actual hit View: the overlay has
+  // no View bounds/state and therefore cannot preserve Android hotspot,
+  // clipping, or WindowManager coordinate semantics.
+  return std::getenv("DARWIN_ART_HWUI_COMPAT_RIPPLE_OVERLAY") != nullptr;
+}
+
 bool g_motion_event_archive_probe_done = false;
 size_t g_debug_main_queue_budget = 0;
 
@@ -1437,8 +1446,9 @@ int32_t dispatch_motion_event(GraphicsState* state, JNIEnv* env, jobject root,
     DebugViewTextState(env, dispatch_root);
     ClearPointerDispatchRoot(state, env);
   }
-  state->gpu_ripple_overlay_active = action != 3u;
-  if (down) {
+  const bool compat_ripple = CompatRippleOverlayEnabled();
+  state->gpu_ripple_overlay_active = compat_ripple && action != 3u;
+  if (compat_ripple && down) {
     state->gpu_ripple_overlay_x = x;
     state->gpu_ripple_overlay_y = y;
     state->gpu_ripple_overlay_started = std::chrono::steady_clock::now();
@@ -1608,10 +1618,14 @@ int32_t dispatch_pointer_internal(GraphicsState* state, uint32_t action, float x
       std::cerr << "ART Android input: expected APK clickable target was not hit\n";
       return 76;
     }
-    state->gpu_ripple_overlay_active = true;
-    state->gpu_ripple_overlay_x = x;
-    state->gpu_ripple_overlay_y = y;
-    state->gpu_ripple_overlay_started = std::chrono::steady_clock::now();
+    if (CompatRippleOverlayEnabled()) {
+      state->gpu_ripple_overlay_active = true;
+      state->gpu_ripple_overlay_x = x;
+      state->gpu_ripple_overlay_y = y;
+      state->gpu_ripple_overlay_started = std::chrono::steady_clock::now();
+    } else {
+      state->gpu_ripple_overlay_active = false;
+    }
     if (pressed_view != nullptr) {
       env->CallVoidMethod(pressed_view, set_pressed, JNI_FALSE);
       env->DeleteGlobalRef(pressed_view);

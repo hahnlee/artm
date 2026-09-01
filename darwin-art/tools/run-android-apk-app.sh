@@ -475,6 +475,18 @@ if [[ -z "${DARWIN_ART_ANGLE_DIRECTORY:-}" && -n "${ANDROID_HOME:-}" ]]; then
   fi
 fi
 
+# Android P+ Chrome enables its direct-rendering display compositor and needs
+# a thread-safe Graphite/Dawn backing. The packaged MoltenVK provider is the
+# Vulkan ICD for that Android contract; the guest still sees libvulkan.so and
+# never receives a Darwin dlopen handle. We intentionally do not synthesize
+# VK_KHR_android_surface, so this does not advertise Android Vulkan WSI to APKs.
+if [[ -z "${DARWIN_ART_MOLTENVK_DYLIB:-}" ]]; then
+  moltenvk_candidate="$root/_build/moltenvk/libMoltenVK.dylib"
+  if [[ -f "$moltenvk_candidate" ]]; then
+    export DARWIN_ART_MOLTENVK_DYLIB="$moltenvk_candidate"
+  fi
+fi
+
 if [[ "$native_count" != "0" ]]; then
   unwind_provider="$root/_build/android-unwind-provider/libdarwin_art_android_unwind.so"
   if [[ -n "$installed_record" && ! -f "$unwind_provider" ]]; then

@@ -70,6 +70,9 @@ static NSString *const DARErrorDomain = @"dev.darwinart.manager";
     environment[@"DARWIN_ART_ANGLE_DIRECTORY"] =
         [self.runtimeRootURL URLByAppendingPathComponent:
                                  @"_build/angle-source/out/DarwinArtRelease"].path;
+    environment[@"DARWIN_ART_MOLTENVK_DYLIB"] =
+        [self.runtimeRootURL URLByAppendingPathComponent:
+                                 @"_build/moltenvk/libMoltenVK.dylib"].path;
     NSString *profilesRoot = environment[@"DARWIN_ART_PROFILE_ROOT"];
     if (!profilesRoot.length) {
         profilesRoot = [NSHomeDirectory() stringByAppendingPathComponent:
