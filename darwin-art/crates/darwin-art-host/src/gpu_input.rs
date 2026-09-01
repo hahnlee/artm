@@ -157,6 +157,11 @@ pub(super) fn dispatch_synthetic_keys(
                     });
                 }
                 dispatched += dispatch_queued_events(runtime)?;
+                // Keep the test-only interval on the same owner-turn contract
+                // as the product loop: drain framework/native Looper work
+                // once, then publish a display edge. pump_frame deliberately
+                // does not run a second opaque callback batch.
+                pump_main_looper(runtime)?;
                 let pulse_status = runtime
                     .graphics()
                     .map_or(-1, |graphics| graphics.pump_frame(0));

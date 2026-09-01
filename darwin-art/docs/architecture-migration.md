@@ -868,3 +868,30 @@ The callback remains on the browser's registering Looper as required by
 Android. The next implementation slice is therefore a browser-side
 MessagePump/IPC batch boundary (or a provider-level non-blocking fix), with
 process attribution retained as a regression invariant.
+
+## 2026-09-02 scheduler-separation progress (single-batch frame boundary)
+
+`pump_frame()` no longer calls `DispatchDueMainMessages()` a second time after
+the owner turn has already drained the Android MessageQueue/ALooper. The
+steady host path is now explicitly `input -> pump_main_looper -> one frame
+pulse`; a frame pulse publishes framework vsync and enqueues the asynchronous
+Metal scanout without re-entering an opaque Chromium watcher callback in the
+same edge. The test-only synthetic-key path was updated to keep the same
+ordering.
+
+This is a scheduling boundary, not a preemption mechanism: the callback still
+runs on its registering ART Looper thread, as Android requires, and a single
+Chromium callback body may still be multi-second. The architecture is already
+split at the safe boundaries (AppKit main actor, ART owner, HWUI RenderThread,
+SurfaceFlinger/latch, and latest-wins Metal scanout). The next host change is
+an `OwnerReactor` with coalesced POD state (`input_ready`, latest vsync,
+close/shutdown) and an ALooper wake token, replacing the remaining 2 ms sleep
+poll without moving `JNIEnv`, `GraphicsSession`, or `SurfaceSession` across
+threads. A cooperative batch limit inside Chromium's own MessagePump remains
+a separate APK-side integration problem.
+
+Verification for this change: `cargo fmt --all -- --check`,
+`cargo test -p darwin-art-host` (7/7), graphics bootstrap (192/192 native
+steps), graphics-link audit PASS, AOSP Calculator `2+3=5` and DeskClock Timer
+PASS, and Chromium real tab-switcher/tab-grid acceptance PASS with 10 target
+states and GPU `GLES+ANGLE+Graphite+Dawn+MoltenVK+AHB+SurfaceFlinger+Metal`.

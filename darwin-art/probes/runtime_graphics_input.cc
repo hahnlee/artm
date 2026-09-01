@@ -1948,15 +1948,13 @@ int32_t pump_frame(GraphicsState* state, jlong frame_time_nanos) {
   };
   if (!sync_interactive_surface_size(state, env)) return 75;
   log_slow_frame_stage("sync_surface_size");
-  if (!DispatchDueMainMessages(state, env)) {
-    if (env->ExceptionCheck()) {
-      std::cerr << "ART Android main message dispatch threw\n"
-                << art_thread->GetException()->Dump() << "\n";
-      art_thread->ClearException();
-    }
-    return 75;
-  }
-  log_slow_frame_stage("dispatch_main_before_vsync");
+  // The host owner reactor drains MessageQueue/ALooper before publishing a
+  // display edge. Do not drain it again from the frame publisher: doing so
+  // couples one vsync to a second opaque native callback batch and lets a
+  // Chromium watcher occupy what should be the bounded frame hand-off. This
+  // function remains owner-thread-only because framework vsync delivery and
+  // ViewRoot bookkeeping use JNI; HWUI RenderThread and final Metal scanout
+  // remain asynchronous consumers below.
   DebugWindowManagerViews(env);
 #if defined(DARWIN_ART_REAL_GRAPHICS)
   auto* animation_context = state->hwui_animation_context.get();
