@@ -1260,3 +1260,19 @@ Therefore `nativeConsumeBatchedInputEvents` remains disabled until the fd
 callback is converted to a receiver-owned consumer, avoiding a second reader
 and duplicate Java dispatch. Focus transition handling and sequence-indexed
 finish ACKs are the next transport boundaries before true Android batching.
+
+## 2026-09-02 scheduler-separation progress (finish ACK queue)
+
+`DarwinInputChannelState` now keeps a bounded sequence-indexed finish-ACK
+queue in addition to the compatibility atomics. `finishInputEvent()` records
+the `(sequence, handled)` result under the channel mutex, and the synchronous
+framework dispatch path consumes the matching sequence instead of assuming
+that one global ACK slot represents all in-flight events. Java is never called
+while the ACK mutex is held. The atomic pair remains only as a fallback for
+older receiver paths during migration.
+
+This improves the Android channel contract but is not yet the final outbound
+transport: overflow handling, asynchronous finish ordering, and receiver-owned
+fd consumption still need to be tightened before enabling real batching or
+`nativeConsumeBatchedInputEvents`. Native audit, AOSP Calculator/DeskClock
+acceptance, and Rust tests pass with this intermediate ACK boundary.

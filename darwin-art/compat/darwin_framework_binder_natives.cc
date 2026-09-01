@@ -459,6 +459,12 @@ struct DarwinInputChannelState {
   std::atomic<bool> last_finished_handled{false};
   std::mutex packet_mutex;
   std::deque<darwin_art::DarwinArtInputPacket> packets;
+  struct FinishAck {
+    jint sequence = 0;
+    bool handled = false;
+  };
+  std::mutex finish_mutex;
+  std::deque<FinishAck> finish_acks;
   int read_fd = -1;
   int write_fd = -1;
 };
@@ -702,6 +708,18 @@ void InputReceiverFinish(JNIEnv*, jclass, jlong pointer, jint sequence,
     receiver->last_finished_sequence = sequence;
     receiver->last_finished_handled = handled == JNI_TRUE;
     if (receiver->channel != nullptr) {
+      {
+        std::lock_guard<std::mutex> lock(receiver->channel->finish_mutex);
+        constexpr size_t kMaxFinishAcks = 256;
+        if (receiver->channel->finish_acks.size() >= kMaxFinishAcks) {
+          // Keep the oldest in-flight result until its dispatch path observes
+          // it; dropping an ACK would make a later event look unhandled.
+          receiver->channel->finish_acks.pop_front();
+        }
+        receiver->channel->finish_acks.push_back(
+            DarwinInputChannelState::FinishAck{
+                .sequence = sequence, .handled = handled == JNI_TRUE});
+      }
       receiver->channel->last_finished_sequence.store(
           sequence, std::memory_order_release);
       receiver->channel->last_finished_handled.store(
@@ -712,6 +730,20 @@ void InputReceiverFinish(JNIEnv*, jclass, jlong pointer, jint sequence,
     std::cerr << "ART Android InputEvent finish sequence=" << sequence
               << " handled=" << (handled == JNI_TRUE ? 1 : 0) << "\n";
   }
+}
+
+bool TakeFinishedAck(const std::shared_ptr<DarwinInputChannelState>& channel,
+                     jint sequence, bool* handled) {
+  if (channel == nullptr) return false;
+  std::lock_guard<std::mutex> lock(channel->finish_mutex);
+  for (auto it = channel->finish_acks.begin();
+       it != channel->finish_acks.end(); ++it) {
+    if (it->sequence != sequence) continue;
+    if (handled != nullptr) *handled = it->handled;
+    channel->finish_acks.erase(it);
+    return true;
+  }
+  return false;
 }
 jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
                         jobject input_channel, jobject) {
@@ -2247,11 +2279,22 @@ bool DispatchFrameworkInputEvent(JNIEnv* env, jobject view_root, jobject event,
     receiver->channel->last_finished_handled.store(
         false, std::memory_order_release);
     env->CallVoidMethod(target, dispatch, sequence, event);
-    if (handled != nullptr &&
-        receiver->channel->last_finished_sequence.load(
-            std::memory_order_acquire) == sequence) {
-      *handled = receiver->channel->last_finished_handled.load(
-          std::memory_order_acquire);
+    bool finished = false;
+    if (handled != nullptr) {
+      finished = TakeFinishedAck(receiver->channel, sequence, handled);
+    } else {
+      bool ignored_handled = false;
+      finished = TakeFinishedAck(receiver->channel, sequence,
+                                 &ignored_handled);
+    }
+    // Preserve the legacy atomic fast path for receivers built against an
+    // older finish implementation that has not populated the channel queue.
+    if (!finished && receiver->channel->last_finished_sequence.load(
+                         std::memory_order_acquire) == sequence) {
+      if (handled != nullptr) {
+        *handled = receiver->channel->last_finished_handled.load(
+            std::memory_order_acquire);
+      }
     }
   }
   const bool delivered = target != nullptr && dispatch != nullptr &&
