@@ -1500,6 +1500,9 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
             ? (update.visible ? 0u : 1u)
             : (control->visible ? 0u : 1u),
         .mask = update.has_visibility ? 1u : 0u,
+        .transform = update.has_transform
+            ? static_cast<uint32_t>(update.transform)
+            : static_cast<uint32_t>(control->transform),
         .x = update.has_position ? static_cast<float>(update.position_x)
                                  : static_cast<float>(control->position_x),
         .y = update.has_position ? static_cast<float>(update.position_y)
@@ -1523,6 +1526,9 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
               ? (update.visible ? 0u : 1u)
               : (control->visible ? 0u : 1u),
           .mask = update.has_visibility ? 1u : 0u,
+          .transform = update.has_transform
+              ? static_cast<uint32_t>(update.transform)
+              : static_cast<uint32_t>(control->transform),
           .iosurface = nullptr,
           .destination_left = destination.left,
           .destination_top = destination.top,
@@ -1538,7 +1544,7 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
           "ART Android SurfaceTransaction: update pid=%d control=%p "
           "layer=%u name=%s what=0x%llx parent=%u visible=%d "
           "flags[pos=%d,z=%d,alpha=%d,scale=%d,visibility=%d,parent=%d,"
-          "transform=%d,crop=%d,buffer=%d,damage=%d,geometry=%d]\n",
+          "transform=%d(value=%d),crop=%d,buffer=%d,damage=%d,geometry=%d]\n",
           getpid(), static_cast<void*>(update.opaque), control->layer_id,
           control->name.c_str(), static_cast<unsigned long long>(what),
           parent == nullptr ? 0 : parent->layer_id,
@@ -1547,7 +1553,9 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
           update.has_position ? 1 : 0, update.has_z_order ? 1 : 0,
           update.has_alpha ? 1 : 0, update.has_scale ? 1 : 0,
           update.has_visibility ? 1 : 0, update.has_parent ? 1 : 0,
-          update.has_transform ? 1 : 0, update.has_crop ? 1 : 0,
+          update.has_transform ? 1 : 0,
+          update.has_transform ? update.transform : control->transform,
+          update.has_crop ? 1 : 0,
           update.has_buffer ? 1 : 0, update.has_damage ? 1 : 0,
           update.has_geometry ? 1 : 0);
     }
@@ -1668,7 +1676,7 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
           state.owner_process_id, state.layer_id,
           state.parent_owner_process_id, state.parent_id, state.what,
           state.flags, state.mask, state.destination_left,
-          state.destination_top, state.destination_right,
+          state.transform, state.destination_top, state.destination_right,
           state.destination_bottom, state.z, state.alpha);
     }
     for (const auto& presentation : presentations) {
@@ -1700,6 +1708,7 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
               DARWIN_ART_SF_DESTINATION_FRAME_CHANGED |
               (presentation.reparented ? DARWIN_ART_SF_REPARENT : 0),
           presentation.z_order, presentation.buffer,
+          static_cast<uint32_t>(presentation.transform),
           presentation.source.left,
           presentation.source.top, presentation.source.right,
           presentation.source.bottom, presentation.destination.left,

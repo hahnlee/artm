@@ -18,6 +18,7 @@ typedef struct DarwinArtSurfaceFlingerLayerUpdate {
   uint64_t what;
   uint32_t flags;
   uint32_t mask;
+  uint32_t transform;
   float x;
   float y;
   int32_t z;

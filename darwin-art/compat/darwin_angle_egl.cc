@@ -2131,6 +2131,14 @@ const char* EglQueryStringAndroid(EGLDisplay display, EGLint name) {
     extensions += " EGL_KHR_image_base";
   if (extensions.find("EGL_ANDROID_image_native_buffer") == std::string::npos)
     extensions += " EGL_ANDROID_image_native_buffer";
+  // Chromium's Android shared-image path probes this companion extension
+  // before importing AHardwareBuffer-backed images.  The bridge exports the
+  // matching eglGetNativeClientBufferANDROID entry point and maps the client
+  // buffer back to the IOSurface owner in EglCreateImageAndroid.
+  if (extensions.find("EGL_ANDROID_get_native_client_buffer") ==
+      std::string::npos) {
+    extensions += " EGL_ANDROID_get_native_client_buffer";
+  }
   if (extensions.find("EGL_KHR_fence_sync") == std::string::npos)
     extensions += " EGL_KHR_fence_sync";
   if (extensions.find("EGL_KHR_wait_sync") == std::string::npos)
@@ -4137,7 +4145,7 @@ extern "C" void darwin_art_android_mark_hardware_buffer_released(
 extern "C" void darwin_art_android_present_hardware_buffer(
     void* queue, std::uint32_t owner_process_id, std::uint32_t layer_id,
     std::uint32_t parent_owner_process_id, std::uint32_t parent_id,
-    std::uint64_t what, std::int32_t z, void* opaque,
+    std::uint64_t what, std::int32_t z, void* opaque, std::uint32_t transform,
     std::int32_t source_left,
     std::int32_t source_top,
     std::int32_t source_right, std::int32_t source_bottom,
@@ -4184,6 +4192,7 @@ extern "C" void darwin_art_android_present_hardware_buffer(
         .parent_owner_process_id = parent_owner_process_id,
         .parent_id = parent_id,
         .what = what,
+        .transform = transform,
         .iosurface = iosurface,
         .width = description.width,
         .height = description.height,
@@ -4251,6 +4260,7 @@ extern "C" void darwin_art_android_present_hardware_buffer(
       .parent_owner_process_id = parent_owner_process_id,
       .parent_id = parent_id,
       .what = what,
+      .transform = transform,
       .iosurface = darwin_art_android_hardware_buffer_iosurface(image.buffer),
       .width = image.width,
       .height = image.height,
@@ -4536,6 +4546,7 @@ extern "C" void darwin_art_android_present_surface_control_state(
     std::uint32_t owner_process_id, std::uint32_t layer_id,
     std::uint32_t parent_owner_process_id, std::uint32_t parent_id,
     std::uint64_t what, std::uint32_t flags, std::uint32_t mask,
+    std::uint32_t transform,
     std::int32_t destination_left, std::int32_t destination_top,
     std::int32_t destination_right, std::int32_t destination_bottom,
     std::int32_t z, float alpha) {
@@ -4547,6 +4558,7 @@ extern "C" void darwin_art_android_present_surface_control_state(
       .what = what,
       .flags = flags,
       .mask = mask,
+      .transform = transform,
       .iosurface = nullptr,
       .destination_left = destination_left,
       .destination_top = destination_top,

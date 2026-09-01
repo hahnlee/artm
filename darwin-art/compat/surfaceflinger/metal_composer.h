@@ -11,6 +11,7 @@ struct DarwinArtMetalComposerLayer {
   uint64_t what = 0;
   uint32_t flags = 0;
   uint32_t mask = 0;
+  uint32_t transform = 0;
   void* iosurface = nullptr;
   uint32_t width = 0;
   uint32_t height = 0;

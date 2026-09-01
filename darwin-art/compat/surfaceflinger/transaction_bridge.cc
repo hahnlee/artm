@@ -38,6 +38,7 @@ android::ResolvedComposerState ResolveLayerState(
   resolved.state.what = source.what;
   resolved.state.flags = source.flags;
   resolved.state.mask = source.mask;
+  resolved.state.bufferTransform = source.transform;
   resolved.state.x = source.x;
   resolved.state.y = source.y;
   resolved.state.z = source.z;

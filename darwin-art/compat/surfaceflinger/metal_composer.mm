@@ -115,6 +115,36 @@ struct Vertex {
   float texcoord[2];
 };
 
+std::array<float, 2> TransformTexcoord(uint32_t transform, float u0,
+                                        float v0, float u1, float v1,
+                                        size_t corner) {
+  // Corners are destination TL, BL, BR, TR. Android HAL transforms operate
+  // on the buffer before it is placed in the destination frame.
+  const std::array<std::array<float, 2>, 4> identity{{
+      {{u0, v0}}, {{u0, v1}}, {{u1, v1}}, {{u1, v0}}}};
+  const auto pick = [&](std::array<size_t, 4> mapping) {
+    return identity[mapping[corner]];
+  };
+  switch (transform & 7u) {
+    case 1:  // HAL_TRANSFORM_FLIP_H
+      return pick({3, 2, 1, 0});
+    case 2:  // HAL_TRANSFORM_FLIP_V
+      return pick({1, 0, 3, 2});
+    case 3:  // HAL_TRANSFORM_ROT_180
+      return pick({2, 3, 0, 1});
+    case 4:  // HAL_TRANSFORM_ROT_90
+      return pick({1, 2, 3, 0});
+    case 5:  // HAL_TRANSFORM_ROT_90 | FLIP_H
+      return pick({0, 3, 2, 1});
+    case 6:  // HAL_TRANSFORM_ROT_90 | FLIP_V
+      return pick({2, 1, 0, 3});
+    case 7:  // HAL_TRANSFORM_ROT_270
+      return pick({3, 0, 1, 2});
+    default:
+      return identity[corner];
+  }
+}
+
 }  // namespace
 
 extern "C" bool darwin_art_metal_composer_compose(
@@ -221,13 +251,20 @@ extern "C" bool darwin_art_metal_composer_compose(
     // visibly become upside-down/180-degree mirrored).
     const float v0 = static_cast<float>(layer.source_top) / layer.height;
     const float v1 = static_cast<float>(layer.source_bottom) / layer.height;
+    const auto texcoord = [&](size_t corner) {
+      return TransformTexcoord(layer.transform, u0, v0, u1, v1, corner);
+    };
+    const auto tl = texcoord(0);
+    const auto bl = texcoord(1);
+    const auto br = texcoord(2);
+    const auto tr = texcoord(3);
     const std::array<Vertex, 6> vertices{{
-        {{left, top}, {u0, v0}},
-        {{left, bottom}, {u0, v1}},
-        {{right, bottom}, {u1, v1}},
-        {{left, top}, {u0, v0}},
-        {{right, bottom}, {u1, v1}},
-        {{right, top}, {u1, v0}},
+        {{left, top}, {tl[0], tl[1]}},
+        {{left, bottom}, {bl[0], bl[1]}},
+        {{right, bottom}, {br[0], br[1]}},
+        {{left, top}, {tl[0], tl[1]}},
+        {{right, bottom}, {br[0], br[1]}},
+        {{right, top}, {tr[0], tr[1]}},
     }};
     const float alpha = std::clamp(layer.alpha, 0.0f, 1.0f);
     [encoder setVertexBytes:vertices.data()

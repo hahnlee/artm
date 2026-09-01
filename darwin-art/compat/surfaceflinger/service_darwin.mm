@@ -37,9 +37,9 @@ extern "C" int darwin_art_android_metal_shared_event_fence_fd(
 
 namespace {
 
-constexpr std::array<char, 8> kRequestMagic{'D', 'A', 'R', 'T', 'S', 'F', '0', '4'};
-constexpr std::array<char, 8> kResponseMagic{'D', 'A', 'R', 'T', 'S', 'F', 'R', '4'};
-constexpr uint32_t kProtocolVersion = 4;
+constexpr std::array<char, 8> kRequestMagic{'D', 'A', 'R', 'T', 'S', 'F', '0', '5'};
+constexpr std::array<char, 8> kResponseMagic{'D', 'A', 'R', 'T', 'S', 'F', 'R', '5'};
+constexpr uint32_t kProtocolVersion = 5;
 constexpr uint32_t kMaximumLayers = 4096;
 
 struct RequestHeader {
@@ -65,6 +65,7 @@ struct WireLayer {
   uint64_t what;
   uint32_t flags;
   uint32_t mask;
+  uint32_t transform;
   int32_t source_left;
   int32_t source_top;
   int32_t source_right;
@@ -307,6 +308,8 @@ void MergeRetainedLayer(WireLayer& destination, const WireLayer& source) {
     destination.flags =
         (destination.flags & ~source.mask) | (source.flags & source.mask);
   }
+  if ((source.what & DARWIN_ART_SF_BUFFER_TRANSFORM_CHANGED) != 0)
+    destination.transform = source.transform;
   if ((source.what & DARWIN_ART_SF_LAYER_CHANGED) != 0)
     destination.z = source.z;
   if ((source.what & DARWIN_ART_SF_ALPHA_CHANGED) != 0)
@@ -491,6 +494,7 @@ void ProcessRequest(RequestHeader header, std::vector<WireLayer> incoming,
             .what = layer.what,
             .flags = layer.flags,
             .mask = layer.mask,
+            .transform = layer.transform,
             .x = static_cast<float>(layer.destination_left),
             .y = static_cast<float>(layer.destination_top),
             .z = layer.z,
@@ -582,6 +586,7 @@ void ProcessRequest(RequestHeader header, std::vector<WireLayer> incoming,
             .what = layer.what,
             .flags = layer.flags,
             .mask = layer.mask,
+            .transform = layer.transform,
             .iosurface = surface,
             .width = layer.width,
             .height = layer.height,
@@ -833,6 +838,7 @@ extern "C" int darwin_art_surfaceflinger_service_present(
         .what = layer.what,
         .flags = layer.flags,
         .mask = layer.mask,
+        .transform = layer.transform,
         .source_left = layer.source_left,
         .source_top = layer.source_top,
         .source_right = layer.source_right,
