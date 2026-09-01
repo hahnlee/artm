@@ -1655,3 +1655,9 @@ WebM/Opus/CoreAudio media checks passed. The tab-grid-specific harness now
 allows 20 seconds for cold button creation and 10 seconds for the grid tree to
 settle before selecting a card; this absorbs observed startup variance without
 changing runtime scheduling.
+
+The subsequent `cargo test --workspace` run initially exposed stale native
+surface test fixtures that omitted the already-required `close_requested`
+callback. Both fixtures now initialize the callback, and the complete
+workspace test plus doc-test suite passes. This keeps the Rust owner/session
+contracts exercised alongside the runtime acceptance tests.

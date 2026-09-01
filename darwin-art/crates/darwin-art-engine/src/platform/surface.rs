@@ -261,6 +261,10 @@ mod surface_session_tests {
         0
     }
 
+    unsafe extern "C" fn close_requested(_: *mut c_void) -> bool {
+        false
+    }
+
     unsafe extern "C" fn next_event(
         _: *mut c_void,
         _: *mut darwin_art_engine_sys::PointerEvent,
@@ -280,6 +284,7 @@ mod surface_session_tests {
             present,
             present_async: None,
             pump_events: pump,
+            close_requested,
             next_pointer_event: next_event,
             next_pointer_event_v2: None,
             next_key_event_v1: None,
@@ -304,6 +309,7 @@ mod surface_session_tests {
             present,
             present_async: None,
             pump_events: pump,
+            close_requested,
             next_pointer_event: next_event,
             next_pointer_event_v2: None,
             next_key_event_v1: None,
