@@ -945,3 +945,20 @@ Verification: `cargo fmt --all -- --check`, `cargo test -p darwin-art-host`
 Timer acceptance PASS. Physical-click latency measurement and a cooperative
 Chromium MessagePump batch boundary remain the next slices; this change only
 coalesces display scheduling and does not preempt one opaque Chromium callback.
+
+## 2026-09-02 scheduler-separation progress (owner wait cadence)
+
+The remaining host loops that waited in fixed 2 ms slices now use the same
+bounded 16 ms owner wait as the native Looper path. Native fd readiness,
+AppKit input wake, and the coalesced FrameClock wake interrupt that wait;
+older engine images still use the bounded sleep fallback. This removes the
+busy polling cadence that remained in pointer-sequence and visible-window
+loops while preserving the Android ordering `input -> Looper -> frame pulse`.
+
+Verification: Rust tests 7/7, graphics-link audit PASS, and the AOSP
+Calculator/DeskClock acceptance PASS. A fresh Chrome tab-switcher/tab-grid
+acceptance also passed with ten composed target states and
+`GLES+ANGLE+Graphite+Dawn+MoltenVK+AHB+SurfaceFlinger+Metal`; timing was
+`looper max=2.179 s`, `graphics max=289 us`, input-to-pulse `p50=37 ms`.
+The remaining multi-second sample is the known single Chromium native
+callback body, which cannot be preempted safely by the compatibility layer.

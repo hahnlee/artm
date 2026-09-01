@@ -12,6 +12,8 @@ use darwin_art_engine_sys::{PointerEventV2, ProcessResult};
 use darwin_art_runtime::Subsystem;
 use std::time::{Duration, Instant};
 
+const OWNER_WAIT_MAX: Duration = Duration::from_millis(16);
+
 #[cfg(target_os = "macos")]
 pub(super) fn run(
     runtime: &mut HostRuntime,
@@ -291,7 +293,7 @@ pub(super) fn run(
                 // Handler/Binder work must not be throttled to display rate.
                 // Service the owner Looper at a short event-loop cadence and
                 // publish Choreographer vsync only at the display cadence.
-                let slice_ms = remaining.as_millis().min(2).max(1) as u64;
+                let slice_ms = remaining.as_millis().min(OWNER_WAIT_MAX.as_millis()).max(1) as u64;
                 let pump_status = owned_surface_wait_slice(runtime, slice_ms as f64 / 1000.0);
                 if pump_status != 0 {
                     loop_error = Some(HostError::SurfaceFailed {
@@ -383,7 +385,7 @@ pub(super) fn run(
         let wait_started = Instant::now();
         while wait_started.elapsed() < delay && loop_error.is_none() {
             let remaining = delay.saturating_sub(wait_started.elapsed());
-            let slice_ms = remaining.as_millis().min(2).max(1) as u64;
+            let slice_ms = remaining.as_millis().min(OWNER_WAIT_MAX.as_millis()).max(1) as u64;
             let pump_status = owned_surface_wait_slice(runtime, slice_ms as f64 / 1000.0);
             if pump_status != 0 {
                 loop_error = Some(HostError::SurfaceFailed {
@@ -645,7 +647,7 @@ pub(super) fn run(
         }
         let slice = visible_deadline
             .saturating_duration_since(Instant::now())
-            .min(Duration::from_millis(2))
+            .min(OWNER_WAIT_MAX)
             .as_secs_f64();
         if slice <= 0.0 {
             break;
