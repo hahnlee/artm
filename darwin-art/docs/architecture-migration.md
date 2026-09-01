@@ -1789,6 +1789,13 @@ does not cross-talk between concurrently running APKs. A single host still
 uses one display surface by design; in-process multi-window composition is a
 separate policy layer rather than a scheduler ownership race.
 
+A Manager/profile-launched physical-input retry was attempted with synthetic
+pointer variables unset. The ART process initialized its owner Looper and
+reported a clean zero-input frame-timing snapshot, but the profile client
+ended the host before an on-screen window appeared; no CoreGraphics target or
+packet was available. This is recorded as an external launch/session boundary,
+not as a measured latency sample or an input-dispatch failure.
+
 The next physical-ingress retry could enumerate the `darwin-art-host` process
 but did not expose a corresponding on-screen window before the host exited;
 the profile daemon also emitted transient missing-client errors. No
