@@ -1762,3 +1762,10 @@ The post-change APK regression run also passed unchanged: Calculator produced
 `DeskClock requests=480, fence_gated=1, coalesced=442, present_calls=316`).
 Owner input-to-pulse samples were Calculator p50=56 us/p95=26.0 ms and
 DeskClock p50=785 us/p95=337.0 ms, with no new scanout queue growth.
+
+The production closure was audited again after the phase change: the
+incremental graphics-link audit had no rebuild work, and the ART-runtime
+graphics closure completed with all 1,970 locked archive members. This keeps
+the scheduler work independent from the native provider graph; the separate
+host/Layoutlib 34-definition drift remains documented above and is not part
+of the production APK path.
