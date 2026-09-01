@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <iterator>
 #include <iostream>
 #include <limits>
@@ -429,13 +430,29 @@ void BinderSetThreadStrictModePolicy(jint policy) {
 
 struct DarwinInputChannelState {
   explicit DarwinInputChannelState(std::string channel_name)
-      : name(std::move(channel_name)) {}
+      : name(std::move(channel_name)) {
+    int fds[2] = {-1, -1};
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0) {
+      read_fd = fds[0];
+      write_fd = fds[1];
+      (void)fcntl(read_fd, F_SETFL, fcntl(read_fd, F_GETFL, 0) | O_NONBLOCK);
+      (void)fcntl(write_fd, F_SETFL,
+                  fcntl(write_fd, F_GETFL, 0) | O_NONBLOCK);
+    }
+  }
+
+  ~DarwinInputChannelState() {
+    if (read_fd >= 0) close(read_fd);
+    if (write_fd >= 0) close(write_fd);
+  }
 
   std::string name;
   // Pending input belongs to the channel, not to the process. AppKit only
   // publishes this release/acquire bit after queueing a packet; the focused
   // InputEventReceiver reads it from Chromium's owner Looper.
   std::atomic<bool> pending_input{false};
+  int read_fd = -1;
+  int write_fd = -1;
 };
 
 std::mutex g_focused_input_channel_mutex;
@@ -462,6 +479,10 @@ void NotifyFocusedInputChannel() {
   }
   if (channel != nullptr) {
     channel->pending_input.store(true, std::memory_order_release);
+    if (channel->write_fd >= 0) {
+      const uint8_t token = 1;
+      (void)send(channel->write_fd, &token, sizeof(token), MSG_DONTWAIT);
+    }
   }
 }
 
@@ -472,6 +493,11 @@ void ClearFocusedInputChannelPending() {
     channel = g_focused_input_channel.lock();
   }
   if (channel != nullptr) {
+    if (channel->read_fd >= 0) {
+      uint8_t buffer[64];
+      while (recv(channel->read_fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
+      }
+    }
     channel->pending_input.store(false, std::memory_order_release);
   }
 }
@@ -553,7 +579,21 @@ struct DarwinInputReceiver {
   bool last_finished_handled = false;
   bool focused = false;
   bool touch_mode = false;
+  void* looper = nullptr;
+  bool transport_registered = false;
 };
+
+int InputChannelTransportCallback(int fd, int events, void* data) {
+  (void)events;
+  auto* channel = static_cast<DarwinInputChannelState*>(data);
+  if (channel == nullptr || fd < 0) return 0;
+  uint8_t buffer[64];
+  while (recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
+  }
+  // The token only wakes the owner Looper. The pending bit remains set until
+  // the host mailbox has delivered the corresponding framework event.
+  return 1;
+}
 
 jboolean InputReceiverConsume(JNIEnv*, jclass, jlong, jlong) {
   return JNI_FALSE;
@@ -562,6 +602,11 @@ void InputReceiverDispose(JNIEnv* env, jclass, jlong pointer) {
   auto* receiver = reinterpret_cast<DarwinInputReceiver*>(
       static_cast<std::uintptr_t>(pointer));
   if (receiver == nullptr) return;
+  if (receiver->transport_registered && receiver->looper != nullptr &&
+      receiver->channel != nullptr && receiver->channel->read_fd >= 0) {
+    (void)darwin_art_android_platform_remove_fd(
+        receiver->looper, receiver->channel->read_fd);
+  }
   if (receiver->weak_receiver != nullptr) {
     env->DeleteGlobalRef(receiver->weak_receiver);
   }
@@ -604,6 +649,16 @@ jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
   if (receiver == nullptr || receiver->weak_receiver == nullptr) {
     delete receiver;
     return 0;
+  }
+  receiver->looper = darwin_art_android_platform_prepare_current_looper();
+  if (receiver->looper != nullptr && receiver->channel->read_fd >= 0) {
+    // ALOOPER_EVENT_INPUT is the NDK value used by InputEventReceiver's
+    // native transport. The callback drains only wake tokens; framework event
+    // payloads remain owned by the host mailbox and are dispatched in order.
+    receiver->transport_registered =
+        darwin_art_android_platform_add_fd(
+            receiver->looper, receiver->channel->read_fd, 0, 0x0001,
+            &InputChannelTransportCallback, receiver->channel.get()) == 1;
   }
   return static_cast<jlong>(
       reinterpret_cast<std::uintptr_t>(receiver));

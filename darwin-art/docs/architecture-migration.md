@@ -1145,3 +1145,20 @@ acceptance remain green. Physical callback-return percentile measurement still
 requires a Manager run with macOS Accessibility input enabled; the next
 runtime slice is a real fd-backed InputChannel queue and its finish/consume
 acknowledgement path.
+
+## 2026-09-02 scheduler-separation progress (InputChannel transport token)
+
+Each compatibility InputChannel now owns a nonblocking Unix socketpair. The
+focused AppKit producer writes a wake token after publishing a mailbox packet;
+`InputEventReceiver.nativeInit` registers the read end with the owner
+`ALooper`, and the callback drains tokens without dispatching Java itself. The
+channel's pending bit remains set until the owner has delivered the framework
+event, preserving Chromium's `probablyHasInput` yield semantics while making
+the wake path an actual Looper fd source.
+
+The event payload is still retained in the bounded AppKit mailbox, so this is
+an incremental transport step rather than the final kernel-backed Android
+InputChannel implementation. Native rebuild/audit and AOSP Calculator/
+DeskClock acceptance pass. The next step is moving packet payload and
+sequence/finish acknowledgement onto the channel queue, followed by a Chrome
+physical-input run that measures callback-return latency under load.

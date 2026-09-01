@@ -1505,6 +1505,19 @@ extern "C" void darwin_art_android_platform_wake_looper(void* looper) {
   ALooper_wake(static_cast<ALooper*>(looper));
 }
 
+extern "C" int darwin_art_android_platform_add_fd(
+    void* looper, int fd, int ident, int events,
+    DarwinArtLooperCallback callback, void* data) {
+  if (looper == nullptr || callback == nullptr) return 0;
+  return ALooper_addFd(static_cast<ALooper*>(looper), fd, ident, events,
+                       callback, data);
+}
+
+extern "C" int darwin_art_android_platform_remove_fd(void* looper, int fd) {
+  return looper == nullptr ? 0
+                           : ALooper_removeFd(static_cast<ALooper*>(looper), fd);
+}
+
 extern "C" ASensorManager* ASensorManager_getInstanceForPackage(const char*) {
   return &g_sensor_manager;
 }

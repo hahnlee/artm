@@ -25,6 +25,15 @@ extern "C" int darwin_art_android_platform_wait_current_looper(
     int timeout_ms);
 extern "C" void darwin_art_android_platform_wake_looper(void* looper);
 
+// Internal InputChannel transport hooks. The opaque Looper handle remains
+// owned by the ART owner thread; these wrappers keep the public APK ABI
+// independent from the compatibility layer's private ALooper type.
+using DarwinArtLooperCallback = int (*)(int, int, void*);
+extern "C" int darwin_art_android_platform_add_fd(
+    void* looper, int fd, int ident, int events,
+    DarwinArtLooperCallback callback, void* data);
+extern "C" int darwin_art_android_platform_remove_fd(void* looper, int fd);
+
 // SCM_RIGHTS transports the Darwin file description but not Android ashmem's
 // region-wide protection metadata. Binder carries this sidecar between app
 // processes and re-adopts the received descriptor into the local provider.
