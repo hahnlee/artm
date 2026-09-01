@@ -1661,3 +1661,11 @@ surface test fixtures that omitted the already-required `close_requested`
 callback. Both fixtures now initialize the callback, and the complete
 workspace test plus doc-test suite passes. This keeps the Rust owner/session
 contracts exercised alongside the runtime acceptance tests.
+
+The graphics closure audit was rerun in both provider modes. The production
+ART-runtime mode passes with the locked 1,970 archive members and zero missing
+providers. The default Layoutlib mode still reports 34 additional definitions
+(`expected=48,795`, `actual=48,829`); that difference is isolated to the
+host-only nativehelper provider and does not affect the ART runtime graph. The
+repository lock remains unchanged until the host/Layoutlib archive is rebuilt
+from its pinned source and reviewed.
