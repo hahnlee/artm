@@ -1276,3 +1276,19 @@ transport: overflow handling, asynchronous finish ordering, and receiver-owned
 fd consumption still need to be tightened before enabling real batching or
 `nativeConsumeBatchedInputEvents`. Native audit, AOSP Calculator/DeskClock
 acceptance, and Rust tests pass with this intermediate ACK boundary.
+
+## 2026-09-02 scheduler-separation progress (consumer boundary audit)
+
+An experimental receiver-owned fd callback was exercised and reverted: direct
+`WindowInputEventReceiver.dispatchInputEvent()` lacks the ViewRoot focus and
+touch-mode staging used by the real framework path, so Chrome could report the
+tab-switcher hit without opening the tab grid. The production path therefore
+continues to keep Rust as the sole payload consumer while the Looper callback
+only drains wake tokens. This is an evidence-based guard against duplicate or
+incomplete Java dispatch, not a completion of the Android transport migration.
+
+After the revert, native/AOSP acceptance remained green and the Chrome tab
+graphics acceptance passed with 10 target states on a subsequent run (the
+first run was startup-timing flaky). The next implementation must route the
+receiver-owned callback through ViewRoot-equivalent dispatch state before
+disabling the Rust channel drain; physical Chrome latency is still unmeasured.
