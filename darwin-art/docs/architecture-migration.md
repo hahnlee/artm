@@ -1454,3 +1454,20 @@ Graphics link audit, Rust tests, AOSP Calculator/DeskClock acceptance, and a
 rerun of Chromium tab-grid acceptance pass (the first Chrome run had the
 known startup/card-selection flake; the rerun reached 10 target states).
 Physical ingress samples and native batched consume remain pending.
+
+## 2026-09-02 scheduler-separation progress (service-stage timing)
+
+`DARWIN_ART_DEBUG_SLOW_FRAME=1` now reports the native service-spawn stages.
+In a Chrome cold launch, `spawn` completed in roughly 3–5 ms, bind-intent
+serialization/send in roughly 5 ms, and dispatcher installation in roughly
+5 ms. The observed 0.4–2.1 s owner occupancy therefore occurs after service
+creation, inside Chrome's owner-affine `MessagePumpAndroid` callback while its
+Java startup work drains. The service process launch itself is not the frame
+latency bottleneck.
+
+The callback remains unsplit because Android requires Chromium's MessagePump
+and Java Looper state to stay on their owner thread; moving or asynchronously
+preempting that opaque callback would risk reordering Binder/View work. Warm
+tab-grid runs continue to complete (target states 10); cold-start and warm
+interaction percentiles are reported separately. Physical ingress sampling
+and native batched consume remain pending.

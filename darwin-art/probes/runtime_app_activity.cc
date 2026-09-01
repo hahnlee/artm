@@ -1,5 +1,6 @@
 #include "runtime_app_activity.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -27,6 +28,17 @@ std::string JavaString(JNIEnv* env, jstring value) {
 jintArray SpawnService(JNIEnv* env, jclass, jstring component,
                        jstring instance_name, jstring process_name,
                        jboolean isolated, jobject intent) {
+  const bool debug_timing =
+      std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr;
+  const auto started = std::chrono::steady_clock::now();
+  const auto log_stage = [&](const char* stage) {
+    if (!debug_timing) return;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                             std::chrono::steady_clock::now() - started)
+                             .count();
+    std::cerr << "DARWIN_ART service-spawn stage=" << stage
+              << " elapsed_us=" << elapsed << "\n";
+  };
   const std::string component_utf = JavaString(env, component);
   const std::string instance_utf = JavaString(env, instance_name);
   const std::string process_utf = JavaString(env, process_name);
@@ -35,14 +47,20 @@ jintArray SpawnService(JNIEnv* env, jclass, jstring component,
   }
   int32_t host_pid = -1;
   int32_t control_fd = -1;
-  if (darwin_art_process::spawn_service_process(
-          component_utf.c_str(), instance_utf.c_str(), process_utf.c_str(),
-          isolated == JNI_TRUE, &host_pid, &control_fd) != 0) {
+  const int32_t spawn_status = darwin_art_process::spawn_service_process(
+      component_utf.c_str(), instance_utf.c_str(), process_utf.c_str(),
+      isolated == JNI_TRUE, &host_pid, &control_fd);
+  log_stage("spawn");
+  if (spawn_status != 0) {
     return nullptr;
   }
-  if (intent == nullptr ||
-      !darwin_art::SendServiceBindIntent(env, control_fd, intent) ||
-      !darwin_art::StartRemoteBinderDispatcher(env, control_fd)) {
+  const bool intent_sent =
+      intent != nullptr && darwin_art::SendServiceBindIntent(env, control_fd, intent);
+  log_stage("bind-intent");
+  const bool dispatcher_started =
+      intent_sent && darwin_art::StartRemoteBinderDispatcher(env, control_fd);
+  log_stage("dispatcher");
+  if (!dispatcher_started) {
     close(control_fd);
     darwin_art_process::release_service_process(host_pid);
     return nullptr;
