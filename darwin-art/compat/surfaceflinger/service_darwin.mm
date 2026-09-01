@@ -101,6 +101,7 @@ struct CompositionJob {
   std::vector<WireLayer> incoming;
   int producer_descriptor = -1;
   int completion_descriptor = -1;
+  bool fence_failed = false;
 };
 
 bool WriteAll(int fd, const void* data, size_t size) {
@@ -306,7 +307,8 @@ class CompositionQueue {
     std::lock_guard<std::mutex> lock(mutex_);
     if (started_) return true;
     try {
-      std::thread([this] { Run(); }).detach();
+      std::thread([this] { MonitorFences(); }).detach();
+      std::thread([this] { ComposeReady(); }).detach();
     } catch (...) {
       return false;
     }
@@ -320,72 +322,87 @@ class CompositionQueue {
     // Waiting here is the SurfaceFlinger-style backpressure boundary: a
     // producer cannot create an unbounded set of composition threads/fences,
     // while accepted requests retain strict transaction order.
-    not_full_.wait(lock, [this] { return queue_.size() < kCapacity; });
-    queue_.push_back(std::move(job));
-    not_empty_.notify_one();
+    not_full_.wait(lock, [this] {
+      return pending_.size() + ready_.size() < kCapacity;
+    });
+    pending_.push_back(std::move(job));
+    pending_available_.notify_one();
     return true;
   }
 
  private:
-  void Run() {
+  void MoveReadyPrefixLocked() {
+    while (!pending_.empty() && pending_.front().producer_descriptor < 0) {
+      ready_.push_back(std::move(pending_.front()));
+      pending_.pop_front();
+    }
+    if (!ready_.empty()) ready_available_.notify_one();
+    not_full_.notify_all();
+  }
+
+  void MonitorFences() {
     for (;;) {
-      CompositionJob job;
-      bool fence_failed = false;
-      bool fence_timed_out = false;
+      std::vector<std::pair<size_t, int>> watched;
       {
         std::unique_lock<std::mutex> lock(mutex_);
-        not_empty_.wait(lock, [this] { return !queue_.empty(); });
-        // Keep the queue strictly ordered, but do not block the worker in an
-        // unbounded read. The head fence is rechecked in short slices; until
-        // it is ready the previous latched target remains untouched.
-        constexpr auto kFenceWaitBudget = std::chrono::milliseconds(250);
-        constexpr int kFenceWaitSliceMs = 4;
-        const auto deadline = std::chrono::steady_clock::now() +
-                              kFenceWaitBudget;
-        for (;;) {
-          CompositionJob& head = queue_.front();
-          if (head.producer_descriptor < 0) {
-            job = std::move(head);
-            queue_.pop_front();
-            not_full_.notify_one();
-            break;
-          }
-          pollfd waiter{.fd = head.producer_descriptor,
-                        .events = POLLIN | POLLHUP,
-                        .revents = 0};
-          lock.unlock();
-          int result = -1;
-          do {
-            result = poll(&waiter, 1, kFenceWaitSliceMs);
-          } while (result < 0 && errno == EINTR);
-          lock.lock();
-          if (result == 0) {
-            if (std::chrono::steady_clock::now() < deadline) continue;
-            fence_timed_out = true;
-          } else if (result <= 0 ||
-                     (waiter.revents & (POLLERR | POLLNVAL)) != 0 ||
-                     !ConsumeProducerFence(head.producer_descriptor)) {
-            fence_failed = true;
-          } else {
-            head.producer_descriptor = -1;
-            continue;
-          }
-          job = std::move(head);
-          queue_.pop_front();
-          not_full_.notify_one();
-          break;
+        pending_available_.wait(lock, [this] { return !pending_.empty(); });
+        for (size_t index = 0; index < pending_.size(); ++index) {
+          const int descriptor = pending_[index].producer_descriptor;
+          if (descriptor >= 0) watched.emplace_back(index, descriptor);
+        }
+        if (watched.empty()) {
+          MoveReadyPrefixLocked();
+          continue;
         }
       }
-      if (fence_failed || fence_timed_out) {
-        if (fence_timed_out) {
-          std::fprintf(stderr,
-                       "ART SurfaceFlinger: acquire fence timed out after "
-                       "250 ms pid=%u transaction=%llu\n",
-                       job.header.process_id,
-                       static_cast<unsigned long long>(
-                           job.header.transaction_id));
+
+      std::vector<pollfd> waiters;
+      waiters.reserve(watched.size());
+      for (const auto& [index, descriptor] : watched) {
+        (void)index;
+        waiters.push_back(
+            {.fd = descriptor, .events = POLLIN | POLLHUP, .revents = 0});
+      }
+      int result = -1;
+      do {
+        // A short timeout gives newly enqueued no-fence jobs a chance to be
+        // moved into the ready prefix without polling under the queue mutex.
+        result = poll(waiters.data(), waiters.size(), 16);
+      } while (result < 0 && errno == EINTR);
+      if (result <= 0) continue;
+
+      std::lock_guard<std::mutex> lock(mutex_);
+      for (size_t offset = 0; offset < waiters.size(); ++offset) {
+        const short events = waiters[offset].revents;
+        if (events == 0 || watched[offset].first >= pending_.size()) continue;
+        CompositionJob& job = pending_[watched[offset].first];
+        if (job.producer_descriptor != watched[offset].second) continue;
+        if ((events & (POLLERR | POLLNVAL)) != 0) {
+          close(job.producer_descriptor);
+          job.producer_descriptor = -1;
+          job.fence_failed = true;
+        } else if (!ConsumeProducerFence(job.producer_descriptor)) {
+          job.producer_descriptor = -1;
+          job.fence_failed = true;
+        } else {
+          job.producer_descriptor = -1;
         }
-        if (job.producer_descriptor >= 0) close(job.producer_descriptor);
+      }
+      MoveReadyPrefixLocked();
+    }
+  }
+
+  void ComposeReady() {
+    for (;;) {
+      CompositionJob job;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        ready_available_.wait(lock, [this] { return !ready_.empty(); });
+        job = std::move(ready_.front());
+        ready_.pop_front();
+        not_full_.notify_all();
+      }
+      if (job.fence_failed) {
         SignalCompletion(job.completion_descriptor, false);
         continue;
       }
@@ -394,9 +411,11 @@ class CompositionQueue {
   }
 
   std::mutex mutex_;
-  std::condition_variable not_empty_;
+  std::condition_variable pending_available_;
+  std::condition_variable ready_available_;
   std::condition_variable not_full_;
-  std::deque<CompositionJob> queue_;
+  std::deque<CompositionJob> pending_;
+  std::deque<CompositionJob> ready_;
   bool started_ = false;
 };
 

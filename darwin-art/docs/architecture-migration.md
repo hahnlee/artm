@@ -1522,3 +1522,21 @@ long-running producer is still dropped at the watchdog boundary. The next
 step is to retain that pending job in a fence-readiness queue, recheck it on
 later display ticks, and publish a completion generation to the independent
 scanout consumer.
+
+## 2026-09-02 scheduler-separation progress (fence-readiness queue)
+
+The central compositor now has separate pending and ready FIFO lanes. A
+dedicated fence monitor polls all pending acquire descriptors without holding
+the composition mutex; only the ready FIFO prefix is handed to the single
+Metal compositor worker. A long-running valid producer is retained rather
+than dropped, while a dead descriptor fails that transaction and preserves the
+previous latched target. The bounded 128-entry combined queue remains the
+backpressure boundary.
+
+Graphics-link audit, AOSP Calculator/DeskClock acceptance, and Chromium
+tab-grid acceptance (`target-states=10`) pass with the new monitor. Strict
+prefix ordering intentionally means later ready transactions wait behind an
+unready head; this matches the retained-buffer correctness boundary. The
+remaining Android fidelity gap is publishing the successful composition's
+completion generation so the independent scanout tick only blits a confirmed
+ready target.
