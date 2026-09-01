@@ -1821,3 +1821,31 @@ CoreGraphics event was posted and no ingress percentile was recorded. This
 does not change the successful synthetic/APK evidence or establish an input
 queue failure; a Manager-launched, accessibility-authorized window remains
 the required source for the physical measurement.
+
+## 2026-09-02 Chromium performance measurement
+
+Measured the installed, unmodified Chromium `chrome_public_apk` (version
+154.0.8024.0, SHA-256
+`2aaea8419d955677313f8b6dae3f0666916243ec55c3607a8711f46c9123b731`) with
+`tools/chromium-android-acceptance/run.sh` and GPU/latency diagnostics enabled.
+The run passed the complete acceptance matrix (HTTPS using the macOS trust
+store, physical-key input, download and content-URI picker, WebM/Opus
+CoreAudio, renderer/GPU services, Binder FD transfer, three Android tabs, and
+WebGL ANGLE-Metal). Artifacts:
+`_build/chromium-android-acceptance/run.8Qc6Qn`.
+
+The interaction phase recorded four input-to-framework-pulse samples with
+`p50=9.641 ms`; `p95=p99=max=2.276795 s` is a cold-start outlier. The separate
+WebGL re-entry phase measured `p50=10.014 ms` and
+`p95=p99=max=2.197819 s`. Slow-callback traces identify those tails as the
+owner-affine Chromium `MessagePumpAndroid` message poll during startup, not
+the Metal scanout path; warm samples remain about 8–10 ms. Key-event ingress
+itself was 0–1 µs in the same run.
+
+During the 32-second interaction phase, SurfaceFlinger/Metal telemetry ended
+at `requests=4440`, `fence_gated=121`, `coalesced=3995`, and
+`present_calls=2801` (90.0% latest-wins coalescing, 2.7% fence-gated). The
+WebGL phase ended at `requests=3360`, `fence_gated=36`, `coalesced=3005`,
+`present_calls=2253`. No crash, missing SharedImage factory, or Dawn provider
+failure was observed. The result is functionally green, but the cold
+owner-affine startup poll remains the dominant latency tail to optimize next.
