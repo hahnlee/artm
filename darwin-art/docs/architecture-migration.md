@@ -1117,12 +1117,31 @@ queued and wakes the owner Looper; the owner clears the hint after draining
 the mailbox and delivering framework input. Chromium's MessagePump can thus
 observe a newly arrived physical packet from inside a native callback, call
 `ScheduleWork()`, and return to the same owner Looper without violating
-sequence affinity. The bridge is intentionally atomic-only across AppKit and
-ART; no `JNIEnv`, `GraphicsSession`, or callback is moved between threads.
+sequence affinity. The pending bit now belongs to the focused compatibility
+InputChannel state; only the atomic bit crosses the AppKit/ART boundary, and
+no `JNIEnv`, `GraphicsSession`, or callback is moved between threads.
 
 This is the first runtime-side cooperative boundary for the previously
 unpreemptible callback tail. It does not claim to interrupt an already-running
-batch when no input is pending, and the final Android shape remains a focused
-InputChannel queue rather than one process-global hint. Rebuild and rerun
-Chrome physical-click timing to measure callback return latency, while
+batch when no input is pending. The compatibility channel still uses a host
+mailbox rather than a real fd-backed InputChannel queue; the next step is to
+move packet ownership and pending generation into that queue. Rebuild and
+rerun Chrome physical-click timing to measure callback return latency, while
 Calculator/DeskClock acceptance remains a regression gate.
+
+## 2026-09-02 scheduler-separation progress (focused channel hint)
+
+The cooperative hint no longer uses a process-global pending flag. Each
+compatibility `DarwinInputChannelState` owns its atomic pending bit, and the
+WindowManager focus path registers the currently focused channel. AppKit
+publishes only to that channel; `nativeProbablyHasInput()` reads the receiver's
+own channel state. Owner-side clearing is performed under the surface mailbox
+mutex and only when both pointer and key queues are empty, so an enqueue racing
+the clear cannot be lost.
+
+The native graphics dylib rebuilt with the focused-channel bridge and the
+graphics-link audit passed. AOSP Calculator (`2+3=5`) and DeskClock Timer
+acceptance remain green. Physical callback-return percentile measurement still
+requires a Manager run with macOS Accessibility input enabled; the next
+runtime slice is a real fd-backed InputChannel queue and its finish/consume
+acknowledgement path.

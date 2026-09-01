@@ -33,13 +33,6 @@ namespace {
 std::mutex g_context_binder_mutex;
 jobject g_context_binder = nullptr;
 
-// AppKit publishes input packets asynchronously while Chromium may be inside
-// a native MessagePump callback on the ART owner. Android exposes this as the
-// InputEventReceiver.nativeProbablyHasInput() hint; keeping the state in one
-// release/acquire bit gives the guest callback a safe cooperative boundary
-// without migrating it away from its registering Looper thread.
-std::atomic<bool> g_framework_input_pending{false};
-
 struct DarwinParcel {
   std::vector<uint8_t> data;
   size_t position = 0;
@@ -439,7 +432,49 @@ struct DarwinInputChannelState {
       : name(std::move(channel_name)) {}
 
   std::string name;
+  // Pending input belongs to the channel, not to the process. AppKit only
+  // publishes this release/acquire bit after queueing a packet; the focused
+  // InputEventReceiver reads it from Chromium's owner Looper.
+  std::atomic<bool> pending_input{false};
 };
+
+std::mutex g_focused_input_channel_mutex;
+std::weak_ptr<DarwinInputChannelState> g_focused_input_channel;
+
+void SetFocusedInputChannel(
+    const std::shared_ptr<DarwinInputChannelState>& channel) {
+  std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
+  g_focused_input_channel = channel;
+}
+
+void ClearFocusedInputChannel(
+    const std::shared_ptr<DarwinInputChannelState>& channel) {
+  std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
+  const auto focused = g_focused_input_channel.lock();
+  if (focused == nullptr || focused == channel) g_focused_input_channel.reset();
+}
+
+void NotifyFocusedInputChannel() {
+  std::shared_ptr<DarwinInputChannelState> channel;
+  {
+    std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
+    channel = g_focused_input_channel.lock();
+  }
+  if (channel != nullptr) {
+    channel->pending_input.store(true, std::memory_order_release);
+  }
+}
+
+void ClearFocusedInputChannelPending() {
+  std::shared_ptr<DarwinInputChannelState> channel;
+  {
+    std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
+    channel = g_focused_input_channel.lock();
+  }
+  if (channel != nullptr) {
+    channel->pending_input.store(false, std::memory_order_release);
+  }
+}
 
 struct DarwinInputChannel {
   std::shared_ptr<DarwinInputChannelState> state;
@@ -582,7 +617,7 @@ jboolean InputReceiverProbablyHasInput(JNIEnv*, jclass pointer_class,
       receiver->weak_receiver == nullptr) {
     return JNI_FALSE;
   }
-  return g_framework_input_pending.load(std::memory_order_acquire)
+  return receiver->channel->pending_input.load(std::memory_order_acquire)
              ? JNI_TRUE
              : JNI_FALSE;
 }
@@ -1447,11 +1482,11 @@ void RunRemoteBinderDispatcher(JavaVM* vm, int fd, uint64_t generation) {
 namespace darwin_art {
 
 void NotifyFrameworkInputPending() {
-  g_framework_input_pending.store(true, std::memory_order_release);
+  NotifyFocusedInputChannel();
 }
 
 void ClearFrameworkInputPending() {
-  g_framework_input_pending.store(false, std::memory_order_release);
+  ClearFocusedInputChannelPending();
 }
 
 bool StartRemoteBinderDispatcher(JNIEnv* env, jint control_fd) {
@@ -1906,7 +1941,12 @@ bool SetFrameworkViewRootFocus(JNIEnv* env, jobject view_root, bool focused) {
                        !env->ExceptionCheck();
   if (receiver != nullptr && changed) {
     receiver->focused = focused;
-    if (focused) receiver->touch_mode = true;
+    if (focused) {
+      receiver->touch_mode = true;
+      SetFocusedInputChannel(receiver->channel);
+    } else {
+      ClearFocusedInputChannel(receiver->channel);
+    }
   }
   if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
     std::cerr << "ART Android window focus=" << (focused ? 1 : 0)
