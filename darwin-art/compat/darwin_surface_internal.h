@@ -9,7 +9,10 @@
 
 #include <cstddef>
 #include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <mutex>
+#include <thread>
 
 struct DarwinArtSurface;
 
@@ -52,6 +55,24 @@ struct DarwinArtSurface {
   bool presentation_scheduled = false;
   uint64_t presentation_requested = 0;
   std::atomic<int32_t> last_scanout_status{DARWIN_ART_SURFACE_OK};
+  // SurfaceFlinger composition completion is a separate readiness boundary
+  // from the display clock.  The producer registers each returned Android
+  // fence here; a single monitor thread advances the ready generation only
+  // after the broker reports that exact composition complete.
+  struct CompositionFence {
+    int descriptor = -1;
+    uint64_t generation = 0;
+    bool ready = false;
+  };
+  mutable std::mutex composition_mutex;
+  std::condition_variable composition_available;
+  std::deque<CompositionFence> composition_fences;
+  std::thread composition_monitor;
+  bool composition_monitor_started = false;
+  bool composition_monitor_stop = false;
+  uint64_t composition_next_generation = 0;
+  std::atomic<uint64_t> composition_submitted_generation{0};
+  std::atomic<uint64_t> composition_ready_generation{0};
   // Worker-thread frame pulses request scanout through a single latest-wins
   // AppKit command. The generation/mutex pair bounds the main-queue backlog
   // to one block while guaranteeing that a request arriving during a blit

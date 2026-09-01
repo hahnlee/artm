@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -17,6 +18,17 @@
 #include <new>
 #include <time.h>
 #include <unordered_map>
+#include <vector>
+
+struct DarwinArtBionicPollFd {
+  int32_t fd;
+  int16_t events;
+  int16_t revents;
+};
+
+extern "C" int darwin_art_bionic_socket_broker_poll(
+    DarwinArtBionicPollFd* descriptors, size_t count, int timeout_ms);
+extern "C" int darwin_art_bionic_socket_broker_close(int fd);
 
 namespace {
 
@@ -39,6 +51,85 @@ constexpr uint32_t kBgraPixelFormat =
 
 bool IsMainThread() {
   return [NSThread isMainThread];
+}
+
+void MonitorCompositionFences(DarwinArtSurface* surface) {
+  for (;;) {
+    std::vector<std::pair<int, uint64_t>> watched;
+    {
+      std::unique_lock<std::mutex> lock(surface->composition_mutex);
+      surface->composition_available.wait(lock, [surface] {
+        return surface->composition_monitor_stop ||
+               !surface->composition_fences.empty();
+      });
+      if (surface->composition_monitor_stop) return;
+      watched.reserve(surface->composition_fences.size());
+      for (const auto& fence : surface->composition_fences) {
+        if (!fence.ready) watched.emplace_back(fence.descriptor,
+                                               fence.generation);
+      }
+      if (watched.empty()) continue;
+    }
+
+    std::vector<DarwinArtBionicPollFd> descriptors;
+    descriptors.reserve(watched.size());
+    for (const auto& [descriptor, generation] : watched) {
+      (void)generation;
+      descriptors.push_back({descriptor, 0x0001, 0});  // POLLIN
+    }
+    int result = -1;
+    do {
+      // Keep teardown and newly queued fences responsive without tying this
+      // monitor to the AppKit or ART owner thread.
+      result = darwin_art_bionic_socket_broker_poll(
+          descriptors.data(), descriptors.size(), 16);
+    } while (result < 0 && errno == EINTR);
+    if (result <= 0) continue;
+
+    bool advanced = false;
+    {
+      std::lock_guard<std::mutex> lock(surface->composition_mutex);
+      for (size_t index = 0; index < descriptors.size(); ++index) {
+        const auto& polled = descriptors[index];
+        if (polled.revents == 0) continue;
+        const int descriptor = watched[index].first;
+        for (auto& fence : surface->composition_fences) {
+          if (fence.ready || fence.descriptor != descriptor) continue;
+          // A completion fence is one-shot. Both a normal readable marker and
+          // an error/hangup advance the generation; the latter means the
+          // composition failed and the retained target must remain visible.
+          (void)darwin_art_bionic_socket_broker_close(fence.descriptor);
+          fence.descriptor = -1;
+          fence.ready = true;
+          break;
+        }
+      }
+      while (!surface->composition_fences.empty() &&
+             surface->composition_fences.front().ready) {
+        const uint64_t generation =
+            surface->composition_fences.front().generation;
+        surface->composition_fences.pop_front();
+        surface->composition_ready_generation.store(generation,
+                                                     std::memory_order_release);
+        advanced = true;
+      }
+    }
+    if (advanced) {
+      if (std::getenv("DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS") != nullptr) {
+        std::fprintf(stderr,
+                     "ART SurfaceFlinger: scanout generation ready "
+                     "surface=%p generation=%llu\n",
+                     surface,
+                     static_cast<unsigned long long>(
+                         surface->composition_ready_generation.load(
+                             std::memory_order_acquire)));
+      }
+      // A fence may signal between display edges. Request one latest-wins
+      // AppKit turn immediately; the independent FrameClock will continue to
+      // provide regular scanout edges without making the ART owner wait.
+      (void)darwin_art_surface_present_async(surface);
+    }
+  }
 }
 
 // Surface lifecycle and scanout are AppKit-owned, but ART will eventually run
@@ -686,6 +777,19 @@ static DarwinArtSurfaceResult ResizeSurfaceBacking(DarwinArtSurface* surface,
 @end
 
 DarwinArtSurface::~DarwinArtSurface() {
+    {
+      std::lock_guard<std::mutex> lock(composition_mutex);
+      composition_monitor_stop = true;
+      for (auto& fence : composition_fences) {
+        if (fence.descriptor >= 0) {
+          (void)darwin_art_bionic_socket_broker_close(fence.descriptor);
+          fence.descriptor = -1;
+        }
+      }
+      composition_fences.clear();
+    }
+    composition_available.notify_all();
+    if (composition_monitor.joinable()) composition_monitor.join();
     // Metal textures created from an IOSurface may consult that IOSurface
     // while they are being released. ARC destroys C++ fields after the
     // destructor body, so release the Objective-C owners explicitly before
@@ -1307,9 +1411,65 @@ DarwinArtSurfaceResult darwin_art_surface_present(DarwinArtSurface* surface) {
 
 static void RunAsyncPresentOnMain(DarwinArtSurface* surface);
 
+bool darwin_art_surface_gpu_track_composition_fence(
+    DarwinArtSurface* surface, int fence_fd) {
+  if (surface == nullptr || fence_fd < 0) return false;
+  {
+    std::lock_guard<std::mutex> lock(surface->composition_mutex);
+    if (surface->composition_monitor_stop) {
+      (void)darwin_art_bionic_socket_broker_close(fence_fd);
+      return false;
+    }
+    if (!surface->composition_monitor_started) {
+      try {
+        surface->composition_monitor =
+            std::thread(MonitorCompositionFences, surface);
+        surface->composition_monitor_started = true;
+      } catch (...) {
+        (void)darwin_art_bionic_socket_broker_close(fence_fd);
+        return false;
+      }
+    }
+    const uint64_t generation = ++surface->composition_next_generation;
+    surface->composition_submitted_generation.store(
+        generation, std::memory_order_release);
+    surface->composition_fences.push_back(
+        DarwinArtSurface::CompositionFence{.descriptor = fence_fd,
+                                            .generation = generation,
+                                            .ready = false});
+  }
+  surface->composition_available.notify_one();
+  if (std::getenv("DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS") != nullptr) {
+    std::fprintf(stderr,
+                 "ART SurfaceFlinger: scanout generation submitted surface=%p "
+                 "generation=%llu fence=%d\n",
+                 surface,
+                 static_cast<unsigned long long>(
+                     surface->composition_submitted_generation.load(
+                         std::memory_order_acquire)),
+                 fence_fd);
+  }
+  return true;
+}
+
+bool darwin_art_surface_gpu_scanout_ready(DarwinArtSurface* surface) {
+  if (surface == nullptr) return false;
+  const uint64_t submitted =
+      surface->composition_submitted_generation.load(std::memory_order_acquire);
+  const uint64_t ready =
+      surface->composition_ready_generation.load(std::memory_order_acquire);
+  return submitted == 0 || ready >= submitted;
+}
+
 DarwinArtSurfaceResult darwin_art_surface_present_async(
     DarwinArtSurface* surface) {
   if (surface == nullptr) return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+  if (!darwin_art_surface_gpu_scanout_ready(surface)) {
+    // SurfaceFlinger has not latched this target yet. The fence monitor will
+    // issue one trailing request when the generation becomes ready, while
+    // the display clock remains free to continue waking the ART owner.
+    return DARWIN_ART_SURFACE_OK;
+  }
   if (IsMainThread()) return PresentSurfaceOnMain(surface);
 
   bool schedule = false;

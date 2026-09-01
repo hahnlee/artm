@@ -1567,3 +1567,25 @@ correctness slice is still the completion/ready-generation mailbox: the
 independent scanout tick must consume a confirmed SurfaceFlinger generation,
 not merely the latest retained IOSurface. Physical-ingress sampling and
 native batched input consumption also remain pending.
+
+## 2026-09-02 scheduler-separation progress (completion-generation scanout gate)
+
+The independent AppKit scanout path now receives a duplicate of each
+SurfaceFlinger completion fence without changing the Android-facing fence
+ownership. A single monitor per host surface polls those broker descriptors
+off the ART/UI owner and advances a monotonic submitted/ready generation only
+after the corresponding composition fence signals. `present_async` returns
+without scheduling a blit while a generation is in flight; the monitor issues
+one trailing latest-wins AppKit request when the generation becomes ready.
+Dead/error fences advance the boundary as a failed composition, leaving the
+retained target unchanged, while teardown closes and joins the monitor before
+the surface backing is released.
+
+The new gate was rebuilt and exercised by AOSP Calculator/DeskClock graphics
+acceptance and a real Chromium tab-grid run. Both passed; Chromium reached
+the real tab-switcher/tab-grid views with `target-states=10`, and logs show
+monotonic fence submission/ready generations with no crash. Graphics-link
+audit, Rust host tests, `cargo fmt --all -- --check`, and `git diff --check`
+also pass. Remaining work is measuring physical input under load and refining
+the ready-generation mailbox to cover multi-surface display policy rather
+than the current single active host surface.

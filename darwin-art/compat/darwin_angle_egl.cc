@@ -112,6 +112,7 @@ extern "C" int darwin_art_android_metal_shared_event_fence_fd(
 extern "C" void darwin_art_android_metal_shared_event_release(
     void* shared_event);
 extern "C" int darwin_art_bionic_fd_import_from_scm(int host_fd);
+extern "C" int darwin_art_bionic_socket_broker_dup(int fd);
 extern "C" int darwin_art_bionic_socket_broker_pipe(
     std::int32_t descriptors[2]);
 extern "C" std::intptr_t darwin_art_bionic_socket_broker_write(
@@ -4088,6 +4089,24 @@ extern "C" int darwin_art_android_end_hardware_buffer_composition() {
   }
   if (completion_event != nullptr)
     darwin_art_android_metal_shared_event_release(completion_event);
+  if (composed && completion_fence >= 0) {
+    // Keep the Android-facing fence ownership intact while a duplicate feeds
+    // the host surface's readiness monitor. AppKit scanout must not sample
+    // the target IOSurface until this exact SurfaceFlinger composition has
+    // signaled, even when the next display tick arrives earlier.
+    DarwinArtSurface* host = darwin_art_surface_active_gpu();
+    const int monitor_fence =
+        host == nullptr ? -1
+                        : darwin_art_bionic_socket_broker_dup(completion_fence);
+    if (host != nullptr && monitor_fence >= 0) {
+      if (!darwin_art_surface_gpu_track_composition_fence(host,
+                                                           monitor_fence) &&
+          std::getenv("DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS") != nullptr) {
+        std::cerr << "ART SurfaceFlinger: readiness monitor rejected fence="
+                  << monitor_fence << "\n";
+      }
+    }
+  }
   if (producer_sync != nullptr)
     (void)EglDestroySyncKhrAndroid(display, producer_sync);
   if (DebugGraphicsDso()) {

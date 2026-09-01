@@ -207,6 +207,15 @@ DarwinArtSurfaceResult darwin_art_surface_gpu_end(
 DarwinArtSurface* darwin_art_surface_active_gpu(void);
 void darwin_art_surface_set_active_gpu(DarwinArtSurface* surface);
 
+// SurfaceFlinger completion/readiness bridge. `fence_fd` is an owned Android
+// broker descriptor; the surface consumes it on a dedicated monitor and
+// advances its ready generation only after the fence signals. Scanout callers
+// can use the readiness query to avoid blitting a target while composition is
+// still in flight.
+bool darwin_art_surface_gpu_track_composition_fence(
+    DarwinArtSurface* surface, int fence_fd);
+bool darwin_art_surface_gpu_scanout_ready(DarwinArtSurface* surface);
+
 // SurfaceView/ANGLE zero-copy bridge. The acquired handle is a retained
 // IOSurfaceRef represented as an opaque pointer and must be released with the
 // matching function. ANGLE renders into that IOSurface, then publishes a
