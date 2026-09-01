@@ -228,6 +228,9 @@ bool darwin_art_surface_gpu_composite_embedded(
     const SkRect destination = SkRect::MakeXYWH(
         static_cast<SkScalar>(x), static_cast<SkScalar>(y),
         static_cast<SkScalar>(width), static_cast<SkScalar>(height));
+    // A locked ANativeWindow is a CPU producer buffer.  Its row zero follows
+    // Android's software Canvas convention, so preserve it as-is; the GLES
+    // origin conversion belongs to the ANGLE/EGL IOSurface path below.
     canvas->drawImageRect(state->native_window_image, source, destination,
                           SkSamplingOptions(SkFilterMode::kLinear), nullptr,
                           SkCanvas::kStrict_SrcRectConstraint);
@@ -264,9 +267,21 @@ bool darwin_art_surface_gpu_composite_embedded(
   const SkRect destination = SkRect::MakeXYWH(
       static_cast<SkScalar>(x), static_cast<SkScalar>(y),
       static_cast<SkScalar>(width), static_cast<SkScalar>(height));
+  // The fallback IOSurface is the ANGLE/EGL producer target.  GLES presents
+  // framebuffer rows from the bottom while the Skia/Metal canvas samples
+  // rows from the top.  Apply the producer-origin conversion at this GLES
+  // boundary.  This is intentionally
+  // limited to embedded producer content; the parent HWUI RenderNode stays
+  // in its native top-left coordinate system.
+  canvas->save();
+  canvas->translate(0.0f,
+                    2.0f * static_cast<SkScalar>(y) +
+                        static_cast<SkScalar>(height));
+  canvas->scale(1.0f, -1.0f);
   canvas->drawImageRect(state->embedded_image, source, destination,
                         SkSamplingOptions(SkFilterMode::kLinear), nullptr,
                         SkCanvas::kStrict_SrcRectConstraint);
+  canvas->restore();
   return true;
 }
 
