@@ -2290,7 +2290,12 @@ public final class DarwinServiceBridge {
                 }
                 SurfaceControl.Transaction transaction = new SurfaceControl.Transaction()
                         .setPosition(producer, x, y)
-                        .setLayer(producer, type >= 1000 ? 1000 : 0);
+                        // Android keeps an app's ViewRoot above ordinary
+                        // child buffer producers (SurfaceView/Chrome's
+                        // compositor surface). Separate window types remain
+                        // above both. Leaving the root at z=0 lets a full
+                        // frame child surface hide Chrome's bottom toolbar.
+                        .setLayer(producer, type >= 1000 ? 1000 : 1);
                 transaction.apply();
                 Field surfaceControlField = result.getClass().getField("surfaceControl");
                 SurfaceControl output =
