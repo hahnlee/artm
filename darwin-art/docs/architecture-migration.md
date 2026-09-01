@@ -1032,3 +1032,20 @@ flow reached the real tab-switcher and tab-grid with ten composed target states
 and the complete GPU capability path. The Manager still needs macOS
 Accessibility permission before physical-ingress percentile telemetry can be
 collected; synthetic acceptance is intentionally kept as a separate gate.
+
+## 2026-09-02 scheduler-separation progress (AppKit actor quantum)
+
+The AppKit actor now pumps `NSApplication` in 2 ms quanta (below one quarter
+of the 60 Hz display interval) while the ART owner waits independently on its
+native Looper wake. This bounds the actor-side observation delay for a physical
+NSEvent without moving JNI, ViewRoot, or GraphicsSession work onto AppKit.
+Debug frame timing also emits bounded `appkit-pump` snapshots because APK
+processes intentionally use `_exit` after the owner loop and cannot emit a
+final outer-actor summary.
+
+The latest Chrome run reached the real tab-switcher and tab-grid (10 composed
+states, full GLES/ANGLE/Graphite/Dawn/MoltenVK/AHB/SurfaceFlinger/Metal path).
+Actor snapshots were approximately 2.5--2.9 ms average with an 88 ms maximum
+across the participating processes; owner metrics remained the known
+Chromium-callback-limited tail (`handoff` p95 about 2.06 s). This separates
+AppKit observation cost from the still-unpreemptible guest native callback.

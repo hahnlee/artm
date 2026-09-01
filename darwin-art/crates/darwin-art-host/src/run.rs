@@ -17,6 +17,7 @@ use darwin_art_engine_sys::AppKitPumpEventsFn;
 use darwin_art_runtime::{ProviderBridge, ProviderKind, Subsystem};
 use std::sync::mpsc::{self, SyncSender, TryRecvError};
 use std::thread;
+use std::time::Instant;
 
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
@@ -47,6 +48,13 @@ enum WorkerMessage {
 }
 
 #[cfg(target_os = "macos")]
+// Keep the AppKit actor's event wait below one quarter of a display interval.
+// Input is still delivered by AppKit on its owning thread, then wakes the ART
+// Looper through the surface mailbox; the shorter quantum only bounds how long
+// the actor can remain asleep before observing a newly queued NSEvent.
+const APPKIT_PUMP_QUANTUM_SECONDS: f64 = 0.002;
+
+#[cfg(target_os = "macos")]
 fn run_with_appkit_actor(options: RunOptions) -> Result<HostOutcome, HostError> {
     let (sender, receiver) = mpsc::sync_channel::<WorkerMessage>(2);
     let worker = thread::Builder::new()
@@ -72,6 +80,9 @@ fn run_with_appkit_actor(options: RunOptions) -> Result<HostOutcome, HostError> 
         .map_err(|error| HostError::HostService(format!("spawn ART UI owner: {error}")))?;
 
     let mut appkit_pump: Option<AppKitPumpEventsFn> = None;
+    let mut appkit_pump_count = 0_u64;
+    let mut appkit_pump_total_us = 0_u64;
+    let mut appkit_pump_max_us = 0_u64;
     let result = loop {
         match receiver.try_recv() {
             Ok(WorkerMessage::AppKitPump(callback)) => appkit_pump = Some(callback),
@@ -88,7 +99,27 @@ fn run_with_appkit_actor(options: RunOptions) -> Result<HostOutcome, HostError> 
             // Keep NSApplication responsive while the ART worker is blocked
             // in framework work or waiting for a marshalled Surface call.
             // The callback itself is main-thread-only and never invokes JNI.
-            let status = unsafe { callback(0.008) };
+            let pump_started = Instant::now();
+            let status = unsafe { callback(APPKIT_PUMP_QUANTUM_SECONDS) };
+            let elapsed_us = pump_started.elapsed().as_micros() as u64;
+            appkit_pump_count += 1;
+            appkit_pump_total_us = appkit_pump_total_us.saturating_add(elapsed_us);
+            appkit_pump_max_us = appkit_pump_max_us.max(elapsed_us);
+            // APK runs intentionally terminate the Android process with
+            // _exit after the owner loop, so the outer actor never reaches
+            // its final summary. Emit bounded snapshots while the actor is
+            // alive to keep the split-path metric observable in those runs.
+            if std::env::var_os("DARWIN_ART_DEBUG_FRAME_TIMING").is_some()
+                && appkit_pump_count % 1024 == 0
+            {
+                eprintln!(
+                    "DARWIN_ART appkit-pump count={} avg_us={} max_us={} quantum_us={}",
+                    appkit_pump_count,
+                    appkit_pump_total_us / appkit_pump_count,
+                    appkit_pump_max_us,
+                    (APPKIT_PUMP_QUANTUM_SECONDS * 1_000_000.0) as u64,
+                );
+            }
             if status != 0 {
                 break Err(HostError::SurfaceFailed {
                     operation: "appkit_main_actor_pump",
@@ -99,6 +130,16 @@ fn run_with_appkit_actor(options: RunOptions) -> Result<HostOutcome, HostError> 
             thread::sleep(std::time::Duration::from_millis(1));
         }
     };
+    if std::env::var_os("DARWIN_ART_DEBUG_FRAME_TIMING").is_some() {
+        let average_us = appkit_pump_total_us.checked_div(appkit_pump_count.max(1));
+        eprintln!(
+            "DARWIN_ART appkit-pump count={} avg_us={} max_us={} quantum_us={}",
+            appkit_pump_count,
+            average_us.unwrap_or(0),
+            appkit_pump_max_us,
+            (APPKIT_PUMP_QUANTUM_SECONDS * 1_000_000.0) as u64,
+        );
+    }
     let _ = worker.join();
     result
 }
