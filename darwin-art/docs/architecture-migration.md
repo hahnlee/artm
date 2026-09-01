@@ -766,3 +766,15 @@ acceptance passes with real tab-grid views; timing is
 Calculator and DeskClock remain green. The long tail is unchanged and is
 therefore confirmed to be inside one native Chromium task batch, not JNI
 reflection or Metal scanout.
+
+## 2026-09-01 scheduler-separation progress (owner scheduling priority)
+
+The ART owner pthread now requests macOS `QOS_CLASS_USER_INTERACTIVE`, which
+matches the latency intent of Android's main/UI thread while leaving AppKit on
+its independent main actor. The change does not migrate callbacks or alter
+Looper sequence affinity. A rebuilt run passed Chrome tab acceptance with 11
+composed target states and Calculator/DeskClock acceptance; timing was
+`looper avg=307us max=2127961us`, `graphics avg=103us max=1849us`.
+The multi-second tail remains a single native Chromium callback, so the next
+step is still task-runner boundary identification rather than more host
+priority tuning.

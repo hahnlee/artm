@@ -52,6 +52,20 @@ fn run_with_appkit_actor(options: RunOptions) -> Result<HostOutcome, HostError> 
     let worker = thread::Builder::new()
         .name("darwin-art-ui-owner".to_owned())
         .spawn(move || {
+            // Android's main/UI Looper runs at an interactive scheduling
+            // priority. Keep the ART owner from being deprioritized behind
+            // Chromium helper work while AppKit remains on its own main
+            // actor. This changes scheduling priority only; JNI/Looper
+            // sequence affinity is unchanged.
+            let qos_status = unsafe {
+                libc::pthread_set_qos_class_self_np(
+                    libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE,
+                    0,
+                )
+            };
+            if qos_status != 0 && std::env::var_os("DARWIN_ART_DEBUG_FRAME_TIMING").is_some() {
+                eprintln!("DARWIN_ART owner QoS setup failed status={qos_status}");
+            }
             let result = run_owner(&options, Some(&sender));
             let _ = sender.send(WorkerMessage::Finished(result));
         })
