@@ -83,6 +83,9 @@ struct GraphicsState {
   jint interactive_height = 0;
   // Borrowed from the surface owner. GraphicsState never destroys this.
   DarwinArtSurface* gpu_surface = nullptr;
+  // Set once the Android owner Looper wake token is attached to the AppKit
+  // surface input mailbox. The callback is cleared during shutdown.
+  bool owner_wake_bound = false;
 #if defined(DARWIN_ART_REAL_GRAPHICS)
   std::unique_ptr<::android::uirenderer::renderthread::TimeLord> hwui_time_lord;
   std::unique_ptr<::android::uirenderer::AnimationContext> hwui_animation_context;

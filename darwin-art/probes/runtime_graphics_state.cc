@@ -1,6 +1,7 @@
 #include "runtime_graphics_state.h"
 
 #include "darwin_framework_natives.h"
+#include "darwin_surface_bridge.h"
 
 #if defined(DARWIN_ART_REAL_GRAPHICS)
 #define private public
@@ -131,6 +132,11 @@ void begin_activity_transition(GraphicsState* state, JNIEnv* env) {
 
 void shutdown(GraphicsState* state, JNIEnv* env) {
   if (state == nullptr || env == nullptr) return;
+  if (state->gpu_surface != nullptr && state->owner_wake_bound) {
+    (void)darwin_art_surface_set_owner_wake(state->gpu_surface, nullptr,
+                                             nullptr);
+    state->owner_wake_bound = false;
+  }
   auto clear_class = [env](jclass* reference) {
     if (*reference != nullptr) {
       env->DeleteGlobalRef(*reference);

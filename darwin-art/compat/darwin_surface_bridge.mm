@@ -293,6 +293,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
 
 @implementation DarwinArtMetalView {
   CAMetalLayer* _metalLayer;
+  DarwinArtSurface* _ownerSurface;
   std::deque<DarwinArtPointerEventV2> _pointerEvents;
   std::deque<DarwinArtKeyEventV1> _keyEvents;
   // AppKit is the producer, while the future ART worker consumes packets.
@@ -324,11 +325,29 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
     _metalLayer.drawableSize = pixelSize;
     self.layer = _metalLayer;
     _pointerActive = NO;
+    _ownerSurface = nullptr;
     _nextPointerSequence = 1;
     _nextKeySequence = 1;
     _downTimeNanos = 0;
   }
   return self;
+}
+
+- (void)setOwnerSurface:(DarwinArtSurface*)surface {
+  _ownerSurface = surface;
+}
+
+- (void)signalOwnerWake {
+  DarwinArtSurface* surface = _ownerSurface;
+  if (surface == nullptr) return;
+  DarwinArtSurfaceOwnerWakeCallback callback = nullptr;
+  void* context = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(surface->owner_wake_mutex);
+    callback = surface->owner_wake_callback;
+    context = surface->owner_wake_context;
+  }
+  if (callback != nullptr) callback(context);
 }
 
 - (BOOL)isFlipped {
@@ -407,6 +426,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
         .size_value = 1.0f,
     });
   }
+  [self signalOwnerWake];
   if (action == DARWIN_ART_POINTER_DOWN) {
     _pointerActive = YES;
   } else if (action == DARWIN_ART_POINTER_UP ||
@@ -468,6 +488,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
         .unicode_char = unicode_char,
     });
   }
+  [self signalOwnerWake];
   if (action == 1) {
     _keyDownTimes.erase(scan_code);
     _keyRepeatCounts.erase(scan_code);
@@ -541,6 +562,7 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
     _pointerActive = NO;
     _downTimeNanos = 0;
   }
+  [self signalOwnerWake];
 }
 
 @end
@@ -936,6 +958,7 @@ static DarwinArtSurface* CreateSurfaceOnMain(
       delete surface;
       return finish(DARWIN_ART_SURFACE_ALLOCATION_FAILED, nullptr);
     }
+    [surface->view setOwnerSurface:surface];
     if (create_info->visible) {
       DarwinArtSurfaceWindowDelegate* delegate =
           [[DarwinArtSurfaceWindowDelegate alloc] init];
@@ -1235,6 +1258,17 @@ DarwinArtSurfaceResult darwin_art_surface_present_async(
       RunAsyncPresentOnMain(surface);
     });
   }
+  return DARWIN_ART_SURFACE_OK;
+}
+
+DarwinArtSurfaceResult darwin_art_surface_set_owner_wake(
+    DarwinArtSurface* surface,
+    DarwinArtSurfaceOwnerWakeCallback callback,
+    void* context) {
+  if (surface == nullptr) return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+  std::lock_guard<std::mutex> lock(surface->owner_wake_mutex);
+  surface->owner_wake_callback = callback;
+  surface->owner_wake_context = context;
   return DARWIN_ART_SURFACE_OK;
 }
 

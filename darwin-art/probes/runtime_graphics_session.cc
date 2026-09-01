@@ -9,6 +9,7 @@
 
 #include "runtime_graphics_probe.h"
 #include "runtime_graphics_state.h"
+#include "darwin_android_platform.h"
 #include "runtime_process_state.h"
 #include "runtime.h"
 #include "scoped_thread_state_change-inl.h"
@@ -247,6 +248,13 @@ int32_t pump_main_looper(darwin_art_graphics_session_t* session) {
   return pump_main_looper(&session->state);
 }
 
+int32_t wait_main_looper(darwin_art_graphics_session_t* session,
+                         int32_t timeout_ms) {
+  const int32_t owner_status = check_owner(session);
+  if (owner_status != 0) return owner_status;
+  return darwin_art_android_platform_wait_current_looper(timeout_ms);
+}
+
 }  // namespace darwin_art_graphics
 
 extern "C" DARWIN_ART_EXPORT darwin_art_graphics_session_t*
@@ -290,4 +298,10 @@ extern "C" DARWIN_ART_EXPORT int32_t
 darwin_art_graphics_session_pump_main_looper(
     darwin_art_graphics_session_t* session) {
   return darwin_art_graphics::pump_main_looper(session);
+}
+
+extern "C" DARWIN_ART_EXPORT int32_t
+darwin_art_graphics_session_wait_main_looper(
+    darwin_art_graphics_session_t* session, int32_t timeout_ms) {
+  return darwin_art_graphics::wait_main_looper(session, timeout_ms);
 }

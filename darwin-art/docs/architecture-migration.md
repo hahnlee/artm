@@ -895,3 +895,29 @@ Verification for this change: `cargo fmt --all -- --check`,
 steps), graphics-link audit PASS, AOSP Calculator `2+3=5` and DeskClock Timer
 PASS, and Chromium real tab-switcher/tab-grid acceptance PASS with 10 target
 states and GPU `GLES+ANGLE+Graphite+Dawn+MoltenVK+AHB+SurfaceFlinger+Metal`.
+
+## 2026-09-02 scheduler-separation progress (OwnerReactor wake path)
+
+The first `OwnerReactor` slice is now wired through the existing ABI. The
+surface's AppKit-owned input mailbox accepts a pointer-free owner-wake hook;
+mouse/key/cancel enqueue signals the Android `ALooper_wake` token after the
+mailbox mutex is released. The owner loop uses a bounded (maximum 16 ms)
+native Looper wait before draining input and publishing one latest display
+pulse, with a sleep fallback for older engine images. The wait is normalized
+to timeout/wake/callback versus poll-error and keeps the `(fd, generation)`
+fairness turn accounting intact.
+
+No `JNIEnv`, `GraphicsSession`, or `SurfaceSession` crosses threads. The wake
+hook is explicitly cleared during graphics shutdown before the AppKit surface
+is destroyed, preserving the existing teardown ordering. This removes the
+blind 2 ms owner sleep from the normal graphics image and lets native fd or
+physical AppKit input wake the owner immediately; it does not preempt a single
+opaque Chromium callback body.
+
+Verification: graphics-link audit PASS; AOSP Calculator/DeskClock acceptance
+PASS; Chromium acceptance passed on an immediate retry and with timing enabled
+(`looper max=1.982 s`, `graphics max=286 us`, input-to-pulse `p50=36 ms`, one
+startup sample over 1 s). One first Chromium run missed the timing-sensitive
+tab-grid assertion and was rerun unchanged successfully with 10 target states.
+The next slice is to coalesce FrameClock latest-vsync into the same wake state
+and then measure physical-click latency separately from synthetic acceptance.

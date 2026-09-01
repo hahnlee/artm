@@ -14,6 +14,11 @@ extern "C" {
 typedef struct DarwinArtSurface DarwinArtSurface;
 typedef struct DarwinArtGpuFrame DarwinArtGpuFrame;
 
+// Worker-safe wake hook used by the Android owner reactor. The producer is
+// AppKit (input) while the consumer is the ART owner Looper; only this POD
+// callback crosses the boundary, never an NSView/JNIEnv/SurfaceSession.
+typedef void (*DarwinArtSurfaceOwnerWakeCallback)(void* context);
+
 typedef enum DarwinArtSurfaceResult {
   DARWIN_ART_SURFACE_OK = 0,
   DARWIN_ART_SURFACE_INVALID_ARGUMENT = 1,
@@ -175,6 +180,15 @@ DarwinArtSurfaceResult darwin_art_surface_present(
 // normal main-thread destroy dispatch runs.
 DarwinArtSurfaceResult darwin_art_surface_present_async(
     DarwinArtSurface* surface);
+
+// Binds the owner Looper wake token to a surface's AppKit input mailbox.
+// Setting a null callback unbinds it before the owner/runtime is torn down.
+// The callback may be invoked from AppKit event methods and must be
+// non-blocking and thread-safe.
+DarwinArtSurfaceResult darwin_art_surface_set_owner_wake(
+    DarwinArtSurface* surface,
+    DarwinArtSurfaceOwnerWakeCallback callback,
+    void* context);
 
 // GPU-only frame path. The returned frame wraps the CAMetalLayer drawable
 // directly; callers must submit it with darwin_art_surface_gpu_end(). No

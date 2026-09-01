@@ -11,6 +11,8 @@
 #include <atomic>
 #include <mutex>
 
+struct DarwinArtSurface;
+
 @interface DarwinArtMetalView : NSView
 @property(nonatomic, readonly) CAMetalLayer* metalLayer;
 - (instancetype)initWithFrame:(NSRect)frame
@@ -22,6 +24,8 @@
 - (BOOL)nextKeyEventV1:(DarwinArtKeyEventV1*)outEvent;
 - (void)cancelPointerStream;
 - (void)updateDrawableSize;
+- (void)setOwnerSurface:(DarwinArtSurface*)surface;
+- (void)signalOwnerWake;
 @end
 
 // Shared host-owned surface state. GPU-only state is deliberately opaque so
@@ -59,6 +63,11 @@ struct DarwinArtSurface {
   // lets the owner observe a user close without synchronously entering the
   // AppKit main queue (the main actor already owns event pumping).
   std::atomic<bool> window_closed{false};
+  // AppKit input wakes the Android owner Looper through this POD hook. The
+  // callback is copied under the mutex and invoked after releasing it.
+  mutable std::mutex owner_wake_mutex;
+  DarwinArtSurfaceOwnerWakeCallback owner_wake_callback = nullptr;
+  void* owner_wake_context = nullptr;
   bool producer_mapped = false;
   void* gpu_state = nullptr;
   // Geometry and publication state for a SurfaceView whose EGL producer

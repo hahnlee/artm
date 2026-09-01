@@ -18,6 +18,11 @@ extern "C" int darwin_art_android_platform_poll_current_looper();
 extern "C" void* darwin_art_android_platform_prepare_current_looper();
 extern "C" int darwin_art_android_platform_poll_current_looper_timeout(
     int timeout_ms);
+// Waits for one owner-Looper wake/native callback for at most timeout_ms.
+// The result is normalized to zero for timeout/wake/callback and -1 only for
+// a poll error, so host scheduling can use it without exposing ALooper codes.
+extern "C" int darwin_art_android_platform_wait_current_looper(
+    int timeout_ms);
 extern "C" void darwin_art_android_platform_wake_looper(void* looper);
 
 // SCM_RIGHTS transports the Darwin file description but not Android ashmem's

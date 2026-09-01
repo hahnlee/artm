@@ -1476,6 +1476,17 @@ extern "C" int darwin_art_android_platform_poll_current_looper_timeout(
   return ALooper_pollOnce(timeout_ms, nullptr, nullptr, nullptr);
 }
 
+extern "C" int darwin_art_android_platform_wait_current_looper(
+    int timeout_ms) {
+  if (g_thread_looper == nullptr) return 0;
+  timeout_ms = std::clamp(timeout_ms, 0, 16);
+  ++g_host_looper_turn;
+  g_host_looper_turn_active = true;
+  const int result = ALooper_pollOnce(timeout_ms, nullptr, nullptr, nullptr);
+  g_host_looper_turn_active = false;
+  return result == ALOOPER_POLL_ERROR ? -1 : 0;
+}
+
 extern "C" void darwin_art_android_platform_wake_looper(void* looper) {
   ALooper_wake(static_cast<ALooper*>(looper));
 }

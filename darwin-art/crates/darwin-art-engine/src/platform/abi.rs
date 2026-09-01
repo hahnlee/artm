@@ -7,11 +7,12 @@ use darwin_art_engine_sys::{
     AppKitPumpEventsFn, GraphicsSessionCloseFn, GraphicsSessionCreateFn, GraphicsSessionDestroyFn,
     GraphicsSessionDispatchKeyV1Fn, GraphicsSessionDispatchPointerFn,
     GraphicsSessionDispatchPointerV2Fn, GraphicsSessionPumpFrameFn,
-    GraphicsSessionPumpMainLooperFn, ProviderClearHooksFn, ProviderInstallHooksFn,
-    ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn, ShutdownProcessFn,
-    SurfaceActiveFn, SurfaceCloseRequestedFn, SurfaceCreateFn, SurfaceDestroyFn, SurfaceGetSizeFn,
-    SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn, SurfaceNextPointerEventV2Fn,
-    SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn, SurfaceUpdateFn,
+    GraphicsSessionPumpMainLooperFn, GraphicsSessionWaitMainLooperFn, ProviderClearHooksFn,
+    ProviderInstallHooksFn, ProviderNativeAcquireFn, ProviderNativeReleaseFn, RunProcessFn,
+    ShutdownProcessFn, SurfaceActiveFn, SurfaceCloseRequestedFn, SurfaceCreateFn, SurfaceDestroyFn,
+    SurfaceGetSizeFn, SurfaceNextKeyEventV1Fn, SurfaceNextPointerEventFn,
+    SurfaceNextPointerEventV2Fn, SurfacePresentFn, SurfacePumpEventsFn, SurfaceResizeFn,
+    SurfaceUpdateFn,
 };
 
 #[derive(Clone, Copy)]
@@ -46,6 +47,7 @@ pub(crate) struct GraphicsSymbols {
     pub dispatch_pointer_v2: Option<GraphicsSessionDispatchPointerV2Fn>,
     pub dispatch_key_v1: Option<GraphicsSessionDispatchKeyV1Fn>,
     pub pump_main_looper: Option<GraphicsSessionPumpMainLooperFn>,
+    pub wait_main_looper: Option<GraphicsSessionWaitMainLooperFn>,
     pub pump_frame: Option<GraphicsSessionPumpFrameFn>,
 }
 
@@ -117,6 +119,9 @@ impl LoadedEngine {
                         .ok(),
                     pump_main_looper: library
                         .symbol(b"darwin_art_graphics_session_pump_main_looper\0")
+                        .ok(),
+                    wait_main_looper: library
+                        .symbol(b"darwin_art_graphics_session_wait_main_looper\0")
                         .ok(),
                     pump_frame: library
                         .symbol(b"darwin_art_graphics_session_pump_frame\0")

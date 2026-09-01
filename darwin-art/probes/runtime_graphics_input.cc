@@ -14,6 +14,7 @@
 #include "darwin_android_platform.h"
 #include "darwin_framework_natives.h"
 #include "darwin_art/darwin_art.h"
+#include "darwin_surface_bridge.h"
 #include "runtime_hwui_probe.h"
 #include "runtime_graphics_gpu.h"
 #include "runtime_graphics_probe.h"
@@ -1904,6 +1905,15 @@ int32_t pump_main_looper(GraphicsState* state) {
   }
   art::ScopedObjectAccess soa(art_thread);
   JNIEnv* env = art_thread->GetJniEnv();
+  if (state->gpu_surface != nullptr && !state->owner_wake_bound) {
+    void* looper = darwin_art_android_platform_prepare_current_looper();
+    if (looper != nullptr &&
+        darwin_art_surface_set_owner_wake(
+            state->gpu_surface, darwin_art_android_platform_wake_looper,
+            looper) == DARWIN_ART_SURFACE_OK) {
+      state->owner_wake_bound = true;
+    }
+  }
   if (!DispatchDueMainMessages(state, env)) {
     if (env->ExceptionCheck() && art_thread->GetException() != nullptr) {
       std::cerr << "ART Android main Looper dispatch threw\n"

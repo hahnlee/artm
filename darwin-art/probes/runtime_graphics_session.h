@@ -35,6 +35,8 @@ int32_t dispatch_pointer_v2(darwin_art_graphics_session_t* session,
 int32_t dispatch_key_v1(darwin_art_graphics_session_t* session,
                         const DarwinArtKeyEventV1* event);
 int32_t pump_main_looper(darwin_art_graphics_session_t* session);
+int32_t wait_main_looper(darwin_art_graphics_session_t* session,
+                         int32_t timeout_ms);
 int32_t pump_frame(darwin_art_graphics_session_t* session,
                    int64_t frame_time_nanos);
 

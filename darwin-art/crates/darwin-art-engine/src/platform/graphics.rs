@@ -2,7 +2,8 @@ use super::abi::EngineSymbols;
 use darwin_art_engine_sys::{
     GraphicsSessionCloseFn, GraphicsSessionDestroyFn, GraphicsSessionDispatchKeyV1Fn,
     GraphicsSessionDispatchPointerFn, GraphicsSessionDispatchPointerV2Fn, GraphicsSessionHandle,
-    GraphicsSessionPumpFrameFn, GraphicsSessionPumpMainLooperFn, KeyEventV1, PointerEventV2,
+    GraphicsSessionPumpFrameFn, GraphicsSessionPumpMainLooperFn, GraphicsSessionWaitMainLooperFn,
+    KeyEventV1, PointerEventV2,
 };
 use darwin_art_runtime::NativeResource;
 use std::ptr::NonNull;
@@ -19,6 +20,7 @@ pub struct GraphicsSession {
     dispatch_v2_fn: Option<GraphicsSessionDispatchPointerV2Fn>,
     dispatch_key_v1_fn: Option<GraphicsSessionDispatchKeyV1Fn>,
     pump_main_looper_fn: GraphicsSessionPumpMainLooperFn,
+    wait_main_looper_fn: Option<GraphicsSessionWaitMainLooperFn>,
     pump_fn: GraphicsSessionPumpFrameFn,
     closed: bool,
     close_attempted: bool,
@@ -58,6 +60,7 @@ impl GraphicsSession {
             dispatch_v2_fn: symbols.graphics.dispatch_pointer_v2,
             dispatch_key_v1_fn: symbols.graphics.dispatch_key_v1,
             pump_main_looper_fn,
+            wait_main_looper_fn: symbols.graphics.wait_main_looper,
             pump_fn,
             closed: false,
             close_attempted: false,
@@ -136,6 +139,21 @@ impl GraphicsSession {
         // SAFETY: the Android MessageQueue remains bound to this session's
         // owner thread for the lifetime of the live handle.
         unsafe { (self.pump_main_looper_fn)(handle.as_ptr()) }
+    }
+
+    /// Wait for one owner-Looper wake without moving the session to a helper
+    /// thread. Older engine images may not export this optional symbol; the
+    /// host then keeps its bounded fallback cadence.
+    pub fn wait_main_looper(&self, timeout_ms: i32) -> i32 {
+        let Some(handle) = self.handle.filter(|_| !self.closed) else {
+            return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+        };
+        let Some(wait) = self.wait_main_looper_fn else {
+            return darwin_art_engine_sys::ENGINE_STATUS_UNAVAILABLE;
+        };
+        // SAFETY: handle remains live while self is borrowed and timeout is a
+        // bounded scalar consumed synchronously by the owner thread.
+        unsafe { wait(handle.as_ptr(), timeout_ms) }
     }
 
     fn destroy(&mut self) -> i32 {
@@ -227,6 +245,7 @@ mod graphics_session_tests {
             dispatch_v2_fn: None,
             dispatch_key_v1_fn: None,
             pump_main_looper_fn: pump_main_looper,
+            wait_main_looper_fn: None,
             pump_fn: pump,
             closed: false,
             close_attempted: false,
@@ -265,6 +284,7 @@ mod graphics_session_tests {
             dispatch_v2_fn: None,
             dispatch_key_v1_fn: None,
             pump_main_looper_fn: pump_main_looper,
+            wait_main_looper_fn: None,
             pump_fn: pump,
             closed: false,
             close_attempted: false,
