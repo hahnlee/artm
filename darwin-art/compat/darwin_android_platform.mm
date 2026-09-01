@@ -1281,8 +1281,13 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
                 ? 0
                 : object_vtable + static_cast<int64_t>(vtable_offset);
         std::fprintf(stderr,
-                     "DARWIN_ART looper-callback-target fd=%d callback=%p "
-                     "data=%p vtable=%p slot_offset=%d target=%p\n",
+                     "DARWIN_ART looper-callback-target pid=%d process=%s "
+                     "fd=%d callback=%p data=%p vtable=%p slot_offset=%d "
+                     "target=%p\n",
+                     getpid(),
+                     std::getenv("DARWIN_ART_APK_PROCESS_NAME") == nullptr
+                         ? "<main>"
+                         : std::getenv("DARWIN_ART_APK_PROCESS_NAME"),
                      registration.fd,
                      reinterpret_cast<void*>(registration.callback),
                      registration.data,
@@ -1307,9 +1312,14 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd,
                   ? (callback_cpu_finished - callback_cpu_started) / 1000
                   : 0;
           std::fprintf(stderr,
-                       "DARWIN_ART slow-native-callback fd=%d events=0x%x "
+                       "DARWIN_ART slow-native-callback pid=%d process=%s "
+                       "fd=%d events=0x%x "
                        "callback=%p data=%p result=%d elapsed_us=%lld "
                        "cpu_us=%llu callback_desc=%s\n",
+                       getpid(),
+                       std::getenv("DARWIN_ART_APK_PROCESS_NAME") == nullptr
+                           ? "<main>"
+                           : std::getenv("DARWIN_ART_APK_PROCESS_NAME"),
                        registration.fd, events,
                        reinterpret_cast<void*>(registration.callback),
                        registration.data, callback_result,

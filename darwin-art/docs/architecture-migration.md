@@ -851,3 +851,20 @@ same single callback (`401ms`, `617ms`, `2135ms` samples;
 fairness boundary prevents repeated wake starvation but cannot preempt the
 callback's internal task batch. Further latency work must target Chromium's
 own task-runner/IPC boundary.
+
+## 2026-09-02 scheduler-separation progress (process attribution)
+
+Slow-callback diagnostics now include the host PID and Android process name.
+The latest Chrome run attributes the multi-second callback to
+`pid=57081 process=<main> fd=1073742850` (`401ms`, `617ms`, and `2018ms`
+samples; `looper max=2018068us`). Child services were independently observed
+with different PIDs and names, including
+`org.chromium.chrome:privileged_process0`, and their Looper callbacks use
+separate native images/registrations. This proves the existing service process
+boundary is active and the browser-side callback is not child work that can be
+moved across processes.
+
+The callback remains on the browser's registering Looper as required by
+Android. The next implementation slice is therefore a browser-side
+MessagePump/IPC batch boundary (or a provider-level non-blocking fix), with
+process attribution retained as a regression invariant.
