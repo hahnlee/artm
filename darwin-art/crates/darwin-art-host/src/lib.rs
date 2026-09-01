@@ -4,6 +4,7 @@ mod config;
 mod frame;
 #[cfg(target_os = "macos")]
 mod frame_clock;
+mod frame_timing;
 #[cfg(target_os = "macos")]
 mod gpu_input;
 #[cfg(target_os = "macos")]

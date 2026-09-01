@@ -1,5 +1,6 @@
 use crate::config::{HostError, HostOutcome, RunOptions};
 use crate::frame_clock::FrameClock;
+use crate::frame_timing;
 use crate::gpu_input::{
     dispatch_queued_events, dispatch_synthetic_keys, pulse_frame_with_latency,
     pump_frame_with_latency, pump_main_looper,
@@ -728,6 +729,7 @@ pub(super) fn run(
             frame_latencies_us.last().copied().unwrap_or(0),
         );
     }
+    frame_timing::report();
     Ok(HostOutcome {
         process,
         frames_presented,

@@ -526,3 +526,41 @@ unchanged. The graph digest now contains 189 production inputs rather than
 the entire `compat/` implementation directory; changing an unrelated
 `compat/android_base_logging.cc` left that digest unchanged. Later phase
 extractions must retain this same evidence.
+
+## 2026-09-01 scheduler-separation progress
+
+The active runtime goal is to match Android's scheduling ownership: ART's UI
+Looper remains responsible for framework work, while AppKit input collection,
+display-vsync production, and Metal presentation are independent producers or
+consumers. `FrameClock` now produces bounded 16.666 ms display edges on a
+dedicated Rust thread and the host consumes only the newest pending edge. This
+prevents a blocked owner loop from replaying stale vsync bursts, but it does
+not yet move ART work or AppKit calls off the owner thread.
+
+The next boundary is intentionally measurement-first. Setting
+`DARWIN_ART_DEBUG_FRAME_TIMING=1` records aggregate count/average/maximum
+microseconds for the owner-thread MessageQueue pump, graphics pulse, and full
+Looper-plus-pulse hand-off. The hand-off also reports counts over 16/50/500/1000
+ms, making long-tail stalls visible instead of hiding them in an average. These
+counters are reset and printed at the end of each graphics run as one
+`DARWIN_ART frame-timing ...` line. Use that line with
+the Chrome tab acceptance latency before introducing a dispatcher: the native
+surface bridge currently rejects non-main-thread AppKit operations, so a direct
+ART worker split would be unsafe until those calls are marshalled through a
+main-thread executor.
+
+Remaining scheduler work is therefore explicit: (1) add a non-blocking
+AppKit/main-thread command queue for event collection and presentation, (2)
+keep ART/UI and Binder work on its owner thread while commands are delivered
+without a main-thread wait cycle, and (3) replace synchronous acquire-fence
+waits with an asynchronous latch queue. Each step must retain the real APK
+acceptance gates and report the frame-timing counters before/after.
+
+The first instrumented AOSP acceptance (Calculator `2+3=5` and DeskClock Timer)
+passed after the input mailbox boundary. Calculator reported
+`looper avg=193us max=2925us`, `graphics avg=1003us max=28303us`, and
+`handoff avg=3886us max=28531us` with one hand-off over 16 ms. DeskClock
+reported `looper avg=232us max=2806us`, `graphics avg=2267us max=330600us`, and
+`handoff avg=39915us max=331517us` with three over 16 ms and one over 50 ms.
+These values are a baseline for the upcoming dispatcher/fence slices, not a
+claim that the ART owner thread is already independent.

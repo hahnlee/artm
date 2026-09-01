@@ -9,7 +9,8 @@ extern "C" {
 #endif
 
 // Opaque owner of one persistent NSWindow, CAMetalLayer, IOSurface, and Metal
-// texture. All API calls currently require the macOS main thread.
+// texture. AppKit lifecycle/presentation calls require the macOS main thread;
+// pointer/key packet dequeue is worker-safe and does not touch AppKit objects.
 typedef struct DarwinArtSurface DarwinArtSurface;
 typedef struct DarwinArtGpuFrame DarwinArtGpuFrame;
 
@@ -230,7 +231,9 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
     DarwinArtSurface* surface,
     double seconds);
 
-// Removes the oldest pointer event captured by the surface's NSView. Event
+// Removes the oldest pointer event captured by the surface's NSView mailbox.
+// This dequeue is safe from a non-main worker; it touches no AppKit object.
+// Event
 // coordinates are expressed in backing pixels, matching the Android render
 // target even when the host window uses a Retina content scale. Returns false
 // when the queue is empty or either argument is null.

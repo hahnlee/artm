@@ -276,6 +276,10 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   CAMetalLayer* _metalLayer;
   std::deque<DarwinArtPointerEventV2> _pointerEvents;
   std::deque<DarwinArtKeyEventV1> _keyEvents;
+  // AppKit is the producer, while the future ART worker consumes packets.
+  // Keep the ABI packets independent of the NSView and make the mailbox
+  // safe to drain without touching AppKit objects.
+  std::mutex _eventMutex;
   std::unordered_map<unsigned short, uint64_t> _keyDownTimes;
   std::unordered_map<unsigned short, uint32_t> _keyRepeatCounts;
   BOOL _pointerActive;
@@ -361,26 +365,29 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   const CGFloat android_y = point.y;
   const uint64_t event_time_nanos = AndroidEventTimeNanos();
   if (action == DARWIN_ART_POINTER_DOWN) _downTimeNanos = event_time_nanos;
-  _pointerEvents.push_back(DarwinArtPointerEventV2{
-      .version = 2,
-      .size = static_cast<uint32_t>(sizeof(DarwinArtPointerEventV2)),
-      .action = static_cast<uint32_t>(action),
-      // Android app players conventionally translate the primary host click
-      // into a touchscreen stream. A distinct mouse packet remains available
-      // in ABI v2 for explicit external-mouse integrations.
-      .flags = 0,
-      .sequence = _nextPointerSequence++,
-      .event_time_nanos = event_time_nanos,
-      .down_time_nanos = _downTimeNanos,
-      .pointer_id = 0,
-      .pointer_count = 1,
-      .x = static_cast<float>(point.x * x_scale),
-      .y = static_cast<float>(android_y * y_scale),
-      .raw_x = static_cast<float>(point.x * x_scale),
-      .raw_y = static_cast<float>(android_y * y_scale),
-      .pressure = 1.0f,
-      .size_value = 1.0f,
-  });
+  {
+    std::lock_guard<std::mutex> lock(_eventMutex);
+    _pointerEvents.push_back(DarwinArtPointerEventV2{
+        .version = 2,
+        .size = static_cast<uint32_t>(sizeof(DarwinArtPointerEventV2)),
+        .action = static_cast<uint32_t>(action),
+        // Android app players conventionally translate the primary host click
+        // into a touchscreen stream. A distinct mouse packet remains available
+        // in ABI v2 for explicit external-mouse integrations.
+        .flags = 0,
+        .sequence = _nextPointerSequence++,
+        .event_time_nanos = event_time_nanos,
+        .down_time_nanos = _downTimeNanos,
+        .pointer_id = 0,
+        .pointer_count = 1,
+        .x = static_cast<float>(point.x * x_scale),
+        .y = static_cast<float>(android_y * y_scale),
+        .raw_x = static_cast<float>(point.x * x_scale),
+        .raw_y = static_cast<float>(android_y * y_scale),
+        .pressure = 1.0f,
+        .size_value = 1.0f,
+    });
+  }
   if (action == DARWIN_ART_POINTER_DOWN) {
     _pointerActive = YES;
   } else if (action == DARWIN_ART_POINTER_UP ||
@@ -421,24 +428,27 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
   NSString* characters = event.characters;
   const uint32_t unicode_char =
       characters.length == 0 ? 0 : [characters characterAtIndex:0];
-  _keyEvents.push_back(DarwinArtKeyEventV1{
-      .version = 1,
-      .size = static_cast<uint32_t>(sizeof(DarwinArtKeyEventV1)),
-      .action = action,
-      // KeyEvent.FLAG_FROM_SYSTEM, as set by Android InputDispatcher for a
-      // connected physical keyboard.
-      .flags = 0x8,
-      .sequence = _nextKeySequence++,
-      .event_time_nanos = event_time_nanos,
-      .down_time_nanos = down_time_nanos,
-      .key_code = key_code,
-      .scan_code = AndroidScanCode(key_code),
-      .meta_state = AndroidMetaState(event.modifierFlags),
-      .repeat_count = repeat_count,
-      .device_id = 1,
-      .source = 0x101,
-      .unicode_char = unicode_char,
-  });
+  {
+    std::lock_guard<std::mutex> lock(_eventMutex);
+    _keyEvents.push_back(DarwinArtKeyEventV1{
+        .version = 1,
+        .size = static_cast<uint32_t>(sizeof(DarwinArtKeyEventV1)),
+        .action = action,
+        // KeyEvent.FLAG_FROM_SYSTEM, as set by Android InputDispatcher for a
+        // connected physical keyboard.
+        .flags = 0x8,
+        .sequence = _nextKeySequence++,
+        .event_time_nanos = event_time_nanos,
+        .down_time_nanos = down_time_nanos,
+        .key_code = key_code,
+        .scan_code = AndroidScanCode(key_code),
+        .meta_state = AndroidMetaState(event.modifierFlags),
+        .repeat_count = repeat_count,
+        .device_id = 1,
+        .source = 0x101,
+        .unicode_char = unicode_char,
+    });
+  }
   if (action == 1) {
     _keyDownTimes.erase(scan_code);
     _keyRepeatCounts.erase(scan_code);
@@ -461,22 +471,27 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
 }
 
 - (BOOL)nextPointerEvent:(DarwinArtPointerEvent*)outEvent {
+  if (outEvent == nullptr) return NO;
   DarwinArtPointerEventV2 event = {};
-  if (![self nextPointerEventV2:&event] || outEvent == nullptr) return NO;
+  if (![self nextPointerEventV2:&event]) return NO;
   *outEvent = DarwinArtPointerEvent{
       .action = event.action, .x = event.x, .y = event.y};
   return YES;
 }
 
 - (BOOL)nextPointerEventV2:(DarwinArtPointerEventV2*)outEvent {
-  if (outEvent == nullptr || _pointerEvents.empty()) return NO;
+  if (outEvent == nullptr) return NO;
+  std::lock_guard<std::mutex> lock(_eventMutex);
+  if (_pointerEvents.empty()) return NO;
   *outEvent = _pointerEvents.front();
   _pointerEvents.pop_front();
   return YES;
 }
 
 - (BOOL)nextKeyEventV1:(DarwinArtKeyEventV1*)outEvent {
-  if (outEvent == nullptr || _keyEvents.empty()) return NO;
+  if (outEvent == nullptr) return NO;
+  std::lock_guard<std::mutex> lock(_eventMutex);
+  if (_keyEvents.empty()) return NO;
   *outEvent = _keyEvents.front();
   _keyEvents.pop_front();
   return YES;
@@ -485,25 +500,28 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
 - (void)cancelPointerStream {
   if (!_pointerActive) return;
   const uint64_t event_time_nanos = AndroidEventTimeNanos();
-  _pointerEvents.push_back(DarwinArtPointerEventV2{
-      .version = 2,
-      .size = static_cast<uint32_t>(sizeof(DarwinArtPointerEventV2)),
-      .action = DARWIN_ART_POINTER_CANCEL,
-      .flags = 0,
-      .sequence = _nextPointerSequence++,
-      .event_time_nanos = event_time_nanos,
-      .down_time_nanos = _downTimeNanos,
-      .pointer_id = 0,
-      .pointer_count = 1,
-      .x = 0.0f,
-      .y = 0.0f,
-      .raw_x = 0.0f,
-      .raw_y = 0.0f,
-      .pressure = 0.0f,
-      .size_value = 0.0f,
-  });
-  _pointerActive = NO;
-  _downTimeNanos = 0;
+  {
+    std::lock_guard<std::mutex> lock(_eventMutex);
+    _pointerEvents.push_back(DarwinArtPointerEventV2{
+        .version = 2,
+        .size = static_cast<uint32_t>(sizeof(DarwinArtPointerEventV2)),
+        .action = DARWIN_ART_POINTER_CANCEL,
+        .flags = 0,
+        .sequence = _nextPointerSequence++,
+        .event_time_nanos = event_time_nanos,
+        .down_time_nanos = _downTimeNanos,
+        .pointer_id = 0,
+        .pointer_count = 1,
+        .x = 0.0f,
+        .y = 0.0f,
+        .raw_x = 0.0f,
+        .raw_y = 0.0f,
+        .pressure = 0.0f,
+        .size_value = 0.0f,
+    });
+    _pointerActive = NO;
+    _downTimeNanos = 0;
+  }
 }
 
 @end
@@ -1184,7 +1202,7 @@ DarwinArtSurfaceResult darwin_art_surface_pump_events(
 bool darwin_art_surface_next_pointer_event(
     DarwinArtSurface* surface,
     DarwinArtPointerEvent* out_event) {
-  if (!IsMainThread() || surface == nullptr || out_event == nullptr) {
+  if (surface == nullptr || out_event == nullptr) {
     return false;
   }
   return [surface->view nextPointerEvent:out_event] == YES;
@@ -1193,7 +1211,7 @@ bool darwin_art_surface_next_pointer_event(
 bool darwin_art_surface_next_pointer_event_v2(
     DarwinArtSurface* surface,
     DarwinArtPointerEventV2* out_event) {
-  if (!IsMainThread() || surface == nullptr || out_event == nullptr) {
+  if (surface == nullptr || out_event == nullptr) {
     return false;
   }
   return [surface->view nextPointerEventV2:out_event] == YES;
@@ -1202,7 +1220,7 @@ bool darwin_art_surface_next_pointer_event_v2(
 bool darwin_art_surface_next_key_event_v1(
     DarwinArtSurface* surface,
     DarwinArtKeyEventV1* out_event) {
-  if (!IsMainThread() || surface == nullptr || out_event == nullptr) {
+  if (surface == nullptr || out_event == nullptr) {
     return false;
   }
   return [surface->view nextKeyEventV1:out_event] == YES;

@@ -1,6 +1,7 @@
 //! Native and synthetic Android input dispatch on the runtime owner thread.
 
 use crate::config::HostError;
+use crate::frame_timing;
 use crate::runtime::HostRuntime;
 use crate::surface::{
     owned_surface_next_key_event_v1, owned_surface_next_pointer_event_v2, owned_surface_pump_events,
@@ -14,13 +15,18 @@ pub(super) fn pump_frame_with_latency(
     last_input_dispatch: &mut Option<Instant>,
     frame_latencies_us: &mut Vec<u64>,
 ) -> Result<(), HostError> {
+    let frame_started = frame_timing::enabled().then(Instant::now);
     pump_main_looper(runtime)?;
-    pulse_frame_with_latency(
+    let result = pulse_frame_with_latency(
         runtime,
         debug_latency,
         last_input_dispatch,
         frame_latencies_us,
-    )
+    );
+    if let Some(started) = frame_started {
+        frame_timing::record_pulse(started.elapsed().as_micros() as u64);
+    }
+    result
 }
 
 pub(super) fn pulse_frame_with_latency(
@@ -29,9 +35,13 @@ pub(super) fn pulse_frame_with_latency(
     last_input_dispatch: &mut Option<Instant>,
     frame_latencies_us: &mut Vec<u64>,
 ) -> Result<(), HostError> {
+    let started = frame_timing::enabled().then(Instant::now);
     let pulse_status = runtime
         .graphics()
         .map_or(-1, |graphics| graphics.pump_frame(0));
+    if let Some(started) = started {
+        frame_timing::record_graphics(started.elapsed().as_micros() as u64);
+    }
     if pulse_status != 0 {
         return Err(HostError::RuntimeFailed(pulse_status));
     }
@@ -42,9 +52,13 @@ pub(super) fn pulse_frame_with_latency(
 }
 
 pub(super) fn pump_main_looper(runtime: &mut HostRuntime) -> Result<(), HostError> {
+    let started = frame_timing::enabled().then(Instant::now);
     let status = runtime
         .graphics()
         .map_or(-1, darwin_art_engine::GraphicsSession::pump_main_looper);
+    if let Some(started) = started {
+        frame_timing::record_looper(started.elapsed().as_micros() as u64);
+    }
     if status != 0 {
         return Err(HostError::RuntimeFailed(status));
     }
