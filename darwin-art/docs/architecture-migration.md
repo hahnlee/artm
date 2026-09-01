@@ -1227,3 +1227,20 @@ rebuild/link audit and AOSP Calculator/DeskClock acceptance pass. Cross-kind
 ordering and `nativeConsumeBatchedInputEvents` still need a unified packet
 queue/consumer before the channel migration is complete; Chrome physical
 latency measurement remains the final validation gate.
+
+## 2026-09-02 scheduler-separation progress (unified input ordering)
+
+The focused `DarwinInputChannelState` now owns one bounded sequence queue for
+both pointer and key packets. Typed dequeue calls only remove the packet kind
+at the queue head, so a key cannot leapfrog an earlier pointer (or vice versa);
+the only permitted saturation loss remains replacement of a trailing MOVE.
+The Rust owner loop alternates one pointer and one key dequeue attempt per pass,
+keeping JNI/View dispatch on the ART owner thread while preserving the channel
+order. The old AppKit mailbox remains the compatibility fallback when no
+focused receiver is registered.
+
+Native graphics rebuild/link audit, `cargo test -p darwin-art-host`, formatting,
+diff checks, and AOSP Calculator/DeskClock graphics acceptance all pass after
+this change. `nativeConsumeBatchedInputEvents` still needs a real consume/ACK
+implementation, and Chrome physical-input latency remains the final
+validation gate; synthetic/probe acceptance does not measure that percentile.

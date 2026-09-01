@@ -68,41 +68,40 @@ pub(super) fn pump_main_looper(runtime: &mut HostRuntime) -> Result<(), HostErro
 pub(super) fn dispatch_queued_events(runtime: &mut HostRuntime) -> Result<u64, HostError> {
     let mut dispatched = 0_u64;
     let mut event = PointerEventV2::default();
-    let mut pending_move: Option<PointerEventV2> = None;
-    let mut dispatch = |event: PointerEventV2| -> Result<(), HostError> {
+    let dispatch = |event: PointerEventV2| -> Result<(), HostError> {
         let dispatch_status = runtime
             .graphics()
             .map_or(-1, |graphics| graphics.dispatch_pointer_v2(&event));
         if dispatch_status != 0 {
             return Err(HostError::RuntimeFailed(dispatch_status));
         }
-        dispatched += 1;
         Ok(())
     };
-    while owned_surface_next_pointer_event_v2(runtime, &mut event) {
-        if event.action == 2 {
-            // MOVE is latest-wins within one host poll. DOWN/UP/CANCEL are
-            // never coalesced, so gesture boundaries remain exact.
-            pending_move = Some(event);
-            continue;
-        }
-        if let Some(move_event) = pending_move.take() {
-            dispatch(move_event)?;
-        }
-        dispatch(event)?;
-    }
-    if let Some(move_event) = pending_move {
-        dispatch(move_event)?;
-    }
     let mut key_event = KeyEventV1::default();
-    while owned_surface_next_key_event_v1(runtime, &mut key_event) {
-        let dispatch_status = runtime
-            .graphics()
-            .map_or(-1, |graphics| graphics.dispatch_key_v1(&key_event));
-        if dispatch_status != 0 {
-            return Err(HostError::RuntimeFailed(dispatch_status));
+    // The focused channel owns one sequence-ordered packet queue. Its typed
+    // dequeue APIs return false when the opposite kind is at the head, so
+    // alternate one pointer and one key attempt per pass to preserve
+    // cross-kind ordering without moving JNI work off the owner thread.
+    loop {
+        let mut progressed = false;
+        if owned_surface_next_pointer_event_v2(runtime, &mut event) {
+            dispatch(event)?;
+            dispatched += 1;
+            progressed = true;
         }
-        dispatched += 1;
+        if owned_surface_next_key_event_v1(runtime, &mut key_event) {
+            let dispatch_status = runtime
+                .graphics()
+                .map_or(-1, |graphics| graphics.dispatch_key_v1(&key_event));
+            if dispatch_status != 0 {
+                return Err(HostError::RuntimeFailed(dispatch_status));
+            }
+            dispatched += 1;
+            progressed = true;
+        }
+        if !progressed {
+            break;
+        }
     }
     Ok(dispatched)
 }

@@ -4,6 +4,17 @@
 
 namespace darwin_art {
 
+enum class DarwinArtInputPacketKind : uint32_t {
+  kPointer = 1,
+  kKey = 2,
+};
+
+struct DarwinArtInputPacket {
+  DarwinArtInputPacketKind kind = DarwinArtInputPacketKind::kPointer;
+  DarwinArtPointerEventV2 pointer{};
+  DarwinArtKeyEventV1 key{};
+};
+
 // Host/AppKit to Android InputEventReceiver cooperative-yield bridge. This
 // header intentionally has no JNI dependency so the surface/Metal bridge can
 // publish the hint from its lightweight graphics compilation unit.

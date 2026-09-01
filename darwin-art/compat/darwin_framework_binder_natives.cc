@@ -458,8 +458,7 @@ struct DarwinInputChannelState {
   std::atomic<jint> last_finished_sequence{0};
   std::atomic<bool> last_finished_handled{false};
   std::mutex packet_mutex;
-  std::deque<DarwinArtPointerEventV2> pointer_packets;
-  std::deque<DarwinArtKeyEventV1> key_packets;
+  std::deque<darwin_art::DarwinArtInputPacket> packets;
   int read_fd = -1;
   int write_fd = -1;
 };
@@ -495,29 +494,32 @@ void NotifyFocusedInputChannel() {
   }
 }
 
-template <typename Packet>
 bool EnqueueFocusedPacket(
     const std::shared_ptr<DarwinInputChannelState>& channel,
-    const Packet& packet, std::deque<Packet>& queue) {
+    const darwin_art::DarwinArtInputPacket& packet) {
   if (channel == nullptr) return false;
   {
     std::lock_guard<std::mutex> lock(channel->packet_mutex);
     constexpr size_t kMaxPackets = 256;
-    if (queue.size() >= kMaxPackets) {
+    if (channel->packets.size() >= kMaxPackets) {
       // Pointer MOVE packets are latest-wins at the AppKit boundary. If a
       // burst still fills the channel queue, replace only its newest MOVE;
       // gesture boundaries and key packets are never discarded.
-      if constexpr (std::is_same_v<Packet, DarwinArtPointerEventV2>) {
-        if (packet.action == DARWIN_ART_POINTER_MOVE && !queue.empty() &&
-            queue.back().action == DARWIN_ART_POINTER_MOVE) {
-          queue.back() = packet;
+      if (packet.kind == darwin_art::DarwinArtInputPacketKind::kPointer) {
+        if (packet.pointer.action == DARWIN_ART_POINTER_MOVE &&
+            !channel->packets.empty() &&
+            channel->packets.back().kind ==
+                darwin_art::DarwinArtInputPacketKind::kPointer &&
+            channel->packets.back().pointer.action ==
+                DARWIN_ART_POINTER_MOVE) {
+          channel->packets.back() = packet;
           channel->pending_input.store(true, std::memory_order_release);
           return true;
         }
       }
       return false;
     }
-    queue.push_back(packet);
+    channel->packets.push_back(packet);
   }
   channel->pending_input.store(true, std::memory_order_release);
   if (channel->write_fd >= 0) {
@@ -527,8 +529,8 @@ bool EnqueueFocusedPacket(
   return true;
 }
 
-template <typename Packet>
-bool DequeueFocusedPacket(Packet* packet, std::deque<Packet>& queue) {
+bool DequeueFocusedPacket(darwin_art::DarwinArtInputPacket* packet,
+                          darwin_art::DarwinArtInputPacketKind kind) {
   if (packet == nullptr) return false;
   std::shared_ptr<DarwinInputChannelState> channel;
   {
@@ -537,9 +539,11 @@ bool DequeueFocusedPacket(Packet* packet, std::deque<Packet>& queue) {
   }
   if (channel == nullptr) return false;
   std::lock_guard<std::mutex> lock(channel->packet_mutex);
-  if (queue.empty()) return false;
-  *packet = queue.front();
-  queue.pop_front();
+  if (channel->packets.empty() || channel->packets.front().kind != kind) {
+    return false;
+  }
+  *packet = channel->packets.front();
+  channel->packets.pop_front();
   return true;
 }
 
@@ -551,7 +555,7 @@ bool FocusedChannelHasPackets() {
   }
   if (channel == nullptr) return false;
   std::lock_guard<std::mutex> lock(channel->packet_mutex);
-  return !channel->pointer_packets.empty() || !channel->key_packets.empty();
+  return !channel->packets.empty();
 }
 
 void ClearFocusedInputChannelPending() {
@@ -562,7 +566,7 @@ void ClearFocusedInputChannelPending() {
   }
   if (channel != nullptr) {
     std::lock_guard<std::mutex> packet_lock(channel->packet_mutex);
-    if (!channel->pointer_packets.empty() || !channel->key_packets.empty()) {
+    if (!channel->packets.empty()) {
       return;
     }
     if (channel->read_fd >= 0) {
@@ -1628,20 +1632,21 @@ bool EnqueueFrameworkPointerPacket(const DarwinArtPointerEventV2& packet) {
     std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
     channel = g_focused_input_channel.lock();
   }
-  return channel == nullptr
-             ? false
-             : EnqueueFocusedPacket(channel, packet, channel->pointer_packets);
+  if (channel == nullptr) return false;
+  DarwinArtInputPacket input;
+  input.kind = DarwinArtInputPacketKind::kPointer;
+  input.pointer = packet;
+  return EnqueueFocusedPacket(channel, input);
 }
 
 bool DequeueFrameworkPointerPacket(DarwinArtPointerEventV2* packet) {
-  std::shared_ptr<DarwinInputChannelState> channel;
-  {
-    std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
-    channel = g_focused_input_channel.lock();
+  if (packet == nullptr) return false;
+  DarwinArtInputPacket input;
+  if (!DequeueFocusedPacket(&input, DarwinArtInputPacketKind::kPointer)) {
+    return false;
   }
-  return channel == nullptr
-             ? false
-             : DequeueFocusedPacket(packet, channel->pointer_packets);
+  *packet = input.pointer;
+  return true;
 }
 
 bool EnqueueFrameworkKeyPacket(const DarwinArtKeyEventV1& packet) {
@@ -1650,20 +1655,21 @@ bool EnqueueFrameworkKeyPacket(const DarwinArtKeyEventV1& packet) {
     std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
     channel = g_focused_input_channel.lock();
   }
-  return channel == nullptr
-             ? false
-             : EnqueueFocusedPacket(channel, packet, channel->key_packets);
+  if (channel == nullptr) return false;
+  DarwinArtInputPacket input;
+  input.kind = DarwinArtInputPacketKind::kKey;
+  input.key = packet;
+  return EnqueueFocusedPacket(channel, input);
 }
 
 bool DequeueFrameworkKeyPacket(DarwinArtKeyEventV1* packet) {
-  std::shared_ptr<DarwinInputChannelState> channel;
-  {
-    std::lock_guard<std::mutex> lock(g_focused_input_channel_mutex);
-    channel = g_focused_input_channel.lock();
+  if (packet == nullptr) return false;
+  DarwinArtInputPacket input;
+  if (!DequeueFocusedPacket(&input, DarwinArtInputPacketKind::kKey)) {
+    return false;
   }
-  return channel == nullptr
-             ? false
-             : DequeueFocusedPacket(packet, channel->key_packets);
+  *packet = input.key;
+  return true;
 }
 
 bool StartRemoteBinderDispatcher(JNIEnv* env, jint control_fd) {
