@@ -1796,6 +1796,24 @@ ended the host before an on-screen window appeared; no CoreGraphics target or
 packet was available. This is recorded as an external launch/session boundary,
 not as a measured latency sample or an input-dispatch failure.
 
+## 2026-09-02 scheduler-separation progress (physical click evidence)
+
+An accessibility-authorized CoreGraphics click was delivered to a live
+Calculator host window with synthetic pointer variables unset. The real
+InputChannel/ViewRoot path logged an `ACTION_DOWN` and `ACTION_UP` targeting
+`digit_2`; AppKit-to-owner ingress ages were 7.366 ms and 9.104 ms, and the
+dispatch-to-framework-pulse samples were 80 µs and 152 µs (p95=152 µs).
+This is the first physical-input percentile evidence for the split scheduler;
+the host exited immediately after the click sequence, so no broader gesture
+distribution is claimed from this two-event sample.
+
+The same physical-click run also confirmed the host-side split while the
+window was live: the InputChannel callback reported the real Android window
+coordinates and `handled=1`, and the owner pulse completed in sub-millisecond
+time after both packets. The host process then exited at the end of its
+profile-controlled session; this lifecycle behavior is independent of the
+measured ingress and pulse timings.
+
 The next physical-ingress retry could enumerate the `darwin-art-host` process
 but did not expose a corresponding on-screen window before the host exited;
 the profile daemon also emitted transient missing-client errors. No
