@@ -979,3 +979,21 @@ coalescing, or Android `MotionEvent`/`KeyEvent` timestamps. A repeatable
 physical-click run through the Manager surface is still required to publish a
 real percentile baseline; the direct APK acceptance remains synthetic by
 design. Rust tests and the graphics-link audit pass after adding the logs.
+
+## 2026-09-02 scheduler-separation progress (Chromium callback attribution)
+
+A fresh debug acceptance again maps the long-tail work to the browser process
+guest watcher (`ident=0`, main-process callback target) rather than to
+SurfaceFlinger, Metal scanout, or a child service. The privileged and
+sandboxed child services continue to register separate Looper callbacks and
+PIDs. A run with callback-target tracing completed the real tab-switcher and
+tab-grid flow with ten composed states; a preceding attempt missed the
+timing-sensitive grid transition and was rerun unchanged, matching the known
+startup race rather than a scheduling regression.
+
+The Manager desktop session currently lacks macOS Accessibility permission, so
+the new physical ingress telemetry has not yet been populated with a real
+click percentile. Synthetic acceptance remains separate and continues to pass;
+once permission is restored, `ingress_latency_us` plus the existing
+input-to-pulse samples will provide the physical baseline without changing the
+runtime path.
