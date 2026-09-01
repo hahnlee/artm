@@ -267,21 +267,14 @@ bool darwin_art_surface_gpu_composite_embedded(
   const SkRect destination = SkRect::MakeXYWH(
       static_cast<SkScalar>(x), static_cast<SkScalar>(y),
       static_cast<SkScalar>(width), static_cast<SkScalar>(height));
-  // The fallback IOSurface is the ANGLE/EGL producer target.  GLES presents
-  // framebuffer rows from the bottom while the Skia/Metal canvas samples
-  // rows from the top.  Apply the producer-origin conversion at this GLES
-  // boundary.  This is intentionally
-  // limited to embedded producer content; the parent HWUI RenderNode stays
-  // in its native top-left coordinate system.
-  canvas->save();
-  canvas->translate(0.0f,
-                    2.0f * static_cast<SkScalar>(y) +
-                        static_cast<SkScalar>(height));
-  canvas->scale(1.0f, -1.0f);
+  // SurfaceFlinger has already composited producer buffers into this display
+  // IOSurface in Android's top-left coordinate space.  Scan that completed
+  // display image into the HWUI/Metal canvas unchanged.  Applying the raw
+  // GLES framebuffer-origin conversion here flips the whole Chrome child
+  // surface a second time while leaving the HWUI popup drawn above it upright.
   canvas->drawImageRect(state->embedded_image, source, destination,
                         SkSamplingOptions(SkFilterMode::kLinear), nullptr,
                         SkCanvas::kStrict_SrcRectConstraint);
-  canvas->restore();
   return true;
 }
 

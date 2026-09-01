@@ -2291,23 +2291,6 @@ public final class DarwinServiceBridge {
                 SurfaceControl.Transaction transaction = new SurfaceControl.Transaction()
                         .setPosition(producer, x, y)
                         .setLayer(producer, type >= 1000 ? 1000 : 0);
-                // Popup/attached windows are rendered by the framework HWUI
-                // buffer path. Its producer coordinates are 180 degrees
-                // opposite to the display-space ANGLE buffers, so mirror the
-                // Android WMS bufferTransform contract instead of correcting
-                // the global Metal composer orientation.
-                if (type >= 1000) {
-                    try {
-                        Method setBufferTransform = SurfaceControl.Transaction.class
-                                .getDeclaredMethod("setBufferTransform",
-                                        SurfaceControl.class, int.class);
-                        setBufferTransform.setAccessible(true);
-                        setBufferTransform.invoke(transaction, producer, 2);
-                    } catch (Throwable error) {
-                        Log.w("DarwinServiceBridge",
-                                "popup buffer transform unavailable", error);
-                    }
-                }
                 transaction.apply();
                 Field surfaceControlField = result.getClass().getField("surfaceControl");
                 SurfaceControl output =
