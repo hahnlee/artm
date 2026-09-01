@@ -82,6 +82,13 @@ fn run_clock(
             thread::sleep(next - now);
             continue;
         }
+        // Keep the display cadence anchored to the previous deadline, as a
+        // real DisplayEventReceiver does. Re-basing every tick on `now`
+        // accumulates scheduler jitter and slowly phase-shifts scanout. If
+        // this worker was actually delayed past one interval, skip the stale
+        // deadline and resume one interval from the observation point rather
+        // than emitting a burst of catch-up edges.
+        let deadline = next;
         // Publish the newest edge. A single pending bit makes the wake token
         // edge-triggered: a blocked owner consumes one latest timestamp,
         // while intermediate vsyncs replace the stale value without filling
@@ -110,7 +117,11 @@ fn run_clock(
         if let Some(token) = scanout {
             let _ = token.present();
         }
-        next = now + DISPLAY_INTERVAL;
+        let after = Instant::now();
+        next = deadline
+            .checked_add(DISPLAY_INTERVAL)
+            .filter(|candidate| *candidate > after)
+            .unwrap_or_else(|| after + DISPLAY_INTERVAL);
     }
 }
 

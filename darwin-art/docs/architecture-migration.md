@@ -1746,3 +1746,12 @@ calling process, and the default Layoutlib graphics-closure archive has a
 host-only 34-definition lock drift (`expected=48,795`, `actual=48,829`). The
 production ART-runtime closure remains locked and passing; neither limitation
 is a scheduler or APK-compatibility failure.
+
+## 2026-09-02 scheduler-separation progress (display-clock phase)
+
+The independent display clock now keeps an absolute 16.666 ms cadence between
+deadlines, matching the phase-preserving behavior of Android's display event
+source. A delayed worker skips stale deadlines and resumes at the next future
+edge instead of emitting a catch-up burst; the owner wake remains latest-wins
+and scanout still receives its own edge on every interval. `darwin-art-host`
+unit/doc tests pass with this change.
