@@ -1646,3 +1646,12 @@ was selected; the prior clean run at this same checkpoint reached
 `target-states=10`, so this is recorded as harness timing variance rather than
 a scheduler regression. A clean Chrome retry remains required before closing
 this validation slice.
+
+The broader official Chromium APK acceptance then passed after the cadence
+change: HTTPS used the exported macOS trust roots, physical-key MotionEvent
+delivery and three-tab interaction completed, renderer/GPU services remained
+separate, Binder FD transfer succeeded, and WebGL (ANGLE-Metal) plus
+WebM/Opus/CoreAudio media checks passed. The tab-grid-specific harness now
+allows 20 seconds for cold button creation and 10 seconds for the grid tree to
+settle before selecting a card; this absorbs observed startup variance without
+changing runtime scheduling.
