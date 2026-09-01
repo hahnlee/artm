@@ -1690,6 +1690,17 @@ renderer/GPU service separation, Binder FD transfer, ANGLE-Metal WebGL, and
 WebM/Opus/CoreAudio media all remained green. This confirms the publication
 fix does not regress child-surface routing or the independent scanout path.
 
+## 2026-09-02 scheduler-separation progress (scanout backpressure telemetry)
+
+Surface scanout counters now expose request, fence-gated, coalesced, and
+present-call totals under `DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS`. A real
+AOSP run recorded Calculator `requests=720, fence_gated=1, coalesced=687,
+present_calls=457` and DeskClock `requests=480, fence_gated=1,
+coalesced=437, present_calls=321`. The high coalesced/request ratio confirms
+that independent 60 Hz ticks are being collapsed into the bounded single
+AppKit command rather than queued as one block per frame; composition fences
+still gate the first eligible scanout.
+
 ## 2026-09-02 scheduler-separation progress (physical input permission probe)
 
 A longer-lived Calculator window was started without synthetic pointer

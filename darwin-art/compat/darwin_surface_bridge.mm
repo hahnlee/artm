@@ -1461,16 +1461,43 @@ bool darwin_art_surface_gpu_scanout_ready(DarwinArtSurface* surface) {
   return submitted == 0 || ready >= submitted;
 }
 
+void MaybeLogScanoutStats(DarwinArtSurface* surface) {
+  if (surface == nullptr ||
+      std::getenv("DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS") == nullptr) {
+    return;
+  }
+  const uint64_t requests =
+      surface->scanout_requests.load(std::memory_order_relaxed);
+  if (requests != 1 && (requests % 60) != 0) return;
+  std::fprintf(
+      stderr,
+      "ART SurfaceFlinger: scanout stats surface=%p requests=%llu "
+      "fence_gated=%llu coalesced=%llu present_calls=%llu\n",
+      surface, static_cast<unsigned long long>(requests),
+      static_cast<unsigned long long>(
+          surface->scanout_fence_gated.load(std::memory_order_relaxed)),
+      static_cast<unsigned long long>(
+          surface->scanout_coalesced.load(std::memory_order_relaxed)),
+      static_cast<unsigned long long>(
+          surface->scanout_present_calls.load(std::memory_order_relaxed)));
+}
+
 DarwinArtSurfaceResult darwin_art_surface_present_async(
     DarwinArtSurface* surface) {
   if (surface == nullptr) return DARWIN_ART_SURFACE_INVALID_ARGUMENT;
+  surface->scanout_requests.fetch_add(1, std::memory_order_relaxed);
+  MaybeLogScanoutStats(surface);
   if (!darwin_art_surface_gpu_scanout_ready(surface)) {
     // SurfaceFlinger has not latched this target yet. The fence monitor will
     // issue one trailing request when the generation becomes ready, while
     // the display clock remains free to continue waking the ART owner.
+    surface->scanout_fence_gated.fetch_add(1, std::memory_order_relaxed);
     return DARWIN_ART_SURFACE_OK;
   }
-  if (IsMainThread()) return PresentSurfaceOnMain(surface);
+  if (IsMainThread()) {
+    surface->scanout_present_calls.fetch_add(1, std::memory_order_relaxed);
+    return PresentSurfaceOnMain(surface);
+  }
 
   bool schedule = false;
   {
@@ -1482,6 +1509,8 @@ DarwinArtSurfaceResult darwin_art_surface_present_async(
     if (!surface->presentation_scheduled) {
       surface->presentation_scheduled = true;
       schedule = true;
+    } else {
+      surface->scanout_coalesced.fetch_add(1, std::memory_order_relaxed);
     }
   }
   if (schedule) {
@@ -1515,6 +1544,7 @@ static void RunAsyncPresentOnMain(DarwinArtSurface* surface) {
     request_generation = surface->presentation_requested;
   }
   const DarwinArtSurfaceResult result = PresentSurfaceOnMain(surface);
+  surface->scanout_present_calls.fetch_add(1, std::memory_order_relaxed);
   surface->last_scanout_status.store(result, std::memory_order_release);
   bool schedule_next = false;
   {
@@ -1707,6 +1737,21 @@ static DarwinArtSurfaceResult DestroySurfaceOnMain(
   const bool direct_gpu_failed =
       last_gpu_command_buffer != nil &&
       last_gpu_command_buffer.status == MTLCommandBufferStatusError;
+  if (std::getenv("DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS") != nullptr) {
+    std::fprintf(
+        stderr,
+        "ART SurfaceFlinger: scanout stats surface=%p requests=%llu "
+        "fence_gated=%llu coalesced=%llu present_calls=%llu\n",
+        surface,
+        static_cast<unsigned long long>(
+            surface->scanout_requests.load(std::memory_order_relaxed)),
+        static_cast<unsigned long long>(
+            surface->scanout_fence_gated.load(std::memory_order_relaxed)),
+        static_cast<unsigned long long>(
+            surface->scanout_coalesced.load(std::memory_order_relaxed)),
+        static_cast<unsigned long long>(
+            surface->scanout_present_calls.load(std::memory_order_relaxed)));
+  }
   [surface->window orderOut:nil];
   [surface->window close];
   delete surface;

@@ -54,6 +54,14 @@ struct DarwinArtSurface {
   bool presentation_closing = false;
   bool presentation_scheduled = false;
   uint64_t presentation_requested = 0;
+  // Scheduler telemetry is intentionally atomic so display-clock and fence
+  // monitor threads can account for requests without taking the AppKit
+  // presentation mutex. These counters are diagnostic only and do not alter
+  // the bounded latest-wins policy.
+  std::atomic<uint64_t> scanout_requests{0};
+  std::atomic<uint64_t> scanout_fence_gated{0};
+  std::atomic<uint64_t> scanout_coalesced{0};
+  std::atomic<uint64_t> scanout_present_calls{0};
   std::atomic<int32_t> last_scanout_status{DARWIN_ART_SURFACE_OK};
   // SurfaceFlinger composition completion is a separate readiness boundary
   // from the display clock.  The producer registers each returned Android
