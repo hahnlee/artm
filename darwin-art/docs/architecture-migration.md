@@ -1683,3 +1683,9 @@ moving any ART/JNI work across threads.
 The incremental graphics-link audit passes (`registrar=51`, fake symbols,
 host ICU, and host FMT all zero), and AOSP Calculator/DeskClock acceptance
 passes again (`Calculator=2+3=5`).
+
+The official Chromium APK acceptance was rerun after the atomic publication
+change and passed again: macOS-trust HTTPS, three-tab interaction,
+renderer/GPU service separation, Binder FD transfer, ANGLE-Metal WebGL, and
+WebM/Opus/CoreAudio media all remained green. This confirms the publication
+fix does not regress child-surface routing or the independent scanout path.
