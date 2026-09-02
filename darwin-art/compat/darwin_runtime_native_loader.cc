@@ -3,10 +3,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -23,11 +25,99 @@
 namespace android {
 namespace {
 
+std::mutex& ElfLibraryRegistryMutex() {
+  static auto* mutex = new std::mutex();
+  return *mutex;
+}
+
+std::vector<ElfLibrary*>& ElfLibraries() {
+  static auto* libraries = new std::vector<ElfLibrary*>();
+  return *libraries;
+}
+
+struct DarwinArtLoaderCallbacks {
+  void* context;
+  void* (*open)(void*, const char*, int, const void*, char*, size_t);
+  void* (*lookup)(void*, void*, const char*, const char*, char*, size_t);
+  int (*close)(void*, void*, char*, size_t);
+};
+extern "C" int darwin_art_loader_bind(const DarwinArtLoaderCallbacks*);
+
 extern "C" uintptr_t darwin_art_bionic_rust_provider_closure_anchor();
 
 void SetNativeLoaderError(char** error_msg, const std::string& message) {
   std::cerr << "DARWIN native loader error: " << message << "\n";
   if (error_msg != nullptr) *error_msg = strdup(message.c_str());
+}
+
+// Guest libdl calls made by an Android ELF image must stay in the same
+// NativeLoader namespace as the image that issued the call.  The dso facade
+// exposes a process callback ABI, so bind it to the first app image and route
+// every subsequent open/lookup/close through the existing ART loader seam.
+void CopyLoaderError(const std::string& message, char* out, size_t capacity) {
+  if (out == nullptr || capacity == 0) return;
+  std::strncpy(out, message.c_str(), capacity - 1);
+  out[capacity - 1] = '\0';
+}
+
+void* GuestDsoOpen(void* context, const char* path, int, const void*,
+                  char* error, size_t capacity) {
+  auto* owner = static_cast<ElfLibrary*>(context);
+  if (owner == nullptr || owner->magic != kElfLibraryMagic || path == nullptr) {
+    CopyLoaderError("invalid Android guest loader context", error, capacity);
+    return nullptr;
+  }
+  bool needs_bridge = false;
+  char* native_error = nullptr;
+  void* handle = OpenNativeLibrary(CurrentArtEnv(), 35, path,
+                                   static_cast<jobject>(owner->app_loader), nullptr,
+                                   nullptr, &needs_bridge, &native_error);
+  if (handle == nullptr || !needs_bridge) {
+    const std::string message = native_error == nullptr
+                                    ? "Android guest ELF open failed"
+                                    : native_error;
+    CopyLoaderError(message, error, capacity);
+  }
+  NativeLoaderFreeErrorMessage(native_error);
+  return handle;
+}
+
+void* GuestDsoLookup(void*, void* handle, const char* symbol, const char*,
+                    char* error, size_t capacity) {
+  auto* owner = AsElfLibrary(handle);
+  uintptr_t address = 0;
+  std::string lookup_error;
+  if (owner == nullptr || symbol == nullptr ||
+      !LookupOptionalElfSymbol(owner, symbol, &address, &lookup_error) || address == 0) {
+    CopyLoaderError(lookup_error.empty() ? "Android guest ELF symbol lookup failed"
+                                         : lookup_error,
+                    error, capacity);
+    return nullptr;
+  }
+  return reinterpret_cast<void*>(address);
+}
+
+int GuestDsoClose(void*, void* handle, char* error, size_t capacity) {
+  char* native_error = nullptr;
+  const bool closed = CloseNativeLibrary(handle, true, &native_error);
+  if (!closed) {
+    CopyLoaderError(native_error == nullptr ? "Android guest ELF close failed"
+                                            : native_error,
+                    error, capacity);
+  }
+  NativeLoaderFreeErrorMessage(native_error);
+  return closed ? 0 : -1;
+}
+
+void BindGuestDsoLoader(ElfLibrary* library) {
+  if (library == nullptr || std::getenv("DARWIN_ART_APK_APP_NATIVE_PATH") == nullptr) return;
+  DarwinArtLoaderCallbacks callbacks{library, &GuestDsoOpen, &GuestDsoLookup,
+                                     &GuestDsoClose};
+  if (darwin_art_loader_bind(&callbacks) != 0) {
+    std::cerr << "DARWIN guest libdl: loader namespace already bound\n";
+  } else {
+    std::cerr << "DARWIN guest libdl: bound app ELF namespace\n";
+  }
 }
 
 std::string ElfError(DarwinArtElfStatus status,
@@ -175,6 +265,36 @@ bool LoadAndroidUnwindProvider(ElfLibrary* library, std::string* error) {
 }
 
 }  // namespace
+
+void RegisterElfLibrary(ElfLibrary* library) {
+  if (library == nullptr) return;
+  std::lock_guard<std::mutex> lock(ElfLibraryRegistryMutex());
+  auto& libraries = ElfLibraries();
+  if (std::find(libraries.begin(), libraries.end(), library) == libraries.end()) {
+    libraries.push_back(library);
+  }
+}
+
+void UnregisterElfLibrary(ElfLibrary* library) {
+  if (library == nullptr) return;
+  std::lock_guard<std::mutex> lock(ElfLibraryRegistryMutex());
+  auto& libraries = ElfLibraries();
+  libraries.erase(std::remove(libraries.begin(), libraries.end(), library),
+                  libraries.end());
+}
+
+ElfLibrary* FindElfLibraryForAddress(uintptr_t address) {
+  if (address == 0) return nullptr;
+  std::lock_guard<std::mutex> lock(ElfLibraryRegistryMutex());
+  for (auto* library : ElfLibraries()) {
+    if (library != nullptr && library->image_registry != nullptr &&
+        darwin_art_image_registry::ContainsAddress(library->image_registry,
+                                                    address)) {
+      return library;
+    }
+  }
+  return nullptr;
+}
 
 ElfLibrary* AsElfLibrary(void* handle) {
   auto* library = static_cast<ElfLibrary*>(
@@ -400,6 +520,7 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
+    RegisterElfLibrary(library.get());
     if (!AttachNativeOwner(library.get(), kNativeOwnerImageRegistry,
                            library->image_registry, &DropRuntimeElfImageRegistry,
                            &error)) {
@@ -649,6 +770,7 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
     std::cerr << "DARWIN ELF loader: published handle=" << graph_handle
               << " JNI_OnLoad=" << reinterpret_cast<void*>(library_value->jni_on_load)
               << "\n";
+    BindGuestDsoLoader(library_value);
     return graph_handle;
   }
   if (resolved_path != nullptr && root_is_elf != 0) {

@@ -20,6 +20,8 @@ void darwin_art_bionic_process_state_bind_sigchain(
     DarwinArtBionicEnsureFrontOfChain ensure_front);
 int darwin_art_bionic___system_property_get(const char* name, char* value);
 const void* darwin_art_bionic___system_property_find(const char* name);
+int darwin_art_bionic___system_property_read(const void* property, char* name,
+                                             char* value);
 void darwin_art_bionic___system_property_read_callback(
     const void* property,
     void (*callback)(void*, const char*, const char*, uint32_t), void* cookie);
@@ -32,6 +34,10 @@ int darwin_art_bionic_rand_r(unsigned* seed);
 double darwin_art_bionic_erand48(unsigned short state[3]);
 long darwin_art_bionic_nrand48(unsigned short state[3]);
 long darwin_art_bionic_jrand48(unsigned short state[3]);
+void darwin_art_bionic_srand48(long seed);
+double darwin_art_bionic_drand48(void);
+long darwin_art_bionic_lrand48(void);
+long darwin_art_bionic_mrand48(void);
 uint32_t darwin_art_bionic_arc4random(void);
 int darwin_art_bionic_getpid(void);
 unsigned darwin_art_bionic_geteuid(void);

@@ -45,6 +45,32 @@ const void* darwin_art_bionic___system_property_find(const char* name) {
   return result;
 }
 
+typedef struct DarwinArtPropertyReadBuffer {
+  char* name;
+  char* value;
+} DarwinArtPropertyReadBuffer;
+
+static void DarwinArtPropertyRead(void* cookie, const char* name,
+                                  const char* value, uint32_t serial) {
+  (void)serial;
+  DarwinArtPropertyReadBuffer* output = (DarwinArtPropertyReadBuffer*)cookie;
+  if (output == NULL) return;
+  if (output->name != NULL && name != NULL) strcpy(output->name, name);
+  if (output->value != NULL && value != NULL) strcpy(output->value, value);
+}
+
+int darwin_art_bionic___system_property_read(const void* property, char* name,
+                                             char* value) {
+  const int saved_host_errno = errno;
+  DarwinArtPropertyReadBuffer output = {name, value};
+  darwin_art_bionic_process_property_read_callback_core(
+      property, DarwinArtPropertyRead, &output);
+  int result = 0;
+  if (value != NULL) result = (int)strlen(value);
+  errno = saved_host_errno;
+  return result;
+}
+
 void darwin_art_bionic___system_property_read_callback(
     const void* property,
     void (*callback)(void*, const char*, const char*, uint32_t), void* cookie) {
@@ -107,6 +133,39 @@ long darwin_art_bionic_nrand48(unsigned short state[3]) {
 
 long darwin_art_bionic_jrand48(unsigned short state[3]) {
   return (long)(int32_t)(Advance48(state) >> 16);
+}
+
+static _Atomic uint64_t gRand48State = UINT64_C(0x1234abcd330e);
+
+static uint64_t AdvanceGlobal48(void) {
+  uint64_t observed = atomic_load_explicit(&gRand48State, memory_order_acquire);
+  uint64_t next;
+  do {
+    next = (observed * UINT64_C(0x5deece66d) + UINT64_C(0xb)) &
+           UINT64_C(0xffffffffffff);
+  } while (!atomic_compare_exchange_weak_explicit(
+      &gRand48State, &observed, next, memory_order_acq_rel,
+      memory_order_acquire));
+  return next;
+}
+
+void darwin_art_bionic_srand48(long seed) {
+  const uint64_t state =
+      (((uint64_t)(unsigned long)seed << 16) | UINT64_C(0x330e)) &
+      UINT64_C(0xffffffffffff);
+  atomic_store_explicit(&gRand48State, state, memory_order_release);
+}
+
+double darwin_art_bionic_drand48(void) {
+  return (double)AdvanceGlobal48() / 281474976710656.0;
+}
+
+long darwin_art_bionic_lrand48(void) {
+  return (long)(AdvanceGlobal48() >> 17);
+}
+
+long darwin_art_bionic_mrand48(void) {
+  return (long)(int32_t)(AdvanceGlobal48() >> 16);
 }
 
 uint32_t darwin_art_bionic_arc4random(void) {
@@ -536,6 +595,13 @@ int darwin_art_bionic_sigpending(uint64_t* set) {
   if (sigpending(&host) != 0) return -1;
   *set = MaskFromHost(&host);
   return 0;
+}
+
+int darwin_art_bionic_sigsuspend(const uint64_t* set) {
+  if (set == NULL) return 22;
+  sigset_t host;
+  MaskToHost(*set, &host);
+  return sigsuspend(&host);
 }
 
 int darwin_art_bionic_sigwait(const uint64_t* set, int* signal_number) {
@@ -1034,6 +1100,8 @@ static const Binding kBindings[] = {
      (DarwinArtBionicProcessFunction)darwin_art_bionic___system_property_find},
     {"__system_property_get",
      (DarwinArtBionicProcessFunction)darwin_art_bionic___system_property_get},
+    {"__system_property_read",
+     (DarwinArtBionicProcessFunction)darwin_art_bionic___system_property_read},
     {"__system_property_read_callback",
      (DarwinArtBionicProcessFunction)darwin_art_bionic___system_property_read_callback},
     {"_exit", (DarwinArtBionicProcessFunction)darwin_art_bionic__exit},
@@ -1044,6 +1112,7 @@ static const Binding kBindings[] = {
     {"arc4random", (DarwinArtBionicProcessFunction)darwin_art_bionic_arc4random},
     {"arc4random_buf", (DarwinArtBionicProcessFunction)darwin_art_bionic_arc4random_buf},
     {"daemon", (DarwinArtBionicProcessFunction)darwin_art_bionic_daemon},
+    {"drand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_drand48},
     {"erand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_erand48},
     {"execlp", (DarwinArtBionicProcessFunction)darwin_art_bionic_process_unsupported},
     {"execv", (DarwinArtBionicProcessFunction)darwin_art_bionic_process_unsupported},
@@ -1077,6 +1146,8 @@ static const Binding kBindings[] = {
     {"jrand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_jrand48},
     {"kill", (DarwinArtBionicProcessFunction)darwin_art_bionic_kill},
     {"longjmp", (DarwinArtBionicProcessFunction)darwin_art_bionic_longjmp},
+    {"lrand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_lrand48},
+    {"mrand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_mrand48},
     {"nice", (DarwinArtBionicProcessFunction)darwin_art_bionic_nice},
     {"nrand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_nrand48},
     {"posix_spawn", (DarwinArtBionicProcessFunction)darwin_art_bionic_posix_spawn},
@@ -1113,8 +1184,10 @@ static const Binding kBindings[] = {
     {"signal", (DarwinArtBionicProcessFunction)darwin_art_bionic_signal},
     {"sigpending", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigpending},
     {"sigsetjmp", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigsetjmp},
+    {"sigsuspend", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigsuspend},
     {"sigwait", (DarwinArtBionicProcessFunction)darwin_art_bionic_sigwait},
     {"srand", (DarwinArtBionicProcessFunction)darwin_art_bionic_srand},
+    {"srand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_srand48},
     {"srandom", (DarwinArtBionicProcessFunction)darwin_art_bionic_srandom},
     {"strsignal", (DarwinArtBionicProcessFunction)darwin_art_bionic_strsignal},
     {"sysinfo", (DarwinArtBionicProcessFunction)darwin_art_bionic_sysinfo},

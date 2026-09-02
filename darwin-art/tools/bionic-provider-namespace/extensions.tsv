@@ -30,8 +30,11 @@ libaaudio.so	AAudioStream_setBufferSizeInFrames		aaudio	AAudio logical buffer si
 libaaudio.so	AAudioStream_waitForStateChange		aaudio	AAudio condition-variable state wait
 libaaudio.so	AAudio_createStreamBuilder		aaudio	AAudio builder creation
 libc.so	gettid	LIBC	syscall	Provider-owned stable Android thread ID shared with syscall(__NR_gettid)
+libc.so	gethostbyaddr	LIBC	dns	Legacy resolver symbol kept in the Android network namespace
+libc.so	gethostbyname	LIBC	dns	Legacy resolver symbol kept in the Android network namespace
 libc.so	environ	LIBC	process-state	Pointer vector backed by the active immutable Android process environment snapshot
 libc.so	__system_property_find	LIBC	process-state	Stable opaque property token lookup in the active immutable Android process snapshot
+libc.so	__system_property_read	LIBC	process-state	Legacy property read over the active immutable Android process snapshot
 libc.so	__system_property_read_callback	LIBC_O	process-state	Validated synchronous callback over a property token owned by the active process snapshot
 libc.so	timezone	LIBC	time	Android long seconds-west-of-UTC slot initialized through the host timezone database
 libc.so	daylight	LIBC	time	Android daylight-saving indicator initialized with the timezone snapshot
@@ -40,6 +43,7 @@ libc.so	optarg	LIBC	process-state	Android getopt argument slot with process-owne
 libc.so	optind	LIBC	process-state	Android getopt index slot initialized to the ABI default of one
 libc.so	in6addr_any	LIBC_N	socket	Immutable all-zero IPv6 wildcard address in Android network ABI layout
 libc.so	in6addr_loopback	LIBC_N	socket	Immutable IPv6 loopback address in Android network ABI layout
+libc.so	isspace	LIBC	leaf	Android C-locale whitespace classification
 libc.so	__strcat_chk	LIBC	leaf	Bionic fortified concatenation with destination bound enforcement
 libc.so	__strchr_chk	LIBC	leaf	Bionic fortified character search with source bound enforcement
 libc.so	__strcpy_chk	LIBC	leaf	Bionic fortified string copy with destination bound enforcement
@@ -98,8 +102,12 @@ libc.so	arc4random_buf	LIBC	process-state	Process-owned random byte stream
 libc.so	android_get_device_api_level	LIBC	process-state	Virtual Android API level
 libc.so	android_get_device_api_level	LIBC_Q	process-state	Android Q version alias for virtual API level
 libc.so	erand48	LIBC	process-state	POSIX caller-owned 48-bit random state with binary64 result
+libc.so	drand48	LIBC	process-state	POSIX process 48-bit random state with binary64 result
 libc.so	jrand48	LIBC	process-state	POSIX caller-owned 48-bit random state with signed result
+libc.so	lrand48	LIBC	process-state	POSIX process 48-bit random state with nonnegative result
+libc.so	mrand48	LIBC	process-state	POSIX process 48-bit random state with signed result
 libc.so	nrand48	LIBC	process-state	POSIX caller-owned 48-bit random state with nonnegative result
+libc.so	srand48	LIBC	process-state	POSIX process 48-bit random seed
 libc.so	rand_r	LIBC	process-state	Reentrant caller-owned integer pseudo-random state
 libc.so	random	LIBC	process-state	Process-owned long pseudo-random compatibility
 libc.so	srandom	LIBC	process-state	Process-owned pseudo-random seed compatibility
@@ -109,6 +117,7 @@ libc.so	sigaddset	LIBC	process-state	Android 64-bit signal set insertion
 libc.so	sigemptyset	LIBC	process-state	Android 64-bit empty signal set initialization
 libc.so	sigismember	LIBC	process-state	Android 64-bit signal set membership query
 libc.so	sigpending	LIBC	process-state	Darwin pending signal translation to Android set layout
+libc.so	sigsuspend	LIBC	process-state	Android signal-mask suspension through Darwin signal translation
 libc.so	sigwait	LIBC	process-state	Synchronous translated signal wait over Android set layout
 libc.so	getegid	LIBC	process-state	Process effective group identity
 libc.so	getgid	LIBC	process-state	Process real group identity
@@ -129,6 +138,7 @@ libc.so	__pwrite64_chk	LIBC_N	filesystem	Android N version alias for fortified p
 libc.so	__pwrite_chk	LIBC	filesystem	Fortify checked positioned write
 libc.so	__readlink_chk	LIBC	filesystem	Fortify checked virtual readlink
 libc.so	futimes	LIBC	filesystem	Explicit ENOSYS pending descriptor timestamp mutation
+libc.so	futimens	LIBC	filesystem	Descriptor timestamp mutation through Android virtual-fd utimensat
 libc.so	futimes	LIBC_O	filesystem	Android O version alias for descriptor timestamp mutation
 libc.so	statfs	LIBC	filesystem	Explicit ENOSYS pending Android statfs ABI translation
 libc.so	utimes	LIBC	filesystem	Explicit ENOSYS pending virtual path timestamp conversion
@@ -161,6 +171,7 @@ libc.so	timegm	LIBC	time	UTC broken-down time conversion
 libc.so	asctime_r	LIBC	time	Reentrant broken-down time text formatting
 libc.so	difftime	LIBC	time	Epoch time difference calculation
 libc.so	clock	LIBC	time	Process CPU clock query
+libc.so	clock_getres	LIBC	time	Android clock resolution through Darwin clock-id mapping
 libc.so	sleep	LIBC	time	Interruptible seconds sleep
 libc.so	usleep	LIBC	time	Interruptible microseconds sleep
 libc.so	setlogmask	LIBC	syslog	Process syslog priority mask state
@@ -412,6 +423,7 @@ libc.so	socket	LIBC	socket	central-broker socket publication
 libc.so	sem_destroy	LIBC	pthread	Android semaphore compatibility for AOSP native Skia workers
 libc.so	sem_init	LIBC	pthread	Android semaphore compatibility for AOSP native Skia workers
 libc.so	sem_post	LIBC	pthread	Android semaphore compatibility for AOSP native Skia workers
+libc.so	sem_getvalue	LIBC	pthread	Android semaphore value inspection through the pthread provider
 libc.so	sem_wait	LIBC	pthread	Android semaphore compatibility for AOSP native Skia workers
 libm.so	acos	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	acosf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
@@ -450,6 +462,7 @@ libm.so	log10f	LIBC	math	Darwin binary32 base-ten logarithm compatibility for An
 libm.so	log1p	LIBC	math	Darwin logarithm-of-one-plus compatibility for Android native consumers
 libm.so	log2	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	log2f	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	logb	LIBC	math	Darwin binary64 exponent extraction compatibility
 libm.so	logbf	LIBC	math	Darwin exponent extraction compatibility for Android native consumers
 libm.so	logf	LIBC	math	Darwin logarithm compatibility for Android native consumers
 libm.so	nanf	LIBC	math	Darwin NaN construction compatibility for Android native consumers
@@ -460,6 +473,7 @@ libm.so	nextafterf	LIBC	math	Darwin math compatibility for AOSP Skia native cons
 libm.so	pow	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	powf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	remainder	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	remainderf	LIBC	math	Darwin binary32 remainder compatibility for Android native consumers
 libm.so	sin	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	scalbnf	LIBC	math	Darwin binary exponent scaling for Android native consumers
 libm.so	scalbn	LIBC	math	Darwin binary64 exponent scaling for Android native consumers
@@ -467,6 +481,7 @@ libm.so	sincos	LIBC	math	Darwin paired sine/cosine compatibility for Android nat
 libm.so	sincosf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	sinf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	sinh	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
+libm.so	sqrtf	LIBC	math	Darwin binary32 square-root compatibility for Android native consumers
 libm.so	tan	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	tanf	LIBC	math	Darwin math compatibility for AOSP Skia native consumers
 libm.so	tanh	LIBC	math	Darwin math compatibility for AOSP Skia native consumers

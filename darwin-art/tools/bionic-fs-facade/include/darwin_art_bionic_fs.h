@@ -179,6 +179,8 @@ int darwin_art_bionic_unlinkat(int directory_fd, const char* path, int flags);
 int darwin_art_bionic_utimensat(int directory_fd, const char* path,
                                 const DarwinArtAndroidTimespec times[2],
                                 int flags);
+int darwin_art_bionic_futimens(int fd,
+                               const DarwinArtAndroidTimespec times[2]);
 
 DarwinArtBionicFsFunction darwin_art_bionic_fs_resolve(const char* import_name);
 

@@ -133,6 +133,14 @@ int DropRuntimeDsoLifecycle(void* value, void* context);
 int DropRuntimeProviderNamespace(void* value, void* context);
 int DropRuntimeProviderKind(void* value, void* context);
 ElfLibrary* AsElfLibrary(void* handle);
+// Resolves a guest JNI function address to the runtime library whose published
+// ELF image owns it.  The Android loader may share one process-wide libdl
+// callback context across multiple ClassLoader DSOs, so JNI registration must
+// derive ownership from the executable address rather than that callback's
+// original context.
+void RegisterElfLibrary(ElfLibrary* library);
+void UnregisterElfLibrary(ElfLibrary* library);
+ElfLibrary* FindElfLibraryForAddress(uintptr_t address);
 int32_t ProxyRegisterNatives(void* context,
                              void* clazz,
                              const DarwinArtJniNativeMethod* methods,

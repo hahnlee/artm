@@ -640,6 +640,18 @@ int darwin_art_bionic_utimensat(int directory_fd, const char* path,
   return result;
 }
 
+int darwin_art_bionic_futimens(int fd,
+                               const DarwinArtAndroidTimespec times[2]) {
+  const int saved_host_errno = errno;
+  // Android's futimens is the descriptor form of utimensat.  Reuse the
+  // descriptor-relative core so virtual descriptors never escape to Darwin's
+  // host filesystem and both entry points share timestamp validation.
+  const int result =
+      darwin_art_bionic_fs_utimensat_core(fd, NULL, times, 0);
+  errno = saved_host_errno;
+  return result;
+}
+
 void* darwin_art_bionic_fs_host_fdopendir(int fd, int* host_errno) {
   errno = 0;
   DIR* result = fdopendir(fd);
@@ -796,6 +808,7 @@ static const Binding kBindings[] = {
     {"fsync", (DarwinArtBionicFsFunction)darwin_art_bionic_fsync},
     {"ftruncate", (DarwinArtBionicFsFunction)darwin_art_bionic_ftruncate},
     {"ftruncate64", (DarwinArtBionicFsFunction)darwin_art_bionic_ftruncate},
+    {"futimens", (DarwinArtBionicFsFunction)darwin_art_bionic_futimens},
     {"futimes", (DarwinArtBionicFsFunction)darwin_art_bionic_fs_path_unsupported},
     {"getcwd", (DarwinArtBionicFsFunction)darwin_art_bionic_getcwd},
     {"isatty", (DarwinArtBionicFsFunction)darwin_art_bionic_isatty},

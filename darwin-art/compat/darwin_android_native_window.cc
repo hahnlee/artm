@@ -480,6 +480,16 @@ extern "C" int32_t darwin_art_android_ANativeWindow_getFormat(void* opaque) {
   return window == nullptr ? 0 : window->format.load(std::memory_order_relaxed);
 }
 
+extern "C" int32_t darwin_art_android_ANativeWindow_getWidth(void* opaque) {
+  auto* window = static_cast<DarwinAndroidNativeWindow*>(opaque);
+  return window == nullptr ? 0 : window->width.load(std::memory_order_relaxed);
+}
+
+extern "C" int32_t darwin_art_android_ANativeWindow_getHeight(void* opaque) {
+  auto* window = static_cast<DarwinAndroidNativeWindow*>(opaque);
+  return window == nullptr ? 0 : window->height.load(std::memory_order_relaxed);
+}
+
 extern "C" void* darwin_art_android_ANativeWindow_toSurface(void*, void*) {
   // The framework Surface wrapper is created by the Java bridge. Native
   // callers still retain and render through the stable ANativeWindow token.

@@ -1585,8 +1585,22 @@ impl LoadedElf {
             if symbol.section_index == SHN_ABS {
                 return Err(LoadError::Capability(Capability::AbsoluteSymbolDefinition));
             }
-            self.require_loaded_range(symbol.value, symbol.size.max(1), None, "defined symbol")?;
-            let address = self.loaded_pointer(symbol.value, 1)? as usize;
+            let is_load_end_marker = symbol.size == 0
+                && self.loads.iter().any(|load| {
+                    load.virtual_address
+                        .checked_add(load.memory_size)
+                        .is_some_and(|end| end == symbol.value)
+                });
+            if let Err(error) = if is_load_end_marker {
+                Ok(())
+            } else {
+                self.require_loaded_range(symbol.value, symbol.size.max(1), None, "defined symbol")
+            } {
+                return Err(error);
+            }
+            let pointer_size = usize::try_from(symbol.size)
+                .map_err(|_| LoadError::Bounds("defined symbol size"))?;
+            let address = self.loaded_pointer(symbol.value, pointer_size)? as usize;
             resolved.insert(index, address);
             return Ok(address);
         }
@@ -1811,15 +1825,35 @@ impl LoadedElf {
             if symbol.section_index == SHN_ABS {
                 return Err(LoadError::Capability(Capability::AbsoluteSymbolDefinition));
             }
-            self.require_loaded_range(symbol.value, symbol.size.max(1), None, "exported symbol")?;
+            // GNU/LLVM linkers commonly emit the zero-sized `end` marker at
+            // the first address after the final PT_LOAD.  It is a valid
+            // dlsym-visible sentinel, but treating it as a one-byte object
+            // would reject an otherwise loadable Android image.
+            let is_load_end_marker = symbol.size == 0
+                && self.loads.iter().any(|load| {
+                    load.virtual_address
+                        .checked_add(load.memory_size)
+                        .is_some_and(|end| end == symbol.value)
+                });
+            let range_error = if is_load_end_marker {
+                None
+            } else {
+                self.require_loaded_range(symbol.value, symbol.size.max(1), None, "exported symbol")
+                    .err()
+            };
+            if let Some(error) = range_error {
+                return Err(error);
+            }
             let name = self.dynamic_string(symbol.name_offset)?;
             if name.is_empty() {
                 continue;
             }
             let (version, hidden) = self.definition_for_symbol(index, &versions)?;
+            let pointer_size = usize::try_from(symbol.size)
+                .map_err(|_| LoadError::Bounds("exported symbol size"))?;
             result.push(ExportedSymbol {
                 name,
-                address: self.loaded_pointer(symbol.value, 1)? as usize,
+                address: self.loaded_pointer(symbol.value, pointer_size)? as usize,
                 binding: symbol.binding,
                 version: version.map(|item| item.name.clone()),
                 version_hidden: hidden,

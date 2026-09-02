@@ -116,6 +116,7 @@ libc.so	__strncpy_chk2	LIBC	leaf
 libc.so	__strrchr_chk	LIBC	leaf
 libc.so	__system_property_find	LIBC	process-state
 libc.so	__system_property_get	LIBC	process-state
+libc.so	__system_property_read	LIBC	process-state
 libc.so	__system_property_read_callback	LIBC_O	process-state
 libc.so	__vsnprintf_chk	LIBC	format
 libc.so	__vsprintf_chk	LIBC	format
@@ -158,6 +159,7 @@ libc.so	chdir	LIBC	filesystem
 libc.so	chmod	LIBC	filesystem
 libc.so	clearerr	LIBC	stdio
 libc.so	clock	LIBC	time
+libc.so	clock_getres	LIBC	time
 libc.so	clock_gettime	LIBC	time
 libc.so	close	LIBC	central-fd-broker
 libc.so	closedir	LIBC	filesystem
@@ -170,6 +172,7 @@ libc.so	daylight	LIBC	time
 libc.so	difftime	LIBC	time
 libc.so	dirfd	LIBC	filesystem
 libc.so	div	LIBC	numeric
+libc.so	drand48	LIBC	process-state
 libc.so	dup	LIBC	central-fd-broker
 libc.so	dup2	LIBC	central-fd-broker
 libc.so	endmntent	LIBC	stdio
@@ -231,6 +234,7 @@ libc.so	ftruncate	LIBC	filesystem
 libc.so	ftruncate64	LIBC	filesystem
 libc.so	ftrylockfile	LIBC	stdio
 libc.so	funlockfile	LIBC	stdio
+libc.so	futimens	LIBC	filesystem
 libc.so	futimes	LIBC	filesystem
 libc.so	futimes	LIBC_O	filesystem
 libc.so	fwrite	LIBC	stdio
@@ -246,6 +250,8 @@ libc.so	getenv	LIBC	process-state
 libc.so	geteuid	LIBC	process-state
 libc.so	getgid	LIBC	process-state
 libc.so	getgrgid	LIBC	process-state
+libc.so	gethostbyaddr	LIBC	dns
+libc.so	gethostbyname	LIBC	dns
 libc.so	gethostname	LIBC	process-state
 libc.so	getifaddrs	LIBC	socket
 libc.so	getifaddrs	LIBC_N	socket
@@ -289,6 +295,7 @@ libc.so	ioctl	LIBC	ioctl
 libc.so	isatty	LIBC	filesystem
 libc.so	isdigit_l	LIBC	locale
 libc.so	islower_l	LIBC	locale
+libc.so	isspace	LIBC	leaf
 libc.so	isupper_l	LIBC	locale
 libc.so	iswalpha_l	LIBC	locale
 libc.so	iswblank_l	LIBC	locale
@@ -313,6 +320,7 @@ libc.so	localeconv	LIBC	locale
 libc.so	localtime	LIBC	time
 libc.so	localtime_r	LIBC	time
 libc.so	longjmp	LIBC	process-state
+libc.so	lrand48	LIBC	process-state
 libc.so	lseek	LIBC	filesystem
 libc.so	lseek64	LIBC	filesystem
 libc.so	lstat	LIBC	filesystem
@@ -344,6 +352,7 @@ libc.so	mktime	LIBC	time
 libc.so	mlock	LIBC	vm
 libc.so	mmap	LIBC	vm
 libc.so	mprotect	LIBC	vm
+libc.so	mrand48	LIBC	process-state
 libc.so	mremap	LIBC	vm
 libc.so	msync	LIBC	vm
 libc.so	munmap	LIBC	vm
@@ -463,6 +472,7 @@ libc.so	sched_setscheduler	LIBC	process-state
 libc.so	sched_yield	LIBC	process-state
 libc.so	select	LIBC	central-fd-broker
 libc.so	sem_destroy	LIBC	pthread
+libc.so	sem_getvalue	LIBC	pthread
 libc.so	sem_init	LIBC	pthread
 libc.so	sem_post	LIBC	pthread
 libc.so	sem_timedwait	LIBC	pthread
@@ -495,6 +505,7 @@ libc.so	siglongjmp	LIBC	process-state
 libc.so	signal	LIBC	process-state
 libc.so	sigpending	LIBC	process-state
 libc.so	sigsetjmp	LIBC	process-state
+libc.so	sigsuspend	LIBC	process-state
 libc.so	sigwait	LIBC	process-state
 libc.so	sleep	LIBC	time
 libc.so	snprintf	LIBC	format
@@ -502,6 +513,7 @@ libc.so	socket	LIBC	socket
 libc.so	socketpair	LIBC	socket
 libc.so	sprintf	LIBC	format
 libc.so	srand	LIBC	process-state
+libc.so	srand48	LIBC	process-state
 libc.so	srandom	LIBC	process-state
 libc.so	sscanf	LIBC	scanf
 libc.so	stat	LIBC	filesystem
@@ -705,6 +717,7 @@ libm.so	log1p	LIBC	math
 libm.so	log1pf	LIBC	math
 libm.so	log2	LIBC	math
 libm.so	log2f	LIBC	math
+libm.so	logb	LIBC	math
 libm.so	logbf	LIBC	math
 libm.so	logf	LIBC	math
 libm.so	modf	LIBC	math
@@ -718,6 +731,7 @@ libm.so	pow	LIBC	math
 libm.so	powf	LIBC	math
 libm.so	powl	LIBC	binary128-conversion
 libm.so	remainder	LIBC	math
+libm.so	remainderf	LIBC	math
 libm.so	roundf	LIBC	math
 libm.so	scalbn	LIBC	math
 libm.so	scalbnf	LIBC	math
@@ -727,6 +741,7 @@ libm.so	sincosf	LIBC	math
 libm.so	sinf	LIBC	math
 libm.so	sinh	LIBC	math
 libm.so	sinhf	LIBC	math
+libm.so	sqrtf	LIBC	math
 libm.so	tan	LIBC	math
 libm.so	tanf	LIBC	math
 libm.so	tanh	LIBC	math

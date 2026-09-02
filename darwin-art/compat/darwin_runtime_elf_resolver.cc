@@ -24,6 +24,20 @@ extern "C" void AndroidBitmap_unlockPixels(void) __attribute__((weak_import));
 namespace android {
 namespace {
 
+// Android's libgen basename is a pure guest-path operation.  Keep it local to
+// the runtime so a native APK never receives Darwin's host path semantics (or
+// a pointer into a host-owned buffer) while resolving this legacy libc export.
+char* AndroidBasename(const char* path) {
+  static char empty_path[] = ".";
+  if (path == nullptr || *path == '\0') return empty_path;
+  const char* end = path + std::strlen(path);
+  while (end > path && end[-1] == '/') --end;
+  if (end == path) return const_cast<char*>(path);
+  const char* begin = end;
+  while (begin > path && begin[-1] != '/') --begin;
+  return const_cast<char*>(begin);
+}
+
 std::string Sha256(const uint8_t* bytes, size_t size) {
   std::array<unsigned char, CC_SHA256_DIGEST_LENGTH> digest{};
   CC_SHA256(bytes, static_cast<CC_LONG>(size), digest.data());
@@ -298,6 +312,13 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
     SetResolverError(error, "Bionic symbol version request is incomplete");
     return DARWIN_ART_ELF_RESOLVE_ERROR;
   }
+  if (provider_soname != nullptr && provider_version != nullptr &&
+      std::strcmp(provider_soname, "libc.so") == 0 &&
+      std::strcmp(provider_version, "LIBC") == 0 &&
+      std::strcmp(request->symbol, "basename") == 0) {
+    *out_address = reinterpret_cast<uintptr_t>(&AndroidBasename);
+    return DARWIN_ART_ELF_RESOLVE_FOUND;
+  }
   if (provider_soname == nullptr) {
     DarwinArtBionicNamespaceResult unique{};
     size_t matches = 0;
@@ -330,10 +351,36 @@ DarwinArtElfResolveStatus ResolveRuntimeProvider(
       return DARWIN_ART_ELF_RESOLVE_ERROR;
     }
   }
+  // Bionic exposes the large-file stdio aliases as LIBC_N, while the closed
+  // stdio owner intentionally publishes the same 64-bit ABI under its
+  // canonical LIBC names. Resolve the aliases to that exact owner rather than
+  // falling through to a host libc symbol.
+  const char* namespace_symbol = request->symbol;
+  const char* namespace_version = provider_version;
+  if (std::strcmp(provider_soname, "libc.so") == 0 &&
+      std::strcmp(provider_version, "LIBC_N") == 0) {
+    if (std::strcmp(request->symbol, "fseeko64") == 0) {
+      namespace_symbol = "fseeko";
+      namespace_version = "LIBC";
+    } else if (std::strcmp(request->symbol, "ftello64") == 0) {
+      namespace_symbol = "ftello";
+      namespace_version = "LIBC";
+    }
+  }
+  // Android's legacy utime entry point has the same path-plus-times pointer
+  // calling convention as the facade's immutable utimes rejection.  Keep the
+  // request inside the closed Bionic namespace instead of accidentally
+  // resolving Darwin's host utime (whose time structure and path authority
+  // are not Android-compatible).
+  if (std::strcmp(provider_soname, "libc.so") == 0 &&
+      std::strcmp(provider_version, "LIBC") == 0 &&
+      std::strcmp(request->symbol, "utime") == 0) {
+    namespace_symbol = "utimes";
+  }
   const DarwinArtBionicNamespaceResult result =
       darwin_art_bionic_namespace_resolve(
-          library->provider_namespace, provider_soname, request->symbol,
-          provider_version);
+          library->provider_namespace, provider_soname, namespace_symbol,
+          namespace_version);
   if (result.status != DARWIN_ART_BIONIC_NAMESPACE_OK || result.address == 0) {
     if (request->symbol_weak != 0) {
       return DARWIN_ART_ELF_RESOLVE_NOT_FOUND;

@@ -23,6 +23,8 @@ typedef void (*DarwinArtBionicTimeFunction)(void);
 
 int darwin_art_bionic_clock_gettime(int android_clock,
                                     DarwinArtAndroidTimespec* result);
+int darwin_art_bionic_clock_getres(int android_clock,
+                                   DarwinArtAndroidTimespec* result);
 int darwin_art_bionic_nanosleep(const DarwinArtAndroidTimespec* request,
                                 DarwinArtAndroidTimespec* remaining);
 int darwin_art_bionic_gettimeofday(DarwinArtAndroidTimeval* result,

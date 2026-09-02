@@ -84,7 +84,7 @@ extern "C" void* darwin_art_bionic_math_resolve(const char* soname,
     return Address(&darwin_art_bionic_ldexpl_compat);
   if (std::strcmp(symbol, "ilogbf") == 0)
     return Address(static_cast<int (*)(float)>(&ilogbf));
-  D(log); D(log10); F(log10f); D(log1p); F(log1pf); D(log2); F(log2f);
+  D(log); D(log10); F(log10f); D(log1p); F(log1pf); D(log2); F(log2f); D(logb);
   F(logbf); F(logf);
   if (std::strcmp(symbol, "modf") == 0)
     return Address(static_cast<double (*)(double, double*)>(&modf));
@@ -95,7 +95,7 @@ extern "C" void* darwin_art_bionic_math_resolve(const char* soname,
   if (std::strcmp(symbol, "nanf") == 0)
     return Address(static_cast<float (*)(const char*)>(&nanf));
   F(nearbyintf); DD(nextafter); FF(nextafterf);
-  DD(pow); FF(powf); DD(remainder); D(sin);
+  DD(pow); FF(powf); DD(remainder); FF(remainderf); F(sqrtf); D(sin);
   if (std::strcmp(symbol, "scalbnf") == 0)
     return Address(static_cast<float (*)(float, int)>(&scalbnf));
   if (std::strcmp(symbol, "scalbn") == 0)

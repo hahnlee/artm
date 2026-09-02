@@ -121,6 +121,12 @@ int darwin_art_bionic_strncasecmp(const char* left, const char* right,
   return 0;
 }
 
+int darwin_art_bionic_isspace(int value) {
+  const unsigned char character = (unsigned char)value;
+  return character == ' ' || character == '\t' || character == '\n' ||
+         character == '\v' || character == '\f' || character == '\r';
+}
+
 size_t darwin_art_bionic_strnlen(const char* string, size_t maximum) {
   size_t length = 0;
   while (length < maximum && string[length] != '\0') ++length;
@@ -712,6 +718,7 @@ static const DarwinArtBionicLeafBinding kBindings[] = {
     {"atoi", (DarwinArtBionicFunction)darwin_art_bionic_atoi},
     {"atol", (DarwinArtBionicFunction)darwin_art_bionic_atol},
     {"bsearch", (DarwinArtBionicFunction)darwin_art_bionic_bsearch},
+    {"isspace", (DarwinArtBionicFunction)darwin_art_bionic_isspace},
     {"lfind", (DarwinArtBionicFunction)darwin_art_bionic_lfind},
     {"memchr", (DarwinArtBionicFunction)darwin_art_bionic_memchr},
     {"memcmp", (DarwinArtBionicFunction)darwin_art_bionic_memcmp},

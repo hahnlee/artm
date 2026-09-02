@@ -22,6 +22,19 @@ int32_t ProxyRegisterNatives(void* context,
     std::cerr << "DARWIN JNI RegisterNatives reject: bad arguments count=" << count << "\n";
     return DARWIN_ART_JNI_ERR;
   }
+  // NativeLoader's guest libdl facade is process-wide, while each Android DSO
+  // still owns an independent ELF image registry and JNI trampoline set.  A
+  // child DSO can therefore enter this callback through the first DSO's proxy
+  // context.  Resolve the actual owner from the first native method address;
+  // this is the same image-ownership fact Android's linker uses for the
+  // registration and keeps the validation fail-closed for foreign pointers.
+  if (methods[0].function != nullptr) {
+    if (ElfLibrary* image_owner = FindElfLibraryForAddress(
+            reinterpret_cast<uintptr_t>(methods[0].function));
+        image_owner != nullptr) {
+      library = image_owner;
+    }
+  }
   JNIEnv* art_env = CurrentArtEnv();
   if (library->proxy == nullptr || art_env == nullptr) {
     std::cerr << "DARWIN JNI RegisterNatives reject: proxy/env missing proxy="
@@ -42,11 +55,12 @@ int32_t ProxyRegisterNatives(void* context,
     return DARWIN_ART_JNI_ERR;
   }
   for (size_t index = 0; index < static_cast<size_t>(count); ++index) {
+    const bool image_contains = darwin_art_image_registry::ContainsAddress(
+        library->image_registry,
+        reinterpret_cast<uintptr_t>(methods[index].function));
     if (methods[index].name == nullptr || methods[index].signature == nullptr ||
         methods[index].function == nullptr ||
-        !darwin_art_image_registry::ContainsAddress(
-            library->image_registry,
-            reinterpret_cast<uintptr_t>(methods[index].function))) {
+        !image_contains) {
       return DARWIN_ART_JNI_ERR;
     }
     if (library->fixture_graph &&

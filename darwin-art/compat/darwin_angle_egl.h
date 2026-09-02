@@ -33,6 +33,8 @@ void* darwin_art_android_ANativeWindow_create(int32_t width, int32_t height,
                                                int32_t format);
 void darwin_art_android_ANativeWindow_acquire(void* window);
 int32_t darwin_art_android_ANativeWindow_getFormat(void* window);
+int32_t darwin_art_android_ANativeWindow_getWidth(void* window);
+int32_t darwin_art_android_ANativeWindow_getHeight(void* window);
 void* darwin_art_android_ANativeWindow_toSurface(void* env, void* window);
 void darwin_art_android_ANativeWindow_release(void* window);
 using DarwinArtAndroidNativeWindowQueueCallback = void (*)(

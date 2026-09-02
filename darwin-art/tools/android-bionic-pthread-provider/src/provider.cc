@@ -1757,6 +1757,21 @@ extern "C" int darwin_art_bionic_sem_wait(void* address) {
   return 0;
 }
 
+extern "C" int darwin_art_bionic_sem_getvalue(void* address, int* value) {
+  if (value == nullptr) return kAndroidEinval;
+  std::shared_ptr<SemEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_sem_mutex);
+    auto found = g_semaphores.find(address);
+    if (found == g_semaphores.end()) return kAndroidEinval;
+    entry = found->second;
+  }
+  std::lock_guard<std::mutex> lock(entry->mutex);
+  if (entry->destroyed) return kAndroidEinval;
+  *value = static_cast<int>(entry->value);
+  return 0;
+}
+
 extern "C" int darwin_art_bionic_sem_timedwait(
     void* address, const timespec* absolute_timeout) {
   if (absolute_timeout == nullptr) return kAndroidEinval;
@@ -1800,6 +1815,8 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
     return reinterpret_cast<void*>(&darwin_art_bionic_sem_post);
   if (std::string_view(symbol) == "sem_wait")
     return reinterpret_cast<void*>(&darwin_art_bionic_sem_wait);
+  if (std::string_view(symbol) == "sem_getvalue")
+    return reinterpret_cast<void*>(&darwin_art_bionic_sem_getvalue);
   if (std::string_view(symbol) == "sem_timedwait")
     return reinterpret_cast<void*>(&darwin_art_bionic_sem_timedwait);
   if (std::string_view(symbol) == "__pthread_cleanup_push")

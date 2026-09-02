@@ -302,20 +302,26 @@ uint64_t ProxyCallMethodV(void *context, void *object, void *method,
   const jobject receiver = static_cast<jobject>(object);
   const jclass clazz = static_cast<jclass>(object);
   const jmethodID id = static_cast<jmethodID>(method);
+  std::string method_name;
+  {
+    std::lock_guard<std::mutex> lock(library->method_descriptor_mutex);
+    const auto found = library->method_names.find(method);
+    if (found != library->method_names.end())
+      method_name = found->second;
+  }
   std::string debug_name;
-  if (std::getenv("DARWIN_ART_DEBUG_JNI_CALLS") != nullptr) {
-    {
-      std::lock_guard<std::mutex> lock(library->method_descriptor_mutex);
-      const auto found = library->method_names.find(method);
-      if (found != library->method_names.end())
-        debug_name = found->second;
-    }
-    if (debug_name == "createAndStart" || debug_name == "makeFdInfos" ||
-        debug_name == "verifyServerCertificates" ||
-        debug_name == "getUserAddedRoots") {
-      std::cerr << "DARWIN JNI call name=" << debug_name << " method=" << method
-                << " static=" << is_static
-                << " return=" << static_cast<char>(return_shorty) << "\n";
+  if (std::getenv("DARWIN_ART_DEBUG_JNI_CALLS") != nullptr)
+    debug_name = method_name;
+  // ContextImpl#getPackageCodePath is backed by PackageManager state on a
+  // device.  The compatibility host has already mounted the immutable APK,
+  // so expose that exact host path to native callers instead of leaving a
+  // framework-side NameNotFoundException pending during Unity bootstrap.
+  if (method_name == "getPackageCodePath" && return_shorty == 'L' &&
+      is_static == 0) {
+    const char *apk_path = std::getenv("DARWIN_ART_APK_APP_RESOURCE_APK");
+    if (apk_path != nullptr && apk_path[0] != '\0') {
+      art_env->ExceptionClear();
+      return reinterpret_cast<uint64_t>(art_env->NewStringUTF(apk_path));
     }
   }
   if (is_static == 2) {

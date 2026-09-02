@@ -291,6 +291,7 @@ int DropRuntimeProviderKind(void* value, void*) {
 
 void TeardownProviderNamespace(ElfLibrary* library) {
   if (library == nullptr) return;
+  UnregisterElfLibrary(library);
   if (library->native_owner != nullptr) {
     const int status = darwin_art_runtime_native_owner_destroy(library->native_owner);
     library->native_owner = nullptr;

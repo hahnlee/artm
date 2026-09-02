@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <net/if.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
@@ -48,6 +49,24 @@ extern "C" intptr_t darwin_art_bionic_fs_write_core(int fd, const void *buffer,
 extern "C" __attribute__((weak)) int
 darwin_art_android_shared_memory_close(int) {
   return 0;
+}
+
+// Unity still imports the legacy resolver entry points even when all runtime
+// lookups use getaddrinfo. Keep those symbols inside the Android network
+// namespace; returning a failed lookup is preferable to exposing Darwin's
+// hostent storage and lifetime to guest code.
+extern "C" struct hostent* darwin_art_bionic_socket_broker_gethostbyname(
+    const char* name) {
+  (void)name;
+  return nullptr;
+}
+
+extern "C" struct hostent* darwin_art_bionic_socket_broker_gethostbyaddr(
+    const void* address, socklen_t length, int type) {
+  (void)address;
+  (void)length;
+  (void)type;
+  return nullptr;
 }
 extern "C" __attribute__((weak)) int darwin_art_android_shared_memory_dup(int) {
   return -2;
@@ -3551,6 +3570,12 @@ darwin_art_bionic_socket_broker_dns_resolve(const char *soname,
   if (std::strcmp(symbol, "getaddrinfo") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_getaddrinfo);
+  if (std::strcmp(symbol, "gethostbyname") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_gethostbyname);
+  if (std::strcmp(symbol, "gethostbyaddr") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_gethostbyaddr);
   if (std::strcmp(symbol, "freeaddrinfo") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_freeaddrinfo);

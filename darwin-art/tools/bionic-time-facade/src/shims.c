@@ -158,6 +158,34 @@ int darwin_art_bionic_clock_gettime(int android_clock,
   return outcome;
 }
 
+int darwin_art_bionic_clock_getres(int android_clock,
+                                   DarwinArtAndroidTimespec* result) {
+  const int saved_host_errno = errno;
+  int outcome;
+  if (result == NULL) {
+    outcome = FailAndroid(ANDROID_EFAULT);
+  } else if (android_clock == ANDROID_CLOCK_BOOTTIME) {
+    result->tv_sec = 0;
+    result->tv_nsec = 1;
+    outcome = 0;
+  } else {
+    clockid_t host_clock;
+    if (!HostClockForAndroid(android_clock, &host_clock)) {
+      outcome = FailAndroid(ANDROID_EINVAL);
+    } else {
+      struct timespec host_result;
+      if (clock_getres(host_clock, &host_result) == 0) {
+        CopyTimespec(result, &host_result);
+        outcome = 0;
+      } else {
+        outcome = FailHost(errno);
+      }
+    }
+  }
+  errno = saved_host_errno;
+  return outcome;
+}
+
 int darwin_art_bionic_nanosleep(const DarwinArtAndroidTimespec* request,
                                 DarwinArtAndroidTimespec* remaining) {
   const int saved_host_errno = errno;
@@ -311,6 +339,7 @@ typedef struct Binding {
 static const Binding kBindings[] = {
     {"asctime_r", (DarwinArtBionicTimeFunction)darwin_art_bionic_asctime_r},
     {"clock", (DarwinArtBionicTimeFunction)darwin_art_bionic_clock},
+    {"clock_getres", (DarwinArtBionicTimeFunction)darwin_art_bionic_clock_getres},
     {"clock_gettime", (DarwinArtBionicTimeFunction)darwin_art_bionic_clock_gettime},
     {"ctime", (DarwinArtBionicTimeFunction)darwin_art_bionic_ctime},
     {"difftime", (DarwinArtBionicTimeFunction)darwin_art_bionic_difftime},

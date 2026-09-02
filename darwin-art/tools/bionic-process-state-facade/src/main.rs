@@ -71,6 +71,7 @@ impl SymbolResolver for ClosedResolver {
         let name = match request.symbol {
             "__errno" => c"__errno",
             "__system_property_get" => c"__system_property_get",
+            "__system_property_read" => c"__system_property_read",
             "getauxval" => c"getauxval",
             "getenv" => c"getenv",
             _ => return Ok(None),

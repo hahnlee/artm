@@ -1521,6 +1521,15 @@ extern "C" int darwin_art_android_platform_remove_fd(void* looper, int fd) {
 extern "C" ASensorManager* ASensorManager_getInstanceForPackage(const char*) {
   return &g_sensor_manager;
 }
+
+extern "C" ASensorManager* ASensorManager_getInstance() {
+  return &g_sensor_manager;
+}
+
+extern "C" int ASensorManager_getSensorList(ASensorManager*, ASensorList* list) {
+  if (list != nullptr) *list = nullptr;
+  return 0;
+}
 extern "C" const ASensor* ASensorManager_getDefaultSensor(ASensorManager*, int) {
   return nullptr;
 }
@@ -1536,6 +1545,11 @@ extern "C" int ASensorEventQueue_enableSensor(ASensorEventQueue*, const ASensor*
 extern "C" int ASensorEventQueue_disableSensor(ASensorEventQueue*, const ASensor*) { return -EINVAL; }
 extern "C" int ASensorEventQueue_setEventRate(ASensorEventQueue*, const ASensor*, int32_t) { return -EINVAL; }
 extern "C" ssize_t ASensorEventQueue_getEvents(ASensorEventQueue*, ASensorEvent*, size_t) { return 0; }
+extern "C" int ASensorEventQueue_hasEvents(ASensorEventQueue*) { return 0; }
+extern "C" const char* ASensor_getName(const ASensor*) { return ""; }
+extern "C" float ASensor_getResolution(const ASensor*) { return 0.0f; }
+extern "C" int ASensor_getType(const ASensor*) { return 0; }
+extern "C" const char* ASensor_getVendor(const ASensor*) { return ""; }
 extern "C" int ASensor_getMinDelay(ASensor const*) { return 0; }
 
 extern "C" ASurfaceControl* ASurfaceControl_createFromWindow(
@@ -2887,12 +2901,19 @@ extern "C" void* darwin_art_android_platform_symbol(const char* symbol) {
   ROUTE(ASensorEventQueue_disableSensor);
   ROUTE(ASensorEventQueue_enableSensor);
   ROUTE(ASensorEventQueue_getEvents);
+  ROUTE(ASensorEventQueue_hasEvents);
   ROUTE(ASensorEventQueue_setEventRate);
   ROUTE(ASensorManager_createEventQueue);
   ROUTE(ASensorManager_destroyEventQueue);
   ROUTE(ASensorManager_getDefaultSensor);
+  ROUTE(ASensorManager_getInstance);
   ROUTE(ASensorManager_getInstanceForPackage);
+  ROUTE(ASensorManager_getSensorList);
   ROUTE(ASensor_getMinDelay);
+  ROUTE(ASensor_getName);
+  ROUTE(ASensor_getResolution);
+  ROUTE(ASensor_getType);
+  ROUTE(ASensor_getVendor);
   ROUTE(ASharedMemory_create);
   ROUTE(ASharedMemory_setProt);
   ROUTE(ASurfaceControl_create);
@@ -2945,6 +2966,12 @@ extern "C" void* darwin_art_android_platform_symbol(const char* symbol) {
     return reinterpret_cast<void*>(&darwin_art_android_ANativeWindow_fromSurface);
   if (std::strcmp(symbol, "ANativeWindow_getFormat") == 0)
     return reinterpret_cast<void*>(&darwin_art_android_ANativeWindow_getFormat);
+  if (std::strcmp(symbol, "ANativeWindow_getWidth") == 0)
+    return reinterpret_cast<void*>(&darwin_art_android_ANativeWindow_getWidth);
+  if (std::strcmp(symbol, "ANativeWindow_getHeight") == 0)
+    return reinterpret_cast<void*>(&darwin_art_android_ANativeWindow_getHeight);
+  if (std::strcmp(symbol, "ANativeWindow_setBuffersGeometry") == 0)
+    return reinterpret_cast<void*>(&darwin_art_android_ANativeWindow_setBuffersGeometry);
   if (std::strcmp(symbol, "ANativeWindow_release") == 0)
     return reinterpret_cast<void*>(&darwin_art_android_ANativeWindow_release);
   if (std::strcmp(symbol, "ANativeWindow_toSurface") == 0)

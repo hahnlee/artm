@@ -179,3 +179,23 @@ The previously installed `apkeep 1.0.0` was also checked. Its APKPure source
 returned no Minecraft versions or artifact, while its Google Play source
 stopped at the required email/AAS-token prompt. No credentials were present,
 so acquisition remains the only blocker for the end-to-end Minecraft gate.
+
+## Progress — 2026-09-02 Crossy Road native compatibility
+
+Acquired Crossy Road 7.12.1 (`com.yodo1.crossyroad`) as an external ARM64
+APK for a runtime-only compatibility test; the APK and extracted assets remain
+outside the repository. The Android NativeLoader/ELF graph now reaches
+`libmain.so`, `libunity.so`, and `libil2cpp.so`; Unity JNI registration is
+image-owned even when process-wide guest libdl callbacks enter a child DSO.
+GNU/LLVM zero-sized `end` load markers are accepted as dlsym-visible sentinels.
+
+Added runtime-owned Bionic seams exercised by this native graph: `logb`,
+`futimens`, `drand48`/`lrand48`/`mrand48`/`srand48`, `clock_getres`,
+`sigsuspend`, and `sem_getvalue`. Provider closure, graphics-link audit,
+formatting, and diff checks pass. The current gate is after Unity's
+`MemoryManager: Using 'Dynamic Heap' Allocator` and SurfaceView GPU setup;
+Crossy still faults in a Unity native thread at a null indirect call before
+the first game frame. This is now a Unity/JNI or graphics lifecycle contract
+to diagnose, not an unresolved ELF import. `getPackageCodePath()` is mapped to
+the mounted APK path to avoid a framework `NameNotFoundException` during that
+bootstrap.
