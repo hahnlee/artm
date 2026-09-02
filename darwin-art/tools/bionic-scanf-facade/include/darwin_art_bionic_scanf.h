@@ -9,6 +9,9 @@ typedef void (*DarwinArtBionicScanfFunction)(void);
 
 /* sscanf has Android AAPCS64 variadic entry semantics. */
 int darwin_art_bionic_sscanf(const char* input, const char* format, ...);
+/* fscanf has Android AAPCS64 variadic entry semantics and accepts only a
+ * provider-owned Android FILE token. */
+int darwin_art_bionic_fscanf(void* stream, const char* format, ...);
 /* android_va_list points to the Android arm64 32-byte va_list object. */
 int darwin_art_bionic_vsscanf(const char* input, const char* format,
                               const void* android_va_list);

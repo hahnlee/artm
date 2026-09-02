@@ -10,6 +10,7 @@
 #include "darwin_art_bionic_errno.h"
 #include "darwin_art_bionic_float_conversion.h"
 #include "darwin_art_bionic_numeric.h"
+#include "darwin_art_bionic_stdio.h"
 
 extern "C" void darwin_art_bionic_strtold_raw(const char*, char**, void*);
 
@@ -239,12 +240,28 @@ void StoreUnsigned(void* output, Length length, uint64_t value) {
   }
 }
 
-int Scan(const char* input, const char* format, Cursor cursor) {
+struct ConsumptionGuard {
+  const char* begin;
+  const char*& current;
+  size_t* output;
+  ~ConsumptionGuard() {
+    *output = static_cast<size_t>(current - begin);
+  }
+};
+
+int Scan(const char* input, const char* format, Cursor cursor,
+         size_t* consumed) {
+  if (consumed == nullptr) {
+    Fail(kEnotsup);
+    return -1;
+  }
+  *consumed = 0;
   if (input == nullptr || format == nullptr) {
     Fail(kEnotsup);
     return -1;
   }
   const char* begin = input;
+  ConsumptionGuard guard{begin, input, consumed};
   int assigned = 0;
   while (*format != '\0') {
     if (Space(static_cast<unsigned char>(*format))) {
@@ -402,6 +419,22 @@ Cursor FromVa(const void* opaque) {
   return {static_cast<uint8_t*>(value.stack), static_cast<uint8_t*>(value.gr_top),
           value.gr_offs};
 }
+
+struct FileScanContext {
+  const char* format;
+  Cursor cursor;
+};
+
+int ScanFileInput(const char* input, size_t length, void* opaque,
+                  size_t* consumed) {
+  (void)length;
+  auto* context = static_cast<FileScanContext*>(opaque);
+  if (context == nullptr) {
+    Fail(kEnotsup);
+    return -1;
+  }
+  return Scan(input, context->format, context->cursor, consumed);
+}
 }  // namespace
 
 extern "C" int darwin_art_bionic_sscanf_captured(
@@ -409,7 +442,19 @@ extern "C" int darwin_art_bionic_sscanf_captured(
     const uint8_t*, uint8_t* stack) {
   Cursor cursor{stack, reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(gp)) + 64,
                 -48};
-  return Scan(input, format, cursor);
+  size_t consumed = 0;
+  return Scan(input, format, cursor, &consumed);
+}
+
+extern "C" int darwin_art_bionic_fscanf_captured(
+    DarwinArtAndroidFile* stream, const char* format, const uint64_t* gp,
+    const uint8_t*, uint8_t* stack) {
+  FileScanContext context{
+      format,
+      Cursor{stack,
+             reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(gp)) + 64,
+             -48}};
+  return darwin_art_bionic_stdio_scan_core(stream, &ScanFileInput, &context);
 }
 
 extern "C" int darwin_art_bionic_vsscanf(const char* input,
@@ -419,15 +464,8 @@ extern "C" int darwin_art_bionic_vsscanf(const char* input,
     Fail(kEnotsup);
     return -1;
   }
-  return Scan(input, format, FromVa(android_va_list));
-}
-
-extern "C" int darwin_art_bionic_fscanf_unsupported(void* stream,
-                                                     const char* format, ...) {
-  (void)stream;
-  (void)format;
-  Fail(kEnotsup);
-  return -1;
+  size_t consumed = 0;
+  return Scan(input, format, FromVa(android_va_list), &consumed);
 }
 
 extern "C" void* darwin_art_bionic_scanf_resolve(const char* soname,
@@ -442,7 +480,7 @@ extern "C" void* darwin_art_bionic_scanf_resolve(const char* soname,
   if (std::string_view(symbol) == "vsscanf")
     return reinterpret_cast<void*>(&darwin_art_bionic_vsscanf);
   if (std::string_view(symbol) == "fscanf")
-    return reinterpret_cast<void*>(&darwin_art_bionic_fscanf_unsupported);
+    return reinterpret_cast<void*>(darwin_art_bionic_fscanf);
   return nullptr;
 }
 
@@ -451,7 +489,8 @@ extern "C" const char* darwin_art_bionic_scanf_capability(
   if (capability == nullptr) return "invalid";
   const std::string_view value(capability);
   if (value == "Android-AAPCS64-variadic" || value == "Android-va_list32" ||
-      value == "Bionic-string-reader" || value == "binary128-raw-output")
+      value == "Bionic-string-reader" || value == "Bionic-FILE-reader" ||
+      value == "binary128-raw-output")
     return "supported";
   return "unsupported";
 }

@@ -53,6 +53,8 @@ fn main() {
             .arg(root.join("tools/bionic-float-conversion-facade/include"))
             .arg("-I")
             .arg(root.join("tools/bionic-errno-tls/include"))
+            .arg("-I")
+            .arg(root.join("tools/bionic-stdio-facade/include"))
             .args(["-c", "src/scanf.cc", "-o"])
             .arg(&scanf),
         "scanf parser",
@@ -98,6 +100,19 @@ fn main() {
             .arg(&allocator),
         "allocator dependency",
     );
+    let stdio_audit_dependencies = out.join("stdio-audit-dependencies.o");
+    run(
+        Command::new("clang")
+            .args(&flags)
+            .arg("-std=c17")
+            .args([
+                "-c",
+                "../bionic-stdio-facade/probes/audit_dependency_shims.c",
+                "-o",
+            ])
+            .arg(&stdio_audit_dependencies),
+        "stdio audit dependencies",
+    );
     let archive = out.join("libdarwin_art_bionic_scanf.a");
     run(
         Command::new("ar")
@@ -108,10 +123,11 @@ fn main() {
     );
     let support = out.join("libscanf_support.a");
     run(
-        Command::new("ar")
-            .arg("rcs")
-            .arg(&support)
-            .args([&numeric, &allocator]),
+        Command::new("ar").arg("rcs").arg(&support).args([
+            &numeric,
+            &allocator,
+            &stdio_audit_dependencies,
+        ]),
         "support",
     );
 
@@ -172,6 +188,8 @@ fn main() {
         "src/scanf.cc",
         "src/aapcs64_entry.S",
         "include/darwin_art_bionic_scanf.h",
+        "../bionic-stdio-facade/include/darwin_art_bionic_stdio.h",
+        "../bionic-stdio-facade/probes/audit_dependency_shims.c",
     ] {
         println!("cargo:rerun-if-changed={source}");
     }

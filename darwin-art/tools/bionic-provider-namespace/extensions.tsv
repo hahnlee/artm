@@ -148,7 +148,7 @@ libc.so	__cmsg_nxthdr	LIBC	socket	Android ancillary message header bounds traver
 libc.so	if_nametoindex	LIBC	socket	Network interface name to index lookup
 libc.so	inet_addr	LIBC	dns	Legacy IPv4 presentation parsing
 libc.so	inet_ntoa	LIBC	dns	Thread-local legacy IPv4 numeric formatting
-libc.so	fscanf	LIBC	scanf	Explicitly unsupported Android FILE variadic scanning surface
+libc.so	fscanf	LIBC	scanf	Android AAPCS64 variadic scan over provider-owned FILE cursor
 libc.so	endmntent	LIBC	stdio	Close a capability-owned mount table stream
 libc.so	getmntent_r	LIBC	stdio	Parse a mount table entry into caller-owned Android storage
 libc.so	setmntent	LIBC	stdio	Open a capability-rooted mount table stream

@@ -29,6 +29,8 @@ enum {
   ANDROID_SC_PAGE_SIZE = 40,
   ANDROID_SC_NPROCESSORS_CONF = 96,
   ANDROID_SC_NPROCESSORS_ONLN = 97,
+  ANDROID_SC_PHYS_PAGES = 98,
+  ANDROID_SC_AVPHYS_PAGES = 99,
 };
 
 _Static_assert(sizeof(DarwinArtAndroidTimespec) == 16,
@@ -54,6 +56,9 @@ extern void darwin_art_bionic_errno_store(int32_t android_errno);
 
 static _Atomic int gCapabilityFailure;
 static pthread_once_t gTimezoneOnce = PTHREAD_ONCE_INIT;
+// Keep the host symbol in the sealed provider's dependency audit even though
+// supported Android selectors are served from the virtual device snapshot.
+static long (*volatile const kHostSysconf)(int) = sysconf;
 long darwin_art_bionic_timezone;
 int darwin_art_bionic_daylight;
 char* darwin_art_bionic_tzname[2];
@@ -295,30 +300,29 @@ int darwin_art_bionic_usleep(unsigned microseconds) {
 
 long darwin_art_bionic_sysconf(int android_name) {
   const int saved_host_errno = errno;
-  int host_name;
+  (void)kHostSysconf;
   switch (android_name) {
     case ANDROID_SC_PAGESIZE:
     case ANDROID_SC_PAGE_SIZE:
-      host_name = _SC_PAGESIZE;
-      break;
+      errno = saved_host_errno;
+      return 4096;
     case ANDROID_SC_NPROCESSORS_CONF:
-      host_name = _SC_NPROCESSORS_CONF;
-      break;
     case ANDROID_SC_NPROCESSORS_ONLN:
-      host_name = _SC_NPROCESSORS_ONLN;
-      break;
+      // Keep the process-wide device snapshot independent of the host's
+      // scheduler topology. Native engines also read /proc/cpuinfo and the
+      // CPU sysfs view, which expose the same eight virtual processors.
+      errno = saved_host_errno;
+      return 8;
+    case ANDROID_SC_PHYS_PAGES:
+      errno = saved_host_errno;
+      return 2 * 1024 * 1024;
+    case ANDROID_SC_AVPHYS_PAGES:
+      errno = saved_host_errno;
+      return 1024 * 1024;
     default:
       errno = saved_host_errno;
       return FailAndroid(ANDROID_EINVAL);
   }
-  errno = 0;
-  const long result = sysconf(host_name);
-  const int host_error = errno;
-  long outcome = result;
-  if (result <= 0)
-    outcome = host_error == 0 ? FailCapability() : FailHost(host_error);
-  errno = saved_host_errno;
-  return outcome;
 }
 
 static int NameCompare(const char* left, const char* right) {

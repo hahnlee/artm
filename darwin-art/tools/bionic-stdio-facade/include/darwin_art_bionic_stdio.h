@@ -17,6 +17,8 @@ extern DarwinArtAndroidFile* darwin_art_bionic_stdin;
 extern DarwinArtAndroidFile* darwin_art_bionic_stdout;
 extern DarwinArtAndroidFile* darwin_art_bionic_stderr;
 typedef void (*DarwinArtBionicStdioFunction)(void);
+typedef int (*DarwinArtBionicStdioScanCallback)(
+    const char* input, size_t length, void* context, size_t* consumed);
 typedef struct DarwinArtAndroidMntent {
   char* fsname;
   char* directory;
@@ -79,6 +81,12 @@ int darwin_art_bionic_stdio_ungetc_core(int, DarwinArtAndroidFile*);
 int darwin_art_bionic_stdio_feof_core(DarwinArtAndroidFile*);
 int darwin_art_bionic_stdio_ferror_core(DarwinArtAndroidFile*);
 void darwin_art_bionic_stdio_clearerr_core(DarwinArtAndroidFile*);
+/* Runs one scanf parser against the unread bytes while retaining the FILE
+ * owner's central lease, then advances the stream by exactly `consumed`.
+ * The callback input is additionally NUL-terminated for Bionic's byte parser;
+ * `length` excludes that terminator. */
+int darwin_art_bionic_stdio_scan_core(DarwinArtAndroidFile*,
+                                      DarwinArtBionicStdioScanCallback, void*);
 
 #ifdef __cplusplus
 }

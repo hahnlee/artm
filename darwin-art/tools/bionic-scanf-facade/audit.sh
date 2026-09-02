@@ -57,9 +57,10 @@ for token in ["case 'b':", "case 'w':", "case 'n':", 'case CT_FLOAT:', 'case CT_
     assert token in vf
 assert '#define LONGDBL' in common and '#define ALLOCATE' in common and 'return (__svfscanf(&f, fmt, ap));' in vs
 ours=(s/'src/scanf.cc').read_text()
-for forbidden in ['::sscanf(', '::vsscanf(', 'vfscanf(', 'fscanf(', 'long double']:
+for forbidden in ['::sscanf(', '::vsscanf(', '::vfscanf(', 'std::fscanf(', 'long double']:
     assert forbidden not in ours
-print('source-contract=PASS Bionic-vfscanf-model FILE-free')
+assert 'darwin_art_bionic_stdio_scan_core' in ours
+print('source-contract=PASS Bionic-vfscanf-model provider-FILE-lease')
 PY
 
 ndk_root="${ANDROID_NDK_ROOT:-$HOME/Library/Android/sdk/ndk/$NDK_REVISION}"
@@ -83,9 +84,9 @@ fixture="$build_root/libbionic_scanf_fixture.so"
   -Wl,--no-undefined -Wl,--version-script,"$script_dir/probes/exports.map" -Wl,-z,norelro -Wl,--hash-style=both \
   "$script_dir/probes/fixture.c" -lc -o "$fixture"
 elf_imports="$($readelf --dyn-syms --wide "$fixture")"
-for symbol in __errno sscanf vsscanf; do grep -E " UND[[:space:]]+${symbol}@LIBC( |$)" <<< "$elf_imports" >/dev/null || fail "missing ELF import: $symbol"; done
-[[ "$(grep -Ec ' UND[[:space:]]+[^ ]+@LIBC( |$)' <<< "$elf_imports")" == 3 ]] || fail 'unexpected fixture imports'
-disassembly="$($objdump -d "$fixture")"; grep -E 'bl.*<sscanf' <<< "$disassembly" >/dev/null || fail 'no sscanf call'; grep -E 'bl.*<vsscanf' <<< "$disassembly" >/dev/null || fail 'no vsscanf call'
+for symbol in __errno fclose fopen fscanf sscanf vsscanf; do grep -E " UND[[:space:]]+${symbol}@LIBC( |$)" <<< "$elf_imports" >/dev/null || fail "missing ELF import: $symbol"; done
+[[ "$(grep -Ec ' UND[[:space:]]+[^ ]+@LIBC( |$)' <<< "$elf_imports")" == 6 ]] || fail 'unexpected fixture imports'
+disassembly="$($objdump -d "$fixture")"; grep -E 'bl.*<fscanf' <<< "$disassembly" >/dev/null || fail 'no fscanf call'; grep -E 'bl.*<sscanf' <<< "$disassembly" >/dev/null || fail 'no sscanf call'; grep -E 'bl.*<vsscanf' <<< "$disassembly" >/dev/null || fail 'no vsscanf call'
 
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
 CARGO_TARGET_DIR="$build_root/clippy" cargo clippy --quiet --all-targets --manifest-path "$script_dir/Cargo.toml" -- -D warnings
@@ -94,14 +95,15 @@ archive="$(find "$build_root/target/debug/build" -path '*/out/libdarwin_art_bion
 [[ -f "$archive" ]] || fail 'archive missing'; cp "$archive" "$build_root/libdarwin-art-bionic-scanf.a"
 [[ "$(ar -t "$archive" | grep -v '^__.SYMDEF' | wc -l | tr -d ' ')" == 2 ]] || fail 'archive member drift'
 definitions="$(nm -gU "$archive")"
-for symbol in darwin_art_bionic_sscanf darwin_art_bionic_vsscanf darwin_art_bionic_scanf_resolve; do grep -F " _$symbol" <<< "$definitions" >/dev/null || fail "definition missing: $symbol"; done
+for symbol in darwin_art_bionic_fscanf darwin_art_bionic_sscanf darwin_art_bionic_vsscanf darwin_art_bionic_scanf_resolve; do grep -F " _$symbol" <<< "$definitions" >/dev/null || fail "definition missing: $symbol"; done
 for duplicate in darwin_art_bionic_malloc darwin_art_bionic___errno darwin_art_bionic_strtod darwin_art_bionic_strtold_raw android_icu_init; do
   grep -E " [TDS] _${duplicate}$" <<< "$definitions" >/dev/null && fail "duplicate owner: $duplicate"
 done
 archive_undefined="$(nm -u "$archive" | awk '{print $NF}' | sort -u)"
-for edge in _darwin_art_bionic_strtoll _darwin_art_bionic_strtoull _darwin_art_bionic_strtof _darwin_art_bionic_strtod _darwin_art_bionic_strtold_raw _darwin_art_bionic_errno_store; do grep -Fx "$edge" <<< "$archive_undefined" >/dev/null || fail "provider edge missing: $edge"; done
-if grep -E '^_(sscanf|vsscanf|vfscanf|fscanf|strtod|strtof|strtold|wcstod|mbrtowc|iswspace)$' <<< "$archive_undefined" >/dev/null; then fail 'host scanf/wchar/float fallback'; fi
+for edge in _darwin_art_bionic_stdio_scan_core _darwin_art_bionic_strtoll _darwin_art_bionic_strtoull _darwin_art_bionic_strtof _darwin_art_bionic_strtod _darwin_art_bionic_strtold_raw _darwin_art_bionic_errno_store; do grep -Fx "$edge" <<< "$archive_undefined" >/dev/null || fail "provider edge missing: $edge"; done
+if grep -E '^_(sscanf|vsscanf|vfscanf|strtod|strtof|strtold|wcstod|mbrtowc|iswspace)$' <<< "$archive_undefined" >/dev/null; then fail 'host scanf/wchar/float fallback'; fi
 otool -tvV "$archive" | grep -E 'stp[[:space:]]+q6, q7, \[sp, #0xa0\]' >/dev/null || fail 'FP-bank capture missing'
+otool -tvV "$archive" | grep -F '_darwin_art_bionic_fscanf_captured' >/dev/null || fail 'fscanf AAPCS64 capture call missing'
 
 for sanitizer in address undefined; do
   target="$build_root/cargo-$sanitizer"
@@ -112,4 +114,4 @@ otool -L "$runner" | grep -Ei '(homebrew|/opt/|libicu|libandroidicu|quadmath)' >
 git -C "$repo_root" diff --check -- "$script_dir"
 git -C "$repo_root" diff --cached --quiet -- "$script_dir" || fail 'staged standalone changes'
 [[ ! -e "$script_dir/target" ]] || fail 'module-local target directory leaked'
-echo 'bionic-scanf-facade: PASS demand=2 archive=2-members AndroidELF=sscanf+vsscanf formats=int+float+binary128+string+char+scanset+n AAPCS64=GP+FP+stack va_list=32 ASan UBSan closed=libc.so@LIBC'
+echo 'bionic-scanf-facade: PASS demand=3 archive=2-members AndroidELF=fscanf+sscanf+vsscanf FILE=provider-cursor formats=int+float+binary128+string+char+scanset+n AAPCS64=GP+FP+stack va_list=32 ASan UBSan closed=libc.so@LIBC'

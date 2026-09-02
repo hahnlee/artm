@@ -169,6 +169,7 @@ dependencies = [
 name = "bionic-scanf-facade"
 version = "0.1.0"
 dependencies = [
+ "bionic-stdio-facade",
  "darwin-art-elf-loader",
 ]
 

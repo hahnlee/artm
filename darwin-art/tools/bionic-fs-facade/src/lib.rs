@@ -762,6 +762,168 @@ impl Facade {
         !pid.is_empty() && pid.len() <= 10 && pid.iter().all(u8::is_ascii_digit) && pid != b"0"
     }
 
+    /// Return the bounded, read-only device view exposed to native Android
+    /// code.  The host is not allowed to leak its procfs/sysfs, but native
+    /// engines legitimately use these files in addition to sysconf(3) and
+    /// sysinfo(2) when selecting allocators and graphics paths.  Keep this
+    /// snapshot consistent with the values reported by the Java/runtime
+    /// device APIs: eight virtual CPUs and 8 GiB of memory.
+    fn synthetic_proc_contents(path: &[u8]) -> Option<Vec<u8>> {
+        const CPU_COUNT: usize = 8;
+        const MEMORY_KIB: usize = 8 * 1024 * 1024;
+
+        if path == b"/proc/cpuinfo" {
+            let mut contents = String::new();
+            for cpu in 0..CPU_COUNT {
+                let _ = writeln!(contents, "processor\t: {cpu}");
+                let _ = writeln!(contents, "BogoMIPS\t: 2400.00");
+                let _ = writeln!(
+                    contents,
+                    "Features\t: fp asimd evtstrm aes pmull sha1 sha2 crc32"
+                );
+                let _ = writeln!(contents, "CPU variant\t: 0x0");
+                let _ = writeln!(contents, "CPU part\t: 0xd03");
+                let _ = writeln!(contents, "CPU revision\t: 4");
+                let _ = writeln!(contents, "CPU architecture\t: 8");
+                let _ = writeln!(contents, "CPU implementer\t: 0x41");
+                let _ = writeln!(contents);
+            }
+            return Some(contents.into_bytes());
+        }
+        if path == b"/proc/meminfo" {
+            return Some(
+                format!(
+                    "MemTotal:       {MEMORY_KIB:>8} kB\nMemFree:        {:>8} kB\nMemAvailable:   {:>8} kB\nBuffers:        {:>8} kB\nCached:         {:>8} kB\nSwapCached:     {:>8} kB\nActive:         {:>8} kB\nInactive:       {:>8} kB\nSwapTotal:      {:>8} kB\nSwapFree:       {:>8} kB\n",
+                    MEMORY_KIB / 2,
+                    MEMORY_KIB / 2,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+                .into_bytes(),
+            );
+        }
+        if path == b"/proc/loadavg" {
+            return Some(b"0.00 0.00 0.00 1/128 1\n".to_vec());
+        }
+        if path == b"/proc/uptime" {
+            return Some(b"86400.00 86400.00\n".to_vec());
+        }
+
+        let is_self = |name: &[u8]| {
+            let mut self_path = b"/proc/self/".to_vec();
+            self_path.extend_from_slice(name);
+            let mut thread_self_path = b"/proc/thread-self/".to_vec();
+            thread_self_path.extend_from_slice(name);
+            let mut pid_suffix = Vec::with_capacity(name.len() + 1);
+            pid_suffix.push(b'/');
+            pid_suffix.extend_from_slice(name);
+            path == self_path
+                || path == thread_self_path
+                || path
+                    .strip_prefix(b"/proc/")
+                    .and_then(|rest| rest.strip_suffix(pid_suffix.as_slice()))
+                    .is_some_and(|pid| {
+                        !pid.is_empty()
+                            && pid.len() <= 10
+                            && pid.iter().all(u8::is_ascii_digit)
+                            && pid != b"0"
+                    })
+        };
+        if is_self(b"status") {
+            return Some(
+                b"Name:\tdarwin-art-host\nState:\tR (running)\nPid:\t1\nPPid:\t0\nUid:\t501\t501\t501\t501\nGid:\t20\t20\t20\t20\nVmPeak:\t1048576 kB\nVmSize:\t1048576 kB\nVmRSS:\t262144 kB\nCpus_allowed_list:\t0-7\n".to_vec(),
+            );
+        }
+        if is_self(b"statm") {
+            return Some(b"262144 65536 0 0 0 0 0\n".to_vec());
+        }
+
+        match path {
+            b"/sys/devices/system/cpu/possible"
+            | b"/sys/devices/system/cpu/present"
+            | b"/sys/devices/system/cpu/online" => Some(b"0-7\n".to_vec()),
+            _ => {
+                let cpu = path
+                    .strip_prefix(b"/sys/devices/system/cpu/cpu")
+                    .and_then(|rest| rest.strip_suffix(b"/cpu_capacity"))
+                    .and_then(|digits| {
+                        if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+                            return None;
+                        }
+                        std::str::from_utf8(digits).ok()?.parse::<usize>().ok()
+                    });
+                if let Some(cpu) = cpu.filter(|cpu| *cpu < CPU_COUNT) {
+                    // Expose a conventional 4+4 ARM big.LITTLE topology so
+                    // Unity/Chromium's cluster classifier reports all eight
+                    // virtual CPUs instead of treating a homogeneous host as
+                    // an unclassified zero-core device.
+                    return Some(if cpu < CPU_COUNT / 2 {
+                        b"512\n".to_vec()
+                    } else {
+                        b"1024\n".to_vec()
+                    });
+                }
+                let cpu = path
+                    .strip_prefix(b"/sys/devices/system/cpu/cpu")
+                    .and_then(|rest| rest.strip_suffix(b"/cpufreq/cpuinfo_max_freq"))
+                    .and_then(|digits| {
+                        if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+                            return None;
+                        }
+                        std::str::from_utf8(digits).ok()?.parse::<usize>().ok()
+                    });
+                cpu.filter(|cpu| *cpu < CPU_COUNT).map(|cpu| {
+                    if cpu < CPU_COUNT / 2 {
+                        b"1800000\n".to_vec()
+                    } else {
+                        b"2400000\n".to_vec()
+                    }
+                })
+            }
+        }
+    }
+
+    fn synthetic_inode(path: &[u8]) -> u64 {
+        // Stable FNV-1a identity makes fstat/stat agree without retaining a
+        // host path or sharing mutable synthetic state between descriptors.
+        path.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x1000_0000_01b3)
+        })
+    }
+
+    fn open_synthetic_readonly(&self, path: &[u8], flags: c_int, data: Vec<u8>) -> c_int {
+        if let Err(error) = self.validate_immutable_flags(flags) {
+            return self.fail(error);
+        }
+        if flags & O_DIRECTORY != 0 {
+            return self.fail(ANDROID_ENOTDIR);
+        }
+        let node = Arc::new(Mutex::new(OverlayFile {
+            inode: Self::synthetic_inode(path),
+            mode: ANDROID_S_IFREG | 0o444,
+            data,
+        }));
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability(),
+        };
+        let result = match descriptors.insert(Descriptor::Overlay(OverlayDescriptor {
+            node,
+            offset: 0,
+            readable: true,
+            writable: false,
+        })) {
+            Ok(fd) => fd,
+            Err(()) => self.fail(ANDROID_EMFILE),
+        };
+        result
+    }
+
     fn open_proc_self_maps(&self, flags: c_int) -> c_int {
         if flags & O_ACCMODE != O_RDONLY || flags & WRITE_FLAGS != 0 {
             return self.fail(ANDROID_EROFS);
@@ -870,6 +1032,9 @@ impl Facade {
         }
         if Self::proc_self_maps(path) {
             return self.open_proc_self_maps(flags);
+        }
+        if let Some(data) = Self::synthetic_proc_contents(path) {
+            return self.open_synthetic_readonly(path, flags, data);
         }
         // A native library may open the APK by the host path returned through
         // ApplicationInfo. Treat that path as a read-only capability and feed
@@ -1552,6 +1717,17 @@ impl Facade {
         if let Some(kind) = Self::random_device(path) {
             // SAFETY: the Android ABI requires one writable 128-byte stat object.
             unsafe { status.write(random_device_stat(kind)) };
+            return 0;
+        }
+        if let Some(data) = Self::synthetic_proc_contents(path) {
+            let file = OverlayFile {
+                inode: Self::synthetic_inode(path),
+                mode: ANDROID_S_IFREG | 0o444,
+                data,
+            };
+            // SAFETY: the Android ABI requires one writable 128-byte stat
+            // object, checked for null above.
+            unsafe { status.write(overlay_file_stat(&file)) };
             return 0;
         }
         if self

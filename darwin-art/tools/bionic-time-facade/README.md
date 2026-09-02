@@ -34,11 +34,10 @@ buffer. An actual SIGALRM acceptance interrupts a one-second Android ELF sleep
 and validates a normalized, positive remainder. Success leaves the remainder
 unspecified as POSIX requires.
 
-`sysconf` supports only page size (both Android selector spellings) and the
-configured/online processor counts. The values describe the Darwin host visible
-to this process; Android cgroup/cpuset topology is not emulated. Every other
-selector returns Android `EINVAL` instead of being sent to Darwin under a
-colliding numeric value.
+`sysconf` supports page size (both Android selector spellings), configured and
+online processor counts, and the physical/available page counts from the
+runtime's bounded eight-CPU/8-GiB device snapshot. Every other selector returns
+Android `EINVAL` instead of being sent to Darwin under a colliding numeric value.
 
 All facade calls save and restore Darwin pthread errno. Expected failures are
 published only in Bionic TLS. An unknown Darwin errno or Mach/sysconf invariant

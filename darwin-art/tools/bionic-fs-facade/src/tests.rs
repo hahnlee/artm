@@ -543,4 +543,40 @@ mod tests {
             PROCESS_OWNER_NOT_INSTALLED
         );
     }
+
+    #[test]
+    fn synthetic_device_procfs_is_bounded_and_consistent() {
+        let cpuinfo = Facade::synthetic_proc_contents(b"/proc/cpuinfo").unwrap();
+        let cpuinfo = String::from_utf8(cpuinfo).unwrap();
+        assert_eq!(cpuinfo.matches("processor\t:").count(), 8);
+        let meminfo = String::from_utf8(
+            Facade::synthetic_proc_contents(b"/proc/meminfo").unwrap(),
+        )
+        .unwrap();
+        assert!(meminfo.contains("MemTotal:        8388608 kB"));
+        assert_eq!(
+            Facade::synthetic_proc_contents(b"/proc/4242/status"),
+            Facade::synthetic_proc_contents(b"/proc/self/status")
+        );
+        assert_eq!(
+            Facade::synthetic_proc_contents(
+                b"/sys/devices/system/cpu/cpu7/cpufreq/cpuinfo_max_freq"
+            ),
+            Some(b"2400000\n".to_vec())
+        );
+        assert_eq!(
+            Facade::synthetic_proc_contents(b"/sys/devices/system/cpu/cpu0/cpu_capacity"),
+            Some(b"512\n".to_vec())
+        );
+        assert_eq!(
+            Facade::synthetic_proc_contents(
+                b"/sys/devices/system/cpu/cpu3/cpufreq/cpuinfo_max_freq"
+            ),
+            Some(b"1800000\n".to_vec())
+        );
+        assert!(Facade::synthetic_proc_contents(
+            b"/sys/devices/system/cpu/cpu8/cpu_capacity"
+        )
+        .is_none());
+    }
 }

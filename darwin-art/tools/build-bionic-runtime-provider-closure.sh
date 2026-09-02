@@ -114,9 +114,11 @@ icu_root="$root/_aosp/external/icu-graphics"
   -c "$root/tools/bionic-numeric-facade/src/provider.c" -o "$objects/numeric.o"
 "$cxx" "${cxxflags[@]}" -fno-builtin -fvisibility=hidden \
   -I"$root/tools/bionic-scanf-facade/include" \
+  -I"$root/tools/bionic-stdio-facade/include" \
   -I"$root/tools/bionic-numeric-facade/include" \
   -I"$root/tools/bionic-float-conversion-facade/include" \
   -I"$root/tools/bionic-errno-tls/include" \
+  -I"$root/tools/bionic-stdio-facade/include" \
   -c "$root/tools/bionic-scanf-facade/src/scanf.cc" -o "$objects/scanf.o"
 "$cc" -arch arm64 -isysroot "$sdk" \
   -c "$root/tools/bionic-scanf-facade/src/aapcs64_entry.S" \
@@ -367,8 +369,10 @@ for symbol in _darwin_art_bionic_malloc_result _darwin_art_bionic_free \
               _darwin_art_bionic_stdio_process_install \
               _darwin_art_bionic_stdio_process_uninstall \
               _darwin_art_bionic_stdio_fwrite_core \
+              _darwin_art_bionic_stdio_scan_core \
               _darwin_art_bionic_scanf_resolve \
-              _darwin_art_bionic_sscanf _darwin_art_bionic_vsscanf \
+              _darwin_art_bionic_fscanf _darwin_art_bionic_sscanf \
+              _darwin_art_bionic_vsscanf \
               _darwin_art_bionic_swprintf_resolve \
               _darwin_art_bionic_swprintf \
               _darwin_art_aosp_gdtoa \

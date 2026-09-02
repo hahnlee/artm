@@ -60,5 +60,17 @@ __attribute__((visibility("default"))) int scanf_fixture(void) {
   if (sscanf("999999999999999999999999 ok", "%*lld %2s", word) != 1 ||
       errno != 7 || word[0] != 'o' || word[1] != 'k') return 10;
   if (sscanf("x", "%d", &i) != 0 || sscanf("", "%d", &i) != -1) return 11;
+
+  FILE* file = fopen("/system/scan.txt", "r");
+  int file_i = 0, final_i = 0;
+  long long file_ll = 0;
+  char file_word[5] = {0};
+  if (file == NULL ||
+      fscanf(file, "%d %lld %4s", &file_i, &file_ll, file_word) != 3 ||
+      file_i != 42 || file_ll != INT64_C(9000000000) ||
+      file_word[0] != 't' || file_word[3] != 'l')
+    return 12;
+  if (fscanf(file, "%d", &final_i) != 1 || final_i != 7) return 13;
+  if (fclose(file) != 0) return 14;
   return 42;
 }

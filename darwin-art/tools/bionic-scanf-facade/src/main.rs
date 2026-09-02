@@ -1,3 +1,4 @@
+use bionic_stdio_facade::Provider;
 use darwin_art_elf_loader::{
     LoadedElf, ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver,
 };
@@ -7,6 +8,7 @@ use std::ffi::{CString, c_char, c_void};
 use std::fs;
 use std::num::NonZeroUsize;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 unsafe extern "C" {
     fn darwin_art_bionic_scanf_resolve(
@@ -16,6 +18,7 @@ unsafe extern "C" {
     ) -> *mut c_void;
     fn darwin_art_bionic_scanf_capability(name: *const c_char) -> *const c_char;
     fn darwin_art_bionic_errno_resolve(name: *const c_char) -> Option<unsafe extern "C" fn()>;
+    fn darwin_art_bionic_stdio_resolve(name: *const c_char) -> Option<unsafe extern "C" fn()>;
 }
 
 #[derive(Default)]
@@ -40,6 +43,8 @@ impl SymbolResolver for Resolver {
             CString::new(request.symbol).map_err(|e| ResolveError::Rejected(e.to_string()))?;
         let address = if request.symbol == "__errno" {
             unsafe { darwin_art_bionic_errno_resolve(symbol.as_ptr()) }.map(|f| f as usize)
+        } else if matches!(request.symbol, "fopen" | "fclose") {
+            unsafe { darwin_art_bionic_stdio_resolve(symbol.as_ptr()) }.map(|f| f as usize)
         } else {
             let value = unsafe {
                 darwin_art_bionic_scanf_resolve(
@@ -58,10 +63,19 @@ impl SymbolResolver for Resolver {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = env::args_os().nth(1).ok_or("Android fixture path")?;
+    let provider = Arc::new(Provider::new(
+        vec![(
+            b"/system/scan.txt".to_vec(),
+            b"42 9000000000 tail 7".to_vec(),
+        )],
+        Vec::new(),
+    )?);
+    let _activation = provider.activate()?;
     for name in [
         "Android-AAPCS64-variadic",
         "Android-va_list32",
         "Bionic-string-reader",
+        "Bionic-FILE-reader",
         "binary128-raw-output",
     ] {
         let name = CString::new(name)?;
@@ -80,14 +94,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if result != 42 {
         return Err(format!("fixture failed at {result}").into());
     }
-    let expected = ["__errno", "sscanf", "vsscanf"]
+    let expected = ["__errno", "fclose", "fopen", "fscanf", "sscanf", "vsscanf"]
         .into_iter()
         .map(str::to_owned)
         .collect();
     if resolver.requested != expected {
         return Err(format!("import drift: {:?}", resolver.requested).into());
     }
-    println!("bionic-scanf-facade: PASS AndroidELF sscanf+vsscanf GP/FP/stack binary128");
+    println!(
+        "bionic-scanf-facade: PASS AndroidELF sscanf+vsscanf+fscanf FILE cursor GP/FP/stack binary128"
+    );
     Ok(())
 }
 fn main() -> ExitCode {

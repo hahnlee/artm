@@ -32,7 +32,7 @@ for symbol in clock_gettime nanosleep sysconf; do
     "$project_root/tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv" ||
     fail "libc import classification drift: $symbol"
 done
-for pair in _SC_PAGESIZE:39 _SC_PAGE_SIZE:40 _SC_NPROCESSORS_CONF:96 _SC_NPROCESSORS_ONLN:97; do
+for pair in _SC_PAGESIZE:39 _SC_PAGE_SIZE:40 _SC_NPROCESSORS_CONF:96 _SC_NPROCESSORS_ONLN:97 _SC_PHYS_PAGES:98 _SC_AVPHYS_PAGES:99; do
   name="${pair%%:*}"
   value="${pair##*:}"
   awk -F '\t' -v wanted="$name" -v expected="$value" \
@@ -80,6 +80,7 @@ ___error
 ___udivti3
 _asctime_r
 _clock
+_clock_getres
 _clock_gettime
 _ctime
 _darwin_art_bionic_errno_set_from_darwin
@@ -160,4 +161,4 @@ CARGO_TARGET_DIR="$temp_root/cargo-target" cargo clippy --quiet \
   --manifest-path "$script_dir/Cargo.toml" -- -D warnings
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
 
-echo 'bionic-time-facade: PASS AndroidELF imports=5 clocks=5 timeval=64-bit-usec nanosleep-EINTR sysconf=4 closed-resolver'
+echo 'bionic-time-facade: PASS AndroidELF imports=5 clocks=5 timeval=64-bit-usec nanosleep-EINTR sysconf=6 closed-resolver'

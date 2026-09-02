@@ -19,6 +19,12 @@ const MAX_STREAM_BYTES: usize = 16 * 1024 * 1024;
 pub struct AndroidFile {
     opaque: [u8; 152],
 }
+type ScanCallback = unsafe extern "C" fn(
+    input: *const c_char,
+    length: usize,
+    context: *mut c_void,
+    consumed: *mut usize,
+) -> c_int;
 unsafe extern "C" {
     static mut darwin_art_bionic___sF: [AndroidFile; 3];
     fn darwin_art_bionic_errno_store(value: i32);
@@ -1111,4 +1117,70 @@ pub extern "C" fn darwin_art_bionic_stdio_clearerr_core(f: *mut AndroidFile) {
         stream.error = false;
         stream.eof = false;
     });
+}
+
+#[unsafe(no_mangle)]
+/// Runs a Bionic scanner while holding the provider-owned FILE cursor lease.
+///
+/// # Safety
+/// `file` must be null or a live provider token. `callback`, when present,
+/// must obey the callback ABI and may read the NUL-terminated input only for
+/// the duration of this call. `context` is owned by the caller.
+pub unsafe extern "C" fn darwin_art_bionic_stdio_scan_core(
+    file: *mut AndroidFile,
+    callback: Option<ScanCallback>,
+    context: *mut c_void,
+) -> c_int {
+    let Some(callback) = callback else {
+        errno(EINVAL);
+        return EOF;
+    };
+    with_stream(file, EOF, |stream| {
+        orient_byte(stream);
+        if !stream.readable {
+            stream.error = true;
+            errno(EBADF);
+            return EOF;
+        }
+
+        let had_pushback = stream.pushback.is_some();
+        let remaining = stream.data.len().saturating_sub(stream.position);
+        let Some(input_length) = remaining.checked_add(usize::from(had_pushback)) else {
+            stream.error = true;
+            errno(EOVERFLOW);
+            return EOF;
+        };
+        let Some(capacity) = input_length.checked_add(1) else {
+            stream.error = true;
+            errno(EOVERFLOW);
+            return EOF;
+        };
+        let mut input = Vec::with_capacity(capacity);
+        if let Some(byte) = stream.pushback {
+            input.push(byte);
+        }
+        input.extend_from_slice(&stream.data[stream.position..]);
+        input.push(0);
+
+        let mut consumed = 0_usize;
+        // SAFETY: the callback and context satisfy this function's contract;
+        // input and consumed remain live and uniquely borrowed for the call.
+        let result =
+            unsafe { callback(input.as_ptr().cast(), input_length, context, &mut consumed) };
+        if consumed > input_length {
+            stream.error = true;
+            errno(EIO);
+            return EOF;
+        }
+
+        if had_pushback && consumed != 0 {
+            stream.pushback = None;
+            consumed -= 1;
+        }
+        stream.position += consumed;
+        if stream.pushback.is_none() && consumed == remaining {
+            stream.eof = true;
+        }
+        result
+    })
 }

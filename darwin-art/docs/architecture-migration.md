@@ -219,3 +219,57 @@ SIGSEGV and reaches repeated GPU SurfaceView composition (`720x1280`, then
 `684x276`) with EGL/Metal submissions. The visible window currently reaches
 the Unity/Crossy splash surface, but a first gameplay frame is not yet proven;
 the next gate is Unity scene/bootstrap progress and frame-content evidence.
+
+## Progress — 2026-09-02 Crossy Road device capability snapshot
+
+The filesystem facade now exposes a bounded read-only Android device view for
+native hardware probing: synthetic `/proc/cpuinfo`, `/proc/meminfo`,
+`/proc/self/{status,statm}`, CPU possible/present/online masks, per-CPU
+capacity/frequency files, and stable `stat` metadata. The values are shared by
+one capability contract (8 virtual CPUs, 8 GiB memory) rather than leaking
+Darwin procfs/sysfs. Native `sysconf` now serves page size, processor counts,
+and physical/available page counts from that same contract.
+
+Facade tests (14), time facade audit, provider closure, and graphics-link audit
+pass. A rebuilt Crossy run confirms the synthetic files are opened and read,
+but Unity still logs `SystemInfo ... Cores = 0, Memory = 0mb`; no crash or
+first gameplay frame is proven yet. The next investigation is the Unity
+hardware-query call path (resolver/selector or parser), followed by lifecycle
+callbacks once the device values are visible.
+
+## Progress — 2026-09-02 Crossy Road FILE scanning and topology
+
+The native `fscanf@LIBC` imports used by Unity are now bridged generically with
+an Android AAPCS64 variadic entry point and a provider-owned `FILE` cursor. The
+scanner commits only the bytes consumed by the Bionic parser, so `fopen`, scan,
+and `fclose` share the same guest VFS without falling back to Darwin stdio.
+The standalone ARM64 fixture passes integer, string, and split-cursor scans
+under ASan/UBSan/TSan; a runtime trace showed Crossy reading every synthetic
+CPU capacity/frequency file successfully.
+
+The synthetic topology now models four lower-capacity and four higher-capacity
+ARM cores (512/1.8 GHz and 1024/2.4 GHz) while retaining the bounded 8 GiB
+memory snapshot. Crossy reaches repeated 720x1280 and 684x276 GPU SurfaceView
+Metal submissions without an ELF/JNI crash. Unity's diagnostic line still
+reports `Cores = 0, Memory = 0mb`, so this remains a device-query compatibility
+issue rather than a success claim; a first gameplay frame and content hash
+still require a follow-up lifecycle/scene gate.
+
+## Progress — 2026-09-02 Crossy Road native hardware parser audit
+
+The Android AAPCS64 `fscanf` bridge now demonstrably parses Unity's per-CPU
+capacity and frequency files, so formatted input is no longer the device-query
+blocker. The failing trace still used homogeneous `1024`/`2400000` values for
+all CPUs; the current provider and rebuilt graphics closure instead expose a
+4+4 big.LITTLE snapshot (`512`/`1800000`, `1024`/`2400000`). Re-run Crossy
+against that closure before changing the topology contract again.
+
+Static inspection of Unity 6000.3 confirms that its memory reader opens
+`/proc/meminfo`, matches `MemTotal:`, parses the numeric kB value, and converts
+it to bytes. The current synthetic format satisfies that contract, but the
+failing trace contains no `/proc/meminfo` open. The next narrow diagnostic is
+therefore entry/result tracing at the Bionic `fopen` boundary, not another
+meminfo-format change. `Cores = 0, Memory = 0mb` did not stop the render loop:
+the same run continued publishing EGL buffers and Metal compositions without
+a SIGSEGV/abort marker. Those swaps prove a live Unity surface, but not yet a
+gameplay-content frame; capture and pixel/content evidence remain required.
