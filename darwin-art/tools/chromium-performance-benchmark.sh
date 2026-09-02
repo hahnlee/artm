@@ -9,6 +9,8 @@ apk="${1:-}"
 event_count="${2:-100}"
 delay_ms="${3:-50}"
 hold_ms="${4:-18}"
+tap_x="${DARWIN_ART_BENCHMARK_X:-8}"
+tap_y="${DARWIN_ART_BENCHMARK_Y:-8}"
 
 [[ -n "$apk" && -f "$apk" ]] || {
   echo "usage: $0 CHROME_APK [TAP_COUNT=100] [INTERVAL_MS=50] [HOLD_MS=18]" >&2
@@ -26,7 +28,7 @@ unset DARWIN_ART_DEBUG_INPUT_LATENCY DARWIN_ART_DEBUG_FRAME_TIMING \
 
 sequence="0,0,0"
 for ((index = 0; index < event_count; index++)); do
-  sequence+=";180,320,$delay_ms"
+  sequence+=";$tap_x,$tap_y,$delay_ms"
 done
 
 # Keep each run isolated from an existing Chrome profile. The launcher owns

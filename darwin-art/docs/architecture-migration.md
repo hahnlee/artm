@@ -102,3 +102,19 @@ blocking Java `MessageQueue.nativePollOnce`: the owner-thread nonblocking poll
 enters a Chromium native-fd callback taking about `1.83 s` (plus a `0.63 s`
 startup callback). The next optimization target is therefore callback
 handoff/startup work while retaining the Android owner-thread sequence.
+
+## Progress — 2026-09-02 final validation
+
+The stable benchmark uses an inert window coordinate `(8,8)` so repeated input
+does not open Chrome selection/action-mode UI. It passed 100 taps with 204
+owner-thread samples and no diagnostic switches: p50 `167 us`, p95 `420 us`,
+p99 `41759 us`, max `1813408 us`. Artifact:
+`/tmp/darwin-art-chromium-benchmark.pVrQuT`.
+
+Two experiments were rejected: reducing the native callback drain budget from
+8 to 1 did not improve latency (p50 `256 us`, p95 `12366 us`), and skipping
+HWUI session creation in service children caused reproducible ART
+`hwuiTask` detach aborts under the 100-tap run. Both were reverted; the
+Android owner-thread, EGL/IOSurface, and service-process paths remain intact.
+The latest graphics-link audit and `darwin-art-host` tests pass, and the full
+unmodified Chrome acceptance remains green in `run.FDPaLM`.
