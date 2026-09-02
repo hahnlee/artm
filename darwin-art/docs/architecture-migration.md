@@ -1861,3 +1861,29 @@ directories were moved to the recoverable macOS Trash archive
 about 66 MiB for the retained acceptance artifacts, with no tab-graphics run
 directories left. The archive can be emptied later once the retained evidence
 is no longer needed.
+
+## 2026-09-02 Chromium optimization assessment
+
+The acceptance run leaves clear optimization headroom without changing
+Android sequence affinity. The largest issue is the cold-start
+`MessagePumpAndroid` owner poll (about 2.2 s p95 outlier); Java/Looper work
+must remain on the ART owner, so the safe direction is prewarming the Chrome
+owner/process state and moving only independent native/service initialization
+out of the first interactive pulse. The steady-state input path is already
+about 8–10 ms p50.
+
+The next steady-state wins are an event-driven AppKit-to-owner wake (reducing
+the periodic pump quantum), a producer-side dirty-generation gate before
+enqueueing scanout, and direct IOSurface/MTLSharedEvent fence readiness. The
+latest interaction telemetry (`requests=4440`, `coalesced=3995`,
+`fence_gated=121`, `present_calls=2801`) shows roughly 90% redundant requests
+are already collapsed, but the remaining dispatch/locking work can be avoided
+before it reaches AppKit. These changes preserve the Android UI-thread model;
+they do not move ViewRoot, Choreographer, or Chromium owner-affine callbacks
+to worker threads.
+
+The current numbers were collected with diagnostics enabled and only four
+input-to-pulse samples, so they are a direction-finding baseline rather than
+a production benchmark. A follow-up benchmark should disable verbose logging,
+send at least 100 warm physical events, and record per-frame jank/drop
+histograms from enqueue → ViewRoot dispatch → vsync → Metal completion.
