@@ -1591,12 +1591,13 @@ impl LoadedElf {
                         .checked_add(load.memory_size)
                         .is_some_and(|end| end == symbol.value)
                 });
-            if let Err(error) = if is_load_end_marker {
-                Ok(())
-            } else {
-                self.require_loaded_range(symbol.value, symbol.size.max(1), None, "defined symbol")
-            } {
-                return Err(error);
+            if !is_load_end_marker {
+                self.require_loaded_range(
+                    symbol.value,
+                    symbol.size.max(1),
+                    None,
+                    "defined symbol",
+                )?;
             }
             let pointer_size = usize::try_from(symbol.size)
                 .map_err(|_| LoadError::Bounds("defined symbol size"))?;

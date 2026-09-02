@@ -432,6 +432,11 @@ impl DirectoryTable {
 pub struct Facade {
     prefix: MountTable,
     broker: ReadOnlyBroker,
+    // Native APK code sometimes receives the installer-owned host path from
+    // ApplicationInfo and opens it directly (Unity's central-directory scan
+    // is one example). Keep this as a single capability, never a general host
+    // path escape: only the exact path supplied by the launcher is accepted.
+    authorized_host_apk: Option<PathBuf>,
     cwd: Mutex<Vec<u8>>,
     descriptors: Mutex<DescriptorTable>,
     overlay: Mutex<OverlayState>,
@@ -493,9 +498,13 @@ impl Facade {
         {
             return Err("invalid private data root");
         }
+        let authorized_host_apk = std::env::var_os("DARWIN_ART_APK_APP_RESOURCE_APK")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute() && path.is_file());
         Ok(Self {
             prefix,
             broker,
+            authorized_host_apk,
             cwd: Mutex::new(initial_cwd.normalized_path),
             descriptors: Mutex::new(DescriptorTable::default()),
             overlay: Mutex::new(OverlayState::default()),
@@ -861,6 +870,32 @@ impl Facade {
         }
         if Self::proc_self_maps(path) {
             return self.open_proc_self_maps(flags);
+        }
+        // A native library may open the APK by the host path returned through
+        // ApplicationInfo. Treat that path as a read-only capability and feed
+        // it through the normal descriptor table so read/pread/mmap/fstat all
+        // retain the Android virtual-fd semantics.
+        if self
+            .authorized_host_apk
+            .as_ref()
+            .is_some_and(|apk| apk.as_os_str().as_bytes() == path)
+        {
+            if let Err(error) = self.validate_immutable_flags(flags) {
+                return self.fail(error);
+            }
+            let apk = self.authorized_host_apk.as_ref().expect("checked above");
+            let file = match File::open(apk) {
+                Ok(file) => file,
+                Err(error) => return self.fail_io(&error),
+            };
+            let mut descriptors = match self.descriptors.lock() {
+                Ok(descriptors) => descriptors,
+                Err(_) => return self.fail_capability(),
+            };
+            return match descriptors.insert(Descriptor::File(file)) {
+                Ok(fd) => fd,
+                Err(()) => self.fail(ANDROID_EMFILE),
+            };
         }
         let resolution = match self.resolve(path) {
             Ok(resolution) => resolution,
@@ -1517,6 +1552,23 @@ impl Facade {
         if let Some(kind) = Self::random_device(path) {
             // SAFETY: the Android ABI requires one writable 128-byte stat object.
             unsafe { status.write(random_device_stat(kind)) };
+            return 0;
+        }
+        if self
+            .authorized_host_apk
+            .as_ref()
+            .is_some_and(|apk| apk.as_os_str().as_bytes() == path)
+        {
+            let apk = self.authorized_host_apk.as_ref().expect("checked above");
+            let metadata = match if no_follow {
+                fs::symlink_metadata(apk)
+            } else {
+                fs::metadata(apk)
+            } {
+                Ok(metadata) => metadata,
+                Err(error) => return self.fail_io(&error),
+            };
+            unsafe { status.write(metadata_to_android(&metadata)) };
             return 0;
         }
         let resolution = match self.resolve(path) {

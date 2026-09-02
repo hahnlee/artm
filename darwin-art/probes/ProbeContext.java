@@ -846,6 +846,40 @@ public final class ProbeContext extends ContextWrapper {
         return new File[] {getExternalFilesDir(type)};
     }
 
+    /**
+     * OBB storage is external shared storage, not the app-private external
+     * files subtree. ContextImpl exposes one package-scoped directory at
+     * /storage/emulated/0/Android/obb/<package>; keep the guest path visible to
+     * Java while mirroring it into this profile's writable host capability.
+     */
+    private File obbPath() {
+        String configuredExternal = System.getenv("DARWIN_ART_APK_APP_EXTERNAL_DIR");
+        String guestRoot = "/storage/emulated/0";
+        if (configuredExternal != null && !configuredExternal.isEmpty()) {
+            int marker = configuredExternal.indexOf("/Android/data/");
+            if (marker > 0) guestRoot = configuredExternal.substring(0, marker);
+        }
+        String relative = "Android/obb/" + packageName;
+        File hostData = new File(System.getenv("DARWIN_ART_APK_APP_DATA_DIR") == null
+                ? new File(System.getProperty("java.io.tmpdir"), "darwin-art-app-data").getPath()
+                : System.getenv("DARWIN_ART_APK_APP_DATA_DIR"));
+        File hostResult = new File(new File(hostData, "external"), relative);
+        hostResult.mkdirs();
+        File guestResult = new File(new File(guestRoot), relative);
+        guestResult.mkdirs();
+        return guestResult;
+    }
+
+    @Override
+    public File getObbDir() {
+        return obbPath();
+    }
+
+    @Override
+    public File[] getObbDirs() {
+        return new File[] {getObbDir()};
+    }
+
     @Override
     public File getExternalCacheDir() {
         return appDataPath("external/cache");

@@ -43,8 +43,13 @@ def main() -> int:
     required_native = [
         "GetVersion",
         "FindClass",
+        "FromReflectedMethod",
+        "FromReflectedField",
+        "ToReflectedMethod",
+        "ToReflectedField",
         "GetSuperclass",
         "IsAssignableFrom",
+        "Throw",
         "ThrowNew",
         "ExceptionOccurred",
         "ExceptionDescribe",

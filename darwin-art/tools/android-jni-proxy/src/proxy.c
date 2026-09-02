@@ -103,6 +103,42 @@ static void* ProxyFindClass(void* raw_env, const char* name) {
   return proxy->backend.find_class(proxy->backend.context, name);
 }
 
+static void* ProxyFromReflectedMethod(void* raw_env, void* method) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_FromReflectedMethod);
+  if (raw == NULL || method == NULL) return NULL;
+  return ((void* (*)(void*, void*))raw)(host_env, method);
+}
+
+static void* ProxyFromReflectedField(void* raw_env, void* field) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_FromReflectedField);
+  if (raw == NULL || field == NULL) return NULL;
+  return ((void* (*)(void*, void*))raw)(host_env, field);
+}
+
+static void* ProxyToReflectedMethod(void* raw_env, void* clazz, void* method,
+                                    uint8_t is_static) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_ToReflectedMethod);
+  if (raw == NULL || clazz == NULL || method == NULL) return NULL;
+  return ((void* (*)(void*, void*, void*, uint8_t))raw)(host_env, clazz, method,
+                                                        is_static);
+}
+
+static void* ProxyToReflectedField(void* raw_env, void* clazz, void* field,
+                                   uint8_t is_static) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_ToReflectedField);
+  if (raw == NULL || clazz == NULL || field == NULL) return NULL;
+  return ((void* (*)(void*, void*, void*, uint8_t))raw)(host_env, clazz, field,
+                                                        is_static);
+}
+
 static void* ProxyGetSuperclass(void* raw_env, void* clazz) {
   struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
   void* host_env = HostEnv(proxy);
@@ -118,6 +154,17 @@ static uint8_t ProxyIsAssignableFrom(void* raw_env, void* clazz1,
   RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_IsAssignableFrom);
   if (raw == NULL || clazz1 == NULL || clazz2 == NULL) return 0;
   return ((uint8_t (*)(void*, void*, void*))raw)(host_env, clazz1, clazz2);
+}
+
+static int32_t ProxyThrow(void* raw_env, void* throwable) {
+  struct DarwinArtJniProxy* proxy = EnvOwner(raw_env);
+  if (proxy == NULL || throwable == NULL) return DARWIN_ART_JNI_ERR;
+  void* host_env = HostEnv(proxy);
+  RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_Throw);
+  if (raw == NULL) return DARWIN_ART_JNI_ERR;
+  const int32_t result = ((int32_t (*)(void*, void*))raw)(host_env, throwable);
+  if (result == DARWIN_ART_JNI_OK) proxy->exception_pending = 1;
+  return result;
 }
 
 static int32_t ProxyThrowNew(void* raw_env, void* clazz, const char* message) {
@@ -1124,9 +1171,15 @@ static int32_t ProxyDetachCurrentThread(void* raw_vm) {
 static const RawJniSlot kNativeTable[DARWIN_ART_JNI_NATIVE_SLOT_COUNT] = {
     [DARWIN_ART_JNI_SLOT_GetVersion] = (RawJniSlot)ProxyGetVersion,
     [DARWIN_ART_JNI_SLOT_FindClass] = (RawJniSlot)ProxyFindClass,
+    [DARWIN_ART_JNI_SLOT_FromReflectedMethod] =
+        (RawJniSlot)ProxyFromReflectedMethod,
+    [DARWIN_ART_JNI_SLOT_FromReflectedField] = (RawJniSlot)ProxyFromReflectedField,
+    [DARWIN_ART_JNI_SLOT_ToReflectedMethod] = (RawJniSlot)ProxyToReflectedMethod,
+    [DARWIN_ART_JNI_SLOT_ToReflectedField] = (RawJniSlot)ProxyToReflectedField,
     [DARWIN_ART_JNI_SLOT_GetSuperclass] = (RawJniSlot)ProxyGetSuperclass,
     [DARWIN_ART_JNI_SLOT_IsAssignableFrom] =
         (RawJniSlot)ProxyIsAssignableFrom,
+    [DARWIN_ART_JNI_SLOT_Throw] = (RawJniSlot)ProxyThrow,
     [DARWIN_ART_JNI_SLOT_ThrowNew] = (RawJniSlot)ProxyThrowNew,
     [DARWIN_ART_JNI_SLOT_ExceptionOccurred] =
         (RawJniSlot)ProxyExceptionOccurred,

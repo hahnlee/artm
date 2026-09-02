@@ -5,8 +5,13 @@
 #define DARWIN_ART_JNI_INVOKE_SLOT_COUNT 8u
 #define DARWIN_ART_JNI_SLOT_GetVersion 4u
 #define DARWIN_ART_JNI_SLOT_FindClass 6u
+#define DARWIN_ART_JNI_SLOT_FromReflectedMethod 7u
+#define DARWIN_ART_JNI_SLOT_FromReflectedField 8u
+#define DARWIN_ART_JNI_SLOT_ToReflectedMethod 9u
+#define DARWIN_ART_JNI_SLOT_ToReflectedField 12u
 #define DARWIN_ART_JNI_SLOT_GetSuperclass 10u
 #define DARWIN_ART_JNI_SLOT_IsAssignableFrom 11u
+#define DARWIN_ART_JNI_SLOT_Throw 13u
 #define DARWIN_ART_JNI_SLOT_ThrowNew 14u
 #define DARWIN_ART_JNI_SLOT_ExceptionOccurred 15u
 #define DARWIN_ART_JNI_SLOT_ExceptionDescribe 16u

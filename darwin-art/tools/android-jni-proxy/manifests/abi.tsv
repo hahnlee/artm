@@ -2,8 +2,13 @@ entry	table	slot	android_signature	pcs	status
 JNI_OnLoad	export	-	jint(JavaVM*,void*)	direct-register-only	fixture-entry
 GetVersion	JNIEnv	4	jint(JNIEnv*)	direct-register-only	implemented
 FindClass	JNIEnv	6	jclass(JNIEnv*,const-char*)	direct-register-only	implemented
+FromReflectedMethod	JNIEnv	7	jmethodID(JNIEnv*,jobject)	direct-register-only	forward-current-ART-env
+FromReflectedField	JNIEnv	8	jfieldID(JNIEnv*,jobject)	direct-register-only	forward-current-ART-env
+ToReflectedMethod	JNIEnv	9	jobject(JNIEnv*,jclass,jmethodID,jboolean)	direct-register-only	forward-current-ART-env
 GetSuperclass	JNIEnv	10	jclass(JNIEnv*,jclass)	direct-register-only	forward-current-ART-env
 IsAssignableFrom	JNIEnv	11	jboolean(JNIEnv*,jclass,jclass)	direct-register-only	forward-current-ART-env
+ToReflectedField	JNIEnv	12	jobject(JNIEnv*,jclass,jfieldID,jboolean)	direct-register-only	forward-current-ART-env
+Throw	JNIEnv	13	jint(JNIEnv*,jthrowable)	direct-register-only	forward-current-ART-env
 ThrowNew	JNIEnv	14	jint(JNIEnv*,jclass,const-char*)	direct-register-only	implemented
 ExceptionOccurred	JNIEnv	15	jthrowable(JNIEnv*)	direct-register-only	forward-current-ART-env
 ExceptionDescribe	JNIEnv	16	void(JNIEnv*)	direct-register-only	forward-current-ART-env

@@ -199,3 +199,23 @@ the first game frame. This is now a Unity/JNI or graphics lifecycle contract
 to diagnose, not an unresolved ELF import. `getPackageCodePath()` is mapped to
 the mounted APK path to avoid a framework `NameNotFoundException` during that
 bootstrap.
+
+## Progress — 2026-09-02 Crossy Road JNI/storage boundary
+
+Forwarded the standard JNI exception slot `Throw` (slot 13) to the current ART
+environment and added `Context.getObbDir(s)` backed by the profile's authorized
+`Android/obb/<package>` subtree. The APK runtime DEX expectations are now
+baseline `960` methods and button `1353` methods. The Bionic filesystem facade
+also accepts the exact launcher-provided APK path as a read-only capability, so
+Unity's `ApkAddCentralDirectory` can open its unmodified `base.apk` without a
+host-path escape. JNI proxy audit, facade tests, graphics-link audit, formatting,
+and diff checks pass.
+
+Sol's address-level diagnosis found the next null jump in Unity's reflection
+bridge: `JNIEnv` slot 7, `FromReflectedMethod`, was absent. It is now forwarded
+to ART; the related reflection slots 8/9/12 are covered as well. A clean
+Crossy run no longer reports `ApkAddCentralDirectory` failure or the slot-7
+SIGSEGV and reaches repeated GPU SurfaceView composition (`720x1280`, then
+`684x276`) with EGL/Metal submissions. The visible window currently reaches
+the Unity/Crossy splash surface, but a first gameplay frame is not yet proven;
+the next gate is Unity scene/bootstrap progress and frame-content evidence.
