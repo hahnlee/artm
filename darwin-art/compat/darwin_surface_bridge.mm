@@ -415,6 +415,16 @@ NSEventModifierFlags ModifierFlagForKey(unsigned short code) {
     _metalLayer = [CAMetalLayer layer];
     _metalLayer.device = device;
     _metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    // Android's window and child SurfaceControl buffers are authored in the
+    // sRGB display space.  AppKit otherwise leaves CAMetalLayer's color
+    // space unspecified, allowing the window server to apply a different
+    // display profile from the IOSurface/Skia path.  That made Chrome's
+    // toolbar surfaces acquire subtly different red/blue balance.  Keep the
+    // presentation target explicitly sRGB so every Android surface follows
+    // one color transform through scanout.
+    CGColorSpaceRef srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    _metalLayer.colorspace = srgb;
+    if (srgb != nullptr) CGColorSpaceRelease(srgb);
     // The current presenter uses the CAMetalLayer drawable as a blit
     // destination. Metal forbids blits into framebuffer-only textures.
     _metalLayer.framebufferOnly = NO;

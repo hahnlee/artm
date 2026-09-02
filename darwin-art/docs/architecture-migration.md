@@ -118,3 +118,21 @@ HWUI session creation in service children caused reproducible ART
 Android owner-thread, EGL/IOSurface, and service-process paths remain intact.
 The latest graphics-link audit and `darwin-art-host` tests pass, and the full
 unmodified Chrome acceptance remains green in `run.FDPaLM`.
+
+## Progress — 2026-09-02 Chrome surface color audit
+
+Investigated the apparent address-bar/bottom-toolbar hue split in the Chrome
+capture. The two regions are authored by Chrome's Material surface roles (the
+sampled colors are approximately `236,227,228` and `228,227,236`), rather
+than being a channel swap introduced by the host compositor. The runtime now
+keeps the presentation contract explicit: `CAMetalLayer.colorspace` and the
+Skia Metal render target are both sRGB. An experiment changing the drawable
+pixel format to `BGRA8Unorm_sRGB` caused the Chromium child Surface to vanish
+and was immediately reverted; the stable drawable remains `BGRA8Unorm`.
+
+Validation: incremental graphics link/audit, `cargo fmt --all -- --check`,
+and `git diff --check` pass. The post-change acceptance reached the HTTPS,
+input, download, media, and E2E reports before the known host termination
+tail; no color-space or graphics-link error was reported. Do not force the two
+Chrome surfaces to one RGB value in the runtime: that would override the APK's
+Material You theme rather than repair Android compatibility.

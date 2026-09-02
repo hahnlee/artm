@@ -88,7 +88,7 @@ DarwinArtGpuFrame* darwin_art_surface_gpu_begin(DarwinArtSurface* surface) {
         surface->width, surface->height, texture_info);
     sk_sp<SkSurface> sk_surface = SkSurfaces::WrapBackendRenderTarget(
         state->context.get(), target, kTopLeft_GrSurfaceOrigin,
-        kBGRA_8888_SkColorType, nullptr, nullptr);
+        kBGRA_8888_SkColorType, SkColorSpace::MakeSRGB(), nullptr);
     if (sk_surface == nullptr) return nullptr;
     auto* frame = new (std::nothrow) DarwinArtGpuFrame();
     if (frame == nullptr) return nullptr;
