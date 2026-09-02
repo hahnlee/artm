@@ -166,3 +166,11 @@ ARM64 APK, or the complete base/config split set and its external data), then
 will exercise native library loading, SurfaceView/GLES/Vulkan capability
 negotiation, filesystem assets, physical input, and automatic landscape
 orientation.
+
+## Progress — 2026-09-02 Minecraft acquisition CLI check
+
+The host has `adb` and `bundletool`, but no connected Android device and no
+authenticated Google Play download CLI or cached Minecraft package. `adb` can
+pull an installed, user-owned package; `bundletool` only processes an existing
+`.aab`/`.apks` and cannot fetch Play Store content. No third-party APK mirror
+was used.
