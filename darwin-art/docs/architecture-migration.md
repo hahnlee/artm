@@ -82,3 +82,23 @@ The generation gate is therefore correctness-green and removes most redundant
 GPU/AppKit submissions, but it is not yet the final benchmark: collect at
 least 100 warm physical events without diagnostic logging, then optimize the
 remaining cold `MessagePumpAndroid` startup tail.
+
+## Progress — 2026-09-02 benchmark and cold-tail diagnosis
+
+Added `tools/chromium-performance-benchmark.sh`, which generates repeated
+MotionEvent DOWN/UP pairs and enables only aggregate host-side timing through
+`DARWIN_ART_BENCHMARK=1`; native per-event diagnostics remain disabled. The
+100-tap run against the unmodified APK passed with 204 owner-thread samples:
+p50 `232 us`, p95 `12157 us`, p99 `37542 us`, max `1802737 us`.
+Artifact: `/tmp/darwin-art-chromium-benchmark.kVByz6`.
+
+The latest full Chromium acceptance also passed after the benchmark hook:
+`_build/chromium-android-acceptance/run.FDPaLM` (HTTPS/macOS trust, physical
+keyboard, three tabs, renderer/GPU services, Binder FD, WebGL ANGLE-Metal,
+download/content URI, and WebM/Opus/CoreAudio).
+
+A single diagnostic cold run shows the remaining multi-second tail is not a
+blocking Java `MessageQueue.nativePollOnce`: the owner-thread nonblocking poll
+enters a Chromium native-fd callback taking about `1.83 s` (plus a `0.63 s`
+startup callback). The next optimization target is therefore callback
+handoff/startup work while retaining the Android owner-thread sequence.

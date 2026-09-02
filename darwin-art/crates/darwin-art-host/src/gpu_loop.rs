@@ -47,7 +47,13 @@ pub(super) fn run(
     }
     let mut frames_presented = 1_u64;
     let mut loop_error: Option<HostError> = None;
-    let debug_latency = std::env::var_os("DARWIN_ART_DEBUG_INPUT_LATENCY").is_some();
+    // Benchmark mode collects the same owner-thread latency samples as the
+    // diagnostic switch, but deliberately does not enable the native bridge's
+    // per-event logging. This keeps a repeated-input run representative of a
+    // release launch while still emitting one aggregate summary at shutdown.
+    let benchmark_latency = std::env::var_os("DARWIN_ART_BENCHMARK").is_some();
+    let debug_latency =
+        std::env::var_os("DARWIN_ART_DEBUG_INPUT_LATENCY").is_some() || benchmark_latency;
     let mut last_input_dispatch: Option<Instant> = None;
     let mut frame_latencies_us = Vec::new();
     let test_config = GpuTestConfig::from_env();
@@ -336,6 +342,9 @@ pub(super) fn run(
                 if status != 0 {
                     loop_error = Some(HostError::RuntimeFailed(status));
                     break;
+                }
+                if debug_latency {
+                    last_input_dispatch = Some(Instant::now());
                 }
                 frames_presented += 1;
                 if let Err(error) = pump_frame_with_latency(
