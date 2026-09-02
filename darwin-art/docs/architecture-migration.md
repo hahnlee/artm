@@ -1849,3 +1849,15 @@ WebGL phase ended at `requests=3360`, `fence_gated=36`, `coalesced=3005`,
 `present_calls=2253`. No crash, missing SharedImage factory, or Dawn provider
 failure was observed. The result is functionally green, but the cold
 owner-affine startup poll remains the dominant latency tail to optimize next.
+
+## 2026-09-02 run-log cleanup
+
+The repeated Chromium acceptance runs had accumulated approximately 2.0 GiB
+under `_build/chromium-android-acceptance` and 1.7 GiB under
+`_build/chromium-tab-graphics-acceptance`. The documented evidence runs
+`run.8Qc6Qn` and `run.V08MPT` were retained; all other temporary `run.*`
+directories were moved to the recoverable macOS Trash archive
+`/Users/hahnlee/.Trash/darwin-art-old-runs-20260902`. Workspace usage is now
+about 66 MiB for the retained acceptance artifacts, with no tab-graphics run
+directories left. The archive can be emptied later once the retained evidence
+is no longer needed.
