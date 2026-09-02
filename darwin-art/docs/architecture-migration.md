@@ -174,3 +174,8 @@ authenticated Google Play download CLI or cached Minecraft package. `adb` can
 pull an installed, user-owned package; `bundletool` only processes an existing
 `.aab`/`.apks` and cannot fetch Play Store content. No third-party APK mirror
 was used.
+
+The previously installed `apkeep 1.0.0` was also checked. Its APKPure source
+returned no Minecraft versions or artifact, while its Google Play source
+stopped at the required email/AAS-token prompt. No credentials were present,
+so acquisition remains the only blocker for the end-to-end Minecraft gate.
