@@ -153,3 +153,16 @@ so input scaling follows the rotated drawable without a second coordinate
 transform. GPU acceptance now accepts either portrait or its landscape
 counterpart. `build-button-dex`, the APK runtime audit, graphics-link audit,
 host tests, formatting, and diff checks pass.
+
+## Progress — 2026-09-02 Minecraft compatibility gate
+
+The Minecraft target is intentionally external to the repository: the runner
+already accepts a user-provided APK path and installs it into the private
+profile store without rewriting or committing the APK. A local search found
+no Minecraft APK, split APK set, OBB, or connected Android device, so an
+end-to-end Minecraft launch cannot yet be verified. The next gate requires a
+legitimately acquired `com.mojang.minecraftpe` package (preferably a universal
+ARM64 APK, or the complete base/config split set and its external data), then
+will exercise native library loading, SurfaceView/GLES/Vulkan capability
+negotiation, filesystem assets, physical input, and automatic landscape
+orientation.
