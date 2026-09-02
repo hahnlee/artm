@@ -23,7 +23,9 @@ const ANDROID_MAP_PRIVATE: i32 = 0x02;
 const ANDROID_MAP_SHARED: i32 = 0x01;
 const ANDROID_MAP_FIXED: i32 = 0x10;
 const ANDROID_MAP_ANONYMOUS: i32 = 0x20;
+const ANDROID_MAP_GROWSDOWN: i32 = 0x100;
 const ANDROID_MAP_NORESERVE: i32 = 0x4000;
+const ANDROID_MAP_STACK: i32 = 0x20000;
 const ANDROID_MREMAP_MAYMOVE: i32 = 0x1;
 
 const MAX_MAPPINGS: usize = 1024;
@@ -677,11 +679,26 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_mmap_core(
     }
     let fixed = flags & ANDROID_MAP_FIXED != 0;
     // MAP_NORESERVE changes the host's commit policy, not the mapping kind.
-    // V8 uses it for the multi-gigabyte sandbox cage reservation.
-    let mapping_flags = flags & !(ANDROID_MAP_FIXED | ANDROID_MAP_NORESERVE);
+    // V8 uses it for the multi-gigabyte sandbox cage reservation. Linux's
+    // MAP_STACK is likewise a compatibility hint. MAP_GROWSDOWN cannot be
+    // delegated to Darwin, but for a null-address anonymous stack request we
+    // can map the complete requested extent eagerly; accesses within the
+    // Android-owned stack then have the same permissions without host growth.
+    let stack_hints = ANDROID_MAP_STACK | ANDROID_MAP_GROWSDOWN;
+    let mapping_flags = flags & !(ANDROID_MAP_FIXED | ANDROID_MAP_NORESERVE | stack_hints);
+    let stack_mapping = flags & stack_hints != 0;
     let anonymous = mapping_flags == ANDROID_MAP_PRIVATE | ANDROID_MAP_ANONYMOUS
         || mapping_flags == ANDROID_MAP_SHARED | ANDROID_MAP_ANONYMOUS;
     let file_backed = mapping_flags == ANDROID_MAP_PRIVATE || mapping_flags == ANDROID_MAP_SHARED;
+    if stack_mapping
+        && (!address.is_null() || mapping_flags != (ANDROID_MAP_PRIVATE | ANDROID_MAP_ANONYMOUS))
+    {
+        if trace {
+            eprintln!("DARWIN VM: mmap rejected non-anonymous stack hints");
+        }
+        set_errno(ANDROID_EOPNOTSUPP);
+        return MAP_FAILED;
+    }
     if (!anonymous && !file_backed) || (anonymous && offset != 0) {
         if trace {
             eprintln!("DARWIN VM: mmap rejected unsupported address/flags/offset");

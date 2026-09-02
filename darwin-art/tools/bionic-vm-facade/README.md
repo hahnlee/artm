@@ -7,8 +7,12 @@ than part of the 160-symbol libc++ closure. A normally linked API35 fixture
 imports `mmap`, `mmap64`, `mremap`, `munmap`, `mprotect`, `madvise`, and `__errno`, all at
 the public `libc.so` `LIBC` symbol version.
 
-`mmap` and `mmap64` accept only a null address, nonzero length no greater than
-`PTRDIFF_MAX`, `MAP_PRIVATE|MAP_ANONYMOUS`, a zero offset, and `PROT_NONE/R/W/X`.
+`mmap` and `mmap64` accept a null address, nonzero length no greater than
+`PTRDIFF_MAX`, anonymous private/shared or resolver-backed file mappings, and
+`PROT_NONE/R/W/X`. Android `MAP_STACK` is treated as Linux's compatibility
+hint. A null-address anonymous `MAP_GROWSDOWN` stack is allocated at its full
+requested extent because Darwin has no equivalent automatic-growth contract;
+non-anonymous or fixed stack-hint combinations remain capability-closed.
 The anonymous fd is intentionally ignored and is never treated as a host fd.
 Android `MAP_ANONYMOUS=0x20` is rebuilt as Darwin `MAP_ANON=0x1000`; guest flags
 are never passed through. `MAP_FIXED`, shared, file-backed, ashmem, hints, and

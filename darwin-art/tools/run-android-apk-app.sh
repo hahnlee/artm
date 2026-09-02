@@ -70,6 +70,7 @@ descriptor="$(sed -n 's/^apk-app-runtime: .* descriptor=\([^ ]*\) .*/\1/p' <<<"$
 activities="$(sed -n 's/^apk-app-runtime: .* activities=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 activity_aliases="$(sed -n 's/^apk-app-runtime: .* activity_aliases=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 services="$(sed -n 's/^apk-app-runtime: .* services=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+service_metadata="$(sed -n 's/^apk-app-runtime: .* service_metadata=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 application_metadata="$(sed -n 's/^apk-app-runtime: .* application_metadata=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 version_code="$(sed -n 's/^apk-app-runtime: .* version_code=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 version_name="$(sed -n 's/^apk-app-runtime: .* version_name=\([^ ]*\) .*/\1/p' <<<"$metadata")"
@@ -80,7 +81,7 @@ label_res="$(sed -n 's/^apk-app-runtime: .* label_res=\([^ ]*\) .*/\1/p' <<<"$me
 icon="$(sed -n 's/^apk-app-runtime: .* icon=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 native_count="$(sed -n 's/^apk-app-runtime: .* native=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 native_root="$(sed -n 's/^apk-app-runtime: .* native_root=\([^ ]*\)$/\1/p' <<<"$metadata")"
-[[ -n "$package" && -n "$application" && -n "$activity" && -n "$launch_component" && -n "$descriptor" && -n "$activities" && -n "$activity_aliases" && -n "$services" && -n "$application_metadata" && -n "$version_code" && -n "$theme" && -n "$target_sdk" && -n "$label" && -n "$label_res" && -n "$icon" && -n "$native_count" && -n "$native_root" ]] || {
+[[ -n "$package" && -n "$application" && -n "$activity" && -n "$launch_component" && -n "$descriptor" && -n "$activities" && -n "$activity_aliases" && -n "$services" && -n "$service_metadata" && -n "$application_metadata" && -n "$version_code" && -n "$theme" && -n "$target_sdk" && -n "$label" && -n "$label_res" && -n "$icon" && -n "$native_count" && -n "$native_root" ]] || {
   echo "could not decode inspected APK metadata" >&2
   exit 65
 }
@@ -206,6 +207,7 @@ if [[ -z "$installed_record" && -n "$profile_mount" ]]; then
     if [[ "${DARWIN_ART_PACKAGED_RUNTIME:-0}" == "1" ]]; then
       codesign --verify --strict "$host"
     else
+      "$root/tools/declare-darwin-x18-abi.sh" "$host"
       codesign --force --sign - --options runtime \
         --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
     fi
@@ -239,6 +241,7 @@ if [[ -z "$installed_record" ]]; then
   if [[ "${DARWIN_ART_PACKAGED_RUNTIME:-0}" == "1" ]]; then
     codesign --verify --strict "$host"
   else
+    "$root/tools/declare-darwin-x18-abi.sh" "$host"
     codesign --force --sign - --options runtime \
       --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
   fi
@@ -338,6 +341,7 @@ export DARWIN_ART_APK_APP_DESCRIPTOR="$descriptor"
 export DARWIN_ART_APK_APP_ACTIVITIES="$activities"
 export DARWIN_ART_APK_APP_ACTIVITY_ALIASES="$activity_aliases"
 export DARWIN_ART_APK_APP_SERVICES="$services"
+export DARWIN_ART_APK_APP_SERVICE_METADATA="$service_metadata"
 export DARWIN_ART_APK_APP_METADATA="$application_metadata"
 export DARWIN_ART_APK_APP_VERSION_CODE="$version_code"
 export DARWIN_ART_APK_APP_VERSION_NAME="$version_name"
@@ -608,6 +612,7 @@ if [[ -n "$profile_mount" ]]; then
       DARWIN_ART_APK_APP_ACTIVITIES=none \
       DARWIN_ART_APK_APP_ACTIVITY_ALIASES=none \
       DARWIN_ART_APK_APP_SERVICES=none \
+      DARWIN_ART_APK_APP_SERVICE_METADATA=none \
       DARWIN_ART_APK_APP_METADATA=none \
       DARWIN_ART_APK_APP_VERSION_CODE=1 \
       DARWIN_ART_APK_APP_VERSION_NAME=1 \
@@ -624,6 +629,8 @@ if [[ -n "$profile_mount" ]]; then
       DARWIN_ART_ANDROID_SYSTEM_ROOT="$system_server_root/system" \
       DARWIN_ART_ANDROID_SYSTEM_NATIVE_DIR="$system_server_root/system/lib64" \
       DARWIN_ART_RUNTIME_HOST_FILES="$core_oj:$core_libart:$framework:$boot_tail:$support_dex" \
+      DARWIN_ART_DEBUG_SURFACECONTROL_CAPTURE_PATH="${DARWIN_ART_DEBUG_SURFACECONTROL_CAPTURE_PATH:-}" \
+      DARWIN_ART_DEBUG_SURFACECONTROL_CAPTURE_PIXELS="${DARWIN_ART_DEBUG_SURFACECONTROL_CAPTURE_PIXELS:-}" \
       "$profile_ctl" daemonize android.system "${system_server_command[@]}" \
     )"
     for _ in {1..100}; do

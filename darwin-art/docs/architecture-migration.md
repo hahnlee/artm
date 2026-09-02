@@ -273,3 +273,98 @@ meminfo-format change. `Cores = 0, Memory = 0mb` did not stop the render loop:
 the same run continued publishing EGL buffers and Metal compositions without
 a SIGSEGV/abort marker. Those swaps prove a live Unity surface, but not yet a
 gameplay-content frame; capture and pixel/content evidence remain required.
+
+## Progress — 2026-09-03 Crossy Road dynamic DEX/OAT fallback
+
+Native-library reuse now keys detached worker lookups by a stable loader
+namespace identity, allowing an already resident APK DSO to be leased when no
+live `JNIEnv` is available. Firebase's extracted `app_resources_lib.jar` also
+crosses the compatibility boundary generically: the guest private-data path is
+resolved to its authorized profile backing for `DexClassLoader`, and
+`UnixFileSystem` permits read-only `stat` only within that exact private root.
+
+The helper JAR then exposed an ART Darwin bug rather than an APK issue:
+`DlOpenOatFile::PreLoad()` terminated with `LOG(FATAL)` before the existing
+`ElfOatFile` fallback could run. Patch 0032 makes Darwin `PreLoad()` side-effect
+free; `Dlopen()` remains unsupported and the normal portable ELF reader remains
+the fallback. The graphics ART archive was rebuilt and the full strict graphics
+link audit passed (`registrar=51`, no fake symbols or host ICU/fmt). A fresh
+Crossy run is still required to prove Firebase class loading and the first
+gameplay frame; neither is claimed by this build-only checkpoint.
+
+## Progress — 2026-09-03 Crossy Road first-gameplay gate
+
+The unmodified Crossy Road 7.12.1 ARM64 APK now loads its Unity/IL2CPP
+runtime, Firebase helper DEX, native ELF graph, and GPU SurfaceView without a
+crash. The runtime reports the shared device contract (8 ARM64 cores, 8 GiB)
+and continuously submits 720x1280 Metal frames. APK central-directory and
+direct-fd traces show the AppLauncher and `gamesceneboot_*` bundles are read,
+but the `gamescene_*` and `gamesceneglobal_*` payloads are not requested.
+
+The current visible output is therefore the GameSceneBoot/default framebuffer
+(cyan after the splash), not a gameplay scene. Unity's graphics worker remains
+active, so this is a managed boot-condition/network-service gate rather than a
+SurfaceFlinger target-selection failure. External hostname resolution and
+the service contract needed by the app remain the next compatibility task;
+first gameplay content and input are not yet claimed.
+
+## Progress — 2026-09-03 Crossy Road DNS/CA and native-loader gate
+
+The Android DNS facade now resolves the app's explicitly requested Unity
+service hostnames with Android-style absolute-name semantics. The framework
+trust bridge now exposes the macOS Security.framework roots through
+`X509TrustManager.getAcceptedIssuers()`, so UnityTls no longer reports curl
+certificate error 60. Native `dlopen` of an already resident APK ELF image
+also follows Android's same-handle/reference-count behavior when a live JNI
+environment is present, eliminating the duplicate Firebase graph SIGSEGV.
+
+The latest 40-second run is crash-free and initializes Firebase Analytics, but
+Firebase Messaging still reports missing Google Play Services and the visible
+output remains the boot/default framebuffer. A first gameplay scene and
+content-pixel proof remain the active gate; no APK modification is permitted.
+
+## Progress — 2026-09-03 Crossy Road first gameplay frame
+
+Detached ART startup now follows Android's boot-before-app ordering. The
+minimal runtime start, boot/native registration, `Thread::FinishStartup()`, and
+root class initializers run before any APK or support DEX class is loaded;
+application ClassLoader installation and Looper preparation remain in the
+post-load phase. This removes the cold-start
+`AtomicInteger`/`MethodHandles.Lookup`/`System` recursive initialization crash.
+The app process bootstrap also publishes `Process.sArgV0`, matching zygote's
+non-null `Process.myProcessName()` contract used by Crashlytics.
+
+The unmodified Crossy Road 7.12.1 APK now logs `TUTORIAL GAMEPLAY STARTED` and
+renders an actual road/chicken gameplay scene. The authoritative run is
+`/private/tmp/crossy-cold-IKErlr`: 162 captured PPM frames, with the gameplay
+map visible in `frame-160.png`/`frame-160.ppm`. The full native graph and
+graphics-link audit pass (`registrar=51`, no fake symbols or host ICU/fmt).
+
+The first run then exposed a host-task ABI mismatch: its SIGSEGV mapped to
+`libunity.so` offset `0x12e9fe0`, instruction `ldr s0, [x18,#0x18]`, with fault
+address `0x18` and `x18=0`. The DSO contains 1,916 uses of x18 as a general
+register, while a current-SDK Darwin task does not preserve x18 across
+scheduling. Darwin ART now declares the host's custom-x18 task ABI before code
+signing using XNU's pre-macOS-13 SDK compatibility contract. A standalone
+arm64 fixture proves the default task loses x18 and the declared task preserves
+it across 100,000 forced scheduling points.
+
+The follow-up `/private/tmp/crossy-x18b-LGT6Dh` run remained free of
+SIGSEGV/abort for the complete bounded capture: 1,747 gameplay PPM frames with
+1,564 distinct hashes. It reached `TUTORIAL GAMEPLAY STARTED`, reloaded the game
+scene, and remained live through the end; `final-gameplay.png` is the final
+captured Crossy Road scene. The x18 contract is task-wide, so it covers guest
+internal execution and JNI/provider transitions without APK-specific code
+rewrites or signal recovery.
+
+## Progress — 2026-09-03 Crossy Road 30-second stability capture
+
+After restarting the profile-scoped system server with the declared x18 ABI,
+the same unmodified APK ran for the full 30-second bounded window. The
+authoritative capture is `/private/tmp/crossy-final-uOZN00`: 1,746 PPM frames
+with 1,566 distinct full-frame hashes. `TUTORIAL GAMEPLAY STARTED` appears in
+the run log, and no `DARWIN signal`, `SIGSEGV`, `SIGABRT`, or Unity crash marker
+was emitted. The montage shows the live forest/road scene, chicken, score, and
+Play button throughout the capture. The remaining Firebase AppMeasurement
+warnings are optional Google Play Services behavior and do not terminate the
+app or prevent gameplay rendering.

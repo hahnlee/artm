@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <cerrno>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -145,6 +146,14 @@ int load_classes(JNIEnv* env,
           ? nullptr
           : env->GetFieldID(dex_path_list, "systemNativeLibraryDirectories",
                             "Ljava/util/List;");
+  jfieldID native_library_path_elements_field =
+      dex_path_list == nullptr
+          ? nullptr
+          : env->GetFieldID(
+                dex_path_list, "nativeLibraryPathElements",
+                "[Ldalvik/system/DexPathList$NativeLibraryElement;");
+  jclass native_library_element =
+      env->FindClass("dalvik/system/DexPathList$NativeLibraryElement");
   jclass array_list = env->FindClass("java/util/ArrayList");
   jmethodID array_list_constructor =
       array_list == nullptr
@@ -158,11 +167,17 @@ int load_classes(JNIEnv* env,
       array_list_constructor == nullptr
           ? nullptr
           : env->NewObject(array_list, array_list_constructor);
+  jobjectArray native_library_path_elements =
+      native_library_element == nullptr
+          ? nullptr
+          : env->NewObjectArray(0, native_library_element, nullptr);
   if (path_list == nullptr || defining_context_field == nullptr ||
       native_library_directories_field == nullptr ||
       system_native_library_directories_field == nullptr ||
+      native_library_path_elements_field == nullptr ||
       native_library_directories == nullptr ||
-      system_native_library_directories == nullptr || env->ExceptionCheck()) {
+      system_native_library_directories == nullptr ||
+      native_library_path_elements == nullptr || env->ExceptionCheck()) {
     std::cerr << "ART Darwin DEX: DexPathList constructor state lookup failed\n";
     return 4;
   }
@@ -171,6 +186,10 @@ int load_classes(JNIEnv* env,
                       native_library_directories);
   env->SetObjectField(path_list, system_native_library_directories_field,
                       system_native_library_directories);
+  env->SetObjectField(path_list, native_library_path_elements_field,
+                      native_library_path_elements);
+  env->DeleteLocalRef(native_library_path_elements);
+  env->DeleteLocalRef(native_library_element);
   env->DeleteLocalRef(system_native_library_directories);
   env->DeleteLocalRef(native_library_directories);
   env->DeleteLocalRef(array_list);
@@ -321,6 +340,124 @@ int install_native_library_path(JNIEnv* env, jobject app_loader,
   }
   env->CallBooleanMethod(paths, add, directory_string);
   env->CallVoidMethod(app_loader, add_native_path, paths);
+  // CreatePathClassLoader starts with an empty native path element array and
+  // Android's addNativePath() is intentionally best-effort on that detached
+  // test loader.  Unity resolves its IL2CPP image through
+  // ClassLoader.findLibrary(), which walks this array rather than the
+  // ApplicationInfo field.  Materialize the same directory element that a
+  // production BaseDexClassLoader constructor would install.
+  if (!env->ExceptionCheck()) {
+    jclass element_class =
+        env->FindClass("dalvik/system/DexPathList$NativeLibraryElement");
+    jclass file_class = env->FindClass("java/io/File");
+    jclass base_loader_class = env->FindClass("dalvik/system/BaseDexClassLoader");
+    jclass dex_path_list_class = env->FindClass("dalvik/system/DexPathList");
+    jmethodID file_ctor =
+        file_class == nullptr
+            ? nullptr
+            : env->GetMethodID(file_class, "<init>", "(Ljava/lang/String;)V");
+    jmethodID element_ctor =
+        element_class == nullptr
+            ? nullptr
+            : env->GetMethodID(element_class, "<init>", "(Ljava/io/File;)V");
+    jfieldID path_list_field =
+        base_loader_class == nullptr
+            ? nullptr
+            : env->GetFieldID(base_loader_class, "pathList",
+                              "Ldalvik/system/DexPathList;");
+    jfieldID elements_field =
+        dex_path_list_class == nullptr
+            ? nullptr
+            : env->GetFieldID(
+                  dex_path_list_class, "nativeLibraryPathElements",
+                  "[Ldalvik/system/DexPathList$NativeLibraryElement;");
+    jobject directory_file =
+        file_ctor == nullptr
+            ? nullptr
+            : env->NewObject(file_class, file_ctor, directory_string);
+    jobject element =
+        element_ctor == nullptr || directory_file == nullptr
+            ? nullptr
+            : env->NewObject(element_class, element_ctor, directory_file);
+    jobject path_list =
+        path_list_field == nullptr
+            ? nullptr
+            : env->GetObjectField(app_loader, path_list_field);
+    jobjectArray element_array =
+        element_class == nullptr || element == nullptr
+            ? nullptr
+            : env->NewObjectArray(1, element_class, element);
+    if (path_list != nullptr && elements_field != nullptr &&
+        element_array != nullptr && !env->ExceptionCheck()) {
+      env->SetObjectField(path_list, elements_field, element_array);
+    }
+    env->DeleteLocalRef(element_array);
+    env->DeleteLocalRef(path_list);
+    env->DeleteLocalRef(element);
+    env->DeleteLocalRef(directory_file);
+    env->DeleteLocalRef(dex_path_list_class);
+    env->DeleteLocalRef(base_loader_class);
+    env->DeleteLocalRef(file_class);
+    env->DeleteLocalRef(element_class);
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_NATIVE_LIBRARY_PATH") != nullptr &&
+      !env->ExceptionCheck()) {
+    jclass base_loader_class =
+        env->FindClass("dalvik/system/BaseDexClassLoader");
+    jclass dex_path_list_class = env->FindClass("dalvik/system/DexPathList");
+    jfieldID path_list_field =
+        base_loader_class == nullptr
+            ? nullptr
+            : env->GetFieldID(base_loader_class, "pathList",
+                              "Ldalvik/system/DexPathList;");
+    jfieldID elements_field =
+        dex_path_list_class == nullptr
+            ? nullptr
+            : env->GetFieldID(
+                  dex_path_list_class, "nativeLibraryPathElements",
+                  "[Ldalvik/system/DexPathList$NativeLibraryElement;");
+    jobject path_list =
+        path_list_field == nullptr
+            ? nullptr
+            : env->GetObjectField(app_loader, path_list_field);
+    auto elements =
+        path_list == nullptr || elements_field == nullptr
+            ? nullptr
+            : reinterpret_cast<jobjectArray>(
+                  env->GetObjectField(path_list, elements_field));
+    const jsize element_count =
+        elements == nullptr ? -1 : env->GetArrayLength(elements);
+    std::cerr << "ART Android APK: PathClassLoader native elements="
+              << element_count << "\n";
+    const char* debug_library_name =
+        std::getenv("DARWIN_ART_DEBUG_NATIVE_LIBRARY_NAME");
+    if (debug_library_name != nullptr && debug_library_name[0] != '\0') {
+      jmethodID find_library = env->GetMethodID(
+          loader_class, "findLibrary", "(Ljava/lang/String;)Ljava/lang/String;");
+      jstring library_name = env->NewStringUTF(debug_library_name);
+      auto found_path =
+          find_library == nullptr || library_name == nullptr
+              ? nullptr
+              : reinterpret_cast<jstring>(env->CallObjectMethod(
+                    app_loader, find_library, library_name));
+      const char* found_utf =
+          found_path == nullptr
+              ? nullptr
+              : env->GetStringUTFChars(found_path, nullptr);
+      std::cerr << "ART Android APK: PathClassLoader findLibrary name="
+                << debug_library_name << " path="
+                << (found_utf == nullptr ? "<null>" : found_utf) << "\n";
+      if (found_utf != nullptr) {
+        env->ReleaseStringUTFChars(found_path, found_utf);
+      }
+      env->DeleteLocalRef(found_path);
+      env->DeleteLocalRef(library_name);
+    }
+    env->DeleteLocalRef(elements);
+    env->DeleteLocalRef(path_list);
+    env->DeleteLocalRef(dex_path_list_class);
+    env->DeleteLocalRef(base_loader_class);
+  }
   const bool failed = env->ExceptionCheck();
   env->DeleteLocalRef(directory_string);
   env->DeleteLocalRef(paths);

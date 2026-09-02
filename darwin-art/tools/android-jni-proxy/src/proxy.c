@@ -740,8 +740,13 @@ static void* ProxyGetFieldID(void* raw_env, void* clazz, const char* name,
   RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_GetFieldID);
   if (raw == NULL || clazz == NULL || name == NULL || signature == NULL)
     return NULL;
-  return ((void* (*)(void*, void*, const char*, const char*))raw)(
+  void* field = ((void* (*)(void*, void*, const char*, const char*))raw)(
       host_env, clazz, name, signature);
+  if (getenv("DARWIN_ART_DEBUG_JNI_CALLS") != NULL) {
+    fprintf(stderr, "DARWIN JNI field name=%s signature=%s id=%p\n", name,
+            signature, field);
+  }
+  return field;
 }
 
 #define DEFINE_GET_FIELD(Name, CType)                                         \

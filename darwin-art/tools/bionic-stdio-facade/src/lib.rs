@@ -14,6 +14,9 @@ const EOVERFLOW: i32 = 75;
 const EIO: i32 = 5;
 const EFBIG: i32 = 27;
 const MAX_STREAM_BYTES: usize = 16 * 1024 * 1024;
+const O_WRONLY: c_int = 1;
+const O_CREAT: c_int = 64;
+const O_APPEND: c_int = 1024;
 
 #[repr(C, align(8))]
 pub struct AndroidFile {
@@ -602,14 +605,33 @@ unsafe fn bytes<'a>(p: *const c_char) -> Option<&'a [u8]> {
         Some(unsafe { CStr::from_ptr(p) }.to_bytes())
     }
 }
-fn parse_mode(mode: &[u8]) -> Option<(bool, bool, bool)> {
-    match mode {
-        b"r" | b"rb" => Some((true, false, false)),
-        b"r+" | b"r+b" | b"rb+" => Some((true, true, false)),
-        b"w" | b"wb" => Some((false, true, true)),
-        b"w+" | b"w+b" | b"wb+" => Some((true, true, true)),
-        _ => None,
+fn parse_mode(mode: &[u8]) -> Option<(bool, bool, bool, bool)> {
+    let (&first, rest) = mode.split_first()?;
+    let (mut readable, mut writable, truncate, append) = match first {
+        b'r' => (true, false, false, false),
+        b'w' => (false, true, true, false),
+        b'a' => (false, true, false, true),
+        _ => return None,
+    };
+    let mut plus = false;
+    let mut binary = false;
+    let mut close_on_exec = false;
+    for byte in rest {
+        match byte {
+            b'+' if !plus => {
+                plus = true;
+                readable = true;
+                writable = true;
+            }
+            // Bionic's libc++ basic_filebuf uses "e" to request O_CLOEXEC.
+            // It is a mode modifier, not a distinct stream orientation.
+            b'e' if !close_on_exec => close_on_exec = true,
+            b'b' if !binary => binary = true,
+            _ => return None,
+        }
     }
+    let _ = (plus, binary, close_on_exec);
+    Some((readable, writable, truncate, append))
 }
 
 unsafe fn fopen(path: *const c_char, mode: *const c_char) -> *mut AndroidFile {
@@ -621,7 +643,7 @@ unsafe fn fopen(path: *const c_char, mode: *const c_char) -> *mut AndroidFile {
         errno(2);
         return ptr::null_mut();
     }
-    let Some((readable, writable, truncate)) = parse_mode(mode) else {
+    let Some((readable, writable, truncate, append)) = parse_mode(mode) else {
         errno(EINVAL);
         return ptr::null_mut();
     };
@@ -640,7 +662,19 @@ unsafe fn fopen(path: *const c_char, mode: *const c_char) -> *mut AndroidFile {
         return ptr::null_mut();
     }
     let mut guest_fd = None;
-    let data = if truncate {
+    let data = if append {
+        // Android append streams create the file through the same guest VFS
+        // as open(2). Keep the descriptor live so fileno() observes a real
+        // Android descriptor rather than a facade-only snapshot token.
+        let fd = unsafe {
+            darwin_art_bionic_open(path.as_ptr().cast(), O_WRONLY | O_CREAT | O_APPEND, 0o600)
+        };
+        if fd < 0 {
+            return ptr::null_mut();
+        }
+        guest_fd = Some(fd);
+        Vec::new()
+    } else if truncate {
         Vec::new()
     } else {
         match table.files.get(path) {

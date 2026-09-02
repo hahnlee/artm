@@ -21,7 +21,8 @@ _Static_assert(PROT_NONE == 0 && PROT_READ == 1 && PROT_WRITE == 2 &&
                    PROT_EXEC == 4,
                "Android PROT drift");
 _Static_assert(MAP_PRIVATE == 2 && MAP_FIXED == 0x10 &&
-                   MAP_ANONYMOUS == 0x20,
+                   MAP_ANONYMOUS == 0x20 && MAP_GROWSDOWN == 0x100 &&
+                   MAP_STACK == 0x20000,
                "Android MAP drift");
 _Static_assert(MADV_NORMAL == 0 && MADV_RANDOM == 1 &&
                    MADV_SEQUENTIAL == 2 && MADV_WILLNEED == 3 &&

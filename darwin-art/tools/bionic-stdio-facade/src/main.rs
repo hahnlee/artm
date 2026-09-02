@@ -46,6 +46,8 @@ impl SymbolResolver for Resolver {
                 "fputc" => c"fputc",
                 "fputs" => c"fputs",
                 "ferror" => c"ferror",
+                "fgetc" => c"fgetc",
+                "fgets" => c"fgets",
                 "fputwc" => c"fputwc",
                 "fread" => c"fread",
                 "fseek" => c"fseek",

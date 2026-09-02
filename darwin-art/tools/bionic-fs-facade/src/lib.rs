@@ -437,6 +437,11 @@ pub struct Facade {
     // is one example). Keep this as a single capability, never a general host
     // path escape: only the exact path supplied by the launcher is accepted.
     authorized_host_apk: Option<PathBuf>,
+    // Extracted native libraries are another installer-owned capability. The
+    // Java PathClassLoader must be able to stat the directory and open its
+    // direct children for DexPathList.findLibrary(), while arbitrary host
+    // traversal remains outside the guest filesystem contract.
+    authorized_host_native_dir: Option<PathBuf>,
     cwd: Mutex<Vec<u8>>,
     descriptors: Mutex<DescriptorTable>,
     overlay: Mutex<OverlayState>,
@@ -501,10 +506,15 @@ impl Facade {
         let authorized_host_apk = std::env::var_os("DARWIN_ART_APK_APP_RESOURCE_APK")
             .map(PathBuf::from)
             .filter(|path| path.is_absolute() && path.is_file());
+        let authorized_host_native_dir = std::env::var_os("DARWIN_ART_APK_APP_NATIVE_DIR")
+            .map(PathBuf::from)
+            .and_then(|path| path.canonicalize().ok())
+            .filter(|path| path.is_absolute() && path.is_dir());
         Ok(Self {
             prefix,
             broker,
             authorized_host_apk,
+            authorized_host_native_dir,
             cwd: Mutex::new(initial_cwd.normalized_path),
             descriptors: Mutex::new(DescriptorTable::default()),
             overlay: Mutex::new(OverlayState::default()),
@@ -609,6 +619,53 @@ impl Facade {
             return Err(ANDROID_EOPNOTSUPP);
         }
         Ok(())
+    }
+
+    fn authorized_host_native_path(&self, path: &[u8]) -> Option<PathBuf> {
+        let root = self.authorized_host_native_dir.as_ref()?;
+        let requested = PathBuf::from(std::ffi::OsString::from_vec(path.to_vec()));
+        if requested == *root {
+            return Some(requested);
+        }
+        if requested.parent() != Some(root.as_path()) {
+            return None;
+        }
+        // Installed native artifacts are regular files. Reject a direct-child
+        // symlink before any host open can follow it outside the sealed root.
+        match fs::symlink_metadata(&requested) {
+            Ok(metadata) if !metadata.file_type().is_symlink() => Some(requested),
+            _ => None,
+        }
+    }
+
+    // ART's DexPathList receives the host backing path for an app-private DEX
+    // after the JNI loader seam translates it. Keep that path inside the same
+    // private-data capability as the Android /data view; this is deliberately
+    // read-only and accepts only an existing regular file or its root.
+    fn authorized_host_private_path(&self, path: &[u8]) -> Option<PathBuf> {
+        let root = self.private_root.as_ref()?;
+        let requested = PathBuf::from(std::ffi::OsString::from_vec(path.to_vec()));
+        let relative = requested.strip_prefix(root).ok()?;
+        if relative.as_os_str().is_empty()
+            || relative
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return None;
+        }
+        let canonical = requested.canonicalize().ok()?;
+        if !canonical.starts_with(root) {
+            return None;
+        }
+        match fs::symlink_metadata(&requested) {
+            Ok(metadata)
+                if !metadata.file_type().is_symlink()
+                    && (metadata.is_file() || metadata.is_dir()) =>
+            {
+                Some(canonical)
+            }
+            _ => None,
+        }
     }
 
     fn overlay_parent(path: &[u8]) -> &[u8] {
@@ -774,21 +831,36 @@ impl Facade {
 
         if path == b"/proc/cpuinfo" {
             let mut contents = String::new();
+            let cpuinfo_style = std::env::var("DARWIN_ART_CPUINFO_STYLE").ok();
+            let cpu_part = if std::env::var_os("DARWIN_ART_CPUINFO_DECIMAL_PART").is_some() {
+                "3331"
+            } else {
+                "0xd03"
+            };
             for cpu in 0..CPU_COUNT {
-                let _ = writeln!(contents, "processor\t: {cpu}");
-                let _ = writeln!(contents, "BogoMIPS\t: 2400.00");
+                let sep = match cpuinfo_style.as_deref() {
+                    Some("none") => ":",
+                    Some("space") => " :",
+                    _ => "\t:",
+                };
+                let _ = writeln!(contents, "processor{sep} {cpu}");
+                let _ = writeln!(contents, "BogoMIPS{sep} 2400.00");
                 let _ = writeln!(
                     contents,
-                    "Features\t: fp asimd evtstrm aes pmull sha1 sha2 crc32"
+                    "Features{sep} fp asimd evtstrm aes pmull sha1 sha2 crc32"
                 );
-                let _ = writeln!(contents, "CPU variant\t: 0x0");
-                let _ = writeln!(contents, "CPU part\t: 0xd03");
-                let _ = writeln!(contents, "CPU revision\t: 4");
-                let _ = writeln!(contents, "CPU architecture\t: 8");
-                let _ = writeln!(contents, "CPU implementer\t: 0x41");
+                let _ = writeln!(contents, "CPU variant{sep} 0x0");
+                let _ = writeln!(contents, "CPU part{sep} {cpu_part}");
+                let _ = writeln!(contents, "CPU revision{sep} 4");
+                let _ = writeln!(contents, "CPU architecture{sep} 8");
+                let _ = writeln!(contents, "CPU implementer{sep} 0x41");
                 let _ = writeln!(contents);
             }
-            return Some(contents.into_bytes());
+            let mut bytes = contents.into_bytes();
+            if std::env::var_os("DARWIN_ART_CPUINFO_NUL").is_some() {
+                bytes.push(0);
+            }
+            return Some(bytes);
         }
         if path == b"/proc/meminfo" {
             return Some(
@@ -912,7 +984,7 @@ impl Facade {
             Ok(descriptors) => descriptors,
             Err(_) => return self.fail_capability(),
         };
-        let result = match descriptors.insert(Descriptor::Overlay(OverlayDescriptor {
+        match descriptors.insert(Descriptor::Overlay(OverlayDescriptor {
             node,
             offset: 0,
             readable: true,
@@ -920,8 +992,7 @@ impl Facade {
         })) {
             Ok(fd) => fd,
             Err(()) => self.fail(ANDROID_EMFILE),
-        };
-        result
+        }
     }
 
     fn open_proc_self_maps(&self, flags: c_int) -> c_int {
@@ -1050,6 +1121,40 @@ impl Facade {
             }
             let apk = self.authorized_host_apk.as_ref().expect("checked above");
             let file = match File::open(apk) {
+                Ok(file) => file,
+                Err(error) => return self.fail_io(&error),
+            };
+            let mut descriptors = match self.descriptors.lock() {
+                Ok(descriptors) => descriptors,
+                Err(_) => return self.fail_capability(),
+            };
+            return match descriptors.insert(Descriptor::File(file)) {
+                Ok(fd) => fd,
+                Err(()) => self.fail(ANDROID_EMFILE),
+            };
+        }
+        if let Some(native_path) = self.authorized_host_native_path(path) {
+            if let Err(error) = self.validate_immutable_flags(flags) {
+                return self.fail(error);
+            }
+            let file = match File::open(native_path) {
+                Ok(file) => file,
+                Err(error) => return self.fail_io(&error),
+            };
+            let mut descriptors = match self.descriptors.lock() {
+                Ok(descriptors) => descriptors,
+                Err(_) => return self.fail_capability(),
+            };
+            return match descriptors.insert(Descriptor::File(file)) {
+                Ok(fd) => fd,
+                Err(()) => self.fail(ANDROID_EMFILE),
+            };
+        }
+        if let Some(private_path) = self.authorized_host_private_path(path) {
+            if let Err(error) = self.validate_immutable_flags(flags) {
+                return self.fail(error);
+            }
+            let file = match File::open(private_path) {
                 Ok(file) => file,
                 Err(error) => return self.fail_io(&error),
             };
@@ -1747,6 +1852,30 @@ impl Facade {
             unsafe { status.write(metadata_to_android(&metadata)) };
             return 0;
         }
+        if let Some(native_path) = self.authorized_host_native_path(path) {
+            let metadata = match if no_follow {
+                fs::symlink_metadata(native_path)
+            } else {
+                fs::metadata(native_path)
+            } {
+                Ok(metadata) => metadata,
+                Err(error) => return self.fail_io(&error),
+            };
+            unsafe { status.write(metadata_to_android(&metadata)) };
+            return 0;
+        }
+        if let Some(private_path) = self.authorized_host_private_path(path) {
+            let metadata = match if no_follow {
+                fs::symlink_metadata(private_path)
+            } else {
+                fs::metadata(private_path)
+            } {
+                Ok(metadata) => metadata,
+                Err(error) => return self.fail_io(&error),
+            };
+            unsafe { status.write(metadata_to_android(&metadata)) };
+            return 0;
+        }
         let resolution = match self.resolve(path) {
             Ok(resolution) => resolution,
             Err(error) => return self.fail(error),
@@ -2363,19 +2492,26 @@ impl Facade {
             Ok(resolution) => resolution,
             Err(error) => return self.fail(error),
         };
-        let opened = match self.broker.open(&resolution.relative_path) {
-            Ok(opened) => opened,
-            Err(error) => return self.fail_broker(&error),
+        let opened = if resolution.mount_id == 2 && self.private_root.is_some() {
+            let private = match self.private_path(&resolution.relative_path) {
+                Ok(path) => path,
+                Err(error) => return self.fail(error),
+            };
+            match File::open(private) {
+                Ok(file) => file,
+                Err(error) => return self.fail_io(&error),
+            }
+        } else {
+            match self.broker.open(&resolution.relative_path) {
+                Ok(opened) => opened.into_file(),
+                Err(error) => return self.fail_broker(&error),
+            }
         };
         let mut host = HostStatvfs::default();
         let mut host_errno = 0;
         // SAFETY: the descriptor and fixed-layout outputs live through the call.
         if unsafe {
-            darwin_art_bionic_fs_host_fstatvfs(
-                opened.file().as_raw_fd(),
-                &mut host,
-                &mut host_errno,
-            )
+            darwin_art_bionic_fs_host_fstatvfs(opened.as_raw_fd(), &mut host, &mut host_errno)
         } != 0
         {
             return self.fail_host_errno(host_errno);

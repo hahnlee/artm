@@ -8,20 +8,34 @@ use std::fs;
 use std::num::NonZeroUsize;
 use std::process::ExitCode;
 
-const LOCALE_IMPORTS: [&str; 31] = [
+const LOCALE_IMPORTS: [&str; 51] = [
     "__ctype_get_mb_cur_max",
     "btowc",
     "freelocale",
+    "isalnum",
+    "isalpha",
     "iswalpha_l",
+    "iswalpha",
     "iswblank_l",
+    "iswblank",
     "iswcntrl_l",
+    "iswcntrl",
     "iswdigit_l",
+    "iswdigit",
     "iswlower_l",
+    "iswlower",
     "iswprint_l",
+    "iswprint",
     "iswpunct_l",
+    "iswpunct",
     "iswspace_l",
     "iswupper_l",
+    "iswupper",
     "iswxdigit_l",
+    "iswxdigit",
+    "islower",
+    "isupper",
+    "isxdigit",
     "localeconv",
     "mbrlen",
     "mbrtowc",
@@ -32,13 +46,19 @@ const LOCALE_IMPORTS: [&str; 31] = [
     "setlocale",
     "strcoll_l",
     "strxfrm_l",
+    "strxfrm",
+    "tolower",
     "towlower_l",
     "towupper_l",
+    "towupper",
+    "toupper",
     "uselocale",
     "wcrtomb",
     "wcscoll_l",
+    "wcscoll",
     "wcsnrtombs",
     "wcsxfrm_l",
+    "wcsxfrm",
     "wctob",
 ];
 
@@ -198,7 +218,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     println!(
-        "bionic-locale-facade: PASS AndroidELF imports=31+errno locale=C+POSIX+C.UTF-8 thread-local UTF-8-state collate=C wide=Android-ICU-76.1 host-errno+fenv=preserved"
+        "bionic-locale-facade: PASS AndroidELF imports=51+errno locale=C+POSIX+C.UTF-8 thread-local UTF-8-state collate=C wide=Android-ICU-76.1 host-errno+fenv=preserved"
     );
     Ok(())
 }

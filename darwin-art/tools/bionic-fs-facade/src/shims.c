@@ -6,6 +6,7 @@
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <stdatomic.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
@@ -78,6 +79,13 @@ typedef struct DarwinArtAndroidFlock {
   int32_t l_pid;
   int32_t __pad1;
 } DarwinArtAndroidFlock;
+
+static _Atomic uint32_t g_android_umask = 0022;
+
+uint32_t darwin_art_bionic___umask_chk(uint32_t mask) {
+  if ((mask & ~0777u) != 0) abort();
+  return atomic_exchange_explicit(&g_android_umask, mask, memory_order_relaxed);
+}
 
 _Static_assert(sizeof(DarwinArtAndroidFlock) == 32,
                "Android arm64 flock size drift");
@@ -783,6 +791,7 @@ static const Binding kBindings[] = {
     {"__pwrite_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___pwrite_chk},
     {"__read_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___read_chk},
     {"__readlink_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___readlink_chk},
+    {"__umask_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___umask_chk},
     {"__write_chk", (DarwinArtBionicFsFunction)darwin_art_bionic___write_chk},
     {"access", (DarwinArtBionicFsFunction)darwin_art_bionic_access},
     {"cfgetispeed", (DarwinArtBionicFsFunction)darwin_art_bionic_cfget_speed},

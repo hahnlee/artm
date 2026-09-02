@@ -10,6 +10,8 @@ import android.content.pm.PackageInfo;
 import android.content.pm.ProviderInfo;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
+import android.content.pm.Signature;
+import android.content.pm.SigningInfo;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -24,6 +26,11 @@ import java.util.Map;
 
 /** Minimal package policy for framework feature gates before system_server exists. */
 public final class ProbePackageManager extends MockPackageManager {
+    private static final String GOOGLE_PLAY_SERVICES_PACKAGE = "com.google.android.gms";
+    private static final String C2DM_SEND_PERMISSION =
+            "com.google.android.c2dm.permission.SEND";
+    private static final String IID_TOKEN_REQUEST_ACTION =
+            "com.google.iid.TOKEN_REQUEST";
     private static native String nativeResolveInstalledPackage(String packageName);
     private String packageName;
     private String activityName;
@@ -65,6 +72,20 @@ public final class ProbePackageManager extends MockPackageManager {
         info.sourceDir = recordValue(record, "apk");
         info.publicSourceDir = info.sourceDir;
         info.dataDir = "/data/user/0/" + requestedPackage;
+        // PackageManager is the authoritative source for ApplicationInfo in
+        // Android's native-library discovery path.  Keep the installed-app
+        // copy consistent with the Context-owned instance so Unity's
+        // FindNativeLibraryPath("il2cpp") can resolve the unmodified APK's
+        // extracted arm64 directory regardless of which API supplied the
+        // ApplicationInfo object.
+        boolean systemPackage = "true".equals(metadataValue(record, "system"));
+        info.enabled = !"false".equals(metadataValue(record, "enabled"));
+        if (systemPackage) {
+            info.flags |= ApplicationInfo.FLAG_SYSTEM;
+        } else {
+            info.nativeLibraryDir = System.getenv("DARWIN_ART_APK_APP_NATIVE_DIR");
+            applyApplicationPaths(info);
+        }
         String target = metadataValue(record, "target_sdk");
         if (target != null) {
             try {
@@ -72,6 +93,15 @@ public final class ProbePackageManager extends MockPackageManager {
             } catch (NumberFormatException ignored) {}
         }
         return info;
+    }
+
+    private static boolean recordDeclaresPermission(String record, String permission) {
+        String permissions = metadataValue(record, "permissions");
+        if (permissions == null || permission == null) return false;
+        for (String declared : permissions.split(",")) {
+            if (permission.equals(declared)) return true;
+        }
+        return false;
     }
 
     private static ActivityInfo installedActivityInfo(ComponentName component, String record) {
@@ -136,6 +166,13 @@ public final class ProbePackageManager extends MockPackageManager {
         return false;
     }
 
+    @Override
+    public int checkPermission(String permission, String requestedPackage) {
+        String record = nativeResolveInstalledPackage(requestedPackage);
+        return recordDeclaresPermission(record, permission)
+                ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
+    }
+
     public boolean shouldShowRequestPermissionRationale(String permission) {
         // No permission request has been denied with "ask again" state in the
         // detached package manager. Android reports false for this initial
@@ -158,6 +195,10 @@ public final class ProbePackageManager extends MockPackageManager {
         String encoded = System.getenv("DARWIN_ART_APK_APP_METADATA");
         if (info == null || encoded == null || encoded.isEmpty()
                 || "none".equals(encoded)) return;
+        info.metaData = decodeMetadata(encoded, resources);
+    }
+
+    private static Bundle decodeMetadata(String encoded, Resources resources) {
         Bundle metadata = new Bundle();
         for (String entry : encoded.split(",")) {
             String[] fields = entry.split(":", -1);
@@ -201,7 +242,7 @@ public final class ProbePackageManager extends MockPackageManager {
                 // preserve the remaining manifest entries.
             }
         }
-        info.metaData = metadata;
+        return metadata;
     }
 
     private static String decodeHexString(String encoded) {
@@ -235,13 +276,29 @@ public final class ProbePackageManager extends MockPackageManager {
 
     @Override
     public List<ResolveInfo> queryBroadcastReceivers(Intent intent, int flags) {
+        if (intent != null
+                && GOOGLE_PLAY_SERVICES_PACKAGE.equals(intent.getPackage())
+                && IID_TOKEN_REQUEST_ACTION.equals(intent.getAction())) {
+            String record = nativeResolveInstalledPackage(intent.getPackage());
+            if (!recordDeclaresPermission(record, C2DM_SEND_PERMISSION)) {
+                return Collections.emptyList();
+            }
+            ResolveInfo resolved = new ResolveInfo();
+            resolved.activityInfo = new ActivityInfo();
+            resolved.activityInfo.packageName = GOOGLE_PLAY_SERVICES_PACKAGE;
+            resolved.activityInfo.name = "com.google.android.gms.gcm.GcmReceiver";
+            resolved.activityInfo.permission = C2DM_SEND_PERMISSION;
+            resolved.activityInfo.applicationInfo = installedApplicationInfo(
+                    GOOGLE_PLAY_SERVICES_PACKAGE, record);
+            return Collections.singletonList(resolved);
+        }
         return Collections.emptyList();
     }
 
     @Override
     public List<ResolveInfo> queryBroadcastReceivers(Intent intent,
             PackageManager.ResolveInfoFlags flags) {
-        return Collections.emptyList();
+        return queryBroadcastReceivers(intent, (int) flags.getValue());
     }
 
     @Override
@@ -360,6 +417,23 @@ public final class ProbePackageManager extends MockPackageManager {
                 serviceInfos.put(new ComponentName(packageName, serviceName), service);
             }
         }
+        String encodedServiceMetadata = System.getenv(
+                "DARWIN_ART_APK_APP_SERVICE_METADATA");
+        if (encodedServiceMetadata != null && !encodedServiceMetadata.isEmpty()
+                && !"none".equals(encodedServiceMetadata)) {
+            for (String entry : encodedServiceMetadata.split(";")) {
+                int separator = entry.indexOf('=');
+                if (separator <= 0 || separator == entry.length() - 1) continue;
+                String serviceName = decodeHexString(entry.substring(0, separator));
+                if (serviceName == null) continue;
+                ServiceInfo service = serviceInfos.get(
+                        new ComponentName(packageName, serviceName));
+                if (service != null) {
+                    service.metaData = decodeMetadata(
+                            entry.substring(separator + 1), resources);
+                }
+            }
+        }
         this.resources = resources;
         this.versionCode = versionCode;
         this.versionName = versionName;
@@ -468,10 +542,25 @@ public final class ProbePackageManager extends MockPackageManager {
             String code = metadataValue(record, "version_code");
             if (code != null) {
                 try {
-                    external.setLongVersionCode(Long.parseLong(code));
+                    long parsed = Long.parseLong(code);
+                    external.versionCode = (int) parsed;
+                    external.setLongVersionCode(parsed);
                 } catch (NumberFormatException ignored) {}
             }
             external.versionName = metadataValue(record, "version_name");
+            String encodedSignature = metadataValue(record, "signature_base64");
+            if (encodedSignature != null) {
+                try {
+                    Signature signature = new Signature(android.util.Base64.decode(
+                            encodedSignature, android.util.Base64.DEFAULT));
+                    external.signatures = new Signature[] {signature};
+                    external.signingInfo = new SigningInfo(3,
+                            Collections.singletonList(signature), null, null);
+                } catch (IllegalArgumentException ignored) {
+                    // An invalid system registry record must not manufacture a
+                    // package signature. Signature checks will reject it.
+                }
+            }
             return external;
         }
         PackageInfo info = new PackageInfo();
@@ -598,7 +687,14 @@ public final class ProbePackageManager extends MockPackageManager {
     @Override
     public int getApplicationEnabledSetting(String requestedPackage) {
         if (packageName == null || !packageName.equals(requestedPackage)) {
-            throw new IllegalArgumentException("Unknown package: " + requestedPackage);
+            ApplicationInfo installed = installedApplicationInfo(
+                    requestedPackage, nativeResolveInstalledPackage(requestedPackage));
+            if (installed == null) {
+                throw new IllegalArgumentException("Unknown package: " + requestedPackage);
+            }
+            return installed.enabled
+                    ? PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+                    : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
         }
         Integer setting = applicationEnabledSettings.get(requestedPackage);
         return setting == null

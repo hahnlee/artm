@@ -161,16 +161,23 @@ int main(int argc, char** argv) {
         "passive numeric service");
 
   DarwinArtAndroidAddrinfo* rejected = nullptr;
-  Check(lookup("example.com", "443", kAfInet, kAiNumericServ,
-               &rejected) == 8 && rejected == nullptr,
-        "external DNS policy closed");
+  Check(lookup("unqualified", "443", kAfInet, kAiNumericServ,
+               &rejected) == 8 && rejected == nullptr &&
+            lookup("printer.local", "443", kAfInet, kAiNumericServ,
+                   &rejected) == 8 && rejected == nullptr &&
+            lookup("printer.LOCAL.", "443", kAfInet, kAiNumericServ,
+                   &rejected) == 8 && rejected == nullptr &&
+            lookup("bad/name.example", "443", kAfInet, kAiNumericServ,
+                   &rejected) == 8 && rejected == nullptr,
+        "search mDNS and malformed name policy closed");
   Check(lookup("127.0.0.1", "https", kAfInet, kAiNumericHost,
                &rejected) == 9 && rejected == nullptr,
         "named service policy closed");
+  DarwinArtAndroidAddrinfo* configured = nullptr;
   Check(lookup("127.0.0.1", "443", kAfInet,
                kAiNumericHost | kAiNumericServ | 0x400,
-               &rejected) == 3 && rejected == nullptr,
-        "AI_ADDRCONFIG policy closed");
+               &configured) == 0 && configured != nullptr,
+        "AI_ADDRCONFIG translated");
   Check(std::strcmp(error_string(8), "Name or service not known") == 0 &&
             std::strcmp(error_string(999), "Unknown error") == 0,
         "Android gai_strerror table");
@@ -216,8 +223,9 @@ int main(int argc, char** argv) {
   free_result(ipv6);
   free_result(localhost);
   free_result(wildcard);
+  free_result(configured);
   Check(darwin_art_bionic_dns_live_results_for_test() == 0 &&
-            darwin_art_bionic_dns_retired_results_for_test() == 5,
+            darwin_art_bionic_dns_retired_results_for_test() == 6,
         "all allocations retired");
   darwin_art_bionic_dns_reset_for_test();
   Check(darwin_art_bionic_dns_live_results_for_test() == 0 &&
@@ -230,6 +238,6 @@ int main(int argc, char** argv) {
   std::fprintf(stderr,
                "bionic-dns-facade: PASS Android-ELF=yes localhost+IPv4+IPv6="
                "yes reverse=numeric allocation=retire+quiescent-reset "
-               "policy=closed errno=preserved\n");
+               "policy=absolute-host-dns errno=preserved\n");
   return 0;
 }

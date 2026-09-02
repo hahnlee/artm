@@ -91,7 +91,8 @@ check "$ndk/source.properties" "$NDK_SOURCE_PROPERTIES_SHA256"
 check "$libcxx" "$NDK_LIBCXX_SHA256"
 check "$ndk_include/asm-generic/unistd.h" "$NDK_UNISTD_SHA256"
 check "$ndk_include/linux/futex.h" "$NDK_FUTEX_SHA256"
-for definition in '__NR_futex 98' '__NR_rt_sigprocmask 135' '__NR_gettid 178' \
+for definition in '__NR_futex 98' '__NR_sched_setaffinity 122' \
+                  '__NR_sched_getaffinity 123' '__NR_rt_sigprocmask 135' '__NR_gettid 178' \
                   '__NR_rt_tgsigqueueinfo 240' '__NR_getrandom 278'; do
   grep -F "$definition" "$ndk_include/asm-generic/unistd.h" >/dev/null ||
     fail "Android syscall number: $definition"
@@ -207,4 +208,4 @@ mkdir -p "$root/_build/bionic-syscall-facade"
 cp "$tmp/libdarwin-art-bionic-syscall.a" "$root/_build/bionic-syscall-facade/"
 cp "$fixture" "$root/_build/bionic-syscall-facade/"
 clean
-echo 'bionic-syscall-facade: PASS import=1 callsites=9 nr=98+135+178+240+278 AAPCS64=captured gettid=stable getrandom=host-csprng futex=private-side-table+monotonic-timeout+capacity257 readability=mach-vm rt-tgsigqueueinfo=virtual-tid errno=Bionic host-syscall=0 ASan+UBSan'
+echo 'bionic-syscall-facade: PASS import=1 callsites=9 nr=98+122+123+135+178+240+278 AAPCS64=captured gettid=stable getrandom=host-csprng sched-affinity=thread-local-8cpu futex=private-side-table+monotonic-timeout+capacity257 readability=mach-vm rt-tgsigqueueinfo=virtual-tid errno=Bionic host-syscall=0 ASan+UBSan'

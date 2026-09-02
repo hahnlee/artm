@@ -126,7 +126,15 @@ public final class DarwinTrustManagerFactory extends TrustManagerFactorySpi {
 
         @Override
         public X509Certificate[] getAcceptedIssuers() {
-            return new X509Certificate[0];
+            // UnityTls and other native Android TLS stacks seed their own
+            // verifier from this standard X509TrustManager contract rather
+            // than calling checkServerTrusted for each connection.
+            X509Certificate[] issuers = DarwinAndroidCAStore.acceptedIssuers();
+            if (DEBUG) {
+                System.err.println(
+                        "DARWIN security: accepted issuers=" + issuers.length);
+            }
+            return issuers;
         }
 
         private static native byte[][] verifyServerChain(byte[][] chain, String host);

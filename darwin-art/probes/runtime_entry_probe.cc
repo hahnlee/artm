@@ -90,9 +90,52 @@ bool ReadAll(int fd, void* data, size_t size) {
 }
 
 std::string ResolveDaemonPackage(const char* package_name) {
+  // Android's package manager publishes immutable system packages in addition
+  // to user-installed packages. Keep the first compatibility services in the
+  // system-server registry rather than teaching individual applications about
+  // them. The records intentionally advertise only package identity; Binder
+  // services are added separately when an app actually requests one.
+  static constexpr const char* kGoogleAndroidReleaseCertificate =
+      "MIIEQzCCAyugAwIBAgIJAMLgh0ZkSjCNMA0GCSqGSIb3DQEBBAUAMHQxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlh"
+      "MRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtHb29nbGUgSW5jLjEQMA4GA1UECxMHQW5kcm9pZDEQMA4GA1UEAxMH"
+      "QW5kcm9pZDAeFw0wODA4MjEyMzEzMzRaFw0zNjAxMDcyMzEzMzRaMHQxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlh"
+      "MRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtHb29nbGUgSW5jLjEQMA4GA1UECxMHQW5kcm9pZDEQMA4GA1UEAxMH"
+      "QW5kcm9pZDCCASAwDQYJKoZIhvcNAQEBBQADggENADCCAQgCggEBAKtWLgDYO6IIrgqWbxJOKdoR8qtW0I9Y4sypEwPpt1TTcvZA"
+      "pxsdyxMJZ2JORland2qSGT2y5b+3JKkedxiLDmpHpDsz2WCbdxgxRczfey5YZnTJ4VZbH0xqWVW/8lGmPav5xVwnIiJS6HXk+BVK"
+      "ZF+JcWjAsb/GEuq/eFdpuzSqeYTcfi6idkyugwfYwXFU1+5fZKUaRKYCwkkFQVfcAs1fXA5V+++FGfvjJ/CxURaSxaBvGdGDhfXE"
+      "28LWuT9ozCl5xw4Yq5OGazvV24mZVSoOO0yZ31j7kYvtwYK6NeADwbSxDdJEqO4k//0zOHKrUiGYXtqw/A0LFFtqoZKFjnkCAQOj"
+      "gdkwgdYwHQYDVR0OBBYEFMd9jMIhF1Ylmn/Tgt9r45jk14alMIGmBgNVHSMEgZ4wgZuAFMd9jMIhF1Ylmn/Tgt9r45jk14aloXik"
+      "djB0MQswCQYDVQQGEwJVUzETMBEGA1UECBMKQ2FsaWZvcm5pYTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLR29v"
+      "Z2xlIEluYy4xEDAOBgNVBAsTB0FuZHJvaWQxEDAOBgNVBAMTB0FuZHJvaWSCCQDC4IdGZEowjTAMBgNVHRMEBTADAQH/MA0GCSqG"
+      "SIb3DQEBBAUAA4IBAQBt0lLO74UwLDYKqs6Tm8/yzKkEu116FmH4rkaymUIE0P9KaMftGlMexFlaYjzmB2OxZyl6euNXEsQH8gjw"
+      "yxCUKRJNexBiGcCEyj6z+a1fuHHvkiaai+KL8W1EyNmgjmyy8AW7P+LLlkR+ho5zEHatRbM/YAnqGcFh5iZBqpknHf1SKMXFh4dd"
+      "239FJ1jWYfbMDMy3NS5CTMQ2XFI1MvcyUTdZPErjQfTbQe3aDQsQcafEQPD+nqActifKZ0Np0IS9L9kR/wbNvyz6ENwPiTrjV2KR"
+      "kEjH78ZMcUQXg0L3BYHJ3lc69Vs5Ddf9uUGGMYldX3WfMBEmh/9iFBDAaTCK";
+  const std::string package(package_name == nullptr ? "" : package_name);
+  const char* guest_apk = nullptr;
+  const char* version_name = nullptr;
+  const char* label = nullptr;
+  if (package == "com.google.android.gms") {
+    guest_apk = "/system/priv-app/GmsCore/GmsCore.apk";
+    version_name = "25.12.00";
+    label = "Google Play services";
+  } else if (package == "com.android.vending") {
+    guest_apk = "/system/priv-app/Phonesky/Phonesky.apk";
+    version_name = "45.2.19";
+    label = "Google Play Store";
+  }
+  if (guest_apk != nullptr) {
+    return std::string("darwin-art-launch-v1\napk=") + guest_apk +
+           "\ndex=" + guest_apk +
+           "\nsha256=darwin-art-system-package\nmetadata=darwin-art-system:" +
+           " package=" + package +
+           " system=true enabled=true version_code=251200000 version_name=" +
+           version_name + " target_sdk=36 label=" + label +
+           " signature_base64=" + kGoogleAndroidReleaseCertificate +
+           " permissions=com.google.android.c2dm.permission.SEND\n";
+  }
   const char* socket_path = std::getenv("DARWIN_ART_PROFILE_SOCKET");
   if (socket_path == nullptr || package_name == nullptr) return {};
-  const std::string package(package_name);
   if (package.empty() || package.size() > 255 ||
       !std::all_of(package.begin(), package.end(), [](unsigned char byte) {
         return std::isalnum(byte) || byte == '.' || byte == '_' || byte == '-';
@@ -451,6 +494,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
 
   art::ClassLinker* class_linker = art::Runtime::Current()->GetClassLinker();
   art::StackHandleScope<32> hs(self);
+  const int runtime_start_status =
+      darwin_art_registration_phase::start(env, self);
+  if (runtime_start_status != 0) {
+    return runtime_start_status;
+  }
   const char* activity_descriptor =
       run_service_process
           ? service_descriptor.c_str()
@@ -530,7 +578,7 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 21;
   }
 
-  const int registration_status = darwin_art_registration_phase::run(
+  const int registration_status = darwin_art_registration_phase::finish(
       {.env = env,
        .self = self,
        .app_loader_ref = app_loader_ref,

@@ -21,6 +21,16 @@ __attribute__((visibility("default"))) long SyscallFixtureGetrandom(
   return syscall(278, buffer, length, flags);
 }
 
+__attribute__((visibility("default"))) long SyscallFixtureGetaffinity(
+    int tid, uint64_t size, void* mask) {
+  return syscall(123, tid, size, mask);
+}
+
+__attribute__((visibility("default"))) long SyscallFixtureSetaffinity(
+    int tid, uint64_t size, const void* mask) {
+  return syscall(122, tid, size, mask);
+}
+
 __attribute__((visibility("default"))) long SyscallFixtureWait(
     int32_t* address, int32_t expected, int64_t timeout_nanoseconds) {
   struct AndroidTimespec timeout = {

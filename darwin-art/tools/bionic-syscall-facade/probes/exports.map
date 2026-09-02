@@ -3,6 +3,8 @@ LIBCXX_SYSCALL_FIXTURE {
     SyscallFixtureGettid;
     SyscallFixtureRtTgSigqueueinfo;
     SyscallFixtureGetrandom;
+    SyscallFixtureGetaffinity;
+    SyscallFixtureSetaffinity;
     SyscallFixtureWait;
     SyscallFixtureWakeOne;
     SyscallFixtureWakeAll;

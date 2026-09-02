@@ -563,6 +563,27 @@ libc.so	sprintf	LIBC	format	Android AAPCS64 formatted output
 libc.so	time	LIBC	time	Unix epoch clock
 libc.so	unlink	LIBC	filesystem	capability-rooted file removal
 libc.so	write	LIBC	central-fd-broker	generic central descriptor output with filesystem delegation
+libc.so	iswalpha	LIBC	locale	Android ICU 76 wide alphabetic classification
+libc.so	iswblank	LIBC	locale	Android ICU 76 wide blank classification
+libc.so	iswcntrl	LIBC	locale	Android ICU 76 wide control classification
+libc.so	iswdigit	LIBC	locale	Android ICU 76 wide digit classification
+libc.so	iswlower	LIBC	locale	Android ICU 76 wide lowercase classification
+libc.so	iswprint	LIBC	locale	Android ICU 76 wide printable classification
+libc.so	iswpunct	LIBC	locale	Android ICU 76 wide punctuation classification
+libc.so	iswupper	LIBC	locale	Android ICU 76 wide uppercase classification
+libc.so	iswxdigit	LIBC	locale	Android ICU 76 wide hexadecimal classification
+libc.so	towupper	LIBC	locale	Android ICU 76 wide uppercase mapping
+libc.so	wcscoll	LIBC	locale	Android C locale wide collation
+libc.so	wcsxfrm	LIBC	locale	Android C locale wide collation transform
+libc.so	isalnum	LIBC	locale	Android C locale alphanumeric classification
+libc.so	isalpha	LIBC	locale	Android C locale alphabetic classification
+libc.so	islower	LIBC	locale	Android C locale lowercase classification
+libc.so	isupper	LIBC	locale	Android C locale uppercase classification
+libc.so	isxdigit	LIBC	locale	Android C locale hexadecimal classification
+libc.so	strxfrm	LIBC	locale	Android C locale collation transform
+libc.so	tolower	LIBC	locale	Android C locale lowercase mapping
+libc.so	toupper	LIBC	locale	Android C locale uppercase mapping
+libc.so	__umask_chk	LIBC	filesystem	Android fortified process umask state
 libdl.so	android_dlopen_ext	LIBC	dso-lifecycle	Android guest DSO namespace extended open
 libdl.so	dlclose	LIBC	dso-lifecycle	Android guest DSO namespace close
 libdl.so	dlerror	LIBC	dso-lifecycle	Android guest DSO namespace error channel

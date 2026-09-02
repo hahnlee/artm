@@ -405,6 +405,9 @@ pub extern "C" fn darwin_art_bionic_process_state_process_install() -> c_int {
             (b"LANG".to_vec(), b"en-US".to_vec()),
         ],
         vec![
+            (b"device.cpu.count".to_vec(), b"8".to_vec()),
+            (b"device.cpu.frequency_mhz".to_vec(), b"2400".to_vec()),
+            (b"device.cpu.model".to_vec(), b"Darwin ARM64".to_vec()),
             (b"ro.build.version.sdk".to_vec(), b"36".to_vec()),
             (b"ro.build.version.release".to_vec(), b"16".to_vec()),
             (b"ro.product.cpu.abi".to_vec(), b"arm64-v8a".to_vec()),

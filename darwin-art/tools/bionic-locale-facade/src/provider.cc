@@ -385,10 +385,27 @@ extern "C" int darwin_art_bionic_iswalpha_l(
   return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_ALPHABETIC);
 }
 
+extern "C" int darwin_art_bionic_iswalpha(uint32_t code_point) {
+  return darwin_art_bionic_iswalpha_l(code_point, GlobalLocale());
+}
+
 extern "C" int darwin_art_bionic_isdigit_l(
     int value, DarwinArtAndroidLocale /*locale*/) {
   const unsigned code = static_cast<unsigned>(value);
   return code < 256 && (kAndroidCtypeTable[code + 1] & kCtypeDigit) != 0;
+}
+
+extern "C" int darwin_art_bionic_isalnum(int value) {
+  const unsigned code = static_cast<unsigned>(value);
+  return code < 256 &&
+         (kAndroidCtypeTable[code + 1] &
+          (kCtypeUpper | kCtypeLower | kCtypeDigit)) != 0;
+}
+
+extern "C" int darwin_art_bionic_isalpha(int value) {
+  const unsigned code = static_cast<unsigned>(value);
+  return code < 256 &&
+         (kAndroidCtypeTable[code + 1] & (kCtypeUpper | kCtypeLower)) != 0;
 }
 
 extern "C" int darwin_art_bionic_islower_l(
@@ -397,10 +414,18 @@ extern "C" int darwin_art_bionic_islower_l(
   return code < 256 && (kAndroidCtypeTable[code + 1] & kCtypeLower) != 0;
 }
 
+extern "C" int darwin_art_bionic_islower(int value) {
+  return darwin_art_bionic_islower_l(value, GlobalLocale());
+}
+
 extern "C" int darwin_art_bionic_isupper_l(
     int value, DarwinArtAndroidLocale /*locale*/) {
   const unsigned code = static_cast<unsigned>(value);
   return code < 256 && (kAndroidCtypeTable[code + 1] & kCtypeUpper) != 0;
+}
+
+extern "C" int darwin_art_bionic_isupper(int value) {
+  return darwin_art_bionic_isupper_l(value, GlobalLocale());
 }
 
 extern "C" int darwin_art_bionic_isxdigit_l(
@@ -408,6 +433,10 @@ extern "C" int darwin_art_bionic_isxdigit_l(
   const unsigned code = static_cast<unsigned>(value);
   return code < 256 && (kAndroidCtypeTable[code + 1] &
                          (kCtypeDigit | kCtypeHex)) != 0;
+}
+
+extern "C" int darwin_art_bionic_isxdigit(int value) {
+  return darwin_art_bionic_isxdigit_l(value, GlobalLocale());
 }
 
 extern "C" int darwin_art_bionic_iswblank_l(
@@ -418,12 +447,20 @@ extern "C" int darwin_art_bionic_iswblank_l(
   return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_POSIX_BLANK);
 }
 
+extern "C" int darwin_art_bionic_iswblank(uint32_t code_point) {
+  return darwin_art_bionic_iswblank_l(code_point, GlobalLocale());
+}
+
 extern "C" int darwin_art_bionic_iswcntrl_l(
     uint32_t code_point,
     DarwinArtAndroidLocale /*locale*/) {
   HostStateGuard guard;
   EnsureAndroidIcu76();
   return u_charType(IcuCodePoint(code_point)) == U_CONTROL_CHAR;
+}
+
+extern "C" int darwin_art_bionic_iswcntrl(uint32_t code_point) {
+  return darwin_art_bionic_iswcntrl_l(code_point, GlobalLocale());
 }
 
 extern "C" int darwin_art_bionic_iswdigit_l(
@@ -434,12 +471,20 @@ extern "C" int darwin_art_bionic_iswdigit_l(
   return u_isdigit(IcuCodePoint(code_point));
 }
 
+extern "C" int darwin_art_bionic_iswdigit(uint32_t code_point) {
+  return darwin_art_bionic_iswdigit_l(code_point, GlobalLocale());
+}
+
 extern "C" int darwin_art_bionic_iswlower_l(
     uint32_t code_point,
     DarwinArtAndroidLocale /*locale*/) {
   HostStateGuard guard;
   EnsureAndroidIcu76();
   return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_LOWERCASE);
+}
+
+extern "C" int darwin_art_bionic_iswlower(uint32_t code_point) {
+  return darwin_art_bionic_iswlower_l(code_point, GlobalLocale());
 }
 
 extern "C" int darwin_art_bionic_iswprint_l(
@@ -450,12 +495,20 @@ extern "C" int darwin_art_bionic_iswprint_l(
   return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_POSIX_PRINT);
 }
 
+extern "C" int darwin_art_bionic_iswprint(uint32_t code_point) {
+  return darwin_art_bionic_iswprint_l(code_point, GlobalLocale());
+}
+
 extern "C" int darwin_art_bionic_iswpunct_l(
     uint32_t code_point,
     DarwinArtAndroidLocale /*locale*/) {
   HostStateGuard guard;
   EnsureAndroidIcu76();
   return u_ispunct(IcuCodePoint(code_point));
+}
+
+extern "C" int darwin_art_bionic_iswpunct(uint32_t code_point) {
+  return darwin_art_bionic_iswpunct_l(code_point, GlobalLocale());
 }
 
 extern "C" int darwin_art_bionic_iswspace_l(
@@ -478,12 +531,20 @@ extern "C" int darwin_art_bionic_iswupper_l(
   return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_UPPERCASE);
 }
 
+extern "C" int darwin_art_bionic_iswupper(uint32_t code_point) {
+  return darwin_art_bionic_iswupper_l(code_point, GlobalLocale());
+}
+
 extern "C" int darwin_art_bionic_iswxdigit_l(
     uint32_t code_point,
     DarwinArtAndroidLocale /*locale*/) {
   HostStateGuard guard;
   EnsureAndroidIcu76();
   return u_hasBinaryProperty(IcuCodePoint(code_point), UCHAR_POSIX_XDIGIT);
+}
+
+extern "C" int darwin_art_bionic_iswxdigit(uint32_t code_point) {
+  return darwin_art_bionic_iswxdigit_l(code_point, GlobalLocale());
 }
 
 extern "C" DarwinArtAndroidLocale darwin_art_bionic_uselocale(
@@ -753,6 +814,21 @@ extern "C" size_t darwin_art_bionic_strxfrm_l(
   return source_length;
 }
 
+extern "C" size_t darwin_art_bionic_strxfrm(char* destination,
+                                             const char* source,
+                                             size_t length) {
+  return darwin_art_bionic_strxfrm_l(destination, source, length,
+                                     GlobalLocale());
+}
+
+extern "C" int darwin_art_bionic_tolower(int value) {
+  return value >= 'A' && value <= 'Z' ? value | 0x20 : value;
+}
+
+extern "C" int darwin_art_bionic_toupper(int value) {
+  return value >= 'a' && value <= 'z' ? value ^ 0x20 : value;
+}
+
 extern "C" uint32_t darwin_art_bionic_towlower_l(
     uint32_t code_point,
     DarwinArtAndroidLocale /*locale*/) {
@@ -796,12 +872,21 @@ extern "C" uint32_t darwin_art_bionic_towupper_l(
   return static_cast<uint32_t>(u_toupper(IcuCodePoint(code_point)));
 }
 
+extern "C" uint32_t darwin_art_bionic_towupper(uint32_t code_point) {
+  return darwin_art_bionic_towupper_l(code_point, GlobalLocale());
+}
+
 extern "C" int darwin_art_bionic_wcscoll_l(
     const uint32_t* left,
     const uint32_t* right,
     DarwinArtAndroidLocale /*locale*/) {
   HostStateGuard guard;
   return WideCompare(left, right);
+}
+
+extern "C" int darwin_art_bionic_wcscoll(const uint32_t* left,
+                                           const uint32_t* right) {
+  return darwin_art_bionic_wcscoll_l(left, right, GlobalLocale());
 }
 
 extern "C" size_t darwin_art_bionic_wcsxfrm_l(
@@ -817,6 +902,13 @@ extern "C" size_t darwin_art_bionic_wcsxfrm_l(
     destination[copy] = 0;
   }
   return source_length;
+}
+
+extern "C" size_t darwin_art_bionic_wcsxfrm(uint32_t* destination,
+                                             const uint32_t* source,
+                                             size_t length) {
+  return darwin_art_bionic_wcsxfrm_l(destination, source, length,
+                                     GlobalLocale());
 }
 
 namespace {
@@ -870,21 +962,35 @@ extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
   RESOLVE(btowc);
   RESOLVE(freelocale);
   RESOLVE(fnmatch);
+  RESOLVE(isalnum);
+  RESOLVE(isalpha);
   RESOLVE(isdigit_l);
   RESOLVE(islower_l);
+  RESOLVE(islower);
   RESOLVE(isupper_l);
+  RESOLVE(isupper);
   RESOLVE(iswalpha_l);
+  RESOLVE(iswalpha);
   RESOLVE(iswblank_l);
+  RESOLVE(iswblank);
   RESOLVE(iswcntrl_l);
+  RESOLVE(iswcntrl);
   RESOLVE(iswdigit_l);
+  RESOLVE(iswdigit);
   RESOLVE(iswlower_l);
+  RESOLVE(iswlower);
   RESOLVE(iswprint_l);
+  RESOLVE(iswprint);
   RESOLVE(iswpunct_l);
+  RESOLVE(iswpunct);
   RESOLVE(iswspace_l);
   RESOLVE(iswspace);
   RESOLVE(iswupper_l);
+  RESOLVE(iswupper);
   RESOLVE(iswxdigit_l);
+  RESOLVE(iswxdigit);
   RESOLVE(isxdigit_l);
+  RESOLVE(isxdigit);
   RESOLVE(localeconv);
   RESOLVE(mbrlen);
   RESOLVE(mbrtowc);
@@ -896,14 +1002,20 @@ extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
   RESOLVE(strcoll_l);
   RESOLVE(strcoll);
   RESOLVE(strxfrm_l);
+  RESOLVE(strxfrm);
+  RESOLVE(tolower);
   RESOLVE(towlower_l);
   RESOLVE(towlower);
   RESOLVE(towupper_l);
+  RESOLVE(towupper);
+  RESOLVE(toupper);
   RESOLVE(uselocale);
   RESOLVE(wcrtomb);
   RESOLVE(wcscoll_l);
+  RESOLVE(wcscoll);
   RESOLVE(wcsnrtombs);
   RESOLVE(wcsxfrm_l);
+  RESOLVE(wcsxfrm);
   RESOLVE(wctob);
   RESOLVE(wcwidth);
 #undef RESOLVE

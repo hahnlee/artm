@@ -8,6 +8,9 @@
 #include "darwin_jni_shorty.h"
 #include "darwin_runtime_adapters_internal.h"
 
+extern "C" intptr_t darwin_art_bionic_fs_resolve_private_host_path(
+    const char *path, char *output, size_t capacity);
+
 namespace android {
 
 namespace {
@@ -280,6 +283,11 @@ void *ProxyGetMethodId(void *context, void *clazz, const char *name,
     library->method_descriptors[method] = signature;
     library->method_names[method] = name;
   }
+  if (std::getenv("DARWIN_ART_DEBUG_JNI_CALLS") != nullptr) {
+    std::cerr << "DARWIN JNI method name=" << name
+              << " signature=" << signature
+              << " static=" << is_static << " id=" << method << "\n";
+  }
   if (std::strcmp(name, "getDataDirectory") == 0 ||
       std::strcmp(name, "getCacheDirectory") == 0) {
     std::cerr << "DARWIN JNI path method name=" << name
@@ -303,11 +311,15 @@ uint64_t ProxyCallMethodV(void *context, void *object, void *method,
   const jclass clazz = static_cast<jclass>(object);
   const jmethodID id = static_cast<jmethodID>(method);
   std::string method_name;
+  std::string method_descriptor;
   {
     std::lock_guard<std::mutex> lock(library->method_descriptor_mutex);
     const auto found = library->method_names.find(method);
     if (found != library->method_names.end())
       method_name = found->second;
+    const auto descriptor = library->method_descriptors.find(method);
+    if (descriptor != library->method_descriptors.end())
+      method_descriptor = descriptor->second;
   }
   std::string debug_name;
   if (std::getenv("DARWIN_ART_DEBUG_JNI_CALLS") != nullptr)
@@ -325,7 +337,41 @@ uint64_t ProxyCallMethodV(void *context, void *object, void *method,
     }
   }
   if (is_static == 2) {
-    return reinterpret_cast<uint64_t>(art_env->NewObjectA(clazz, id, values));
+    // Native Android SDKs commonly extract an embedded helper DEX/JAR into
+    // Context.getCacheDir() and construct a DexClassLoader from that guest
+    // pathname. ART's file loader executes outside the Bionic facade, so map
+    // only a path already authorized by the private /data overlay. Immutable
+    // mounts, host paths, and traversal remain rejected by the facade.
+    jobject translated_dex_path = nullptr;
+    if (method_name == "<init>" &&
+        method_descriptor ==
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
+            "Ljava/lang/ClassLoader;)V" &&
+        !arguments.empty() && arguments[0].l != nullptr) {
+      const jstring original_dex_path = static_cast<jstring>(arguments[0].l);
+      const char *guest_path = art_env->GetStringUTFChars(
+          original_dex_path, nullptr);
+      if (guest_path != nullptr) {
+        const intptr_t required =
+            darwin_art_bionic_fs_resolve_private_host_path(guest_path, nullptr, 0);
+        if (required > 0) {
+          std::vector<char> host_path(static_cast<size_t>(required) + 1u, '\0');
+          if (darwin_art_bionic_fs_resolve_private_host_path(
+                  guest_path, host_path.data(), host_path.size()) == required) {
+            translated_dex_path = art_env->NewStringUTF(host_path.data());
+            if (translated_dex_path != nullptr) {
+              arguments[0].l = translated_dex_path;
+              values = arguments.data();
+            }
+          }
+        }
+        art_env->ReleaseStringUTFChars(original_dex_path, guest_path);
+      }
+    }
+    jobject result = art_env->NewObjectA(clazz, id, values);
+    if (translated_dex_path != nullptr)
+      art_env->DeleteLocalRef(translated_dex_path);
+    return reinterpret_cast<uint64_t>(result);
   }
   if (is_static != 0) {
     switch (return_shorty) {
@@ -341,6 +387,96 @@ uint64_t ProxyCallMethodV(void *context, void *object, void *method,
                     << art_env->GetArrayLength(static_cast<jarray>(result));
         }
         std::cerr << "\n";
+        if (result == nullptr && art_env->ExceptionCheck()) {
+          jthrowable pending = art_env->ExceptionOccurred();
+          art_env->ExceptionClear();
+          jclass throwable = art_env->FindClass("java/lang/Throwable");
+          jmethodID to_string =
+              throwable == nullptr
+                  ? nullptr
+                  : art_env->GetMethodID(throwable, "toString",
+                                         "()Ljava/lang/String;");
+          jmethodID get_stack_trace =
+              throwable == nullptr
+                  ? nullptr
+                  : art_env->GetMethodID(
+                        throwable, "getStackTrace",
+                        "()[Ljava/lang/StackTraceElement;");
+          jstring description =
+              to_string == nullptr
+                  ? nullptr
+                  : static_cast<jstring>(
+                        art_env->CallObjectMethod(pending, to_string));
+          const char *text =
+              description == nullptr
+                  ? nullptr
+                  : art_env->GetStringUTFChars(description, nullptr);
+          std::cerr << "DARWIN JNI pending exception method=" << debug_name
+                    << " description="
+                    << (text == nullptr ? "<unavailable>" : text)
+                    << "\n";
+          if (text != nullptr)
+            art_env->ReleaseStringUTFChars(description, text);
+          if (description != nullptr)
+            art_env->DeleteLocalRef(description);
+
+          if (art_env->ExceptionCheck())
+            art_env->ExceptionClear();
+          jobjectArray stack =
+              get_stack_trace == nullptr
+                  ? nullptr
+                  : static_cast<jobjectArray>(
+                        art_env->CallObjectMethod(pending, get_stack_trace));
+          jclass stack_element =
+              stack == nullptr
+                  ? nullptr
+                  : art_env->FindClass("java/lang/StackTraceElement");
+          jmethodID stack_to_string =
+              stack_element == nullptr
+                  ? nullptr
+                  : art_env->GetMethodID(stack_element, "toString",
+                                         "()Ljava/lang/String;");
+          if (!art_env->ExceptionCheck() && stack != nullptr &&
+              stack_to_string != nullptr) {
+            const jsize frame_count = art_env->GetArrayLength(stack);
+            for (jsize frame = 0; frame < frame_count; ++frame) {
+              jobject element = art_env->GetObjectArrayElement(stack, frame);
+              jstring line =
+                  element == nullptr
+                      ? nullptr
+                      : static_cast<jstring>(
+                            art_env->CallObjectMethod(element, stack_to_string));
+              const char *line_text =
+                  line == nullptr
+                      ? nullptr
+                      : art_env->GetStringUTFChars(line, nullptr);
+              std::cerr << "DARWIN JNI pending exception frame=" << frame
+                        << " at "
+                        << (line_text == nullptr ? "<unavailable>" : line_text)
+                        << "\n";
+              if (line_text != nullptr)
+                art_env->ReleaseStringUTFChars(line, line_text);
+              if (line != nullptr)
+                art_env->DeleteLocalRef(line);
+              if (element != nullptr)
+                art_env->DeleteLocalRef(element);
+              if (art_env->ExceptionCheck()) {
+                art_env->ExceptionClear();
+                break;
+              }
+            }
+          }
+          if (stack_element != nullptr)
+            art_env->DeleteLocalRef(stack_element);
+          if (stack != nullptr)
+            art_env->DeleteLocalRef(stack);
+          if (throwable != nullptr)
+            art_env->DeleteLocalRef(throwable);
+          if (art_env->ExceptionCheck())
+            art_env->ExceptionClear();
+          art_env->Throw(pending);
+          art_env->DeleteLocalRef(pending);
+        }
       }
       return reinterpret_cast<uint64_t>(result);
     }

@@ -1582,7 +1582,7 @@ impl LoadedElf {
             return Err(LoadError::InvalidSymbol(format!("dynsym[{index}] type")));
         }
         if symbol.section_index != SHN_UNDEF {
-            if symbol.section_index == SHN_ABS {
+            if symbol.section_index == SHN_ABS && !self.is_image_relative_absolute_marker(&symbol) {
                 return Err(LoadError::Capability(Capability::AbsoluteSymbolDefinition));
             }
             let is_load_end_marker = symbol.size == 0
@@ -1823,7 +1823,7 @@ impl LoadedElf {
             {
                 continue;
             }
-            if symbol.section_index == SHN_ABS {
+            if symbol.section_index == SHN_ABS && !self.is_image_relative_absolute_marker(&symbol) {
                 return Err(LoadError::Capability(Capability::AbsoluteSymbolDefinition));
             }
             // GNU/LLVM linkers commonly emit the zero-sized `end` marker at
@@ -2299,6 +2299,20 @@ impl LoadedElf {
         } else {
             Err(LoadError::Bounds(what))
         }
+    }
+
+    fn is_image_relative_absolute_marker(&self, symbol: &DynamicSymbol) -> bool {
+        // Android DSOs produced by GNU/LLVM linkers commonly publish
+        // zero-sized linker markers such as __bss_start, _edata, and _end as
+        // SHN_ABS even though their st_value is an image virtual address.
+        // Bionic exposes these as load-bias-relative dlsym values. Accept only
+        // the tightly bounded form whose address lies in (or exactly at the
+        // end of) a PT_LOAD; arbitrary absolute constants remain rejected.
+        symbol.section_index == SHN_ABS
+            && symbol.size == 0
+            && self
+                .require_loaded_range(symbol.value, 0, None, "image-relative absolute marker")
+                .is_ok()
     }
 
     fn loaded_pointer(&self, address: u64, size: usize) -> Result<*mut u8, LoadError> {

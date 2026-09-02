@@ -176,6 +176,11 @@ bool IsAuthorizedHostRuntimePath(const char* path) {
          IsPathWithin(path, std::getenv("ANDROID_DATA")) ||
          IsPathWithin(path, std::getenv("ANDROID_TZDATA_ROOT")) ||
          IsPathWithin(path, std::getenv("DARWIN_ART_APK_APP_NATIVE_DIR")) ||
+         // ART consumes the resolved backing path when a native SDK creates a
+         // DexClassLoader from its private Android /data cache. This root is
+         // one app-scoped capability, not arbitrary host filesystem access.
+         IsPathWithin(path,
+                      std::getenv("DARWIN_ART_ANDROID_PRIVATE_DATA_ROOT")) ||
          IsExplicitHostFile(path, "DARWIN_ART_APK_APP_RESOURCE_APK") ||
          IsExplicitHostFile(path, "DARWIN_ART_APK_APP_SUPPORT_DEX") ||
          IsExplicitHostFile(path, "DARWIN_ART_FRAMEWORK_RES_APK");
@@ -387,7 +392,13 @@ int Fstat(int fd, struct stat* status) {
 }
 
 int Stat(const char* path, struct stat* status) {
-  if (g_providers.stat != nullptr && !IsAuthorizedHostRuntimePath(path)) {
+  const bool authorized = IsAuthorizedHostRuntimePath(path);
+  if (std::getenv("DARWIN_ART_DEBUG_LIBCORE_IO") != nullptr &&
+      path != nullptr && std::strstr(path, "app_resources_lib") != nullptr) {
+    std::fprintf(stderr, "DARWIN libcore stat path=%s authorized=%d\n", path,
+                 authorized ? 1 : 0);
+  }
+  if (g_providers.stat != nullptr && !authorized) {
     DarwinArtAndroidStat android_status{};
     const int result = g_providers.stat(path, &android_status);
     if (result == -1) {
@@ -450,7 +461,13 @@ int Access(const char* path, int mode) {
     errno = EINVAL;
     return -1;
   }
-  if (g_providers.access != nullptr && !IsAuthorizedHostRuntimePath(path)) {
+  const bool authorized = IsAuthorizedHostRuntimePath(path);
+  if (std::getenv("DARWIN_ART_DEBUG_LIBCORE_IO") != nullptr &&
+      path != nullptr && std::strstr(path, "app_resources_lib") != nullptr) {
+    std::fprintf(stderr, "DARWIN libcore access path=%s mode=%d authorized=%d\n",
+                 path, mode, authorized ? 1 : 0);
+  }
+  if (g_providers.access != nullptr && !authorized) {
     const int result = g_providers.access(path, mode);
     if (result == -1) PublishAndroidErrno();
     return result;

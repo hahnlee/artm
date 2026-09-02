@@ -89,6 +89,16 @@ struct ElfLibrary {
   // Initiating app loader for JNI_OnLoad/ProxyFindClass.  NativeBridge's
   // callback has no class-loader argument, so retain the lease per image.
   void* app_loader = nullptr;
+  // Stable NativeLoader namespace identity shared by every global reference
+  // to the same Java ClassLoader. Detached native threads cannot call
+  // IsSameObject, so cache reuse must not depend on jobject pointer identity.
+  uint64_t loader_namespace_id = 0;
+  // Exact resolved guest path and published graph handle. ART's resident
+  // library cache is path + ClassLoader scoped; guest libdl must lease that
+  // same owner rather than map a second copy with independent static state.
+  std::string resolved_path;
+  void* graph_handle = nullptr;
+  std::atomic<uint32_t> guest_open_refs{0};
   darwin_art::android_jni::TrampolineSet* trampolines = nullptr;
   // JNI_OnLoad may register methods on more than one app class.  Each
   // RegisterNatives call gets an independent executable trampoline mapping;
@@ -141,6 +151,7 @@ ElfLibrary* AsElfLibrary(void* handle);
 void RegisterElfLibrary(ElfLibrary* library);
 void UnregisterElfLibrary(ElfLibrary* library);
 ElfLibrary* FindElfLibraryForAddress(uintptr_t address);
+ElfLibrary* FindElfLibraryByPath(JNIEnv* env, const char* path, jobject loader);
 int32_t ProxyRegisterNatives(void* context,
                              void* clazz,
                              const DarwinArtJniNativeMethod* methods,
@@ -157,5 +168,11 @@ void* ProxyGetMethodId(void* context, void* clazz, const char* name,
 uint64_t ProxyCallMethodV(void* context, void* object, void* method,
                           void* android_va_list, int32_t return_shorty,
                           int32_t is_static);
+
+// Debug-only wrappers used to observe an APK's Unity lifecycle JNI calls at
+// the registration boundary. They are inert unless
+// DARWIN_ART_DEBUG_UNITY_LIFECYCLE is set by the host.
+void* MaybeWrapUnityLifecycleNative(const char* name, const char* signature,
+                                    void* target);
 
 }  // namespace android

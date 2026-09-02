@@ -39,7 +39,7 @@ for generated in ownership.tsv unsupported-libc.tsv ownership.inc unsupported.in
     fail "generated $generated drift"
 done
 
-[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 557 ]] ||
+[[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libc.so"{n++}END{print n+0}')" == 590 ]] ||
   fail 'expected pinned libc++ owners plus reviewed extensions'
 [[ "$(tail -n +2 "$here/generated/ownership.tsv" | awk -F '\t' '$1=="libdl.so"{n++}END{print n+0}')" == 7 ]] ||
   fail 'expected seven closed guest libdl owners'
@@ -140,4 +140,4 @@ if grep -E '(_dlopen|_dlsym|_dlvsym|_NSLookupSymbolInImage|__dyld_)' <<<"$undefi
   fail 'host loader undefined reference present'
 fi
 
-echo 'bionic-provider-namespace: PASS libcxx=160/160 extensions=557 liblog-symbols=20 binder-ndk=39 aaudio=30 aliases=13 owned=733 unsupported=0 duplicate-triple=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'
+echo 'bionic-provider-namespace: PASS libcxx=160/160 extensions=590 liblog-symbols=20 binder-ndk=39 aaudio=30 aliases=13 owned=769 unsupported=0 duplicate-triple=0 exact-version=yes resolver=closed teardown=ordered+quiescent asan+ubsan+tsan=yes'

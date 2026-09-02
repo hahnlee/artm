@@ -34,6 +34,11 @@ char* darwin_art_bionic_getenv(const char* name) {
 int darwin_art_bionic___system_property_get(const char* name, char* value) {
   const int saved_host_errno = errno;
   const int result = darwin_art_bionic_process_property_get_core(name, value);
+  if (getenv("DARWIN_ART_DEBUG_PROPERTIES") != NULL) {
+    fprintf(stderr, "DARWIN property get name=%s result=%d value=%s caller=%p\n",
+            name == NULL ? "<null>" : name, result,
+            value == NULL ? "<null>" : value, __builtin_return_address(0));
+  }
   errno = saved_host_errno;
   return result;
 }
@@ -41,6 +46,11 @@ int darwin_art_bionic___system_property_get(const char* name, char* value) {
 const void* darwin_art_bionic___system_property_find(const char* name) {
   const int saved_host_errno = errno;
   const void* result = darwin_art_bionic_process_property_find_core(name);
+  if (getenv("DARWIN_ART_DEBUG_PROPERTIES") != NULL) {
+    fprintf(stderr, "DARWIN property find name=%s result=%p caller=%p\n",
+            name == NULL ? "<null>" : name, result,
+            __builtin_return_address(0));
+  }
   errno = saved_host_errno;
   return result;
 }
@@ -67,6 +77,12 @@ int darwin_art_bionic___system_property_read(const void* property, char* name,
       property, DarwinArtPropertyRead, &output);
   int result = 0;
   if (value != NULL) result = (int)strlen(value);
+  if (getenv("DARWIN_ART_DEBUG_PROPERTIES") != NULL) {
+    fprintf(stderr, "DARWIN property read property=%p name=%s value=%s result=%d caller=%p\n",
+            property, name == NULL ? "<null>" : name,
+            value == NULL ? "<null>" : value, result,
+            __builtin_return_address(0));
+  }
   errno = saved_host_errno;
   return result;
 }
@@ -77,6 +93,11 @@ void darwin_art_bionic___system_property_read_callback(
   const int saved_host_errno = errno;
   darwin_art_bionic_process_property_read_callback_core(property, callback,
                                                         cookie);
+  if (getenv("DARWIN_ART_DEBUG_PROPERTIES") != NULL) {
+    fprintf(stderr,
+            "DARWIN property read-callback property=%p cookie=%p caller=%p\n",
+            property, cookie, __builtin_return_address(0));
+  }
   errno = saved_host_errno;
 }
 
@@ -333,11 +354,14 @@ _Static_assert(offsetof(AndroidSignalContext, machine) == 176,
                "Android arm64 ucontext ABI");
 
 static int HostSignal(int android_signal) {
+  // Keep the mapping injective. In particular Android SIGPWR is 30, while
+  // Darwin signal 30 is SIGUSR1; mapping both Android 10 and 30 to SIGUSR1
+  // loses the logical signo when the host trampoline calls the guest handler.
   static const unsigned char map[32] = {
       0, SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGBUS,
       SIGFPE, SIGKILL, SIGUSR1, SIGSEGV, SIGUSR2, SIGPIPE, SIGALRM, SIGTERM,
-      0, SIGCHLD, SIGCONT, SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU, SIGURG,
-      SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF, SIGWINCH, SIGINFO, SIGUSR1, SIGUSR2};
+      SIGEMT, SIGCHLD, SIGCONT, SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU, SIGURG,
+      SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF, SIGWINCH, SIGIO, SIGINFO, SIGSYS};
   return android_signal > 0 && android_signal < 32 ? map[android_signal] : 0;
 }
 

@@ -64,6 +64,7 @@ for helper in darwin-artctl darwin-artd darwin-art-apk-install \
   copy_file "$project_root/target/release/$helper" "target/release/$helper"
 done
 copy_file "$project_root/tools/run-android-apk-app.sh" tools/run-android-apk-app.sh
+copy_file "$project_root/tools/declare-darwin-x18-abi.sh" tools/declare-darwin-x18-abi.sh
 copy_file "$project_root/config/darwin-art-host.entitlements" config/darwin-art-host.entitlements
 copy_file "$project_root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib" \
   _build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib
@@ -113,8 +114,12 @@ lz4_source="$(brew --prefix lz4)/lib/liblz4.1.dylib"
 copy_file "$lz4_source" _build/runtime-graphics-link-probe/liblz4.1.dylib
 install_name_tool -change "$lz4_source" @loader_path/liblz4.1.dylib "$runtime_dylib"
 
-chmod +x "$runtime/tools/run-android-apk-app.sh" "$runtime/target/release/darwin-art-host" \
+chmod +x "$runtime/tools/run-android-apk-app.sh" \
+  "$runtime/tools/declare-darwin-x18-abi.sh" \
+  "$runtime/target/release/darwin-art-host" \
   "$runtime/target/release/"*
+"$runtime/tools/declare-darwin-x18-abi.sh" \
+  "$runtime/target/release/darwin-art-host"
 codesign --force --sign - --options runtime --timestamp=none \
   --entitlements "$project_root/config/darwin-art-host.entitlements" \
   "$runtime/target/release/darwin-art-host" >/dev/null
@@ -123,6 +128,7 @@ find "$runtime" -type f \( -name '*.dylib' -o -name '*.so' \) -print0 |
     codesign --force --sign - --timestamp=none "$library" >/dev/null
   done
 for helper in "$runtime/target/release/"*; do
+  [[ "$helper" == "$runtime/target/release/darwin-art-host" ]] && continue
   codesign --force --sign - --timestamp=none "$helper" >/dev/null
 done
 codesign --force --sign - --timestamp=none "$shim_launcher" >/dev/null

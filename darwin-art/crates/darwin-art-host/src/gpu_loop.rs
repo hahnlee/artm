@@ -114,8 +114,9 @@ pub(super) fn run(
         .filter(|scale| scale.is_finite() && *scale > 0.0)
         .unwrap_or(1.0);
     eprintln!(
-        "DARWIN_ART gpu test pointer={test_pointer:?} drag_points={} hold_ms={test_hold_ms} cancel={test_cancel} hz={test_pointer_hz:?} keys={}",
+        "DARWIN_ART gpu test pointer={test_pointer:?} drag_points={} tap_sequence={} hold_ms={test_hold_ms} cancel={test_cancel} hz={test_pointer_hz:?} keys={}",
         test_drag.as_ref().map_or(0, Vec::len),
+        test_tap_sequence.as_ref().map_or(0, Vec::len),
         test_key_sequence.as_ref().map_or(0, Vec::len),
     );
 

@@ -24,6 +24,7 @@ check_hash "$master" "$LIBC_IMPORT_MANIFEST_SHA256"
 check_hash "$script_dir/upstream-sources.tsv" "$BIONIC_SOURCE_MANIFEST_SHA256"
 check_hash "$script_dir/manifests/locale-cluster.tsv" "$LOCALE_CLUSTER_SHA256"
 check_hash "$script_dir/manifests/imports.tsv" "$LOCALE_IMPORTS_SHA256"
+check_hash "$script_dir/manifests/extension-boundary.tsv" "$LOCALE_EXTENSIONS_SHA256"
 check_hash "$errno_root/sources.lock" "$BIONIC_ERRNO_LOCK_SHA256"
 check_hash "$errno_root/src/errno_tls.c" "$BIONIC_ERRNO_SOURCE_SHA256"
 check_hash "$errno_root/generated/darwin_to_android.inc" "$BIONIC_ERRNO_MAPPING_SHA256"
@@ -67,10 +68,16 @@ diff -u "$temp_root/master-cluster" "$temp_root/locked-cluster" ||
   fail 'unsupported locale count drift'
 awk -F '\t' 'NR>1 && $3=="supported"{print $1}' \
   "$script_dir/manifests/locale-cluster.tsv" | sort > "$temp_root/cluster-supported"
+tail -n +2 "$script_dir/manifests/extension-boundary.tsv" | cut -f1 | sort \
+  > "$temp_root/extension-supported"
+cat "$temp_root/cluster-supported" "$temp_root/extension-supported" | sort \
+  > "$temp_root/provider-expected"
 tail -n +2 "$script_dir/manifests/imports.tsv" | cut -f1 | sort \
   > "$temp_root/provider-imports"
-diff -u "$temp_root/cluster-supported" "$temp_root/provider-imports" ||
-  fail 'provider manifest is not the exact supported cluster'
+diff -u "$temp_root/provider-expected" "$temp_root/provider-imports" ||
+  fail 'provider manifest is not the exact supported cluster plus extensions'
+[[ "$(wc -l < "$temp_root/extension-supported" | tr -d ' ')" == "$LOCALE_EXTENSION_COUNT" ]] ||
+  fail 'locale extension count drift'
 
 source_root="$project_root/_aosp/bionic-locale-facade"
 [[ "$(tail -n +2 "$script_dir/upstream-sources.tsv" | wc -l | tr -d ' ')" == "$BIONIC_SOURCE_COUNT" ]] ||

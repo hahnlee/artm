@@ -8,6 +8,8 @@
 #include <sys/socket.h>
 
 #include <array>
+#include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -26,6 +28,7 @@ constexpr int kAndroidAiPassive = 0x1;
 constexpr int kAndroidAiCanonname = 0x2;
 constexpr int kAndroidAiNumericHost = 0x4;
 constexpr int kAndroidAiNumericServ = 0x8;
+constexpr int kAndroidAiAddrConfig = 0x400;
 constexpr int kAndroidNiNumericHost = 0x2;
 constexpr int kAndroidNiNumericServ = 0x8;
 constexpr int kAndroidNiDgram = 0x10;
@@ -134,10 +137,75 @@ bool IsNumericNode(const char* node) {
          inet_pton(AF_INET6, node, &address6) == 1;
 }
 
-bool IsAllowedNode(const char* node) {
-  return node == nullptr || IsNumericNode(node) ||
-         EqualsAsciiIgnoreCase(node, "localhost") ||
+bool IsLocalhostNode(const char* node) {
+  return EqualsAsciiIgnoreCase(node, "localhost") ||
          EqualsAsciiIgnoreCase(node, "localhost.");
+}
+
+bool HasLocalSuffix(const char* node, size_t content_length) {
+  constexpr char kSuffix[] = ".local";
+  constexpr size_t kSuffixLength = sizeof(kSuffix) - 1;
+  if (content_length < kSuffixLength) return false;
+  const char* tail = node + content_length - kSuffixLength;
+  for (size_t index = 0; index < kSuffixLength; ++index) {
+    unsigned char byte = static_cast<unsigned char>(tail[index]);
+    if (byte >= 'A' && byte <= 'Z') byte = static_cast<unsigned char>(byte + 32);
+    if (byte != static_cast<unsigned char>(kSuffix[index])) return false;
+  }
+  return true;
+}
+
+// Android applications expect libc resolution to use the device's configured
+// resolver.  Darwin is the device OS for this compatibility layer, but passing
+// an unqualified name to getaddrinfo would also inherit search-domain and mDNS
+// policy that an APK did not explicitly request.  Admit DNS-style FQDNs only,
+// reject .local, and make the host query absolute below by appending a dot.
+bool IsExternalDnsNode(const char* node) {
+  if (node == nullptr) return false;
+  const size_t length = std::strlen(node);
+  if (length < 3 || length > 253) return false;
+  const size_t content_length = node[length - 1] == '.' ? length - 1 : length;
+  if (content_length == 0 || content_length > 253) return false;
+  if (HasLocalSuffix(node, content_length)) return false;
+  size_t label_length = 0;
+  bool saw_dot = false;
+  for (size_t index = 0; index < content_length; ++index) {
+    const unsigned char byte = static_cast<unsigned char>(node[index]);
+    if (byte == '.') {
+      if (label_length == 0 || label_length > 63 || node[index - 1] == '-') {
+        return false;
+      }
+      saw_dot = true;
+      label_length = 0;
+      continue;
+    }
+    const bool alphanumeric =
+        (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') ||
+        (byte >= '0' && byte <= '9');
+    if (!alphanumeric && byte != '-') return false;
+    if (label_length == 0 && byte == '-') return false;
+    ++label_length;
+  }
+  return saw_dot && label_length != 0 && label_length <= 63 &&
+         node[content_length - 1] != '-';
+}
+
+const char* PrepareHostNode(const char* node, std::array<char, 255>* absolute) {
+  if (node == nullptr || IsNumericNode(node) || IsLocalhostNode(node)) {
+    return node;
+  }
+  if (!IsExternalDnsNode(node)) return nullptr;
+  const size_t length = std::strlen(node);
+  std::memcpy(absolute->data(), node, length);
+  size_t output_length = length;
+  if (node[length - 1] != '.') (*absolute)[output_length++] = '.';
+  (*absolute)[output_length] = 0;
+  return absolute->data();
+}
+
+bool DebugDns() {
+  static const bool enabled = std::getenv("DARWIN_ART_DEBUG_DNS") != nullptr;
+  return enabled;
 }
 
 bool IsNumericService(const char* service) {
@@ -209,13 +277,15 @@ bool TranslateProtocolFromHost(int host, int* android) {
 
 bool TranslateFlagsToHost(int android, int* host) {
   constexpr int kAllowed = kAndroidAiPassive | kAndroidAiCanonname |
-                           kAndroidAiNumericHost | kAndroidAiNumericServ;
+                           kAndroidAiNumericHost | kAndroidAiNumericServ |
+                           kAndroidAiAddrConfig;
   if ((android & ~kAllowed) != 0) return false;
   int result = 0;
   if ((android & kAndroidAiPassive) != 0) result |= AI_PASSIVE;
   if ((android & kAndroidAiCanonname) != 0) result |= AI_CANONNAME;
   if ((android & kAndroidAiNumericHost) != 0) result |= AI_NUMERICHOST;
   if ((android & kAndroidAiNumericServ) != 0) result |= AI_NUMERICSERV;
+  if ((android & kAndroidAiAddrConfig) != 0) result |= AI_ADDRCONFIG;
   *host = result;
   return true;
 }
@@ -226,6 +296,7 @@ int TranslateFlagsFromHost(int host) {
   if ((host & AI_CANONNAME) != 0) result |= kAndroidAiCanonname;
   if ((host & AI_NUMERICHOST) != 0) result |= kAndroidAiNumericHost;
   if ((host & AI_NUMERICSERV) != 0) result |= kAndroidAiNumericServ;
+  if ((host & AI_ADDRCONFIG) != 0) result |= kAndroidAiAddrConfig;
   return result;
 }
 
@@ -340,7 +411,6 @@ extern "C" int darwin_art_bionic_dns_getaddrinfo(
   if (result == nullptr) return 4;
   *result = nullptr;
   if (node == nullptr && service == nullptr) return 8;
-  if (!IsAllowedNode(node)) return 8;
   if (!IsNumericService(service)) return 9;
 
   addrinfo host_hints{};
@@ -357,11 +427,33 @@ extern "C" int darwin_art_bionic_dns_getaddrinfo(
     }
   }
 
+  std::array<char, 255> absolute_node{};
+  const char* host_node = PrepareHostNode(node, &absolute_node);
+  if (node != nullptr && host_node == nullptr) {
+    if (DebugDns()) {
+      std::fprintf(stderr, "DARWIN DNS: reject node=%s reason=policy\n", node);
+    }
+    return 8;
+  }
+  if (node != nullptr && !IsNumericNode(node) && !IsLocalhostNode(node) &&
+      (host_hints.ai_flags & AI_NUMERICHOST) != 0) {
+    if (DebugDns()) {
+      std::fprintf(stderr,
+                   "DARWIN DNS: reject node=%s reason=AI_NUMERICHOST\n", node);
+    }
+    return 8;
+  }
+
   addrinfo* host_result = nullptr;
-  const int host_status = getaddrinfo(node, service,
+  const int host_status = getaddrinfo(host_node, service,
                                       hints == nullptr ? nullptr : &host_hints,
                                       &host_result);
   const int host_errno = errno;
+  if (DebugDns()) {
+    std::fprintf(stderr, "DARWIN DNS: resolve node=%s query=%s status=%d\n",
+                 node == nullptr ? "(null)" : node,
+                 host_node == nullptr ? "(null)" : host_node, host_status);
+  }
   if (host_status != 0) {
     if (host_status == EAI_SYSTEM) {
       darwin_art_bionic_errno_store(AndroidErrno(host_errno));
@@ -556,7 +648,8 @@ extern "C" DarwinArtBionicDnsFunction darwin_art_bionic_dns_resolve(
 extern "C" const char* darwin_art_bionic_dns_capability(
     const char* capability) {
   if (capability == nullptr) return "invalid-capability";
-  if (std::strcmp(capability, "localhost-numeric-policy") == 0 ||
+  if (std::strcmp(capability, "absolute-host-dns") == 0 ||
+      std::strcmp(capability, "localhost-numeric-policy") == 0 ||
       std::strcmp(capability, "android-addrinfo-deep-copy") == 0 ||
       std::strcmp(capability, "numeric-reverse") == 0 ||
       std::strcmp(capability, "numeric-presentation") == 0 ||

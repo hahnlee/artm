@@ -12,6 +12,12 @@ namespace {
 
 std::mutex g_system_properties_mutex;
 std::unordered_map<std::string, std::string> g_system_properties{
+    // Keep Unity's native device query in agreement with the bounded procfs
+    // capability snapshot.  Android exposes this as a system property on
+    // devices where the CPU topology service is available.
+    {"device.cpu.count", "8"},
+    {"device.cpu.frequency_mhz", "2400"},
+    {"device.cpu.model", "Darwin ARM64"},
     {"ro.product.cpu.abilist", "arm64-v8a"},
     {"ro.product.cpu.abilist64", "arm64-v8a"},
     {"ro.product.cpu.abilist32", ""},

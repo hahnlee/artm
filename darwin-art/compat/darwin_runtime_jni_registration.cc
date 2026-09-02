@@ -11,6 +11,125 @@
 
 namespace android {
 
+namespace {
+
+using UnityBoolNative = jboolean (*)(JNIEnv*, jobject);
+using UnityVoidNative = void (*)(JNIEnv*, jobject);
+using UnityFocusNative = void (*)(JNIEnv*, jobject, jboolean);
+using UnitySurfaceNative = void (*)(JNIEnv*, jobject, jint, jobject);
+using NativeLoaderLoad = jboolean (*)(JNIEnv*, jobject, jstring);
+
+UnityBoolNative g_unity_native_render = nullptr;
+UnityBoolNative g_unity_native_pause = nullptr;
+UnityVoidNative g_unity_native_resume = nullptr;
+UnityFocusNative g_unity_native_focus_changed = nullptr;
+UnitySurfaceNative g_unity_native_recreate_gfx_state = nullptr;
+NativeLoaderLoad g_native_loader_load = nullptr;
+
+bool UnityLifecycleDebugEnabled() {
+  return std::getenv("DARWIN_ART_DEBUG_UNITY_LIFECYCLE") != nullptr;
+}
+
+jboolean TraceUnityNativeRender(JNIEnv* env, jobject object) {
+  std::cerr << "DARWIN Unity lifecycle: nativeRender enter\n";
+  const jboolean result = g_unity_native_render == nullptr
+                              ? JNI_FALSE
+                              : g_unity_native_render(env, object);
+  std::cerr << "DARWIN Unity lifecycle: nativeRender exit result="
+            << (result == JNI_TRUE ? 1 : 0) << " exception="
+            << (env != nullptr && env->ExceptionCheck() ? 1 : 0) << "\n";
+  return result;
+}
+
+jboolean TraceUnityNativePause(JNIEnv* env, jobject object) {
+  std::cerr << "DARWIN Unity lifecycle: nativePause enter\n";
+  const jboolean result = g_unity_native_pause == nullptr
+                              ? JNI_FALSE
+                              : g_unity_native_pause(env, object);
+  std::cerr << "DARWIN Unity lifecycle: nativePause exit result="
+            << (result == JNI_TRUE ? 1 : 0) << " exception="
+            << (env != nullptr && env->ExceptionCheck() ? 1 : 0) << "\n";
+  return result;
+}
+
+void TraceUnityNativeResume(JNIEnv* env, jobject object) {
+  std::cerr << "DARWIN Unity lifecycle: nativeResume enter\n";
+  if (g_unity_native_resume != nullptr) g_unity_native_resume(env, object);
+  std::cerr << "DARWIN Unity lifecycle: nativeResume exit exception="
+            << (env != nullptr && env->ExceptionCheck() ? 1 : 0) << "\n";
+}
+
+void TraceUnityNativeFocusChanged(JNIEnv* env, jobject object, jboolean focused) {
+  std::cerr << "DARWIN Unity lifecycle: nativeFocusChanged enter focused="
+            << (focused == JNI_TRUE ? 1 : 0) << "\n";
+  if (g_unity_native_focus_changed != nullptr)
+    g_unity_native_focus_changed(env, object, focused);
+  std::cerr << "DARWIN Unity lifecycle: nativeFocusChanged exit exception="
+            << (env != nullptr && env->ExceptionCheck() ? 1 : 0) << "\n";
+}
+
+void TraceUnityNativeRecreateGfxState(JNIEnv* env, jobject object, jint index,
+                                      jobject surface) {
+  std::cerr << "DARWIN Unity lifecycle: nativeRecreateGfxState enter index="
+            << index << " surface=" << surface << "\n";
+  if (g_unity_native_recreate_gfx_state != nullptr)
+    g_unity_native_recreate_gfx_state(env, object, index, surface);
+  std::cerr << "DARWIN Unity lifecycle: nativeRecreateGfxState exit exception="
+            << (env != nullptr && env->ExceptionCheck() ? 1 : 0) << "\n";
+}
+
+jboolean TraceNativeLoaderLoad(JNIEnv* env, jobject object, jstring path) {
+  std::cerr << "DARWIN NativeLoader.load enter path=" << path << "\n";
+  const jboolean result = g_native_loader_load == nullptr
+                              ? JNI_FALSE
+                              : g_native_loader_load(env, object, path);
+  std::cerr << "DARWIN NativeLoader.load exit result="
+            << (result == JNI_TRUE ? 1 : 0) << " exception="
+            << (env != nullptr && env->ExceptionCheck() ? 1 : 0) << "\n";
+  return result;
+}
+
+}  // namespace
+
+void* MaybeWrapUnityLifecycleNative(const char* name, const char* signature,
+                                    void* target) {
+  if (!UnityLifecycleDebugEnabled() || name == nullptr || signature == nullptr ||
+      target == nullptr)
+    return target;
+  if (std::strcmp(name, "nativeRender") == 0 &&
+      std::strcmp(signature, "()Z") == 0) {
+    g_unity_native_render = reinterpret_cast<UnityBoolNative>(target);
+    return reinterpret_cast<void*>(&TraceUnityNativeRender);
+  }
+  if (std::strcmp(name, "nativePause") == 0 &&
+      std::strcmp(signature, "()Z") == 0) {
+    g_unity_native_pause = reinterpret_cast<UnityBoolNative>(target);
+    return reinterpret_cast<void*>(&TraceUnityNativePause);
+  }
+  if (std::strcmp(name, "nativeResume") == 0 &&
+      std::strcmp(signature, "()V") == 0) {
+    g_unity_native_resume = reinterpret_cast<UnityVoidNative>(target);
+    return reinterpret_cast<void*>(&TraceUnityNativeResume);
+  }
+  if (std::strcmp(name, "nativeFocusChanged") == 0 &&
+      std::strcmp(signature, "(Z)V") == 0) {
+    g_unity_native_focus_changed = reinterpret_cast<UnityFocusNative>(target);
+    return reinterpret_cast<void*>(&TraceUnityNativeFocusChanged);
+  }
+  if (std::strcmp(name, "nativeRecreateGfxState") == 0 &&
+      std::strcmp(signature, "(ILandroid/view/Surface;)V") == 0) {
+    g_unity_native_recreate_gfx_state =
+        reinterpret_cast<UnitySurfaceNative>(target);
+    return reinterpret_cast<void*>(&TraceUnityNativeRecreateGfxState);
+  }
+  if (std::strcmp(name, "load") == 0 &&
+      std::strcmp(signature, "(Ljava/lang/String;)Z") == 0) {
+    g_native_loader_load = reinterpret_cast<NativeLoaderLoad>(target);
+    return reinterpret_cast<void*>(&TraceNativeLoaderLoad);
+  }
+  return target;
+}
+
 int32_t ProxyRegisterNatives(void* context,
                              void* clazz,
                              const DarwinArtJniNativeMethod* methods,
@@ -109,7 +228,10 @@ int32_t ProxyRegisterNatives(void* context,
     const uint32_t entry_mask =
         library->fixture_graph ? (uint32_t{1} << index) : uint32_t{1};
     requests[index] = {
-        methods[index].function, shorties[index].c_str(), entry_mask};
+        MaybeWrapUnityLifecycleNative(methods[index].name,
+                                      methods[index].signature,
+                                      methods[index].function),
+        shorties[index].c_str(), entry_mask};
     std::cerr << "DARWIN JNI RegisterNatives method name="
               << methods[index].name << " sig=" << methods[index].signature
               << " target=" << methods[index].function << "\n";

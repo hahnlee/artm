@@ -24,6 +24,22 @@ extern "C" int darwin_art_bionic_fs_chmod_core(
     const char*, uint32_t) __attribute__((weak_import));
 extern "C" int darwin_art_bionic_fs_fchmod_core(
     int, uint32_t) __attribute__((weak_import));
+struct DarwinArtAndroidStatvfs {
+  uint64_t f_bsize;
+  uint64_t f_frsize;
+  uint64_t f_blocks;
+  uint64_t f_bfree;
+  uint64_t f_bavail;
+  uint64_t f_files;
+  uint64_t f_ffree;
+  uint64_t f_favail;
+  uint64_t f_fsid;
+  uint64_t f_flag;
+  uint64_t f_namemax;
+  uint64_t reserved[6];
+};
+extern "C" int darwin_art_bionic_fs_statvfs_core(
+    const char*, DarwinArtAndroidStatvfs*) __attribute__((weak_import));
 extern "C" int32_t darwin_art_bionic_errno_load(void)
     __attribute__((weak_import));
 
@@ -94,6 +110,32 @@ jobject MakeStructStat(JNIEnv* env, const struct stat& status) {
 }
 
 jobject MakeStructStatVfs(JNIEnv* env, const struct statvfs& status) {
+  jclass klass = env->FindClass("android/system/StructStatVfs");
+  jmethodID constructor =
+      klass == nullptr
+          ? nullptr
+          : env->GetMethodID(klass, "<init>", "(JJJJJJJJJJJ)V");
+  jobject result =
+      constructor == nullptr
+          ? nullptr
+          : env->NewObject(
+                klass, constructor, static_cast<jlong>(status.f_bsize),
+                static_cast<jlong>(status.f_frsize),
+                static_cast<jlong>(status.f_blocks),
+                static_cast<jlong>(status.f_bfree),
+                static_cast<jlong>(status.f_bavail),
+                static_cast<jlong>(status.f_files),
+                static_cast<jlong>(status.f_ffree),
+                static_cast<jlong>(status.f_favail),
+                static_cast<jlong>(status.f_fsid),
+                static_cast<jlong>(status.f_flag),
+                static_cast<jlong>(status.f_namemax));
+  env->DeleteLocalRef(klass);
+  return result;
+}
+
+jobject MakeStructStatVfs(JNIEnv* env,
+                          const DarwinArtAndroidStatvfs& status) {
   jclass klass = env->FindClass("android/system/StructStatVfs");
   jmethodID constructor =
       klass == nullptr
@@ -190,13 +232,19 @@ void DarwinLinuxRename(JNIEnv* env, jobject, jstring java_old_path,
 jobject DarwinLinuxStatvfs(JNIEnv* env, jobject, jstring java_path) {
   ScopedUtfChars path(env, java_path);
   if (path.c_str() == nullptr) return nullptr;
-  const char* native_path = path.c_str();
-  if (std::strcmp(native_path, "/data") == 0) {
-    const char* app_data = std::getenv("DARWIN_ART_APK_APP_DATA_DIR");
-    if (app_data != nullptr && *app_data != '\0') native_path = app_data;
+  if (darwin_art_bionic_fs_statvfs_core != nullptr && path.c_str()[0] == '/') {
+    DarwinArtAndroidStatvfs status{};
+    if (darwin_art_bionic_fs_statvfs_core(path.c_str(), &status) == -1) {
+      const int android_error = darwin_art_bionic_errno_load == nullptr
+                                    ? EIO
+                                    : darwin_art_bionic_errno_load();
+      jniThrowErrnoException(env, "statvfs", android_error);
+      return nullptr;
+    }
+    return MakeStructStatVfs(env, status);
   }
   struct statvfs status {};
-  if (statvfs(native_path, &status) == -1) {
+  if (statvfs(path.c_str(), &status) == -1) {
     ThrowErrno(env, "statvfs", errno);
     return nullptr;
   }

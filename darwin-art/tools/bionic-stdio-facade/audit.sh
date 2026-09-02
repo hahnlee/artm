@@ -76,6 +76,8 @@ __sF
 fclose
 ferror
 fflush
+fgetc
+fgets
 fileno
 fopen
 fputc
@@ -106,4 +108,4 @@ UBSAN_OPTIONS=halt_on_error=1 BIONIC_STDIO_C_SANITIZER=undefined CARGO_TARGET_DI
 BIONIC_STDIO_C_SANITIZER=thread CARGO_TARGET_DIR="$tmp/tsan" cargo run --quiet --manifest-path "$integration" -- "$fixture"
 cargo fmt --manifest-path "$dir/Cargo.toml" -- --check
 cargo fmt --manifest-path "$integration" -- --check;clean
-echo 'bionic-stdio-facade: PASS imports=18 FILE152 API23-stream-objects fputs binary+wide lease close/seek/reset+reuse C-ASan C-UBSan C-TSan target-clean'
+echo 'bionic-stdio-facade: PASS imports=18 FILE152 API23-stream-objects fopen-e fgetc+fgets fputs binary+wide lease close/seek/reset+reuse C-ASan C-UBSan C-TSan target-clean'

@@ -43,6 +43,17 @@ __attribute__((visibility("default"))) int bionic_vm_fixture_basic(void) {
   if (mapping == MAP_FAILED || munmap(mapping, 16 * 1024 * 1024) != 0)
     return 47;
 
+  mapping = mmap(NULL, 256 * 1024, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK | MAP_GROWSDOWN, -1,
+                 0);
+  if (mapping == MAP_FAILED) return 52;
+  ((volatile unsigned char*)mapping)[0] = 0x31;
+  ((volatile unsigned char*)mapping)[256 * 1024 - 1] = 0x32;
+  if (((volatile unsigned char*)mapping)[0] != 0x31 ||
+      ((volatile unsigned char*)mapping)[256 * 1024 - 1] != 0x32 ||
+      munmap(mapping, 256 * 1024) != 0)
+    return 53;
+
   mapping = mmap(NULL, length, PROT_READ | PROT_WRITE,
                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (mapping == MAP_FAILED) return 37;

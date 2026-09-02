@@ -76,12 +76,14 @@ int AndroidError(int error) {
 }
 
 int HostSignal(int android_signal) {
+  // This must remain the same one-to-one map used by process-state's signal
+  // trampoline so pthread_kill and sigaction agree on the guest signo.
   static constexpr unsigned char kMap[32] = {
       0,        SIGHUP,  SIGINT,  SIGQUIT, SIGILL,  SIGTRAP,   SIGABRT,
       SIGBUS,   SIGFPE,  SIGKILL, SIGUSR1, SIGSEGV, SIGUSR2,   SIGPIPE,
-      SIGALRM,  SIGTERM, 0,       SIGCHLD, SIGCONT, SIGSTOP,   SIGTSTP,
+      SIGALRM,  SIGTERM, SIGEMT,  SIGCHLD, SIGCONT, SIGSTOP,   SIGTSTP,
       SIGTTIN,  SIGTTOU, SIGURG,  SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF,
-      SIGWINCH, SIGINFO, SIGUSR1, SIGUSR2};
+      SIGWINCH, SIGIO,   SIGINFO, SIGSYS};
   return android_signal > 0 && android_signal < 32 ? kMap[android_signal] : 0;
 }
 
@@ -334,7 +336,48 @@ void* HostOwnedThreadStart(void* opaque) {
     while (!entry->published) entry->startup_condition.wait(lock);
   }
   current_thread_token = static_cast<uint64_t>(entry->token);
+  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
+    std::fprintf(stderr,
+                 "DARWIN pthread thread-start token=%llu routine=%p argument=%p\n",
+                 static_cast<unsigned long long>(entry->token),
+                 reinterpret_cast<void*>(entry->routine), entry->argument);
+    if (entry->argument != nullptr) {
+      uintptr_t words[16] = {};
+      std::memcpy(words, entry->argument, sizeof(words));
+      std::fprintf(stderr,
+                   "DARWIN pthread thread-argument token=%llu "
+                   "q0=%#llx q1=%#llx q2=%#llx q3=%#llx q4=%#llx q5=%#llx "
+                   "q6=%#llx q7=%#llx q8=%#llx q9=%#llx q10=%#llx q11=%#llx "
+                   "q12=%#llx q13=%#llx q14=%#llx q15=%#llx\n",
+                   static_cast<unsigned long long>(entry->token),
+                   static_cast<unsigned long long>(words[0]),
+                   static_cast<unsigned long long>(words[1]),
+                   static_cast<unsigned long long>(words[2]),
+                   static_cast<unsigned long long>(words[3]),
+                   static_cast<unsigned long long>(words[4]),
+                   static_cast<unsigned long long>(words[5]),
+                   static_cast<unsigned long long>(words[6]),
+                   static_cast<unsigned long long>(words[7]),
+                   static_cast<unsigned long long>(words[8]),
+                   static_cast<unsigned long long>(words[9]),
+                   static_cast<unsigned long long>(words[10]),
+                   static_cast<unsigned long long>(words[11]),
+                   static_cast<unsigned long long>(words[12]),
+                   static_cast<unsigned long long>(words[13]),
+                   static_cast<unsigned long long>(words[14]),
+                   static_cast<unsigned long long>(words[15]));
+    }
+  }
   void* result = entry->routine(entry->argument);
+  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
+    char thread_name[64] = {};
+    (void)pthread_getname_np(pthread_self(), thread_name, sizeof(thread_name));
+    std::fprintf(stderr,
+                 "DARWIN pthread thread-exit token=%llu thread=%s routine=%p "
+                 "result=%p\n",
+                 static_cast<unsigned long long>(entry->token), thread_name,
+                 reinterpret_cast<void*>(entry->routine), result);
+  }
   {
     std::lock_guard<std::mutex> lock(entry->mutex);
     entry->return_value = result;
@@ -868,6 +911,17 @@ extern "C" int darwin_art_bionic_pthread_create(
   }
   entry->routine = routine;
   entry->argument = argument;
+  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
+    char thread_name[64] = {};
+    (void)pthread_getname_np(pthread_self(), thread_name, sizeof(thread_name));
+    std::fprintf(stderr,
+                 "DARWIN pthread create thread=%s routine=%p argument=%p "
+                 "caller=%p stack=%zu guard=%zu\n",
+                 thread_name, reinterpret_cast<void*>(routine), argument,
+                 __builtin_return_address(0),
+                 attributes == nullptr ? 0 : attributes->stack_size,
+                 attributes == nullptr ? 0 : attributes->guard_size);
+  }
   auto* owner =
       new (std::nothrow) std::shared_ptr<ThreadEntry>(entry);
   if (owner == nullptr) return kAndroidEnomem;
@@ -911,6 +965,12 @@ extern "C" int darwin_art_bionic_pthread_create(
   }
   const int result = pthread_create(&entry->host, host_attributes_pointer,
                                     &HostOwnedThreadStart, owner);
+  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
+    std::fprintf(stderr,
+                 "DARWIN pthread create-result routine=%p result=%d host=%p\n",
+                 reinterpret_cast<void*>(routine), result,
+                 reinterpret_cast<void*>(entry->host));
+  }
   if (host_attributes_pointer != nullptr) pthread_attr_destroy(&host_attributes);
   if (result != 0) {
     RemoveThreadEntry(entry);
@@ -1097,6 +1157,15 @@ extern "C" int darwin_art_bionic_pthread_setschedparam(
 }
 
 extern "C" [[noreturn]] void darwin_art_bionic_pthread_exit(void* value) {
+  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
+    char thread_name[64] = {};
+    (void)pthread_getname_np(pthread_self(), thread_name, sizeof(thread_name));
+    std::fprintf(stderr,
+                 "DARWIN pthread explicit-exit token=%llu thread=%s value=%p "
+                 "caller=%p\n",
+                 static_cast<unsigned long long>(CurrentThreadToken()),
+                 thread_name, value, __builtin_return_address(0));
+  }
   pthread_exit(value);
   __builtin_unreachable();
 }
@@ -1105,6 +1174,12 @@ extern "C" int darwin_art_bionic_pthread_setname_np(
     DarwinArtAndroidPthread token, const char* name) {
   if (name == nullptr) return kAndroidEinval;
   if (token != CurrentThreadToken()) return kAndroidEnotsup;
+  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
+    std::fprintf(stderr,
+                 "DARWIN pthread setname token=%llu name=%s caller=%p\n",
+                 static_cast<unsigned long long>(token), name,
+                 __builtin_return_address(0));
+  }
   return AndroidError(pthread_setname_np(name));
 }
 
@@ -1350,6 +1425,95 @@ extern "C" int darwin_art_bionic_pthread_once(
   __atomic_store_n(once, kOnceUnderway, __ATOMIC_RELEASE);
   lock.unlock();
   routine();
+  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
+    const uintptr_t routine_address = reinterpret_cast<uintptr_t>(routine);
+    constexpr uintptr_t kUnityCpuOnceOffset = 0x12eb474;
+    if (routine_address >= kUnityCpuOnceOffset &&
+        ((routine_address - kUnityCpuOnceOffset) & 0x3fff) == 0) {
+      const uintptr_t image_base = routine_address - kUnityCpuOnceOffset;
+      const int32_t cpu_count =
+          *reinterpret_cast<const int32_t*>(image_base + 0x180c728);
+      const auto* records = *reinterpret_cast<const uint8_t* const*>(
+          image_base + 0x1728140);
+      std::fprintf(stderr,
+                   "DARWIN pthread Unity CPU once base=%p count=%d "
+                   "records=%p active=%u,%u,%u,%u,%u,%u,%u,%u\n",
+                   reinterpret_cast<void*>(image_base), cpu_count,
+                   static_cast<const void*>(records),
+                   records == nullptr ? 0u : records[0x08],
+                   records == nullptr ? 0u : records[0x28],
+                   records == nullptr ? 0u : records[0x48],
+                   records == nullptr ? 0u : records[0x68],
+                   records == nullptr ? 0u : records[0x88],
+                   records == nullptr ? 0u : records[0xa8],
+                   records == nullptr ? 0u : records[0xc8],
+                   records == nullptr ? 0u : records[0xe8]);
+    }
+    constexpr uintptr_t kUnityClassifierOnceOffset = 0x8978ec;
+    if (routine_address >= kUnityClassifierOnceOffset &&
+        ((routine_address - kUnityClassifierOnceOffset) & 0x3fff) == 0) {
+      const uintptr_t image_base = routine_address - kUnityClassifierOnceOffset;
+      const auto* records = *reinterpret_cast<const uint8_t* const*>(
+          image_base + 0x1728140);
+      const uint64_t first =
+          *reinterpret_cast<const uint64_t*>(image_base + 0x172c5c8);
+      const uint64_t second =
+          *reinterpret_cast<const uint64_t*>(image_base + 0x172c5d0);
+      std::fprintf(stderr,
+                   "DARWIN pthread Unity classifier once base=%p "
+                   "records=%p count=%d active=%u,%u,%u,%u,%u,%u,%u,%u "
+                   "results=%#llx,%#llx\n",
+                   reinterpret_cast<void*>(image_base),
+                   static_cast<const void*>(records),
+                   records == nullptr ? -1
+                                      : *reinterpret_cast<const int32_t*>(records),
+                   records == nullptr ? 0u : records[0x08],
+                   records == nullptr ? 0u : records[0x28],
+                   records == nullptr ? 0u : records[0x48],
+                   records == nullptr ? 0u : records[0x68],
+                   records == nullptr ? 0u : records[0x88],
+                   records == nullptr ? 0u : records[0xa8],
+                   records == nullptr ? 0u : records[0xc8],
+                   records == nullptr ? 0u : records[0xe8],
+                   static_cast<unsigned long long>(first),
+                   static_cast<unsigned long long>(second));
+      if (records != nullptr) {
+        const auto* raw = records + 0x568;
+        const auto* raw_text =
+            *reinterpret_cast<const char* const*>(raw);
+        const uint64_t raw_length =
+            *reinterpret_cast<const uint64_t*>(raw + 0x10);
+        std::fprintf(stderr,
+                     "DARWIN pthread Unity cpuinfo raw=%p len=%llu text='%.*s'\n",
+                     static_cast<const void*>(raw_text),
+                     static_cast<unsigned long long>(raw_length),
+                     static_cast<int>(std::min<uint64_t>(raw_length, 160)),
+                     raw_text == nullptr ? "" : raw_text);
+        const auto* lines = records + 0x588;
+        const auto* entries =
+            *reinterpret_cast<const uint8_t* const*>(lines);
+        const uint64_t line_count =
+            *reinterpret_cast<const uint64_t*>(lines + 0x10);
+        std::fprintf(stderr,
+                     "DARWIN pthread Unity cpuinfo lines entries=%p count=%llu\n",
+                     static_cast<const void*>(entries),
+                     static_cast<unsigned long long>(line_count));
+        for (uint64_t index = 0;
+             entries != nullptr && index < line_count && index < 16; ++index) {
+          const auto* text = *reinterpret_cast<const char* const*>(
+              entries + index * 0x10);
+          const uint64_t length = *reinterpret_cast<const uint64_t*>(
+              entries + index * 0x10 + 8);
+          std::fprintf(stderr,
+                       "DARWIN pthread Unity cpuinfo line[%llu] len=%llu text='%.*s'\n",
+                       static_cast<unsigned long long>(index),
+                       static_cast<unsigned long long>(length),
+                       static_cast<int>(std::min<uint64_t>(length, 120)),
+                       text == nullptr ? "" : text);
+        }
+      }
+    }
+  }
   lock.lock();
   entry->state = kOnceComplete;
   __atomic_store_n(once, kOnceComplete, __ATOMIC_RELEASE);
@@ -1486,7 +1650,26 @@ extern "C" int darwin_art_bionic_pthread_mutex_destroy(
 extern "C" int darwin_art_bionic_pthread_cond_wait(
     DarwinArtAndroidPthreadCond* cond,
     DarwinArtAndroidPthreadMutex* mutex) {
-  return CondWait(cond, mutex, nullptr);
+  const bool debug_waits =
+      std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr;
+  char thread_name[64] = {};
+  if (debug_waits) {
+    (void)pthread_getname_np(pthread_self(), thread_name, sizeof(thread_name));
+    const uintptr_t caller =
+        reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+    std::fprintf(stderr,
+                 "DARWIN pthread cond-wait enter thread=%s cond=%p mutex=%p "
+                 "caller=%p\n",
+                 thread_name, static_cast<void*>(cond),
+                 static_cast<void*>(mutex), reinterpret_cast<void*>(caller));
+  }
+  const int result = CondWait(cond, mutex, nullptr);
+  if (debug_waits) {
+    std::fprintf(stderr,
+                 "DARWIN pthread cond-wait leave thread=%s cond=%p result=%d\n",
+                 thread_name, static_cast<void*>(cond), result);
+  }
+  return result;
 }
 
 extern "C" int darwin_art_bionic_pthread_cond_timedwait(
@@ -1498,11 +1681,27 @@ extern "C" int darwin_art_bionic_pthread_cond_timedwait(
 
 extern "C" int darwin_art_bionic_pthread_cond_signal(
     DarwinArtAndroidPthreadCond* cond) {
+  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
+    char thread_name[64] = {};
+    (void)pthread_getname_np(pthread_self(), thread_name, sizeof(thread_name));
+    std::fprintf(stderr,
+                 "DARWIN pthread cond-signal thread=%s cond=%p caller=%p\n",
+                 thread_name, static_cast<void*>(cond),
+                 __builtin_return_address(0));
+  }
   return CondPulse(cond, false);
 }
 
 extern "C" int darwin_art_bionic_pthread_cond_broadcast(
     DarwinArtAndroidPthreadCond* cond) {
+  if (std::getenv("DARWIN_ART_DEBUG_PTHREAD_WAITS") != nullptr) {
+    char thread_name[64] = {};
+    (void)pthread_getname_np(pthread_self(), thread_name, sizeof(thread_name));
+    std::fprintf(stderr,
+                 "DARWIN pthread cond-broadcast thread=%s cond=%p caller=%p\n",
+                 thread_name, static_cast<void*>(cond),
+                 __builtin_return_address(0));
+  }
   return CondPulse(cond, true);
 }
 

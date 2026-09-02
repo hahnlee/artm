@@ -7,6 +7,8 @@
 #include <signal.h>
 #include <stdatomic.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
@@ -300,29 +302,40 @@ int darwin_art_bionic_usleep(unsigned microseconds) {
 
 long darwin_art_bionic_sysconf(int android_name) {
   const int saved_host_errno = errno;
+  if (getenv("DARWIN_ART_DEBUG_SYSCONF") != NULL) {
+    fprintf(stderr, "DARWIN sysconf selector=%d caller=%p\n", android_name,
+            __builtin_return_address(0));
+  }
   (void)kHostSysconf;
+  long result;
   switch (android_name) {
     case ANDROID_SC_PAGESIZE:
     case ANDROID_SC_PAGE_SIZE:
-      errno = saved_host_errno;
-      return 4096;
+      result = 4096;
+      break;
     case ANDROID_SC_NPROCESSORS_CONF:
     case ANDROID_SC_NPROCESSORS_ONLN:
       // Keep the process-wide device snapshot independent of the host's
       // scheduler topology. Native engines also read /proc/cpuinfo and the
       // CPU sysfs view, which expose the same eight virtual processors.
-      errno = saved_host_errno;
-      return 8;
+      result = 8;
+      break;
     case ANDROID_SC_PHYS_PAGES:
-      errno = saved_host_errno;
-      return 2 * 1024 * 1024;
+      result = 2 * 1024 * 1024;
+      break;
     case ANDROID_SC_AVPHYS_PAGES:
-      errno = saved_host_errno;
-      return 1024 * 1024;
+      result = 1024 * 1024;
+      break;
     default:
       errno = saved_host_errno;
       return FailAndroid(ANDROID_EINVAL);
   }
+  if (getenv("DARWIN_ART_DEBUG_SYSCONF") != NULL) {
+    fprintf(stderr, "DARWIN sysconf name=%d result=%ld caller=%p\n",
+            android_name, result, __builtin_return_address(0));
+  }
+  errno = saved_host_errno;
+  return result;
 }
 
 static int NameCompare(const char* left, const char* right) {

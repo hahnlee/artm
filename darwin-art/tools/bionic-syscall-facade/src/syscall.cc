@@ -25,6 +25,8 @@ extern "C" void darwin_art_bionic_errno_store(int32_t android_errno);
 namespace {
 
 constexpr uint64_t kFutex = 98;
+constexpr uint64_t kSchedSetaffinity = 122;
+constexpr uint64_t kSchedGetaffinity = 123;
 constexpr uint64_t kTgkill = 131;
 constexpr uint64_t kRtSigprocmask = 135;
 constexpr uint64_t kGettid = 178;
@@ -109,12 +111,14 @@ void TraceSignalSyscall(const char *name, const uint64_t *arguments) {
 }
 
 int HostSignal(int android_signal) {
+  // Match the injective Android-to-Darwin signal map used by sigaction and
+  // pthread_kill; syscall delivery must not alias SIGPWR onto SIGUSR1.
   static const unsigned char map[32] = {
       0,        SIGHUP,  SIGINT,  SIGQUIT, SIGILL,  SIGTRAP,   SIGABRT,
       SIGBUS,   SIGFPE,  SIGKILL, SIGUSR1, SIGSEGV, SIGUSR2,   SIGPIPE,
-      SIGALRM,  SIGTERM, 0,       SIGCHLD, SIGCONT, SIGSTOP,   SIGTSTP,
+      SIGALRM,  SIGTERM, SIGEMT,  SIGCHLD, SIGCONT, SIGSTOP,   SIGTSTP,
       SIGTTIN,  SIGTTOU, SIGURG,  SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF,
-      SIGWINCH, SIGINFO, SIGUSR1, SIGUSR2};
+      SIGWINCH, SIGIO,   SIGINFO, SIGSYS};
   return android_signal > 0 && android_signal < 32 ? map[android_signal] : 0;
 }
 
@@ -130,6 +134,7 @@ struct ThreadIdentity {
 };
 
 thread_local ThreadIdentity g_thread_identity;
+thread_local uint8_t g_thread_affinity[128] = {0xff};
 
 void InitializeWaitEntries() {
   if (g_wait_initialized)
@@ -215,6 +220,48 @@ long GetTid() {
   }
   g_thread_identity.tid = candidate;
   return static_cast<long>(candidate);
+}
+
+long SchedGetaffinity(const uint64_t *arguments) {
+  const int32_t tid = static_cast<int32_t>(arguments[1]);
+  const uint64_t capacity = arguments[2];
+  void *mask = reinterpret_cast<void *>(arguments[3]);
+  if (tid < 0 || capacity == 0 || capacity > SIZE_MAX)
+    return Fail(kAndroidEinval);
+  if (!IsWritableRange(mask, static_cast<size_t>(capacity)))
+    return Fail(kAndroidEfault);
+  std::memset(mask, 0, static_cast<size_t>(capacity));
+  std::memcpy(mask, g_thread_affinity,
+              std::min(static_cast<size_t>(capacity),
+                       sizeof(g_thread_affinity)));
+  // Linux's raw syscall returns the kernel cpumask size, rounded to an
+  // unsigned long. The virtual Android device exposes eight CPUs.
+  return static_cast<long>(std::min<uint64_t>(capacity, sizeof(uint64_t)));
+}
+
+long SchedSetaffinity(const uint64_t *arguments) {
+  const int32_t tid = static_cast<int32_t>(arguments[1]);
+  const uint64_t capacity = arguments[2];
+  const void *mask = reinterpret_cast<const void *>(arguments[3]);
+  if (tid < 0 || capacity == 0 || capacity > SIZE_MAX)
+    return Fail(kAndroidEinval);
+  if (!IsReadableRange(mask, static_cast<size_t>(capacity)))
+    return Fail(kAndroidEfault);
+  const auto *bytes = static_cast<const uint8_t *>(mask);
+  bool any = false;
+  for (size_t index = 0;
+       index < std::min(static_cast<size_t>(capacity),
+                        sizeof(g_thread_affinity));
+       ++index) {
+    any |= bytes[index] != 0;
+  }
+  if (!any)
+    return Fail(kAndroidEinval);
+  std::memset(g_thread_affinity, 0, sizeof(g_thread_affinity));
+  std::memcpy(g_thread_affinity, mask,
+              std::min(static_cast<size_t>(capacity),
+                       sizeof(g_thread_affinity)));
+  return 0;
 }
 
 long Tgkill(const uint64_t *arguments) {
@@ -339,6 +386,7 @@ long FutexWait(const uint64_t *arguments, bool absolute_timeout,
   auto *address = reinterpret_cast<int32_t *>(arguments[1]);
   const int32_t expected = static_cast<int32_t>(arguments[3]);
   const void *timeout_pointer = reinterpret_cast<const void *>(arguments[4]);
+  const bool debug = std::getenv("DARWIN_ART_DEBUG_FUTEX") != nullptr;
   if (address == nullptr || (reinterpret_cast<uintptr_t>(address) & 3) != 0) {
     return Fail(kAndroidEinval);
   }
@@ -349,6 +397,21 @@ long FutexWait(const uint64_t *arguments, bool absolute_timeout,
       (timeout_pointer != nullptr &&
        !IsReadableRange(timeout_pointer, sizeof(AndroidTimespec)))) {
     return Fail(kAndroidEfault);
+  }
+  if (debug) {
+    char name[64]{};
+    AndroidTimespec debug_timeout{};
+    if (timeout_pointer != nullptr)
+      memcpy(&debug_timeout, timeout_pointer, sizeof(debug_timeout));
+    (void)pthread_getname_np(pthread_self(), name, sizeof(name));
+    std::fprintf(stderr,
+                 "DARWIN futex: wait enter thread=%s address=%p expected=%d "
+                 "current=%d absolute=%d timeout=%p value=%lld.%09lld\n",
+                 name, static_cast<void *>(address), expected,
+                 __atomic_load_n(address, __ATOMIC_RELAXED),
+                 absolute_timeout ? 1 : 0, timeout_pointer,
+                 static_cast<long long>(debug_timeout.seconds),
+                 static_cast<long long>(debug_timeout.nanoseconds));
   }
   const bool timed = timeout_pointer != nullptr;
   timespec deadline{};
@@ -419,12 +482,22 @@ long FutexWait(const uint64_t *arguments, bool absolute_timeout,
   --entry->waiters;
   ReleaseEmptyEntry(entry);
   os_unfair_lock_unlock(&g_wait_lock);
+  if (debug) {
+    char name[64]{};
+    (void)pthread_getname_np(pthread_self(), name, sizeof(name));
+    std::fprintf(stderr,
+                 "DARWIN futex: wait leave thread=%s address=%p result=%ld "
+                 "current=%d\n",
+                 name, static_cast<void *>(address), result,
+                 __atomic_load_n(address, __ATOMIC_RELAXED));
+  }
   return result;
 }
 
 long FutexWake(const uint64_t *arguments) {
   auto *address = reinterpret_cast<int32_t *>(arguments[1]);
   const int32_t requested = static_cast<int32_t>(arguments[3]);
+  const bool debug = std::getenv("DARWIN_ART_DEBUG_FUTEX") != nullptr;
   if (address == nullptr || (reinterpret_cast<uintptr_t>(address) & 3) != 0 ||
       requested < 0) {
     return Fail(kAndroidEinval);
@@ -437,6 +510,15 @@ long FutexWake(const uint64_t *arguments) {
   WaitEntry *entry = FindWaitEntry(address, false);
   if (entry == nullptr) {
     os_unfair_lock_unlock(&g_wait_lock);
+    if (debug) {
+      char name[64]{};
+      (void)pthread_getname_np(pthread_self(), name, sizeof(name));
+      std::fprintf(stderr,
+                   "DARWIN futex: wake thread=%s address=%p requested=%d "
+                   "selected=0 no-entry current=%d\n",
+                   name, static_cast<void *>(address), requested,
+                   __atomic_load_n(address, __ATOMIC_RELAXED));
+    }
     return 0;
   }
   if (entry->wake_tokens > entry->waiters)
@@ -447,6 +529,15 @@ long FutexWake(const uint64_t *arguments) {
   for (size_t index = 0; index < selected; ++index)
     (void)semaphore_signal(entry->semaphore);
   os_unfair_lock_unlock(&g_wait_lock);
+  if (debug) {
+    char name[64]{};
+    (void)pthread_getname_np(pthread_self(), name, sizeof(name));
+    std::fprintf(stderr,
+                 "DARWIN futex: wake thread=%s address=%p requested=%d "
+                 "selected=%zu current=%d\n",
+                 name, static_cast<void *>(address), requested, selected,
+                 __atomic_load_n(address, __ATOMIC_RELAXED));
+  }
   return static_cast<long>(selected);
 }
 
@@ -498,6 +589,11 @@ long ReadabilityProbe(const uint64_t *arguments) {
 extern "C" long darwin_art_bionic_syscall_captured(const uint64_t *registers,
                                                    const uint8_t *stack) {
   const int saved_errno = errno;
+  if (std::getenv("DARWIN_ART_DEBUG_SYSCALL") != nullptr) {
+    std::fprintf(stderr, "DARWIN syscall entry regs=%p stack=%p nr=%llu\n",
+                 registers, stack,
+                 registers == nullptr ? 0ULL : static_cast<unsigned long long>(registers[0]));
+  }
   long result = -1;
   if (registers == nullptr || stack == nullptr) {
     result = Fail(kAndroidEinval);
@@ -507,6 +603,20 @@ extern "C" long darwin_art_bionic_syscall_captured(const uint64_t *registers,
     result = Tgkill(registers);
   } else if (registers[0] == kFutex) {
     result = Futex(registers);
+  } else if (registers[0] == kSchedSetaffinity) {
+    result = SchedSetaffinity(registers);
+    if (std::getenv("DARWIN_ART_DEBUG_SYSCALL") != nullptr)
+      std::fprintf(stderr, "DARWIN syscall sched_setaffinity tid=%llu size=%llu mask=%p result=%ld\n",
+                   static_cast<unsigned long long>(registers[1]),
+                   static_cast<unsigned long long>(registers[2]),
+                   reinterpret_cast<const void*>(registers[3]), result);
+  } else if (registers[0] == kSchedGetaffinity) {
+    result = SchedGetaffinity(registers);
+    if (std::getenv("DARWIN_ART_DEBUG_SYSCALL") != nullptr)
+      std::fprintf(stderr, "DARWIN syscall sched_getaffinity tid=%llu size=%llu mask=%p result=%ld\n",
+                   static_cast<unsigned long long>(registers[1]),
+                   static_cast<unsigned long long>(registers[2]),
+                   reinterpret_cast<const void*>(registers[3]), result);
   } else if (registers[0] == kRtSigprocmask) {
     result = ReadabilityProbe(registers);
   } else if (registers[0] == kRtTgSigqueueinfo) {

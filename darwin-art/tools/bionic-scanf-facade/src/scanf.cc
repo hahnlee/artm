@@ -1,6 +1,8 @@
 #include "darwin_art_bionic_scanf.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -443,7 +445,13 @@ extern "C" int darwin_art_bionic_sscanf_captured(
   Cursor cursor{stack, reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(gp)) + 64,
                 -48};
   size_t consumed = 0;
-  return Scan(input, format, cursor, &consumed);
+  const int result = Scan(input, format, cursor, &consumed);
+  if (std::getenv("DARWIN_ART_DEBUG_SCANF") != nullptr) {
+    std::fprintf(stderr, "DARWIN sscanf input=%s format=%s result=%d consumed=%zu\n",
+                 input == nullptr ? "<null>" : input,
+                 format == nullptr ? "<null>" : format, result, consumed);
+  }
+  return result;
 }
 
 extern "C" int darwin_art_bionic_fscanf_captured(
@@ -454,7 +462,14 @@ extern "C" int darwin_art_bionic_fscanf_captured(
       Cursor{stack,
              reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(gp)) + 64,
              -48}};
-  return darwin_art_bionic_stdio_scan_core(stream, &ScanFileInput, &context);
+  const int result =
+      darwin_art_bionic_stdio_scan_core(stream, &ScanFileInput, &context);
+  if (std::getenv("DARWIN_ART_DEBUG_SCANF") != nullptr) {
+    std::fprintf(stderr, "DARWIN fscanf format=%s result=%d stream=%p\n",
+                 format == nullptr ? "<null>" : format, result,
+                 static_cast<void*>(stream));
+  }
+  return result;
 }
 
 extern "C" int darwin_art_bionic_vsscanf(const char* input,

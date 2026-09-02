@@ -12,6 +12,7 @@ import java.security.UnrecoverableKeyException;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.util.Collections;
 import java.util.Date;
 import java.util.Enumeration;
@@ -22,6 +23,7 @@ import java.util.Map;
 /** Read-only AndroidCAStore view backed by the macOS trust domains. */
 public final class DarwinAndroidCAStore extends KeyStoreSpi {
     private static byte[][] cachedRoots;
+    private static X509Certificate[] cachedIssuers;
     private static boolean installedSystemRoots;
     private final Map<String, Certificate> certificates = new LinkedHashMap<>();
 
@@ -30,6 +32,28 @@ public final class DarwinAndroidCAStore extends KeyStoreSpi {
         if (!installedSystemRoots) {
             installedSystemRoots = installSystemRoots(cachedRoots);
         }
+    }
+
+    static synchronized X509Certificate[] acceptedIssuers() {
+        preload();
+        if (cachedIssuers == null) {
+            try {
+                CertificateFactory factory = CertificateFactory.getInstance("X.509");
+                byte[][] roots = cachedRoots;
+                X509Certificate[] issuers =
+                        new X509Certificate[roots == null ? 0 : roots.length];
+                for (int index = 0; index < issuers.length; ++index) {
+                    issuers[index] = (X509Certificate) factory.generateCertificate(
+                            new java.io.ByteArrayInputStream(roots[index]));
+                }
+                cachedIssuers = issuers;
+            } catch (CertificateException error) {
+                android.util.Log.e(
+                        "DarwinSecurity", "cannot decode macOS trust roots", error);
+                cachedIssuers = new X509Certificate[0];
+            }
+        }
+        return cachedIssuers.clone();
     }
 
     private static boolean installSystemRoots(byte[][] roots) {

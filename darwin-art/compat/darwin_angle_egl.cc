@@ -5156,6 +5156,57 @@ extern "C" void* darwin_art_angle_dso_symbol(const char* soname,
   auto& api = GetAngleApi();
   if (!api.ready) return nullptr;
   if (std::strcmp(soname, "libEGL.so") == 0) {
+    // Direct ELF relocations must resolve through the same Android libEGL
+    // dispatch boundary as eglGetProcAddress.  In particular, passing an
+    // Android ANativeWindow to ANGLE's Darwin eglCreateWindowSurface would
+    // make its Metal backend reinterpret the BufferQueue producer as a
+    // CALayer.  Keep all surface lifecycle calls on the Android window bridge
+    // instead of exposing ANGLE's raw Darwin entry points.
+    if (std::strcmp(symbol, "eglGetDisplay") == 0) {
+      return reinterpret_cast<void*>(&EglGetDisplayHost);
+    }
+    if (std::strcmp(symbol, "eglInitialize") == 0) {
+      return reinterpret_cast<void*>(&EglInitializeHost);
+    }
+    if (std::strcmp(symbol, "eglChooseConfig") == 0) {
+      return reinterpret_cast<void*>(&EglChooseConfigHost);
+    }
+    if (std::strcmp(symbol, "eglCreateContext") == 0) {
+      return reinterpret_cast<void*>(&EglCreateContextHost);
+    }
+    if (std::strcmp(symbol, "eglCreatePbufferSurface") == 0) {
+      return reinterpret_cast<void*>(&EglCreatePbufferSurfaceHost);
+    }
+    if (std::strcmp(symbol, "eglCreateWindowSurface") == 0) {
+      return reinterpret_cast<void*>(
+          &darwin_art_android_eglCreateWindowSurface);
+    }
+    if (std::strcmp(symbol, "eglSwapBuffers") == 0 ||
+        std::strcmp(symbol, "eglSwapBuffersWithDamageKHR") == 0 ||
+        std::strcmp(symbol, "eglSwapBuffersWithDamageEXT") == 0) {
+      return reinterpret_cast<void*>(&darwin_art_android_eglSwapBuffers);
+    }
+    if (std::strcmp(symbol, "eglDestroySurface") == 0) {
+      return reinterpret_cast<void*>(&darwin_art_android_eglDestroySurface);
+    }
+    if (std::strcmp(symbol, "eglMakeCurrent") == 0) {
+      return reinterpret_cast<void*>(&darwin_art_android_eglMakeCurrent);
+    }
+    if (std::strcmp(symbol, "eglQuerySurface") == 0) {
+      return reinterpret_cast<void*>(&darwin_art_android_eglQuerySurface);
+    }
+    if (std::strcmp(symbol, "eglSurfaceAttrib") == 0) {
+      return reinterpret_cast<void*>(&darwin_art_android_eglSurfaceAttrib);
+    }
+    if (std::strcmp(symbol, "eglSwapInterval") == 0) {
+      return reinterpret_cast<void*>(&darwin_art_android_eglSwapInterval);
+    }
+    if (std::strcmp(symbol, "eglSetDamageRegionKHR") == 0) {
+      return reinterpret_cast<void*>(&darwin_art_android_eglSetDamageRegion);
+    }
+    if (std::strcmp(symbol, "eglBeginFrame") == 0) {
+      return reinterpret_cast<void*>(&eglBeginFrame);
+    }
     if (std::strcmp(symbol, "eglGetProcAddress") == 0) {
       return reinterpret_cast<void*>(&EglGetProcAddressMetal);
     }

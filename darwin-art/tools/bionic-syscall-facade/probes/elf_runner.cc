@@ -80,6 +80,8 @@ int main(int argc, char** argv) {
   using Gettid = long (*)();
   using RtTgSigqueueinfo = long (*)(int, int, int, const void*);
   using Getrandom = long (*)(void*, uint64_t, uint32_t);
+  using Getaffinity = long (*)(int, uint64_t, void*);
+  using Setaffinity = long (*)(int, uint64_t, const void*);
   using Wait = long (*)(int32_t*, int32_t, int64_t);
   using Wake = long (*)(int32_t*);
   using CountedWake = long (*)(int32_t*, int32_t);
@@ -89,6 +91,10 @@ int main(int argc, char** argv) {
       image, "SyscallFixtureRtTgSigqueueinfo");
   Getrandom getrandom =
       Lookup<Getrandom>(image, "SyscallFixtureGetrandom");
+  Getaffinity getaffinity =
+      Lookup<Getaffinity>(image, "SyscallFixtureGetaffinity");
+  Setaffinity setaffinity =
+      Lookup<Setaffinity>(image, "SyscallFixtureSetaffinity");
   Wait wait = Lookup<Wait>(image, "SyscallFixtureWait");
   Wake wake_one = Lookup<Wake>(image, "SyscallFixtureWakeOne");
   Wake wake_all = Lookup<Wake>(image, "SyscallFixtureWakeAll");
@@ -158,6 +164,27 @@ int main(int argc, char** argv) {
   Check(getrandom(random_bytes, sizeof(random_bytes), 2u | 4u) == -1 &&
             darwin_art_bionic_errno_load() == 22,
         "getrandom RANDOM plus INSECURE EINVAL");
+
+  uint8_t affinity[128]{};
+  Check(getaffinity(0, sizeof(affinity), affinity) == 8 &&
+            affinity[0] == 0xff &&
+            std::all_of(affinity + 1, affinity + sizeof(affinity),
+                        [](uint8_t byte) { return byte == 0; }),
+        "default eight-CPU affinity");
+  uint8_t restricted_affinity[128]{};
+  restricted_affinity[0] = 0x35;
+  Check(setaffinity(0, sizeof(restricted_affinity), restricted_affinity) == 0,
+        "set virtual affinity");
+  std::fill(std::begin(affinity), std::end(affinity), uint8_t{0xa5});
+  Check(getaffinity(0, sizeof(affinity), affinity) == 8 &&
+            std::equal(std::begin(affinity), std::end(affinity),
+                       std::begin(restricted_affinity)),
+        "round-trip virtual affinity");
+  std::fill(std::begin(restricted_affinity), std::end(restricted_affinity), 0);
+  darwin_art_bionic_errno_store(0);
+  Check(setaffinity(0, sizeof(restricted_affinity), restricted_affinity) == -1 &&
+            darwin_art_bionic_errno_load() == 22,
+        "reject empty affinity");
 
   alignas(4) int32_t word = 0;
   constexpr size_t kWaiters = 4;
@@ -352,6 +379,7 @@ int main(int argc, char** argv) {
                "bionic-syscall-facade: ELF PASS gettid=threads futex="
                "wait+wake-one+wake-all timeout=monotonic-spurious "
                "getrandom=host-csprng "
+               "sched-affinity=thread-local-round-trip "
                "capacity=257 invalid-wake=EFAULT rt_sigprocmask=readability "
                "rt_tgsigqueueinfo=virtual-tid-delivery "
                "unknown=closed\n");

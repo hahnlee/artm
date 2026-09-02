@@ -805,10 +805,13 @@ void ProcessRequest(CompositionJob job) {
       if (listener == nil) {
         valid = false;
       } else {
+        const char* capture_path =
+            std::getenv("DARWIN_ART_DEBUG_SURFACECONTROL_CAPTURE_PATH");
         IOSurfaceRef debug_target =
-            std::getenv("DARWIN_ART_DEBUG_SURFACECONTROL_PIXELS") == nullptr
-                ? nullptr
-                : target_surface;
+            std::getenv("DARWIN_ART_DEBUG_SURFACECONTROL_PIXELS") != nullptr ||
+                    (capture_path != nullptr && capture_path[0] != '\0')
+                ? target_surface
+                : nullptr;
         if (debug_target != nullptr) CFRetain(debug_target);
         [event notifyListener:listener
                       atValue:completion_value

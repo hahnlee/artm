@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -33,6 +34,44 @@ std::mutex& ElfLibraryRegistryMutex() {
 std::vector<ElfLibrary*>& ElfLibraries() {
   static auto* libraries = new std::vector<ElfLibrary*>();
   return *libraries;
+}
+
+uint64_t& NextLoaderNamespaceId() {
+  static auto* next = new uint64_t(1);
+  return *next;
+}
+
+// ElfLibraryRegistryMutex must be held. A Java ClassLoader can have many
+// distinct global-reference values, but Android NativeLoader gives all of
+// them one linker namespace. Prefer exact identity so detached native threads
+// can recover their namespace without entering ART; use IsSameObject only
+// while a live JNIEnv is available.
+uint64_t FindLoaderNamespaceIdLocked(JNIEnv* env, jobject loader) {
+  if (loader == nullptr) return 0;
+  for (auto* library : ElfLibraries()) {
+    if (library != nullptr && library->app_loader == loader) {
+      return library->loader_namespace_id;
+    }
+  }
+  if (env != nullptr) {
+    for (auto* library : ElfLibraries()) {
+      if (library != nullptr && library->app_loader != nullptr &&
+          env->IsSameObject(loader, static_cast<jobject>(library->app_loader))) {
+        return library->loader_namespace_id;
+      }
+    }
+  }
+  return 0;
+}
+
+uint64_t GetOrCreateLoaderNamespaceId(JNIEnv* env, jobject loader) {
+  if (loader == nullptr) return 0;
+  std::lock_guard<std::mutex> lock(ElfLibraryRegistryMutex());
+  if (const uint64_t existing = FindLoaderNamespaceIdLocked(env, loader);
+      existing != 0) {
+    return existing;
+  }
+  return NextLoaderNamespaceId()++;
 }
 
 struct DarwinArtLoaderCallbacks {
@@ -67,6 +106,22 @@ void* GuestDsoOpen(void* context, const char* path, int, const void*,
     CopyLoaderError("invalid Android guest loader context", error, capacity);
     return nullptr;
   }
+  // bionic dlopen is identity based: a second open of an already loaded
+  // absolute SONAME returns the original handle and does not invoke
+  // JNI_OnLoad again. Unity opens libil2cpp once through NativeLoader and
+  // again through its internal libdl path, so preserve that contract here.
+  if (ElfLibrary* existing = FindElfLibraryByPath(
+          CurrentArtEnv(), path, static_cast<jobject>(owner->app_loader));
+      existing != nullptr && existing->graph_handle != nullptr) {
+    existing->guest_open_refs.fetch_add(1, std::memory_order_relaxed);
+    if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+      std::fprintf(stderr,
+                   "DARWIN guest libdl open reuse path=%s handle=%p refs=%u\n",
+                   path, existing->graph_handle,
+                   existing->guest_open_refs.load(std::memory_order_relaxed));
+    }
+    return existing->graph_handle;
+  }
   bool needs_bridge = false;
   char* native_error = nullptr;
   void* handle = OpenNativeLibrary(CurrentArtEnv(), 35, path,
@@ -79,6 +134,10 @@ void* GuestDsoOpen(void* context, const char* path, int, const void*,
     CopyLoaderError(message, error, capacity);
   }
   NativeLoaderFreeErrorMessage(native_error);
+  if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+    std::fprintf(stderr, "DARWIN guest libdl open path=%s handle=%p bridge=%d\n",
+                 path, handle, needs_bridge ? 1 : 0);
+  }
   return handle;
 }
 
@@ -89,15 +148,32 @@ void* GuestDsoLookup(void*, void* handle, const char* symbol, const char*,
   std::string lookup_error;
   if (owner == nullptr || symbol == nullptr ||
       !LookupOptionalElfSymbol(owner, symbol, &address, &lookup_error) || address == 0) {
+    if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+      std::fprintf(stderr,
+                   "DARWIN guest libdl lookup handle=%p symbol=%s result=null error=%s\n",
+                   handle, symbol == nullptr ? "(null)" : symbol,
+                   lookup_error.c_str());
+    }
     CopyLoaderError(lookup_error.empty() ? "Android guest ELF symbol lookup failed"
                                          : lookup_error,
                     error, capacity);
     return nullptr;
   }
+  if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+    std::fprintf(stderr,
+                 "DARWIN guest libdl lookup handle=%p symbol=%s result=%p\n",
+                 handle, symbol, reinterpret_cast<void*>(address));
+  }
   return reinterpret_cast<void*>(address);
 }
 
 int GuestDsoClose(void*, void* handle, char* error, size_t capacity) {
+  if (ElfLibrary* library = AsElfLibrary(handle);
+      library != nullptr &&
+      library->guest_open_refs.load(std::memory_order_relaxed) != 0) {
+    library->guest_open_refs.fetch_sub(1, std::memory_order_relaxed);
+    return 0;
+  }
   char* native_error = nullptr;
   const bool closed = CloseNativeLibrary(handle, true, &native_error);
   if (!closed) {
@@ -275,6 +351,35 @@ void RegisterElfLibrary(ElfLibrary* library) {
   }
 }
 
+ElfLibrary* FindElfLibraryByPath(JNIEnv* env, const char* path, jobject loader) {
+  if (path == nullptr || path[0] == '\0') return nullptr;
+  std::lock_guard<std::mutex> lock(ElfLibraryRegistryMutex());
+  const uint64_t namespace_id = FindLoaderNamespaceIdLocked(env, loader);
+  if (loader != nullptr && namespace_id == 0) return nullptr;
+  for (auto* library : ElfLibraries()) {
+    if (library == nullptr || library->resolved_path != path) continue;
+    if (library->loader_namespace_id == namespace_id) return library;
+  }
+  return nullptr;
+}
+
+// A few Unity worker paths call bionic dlopen after detaching from the Java
+// VM.  The resident ART image is still the authoritative owner in that case;
+// an exact resolved path is sufficient to lease it without manufacturing a
+// second ELF graph (or requiring a JNIEnv that the caller intentionally does
+// not have).
+ElfLibrary* FindResidentElfLibraryByPath(const char* path) {
+  if (path == nullptr || path[0] == '\0') return nullptr;
+  std::lock_guard<std::mutex> lock(ElfLibraryRegistryMutex());
+  for (auto* library : ElfLibraries()) {
+    if (library != nullptr && library->resolved_path == path &&
+        library->graph_handle != nullptr) {
+      return library;
+    }
+  }
+  return nullptr;
+}
+
 void UnregisterElfLibrary(ElfLibrary* library) {
   if (library == nullptr) return;
   std::lock_guard<std::mutex> lock(ElfLibraryRegistryMutex());
@@ -328,6 +433,28 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
         std::strstr(path, "..") == nullptr) {
       system_native_path = std::string(system_directory) + "/" + path;
       resolved_path = system_native_path.c_str();
+    }
+  }
+  // A null ClassLoader is also used by Android's process-native dlopen path.
+  // If that path names an exact image already resident in this process, bionic
+  // returns the same handle and bumps its reference count; it does not create
+  // a second copy merely because a live JNIEnv happens to be present.  The
+  // absolute path is the retained NativeLoader identity when no Java loader
+  // namespace is supplied.
+  if (env == nullptr || loader == nullptr) {
+    if (ElfLibrary* existing = FindResidentElfLibraryByPath(resolved_path);
+        existing != nullptr) {
+      existing->guest_open_refs.fetch_add(1, std::memory_order_relaxed);
+      if (needs_native_bridge != nullptr) *needs_native_bridge = true;
+      if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+        std::fprintf(stderr,
+                     "DARWIN native loader: path reuse path=%s handle=%p refs=%u "
+                     "detached=%d\n",
+                     resolved_path, existing->graph_handle,
+                     existing->guest_open_refs.load(std::memory_order_relaxed),
+                     env == nullptr ? 1 : 0);
+      }
+      return existing->graph_handle;
     }
   }
   // Framework media classes load libmedia_jni only to install their JNI
@@ -395,6 +522,27 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
           resolved_path = app_native_path.c_str();
         }
       }
+    }
+  }
+  // A native worker may invoke bionic dlopen after detaching from ART. It may
+  // lease an already-resident image in its NativeLoader namespace, but it may
+  // not create a new image because JNI_OnLoad requires a live JNIEnv. Resolve
+  // the stable namespace through the initiating library's retained loader.
+  if (env == nullptr && resolved_path != nullptr) {
+    if (ElfLibrary* existing = FindElfLibraryByPath(nullptr, resolved_path, loader);
+        existing != nullptr && existing->graph_handle != nullptr) {
+      existing->guest_open_refs.fetch_add(1, std::memory_order_relaxed);
+      if (needs_native_bridge != nullptr) *needs_native_bridge = true;
+      if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+        std::fprintf(stderr,
+                     "DARWIN native loader detached reuse path=%s handle=%p "
+                     "namespace=%llu refs=%u\n",
+                     resolved_path, existing->graph_handle,
+                     static_cast<unsigned long long>(
+                         existing->loader_namespace_id),
+                     existing->guest_open_refs.load(std::memory_order_relaxed));
+      }
+      return existing->graph_handle;
     }
   }
   bool selected_darwin = false;
@@ -476,6 +624,8 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
     }
     std::string error;
     auto library = std::make_unique<ElfLibrary>();
+    library->resolved_path = resolved_path == nullptr ? "" : resolved_path;
+    library->loader_namespace_id = GetOrCreateLoaderNamespaceId(env, loader);
     library->app_loader = loader == nullptr ? nullptr : env->NewGlobalRef(loader);
     std::cerr << "DARWIN ELF loader: initiating loader=" << loader
               << " global=" << library->app_loader << "\n";
@@ -767,6 +917,7 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       SetNativeLoaderError(error_msg, "Rust graph handle publication failed");
       return nullptr;
     }
+    library_value->graph_handle = graph_handle;
     std::cerr << "DARWIN ELF loader: published handle=" << graph_handle
               << " JNI_OnLoad=" << reinterpret_cast<void*>(library_value->jni_on_load)
               << "\n";

@@ -83,6 +83,50 @@ public final class ProbeResources extends Resources {
     }
 
     @Override
+    public int getIdentifier(String name, String defType, String defPackage) {
+        int identifier = super.getIdentifier(name, defType, defPackage);
+        String appPackage = System.getenv("DARWIN_ART_APK_APP_PACKAGE");
+        // Android's ResourcesImpl resolves an unqualified application name in
+        // the caller's package even when a library supplied a framework
+        // package as its default. The detached host has one AssetManager for
+        // framework + APK, so repeat the lookup against the installed app
+        // package before reporting a miss.
+        if (identifier == 0 && appPackage != null && !appPackage.isEmpty()
+                && !appPackage.equals(defPackage)) {
+            identifier = super.getIdentifier(name, defType, appPackage);
+        }
+        if (System.getenv("DARWIN_ART_DEBUG_RESOURCES") != null) {
+            System.err.println("DARWIN resources identifier name=" + name
+                    + " type=" + defType + " package=" + defPackage
+                    + " app=" + appPackage + " result=0x"
+                    + Integer.toHexString(identifier));
+        }
+        return identifier;
+    }
+
+    @Override
+    public String getResourcePackageName(int id) throws NotFoundException {
+        String resolved;
+        if ((id >>> 24) == 0x7f) {
+            String appPackage = System.getenv("DARWIN_ART_APK_APP_PACKAGE");
+            if (appPackage != null && !appPackage.isEmpty()) {
+                resolved = appPackage;
+                if (System.getenv("DARWIN_ART_DEBUG_RESOURCES") != null) {
+                    System.err.println("DARWIN resources package id=0x"
+                            + Integer.toHexString(id) + " result=" + resolved);
+                }
+                return resolved;
+            }
+        }
+        resolved = super.getResourcePackageName(id);
+        if (System.getenv("DARWIN_ART_DEBUG_RESOURCES") != null) {
+            System.err.println("DARWIN resources package id=0x"
+                    + Integer.toHexString(id) + " result=" + resolved);
+        }
+        return resolved;
+    }
+
+    @Override
     public boolean getBoolean(int id) {
         try {
             return super.getBoolean(id);

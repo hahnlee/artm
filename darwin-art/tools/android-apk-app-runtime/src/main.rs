@@ -62,8 +62,10 @@ struct ActivityCandidate {
 
 #[derive(Clone)]
 struct ServiceCandidate {
+    depth: usize,
     name: String,
     process: Option<String>,
+    metadata: Vec<ManifestMetadata>,
 }
 
 #[derive(Clone)]
@@ -88,6 +90,7 @@ struct ManifestInfo {
     activity_themes: Vec<(String, u32)>,
     activity_aliases: Vec<(String, String)>,
     services: Vec<(String, String)>,
+    service_metadata: Vec<(String, Vec<ManifestMetadata>)>,
     application_metadata: Vec<ManifestMetadata>,
     version_code: u32,
     version_name: String,
@@ -602,6 +605,7 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
     let mut activities = Vec::new();
     let mut activity_aliases = Vec::new();
     let mut service_names = Vec::new();
+    let mut current_service: Option<ServiceCandidate> = None;
     let mut application_depth = None;
     let mut application_metadata = Vec::new();
     while offset < input.len() {
@@ -681,6 +685,22 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                         input, strings, attrs, attr_count, attr_size, "theme",
                     )?;
                 }
+                "meta-data"
+                    if current_service
+                        .as_ref()
+                        .is_some_and(|service| service.depth == depth.saturating_sub(1)) =>
+                {
+                    if let (Some(name), Some(value)) = (
+                        find_attribute(input, strings, attrs, attr_count, attr_size, "name")?,
+                        find_metadata_value(input, strings, attrs, attr_count, attr_size)?,
+                    ) {
+                        current_service
+                            .as_mut()
+                            .expect("service depth checked")
+                            .metadata
+                            .push(ManifestMetadata { name, value });
+                    }
+                }
                 "meta-data" if application_depth == depth.checked_sub(1) => {
                     if let (Some(name), Some(value)) = (
                         find_attribute(input, strings, attrs, attr_count, attr_size, "name")?,
@@ -732,6 +752,9 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                     });
                 }
                 "service" => {
+                    if current_service.is_some() {
+                        return Err("nested service declarations are invalid".to_owned());
+                    }
                     let enabled = find_boolean_attribute(
                         input, strings, attrs, attr_count, attr_size, "enabled",
                     )?
@@ -743,7 +766,12 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                         let process = find_attribute(
                             input, strings, attrs, attr_count, attr_size, "process",
                         )?;
-                        service_names.push(ServiceCandidate { name, process });
+                        current_service = Some(ServiceCandidate {
+                            depth,
+                            name,
+                            process,
+                            metadata: Vec::new(),
+                        });
                     }
                 }
                 "action" if current.is_some() => {
@@ -783,6 +811,13 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
                     activity_aliases.push(candidate);
                 } else {
                     activities.push(candidate);
+                }
+            } else if tag == "service" {
+                if let Some(service) = current_service.take() {
+                    if service.depth != depth {
+                        return Err("service element depth mismatch".to_owned());
+                    }
+                    service_names.push(service);
                 }
             }
             depth = depth
@@ -825,6 +860,7 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
             ))
         })
         .collect::<Result<Vec<_>>>()?;
+    let mut service_metadata = Vec::new();
     let services = service_names
         .into_iter()
         .map(|service| {
@@ -839,6 +875,9 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
             } else {
                 declared.to_owned()
             };
+            if !service.metadata.is_empty() {
+                service_metadata.push((name.clone(), service.metadata));
+            }
             Ok((name, process))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -867,6 +906,7 @@ fn parse_manifest(input: &[u8]) -> Result<ManifestInfo> {
         activity_themes,
         activity_aliases,
         services,
+        service_metadata,
         application_metadata,
         version_code: version_code.unwrap_or(0),
         version_name: version_name.unwrap_or_default(),
@@ -910,6 +950,23 @@ fn encode_application_metadata(entries: &[ManifestMetadata]) -> String {
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn encode_service_metadata(entries: &[(String, Vec<ManifestMetadata>)]) -> String {
+    if entries.is_empty() {
+        return "none".to_owned();
+    }
+    entries
+        .iter()
+        .map(|(service, metadata)| {
+            format!(
+                "{}={}",
+                hex_bytes(service),
+                encode_application_metadata(metadata)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 fn icon_entry(entries: &[ZipEntry]) -> Option<String> {
@@ -1200,7 +1257,7 @@ fn run() -> Result<()> {
     let (info, dex_source, dex_count, native_libraries, native_root) =
         inspect(Path::new(&path), external_dex.as_deref().map(Path::new))?;
     println!(
-        "apk-app-runtime: package={} application={} activity={} launch_component={} descriptor={} activities={} activity_aliases={} services={} application_metadata={} version_code={} version_name={} theme={:#x} target_sdk={} label={} label_res={:#x} icon={} dex={}-{} native={} native_root={}",
+        "apk-app-runtime: package={} application={} activity={} launch_component={} descriptor={} activities={} activity_aliases={} services={} service_metadata={} application_metadata={} version_code={} version_name={} theme={:#x} target_sdk={} label={} label_res={:#x} icon={} dex={}-{} native={} native_root={}",
         info.package,
         info.application,
         info.activity,
@@ -1229,6 +1286,7 @@ fn run() -> Result<()> {
                 .collect::<Vec<_>>()
                 .join(",")
         },
+        encode_service_metadata(&info.service_metadata),
         encode_application_metadata(&info.application_metadata),
         info.version_code,
         info.version_name,

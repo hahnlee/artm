@@ -6,20 +6,23 @@ under the exact `libc.so`/`LIBC` namespace. A real NDK r28c/API-35 Android
 AArch64 ELF exercises all five imports through the repository ELF loader. Resolution is closed; no
 dyld, `dlsym`, legacy `gethostbyname`, or alternate SONAME path exists.
 
-## Closed policy
+## Resolver policy
 
-The facade deliberately does not expose Darwin's complete system resolver.
-Forward lookup admits only null nodes for passive wildcard construction,
-case-insensitive `localhost`/`localhost.`, and textual numeric IPv4 or IPv6.
-Services must be null or decimal ports from 0 through 65535. Other hostnames
-return Android `EAI_NONAME` before a host resolver call, and named services
-return `EAI_SERVICE`. This prevents accidental inheritance of search domains,
-VPN split DNS, mDNS, `/etc/services`, or other host policy.
+Forward lookup uses Darwin's configured system resolver for explicit DNS-style
+hostnames, which is the compatibility-layer equivalent of Android's
+netd-configured resolver. The facade validates the name and appends a trailing
+dot before the host call, so an APK cannot accidentally inherit search-domain
+expansion. Unqualified names and `.local` remain closed to avoid leaking host
+LAN/mDNS policy; null passive nodes, case-insensitive `localhost`, and textual
+numeric IPv4/IPv6 remain supported. Services must be null or decimal ports
+from 0 through 65535, so `/etc/services` is never inherited. Set
+`DARWIN_ART_DEBUG_DNS=1` to log requested and absolute query names plus the
+host resolver status without changing policy.
 
-Supported Android hints are `AI_PASSIVE`, `AI_CANONNAME`, `AI_NUMERICHOST`, and
-`AI_NUMERICSERV`; family is `AF_UNSPEC`, `AF_INET`, or Android `AF_INET6=10`,
+Supported Android hints are `AI_PASSIVE`, `AI_CANONNAME`, `AI_NUMERICHOST`,
+`AI_NUMERICSERV`, and `AI_ADDRCONFIG`; family is `AF_UNSPEC`, `AF_INET`, or Android `AF_INET6=10`,
 with stream/datagram and TCP/UDP protocols. Unknown flags and nonempty result
-fields in hints fail closed. `AI_ADDRCONFIG`, V4-mapped synthesis, IDN, DNS
+fields in hints fail closed. V4-mapped synthesis, IDN, DNS
 search, and arbitrary reverse lookup remain explicit boundaries in
 `manifests/unsupported.tsv`.
 
@@ -65,7 +68,7 @@ numbers, and `gai_strerror` returns provider-owned static Android messages.
 asserts Android/Darwin constants, sizes, and offsets, verifies that the actual
 fixture has exactly five `@LIBC` imports, and rejects dynamic lookup. Runtime
 tests cover localhost, passive wildcard, numeric IPv4/IPv6, numeric reverse,
-closed external/name-service policy, result ownership, duplicate concurrent
+external-name validation, closed search/mDNS/name-service policy, result ownership, duplicate concurrent
 free with an active reader, host errno preservation, and quiescent reclamation
 under ASan+UBSan and TSan. Build output remains under temporary or ignored
 `_build` paths; the source module stays target-clean.

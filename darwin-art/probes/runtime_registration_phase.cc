@@ -19,13 +19,10 @@ extern "C" int darwin_art_install_context_loader(JNIEnv* env,
 
 namespace darwin_art_registration_phase {
 
-int run(const Inputs& inputs) {
-  if (inputs.env == nullptr || inputs.self == nullptr ||
-      inputs.app_loader_ref == nullptr) {
+int start(JNIEnv* env, art::Thread* self) {
+  if (env == nullptr || self == nullptr) {
     return 4;
   }
-  JNIEnv* env = inputs.env;
-  art::Thread* self = inputs.self;
 
   art::Runtime::Current()->StartMinimalForDarwinProbe(env);
   if (!InstallProbeAndroidSystemRoot()) {
@@ -67,6 +64,15 @@ int run(const Inputs& inputs) {
     std::cerr << "ART Darwin graphics: native registration failed\n";
     return 35;
   }
+  return 0;
+}
+
+int finish(const Inputs& inputs) {
+  if (inputs.env == nullptr || inputs.self == nullptr ||
+      inputs.app_loader_ref == nullptr) {
+    return 4;
+  }
+  JNIEnv* env = inputs.env;
 
   // ActivityThread performs this after minimal runtime startup. Keep this
   // JNI-only bridge independent from the process/activity entry TU.

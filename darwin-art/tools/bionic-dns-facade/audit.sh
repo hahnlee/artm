@@ -215,4 +215,4 @@ mkdir -p "$root/_build/bionic-dns-facade"
 cp "$tmp/libdarwin-art-bionic-dns.a" "$root/_build/bionic-dns-facade/"
 cp "$fixture" "$root/_build/bionic-dns-facade/"
 clean
-echo 'bionic-dns-facade: PASS imports=5 Android-ELF=yes localhost+passive+IPv4+IPv6+numeric-reverse+presentation=yes allocation=deep-copy+retire+quiescent-reset policy=closed host-errno=preserved ASan+UBSan+TSan'
+echo 'bionic-dns-facade: PASS imports=5 Android-ELF=yes localhost+passive+IPv4+IPv6+numeric-reverse+presentation=yes allocation=deep-copy+retire+quiescent-reset policy=absolute-host-dns host-errno=preserved ASan+UBSan+TSan'

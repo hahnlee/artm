@@ -23,6 +23,9 @@ The supported behavior is:
   `GRND_RANDOM`, and `GRND_INSECURE` flags are validated; the mutually
   exclusive RANDOM/INSECURE combination and unknown flags fail with Android
   `EINVAL`, while inaccessible output memory fails with Android `EFAULT`;
+- syscalls 122/123 (`sched_setaffinity`/`sched_getaffinity`) expose an
+  eight-CPU, thread-local virtual affinity mask. Set/get round-trips preserve
+  native engine affinity probes without applying Linux CPU ids to Darwin;
 - syscall 98 accepts `FUTEX_WAIT`/`FUTEX_WAIT_PRIVATE` with a readable aligned
   word and optional relative timeout, and `FUTEX_WAKE`/`FUTEX_WAKE_PRIVATE`
   with any non-negative wake count;

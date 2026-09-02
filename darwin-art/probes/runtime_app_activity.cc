@@ -580,6 +580,20 @@ int prepare(JNIEnv* env, art::Thread* self, jobject* activity_instance_out,
         configured_process_name == nullptr ? apk_app_package
                                            : configured_process_name);
     jstring application_package = env->NewStringUTF(apk_app_package);
+    // Zygote sets Process.sArgV0 before ActivityThread.bindApplication().
+    // Process.myProcessName() is a Java accessor for that field (not a native
+    // method), and Android SDKs require its @NonNull contract during eager
+    // application initialization.
+    jclass process_class = env->FindClass("android/os/Process");
+    jfieldID process_arg_v0 =
+        process_class == nullptr
+            ? nullptr
+            : env->GetStaticFieldID(process_class, "sArgV0",
+                                    "Ljava/lang/String;");
+    if (process_arg_v0 != nullptr && process_name != nullptr &&
+        !env->ExceptionCheck()) {
+      env->SetStaticObjectField(process_class, process_arg_v0, process_name);
+    }
     if (activity_thread != nullptr && bind_data != nullptr &&
         application_info != nullptr && bound_application != nullptr &&
         bind_process_name != nullptr && bind_app_info != nullptr &&

@@ -14,14 +14,16 @@ are freed by `fclose`; stale use is never dereferenced and returns `EBADF` until
 allocator reuse, after which POSIX stale-FILE use remains undefined.
 
 Supported central imports are `fopen`, `fclose`, `fflush`, `fileno`, `fread`, `fwrite`,
-`fseek`, `fseeko`, `ftello`, `fputc`, `getc`, and one-byte `ungetc`. Paths and
+`fseek`, `fseeko`, `ftello`, `fputc`, `getc`, and one-byte `ungetc`. The runtime
+extension resolver also provides `fgetc` and `fgets` over the same cursor. Paths and
 modes are byte strings. This vertical slice uses explicit in-memory file
 snapshots and private writable streams, so it cannot expose host paths, FILEs,
 or descriptors. `fileno` values starting at 20000 are provider-local only.
-The accepted mode grammar is deliberately narrow: `r`/`rb`, all three `r+`
-binary spellings, `w`/`wb`, and all three `w+` binary spellings. Append,
-close-on-exec mode suffixes, persistence after close, and host filesystem access
-are unsupported rather than silently approximated.
+The accepted mode grammar is deliberately narrow: `r` or `w`, followed by at
+most one each of `+`, `b`, and Bionic's `e` close-on-exec modifier in any order.
+The provider already owns the descriptor, so `e` changes no host state but must
+be accepted for Bionic libc++ `basic_filebuf`. Append, persistence after close,
+and host filesystem access are unsupported rather than silently approximated.
 The standalone in-memory backing is capped at 16 MiB per stream; writes or
 sparse extensions beyond that return Android `EFBIG` with checked arithmetic.
 

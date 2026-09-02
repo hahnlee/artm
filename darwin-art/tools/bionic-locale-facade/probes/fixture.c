@@ -16,6 +16,22 @@ static int StringEquals(const char* left, const char* right) {
   return *left == *right;
 }
 
+extern int imported_isalnum(int) __asm__("isalnum");
+extern int imported_isalpha(int) __asm__("isalpha");
+extern int imported_islower(int) __asm__("islower");
+extern int imported_isupper(int) __asm__("isupper");
+extern int imported_isxdigit(int) __asm__("isxdigit");
+extern int imported_tolower(int) __asm__("tolower");
+extern int imported_toupper(int) __asm__("toupper");
+
+static int (*volatile call_isalnum)(int) = imported_isalnum;
+static int (*volatile call_isalpha)(int) = imported_isalpha;
+static int (*volatile call_islower)(int) = imported_islower;
+static int (*volatile call_isupper)(int) = imported_isupper;
+static int (*volatile call_isxdigit)(int) = imported_isxdigit;
+static int (*volatile call_tolower)(int) = imported_tolower;
+static int (*volatile call_toupper)(int) = imported_toupper;
+
 __attribute__((visibility("default"))) int bionic_locale_fixture_basic(void) {
   errno = 777;
   if (!StringEquals(setlocale(LC_ALL, 0), "C.UTF-8") ||
@@ -28,6 +44,10 @@ __attribute__((visibility("default"))) int bionic_locale_fixture_basic(void) {
       !StringEquals(setlocale(LC_ALL, ""), "C.UTF-8") ||
       !StringEquals(setlocale(LC_ALL, "en_US.UTF-8"), "C.UTF-8"))
     return 3;
+  if (!call_isalnum('7') || !call_isalpha('A') || !call_islower('a') ||
+      !call_isupper('A') || !call_isxdigit('f') ||
+      call_tolower('A') != 'a' || call_toupper('a') != 'A')
+    return 5;
   errno = 0;
   if (setlocale(LC_ALL, "ko_KR.UTF-8") != 0 || errno != ENOENT) return 4;
   errno = 0;
@@ -134,14 +154,21 @@ __attribute__((visibility("default"))) int bionic_locale_fixture_collation(void)
   if (strxfrm_l(transformed, "abcd", sizeof(transformed), locale) != 4 ||
       transformed[0] != 'a' || transformed[1] != 'b' || transformed[2] != 0)
     return 42;
+  if (strxfrm(transformed, "abcd", sizeof(transformed)) != 4 ||
+      transformed[0] != 'a' || transformed[1] != 'b' || transformed[2] != 0)
+    return 47;
   const wchar_t high[] = {(wchar_t)0xffffffffU, 0};
   const wchar_t low[] = {(wchar_t)0x7fffffffU, 0};
   if (wcscoll_l(high, low, locale) <= 0) return 43;
+  if (wcscoll(high, low) <= 0) return 45;
   wchar_t wide_transform[2] = {(wchar_t)'x', (wchar_t)'x'};
   const wchar_t wide_source[] = {L'a', L'b', L'c', 0};
   if (wcsxfrm_l(wide_transform, wide_source, 2, locale) != 3 ||
       wide_transform[0] != L'a' || wide_transform[1] != 0)
     return 44;
+  if (wcsxfrm(wide_transform, wide_source, 2) != 3 ||
+      wide_transform[0] != L'a' || wide_transform[1] != 0)
+    return 46;
   freelocale(locale);
   return 42;
 }
@@ -169,6 +196,11 @@ __attribute__((visibility("default"))) int bionic_locale_fixture_wctype(void) {
   if (!iswupper_l((wint_t)0x10400, null_locale) ||
       towlower_l((wint_t)0x10400, null_locale) != (wint_t)0x10428)
     return 63;
+  if (!iswalpha(L'A') || !iswblank(L'\t') || !iswcntrl(L'\n') ||
+      !iswdigit(L'7') || !iswlower(L'a') || !iswprint(L'A') ||
+      !iswpunct(L'!') || !iswupper(L'A') || !iswxdigit(L'f') ||
+      towupper(L'a') != L'A')
+    return 65;
 
   const wint_t invalid[] = {WEOF, (wint_t)0xd800, (wint_t)0xfdd0,
                             (wint_t)0x110000, (wint_t)0x80000000U};

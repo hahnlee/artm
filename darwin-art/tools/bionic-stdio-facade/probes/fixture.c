@@ -16,6 +16,11 @@ __attribute__((visibility("default"))) int bionic_stdio_fixture_basic(void){
  if(fileno(in)!=0||fileno(out)!=1||fileno(err)!=2)return 1;
  if(getc(in)!='i'||ungetc('Z',in)!='Z'||getc(in)!='Z'||getc(in)!='n')return 2;
  if(fputs("ok",err)<0||fputc('!',out)!='!'||ferror(out)!=0||ftell(out)!=1||fflush(out)!=0||fflush(NULL)!=0)return 3;
+ FILE* cloexec=fopen("/system/input.bin","re");if(cloexec==NULL)return 37;
+ char line[8]={0};
+ if(fgetc(cloexec)!='a'||fgets(line,(int)sizeof(line),cloexec)!=line||
+    !Equal((const unsigned char*)line,(const unsigned char*)"bcdef",6)||
+    fclose(cloexec)!=0)return 38;
  FILE* f=fopen("/system/input.bin","rb");if(f==NULL||fileno(f)<20000)return 4;
  unsigned char b[8]={0};if(fread(b,2,2,f)!=2||!Equal(b,(const unsigned char*)"abcd",4)||ftello(f)!=4)return 5;
  if(getc(f)!='e'||ungetc('Q',f)!='Q'||getc(f)!='Q')return 6;

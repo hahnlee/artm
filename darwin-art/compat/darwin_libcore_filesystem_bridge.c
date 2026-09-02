@@ -15,6 +15,13 @@ static DarwinArtLibcoreModeProvider g_chmod_provider;
 static DarwinArtLibcoreErrnoProvider g_errno_provider;
 static unsigned g_debug_stat_count;
 
+static int path_is_within(const char* path, const char* root) {
+  if (path == NULL || root == NULL || root[0] == '\0') return 0;
+  const size_t root_length = strlen(root);
+  return strncmp(path, root, root_length) == 0 &&
+         (path[root_length] == '\0' || path[root_length] == '/');
+}
+
 void darwin_art_libcore_install_filesystem_provider(
     DarwinArtLibcoreStatProvider stat_provider,
     DarwinArtLibcoreModeProvider mkdir_provider,
@@ -36,6 +43,22 @@ static void publish_android_errno(void) {
 
 int darwin_art_libcore_stat(const char* path, struct stat* status) {
   if (g_stat_provider == NULL) return stat(path, status);
+  // DexPathList checks File.isFile() before asking ART to open a native SDK's
+  // extracted helper JAR. The JNI boundary has already resolved the guest
+  // /data pathname into this one app-private backing root, so keep that exact
+  // capability on the host stat path instead of feeding it back into the
+  // guest VFS a second time.
+  const char* private_root = getenv("DARWIN_ART_ANDROID_PRIVATE_DATA_ROOT");
+  if (path_is_within(path, private_root)) {
+    const int result = stat(path, status);
+    if (getenv("DARWIN_ART_DEBUG_FS_BRIDGE") != NULL) {
+      fprintf(stderr,
+              "DARWIN libcore FS: private-host stat path=%s result=%d "
+              "errno=%d\n",
+              path, result, errno);
+    }
+    return result;
+  }
   DarwinArtAndroidStat android_status;
   const int provider_result = g_stat_provider(path, &android_status);
   if (getenv("DARWIN_ART_DEBUG_FS_BRIDGE") != NULL &&
