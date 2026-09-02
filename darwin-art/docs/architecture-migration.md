@@ -136,3 +136,20 @@ input, download, media, and E2E reports before the known host termination
 tail; no color-space or graphics-link error was reported. Do not force the two
 Chrome surfaces to one RGB value in the runtime: that would override the APK's
 Material You theme rather than repair Android compatibility.
+
+## Progress — 2026-09-02 Android orientation and landscape window
+
+Added the Android-compatible orientation request path. Calls to
+`Activity.setRequestedOrientation()` now terminate at the in-process
+`IActivityTaskManager` bridge, where landscape/portrait requests are queued on
+the Android main `Handler`. The bridge updates shared `Configuration` and
+`DisplayMetrics` (including orientation, dp bounds, and smallest width), then
+resizes the active IOSurface/CAMetalLayer-backed `NSWindow`; the next
+ViewRoot traversal observes the same dimensions. Sensor/user requests retain
+the current posture because this host has no accelerometer.
+
+The live AppKit resize path remains authoritative for manual window changes,
+so input scaling follows the rotated drawable without a second coordinate
+transform. GPU acceptance now accepts either portrait or its landscape
+counterpart. `build-button-dex`, the APK runtime audit, graphics-link audit,
+host tests, formatting, and diff checks pass.

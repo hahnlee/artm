@@ -56,6 +56,19 @@ public final class DarwinServiceBridge {
     private static volatile Activity currentActivity;
     private static volatile int windowTopologyGeneration;
 
+    private static final int SCREEN_ORIENTATION_UNSPECIFIED = -1;
+    private static final int SCREEN_ORIENTATION_LANDSCAPE = 0;
+    private static final int SCREEN_ORIENTATION_PORTRAIT = 1;
+    private static final int SCREEN_ORIENTATION_SENSOR_LANDSCAPE = 6;
+    private static final int SCREEN_ORIENTATION_SENSOR_PORTRAIT = 7;
+    private static final int SCREEN_ORIENTATION_REVERSE_LANDSCAPE = 8;
+    private static final int SCREEN_ORIENTATION_REVERSE_PORTRAIT = 9;
+    private static final int SCREEN_ORIENTATION_USER_LANDSCAPE = 11;
+    private static final int SCREEN_ORIENTATION_USER_PORTRAIT = 12;
+    private static final int SCREEN_ORIENTATION_LOCKED = 14;
+
+    private static native void nativeResizeHostSurface(int width, int height);
+
     /** Publishes a host-window resize through WindowManager/ViewRootImpl. */
     static void resizeDisplay(int width, int height) {
         if (width <= 0 || height <= 0
@@ -64,7 +77,51 @@ public final class DarwinServiceBridge {
         }
         DISPLAY_WIDTH = width;
         DISPLAY_HEIGHT = height;
+        try {
+            // Resources and DisplayMetrics are shared by the detached process;
+            // update them before the next ViewRoot traversal observes the new
+            // window geometry, just like ActivityThread's configuration edge.
+            dev.darwinart.probe.ProbeResources.configureDisplaySize(width, height);
+        } catch (Throwable error) {
+            Log.e("DarwinServiceBridge", "could not update display configuration", error);
+        }
+        try {
+            nativeResizeHostSurface(width, height);
+        } catch (UnsatisfiedLinkError ignored) {
+            // Headless framework tests may exercise configuration without
+            // installing the visible-surface JNI bridge.
+        }
         requestAllWindowLayouts();
+    }
+
+    private static void requestOrientation(int orientation) {
+        boolean landscape;
+        switch (orientation) {
+            case SCREEN_ORIENTATION_LANDSCAPE:
+            case SCREEN_ORIENTATION_SENSOR_LANDSCAPE:
+            case SCREEN_ORIENTATION_REVERSE_LANDSCAPE:
+            case SCREEN_ORIENTATION_USER_LANDSCAPE:
+                landscape = true;
+                break;
+            case SCREEN_ORIENTATION_PORTRAIT:
+            case SCREEN_ORIENTATION_SENSOR_PORTRAIT:
+            case SCREEN_ORIENTATION_REVERSE_PORTRAIT:
+            case SCREEN_ORIENTATION_USER_PORTRAIT:
+                landscape = false;
+                break;
+            case SCREEN_ORIENTATION_UNSPECIFIED:
+            case SCREEN_ORIENTATION_LOCKED:
+            default:
+                // SENSOR/USER/FULL_SENSOR are left at the current physical
+                // posture. The host has no accelerometer, so Android keeps the
+                // last stable orientation for those requests.
+                return;
+        }
+        int naturalWidth = 360 * DISPLAY_SCALE;
+        int naturalHeight = 640 * DISPLAY_SCALE;
+        int width = landscape ? naturalHeight : naturalWidth;
+        int height = landscape ? naturalWidth : naturalHeight;
+        resizeDisplay(width, height);
     }
 
     private static void requestAllWindowLayouts() {
@@ -1469,6 +1526,24 @@ public final class DarwinServiceBridge {
 
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
+            if (method.getName().equals("setRequestedOrientation")) {
+                // Activity.setRequestedOrientation() normally crosses the
+                // system ActivityTaskManager Binder. Route the same contract
+                // through the in-process service and apply it on the Android
+                // main queue so the window/configuration/display edge is
+                // ordered before the next traversal.
+                int orientation = -1;
+                if (args != null) {
+                    for (Object value : args) {
+                        if (value instanceof Integer) {
+                            orientation = ((Integer) value).intValue();
+                        }
+                    }
+                }
+                final int requested = orientation;
+                MAIN_HANDLER.post(() -> requestOrientation(requested));
+                return defaultValue(method.getReturnType());
+            }
             if (method.getName().equals("getActivityClientController")) {
                 return controller;
             }

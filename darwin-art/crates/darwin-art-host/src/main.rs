@@ -126,8 +126,12 @@ fn main_result() -> Result<(), Box<dyn Error>> {
             Ok("1") | Err(_) => 1,
             Ok(_) => return Err("DARWIN_ART_WINDOW_SCALE must be 1 or 2".into()),
         };
-        let expected_width = 360 * render_scale;
-        let expected_height = 640 * render_scale;
+        let expected_width = (360 * render_scale) as u32;
+        let expected_height = (640 * render_scale) as u32;
+        let is_expected_geometry = |width: u32, height: u32| {
+            (width == expected_width && height == expected_height)
+                || (width == expected_height && height == expected_width)
+        };
         let widget_expected = env::var("DARWIN_ART_APK_APP_EXPECT_WIDGETS").as_deref() == Ok("1");
         let native_loaded = env::var("DARWIN_ART_APK_APP_NATIVE_PATH")
             .map(|path| !path.is_empty())
@@ -142,8 +146,7 @@ fn main_result() -> Result<(), Box<dyn Error>> {
                 .argb_pixels
                 .iter()
                 .all(|pixel| pixel & 0xff00_0000 == 0xff00_0000);
-            if frame.width != expected_width
-                || frame.height != expected_height
+            if !is_expected_geometry(frame.width, frame.height)
                 || outcome.frames_presented == 0
                 || !all_opaque
             {
@@ -160,16 +163,17 @@ fn main_result() -> Result<(), Box<dyn Error>> {
             // callback or readback, so GPU acceptance validates presentation
             // count and the dimensions recorded by the Android frame probe.
             if outcome.frames_presented == 0
-                || outcome.process.frame_width != expected_width
-                || outcome.process.frame_height != expected_height
+                || !is_expected_geometry(outcome.process.frame_width, outcome.process.frame_height)
             {
                 return Err(
                     "APK Activity GPU presentation did not match its frame contract".into(),
                 );
             }
             println!(
-                "ART Android APK: package={package} launcher={activity} classes.dex=APK native={} gpu=direct drawable={expected_width}x{expected_height}{widget}",
-                if native_loaded { 1 } else { 0 }
+                "ART Android APK: package={package} launcher={activity} classes.dex=APK native={} gpu=direct drawable={}x{}{widget}",
+                if native_loaded { 1 } else { 0 },
+                outcome.process.frame_width,
+                outcome.process.frame_height,
             );
         }
     } else {

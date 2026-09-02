@@ -269,8 +269,8 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
                     class[73]=Ljavax/microedition/khronos/egl/EGLSurface;";
     verify_dex_contract(
         &output,
-        88,
-        1342,
+        89,
+        1350,
         &[
             "Ldev/darwinart/probe/ProbeActivity;",
             "Ldev/darwinart/probe/ProbeContext$BaseContext;",

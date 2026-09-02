@@ -21,11 +21,27 @@ public final class ProbeResources extends Resources {
 
     private final boolean frameworkResources;
 
-    public static void configureDisplayScale(int scale) {
+    public static synchronized void configureDisplayScale(int scale) {
         if (scale != 1 && scale != 2) {
             throw new IllegalArgumentException("display scale must be 1 or 2");
         }
+        configureDisplaySize(360 * scale, 640 * scale, scale);
+    }
+
+    /** Updates the shared Android display contract after a host rotation. */
+    public static synchronized void configureDisplaySize(int widthPixels, int heightPixels) {
+        if (widthPixels <= 0 || heightPixels <= 0) {
+            throw new IllegalArgumentException("display dimensions must be positive");
+        }
+        int scale = DISPLAY_METRICS.densityDpi >= DisplayMetrics.DENSITY_DEFAULT * 2
+                ? 2 : 1;
+        configureDisplaySize(widthPixels, heightPixels, scale);
+    }
+
+    private static void configureDisplaySize(int widthPixels, int heightPixels, int scale) {
         int densityDpi = DisplayMetrics.DENSITY_DEFAULT * scale;
+        int widthDp = Math.max(1, widthPixels / scale);
+        int heightDp = Math.max(1, heightPixels / scale);
         CONFIGURATION.setToDefaults();
         CONFIGURATION.setLocale(Locale.US);
         CONFIGURATION.densityDpi = densityDpi;
@@ -34,10 +50,14 @@ public final class ProbeResources extends Resources {
         // alias to its port/land variants) require a concrete orientation and
         // screen bucket, otherwise Resources.getLayout() cannot select an
         // entry even though the APK's resource table is installed.
-        CONFIGURATION.orientation = Configuration.ORIENTATION_PORTRAIT;
-        CONFIGURATION.screenWidthDp = 360;
-        CONFIGURATION.screenHeightDp = 640;
-        CONFIGURATION.smallestScreenWidthDp = 360;
+        CONFIGURATION.orientation = widthPixels > heightPixels
+                ? Configuration.ORIENTATION_LANDSCAPE
+                : widthPixels < heightPixels
+                        ? Configuration.ORIENTATION_PORTRAIT
+                        : Configuration.ORIENTATION_SQUARE;
+        CONFIGURATION.screenWidthDp = widthDp;
+        CONFIGURATION.screenHeightDp = heightDp;
+        CONFIGURATION.smallestScreenWidthDp = Math.min(widthDp, heightDp);
         // The macOS host is a touch-capable Android display paired with a
         // permanently connected physical keyboard.  Android publishes this
         // through Configuration in addition to InputManager device records;
@@ -48,8 +68,8 @@ public final class ProbeResources extends Resources {
         CONFIGURATION.keyboardHidden = Configuration.KEYBOARDHIDDEN_NO;
         CONFIGURATION.hardKeyboardHidden = Configuration.HARDKEYBOARDHIDDEN_NO;
         DISPLAY_METRICS.setToDefaults();
-        DISPLAY_METRICS.widthPixels = 360 * scale;
-        DISPLAY_METRICS.heightPixels = 640 * scale;
+        DISPLAY_METRICS.widthPixels = widthPixels;
+        DISPLAY_METRICS.heightPixels = heightPixels;
         DISPLAY_METRICS.density = scale;
         DISPLAY_METRICS.densityDpi = densityDpi;
         DISPLAY_METRICS.scaledDensity = scale;

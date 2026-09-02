@@ -435,6 +435,30 @@ void ConfigureHostSurface(JNIEnv* env, jclass, jobject surface_view,
   EnsureJavaSurfaceValid(env, surface);
 }
 
+void ResizeHostSurface(JNIEnv*, jclass, jint width, jint height) {
+  if (width <= 0 || height <= 0) return;
+  // The Java ActivityTaskManager compatibility service invokes this callback
+  // on an orientation request. The active surface owns the persistent
+  // CAMetalLayer/NSWindow; resizing it on the host actor rotates the visible
+  // window while preserving the Android ViewRoot/Surface contract.
+  DarwinArtSurface* surface = darwin_art_surface_active_gpu();
+  if (surface != nullptr) {
+    const DarwinArtSurfaceResult result = darwin_art_surface_resize(
+        surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+    if (result != DARWIN_ART_SURFACE_OK &&
+        std::getenv("DARWIN_ART_DEBUG_RESIZE") != nullptr) {
+      std::cerr << "ART Android orientation resize failed status=" << result
+                << " size=" << width << "x" << height << "\n";
+    }
+  }
+  if (auto* state = darwin_art_process::graphics_state_for_callback();
+      state != nullptr) {
+    state->interactive_width = width;
+    state->interactive_height = height;
+    state->gpu_render_node_recorded = false;
+  }
+}
+
 bool install_activity_bridge(JNIEnv* env, jclass activity_class,
                              jobject activity,
                              darwin_art_graphics::GraphicsState* graphics_state) {
@@ -454,6 +478,9 @@ bool install_activity_bridge(JNIEnv* env, jclass activity_class,
        const_cast<char*>(
            "(Landroid/view/SurfaceView;Landroid/view/Surface;IIII)V"),
        reinterpret_cast<void*>(&ConfigureHostSurface)},
+      {const_cast<char*>("nativeResizeHostSurface"),
+       const_cast<char*>("(II)V"),
+       reinterpret_cast<void*>(&ResizeHostSurface)},
   };
   const bool registered =
       bridge != nullptr && !env->ExceptionCheck() &&
