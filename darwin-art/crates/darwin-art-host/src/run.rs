@@ -48,11 +48,11 @@ enum WorkerMessage {
 }
 
 #[cfg(target_os = "macos")]
-// Keep the AppKit actor's event wait below one quarter of a display interval.
-// Input is still delivered by AppKit on its owning thread, then wakes the ART
-// Looper through the surface mailbox; the shorter quantum only bounds how long
-// the actor can remain asleep before observing a newly queued NSEvent.
-const APPKIT_PUMP_QUANTUM_SECONDS: f64 = 0.002;
+// Let AppKit sleep for one display interval while idle. nextEventMatchingMask:
+// returns immediately when an NSEvent arrives, so this is event-driven rather
+// than a 2 ms polling loop; the ART owner is still woken through the surface
+// mailbox and Android input remains on its original sequence.
+const APPKIT_PUMP_QUANTUM_SECONDS: f64 = 0.016;
 
 #[cfg(target_os = "macos")]
 fn run_with_appkit_actor(options: RunOptions) -> Result<HostOutcome, HostError> {

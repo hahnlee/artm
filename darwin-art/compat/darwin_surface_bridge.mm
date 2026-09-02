@@ -1217,6 +1217,13 @@ static DarwinArtSurfaceResult ResizeSurfaceBacking(DarwinArtSurface* surface,
     surface->width = width;
     surface->height = height;
     surface->last_command_buffer = nil;
+    // The new IOSurface backing has no presented composition generation yet;
+    // allow the next ready frame-clock edge to publish it even if the old
+    // backing had already claimed a higher generation.
+    surface->scanout_last_requested_generation.store(
+        0, std::memory_order_release);
+    surface->scanout_last_requested_embedded_frame.store(
+        0, std::memory_order_release);
   }
   if (old_surface != nullptr) CFRelease(old_surface);
   if (surface->view != nil) {
@@ -1461,6 +1468,53 @@ bool darwin_art_surface_gpu_scanout_ready(DarwinArtSurface* surface) {
   return submitted == 0 || ready >= submitted;
 }
 
+bool ClaimScanoutDirty(DarwinArtSurface* surface) {
+  if (surface == nullptr) return false;
+  const uint64_t submitted =
+      surface->composition_submitted_generation.load(std::memory_order_acquire);
+  const uint64_t ready =
+      surface->composition_ready_generation.load(std::memory_order_acquire);
+  if (submitted != 0 && ready < submitted) return false;
+
+  bool claimed = false;
+  if (submitted != 0) {
+    uint64_t previous = surface->scanout_last_requested_generation.load(
+        std::memory_order_acquire);
+    for (;;) {
+      if (previous >= submitted) break;
+      if (surface->scanout_last_requested_generation.compare_exchange_weak(
+              previous, submitted, std::memory_order_acq_rel,
+              std::memory_order_acquire)) {
+        claimed = true;
+        break;
+      }
+    }
+  }
+
+  // ANGLE/WebGL can publish a new embedded IOSurface frame after its own
+  // command queue completes without creating a SurfaceFlinger composition
+  // fence. Treat that publication counter as a second dirty source so the
+  // producer gate never suppresses a real browser-content update.
+  const uint64_t embedded =
+      surface->embedded_surface_frame.load(std::memory_order_acquire);
+  if (embedded != 0) {
+    uint64_t previous = surface->scanout_last_requested_embedded_frame.load(
+        std::memory_order_acquire);
+    for (;;) {
+      if (previous >= embedded) break;
+      if (surface->scanout_last_requested_embedded_frame.compare_exchange_weak(
+              previous, embedded, std::memory_order_acq_rel,
+              std::memory_order_acquire)) {
+        claimed = true;
+        break;
+      }
+    }
+  }
+  if (claimed) return true;
+  surface->scanout_dirty_skipped.fetch_add(1, std::memory_order_relaxed);
+  return false;
+}
+
 void MaybeLogScanoutStats(DarwinArtSurface* surface) {
   if (surface == nullptr ||
       std::getenv("DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS") == nullptr) {
@@ -1472,12 +1526,15 @@ void MaybeLogScanoutStats(DarwinArtSurface* surface) {
   std::fprintf(
       stderr,
       "ART SurfaceFlinger: scanout stats surface=%p requests=%llu "
-      "fence_gated=%llu coalesced=%llu present_calls=%llu\n",
+      "fence_gated=%llu coalesced=%llu dirty_skipped=%llu "
+      "present_calls=%llu\n",
       surface, static_cast<unsigned long long>(requests),
       static_cast<unsigned long long>(
           surface->scanout_fence_gated.load(std::memory_order_relaxed)),
       static_cast<unsigned long long>(
           surface->scanout_coalesced.load(std::memory_order_relaxed)),
+      static_cast<unsigned long long>(
+          surface->scanout_dirty_skipped.load(std::memory_order_relaxed)),
       static_cast<unsigned long long>(
           surface->scanout_present_calls.load(std::memory_order_relaxed)));
 }
@@ -1492,6 +1549,14 @@ DarwinArtSurfaceResult darwin_art_surface_present_async(
     // issue one trailing request when the generation becomes ready, while
     // the display clock remains free to continue waking the ART owner.
     surface->scanout_fence_gated.fetch_add(1, std::memory_order_relaxed);
+    return DARWIN_ART_SURFACE_OK;
+  }
+  // SurfaceFlinger completion generations are the producer-side dirty bit.
+  // Once a generation has been claimed, further display ticks retain the
+  // already presented CAMetalLayer contents instead of dispatching another
+  // identical blit to AppKit. A new fence generation claims the next turn;
+  // fence-less surfaces keep the legacy every-tick behavior above.
+  if (!ClaimScanoutDirty(surface)) {
     return DARWIN_ART_SURFACE_OK;
   }
   if (IsMainThread()) {
@@ -1741,7 +1806,8 @@ static DarwinArtSurfaceResult DestroySurfaceOnMain(
     std::fprintf(
         stderr,
         "ART SurfaceFlinger: scanout stats surface=%p requests=%llu "
-        "fence_gated=%llu coalesced=%llu present_calls=%llu\n",
+        "fence_gated=%llu coalesced=%llu dirty_skipped=%llu "
+        "present_calls=%llu\n",
         surface,
         static_cast<unsigned long long>(
             surface->scanout_requests.load(std::memory_order_relaxed)),
@@ -1749,6 +1815,9 @@ static DarwinArtSurfaceResult DestroySurfaceOnMain(
             surface->scanout_fence_gated.load(std::memory_order_relaxed)),
         static_cast<unsigned long long>(
             surface->scanout_coalesced.load(std::memory_order_relaxed)),
+        static_cast<unsigned long long>(
+            surface->scanout_dirty_skipped.load(
+                std::memory_order_relaxed)),
         static_cast<unsigned long long>(
             surface->scanout_present_calls.load(std::memory_order_relaxed)));
   }

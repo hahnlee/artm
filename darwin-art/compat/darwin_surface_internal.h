@@ -61,6 +61,13 @@ struct DarwinArtSurface {
   std::atomic<uint64_t> scanout_requests{0};
   std::atomic<uint64_t> scanout_fence_gated{0};
   std::atomic<uint64_t> scanout_coalesced{0};
+  // A display tick does not need to enqueue another AppKit blit when the
+  // latest SurfaceFlinger composition or embedded IOSurface frame is already
+  // in flight or has been presented. Surfaces with neither dirty source keep
+  // the legacy every-tick behavior.
+  std::atomic<uint64_t> scanout_last_requested_generation{0};
+  std::atomic<uint64_t> scanout_last_requested_embedded_frame{0};
+  std::atomic<uint64_t> scanout_dirty_skipped{0};
   std::atomic<uint64_t> scanout_present_calls{0};
   std::atomic<int32_t> last_scanout_status{DARWIN_ART_SURFACE_OK};
   // SurfaceFlinger composition completion is a separate readiness boundary
