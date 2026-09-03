@@ -15,6 +15,8 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
 @property(nonatomic) NSArray<DARInstalledApp *> *apps;
 @property(nonatomic) NSArray<NSString *> *profiles;
 @property(nonatomic) NSString *selectedPackage;
+@property(nonatomic) NSTextField *sidebarTitle;
+@property(nonatomic) NSTextField *sidebarSubtitle;
 @property(nonatomic) NSPopUpButton *profilePopup;
 @property(nonatomic) NSButton *removeProfileButton;
 @property(nonatomic) NSTableView *tableView;
@@ -35,10 +37,9 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
 
 - (instancetype)initWithRuntimeClient:(DARRuntimeClient *)client {
     NSWindow *window = [[NSWindow alloc]
-        initWithContentRect:NSMakeRect(0, 0, 940, 620)
+        initWithContentRect:NSMakeRect(0, 0, 1040, 700)
                   styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                            NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable |
-                            NSWindowStyleMaskFullSizeContentView
+                            NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                     backing:NSBackingStoreBuffered
                       defer:NO];
     self = [super initWithWindow:window];
@@ -49,7 +50,7 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     _pendingLogText = [NSMutableString string];
     window.title = @"Darwin ART";
     window.subtitle = [NSString stringWithFormat:@"%@ 프로필", client.profileName];
-    window.minSize = NSMakeSize(760, 500);
+    window.minSize = NSMakeSize(860, 560);
     window.titlebarAppearsTransparent = YES;
     window.toolbarStyle = NSWindowToolbarStyleUnified;
     window.tabbingMode = NSWindowTabbingModeDisallowed;
@@ -84,6 +85,13 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     sidebar.state = NSVisualEffectStateFollowsWindowActiveState;
     sidebar.translatesAutoresizingMaskIntoConstraints = NO;
 
+    self.sidebarTitle = [self labelWithFont:[NSFont systemFontOfSize:17 weight:NSFontWeightSemibold]
+                                      color:NSColor.labelColor];
+    self.sidebarTitle.stringValue = @"설치된 앱";
+    self.sidebarSubtitle = [self labelWithFont:[NSFont systemFontOfSize:11]
+                                         color:NSColor.secondaryLabelColor];
+    self.sidebarSubtitle.stringValue = @"Android 호환 런타임";
+
     self.profilePopup = [[NSPopUpButton alloc] init];
     self.profilePopup.target = self;
     self.profilePopup.action = @selector(profileChanged:);
@@ -109,10 +117,11 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     NSScrollView *listScroll = [[NSScrollView alloc] init];
     listScroll.drawsBackground = NO;
     listScroll.hasVerticalScroller = YES;
+    listScroll.scrollerStyle = NSScrollerStyleOverlay;
     listScroll.translatesAutoresizingMaskIntoConstraints = NO;
     self.tableView = [[NSTableView alloc] init];
     self.tableView.headerView = nil;
-    self.tableView.rowHeight = 48;
+    self.tableView.rowHeight = 64;
     self.tableView.backgroundColor = NSColor.clearColor;
     self.tableView.style = NSTableViewStyleSourceList;
     self.tableView.delegate = self;
@@ -121,13 +130,19 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     column.resizingMask = NSTableColumnAutoresizingMask;
     [self.tableView addTableColumn:column];
     listScroll.documentView = self.tableView;
+    [sidebar addSubview:self.sidebarTitle];
+    [sidebar addSubview:self.sidebarSubtitle];
     [sidebar addSubview:self.profilePopup];
     [sidebar addSubview:addProfile];
     [sidebar addSubview:self.removeProfileButton];
     [sidebar addSubview:listScroll];
     [NSLayoutConstraint activateConstraints:@[
+        [self.sidebarTitle.leadingAnchor constraintEqualToAnchor:sidebar.leadingAnchor constant:16],
+        [self.sidebarTitle.topAnchor constraintEqualToAnchor:sidebar.topAnchor constant:18],
+        [self.sidebarSubtitle.leadingAnchor constraintEqualToAnchor:self.sidebarTitle.leadingAnchor],
+        [self.sidebarSubtitle.topAnchor constraintEqualToAnchor:self.sidebarTitle.bottomAnchor constant:2],
         [self.profilePopup.leadingAnchor constraintEqualToAnchor:sidebar.leadingAnchor constant:12],
-        [self.profilePopup.topAnchor constraintEqualToAnchor:sidebar.topAnchor constant:12],
+        [self.profilePopup.topAnchor constraintEqualToAnchor:self.sidebarSubtitle.bottomAnchor constant:14],
         [addProfile.leadingAnchor constraintEqualToAnchor:self.profilePopup.trailingAnchor constant:6],
         [addProfile.centerYAnchor constraintEqualToAnchor:self.profilePopup.centerYAnchor],
         [self.removeProfileButton.leadingAnchor constraintEqualToAnchor:addProfile.trailingAnchor constant:4],
@@ -137,7 +152,7 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
         [listScroll.trailingAnchor constraintEqualToAnchor:sidebar.trailingAnchor],
         [listScroll.topAnchor constraintEqualToAnchor:self.profilePopup.bottomAnchor constant:10],
         [listScroll.bottomAnchor constraintEqualToAnchor:sidebar.bottomAnchor],
-        [sidebar.widthAnchor constraintEqualToConstant:280],
+        [sidebar.widthAnchor constraintEqualToConstant:260],
     ]];
 
     NSView *detail = [[NSView alloc] init];
@@ -150,7 +165,7 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     self.appIconView.contentTintColor = NSColor.controlAccentColor;
     self.appIconView.imageScaling = NSImageScaleProportionallyUpOrDown;
     self.appIconView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.packageLabel = [self labelWithFont:[NSFont systemFontOfSize:24 weight:NSFontWeightSemibold]
+    self.packageLabel = [self labelWithFont:[NSFont systemFontOfSize:28 weight:NSFontWeightBold]
                                       color:NSColor.labelColor];
     self.packageLabel.stringValue = @"앱을 선택하세요";
     self.stateLabel = [self labelWithFont:[NSFont systemFontOfSize:13]
@@ -179,7 +194,7 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
 
     NSTextField *logTitle = [self labelWithFont:[NSFont systemFontOfSize:13 weight:NSFontWeightSemibold]
                                          color:NSColor.labelColor];
-    logTitle.stringValue = @"런타임 로그";
+    logTitle.stringValue = @"활동 로그";
     NSScrollView *logScroll = [[NSScrollView alloc] init];
     logScroll.borderType = NSBezelBorder;
     logScroll.hasVerticalScroller = YES;
@@ -189,7 +204,7 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
     self.logView.selectable = YES;
     self.logView.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
     self.logView.textColor = NSColor.secondaryLabelColor;
-    self.logView.backgroundColor = NSColor.textBackgroundColor;
+    self.logView.backgroundColor = NSColor.controlBackgroundColor;
     self.logView.textContainerInset = NSMakeSize(8, 8);
     logScroll.documentView = self.logView;
 
@@ -233,14 +248,14 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
 
     [split addArrangedSubview:sidebar];
     [split addArrangedSubview:detail];
-    [split setPosition:280 ofDividerAtIndex:0];
+    [split setPosition:260 ofDividerAtIndex:0];
     [self updateControls];
 }
 
 - (void)configureToolbar {
     NSToolbar *toolbar = [[NSToolbar alloc] initWithIdentifier:@"DarwinARTToolbar"];
     toolbar.delegate = self;
-    toolbar.displayMode = NSToolbarDisplayModeIconOnly;
+    toolbar.displayMode = NSToolbarDisplayModeIconAndLabel;
     self.window.toolbar = toolbar;
 }
 
@@ -338,11 +353,11 @@ static NSToolbarItemIdentifier const DARSystemItem = @"dev.darwinart.manager.sys
         [NSLayoutConstraint activateConstraints:@[
             [image.leadingAnchor constraintEqualToAnchor:cell.leadingAnchor constant:8],
             [image.centerYAnchor constraintEqualToAnchor:cell.centerYAnchor],
-            [image.widthAnchor constraintEqualToConstant:20],
-            [image.heightAnchor constraintEqualToConstant:20],
+            [image.widthAnchor constraintEqualToConstant:32],
+            [image.heightAnchor constraintEqualToConstant:32],
             [text.leadingAnchor constraintEqualToAnchor:image.trailingAnchor constant:8],
             [text.trailingAnchor constraintEqualToAnchor:cell.trailingAnchor constant:-8],
-            [text.topAnchor constraintEqualToAnchor:cell.topAnchor constant:7],
+            [text.topAnchor constraintEqualToAnchor:cell.topAnchor constant:11],
             [detail.leadingAnchor constraintEqualToAnchor:text.leadingAnchor],
             [detail.trailingAnchor constraintEqualToAnchor:text.trailingAnchor],
             [detail.topAnchor constraintEqualToAnchor:text.bottomAnchor constant:1],
