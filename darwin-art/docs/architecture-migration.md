@@ -368,3 +368,14 @@ was emitted. The montage shows the live forest/road scene, chicken, score, and
 Play button throughout the capture. The remaining Firebase AppMeasurement
 warnings are optional Google Play Services behavior and do not terminate the
 app or prevent gameplay rendering.
+
+## Progress — 2026-09-03 Crossy Road physical input smoke test
+
+With the compatibility window in the foreground, macOS CGEvent mouse-down/up
+events were sent to the real Crossy Road window (not the synthetic probe
+pointer path). A click on the Play button followed by eight forward taps
+advanced the chicken through the forest and road lanes; the score changed from
+30 to 80 and moving vehicles were visible. Window captures are
+`/private/tmp/crossy-window-live3.png`, `/private/tmp/crossy-played.png`, and
+`/private/tmp/crossy-played2.png`. This confirms the end-to-end input route from
+physical host events through Android MotionEvent/Unity into gameplay state.
