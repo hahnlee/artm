@@ -3455,3 +3455,9 @@ added; the full corpus and multi-loader identity task remain open.
   generated Java symlink was read during native-owner discovery. The runner
   now exposes `_aosp/external/dlmalloc` and skips dangling Java links. Focused
   reruns of 1986, 1987, and 2000 pass interpreter, JIT, and unmodified lanes.
+
+### Handoff checkpoint 16 — 2026-09-08
+
+- Commit `df07931` is pushed; Python syntax validation passes. The background
+  corpus started before the final edit and contains a transient syntax-error
+  window in historical rows; newly scheduled tests use the fixed runner.

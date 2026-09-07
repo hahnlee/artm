@@ -8482,3 +8482,9 @@ or admission exception was added.
   cluster. Runner parity was tightened by adding the AOSP dlmalloc include
   root and ignoring unresolved generated Java symlinks during source-owner
   discovery; focused 1986/1987/2000 interpreter and JIT runs now pass.
+
+### Handoff checkpoint 16 — 2026-09-08
+
+- Runner fix is pushed as `df07931`; focused structural-redefine tests pass.
+  The existing ledger has historical rows from the brief pre-fix syntax
+  window and should be refreshed or rechecked after the worker completes.
