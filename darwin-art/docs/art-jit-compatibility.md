@@ -3185,3 +3185,10 @@ added; the full corpus and multi-loader identity task remain open.
   rejection. No speculative loader replacement was retained. The next code
   change must preserve AOSP startup ordering and separate app-image ownership
   generically.
+
+### Native DexFile cookie trace hook — 2026-09-08
+
+- Added manifest patch `0156` at ART's own
+  `CollectDexFilesFromJavaDexFile` path. Runtime-core staging applies it;
+  logging is disabled unless `DARWIN_ART_TRACE_DEX_IDENTITY=1` and does not
+  alter registration.

@@ -8234,3 +8234,9 @@ or admission exception was added.
   distinct native `DexFile*` for `Main`, indicating an app-image/cache-side
   mapping. The remaining work is to trace the Java cookie's native pointer and
   its registration timing, while keeping AOSP duplicate rejection intact.
+
+### Native DexFile cookie trace hook — 2026-09-08
+
+- Added manifest patch `0156` at ART's native
+  `CollectDexFilesFromJavaDexFile` path. Staging applies it successfully, and
+  logging is disabled by default for normal runs.
