@@ -24,6 +24,7 @@
 #include "mirror/class-inl.h"
 #include "thread-current-inl.h"
 #include "monitor.h"
+#include "interpreter/interpreter.h"
 #include <unwindstack/AndroidUnwinder.h>
 #include "runtime_jit_exit_hook_acceptance.h"
 #include "runtime_jit_fields_acceptance.h"
@@ -303,8 +304,12 @@ int run(JNIEnv* env, art::Thread* self, art::ClassLinker* class_linker,
       art::ScopedSuspendAll all("JIT identity removal acceptance");
       removed_identity = jit->GetCodeCache()->RemoveMethod(identity, /*release_memory=*/true);
     }
-    if (!removed_identity ||
-        !class_linker->IsQuickToInterpreterBridge(identity->GetEntryPointFromQuickCompiledCode())) {
+    const void* identity_entrypoint =
+        identity->GetEntryPointFromQuickCompiledCode();
+    const bool reinitialized_to_interpreter =
+        class_linker->IsQuickToInterpreterBridge(identity_entrypoint) ||
+        identity_entrypoint == art::interpreter::GetNterpEntryPoint();
+    if (!removed_identity || !reinitialized_to_interpreter) {
       return 121;
     }
     for (int iteration = 0; iteration < 8; ++iteration) {

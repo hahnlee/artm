@@ -3095,3 +3095,13 @@ any of these tests; Java rewrites are not acceptable evidence.
   app `DexFile` element, so the test DEX is already registered for that loader
   when `Main` is resolved. The remaining fix is app-image versus PathClassLoader
   DexFile identity/lifecycle parity, not weakening AOSP's duplicate rejection.
+
+### JIT acceptance/deoptimization correction — 2026-09-09
+
+- `audit-art-jit.sh` passes on the replacement host after aligning the
+  identity-removal assertion with AOSP `Instrumentation::ReinitializeMethodsCode`:
+  a verified method may return to Nterp, not only the quick interpreter bridge.
+- The run exercised compiled arithmetic, JNI reference returns, concurrent GC,
+  exceptions, fields/arrays, inlining, virtual/interface calls, VarHandles,
+  and native exit hooks. No JIT admission gate or interpreter-only fallback was
+  added; the full corpus and multi-loader identity task remain open.

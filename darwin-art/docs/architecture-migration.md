@@ -8157,3 +8157,11 @@ the original bytecode rather than translating it to Java.
   `InternalError`, leaving `foo` null. Diagnostics were reverted; the generic
   runtime task is to model the distinct app-image/PathClassLoader DexFile
   ownership seen by AOSP while retaining the rejection contract.
+
+### JIT acceptance/deoptimization correction — 2026-09-09
+
+- The complete `audit-art-jit.sh` acceptance now passes. Its deoptimization
+  check accepts the AOSP-selected Nterp entrypoint as well as the bridge after
+  `JitCodeCache::RemoveMethod`, matching the pinned runtime implementation.
+- This is a probe-contract correction, not a runtime bypass; broad corpus and
+  ClassLoader identity coverage are still required for the 100% objective.
