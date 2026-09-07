@@ -3935,3 +3935,8 @@ added; the full corpus and multi-loader identity task remain open.
   server, and dup wrappers; `nativeGetToken` returns a local reference and
   teardown releases the global reference safely. Native compat incremental
   build and graphics-link audit pass.
+
+### Runtime checkpoint 85 — 2026-09-08
+
+- `370-dex-v37` passes interpreter, JIT, and unmodified optimized lanes,
+  validating the current DEX v37 reader/verifier and execution path.

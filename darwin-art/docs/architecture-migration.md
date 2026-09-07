@@ -8919,3 +8919,8 @@ or admission exception was added.
   token is shared across each pair/dup wrapper, exposed via `nativeGetToken`,
   with VM-safe global-ref teardown. Incremental native build and graphics-link
   audit pass.
+
+### Runtime checkpoint 85 — 2026-09-08
+
+- `370-dex-v37` passes all execution lanes, confirming DEX v37 parsing,
+  verification, and execution remain on the shared ART pipeline.
