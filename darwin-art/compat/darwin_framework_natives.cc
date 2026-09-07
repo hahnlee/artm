@@ -1122,6 +1122,16 @@ void SurfaceNativeRelease(JNIEnv*, jclass, jlong handle) {
   (void)darwin_art_android_ANativeWindow_release_if_managed(
       reinterpret_cast<void*>(static_cast<uintptr_t>(handle)));
 }
+void SurfaceNativeDestroy(JNIEnv*, jclass, jlong) {
+  // Surface.destroy() is a producer disconnect, not a strong-reference
+  // release. Surface.java immediately calls release() afterward, which owns
+  // the single nativeRelease for this Java Surface. Mapping both natives to
+  // SurfaceNativeRelease consumed BLASTBufferQueue's producer reference and
+  // left nativeDestroy() locking a freed ANativeWindow during compositor
+  // detach. The Darwin queue currently has no separate connected-API state,
+  // so disconnect is intentionally a no-op while reference teardown remains
+  // exclusively in SurfaceNativeRelease.
+}
 jlong SurfaceNativeCreateFromSurfaceTexture(JNIEnv* env, jclass,
                                             jobject surface_texture) {
   return darwin_art_android_surface_texture_acquire_producer(env,
@@ -2448,7 +2458,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
       {const_cast<char*>("nativeRelease"), const_cast<char*>("(J)V"),
        reinterpret_cast<void*>(&SurfaceNativeRelease)},
       {const_cast<char*>("nativeDestroy"), const_cast<char*>("(J)V"),
-       reinterpret_cast<void*>(&SurfaceNativeRelease)},
+       reinterpret_cast<void*>(&SurfaceNativeDestroy)},
       {const_cast<char*>("nativeGetWidth"), const_cast<char*>("(J)I"),
        reinterpret_cast<void*>(&SurfaceNativeGetWidth)},
       {const_cast<char*>("nativeGetHeight"), const_cast<char*>("(J)I"),

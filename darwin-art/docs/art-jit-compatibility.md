@@ -4175,3 +4175,12 @@ added; the full corpus and multi-loader identity task remain open.
   mutex is therefore accessed after free (`std::mutex::lock(EINVAL)`), not
   because of a JIT instruction defect. A queue-owned native-window lifetime
   reference is being added and will be validated through compositor teardown.
+
+### Runtime checkpoint 116 — 2026-09-08
+
+- Confirmed the UAF was caused by mapping both `Surface.nativeDestroy` and
+  `nativeRelease` to the same refcount decrement. `nativeDestroy` is now a
+  producer disconnect no-op while `nativeRelease` owns the Java reference
+  release. Chrome compositor teardown no longer emits the mutex EINVAL or ART
+  generated-code fault; the remaining `unknown service child PID` is isolated
+  to child-service registration.

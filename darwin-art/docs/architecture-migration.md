@@ -9142,3 +9142,11 @@ or admission exception was added.
   already destroyed its host object. The resulting `std::mutex` EINVAL is a
   native-window UAF/lifetime bug, not a generated-code semantic mismatch. The
   next patch gives the queue observer an explicit reference through destroy.
+
+### Runtime checkpoint 116 — 2026-09-08
+
+- Corrected the Surface lifecycle ABI: `nativeDestroy` no longer decrements
+  the native-window reference, matching Android's disconnect-versus-release
+  split. Fresh Chrome teardown logs show no mutex EINVAL or generated-code
+  fault. A separate child-service registry miss (`unknown service child PID`)
+  remains for the next multiprocess compatibility slice.
