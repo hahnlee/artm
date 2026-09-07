@@ -8722,3 +8722,9 @@ or admission exception was added.
 - The null register survives boot-image changes and occurs before JNI dispatch;
   investigation is narrowed to compressed `ObjPtr` normalization at the Darwin
   C++/ART boundary.
+
+### Runtime checkpoint 53 — 2026-09-08
+
+- The null is observed before JNI dispatch, so field-ID fallback alone cannot
+  fix 936. The next change must correct compressed-reference or handle usage at
+  the ART C++ boundary.

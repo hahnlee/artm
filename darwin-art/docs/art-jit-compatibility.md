@@ -3725,3 +3725,9 @@ added; the full corpus and multi-loader identity task remain open.
 - Repeated disassembly continues to show a null ART internal pointer before JNI,
   even after boot seeding and initialization attempts. The next focused task is
   compressed `ObjPtr` normalization at the Darwin C++/ART boundary.
+
+### Runtime checkpoint 53 — 2026-09-08
+
+- A JNI field-ID fallback is not sufficient because the null occurs during ART
+  `System.props` resolution before JNI dispatch. The next implementation must
+  use an ART-safe handle or correct compressed-reference representation.
