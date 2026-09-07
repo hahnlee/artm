@@ -3122,3 +3122,12 @@ added; the full corpus and multi-loader identity task remain open.
   the previous false status-121 deoptimization failure. A single frame-clock
   unit test was timing-sensitive on its first run and passed on exact rerun and
   the subsequent full host suite.
+
+### Dynamic Nterp unwind CFA — 2026-09-08
+
+- Reified the AOSP ARM64ng Nterp CFA as `DW_CFA_def_cfa_expression`:
+  `*(x25 - 8) + 160`. Darwin lowering retains one dynamic expression per
+  real Nterp FDE while filtering unsupported state-changing directives.
+- `build-nterp-arm64ng`, all 13 bootstrap tests, runtime graphics rebuild, and
+  the complete `audit-art-jit.sh` acceptance pass. ClassLoader case 497 remains
+  the unrelated open compatibility task.

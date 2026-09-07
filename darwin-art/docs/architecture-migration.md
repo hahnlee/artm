@@ -8180,3 +8180,12 @@ or admission exception was added.
 - 497 remains the sole reproduced failure: duplicate DexFile registration at
   the first custom ClassLoader. The runtime must preserve AOSP rejection while
   separating the app-image and Java PathClassLoader ownership boundary.
+
+### Dynamic Nterp unwind CFA — 2026-09-08
+
+- ARM64ng Nterp now emits the AOSP-compatible dynamic CFA
+  `*(x25 - 8) + 160` instead of the fixed `sp+224` approximation. Mach-O/DWARF
+  verification, bootstrap tests, runtime graphics rebuild, and full JIT audit
+  all pass.
+- No interpreter dispatch or JIT admission policy changed. The generic
+  DexFile/ClassLoader identity gap in case 497 is still next.

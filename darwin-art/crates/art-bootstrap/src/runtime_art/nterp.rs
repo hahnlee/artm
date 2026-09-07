@@ -177,8 +177,9 @@ fn lower_nterp_cfi(source: &str) -> Result<String> {
     let mut helper_splits = 0usize;
     let mut in_macro = false;
     let mut real_fde_starts = 0usize;
+    let mut dynamic_cfi_seeded = false;
 
-    const NTERP_FRAME_SEED: &str = "    .cfi_def_cfa sp, 224\n\
+    const NTERP_FRAME_SEED: &str = "    .cfi_escape 0x0f, 7, 0x92, 25, 0x78, 0x06, 0x23, 0xa0, 0x01\n\
     .cfi_rel_offset x19, 64\n\
     .cfi_rel_offset x20, 72\n\
     .cfi_rel_offset x21, 80\n\
@@ -251,9 +252,18 @@ fn lower_nterp_cfi(source: &str) -> Result<String> {
         // lower state operations and macro-emitted restores to no-ops.  This
         // is metadata-only and leaves every instruction and table offset
         // unchanged.
-        if trimmed.starts_with(".cfi_") && trimmed != ".cfi_startproc" && trimmed != ".cfi_endproc"
+        if trimmed.starts_with(".cfi_")
+            && trimmed != ".cfi_startproc"
+            && trimmed != ".cfi_endproc"
+            && !trimmed.starts_with(".cfi_escape")
         {
             continue;
+        }
+        if trimmed.starts_with(".cfi_escape") {
+            if dynamic_cfi_seeded {
+                continue;
+            }
+            dynamic_cfi_seeded = true;
         }
         lowered.push_str(line);
         lowered.push('\n');
@@ -263,12 +273,15 @@ fn lower_nterp_cfi(source: &str) -> Result<String> {
                 // expansion starts with a valid CFA, without leaking a CFI
                 // directive into the surrounding source FDE.
                 lowered.push_str("    .cfi_def_cfa sp, 0\n");
+                dynamic_cfi_seeded = false;
             } else {
                 real_fde_starts += 1;
                 if real_fde_starts == 2 {
                     lowered.push_str(NTERP_FRAME_SEED);
+                    dynamic_cfi_seeded = true;
                 } else {
                     lowered.push_str("    .cfi_def_cfa sp, 0\n");
+                    dynamic_cfi_seeded = false;
                 }
             }
         }
@@ -417,6 +430,19 @@ fn darwinize_asm_support(source: &mut String) -> Result<()> {
 fn darwinize_main_template(source: &mut String) -> Result<()> {
     darwinize_reference_macros(source)?;
     darwinize_write_barrier(source)?;
+    // cfi_asm_support.h makes this macro a no-op on Darwin, but Nterp's CFA
+    // is genuinely dynamic: *(xREFS - 8) + CALLEE_SAVES_SIZE. Reify the AOSP
+    // DW_CFA_def_cfa_expression before preprocessing so stack walkers retain
+    // the real frame contract on Apple's assembler.
+    const DYNAMIC_NTERP_CFA: &str = ".cfi_escape 0x0f, 7, 0x92, 25, 0x78, 0x06, 0x23, 0xa0, 0x01";
+    *source = source.replace(
+        "CFI_DEF_CFA_BREG_PLUS_UCONST \\cfi_refs, -8, CALLEE_SAVES_SIZE",
+        DYNAMIC_NTERP_CFA,
+    );
+    *source = source.replace(
+        "CFI_DEF_CFA_BREG_PLUS_UCONST CFI_REFS, -8, CALLEE_SAVES_SIZE",
+        DYNAMIC_NTERP_CFA,
+    );
     replace_required(
         source,
         "OAT_ENTRY ExecuteNterpWithClinitImpl\n    .cfi_startproc\n",
