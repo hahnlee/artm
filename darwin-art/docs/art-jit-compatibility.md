@@ -3199,3 +3199,13 @@ added; the full corpus and multi-loader identity task remain open.
   `CollectDexFilesFromJavaDexFile` trace lines before failing. Its class
   definition path is earlier than this OAT context helper; the next diagnostic
   target is native `defineClassNative` registration.
+
+### Runtime shadow source coverage — 2026-09-08
+
+- The patched shadow manifest now includes both `class_loader_context.cc` and
+  `native/dalvik_system_DexFile.cc`, which are compiled by the runtime job but
+  had previously been omitted from the copy set. Shadow identity was bumped to
+  v6 to invalidate the stale generated tree; graphics bootstrap rebuilt two
+  affected objects successfully. The cookie hook is present in the staged
+  source. This fixes build-graph coverage only; 497 remains an unresolved
+  AOSP app-image/DexCache ownership failure and is not claimed fixed.

@@ -2,7 +2,7 @@ diff --git a/runtime/class_loader_context.cc b/runtime/class_loader_context.cc
 index 0000000..0000000 100644
 --- a/runtime/class_loader_context.cc
 +++ b/runtime/class_loader_context.cc
-@@ -986,6 +986,14 @@ static bool CollectDexFilesFromJavaDexFile(ObjPtr<mirror::Object> java_dex_file,
+@@ -986,7 +986,13 @@ static bool CollectDexFilesFromJavaDexFile(ObjPtr<mirror::Object> java_dex_file,
    // Index 0 from the long array stores the oat file. The dex files start at index 1.
    for (int32_t j = 1; j < long_array_size; ++j) {
      const DexFile* cp_dex_file =

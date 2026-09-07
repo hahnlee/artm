@@ -4,7 +4,7 @@
 //! compiler orchestration cannot silently change which upstream files are
 //! copied or patched.
 
-pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v3";
+pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v6";
 
 pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.cc",
@@ -17,6 +17,7 @@ pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "signal_set.h",
     "class_linker.cc",
     "class_linker.h",
+    "class_loader_context.cc",
     "mirror/object_reference.h",
     "mirror/string-inl.h",
     "gc/heap.cc",
@@ -61,6 +62,7 @@ pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "nterp_helpers.cc",
     "interpreter/mterp/nterp.cc",
     "native/dalvik_system_VMDebug.cc",
+    "native/dalvik_system_DexFile.cc",
     "hprof/hprof.cc",
     "native_bridge_art_interface.cc",
     "entrypoints/quick/quick_jni_entrypoints.cc",

@@ -8246,3 +8246,11 @@ or admission exception was added.
 - 497 ran against the rebuilt hook-bearing runtime with zero collection-hook
   events, so the failure occurs before that OAT class-loader-context path. The
   next trace target is the native `defineClassNative` registration boundary.
+
+### Runtime shadow source coverage — 2026-09-08
+
+- Runtime staging now treats `class_loader_context.cc` and
+  `native/dalvik_system_DexFile.cc` as patched sources, matching the compile
+  list. The shadow identity moved to v6 so existing caches cannot hide this
+  change. A graphics bootstrap rebuild compiled the changed closure; no
+  behavioral workaround or test-specific loader fallback was introduced.
