@@ -8398,3 +8398,8 @@ or admission exception was added.
 - The fresh four-worker ledger has completed 105 tests with no failures so far.
   Workers remain active; final compatibility classification awaits terminal
   results for the entire corpus.
+
+### Fresh corpus checkpoint 2 — 2026-09-08
+
+- The same live ledger has completed 148 tests with no failures. This is an
+  interim observation only; the full pinned corpus remains active.

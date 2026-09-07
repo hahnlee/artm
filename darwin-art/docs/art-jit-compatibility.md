@@ -3368,3 +3368,9 @@ added; the full corpus and multi-loader identity task remain open.
 - The same four-worker run has reached 105 completed tests; every terminal
   result so far is `passed`. The corpus process remains live, so this remains
   an interim checkpoint rather than a completion claim.
+
+### Fresh corpus checkpoint 2 — 2026-09-08
+
+- The live four-worker recheck has reached 148 completed tests with zero
+  failures. The remaining corpus is still running and must reach terminal
+  completion before its summary can guide implementation priorities.
