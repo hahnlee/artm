@@ -3979,3 +3979,9 @@ added; the full corpus and multi-loader identity task remain open.
   and optimized lanes. `2258-checker-valid-rti` and
   `2283-checker-remove-null-check` also pass all lanes. Cross-process FD export
   remains an explicit transport-layer gap.
+
+### Runtime checkpoint 92 — 2026-09-08
+
+- KeyCharacterMap Parcel support now preserves a Darwin map's device id with
+  a versioned magic record instead of silently resetting to device 1. Native
+  graph check passes; managed identity/type smoke is in progress.

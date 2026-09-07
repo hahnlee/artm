@@ -8962,3 +8962,9 @@ or admission exception was added.
   `2283-checker-remove-null-check` also pass. The remaining cross-process FD
   transport mismatch is tracked separately rather than hidden by registry
   fallback.
+
+### Runtime checkpoint 92 — 2026-09-08
+
+- KeyCharacterMap Parcel serialization now preserves device id through a
+  versioned record, removing the previous silent device-1 reset. Native graph
+  check passes; managed round-trip identity/type smoke is being finalized.

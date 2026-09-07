@@ -1519,11 +1519,32 @@ jobject KeyMapObtainEmpty(JNIEnv* env, jclass klass, jint device_id) {
   }
   return result;
 }
-jlong KeyMapReadFromParcel(JNIEnv*, jclass, jobject) {
-  auto* map = new (std::nothrow) DarwinKeyCharacterMap{1};
+constexpr jint kDarwinKeyCharacterMapParcelMagic = 0x44414b4d;  // DAKM
+constexpr jint kDarwinKeyCharacterMapParcelVersion = 1;
+
+jlong KeyMapReadFromParcel(JNIEnv* env, jclass, jobject parcel_object) {
+  DarwinParcel* parcel = JavaParcel(env, parcel_object);
+  if (parcel == nullptr ||
+      ParcelReadInt(reinterpret_cast<jlong>(parcel)) !=
+          kDarwinKeyCharacterMapParcelMagic ||
+      ParcelReadInt(reinterpret_cast<jlong>(parcel)) !=
+          kDarwinKeyCharacterMapParcelVersion) {
+    return 0;
+  }
+  const jint device_id = ParcelReadInt(reinterpret_cast<jlong>(parcel));
+  auto* map = new (std::nothrow) DarwinKeyCharacterMap{device_id};
   return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(map));
 }
-void KeyMapWriteToParcel(JNIEnv*, jclass, jlong, jobject) {}
+void KeyMapWriteToParcel(JNIEnv* env, jclass, jlong pointer,
+                         jobject parcel_object) {
+  DarwinParcel* parcel = JavaParcel(env, parcel_object);
+  const auto* map = KeyMap(pointer);
+  if (parcel == nullptr || map == nullptr) return;
+  const jlong parcel_pointer = reinterpret_cast<jlong>(parcel);
+  ParcelWriteInt(parcel_pointer, kDarwinKeyCharacterMapParcelMagic);
+  ParcelWriteInt(parcel_pointer, kDarwinKeyCharacterMapParcelVersion);
+  ParcelWriteInt(parcel_pointer, map->device_id);
+}
 
 std::atomic<jint> g_next_key_event_id{1};
 
