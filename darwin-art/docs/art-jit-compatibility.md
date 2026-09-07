@@ -3685,3 +3685,12 @@ added; the full corpus and multi-loader identity task remain open.
   graphics/runtime link audit passes. A fresh linked-runtime rerun still
   reproduces 936's null-page generated-code fault, ruling out a missing
   toolchain or stale graphics artifact.
+
+### Runtime checkpoint 48 — 2026-09-08
+
+- Persisted the Android-shaped JVMTI search fix: `System` and `Properties` are
+  resolved with `FindSystemClass`, and a null `Properties.defaults` receiver
+  falls back to the owning `Properties` object. OpenJDK JVMTI rebuild and the
+  complete graphics/runtime link audit pass. `936-search-onload` still fails
+  with `SIGSEGV/SEGV_ACCERR` at `0x4`, so the remaining defect is in the
+  generated-code/JNI call boundary, not class lookup or host toolchain setup.

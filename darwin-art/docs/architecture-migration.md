@@ -8687,3 +8687,10 @@ or admission exception was added.
   audit green. 936 nevertheless fails in the newly linked runtime, confirming
   an independent generated-code/boot-Dex entrypoint defect rather than a host
   setup problem.
+
+### Runtime checkpoint 48 — 2026-09-08
+
+- The OpenJDK JVMTI search path now follows ART class-linker semantics for
+  system classes and safely handles an absent `Properties.defaults` chain.
+  Rebuild and link audit are green, while 936 continues to fault at `0x4` in
+  generated code; JNI/quick-call ABI investigation remains the next task.
