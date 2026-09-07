@@ -9045,3 +9045,10 @@ or admission exception was added.
   broker FD duplication helpers. The implementation is deliberately not
   marked as full cross-process support: payload and finish-ACK framing still
   require a two-process endpoint test before that boundary can be closed.
+
+### Runtime checkpoint 104 — 2026-09-08
+
+- InputChannel Parcel serialization now matches AOSP's token/name/FD order and
+  can adopt an imported broker endpoint. Same-process behavior remains intact;
+  event payload framing and finish acknowledgements remain explicitly pending
+  a two-process validation.

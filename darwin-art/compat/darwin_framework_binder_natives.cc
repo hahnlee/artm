@@ -489,6 +489,20 @@ struct DarwinInputChannelState {
     }
     env->DeleteLocalRef(local_token);
     env->DeleteLocalRef(binder_class);
+    OpenLocalWakePair();
+  }
+
+  DarwinInputChannelState(JNIEnv* env, std::string channel_name, jobject token,
+                          int endpoint_fd)
+      : name(std::move(channel_name)), remote_endpoint_fd(endpoint_fd) {
+    if (token != nullptr) connection_token = env->NewGlobalRef(token);
+    // AppKit events originate in the APK process even when WindowManager sent
+    // this channel through Binder. Keep their process-local queue wakeup
+    // separate from the transferred InputTransport endpoint.
+    OpenLocalWakePair();
+  }
+
+  void OpenLocalWakePair() {
     int fds[2] = {-1, -1};
     // These are guest descriptors consumed by the broker-backed ALooper.
     // Host libc socketpair/fcntl would produce unrelated descriptor numbers
@@ -506,6 +520,8 @@ struct DarwinInputChannelState {
     if (read_fd >= 0) darwin_art_bionic_socket_broker_close(read_fd);
     if (write_fd >= 0 && write_fd != read_fd)
       darwin_art_bionic_socket_broker_close(write_fd);
+    if (remote_endpoint_fd >= 0)
+      darwin_art_bionic_socket_broker_close(remote_endpoint_fd);
     if (connection_token != nullptr && g_framework_vm != nullptr) {
       JNIEnv* env = nullptr;
       bool detach = false;
@@ -555,9 +571,9 @@ struct DarwinInputChannelState {
   std::shared_ptr<DarwinInputReceiver> consumer;
   int read_fd = -1;
   int write_fd = -1;
-  // A parcel-imported endpoint is one full-duplex descriptor. Local pairs use
-  // separate broker descriptors; the flag prevents double-close on import.
-  bool shared_endpoint = false;
+  // A parcel-imported endpoint is one full-duplex descriptor. It is not used
+  // as a one-byte local wake pipe: framed payload/ACK decoding must own it.
+  int remote_endpoint_fd = -1;
 };
 
 std::mutex g_focused_input_channel_mutex;
@@ -916,9 +932,6 @@ jlongArray InputChannelOpenPair(JNIEnv* env, jclass, jstring name) {
   if (result != nullptr) env->SetLongArrayRegion(result, 0, 2, values);
   return result;
 }
-
-constexpr jint kDarwinInputChannelParcelMagic = 0x44414943;  // DAIC
-constexpr jint kDarwinInputChannelParcelVersion = 1;
 
 jlong InputChannelReadParcel(JNIEnv* env, jobject, jobject parcel_object) {
   DarwinParcel* parcel = JavaParcel(env, parcel_object);

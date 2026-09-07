@@ -4070,3 +4070,11 @@ added; the full corpus and multi-loader identity task remain open.
   now consumed in that order. Native graph and graphics-link audits pass;
   remote payload framing remains explicitly unimplemented until endpoint
   ownership is exercised by a two-process smoke.
+
+### Runtime checkpoint 104 — 2026-09-08
+
+- `InputChannel` now consumes and emits the AOSP parcel tuple (connection
+  token, UTF-16 name, unique endpoint FD), adopting an imported broker
+  descriptor with single-owner cleanup. Native graph and graphics-link checks
+  pass. A two-process payload/finish-ACK smoke is still required before the
+  transport gap can be closed.
