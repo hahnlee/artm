@@ -8315,3 +8315,10 @@ or admission exception was added.
   makes the ownership gap concrete: publish the custom loader table/cache at
   the AOSP lifecycle point before defining the class, without weakening the
   duplicate-loader contract.
+
+### 497 DexCache reuse experiment — 2026-09-08
+
+- A speculative reuse path caused a native fault after clearing ART's pending
+  exception state and was removed immediately. Production again follows the
+  AOSP duplicate-loader guard; the next step is the correct pre-definition
+  ownership lifecycle, not ad hoc cache reuse.

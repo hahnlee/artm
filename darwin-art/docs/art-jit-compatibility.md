@@ -3277,3 +3277,10 @@ added; the full corpus and multi-loader identity task remain open.
   precisely identifies the missing lifecycle step: a custom loader's table and
   app-image DexCache association must be published before class definition,
   while test 156's duplicate rejection remains unchanged.
+
+### 497 DexCache reuse experiment — 2026-09-08
+
+- A speculative reuse path was rejected and reverted after it violated ART's
+  pending-exception contract and produced a native fault. The production path
+  is restored to AOSP's duplicate-loader guard; no unsafe behavior change was
+  retained.
