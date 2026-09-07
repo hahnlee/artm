@@ -3624,6 +3624,12 @@ added; the full corpus and multi-loader identity task remain open.
 - The boot-class JVMTI issue remains under active native implementation review;
   no semantic workaround or test-specific bypass has been merged.
 
+### Runtime checkpoint 41 — 2026-09-08
+
+- The boot-class JVMTI implementation review continues; current source still
+  has no native patch for 936/938, so their failures remain explicit and
+  unmasked.
+
 ### Runtime checkpoint 40 — 2026-09-08
 
 - The native boot-class JVMTI review is still active; shared worktree inspection
