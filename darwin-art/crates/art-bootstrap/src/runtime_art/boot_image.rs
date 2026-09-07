@@ -9,6 +9,27 @@ use super::*;
 const BOOT_IMAGE_BASE: &str = "0x70000000";
 const BOOT_IMAGE_FILTER: &str = "speed";
 
+// Android's production boot image is profile-driven.  Keep the detached
+// runtime's seed profile intentionally limited to classes required to bring
+// up ART and the Java class-loader hierarchy; application/framework classes
+// remain lazily loaded from the boot class path.  In particular, do not make
+// the no-profile dex2oat default (which images every class) the Darwin ABI.
+const BOOT_IMAGE_SEED_CLASSES: &[&str] = &[
+    "Ljava/lang/Object;",
+    "Ljava/lang/Class;",
+    "Ljava/lang/String;",
+    "Ljava/lang/Throwable;",
+    "Ljava/lang/Exception;",
+    "Ljava/lang/Error;",
+    "Ljava/lang/RuntimeException;",
+    "Ljava/lang/System;",
+    "Ljava/lang/Thread;",
+    "Ljava/lang/ThreadGroup;",
+    "Ljava/lang/Runnable;",
+    "Ljava/lang/Cloneable;",
+    "Ljava/lang/ClassLoader;",
+];
+
 /// The Android 16 boot class path used by the detached Darwin ART runtime.
 /// Keep this order identical to the `bootclasspath` property consumed by ART.
 fn boot_class_path(root: &Path) -> [PathBuf; 11] {
@@ -151,10 +172,36 @@ pub(crate) fn build_android16_boot_image(root: &Path) -> Result<()> {
     let result = (|| {
         let oat = staging.join("boot.oat");
         let image = staging.join("boot.art");
+        let profile_source = staging.join("boot-image-seed.classes");
+        let profile = staging.join("boot-image.prof");
+        fs::write(&profile_source, BOOT_IMAGE_SEED_CLASSES.join("\n") + "\n")?;
+        let runtime_arg = runtime.to_str().ok_or("runtime dylib path is not UTF-8")?;
+
+        // Generate the boot-format profile through the same AOSP profman
+        // implementation linked into the detached host.  Passing all boot
+        // jars lets profman resolve descriptors and records every dex key,
+        // while only the explicit seed class set is selected for the image.
+        let mut profile_command = Command::new(&host);
+        profile_command
+            .arg("--profman")
+            .arg(runtime_arg)
+            .arg(format!(
+                "--create-profile-from={}",
+                profile_source.display()
+            ))
+            .arg("--output-profile-type=boot");
+        for path in &class_path {
+            let dex_file = path.to_str().ok_or("boot class path is not UTF-8")?;
+            profile_command.args([
+                &format!("--apk={dex_file}"),
+                &format!("--dex-location={dex_file}"),
+            ]);
+        }
+        profile_command.arg(format!("--reference-profile-file={}", profile.display()));
+        run_command(&mut profile_command)?;
+
         let mut command = Command::new(&host);
-        command
-            .arg("--dex2oat")
-            .arg(runtime.to_str().ok_or("runtime dylib path is not UTF-8")?);
+        command.arg("--dex2oat").arg(runtime_arg);
         command.args([
             "--android-root=/",
             &format!("--base={BOOT_IMAGE_BASE}"),
@@ -169,6 +216,7 @@ pub(crate) fn build_android16_boot_image(root: &Path) -> Result<()> {
             &format!("--compiler-filter={BOOT_IMAGE_FILTER}"),
             "--image-format=lz4",
             "--instruction-set=arm64",
+            &format!("--profile-file={}", profile.display()),
         ]);
         for path in &class_path {
             let dex_file = path.to_str().ok_or("boot class path is not UTF-8")?;
@@ -203,7 +251,8 @@ pub(crate) fn build_android16_boot_image(root: &Path) -> Result<()> {
         create_arm64_component_links(&staging)?;
         publish_boot_image(&staging, &destination)?;
         println!(
-            "build-android16-boot-image: filter={BOOT_IMAGE_FILTER} components=11 published={}",
+            "build-android16-boot-image: filter={BOOT_IMAGE_FILTER} profile={} components=11 published={}",
+            profile.display(),
             destination.display()
         );
         Ok(())
