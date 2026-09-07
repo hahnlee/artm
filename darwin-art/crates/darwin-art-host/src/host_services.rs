@@ -120,13 +120,20 @@ impl ServiceProcessManager {
     }
 
     fn release(&self, pid: i32) -> Result<(), String> {
-        let mut child = self
+        let Some(mut child) = self
             .children
             .lock()
             .map_err(|_| "service child table poisoned".to_owned())?
             .remove(&pid)
-            .ok_or_else(|| format!("unknown service child PID {pid}"))?
-            .child;
+            .map(|managed| managed.child)
+        else {
+            // Android's unbind/stop callbacks can race with process death and
+            // be delivered more than once. Releasing an already-reaped child
+            // is therefore an idempotent lifecycle operation, not a protocol
+            // error that should abort the browser host.
+            eprintln!("darwin-art-host: duplicate release for child PID {pid}");
+            return Ok(());
+        };
         if child
             .try_wait()
             .map_err(|error| error.to_string())?

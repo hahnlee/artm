@@ -4184,3 +4184,10 @@ added; the full corpus and multi-loader identity task remain open.
   release. Chrome compositor teardown no longer emits the mutex EINVAL or ART
   generated-code fault; the remaining `unknown service child PID` is isolated
   to child-service registration.
+
+### Runtime checkpoint 117 — 2026-09-08
+
+- Service-child release is now idempotent: duplicate stop/unbind callbacks for
+  an already-reaped PID no longer abort the host. Host check/tests pass, and a
+  fresh Chrome startup/menu smoke exits with status 0 without the prior mutex,
+  generated-code, broadcast-stub, or unknown-child-PID failures.

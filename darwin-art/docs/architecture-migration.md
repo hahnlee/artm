@@ -9150,3 +9150,10 @@ or admission exception was added.
   split. Fresh Chrome teardown logs show no mutex EINVAL or generated-code
   fault. A separate child-service registry miss (`unknown service child PID`)
   remains for the next multiprocess compatibility slice.
+
+### Runtime checkpoint 117 — 2026-09-08
+
+- Service-child release now tolerates duplicate lifecycle callbacks after a
+  child has been reaped, matching Android's idempotent stop/unbind behavior.
+  Host check/tests pass and a fresh Chrome startup/menu smoke returns status 0
+  without the previous teardown or PID-registry errors.
