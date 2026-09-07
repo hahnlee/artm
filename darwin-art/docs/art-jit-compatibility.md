@@ -3422,3 +3422,9 @@ added; the full corpus and multi-loader identity task remain open.
 - The live ledger has reached 249 completed tests with zero failures,
   including DDMS, dispose stress, raw-monitor suspend/exit/wait, and proxy
   method-argument paths. The worker pool remains active.
+
+### Fresh corpus checkpoint 11 — 2026-09-08
+
+- The live ledger has reached 257 completed tests with zero failures,
+  including obsolete method-handle, short-dex, monitor-enter, and pop-frame
+  JIT paths. The worker pool remains active; final classification is pending.
