@@ -3661,3 +3661,12 @@ added; the full corpus and multi-loader identity task remain open.
   seeds. The rebuilt image makes `938-load-transform-bcp` pass in interpreter
   and ARM64 JIT lanes; `936-search-onload` remains a separate generated-code
   fault.
+
+### Runtime checkpoint 45 — 2026-09-08
+
+- 936 reproduction narrowed the null dereference to the ONLOAD system-search
+  property update path: the detached runtime can expose `Properties.defaults ==
+  null`, while the upstream helper unconditionally invokes methods on it. A
+  persistent OpenJDK JVMTI patch now targets the owning `Properties` object in
+  that valid state. Source patching succeeds; final graphics relink is pending
+  on this host's missing Android NDK 28.2 prerequisite.

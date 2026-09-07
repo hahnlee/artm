@@ -8665,3 +8665,11 @@ or admission exception was added.
   profile-driven class selection. This fixes `938-load-transform-bcp` in both
   interpreter and JIT modes without an APK rewrite or host fallback; the
   independent 936 generated-code crash remains open.
+
+### Runtime checkpoint 45 — 2026-09-08
+
+- 936's crash boundary is now identified as the ONLOAD `java.class.path`
+  update dereferencing a null optional `Properties.defaults` chain. The
+  Android-shaped JVMTI implementation is patched to update the owning
+  properties object when that chain is absent. Full runtime relink remains
+  blocked only by the replacement host lacking Android NDK 28.2.
