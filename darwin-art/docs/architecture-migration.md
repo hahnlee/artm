@@ -8403,3 +8403,9 @@ or admission exception was added.
 
 - The same live ledger has completed 148 tests with no failures. This is an
   interim observation only; the full pinned corpus remains active.
+
+### Fresh corpus checkpoint 3 — 2026-09-08
+
+- The fresh ledger has completed 170 tests with no failures so far, including
+  CFI, daemon-shutdown, and register-natives paths. Final classification waits
+  for the live corpus to finish.
