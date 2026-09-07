@@ -8120,3 +8120,13 @@ the original bytecode rather than translating it to Java.
   `arm64ng/invoke.S` interface-vtable `add w2` fragment. The audit now matches
   the pinned source without weakening fail-closed checks; `cargo test
   -p art-bootstrap` passes all 13 tests.
+
+### Nterp entry ABI — 2026-09-09
+
+- Added idempotent low-32-to-`DARWIN_ART_REFERENCE_BASE` `ArtMethod*`
+  normalization at both generated `ExecuteNterpWithClinitImpl` and
+  `ExecuteNterpImpl` entrypoints. The generated ARM64ng object and 13-object
+  runtime archive rebuild and Mach-O/DWARF audits pass; `821-many-args` passes
+  interpreter, JIT, and unchanged-source lanes. Dynamic Nterp CFA semantics
+  still require a separate ABI-correct unwind implementation and are not
+  claimed complete.

@@ -419,6 +419,16 @@ fn darwinize_main_template(source: &mut String) -> Result<()> {
     darwinize_write_barrier(source)?;
     replace_required(
         source,
+        "OAT_ENTRY ExecuteNterpWithClinitImpl\n    .cfi_startproc\n",
+        "OAT_ENTRY ExecuteNterpWithClinitImpl\n    .cfi_startproc\n    DARWIN_NORMALIZE_ART_METHOD\n",
+    )?;
+    replace_required(
+        source,
+        "OAT_ENTRY ExecuteNterpImpl\n    .cfi_startproc\n",
+        "OAT_ENTRY ExecuteNterpImpl\n    .cfi_startproc\n    DARWIN_NORMALIZE_ART_METHOD\n",
+    )?;
+    replace_required(
+        source,
         "    .type \\name, #function\n    .hidden \\name\n    .global \\name\n    .balign 16\n\\name:\n",
         "    .private_extern _\\name\n    .global _\\name\n    .balign 16\n_\\name:\n",
     )?;
@@ -473,7 +483,16 @@ fn darwinize_reference_macros(source: &mut String) -> Result<()> {
         ".macro GET_VREG reg, vreg\n    ldr     \\reg, [xFP, \\vreg, uxtw #2]\n.endm\n",
         ".macro GET_VREG reg, vreg\n    ldr     \\reg, [xFP, \\vreg, uxtw #2]\n.endm\n\
 .macro DARWIN_DECODE_NON_NULL_HEAP_REF xreg\n\
-    orr     \\xreg, \\xreg, #0x10000000000\n\
+    orr     \\xreg, \\xreg, #DARWIN_ART_REFERENCE_BASE\n\
+.endm\n\
+.macro DARWIN_NORMALIZE_ART_METHOD\n\
+    cbz     x0, 988f\n\
+    mov     ip2, x0\n\
+    lsr     ip2, ip2, #32\n\
+    cbnz    ip2, 988f\n\
+    mov     ip2, #DARWIN_ART_REFERENCE_BASE\n\
+    orr     x0, x0, ip2\n\
+988:\n\
 .endm\n\
 .macro DARWIN_DECODE_NULLABLE_HEAP_REF xreg, wreg\n\
     cbz     \\wreg, 987f\n\
@@ -743,6 +762,7 @@ fn audit_darwin_reference_boundaries(template: &str, source: &str) -> Result<()>
     if template == "main.S" {
         if !source.contains(".macro DARWIN_DECODE_NON_NULL_HEAP_REF xreg")
             || !source.contains(".macro DARWIN_DECODE_NULLABLE_HEAP_REF xreg, wreg")
+            || !source.contains(".macro DARWIN_NORMALIZE_ART_METHOD")
         {
             return Err("Darwin Nterp reference decode macros are missing".into());
         }
@@ -768,6 +788,12 @@ fn audit_nterp_source(source: &str, preprocessed: &str) -> Result<()> {
         .count();
     if handlers != 256 {
         return Err(format!("ARM64ng Nterp handler inventory drift: {handlers}/256").into());
+    }
+    if source.matches("DARWIN_NORMALIZE_ART_METHOD").count() != 3 {
+        return Err(
+            "Darwin Nterp ArtMethod entry normalization inventory drift: expected macro plus two entry calls"
+                .into(),
+        );
     }
     for symbol in [
         "_\\name:",
@@ -807,7 +833,7 @@ mod tests {
             writeln!(source, "NAME_START nterp_op_{index}").unwrap();
         }
         source.push_str(
-            "_EndExecuteNterpImpl:\n_EndExecuteNterpWithClinitImpl:\n_artNterpAsmInstructionStart\n_artNterpAsmInstructionEnd:\n.cfi_startproc\n.cfi_endproc\n",
+            ".macro DARWIN_NORMALIZE_ART_METHOD\n.endm\nDARWIN_NORMALIZE_ART_METHOD\nDARWIN_NORMALIZE_ART_METHOD\n_EndExecuteNterpImpl:\n_EndExecuteNterpWithClinitImpl:\n_artNterpAsmInstructionStart\n_artNterpAsmInstructionEnd:\n.cfi_startproc\n.cfi_endproc\n",
         );
         (
             source,
@@ -842,7 +868,8 @@ mod tests {
         );
         darwinize_reference_macros(&mut source).unwrap();
         assert!(source.contains(".macro DARWIN_DECODE_NON_NULL_HEAP_REF xreg"));
-        assert!(source.contains("orr     \\xreg, \\xreg, #0x10000000000"));
+        assert!(source.contains("orr     \\xreg, \\xreg, #DARWIN_ART_REFERENCE_BASE"));
+        assert!(source.contains(".macro DARWIN_NORMALIZE_ART_METHOD"));
         assert!(source.contains(".macro DARWIN_DECODE_NULLABLE_HEAP_REF xreg, wreg"));
         assert!(source.contains("cbz     \\wreg, 987f"));
     }
