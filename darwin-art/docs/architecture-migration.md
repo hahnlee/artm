@@ -9004,3 +9004,12 @@ or admission exception was added.
 
 - `2248-checker-smali-remove-try-until-the-end` passes interpreter, JIT, and
   optimized lanes, covering try-region elimination and exception-table bounds.
+
+### Runtime checkpoint 99 — 2026-09-08
+
+- KeyCharacterMap text synthesis now follows the Android event contract:
+  characters resolved by the shared key mapping produce key down/up sequences,
+  shifted characters are bracketed by Shift down/up, and device/source identity
+  is retained. Managed lowercase, uppercase, and unmapped-character coverage
+  passes interpreter, JIT, and optimized lanes. Layout-specific fallback
+  actions remain an explicit future key-layout data task.

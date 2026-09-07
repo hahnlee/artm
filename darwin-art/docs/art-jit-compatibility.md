@@ -4023,3 +4023,14 @@ added; the full corpus and multi-loader identity task remain open.
 
 - `2248-checker-smali-remove-try-until-the-end` passes all three lanes,
   validating try-region elimination and exception-table boundary lowering.
+
+### Runtime checkpoint 99 — 2026-09-08
+
+- Implemented `KeyCharacterMap.nativeGetEvents` using the runtime's generic
+  key-character mapping: printable characters become Android `KeyEvent`
+  down/up sequences, with explicit Shift down/up events for shifted glyphs,
+  monotonic event times, preserved device id, and keyboard source. A managed
+  smoke validates lowercase and uppercase event ordering plus unmapped-character
+  failure across interpreter, JIT, and unmodified optimized lanes. Fallback
+  actions remain false until layout behavior records are available rather than
+  inventing test-specific substitutions.

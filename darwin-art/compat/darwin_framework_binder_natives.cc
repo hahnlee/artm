@@ -1458,12 +1458,7 @@ jboolean KeyMapEquals(JNIEnv*, jclass, jlong left, jlong right) {
              ? JNI_TRUE
              : JNI_FALSE;
 }
-jchar KeyMapGetCharacter(JNIEnv*, jclass, jlong, jint key_code,
-                         jint meta_state) {
-  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
-    std::cerr << "ART Android KeyCharacterMap: character key=" << key_code
-              << " meta=" << meta_state << "\n";
-  }
+jchar MappedKeyCharacter(jint key_code, jint meta_state) {
   const bool shift = (meta_state & 0x1) != 0;
   if (key_code >= 29 && key_code <= 54) {
     const char base = static_cast<char>('a' + (key_code - 29));
@@ -1491,6 +1486,14 @@ jchar KeyMapGetCharacter(JNIEnv*, jclass, jlong, jint key_code,
     default: return 0;
   }
 }
+jchar KeyMapGetCharacter(JNIEnv*, jclass, jlong, jint key_code,
+                         jint meta_state) {
+  if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
+    std::cerr << "ART Android KeyCharacterMap: character key=" << key_code
+              << " meta=" << meta_state << "\n";
+  }
+  return MappedKeyCharacter(key_code, meta_state);
+}
 jchar KeyMapGetDisplayLabel(JNIEnv* env, jclass klass, jlong pointer,
                             jint key_code) {
   // Android's physical KeyCharacterMap exposes an unmodified printable label
@@ -1498,7 +1501,109 @@ jchar KeyMapGetDisplayLabel(JNIEnv* env, jclass klass, jlong pointer,
   // (and Chromium's hardware keyboard path) relies on this value.
   return KeyMapGetCharacter(env, klass, pointer, key_code, 0);
 }
-jobjectArray KeyMapGetEvents(JNIEnv*, jclass, jlong, jcharArray) { return nullptr; }
+struct DarwinMappedKeyStroke {
+  jint key_code;
+  bool shift;
+};
+
+bool FindMappedKeyStroke(jchar character, DarwinMappedKeyStroke* result) {
+  if (character == 0 || result == nullptr) return false;
+  constexpr jint kKeyCodeScanLimit = 512;
+  for (jint meta_state : {0, 1}) {
+    for (jint key_code = 1; key_code <= kKeyCodeScanLimit; ++key_code) {
+      if (MappedKeyCharacter(key_code, meta_state) == character) {
+        *result = DarwinMappedKeyStroke{key_code, meta_state != 0};
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+jobjectArray KeyMapGetEvents(JNIEnv* env, jclass, jlong pointer,
+                             jcharArray characters) {
+  const auto* map = KeyMap(pointer);
+  jclass event_class = env->FindClass("android/view/KeyEvent");
+  if (event_class == nullptr) return nullptr;
+  if (map == nullptr) {
+    jobjectArray empty = env->NewObjectArray(0, event_class, nullptr);
+    env->DeleteLocalRef(event_class);
+    return empty;
+  }
+  if (characters == nullptr) {
+    env->DeleteLocalRef(event_class);
+    return nullptr;
+  }
+  const jsize character_count = env->GetArrayLength(characters);
+  std::vector<jchar> values(static_cast<size_t>(character_count));
+  if (character_count > 0) {
+    env->GetCharArrayRegion(characters, 0, character_count, values.data());
+    if (env->ExceptionCheck()) {
+      env->DeleteLocalRef(event_class);
+      return nullptr;
+    }
+  }
+  std::vector<DarwinMappedKeyStroke> strokes;
+  strokes.reserve(values.size());
+  size_t event_count = 0;
+  for (jchar value : values) {
+    DarwinMappedKeyStroke stroke{};
+    if (!FindMappedKeyStroke(value, &stroke)) {
+      env->DeleteLocalRef(event_class);
+      return nullptr;
+    }
+    strokes.push_back(stroke);
+    event_count += stroke.shift ? 4 : 2;
+  }
+  if (event_count > static_cast<size_t>(std::numeric_limits<jsize>::max())) {
+    env->DeleteLocalRef(event_class);
+    return nullptr;
+  }
+  jobjectArray result = env->NewObjectArray(
+      static_cast<jsize>(event_count), event_class, nullptr);
+  jmethodID constructor = env->GetMethodID(
+      event_class, "<init>", "(JJIIIIIIII)V");
+  if (result == nullptr || constructor == nullptr) {
+    env->DeleteLocalRef(event_class);
+    return nullptr;
+  }
+  constexpr jint kActionDown = 0;
+  constexpr jint kActionUp = 1;
+  constexpr jint kShiftLeftKeyCode = 59;
+  constexpr jint kShiftLeftMetaState = 0x41;
+  constexpr jint kKeyboardSource = 0x101;
+  const jlong now = static_cast<jlong>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch()).count());
+  jsize index = 0;
+  auto append_event = [&](jint action, jint key_code, jint meta_state) {
+    jobject event = env->NewObject(
+        event_class, constructor, now, now, action, key_code, 0, meta_state,
+        map->device_id, 0, 0, kKeyboardSource);
+    if (event == nullptr) return false;
+    env->SetObjectArrayElement(result, index++, event);
+    env->DeleteLocalRef(event);
+    return !env->ExceptionCheck();
+  };
+  for (const DarwinMappedKeyStroke& stroke : strokes) {
+    if (stroke.shift &&
+        !append_event(kActionDown, kShiftLeftKeyCode,
+                      kShiftLeftMetaState)) {
+      env->DeleteLocalRef(event_class);
+      return nullptr;
+    }
+    const jint meta_state = stroke.shift ? kShiftLeftMetaState : 0;
+    if (!append_event(kActionDown, stroke.key_code, meta_state) ||
+        !append_event(kActionUp, stroke.key_code, meta_state) ||
+        (stroke.shift &&
+         !append_event(kActionUp, kShiftLeftKeyCode, 0))) {
+      env->DeleteLocalRef(event_class);
+      return nullptr;
+    }
+  }
+  env->DeleteLocalRef(event_class);
+  return result;
+}
 jboolean KeyMapGetFallbackAction(JNIEnv*, jclass, jlong, jint, jint, jobject) {
   return JNI_FALSE;
 }
