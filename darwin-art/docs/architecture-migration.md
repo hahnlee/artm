@@ -8807,3 +8807,8 @@ or admission exception was added.
   `693-vdex-inmem-loader-evict`, and `944-transform-classloaders`; the runtime
   now exercises secondary VDEX ownership, in-memory cache eviction, and
   transform/class-loader interactions through the normal AOSP contracts.
+
+### Runtime checkpoint 66 — 2026-09-08
+
+- `2237-checker-inline-multidex` passes all three execution lanes, confirming
+  multidex checker/inlining behavior remains on the standard ART pipeline.

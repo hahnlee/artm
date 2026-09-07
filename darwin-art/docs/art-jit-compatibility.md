@@ -3819,3 +3819,9 @@ added; the full corpus and multi-loader identity task remain open.
   and 949, this covers secondary-Dex VDEX ownership, in-memory verification
   cache eviction, shared-library graphs, JVMTI transforms, and loader
   subclasses without changing the original APK or weakening ClassLinker.
+
+### Runtime checkpoint 66 — 2026-09-08
+
+- `2237-checker-inline-multidex` passes interpreter, JIT, and unmodified
+  optimized lanes, extending verification to multidex checker/inlining
+  behavior without a Darwin-specific code path.
