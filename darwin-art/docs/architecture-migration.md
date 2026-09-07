@@ -8632,3 +8632,8 @@ or admission exception was added.
 
 - Android-shaped boot/system class-loader semantics remain unchanged while the
   native `ClassPreDefine`/DexFile identity review proceeds.
+
+### Runtime checkpoint 40 — 2026-09-08
+
+- Android-shaped boot/system class-loader semantics remain unchanged while the
+  implementation review continues; completion is not claimed.
