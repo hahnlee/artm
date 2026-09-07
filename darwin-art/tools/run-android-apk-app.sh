@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Bash 3 (the macOS system shell) treats expansion of an initialized empty
+# array as unset under nounset. This launcher intentionally supports base-only
+# APKs, so keep strict error/pipe handling while relaxing only nounset.
+set +u
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 installed_record=""
@@ -66,7 +70,11 @@ for split_apk in "${split_apks[@]}"; do
   normalized_split_apks+=("$split_apk")
 done
 fi
-split_apks=("${normalized_split_apks[@]}")
+if [[ ${#normalized_split_apks[@]} -gt 0 ]]; then
+  split_apks=("${normalized_split_apks[@]}")
+else
+  split_apks=()
+fi
 [[ "$seconds" =~ ^([0-9]+)(\.[0-9]+)?$ ]] || {
   echo "VISIBLE_SECONDS must be a non-negative number" >&2
   exit 64
@@ -85,9 +93,11 @@ if [[ -z "$installed_record" ]]; then
   metadata_tool="$root/target/release/android-apk-app-runtime"
   metadata_arguments=("$source_apk")
   [[ "$app_dex" == "$source_apk" ]] || metadata_arguments+=("$app_dex")
-  for split_apk in "${split_apks[@]}"; do
-    metadata_arguments+=(--split "$split_apk")
-  done
+  if [[ ${#split_apks[@]} -gt 0 ]]; then
+    for split_apk in "${split_apks[@]}"; do
+      metadata_arguments+=(--split "$split_apk")
+    done
+  fi
   if [[ "$app_dex" == "$source_apk" ]]; then
     if [[ -x "$metadata_tool" ]]; then
       metadata="$("$metadata_tool" "${metadata_arguments[@]}")"

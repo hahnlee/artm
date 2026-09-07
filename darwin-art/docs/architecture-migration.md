@@ -9109,3 +9109,11 @@ or admission exception was added.
   pending sequences enter the bounded completion path, preventing an external
   peer from accumulating unsolicited results. Native graph and graphics-link
   verification pass; the remaining boundary is a real two-process smoke.
+
+### Runtime checkpoint 112 — 2026-09-08
+
+- Window-menu acceptance now reaches real Calculator, Calendar, and Chrome APK
+  interactions: popup dispatch, History/Day-Week-Month labels, Chrome menu/new
+  tab, outside dismissal, and crash checks pass. Resizing the host surface does
+  not yet trigger Android-style relayout of the existing popup ViewRoot; its
+  stale position is recorded as the next WindowManager transaction task.

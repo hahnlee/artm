@@ -4137,3 +4137,12 @@ added; the full corpus and multi-loader identity task remain open.
   nounset, allowing base-only AOSP APK runs to reach the runtime instead of
   aborting before launch. `bash -n` and diff checks pass; the two-process
   InputChannel smoke remains the next validation boundary.
+
+### Runtime checkpoint 112 — 2026-09-08
+
+- Re-ran the Android window-menu acceptance flow after fixing its outside-click
+  sequence. Calculator menu/History, outside dismiss, Calendar popup labels,
+  and Chrome menu/new-tab paths all pass without crashes. The resize lane still
+  exposes a real gap: the popup ViewRoot remains at its pre-resize position
+  (`at=320,8`) instead of being relaid out to `at=208,8`; keep this as a runtime
+  WindowManager relayout task rather than weakening the assertion.

@@ -53,7 +53,7 @@ grep -a -F 'window remove argc=1 session=true' "$calculator_log" >/dev/null
 
 calculator_outside_log="$output/calculator-outside.log"
 env "${common_env[@]}" \
-  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;340,45,2500;340,45,300;50,250,300' \
+  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;340,45,2500;50,250,300' \
   "$root/tools/run-android-apk-app.sh" "$calculator" 8 \
   >"$calculator_outside_log" 2>&1
 
