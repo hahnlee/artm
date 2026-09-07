@@ -3514,6 +3514,13 @@ added; the full corpus and multi-loader identity task remain open.
   The latter exercise JVMTI agent loading and boot-class transformation and
   remain open; no fallback or allowlist was added.
 
+### Final corpus audit checkpoint 28 — 2026-09-08
+
+- The complete 1,075-test run is terminal. Focused reruns confirm the runner
+  repair (`1986`, `1987`, `2000`, `420`, `2286`), while `936` and `938` still
+  fail in JVMTI boot/system class-path and boot-class transformation semantics.
+  These are explicit remaining implementation work for full AOSP parity.
+
 ### Fresh corpus checkpoint 24 — 2026-09-08
 
 - The live worker reached 994 rows. The post-repair suffix remains entirely

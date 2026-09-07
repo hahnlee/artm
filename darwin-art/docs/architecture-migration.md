@@ -8553,3 +8553,9 @@ or admission exception was added.
 - At 1,057 rows, `936-search-onload` and `938-load-transform-bcp` are the
   first post-repair semantic failures, both in JVMTI/boot-class transformation
   behavior. They remain open runtime work, not hidden gates.
+
+### Final corpus audit checkpoint 28 — 2026-09-08
+
+- The 1,075-test corpus is terminal. Runner fixes are validated by focused
+  reruns; only `936-search-onload` and `938-load-transform-bcp` remain as
+  genuine JVMTI boot/system search and boot transformation gaps.
