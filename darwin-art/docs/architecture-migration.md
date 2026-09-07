@@ -8322,3 +8322,11 @@ or admission exception was added.
   exception state and was removed immediately. Production again follows the
   AOSP duplicate-loader guard; the next step is the correct pre-definition
   ownership lifecycle, not ad hoc cache reuse.
+
+### AOSP lazy ClassTable comparison — 2026-09-08
+
+- In pinned AOSP, `RegisterClassLoader` is deliberately deferred until after
+  `RegisterDexFile` checks for an existing DexCache. The custom loader's null
+  table in our trace therefore matches the upstream lifecycle. The remaining
+  discrepancy is specifically app-image/class-definition ownership; global
+  loader pre-registration is not an acceptable fix.

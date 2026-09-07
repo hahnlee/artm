@@ -3284,3 +3284,12 @@ added; the full corpus and multi-loader identity task remain open.
   pending-exception contract and produced a native fault. The production path
   is restored to AOSP's duplicate-loader guard; no unsafe behavior change was
   retained.
+
+### AOSP lazy ClassTable comparison — 2026-09-08
+
+- Pinned AOSP confirms `RegisterClassLoader` is intentionally lazy: a new
+  loader's table is created by `GetOrCreateAllocatorForClassLoader` only after
+  the duplicate-DexFile check. The observed custom-loader `new_table=null` is
+  therefore not itself a Darwin defect. The unresolved 497 behavior must come
+  from app-image metadata/publication or the class-definition ownership path;
+  pre-registering every loader would diverge from AOSP and is rejected.
