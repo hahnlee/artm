@@ -3321,3 +3321,13 @@ added; the full corpus and multi-loader identity task remain open.
   this lifecycle cleanup remains open. This result is broad acceptance
   evidence, not completion of the full AOSP compatibility goal; the 497
   custom-class-loader failure is still tracked above.
+
+### VM shutdown detach parity — 2026-09-08
+
+- `darwin_art_shutdown_process` now detaches the owner thread before
+  `DestroyJavaVM` for both dalvikvm and standalone host processes, matching
+  AndroidRuntime's VM contract. The full JIT audit still exits 0 and no longer
+  emits `Current thread not detached in Runtime shutdown`.
+- This is lifecycle cleanup only. The 497 custom-loader class-definition
+  failure reproduces unchanged, so the overall compatibility goal remains
+  incomplete.

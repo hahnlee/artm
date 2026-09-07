@@ -8356,3 +8356,12 @@ or admission exception was added.
   shutdown`), so thread lifecycle ownership still needs cleanup. The 497
   custom-loader discrepancy also remains unresolved; the audit is not a
   claim of complete AOSP compatibility.
+
+### VM shutdown detach parity — 2026-09-08
+
+- The native shutdown bridge now detaches the current ART thread before
+  `DestroyJavaVM` in every process mode, instead of only in the dalvikvm
+  branch. This removes the upstream Runtime-destructor warning while keeping
+  app-thread quiescing and resource teardown ordering intact.
+- Full JIT audit remains exit 0 after the change. The 497 custom-loader
+  discrepancy is unaffected and remains the next ClassLinker investigation.

@@ -339,10 +339,13 @@ int32_t run_shutdown(const ShutdownState& state) {
 
   // DexFile owners remain live until DestroyJavaVM has finished tearing down
   // ClassLinker and Heap.
-  // AndroidRuntime's dalvikvm path detaches its main thread before destroying
-  // the VM. This is observable by JVMTI and must not be replaced by the
-  // Activity-process thread-quiescing bridge above.
-  if (shutdown.dalvikvm_process && java_vm->DetachCurrentThread() != JNI_OK) {
+  // ART's Runtime destructor treats an attached caller as an already-owned
+  // thread and emits "Current thread not detached in Runtime shutdown".  The
+  // AndroidRuntime/dalvikvm path has always detached here; the standalone
+  // Darwin host must follow the same VM contract after its app-thread
+  // quiescing bridge has completed.  No ART or JNIEnv access occurs after
+  // this point, so both process modes can safely detach before DestroyJavaVM.
+  if (java_vm->DetachCurrentThread() != JNI_OK) {
     darwin_art_process::mark_shutdown_failed();
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
   }
