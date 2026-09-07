@@ -4165,3 +4165,13 @@ added; the full corpus and multi-loader identity task remain open.
   past startup broadcast setup, but its compositor teardown exposes a separate
   `std::system_error` mutex-lock failure followed by an ART generated-code
   fault; concurrency/JIT lifetime diagnosis remains open.
+
+### Runtime checkpoint 115 — 2026-09-08
+
+- Crash diagnostics identify the next boundary precisely: Chrome's
+  `BlastBufferQueueNativeDestroy` calls
+  `darwin_art_android_ANativeWindow_set_transaction_callback` after the Java
+  Surface release path has dropped the last native-window reference. The host
+  mutex is therefore accessed after free (`std::mutex::lock(EINVAL)`), not
+  because of a JIT instruction defect. A queue-owned native-window lifetime
+  reference is being added and will be validated through compositor teardown.

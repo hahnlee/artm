@@ -9134,3 +9134,11 @@ or admission exception was added.
   build passes. Chrome advances beyond that startup point, then reveals a
   separate mutex-lock failure during compositor/child teardown and an ART
   generated-code fault, which is the next concurrency/JIT lifetime boundary.
+
+### Runtime checkpoint 115 — 2026-09-08
+
+- Diagnostic symbols show `BlastBufferQueueNativeDestroy` entering the native
+  window transaction-callback setter after the Java Surface release has
+  already destroyed its host object. The resulting `std::mutex` EINVAL is a
+  native-window UAF/lifetime bug, not a generated-code semantic mismatch. The
+  next patch gives the queue observer an explicit reference through destroy.
