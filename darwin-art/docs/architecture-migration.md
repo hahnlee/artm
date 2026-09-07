@@ -8590,3 +8590,10 @@ or admission exception was added.
   from AOSP.
 - Native crash tails are now retained by the test runner, so the next fix can
   be validated against the actual ART class-linker phase and fault site.
+
+### Nterp checkpoint 33 — 2026-09-08
+
+- ARM64 Nterp entry normalization is verified at the generated instruction
+  boundary, preserving Android's logical compressed-reference contract.
+- Remaining divergence is isolated to JVMTI boot-class search and
+  transformation semantics; no interpreter fallback or test gate was added.

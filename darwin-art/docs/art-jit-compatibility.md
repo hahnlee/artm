@@ -3577,3 +3577,10 @@ added; the full corpus and multi-loader identity task remain open.
 - The source audit verifies per-entry ordering and rejects late-normalization
   regressions. Nterp unit checks pass 11/11, along with runtime-arm64
   Mach-O/CFI/DWARF audits.
+
+### Nterp checkpoint 33 — 2026-09-08
+
+- Revalidated ARM64 Nterp normalization on the current machine: per-entry
+  ordering checks and generated Mach-O/CFI/DWARF audits pass.
+- The Nterp logical-reference entry slice is closed; JVMTI boot-class loading
+  and transformation remain open without a fallback.
