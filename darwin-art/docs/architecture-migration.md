@@ -9013,3 +9013,13 @@ or admission exception was added.
   is retained. Managed lowercase, uppercase, and unmapped-character coverage
   passes interpreter, JIT, and optimized lanes. Layout-specific fallback
   actions remain an explicit future key-layout data task.
+
+### Runtime checkpoint 100 — 2026-09-08
+
+- KeyCharacterMap behavior queries now share one physical-keyboard mapping:
+  `getMatch` honors requested base/Shift preference before a same-key fallback,
+  and `getNumber` exposes decimal-row numbers without adding legacy phone-key
+  T9 metadata to a FULL keyboard. Managed null/empty and match/number coverage
+  passes interpreter, JIT, and optimized lanes. Cross-process InputChannel is
+  still the larger input-architecture gap because its payload queue remains
+  process-local even though Binder wire FD transfer already exists.
