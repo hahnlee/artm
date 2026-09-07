@@ -283,6 +283,35 @@ jobject ParcelReadStrongBinder(JNIEnv* env, jclass, jlong p) {
       ? nullptr : env->NewLocalRef(parcel->binders[static_cast<size_t>(index)]);
 }
 
+bool ParcelWriteGuestFileDescriptor(jlong p, int source) {
+  auto* parcel = Parcel(p);
+  if (parcel == nullptr || !parcel->allow_fds) return false;
+  const int duplicate =
+      source < 0 ? -1 : darwin_art_bionic_socket_broker_dup(source);
+  if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
+    std::cerr << "ART Binder parcel: write fd source=" << source
+              << " duplicate=" << duplicate << " errno=" << errno << "\n";
+  }
+  if (duplicate < 0) {
+    ParcelWriteInt(p, -1);
+    return false;
+  }
+  parcel->file_descriptors.push_back(duplicate);
+  ParcelWriteInt(p, static_cast<jint>(parcel->file_descriptors.size() - 1));
+  return true;
+}
+
+int ParcelReadGuestFileDescriptor(jlong p) {
+  auto* parcel = Parcel(p);
+  const jint index = ParcelReadInt(p);
+  if (parcel == nullptr || index < 0 ||
+      static_cast<size_t>(index) >= parcel->file_descriptors.size()) {
+    return -1;
+  }
+  return darwin_art_bionic_socket_broker_dup(
+      parcel->file_descriptors[static_cast<size_t>(index)]);
+}
+
 void ParcelWriteFileDescriptor(JNIEnv* env, jclass, jlong p,
                                jobject file_descriptor) {
   auto* parcel = Parcel(p);
@@ -298,36 +327,21 @@ void ParcelWriteFileDescriptor(JNIEnv* env, jclass, jlong p,
                          ? -1
                          : env->GetIntField(file_descriptor, descriptor_field);
   env->DeleteLocalRef(descriptor_class);
-  const int duplicate =
-      source < 0 ? -1 : darwin_art_bionic_socket_broker_dup(source);
-  if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
-    std::cerr << "ART Binder parcel: write fd source=" << source
-              << " duplicate=" << duplicate << " errno=" << errno << "\n";
-  }
-  if (duplicate < 0) {
-    ParcelWriteInt(p, -1);
-    return;
-  }
-  parcel->file_descriptors.push_back(duplicate);
-  ParcelWriteInt(p, static_cast<jint>(parcel->file_descriptors.size() - 1));
+  (void)ParcelWriteGuestFileDescriptor(p, source);
 }
 
 jobject ParcelReadFileDescriptor(JNIEnv* env, jclass, jlong p) {
   auto* parcel = Parcel(p);
-  const jint index = ParcelReadInt(p);
+  const size_t descriptor_count =
+      parcel == nullptr ? 0 : parcel->file_descriptors.size();
+  const size_t position = parcel == nullptr ? 0 : parcel->position;
+  const int duplicate = ParcelReadGuestFileDescriptor(p);
   if (std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr) {
-    std::cerr << "ART Binder parcel: read fd index=" << index
-              << " count="
-              << (parcel == nullptr ? 0 : parcel->file_descriptors.size())
-              << " position=" << (parcel == nullptr ? 0 : parcel->position)
+    std::cerr << "ART Binder parcel: read fd duplicate=" << duplicate
+              << " count=" << descriptor_count
+              << " position=" << position
               << "\n";
   }
-  if (parcel == nullptr || index < 0 ||
-      static_cast<size_t>(index) >= parcel->file_descriptors.size()) {
-    return nullptr;
-  }
-  const int duplicate = darwin_art_bionic_socket_broker_dup(
-      parcel->file_descriptors[static_cast<size_t>(index)]);
   if (duplicate < 0) return nullptr;
   jclass descriptor_class = env->FindClass("java/io/FileDescriptor");
   jmethodID constructor = descriptor_class == nullptr

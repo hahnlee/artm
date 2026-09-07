@@ -4054,3 +4054,11 @@ added; the full corpus and multi-loader identity task remain open.
   as an open vertical slice: endpoint FDs, framed motion/key payloads, and
   finish acknowledgements must move together rather than adding a superficial
   FD field that still leaves the payload deque process-local.
+
+### Runtime checkpoint 102 — 2026-09-08
+
+- Extracted broker-backed Parcel file-descriptor duplication/read helpers into
+  one shared path and revalidated the native graph plus graphics-link audit.
+  This prepares InputChannel endpoint transfer without changing existing
+  same-process semantics; endpoint adoption and framed payload delivery remain
+  the next implementation slice.

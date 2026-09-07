@@ -9031,3 +9031,10 @@ or admission exception was added.
   versioned payload/finish-ACK wire protocol. The existing same-process
   registry remains valid for local callers; no fake FD-only compatibility shim
   was added.
+
+### Runtime checkpoint 102 — 2026-09-08
+
+- Parcel FD ownership is now centralized in broker-aware helpers, preserving
+  descriptor duplication and cleanup rules for future InputChannel endpoint
+  import/export. Native graph and graphics-link audits pass; no process-local
+  payload behavior was misrepresented as cross-process support.
