@@ -3538,3 +3538,14 @@ added; the full corpus and multi-loader identity task remain open.
 - The worker reached 1,057 rows. `936-search-onload` and
   `938-load-transform-bcp` exposed real remaining JVMTI/boot-class
   transformation gaps; they are tracked as open runtime work.
+
+### Diagnostic checkpoint 29 — 2026-09-08
+
+- Focused reruns reproduce the two remaining semantic gaps: `936-search-onload`
+  terminates in ART generated code while loading the injected boot/system DEX,
+  and `938-load-transform-bcp` loads its JVMTI agent but does not apply the
+  supplied `java.util.OptionalLong` boot-class transformation.
+- The upstream runner now emits the bounded native-host log tail whenever an
+  invocation exits unexpectedly, preserving ART signal and JVMTI diagnostics
+  for the next runtime fix without changing test semantics or adding a
+  fallback.

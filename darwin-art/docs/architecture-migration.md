@@ -8559,3 +8559,11 @@ or admission exception was added.
 - The 1,075-test corpus is terminal. Runner fixes are validated by focused
   reruns; only `936-search-onload` and `938-load-transform-bcp` remain as
   genuine JVMTI boot/system search and boot transformation gaps.
+
+### Diagnostic checkpoint 29 — 2026-09-08
+
+- Runtime architecture remains Android-shaped: the open work is in native
+  JVMTI boot-class search and transformation semantics, not in the harness.
+- Unexpected host exits now retain the last 40 lines of the detached ART log,
+  making phase ordering, class-linker, and signal failures directly actionable
+  during focused compatibility runs.

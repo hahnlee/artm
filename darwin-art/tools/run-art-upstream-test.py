@@ -3574,6 +3574,19 @@ def main() -> int:
                             timeout=1200 if args.gcstress else 120,
                             cwd=root)
                     if completed.returncode != run_invocation.expected_exit_code:
+                        # Keep native crash/JVMTI diagnostics visible. The
+                        # detached host writes its signal report to this log,
+                        # and a bare exit status is otherwise insufficient
+                        # once the temporary invocation directory is removed.
+                        log.flush()
+                        log.seek(0)
+                        diagnostic_tail = log.read().splitlines()[-40:]
+                        if diagnostic_tail:
+                            print(
+                                "ART upstream host diagnostics (tail):\n"
+                                + "\n".join(diagnostic_tail),
+                                file=sys.stderr,
+                            )
                         raise subprocess.CalledProcessError(
                             completed.returncode, invocation_host_arguments)
                     current_host_log_is_stderr = (
