@@ -3871,3 +3871,10 @@ added; the full corpus and multi-loader identity task remain open.
   process-lifetime numeric tokens and typed handle reads. Framework compat
   builds and `936-search-onload` pass; the latter passes interpreter, JIT, and
   unmodified optimized lanes.
+
+### Runtime checkpoint 75 — 2026-09-08
+
+- Full `audit-art-jit.sh` passes, including ARM64 JIT acceptance, GC/read
+  barriers, JNI/native exits, framework/window/lifecycle smoke, and launcher
+  checks. `938-load-transform-bcp` also passes interpreter, JIT, and
+  unmodified optimized lanes after the property-handle change.

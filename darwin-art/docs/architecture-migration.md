@@ -8858,3 +8858,9 @@ or admission exception was added.
 - SystemProperties native handles now use stable numeric tokens mapped to
   property names, matching Android's process-lifetime `prop_info` semantics.
   Framework compatibility build and `936-search-onload` pass all lanes.
+
+### Runtime checkpoint 75 — 2026-09-08
+
+- The full JIT acceptance audit is green across GC/read barriers, JNI/native
+  exits, framework/window/lifecycle smoke, and launcher startup. BCP transform
+  regression `938-load-transform-bcp` passes all three execution lanes.
