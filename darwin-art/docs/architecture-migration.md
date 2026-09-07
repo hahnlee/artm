@@ -8506,3 +8506,9 @@ or admission exception was added.
 - 773 rows are complete with no post-repair failures. Later checker and
   compiler rows continue to pass; only the documented upstream-broken 497
   class-loader fixture remains failed.
+
+### Fresh corpus checkpoint 20 — 2026-09-08
+
+- The worker has completed 815 rows without a new post-repair failure. The
+  ledger's failing rows remain classified as historical runner syntax records
+  and the upstream-known 497 fixture.
