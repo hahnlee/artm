@@ -4045,3 +4045,12 @@ added; the full corpus and multi-loader identity task remain open.
   managed smoke covers preferred/fallback/no/empty matches, Java's public
   null-array `IllegalArgumentException`, and digit/letter/unknown number
   results across interpreter, JIT, and unmodified optimized lanes.
+
+### Runtime checkpoint 101 — 2026-09-08
+
+- Audited the remaining `InputChannel` boundary against the AOSP transport
+  contract. The current process-local Parcel/token behavior is intentionally
+  retained for same-process callers, while cross-process delivery is tracked
+  as an open vertical slice: endpoint FDs, framed motion/key payloads, and
+  finish acknowledgements must move together rather than adding a superficial
+  FD field that still leaves the payload deque process-local.

@@ -9023,3 +9023,11 @@ or admission exception was added.
   passes interpreter, JIT, and optimized lanes. Cross-process InputChannel is
   still the larger input-architecture gap because its payload queue remains
   process-local even though Binder wire FD transfer already exists.
+
+### Runtime checkpoint 101 — 2026-09-08
+
+- The InputChannel audit fixes the next architecture boundary: a real
+  cross-process implementation must transfer endpoint descriptors and use a
+  versioned payload/finish-ACK wire protocol. The existing same-process
+  registry remains valid for local callers; no fake FD-only compatibility shim
+  was added.
