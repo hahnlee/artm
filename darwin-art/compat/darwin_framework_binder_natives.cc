@@ -641,6 +641,15 @@ size_t DecodeRemoteInputFramesLocked(DarwinInputChannelState* channel) {
     DarwinInputFrame frame{};
     std::memcpy(&frame, channel->remote_rx.data() + consumed_bytes,
                 sizeof(frame));
+    uint32_t leading_magic = 0;
+    std::memcpy(&leading_magic, channel->remote_rx.data() + consumed_bytes,
+                sizeof(leading_magic));
+    if (leading_magic == 0x4441414b) {
+      // ACK frames may be interleaved with input frames on the full-duplex
+      // stream. Leave the ACK at the front for the ACK decoder instead of
+      // treating it as a corrupt input frame and dropping subsequent bytes.
+      break;
+    }
     if (frame.magic != kInputFrameMagic ||
         frame.version != kInputFrameVersion ||
         frame.payload_size != sizeof(frame.payload) ||
@@ -675,12 +684,56 @@ size_t DecodeRemoteInputFramesLocked(DarwinInputChannelState* channel) {
   return decoded;
 }
 struct DarwinInputAckFrame {
-  uint32_t magic = kInputFrameMagic;
+  uint32_t magic = 0x4441414b;  // DAAK
   uint32_t version = kInputFrameVersion;
   uint32_t sequence = 0;
   uint32_t handled = 0;
 };
 static_assert(std::is_trivially_copyable_v<DarwinInputAckFrame>);
+
+bool SendRemoteAckFrame(DarwinInputChannelState* channel, jint sequence,
+                        bool handled) {
+  if (channel == nullptr || channel->remote_endpoint_fd < 0) return false;
+  DarwinInputAckFrame frame;
+  frame.sequence = static_cast<uint32_t>(sequence);
+  frame.handled = handled ? 1u : 0u;
+  const auto* bytes = reinterpret_cast<const uint8_t*>(&frame);
+  std::lock_guard<std::mutex> lock(channel->remote_tx_mutex);
+  size_t offset = 0;
+  while (offset < sizeof(frame)) {
+    const intptr_t sent = darwin_art_bionic_socket_broker_send(
+        channel->remote_endpoint_fd, bytes + offset, sizeof(frame) - offset,
+        kAndroidMsgNoSignal);
+    if (sent <= 0) return false;
+    offset += static_cast<size_t>(sent);
+  }
+  return true;
+}
+
+void DecodeRemoteAckFramesLocked(DarwinInputChannelState* channel) {
+  if (channel == nullptr) return;
+  while (channel->remote_rx.size() >= sizeof(DarwinInputAckFrame)) {
+    uint32_t magic = 0;
+    std::memcpy(&magic, channel->remote_rx.data(), sizeof(magic));
+    if (magic != 0x4441414b) break;
+    DarwinInputAckFrame frame{};
+    std::memcpy(&frame, channel->remote_rx.data(), sizeof(frame));
+    if (frame.version != kInputFrameVersion || frame.handled > 1) {
+      channel->remote_rx.clear();
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(channel->finish_mutex);
+      channel->finish_acks.push_back(DarwinInputChannelState::FinishAck{
+          .sequence = static_cast<jint>(frame.sequence),
+          .handled = frame.handled != 0});
+    }
+    channel->remote_rx.erase(
+        channel->remote_rx.begin(),
+        channel->remote_rx.begin() + static_cast<ptrdiff_t>(sizeof(frame)));
+    channel->finish_condition.notify_all();
+  }
+}
 
 std::mutex g_focused_input_channel_mutex;
 std::weak_ptr<DarwinInputChannelState> g_focused_input_channel;
@@ -1327,39 +1380,52 @@ int InputChannelTransportCallback(int fd, int events, void* data) {
                 kLooperEventInvalid)) != 0) {
     std::lock_guard<std::mutex> lock(channel->packet_mutex);
     if (channel->consumer != nullptr) {
-      channel->consumer->transport_registered.store(
-          false, std::memory_order_release);
+      if (fd == channel->remote_endpoint_fd) {
+        channel->consumer->remote_transport_registered.store(
+            false, std::memory_order_release);
+      } else {
+        channel->consumer->transport_registered.store(
+            false, std::memory_order_release);
+      }
     }
     // Keep this state transition in the same critical section as the
     // transport flag. QueueFocusLossCancel must not resurrect a registration
     // after this callback has observed a terminal broker error.
-    channel->looper_consumer.store(false, std::memory_order_release);
+    const bool has_transport =
+        channel->consumer != nullptr &&
+        (channel->consumer->transport_registered.load(
+             std::memory_order_acquire) ||
+         channel->consumer->remote_transport_registered.load(
+             std::memory_order_acquire));
+    channel->looper_consumer.store(has_transport, std::memory_order_release);
     return 0;
   }
   uint8_t buffer[4096];
-  for (;;) {
-    const intptr_t received = darwin_art_bionic_socket_broker_recv(
-        fd, buffer, sizeof(buffer), kAndroidMsgDontWait);
-    if (received <= 0) break;
-    if (channel->remote_endpoint_fd != fd) continue;
-    std::lock_guard<std::mutex> lock(channel->packet_mutex);
-    channel->remote_rx.insert(channel->remote_rx.end(), buffer,
-                              buffer + received);
-    while (channel->remote_rx.size() >= sizeof(DarwinInputFrame)) {
-      DarwinInputFrame frame{};
-      std::memcpy(&frame, channel->remote_rx.data(), sizeof(frame));
-      if (frame.magic != kInputFrameMagic ||
-          frame.version != kInputFrameVersion ||
-          frame.payload_size != sizeof(frame.payload)) {
+  if (fd == channel->remote_endpoint_fd) {
+    constexpr size_t kMaxRemoteRxBytes = sizeof(DarwinInputFrame) * 512;
+    for (;;) {
+      const intptr_t received = darwin_art_bionic_socket_broker_recv(
+          fd, buffer, sizeof(buffer), kAndroidMsgDontWait);
+      if (received <= 0) break;
+      std::lock_guard<std::mutex> lock(channel->packet_mutex);
+      if (channel->remote_rx.size() + static_cast<size_t>(received) >
+          kMaxRemoteRxBytes) {
         channel->remote_rx.clear();
         break;
       }
-      darwin_art::DarwinArtInputPacket packet = frame.payload;
-      channel->packets.push_back(packet);
-      channel->remote_rx.erase(
-          channel->remote_rx.begin(),
-          channel->remote_rx.begin() + static_cast<ptrdiff_t>(sizeof(frame)));
+      channel->remote_rx.insert(channel->remote_rx.end(), buffer,
+                                buffer + received);
     }
+  } else {
+    while (darwin_art_bionic_socket_broker_recv(
+               fd, buffer, sizeof(buffer), kAndroidMsgDontWait) > 0) {
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(channel->packet_mutex);
+    DecodeRemoteAckFramesLocked(channel);
+    (void)DecodeRemoteInputFramesLocked(channel);
+    DecodeRemoteAckFramesLocked(channel);
   }
   std::shared_ptr<DarwinInputReceiver> receiver;
   {
@@ -1441,6 +1507,12 @@ void InputReceiverDispose(JNIEnv* env, jclass, jlong pointer) {
     (void)darwin_art_android_platform_remove_fd(
         receiver->looper, receiver->channel->read_fd);
   }
+  if (receiver->remote_transport_registered.load(std::memory_order_acquire) &&
+      receiver->looper != nullptr && receiver->channel != nullptr &&
+      receiver->channel->remote_endpoint_fd >= 0) {
+    (void)darwin_art_android_platform_remove_fd(
+        receiver->looper, receiver->channel->remote_endpoint_fd);
+  }
   if (receiver->active_callbacks.load(std::memory_order_acquire) == 0) {
     CleanupReceiverRefs(env, receiver);
   }
@@ -1482,6 +1554,12 @@ void InputReceiverFinish(JNIEnv*, jclass, jlong pointer, jint sequence,
           sequence, std::memory_order_release);
       receiver->channel->last_finished_handled.store(
           handled == JNI_TRUE, std::memory_order_release);
+      // A remote InputChannel peer waits on the same sequence ACK that local
+      // callers observe through finish_acks. Keep the wire acknowledgement
+      // outside finish_mutex so a short broker backpressure cannot block the
+      // Java callback's local completion path.
+      (void)SendRemoteAckFrame(receiver->channel.get(), sequence,
+                               handled == JNI_TRUE);
     }
   }
   if (std::getenv("DARWIN_ART_DEBUG_INPUT_LATENCY") != nullptr) {
@@ -1593,22 +1671,30 @@ jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
     receiver->channel->consumer = receiver_shared;
   }
   receiver->looper = darwin_art_android_platform_prepare_current_looper();
-  const int transport_fd = receiver->channel->remote_endpoint_fd >= 0
-                               ? receiver->channel->remote_endpoint_fd
-                               : receiver->channel->read_fd;
-  if (receiver->looper != nullptr && transport_fd >= 0) {
+  if (receiver->looper != nullptr && receiver->channel->read_fd >= 0) {
     // ALOOPER_EVENT_INPUT is the NDK value used by InputEventReceiver's
-    // native transport. The callback drains only wake tokens; framework event
+    // local transport. The callback drains wake tokens; framework event
     // payloads remain owned by the channel queue and are dispatched in order.
     receiver->transport_registered.store(
         darwin_art_android_platform_add_fd(
-            receiver->looper, transport_fd, 0, 0x0001,
+            receiver->looper, receiver->channel->read_fd, 0, 0x0001,
             &InputChannelTransportCallback, receiver->channel.get()) == 1,
         std::memory_order_release);
-    if (receiver->transport_registered.load(std::memory_order_acquire)) {
-      receiver->channel->looper_consumer.store(true, std::memory_order_release);
-    }
   }
+  if (receiver->looper != nullptr &&
+      receiver->channel->remote_endpoint_fd >= 0 &&
+      receiver->channel->remote_endpoint_fd != receiver->channel->read_fd) {
+    receiver->remote_transport_registered.store(
+        darwin_art_android_platform_add_fd(
+            receiver->looper, receiver->channel->remote_endpoint_fd, 0, 0x0001,
+            &InputChannelTransportCallback, receiver->channel.get()) == 1,
+        std::memory_order_release);
+  }
+  receiver->channel->looper_consumer.store(
+      receiver->transport_registered.load(std::memory_order_acquire) ||
+          receiver->remote_transport_registered.load(
+              std::memory_order_acquire),
+      std::memory_order_release);
   return static_cast<jlong>(
       reinterpret_cast<std::uintptr_t>(receiver));
 }

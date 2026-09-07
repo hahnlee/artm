@@ -4107,3 +4107,11 @@ added; the full corpus and multi-loader identity task remain open.
   validation, serialized under a per-channel writer lock, and reassembled
   before dispatch. Imported endpoints remain distinct from local wake pairs;
   finish-ACK framing and two-process verification remain open.
+
+### Runtime checkpoint 109 — 2026-09-08
+
+- Added a dedicated finish-ACK frame carrying sequence and handled state;
+  remote `finishInputEvent` emits it and the callback merges it into the
+  bounded wait queue. Interleaved ACK/input frames are preserved by unified
+  decoder ordering. Native graph and graphics-link checks pass; two-process
+  end-to-end validation remains open.

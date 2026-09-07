@@ -9080,3 +9080,10 @@ or admission exception was added.
   serialized writes and receive-side reassembly. This is the first real
   one-way payload slice; ACK framing and a process-separated smoke are still
   required for full InputTransport parity.
+
+### Runtime checkpoint 109 — 2026-09-08
+
+- Finish acknowledgements now have a dedicated validated wire frame and share
+  the existing condition-variable wait path. Decoder ordering handles ACK and
+  input interleaving without discarding buffered frames; process-separated
+  end-to-end validation is still pending.
