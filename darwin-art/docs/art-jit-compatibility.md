@@ -3151,6 +3151,14 @@ added; the full corpus and multi-loader identity task remain open.
   loader-registration path; no test-specific behavior or rejection bypass is
   acceptable.
 
+### DexFile cookie decode follow-up — 2026-09-08
+
+- A native-side diagnostic confirmed `Main` resolves through a distinct
+  `DexFile*`, but JNI reflection of the hidden cookie did not yield a reliable
+  native pointer (the field representation is an internal ART contract). The
+  diagnostic was removed. The next probe must reuse ART's own
+  `CollectDexFilesFromJavaDexFile` path rather than duplicating cookie decoding.
+
 ### DexFile identity instrumentation — 2026-09-08
 
 - Environment-gated tracing shows one Java `PathClassLoader` dex element while

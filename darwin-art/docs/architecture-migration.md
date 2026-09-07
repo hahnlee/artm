@@ -8221,6 +8221,13 @@ or admission exception was added.
   app-image/DexCache split into generic runtime startup rather than altering
   test inputs or weakening duplicate registration.
 
+### DexFile cookie decode follow-up — 2026-09-08
+
+- Direct JNI reflection could not reliably decode the hidden DexFile cookie;
+  the diagnostic was removed. Native tracing must be placed at ART's existing
+  `CollectDexFilesFromJavaDexFile` path to compare the path-list DexFile with
+  the app-image-side registration.
+
 ### DexFile identity instrumentation — 2026-09-08
 
 - A disabled-by-default trace records one system PathClassLoader element and a
