@@ -9066,3 +9066,10 @@ or admission exception was added.
   retaining an independent local wake pair, matching Android's initialized
   marker plus token/name/FD parcel contract. Cross-process event framing is
   not claimed until a two-process smoke exercises it.
+
+### Runtime checkpoint 107 — 2026-09-08
+
+- Remote InputChannel endpoints now have a versioned fixed-size packet frame
+  and receive-side reassembly path, while local wake-pair behavior is retained
+  for same-process channels. This closes the one-way input payload slice;
+  finish acknowledgements and an end-to-end two-process smoke remain open.

@@ -574,7 +574,19 @@ struct DarwinInputChannelState {
   // A parcel-imported endpoint is one full-duplex descriptor. It is not used
   // as a one-byte local wake pipe: framed payload/ACK decoding must own it.
   int remote_endpoint_fd = -1;
+  std::vector<uint8_t> remote_rx;
 };
+
+constexpr uint32_t kInputFrameMagic = 0x44414950;  // DAIP
+constexpr uint32_t kInputFrameVersion = 1;
+struct DarwinInputFrame {
+  uint32_t magic = kInputFrameMagic;
+  uint32_t version = kInputFrameVersion;
+  uint32_t payload_size = sizeof(darwin_art::DarwinArtInputPacket);
+  uint32_t reserved = 0;
+  darwin_art::DarwinArtInputPacket payload{};
+};
+static_assert(std::is_trivially_copyable_v<DarwinInputFrame>);
 
 std::mutex g_focused_input_channel_mutex;
 std::weak_ptr<DarwinInputChannelState> g_focused_input_channel;
@@ -676,6 +688,18 @@ darwin_art::DarwinArtInputEnqueueResult EnqueueFocusedPacket(
     const darwin_art::DarwinArtInputPacket& packet) {
   if (channel == nullptr) {
     return darwin_art::DarwinArtInputEnqueueResult::kNoFocusedChannel;
+  }
+  if (channel->remote_endpoint_fd >= 0) {
+    DarwinInputFrame frame;
+    frame.payload = packet;
+    const intptr_t sent = darwin_art_bionic_socket_broker_send(
+        channel->remote_endpoint_fd,
+        reinterpret_cast<const uint8_t*>(&frame), sizeof(frame), 0);
+    if (sent != static_cast<intptr_t>(sizeof(frame))) {
+      return darwin_art::DarwinArtInputEnqueueResult::kBackpressured;
+    }
+    channel->pending_input.store(true, std::memory_order_release);
+    return darwin_art::DarwinArtInputEnqueueResult::kQueued;
   }
   {
     std::lock_guard<std::mutex> lock(channel->packet_mutex);
@@ -1225,9 +1249,30 @@ int InputChannelTransportCallback(int fd, int events, void* data) {
     channel->looper_consumer.store(false, std::memory_order_release);
     return 0;
   }
-  uint8_t buffer[64];
-  while (darwin_art_bionic_socket_broker_recv(
-             fd, buffer, sizeof(buffer), kAndroidMsgDontWait) > 0) {
+  uint8_t buffer[4096];
+  for (;;) {
+    const intptr_t received = darwin_art_bionic_socket_broker_recv(
+        fd, buffer, sizeof(buffer), kAndroidMsgDontWait);
+    if (received <= 0) break;
+    if (channel->remote_endpoint_fd != fd) continue;
+    std::lock_guard<std::mutex> lock(channel->packet_mutex);
+    channel->remote_rx.insert(channel->remote_rx.end(), buffer,
+                              buffer + received);
+    while (channel->remote_rx.size() >= sizeof(DarwinInputFrame)) {
+      DarwinInputFrame frame{};
+      std::memcpy(&frame, channel->remote_rx.data(), sizeof(frame));
+      if (frame.magic != kInputFrameMagic ||
+          frame.version != kInputFrameVersion ||
+          frame.payload_size != sizeof(frame.payload)) {
+        channel->remote_rx.clear();
+        break;
+      }
+      darwin_art::DarwinArtInputPacket packet = frame.payload;
+      channel->packets.push_back(packet);
+      channel->remote_rx.erase(
+          channel->remote_rx.begin(),
+          channel->remote_rx.begin() + static_cast<ptrdiff_t>(sizeof(frame)));
+    }
   }
   std::shared_ptr<DarwinInputReceiver> receiver;
   {
@@ -1461,13 +1506,16 @@ jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
     receiver->channel->consumer = receiver_shared;
   }
   receiver->looper = darwin_art_android_platform_prepare_current_looper();
-  if (receiver->looper != nullptr && receiver->channel->read_fd >= 0) {
+  const int transport_fd = receiver->channel->remote_endpoint_fd >= 0
+                               ? receiver->channel->remote_endpoint_fd
+                               : receiver->channel->read_fd;
+  if (receiver->looper != nullptr && transport_fd >= 0) {
     // ALOOPER_EVENT_INPUT is the NDK value used by InputEventReceiver's
     // native transport. The callback drains only wake tokens; framework event
     // payloads remain owned by the channel queue and are dispatched in order.
     receiver->transport_registered.store(
         darwin_art_android_platform_add_fd(
-            receiver->looper, receiver->channel->read_fd, 0, 0x0001,
+            receiver->looper, transport_fd, 0, 0x0001,
             &InputChannelTransportCallback, receiver->channel.get()) == 1,
         std::memory_order_release);
     if (receiver->transport_registered.load(std::memory_order_acquire)) {

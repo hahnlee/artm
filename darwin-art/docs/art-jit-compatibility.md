@@ -4092,3 +4092,11 @@ added; the full corpus and multi-loader identity task remain open.
   registry-miss endpoint with the transferred Binder token plus a separate
   local wake pair. Native graph, graphics-link, format, and diff checks pass;
   payload/finish-ACK framing remains the explicit next gap.
+
+### Runtime checkpoint 107 — 2026-09-08
+
+- Added a versioned fixed-size InputChannel frame for imported endpoints:
+  producer writes pointer/key packets to the broker FD, and the registered
+  remote endpoint callback reassembles and queues complete frames before
+  normal ViewRoot dispatch. Native graph, graphics-link, and format checks
+  pass; finish-ACK framing remains to be added.
