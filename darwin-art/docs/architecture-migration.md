@@ -8385,3 +8385,10 @@ or admission exception was added.
   reproduces, matching the pinned AOSP `knownfailures.json` description of a
   deliberately broken loader that registers one DexFile with multiple
   loaders; no workaround was introduced.
+
+### Fresh full-corpus recheck started — 2026-09-08
+
+- A fresh ledger (`_build/art-upstream-corpus-recheck`) is running the entire
+  pinned corpus with four parallel workers, avoiding stale result summaries.
+- The first 66 completed tests are all passing; the run remains active and
+  will be classified only after every selected test reaches a terminal state.

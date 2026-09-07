@@ -3354,3 +3354,11 @@ added; the full corpus and multi-loader identity task remain open.
 - Every test passed the interpreter, JIT, and unmodified-source lanes. The
   only reproduced failure remains 497, whose own pinned AOSP manifest marks
   it broken until its multi-loader test is rewritten.
+
+### Fresh full-corpus recheck started — 2026-09-08
+
+- Started a new, non-stale corpus ledger with four parallel workers:
+  `_build/art-upstream-corpus-recheck`.
+- While this turn ends, 66 tests have completed and all are `passed`; worker
+  processes remain live for the rest of the pinned corpus. No result is being
+  treated as final until the ledger reaches terminal completion.
