@@ -3779,3 +3779,11 @@ added; the full corpus and multi-loader identity task remain open.
   is reproducing an arm64e PAC trap seen in the gcstress launcher path; normal
   JIT/GC acceptance and AOSP 936/938 remain green. No fallback or test-specific
   suppression has been introduced while the shared ABI boundary is isolated.
+
+### Runtime checkpoint 61 — 2026-09-08
+
+- A serial `074-gc-thrash --gcstress` reproduction confirms the stress-only
+  arm64e PAC failure is independent of concurrent builds; normal 074 remains
+  green. A temporary LLDB launcher probe was discarded because it interfered
+  with the runner's captured-output contract. The runtime source remains
+  unchanged while the fault is symbolized at the shared ABI boundary.

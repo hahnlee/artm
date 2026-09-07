@@ -8772,3 +8772,10 @@ or admission exception was added.
   trap occurs before managed output in the stress launcher, while ordinary
   JIT/GC and 936/938 lanes pass. The next change is being constrained to the
   shared Darwin ABI path rather than adding a test or interpreter bypass.
+
+### Runtime checkpoint 61 — 2026-09-08
+
+- Serial gcstress reproduction confirms the arm64e PAC trap is stress-specific
+  and not a concurrent build artifact. Diagnostic launcher instrumentation was
+  removed after violating captured-output handling; no runtime workaround was
+  retained. Symbolization of the shared ABI boundary remains the next step.
