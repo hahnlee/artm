@@ -79,6 +79,26 @@ std::optional<std::string> GetSystemPropertyByHandle(jlong handle) {
              : std::optional<std::string>(found->second);
 }
 
+jlong FindSystemPropertyHandle(const std::string& name) {
+  std::lock_guard lock(g_system_properties_mutex);
+  if (!g_system_properties.contains(name)) {
+    return 0;
+  }
+  const auto existing = g_system_property_handles_by_name.find(name);
+  if (existing != g_system_property_handles_by_name.end()) {
+    return existing->second;
+  }
+  const jlong handle = g_next_system_property_handle++;
+  g_system_property_handles_by_name.emplace(name, handle);
+  g_system_property_names_by_handle.emplace(handle, name);
+  return handle;
+}
+
+void SetSystemPropertyValue(const std::string& name, const std::string& value) {
+  std::lock_guard lock(g_system_properties_mutex);
+  g_system_properties[name] = value;
+}
+
 jstring SystemPropertiesGet(JNIEnv* env, jclass, jstring key,
                             jstring default_value) {
   const std::optional<std::string> value = GetSystemProperty(env, key);
@@ -141,18 +161,7 @@ jlong SystemPropertiesFind(JNIEnv* env, jclass, jstring key) {
   if (!name.has_value()) {
     return 0;
   }
-  std::lock_guard lock(g_system_properties_mutex);
-  if (!g_system_properties.contains(*name)) {
-    return 0;
-  }
-  const auto existing = g_system_property_handles_by_name.find(*name);
-  if (existing != g_system_property_handles_by_name.end()) {
-    return existing->second;
-  }
-  const jlong handle = g_next_system_property_handle++;
-  g_system_property_handles_by_name.emplace(*name, handle);
-  g_system_property_names_by_handle.emplace(handle, *name);
-  return handle;
+  return FindSystemPropertyHandle(*name);
 }
 
 jstring SystemPropertiesGetByHandle(JNIEnv* env, jclass, jlong handle) {
@@ -184,8 +193,7 @@ void SystemPropertiesSet(JNIEnv* env, jclass, jstring key, jstring value) {
   if (!name.has_value() || !text.has_value()) {
     return;
   }
-  std::lock_guard lock(g_system_properties_mutex);
-  g_system_properties[*name] = *text;
+  SetSystemPropertyValue(*name, *text);
 }
 
 void SystemPropertiesNoOp(JNIEnv*, jclass) {}

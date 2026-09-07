@@ -3878,3 +3878,11 @@ added; the full corpus and multi-loader identity task remain open.
   barriers, JNI/native exits, framework/window/lifecycle smoke, and launcher
   checks. `938-load-transform-bcp` also passes interpreter, JIT, and
   unmodified optimized lanes after the property-handle change.
+
+### Runtime checkpoint 76 — 2026-09-08
+
+- Corrected the `SystemProperties` handle getter JNI prototypes and validated
+  stable identity, set-after-find updates, typed reads, and forged-handle
+  rejection with focused native smoke. `cargo xtask check` for the native
+  source passes; `2242-checker-lse-acquire-release-operations` also passes all
+  interpreter, JIT, and unmodified optimized lanes.

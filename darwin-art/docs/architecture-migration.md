@@ -8864,3 +8864,11 @@ or admission exception was added.
 - The full JIT acceptance audit is green across GC/read barriers, JNI/native
   exits, framework/window/lifecycle smoke, and launcher startup. BCP transform
   regression `938-load-transform-bcp` passes all three execution lanes.
+
+### Runtime checkpoint 76 — 2026-09-08
+
+- Fixed the framework SystemProperties handle getter JNI ABI and verified
+  stable handles, post-find value updates, typed reads, and invalid-handle
+  safety with native smoke and an incremental compat check. LSE
+  acquire/release regression `2242-checker-lse-acquire-release-operations`
+  passes all execution lanes.
