@@ -3441,3 +3441,9 @@ added; the full corpus and multi-loader identity task remain open.
 - The live ledger has reached 273 completed tests with zero failures,
   including add-to-dex ClassLoader, JVMTI local primitive/object/bad-slot, and
   multi-force-early-return paths. The corpus remains active.
+
+### Fresh corpus checkpoint 14 — 2026-09-08
+
+- The live ledger has reached 282 completed tests with zero failures,
+  including JNI ID swap (indices/pointers), resize-array, and structural
+  transformation/obsolescence paths. The corpus remains active.

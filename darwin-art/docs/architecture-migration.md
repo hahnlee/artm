@@ -8469,3 +8469,9 @@ or admission exception was added.
 - The fresh ledger has completed 273 tests without failure, including add-to-
   dex ClassLoader, JVMTI local primitive/object/bad-slot, and multi-force-
   early-return paths. The corpus remains active.
+
+### Fresh corpus checkpoint 14 — 2026-09-08
+
+- The fresh ledger has completed 282 tests without failure, including JNI ID
+  swap (indices/pointers), resize-array, and structural transformation/
+  obsolescence paths. The corpus remains active.
