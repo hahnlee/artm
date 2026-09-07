@@ -3644,3 +3644,12 @@ added; the full corpus and multi-loader identity task remain open.
   canonical command. The remaining 938 gap is therefore a real boot-image
   profile/class-selection issue, not a phase-order workaround, while 936
   remains a separate generated-code fault.
+
+### Runtime checkpoint 43 — 2026-09-08
+
+- Replacement-Mac validation rebuilt the canonical 11-component boot image and
+  reconfirmed `934-load-transform` in both interpreter and JIT modes. Passing
+  an explicit empty preload list changes the build artifact but does not make
+  `938-load-transform-bcp` observe `OptionalLong`; it was not retained. This
+  rules out a superficial preload-file switch and keeps the required fix in
+  Android's profile-guided image-class selection and boot-Dex loading path.

@@ -8650,3 +8650,11 @@ or admission exception was added.
   host fallback was retained; boot-image class-selection/profile semantics
   remain the next native implementation boundary for 938, with 936 tracked
   independently as a generated-code crash.
+
+### Runtime checkpoint 43 — 2026-09-08
+
+- The replacement-Mac boot-image rebuild and ordinary JVMTI transform lane are
+  green. An empty preload-list experiment was explicitly rejected because it
+  did not restore boot-class transformation, preserving the Android-shaped
+  architecture and narrowing the next change to profile-derived image class
+  selection plus native boot-Dex loading.
