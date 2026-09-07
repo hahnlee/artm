@@ -3602,3 +3602,8 @@ added; the full corpus and multi-loader identity task remain open.
   ordering checks and generated Mach-O/CFI/DWARF audits pass.
 - The Nterp logical-reference entry slice is closed; JVMTI boot-class loading
   and transformation remain open without a fallback.
+
+### Runtime checkpoint 36 — 2026-09-08
+
+- Boot-class JVMTI investigation remains active in the class-loader
+  implementation lane. No fallback, allowlist, or APK rewrite was introduced.

@@ -8611,3 +8611,9 @@ or admission exception was added.
 - A fresh incremental graphics/runtime link rebuild passes its strict closure
   audit; focused JVMTI failures persist, so the remaining work is in the ART
   boot-class callback/class-linker path itself.
+
+### Runtime checkpoint 36 — 2026-09-08
+
+- The compatibility layer preserves Android's boot/system class-loader
+  contract; the remaining issue is a native implementation defect, not a host
+  policy substitution.
