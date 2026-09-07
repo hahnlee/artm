@@ -3510,3 +3510,9 @@ added; the full corpus and multi-loader identity task remain open.
 - The live worker reached 994 rows. The post-repair suffix remains entirely
   green; 110 recorded failures are unchanged historical SyntaxError rows plus
   AOSP's known broken 497 fixture.
+
+### Fresh corpus checkpoint 25 — 2026-09-08
+
+- The worker reached 1,001 rows. The post-repair suffix remains green; the
+  ledger still contains only the historical SyntaxError window and upstream
+  known 497 fixture as failures.
