@@ -3678,3 +3678,10 @@ added; the full corpus and multi-loader identity task remain open.
   code address. The hypothesis is rejected and the patch was removed; 936's
   native/JIT boundary remains unresolved rather than masked by a speculative
   workaround.
+
+### Runtime checkpoint 47 — 2026-09-08
+
+- With the replacement Mac's installed NDK 28.2 explicitly selected, the full
+  graphics/runtime link audit passes. A fresh linked-runtime rerun still
+  reproduces 936's null-page generated-code fault, ruling out a missing
+  toolchain or stale graphics artifact.

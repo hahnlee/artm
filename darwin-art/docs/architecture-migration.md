@@ -8680,3 +8680,10 @@ or admission exception was added.
   hypothesis for 936; the temporary JVMTI patch was removed. The remaining
   failure is still an ART generated-code/JNI or boot-Dex entrypoint defect and
   is being kept explicit for the next instrumentation pass.
+
+### Runtime checkpoint 47 — 2026-09-08
+
+- Selecting the installed Android NDK 28.2 makes the complete graphics link
+  audit green. 936 nevertheless fails in the newly linked runtime, confirming
+  an independent generated-code/boot-Dex entrypoint defect rather than a host
+  setup problem.
