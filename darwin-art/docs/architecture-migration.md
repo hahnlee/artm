@@ -9126,3 +9126,11 @@ or admission exception was added.
   also corrects scaled Calendar physical coordinates. Calculator, Calendar,
   dismiss, and resize checks pass; the full suite still exposes Chrome's
   pre-existing `MockContext.sendBroadcast()` stub abort during startup.
+
+### Runtime checkpoint 114 — 2026-09-08
+
+- Detached app contexts now implement the broadcast-send contract instead of
+  throwing through `MockContext`; DEX counts were refreshed and the button DEX
+  build passes. Chrome advances beyond that startup point, then reveals a
+  separate mutex-lock failure during compositor/child teardown and an ART
+  generated-code fault, which is the next concurrency/JIT lifetime boundary.

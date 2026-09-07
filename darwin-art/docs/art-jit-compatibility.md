@@ -4156,3 +4156,12 @@ added; the full corpus and multi-loader identity task remain open.
   Calculator, Calendar, outside-dismiss, and resize lanes pass. Chrome reaches
   startup but still aborts in the existing `MockContext.sendBroadcast()` stub,
   so the full suite remains red until that framework broadcast path is added.
+
+### Runtime checkpoint 114 — 2026-09-08
+
+- Implemented the app-context `sendBroadcast`/`sendBroadcastAsUser` contract
+  so detached applications no longer inherit `MockContext`'s `Stub!` failure;
+  the DEX contract was updated and `build-button-dex` passes. Chrome now gets
+  past startup broadcast setup, but its compositor teardown exposes a separate
+  `std::system_error` mutex-lock failure followed by an ART generated-code
+  fault; concurrency/JIT lifetime diagnosis remains open.
