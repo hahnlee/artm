@@ -3105,3 +3105,11 @@ any of these tests; Java rewrites are not acceptable evidence.
   exceptions, fields/arrays, inlining, virtual/interface calls, VarHandles,
   and native exit hooks. No JIT admission gate or interpreter-only fallback was
   added; the full corpus and multi-loader identity task remain open.
+
+### Replacement-host JIT audit — 2026-09-09 (continued)
+
+- Rebuilt the changed graphics runtime and reran `audit-art-jit.sh` with the
+  production library. Exit status is 0; all acceptance phases complete without
+  the previous false status-121 deoptimization failure. A single frame-clock
+  unit test was timing-sensitive on its first run and passed on exact rerun and
+  the subsequent full host suite.

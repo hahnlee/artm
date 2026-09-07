@@ -8165,3 +8165,10 @@ the original bytecode rather than translating it to Java.
   `JitCodeCache::RemoveMethod`, matching the pinned runtime implementation.
 - This is a probe-contract correction, not a runtime bypass; broad corpus and
   ClassLoader identity coverage are still required for the 100% objective.
+
+### Replacement-host JIT audit — 2026-09-09 (continued)
+
+- After rebuilding the changed runtime probe, `audit-art-jit.sh` exits 0 with
+  the complete JIT acceptance path. The transient frame-clock timing assertion
+  also passes on exact rerun and the full host test suite; no runtime fallback
+  or admission exception was added.
