@@ -8204,3 +8204,12 @@ or admission exception was added.
   system PathClassLoader versus app-image/DexCache ownership, not JIT code.
   The eventual fix belongs in generic runtime loader registration and must
   retain AOSP's duplicate-DexFile rejection.
+
+### System loader startup ordering — 2026-09-08
+
+- AOSP constructs the system class loader during `Runtime::Start`; the
+  detached launcher currently republishes it later through
+  `runtime_context_loader`. This ordering is the remaining 497 boundary, while
+  156 confirms the rejection contract. The next implementation must move the
+  app-image/DexCache split into generic runtime startup rather than altering
+  test inputs or weakening duplicate registration.

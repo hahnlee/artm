@@ -3150,3 +3150,13 @@ added; the full corpus and multi-loader identity task remain open.
   startup. The next implementation must move that split into the runtime
   loader-registration path; no test-specific behavior or rejection bypass is
   acceptable.
+
+### System loader startup ordering — 2026-09-08
+
+- AOSP creates its system class loader from `Runtime::Start` before the
+  application process phase. Darwin's detached path currently republishes and
+  overrides that loader from `runtime_context_loader`; 497 fails at the
+  resulting DexCache identity boundary while 156 still validates duplicate
+  rejection. No speculative loader replacement was retained. The next code
+  change must preserve AOSP startup ordering and separate app-image ownership
+  generically.
