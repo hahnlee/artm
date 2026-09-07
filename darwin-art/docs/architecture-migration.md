@@ -8330,3 +8330,11 @@ or admission exception was added.
   table in our trace therefore matches the upstream lifecycle. The remaining
   discrepancy is specifically app-image/class-definition ownership; global
   loader pre-registration is not an acceptable fix.
+
+### 497 DexCache owner trace — 2026-09-08
+
+- The existing DexCache explicitly points to the canonical PathClassLoader;
+  `defineClassNative` requests it from a distinct custom loader whose table is
+  still null. The ownership discrepancy is therefore real and deterministic;
+  the remaining implementation work is app-image publication/definition
+  ordering, not pointer validity or generic loader registration.

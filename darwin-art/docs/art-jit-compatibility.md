@@ -3293,3 +3293,11 @@ added; the full corpus and multi-loader identity task remain open.
   therefore not itself a Darwin defect. The unresolved 497 behavior must come
   from app-image metadata/publication or the class-definition ownership path;
   pre-registering every loader would diverge from AOSP and is rejected.
+
+### 497 DexCache owner trace — 2026-09-08
+
+- The owner trace adds the missing identity: the existing DexCache's loader is
+  the canonical PathClassLoader (`0x10002001ad0`), while the requesting custom
+  loader is `0x1000209f818` with no table yet. This rules out a null/invalid
+  owner and leaves app-image publication/definition ordering as the remaining
+  AOSP compatibility gap.

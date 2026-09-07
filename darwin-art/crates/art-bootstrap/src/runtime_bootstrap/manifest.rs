@@ -4,7 +4,7 @@
 //! compiler orchestration cannot silently change which upstream files are
 //! copied or patched.
 
-pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v19";
+pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v20";
 
 pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.cc",
