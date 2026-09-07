@@ -3741,6 +3741,12 @@ added; the full corpus and multi-loader identity task remain open.
   later dex2oat reference path, indicating the base-relative conversion is
   active but an additional absolute-vs-offset representation remains.
 
+### Runtime checkpoint 57 — 2026-09-08
+
+- Symbolization confirms `defaults_field->GetObject(props_obj)` receives a null
+  `props_obj`; any fallback after that dereference is ineffective. Recovery of
+  `System.props` must occur before ART field access.
+
 ### Runtime checkpoint 56 — 2026-09-08
 
 - Re-ran `938-load-transform-bcp` after the shared `ObjPtr` update; interpreter

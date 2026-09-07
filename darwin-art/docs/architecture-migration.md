@@ -8736,6 +8736,11 @@ or admission exception was added.
   a later dex2oat null-page fault. This confirms partial progress and leaves an
   absolute-pointer versus base-offset representation mismatch to isolate.
 
+### Runtime checkpoint 57 — 2026-09-08
+
+- The remaining boundary is `defaults_field->GetObject(props_obj)` with null
+  `props_obj`; the next patch must recover the object before field dereference.
+
 ### Runtime checkpoint 56 — 2026-09-08
 
 - 938 remains green in interpreter and JIT after the common `ObjPtr` change;
