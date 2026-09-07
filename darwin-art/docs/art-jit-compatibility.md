@@ -3243,3 +3243,10 @@ added; the full corpus and multi-loader identity task remain open.
   duplicate-DexFile rejection is intact; investigation now targets the
   app-image DexCache/class-table association that should allow 497's class
   definition.
+
+### Graphics runtime rebuild confirmation — 2026-09-08
+
+- Rebuilt the graphics bootstrap after the loader-shadow changes; all 256
+  runtime objects were reused from the validated v12 shadow and the build
+  completed without introducing a behavior workaround. The 497 Java NPE
+  boundary is unchanged and remains the active implementation target.

@@ -8285,3 +8285,9 @@ or admission exception was added.
   remains alive and test 156 continues to validate the AOSP duplicate-loader
   error contract. The next implementation comparison is app-image
   DexCache/class-table publication, not a loader-specific fallback.
+
+### Graphics runtime rebuild confirmation — 2026-09-08
+
+- The graphics runtime bootstrap was rebuilt successfully against the v12
+  shadow identity with 256 cached ART objects. No diagnostic or loader
+  behavior was added; 497 remains the only reproduced compatibility failure.
