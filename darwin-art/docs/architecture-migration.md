@@ -8445,3 +8445,9 @@ or admission exception was added.
 - The fresh ledger has completed 243 tests without failure, including
   monitor/JVMTI signal, current-frame, thread-end, and transform paths. The
   worker pool remains active and the final verdict is pending.
+
+### Fresh corpus checkpoint 10 — 2026-09-08
+
+- The fresh ledger has completed 249 tests without failure, including DDMS,
+  dispose stress, raw-monitor suspend/exit/wait, and proxy method-argument
+  paths. The worker pool remains active and final classification is pending.
