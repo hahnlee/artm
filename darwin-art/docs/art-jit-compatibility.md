@@ -3492,3 +3492,9 @@ added; the full corpus and multi-loader identity task remain open.
 
 - The live worker reached 860 rows with no new post-repair failures. Exception,
   JNI, and compiler coverage continues through the remaining corpus.
+
+### Fresh corpus checkpoint 22 — 2026-09-08
+
+- The live worker reached 878 rows with no new post-repair failures. The
+  remaining recorded failures are unchanged: the pre-fix runner syntax window
+  and the upstream-known broken 497 class-loader fixture.

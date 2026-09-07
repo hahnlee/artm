@@ -8517,3 +8517,9 @@ or admission exception was added.
 
 - The worker reached 860 rows without a new failure after the runner repair;
   exception, JNI, and compiler lanes continue to pass.
+
+### Fresh corpus checkpoint 22 — 2026-09-08
+
+- 878 rows are complete without a new post-repair failure. The failure set is
+  unchanged and remains limited to historical runner syntax records plus the
+  AOSP-known broken 497 class-loader fixture.
