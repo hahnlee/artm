@@ -3250,3 +3250,12 @@ added; the full corpus and multi-loader identity task remain open.
   runtime objects were reused from the validated v12 shadow and the build
   completed without introducing a behavior workaround. The 497 Java NPE
   boundary is unchanged and remains the active implementation target.
+
+### 497 loader boundary audit — 2026-09-08
+
+- The failure remains confined to the AOSP custom-loader path: the app's
+  canonical `PathClassLoader` exposes one non-null DexFile element, but the
+  custom `loadClassBinaryName` call returns no class and its caller observes a
+  null result. The adjacent multi-loader registration test passes, so this is
+  not permission to relax duplicate registration; app-image class-table
+  publication must be compared with AOSP before changing runtime behavior.

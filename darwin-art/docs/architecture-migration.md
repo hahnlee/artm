@@ -8291,3 +8291,11 @@ or admission exception was added.
 - The graphics runtime bootstrap was rebuilt successfully against the v12
   shadow identity with 256 cached ART objects. No diagnostic or loader
   behavior was added; 497 remains the only reproduced compatibility failure.
+
+### 497 loader boundary audit — 2026-09-08
+
+- Current evidence shows a valid canonical PathClassLoader/DexFile element and
+  a null class result only when the AOSP custom loader invokes
+  `loadClassBinaryName`. The 156 duplicate-loader contract still passes; the
+  next change must align app-image DexCache/class-table publication rather
+  than bypassing registration checks.
