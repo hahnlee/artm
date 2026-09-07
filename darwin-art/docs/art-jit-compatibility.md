@@ -3953,3 +3953,9 @@ added; the full corpus and multi-loader identity task remain open.
   transport: name, endpoint role, and shared Binder token are serialized and
   restored, with registry lookup preserving pair/dup identity. Native graph
   incremental check passes.
+
+### Runtime checkpoint 88 — 2026-09-08
+
+- `543-env-long-ref` and `686-get-this` pass interpreter, JIT, and unmodified
+  optimized lanes, covering JNI long-reference lifetime and instance receiver
+  ABI handling.

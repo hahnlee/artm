@@ -8937,3 +8937,8 @@ or admission exception was added.
   the current single-process Darwin transport while leaving cross-process FD
   transfer as an explicit future transport-layer task; native graph check is
   green.
+
+### Runtime checkpoint 88 — 2026-09-08
+
+- `543-env-long-ref` and `686-get-this` pass all lanes, validating JNI long
+  references and instance receiver argument ABI through the shared ART JIT.
