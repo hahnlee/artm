@@ -2237,6 +2237,11 @@ def main() -> int:
                 "-I", str(root / "_aosp/art/runtime"),
                 "-I", str(root / "_aosp/art/runtime/base"),
                 "-I", str(root / "_aosp/art/runtime/arch/arm64"),
+                # Structural-redefine stack-scope fixtures include ART's
+                # allocator wrapper, which in turn includes the pinned
+                # AOSP dlmalloc header. Match the platform run-test include
+                # surface instead of relying on the source directory.
+                "-I", str(root / "_aosp/external/dlmalloc"),
                 "-I", str(root / "_aosp/art/libdexfile"),
                 "-I", str(root / "_aosp/art/libprofile"),
                 "-I", str(root / "_aosp/art/libnativebridge/include"),
@@ -2551,6 +2556,8 @@ def main() -> int:
             # maintaining a directory-name exception or changing inputs.
             declared_main_methods = set()
             for source in test.rglob("*.java"):
+                if not source.is_file():
+                    continue
                 declared_main_methods.update(re.findall(
                     r"\bnative\s+[^;()\n]+?\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(",
                     source.read_text(encoding="utf-8", errors="ignore"),

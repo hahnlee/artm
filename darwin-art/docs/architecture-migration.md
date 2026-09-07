@@ -8475,3 +8475,10 @@ or admission exception was added.
 - The fresh ledger has completed 282 tests without failure, including JNI ID
   swap (indices/pointers), resize-array, and structural transformation/
   obsolescence paths. The corpus remains active.
+
+### Fresh corpus checkpoint 15 — 2026-09-08
+
+- Corpus triage found no ART semantic regression in the structural redefine
+  cluster. Runner parity was tightened by adding the AOSP dlmalloc include
+  root and ignoring unresolved generated Java symlinks during source-owner
+  discovery; focused 1986/1987/2000 interpreter and JIT runs now pass.

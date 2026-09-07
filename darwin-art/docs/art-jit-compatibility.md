@@ -3447,3 +3447,11 @@ added; the full corpus and multi-loader identity task remain open.
 - The live ledger has reached 282 completed tests with zero failures,
   including JNI ID swap (indices/pointers), resize-array, and structural
   transformation/obsolescence paths. The corpus remains active.
+
+### Fresh corpus checkpoint 15 — 2026-09-08
+
+- Two structural-redefine failures were isolated to the test runner: native
+  fixtures could not include AOSP's external `dlmalloc.h`, and a dangling
+  generated Java symlink was read during native-owner discovery. The runner
+  now exposes `_aosp/external/dlmalloc` and skips dangling Java links. Focused
+  reruns of 1986, 1987, and 2000 pass interpreter, JIT, and unmodified lanes.
