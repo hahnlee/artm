@@ -3711,3 +3711,11 @@ added; the full corpus and multi-loader identity task remain open.
   `java.util.Properties` to the profile-driven boot-image seed and rebuilt the
   image successfully. The 936 repro still faults at `0x4`, so boot-image
   seeding alone does not yet establish the static initialization contract.
+
+### Runtime checkpoint 51 — 2026-09-08
+
+- The post-seed crash disassembly still shows `ldr w8, [x23,#4]` with `x23=0`
+  before any JNI call, confirming a null ART internal field/class pointer rather
+  than a JNI receiver fault. The persistent seed and initialization changes
+  remain; a JNI field-ID replacement was not retained because the patch needs
+  to preserve AOSP callback ordering and is the next isolated experiment.

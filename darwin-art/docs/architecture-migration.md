@@ -8709,3 +8709,10 @@ or admission exception was added.
   `Hashtable`/`Properties` and the boot image rebuild passes, but 936 remains
   unchanged; static field initialization/state publication is the next ART
   parity boundary.
+
+### Runtime checkpoint 51 — 2026-09-08
+
+- Fresh post-seed disassembly continues to fault on an ART internal null pointer
+  (`ldr w8, [x23,#4]`, `x23=0`) before JNI dispatch. This rules out the quick-call
+  receiver as the immediate cause; the next experiment must isolate ART static
+  field resolution/initialization without changing callback ordering.
