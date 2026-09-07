@@ -3516,3 +3516,9 @@ added; the full corpus and multi-loader identity task remain open.
 - The worker reached 1,001 rows. The post-repair suffix remains green; the
   ledger still contains only the historical SyntaxError window and upstream
   known 497 fixture as failures.
+
+### Fresh corpus checkpoint 26 — 2026-09-08
+
+- The worker reached 1,057 rows. `936-search-onload` and
+  `938-load-transform-bcp` exposed real remaining JVMTI/boot-class
+  transformation gaps; they are tracked as open runtime work.
