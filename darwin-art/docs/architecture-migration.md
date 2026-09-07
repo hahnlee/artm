@@ -8345,3 +8345,14 @@ or admission exception was added.
   diagnostic was removed. The failure is not caused by that helper's eager
   string resolution; focus remains on app dex open and class-definition
   publication ordering.
+
+### Full JIT acceptance audit — 2026-09-08
+
+- On the replacement machine, `bash tools/audit-art-jit.sh` exited 0. All
+  exercised compiled execution, GC/read-barrier, exception, JNI/native-exit,
+  synchronization, VarHandle, invoke-polymorphic/custom, typed-array, and
+  OSR variants reported PASS.
+- A shutdown warning remains (`Current thread not detached in Runtime
+  shutdown`), so thread lifecycle ownership still needs cleanup. The 497
+  custom-loader discrepancy also remains unresolved; the audit is not a
+  claim of complete AOSP compatibility.

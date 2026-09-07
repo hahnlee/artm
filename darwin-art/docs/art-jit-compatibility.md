@@ -3309,3 +3309,15 @@ added; the full corpus and multi-loader identity task remain open.
   removed. Canonical DexCache creation in that helper is therefore not the
   cause; the remaining ordering gap is during app dex open/class-definition
   publication itself.
+
+### Full JIT acceptance audit — 2026-09-08
+
+- `bash tools/audit-art-jit.sh` exited 0 on the replacement machine. The
+  audit reported PASS across compiled arithmetic, typed fields/arrays,
+  exceptions, moving and concurrent GC, read barriers, JNI/native exits,
+  concurrency, VarHandle (including wide/narrow/FP/ByteBuffer),
+  invoke-polymorphic/custom, and OSR integer/wide/reference/exception paths.
+- The audit still emits `Current thread not detached in Runtime shutdown`;
+  this lifecycle cleanup remains open. This result is broad acceptance
+  evidence, not completion of the full AOSP compatibility goal; the 497
+  custom-class-loader failure is still tracked above.
