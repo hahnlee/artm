@@ -8694,3 +8694,10 @@ or admission exception was added.
   system classes and safely handles an absent `Properties.defaults` chain.
   Rebuild and link audit are green, while 936 continues to fault at `0x4` in
   generated code; JNI/quick-call ABI investigation remains the next task.
+
+### Runtime checkpoint 49 — 2026-09-08
+
+- Static `System.props` access now also follows ART initialization semantics
+  (`EnsureInitialized` with a stack handle). Rebuild and link audit pass, but
+  936 still faults at `0x4`; the remaining work is generated-code/JNI quick
+  invocation ABI parity.

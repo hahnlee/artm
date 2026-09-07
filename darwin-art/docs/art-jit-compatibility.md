@@ -3694,3 +3694,11 @@ added; the full corpus and multi-loader identity task remain open.
   complete graphics/runtime link audit pass. `936-search-onload` still fails
   with `SIGSEGV/SEGV_ACCERR` at `0x4`, so the remaining defect is in the
   generated-code/JNI call boundary, not class lookup or host toolchain setup.
+
+### Runtime checkpoint 49 — 2026-09-08
+
+- Added explicit `System` class initialization before reading the static
+  `System.props` field, using a stack handle as required by ART's
+  `EnsureInitialized` contract. The JVMTI archive and full graphics link audit
+  remain green; 936 still reproduces `SIGSEGV/SEGV_ACCERR` at `0x4`, so this
+  ordering fix is insufficient and the quick-call ABI remains open.
