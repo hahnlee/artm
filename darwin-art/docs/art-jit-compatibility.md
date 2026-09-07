@@ -3331,3 +3331,13 @@ added; the full corpus and multi-loader identity task remain open.
 - This is lifecycle cleanup only. The 497 custom-loader class-definition
   failure reproduces unchanged, so the overall compatibility goal remains
   incomplete.
+
+### Replacement-machine revalidation — 2026-09-08
+
+- After the detach change, `cargo test -p art-bootstrap` passed all 13 tests,
+  the graphics link audit passed, and `audit-art-jit.sh` exited 0 without the
+  prior shutdown warning.
+- The focused unmodified AOSP `497-inlining-and-class-loader` run still exits
+  1 because `MyClassLoader.loadClass("LoadedByMyClassLoader")` returns null.
+  This is unchanged in interpreter and optimized lanes and remains an
+  authentic ClassLinker/DexCache compatibility gap, not a test bypass.

@@ -8365,3 +8365,12 @@ or admission exception was added.
   app-thread quiescing and resource teardown ordering intact.
 - Full JIT audit remains exit 0 after the change. The 497 custom-loader
   discrepancy is unaffected and remains the next ClassLinker investigation.
+
+### Replacement-machine revalidation — 2026-09-08
+
+- `cargo test -p art-bootstrap` passed 13/13, the incremental graphics link
+  audit passed, and the full JIT acceptance audit exited 0 with no runtime
+  detach warning.
+- The unmodified AOSP 497 test still fails in both interpreter and optimized
+  lanes when its custom loader receives a null class. No allowlist or fallback
+  was added; ClassLinker/DexCache publication ordering remains open.
