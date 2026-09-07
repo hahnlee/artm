@@ -3579,12 +3579,12 @@ def main() -> int:
                         # and a bare exit status is otherwise insufficient
                         # once the temporary invocation directory is removed.
                         log.flush()
-                        log.seek(0)
-                        diagnostic_tail = log.read().splitlines()[-40:]
+                        diagnostic_tail = host_log.read_bytes().splitlines()[-40:]
                         if diagnostic_tail:
                             print(
                                 "ART upstream host diagnostics (tail):\n"
-                                + "\n".join(diagnostic_tail),
+                                + b"\n".join(diagnostic_tail).decode(
+                                    "utf-8", errors="replace"),
                                 file=sys.stderr,
                             )
                         raise subprocess.CalledProcessError(
