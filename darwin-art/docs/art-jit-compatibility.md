@@ -3259,3 +3259,12 @@ added; the full corpus and multi-loader identity task remain open.
   null result. The adjacent multi-loader registration test passes, so this is
   not permission to relax duplicate registration; app-image class-table
   publication must be compared with AOSP before changing runtime behavior.
+
+### 497 native registration trace — 2026-09-08
+
+- Environment-gated ART tracing captured canonical registration of dex
+  `0xc9b0edc00` to loader `0x10002001ad0`, followed by
+  `defineClassNative(LLoadedByMyClassLoader;)` for the same dex under custom
+  loader `0x1000209f768`. An existing DexCache triggers the standard AOSP
+  duplicate-loader rejection. The remaining fix is the app-image/class-table
+  ownership transition, not cookie decoding or pointer transport.

@@ -4,7 +4,7 @@
 //! compiler orchestration cannot silently change which upstream files are
 //! copied or patched.
 
-pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v12";
+pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v14";
 
 pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.cc",
@@ -134,6 +134,8 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0153-darwin-boot-oat-logical-location.patch",
     "patches/art/0155-darwin-allocation-entrypoint-class-reference-boundary.patch",
     "patches/art/0156-darwin-dex-cookie-identity-trace.patch",
+    "patches/art/0157-darwin-define-class-dex-registration-trace.patch",
+    "patches/art/0158-darwin-register-dex-trace.patch",
 ];
 
 #[cfg(test)]

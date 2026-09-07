@@ -8299,3 +8299,11 @@ or admission exception was added.
   `loadClassBinaryName`. The 156 duplicate-loader contract still passes; the
   next change must align app-image DexCache/class-table publication rather
   than bypassing registration checks.
+
+### 497 native registration trace — 2026-09-08
+
+- ART tracing confirms the same native DexFile is first registered to the
+  canonical PathClassLoader, then requested by the custom loader for
+  `LoadedByMyClassLoader`; the existing DexCache causes AOSP's duplicate-loader
+  rejection. The next fix must reproduce AOSP's app-image ownership transition
+  while retaining that guard.
