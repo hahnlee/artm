@@ -11,7 +11,6 @@ temporary_output="$build_root/libopenjdkjvmti-darwin.a.tmp.$$"
 patch_file="$project_root/patches/openjdkjvmti/0001-darwin-monotonic-jvmti-time.patch"
 allocator_patch_file="$project_root/patches/openjdkjvmti/0002-darwin-malloc-size.patch"
 search_patch_file="$project_root/patches/openjdkjvmti/0003-darwin-in-memory-dex-file.patch"
-search_properties_patch_file="$project_root/patches/openjdkjvmti/0004-darwin-search-properties-null-defaults.patch"
 
 # shellcheck disable=SC1090
 source "$project_root/upstream/android16-openjdkjvmti.lock"
@@ -42,7 +41,6 @@ cp "$source_root/ti_search.cc" "$patched_source_root/ti_search.cc"
 patch --batch --forward -p1 -d "$patched_source_root" < "$patch_file" >/dev/null
 patch --batch --forward -p1 -d "$patched_source_root" < "$allocator_patch_file" >/dev/null
 patch --batch --forward -p1 -d "$patched_source_root" < "$search_patch_file" >/dev/null
-patch --batch --forward -p1 -d "$patched_source_root" < "$search_properties_patch_file" >/dev/null
 
 sources=(
   alloc_manager.cc deopt_manager.cc events.cc object_tagging.cc OpenjdkJvmTi.cc

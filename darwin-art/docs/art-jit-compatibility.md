@@ -3670,3 +3670,11 @@ added; the full corpus and multi-loader identity task remain open.
   persistent OpenJDK JVMTI patch now targets the owning `Properties` object in
   that valid state. Source patching succeeds; final graphics relink is pending
   on this host's missing Android NDK 28.2 prerequisite.
+
+### Runtime checkpoint 46 — 2026-09-08
+
+- The proposed null-`Properties.defaults` change was linked into a fresh
+  graphics runtime and `936-search-onload` still faulted at the same generated
+  code address. The hypothesis is rejected and the patch was removed; 936's
+  native/JIT boundary remains unresolved rather than masked by a speculative
+  workaround.

@@ -8673,3 +8673,10 @@ or admission exception was added.
   Android-shaped JVMTI implementation is patched to update the owning
   properties object when that chain is absent. Full runtime relink remains
   blocked only by the replacement host lacking Android NDK 28.2.
+
+### Runtime checkpoint 46 — 2026-09-08
+
+- A fresh linked-runtime experiment disproved the `Properties.defaults` null
+  hypothesis for 936; the temporary JVMTI patch was removed. The remaining
+  failure is still an ART generated-code/JNI or boot-Dex entrypoint defect and
+  is being kept explicit for the next instrumentation pass.
