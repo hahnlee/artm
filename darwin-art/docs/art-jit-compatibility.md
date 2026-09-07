@@ -3568,3 +3568,12 @@ added; the full corpus and multi-loader identity task remain open.
   `938-load-transform-bcp` still misses only the boot-class transformation;
   this narrows the implementation target to the boot-class JVMTI callback and
   injected-Dex class-linker boundary rather than generic retransformation.
+
+### Nterp checkpoint 32 — 2026-09-08
+
+- ARM64 Nterp entry normalization is now enforced structurally: both entry
+  points lift logical low-32-bit `ArtMethod*` values before their first field
+  dereference, while full native pointers remain unchanged.
+- The source audit verifies per-entry ordering and rejects late-normalization
+  regressions. Nterp unit checks pass 11/11, along with runtime-arm64
+  Mach-O/CFI/DWARF audits.

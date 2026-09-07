@@ -8576,6 +8576,13 @@ or admission exception was added.
 - The runner now provides the native ART fault tail needed to fix the runtime
   class-linker path rather than masking it in the harness.
 
+### Nterp checkpoint 32 — 2026-09-08
+
+- Darwin ARM64 Nterp now matches ART's logical-reference ABI at both execution
+  entry points, with a fail-closed ordering audit and regression test.
+- Generator, Mach-O, CFI/DWARF, and focused Nterp checks are green; JVMTI
+  boot-class work remains the next runtime slice.
+
 ### Diagnostic checkpoint 30 — 2026-09-08
 
 - The host/runtime split remains intact: ordinary JVMTI transformation is
