@@ -3618,3 +3618,8 @@ added; the full corpus and multi-loader identity task remain open.
 - The native boot-class loader review remains active; no additional policy
   gates or harness substitutions were made while awaiting the focused runtime
   implementation result.
+
+### Runtime checkpoint 39 — 2026-09-08
+
+- The boot-class JVMTI issue remains under active native implementation review;
+  no semantic workaround or test-specific bypass has been merged.

@@ -8627,3 +8627,8 @@ or admission exception was added.
 
 - Android-shaped boot/system class-loader semantics remain the target. The
   unresolved behavior is still confined to the native ART implementation path.
+
+### Runtime checkpoint 39 — 2026-09-08
+
+- Android-shaped boot/system class-loader semantics remain unchanged while the
+  native `ClassPreDefine`/DexFile identity review proceeds.
