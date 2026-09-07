@@ -9059,3 +9059,10 @@ or admission exception was added.
   owner, separate from the local pair state, with single-close cleanup. This
   keeps the AOSP Parcel boundary honest while the framed payload/ACK reader is
   still under implementation.
+
+### Runtime checkpoint 106 — 2026-09-08
+
+- The remote InputChannel constructor now owns the imported endpoint while
+  retaining an independent local wake pair, matching Android's initialized
+  marker plus token/name/FD parcel contract. Cross-process event framing is
+  not claimed until a two-process smoke exercises it.

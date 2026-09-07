@@ -4085,3 +4085,10 @@ added; the full corpus and multi-loader identity task remain open.
   the local same-process wake pair. The native graph and graphics-link audit
   pass; the endpoint is retained for the pending framed payload reader rather
   than being incorrectly treated as a local queue.
+
+### Runtime checkpoint 106 — 2026-09-08
+
+- InputChannel now preserves the Android initialized marker and adopts a
+  registry-miss endpoint with the transferred Binder token plus a separate
+  local wake pair. Native graph, graphics-link, format, and diff checks pass;
+  payload/finish-ACK framing remains the explicit next gap.

@@ -937,6 +937,11 @@ jlong InputChannelReadParcel(JNIEnv* env, jobject, jobject parcel_object) {
   DarwinParcel* parcel = JavaParcel(env, parcel_object);
   if (parcel == nullptr) return 0;
   const jlong parcel_pointer = reinterpret_cast<jlong>(parcel);
+  // android_view_InputChannel writes this wrapper marker before the
+  // InputChannelCore tuple. No core fields follow an uninitialized channel.
+  const jint initialized = ParcelReadInt(parcel_pointer);
+  if (initialized == 0) return 0;
+  if (initialized != 1) return 0;
   // Match android::InputChannel::readFromParcel: strong connection token,
   // UTF-16 name, then one unique full-duplex endpoint descriptor.
   jobject token = ParcelReadStrongBinder(env, nullptr, parcel_pointer);
@@ -948,33 +953,25 @@ jlong InputChannelReadParcel(JNIEnv* env, jobject, jobject parcel_object) {
     if (endpoint_fd >= 0) darwin_art_bionic_socket_broker_close(endpoint_fd);
     return 0;
   }
+  const char* utf = env->GetStringUTFChars(name, nullptr);
+  const std::string channel_name = utf == nullptr ? "" : utf;
+  if (utf != nullptr) env->ReleaseStringUTFChars(name, utf);
   std::shared_ptr<DarwinInputChannelState> state =
       FindInputChannelState(env, token);
-  if (state != nullptr && name != nullptr) {
-    const char* utf = env->GetStringUTFChars(name, nullptr);
-    if (utf == nullptr || state->name != utf) {
+  if (state != nullptr && state->name != channel_name) state.reset();
+  bool adopted_endpoint = false;
+  if (state == nullptr && token != nullptr && !channel_name.empty() &&
+      !env->ExceptionCheck()) {
+    state = std::make_shared<DarwinInputChannelState>(
+        env, channel_name, token, endpoint_fd);
+    adopted_endpoint = true;
+    if (state->connection_token == nullptr || state->read_fd < 0 ||
+        state->write_fd < 0 || env->ExceptionCheck()) {
       state.reset();
+    } else {
+      RegisterInputChannelState(state);
     }
-    if (utf != nullptr) env->ReleaseStringUTFChars(name, utf);
-  } else {
-    state.reset();
-  }
-  if (state == nullptr && !env->ExceptionCheck()) {
-    const char* utf = env->GetStringUTFChars(name, nullptr);
-    if (utf != nullptr) {
-      state = std::make_shared<DarwinInputChannelState>(
-          env, std::string(utf));
-      env->ReleaseStringUTFChars(name, utf);
-      if (state != nullptr) {
-        if (state->read_fd >= 0)
-          darwin_art_bionic_socket_broker_close(state->read_fd);
-        if (state->write_fd >= 0 && state->write_fd != state->read_fd)
-          darwin_art_bionic_socket_broker_close(state->write_fd);
-        state->remote_endpoint_fd = endpoint_fd;
-        RegisterInputChannelState(state);
-      }
-    }
-  } else if (endpoint_fd >= 0) {
+  } else if (state != nullptr) {
     // Same-process state already owns its endpoint pair; consume the parcel's
     // duplicated descriptor without changing the live pair identity.
     darwin_art_bionic_socket_broker_close(endpoint_fd);
@@ -982,7 +979,7 @@ jlong InputChannelReadParcel(JNIEnv* env, jobject, jobject parcel_object) {
   env->DeleteLocalRef(token);
   env->DeleteLocalRef(name);
   if (state == nullptr || env->ExceptionCheck()) {
-    if (state == nullptr && endpoint_fd >= 0)
+    if (!adopted_endpoint && endpoint_fd >= 0)
       darwin_art_bionic_socket_broker_close(endpoint_fd);
     return 0;
   }
@@ -999,19 +996,19 @@ void InputChannelWriteParcel(JNIEnv* env, jobject, jobject parcel_object,
   const auto* channel = InputChannel(pointer);
   if (channel == nullptr || channel->disposed || channel->state == nullptr ||
       channel->state->connection_token == nullptr) {
-    ParcelWriteStrongBinder(env, nullptr, parcel_pointer, nullptr);
-    jstring empty = env->NewStringUTF("");
-    ParcelWriteString(env, nullptr, parcel_pointer, empty);
-    env->DeleteLocalRef(empty);
-    ParcelWriteInt(parcel_pointer, -1);
+    ParcelWriteInt(parcel_pointer, 0);
     return;
   }
+  ParcelWriteInt(parcel_pointer, 1);
   ParcelWriteStrongBinder(env, nullptr, parcel_pointer,
                           channel->state->connection_token);
   jstring name = env->NewStringUTF(channel->state->name.c_str());
   ParcelWriteString(env, nullptr, parcel_pointer, name);
-  const int endpoint_fd = channel->server ? channel->state->read_fd
-                                          : channel->state->write_fd;
+  const int endpoint_fd =
+      channel->state->remote_endpoint_fd >= 0
+          ? channel->state->remote_endpoint_fd
+          : (channel->server ? channel->state->read_fd
+                             : channel->state->write_fd);
   (void)ParcelWriteGuestFileDescriptor(parcel_pointer, endpoint_fd);
   env->DeleteLocalRef(name);
 }
