@@ -8900,3 +8900,9 @@ or admission exception was added.
 - `401-optimizing-compiler` and `304-method-tracing` pass interpreter, JIT,
   and optimized lanes, covering optimizer startup and instrumentation tracing
   across compiled method entry/exit.
+
+### Runtime checkpoint 82 — 2026-09-08
+
+- `411-optimizing-arith` and `414-static-fields` pass all lanes, validating
+  arithmetic lowering and static-field lifecycle/barrier behavior on the
+  shared ART pipeline.

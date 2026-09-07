@@ -3915,3 +3915,9 @@ added; the full corpus and multi-loader identity task remain open.
 - `401-optimizing-compiler` and `304-method-tracing` pass all three lanes,
   validating optimizing-compiler execution and instrumentation method-entry/
   exit tracing on JIT code.
+
+### Runtime checkpoint 82 — 2026-09-08
+
+- `411-optimizing-arith` and `414-static-fields` pass interpreter, JIT, and
+  unmodified optimized lanes, covering optimizer arithmetic lowering and
+  static-field initialization/read/write barriers.
