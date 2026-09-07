@@ -3380,3 +3380,9 @@ added; the full corpus and multi-loader identity task remain open.
 - The live four-worker ledger has reached 170 completed tests with zero
   failures, including CFI, daemon-shutdown, and register-natives cases. The
   remaining corpus is still active and has not yet been classified.
+
+### Fresh corpus checkpoint 4 — 2026-09-08
+
+- The live ledger has reached 199 completed tests with zero failures,
+  including GC-loop, lock visitation, thread-group JNI, and app-image cases.
+  Workers remain active and no final corpus classification is claimed yet.

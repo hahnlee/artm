@@ -8409,3 +8409,9 @@ or admission exception was added.
 - The fresh ledger has completed 170 tests with no failures so far, including
   CFI, daemon-shutdown, and register-natives paths. Final classification waits
   for the live corpus to finish.
+
+### Fresh corpus checkpoint 4 — 2026-09-08
+
+- The fresh ledger has completed 199 tests without failure, covering GC-loop,
+  lock visitation, thread-group JNI, and app-image paths. The worker pool is
+  still running, so the complete-corpus verdict remains pending.
