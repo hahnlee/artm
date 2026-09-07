@@ -627,13 +627,26 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, size_t max_frames,
       walk.has_registered_quick_frame = true;
     }
   }
-  _Unwind_Backtrace(CollectNativeFrame, &walk);
-  if (!data.frames.empty()) {
-    data.frames.erase(data.frames.begin());
-    for (size_t index = 0; index < data.frames.size(); ++index) data.frames[index].num = index;
+  // Apple's libunwind authenticates each saved LR while stepping. ART's
+  // ARM64 quick and Nterp frames intentionally use Android's unsigned return
+  // address ABI, so `_Unwind_Backtrace` traps in libunwind when a native
+  // allocation stack reaches one of those frames (GC stress does this before
+  // managed main). Walk Darwin's ordinary frame records just as the remote
+  // Mach-task path does and strip, rather than authenticate, saved return
+  // addresses at the host boundary.
+  const uint64_t frame_pointer =
+      reinterpret_cast<uint64_t>(__builtin_frame_address(0));
+  uint64_t caller_record[2]{};
+  if (!ReadFrameRecord(mach_task_self(), frame_pointer, caller_record)) {
+    data.error.code = ERROR_MEMORY_INVALID;
+    return false;
   }
-  AppendManagedFrames(&walk);
-  return !data.frames.empty();
+  const uint64_t caller_pc = StripReturnAddress(caller_record[1]);
+  const bool collected = caller_pc != 0 && CollectFrameRecords(
+      mach_task_self(), caller_pc - 1, frame_pointer + sizeof(caller_record),
+      caller_record[0], &walk);
+  if (collected) AppendManagedFrames(&walk);
+  return collected;
 }
 
 bool DarwinNativeUnwindUcontext(Maps* maps, JitDebug* jit_debug, size_t max_frames, void* ucontext,

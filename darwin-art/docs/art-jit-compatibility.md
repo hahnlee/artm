@@ -3787,3 +3787,11 @@ added; the full corpus and multi-loader identity task remain open.
   green. A temporary LLDB launcher probe was discarded because it interfered
   with the runner's captured-output contract. The runtime source remains
   unchanged while the fault is symbolized at the shared ABI boundary.
+
+### Runtime checkpoint 62 — 2026-09-08
+
+- Fixed the GC-stress arm64e PAC trap by replacing local `_Unwind_Backtrace`
+  over Android quick/Nterp frames with the same Darwin Mach frame-record walk
+  and stripped return addresses used by the remote path. `074-gc-thrash` and
+  `837-deopt` now pass interpreter, JIT, and unmodified optimized lanes;
+  `137-cfi` and the unwind-provider smoke also pass.

@@ -8779,3 +8779,10 @@ or admission exception was added.
   and not a concurrent build artifact. Diagnostic launcher instrumentation was
   removed after violating captured-output handling; no runtime workaround was
   retained. Symbolization of the shared ABI boundary remains the next step.
+
+### Runtime checkpoint 62 — 2026-09-08
+
+- Local Darwin unwinding now uses Mach frame records with stripped return
+  addresses instead of Apple's PAC-authenticating libunwind across Android
+  quick/Nterp frames. GC-stress 074/837 and CFI 137 pass across all lanes;
+  the provider smoke and graphics link audit remain green.
