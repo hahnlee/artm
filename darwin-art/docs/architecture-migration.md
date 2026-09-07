@@ -8888,3 +8888,9 @@ or admission exception was added.
 
 - `410-floats` and `419-long-parameter` pass interpreter, JIT, and optimized
   lanes, covering floating-point code generation and long-argument ABI paths.
+
+### Runtime checkpoint 80 — 2026-09-08
+
+- `2239-varhandle-perf-vh-unsafe-cas` passes all lanes, validating
+  Unsafe-backed atomic CAS and managed memory ordering through the standard
+  ART JIT path.

@@ -3903,3 +3903,9 @@ added; the full corpus and multi-loader identity task remain open.
 
 - `410-floats` and `419-long-parameter` pass all three lanes, validating
   floating-point lowering and wide-argument register/stack ABI marshalling.
+
+### Runtime checkpoint 80 — 2026-09-08
+
+- `2239-varhandle-perf-vh-unsafe-cas` passes interpreter, JIT, and unmodified
+  optimized lanes, covering Unsafe-backed atomic compare-and-set and its
+  managed memory ordering/barrier path.
