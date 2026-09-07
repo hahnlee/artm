@@ -9038,3 +9038,10 @@ or admission exception was added.
   descriptor duplication and cleanup rules for future InputChannel endpoint
   import/export. Native graph and graphics-link audits pass; no process-local
   payload behavior was misrepresented as cross-process support.
+
+### Runtime checkpoint 103 — 2026-09-08
+
+- InputChannel parcel handling now follows the AOSP field order and uses the
+  broker FD duplication helpers. The implementation is deliberately not
+  marked as full cross-process support: payload and finish-ACK framing still
+  require a two-process endpoint test before that boundary can be closed.

@@ -4062,3 +4062,11 @@ added; the full corpus and multi-loader identity task remain open.
   This prepares InputChannel endpoint transfer without changing existing
   same-process semantics; endpoint adoption and framed payload delivery remain
   the next implementation slice.
+
+### Runtime checkpoint 103 — 2026-09-08
+
+- Revalidated the broker-backed descriptor path after wiring the AOSP parcel
+  order at the native boundary: token, UTF-16 name, and one endpoint FD are
+  now consumed in that order. Native graph and graphics-link audits pass;
+  remote payload framing remains explicitly unimplemented until endpoint
+  ownership is exercised by a two-process smoke.
