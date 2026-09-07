@@ -3404,3 +3404,9 @@ added; the full corpus and multi-loader identity task remain open.
 - The live ledger has reached 227 completed tests with zero failures,
   including VM-init timing and native/recursive/owned monitor paths. Workers
   remain active; the complete corpus verdict is still pending.
+
+### Fresh corpus checkpoint 8 — 2026-09-08
+
+- The live ledger has reached 234 completed tests with zero failures,
+  including JVMTI frame-pop, missed-frame-pop, exception-event, and
+  exception-catch paths. The full corpus remains active.
