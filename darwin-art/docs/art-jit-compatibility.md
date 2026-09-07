@@ -3864,3 +3864,10 @@ added; the full corpus and multi-loader identity task remain open.
 
 - `412-new-array` and `420-const-class` pass interpreter, JIT, and unmodified
   optimized lanes, covering array allocation and class-constant resolution.
+
+### Runtime checkpoint 74 — 2026-09-08
+
+- Stabilized the framework `SystemProperties.native_find` handle contract with
+  process-lifetime numeric tokens and typed handle reads. Framework compat
+  builds and `936-search-onload` pass; the latter passes interpreter, JIT, and
+  unmodified optimized lanes.

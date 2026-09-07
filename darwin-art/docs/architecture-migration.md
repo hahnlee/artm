@@ -8852,3 +8852,9 @@ or admission exception was added.
 
 - `412-new-array` and `420-const-class` pass all lanes, validating allocation
   and class-constant resolution without a Darwin-specific execution path.
+
+### Runtime checkpoint 74 — 2026-09-08
+
+- SystemProperties native handles now use stable numeric tokens mapped to
+  property names, matching Android's process-lifetime `prop_info` semantics.
+  Framework compatibility build and `936-search-onload` pass all lanes.

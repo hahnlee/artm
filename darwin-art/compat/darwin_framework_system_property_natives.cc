@@ -29,6 +29,15 @@ std::unordered_map<std::string, std::string> g_system_properties{
     {"ro.build.version.all_codenames", "REL"},
     {"ro.build.version.known_codenames", "REL"},
 };
+// Android's native property area returns process-lifetime-stable prop_info
+// pointers from __system_property_find().  The Java Handle API relies on the
+// same stability: PropertyInvalidatedCache stores the opaque value and reuses
+// it after the property's value changes.  Keep numeric tokens instead of C++
+// container addresses so a forged/reflected Handle cannot become an arbitrary
+// pointer dereference and unordered_map rehashing cannot invalidate a token.
+jlong g_next_system_property_handle = 1;
+std::unordered_map<std::string, jlong> g_system_property_handles_by_name;
+std::unordered_map<jlong, std::string> g_system_property_names_by_handle;
 
 std::optional<std::string> JavaString(JNIEnv* env, jstring value) {
   if (value == nullptr) {
@@ -55,6 +64,21 @@ std::optional<std::string> GetSystemProperty(JNIEnv* env, jstring key) {
              : std::optional<std::string>(found->second);
 }
 
+std::optional<std::string> GetSystemPropertyByHandle(jlong handle) {
+  if (handle == 0) {
+    return std::nullopt;
+  }
+  std::lock_guard lock(g_system_properties_mutex);
+  const auto named = g_system_property_names_by_handle.find(handle);
+  if (named == g_system_property_names_by_handle.end()) {
+    return std::nullopt;
+  }
+  const auto found = g_system_properties.find(named->second);
+  return found == g_system_properties.end()
+             ? std::nullopt
+             : std::optional<std::string>(found->second);
+}
+
 jstring SystemPropertiesGet(JNIEnv* env, jclass, jstring key,
                             jstring default_value) {
   const std::optional<std::string> value = GetSystemProperty(env, key);
@@ -62,9 +86,8 @@ jstring SystemPropertiesGet(JNIEnv* env, jclass, jstring key,
 }
 
 template <typename Integer>
-Integer ParseSystemPropertyInteger(JNIEnv* env, jstring key,
-                                   Integer default_value) {
-  const std::optional<std::string> value = GetSystemProperty(env, key);
+Integer ParseSystemPropertyIntegerValue(const std::optional<std::string>& value,
+                                        Integer default_value) {
   if (!value.has_value()) {
     return default_value;
   }
@@ -74,6 +97,27 @@ Integer ParseSystemPropertyInteger(JNIEnv* env, jstring key,
   return result.ec == std::errc{} && result.ptr == value->data() + value->size()
              ? parsed
              : default_value;
+}
+
+template <typename Integer>
+Integer ParseSystemPropertyInteger(JNIEnv* env, jstring key,
+                                   Integer default_value) {
+  return ParseSystemPropertyIntegerValue(GetSystemProperty(env, key),
+                                         default_value);
+}
+
+jboolean ParseSystemPropertyBooleanValue(
+    const std::optional<std::string>& value, jboolean default_value) {
+  if (!value.has_value()) {
+    return default_value;
+  }
+  if (*value == "1" || *value == "true" || *value == "on" || *value == "yes") {
+    return JNI_TRUE;
+  }
+  if (*value == "0" || *value == "false" || *value == "off" || *value == "no") {
+    return JNI_FALSE;
+  }
+  return default_value;
 }
 
 jint SystemPropertiesGetInt(JNIEnv* env, jclass, jstring key,
@@ -88,35 +132,50 @@ jlong SystemPropertiesGetLong(JNIEnv* env, jclass, jstring key,
 
 jboolean SystemPropertiesGetBoolean(JNIEnv* env, jclass, jstring key,
                                     jboolean default_value) {
-  const std::optional<std::string> value = GetSystemProperty(env, key);
-  if (!value.has_value()) {
-    return default_value;
+  return ParseSystemPropertyBooleanValue(GetSystemProperty(env, key),
+                                         default_value);
+}
+
+jlong SystemPropertiesFind(JNIEnv* env, jclass, jstring key) {
+  const std::optional<std::string> name = JavaString(env, key);
+  if (!name.has_value()) {
+    return 0;
   }
-  if (*value == "1" || *value == "true" || *value == "on" || *value == "yes") {
-    return JNI_TRUE;
+  std::lock_guard lock(g_system_properties_mutex);
+  if (!g_system_properties.contains(*name)) {
+    return 0;
   }
-  if (*value == "0" || *value == "false" || *value == "off" || *value == "no") {
-    return JNI_FALSE;
+  const auto existing = g_system_property_handles_by_name.find(*name);
+  if (existing != g_system_property_handles_by_name.end()) {
+    return existing->second;
   }
-  return default_value;
+  const jlong handle = g_next_system_property_handle++;
+  g_system_property_handles_by_name.emplace(*name, handle);
+  g_system_property_names_by_handle.emplace(handle, *name);
+  return handle;
 }
 
-jlong SystemPropertiesFind(JNIEnv*, jclass, jstring) { return 0; }
-
-jstring SystemPropertiesGetByHandle(JNIEnv* env, jclass, jlong) {
-  return env->NewStringUTF("");
+jstring SystemPropertiesGetByHandle(JNIEnv* env, jclass, jlong handle) {
+  const std::optional<std::string> value = GetSystemPropertyByHandle(handle);
+  return env->NewStringUTF(value.has_value() ? value->c_str() : "");
 }
 
-jint SystemPropertiesGetIntByHandle(jlong, jint default_value) {
-  return default_value;
+jint SystemPropertiesGetIntByHandle(JNIEnv*, jclass, jlong handle,
+                                    jint default_value) {
+  return ParseSystemPropertyIntegerValue(GetSystemPropertyByHandle(handle),
+                                         default_value);
 }
 
-jlong SystemPropertiesGetLongByHandle(jlong, jlong default_value) {
-  return default_value;
+jlong SystemPropertiesGetLongByHandle(JNIEnv*, jclass, jlong handle,
+                                      jlong default_value) {
+  return ParseSystemPropertyIntegerValue(GetSystemPropertyByHandle(handle),
+                                         default_value);
 }
 
-jboolean SystemPropertiesGetBooleanByHandle(jlong, jboolean default_value) {
-  return default_value;
+jboolean SystemPropertiesGetBooleanByHandle(JNIEnv*, jclass, jlong handle,
+                                            jboolean default_value) {
+  return ParseSystemPropertyBooleanValue(GetSystemPropertyByHandle(handle),
+                                         default_value);
 }
 
 void SystemPropertiesSet(JNIEnv* env, jclass, jstring key, jstring value) {
