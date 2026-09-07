@@ -4118,7 +4118,22 @@ added; the full corpus and multi-loader identity task remain open.
 
 ### Runtime checkpoint 110 — 2026-09-08
 
+- Hardened the shared full-duplex InputChannel stream: the callback now drains
+  arbitrary alternating input and finish-ACK frames until no decoder advances,
+  and ignores unsolicited ACK sequences instead of growing the completion
+  queue. Incremental native compilation, graphics-link audit, Rust formatting,
+  and diff checks pass; a process-separated end-to-end smoke remains open.
+
+### Runtime checkpoint 110 — 2026-09-08
+
 - Added ACK-aware remote stream decoding with separate local/remote Looper
   registrations. Input and finish-ACK frames can now interleave without being
   dropped, and remote ACKs enter the same bounded finish wait queue. Native
   graph check passes; process-separated end-to-end smoke remains pending.
+
+### Runtime checkpoint 111 — 2026-09-08
+
+- Fixed the APK launch acceptance harness for empty split lists under Bash
+  nounset, allowing base-only AOSP APK runs to reach the runtime instead of
+  aborting before launch. `bash -n` and diff checks pass; the two-process
+  InputChannel smoke remains the next validation boundary.

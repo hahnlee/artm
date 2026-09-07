@@ -52,6 +52,7 @@ source_apk="$(cd "$(dirname "$apk")" && pwd)/$(basename "$apk")"
   exit 66
 }
 normalized_split_apks=()
+if [[ ${#split_apks[@]} -gt 0 ]]; then
 for split_apk in "${split_apks[@]}"; do
   split_apk="$(cd "$(dirname "$split_apk")" && pwd)/$(basename "$split_apk")"
   [[ -f "$split_apk" ]] || {
@@ -64,6 +65,7 @@ for split_apk in "${split_apks[@]}"; do
   }
   normalized_split_apks+=("$split_apk")
 done
+fi
 split_apks=("${normalized_split_apks[@]}")
 [[ "$seconds" =~ ^([0-9]+)(\.[0-9]+)?$ ]] || {
   echo "VISIBLE_SECONDS must be a non-negative number" >&2

@@ -9088,9 +9088,24 @@ or admission exception was added.
   wait semantics. A real two-process smoke is still required before claiming
   complete InputTransport parity.
 
+### Runtime checkpoint 111 — 2026-09-08
+
+- The APK runner now handles an empty split-APK vector safely with `set -u`,
+  removing a harness-only failure that prevented base-only acceptance runs.
+  Runtime transport parity is unchanged and still requires the two-process
+  smoke.
+
 ### Runtime checkpoint 109 — 2026-09-08
 
 - Finish acknowledgements now have a dedicated validated wire frame and share
   the existing condition-variable wait path. Decoder ordering handles ACK and
   input interleaving without discarding buffered frames; process-separated
   end-to-end validation is still pending.
+
+### Runtime checkpoint 110 — 2026-09-08
+
+- The imported InputChannel endpoint now safely multiplexes any alternating
+  sequence of validated payload and completion frames. Only ACKs for registered
+  pending sequences enter the bounded completion path, preventing an external
+  peer from accumulating unsolicited results. Native graph and graphics-link
+  verification pass; the remaining boundary is a real two-process smoke.
