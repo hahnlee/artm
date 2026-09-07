@@ -8307,3 +8307,11 @@ or admission exception was added.
   `LoadedByMyClassLoader`; the existing DexCache causes AOSP's duplicate-loader
   rejection. The next fix must reproduce AOSP's app-image ownership transition
   while retaining that guard.
+
+### 497 class-table ownership trace — 2026-09-08
+
+- `RegisterDexFile` sees the canonical table populated but the custom loader's
+  table still null when `defineClassNative` requests the same DexFile. This
+  makes the ownership gap concrete: publish the custom loader table/cache at
+  the AOSP lifecycle point before defining the class, without weakening the
+  duplicate-loader contract.

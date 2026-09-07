@@ -3268,3 +3268,12 @@ added; the full corpus and multi-loader identity task remain open.
   loader `0x1000209f768`. An existing DexCache triggers the standard AOSP
   duplicate-loader rejection. The remaining fix is the app-image/class-table
   ownership transition, not cookie decoding or pointer transport.
+
+### 497 class-table ownership trace — 2026-09-08
+
+- The same run records canonical loader table `0x90f188140` and custom loader
+  table `0x0` at `RegisterDexFile`. The existing DexCache therefore cannot be
+  considered the custom loader's cache and AOSP rejects registration. This
+  precisely identifies the missing lifecycle step: a custom loader's table and
+  app-image DexCache association must be published before class definition,
+  while test 156's duplicate rejection remains unchanged.
