@@ -3550,6 +3550,16 @@ added; the full corpus and multi-loader identity task remain open.
   for the next runtime fix without changing test semantics or adding a
   fallback.
 
+### Diagnostic checkpoint 31 — 2026-09-08
+
+- Re-running on the current machine confirms the prior corpus state: `936` still
+  faults in generated code during injected boot/system-Dex loading, while
+  `938` still reports the untransformed `OptionalLong`; `934` remains green in
+  both interpreter and JIT lanes.
+- The failure-log change is validated: 936 now exposes the native signal tail
+  instead of only a process exit code. No fallback or test-specific bypass was
+  introduced.
+
 ### Diagnostic checkpoint 30 — 2026-09-08
 
 - The improved runner reproduced `936-search-onload` as an ART generated-code

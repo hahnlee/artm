@@ -8568,6 +8568,14 @@ or admission exception was added.
   making phase ordering, class-linker, and signal failures directly actionable
   during focused compatibility runs.
 
+### Diagnostic checkpoint 31 — 2026-09-08
+
+- Current-machine reruns preserve the same Android semantic boundary: ordinary
+  JVMTI transformation works, but injected boot-Dex loading and boot-class
+  transformation remain incomplete.
+- The runner now provides the native ART fault tail needed to fix the runtime
+  class-linker path rather than masking it in the harness.
+
 ### Diagnostic checkpoint 30 — 2026-09-08
 
 - The host/runtime split remains intact: ordinary JVMTI transformation is
