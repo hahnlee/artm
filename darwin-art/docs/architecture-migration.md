@@ -8786,3 +8786,10 @@ or admission exception was added.
   addresses instead of Apple's PAC-authenticating libunwind across Android
   quick/Nterp frames. GC-stress 074/837 and CFI 137 pass across all lanes;
   the provider smoke and graphics link audit remain green.
+
+### Runtime checkpoint 63 — 2026-09-08
+
+- AOSP marks 497 as a known broken duplicate-DexFile loader and disables it;
+  its failure is therefore not evidence for weakening ClassLinker registration.
+  The valid 156 multi-loader rejection remains the compatibility contract, so
+  investigation continues with supported dynamic-loader tests instead.

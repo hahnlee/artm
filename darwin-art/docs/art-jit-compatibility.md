@@ -3795,3 +3795,11 @@ added; the full corpus and multi-loader identity task remain open.
   and stripped return addresses used by the remote path. `074-gc-thrash` and
   `837-deopt` now pass interpreter, JIT, and unmodified optimized lanes;
   `137-cfi` and the unwind-provider smoke also pass.
+
+### Runtime checkpoint 63 — 2026-09-08
+
+- Audited the remaining 497 class-loader failure against pinned AOSP
+  `knownfailures.json`: it is an unconditional upstream disable for the
+  broken duplicate-DexFile loader contract, and relaxing `RegisterDexFile`
+  would regress the valid 156 multi-loader rejection test. No ClassLinker
+  weakening was added; valid dynamic-loader tests are the next coverage set.
