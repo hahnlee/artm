@@ -8493,3 +8493,10 @@ or admission exception was added.
 
 - Representative rows `420-const-class` and `2286-invokevirtual-invokeexact`
   were rechecked; interpreter, JIT, and unmodified lanes pass.
+
+### Fresh corpus checkpoint 18 — 2026-09-08
+
+- 675 corpus rows are complete with no new failures since the runner repair.
+  The only current semantic failure is the upstream-known broken
+  `497-inlining-and-class-loader` fixture (AOSP bug b/34193123), not a
+  platform-specific fallback or allowlist condition.

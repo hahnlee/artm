@@ -3467,3 +3467,11 @@ added; the full corpus and multi-loader identity task remain open.
 - Representative historical failures `420-const-class` and
   `2286-invokevirtual-invokeexact` pass all three lanes under the fixed
   runner, confirming the ledger failures were not ART/JIT semantics.
+
+### Fresh corpus checkpoint 18 — 2026-09-08
+
+- The corpus has passed 675 cases with no new failures after the runner fix.
+  The remaining semantic row is AOSP's own disabled `497-inlining-and-class-
+  loader` test; its `knownfailures.json` entry documents a deliberately broken
+  loader that re-registers an already-registered DexFile under another loader.
+  This is kept visible rather than hidden behind a Darwin gate.
