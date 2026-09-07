@@ -8084,3 +8084,11 @@ the original bytecode rather than translating it to Java.
   production graphics targets still link the runtime-owned providers. The
   replacement host now passes `build-skia` with 120 IOSurface frames,
   `staging-copies=0`, and the expected final/sequence hashes.
+
+### ClassLoader regression verification — 2026-09-09
+
+- After fixing runtime archive invalidation, a clean parallel corpus run for
+  `142-classloader2` through `158-app-image-class-table` passed all 16 tests,
+  including interpreter, JIT, and unchanged-source lanes. The previously
+  failing `156-register-dex-file-multi-loader` now passes with AOSP's real
+  duplicate-registration rejection.
