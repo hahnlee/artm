@@ -115,6 +115,13 @@ def _post_requires_argument(contract: object) -> bool:
         for item in items:
             arguments = getattr(item, "arguments", {})
             if isinstance(arguments, dict):
+                # Branch predicates can reference $1 even when the branch
+                # body only contains ordinary file operations (for example
+                # AOSP's multidex javac_post scripts).  Treat the predicate
+                # as part of the contract's argument requirements so the
+                # caller supplies the logical classes directory.
+                if value_has_argument(arguments.get("condition")):
+                    return True
                 if any(value_has_argument(value) for value in arguments.values()):
                     return True
                 if operations(arguments.get("body")) or operations(arguments.get("then")) \

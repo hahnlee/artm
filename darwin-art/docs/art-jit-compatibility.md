@@ -3217,3 +3217,11 @@ added; the full corpus and multi-loader identity task remain open.
   weakening the staging contract. The graphics bootstrap now rebuilds cleanly
   with 256 cached objects and the staged cookie hook; 497 still fails before
   the collection hook and remains open.
+
+### Corpus regression refresh — 2026-09-08
+
+- Re-ran the five non-497 entries previously recorded as failed: `126`, `149`,
+  `2031`, `2271`, and `304`. Each now passes interpreter, JIT, and unmodified
+  source/optimized lanes. The 126 result also validates the typed `javac_post`
+  argument detection for AOSP's multidex branch. The only remaining reproduced
+  runtime failure is `497-inlining-and-class-loader`.

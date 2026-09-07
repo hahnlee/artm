@@ -8261,3 +8261,11 @@ or admission exception was added.
   the malformed native registration experiment. A clean graphics bootstrap
   confirms the source-shadow contract; no loader behavior was changed and the
   497 ownership failure remains the next implementation target.
+
+### Corpus regression refresh — 2026-09-08
+
+- Current-runtime reruns pass `126-miranda-multidex`,
+  `149-suspend-all-stress`, `2031-zygote-compiled-frame-deopt`,
+  `2271-profile-inline-cache`, and `304-method-tracing` in interpreter, JIT,
+  and unmodified lanes. The runner now recognizes branch predicates using the
+  AOSP `javac_post` `$1` contract. Only 497 remains reproducibly failing.
