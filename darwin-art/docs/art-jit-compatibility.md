@@ -3549,3 +3549,12 @@ added; the full corpus and multi-loader identity task remain open.
   invocation exits unexpectedly, preserving ART signal and JVMTI diagnostics
   for the next runtime fix without changing test semantics or adding a
   fallback.
+
+### Diagnostic checkpoint 30 — 2026-09-08
+
+- The improved runner reproduced `936-search-onload` as an ART generated-code
+  SIGSEGV and now preserves the native signal/register report.
+- `934-load-transform` passes in both interpreter and JIT modes, while
+  `938-load-transform-bcp` still misses only the boot-class transformation;
+  this narrows the implementation target to the boot-class JVMTI callback and
+  injected-Dex class-linker boundary rather than generic retransformation.

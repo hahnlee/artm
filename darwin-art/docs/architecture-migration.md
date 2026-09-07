@@ -8567,3 +8567,11 @@ or admission exception was added.
 - Unexpected host exits now retain the last 40 lines of the detached ART log,
   making phase ordering, class-linker, and signal failures directly actionable
   during focused compatibility runs.
+
+### Diagnostic checkpoint 30 — 2026-09-08
+
+- The host/runtime split remains intact: ordinary JVMTI transformation is
+  green, but boot-class injection and boot-class transformation still diverge
+  from AOSP.
+- Native crash tails are now retained by the test runner, so the next fix can
+  be validated against the actual ART class-linker phase and fault site.
