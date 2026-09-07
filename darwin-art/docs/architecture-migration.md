@@ -8529,3 +8529,9 @@ or admission exception was added.
 - 979 rows are complete. Recorded failures remain attributable to the pre-fix
   runner SyntaxError window or the upstream-known 497 fixture; no post-fix
   ART/JIT failure is present.
+
+### Fresh corpus checkpoint 24 — 2026-09-08
+
+- 994 rows are complete. The post-repair suffix is fully green; the 110
+  recorded failures remain historical SyntaxError rows plus AOSP's known
+  broken 497 fixture.
