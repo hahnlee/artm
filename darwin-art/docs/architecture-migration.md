@@ -8130,3 +8130,13 @@ the original bytecode rather than translating it to Java.
   interpreter, JIT, and unchanged-source lanes. Dynamic Nterp CFA semantics
   still require a separate ABI-correct unwind implementation and are not
   claimed complete.
+
+### ClassLoader regression diagnosis — 2026-09-09
+
+- Reproduced `497-inlining-and-class-loader` with the unmodified AOSP test and
+  printed its suppressed exception temporarily (then reverted the test file).
+  The failure is AOSP `ClassLinker::RegisterDexFile` rejecting the same native
+  DexFile pointer when the test's second custom loader calls
+  `loadClassBinaryName`; this is a real multi-loader identity/lifecycle gap,
+  not a runner or JIT-only failure. A general fix is still required; no test
+  input or duplicate-registration rejection was weakened.
