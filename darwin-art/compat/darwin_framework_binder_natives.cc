@@ -722,16 +722,27 @@ void DecodeRemoteAckFramesLocked(DarwinInputChannelState* channel) {
       channel->remote_rx.clear();
       return;
     }
+    bool queued = false;
     {
       std::lock_guard<std::mutex> lock(channel->finish_mutex);
-      channel->finish_acks.push_back(DarwinInputChannelState::FinishAck{
-          .sequence = static_cast<jint>(frame.sequence),
-          .handled = frame.handled != 0});
+      const jint sequence = static_cast<jint>(frame.sequence);
+      if (channel->pending_finish_set.contains(sequence)) {
+        auto existing = std::find_if(
+            channel->finish_acks.begin(), channel->finish_acks.end(),
+            [sequence](const auto& ack) { return ack.sequence == sequence; });
+        if (existing != channel->finish_acks.end()) {
+          existing->handled = frame.handled != 0;
+        } else {
+          channel->finish_acks.push_back(DarwinInputChannelState::FinishAck{
+              .sequence = sequence, .handled = frame.handled != 0});
+        }
+        queued = true;
+      }
     }
     channel->remote_rx.erase(
         channel->remote_rx.begin(),
         channel->remote_rx.begin() + static_cast<ptrdiff_t>(sizeof(frame)));
-    channel->finish_condition.notify_all();
+    if (queued) channel->finish_condition.notify_all();
   }
 }
 
@@ -1423,9 +1434,14 @@ int InputChannelTransportCallback(int fd, int events, void* data) {
   }
   {
     std::lock_guard<std::mutex> lock(channel->packet_mutex);
-    DecodeRemoteAckFramesLocked(channel);
-    (void)DecodeRemoteInputFramesLocked(channel);
-    DecodeRemoteAckFramesLocked(channel);
+    // Both frame types share one byte stream. Iterate until neither decoder
+    // advances so any number of alternating input/ACK frames is preserved.
+    for (;;) {
+      const size_t before = channel->remote_rx.size();
+      DecodeRemoteAckFramesLocked(channel);
+      (void)DecodeRemoteInputFramesLocked(channel);
+      if (channel->remote_rx.size() == before) break;
+    }
   }
   std::shared_ptr<DarwinInputReceiver> receiver;
   {
