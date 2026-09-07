@@ -3578,6 +3578,14 @@ added; the full corpus and multi-loader identity task remain open.
   regressions. Nterp unit checks pass 11/11, along with runtime-arm64
   Mach-O/CFI/DWARF audits.
 
+### Nterp checkpoint 34 — 2026-09-08
+
+- Rebuilt the graphics/runtime link closure from current sources; all native
+  closure audits remain green and do not change the JVMTI result.
+- Focused reruns still reproduce `936` generated-code SIGSEGV and `938`
+  missing boot-class transformation, confirming these are runtime semantics
+  rather than stale build artifacts.
+
 ### Nterp checkpoint 33 — 2026-09-08
 
 - Revalidated ARM64 Nterp normalization on the current machine: per-entry

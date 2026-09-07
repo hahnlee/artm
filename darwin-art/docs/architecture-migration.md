@@ -8597,3 +8597,9 @@ or admission exception was added.
   boundary, preserving Android's logical compressed-reference contract.
 - Remaining divergence is isolated to JVMTI boot-class search and
   transformation semantics; no interpreter fallback or test gate was added.
+
+### Runtime checkpoint 34 — 2026-09-08
+
+- A fresh incremental graphics/runtime link rebuild passes its strict closure
+  audit; focused JVMTI failures persist, so the remaining work is in the ART
+  boot-class callback/class-linker path itself.
