@@ -8929,3 +8929,11 @@ or admission exception was added.
 
 - `412-new-array --gcstress` passes all lanes, covering array allocation and
   reference barriers while the concurrent-copying collector is stressed.
+
+### Runtime checkpoint 87 — 2026-09-08
+
+- Added process-local InputChannel Parcel serialization/restoration of name,
+  endpoint role, and shared Binder token identity. The implementation matches
+  the current single-process Darwin transport while leaving cross-process FD
+  transfer as an explicit future transport-layer task; native graph check is
+  green.

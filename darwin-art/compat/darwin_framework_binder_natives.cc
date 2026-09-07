@@ -81,6 +81,8 @@ DarwinParcel* Parcel(jlong pointer) {
   return reinterpret_cast<DarwinParcel*>(static_cast<std::uintptr_t>(pointer));
 }
 
+DarwinParcel* JavaParcel(JNIEnv* env, jobject parcel);
+
 template <typename T>
 jint ParcelWriteScalar(jlong pointer, T value) {
   auto* parcel = Parcel(pointer);
@@ -794,6 +796,34 @@ struct DarwinInputChannel {
   bool disposed = false;
 };
 
+std::mutex g_input_channel_registry_mutex;
+std::vector<std::weak_ptr<DarwinInputChannelState>> g_input_channel_registry;
+
+void RegisterInputChannelState(
+    const std::shared_ptr<DarwinInputChannelState>& state) {
+  std::lock_guard<std::mutex> lock(g_input_channel_registry_mutex);
+  std::erase_if(g_input_channel_registry,
+                [](const auto& candidate) { return candidate.expired(); });
+  g_input_channel_registry.emplace_back(state);
+}
+
+std::shared_ptr<DarwinInputChannelState> FindInputChannelState(
+    JNIEnv* env, jobject token) {
+  if (env == nullptr || token == nullptr) return nullptr;
+  std::lock_guard<std::mutex> lock(g_input_channel_registry_mutex);
+  std::shared_ptr<DarwinInputChannelState> result;
+  std::erase_if(g_input_channel_registry, [&](const auto& candidate) {
+    const auto state = candidate.lock();
+    if (state == nullptr) return true;
+    if (result == nullptr && state->connection_token != nullptr &&
+        env->IsSameObject(state->connection_token, token) == JNI_TRUE) {
+      result = state;
+    }
+    return false;
+  });
+  return result;
+}
+
 void InputChannelFinalizer(void* pointer) {
   delete static_cast<DarwinInputChannel*>(pointer);
 }
@@ -847,6 +877,7 @@ jlongArray InputChannelOpenPair(JNIEnv* env, jclass, jstring name) {
   if (state->connection_token == nullptr || env->ExceptionCheck()) {
     return nullptr;
   }
+  RegisterInputChannelState(state);
   auto* client = new (std::nothrow) DarwinInputChannel{state, false, false};
   auto* server = new (std::nothrow) DarwinInputChannel{state, true, false};
   if (client == nullptr || server == nullptr) {
@@ -863,8 +894,61 @@ jlongArray InputChannelOpenPair(JNIEnv* env, jclass, jstring name) {
   return result;
 }
 
-jlong InputChannelReadParcel(JNIEnv*, jobject, jobject) { return 0; }
-void InputChannelWriteParcel(JNIEnv*, jobject, jobject, jlong) {}
+constexpr jint kDarwinInputChannelParcelMagic = 0x44414943;  // DAIC
+constexpr jint kDarwinInputChannelParcelVersion = 1;
+
+jlong InputChannelReadParcel(JNIEnv* env, jobject, jobject parcel_object) {
+  DarwinParcel* parcel = JavaParcel(env, parcel_object);
+  if (parcel == nullptr ||
+      ParcelReadInt(reinterpret_cast<jlong>(parcel)) !=
+          kDarwinInputChannelParcelMagic ||
+      ParcelReadInt(reinterpret_cast<jlong>(parcel)) !=
+          kDarwinInputChannelParcelVersion) {
+    return 0;
+  }
+  jstring name = ParcelReadString(env, nullptr,
+                                  reinterpret_cast<jlong>(parcel));
+  const jint server = ParcelReadInt(reinterpret_cast<jlong>(parcel));
+  jobject token = ParcelReadStrongBinder(env, nullptr,
+                                         reinterpret_cast<jlong>(parcel));
+  std::shared_ptr<DarwinInputChannelState> state =
+      FindInputChannelState(env, token);
+  if (state != nullptr && name != nullptr) {
+    const char* utf = env->GetStringUTFChars(name, nullptr);
+    if (utf == nullptr || state->name != utf) {
+      state.reset();
+    }
+    if (utf != nullptr) env->ReleaseStringUTFChars(name, utf);
+  } else {
+    state.reset();
+  }
+  env->DeleteLocalRef(token);
+  env->DeleteLocalRef(name);
+  if (state == nullptr || env->ExceptionCheck()) return 0;
+  auto* channel = new (std::nothrow)
+      DarwinInputChannel{state, server != 0, false};
+  return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(channel));
+}
+
+void InputChannelWriteParcel(JNIEnv* env, jobject, jobject parcel_object,
+                             jlong pointer) {
+  DarwinParcel* parcel = JavaParcel(env, parcel_object);
+  const auto* channel = InputChannel(pointer);
+  if (parcel == nullptr || channel == nullptr || channel->disposed ||
+      channel->state == nullptr ||
+      channel->state->connection_token == nullptr) {
+    return;
+  }
+  const jlong parcel_pointer = reinterpret_cast<jlong>(parcel);
+  ParcelWriteInt(parcel_pointer, kDarwinInputChannelParcelMagic);
+  ParcelWriteInt(parcel_pointer, kDarwinInputChannelParcelVersion);
+  jstring name = env->NewStringUTF(channel->state->name.c_str());
+  ParcelWriteString(env, nullptr, parcel_pointer, name);
+  ParcelWriteInt(parcel_pointer, channel->server ? 1 : 0);
+  ParcelWriteStrongBinder(env, nullptr, parcel_pointer,
+                          channel->state->connection_token);
+  env->DeleteLocalRef(name);
+}
 
 // Build the same framework InputEvent objects used by the owner dispatch path.
 // The callback supplies the stored ViewRoot so focus, touch-mode, and finish

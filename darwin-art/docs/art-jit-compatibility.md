@@ -3946,3 +3946,10 @@ added; the full corpus and multi-loader identity task remain open.
 - `412-new-array --gcstress` passes interpreter, JIT, and unmodified optimized
   lanes, validating array allocation and reference barriers under concurrent
   copying GC stress.
+
+### Runtime checkpoint 87 — 2026-09-08
+
+- Implemented process-local `InputChannel` Parcel round-trip for the Darwin
+  transport: name, endpoint role, and shared Binder token are serialized and
+  restored, with registry lookup preserving pair/dup identity. Native graph
+  incremental check passes.
