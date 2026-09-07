@@ -3830,3 +3830,9 @@ added; the full corpus and multi-loader identity task remain open.
 
 - `1946-list-descriptors` passes all three lanes, validating JVMTI's
   loader-specific DEX descriptor enumeration on the normal runtime path.
+
+### Runtime checkpoint 68 — 2026-09-08
+
+- `2239-varhandle-perf-vh-cas` passes interpreter, JIT, and unmodified
+  optimized lanes, exercising VarHandle compare-and-set lowering and its
+  managed-memory barriers through the standard ART ABI.

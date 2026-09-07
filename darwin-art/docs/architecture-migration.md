@@ -8817,3 +8817,9 @@ or admission exception was added.
 
 - `1946-list-descriptors` passes interpreter, JIT, and optimized lanes, adding
   JVMTI loader-specific DEX descriptor enumeration to the compatibility matrix.
+
+### Runtime checkpoint 68 — 2026-09-08
+
+- `2239-varhandle-perf-vh-cas` passes all three lanes, covering JIT VarHandle
+  compare-and-set and managed-memory barrier behavior without a Darwin-only
+  execution path.
