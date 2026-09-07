@@ -3984,4 +3984,11 @@ added; the full corpus and multi-loader identity task remain open.
 
 - KeyCharacterMap Parcel support now preserves a Darwin map's device id with
   a versioned magic record instead of silently resetting to device 1. Native
-  graph check passes; managed identity/type smoke is in progress.
+  graph check passes; managed `obtainEmptyMap` → Parcel → CREATOR identity and
+  keyboard-type smoke passes interpreter, JIT, and optimized lanes.
+
+### Runtime checkpoint 93 — 2026-09-08
+
+- `9999-key-character-map-parcel-smoke` verifies device-id identity and FULL
+  keyboard type across all lanes. `2255-checker-branch-redirection` also
+  passes interpreter, JIT, and unmodified optimized lanes.

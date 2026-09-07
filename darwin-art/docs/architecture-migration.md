@@ -8967,4 +8967,11 @@ or admission exception was added.
 
 - KeyCharacterMap Parcel serialization now preserves device id through a
   versioned record, removing the previous silent device-1 reset. Native graph
-  check passes; managed round-trip identity/type smoke is being finalized.
+  check passes; managed `obtainEmptyMap` → Parcel → CREATOR identity and
+  keyboard-type smoke passes interpreter, JIT, and optimized lanes.
+
+### Runtime checkpoint 93 — 2026-09-08
+
+- `9999-key-character-map-parcel-smoke` passes all execution lanes, validating
+  device-id identity and FULL keyboard type; `2255-checker-branch-redirection`
+  also passes interpreter, JIT, and optimized lanes.
