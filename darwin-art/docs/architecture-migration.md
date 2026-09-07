@@ -8020,3 +8020,9 @@ the original bytecode rather than translating it to Java.
 ### Audit progress — 2026-09-08 (live update 21)
 
 - The pre-rebuild audit reached 982/1,075 contracts: 952 pass and 30 fail.
+
+### Environment verification — 2026-09-09
+
+- On the replacement ARM64 macOS host, the Rust host test suite (10 tests),
+  host `cargo check`, and D8 wrapper shell syntax check all pass. Full ART
+  compatibility verification remains active.

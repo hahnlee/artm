@@ -2953,3 +2953,9 @@ any of these tests; Java rewrites are not acceptable evidence.
 ### Audit progress — 2026-09-08 (live update 22)
 
 - The pre-rebuild audit reached 988/1,075 contracts: 958 pass and 30 fail.
+
+### Environment verification — 2026-09-09
+
+- On the replacement ARM64 macOS host, `cargo test -p darwin-art-host` passed
+  all 10 unit/integration tests, `cargo check -p darwin-art-host` passed, and
+  `bash -n tools/d8-jar-compat.sh` passed. The full ART goal remains active.
