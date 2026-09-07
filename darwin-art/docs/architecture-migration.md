@@ -8189,3 +8189,10 @@ or admission exception was added.
   all pass.
 - No interpreter dispatch or JIT admission policy changed. The generic
   DexFile/ClassLoader identity gap in case 497 is still next.
+
+### Multi-loader boundary experiment — 2026-09-08
+
+- AOSP 156 passes all interpreter/JIT/source lanes, preserving the canonical
+  duplicate registration error. Reopening fresh Java DexFile objects in the
+  PathClassLoader did not resolve 497 and was reverted; the next fix must model
+  app-image and path-list DexFile ownership at the ART loading boundary.

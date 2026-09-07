@@ -3131,3 +3131,12 @@ added; the full corpus and multi-loader identity task remain open.
 - `build-nterp-arm64ng`, all 13 bootstrap tests, runtime graphics rebuild, and
   the complete `audit-art-jit.sh` acceptance pass. ClassLoader case 497 remains
   the unrelated open compatibility task.
+
+### Multi-loader boundary experiment — 2026-09-08
+
+- Re-ran unchanged AOSP `156-register-dex-file-multi-loader`: interpreter,
+  JIT, and source lanes pass, confirming duplicate-DexFile rejection remains
+  AOSP-compatible. A generic attempt to reopen PathClassLoader DexFiles did
+  not fix `497-inlining-and-class-loader` and was removed; the remaining gap
+  is the app-image-versus-path-list identity boundary, not a broad rejection
+  bypass.
