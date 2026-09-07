@@ -3741,6 +3741,12 @@ added; the full corpus and multi-loader identity task remain open.
   later dex2oat reference path, indicating the base-relative conversion is
   active but an additional absolute-vs-offset representation remains.
 
+### Runtime checkpoint 56 — 2026-09-08
+
+- Re-ran `938-load-transform-bcp` after the shared `ObjPtr` update; interpreter
+  and JIT lanes both pass. The remaining 936 failure is a separate dex2oat
+  internal reference path, not a regression in the fixed boot-classpath path.
+
 ### Runtime checkpoint 53 — 2026-09-08
 
 - A JNI field-ID fallback is not sufficient because the null occurs during ART

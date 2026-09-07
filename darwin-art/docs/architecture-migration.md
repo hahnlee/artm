@@ -8736,6 +8736,11 @@ or admission exception was added.
   a later dex2oat null-page fault. This confirms partial progress and leaves an
   absolute-pointer versus base-offset representation mismatch to isolate.
 
+### Runtime checkpoint 56 — 2026-09-08
+
+- 938 remains green in interpreter and JIT after the common `ObjPtr` change;
+  936 is narrowed to a separate dex2oat internal reference failure.
+
 ### Runtime checkpoint 53 — 2026-09-08
 
 - The null is observed before JNI dispatch, so field-ID fallback alone cannot
