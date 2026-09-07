@@ -8598,6 +8598,14 @@ or admission exception was added.
 - Remaining divergence is isolated to JVMTI boot-class search and
   transformation semantics; no interpreter fallback or test gate was added.
 
+### Runtime checkpoint 35 — 2026-09-08
+
+- A clean runtime/graphics closure rebuild does not alter the focused JVMTI
+  failures, confirming a native ART boot-loader semantic defect rather than a
+  stale artifact.
+- Investigation is narrowed to the Android-shaped `ClassPreDefine` and boot
+  `ClassLoaderHelper` path; host-side fallbacks remain unchanged.
+
 ### Runtime checkpoint 34 — 2026-09-08
 
 - A fresh incremental graphics/runtime link rebuild passes its strict closure

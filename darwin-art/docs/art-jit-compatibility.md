@@ -3550,6 +3550,16 @@ added; the full corpus and multi-loader identity task remain open.
   for the next runtime fix without changing test semantics or adding a
   fallback.
 
+### Runtime checkpoint 35 — 2026-09-08
+
+- Rebuilt the strict runtime/graphics closure and reran the focused JVMTI
+  cases. The failures persist independently of stale artifacts: `936` faults
+  while resolving the injected boot/system DEX and `938` misses the boot-class
+  load hook, whereas ordinary `934` transformation remains green.
+- The next implementation boundary is the upstream `ClassPreDefine` to
+  `ClassLoaderHelper::AddToClassLoader` boot-loader path; no harness bypass was
+  added.
+
 ### Diagnostic checkpoint 31 — 2026-09-08
 
 - Re-running on the current machine confirms the prior corpus state: `936` still
