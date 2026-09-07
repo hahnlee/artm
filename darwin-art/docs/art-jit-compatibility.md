@@ -3734,6 +3734,13 @@ added; the full corpus and multi-loader identity task remain open.
   `936-search-onload` now reaches a different dex2oat internal reference fault,
   so the fix is productive but the full generated-code path remains open.
 
+### Runtime checkpoint 55 — 2026-09-08
+
+- The shared `ObjPtr` boundary patch builds cleanly and preserves the 938
+  interpreter/JIT regression test. 936 now faults with a null-page access in a
+  later dex2oat reference path, indicating the base-relative conversion is
+  active but an additional absolute-vs-offset representation remains.
+
 ### Runtime checkpoint 53 — 2026-09-08
 
 - A JNI field-ID fallback is not sufficient because the null occurs during ART

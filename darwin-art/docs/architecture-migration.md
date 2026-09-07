@@ -8730,6 +8730,12 @@ or admission exception was added.
   936 advances past the prior static-field boundary but still fails in a
   dex2oat internal reference path requiring another ABI audit.
 
+### Runtime checkpoint 55 — 2026-09-08
+
+- The common `ObjPtr` conversion compiles and keeps 938 green, but 936 moves to
+  a later dex2oat null-page fault. This confirms partial progress and leaves an
+  absolute-pointer versus base-offset representation mismatch to isolate.
+
 ### Runtime checkpoint 53 — 2026-09-08
 
 - The null is observed before JNI dispatch, so field-ID fallback alone cannot
