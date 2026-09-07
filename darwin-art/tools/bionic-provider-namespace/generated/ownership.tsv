@@ -83,6 +83,7 @@ libc.so	__cxa_thread_atexit_impl	LIBC	dso-lifecycle
 libc.so	__errno	LIBC	errno
 libc.so	__fwrite_chk	LIBC	stdio
 libc.so	__fwrite_chk	LIBC_N	stdio
+libc.so	__get_h_errno	LIBC	dns
 libc.so	__gnu_strerror_r	LIBC	strerror
 libc.so	__memchr_chk	LIBC	leaf
 libc.so	__memcpy_chk	LIBC	leaf
@@ -139,6 +140,7 @@ libc.so	android_fdsan_exchange_owner_tag	LIBC	socket
 libc.so	android_fdsan_exchange_owner_tag	LIBC_Q	socket
 libc.so	android_get_device_api_level	LIBC	process-state
 libc.so	android_get_device_api_level	LIBC_Q	process-state
+libc.so	android_getaddrinfofornet	LIBC	dns
 libc.so	android_set_abort_message	LIBC	abort
 libc.so	arc4random	LIBC	process-state
 libc.so	arc4random_buf	LIBC	process-state
@@ -148,6 +150,7 @@ libc.so	atof	LIBC	float-conversion
 libc.so	atoi	LIBC	leaf
 libc.so	atol	LIBC	leaf
 libc.so	atoll	LIBC	numeric
+libc.so	basename	LIBC	process-state
 libc.so	bind	LIBC	socket
 libc.so	bsearch	LIBC	leaf
 libc.so	btowc	LIBC	locale
@@ -247,6 +250,7 @@ libc.so	getc_unlocked	LIBC	stdio
 libc.so	getchar	LIBC	stdio
 libc.so	getcwd	LIBC	filesystem
 libc.so	getegid	LIBC	process-state
+libc.so	getentropy	LIBC	process-state
 libc.so	getenv	LIBC	process-state
 libc.so	geteuid	LIBC	process-state
 libc.so	getgid	LIBC	process-state
@@ -272,6 +276,7 @@ libc.so	getrandom	LIBC	process-state
 libc.so	getrandom	LIBC_P	process-state
 libc.so	getrlimit	LIBC	process-state
 libc.so	getrusage	LIBC	process-state
+libc.so	getservbyname	LIBC	dns
 libc.so	getservbyport	LIBC	process-state
 libc.so	getsockname	LIBC	socket
 libc.so	getsockopt	LIBC	socket
@@ -299,6 +304,7 @@ libc.so	isatty	LIBC	filesystem
 libc.so	isdigit_l	LIBC	locale
 libc.so	islower	LIBC	locale
 libc.so	islower_l	LIBC	locale
+libc.so	isprint	LIBC	leaf
 libc.so	isspace	LIBC	leaf
 libc.so	isupper	LIBC	locale
 libc.so	isupper_l	LIBC	locale
@@ -370,6 +376,7 @@ libc.so	mprotect	LIBC	vm
 libc.so	mrand48	LIBC	process-state
 libc.so	mremap	LIBC	vm
 libc.so	msync	LIBC	vm
+libc.so	munlock	LIBC	vm
 libc.so	munmap	LIBC	vm
 libc.so	nanosleep	LIBC	time
 libc.so	newlocale	LIBC	locale
@@ -397,6 +404,7 @@ libc.so	prctl	LIBC	process-state
 libc.so	pread	LIBC	filesystem
 libc.so	printf	LIBC	formatted-stdio
 libc.so	process_vm_readv	LIBC	process-state
+libc.so	pthread_atfork	LIBC	pthread
 libc.so	pthread_attr_destroy	LIBC	pthread
 libc.so	pthread_attr_getguardsize	LIBC	pthread
 libc.so	pthread_attr_getschedparam	LIBC	pthread
@@ -494,6 +502,7 @@ libc.so	sem_timedwait	LIBC	pthread
 libc.so	sem_wait	LIBC	pthread
 libc.so	send	LIBC	socket
 libc.so	sendfile	LIBC	sendfile
+libc.so	sendmmsg	LIBC	socket
 libc.so	sendmsg	LIBC	socket
 libc.so	sendto	LIBC	socket
 libc.so	setbuf	LIBC	stdio
@@ -519,6 +528,7 @@ libc.so	sigismember	LIBC	process-state
 libc.so	siglongjmp	LIBC	process-state
 libc.so	signal	LIBC	process-state
 libc.so	sigpending	LIBC	process-state
+libc.so	sigprocmask	LIBC	pthread
 libc.so	sigsetjmp	LIBC	process-state
 libc.so	sigsuspend	LIBC	process-state
 libc.so	sigwait	LIBC	process-state
@@ -552,6 +562,7 @@ libc.so	strerror	LIBC	strerror
 libc.so	strerror_r	LIBC	strerror
 libc.so	strftime	LIBC	strftime
 libc.so	strftime_l	LIBC	strftime
+libc.so	strlcat	LIBC	leaf
 libc.so	strlcpy	LIBC	leaf
 libc.so	strlen	LIBC	leaf
 libc.so	strncasecmp	LIBC	leaf
@@ -606,7 +617,9 @@ libc.so	timerfd_settime	LIBC	central-fd-broker
 libc.so	timezone	LIBC	time
 libc.so	tmpfile	LIBC	stdio
 libc.so	tolower	LIBC	locale
+libc.so	tolower_l	LIBC	locale
 libc.so	toupper	LIBC	locale
+libc.so	toupper_l	LIBC	locale
 libc.so	towlower	LIBC	locale
 libc.so	towlower_l	LIBC	locale
 libc.so	towupper	LIBC	locale
@@ -762,9 +775,11 @@ libm.so	sincosf	LIBC	math
 libm.so	sinf	LIBC	math
 libm.so	sinh	LIBC	math
 libm.so	sinhf	LIBC	math
+libm.so	sqrt	LIBC	math
 libm.so	sqrtf	LIBC	math
 libm.so	tan	LIBC	math
 libm.so	tanf	LIBC	math
 libm.so	tanh	LIBC	math
 libm.so	tanhf	LIBC	math
+libm.so	trunc	LIBC	math
 libm.so	truncf	LIBC	math

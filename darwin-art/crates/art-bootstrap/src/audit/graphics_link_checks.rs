@@ -8,6 +8,7 @@ use crate::support::command_output;
 pub(super) fn validate_graphics_runtime_link(
     root: &Path,
     runtime_library: &Path,
+    openjdk_named_jni_owner: &Path,
     link_map: &Path,
 ) -> Result<()> {
     let global_symbols = command_output(Command::new("nm").args(["-gU"]).arg(runtime_library))?;
@@ -47,12 +48,115 @@ pub(super) fn validate_graphics_runtime_link(
         "_darwin_art_runtime_native_owner_attach",
         "_darwin_art_runtime_native_owner_lookup",
         "_darwin_art_runtime_native_owner_destroy",
+        "_jniRegisterNativeMethods",
     ] {
         if !global_symbols.contains(required) {
             return Err(format!("real-graphics Runtime lacks required symbol {required}").into());
         }
     }
     let all_symbols = command_output(Command::new("nm").args(["-aC"]).arg(runtime_library))?;
+    // Dynamic JNI lookup is the Android contract for OpenJDK native methods:
+    // the linker must retain and export the complete provider surface even
+    // though no image relocation references those entrypoints. The aggregate
+    // runtime is deliberately not the owner: it also carries test/framework
+    // Java_* symbols. Check the dedicated owner against the source/archive
+    // manifest so missing and surplus candidates both fail closed.
+    let named_manifest = fs::read_to_string(
+        root.join("_build/system-natives-darwin/openjdk-named-jni-exported-symbols.txt"),
+    )?;
+    let expected_exports = named_manifest
+        .lines()
+        .collect::<std::collections::HashSet<_>>();
+    if expected_exports.len() != 64
+        || expected_exports
+            .iter()
+            .any(|line| !line.starts_with("_Java_"))
+        || named_manifest.lines().any(|line| line == "_JNI_OnLoad")
+    {
+        return Err("OpenJDK named-JNI export manifest has unexpected JNI_OnLoad/count".into());
+    }
+    let owner_symbols = command_output(
+        Command::new("nm")
+            .args(["-gU"])
+            .arg(openjdk_named_jni_owner),
+    )?;
+    let actual_exports = owner_symbols
+        .lines()
+        .filter_map(|line| line.split_whitespace().last())
+        .collect::<std::collections::HashSet<_>>();
+    if actual_exports != expected_exports {
+        return Err("dedicated OpenJDK named-JNI owner has missing or surplus exports".into());
+    }
+    let openjdkjvm_manifest =
+        fs::read_to_string(root.join("_build/openjdkjvm-darwin/openjdkjvm-exports.txt"))?;
+    let missing_jvm_exports = openjdkjvm_manifest
+        .lines()
+        .map(|symbol| format!("_{symbol}"))
+        .filter(|symbol| !global_symbols.lines().any(|line| line.ends_with(symbol)))
+        .collect::<Vec<_>>();
+    if !missing_jvm_exports.is_empty() {
+        return Err(format!(
+            "real-graphics Runtime dropped libopenjdkjvm exports: {}",
+            missing_jvm_exports.join(", ")
+        )
+        .into());
+    }
+    let owner_undefined =
+        command_output(Command::new("nm").arg("-u").arg(openjdk_named_jni_owner))?;
+    if !owner_undefined
+        .lines()
+        .any(|line| line.trim() == "_JVM_GetLastErrorString")
+    {
+        return Err("dedicated OpenJDK named-JNI owner lost its libopenjdkjvm import".into());
+    }
+    let owner_all_symbols =
+        command_output(Command::new("nm").arg("-a").arg(openjdk_named_jni_owner))?;
+    if owner_all_symbols.lines().any(|line| {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        fields.last().is_some_and(|symbol| {
+            (symbol.starts_with("_JVM_") || symbol.starts_with("_jio_"))
+                && fields.get(fields.len().saturating_sub(2)) != Some(&"U")
+        })
+    }) {
+        return Err(
+            "dedicated OpenJDK named-JNI owner duplicates libopenjdkjvm definitions".into(),
+        );
+    }
+    let load_smoke = runtime_library
+        .parent()
+        .ok_or("real-graphics Runtime has no output directory")?
+        .join("openjdk-named-jni-load-smoke");
+    command_output(
+        Command::new("clang")
+            .args(["-std=c11", "-arch", "arm64", "-Wall", "-Wextra", "-Werror"])
+            .arg(root.join("probes/openjdk_named_jni_load_smoke.c"))
+            .arg("-o")
+            .arg(&load_smoke),
+    )?;
+    let load_output = command_output(
+        Command::new(&load_smoke)
+            .arg(runtime_library)
+            .arg(openjdk_named_jni_owner),
+    )?;
+    if load_output.trim() != "openjdk-owner-load: RTLD_GLOBAL(runtime)->RTLD_LOCAL(owner)=PASS" {
+        return Err(format!("unexpected OpenJDK owner load smoke output: {load_output}").into());
+    }
+    let nio_archive = root
+        .join("_build/unix-native-dispatcher-darwin/libopenjdk-unix-native-dispatcher-darwin.a");
+    let nio_symbols = command_output(Command::new("nm").args(["-gU"]).arg(&nio_archive))?;
+    let missing_nio_jni = nio_symbols
+        .lines()
+        .filter_map(|line| line.split_whitespace().last())
+        .filter(|symbol| symbol.starts_with("_Java_"))
+        .filter(|symbol| !actual_exports.contains(symbol))
+        .collect::<Vec<_>>();
+    if !missing_nio_jni.is_empty() {
+        return Err(format!(
+            "real-graphics Runtime dropped dynamically-discovered JNI exports: {}",
+            missing_nio_jni.join(", ")
+        )
+        .into());
+    }
     for registrar in [
         "_init_android_graphics",
         "_register_android_graphics_classes",

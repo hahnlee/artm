@@ -3,6 +3,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/uio.h>
+#include "darwin_art_bionic_stat.h"
 
 #include "darwin_art_bionic_ioctl.h"
 
@@ -23,31 +25,6 @@ enum {
   DARWIN_ART_ANDROID_AT_SYMLINK_NOFOLLOW = 0x100,
   DARWIN_ART_ANDROID_AT_REMOVEDIR = 0x200,
 };
-
-typedef struct DarwinArtAndroidTimespec {
-  int64_t tv_sec;
-  int64_t tv_nsec;
-} DarwinArtAndroidTimespec;
-
-typedef struct DarwinArtAndroidStat {
-  uint64_t st_dev;
-  uint64_t st_ino;
-  uint32_t st_mode;
-  uint32_t st_nlink;
-  uint32_t st_uid;
-  uint32_t st_gid;
-  uint64_t st_rdev;
-  uint64_t __pad1;
-  int64_t st_size;
-  int32_t st_blksize;
-  int32_t __pad2;
-  int64_t st_blocks;
-  DarwinArtAndroidTimespec st_atim;
-  DarwinArtAndroidTimespec st_mtim;
-  DarwinArtAndroidTimespec st_ctim;
-  uint32_t __unused4;
-  uint32_t __unused5;
-} DarwinArtAndroidStat;
 
 typedef struct DarwinArtAndroidDirent {
   uint64_t d_ino;
@@ -136,6 +113,10 @@ intptr_t darwin_art_bionic_pread(int fd, void* buffer, size_t count,
 intptr_t darwin_art_bionic_pwrite(int fd, const void* buffer, size_t count,
                                   int64_t offset);
 intptr_t darwin_art_bionic_write(int fd, const void* buffer, size_t count);
+/* Vector operations retain one readv/writev operation at the virtual-FD
+ * boundary; callers must not emulate them by issuing one syscall per iovec. */
+intptr_t darwin_art_bionic_readv(int fd, const struct iovec* vectors, int count);
+intptr_t darwin_art_bionic_writev(int fd, const struct iovec* vectors, int count);
 intptr_t darwin_art_bionic___write_chk(int fd, const void* buffer,
                                        size_t count, size_t buffer_size);
 int64_t darwin_art_bionic_lseek(int fd, int64_t offset, int whence);
@@ -214,6 +195,10 @@ intptr_t darwin_art_bionic_fs_pwrite_core(int fd, const void* buffer,
                                           size_t count, int64_t offset);
 intptr_t darwin_art_bionic_fs_write_core(int fd, const void* buffer,
                                          size_t count);
+intptr_t darwin_art_bionic_fs_readv_core(int fd, const struct iovec* vectors,
+                                         int count);
+intptr_t darwin_art_bionic_fs_writev_core(int fd, const struct iovec* vectors,
+                                          int count);
 int64_t darwin_art_bionic_fs_lseek_core(int fd, int64_t offset, int whence);
 int darwin_art_bionic_fs_close_core(int fd);
 int darwin_art_bionic_fs_flock_core(int fd, int operation);
@@ -273,6 +258,18 @@ __attribute__((visibility("hidden"))) int
 darwin_art_bionic_fs_host_record_lock(int host_fd, int android_command,
                                       intptr_t android_lock,
                                       int* host_errno);
+/* Opens a private-root-relative path by walking every component with
+ * O_NOFOLLOW. Android flags are translated here, immediately before the
+ * Darwin openat syscall; host_errno is written without changing caller errno. */
+__attribute__((visibility("hidden"))) int
+darwin_art_bionic_fs_host_openat_private(int root_fd, const char* relative,
+                                         int android_flags, uint32_t mode,
+                                         int* host_errno);
+
+/* Host topology is queried through the native shim so Rust never infers it
+ * from process affinity (which may describe a virtual guest restriction). */
+__attribute__((visibility("hidden"))) long
+darwin_art_bionic_fs_host_cpu_count(int online);
 
 #ifdef __cplusplus
 }

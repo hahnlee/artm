@@ -1,3 +1,4 @@
+use super::manifest::PATCHED_RUNTIME_SOURCES;
 use super::*;
 use crate::native_build::PendingNativeCompile;
 
@@ -29,6 +30,7 @@ pub(super) fn runtime_jobs(
         "dex/dex_file_annotations.cc",
         "exec_utils.cc",
         "hidden_api.cc",
+        "hprof/hprof.cc",
         "jni/check_jni.cc",
         "jni/jni_internal.cc",
         "method_handles.cc",
@@ -99,6 +101,8 @@ pub(super) fn runtime_jobs(
         "entrypoints/quick/quick_throw_entrypoints.cc",
         "entrypoints/quick/quick_trampoline_entrypoints.cc",
         "runtime.cc",
+        "runtime_image.cc",
+        "parsed_options.cc",
         "class_linker.cc",
         "thread.cc",
         "thread_list.cc",
@@ -207,37 +211,34 @@ pub(super) fn runtime_jobs(
         "runtime_intrinsics.cc",
         "well_known_classes.cc",
     ];
-    let patched_sources = [
-        "runtime.cc",
-        "class_linker.cc",
-        "thread.cc",
-        "thread_list.cc",
-        "gc/heap.cc",
-        "gc/collector/garbage_collector.cc",
-        "gc/collector/mark_compact.cc",
-        "gc/space/malloc_space.cc",
-        "gc/space/space.cc",
-        "entrypoints/quick/quick_alloc_entrypoints.cc",
-        "entrypoints/quick/quick_trampoline_entrypoints.cc",
-        "runtime_common.cc",
-        "oat/oat_file.cc",
-        "exec_utils.cc",
-        "signal_catcher.cc",
-        "nterp_helpers.cc",
-        "interpreter/mterp/nterp.cc",
-    ];
     sources
         .into_iter()
         .map(|source| {
             let object = staged
                 .runtime_core_object_dir
                 .join(format!("{}.o", source.replace('/', "_")));
-            let source_path = if patched_sources.contains(&source) {
+            let source_path = if PATCHED_RUNTIME_SOURCES.contains(&source) {
                 staged.patched_runtime.join(source)
             } else {
                 staged.runtime.join(source)
             };
             let mut command = runtime_bootstrap_cpp_command(includes);
+            command.arg("-I").arg(staged.runtime.join("jit"));
+            if PATCHED_RUNTIME_SOURCES.contains(&source)
+                && let Some(parent) = Path::new(source).parent()
+                && !parent.as_os_str().is_empty()
+            {
+                // A staged nested translation unit still owns its unchanged
+                // sibling headers. Preserve quote-include semantics without
+                // copying an entire upstream directory into the shadow.
+                command.arg("-iquote").arg(staged.runtime.join(parent));
+            }
+            if source == "mirror/var_handle.cc" {
+                command.arg("-iquote").arg(staged.runtime.join("mirror"));
+            }
+            command
+                .arg("-include")
+                .arg(staged.patched_runtime.join("jit/jit_memory_region.h"));
             if matches!(
                 source,
                 "entrypoints/jni/jni_entrypoints.cc" | "oat/jni_stub_hash_map.cc"

@@ -3,6 +3,7 @@ pub(crate) fn print_help() {
     println!();
     println!("  doctor     verify the native Apple Silicon environment");
     println!("  sync       fetch locked ART subtrees without .git metadata");
+    println!("  sync-jit-sources  fetch only the pinned ART compiler and VIXL source closure");
     println!("  probe-asm  compile and execute an ART-derived Mach-O ARM64 entrypoint");
     println!("  probe-pagesize  compile ART's dynamic page-size path for Darwin");
     println!("  build-foundation  build and execute the minimal libartbase archive");
@@ -42,7 +43,16 @@ pub(crate) fn print_help() {
     println!("  build-runtime-core  apply Darwin monitor patches and compile runtime core");
     println!("  probe-park  stress Darwin's pthread-backed LockSupport primitive");
     println!("  build-runtime-arm64  generate ABI constants and compile ARM64 context");
+    println!("  build-runtime-unwindstack-core  compile pinned AOSP DWARF/ELF unwind engine");
     println!("  build-interpreter-core  compile ART's C++ interpreter implementation");
+    println!(
+        "  build-nterp-arm64ng  generate and audit the production Darwin ARM64ng Nterp source"
+    );
+    println!("  build-jit-compiler      compile pinned AOSP ARM64 optimizing compiler");
+    println!("  build-jit-libelffile    compile the pinned libelffile/LZMA JIT link closure");
+    println!(
+        "  build-android16-boot-image  build and atomically publish the AOSP speed boot image"
+    );
     println!("  build-runtime-bootstrap  compile ART Runtime initialization for Darwin");
     println!(
         "  build-runtime-graphics-bootstrap  compile the isolated real-graphics Runtime flavor"

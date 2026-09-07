@@ -45,6 +45,13 @@ bool EnsurePipeline(id<MTLDevice> device, MetalComposerState& state) {
 using namespace metal;
 struct VertexIn { float2 position; float2 texcoord; };
 struct VertexOut { float4 position [[position]]; float2 texcoord; };
+struct TransparentRegionUniform {
+  uint count;
+  uint reserved0;
+  uint reserved1;
+  uint reserved2;
+  float4 rects[8];
+};
 vertex VertexOut darwin_art_composer_vertex(
     uint vertex_id [[vertex_id]], constant VertexIn* vertices [[buffer(0)]]) {
   VertexOut out;
@@ -54,7 +61,19 @@ vertex VertexOut darwin_art_composer_vertex(
 }
 fragment float4 darwin_art_composer_fragment(
     VertexOut in [[stage_in]], texture2d<float> source [[texture(0)]],
-    constant float& alpha [[buffer(0)]]) {
+    constant float& alpha [[buffer(0)]],
+    constant TransparentRegionUniform& transparent [[buffer(1)]]) {
+  // SurfaceControl's transparent-region hint is a hole in this layer, not a
+  // replacement color.  Discarding lets the already-composed lower layer
+  // survive the source-over blend, including when this layer's buffer is
+  // otherwise opaque.  Rectangles are bounded and supplied in target pixels.
+  for (uint index = 0; index < transparent.count && index < 8; ++index) {
+    const float4 rect = transparent.rects[index];
+    if (in.position.x >= rect.x && in.position.x < rect.z &&
+        in.position.y >= rect.y && in.position.y < rect.w) {
+      discard_fragment();
+    }
+  }
   constexpr sampler linear_sampler(coord::normalized, address::clamp_to_edge,
                                    filter::linear);
   return source.sample(linear_sampler, in.texcoord) * alpha;
@@ -114,6 +133,18 @@ struct Vertex {
   float position[2];
   float texcoord[2];
 };
+
+// Keep the CPU payload layout identical to TransparentRegionUniform in the
+// Metal shader. The explicit padding gives the uint/float4 pair the same
+// 16-byte alignment on both sides of the API boundary.
+struct TransparentRegionUniform {
+  uint32_t count = 0;
+  uint32_t reserved[3] = {};
+  float rects[kDarwinArtMaxTransparentRegionRects][4] = {};
+};
+
+static_assert(sizeof(TransparentRegionUniform) == 16 +
+                  16 * kDarwinArtMaxTransparentRegionRects);
 
 std::array<float, 2> TransformTexcoord(uint32_t transform, float u0,
                                         float v0, float u1, float v1,
@@ -213,8 +244,13 @@ extern "C" bool darwin_art_metal_composer_compose(
         layer.destination_bottom <= layer.destination_top) {
       continue;
     }
+    CFTypeRef storage_rgba = IOSurfaceCopyValue(
+        reinterpret_cast<IOSurfaceRef>(layer.iosurface), CFSTR("DarwinArtStorageRGBA"));
+    const bool rgba = storage_rgba != nullptr && CFEqual(storage_rgba, kCFBooleanTrue);
+    if (storage_rgba != nullptr) CFRelease(storage_rgba);
     MTLTextureDescriptor* source_descriptor =
-        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
+                                 (rgba ? MTLPixelFormatRGBA8Unorm : MTLPixelFormatBGRA8Unorm)
                                                            width:layer.width
                                                           height:layer.height
                                                        mipmapped:NO];
@@ -247,11 +283,16 @@ extern "C" bool darwin_art_metal_composer_compose(
     // producer storage origin once, before applying the explicit Android HAL
     // transform. ANGLE composer-overlay buffers are already display-space;
     // HWUI's Metal buffers retain a bottom-left storage origin.
-    const float v0 = layer.producer_bottom_left
+    CFTypeRef top_left = IOSurfaceCopyValue(
+        reinterpret_cast<IOSurfaceRef>(layer.iosurface), CFSTR("DarwinArtProducerTopLeft"));
+    const bool explicit_top_left = top_left != nullptr && CFEqual(top_left, kCFBooleanTrue);
+    if (top_left != nullptr) CFRelease(top_left);
+    const bool producer_bottom_left = layer.producer_bottom_left && !explicit_top_left;
+    const float v0 = producer_bottom_left
                          ? 1.0f - static_cast<float>(layer.source_top) /
                                layer.height
                          : static_cast<float>(layer.source_top) / layer.height;
-    const float v1 = layer.producer_bottom_left
+    const float v1 = producer_bottom_left
                          ? 1.0f - static_cast<float>(layer.source_bottom) /
                                layer.height
                          : static_cast<float>(layer.source_bottom) / layer.height;
@@ -271,11 +312,31 @@ extern "C" bool darwin_art_metal_composer_compose(
         {{right, top}, {tr[0], tr[1]}},
     }};
     const float alpha = std::clamp(layer.alpha, 0.0f, 1.0f);
+    TransparentRegionUniform transparent_region;
+    transparent_region.count = std::min(
+        layer.transparent_region_count,
+        static_cast<uint32_t>(kDarwinArtMaxTransparentRegionRects));
+    for (uint32_t region_index = 0;
+         region_index < transparent_region.count; ++region_index) {
+      const DarwinArtTransparentRegionRect& rect =
+          layer.transparent_region[region_index];
+      transparent_region.rects[region_index][0] =
+          static_cast<float>(rect.left);
+      transparent_region.rects[region_index][1] =
+          static_cast<float>(rect.top);
+      transparent_region.rects[region_index][2] =
+          static_cast<float>(rect.right);
+      transparent_region.rects[region_index][3] =
+          static_cast<float>(rect.bottom);
+    }
     [encoder setVertexBytes:vertices.data()
                      length:sizeof(vertices)
                     atIndex:0];
     [encoder setFragmentTexture:source atIndex:0];
     [encoder setFragmentBytes:&alpha length:sizeof(alpha) atIndex:0];
+    [encoder setFragmentBytes:&transparent_region
+                        length:sizeof(transparent_region)
+                       atIndex:1];
     [encoder drawPrimitives:MTLPrimitiveTypeTriangle
                 vertexStart:0
                 vertexCount:vertices.size()];

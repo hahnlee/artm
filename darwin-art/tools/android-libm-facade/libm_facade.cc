@@ -1,6 +1,7 @@
 #include "darwin_art_libm_facade.h"
 
 #include <bit>
+#include <cmath>
 #include <cstring>
 
 extern "C" double darwin_art_bionic_fabs(double value) {
@@ -23,6 +24,13 @@ extern "C" float darwin_art_bionic_copysignf(float magnitude, float sign) {
   return std::bit_cast<float>(magnitude_bits | sign_bits);
 }
 
+// These are required by common Android NDK database libraries (notably
+// SQLCipher).  Darwin's libSystem provides the same IEEE-754 operation; keep
+// the Android libm resolver explicit so the guest never receives an accidental
+// host symbol with a different ABI.
+extern "C" double darwin_art_bionic_trunc(double value) { return std::trunc(value); }
+extern "C" float darwin_art_bionic_truncf(float value) { return std::trunc(value); }
+
 struct Entry {
   const char* name;
   uintptr_t address;
@@ -33,6 +41,8 @@ static const Entry kSafeEntries[] = {
     {"copysignf", reinterpret_cast<uintptr_t>(&darwin_art_bionic_copysignf)},
     {"fabs", reinterpret_cast<uintptr_t>(&darwin_art_bionic_fabs)},
     {"fabsf", reinterpret_cast<uintptr_t>(&darwin_art_bionic_fabsf)},
+    {"trunc", reinterpret_cast<uintptr_t>(&darwin_art_bionic_trunc)},
+    {"truncf", reinterpret_cast<uintptr_t>(&darwin_art_bionic_truncf)},
 };
 
 extern "C" uintptr_t darwin_art_libm_resolve(const char* symbol, const char* version) {

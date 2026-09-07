@@ -7,9 +7,21 @@
 use super::*;
 
 mod arm64;
+mod boot_image;
+mod dex2oat;
 mod foundation;
 mod interpreter;
+mod jit;
+mod jit_support;
+mod nterp;
+mod unwindstack;
 
 pub(crate) use arm64::*;
+pub(crate) use boot_image::*;
+pub(crate) use dex2oat::*;
 pub(crate) use foundation::*;
 pub(crate) use interpreter::*;
+pub(crate) use jit::*;
+pub(crate) use jit_support::*;
+pub(crate) use nterp::*;
+pub(crate) use unwindstack::*;

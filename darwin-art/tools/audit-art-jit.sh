@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+jit_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$jit_root"
+python3 "$jit_root/tools/audit-art-arm64-intrinsics.py" --root "$jit_root"
+# Use the same compatibility boot class path as installed applications.
+jit_tail="$jit_root/_prebuilt/android-16/bootclasspath/framework-location.jar"
+for module in conscrypt/javalib/conscrypt.jar bt/javalib/framework-bluetooth.jar mediaprovider/javalib/framework-mediaprovider.jar permission/javalib/framework-permission.jar permission/javalib/framework-permission-s.jar art/javalib/okhttp.jar; do
+  jit_tail="$jit_tail:$jit_root/_build/android16-ps16k-r07/extracted/$module"
+done
+jit_tail="$jit_tail:$jit_root/_build/bootclasspath/core-icu4j-api36.jar"
+# JitUnsafe is a compiler acceptance fixture, not application payload. Direct
+# references to the hidden JDK Unsafe API are only verifier-valid from a
+# trusted boot class, matching upstream ART compiler tests.
+jit_unsafe_boot="$jit_root/_build/dex-probe/unsafe-boot-dex/classes.dex"
+test -f "$jit_unsafe_boot"
+jit_tail="$jit_tail:$jit_unsafe_boot"
+# Do not force the production setting here: Android application processes must
+# enter ART with JIT enabled by default. The acceptance run therefore doubles
+# as a regression gate for the no-override launcher contract.
+unset DARWIN_ART_JIT
+export DARWIN_ART_JIT_ACCEPTANCE_ONLY=1
+export ANDROID_I18N_ROOT="$jit_root/_build/icu-runtime-adapters/runtime/i18n"
+export ANDROID_DATA="$jit_root/_build/icu-runtime-adapters/runtime/data"
+export ANDROID_TZDATA_ROOT="$jit_root/_build/icu-runtime-adapters/runtime/tzdata"
+export DARWIN_ART_TEST_FONTS_XML="$jit_root/probes/button/fonts.xml"
+export DARWIN_ART_TEST_FONT="$jit_root/_aosp/external/skia/resources/fonts/Roboto-Regular.ttf"
+export DARWIN_ART_FRAMEWORK_RES_APK="$jit_root/_prebuilt/android-16/resources/framework-res.apk"
+export DARWIN_ART_APK_APP_RESOURCE_APK="$DARWIN_ART_FRAMEWORK_RES_APK"
+export DARWIN_ART_RUNTIME_HOST_FILES="$jit_root/_build/android16-core-oj-compat/core-oj-compat.jar:$jit_root/_prebuilt/android-16/bootclasspath/core-libart.jar:$jit_root/_build/android16-framework-compat/framework-compat.jar:$jit_tail:$jit_root/_build/button-dex/dex/classes.dex"
+exec target/debug/darwin-art-host --window-seconds 3 \
+  "$jit_root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib" \
+  "$jit_root/_build/android16-core-oj-compat/core-oj-compat.jar" \
+  "$jit_root/_prebuilt/android-16/bootclasspath/core-libart.jar" \
+  "$jit_root/_build/android16-framework-compat/framework-compat.jar" \
+  "$jit_tail" "$jit_root/_build/button-dex/dex/classes.dex"

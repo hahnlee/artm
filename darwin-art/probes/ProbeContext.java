@@ -116,6 +116,7 @@ public final class ProbeContext extends ContextWrapper {
     private Object mediaSessionManager;
     private Object accountManager;
     private Object cameraManager;
+    private Object telephonyManager;
     private final String packageName;
     private final ClassLoader classLoader;
     private volatile Display display;
@@ -251,6 +252,8 @@ public final class ProbeContext extends ContextWrapper {
         applicationInfo.nativeLibraryDir = System.getenv(
                 "DARWIN_ART_APK_APP_NATIVE_DIR");
         ProbePackageManager.applyApplicationPaths(applicationInfo);
+        ProbePackageManager.applyApplicationLabel(applicationInfo, resources);
+        ProbePackageManager.applyApplicationIcon(applicationInfo);
         ProbePackageManager.applyApplicationMetadata(applicationInfo, resources);
         attributionSource = new AttributionSource.Builder(1000)
                 .setPackageName(getPackageName())
@@ -262,6 +265,18 @@ public final class ProbeContext extends ContextWrapper {
     @Override
     public ApplicationInfo getApplicationInfo() {
         return applicationInfo;
+    }
+
+    @Override
+    public Context createPackageContext(String requestedPackage, int flags)
+            throws PackageManager.NameNotFoundException {
+        if (packageName.equals(requestedPackage)) return this;
+        // PackageManager owns package visibility.  A detached profile does
+        // not provide a Google Play Services package, so report the normal
+        // Android absence instead of inheriting MockContext's Stub! method
+        // (which would turn an optional ProviderInstaller probe into a fatal
+        // application exception).
+        throw new PackageManager.NameNotFoundException(requestedPackage);
     }
 
     /** Applies the manifest compatibility level before Application.onCreate(). */
@@ -461,7 +476,17 @@ public final class ProbeContext extends ContextWrapper {
             Executor executor, String isolatedInstanceName) {
         if (connection == null) throw new NullPointerException("connection");
         if (executor == null) throw new NullPointerException("executor");
-        ComponentName component = requireServiceComponent(intent);
+        ComponentName component = intent == null ? null : intent.getComponent();
+        if (component == null || !packageName.equals(component.getPackageName())) {
+            // A detached profile has no Play Services/system-server process to
+            // bind. Android reports an unavailable explicit service as a
+            // failed bind; do not turn that normal capability miss into an
+            // uncaught exception on the app's main looper.
+            android.util.Log.w("DarwinServiceBridge",
+                    "service unavailable outside profile package: "
+                            + (component == null ? "<implicit>" : component));
+            return false;
+        }
         if (isolatedInstanceName != null) {
             // ActivityManager identifies an isolated service by component and
             // instance name. Chromium deliberately creates several binding
@@ -717,6 +742,12 @@ public final class ProbeContext extends ContextWrapper {
         return activityToken;
     }
 
+    // An Activity-backed context is not a WindowContext. ContextImpl returns
+    // null here; ViewRoot uses it to route configuration callbacks correctly.
+    public IBinder getWindowContextToken() {
+        return null;
+    }
+
     @Override
     public synchronized void registerComponentCallbacks(ComponentCallbacks callback) {
         if (callback == null) throw new NullPointerException("callback");
@@ -730,7 +761,11 @@ public final class ProbeContext extends ContextWrapper {
 
     @Override
     public boolean isDeviceProtectedStorage() {
-        return true;
+        // The profile data directory is already unlocked before an app is
+        // launched. WorkManager and AndroidX Startup must therefore observe
+        // credential-protected storage, just as they do after user unlock on
+        // a physical Android device.
+        return false;
     }
 
     @Override
@@ -1221,6 +1256,12 @@ public final class ProbeContext extends ContextWrapper {
             }
             return cameraManager;
         }
+        if (TELEPHONY_SERVICE.equals(name)) {
+            if (telephonyManager == null) {
+                telephonyManager = construct("android.telephony.TelephonyManager");
+            }
+            return telephonyManager;
+        }
         return null;
     }
 
@@ -1310,6 +1351,9 @@ public final class ProbeContext extends ContextWrapper {
         }
         if ("android.hardware.camera2.CameraManager".equals(className)) {
             return CAMERA_SERVICE;
+        }
+        if ("android.telephony.TelephonyManager".equals(className)) {
+            return TELEPHONY_SERVICE;
         }
         return null;
     }

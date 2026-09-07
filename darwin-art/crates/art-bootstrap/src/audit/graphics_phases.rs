@@ -119,12 +119,18 @@ pub(super) fn run_graphics_upstream_gates(root: &Path, incremental: bool) -> Res
         (
             "build-android16-system-natives-darwin.sh",
             "upstream/android16-system-natives-darwin.lock",
-            &["_build/system-natives-darwin/libopenjdk-system-natives-darwin.a"][..],
+            &[
+                "_build/system-natives-darwin/libopenjdk-system-natives-darwin.a",
+                "_build/system-natives-darwin/libcrypto-boringssl-darwin.a",
+            ][..],
         ),
         (
             "build-android16-unix-native-dispatcher-darwin.sh",
             "upstream/android16-unix-native-dispatcher-darwin.lock",
-            &["_build/unix-native-dispatcher-darwin/libopenjdk-unix-native-dispatcher-darwin.a"][..],
+            &[
+                "_build/unix-native-dispatcher-darwin/libopenjdk-unix-native-dispatcher-darwin.a",
+                "_build/unix-native-dispatcher-darwin/libfdlibm-darwin.a",
+            ][..],
         ),
         (
             "build-android16-openjdk-nio-mapping.sh",

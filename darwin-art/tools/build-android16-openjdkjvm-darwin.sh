@@ -68,7 +68,7 @@ PY
 for required in \
   "$patch_file" \
   "$project_root/probes/openjdkjvm_last_error_smoke.cc" \
-  "$project_root/_build/runtime-bootstrap/patched-source/runtime/runtime.h" \
+  "$project_root/_build/runtime-common/patched-source/runtime/runtime.h" \
   "$project_root/_build/runtime-core/patched-source/runtime/mirror/object_reference.h" \
   "$project_root/_build/foundation/patched-source/libartbase/base/globals.h" \
   "$project_root/_aosp/art/runtime" \
@@ -123,7 +123,7 @@ libtool_bin="$(xcrun --find libtool)"
 sdk_root="$(xcrun --sdk macosx --show-sdk-path)"
 object="$stage/OpenjdkJvm.cc.o"
 includes=(
-  "$project_root/_build/runtime-bootstrap/patched-source/runtime"
+  "$project_root/_build/runtime-common/patched-source/runtime"
   "$project_root/_build/runtime-core/patched-source/runtime"
   "$project_root/_build/foundation/patched-source/libartbase"
   "$project_root/_aosp/art/libartbase"

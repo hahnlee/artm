@@ -32,7 +32,10 @@ int darwin_art_bionic_strcasecmp(const char* left, const char* right);
 int darwin_art_bionic_strncasecmp(const char* left, const char* right,
                                   size_t length);
 int darwin_art_bionic_isspace(int value);
+int darwin_art_bionic_isprint(int value);
 size_t darwin_art_bionic_strnlen(const char* string, size_t maximum);
+size_t darwin_art_bionic_strlcat(char* destination, const char* source,
+                                 size_t size);
 size_t darwin_art_bionic_strlcpy(char* destination, const char* source,
                                  size_t size);
 char* darwin_art_bionic_stpcpy(char* destination, const char* source);

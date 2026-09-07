@@ -58,6 +58,19 @@ public final class ProbeResources extends Resources {
         CONFIGURATION.screenWidthDp = widthDp;
         CONFIGURATION.screenHeightDp = heightDp;
         CONFIGURATION.smallestScreenWidthDp = Math.min(widthDp, heightDp);
+        try {
+            Object windowConfiguration = Configuration.class
+                    .getField("windowConfiguration").get(CONFIGURATION);
+            android.graphics.Rect bounds =
+                    new android.graphics.Rect(0, 0, widthPixels, heightPixels);
+            for (String setter : new String[] {"setBounds", "setAppBounds",
+                                                "setMaxBounds"}) {
+                windowConfiguration.getClass().getMethod(setter, android.graphics.Rect.class)
+                        .invoke(windowConfiguration, bounds);
+            }
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Android window bounds unavailable", error);
+        }
         // The macOS host is a touch-capable Android display paired with a
         // permanently connected physical keyboard.  Android publishes this
         // through Configuration in addition to InputManager device records;

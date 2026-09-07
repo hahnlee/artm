@@ -118,7 +118,9 @@ size_t darwin_art_bionic_strxfrm(char* destination,
                                 const char* source,
                                 size_t length);
 int darwin_art_bionic_tolower(int value);
+int darwin_art_bionic_tolower_l(int value, DarwinArtAndroidLocale locale);
 int darwin_art_bionic_toupper(int value);
+int darwin_art_bionic_toupper_l(int value, DarwinArtAndroidLocale locale);
 uint32_t darwin_art_bionic_towlower_l(uint32_t code_point,
                                       DarwinArtAndroidLocale locale);
 uint32_t darwin_art_bionic_towlower(uint32_t code_point);

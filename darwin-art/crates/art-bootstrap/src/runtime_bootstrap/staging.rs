@@ -1,4 +1,6 @@
-use super::manifest::{PATCHED_RUNTIME_PATCHES, PATCHED_RUNTIME_SOURCES};
+use super::manifest::{
+    PATCHED_RUNTIME_PATCHES, PATCHED_RUNTIME_SOURCES, RUNTIME_SHADOW_IDENTITY_VERSION,
+};
 use super::*;
 use darwin_art_build_contract::{RUNTIME_CACHE_IDENTITY, RuntimeFlavor};
 
@@ -11,7 +13,6 @@ pub(crate) struct RuntimeBootstrapStaging {
     /// consumes the first flavor's dependency-fingerprinted objects.
     pub(crate) runtime_core_object_dir: PathBuf,
     pub(crate) patched_runtime: PathBuf,
-    pub(crate) artbase: PathBuf,
     pub(crate) libprofile: PathBuf,
     pub(crate) runtime: PathBuf,
     pub(crate) android_jni_include: PathBuf,
@@ -129,6 +130,7 @@ pub(crate) fn prepare(root: &Path, flavor: RuntimeFlavor) -> Result<RuntimeBoots
         }
         fs::write(shadow_identity_path, format!("{shadow_identity}\n"))?;
     }
+    audit_nterp_admission(&patched_runtime)?;
 
     let runtime_includes = vec![
         public_include,
@@ -243,7 +245,6 @@ pub(crate) fn prepare(root: &Path, flavor: RuntimeFlavor) -> Result<RuntimeBoots
         object_dir,
         runtime_core_object_dir,
         patched_runtime,
-        artbase,
         libprofile,
         runtime,
         android_jni_include,
@@ -274,8 +275,62 @@ fn copy_runtime_sources(runtime: &Path, patched_runtime: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Fail closed if a legacy Darwin-only Nterp disable patch survives in the
+/// shared runtime shadow. The ARM64ng object is part of the production runtime
+/// archive, so silently selecting the switch interpreter would make corpus
+/// results look like Nterp coverage without executing the native interpreter.
+fn audit_nterp_admission(patched_runtime: &Path) -> Result<()> {
+    let nterp = fs::read_to_string(patched_runtime.join("interpreter/mterp/nterp.cc"))?;
+    let helpers = fs::read_to_string(patched_runtime.join("nterp_helpers.cc"))?;
+
+    for (function, forbidden) in [
+        ("IsNterpSupported", "#if defined(__APPLE__)"),
+        ("GetNterpEntryPoint", "return nullptr;"),
+        ("NterpImpl", "return {};"),
+        ("GetNterpWithClinitEntryPoint", "return nullptr;"),
+        ("NterpWithClinitImpl", "return {};"),
+    ] {
+        let body = function_body(&nterp, function)?;
+        if body.contains(forbidden) {
+            return Err(
+                format!("legacy Darwin Nterp gate remains in {function}: {forbidden}").into(),
+            );
+        }
+    }
+    if function_body(&helpers, "NterpGetCatchHandler")?.contains("return 0u;") {
+        return Err("legacy Darwin Nterp catch-entry gate remains".into());
+    }
+    Ok(())
+}
+
+fn function_body<'a>(source: &'a str, function: &str) -> Result<&'a str> {
+    let start = source
+        .find(&format!("{function}("))
+        .ok_or_else(|| format!("missing pinned ART function {function}"))?;
+    let open = source[start..]
+        .find('{')
+        .map(|offset| start + offset)
+        .ok_or_else(|| format!("missing body for pinned ART function {function}"))?;
+    let mut depth = 0usize;
+    for (offset, byte) in source.as_bytes()[open..].iter().enumerate() {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(&source[open..=open + offset]);
+                }
+            }
+            _ => {}
+        }
+    }
+    Err(format!("unterminated body for pinned ART function {function}").into())
+}
+
 fn runtime_shadow_identity(runtime: &Path, root: &Path) -> Result<String> {
     let mut digest = Sha256::new();
+    digest.update(RUNTIME_SHADOW_IDENTITY_VERSION.as_bytes());
+    digest.update([0]);
     for path in PATCHED_RUNTIME_SOURCES
         .iter()
         .map(|source| runtime.join(source))

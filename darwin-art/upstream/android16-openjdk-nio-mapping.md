@@ -49,3 +49,14 @@ Run:
 ```sh
 tools/build-android16-openjdk-nio-mapping.sh
 ```
+
+## ABI boundary follow-up (2026-09-07)
+
+The production archive now separates `FileDispatcherImpl`'s host-constant
+`preClose0` `/dev/null` open from `UnixNativeDispatcher`'s Android-flag open;
+Android flags never reach Darwin `open(2)`. Bionic errno values are translated
+back to Darwin values before OpenJDK's `EINTR`/`EAGAIN` comparisons. Virtual
+descriptor `readv`/`writev` use one facade vector operation (with the central
+broker's vector entrypoint), and managed acceptance links the redirected
+production archive and exercises a virtual-FD `readv` call. The focused NIO,
+UnixNativeDispatcher, UnixFileSystem, and Bionic filesystem tests pass.

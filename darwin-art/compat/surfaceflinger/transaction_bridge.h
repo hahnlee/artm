@@ -44,6 +44,10 @@ typedef enum DarwinArtSurfaceFlingerLayerChange {
   DARWIN_ART_SF_DATASPACE_CHANGED = UINT64_C(0x00800000),
   DARWIN_ART_SF_DAMAGE_CHANGED = UINT64_C(0x02000000),
   DARWIN_ART_SF_DESTINATION_FRAME_CHANGED = UINT64_C(0x100000000),
+  // The layer's transparent-region hint changed.  The AOSP frontend does not
+  // need to interpret this payload; Darwin's retained GPU composer consumes
+  // the bounded rectangles after it has applied the frontend's layer order.
+  DARWIN_ART_SF_TRANSPARENT_REGION_CHANGED = UINT64_C(0x200000000),
 } DarwinArtSurfaceFlingerLayerChange;
 
 typedef struct DarwinArtSurfaceFlingerCommitResult {

@@ -3,6 +3,56 @@
 #include <arpa/inet.h>
 #include <stdint.h>
 
+extern int* ImportedHerrno(void) __asm__("__get_h_errno");
+extern struct hostent* ImportedHostByName(const char*) __asm__("gethostbyname");
+extern struct servent* ImportedServiceByName(const char*, const char*)
+    __asm__("getservbyname");
+
+static int LegacyHostValid(const struct hostent* host) {
+  if (host == (const struct hostent*)0 || host->h_name == (char*)0 ||
+      host->h_addrtype != AF_INET || host->h_length != 4 ||
+      host->h_addr_list == (char**)0 || host->h_addr_list[0] == (char*)0) {
+    return 0;
+  }
+  return 1;
+}
+
+__attribute__((visibility("default"))) int DnsFixtureHostLookup(
+    const char* node) {
+  return LegacyHostValid(ImportedHostByName(node)) ? 42 : -1;
+}
+
+__attribute__((visibility("default"))) int DnsFixtureHostFailure(
+    const char* node) {
+  if (ImportedHostByName(node) != (struct hostent*)0) return -1;
+  return ImportedHerrno() == (int*)0 ? -2 : *ImportedHerrno();
+}
+
+__attribute__((visibility("default"))) uintptr_t DnsFixtureHostStorage(
+    const char* node) {
+  return (uintptr_t)ImportedHostByName(node);
+}
+
+__attribute__((visibility("default"))) int DnsFixtureServiceLookup(
+    const char* name, const char* proto) {
+  const struct servent* service = ImportedServiceByName(name, proto);
+  return service != (const struct servent*)0 && service->s_name != (char*)0 &&
+                 service->s_proto != (char*)0 && service->s_port != 0
+             ? 42
+             : -1;
+}
+
+__attribute__((visibility("default"))) int DnsFixtureServiceFailure(
+    const char* name, const char* proto) {
+  if (ImportedServiceByName(name, proto) != (struct servent*)0) return -1;
+  return ImportedHerrno() == (int*)0 ? -2 : *ImportedHerrno();
+}
+
+__attribute__((visibility("default"))) uintptr_t DnsFixtureServiceStorage(
+    const char* name, const char* proto) {
+  return (uintptr_t)ImportedServiceByName(name, proto);
+}
+
 __attribute__((visibility("default"))) int DnsFixtureLookup(
     const char* node, const char* service, int family, int flags,
     struct addrinfo** result) {
@@ -68,4 +118,12 @@ __attribute__((visibility("default"))) const char* DnsFixtureErrorString(
 __attribute__((visibility("default"))) const char* DnsFixtureNtop(
     int family, const void* address, char* output, socklen_t output_length) {
   return inet_ntop(family, address, output, output_length);
+}
+
+__attribute__((visibility("default"))) int DnsFixtureHerrno(void) {
+  int* first = ImportedHerrno();
+  if (first == (int*)0) return 1;
+  *first = 97;
+  int* second = ImportedHerrno();
+  return second == first && *second == 97 ? 42 : 2;
 }

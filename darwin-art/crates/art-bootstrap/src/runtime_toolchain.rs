@@ -9,6 +9,12 @@ pub(crate) fn runtime_cpp_command(includes: &[&Path]) -> Command {
         "-DBUILDING_LIBART",
         "-DUSE_D8_DESUGAR",
         "-DART_DEFAULT_GC_TYPE_IS_CMS",
+        // Darwin has no Linux userfaultfd collector. Use AOSP's normal Baker
+        // read-barrier/ConcurrentCopying path for the production runtime
+        // instead of compiling a separate no-read-barrier object model.
+        "-DART_USE_READ_BARRIER",
+        "-DART_READ_BARRIER_TYPE_IS_BAKER=1",
+        "-DART_FORCE_USE_READ_BARRIER",
         "-DART_FRAME_SIZE_LIMIT=1744",
         "-DART_BASE_ADDRESS=0x70000000",
         "-DART_BASE_ADDRESS_MIN_DELTA=(-0x1000000)",

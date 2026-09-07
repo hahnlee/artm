@@ -12,6 +12,10 @@ typedef void (*DarwinArtBionicSyscallFunction)(void);
 
 long darwin_art_bionic_syscall(long number, ...);
 int darwin_art_bionic_gettid(void);
+/* Fixed host ABI used by libc wrappers; unlike raw syscalls get returns zero
+ * and clears the caller's mask tail. Never call the Android variadic ABI from C. */
+int darwin_art_bionic_affinity_get(int tid, size_t capacity, void* mask);
+int darwin_art_bionic_affinity_set(int tid, size_t capacity, const void* mask);
 DarwinArtBionicSyscallFunction darwin_art_bionic_syscall_resolve(
     const char* soname, const char* symbol, const char* version);
 const char* darwin_art_bionic_syscall_capability(const char* capability);

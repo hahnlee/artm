@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
 
   const char* symbols[] = {
       "freeaddrinfo", "gai_strerror", "getaddrinfo", "getnameinfo",
-      "inet_ntop"};
+      "inet_ntop", "__get_h_errno", "gethostbyname", "getservbyname"};
   for (const char* symbol : symbols) {
     Check(darwin_art_bionic_dns_resolve("libc.so", symbol, "LIBC") != nullptr,
           "exact resolver entry");
@@ -66,8 +66,6 @@ int main(int argc, char** argv) {
   Check(darwin_art_bionic_dns_resolve("libSystem.B.dylib", "getaddrinfo",
                                       "LIBC") == nullptr &&
             darwin_art_bionic_dns_resolve("libc.so", "getaddrinfo", nullptr) ==
-                nullptr &&
-            darwin_art_bionic_dns_resolve("libc.so", "gethostbyname", "LIBC") ==
                 nullptr,
         "closed resolver");
 
@@ -93,6 +91,14 @@ int main(int argc, char** argv) {
   using Free = void (*)(DarwinArtAndroidAddrinfo*);
   using ErrorString = const char* (*)(int);
   using Ntop = const char* (*)(int, const void*, char*, uint32_t);
+  using Herrno = int* (*)(void);
+  using HerrnoFixture = int (*)(void);
+  using LegacyLookup = int (*)(const char*);
+  using LegacyFailure = int (*)(const char*);
+  using LegacyStorage = uintptr_t (*)(const char*);
+  using ServiceLookup = int (*)(const char*, const char*);
+  using ServiceFailure = int (*)(const char*, const char*);
+  using ServiceStorage = uintptr_t (*)(const char*, const char*);
   LookupAddress lookup = Lookup<LookupAddress>(image, "DnsFixtureLookup");
   LookupPassive passive = Lookup<LookupPassive>(image, "DnsFixtureLookupPassive");
   Count count = Lookup<Count>(image, "DnsFixtureCount");
@@ -102,6 +108,79 @@ int main(int argc, char** argv) {
   Free free_result = Lookup<Free>(image, "DnsFixtureFree");
   ErrorString error_string = Lookup<ErrorString>(image, "DnsFixtureErrorString");
   Ntop ntop = Lookup<Ntop>(image, "DnsFixtureNtop");
+  HerrnoFixture h_errno_fixture = Lookup<HerrnoFixture>(image, "DnsFixtureHerrno");
+  LegacyLookup host_lookup = Lookup<LegacyLookup>(image, "DnsFixtureHostLookup");
+  LegacyFailure host_failure =
+      Lookup<LegacyFailure>(image, "DnsFixtureHostFailure");
+  LegacyStorage host_storage =
+      Lookup<LegacyStorage>(image, "DnsFixtureHostStorage");
+  ServiceLookup service_lookup =
+      Lookup<ServiceLookup>(image, "DnsFixtureServiceLookup");
+  ServiceFailure service_failure =
+      Lookup<ServiceFailure>(image, "DnsFixtureServiceFailure");
+  ServiceStorage service_storage =
+      Lookup<ServiceStorage>(image, "DnsFixtureServiceStorage");
+  Herrno get_h_errno = reinterpret_cast<Herrno>(
+      darwin_art_bionic_dns_resolve("libc.so", "__get_h_errno", "LIBC"));
+  Check(get_h_errno != nullptr, "thread-local h_errno resolver entry");
+  *get_h_errno() = 11;
+  int* main_h_errno = get_h_errno();
+  std::atomic<bool> worker_h_errno_is_distinct{false};
+  std::thread h_errno_worker([&] {
+    int* worker_h_errno = get_h_errno();
+    worker_h_errno_is_distinct.store(worker_h_errno != main_h_errno &&
+                                         *worker_h_errno == 0,
+                                     std::memory_order_release);
+    *worker_h_errno = 12;
+  });
+  h_errno_worker.join();
+  Check(worker_h_errno_is_distinct.load(std::memory_order_acquire) &&
+            *main_h_errno == 11,
+        "h_errno is Android thread-local storage");
+  Check(h_errno_fixture() == 42, "Android ELF h_errno import ABI");
+  Check(host_lookup("127.0.0.1") == 42 && host_lookup("localhost") == 42,
+        "legacy hostent numeric and localhost lookup");
+  const int missing_host = host_failure(
+      "darwin-art-host-does-not-exist.invalid");
+  Check(missing_host == HOST_NOT_FOUND || missing_host == NO_DATA,
+        "legacy hostent failure updates h_errno");
+  Check(service_lookup("https", "tcp") == 42,
+        "legacy servent known service lookup");
+  Check(service_failure("darwin-art-service-does-not-exist", "tcp") ==
+            NO_DATA,
+        "legacy servent failure updates h_errno");
+  const uintptr_t host_storage_main = host_storage("127.0.0.1");
+  const uintptr_t service_storage_main = service_storage("https", "tcp");
+  std::atomic<bool> legacy_storage_distinct{false};
+  std::thread legacy_storage_worker([&] {
+    legacy_storage_distinct.store(
+        host_storage("127.0.0.1") != host_storage_main &&
+            service_storage("https", "tcp") != service_storage_main,
+        std::memory_order_release);
+  });
+  legacy_storage_worker.join();
+  Check(legacy_storage_distinct.load(std::memory_order_acquire),
+        "legacy hostent and servent storage is thread-local");
+  constexpr const char* kKnownServices[] = {"https", "http", "ssh"};
+  std::atomic<bool> service_stress_ok{true};
+  std::vector<std::thread> service_workers;
+  for (size_t worker_index = 0; worker_index < 8; ++worker_index) {
+    service_workers.emplace_back([&, worker_index] {
+      for (size_t iteration = 0; iteration < 64; ++iteration) {
+        const char* service =
+            kKnownServices[(worker_index + iteration) %
+                           (sizeof(kKnownServices) / sizeof(kKnownServices[0]))];
+        if (service_lookup(service, "tcp") != 42 ||
+            service_storage(service, "tcp") == 0) {
+          service_stress_ok.store(false, std::memory_order_release);
+          return;
+        }
+      }
+    });
+  }
+  for (std::thread& worker : service_workers) worker.join();
+  Check(service_stress_ok.load(std::memory_order_acquire),
+        "concurrent varied service lookup remains stable");
 
   constexpr int kAfUnspec = 0;
   constexpr int kAfInet = 2;
@@ -237,7 +316,8 @@ int main(int argc, char** argv) {
         "unload Android ELF");
   std::fprintf(stderr,
                "bionic-dns-facade: PASS Android-ELF=yes localhost+IPv4+IPv6="
-               "yes reverse=numeric allocation=retire+quiescent-reset "
-               "policy=absolute-host-dns errno=preserved\n");
+               "yes reverse=numeric legacy-hostent+servent=deep-copy+TLS "
+               "allocation=retire+quiescent-reset policy=absolute-host-dns "
+               "errno=preserved\n");
   return 0;
 }

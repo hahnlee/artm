@@ -20,14 +20,25 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
         "patches/art/0002-darwin-dynamic-page-size.patch",
         "patches/art/0020-darwin-low4g-mach-reservation.patch",
         "patches/art/0021-darwin-compressed-reference-window.patch",
+        "patches/art/0094-darwin-thread-cpu-nanotime.patch",
+        "patches/art/0102-darwin-logical-pthread-names.patch",
+        "patches/art/0112-darwin-artbase-private-paths.patch",
     ];
     let shadow_identity = foundation_shadow_identity(root, &artbase, &foundation_patches)?;
     let shadow_identity_path = patched_source_dir.join(".darwin-art-shadow-identity");
     let shadow_current = fs::read_to_string(&shadow_identity_path)
         .is_ok_and(|cached| cached.trim() == shadow_identity)
-        && ["globals.h", "mem_map.cc", "mem_map_unix.cc"]
-            .iter()
-            .all(|source| patched_artbase.join("base").join(source).is_file());
+        && [
+            "globals.h",
+            "mem_map.cc",
+            "mem_map_unix.cc",
+            "os_linux.cc",
+            "scoped_flock.cc",
+            "time_utils.cc",
+            "utils.cc",
+        ]
+        .iter()
+        .all(|source| patched_artbase.join("base").join(source).is_file());
     if !shadow_current {
         let candidate_dir =
             build_dir.join(format!("patched-source.candidate-{}", std::process::id()));
@@ -36,7 +47,15 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
             fs::remove_dir_all(&candidate_dir)?;
         }
         fs::create_dir_all(&candidate_artbase)?;
-        for source in ["globals.h", "mem_map.cc", "mem_map_unix.cc"] {
+        for source in [
+            "globals.h",
+            "mem_map.cc",
+            "mem_map_unix.cc",
+            "os_linux.cc",
+            "scoped_flock.cc",
+            "time_utils.cc",
+            "utils.cc",
+        ] {
             fs::copy(
                 artbase.join("base").join(source),
                 candidate_artbase.join(source),
@@ -50,7 +69,15 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
                     .current_dir(&candidate_dir),
             )?;
         }
-        for source in ["globals.h", "mem_map.cc", "mem_map_unix.cc"] {
+        for source in [
+            "globals.h",
+            "mem_map.cc",
+            "mem_map_unix.cc",
+            "os_linux.cc",
+            "scoped_flock.cc",
+            "time_utils.cc",
+            "utils.cc",
+        ] {
             publish_if_changed(
                 &candidate_artbase.join(source),
                 &patched_artbase.join("base").join(source),
@@ -165,16 +192,16 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
         artbase.join("base/memory_region.cc"),
         patched_artbase.join("base/mem_map.cc"),
         artbase.join("base/metrics/metrics_common.cc"),
-        artbase.join("base/os_linux.cc"),
+        patched_artbase.join("base/os_linux.cc"),
         artbase.join("base/pointer_size.cc"),
         artbase.join("base/runtime_debug.cc"),
         artbase.join("base/scoped_arena_allocator.cc"),
-        artbase.join("base/scoped_flock.cc"),
+        patched_artbase.join("base/scoped_flock.cc"),
         artbase.join("base/socket_peer_is_trusted.cc"),
-        artbase.join("base/time_utils.cc"),
+        patched_artbase.join("base/time_utils.cc"),
         artbase.join("base/unix_file/fd_file.cc"),
         artbase.join("base/unix_file/random_access_file_utils.cc"),
-        artbase.join("base/utils.cc"),
+        patched_artbase.join("base/utils.cc"),
         artbase.join("base/zip_archive.cc"),
         artbase.join("base/globals_unix.cc"),
         patched_artbase.join("base/mem_map_unix.cc"),
@@ -182,7 +209,21 @@ pub(crate) fn build_foundation(root: &Path) -> Result<()> {
     ];
     let artbase_jobs = artbase_sources
         .into_iter()
-        .map(|source| pending_compile(runtime_cpp_command(&includes), source, &object_dir))
+        .map(|source| {
+            let mut command = runtime_cpp_command(&includes);
+            // libartbase is embedded into Darwin's production libart image,
+            // not loaded as Android's separate libartbase(.d)ylib.  Keep the
+            // AOSP globals check disabled for this one object, otherwise its
+            // static initializer aborts every host before the embedded
+            // provider can be used by an unchanged native ART test.
+            if source
+                .file_name()
+                .is_some_and(|name| name == "globals_unix.cc")
+            {
+                command.arg("-DART_STATIC_LIBARTBASE");
+            }
+            pending_compile(command, source, &object_dir)
+        })
         .collect::<Result<Vec<_>>>()?;
     let (artbase_objects, artbase_compiled, _) =
         compile_pending_native(artbase_jobs, &compiler_identity)?;

@@ -117,6 +117,11 @@ nm -u "$temp_root/shims.o" | sed 's/^[[:space:]]*//' | sort \
   >"$temp_root/undefined"
 cat >"$temp_root/expected-undefined" <<'EOF'
 ___error
+___stack_chk_fail
+___stack_chk_guard
+_abort
+_bzero
+_close
 _closedir
 _darwin_art_bionic_errno_load
 _darwin_art_bionic_errno_store
@@ -147,6 +152,7 @@ _darwin_art_bionic_fs_pwrite_core
 _darwin_art_bionic_fs_read_core
 _darwin_art_bionic_fs_readdir_core
 _darwin_art_bionic_fs_readlink_core
+_darwin_art_bionic_fs_readv_core
 _darwin_art_bionic_fs_realpath_core
 _darwin_art_bionic_fs_remove_core
 _darwin_art_bionic_fs_rename_core
@@ -158,16 +164,27 @@ _darwin_art_bionic_fs_truncate_core
 _darwin_art_bionic_fs_unlinkat_core
 _darwin_art_bionic_fs_utimensat_core
 _darwin_art_bionic_fs_write_core
+_darwin_art_bionic_fs_writev_core
+_dup
 _fcntl
 _fdopendir
 _fpathconf
+_free
 _fstatvfs
+_getenv
+_getpid
 _mach_task_self_
 _mach_vm_region_recurse
 _memcpy
+_openat
+_proc_pidinfo
 _readdir
 _rewinddir
+_strdup
 _strlen
+_strsep
+_sysconf
+_write
 EOF
 diff -u "$temp_root/expected-undefined" "$temp_root/undefined" ||
   fail 'shim dependency drift'
@@ -180,7 +197,7 @@ for symbol in __read_chk __write_chk; do
   grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
     fail "missing fortified definition $symbol"
 done
-for symbol in chmod lseek lseek64 pread pwrite rewinddir write; do
+for symbol in chmod lseek lseek64 pread pwrite readv rewinddir write writev; do
   grep -F " _darwin_art_bionic_$symbol" <<<"$definitions" >/dev/null ||
     fail "missing extended prefixed definition $symbol"
 done

@@ -2,7 +2,9 @@
 
 #include "jit/jit.h"
 
-// Normally generated/exported by libart-compiler. The interpreter-only Darwin
-// bootstrap needs the ABI declaration to compile libart-runtime, but does not
-// instantiate a compiler.
-extern "C" art::jit::JitCompilerInterface* jit_create();
+// Same C++ namespace/linkage as compiler/export/jit_create.h. This declaration
+// also permits the interpreter-only runtime objects to build without compiler
+// headers; JIT-enabled linking must supply the real AOSP compiler definition.
+namespace art::jit {
+JitCompilerInterface* jit_create();
+}

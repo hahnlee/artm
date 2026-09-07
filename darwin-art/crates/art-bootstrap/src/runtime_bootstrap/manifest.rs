@@ -4,32 +4,67 @@
 //! compiler orchestration cannot silently change which upstream files are
 //! copied or patched.
 
+pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v3";
+
 pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.cc",
+    "runtime_image.cc",
+    "backtrace_helper.cc",
+    "plugin.cc",
+    "fault_handler.cc",
+    "lock_word.h",
+    "lock_word-inl.h",
     "signal_set.h",
     "class_linker.cc",
     "class_linker.h",
     "mirror/object_reference.h",
     "mirror/string-inl.h",
     "gc/heap.cc",
+    "gc/collector/semi_space.cc",
+    "gc/space/rosalloc_space.cc",
     "gc/space/malloc_space.cc",
+    "gc/space/large_object_space.cc",
     "gc/space/space.cc",
+    "gc/space/image_space.cc",
     "entrypoints/quick/quick_alloc_entrypoints.cc",
     "entrypoints/quick/callee_save_frame.h",
     "entrypoints/quick/quick_trampoline_entrypoints.cc",
+    "entrypoints/entrypoint_utils.h",
+    "entrypoints/entrypoint_utils-inl.h",
+    "method_handles.cc",
+    "mirror/var_handle.cc",
+    "instrumentation.cc",
+    "jni/jni_internal.cc",
     "arch/arm64/jni_frame_arm64.h",
     "runtime_common.cc",
     "runtime.h",
+    "jit/jit.cc",
+    "jit/jit_code_cache.cc",
+    "jit/jit_memory_region.cc",
+    "jit/jit_memory_region.h",
+    "jit/jit_scoped_code_cache_write.h",
+    "jit/small_pattern_matcher.cc",
+    "quick_exception_handler.cc",
+    "stack.cc",
     "thread.cc",
     "thread.h",
     "thread_list.cc",
+    "trace.cc",
     "gc/collector/garbage_collector.cc",
     "gc/collector/mark_compact.cc",
     "oat/oat_file.cc",
+    "oat/oat_quick_method_header.cc",
+    "oat/image.h",
+    "oat/image-inl.h",
     "exec_utils.cc",
     "signal_catcher.cc",
     "nterp_helpers.cc",
     "interpreter/mterp/nterp.cc",
+    "native/dalvik_system_VMDebug.cc",
+    "hprof/hprof.cc",
+    "native_bridge_art_interface.cc",
+    "entrypoints/quick/quick_jni_entrypoints.cc",
+    "entrypoints/quick/runtime_entrypoints_list.h",
 ];
 
 pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
@@ -41,11 +76,12 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0011-darwin-disable-userfaultfd-mark-compact.patch",
     "patches/art/0013-darwin-stat-mtime.patch",
     "patches/art/0014-darwin-exec-pidfd-fallback.patch",
-    "patches/art/0017-darwin-disable-nterp.patch",
-    "patches/art/0019-darwin-disable-nterp-catch-entry.patch",
     "patches/art/0022-darwin-base-relative-heap-references.patch",
     "patches/art/0023-darwin-enable-quick-allocation-entrypoints.patch",
     "patches/art/0024-darwin-arm64-ucontext-dump.patch",
+    "patches/art/0128-darwin-arm64-early-fault-pc.patch",
+    "patches/art/0130-darwin-arm64-async-fault-pc.patch",
+    "patches/art/0141-darwin-arm64-original-fault-context.patch",
     "patches/art/0025-darwin-morecore-diagnostics.patch",
     "patches/art/0027-darwin-string-abi-overlay.patch",
     "patches/art/0028-darwin-minimal-runtime-start.patch",
@@ -53,6 +89,48 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0030-darwin-large-object-bitmap-window.patch",
     "patches/art/0031-darwin-class-loader-native-path-elements.patch",
     "patches/art/0032-darwin-oat-dlopen-fallback.patch",
+    "patches/art/0033-darwin-base-relative-lockword-forwarding.patch",
+    "patches/art/0034-darwin-fragmented-oom-hspace-retry.patch",
+    "patches/art/0035-darwin-rosalloc-clear-tail-protection.patch",
+    "patches/art/0038-darwin-jit-memory.patch",
+    "patches/art/0067-homogeneous-compaction-jit-roots.patch",
+    "patches/art/0070-darwin-imt-conflict-receiver.patch",
+    "patches/art/0072-darwin-polymorphic-runtime-boundary.patch",
+    "patches/art/0041-darwin-jit-startup.patch",
+    "patches/art/0042-darwin-compressed32-jit-gc-boundaries.patch",
+    "patches/art/0046-darwin-compressed32-managed-return-boundaries.patch",
+    "patches/art/0048-darwin-compressed32-generic-jni-return.patch",
+    "patches/art/0049-darwin-managed-exit-hook.patch",
+    "patches/art/0051-darwin-jit-code-retirement-order.patch",
+    "patches/art/0057-darwin-large-object-zero-on-release.patch",
+    "patches/art/0076-darwin-bytebuffer-native-address.patch",
+    "patches/art/0100-darwin-small-pattern-reference-abi.patch",
+    "patches/art/0101-darwin-private-trace-path.patch",
+    "patches/art/0103-darwin-app-process-system-class-loader.patch",
+    "patches/art/0104-darwin-attached-thread-class-loader.patch",
+    "patches/art/0105-darwin-protection-fault-signal.patch",
+    "patches/art/0132-darwin-sigbus-user-sigsegv-chain.patch",
+    "patches/art/0106-darwin-runtime-virtual-fd-export.patch",
+    "patches/art/0107-darwin-embedded-openjdkjvmti-plugin.patch",
+    "patches/art/0108-darwin-minimal-start-runtime-phases.patch",
+    "patches/art/0109-darwin-null-cmdline-sigquit.patch",
+    "patches/art/0110-darwin-native-allocation-accounting.patch",
+    "patches/art/0111-darwin-android-trace-clock.patch",
+    "patches/art/0114-darwin-image-logical-address-window.patch",
+    "patches/art/0115-darwin-generic-jni-remote-unwind.patch",
+    "patches/art/0116-darwin-native-bridge-preinitialize.patch",
+    "patches/art/0117-darwin-minimal-start-native-bridge.patch",
+    "patches/art/0118-darwin-minimal-start-system-loader.patch",
+    "patches/art/0119-darwin-native-bridge-signals.patch",
+    "patches/art/0120-darwin-hprof-private-path.patch",
+    "patches/art/0125-darwin-runtime-image-logical-addresses.patch",
+    "patches/art/0126-darwin-backtrace-collector.patch",
+    "patches/art/0143-darwin-compiled-jni-frame-publication.patch",
+    "patches/art/0150-darwin-oat-quick-method-header-image-identity.patch",
+    "patches/art/0151-darwin-embedded-openjdk-loader.patch",
+    "patches/art/0152-darwin-minimal-start-tail.patch",
+    "patches/art/0153-darwin-boot-oat-logical-location.patch",
+    "patches/art/0155-darwin-allocation-entrypoint-class-reference-boundary.patch",
 ];
 
 #[cfg(test)]
@@ -62,10 +140,50 @@ mod tests {
     #[test]
     fn manifest_contains_the_runtime_shadow_and_patch_contract() {
         assert!(PATCHED_RUNTIME_SOURCES.contains(&"runtime.cc"));
+        assert!(PATCHED_RUNTIME_SOURCES.contains(&"plugin.cc"));
         assert!(PATCHED_RUNTIME_SOURCES.contains(&"runtime.h"));
+        assert!(PATCHED_RUNTIME_SOURCES.contains(&"jit/jit.cc"));
+        assert!(PATCHED_RUNTIME_SOURCES.contains(&"jit/jit_memory_region.h"));
+        assert!(PATCHED_RUNTIME_SOURCES.contains(&"jit/jit_scoped_code_cache_write.h"));
+        assert!(PATCHED_RUNTIME_SOURCES.contains(&"quick_exception_handler.cc"));
+        assert!(PATCHED_RUNTIME_SOURCES.contains(&"instrumentation.cc"));
+        assert!(PATCHED_RUNTIME_SOURCES.contains(&"stack.cc"));
+        assert!(PATCHED_RUNTIME_SOURCES.contains(&"mirror/var_handle.cc"));
+        assert!(PATCHED_RUNTIME_SOURCES.contains(&"entrypoints/entrypoint_utils.h"));
+        assert!(PATCHED_RUNTIME_SOURCES.contains(&"entrypoints/entrypoint_utils-inl.h"));
         assert!(
             PATCHED_RUNTIME_PATCHES
                 .contains(&"patches/art/0030-darwin-large-object-bitmap-window.patch")
+        );
+        assert!(PATCHED_RUNTIME_PATCHES.contains(&"patches/art/0038-darwin-jit-memory.patch"));
+        assert!(!PATCHED_RUNTIME_PATCHES.contains(&"patches/art/0017-darwin-disable-nterp.patch"));
+        assert!(
+            !PATCHED_RUNTIME_PATCHES
+                .contains(&"patches/art/0019-darwin-disable-nterp-catch-entry.patch")
+        );
+        assert!(
+            !PATCHED_RUNTIME_PATCHES.contains(&"patches/art/0039-darwin-jit-primitive-gate.patch")
+        );
+        assert!(PATCHED_RUNTIME_PATCHES.contains(&"patches/art/0041-darwin-jit-startup.patch"));
+        assert!(
+            PATCHED_RUNTIME_PATCHES
+                .contains(&"patches/art/0042-darwin-compressed32-jit-gc-boundaries.patch")
+        );
+        assert!(
+            PATCHED_RUNTIME_PATCHES
+                .contains(&"patches/art/0046-darwin-compressed32-managed-return-boundaries.patch")
+        );
+        assert!(
+            PATCHED_RUNTIME_PATCHES
+                .contains(&"patches/art/0048-darwin-compressed32-generic-jni-return.patch")
+        );
+        assert!(
+            PATCHED_RUNTIME_PATCHES
+                .contains(&"patches/art/0076-darwin-bytebuffer-native-address.patch")
+        );
+        assert!(
+            PATCHED_RUNTIME_PATCHES
+                .contains(&"patches/art/0155-darwin-allocation-entrypoint-class-reference-boundary.patch")
         );
     }
 }

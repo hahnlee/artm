@@ -3,6 +3,19 @@
 #include <cstddef>
 #include <cstdint>
 
+// SurfaceControl's transparent-region hint is intentionally bounded at the
+// compositor boundary.  Android's Region may contain an arbitrary number of
+// rectangles; the native shim forwards the first few rectangles and treats a
+// truncated hint as conservative (no additional hole beyond those entries).
+inline constexpr size_t kDarwinArtMaxTransparentRegionRects = 8;
+
+struct DarwinArtTransparentRegionRect {
+  int32_t left = 0;
+  int32_t top = 0;
+  int32_t right = 0;
+  int32_t bottom = 0;
+};
+
 struct DarwinArtMetalComposerLayer {
   uint32_t owner_process_id = 0;
   uint32_t layer_id = 0;
@@ -30,6 +43,9 @@ struct DarwinArtMetalComposerLayer {
   int32_t destination_bottom = 0;
   int32_t z = 0;
   float alpha = 1.0f;
+  uint32_t transparent_region_count = 0;
+  DarwinArtTransparentRegionRect transparent_region[
+      kDarwinArtMaxTransparentRegionRects]{};
 };
 
 // Darwin's HWC/Composer backend. Every layer and the display target remain

@@ -17,3 +17,16 @@ index 69ab0b7f4..000000000 100644
  #include "zlib.h"
  #include <nativehelper/JNIHelp.h>
  #include <nativehelper/jni_macros.h>
+@@ -206,4 +213,11 @@ static jobjectArray System_specialProperties(JNIEnv* env, jclass ignored) {
+-    const char* library_path = getenv("LD_LIBRARY_PATH");
++    const char* library_path = getenv("DARWIN_ART_JAVA_LIBRARY_PATH");
++    if (library_path == NULL) {
++#if defined(__APPLE__)
++        library_path = getenv("DYLD_LIBRARY_PATH");
++#else
++        library_path = getenv("LD_LIBRARY_PATH");
++#endif
++    }
+ #if defined(__ANDROID__)
+     if (library_path == NULL) {
+         android_get_LD_LIBRARY_PATH(path, sizeof(path));

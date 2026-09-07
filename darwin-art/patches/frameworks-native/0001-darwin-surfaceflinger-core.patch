@@ -208,6 +208,22 @@ index 466fb36..af8ace1 100644
      dataspace = ui::Dataspace::V0_SRGB;
      gameMode = gui::GameMode::Unsupported;
      requestedFrameRate = {};
+@@ -165,5 +165,15 @@ void RequestedLayerState::merge(const ResolvedComposerState& resolvedComposerState) {
+     const bool hadSideStream = sidebandStream != nullptr;
+     const layer_state_t& clientState = resolvedComposerState.state;
+     const bool hadSomethingToDraw = hasSomethingToDraw();
+     uint64_t clientChanges = what | layer_state_t::diff(clientState);
++#if defined(__APPLE__)
++    // The Darwin wire state carries only layer ids, so both Binder parent
++    // handles are null. Make a real parent-id/canBeRoot transition visible to
++    // LayerLifecycleManager even when layer_state_t::diff cannot compare the
++    // absent handles.
++    if ((clientState.what & layer_state_t::eReparent) &&
++        (parentId != resolvedComposerState.parentId || canBeRoot)) {
++        clientChanges |= layer_state_t::eReparent;
++    }
++#endif
+     layer_state_t::merge(clientState);
 @@ -219,13 +259,15 @@ void RequestedLayerState::merge(const ResolvedComposerState& resolvedComposerSta
              if ((barrierProducerId > bufferData->producerId) ||
                  ((barrierProducerId == bufferData->producerId) &&

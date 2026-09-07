@@ -528,6 +528,38 @@ pub unsafe extern "C" fn darwin_art_bionic_fs_write_core(
 #[unsafe(no_mangle)]
 /// # Safety
 ///
+/// `vectors` points to `count` Android-arm64 iovec entries and each writable
+/// buffer is valid for its declared length for the duration of this call.
+pub unsafe extern "C" fn darwin_art_bionic_fs_readv_core(
+    fd: c_int,
+    vectors: *const crate::NativeIovec,
+    count: c_int,
+) -> isize {
+    if count < 0 || count > 1024 || (count != 0 && vectors.is_null()) {
+        return with_active(-1, |facade| facade.fail(22) as isize);
+    }
+    with_active(-1, |facade| unsafe { facade.readv(fd, vectors, count) })
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `vectors` points to `count` Android-arm64 iovec entries and each readable
+/// buffer is valid for its declared length for the duration of this call.
+pub unsafe extern "C" fn darwin_art_bionic_fs_writev_core(
+    fd: c_int,
+    vectors: *const crate::NativeIovec,
+    count: c_int,
+) -> isize {
+    if count < 0 || count > 1024 || (count != 0 && vectors.is_null()) {
+        return with_active(-1, |facade| facade.fail(22) as isize);
+    }
+    with_active(-1, |facade| unsafe { facade.writev(fd, vectors, count) })
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
 /// For nonzero `count`, `buffer` must be writable for `count` bytes.
 pub unsafe extern "C" fn darwin_art_bionic_fs_pread_core(
     fd: c_int,

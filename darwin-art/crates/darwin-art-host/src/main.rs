@@ -1,8 +1,10 @@
 use darwin_art_host::{RunOptions, run, run_service_child};
 use std::env;
 use std::error::Error;
+use std::ffi::{CStr, CString, OsString};
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
 fn main() {
@@ -13,6 +15,22 @@ fn main() {
 }
 
 fn main_result() -> Result<(), Box<dyn Error>> {
+    // Android blocks its runtime-control signals before creating any process
+    // threads, then ART's Signal Catcher consumes them with sigwait(). Do the
+    // same at the Mach-O process boundary so AppKit/frame-clock workers cannot
+    // inherit an unblocked SIGQUIT and terminate the process first.
+    let mut runtime_signals = unsafe { std::mem::zeroed::<libc::sigset_t>() };
+    unsafe {
+        libc::sigemptyset(&mut runtime_signals);
+        libc::sigaddset(&mut runtime_signals, libc::SIGPIPE);
+        libc::sigaddset(&mut runtime_signals, libc::SIGQUIT);
+        libc::sigaddset(&mut runtime_signals, libc::SIGUSR1);
+    }
+    let signal_status =
+        unsafe { libc::pthread_sigmask(libc::SIG_BLOCK, &runtime_signals, std::ptr::null_mut()) };
+    if signal_status != 0 {
+        return Err(std::io::Error::from_raw_os_error(signal_status).into());
+    }
     // darwin-artctl deliberately carries the daemon lease through exec. Make
     // it close-on-exec again immediately so a service child receives its own
     // PID lease instead of extending its parent's registration accidentally.
@@ -29,6 +47,12 @@ fn main_result() -> Result<(), Box<dyn Error>> {
     let mut arguments = env::args_os();
     let program = arguments.next().unwrap_or_else(|| "darwin-art-host".into());
     let mut values = arguments.collect::<Vec<_>>();
+    if values.first().is_some_and(|value| value == "--dex2oat") {
+        return run_embedded_art_tool(&values, "--dex2oat", c"darwin_art_run_dex2oat", "dex2oat");
+    }
+    if values.first().is_some_and(|value| value == "--profman") {
+        return run_embedded_art_tool(&values, "--profman", c"darwin_art_run_profman", "profman");
+    }
     if values
         .first()
         .is_some_and(|value| value == "--service-child")
@@ -101,6 +125,12 @@ fn main_result() -> Result<(), Box<dyn Error>> {
             ])?;
         }
         output.flush()?;
+    }
+    // Upstream ART run-test owns stdout/stderr byte-for-byte. Native test
+    // modules write to the inherited process stream, so keep the host's
+    // human-oriented acceptance summary out of that application channel.
+    if env::var_os("DARWIN_ART_UPSTREAM_MAIN").is_some() {
+        return Ok(());
     }
     println!("ART Darwin Runtime::Create: ok");
     println!("ART Darwin app ClassLoader: PathClassLoader");
@@ -192,6 +222,61 @@ fn main_result() -> Result<(), Box<dyn Error>> {
         outcome.process.lifecycle_result
     );
     println!("ART Darwin launcher: main(String[])=ok");
+    Ok(())
+}
+
+fn run_embedded_art_tool(
+    values: &[OsString],
+    mode: &str,
+    symbol_name: &CStr,
+    argv0: &str,
+) -> Result<(), Box<dyn Error>> {
+    if values.len() < 3 {
+        return Err(format!("{mode} requires LIBDARWIN_ART and tool arguments").into());
+    }
+    let library_path = CString::new(values[1].as_bytes())?;
+    // Keep the runtime provider visible to the sibling RTLD_LOCAL OpenJDK
+    // owner.  This mirrors the production Darwin engine's libart load and
+    // preserves the Android process-wide provider ABI without copying
+    // private runtime symbols into each JNI module.
+    let handle = unsafe { libc::dlopen(library_path.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) };
+    if handle.is_null() {
+        let message = unsafe { libc::dlerror() };
+        return Err(if message.is_null() {
+            format!("unable to load {argv0} runtime").into()
+        } else {
+            unsafe { CStr::from_ptr(message) }
+                .to_string_lossy()
+                .into_owned()
+                .into()
+        });
+    }
+    let symbol = unsafe { libc::dlsym(handle, symbol_name.as_ptr()) };
+    if symbol.is_null() {
+        unsafe { libc::dlclose(handle) };
+        return Err(format!("{argv0} runtime entry is missing").into());
+    }
+    let mut argv = Vec::with_capacity(values.len() - 1);
+    argv.push(CString::new(argv0)?);
+    for value in &values[2..] {
+        argv.push(CString::new(value.as_bytes())?);
+    }
+    let mut argv_ptrs = argv
+        .iter_mut()
+        .map(|value| value.as_ptr().cast_mut())
+        .collect::<Vec<_>>();
+    let argc = argv_ptrs.len() as i32;
+    // ART's InitLogging() intentionally reconstructs the command line by
+    // walking argv until a null pointer; it does not receive argc. Preserve
+    // the process-entry C ABI even though this tool is entered through dlopen.
+    argv_ptrs.push(std::ptr::null_mut());
+    type ToolMain = unsafe extern "C" fn(i32, *mut *mut libc::c_char) -> i32;
+    let entry: ToolMain = unsafe { std::mem::transmute(symbol) };
+    let status = unsafe { entry(argc, argv_ptrs.as_mut_ptr()) };
+    unsafe { libc::dlclose(handle) };
+    if status != 0 {
+        return Err(format!("{argv0} failed with status {status}").into());
+    }
     Ok(())
 }
 

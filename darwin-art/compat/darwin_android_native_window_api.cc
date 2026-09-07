@@ -55,3 +55,24 @@ extern "C" int32_t ANativeWindow_getBuffersDataSpace(
   }
   return dataspace;
 }
+
+// Frame-rate hints are advisory on Android: SurfaceFlinger may change the
+// display mode, but rendering remains correct when the hint is ignored.  The
+// Metal compositor owns the display cadence in Darwin ART, so accept the
+// NDK calls as successful no-ops rather than leaving the API unresolved for
+// engines (notably Unity/Swappy) that resolve them lazily.
+extern "C" int32_t ANativeWindow_setFrameRate(
+    ANativeWindow* native_window, float, int8_t) {
+  auto* window = reinterpret_cast<AndroidNativeWindowAbi*>(native_window);
+  if (window == nullptr || window->query == nullptr) return -EINVAL;
+  int valid = 0;
+  return window->query(window, kNativeWindowIsValid, &valid) == 0 && valid
+             ? 0
+             : -EINVAL;
+}
+
+extern "C" int32_t ANativeWindow_setFrameRateWithChangeStrategy(
+    ANativeWindow* native_window, float frame_rate, int8_t compatibility,
+    int8_t) {
+  return ANativeWindow_setFrameRate(native_window, frame_rate, compatibility);
+}

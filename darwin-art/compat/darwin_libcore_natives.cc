@@ -2,6 +2,12 @@
 #include "darwin_android_time.h"
 #include "darwin_framework_natives.h"
 #include "darwin_libcore_filesystem_bridge.h"
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+#include "AsynchronousCloseMonitor.h"
+#include "../tools/bionic-socket-broker-adapter/include/darwin_art_bionic_socket_broker.h"
+#include "../_aosp/libnativehelper-full/include/nativehelper/JNIHelp.h"
+#include "../_aosp/libnativehelper-full/include/android/file_descriptor_jni.h"
+#endif
 
 extern "C" int darwin_art_bionic_fs_stat_core(
     const char*, DarwinArtAndroidStat*);
@@ -17,6 +23,7 @@ extern "C" intptr_t darwin_art_bionic_write(int, const void*, size_t);
 extern "C" intptr_t darwin_art_bionic_pread(int, void*, size_t, int64_t);
 extern "C" intptr_t darwin_art_bionic_pwrite(int, const void*, size_t, int64_t);
 extern "C" int darwin_art_bionic_fstat(int, DarwinArtAndroidStat*);
+extern "C" int darwin_art_bionic_ftruncate(int, int64_t);
 extern "C" int darwin_art_bionic_stat(const char*, DarwinArtAndroidStat*);
 extern "C" int64_t darwin_art_bionic_lseek(int, int64_t, int);
 extern "C" int darwin_art_bionic_access(const char*, int);
@@ -34,6 +41,9 @@ extern "C" void register_java_io_UnixFileSystem(JNIEnv* env);
 extern "C" void register_java_io_FileDescriptor(JNIEnv* env);
 extern "C" void register_java_io_FileInputStream(JNIEnv* env);
 extern "C" void register_java_lang_System(JNIEnv* env);
+void register_jdk_internal_misc_VM(JNIEnv* env);
+void register_java_lang_invoke_MethodHandle(JNIEnv* env);
+void register_java_lang_invoke_VarHandle(JNIEnv* env);
 extern "C" void register_java_lang_Runtime(JNIEnv* env);
 extern "C" void register_java_sun_nio_fs_UnixNativeDispatcher(JNIEnv* env);
 extern "C" void register_sun_nio_ch_IOUtil(JNIEnv* env);
@@ -60,6 +70,7 @@ class DarwinArtLibcoreJniConstants {
 #include <zlib.h>
 
 #include <cerrno>
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -67,13 +78,557 @@ class DarwinArtLibcoreJniConstants {
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
+#include <poll.h>
 #include <string>
 #include <vector>
+
+// java.util.zip.Deflater is loaded by the OpenJDK zip classes through the
+// standard JNI symbol path (unlike Inflater, which is registered by OnLoad).
+// Keep the state native and expose the AOSP entry points so apps do not fall
+// back to a missing-symbol exception when they construct a GZIP stream.
+struct DarwinDeflaterState {
+  z_stream stream{};
+};
+
+extern "C" JNIEXPORT jlong Java_java_util_zip_Deflater_init(
+    JNIEnv*, jclass, jint level, jint strategy, jboolean nowrap) {
+  auto* state = new (std::nothrow) DarwinDeflaterState();
+  if (state == nullptr) return 0;
+  const int window_bits = nowrap == JNI_TRUE ? -MAX_WBITS : MAX_WBITS;
+  if (deflateInit2(&state->stream, level, Z_DEFLATED, window_bits, MAX_MEM_LEVEL,
+                   strategy) != Z_OK) {
+    delete state;
+    return 0;
+  }
+  return reinterpret_cast<jlong>(state);
+}
+
+extern "C" JNIEXPORT void Java_java_util_zip_Deflater_setDictionary(
+    JNIEnv* env, jobject, jlong address, jbyteArray dictionary, jint offset,
+    jint length) {
+  auto* state = reinterpret_cast<DarwinDeflaterState*>(address);
+  if (state == nullptr || dictionary == nullptr || offset < 0 || length < 0 ||
+      offset > env->GetArrayLength(dictionary) ||
+      length > env->GetArrayLength(dictionary) - offset) {
+    return;
+  }
+  std::vector<jbyte> bytes(static_cast<std::size_t>(length));
+  env->GetByteArrayRegion(dictionary, offset, length, bytes.data());
+  if (!env->ExceptionCheck()) {
+    deflateSetDictionary(&state->stream,
+                         reinterpret_cast<const Bytef*>(bytes.data()),
+                         static_cast<uInt>(bytes.size()));
+  }
+}
+
+extern "C" JNIEXPORT void Java_java_util_zip_Deflater_setDictionaryBuffer(
+    JNIEnv*, jobject, jlong address, jlong dictionary, jint length) {
+  auto* state = reinterpret_cast<DarwinDeflaterState*>(address);
+  if (state == nullptr || dictionary == 0 || length < 0) return;
+  deflateSetDictionary(
+      &state->stream,
+      reinterpret_cast<const Bytef*>(static_cast<uintptr_t>(dictionary)),
+      static_cast<uInt>(length));
+}
+
+extern "C" JNIEXPORT jint Java_java_util_zip_Deflater_deflateBytes(
+    JNIEnv* env, jobject, jlong address, jbyteArray output, jint offset,
+    jint length, jint flush) {
+  auto* state = reinterpret_cast<DarwinDeflaterState*>(address);
+  if (state == nullptr || output == nullptr || offset < 0 || length < 0 ||
+      offset > env->GetArrayLength(output) ||
+      length > env->GetArrayLength(output) - offset) {
+    return 0;
+  }
+  std::vector<jbyte> bytes(static_cast<std::size_t>(length));
+  state->stream.next_in = nullptr;
+  state->stream.avail_in = 0;
+  state->stream.next_out = reinterpret_cast<Bytef*>(bytes.data());
+  state->stream.avail_out = static_cast<uInt>(bytes.size());
+  const int result = deflate(&state->stream, flush);
+  if (result != Z_OK && result != Z_STREAM_END && result != Z_BUF_ERROR) {
+    return 0;
+  }
+  const jint produced = length - static_cast<jint>(state->stream.avail_out);
+  if (produced > 0) {
+    env->SetByteArrayRegion(output, offset, produced, bytes.data());
+  }
+  return produced;
+}
+
+extern "C" JNIEXPORT jlong Java_java_util_zip_Deflater_deflateBytesBytes(
+    JNIEnv* env, jobject, jlong address, jbyteArray input, jint input_offset,
+    jint input_length, jbyteArray output, jint output_offset,
+    jint output_length, jint flush, jint) {
+  auto* state = reinterpret_cast<DarwinDeflaterState*>(address);
+  if (state == nullptr || input == nullptr || output == nullptr ||
+      input_offset < 0 || input_length < 0 || output_offset < 0 ||
+      output_length < 0 || input_offset > env->GetArrayLength(input) ||
+      input_length > env->GetArrayLength(input) - input_offset ||
+      output_offset > env->GetArrayLength(output) ||
+      output_length > env->GetArrayLength(output) - output_offset) {
+    return 0;
+  }
+  std::vector<jbyte> input_bytes(static_cast<std::size_t>(input_length));
+  std::vector<jbyte> output_bytes(static_cast<std::size_t>(output_length));
+  env->GetByteArrayRegion(input, input_offset, input_length, input_bytes.data());
+  if (env->ExceptionCheck()) return 0;
+  state->stream.next_in = reinterpret_cast<Bytef*>(input_bytes.data());
+  state->stream.avail_in = static_cast<uInt>(input_bytes.size());
+  state->stream.next_out = reinterpret_cast<Bytef*>(output_bytes.data());
+  state->stream.avail_out = static_cast<uInt>(output_bytes.size());
+  const int result = deflate(&state->stream, flush);
+  if (result != Z_OK && result != Z_STREAM_END && result != Z_BUF_ERROR) return 0;
+  const jint consumed = input_length - static_cast<jint>(state->stream.avail_in);
+  const jint produced = output_length - static_cast<jint>(state->stream.avail_out);
+  if (produced > 0) {
+    env->SetByteArrayRegion(output, output_offset, produced, output_bytes.data());
+  }
+  const jlong finished = result == Z_STREAM_END ? (1LL << 62) : 0;
+  return (static_cast<jlong>(consumed) & 0x7fffffffLL) |
+         ((static_cast<jlong>(produced) & 0x7fffffffLL) << 31) | finished;
+}
+
+static jlong DeflaterDeflateBuffer(DarwinDeflaterState* state,
+                                   const Bytef* input, jint input_length,
+                                   Bytef* output, jint output_length,
+                                   jint flush) {
+  if (state == nullptr || input_length < 0 || output_length < 0 ||
+      (input_length != 0 && input == nullptr) ||
+      (output_length != 0 && output == nullptr)) {
+    return 0;
+  }
+  state->stream.next_in = const_cast<Bytef*>(input);
+  state->stream.avail_in = static_cast<uInt>(input_length);
+  state->stream.next_out = output;
+  state->stream.avail_out = static_cast<uInt>(output_length);
+  const int result = deflate(&state->stream, flush);
+  if (result != Z_OK && result != Z_STREAM_END && result != Z_BUF_ERROR) return 0;
+  const jint consumed = input_length - static_cast<jint>(state->stream.avail_in);
+  const jint produced = output_length - static_cast<jint>(state->stream.avail_out);
+  const jlong finished = result == Z_STREAM_END ? (1LL << 62) : 0;
+  return (static_cast<jlong>(consumed) & 0x7fffffffLL) |
+         ((static_cast<jlong>(produced) & 0x7fffffffLL) << 31) | finished;
+}
+
+extern "C" JNIEXPORT jlong Java_java_util_zip_Deflater_deflateBytesBuffer(
+    JNIEnv* env, jobject, jlong address, jbyteArray input, jint input_offset,
+    jint input_length, jlong output, jint output_offset, jint output_length,
+    jint flush) {
+  auto* state = reinterpret_cast<DarwinDeflaterState*>(address);
+  if (input == nullptr || input_offset < 0 || input_length < 0 || output_offset < 0 ||
+      output_length < 0 || input_offset > env->GetArrayLength(input) ||
+      input_length > env->GetArrayLength(input) - input_offset || output == 0) return 0;
+  std::vector<jbyte> bytes(static_cast<std::size_t>(input_length));
+  env->GetByteArrayRegion(input, input_offset, input_length, bytes.data());
+  if (env->ExceptionCheck()) return 0;
+  return DeflaterDeflateBuffer(
+      state, reinterpret_cast<const Bytef*>(bytes.data()), input_length,
+      reinterpret_cast<Bytef*>(static_cast<uintptr_t>(output) +
+                               static_cast<uintptr_t>(output_offset)),
+      output_length, flush);
+}
+
+extern "C" JNIEXPORT jlong Java_java_util_zip_Deflater_deflateBufferBytes(
+    JNIEnv* env, jobject, jlong address, jlong input, jint input_offset,
+    jint input_length, jbyteArray output, jint output_offset,
+    jint output_length, jint flush) {
+  auto* state = reinterpret_cast<DarwinDeflaterState*>(address);
+  if (input == 0 || output == nullptr || input_offset < 0 || input_length < 0 ||
+      output_offset < 0 || output_length < 0 ||
+      output_offset > env->GetArrayLength(output) ||
+      output_length > env->GetArrayLength(output) - output_offset) return 0;
+  std::vector<jbyte> bytes(static_cast<std::size_t>(output_length));
+  const jlong result = DeflaterDeflateBuffer(
+      state,
+      reinterpret_cast<const Bytef*>(static_cast<uintptr_t>(input) +
+                                     static_cast<uintptr_t>(input_offset)),
+      input_length, reinterpret_cast<Bytef*>(bytes.data()), output_length, flush);
+  const jint produced = static_cast<jint>((result >> 31) & 0x7fffffffLL);
+  if (produced > 0) env->SetByteArrayRegion(output, output_offset, produced, bytes.data());
+  return result;
+}
+
+extern "C" JNIEXPORT jlong Java_java_util_zip_Deflater_deflateBufferBuffer(
+    JNIEnv*, jobject, jlong address, jlong input, jint input_offset,
+    jint input_length, jlong output, jint output_offset, jint output_length,
+    jint flush) {
+  if (input == 0 || output == 0) return 0;
+  return DeflaterDeflateBuffer(
+      reinterpret_cast<DarwinDeflaterState*>(address),
+      reinterpret_cast<const Bytef*>(static_cast<uintptr_t>(input) +
+                                     static_cast<uintptr_t>(input_offset)),
+      input_length,
+      reinterpret_cast<Bytef*>(static_cast<uintptr_t>(output) +
+                               static_cast<uintptr_t>(output_offset)),
+      output_length, flush);
+}
+
+extern "C" JNIEXPORT jint Java_java_util_zip_Deflater_getAdler(
+    JNIEnv*, jobject, jlong address) {
+  const auto* state = reinterpret_cast<const DarwinDeflaterState*>(address);
+  return state == nullptr ? 0 : static_cast<jint>(state->stream.adler);
+}
+
+extern "C" JNIEXPORT void Java_java_util_zip_Deflater_reset(
+    JNIEnv*, jobject, jlong address) {
+  auto* state = reinterpret_cast<DarwinDeflaterState*>(address);
+  if (state != nullptr) deflateReset(&state->stream);
+}
+
+extern "C" JNIEXPORT void Java_java_util_zip_Deflater_end(
+    JNIEnv*, jobject, jlong address) {
+  auto* state = reinterpret_cast<DarwinDeflaterState*>(address);
+  if (state != nullptr) {
+    deflateEnd(&state->stream);
+    delete state;
+  }
+}
+
+extern "C" JNIEXPORT jint Java_java_util_zip_CRC32_update(jint crc, jint value) {
+  const Bytef byte = static_cast<Bytef>(value);
+  return static_cast<jint>(crc32(static_cast<uLong>(crc), &byte, 1));
+}
+
+extern "C" JNIEXPORT jint Java_java_util_zip_CRC32_updateBytes0(
+    JNIEnv* env, jclass, jint crc, jbyteArray bytes, jint offset, jint length) {
+  if (bytes == nullptr || offset < 0 || length < 0 ||
+      offset > env->GetArrayLength(bytes) ||
+      length > env->GetArrayLength(bytes) - offset) {
+    return crc;
+  }
+  std::vector<jbyte> data(static_cast<std::size_t>(length));
+  env->GetByteArrayRegion(bytes, offset, length, data.data());
+  if (env->ExceptionCheck()) return crc;
+  return static_cast<jint>(crc32(
+      static_cast<uLong>(crc), reinterpret_cast<const Bytef*>(data.data()),
+      static_cast<uInt>(data.size())));
+}
+
+extern "C" JNIEXPORT jint Java_java_util_zip_CRC32_updateByteBuffer0(
+    JNIEnv*, jclass, jint crc, jlong address, jint offset, jint length) {
+  if (address == 0 || offset < 0 || length < 0) return crc;
+  const auto* data = reinterpret_cast<const Bytef*>(
+      static_cast<uintptr_t>(address) + static_cast<uintptr_t>(offset));
+  return static_cast<jint>(crc32(static_cast<uLong>(crc), data,
+                                 static_cast<uInt>(length)));
+}
+
+extern "C" JNIEXPORT jint Java_java_util_zip_Adler32_update(JNIEnv*, jclass,
+                                                              jint adler, jint value) {
+  const Bytef byte = static_cast<Bytef>(value);
+  return static_cast<jint>(adler32(static_cast<uLong>(adler), &byte, 1));
+}
+
+extern "C" JNIEXPORT jint Java_java_util_zip_Adler32_updateBytes(
+    JNIEnv* env, jclass, jint adler, jbyteArray bytes, jint offset, jint length) {
+  if (bytes == nullptr || offset < 0 || length < 0 ||
+      offset > env->GetArrayLength(bytes) ||
+      length > env->GetArrayLength(bytes) - offset) {
+    return adler;
+  }
+  std::vector<jbyte> data(static_cast<std::size_t>(length));
+  env->GetByteArrayRegion(bytes, offset, length, data.data());
+  if (env->ExceptionCheck()) return adler;
+  return static_cast<jint>(adler32(
+      static_cast<uLong>(adler), reinterpret_cast<const Bytef*>(data.data()),
+      static_cast<uInt>(data.size())));
+}
+
+extern "C" JNIEXPORT jint Java_java_util_zip_Adler32_updateByteBuffer(
+    JNIEnv*, jclass, jint adler, jlong address, jint offset, jint length) {
+  if (address == 0 || offset < 0 || length < 0) return adler;
+  const auto* data = reinterpret_cast<const Bytef*>(
+      static_cast<uintptr_t>(address) + static_cast<uintptr_t>(offset));
+  return static_cast<jint>(adler32(static_cast<uLong>(adler), data,
+                                   static_cast<uInt>(length)));
+}
+
+// Android OpenJDK's ProcessEnvironment native is implemented by the Darwin
+// libcore owner.  Keep the implementation in the Linux-compatibility TU, but
+// register it here alongside the other OnLoad-owned OpenJDK classes so the
+// linker retains the entry point and ART never falls back to name lookup.
+extern "C" jobjectArray Java_java_lang_ProcessEnvironment_environ(
+    JNIEnv* env, jclass clazz);
 
 namespace {
 
 bool Register(JNIEnv* env, const char* class_name,
               const JNINativeMethod* methods, jint method_count);
+
+#if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
+// SocketInputStream/SocketOutputStream are OpenJDK classes, but their
+// upstream native owner is not present in the small libopenjdk image used by
+// DarwinART.  Keep these two methods here with the rest of the libcore owner,
+// and use the central broker so FileDescriptor values remain guest handles.
+constexpr int kAndroidEagain = 11;
+constexpr int kAndroidEintr = 4;
+constexpr int kAndroidEbadf = 9;
+constexpr int kAndroidEpipe = 32;
+constexpr int kAndroidEconnreset = 104;
+constexpr int kAndroidEio = 5;
+constexpr int kAndroidMsgDontWait = 0x40;
+
+int SocketBrokerErrno() {
+  const int error = darwin_art_bionic_errno_load();
+  return error > 0 ? error : kAndroidEio;
+}
+
+enum class SocketWaitResult { kReady, kTimedOut, kInterrupted, kError };
+
+SocketWaitResult WaitForSocket(int fd, short events,
+                               bool finite_timeout,
+                               std::chrono::steady_clock::time_point deadline,
+                               int* error) {
+  for (;;) {
+    int timeout_ms = -1;
+    if (finite_timeout) {
+      const auto now = std::chrono::steady_clock::now();
+      if (now >= deadline) {
+        return SocketWaitResult::kTimedOut;
+      }
+      const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+          deadline - now);
+      // poll() takes an integer millisecond timeout. Round up so a short,
+      // non-zero Java timeout gets one genuine readiness attempt.
+      timeout_ms = static_cast<int>(std::min<int64_t>(
+          std::numeric_limits<int>::max(),
+          std::max<int64_t>(1, remaining.count())));
+    }
+    DarwinArtBionicPollFd descriptor{fd, events, 0};
+    AsynchronousCloseMonitor monitor(fd);
+    const int result = darwin_art_bionic_socket_broker_poll(
+        &descriptor, 1, timeout_ms);
+    const int broker_error = SocketBrokerErrno();
+    if (monitor.wasSignaled()) {
+      if (error != nullptr) *error = kAndroidEintr;
+      return SocketWaitResult::kInterrupted;
+    }
+    if (result > 0) {
+      return SocketWaitResult::kReady;
+    }
+    if (result == 0) {
+      return SocketWaitResult::kTimedOut;
+    }
+    if (broker_error == kAndroidEintr) {
+      if (error != nullptr) *error = broker_error;
+      return SocketWaitResult::kError;
+    }
+    if (error != nullptr) *error = broker_error;
+    return SocketWaitResult::kError;
+  }
+}
+
+void ThrowSocketClosed(JNIEnv* env) {
+  jniThrowException(env, "java/net/SocketException", "Socket closed");
+}
+
+void ThrowSocketInterrupted(JNIEnv* env) {
+  jniThrowException(env, "java/io/InterruptedIOException",
+                    "Operation interrupted");
+}
+
+void ThrowSocketTimeout(JNIEnv* env) {
+  jniThrowException(env, "java/net/SocketTimeoutException", "Read timed out");
+}
+
+void ThrowSocketFailure(JNIEnv* env, const char* operation, int error) {
+  if (error == kAndroidEbadf) {
+    ThrowSocketClosed(env);
+  } else if (error == kAndroidEconnreset || error == kAndroidEpipe) {
+    jniThrowException(env, "sun/net/ConnectionResetException",
+                      "Connection reset");
+  } else if (error == kAndroidEintr) {
+    ThrowSocketInterrupted(env);
+  } else {
+    jniThrowException(env, "java/net/SocketException",
+                      std::strcmp(operation, "socketWrite0") == 0
+                          ? "Write failed"
+                          : "Read failed");
+  }
+}
+
+bool GetSocketByteArrayRange(JNIEnv* env, jbyteArray bytes, jint offset,
+                             jint length, jbyte** elements) {
+  if (bytes == nullptr) {
+    jniThrowNullPointerException(env, "null byte array");
+    return false;
+  }
+  if (offset < 0 || length < 0) {
+    jniThrowException(env, "java/lang/ArrayIndexOutOfBoundsException",
+                      "negative offset or length");
+    return false;
+  }
+  const jsize array_length = env->GetArrayLength(bytes);
+  if (offset > array_length || length > array_length - offset) {
+    jniThrowException(env, "java/lang/ArrayIndexOutOfBoundsException",
+                      "socket byte range exceeds array");
+    return false;
+  }
+  if (length == 0) {
+    *elements = nullptr;
+    return true;
+  }
+  *elements = env->GetByteArrayElements(bytes, nullptr);
+  return *elements != nullptr;
+}
+
+bool GetSocketFd(JNIEnv* env, jobject java_fd, int* fd) {
+  if (java_fd == nullptr) {
+    jniThrowNullPointerException(env, "null file descriptor");
+    return false;
+  }
+  *fd = AFileDescriptor_getFd(env, java_fd);
+  if (*fd < 0) {
+    ThrowSocketClosed(env);
+    return false;
+  }
+  return true;
+}
+
+jint SocketInputStreamRead0(JNIEnv* env, jobject, jobject java_fd,
+                            jbyteArray bytes, jint offset, jint length,
+                            jint timeout_ms) {
+  jbyte* elements = nullptr;
+  if (!GetSocketByteArrayRange(env, bytes, offset, length, &elements)) {
+    return -1;
+  }
+  if (length == 0) return 0;
+
+  int fd = -1;
+  if (!GetSocketFd(env, java_fd, &fd)) {
+    env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+    return -1;
+  }
+  const bool finite_timeout = timeout_ms > 0;
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(timeout_ms > 0 ? timeout_ms : 0);
+  for (;;) {
+    if (finite_timeout) {
+      int error = 0;
+      const SocketWaitResult wait = WaitForSocket(
+          fd, POLLIN, true, deadline, &error);
+      if (wait == SocketWaitResult::kTimedOut) {
+        env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+        ThrowSocketTimeout(env);
+        return -1;
+      }
+      if (wait == SocketWaitResult::kInterrupted) {
+        env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+        ThrowSocketClosed(env);
+        return -1;
+      }
+      if (wait == SocketWaitResult::kError) {
+        env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+        ThrowSocketFailure(env, "socketRead0", error);
+        return -1;
+      }
+    }
+
+    AsynchronousCloseMonitor monitor(fd);
+    const intptr_t result = darwin_art_bionic_socket_broker_recv(
+        fd, elements + offset, static_cast<size_t>(length),
+        finite_timeout ? kAndroidMsgDontWait : 0);
+    const int error = SocketBrokerErrno();
+    if (monitor.wasSignaled()) {
+      env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+      ThrowSocketClosed(env);
+      return -1;
+    }
+    if (result >= 0) {
+      env->ReleaseByteArrayElements(bytes, elements, 0);
+      return static_cast<jint>(result);
+    }
+    if (error == kAndroidEintr) {
+      env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+      ThrowSocketInterrupted(env);
+      return -1;
+    }
+    if (error == kAndroidEagain) {
+      // A nonblocking socket can lose readiness between poll and recv. Keep
+      // waiting against the same deadline instead of exposing a spurious
+      // EAGAIN to java.net.
+      if (!finite_timeout) {
+        int wait_error = 0;
+        const SocketWaitResult wait = WaitForSocket(
+            fd, POLLIN, false, deadline, &wait_error);
+        if (wait == SocketWaitResult::kReady) continue;
+        if (wait == SocketWaitResult::kInterrupted) {
+          env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+          ThrowSocketClosed(env);
+          return -1;
+        }
+        if (wait == SocketWaitResult::kError) {
+          env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+          ThrowSocketFailure(env, "socketRead0", wait_error);
+          return -1;
+        }
+      }
+      continue;
+    }
+    env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+    ThrowSocketFailure(env, "socketRead0", error);
+    return -1;
+  }
+}
+
+void SocketOutputStreamWrite0(JNIEnv* env, jobject, jobject java_fd,
+                              jbyteArray bytes, jint offset, jint length) {
+  jbyte* elements = nullptr;
+  if (!GetSocketByteArrayRange(env, bytes, offset, length, &elements)) return;
+  if (length == 0) return;
+
+  int fd = -1;
+  if (!GetSocketFd(env, java_fd, &fd)) {
+    env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+    return;
+  }
+  size_t sent = 0;
+  while (sent < static_cast<size_t>(length)) {
+    AsynchronousCloseMonitor monitor(fd);
+    const intptr_t result = darwin_art_bionic_socket_broker_send(
+        fd, elements + offset + sent, static_cast<size_t>(length) - sent, 0);
+    const int error = SocketBrokerErrno();
+    if (monitor.wasSignaled()) {
+      env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+      ThrowSocketClosed(env);
+      return;
+    }
+    if (result > 0) {
+      sent += static_cast<size_t>(result);
+      continue;
+    }
+    if (result == 0) {
+      env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+      ThrowSocketFailure(env, "socketWrite0", kAndroidEio);
+      return;
+    }
+    if (error == kAndroidEintr) {
+      env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+      ThrowSocketInterrupted(env);
+      return;
+    }
+    if (error == kAndroidEagain) {
+      int wait_error = 0;
+      const SocketWaitResult wait = WaitForSocket(
+          fd, POLLOUT, false, std::chrono::steady_clock::time_point::max(),
+          &wait_error);
+      if (wait == SocketWaitResult::kReady) continue;
+      env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+      if (wait == SocketWaitResult::kInterrupted) {
+        ThrowSocketClosed(env);
+      } else {
+        ThrowSocketFailure(env, "socketWrite0", wait_error);
+      }
+      return;
+    }
+    env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+    ThrowSocketFailure(env, "socketWrite0", error);
+    return;
+  }
+  env->ReleaseByteArrayElements(bytes, elements, JNI_ABORT);
+}
+#endif
 
 // java.util.zip.Inflater is part of the Android boot class path and is used
 // while framework and APK resources are read.  Keep the Java-facing ABI
@@ -105,8 +660,12 @@ void FileKeyInit(JNIEnv* env, jobject file_key, jobject file_descriptor) {
                               : env->GetIntField(file_descriptor,
                                                  descriptor_field);
   if (descriptor_class != nullptr) env->DeleteLocalRef(descriptor_class);
-  struct stat status {};
-  if (descriptor < 0 || fstat(descriptor, &status) != 0) {
+  // FileDescriptor values in an APK process are Android facade descriptors,
+  // not necessarily Darwin descriptors.  Using host fstat here makes the
+  // broker's guest fd table look invalid and breaks FileLockTable.  Query the
+  // same Android-shaped stat contract used by libcore.io.Linux instead.
+  DarwinArtAndroidStat status{};
+  if (descriptor < 0 || darwin_art_bionic_fstat(descriptor, &status) != 0) {
     jclass exception = env->FindClass("java/io/IOException");
     if (exception != nullptr) {
       env->ThrowNew(exception, "fstat failed while constructing FileKey");
@@ -245,6 +804,59 @@ bool RegisterInflaterNatives(JNIEnv* env) {
   };
   return Register(env, "java/util/zip/Inflater", methods,
                   static_cast<jint>(std::size(methods)));
+}
+
+bool RegisterDeflaterNatives(JNIEnv* env) {
+  // Android 16's java.util.zip.Deflater resolves init through the libcore
+  // OnLoad table (signature: (IIZ)J).  The remaining entry points are kept as
+  // exported JNI symbols for runtimes that use the legacy name lookup path;
+  // registering only the ABI present in this boot class avoids rejecting the
+  // whole class when an older/newer core-oj changes auxiliary signatures.
+  JNINativeMethod methods[] = {
+      {const_cast<char*>("init"), const_cast<char*>("(IIZ)J"),
+       reinterpret_cast<void*>(&Java_java_util_zip_Deflater_init)},
+      {const_cast<char*>("deflateBytesBytes"),
+       const_cast<char*>("(J[BII[BIIII)J"),
+       reinterpret_cast<void*>(&Java_java_util_zip_Deflater_deflateBytesBytes)},
+      {const_cast<char*>("setDictionaryBuffer"), const_cast<char*>("(JJI)V"),
+       reinterpret_cast<void*>(&Java_java_util_zip_Deflater_setDictionaryBuffer)},
+      {const_cast<char*>("deflateBytesBuffer"),
+       const_cast<char*>("(J[BIIJIII)J"),
+       reinterpret_cast<void*>(&Java_java_util_zip_Deflater_deflateBytesBuffer)},
+      {const_cast<char*>("deflateBufferBytes"),
+       const_cast<char*>("(JJI[BIIII)J"),
+       reinterpret_cast<void*>(&Java_java_util_zip_Deflater_deflateBufferBytes)},
+      {const_cast<char*>("deflateBufferBuffer"),
+       const_cast<char*>("(JJIJIII)J"),
+       reinterpret_cast<void*>(&Java_java_util_zip_Deflater_deflateBufferBuffer)},
+      {const_cast<char*>("end"), const_cast<char*>("(J)V"),
+       reinterpret_cast<void*>(&Java_java_util_zip_Deflater_end)},
+  };
+  return Register(env, "java/util/zip/Deflater", methods,
+                  static_cast<jint>(std::size(methods)));
+}
+
+bool RegisterChecksumNatives(JNIEnv* env) {
+  JNINativeMethod crc_methods[] = {
+      {const_cast<char*>("update"), const_cast<char*>("(II)I"),
+       reinterpret_cast<void*>(&Java_java_util_zip_CRC32_update)},
+      {const_cast<char*>("updateBytes0"), const_cast<char*>("(I[BII)I"),
+       reinterpret_cast<void*>(&Java_java_util_zip_CRC32_updateBytes0)},
+      {const_cast<char*>("updateByteBuffer0"), const_cast<char*>("(IJII)I"),
+       reinterpret_cast<void*>(&Java_java_util_zip_CRC32_updateByteBuffer0)},
+  };
+  JNINativeMethod adler_methods[] = {
+      {const_cast<char*>("update"), const_cast<char*>("(II)I"),
+       reinterpret_cast<void*>(&Java_java_util_zip_Adler32_update)},
+      {const_cast<char*>("updateBytes"), const_cast<char*>("(I[BII)I"),
+       reinterpret_cast<void*>(&Java_java_util_zip_Adler32_updateBytes)},
+      {const_cast<char*>("updateByteBuffer"), const_cast<char*>("(IJII)I"),
+       reinterpret_cast<void*>(&Java_java_util_zip_Adler32_updateByteBuffer)},
+  };
+  return Register(env, "java/util/zip/CRC32", crc_methods,
+                  static_cast<jint>(std::size(crc_methods))) &&
+         Register(env, "java/util/zip/Adler32", adler_methods,
+                  static_cast<jint>(std::size(adler_methods)));
 }
 
 #if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
@@ -513,7 +1125,10 @@ jobjectArray SystemSpecialProperties(JNIEnv* env, jclass) {
 
   char current_directory[PATH_MAX];
   const char* directory = getcwd(current_directory, sizeof(current_directory));
-  const char* library_path = std::getenv("DYLD_LIBRARY_PATH");
+  const char* library_path = std::getenv("DARWIN_ART_JAVA_LIBRARY_PATH");
+  if (library_path == nullptr) {
+    library_path = std::getenv("DYLD_LIBRARY_PATH");
+  }
   const std::string values[] = {
       std::string("user.dir=") + (directory == nullptr ? "/" : directory),
       std::string("android.zlib.version=") + ZLIB_VERSION,
@@ -572,9 +1187,115 @@ bool Register(JNIEnv* env, const char* class_name,
   return registered;
 }
 
+// The ART runtime owns the complete sun.misc.Unsafe table, but a detached
+// libcore bootstrap can load its core-oj Unsafe class after the runtime's
+// early registrar ran. Keep this narrow registration at the libcore boundary
+// as well. AllocObject is the ART JNI primitive used by AOSP's implementation;
+// it deliberately skips constructors while retaining normal VM checks for
+// null, interfaces, and abstract classes.
+jobject UnsafeAllocateInstance(JNIEnv* env, jobject, jclass clazz) {
+  return env->AllocObject(clazz);
+}
+
+bool RegisterUnsafeAllocateInstanceNatives(JNIEnv* env) {
+  const JNINativeMethod methods[] = {
+      {const_cast<char*>("allocateInstance"),
+       const_cast<char*>("(Ljava/lang/Class;)Ljava/lang/Object;"),
+       reinterpret_cast<void*>(&UnsafeAllocateInstance)},
+  };
+  return Register(env, "sun/misc/Unsafe", methods,
+                  static_cast<jint>(std::size(methods)));
+}
+
+// java.io.ObjectStreamClass owns this native because the default
+// serialVersionUID calculation must include a class initializer when the
+// classfile actually defines <clinit>.  Android's implementation uses the
+// JNI method lookup itself (rather than a guessed reflection result), which
+// also preserves the target-SDK compatibility behavior for inherited
+// initializers.
+jclass gObjectStreamNoSuchMethodError = nullptr;
+
+jboolean ObjectStreamClassHasStaticInitializer(JNIEnv* env, jclass,
+                                               jclass clazz,
+                                               jboolean check_superclass) {
+  jmethodID clinit = env->GetStaticMethodID(clazz, "<clinit>", "()V");
+  if (clinit == nullptr) {
+    // GetStaticMethodID reports the ordinary absence case as
+    // NoSuchMethodError.  That is a normal false result here; all other
+    // lookup failures must remain visible to the Java caller.
+    jthrowable pending = env->ExceptionOccurred();
+    env->ExceptionClear();
+    const bool is_missing =
+        pending != nullptr && gObjectStreamNoSuchMethodError != nullptr &&
+        env->IsInstanceOf(pending, gObjectStreamNoSuchMethodError) == JNI_TRUE;
+    if (!is_missing && pending != nullptr) {
+      env->Throw(pending);
+    }
+    if (pending != nullptr) env->DeleteLocalRef(pending);
+    return JNI_FALSE;
+  }
+
+  if (check_superclass == JNI_FALSE) return JNI_TRUE;
+
+  jclass superclass = env->GetSuperclass(clazz);
+  if (superclass == nullptr) return JNI_TRUE;
+  jmethodID superclass_clinit =
+      env->GetStaticMethodID(superclass, "<clinit>", "()V");
+  env->DeleteLocalRef(superclass);
+  if (superclass_clinit == nullptr) {
+    // A superclass without <clinit> is expected and means the child lookup
+    // was the defining initializer.  Preserve any unrelated JNI exception.
+    jthrowable pending = env->ExceptionOccurred();
+    env->ExceptionClear();
+    const bool is_missing =
+        pending != nullptr && gObjectStreamNoSuchMethodError != nullptr &&
+        env->IsInstanceOf(pending, gObjectStreamNoSuchMethodError) == JNI_TRUE;
+    if (!is_missing && pending != nullptr) env->Throw(pending);
+    if (pending != nullptr) env->DeleteLocalRef(pending);
+    return JNI_TRUE;
+  }
+  // Android intentionally compares method IDs here.  When the VM resolves
+  // the same inherited <clinit>, the IDs match and the class contributes no
+  // class-defined initializer to its SUID signature.
+  return clinit != superclass_clinit ? JNI_TRUE : JNI_FALSE;
+}
+
+bool RegisterObjectStreamClassNatives(JNIEnv* env) {
+  jclass object_stream_class = env->FindClass("java/io/ObjectStreamClass");
+  if (object_stream_class == nullptr) return false;
+  jclass no_such_method_error = env->FindClass("java/lang/NoSuchMethodError");
+  if (no_such_method_error == nullptr) {
+    env->DeleteLocalRef(object_stream_class);
+    return false;
+  }
+  gObjectStreamNoSuchMethodError = reinterpret_cast<jclass>(
+      env->NewGlobalRef(no_such_method_error));
+  env->DeleteLocalRef(no_such_method_error);
+  if (gObjectStreamNoSuchMethodError == nullptr || env->ExceptionCheck()) {
+    env->DeleteLocalRef(object_stream_class);
+    return false;
+  }
+  const JNINativeMethod methods[] = {
+      {const_cast<char*>("hasStaticInitializer"),
+       const_cast<char*>("(Ljava/lang/Class;Z)Z"),
+       reinterpret_cast<void*>(&ObjectStreamClassHasStaticInitializer)},
+  };
+  const bool registered =
+      env->RegisterNatives(object_stream_class, methods,
+                           static_cast<jint>(std::size(methods))) == JNI_OK;
+  env->DeleteLocalRef(object_stream_class);
+  return registered && !env->ExceptionCheck();
+}
+
 }  // namespace
 
+void register_libcore_math_NativeBN(JNIEnv* env);
+void register_libcore_icu_ICU(JNIEnv* env);
+
 namespace darwin_art {
+
+extern "C" void register_java_lang_UNIXProcess(JNIEnv* env);
+extern "C" void register_java_lang_StrictMath(JNIEnv* env);
 
 bool RegisterLibcoreNatives(JNIEnv* env) {
   // The standalone managed smoke intentionally uses host filesystem paths.
@@ -592,12 +1313,13 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
           .open = &darwin_art_bionic_open,
           .dup = &darwin_art_bionic_socket_broker_dup,
           .fcntl = &darwin_art_bionic_socket_broker_fcntl,
-          .close = &darwin_art_bionic_close,
+          .close = &darwin_art_bionic_socket_broker_close,
           .read = &darwin_art_bionic_read,
           .write = &darwin_art_bionic_write,
           .pread = &darwin_art_bionic_pread,
           .pwrite = &darwin_art_bionic_pwrite,
           .fstat = &darwin_art_bionic_fstat,
+          .ftruncate = &darwin_art_bionic_ftruncate,
           .stat = &darwin_art_bionic_stat,
           .lseek = &darwin_art_bionic_lseek,
           .sendfile = &darwin_art_bionic_sendfile,
@@ -614,7 +1336,31 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
   if (!darwin_art::RegisterFrameworkSupportNatives(env)) {
     return false;
   }
+  if (!RegisterUnsafeAllocateInstanceNatives(env)) {
+    return false;
+  }
+  if (!RegisterObjectStreamClassNatives(env)) {
+    return false;
+  }
   if (!RegisterInflaterNatives(env)) {
+    return false;
+  }
+  if (!RegisterDeflaterNatives(env)) {
+    return false;
+  }
+  if (!RegisterChecksumNatives(env)) {
+    return false;
+  }
+  ::register_libcore_math_NativeBN(env);
+  if (env->ExceptionCheck()) {
+    return false;
+  }
+  ::register_libcore_icu_ICU(env);
+  if (env->ExceptionCheck()) {
+    return false;
+  }
+  register_java_lang_StrictMath(env);
+  if (env->ExceptionCheck()) {
     return false;
   }
 #if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
@@ -635,6 +1381,10 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
     return false;
   }
 #endif
+  register_java_lang_UNIXProcess(env);
+  if (env->ExceptionCheck()) {
+    return false;
+  }
 #if !defined(DARWIN_ART_FULL_LIBCORE_LINUX)
   JNINativeMethod os_constants_methods[] = {
       {const_cast<char*>("initConstants"), const_cast<char*>("()V"),
@@ -703,6 +1453,12 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
   const auto register_system = [&]() {
 #if defined(DARWIN_ART_FULL_LIBCORE_LINUX)
     register_java_lang_System(env);
+    if (env->ExceptionCheck()) {
+      return false;
+    }
+    register_jdk_internal_misc_VM(env);
+    register_java_lang_invoke_MethodHandle(env);
+    register_java_lang_invoke_VarHandle(env);
     return !env->ExceptionCheck();
 #else
     return Register(env, "java/lang/System", system_methods, 3);
@@ -735,6 +1491,29 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
     }
     register_java_io_FileInputStream(env);
     if (env->ExceptionCheck()) {
+      return false;
+    }
+    // Android's libopenjdk OnLoad normally owns these registrations. That
+    // registrar is intentionally absent from the DarwinART libopenjdk image,
+    // so install the exact OpenJDK method descriptors here. In particular,
+    // socketRead0 includes the java.net timeout argument. Android removed the
+    // old OpenJDK init() native from these classes, so do not register it.
+    const JNINativeMethod socket_input_methods[] = {
+        {const_cast<char*>("socketRead0"),
+         const_cast<char*>("(Ljava/io/FileDescriptor;[BIII)I"),
+         reinterpret_cast<void*>(&SocketInputStreamRead0)},
+    };
+    if (!Register(env, "java/net/SocketInputStream", socket_input_methods,
+                  static_cast<jint>(std::size(socket_input_methods)))) {
+      return false;
+    }
+    const JNINativeMethod socket_output_methods[] = {
+        {const_cast<char*>("socketWrite0"),
+         const_cast<char*>("(Ljava/io/FileDescriptor;[BII)V"),
+         reinterpret_cast<void*>(&SocketOutputStreamWrite0)},
+    };
+    if (!Register(env, "java/net/SocketOutputStream", socket_output_methods,
+                  static_cast<jint>(std::size(socket_output_methods)))) {
       return false;
     }
     register_sun_nio_ch_NativeThread(env);
@@ -781,8 +1560,7 @@ bool RegisterLibcoreNatives(JNIEnv* env) {
          register_os_constants() &&
          register_linux() &&
          register_file_descriptor() &&
-         register_openjdk_file_mapping() &&
-         register_libcore_memory() && RegisterLibcoreIcuNatives(env);
+         register_openjdk_file_mapping() && register_libcore_memory();
 }
 
 bool RegisterManagedLoadNatives(JNIEnv* env) {
@@ -794,6 +1572,15 @@ bool RegisterManagedLoadNatives(JNIEnv* env) {
   // UnixNativeDispatcher table. Each registrar is one atomic JNI table.
   register_java_lang_Runtime(env);
   if (env->ExceptionCheck()) {
+    return false;
+  }
+  JNINativeMethod process_environment_methods[] = {
+      {const_cast<char*>("environ"), const_cast<char*>("()[[B"),
+       reinterpret_cast<void*>(&Java_java_lang_ProcessEnvironment_environ)},
+  };
+  if (!Register(env, "java/lang/ProcessEnvironment",
+                process_environment_methods,
+                static_cast<jint>(std::size(process_environment_methods)))) {
     return false;
   }
   register_java_sun_nio_fs_UnixNativeDispatcher(env);

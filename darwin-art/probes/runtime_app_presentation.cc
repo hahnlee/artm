@@ -422,6 +422,32 @@ void ConfigureHostSurface(JNIEnv* env, jclass, jobject surface_view,
                           jobject surface, jint x, jint y, jint width,
                           jint height) {
   if (std::getenv("DARWIN_ART_DEBUG_SURFACE_JNI") != nullptr) {
+    static unsigned diagnostics = 0;
+    if (surface_view != nullptr && diagnostics++ < 64) {
+      jclass clazz = env->FindClass("android/view/SurfaceView");
+      if (clazz != nullptr) {
+        for (const char* name : {"mDrawFinished", "mHaveFrame",
+                                 "mSurfaceCreated"}) {
+          jfieldID field = env->GetFieldID(clazz, name, "Z");
+          if (field != nullptr) {
+            std::fprintf(stderr, "ART Android SurfaceView: %s=%d view=%p\n",
+                         name, env->GetBooleanField(surface_view, field),
+                         static_cast<void*>(surface_view));
+          } else if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+          }
+        }
+        jfieldID sub_layer = env->GetFieldID(clazz, "mSubLayer", "I");
+        if (sub_layer != nullptr) {
+          std::fprintf(stderr, "ART Android SurfaceView: mSubLayer=%d view=%p\n",
+                       env->GetIntField(surface_view, sub_layer),
+                       static_cast<void*>(surface_view));
+        } else if (env->ExceptionCheck()) {
+          env->ExceptionClear();
+        }
+        env->DeleteLocalRef(clazz);
+      }
+    }
     jobject global = surface == nullptr ? nullptr : env->NewGlobalRef(surface);
     std::fprintf(stderr,
                  "ART Android Surface JNI: configure pid=%d local=%p global=%p "
@@ -461,7 +487,8 @@ void ResizeHostSurface(JNIEnv*, jclass, jint width, jint height) {
 
 bool install_activity_bridge(JNIEnv* env, jclass activity_class,
                              jobject activity,
-                             darwin_art_graphics::GraphicsState* graphics_state) {
+                             darwin_art_graphics::GraphicsState* graphics_state,
+                             const char* app_apk_path) {
   jclass bridge = load_activity_class(
       env, activity_class, "dev.darwinart.simple.DarwinServiceBridge");
   JNINativeMethod methods[] = {
@@ -494,6 +521,48 @@ bool install_activity_bridge(JNIEnv* env, jclass activity_class,
   if (install_initial != nullptr && !env->ExceptionCheck()) {
     env->CallStaticVoidMethod(bridge, install_initial, activity);
   }
+  const char* configured_orientation =
+      std::getenv("DARWIN_ART_APK_APP_SCREEN_ORIENTATION");
+  if (configured_orientation != nullptr && !env->ExceptionCheck()) {
+    char* end = nullptr;
+    const long parsed = std::strtol(configured_orientation, &end, 10);
+    jmethodID apply_orientation = env->GetStaticMethodID(
+        bridge, "applyManifestOrientation", "(I)V");
+    if (apply_orientation != nullptr && end != configured_orientation &&
+        *end == '\0' && parsed >= INT32_MIN && parsed <= INT32_MAX &&
+        parsed != -1 && !env->ExceptionCheck()) {
+      env->CallStaticVoidMethod(bridge, apply_orientation,
+                                static_cast<jint>(parsed));
+    }
+  }
+  // ActivityThread/RuntimeInit installs a process-wide uncaught-exception
+  // delegate before invoking Activity.onCreate().  The detached launcher has
+  // no zygote startup phase; install the support bridge's equivalent now so
+  // Unity's forwarding handler cannot dereference a null delegate and hide
+  // the original asynchronous startup failure.
+  jmethodID install_exception_handler =
+      registered && !env->ExceptionCheck()
+          ? env->GetStaticMethodID(bridge,
+                                  "installDefaultUncaughtExceptionHandler",
+                                  "()V")
+          : nullptr;
+  if (install_exception_handler != nullptr && !env->ExceptionCheck()) {
+    env->CallStaticVoidMethod(bridge, install_exception_handler);
+  }
+  jmethodID install_resource_path =
+      registered && !env->ExceptionCheck()
+          ? env->GetStaticMethodID(bridge, "installApkResourcePath",
+                                   "(Landroid/app/Activity;Ljava/lang/String;)V")
+          : nullptr;
+  jstring apk_path =
+      install_resource_path != nullptr && app_apk_path != nullptr
+          ? env->NewStringUTF(app_apk_path)
+          : nullptr;
+  if (install_resource_path != nullptr && apk_path != nullptr &&
+      !env->ExceptionCheck()) {
+    env->CallStaticVoidMethod(bridge, install_resource_path, activity, apk_path);
+  }
+  env->DeleteLocalRef(apk_path);
   const bool installed =
       registered && install_initial != nullptr && !env->ExceptionCheck() &&
       darwin_art_graphics::retain_service_bridge_class(graphics_state, env,
@@ -942,7 +1011,7 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
   // record before app lifecycle code can issue that transaction.
   if (run_apk_app &&
       !install_activity_bridge(env, probe_activity_class, activity_instance,
-                               graphics_state)) {
+                               graphics_state, app_apk_path)) {
     std::cerr << "ART Android activity: local task bridge install failed\n";
     if (env->ExceptionCheck()) {
       env->ExceptionDescribe();

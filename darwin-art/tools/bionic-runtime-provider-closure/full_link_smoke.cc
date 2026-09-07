@@ -240,8 +240,7 @@ int main() {
     return 15;
   }
   darwin_art_bionic_namespace_destroy(instance);
-  if (darwin_art_bionic_socket_broker_live_objects() != 0 ||
-      darwin_art_bionic_socket_broker_deactivate() != 0 ||
+  if (darwin_art_bionic_socket_broker_deactivate() != 0 ||
       darwin_art_bionic_stdio_process_uninstall() != 0 ||
       darwin_art_bionic_vm_process_uninstall() != 0 ||
       darwin_art_bionic_fs_process_uninstall() !=

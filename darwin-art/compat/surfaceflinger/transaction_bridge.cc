@@ -38,7 +38,12 @@ android::ResolvedComposerState ResolveLayerState(
       ? UNASSIGNED_LAYER_ID
       : source.relative_parent_id;
   resolved.state.layerId = static_cast<int32_t>(source.layer_id);
-  resolved.state.what = source.what;
+  // Transparent-region hints are consumed by Darwin's GPU composer. They are
+  // not part of this vendored frontend's layer_state_t change-bit set, so do
+  // not let the private wire bit alter AOSP transaction merge semantics.
+  resolved.state.what =
+      source.what & ~static_cast<uint64_t>(
+                          DARWIN_ART_SF_TRANSPARENT_REGION_CHANGED);
   resolved.state.flags = source.flags;
   resolved.state.mask = source.mask;
   resolved.state.bufferTransform = source.transform;

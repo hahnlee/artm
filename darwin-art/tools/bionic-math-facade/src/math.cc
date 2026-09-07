@@ -95,7 +95,7 @@ extern "C" void* darwin_art_bionic_math_resolve(const char* soname,
   if (std::strcmp(symbol, "nanf") == 0)
     return Address(static_cast<float (*)(const char*)>(&nanf));
   F(nearbyintf); DD(nextafter); FF(nextafterf);
-  DD(pow); FF(powf); DD(remainder); FF(remainderf); F(sqrtf); D(sin);
+  DD(pow); FF(powf); DD(remainder); FF(remainderf); D(sqrt); F(sqrtf); D(sin);
   if (std::strcmp(symbol, "scalbnf") == 0)
     return Address(static_cast<float (*)(float, int)>(&scalbnf));
   if (std::strcmp(symbol, "scalbn") == 0)
@@ -103,6 +103,7 @@ extern "C" void* darwin_art_bionic_math_resolve(const char* soname,
   if (std::strcmp(symbol, "sincos") == 0) return Address(&DarwinSincos);
   if (std::strcmp(symbol, "sincosf") == 0) return Address(&DarwinSincosf);
   F(roundf); F(sinf); D(sinh); F(sinhf); D(tan); F(tanf); D(tanh); F(tanhf);
+  D(trunc);
   F(truncf);
 #undef D
 #undef F

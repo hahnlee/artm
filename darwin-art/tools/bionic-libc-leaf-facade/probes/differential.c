@@ -34,6 +34,20 @@ static void TestBionicContractEdges(void) {
   assert(darwin_art_bionic_strcasecmp((const char*)high, (const char*)low) > 0);
   assert(darwin_art_bionic_strncmp("same", "different", 0) == 0);
   assert(darwin_art_bionic_memchr("abc", 'z', 3) == NULL);
+  assert(darwin_art_bionic_isprint(' ') != 0);
+  assert(darwin_art_bionic_isprint('~') != 0);
+  assert(darwin_art_bionic_isprint('\n') == 0);
+  assert(darwin_art_bionic_isprint(0x80) == 0);
+  assert(darwin_art_bionic_isprint(-1) == 0);
+
+  char concatenated[8] = "abc";
+  assert(darwin_art_bionic_strlcat(concatenated, "defgh", sizeof(concatenated)) ==
+         8);
+  assert(strcmp(concatenated, "abcdefg") == 0);
+  char truncated[4] = {'a', 'b', 'c', 'd'};
+  assert(darwin_art_bionic_strlcat(truncated, "xy", sizeof(truncated)) == 6);
+  assert(memcmp(truncated, "abcd", sizeof(truncated)) == 0);
+  assert(darwin_art_bionic_strlcat(NULL, "zero", 0) == 4);
 
   char checked[8] = {0};
   assert(darwin_art_bionic___memcpy_chk(checked, "abc", 4,
@@ -122,7 +136,7 @@ static void TestWideMemory(void) {
 static void TestResolver(void) {
   size_t count = 0;
   const DarwinArtBionicLeafBinding* table = darwin_art_bionic_libc_leaf_table(&count);
-  assert(table != NULL && count == 63);
+  assert(table != NULL && count == 66);
   for (size_t index = 0; index < count; ++index) {
     assert(table[index].address != NULL);
     assert(darwin_art_bionic_libc_leaf_resolve(table[index].import_name) == table[index].address);
@@ -139,6 +153,6 @@ int main(void) {
   TestMemoryAndStrings();
   TestWideMemory();
   TestResolver();
-  puts("bionic-libc-leaf differential: PASS cases=4096 bindings=63");
+  puts("bionic-libc-leaf differential: PASS cases=4096 bindings=66");
   return 0;
 }

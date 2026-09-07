@@ -2,6 +2,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
+
 use darwin_art_build_contract::RUNTIME_CACHE_IDENTITY;
 use darwin_art_build_contract::{GRAPHICS_ADAPTER_SOURCES, HEADLESS_ADAPTER_SOURCES};
 
@@ -19,6 +21,125 @@ use super::inputs::{collect_files, is_probe_only_input};
 use super::manifest::prepare as prepare_manifest;
 use super::probe_manifest;
 use super::representative::emit_representative_edges;
+
+pub(crate) fn interpreter_core_inputs(root: &Path) -> Vec<PathBuf> {
+    [
+        "crates/art-bootstrap/src/runtime_art/interpreter.rs",
+        "patches/art/0037-darwin-shadow-frame-single-initialization.patch",
+        "patches/art/0074-darwin-interpreter-reference-copy.patch",
+        "_aosp/art/runtime/interpreter/interpreter.cc",
+        "_aosp/art/runtime/interpreter/interpreter_cache.cc",
+        "_aosp/art/runtime/interpreter/interpreter_common.cc",
+        "_aosp/art/runtime/interpreter/interpreter_switch_impl0.cc",
+        "_aosp/art/runtime/interpreter/lock_count_data.cc",
+        "_aosp/art/runtime/interpreter/shadow_frame.cc",
+        "_aosp/art/runtime/interpreter/shadow_frame.h",
+        "_aosp/art/runtime/interpreter/unstarted_runtime.cc",
+    ]
+    .into_iter()
+    .map(|path| root.join(path))
+    .collect()
+}
+
+#[path = "../../../art-bootstrap/src/runtime_bootstrap/manifest.rs"]
+mod bootstrap_shadow_manifest;
+
+use bootstrap_shadow_manifest::PATCHED_RUNTIME_PATCHES as RUNTIME_COMMON_SHADOW_PATCHES;
+use bootstrap_shadow_manifest::PATCHED_RUNTIME_SOURCES as RUNTIME_COMMON_SHADOW_SOURCES;
+use bootstrap_shadow_manifest::RUNTIME_SHADOW_IDENTITY_VERSION;
+
+#[cfg(test)]
+mod tests {
+    use super::{shadow_identity, shadow_identity_matches};
+    use std::fs;
+
+    #[test]
+    fn graph_shadow_identity_matches_bootstrap_manifest() {
+        assert_eq!(
+            super::RUNTIME_COMMON_SHADOW_SOURCES,
+            super::bootstrap_shadow_manifest::PATCHED_RUNTIME_SOURCES
+        );
+        assert_eq!(
+            super::RUNTIME_COMMON_SHADOW_PATCHES,
+            super::bootstrap_shadow_manifest::PATCHED_RUNTIME_PATCHES
+        );
+    }
+
+    #[test]
+    fn changed_shadow_patch_blocks_cached_promotion() {
+        let root = std::env::temp_dir().join(format!(
+            "darwin-art-shadow-patch-test-{}",
+            std::process::id()
+        ));
+        let staged = root.join("patched-source");
+        let source = staged.join("runtime/jit/jit.cc");
+        let patch_file = root.join("patches/test.patch");
+        fs::create_dir_all(source.parent().expect("source parent")).expect("source directory");
+        fs::create_dir_all(patch_file.parent().expect("patch parent")).expect("patch directory");
+        fs::write(&source, "old\n").expect("original staged source");
+        fs::write(&patch_file, "patch-v1\n").expect("patch file");
+        let sources = vec![source];
+        let patches = vec![patch_file];
+        let marker = staged.join(".darwin-art-shadow-identity");
+        fs::write(
+            &marker,
+            format!(
+                "{}\n",
+                shadow_identity(&sources, &patches).expect("identity")
+            ),
+        )
+        .expect("shadow marker");
+        assert!(shadow_identity_matches(&marker, &sources, &patches));
+        fs::write(&patches[0], "patch-v2\n").expect("changed patch file");
+        assert!(!shadow_identity_matches(&marker, &sources, &patches));
+        fs::remove_dir_all(root).expect("test cleanup");
+    }
+}
+
+// The native graph consumes art-bootstrap's canonical runtime-shadow manifest
+// directly. This keeps cache invalidation and source staging on one contract;
+// a newly added runtime patch cannot be omitted from cached-object promotion.
+
+fn shadow_identity(source_paths: &[PathBuf], patch_paths: &[PathBuf]) -> Option<String> {
+    let mut digest = Sha256::new();
+    digest.update(RUNTIME_SHADOW_IDENTITY_VERSION.as_bytes());
+    digest.update([0]);
+    for path in source_paths.iter().chain(patch_paths) {
+        let bytes = fs::read(path).ok()?;
+        digest.update(path.to_string_lossy().as_bytes());
+        digest.update([0]);
+        digest.update(bytes);
+        digest.update([0]);
+    }
+    Some(format!("{:x}", digest.finalize()))
+}
+
+fn shadow_identity_matches(
+    marker: &Path,
+    source_paths: &[PathBuf],
+    patch_paths: &[PathBuf],
+) -> bool {
+    shadow_identity(source_paths, patch_paths).is_some_and(|expected| {
+        fs::read_to_string(marker).is_ok_and(|actual| actual.trim() == expected)
+    })
+}
+
+fn runtime_common_shadow_is_current(root: &Path) -> bool {
+    let runtime = root.join("_aosp/art/runtime");
+    let source_files = RUNTIME_COMMON_SHADOW_SOURCES
+        .iter()
+        .map(|source| runtime.join(source))
+        .collect::<Vec<_>>();
+    let patch_files = RUNTIME_COMMON_SHADOW_PATCHES
+        .iter()
+        .map(|patch| root.join(patch))
+        .collect::<Vec<_>>();
+    shadow_identity_matches(
+        &root.join("_build/runtime-common/patched-source/.darwin-art-shadow-identity"),
+        &source_files,
+        &patch_files,
+    )
+}
 
 pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let manifest = prepare_manifest(out)?;
@@ -57,6 +178,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     // a cold 200+ TU rebuild and defeat dependency-fingerprint caching.
     let native_output_root = root.join("_build");
     let runtime_owner_archive_path = root.join("target/release/libdarwin_art_runtime.a");
+    let interpreter_archive_path = root.join("_build/interpreter-core/libart-interpreter-darwin.a");
     let archive_path = native_output_root.join(GRAPHICS_BOOTSTRAP_ARCHIVE);
     let runtime_archive_path = native_output_root.join(RUNTIME_BOOTSTRAP_ARCHIVE);
     let hwui_foundation_archive_path = native_output_root.join(HWUI_STATIC_FOUNDATION_ARCHIVE);
@@ -70,6 +192,17 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let icu_i18n_archive_path = native_output_root.join(ICU_I18N_FOUNDATION_ARCHIVE);
     let icu_stubdata_archive_path = native_output_root.join(ICU_STUBDATA_FOUNDATION_ARCHIVE);
     let icu_init_archive_path = native_output_root.join(ICU_INIT_FOUNDATION_ARCHIVE);
+    // The shell builder has a fixed, published output contract under the
+    // repository root. Keep this edge on that path even if other graph
+    // artifacts are moved behind a custom native output root.
+    let libcore_linux_archive_path =
+        root.join("_build/libcore-darwin-linux/libcore-darwin-linux.a");
+    let unix_filesystem_archive_path =
+        root.join("_build/unix-filesystem-darwin/libopenjdk-unix-filesystem-darwin.a");
+    let system_natives_archive_path =
+        root.join("_build/system-natives-darwin/libopenjdk-system-natives-darwin.a");
+    let boringssl_archive_path =
+        root.join("_build/system-natives-darwin/libcrypto-boringssl-darwin.a");
     let runtime_library_path = native_output_root.join(GRAPHICS_RUNTIME_LIBRARY);
     let surfaceflinger_frontend_archive_path =
         native_output_root.join("surfaceflinger-core/libsurfaceflinger-frontend-darwin.a");
@@ -137,6 +270,10 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let icu_i18n_archive = ninja_path(&icu_i18n_archive_path);
     let icu_stubdata_archive = ninja_path(&icu_stubdata_archive_path);
     let icu_init_archive = ninja_path(&icu_init_archive_path);
+    let libcore_linux_archive = ninja_path(&libcore_linux_archive_path);
+    let unix_filesystem_archive = ninja_path(&unix_filesystem_archive_path);
+    let system_natives_archive = ninja_path(&system_natives_archive_path);
+    let boringssl_archive = ninja_path(&boringssl_archive_path);
     let runtime_library = ninja_path(&runtime_library_path);
     let surfaceflinger_frontend_archive = ninja_path(&surfaceflinger_frontend_archive_path);
     let surfaceflinger_binder_archive = ninja_path(&surfaceflinger_binder_archive_path);
@@ -149,6 +286,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let bionic_float_provider_archive = ninja_path(&bionic_float_provider_archive_path);
     let bionic_binary128_provider_archive = ninja_path(&bionic_binary128_provider_archive_path);
     let runtime_owner_archive = ninja_path(&runtime_owner_archive_path);
+    let interpreter_archive = ninja_path(&interpreter_archive_path);
     let filesystem_object = ninja_path(&filesystem_object_path);
     let network_object = ninja_path(&network_object_path);
     let hwui_object = ninja_path(&hwui_object_path);
@@ -170,7 +308,12 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     let shared_runtime_cache_ready =
         fs::read_to_string(native_output_root.join("runtime-common/cache-identity"))
             .is_ok_and(|identity| identity.trim() == RUNTIME_CACHE_IDENTITY);
-    let cached_runtime_objects = if shared_runtime_cache_ready {
+    // Cached objects refer to the shared staged shadow. If a patch changed
+    // after that shadow was prepared, force the canonical bootstrap edge to
+    // run so it restages the original sources before recompiling. Otherwise a
+    // regenerated graph would faithfully reuse an obsolete staged pathname.
+    let runtime_common_shadow_current = runtime_common_shadow_is_current(&root);
+    let cached_runtime_objects = if shared_runtime_cache_ready && runtime_common_shadow_current {
         cached_native_objects_from_dirs(
             &[&runtime_common_objects, &runtime_objects],
             &runtime_archive_path,
@@ -179,7 +322,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     } else {
         None
     };
-    let cached_graphics_objects = if shared_runtime_cache_ready {
+    let cached_graphics_objects = if shared_runtime_cache_ready && runtime_common_shadow_current {
         cached_native_objects_from_dirs(
             &[&runtime_common_objects, &graphics_objects],
             &archive_path,
@@ -289,6 +432,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         .map(|path| ninja_path(&root.join(path)))
         .collect::<Vec<_>>()
         .join(" ");
+    let interpreter_inputs = interpreter_core_inputs(&root);
     // Probe objects are separate graph products.  Do not attach the complete
     // bootstrap input closure to each one: that turns an edit to an unrelated
     // probe/provider into a rebuild of every probe.  The compiler writes the
@@ -485,6 +629,141 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&bootstrap_cli_target);
     graph.push(' ');
     graph.push_str(&runtime_archive);
+    graph.push('\n');
+
+    // The standalone interpreter archive is consumed by both runtime-link
+    // audits. Keep its Rust orchestration file and dedicated shadow-frame
+    // patch on this narrow edge so either change rebuilds the archive and its
+    // final dylib dependents without rotating the broad native graph cache.
+    graph.push_str("rule interpreter_core\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && ");
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-interpreter-core\n");
+    graph.push_str("  description = ART interpreter core\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&interpreter_archive);
+    graph.push_str(": interpreter_core ");
+    graph.push_str(&bootstrap_cli_target);
+    graph.push(' ');
+    for input in &interpreter_inputs {
+        graph.push_str(&ninja_path(input));
+        graph.push(' ');
+    }
+    graph.push('\n');
+    graph.push_str("build interpreter-core: phony ");
+    graph.push_str(&bootstrap_cli_target);
+    graph.push(' ');
+    graph.push_str(&interpreter_archive);
+    graph.push('\n');
+
+    // The JIT compiler consumes the runtime's staged ABI headers. Build the
+    // runtime first so a clean build cannot race source staging.
+    let jit_archive = ninja_path(&root.join("_build/jit-compiler/libart-compiler-darwin.a"));
+    let jit_support_archive =
+        ninja_path(&root.join("_build/jit-compiler/libart-libelffile-darwin.a"));
+    let mut jit_inputs = Vec::new();
+    for directory in [
+        "_aosp/art/compiler",
+        "_aosp/art/disassembler",
+        "_aosp/external/vixl",
+        "_aosp/external/lzma",
+        "_aosp/art/libelffile",
+        "_aosp/art/runtime",
+        "_aosp/art/libartbase",
+        "compat",
+    ] {
+        collect_files(&root.join(directory), &root, &mut jit_inputs);
+    }
+    for file in [
+        "sources.lock",
+        "crates/art-bootstrap/src/runtime_art/jit.rs",
+        "crates/art-bootstrap/src/runtime_art/jit_support.rs",
+        "patches/art/0040-darwin-jit-compiler-gate.patch",
+        "patches/art/0043-darwin-jit-reference-return.patch",
+        "patches/art/0044-darwin-arm64-compressed32-field-get.patch",
+        "patches/art/0045-darwin-jit-forwarding-call-abi.patch",
+        "patches/art/0050-darwin-jit-native-root-slot-literals.patch",
+        "patches/art/0052-darwin-jit-boot-object-literals.patch",
+        "patches/art/0053-darwin-arm64-compressed-field-store-card-address.patch",
+        "patches/art/0054-darwin-arm64-compressed-array-addresses.patch",
+        "patches/art/0056-darwin-arm64-allocation-boundary.patch",
+        "patches/art/0059-darwin-arm64-virtual-dispatch-addresses.patch",
+        "patches/art/0060-darwin-jit-inline-capability.patch",
+        "patches/art/0061-darwin-arm64-throw-boundary.patch",
+        "patches/art/0062-darwin-arm64-monitor-boundary.patch",
+        "patches/art/0063-darwin-arm64-type-check-boundary.patch",
+        "patches/art/0064-darwin-arm64-interface-check-boundary.patch",
+        "patches/art/0065-darwin-arm64-array-type-boundary.patch",
+        "patches/art/0066-darwin-arm64-class-load-boundary.patch",
+        "patches/art/0068-darwin-string-resolution-boundary.patch",
+        "patches/art/0069-darwin-interface-dispatch-boundary.patch",
+        "patches/art/0071-darwin-unresolved-static-field-boundary.patch",
+        "patches/art/0073-darwin-polymorphic-runtime-dispatch.patch",
+        "patches/art/0075-darwin-varhandle-addresses.patch",
+        "patches/art/0077-darwin-varhandle-fp-acquire-scratch.patch",
+        "patches/art/0079-darwin-baker-reference-window.patch",
+        "patches/art/0080-darwin-baker-array-reference-window.patch",
+        "patches/art/0082-darwin-fast-jit-native-root-slot-literals.patch",
+        "patches/art/0083-darwin-reference-array-intermediate-address.patch",
+        "patches/art/0084-darwin-baker-unresolved-fields.patch",
+        "patches/art/0085-darwin-baker-gc-root-thunk-address.patch",
+        "patches/art/0087-darwin-baker-unresolved-invokes.patch",
+        "patches/art/0088-darwin-invoke-custom-graph.patch",
+        "patches/art/0089-darwin-aosp-arm64-intrinsics.patch",
+        "patches/art/0090-darwin-unsafe-get-addresses.patch",
+        "patches/art/0091-darwin-unsafe-write-atomic-addresses.patch",
+        "patches/art/0092-darwin-unrestricted-aosp-invokes.patch",
+        "patches/art/0093-darwin-aosp-jit-admission.patch",
+        "patches/art/0095-darwin-arm64-jni-handle-return.patch",
+        "patches/art/0096-darwin-arm64-string-intrinsic-addresses.patch",
+        "patches/art/0097-darwin-arm64-crc32-array-address.patch",
+        "patches/art/0098-darwin-arm64-reference-addresses.patch",
+        "patches/art/0099-darwin-arm64-vector-memory-addresses.patch",
+        "patches/art/0121-darwin-arm64-jni-monitor-boundary.patch",
+        "patches/art/0122-darwin-arm64-image-method-addresses.patch",
+        "patches/art/0123-darwin-unrestricted-aosp-loads.patch",
+        "patches/art/0124-darwin-arm64-implicit-null-address.patch",
+        "patches/art/0127-darwin-arm64-boxing-allocation-boundary.patch",
+        "patches/art/0129-darwin-arm64-baker-intermediate-array-address.patch",
+        "patches/art/0131-darwin-arm64-boxing-cache-address.patch",
+        "patches/art/0133-darwin-arm64-implicit-invoke-receiver.patch",
+        "patches/art/0134-darwin-arm64-implicit-field-receiver.patch",
+        "patches/art/0135-darwin-arm64-jni-stack-abi.patch",
+        "patches/art/0136-darwin-arm64-char-arraycopy-addresses.patch",
+        "patches/art/0137-darwin-arm64-frame-clinit-address.patch",
+        "patches/art/0138-darwin-sharpening-boot-image-address.patch",
+        "patches/art/0139-darwin-arm64-boot-literal-reference.patch",
+        "patches/art/0140-darwin-arm64-reference-intrinsic-class.patch",
+        "patches/art/0144-darwin-compiled-jni-frame-contract.patch",
+        "patches/art/0145-darwin-arm64-jni-method-pointer.patch",
+        "patches/art/0146-darwin-arm64-managed-method-pointer.patch",
+    ] {
+        jit_inputs.push(PathBuf::from(file));
+    }
+    jit_inputs.sort();
+    jit_inputs.dedup();
+    graph.push_str("rule jit_compiler\n  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && ");
+    graph.push_str(&bootstrap_cli);
+    graph.push_str(" build-jit-compiler\n  description = ART ARM64 JIT compiler\n  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&jit_archive);
+    graph.push(' ');
+    graph.push_str(&jit_support_archive);
+    graph.push_str(": jit_compiler ");
+    graph.push_str(&bootstrap_cli_target);
+    graph.push(' ');
+    graph.push_str(&archive);
+    for input in &jit_inputs {
+        graph.push(' ');
+        graph.push_str(&ninja_path(&root.join(input)));
+    }
+    graph.push_str("\nbuild jit-compiler: phony ");
+    graph.push_str(&jit_archive);
     graph.push('\n');
 
     graph.push_str("rule runtime_owner_archive\n");
@@ -1077,6 +1356,70 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push(' ');
     graph.push_str(&ninja_path(&app_presentation_stamp));
     graph.push('\n');
+    // Keep the libcore Linux archive on the same incremental path as its
+    // source and lockfile. The graphics audit consumes this archive directly,
+    // so treating it as an ambient prebuilt lets a changed compatibility TU
+    // silently leave the final dylib linked against stale JNI code.
+    graph.push_str("rule libcore_linux_archive\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && tools/build-android16-libcore-darwin-linux.sh\n");
+    graph.push_str("  description = libcore Linux compatibility archive\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&libcore_linux_archive);
+    graph.push_str(": libcore_linux_archive ");
+    for input in [
+        "tools/build-android16-libcore-darwin-linux.sh",
+        "upstream/android16-libcore-darwin-linux.lock",
+        "compat/libcore_darwin_linux.cc",
+        "compat/libcore_darwin_linux_system_natives.cc",
+        "compat/libcore_darwin_linux_syscalls.cc",
+        "compat/libcore_darwin_linux.h",
+        "compat/darwin_dns_hints.h",
+        "compat/darwin_os_constants.h",
+        "compat/AsynchronousCloseMonitor.h",
+        "compat/darwin_asynchronous_close_monitor.cc",
+        "tools/bionic-socket-broker-adapter/include/darwin_art_bionic_socket_broker.h",
+        "tools/build-android16-asynchronous-close-monitor.sh",
+        "upstream/android16-asynchronous-close-monitor.lock",
+        "probes/android16_asynchronous_close_monitor_smoke.cc",
+        "probes/android16_asynchronous_close_monitor_jni.cc",
+        "tools/build-android16-os-constants-darwin.sh",
+        "upstream/android16-os-constants.lock",
+        "upstream/android16-os-constants-values.tsv",
+    ] {
+        graph.push_str(&ninja_path(&root.join(input)));
+        graph.push(' ');
+    }
+    graph.push('\n');
+    graph.push_str("rule unix_filesystem_archive\n");
+    graph.push_str("  command = cd ");
+    graph.push_str(&shell_quote(&root_for_shell));
+    graph.push_str(" && tools/build-android16-unix-filesystem-darwin.sh\n");
+    graph.push_str("  description = Unix filesystem compatibility archive\n");
+    graph.push_str("  restat = 1\n\n");
+    graph.push_str("build ");
+    graph.push_str(&unix_filesystem_archive);
+    graph.push_str(": unix_filesystem_archive ");
+    for input in [
+        "tools/build-android16-unix-filesystem-darwin.sh",
+        "upstream/android16-unix-filesystem-darwin.lock",
+        "compat/darwin_libcore_filesystem_bridge.c",
+        "compat/darwin_libcore_filesystem_bridge.h",
+        "compat/darwin_openjdk_nio_copy.c",
+        "compat/darwin_openjdk_nio_fs_redirect.h",
+        "tools/bionic-fs-facade/include/darwin_art_bionic_fs.h",
+        "tools/bionic-fs-facade/include/darwin_art_bionic_stat.h",
+        "tools/bionic-ioctl-facade/include/darwin_art_bionic_ioctl.h",
+        "tools/bionic-errno-tls/include/darwin_art_bionic_errno.h",
+        "probes/android16_unix_filesystem_jni.c",
+        "probes/unix-filesystem/UnixFileSystemDarwinSmoke.java",
+    ] {
+        graph.push_str(&ninja_path(&root.join(input)));
+        graph.push(' ');
+    }
+    graph.push('\n');
     graph.push_str("rule graphics_audit\n");
     graph.push_str("  command = cd ");
     graph.push_str(&shell_quote(&root_for_shell));
@@ -1157,6 +1500,20 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
     graph.push_str(&icu_init_archive);
     graph.push(' ');
     graph.push_str(&archive);
+    graph.push(' ');
+    graph.push_str(&interpreter_archive);
+    graph.push(' ');
+    graph.push_str(&jit_archive);
+    graph.push(' ');
+    graph.push_str(&jit_support_archive);
+    graph.push(' ');
+    graph.push_str(&libcore_linux_archive);
+    graph.push(' ');
+    graph.push_str(&unix_filesystem_archive);
+    graph.push(' ');
+    graph.push_str(&system_natives_archive);
+    graph.push(' ');
+    graph.push_str(&boringssl_archive);
     graph.push(' ');
     graph.push_str(&filesystem_object);
     graph.push(' ');

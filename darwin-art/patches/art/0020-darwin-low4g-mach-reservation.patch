@@ -181,7 +181,53 @@ diff --git a/libartbase/base/mem_map.cc b/libartbase/base/mem_map.cc
 diff --git a/libartbase/base/mem_map_unix.cc b/libartbase/base/mem_map_unix.cc
 --- a/libartbase/base/mem_map_unix.cc
 +++ b/libartbase/base/mem_map_unix.cc
-@@ -31,3 +31,18 @@ int MemMap::TargetMUnmap(void* start, size_t len) {
+@@ -24,10 +24,64 @@ void MemMap::TargetMMapInit() {
+   // no-op for unix
+ }
+ 
+ void* MemMap::TargetMMap(void* start, size_t len, int prot, int flags, int fd, off_t fd_off) {
++#if defined(__APPLE__) && defined(__LP64__)
++  if (fd != -1 &&
++      (prot & PROT_EXEC) != 0 &&
++      (flags & MAP_FIXED) != 0) {
++    // Apple Silicon rejects executable MAP_FIXED mappings backed by an
++    // unsigned Android ELF file. Materialize only the executable OAT segment
++    // into anonymous memory, then seal it RX. Non-executable ELF segments
++    // remain file-backed and zero-copy.
++    void* actual = mmap(start,
++                        len,
++                        PROT_READ | PROT_WRITE,
++                        MAP_PRIVATE | MAP_ANON | MAP_FIXED,
++                        -1,
++                        0);
++    if (actual == MAP_FAILED) {
++      return MAP_FAILED;
++    }
++    size_t copied = 0u;
++    while (copied < len) {
++      ssize_t count = pread(fd,
++                            reinterpret_cast<uint8_t*>(actual) + copied,
++                            len - copied,
++                            fd_off + copied);
++      if (count > 0) {
++        copied += static_cast<size_t>(count);
++      } else if (count == 0) {
++        break;
++      } else if (errno != EINTR) {
++        mprotect(actual, len, PROT_NONE);
++        return MAP_FAILED;
++      }
++    }
++    if (mprotect(actual, len, prot) != 0) {
++      mprotect(actual, len, PROT_NONE);
++      return MAP_FAILED;
++    }
++    return actual;
++  }
++#endif
+   return mmap(start, len, prot, flags, fd, fd_off);
+ }
+ 
  int MemMap::TargetMUnmap(void* start, size_t len) {
 +#if defined(__APPLE__) && defined(__LP64__)
 +  const uintptr_t begin = reinterpret_cast<uintptr_t>(start);

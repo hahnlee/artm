@@ -5,18 +5,19 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
-#include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "darwin_provider_owners.h"
+#include "darwin_android_media_ndk.h"
 #include "darwin_jni_shorty.h"
 #include "darwin_art_bionic_builtin_adapters.h"
 #include "darwin_runtime_adapters_internal.h"
@@ -34,6 +35,15 @@ std::mutex& ElfLibraryRegistryMutex() {
 std::vector<ElfLibrary*>& ElfLibraries() {
   static auto* libraries = new std::vector<ElfLibrary*>();
   return *libraries;
+}
+
+// Built-in NDK providers do not have a guest ELF image. Keep a typed sentinel
+// for the media provider so bionic dlopen/dlsym still has a normal handle
+// lifetime while symbol lookup remains owned by the runtime provider table.
+int g_media_ndk_handle_tag = 0;
+
+bool IsMediaNdkHandle(void* handle) {
+  return handle == static_cast<void*>(&g_media_ndk_handle_tag);
 }
 
 uint64_t& NextLoaderNamespaceId() {
@@ -85,9 +95,9 @@ extern "C" int darwin_art_loader_bind(const DarwinArtLoaderCallbacks*);
 extern "C" uintptr_t darwin_art_bionic_rust_provider_closure_anchor();
 
 void SetNativeLoaderError(char** error_msg, const std::string& message) {
-  std::cerr << "DARWIN native loader error: " << message << "\n";
   if (error_msg != nullptr) *error_msg = strdup(message.c_str());
 }
+
 
 // Guest libdl calls made by an Android ELF image must stay in the same
 // NativeLoader namespace as the image that issued the call.  The dso facade
@@ -99,12 +109,56 @@ void CopyLoaderError(const std::string& message, char* out, size_t capacity) {
   out[capacity - 1] = '\0';
 }
 
+// bionic dlopen itself does not require an Android native worker to remain
+// attached to the VM. Our ELF graph construction does need a JNIEnv briefly
+// because it retains the initiating ClassLoader and installs the JNI proxy.
+// Attach only for that internal bookkeeping interval and restore the caller's
+// original detached state before returning to guest code.
+class ScopedGuestLoaderAttachment {
+ public:
+  explicit ScopedGuestLoaderAttachment(ElfLibrary* owner)
+      : vm_(owner == nullptr ? nullptr : owner->art_vm), env_(CurrentArtEnv()) {
+    if (env_ != nullptr || vm_ == nullptr) return;
+    void* current = nullptr;
+    const jint state = vm_->GetEnv(&current, JNI_VERSION_1_6);
+    if (state == JNI_OK) {
+      env_ = static_cast<JNIEnv*>(current);
+      return;
+    }
+    if (state == JNI_EDETACHED &&
+        vm_->AttachCurrentThreadAsDaemon(&env_, nullptr) == JNI_OK) {
+      attached_here_ = true;
+    }
+  }
+
+  ~ScopedGuestLoaderAttachment() {
+    if (attached_here_) (void)vm_->DetachCurrentThread();
+  }
+
+  ScopedGuestLoaderAttachment(const ScopedGuestLoaderAttachment&) = delete;
+  ScopedGuestLoaderAttachment& operator=(const ScopedGuestLoaderAttachment&) =
+      delete;
+
+  JNIEnv* env() const { return env_; }
+  bool attached_here() const { return attached_here_; }
+
+ private:
+  JavaVM* vm_ = nullptr;
+  JNIEnv* env_ = nullptr;
+  bool attached_here_ = false;
+};
+
 void* GuestDsoOpen(void* context, const char* path, int, const void*,
                   char* error, size_t capacity) {
   auto* owner = static_cast<ElfLibrary*>(context);
   if (owner == nullptr || owner->magic != kElfLibraryMagic || path == nullptr) {
     CopyLoaderError("invalid Android guest loader context", error, capacity);
     return nullptr;
+  }
+  if (std::strcmp(path, "libmediandk.so") == 0) {
+    if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr)
+      std::fprintf(stderr, "DARWIN guest libdl open builtin path=%s\n", path);
+    return static_cast<void*>(&g_media_ndk_handle_tag);
   }
   // bionic dlopen is identity based: a second open of an already loaded
   // absolute SONAME returns the original handle and does not invoke
@@ -122,9 +176,20 @@ void* GuestDsoOpen(void* context, const char* path, int, const void*,
     }
     return existing->graph_handle;
   }
+  ScopedGuestLoaderAttachment attachment(owner);
+  if (attachment.env() == nullptr) {
+    CopyLoaderError("Android guest ELF loader could not attach native worker",
+                    error, capacity);
+    return nullptr;
+  }
+  if (attachment.attached_here() &&
+      std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+    std::fprintf(stderr,
+                 "DARWIN guest libdl temporary ART attach path=%s\n", path);
+  }
   bool needs_bridge = false;
   char* native_error = nullptr;
-  void* handle = OpenNativeLibrary(CurrentArtEnv(), 35, path,
+  void* handle = OpenNativeLibrary(attachment.env(), 35, path,
                                    static_cast<jobject>(owner->app_loader), nullptr,
                                    nullptr, &needs_bridge, &native_error);
   if (handle == nullptr || !needs_bridge) {
@@ -143,6 +208,12 @@ void* GuestDsoOpen(void* context, const char* path, int, const void*,
 
 void* GuestDsoLookup(void*, void* handle, const char* symbol, const char*,
                     char* error, size_t capacity) {
+  if (IsMediaNdkHandle(handle)) {
+    void* address = darwin_art_android_media_ndk_symbol(symbol);
+    if (address != nullptr) return address;
+    CopyLoaderError("Android media NDK symbol is unavailable", error, capacity);
+    return nullptr;
+  }
   auto* owner = AsElfLibrary(handle);
   uintptr_t address = 0;
   std::string lookup_error;
@@ -168,6 +239,7 @@ void* GuestDsoLookup(void*, void* handle, const char* symbol, const char*,
 }
 
 int GuestDsoClose(void*, void* handle, char* error, size_t capacity) {
+  if (IsMediaNdkHandle(handle)) return 0;
   if (ElfLibrary* library = AsElfLibrary(handle);
       library != nullptr &&
       library->guest_open_refs.load(std::memory_order_relaxed) != 0) {
@@ -190,9 +262,13 @@ void BindGuestDsoLoader(ElfLibrary* library) {
   DarwinArtLoaderCallbacks callbacks{library, &GuestDsoOpen, &GuestDsoLookup,
                                      &GuestDsoClose};
   if (darwin_art_loader_bind(&callbacks) != 0) {
-    std::cerr << "DARWIN guest libdl: loader namespace already bound\n";
+    if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+      std::fprintf(stderr, "DARWIN guest libdl: loader namespace already bound\n");
+    }
   } else {
-    std::cerr << "DARWIN guest libdl: bound app ELF namespace\n";
+    if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+      std::fprintf(stderr, "DARWIN guest libdl: bound app ELF namespace\n");
+    }
   }
 }
 
@@ -248,7 +324,12 @@ void* OpenSelectedDarwinArtifact(const char* requested_path,
     return nullptr;
   }
   const std::string dylib_path = std::string(directory) + "/" + leaf + ".dylib";
-  void* handle = dlopen(dylib_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  // Each Darwin host process owns exactly one Android application native
+  // namespace. Promote translated Mach-O symbols within that process so
+  // Bionic-style RTLD_DEFAULT lookups from the DSO can resolve namespace
+  // peers (and the DSO itself); process isolation still prevents cross-app
+  // symbol leakage.
+  void* handle = dlopen(dylib_path.c_str(), RTLD_NOW | RTLD_GLOBAL);
   if (handle == nullptr) {
     const char* message = dlerror();
     SetNativeLoaderError(
@@ -256,7 +337,10 @@ void* OpenSelectedDarwinArtifact(const char* requested_path,
         message == nullptr ? "complete Darwin native graph failed to load" : message);
     return nullptr;
   }
-  std::cerr << "DARWIN native loader: complete graph root=" << dylib_path << "\n";
+  if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+    std::fprintf(stderr, "DARWIN native loader: complete graph root=%s\n",
+                 dylib_path.c_str());
+  }
   return handle;
 }
 
@@ -431,8 +515,13 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
         std::getenv("DARWIN_ART_ANDROID_SYSTEM_NATIVE_DIR");
     if (system_directory != nullptr && system_directory[0] == '/' &&
         std::strstr(path, "..") == nullptr) {
-      system_native_path = std::string(system_directory) + "/" + path;
-      resolved_path = system_native_path.c_str();
+      const std::string candidate = std::string(system_directory) + "/" + path;
+      struct stat candidate_status {};
+      if (stat(candidate.c_str(), &candidate_status) == 0 &&
+          S_ISREG(candidate_status.st_mode)) {
+        system_native_path = candidate;
+        resolved_path = system_native_path.c_str();
+      }
     }
   }
   // A null ClassLoader is also used by Android's process-native dlopen path.
@@ -469,10 +558,18 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       SetNativeLoaderError(error_msg,
                            "Darwin platform media JNI image is unavailable");
     } else {
-      std::cerr << "DARWIN native loader: platform JNI SONAME=" << path
-                << " provider=runtime\n";
+      if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+        std::fprintf(stderr,
+                     "DARWIN native loader: platform JNI SONAME=%s provider=runtime\n",
+                     path);
+      }
     }
     return handle;
+  }
+  if (path != nullptr && std::strcmp(path, "libmediandk.so") == 0) {
+    if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr)
+      std::fprintf(stderr, "DARWIN native loader: builtin SONAME=%s\n", path);
+    return static_cast<void*>(&g_media_ndk_handle_tag);
   }
   // Android's NativeLoader searches the ClassLoader namespace when
   // Runtime.loadLibrary0 deliberately falls back to a bare SONAME.  There is
@@ -524,10 +621,10 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       }
     }
   }
-  // A native worker may invoke bionic dlopen after detaching from ART. It may
-  // lease an already-resident image in its NativeLoader namespace, but it may
-  // not create a new image because JNI_OnLoad requires a live JNIEnv. Resolve
-  // the stable namespace through the initiating library's retained loader.
+  // A native worker may invoke bionic dlopen after detaching from ART. Reuse
+  // remains possible without entering ART. New images arrive here with the
+  // short-lived JNIEnv established by GuestDsoOpen; JNI_OnLoad is a separate
+  // JavaVMExt/NativeBridge operation and is intentionally not invoked here.
   if (env == nullptr && resolved_path != nullptr) {
     if (ElfLibrary* existing = FindElfLibraryByPath(nullptr, resolved_path, loader);
         existing != nullptr && existing->graph_handle != nullptr) {
@@ -627,8 +724,10 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
     library->resolved_path = resolved_path == nullptr ? "" : resolved_path;
     library->loader_namespace_id = GetOrCreateLoaderNamespaceId(env, loader);
     library->app_loader = loader == nullptr ? nullptr : env->NewGlobalRef(loader);
-    std::cerr << "DARWIN ELF loader: initiating loader=" << loader
-              << " global=" << library->app_loader << "\n";
+    if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+      std::fprintf(stderr, "DARWIN ELF loader: initiating loader=%p global=%p\n",
+                   loader, library->app_loader);
+    }
     library->native_owner = darwin_art_runtime_native_owner_create();
     if (library->native_owner == nullptr) {
       SetNativeLoaderError(error_msg, "Rust native owner allocation failed");
@@ -848,8 +947,10 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       TeardownProviderNamespace(library.get());
       return nullptr;
     }
-    std::cerr << "DARWIN ELF loader: graph loaded root=" << root_soname
-              << " sources=" << source_count << "\n";
+    if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+      std::fprintf(stderr, "DARWIN ELF loader: graph loaded root=%s sources=%zu\n",
+                   root_soname, source_count);
+    }
     if (!AttachNativeOwner(library.get(), kNativeOwnerGraph, library->graph,
                            &DropRuntimeElfGraph, &error)) {
       SetNativeLoaderError(error_msg, "Rust native owner graph slot failed: " + error);
@@ -918,9 +1019,11 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
       return nullptr;
     }
     library_value->graph_handle = graph_handle;
-    std::cerr << "DARWIN ELF loader: published handle=" << graph_handle
-              << " JNI_OnLoad=" << reinterpret_cast<void*>(library_value->jni_on_load)
-              << "\n";
+    if (std::getenv("DARWIN_ART_DEBUG_GUEST_LIBDL") != nullptr) {
+      std::fprintf(stderr,
+                   "DARWIN ELF loader: published handle=%p JNI_OnLoad=%p\n",
+                   graph_handle, reinterpret_cast<void*>(library_value->jni_on_load));
+    }
     BindGuestDsoLoader(library_value);
     return graph_handle;
   }
@@ -929,9 +1032,30 @@ extern "C" void* OpenNativeLibrary(JNIEnv* env,
                                      ElfError(discovery_status, discovery_error));
     return nullptr;
   }
+  // Android linker namespaces do not promote an application DSO into a
+  // process-wide symbol pool. A library opened without an application
+  // ClassLoader is instead in the boot/agent namespace; JVMTI's agent loader
+  // relies on that namespace being visible to RTLD_DEFAULT (the native-method
+  // bind contract uses exactly that lookup). Preserve application isolation
+  // while matching the platform scope for bootstrap and agent loads.
+  const int load_scope = loader == nullptr ? RTLD_GLOBAL : RTLD_LOCAL;
   void* handle = resolved_path == nullptr
                      ? nullptr
-                     : dlopen(resolved_path, RTLD_NOW | RTLD_LOCAL);
+                     : dlopen(resolved_path, RTLD_NOW | load_scope);
+  if (handle == nullptr && resolved_path != nullptr &&
+      NativeBridgeIsSupported(resolved_path)) {
+    if (needs_native_bridge == nullptr) {
+      SetNativeLoaderError(error_msg,
+                           "NativeBridge load requires ownership output");
+      return nullptr;
+    }
+    *needs_native_bridge = true;
+    handle = NativeBridgeLoadLibrary(resolved_path, RTLD_NOW);
+    if (handle == nullptr) {
+      SetNativeLoaderError(error_msg, NativeBridgeGetError());
+    }
+    return handle;
+  }
   if (handle == nullptr && error_msg != nullptr) {
     const char* message = dlerror();
     *error_msg = strdup(message == nullptr ? "Darwin native library load failed" : message);
@@ -945,8 +1069,12 @@ extern "C" bool CloseNativeLibrary(void* handle,
   if (needs_native_bridge) {
     ElfLibrary* library = AsElfLibrary(handle);
     if (library == nullptr) {
-      SetNativeLoaderError(error_msg, "invalid Android ELF NativeBridge handle");
-      return false;
+      const int status = NativeBridgeUnloadLibrary(handle);
+      if (status != 0) {
+        SetNativeLoaderError(error_msg, NativeBridgeGetError());
+        return false;
+      }
+      return true;
     }
     DestroyRuntimeElfTrampolines(library);
     const int status = darwin_art_runtime_native_owner_destroy(

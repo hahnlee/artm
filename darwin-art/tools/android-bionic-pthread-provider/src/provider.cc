@@ -19,6 +19,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+extern "C" void darwin_art_bionic_errno_store(int32_t android_errno);
+
 namespace {
 
 static_assert(sizeof(DarwinArtAndroidPthread) == 8);
@@ -35,6 +37,8 @@ constexpr int kAndroidEagain = 11;
 constexpr int kAndroidEnomem = 12;
 constexpr int kAndroidEbusy = 16;
 constexpr int kAndroidEinval = 22;
+constexpr int kAndroidEoverflow = 75;
+constexpr unsigned kAndroidSemValueMax = UINT32_C(0x3fffffff);
 constexpr int kAndroidEdeadlk = 35;
 constexpr int kAndroidEnotsup = 95;
 constexpr int kAndroidEtimedout = 110;
@@ -112,6 +116,11 @@ struct ThreadTlsValue {
 
 struct ThreadTlsState {
   ThreadTlsValue values[kAndroidKeySlots];
+  // A host/ART-created thread is registered lazily by pthread_self().  Keep
+  // only its token here so the host TLS destructor can retire the external
+  // mapping after guest TLS destructors have run; the registry owns the
+  // ThreadEntry itself.
+  DarwinArtAndroidPthread foreign_thread_token{};
 };
 
 struct MutexEntry {
@@ -177,6 +186,7 @@ struct ThreadEntry {
   std::condition_variable startup_condition;
   DarwinArtAndroidPthread token{};
   pthread_t host{};
+  bool provider_owned{true};
   bool published{};
   bool host_exited{};
   bool host_detached{};
@@ -257,6 +267,8 @@ std::shared_ptr<ThreadEntry> FindThreadEntry(DarwinArtAndroidPthread token) {
   std::lock_guard<std::mutex> lock(entry->mutex);
   return entry->published ? entry : nullptr;
 }
+
+void RetireForeignThreadEntry(DarwinArtAndroidPthread token);
 
 std::atomic<uint64_t>& NextThreadToken() {
   static std::atomic<uint64_t> value{1};
@@ -408,10 +420,62 @@ ThreadTlsState* GetThreadTlsState(bool create) {
 
 DarwinArtAndroidPthread CurrentThreadToken() {
   if (current_thread_token == 0) {
-    current_thread_token =
-        NextThreadToken().fetch_add(1, std::memory_order_relaxed);
+    ThreadTlsState* thread_state = nullptr;
+    try {
+      thread_state = GetThreadTlsState(true);
+    } catch (...) {
+      // pthread_self has no failure return. Do not let allocator exceptions
+      // cross the C ABI or return an identity that other threads cannot find.
+      std::abort();
+    }
+    if (thread_state != nullptr && thread_state->foreign_thread_token != 0) {
+      current_thread_token = thread_state->foreign_thread_token;
+    } else if (thread_state != nullptr) {
+      try {
+        auto entry = std::make_shared<ThreadEntry>();
+        entry->provider_owned = false;
+        entry->host = pthread_self();
+        entry->published = true;
+        ProviderState& state = State();
+        std::lock_guard<std::mutex> lock(state.threads_mutex);
+        for (;;) {
+          const uint64_t raw_token =
+              NextThreadToken().fetch_add(1, std::memory_order_relaxed);
+          if (raw_token == 0) continue;
+          entry->token = static_cast<DarwinArtAndroidPthread>(raw_token);
+          const auto [position, inserted] =
+              state.threads.emplace(entry->token, entry);
+          (void)position;
+          if (inserted) break;
+        }
+        thread_state->foreign_thread_token = entry->token;
+        current_thread_token = static_cast<uint64_t>(entry->token);
+      } catch (...) {
+        // pthread_self has no failure return. Never publish an unregistered
+        // token: a foreign GC thread receiving ESRCH would otherwise be
+        // mistaken for an exited thread. Allocation failure is process-fatal
+        // rather than silently violating the identity contract.
+        std::abort();
+      }
+    } else {
+      // Registration requires the host TLS state. Do not return a token which
+      // cannot be found by another thread.
+      std::abort();
+    }
   }
   return static_cast<DarwinArtAndroidPthread>(current_thread_token);
+}
+
+void RetireForeignThreadEntry(DarwinArtAndroidPthread token) {
+  std::shared_ptr<ThreadEntry> entry = FindThreadEntry(token);
+  if (entry == nullptr) return;
+  {
+    std::lock_guard<std::mutex> lock(entry->mutex);
+    if (entry->provider_owned) return;
+    entry->host_exited = true;
+    entry->published = false;
+  }
+  RemoveThreadEntry(entry);
 }
 
 bool DecodeKey(DarwinArtAndroidPthreadKey key, uint32_t* slot_out) {
@@ -456,6 +520,15 @@ void HostThreadTlsDestructor(void* opaque) {
       // callback. Arbitrary callback signatures remain out of scope.
       pending[index].destructor(pending[index].value);
     }
+  }
+  const DarwinArtAndroidPthread foreign_token =
+      thread_state->foreign_thread_token;
+  if (foreign_token != 0) {
+    // Retire only after all emulated Android TLS destructors have run, so a
+    // destructor can still use pthread_self()/pthread_kill(self, 0).
+    RetireForeignThreadEntry(foreign_token);
+    thread_state->foreign_thread_token = 0;
+    current_thread_token = 0;
   }
   tls_destructor_state = nullptr;
   ProviderState& state = State();
@@ -1080,7 +1153,17 @@ extern "C" int darwin_art_bionic_pthread_getattr_np(
   } else {
     auto entry = FindThreadEntry(token);
     if (entry == nullptr) return kAndroidEsrch;
-    host = entry->host;
+    std::lock_guard<std::mutex> lock(entry->mutex);
+    if (!entry->published || entry->host_exited) return kAndroidEsrch;
+    std::memset(attr, 0, sizeof(*attr));
+    attr->stack_size = pthread_get_stacksize_np(entry->host);
+    void* stack_top = pthread_get_stackaddr_np(entry->host);
+    attr->stack_base = stack_top == nullptr
+                           ? nullptr
+                           : static_cast<void*>(
+                                 static_cast<char*>(stack_top) - attr->stack_size);
+    attr->guard_size = 4096;
+    return 0;
   }
   std::memset(attr, 0, sizeof(*attr));
   attr->stack_size = pthread_get_stacksize_np(host);
@@ -1141,8 +1224,10 @@ extern "C" int darwin_art_bionic_pthread_getschedparam(
   if (token == CurrentThreadToken())
     return AndroidError(pthread_getschedparam(pthread_self(), policy, param));
   auto entry = FindThreadEntry(token);
-  return entry == nullptr ? kAndroidEsrch
-                          : AndroidError(pthread_getschedparam(entry->host, policy, param));
+  if (entry == nullptr) return kAndroidEsrch;
+  std::lock_guard<std::mutex> lock(entry->mutex);
+  if (!entry->published || entry->host_exited) return kAndroidEsrch;
+  return AndroidError(pthread_getschedparam(entry->host, policy, param));
 }
 
 extern "C" int darwin_art_bionic_pthread_setschedparam(
@@ -1151,9 +1236,10 @@ extern "C" int darwin_art_bionic_pthread_setschedparam(
   if (token == CurrentThreadToken())
     return AndroidError(pthread_setschedparam(pthread_self(), policy, param));
   auto entry = FindThreadEntry(token);
-  return entry == nullptr
-             ? kAndroidEsrch
-             : AndroidError(pthread_setschedparam(entry->host, policy, param));
+  if (entry == nullptr) return kAndroidEsrch;
+  std::lock_guard<std::mutex> lock(entry->mutex);
+  if (!entry->published || entry->host_exited) return kAndroidEsrch;
+  return AndroidError(pthread_setschedparam(entry->host, policy, param));
 }
 
 extern "C" [[noreturn]] void darwin_art_bionic_pthread_exit(void* value) {
@@ -1191,8 +1277,10 @@ extern "C" int darwin_art_bionic_pthread_kill(
   if (token == CurrentThreadToken())
     return AndroidError(pthread_kill(pthread_self(), host_signal));
   auto entry = FindThreadEntry(token);
-  return entry == nullptr ? kAndroidEsrch
-                          : AndroidError(pthread_kill(entry->host, host_signal));
+  if (entry == nullptr) return kAndroidEsrch;
+  std::lock_guard<std::mutex> lock(entry->mutex);
+  if (!entry->published || entry->host_exited) return kAndroidEsrch;
+  return AndroidError(pthread_kill(entry->host, host_signal));
 }
 
 extern "C" int darwin_art_bionic_pthread_sigmask(
@@ -1273,6 +1361,7 @@ extern "C" int darwin_art_bionic_pthread_join(
   if (entry == nullptr) return kAndroidEsrch;
   {
     std::lock_guard<std::mutex> lock(entry->mutex);
+    if (!entry->provider_owned) return kAndroidEinval;
     if (entry->join_state == ThreadEntry::JoinState::kDetached ||
         entry->join_state == ThreadEntry::JoinState::kJoined) {
       return kAndroidEinval;
@@ -1294,6 +1383,7 @@ extern "C" int darwin_art_bionic_pthread_detach(
   bool collect_exited = false;
   {
     std::lock_guard<std::mutex> lock(entry->mutex);
+    if (!entry->provider_owned) return kAndroidEinval;
     if (entry->join_state == ThreadEntry::JoinState::kNotJoined) {
       entry->join_state = ThreadEntry::JoinState::kDetached;
     } else if (entry->join_state ==
@@ -1598,6 +1688,15 @@ extern "C" int darwin_art_bionic_pthread_mutex_lock(
   return result;
 }
 
+extern "C" int darwin_art_bionic_pthread_atfork(
+    DarwinArtAndroidForkRoutine prepare, DarwinArtAndroidForkRoutine parent,
+    DarwinArtAndroidForkRoutine child) {
+  // Android's pthread_atfork ABI uses the same three void(void) callbacks as
+  // Darwin. Keep registration in the host pthread subsystem so callbacks run
+  // at the real process fork boundary without a guest pthread object.
+  return pthread_atfork(prepare, parent, child);
+}
+
 extern "C" int darwin_art_bionic_pthread_mutex_trylock(
     DarwinArtAndroidPthreadMutex* mutex) {
   int error = 0;
@@ -1893,31 +1992,40 @@ struct SemEntry {
   std::mutex mutex;
   std::condition_variable condition;
   unsigned value = 0;
+  size_t waiters = 0;
   bool destroyed = false;
 };
 std::mutex g_sem_mutex;
 std::unordered_map<void*, std::shared_ptr<SemEntry>> g_semaphores;
 
+int SemFail(int error) {
+  darwin_art_bionic_errno_store(error);
+  return -1;
+}
+
 extern "C" int darwin_art_bionic_sem_init(void* address, int pshared,
                                            unsigned value) {
-  if (address == nullptr || pshared != 0) return kAndroidEnotsup;
+  if (address == nullptr) return SemFail(kAndroidEinval);
+  if (pshared != 0) return SemFail(kAndroidEnotsup);
+  if (value > kAndroidSemValueMax) return SemFail(kAndroidEinval);
   auto entry = std::make_shared<SemEntry>();
   entry->value = value;
   std::lock_guard<std::mutex> lock(g_sem_mutex);
-  if (g_semaphores.count(address) != 0) return kAndroidEinval;
+  if (g_semaphores.count(address) != 0) return SemFail(kAndroidEinval);
   g_semaphores.emplace(address, std::move(entry));
   return 0;
 }
 
 extern "C" int darwin_art_bionic_sem_destroy(void* address) {
+  if (address == nullptr) return SemFail(kAndroidEinval);
   std::shared_ptr<SemEntry> entry;
   {
     std::lock_guard<std::mutex> lock(g_sem_mutex);
     auto found = g_semaphores.find(address);
-    if (found == g_semaphores.end()) return kAndroidEinval;
+    if (found == g_semaphores.end()) return SemFail(kAndroidEinval);
     entry = found->second;
     std::lock_guard<std::mutex> sem_lock(entry->mutex);
-    if (entry->value == 0) return kAndroidEbusy;
+    if (entry->waiters != 0) return SemFail(kAndroidEbusy);
     entry->destroyed = true;
     g_semaphores.erase(found);
   }
@@ -1925,16 +2033,19 @@ extern "C" int darwin_art_bionic_sem_destroy(void* address) {
 }
 
 extern "C" int darwin_art_bionic_sem_post(void* address) {
+  if (address == nullptr) return SemFail(kAndroidEinval);
   std::shared_ptr<SemEntry> entry;
   {
     std::lock_guard<std::mutex> lock(g_sem_mutex);
     auto found = g_semaphores.find(address);
-    if (found == g_semaphores.end()) return kAndroidEinval;
+    if (found == g_semaphores.end()) return SemFail(kAndroidEinval);
     entry = found->second;
   }
   {
     std::lock_guard<std::mutex> lock(entry->mutex);
-    if (entry->destroyed || entry->value == UINT_MAX) return kAndroidEinval;
+    if (entry->destroyed) return SemFail(kAndroidEinval);
+    if (entry->value == kAndroidSemValueMax)
+      return SemFail(kAndroidEoverflow);
     ++entry->value;
   }
   entry->condition.notify_one();
@@ -1942,54 +2053,90 @@ extern "C" int darwin_art_bionic_sem_post(void* address) {
 }
 
 extern "C" int darwin_art_bionic_sem_wait(void* address) {
+  if (address == nullptr) return SemFail(kAndroidEinval);
   std::shared_ptr<SemEntry> entry;
   {
     std::lock_guard<std::mutex> lock(g_sem_mutex);
     auto found = g_semaphores.find(address);
-    if (found == g_semaphores.end()) return kAndroidEinval;
+    if (found == g_semaphores.end()) return SemFail(kAndroidEinval);
     entry = found->second;
   }
   std::unique_lock<std::mutex> lock(entry->mutex);
+  ++entry->waiters;
   entry->condition.wait(lock, [&] { return entry->destroyed || entry->value != 0; });
-  if (entry->destroyed) return kAndroidEinval;
+  --entry->waiters;
+  if (entry->destroyed) return SemFail(kAndroidEinval);
+  --entry->value;
+  return 0;
+}
+
+extern "C" int darwin_art_bionic_sem_trywait(void* address) {
+  if (address == nullptr) return SemFail(kAndroidEinval);
+  std::shared_ptr<SemEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_sem_mutex);
+    auto found = g_semaphores.find(address);
+    if (found == g_semaphores.end()) return SemFail(kAndroidEinval);
+    entry = found->second;
+  }
+  std::lock_guard<std::mutex> lock(entry->mutex);
+  if (entry->destroyed) return SemFail(kAndroidEinval);
+  if (entry->value == 0) return SemFail(kAndroidEagain);
   --entry->value;
   return 0;
 }
 
 extern "C" int darwin_art_bionic_sem_getvalue(void* address, int* value) {
-  if (value == nullptr) return kAndroidEinval;
+  if (address == nullptr || value == nullptr) return SemFail(kAndroidEinval);
   std::shared_ptr<SemEntry> entry;
   {
     std::lock_guard<std::mutex> lock(g_sem_mutex);
     auto found = g_semaphores.find(address);
-    if (found == g_semaphores.end()) return kAndroidEinval;
+    if (found == g_semaphores.end()) return SemFail(kAndroidEinval);
     entry = found->second;
   }
   std::lock_guard<std::mutex> lock(entry->mutex);
-  if (entry->destroyed) return kAndroidEinval;
+  if (entry->destroyed) return SemFail(kAndroidEinval);
   *value = static_cast<int>(entry->value);
   return 0;
 }
 
 extern "C" int darwin_art_bionic_sem_timedwait(
     void* address, const timespec* absolute_timeout) {
-  if (absolute_timeout == nullptr) return kAndroidEinval;
+  if (address == nullptr) return SemFail(kAndroidEinval);
   std::shared_ptr<SemEntry> entry;
   {
     std::lock_guard<std::mutex> lock(g_sem_mutex);
     auto found = g_semaphores.find(address);
-    if (found == g_semaphores.end()) return kAndroidEinval;
+    if (found == g_semaphores.end()) return SemFail(kAndroidEinval);
     entry = found->second;
   }
+  std::unique_lock<std::mutex> lock(entry->mutex);
+  if (entry->destroyed) return SemFail(kAndroidEinval);
+  // POSIX permits an already-available semaphore to be consumed without
+  // inspecting the timeout object. This matters for callers that pass a
+  // stale/invalid timespec while racing a posted permit.
+  if (entry->value != 0) {
+    --entry->value;
+    return 0;
+  }
+  if (absolute_timeout == nullptr || absolute_timeout->tv_sec < 0 ||
+      absolute_timeout->tv_nsec < 0 ||
+      absolute_timeout->tv_nsec >= 1000000000L)
+    return SemFail(kAndroidEinval);
   const auto duration = std::chrono::seconds(absolute_timeout->tv_sec) +
                         std::chrono::nanoseconds(absolute_timeout->tv_nsec);
   const auto deadline = std::chrono::system_clock::time_point(
       std::chrono::duration_cast<std::chrono::system_clock::duration>(duration));
-  std::unique_lock<std::mutex> lock(entry->mutex);
+  ++entry->waiters;
   if (!entry->condition.wait_until(
           lock, deadline, [&] { return entry->destroyed || entry->value != 0; }))
-    return kAndroidEtimedout;
-  if (entry->destroyed) return kAndroidEinval;
+  {
+    --entry->waiters;
+    return SemFail(kAndroidEtimedout);
+  }
+  --entry->waiters;
+  if (entry->destroyed) return SemFail(kAndroidEinval);
   --entry->value;
   return 0;
 }
@@ -2014,6 +2161,8 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
     return reinterpret_cast<void*>(&darwin_art_bionic_sem_post);
   if (std::string_view(symbol) == "sem_wait")
     return reinterpret_cast<void*>(&darwin_art_bionic_sem_wait);
+  if (std::string_view(symbol) == "sem_trywait")
+    return reinterpret_cast<void*>(&darwin_art_bionic_sem_trywait);
   if (std::string_view(symbol) == "sem_getvalue")
     return reinterpret_cast<void*>(&darwin_art_bionic_sem_getvalue);
   if (std::string_view(symbol) == "sem_timedwait")
@@ -2050,11 +2199,14 @@ extern "C" void* darwin_art_bionic_pthread_resolve(const char* soname,
   RESOLVE(kill);
   RESOLVE(setname_np);
   RESOLVE(sigmask);
+  if (std::string_view(symbol) == "sigprocmask")
+    return reinterpret_cast<void*>(&darwin_art_bionic_pthread_sigmask);
   RESOLVE(key_create);
   RESOLVE(key_delete);
   RESOLVE(getspecific);
   RESOLVE(setspecific);
   RESOLVE(once);
+  RESOLVE(atfork);
   RESOLVE(mutexattr_init);
   RESOLVE(mutexattr_destroy);
   RESOLVE(mutexattr_settype);
@@ -2089,7 +2241,36 @@ extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
                         state.once_mutex,
                         state.rwlocks_mutex,
                         state.threads_mutex);
-  if (!state.threads.empty()) return kAndroidEbusy;
+  ThreadTlsState* current = tls_destructor_state;
+  if (current == nullptr) {
+    pthread_once(&HostThreadTlsKeyOnce(), &InitializeHostThreadTlsKey);
+    current = static_cast<ThreadTlsState*>(
+        pthread_getspecific(HostThreadTlsKey()));
+  }
+  std::shared_ptr<ThreadEntry> current_foreign_entry;
+  if (!state.threads.empty()) {
+    // A host/ART-created current thread has a non-joinable provider entry so
+    // its pthread_self token can be used by other threads.  It is safe to
+    // retire only that one entry at reset; all other owned or foreign threads
+    // remain a real busy state.
+    if (current == nullptr || current->foreign_thread_token == 0 ||
+        state.threads.size() != 1) {
+      return kAndroidEbusy;
+    }
+    const auto found =
+        state.threads.find(current->foreign_thread_token);
+    if (found == state.threads.end()) return kAndroidEbusy;
+    current_foreign_entry = found->second;
+    {
+      std::lock_guard<std::mutex> entry_lock(current_foreign_entry->mutex);
+      if (current_foreign_entry->provider_owned ||
+          !current_foreign_entry->published ||
+          current_foreign_entry->host_exited ||
+          !pthread_equal(current_foreign_entry->host, pthread_self())) {
+        return kAndroidEbusy;
+      }
+    }
+  }
   for (const KeySlot& slot : state.key_slots) {
     if (slot.active != nullptr) return kAndroidEbusy;
   }
@@ -2118,12 +2299,6 @@ extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
       return kAndroidEbusy;
     }
   }
-  ThreadTlsState* current = tls_destructor_state;
-  if (current == nullptr) {
-    pthread_once(&HostThreadTlsKeyOnce(), &InitializeHostThreadTlsKey);
-    current = static_cast<ThreadTlsState*>(
-        pthread_getspecific(HostThreadTlsKey()));
-  }
   for (ThreadTlsState* thread_state : state.thread_tls_states) {
     if (thread_state != current) return kAndroidEbusy;
   }
@@ -2132,8 +2307,16 @@ extern "C" int darwin_art_bionic_pthread_provider_reset(void) {
     if (pthread_setspecific(HostThreadTlsKey(), nullptr) != 0) {
       return kAndroidEbusy;
     }
+    if (current_foreign_entry != nullptr) {
+      std::lock_guard<std::mutex> entry_lock(current_foreign_entry->mutex);
+      current_foreign_entry->host_exited = true;
+      current_foreign_entry->published = false;
+      state.threads.erase(current_foreign_entry->token);
+      current->foreign_thread_token = 0;
+    }
     state.thread_tls_states.erase(current);
     delete current;
+    current_thread_token = 0;
   }
   state.mutexes.clear();
   for (ConditionShard& shard : state.conditions) shard.entries.clear();

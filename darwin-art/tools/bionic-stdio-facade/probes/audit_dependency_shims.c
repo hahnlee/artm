@@ -49,6 +49,15 @@ AUDIT_WEAK intptr_t darwin_art_bionic_read(int fd, void* buffer,
   return -1;
 }
 
+AUDIT_WEAK intptr_t darwin_art_bionic_write(int fd, const void* buffer,
+                                             size_t count) {
+  (void)fd;
+  (void)buffer;
+  (void)count;
+  darwin_art_bionic_errno_store(9);
+  return -1;
+}
+
 AUDIT_WEAK int64_t darwin_art_bionic_lseek(int fd, int64_t offset,
                                             int whence) {
   (void)fd;

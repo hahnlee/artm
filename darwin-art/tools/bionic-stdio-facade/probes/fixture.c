@@ -36,6 +36,20 @@ __attribute__((visibility("default"))) int bionic_stdio_fixture_basic(void){
  errno=0;if(fputc('x',f)!=EOF||errno!=EFBIG)return 16;
  errno=0;if(fseek(f,0,99)!=-1||errno!=EINVAL)return 17;
  if(fclose(f)!=0)return 18;
+ f=fopen("/private/output.bin","r+b");if(f==NULL)return 39;
+ if(fseeko(f,0,SEEK_END)!=0||fwrite("!",1,1,f)!=1||fclose(f)!=0)return 40;
+ f=fopen("/private/output.bin","rb");if(f==NULL)return 41;
+ unsigned char persisted[4]={0};
+ if(fread(persisted,1,sizeof(persisted),f)!=sizeof(persisted) ||
+    !Equal(persisted,(const unsigned char*)"xyz!",sizeof(persisted)) ||
+    fclose(f)!=0)return 42;
+ f=fopen("/private/output.bin","a+b");if(f==NULL)return 43;
+ if(fseeko(f,0,SEEK_SET)!=0||fwrite("?",1,1,f)!=1||fclose(f)!=0)return 44;
+ f=fopen("/private/output.bin","rb");if(f==NULL)return 45;
+ unsigned char appended[5]={0};
+ if(fread(appended,1,sizeof(appended),f)!=sizeof(appended) ||
+    !Equal(appended,(const unsigned char*)"xyz!?",sizeof(appended)) ||
+    fclose(f)!=0)return 46;
  errno=0;if(fopen("/system/input.bin","q")!=NULL||errno!=EINVAL)return 19;
  errno=0;if(fopen("","w")!=NULL||errno!=ENOENT)return 20;
  errno=0;if(fopen("/missing","rb")!=NULL||errno!=ENOENT)return 24;

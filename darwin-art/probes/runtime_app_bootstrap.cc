@@ -44,168 +44,30 @@ int load_classes(JNIEnv* env,
     return 3;
   }
 
-  std::vector<std::unique_ptr<const art::DexFile>>& app_dex_files =
-      darwin_art_process::app_dex_files();
-  CHECK(app_dex_files.empty());
-  std::string dex_error;
-  if (run_apk_app) {
-    art::ArtDexFileLoader support_loader(support_dex);
-    if (!support_loader.Open(/* verify= */ true,
-                             /* verify_checksum= */ true, &dex_error,
-                             &app_dex_files)) {
-      std::cerr << "ART Darwin support DEX: open failed: " << dex_error << "\n";
-      return 3;
-    }
-  }
-  art::ArtDexFileLoader dex_loader(app_dex);
-  if (!dex_loader.Open(/* verify= */ true,
-                       /* verify_checksum= */ true, &dex_error,
-                       &app_dex_files)) {
-    std::cerr << "ART Darwin DEX: open failed: " << dex_error << "\n";
-    return 3;
-  }
-
-  std::vector<const art::DexFile*> app_dex_file_ptrs;
-  app_dex_file_ptrs.reserve(app_dex_files.size());
-  for (const auto& dex_file : app_dex_files) {
-    app_dex_file_ptrs.push_back(dex_file.get());
-  }
-
-  art::Handle<art::mirror::ClassLoader> app_loader =
-      hs.NewHandle(soa.Decode<art::mirror::ClassLoader>(
-          class_linker->CreatePathClassLoader(self, app_dex_file_ptrs)));
-  if (app_loader == nullptr || self->IsExceptionPending()) {
-    std::cerr << "ART Darwin DEX: PathClassLoader creation failed\n";
+  // Android's launcher publishes one system PathClassLoader for the process
+  // class path. RuntimeArgumentMap::ClassPath has already created that loader;
+  // wrapping it in another PathClassLoader duplicates the DexFile and splits
+  // defining classes from later JVMTI/addDexPath mutations.
+  jclass class_loader_class = env->FindClass("java/lang/ClassLoader");
+  jmethodID get_system_loader =
+      class_loader_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(class_loader_class, "getSystemClassLoader",
+                                   "()Ljava/lang/ClassLoader;");
+  jobject managed_loader =
+      get_system_loader == nullptr
+          ? nullptr
+          : env->CallStaticObjectMethod(class_loader_class, get_system_loader);
+  env->DeleteLocalRef(class_loader_class);
+  if (managed_loader == nullptr || self->IsExceptionPending()) {
+    std::cerr << "ART Darwin DEX: Java PathClassLoader creation failed\n";
     return 4;
   }
+  art::Handle<art::mirror::ClassLoader> app_loader =
+      hs.NewHandle(soa.Decode<art::mirror::ClassLoader>(managed_loader));
+  out->app_loader = managed_loader;
   std::cerr << "ART Darwin DEX: application ClassLoader="
             << static_cast<void*>(app_loader.Get()) << "\n";
-  out->app_loader = soa.AddLocalReference<jobject>(app_loader.Get());
-  // ClassLinker::CreatePathClassLoader is an ART test helper: it allocates and
-  // wires BaseDexClassLoader fields directly, without running ClassLoader's
-  // Java constructor. Production Android creates the loader through that
-  // constructor, which owns maps used by Class.getPackage(), certificates,
-  // assertions, and class-loader values. Complete the omitted base
-  // construction while preserving the helper-installed boot parent and
-  // DexPathList.
-  jclass class_loader_class = env->FindClass("java/lang/ClassLoader");
-  jmethodID get_parent =
-      class_loader_class == nullptr
-          ? nullptr
-          : env->GetMethodID(class_loader_class, "getParent",
-                             "()Ljava/lang/ClassLoader;");
-  jmethodID class_loader_constructor =
-      class_loader_class == nullptr
-          ? nullptr
-          : env->GetMethodID(class_loader_class, "<init>",
-                             "(Ljava/lang/ClassLoader;)V");
-  jobject loader_parent =
-      get_parent == nullptr
-          ? nullptr
-          : env->CallObjectMethod(out->app_loader, get_parent);
-  if (class_loader_constructor != nullptr && !env->ExceptionCheck()) {
-    env->CallNonvirtualVoidMethod(out->app_loader, class_loader_class,
-                                  class_loader_constructor, loader_parent);
-  }
-  env->DeleteLocalRef(loader_parent);
-  env->DeleteLocalRef(class_loader_class);
-  if (class_loader_constructor == nullptr || self->IsExceptionPending()) {
-    std::cerr << "ART Darwin DEX: ClassLoader base initialization failed\n";
-    return 4;
-  }
-
-  // CreatePathClassLoader is a test helper and bypasses the Java
-  // BaseDexClassLoader/DexPathList constructors.  In particular its
-  // DexPathList.definingContext remains null.  Normal Java-side class lookup
-  // later passes that field to DexFile.defineClassNative; leaving it null
-  // attempts to register the APK dex files against the boot loader.  Complete
-  // the constructor invariant before any app class can perform a lazy lookup.
-  jclass base_dex_class_loader = env->FindClass("dalvik/system/BaseDexClassLoader");
-  jfieldID path_list_field =
-      base_dex_class_loader == nullptr
-          ? nullptr
-          : env->GetFieldID(base_dex_class_loader, "pathList",
-                            "Ldalvik/system/DexPathList;");
-  jobject path_list =
-      path_list_field == nullptr
-          ? nullptr
-          : env->GetObjectField(out->app_loader, path_list_field);
-  jclass dex_path_list = env->FindClass("dalvik/system/DexPathList");
-  jfieldID defining_context_field =
-      dex_path_list == nullptr
-          ? nullptr
-          : env->GetFieldID(dex_path_list, "definingContext",
-                            "Ljava/lang/ClassLoader;");
-  jfieldID native_library_directories_field =
-      dex_path_list == nullptr
-          ? nullptr
-          : env->GetFieldID(dex_path_list, "nativeLibraryDirectories",
-                            "Ljava/util/List;");
-  jfieldID system_native_library_directories_field =
-      dex_path_list == nullptr
-          ? nullptr
-          : env->GetFieldID(dex_path_list, "systemNativeLibraryDirectories",
-                            "Ljava/util/List;");
-  jfieldID native_library_path_elements_field =
-      dex_path_list == nullptr
-          ? nullptr
-          : env->GetFieldID(
-                dex_path_list, "nativeLibraryPathElements",
-                "[Ldalvik/system/DexPathList$NativeLibraryElement;");
-  jclass native_library_element =
-      env->FindClass("dalvik/system/DexPathList$NativeLibraryElement");
-  jclass array_list = env->FindClass("java/util/ArrayList");
-  jmethodID array_list_constructor =
-      array_list == nullptr
-          ? nullptr
-          : env->GetMethodID(array_list, "<init>", "()V");
-  jobject native_library_directories =
-      array_list_constructor == nullptr
-          ? nullptr
-          : env->NewObject(array_list, array_list_constructor);
-  jobject system_native_library_directories =
-      array_list_constructor == nullptr
-          ? nullptr
-          : env->NewObject(array_list, array_list_constructor);
-  jobjectArray native_library_path_elements =
-      native_library_element == nullptr
-          ? nullptr
-          : env->NewObjectArray(0, native_library_element, nullptr);
-  if (path_list == nullptr || defining_context_field == nullptr ||
-      native_library_directories_field == nullptr ||
-      system_native_library_directories_field == nullptr ||
-      native_library_path_elements_field == nullptr ||
-      native_library_directories == nullptr ||
-      system_native_library_directories == nullptr ||
-      native_library_path_elements == nullptr || env->ExceptionCheck()) {
-    std::cerr << "ART Darwin DEX: DexPathList constructor state lookup failed\n";
-    return 4;
-  }
-  env->SetObjectField(path_list, defining_context_field, out->app_loader);
-  env->SetObjectField(path_list, native_library_directories_field,
-                      native_library_directories);
-  env->SetObjectField(path_list, system_native_library_directories_field,
-                      system_native_library_directories);
-  env->SetObjectField(path_list, native_library_path_elements_field,
-                      native_library_path_elements);
-  env->DeleteLocalRef(native_library_path_elements);
-  env->DeleteLocalRef(native_library_element);
-  env->DeleteLocalRef(system_native_library_directories);
-  env->DeleteLocalRef(native_library_directories);
-  env->DeleteLocalRef(array_list);
-  env->DeleteLocalRef(dex_path_list);
-  env->DeleteLocalRef(path_list);
-  env->DeleteLocalRef(base_dex_class_loader);
-  if (env->ExceptionCheck()) {
-    std::cerr << "ART Darwin DEX: DexPathList defining context setup failed\n";
-    return 4;
-  }
-  for (const auto& dex_file : app_dex_files) {
-    if (class_linker->RegisterDexFile(*dex_file, app_loader.Get()) == nullptr) {
-      std::cerr << "ART Darwin DEX: registration failed\n";
-      return 4;
-    }
-  }
 
   auto find = [&](const char* descriptor) -> jclass {
     art::Handle<art::mirror::Class> klass = hs.NewHandle(
@@ -232,8 +94,10 @@ int load_classes(JNIEnv* env,
   out->view = find("Ldev/darwinart/probe/ProbeView;");
   out->content_root = find("Ldev/darwinart/probe/ProbeContentRoot;");
   out->package_manager = find("Ldev/darwinart/probe/ProbePackageManager;");
+  out->upstream_test_harness = find("Ldev/darwinart/probe/UpstreamTestHarness;");
   if (out->context == nullptr || out->resources == nullptr || out->view == nullptr ||
-      out->content_root == nullptr || out->package_manager == nullptr) {
+      out->content_root == nullptr || out->package_manager == nullptr ||
+      out->upstream_test_harness == nullptr) {
     std::cerr << "ART Android window: framework probe class lookup failed\n";
     return 21;
   }

@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <signal.h>
+#include <sys/uio.h>
 
 #include <jni.h>
 #include <nativehelper/JNIHelp.h>
@@ -41,6 +42,42 @@ extern jlong FileDispatcherImpl_readv0(JNIEnv*, jclass, jobject, jlong, jint);
 extern jint FileDispatcherImpl_pread0(JNIEnv*, jclass, jobject, jlong, jint,
                                      jlong);
 extern jint FileDispatcherImpl_read0(JNIEnv*, jclass, jobject, jlong, jint);
+
+// Production NIO virtual-FD acceptance seam. The real runtime resolves these
+// symbols to the Bionic filesystem facade; this small managed probe provider
+// proves the production redirect selects one vector operation for a virtual
+// descriptor without passing its token to Darwin's libc.
+int darwin_art_bionic_fs_owns_fd_core(int fd) {
+  return fd == 0x30000001;
+}
+
+intptr_t darwin_art_bionic_readv(int fd, const struct iovec* vectors, int count) {
+  if (fd != 0x30000001 || vectors == NULL || count != 2) return -1;
+  if (vectors[0].iov_len < 1 || vectors[1].iov_len < 2 ||
+      vectors[0].iov_base == NULL || vectors[1].iov_base == NULL) return -1;
+  ((char*)vectors[0].iov_base)[0] = 'v';
+  ((char*)vectors[1].iov_base)[0] = 'f';
+  ((char*)vectors[1].iov_base)[1] = 'd';
+  return 3;
+}
+
+extern jlong FileDispatcherImpl_readv0(JNIEnv*, jclass, jobject, jlong, jint);
+static jint VirtualReadv(JNIEnv* env, jclass clazz, jobject file_descriptor) {
+  (void)clazz;
+  struct iovec vectors[2];
+  char first[1] = {0};
+  char second[2] = {0, 0};
+  vectors[0].iov_base = first;
+  vectors[0].iov_len = sizeof(first);
+  vectors[1].iov_base = second;
+  vectors[1].iov_len = sizeof(second);
+  const jlong result = FileDispatcherImpl_readv0(
+      env, NULL, file_descriptor, (jlong)(uintptr_t)vectors, 2);
+  if (result != 3 || first[0] != 'v' || second[0] != 'f' || second[1] != 'd') {
+    return -1;
+  }
+  return 3;
+}
 
 #define METHOD(name, signature, function) \
   {(char*)(name), (char*)(signature), (void*)(function)}
@@ -108,6 +145,7 @@ static jint RestoreSignalHandler(JNIEnv* env, jclass clazz) {
 static JNINativeMethod kSmokeMethods[] = {
     METHOD("peek", "(J)I", Peek),
     METHOD("restoreSignalHandler", "()I", RestoreSignalHandler),
+    METHOD("virtualReadv", "(Ljava/io/FileDescriptor;)I", VirtualReadv),
 };
 
 static int Register(JNIEnv* env, const char* name, JNINativeMethod* methods,

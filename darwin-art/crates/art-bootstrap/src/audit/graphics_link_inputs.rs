@@ -15,11 +15,14 @@ pub(super) struct GraphicsRuntimeInputs {
     pub(super) os_constants_archive: PathBuf,
     pub(super) unix_filesystem_archive: PathBuf,
     pub(super) openjdkjvm_archive: PathBuf,
+    pub(super) openjdkjvmti_archive: PathBuf,
     pub(super) managed_load_archive: PathBuf,
     pub(super) file_input_stream_archive: PathBuf,
     pub(super) file_descriptor_archive: PathBuf,
     pub(super) system_natives_archive: PathBuf,
+    pub(super) boringssl_crypto_archive: PathBuf,
     pub(super) unix_native_dispatcher_archive: PathBuf,
+    pub(super) fdlibm_archive: PathBuf,
     pub(super) openjdk_nio_mapping_archive: PathBuf,
     pub(super) openjdk_nio_support_archive: PathBuf,
     pub(super) libcore_memory_archive: PathBuf,
@@ -46,6 +49,8 @@ impl GraphicsRuntimeInputs {
             unix_filesystem_archive: root
                 .join("_build/unix-filesystem-darwin/libopenjdk-unix-filesystem-darwin.a"),
             openjdkjvm_archive: root.join("_build/openjdkjvm-darwin/libopenjdkjvm-darwin.a"),
+            openjdkjvmti_archive: root
+                .join("_build/openjdkjvmti-darwin/libopenjdkjvmti-darwin.a"),
             managed_load_archive: root.join(
                 "_build/android-managed-native-load/libopenjdk-runtime-managed-load-darwin.a",
             ),
@@ -55,9 +60,13 @@ impl GraphicsRuntimeInputs {
                 .join("_build/file-descriptor-darwin/libopenjdk-file-descriptor-darwin.a"),
             system_natives_archive: root
                 .join("_build/system-natives-darwin/libopenjdk-system-natives-darwin.a"),
+            boringssl_crypto_archive: root
+                .join("_build/system-natives-darwin/libcrypto-boringssl-darwin.a"),
             unix_native_dispatcher_archive: root.join(
                 "_build/unix-native-dispatcher-darwin/libopenjdk-unix-native-dispatcher-darwin.a",
             ),
+            fdlibm_archive: root
+                .join("_build/unix-native-dispatcher-darwin/libfdlibm-darwin.a"),
             openjdk_nio_mapping_archive: root
                 .join("_build/openjdk-nio-mapping/libopenjdk-nio-mapping-darwin.a"),
             openjdk_nio_support_archive: root
@@ -89,11 +98,14 @@ impl GraphicsRuntimeInputs {
             &inputs.os_constants_archive,
             &inputs.unix_filesystem_archive,
             &inputs.openjdkjvm_archive,
+            &inputs.openjdkjvmti_archive,
             &inputs.managed_load_archive,
             &inputs.file_input_stream_archive,
             &inputs.file_descriptor_archive,
             &inputs.system_natives_archive,
+            &inputs.boringssl_crypto_archive,
             &inputs.unix_native_dispatcher_archive,
+            &inputs.fdlibm_archive,
             &inputs.openjdk_nio_mapping_archive,
             &inputs.openjdk_nio_support_archive,
             &inputs.libcore_memory_archive,

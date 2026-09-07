@@ -12,6 +12,27 @@ pub(super) fn bootstrap_jobs(
     runtime_includes: &[&Path],
 ) -> Vec<PendingNativeCompile> {
     let mut jobs = Vec::new();
+
+    // The Darwin MAP_JIT implementation is a small compat TU rather than an
+    // upstream ART source. Keep it in the runtime bootstrap archive so the
+    // patched JIT headers can resolve their thread-local write-scope helpers.
+    #[cfg(target_os = "macos")]
+    {
+        let jit_memory_object = staged
+            .runtime_core_object_dir
+            .join("darwin_jit_memory.cc.o");
+        let mut jit_memory_command = runtime_bootstrap_cpp_command(runtime_includes);
+        jit_memory_command
+            .arg("-c")
+            .arg(staged.root.join("compat/darwin_jit_memory.cc"))
+            .arg("-o")
+            .arg(&jit_memory_object);
+        jobs.push(PendingNativeCompile {
+            command: jit_memory_command,
+            object: jit_memory_object,
+        });
+    }
+
     let operator_object = staged.object_dir.join("generated_operator_out.cc.o");
     let mut operator_command = runtime_bootstrap_cpp_command(runtime_includes);
     operator_command
@@ -57,8 +78,14 @@ pub(super) fn bootstrap_jobs(
         let os_linux_object = staged.object_dir.join("artbase_os_linux_aosp_fmt.cc.o");
         let mut os_linux_command = runtime_cpp_command(includes);
         os_linux_command
+            .arg("-I")
+            .arg(staged.root.join("_aosp/art/libartbase/base"))
             .arg("-c")
-            .arg(staged.artbase.join("base/os_linux.cc"))
+            .arg(
+                staged
+                    .root
+                    .join("_build/foundation/patched-source/libartbase/base/os_linux.cc"),
+            )
             .arg("-o")
             .arg(&os_linux_object);
         jobs.push(PendingNativeCompile {

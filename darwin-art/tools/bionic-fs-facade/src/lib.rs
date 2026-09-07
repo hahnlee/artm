@@ -4,7 +4,7 @@ use darwin_art_fs_broker::{BrokerError, ReadOnlyBroker};
 use darwin_art_prefix::{MountKind, MountTable, PrefixError, Resolution};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::ffi::{CStr, c_char, c_int, c_void};
+use std::ffi::{CStr, CString, c_char, c_int, c_long, c_void};
 use std::fmt::Write as _;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -76,12 +76,24 @@ unsafe extern "C" {
     fn host_flock(fd: c_int, operation: c_int) -> c_int;
     #[link_name = "fcntl"]
     fn host_fcntl(fd: c_int, command: c_int, ...) -> c_int;
+    #[link_name = "readv"]
+    fn host_readv(fd: c_int, vectors: *const NativeIovec, count: c_int) -> isize;
+    #[link_name = "writev"]
+    fn host_writev(fd: c_int, vectors: *const NativeIovec, count: c_int) -> isize;
     fn darwin_art_bionic_fs_host_record_lock(
         host_fd: c_int,
         android_command: c_int,
         android_lock: isize,
         host_errno: *mut c_int,
     ) -> c_int;
+    fn darwin_art_bionic_fs_host_openat_private(
+        root_fd: c_int,
+        relative: *const c_char,
+        android_flags: c_int,
+        mode: u32,
+        host_errno: *mut c_int,
+    ) -> c_int;
+    fn darwin_art_bionic_fs_host_cpu_count(online: c_int) -> c_long;
     fn darwin_art_bionic_fs_host_fdopendir(fd: c_int, host_errno: *mut c_int) -> *mut c_void;
     fn darwin_art_bionic_fs_host_readdir(
         directory: *mut c_void,
@@ -106,9 +118,32 @@ unsafe extern "C" {
     #[link_name = "SecRandomCopyBytes"]
     fn sec_random_copy_bytes(random: *const c_void, count: usize, bytes: *mut u8) -> c_int;
     fn darwin_art_bionic_fs_host_enumerate_regions(
-        callback: unsafe extern "C" fn(*mut c_void, u64, u64, c_int) -> c_int,
+        callback: unsafe extern "C" fn(*mut c_void, u64, u64, c_int, *const c_char, u64) -> c_int,
         context: *mut c_void,
     ) -> c_int;
+}
+
+// Darwin and Android arm64 use the same two-word iovec shape at this native
+// boundary. Keep it explicit so the production vector facade does not depend
+// on a host libc typedef leaking into the Android ELF ABI.
+#[repr(C)]
+pub struct NativeIovec {
+    pub base: *mut c_void,
+    pub length: usize,
+}
+
+fn host_cpu_counts() -> (usize, usize) {
+    fn query(online: bool) -> usize {
+        // SAFETY: the shim forwards this fixed Darwin sysconf selector and
+        // returns only the scalar result.
+        let count = unsafe { darwin_art_bionic_fs_host_cpu_count(online as c_int) };
+        usize::try_from(count)
+            .ok()
+            .filter(|count| *count > 0)
+            .unwrap_or(1)
+    }
+
+    (query(false), query(true))
 }
 
 #[repr(C)]
@@ -437,6 +472,10 @@ pub struct Facade {
     // is one example). Keep this as a single capability, never a general host
     // path escape: only the exact path supplied by the launcher is accepted.
     authorized_host_apk: Option<PathBuf>,
+    // ABI/resource splits are separate installer-owned files. Keep each one
+    // as an exact-file capability as well; authorizing their parent directory
+    // would let native code read unrelated host files.
+    authorized_host_apk_splits: Vec<PathBuf>,
     // Extracted native libraries are another installer-owned capability. The
     // Java PathClassLoader must be able to stat the directory and open its
     // direct children for DexPathList.findLibrary(), while arbitrary host
@@ -446,6 +485,7 @@ pub struct Facade {
     descriptors: Mutex<DescriptorTable>,
     overlay: Mutex<OverlayState>,
     private_root: Option<PathBuf>,
+    private_root_directory: Option<File>,
     directories: Mutex<DirectoryTable>,
     entropy: Arc<dyn EntropyBackend>,
     capability_failure: AtomicBool,
@@ -503,9 +543,32 @@ impl Facade {
         {
             return Err("invalid private data root");
         }
+        let private_root_directory = if let Some(path) = private_root.as_ref() {
+            match File::open(path) {
+                Ok(file) => Some(file),
+                Err(_) => return Err("private data root cannot be opened"),
+            }
+        } else {
+            None
+        };
         let authorized_host_apk = std::env::var_os("DARWIN_ART_APK_APP_RESOURCE_APK")
             .map(PathBuf::from)
             .filter(|path| path.is_absolute() && path.is_file());
+        let authorized_host_apk_splits = std::env::var_os("DARWIN_ART_APK_APP_SPLIT_SOURCE_DIRS")
+            .map(|paths| {
+                paths
+                    .as_bytes()
+                    .split(|byte| *byte == b':')
+                    .filter_map(|path| {
+                        if path.is_empty() {
+                            return None;
+                        }
+                        let path = PathBuf::from(std::ffi::OsString::from_vec(path.to_vec()));
+                        (path.is_absolute() && path.is_file()).then_some(path)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let authorized_host_native_dir = std::env::var_os("DARWIN_ART_APK_APP_NATIVE_DIR")
             .map(PathBuf::from)
             .and_then(|path| path.canonicalize().ok())
@@ -514,11 +577,13 @@ impl Facade {
             prefix,
             broker,
             authorized_host_apk,
+            authorized_host_apk_splits,
             authorized_host_native_dir,
             cwd: Mutex::new(initial_cwd.normalized_path),
             descriptors: Mutex::new(DescriptorTable::default()),
             overlay: Mutex::new(OverlayState::default()),
             private_root,
+            private_root_directory,
             directories: Mutex::new(DirectoryTable::default()),
             entropy,
             capability_failure: AtomicBool::new(false),
@@ -638,11 +703,32 @@ impl Facade {
         }
     }
 
+    fn authorized_host_apk_path(&self, path: &[u8]) -> Option<&std::path::Path> {
+        find_authorized_host_apk_path(
+            self.authorized_host_apk.as_ref(),
+            &self.authorized_host_apk_splits,
+            path,
+        )
+    }
+
     // ART's DexPathList receives the host backing path for an app-private DEX
     // after the JNI loader seam translates it. Keep that path inside the same
     // private-data capability as the Android /data view; this is deliberately
     // read-only and accepts only an existing regular file or its root.
     fn authorized_host_private_path(&self, path: &[u8]) -> Option<PathBuf> {
+        let requested = self.authorized_host_private_candidate(path)?;
+        match fs::metadata(&requested) {
+            Ok(metadata) if metadata.is_file() || metadata.is_dir() => Some(requested),
+            _ => None,
+        }
+    }
+
+    // Host paths below DEX_LOCATION are the writable backing of the private
+    // Android data mount.  Unlike the read-only lookup above, this form also
+    // admits a not-yet-created final component so java.nio Files.copy and
+    // friends can create app-private files without falling through to the
+    // immutable guest broker (which reports ENOTDIR for a host pathname).
+    fn authorized_host_private_candidate(&self, path: &[u8]) -> Option<PathBuf> {
         let root = self.private_root.as_ref()?;
         let requested = PathBuf::from(std::ffi::OsString::from_vec(path.to_vec()));
         let relative = requested.strip_prefix(root).ok()?;
@@ -653,18 +739,100 @@ impl Facade {
         {
             return None;
         }
-        let canonical = requested.canonicalize().ok()?;
-        if !canonical.starts_with(root) {
+        let parent = requested.parent()?;
+        if !parent.is_dir() {
             return None;
         }
-        match fs::symlink_metadata(&requested) {
-            Ok(metadata)
-                if !metadata.file_type().is_symlink()
-                    && (metadata.is_file() || metadata.is_dir()) =>
-            {
-                Some(canonical)
+        Some(requested)
+    }
+
+    fn private_relative_from_host_path(&self, path: &PathBuf) -> Option<Vec<u8>> {
+        let root = self.private_root.as_ref()?;
+        let relative = path.strip_prefix(root).ok()?;
+        let bytes = relative.as_os_str().as_bytes();
+        if bytes.is_empty()
+            || bytes
+                .split(|byte| *byte == b'/')
+                .any(|component| component.is_empty() || component == b"." || component == b"..")
+        {
+            return None;
+        }
+        Some(bytes.to_vec())
+    }
+
+    fn open_private_relative(
+        &self,
+        relative: &[u8],
+        flags: c_int,
+        mode: u32,
+    ) -> Result<File, c_int> {
+        let fallback_root;
+        let root = if let Some(root) = self.private_root_directory.as_ref() {
+            root
+        } else if let Some(path) = self.private_root.as_ref() {
+            fallback_root = File::open(path).map_err(|error| self.fail_io(&error))?;
+            &fallback_root
+        } else {
+            return Err(self.fail(ANDROID_EIO));
+        };
+        let path = CString::new(relative).map_err(|_| self.fail(ANDROID_EINVAL))?;
+        let mut host_errno = 0;
+        // SAFETY: root is an owned directory fd; path is a temporary,
+        // NUL-terminated relative name; the helper validates each component
+        // and returns one owned host descriptor on success.
+        let fd = unsafe {
+            darwin_art_bionic_fs_host_openat_private(
+                root.as_raw_fd(),
+                path.as_ptr(),
+                flags,
+                mode,
+                &mut host_errno,
+            )
+        };
+        if fd < 0 {
+            if host_errno != 0 {
+                return Err(self.fail_io(&std::io::Error::from_raw_os_error(host_errno)));
             }
-            _ => None,
+            return Err(self.fail(ANDROID_EINVAL));
+        }
+        // SAFETY: the helper transfers ownership of this descriptor.
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+
+    fn open_authorized_host_private(&self, path: PathBuf, flags: c_int, mode: u32) -> c_int {
+        let accepted = O_ACCMODE
+            | O_CREAT
+            | O_EXCL
+            | O_TRUNC
+            | O_APPEND
+            | O_DSYNC
+            | O_SYNC
+            | O_NONBLOCK
+            | O_DIRECTORY
+            | O_NOFOLLOW
+            | O_LARGEFILE
+            | O_CLOEXEC;
+        if flags & !accepted != 0 || flags & O_TMPFILE == O_TMPFILE {
+            return self.fail(ANDROID_EOPNOTSUPP);
+        }
+        let relative = match self.private_relative_from_host_path(&path) {
+            Some(relative) => relative,
+            None => return self.fail(ANDROID_EACCES),
+        };
+        let file = match self.open_private_relative(&relative, flags, mode) {
+            Ok(file) => file,
+            Err(error) => return error,
+        };
+        if flags & O_DIRECTORY != 0 && !file.metadata().is_ok_and(|metadata| metadata.is_dir()) {
+            return self.fail(ANDROID_ENOTDIR);
+        }
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability(),
+        };
+        match descriptors.insert(Descriptor::PrivateFile(file)) {
+            Ok(fd) => fd,
+            Err(()) => self.fail(ANDROID_EMFILE),
         }
     }
 
@@ -739,25 +907,7 @@ impl Facade {
             }
             return self.fail(ANDROID_EOPNOTSUPP);
         }
-        let path = match self.private_path(&resolution.relative_path) {
-            Ok(path) => path,
-            Err(error) => return self.fail(error),
-        };
-        if flags & O_NOFOLLOW != 0
-            && matches!(fs::symlink_metadata(&path), Ok(metadata) if metadata.file_type().is_symlink())
-        {
-            return self.fail(ANDROID_EACCES);
-        }
-        let access = flags & O_ACCMODE;
-        let mut options = OpenOptions::new();
-        options
-            .read(access != O_WRONLY)
-            .write(access != O_RDONLY)
-            .create(flags & O_CREAT != 0)
-            .create_new(flags & O_EXCL != 0)
-            .truncate(flags & O_TRUNC != 0)
-            .append(flags & O_APPEND != 0);
-        let file = match options.open(&path) {
+        let file = match self.open_private_relative(&resolution.relative_path, flags, mode) {
             Ok(file) => file,
             Err(error) => {
                 if std::env::var_os("DARWIN_ART_FS_TRACE").is_some() {
@@ -766,15 +916,11 @@ impl Facade {
                         String::from_utf8_lossy(&resolution.relative_path)
                     );
                 }
-                return self.fail_io(&error);
+                return error;
             }
         };
         if flags & O_DIRECTORY != 0 && !file.metadata().is_ok_and(|metadata| metadata.is_dir()) {
             return self.fail(ANDROID_ENOTDIR);
-        }
-        if flags & O_CREAT != 0 {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(mode & 0o7777));
         }
         let mut descriptors = match self.descriptors.lock() {
             Ok(descriptors) => descriptors,
@@ -803,12 +949,23 @@ impl Facade {
     }
 
     fn proc_self_maps(path: &[u8]) -> bool {
-        if path == b"/proc/self/maps" || path == b"/proc/thread-self/maps" {
+        Self::proc_self_memory_file(path, b"maps")
+    }
+
+    fn proc_self_smaps(path: &[u8]) -> bool {
+        Self::proc_self_memory_file(path, b"smaps")
+    }
+
+    fn proc_self_memory_file(path: &[u8], file_name: &[u8]) -> bool {
+        let self_path = [b"/proc/self/".as_slice(), file_name].concat();
+        let thread_self_path = [b"/proc/thread-self/".as_slice(), file_name].concat();
+        if path == self_path || path == thread_self_path {
             return true;
         }
+        let suffix = [b"/".as_slice(), file_name].concat();
         let Some(pid) = path
             .strip_prefix(b"/proc/")
-            .and_then(|path| path.strip_suffix(b"/maps"))
+            .and_then(|path| path.strip_suffix(suffix.as_slice()))
         else {
             return false;
         };
@@ -824,10 +981,48 @@ impl Facade {
     /// engines legitimately use these files in addition to sysconf(3) and
     /// sysinfo(2) when selecting allocators and graphics paths.  Keep this
     /// snapshot consistent with the values reported by the Java/runtime
-    /// device APIs: eight virtual CPUs and 8 GiB of memory.
+    /// device APIs: the host's configured/online CPU topology and 8 GiB of
+    /// memory. CPU counts come from Darwin sysconf rather than process
+    /// affinity, which may describe a virtual guest restriction.
     fn synthetic_proc_contents(path: &[u8]) -> Option<Vec<u8>> {
-        const CPU_COUNT: usize = 8;
         const MEMORY_KIB: usize = 8 * 1024 * 1024;
+        fn is_virtual_proc_file(path: &[u8], suffix: &[u8]) -> bool {
+            if (suffix == b"/status"
+                && (path == b"/proc/self/status" || path == b"/proc/thread-self/status"))
+                || (suffix == b"/statm"
+                    && (path == b"/proc/self/statm" || path == b"/proc/thread-self/statm"))
+            {
+                return true;
+            }
+            path.strip_prefix(b"/proc/")
+                .and_then(|rest| rest.strip_suffix(suffix))
+                .is_some_and(|pid| {
+                    !pid.is_empty()
+                        && pid.len() <= 10
+                        && pid.iter().all(u8::is_ascii_digit)
+                        && pid != b"0"
+                })
+        }
+        let is_cpuinfo = path == b"/proc/cpuinfo";
+        let is_status = is_virtual_proc_file(path, b"/status");
+        let is_statm = is_virtual_proc_file(path, b"/statm");
+        let is_cpu_sysfs = path == b"/sys/devices/system/cpu/possible"
+            || path == b"/sys/devices/system/cpu/present"
+            || path == b"/sys/devices/system/cpu/online"
+            || path.starts_with(b"/sys/devices/system/cpu/cpu");
+        let is_static_proc =
+            path == b"/proc/meminfo" || path == b"/proc/loadavg" || path == b"/proc/uptime";
+        if !is_cpuinfo && !is_status && !is_statm && !is_cpu_sysfs && !is_static_proc {
+            return None;
+        }
+        // Only CPU proc/sysfs surfaces need the host topology. Keep fixed
+        // memory/load/uptime data and ordinary assets off this host query.
+        let (configured_cpu_count, online_cpu_count) =
+            if is_cpuinfo || is_status || is_statm || is_cpu_sysfs {
+                host_cpu_counts()
+            } else {
+                (0, 0)
+            };
 
         if path == b"/proc/cpuinfo" {
             let mut contents = String::new();
@@ -837,7 +1032,7 @@ impl Facade {
             } else {
                 "0xd03"
             };
-            for cpu in 0..CPU_COUNT {
+            for cpu in 0..online_cpu_count {
                 let sep = match cpuinfo_style.as_deref() {
                     Some("none") => ":",
                     Some("space") => " :",
@@ -908,7 +1103,11 @@ impl Facade {
         };
         if is_self(b"status") {
             return Some(
-                b"Name:\tdarwin-art-host\nState:\tR (running)\nPid:\t1\nPPid:\t0\nUid:\t501\t501\t501\t501\nGid:\t20\t20\t20\t20\nVmPeak:\t1048576 kB\nVmSize:\t1048576 kB\nVmRSS:\t262144 kB\nCpus_allowed_list:\t0-7\n".to_vec(),
+                format!(
+                    "Name:\tdarwin-art-host\nState:\tR (running)\nPid:\t1\nPPid:\t0\nUid:\t501\t501\t501\t501\nGid:\t20\t20\t20\t20\nVmPeak:\t1048576 kB\nVmSize:\t1048576 kB\nVmRSS:\t262144 kB\nCpus_allowed_list:\t0-{}\n",
+                    online_cpu_count - 1,
+                )
+                .into_bytes(),
             );
         }
         if is_self(b"statm") {
@@ -916,9 +1115,12 @@ impl Facade {
         }
 
         match path {
-            b"/sys/devices/system/cpu/possible"
-            | b"/sys/devices/system/cpu/present"
-            | b"/sys/devices/system/cpu/online" => Some(b"0-7\n".to_vec()),
+            b"/sys/devices/system/cpu/possible" | b"/sys/devices/system/cpu/present" => {
+                Some(format!("0-{}\n", configured_cpu_count - 1).into_bytes())
+            }
+            b"/sys/devices/system/cpu/online" => {
+                Some(format!("0-{}\n", online_cpu_count - 1).into_bytes())
+            }
             _ => {
                 let cpu = path
                     .strip_prefix(b"/sys/devices/system/cpu/cpu")
@@ -929,12 +1131,11 @@ impl Facade {
                         }
                         std::str::from_utf8(digits).ok()?.parse::<usize>().ok()
                     });
-                if let Some(cpu) = cpu.filter(|cpu| *cpu < CPU_COUNT) {
-                    // Expose a conventional 4+4 ARM big.LITTLE topology so
-                    // Unity/Chromium's cluster classifier reports all eight
-                    // virtual CPUs instead of treating a homogeneous host as
-                    // an unclassified zero-core device.
-                    return Some(if cpu < CPU_COUNT / 2 {
+                if let Some(cpu) = cpu.filter(|cpu| *cpu < configured_cpu_count) {
+                    // Expose a stable two-cluster ARM topology so
+                    // Unity/Chromium's cluster classifier reports every host
+                    // configured CPU instead of treating it as zero-core.
+                    return Some(if cpu < configured_cpu_count / 2 {
                         b"512\n".to_vec()
                     } else {
                         b"1024\n".to_vec()
@@ -949,8 +1150,8 @@ impl Facade {
                         }
                         std::str::from_utf8(digits).ok()?.parse::<usize>().ok()
                     });
-                cpu.filter(|cpu| *cpu < CPU_COUNT).map(|cpu| {
-                    if cpu < CPU_COUNT / 2 {
+                cpu.filter(|cpu| *cpu < configured_cpu_count).map(|cpu| {
+                    if cpu < configured_cpu_count / 2 {
                         b"1800000\n".to_vec()
                     } else {
                         b"2400000\n".to_vec()
@@ -995,7 +1196,7 @@ impl Facade {
         }
     }
 
-    fn open_proc_self_maps(&self, flags: c_int) -> c_int {
+    fn open_proc_memory_file(&self, flags: c_int, smaps: bool) -> c_int {
         if flags & O_ACCMODE != O_RDONLY || flags & WRITE_FLAGS != 0 {
             return self.fail(ANDROID_EROFS);
         }
@@ -1003,39 +1204,114 @@ impl Facade {
             return self.fail(ANDROID_EOPNOTSUPP);
         }
 
+        #[repr(C)]
+        struct ProcMemoryOutput {
+            output: *mut String,
+            smaps: bool,
+        }
+
         unsafe extern "C" fn append_region(
             context: *mut c_void,
             start: u64,
             end: u64,
             protection: c_int,
+            path: *const c_char,
+            file_offset: u64,
         ) -> c_int {
             if context.is_null() || start >= end {
                 return -1;
             }
             // SAFETY: host_enumerate_regions synchronously passes back the
-            // String pointer supplied by this function.
-            let output = unsafe { &mut *context.cast::<String>() };
+            // context supplied by this function.
+            let state = unsafe { &mut *context.cast::<ProcMemoryOutput>() };
+            if state.output.is_null() {
+                return -1;
+            }
+            // SAFETY: state.output points at the live String owned by the
+            // caller for this synchronous enumeration.
+            let output = unsafe { &mut *state.output };
             let read = if protection & 1 != 0 { 'r' } else { '-' };
             let write = if protection & 2 != 0 { 'w' } else { '-' };
             let execute = if protection & 4 != 0 { 'x' } else { '-' };
-            if writeln!(
+            let pathname = if path.is_null() {
+                String::new()
+            } else {
+                // SAFETY: the C provider keeps this NUL-terminated path
+                // alive for the duration of this synchronous callback.
+                unsafe { CStr::from_ptr(path) }
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            // Darwin reports canonical paths below /private, while Android's
+            // capability paths (and the POSIX spelling used by callers) use
+            // /var, /tmp, and similar public mount aliases.
+            let pathname = pathname
+                .strip_prefix("/private")
+                .unwrap_or(&pathname)
+                .to_owned();
+            if pathname.is_empty() {
+                if writeln!(
+                    output,
+                    "{start:016x}-{end:016x} {read}{write}{execute}p {file_offset:08x} 00:00 0"
+                )
+                .is_err()
+                {
+                    return -1;
+                }
+            } else if writeln!(
                 output,
-                "{start:016x}-{end:016x} {read}{write}{execute}p 00000000 00:00 0"
+                "{start:016x}-{end:016x} {read}{write}{execute}p {file_offset:08x} 00:00 0 {pathname}"
             )
             .is_err()
             {
                 return -1;
             }
+            if state.smaps {
+                let size_kib = end.saturating_sub(start) / 1024;
+                // Keep the complete Android smaps entry shape.  Darwin does
+                // not expose Linux's per-page dirty accounting, so the
+                // conservative values are zero; this is preferable to
+                // claiming dirty pages based on an unrelated host metric.
+                for line in [
+                    format!("Size:                 {size_kib} kB"),
+                    "Rss:                       0 kB".to_owned(),
+                    "Pss:                       0 kB".to_owned(),
+                    "Shared_Clean:              0 kB".to_owned(),
+                    "Shared_Dirty:              0 kB".to_owned(),
+                    "Private_Clean:             0 kB".to_owned(),
+                    "Private_Dirty:             0 kB".to_owned(),
+                    "Referenced:                0 kB".to_owned(),
+                    "Anonymous:                 0 kB".to_owned(),
+                    "AnonHugePages:             0 kB".to_owned(),
+                    "ShmemPmdMapped:            0 kB".to_owned(),
+                    "FilePmdMapped:             0 kB".to_owned(),
+                    "Shared_Hugetlb:            0 kB".to_owned(),
+                    "Private_Hugetlb:           0 kB".to_owned(),
+                    "Swap:                      0 kB".to_owned(),
+                    "SwapPss:                   0 kB".to_owned(),
+                    "Locked:                    0 kB".to_owned(),
+                    "THPeligible:               0".to_owned(),
+                    "VmFlags: rd".to_owned(),
+                ] {
+                    if writeln!(output, "{line}").is_err() {
+                        return -1;
+                    }
+                }
+            }
             0
         }
 
         let mut contents = String::new();
+        let mut state = ProcMemoryOutput {
+            output: &mut contents,
+            smaps,
+        };
         // SAFETY: the callback and context remain live for this synchronous
         // enumeration of the current task's Mach VM map.
         let result = unsafe {
             darwin_art_bionic_fs_host_enumerate_regions(
                 append_region,
-                (&mut contents as *mut String).cast(),
+                (&mut state as *mut ProcMemoryOutput).cast(),
             )
         };
         if result != 0 {
@@ -1059,7 +1335,10 @@ impl Facade {
         match descriptors.insert(descriptor) {
             Ok(fd) => {
                 if std::env::var_os("DARWIN_ART_FS_TRACE").is_some() {
-                    eprintln!("DARWIN FS: synthetic proc maps fd={fd}");
+                    eprintln!(
+                        "DARWIN FS: synthetic proc {} fd={fd}",
+                        if smaps { "smaps" } else { "maps" }
+                    );
                 }
                 fd
             }
@@ -1092,6 +1371,29 @@ impl Facade {
         }
     }
 
+    fn open_null(&self, flags: c_int) -> c_int {
+        if flags & !(O_ACCMODE | O_CLOEXEC | O_NONBLOCK | O_LARGEFILE) != 0 {
+            return self.fail(ANDROID_EOPNOTSUPP);
+        }
+        let access = flags & O_ACCMODE;
+        let file = match OpenOptions::new()
+            .read(access != O_WRONLY)
+            .write(access != O_RDONLY)
+            .open("/dev/null")
+        {
+            Ok(file) => file,
+            Err(error) => return self.fail_io(&error),
+        };
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability(),
+        };
+        match descriptors.insert(Descriptor::File(file)) {
+            Ok(fd) => fd,
+            Err(()) => self.fail(ANDROID_EMFILE),
+        }
+    }
+
     #[cfg(test)]
     fn open(&self, path: &[u8], flags: c_int) -> c_int {
         self.open_with_mode(path, flags, 0o600)
@@ -1101,8 +1403,14 @@ impl Facade {
         if let Some(kind) = Self::random_device(path) {
             return self.open_random(kind, flags);
         }
+        if path == b"/dev/null" {
+            return self.open_null(flags);
+        }
         if Self::proc_self_maps(path) {
-            return self.open_proc_self_maps(flags);
+            return self.open_proc_memory_file(flags, false);
+        }
+        if Self::proc_self_smaps(path) {
+            return self.open_proc_memory_file(flags, true);
         }
         if let Some(data) = Self::synthetic_proc_contents(path) {
             return self.open_synthetic_readonly(path, flags, data);
@@ -1111,18 +1419,27 @@ impl Facade {
         // ApplicationInfo. Treat that path as a read-only capability and feed
         // it through the normal descriptor table so read/pread/mmap/fstat all
         // retain the Android virtual-fd semantics.
-        if self
-            .authorized_host_apk
-            .as_ref()
-            .is_some_and(|apk| apk.as_os_str().as_bytes() == path)
-        {
+        if let Some(apk) = self.authorized_host_apk_path(path) {
+            if std::env::var_os("DARWIN_ART_FS_TRACE").is_some() {
+                eprintln!(
+                    "DARWIN FS: authorized APK open path={} flags={flags:#x}",
+                    String::from_utf8_lossy(path)
+                );
+            }
             if let Err(error) = self.validate_immutable_flags(flags) {
+                if std::env::var_os("DARWIN_ART_FS_TRACE").is_some() {
+                    eprintln!("DARWIN FS: authorized APK flags rejected error={error}");
+                }
                 return self.fail(error);
             }
-            let apk = self.authorized_host_apk.as_ref().expect("checked above");
             let file = match File::open(apk) {
                 Ok(file) => file,
-                Err(error) => return self.fail_io(&error),
+                Err(error) => {
+                    if std::env::var_os("DARWIN_ART_FS_TRACE").is_some() {
+                        eprintln!("DARWIN FS: authorized APK host open failed error={error}");
+                    }
+                    return self.fail_io(&error);
+                }
             };
             let mut descriptors = match self.descriptors.lock() {
                 Ok(descriptors) => descriptors,
@@ -1149,6 +1466,18 @@ impl Facade {
                 Ok(fd) => fd,
                 Err(()) => self.fail(ANDROID_EMFILE),
             };
+        }
+        if let Some(private_path) = self.authorized_host_private_candidate(path) {
+            if std::env::var_os("DARWIN_ART_DEBUG_PRIVATE_HOST").is_some() {
+                eprintln!(
+                    "DARWIN FS: private host candidate path={} flags={flags:#x}",
+                    String::from_utf8_lossy(path)
+                );
+            }
+            // Route reads through the same fd-relative no-follow walk as
+            // creates and writes. A metadata/canonicalize check followed by
+            // File::open would reintroduce a symlink race at the final node.
+            return self.open_authorized_host_private(private_path, flags, mode);
         }
         if let Some(private_path) = self.authorized_host_private_path(path) {
             if let Err(error) = self.validate_immutable_flags(flags) {
@@ -1411,6 +1740,133 @@ impl Facade {
                 file.data[start..end].copy_from_slice(bytes);
                 descriptor.offset = end as u64;
                 bytes.len() as isize
+            }
+        }
+    }
+
+    unsafe fn readv(&self, fd: c_int, vectors: *const NativeIovec, count: c_int) -> isize {
+        let vectors = unsafe { slice::from_raw_parts(vectors, count as usize) };
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability() as isize,
+        };
+        let Some(descriptor) = descriptors.entries.get_mut(&fd) else {
+            return self.fail(ANDROID_EBADF) as isize;
+        };
+        match descriptor {
+            Descriptor::File(file) | Descriptor::PrivateFile(file) => {
+                // One host readv preserves POSIX short-read and blocking
+                // semantics across all buffers; a loop of read() calls is not
+                // equivalent for pipes, stream endpoints, or interruption
+                // boundaries.
+                let result = unsafe { host_readv(file.as_raw_fd(), vectors.as_ptr(), count) };
+                if result < 0 {
+                    self.fail_io(&std::io::Error::last_os_error()) as isize
+                } else {
+                    result
+                }
+            }
+            Descriptor::Random(_) | Descriptor::Overlay(_) => {
+                let mut total = 0usize;
+                for vector in vectors {
+                    if vector.base.is_null() && vector.length != 0 {
+                        return self.fail(ANDROID_EFAULT) as isize;
+                    }
+                    let pointer = if vector.length == 0 {
+                        ptr::NonNull::<u8>::dangling().as_ptr()
+                    } else {
+                        vector.base.cast::<u8>()
+                    };
+                    let bytes = unsafe { slice::from_raw_parts_mut(pointer, vector.length) };
+                    let result = match descriptor {
+                        Descriptor::Random(_) => match self.entropy.fill(bytes) {
+                            Ok(()) => bytes.len(),
+                            Err(()) => return self.fail(ANDROID_EIO) as isize,
+                        },
+                        Descriptor::Overlay(overlay) => {
+                            if !overlay.readable {
+                                return self.fail(ANDROID_EBADF) as isize;
+                            }
+                            let file = match overlay.node.lock() {
+                                Ok(file) => file,
+                                Err(_) => return self.fail_capability() as isize,
+                            };
+                            let start = usize::try_from(overlay.offset).unwrap_or(usize::MAX);
+                            let copied = file.data.len().saturating_sub(start).min(bytes.len());
+                            if copied != 0 {
+                                bytes[..copied].copy_from_slice(&file.data[start..start + copied]);
+                                overlay.offset += copied as u64;
+                            }
+                            copied
+                        }
+                        _ => unreachable!(),
+                    };
+                    total = total.saturating_add(result);
+                    if result != bytes.len() {
+                        break;
+                    }
+                }
+                total as isize
+            }
+        }
+    }
+
+    unsafe fn writev(&self, fd: c_int, vectors: *const NativeIovec, count: c_int) -> isize {
+        let vectors = unsafe { slice::from_raw_parts(vectors, count as usize) };
+        let mut descriptors = match self.descriptors.lock() {
+            Ok(descriptors) => descriptors,
+            Err(_) => return self.fail_capability() as isize,
+        };
+        let Some(descriptor) = descriptors.entries.get_mut(&fd) else {
+            return self.fail(ANDROID_EBADF) as isize;
+        };
+        match descriptor {
+            Descriptor::File(file) | Descriptor::PrivateFile(file) => {
+                let result = unsafe { host_writev(file.as_raw_fd(), vectors.as_ptr(), count) };
+                if result < 0 {
+                    self.fail_io(&std::io::Error::last_os_error()) as isize
+                } else {
+                    result
+                }
+            }
+            Descriptor::Random(_) => self.fail(ANDROID_EBADF) as isize,
+            Descriptor::Overlay(_) => {
+                let mut total = 0usize;
+                for vector in vectors {
+                    if vector.base.is_null() && vector.length != 0 {
+                        return self.fail(ANDROID_EFAULT) as isize;
+                    }
+                    let pointer = if vector.length == 0 {
+                        ptr::NonNull::<u8>::dangling().as_ptr()
+                    } else {
+                        vector.base.cast_const().cast::<u8>()
+                    };
+                    let bytes = unsafe { slice::from_raw_parts(pointer, vector.length) };
+                    let Descriptor::Overlay(overlay) = descriptor else {
+                        unreachable!()
+                    };
+                    if !overlay.writable {
+                        return self.fail(ANDROID_EBADF) as isize;
+                    }
+                    let mut file = match overlay.node.lock() {
+                        Ok(file) => file,
+                        Err(_) => return self.fail_capability() as isize,
+                    };
+                    let start = match usize::try_from(overlay.offset) {
+                        Ok(start) => start,
+                        Err(_) => return self.fail(ANDROID_EINVAL) as isize,
+                    };
+                    let Some(end) = start.checked_add(bytes.len()) else {
+                        return self.fail(ANDROID_EINVAL) as isize;
+                    };
+                    if end > file.data.len() {
+                        file.data.resize(end, 0);
+                    }
+                    file.data[start..end].copy_from_slice(bytes);
+                    overlay.offset = end as u64;
+                    total = total.saturating_add(bytes.len());
+                }
+                total as isize
             }
         }
     }
@@ -1835,12 +2291,7 @@ impl Facade {
             unsafe { status.write(overlay_file_stat(&file)) };
             return 0;
         }
-        if self
-            .authorized_host_apk
-            .as_ref()
-            .is_some_and(|apk| apk.as_os_str().as_bytes() == path)
-        {
-            let apk = self.authorized_host_apk.as_ref().expect("checked above");
+        if let Some(apk) = self.authorized_host_apk_path(path) {
             let metadata = match if no_follow {
                 fs::symlink_metadata(apk)
             } else {
@@ -1865,6 +2316,22 @@ impl Facade {
             return 0;
         }
         if let Some(private_path) = self.authorized_host_private_path(path) {
+            let metadata = match if no_follow {
+                fs::symlink_metadata(private_path)
+            } else {
+                fs::metadata(private_path)
+            } {
+                Ok(metadata) => metadata,
+                Err(error) => return self.fail_io(&error),
+            };
+            unsafe { status.write(metadata_to_android(&metadata)) };
+            return 0;
+        }
+        // Preserve ENOENT for a missing final component below the writable
+        // private root.  Falling through to guest-path resolution would treat
+        // this absolute host pathname as an immutable mount and can turn the
+        // ordinary missing-file result into ENOTDIR.
+        if let Some(private_path) = self.authorized_host_private_candidate(path) {
             let metadata = match if no_follow {
                 fs::symlink_metadata(private_path)
             } else {
@@ -2460,6 +2927,24 @@ impl Facade {
             self.fail(ANDROID_EOPNOTSUPP);
             return ptr::null_mut();
         }
+        if path == b"/proc/self" {
+            // Linux procfs exposes self as a magic symlink to the caller's
+            // numeric process directory. Android File.getCanonicalFile()
+            // relies on this identity; returning the lexical "self" segment
+            // breaks code that parses the canonical basename as a PID.
+            let canonical = format!("/proc/{}", std::process::id());
+            // SAFETY: realpath's caller supplies a PATH_MAX-sized output and
+            // this bounded decimal PID path is far smaller than PATH_MAX.
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    canonical.as_ptr(),
+                    resolved.cast::<u8>(),
+                    canonical.len(),
+                );
+                resolved.add(canonical.len()).write(0);
+            }
+            return resolved;
+        }
         let resolution = match self.resolve(path) {
             Ok(resolution) => resolution,
             Err(error) => {
@@ -2912,6 +3397,50 @@ impl Facade {
                 SENDFILE_TRANSFER_OK
             }
         }
+    }
+}
+
+fn find_authorized_host_apk_path<'a>(
+    base: Option<&'a PathBuf>,
+    splits: &'a [PathBuf],
+    requested: &[u8],
+) -> Option<&'a std::path::Path> {
+    base.into_iter()
+        .chain(splits.iter())
+        .find(|apk| apk.as_os_str().as_bytes() == requested)
+        .map(PathBuf::as_path)
+}
+
+#[cfg(test)]
+mod authorized_host_apk_tests {
+    use super::find_authorized_host_apk_path;
+    use std::path::PathBuf;
+
+    #[test]
+    fn exact_base_and_split_files_are_authorized_but_unrelated_paths_are_not() {
+        let base = PathBuf::from("/private/app/base.apk");
+        let splits = vec![PathBuf::from("/private/app/config.arm64_v8a.apk")];
+
+        assert_eq!(
+            find_authorized_host_apk_path(Some(&base), &splits, b"/private/app/base.apk"),
+            Some(base.as_path())
+        );
+        assert_eq!(
+            find_authorized_host_apk_path(
+                Some(&base),
+                &splits,
+                b"/private/app/config.arm64_v8a.apk"
+            ),
+            Some(splits[0].as_path())
+        );
+        assert_eq!(
+            find_authorized_host_apk_path(Some(&base), &splits, b"/private/app/other.apk"),
+            None
+        );
+        assert_eq!(
+            find_authorized_host_apk_path(Some(&base), &splits, b"/private/app"),
+            None
+        );
     }
 }
 

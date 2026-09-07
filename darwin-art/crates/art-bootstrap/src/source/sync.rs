@@ -1,4 +1,96 @@
 use super::*;
+use std::collections::BTreeMap;
+
+fn sync_jit_sources_locked(root: &Path, lock: &BTreeMap<String, String>) -> Result<()> {
+    let art_revision = lock_value(lock, "ART_REVISION")?;
+    let compiler_revision = lock_value(lock, "ART_COMPILER_REVISION")?;
+    if compiler_revision != art_revision {
+        return Err(format!(
+            "ART compiler revision {compiler_revision} does not match ART revision {art_revision}"
+        )
+        .into());
+    }
+    materialize_archive(
+        root,
+        "platform/art",
+        compiler_revision,
+        "art-compiler",
+        "compiler",
+        "_aosp/art/compiler",
+        "Android.bp",
+        lock_value(lock, "ART_COMPILER_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/art",
+        compiler_revision,
+        "art-dex2oat",
+        "dex2oat",
+        "_aosp/art/dex2oat",
+        "Android.bp",
+        lock_value(lock, "ART_DEX2OAT_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/art",
+        compiler_revision,
+        "art-profman",
+        "profman",
+        "_aosp/art/profman",
+        "Android.bp",
+        lock_value(lock, "ART_PROFMAN_ANDROID_BP_SHA256")?,
+    )?;
+
+    materialize_archive(
+        root,
+        "platform/art",
+        compiler_revision,
+        "art-disassembler",
+        "disassembler",
+        "_aosp/art/disassembler",
+        "Android.bp",
+        lock_value(lock, "ART_DISASSEMBLER_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/art",
+        compiler_revision,
+        "art-tests",
+        "test",
+        "_aosp/art/test",
+        "Android.bp",
+        lock_value(lock, "ART_TEST_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/external/vixl",
+        lock_value(lock, "VIXL_REVISION")?,
+        "external-vixl",
+        "",
+        "_aosp/external/vixl",
+        "Android.bp",
+        lock_value(lock, "VIXL_ANDROID_BP_SHA256")?,
+    )?;
+    materialize_archive(
+        root,
+        "platform/external/lzma",
+        lock_value(lock, "LZMA_REVISION")?,
+        "external-lzma",
+        "",
+        "_aosp/external/lzma",
+        "Android.bp",
+        lock_value(lock, "LZMA_ANDROID_BP_SHA256")?,
+    )?;
+    Ok(())
+}
+
+/// Materialize only the ART JIT compiler and its pinned VIXL assembler source.
+/// This is intentionally separate from the full source sync because the
+/// compiler closure is large and can be fetched independently by JIT work.
+pub(crate) fn sync_jit_sources(root: &Path) -> Result<()> {
+    let lock = read_lock(root)?;
+    sync_jit_sources_locked(root, &lock)
+}
 
 pub(crate) fn sync_sources(root: &Path) -> Result<()> {
     let lock = read_lock(root)?;
@@ -439,15 +531,26 @@ pub(crate) fn sync_sources(root: &Path) -> Result<()> {
         "dlmalloc.h",
         lock_value(&lock, "DLMALLOC_HEADER_SHA256")?,
     )?;
+    let unwindstack = root.join("_aosp/system/unwinding/libunwindstack");
+    let legacy_unwindstack_marker = unwindstack.join("include/.source-revision");
+    let unwinding_revision = lock_value(&lock, "UNWINDING_REVISION")?;
+    if !unwindstack.join("Android.bp").exists()
+        && fs::read_to_string(&legacy_unwindstack_marker)
+            .is_ok_and(|value| value.trim() == unwinding_revision)
+    {
+        // The earlier bootstrap synchronized only public headers. The full
+        // pinned implementation supersedes that generated subtree atomically.
+        fs::remove_dir_all(&unwindstack)?;
+    }
     materialize_archive(
         root,
         "platform/system/unwinding",
-        lock_value(&lock, "UNWINDING_REVISION")?,
-        "system-unwindstack-include",
-        "libunwindstack/include",
-        "_aosp/system/unwinding/libunwindstack/include",
-        "unwindstack/AndroidUnwinder.h",
-        lock_value(&lock, "UNWINDSTACK_ANDROID_UNWINDER_SHA256")?,
+        unwinding_revision,
+        "system-libunwindstack",
+        "libunwindstack",
+        "_aosp/system/unwinding/libunwindstack",
+        "Android.bp",
+        lock_value(&lock, "UNWINDSTACK_ANDROID_BP_SHA256")?,
     )?;
     materialize_archive(
         root,
@@ -491,5 +594,6 @@ pub(crate) fn sync_sources(root: &Path) -> Result<()> {
         "_aosp/external/icu-runtime-bridge/com/android/icu/util/UResourceBundleNative.java",
         lock_value(&lock, "ICU_URESOURCE_BUNDLE_NATIVE_JAVA_SHA256")?,
     )?;
+    sync_jit_sources_locked(root, &lock)?;
     Ok(())
 }

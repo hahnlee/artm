@@ -7,15 +7,21 @@ use std::slice;
 use std::sync::{Arc, Condvar, Mutex, OnceLock, RwLock};
 
 const EOF: i32 = -1;
+const EINTR: i32 = 4;
 const EBADF: i32 = 9;
 const EFAULT: i32 = 14;
 const EINVAL: i32 = 22;
 const EOVERFLOW: i32 = 75;
 const EIO: i32 = 5;
 const EFBIG: i32 = 27;
+const EOPNOTSUPP: i32 = 95;
+// Only fixture-table streams use this mirror cap. Production VFS streams are
+// descriptor-backed and do not materialize package data in this Vec.
 const MAX_STREAM_BYTES: usize = 16 * 1024 * 1024;
 const O_WRONLY: c_int = 1;
+const O_RDWR: c_int = 2;
 const O_CREAT: c_int = 64;
+const O_TRUNC: c_int = 512;
 const O_APPEND: c_int = 1024;
 
 #[repr(C, align(8))]
@@ -30,9 +36,11 @@ type ScanCallback = unsafe extern "C" fn(
 ) -> c_int;
 unsafe extern "C" {
     static mut darwin_art_bionic___sF: [AndroidFile; 3];
+    fn darwin_art_bionic_errno_load() -> i32;
     fn darwin_art_bionic_errno_store(value: i32);
     fn darwin_art_bionic_open(path: *const c_char, flags: c_int, mode: u32) -> c_int;
     fn darwin_art_bionic_read(fd: c_int, buffer: *mut c_void, count: usize) -> isize;
+    fn darwin_art_bionic_write(fd: c_int, buffer: *const c_void, count: usize) -> isize;
     fn darwin_art_bionic_lseek(fd: c_int, offset: i64, whence: c_int) -> i64;
     fn darwin_art_bionic_close(fd: c_int) -> c_int;
     fn darwin_art_bionic_wide_stdio_install(
@@ -41,43 +49,6 @@ unsafe extern "C" {
     fn darwin_art_bionic_wide_stdio_uninstall(activation: *mut *mut WideStdioActivation) -> c_int;
     fn darwin_art_bionic_wide_stdio_reset(file: *mut AndroidFile) -> c_int;
     fn darwin_art_bionic_wide_stdio_forget(file: *mut AndroidFile) -> c_int;
-}
-
-unsafe fn read_guest_file(path: *const c_char) -> Option<(Vec<u8>, c_int)> {
-    // Android fopen ultimately opens through the same guest VFS as open(2).
-    // Keep the Android FILE ABI private to this facade, but snapshot regular
-    // files through the filesystem provider instead of maintaining a second,
-    // unrelated namespace of files.
-    let fd = unsafe { darwin_art_bionic_open(path, 0, 0) };
-    if fd < 0 {
-        return None;
-    }
-    let mut data = Vec::new();
-    let mut chunk = [0_u8; 16 * 1024];
-    loop {
-        let count = unsafe { darwin_art_bionic_read(fd, chunk.as_mut_ptr().cast(), chunk.len()) };
-        if count < 0 {
-            unsafe { darwin_art_bionic_close(fd) };
-            return None;
-        }
-        if count == 0 {
-            break;
-        }
-        if data.len() > MAX_STREAM_BYTES - count as usize {
-            unsafe { darwin_art_bionic_close(fd) };
-            errno(EFBIG);
-            return None;
-        }
-        data.extend_from_slice(&chunk[..count as usize]);
-    }
-    // The descriptor exposed by fileno() must start at the same position as
-    // the new FILE.  Native Android clients such as Skia/FreeType commonly
-    // open through stdio and then switch to descriptor I/O.
-    if unsafe { darwin_art_bionic_lseek(fd, 0, 0) } != 0 {
-        unsafe { darwin_art_bionic_close(fd) };
-        return None;
-    }
-    Some((data, fd))
 }
 
 #[repr(C)]
@@ -108,6 +79,11 @@ struct Stream {
     pushback: Option<u8>,
     fd: i32,
     owns_fd: bool,
+    // A stream backed by the fixture table has no guest descriptor. Keep its
+    // path so fclose can commit writes back to that table; real guest files
+    // are persisted by the descriptor itself.
+    backing_path: Option<Vec<u8>>,
+    append: bool,
     orientation: i8,
     error: bool,
     eof: bool,
@@ -119,6 +95,7 @@ struct Table {
     files: BTreeMap<Vec<u8>, Vec<u8>>,
     next_fd: i32,
     shutting_down: bool,
+    allow_memory_files: bool,
 }
 pub struct Provider {
     table: Mutex<Table>,
@@ -131,6 +108,14 @@ fn slot() -> &'static RwLock<Option<Arc<Provider>>> {
 
 impl Provider {
     pub fn new(files: Vec<(Vec<u8>, Vec<u8>)>, stdin: Vec<u8>) -> Result<Self, &'static str> {
+        Self::new_with_mode(files, stdin, true)
+    }
+
+    fn new_with_mode(
+        files: Vec<(Vec<u8>, Vec<u8>)>,
+        stdin: Vec<u8>,
+        allow_memory_files: bool,
+    ) -> Result<Self, &'static str> {
         if stdin.len() > MAX_STREAM_BYTES {
             return Err("invalid stdin snapshot");
         }
@@ -164,6 +149,8 @@ impl Provider {
                     pushback: None,
                     fd: index as i32,
                     owns_fd: false,
+                    backing_path: None,
+                    append: false,
                     orientation: 0,
                     error: false,
                     eof: false,
@@ -178,6 +165,7 @@ impl Provider {
                 files: file_map,
                 next_fd: 20_000,
                 shutting_down: false,
+                allow_memory_files,
             }),
             idle: Condvar::new(),
         })
@@ -322,7 +310,7 @@ pub extern "C" fn darwin_art_bionic_stdio_process_install() -> c_int {
         };
         return 0;
     }
-    let provider = match Provider::new(Vec::new(), Vec::new()) {
+    let provider = match Provider::new_with_mode(Vec::new(), Vec::new(), false) {
         Ok(provider) => Arc::new(provider),
         Err(_) => {
             errno(EIO);
@@ -530,6 +518,25 @@ extern "C" fn wide_read_byte(_: *mut c_void, lease: *mut c_void, output: *mut u8
         }
         let byte = if let Some(byte) = stream.pushback.take() {
             byte
+        } else if stream.owns_fd {
+            let mut byte = 0_u8;
+            loop {
+                let result =
+                    unsafe { darwin_art_bionic_read(stream.fd, (&mut byte as *mut u8).cast(), 1) };
+                if result < 0 && unsafe { darwin_art_bionic_errno_load() } == EINTR {
+                    continue;
+                }
+                if result < 0 {
+                    stream.error = true;
+                    return -1;
+                }
+                if result == 0 {
+                    stream.eof = true;
+                    return 0;
+                }
+                stream.position = stream.position.saturating_add(1);
+                break byte;
+            }
         } else if stream.position < stream.data.len() {
             let byte = stream.data[stream.position];
             stream.position += 1;
@@ -566,15 +573,60 @@ extern "C" fn wide_write_bytes(
             errno(EBADF);
             return -1;
         }
+        if stream.append && !stream.owns_fd {
+            stream.position = stream.data.len();
+        }
         let Some(end) = stream.position.checked_add(length) else {
             stream.error = true;
             errno(EOVERFLOW);
             return -1;
         };
-        if end > MAX_STREAM_BYTES {
+        if !stream.owns_fd && end > MAX_STREAM_BYTES {
             stream.error = true;
             errno(EFBIG);
             return -1;
+        }
+        if stream.owns_fd {
+            if stream.pushback.take().is_some()
+                && unsafe { darwin_art_bionic_lseek(stream.fd, stream.position as i64, 0) }
+                    != stream.position as i64
+            {
+                stream.error = true;
+                return -1;
+            }
+            let mut written = 0;
+            while written < input.len() {
+                let result = unsafe {
+                    darwin_art_bionic_write(
+                        stream.fd,
+                        input[written..].as_ptr().cast(),
+                        input.len() - written,
+                    )
+                };
+                if result < 0 {
+                    if unsafe { darwin_art_bionic_errno_load() } == EINTR {
+                        continue;
+                    }
+                    stream.error = true;
+                    return -1;
+                }
+                if result == 0 {
+                    stream.error = true;
+                    return -1;
+                }
+                written += result as usize;
+            }
+            stream.position = if stream.append {
+                let actual = unsafe { darwin_art_bionic_lseek(stream.fd, 0, 1) };
+                if actual < 0 {
+                    stream.error = true;
+                    return -1;
+                }
+                actual as usize
+            } else {
+                end
+            };
+            return 0;
         }
         if stream.position > stream.data.len() {
             stream.data.resize(stream.position, 0);
@@ -662,35 +714,77 @@ unsafe fn fopen(path: *const c_char, mode: *const c_char) -> *mut AndroidFile {
         return ptr::null_mut();
     }
     let mut guest_fd = None;
+    let mut backing_path = None;
+    let mut initial_position = 0_usize;
     let data = if append {
         // Android append streams create the file through the same guest VFS
         // as open(2). Keep the descriptor live so fileno() observes a real
         // Android descriptor rather than a facade-only snapshot token.
+        let access = if readable { O_RDWR } else { O_WRONLY };
         let fd = unsafe {
-            darwin_art_bionic_open(path.as_ptr().cast(), O_WRONLY | O_CREAT | O_APPEND, 0o600)
+            darwin_art_bionic_open(path.as_ptr().cast(), access | O_CREAT | O_APPEND, 0o666)
         };
-        if fd < 0 {
+        if fd >= 0 {
+            let end = unsafe { darwin_art_bionic_lseek(fd, 0, 2) };
+            let Some(end) = usize::try_from(end).ok() else {
+                unsafe { darwin_art_bionic_close(fd) };
+                return ptr::null_mut();
+            };
+            initial_position = end;
+            guest_fd = Some(fd);
+            Vec::new()
+        } else if table.allow_memory_files {
+            let Some(v) = table.files.get(path) else {
+                errno(2);
+                return ptr::null_mut();
+            };
+            backing_path = Some(path.to_vec());
+            initial_position = v.len();
+            v.clone()
+        } else {
             return ptr::null_mut();
         }
-        guest_fd = Some(fd);
-        Vec::new()
-    } else if truncate {
-        Vec::new()
+    } else if truncate || (readable && writable) {
+        // Writable streams must be real guest descriptors whenever the VFS
+        // is installed. The table fallback is retained for the standalone
+        // stdio fixture, which intentionally has no filesystem provider.
+        let access = if readable { O_RDWR } else { O_WRONLY };
+        let flags = if truncate {
+            access | O_CREAT | O_TRUNC
+        } else {
+            access
+        };
+        let fd = unsafe { darwin_art_bionic_open(path.as_ptr().cast(), flags, 0o666) };
+        if fd >= 0 {
+            guest_fd = Some(fd);
+            Vec::new()
+        } else if table.allow_memory_files {
+            let v = table.files.get(path);
+            if v.is_none() && !truncate {
+                return ptr::null_mut();
+            }
+            backing_path = Some(path.to_vec());
+            if truncate {
+                Vec::new()
+            } else {
+                v.cloned().expect("checked fixture file")
+            }
+        } else {
+            return ptr::null_mut();
+        }
     } else {
         match table.files.get(path) {
             Some(v) => v.clone(),
             None => {
-                if writable {
-                    errno(2);
+                // Real read-only files stay descriptor-backed. This avoids
+                // imposing MAX_STREAM_BYTES on package data such as Unity's
+                // 300+ MiB ExcelDB.db.
+                let fd = unsafe { darwin_art_bionic_open(path.as_ptr().cast(), 0, 0) };
+                if fd < 0 {
                     return ptr::null_mut();
                 }
-                // SAFETY: fopen's path argument remains a readable C string
-                // for the duration of this call.
-                let Some((data, fd)) = (unsafe { read_guest_file(path.as_ptr().cast()) }) else {
-                    return ptr::null_mut();
-                };
                 guest_fd = Some(fd);
-                data
+                Vec::new()
             }
         }
     };
@@ -706,12 +800,14 @@ unsafe fn fopen(path: *const c_char, mode: *const c_char) -> *mut AndroidFile {
         Stream {
             _token: Some(token),
             data,
-            position: 0,
+            position: initial_position,
             readable,
             writable,
             pushback: None,
             fd,
             owns_fd: guest_fd.is_some(),
+            backing_path,
+            append,
             orientation: 0,
             error: false,
             eof: false,
@@ -827,6 +923,14 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fclose_core(f: *mut AndroidFile
         return EOF;
     }
     let removed = t.streams.remove(&token);
+    if let Some(stream) = removed.as_ref()
+        && let Some(path) = stream.backing_path.as_ref()
+    {
+        // Snapshot-only fixture streams have no descriptor to persist their
+        // writes through. Commit them while the table is still locked; real
+        // VFS-backed streams have already written to their guest descriptor.
+        t.files.insert(path.clone(), stream.data.clone());
+    }
     p.idle.notify_all();
     drop(t);
     if let Some(stream) = removed.as_ref()
@@ -888,9 +992,35 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fread_core(
             out[0] = v;
             n = 1
         }
-        let available = s.data.len().saturating_sub(s.position);
-        let take = (total - n).min(available);
-        out[n..n + take].copy_from_slice(&s.data[s.position..s.position + take]);
+        let take = if s.owns_fd {
+            let mut read = 0;
+            while read < total - n {
+                let result = unsafe {
+                    darwin_art_bionic_read(
+                        s.fd,
+                        out[n + read..].as_mut_ptr().cast(),
+                        total - n - read,
+                    )
+                };
+                if result < 0 {
+                    if unsafe { darwin_art_bionic_errno_load() } == EINTR {
+                        continue;
+                    }
+                    s.error = true;
+                    break;
+                }
+                if result == 0 {
+                    break;
+                }
+                read += result as usize;
+            }
+            read
+        } else {
+            let available = s.data.len().saturating_sub(s.position);
+            let take = (total - n).min(available);
+            out[n..n + take].copy_from_slice(&s.data[s.position..s.position + take]);
+            take
+        };
         s.position += take;
         if n + take < total {
             s.eof = true;
@@ -918,10 +1048,6 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fwrite_core(
         errno(EOVERFLOW);
         return 0;
     }
-    if total > MAX_STREAM_BYTES {
-        errno(EFBIG);
-        return 0;
-    }
     if b.is_null() {
         errno(EFAULT);
         return 0;
@@ -935,25 +1061,72 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fwrite_core(
             errno(EBADF);
             return 0;
         }
+        if s.append && !s.owns_fd {
+            s.position = s.data.len();
+        }
         let Some(end) = s.position.checked_add(total) else {
             errno(EOVERFLOW);
             return 0;
         };
-        if end > MAX_STREAM_BYTES {
+        if !s.owns_fd && end > MAX_STREAM_BYTES {
             s.error = true;
             errno(EFBIG);
             return 0;
         }
-        if s.position > s.data.len() {
-            s.data.resize(s.position, 0)
+        let bytes_written = if s.owns_fd {
+            if s.pushback.take().is_some()
+                && unsafe { darwin_art_bionic_lseek(s.fd, s.position as i64, 0) }
+                    != s.position as i64
+            {
+                s.error = true;
+                return 0;
+            }
+            let mut written = 0;
+            while written < total {
+                let result = unsafe {
+                    darwin_art_bionic_write(s.fd, input[written..].as_ptr().cast(), total - written)
+                };
+                if result < 0 {
+                    if unsafe { darwin_art_bionic_errno_load() } == EINTR {
+                        continue;
+                    }
+                    s.error = true;
+                    break;
+                }
+                if result == 0 {
+                    s.error = true;
+                    break;
+                }
+                written += result as usize;
+            }
+            written
+        } else {
+            if s.position > s.data.len() {
+                s.data.resize(s.position, 0)
+            }
+            if end > s.data.len() {
+                s.data.resize(end, 0)
+            }
+            s.data[s.position..end].copy_from_slice(input);
+            total
+        };
+        if s.owns_fd {
+            let new_end = if s.append {
+                let actual = unsafe { darwin_art_bionic_lseek(s.fd, 0, 1) };
+                if actual < 0 {
+                    s.error = true;
+                    return 0;
+                }
+                actual as usize
+            } else {
+                s.position.saturating_add(bytes_written)
+            };
+            s.position = new_end;
+        } else {
+            s.position = end;
         }
-        if end > s.data.len() {
-            s.data.resize(end, 0)
-        }
-        s.data[s.position..end].copy_from_slice(input);
-        s.position = end;
         mirror_stderr = s.fd == 2;
-        count
+        bytes_written / size
     });
     if written == count && mirror_stderr {
         let _ = std::io::stderr().write_all(input);
@@ -1012,9 +1185,47 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fseek_core(
     }
     let result = {
         let stream = table.streams.get_mut(&token).expect("exclusive stream");
+        let fd_position = if stream.owns_fd {
+            let position = unsafe { darwin_art_bionic_lseek(stream.fd, 0, 1) };
+            if position < 0 {
+                stream.error = true;
+                stream.exclusive = false;
+                provider.idle.notify_all();
+                return EOF;
+            }
+            Some(position)
+        } else {
+            None
+        };
         let base = match whence {
             0 => 0i128,
-            1 => stream.position as i128,
+            1 => match fd_position {
+                Some(position) => position as i128 - i128::from(stream.pushback.is_some()),
+                None => stream.position as i128,
+            },
+            2 if stream.owns_fd => {
+                let end = unsafe { darwin_art_bionic_lseek(stream.fd, 0, 2) };
+                if end < 0 {
+                    if let Some(position) = fd_position {
+                        let _ = unsafe { darwin_art_bionic_lseek(stream.fd, position, 0) };
+                    }
+                    stream.error = true;
+                    stream.exclusive = false;
+                    provider.idle.notify_all();
+                    return EOF;
+                }
+                // Discovering the end must not commit a position change: the
+                // requested offset or wide-state reset may still fail below.
+                if let Some(position) = fd_position
+                    && unsafe { darwin_art_bionic_lseek(stream.fd, position, 0) } != position
+                {
+                    stream.error = true;
+                    stream.exclusive = false;
+                    provider.idle.notify_all();
+                    return EOF;
+                }
+                end as i128
+            }
             2 => stream.data.len() as i128,
             _ => {
                 errno(EINVAL);
@@ -1024,7 +1235,10 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fseek_core(
             }
         };
         let value = base + offset as i128;
-        if value < 0 || value > usize::MAX as i128 {
+        if value < 0 || value > i64::MAX as i128 {
+            if let Some(position) = fd_position {
+                let _ = unsafe { darwin_art_bionic_lseek(stream.fd, position, 0) };
+            }
             errno(EINVAL);
             stream.exclusive = false;
             provider.idle.notify_all();
@@ -1057,11 +1271,21 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_fseek_core(
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_stdio_ftello_core(f: *mut AndroidFile) -> i64 {
-    with_stream(f, -1, |s| match i64::try_from(s.position) {
-        Ok(v) => v,
-        Err(_) => {
-            errno(EOVERFLOW);
-            -1
+    with_stream(f, -1, |s| {
+        if s.owns_fd && s.pushback.is_none() {
+            let position = unsafe { darwin_art_bionic_lseek(s.fd, 0, 1) };
+            if position < 0 {
+                s.error = true;
+                return -1;
+            }
+            s.position = position as usize;
+        }
+        match i64::try_from(s.position) {
+            Ok(v) => v,
+            Err(_) => {
+                errno(EOVERFLOW);
+                -1
+            }
         }
     })
 }
@@ -1075,24 +1299,59 @@ pub extern "C" fn darwin_art_bionic_stdio_fputc_core(c: c_int, f: *mut AndroidFi
             errno(EBADF);
             return EOF;
         }
+        if s.append && !s.owns_fd {
+            s.position = s.data.len();
+        }
         let Some(end) = s.position.checked_add(1) else {
             errno(EOVERFLOW);
             return EOF;
         };
-        if end > MAX_STREAM_BYTES {
+        if !s.owns_fd && end > MAX_STREAM_BYTES {
             s.error = true;
             errno(EFBIG);
             return EOF;
         }
-        if s.position > s.data.len() {
-            s.data.resize(s.position, 0)
-        }
-        if s.position == s.data.len() {
-            s.data.push(byte)
+        if s.owns_fd {
+            if s.pushback.take().is_some()
+                && unsafe { darwin_art_bionic_lseek(s.fd, s.position as i64, 0) }
+                    != s.position as i64
+            {
+                s.error = true;
+                return EOF;
+            }
+            loop {
+                let result =
+                    unsafe { darwin_art_bionic_write(s.fd, (&byte as *const u8).cast(), 1) };
+                if result < 0 && unsafe { darwin_art_bionic_errno_load() } == EINTR {
+                    continue;
+                }
+                if result != 1 {
+                    s.error = true;
+                    return EOF;
+                }
+                break;
+            }
+            s.position = if s.append {
+                let actual = unsafe { darwin_art_bionic_lseek(s.fd, 0, 1) };
+                if actual < 0 {
+                    s.error = true;
+                    return EOF;
+                }
+                actual as usize
+            } else {
+                s.position.saturating_add(1)
+            };
         } else {
-            s.data[s.position] = byte
+            if s.position > s.data.len() {
+                s.data.resize(s.position, 0)
+            }
+            if s.position == s.data.len() {
+                s.data.push(byte)
+            } else {
+                s.data[s.position] = byte
+            }
+            s.position = end;
         }
-        s.position = end;
         byte as i32
     })
 }
@@ -1107,6 +1366,27 @@ pub extern "C" fn darwin_art_bionic_stdio_getc_core(f: *mut AndroidFile) -> c_in
         }
         if let Some(v) = s.pushback.take() {
             return v as i32;
+        }
+        if s.owns_fd {
+            let mut byte = 0_u8;
+            loop {
+                let result =
+                    unsafe { darwin_art_bionic_read(s.fd, (&mut byte as *mut u8).cast(), 1) };
+                if result < 0 && unsafe { darwin_art_bionic_errno_load() } == EINTR {
+                    continue;
+                }
+                if result < 0 {
+                    s.error = true;
+                    return EOF;
+                }
+                if result == 0 {
+                    s.eof = true;
+                    return EOF;
+                }
+                break;
+            }
+            s.position = s.position.saturating_add(1);
+            return byte as i32;
         }
         if s.position >= s.data.len() {
             s.eof = true;
@@ -1174,6 +1454,16 @@ pub unsafe extern "C" fn darwin_art_bionic_stdio_scan_core(
         if !stream.readable {
             stream.error = true;
             errno(EBADF);
+            return EOF;
+        }
+        // The callback ABI requires one contiguous NUL-terminated view of
+        // the remaining stream. A descriptor-backed production stream is
+        // intentionally unbounded (e.g. ExcelDB.db), so never index its
+        // empty mirror or materialize the whole file here. Callers needing
+        // scanner semantics must use fread on the FD-backed stream.
+        if stream.owns_fd {
+            stream.error = true;
+            errno(EOPNOTSUPP);
             return EOF;
         }
 

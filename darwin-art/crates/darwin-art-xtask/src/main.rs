@@ -127,6 +127,7 @@ fn shell_quote(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::emit::{emit_graph, interpreter_core_inputs};
     use crate::graph::foundation::{FoundationFamily, is_foundation_family_input};
     use crate::graph::inputs::{graph_inputs, is_probe_only_input, probe_content_stamp};
 
@@ -179,6 +180,8 @@ mod tests {
         let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let paths = graph_inputs(&repository_root);
         for input in [
+            "tools/build-android16-libcore-darwin-linux.sh",
+            "upstream/android16-libcore-darwin-linux.lock",
             "compat/libcore_darwin_linux.cc",
             "compat/libcore_darwin_linux_system_natives.cc",
             "compat/libcore_darwin_linux_syscalls.cc",
@@ -189,6 +192,62 @@ mod tests {
                 "libcore archive input is missing from native graph: {input}"
             );
         }
+    }
+
+    #[test]
+    fn interpreter_archive_edge_tracks_patch_or_orchestration_changes() {
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let output = repository_root.join(format!(
+            "_build/darwin-art-interpreter-graph-{}.ninja",
+            std::process::id()
+        ));
+        emit_graph(&output).expect("emit native graph");
+        let graph = fs::read_to_string(&output).expect("read emitted graph");
+        let archive = repository_root.join("_build/interpreter-core/libart-interpreter-darwin.a");
+        let archive_edge = graph
+            .lines()
+            .find(|line| {
+                line.starts_with(&format!("build {}: interpreter_core", archive.display()))
+            })
+            .expect("interpreter archive producer edge");
+        assert!(
+            archive_edge.contains("patches/art/0074-darwin-interpreter-reference-copy.patch"),
+            "interpreter reference-copy patch must invalidate its archive"
+        );
+        for input in interpreter_core_inputs(&repository_root) {
+            assert!(
+                archive_edge.contains(&input.to_string_lossy().to_string()),
+                "interpreter edge is missing input {}",
+                input.display()
+            );
+        }
+        let graphics_link = graph
+            .lines()
+            .find(|line| line.starts_with(&format!("build {}: graphics_audit", repository_root.join("_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib").display())))
+            .expect("graphics audit edge");
+        assert!(
+            graphics_link.contains(&archive.to_string_lossy().to_string()),
+            "graphics link edge does not depend on interpreter archive"
+        );
+        let jit_edge = graph
+            .lines()
+            .find(|line| line.contains(": jit_compiler "))
+            .expect("JIT compiler archive producer edge");
+        let compiler =
+            fs::read_to_string(repository_root.join("crates/art-bootstrap/src/runtime_art/jit.rs"))
+                .expect("read compiler patch registration");
+        let patches: Vec<_> = compiler
+            .split('"')
+            .filter(|part| part.starts_with("patches/art/") && part.ends_with(".patch"))
+            .collect();
+        assert!(!patches.is_empty());
+        for patch in patches {
+            assert!(
+                jit_edge.contains(patch),
+                "JIT archive edge is missing {patch}"
+            );
+        }
+        fs::remove_file(output).expect("remove emitted graph");
     }
 
     #[test]

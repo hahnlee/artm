@@ -16,6 +16,31 @@ typedef struct DarwinArtBionicPollFd {
   int16_t revents;
 } DarwinArtBionicPollFd;
 
+/* Android arm64 mmsghdr ABI. The explicit padding keeps the 64-bit guest
+ * stride (sizeof(mmsghdr)==64) independent of the host's socket headers. */
+typedef struct DarwinArtAndroidIovec {
+  void* base;
+  uint64_t length;
+} DarwinArtAndroidIovec;
+
+typedef struct DarwinArtAndroidMsghdr {
+  void* name;
+  uint32_t name_length;
+  uint32_t padding;
+  DarwinArtAndroidIovec* vectors;
+  uint64_t vector_count;
+  void* control;
+  uint64_t control_length;
+  int32_t flags;
+  uint32_t tail_padding;
+} DarwinArtAndroidMsghdr;
+
+typedef struct DarwinArtAndroidMmsghdr {
+  DarwinArtAndroidMsghdr msg_hdr;
+  uint32_t msg_len;
+  uint32_t padding;
+} DarwinArtAndroidMmsghdr;
+
 int darwin_art_bionic_socket_broker_activate(void);
 int darwin_art_bionic_socket_broker_deactivate(void);
 
@@ -69,6 +94,8 @@ intptr_t darwin_art_bionic_socket_broker_recvfrom(int fd, void *bytes,
                                                   size_t count, int flags,
                                                   void *address,
                                                   uint32_t *address_length);
+int darwin_art_bionic_socket_broker_sendmmsg(
+    int fd, DarwinArtAndroidMmsghdr* messages, uint32_t count, int flags);
 int darwin_art_bionic_socket_broker_getsockopt(int fd, int level, int option,
                                                void *value, uint32_t *length);
 int darwin_art_bionic_socket_broker_setsockopt(int fd, int level, int option,
@@ -76,6 +103,7 @@ int darwin_art_bionic_socket_broker_setsockopt(int fd, int level, int option,
                                                uint32_t length);
 int darwin_art_bionic_socket_broker_shutdown(int fd, int how);
 int darwin_art_bionic_socket_broker_dup(int fd);
+int darwin_art_bionic_socket_broker_dup2(int old_fd, int new_fd);
 int darwin_art_bionic_socket_broker_close(int fd);
 int darwin_art_bionic_socket_broker_fcntl(int fd, int command,
                                           intptr_t argument);

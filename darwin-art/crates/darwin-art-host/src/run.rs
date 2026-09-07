@@ -20,6 +20,15 @@ use std::thread;
 use std::time::Instant;
 
 #[cfg(target_os = "macos")]
+use std::fs::{File, OpenOptions};
+#[cfg(target_os = "macos")]
+use std::os::fd::AsRawFd;
+#[cfg(target_os = "macos")]
+use std::os::unix::fs::OpenOptionsExt;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
+
+#[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn _exit(status: i32) -> !;
 }
@@ -30,6 +39,36 @@ fn exit_android_process(status: i32) -> ! {
     // `exit` would run host C++ static destructors while Chromium task runners
     // are still live, which is neither Android behavior nor race-free.
     unsafe { _exit(status) }
+}
+
+#[cfg(target_os = "macos")]
+fn open_filesystem_authority() -> Result<Option<File>, HostError> {
+    let root = std::env::var_os("DARWIN_ART_ANDROID_FILESYSTEM_ROOT")
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            std::env::var_os("DARWIN_ART_ANDROID_SYSTEM_ROOT").filter(|value| !value.is_empty())
+        });
+    let Some(root) = root else {
+        return Ok(None);
+    };
+    let root = PathBuf::from(root);
+    if !root.is_absolute() {
+        return Err(HostError::HostService(format!(
+            "Android filesystem authority must be absolute: {}",
+            root.display()
+        )));
+    }
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(&root)
+        .map(Some)
+        .map_err(|error| {
+            HostError::HostService(format!(
+                "open Android filesystem authority {}: {error}",
+                root.display()
+            ))
+        })
 }
 
 pub fn run(options: &RunOptions) -> Result<HostOutcome, HostError> {
@@ -217,12 +256,24 @@ fn run_owner(
             frames_received: 0,
             last_frame: None,
         };
+        // Install the guest filesystem before Java starts. Libcore can enter
+        // UnixNativeDispatcher while constructing the boot class path (for
+        // example through Charset.availableCharsets()), well before an APK
+        // loads its first native library. The File stays alive through the
+        // synchronous Android process invocation; the native facade owns its
+        // own duplicate until the Rust process lease is released.
+        let filesystem_authority = open_filesystem_authority()?;
         let process = {
             let runtime = shutdown_guard.runtime();
             let Some(provider) = runtime.provider() else {
                 let _ = shutdown_guard.shutdown();
                 return Err(HostError::RuntimeFailed(-1));
             };
+            if let Some(authority) = filesystem_authority.as_ref() {
+                provider
+                    .acquire_process_lease(ProviderKind::Filesystem, authority.as_raw_fd())
+                    .map_err(HostError::RuntimeFailed)?;
+            }
             // Socket and pipe descriptors can arrive in the first Binder
             // transaction that starts an Android service process, before its
             // native library is loaded.  Own the network provider for the

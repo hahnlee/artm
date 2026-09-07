@@ -385,7 +385,12 @@ static void* ProxyGetDirectBufferAddress(void* raw_env, void* buffer) {
   void* host_env = HostEnv(proxy);
   RawJniSlot raw = HostSlot(host_env, DARWIN_ART_JNI_SLOT_GetDirectBufferAddress);
   if (raw == NULL) return NULL;
-  return ((void* (*)(void*, void*))raw)(host_env, buffer);
+  void* address = ((void* (*)(void*, void*))raw)(host_env, buffer);
+  if (getenv("DARWIN_ART_DEBUG_MEDIA_CODEC") != NULL) {
+    fprintf(stderr, "DARWIN JNI direct buffer object=%p address=%p caller=%p\n",
+            buffer, address, __builtin_return_address(0));
+  }
+  return address;
 }
 
 static int64_t ProxyGetDirectBufferCapacity(void* raw_env, void* buffer) {

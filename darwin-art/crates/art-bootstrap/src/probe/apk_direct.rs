@@ -218,8 +218,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         root.join("compat"),
         root.join("crates/darwin-art-elf-loader/include"),
         root.join("_build/runtime-arm64/generated"),
-        root.join("_build/runtime-bootstrap/patched-source/runtime"),
-        root.join("_build/runtime-core/patched-source/runtime"),
+        root.join("_build/runtime-common/patched-source/runtime"),
         root.join("_build/foundation/patched-source/libartbase"),
         root.join("_aosp/art/libartbase"),
         root.join("_aosp/art/cmdline"),
@@ -491,6 +490,9 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_provider_clear_hooks")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_acquire")
         .arg("-Wl,-exported_symbol,_darwin_art_provider_native_release")
+        .arg("-Wl,-exported_symbol,__ZN3art6GetTidEv")
+        .arg("-Wl,-exported_symbol,__ZN3art5Locks26thread_suspend_count_lock_E")
+        .arg("-Wl,-exported_symbol,__ZN3art6Thread11is_started_E")
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&elf_probe_object)

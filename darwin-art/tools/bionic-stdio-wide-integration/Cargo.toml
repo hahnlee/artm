@@ -10,5 +10,6 @@ name = "bionic-stdio-wide-integration"
 path = "../bionic-stdio-facade/src/main.rs"
 
 [dependencies]
+bionic-fs-facade = { path = "../bionic-fs-facade" }
 bionic-stdio-facade = { path = "../bionic-stdio-facade" }
 darwin-art-elf-loader = { path = "../../crates/darwin-art-elf-loader" }

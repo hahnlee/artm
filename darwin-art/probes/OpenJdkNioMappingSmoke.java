@@ -60,6 +60,7 @@ final class NioFileChannel {
 public final class OpenJdkNioMappingSmoke {
   private static native int peek(long address);
   private static native int restoreSignalHandler();
+  private static native int virtualReadv(FileDescriptor fd);
 
   private static void require(boolean condition, String message) {
     if (!condition) throw new AssertionError(message);
@@ -81,6 +82,13 @@ public final class OpenJdkNioMappingSmoke {
       channel.unmap(address, content.length);
     }
 
+    FileDescriptor virtual = new FileDescriptor();
+    var fdField = FileDescriptor.class.getDeclaredField("fd");
+    fdField.setAccessible(true);
+    fdField.setInt(virtual, 0x30000001);
+    require(virtualReadv(virtual) == 3,
+            "production virtual-FD readv did not preserve one vector call");
+
     Class<?> nativeThread = Class.forName("sun.nio.ch.NativeThread");
     Method current = nativeThread.getDeclaredMethod("current");
     Method signal = nativeThread.getDeclaredMethod("signal", long.class);
@@ -95,6 +103,7 @@ public final class OpenJdkNioMappingSmoke {
 
     Files.delete(path);
     System.out.println(
-        "managed-openjdk-nio: methods=5+14+2 size=pass map-ro=pass unmap=pass thread=pass signal-restore=pass");
+        "managed-openjdk-nio: methods=5+14+2 size=pass map-ro=pass unmap=pass "
+            + "virtual-readv=pass thread=pass signal-restore=pass");
   }
 }

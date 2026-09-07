@@ -23,6 +23,8 @@ extern int imported_isupper(int) __asm__("isupper");
 extern int imported_isxdigit(int) __asm__("isxdigit");
 extern int imported_tolower(int) __asm__("tolower");
 extern int imported_toupper(int) __asm__("toupper");
+extern int imported_tolower_l(int, locale_t) __asm__("tolower_l");
+extern int imported_toupper_l(int, locale_t) __asm__("toupper_l");
 
 static int (*volatile call_isalnum)(int) = imported_isalnum;
 static int (*volatile call_isalpha)(int) = imported_isalpha;
@@ -31,6 +33,8 @@ static int (*volatile call_isupper)(int) = imported_isupper;
 static int (*volatile call_isxdigit)(int) = imported_isxdigit;
 static int (*volatile call_tolower)(int) = imported_tolower;
 static int (*volatile call_toupper)(int) = imported_toupper;
+static int (*volatile call_tolower_l)(int, locale_t) = imported_tolower_l;
+static int (*volatile call_toupper_l)(int, locale_t) = imported_toupper_l;
 
 __attribute__((visibility("default"))) int bionic_locale_fixture_basic(void) {
   errno = 777;
@@ -48,6 +52,12 @@ __attribute__((visibility("default"))) int bionic_locale_fixture_basic(void) {
       !call_isupper('A') || !call_isxdigit('f') ||
       call_tolower('A') != 'a' || call_toupper('a') != 'A')
     return 5;
+  locale_t invalid_locale = (locale_t)(uintptr_t)0x12345678U;
+  if (call_tolower_l('A', invalid_locale) != 'a' ||
+      call_toupper_l('a', invalid_locale) != 'A' ||
+      call_tolower_l(EOF, invalid_locale) != EOF ||
+      call_toupper_l(EOF, invalid_locale) != EOF)
+    return 13;
   errno = 0;
   if (setlocale(LC_ALL, "ko_KR.UTF-8") != 0 || errno != ENOENT) return 4;
   errno = 0;

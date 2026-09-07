@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -25,6 +26,7 @@ extern "C" void darwin_art_bionic_errno_store(int32_t android_errno);
 namespace {
 
 constexpr uint64_t kFutex = 98;
+constexpr uint64_t kGetpid = 172;
 constexpr uint64_t kSchedSetaffinity = 122;
 constexpr uint64_t kSchedGetaffinity = 123;
 constexpr uint64_t kTgkill = 131;
@@ -66,6 +68,33 @@ os_unfair_lock g_wait_lock = OS_UNFAIR_LOCK_INIT;
 bool g_wait_initialized = false;
 WaitEntry g_wait_entries[kWaitEntryCount];
 std::atomic<uint32_t> g_next_tid{1};
+// These flags are intentionally initialized before any guest thread can enter
+// the syscall seam. Reading getenv lazily from futex/syscall code can contend
+// with the suspended thread holding libc's environment lock during a GC stop.
+// They are immutable for the lifetime of the process.
+bool g_debug_signal_syscall = false;
+bool g_debug_futex = false;
+bool g_debug_syscall = false;
+std::atomic<uint32_t> g_signal_tgkill_emitted{0};
+std::atomic<uint32_t> g_signal_queued_emitted{0};
+
+void DebugPrintf(const char *format, ...) {
+  char buffer[512];
+  va_list arguments;
+  va_start(arguments, format);
+  const int length = std::vsnprintf(buffer, sizeof(buffer), format, arguments);
+  va_end(arguments);
+  if (length > 0) {
+    (void)write(STDERR_FILENO, buffer,
+                std::min(static_cast<size_t>(length), sizeof(buffer) - 1));
+  }
+}
+
+__attribute__((constructor)) void InitializeDebugFlags() {
+  g_debug_signal_syscall = std::getenv("DARWIN_ART_DEBUG_SIGNAL_SYSCALL") != nullptr;
+  g_debug_futex = std::getenv("DARWIN_ART_DEBUG_FUTEX") != nullptr;
+  g_debug_syscall = std::getenv("DARWIN_ART_DEBUG_SYSCALL") != nullptr;
+}
 
 struct ThreadRegistry {
   std::mutex mutex;
@@ -78,14 +107,12 @@ ThreadRegistry &Threads() {
 }
 
 void TraceSignalSyscall(const char *name, const uint64_t *arguments) {
-  static const bool enabled =
-      std::getenv("DARWIN_ART_DEBUG_SIGNAL_SYSCALL") != nullptr;
-  static std::atomic<uint32_t> tgkill_emitted{0};
-  static std::atomic<uint32_t> queued_emitted{0};
   std::atomic<uint32_t> &emitted =
-      std::strcmp(name, "rt_tgsigqueueinfo") == 0 ? queued_emitted
-                                                   : tgkill_emitted;
-  if (!enabled || emitted.fetch_add(1, std::memory_order_relaxed) >= 128)
+      std::strcmp(name, "rt_tgsigqueueinfo") == 0
+          ? g_signal_queued_emitted
+          : g_signal_tgkill_emitted;
+  if (!g_debug_signal_syscall ||
+      emitted.fetch_add(1, std::memory_order_relaxed) >= 128)
     return;
   uint32_t information_words[8] = {};
   if (std::strcmp(name, "rt_tgsigqueueinfo") == 0 && arguments[4] != 0) {
@@ -134,7 +161,6 @@ struct ThreadIdentity {
 };
 
 thread_local ThreadIdentity g_thread_identity;
-thread_local uint8_t g_thread_affinity[128] = {0xff};
 
 void InitializeWaitEntries() {
   if (g_wait_initialized)
@@ -222,21 +248,39 @@ long GetTid() {
   return static_cast<long>(candidate);
 }
 
+long GetPid() { return static_cast<long>(getpid()); }
+
+size_t OnlineCpuCount() {
+  const long count = sysconf(_SC_NPROCESSORS_ONLN);
+  return count > 0 ? static_cast<size_t>(count) : 1;
+}
+
+bool AffinityTargetExists(int32_t tid) {
+  if (tid == 0) return true;
+  if (GetTid() < 0) return false;
+  ThreadRegistry &registry = Threads();
+  std::lock_guard<std::mutex> lock(registry.mutex);
+  return registry.threads.find(static_cast<uint32_t>(tid)) != registry.threads.end();
+}
+
 long SchedGetaffinity(const uint64_t *arguments) {
   const int32_t tid = static_cast<int32_t>(arguments[1]);
   const uint64_t capacity = arguments[2];
   void *mask = reinterpret_cast<void *>(arguments[3]);
   if (tid < 0 || capacity == 0 || capacity > SIZE_MAX)
     return Fail(kAndroidEinval);
-  if (!IsWritableRange(mask, static_cast<size_t>(capacity)))
+  const size_t count = OnlineCpuCount();
+  const size_t mask_size = ((count + 63) / 64) * sizeof(uint64_t);
+  if (capacity < mask_size) return Fail(kAndroidEinval);
+  if (!AffinityTargetExists(tid)) return Fail(3);  // Android ESRCH.
+  if (!IsWritableRange(mask, mask_size))
     return Fail(kAndroidEfault);
-  std::memset(mask, 0, static_cast<size_t>(capacity));
-  std::memcpy(mask, g_thread_affinity,
-              std::min(static_cast<size_t>(capacity),
-                       sizeof(g_thread_affinity)));
-  // Linux's raw syscall returns the kernel cpumask size, rounded to an
-  // unsigned long. The virtual Android device exposes eight CPUs.
-  return static_cast<long>(std::min<uint64_t>(capacity, sizeof(uint64_t)));
+  std::memset(mask, 0, mask_size);
+  auto *bytes = static_cast<uint8_t *>(mask);
+  for (size_t cpu = 0; cpu < count; ++cpu)
+    bytes[cpu / 8] |= static_cast<uint8_t>(1u << (cpu % 8));
+  // Raw Linux syscall writes/returns only the kernel mask size.
+  return static_cast<long>(mask_size);
 }
 
 long SchedSetaffinity(const uint64_t *arguments) {
@@ -245,22 +289,22 @@ long SchedSetaffinity(const uint64_t *arguments) {
   const void *mask = reinterpret_cast<const void *>(arguments[3]);
   if (tid < 0 || capacity == 0 || capacity > SIZE_MAX)
     return Fail(kAndroidEinval);
+  if (!AffinityTargetExists(tid)) return Fail(3);  // Android ESRCH.
   if (!IsReadableRange(mask, static_cast<size_t>(capacity)))
     return Fail(kAndroidEfault);
   const auto *bytes = static_cast<const uint8_t *>(mask);
-  bool any = false;
-  for (size_t index = 0;
-       index < std::min(static_cast<size_t>(capacity),
-                        sizeof(g_thread_affinity));
-       ++index) {
-    any |= bytes[index] != 0;
+  const size_t count = OnlineCpuCount();
+  size_t selected = 0;
+  for (size_t cpu = 0; cpu < count; ++cpu) {
+    if (cpu / 8 < capacity && (bytes[cpu / 8] & (1u << (cpu % 8))))
+      ++selected;
   }
-  if (!any)
+  if (selected == 0)
     return Fail(kAndroidEinval);
-  std::memset(g_thread_affinity, 0, sizeof(g_thread_affinity));
-  std::memcpy(g_thread_affinity, mask,
-              std::min(static_cast<size_t>(capacity),
-                       sizeof(g_thread_affinity)));
+  // Darwin affinity tags are cache-sharing hints, not CPU pinning. Report
+  // unavailable for a restriction instead of claiming an unapplied binding.
+  // An unrestricted mask needs no host operation; offline bits are ignored.
+  if (selected != count) return Fail(kAndroidEnosys);
   return 0;
 }
 
@@ -386,7 +430,7 @@ long FutexWait(const uint64_t *arguments, bool absolute_timeout,
   auto *address = reinterpret_cast<int32_t *>(arguments[1]);
   const int32_t expected = static_cast<int32_t>(arguments[3]);
   const void *timeout_pointer = reinterpret_cast<const void *>(arguments[4]);
-  const bool debug = std::getenv("DARWIN_ART_DEBUG_FUTEX") != nullptr;
+  const bool debug = g_debug_futex;
   if (address == nullptr || (reinterpret_cast<uintptr_t>(address) & 3) != 0) {
     return Fail(kAndroidEinval);
   }
@@ -404,7 +448,7 @@ long FutexWait(const uint64_t *arguments, bool absolute_timeout,
     if (timeout_pointer != nullptr)
       memcpy(&debug_timeout, timeout_pointer, sizeof(debug_timeout));
     (void)pthread_getname_np(pthread_self(), name, sizeof(name));
-    std::fprintf(stderr,
+    DebugPrintf(
                  "DARWIN futex: wait enter thread=%s address=%p expected=%d "
                  "current=%d absolute=%d timeout=%p value=%lld.%09lld\n",
                  name, static_cast<void *>(address), expected,
@@ -485,7 +529,7 @@ long FutexWait(const uint64_t *arguments, bool absolute_timeout,
   if (debug) {
     char name[64]{};
     (void)pthread_getname_np(pthread_self(), name, sizeof(name));
-    std::fprintf(stderr,
+    DebugPrintf(
                  "DARWIN futex: wait leave thread=%s address=%p result=%ld "
                  "current=%d\n",
                  name, static_cast<void *>(address), result,
@@ -497,7 +541,7 @@ long FutexWait(const uint64_t *arguments, bool absolute_timeout,
 long FutexWake(const uint64_t *arguments) {
   auto *address = reinterpret_cast<int32_t *>(arguments[1]);
   const int32_t requested = static_cast<int32_t>(arguments[3]);
-  const bool debug = std::getenv("DARWIN_ART_DEBUG_FUTEX") != nullptr;
+  const bool debug = g_debug_futex;
   if (address == nullptr || (reinterpret_cast<uintptr_t>(address) & 3) != 0 ||
       requested < 0) {
     return Fail(kAndroidEinval);
@@ -513,7 +557,7 @@ long FutexWake(const uint64_t *arguments) {
     if (debug) {
       char name[64]{};
       (void)pthread_getname_np(pthread_self(), name, sizeof(name));
-      std::fprintf(stderr,
+      DebugPrintf(
                    "DARWIN futex: wake thread=%s address=%p requested=%d "
                    "selected=0 no-entry current=%d\n",
                    name, static_cast<void *>(address), requested,
@@ -532,7 +576,7 @@ long FutexWake(const uint64_t *arguments) {
   if (debug) {
     char name[64]{};
     (void)pthread_getname_np(pthread_self(), name, sizeof(name));
-    std::fprintf(stderr,
+    DebugPrintf(
                  "DARWIN futex: wake thread=%s address=%p requested=%d "
                  "selected=%zu current=%d\n",
                  name, static_cast<void *>(address), requested, selected,
@@ -561,8 +605,8 @@ long Futex(const uint64_t *arguments) {
       static_cast<uint32_t>(arguments[6]) == kFutexBitsetMatchAny) {
     return FutexWake(arguments);
   }
-  if (std::getenv("DARWIN_ART_DEBUG_FUTEX") != nullptr) {
-    std::fprintf(stderr,
+  if (g_debug_futex) {
+    DebugPrintf(
                  "DARWIN futex: unsupported address=%p operation=%#x "
                  "value=%#llx timeout=%p address2=%p value3=%#llx\n",
                  reinterpret_cast<void *>(arguments[1]), operation,
@@ -586,12 +630,38 @@ long ReadabilityProbe(const uint64_t *arguments) {
 
 } // namespace
 
+extern "C" int darwin_art_bionic_affinity_get(int tid, size_t capacity, void *mask) {
+  const int saved_errno = errno;
+  const uint64_t arguments[] = {kSchedGetaffinity, static_cast<uint64_t>(tid),
+                               capacity, reinterpret_cast<uint64_t>(mask)};
+  long result;
+  if (capacity != 0 && !IsWritableRange(mask, capacity)) {
+    result = Fail(kAndroidEfault);
+  } else {
+    result = SchedGetaffinity(arguments);
+    if (result >= 0 && static_cast<size_t>(result) < capacity)
+      std::memset(static_cast<uint8_t *>(mask) + result, 0, capacity - result);
+  }
+  errno = saved_errno;
+  return result < 0 ? -1 : 0;
+}
+
+extern "C" int darwin_art_bionic_affinity_set(int tid, size_t capacity, const void *mask) {
+  const int saved_errno = errno;
+  const uint64_t arguments[] = {kSchedSetaffinity, static_cast<uint64_t>(tid),
+                               capacity, reinterpret_cast<uint64_t>(mask)};
+  const long result = SchedSetaffinity(arguments);
+  errno = saved_errno;
+  return static_cast<int>(result);
+}
+
 extern "C" long darwin_art_bionic_syscall_captured(const uint64_t *registers,
                                                    const uint8_t *stack) {
   const int saved_errno = errno;
-  if (std::getenv("DARWIN_ART_DEBUG_SYSCALL") != nullptr) {
-    std::fprintf(stderr, "DARWIN syscall entry regs=%p stack=%p nr=%llu\n",
-                 registers, stack,
+  if (g_debug_syscall) {
+    DebugPrintf("DARWIN syscall entry regs=%p stack=%p nr=%llu\n",
+                 static_cast<const void *>(registers),
+                 static_cast<const void *>(stack),
                  registers == nullptr ? 0ULL : static_cast<unsigned long long>(registers[0]));
   }
   long result = -1;
@@ -599,21 +669,23 @@ extern "C" long darwin_art_bionic_syscall_captured(const uint64_t *registers,
     result = Fail(kAndroidEinval);
   } else if (registers[0] == kGettid) {
     result = GetTid();
+  } else if (registers[0] == kGetpid) {
+    result = GetPid();
   } else if (registers[0] == kTgkill) {
     result = Tgkill(registers);
   } else if (registers[0] == kFutex) {
     result = Futex(registers);
   } else if (registers[0] == kSchedSetaffinity) {
     result = SchedSetaffinity(registers);
-    if (std::getenv("DARWIN_ART_DEBUG_SYSCALL") != nullptr)
-      std::fprintf(stderr, "DARWIN syscall sched_setaffinity tid=%llu size=%llu mask=%p result=%ld\n",
+    if (g_debug_syscall)
+      DebugPrintf("DARWIN syscall sched_setaffinity tid=%llu size=%llu mask=%p result=%ld\n",
                    static_cast<unsigned long long>(registers[1]),
                    static_cast<unsigned long long>(registers[2]),
                    reinterpret_cast<const void*>(registers[3]), result);
   } else if (registers[0] == kSchedGetaffinity) {
     result = SchedGetaffinity(registers);
-    if (std::getenv("DARWIN_ART_DEBUG_SYSCALL") != nullptr)
-      std::fprintf(stderr, "DARWIN syscall sched_getaffinity tid=%llu size=%llu mask=%p result=%ld\n",
+    if (g_debug_syscall)
+      DebugPrintf("DARWIN syscall sched_getaffinity tid=%llu size=%llu mask=%p result=%ld\n",
                    static_cast<unsigned long long>(registers[1]),
                    static_cast<unsigned long long>(registers[2]),
                    reinterpret_cast<const void*>(registers[3]), result);

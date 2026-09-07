@@ -132,6 +132,17 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
             "probes/runtime_jni_acceptance_probe.h",
             "probes/runtime_abi_probe.h",
             "probes/runtime_jni_scope.h",
+            "probes/runtime_upstream_test.h",
+            "probes/runtime_jit_invoke_custom.h",
+            "probes/runtime_jit_specialized_intrinsics.h",
+            "probes/runtime_jit_string_intrinsics.h",
+            "probes/runtime_jit_string_hidden_intrinsics.h",
+            "probes/runtime_jit_system_arraycopy.h",
+            "probes/runtime_jit_math_hinvoke.h",
+            "probes/runtime_jit_crc32.h",
+            "probes/runtime_jit_memory.h",
+            "probes/runtime_jit_reference_boxing.h",
+            "probes/runtime_jit_unsafe_intrinsics.h",
         ],
     );
     let app_bootstrap_inputs = probe_inputs(
@@ -269,6 +280,17 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
             "probes/runtime_jni_acceptance_probe.h",
             "probes/runtime_abi_probe.h",
             "probes/runtime_jni_scope.h",
+            "probes/runtime_upstream_test.h",
+            "probes/runtime_jit_invoke_custom.h",
+            "probes/runtime_jit_specialized_intrinsics.h",
+            "probes/runtime_jit_string_intrinsics.h",
+            "probes/runtime_jit_string_hidden_intrinsics.h",
+            "probes/runtime_jit_system_arraycopy.h",
+            "probes/runtime_jit_math_hinvoke.h",
+            "probes/runtime_jit_crc32.h",
+            "probes/runtime_jit_memory.h",
+            "probes/runtime_jit_reference_boxing.h",
+            "probes/runtime_jit_unsafe_intrinsics.h",
         ],
     )?;
     let app_bootstrap_stamp = probe_content_stamp(
@@ -325,6 +347,7 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
             "probes/runtime_shutdown_probe.h",
             "probes/runtime_graphics_session.h",
             "probes/runtime_app_presentation.h",
+            "probes/runtime_upstream_test.h",
         ],
     )?;
     Ok(ProbeGraphInputs {

@@ -1,5 +1,6 @@
 #include "darwin_art_bionic_fd_broker.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -18,6 +19,8 @@ namespace {
 constexpr int kAndroidEbadf = 9;
 constexpr uint64_t kBlockedObject = 99;
 constexpr uint64_t kBlockedCloseObject = 100;
+constexpr uint64_t kAliasBlockedObject = 199;
+constexpr uint64_t kAliasReplacementObject = 1003;
 
 struct ObjectState {
   std::string input;
@@ -59,7 +62,8 @@ intptr_t Read(void *context, uint64_t object, void *bytes, size_t count,
   ObjectState &state = fake->objects.at(object);
   assert(!state.closed);
   fake->events.push_back(std::to_string(object) + ":read-enter");
-  if (object == kBlockedObject && !fake->blocked_read_entered) {
+  if ((object == kBlockedObject || object == kAliasBlockedObject) &&
+      !fake->blocked_read_entered) {
     fake->blocked_read_entered = true;
     fake->blocked_reader = std::this_thread::get_id();
     fake->changed.notify_all();
@@ -99,7 +103,8 @@ intptr_t ReadAt(void *context, uint64_t object, int64_t *offset, void *bytes,
   ObjectState &state = fake->objects.at(object);
   assert(!state.closed && offset != nullptr && *offset >= 0);
   fake->events.push_back(std::to_string(object) + ":read-enter");
-  if (object == kBlockedObject && !fake->blocked_read_entered) {
+  if ((object == kBlockedObject || object == kAliasBlockedObject) &&
+      !fake->blocked_read_entered) {
     fake->blocked_read_entered = true;
     fake->blocked_reader = std::this_thread::get_id();
     fake->changed.notify_all();
@@ -380,6 +385,7 @@ int main() {
   fake.objects.emplace(101, ObjectState{});
   fake.objects.emplace(102, ObjectState{"v1", "", 0, false});
   fake.objects.emplace(103, ObjectState{});
+  fake.objects.emplace(kAliasReplacementObject, ObjectState{});
 
   DarwinArtFdBroker *broker = darwin_art_fd_broker_create();
   assert(broker != nullptr);
@@ -812,7 +818,12 @@ int main() {
     }
     std::this_thread::yield();
   }
-  assert(during_close == DARWIN_ART_FD_BROKER_STALE && !close_done.load());
+  assert(during_close == DARWIN_ART_FD_BROKER_STALE);
+  for (size_t attempt = 0; attempt < 100000 && !close_done.load(); ++attempt)
+    std::this_thread::yield();
+  // Logical close must not wait for the in-flight owner read. The physical
+  // owner close remains deferred because blocked_dup still references it.
+  assert(close_done.load());
   int rejected_dup = -1;
   Expect(darwin_art_fd_broker_dup(broker, blocked_fd, &rejected_dup),
          DARWIN_ART_FD_BROKER_STALE);
@@ -840,6 +851,82 @@ int main() {
     const size_t close = FindEvent(fake.events, "99:close");
     assert(read_exit < close);
   }
+
+  // Closing the final inactive alias must recycle its slot even while an
+  // earlier alias still owns an active lease. The description close remains
+  // queued until that lease releases, and flush must wait for it.
+  {
+    std::lock_guard lock(fake.mutex);
+    fake.objects.emplace(kAliasBlockedObject,
+                         ObjectState{"alias-blocked", "", 0, false});
+    fake.blocked_read_entered = false;
+    fake.release_blocked_read = false;
+  }
+  int alias_a = -1;
+  int alias_b = -1;
+  Expect(darwin_art_fd_broker_publish(broker, file_owner, kAliasBlockedObject,
+                                      &alias_a),
+         DARWIN_ART_FD_BROKER_OK);
+  std::atomic<bool> alias_read_done{false};
+  std::thread alias_reader([&] {
+    char bytes[13]{};
+    DarwinArtFdIoResult alias_result{};
+    Expect(darwin_art_fd_broker_read(broker, alias_a, bytes, sizeof(bytes),
+                                     &alias_result),
+           DARWIN_ART_FD_BROKER_OK);
+    assert(alias_result.value == 13 &&
+           std::memcmp(bytes, "alias-blocked", 13) == 0);
+    alias_read_done = true;
+  });
+  {
+    std::unique_lock lock(fake.mutex);
+    fake.changed.wait(lock, [&] { return fake.blocked_read_entered; });
+  }
+  Expect(darwin_art_fd_broker_dup(broker, alias_a, &alias_b),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_close(broker, alias_a, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  Expect(darwin_art_fd_broker_close(broker, alias_b, &result),
+         DARWIN_ART_FD_BROKER_OK);
+  int alias_b_flags = 0;
+  Expect(darwin_art_fd_broker_get_descriptor_flags(broker, alias_b,
+                                                   &alias_b_flags),
+         DARWIN_ART_FD_BROKER_STALE);
+  int recycled_alias = -1;
+  Expect(darwin_art_fd_broker_publish(broker, file_owner,
+                                      kAliasReplacementObject, &recycled_alias),
+         DARWIN_ART_FD_BROKER_OK);
+  assert(recycled_alias != alias_b &&
+         (static_cast<uint32_t>(recycled_alias) & 0x3ffU) ==
+             (static_cast<uint32_t>(alias_b) & 0x3ffU));
+  std::atomic<bool> flush_done{false};
+  std::thread flusher([&] {
+    Expect(darwin_art_fd_broker_flush_deferred_closes(broker),
+           DARWIN_ART_FD_BROKER_OK);
+    flush_done = true;
+  });
+  for (size_t attempt = 0; attempt < 100000; ++attempt) {
+    if (flush_done.load())
+      break;
+    std::this_thread::yield();
+  }
+  assert(!flush_done.load() && !alias_read_done.load());
+  {
+    std::lock_guard lock(fake.mutex);
+    fake.release_blocked_read = true;
+    fake.changed.notify_all();
+  }
+  alias_reader.join();
+  flusher.join();
+  assert(alias_read_done.load() && flush_done.load());
+  {
+    std::lock_guard lock(fake.mutex);
+    assert(fake.objects.at(kAliasBlockedObject).closed);
+    assert(std::count(fake.events.begin(), fake.events.end(),
+                      std::to_string(kAliasBlockedObject) + ":close") == 1);
+  }
+  Expect(darwin_art_fd_broker_close(broker, recycled_alias, &result),
+         DARWIN_ART_FD_BROKER_OK);
 
   int epoll_fd = -1;
   Expect(darwin_art_fd_broker_epoll_create1(broker, DARWIN_ART_EPOLL_CLOEXEC,
@@ -1003,7 +1090,12 @@ int main() {
   int rejected_fd = -1;
   Expect(darwin_art_fd_broker_publish(broker, socket_owner, 40, &rejected_fd),
          DARWIN_ART_FD_BROKER_DRAINING);
-  assert(!socket_operation_done.load() && !socket_close_done.load());
+  // close() is a logical descriptor close and must return while the socket
+  // operation still holds its lease; the owner callback remains deferred.
+  for (size_t attempt = 0; attempt < 100000 && !socket_close_done.load();
+       ++attempt)
+    std::this_thread::yield();
+  assert(!socket_operation_done.load() && socket_close_done.load());
   {
     std::lock_guard lock(fake.mutex);
     fake.release_blocked_socket = true;

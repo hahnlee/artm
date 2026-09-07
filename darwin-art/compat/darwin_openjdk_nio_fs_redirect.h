@@ -26,7 +26,77 @@
 #include <unistd.h>
 
 static inline void darwin_art_openjdk_nio_publish_errno(intptr_t result) {
-  if (result < 0) errno = darwin_art_bionic_errno_load();
+  if (result < 0) {
+    // OpenJDK compares errno with the host constants (EINTR/EAGAIN/etc.)
+    // after a Bionic-owned operation.  The facade deliberately keeps its
+    // Android errno in separate TLS, so translate at this C/OpenJDK boundary
+    // instead of exposing Linux numbers to Darwin code.
+    switch (darwin_art_bionic_errno_load()) {
+      case 2: errno = ENOENT; break;
+      case 5: errno = EIO; break;
+      case 9: errno = EBADF; break;
+      case 11: errno = EAGAIN; break;
+      case 12: errno = ENOMEM; break;
+      case 13: errno = EACCES; break;
+      case 14: errno = EFAULT; break;
+      case 17: errno = EEXIST; break;
+      case 20: errno = ENOTDIR; break;
+      case 21: errno = EISDIR; break;
+      case 22: errno = EINVAL; break;
+      case 24: errno = EMFILE; break;
+      case 25: errno = ENOTTY; break;
+      case 27: errno = EFBIG; break;
+      case 28: errno = ENOSPC; break;
+      case 30: errno = EROFS; break;
+      case 32: errno = EPIPE; break;
+      case 34: errno = ERANGE; break;
+      case 35: errno = EDEADLK; break;
+      case 36: errno = ENAMETOOLONG; break;
+      case 37: errno = ENOLCK; break;
+      case 38: errno = ENOSYS; break;
+      case 39: errno = ENOTEMPTY; break;
+      case 40: errno = ELOOP; break;
+      case 43: errno = EIDRM; break;
+      case 60: errno = ENOSTR; break;
+      case 61: errno = ENODATA; break;
+      case 62: errno = ETIME; break;
+      case 63: errno = ENOSR; break;
+      case 67: errno = ENOLINK; break;
+      case 71: errno = EPROTO; break;
+      case 72: errno = EMULTIHOP; break;
+      case 74: errno = EBADMSG; break;
+      case 75: errno = EOVERFLOW; break;
+      case 84: errno = EILSEQ; break;
+      case 87: errno = EUSERS; break;
+      case 88: errno = ENOTSOCK; break;
+      case 89: errno = EDESTADDRREQ; break;
+      case 90: errno = EMSGSIZE; break;
+      case 91: errno = EPROTOTYPE; break;
+      case 92: errno = ENOPROTOOPT; break;
+      case 93: errno = EPROTONOSUPPORT; break;
+      case 95: errno = ENOTSUP; break;
+      case 97: errno = EAFNOSUPPORT; break;
+      case 98: errno = EADDRINUSE; break;
+      case 99: errno = EADDRNOTAVAIL; break;
+      case 100: errno = ENETDOWN; break;
+      case 101: errno = ENETUNREACH; break;
+      case 102: errno = ENETRESET; break;
+      case 103: errno = ECONNABORTED; break;
+      case 104: errno = ECONNRESET; break;
+      case 105: errno = ENOBUFS; break;
+      case 106: errno = EISCONN; break;
+      case 107: errno = ENOTCONN; break;
+      case 110: errno = ETIMEDOUT; break;
+      case 111: errno = ECONNREFUSED; break;
+      case 113: errno = EHOSTUNREACH; break;
+      case 114: errno = EALREADY; break;
+      case 115: errno = EINPROGRESS; break;
+      case 116: errno = ESTALE; break;
+      case 122: errno = EDQUOT; break;
+      case 125: errno = ECANCELED; break;
+      default: errno = EIO; break;
+    }
+  }
 }
 
 static inline int darwin_art_openjdk_nio_is_guest_path(const char* path) {
@@ -49,6 +119,29 @@ static inline int darwin_art_openjdk_nio_is_runtime_read(int flags) {
   const int android_access_mode = flags & 3;
   const int android_write_effects = flags & (0x40 | 0x80 | 0x200 | 0x400);
   return android_access_mode == 0 && android_write_effects == 0;
+}
+
+static inline int darwin_art_openjdk_nio_runtime_read_host_flags(
+    int android_flags, int* host_flags) {
+  // Linux/Android bits accepted for an immutable regular-file capability.
+  // Translate them explicitly; their numeric values are not Darwin ABI.
+  const int android_largefile = 0x8000;
+  const int android_directory = 0x10000;
+  const int android_nofollow = 0x20000;
+  const int android_cloexec = 0x80000;
+  const int accepted = android_largefile | android_directory |
+                       android_nofollow | android_cloexec;
+  if (!darwin_art_openjdk_nio_is_runtime_read(android_flags) ||
+      (android_flags & ~accepted) != 0) {
+    errno = EOPNOTSUPP;
+    return -1;
+  }
+  int translated = O_RDONLY;
+  if ((android_flags & android_directory) != 0) translated |= O_DIRECTORY;
+  if ((android_flags & android_nofollow) != 0) translated |= O_NOFOLLOW;
+  if ((android_flags & android_cloexec) != 0) translated |= O_CLOEXEC;
+  *host_flags = translated;
+  return 0;
 }
 
 static inline int darwin_art_openjdk_nio_is_virtual_fd(int fd) {
@@ -115,28 +208,28 @@ static inline ssize_t darwin_art_openjdk_nio_pwrite(int fd,
 static inline ssize_t darwin_art_openjdk_nio_readv(int fd,
                                                     const struct iovec* iov,
                                                     int count) {
-  ssize_t total = 0;
-  for (int index = 0; index < count; ++index) {
-    const ssize_t result = darwin_art_openjdk_nio_read(
-        fd, iov[index].iov_base, iov[index].iov_len);
-    if (result < 0) return total == 0 ? -1 : total;
-    total += result;
-    if ((size_t)result != iov[index].iov_len) break;
+  if (!darwin_art_openjdk_nio_is_virtual_fd(fd)) return readv(fd, iov, count);
+  if (darwin_art_openjdk_nio_is_central_fd(fd)) {
+    const intptr_t result = darwin_art_bionic_socket_broker_readv(fd, iov, count);
+    darwin_art_openjdk_nio_publish_errno(result);
+    return (ssize_t)result;
   }
-  return total;
+  const intptr_t result = darwin_art_bionic_readv(fd, iov, count);
+  darwin_art_openjdk_nio_publish_errno(result);
+  return (ssize_t)result;
 }
 
 static inline ssize_t darwin_art_openjdk_nio_writev(
     int fd, const struct iovec* iov, int count) {
-  ssize_t total = 0;
-  for (int index = 0; index < count; ++index) {
-    const ssize_t result = darwin_art_openjdk_nio_write(
-        fd, iov[index].iov_base, iov[index].iov_len);
-    if (result < 0) return total == 0 ? -1 : total;
-    total += result;
-    if ((size_t)result != iov[index].iov_len) break;
+  if (!darwin_art_openjdk_nio_is_virtual_fd(fd)) return writev(fd, iov, count);
+  if (darwin_art_openjdk_nio_is_central_fd(fd)) {
+    const intptr_t result = darwin_art_bionic_socket_broker_writev(fd, iov, count);
+    darwin_art_openjdk_nio_publish_errno(result);
+    return (ssize_t)result;
   }
-  return total;
+  const intptr_t result = darwin_art_bionic_writev(fd, iov, count);
+  darwin_art_openjdk_nio_publish_errno(result);
+  return (ssize_t)result;
 }
 
 static inline int darwin_art_openjdk_nio_close(int fd) {
@@ -291,18 +384,43 @@ static inline void* darwin_art_openjdk_nio_mmap(void* address, size_t length,
 static inline int darwin_art_openjdk_nio_open(const char* path, int flags,
                                                ...) {
   uint32_t mode = 0;
-  if ((flags & O_CREAT) != 0) {
+  // UnixNativeDispatcher_open0 receives Android/Linux flag values, while
+  // this translation unit also includes Darwin's fcntl constants. In
+  // particular Android O_CREAT is 0x40 (not Darwin O_CREAT 0x200).
+  if ((flags & 0x40) != 0) {
     va_list arguments;
     va_start(arguments, flags);
     mode = (uint32_t)va_arg(arguments, int);
     va_end(arguments);
   }
-  if (!darwin_art_openjdk_nio_is_guest_path(path) &&
-      darwin_art_openjdk_nio_is_runtime_read(flags))
-    return open(path, flags, (mode_t)mode);
+  if (!darwin_art_openjdk_nio_is_guest_path(path)) {
+    // Immutable runtime files are host-backed only for read operations.
+    int host_flags = 0;
+    if (darwin_art_openjdk_nio_runtime_read_host_flags(flags, &host_flags) != 0)
+      return -1;
+    return open(path, host_flags);
+  }
   const int result = darwin_art_bionic_open(path, flags, mode);
   darwin_art_openjdk_nio_publish_errno(result);
   return result;
+}
+
+// FileDispatcherImpl's preClose0 is an internal host-JDK operation: its
+// O_RDWR|O_CLOEXEC constants are Darwin values and /dev/null is the host
+// wakeup endpoint. UnixNativeDispatcher_open0 continues to use the Android
+// wrapper above, so these two ABI domains cannot share the open macro.
+static inline int darwin_art_openjdk_nio_host_open(const char* path, int flags,
+                                                    ...) {
+  mode_t mode = 0;
+  if ((flags & O_CREAT) != 0) {
+    va_list arguments;
+    va_start(arguments, flags);
+    mode = (mode_t)va_arg(arguments, int);
+    va_end(arguments);
+  }
+  // The source-level open macro is declared below this function, so this call
+  // binds directly to Darwin libc without an assembler-name alias.
+  return open(path, flags, mode);
 }
 
 static inline int darwin_art_openjdk_nio_dup(int fd) {
@@ -314,7 +432,7 @@ static inline int darwin_art_openjdk_nio_dup(int fd) {
 
 static inline char* darwin_art_openjdk_nio_getcwd(char* buffer, size_t size) {
   char* const result = darwin_art_bionic_getcwd(buffer, size);
-  if (result == NULL) errno = darwin_art_bionic_errno_load();
+  if (result == NULL) darwin_art_openjdk_nio_publish_errno(-1);
   return result;
 }
 
@@ -353,7 +471,7 @@ static inline int darwin_art_openjdk_nio_utimes(
 
 static inline DIR* darwin_art_openjdk_nio_opendir(const char* path) {
   void* const result = darwin_art_bionic_opendir(path);
-  if (result == NULL) errno = darwin_art_bionic_errno_load();
+  if (result == NULL) darwin_art_openjdk_nio_publish_errno(-1);
   return (DIR*)result;
 }
 
@@ -428,7 +546,7 @@ static inline char* darwin_art_openjdk_nio_realpath(const char* path,
   if (!darwin_art_openjdk_nio_is_guest_path(path))
     return realpath(path, resolved);
   char* const result = darwin_art_bionic_realpath(path, resolved);
-  if (result == NULL) errno = darwin_art_bionic_errno_load();
+  if (result == NULL) darwin_art_openjdk_nio_publish_errno(-1);
   return result;
 }
 
@@ -518,7 +636,11 @@ static inline int darwin_art_openjdk_nio_fcntl(int fd, int command, ...) {
 #define fstat darwin_art_openjdk_nio_fstat
 #define lseek darwin_art_openjdk_nio_lseek
 #define mmap darwin_art_openjdk_nio_mmap
+#ifdef DARWIN_ART_OPENJDK_NIO_HOST_OPEN
+#define open darwin_art_openjdk_nio_host_open
+#else
 #define open darwin_art_openjdk_nio_open
+#endif
 #define dup darwin_art_openjdk_nio_dup
 #define getcwd darwin_art_openjdk_nio_getcwd
 #define stat(...) darwin_art_openjdk_nio_stat(__VA_ARGS__)

@@ -287,14 +287,16 @@ int32_t run_shutdown(const ShutdownState& state) {
       // does destroy the VM, and ART correctly waits for non-daemon Java
       // threads.  Quiesce AsyncTask's shared pool before releasing framework
       // state so a loader worker cannot keep shutdown blocked indefinitely.
-      if (!ShutdownAndroidAsyncTaskExecutor(art_thread->GetJniEnv())) {
+      if (!shutdown.dalvikvm_process &&
+          !ShutdownAndroidAsyncTaskExecutor(art_thread->GetJniEnv())) {
         std::cerr << "ART Darwin shutdown: AsyncTask executor shutdown failed\n";
         darwin_art_process::mark_shutdown_failed();
         return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
       }
       darwin_art_graphics::shutdown(shutdown.graphics_state,
                                     art_thread->GetJniEnv());
-      if (!StopAndroidApplicationThreads(art_thread->GetJniEnv())) {
+      if (!shutdown.dalvikvm_process &&
+          !StopAndroidApplicationThreads(art_thread->GetJniEnv())) {
         std::cerr << "ART Darwin shutdown: application thread stop failed\n";
         darwin_art_process::mark_shutdown_failed();
         return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
@@ -337,6 +339,13 @@ int32_t run_shutdown(const ShutdownState& state) {
 
   // DexFile owners remain live until DestroyJavaVM has finished tearing down
   // ClassLinker and Heap.
+  // AndroidRuntime's dalvikvm path detaches its main thread before destroying
+  // the VM. This is observable by JVMTI and must not be replaced by the
+  // Activity-process thread-quiescing bridge above.
+  if (shutdown.dalvikvm_process && java_vm->DetachCurrentThread() != JNI_OK) {
+    darwin_art_process::mark_shutdown_failed();
+    return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+  }
   if (java_vm->DestroyJavaVM() != JNI_OK) {
     darwin_art_process::mark_shutdown_failed();
     return DARWIN_ART_STATUS_SHUTDOWN_FAILED;

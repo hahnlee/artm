@@ -38,6 +38,8 @@ public final class ProbePackageManager extends MockPackageManager {
     private Resources resources;
     private int versionCode;
     private String versionName;
+    private SigningInfo verifiedSigningInfo;
+    private boolean signingInfoChecked;
     private Map<ComponentName, Integer> componentEnabledSettings;
     private Map<String, Integer> applicationEnabledSettings;
     private Map<ComponentName, ServiceInfo> serviceInfos;
@@ -86,6 +88,14 @@ public final class ProbePackageManager extends MockPackageManager {
             info.nativeLibraryDir = System.getenv("DARWIN_ART_APK_APP_NATIVE_DIR");
             applyApplicationPaths(info);
         }
+        // The launcher environment describes only the package being run. Do
+        // not stamp that label onto records for unrelated installed packages
+        // (for example Play Services queried by an SDK).
+        String runningPackage = System.getenv("DARWIN_ART_APK_APP_PACKAGE");
+        if (runningPackage != null && runningPackage.equals(requestedPackage)) {
+            applyApplicationLabel(info, null);
+        }
+        applyApplicationIcon(info);
         String target = metadataValue(record, "target_sdk");
         if (target != null) {
             try {
@@ -187,8 +197,52 @@ public final class ProbePackageManager extends MockPackageManager {
             info.sourceDir = apk;
             info.publicSourceDir = apk;
         }
+        String splits = System.getenv("DARWIN_ART_APK_APP_SPLIT_SOURCE_DIRS");
+        if (splits != null && !splits.isEmpty()) {
+            info.splitSourceDirs = splits.split(":");
+            info.splitPublicSourceDirs = info.splitSourceDirs.clone();
+        }
         String data = System.getenv("DARWIN_ART_APK_APP_DATA_GUEST_DIR");
         if (data != null && !data.isEmpty()) info.dataDir = data;
+    }
+
+    /** Applies the selected APK's manifest application label fields. */
+    static void applyApplicationLabel(ApplicationInfo info, Resources resources) {
+        if (info == null) return;
+        String configuredResource = System.getenv("DARWIN_ART_APK_APP_LABEL_RES");
+        boolean hasConfiguredResource = false;
+        if (configuredResource != null && !configuredResource.isEmpty()) {
+            try {
+                info.labelRes = Integer.decode(configuredResource).intValue();
+                hasConfiguredResource = info.labelRes != 0;
+            } catch (NumberFormatException ignored) {
+                info.labelRes = 0;
+            }
+        }
+        String configuredLabel = System.getenv("DARWIN_ART_APK_APP_LABEL");
+        // ApplicationInfo.loadLabel resolves labelRes through Resources. A
+        // resource-backed manifest label must therefore leave
+        // nonLocalizedLabel null; otherwise the package fallback would mask
+        // the actual localized resource.
+        if (hasConfiguredResource) {
+            info.nonLocalizedLabel = null;
+        } else if (configuredLabel != null && !configuredLabel.isEmpty()) {
+            info.nonLocalizedLabel = configuredLabel;
+        }
+    }
+
+    /** Applies the selected APK's manifest application icon resource ID. */
+    static void applyApplicationIcon(ApplicationInfo info) {
+        if (info == null) return;
+        String runningPackage = System.getenv("DARWIN_ART_APK_APP_PACKAGE");
+        if (runningPackage == null || !runningPackage.equals(info.packageName)) return;
+        String configured = System.getenv("DARWIN_ART_APK_APP_ICON_RES");
+        if (configured == null || configured.isEmpty()) return;
+        try {
+            info.icon = Integer.decode(configured).intValue();
+        } catch (NumberFormatException ignored) {
+            info.icon = 0;
+        }
     }
 
     static void applyApplicationMetadata(ApplicationInfo info, Resources resources) {
@@ -337,6 +391,46 @@ public final class ProbePackageManager extends MockPackageManager {
     }
 
     @Override
+    public ProviderInfo getProviderInfo(ComponentName component, int flags)
+            throws PackageManager.NameNotFoundException {
+        if (component == null || packageName == null
+                || !packageName.equals(component.getPackageName())) {
+            throw new PackageManager.NameNotFoundException(String.valueOf(component));
+        }
+        String encoded = System.getenv("DARWIN_ART_APK_APP_PROVIDERS");
+        if (encoded == null || encoded.isEmpty() || "none".equals(encoded)) {
+            throw new PackageManager.NameNotFoundException(String.valueOf(component));
+        }
+        for (String item : encoded.split(";")) {
+            String[] fields = item.split(">", -1);
+            if (fields.length < 4) continue;
+            String name = decodeHexString(fields[0]);
+            if (!component.getClassName().equals(name)) continue;
+            ProviderInfo info = new ProviderInfo();
+            info.name = name;
+            info.packageName = packageName;
+            info.authority = decodeHexString(fields[1]);
+            try {
+                info.initOrder = (int) Long.parseLong(fields[2], 16);
+            } catch (NumberFormatException ignored) {}
+            info.applicationInfo = activityInfo == null
+                    ? null : new ApplicationInfo(activityInfo.applicationInfo);
+            if (!"none".equals(fields[3]) && !fields[3].isEmpty()) {
+                info.metaData = decodeMetadata(fields[3], resources);
+            }
+            return info;
+        }
+        throw new PackageManager.NameNotFoundException(String.valueOf(component));
+    }
+
+    @Override
+    public ProviderInfo getProviderInfo(ComponentName component,
+            PackageManager.ComponentInfoFlags flags)
+            throws PackageManager.NameNotFoundException {
+        return getProviderInfo(component, (int) flags.getValue());
+    }
+
+    @Override
     public ProviderInfo resolveContentProvider(String authority,
             PackageManager.ComponentInfoFlags flags) {
         return null;
@@ -364,6 +458,8 @@ public final class ProbePackageManager extends MockPackageManager {
             String activityAliasNames, String serviceNames,
             ActivityInfo source, int targetSdkVersion, Resources resources,
             int versionCode, String versionName) {
+        verifiedSigningInfo = null;
+        signingInfoChecked = false;
         componentEnabledSettings = new HashMap<>();
         applicationEnabledSettings = new HashMap<>();
         serviceInfos = new HashMap<>();
@@ -382,6 +478,8 @@ public final class ProbePackageManager extends MockPackageManager {
         configured.applicationInfo.nativeLibraryDir = System.getenv(
                 "DARWIN_ART_APK_APP_NATIVE_DIR");
         applyApplicationPaths(configured.applicationInfo);
+        applyApplicationLabel(configured.applicationInfo, resources);
+        applyApplicationIcon(configured.applicationInfo);
         applyApplicationMetadata(configured.applicationInfo, resources);
         activityInfo = new ActivityInfo(configured);
         if (activityNames != null && !"none".equals(activityNames)) {
@@ -518,13 +616,71 @@ public final class ProbePackageManager extends MockPackageManager {
             throw new IllegalArgumentException("Unknown application");
         }
         if (packageName != null && packageName.equals(info.packageName)) {
-            String configured = System.getenv("DARWIN_ART_APK_APP_LABEL");
-            return configured == null || configured.isEmpty() ? packageName : configured;
+            if (info.labelRes != 0 && resources != null) {
+                try {
+                    return resources.getString(info.labelRes);
+                } catch (Resources.NotFoundException ignored) {
+                    // Fall through to the literal/package fallback below.
+                }
+            }
+            if (info.nonLocalizedLabel != null) return info.nonLocalizedLabel;
+            return packageName;
         }
         String record = nativeResolveInstalledPackage(info.packageName);
         String installed = metadataValue(record, "label");
         if (installed != null) return installed;
         throw new IllegalArgumentException("Unknown application");
+    }
+
+    @Override
+    public CharSequence getText(String requestedPackage, int resid,
+            ApplicationInfo appInfo) {
+        if (packageName == null || !packageName.equals(requestedPackage)
+                || resources == null || resid == 0) {
+            return null;
+        }
+        try {
+            // ActivityInfo/ApplicationInfo.loadLabel routes resource-backed
+            // labels through PackageManager.getText(). Keep this scoped to
+            // the selected APK; unrelated package resources are unavailable
+            // in the detached profile.
+            return resources.getText(resid);
+        } catch (Resources.NotFoundException ignored) {
+            return null;
+        }
+    }
+
+    private synchronized SigningInfo ownSigningInfo() {
+        if (signingInfoChecked) return verifiedSigningInfo;
+        if (activityInfo == null || activityInfo.applicationInfo == null) return null;
+        signingInfoChecked = true;
+        String source = activityInfo.applicationInfo.sourceDir;
+        if (source == null) return null;
+        try {
+            // Use the platform verifier, including APK content digests and
+            // signer rotation history. Never synthesize an app certificate.
+            Class<?> inputClass = Class.forName("android.content.pm.parsing.result.ParseInput");
+            Object input = Class.forName("android.content.pm.parsing.result.ParseTypeImpl")
+                    .getMethod("forParsingWithoutPlatformCompat").invoke(null);
+            Object result = Class.forName("android.util.apk.ApkSignatureVerifier")
+                    .getMethod("verify", inputClass, String.class, int.class)
+                    .invoke(null, input, source,
+                            activityInfo.applicationInfo.targetSdkVersion >= 30 ? 2 : 1);
+            Class<?> resultClass = Class.forName("android.content.pm.parsing.result.ParseResult");
+            if ((Boolean) resultClass.getMethod("isError").invoke(result)) {
+                Throwable failure = (Throwable) resultClass.getMethod("getException").invoke(result);
+                android.util.Log.w("DarwinPackageManager", "APK signature verification failed: "
+                        + resultClass.getMethod("getErrorMessage").invoke(result), failure);
+                return null;
+            }
+            Object details = resultClass.getMethod("getResult").invoke(result);
+            verifiedSigningInfo = SigningInfo.class.getConstructor(
+                    Class.forName("android.content.pm.SigningDetails")).newInstance(details);
+            android.util.Log.i("DarwinPackageManager", "APK content and signing identity verified");
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            android.util.Log.w("DarwinPackageManager", "Cannot verify APK signing identity", error);
+        }
+        return verifiedSigningInfo;
     }
 
     @Override
@@ -569,6 +725,20 @@ public final class ProbePackageManager extends MockPackageManager {
         info.versionCode = versionCode;
         info.setLongVersionCode(versionCode & 0xffff_ffffL);
         info.versionName = versionName;
+        if ((flags & (PackageManager.GET_SIGNATURES
+                | PackageManager.GET_SIGNING_CERTIFICATES)) != 0) {
+            SigningInfo signing = ownSigningInfo();
+            if (signing != null) {
+                if ((flags & PackageManager.GET_SIGNING_CERTIFICATES) != 0) {
+                    info.signingInfo = new SigningInfo(signing);
+                }
+                if ((flags & PackageManager.GET_SIGNATURES) != 0) {
+                    Signature[] history = signing.getSigningCertificateHistory();
+                    info.signatures = history != null && history.length > 0
+                            ? new Signature[] {history[0]} : signing.getApkContentsSigners();
+                }
+            }
+        }
         info.activities = new ActivityInfo[activityThemes.size() + activityAliases.size()];
         int index = 0;
         for (Map.Entry<String, Integer> entry : activityThemes.entrySet()) {

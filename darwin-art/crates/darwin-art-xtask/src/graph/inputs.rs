@@ -55,6 +55,20 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_process_options.cc"),
         PathBuf::from("probes/runtime_process_options.h"),
         PathBuf::from("probes/runtime_jni_scope.h"),
+        PathBuf::from("probes/runtime_upstream_test.h"),
+        PathBuf::from("probes/runtime_upstream_arttest.cc"),
+        PathBuf::from("_aosp/art/test/common/runtime_state.cc"),
+        PathBuf::from("_aosp/art/test/common/stack_inspect.cc"),
+        PathBuf::from("probes/runtime_jit_invoke_custom.h"),
+        PathBuf::from("probes/runtime_jit_specialized_intrinsics.h"),
+        PathBuf::from("probes/runtime_jit_string_intrinsics.h"),
+        PathBuf::from("probes/runtime_jit_string_hidden_intrinsics.h"),
+        PathBuf::from("probes/runtime_jit_system_arraycopy.h"),
+        PathBuf::from("probes/runtime_jit_math_hinvoke.h"),
+        PathBuf::from("probes/runtime_jit_crc32.h"),
+        PathBuf::from("probes/runtime_jit_memory.h"),
+        PathBuf::from("probes/runtime_jit_reference_boxing.h"),
+        PathBuf::from("probes/runtime_jit_unsafe_intrinsics.h"),
         PathBuf::from("probes/runtime_shutdown_probe.cc"),
         PathBuf::from("probes/runtime_shutdown_probe.h"),
         PathBuf::from("probes/runtime_frame_probe.cc"),
@@ -94,6 +108,21 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("compat/libcore_darwin_linux_system_natives.cc"),
         PathBuf::from("compat/libcore_darwin_linux_syscalls.cc"),
         PathBuf::from("compat/libcore_darwin_linux.h"),
+        PathBuf::from("compat/darwin_asynchronous_close_monitor.cc"),
+        PathBuf::from("probes/android16_asynchronous_close_monitor_smoke.cc"),
+        PathBuf::from("probes/android16_asynchronous_close_monitor_jni.cc"),
+        PathBuf::from("compat/darwin_libcore_filesystem_bridge.c"),
+        PathBuf::from("compat/darwin_openjdk_nio_copy.c"),
+        PathBuf::from("compat/darwin_openjdk_nio_fs_redirect.h"),
+        PathBuf::from("probes/android16_unix_filesystem_jni.c"),
+        PathBuf::from("probes/unix-filesystem/UnixFileSystemDarwinSmoke.java"),
+        PathBuf::from("upstream/android16-libcore-darwin-linux.lock"),
+        PathBuf::from("upstream/android16-asynchronous-close-monitor.lock"),
+        PathBuf::from("upstream/android16-os-constants.lock"),
+        PathBuf::from("upstream/android16-os-constants-values.tsv"),
+        PathBuf::from("upstream/android16-unix-filesystem-darwin.lock"),
+        PathBuf::from("upstream/android16-system-natives-darwin.lock"),
+        PathBuf::from("tools/bionic-errno-tls/include/darwin_art_bionic_errno.h"),
     ];
     // Keep this graph tied to the production bootstrap closure. Acceptance
     // probes and unrelated native sources must not rotate the persistent
@@ -111,6 +140,8 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
     for directory in [
         "include",
         "patches/art",
+        "patches/boringssl",
+        "patches/libcore-openjdk",
         "crates/darwin-art-elf-loader/src",
         "tools/android-jni-proxy/include",
         "tools/android-jni-proxy/generated",
@@ -131,6 +162,7 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
     for script in [
         "build-bionic-runtime-provider-closure.sh",
         "build-android16-android-runtime-host.sh",
+        "build-android16-asynchronous-close-monitor.sh",
         "build-android16-libcore-darwin-linux.sh",
         "build-android16-os-constants-darwin.sh",
         "build-android16-unix-filesystem-darwin.sh",
@@ -138,6 +170,7 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         "build-android16-file-input-stream-darwin.sh",
         "build-android16-file-descriptor-darwin.sh",
         "build-android16-system-natives-darwin.sh",
+        "build-android16-openjdk-named-jni-owner.sh",
         "build-android16-unix-native-dispatcher-darwin.sh",
         "build-android16-openjdk-nio-mapping.sh",
         "build-android16-libcore-memory-darwin.sh",
@@ -201,7 +234,22 @@ pub(crate) fn is_probe_only_input(path: &Path) -> bool {
             | "probes/runtime_process_state.h"
             | "probes/runtime_process_options.cc"
             | "probes/runtime_process_options.h"
+            | "probes/runtime_context_loader.cc"
             | "probes/runtime_jni_scope.h"
+            | "probes/runtime_upstream_test.h"
+            | "probes/runtime_upstream_arttest.cc"
+            | "_aosp/art/test/common/runtime_state.cc"
+            | "_aosp/art/test/common/stack_inspect.cc"
+            | "probes/runtime_jit_invoke_custom.h"
+            | "probes/runtime_jit_specialized_intrinsics.h"
+            | "probes/runtime_jit_string_intrinsics.h"
+            | "probes/runtime_jit_string_hidden_intrinsics.h"
+            | "probes/runtime_jit_system_arraycopy.h"
+            | "probes/runtime_jit_math_hinvoke.h"
+            | "probes/runtime_jit_crc32.h"
+            | "probes/runtime_jit_memory.h"
+            | "probes/runtime_jit_reference_boxing.h"
+            | "probes/runtime_jit_unsafe_intrinsics.h"
             | "probes/runtime_shutdown_probe.cc"
             | "probes/runtime_shutdown_probe.h"
             | "probes/runtime_frame_probe.cc"

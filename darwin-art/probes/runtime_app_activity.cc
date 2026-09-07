@@ -6,6 +6,7 @@
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <sstream>
 #include <unistd.h>
 
 #include "mirror/throwable.h"
@@ -15,6 +16,259 @@
 
 namespace darwin_art_app_activity {
 namespace {
+
+bool DecodeHex(const std::string& encoded, std::string* decoded) {
+  if (decoded == nullptr || encoded.size() % 2 != 0) return false;
+  decoded->clear();
+  decoded->reserve(encoded.size() / 2);
+  auto nibble = [](char value) -> int {
+    if (value >= '0' && value <= '9') return value - '0';
+    if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+    if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+    return -1;
+  };
+  for (size_t index = 0; index < encoded.size(); index += 2) {
+    const int high = nibble(encoded[index]);
+    const int low = nibble(encoded[index + 1]);
+    if (high < 0 || low < 0) return false;
+    decoded->push_back(static_cast<char>((high << 4) | low));
+  }
+  return true;
+}
+
+std::vector<std::string> Split(const std::string& value, char delimiter) {
+  std::vector<std::string> result;
+  size_t begin = 0;
+  while (begin <= value.size()) {
+    const size_t end = value.find(delimiter, begin);
+    result.push_back(value.substr(begin, end == std::string::npos
+                                           ? std::string::npos
+                                           : end - begin));
+    if (end == std::string::npos) break;
+    begin = end + 1;
+  }
+  return result;
+}
+
+jobject AllocateWithoutConstructor(JNIEnv* env, jclass type) {
+  if (env == nullptr || type == nullptr) return nullptr;
+  jclass unsafe_class = env->FindClass("sun/misc/Unsafe");
+  if (unsafe_class == nullptr) {
+    env->ExceptionClear();
+    unsafe_class = env->FindClass("jdk/internal/misc/Unsafe");
+  }
+  if (unsafe_class == nullptr) {
+    env->ExceptionClear();
+    return nullptr;
+  }
+  jfieldID singleton = env->GetStaticFieldID(unsafe_class, "theUnsafe",
+                                             "Lsun/misc/Unsafe;");
+  if (singleton == nullptr) {
+    env->ExceptionClear();
+    singleton = env->GetStaticFieldID(unsafe_class, "theUnsafe",
+                                      "Ljdk/internal/misc/Unsafe;");
+  }
+  jobject unsafe = singleton == nullptr
+                       ? nullptr
+                       : env->GetStaticObjectField(unsafe_class, singleton);
+  jmethodID allocate = unsafe == nullptr
+                           ? nullptr
+                           : env->GetMethodID(unsafe_class, "allocateInstance",
+                                              "(Ljava/lang/Class;)Ljava/lang/Object;");
+  jobject result = (unsafe != nullptr && allocate != nullptr)
+                       ? env->CallObjectMethod(unsafe, allocate, type)
+                       : nullptr;
+  env->ExceptionClear();
+  env->DeleteLocalRef(unsafe);
+  env->DeleteLocalRef(unsafe_class);
+  return result;
+}
+
+bool InstallDeclaredContentProviders(JNIEnv* env, jobject context,
+                                     jobject application_info,
+                                     jobject app_loader) {
+  const char* encoded = std::getenv("DARWIN_ART_APK_APP_PROVIDERS");
+  if (env == nullptr || context == nullptr || app_loader == nullptr ||
+      encoded == nullptr || encoded[0] == '\0' ||
+      std::strcmp(encoded, "none") == 0) {
+    return true;
+  }
+  jclass loader_class = env->GetObjectClass(app_loader);
+  jmethodID load_class = loader_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(
+                                   loader_class, "loadClass",
+                                   "(Ljava/lang/String;)Ljava/lang/Class;");
+  jclass provider_info_class = env->FindClass("android/content/pm/ProviderInfo");
+  jmethodID provider_info_constructor =
+      provider_info_class == nullptr
+          ? nullptr
+          : env->GetMethodID(provider_info_class, "<init>", "()V");
+  jclass bundle_class = env->FindClass("android/os/Bundle");
+  jmethodID bundle_constructor = bundle_class == nullptr
+                                     ? nullptr
+                                     : env->GetMethodID(bundle_class, "<init>", "()V");
+  jmethodID put_string = bundle_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(bundle_class, "putString",
+                                                "(Ljava/lang/String;Ljava/lang/String;)V");
+  jmethodID put_int = bundle_class == nullptr
+                          ? nullptr
+                          : env->GetMethodID(bundle_class, "putInt",
+                                             "(Ljava/lang/String;I)V");
+  jmethodID put_boolean = bundle_class == nullptr
+                              ? nullptr
+                              : env->GetMethodID(bundle_class, "putBoolean",
+                                                 "(Ljava/lang/String;Z)V");
+  jfieldID info_name = provider_info_class == nullptr
+                           ? nullptr
+                           : env->GetFieldID(provider_info_class, "name",
+                                             "Ljava/lang/String;");
+  jfieldID info_authority = provider_info_class == nullptr
+                                ? nullptr
+                                : env->GetFieldID(provider_info_class, "authority",
+                                                  "Ljava/lang/String;");
+  jfieldID info_init_order = provider_info_class == nullptr
+                                 ? nullptr
+                                 : env->GetFieldID(provider_info_class, "initOrder", "I");
+  jfieldID info_application = provider_info_class == nullptr
+                                  ? nullptr
+                                  : env->GetFieldID(
+                                        provider_info_class, "applicationInfo",
+                                        "Landroid/content/pm/ApplicationInfo;");
+  jfieldID info_metadata = provider_info_class == nullptr
+                               ? nullptr
+                               : env->GetFieldID(provider_info_class, "metaData",
+                                                 "Landroid/os/Bundle;");
+  if (load_class == nullptr || provider_info_constructor == nullptr ||
+      bundle_constructor == nullptr || info_name == nullptr ||
+      info_authority == nullptr || info_init_order == nullptr ||
+      info_application == nullptr || info_metadata == nullptr ||
+      env->ExceptionCheck()) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    return false;
+  }
+  for (const std::string& item : Split(encoded, ';')) {
+    if (item.empty()) continue;
+    const size_t first = item.find('>');
+    const size_t second = first == std::string::npos
+                              ? std::string::npos
+                              : item.find('>', first + 1);
+    const size_t third = second == std::string::npos
+                             ? std::string::npos
+                             : item.find('>', second + 1);
+    if (first == std::string::npos || second == std::string::npos ||
+        third == std::string::npos) {
+      continue;
+    }
+    std::string provider_name;
+    std::string authority;
+    if (!DecodeHex(item.substr(0, first), &provider_name) ||
+        !DecodeHex(item.substr(first + 1, second - first - 1), &authority)) {
+      continue;
+    }
+    // FirebaseInitProvider is intentionally owned by the APK Application in
+    // this detached process.  Calling it here as well starts a second
+    // Firebase singleton before ActivityThread has published the application
+    // context and causes Firebase's fatal-exit path.  Other manifest
+    // providers (notably AndroidX Startup/WorkManager) still follow the
+    // Android attachInfo -> onCreate ordering below.
+    if (provider_name ==
+        "com.google.firebase.provider.FirebaseInitProvider") {
+      continue;
+    }
+    const unsigned long init_order = std::strtoul(
+        item.substr(second + 1, third - second - 1).c_str(), nullptr, 16);
+    jstring class_name = env->NewStringUTF(provider_name.c_str());
+    jclass provider_class = reinterpret_cast<jclass>(
+        env->CallObjectMethod(app_loader, load_class, class_name));
+    env->DeleteLocalRef(class_name);
+    if (provider_class == nullptr || env->ExceptionCheck()) {
+      if (env->ExceptionCheck()) env->ExceptionClear();
+      env->DeleteLocalRef(provider_class);
+      continue;  // Optional Play Services providers may be absent.
+    }
+    jmethodID provider_constructor =
+        env->GetMethodID(provider_class, "<init>", "()V");
+    jmethodID attach_info = env->GetMethodID(
+        provider_class, "attachInfo",
+        "(Landroid/content/Context;Landroid/content/pm/ProviderInfo;)V");
+    jmethodID on_create = env->GetMethodID(provider_class, "onCreate", "()Z");
+    jobject provider = provider_constructor == nullptr
+                           ? nullptr
+                           : env->NewObject(provider_class, provider_constructor);
+    // ProviderInfo is an SDK-stub class in the compact framework image and
+    // its public constructor throws RuntimeException("Stub!"). Android's
+    // system_server allocates it as a parcelable data holder, so mirror that
+    // behavior with Unsafe when the constructor is a stub.
+    jobject info = env->NewObject(provider_info_class, provider_info_constructor);
+    if (info == nullptr && env->ExceptionCheck()) {
+      env->ExceptionClear();
+      info = AllocateWithoutConstructor(env, provider_info_class);
+    }
+    jobject metadata = env->NewObject(bundle_class, bundle_constructor);
+    jstring name_value = env->NewStringUTF(provider_name.c_str());
+    jstring authority_value = env->NewStringUTF(authority.c_str());
+    if (provider != nullptr && info != nullptr && metadata != nullptr &&
+        name_value != nullptr && authority_value != nullptr &&
+        !env->ExceptionCheck()) {
+      env->SetObjectField(info, info_name, name_value);
+      env->SetObjectField(info, info_authority, authority_value);
+      env->SetIntField(info, info_init_order, static_cast<jint>(init_order));
+      if (application_info != nullptr) {
+        env->SetObjectField(info, info_application, application_info);
+      }
+      for (const std::string& metadata_item :
+           Split(item.substr(third + 1), ',')) {
+        const size_t colon = metadata_item.find(':');
+        const size_t value_colon = colon == std::string::npos
+                                       ? std::string::npos
+                                       : metadata_item.find(':', colon + 1);
+        if (colon == std::string::npos || value_colon == std::string::npos) continue;
+        std::string metadata_name;
+        if (!DecodeHex(metadata_item.substr(0, colon), &metadata_name)) continue;
+        jstring key = env->NewStringUTF(metadata_name.c_str());
+        const char kind = metadata_item[colon + 1];
+        const std::string value = metadata_item.substr(value_colon + 1);
+        if (kind == 's' && put_string != nullptr) {
+          std::string string_value;
+          if (DecodeHex(value, &string_value)) {
+            jstring text = env->NewStringUTF(string_value.c_str());
+            env->CallVoidMethod(metadata, put_string, key, text);
+            env->DeleteLocalRef(text);
+          }
+        } else if ((kind == 'i' || kind == 'r') && put_int != nullptr) {
+          const jint integer = static_cast<jint>(std::strtoul(value.c_str(), nullptr, 16));
+          env->CallVoidMethod(metadata, put_int, key, integer);
+        } else if (kind == 'b' && put_boolean != nullptr) {
+          env->CallVoidMethod(metadata, put_boolean, key, value == "1");
+        }
+        env->DeleteLocalRef(key);
+      }
+      env->SetObjectField(info, info_metadata, metadata);
+      if (attach_info != nullptr) {
+        env->CallVoidMethod(provider, attach_info, context, info);
+      }
+      if (on_create != nullptr && !env->ExceptionCheck()) {
+        env->CallBooleanMethod(provider, on_create);
+      }
+    }
+    env->DeleteLocalRef(authority_value);
+    env->DeleteLocalRef(name_value);
+    env->DeleteLocalRef(metadata);
+    env->DeleteLocalRef(info);
+    env->DeleteLocalRef(provider);
+    env->DeleteLocalRef(provider_class);
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
+    }
+  }
+  env->DeleteLocalRef(bundle_class);
+  env->DeleteLocalRef(provider_info_class);
+  env->DeleteLocalRef(loader_class);
+  return !env->ExceptionCheck();
+}
 
 std::string JavaString(JNIEnv* env, jstring value) {
   if (value == nullptr) return {};
@@ -210,6 +464,12 @@ int prepare(JNIEnv* env, art::Thread* self, jobject* activity_instance_out,
                              ? 0
                              : static_cast<jint>(
                                    std::strtoul(configured_theme, nullptr, 0));
+  const char* configured_screen_orientation =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_APP_SCREEN_ORIENTATION") : nullptr;
+  const jint app_screen_orientation =
+      configured_screen_orientation == nullptr
+          ? -1
+          : static_cast<jint>(std::strtol(configured_screen_orientation, nullptr, 10));
   const char* configured_target_sdk =
       run_apk_app ? std::getenv("DARWIN_ART_APK_APP_TARGET_SDK") : nullptr;
   const jint app_target_sdk =
@@ -229,12 +489,24 @@ int prepare(JNIEnv* env, art::Thread* self, jobject* activity_instance_out,
                                   std::getenv("DARWIN_ART_APK_APP_LABEL") != nullptr
                               ? std::getenv("DARWIN_ART_APK_APP_LABEL")
                               : "Darwin ART APK";
-  const char* configured_label_res =
+  const char* configured_app_label_res =
       run_apk_app ? std::getenv("DARWIN_ART_APK_APP_LABEL_RES") : nullptr;
   const jint app_label_res =
-      configured_label_res == nullptr
+      configured_app_label_res == nullptr
           ? 0
-          : static_cast<jint>(std::strtoul(configured_label_res, nullptr, 0));
+          : static_cast<jint>(std::strtoul(configured_app_label_res, nullptr, 0));
+  const char* configured_activity_label =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_ACTIVITY_LABEL") : nullptr;
+  std::string activity_label = configured_activity_label == nullptr
+                                   ? std::string()
+                                   : configured_activity_label;
+  const char* configured_activity_label_res =
+      run_apk_app ? std::getenv("DARWIN_ART_APK_ACTIVITY_LABEL_RES") : nullptr;
+  const jint activity_label_res =
+      configured_activity_label_res == nullptr
+          ? 0
+          : static_cast<jint>(std::strtoul(configured_activity_label_res,
+                                           nullptr, 0));
   if (run_apk_app) {
     jclass vm_runtime_class = env->FindClass("dalvik/system/VMRuntime");
     jmethodID get_vm_runtime =
@@ -267,37 +539,50 @@ int prepare(JNIEnv* env, art::Thread* self, jobject* activity_instance_out,
       env->SetIntField(resources->activity_info, activity_theme, app_theme);
     }
   }
-  if (run_apk_app && app_label_res != 0 && resources->probe_resources != nullptr &&
+  if (run_apk_app && configured_screen_orientation != nullptr &&
       resources->activity_info != nullptr) {
-    jclass resources_class = env->FindClass("android/content/res/Resources");
-    jmethodID get_string =
-        resources_class == nullptr
-            ? nullptr
-            : env->GetMethodID(resources_class, "getString",
-                               "(I)Ljava/lang/String;");
-    jstring resolved_string =
-        get_string == nullptr || env->ExceptionCheck()
-            ? nullptr
-            : static_cast<jstring>(env->CallObjectMethod(
-                  resources->probe_resources, get_string, app_label_res));
-    if (resolved_string != nullptr && !env->ExceptionCheck()) {
-      const char* utf = env->GetStringUTFChars(resolved_string, nullptr);
-      if (utf != nullptr) {
-        app_label = utf;
-        env->ReleaseStringUTFChars(resolved_string, utf);
-        setenv("DARWIN_ART_APK_APP_LABEL", app_label.c_str(), 1);
-      }
-      jfieldID non_localized_label = env->GetFieldID(
-          resources->activity_info_class, "nonLocalizedLabel",
-          "Ljava/lang/CharSequence;");
+    jfieldID activity_orientation = env->GetFieldID(
+        resources->activity_info_class, "screenOrientation", "I");
+    if (activity_orientation != nullptr && !env->ExceptionCheck()) {
+      env->SetIntField(resources->activity_info, activity_orientation,
+                       app_screen_orientation);
+    }
+  }
+  if (run_apk_app && resources->activity_info != nullptr) {
+    jfieldID activity_label_resource = env->GetFieldID(
+        resources->activity_info_class, "labelRes", "I");
+    jfieldID non_localized_label = env->GetFieldID(
+        resources->activity_info_class, "nonLocalizedLabel",
+        "Ljava/lang/CharSequence;");
+    if (activity_label_res != 0 && activity_label_resource != nullptr &&
+        !env->ExceptionCheck()) {
+      // Keep resource-backed labels as a resource reference. Storing the
+      // package fallback in nonLocalizedLabel would mask localization in
+      // ActivityInfo.loadLabel().
+      env->SetIntField(resources->activity_info, activity_label_resource,
+                       activity_label_res);
       if (non_localized_label != nullptr && !env->ExceptionCheck()) {
         env->SetObjectField(resources->activity_info, non_localized_label,
-                            resolved_string);
+                            nullptr);
       }
     }
-    if (env->ExceptionCheck()) env->ExceptionClear();
-    if (resolved_string != nullptr) env->DeleteLocalRef(resolved_string);
-    if (resources_class != nullptr) env->DeleteLocalRef(resources_class);
+    if (activity_label_res == 0 && !activity_label.empty()) {
+      if (activity_label_resource != nullptr && !env->ExceptionCheck()) {
+        env->SetIntField(resources->activity_info, activity_label_resource, 0);
+      }
+      jclass char_sequence_class = env->FindClass("java/lang/String");
+      jstring literal = char_sequence_class == nullptr
+                            ? nullptr
+                            : env->NewStringUTF(activity_label.c_str());
+      if (non_localized_label != nullptr && literal != nullptr &&
+          !env->ExceptionCheck()) {
+        env->SetObjectField(resources->activity_info, non_localized_label,
+                            literal);
+      }
+      if (literal != nullptr) env->DeleteLocalRef(literal);
+      if (char_sequence_class != nullptr)
+        env->DeleteLocalRef(char_sequence_class);
+    }
   }
   out->activity_class = env->GetSuperclass(probe_activity_class);
   jclass package_manager_class = env->GetObjectClass(package_manager);
@@ -689,6 +974,25 @@ int prepare(JNIEnv* env, art::Thread* self, jobject* activity_instance_out,
       env->DeleteLocalRef(installed_application_context);
       env->DeleteLocalRef(context_class);
       if (!env->ExceptionCheck()) {
+        jfieldID activity_application_info =
+            resources->activity_info_class == nullptr
+                ? nullptr
+                : env->GetFieldID(resources->activity_info_class,
+                                  "applicationInfo",
+                                  "Landroid/content/pm/ApplicationInfo;");
+        jobject provider_application_info =
+            activity_application_info == nullptr ||
+                    resources->activity_info == nullptr
+                ? nullptr
+                : env->GetObjectField(resources->activity_info,
+                                      activity_application_info);
+        if (!InstallDeclaredContentProviders(
+                env, out->probe_context, provider_application_info, app_loader)) {
+          std::cerr << "ART Android process: ContentProvider bootstrap failed\n";
+          env->DeleteLocalRef(provider_application_info);
+          return 27;
+        }
+        env->DeleteLocalRef(provider_application_info);
         // Zygote initializes Typeface before Application.onCreate(). Arbitrary
         // APKs, including Chromium, can resolve fonts from their Application
         // callback, so the detached process must establish the same invariant
@@ -803,8 +1107,36 @@ int prepare(JNIEnv* env, art::Thread* self, jobject* activity_instance_out,
           ? configured_launch_component
           : (run_apk_app ? apk_app_activity
                          : "dev.darwinart.probe.ProbeActivity"));
-  jstring title = env->NewStringUTF(run_apk_app ? app_label.c_str()
-                                                : "Darwin ART Probe");
+  std::string window_title = run_apk_app ? app_label : "Darwin ART Probe";
+  if (run_apk_app && app_label_res != 0 && resources->probe_resources != nullptr) {
+    jclass resources_class = env->FindClass("android/content/res/Resources");
+    jmethodID get_string =
+        resources_class == nullptr
+            ? nullptr
+            : env->GetMethodID(resources_class, "getString",
+                               "(I)Ljava/lang/String;");
+    jstring resolved =
+        get_string == nullptr || env->ExceptionCheck()
+            ? nullptr
+            : static_cast<jstring>(env->CallObjectMethod(
+                  resources->probe_resources, get_string, app_label_res));
+    if (resolved != nullptr && !env->ExceptionCheck()) {
+      const char* utf = env->GetStringUTFChars(resolved, nullptr);
+      if (utf != nullptr) {
+        window_title = utf;
+        env->ReleaseStringUTFChars(resolved, utf);
+      }
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (resolved != nullptr) env->DeleteLocalRef(resolved);
+    if (resources_class != nullptr) env->DeleteLocalRef(resources_class);
+  }
+  if (run_apk_app) {
+    // Host presentation consumes a resolved title, while package metadata
+    // keeps the original resource reference and literal label separate.
+    setenv("DARWIN_ART_APK_WINDOW_TITLE", window_title.c_str(), 1);
+  }
+  jstring title = env->NewStringUTF(window_title.c_str());
   jobject component_name =
       component_name_constructor == nullptr
           ? nullptr

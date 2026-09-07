@@ -8,7 +8,7 @@ use std::fs;
 use std::num::NonZeroUsize;
 use std::process::ExitCode;
 
-const LOCALE_IMPORTS: [&str; 51] = [
+const LOCALE_IMPORTS: [&str; 53] = [
     "__ctype_get_mb_cur_max",
     "btowc",
     "freelocale",
@@ -48,10 +48,12 @@ const LOCALE_IMPORTS: [&str; 51] = [
     "strxfrm_l",
     "strxfrm",
     "tolower",
+    "tolower_l",
     "towlower_l",
     "towupper_l",
     "towupper",
     "toupper",
+    "toupper_l",
     "uselocale",
     "wcrtomb",
     "wcscoll_l",
@@ -218,7 +220,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     println!(
-        "bionic-locale-facade: PASS AndroidELF imports=51+errno locale=C+POSIX+C.UTF-8 thread-local UTF-8-state collate=C wide=Android-ICU-76.1 host-errno+fenv=preserved"
+        "bionic-locale-facade: PASS AndroidELF imports=53+errno locale=C+POSIX+C.UTF-8 thread-local UTF-8-state collate=C wide=Android-ICU-76.1 host-errno+fenv=preserved"
     );
     Ok(())
 }

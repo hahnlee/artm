@@ -55,8 +55,14 @@ int darwin_art_bionic_mincore(void* address, size_t length,
     darwin_art_bionic_errno_store(14);
     return -1;
   }
+  const size_t page_size = darwin_art_host_vm_page_size();
+  if (page_size == 0 || !((page_size & (page_size - 1)) == 0)) {
+    darwin_art_bionic_errno_store(22);
+    return -1;
+  }
   if (darwin_art_bionic_madvise(address, length, 0) != 0) return -1;
-  const size_t pages = (length + 4095) / 4096;
+  // Avoid length + page_size - 1 wrapping for a hostile native caller.
+  const size_t pages = length / page_size + (length % page_size != 0 ? 1 : 0);
   for (size_t index = 0; index < pages; ++index) residency[index] = 1;
   return 0;
 }
@@ -73,6 +79,15 @@ int darwin_art_bionic_mlock_unsupported(const void* address, size_t length) {
   (void)length;
   darwin_art_bionic_errno_store(38);
   return -1;
+}
+
+// Locking guest pages is advisory on this host.  SQLCipher and other NDK
+// consumers use munlock to release a best-effort mlock; report success while
+// leaving ownership and protection to the VM facade.
+int darwin_art_bionic_munlock(const void* address, size_t length) {
+  (void)address;
+  (void)length;
+  return 0;
 }
 
 static int Compare(const char* left, const char* right) {
@@ -99,6 +114,7 @@ static const Binding kBindings[] = {
     {"mprotect", (DarwinArtBionicVmFunction)darwin_art_bionic_mprotect},
     {"mremap", (DarwinArtBionicVmFunction)darwin_art_bionic_mremap},
     {"msync", (DarwinArtBionicVmFunction)darwin_art_bionic_msync},
+    {"munlock", (DarwinArtBionicVmFunction)darwin_art_bionic_munlock},
     {"munmap", (DarwinArtBionicVmFunction)darwin_art_bionic_munmap},
     {"posix_madvise", (DarwinArtBionicVmFunction)darwin_art_bionic_posix_madvise},
 };

@@ -32,6 +32,7 @@ libaaudio.so	AAudio_createStreamBuilder		aaudio	AAudio builder creation
 libc.so	gettid	LIBC	syscall	Provider-owned stable Android thread ID shared with syscall(__NR_gettid)
 libc.so	gethostbyaddr	LIBC	dns	Legacy resolver symbol kept in the Android network namespace
 libc.so	gethostbyname	LIBC	dns	Legacy resolver symbol kept in the Android network namespace
+libc.so	getservbyname	LIBC	dns	Legacy service resolver symbol kept in the Android network namespace
 libc.so	environ	LIBC	process-state	Pointer vector backed by the active immutable Android process environment snapshot
 libc.so	__system_property_find	LIBC	process-state	Stable opaque property token lookup in the active immutable Android process snapshot
 libc.so	__system_property_read	LIBC	process-state	Legacy property read over the active immutable Android process snapshot
@@ -44,6 +45,7 @@ libc.so	optind	LIBC	process-state	Android getopt index slot initialized to the A
 libc.so	in6addr_any	LIBC_N	socket	Immutable all-zero IPv6 wildcard address in Android network ABI layout
 libc.so	in6addr_loopback	LIBC_N	socket	Immutable IPv6 loopback address in Android network ABI layout
 libc.so	isspace	LIBC	leaf	Android C-locale whitespace classification
+libc.so	isprint	LIBC	leaf	Android ASCII printable-byte classification with EOF handling
 libc.so	__strcat_chk	LIBC	leaf	Bionic fortified concatenation with destination bound enforcement
 libc.so	__strchr_chk	LIBC	leaf	Bionic fortified character search with source bound enforcement
 libc.so	__strcpy_chk	LIBC	leaf	Bionic fortified string copy with destination bound enforcement
@@ -58,6 +60,7 @@ libc.so	memrchr	LIBC	leaf	Android reverse bounded byte search required by native
 libc.so	stpcpy	LIBC	leaf	Android string copy returning the terminating byte
 libc.so	strcasestr	LIBC	leaf	Android ASCII case-insensitive substring search
 libc.so	strlcpy	LIBC	leaf	Android size-bounded string copy with source-length result
+libc.so	strlcat	LIBC	leaf	Android size-bounded string concatenation with attempted-length result
 libc.so	strnlen	LIBC	leaf	Android bounded string length query
 libc.so	strndup	LIBC	allocator	Android bounded string duplication in the owned allocation domain
 libc.so	strsep	LIBC	leaf	Android reentrant delimiter splitting required by native consumers
@@ -74,6 +77,7 @@ libc.so	getsockname	LIBC	socket	Android local socket address query with family t
 libc.so	listen	LIBC	socket	Android socket listen over broker-owned descriptors
 libc.so	recvmsg	LIBC	socket	Android scatter receive with message ABI translation
 libc.so	sendmsg	LIBC	socket	Android scatter send with message ABI translation
+libc.so	sendmmsg	LIBC	socket	Android batched message send through broker-owned sockets
 libc.so	socketpair	LIBC	socket	Android local socket pair published into the descriptor broker
 libc.so	getnameinfo	LIBC	dns	Android numeric reverse address formatting with sockaddr translation
 libc.so	inet_pton	LIBC	dns	Android numeric network address parsing with family translation
@@ -97,8 +101,10 @@ libc.so	timerfd_settime	LIBC	central-fd-broker	Schedules one-shot and periodic m
 libc.so	pipe2	LIBC	central-fd-broker	Android flagged pipe creation published atomically through the central broker
 libc.so	readv	LIBC	central-fd-broker	Android scatter read across broker-owned descriptors
 libc.so	writev	LIBC	central-fd-broker	Android gather write across broker-owned descriptors
-libc.so	arc4random	LIBC	process-state	Process-owned 32-bit pseudo-random generation for native consumers
-libc.so	arc4random_buf	LIBC	process-state	Process-owned random byte stream
+libc.so	arc4random	LIBC	process-state	Host secure system random 32-bit value
+libc.so	arc4random_buf	LIBC	process-state	Host secure system random byte stream
+libc.so	basename	LIBC	process-state	Android POSIX basename with thread-local result and unchanged input
+libc.so	getentropy	LIBC	process-state	Host secure entropy with Android 256-byte limit and guest errno
 libc.so	android_get_device_api_level	LIBC	process-state	Virtual Android API level
 libc.so	android_get_device_api_level	LIBC_Q	process-state	Android Q version alias for virtual API level
 libc.so	erand48	LIBC	process-state	POSIX caller-owned 48-bit random state with binary64 result
@@ -278,7 +284,7 @@ libc.so	unsetenv	LIBC	process-state	Process environment mutation
 libc.so	getppid	LIBC	process-state	Virtual Android zygote parent identifier
 libc.so	getpriority	LIBC	process-state	Virtual Android per-thread nice query
 libc.so	getprogname	LIBC	process-state	Virtual Android process name
-libc.so	getrandom	LIBC	process-state	Process-owned random byte stream
+libc.so	getrandom	LIBC	process-state	Host secure system random byte stream
 libc.so	getrandom	LIBC_P	process-state	Android P version alias for process random bytes
 libc.so	process_vm_readv	LIBC	process-state	Explicit ENOSYS outside virtual Android process broker
 libc.so	ptrace	LIBC	process-state	Explicit ENOSYS outside virtual Android process broker
@@ -301,7 +307,7 @@ libc.so	posix_spawn	LIBC_P	process-state	Explicit ENOSYS because Android childre
 libc.so	posix_spawnp	LIBC_P	process-state	Explicit ENOSYS because Android children must launch through ActivityManager and zygote semantics
 libc.so	dup	LIBC	central-fd-broker	Duplicate a central virtual descriptor
 libc.so	dup2	LIBC	central-fd-broker	Explicit ENOSYS pending fixed-token descriptor replacement
-libc.so	select	LIBC	central-fd-broker	Explicit ENOSYS pending Android fd_set broker translation
+libc.so	select	LIBC	central-fd-broker	Android fd_set readiness translated through the central descriptor broker
 libc.so	tempnam	LIBC	allocator	Explicit ENOSYS pending capability-rooted allocated temporary names
 libc.so	strtok	LIBC	leaf	Thread-local Android string tokenization
 libc.so	wcscpy	LIBC	leaf	Android 32-bit wchar string copy
@@ -312,6 +318,7 @@ libc.so	__FD_CLR_chk	LIBC	leaf	Bionic fortified fd_set removal bounds check
 libc.so	strtoumax	LIBC	numeric	Android maximum-width unsigned integer conversion
 libc.so	vsprintf	LIBC	format	Android va_list unbounded string formatting
 libc.so	mlock	LIBC	vm	Explicit ENOSYS pending VM-owned range locking
+libc.so	munlock	LIBC	vm	Advisory unlock for native memory consumers
 libdl.so	dladdr	LIBC	dso-lifecycle	Published Android ELF image address and module path lookup
 libm.so	ldexpl	LIBC	math	Android binary128 exponent-scaling compatibility placeholder
 libm.so	acoshf	LIBC	math	Darwin binary32 inverse hyperbolic cosine compatibility
@@ -329,6 +336,8 @@ libm.so	nan	LIBC	math	Darwin binary64 NaN construction compatibility
 libm.so	nearbyintf	LIBC	math	Darwin binary32 current-rounding-mode integral compatibility
 libm.so	roundf	LIBC	math	Darwin binary32 away-from-zero rounding compatibility
 libm.so	sinhf	LIBC	math	Darwin binary32 hyperbolic sine compatibility
+libm.so	sqrt	LIBC	math	Darwin binary64 square-root compatibility
+libm.so	trunc	LIBC	math	Darwin binary64 truncation compatibility
 libm.so	truncf	LIBC	math	Darwin binary32 truncation compatibility
 libc.so	tdelete	LIBC	leaf	POSIX binary search tree removal using the owned allocator domain
 libc.so	tdestroy	LIBC	leaf	GNU-compatible binary search tree destruction using the owned allocator domain
@@ -357,6 +366,7 @@ libc.so	munmap	LIBC	vm	whole-mapping retirement for VM-provider-owned mappings
 libc.so	madvise	LIBC	vm	bounded advice for VM-provider-owned mappings
 libc.so	mprotect	LIBC	vm	whole-mapping protection transition with W^X enforcement
 libc.so	pthread_create	LIBC	pthread	provider-owned thread creation required by general Android DSOs but absent from pinned libc++ imports
+libc.so	pthread_atfork	LIBC	pthread	Android pthread fork callback registration backed by the host pthread lifecycle
 libc.so	pthread_attr_getstack	LIBC	pthread	Android pthread attribute stack query
 libc.so	pthread_attr_getstacksize	LIBC	pthread	Android pthread attribute stack-size query
 libc.so	pthread_condattr_destroy	LIBC	pthread	Android condition attribute lifecycle
@@ -412,6 +422,8 @@ libc.so	poll	LIBC	central-fd-broker	blocking readiness wait across leased centra
 libc.so	freeaddrinfo	LIBC	dns	bounded resolver result retirement
 libc.so	gai_strerror	LIBC	dns	Android resolver error strings required by Conscrypt
 libc.so	getaddrinfo	LIBC	dns	bounded numeric and localhost resolution
+libc.so	__get_h_errno	LIBC	dns	Thread-local Android host-resolver error storage
+libc.so	android_getaddrinfofornet	LIBC	dns	netd-compatible hostname resolution through the host network owner
 libc.so	recv	LIBC	socket	central-broker socket owner v3
 libc.so	recvfrom	LIBC	socket	central-broker datagram receive with address translation
 libc.so	send	LIBC	socket	central-broker socket owner v3
@@ -546,6 +558,7 @@ libc.so	pthread_equal	LIBC	pthread	Android thread token equality
 libc.so	pthread_getschedparam	LIBC	pthread	Android thread scheduling query
 libc.so	pthread_kill	LIBC	pthread	Android thread signal delivery
 libc.so	pthread_setname_np	LIBC	pthread	Android thread naming
+libc.so	sigprocmask	LIBC	pthread	Android signal mask translation
 libc.so	pthread_sigmask	LIBC	pthread	Android signal mask translation
 libc.so	__pthread_cleanup_pop	LIBC	pthread	Android pthread cleanup stack pop
 libc.so	__pthread_cleanup_push	LIBC	pthread	Android pthread cleanup stack push
@@ -582,7 +595,9 @@ libc.so	isupper	LIBC	locale	Android C locale uppercase classification
 libc.so	isxdigit	LIBC	locale	Android C locale hexadecimal classification
 libc.so	strxfrm	LIBC	locale	Android C locale collation transform
 libc.so	tolower	LIBC	locale	Android C locale lowercase mapping
+libc.so	tolower_l	LIBC	locale	Android C locale lowercase mapping with explicit locale handle
 libc.so	toupper	LIBC	locale	Android C locale uppercase mapping
+libc.so	toupper_l	LIBC	locale	Android C locale uppercase mapping with explicit locale handle
 libc.so	__umask_chk	LIBC	filesystem	Android fortified process umask state
 libdl.so	android_dlopen_ext	LIBC	dso-lifecycle	Android guest DSO namespace extended open
 libdl.so	dlclose	LIBC	dso-lifecycle	Android guest DSO namespace close

@@ -5,18 +5,77 @@
 #include <fcntl.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
+#include <libproc.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdatomic.h>
+#include <string.h>
+#include <sys/proc_info.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
 
 extern void darwin_art_bionic_errno_store(int32_t android_errno);
 extern int32_t darwin_art_bionic_errno_load(void);
 
+static int g_trace_fs_failures;
+_Static_assert(ATOMIC_INT_LOCK_FREE == 2, "diagnostic counter must be lock-free");
+__attribute__((constructor)) static void initialize_fs_diagnostics(void) {
+  g_trace_fs_failures = getenv("DARWIN_ART_TRACE_FS_FAILURES") != NULL;
+}
+
+static size_t trace_append(char* output, size_t used, const char* text,
+                           size_t limit) {
+  for (size_t i = 0; i < limit && text[i] != '\0'; ++i) output[used++] = text[i];
+  return used;
+}
+
+static size_t trace_append_int(char* output, size_t used, int value) {
+  unsigned magnitude = (unsigned)value;
+  if (value < 0) { output[used++] = '-'; magnitude = 0u - magnitude; }
+  char digits[10];
+  size_t count = 0;
+  do { digits[count++] = (char)('0' + magnitude % 10); magnitude /= 10; }
+  while (magnitude != 0);
+  while (count != 0) output[used++] = digits[--count];
+  return used;
+}
+
+// Guest GC can suspend another thread holding host getenv/stdio locks. Keep
+// diagnostics lock-free after eager initialization, including formatting.
+// Never emit file contents; standard-FD failures have a separate small budget
+// so repeated stderr failures cannot hide later resource-path failures.
+static void trace_fs_failure(const char* operation, const char* path, int fd) {
+  if (!g_trace_fs_failures) return;
+  const int guest_error = darwin_art_bionic_errno_load();
+  const int host_error = errno;
+  static _Atomic unsigned emitted;
+  static _Atomic unsigned standard_emitted;
+  const int standard_fd = fd >= 0 && fd <= STDERR_FILENO;
+  const unsigned index = atomic_fetch_add_explicit(
+      standard_fd ? &standard_emitted : &emitted, 1, memory_order_relaxed);
+  if (index < (standard_fd ? 8u : 512u)) {
+    char line[640];
+    size_t used = trace_append(line, 0, "ART filesystem failure: op=", 32);
+    used = trace_append(line, used, operation, 8);
+    used = trace_append(line, used, " fd=", 4);
+    used = trace_append_int(line, used, fd);
+    used = trace_append(line, used, " errno=", 7);
+    used = trace_append_int(line, used, guest_error);
+    used = trace_append(line, used, " path=", 6);
+    used = trace_append(line, used,
+        path != NULL && guest_error != 14 ? path : "(unavailable)", 512);
+    line[used++] = '\n';
+    (void)write(STDERR_FILENO, line, used);
+  }
+  darwin_art_bionic_errno_store(guest_error);
+  errno = host_error;
+}
+
 typedef int (*DarwinArtProcMapsRegionCallback)(void* context, uint64_t start,
                                                uint64_t end,
-                                               int protection);
+                                               int protection,
+                                               const char* path,
+                                               uint64_t file_offset);
 
 int darwin_art_bionic_fs_host_enumerate_regions(
     DarwinArtProcMapsRegionCallback callback, void* context) {
@@ -38,7 +97,29 @@ int darwin_art_bionic_fs_host_enumerate_regions(
     }
     if (address > UINT64_MAX - size) return EOVERFLOW;
     const uint64_t end = address + size;
-    if (callback(context, address, end, info.protection) != 0) return ENOMEM;
+    // Mach's region API reports protection and bounds, but not the backing
+    // vnode name.  proc_pidinfo is the Darwin equivalent needed to expose
+    // Android's /proc/*/{maps,smaps} pathname and offset fields.  Anonymous
+    // regions, and regions for which the diagnostic query is unavailable,
+    // deliberately remain unnamed rather than leaking an unrelated host
+    // path or failing the complete proc snapshot.
+    const char* path = NULL;
+    uint64_t file_offset = 0;
+    struct proc_regionwithpathinfo path_info = {0};
+    const int path_result = proc_pidinfo(
+        getpid(), PROC_PIDREGIONPATHINFO, address, &path_info,
+        sizeof(path_info));
+    if (path_result == (int)sizeof(path_info) &&
+        path_info.prp_prinfo.pri_address <= address &&
+        address - path_info.prp_prinfo.pri_address < path_info.prp_prinfo.pri_size &&
+        path_info.prp_vip.vip_path[0] != '\0') {
+      path = path_info.prp_vip.vip_path;
+      file_offset = path_info.prp_prinfo.pri_offset +
+          (address - path_info.prp_prinfo.pri_address);
+    }
+    if (callback(context, address, end, info.protection, path, file_offset) != 0) {
+      return ENOMEM;
+    }
     address = end;
   }
 }
@@ -46,6 +127,8 @@ int darwin_art_bionic_fs_host_enumerate_regions(
 _Static_assert(sizeof(void*) == 8, "Android and Darwin arm64 pointer width drift");
 _Static_assert(sizeof(size_t) == 8, "Android and Darwin arm64 size_t width drift");
 _Static_assert(sizeof(intptr_t) == 8, "Android ssize_t/Darwin intptr_t width drift");
+_Static_assert(_SC_NPROCESSORS_CONF == 57 && _SC_NPROCESSORS_ONLN == 58,
+               "Darwin sysconf processor identifiers drift");
 _Static_assert(sizeof(DarwinArtAndroidStat) == 128, "Android arm64 stat size drift");
 _Static_assert(offsetof(DarwinArtAndroidStat, st_mode) == 16, "stat mode offset drift");
 _Static_assert(offsetof(DarwinArtAndroidStat, st_size) == 48, "stat size offset drift");
@@ -144,10 +227,110 @@ int darwin_art_bionic_fs_host_record_lock(int host_fd, int android_command,
   return 0;
 }
 
+static int host_flags_from_android_private(int flags) {
+  int host = flags & O_ACCMODE;
+#define MAP_PRIVATE_FLAG(android_flag, host_flag) \
+  do { if ((flags & (android_flag)) != 0) host |= (host_flag); } while (0)
+  MAP_PRIVATE_FLAG(64, O_CREAT);
+  MAP_PRIVATE_FLAG(128, O_EXCL);
+  MAP_PRIVATE_FLAG(512, O_TRUNC);
+  MAP_PRIVATE_FLAG(1024, O_APPEND);
+  MAP_PRIVATE_FLAG(2048, O_NONBLOCK);
+#ifdef O_DSYNC
+  MAP_PRIVATE_FLAG(4096, O_DSYNC);
+#endif
+#ifdef O_SYNC
+  MAP_PRIVATE_FLAG(1052672, O_SYNC);
+#endif
+#ifdef O_DIRECTORY
+  MAP_PRIVATE_FLAG(16384, O_DIRECTORY);
+#endif
+#ifdef O_NOFOLLOW
+  MAP_PRIVATE_FLAG(32768, O_NOFOLLOW);
+#endif
+#ifdef O_CLOEXEC
+  MAP_PRIVATE_FLAG(524288, O_CLOEXEC);
+#endif
+#undef MAP_PRIVATE_FLAG
+  return host;
+}
+
+int darwin_art_bionic_fs_host_openat_private(int root_fd, const char* relative,
+                                             int android_flags, uint32_t mode,
+                                             int* host_errno) {
+  if (relative == NULL || relative[0] == '\0' || host_errno == NULL) return -2;
+  const int saved_errno = errno;
+  char* copy = strdup(relative);
+  if (copy == NULL) {
+    *host_errno = ENOMEM;
+    errno = saved_errno;
+    return -1;
+  }
+  int directory = dup(root_fd);
+  if (directory < 0) {
+    *host_errno = errno;
+    free(copy);
+    errno = saved_errno;
+    return -1;
+  }
+  char* cursor = copy;
+  char* component = NULL;
+  char* next = NULL;
+  int result = -1;
+  while ((component = strsep(&cursor, "/")) != NULL) {
+    if (component[0] == '\0' || strcmp(component, ".") == 0 ||
+        strcmp(component, "..") == 0) {
+      *host_errno = EINVAL;
+      break;
+    }
+    next = cursor;
+    const int final_component = next == NULL || *next == '\0';
+    if (final_component) {
+      int host_flags = host_flags_from_android_private(android_flags);
+#ifdef O_NOFOLLOW
+      host_flags |= O_NOFOLLOW;
+#endif
+      result = openat(directory, component, host_flags, (mode_t)mode);
+      *host_errno = result < 0 ? errno : 0;
+      break;
+    }
+    int child_flags = O_RDONLY;
+#ifdef O_DIRECTORY
+    child_flags |= O_DIRECTORY;
+#endif
+#ifdef O_NOFOLLOW
+    child_flags |= O_NOFOLLOW;
+#endif
+#ifdef O_CLOEXEC
+    child_flags |= O_CLOEXEC;
+#endif
+    const int child = openat(directory, component, child_flags, 0);
+    if (child < 0) {
+      *host_errno = errno;
+      break;
+    }
+    (void)close(directory);
+    directory = child;
+  }
+  (void)close(directory);
+  free(copy);
+  errno = saved_errno;
+  return result;
+}
+
 int darwin_art_bionic_open(const char* path, int flags, uint32_t mode) {
   const int saved_host_errno = errno;
   const int result = darwin_art_bionic_fs_open_core(path, flags, mode);
+  if (result < 0) trace_fs_failure("open", path, -1);
   errno = saved_host_errno;
+  return result;
+}
+
+long darwin_art_bionic_fs_host_cpu_count(int online) {
+  const int saved_errno = errno;
+  const long result =
+      sysconf(online ? _SC_NPROCESSORS_ONLN : _SC_NPROCESSORS_CONF);
+  errno = saved_errno;
   return result;
 }
 
@@ -156,6 +339,7 @@ int darwin_art_bionic_openat(int directory_fd, const char* path, int flags,
   const int saved_host_errno = errno;
   const int result =
       darwin_art_bionic_fs_openat_core(directory_fd, path, flags, mode);
+  if (result < 0) trace_fs_failure("openat", path, directory_fd);
   errno = saved_host_errno;
   return result;
 }
@@ -170,6 +354,7 @@ int darwin_art_bionic_chmod(const char* path, uint32_t mode) {
 intptr_t darwin_art_bionic_read(int fd, void* buffer, size_t count) {
   const int saved_host_errno = errno;
   const intptr_t result = darwin_art_bionic_fs_read_core(fd, buffer, count);
+  if (result < 0) trace_fs_failure("read", NULL, fd);
   errno = saved_host_errno;
   return result;
 }
@@ -179,6 +364,7 @@ intptr_t darwin_art_bionic_pread(int fd, void* buffer, size_t count,
   const int saved_host_errno = errno;
   const intptr_t result =
       darwin_art_bionic_fs_pread_core(fd, buffer, count, offset);
+  if (result < 0) trace_fs_failure("pread", NULL, fd);
   errno = saved_host_errno;
   return result;
 }
@@ -188,6 +374,7 @@ intptr_t darwin_art_bionic_pwrite(int fd, const void* buffer, size_t count,
   const int saved_host_errno = errno;
   const intptr_t result =
       darwin_art_bionic_fs_pwrite_core(fd, buffer, count, offset);
+  if (result < 0) trace_fs_failure("pwrite", NULL, fd);
   errno = saved_host_errno;
   return result;
 }
@@ -195,6 +382,23 @@ intptr_t darwin_art_bionic_pwrite(int fd, const void* buffer, size_t count,
 intptr_t darwin_art_bionic_write(int fd, const void* buffer, size_t count) {
   const int saved_host_errno = errno;
   const intptr_t result = darwin_art_bionic_fs_write_core(fd, buffer, count);
+  if (result < 0) trace_fs_failure("write", NULL, fd);
+  errno = saved_host_errno;
+  return result;
+}
+
+intptr_t darwin_art_bionic_readv(int fd, const struct iovec* vectors, int count) {
+  const int saved_host_errno = errno;
+  const intptr_t result = darwin_art_bionic_fs_readv_core(fd, vectors, count);
+  if (result < 0) trace_fs_failure("readv", NULL, fd);
+  errno = saved_host_errno;
+  return result;
+}
+
+intptr_t darwin_art_bionic_writev(int fd, const struct iovec* vectors, int count) {
+  const int saved_host_errno = errno;
+  const intptr_t result = darwin_art_bionic_fs_writev_core(fd, vectors, count);
+  if (result < 0) trace_fs_failure("writev", NULL, fd);
   errno = saved_host_errno;
   return result;
 }
@@ -604,6 +808,7 @@ int darwin_art_bionic_remove(const char* path) {
 int darwin_art_bionic_rename(const char* old_path, const char* new_path) {
   const int saved_host_errno = errno;
   const int result = darwin_art_bionic_fs_rename_core(old_path, new_path);
+  if (result < 0) trace_fs_failure("rename", old_path, -1);
   errno = saved_host_errno;
   return result;
 }
@@ -838,6 +1043,7 @@ static const Binding kBindings[] = {
     {"pread", (DarwinArtBionicFsFunction)darwin_art_bionic_pread},
     {"pwrite", (DarwinArtBionicFsFunction)darwin_art_bionic_pwrite},
     {"read", (DarwinArtBionicFsFunction)darwin_art_bionic_read},
+    {"readv", (DarwinArtBionicFsFunction)darwin_art_bionic_readv},
     {"readdir", (DarwinArtBionicFsFunction)darwin_art_bionic_readdir},
     {"readdir_r", (DarwinArtBionicFsFunction)darwin_art_bionic_readdir_r},
     {"readlink", (DarwinArtBionicFsFunction)darwin_art_bionic_readlink},
@@ -860,6 +1066,7 @@ static const Binding kBindings[] = {
     {"utimensat", (DarwinArtBionicFsFunction)darwin_art_bionic_utimensat},
     {"utimes", (DarwinArtBionicFsFunction)darwin_art_bionic_fs_path_unsupported},
     {"write", (DarwinArtBionicFsFunction)darwin_art_bionic_write},
+    {"writev", (DarwinArtBionicFsFunction)darwin_art_bionic_writev},
 };
 
 DarwinArtBionicFsFunction darwin_art_bionic_fs_resolve(const char* import_name) {

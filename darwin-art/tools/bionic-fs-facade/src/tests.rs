@@ -41,6 +41,19 @@ mod tests {
     }
 
     #[test]
+    fn proc_self_realpath_resolves_to_numeric_process_directory() {
+        let facade = Facade::new(File::open("/").unwrap(), b"/system", b"/system").unwrap();
+        let mut resolved = [0_i8; 4096];
+        let result = unsafe { facade.realpath(b"/proc/self", resolved.as_mut_ptr()) };
+        assert_eq!(result, resolved.as_mut_ptr());
+        let actual = unsafe { CStr::from_ptr(resolved.as_ptr()) };
+        assert_eq!(
+            actual.to_bytes(),
+            format!("/proc/{}", std::process::id()).as_bytes()
+        );
+    }
+
+    #[test]
     fn descriptor_allocator_reserves_central_broker_token_range() {
         let mut table = DescriptorTable {
             next: CENTRAL_BROKER_TOKEN_MARKER - 1,
@@ -185,6 +198,49 @@ mod tests {
     }
 
     #[test]
+    fn virtual_regular_file_readv_uses_one_vector_operation() {
+        let project = File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/../..")).unwrap();
+        let facade = Facade::new(project, b"/", b"/").unwrap();
+        let fd = facade.open(b"/Cargo.toml", O_RDONLY);
+        assert!(fd >= 10_000);
+        let mut first = [0_u8; 5];
+        let mut second = [0_u8; 5];
+        let vectors = [
+            NativeIovec {
+                base: first.as_mut_ptr().cast(),
+                length: first.len(),
+            },
+            NativeIovec {
+                base: second.as_mut_ptr().cast(),
+                length: second.len(),
+            },
+        ];
+        // SAFETY: both buffers and the vector array remain live for the call.
+        assert_eq!(unsafe { facade.readv(fd, vectors.as_ptr(), 2) }, 10);
+        assert_eq!(&first, b"[work");
+        assert_eq!(&second, b"space");
+        assert_eq!(facade.close(fd), 0);
+    }
+
+    #[test]
+    fn private_root_open_rejects_final_symlink_without_canonicalize_race() {
+        let private_root = std::env::temp_dir().join(format!(
+            "darwin-art-private-nofollow-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        fs::create_dir_all(&private_root).unwrap();
+        let outside = private_root.with_extension("-outside");
+        fs::write(&outside, b"outside").unwrap();
+        std::os::unix::fs::symlink(&outside, private_root.join("escape")).unwrap();
+        let mut facade = Facade::new(File::open("/").unwrap(), b"/", b"/").unwrap();
+        facade.private_root = Some(private_root.clone());
+        assert_eq!(facade.open(private_root.join("escape").as_os_str().as_bytes(), O_RDONLY), -1);
+        fs::remove_dir_all(private_root).unwrap();
+        fs::remove_file(outside).unwrap();
+    }
+
+    #[test]
     fn private_file_fcntl_translates_android_descriptor_and_status_flags() {
         let private_root = std::env::temp_dir().join(format!(
             "darwin-art-fcntl-{}-{:?}",
@@ -212,6 +268,41 @@ mod tests {
     }
 
     #[test]
+    fn absolute_private_host_read_and_android_create_use_host_capability() {
+        let private_root = std::env::temp_dir().join(format!(
+            "darwin-art-private-open-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        fs::create_dir_all(&private_root).unwrap();
+        let existing = private_root.join("source.so");
+        fs::write(&existing, b"ELF").unwrap();
+        let missing = private_root.join("copy.so");
+
+        let mut facade = Facade::new(File::open("/").unwrap(), b"/", b"/").unwrap();
+        facade.private_root = Some(private_root.clone());
+
+        let input_fd = facade.open(existing.as_os_str().as_bytes(), O_RDONLY);
+        assert!(input_fd >= 10_000);
+        let mut bytes = [0_u8; 3];
+        assert_eq!(
+            unsafe { facade.read(input_fd, bytes.as_mut_ptr().cast(), bytes.len()) },
+            3
+        );
+        assert_eq!(&bytes, b"ELF");
+        assert_eq!(facade.close(input_fd), 0);
+
+        // 0xc1 is Android O_WRONLY|O_CREAT|O_EXCL. This must create the
+        // missing final component below the private host root.
+        let output_fd = facade.open(missing.as_os_str().as_bytes(), O_WRONLY | O_CREAT | O_EXCL);
+        assert!(output_fd >= 10_000);
+        assert_eq!(facade.close(output_fd), 0);
+        assert!(missing.is_file());
+
+        fs::remove_dir_all(private_root).unwrap();
+    }
+
+    #[test]
     fn proc_maps_accepts_self_thread_self_and_virtual_pid_aliases() {
         assert!(Facade::proc_self_maps(b"/proc/self/maps"));
         assert!(Facade::proc_self_maps(b"/proc/thread-self/maps"));
@@ -221,6 +312,38 @@ mod tests {
         assert!(!Facade::proc_self_maps(b"/proc/0/maps"));
         assert!(!Facade::proc_self_maps(b"/proc/not-a-pid/maps"));
         assert!(!Facade::proc_self_maps(b"/proc/self/status"));
+    }
+
+    #[test]
+    fn proc_smaps_is_a_readonly_android_memory_snapshot() {
+        assert!(Facade::proc_self_smaps(b"/proc/self/smaps"));
+        assert!(Facade::proc_self_smaps(b"/proc/thread-self/smaps"));
+        let current = format!("/proc/{}/smaps", std::process::id());
+        assert!(Facade::proc_self_smaps(current.as_bytes()));
+        assert!(Facade::proc_self_smaps(b"/proc/999999999/smaps"));
+        assert!(!Facade::proc_self_smaps(b"/proc/0/smaps"));
+        assert!(!Facade::proc_self_smaps(b"/proc/self/maps"));
+        assert!(!Facade::proc_self_smaps(b"/proc/not-a-pid/smaps"));
+
+        let facade = Facade::new(File::open("/").unwrap(), b"/system", b"/system").unwrap();
+        let fd = facade.open(b"/proc/self/smaps", O_RDONLY);
+        assert!(fd >= 10_000);
+        let mut contents = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        loop {
+            // SAFETY: chunk remains writable for the synchronous facade read.
+            let count = unsafe { facade.read(fd, chunk.as_mut_ptr().cast(), chunk.len()) };
+            assert!(count >= 0);
+            if count == 0 {
+                break;
+            }
+            contents.extend_from_slice(&chunk[..usize::try_from(count).unwrap()]);
+        }
+        let contents = String::from_utf8(contents).unwrap();
+        assert!(contents.contains("Shared_Dirty:"));
+        assert!(contents.contains("Private_Dirty:"));
+        assert!(contents.contains("VmFlags:"));
+        assert_eq!(facade.close(fd), 0);
     }
 
     #[test]
@@ -546,9 +669,14 @@ mod tests {
 
     #[test]
     fn synthetic_device_procfs_is_bounded_and_consistent() {
+        // The topology shim is an internal host query and must not leak a
+        // Darwin errno change into the calling guest operation.
+        unsafe { *__error() = 33_210 };
+        let (configured, online) = host_cpu_counts();
+        assert_eq!(unsafe { *__error() }, 33_210);
         let cpuinfo = Facade::synthetic_proc_contents(b"/proc/cpuinfo").unwrap();
         let cpuinfo = String::from_utf8(cpuinfo).unwrap();
-        assert_eq!(cpuinfo.matches("processor\t:").count(), 8);
+        assert_eq!(cpuinfo.matches("processor\t:").count(), online);
         let meminfo = String::from_utf8(
             Facade::synthetic_proc_contents(b"/proc/meminfo").unwrap(),
         )
@@ -558,25 +686,78 @@ mod tests {
             Facade::synthetic_proc_contents(b"/proc/4242/status"),
             Facade::synthetic_proc_contents(b"/proc/self/status")
         );
+        let status = String::from_utf8(
+            Facade::synthetic_proc_contents(b"/proc/self/status").unwrap(),
+        )
+        .unwrap();
+        assert!(status.ends_with(&format!("Cpus_allowed_list:\t0-{}\n", online - 1)));
         assert_eq!(
             Facade::synthetic_proc_contents(
-                b"/sys/devices/system/cpu/cpu7/cpufreq/cpuinfo_max_freq"
+                format!(
+                    "/sys/devices/system/cpu/cpu{}/cpufreq/cpuinfo_max_freq",
+                    configured - 1
+                )
+                .as_bytes(),
             ),
-            Some(b"2400000\n".to_vec())
+            Some(if configured - 1 < configured / 2 {
+                b"1800000\n".to_vec()
+            } else {
+                b"2400000\n".to_vec()
+            })
         );
         assert_eq!(
             Facade::synthetic_proc_contents(b"/sys/devices/system/cpu/cpu0/cpu_capacity"),
-            Some(b"512\n".to_vec())
+            Some(if configured / 2 > 0 {
+                b"512\n".to_vec()
+            } else {
+                b"1024\n".to_vec()
+            })
         );
         assert_eq!(
             Facade::synthetic_proc_contents(
-                b"/sys/devices/system/cpu/cpu3/cpufreq/cpuinfo_max_freq"
+                b"/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq"
             ),
-            Some(b"1800000\n".to_vec())
+            Some(if configured / 2 > 0 {
+                b"1800000\n".to_vec()
+            } else {
+                b"2400000\n".to_vec()
+            })
+        );
+        assert_eq!(
+            Facade::synthetic_proc_contents(b"/sys/devices/system/cpu/possible"),
+            Some(format!("0-{}\n", configured - 1).into_bytes())
+        );
+        assert_eq!(
+            Facade::synthetic_proc_contents(b"/sys/devices/system/cpu/online"),
+            Some(format!("0-{}\n", online - 1).into_bytes())
         );
         assert!(Facade::synthetic_proc_contents(
-            b"/sys/devices/system/cpu/cpu8/cpu_capacity"
+            format!(
+                "/sys/devices/system/cpu/cpu{}/cpu_capacity",
+                configured
+            )
+            .as_bytes()
         )
         .is_none());
+        assert!(Facade::synthetic_proc_contents(
+            format!(
+                "/sys/devices/system/cpu/cpu{}/cpufreq/cpuinfo_max_freq",
+                configured
+            )
+            .as_bytes()
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn ordinary_paths_bypass_synthetic_cpu_topology() {
+        assert_eq!(
+            Facade::synthetic_proc_contents(b"/system/etc/payload.txt"),
+            None
+        );
+        assert_eq!(
+            Facade::synthetic_proc_contents(b"/proc/not-a-synthetic-surface"),
+            None
+        );
     }
 }

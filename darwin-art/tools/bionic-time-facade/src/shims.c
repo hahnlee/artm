@@ -311,20 +311,44 @@ long darwin_art_bionic_sysconf(int android_name) {
   switch (android_name) {
     case ANDROID_SC_PAGESIZE:
     case ANDROID_SC_PAGE_SIZE:
-      result = 4096;
+      // Android's page-size selectors describe the process's actual mapping
+      // granularity. Apple Silicon hosts currently use 16 KiB pages; keeping
+      // a 4 KiB answer here makes native engines disagree with mmap/mprotect.
+      result = (long)getpagesize();
+      if (result <= 0) {
+        errno = saved_host_errno;
+        return FailCapability();
+      }
       break;
     case ANDROID_SC_NPROCESSORS_CONF:
+      // Match Java/libcore's host-backed topology. Do not use a process
+      // affinity query here: it can describe a virtual guest restriction.
+      result = kHostSysconf(_SC_NPROCESSORS_CONF);
+      if (result <= 0) {
+        errno = saved_host_errno;
+        return FailCapability();
+      }
+      break;
     case ANDROID_SC_NPROCESSORS_ONLN:
-      // Keep the process-wide device snapshot independent of the host's
-      // scheduler topology. Native engines also read /proc/cpuinfo and the
-      // CPU sysfs view, which expose the same eight virtual processors.
-      result = 8;
+      // The online selector has its own Darwin counterpart; on this host it
+      // currently agrees with configured CPUs, but preserve POSIX semantics if
+      // that changes.
+      result = kHostSysconf(_SC_NPROCESSORS_ONLN);
+      if (result <= 0) {
+        errno = saved_host_errno;
+        return FailCapability();
+      }
       break;
     case ANDROID_SC_PHYS_PAGES:
-      result = 2 * 1024 * 1024;
+      // Preserve the virtual device's fixed 8 GiB physical-memory snapshot,
+      // expressed in the host's actual page units.
+      result = (long)(8ULL * 1024ULL * 1024ULL * 1024ULL /
+                      (unsigned long)getpagesize());
       break;
     case ANDROID_SC_AVPHYS_PAGES:
-      result = 1024 * 1024;
+      // Preserve the corresponding 4 GiB available-memory snapshot.
+      result = (long)(4ULL * 1024ULL * 1024ULL * 1024ULL /
+                      (unsigned long)getpagesize());
       break;
     default:
       errno = saved_host_errno;

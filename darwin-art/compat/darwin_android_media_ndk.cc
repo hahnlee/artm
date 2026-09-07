@@ -2,6 +2,7 @@
 
 #include "darwin_angle_egl.h"
 #include "darwin_art_bionic_socket_broker.h"
+#include "darwin_vp9_decoder.h"
 
 #include <android/hardware_buffer.h>
 #include <CoreMedia/CoreMedia.h>
@@ -22,6 +23,7 @@
 
 struct AMediaFormat {
   std::unordered_map<std::string, int32_t> integers;
+  std::unordered_map<std::string, int64_t> wide_integers;
   std::unordered_map<std::string, float> floats;
   std::unordered_map<std::string, std::string> strings;
   std::unordered_map<std::string, std::vector<uint8_t>> buffers;
@@ -33,8 +35,18 @@ struct AMediaCodec {
   std::string mime;
   bool configured = false;
   bool started = false;
+  bool input_owned = false;
+  bool output_owned = false;
+  bool output_format_pending = false;
+  bool eos = false;
+  int32_t width = 0;
+  int32_t height = 0;
+  darwin_art::Vp9Decoder vp9;
   std::vector<uint8_t> input;
-  std::deque<std::vector<uint8_t>> output;
+  // The dequeued slot retains full capacity across zero-sized EOS buffers.
+  // Android reports valid bytes in BufferInfo, not in getOutputBuffer capacity.
+  std::vector<uint8_t> output_buffer;
+  std::deque<darwin_art::DecodedVideoFrame> output;
   CMVideoFormatDescriptionRef format = nullptr;
   VTDecompressionSessionRef session = nullptr;
 };
@@ -93,6 +105,23 @@ MEDIA_KEY(AMEDIAFORMAT_KEY_SLICE_HEIGHT, "slice-height");
 MEDIA_KEY(AMEDIAFORMAT_KEY_STRIDE, "stride");
 MEDIA_KEY(AMEDIAFORMAT_KEY_TEMPORAL_LAYERING, "ts-schema");
 MEDIA_KEY(AMEDIAFORMAT_KEY_WIDTH, "width");
+MEDIA_KEY(AMEDIAFORMAT_KEY_AAC_PROFILE, "aac-profile");
+MEDIA_KEY(AMEDIAFORMAT_KEY_CHANNEL_COUNT, "channel-count");
+MEDIA_KEY(AMEDIAFORMAT_KEY_CHANNEL_MASK, "channel-mask");
+MEDIA_KEY(AMEDIAFORMAT_KEY_DURATION, "durationUs");
+MEDIA_KEY(AMEDIAFORMAT_KEY_FLAC_COMPRESSION_LEVEL, "flac-compression-level");
+MEDIA_KEY(AMEDIAFORMAT_KEY_IS_ADTS, "is-adts");
+MEDIA_KEY(AMEDIAFORMAT_KEY_IS_AUTOSELECT, "is-autoselect");
+MEDIA_KEY(AMEDIAFORMAT_KEY_IS_DEFAULT, "is-default");
+MEDIA_KEY(AMEDIAFORMAT_KEY_IS_FORCED_SUBTITLE, "is-forced-subtitle");
+MEDIA_KEY(AMEDIAFORMAT_KEY_LANGUAGE, "language");
+MEDIA_KEY(AMEDIAFORMAT_KEY_MAX_HEIGHT, "max-height");
+MEDIA_KEY(AMEDIAFORMAT_KEY_MAX_INPUT_SIZE, "max-input-size");
+MEDIA_KEY(AMEDIAFORMAT_KEY_MAX_WIDTH, "max-width");
+MEDIA_KEY(AMEDIAFORMAT_KEY_PUSH_BLANK_BUFFERS_ON_STOP, "push-blank-buffers-on-shutdown");
+MEDIA_KEY(AMEDIAFORMAT_KEY_REPEAT_PREVIOUS_FRAME_AFTER, "repeat-previous-frame-after");
+MEDIA_KEY(AMEDIAFORMAT_KEY_SAMPLE_RATE, "sample-rate");
+MEDIA_KEY(AMEDIAFORMAT_KEY_ROTATION, "rotation-degrees");
 #undef MEDIA_KEY
 
 }  // namespace
@@ -102,6 +131,23 @@ extern "C" AMediaFormat* AMediaFormat_new() { return new AMediaFormat; }
 extern "C" int32_t AMediaFormat_delete(AMediaFormat* format) {
   delete format;
   return 0;
+}
+
+extern "C" const char* AMediaFormat_toString(AMediaFormat* format) {
+  static thread_local std::string description;
+  description.clear();
+  if (format == nullptr) return description.c_str();
+  description = "AMediaFormat{";
+  bool first = true;
+  for (const auto& entry : format->strings) {
+    if (!first) description += ", ";
+    first = false;
+    description += entry.first;
+    description += "=";
+    description += entry.second;
+  }
+  description += "}";
+  return description.c_str();
 }
 
 extern "C" bool AMediaFormat_getInt32(AMediaFormat* format,
@@ -114,10 +160,51 @@ extern "C" bool AMediaFormat_getInt32(AMediaFormat* format,
   return true;
 }
 
+extern "C" bool AMediaFormat_getInt64(AMediaFormat* format,
+                                       const char* name, int64_t* output) {
+  if (format == nullptr || name == nullptr || output == nullptr) return false;
+  const auto found = format->wide_integers.find(name);
+  if (found == format->wide_integers.end()) return false;
+  *output = found->second;
+  return true;
+}
+
+extern "C" bool AMediaFormat_getFloat(AMediaFormat* format,
+                                       const char* name, float* output) {
+  if (format == nullptr || name == nullptr || output == nullptr) return false;
+  const auto found = format->floats.find(name);
+  if (found == format->floats.end()) return false;
+  *output = found->second;
+  return true;
+}
+
+extern "C" bool AMediaFormat_getSize(AMediaFormat* format,
+                                      const char* name, size_t* output) {
+  int64_t value = 0;
+  if (!AMediaFormat_getInt64(format, name, &value) || value < 0) return false;
+  *output = static_cast<size_t>(value);
+  return true;
+}
+
+extern "C" bool AMediaFormat_getString(AMediaFormat* format,
+                                        const char* name,
+                                        const char** output) {
+  if (format == nullptr || name == nullptr || output == nullptr) return false;
+  const auto found = format->strings.find(name);
+  if (found == format->strings.end()) return false;
+  *output = found->second.c_str();
+  return true;
+}
+
 extern "C" void AMediaFormat_setInt32(AMediaFormat* format,
                                        const char* name,
                                        int32_t value) {
   if (format != nullptr && name != nullptr) format->integers[name] = value;
+}
+
+extern "C" void AMediaFormat_setInt64(AMediaFormat* format,
+                                       const char* name, int64_t value) {
+  if (format != nullptr && name != nullptr) format->wide_integers[name] = value;
 }
 
 extern "C" void AMediaFormat_setFloat(AMediaFormat* format,
@@ -152,6 +239,8 @@ extern "C" void AMediaFormat_setBuffer(AMediaFormat* format, const char* name,
   format->buffers[name] = std::vector<uint8_t>(bytes, bytes + size);
 }
 
+#include "darwin_media_extractor_ndk.inc"
+
 std::vector<uint8_t> StripCodecStartCode(const std::vector<uint8_t>& value) {
   size_t offset = 0;
   if (value.size() >= 4 && value[0] == 0 && value[1] == 0 && value[2] == 0 &&
@@ -162,7 +251,7 @@ std::vector<uint8_t> StripCodecStartCode(const std::vector<uint8_t>& value) {
 }
 
 void NdkDecodeCallback(void* refcon, void*, OSStatus status, VTDecodeInfoFlags,
-                       CVImageBufferRef image, CMTime, CMTime) {
+                       CVImageBufferRef image, CMTime pts, CMTime) {
   auto* codec = static_cast<AMediaCodec*>(refcon);
   if (codec == nullptr || status != noErr || image == nullptr) return;
   auto pixel = static_cast<CVPixelBufferRef>(image);
@@ -186,13 +275,19 @@ void NdkDecodeCallback(void* refcon, void*, OSStatus status, VTDecodeInfoFlags,
   CVPixelBufferUnlockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
   if (!frame.empty()) {
     std::lock_guard<std::mutex> lock(codec->mutex);
-    codec->output.push_back(std::move(frame));
+    darwin_art::DecodedVideoFrame decoded;
+    decoded.bytes = std::move(frame);
+    decoded.width = width;
+    decoded.height = height;
+    decoded.pts_us = CMTIME_IS_VALID(pts) ? CMTimeGetSeconds(pts) * 1000000 : 0;
+    codec->output.push_back(std::move(decoded));
   }
 }
 
 extern "C" AMediaCodec* AMediaCodec_createCodecByName(const char* name) {
   if (name == nullptr || (std::strcmp(name, "c2.darwin.avc.decoder") != 0 &&
-                          std::strcmp(name, "c2.darwin.hevc.decoder") != 0))
+                          std::strcmp(name, "c2.darwin.hevc.decoder") != 0 &&
+                          std::strcmp(name, "c2.darwin.vp9.decoder") != 0))
     return nullptr;
   auto* codec = new (std::nothrow) AMediaCodec();
   if (codec != nullptr) codec->name = name;
@@ -205,6 +300,8 @@ extern "C" AMediaCodec* AMediaCodec_createDecoderByType(const char* mime) {
     return AMediaCodec_createCodecByName("c2.darwin.hevc.decoder");
   if (std::strcmp(mime, "video/avc") == 0)
     return AMediaCodec_createCodecByName("c2.darwin.avc.decoder");
+  if (std::strcmp(mime, "video/x-vnd.on2.vp9") == 0)
+    return AMediaCodec_createCodecByName("c2.darwin.vp9.decoder");
   return nullptr;
 }
 
@@ -225,11 +322,34 @@ extern "C" int32_t AMediaCodec_delete(AMediaCodec* codec) {
 }
 extern "C" int32_t AMediaCodec_configure(AMediaCodec* codec,
                                           const AMediaFormat* format,
-                                          ANativeWindow*,
-                                          AMediaCrypto*,
-                                          uint32_t) {
+                                          ANativeWindow* surface,
+                                          AMediaCrypto* crypto,
+                                          uint32_t flags) {
   if (codec == nullptr || format == nullptr) return kMediaErrorInvalidObject;
+  if (surface != nullptr || crypto != nullptr || flags != 0 || codec->configured) {
+    return kMediaErrorUnsupported;
+  }
   auto mime = format->strings.find("mime");
+  if (mime == format->strings.end()) return kMediaErrorUnsupported;
+  auto width = format->integers.find("width");
+  auto height = format->integers.find("height");
+  if (width == format->integers.end() || height == format->integers.end() ||
+      width->second <= 0 || height->second <= 0 ||
+      width->second > 16384 || height->second > 16384) return kMediaErrorUnsupported;
+  codec->width = width->second;
+  codec->height = height->second;
+  codec->mime = mime->second;
+  if (codec->mime == "video/x-vnd.on2.vp9") {
+    if (!codec->vp9.Initialize(codec->width, codec->height)) return kMediaErrorUnsupported;
+    codec->input.resize(4 * 1024 * 1024);
+    codec->output_buffer.resize(size_t(codec->width) * codec->height +
+        2 * size_t((codec->width + 1) / 2) * ((codec->height + 1) / 2));
+    codec->configured = true;
+    if (std::getenv("DARWIN_ART_DEBUG_MEDIA_CODEC")) {
+      fprintf(stderr, "ART NDK MediaCodec: VP9 configured %dx%d\n", codec->width, codec->height);
+    }
+    return 0;
+  }
   auto sps_it = format->buffers.find("csd-0");
   auto pps_it = format->buffers.find("csd-1");
   auto vps_it = format->buffers.find("csd-2");
@@ -262,6 +382,7 @@ extern "C" int32_t AMediaCodec_configure(AMediaCodec* codec,
                                          &codec->session);
   if (status != noErr) return kMediaErrorUnsupported;
   codec->input.resize(4 * 1024 * 1024);
+  codec->output_buffer.resize(size_t(codec->width) * codec->height * 3 / 2);
   codec->configured = true;
   return 0;
 }
@@ -269,6 +390,7 @@ extern "C" int32_t AMediaCodec_start(AMediaCodec* codec) {
   if (codec == nullptr) return kMediaErrorInvalidObject;
   if (!codec->configured) return kMediaErrorUnsupported;
   codec->started = true;
+  codec->output_format_pending = true;
   return 0;
 }
 extern "C" int32_t AMediaCodec_stop(AMediaCodec* codec) {
@@ -278,8 +400,16 @@ extern "C" int32_t AMediaCodec_stop(AMediaCodec* codec) {
 }
 extern "C" int32_t AMediaCodec_flush(AMediaCodec* codec) {
   if (codec == nullptr) return kMediaErrorInvalidObject;
+  if (codec->session) {
+    VTDecompressionSessionFinishDelayedFrames(codec->session);
+    VTDecompressionSessionWaitForAsynchronousFrames(codec->session);
+  }
   std::lock_guard<std::mutex> lock(codec->mutex);
   codec->output.clear();
+  codec->input_owned = codec->output_owned = codec->eos = false;
+  if (codec->mime == "video/x-vnd.on2.vp9" && !codec->vp9.Initialize(codec->width, codec->height)) {
+    return kMediaErrorUnsupported;
+  }
   return 0;
 }
 extern "C" int32_t AMediaCodec_setAsyncNotifyCallback(
@@ -302,28 +432,64 @@ extern "C" uint8_t* AMediaCodec_getOutputBuffer(AMediaCodec* codec, size_t index
   if (size != nullptr) *size = 0;
   if (codec == nullptr || index != 0) return nullptr;
   std::lock_guard<std::mutex> lock(codec->mutex);
-  if (codec->output.empty()) return nullptr;
-  if (size != nullptr) *size = codec->output.front().size();
-  return codec->output.front().data();
+  if (!codec->output_owned || codec->output.empty()) return nullptr;
+  if (size != nullptr) *size = codec->output_buffer.size();
+  return codec->output_buffer.data();
 }
 extern "C" AMediaFormat* AMediaCodec_getInputFormat(AMediaCodec*) {
   return AMediaFormat_new();
 }
-extern "C" AMediaFormat* AMediaCodec_getBufferFormat(AMediaCodec*, size_t) {
-  return AMediaFormat_new();
+extern "C" AMediaFormat* AMediaCodec_getOutputFormat(AMediaCodec* codec) {
+  if (!codec) return nullptr;
+  std::lock_guard<std::mutex> lock(codec->mutex);
+  auto* format = AMediaFormat_new();
+  format->strings["mime"] = "video/raw";
+  format->integers = {{"width", codec->width}, {"height", codec->height},
+      {"stride", codec->width}, {"slice-height", codec->height},
+      {"color-format", codec->mime == "video/x-vnd.on2.vp9" ? 0x13 : 0x15},
+      {"crop-left", 0}, {"crop-top", 0}, {"crop-right", codec->width - 1},
+      {"crop-bottom", codec->height - 1}, {"color-range", 2},
+      {"color-standard", 1}, {"color-transfer", 3}, {"rotation-degrees", 0}};
+  return format;
+}
+extern "C" AMediaFormat* AMediaCodec_getBufferFormat(AMediaCodec* codec, size_t) {
+  return AMediaCodec_getOutputFormat(codec);
 }
 extern "C" ssize_t AMediaCodec_dequeueInputBuffer(AMediaCodec* codec, int64_t) {
-  return codec != nullptr && codec->started ? 0 : -1;
+  if (!codec) return -1;
+  std::lock_guard<std::mutex> lock(codec->mutex);
+  if (!codec->started || codec->input_owned || codec->eos || codec->output.size() >= 4) return -1;
+  codec->input_owned = true;
+  return 0;
 }
 extern "C" ssize_t AMediaCodec_dequeueOutputBuffer(
     AMediaCodec* codec, AMediaCodecBufferInfo* info, int64_t) {
   if (codec == nullptr || info == nullptr) return -1;
   std::lock_guard<std::mutex> lock(codec->mutex);
-  if (codec->output.empty()) return -1;
+  if (!codec->started || codec->output_owned || codec->output.empty()) return -1;
+  const auto& next = codec->output.front();
+  if (next.width > 0 && next.height > 0 &&
+      (next.width != codec->width || next.height != codec->height)) {
+    codec->width = next.width;
+    codec->height = next.height;
+    codec->output_format_pending = true;
+  }
+  if (codec->output_format_pending) {
+    codec->output_format_pending = false;
+    return -2;
+  }
+  codec->output_owned = true;
   info->offset = 0;
-  info->size = static_cast<int32_t>(codec->output.front().size());
-  info->presentationTimeUs = 0;
-  info->flags = 0;
+  info->size = static_cast<int32_t>(codec->output.front().bytes.size());
+  info->presentationTimeUs = codec->output.front().pts_us;
+  info->flags = codec->output.front().flags;
+  if (!codec->output.front().bytes.empty()) {
+    codec->output_buffer.swap(codec->output.front().bytes);
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_MEDIA_CODEC")) {
+    fprintf(stderr, "ART NDK MediaCodec: output size=%d pts=%lld flags=%u\n",
+            info->size, static_cast<long long>(info->presentationTimeUs), info->flags);
+  }
   return 0;
 }
 extern "C" int32_t AMediaCodec_queueInputBuffer(AMediaCodec* codec,
@@ -333,8 +499,27 @@ extern "C" int32_t AMediaCodec_queueInputBuffer(AMediaCodec* codec,
                                                  uint64_t pts,
                                                  uint32_t flags) {
   if (codec == nullptr) return kMediaErrorInvalidObject;
-  if (index != 0 || !codec->started || codec->session == nullptr ||
-      offset + size > codec->input.size()) return kMediaErrorUnsupported;
+  if (index != 0 || !codec->started || offset > codec->input.size() ||
+      size > codec->input.size() - offset) return kMediaErrorUnsupported;
+  {
+    std::lock_guard<std::mutex> lock(codec->mutex);
+    if (!codec->input_owned || codec->eos) return kMediaErrorUnsupported;
+    codec->input_owned = false;
+    codec->eos = (flags & 4) != 0;
+    if (codec->mime == "video/x-vnd.on2.vp9") {
+      if (!codec->vp9.Decode(codec->input.data() + offset, size, pts, &codec->output)) {
+        return kMediaErrorUnsupported;
+      }
+      if (codec->eos) {
+        darwin_art::DecodedVideoFrame eos;
+        eos.pts_us = pts;
+        eos.flags = 4;
+        codec->output.emplace_back(std::move(eos));
+      }
+      return 0;
+    }
+  }
+  if (!codec->session) return kMediaErrorUnsupported;
   CMBlockBufferRef block = nullptr;
   OSStatus status = CMBlockBufferCreateWithMemoryBlock(
       kCFAllocatorDefault, nullptr, size, kCFAllocatorDefault, nullptr, 0,
@@ -362,9 +547,14 @@ extern "C" int32_t AMediaCodec_releaseOutputBuffer(AMediaCodec* codec,
   if (codec == nullptr) return kMediaErrorInvalidObject;
   if (index != 0) return kMediaErrorUnsupported;
   std::lock_guard<std::mutex> lock(codec->mutex);
-  if (codec->output.empty()) return kMediaErrorUnsupported;
+  if (!codec->output_owned || codec->output.empty()) return kMediaErrorUnsupported;
   codec->output.pop_front();
+  codec->output_owned = false;
   return 0;
+}
+extern "C" int32_t AMediaCodec_releaseOutputBufferAtTime(AMediaCodec* codec,
+                                                          size_t index, int64_t) {
+  return AMediaCodec_releaseOutputBuffer(codec, index, true);
 }
 extern "C" int32_t AMediaCodec_getName(AMediaCodec* codec, char** name) {
   if (name == nullptr) return kMediaErrorInvalidObject;
@@ -489,21 +679,51 @@ void* darwin_art_android_media_ndk_symbol(const char* symbol) {
   MEDIA_FUNCTION(AMediaCodec_getInputFormat)
   MEDIA_FUNCTION(AMediaCodec_getName)
   MEDIA_FUNCTION(AMediaCodec_getOutputBuffer)
+  MEDIA_FUNCTION(AMediaCodec_getOutputFormat)
   MEDIA_FUNCTION(AMediaCodec_queueInputBuffer)
   MEDIA_FUNCTION(AMediaCodec_releaseName)
   MEDIA_FUNCTION(AMediaCodec_releaseOutputBuffer)
+  MEDIA_FUNCTION(AMediaCodec_releaseOutputBufferAtTime)
   MEDIA_FUNCTION(AMediaCodec_setAsyncNotifyCallback)
   MEDIA_FUNCTION(AMediaCodec_setParameters)
   MEDIA_FUNCTION(AMediaCodec_start)
   MEDIA_FUNCTION(AMediaCodec_stop)
   MEDIA_FUNCTION(AMediaFormat_delete)
   MEDIA_FUNCTION(AMediaFormat_getInt32)
+  MEDIA_FUNCTION(AMediaFormat_getInt64)
+  MEDIA_FUNCTION(AMediaFormat_getFloat)
+  MEDIA_FUNCTION(AMediaFormat_getSize)
+  MEDIA_FUNCTION(AMediaFormat_getString)
   MEDIA_FUNCTION(AMediaFormat_getBuffer)
   MEDIA_FUNCTION(AMediaFormat_new)
   MEDIA_FUNCTION(AMediaFormat_setFloat)
   MEDIA_FUNCTION(AMediaFormat_setInt32)
+  MEDIA_FUNCTION(AMediaFormat_setInt64)
   MEDIA_FUNCTION(AMediaFormat_setBuffer)
   MEDIA_FUNCTION(AMediaFormat_setString)
+  MEDIA_FUNCTION(AMediaFormat_toString)
+  MEDIA_FUNCTION(AMediaExtractor_new)
+  MEDIA_FUNCTION(AMediaExtractor_delete)
+  MEDIA_FUNCTION(AMediaExtractor_setDataSourceFd)
+  MEDIA_FUNCTION(AMediaExtractor_setDataSource)
+  MEDIA_FUNCTION(AMediaExtractor_setDataSourceCustom)
+  MEDIA_FUNCTION(AMediaExtractor_getTrackCount)
+  MEDIA_FUNCTION(AMediaExtractor_getTrackFormat)
+  MEDIA_FUNCTION(AMediaExtractor_selectTrack)
+  MEDIA_FUNCTION(AMediaExtractor_unselectTrack)
+  MEDIA_FUNCTION(AMediaExtractor_readSampleData)
+  MEDIA_FUNCTION(AMediaExtractor_getSampleFlags)
+  MEDIA_FUNCTION(AMediaExtractor_getSampleTrackIndex)
+  MEDIA_FUNCTION(AMediaExtractor_getSampleTime)
+  MEDIA_FUNCTION(AMediaExtractor_advance)
+  MEDIA_FUNCTION(AMediaExtractor_seekTo)
+  MEDIA_FUNCTION(AMediaDataSource_new)
+  MEDIA_FUNCTION(AMediaDataSource_delete)
+  MEDIA_FUNCTION(AMediaDataSource_setUserdata)
+  MEDIA_FUNCTION(AMediaDataSource_setReadAt)
+  MEDIA_FUNCTION(AMediaDataSource_setGetSize)
+  MEDIA_FUNCTION(AMediaDataSource_setClose)
+  MEDIA_FUNCTION(AMediaDataSource_setGetAvailableSize)
   MEDIA_FUNCTION(AImageReader_acquireLatestImageAsync)
   MEDIA_FUNCTION(AImageReader_acquireNextImageAsync)
   MEDIA_FUNCTION(AImageReader_delete)
@@ -539,6 +759,23 @@ void* darwin_art_android_media_ndk_symbol(const char* symbol) {
   MEDIA_DATA(AMEDIAFORMAT_KEY_STRIDE)
   MEDIA_DATA(AMEDIAFORMAT_KEY_TEMPORAL_LAYERING)
   MEDIA_DATA(AMEDIAFORMAT_KEY_WIDTH)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_AAC_PROFILE)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_CHANNEL_COUNT)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_CHANNEL_MASK)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_DURATION)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_FLAC_COMPRESSION_LEVEL)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_IS_ADTS)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_IS_AUTOSELECT)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_IS_DEFAULT)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_IS_FORCED_SUBTITLE)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_LANGUAGE)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_MAX_HEIGHT)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_MAX_INPUT_SIZE)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_MAX_WIDTH)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_PUSH_BLANK_BUFFERS_ON_STOP)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_REPEAT_PREVIOUS_FRAME_AFTER)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_SAMPLE_RATE)
+  MEDIA_DATA(AMEDIAFORMAT_KEY_ROTATION)
 #undef MEDIA_DATA
   return nullptr;
 }

@@ -1,5 +1,6 @@
 #include "darwin_android_platform.h"
 #include "darwin_android_time.h"
+#include "darwin_surface_bridge.h"
 #include "surfaceflinger/transaction_bridge.h"
 #include "surfaceflinger/service_darwin.h"
 
@@ -21,6 +22,7 @@
 #include <android/surface_control.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <climits>
@@ -360,7 +362,10 @@ struct SurfaceControl {
   float scale_x = 1.0f;
   float scale_y = 1.0f;
   float alpha = 1.0f;
+  std::vector<ARect> transparent_region;
 };
+
+constexpr size_t kMaxTransparentRegionRects = 8;
 
 std::mutex g_surface_controls_mutex;
 std::vector<SurfaceControl*> g_surface_controls;
@@ -496,15 +501,77 @@ struct SurfaceTransaction {
     ASurfaceControl* relative_to = nullptr;
     bool has_damage = false;
     std::vector<ARect> damage;
+    bool has_transparent_region = false;
+    std::vector<ARect> transparent_region;
   };
 
   std::vector<ASurfaceControl*> controls;
   std::vector<Update> updates;
-  TransactionCallback commit = nullptr;
-  void* commit_context = nullptr;
-  TransactionCallback complete = nullptr;
-  void* complete_context = nullptr;
+  struct Callback {
+    TransactionCallback function = nullptr;
+    void* context = nullptr;
+  };
+  struct DiscardCallback {
+    void (*function)(void*) = nullptr;
+    void* context = nullptr;
+  };
+  std::vector<Callback> commits;
+  std::vector<Callback> completes;
+  std::vector<DiscardCallback> discards;
+  struct BufferCallback {
+    ASurfaceControl* control;
+    void* context;
+    TransactionCallback complete;
+    void (*discard)(void*, int);
+  };
+  std::vector<BufferCallback> buffer_callbacks;
 };
+
+// An overwritten buffer never reaches the consumer, but its producer can still
+// be writing. Return that acquire fence with the slot instead of releasing early.
+void DiscardBufferCallbacks(SurfaceTransaction* transaction,
+                            ASurfaceControl* control, bool quarantine = false) {
+  std::vector<SurfaceTransaction::BufferCallback> discarded;
+  auto& callbacks = transaction->buffer_callbacks;
+  for (auto it = callbacks.begin(); it != callbacks.end();) {
+    if (control == nullptr || it->control == control) {
+      discarded.push_back(*it);
+      it = callbacks.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  for (const auto& callback : discarded) {
+    int fence = quarantine ? -2 : -1;
+    for (const auto& update : transaction->updates) {
+      if (quarantine) break;
+      if (update.opaque == callback.control && update.acquire_fence >= 0) {
+        fence = darwin_art_bionic_socket_broker_dup(update.acquire_fence);
+        if (fence < 0) {
+          // FD exhaustion must not make an unfinished producer reusable.
+          int result;
+          do { result = sync_wait(update.acquire_fence, -1); }
+          while (result != 0 && errno == EINTR);
+          if (result != 0) fence = -2;
+        }
+        break;
+      }
+    }
+    callback.discard(callback.context, fence);
+  }
+}
+
+void DiscardTransactionCallbacks(SurfaceTransaction* transaction) {
+  if (transaction == nullptr) return;
+  DiscardBufferCallbacks(transaction, nullptr);
+  auto callbacks = std::move(transaction->discards);
+  transaction->discards.clear();
+  transaction->commits.clear();
+  transaction->completes.clear();
+  for (const auto& callback : callbacks) {
+    if (callback.function != nullptr) callback.function(callback.context);
+  }
+}
 
 struct DeferredLatchTransaction {
   std::unique_ptr<SurfaceTransaction> transaction;
@@ -590,6 +657,23 @@ bool DebugSurfaceTransactions() {
   static const bool enabled =
       std::getenv("DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS") != nullptr;
   return enabled;
+}
+
+bool TraceReparentToNull() {
+  static const bool enabled =
+      std::getenv("DARWIN_ART_TRACE_REPARENT_NULL") != nullptr;
+  return enabled;
+}
+
+uint32_t HostTargetSurfaceIdForTrace() {
+  const char* encoded_target = std::getenv("DARWIN_ART_HOST_IOSURFACE_ID");
+  if (encoded_target == nullptr || encoded_target[0] == '\0') return 0;
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(encoded_target, &end, 10);
+  return end != encoded_target && *end == '\0' && parsed > 0 &&
+          parsed <= UINT32_MAX
+      ? static_cast<uint32_t>(parsed)
+      : 0;
 }
 
 void Remember(SurfaceTransaction* transaction, ASurfaceControl* control) {
@@ -688,25 +772,48 @@ extern "C" void* darwin_art_android_hardware_buffer_metal_texture(
       metal_device);
 }
 
-extern "C" void* darwin_art_android_hardware_buffer_vulkan_metal_texture(
-    AHardwareBuffer* buffer, void* metal_device) {
+static void* CreateVulkanHardwareBufferTexture(
+    AHardwareBuffer* buffer, void* metal_device, int32_t vk_format,
+    bool importing_storage) {
   if (buffer == nullptr || buffer->surface == nullptr || metal_device == nullptr ||
       buffer->description.width == 0 || buffer->description.height == 0) {
     return nullptr;
   }
   id<MTLDevice> device = (__bridge id<MTLDevice>)metal_device;
+  if (vk_format != 37 && vk_format != 43) return nullptr;
+  const MTLPixelFormat format = vk_format == 43 ? MTLPixelFormatRGBA8Unorm_sRGB
+                                               : MTLPixelFormatRGBA8Unorm;
   MTLTextureDescriptor* descriptor =
-      [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+      [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
                                                          width:buffer->description.width
                                                         height:buffer->description.height
                                                      mipmapped:NO];
   descriptor.storageMode = MTLStorageModeShared;
   descriptor.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite |
-                     MTLTextureUsageRenderTarget;
+                     MTLTextureUsageRenderTarget | MTLTextureUsagePixelFormatView;
+  // This producer writes actual RGBA bytes. Preserve that storage contract
+  // for consumers which otherwise assume the legacy HWUI BGRA storage.
+  if (importing_storage) {
+    IOSurfaceSetValue(buffer->surface, CFSTR("DarwinArtStorageRGBA"), kCFBooleanTrue);
+    // Vulkan framebuffer coordinates and the imported Metal texture are
+    // top-left based; unlike HWUI's Ganesh target they need no storage Y flip.
+    IOSurfaceSetValue(buffer->surface, CFSTR("DarwinArtProducerTopLeft"), kCFBooleanTrue);
+  }
   return reinterpret_cast<void*>(
       [device newTextureWithDescriptor:descriptor
                              iosurface:buffer->surface
                                  plane:0]);
+}
+
+extern "C" void* darwin_art_android_hardware_buffer_vulkan_metal_texture_for_format(
+    AHardwareBuffer* buffer, void* metal_device, int32_t vk_format) {
+  return CreateVulkanHardwareBufferTexture(buffer, metal_device, vk_format, true);
+}
+
+extern "C" void* darwin_art_android_hardware_buffer_vulkan_metal_texture(
+    AHardwareBuffer* buffer, void* metal_device) {
+  // Capability queries must not change an existing producer's storage format.
+  return CreateVulkanHardwareBufferTexture(buffer, metal_device, 37, false);
 }
 
 extern "C" void* darwin_art_android_iosurface_metal_texture(
@@ -716,8 +823,13 @@ extern "C" void* darwin_art_android_iosurface_metal_texture(
     return nullptr;
   }
   id<MTLDevice> device = (__bridge id<MTLDevice>)metal_device;
+  CFTypeRef storage_rgba = IOSurfaceCopyValue((IOSurfaceRef)iosurface,
+                                             CFSTR("DarwinArtStorageRGBA"));
+  const bool rgba = storage_rgba != nullptr && CFEqual(storage_rgba, kCFBooleanTrue);
+  if (storage_rgba != nullptr) CFRelease(storage_rgba);
   MTLTextureDescriptor* descriptor =
-      [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+      [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
+                               (rgba ? MTLPixelFormatRGBA8Unorm : MTLPixelFormatBGRA8Unorm)
                                                          width:width
                                                         height:height
                                                      mipmapped:NO];
@@ -766,8 +878,19 @@ extern "C" int darwin_art_android_metal_shared_event_fence_fd(
     return -1;
   }
   const int write_descriptor = descriptors[1];
+  // A sync_file may be closed before its GPU work completes. Keep a private
+  // read reference until notification finishes: the implementation's pipe
+  // must never deliver SIGPIPE to the Android app on fence cancellation.
+  const int completion_read_guard =
+      darwin_art_bionic_socket_broker_dup(descriptors[0]);
+  if (completion_read_guard < 0) {
+    (void)darwin_art_bionic_socket_broker_close(descriptors[0]);
+    (void)darwin_art_bionic_socket_broker_close(descriptors[1]);
+    return -1;
+  }
   MTLSharedEventListener* listener = [[MTLSharedEventListener alloc] init];
   if (listener == nil) {
+    (void)darwin_art_bionic_socket_broker_close(completion_read_guard);
     (void)darwin_art_bionic_socket_broker_close(descriptors[0]);
     (void)darwin_art_bionic_socket_broker_close(descriptors[1]);
     return -1;
@@ -782,6 +905,8 @@ extern "C" int darwin_art_android_metal_shared_event_fence_fd(
                         sizeof(kSignaledMetalFence));
                     (void)darwin_art_bionic_socket_broker_close(
                         write_descriptor);
+                    (void)darwin_art_bionic_socket_broker_close(
+                        completion_read_guard);
                   }];
   [listener release];
   return descriptors[0];
@@ -1603,6 +1728,7 @@ extern "C" ASurfaceTransaction* ASurfaceTransaction_create() {
 
 extern "C" void ASurfaceTransaction_delete(ASurfaceTransaction* opaque) {
   auto* transaction = reinterpret_cast<SurfaceTransaction*>(opaque);
+  DiscardTransactionCallbacks(transaction);
   ReleaseTransactionBuffers(transaction);
   delete transaction;
 }
@@ -1611,6 +1737,7 @@ extern "C" void darwin_art_android_surface_transaction_clear(
     void* opaque) {
   auto* transaction = reinterpret_cast<SurfaceTransaction*>(opaque);
   if (transaction == nullptr) return;
+  DiscardTransactionCallbacks(transaction);
   ReleaseTransactionBuffers(transaction);
   transaction->controls.clear();
   transaction->updates.clear();
@@ -1634,6 +1761,7 @@ extern "C" void darwin_art_android_surface_transaction_merge(
         FindUpdate(destination, incoming.opaque);
     if (merged == nullptr) continue;
     if (incoming.has_buffer) {
+      DiscardBufferCallbacks(destination, incoming.opaque);
       if (merged->buffer != nullptr) AHardwareBuffer_release(merged->buffer);
       if (merged->acquire_fence >= 0) {
         (void)darwin_art_bionic_socket_broker_close(merged->acquire_fence);
@@ -1672,32 +1800,108 @@ extern "C" void darwin_art_android_surface_transaction_merge(
       merged->has_damage = true;
       merged->damage = std::move(incoming.damage);
     }
+    if (incoming.has_transparent_region) {
+      merged->has_transparent_region = true;
+      merged->transparent_region = std::move(incoming.transparent_region);
+    }
   }
-  if (destination->commit == nullptr && source->commit != nullptr) {
-    destination->commit = source->commit;
-    destination->commit_context = source->commit_context;
-  }
-  if (destination->complete == nullptr && source->complete != nullptr) {
-    destination->complete = source->complete;
-    destination->complete_context = source->complete_context;
-  }
+  destination->commits.insert(destination->commits.end(),
+                              source->commits.begin(), source->commits.end());
+  destination->completes.insert(destination->completes.end(),
+                                source->completes.begin(), source->completes.end());
+  destination->discards.insert(destination->discards.end(),
+                               source->discards.begin(), source->discards.end());
+  destination->buffer_callbacks.insert(destination->buffer_callbacks.end(),
+      source->buffer_callbacks.begin(), source->buffer_callbacks.end());
+  source->buffer_callbacks.clear();
   source->controls.clear();
   source->updates.clear();
-  source->commit = nullptr;
-  source->commit_context = nullptr;
-  source->complete = nullptr;
-  source->complete_context = nullptr;
+  source->commits.clear();
+  source->completes.clear();
+  source->discards.clear();
+}
+
+extern "C" void darwin_art_android_surface_transaction_set_on_discard(
+    void* opaque, void* context, void (*callback)(void*)) {
+  auto* transaction = reinterpret_cast<SurfaceTransaction*>(opaque);
+  if (transaction != nullptr && callback != nullptr) {
+    transaction->discards.push_back({callback, context});
+  }
+}
+
+extern "C" void
+darwin_art_android_surface_transaction_set_transparent_region_hint(
+    void* opaque, void* opaque_control, const int32_t* rects, size_t count) {
+  auto* transaction = reinterpret_cast<SurfaceTransaction*>(opaque);
+  auto* control = reinterpret_cast<ASurfaceControl*>(opaque_control);
+  if (transaction == nullptr || control == nullptr) return;
+  Remember(transaction, control);
+  auto* update = FindUpdate(transaction, control);
+  if (update == nullptr) return;
+  update->has_transparent_region = true;
+  update->transparent_region.clear();
+  if (rects == nullptr) count = 0;
+  count = std::min(count, kMaxTransparentRegionRects);
+  update->transparent_region.reserve(count);
+  for (size_t index = 0; index < count; ++index) {
+    const int32_t* rect = rects + index * 4;
+    if (rect[2] <= rect[0] || rect[3] <= rect[1]) continue;
+    update->transparent_region.push_back(
+        {rect[0], rect[1], rect[2], rect[3]});
+  }
+  if (DebugSurfaceTransactions()) {
+    std::fprintf(stderr, "ART Android SurfaceTransaction: transparent-region "
+                         "layer=%u rects=%zu\n",
+                 reinterpret_cast<SurfaceControl*>(control)->layer_id,
+                 update->transparent_region.size());
+  }
+}
+
+extern "C" size_t darwin_art_android_surface_control_copy_transparent_region(
+    void* opaque, int32_t* rects, size_t capacity) {
+  auto* control = reinterpret_cast<SurfaceControl*>(opaque);
+  if (control == nullptr) return 0;
+  std::lock_guard<std::mutex> lock(g_surface_controls_mutex);
+  const size_t count = control->transparent_region.size();
+  if (rects == nullptr || capacity == 0) return count;
+  const size_t copied = std::min(count, capacity);
+  for (size_t index = 0; index < copied; ++index) {
+    const ARect& rect = control->transparent_region[index];
+    rects[index * 4 + 0] = rect.left;
+    rects[index * 4 + 1] = rect.top;
+    rects[index * 4 + 2] = rect.right;
+    rects[index * 4 + 3] = rect.bottom;
+  }
+  return count;
+}
+
+extern "C" void darwin_art_android_surface_transaction_set_buffer_callbacks(
+    void* opaque, void* control, void* context,
+    void (*complete)(void*, ASurfaceTransactionStats*),
+    void (*discard)(void*, int)) {
+  auto* transaction = reinterpret_cast<SurfaceTransaction*>(opaque);
+  if (transaction != nullptr && complete != nullptr && discard != nullptr) {
+    transaction->buffer_callbacks.push_back(
+        {static_cast<ASurfaceControl*>(control), context, complete, discard});
+  }
 }
 
 static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
   if (transaction == nullptr) return;
+  // Commit listeners may close or reuse the Java transaction synchronously.
+  // Consume its state before invoking any listener and clean up only this batch.
+  SurfaceTransaction batch = std::move(*transaction);
+  *transaction = SurfaceTransaction{};
+  transaction = &batch;
   // A buffer may not be latched until its producer's acquire fence signals.
   // The descriptor is backed by the producer's MTLSharedEvent and remains
   // owned by this transaction until this latch boundary.
   for (auto& update : transaction->updates) {
     if (update.acquire_fence < 0) continue;
     const int fence = update.acquire_fence;
-    const int wait_result = sync_wait(fence, -1);
+    int wait_result;
+    do { wait_result = sync_wait(fence, -1); }
+    while (wait_result != 0 && errno == EINTR);
     (void)darwin_art_bionic_socket_broker_close(fence);
     update.acquire_fence = -1;
     if (wait_result != 0) {
@@ -1705,6 +1909,9 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
                    "ART Android SurfaceTransaction: acquire fence failed "
                    "control=%p fence=%d errno=%d\n",
                    static_cast<void*>(update.opaque), fence, errno);
+      DiscardBufferCallbacks(transaction, nullptr, true);
+      DiscardTransactionCallbacks(transaction);
+      ReleaseTransactionBuffers(transaction);
       return;
     }
   }
@@ -1712,6 +1919,24 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
   frontend_updates.reserve(transaction->updates.size());
   std::vector<DarwinArtMetalComposerLayer> control_states;
   control_states.reserve(transaction->updates.size());
+  const auto populate_transparent_region =
+      [](DarwinArtMetalComposerLayer* state, const std::vector<ARect>& region,
+         bool changed) {
+        if (state == nullptr || !changed) return;
+        state->what |= DARWIN_ART_SF_TRANSPARENT_REGION_CHANGED;
+        const size_t count = std::min(region.size(), kMaxTransparentRegionRects);
+        state->transparent_region_count = 0;
+        for (size_t index = 0; index < count; ++index) {
+          const ARect& rect = region[index];
+          if (rect.right <= rect.left || rect.bottom <= rect.top) continue;
+          state->transparent_region[state->transparent_region_count++] = {
+              .left = rect.left,
+              .top = rect.top,
+              .right = rect.right,
+              .bottom = rect.bottom,
+          };
+        }
+      };
   for (const auto& update : transaction->updates) {
     const auto* control = reinterpret_cast<const SurfaceControl*>(update.opaque);
     if (control == nullptr) continue;
@@ -1730,6 +1955,14 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
     if (update.has_buffer) what |= DARWIN_ART_SF_BUFFER_CHANGED;
     if (update.has_damage) what |= DARWIN_ART_SF_DAMAGE_CHANGED;
     if (update.has_geometry) what |= DARWIN_ART_SF_DESTINATION_FRAME_CHANGED;
+    if (TraceReparentToNull() && update.has_parent && update.parent == nullptr) {
+      std::fprintf(stderr,
+                   "ART SurfaceTransaction trace: producer-reparent-null "
+                   "owner=%u local=%u what=0x%llx parent=0 target=%u\n",
+                   control->owner_process_id, control->layer_id,
+                   static_cast<unsigned long long>(what),
+                   HostTargetSurfaceIdForTrace());
+    }
     const auto* parent =
         update.has_parent
             ? reinterpret_cast<const SurfaceControl*>(update.parent)
@@ -1766,7 +1999,9 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
         .destination_right = destination.right,
         .destination_bottom = destination.bottom,
     });
-    if (!update.has_buffer) {
+    const bool has_transparent_region =
+        update.has_transparent_region || !control->transparent_region.empty();
+    if (!update.has_buffer || has_transparent_region) {
       control_states.push_back({
           .owner_process_id = control->owner_process_id,
           .layer_id = control->layer_id,
@@ -1795,6 +2030,14 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
               : control->z_order,
           .alpha = update.has_alpha ? update.alpha : control->alpha,
       });
+      // `control` is deliberately read only here: the update is applied to it
+      // below. Prefer the transaction's new value, including an empty vector
+      // which explicitly clears a previously published hint.
+      const auto& region = update.has_transparent_region
+                               ? update.transparent_region
+                               : control->transparent_region;
+      populate_transparent_region(&control_states.back(), region,
+                                  has_transparent_region);
     }
     if (DebugSurfaceTransactions()) {
       std::fprintf(
@@ -1835,6 +2078,8 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
                  "ART Android SurfaceTransaction: application %s requires "
                  "the central SurfaceFlinger service\n",
                  app_package);
+    DiscardTransactionCallbacks(transaction);
+    ReleaseTransactionBuffers(transaction);
     return;
   }
   if (!central_surfaceflinger &&
@@ -1846,6 +2091,8 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
                  "transaction=%llu layers=%zu\n",
                  static_cast<unsigned long long>(transaction_id),
                  frontend_updates.size());
+    DiscardTransactionCallbacks(transaction);
+    ReleaseTransactionBuffers(transaction);
     return;
   }
   SurfaceTransactionStats stats;
@@ -1900,6 +2147,9 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
         control->scale_y = update.scale_y;
       }
       if (update.has_alpha) control->alpha = update.alpha;
+      if (update.has_transparent_region) {
+        control->transparent_region = std::move(update.transparent_region);
+      }
       if (update.has_parent) {
         control->parent = reinterpret_cast<SurfaceControl*>(update.parent);
         // createFromWindow/fromJava controls start attached to the display,
@@ -1963,6 +2213,9 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
           .z = control->z_order,
           .alpha = control->alpha,
       });
+      populate_transparent_region(&control_states.back(),
+                                  control->transparent_region,
+                                  !control->transparent_region.empty());
     }
 
     // SurfaceFlinger composes the current layer tree, not just the controls
@@ -1994,15 +2247,30 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
       !presentations.empty() &&
       darwin_art_android_begin_hardware_buffer_composition(
           presentations.front().buffer, true, transaction_id);
+  bool actual_target_composition_marked = false;
   if (composition_started) {
     for (const auto& state : control_states) {
+      std::array<int32_t, kMaxTransparentRegionRects * 4>
+          transparent_region_rects{};
+      for (uint32_t index = 0; index < state.transparent_region_count;
+           ++index) {
+        const auto& rect = state.transparent_region[index];
+        transparent_region_rects[index * 4 + 0] = rect.left;
+        transparent_region_rects[index * 4 + 1] = rect.top;
+        transparent_region_rects[index * 4 + 2] = rect.right;
+        transparent_region_rects[index * 4 + 3] = rect.bottom;
+      }
       darwin_art_android_present_surface_control_state(
           state.owner_process_id, state.layer_id,
           state.parent_owner_process_id, state.parent_id,
           state.relative_parent_owner_process_id, state.relative_parent_id,
           state.what, state.flags, state.mask, state.transform,
           state.destination_left, state.destination_top, state.destination_right,
-          state.destination_bottom, state.z, state.alpha);
+          state.destination_bottom, state.z, state.alpha,
+          state.transparent_region_count == 0
+              ? nullptr
+              : transparent_region_rects.data(),
+          state.transparent_region_count);
     }
     for (const auto& presentation : presentations) {
       if (DebugSurfaceTransactions()) {
@@ -2056,7 +2324,7 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
         darwin_art_android_end_hardware_buffer_composition();
   }
   if (!composition_started && central_surfaceflinger &&
-      !control_states.empty()) {
+      (!control_states.empty() || !presentations.empty())) {
     const char* encoded_target = std::getenv("DARWIN_ART_HOST_IOSURFACE_ID");
     char* end = nullptr;
     const unsigned long parsed =
@@ -2067,36 +2335,167 @@ static void ApplySurfaceTransactionImpl(SurfaceTransaction* transaction) {
             ? IOSurfaceLookup(static_cast<uint32_t>(parsed))
             : nullptr;
     if (target != nullptr) {
+      const uint32_t target_width =
+          static_cast<uint32_t>(IOSurfaceGetWidth(target));
+      const uint32_t target_height =
+          static_cast<uint32_t>(IOSurfaceGetHeight(target));
+
+      // The normal path appends each retained AHardwareBuffer to the Metal
+      // composer after publishing the structural control states.  Keep the
+      // same layer payload when the client-side ANGLE context is unavailable:
+      // the central service can import the IOSurface directly, and does not
+      // need a producer EGL context to latch an already fence-waited buffer.
+      // AHardwareBuffer references in `presentations` remain held until the
+      // synchronous service call has serialized every IOSurface id below.
+      std::vector<DarwinArtMetalComposerLayer> fallback_layers = control_states;
+      fallback_layers.reserve(control_states.size() + presentations.size());
+      for (const auto& presentation : presentations) {
+        if (presentation.control == nullptr || presentation.buffer == nullptr)
+          continue;
+        AHardwareBuffer_Desc description{};
+        AHardwareBuffer_describe(presentation.buffer, &description);
+        void* iosurface =
+            darwin_art_android_hardware_buffer_iosurface(presentation.buffer);
+        if (iosurface == nullptr || description.width == 0 ||
+            description.height == 0) {
+          continue;
+        }
+        const int32_t buffer_width =
+            static_cast<int32_t>(description.width);
+        const int32_t buffer_height =
+            static_cast<int32_t>(description.height);
+        const int32_t source_left =
+            std::clamp(presentation.source.left, 0, buffer_width);
+        const int32_t source_top =
+            std::clamp(presentation.source.top, 0, buffer_height);
+        const int32_t source_right =
+            std::clamp(presentation.source.right, 0, buffer_width);
+        const int32_t source_bottom =
+            std::clamp(presentation.source.bottom, 0, buffer_height);
+        const int32_t destination_left = std::clamp(
+            presentation.destination.left, 0,
+            static_cast<int32_t>(target_width));
+        const int32_t destination_top = std::clamp(
+            presentation.destination.top, 0,
+            static_cast<int32_t>(target_height));
+        const int32_t destination_right = std::clamp(
+            presentation.destination.right, 0,
+            static_cast<int32_t>(target_width));
+        const int32_t destination_bottom = std::clamp(
+            presentation.destination.bottom, 0,
+            static_cast<int32_t>(target_height));
+        const auto* control = presentation.control;
+        fallback_layers.push_back({
+            .owner_process_id = control->owner_process_id,
+            .layer_id = control->layer_id,
+            .parent_owner_process_id =
+                control->parent == nullptr ? 0 : control->parent->owner_process_id,
+            .parent_id =
+                control->parent == nullptr ? 0 : control->parent->layer_id,
+            .relative_parent_owner_process_id =
+                control->relative_to == nullptr
+                    ? 0
+                    : control->relative_to->owner_process_id,
+            .relative_parent_id =
+                control->relative_to == nullptr ? 0 : control->relative_to->layer_id,
+            .what = static_cast<uint64_t>(DARWIN_ART_SF_POSITION_CHANGED |
+                (control->relative_to == nullptr
+                     ? DARWIN_ART_SF_LAYER_CHANGED
+                     : DARWIN_ART_SF_RELATIVE_LAYER_CHANGED) |
+                DARWIN_ART_SF_ALPHA_CHANGED | DARWIN_ART_SF_FLAGS_CHANGED |
+                DARWIN_ART_SF_BUFFER_CHANGED |
+                DARWIN_ART_SF_DESTINATION_FRAME_CHANGED |
+                (presentation.reparented ? DARWIN_ART_SF_REPARENT : 0)),
+            .flags = 0,
+            .mask = 0,
+            .transform = static_cast<uint32_t>(presentation.transform),
+            .producer_bottom_left =
+                (description.usage & AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY) == 0,
+            .iosurface = iosurface,
+            .width = description.width,
+            .height = description.height,
+            .source_left = source_left,
+            .source_top = source_top,
+            .source_right = source_right,
+            .source_bottom = source_bottom,
+            .destination_left = destination_left,
+            .destination_top = destination_top,
+            .destination_right = destination_right,
+            .destination_bottom = destination_bottom,
+            .z = presentation.z_order,
+            .alpha = presentation.alpha,
+        });
+      }
       stats.present_fence = darwin_art_surfaceflinger_service_present(
-          static_cast<uint32_t>(parsed),
-          static_cast<uint32_t>(IOSurfaceGetWidth(target)),
-          static_cast<uint32_t>(IOSurfaceGetHeight(target)), transaction_id,
-          control_states.data(), control_states.size(), nullptr, 0);
+          static_cast<uint32_t>(parsed), target_width, target_height,
+          transaction_id, fallback_layers.data(), fallback_layers.size(),
+          nullptr, 0);
       composition_started = stats.present_fence >= 0;
+      // This path does not enter ANGLE, so its thread-local EGL target may be
+      // empty or stale. Mark the target actually submitted to the central
+      // service and register a private copy of its completion fence with the
+      // host scanout monitor. The Android-facing stats fence remains owned by
+      // the transaction callbacks; the duplicate is consumed by the monitor.
+      darwin_art_surface_gpu_set_iosurface_composition_active(
+          target, composition_started);
+      actual_target_composition_marked = true;
+      if (composition_started) {
+        DarwinArtSurface* host = darwin_art_surface_active_gpu();
+        const int monitor_fence =
+            host == nullptr
+                ? -1
+                : darwin_art_bionic_socket_broker_dup(stats.present_fence);
+        if (host != nullptr && monitor_fence >= 0) {
+          if (!darwin_art_surface_gpu_track_composition_fence(
+                  host, monitor_fence) &&
+              DebugSurfaceTransactions()) {
+            std::fprintf(stderr,
+                         "ART Android SurfaceTransaction: fallback readiness "
+                         "monitor rejected fence=%d\n",
+                         monitor_fence);
+          }
+        }
+      }
       CFRelease(target);
     }
   }
   // The host and Chromium renderer import the same IOSurface in different
   // processes. Publish SurfaceFlinger's retained-layer visibility with that
   // shared object so parent HWUI never samples a detached child layer.
-  darwin_art_android_set_hardware_buffer_composition_active(
-      composition_started);
+  if (!actual_target_composition_marked) {
+    darwin_art_android_set_hardware_buffer_composition_active(
+        composition_started);
+  }
   for (const auto& presentation : presentations) {
     AHardwareBuffer_release(presentation.buffer);
   }
   auto* stats_opaque = reinterpret_cast<ASurfaceTransactionStats*>(&stats);
   if (DebugSurfaceTransactions()) {
     std::fprintf(stderr,
-                 "ART Android SurfaceTransaction: callbacks pid=%d commit=%p "
-                 "complete=%p fence=%d\n",
-                 getpid(), reinterpret_cast<void*>(transaction->commit),
-                 reinterpret_cast<void*>(transaction->complete),
+                 "ART Android SurfaceTransaction: callbacks pid=%d commits=%zu "
+                 "completes=%zu fence=%d\n",
+                 getpid(), transaction->commits.size(),
+                 transaction->completes.size(),
                  stats.present_fence);
   }
-  if (transaction->commit != nullptr)
-    transaction->commit(transaction->commit_context, stats_opaque);
-  if (transaction->complete != nullptr)
-    transaction->complete(transaction->complete_context, stats_opaque);
+  auto commits = std::move(transaction->commits);
+  auto completes = std::move(transaction->completes);
+  auto buffer_callbacks = std::move(transaction->buffer_callbacks);
+  transaction->buffer_callbacks.clear();
+  transaction->commits.clear();
+  transaction->completes.clear();
+  transaction->discards.clear();
+  for (const auto& callback : commits) {
+    if (callback.function != nullptr)
+      callback.function(callback.context, stats_opaque);
+  }
+  for (const auto& callback : completes) {
+    if (callback.function != nullptr)
+      callback.function(callback.context, stats_opaque);
+  }
+  for (const auto& callback : buffer_callbacks) {
+    callback.complete(callback.context, stats_opaque);
+  }
   transaction->controls.clear();
   ReleaseTransactionBuffers(transaction);
 }
@@ -2182,12 +2581,12 @@ extern "C" void ASurfaceTransaction_apply(ASurfaceTransaction* opaque) {
   }
 
   auto deferred = std::make_unique<SurfaceTransaction>(std::move(*transaction));
+  transaction->buffer_callbacks.clear();
   transaction->controls.clear();
   transaction->updates.clear();
-  transaction->commit = nullptr;
-  transaction->commit_context = nullptr;
-  transaction->complete = nullptr;
-  transaction->complete_context = nullptr;
+  transaction->commits.clear();
+  transaction->completes.clear();
+  transaction->discards.clear();
   for (ASurfaceControl* control : deferred->controls) {
     if (control != nullptr) ASurfaceControl_acquire(control);
   }
@@ -2216,8 +2615,7 @@ extern "C" void ASurfaceTransaction_setOnCommit(ASurfaceTransaction* opaque,
                                                   TransactionCallback callback) {
   auto* transaction = reinterpret_cast<SurfaceTransaction*>(opaque);
   if (transaction != nullptr) {
-    transaction->commit = callback;
-    transaction->commit_context = context;
+    if (callback != nullptr) transaction->commits.push_back({callback, context});
     if (DebugSurfaceTransactions()) {
       std::fprintf(stderr,
                    "ART Android SurfaceTransaction: setOnCommit pid=%d "
@@ -2232,8 +2630,7 @@ extern "C" void ASurfaceTransaction_setOnComplete(ASurfaceTransaction* opaque,
                                                     TransactionCallback callback) {
   auto* transaction = reinterpret_cast<SurfaceTransaction*>(opaque);
   if (transaction != nullptr) {
-    transaction->complete = callback;
-    transaction->complete_context = context;
+    if (callback != nullptr) transaction->completes.push_back({callback, context});
     if (DebugSurfaceTransactions()) {
       std::fprintf(stderr,
                    "ART Android SurfaceTransaction: setOnComplete pid=%d "
@@ -2374,6 +2771,7 @@ extern "C" void ASurfaceTransaction_setBuffer(
   Remember(state, control);
   auto* update = FindUpdate(state, control);
   if (update != nullptr) {
+    DiscardBufferCallbacks(state, control);
     if (update->buffer != nullptr) AHardwareBuffer_release(update->buffer);
     if (update->acquire_fence >= 0)
       (void)darwin_art_bionic_socket_broker_close(update->acquire_fence);
@@ -2832,6 +3230,17 @@ extern "C" void* darwin_art_android_platform_symbol(const char* symbol) {
   if (symbol == nullptr) return nullptr;
 #define ROUTE(name) if (std::strcmp(symbol, #name) == 0) return reinterpret_cast<void*>(&name)
   ROUTE(AHardwareBuffer_acquire);
+  ROUTE(darwin_art_bionic_socket_broker_close);
+  ROUTE(darwin_art_android_ANativeWindow_is_managed);
+  ROUTE(darwin_art_android_ANativeWindow_acquire);
+  ROUTE(darwin_art_android_ANativeWindow_release);
+  ROUTE(darwin_art_android_ANativeWindow_getWidth);
+  ROUTE(darwin_art_android_ANativeWindow_getHeight);
+  ROUTE(darwin_art_android_ANativeWindow_setBuffersGeometry);
+  ROUTE(darwin_art_android_ANativeWindow_prepare_swapchain);
+  ROUTE(darwin_art_android_ANativeWindow_dequeue_hardware_buffer);
+  ROUTE(darwin_art_android_ANativeWindow_queue_hardware_buffer);
+  ROUTE(darwin_art_android_ANativeWindow_cancel_hardware_buffer);
   ROUTE(AHardwareBuffer_allocate);
   ROUTE(AHardwareBuffer_describe);
   ROUTE(AHardwareBuffer_fromHardwareBuffer);
@@ -2844,6 +3253,7 @@ extern "C" void* darwin_art_android_platform_symbol(const char* symbol) {
   ROUTE(AHardwareBuffer_unlock);
   ROUTE(darwin_art_android_hardware_buffer_metal_texture);
   ROUTE(darwin_art_android_hardware_buffer_vulkan_metal_texture);
+  ROUTE(darwin_art_android_hardware_buffer_vulkan_metal_texture_for_format);
   ROUTE(darwin_art_android_metal_texture_release);
   ROUTE(darwin_art_android_metal_shared_event_create);
   ROUTE(darwin_art_android_metal_shared_event_fence_fd);
@@ -2972,6 +3382,12 @@ extern "C" void* darwin_art_android_platform_symbol(const char* symbol) {
     return reinterpret_cast<void*>(&darwin_art_android_ANativeWindow_getHeight);
   if (std::strcmp(symbol, "ANativeWindow_setBuffersGeometry") == 0)
     return reinterpret_cast<void*>(&darwin_art_android_ANativeWindow_setBuffersGeometry);
+  if (std::strcmp(symbol, "ANativeWindow_setFrameRate") == 0)
+    return reinterpret_cast<void*>(&ANativeWindow_setFrameRate);
+  if (std::strcmp(symbol, "ANativeWindow_setFrameRateWithChangeStrategy") == 0)
+    return reinterpret_cast<void*>(&ANativeWindow_setFrameRateWithChangeStrategy);
+  if (std::strcmp(symbol, "ANativeWindow_clearFrameRate") == 0)
+    return reinterpret_cast<void*>(&ANativeWindow_setFrameRate);
   if (std::strcmp(symbol, "ANativeWindow_release") == 0)
     return reinterpret_cast<void*>(&darwin_art_android_ANativeWindow_release);
   if (std::strcmp(symbol, "ANativeWindow_toSurface") == 0)

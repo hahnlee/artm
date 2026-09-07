@@ -7,8 +7,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr;
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+mod vulkan_acquire_fences;
+mod vulkan_wsi;
+mod vulkan_wsi_backend;
+use vulkan_wsi_backend::*;
 
 pub const PROVIDER_LOADER_LIBDL: u32 = 1;
 pub const PROVIDER_AOSP_LIBLOG: u32 = 2;
@@ -427,12 +432,14 @@ static MOLTENVK: OnceLock<Option<MoltenVkProvider>> = OnceLock::new();
 static VULKAN_INSTANCE: AtomicPtr<c_void> = AtomicPtr::new(ptr::null_mut());
 static VULKAN_PHYSICAL_DEVICE: AtomicPtr<c_void> = AtomicPtr::new(ptr::null_mut());
 static VULKAN_METAL_DEVICE: AtomicPtr<c_void> = AtomicPtr::new(ptr::null_mut());
-static VULKAN_SYNC_FD_ENABLED: AtomicBool = AtomicBool::new(false);
+static VULKAN_DEVICE_SYNC_FD: OnceLock<Mutex<HashMap<usize, bool>>> = OnceLock::new();
 static IMPORTED_ANDROID_MEMORY: OnceLock<Mutex<HashMap<usize, ImportedAndroidMemory>>> =
     OnceLock::new();
 static VULKAN_SEMAPHORES: OnceLock<Mutex<HashMap<usize, VulkanSemaphoreState>>> = OnceLock::new();
+static VULKAN_IMAGE_FORMATS: OnceLock<Mutex<HashMap<usize, i32>>> = OnceLock::new();
 
 const VK_INCOMPLETE: i32 = 5;
+const VK_ERROR_EXTENSION_NOT_PRESENT: i32 = -7;
 const VK_ERROR_FORMAT_NOT_SUPPORTED: i32 = -11;
 const VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID: i32 = 1_000_129_002;
 const VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID: i32 = 1_000_129_003;
@@ -495,7 +502,8 @@ fn load_moltenvk() -> Option<MoltenVkProvider> {
             continue;
         }
         // SAFETY: the symbol has the exact Vulkan PFN_vkGetInstanceProcAddr ABI.
-        let get_instance_proc_addr = unsafe { std::mem::transmute(address) };
+        let get_instance_proc_addr: VulkanGetInstanceProcAddr =
+            unsafe { std::mem::transmute(address) };
         type GetConfiguration =
             unsafe extern "C" fn(*mut c_void, *mut MoltenVkConfigurationPrefix, *mut usize) -> i32;
         type SetConfiguration = unsafe extern "C" fn(
@@ -627,7 +635,37 @@ unsafe extern "C" fn moltenvk_create_instance(
     }
     let create: unsafe extern "C" fn(*const c_void, *const c_void, *mut *mut c_void) -> i32 =
         unsafe { std::mem::transmute(address) };
-    let result = unsafe { create(create_info, allocator, instance) };
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct InstanceInfo {
+        s_type: i32,
+        p_next: *const c_void,
+        flags: u32,
+        application: *const c_void,
+        layer_count: u32,
+        layers: *const *const c_char,
+        extension_count: u32,
+        extensions: *const *const c_char,
+    }
+    if create_info.is_null() {
+        return VK_ERROR_INCOMPATIBLE_DRIVER;
+    }
+    let mut info = unsafe { *(create_info as *const InstanceInfo) };
+    let names = if info.extension_count == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(info.extensions, info.extension_count as usize) }
+    };
+    let translated: Vec<_> = names
+        .iter()
+        .copied()
+        .filter(|name| {
+            !name.is_null() && unsafe { CStr::from_ptr(*name) } != ANDROID_SURFACE_EXTENSION
+        })
+        .collect();
+    info.extension_count = translated.len() as u32;
+    info.extensions = translated.as_ptr();
+    let result = unsafe { create((&info as *const InstanceInfo).cast(), allocator, instance) };
     if result == VK_SUCCESS && !instance.is_null() {
         let value = unsafe { *instance };
         VULKAN_INSTANCE.store(value, Ordering::Release);
@@ -685,6 +723,18 @@ unsafe extern "C" fn moltenvk_enumerate_instance_extensions(
         (unsafe { CStr::from_ptr(property.extension_name.as_ptr()) }) == ANDROID_SURFACE_EXTENSION
     });
     native.retain(|property| !is_host_surface_extension(property));
+    if layer_name.is_null() && !advertised_android_surface {
+        let mut android = empty;
+        android.spec_version = 6;
+        for (dst, src) in android
+            .extension_name
+            .iter_mut()
+            .zip(ANDROID_SURFACE_EXTENSION.to_bytes_with_nul())
+        {
+            *dst = *src as c_char;
+        }
+        native.push(android);
+    }
     if std::env::var_os("DARWIN_ART_DEBUG_GRAPHICS_DSO").is_some() {
         eprintln!(
             "ART Android Vulkan: instance-extensions native={} returned={} host-wsi=0 android-wsi={}",
@@ -732,30 +782,45 @@ unsafe extern "C" fn moltenvk_enumerate_device_extensions(
         return unsafe { enumerate(physical_device, layer_name, property_count, properties) };
     }
 
-    if properties.is_null() {
-        let result = unsafe { enumerate(physical_device, layer_name, property_count, properties) };
-        if result == VK_SUCCESS {
-            unsafe { *property_count = (*property_count).saturating_add(3) };
-            if std::env::var_os("DARWIN_ART_DEBUG_GRAPHICS_DSO").is_some() {
-                eprintln!(
-                    "ART Android Vulkan: device-extension-count={} includes-android-ahb=1 queue-family-foreign=1 sync-fd=1",
-                    unsafe { *property_count }
-                );
-            }
-        }
+    let mut native_count = 0;
+    let result = unsafe {
+        enumerate(
+            physical_device,
+            layer_name,
+            &mut native_count,
+            ptr::null_mut(),
+        )
+    };
+    if result != VK_SUCCESS {
         return result;
     }
-
-    let capacity = unsafe { *property_count };
-    let result = unsafe { enumerate(physical_device, layer_name, property_count, properties) };
+    let mut native = vec![
+        VulkanExtensionProperties {
+            extension_name: [0; 256],
+            spec_version: 0,
+        };
+        native_count as usize
+    ];
+    let result = unsafe {
+        enumerate(
+            physical_device,
+            layer_name,
+            &mut native_count,
+            native.as_mut_ptr(),
+        )
+    };
     if result != VK_SUCCESS && result != VK_INCOMPLETE {
         return result;
     }
-    let native_count = unsafe { *property_count };
-    let native_extensions =
-        unsafe { std::slice::from_raw_parts(properties, native_count as usize) };
+    native.truncate(native_count as usize);
+    // Android WSI implements the base swapchain contract; extra presentation
+    // extensions cannot be forwarded with our native-window surface handles.
+    native.retain(|property| {
+        let name = unsafe { CStr::from_ptr(property.extension_name.as_ptr()) };
+        android_device_extension_supported(name)
+    });
     let contains = |name: &CStr| {
-        native_extensions.iter().any(|property| {
+        native.iter().any(|property| {
             // SAFETY: VkExtensionProperties guarantees a NUL-terminated name.
             (unsafe { CStr::from_ptr(property.extension_name.as_ptr()) }) == name
         })
@@ -764,19 +829,12 @@ unsafe extern "C" fn moltenvk_enumerate_device_extensions(
         ANDROID_AHB_EXTENSION,
         QUEUE_FAMILY_FOREIGN_EXTENSION,
         EXTERNAL_SEMAPHORE_FD_EXTENSION,
+        c"VK_KHR_swapchain",
     ]
     .into_iter()
     .filter(|name| !contains(name))
     .collect::<Vec<_>>();
-    if missing.is_empty() {
-        return result;
-    }
-    if native_count.saturating_add(missing.len() as u32) > capacity {
-        unsafe { *property_count = native_count.saturating_add(missing.len() as u32) };
-        return VK_INCOMPLETE;
-    }
-
-    for (offset, name) in missing.iter().enumerate() {
+    for name in missing.iter() {
         let mut extension = VulkanExtensionProperties {
             extension_name: [0; 256],
             spec_version: if *name == ANDROID_AHB_EXTENSION { 5 } else { 1 },
@@ -788,17 +846,44 @@ unsafe extern "C" fn moltenvk_enumerate_device_extensions(
         {
             *destination = *source as c_char;
         }
-        unsafe { *properties.add(native_count as usize + offset) = extension };
+        native.push(extension);
     }
-    let returned_count = native_count + missing.len() as u32;
-    unsafe { *property_count = returned_count };
+    if properties.is_null() {
+        unsafe { *property_count = native.len() as u32 };
+        return VK_SUCCESS;
+    }
+    let written = (unsafe { *property_count } as usize).min(native.len());
+    unsafe {
+        ptr::copy_nonoverlapping(native.as_ptr(), properties, written);
+        *property_count = written as u32;
+    }
     if std::env::var_os("DARWIN_ART_DEBUG_GRAPHICS_DSO").is_some() {
         eprintln!(
-            "ART Android Vulkan: device-extensions native={} returned={} android-ahb=1 queue-family-foreign=1 sync-fd=1",
-            native_count, returned_count
+            "ART Android Vulkan: device-extensions native={} returned={} android-ahb=1 queue-family-foreign=1 sync-fd=1 android-swapchain=1",
+            native_count, written
         );
     }
-    VK_SUCCESS
+    if written < native.len() {
+        VK_INCOMPLETE
+    } else {
+        VK_SUCCESS
+    }
+}
+
+fn android_device_extension_supported(name: &CStr) -> bool {
+    !matches!(
+        name.to_bytes(),
+        b"VK_KHR_incremental_present"
+            | b"VK_KHR_swapchain_maintenance1"
+            | b"VK_KHR_swapchain_mutable_format"
+            | b"VK_EXT_swapchain_maintenance1"
+            | b"VK_KHR_present_id"
+            | b"VK_KHR_present_id2"
+            | b"VK_KHR_present_wait"
+            | b"VK_KHR_present_wait2"
+            | b"VK_EXT_hdr_metadata"
+            | b"VK_GOOGLE_display_timing"
+    )
 }
 
 unsafe extern "C" fn moltenvk_create_device(
@@ -840,6 +925,17 @@ unsafe extern "C" fn moltenvk_create_device(
             continue;
         }
         let value = unsafe { CStr::from_ptr(name) };
+        if value == c"VK_KHR_swapchain" {
+            requested_android_ahb = true;
+            requested_sync_fd = true;
+            continue;
+        }
+        if !android_device_extension_supported(value) {
+            if !device.is_null() {
+                unsafe { *device = ptr::null_mut() };
+            }
+            return VK_ERROR_EXTENSION_NOT_PRESENT;
+        }
         if value == ANDROID_AHB_EXTENSION {
             requested_android_ahb = true;
             continue;
@@ -894,7 +990,11 @@ unsafe extern "C" fn moltenvk_create_device(
     }
     if result == VK_SUCCESS && !device.is_null() && !unsafe { *device }.is_null() {
         VULKAN_PHYSICAL_DEVICE.store(physical_device, Ordering::Release);
-        VULKAN_SYNC_FD_ENABLED.store(requested_sync_fd, Ordering::Release);
+        VULKAN_DEVICE_SYNC_FD
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap()
+            .insert(unsafe { *device } as usize, requested_sync_fd);
     }
     result
 }
@@ -1164,6 +1264,16 @@ unsafe extern "C" fn moltenvk_create_image(
         next = unsafe { (*next).p_next };
     }
     let result = unsafe { create(device, create_info, allocator, image) };
+    if result == VK_SUCCESS && !image.is_null() {
+        VULKAN_IMAGE_FORMATS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap()
+            .insert(unsafe { *image } as usize, unsafe { (*create_info).format });
+    }
+    if std::env::var_os("DARWIN_ART_DEBUG_GRAPHICS_DSO").is_some() {
+        eprintln!("ART Android Vulkan: create-image result={result} image={:p} format={} size={:?} usage={:#x}", if image.is_null() { ptr::null_mut() } else { unsafe { *image } }, unsafe { (*create_info).format }, unsafe { (*create_info).extent }, unsafe { (*create_info).usage });
+    }
     if !translated.is_null() {
         unsafe { (*translated).handle_types = original_handle_types };
     }
@@ -1182,7 +1292,7 @@ unsafe extern "C" fn moltenvk_allocate_memory(
         *const c_void,
         *mut *mut c_void,
     ) -> i32;
-    type CreateMetalTexture = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+    type CreateMetalTexture = unsafe extern "C" fn(*mut c_void, *mut c_void, i32) -> *mut c_void;
     type ReleaseMetalTexture = unsafe extern "C" fn(*mut c_void);
     let get_device_proc_address = unsafe { moltenvk_instance_symbol(c"vkGetDeviceProcAddr") };
     if get_device_proc_address.is_null() || allocate_info.is_null() || memory.is_null() {
@@ -1217,7 +1327,7 @@ unsafe extern "C" fn moltenvk_allocate_memory(
     let metal_device = VULKAN_METAL_DEVICE.load(Ordering::Acquire);
     let create_texture_address = unsafe {
         darwin_art_android_platform_symbol(
-            c"darwin_art_android_hardware_buffer_vulkan_metal_texture".as_ptr(),
+            c"darwin_art_android_hardware_buffer_vulkan_metal_texture_for_format".as_ptr(),
         )
     };
     let release_texture_address = unsafe {
@@ -1232,7 +1342,17 @@ unsafe extern "C" fn moltenvk_allocate_memory(
     let create_texture: CreateMetalTexture = unsafe { std::mem::transmute(create_texture_address) };
     let release_texture: ReleaseMetalTexture =
         unsafe { std::mem::transmute(release_texture_address) };
-    let metal_texture = unsafe { create_texture(hardware_buffer, metal_device) };
+    let image_format = dedicated
+        .and_then(|info| {
+            VULKAN_IMAGE_FORMATS
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+                .unwrap()
+                .get(&(info.image as usize))
+                .copied()
+        })
+        .unwrap_or(37);
+    let metal_texture = unsafe { create_texture(hardware_buffer, metal_device, image_format) };
     if metal_texture.is_null() {
         return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
@@ -1288,6 +1408,13 @@ unsafe extern "C" fn moltenvk_allocate_memory(
             return set_result;
         }
         let imports = IMPORTED_ANDROID_MEMORY.get_or_init(|| Mutex::new(HashMap::new()));
+        let acquire_address =
+            unsafe { darwin_art_android_platform_symbol(c"AHardwareBuffer_acquire".as_ptr()) };
+        if !acquire_address.is_null() {
+            let acquire: unsafe extern "C" fn(*mut c_void) =
+                unsafe { std::mem::transmute(acquire_address) };
+            unsafe { acquire(hardware_buffer) };
+        }
         imports
             .lock()
             .expect("Vulkan import registry poisoned")
@@ -1525,7 +1652,14 @@ unsafe extern "C" fn moltenvk_create_semaphore(
         p_next: translated.p_next,
         metal_shared_event: ptr::null_mut(),
     };
-    if VULKAN_SYNC_FD_ENABLED.load(Ordering::Acquire) {
+    if VULKAN_DEVICE_SYNC_FD
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap()
+        .get(&(device as usize))
+        .copied()
+        .unwrap_or(false)
+    {
         type CreateSharedEvent = unsafe extern "C" fn(*mut c_void, *mut u64) -> *mut c_void;
         let create_event_address = unsafe {
             darwin_art_android_platform_symbol(
@@ -1613,6 +1747,50 @@ unsafe extern "C" fn moltenvk_destroy_semaphore(
             unsafe { release(state.metal_shared_event as *mut c_void) };
         }
     }
+}
+
+unsafe fn moltenvk_signal_wsi_acquire(device: *mut c_void, semaphore: *mut c_void) -> i32 {
+    let event = unsafe { moltenvk_export_metal_shared_event(device, semaphore) };
+    if event.is_null() {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    let next_address = unsafe {
+        darwin_art_android_platform_symbol(
+            c"darwin_art_android_metal_shared_event_next_value".as_ptr(),
+        )
+    };
+    let import_address = unsafe {
+        darwin_art_android_platform_symbol(
+            c"darwin_art_android_metal_shared_event_import_fence".as_ptr(),
+        )
+    };
+    if next_address.is_null() || import_address.is_null() {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    let next: unsafe extern "C" fn(*mut c_void) -> u64 =
+        unsafe { std::mem::transmute(next_address) };
+    let signal: unsafe extern "C" fn(*mut c_void, u64, i32) -> i32 =
+        unsafe { std::mem::transmute(import_address) };
+    // Acquire's semaphore must be unsignaled with no unfinished operations.
+    // Engines may recycle render-complete semaphores here: their previous
+    // ordinary queue waits advanced MoltenVK's counter, not our FD bookkeeping.
+    // At this quiescent boundary the next payload is the completed event + 1.
+    let value = unsafe { next(event) };
+    if value == 0 || unsafe { signal(event, value, -1) } != 0 {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    if let Some(state) = VULKAN_SEMAPHORES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap()
+        .get_mut(&(semaphore as usize))
+    {
+        state.next_value = value.saturating_add(1);
+    }
+    if std::env::var_os("DARWIN_ART_DEBUG_GRAPHICS_DSO").is_some() {
+        eprintln!("ART Android Vulkan: acquire-signaled semaphore={semaphore:p} value={value}");
+    }
+    VK_SUCCESS
 }
 
 unsafe extern "C" fn moltenvk_import_semaphore_fd(
@@ -1722,6 +1900,58 @@ unsafe extern "C" fn moltenvk_android_hardware_buffer_unsupported(
     VK_ERROR_FORMAT_NOT_SUPPORTED
 }
 
+unsafe extern "C" fn moltenvk_destroy_image(
+    device: *mut c_void,
+    image: *mut c_void,
+    allocator: *const c_void,
+) {
+    if let Some(images) = VULKAN_IMAGE_FORMATS.get() {
+        images.lock().unwrap().remove(&(image as usize));
+    }
+    let address = unsafe { wsi_backend_raw_device_symbol(device as usize, c"vkDestroyImage") };
+    if !address.is_null() {
+        let destroy: unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_void) =
+            unsafe { std::mem::transmute(address) };
+        unsafe { destroy(device, image, allocator) };
+    }
+}
+
+unsafe extern "C" fn moltenvk_create_image_view(
+    device: *mut c_void,
+    info: *const c_void,
+    allocator: *const c_void,
+    output: *mut *mut c_void,
+) -> i32 {
+    let address = unsafe { wsi_backend_raw_device_symbol(device as usize, c"vkCreateImageView") };
+    if address.is_null() || info.is_null() {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    if std::env::var_os("DARWIN_ART_DEBUG_GRAPHICS_DSO").is_some() {
+        let words = unsafe { std::slice::from_raw_parts(info.cast::<u64>(), 10) };
+        eprintln!("ART Android Vulkan: create-image-view info={info:p} words={words:x?}");
+    }
+    let create: unsafe extern "C" fn(
+        *mut c_void,
+        *const c_void,
+        *const c_void,
+        *mut *mut c_void,
+    ) -> i32 = unsafe { std::mem::transmute(address) };
+    unsafe { create(device, info, allocator, output) }
+}
+
+unsafe extern "C" fn moltenvk_destroy_device(device: *mut c_void, allocator: *const c_void) {
+    vulkan_acquire_fences::forget_device(device as usize);
+    if let Some(devices) = VULKAN_DEVICE_SYNC_FD.get() {
+        devices.lock().unwrap().remove(&(device as usize));
+    }
+    let address = unsafe { wsi_backend_raw_device_symbol(device as usize, c"vkDestroyDevice") };
+    if !address.is_null() {
+        let destroy: unsafe extern "C" fn(*mut c_void, *const c_void) =
+            unsafe { std::mem::transmute(address) };
+        unsafe { destroy(device, allocator) };
+    }
+}
+
 unsafe extern "C" fn moltenvk_get_device_proc_addr(
     device: *mut c_void,
     name: *const c_char,
@@ -1730,7 +1960,13 @@ unsafe extern "C" fn moltenvk_get_device_proc_addr(
         return ptr::null_mut();
     }
     let value = unsafe { CStr::from_ptr(name) };
+    if let Some(address) =
+        vulkan_wsi::lookup(value).or_else(|| vulkan_acquire_fences::lookup(value))
+    {
+        return address;
+    }
     match value.to_bytes() {
+        b"vkDestroyDevice" => moltenvk_destroy_device as *mut c_void,
         b"vkGetDeviceProcAddr" => moltenvk_get_device_proc_addr as *mut c_void,
         b"vkGetAndroidHardwareBufferPropertiesANDROID" => {
             moltenvk_get_android_hardware_buffer_properties as *mut c_void
@@ -1739,6 +1975,8 @@ unsafe extern "C" fn moltenvk_get_device_proc_addr(
             moltenvk_android_hardware_buffer_unsupported as *mut c_void
         }
         b"vkCreateImage" => moltenvk_create_image as *mut c_void,
+        b"vkDestroyImage" => moltenvk_destroy_image as *mut c_void,
+        b"vkCreateImageView" => moltenvk_create_image_view as *mut c_void,
         b"vkAllocateMemory" => moltenvk_allocate_memory as *mut c_void,
         b"vkBindImageMemory" => moltenvk_bind_image_memory as *mut c_void,
         b"vkBindImageMemory2" | b"vkBindImageMemory2KHR" => {
@@ -1797,6 +2035,23 @@ unsafe extern "C" fn vulkan_create_instance(
     VK_ERROR_INCOMPATIBLE_DRIVER
 }
 
+// MoltenVK does not expose Android's WSI surface object on macOS.  Still
+// provide the entry point so engines that resolve it unconditionally receive
+// a normal Vulkan capability error instead of branching through a null PFN.
+// Unity/Swappy treats VK_ERROR_EXTENSION_NOT_PRESENT as an unavailable WSI
+// path and can select its GLES/ANGLE backend when one is present.
+unsafe extern "C" fn vulkan_create_android_surface(
+    _instance: *mut c_void,
+    _create_info: *const c_void,
+    _allocator: *const c_void,
+    surface: *mut *mut c_void,
+) -> i32 {
+    if !surface.is_null() {
+        unsafe { *surface = ptr::null_mut() };
+    }
+    VK_ERROR_EXTENSION_NOT_PRESENT
+}
+
 unsafe extern "C" fn vulkan_get_instance_proc_addr(
     instance: *mut c_void,
     name: *const c_char,
@@ -1806,7 +2061,20 @@ unsafe extern "C" fn vulkan_get_instance_proc_addr(
     }
     if let Some(provider) = moltenvk() {
         let value = unsafe { CStr::from_ptr(name) };
+        if let Some(address) =
+            vulkan_wsi::lookup(value).or_else(|| vulkan_acquire_fences::lookup(value))
+        {
+            return address;
+        }
         match value.to_bytes() {
+            b"vkDestroyDevice" => return moltenvk_destroy_device as *mut c_void,
+            b"vkCreateSemaphore" => return moltenvk_create_semaphore as *mut c_void,
+            b"vkDestroySemaphore" => return moltenvk_destroy_semaphore as *mut c_void,
+            b"vkCreateImage" => return moltenvk_create_image as *mut c_void,
+            b"vkDestroyImage" => return moltenvk_destroy_image as *mut c_void,
+            b"vkCreateImageView" => return moltenvk_create_image_view as *mut c_void,
+            b"vkAllocateMemory" => return moltenvk_allocate_memory as *mut c_void,
+            b"vkFreeMemory" => return moltenvk_free_memory as *mut c_void,
             b"vkGetInstanceProcAddr" => return vulkan_get_instance_proc_addr as *mut c_void,
             b"vkCreateInstance" => return moltenvk_create_instance as *mut c_void,
             b"vkEnumerateInstanceExtensionProperties" => {
@@ -1815,6 +2083,7 @@ unsafe extern "C" fn vulkan_get_instance_proc_addr(
             b"vkCreateMetalSurfaceEXT" | b"vkCreateMacOSSurfaceMVK" => {
                 return ptr::null_mut();
             }
+            b"vkCreateAndroidSurfaceKHR" => return vulkan_create_android_surface as *mut c_void,
             b"vkEnumerateDeviceExtensionProperties" => {
                 return moltenvk_enumerate_device_extensions as *mut c_void;
             }
@@ -1851,6 +2120,7 @@ unsafe extern "C" fn vulkan_get_instance_proc_addr(
             vulkan_enumerate_instance_layer_properties as *mut c_void
         }
         b"vkCreateInstance" => vulkan_create_instance as *mut c_void,
+        b"vkCreateAndroidSurfaceKHR" => vulkan_create_android_surface as *mut c_void,
         _ => ptr::null_mut(),
     }
 }
@@ -1859,7 +2129,7 @@ unsafe fn libandroid_symbol(name: &CStr) -> *mut c_void {
     #[cfg(test)]
     {
         let _ = name;
-        return 1usize as *mut c_void;
+        ptr::dangling_mut::<c_void>()
     }
     #[cfg(not(test))]
     {
@@ -2044,7 +2314,7 @@ pub unsafe extern "C" fn darwin_art_bionic_dlsym(
         #[cfg(test)]
         let result = {
             let _ = soname;
-            1usize as *mut c_void
+            ptr::dangling_mut::<c_void>()
         };
         if std::env::var_os("DARWIN_ART_DEBUG_GRAPHICS_DSO").is_some() {
             let name = unsafe { CStr::from_ptr(symbol) };
@@ -2321,6 +2591,25 @@ pub fn manifest() -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn android_wsi_does_not_advertise_unsupported_presentation_extensions() {
+        for name in [
+            c"VK_KHR_present_wait",
+            c"VK_EXT_hdr_metadata",
+            c"VK_KHR_swapchain_maintenance1",
+            c"VK_GOOGLE_display_timing",
+        ] {
+            assert!(!super::android_device_extension_supported(name));
+        }
+        for name in [
+            c"VK_KHR_swapchain",
+            c"VK_ANDROID_external_memory_android_hardware_buffer",
+            c"VK_KHR_external_memory",
+            c"VK_KHR_timeline_semaphore",
+        ] {
+            assert!(super::android_device_extension_supported(name));
+        }
+    }
     use super::*;
 
     #[test]

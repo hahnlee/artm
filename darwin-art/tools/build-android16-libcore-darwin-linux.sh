@@ -29,7 +29,7 @@ manifest="$stage/methods.tsv"
 perl -0777 -ne '
   if (/static JNINativeMethod gMethods\[\] = \{(.*?)\n\};/s) {
     $body = $1;
-    while ($body =~ /(CRITICAL_NATIVE_METHOD|NATIVE_METHOD(?:_OVERLOAD)?)\(Linux,\s*(\w+),\s*"([^"]+)"(?:,\s*\w+)?\)/gs) {
+    while ($body =~ /(CRITICAL_NATIVE_METHOD|NATIVE_METHOD(?:_OVERLOAD)?)\(Linux,\s*(\w+),\s*"([^"]+)"(?:,\s*(\w+))?\)/gs) {
       print "$1\t$2\t$3\n";
     }
   }
@@ -126,8 +126,11 @@ my %critical = (
 );
 my %supported = (
   access => 'DarwinLinuxAccess', open => 'DarwinLinuxOpen', dup => 'DarwinLinuxDup',
+  dup2 => 'DarwinLinuxDup2',
+  socketpair => 'DarwinLinuxSocketpair',
   fcntlInt => 'DarwinLinuxFcntlInt', fcntlVoid => 'DarwinLinuxFcntlVoid',
   fstat => 'DarwinLinuxFstat',
+  ftruncate => 'DarwinLinuxFtruncate',
   readBytes => 'DarwinLinuxReadBytes', preadBytes => 'DarwinLinuxPreadBytes',
   writeBytes => 'DarwinLinuxWriteBytes', pwriteBytes => 'DarwinLinuxPwriteBytes',
   close => 'DarwinLinuxClose',
@@ -135,6 +138,7 @@ my %supported = (
   sysconf => 'DarwinLinuxSysconf',
   getenv => 'DarwinLinuxGetenv', getpwuid => 'DarwinLinuxGetpwuid',
   stat => 'DarwinLinuxStat', lseek => 'DarwinLinuxLseek',
+  kill => 'DarwinLinuxKill',
   sendfile => 'DarwinLinuxSendfile',
   remove => 'DarwinLinuxRemove', rename => 'DarwinLinuxRename',
   statvfs => 'DarwinLinuxStatvfs', fstatvfs => 'DarwinLinuxFstatvfs',
@@ -145,6 +149,20 @@ my %supported = (
   android_fdsan_get_owner_tag => 'DarwinLinuxFdsanGetOwnerTag',
   android_fdsan_get_tag_type => 'DarwinLinuxFdsanGetTagType',
   android_fdsan_get_tag_value => 'DarwinLinuxFdsanGetTagValue',
+  android_getaddrinfo => 'DarwinLinuxAndroidGetaddrinfo',
+  gai_strerror => 'DarwinLinuxGaiStrerror',
+  socket => 'DarwinLinuxSocket',
+  connect => 'DarwinLinuxConnect',
+  connectSocketAddress => 'DarwinLinuxConnectSocketAddress',
+  bind => 'DarwinLinuxBind',
+  bindSocketAddress => 'DarwinLinuxBindSocketAddress',
+  getsockname => 'DarwinLinuxGetsockname',
+  getsockoptInt => 'DarwinLinuxGetsockoptInt',
+  setsockoptInt => 'DarwinLinuxSetsockoptInt',
+  getsockoptTimeval => 'DarwinLinuxGetsockoptTimeval',
+  setsockoptTimeval => 'DarwinLinuxSetsockoptTimeval',
+  poll => 'DarwinLinuxPoll',
+  shutdown => 'DarwinLinuxShutdown',
 );
 my ($index, $regular_count, $critical_count, $unsupported_count) = (0, 0, 0, 0);
 while (my $line = <$input>) {
@@ -157,7 +175,10 @@ while (my $line = <$input>) {
     $symbol = $critical{$name};
     ++$critical_count;
   } elsif (exists $supported{$name}) {
-    $symbol = $supported{$name};
+    my $key = $name;
+    $key .= 'SocketAddress' if ($name eq 'connect' || $name eq 'bind')
+        && $signature =~ /Ljava\/net\/SocketAddress;/;
+    $symbol = $supported{$key};
     ++$regular_count;
   } else {
     my ($return_type, @parameters) = decode_signature($signature);
@@ -209,8 +230,7 @@ if grep -F '...' "$wrappers" >/dev/null; then
   fail "generated wrapper contains a variadic parameter"
 fi
 for expected in \
-  $'getsockoptByte\t(Ljava/io/FileDescriptor;II)I\tjint\tJNIEnv* env,jobject,jobject,jint,jint' \
-  $'gai_strerror\t(I)Ljava/lang/String;\tjstring\tJNIEnv* env,jobject,jint'; do
+  $'getsockoptByte\t(Ljava/io/FileDescriptor;II)I\tjint\tJNIEnv* env,jobject,jobject,jint,jint'; do
   grep -F "$expected" "$abi_manifest" >/dev/null ||
     fail "representative fixed ABI missing: $expected"
 done
@@ -253,6 +273,8 @@ done
 common_flags=(
   -std=c++20 -arch arm64 -isysroot "$sdk_root" -fPIC -Wall -Wextra -Werror
   -I"$project_root/compat"
+  -I"$project_root/tools/bionic-socket-broker-adapter/include"
+  -I"$project_root/tools/bionic-process-state-facade/include"
   -I"$project_root/tools/bionic-fs-facade/include"
   -I"$project_root/tools/bionic-ioctl-facade/include"
   -I"$stage"

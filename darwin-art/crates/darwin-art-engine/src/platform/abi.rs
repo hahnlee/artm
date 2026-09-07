@@ -158,8 +158,13 @@ impl DynamicLibrary {
     fn open(path: &Path) -> Result<Self, String> {
         let path = CString::new(path.as_os_str().as_bytes())
             .map_err(|_| "dynamic-library path contains an interior NUL".to_owned())?;
+        // ART is the process runtime provider. Android loads libart into a
+        // linker namespace where JNI libraries can resolve their declared
+        // libart dependency; publish the Darwin runtime image equivalently.
+        // Application-library path visibility is still enforced separately by
+        // the Android native-loader namespace and is not widened here.
         // SAFETY: path is NUL terminated and flags are valid Darwin flags.
-        let handle = unsafe { dlopen(path.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
+        let handle = unsafe { dlopen(path.as_ptr(), RTLD_NOW | RTLD_GLOBAL) };
         if handle.is_null() {
             Err(loader_error())
         } else {
@@ -209,7 +214,7 @@ fn loader_error() -> String {
     }
 }
 
-const RTLD_LOCAL: i32 = 0x4;
+const RTLD_GLOBAL: i32 = 0x8;
 const RTLD_NOW: i32 = 0x2;
 
 unsafe extern "C" {

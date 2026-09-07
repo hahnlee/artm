@@ -61,7 +61,16 @@ uintptr_t FaultManager::GetFaultSp(void* context) {
 
 bool NullPointerHandler::Action(int, siginfo_t* info, void* context) {
   uintptr_t fault_address = reinterpret_cast<uintptr_t>(info->si_addr);
-  if (!IsValidFaultAddress(fault_address)) {
+  // Managed references retain Android's low-32-bit value on Darwin, while
+  // generated memory operands decode them into the reserved high host window.
+  // A null receiver therefore faults at heap-base + field-offset rather than
+  // literal field-offset. Feed ART's ordinary implicit-null predicate the
+  // logical Android address. The quick throw entrypoint forwards this value
+  // to ThrowNullPointerExceptionFromDexPC(), whose AOSP validation applies
+  // the same low-page implicit-null contract.
+  uintptr_t logical_fault_address =
+      ArtHostAddressToCompressedReferenceAddress(fault_address);
+  if (!IsValidFaultAddress(logical_fault_address)) {
     return false;
   }
 
@@ -76,7 +85,7 @@ bool NullPointerHandler::Action(int, siginfo_t* info, void* context) {
   stack_pointer -= sizeof(uintptr_t);
   *reinterpret_cast<uintptr_t*>(stack_pointer) = return_pc;
   SetSp(machine_context, stack_pointer);
-  SetLr(machine_context, fault_address);
+  SetLr(machine_context, logical_fault_address);
   SetPc(machine_context, art_quick_throw_null_pointer_exception_from_signal);
   return true;
 }

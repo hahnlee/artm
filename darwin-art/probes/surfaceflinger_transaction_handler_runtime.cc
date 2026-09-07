@@ -182,9 +182,75 @@ int main() {
     return 23;
   }
 
+  // The pointer-free Darwin bridge cannot populate Binder parent handles.
+  // A pure eReparent(root -> null) must nevertheless invalidate the cached
+  // hierarchy; otherwise a root that has become detached remains in the
+  // display-root order.
+  const DarwinArtSurfaceFlingerLayerUpdate detach_case[] = {
+      {.layer_id = 71,
+       .parent_id = 0,
+       .what = android::layer_state_t::eLayerChanged,
+       .z = 1,
+       .alpha = 1.0f},
+      {.layer_id = 73,
+       .parent_id = 0,
+       .what = android::layer_state_t::eLayerChanged,
+       .z = 3,
+       .alpha = 1.0f},
+      {.layer_id = 72,
+       .parent_id = 0,
+       .what = android::layer_state_t::eLayerChanged,
+       .z = 2,
+       .alpha = 1.0f},
+  };
+  if (!darwin_art_surfaceflinger_commit_transaction(
+          6, detach_case, std::size(detach_case), &result) ||
+      !darwin_art_surfaceflinger_copy_layer_order(nullptr, 0, &order_count) ||
+      order_count != 3) {
+    return 24;
+  }
+  std::array<uint32_t, 3> detach_order{};
+  if (!darwin_art_surfaceflinger_copy_layer_order(
+          detach_order.data(), detach_order.size(), &order_count) ||
+      detach_order != std::array<uint32_t, 3>{71, 72, 73}) {
+    return 25;
+  }
+  const DarwinArtSurfaceFlingerLayerUpdate detach_child[] = {
+      {.layer_id = 72,
+       .parent_id = 0,
+       .what = android::layer_state_t::eReparent,
+       .z = 2,
+       .alpha = 1.0f},
+  };
+  if (!darwin_art_surfaceflinger_commit_transaction(
+          7, detach_child, std::size(detach_child), &result) ||
+      !darwin_art_surfaceflinger_copy_layer_order(
+          detach_order.data(), detach_order.size(), &order_count) ||
+      order_count != 2 ||
+      std::array<uint32_t, 3>{detach_order[0], detach_order[1], 0} !=
+          std::array<uint32_t, 3>{71, 73, 0}) {
+    return 26;
+  }
+  // A repeated null-parent transaction is a no-op after the first detach and
+  // must not perturb the surviving root order.
+  if (!darwin_art_surfaceflinger_commit_transaction(
+          8, detach_child, std::size(detach_child), &result) ||
+      !darwin_art_surfaceflinger_copy_layer_order(
+          detach_order.data(), detach_order.size(), &order_count) ||
+      order_count != 2 || detach_order[0] != 71 || detach_order[1] != 73) {
+    return 27;
+  }
+  const std::array<uint32_t, 3> detach_destroyed{71, 72, 73};
+  if (!darwin_art_surfaceflinger_destroy_layer_handles(
+          detach_destroyed.data(), detach_destroyed.size()) ||
+      !darwin_art_surfaceflinger_copy_layer_order(nullptr, 0, &order_count) ||
+      order_count != 0) {
+    return 28;
+  }
+
   std::puts(
       "surfaceflinger-transaction-runtime: queue=1 flush=1 pending=0 "
       "resolved-layers=2 hierarchy-order=PASS lifecycle=PASS "
-      "buffer-child-parent=PASS relative-layer=PASS");
+      "buffer-child-parent=PASS relative-layer=PASS detach-reparent=PASS");
   return 0;
 }

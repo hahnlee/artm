@@ -11,9 +11,9 @@ use std::process::ExitCode;
 
 fn run() -> Result<(), String> {
     let arguments = env::args_os().collect::<Vec<_>>();
-    if arguments.len() != 10 {
+    if arguments.len() < 10 {
         return Err(
-            "usage: darwin-art-apk-install APK INSTALL_ROOT PACKAGE VERSION_CODE NATIVE_ROOT|none EXTRACTOR|none RUNTIME_ABI NATIVE_CACHE_ROOT CONVERTER|none"
+            "usage: darwin-art-apk-install APK INSTALL_ROOT PACKAGE VERSION_CODE NATIVE_ROOT|none EXTRACTOR|none RUNTIME_ABI NATIVE_CACHE_ROOT CONVERTER|none [SPLIT_APK ...]"
                 .to_owned(),
         );
     }
@@ -33,6 +33,7 @@ fn run() -> Result<(), String> {
         native_root: (native_root != "none").then_some(native_root),
         extractor: (extractor != PathBuf::from("none")).then_some(extractor),
         runtime_abi: text(7, "runtime ABI")?,
+        splits: arguments[10..].iter().map(PathBuf::from).collect(),
     };
     let installed = install(&request)?;
     let native_cache_root = PathBuf::from(&arguments[8]);

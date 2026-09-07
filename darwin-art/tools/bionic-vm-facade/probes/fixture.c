@@ -172,6 +172,10 @@ __attribute__((visibility("default"))) int bionic_vm_fixture_basic(void) {
   mapping = mmap(NULL, host_page * 2, PROT_READ | PROT_WRITE,
                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (mapping == MAP_FAILED) return 17;
+  unsigned char residency[2] = {0, 0};
+  if (mincore(mapping, host_page + 1, residency) != 0 ||
+      residency[0] != 1 || residency[1] != 1)
+    return 55;
   void* second_page = (unsigned char*)mapping + host_page;
   if (mprotect(second_page, host_page, PROT_READ) != 0 ||
       mprotect(second_page, host_page, PROT_READ | PROT_WRITE) != 0)

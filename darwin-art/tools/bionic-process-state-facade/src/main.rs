@@ -72,8 +72,13 @@ impl SymbolResolver for ClosedResolver {
             "__errno" => c"__errno",
             "__system_property_get" => c"__system_property_get",
             "__system_property_read" => c"__system_property_read",
+            "basename" => c"basename",
             "getauxval" => c"getauxval",
+            "getentropy" => c"getentropy",
             "getenv" => c"getenv",
+            "raise" => c"raise",
+            "sigaction" => c"sigaction",
+            "signal" => c"signal",
             _ => return Ok(None),
         };
         // SAFETY: providers only read the static NUL-terminated name.
@@ -204,6 +209,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("facade-lifetime pointer stability failed".into());
     }
 
+    if image.call_exported_i32("bionic_process_fixture_signal_legacy")? != 42 {
+        return Err("legacy signal trampoline dispatch failed".into());
+    }
+    if image.call_exported_i32("bionic_process_fixture_sigaction_query")? != 42 {
+        return Err("sigaction guest flags/query failed".into());
+    }
+
     drop(activation);
     drop(snapshot);
     if drop_count() != 1 {
@@ -217,7 +229,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("post-teardown Android calls did not fail closed".into());
     }
-    println!("bionic-process-state-facade: PASS immutable snapshot concurrent teardown");
+    println!(
+        "bionic-process-state-facade: PASS immutable snapshot concurrent teardown signal-trampoline"
+    );
     Ok(())
 }
 

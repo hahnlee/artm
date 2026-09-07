@@ -11,6 +11,8 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 
 mod direct_syscall;
+#[cfg(all(test, target_arch = "aarch64", target_os = "macos"))]
+mod direct_syscall_execution_tests;
 mod direct_tls;
 mod ffi;
 mod mapping;
@@ -507,6 +509,7 @@ struct ParsedImage {
     image_offset: usize,
     stack_guard_offset: usize,
     direct_syscall_shim_offset: usize,
+    direct_syscall_shim_size: usize,
     page_size: usize,
     page_protections: Vec<c_int>,
 }
@@ -519,6 +522,7 @@ pub struct LoadedElf {
     stack_guard: NonNull<u64>,
     stack_guard_rewrites: Vec<(u64, u32)>,
     direct_syscall_shim: NonNull<u8>,
+    direct_syscall_shim_size: usize,
     direct_syscall_rewrites: Vec<(u64, u32)>,
     minimum_page: u64,
     loads: Vec<ProgramHeader>,
@@ -666,6 +670,7 @@ impl LoadedElf {
             stack_guard,
             stack_guard_rewrites: Vec::new(),
             direct_syscall_shim,
+            direct_syscall_shim_size: parsed.direct_syscall_shim_size,
             direct_syscall_rewrites: Vec::new(),
             minimum_page: parsed.minimum_page,
             loads: parsed.loads,
@@ -727,7 +732,7 @@ impl LoadedElf {
         let has_fips_hash = self
             .exported_symbols()?
             .iter()
-            .any(|symbol| symbol.name == "FIPS_module_hash");
+            .any(|symbol| symbol.name == b"FIPS_module_hash");
         if !has_fips_hash {
             return Ok(());
         }
@@ -822,11 +827,14 @@ impl LoadedElf {
     }
 
     fn exported_address(&self, name: &str) -> Result<usize, LoadError> {
-        self.exported_symbols()?
-            .into_iter()
-            .find(|symbol| symbol.name == name)
+        self.exported_address_bytes(name.as_bytes())
+    }
+
+    fn exported_address_bytes(&self, name: &[u8]) -> Result<usize, LoadError> {
+        let symbols = self.exported_symbols()?;
+        find_exported_symbol(&symbols, name)
             .map(|symbol| symbol.address)
-            .ok_or_else(|| LoadError::SymbolNotFound(name.to_owned()))
+            .ok_or_else(|| LoadError::SymbolNotFound(String::from_utf8_lossy(name).into_owned()))
     }
 
     fn host_span_to_virtual(
@@ -874,11 +882,15 @@ impl LoadedElf {
     /// the general case: the caller must know the exact ABI and must run required initializers
     /// first. This method performs symbol visibility/type and executable-range validation only.
     pub fn lookup_exported(&self, name: &str) -> Result<usize, LoadError> {
-        self.resolve_function(name)
+        self.lookup_exported_bytes(name.as_bytes())
     }
 
-    pub(crate) fn lookup_any_exported(&self, name: &str) -> Result<usize, LoadError> {
-        self.exported_address(name)
+    pub(crate) fn lookup_exported_bytes(&self, name: &[u8]) -> Result<usize, LoadError> {
+        self.resolve_function_bytes(name)
+    }
+
+    pub(crate) fn lookup_any_exported_bytes(&self, name: &[u8]) -> Result<usize, LoadError> {
+        self.exported_address_bytes(name)
     }
 
     pub(crate) fn debug_mapped_pointer(&self, virtual_address: u64) -> Result<usize, LoadError> {
@@ -1608,12 +1620,18 @@ impl LoadedElf {
         if !matches!(symbol.binding, STB_GLOBAL | STB_WEAK) || symbol.visibility != 0 {
             return Err(LoadError::InvalidSymbol(format!("dynsym[{index}] binding")));
         }
-        let name = self.dynamic_string(symbol.name_offset)?;
-        if name.is_empty() {
+        let name_bytes = self.dynamic_string_bytes(symbol.name_offset)?;
+        if name_bytes.is_empty() {
             return Err(LoadError::InvalidSymbol(format!(
                 "dynsym[{index}] empty name"
             )));
         }
+        // Undefined symbols are passed through the Rust resolver's historical
+        // UTF-8 API.  Android DSOs may contain arbitrary bytes in *defined*
+        // names (which are retained below), but an invalid undefined import
+        // cannot be represented by this external resolver contract.
+        let name = std::str::from_utf8(name_bytes)
+            .map_err(|_| LoadError::InvalidSymbol(format!("dynsym[{index}] non-UTF-8 name")))?;
         let version = self.version_for_symbol(index, versions)?;
         let request_version = version.map(|(requirement, hidden)| VersionRequirement {
             soname: &requirement.soname,
@@ -1623,13 +1641,13 @@ impl LoadedElf {
         });
         let result = resolver
             .resolve(SymbolRequest {
-                symbol: &name,
+                symbol: name,
                 needed_libraries: &self.needed_libraries,
                 version: request_version,
                 is_weak: symbol.binding == STB_WEAK,
             })
             .map_err(|source| LoadError::Resolver {
-                symbol: name.clone(),
+                symbol: name.to_owned(),
                 source,
             })?;
         let address = match result {
@@ -1637,7 +1655,7 @@ impl LoadedElf {
             None if symbol.binding == STB_WEAK => 0,
             None => {
                 return Err(LoadError::UnresolvedSymbol {
-                    symbol: name,
+                    symbol: name.to_owned(),
                     soname: version.map(|(item, _)| item.soname.clone()),
                     version: version.map(|(item, _)| item.name.clone()),
                 });
@@ -1781,9 +1799,13 @@ impl LoadedElf {
     }
 
     fn resolve_function(&self, requested: &str) -> Result<usize, LoadError> {
+        self.resolve_function_bytes(requested.as_bytes())
+    }
+
+    fn resolve_function_bytes(&self, requested: &[u8]) -> Result<usize, LoadError> {
         for index in 1..self.symbol_count()? {
             let symbol = self.dynamic_symbol(index)?;
-            if self.dynamic_string(symbol.name_offset)? != requested {
+            if self.dynamic_string_bytes(symbol.name_offset)? != requested {
                 continue;
             }
             if symbol.section_index == SHN_UNDEF
@@ -1792,7 +1814,9 @@ impl LoadedElf {
                 || !matches!(symbol.visibility, STV_DEFAULT | STV_PROTECTED)
                 || symbol.value == 0
             {
-                return Err(LoadError::InvalidSymbol(requested.to_owned()));
+                return Err(LoadError::InvalidSymbol(
+                    String::from_utf8_lossy(requested).into_owned(),
+                ));
             }
             if symbol.section_index == SHN_ABS {
                 return Err(LoadError::Capability(Capability::AbsoluteSymbolDefinition));
@@ -1806,7 +1830,9 @@ impl LoadedElf {
             let pointer = self.loaded_pointer(symbol.value, 1)? as usize;
             return Ok(pointer);
         }
-        Err(LoadError::SymbolNotFound(requested.to_owned()))
+        Err(LoadError::SymbolNotFound(
+            String::from_utf8_lossy(requested).into_owned(),
+        ))
     }
 
     fn exported_symbols(&self) -> Result<Vec<ExportedSymbol>, LoadError> {
@@ -1845,7 +1871,7 @@ impl LoadedElf {
             if let Some(error) = range_error {
                 return Err(error);
             }
-            let name = self.dynamic_string(symbol.name_offset)?;
+            let name = self.dynamic_string_bytes(symbol.name_offset)?.to_vec();
             if name.is_empty() {
                 continue;
             }
@@ -2118,7 +2144,7 @@ impl LoadedElf {
         })
     }
 
-    fn dynamic_string(&self, offset: u32) -> Result<String, LoadError> {
+    fn dynamic_string_bytes(&self, offset: u32) -> Result<&[u8], LoadError> {
         let table = self
             .dynamic
             .string_table
@@ -2132,12 +2158,13 @@ impl LoadedElf {
         }
         self.require_loaded_range(table, size, Some(PF_R), "dynamic string table")?;
         let bytes = self.loaded_slice(table + offset as u64, (size - offset as u64) as usize)?;
-        let end = bytes
-            .iter()
-            .position(|byte| *byte == 0)
-            .ok_or(LoadError::Format("unterminated dynamic string"))?;
-        let value = std::str::from_utf8(&bytes[..end])
-            .map_err(|_| LoadError::Format("non-UTF-8 dynamic symbol name"))?;
+        terminated_dynamic_string(bytes)
+    }
+
+    fn dynamic_string(&self, offset: u32) -> Result<String, LoadError> {
+        let value = self.dynamic_string_bytes(offset)?;
+        let value = std::str::from_utf8(value)
+            .map_err(|_| LoadError::Format("non-UTF-8 dynamic metadata string"))?;
         Ok(value.to_owned())
     }
 
@@ -2235,22 +2262,51 @@ impl LoadedElf {
             .ok_or(LoadError::Capability(Capability::DirectSyscall))?
             .address();
 
-        // SAFETY: the parser reserves a dedicated page which remains writable until final
-        // protections are applied and is never exposed as guest data.
-        unsafe {
-            direct_syscall::write_shim(self.direct_syscall_shim.as_ptr(), target)?;
-        }
+        let errno_target = resolver
+            .resolve(SymbolRequest {
+                symbol: "__errno",
+                needed_libraries: &self.needed_libraries,
+                version: Some(VersionRequirement {
+                    soname: "libc.so",
+                    name: "LIBC",
+                    hidden: false,
+                    flags: 0,
+                }),
+                is_weak: false,
+            })
+            .map_err(|source| LoadError::Resolver {
+                symbol: "__errno".to_owned(),
+                source,
+            })?
+            .ok_or(LoadError::Capability(Capability::DirectSyscall))?
+            .address();
+
+        let mut veneer_cursor = 0usize;
         for (virtual_address, file_size) in executable_ranges {
             let size = to_usize(file_size, "executable PT_LOAD file size")?;
             let pointer = self.loaded_pointer(virtual_address, size)?;
-            // SAFETY: staging made every executable PT_LOAD page writable and this unique
-            // mutable image owner serializes all instruction rewrites.
-            let code = unsafe { std::slice::from_raw_parts_mut(pointer, size) };
-            let rewrites = direct_syscall::rewrite_linux_svc(
-                code,
-                self.direct_syscall_shim.as_ptr() as usize,
-            )?;
+            let rewrites = {
+                // SAFETY: staging made every executable PT_LOAD page writable and this unique
+                // mutable image owner serializes all instruction rewrites.
+                let code = unsafe { std::slice::from_raw_parts_mut(pointer, size) };
+                direct_syscall::rewrite_linux_svc(
+                    code,
+                    self.direct_syscall_shim.as_ptr() as usize,
+                    &mut veneer_cursor,
+                    self.direct_syscall_shim_size,
+                )?
+            };
             for rewrite in rewrites {
+                // SAFETY: the parser reserved and staged the complete direct-SVC veneer area;
+                // each cursor slot is unique and remains writable until final protections.
+                unsafe {
+                    direct_syscall::write_veneer(
+                        self.direct_syscall_shim.as_ptr().add(rewrite.veneer_offset),
+                        target,
+                        errno_target,
+                        rewrite.return_address,
+                    )?;
+                }
                 let offset = u64::try_from(rewrite.instruction_index)
                     .ok()
                     .and_then(|index| index.checked_mul(4))
@@ -2397,11 +2453,29 @@ struct OwnedVersionDefinition {
 
 #[derive(Clone, Debug)]
 struct ExportedSymbol {
-    name: String,
+    /// Raw bytes from the ELF string table. ELF symbol names are byte strings,
+    /// not Rust text; keeping them raw prevents invalid names from colliding
+    /// through replacement-character or lossy conversions.
+    name: Vec<u8>,
     address: usize,
     binding: u8,
     version: Option<String>,
     version_hidden: bool,
+}
+
+fn terminated_dynamic_string(bytes: &[u8]) -> Result<&[u8], LoadError> {
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .ok_or(LoadError::Format("unterminated dynamic string"))?;
+    Ok(&bytes[..end])
+}
+
+fn find_exported_symbol<'a>(
+    symbols: &'a [ExportedSymbol],
+    name: &[u8],
+) -> Option<&'a ExportedSymbol> {
+    symbols.iter().find(|symbol| symbol.name == name)
 }
 
 fn elf_flags_to_protection(flags: u32) -> c_int {
@@ -2521,6 +2595,71 @@ mod tests {
         assert!(matches!(
             LoadedElf::load(&[0; ELF64_EHDR_SIZE]),
             Err(LoadError::Format("bad magic"))
+        ));
+    }
+
+    #[test]
+    fn raw_defined_symbol_names_are_retained_and_looked_up_exactly() {
+        let symbols = vec![
+            ExportedSymbol {
+                name: b"ascii_export".to_vec(),
+                address: 1,
+                binding: STB_GLOBAL,
+                version: None,
+                version_hidden: false,
+            },
+            ExportedSymbol {
+                name: b"raw\x80".to_vec(),
+                address: 2,
+                binding: STB_GLOBAL,
+                version: None,
+                version_hidden: false,
+            },
+            ExportedSymbol {
+                name: b"raw\x81".to_vec(),
+                address: 3,
+                binding: STB_GLOBAL,
+                version: None,
+                version_hidden: false,
+            },
+            ExportedSymbol {
+                name: b"raw\xef\xbf\xbd".to_vec(),
+                address: 4,
+                binding: STB_GLOBAL,
+                version: None,
+                version_hidden: false,
+            },
+        ];
+        assert_eq!(
+            find_exported_symbol(&symbols, b"ascii_export")
+                .unwrap()
+                .address,
+            1
+        );
+        assert_eq!(
+            find_exported_symbol(&symbols, b"raw\x80").unwrap().address,
+            2
+        );
+        assert_eq!(
+            find_exported_symbol(&symbols, b"raw\x81").unwrap().address,
+            3
+        );
+        assert_eq!(
+            find_exported_symbol(&symbols, b"raw\xef\xbf\xbd")
+                .unwrap()
+                .address,
+            4
+        );
+        assert!(find_exported_symbol(&symbols, b"raw\x82").is_none());
+    }
+
+    #[test]
+    fn dynamic_string_decoder_preserves_invalid_bytes_and_requires_nul() {
+        let bytes = b"defined\x80\0following";
+        assert_eq!(terminated_dynamic_string(bytes).unwrap(), b"defined\x80");
+        assert!(matches!(
+            terminated_dynamic_string(b"unterminated\x80"),
+            Err(LoadError::Format("unterminated dynamic string"))
         ));
     }
 }

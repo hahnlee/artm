@@ -1,10 +1,11 @@
 # Bionic DNS facade
 
 This standalone provider owns the minimum coherent Bionic name/address cluster:
-`getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `getnameinfo`, and `inet_ntop`
+`getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `getnameinfo`, `inet_ntop`,
+`gethostbyname`, and `getservbyname`
 under the exact `libc.so`/`LIBC` namespace. A real NDK r28c/API-35 Android
-AArch64 ELF exercises all five imports through the repository ELF loader. Resolution is closed; no
-dyld, `dlsym`, legacy `gethostbyname`, or alternate SONAME path exists.
+AArch64 ELF exercises these imports through the repository ELF loader. Resolution is closed; no
+dyld, `dlsym`, or alternate SONAME path exists.
 
 ## Resolver policy
 
@@ -14,10 +15,17 @@ netd-configured resolver. The facade validates the name and appends a trailing
 dot before the host call, so an APK cannot accidentally inherit search-domain
 expansion. Unqualified names and `.local` remain closed to avoid leaking host
 LAN/mDNS policy; null passive nodes, case-insensitive `localhost`, and textual
-numeric IPv4/IPv6 remain supported. Services must be null or decimal ports
-from 0 through 65535, so `/etc/services` is never inherited. Set
+numeric IPv4/IPv6 remain supported. For `getaddrinfo`, services must be null
+or decimal ports from 0 through 65535, so `/etc/services` is never inherited.
+Set
 `DARWIN_ART_DEBUG_DNS=1` to log requested and absolute query names plus the
 host resolver status without changing policy.
+
+The legacy host and service entry points use real Darwin resolver results but
+copy them into bounded Android-shaped, thread-local `hostent` and `servent`
+storage. Host names use the same explicit numeric/localhost/FQDN policy as
+`getaddrinfo`; service names are looked up through the host service database,
+with failures reflected in the Android `h_errno` cell.
 
 Supported Android hints are `AI_PASSIVE`, `AI_CANONNAME`, `AI_NUMERICHOST`,
 `AI_NUMERICSERV`, and `AI_ADDRCONFIG`; family is `AF_UNSPEC`, `AF_INET`, or Android `AF_INET6=10`,

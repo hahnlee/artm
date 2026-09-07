@@ -1,0 +1,59 @@
+#include "darwin_jit_memory.h"
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <sys/mman.h>
+#include <thread>
+#include <unistd.h>
+
+int main(int argc, char** argv) {
+  const size_t size = static_cast<size_t>(getpagesize());
+  void* code = DarwinArtMapJitCode(size);
+  if (code == MAP_FAILED) { perror("MAP_JIT"); return 1; }
+  const uint32_t first[] = {0x52800540, 0xd65f03c0}; // mov w0,#42; ret
+  {
+    DarwinArtJitWriteScope outer;
+    { DarwinArtJitWriteScope inner; memcpy(code, first, sizeof(first)); }
+    memcpy(static_cast<char*>(code) + 64, first, sizeof(first));
+    DarwinArtFlushJitCode(code, 72);
+  }
+  auto first_fn = reinterpret_cast<int (*)()>(code);
+  assert(first_fn() == 42);
+  if (argc == 2 && strcmp(argv[1], "--protected-write") == 0) {
+    *static_cast<volatile uint32_t*>(code) = first[0];
+    return 99; // Must fault: this thread is execute-only for JIT memory.
+  }
+  if (argc == 2 && strcmp(argv[1], "--execute-while-writing") == 0) {
+    DarwinArtJitWriteScope write;
+    return first_fn() == 42 ? 99 : 98; // Must fault: this thread cannot execute.
+  }
+  std::atomic<bool> done{false};
+  std::atomic<size_t> executions{0};
+  std::thread reader([&] {
+    while (!done.load(std::memory_order_acquire)) {
+      assert(first_fn() == 42);
+      executions.fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+  while (executions.load(std::memory_order_relaxed) == 0) std::this_thread::yield();
+  const uint32_t second[] = {0x52800920, 0xd65f03c0}; // return 73
+  {
+    DarwinArtJitWriteScope write;
+    const size_t before = executions.load();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (executions.load() < before + 1000) {
+      assert(std::chrono::steady_clock::now() < deadline);
+      std::this_thread::yield();
+    }
+    memcpy(static_cast<char*>(code) + 64, second, sizeof(second));
+    DarwinArtFlushJitCode(static_cast<char*>(code) + 64, sizeof(second));
+  }
+  assert(reinterpret_cast<int (*)()>(static_cast<char*>(code) + 64)() == 73);
+  done.store(true, std::memory_order_release);
+  reader.join();
+  assert(munmap(code, size) == 0);
+  printf("JIT memory PASS: nested thread-local W^X, concurrent execution=%zu\n", executions.load());
+}

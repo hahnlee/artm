@@ -1,0 +1,845 @@
+#include "darwin_unwindstack_native.h"
+
+#include <dlfcn.h>
+#include <libunwind.h>
+#include <mach/arm/thread_status.h>
+#include <mach/mach.h>
+#include <mach-o/dyld.h>
+#include <mach-o/loader.h>
+#include <mach-o/nlist.h>
+#include <ptrauth.h>
+#include <pthread.h>
+#include <unwind.h>
+
+#include <array>
+#include <cstdlib>
+#include <cxxabi.h>
+#include <cstdint>
+#include <cstdio>
+#include <fstream>
+#include <string>
+#include <string_view>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include <unwindstack/AndroidUnwinder.h>
+#include <unwindstack/JitDebug.h>
+#include <unwindstack/MachineArm64.h>
+#include <unwindstack/Maps.h>
+#include <unwindstack/Memory.h>
+#include <unwindstack/RegsArm64.h>
+#include <unwindstack/Unwinder.h>
+
+extern "C" __attribute__((visibility("default"))) DarwinArtQuickFrameRegistry
+    darwin_art_unwindstack_quick_frames = {
+        kDarwinArtQuickFrameRegistryVersion, kDarwinArtQuickFrameRegistrySlots, 0, {}};
+
+namespace {
+
+DarwinArtQuickFrameSlot* FindLocalQuickFrameSlot(uint64_t thread_id, bool claim) {
+  const size_t first = thread_id % kDarwinArtQuickFrameRegistrySlots;
+  for (size_t probe = 0; probe < kDarwinArtQuickFrameRegistrySlots; ++probe) {
+    auto* slot = &darwin_art_unwindstack_quick_frames
+                      .slots[(first + probe) % kDarwinArtQuickFrameRegistrySlots];
+    uint64_t owner = __atomic_load_n(&slot->thread_id, __ATOMIC_ACQUIRE);
+    if (owner == thread_id) return slot;
+    if (claim && owner == 0 && __atomic_compare_exchange_n(&slot->thread_id, &owner, thread_id,
+                                                           false, __ATOMIC_ACQ_REL,
+                                                           __ATOMIC_ACQUIRE)) {
+      return slot;
+    }
+  }
+  return nullptr;
+}
+
+bool ReadLocalQuickFrame(uint64_t thread_id, uint64_t* managed_sp, uint64_t* frame_kind,
+                         uint64_t* frame_size, uint64_t* core_spill_mask) {
+  if (thread_id == 0 || managed_sp == nullptr || frame_kind == nullptr || frame_size == nullptr ||
+      core_spill_mask == nullptr) {
+    return false;
+  }
+  DarwinArtQuickFrameSlot* slot = FindLocalQuickFrameSlot(thread_id, false);
+  if (slot == nullptr) return false;
+  const uint64_t depth = __atomic_load_n(&slot->depth, __ATOMIC_ACQUIRE);
+  if (depth == 0 || depth > kDarwinArtQuickFrameRegistryDepth) return false;
+  const size_t index = static_cast<size_t>(depth - 1);
+  *managed_sp = __atomic_load_n(&slot->frames[index], __ATOMIC_ACQUIRE);
+  *frame_kind = __atomic_load_n(&slot->frame_kinds[index], __ATOMIC_ACQUIRE);
+  *frame_size = __atomic_load_n(&slot->frame_sizes[index], __ATOMIC_ACQUIRE);
+  *core_spill_mask = __atomic_load_n(&slot->core_spill_masks[index], __ATOMIC_ACQUIRE);
+  return *managed_sp != 0;
+}
+
+}  // namespace
+
+extern "C" __attribute__((visibility("default"))) void
+darwin_art_unwindstack_set_art_main_thread() {
+  uint64_t thread_id = 0;
+  if (pthread_threadid_np(nullptr, &thread_id) == 0 && thread_id != 0) {
+    __atomic_store_n(&darwin_art_unwindstack_quick_frames.art_main_thread_id, thread_id,
+                     __ATOMIC_RELEASE);
+  }
+}
+
+extern "C" __attribute__((visibility("default"))) void
+darwin_art_unwindstack_push_quick_frame(void* managed_sp) {
+  uint64_t thread_id = 0;
+  if (managed_sp == nullptr || pthread_threadid_np(nullptr, &thread_id) != 0 || thread_id == 0) {
+    return;
+  }
+  DarwinArtQuickFrameSlot* slot = FindLocalQuickFrameSlot(thread_id, true);
+  if (slot == nullptr) return;
+  const uint64_t art_main_thread_id = __atomic_load_n(
+      &darwin_art_unwindstack_quick_frames.art_main_thread_id, __ATOMIC_ACQUIRE);
+  __atomic_store_n(&slot->is_main_thread, art_main_thread_id == thread_id ? uint64_t{1} : uint64_t{0},
+                   __ATOMIC_RELAXED);
+  const uint64_t depth = __atomic_load_n(&slot->depth, __ATOMIC_RELAXED);
+  if (depth >= kDarwinArtQuickFrameRegistryDepth) return;
+  __atomic_store_n(&slot->frames[depth], reinterpret_cast<uint64_t>(managed_sp), __ATOMIC_RELAXED);
+  __atomic_store_n(&slot->frame_kinds[depth], uint64_t{0}, __ATOMIC_RELAXED);
+  __atomic_store_n(&slot->frame_sizes[depth], uint64_t{224}, __ATOMIC_RELAXED);
+  __atomic_store_n(&slot->core_spill_masks[depth], uint64_t{0}, __ATOMIC_RELAXED);
+  __atomic_store_n(&slot->depth, depth + 1, __ATOMIC_RELEASE);
+}
+
+extern "C" __attribute__((visibility("default"))) void
+darwin_art_unwindstack_push_compiled_quick_frame(void* managed_sp, uint64_t frame_size,
+                                                 uint32_t core_spill_mask) {
+  uint64_t thread_id = 0;
+  if (managed_sp == nullptr || pthread_threadid_np(nullptr, &thread_id) != 0 || thread_id == 0) {
+    return;
+  }
+  DarwinArtQuickFrameSlot* slot = FindLocalQuickFrameSlot(thread_id, true);
+  if (slot == nullptr) return;
+  const uint64_t art_main_thread_id = __atomic_load_n(
+      &darwin_art_unwindstack_quick_frames.art_main_thread_id, __ATOMIC_ACQUIRE);
+  __atomic_store_n(&slot->is_main_thread, art_main_thread_id == thread_id ? uint64_t{1} : uint64_t{0},
+                   __ATOMIC_RELAXED);
+  const uint64_t depth = __atomic_load_n(&slot->depth, __ATOMIC_RELAXED);
+  if (depth >= kDarwinArtQuickFrameRegistryDepth) return;
+  __atomic_store_n(&slot->frames[depth], reinterpret_cast<uint64_t>(managed_sp), __ATOMIC_RELAXED);
+  __atomic_store_n(&slot->frame_kinds[depth], uint64_t{1}, __ATOMIC_RELAXED);
+  __atomic_store_n(&slot->frame_sizes[depth], frame_size, __ATOMIC_RELAXED);
+  __atomic_store_n(&slot->core_spill_masks[depth], core_spill_mask, __ATOMIC_RELAXED);
+  __atomic_store_n(&slot->depth, depth + 1, __ATOMIC_RELEASE);
+}
+
+extern "C" __attribute__((visibility("default"))) void darwin_art_unwindstack_pop_quick_frame() {
+  uint64_t thread_id = 0;
+  if (pthread_threadid_np(nullptr, &thread_id) != 0 || thread_id == 0) return;
+  DarwinArtQuickFrameSlot* slot = FindLocalQuickFrameSlot(thread_id, false);
+  if (slot == nullptr) return;
+  const uint64_t depth = __atomic_load_n(&slot->depth, __ATOMIC_ACQUIRE);
+  if (depth == 0) return;
+  __atomic_store_n(&slot->depth, depth - 1, __ATOMIC_RELEASE);
+  if (depth == 1) {
+    __atomic_store_n(&slot->thread_id, uint64_t{0}, __ATOMIC_RELEASE);
+  }
+}
+
+extern "C" __attribute__((visibility("default"))) bool
+darwin_art_unwindstack_pop_quick_frame_if(void* managed_sp, uint64_t frame_kind) {
+  uint64_t thread_id = 0;
+  if (managed_sp == nullptr || pthread_threadid_np(nullptr, &thread_id) != 0 || thread_id == 0) {
+    return false;
+  }
+  DarwinArtQuickFrameSlot* slot = FindLocalQuickFrameSlot(thread_id, false);
+  if (slot == nullptr) return false;
+  const uint64_t depth = __atomic_load_n(&slot->depth, __ATOMIC_ACQUIRE);
+  if (depth == 0) return false;
+  const uint64_t index = depth - 1;
+  if (__atomic_load_n(&slot->frames[index], __ATOMIC_RELAXED) !=
+          reinterpret_cast<uint64_t>(managed_sp) ||
+      __atomic_load_n(&slot->frame_kinds[index], __ATOMIC_RELAXED) != frame_kind) {
+    return false;
+  }
+  __atomic_store_n(&slot->depth, index, __ATOMIC_RELEASE);
+  if (index == 0) {
+    __atomic_store_n(&slot->thread_id, uint64_t{0}, __ATOMIC_RELEASE);
+  }
+  return true;
+}
+
+namespace unwindstack {
+namespace {
+
+struct NativeWalk {
+  Maps* maps;
+  JitDebug* jit_debug;
+  AndroidUnwinderData* data;
+  size_t limit;
+  mach_port_t task;
+  std::shared_ptr<Memory> memory;
+  uint64_t last_cfa = 0;
+  uint64_t last_x28 = 0;
+  uint64_t registered_managed_sp = 0;
+  uint64_t registered_frame_kind = 0;
+  uint64_t registered_frame_size = 0;
+  uint64_t registered_core_spill_mask = 0;
+  bool has_registered_quick_frame = false;
+  std::array<uint64_t, ARM64_REG_R30 + 1> last_registers{};
+};
+
+uint64_t StripReturnAddress(uint64_t address);
+
+bool LookupNativeSymbol(Maps* maps, uint64_t pc, Dl_info* symbol) {
+  if (dladdr(reinterpret_cast<const void*>(pc), symbol) != 0 && symbol->dli_sname != nullptr) {
+    return true;
+  }
+  if (maps == nullptr) return false;
+  auto map = maps->Find(pc);
+  if (map == nullptr || map->name().empty()) return false;
+  uint64_t remote_base = 0;
+  maps->ForEachMapInfo([&](MapInfo* candidate) {
+    if (candidate->name() == map->name() && candidate->offset() == 0) {
+      remote_base = candidate->start();
+      return false;
+    }
+    return true;
+  });
+  if (remote_base == 0 || pc < remote_base) return false;
+  for (uint32_t image = 0; image < _dyld_image_count(); ++image) {
+    const char* path = _dyld_get_image_name(image);
+    const auto* header = _dyld_get_image_header(image);
+    if (path == nullptr || header == nullptr || map->name() != path) continue;
+    const uint64_t translated = reinterpret_cast<uint64_t>(header) + (pc - remote_base);
+    return dladdr(reinterpret_cast<const void*>(translated), symbol) != 0 &&
+           symbol->dli_sname != nullptr;
+  }
+  return false;
+}
+
+bool LookupMachOSymbol(Maps* maps, uint64_t pc, std::string* name, uint64_t* function_offset) {
+  if (maps == nullptr || name == nullptr || function_offset == nullptr) return false;
+  auto map = maps->Find(pc);
+  if (map == nullptr || map->name().empty()) return false;
+  uint64_t image_base = 0;
+  maps->ForEachMapInfo([&](MapInfo* candidate) {
+    if (candidate->name() == map->name() && candidate->offset() == 0) {
+      image_base = candidate->start();
+      return false;
+    }
+    return true;
+  });
+  if (image_base == 0 || pc < image_base) return false;
+
+  std::ifstream input(map->name(), std::ios::binary);
+  mach_header_64 header{};
+  if (!input.read(reinterpret_cast<char*>(&header), sizeof(header)) || header.magic != MH_MAGIC_64 ||
+      header.sizeofcmds > 16 * 1024 * 1024) {
+    return false;
+  }
+  std::vector<uint8_t> commands(header.sizeofcmds);
+  if (!input.read(reinterpret_cast<char*>(commands.data()), commands.size())) return false;
+  symtab_command symbols{};
+  uint64_t image_vmaddr = 0;
+  size_t command_offset = 0;
+  for (uint32_t index = 0; index < header.ncmds && command_offset < commands.size(); ++index) {
+    const auto* command = reinterpret_cast<const load_command*>(commands.data() + command_offset);
+    if (command->cmdsize < sizeof(load_command) ||
+        command_offset + command->cmdsize > commands.size()) {
+      return false;
+    }
+    if (command->cmd == LC_SYMTAB) {
+      symbols = *reinterpret_cast<const symtab_command*>(command);
+    } else if (command->cmd == LC_SEGMENT_64) {
+      const auto* segment = reinterpret_cast<const segment_command_64*>(command);
+      if (segment->fileoff == 0) image_vmaddr = segment->vmaddr;
+    }
+    command_offset += command->cmdsize;
+  }
+  if (symbols.nsyms == 0 || symbols.strsize == 0) return false;
+  std::vector<nlist_64> entries(symbols.nsyms);
+  std::vector<char> strings(symbols.strsize);
+  input.clear();
+  input.seekg(symbols.symoff);
+  if (!input.read(reinterpret_cast<char*>(entries.data()), entries.size() * sizeof(nlist_64))) {
+    return false;
+  }
+  input.clear();
+  input.seekg(symbols.stroff);
+  if (!input.read(strings.data(), strings.size())) return false;
+
+  const uint64_t target = image_vmaddr + (pc - image_base);
+  const nlist_64* best = nullptr;
+  for (const auto& symbol : entries) {
+    if ((symbol.n_type & N_STAB) != 0 || (symbol.n_type & N_TYPE) != N_SECT ||
+        symbol.n_value == 0 || symbol.n_value > target || symbol.n_un.n_strx >= strings.size()) {
+      continue;
+    }
+    const char* candidate = strings.data() + symbol.n_un.n_strx;
+    const size_t remaining = strings.size() - symbol.n_un.n_strx;
+    if (strnlen(candidate, remaining) == remaining || candidate[0] == '\0') continue;
+    if (best == nullptr || symbol.n_value > best->n_value) best = &symbol;
+  }
+  if (best == nullptr) return false;
+  const char* raw = strings.data() + best->n_un.n_strx;
+  const char* linker_name = raw[0] == '_' ? raw + 1 : raw;
+  int demangle_status = 0;
+  char* demangled = abi::__cxa_demangle(linker_name, nullptr, nullptr, &demangle_status);
+  name->assign(demangle_status == 0 && demangled != nullptr ? demangled : linker_name);
+  std::free(demangled);
+  *function_offset = target - best->n_value;
+  return true;
+}
+
+_Unwind_Reason_Code CollectNativeFrame(_Unwind_Context* context, void* opaque) {
+  auto* walk = static_cast<NativeWalk*>(opaque);
+  if (walk->data->frames.size() >= walk->limit) return _URC_END_OF_STACK;
+  const uint64_t pc = _Unwind_GetIP(context);
+  if (pc == 0) return _URC_END_OF_STACK;
+  walk->last_cfa = _Unwind_GetCFA(context);
+  walk->last_x28 = _Unwind_GetGR(context, 28);
+  for (size_t reg = 0; reg < walk->last_registers.size(); ++reg) {
+    walk->last_registers[reg] = _Unwind_GetGR(context, reg);
+  }
+
+  Dl_info symbol{};
+  LookupNativeSymbol(walk->maps, pc, &symbol);
+  FrameData frame{};
+  frame.num = walk->data->frames.size();
+  frame.pc = pc;
+  frame.sp = _Unwind_GetCFA(context);
+  frame.map_info = walk->maps == nullptr ? nullptr : walk->maps->Find(pc);
+  if (frame.map_info != nullptr) {
+    frame.rel_pc = pc - frame.map_info->start() + frame.map_info->offset();
+  }
+  if (symbol.dli_sname != nullptr) {
+    frame.function_name = symbol.dli_sname;
+    frame.function_offset = pc - reinterpret_cast<uint64_t>(symbol.dli_saddr);
+  } else if (walk->jit_debug != nullptr) {
+    walk->jit_debug->GetFunctionName(walk->maps, pc, &frame.function_name,
+                                     &frame.function_offset);
+  }
+  walk->data->frames.emplace_back(std::move(frame));
+  return _URC_NO_REASON;
+}
+
+void AppendManagedFrames(NativeWalk* walk) {
+  if (walk->jit_debug == nullptr || walk->data->frames.empty() ||
+      walk->data->frames.size() >= walk->limit) {
+    return;
+  }
+  if (!walk->has_registered_quick_frame) {
+    const auto& native_caller = walk->data->frames.back();
+    if (static_cast<std::string_view>(native_caller.function_name)
+            .find("art_quick_generic_jni_trampoline") == std::string_view::npos) {
+      return;
+    }
+  }
+
+  // AOSP's ARM64 generic JNI trampoline keeps the managed SaveRefsAndArgs
+  // frame base in x28 while native code uses a separately allocated call
+  // frame. Compiled-JNI uses the JNI compiler's fixed 176-byte frame and
+  // publishes its untagged SP separately.
+  constexpr uint64_t kSaveRefsAndArgsFrameSize = 224;
+  const uint64_t frame_size = walk->registered_frame_kind == 1
+      ? walk->registered_frame_size : kSaveRefsAndArgsFrameSize;
+  if (walk->registered_frame_kind == 1 &&
+      (frame_size == 0 || (frame_size & 15u) != 0 || frame_size > 4096 ||
+       walk->registered_core_spill_mask == 0)) {
+    return;
+  }
+  if (walk->registered_managed_sp != 0) {
+    // libunwind's CFI can describe x28 as undefined after the native callback
+    // even though the JNI trampoline published the authoritative managed
+    // frame. Never replace that publication with a recovered register value.
+    walk->last_x28 = walk->registered_managed_sp;
+  }
+  if (walk->last_x28 == 0) return;
+  std::array<uint64_t, ARM64_REG_R30 - ARM64_REG_R20 + 1> saved_registers{};
+  mach_vm_size_t copied = 0;
+  const uint64_t managed_return_slot = walk->last_x28 + frame_size - sizeof(uint64_t);
+  const uint64_t managed_saved_registers = walk->registered_frame_kind == 1
+      ? walk->last_x28 + frame_size -
+          static_cast<uint64_t>(__builtin_popcountll(walk->registered_core_spill_mask)) *
+              sizeof(uint64_t) + sizeof(uint64_t)
+      : managed_return_slot - (saved_registers.size() - 1) * sizeof(uint64_t);
+  if (mach_vm_read_overwrite(walk->task, managed_saved_registers,
+                             sizeof(saved_registers),
+                             reinterpret_cast<mach_vm_address_t>(saved_registers.data()),
+                             &copied) !=
+          KERN_SUCCESS ||
+      copied != sizeof(saved_registers)) {
+    return;
+  }
+  uint64_t return_pc = saved_registers.back();
+  return_pc = StripReturnAddress(return_pc);
+  if (return_pc == 0) return;
+
+  RegsArm64 regs;
+  auto* raw = static_cast<uint64_t*>(regs.RawData());
+  for (size_t reg = 0; reg < walk->last_registers.size(); ++reg) {
+    raw[reg] = walk->last_registers[reg];
+  }
+  for (size_t index = 0; index < saved_registers.size(); ++index) {
+    raw[ARM64_REG_R20 + index] = saved_registers[index];
+  }
+  // The managed unwinder must advance over the frame that was actually
+  // published.  Generic JNI uses SaveRefsAndArgs (224 bytes), while compiled
+  // JNI uses the AArch64 JNI compiler's 176-byte frame; using the former for
+  // both skips the caller's saved-register boundary in compiled JNI.
+  regs.set_sp(walk->last_x28 + frame_size);
+  // A saved LR points immediately after the call. Use the call-site PC so the
+  // JIT FDE and inline-info lookup select the caller's instruction range.
+  regs.set_pc(return_pc - 1);
+
+  Unwinder managed(walk->limit - walk->data->frames.size(), walk->maps, &regs, walk->memory);
+  managed.SetJitDebug(walk->jit_debug);
+  managed.Unwind();
+  auto frames = managed.ConsumeFrames();
+  for (auto& frame : frames) {
+    frame.num = walk->data->frames.size();
+    walk->data->frames.emplace_back(std::move(frame));
+  }
+}
+
+void AppendFrame(NativeWalk* walk, uint64_t pc, uint64_t sp) {
+  Dl_info symbol{};
+  std::string mach_function_name;
+  uint64_t mach_function_offset = 0;
+  const bool remote_mach_symbol =
+      walk->task != mach_task_self() &&
+      LookupMachOSymbol(walk->maps, pc, &mach_function_name, &mach_function_offset);
+  if (!remote_mach_symbol) LookupNativeSymbol(walk->maps, pc, &symbol);
+  FrameData frame{};
+  frame.num = walk->data->frames.size();
+  frame.pc = pc;
+  frame.sp = sp;
+  frame.map_info = walk->maps == nullptr ? nullptr : walk->maps->Find(pc);
+  if (frame.map_info != nullptr) {
+    frame.rel_pc = pc - frame.map_info->start() + frame.map_info->offset();
+  }
+  if (remote_mach_symbol) {
+    frame.function_name = std::move(mach_function_name);
+    frame.function_offset = mach_function_offset;
+  } else if (symbol.dli_sname != nullptr) {
+    frame.function_name = symbol.dli_sname;
+    frame.function_offset = pc - reinterpret_cast<uint64_t>(symbol.dli_saddr);
+  } else if (walk->jit_debug != nullptr) {
+    walk->jit_debug->GetFunctionName(walk->maps, pc, &frame.function_name,
+                                     &frame.function_offset);
+  }
+  walk->data->frames.emplace_back(std::move(frame));
+}
+
+bool CollectCursor(unw_cursor_t* cursor, NativeWalk* walk) {
+  while (walk->data->frames.size() < walk->limit) {
+    unw_word_t pc = 0;
+    unw_word_t sp = 0;
+    if (unw_get_reg(cursor, UNW_REG_IP, &pc) != UNW_ESUCCESS ||
+        unw_get_reg(cursor, UNW_REG_SP, &sp) != UNW_ESUCCESS || pc == 0) {
+      break;
+    }
+    AppendFrame(walk, pc, sp);
+    if (unw_step(cursor) <= 0) break;
+  }
+  return !walk->data->frames.empty();
+}
+
+uint64_t StripReturnAddress(uint64_t address) {
+#if __has_feature(ptrauth_calls)
+  return reinterpret_cast<uint64_t>(ptrauth_strip(reinterpret_cast<void*>(address),
+                                                  ptrauth_key_return_address));
+#else
+  return address;
+#endif
+}
+
+bool ReadFrameRecord(mach_port_t task, uint64_t address, uint64_t (&record)[2]) {
+  mach_vm_size_t copied = 0;
+  return mach_vm_read_overwrite(task, address, sizeof(record),
+                                reinterpret_cast<mach_vm_address_t>(record),
+                                &copied) == KERN_SUCCESS &&
+         copied == sizeof(record);
+}
+
+struct RegisteredQuickFrame {
+  uint64_t managed_sp = 0;
+  uint64_t frame_kind = 0;
+  uint64_t frame_size = 0;
+  uint64_t core_spill_mask = 0;
+  bool is_main_thread = false;
+};
+
+RegisteredQuickFrame ReadRemoteQuickFrame(mach_port_t task, uint64_t registry_address,
+                                          uint64_t thread_id) {
+  if (registry_address == 0 || thread_id == 0) return {};
+  DarwinArtQuickFrameRegistry registry{};
+  mach_vm_size_t copied = 0;
+  if (mach_vm_read_overwrite(task, registry_address, sizeof(registry),
+                             reinterpret_cast<mach_vm_address_t>(&registry), &copied) !=
+          KERN_SUCCESS ||
+      copied != sizeof(registry) || registry.version != kDarwinArtQuickFrameRegistryVersion ||
+      registry.slot_count != kDarwinArtQuickFrameRegistrySlots) {
+    return {};
+  }
+  for (const auto& slot : registry.slots) {
+    if (slot.thread_id != thread_id || slot.depth == 0 ||
+        slot.depth > kDarwinArtQuickFrameRegistryDepth) {
+      continue;
+    }
+    return {slot.frames[slot.depth - 1], slot.frame_kinds[slot.depth - 1],
+            slot.frame_sizes[slot.depth - 1], slot.core_spill_masks[slot.depth - 1],
+            registry.art_main_thread_id == thread_id};
+  }
+  return {};
+}
+
+uint64_t ThreadIdentifier(thread_t thread) {
+  thread_identifier_info_data_t info{};
+  mach_msg_type_number_t count = THREAD_IDENTIFIER_INFO_COUNT;
+  if (thread_info(thread, THREAD_IDENTIFIER_INFO, reinterpret_cast<thread_info_t>(&info),
+                  &count) != KERN_SUCCESS) {
+    return 0;
+  }
+  return info.thread_id;
+}
+
+bool CollectFrameRecords(mach_port_t task, uint64_t pc, uint64_t sp, uint64_t fp,
+                         NativeWalk* walk) {
+  walk->data->frames.clear();
+  AppendFrame(walk, pc, sp);
+  while (fp != 0 && walk->data->frames.size() < walk->limit) {
+    if ((fp & (alignof(uint64_t) - 1)) != 0 || fp < sp || fp - sp > 8 * 1024 * 1024) break;
+    uint64_t record[2]{};
+    if (!ReadFrameRecord(task, fp, record)) break;
+    const uint64_t next_fp = record[0];
+    const uint64_t return_pc = StripReturnAddress(record[1]);
+    if (return_pc == 0 || next_fp <= fp) break;
+    AppendFrame(walk, return_pc - 1, fp + sizeof(record));
+    sp = fp + sizeof(record);
+    fp = next_fp;
+    if (static_cast<std::string_view>(walk->data->frames.back().function_name)
+            .find("art_quick_generic_jni_trampoline") != std::string_view::npos) {
+      break;
+    }
+  }
+  return !walk->data->frames.empty();
+}
+
+thread_t FindThread(mach_port_t task, uint64_t thread_id) {
+  thread_act_array_t threads = nullptr;
+  mach_msg_type_number_t count = 0;
+  if (task_threads(task, &threads, &count) != KERN_SUCCESS) return MACH_PORT_NULL;
+  thread_t found = MACH_PORT_NULL;
+  for (mach_msg_type_number_t index = 0; index < count; ++index) {
+    thread_identifier_info_data_t info{};
+    mach_msg_type_number_t info_count = THREAD_IDENTIFIER_INFO_COUNT;
+    if (thread_info(threads[index], THREAD_IDENTIFIER_INFO,
+                    reinterpret_cast<thread_info_t>(&info), &info_count) == KERN_SUCCESS &&
+        (thread_id == 0 || info.thread_id == thread_id)) {
+      found = threads[index];
+      threads[index] = MACH_PORT_NULL;
+      break;
+    }
+  }
+  for (mach_msg_type_number_t index = 0; index < count; ++index) {
+    if (threads[index] != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), threads[index]);
+  }
+  vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threads),
+                count * sizeof(thread_t));
+  return found;
+}
+
+}  // namespace
+
+uint64_t DarwinFindGlobalVariable(Maps* maps, const char* variable) {
+  if (maps == nullptr || variable == nullptr) return 0;
+  const std::string mach_symbol = std::string("_") + variable;
+  std::unordered_set<std::string> visited;
+  uint64_t result = 0;
+  maps->ForEachMapInfo([&](MapInfo* map) {
+    if (result != 0 || map->offset() != 0 || map->name().empty() ||
+        !visited.emplace(map->name()).second) {
+      return result == 0;
+    }
+    std::ifstream input(map->name(), std::ios::binary);
+    mach_header_64 header{};
+    if (!input.read(reinterpret_cast<char*>(&header), sizeof(header)) ||
+        header.magic != MH_MAGIC_64 || header.sizeofcmds > 16 * 1024 * 1024) {
+      return true;
+    }
+    std::vector<uint8_t> commands(header.sizeofcmds);
+    if (!input.read(reinterpret_cast<char*>(commands.data()), commands.size())) return true;
+    symtab_command symbols{};
+    uint64_t image_vmaddr = 0;
+    size_t offset = 0;
+    for (uint32_t index = 0; index < header.ncmds && offset < commands.size(); ++index) {
+      const auto* command = reinterpret_cast<const load_command*>(commands.data() + offset);
+      if (command->cmdsize < sizeof(load_command) || offset + command->cmdsize > commands.size()) {
+        return true;
+      }
+      if (command->cmd == LC_SYMTAB) {
+        symbols = *reinterpret_cast<const symtab_command*>(command);
+      } else if (command->cmd == LC_SEGMENT_64) {
+        const auto* segment = reinterpret_cast<const segment_command_64*>(command);
+        if (segment->fileoff == 0) image_vmaddr = segment->vmaddr;
+      }
+      offset += command->cmdsize;
+    }
+    if (symbols.nsyms == 0 || symbols.strsize == 0 || map->start() < image_vmaddr) return true;
+    std::vector<nlist_64> entries(symbols.nsyms);
+    std::vector<char> strings(symbols.strsize);
+    input.clear();
+    input.seekg(symbols.symoff);
+    if (!input.read(reinterpret_cast<char*>(entries.data()),
+                    entries.size() * sizeof(nlist_64))) {
+      return true;
+    }
+    input.clear();
+    input.seekg(symbols.stroff);
+    if (!input.read(strings.data(), strings.size())) return true;
+    const uint64_t slide = map->start() - image_vmaddr;
+    for (const auto& symbol : entries) {
+      if (symbol.n_un.n_strx >= strings.size() || symbol.n_value == 0) continue;
+      const char* name = strings.data() + symbol.n_un.n_strx;
+      const size_t remaining = strings.size() - symbol.n_un.n_strx;
+      if (strnlen(name, remaining) == remaining) continue;
+      if (mach_symbol == name) {
+        result = symbol.n_value + slide;
+        return false;
+      }
+    }
+    return true;
+  });
+  return result;
+}
+
+bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, size_t max_frames,
+                        AndroidUnwinderData& data) {
+  data.frames.clear();
+  data.error = {ERROR_NONE, 0};
+  NativeWalk walk{maps, jit_debug, &data, data.max_frames.value_or(max_frames), mach_task_self(),
+                  Memory::CreateProcessMemoryThreadCached(getpid())};
+  // The generic-JNI trampoline deliberately leaves no unwindable native frame
+  // between the JNI entry and the managed caller.  It publishes the managed
+  // SaveRefsAndArgs frame in the same registry used by the Mach remote path;
+  // consume that publication for local unwinds as well.  Relying on the last
+  // native symbol name is insufficient because libunwind may stop at the
+  // native callback before visiting the trampoline's CFI range.
+  uint64_t thread_id = 0;
+  if (pthread_threadid_np(nullptr, &thread_id) == 0 && thread_id != 0) {
+    if (ReadLocalQuickFrame(thread_id, &walk.registered_managed_sp, &walk.registered_frame_kind,
+                            &walk.registered_frame_size, &walk.registered_core_spill_mask)) {
+      walk.last_x28 = walk.registered_managed_sp;
+      walk.has_registered_quick_frame = true;
+    }
+  }
+  _Unwind_Backtrace(CollectNativeFrame, &walk);
+  if (!data.frames.empty()) {
+    data.frames.erase(data.frames.begin());
+    for (size_t index = 0; index < data.frames.size(); ++index) data.frames[index].num = index;
+  }
+  AppendManagedFrames(&walk);
+  return !data.frames.empty();
+}
+
+bool DarwinNativeUnwindUcontext(Maps* maps, JitDebug* jit_debug, size_t max_frames, void* ucontext,
+                                AndroidUnwinderData& data) {
+  data.frames.clear();
+  if (ucontext == nullptr) {
+    data.error = {ERROR_INVALID_PARAMETER, 0};
+    return false;
+  }
+  data.error = {ERROR_NONE, 0};
+  auto* context = static_cast<ucontext_t*>(ucontext);
+  if (context->uc_mcontext == nullptr) {
+    data.error.code = ERROR_INVALID_PARAMETER;
+    return false;
+  }
+  const auto& state = context->uc_mcontext->__ss;
+  NativeWalk walk{maps, jit_debug, &data, data.max_frames.value_or(max_frames), mach_task_self(),
+                  Memory::CreateProcessMemoryThreadCached(getpid())};
+  return CollectFrameRecords(mach_task_self(), state.__pc, state.__sp, state.__fp, &walk);
+}
+
+bool DarwinNativeUnwindThread(Maps* maps, JitDebug* jit_debug, size_t max_frames,
+                              uint64_t thread_id,
+                              AndroidUnwinderData& data) {
+  data.frames.clear();
+  data.error = {ERROR_NONE, 0};
+  thread_t thread = FindThread(mach_task_self(), thread_id);
+  if (thread == MACH_PORT_NULL) {
+    data.error.code = ERROR_THREAD_DOES_NOT_EXIST;
+    return false;
+  }
+  if (thread_suspend(thread) != KERN_SUCCESS) {
+    mach_port_deallocate(mach_task_self(), thread);
+    data.error.code = ERROR_SYSTEM_CALL;
+    return false;
+  }
+  arm_thread_state64_t state{};
+  mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+  const kern_return_t state_status = thread_get_state(
+      thread, ARM_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count);
+  uint64_t registered_managed_sp = 0;
+  uint64_t registered_frame_kind = 0;
+  uint64_t registered_frame_size = 0;
+  uint64_t registered_core_spill_mask = 0;
+  const bool has_registered_quick_frame =
+      state_status == KERN_SUCCESS &&
+      ReadLocalQuickFrame(thread_id, &registered_managed_sp, &registered_frame_kind,
+                          &registered_frame_size, &registered_core_spill_mask);
+  thread_resume(thread);
+  mach_port_deallocate(mach_task_self(), thread);
+  if (state_status != KERN_SUCCESS) {
+    data.error.code = ERROR_SYSTEM_CALL;
+    return false;
+  }
+
+  unw_context_t context{};
+  unw_cursor_t cursor{};
+  if (unw_getcontext(&context) != UNW_ESUCCESS ||
+      unw_init_local(&cursor, &context) != UNW_ESUCCESS) {
+    data.error.code = ERROR_UNSUPPORTED;
+    return false;
+  }
+  for (int index = 0; index < 29; ++index) {
+    unw_set_reg(&cursor, UNW_ARM64_X0 + index, state.__x[index]);
+  }
+  unw_set_reg(&cursor, UNW_ARM64_FP, state.__fp);
+  unw_set_reg(&cursor, UNW_ARM64_LR, state.__lr);
+  unw_set_reg(&cursor, UNW_REG_SP, state.__sp);
+  unw_set_reg(&cursor, UNW_REG_IP, state.__pc);
+  NativeWalk walk{maps, jit_debug, &data, data.max_frames.value_or(max_frames), mach_task_self(),
+                  Memory::CreateProcessMemoryThreadCached(getpid())};
+  walk.registered_managed_sp = registered_managed_sp;
+  walk.registered_frame_kind = registered_frame_kind;
+  walk.registered_frame_size = registered_frame_size;
+  walk.registered_core_spill_mask = registered_core_spill_mask;
+  walk.last_x28 = walk.registered_managed_sp;
+  walk.has_registered_quick_frame = has_registered_quick_frame;
+  if (CollectCursor(&cursor, &walk) && data.frames.size() > 1) {
+    AppendManagedFrames(&walk);
+    return true;
+  }
+  const bool collected =
+      CollectFrameRecords(mach_task_self(), state.__pc, state.__sp, state.__fp, &walk);
+  if (collected) AppendManagedFrames(&walk);
+  return collected;
+}
+
+bool DarwinNativeUnwindRemote(Maps* maps, JitDebug* jit_debug, size_t max_frames, int process_id,
+                              uint64_t thread_id,
+                              AndroidUnwinderData& data) {
+  data.frames.clear();
+  data.error = {ERROR_NONE, 0};
+  mach_port_t task = MACH_PORT_NULL;
+  if (task_for_pid(mach_task_self(), process_id, &task) != KERN_SUCCESS) {
+    data.error.code = ERROR_SYSTEM_CALL;
+    return false;
+  }
+  auto memory = Memory::CreateProcessMemoryCached(process_id);
+  const uint64_t quick_frame_registry =
+      DarwinFindGlobalVariable(maps, "darwin_art_unwindstack_quick_frames");
+  auto collect = [&](thread_t thread, AndroidUnwinderData* output, bool* is_main_thread) {
+    if (thread_suspend(thread) != KERN_SUCCESS) return false;
+    arm_thread_state64_t state{};
+    mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+    const kern_return_t state_status = thread_get_state(
+        thread, ARM_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count);
+    thread_resume(thread);
+    if (state_status != KERN_SUCCESS) return false;
+    NativeWalk walk{maps, jit_debug, output, output->max_frames.value_or(max_frames), task, memory};
+    for (size_t reg = 0; reg < 29; ++reg) walk.last_registers[reg] = state.__x[reg];
+    walk.last_registers[ARM64_REG_R29] = state.__fp;
+    walk.last_registers[ARM64_REG_R30] = state.__lr;
+    const RegisteredQuickFrame registered_quick_frame =
+        ReadRemoteQuickFrame(task, quick_frame_registry, ThreadIdentifier(thread));
+    if (is_main_thread != nullptr) *is_main_thread = registered_quick_frame.is_main_thread;
+    walk.last_x28 =
+        registered_quick_frame.managed_sp != 0 ? registered_quick_frame.managed_sp : state.__x[28];
+    walk.registered_managed_sp = registered_quick_frame.managed_sp;
+    walk.registered_frame_kind = registered_quick_frame.frame_kind;
+    walk.registered_frame_size = registered_quick_frame.frame_size;
+    walk.registered_core_spill_mask = registered_quick_frame.core_spill_mask;
+    walk.has_registered_quick_frame = registered_quick_frame.managed_sp != 0;
+    const bool success =
+        CollectFrameRecords(task, state.__pc, state.__sp, state.__fp, &walk);
+    if (success) AppendManagedFrames(&walk);
+    return success;
+  };
+
+  bool success = false;
+  if (thread_id != 0) {
+    thread_t thread = FindThread(task, thread_id);
+    if (thread != MACH_PORT_NULL) {
+      success = collect(thread, &data, nullptr);
+      mach_port_deallocate(mach_task_self(), thread);
+    }
+  } else {
+    thread_act_array_t threads = nullptr;
+    mach_msg_type_number_t count = 0;
+    if (task_threads(task, &threads, &count) == KERN_SUCCESS) {
+      AndroidUnwinderData fallback(data.max_frames.value_or(max_frames));
+      for (mach_msg_type_number_t index = 0; index < count; ++index) {
+        AndroidUnwinderData candidate(data.max_frames.value_or(max_frames));
+        bool is_main_thread = false;
+        if (!collect(threads[index], &candidate, &is_main_thread)) continue;
+        if (is_main_thread) {
+          data.frames = std::move(candidate.frames);
+          data.error = candidate.error;
+          success = true;
+          break;
+        }
+        if (fallback.frames.empty()) {
+          fallback.frames = std::move(candidate.frames);
+          fallback.error = candidate.error;
+        }
+      }
+      if (!success && !fallback.frames.empty()) {
+        data.frames = std::move(fallback.frames);
+        data.error = fallback.error;
+        success = true;
+      }
+      for (mach_msg_type_number_t index = 0; index < count; ++index) {
+        mach_port_deallocate(mach_task_self(), threads[index]);
+      }
+      vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threads),
+                    count * sizeof(thread_t));
+    }
+  }
+  if (!success) data.error.code = ERROR_THREAD_DOES_NOT_EXIST;
+  mach_port_deallocate(mach_task_self(), task);
+  return success;
+}
+
+}  // namespace unwindstack
+
+namespace {
+
+bool CheckUnwindstackSequence(unwindstack::AndroidUnwinder& unwinder,
+                              const unwindstack::AndroidUnwinderData& data,
+                              const char* const* sequence, size_t sequence_size) {
+  size_t next = 0;
+  for (const auto& frame : data.frames) {
+    const std::string_view name = static_cast<std::string_view>(frame.function_name);
+    if (next < sequence_size && name.find(sequence[next]) != std::string_view::npos) ++next;
+  }
+  if (next == sequence_size) return true;
+  for (const auto& frame : data.frames) {
+    std::fprintf(stderr, "%s\n", unwinder.FormatFrame(frame).c_str());
+  }
+  return false;
+}
+
+}  // namespace
+
+extern "C" bool darwin_art_unwindstack_check_local(const char* const* sequence,
+                                                     size_t sequence_size) {
+  unwindstack::AndroidLocalUnwinder unwinder;
+  unwindstack::AndroidUnwinderData data;
+  return unwinder.Unwind(data) &&
+         CheckUnwindstackSequence(unwinder, data, sequence, sequence_size);
+}
+
+extern "C" bool darwin_art_unwindstack_check_remote(int process_id,
+                                                      const char* const* sequence,
+                                                      size_t sequence_size) {
+  unwindstack::AndroidRemoteUnwinder unwinder(process_id);
+  unwindstack::AndroidUnwinderData data;
+  return unwinder.Unwind(data) &&
+         CheckUnwindstackSequence(unwinder, data, sequence, sequence_size);
+}

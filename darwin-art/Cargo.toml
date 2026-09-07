@@ -13,6 +13,7 @@ members = [
     "crates/darwin-art-apk-install",
     "crates/darwin-art-native-artifact",
     "crates/darwin-art-profile",
+    "crates/darwin-art-rust-demangle",
     "crates/darwin-art-xtask",
     "tools/android-aaudio-provider",
     "tools/android-apk-app-runtime",

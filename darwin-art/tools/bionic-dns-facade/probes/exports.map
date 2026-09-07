@@ -8,6 +8,13 @@ DNS_FIXTURE {
     DnsFixtureFree;
     DnsFixtureErrorString;
     DnsFixtureNtop;
+    DnsFixtureHerrno;
+    DnsFixtureHostLookup;
+    DnsFixtureHostFailure;
+    DnsFixtureHostStorage;
+    DnsFixtureServiceLookup;
+    DnsFixtureServiceFailure;
+    DnsFixtureServiceStorage;
   local:
     *;
 };

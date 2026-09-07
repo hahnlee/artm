@@ -53,7 +53,10 @@ javac --release 8 -encoding UTF-8 -d "$classes" -classpath "$android_jar" \
   "$root/compat/java/android/net/NetworkCapabilities.java" \
   "$root/compat/java/android/net/NetworkInfo.java" \
   "$root/compat/java/android/net/NetworkRequest.java" \
+  "$root/tools/android-framework-compat/src/android/net/TrafficStats.java" \
+  "$root/tools/android-framework-compat/src/android/telephony/TelephonyManager.java" \
   "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinSecurityProvider.java" \
+  "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinHttpsDiagnostic.java" \
   "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinAndroidCAStore.java" \
   "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinSecureRandom.java" \
   "$root/tools/android-framework-compat/src/dev/darwinart/security/DarwinTrustManagerFactory.java"
@@ -82,7 +85,11 @@ fi
   "$classes/android/net/NetworkRequest.class" \
   "$classes/android/net/NetworkRequest\$Builder.class" \
   "$classes/android/net/NetworkRequest\$1.class" \
+  "$classes/android/net/TrafficStats.class" \
+  "$classes/android/net/TrafficStats\$1.class" \
+  "$classes/android/telephony/TelephonyManager.class" \
   "$classes/dev/darwinart/security/DarwinSecurityProvider.class" \
+  "$classes/dev/darwinart/security/DarwinHttpsDiagnostic.class" \
   "$classes/dev/darwinart/security/DarwinAndroidCAStore.class" \
   "$classes/dev/darwinart/security/DarwinSecureRandom.class" \
   "$classes/dev/darwinart/security/DarwinTrustManagerFactory.class" \
@@ -120,4 +127,67 @@ security.provider.4=com.android.org.conscrypt.JSSEProvider
 securerandom.source=file:/dev/urandom
 EOF
 (cd "$core_staged" && zip -q -qr "$core_out/core-oj-compat.jar" .)
+
+# core-libart is deliberately kept as the pinned DEX input at runtime. Its
+# hidden Java APIs are nevertheless part of the platform boot class path and
+# javac cannot inspect a DEX container. Publish a compiler-only companion from
+# the shared compiler-capability sources so every ART test sees the same hidden
+# API surface without putting compiler classes in an app DEX.
+libcore_compiler_out="$root/_build/android16-libcore-compiler-api"
+libcore_compiler_classes="$libcore_compiler_out/classes"
+mkdir -p "$libcore_compiler_classes"
+# Keep the compiler views tied to the same pinned libcore checkout that owns
+# the runtime classes. The reduced declarations below are only a classfile
+# projection for javac; ART still loads the complete implementation from the
+# pinned core-libart DEX.
+for source in \
+  "$root/_aosp/libcore-full/luni/src/main/java/libcore/util/FP16.java" \
+  "$root/_aosp/libcore-full/libart/src/main/java/java/lang/StringFactory.java"; do
+  [[ -f "$source" ]] || {
+    echo "android16-framework-compat: pinned libcore source missing: $source" >&2
+    exit 69
+  }
+done
+libcore_compiler_sources=(
+  "$root/probes/compiler-stubs/android/compat/annotation/UnsupportedAppUsage.java"
+  "$root/probes/compiler-stubs/com/android/art/flags/Flags.java"
+  "$root/probes/compiler-stubs/com/android/libcore/Flags.java"
+  "$root/probes/compiler-stubs/dalvik/annotation/compat/VersionCodes.java"
+  "$root/probes/compiler-stubs/dalvik/annotation/optimization/DeadReferenceSafe.java"
+  "$root/probes/compiler-stubs/dalvik/annotation/optimization/NeverInline.java"
+  "$root/probes/compiler-stubs/dalvik/annotation/optimization/ReachabilitySensitive.java"
+  "$root/probes/compiler-stubs/dalvik/system/AnnotatedStackTraceElement.java"
+  "$root/probes/compiler-stubs/dalvik/system/BaseDexClassLoader.java"
+  "$root/probes/compiler-stubs/dalvik/system/DexFile.java"
+  "$root/probes/compiler-stubs/dalvik/system/DelegateLastClassLoader.java"
+  "$root/probes/compiler-stubs/dalvik/system/EmulatedStackFrame.java"
+  "$root/probes/compiler-stubs/dalvik/system/PathClassLoader.java"
+  "$root/probes/compiler-stubs/dalvik/system/VMDebug.java"
+  "$root/probes/compiler-stubs/dalvik/system/VMRuntime.java"
+  "$root/probes/compiler-stubs/dalvik/system/ZygoteHooks.java"
+  "$root/probes/compiler-stubs/java/lang/StringFactory.java"
+  "$root/probes/compiler-stubs/java/lang/invoke/Transformers.java"
+  "$root/probes/compiler-stubs/jdk/internal/misc/Unsafe.java"
+  "$root/probes/compiler-stubs/libcore/util/EmptyArray.java"
+  "$root/probes/compiler-stubs/libcore/util/FP16.java"
+  "$root/probes/compiler-stubs/libcore/util/NativeAllocationRegistry.java"
+  "$root/probes/compiler-stubs/org/apache/harmony/dalvik/ddmc/Chunk.java"
+  "$root/probes/compiler-stubs/org/apache/harmony/dalvik/ddmc/ChunkHandler.java"
+  "$root/probes/compiler-stubs/org/apache/harmony/dalvik/ddmc/DdmServer.java"
+  "$root/probes/compiler-stubs/org/apache/harmony/dalvik/ddmc/DdmVmInternal.java"
+  "$root/probes/compiler-stubs/sun/misc/Cleaner.java"
+)
+for source in "${libcore_compiler_sources[@]}"; do
+  [[ -f "$source" ]] || {
+    echo "android16-framework-compat: compiler API source missing: $source" >&2
+    exit 69
+  }
+done
+find "$libcore_compiler_classes" -type f -delete
+javac -g -Xlint:-options -implicit:none -source 8 -target 8 -encoding UTF-8 \
+  -bootclasspath "$libcore_compiler_classes:$android_jar:$HOME/Library/Android/sdk/platforms/android-36/core-for-system-modules.jar" \
+  -d "$libcore_compiler_classes" "${libcore_compiler_sources[@]}"
+jar -cf "$libcore_compiler_out/core-libart-compiler.jar" \
+  -C "$libcore_compiler_classes" .
 echo "android16-framework-compat: PASS $out/framework-compat.jar"
+echo "android16-framework-compat: PASS $libcore_compiler_out/core-libart-compiler.jar"

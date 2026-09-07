@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef void (*DarwinArtBionicProcessFunction)(void);
 typedef int (*DarwinArtBionicJitFaultRecovery)(uintptr_t fault_address,
                                                 int execution_fault);
@@ -26,6 +30,8 @@ void darwin_art_bionic___system_property_read_callback(
     const void* property,
     void (*callback)(void*, const char*, const char*, uint32_t), void* cookie);
 unsigned long darwin_art_bionic_getauxval(unsigned long type);
+char* darwin_art_bionic_basename(const char* path);
+int darwin_art_bionic_getentropy(void* buffer, size_t length);
 int darwin_art_bionic_rand(void);
 void darwin_art_bionic_srand(unsigned seed);
 long darwin_art_bionic_random(void);
@@ -40,6 +46,7 @@ long darwin_art_bionic_lrand48(void);
 long darwin_art_bionic_mrand48(void);
 uint32_t darwin_art_bionic_arc4random(void);
 int darwin_art_bionic_getpid(void);
+int darwin_art_bionic_kill(int pid, int signal_number);
 unsigned darwin_art_bionic_geteuid(void);
 int darwin_art_bionic_getpagesize(void);
 int darwin_art_bionic_daemon(int nochdir, int noclose);
@@ -60,5 +67,9 @@ void darwin_art_bionic_process_property_read_callback_core(
     const void* property,
     void (*callback)(void*, const char*, const char*, uint32_t), void* cookie);
 unsigned long darwin_art_bionic_process_getauxval_core(unsigned long type);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

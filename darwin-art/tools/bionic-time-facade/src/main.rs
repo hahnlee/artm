@@ -2,13 +2,16 @@ use darwin_art_elf_loader::{
     LoadedElf, ResolveError, ResolvedSymbol, SymbolRequest, SymbolResolver,
 };
 use std::env;
-use std::ffi::{c_char, c_void};
+use std::ffi::{c_char, c_int, c_long, c_void};
 use std::fs;
 use std::num::NonZeroUsize;
 use std::process::ExitCode;
 
 unsafe extern "C" {
     fn __error() -> *mut i32;
+    fn getpagesize() -> i32;
+    #[link_name = "sysconf"]
+    fn host_sysconf(name: c_int) -> c_long;
     fn darwin_art_bionic_time_resolve(name: *const c_char) -> Option<unsafe extern "C" fn()>;
     fn darwin_art_bionic_errno_resolve(name: *const c_char) -> Option<unsafe extern "C" fn()>;
     fn darwin_art_bionic_time_capability_failed() -> i32;
@@ -90,6 +93,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // SAFETY: same current-pthread host errno cell set immediately above.
     if unsafe { *__error() } != 33_101 {
         return Err("basic time facade call changed host errno".into());
+    }
+    let guest_page = image.call_exported_i32("bionic_time_fixture_page_size")?;
+    // The Android sysconf selector and the host VM provider must describe the
+    // same process mapping granularity (16 KiB on current Apple Silicon).
+    let host_page = unsafe { getpagesize() };
+    if guest_page != host_page {
+        return Err(format!("page-size mismatch guest={guest_page} host={host_page}").into());
+    }
+    // Check both CPU selectors against the corresponding Darwin host values;
+    // this catches a facade that merely reports a positive fixed constant.
+    let host_configured = unsafe { host_sysconf(57) };
+    let host_online = unsafe { host_sysconf(58) };
+    let guest_configured = image.call_exported_i32("bionic_time_fixture_configured_processors")?;
+    let guest_online = image.call_exported_i32("bionic_time_fixture_online_processors")?;
+    if host_configured <= 0
+        || host_online <= 0
+        || guest_configured as c_long != host_configured
+        || guest_online as c_long != host_online
+    {
+        return Err(format!(
+            "processor-count mismatch guest=({guest_configured},{guest_online}) host=({host_configured},{host_online})"
+        )
+        .into());
     }
 
     // SAFETY: test-only helper installs one process SIGALRM handler and timer.

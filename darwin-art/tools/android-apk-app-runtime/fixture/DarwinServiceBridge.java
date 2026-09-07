@@ -9,7 +9,9 @@ import android.app.Application;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.ActivityInfo;
+import android.content.pm.ProviderInfo;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Rect;
@@ -39,6 +41,44 @@ import java.io.File;
 
 /** Minimal in-process display service used by Choreographer on the host. */
 public final class DarwinServiceBridge {
+    /**
+     * ActivityThread normally installs RuntimeInit's process-wide handler
+     * before an application's Activity is created.  The detached launcher
+     * has no RuntimeInit phase, which leaves Unity's forwarding handler with
+     * a null delegate and masks the original asynchronous exception with an
+     * NPE.  Install the same process boundary here so framework/app failures
+     * are logged instead of being replaced by the forwarding NPE.
+     */
+    public static void installDefaultUncaughtExceptionHandler() {
+        if (Thread.getDefaultUncaughtExceptionHandler() != null) return;
+        Thread.setDefaultUncaughtExceptionHandler((thread, error) ->
+                Log.e("DarwinART", "uncaught exception on " + thread.getName(), error));
+    }
+
+    /**
+     * CreatePathClassLoader is intentionally fed already-open DexFile objects
+     * by the native bootstrap.  That preserves ART's class identity but omits
+     * the APK zip element that BaseDexClassLoader uses for META-INF/services
+     * and other arbitrary resources.  Add the original APK as a trailing
+     * resource path, matching Android's PathClassLoader ordering (the support
+     * and app DEX elements remain ahead of it for class lookup).
+     */
+    public static void installApkResourcePath(Activity activity, String apkPath) {
+        if (activity == null || apkPath == null || apkPath.isEmpty()) return;
+        try {
+            ClassLoader loader = activity.getClass().getClassLoader();
+            Class<?> base = Class.forName("dalvik.system.BaseDexClassLoader");
+            Field pathListField = base.getDeclaredField("pathList");
+            pathListField.setAccessible(true);
+            Object pathList = pathListField.get(loader);
+            Method addDexPath = pathList.getClass().getDeclaredMethod(
+                    "addDexPath", String.class, File.class);
+            addDexPath.setAccessible(true);
+            addDexPath.invoke(pathList, apkPath, null);
+        } catch (Throwable error) {
+            Log.e("DarwinART", "could not add APK resource path", error);
+        }
+    }
     private static final int DISPLAY_SCALE =
             "2".equals(System.getenv("DARWIN_ART_WINDOW_SCALE")) ? 2 : 1;
     private static volatile int DISPLAY_WIDTH = 360 * DISPLAY_SCALE;
@@ -122,6 +162,11 @@ public final class DarwinServiceBridge {
         int width = landscape ? naturalHeight : naturalWidth;
         int height = landscape ? naturalWidth : naturalHeight;
         resizeDisplay(width, height);
+    }
+
+    /** Applies the launch Activity's manifest orientation before onCreate(). */
+    public static void applyManifestOrientation(int orientation) {
+        requestOrientation(orientation);
     }
 
     private static void requestAllWindowLayouts() {
@@ -929,6 +974,7 @@ public final class DarwinServiceBridge {
                     new Class<?>[] {contentInterface},
                     (proxy, method, args) -> defaultValue(method.getReturnType()));
             attach(contentBinder, contentService, "android.content.IContentService");
+            installSettingsProvider();
 
             Binder notificationBinder = new Binder();
             Class<?> notificationInterface = Class.forName(
@@ -1988,8 +2034,19 @@ public final class DarwinServiceBridge {
 
     /** Process-local ActivityManager state normally supplied by system_server. */
     private static final class ActivityManagerHandler implements InvocationHandler {
+        private static volatile Object settingsProvider;
+
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) throws Exception {
+            if (method.getName().toLowerCase().contains("provider")) {
+                Log.i("DarwinServiceBridge", "ActivityManager " + method.getName()
+                        + " args=" + java.util.Arrays.toString(args));
+            }
+            if ("getContentProvider".equals(method.getName())
+                    && args != null && args.length > 2
+                    && "settings".equals(args[2])) {
+                return settingsProvider();
+            }
             if ("sendIntentSender".equals(method.getName())) {
                 Class<?> senderInterface = Class.forName(
                         "android.content.IIntentSender");
@@ -2041,6 +2098,12 @@ public final class DarwinServiceBridge {
                 processInfoType.getField("uid").setInt(
                         processInfo, android.os.Process.myUid());
                 processInfoType.getField("importance").setInt(processInfo, 100);
+                // RunningAppProcessInfo.pkgList is populated by ActivityManager
+                // in system_server.  The detached in-process service must keep
+                // that field non-null: callers such as NXPatcher iterate it
+                // directly after checking importance.
+                processInfoType.getField("pkgList").set(processInfo,
+                        new String[] {packageName});
                 ArrayList<Object> processes = new ArrayList<>();
                 processes.add(processInfo);
                 return processes;
@@ -2053,6 +2116,150 @@ public final class DarwinServiceBridge {
             }
             return defaultValue(method.getReturnType());
         }
+
+        /**
+         * Android's Settings.NameValueCache obtains android_id through the
+         * system settings provider.  The detached runtime has no system_server,
+         * so publish the same provider holder and IContentProvider.call path
+         * in-process.  Only stable device identity is exposed here; other
+         * settings retain the platform's ordinary null/empty behavior.
+         */
+        private static Object settingsProvider() throws Exception {
+            Object cached = settingsProvider;
+            if (cached != null) return cached;
+
+            ProviderInfo info = new ProviderInfo();
+            info.authority = "settings";
+            info.name = "dev.darwinart.simple.DarwinSettingsProvider";
+            info.packageName = System.getenv("DARWIN_ART_APK_APP_PACKAGE");
+            if (info.packageName == null || info.packageName.isEmpty()) {
+                info.packageName = "android";
+            }
+            info.applicationInfo = new ApplicationInfo();
+            info.applicationInfo.packageName = info.packageName;
+            info.applicationInfo.uid = android.os.Process.myUid();
+
+            Binder binder = new Binder();
+            Class<?> providerInterface = Class.forName("android.content.IContentProvider");
+            Object provider = Proxy.newProxyInstance(
+                    providerInterface.getClassLoader(),
+                    new Class<?>[] {providerInterface},
+                    (ignored, providerMethod, providerArgs) -> {
+                        if ("asBinder".equals(providerMethod.getName())) return binder;
+                        if ("call".equals(providerMethod.getName())) {
+                            String key = null;
+                            if (providerArgs != null && providerArgs.length > 3
+                                    && providerArgs[3] instanceof String) {
+                                key = (String) providerArgs[3];
+                            }
+                            if ("android_id".equals(key)) {
+                                Bundle result = new Bundle();
+                                result.putString("value", stableAndroidId());
+                                return result;
+                            }
+                        }
+                        return defaultValue(providerMethod.getReturnType());
+                    });
+            attach(binder, provider, "android.content.IContentProvider");
+            Class<?> holderClass = Class.forName("android.app.ContentProviderHolder");
+            Object holder = holderClass.getConstructor(ProviderInfo.class).newInstance(info);
+            holderClass.getField("provider").set(holder, provider);
+            holderClass.getField("noReleaseNeeded").setBoolean(holder, true);
+            holderClass.getField("mLocal").setBoolean(holder, true);
+            settingsProvider = holder;
+            return holder;
+        }
+
+        private static String stableAndroidId() {
+            String configured = System.getenv("DARWIN_ART_ANDROID_ID");
+            if (configured != null && !configured.isEmpty()) return configured;
+            // Per-profile identity is supplied by the launcher when available;
+            // this deterministic fallback keeps analytics initialization stable
+            // without exposing a host identifier to the guest application.
+            return " darwinart00000001".trim();
+        }
+    }
+
+    /** Install the detached settings provider into Settings.NameValueCache. */
+    private static void installSettingsProvider() throws Exception {
+        Object holder = ActivityManagerHandler.settingsProvider();
+        Class<?> holderClass = holder.getClass();
+        Field providerField = holderClass.getField("provider");
+        Object provider = providerField.get(holder);
+        Class<?> secureClass = Class.forName("android.provider.Settings$Secure");
+        Field secureHolderField = secureClass.getDeclaredField("sProviderHolder");
+        secureHolderField.setAccessible(true);
+        Object secureHolder = secureHolderField.get(null);
+        Field contentProviderField = secureHolder.getClass()
+                .getDeclaredField("mContentProvider");
+        contentProviderField.setAccessible(true);
+        contentProviderField.set(secureHolder, provider);
+    }
+
+    /** Register the mainline telephony manager wrapper when its module is present. */
+    private static void installTelephonyServiceWrapper() {
+        try {
+            ClassLoader loader = DarwinServiceBridge.class.getClassLoader();
+            Class<?> registry = Class.forName("android.app.SystemServiceRegistry", false, loader);
+            Field fetchersField = registry.getDeclaredField("SYSTEM_SERVICE_FETCHERS");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> fetchers = (Map<String, Object>) rawStaticObject(fetchersField);
+            if (fetchers == null) {
+                fetchers = new android.util.ArrayMap<>();
+                rawStaticPut(fetchersField, fetchers);
+            }
+            Class<?> fetcher = Class.forName(
+                    "android.app.SystemServiceRegistry$ServiceFetcher", false, loader);
+            Object telephonyFetcher = Proxy.newProxyInstance(
+                    loader, new Class<?>[] {fetcher}, (ignored, method, args) -> {
+                        Log.i("DarwinServiceBridge", "telephony fetcher " + method.getName());
+                        if ("getService".equals(method.getName())
+                                && args != null && args.length > 0 && args[0] instanceof Context) {
+                            Class<?> manager = Class.forName("android.telephony.TelephonyManager");
+                            Constructor<?> constructor = manager.getDeclaredConstructor(Context.class);
+                            constructor.setAccessible(true);
+                            return constructor.newInstance(args[0]);
+                        }
+                        return defaultValue(method.getReturnType());
+                    });
+            fetchers.put(Context.TELEPHONY_SERVICE, telephonyFetcher);
+        } catch (Throwable error) {
+            Log.w("DarwinServiceBridge", "telephony wrapper unavailable: "
+                    + describeThrowable(error));
+        }
+    }
+
+    private static String describeThrowable(Throwable error) {
+        StringBuilder text = new StringBuilder(String.valueOf(error));
+        Throwable cause = error.getCause();
+        int depth = 0;
+        while (cause != null && cause != error && depth++ < 4) {
+            text.append(" <- ").append(cause);
+            cause = cause.getCause();
+        }
+        return text.toString();
+    }
+
+    /** Read a static field without re-running a failed SystemServiceRegistry initializer. */
+    private static Object rawStaticObject(Field field) throws Exception {
+        Class<?> unsafeClass = Class.forName("jdk.internal.misc.Unsafe");
+        Object unsafe = unsafeClass.getMethod("getUnsafe").invoke(null);
+        Method base = unsafeClass.getMethod("staticFieldBase", Field.class);
+        Method offset = unsafeClass.getMethod("staticFieldOffset", Field.class);
+        Method getObject = unsafeClass.getMethod("getObject", Object.class, long.class);
+        return getObject.invoke(unsafe, base.invoke(unsafe, field),
+                ((Long) offset.invoke(unsafe, field)).longValue());
+    }
+
+    private static void rawStaticPut(Field field, Object value) throws Exception {
+        Class<?> unsafeClass = Class.forName("jdk.internal.misc.Unsafe");
+        Object unsafe = unsafeClass.getMethod("getUnsafe").invoke(null);
+        Method base = unsafeClass.getMethod("staticFieldBase", Field.class);
+        Method offset = unsafeClass.getMethod("staticFieldOffset", Field.class);
+        Method putObject = unsafeClass.getMethod(
+                "putObject", Object.class, long.class, Object.class);
+        putObject.invoke(unsafe, base.invoke(unsafe, field),
+                ((Long) offset.invoke(unsafe, field)).longValue(), value);
     }
 
     private static final class DisplayHandler implements InvocationHandler {
@@ -2206,7 +2413,31 @@ public final class DarwinServiceBridge {
             if (proxy == session && "remove".equals(method.getName())) {
                 Object windowToken = args == null || args.length == 0 ? null : args[0];
                 SurfaceControl surface = windowSurfaces.remove(windowToken);
-                if (surface != null && surface.isValid()) surface.release();
+                final boolean surfaceValid = surface != null && surface.isValid();
+                if (System.getenv("DARWIN_ART_TRACE_REPARENT_NULL") != null) {
+                    Log.i("DarwinServiceBridge", "remove-reparent-null token=0x"
+                            + Integer.toHexString(System.identityHashCode(windowToken))
+                            + " surface=0x"
+                            + Integer.toHexString(System.identityHashCode(surface))
+                            + " valid=" + surfaceValid);
+                }
+                if (surfaceValid) {
+                    // WMS removes the layer from the composition tree before
+                    // releasing its client handle. Other ViewRoot/NativeWindow
+                    // references may still retain that handle after dismissal.
+                    try (SurfaceControl.Transaction transaction =
+                            new SurfaceControl.Transaction()) {
+                        transaction.reparent(surface, null).apply();
+                    }
+                    if (System.getenv("DARWIN_ART_TRACE_REPARENT_NULL") != null) {
+                        Log.i("DarwinServiceBridge", "remove-reparent-null-applied "
+                                + "token=0x"
+                                + Integer.toHexString(System.identityHashCode(windowToken))
+                                + " surface=0x"
+                                + Integer.toHexString(System.identityHashCode(surface)));
+                    }
+                    surface.release();
+                }
                 windowSurfaceSizes.remove(windowToken);
                 if (windowLayouts.remove(windowToken) != null) {
                     windowTopologyGeneration++;
@@ -2311,7 +2542,8 @@ public final class DarwinServiceBridge {
                 int height = requestedHeight > 0 && requestedHeight <= DISPLAY_HEIGHT
                         ? requestedHeight
                         : (layoutHeight > 0 && layoutHeight <= DISPLAY_HEIGHT
-                                ? layoutHeight : 120 * DISPLAY_SCALE);
+                                ? layoutHeight : (type < 1000
+                                        ? DISPLAY_HEIGHT : 120 * DISPLAY_SCALE));
                 width = Math.min(width, DISPLAY_WIDTH);
                 height = Math.min(height, DISPLAY_HEIGHT);
                 Rect displayFrame = new Rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
@@ -2343,6 +2575,25 @@ public final class DarwinServiceBridge {
                 }
 
                 Object result = args[8];
+                // Android's asynchronous relayout computes frames locally from
+                // this merged configuration. Returning only ClientWindowFrames
+                // leaves windowConfiguration.bounds empty on the next traversal.
+                Configuration configuration = new Configuration(
+                        currentActivity == null
+                                ? Resources.getSystem().getConfiguration()
+                                : currentActivity.getResources().getConfiguration());
+                Object windowConfiguration = Configuration.class
+                        .getField("windowConfiguration").get(configuration);
+                for (String setter : new String[] {"setBounds", "setAppBounds",
+                                                    "setMaxBounds"}) {
+                    windowConfiguration.getClass().getMethod(setter, Rect.class)
+                            .invoke(windowConfiguration, displayFrame);
+                }
+                Object mergedConfiguration = result.getClass()
+                        .getField("mergedConfiguration").get(result);
+                mergedConfiguration.getClass().getMethod("setConfiguration",
+                        Configuration.class, Configuration.class).invoke(
+                                mergedConfiguration, configuration, new Configuration());
                 Field framesField = result.getClass().getField("frames");
                 Object frames = framesField.get(result);
                 setRectField(frames, "frame", x, y, x + width, y + height);

@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -6,7 +7,6 @@
 #include "intrinsics_list.h"
 #include "jni.h"
 #include "palette/palette.h"
-#include "runtime_image.h"
 #include "unwindstack/AndroidUnwinder.h"
 
 // This translation unit owns platform-compatibility shims that do not depend
@@ -26,8 +26,19 @@ extern "C" palette_status_t PaletteSchedSetPriority(int32_t, int32_t) {
   return PALETTE_STATUS_OK;
 }
 
-extern "C" palette_status_t PaletteWriteCrashThreadStacks(const char*, size_t) {
-  return PALETTE_STATUS_NOT_SUPPORTED;
+extern "C" palette_status_t PaletteWriteCrashThreadStacks(const char* stacks,
+                                                             size_t length) {
+  if (stacks == nullptr && length != 0) {
+    return PALETTE_STATUS_INVALID_ARGUMENT;
+  }
+  // Android writes this report to tombstoned. Darwin has no tombstoned
+  // service, so preserve the complete diagnostic payload on the process host
+  // stream. The caller has already assembled one atomic report.
+  if (length != 0 && std::fwrite(stacks, 1, length, stderr) != length) {
+    return PALETTE_STATUS_FAILED_CHECK_LOG;
+  }
+  std::fflush(stderr);
+  return PALETTE_STATUS_OK;
 }
 
 extern "C" palette_status_t PaletteDebugStoreGetString(char* result, size_t max_size) {
@@ -57,6 +68,24 @@ extern "C" palette_status_t PaletteNotifyOatFileLoaded(const char*) {
   return PALETTE_STATUS_OK;
 }
 
+extern "C" palette_status_t PaletteShouldReportDex2oatCompilation(bool* enabled) {
+  if (enabled == nullptr) {
+    return PALETTE_STATUS_INVALID_ARGUMENT;
+  }
+  // Android reports this optional telemetry through statsd. The compiler and
+  // produced artifacts are unaffected when the host has no statsd backend.
+  *enabled = false;
+  return PALETTE_STATUS_OK;
+}
+
+extern "C" palette_status_t PaletteNotifyStartDex2oatCompilation(int, int, int, int) {
+  return PALETTE_STATUS_OK;
+}
+
+extern "C" palette_status_t PaletteNotifyEndDex2oatCompilation(int, int, int, int) {
+  return PALETTE_STATUS_OK;
+}
+
 extern "C" palette_status_t PaletteShouldReportJniInvocations(bool* enabled) {
   if (enabled == nullptr) {
     return PALETTE_STATUS_INVALID_ARGUMENT;
@@ -78,19 +107,6 @@ extern "C" void* __hwasan_tag_pointer(const volatile void* pointer, unsigned cha
 extern "C" void __hwasan_handle_longjmp(const void*) {}
 
 namespace art {
-namespace hprof {
-void DumpHeap(const char*, int, bool) {}
-}  // namespace hprof
-
-std::string RuntimeImage::GetRuntimeImagePath(const std::string&) { return {}; }
-
-bool RuntimeImage::WriteImageToDisk(std::string* error_msg) {
-  if (error_msg != nullptr) {
-    *error_msg = "runtime images are not supported on Darwin";
-  }
-  return false;
-}
-
 namespace odrefresh {
 bool UploadStatsIfAvailable(std::string*) { return true; }
 }  // namespace odrefresh
@@ -108,13 +124,3 @@ std::ostream& operator<<(std::ostream& stream, const Intrinsics& intrinsic) {
 }  // namespace art
 
 extern "C" void SkipAddSignalHandler(bool) {}
-
-namespace unwindstack {
-bool AndroidLocalUnwinder::InternalInitialize(ErrorData&) {
-  return false;
-}
-
-bool AndroidLocalUnwinder::InternalUnwind(std::optional<pid_t>, AndroidUnwinderData&) {
-  return false;
-}
-}  // namespace unwindstack

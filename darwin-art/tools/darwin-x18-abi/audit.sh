@@ -22,4 +22,20 @@ codesign --force --sign - --timestamp=none "$temporary/preserve-x18" >/dev/null
 xcrun vtool -show-build "$temporary/preserve-x18" | grep -F 'sdk 12.0' >/dev/null
 "$temporary/preserve-x18"
 
-echo 'darwin-x18-abi: PASS task preserves Android x18 across scheduling'
+# The installed-app launcher must re-establish this task ABI after any Cargo
+# relink, not only at installation time. Exercise the serialized production
+# preparation path on a fresh current-SDK executable and race two launchers.
+cp "$temporary/default" "$temporary/prepared-host"
+"$root/tools/prepare-darwin-art-host.sh" "$temporary/prepared-host" development &
+first_prepare=$!
+"$root/tools/prepare-darwin-art-host.sh" "$temporary/prepared-host" development &
+second_prepare=$!
+wait "$first_prepare"
+wait "$second_prepare"
+xcrun vtool -show-build "$temporary/prepared-host" | grep -F 'sdk 12.0' >/dev/null
+codesign --verify --strict "$temporary/prepared-host"
+codesign -d --entitlements :- "$temporary/prepared-host" 2>/dev/null |
+  grep -F '<key>com.apple.security.cs.allow-jit</key><true/>' >/dev/null
+"$temporary/prepared-host"
+
+echo 'darwin-x18-abi: PASS task and installed-launch preparation preserve Android x18'

@@ -1,6 +1,7 @@
 LIBCXX_SYSCALL_FIXTURE {
   global:
     SyscallFixtureGettid;
+    SyscallFixtureGetpid;
     SyscallFixtureRtTgSigqueueinfo;
     SyscallFixtureGetrandom;
     SyscallFixtureGetaffinity;

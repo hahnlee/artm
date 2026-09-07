@@ -127,10 +127,32 @@ int darwin_art_bionic_isspace(int value) {
          character == '\v' || character == '\f' || character == '\r';
 }
 
+int darwin_art_bionic_isprint(int value) {
+  const unsigned char character = (unsigned char)value;
+  return value != -1 && character >= 0x20 && character <= 0x7e;
+}
+
 size_t darwin_art_bionic_strnlen(const char* string, size_t maximum) {
   size_t length = 0;
   while (length < maximum && string[length] != '\0') ++length;
   return length;
+}
+
+size_t darwin_art_bionic_strlcat(char* destination, const char* source,
+                                 size_t size) {
+  const size_t destination_length =
+      darwin_art_bionic_strnlen(destination, size);
+  size_t source_length = 0;
+  while (source[source_length] != '\0') ++source_length;
+  if (destination_length == size) return size + source_length;
+
+  const size_t available = size - destination_length;
+  const size_t copied = source_length < available - 1 ? source_length
+                                                       : available - 1;
+  for (size_t index = 0; index < copied; ++index)
+    destination[destination_length + index] = source[index];
+  destination[destination_length + copied] = '\0';
+  return destination_length + source_length;
 }
 
 size_t darwin_art_bionic_strlcpy(char* destination, const char* source,
@@ -718,6 +740,7 @@ static const DarwinArtBionicLeafBinding kBindings[] = {
     {"atoi", (DarwinArtBionicFunction)darwin_art_bionic_atoi},
     {"atol", (DarwinArtBionicFunction)darwin_art_bionic_atol},
     {"bsearch", (DarwinArtBionicFunction)darwin_art_bionic_bsearch},
+    {"isprint", (DarwinArtBionicFunction)darwin_art_bionic_isprint},
     {"isspace", (DarwinArtBionicFunction)darwin_art_bionic_isspace},
     {"lfind", (DarwinArtBionicFunction)darwin_art_bionic_lfind},
     {"memchr", (DarwinArtBionicFunction)darwin_art_bionic_memchr},
@@ -736,6 +759,7 @@ static const DarwinArtBionicLeafBinding kBindings[] = {
     {"strcmp", (DarwinArtBionicFunction)darwin_art_bionic_strcmp},
     {"strcpy", (DarwinArtBionicFunction)darwin_art_bionic_strcpy},
     {"strcspn", (DarwinArtBionicFunction)darwin_art_bionic_strcspn},
+    {"strlcat", (DarwinArtBionicFunction)darwin_art_bionic_strlcat},
     {"strlcpy", (DarwinArtBionicFunction)darwin_art_bionic_strlcpy},
     {"strlen", (DarwinArtBionicFunction)darwin_art_bionic_strlen},
     {"strncasecmp", (DarwinArtBionicFunction)darwin_art_bionic_strncasecmp},

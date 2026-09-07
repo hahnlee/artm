@@ -202,17 +202,24 @@ print("bionic-pthread-provider: create-failure-atomicity=PASS allocation-before-
 PY
 
 cxx="$(xcrun --find clang++)"
+cc="$(xcrun --find clang)"
 ar="$(xcrun --find ar)"
 host_nm="$(xcrun --find nm)"
 macos_sdk="$(xcrun --sdk macosx --show-sdk-path)"
 host_flags=(-std=c++20 -arch arm64 -isysroot "$macos_sdk" -O2 -Wall -Wextra -Werror
             -fvisibility=hidden -fvisibility-inlines-hidden -I"$module_root/include")
 "$cxx" "${host_flags[@]}" -c "$module_root/src/provider.cc" -o "$stage/provider.o"
+"$cc" -std=c17 -arch arm64 -isysroot "$macos_sdk" -O2 -Wall -Wextra -Werror \
+  -I"$project_root/tools/bionic-errno-tls/include" \
+  -I"$project_root/tools/bionic-errno-tls/generated" \
+  -c "$project_root/tools/bionic-errno-tls/src/errno_tls.c" \
+  -o "$stage/errno_tls.o"
 if grep -E 'reinterpret_cast<[^>]*pthread_(t|key_t|once_t|mutex_t|mutexattr_t|cond_t|rwlock_t)' \
     "$module_root/src/provider.cc" >/dev/null; then
   fail "Android opaque object is reinterpreted as a Darwin pthread type"
 fi
-"$ar" rcs "$stage/libdarwin-art-bionic-pthread.a" "$stage/provider.o"
+"$ar" rcs "$stage/libdarwin-art-bionic-pthread.a" \
+  "$stage/provider.o" "$stage/errno_tls.o"
 file "$stage/provider.o" | grep -F 'Mach-O 64-bit object arm64' >/dev/null ||
   fail "provider object is not Darwin arm64"
 if "$host_nm" -gU "$stage/provider.o" | awk '{print $3}' |
@@ -281,7 +288,8 @@ grep -F 'no-Darwin-reinterpret stale-key=reuse-alias(Bionic-undefined) unsupport
   fail "capability matrix failed"
 
 "$cxx" "${host_flags[@]}" -fsanitize=address,undefined \
-  "$module_root/src/provider.cc" "$module_root/tls_delete_stress.cc" \
+  "$module_root/src/provider.cc" "$stage/errno_tls.o" \
+  "$module_root/tls_delete_stress.cc" \
   -o "$stage/tls-delete-stress"
 tls_stress_output="$("$stage/tls-delete-stress")"
 grep -F 'delete-vs-get+set ASan=clean' <<< "$tls_stress_output" >/dev/null ||
@@ -292,7 +300,8 @@ grep -F 'repeated-delete=10000 peak-cells=1 reset-cells=0' <<< "$tls_stress_outp
 [[ "$(sha "$module_root/cond_stress.cc")" == "$COND_STRESS_SHA256" ]] ||
   fail "condition stress source SHA mismatch"
 "$cxx" "${host_flags[@]}" -fsanitize=address,undefined \
-  "$module_root/src/provider.cc" "$module_root/cond_stress.cc" \
+  "$module_root/src/provider.cc" "$stage/errno_tls.o" \
+  "$module_root/cond_stress.cc" \
   -o "$stage/cond-stress"
 cond_stress_output="$("$stage/cond-stress")"
 grep -F 'rounds=100 waiters=8 destroy-wait=EBUSY ASan=clean monotonic-timeout=110 monotonic-attr-timeout=110 relock=owned' <<< "$cond_stress_output" >/dev/null ||
@@ -301,7 +310,8 @@ grep -F 'rounds=100 waiters=8 destroy-wait=EBUSY ASan=clean monotonic-timeout=11
 [[ "$(sha "$module_root/rwlock_stress.cc")" == "$RWLOCK_STRESS_SHA256" ]] ||
   fail "rwlock stress source SHA mismatch"
 "$cxx" "${host_flags[@]}" -fsanitize=address,undefined \
-  "$module_root/src/provider.cc" "$module_root/rwlock_stress.cc" \
+  "$module_root/src/provider.cc" "$stage/errno_tls.o" \
+  "$module_root/rwlock_stress.cc" \
   -o "$stage/rwlock-stress"
 rwlock_stress_output="$("$stage/rwlock-stress")"
 grep -F 'rounds=20 readers=4 concurrent>=2 writer=10000-progress wrong-unlock=EPERM destroy-held=EBUSY double-destroy=Bionic-0 lazy-reset=clean ASan=clean' <<< "$rwlock_stress_output" >/dev/null ||
@@ -310,7 +320,8 @@ grep -F 'rounds=20 readers=4 concurrent>=2 writer=10000-progress wrong-unlock=EP
 [[ "$(sha "$module_root/mutex_attr_stress.cc")" == "$MUTEX_ATTR_STRESS_SHA256" ]] ||
   fail "mutex attribute stress source SHA mismatch"
 "$cxx" "${host_flags[@]}" -fsanitize=address,undefined \
-  "$module_root/src/provider.cc" "$module_root/mutex_attr_stress.cc" \
+  "$module_root/src/provider.cc" "$stage/errno_tls.o" \
+  "$module_root/mutex_attr_stress.cc" \
   -o "$stage/mutex-attr-stress"
 mutex_attr_stress_output="$("$stage/mutex-attr-stress")"
 grep -F 'rounds=100 normal+recursive+errorcheck recursive-depth=2 self=EDEADLK wrong-owner=EPERM held-destroy=EBUSY address-reuse=fresh-generation destroyed-attr=EINVAL pshared+PI=ENOTSUP ASan=clean' <<< "$mutex_attr_stress_output" >/dev/null ||
@@ -319,7 +330,8 @@ grep -F 'rounds=100 normal+recursive+errorcheck recursive-depth=2 self=EDEADLK w
 [[ "$(sha "$module_root/thread_lifecycle_stress.cc")" == "$THREAD_LIFECYCLE_STRESS_SHA256" ]] ||
   fail "thread lifecycle stress source SHA mismatch"
 "$cxx" "${host_flags[@]}" -fsanitize=address,undefined \
-  "$module_root/src/provider.cc" "$module_root/thread_lifecycle_stress.cc" \
+  "$module_root/src/provider.cc" "$stage/errno_tls.o" \
+  "$module_root/thread_lifecycle_stress.cc" \
   -o "$stage/thread-lifecycle-stress"
 thread_lifecycle_stress_output="$("$stage/thread-lifecycle-stress")"
 grep -F 'rounds=100 create+join+detach result=roundtrip self=EDEADLK foreign=ESRCH join-vs-detach=one-winner detached-clean=quiescent target-clean=reset ASan=clean' <<< "$thread_lifecycle_stress_output" >/dev/null ||

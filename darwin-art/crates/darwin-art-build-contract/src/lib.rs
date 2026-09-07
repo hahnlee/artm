@@ -7,7 +7,7 @@
 /// Bump when the common runtime/adapters include or command contract changes.
 /// A mismatch disables cache promotion until the canonical builder repopulates
 /// `_build/runtime-common`.
-pub const RUNTIME_CACHE_IDENTITY: &str = "darwin-art-runtime-core-cache-v14-central-surfaceflinger";
+pub const RUNTIME_CACHE_IDENTITY: &str = "darwin-art-runtime-core-cache-v17-runtime-image";
 
 /// Identity of the generated native Ninja graph. Keeping this beside the
 /// runtime cache contract prevents the canonical builder and graph emitter

@@ -33,3 +33,12 @@ FileDescriptor entry points and their `IO_fd_fdID` state. The retained external
 VM contract is `JVM_GetLastErrorString`, owned by ART's genuine
 `libopenjdkjvm`; the gate records it in
 `managed-retained-undefined.txt` rather than supplying a per-symbol shim.
+
+## ABI and private-root follow-up (2026-09-07)
+
+The filesystem owner now keeps Android open flags on the Bionic side and only
+translates them at the Darwin syscall boundary. Private-root host opens walk
+from an owned root descriptor with `openat` and `O_NOFOLLOW` on every component,
+covering both creates and read-only opens without a canonicalize-then-open
+TOCTOU window. The focused managed UnixFileSystem gate and Bionic filesystem
+unit suite pass, including final-symlink rejection.

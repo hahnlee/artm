@@ -887,6 +887,7 @@ bool RefreshFocusedWindowRoot(GraphicsState* state, JNIEnv* env) {
       state->interactive_view_root == nullptr) {
     return false;
   }
+  const jint previous_generation = state->focused_window_generation;
   jobject candidate = nullptr;
   if (state->service_bridge_class != nullptr) {
     if (state->window_topology_generation_method == nullptr) {
@@ -931,16 +932,36 @@ bool RefreshFocusedWindowRoot(GraphicsState* state, JNIEnv* env) {
     env->DeleteLocalRef(candidate);
     return true;
   }
-  if (state->focused_view_root != nullptr) {
-    darwin_art::SetFrameworkViewRootFocus(env, state->focused_view_root, false);
+  jobject candidate_global = env->NewGlobalRef(candidate);
+  if (candidate_global == nullptr || env->ExceptionCheck()) {
     if (env->ExceptionCheck()) env->ExceptionClear();
-    env->DeleteGlobalRef(state->focused_view_root);
-    state->focused_view_root = nullptr;
+    state->focused_window_generation = previous_generation;
+    env->DeleteLocalRef(candidate);
+    return state->focused_view_root != nullptr;
   }
+  // Probe the new receiver before retiring the old one. A popup ViewRoot can
+  // be visible in WindowManagerGlobal for one owner turn before its
+  // WindowInputEventReceiver has finished native initialization. Publishing
+  // the candidate only succeeds with a ready receiver. SetFocusedInputChannel
+  // cancels the previous channel; clearing its Java focus afterward cannot
+  // clear the newly published channel.
   const bool focused =
       darwin_art::SetFrameworkViewRootFocus(env, candidate, true);
-  if (focused && !env->ExceptionCheck()) {
-    state->focused_view_root = env->NewGlobalRef(candidate);
+  if (!focused || env->ExceptionCheck()) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    // Leave the generation stale so the next owner turn retries after the
+    // receiver's native peer has completed initialization.
+    state->focused_window_generation = previous_generation;
+    env->DeleteGlobalRef(candidate_global);
+    env->DeleteLocalRef(candidate);
+    return state->focused_view_root != nullptr;
+  }
+  jobject previous_root = state->focused_view_root;
+  state->focused_view_root = candidate_global;
+  if (previous_root != nullptr) {
+    darwin_art::SetFrameworkViewRootFocus(env, previous_root, false);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteGlobalRef(previous_root);
   }
   // InputDispatcher publishes focus before it releases the next key/pointer
   // packet. onFocusEvent posts ViewRootImpl's focus message, so drain that
@@ -1939,6 +1960,17 @@ int32_t pump_main_looper(GraphicsState* state) {
       state->owner_wake_bound = true;
     }
   }
+  // Refresh on both sides of the owner-Looper drain. The pre-drain pass
+  // retires a stale channel as soon as topology is visible; the post-drain
+  // pass retries a receiver that was visible before its native peer finished
+  // initialization. InputChannel-backed receivers consume directly on their
+  // registered Looper, so waiting until dispatch_motion_event(DOWN) is too
+  // late. AppKit may enqueue concurrently with either pass; the channel mutex
+  // preserves packet order, and any packet racing the focus boundary remains
+  // owned by the channel that was focused when it was published.
+  if (!RefreshFocusedWindowRoot(state, env)) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+  }
   if (!DispatchDueMainMessages(state, env)) {
     if (env->ExceptionCheck() && art_thread->GetException() != nullptr) {
       std::cerr << "ART Android main Looper dispatch threw\n"
@@ -1946,6 +1978,9 @@ int32_t pump_main_looper(GraphicsState* state) {
       art_thread->ClearException();
     }
     return 75;
+  }
+  if (!RefreshFocusedWindowRoot(state, env)) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
   }
   // AppKit publishes the Android input hint before waking this owner. Clear
   // it only while the surface mailbox is empty and its framework messages have

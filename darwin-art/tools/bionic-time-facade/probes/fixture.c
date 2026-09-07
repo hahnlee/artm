@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <limits.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -52,8 +53,16 @@ __attribute__((visibility("default"))) int bionic_time_fixture_basic(void) {
   const long page_alias = sysconf(_SC_PAGE_SIZE);
   const long configured = sysconf(_SC_NPROCESSORS_CONF);
   const long online = sysconf(_SC_NPROCESSORS_ONLN);
+  const long physical_pages = sysconf(_SC_PHYS_PAGES);
+  const long available_pages = sysconf(_SC_AVPHYS_PAGES);
   if (page < 4096 || (page & (page - 1)) != 0 || page_alias != page) return 11;
   if (configured < 1 || online < 1 || online > configured) return 12;
+  if (physical_pages <= 0 || available_pages <= 0 ||
+      (unsigned long long)physical_pages * (unsigned long long)page !=
+          8ULL * 1024ULL * 1024ULL * 1024ULL ||
+      (unsigned long long)available_pages * (unsigned long long)page !=
+          4ULL * 1024ULL * 1024ULL * 1024ULL)
+    return 15;
   errno = 0;
   if (sysconf(0x7fffffff) != -1 || errno != EINVAL) return 13;
   struct timeval wall = {.tv_sec = -1, .tv_usec = -1};
@@ -63,6 +72,23 @@ __attribute__((visibility("default"))) int bionic_time_fixture_basic(void) {
       wall.tv_sec > realtime.tv_sec + 2)
     return 14;
   return 42;
+}
+
+__attribute__((visibility("default"))) int bionic_time_fixture_page_size(void) {
+  const long page = sysconf(_SC_PAGESIZE);
+  return page > 0 && page <= INT_MAX ? (int)page : -1;
+}
+
+__attribute__((visibility("default"))) int
+bionic_time_fixture_configured_processors(void) {
+  const long count = sysconf(_SC_NPROCESSORS_CONF);
+  return count > 0 && count <= INT_MAX ? (int)count : -1;
+}
+
+__attribute__((visibility("default"))) int
+bionic_time_fixture_online_processors(void) {
+  const long count = sysconf(_SC_NPROCESSORS_ONLN);
+  return count > 0 && count <= INT_MAX ? (int)count : -1;
 }
 
 __attribute__((visibility("default"))) int

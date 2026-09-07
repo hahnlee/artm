@@ -103,6 +103,7 @@ fn main() {
     for source in [
         "src/shims.c",
         "include/darwin_art_bionic_fs.h",
+        "include/darwin_art_bionic_stat.h",
         "../bionic-ioctl-facade/include/darwin_art_bionic_ioctl.h",
         "../bionic-errno-tls/src/errno_tls.c",
         "../bionic-errno-tls/include/darwin_art_bionic_errno.h",

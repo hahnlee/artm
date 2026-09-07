@@ -7,9 +7,12 @@ pub(crate) fn finalize(
     compiled: RuntimeBootstrapCompiled,
 ) -> Result<()> {
     let archive = staged.build_dir.join(flavor.archive_name());
-    create_archive(&archive, &compiled.objects)?;
+    let reused_archive = compiled.compiled_objects == 0 && archive.is_file();
+    if !reused_archive {
+        create_archive(&archive, &compiled.objects)?;
+    }
     println!(
-        "{}: ART runtime initialization spine Mach-O objects={} compiled={} cached={} archive={}",
+        "{}: ART runtime initialization spine Mach-O objects={} compiled={} cached={} archive={}{}",
         if flavor.real_graphics() {
             "build-runtime-graphics-bootstrap"
         } else {
@@ -18,7 +21,8 @@ pub(crate) fn finalize(
         compiled.objects.len(),
         compiled.compiled_objects,
         compiled.cached_objects,
-        archive.display()
+        archive.display(),
+        if reused_archive { " reused" } else { "" }
     );
     Ok(())
 }

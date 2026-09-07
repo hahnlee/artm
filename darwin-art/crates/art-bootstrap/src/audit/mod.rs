@@ -1,5 +1,6 @@
 use super::*;
 
+mod art_test_exports;
 mod common;
 mod graphics_core_probes;
 mod graphics_link;

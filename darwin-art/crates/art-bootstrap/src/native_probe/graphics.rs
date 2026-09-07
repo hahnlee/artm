@@ -53,7 +53,7 @@ pub(crate) fn build_runtime_graphics_phase_probe(root: &Path) -> Result<()> {
         root.join("include"),
         root.join("compat"),
         root.join("_build/runtime-arm64/generated"),
-        root.join("_build/runtime-core/patched-source/runtime"),
+        root.join("_build/runtime-common/patched-source/runtime"),
         root.join("_build/foundation/patched-source/libartbase"),
         root.join("_aosp/art/libartbase"),
         root.join("_aosp/art/libdexfile"),
@@ -159,26 +159,9 @@ pub(crate) fn build_runtime_graphics_gpu_probe(root: &Path) -> Result<()> {
     let build_dir = output
         .parent()
         .ok_or_else(|| format!("graphics GPU output has no parent: {}", output.display()))?;
-    let includes = [
-        root.join("include"),
-        root.join("compat"),
-        root.join("_build/runtime-arm64/generated"),
-        root.join("_build/runtime-core/patched-source/runtime"),
-        root.join("_build/foundation/patched-source/libartbase"),
-        root.join("_aosp/art/runtime"),
-        root.join("_aosp/art/runtime/base"),
-        root.join("_aosp/art/libartbase"),
-        root.join("_aosp/art/libdexfile"),
-        root.join("_aosp/art/libelffile"),
-        root.join("_aosp/art/libprofile"),
-        root.join("_aosp/art/libnativebridge/include"),
-        root.join("_aosp/external/tinyxml2"),
-        root.join("_aosp/system/libbase/include"),
-        root.join("_aosp/libnativehelper/include_jni"),
-        root.join("_aosp/libnativehelper/header_only_include"),
-        root.join("_aosp/libnativehelper/platform_header_only_include"),
-        PathBuf::from("/opt/homebrew/include"),
-    ];
+    let build_paths = BuildPaths::from_root(root);
+    let runtime = root.join("_aosp/art/runtime");
+    let includes = core_probe_includes(root, &build_paths, &runtime);
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
     let object = compile_runtime_graphics_gpu_probe(
@@ -217,10 +200,15 @@ pub(crate) fn compile_runtime_jni_acceptance_probe(
     }
     let cache_path = build_dir.join("runtime-probe-jni-acceptance-hashes.cache");
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
     let mut command = runtime_cpp_command(includes);
     command
         .arg("-include")
         .arg("mirror/object_reference.h")
+        .arg("-idirafter")
+        .arg(ndk_arch_include)
+        .arg("-idirafter")
+        .arg(ndk_include)
         .arg("-c")
         .arg(root.join("probes/runtime_jni_acceptance_probe.cc"))
         .arg("-o")
@@ -238,26 +226,17 @@ pub(crate) fn build_runtime_jni_acceptance_probe(root: &Path) -> Result<()> {
     let build_dir = output
         .parent()
         .ok_or_else(|| format!("JNI acceptance output has no parent: {}", output.display()))?;
-    let includes = [
-        root.join("include"),
-        root.join("compat"),
-        root.join("_build/runtime-arm64/generated"),
-        root.join("_build/runtime-core/patched-source/runtime"),
-        root.join("_build/foundation/patched-source/libartbase"),
-        root.join("_aosp/art/runtime"),
-        root.join("_aosp/art/runtime/base"),
-        root.join("_aosp/art/libartbase"),
-        root.join("_aosp/art/libdexfile"),
-        root.join("_aosp/art/libelffile"),
-        root.join("_aosp/art/libprofile"),
-        root.join("_aosp/art/libnativebridge/include"),
-        root.join("_aosp/external/tinyxml2"),
-        root.join("_aosp/system/libbase/include"),
-        root.join("_aosp/libnativehelper/include_jni"),
-        root.join("_aosp/libnativehelper/header_only_include"),
-        root.join("_aosp/libnativehelper/platform_header_only_include"),
-        PathBuf::from("/opt/homebrew/include"),
-    ];
+    // This command is itself the Ninja edge that rebuilds the object. The
+    // environment path also serves as a reuse hint to higher-level link
+    // commands, so remove the dirty edge's old output before entering the
+    // shared helper; otherwise its reuse fast path would silently retain stale
+    // code after an included acceptance header changed.
+    if output.is_file() {
+        fs::remove_file(&output)?;
+    }
+    let build_paths = BuildPaths::from_root(root);
+    let runtime = root.join("_aosp/art/runtime");
+    let includes = core_probe_includes(root, &build_paths, &runtime);
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
     let object = compile_runtime_jni_acceptance_probe(root, build_dir, &include_refs)?;
     if object != output {

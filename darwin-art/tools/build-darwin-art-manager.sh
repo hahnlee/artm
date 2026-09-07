@@ -68,6 +68,8 @@ copy_file "$project_root/tools/declare-darwin-x18-abi.sh" tools/declare-darwin-x
 copy_file "$project_root/config/darwin-art-host.entitlements" config/darwin-art-host.entitlements
 copy_file "$project_root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib" \
   _build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib
+copy_file "$project_root/_build/runtime-graphics-link-probe/libopenjdk-named-jni-owner.dylib" \
+  _build/runtime-graphics-link-probe/libopenjdk-named-jni-owner.dylib
 copy_file "$project_root/_build/android16-core-oj-compat/core-oj-compat.jar" \
   _build/android16-core-oj-compat/core-oj-compat.jar
 copy_file "$project_root/_build/android16-framework-compat/framework-compat.jar" \

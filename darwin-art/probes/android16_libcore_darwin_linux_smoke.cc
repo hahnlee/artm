@@ -105,6 +105,16 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "munmap: %s\n", std::strerror(errno));
     return 9;
   }
+  void* populated = darwin_art::libcore_darwin::Mmap(
+      nullptr, static_cast<size_t>(status.st_size), 1, 1 | 0x8000, fd, 0);
+  if (populated == MAP_FAILED ||
+      Fnv1a(static_cast<const unsigned char*>(populated), prefix.size()) != prefix_hash) {
+    std::fprintf(stderr, "MAP_POPULATE mapping failed or changed content\n");
+    return 17;
+  }
+  if (darwin_art::libcore_darwin::Munmap(populated, static_cast<size_t>(status.st_size)) != 0) {
+    return 18;
+  }
   if (darwin_art::libcore_darwin::Close(fd) == -1) {
     std::fprintf(stderr, "close: %s\n", std::strerror(errno));
     return 10;

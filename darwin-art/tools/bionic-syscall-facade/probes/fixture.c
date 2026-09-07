@@ -11,6 +11,10 @@ __attribute__((visibility("default"))) long SyscallFixtureGettid(void) {
   return syscall(178);
 }
 
+__attribute__((visibility("default"))) long SyscallFixtureGetpid(void) {
+  return syscall(172);
+}
+
 __attribute__((visibility("default"))) long SyscallFixtureRtTgSigqueueinfo(
     int process, int tid, int signal_number, const void* information) {
   return syscall(240, process, tid, signal_number, information);

@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 installed_record=""
+split_apks=()
 if [[ "${1:-}" == "--record" ]]; then
   installed_record="${2:-}"
   seconds="${3:-86400}"
@@ -17,12 +18,32 @@ if [[ "${1:-}" == "--record" ]]; then
   apk="$(sed -n 's/^apk=//p' "$installed_record")"
   app_dex="$(sed -n 's/^dex=//p' "$installed_record")"
   metadata="$(sed -n 's/^metadata=//p' "$installed_record")"
+  while IFS= read -r split_apk; do
+    [[ -z "$split_apk" ]] || split_apks+=("$split_apk")
+  done < <(sed -n 's/^split=//p' "$installed_record")
 else
   apk="${1:-}"
-  seconds="${2:-86400}"
+  if [[ "${2:-}" == "--split" ]]; then
+    shift
+    while [[ "${1:-}" == "--split" ]]; do
+      [[ -n "${2:-}" ]] || {
+        echo "--split requires an APK path" >&2
+        exit 64
+      }
+      split_apks+=("$2")
+      shift 2
+    done
+    seconds="${1:-86400}"
+  elif [[ "${2:-}" == *.apk ]]; then
+    # Convenience form for the common original base.apk plus one ABI split.
+    split_apks+=("$2")
+    seconds="${3:-86400}"
+  else
+    seconds="${2:-86400}"
+  fi
 fi
 [[ -n "$apk" ]] || {
-  echo "usage: $0 APK [VISIBLE_SECONDS] | --record RECORD [VISIBLE_SECONDS]" >&2
+  echo "usage: $0 BASE_APK [VISIBLE_SECONDS] | $0 BASE_APK --split ABI_APK [VISIBLE_SECONDS] | --record RECORD [VISIBLE_SECONDS]" >&2
   exit 64
 }
 source_apk="$(cd "$(dirname "$apk")" && pwd)/$(basename "$apk")"
@@ -30,6 +51,20 @@ source_apk="$(cd "$(dirname "$apk")" && pwd)/$(basename "$apk")"
   echo "APK does not exist: $source_apk" >&2
   exit 66
 }
+normalized_split_apks=()
+for split_apk in "${split_apks[@]}"; do
+  split_apk="$(cd "$(dirname "$split_apk")" && pwd)/$(basename "$split_apk")"
+  [[ -f "$split_apk" ]] || {
+    echo "split APK does not exist: $split_apk" >&2
+    exit 66
+  }
+  [[ "$split_apk" != *:* ]] || {
+    echo "split APK path cannot contain ':' (splitSourceDirs uses ':' delimiter): $split_apk" >&2
+    exit 64
+  }
+  normalized_split_apks+=("$split_apk")
+done
+split_apks=("${normalized_split_apks[@]}")
 [[ "$seconds" =~ ^([0-9]+)(\.[0-9]+)?$ ]] || {
   echo "VISIBLE_SECONDS must be a non-negative number" >&2
   exit 64
@@ -46,19 +81,26 @@ if [[ -z "$installed_record" ]]; then
     app_dex="$external_dex"
   fi
   metadata_tool="$root/target/release/android-apk-app-runtime"
+  metadata_arguments=("$source_apk")
+  [[ "$app_dex" == "$source_apk" ]] || metadata_arguments+=("$app_dex")
+  for split_apk in "${split_apks[@]}"; do
+    metadata_arguments+=(--split "$split_apk")
+  done
   if [[ "$app_dex" == "$source_apk" ]]; then
     if [[ -x "$metadata_tool" ]]; then
-      metadata="$("$metadata_tool" "$source_apk")"
+      metadata="$("$metadata_tool" "${metadata_arguments[@]}")"
     else
       metadata="$(cargo run -q --release \
-        --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk")"
+        --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- \
+        "${metadata_arguments[@]}")"
     fi
   else
     if [[ -x "$metadata_tool" ]]; then
-      metadata="$("$metadata_tool" "$source_apk" "$app_dex")"
+      metadata="$("$metadata_tool" "${metadata_arguments[@]}")"
     else
       metadata="$(cargo run -q --release \
-        --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- "$source_apk" "$app_dex")"
+        --manifest-path "$root/tools/android-apk-app-runtime/Cargo.toml" -- \
+        "${metadata_arguments[@]}")"
     fi
   fi
 fi
@@ -66,22 +108,57 @@ package="$(sed -n 's/^apk-app-runtime: package=\([^ ]*\) .*/\1/p' <<<"$metadata"
 application="$(sed -n 's/^apk-app-runtime: .* application=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 activity="$(sed -n 's/^apk-app-runtime: .* activity=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 launch_component="$(sed -n 's/^apk-app-runtime: .* launch_component=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+screen_orientation="$(sed -n 's/^apk-app-runtime: .* screen_orientation=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+if [[ -z "$screen_orientation" ]]; then
+  # v1 launch records predate orientation metadata. Re-inspect the source APK
+  # when the already-built metadata tool is available; otherwise preserve the
+  # old unspecified-orientation behavior instead of rejecting the record.
+  screen_orientation=-1
+  metadata_tool="$root/target/release/android-apk-app-runtime"
+  if [[ -x "$metadata_tool" ]]; then
+    refresh_arguments=("$source_apk")
+    [[ "$app_dex" == "$source_apk" ]] || refresh_arguments+=("$app_dex")
+    for split_apk in "${split_apks[@]}"; do
+      refresh_arguments+=(--split "$split_apk")
+    done
+    if [[ "$app_dex" == "$source_apk" ]]; then
+      if refreshed_metadata="$($metadata_tool "${refresh_arguments[@]}")"; then
+        :
+      else
+        refreshed_metadata=""
+      fi
+    else
+      if refreshed_metadata="$($metadata_tool "${refresh_arguments[@]}")"; then
+        :
+      else
+        refreshed_metadata=""
+      fi
+    fi
+    refreshed_orientation="$(sed -n 's/^apk-app-runtime: .* screen_orientation=\([^ ]*\) .*/\1/p' <<<"$refreshed_metadata")"
+    [[ -z "$refreshed_orientation" ]] || screen_orientation="$refreshed_orientation"
+  fi
+fi
 descriptor="$(sed -n 's/^apk-app-runtime: .* descriptor=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 activities="$(sed -n 's/^apk-app-runtime: .* activities=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 activity_aliases="$(sed -n 's/^apk-app-runtime: .* activity_aliases=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 services="$(sed -n 's/^apk-app-runtime: .* services=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 service_metadata="$(sed -n 's/^apk-app-runtime: .* service_metadata=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 application_metadata="$(sed -n 's/^apk-app-runtime: .* application_metadata=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+providers="$(sed -n 's/^apk-app-runtime: .* providers=\([^ ]*\) application_metadata=.*/\1/p' <<<"$metadata")"
 version_code="$(sed -n 's/^apk-app-runtime: .* version_code=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 version_name="$(sed -n 's/^apk-app-runtime: .* version_name=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 theme="$(sed -n 's/^apk-app-runtime: .* theme=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 target_sdk="$(sed -n 's/^apk-app-runtime: .* target_sdk=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+debuggable="$(sed -n 's/^apk-app-runtime: .* debuggable=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 label="$(sed -n 's/^apk-app-runtime: .* label=\(.*\) label_res=.*/\1/p' <<<"$metadata")"
 label_res="$(sed -n 's/^apk-app-runtime: .* label_res=\([^ ]*\) .*/\1/p' <<<"$metadata")"
+activity_label="$(sed -n 's/^apk-app-runtime-activity-label: label=\(.*\) label_res=.*/\1/p' <<<"$metadata")"
+activity_label_res="$(sed -n 's/^apk-app-runtime-activity-label: .* label_res=\([^ ]*\)$/\1/p' <<<"$metadata")"
+application_icon_res="$(sed -n 's/^apk-app-runtime-application-icon: res=\([^ ]*\)$/\1/p' <<<"$metadata")"
 icon="$(sed -n 's/^apk-app-runtime: .* icon=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 native_count="$(sed -n 's/^apk-app-runtime: .* native=\([^ ]*\) .*/\1/p' <<<"$metadata")"
 native_root="$(sed -n 's/^apk-app-runtime: .* native_root=\([^ ]*\)$/\1/p' <<<"$metadata")"
-[[ -n "$package" && -n "$application" && -n "$activity" && -n "$launch_component" && -n "$descriptor" && -n "$activities" && -n "$activity_aliases" && -n "$services" && -n "$service_metadata" && -n "$application_metadata" && -n "$version_code" && -n "$theme" && -n "$target_sdk" && -n "$label" && -n "$label_res" && -n "$icon" && -n "$native_count" && -n "$native_root" ]] || {
+[[ -n "$package" && -n "$application" && -n "$activity" && -n "$launch_component" && -n "$screen_orientation" && -n "$descriptor" && -n "$activities" && -n "$activity_aliases" && -n "$services" && -n "$service_metadata" && -n "$application_metadata" && -n "$version_code" && -n "$theme" && -n "$target_sdk" && -n "$debuggable" && -n "$label" && -n "$label_res" && -n "$icon" && -n "$native_count" && -n "$native_root" ]] || {
   echo "could not decode inspected APK metadata" >&2
   exit 65
 }
@@ -144,9 +221,13 @@ if [[ -z "$installed_record" ]]; then
         --manifest-path "$root/tools/android-apk-native-extract/Cargo.toml"
     fi
   fi
-  install_output="$("$installer" "$source_apk" "$install_root" "$package" \
-    "$version_code" "$native_root" "$extractor" "$runtime_abi" \
-    "$native_cache_root" "$native_converter")"
+  install_arguments=("$source_apk" "$install_root" "$package" "$version_code"
+    "$native_root" "$extractor" "$runtime_abi" "$native_cache_root"
+    "$native_converter")
+  for split_apk in "${split_apks[@]}"; do
+    install_arguments+=("$split_apk")
+  done
+  install_output="$("$installer" "${install_arguments[@]}")"
   apk_sha256="$(sed -n 's/^apk-install: .* apk_sha256=\([^ ]*\) .*/\1/p' \
     <<<"$install_output")"
 elif [[ -n "$installed_record" ]]; then
@@ -162,6 +243,14 @@ if [[ -z "$installed_record" ]]; then
   apk="$installed_directory/base.apk"
 else
   installed_directory="$(dirname "$apk")"
+fi
+installed_split_apks=()
+if [[ -z "$installed_record" ]]; then
+  for index in "${!split_apks[@]}"; do
+    installed_split_apks+=("$installed_directory/split-$index.apk")
+  done
+else
+  installed_split_apks=("${split_apks[@]}")
 fi
 [[ -f "$apk" ]] || {
   echo "installed APK is missing: $apk" >&2
@@ -190,6 +279,9 @@ if [[ -z "$installed_record" && -n "$profile_mount" ]]; then
     printf 'apk=%s\n' "$apk"
     printf 'dex=%s\n' "$app_dex"
     printf 'sha256=%s\n' "$apk_sha256"
+    for split_apk in "${installed_split_apks[@]}"; do
+      printf 'split=%s\n' "$split_apk"
+    done
     printf 'metadata=%s\n' "$metadata"
   } >"$record_stage"
   "$profile_ctl" register "$package" "$record_stage"
@@ -205,11 +297,9 @@ if [[ -z "$installed_record" && -n "$profile_mount" ]]; then
       exit 69
     }
     if [[ "${DARWIN_ART_PACKAGED_RUNTIME:-0}" == "1" ]]; then
-      codesign --verify --strict "$host"
+      "$root/tools/prepare-darwin-art-host.sh" "$host" packaged
     else
-      "$root/tools/declare-darwin-x18-abi.sh" "$host"
-      codesign --force --sign - --options runtime \
-        --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
+      "$root/tools/prepare-darwin-art-host.sh" "$host" development
     fi
     echo "$metadata"
     echo "$install_output"
@@ -234,19 +324,10 @@ fi
   echo "darwin-art host is missing: $host" >&2
   exit 69
 }
-# Installation signs the shared host once. Re-signing here would atomically
-# replace the executable underneath concurrent launches. Legacy direct-APK
-# runs still sign because they do not pass through the install command.
-if [[ -z "$installed_record" ]]; then
-  if [[ "${DARWIN_ART_PACKAGED_RUNTIME:-0}" == "1" ]]; then
-    codesign --verify --strict "$host"
-  else
-    "$root/tools/declare-darwin-x18-abi.sh" "$host"
-    codesign --force --sign - --options runtime \
-      --entitlements "$root/config/darwin-art-host.entitlements" "$host" >/dev/null
-  fi
+if [[ "${DARWIN_ART_PACKAGED_RUNTIME:-0}" == "1" ]]; then
+  "$root/tools/prepare-darwin-art-host.sh" "$host" packaged
 else
-  codesign --verify --strict "$host"
+  "$root/tools/prepare-darwin-art-host.sh" "$host" development
 fi
 runtime="$root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib"
 core_oj="${DARWIN_ART_CORE_OJ_JAR:-$root/_prebuilt/android-16/bootclasspath/core-oj.jar}"
@@ -271,11 +352,12 @@ framework_bluetooth="$root/_build/android16-ps16k-r07/extracted/bt/javalib/frame
 framework_mediaprovider="$root/_build/android16-ps16k-r07/extracted/mediaprovider/javalib/framework-mediaprovider.jar"
 framework_permission="$root/_build/android16-ps16k-r07/extracted/permission/javalib/framework-permission.jar"
 framework_permission_s="$root/_build/android16-ps16k-r07/extracted/permission/javalib/framework-permission-s.jar"
+okhttp="$root/_build/android16-ps16k-r07/extracted/art/javalib/okhttp.jar"
 # Match Android 16's boot-class-path ordering: framework-location follows the
 # core framework (and framework-graphics, once split out here) before APEX
 # framework modules.  The host ABI accepts the remaining colon-separated
 # components through its boot-tail field.
-boot_tail="$framework_location:$conscrypt:$framework_bluetooth:$framework_mediaprovider:$framework_permission:$framework_permission_s:$core_icu"
+boot_tail="$framework_location:$conscrypt:$framework_bluetooth:$framework_mediaprovider:$framework_permission:$framework_permission_s:$okhttp:$core_icu"
 support_dex="$root/_build/button-dex/dex/classes.dex"
 export DARWIN_ART_RUNTIME_HOST_FILES="$core_oj:$core_libart:$framework:$boot_tail:$support_dex:$app_dex"
 fonts_xml="$root/probes/button/fonts.xml"
@@ -288,7 +370,7 @@ if [[ ! -f "$support_dex" ]]; then
   fi
   cargo run -q -p art-bootstrap -- build-button-dex >/dev/null
 fi
-for input in "$host" "$runtime" "$core_oj" "$core_libart" "$framework" "$framework_location" "$core_icu" "$conscrypt" "$framework_bluetooth" "$framework_mediaprovider" "$framework_permission" "$framework_permission_s" "$support_dex" "$fonts_xml" "$roboto" "$framework_res"; do
+for input in "$host" "$runtime" "$core_oj" "$core_libart" "$framework" "$framework_location" "$core_icu" "$conscrypt" "$framework_bluetooth" "$framework_mediaprovider" "$framework_permission" "$framework_permission_s" "$okhttp" "$support_dex" "$fonts_xml" "$roboto" "$framework_res"; do
   [[ -f "$input" ]] || {
     echo "runtime input is missing: $input" >&2
     echo "run the bootstrap/graphics build gates first" >&2
@@ -337,20 +419,27 @@ export DARWIN_ART_APK_APP_PACKAGE="$package"
 export DARWIN_ART_APK_APP_APPLICATION="$application"
 export DARWIN_ART_APK_APP_ACTIVITY="$activity"
 export DARWIN_ART_APK_APP_LAUNCH_COMPONENT="$launch_component"
+export DARWIN_ART_APK_APP_SCREEN_ORIENTATION="$screen_orientation"
 export DARWIN_ART_APK_APP_DESCRIPTOR="$descriptor"
 export DARWIN_ART_APK_APP_ACTIVITIES="$activities"
 export DARWIN_ART_APK_APP_ACTIVITY_ALIASES="$activity_aliases"
 export DARWIN_ART_APK_APP_SERVICES="$services"
 export DARWIN_ART_APK_APP_SERVICE_METADATA="$service_metadata"
+export DARWIN_ART_APK_APP_PROVIDERS="$providers"
 export DARWIN_ART_APK_APP_METADATA="$application_metadata"
 export DARWIN_ART_APK_APP_VERSION_CODE="$version_code"
 export DARWIN_ART_APK_APP_VERSION_NAME="$version_name"
 export DARWIN_ART_APK_APP_THEME="$theme"
 export DARWIN_ART_APK_APP_TARGET_SDK="$target_sdk"
+export DARWIN_ART_RUNTIME_TARGET_SDK_VERSION="$target_sdk"
+export DARWIN_ART_RUNTIME_JAVA_DEBUGGABLE="$debuggable"
 export DARWIN_ART_APK_APP_APK_SHA256="$apk_sha256"
 export DARWIN_ART_NATIVE_RUNTIME_ABI="$runtime_abi"
 export DARWIN_ART_APK_APP_LABEL="$label"
 export DARWIN_ART_APK_APP_LABEL_RES="$label_res"
+export DARWIN_ART_APK_ACTIVITY_LABEL="$activity_label"
+export DARWIN_ART_APK_ACTIVITY_LABEL_RES="${activity_label_res:-0}"
+export DARWIN_ART_APK_APP_ICON_RES="${application_icon_res:-0}"
 if [[ -n "${DARWIN_ART_APP_DATA_ROOT:-}" ]]; then
   app_data_root="$DARWIN_ART_APP_DATA_ROOT"
 else
@@ -453,6 +542,15 @@ else
 fi
 export DARWIN_ART_APK_APP_SUPPORT_DEX="$support_dex"
 export DARWIN_ART_APK_APP_RESOURCE_APK="$apk"
+split_source_dirs=""
+for split_apk in "${installed_split_apks[@]}"; do
+  if [[ -n "$split_source_dirs" ]]; then
+    split_source_dirs="$split_source_dirs:$split_apk"
+  else
+    split_source_dirs="$split_apk"
+  fi
+done
+export DARWIN_ART_APK_APP_SPLIT_SOURCE_DIRS="$split_source_dirs"
 export DARWIN_ART_FRAMEWORK_RES_APK="$framework_res"
 export DARWIN_ART_TEST_FONTS_XML="/system/etc/fonts.xml"
 export DARWIN_ART_TEST_FONT="/system/fonts/Roboto-Regular.ttf"
@@ -543,8 +641,21 @@ fi
 echo "$metadata"
 echo "$install_output"
 [[ "$native_count" == "0" ]] || echo "$native_resolution"
+# A separately signed development host permits late debugger attachment while
+# retaining the normal profile exec path, ASLR, and initial signal behavior.
+if [[ -n "${DARWIN_ART_DEBUG_HOST:-}" ]]; then
+  [[ -x "$DARWIN_ART_DEBUG_HOST" ]] || { echo "debug host is not executable" >&2; exit 2; }
+  host="$DARWIN_ART_DEBUG_HOST"
+fi
+if [[ -n "${DARWIN_ART_LLDB_COMMAND_FILE:-}" ]]; then
+  [[ -f "$DARWIN_ART_LLDB_COMMAND_FILE" ]] || { echo "debugger command file is missing" >&2; exit 2; }
+  exec lldb --source "$DARWIN_ART_LLDB_COMMAND_FILE" -- "$host" --window-seconds "$seconds" \
+    "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
+fi
 if [[ "${DARWIN_ART_LLDB:-0}" == "1" ]]; then
-  exec lldb --batch -o run -k bt -k 'register read' -- "$host" --window-seconds "$seconds" \
+  exec lldb --batch \
+    -o 'process handle SIGINFO --stop false --notify false --pass false' \
+    -o run -k 'thread backtrace all -c 40' -k 'register read' -- "$host" --window-seconds "$seconds" \
     "$runtime" "$core_oj" "$core_libart" "$framework" "$boot_tail" "$app_dex"
 fi
 if [[ "${DARWIN_ART_LLDB:-0}" == "exit" ]]; then
@@ -608,6 +719,7 @@ if [[ -n "$profile_mount" ]]; then
       DARWIN_ART_APK_APP_APPLICATION=android.app.Application \
       DARWIN_ART_APK_APP_ACTIVITY=dev.darwinart.probe.ProbeActivity \
       DARWIN_ART_APK_APP_LAUNCH_COMPONENT=none \
+      DARWIN_ART_APK_APP_SCREEN_ORIENTATION=-1 \
       DARWIN_ART_APK_APP_DESCRIPTOR=Ldev/darwinart/probe/ProbeActivity\; \
       DARWIN_ART_APK_APP_ACTIVITIES=none \
       DARWIN_ART_APK_APP_ACTIVITY_ALIASES=none \
@@ -620,6 +732,7 @@ if [[ -n "$profile_mount" ]]; then
       DARWIN_ART_APK_APP_TARGET_SDK=36 \
       DARWIN_ART_APK_APP_LABEL=Android \
       DARWIN_ART_APK_APP_LABEL_RES=0 \
+      DARWIN_ART_APK_APP_ICON_RES=0 \
       DARWIN_ART_APK_APP_RESOURCE_APK="$framework_res" \
       DARWIN_ART_ANDROID_PRIVATE_DATA_ROOT="$system_server_private" \
       DARWIN_ART_APK_APP_DATA_DIR="${system_server_private%/private-data}" \

@@ -1,4 +1,44 @@
 use super::*;
+use std::fmt::Write as _;
+
+const LARGE_FIELD_PADDING_COUNT: usize = 4096;
+
+/// Generate the large-object field fixture into the ignored build tree. ART
+/// lays out the generated padding fields before the named targets, giving the
+/// ARM64 field-get path a real offset well beyond its immediate-offset range.
+fn generate_large_field_fixture(root: &Path, build_dir: &Path) -> Result<PathBuf> {
+    let template_path = root.join("probes/Hello.java");
+    let template = fs::read_to_string(&template_path)?;
+    let marker = "    // DARWIN_ART_LARGE_FIELD_FIXTURE\n";
+    if !template.contains(marker) {
+        return Err(format!("Hello.java is missing {marker:?}").into());
+    }
+
+    let mut generated_fields = String::with_capacity(LARGE_FIELD_PADDING_COUNT * 82 * 2);
+    for index in 0..LARGE_FIELD_PADDING_COUNT {
+        writeln!(
+            generated_fields,
+            "    public int darwinLargeIntPadding{index:04};"
+        )?;
+    }
+    for index in 0..LARGE_FIELD_PADDING_COUNT {
+        writeln!(
+            generated_fields,
+            "    public Object darwinLargeReferencePadding{index:04};"
+        )?;
+    }
+    generated_fields.push_str(
+        "    public int jitLargeIntField;\n\
+         public Object jitLargeReferenceField;\n\
+         public volatile int jitLargeVolatileIntField;\n",
+    );
+
+    let generated_dir = build_dir.join("generated");
+    fs::create_dir_all(&generated_dir)?;
+    let generated_path = generated_dir.join("Hello.java");
+    fs::write(&generated_path, template.replace(marker, &generated_fields))?;
+    Ok(generated_path)
+}
 
 pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
     build_foundation(root)?;
@@ -23,10 +63,16 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
     let build_dir = root.join("_build/dex-probe");
     let class_dir = build_dir.join("classes");
     let dex_dir = build_dir.join("dex");
+    let unsafe_boot_dex_dir = build_dir.join("unsafe-boot-dex");
     let object_dir = build_dir.join("objects");
     fs::create_dir_all(&class_dir)?;
     fs::create_dir_all(&dex_dir)?;
+    if unsafe_boot_dex_dir.exists() {
+        fs::remove_dir_all(&unsafe_boot_dex_dir)?;
+    }
+    fs::create_dir_all(&unsafe_boot_dex_dir)?;
     fs::create_dir_all(&object_dir)?;
+    let hello_source = generate_large_field_fixture(root, &build_dir)?;
 
     let android_platform_jar = find_android_platform_jar()?;
     let android_mock_jar = android_platform_jar
@@ -40,16 +86,25 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
         )
         .into());
     }
-    let javac_classpath = env::join_paths([&android_platform_jar, &android_mock_jar])?;
-
+    let javac_bootclasspath = env::join_paths([
+        find_android_core_system_modules()?,
+        android_platform_jar.clone(),
+    ])?;
     run_command(
         Command::new("javac")
-            .args(["--release", "8", "-encoding", "UTF-8", "-d"])
+            // Android's API surface is the boot class path. `--release 8`
+            // incorrectly substitutes the Java SE 8 API and hides Android
+            // methods such as Math.fma() while source/target 8 is still the
+            // required classfile language level for this fixture.
+            .args(["-source", "8", "-target", "8", "-encoding", "UTF-8", "-d"])
             .arg(&class_dir)
+            .arg("-bootclasspath")
+            .arg(&javac_bootclasspath)
             .arg("-classpath")
-            .arg(&javac_classpath)
-            .arg(root.join("probes/Hello.java"))
+            .arg(&android_mock_jar)
+            .arg(&hello_source)
             .arg(root.join("probes/ProbeActivity.java"))
+            .arg(root.join("probes/UpstreamTestHarness.java"))
             .arg(root.join("probes/ProbeContext.java"))
             .arg(root.join("probes/ProbeAudioManager.java"))
             .arg(root.join("probes/ProbeSharedPreferences.java"))
@@ -68,6 +123,42 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(root.join("probes/compile-stubs/android/content/IContentProvider.java"))
             .arg(root.join("probes/compile-stubs/android/content/ContentCaptureOptions.java"))
             .arg(root.join("probes/compile-stubs/android/view/autofill/AutofillManager.java")),
+    )?;
+
+    let invoke_custom_generator_dir = build_dir.join("invoke-custom-generator");
+    fs::create_dir_all(&invoke_custom_generator_dir)?;
+    run_command(
+        Command::new("javac")
+            .args([
+                "--add-exports",
+                "java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED",
+                "-d",
+            ])
+            .arg(&invoke_custom_generator_dir)
+            .arg(root.join("probes/GenerateJitInvokeCustom.java"))
+            .arg(root.join("probes/GenerateJitUnsafe.java")),
+    )?;
+    run_command(
+        Command::new("java")
+            .args([
+                "--add-exports",
+                "java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED",
+                "-cp",
+            ])
+            .arg(&invoke_custom_generator_dir)
+            .arg("GenerateJitInvokeCustom")
+            .arg(&class_dir),
+    )?;
+    run_command(
+        Command::new("java")
+            .args([
+                "--add-exports",
+                "java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED",
+                "-cp",
+            ])
+            .arg(&invoke_custom_generator_dir)
+            .arg("GenerateJitUnsafe")
+            .arg(&class_dir),
     )?;
 
     run_command(
@@ -146,8 +237,32 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
     let canvas_class = class_dir.join("dev/darwinart/probe/ProbeCanvas.class");
     let view_class = class_dir.join("dev/darwinart/probe/ProbeView.class");
     let content_root_class = class_dir.join("dev/darwinart/probe/ProbeContentRoot.class");
+    let upstream_test_harness_class =
+        class_dir.join("dev/darwinart/probe/UpstreamTestHarness.class");
+    let upstream_test_shutdown_hook_class =
+        class_dir.join("dev/darwinart/probe/UpstreamTestHarness$OutputShutdownHook.class");
+    let upstream_test_main_thread_class =
+        class_dir.join("dev/darwinart/probe/UpstreamTestHarness$TestMainThread.class");
+    let upstream_test_native_output_class =
+        class_dir.join("dev/darwinart/probe/UpstreamTestHarness$NativeOutputStream.class");
     run_command(
         Command::new(find_d8()?)
+            .args(["--min-api", "26", "--no-desugaring"])
+            .arg("--lib")
+            .arg(&android_platform_jar)
+            .arg("--output")
+            .arg(&unsafe_boot_dex_dir)
+            .arg(class_dir.join("dev/darwinart/probe/JitUnsafe.class"))
+            .arg(class_dir.join("java/lang/JitStringHidden.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitMathDirect.class"))
+            .arg(class_dir.join("libcore/io/JitMemoryDirect.class"))
+            .arg(class_dir.join("java/lang/ref/JitReferenceDirect.class"))
+            .arg(class_dir.join("java/lang/JitBoxingDirect.class")),
+    )?;
+
+    run_command(
+        Command::new(find_d8()?)
+            .args(["--min-api", "26"])
             .arg("--lib")
             .arg(&android_platform_jar)
             .arg("--classpath")
@@ -157,6 +272,24 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .arg("--output")
             .arg(&dex_dir)
             .arg(&hello_class)
+            .arg(class_dir.join("dev/darwinart/probe/JitInvokeCustom.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitConstructorParent.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitFinalReference.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitVirtualBase.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitCallable.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitVirtualChild.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitColdInitialization.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitColdStatic.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitFailedStaticRead.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitFailedStaticWrite.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitColdMoving.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitColdLong.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitColdDouble.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitColdReference.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitRecursiveInitialization.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitConcurrentInitialization.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitConcurrentFailedInitialization.class"))
+            .arg(class_dir.join("dev/darwinart/probe/JitFailedInitialization.class"))
             .arg(&activity_class)
             .arg(&context_class)
             .arg(&base_context_class)
@@ -184,7 +317,11 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(&xml_parser_class)
             .arg(&canvas_class)
             .arg(&view_class)
-            .arg(&content_root_class),
+            .arg(&content_root_class)
+            .arg(&upstream_test_harness_class)
+            .arg(&upstream_test_shutdown_hook_class)
+            .arg(&upstream_test_main_thread_class)
+            .arg(&upstream_test_native_output_class),
     )?;
 
     let includes = [
@@ -288,13 +425,14 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
                     class[32]=Ldev/darwinart/probe/ProbeXmlResourceParser;";
     verify_dex_contract(
         &output,
-        36,
-        971,
+        56,
+        2661,
         &[
             "Ldev/darwinart/probe/ProbeContext;",
             "Ldev/darwinart/probe/ProbeContext$BaseContext;",
             "Ldev/darwinart/probe/ProbeContext$BoundServiceRecord;",
             "Ldev/darwinart/probe/ProbeContext$RemoteServiceBinder;",
+            "Ldev/darwinart/probe/JitInvokeCustom;",
             "Ldev/darwinart/probe/ProbePackageManager;",
             "Ldev/darwinart/probe/ProbeResources;",
         ],

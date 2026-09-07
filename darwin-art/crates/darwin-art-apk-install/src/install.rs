@@ -9,6 +9,22 @@ use std::process::Command;
 const MAX_APK_SIZE: usize = 512 * 1024 * 1024;
 const INSTALL_VERSION: &str = "darwin-art-apk-install-v1";
 
+fn le16(input: &[u8], offset: usize, label: &str) -> Result<u16, String> {
+    let bytes = input
+        .get(offset..offset + 2)
+        .ok_or_else(|| format!("{label} is outside APK"))?;
+    Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
+}
+
+fn le32(input: &[u8], offset: usize, label: &str) -> Result<u32, String> {
+    let bytes = input
+        .get(offset..offset + 4)
+        .ok_or_else(|| format!("{label} is outside APK"))?;
+    Ok(u32::from_le_bytes(
+        bytes.try_into().expect("four-byte slice"),
+    ))
+}
+
 pub struct InstallRequest {
     pub apk: PathBuf,
     pub install_root: PathBuf,
@@ -17,6 +33,7 @@ pub struct InstallRequest {
     pub native_root: Option<String>,
     pub extractor: Option<PathBuf>,
     pub runtime_abi: String,
+    pub splits: Vec<PathBuf>,
 }
 
 pub struct InstalledApk {
@@ -29,7 +46,12 @@ pub struct InstalledApk {
 pub fn install(request: &InstallRequest) -> Result<InstalledApk, String> {
     validate_request(request)?;
     let apk = read_apk(&request.apk)?;
-    let apk_sha256 = format!("{:x}", Sha256::digest(&apk));
+    let split_bytes = request
+        .splits
+        .iter()
+        .map(|path| read_apk(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let apk_sha256 = identity_sha256(&apk, &split_bytes);
     let version_parent = request
         .install_root
         .join(&request.package)
@@ -46,6 +68,12 @@ pub fn install(request: &InstallRequest) -> Result<InstalledApk, String> {
     let mut stage = StageGuard::new(&version_parent)?;
     let base_apk = stage.path().join("base.apk");
     write_sealed_file(&base_apk, &apk)?;
+    let mut installed_splits = Vec::with_capacity(split_bytes.len());
+    for (index, bytes) in split_bytes.iter().enumerate() {
+        let destination = stage.path().join(format!("split-{index}.apk"));
+        write_sealed_file(&destination, bytes)?;
+        installed_splits.push(destination);
+    }
 
     if let Some(root) = &request.native_root {
         let extractor = request
@@ -56,17 +84,51 @@ pub fn install(request: &InstallRequest) -> Result<InstalledApk, String> {
         fs::create_dir(&native_parent)
             .map_err(|error| format!("could not create native parent: {error}"))?;
         let native_directory = native_parent.join("arm64-v8a");
-        let output = Command::new(extractor)
-            .arg(&base_apk)
-            .arg(&native_directory)
-            .arg(root)
-            .output()
-            .map_err(|error| format!("could not run native extractor: {error}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "native extraction failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
+        let mut native_sources = Vec::new();
+        let mut native_archive_count = 0_usize;
+        if archive_has_native_libraries(&apk)? {
+            native_archive_count += 1;
+        }
+        if archive_contains_native_root(&apk, root)? {
+            native_sources.push((base_apk.clone(), 0_usize));
+        }
+        for (index, (bytes, source)) in split_bytes.iter().zip(installed_splits.iter()).enumerate()
+        {
+            if archive_has_native_libraries(bytes)? {
+                native_archive_count += 1;
+            }
+            if archive_contains_native_root(bytes, root)? {
+                native_sources.push((source.clone(), index + 1));
+            }
+        }
+        if native_archive_count != 1 {
+            return Err(
+                "native libraries must be contained in exactly one base/ABI split".to_owned(),
+            );
+        }
+        if native_sources.is_empty() {
+            return Err("selected native root is absent from all APKs".to_owned());
+        }
+        for (source, index) in native_sources {
+            let extraction_directory = native_parent.join(format!(".native-{index}"));
+            let output = Command::new(extractor)
+                .arg(&source)
+                .arg(&extraction_directory)
+                .arg(root)
+                .output()
+                .map_err(|error| format!("could not run native extractor: {error}"))?;
+            if output.status.success() {
+                // The archive-count check above guarantees one native
+                // source. Preserve the extractor's sealed directory and
+                // publish it atomically; reopening it would weaken the
+                // read-only boundary and makes rename-based cleanup fail.
+                fs::rename(&extraction_directory, &native_directory).map_err(|error| {
+                    format!("could not publish extracted native directory: {error}")
+                })?;
+                continue;
+            }
+            let detail = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("native extraction failed: {}", detail.trim()));
         }
         fs::set_permissions(&native_parent, fs::Permissions::from_mode(0o500))
             .map_err(|error| format!("could not seal native parent: {error}"))?;
@@ -97,6 +159,101 @@ pub fn install(request: &InstallRequest) -> Result<InstalledApk, String> {
     installed(request, apk_sha256, destination, false)
 }
 
+fn archive_contains_native_root(bytes: &[u8], root: &str) -> Result<bool, String> {
+    let floor = bytes.len().saturating_sub(22 + usize::from(u16::MAX));
+    let mut eocd = None;
+    for offset in (floor..bytes.len().saturating_sub(21)).rev() {
+        if bytes.get(offset..offset + 4) == Some(&0x0605_4b50_u32.to_le_bytes()) {
+            let comment = usize::from(le16(bytes, offset + 20, "APK EOCD comment")?);
+            if offset
+                .checked_add(22 + comment)
+                .is_some_and(|end| end == bytes.len())
+            {
+                eocd = Some(offset);
+                break;
+            }
+        }
+    }
+    let eocd = eocd.ok_or_else(|| "APK has no valid ZIP EOCD".to_owned())?;
+    let count = usize::from(le16(bytes, eocd + 10, "APK EOCD entry count")?);
+    let central = usize::try_from(le32(bytes, eocd + 16, "APK central offset")?)
+        .map_err(|_| "APK central offset is too large".to_owned())?;
+    let wanted = format!("lib/arm64-v8a/{root}").into_bytes();
+    let mut cursor = central;
+    for _ in 0..count {
+        if le32(bytes, cursor, "APK central signature")? != 0x0201_4b50 {
+            return Err("APK central directory signature mismatch".to_owned());
+        }
+        let name_length = usize::from(le16(bytes, cursor + 28, "APK central name length")?);
+        let extra_length = usize::from(le16(bytes, cursor + 30, "APK central extra length")?);
+        let comment_length = usize::from(le16(bytes, cursor + 32, "APK central comment length")?);
+        let name_start = cursor
+            .checked_add(46)
+            .ok_or_else(|| "APK central name offset overflow".to_owned())?;
+        let name_end = name_start
+            .checked_add(name_length)
+            .ok_or_else(|| "APK central name length overflow".to_owned())?;
+        if bytes.get(name_start..name_end) == Some(wanted.as_slice()) {
+            return Ok(true);
+        }
+        cursor = name_end
+            .checked_add(extra_length)
+            .and_then(|value| value.checked_add(comment_length))
+            .ok_or_else(|| "APK central record length overflow".to_owned())?;
+    }
+    Ok(false)
+}
+
+fn archive_has_native_libraries(bytes: &[u8]) -> Result<bool, String> {
+    let floor = bytes.len().saturating_sub(22 + usize::from(u16::MAX));
+    let mut eocd = None;
+    for offset in (floor..bytes.len().saturating_sub(21)).rev() {
+        if bytes.get(offset..offset + 4) == Some(&0x0605_4b50_u32.to_le_bytes()) {
+            let comment = usize::from(le16(bytes, offset + 20, "APK EOCD comment")?);
+            if offset
+                .checked_add(22 + comment)
+                .is_some_and(|end| end == bytes.len())
+            {
+                eocd = Some(offset);
+                break;
+            }
+        }
+    }
+    let eocd = eocd.ok_or_else(|| "APK has no valid ZIP EOCD".to_owned())?;
+    let count = usize::from(le16(bytes, eocd + 10, "APK EOCD entry count")?);
+    let central = usize::try_from(le32(bytes, eocd + 16, "APK central offset")?)
+        .map_err(|_| "APK central offset is too large".to_owned())?;
+    let mut cursor = central;
+    for _ in 0..count {
+        if le32(bytes, cursor, "APK central signature")? != 0x0201_4b50 {
+            return Err("APK central directory signature mismatch".to_owned());
+        }
+        let name_length = usize::from(le16(bytes, cursor + 28, "APK central name length")?);
+        let extra_length = usize::from(le16(bytes, cursor + 30, "APK central extra length")?);
+        let comment_length = usize::from(le16(bytes, cursor + 32, "APK central comment length")?);
+        let name_start = cursor
+            .checked_add(46)
+            .ok_or_else(|| "APK central name offset overflow".to_owned())?;
+        let name_end = name_start
+            .checked_add(name_length)
+            .ok_or_else(|| "APK central name length overflow".to_owned())?;
+        let name = bytes
+            .get(name_start..name_end)
+            .ok_or_else(|| "APK central name exceeds APK".to_owned())?;
+        if name.starts_with(b"lib/arm64-v8a/")
+            && name.ends_with(b".so")
+            && !name[14..].contains(&b'/')
+        {
+            return Ok(true);
+        }
+        cursor = name_end
+            .checked_add(extra_length)
+            .and_then(|value| value.checked_add(comment_length))
+            .ok_or_else(|| "APK central record length overflow".to_owned())?;
+    }
+    Ok(false)
+}
+
 fn validate_request(request: &InstallRequest) -> Result<(), String> {
     if !component(&request.package, true)
         || !component(&request.version_code, false)
@@ -112,6 +269,11 @@ fn validate_request(request: &InstallRequest) -> Result<(), String> {
                 .any(|byte| !byte.is_ascii_graphic() || matches!(byte, b'/' | b'\\' | b'\0')))
     {
         return Err("native root is not a direct Android SONAME".to_owned());
+    }
+    for split in &request.splits {
+        if split.as_os_str().is_empty() {
+            return Err("split APK path is empty".to_owned());
+        }
     }
     Ok(())
 }
@@ -147,6 +309,20 @@ fn read_apk(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+fn identity_sha256(base: &[u8], splits: &[Vec<u8>]) -> String {
+    if splits.is_empty() {
+        return format!("{:x}", Sha256::digest(base));
+    }
+    let mut digest = Sha256::new();
+    digest.update((base.len() as u64).to_le_bytes());
+    digest.update(base);
+    for split in splits {
+        digest.update((split.len() as u64).to_le_bytes());
+        digest.update(split);
+    }
+    format!("{:x}", digest.finalize())
+}
+
 fn write_sealed_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut file = OpenOptions::new()
         .write(true)
@@ -162,12 +338,22 @@ fn write_sealed_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn contract(request: &InstallRequest, apk_sha256: &str) -> String {
+    if request.splits.is_empty() {
+        return format!(
+            "{INSTALL_VERSION}\npackage={}\nversion-code={}\napk-sha256={apk_sha256}\nnative-root={}\nruntime-abi={}\n",
+            request.package,
+            request.version_code,
+            request.native_root.as_deref().unwrap_or("none"),
+            request.runtime_abi,
+        );
+    }
     format!(
-        "{INSTALL_VERSION}\npackage={}\nversion-code={}\napk-sha256={apk_sha256}\nnative-root={}\nruntime-abi={}\n",
+        "{INSTALL_VERSION}\npackage={}\nversion-code={}\napk-sha256={apk_sha256}\nsplit-count={}\nnative-root={}\nruntime-abi={}\n",
         request.package,
         request.version_code,
+        request.splits.len(),
         request.native_root.as_deref().unwrap_or("none"),
-        request.runtime_abi
+        request.runtime_abi,
     )
 }
 
@@ -182,7 +368,10 @@ fn validate_existing(
         return Err("existing installation contract does not match request".to_owned());
     }
     let existing_apk = read_apk(&destination.join("base.apk"))?;
-    if format!("{:x}", Sha256::digest(&existing_apk)) != apk_sha256 {
+    let existing_splits = (0..request.splits.len())
+        .map(|index| read_apk(&destination.join(format!("split-{index}.apk"))))
+        .collect::<Result<Vec<_>, _>>()?;
+    if identity_sha256(&existing_apk, &existing_splits) != apk_sha256 {
         return Err("existing installed APK hash is corrupt".to_owned());
     }
     installed(
@@ -204,7 +393,13 @@ fn installed(
         .native_root
         .as_ref()
         .map(|root| destination.join("android-elf").join("arm64-v8a").join(root));
-    if !base_apk.is_file() || native_root.as_ref().is_some_and(|path| !path.is_file()) {
+    let split_apks = (0..request.splits.len())
+        .map(|index| destination.join(format!("split-{index}.apk")))
+        .collect::<Vec<_>>();
+    if !base_apk.is_file()
+        || split_apks.iter().any(|path| !path.is_file())
+        || native_root.as_ref().is_some_and(|path| !path.is_file())
+    {
         return Err("published installation is incomplete".to_owned());
     }
     Ok(InstalledApk {

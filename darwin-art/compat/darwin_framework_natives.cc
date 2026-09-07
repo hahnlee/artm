@@ -6,6 +6,7 @@
 #include "darwin_framework_system_natives.h"
 #include "darwin_motion_event_natives.h"
 #include "darwin_media_codec.h"
+#include "darwin_media_extractor.h"
 #include "darwin_security_trust.h"
 
 #include <cstdint>
@@ -15,17 +16,37 @@
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
+#include <cstdio>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <atomic>
+#include <deque>
+#include <mutex>
 #include <new>
 #include <unordered_map>
 #include <vector>
 
 #include <android/surface_control.h>
+#include "../_aosp/system/libziparchive/include/ziparchive/zip_archive.h"
+
+#include <fcntl.h>
+#include <unistd.h>
+
+extern "C" intptr_t darwin_art_bionic_pread(int, void*, size_t, int64_t);
 
 namespace {
+
+jbyteArray IncrementalFileSignature(JNIEnv*, jclass, jstring) {
+  // Installed APKs live on ordinary macOS filesystems, not Linux IncFS.
+  // Absence of an IncFS v4 signature is normal: the AOSP verifier then checks
+  // an optional .idsig and proceeds to the APK's authenticated v3/v2 blocks.
+  return nullptr;
+}
+jboolean IncrementalEnabled(JNIEnv*, jclass) { return JNI_FALSE; }
+jboolean IncrementalFileDescriptor(JNIEnv*, jclass, jint) { return JNI_FALSE; }
+jboolean IncrementalPath(JNIEnv*, jclass, jstring) { return JNI_FALSE; }
 
 void NativeAllocationRegistryApplyFreeFunction(JNIEnv*, jclass,
                                                 jlong free_function,
@@ -108,6 +129,87 @@ void SurfaceControlNativeTransactionNoop1(JNIEnv*, jclass, jlong) {}
 void SurfaceControlNativeTransactionNoop2(JNIEnv*, jclass, jlong, jlong) {}
 void SurfaceControlNativeTransactionNoop3(JNIEnv*, jclass, jlong, jlong,
                                           jlong) {}
+
+void SurfaceControlNativeSetTransparentRegionHint(JNIEnv* env, jclass,
+                                                  jlong transaction,
+                                                  jlong control,
+                                                  jobject region) {
+  if (env == nullptr) return;
+  // RegionIterator exposes the exact SkRegion rectangles used by ViewRoot's
+  // transparent-region hint. Keep the producer ABI bounded to eight rects;
+  // an empty/null Region explicitly clears the prior hint.
+  std::array<int32_t, 32> flattened{};
+  size_t count = 0;
+  if (region != nullptr) {
+    jclass iterator_class =
+        env->FindClass("android/graphics/RegionIterator");
+    jclass rect_class = env->FindClass("android/graphics/Rect");
+    jmethodID iterator_constructor =
+        iterator_class == nullptr
+            ? nullptr
+            : env->GetMethodID(iterator_class, "<init>",
+                               "(Landroid/graphics/Region;)V");
+    jmethodID next =
+        iterator_class == nullptr
+            ? nullptr
+            : env->GetMethodID(iterator_class, "next",
+                               "(Landroid/graphics/Rect;)Z");
+    jmethodID rect_constructor =
+        rect_class == nullptr
+            ? nullptr
+            : env->GetMethodID(rect_class, "<init>", "()V");
+    jfieldID left = rect_class == nullptr
+                        ? nullptr
+                        : env->GetFieldID(rect_class, "left", "I");
+    jfieldID top = rect_class == nullptr
+                       ? nullptr
+                       : env->GetFieldID(rect_class, "top", "I");
+    jfieldID right = rect_class == nullptr
+                         ? nullptr
+                         : env->GetFieldID(rect_class, "right", "I");
+    jfieldID bottom = rect_class == nullptr
+                          ? nullptr
+                          : env->GetFieldID(rect_class, "bottom", "I");
+    jobject iterator =
+        iterator_constructor == nullptr
+            ? nullptr
+            : env->NewObject(iterator_class, iterator_constructor, region);
+    jobject rect = rect_constructor == nullptr
+                       ? nullptr
+                       : env->NewObject(rect_class, rect_constructor);
+    const bool valid = iterator != nullptr && rect != nullptr && next != nullptr &&
+                       left != nullptr && top != nullptr && right != nullptr &&
+                       bottom != nullptr && !env->ExceptionCheck();
+    if (valid) {
+      while (count < 8 && env->CallBooleanMethod(iterator, next, rect) == JNI_TRUE) {
+        const int32_t rect_left = env->GetIntField(rect, left);
+        const int32_t rect_top = env->GetIntField(rect, top);
+        const int32_t rect_right = env->GetIntField(rect, right);
+        const int32_t rect_bottom = env->GetIntField(rect, bottom);
+        if (rect_right > rect_left && rect_bottom > rect_top) {
+          flattened[count * 4 + 0] = rect_left;
+          flattened[count * 4 + 1] = rect_top;
+          flattened[count * 4 + 2] = rect_right;
+          flattened[count * 4 + 3] = rect_bottom;
+          ++count;
+        }
+      }
+    }
+    const bool failed = env->ExceptionCheck();
+    if (iterator != nullptr) env->DeleteLocalRef(iterator);
+    if (rect != nullptr) env->DeleteLocalRef(rect);
+    if (iterator_class != nullptr) env->DeleteLocalRef(iterator_class);
+    if (rect_class != nullptr) env->DeleteLocalRef(rect_class);
+    if (failed) {
+      env->ExceptionClear();
+      return;
+    }
+  }
+  darwin_art_android_surface_transaction_set_transparent_region_hint(
+      reinterpret_cast<void*>(transaction), reinterpret_cast<void*>(control),
+      flattened.data(), count);
+}
+
 ASurfaceTransaction* SurfaceTransaction(jlong handle) {
   return reinterpret_cast<ASurfaceTransaction*>(handle);
 }
@@ -228,6 +330,37 @@ void SurfaceControlNativeSetDesiredHdrHeadroom(JNIEnv*, jclass,
 }
 
 struct DarwinBlastBufferQueue {
+  struct State {
+    struct PendingTransaction {
+      ASurfaceTransaction* transaction = nullptr;
+      uint64_t frame = 0;
+    };
+
+    JavaVM* vm = nullptr;
+    std::mutex mutex;
+    void* native_window = nullptr;
+    jobject sync_consumer = nullptr;
+    bool continuous_sync = false;
+    bool destroyed = false;
+    // The continuous-sync accumulator is deliberately separate from the
+    // frame-indexed merge list.  A mergeWithNextTransaction call is valid
+    // even when no sync consumer is currently registered.
+    ASurfaceTransaction* continuous_transaction = nullptr;
+    uint64_t continuous_frame = 0;
+    std::deque<PendingTransaction> future_transactions;
+    // Once a transaction has been handed to the Java sync consumer, the
+    // producer must not apply a later transaction ahead of its commit.  The
+    // queue callback therefore takes ownership into this bounded FIFO until
+    // the consumer transaction's commit/discard callback releases the gate.
+    bool outstanding_sync = false;
+    enum class SyncPhase : uint8_t { kIdle, kReserved, kGated, kDraining };
+    SyncPhase sync_phase = SyncPhase::kIdle;
+    uint64_t sync_generation = 0;
+    std::deque<ASurfaceTransaction*> held_transactions;
+    uint64_t last_acquired_frame = 0;
+  };
+
+  std::shared_ptr<State> state;
   void* native_window = nullptr;
   ASurfaceControl* surface_control = nullptr;
   jint width = 0;
@@ -235,15 +368,535 @@ struct DarwinBlastBufferQueue {
   jint format = 1;
 };
 
-jlong BlastBufferQueueNativeCreate(JNIEnv*, jclass, jstring, jboolean) {
-  return reinterpret_cast<jlong>(new (std::nothrow) DarwinBlastBufferQueue());
+struct BlastTransactionObserverContext {
+  std::shared_ptr<DarwinBlastBufferQueue::State> state;
+};
+
+struct BlastTransactionGateContext {
+  std::shared_ptr<DarwinBlastBufferQueue::State> state;
+  uint64_t generation = 0;
+};
+
+constexpr size_t kMaxHeldBlastTransactions = 8;
+std::atomic<uint32_t> g_blast_debug_events{0};
+
+void BlastDebugTrace(const char* event, const void* state, const void* window,
+                     const void* transaction, uint64_t value) {
+  if (std::getenv("DARWIN_ART_DEBUG_BLAST") == nullptr &&
+      std::getenv("DEBUG_BLAST") == nullptr) {
+    return;
+  }
+  const uint32_t sequence =
+      g_blast_debug_events.fetch_add(1, std::memory_order_relaxed);
+  if (sequence >= 128) return;
+  std::fprintf(stderr,
+               "ART BLAST[%u] %s state=%p window=%p tx=%p value=%llu\n",
+               sequence, event == nullptr ? "?" : event, state, window,
+               transaction, static_cast<unsigned long long>(value));
+}
+
+void ReleaseBlastTransactionObserverContext(void* opaque) {
+  delete static_cast<BlastTransactionObserverContext*>(opaque);
+}
+
+JNIEnv* AttachBlastThread(JavaVM* vm, bool* attached) {
+  if (attached != nullptr) *attached = false;
+  if (vm == nullptr) return nullptr;
+  JNIEnv* env = nullptr;
+  if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_OK) {
+    return env;
+  }
+  if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return nullptr;
+  if (attached != nullptr) *attached = true;
+  return env;
+}
+
+void DeleteBlastConsumer(JNIEnv* env, jobject consumer) {
+  if (env != nullptr && consumer != nullptr) env->DeleteGlobalRef(consumer);
+}
+
+void ApplyAndDeleteBlastTransaction(ASurfaceTransaction* transaction) {
+  if (transaction == nullptr) return;
+  ASurfaceTransaction_apply(transaction);
+  ASurfaceTransaction_delete(transaction);
+}
+
+jobject NewBlastJavaTransaction(JNIEnv* env,
+                                ASurfaceTransaction* transaction) {
+  if (env == nullptr || transaction == nullptr || env->ExceptionCheck()) {
+    return nullptr;
+  }
+  jclass transaction_class =
+      env->FindClass("android/view/SurfaceControl$Transaction");
+  jmethodID constructor =
+      transaction_class == nullptr
+          ? nullptr
+          : env->GetMethodID(transaction_class, "<init>", "(J)V");
+  jobject result =
+      constructor == nullptr
+          ? nullptr
+          : env->NewObject(transaction_class, constructor,
+                           reinterpret_cast<jlong>(transaction));
+  if (transaction_class != nullptr) env->DeleteLocalRef(transaction_class);
+  return result;
+}
+
+void DiscardHeldBlastTransactions(
+    const std::shared_ptr<DarwinBlastBufferQueue::State>& state,
+    bool apply) {
+  if (state == nullptr) return;
+  std::deque<ASurfaceTransaction*> held;
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    held.swap(state->held_transactions);
+  }
+  for (ASurfaceTransaction* transaction : held) {
+    if (apply) {
+      ApplyAndDeleteBlastTransaction(transaction);
+    } else if (transaction != nullptr) {
+      // Deletion invokes the platform discard callbacks, returning any
+      // producer-held buffer without presenting a stale transaction.
+      ASurfaceTransaction_delete(transaction);
+    }
+  }
+}
+
+void ReleaseReservedBlastGate(
+    const std::shared_ptr<DarwinBlastBufferQueue::State>& state,
+    uint64_t generation, bool apply) {
+  if (state == nullptr) return;
+  std::deque<ASurfaceTransaction*> held;
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    if (state->sync_generation != generation ||
+        state->sync_phase == DarwinBlastBufferQueue::State::SyncPhase::kIdle) {
+      return;
+    }
+    state->outstanding_sync = false;
+    state->sync_phase = DarwinBlastBufferQueue::State::SyncPhase::kIdle;
+    held.swap(state->held_transactions);
+  }
+  for (ASurfaceTransaction* transaction : held) {
+    if (apply) {
+      ApplyAndDeleteBlastTransaction(transaction);
+    } else if (transaction != nullptr) {
+      ASurfaceTransaction_delete(transaction);
+    }
+  }
+}
+
+void BlastTransactionGateFinished(void* opaque, bool apply) {
+  auto* gate = static_cast<BlastTransactionGateContext*>(opaque);
+  if (gate == nullptr) return;
+  auto state = std::move(gate->state);
+  const uint64_t generation = gate->generation;
+  delete gate;
+  if (state == nullptr) return;
+  // Keep the generation gated while taking and applying each FIFO batch.
+  // Queue callbacks may arrive during ApplyAndDelete and are admitted to the
+  // same FIFO; only the locked empty check transitions back to idle.
+  for (;;) {
+    std::deque<ASurfaceTransaction*> batch;
+    bool should_apply = apply;
+    {
+      std::lock_guard<std::mutex> lock(state->mutex);
+      if (state->sync_generation != generation ||
+          !state->outstanding_sync ||
+          state->sync_phase ==
+              DarwinBlastBufferQueue::State::SyncPhase::kIdle) {
+        return;
+      }
+      if (state->destroyed) should_apply = false;
+      if (state->held_transactions.empty()) {
+        state->outstanding_sync = false;
+        state->sync_phase =
+            DarwinBlastBufferQueue::State::SyncPhase::kIdle;
+        return;
+      }
+      state->sync_phase =
+          DarwinBlastBufferQueue::State::SyncPhase::kDraining;
+      batch.swap(state->held_transactions);
+    }
+    for (ASurfaceTransaction* transaction : batch) {
+      if (should_apply) {
+        ApplyAndDeleteBlastTransaction(transaction);
+      } else if (transaction != nullptr) {
+        ASurfaceTransaction_delete(transaction);
+      }
+    }
+  }
+}
+
+void BlastTransactionGateOnCommit(void* opaque,
+                                  ASurfaceTransactionStats*) {
+  auto* gate = static_cast<BlastTransactionGateContext*>(opaque);
+  BlastDebugTrace("gate-commit", gate == nullptr ? nullptr : gate->state.get(),
+                  nullptr, nullptr,
+                  gate == nullptr ? 0 : gate->generation);
+  BlastTransactionGateFinished(opaque, true);
+}
+
+void BlastTransactionGateOnDiscard(void* opaque) {
+  auto* gate = static_cast<BlastTransactionGateContext*>(opaque);
+  BlastDebugTrace("gate-discard", gate == nullptr ? nullptr : gate->state.get(),
+                  nullptr, nullptr,
+                  gate == nullptr ? 0 : gate->generation);
+  BlastTransactionGateFinished(opaque, false);
+}
+
+bool ArmBlastTransactionGate(
+    const std::shared_ptr<DarwinBlastBufferQueue::State>& state,
+    ASurfaceTransaction* transaction, uint64_t generation) {
+  if (state == nullptr || transaction == nullptr) return false;
+  auto* gate = new (std::nothrow)
+      BlastTransactionGateContext{state, generation};
+  if (gate == nullptr) return false;
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    if (state->destroyed || !state->outstanding_sync ||
+        state->sync_generation != generation ||
+        state->sync_phase !=
+            DarwinBlastBufferQueue::State::SyncPhase::kReserved) {
+      delete gate;
+      return false;
+    }
+    state->sync_phase = DarwinBlastBufferQueue::State::SyncPhase::kGated;
+  }
+  // The same context is installed on mutually-exclusive paths: the platform
+  // clears discard callbacks before invoking commit, so exactly one callback
+  // owns and destroys the gate context.
+  ASurfaceTransaction_setOnCommit(transaction, gate,
+                                  &BlastTransactionGateOnCommit);
+  darwin_art_android_surface_transaction_set_on_discard(
+      transaction, gate, &BlastTransactionGateOnDiscard);
+  BlastDebugTrace("gate-arm", state.get(), nullptr, transaction, generation);
+  return true;
+}
+
+std::vector<ASurfaceTransaction*> TakeDueBlastTransactions(
+    const std::shared_ptr<DarwinBlastBufferQueue::State>& state,
+    uint64_t frame, bool all) {
+  std::vector<ASurfaceTransaction*> result;
+  if (state == nullptr) return result;
+  std::lock_guard<std::mutex> lock(state->mutex);
+  for (auto it = state->future_transactions.begin();
+       it != state->future_transactions.end();) {
+    if (all || it->frame == 0 || (frame != 0 && it->frame <= frame)) {
+      result.push_back(it->transaction);
+      it = state->future_transactions.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  return result;
+}
+
+void MergeBlastTransactions(ASurfaceTransaction* destination,
+                            const std::vector<ASurfaceTransaction*>& sources) {
+  if (destination == nullptr) {
+    for (ASurfaceTransaction* source : sources) {
+      if (source != nullptr) ASurfaceTransaction_delete(source);
+    }
+    return;
+  }
+  for (ASurfaceTransaction* source : sources) {
+    if (source == nullptr) continue;
+    darwin_art_android_surface_transaction_merge(destination, source);
+    ASurfaceTransaction_delete(source);
+  }
+}
+
+bool DeliverBlastTransaction(
+    const std::shared_ptr<DarwinBlastBufferQueue::State>& state,
+    jobject consumer, ASurfaceTransaction* transaction,
+    uint64_t generation) {
+  if (transaction == nullptr) return false;
+  if (state == nullptr) {
+    // There is no callback owner left to consume this transaction. Returning
+    // false leaves it to the native-window caller, which still owns it.
+    return false;
+  }
+  if (consumer == nullptr) {
+    ApplyAndDeleteBlastTransaction(transaction);
+    return true;
+  }
+  bool attached = false;
+  JNIEnv* env = AttachBlastThread(state->vm, &attached);
+  if (env == nullptr) {
+    // The sync reservation was made before JNI attach. Consume this callback's
+    // transaction locally, then release any FIFO entries in order.
+    DeleteBlastConsumer(nullptr, consumer);
+    ApplyAndDeleteBlastTransaction(transaction);
+    ReleaseReservedBlastGate(state, generation, true);
+    return true;
+  }
+  BlastDebugTrace("consumer-invoke", state.get(), nullptr, transaction,
+                  generation);
+  jobject java_transaction = NewBlastJavaTransaction(env, transaction);
+  jclass consumer_class =
+      consumer == nullptr ? nullptr : env->GetObjectClass(consumer);
+  jmethodID accept =
+      consumer_class == nullptr
+          ? nullptr
+          : env->GetMethodID(consumer_class, "accept", "(Ljava/lang/Object;)V");
+  const bool callable = java_transaction != nullptr && accept != nullptr &&
+                        !env->ExceptionCheck();
+  bool handed_to_java = false;
+  if (callable) {
+    // Arm before invoking Consumer.accept: accept may synchronously call
+    // Transaction.apply(), and queue callbacks may arrive as soon as that
+    // re-entrant call returns.
+    if (ArmBlastTransactionGate(state, transaction, generation)) {
+      handed_to_java = true;
+      env->CallVoidMethod(consumer, accept, java_transaction);
+    } else {
+      // The Java wrapper owns the pointer, but no consumer saw it. Apply it
+      // while the wrapper is still local and release the reservation; never
+      // hand an ungated transaction to Java where later frames could pass it.
+      ASurfaceTransaction_apply(transaction);
+      ReleaseReservedBlastGate(state, generation, true);
+    }
+  }
+  const bool exception = env->ExceptionCheck();
+  BlastDebugTrace(exception ? "consumer-exception" : "consumer-return",
+                  state.get(), nullptr, transaction, generation);
+  if (exception) {
+    // Once the Java Transaction has been passed to Consumer, Java owns the
+    // native pointer even if Consumer closes it and then throws.  Never touch
+    // the raw pointer on that path: it may already have been deleted.
+    env->ExceptionClear();
+    if (!handed_to_java && java_transaction == nullptr) {
+      ApplyAndDeleteBlastTransaction(transaction);
+    } else if (!handed_to_java) {
+      // The wrapper exists but was not handed off (for example, accept could
+      // not be resolved). It still owns the pointer, so apply only and let
+      // its finalizer perform deletion.
+      ASurfaceTransaction_apply(transaction);
+    }
+    if (!handed_to_java) ReleaseReservedBlastGate(state, generation, true);
+  } else if (!callable) {
+    if (java_transaction != nullptr) {
+      ASurfaceTransaction_apply(transaction);
+    } else {
+      ApplyAndDeleteBlastTransaction(transaction);
+    }
+    ReleaseReservedBlastGate(state, generation, true);
+  }
+  if (consumer_class != nullptr) env->DeleteLocalRef(consumer_class);
+  if (java_transaction != nullptr) env->DeleteLocalRef(java_transaction);
+  DeleteBlastConsumer(env, consumer);
+  if (attached) state->vm->DetachCurrentThread();
+  // A Java Transaction constructed with the private native-pointer constructor
+  // owns the transaction after construction. If it reached Consumer, its
+  // finalizer (or Consumer.apply/close) is the only valid native owner; this
+  // function deliberately never reuses the raw pointer on that path.
+  return true;
+}
+
+bool BlastBufferQueueTransactionCallback(void* opaque, void* transaction,
+                                         uint64_t frame_number) {
+  auto* observer = static_cast<BlastTransactionObserverContext*>(opaque);
+  if (observer == nullptr || observer->state == nullptr || transaction == nullptr)
+    return false;
+  const auto& state = observer->state;
+  BlastDebugTrace("queue-callback", state.get(), nullptr, transaction,
+                  frame_number);
+  jobject consumer = nullptr;
+  ASurfaceTransaction* deliver = nullptr;
+  uint64_t generation = 0;
+  std::vector<ASurfaceTransaction*> due;
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    state->last_acquired_frame = std::max(state->last_acquired_frame,
+                                          frame_number);
+    if (state->destroyed) return false;
+    for (auto it = state->future_transactions.begin();
+         it != state->future_transactions.end();) {
+      if (it->frame == 0 ||
+          (frame_number != 0 && it->frame <= frame_number)) {
+        due.push_back(it->transaction);
+        it = state->future_transactions.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    auto* incoming = static_cast<ASurfaceTransaction*>(transaction);
+    // Merge frame-indexed metadata into the actual queued buffer transaction
+    // before any sync/continuous ownership decision.
+    for (ASurfaceTransaction* source : due) {
+      if (source != nullptr) {
+        darwin_art_android_surface_transaction_merge(incoming, source);
+        ASurfaceTransaction_delete(source);
+      }
+    }
+    if (state->continuous_sync) {
+      if (state->continuous_transaction == nullptr) {
+        state->continuous_transaction = incoming;
+        state->continuous_frame = frame_number;
+      } else {
+        darwin_art_android_surface_transaction_merge(
+            state->continuous_transaction, incoming);
+        ASurfaceTransaction_delete(incoming);
+        state->continuous_frame =
+            std::max(state->continuous_frame, frame_number);
+      }
+      return true;
+    }
+    // A reserved single-sync consumer must claim the first queued transaction
+    // even though outstanding_sync is already true. That reservation closes
+    // the race between SyncNextTransaction and JNI delivery.
+    if (state->sync_consumer != nullptr) {
+      consumer = state->sync_consumer;
+      state->sync_consumer = nullptr;
+      state->continuous_sync = false;
+      generation = state->sync_generation;
+      deliver = incoming;
+    } else if (state->outstanding_sync) {
+      // A commit gate is active even though the Java consumer slot has been
+      // consumed. Preserve queue order until that transaction commits.
+      if (state->held_transactions.size() < kMaxHeldBlastTransactions) {
+        state->held_transactions.push_back(incoming);
+        return true;
+      }
+      // Do not let a bounded-queue overflow violate the commit gate. The
+      // incoming transaction is still owned by this callback, so discard it
+      // (and return its producer buffer through the platform lifecycle hook)
+      // rather than applying it ahead of the outstanding Java transaction.
+      ASurfaceTransaction_delete(incoming);
+      return true;
+    }
+  }
+  // Consumer invocation may re-enter framework code and must never run under
+  // the state mutex. The callback has claimed transaction ownership here.
+  return DeliverBlastTransaction(state, consumer, deliver, generation);
+}
+
+void DiscardPendingBlastTransaction(
+    const std::shared_ptr<DarwinBlastBufferQueue::State>& state,
+    JNIEnv* env) {
+  if (state == nullptr) return;
+  jobject consumer = nullptr;
+  ASurfaceTransaction* continuous = nullptr;
+  std::deque<DarwinBlastBufferQueue::State::PendingTransaction> future;
+  std::deque<ASurfaceTransaction*> held;
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    consumer = state->sync_consumer;
+    state->sync_consumer = nullptr;
+    state->continuous_sync = false;
+    // A consumer still present here has not been claimed by the queue
+    // callback, so clear can safely cancel its reservation. If it is already
+    // null, a delivery is in flight and its generation owns the reservation.
+    if (consumer != nullptr &&
+        state->sync_phase ==
+            DarwinBlastBufferQueue::State::SyncPhase::kReserved) {
+      state->outstanding_sync = false;
+      state->sync_phase =
+          DarwinBlastBufferQueue::State::SyncPhase::kIdle;
+      ++state->sync_generation;
+      held.swap(state->held_transactions);
+    }
+    continuous = state->continuous_transaction;
+    state->continuous_transaction = nullptr;
+    state->continuous_frame = 0;
+    future.swap(state->future_transactions);
+  }
+  DeleteBlastConsumer(env, consumer);
+  if (continuous != nullptr) ASurfaceTransaction_delete(continuous);
+  for (const auto& pending : future) {
+    if (pending.transaction != nullptr) {
+      ASurfaceTransaction_delete(pending.transaction);
+    }
+  }
+  for (ASurfaceTransaction* transaction : held) {
+    if (transaction != nullptr) ASurfaceTransaction_delete(transaction);
+  }
+}
+
+void DispatchContinuousBlastTransaction(
+    const std::shared_ptr<DarwinBlastBufferQueue::State>& state, JNIEnv* env) {
+  if (state == nullptr) return;
+  jobject consumer = nullptr;
+  ASurfaceTransaction* pending = nullptr;
+  uint64_t generation = 0;
+  std::vector<ASurfaceTransaction*> future;
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    if (state->sync_consumer == nullptr || !state->continuous_sync) return;
+    consumer = state->sync_consumer;
+    generation = state->sync_generation;
+    state->sync_consumer = nullptr;
+    state->continuous_sync = false;
+    pending = state->continuous_transaction;
+    state->continuous_transaction = nullptr;
+    state->continuous_frame = 0;
+    for (const auto& entry : state->future_transactions) {
+      if (entry.transaction != nullptr) future.push_back(entry.transaction);
+    }
+    state->future_transactions.clear();
+  }
+  if (pending == nullptr) pending = ASurfaceTransaction_create();
+  // The native stop call is made by the Java/UI thread, but delivery is kept
+  // outside the queue mutex for the same re-entry guarantee as frame delivery.
+  if (pending == nullptr) {
+    DeleteBlastConsumer(env, consumer);
+    for (ASurfaceTransaction* transaction : future) {
+      if (transaction != nullptr) ASurfaceTransaction_delete(transaction);
+    }
+    return;
+  }
+  MergeBlastTransactions(pending, future);
+  if (!DeliverBlastTransaction(state, consumer, pending, generation)) {
+    // Stop is not itself an ANativeWindow callback, so there is no caller to
+    // perform the normal-apply fallback when JNI delivery cannot attach.
+    ApplyAndDeleteBlastTransaction(pending);
+  }
+}
+
+jlong BlastBufferQueueNativeCreate(JNIEnv* env, jclass, jstring, jboolean) {
+  auto* queue = new (std::nothrow) DarwinBlastBufferQueue();
+  if (queue == nullptr) return 0;
+  try {
+    queue->state = std::make_shared<DarwinBlastBufferQueue::State>();
+  } catch (const std::bad_alloc&) {
+    delete queue;
+    return 0;
+  }
+  if (queue->state == nullptr || env == nullptr ||
+      env->GetJavaVM(&queue->state->vm) != JNI_OK) {
+    delete queue;
+    return 0;
+  }
+  return reinterpret_cast<jlong>(queue);
 }
 void BlastBufferQueueNativeNoop(JNIEnv*, jclass, jlong) {}
 void BlastBufferQueueNativeNoop2(JNIEnv*, jclass, jlong, jlong) {}
 void BlastBufferQueueNativeNoop3(JNIEnv*, jclass, jlong, jlong, jlong) {}
-void BlastBufferQueueNativeDestroy(JNIEnv*, jclass, jlong handle) {
+void BlastBufferQueueNativeDestroy(JNIEnv* env, jclass, jlong handle) {
   auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
   if (queue == nullptr) return;
+  auto state = queue->state;
+  void* native_window = queue->native_window;
+  if (state != nullptr) {
+    {
+      std::lock_guard<std::mutex> lock(state->mutex);
+      state->destroyed = true;
+      state->native_window = nullptr;
+      state->outstanding_sync = false;
+      state->sync_phase =
+          DarwinBlastBufferQueue::State::SyncPhase::kIdle;
+      ++state->sync_generation;
+    }
+    if (native_window != nullptr) {
+      darwin_art_android_ANativeWindow_set_transaction_callback(
+          native_window, nullptr, nullptr, nullptr);
+    }
+    DiscardPendingBlastTransaction(state, env);
+    // Transactions held behind a Java commit gate cannot be presented after
+    // queue destruction. Delete them after unregistering the observer so the
+    // platform discard callbacks return their producer slots safely.
+    DiscardHeldBlastTransactions(state, false);
+  }
   if (queue->native_window != nullptr) {
     darwin_art_android_ANativeWindow_release(queue->native_window);
   }
@@ -270,9 +923,32 @@ void BlastBufferQueueNativeUpdate(JNIEnv*, jclass, jlong handle,
   }
   darwin_art_android_ANativeWindow_set_surface_control(
       queue->native_window, queue->surface_control);
+  if (queue->state != nullptr) {
+    std::lock_guard<std::mutex> lock(queue->state->mutex);
+    if (queue->state->native_window == nullptr) {
+      auto* context = new (std::nothrow) BlastTransactionObserverContext{
+          queue->state};
+      if (context != nullptr &&
+          darwin_art_android_ANativeWindow_set_transaction_callback(
+              queue->native_window, &BlastBufferQueueTransactionCallback,
+              context, &ReleaseBlastTransactionObserverContext)) {
+        queue->state->native_window = queue->native_window;
+        BlastDebugTrace("observer-registered", queue->state.get(),
+                        queue->native_window, nullptr, 1);
+      } else {
+        BlastDebugTrace("observer-register-failed", queue->state.get(),
+                        queue->native_window, nullptr, 0);
+        delete context;
+      }
+    }
+  }
 }
-jlong BlastBufferQueueNativeGetLastAcquiredFrameNum(JNIEnv*, jclass, jlong) {
-  return 0;
+jlong BlastBufferQueueNativeGetLastAcquiredFrameNum(JNIEnv*, jclass,
+                                                   jlong handle) {
+  auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
+  if (queue == nullptr || queue->state == nullptr) return 0;
+  std::lock_guard<std::mutex> lock(queue->state->mutex);
+  return static_cast<jlong>(queue->state->last_acquired_frame);
 }
 jboolean BlastBufferQueueNativeIsSameSurfaceControl(JNIEnv*, jclass,
                                                     jlong handle,
@@ -308,24 +984,114 @@ jobject BlastBufferQueueNativeGetSurface(JNIEnv* env, jclass, jlong handle,
   return surface;
 }
 jobject BlastBufferQueueNativeGatherPendingTransactions(JNIEnv* env, jclass,
-                                                         jlong, jlong) {
-  jclass transaction_class =
-      env->FindClass("android/view/SurfaceControl$Transaction");
-  jmethodID constructor =
-      transaction_class == nullptr
-          ? nullptr
-          : env->GetMethodID(transaction_class, "<init>", "()V");
-  jobject transaction = constructor == nullptr
-                            ? nullptr
-                            : env->NewObject(transaction_class, constructor);
-  env->DeleteLocalRef(transaction_class);
-  return transaction;
+                                                         jlong handle,
+                                                         jlong frame) {
+  auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
+  std::shared_ptr<DarwinBlastBufferQueue::State> state =
+      queue == nullptr ? nullptr : queue->state;
+  const auto future = TakeDueBlastTransactions(
+      state, frame <= 0 ? 0 : static_cast<uint64_t>(frame), frame <= 0);
+  ASurfaceTransaction* pending = ASurfaceTransaction_create();
+  MergeBlastTransactions(pending, future);
+  if (pending == nullptr) pending = ASurfaceTransaction_create();
+  jobject result = NewBlastJavaTransaction(env, pending);
+  if (result == nullptr) ApplyAndDeleteBlastTransaction(pending);
+  return result;
 }
 void BlastBufferQueueNativeSetApplyToken(JNIEnv*, jclass, jlong, jobject) {}
 void BlastBufferQueueNativeSetHangCallback(JNIEnv*, jclass, jlong, jobject) {}
-jboolean BlastBufferQueueNativeSyncNextTransaction(JNIEnv*, jclass, jlong,
-                                                   jobject, jboolean) {
-  return JNI_TRUE;
+
+void BlastBufferQueueNativeMergeWithNextTransaction(JNIEnv*, jclass,
+                                                    jlong handle,
+                                                    jlong transaction,
+                                                    jlong frame) {
+  auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
+  auto* source = reinterpret_cast<ASurfaceTransaction*>(transaction);
+  if (queue == nullptr || queue->state == nullptr || source == nullptr) return;
+  ASurfaceTransaction* apply_now = nullptr;
+  const uint64_t target_frame = frame <= 0 ? 0 : static_cast<uint64_t>(frame);
+  {
+    std::lock_guard<std::mutex> lock(queue->state->mutex);
+    if (queue->state->destroyed) {
+      return;
+    } else if (frame > 0 && static_cast<uint64_t>(frame) <=
+                         queue->state->last_acquired_frame) {
+      apply_now = source;
+    } else {
+      ASurfaceTransaction* owned = ASurfaceTransaction_create();
+      if (owned != nullptr) {
+        darwin_art_android_surface_transaction_merge(owned, source);
+        queue->state->future_transactions.push_back(
+            {owned, target_frame});
+      }
+    }
+  }
+  if (apply_now != nullptr) ASurfaceTransaction_apply(apply_now);
+}
+
+void BlastBufferQueueNativeClearSyncTransaction(JNIEnv* env, jclass,
+                                                jlong handle) {
+  auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
+  if (queue == nullptr) return;
+  DiscardPendingBlastTransaction(queue->state, env);
+}
+
+void BlastBufferQueueNativeStopContinuousSyncTransaction(JNIEnv* env, jclass,
+                                                         jlong handle) {
+  auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
+  if (queue == nullptr) return;
+  DispatchContinuousBlastTransaction(queue->state, env);
+}
+
+void BlastBufferQueueNativeApplyPendingTransactions(JNIEnv*, jclass,
+                                                    jlong handle, jlong frame) {
+  auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
+  if (queue == nullptr || queue->state == nullptr) return;
+  const auto future = TakeDueBlastTransactions(
+      queue->state, frame <= 0 ? 0 : static_cast<uint64_t>(frame), frame <= 0);
+  ASurfaceTransaction* pending = ASurfaceTransaction_create();
+  MergeBlastTransactions(pending, future);
+  ApplyAndDeleteBlastTransaction(pending);
+}
+
+jboolean BlastBufferQueueNativeSyncNextTransaction(JNIEnv* env, jclass,
+                                                   jlong handle,
+                                                   jobject consumer,
+                                                   jboolean acquire_single) {
+  auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
+  if (queue == nullptr || queue->state == nullptr || env == nullptr ||
+      consumer == nullptr) {
+    return JNI_FALSE;
+  }
+  jobject global = env->NewGlobalRef(consumer);
+  if (global == nullptr) return JNI_FALSE;
+  auto state = queue->state;
+  bool accepted = false;
+  uint64_t generation = 0;
+  void* observed_window = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    observed_window = state->native_window;
+    if (!state->destroyed && state->sync_consumer == nullptr &&
+        !state->outstanding_sync) {
+      state->sync_consumer = global;
+      state->continuous_sync = acquire_single == JNI_FALSE;
+      // Reserve the generation before JNI attach/wrapper construction. A
+      // queue callback racing this call will either claim this consumer or be
+      // held behind this reservation, never applied as an ordinary frame.
+      state->outstanding_sync = true;
+      state->sync_phase =
+          DarwinBlastBufferQueue::State::SyncPhase::kReserved;
+      ++state->sync_generation;
+      generation = state->sync_generation;
+      accepted = true;
+    }
+  }
+  if (!accepted) env->DeleteGlobalRef(global);
+  BlastDebugTrace(accepted ? "sync-reserved" : "sync-rejected", state.get(),
+                  observed_window, nullptr,
+                  accepted ? generation : 0);
+  return accepted ? JNI_TRUE : JNI_FALSE;
 }
 
 std::atomic<jlong> g_egl_handle{1};
@@ -367,7 +1133,10 @@ jint SurfaceNativeGetWidth(JNIEnv*, jclass, jlong handle) {
 jint SurfaceNativeGetHeight(JNIEnv*, jclass, jlong handle) {
   return handle == 0 ? 0 : darwin_art::DarwinAngleHostSurfaceHeight();
 }
-jlong SurfaceNativeGetNextFrameNumber(JNIEnv*, jclass, jlong) { return 0; }
+jlong SurfaceNativeGetNextFrameNumber(JNIEnv*, jclass, jlong handle) {
+  return static_cast<jlong>(darwin_art_android_ANativeWindow_next_frame_number(
+      reinterpret_cast<void*>(static_cast<std::uintptr_t>(handle))));
+}
 jboolean SurfaceNativeFalse(JNIEnv*, jclass, jlong) { return JNI_FALSE; }
 void SurfaceNativeAllocateBuffers(JNIEnv*, jclass, jlong) {}
 jint SurfaceNativeStatus(JNIEnv*, jclass, jlong, jint) { return 0; }
@@ -916,6 +1685,310 @@ extern "C" JNIEXPORT jlong Java_android_os_Process_getElapsedCpuTime(
 
 namespace darwin_art {
 
+// MediaExtractor's Java class keeps its native handle in mNativeContext. The
+// demux state and bounded WebM parser are shared with the NDK facade.
+
+bool ExtractZipAsset(const std::string& source, std::vector<uint8_t>* bytes) {
+  if (bytes == nullptr) return false;
+  std::string apk = source;
+  std::string entry;
+  const size_t bang = source.find("!/");
+  if (bang != std::string::npos) {
+    apk = source.substr(0, bang);
+    entry = source.substr(bang + 2);
+    if (apk.rfind("jar:", 0) == 0) apk.erase(0, 4);
+    if (apk.rfind("file://", 0) == 0) apk.erase(0, 7);
+    else if (apk.rfind("file:", 0) == 0) apk.erase(0, 5);
+  }
+  if (entry.empty()) return false;
+  ZipArchiveHandle archive = nullptr;
+  if (OpenArchive(apk.c_str(), &archive) != 0) return false;
+  ZipEntry64 zip_entry;
+  const bool found = FindEntry(archive, entry, &zip_entry) == 0;
+  if (found && zip_entry.uncompressed_length <= (64u * 1024u * 1024u)) {
+    bytes->resize(static_cast<size_t>(zip_entry.uncompressed_length));
+    if (ExtractToMemory(archive, &zip_entry, bytes->data(), bytes->size()) != 0)
+      bytes->clear();
+  }
+  CloseArchive(archive);
+  return !bytes->empty();
+}
+
+MediaExtractorState* GetExtractorState(JNIEnv* env, jobject self) {
+  if (env == nullptr || self == nullptr) return nullptr;
+  jclass type = env->GetObjectClass(self);
+  jfieldID field = type == nullptr
+                       ? nullptr
+                       : env->GetFieldID(type, "mNativeContext", "J");
+  jlong value = field == nullptr ? 0 : env->GetLongField(self, field);
+  env->DeleteLocalRef(type);
+  return reinterpret_cast<MediaExtractorState*>(static_cast<uintptr_t>(value));
+}
+
+void SetExtractorState(JNIEnv* env, jobject self, MediaExtractorState* state) {
+  if (env == nullptr || self == nullptr) return;
+  jclass type = env->GetObjectClass(self);
+  jfieldID field = type == nullptr
+                       ? nullptr
+                       : env->GetFieldID(type, "mNativeContext", "J");
+  if (field != nullptr) {
+    env->SetLongField(self, field, reinterpret_cast<jlong>(state));
+  }
+  env->DeleteLocalRef(type);
+}
+
+jobject NewExtractorFormat(JNIEnv* env, const MediaExtractorState* state) {
+  if (env == nullptr || state == nullptr) return nullptr;
+  jclass map_class = env->FindClass("java/util/HashMap");
+  if (map_class == nullptr) return nullptr;
+  jmethodID constructor = env->GetMethodID(map_class, "<init>", "()V");
+  jmethodID put = env->GetMethodID(
+      map_class, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+  jobject map = constructor == nullptr ? nullptr : env->NewObject(map_class, constructor);
+  if (map == nullptr || put == nullptr) {
+    env->DeleteLocalRef(map_class);
+    return map;
+  }
+  jclass integer_class = env->FindClass("java/lang/Integer");
+  jclass long_class = env->FindClass("java/lang/Long");
+  jclass float_class = env->FindClass("java/lang/Float");
+  jmethodID integer_value = integer_class == nullptr
+                                ? nullptr
+                                : env->GetMethodID(integer_class, "<init>", "(I)V");
+  jmethodID long_value = long_class == nullptr
+                             ? nullptr
+                             : env->GetMethodID(long_class, "<init>", "(J)V");
+  auto add_string = [&](const char* key, const char* value) {
+    jstring k = env->NewStringUTF(key);
+    jstring v = env->NewStringUTF(value);
+    env->CallObjectMethod(map, put, k, v);
+    env->DeleteLocalRef(k);
+    env->DeleteLocalRef(v);
+  };
+  auto add_int = [&](const char* key, jint value) {
+    jstring k = env->NewStringUTF(key);
+    jobject v = integer_value == nullptr ? nullptr : env->NewObject(integer_class, integer_value, value);
+    env->CallObjectMethod(map, put, k, v);
+    env->DeleteLocalRef(k);
+    env->DeleteLocalRef(v);
+  };
+  auto add_long = [&](const char* key, jlong value) {
+    jstring k = env->NewStringUTF(key);
+    jobject v = long_value == nullptr ? nullptr : env->NewObject(long_class, long_value, value);
+    env->CallObjectMethod(map, put, k, v);
+    env->DeleteLocalRef(k);
+    env->DeleteLocalRef(v);
+  };
+  auto add_float = [&](const char* key, jfloat value) {
+    jstring k = env->NewStringUTF(key);
+    jmethodID ctor = float_class == nullptr ? nullptr : env->GetMethodID(float_class, "<init>", "(F)V");
+    jobject v = ctor == nullptr ? nullptr : env->NewObject(float_class, ctor, value);
+    env->CallObjectMethod(map, put, k, v);
+    env->DeleteLocalRef(k);
+    env->DeleteLocalRef(v);
+  };
+  add_string("mime", "video/x-vnd.on2.vp9");
+  add_int("width", state->width);
+  add_int("height", state->height);
+  add_float("frame-rate", 30.0f);
+  add_long("durationUs", state->duration_us);
+  env->DeleteLocalRef(integer_class);
+  env->DeleteLocalRef(long_class);
+  env->DeleteLocalRef(float_class);
+  env->DeleteLocalRef(map_class);
+  return map;
+}
+
+void MediaExtractorNativeInit(JNIEnv*, jclass) {}
+void MediaExtractorNativeSetup(JNIEnv* env, jobject self) {
+  SetExtractorState(env, self, new (std::nothrow) MediaExtractorState());
+}
+void MediaExtractorNativeSetDataSource(JNIEnv* env, jobject self, jobject, jstring path,
+                                       jobjectArray, jobjectArray) {
+  auto* state = GetExtractorState(env, self);
+  if (std::getenv("DARWIN_ART_DEBUG_MEDIA_CODEC") != nullptr) {
+    std::cerr << "ART Android MediaExtractor: nativeSetDataSource state=" << state
+              << " path_obj=" << path << "\n";
+  }
+  if (state == nullptr || path == nullptr) return;
+  *state = MediaExtractorState{};
+  const char* chars = env->GetStringUTFChars(path, nullptr);
+  if (chars == nullptr) return;
+  const std::string source(chars);
+  std::vector<uint8_t> bytes;
+  const bool parsed = ExtractZipAsset(chars, &bytes);
+  env->ReleaseStringUTFChars(path, chars);
+  if (parsed) ParseWebm(bytes, state);
+  // Keep a normal filesystem path useful for non-APK callers.
+  if (!state->has_source) {
+    FILE* file = std::fopen(source.c_str(), "rb");
+    if (file != nullptr) {
+      std::fseek(file, 0, SEEK_END); const long length = std::ftell(file);
+      std::fseek(file, 0, SEEK_SET);
+      if (length > 0 && length <= 64 * 1024 * 1024) {
+        bytes.resize(static_cast<size_t>(length));
+        std::fread(bytes.data(), 1, bytes.size(), file);
+        ParseWebm(bytes, state);
+      }
+      std::fclose(file);
+    }
+  }
+  if (std::getenv("DARWIN_ART_DEBUG_MEDIA_CODEC") != nullptr) {
+    std::cerr << "ART Android MediaExtractor: source=" << source
+              << " parsed=" << parsed << " samples=" << state->samples.size()
+              << " size=" << bytes.size() << " duration_us=" << state->duration_us
+              << "\n";
+  }
+}
+void MediaExtractorSetDataSourceFd(JNIEnv* env, jobject self, jobject descriptor,
+                                   jlong offset, jlong length) {
+  auto* state = GetExtractorState(env, self);
+  if (std::getenv("DARWIN_ART_DEBUG_MEDIA_CODEC") != nullptr) {
+    std::cerr << "ART Android MediaExtractor: setDataSourceFd state=" << state
+              << " descriptor=" << descriptor << " offset=" << offset
+              << " length=" << length << "\n";
+  }
+  if (state == nullptr || descriptor == nullptr) return;
+  if (offset < 0 || length <= 0 ||
+      static_cast<uint64_t>(length) > kMediaExtractorMaxBytes) {
+    return;
+  }
+  jclass type = env->GetObjectClass(descriptor);
+  jfieldID field = type == nullptr ? nullptr : env->GetFieldID(type, "descriptor", "I");
+  if (field == nullptr && type != nullptr) {
+    env->ExceptionClear();
+    field = env->GetFieldID(type, "fd", "I");
+  }
+  const jint fd = field == nullptr ? -1 : env->GetIntField(descriptor, field);
+  env->DeleteLocalRef(type);
+  if (fd < 0) return;
+  std::vector<uint8_t> bytes(static_cast<size_t>(length));
+  size_t total = 0;
+  while (total < bytes.size()) {
+    if (offset > std::numeric_limits<jlong>::max() -
+                    static_cast<jlong>(total)) {
+      bytes.clear();
+      break;
+    }
+    const intptr_t n = darwin_art_bionic_pread(
+        fd, bytes.data() + total, bytes.size() - total,
+        offset + static_cast<jlong>(total));
+    if (n <= 0 || static_cast<uint64_t>(n) > bytes.size() - total) break;
+    total += static_cast<size_t>(n);
+  }
+  bytes.resize(total);
+  ParseWebm(bytes, state);
+  if (std::getenv("DARWIN_ART_DEBUG_MEDIA_CODEC") != nullptr) {
+    std::cerr << "ART Android MediaExtractor: fd=" << fd << " samples="
+              << state->samples.size() << " bytes=" << bytes.size() << "\n";
+  }
+}
+void MediaExtractorSetDataSourceMedia(JNIEnv* env, jobject self, jobject) {
+  // Java MediaDataSource callbacks are not a filesystem source. Do not claim
+  // a track unless the source was actually read and parsed.
+  if (auto* state = GetExtractorState(env, self); state != nullptr)
+    *state = MediaExtractorState{};
+}
+jobject MediaExtractorGetFileFormat(JNIEnv* env, jobject self) {
+  return NewExtractorFormat(env, GetExtractorState(env, self));
+}
+jobject MediaExtractorGetTrackFormat(JNIEnv* env, jobject self, jint) {
+  return NewExtractorFormat(env, GetExtractorState(env, self));
+}
+jint MediaExtractorGetTrackCount(JNIEnv* env, jobject self) {
+  auto* state = GetExtractorState(env, self);
+  return state != nullptr && state->has_source ? 1 : 0;
+}
+void MediaExtractorRelease(JNIEnv* env, jobject self) {
+  delete GetExtractorState(env, self);
+  SetExtractorState(env, self, nullptr);
+}
+void MediaExtractorFinalize(JNIEnv* env, jobject self) { MediaExtractorRelease(env, self); }
+void MediaExtractorSelectTrack(JNIEnv*, jobject, jint) {}
+void MediaExtractorUnselectTrack(JNIEnv*, jobject, jint) {}
+jboolean MediaExtractorAdvance(JNIEnv* env, jobject self) {
+  auto* state = GetExtractorState(env, self);
+  if (state == nullptr || !state->has_source) return JNI_FALSE;
+  if (state->sample_index + 1 >= state->samples.size()) {
+    state->sample_index = state->samples.size();
+    return JNI_FALSE;
+  }
+  ++state->sample_index;
+  return JNI_TRUE;
+}
+jlong MediaExtractorGetSampleTime(JNIEnv* env, jobject self) {
+  auto* state = GetExtractorState(env, self);
+  return state != nullptr &&
+                 state->sample_index < state->samples.size()
+             ? state->samples[state->sample_index].pts_us : -1;
+}
+jlong MediaExtractorGetSampleSize(JNIEnv* env, jobject self) {
+  auto* state = GetExtractorState(env, self);
+  return state != nullptr &&
+                 state->sample_index < state->samples.size()
+             ? static_cast<jlong>(state->samples[state->sample_index].data.size()) : -1;
+}
+jint MediaExtractorGetSampleFlags(JNIEnv* env, jobject self) {
+  auto* state = GetExtractorState(env, self);
+  return state != nullptr &&
+                 state->sample_index < state->samples.size()
+             ? state->samples[state->sample_index].flags : 0;
+}
+jint MediaExtractorGetSampleTrackIndex(JNIEnv* env, jobject self) {
+  auto* state = GetExtractorState(env, self);
+  return state != nullptr && state->sample_index < state->samples.size() ? 0 : -1;
+}
+jint MediaExtractorReadSampleData(JNIEnv* env, jobject self, jobject buffer, jint offset) {
+  auto* state = GetExtractorState(env, self);
+  if (state == nullptr || buffer == nullptr ||
+      state->sample_index >= state->samples.size() || offset < 0)
+    return -1;
+  void* destination = env->GetDirectBufferAddress(buffer);
+  const jlong capacity = env->GetDirectBufferCapacity(buffer);
+  const auto& sample = state->samples[state->sample_index].data;
+  if (destination == nullptr ||
+      sample.size() > static_cast<size_t>(std::numeric_limits<jint>::max()) ||
+      static_cast<jlong>(offset) > capacity ||
+      sample.size() > static_cast<size_t>(capacity - offset)) return -1;
+  std::memcpy(static_cast<uint8_t*>(destination) + offset, sample.data(), sample.size());
+  return static_cast<jint>(sample.size());
+}
+void MediaExtractorSeekTo(JNIEnv* env, jobject self, jlong time_us, jint mode) {
+  auto* state = GetExtractorState(env, self);
+  if (state == nullptr) return;
+  size_t index = 0;
+  while (index < state->samples.size() &&
+         state->samples[index].pts_us < time_us) ++index;
+  if (mode == 0 && index > 0) --index;
+  state->sample_index = std::min(index, state->samples.size());
+}
+jlong MediaExtractorGetCachedDuration(JNIEnv* env, jobject self) {
+  auto* state = GetExtractorState(env, self);
+  return state == nullptr ? 0 : state->duration_us;
+}
+jboolean MediaExtractorHasCacheReachedEnd(JNIEnv* env, jobject self) {
+  auto* state = GetExtractorState(env, self);
+  return state == nullptr || state->sample_index + 1 >= state->samples.size();
+}
+jboolean MediaExtractorGetSampleCryptoInfo(JNIEnv*, jobject, jobject) { return JNI_FALSE; }
+jobject MediaExtractorGetAudioPresentations(JNIEnv* env, jobject, jint) {
+  jclass collections = env->FindClass("java/util/Collections");
+  jmethodID empty = collections == nullptr ? nullptr : env->GetStaticMethodID(
+      collections, "emptyList", "()Ljava/util/List;");
+  jobject result = empty == nullptr ? nullptr : env->CallStaticObjectMethod(collections, empty);
+  env->DeleteLocalRef(collections);
+  return result;
+}
+jobject MediaExtractorGetMetrics(JNIEnv* env, jobject) {
+  jclass type = env->FindClass("android/os/PersistableBundle");
+  jmethodID ctor = type == nullptr ? nullptr : env->GetMethodID(type, "<init>", "()V");
+  jobject result = ctor == nullptr ? nullptr : env->NewObject(type, ctor);
+  env->DeleteLocalRef(type);
+  return result;
+}
+void MediaExtractorSetLogSessionId(JNIEnv*, jobject, jstring) {}
+void MediaExtractorSetMediaCas(JNIEnv*, jobject, jobject) {}
+
 bool RegisterFrameworkSupportNatives(JNIEnv* env) {
   JNINativeMethod native_allocation_methods[] = {
       {const_cast<char*>("applyFreeFunction"), const_cast<char*>("(JJ)V"),
@@ -958,6 +2031,66 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   if (!darwin_art::RegisterDarwinMediaCodecNatives(env)) {
     return false;
   }
+  JNINativeMethod media_extractor_methods[] = {
+      {const_cast<char*>("getFileFormatNative"), const_cast<char*>("()Ljava/util/Map;"),
+       reinterpret_cast<void*>(&MediaExtractorGetFileFormat)},
+      {const_cast<char*>("getTrackFormatNative"), const_cast<char*>("(I)Ljava/util/Map;"),
+       reinterpret_cast<void*>(&MediaExtractorGetTrackFormat)},
+      {const_cast<char*>("nativeSetDataSource"),
+       const_cast<char*>("(Landroid/os/IBinder;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V"),
+       reinterpret_cast<void*>(&MediaExtractorNativeSetDataSource)},
+      {const_cast<char*>("nativeSetMediaCas"), const_cast<char*>("(Landroid/os/IHwBinder;)V"),
+       reinterpret_cast<void*>(&MediaExtractorSetMediaCas)},
+      {const_cast<char*>("native_finalize"), const_cast<char*>("()V"),
+       reinterpret_cast<void*>(&MediaExtractorFinalize)},
+      {const_cast<char*>("native_getAudioPresentations"), const_cast<char*>("(I)Ljava/util/List;"),
+       reinterpret_cast<void*>(&MediaExtractorGetAudioPresentations)},
+      {const_cast<char*>("native_getMetrics"), const_cast<char*>("()Landroid/os/PersistableBundle;"),
+       reinterpret_cast<void*>(&MediaExtractorGetMetrics)},
+      {const_cast<char*>("native_init"), const_cast<char*>("()V"),
+       reinterpret_cast<void*>(&MediaExtractorNativeInit)},
+      {const_cast<char*>("native_setLogSessionId"), const_cast<char*>("(Ljava/lang/String;)V"),
+       reinterpret_cast<void*>(&MediaExtractorSetLogSessionId)},
+      {const_cast<char*>("native_setup"), const_cast<char*>("()V"),
+       reinterpret_cast<void*>(&MediaExtractorNativeSetup)},
+      {const_cast<char*>("advance"), const_cast<char*>("()Z"),
+       reinterpret_cast<void*>(&MediaExtractorAdvance)},
+      {const_cast<char*>("getCachedDuration"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&MediaExtractorGetCachedDuration)},
+      {const_cast<char*>("getSampleCryptoInfo"), const_cast<char*>("(Landroid/media/MediaCodec$CryptoInfo;)Z"),
+       reinterpret_cast<void*>(&MediaExtractorGetSampleCryptoInfo)},
+      {const_cast<char*>("getSampleFlags"), const_cast<char*>("()I"),
+       reinterpret_cast<void*>(&MediaExtractorGetSampleFlags)},
+      {const_cast<char*>("getSampleSize"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&MediaExtractorGetSampleSize)},
+      {const_cast<char*>("getSampleTime"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&MediaExtractorGetSampleTime)},
+      {const_cast<char*>("getSampleTrackIndex"), const_cast<char*>("()I"),
+       reinterpret_cast<void*>(&MediaExtractorGetSampleTrackIndex)},
+      {const_cast<char*>("setDataSource"),
+       const_cast<char*>("(Ljava/io/FileDescriptor;JJ)V"),
+       reinterpret_cast<void*>(&MediaExtractorSetDataSourceFd)},
+      {const_cast<char*>("setDataSource"), const_cast<char*>("(Landroid/media/MediaDataSource;)V"),
+       reinterpret_cast<void*>(&MediaExtractorSetDataSourceMedia)},
+      {const_cast<char*>("getTrackCount"), const_cast<char*>("()I"),
+       reinterpret_cast<void*>(&MediaExtractorGetTrackCount)},
+      {const_cast<char*>("hasCacheReachedEndOfStream"), const_cast<char*>("()Z"),
+       reinterpret_cast<void*>(&MediaExtractorHasCacheReachedEnd)},
+      {const_cast<char*>("readSampleData"), const_cast<char*>("(Ljava/nio/ByteBuffer;I)I"),
+       reinterpret_cast<void*>(&MediaExtractorReadSampleData)},
+      {const_cast<char*>("release"), const_cast<char*>("()V"),
+       reinterpret_cast<void*>(&MediaExtractorRelease)},
+      {const_cast<char*>("seekTo"), const_cast<char*>("(JI)V"),
+       reinterpret_cast<void*>(&MediaExtractorSeekTo)},
+      {const_cast<char*>("selectTrack"), const_cast<char*>("(I)V"),
+       reinterpret_cast<void*>(&MediaExtractorSelectTrack)},
+      {const_cast<char*>("unselectTrack"), const_cast<char*>("(I)V"),
+       reinterpret_cast<void*>(&MediaExtractorUnselectTrack)},
+  };
+  if (!Register(env, "android/media/MediaExtractor", media_extractor_methods,
+                static_cast<jint>(std::size(media_extractor_methods)))) {
+    return false;
+  }
   if (!RegisterMotionEventNatives(env)) {
     return false;
   }
@@ -983,6 +2116,23 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
     return false;
   }
   using namespace framework_system;
+  JNINativeMethod incremental_methods[] = {
+      {const_cast<char*>("nativeIsEnabled"), const_cast<char*>("()Z"),
+       reinterpret_cast<void*>(&IncrementalEnabled)},
+      {const_cast<char*>("nativeIsV2Available"), const_cast<char*>("()Z"),
+       reinterpret_cast<void*>(&IncrementalEnabled)},
+      {const_cast<char*>("nativeIsIncrementalFd"), const_cast<char*>("(I)Z"),
+       reinterpret_cast<void*>(&IncrementalFileDescriptor)},
+      {const_cast<char*>("nativeIsIncrementalPath"), const_cast<char*>("(Ljava/lang/String;)Z"),
+       reinterpret_cast<void*>(&IncrementalPath)},
+      {const_cast<char*>("nativeUnsafeGetFileSignature"),
+       const_cast<char*>("(Ljava/lang/String;)[B"),
+       reinterpret_cast<void*>(&IncrementalFileSignature)},
+  };
+  if (!Register(env, "android/os/incremental/IncrementalManager",
+                incremental_methods, static_cast<jint>(std::size(incremental_methods)))) {
+    return false;
+  }
   JNINativeMethod process_methods[] = {
       {const_cast<char*>("setThreadPriority"), const_cast<char*>("(I)V"),
        reinterpret_cast<void*>(&ProcessSetThreadPriority)},
@@ -1197,7 +2347,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
       {const_cast<char*>("nativeSetTransparentRegionHint"),
        const_cast<char*>("(JJLandroid/graphics/Region;)V"),
-       reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
+       reinterpret_cast<void*>(&SurfaceControlNativeSetTransparentRegionHint)},
       {const_cast<char*>("nativeSetDataSpace"), const_cast<char*>("(JJI)V"),
        reinterpret_cast<void*>(&SurfaceControlNativeTransactionNoop2)},
       {const_cast<char*>("nativeSetFrameTimelineVsync"),
@@ -1237,9 +2387,9 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   JNINativeMethod blast_buffer_queue_methods[] = {
       {const_cast<char*>("nativeApplyPendingTransactions"),
        const_cast<char*>("(JJ)V"),
-       reinterpret_cast<void*>(&BlastBufferQueueNativeNoop2)},
+       reinterpret_cast<void*>(&BlastBufferQueueNativeApplyPendingTransactions)},
       {const_cast<char*>("nativeClearSyncTransaction"), const_cast<char*>("(J)V"),
-       reinterpret_cast<void*>(&BlastBufferQueueNativeNoop)},
+       reinterpret_cast<void*>(&BlastBufferQueueNativeClearSyncTransaction)},
       {const_cast<char*>("nativeCreate"),
        const_cast<char*>("(Ljava/lang/String;Z)J"),
        reinterpret_cast<void*>(&BlastBufferQueueNativeCreate)},
@@ -1259,7 +2409,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&BlastBufferQueueNativeIsSameSurfaceControl)},
       {const_cast<char*>("nativeMergeWithNextTransaction"),
        const_cast<char*>("(JJJ)V"),
-       reinterpret_cast<void*>(&BlastBufferQueueNativeNoop3)},
+       reinterpret_cast<void*>(&BlastBufferQueueNativeMergeWithNextTransaction)},
       {const_cast<char*>("nativeSetApplyToken"),
        const_cast<char*>("(JLandroid/os/IBinder;)V"),
        reinterpret_cast<void*>(&BlastBufferQueueNativeSetApplyToken)},
@@ -1273,7 +2423,7 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&BlastBufferQueueNativeSetHangCallback)},
       {const_cast<char*>("nativeStopContinuousSyncTransaction"),
        const_cast<char*>("(J)V"),
-       reinterpret_cast<void*>(&BlastBufferQueueNativeNoop)},
+       reinterpret_cast<void*>(&BlastBufferQueueNativeStopContinuousSyncTransaction)},
       {const_cast<char*>("nativeSyncNextTransaction"),
        const_cast<char*>("(JLjava/util/function/Consumer;Z)Z"),
        reinterpret_cast<void*>(&BlastBufferQueueNativeSyncNextTransaction)},

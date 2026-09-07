@@ -3,7 +3,7 @@ use super::runtime_jobs::runtime_jobs;
 use super::seed_jobs::bootstrap_jobs;
 use super::*;
 use crate::native_build::compile_pending_native;
-use darwin_art_build_contract::RuntimeFlavor;
+use darwin_art_build_contract::{RUNTIME_CACHE_IDENTITY, RuntimeFlavor};
 
 pub(crate) struct RuntimeBootstrapCompiled {
     pub(crate) objects: Vec<PathBuf>,
@@ -27,7 +27,7 @@ pub(crate) fn compile(
         .map(PathBuf::as_path)
         .collect::<Vec<_>>();
     let compiler_identity = format!(
-        "{}macOS {} ({})",
+        "{}macOS {} ({})\nruntime-cache={RUNTIME_CACHE_IDENTITY}",
         command_output(Command::new("clang++").arg("--version"))?,
         command_output(Command::new("sw_vers").arg("-productVersion"))?.trim(),
         command_output(Command::new("sw_vers").arg("-buildVersion"))?.trim()

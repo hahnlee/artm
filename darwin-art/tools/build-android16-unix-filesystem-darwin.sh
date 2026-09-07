@@ -187,13 +187,26 @@ while IFS= read -r source; do
   object="$objects/${source%.*}.o"
   "$cc" "${common_flags[@]}" \
     -include "$project_root/compat/darwin_libcore_filesystem_bridge.h" \
-    -Dstat=darwin_art_libcore_stat \
-    -Dmkdir=darwin_art_libcore_mkdir \
-    -Dchmod=darwin_art_libcore_chmod \
+    -DDARWIN_ART_LIBCORE_REDIRECT_FILESYSTEM \
     -c "$native_root/$source" -o "$object"
   [[ "$(file "$object")" == *"Mach-O 64-bit object arm64"* ]] ||
     fail "non-arm64 object: $source"
 done < "$closure_manifest"
+
+for bridge in stat statfs mkdir chmod opendir readdir closedir; do
+  nm -u "$objects/UnixFileSystem_md.o" | grep -F "_darwin_art_libcore_$bridge" >/dev/null ||
+    fail "UnixFileSystem redirect not linked: $bridge"
+done
+nm -u "$objects/canonicalize_md.o" | grep -F \
+  '_darwin_art_libcore_realpath' >/dev/null ||
+  fail "canonicalize redirect not linked: realpath"
+for bridge in fstat open; do
+  nm -u "$objects/io_util_md.o" | grep -F "_darwin_art_libcore_$bridge" >/dev/null ||
+    fail "io_util redirect not linked: $bridge"
+done
+{ nm -u "$objects/io_util_md.o"; nm -u "$objects/UnixFileSystem_md.o"; } |
+  grep -F '_darwin_art_libcore_close' >/dev/null ||
+  fail "filesystem close redirect not linked"
 
 "$cc" "${common_flags[@]}" \
   -c "$project_root/compat/darwin_libcore_filesystem_bridge.c" \

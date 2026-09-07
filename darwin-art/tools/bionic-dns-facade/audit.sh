@@ -155,9 +155,12 @@ if nm -u "$tmp/dns.o" | awk '{print $NF}' |
 fi
 nm -u "$tmp/dns.o" | grep -F '_darwin_art_bionic_errno_store' >/dev/null ||
   fail 'Bionic errno route missing'
-for symbol in getaddrinfo freeaddrinfo gai_strerror getnameinfo inet_ntop; do
+for symbol in __get_h_errno getaddrinfo freeaddrinfo gai_strerror getnameinfo inet_ntop \
+  gethostbyname getservbyname; do
+  definition="darwin_art_bionic_dns_$symbol"
+  [[ "$symbol" == "__get_h_errno" ]] && definition=darwin_art_bionic_dns_get_h_errno
   nm -gU "$tmp/dns.o" |
-    grep -F " _darwin_art_bionic_dns_$symbol" >/dev/null ||
+    grep -F " _$definition" >/dev/null ||
     fail "definition: $symbol"
 done
 ar rcs "$tmp/libdarwin-art-bionic-dns.a" "$tmp/dns.o"
@@ -215,4 +218,4 @@ mkdir -p "$root/_build/bionic-dns-facade"
 cp "$tmp/libdarwin-art-bionic-dns.a" "$root/_build/bionic-dns-facade/"
 cp "$fixture" "$root/_build/bionic-dns-facade/"
 clean
-echo 'bionic-dns-facade: PASS imports=5 Android-ELF=yes localhost+passive+IPv4+IPv6+numeric-reverse+presentation=yes allocation=deep-copy+retire+quiescent-reset policy=absolute-host-dns host-errno=preserved ASan+UBSan+TSan'
+echo 'bionic-dns-facade: PASS imports=8 Android-ELF=yes localhost+passive+IPv4+IPv6+numeric-reverse+presentation=yes legacy-hostent+servent=thread-local-deep-copy allocation=deep-copy+retire+quiescent-reset policy=absolute-host-dns host-errno=preserved ASan+UBSan+TSan'

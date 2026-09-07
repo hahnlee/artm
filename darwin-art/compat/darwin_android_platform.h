@@ -94,5 +94,23 @@ extern "C" void darwin_art_android_surface_transaction_clear(
     void* transaction);
 extern "C" void darwin_art_android_surface_transaction_merge(
     void* destination, void* source);
+// Internal ownership hook: runs only if an unapplied transaction is cleared
+// or deleted. A successful apply consumes it without invoking the callback.
+extern "C" void darwin_art_android_surface_transaction_set_on_discard(
+    void* transaction, void* context, void (*callback)(void*));
+// Stores the bounded transparent-region hint carried by a SurfaceControl
+// transaction. `rects` is a flattened [left, top, right, bottom] array.
+extern "C" void darwin_art_android_surface_transaction_set_transparent_region_hint(
+    void* transaction, void* control, const int32_t* rects, size_t count);
+// Producer-side accessor for the compositor flattening stage. Passing null
+// output with zero capacity queries the number of stored rectangles.
+extern "C" size_t darwin_art_android_surface_control_copy_transparent_region(
+    void* control, int32_t* rects, size_t capacity);
+struct ASurfaceTransactionStats;
+// discard owns its fence; -1 is ready, -2 requires quarantine after fence failure.
+extern "C" void darwin_art_android_surface_transaction_set_buffer_callbacks(
+    void* transaction, void* control, void* context,
+    void (*complete)(void*, ASurfaceTransactionStats*),
+    void (*discard)(void*, int));
 extern "C" void darwin_art_android_surface_transaction_set_relative_layer(
     void* transaction, void* control, void* relative_to, int32_t z);

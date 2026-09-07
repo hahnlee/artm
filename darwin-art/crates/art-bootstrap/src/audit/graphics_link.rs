@@ -34,6 +34,22 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     run_upstream_gates: bool,
     incremental: bool,
 ) -> Result<()> {
+    // The final dylib embeds libartbase and exports its production C++ ABI.
+    // Rebuild that provider through its dependency cache before linking so a
+    // compile-contract change (for example ART_STATIC_LIBARTBASE) cannot be
+    // hidden behind an otherwise fresh-looking archive.
+    build_foundation(root)?;
+    let unwindstack_core = build_runtime_unwindstack_core(root)?;
+    let unwindstack_providers =
+        root.join("_build/runtime-unwindstack/libunwindstack-mach-providers.a");
+    let rust_demangle = root.join(
+        "_build/runtime-unwindstack/rust-demangle-target/release/libdarwin_art_rust_demangle.a",
+    );
+    // dex2oat and the final runtime dylib force-load the compiler archive.
+    // Build that producer edge here so compiler patches cannot be hidden by a
+    // stale archive from an earlier explicit `build-jit-compiler` invocation.
+    build_jit_compiler(root)?;
+    let dex2oat_archive = build_dex2oat(root)?;
     let elf_loader = build_elf_loader(root)?;
     run_command(
         Command::new("bash")
@@ -44,6 +60,9 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         run_graphics_upstream_gates(root, incremental)?;
     }
     let runtime_native_owner_archive = build_runtime_native_owner(root)?;
+    run_command(
+        Command::new("bash").arg(root.join("tools/build-android16-openjdkjvmti-darwin.sh")),
+    )?;
 
     let runtime = root.join("_aosp/art/runtime");
     let build_paths = BuildPaths::from_root(root);
@@ -70,11 +89,14 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         os_constants_archive,
         unix_filesystem_archive,
         openjdkjvm_archive,
+        openjdkjvmti_archive,
         managed_load_archive,
         file_input_stream_archive,
         file_descriptor_archive,
         system_natives_archive,
+        boringssl_crypto_archive,
         unix_native_dispatcher_archive,
+        fdlibm_archive,
         openjdk_nio_mapping_archive,
         openjdk_nio_support_archive,
         libcore_memory_archive,
@@ -88,6 +110,20 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     } = GraphicsRuntimeInputs::load(root, &build_paths)?;
 
     fs::create_dir_all(&build_dir)?;
+    // Boot JavaVMExt must own a separate RTLD_LOCAL image for AOSP OpenJDK's
+    // named-JNI methods. The aggregate runtime image also contains framework
+    // and test Java_* entrypoints and is intentionally not registered as a
+    // boot library.
+    let openjdk_named_jni_owner = build_dir.join("libopenjdk-named-jni-owner.dylib");
+    run_command(
+        Command::new("bash")
+            .arg(root.join("tools/build-android16-openjdk-named-jni-owner.sh"))
+            .arg(&openjdk_named_jni_owner),
+    )?;
+    require_file(
+        &openjdk_named_jni_owner,
+        "OpenJDK named-JNI owner dylib is missing",
+    )?;
     let includes = core_probe_includes(root, &build_paths, &runtime);
     let include_refs = includes.iter().map(PathBuf::as_path).collect::<Vec<_>>();
     let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
@@ -342,6 +378,45 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         compile_runtime_network_loader_probe(root, &build_dir, &include_refs)?;
     let context_loader_object =
         compile_runtime_context_loader_probe(root, &build_dir, &include_refs)?;
+    let mut arttest_objects = Vec::new();
+    for (label, source) in [
+        ("runtime_state", "_aosp/art/test/common/runtime_state.cc"),
+        ("stack_inspect", "_aosp/art/test/common/stack_inspect.cc"),
+        (
+            "native_methods_178",
+            "_aosp/art/test/178-app-image-native-method/native_methods.cc",
+        ),
+        ("registration", "probes/runtime_upstream_arttest.cc"),
+    ] {
+        let arttest_object = build_dir.join(format!("darwin_art_arttest_{label}.cc.o"));
+        let mut arttest_command = runtime_cpp_command(&include_refs);
+        arttest_command
+            .arg("-I")
+            .arg(root.join("_aosp/art/test/common"))
+            .arg("-I")
+            .arg(root.join("_aosp/libnativehelper-full/include"))
+            .arg("-I")
+            .arg(root.join("_aosp/system/logging/liblog/include"))
+            // Headers included from AOSP's runtime directory otherwise find
+            // their unpatched sibling first. Preload the Darwin base-relative
+            // CompressedReference definition so JNI test helpers decode into
+            // the native heap window just like the linked runtime.
+            .arg("-include")
+            .arg(
+                root.join("_build/runtime-common/patched-source/runtime/mirror/object_reference.h"),
+            )
+            .arg("-c")
+            .arg(root.join(source))
+            .arg("-o")
+            .arg(&arttest_object);
+        let _ = compile_cached_probe_tu(
+            &mut arttest_command,
+            &arttest_object,
+            &probe_cache,
+            &compiler_identity,
+        )?;
+        arttest_objects.push(arttest_object);
+    }
     let app_bootstrap_object = if let Some(path) =
         env::var_os("DARWIN_ART_NATIVE_APP_BOOTSTRAP_OBJECT")
         && Path::new(&path).is_file()
@@ -375,13 +450,141 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     let (surface_object, surface_gpu_object) =
         compile_surface_objects(root, &build_dir, &probe_cache, &compiler_identity)?;
 
+    // Android's libart is a shared-library boundary for the in-APEX
+    // libarttest/JVMTI clients.  An ld64 `-exported_symbol` option turns the
+    // complete dylib export table into an allowlist, so the small host ABI
+    // list below used to hide ordinary AOSP C++ definitions.  Export every
+    // external definition from the pinned libart provider archives and union
+    // it with the fixed Darwin C ABI below.  The graphics bootstrap archive
+    // is not the whole provider boundary: runtime-core owns synchronization
+    // primitives and libartbase owns allocators used directly by unchanged
+    // AOSP native run-tests.  Keeping the provider set here (at the
+    // production dylib boundary) avoids test-specific link shims.
+    let art_export_list = build_dir.join("aosp-libart.exports");
+    let art_export_providers = [
+        bootstrap.clone(),
+        root.join("_build/runtime-core/libart-core-darwin.a"),
+        root.join("_build/foundation/libartbase-darwin.a"),
+        // AOSP libopenjdk declares libopenjdkjvm as a shared dependency.  The
+        // Darwin aggregate is the process libart/libopenjdkjvm provider, so
+        // publish that pinned module's complete public JVM_/jio_ ABI for the
+        // sibling RTLD_LOCAL named-JNI image instead of cloning its TU there.
+        openjdkjvm_archive.clone(),
+        // libopenjdk_native_defaults also declares libnativehelper#impl as a
+        // shared dependency.  Keep that genuine provider visible across the
+        // same process boundary; jni_util must not rely on a private symbol
+        // accidentally present in the aggregate image.
+        root.join("_build/nativehelper-device-foundation/libnativehelper-device-darwin.a"),
+        // OpenJDK's RTLD_LOCAL named-JNI owner is loaded after libart.  Its
+        // NIO implementation is the AOSP module closure and must resolve the
+        // process-wide Bionic facade ABI through the runtime boundary, not
+        // through ad-hoc per-owner copies or test-specific stubs.
+        root.join("_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a"),
+        root.join("_build/bionic-runtime-provider-closure/libdarwin-art-bionic-rust-providers.a"),
+        root.join("_build/bionic-runtime-provider-closure/libdarwin-art-bionic-float-conversion.a"),
+    ];
+    let mut art_exports = Vec::new();
+    for provider in &art_export_providers {
+        let provider_symbols = command_output(Command::new("nm").args(["-gU"]).arg(provider))?;
+        let provider_exports = provider_symbols
+            .lines()
+            .filter_map(|line| {
+                let fields = line.split_whitespace().collect::<Vec<_>>();
+                let kind = fields.get(fields.len().saturating_sub(2)).copied();
+                let symbol = fields.last().copied();
+                match (kind, symbol) {
+                    (Some(kind), Some(symbol))
+                        if kind.len() == 1 && "TtDdSsBbCcWwVv".contains(kind) =>
+                    {
+                        Some(symbol)
+                    }
+                    _ => None,
+                }
+            })
+            .filter(|symbol| symbol.starts_with('_'))
+            // Rust provider archives also contain compiler-builtins/std
+            // implementation members. They are not standalone shared-ABI
+            // definitions and must not become forced linker roots.
+            .filter(|symbol| !symbol.contains('$'))
+            // Do not turn archive-local C++ static initializers into part of
+            // the shared ABI.  In particular libartbase's globals_unix.cc
+            // constructor asserts that a separately loaded Android
+            // libartbase.dylib exists; Darwin embeds this provider in libart
+            // instead, so retaining that initializer would make every host
+            // runtime fail before it can execute the test client.
+            .filter(|symbol| {
+                !symbol.contains("GLOBAL__sub_I_") && !symbol.contains("cxx_global_var_init")
+            })
+            .map(str::to_owned);
+        art_exports.extend(provider_exports);
+    }
+    // JNI entrypoints are intentionally discovered by ART at runtime, so they
+    // have no ordinary relocation from the image. Keep the archive force-
+    // loaded below and derive its complete JNI export surface from the
+    // provider itself. This is one generic contract for every OpenJDK native
+    // method; it must not grow one `-u` linker root per application or test.
+    let nio_symbols = command_output(
+        Command::new("nm")
+            .args(["-gU"])
+            .arg(&unix_native_dispatcher_archive),
+    )?;
+    let nio_jni_exports = nio_symbols
+        .lines()
+        .filter_map(|line| line.split_whitespace().last())
+        .filter(|symbol| symbol.starts_with("_Java_"))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if nio_jni_exports.is_empty() {
+        return Err("OpenJDK NIO archive has no JNI entrypoints".into());
+    }
+    art_exports.extend(nio_jni_exports);
+    art_exports.sort_unstable();
+    art_exports.dedup();
+    if art_exports.is_empty() {
+        return Err("pinned libart bootstrap has no external exports".into());
+    }
+    fs::write(&art_export_list, format!("{}\n", art_exports.join("\n")))?;
+
     let link_map = build_dir.join("runtime-graphics-link.map");
     let mut linker = Command::new("clang++");
     linker
         .arg("-dynamiclib")
         .arg("-Wl,-install_name,@rpath/libdarwin_art_runtime_graphics.dylib")
+        // Pass the list as a distinct linker argument so link_with_cache can
+        // fingerprint the file itself (the comma-joined -Wl spelling hides
+        // the path from its input metadata walk).
+        .args(["-Xlinker", "-exported_symbols_list", "-Xlinker"])
+        .arg(&art_export_list)
         .arg("-Wl,-exported_symbol,_darwin_art_run_process")
+        .arg("-Wl,-exported_symbol,_darwin_art_run_dex2oat")
+        .arg("-Wl,-exported_symbol,_darwin_art_run_profman")
         .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
+        .arg("-Wl,-exported_symbol,_darwin_art_upstream_open_file_for_reading")
+        .arg("-Wl,-exported_symbol,_darwin_art_upstream_fd_file_read_fully")
+        .arg("-Wl,-exported_symbol,_Java_Main_makeVisiblyInitialized")
+        .arg("-Wl,-exported_symbol,_Java_Test_nativeMethodVoid")
+        .arg("-Wl,-exported_symbol,_Java_Test_nativeMethod")
+        .arg("-Wl,-exported_symbol,_Java_Test_nativeMethodWithManyParameters")
+        .arg("-Wl,-exported_symbol,_Java_TestFast_nativeMethodVoid")
+        .arg("-Wl,-exported_symbol,_Java_TestFast_nativeMethod")
+        .arg("-Wl,-exported_symbol,_Java_TestFast_nativeMethodWithManyParameters")
+        .arg("-Wl,-exported_symbol,_Java_TestCritical_nativeMethodVoid")
+        .arg("-Wl,-exported_symbol,_Java_TestCritical_nativeMethod")
+        .arg("-Wl,-exported_symbol,_Java_TestCritical_nativeMethodWithManyParameters")
+        .arg("-Wl,-exported_symbol,_Java_CriticalSignatures_nativeILFFFFD")
+        .arg("-Wl,-exported_symbol,_Java_CriticalSignatures_nativeLIFFFFD")
+        .arg("-Wl,-exported_symbol,_Java_CriticalSignatures_nativeFLIFFFD")
+        .arg("-Wl,-exported_symbol,_Java_CriticalSignatures_nativeDDIIIIII")
+        .arg("-Wl,-exported_symbol,_Java_CriticalSignatures_nativeDFFILIII")
+        .arg("-Wl,-exported_symbol,_Java_CriticalSignatures_nativeDDFILIII")
+        .arg("-Wl,-exported_symbol,_Java_CriticalSignatures_nativeDDIFII")
+        .arg("-Wl,-exported_symbol,_Java_CriticalSignatures_nativeFullArgs")
+        .arg("-Wl,-exported_symbol,_Java_CriticalSignatures_nativeDFDFDFDFDFIJ")
+        .arg("-Wl,-exported_symbol,_Java_CriticalClinitCheck_nativeMethodVoid")
+        .arg("-Wl,-exported_symbol,_Java_CriticalClinitCheck_nativeMethod")
+        .arg("-Wl,-exported_symbol,_Java_CriticalClinitCheck_nativeMethodWithManyParameters")
+        .arg("-Wl,-exported_symbol,_Java_Main_b189235039CallThrough")
+        .arg("-Wl,-exported_symbol,_Java_Main_b189235039CheckLocks")
         .arg("-Wl,-exported_symbol,_darwin_art_dispatch_pointer")
         .arg("-Wl,-exported_symbol,_darwin_art_pump_framework_frame")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_create")
@@ -417,8 +620,35 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_attach")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_lookup")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_destroy")
+        .arg("-Wl,-exported_symbol,___jit_debug_descriptor")
+        .arg("-Wl,-exported_symbol,_ArtPlugin_Initialize")
+        .arg("-Wl,-exported_symbol,_ArtPlugin_Deinitialize")
+        // Runtime::AttachAgent is an AOSP EXPORT surface consumed by
+        // libarttest/libtiagent. The explicit Darwin export list must retain
+        // that public ART test-agent ABI instead of hiding it accidentally.
+        .arg("-Wl,-exported_symbol,__ZN3art7Runtime11AttachAgentEP7_JNIEnvRKNSt3__112basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEEP8_jobject")
+        // libarttest is an AOSP runtime-test client of these ART APIs. Keep
+        // their original C++ ABI visible so tests such as 566 can inspect the
+        // real JIT code cache without a Darwin-only replacement JNI method.
+        .arg("-Wl,-exported_symbol,__ZN3art3jit3Jit13JitAtFirstUseEv")
+        .arg("-Wl,-exported_symbol,__ZN3art6mirror5Class30FindDeclaredDirectMethodByNameENSt3__117basic_string_viewIcNS2_11char_traitsIcEEEENS_11PointerSizeE")
+        .arg("-Wl,-exported_symbol,__ZN3art8CodeInfoC1EPKNS_20OatQuickMethodHeaderE")
+        .arg("-Wl,-exported_symbol,__ZNK3art3jit12JitCodeCache10ContainsPcEPKv")
+        // AOSP hidden-api run-tests consume the public DexFileLoader overload
+        // and its no-file sentinel from libarttest. Keep those libdexfile
+        // symbols visible from the runtime image; the implementation remains
+        // owned by the linked libdexfile archive.
+        .arg("-Wl,-exported_symbol,__ZN3art13DexFileLoader12kInvalidFileE")
+        .arg("-Wl,-exported_symbol,__ZN3art13DexFileLoader4OpenEbbbPNS_22DexFileLoaderErrorCodeEPNSt3__112basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEEPNS3_6vectorINS3_10unique_ptrIKNS_7DexFileENS3_14default_deleteISE_EEEENS7_ISH_EEEE")
         .arg("-Wl,-exported_symbol,_EnsureFrontOfChain")
         .arg("-Wl,-exported_symbol,_darwin_art_sigchain_owns_signal")
+        .arg("-Wl,-exported_symbol,_darwin_art_sigchain_sigaction")
+        // Converted Mach-O JNI modules observe Android's logical pthread name
+        // even when Darwin cannot rename a different host pthread directly.
+        .arg("-Wl,-u,_darwin_art_pthread_getname_np")
+        .arg("-Wl,-exported_symbol,_darwin_art_pthread_getname_np")
+        .arg("-Wl,-u,_darwin_art_pthread_setname_np")
+        .arg("-Wl,-exported_symbol,_darwin_art_pthread_setname_np")
         // libjnigraphics is a virtual Android platform DSO. Keep its fixed C
         // ABI entry points dynamically visible so the ELF provider resolver
         // can bind AndroidBitmap_* without manufacturing a host dylib.
@@ -428,6 +658,14 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_AndroidBitmap_getInfo")
         .arg("-Wl,-exported_symbol,_AndroidBitmap_lockPixels")
         .arg("-Wl,-exported_symbol,_AndroidBitmap_unlockPixels")
+        // The named-JNI owner reaches these TLS errno adapters through
+        // indirect NIO calls, so retain them as real runtime ABI roots.
+        .arg("-Wl,-u,_darwin_art_bionic_errno_load")
+        .arg("-Wl,-u,_darwin_art_bionic_errno_store")
+        .arg("-Wl,-u,_darwin_art_bionic_errno_set_from_darwin")
+        .arg("-Wl,-exported_symbol,_darwin_art_bionic_errno_load")
+        .arg("-Wl,-exported_symbol,_darwin_art_bionic_errno_store")
+        .arg("-Wl,-exported_symbol,_darwin_art_bionic_errno_set_from_darwin")
         .arg("-Wl,-dead_strip")
         .arg(format!("-Wl,-map,{}", link_map.display()))
         .arg(&object)
@@ -443,6 +681,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&graphics_state_object)
         .arg(&network_loader_object)
         .arg(&context_loader_object)
+        .args(&arttest_objects)
         .arg(&app_bootstrap_object)
         .arg(&app_resources_object)
         .arg(&app_activity_object)
@@ -482,7 +721,18 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         // graphics archives. Place its fixed definitions before ART's normal
         // archives so the latter extract only additional runtime providers.
         .arg(&graphics_closure)
+        // Keep OpenJDK JVMTI in the same ART image on Darwin. Its implementation
+        // consumes ART-private symbols that are hidden across Android DSOs as
+        // part of one APEX closure; embedding the archive preserves that
+        // ownership without exporting the entire Runtime C++ ABI.
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            openjdkjvmti_archive.display()
+        ))
         .arg(&bootstrap)
+        .arg(&unwindstack_providers)
+        .arg(&unwindstack_core)
+        .arg(&rust_demangle)
         .arg(format!(
             "-Wl,-force_load,{}",
             root.join(
@@ -495,11 +745,13 @@ pub(crate) fn audit_runtime_graphics_link_mode(
                 "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a",
             ),
         )
-        .arg(
+        .arg(format!(
+            "-Wl,-force_load,{}",
             root.join(
                 "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-float-conversion.a",
-            ),
-        )
+            )
+            .display()
+        ))
         .arg(
             root.join(
                 "_build/bionic-runtime-provider-closure/libdarwin-art-bionic-rust-providers.a",
@@ -512,8 +764,16 @@ pub(crate) fn audit_runtime_graphics_link_mode(
             runtime_native_owner_archive.display()
         ))
         .arg(&system_natives_archive)
+        .arg(&boringssl_crypto_archive)
         .arg(&file_descriptor_archive)
+        // Keep the complete OpenJDK NIO owner resident. UnixCopyFile.transfer
+        // is discovered by ART's JNI lookup rather than referenced by the
+        // link graph, so a normal archive edge would dead-strip its object.
+        // Keep the archive path as a distinct linker argument so the native
+        // link fingerprint observes archive replacement as an input change.
+        .args(["-Xlinker", "-force_load", "-Xlinker"])
         .arg(&unix_native_dispatcher_archive)
+        .arg(&fdlibm_archive)
         .arg(&file_input_stream_archive)
         .arg(&openjdk_nio_mapping_archive)
         .arg(&openjdk_nio_support_archive)
@@ -536,6 +796,9 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&asynchronous_close_registrar)
         .arg(&asynchronous_close_backend)
         .arg(root.join("_build/interpreter-core/libart-interpreter-darwin.a"))
+        .arg(format!("-Wl,-force_load,{}", dex2oat_archive.display()))
+        .arg(root.join("_build/jit-compiler/libart-compiler-darwin.a"))
+        .arg(root.join("_build/jit-compiler/libart-libelffile-darwin.a"))
         .arg(root.join("_build/runtime-arm64/libart-arm64-darwin.a"))
         .arg(root.join("_build/runtime-core/libart-core-darwin.a"))
         .arg(root.join("_build/runtime-platform/libart-platform-darwin.a"))
@@ -570,6 +833,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .args([
             "-L/opt/homebrew/lib",
             "-llz4",
+            "-lzstd",
             "-lsqlite3",
             "-lz",
             "-lresolv",
@@ -605,6 +869,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
             "-o",
         ])
         .arg(&runtime_library);
+    super::art_test_exports::apply(&mut linker);
     let description = describe_command(&linker);
     let link_stamp = build_dir.join("runtime-graphics-link.fingerprint");
     let output = link_with_cache(&mut linker, &runtime_library, &link_stamp)?;
@@ -614,7 +879,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         return Err(format!("real-graphics Runtime link failed: {description}\n{stderr}").into());
     }
 
-    validate_graphics_runtime_link(root, &runtime_library, &link_map)?;
+    validate_graphics_runtime_link(root, &runtime_library, &openjdk_named_jni_owner, &link_map)?;
     build_runtime_host(root)?;
     println!(
         "audit-runtime-graphics-link: closure complete registrar=51 fake-symbols=0 host-icu=0 host-fmt=0 CoreText=0"

@@ -47,6 +47,34 @@ fn main() {
     let setjmp = output_dir.join("setjmp.o");
     let errno = output_dir.join("errno.o");
     let archive = output_dir.join("libdarwin_art_bionic_process_state.a");
+    let syscall = output_dir.join("syscall.o");
+    let syscall_entry = output_dir.join("syscall_entry.o");
+    let standalone = env::var_os("CARGO_FEATURE_STANDALONE_SYSCALL").is_some();
+    if standalone {
+        assert!(
+            Command::new("clang++")
+                .args([
+                    "-std=c++20",
+                    "-O2",
+                    "-I../bionic-syscall-facade/include",
+                    "-c",
+                    "../bionic-syscall-facade/src/syscall.cc",
+                    "-o"
+                ])
+                .arg(&syscall)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("clang")
+                .args(["-c", "../bionic-syscall-facade/src/aapcs64_entry.S", "-o"])
+                .arg(&syscall_entry)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
     compile("src/shims.c", &shims, &sdk, &["include"]);
     assert!(
         Command::new("clang")
@@ -73,19 +101,28 @@ fn main() {
             "../bionic-errno-tls/generated",
         ],
     );
-    assert!(
-        Command::new("ar")
-            .arg("rcs")
-            .arg(&archive)
-            .arg(&shims)
-            .arg(&setjmp)
-            .arg(&errno)
-            .status()
-            .unwrap()
-            .success()
-    );
+    if archive.exists() {
+        std::fs::remove_file(&archive).unwrap();
+    }
+    let mut archiver = Command::new("ar");
+    archiver
+        .arg("rcs")
+        .arg(&archive)
+        .arg(&shims)
+        .arg(&setjmp)
+        .arg(&errno);
+    if standalone {
+        archiver.arg(&syscall).arg(&syscall_entry);
+    }
+    assert!(archiver.status().unwrap().success());
     println!("cargo:rustc-link-search=native={}", output_dir.display());
     println!("cargo:rustc-link-lib=static=darwin_art_bionic_process_state");
+    if standalone {
+        println!("cargo:rustc-link-lib=c++");
+    }
+    println!("cargo:rerun-if-changed=../bionic-syscall-facade/src/syscall.cc");
+    println!("cargo:rerun-if-changed=../bionic-syscall-facade/src/aapcs64_entry.S");
+    println!("cargo:rerun-if-changed=../bionic-syscall-facade/include/darwin_art_bionic_syscall.h");
     for source in [
         "src/shims.c",
         "src/setjmp_arm64.S",

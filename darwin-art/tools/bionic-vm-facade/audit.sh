@@ -25,7 +25,7 @@ clean() {
 clean
 imports="$root/tools/bionic-libc-leaf-facade/imports/ndk-r28c-api35-arm64-libc.tsv"
 check "$imports" "$LIBC_IMPORT_MANIFEST_SHA256"
-[[ "$(tail -n +2 "$dir/manifests/imports.tsv" | wc -l | tr -d ' ')" == 6 ]] || fail 'manifest count'
+[[ "$(tail -n +2 "$dir/manifests/imports.tsv" | wc -l | tr -d ' ')" == 8 ]] || fail 'manifest count'
 while IFS=$'\t' read -r symbol kind demand policy; do
   [[ "$symbol" == symbol ]] && continue
   [[ "$kind" == FUNC && "$demand" == absent && -n "$policy" ]] || fail "manifest row: $symbol"
@@ -70,6 +70,7 @@ _darwin_art_bionic_vm_mmap_core
 _darwin_art_bionic_vm_mprotect_core
 _darwin_art_bionic_vm_mremap_core
 _darwin_art_bionic_vm_munmap_core
+_darwin_art_host_vm_page_size
 _memset
 EOF
 diff -u "$tmp/shims.expected" "$tmp/shims.actual" || fail 'shim dependencies'
@@ -97,6 +98,7 @@ awk '$7=="UND"&&$8!=""{print $8}' "$tmp/dynsyms" | sort -u > "$tmp/imports.actua
 cat > "$tmp/imports.expected" <<'EOF'
 __errno@LIBC
 madvise@LIBC
+mincore@LIBC
 mmap64@LIBC
 mmap@LIBC
 mprotect@LIBC
@@ -120,4 +122,4 @@ BIONIC_VM_C_SANITIZER=address CARGO_TARGET_DIR="$tmp/asan" cargo run --quiet --m
 UBSAN_OPTIONS=halt_on_error=1 BIONIC_VM_C_SANITIZER=undefined CARGO_TARGET_DIR="$tmp/ubsan" cargo run --quiet --manifest-path "$dir/Cargo.toml" -- "$fixture"
 cargo fmt --manifest-path "$dir/Cargo.toml" -- --check
 clean
-echo "bionic-vm-facade: PASS libc++-demand=0 imports=7@LIBC anon-private+shared remap-move RW-RX-exec DONTNEED-zero race C-ASan C-UBSan target-clean"
+echo "bionic-vm-facade: PASS libc++-demand=0 imports=8@LIBC anon-private+shared remap-move RW-RX-exec DONTNEED-zero mincore-page-size race C-ASan C-UBSan target-clean"

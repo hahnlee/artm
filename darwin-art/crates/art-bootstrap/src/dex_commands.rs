@@ -48,6 +48,14 @@ pub(crate) fn find_android_platform_jar() -> Result<PathBuf> {
     Ok(jar)
 }
 
+pub(crate) fn find_android_core_system_modules() -> Result<PathBuf> {
+    let jar = android_sdk_root()?.join("platforms/android-36/core-for-system-modules.jar");
+    if !jar.is_file() {
+        return Err(format!("Android core system modules are missing: {}", jar.display()).into());
+    }
+    Ok(jar)
+}
+
 // D8 is free to renumber synthetic lambda classes when an unrelated method is
 // added. Treating its full diagnostic string as a golden file made every Java
 // compatibility edit rebuild foundation twice merely to discover the next
@@ -59,7 +67,7 @@ pub(crate) fn verify_dex_contract(
     methods: usize,
     required_descriptors: &[&str],
 ) -> Result<()> {
-    let header = format!("AOSP DEX: verified=yes version=35 classes={classes} methods={methods} ");
+    let header = format!("AOSP DEX: verified=yes version=38 classes={classes} methods={methods} ");
     if !output.trim().starts_with(&header) {
         return Err(format!("unexpected DEX contract header: {output:?}").into());
     }

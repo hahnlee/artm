@@ -90,10 +90,22 @@ pub(crate) fn build_runtime_core(root: &Path) -> Result<()> {
         patched_runtime.join("monitor.cc"),
     )?;
     fs::copy(runtime.join("base/mutex.h"), patched_base.join("mutex.h"))?;
+    fs::copy(
+        runtime.join("base/mutex-inl.h"),
+        patched_base.join("mutex-inl.h"),
+    )?;
     fs::copy(runtime.join("base/mutex.cc"), patched_base.join("mutex.cc"))?;
     fs::copy(
         runtime.join("mirror/object_reference.h"),
         patched_mirror.join("object_reference.h"),
+    )?;
+    fs::copy(
+        runtime.join("lock_word.h"),
+        patched_runtime.join("lock_word.h"),
+    )?;
+    fs::copy(
+        runtime.join("lock_word-inl.h"),
+        patched_runtime.join("lock_word-inl.h"),
     )?;
 
     for patch in [
@@ -101,6 +113,9 @@ pub(crate) fn build_runtime_core(root: &Path) -> Result<()> {
         "patches/art/0004-darwin-uncontended-monitor-lock.patch",
         "patches/art/0004b-darwin-cross-thread-monitor-lock.patch",
         "patches/art/0026-darwin-base-relative-object-references-only.patch",
+        "patches/art/0033-darwin-base-relative-lockword-forwarding.patch",
+        "patches/art/0042b-darwin-compressed32-monitor-boundary.patch",
+        "patches/art/0078-darwin-pthread-empty-checkpoints.patch",
     ] {
         run_command(
             Command::new("patch")
@@ -161,7 +176,7 @@ pub(crate) fn build_runtime_core(root: &Path) -> Result<()> {
 
 pub(crate) fn probe_park(root: &Path) -> Result<()> {
     let mutex_object = root.join("_build/runtime-core/objects/mutex.cc.o");
-    let patched_runtime = root.join("_build/runtime-bootstrap/patched-source/runtime");
+    let patched_runtime = root.join("_build/runtime-common/patched-source/runtime");
     if !mutex_object.exists() || !patched_runtime.join("thread.h").exists() {
         return Err(
             "Darwin runtime objects are missing; run `build-runtime-bootstrap` first".into(),

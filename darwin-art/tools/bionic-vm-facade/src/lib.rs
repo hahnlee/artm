@@ -30,6 +30,9 @@ const ANDROID_MREMAP_MAYMOVE: i32 = 0x1;
 
 const MAX_MAPPINGS: usize = 1024;
 const MAP_FAILED: *mut c_void = usize::MAX as *mut c_void;
+const VM_MADVISE_TRACE_LIMIT: usize = 256;
+
+static VM_MADVISE_TRACE_EVENTS: AtomicUsize = AtomicUsize::new(0);
 
 struct JitRange {
     start: AtomicUsize,
@@ -442,6 +445,26 @@ fn host_protection(android: i32) -> Option<i32> {
         host |= 4;
     }
     Some(host)
+}
+
+fn trace_madvise_event(
+    enabled: bool,
+    phase: &str,
+    address: *mut c_void,
+    length: usize,
+    advice: c_int,
+    error: i32,
+) {
+    if !enabled {
+        return;
+    }
+    let sequence = VM_MADVISE_TRACE_EVENTS.fetch_add(1, Ordering::Relaxed);
+    if sequence < VM_MADVISE_TRACE_LIMIT {
+        eprintln!(
+            "DARWIN VM: madvise {phase} address={:#x} length={length:#x} advice={advice} errno={error}",
+            address as usize
+        );
+    }
 }
 
 fn whole_mapping(mapping: Mapping, length: usize) -> bool {
@@ -1259,11 +1282,28 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_madvise_core(
     advice: c_int,
 ) -> c_int {
     let trace = std::env::var_os("DARWIN_ART_VM_TRACE").is_some();
+    trace_madvise_event(trace, "ENTRY", address, length, advice, 0);
     let Some(provider) = provider() else {
+        trace_madvise_event(
+            trace,
+            "EARLY_NO_PROVIDER",
+            address,
+            length,
+            advice,
+            ANDROID_EIO,
+        );
         return -1;
     };
     if address.is_null() || length == 0 || address as usize % provider.page_size != 0 {
         set_errno(ANDROID_EINVAL);
+        trace_madvise_event(
+            trace,
+            "EARLY_INVALID_RANGE",
+            address,
+            length,
+            advice,
+            ANDROID_EINVAL,
+        );
         return -1;
     }
     let host_advice = match advice {
@@ -1276,10 +1316,26 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_madvise_core(
         8 => 5,
         9..=25 | 100 | 101 => {
             set_errno(ANDROID_EOPNOTSUPP);
+            trace_madvise_event(
+                trace,
+                "EARLY_UNSUPPORTED_ADVICE",
+                address,
+                length,
+                advice,
+                ANDROID_EOPNOTSUPP,
+            );
             return -1;
         }
         _ => {
             set_errno(ANDROID_EINVAL);
+            trace_madvise_event(
+                trace,
+                "EARLY_INVALID_ADVICE",
+                address,
+                length,
+                advice,
+                ANDROID_EINVAL,
+            );
             return -1;
         }
     };
@@ -1288,15 +1344,39 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_madvise_core(
         Err(_) => {
             provider.capability_failure.store(true, Ordering::Release);
             set_errno(ANDROID_EIO);
+            trace_madvise_event(
+                trace,
+                "EARLY_MAPPING_LOCK",
+                address,
+                length,
+                advice,
+                ANDROID_EIO,
+            );
             return -1;
         }
     };
     let Some(mapped_length) = round_length(length, provider.page_size) else {
         set_errno(ANDROID_EOVERFLOW);
+        trace_madvise_event(
+            trace,
+            "EARLY_LENGTH_OVERFLOW",
+            address,
+            length,
+            advice,
+            ANDROID_EOVERFLOW,
+        );
         return -1;
     };
     if !owned_range(&mappings, address as usize, mapped_length) {
         set_errno(ANDROID_ENOMEM);
+        trace_madvise_event(
+            trace,
+            "EARLY_UNOWNED_RANGE",
+            address,
+            mapped_length,
+            advice,
+            ANDROID_ENOMEM,
+        );
         return -1;
     }
     if advice == 4 {
@@ -1350,12 +1430,14 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_madvise_core(
                 }
             };
             if result != 0 {
-                if trace {
-                    eprintln!(
-                        "DARWIN VM: MADV_DONTNEED failed address={segment_start:#x} length={segment_length:#x} anonymous={} errno={host_error}",
-                        mapping.anonymous
-                    );
-                }
+                trace_madvise_event(
+                    trace,
+                    "HOST_ERROR",
+                    segment_start as *mut c_void,
+                    segment_length,
+                    advice,
+                    host_error,
+                );
                 fail_host(&provider, host_error);
                 return -1;
             }
@@ -1367,6 +1449,14 @@ pub unsafe extern "C" fn darwin_art_bionic_vm_madvise_core(
     if unsafe { darwin_art_host_vm_advise(address, mapped_length, host_advice, &mut host_error) }
         != 0
     {
+        trace_madvise_event(
+            trace,
+            "HOST_ERROR",
+            address,
+            mapped_length,
+            advice,
+            host_error,
+        );
         fail_host(&provider, host_error);
         return -1;
     }

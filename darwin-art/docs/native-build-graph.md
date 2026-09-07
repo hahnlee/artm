@@ -183,8 +183,12 @@ name, avoiding the legacy rule for every object. On the reference machine the
 first Ninja promotion after this fix rebuilt 221 objects in 159.28s; the next
 graph query reported `ninja: no work to do` in 0.03s.
 The process-wide NativeBridge/NativeLoader hooks are a third independent
-object, `darwin_native_bridge_stubs.cc`; only the per-image trampoline selector
-stays in the graph-aware adapter.
+object, `darwin_native_bridge_stubs.cc`. The filename is historical: this
+translation unit now compiles the pinned Android 16 libnativebridge state
+machine and adds only the Darwin host wrappers needed to prefer translated
+Android ELF/dylib trampolines. Per-image ELF trampoline selection remains in
+the graph-aware adapter, and NativeLoader retains Android's bridge fallback
+after the native Darwin load attempt.
 Descriptor-to-shorty planning is a fourth cached object,
 `darwin_jni_shorty.cc`, so changing the regular JNI proxy does not rebuild the
 parser and vice versa.
@@ -220,6 +224,15 @@ static library. Its opaque native-owner symbols are exported and audited in
 both CPU and graphics dylibs; the Rust archive is built incrementally by Cargo
 and does not participate in the large AOSP/HWUI object promotion.
 
+The Darwin sigchain adapter remains part of the shared runtime-common object
+boundary. Its user-handler dispatch now restores the fault context's signal
+mask after the Mach SIGBUS-to-SIGSEGV bridge calls an application action as an
+ordinary function, recreating the kernel `sigreturn` boundary used by AOSP.
+The incremental graph rebuilt only `darwin_sigchain.cc.o`, its shared archive,
+the JIT edge, and the graphics link/audit closure. The link audit, the focused
+direct-dispatch mask smoke, and unchanged `004-SignalTest` interpreter/JIT
+execution all pass without a test-specific shutdown path.
+
 The `compat/darwin_art_abi_layout.cc` TU is a deliberately tiny native ABI
 gate. It statically asserts the C process/result/surface layouts exported by
 `include/darwin_art/darwin_art.h` and `compat/darwin_surface_bridge.h`; the
@@ -236,3 +249,13 @@ remaining graphics probe owns Java recording/orchestration state. The linker
 consumes all phase objects, so a change to framework validation or input
 handling does not recompile the HWUI/Skia implementation and a graphics
 implementation change does not rebuild the orchestration phases.
+
+NativeBridge run-test staging keeps canonical compiled dylibs as shared build
+outputs, then copies the declared bridge and native-test fixture namespace into
+each mode's disposable action root. This lets unchanged typed `run.py` actions
+create their process-visible aliases without granting write authority to the
+shared output directory or weakening path confinement. The production runtime
+still exercises the pinned NativeBridge state machine, namespace, trampoline,
+JNI lifecycle, and signal callbacks; the staging copy adds no alternate loader
+or test-specific runtime path. The focused state-machine/control-flow audit and
+unchanged `115-native-bridge` interpreter/JIT exact-output run pass.

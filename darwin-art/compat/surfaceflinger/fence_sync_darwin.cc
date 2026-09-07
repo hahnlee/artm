@@ -34,6 +34,15 @@ extern "C" int sync_merge(const char*, int fd1, int fd2) {
   if (pipe(descriptors) != 0) return -1;
   fcntl(descriptors[0], F_SETFD, FD_CLOEXEC);
   fcntl(descriptors[1], F_SETFD, FD_CLOEXEC);
+#ifdef F_SETNOSIGPIPE
+  // Closing a sync fence cancels observation, not the underlying GPU work.
+  // Its internal completion writer must not raise an application SIGPIPE.
+  if (fcntl(descriptors[1], F_SETNOSIGPIPE, 1) != 0) {
+    close(descriptors[0]);
+    close(descriptors[1]);
+    return -1;
+  }
+#endif
 
   const int first = dup(fd1);
   const int second = dup(fd2);

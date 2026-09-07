@@ -829,6 +829,20 @@ extern "C" int darwin_art_bionic_toupper(int value) {
   return value >= 'a' && value <= 'z' ? value ^ 0x20 : value;
 }
 
+extern "C" int darwin_art_bionic_tolower_l(
+    int value,
+    DarwinArtAndroidLocale /*locale*/) {
+  // Android's locale_t is an opaque Bionic handle.  The supported locale
+  // set has C byte semantics, so do not pass that guest handle to Darwin.
+  return darwin_art_bionic_tolower(value);
+}
+
+extern "C" int darwin_art_bionic_toupper_l(
+    int value,
+    DarwinArtAndroidLocale /*locale*/) {
+  return darwin_art_bionic_toupper(value);
+}
+
 extern "C" uint32_t darwin_art_bionic_towlower_l(
     uint32_t code_point,
     DarwinArtAndroidLocale /*locale*/) {
@@ -1004,11 +1018,13 @@ extern "C" void* darwin_art_bionic_locale_resolve(const char* soname,
   RESOLVE(strxfrm_l);
   RESOLVE(strxfrm);
   RESOLVE(tolower);
+  RESOLVE(tolower_l);
   RESOLVE(towlower_l);
   RESOLVE(towlower);
   RESOLVE(towupper_l);
   RESOLVE(towupper);
   RESOLVE(toupper);
+  RESOLVE(toupper_l);
   RESOLVE(uselocale);
   RESOLVE(wcrtomb);
   RESOLVE(wcscoll_l);

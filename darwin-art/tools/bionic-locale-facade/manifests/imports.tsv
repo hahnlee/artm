@@ -38,10 +38,12 @@ strcoll_l	FUNC	LIBC	C-collation
 strxfrm_l	FUNC	LIBC	C-collation
 strxfrm	FUNC	LIBC	C-collation
 tolower	FUNC	LIBC	C-byte-mapping
+tolower_l	FUNC	LIBC	C-byte-mapping
 towlower_l	FUNC	LIBC	Android-ICU76-Unicode-mapping
 towupper_l	FUNC	LIBC	Android-ICU76-Unicode-mapping
 towupper	FUNC	LIBC	Android-ICU76-Unicode-mapping
 toupper	FUNC	LIBC	C-byte-mapping
+toupper_l	FUNC	LIBC	C-byte-mapping
 uselocale	FUNC	LIBC	locale-thread-state
 wcrtomb	FUNC	LIBC	utf8-multibyte
 wcscoll_l	FUNC	LIBC	C-collation

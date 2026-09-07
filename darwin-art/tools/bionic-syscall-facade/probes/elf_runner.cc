@@ -78,6 +78,7 @@ int main(int argc, char** argv) {
         "run initializers");
 
   using Gettid = long (*)();
+  using Getpid = long (*)();
   using RtTgSigqueueinfo = long (*)(int, int, int, const void*);
   using Getrandom = long (*)(void*, uint64_t, uint32_t);
   using Getaffinity = long (*)(int, uint64_t, void*);
@@ -87,6 +88,7 @@ int main(int argc, char** argv) {
   using CountedWake = long (*)(int32_t*, int32_t);
   using Readable = long (*)(const void*);
   Gettid gettid = Lookup<Gettid>(image, "SyscallFixtureGettid");
+  Getpid getpid = Lookup<Getpid>(image, "SyscallFixtureGetpid");
   RtTgSigqueueinfo rt_tgsigqueueinfo = Lookup<RtTgSigqueueinfo>(
       image, "SyscallFixtureRtTgSigqueueinfo");
   Getrandom getrandom =
@@ -111,6 +113,10 @@ int main(int argc, char** argv) {
   const long main_tid = gettid();
   Check(main_tid > 0 && gettid() == main_tid && errno == EDOM,
         "stable main gettid and host errno");
+  const long main_pid = getpid();
+  Check(main_pid > 0 && main_pid == static_cast<long>(::getpid()) &&
+            getpid() == main_pid && errno == EDOM,
+        "host process getpid and host errno");
   std::vector<long> tids(8);
   std::vector<std::thread> tid_threads;
   for (size_t index = 0; index < tids.size(); ++index) {
@@ -166,20 +172,61 @@ int main(int argc, char** argv) {
         "getrandom RANDOM plus INSECURE EINVAL");
 
   uint8_t affinity[128]{};
-  Check(getaffinity(0, sizeof(affinity), affinity) == 8 &&
-            affinity[0] == 0xff &&
-            std::all_of(affinity + 1, affinity + sizeof(affinity),
-                        [](uint8_t byte) { return byte == 0; }),
-        "default eight-CPU affinity");
+  const size_t cpu_count = static_cast<size_t>(sysconf(_SC_NPROCESSORS_ONLN));
+  const size_t mask_size = ((cpu_count + 63) / 64) * 8;
+  Check(cpu_count > 0 && mask_size <= sizeof(affinity), "host CPU count");
+  uint8_t expected_affinity[128]{};
+  for (size_t cpu = 0; cpu < cpu_count; ++cpu)
+    expected_affinity[cpu / 8] |= static_cast<uint8_t>(1u << (cpu % 8));
+  Check(getaffinity(0, sizeof(affinity), affinity) == static_cast<long>(mask_size) &&
+            std::equal(std::begin(affinity), std::end(affinity), expected_affinity),
+        "host online CPU affinity");
+  Check(setaffinity(0, sizeof(affinity), affinity) == 0,
+        "unrestricted affinity succeeds without pinning");
   uint8_t restricted_affinity[128]{};
-  restricted_affinity[0] = 0x35;
-  Check(setaffinity(0, sizeof(restricted_affinity), restricted_affinity) == 0,
-        "set virtual affinity");
+  restricted_affinity[0] = 1;
+  darwin_art_bionic_errno_store(0);
+  if (cpu_count > 1)
+    Check(setaffinity(0, sizeof(restricted_affinity), restricted_affinity) == -1 &&
+              darwin_art_bionic_errno_load() == 38,
+          "exact CPU restriction explicitly unsupported");
   std::fill(std::begin(affinity), std::end(affinity), uint8_t{0xa5});
-  Check(getaffinity(0, sizeof(affinity), affinity) == 8 &&
-            std::equal(std::begin(affinity), std::end(affinity),
-                       std::begin(restricted_affinity)),
-        "round-trip virtual affinity");
+  Check(getaffinity(0, sizeof(affinity), affinity) == static_cast<long>(mask_size) &&
+            std::equal(affinity, affinity + mask_size, expected_affinity) &&
+            std::all_of(affinity + mask_size, std::end(affinity),
+                        [](uint8_t byte) { return byte == 0xa5; }),
+        "failed restriction leaves host mask; raw syscall preserves tail");
+  Check(getaffinity(0, mask_size - 1, affinity) == -1 &&
+            darwin_art_bionic_errno_load() == 22, "short mask EINVAL");
+  Check(getaffinity(INT32_MAX, sizeof(affinity), affinity) == -1 &&
+            darwin_art_bionic_errno_load() == 3, "unknown target ESRCH");
+  Check(setaffinity(INT32_MAX, sizeof(affinity), expected_affinity) == -1 &&
+            darwin_art_bionic_errno_load() == 3, "unknown set target ESRCH");
+  Check(getaffinity(static_cast<int>(main_tid), sizeof(affinity), affinity) ==
+            static_cast<long>(mask_size), "explicit current target");
+  Check(getaffinity(static_cast<int>(tids.front()), sizeof(affinity), affinity) == -1 &&
+            darwin_art_bionic_errno_load() == 3, "exited target ESRCH");
+  std::atomic<long> affinity_tid{0};
+  std::atomic<bool> affinity_done{false};
+  std::thread affinity_worker([&] {
+    affinity_tid.store(gettid());
+    while (!affinity_done.load()) std::this_thread::yield();
+  });
+  while (affinity_tid.load() == 0) std::this_thread::yield();
+  Check(getaffinity(static_cast<int>(affinity_tid.load()), sizeof(affinity), affinity) ==
+            static_cast<long>(mask_size), "other live target");
+  Check(setaffinity(static_cast<int>(affinity_tid.load()), sizeof(expected_affinity),
+                    expected_affinity) == 0, "other live target unrestricted set");
+  affinity_done.store(true);
+  affinity_worker.join();
+  std::fill(std::begin(affinity), std::end(affinity), uint8_t{0xa5});
+  Check(darwin_art_bionic_affinity_get(0, sizeof(affinity), affinity) == 0 &&
+            std::equal(std::begin(affinity), std::end(affinity), expected_affinity),
+        "libc fixed ABI returns zero and clears tail");
+  Check(darwin_art_bionic_affinity_set(0, sizeof(affinity), affinity) == 0,
+        "libc fixed ABI unrestricted set");
+  Check(darwin_art_bionic_affinity_get(0, sizeof(affinity), nullptr) == -1 &&
+            darwin_art_bionic_errno_load() == 14, "libc null output EFAULT");
   std::fill(std::begin(restricted_affinity), std::end(restricted_affinity), 0);
   darwin_art_bionic_errno_store(0);
   Check(setaffinity(0, sizeof(restricted_affinity), restricted_affinity) == -1 &&
@@ -379,7 +426,7 @@ int main(int argc, char** argv) {
                "bionic-syscall-facade: ELF PASS gettid=threads futex="
                "wait+wake-one+wake-all timeout=monotonic-spurious "
                "getrandom=host-csprng "
-               "sched-affinity=thread-local-round-trip "
+               "sched-affinity=host-topology+target-validation+restriction-ENOSYS "
                "capacity=257 invalid-wake=EFAULT rt_sigprocmask=readability "
                "rt_tgsigqueueinfo=virtual-tid-delivery "
                "unknown=closed\n");

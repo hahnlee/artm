@@ -37,6 +37,7 @@ impl SymbolResolver for Resolver {
         let name = match request.symbol {
             "__errno" => c"__errno",
             "madvise" => c"madvise",
+            "mincore" => c"mincore",
             "mmap" => c"mmap",
             "mmap64" => c"mmap64",
             "mprotect" => c"mprotect",

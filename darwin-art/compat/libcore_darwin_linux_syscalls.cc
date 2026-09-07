@@ -61,6 +61,63 @@ bool IsListedHostFile(const char* path) {
   return false;
 }
 
+bool ResolveAlignedEnvironmentPath(const char* path,
+                                   const char* logical_environment,
+                                   const char* backing_environment,
+                                   std::string* backing) {
+  if (path == nullptr || logical_environment == nullptr ||
+      backing_environment == nullptr || backing == nullptr) {
+    return false;
+  }
+  const char* logical = std::getenv(logical_environment);
+  const char* physical = std::getenv(backing_environment);
+  if (logical == nullptr || physical == nullptr) return false;
+
+  const size_t path_length = std::strlen(path);
+  while (*logical != '\0' && *physical != '\0') {
+    const char* logical_end = std::strchr(logical, ':');
+    const char* physical_end = std::strchr(physical, ':');
+    const size_t logical_length =
+        logical_end == nullptr ? std::strlen(logical)
+                               : static_cast<size_t>(logical_end - logical);
+    const size_t physical_length =
+        physical_end == nullptr ? std::strlen(physical)
+                                : static_cast<size_t>(physical_end - physical);
+    if (logical_length == path_length &&
+        std::memcmp(logical, path, path_length) == 0) {
+      backing->assign(physical, physical_length);
+      return true;
+    }
+    if (logical_end == nullptr || physical_end == nullptr) break;
+    logical = logical_end + 1;
+    physical = physical_end + 1;
+  }
+  return false;
+}
+
+bool ResolveBootClassPathBacking(const char* path, std::string* backing) {
+  if (!ResolveAlignedEnvironmentPath(path,
+                                     "DARWIN_ART_BOOT_CLASSPATH_LOCATIONS",
+                                     "DARWIN_ART_BOOT_CLASSPATH",
+                                     backing)) {
+    return false;
+  }
+  // The two aligned lists preserve Android's logical BCP identity while the
+  // detached Darwin process opens its physical backing. Require the backing
+  // to be an exact immutable runtime-file capability; neither a directory
+  // prefix nor an arbitrary relative path crosses into the host filesystem.
+  return !backing->empty() && (*backing)[0] == '/' &&
+         IsListedHostFile(backing->c_str());
+}
+
+bool IsImmutableOpen(int linux_flags) {
+  constexpr int kAndroidAccessMode = 3;
+  constexpr int kAndroidReadOnly = 0;
+  constexpr int kAndroidWriteEffects = 64 | 128 | 512 | 1024;
+  return (linux_flags & kAndroidAccessMode) == kAndroidReadOnly &&
+         (linux_flags & kAndroidWriteEffects) == 0;
+}
+
 void RememberHostFd(int fd) {
   if (fd < 0) return;
   std::lock_guard<std::mutex> lock(g_host_fd_mutex);
@@ -127,7 +184,9 @@ void AndroidStatToDarwin(const DarwinArtAndroidStat& source,
 }
 
 int TranslateMmapFlags(int linux_flags) {
-  int remaining = linux_flags;
+  // MAP_POPULATE is a best-effort prefault/read-ahead hint, not a different
+  // mapping type. AOSP's APK digest reader requests it for ordinary files.
+  int remaining = linux_flags & ~0x8000;
   int darwin_flags = 0;
   if ((remaining & kLinuxMapShared) != 0) {
     darwin_flags |= MAP_SHARED;
@@ -187,11 +246,18 @@ bool IsAuthorizedHostRuntimePath(const char* path) {
 }
 
 int Open(const char* path, int linux_flags, mode_t mode) {
+  std::string boot_class_path_backing;
+  const char* effective_path = path;
+  if (IsImmutableOpen(linux_flags) &&
+      ResolveBootClassPathBacking(path, &boot_class_path_backing)) {
+    effective_path = boot_class_path_backing.c_str();
+  }
   const char* system_root = std::getenv("DARWIN_ART_ANDROID_SYSTEM_ROOT");
   const bool use_sealed_system_file =
-      system_root != nullptr && path != nullptr &&
-      std::strncmp(path, "/system/", 8) == 0;
-  if (g_providers.open != nullptr && !IsAuthorizedHostRuntimePath(path) &&
+      system_root != nullptr && effective_path != nullptr &&
+      std::strncmp(effective_path, "/system/", 8) == 0;
+  if (g_providers.open != nullptr &&
+      !IsAuthorizedHostRuntimePath(effective_path) &&
       !use_sealed_system_file) {
     const int result = g_providers.open(
         path, linux_flags, static_cast<uint32_t>(mode));
@@ -211,7 +277,7 @@ int Open(const char* path, int linux_flags, mode_t mode) {
   // descriptor native lets OpenJDK FileChannel and Android font mmap share the
   // same file without exposing arbitrary host paths.
   if (use_sealed_system_file) {
-    const char* relative = path + 8;
+    const char* relative = effective_path + 8;
     if (*relative == '\0' || std::strstr(relative, "/../") != nullptr ||
         std::strncmp(relative, "../", 3) == 0 ||
         (std::strlen(relative) >= 3 &&
@@ -234,7 +300,7 @@ int Open(const char* path, int linux_flags, mode_t mode) {
   }
   int result;
   do {
-    result = open(path, flags, mode);
+    result = open(effective_path, flags, mode);
   } while (result == -1 && errno == EINTR);
   return AdoptHostFd(result);
 }
@@ -391,8 +457,26 @@ int Fstat(int fd, struct stat* status) {
   return result;
 }
 
+int Ftruncate(int fd, int64_t length) {
+  if (g_providers.ftruncate != nullptr && !IsHostFd(fd)) {
+    const int result = g_providers.ftruncate(fd, length);
+    if (result == -1) PublishAndroidErrno();
+    return result;
+  }
+  int result;
+  do {
+    result = ftruncate(fd, static_cast<off_t>(length));
+  } while (result == -1 && errno == EINTR);
+  return result;
+}
+
 int Stat(const char* path, struct stat* status) {
-  const bool authorized = IsAuthorizedHostRuntimePath(path);
+  std::string boot_class_path_backing;
+  const char* effective_path = path;
+  if (ResolveBootClassPathBacking(path, &boot_class_path_backing)) {
+    effective_path = boot_class_path_backing.c_str();
+  }
+  const bool authorized = IsAuthorizedHostRuntimePath(effective_path);
   if (std::getenv("DARWIN_ART_DEBUG_LIBCORE_IO") != nullptr &&
       path != nullptr && std::strstr(path, "app_resources_lib") != nullptr) {
     std::fprintf(stderr, "DARWIN libcore stat path=%s authorized=%d\n", path,
@@ -410,7 +494,7 @@ int Stat(const char* path, struct stat* status) {
   }
   int result;
   do {
-    result = stat(path, status);
+    result = stat(effective_path, status);
   } while (result == -1 && errno == EINTR);
   return result;
 }
@@ -506,7 +590,13 @@ void* Mmap(void* address, size_t byte_count, int linux_prot,
   if (flags == -1) {
     return MAP_FAILED;
   }
-  return mmap(address, byte_count, linux_prot, flags, fd, offset);
+  void* result = mmap(address, byte_count, linux_prot, flags, fd, offset);
+  if (result != MAP_FAILED && (linux_flags & 0x8000) != 0) {
+    const int saved_errno = errno;
+    (void)madvise(result, byte_count, MADV_WILLNEED);
+    errno = saved_errno;
+  }
+  return result;
 }
 
 int Munmap(void* address, size_t byte_count) {

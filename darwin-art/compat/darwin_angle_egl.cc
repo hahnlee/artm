@@ -2545,6 +2545,28 @@ struct DarwinSurfaceControlContextScope {
 
 thread_local DarwinSurfaceControlContextScope g_surface_control_context_scope;
 
+// Restoring the producer context is deliberately separate from composition
+// completion.  In particular, begin_hardware_buffer_composition holds
+// AhbEglImageMutex while it imports the target; calling the normal end path on
+// an import failure would create a fence and take that mutex recursively.
+void RestoreSurfaceControlContextScope() {
+  auto& scope = g_surface_control_context_scope;
+  if (!scope.switched) {
+    scope = {};
+    return;
+  }
+  const EGLDisplay restore_display =
+      scope.previous_display == nullptr ? scope.activated_display
+                                        : scope.previous_display;
+  auto& api = GetAngleApi();
+  if (api.make_current != nullptr) {
+    (void)api.make_current(restore_display, scope.previous_draw_surface,
+                           scope.previous_read_surface,
+                           scope.previous_context);
+  }
+  scope = {};
+}
+
 std::mutex& AhbEglImageMutex() {
   static std::mutex mutex;
   return mutex;
@@ -2889,13 +2911,55 @@ bool EnsureSurfaceControlTarget(EGLDisplay display) {
   return true;
 }
 
+enum class ComposerTargetFailureKind : std::uint8_t {
+  kMissingOrInvalidSurfaceId = 0,
+  kSurfaceLookup = 1,
+  kMetalDeviceQuery = 2,
+};
+
+void TraceComposerTargetFailure(ComposerTargetFailureKind kind,
+                                EGLDisplay display, std::uint32_t surface_id) {
+  // Target setup can be retried for every frame. Keep diagnostics opt-in and
+  // bounded independently for each failure class so one bad environment
+  // value cannot hide a later lookup or device-query failure.
+  if (std::getenv("DARWIN_ART_TRACE_COMPOSER_FAILURES") == nullptr) return;
+  static std::atomic<std::uint32_t> emitted[3] = {};
+  const std::size_t index = static_cast<std::size_t>(kind);
+  if (index >= std::size(emitted) ||
+      emitted[index].fetch_add(1, std::memory_order_relaxed) >= 4) {
+    return;
+  }
+  const char* reason = "unknown";
+  switch (kind) {
+    case ComposerTargetFailureKind::kMissingOrInvalidSurfaceId:
+      reason = "missing-or-invalid-iosurface-id";
+      break;
+    case ComposerTargetFailureKind::kSurfaceLookup:
+      reason = "iosurface-lookup-failed";
+      break;
+    case ComposerTargetFailureKind::kMetalDeviceQuery:
+      reason = "metal-device-query-failed";
+      break;
+  }
+  std::cerr << "ART Metal Composer: target setup failed reason=" << reason
+            << " display=" << display << " surface_id=" << surface_id
+            << "\n";
+}
+
 bool EnsureMetalComposerTarget(EGLDisplay display) {
   const char* encoded = std::getenv("DARWIN_ART_HOST_IOSURFACE_ID");
-  if (encoded == nullptr || encoded[0] == '\0') return false;
+  if (encoded == nullptr || encoded[0] == '\0') {
+    TraceComposerTargetFailure(
+        ComposerTargetFailureKind::kMissingOrInvalidSurfaceId, display, 0);
+    return false;
+  }
   char* end = nullptr;
   const unsigned long parsed = std::strtoul(encoded, &end, 10);
-  if (end == encoded || *end != '\0' || parsed == 0 || parsed > UINT32_MAX)
+  if (end == encoded || *end != '\0' || parsed == 0 || parsed > UINT32_MAX) {
+    TraceComposerTargetFailure(
+        ComposerTargetFailureKind::kMissingOrInvalidSurfaceId, display, 0);
     return false;
+  }
   auto& target = g_surface_control_target;
   if (target.bound && target.display == display &&
       target.surface_id == static_cast<std::uint32_t>(parsed) &&
@@ -2910,6 +2974,8 @@ bool EnsureMetalComposerTarget(EGLDisplay display) {
   std::uint32_t height = 0;
   if (!darwin_art_surface_gpu_lookup_iosurface(
           static_cast<std::uint32_t>(parsed), &iosurface, &width, &height)) {
+    TraceComposerTargetFailure(ComposerTargetFailureKind::kSurfaceLookup,
+                               display, static_cast<std::uint32_t>(parsed));
     return false;
   }
   using QueryDisplayAttrib = EGLBoolean (*)(EGLDisplay, EGLint, EGLAttrib*);
@@ -2926,6 +2992,8 @@ bool EnsureMetalComposerTarget(EGLDisplay display) {
       query_device_attrib(reinterpret_cast<void*>(egl_device),
                           kEglMetalDeviceAngle, &metal_device) == 0 ||
       metal_device == 0) {
+    TraceComposerTargetFailure(ComposerTargetFailureKind::kMetalDeviceQuery,
+                               display, static_cast<std::uint32_t>(parsed));
     darwin_art_surface_gpu_release_iosurface(iosurface);
     return false;
   }
@@ -3957,6 +4025,8 @@ extern "C" bool darwin_art_android_begin_hardware_buffer_composition(
                   << " current_display=" << display
                   << " current_context=" << context << "\n";
       }
+      g_metal_composer_layers.clear();
+      g_metal_composer_transaction_id = 0;
       return false;
     }
     DarwinAhbEglImage& image = *found->second;
@@ -3980,7 +4050,9 @@ extern "C" bool darwin_art_android_begin_hardware_buffer_composition(
                   << image.owner_read_surface << " error=0x" << std::hex
                   << api.get_error() << std::dec << "\n";
       }
-      g_surface_control_context_scope = {};
+      g_metal_composer_layers.clear();
+      g_metal_composer_transaction_id = 0;
+      RestoreSurfaceControlContextScope();
       return false;
     }
     scope.switched = true;
@@ -3995,8 +4067,14 @@ extern "C" bool darwin_art_android_begin_hardware_buffer_composition(
               << clear << "\n";
   }
   if (!EnsureMetalComposerTarget(display)) {
-    const int fence = darwin_art_android_end_hardware_buffer_composition();
-    if (fence >= 0) (void)darwin_art_bionic_socket_broker_close(fence);
+    // Do not call end_hardware_buffer_composition here: begin holds
+    // AhbEglImageMutex and end creates a native-fence sync which may acquire
+    // it again while publishing AHardwareBuffer contents. This is a setup
+    // failure, so no producer or completion fence exists to return.
+    g_metal_composer_layers.clear();
+    g_metal_composer_transaction_id = 0;
+    g_surface_control_target.has_content = false;
+    RestoreSurfaceControlContextScope();
     return false;
   }
   g_metal_composer_layers.clear();
@@ -4120,14 +4198,7 @@ extern "C" int darwin_art_android_end_hardware_buffer_composition() {
   g_metal_composer_layers.clear();
   g_metal_composer_transaction_id = 0;
 
-  auto& scope = g_surface_control_context_scope;
-  if (!scope.switched) return completion_fence;
-  const EGLDisplay restore_display =
-      scope.previous_display == nullptr ? scope.activated_display
-                                        : scope.previous_display;
-  api.make_current(restore_display, scope.previous_draw_surface,
-                   scope.previous_read_surface, scope.previous_context);
-  scope = {};
+  RestoreSurfaceControlContextScope();
   return completion_fence;
 }
 
@@ -4583,7 +4654,8 @@ extern "C" void darwin_art_android_present_surface_control_state(
     std::uint32_t transform,
     std::int32_t destination_left, std::int32_t destination_top,
     std::int32_t destination_right, std::int32_t destination_bottom,
-    std::int32_t z, float alpha) {
+    std::int32_t z, float alpha, const std::int32_t* transparent_region_rects,
+    std::uint32_t transparent_region_count) {
   g_metal_composer_layers.push_back({
       .owner_process_id = owner_process_id,
       .layer_id = layer_id,
@@ -4604,6 +4676,20 @@ extern "C" void darwin_art_android_present_surface_control_state(
       .z = z,
       .alpha = alpha,
   });
+  DarwinArtMetalComposerLayer& state = g_metal_composer_layers.back();
+  state.transparent_region_count = std::min(
+      transparent_region_rects == nullptr ? 0u : transparent_region_count,
+      static_cast<std::uint32_t>(kDarwinArtMaxTransparentRegionRects));
+  for (std::uint32_t index = 0; index < state.transparent_region_count;
+       ++index) {
+    const std::int32_t* source = transparent_region_rects + index * 4;
+    state.transparent_region[index] = {
+        .left = source[0],
+        .top = source[1],
+        .right = source[2],
+        .bottom = source[3],
+    };
+  }
 }
 
 void RestoreBufferQueueSlotIfNeeded(std::uint32_t texture) {

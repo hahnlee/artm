@@ -6,10 +6,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -70,6 +72,7 @@ struct Description {
   size_t descriptor_refs = 1;
   size_t active = 0;
   bool closing = false;
+  bool deferred_close = false;
   std::mutex io_mutex;
   std::shared_ptr<EpollState> epoll;
 };
@@ -101,12 +104,74 @@ struct DarwinArtFdBrokerImpl {
   std::condition_variable description_changed;
   std::array<Slot, kSlotCount> slots;
   std::vector<size_t> free_slots;
+  std::deque<std::shared_ptr<Description>> deferred_closes;
+  size_t pending_deferred_closes = 0;
   std::map<DarwinArtFdOwnerHandle, Owner> owners;
   DarwinArtFdOwnerHandle next_owner = 1;
+  bool stopping = false;
+  std::thread deferred_close_thread;
   DarwinArtFdBrokerImpl() {
     free_slots.reserve(kSlotCount);
     for (size_t index = kSlotCount; index-- > 0;)
       free_slots.push_back(index);
+    deferred_close_thread = std::thread([this] { DeferredCloseLoop(); });
+  }
+  ~DarwinArtFdBrokerImpl() {
+    {
+      std::lock_guard lock(mutex);
+      stopping = true;
+      description_changed.notify_all();
+    }
+    if (deferred_close_thread.joinable())
+      deferred_close_thread.join();
+  }
+
+  void DeferredCloseLoop() {
+    for (;;) {
+      std::shared_ptr<Description> description;
+      {
+        std::unique_lock lock(mutex);
+        description_changed.wait(
+            lock, [&] { return stopping || !deferred_closes.empty(); });
+        if (stopping)
+          return;
+        for (;;) {
+          auto ready =
+              std::find_if(deferred_closes.begin(), deferred_closes.end(),
+                           [](const std::shared_ptr<Description> &candidate) {
+                             return candidate && candidate->active == 0;
+                           });
+          if (ready != deferred_closes.end()) {
+            description = std::move(*ready);
+            deferred_closes.erase(ready);
+            break;
+          }
+          description_changed.wait(lock);
+          if (stopping)
+            return;
+        }
+      }
+
+      int error = 0;
+      if (description->kind != DARWIN_ART_FD_EPOLL &&
+          description->callbacks.close != nullptr) {
+        (void)description->callbacks.close(description->callbacks.context,
+                                           description->object, &error);
+      }
+
+      std::lock_guard lock(mutex);
+      if (description->owner != 0) {
+        auto owner = owners.find(description->owner);
+        if (owner == owners.end() || owner->second.live_descriptions == 0)
+          std::terminate();
+        --owner->second.live_descriptions;
+      }
+      description->deferred_close = false;
+      if (pending_deferred_closes == 0)
+        std::terminate();
+      --pending_deferred_closes;
+      description_changed.notify_all();
+    }
   }
 };
 
@@ -250,8 +315,12 @@ void ReleaseLocked(DarwinArtFdBrokerImpl *broker, const Lease &lease) {
     --owner->second.active;
   }
   --lease.description->active;
-  if (slot.active == 0)
-    slot.changed.notify_all();
+  if (slot.active == 0) {
+    if (slot.closing)
+      RecycleSlotLocked(broker, lease.slot_index);
+    else
+      slot.changed.notify_all();
+  }
   if (lease.description->active == 0)
     broker->description_changed.notify_all();
 }
@@ -368,8 +437,9 @@ CloseImpl(DarwinArtFdBrokerImpl *broker,
   size_t slot_index = 0;
   uint32_t generation = 0;
   std::shared_ptr<Description> description;
+  bool close_now = false;
   {
-    std::unique_lock lock(broker->mutex);
+    std::lock_guard lock(broker->mutex);
     Slot *slot = nullptr;
     auto status = LookupSlotLocked(broker, fd, &slot_index, &generation, &slot);
     if (status != DARWIN_ART_FD_BROKER_OK)
@@ -378,40 +448,123 @@ CloseImpl(DarwinArtFdBrokerImpl *broker,
     if (expected && description->owner != *expected)
       return DARWIN_ART_FD_BROKER_WRONG_OWNER;
     slot->closing = true;
-    slot->changed.wait(lock, [&] { return slot->active == 0; });
     if (description->descriptor_refs == 0)
       std::terminate();
-    if (description->descriptor_refs > 1) {
-      --description->descriptor_refs;
-      RecycleSlotLocked(broker, slot_index);
+    --description->descriptor_refs;
+    if (description->descriptor_refs != 0) {
+      if (slot->active == 0)
+        RecycleSlotLocked(broker, slot_index);
+      else
+        slot->changed.notify_all();
       SetResult(result, 0, 0);
       return DARWIN_ART_FD_BROKER_OK;
     }
     description->closing = true;
-    broker->description_changed.wait(lock,
-                                     [&] { return description->active == 0; });
+    if (description->active != 0) {
+      try {
+        broker->deferred_closes.push_back(description);
+      } catch (...) {
+        // Keep the descriptor fully live if the deferred work item cannot be
+        // allocated; callers may retry close without losing the owner lease.
+        description->closing = false;
+        ++description->descriptor_refs;
+        slot->closing = false;
+        return DARWIN_ART_FD_BROKER_EXHAUSTED;
+      }
+      description->deferred_close = true;
+      ++broker->pending_deferred_closes;
+      if (slot->active == 0)
+        RecycleSlotLocked(broker, slot_index);
+      broker->description_changed.notify_all();
+      SetResult(result, 0, 0);
+      return DARWIN_ART_FD_BROKER_OK;
+    }
+    if (slot->active == 0)
+      RecycleSlotLocked(broker, slot_index);
+    close_now = true;
   }
+
   int error = 0;
   int close_result = 0;
-  if (description->kind != DARWIN_ART_FD_EPOLL && description->callbacks.close)
+  if (close_now && description->kind != DARWIN_ART_FD_EPOLL &&
+      description->callbacks.close)
     close_result = description->callbacks.close(description->callbacks.context,
                                                 description->object, &error);
   {
     std::lock_guard lock(broker->mutex);
-    Slot &slot = broker->slots[slot_index];
-    if (!slot.live || !slot.closing || slot.generation != generation ||
-        description->descriptor_refs != 1)
-      std::terminate();
-    description->descriptor_refs = 0;
     if (description->owner != 0) {
       auto owner = broker->owners.find(description->owner);
       if (owner == broker->owners.end() || owner->second.live_descriptions == 0)
         std::terminate();
       --owner->second.live_descriptions;
+      broker->description_changed.notify_all();
     }
-    RecycleSlotLocked(broker, slot_index);
   }
   SetResult(result, close_result, close_result == 0 ? 0 : error);
+  return DARWIN_ART_FD_BROKER_OK;
+}
+
+DarwinArtFdBrokerStatus Dup2Impl(DarwinArtFdBrokerImpl *broker, int old_fd,
+                                 int new_fd, DarwinArtFdIoResult *result) {
+  if (!broker || !result)
+    return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
+
+  std::unique_lock lock(broker->mutex);
+  size_t old_index = 0;
+  size_t new_index = 0;
+  uint32_t old_generation = 0;
+  uint32_t new_generation = 0;
+  Slot *old_slot = nullptr;
+  Slot *new_slot = nullptr;
+  auto status =
+      LookupSlotLocked(broker, old_fd, &old_index, &old_generation, &old_slot);
+  if (status != DARWIN_ART_FD_BROKER_OK)
+    return status;
+  status =
+      LookupSlotLocked(broker, new_fd, &new_index, &new_generation, &new_slot);
+  if (status != DARWIN_ART_FD_BROKER_OK)
+    return status;
+
+  // POSIX dup2 validates the descriptor before treating an identical pair as
+  // a no-op. It also preserves the descriptor flags for that exact case.
+  if (old_fd == new_fd) {
+    SetResult(result, new_fd, 0);
+    return DARWIN_ART_FD_BROKER_OK;
+  }
+
+  const auto source = old_slot->description;
+  const auto target = new_slot->description;
+  if (source == target) {
+    // Different aliases of one open description still clear FD_CLOEXEC on the
+    // destination, but do not perturb the shared description reference count.
+    new_slot->descriptor_flags = 0;
+    SetResult(result, new_fd, 0);
+    return DARWIN_ART_FD_BROKER_OK;
+  }
+
+  ++source->descriptor_refs;
+  if (target->descriptor_refs > 1) {
+    --target->descriptor_refs;
+    new_slot->description = source;
+    new_slot->descriptor_flags = 0;
+    new_slot->changed.notify_all();
+    SetResult(result, new_fd, 0);
+    return DARWIN_ART_FD_BROKER_OK;
+  }
+
+  // Keep the old Description detached but alive until every operation that
+  // acquired it has released. The target Slot is swapped immediately, and
+  // its active count is intentionally left untouched for those old leases.
+  target->closing = true;
+  target->descriptor_refs = 0;
+  target->deferred_close = true;
+  broker->deferred_closes.push_back(target);
+  ++broker->pending_deferred_closes;
+  new_slot->description = source;
+  new_slot->descriptor_flags = 0;
+  new_slot->changed.notify_all();
+  broker->description_changed.notify_all();
+  SetResult(result, new_fd, 0);
   return DARWIN_ART_FD_BROKER_OK;
 }
 } // namespace
@@ -494,6 +647,36 @@ darwin_art_fd_broker_uninstall_owner(DarwinArtFdBroker *broker,
   impl->owners.erase(found);
   return DARWIN_ART_FD_BROKER_OK;
 }
+extern "C" DarwinArtFdBrokerStatus
+darwin_art_fd_broker_wait_owner_quiescent(DarwinArtFdBroker *broker,
+                                          DarwinArtFdOwnerHandle owner) {
+  if (!broker || owner == 0)
+    return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
+  auto *impl = Impl(broker);
+  std::unique_lock lock(impl->mutex);
+  auto found = impl->owners.find(owner);
+  if (found == impl->owners.end())
+    return DARWIN_ART_FD_BROKER_STALE;
+  impl->description_changed.wait(lock, [&] {
+    auto current = impl->owners.find(owner);
+    return current == impl->owners.end() ||
+           (current->second.live_descriptions == 0 &&
+            current->second.active == 0);
+  });
+  return impl->owners.find(owner) == impl->owners.end()
+             ? DARWIN_ART_FD_BROKER_STALE
+             : DARWIN_ART_FD_BROKER_OK;
+}
+extern "C" DarwinArtFdBrokerStatus
+darwin_art_fd_broker_flush_deferred_closes(DarwinArtFdBroker *broker) {
+  if (!broker)
+    return DARWIN_ART_FD_BROKER_INVALID_ARGUMENT;
+  auto *impl = Impl(broker);
+  std::unique_lock lock(impl->mutex);
+  impl->description_changed.wait(
+      lock, [&] { return impl->pending_deferred_closes == 0; });
+  return DARWIN_ART_FD_BROKER_OK;
+}
 extern "C" DarwinArtFdBrokerStatus darwin_art_fd_broker_publish_with_flags(
     DarwinArtFdBroker *broker, DarwinArtFdOwnerHandle owner, uint64_t object,
     int status_flags, int descriptor_flags, int *guest_fd) {
@@ -534,6 +717,11 @@ darwin_art_fd_broker_publish(DarwinArtFdBroker *broker,
 extern "C" DarwinArtFdBrokerStatus
 darwin_art_fd_broker_dup(DarwinArtFdBroker *broker, int old_fd, int *new_fd) {
   return Duplicate(Impl(broker), old_fd, std::nullopt, 0, new_fd);
+}
+extern "C" DarwinArtFdBrokerStatus
+darwin_art_fd_broker_dup2(DarwinArtFdBroker *broker, int old_fd, int new_fd,
+                          DarwinArtFdIoResult *result) {
+  return Dup2Impl(Impl(broker), old_fd, new_fd, result);
 }
 extern "C" DarwinArtFdBrokerStatus
 darwin_art_fd_broker_duplicate_with_flags(DarwinArtFdBroker *broker, int old_fd,

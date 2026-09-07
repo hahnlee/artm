@@ -43,6 +43,15 @@ using DarwinArtAndroidNativeWindowQueueCallback = void (*)(
 void darwin_art_android_ANativeWindow_set_queue_callback(
     void* window, DarwinArtAndroidNativeWindowQueueCallback callback,
     void* context);
+// BLAST receives the actual buffer transaction before it is applied. Returning
+// true transfers transaction ownership to the callback. Registration context
+// is owned only on success and released after replacement and in-flight calls.
+using DarwinArtAndroidNativeWindowTransactionCallback = bool (*)(
+    void* context, void* transaction, uint64_t frame_number);
+bool darwin_art_android_ANativeWindow_set_transaction_callback(
+    void* window, DarwinArtAndroidNativeWindowTransactionCallback callback,
+    void* context, void (*release_context)(void*));
+uint64_t darwin_art_android_ANativeWindow_next_frame_number(void* window);
 void darwin_art_android_ANativeWindow_release_consumer_slot(
     void* window, int32_t slot, int release_fence);
 void darwin_art_android_ANativeWindow_set_surface_control(void* window,
@@ -54,6 +63,15 @@ void darwin_art_android_ANativeWindow_register_imported_surface_identity(
 bool darwin_art_android_ANativeWindow_get_imported_surface_identity(
     void* window, uint32_t* owner_process_id, uint32_t* layer_id);
 bool darwin_art_android_ANativeWindow_release_if_managed(void* window);
+// Returns true only while the pointer is present in the native-window
+// registry. Callers that need to use the handle after this check must acquire
+// their own native-window reference.
+bool darwin_art_android_ANativeWindow_is_managed(void* window);
+// Forces a bounded 3-slot generation transition, including when dimensions
+// are unchanged. Returns -EBUSY while a borrowed/dequeued slot or prior
+// retired generation cannot be safely preserved.
+int32_t darwin_art_android_ANativeWindow_prepare_swapchain(
+    void* window, int32_t width, int32_t height);
 int32_t darwin_art_android_ANativeWindow_dequeue_hardware_buffer(
     void* window, AHardwareBuffer** buffer, void** native_buffer, int* fence);
 int32_t darwin_art_android_ANativeWindow_queue_hardware_buffer(
@@ -129,5 +147,7 @@ void darwin_art_android_present_surface_control_state(
     uint64_t what, uint32_t flags, uint32_t mask, uint32_t transform,
     int32_t destination_left,
     int32_t destination_top, int32_t destination_right,
-    int32_t destination_bottom, int32_t z, float alpha);
+    int32_t destination_bottom, int32_t z, float alpha,
+    const int32_t* transparent_region_rects,
+    uint32_t transparent_region_count);
 }

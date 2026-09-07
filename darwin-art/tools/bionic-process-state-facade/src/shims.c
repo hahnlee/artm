@@ -16,12 +16,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/random.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+enum { kAndroidPathMax = 4096 };
+enum { kAndroidEio = 5, kAndroidEfault = 14, kAndroidEnametoolong = 36 };
 
 extern int darwin_art_bionic_setjmp(void* environment);
 extern void darwin_art_bionic_longjmp(void* environment, int value);
 extern void darwin_art_bionic_errno_store(int32_t android_errno);
+extern int darwin_art_bionic_affinity_get(int tid, size_t capacity, void* mask);
+extern int darwin_art_bionic_affinity_set(int tid, size_t capacity, const void* mask);
+extern int32_t darwin_art_bionic_errno_load(void);
+extern int darwin_art_bionic_errno_set_from_darwin(int darwin_errno);
 static int HostSignal(int android_signal);
 
 char* darwin_art_bionic_getenv(const char* name) {
@@ -190,21 +198,67 @@ long darwin_art_bionic_mrand48(void) {
 }
 
 uint32_t darwin_art_bionic_arc4random(void) {
-  const uint32_t high = (uint32_t)darwin_art_bionic_rand();
-  const uint32_t low = (uint32_t)darwin_art_bionic_rand();
-  return (high << 1) ^ low;
+  return arc4random();
 }
 
 void darwin_art_bionic_arc4random_buf(void* output, size_t length) {
-  unsigned char* bytes = (unsigned char*)output;
-  while (length != 0) {
-    const uint32_t value = darwin_art_bionic_arc4random();
-    const size_t count = length < sizeof(value) ? length : sizeof(value);
-    for (size_t index = 0; index < count; ++index)
-      bytes[index] = (unsigned char)(value >> (index * 8));
-    bytes += count;
-    length -= count;
+  arc4random_buf(output, length);
+}
+
+int darwin_art_bionic_getentropy(void* output, size_t length) {
+  // This is the Android/Bionic contract, rather than getrandom's contract:
+  // Requests above 256 bytes fail with EIO and successful calls preserve the
+  // caller's errno value.
+  if (length > 256) {
+    darwin_art_bionic_errno_store(kAndroidEio);
+    return -1;
   }
+  if (output == NULL && length != 0) {
+    darwin_art_bionic_errno_store(kAndroidEfault);
+    return -1;
+  }
+  const int32_t saved_errno = darwin_art_bionic_errno_load();
+  // Use the host kernel CSPRNG. The facade's arc4random implementation is a
+  // separate libc entry point and is not used as a fallback here.
+  if (getentropy(output, length) != 0) {
+    if (!darwin_art_bionic_errno_set_from_darwin(errno))
+      darwin_art_bionic_errno_store(kAndroidEio);
+    return -1;
+  }
+  darwin_art_bionic_errno_store(saved_errno);
+  return 0;
+}
+
+char* darwin_art_bionic_basename(const char* path) {
+  // Android's POSIX basename does not modify its input and stores the result
+  // in a per-thread 4096-byte buffer. This avoids returning a pointer into a
+  // host-owned temporary and matches Bionic's ENAMETOOLONG boundary.
+  static _Thread_local char buffer[kAndroidPathMax];
+  const char* source = path;
+  size_t length = 0;
+  if (source == NULL || source[0] == '\0') {
+    source = ".";
+    length = 1;
+  } else {
+    const char* end = source + strlen(source);
+    while (end > source && end[-1] == '/') --end;
+    if (end == source) {
+      source = "/";
+      length = 1;
+    } else {
+      const char* begin = end;
+      while (begin > path && begin[-1] != '/') --begin;
+      source = begin;
+      length = (size_t)(end - begin);
+    }
+  }
+  if (length >= sizeof(buffer)) {
+    darwin_art_bionic_errno_store(kAndroidEnametoolong);
+    return NULL;
+  }
+  memcpy(buffer, source, length);
+  buffer[length] = '\0';
+  return buffer;
 }
 
 long darwin_art_bionic_getrandom(void* output, size_t length, unsigned flags) {
@@ -527,11 +581,37 @@ static void DarwinArtAndroidSignalTrampoline(int host_signal,
           (size_t)length < sizeof(message) ? (size_t)length : sizeof(message) - 1;
       (void)write(STDERR_FILENO, message, bytes);
     }
+    if (getenv("DARWIN_ART_DEBUG_MEDIA_CODEC") != NULL && host_context != NULL) {
+      const ucontext_t* context = (const ucontext_t*)host_context;
+      const uintptr_t sp = arm_thread_state64_get_sp(context->uc_mcontext->__ss);
+      uintptr_t words[160];
+      mach_vm_size_t copied = 0;
+      if (mach_vm_read_overwrite(mach_task_self(), sp, sizeof(words),
+                                (mach_vm_address_t)words, &copied) == KERN_SUCCESS) {
+        for (size_t i = 0; i + 3 < copied / sizeof(uintptr_t); i += 4) {
+          const int n = snprintf(message, sizeof(message),
+              "DARWIN signal stack +%03zx %016lx %016lx %016lx %016lx\n",
+              i * sizeof(uintptr_t), words[i], words[i + 1], words[i + 2], words[i + 3]);
+          if (n > 0 && (size_t)n < sizeof(message)) (void)write(STDERR_FILENO, message, n);
+        }
+      }
+    }
   }
 #endif
   const uintptr_t address = atomic_load_explicit(
       &gAndroidSignalHandlers[host_signal], memory_order_acquire);
-  if (address == (uintptr_t)SIG_DFL || address == (uintptr_t)SIG_IGN) return;
+  if (address == (uintptr_t)SIG_IGN) return;
+  if (address == (uintptr_t)SIG_DFL) {
+    // This trampoline can be the action behind ART's sigchain dispatcher even
+    // after the guest restored its Android disposition to SIG_DFL. Returning
+    // would retry the faulting instruction forever. Restore the host default
+    // action and re-raise; the signal is pending until this handler returns.
+    struct sigaction default_action = {.sa_handler = SIG_DFL};
+    sigemptyset(&default_action.sa_mask);
+    sigaction(host_signal, &default_action, NULL);
+    raise(host_signal);
+    return;
+  }
   if (android_signal == 4 &&
       RecoverAndroidReadableSystemRegister((ucontext_t*)host_context)) {
     return;
@@ -915,25 +995,12 @@ int darwin_art_bionic_sched_getscheduler(int pid) {
 }
 
 int darwin_art_bionic_sched_getaffinity(int pid, size_t capacity, void* mask) {
-  if (pid < 0 || mask == NULL || capacity == 0) {
-    darwin_art_bionic_errno_store(22);
-    return -1;
-  }
-  volatile unsigned char* bytes = (volatile unsigned char*)mask;
-  for (size_t index = 0; index < capacity; ++index) bytes[index] = 0;
-  const size_t virtual_cpu_count = 8;
-  for (size_t cpu = 0; cpu < virtual_cpu_count && cpu < capacity * 8; ++cpu)
-    bytes[cpu / 8] |= (unsigned char)(1u << (cpu % 8));
-  return 0;
+  return darwin_art_bionic_affinity_get(pid, capacity, mask);
 }
 
 int darwin_art_bionic_sched_setaffinity(int pid, size_t capacity,
                                         const void* mask) {
-  if (pid < 0 || mask == NULL || capacity == 0) {
-    darwin_art_bionic_errno_store(22);
-    return -1;
-  }
-  return 0;
+  return darwin_art_bionic_affinity_set(pid, capacity, mask);
 }
 
 int darwin_art_bionic___sched_cpucount(size_t capacity, const void* mask) {
@@ -1037,7 +1104,13 @@ int darwin_art_bionic_sigaction(int signal_number,
     if ((action->flags & 0x10000000) != 0) host_action.sa_flags |= SA_RESTART;
     if ((action->flags & 0x40000000) != 0) host_action.sa_flags |= SA_NODEFER;
     if ((uint32_t)action->flags & UINT32_C(0x80000000)) host_action.sa_flags |= SA_RESETHAND;
-    if ((action->flags & 4) != 0) host_action.sa_flags |= SA_SIGINFO;
+    // Every non-default host handler is the three-argument trampoline, even
+    // for a legacy guest disposition. Default/ignored actions do not use the
+    // trampoline and must not acquire an unrequested flag on a later query.
+    if ((action->handler != SIG_DFL && action->handler != SIG_IGN) ||
+        (action->flags & 4) != 0) {
+      host_action.sa_flags |= SA_SIGINFO;
+    }
     host_action_pointer = &host_action;
   }
   if (sigaction(host_signal, host_action_pointer,
@@ -1135,6 +1208,7 @@ static const Binding kBindings[] = {
      (DarwinArtBionicProcessFunction)darwin_art_bionic_android_get_device_api_level},
     {"arc4random", (DarwinArtBionicProcessFunction)darwin_art_bionic_arc4random},
     {"arc4random_buf", (DarwinArtBionicProcessFunction)darwin_art_bionic_arc4random_buf},
+    {"basename", (DarwinArtBionicProcessFunction)darwin_art_bionic_basename},
     {"daemon", (DarwinArtBionicProcessFunction)darwin_art_bionic_daemon},
     {"drand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_drand48},
     {"erand48", (DarwinArtBionicProcessFunction)darwin_art_bionic_erand48},
@@ -1146,6 +1220,7 @@ static const Binding kBindings[] = {
     {"fork", (DarwinArtBionicProcessFunction)darwin_art_bionic_fork},
     {"getauxval", (DarwinArtBionicProcessFunction)darwin_art_bionic_getauxval},
     {"getegid", (DarwinArtBionicProcessFunction)darwin_art_bionic_getegid},
+    {"getentropy", (DarwinArtBionicProcessFunction)darwin_art_bionic_getentropy},
     {"getenv", (DarwinArtBionicProcessFunction)darwin_art_bionic_getenv},
     {"geteuid", (DarwinArtBionicProcessFunction)darwin_art_bionic_geteuid},
     {"getgid", (DarwinArtBionicProcessFunction)darwin_art_bionic_getgid},

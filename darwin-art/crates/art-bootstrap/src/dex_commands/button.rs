@@ -69,6 +69,7 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
     let button = |relative: &str| class_dir.join(relative);
     run_command(
         Command::new(find_d8()?)
+            .args(["--min-api", "26"])
             .arg("--lib")
             .arg(&android_platform_jar)
             .arg("--classpath")
@@ -82,6 +83,34 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
             .arg(baseline("android/content/pm/ProbeShortcutManager.class"))
             .arg(baseline("android/os/ProbeUserManager.class"))
             .arg(baseline("dev/darwinart/probe/Hello.class"))
+            .arg(baseline("dev/darwinart/probe/UpstreamTestHarness.class"))
+            .arg(baseline(
+                "dev/darwinart/probe/UpstreamTestHarness$OutputShutdownHook.class",
+            ))
+            .arg(baseline(
+                "dev/darwinart/probe/UpstreamTestHarness$TestMainThread.class",
+            ))
+            .arg(baseline(
+                "dev/darwinart/probe/UpstreamTestHarness$NativeOutputStream.class",
+            ))
+            .arg(baseline("dev/darwinart/probe/JitInvokeCustom.class"))
+            .arg(baseline("dev/darwinart/probe/JitConstructorParent.class"))
+            .arg(baseline("dev/darwinart/probe/JitFinalReference.class"))
+            .arg(baseline("dev/darwinart/probe/JitVirtualBase.class"))
+            .arg(baseline("dev/darwinart/probe/JitCallable.class"))
+            .arg(baseline("dev/darwinart/probe/JitVirtualChild.class"))
+            .arg(baseline("dev/darwinart/probe/JitColdInitialization.class"))
+            .arg(baseline("dev/darwinart/probe/JitColdStatic.class"))
+            .arg(baseline("dev/darwinart/probe/JitFailedStaticRead.class"))
+            .arg(baseline("dev/darwinart/probe/JitFailedStaticWrite.class"))
+            .arg(baseline("dev/darwinart/probe/JitColdMoving.class"))
+            .arg(baseline("dev/darwinart/probe/JitColdLong.class"))
+            .arg(baseline("dev/darwinart/probe/JitColdDouble.class"))
+            .arg(baseline("dev/darwinart/probe/JitColdReference.class"))
+            .arg(baseline("dev/darwinart/probe/JitRecursiveInitialization.class"))
+            .arg(baseline("dev/darwinart/probe/JitConcurrentInitialization.class"))
+            .arg(baseline("dev/darwinart/probe/JitConcurrentFailedInitialization.class"))
+            .arg(baseline("dev/darwinart/probe/JitFailedInitialization.class"))
             .arg(baseline("dev/darwinart/probe/ProbeCanvas.class"))
             .arg(baseline("android/media/ProbeAudioManager.class"))
             .arg(baseline("dev/darwinart/probe/ProbeCalendarProvider.class"))
@@ -269,12 +298,13 @@ pub(crate) fn build_button_dex_probe(root: &Path) -> Result<()> {
                     class[73]=Ljavax/microedition/khronos/egl/EGLSurface;";
     verify_dex_contract(
         &output,
-        89,
-        1363,
+        112,
+        3072,
         &[
             "Ldev/darwinart/probe/ProbeActivity;",
             "Ldev/darwinart/probe/ProbeContext$BaseContext;",
             "Ldev/darwinart/probe/ProbeContext$RemoteServiceBinder;",
+            "Ldev/darwinart/probe/JitInvokeCustom;",
             "Ldev/darwinart/simple/DarwinServiceBridge;",
             "Ldev/darwinart/system/DarwinSystemServer;",
             "Ljavax/microedition/khronos/egl/DarwinEGL10;",

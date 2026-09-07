@@ -42,8 +42,14 @@ namespace {
 
 constexpr std::array<char, 8> kRequestMagic{'D', 'A', 'R', 'T', 'S', 'F', '0', '7'};
 constexpr std::array<char, 8> kResponseMagic{'D', 'A', 'R', 'T', 'S', 'F', 'R', '7'};
-constexpr uint32_t kProtocolVersion = 7;
+constexpr uint32_t kProtocolVersion = 8;
 constexpr uint32_t kMaximumLayers = 4096;
+
+bool TraceReparentToNull() {
+  static const bool enabled =
+      std::getenv("DARWIN_ART_TRACE_REPARENT_NULL") != nullptr;
+  return enabled;
+}
 
 struct RequestHeader {
   char magic[8];
@@ -82,6 +88,9 @@ struct WireLayer {
   int32_t destination_bottom;
   int32_t z;
   float alpha;
+  uint32_t transparent_region_count;
+  DarwinArtTransparentRegionRect transparent_region[
+      kDarwinArtMaxTransparentRegionRects];
 };
 
 struct ResponseHeader {
@@ -437,6 +446,21 @@ bool ConsumeProducerFence(int descriptor) {
   return received > 0;
 }
 
+uint32_t CopyTransparentRegion(
+    const DarwinArtTransparentRegionRect* source, uint32_t source_count,
+    DarwinArtTransparentRegionRect* destination) {
+  if (source == nullptr || destination == nullptr) return 0;
+  const uint32_t bounded_count = std::min(
+      source_count, static_cast<uint32_t>(kDarwinArtMaxTransparentRegionRects));
+  uint32_t copied = 0;
+  for (uint32_t index = 0; index < bounded_count; ++index) {
+    const auto& rect = source[index];
+    if (rect.right <= rect.left || rect.bottom <= rect.top) continue;
+    destination[copied++] = rect;
+  }
+  return copied;
+}
+
 void MergeRetainedLayer(WireLayer& destination, const WireLayer& source) {
   destination.owner_process_id = source.owner_process_id;
   destination.layer_id = source.layer_id;
@@ -464,6 +488,11 @@ void MergeRetainedLayer(WireLayer& destination, const WireLayer& source) {
     destination.z = source.z;
   if ((source.what & DARWIN_ART_SF_ALPHA_CHANGED) != 0)
     destination.alpha = source.alpha;
+  if ((source.what & DARWIN_ART_SF_TRANSPARENT_REGION_CHANGED) != 0) {
+    destination.transparent_region_count = CopyTransparentRegion(
+        source.transparent_region, source.transparent_region_count,
+        destination.transparent_region);
+  }
   if ((source.what & DARWIN_ART_SF_BUFFER_CHANGED) != 0) {
     destination.iosurface_id = source.iosurface_id;
     destination.width = source.width;
@@ -587,6 +616,15 @@ void ProcessRequest(CompositionJob job) {
     bool valid = device != nil && target_surface != nullptr;
     std::vector<IOSurfaceRef> retained_surfaces;
     std::vector<DarwinArtMetalComposerLayer> composition;
+    struct ReparentNullTrace {
+      uint32_t owner_process_id;
+      uint32_t local_layer_id;
+      uint32_t global_layer_id;
+      uint32_t parent_id;
+      uint32_t parent_global_id;
+      uint64_t what;
+    };
+    std::vector<ReparentNullTrace> reparent_null_traces;
     {
       std::lock_guard<std::mutex> lock(State().mutex);
       ServiceState& state = State();
@@ -656,6 +694,19 @@ void ProcessRequest(CompositionJob job) {
         });
         const uint32_t global_id =
             GlobalLayerId(state, owner_process_id, layer.layer_id);
+        if (TraceReparentToNull() &&
+            (layer.what & DARWIN_ART_SF_REPARENT) != 0 &&
+            layer.parent_id == 0) {
+          reparent_null_traces.push_back({
+              .owner_process_id = owner_process_id,
+              .local_layer_id = layer.layer_id,
+              .global_layer_id = global_id,
+              .parent_id = layer.parent_id,
+              .parent_global_id = GlobalLayerId(
+                  state, parent_owner_process_id, layer.parent_id),
+              .what = layer.what,
+          });
+        }
         auto [retained, inserted] = target.layers.try_emplace(
             global_id, RetainedLayer{.submitting_process_id = header.process_id,
                                      .layer = layer});
@@ -709,11 +760,28 @@ void ProcessRequest(CompositionJob job) {
           valid = false;
         }
       }
-      size_t visible_ordered_count = 0;
+      if (TraceReparentToNull()) {
+        for (const auto& trace : reparent_null_traces) {
+          const bool in_order = std::find(layer_order.begin(), layer_order.end(),
+                                          trace.global_layer_id) !=
+              layer_order.end();
+          std::fprintf(stderr,
+                       "ART SurfaceFlinger trace: after-commit-reparent-null "
+                       "owner=%u local=%u global=%u what=0x%llx parent=%u "
+                       "parent_global=%u order_membership=%d target=%u\n",
+                       trace.owner_process_id, trace.local_layer_id,
+                       trace.global_layer_id,
+                       static_cast<unsigned long long>(trace.what),
+                       trace.parent_id, trace.parent_global_id,
+                       in_order ? 1 : 0, header.target_iosurface_id);
+        }
+      }
+      // Retained buffers can belong to detached/offscreen layers. Only the
+      // AOSP hierarchy determines which candidates participate in this frame;
+      // absence from its order is not a transaction failure.
       for (uint32_t global_id : layer_order) {
         const auto found = visible_layers.find(global_id);
         if (found == visible_layers.end()) continue;
-        ++visible_ordered_count;
         const VisibleLayer& visible = found->second;
         const WireLayer& layer = visible.layer;
         const uint32_t owner_process_id = layer.owner_process_id == 0
@@ -760,32 +828,11 @@ void ProcessRequest(CompositionJob job) {
             .destination_bottom = layer.destination_bottom,
             .z = layer.z,
             .alpha = layer.alpha,
+            .transparent_region_count = 0,
         });
-      }
-      if (visible_ordered_count != visible_layers.size()) {
-        std::fprintf(stderr,
-                     "ART SurfaceFlinger: AOSP hierarchy omitted visible "
-                     "layers expected=%zu ordered=%zu\n",
-                     visible_layers.size(), visible_ordered_count);
-        for (const auto& [global_id, visible] : visible_layers) {
-          std::fprintf(stderr,
-                       "ART SurfaceFlinger: omitted candidate pid=%u "
-                       "local=%u global=%u parent-local=%u parent-global=%u "
-                       "what=0x%llx surface=%u\n",
-                       visible.process_id, visible.layer.layer_id, global_id,
-                       visible.layer.parent_id,
-                       GlobalLayerId(
-                                     state,
-                                     visible.layer.parent_owner_process_id == 0
-                                         ? (visible.layer.owner_process_id == 0
-                                                ? visible.process_id
-                                                : visible.layer.owner_process_id)
-                                         : visible.layer.parent_owner_process_id,
-                                     visible.layer.parent_id),
-                       static_cast<unsigned long long>(visible.layer.what),
-                       visible.layer.iosurface_id);
-        }
-        valid = false;
+        composition.back().transparent_region_count = CopyTransparentRegion(
+            layer.transparent_region, layer.transparent_region_count,
+            composition.back().transparent_region);
       }
     }
 
@@ -1001,7 +1048,7 @@ extern "C" int darwin_art_surfaceflinger_service_present(
     const uint32_t surface_id =
         surface == nullptr ? 0 : IOSurfaceGetID(surface);
     if (layer.layer_id == 0) continue;
-    wire_layers.push_back({
+    WireLayer wire{
         .owner_process_id = layer.owner_process_id,
         .layer_id = layer.layer_id,
         .parent_owner_process_id = layer.parent_owner_process_id,
@@ -1027,7 +1074,12 @@ extern "C" int darwin_art_surfaceflinger_service_present(
         .destination_bottom = layer.destination_bottom,
         .z = layer.z,
         .alpha = layer.alpha,
-    });
+        .transparent_region_count = 0,
+    };
+    wire.transparent_region_count = CopyTransparentRegion(
+        layer.transparent_region, layer.transparent_region_count,
+        wire.transparent_region);
+    wire_layers.push_back(wire);
   }
   const int fd = Connect(path);
   if (fd < 0) {

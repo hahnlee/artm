@@ -855,11 +855,9 @@ pub unsafe extern "C" fn darwin_art_elf_graph_lookup_root(
         }
         // SAFETY: the C contract requires a live handle and NUL-terminated symbol name.
         let handle = unsafe { handle.as_ref() }.ok_or(FfiFailure::Invalid("handle is null"))?;
-        let name = unsafe { CStr::from_ptr(name) }
-            .to_str()
-            .map_err(|_| FfiFailure::Invalid("symbol name is not UTF-8"))?;
+        let name = unsafe { CStr::from_ptr(name) }.to_bytes();
         let address = lock_graph(handle)?
-            .lookup_root_exported(name)
+            .lookup_root_exported_bytes(name)
             .map_err(FfiFailure::Load)?;
         unsafe { *out_address = address };
         Ok(())
@@ -882,11 +880,9 @@ pub unsafe extern "C" fn darwin_art_elf_graph_lookup_root_symbol(
             return Err(FfiFailure::Invalid("name is null"));
         }
         let handle = unsafe { handle.as_ref() }.ok_or(FfiFailure::Invalid("handle is null"))?;
-        let name = unsafe { CStr::from_ptr(name) }
-            .to_str()
-            .map_err(|_| FfiFailure::Invalid("symbol name is not UTF-8"))?;
+        let name = unsafe { CStr::from_ptr(name) }.to_bytes();
         let address = lock_graph(handle)?
-            .lookup_root_symbol(name)
+            .lookup_root_symbol_bytes(name)
             .map_err(FfiFailure::Load)?;
         unsafe { *out_address = address };
         Ok(())
@@ -966,11 +962,9 @@ pub unsafe extern "C" fn darwin_art_elf_lookup(
         }
         // SAFETY: the C contract requires a live handle and NUL-terminated name.
         let handle = unsafe { handle.as_ref() }.ok_or(FfiFailure::Invalid("handle is null"))?;
-        let name = unsafe { CStr::from_ptr(name) }
-            .to_str()
-            .map_err(|_| FfiFailure::Invalid("symbol name is not UTF-8"))?;
+        let name = unsafe { CStr::from_ptr(name) }.to_bytes();
         let address = lock_image(handle)?
-            .lookup_exported(name)
+            .lookup_exported_bytes(name)
             .map_err(FfiFailure::Load)?;
         unsafe { *out_address = address };
         Ok(())

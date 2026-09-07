@@ -85,6 +85,7 @@ cxxflags=(-arch arm64 -isysroot "$sdk" -std=c++20 -O2 -Wall -Wextra -Werror)
   -o "$objects/central-fd-broker.o"
 "$cxx" "${cxxflags[@]}" \
   -I"$root/tools/bionic-socket-broker-adapter/include" \
+  -I"$root/tools/bionic-errno-tls/include" \
   -I"$root/tools/bionic-central-fd-broker/include" \
   -I"$root/tools/bionic-dns-facade/include" \
   -c "$root/tools/bionic-socket-broker-adapter/src/adapter.cc" \

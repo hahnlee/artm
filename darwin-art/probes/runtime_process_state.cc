@@ -35,6 +35,7 @@ struct State {
   JavaVM* java_vm = nullptr;
   art::Thread* art_thread = nullptr;
   bool resource_runtime_installed = false;
+  bool dalvikvm_process = false;
   darwin_art_graphics::GraphicsState* graphics_state = nullptr;
   const darwin_art_lifecycle_hooks_t* lifecycle_hooks = nullptr;
   const darwin_art_host_services_t* host_services = nullptr;
@@ -82,6 +83,13 @@ void record_created_runtime(art::Thread* art_thread) {
   g_state.java_vm = reinterpret_cast<JavaVM*>(art::Runtime::Current()->GetJavaVM());
   g_state.art_thread = art_thread;
   g_state.runtime_created = true;
+}
+
+void record_dalvikvm_process() {
+  std::lock_guard<std::mutex> lock(g_state.mutex);
+  CHECK(g_state.run_started && g_state.runtime_created && !g_state.failed &&
+        !g_state.shutdown_started);
+  g_state.dalvikvm_process = true;
 }
 
 void record_graphics_state(darwin_art_graphics::GraphicsState* state) {
@@ -221,6 +229,7 @@ ShutdownBeginResult begin_shutdown(ShutdownSnapshot* snapshot) {
     snapshot->java_vm = g_state.java_vm;
     snapshot->art_thread = g_state.art_thread;
     snapshot->resource_runtime_installed = g_state.resource_runtime_installed;
+    snapshot->dalvikvm_process = g_state.dalvikvm_process;
     snapshot->graphics_state = g_state.graphics_state;
     lifecycle_hooks = g_state.lifecycle_hooks;
   }
@@ -251,6 +260,7 @@ void mark_shutdown_complete() {
   g_state.java_vm = nullptr;
   g_state.art_thread = nullptr;
   g_state.resource_runtime_installed = false;
+  g_state.dalvikvm_process = false;
   g_state.graphics_state = nullptr;
   g_state.lifecycle_hooks = nullptr;
   g_state.host_services = nullptr;

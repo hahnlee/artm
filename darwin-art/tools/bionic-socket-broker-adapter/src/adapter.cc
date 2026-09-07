@@ -1,6 +1,7 @@
 #include "darwin_art_bionic_socket_broker.h"
 
 #include "darwin_art_bionic_dns.h"
+#include "darwin_art_bionic_errno.h"
 #include "darwin_art_bionic_fd_broker.h"
 
 #include <arpa/inet.h>
@@ -16,6 +17,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -28,6 +30,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -51,18 +54,16 @@ darwin_art_android_shared_memory_close(int) {
   return 0;
 }
 
-// Unity still imports the legacy resolver entry points even when all runtime
-// lookups use getaddrinfo. Keep those symbols inside the Android network
-// namespace; returning a failed lookup is preferable to exposing Darwin's
-// hostent storage and lifetime to guest code.
-extern "C" struct hostent* darwin_art_bionic_socket_broker_gethostbyname(
-    const char* name) {
-  (void)name;
-  return nullptr;
+// Keep legacy resolver storage in the Android facade, never return Darwin's
+// static hostent directly to guest code.
+extern "C" struct hostent *
+darwin_art_bionic_socket_broker_gethostbyname(const char *name) {
+  return darwin_art_bionic_dns_gethostbyname(name);
 }
 
-extern "C" struct hostent* darwin_art_bionic_socket_broker_gethostbyaddr(
-    const void* address, socklen_t length, int type) {
+extern "C" struct hostent *
+darwin_art_bionic_socket_broker_gethostbyaddr(const void *address,
+                                              socklen_t length, int type) {
   (void)address;
   (void)length;
   (void)type;
@@ -96,6 +97,8 @@ constexpr int kAndroidSoError = 4;
 constexpr int kAndroidSoSndbuf = 7;
 constexpr int kAndroidSoRcvbuf = 8;
 constexpr int kAndroidSoKeepalive = 9;
+constexpr int kAndroidSoRcvtimeo = 20;
+constexpr int kAndroidSoSndtimeo = 21;
 constexpr int kAndroidSoPasscred = 16;
 constexpr int kAndroidMsgOob = 0x1;
 constexpr int kAndroidMsgPeek = 0x2;
@@ -106,6 +109,7 @@ constexpr int kAndroidMsgWaitAll = 0x100;
 constexpr int kAndroidMsgNoSignal = 0x4000;
 constexpr uint32_t kCentralBrokerTokenMarker = UINT32_C(0x40000000);
 constexpr uint32_t kCentralBrokerTokenTopMask = UINT32_C(0xc0000000);
+constexpr uint32_t kAndroidSendMmsgMax = 1024;
 constexpr int kAndroidFDupfd = 0;
 constexpr int kAndroidFGetfd = 1;
 constexpr int kAndroidFSetfd = 2;
@@ -115,6 +119,9 @@ constexpr int kAndroidFDupfdCloexec = 1030;
 constexpr int kAndroidFdCloexec = 1;
 constexpr int kAndroidOAppend = 1024;
 constexpr int kAndroidONonblock = 2048;
+constexpr int kAndroidFdSetBits = 1024;
+constexpr int kAndroidFdSetWordBits = 64;
+constexpr size_t kAndroidFdSetWords = kAndroidFdSetBits / kAndroidFdSetWordBits;
 constexpr uint32_t kAndroidFionread = 0x541b;
 constexpr uint32_t kAndroidFionbio = 0x5421;
 
@@ -177,7 +184,50 @@ struct HostFdObject {
   std::shared_ptr<DnsQueryState> dns;
   std::shared_ptr<EventFdState> event;
   std::atomic<bool> pass_credentials{false};
+  // A nonblocking TLS/client read can legitimately return EAGAIN many times
+  // while waiting for the peer. Keep the opt-in trace useful without letting
+  // that wait flood the process log.
+  std::atomic<uint32_t> debug_read_eagain_logs{0};
+  // A level-triggered descriptor remains readable until its owner drains it.
+  // Bound readiness diagnostics as well; otherwise a single fd can emit one
+  // line per Looper iteration while an opt-in network trace is running.
+  std::atomic<uint32_t> debug_poll_logs{0};
 };
+
+constexpr uint32_t kSocketDebugReadEagainLogLimit = 128;
+constexpr uint32_t kSocketDebugPollLogLimit = 128;
+constexpr uint32_t kSocketDebugSelectLogLimit = 256;
+constexpr uint32_t kSocketDebugReadChkLogLimit = 128;
+
+std::atomic<uint32_t> g_socket_select_debug_logs{0};
+std::atomic<uint32_t> g_socket_read_chk_debug_logs{0};
+
+bool ShouldLogSocketRead(HostFdObject *socket, ssize_t result, int host_errno) {
+  if (result >= 0 || (host_errno != EAGAIN && host_errno != EWOULDBLOCK)) {
+    return true;
+  }
+  const uint32_t prior =
+      socket->debug_read_eagain_logs.fetch_add(1, std::memory_order_relaxed);
+  return prior < kSocketDebugReadEagainLogLimit;
+}
+
+bool ShouldLogSocketPoll(HostFdObject *socket) {
+  const uint32_t prior =
+      socket->debug_poll_logs.fetch_add(1, std::memory_order_relaxed);
+  return prior < kSocketDebugPollLogLimit;
+}
+
+bool ShouldLogSocketSelect() {
+  const uint32_t prior =
+      g_socket_select_debug_logs.fetch_add(1, std::memory_order_relaxed);
+  return prior < kSocketDebugSelectLogLimit;
+}
+
+bool ShouldLogSocketReadChk() {
+  const uint32_t prior =
+      g_socket_read_chk_debug_logs.fetch_add(1, std::memory_order_relaxed);
+  return prior < kSocketDebugReadChkLogLimit;
+}
 
 struct HostPollWake {
   int read_fd = -1;
@@ -229,22 +279,14 @@ static_assert(sizeof(AndroidSyncMergeData) == 48);
 
 int BrokerFailure(DarwinArtFdBrokerStatus status);
 
-struct AndroidIovec {
-  void *base;
-  size_t length;
-};
+using AndroidIovec = DarwinArtAndroidIovec;
+using AndroidMsghdr = DarwinArtAndroidMsghdr;
+using AndroidMmsghdr = DarwinArtAndroidMmsghdr;
 
-struct AndroidMsghdr {
-  void *name;
-  uint32_t name_length;
-  uint32_t padding;
-  AndroidIovec *vectors;
-  size_t vector_count;
-  void *control;
-  size_t control_length;
-  int32_t flags;
-  uint32_t tail_padding;
-};
+static_assert(sizeof(AndroidMsghdr) == 56);
+static_assert(offsetof(AndroidMsghdr, vector_count) == 24);
+static_assert(sizeof(AndroidMmsghdr) == 64);
+static_assert(offsetof(AndroidMmsghdr, msg_len) == 56);
 
 struct AndroidCmsghdr {
   size_t length;
@@ -257,6 +299,16 @@ struct AndroidUcred {
   uint32_t user_id;
   uint32_t group_id;
 };
+
+// Android's timeval is two 64-bit fields. Darwin's tv_usec is a signed
+// 32-bit field, so socket-option conversion must be field-wise rather than a
+// raw 16-byte copy.
+struct AndroidTimeval {
+  int64_t seconds;
+  int64_t microseconds;
+};
+
+static_assert(sizeof(AndroidTimeval) == 16);
 
 static_assert(sizeof(AndroidUcred) == 12);
 
@@ -648,6 +700,12 @@ bool TranslateOption(int android_level, int android_option, int *host_level,
     case kAndroidSoKeepalive:
       *host_option = SO_KEEPALIVE;
       return true;
+    case kAndroidSoRcvtimeo:
+      *host_option = SO_RCVTIMEO;
+      return true;
+    case kAndroidSoSndtimeo:
+      *host_option = SO_SNDTIMEO;
+      return true;
     default:
       return false;
     }
@@ -675,12 +733,14 @@ bool TranslateOption(int android_level, int android_option, int *host_level,
 }
 
 bool EnsureEventFdSignaled(const std::shared_ptr<EventFdState> &state) {
-  if (state == nullptr) return true;
+  if (state == nullptr)
+    return true;
   std::lock_guard lock(state->mutex);
-  if (state->counter == 0 || state->signaled) return true;
+  if (state->counter == 0 || state->signaled)
+    return true;
   const uint64_t token = 1;
-  const ssize_t result = send(state->signal_fd, &token, sizeof(token),
-                              MSG_DONTWAIT);
+  const ssize_t result =
+      send(state->signal_fd, &token, sizeof(token), MSG_DONTWAIT);
   if (result == sizeof(token)) {
     state->signaled = true;
     return true;
@@ -708,9 +768,10 @@ intptr_t EventFdRead(HostFdObject *descriptor, void *bytes, size_t count,
   std::memcpy(bytes, &value, sizeof(value));
   if (state->counter != 0) {
     const uint64_t next_token = 1;
-    const ssize_t result = send(state->signal_fd, &next_token,
-                                sizeof(next_token), MSG_DONTWAIT);
-    if (result == sizeof(next_token)) state->signaled = true;
+    const ssize_t result =
+        send(state->signal_fd, &next_token, sizeof(next_token), MSG_DONTWAIT);
+    if (result == sizeof(next_token))
+      state->signaled = true;
   }
   *android_errno = 0;
   return sizeof(uint64_t);
@@ -738,9 +799,10 @@ intptr_t EventFdWrite(HostFdObject *descriptor, const void *bytes, size_t count,
   state->counter += value;
   if (was_empty && value != 0 && !state->signaled) {
     const uint64_t token = 1;
-    const ssize_t result = send(state->signal_fd, &token, sizeof(token),
-                                MSG_DONTWAIT);
-    if (result == sizeof(token)) state->signaled = true;
+    const ssize_t result =
+        send(state->signal_fd, &token, sizeof(token), MSG_DONTWAIT);
+    if (result == sizeof(token))
+      state->signaled = true;
   }
   *android_errno = 0;
   return sizeof(uint64_t);
@@ -754,10 +816,12 @@ intptr_t OwnerRead(void *, uint64_t object, void *bytes, size_t count,
   const auto started = std::chrono::steady_clock::now();
   const int status_flags = fcntl(socket->fd, F_GETFL);
   const ssize_t result = recv(socket->fd, bytes, count, 0);
+  const int host_errno = result < 0 ? errno : 0;
   if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
-    const auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                                std::chrono::steady_clock::now() - started)
-                                .count();
+    const auto elapsed_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - started)
+            .count();
     if (elapsed_us >= 100'000) {
       std::fprintf(stderr,
                    "DARWIN_ART slow-broker-read host_fd=%d count=%zu "
@@ -766,16 +830,15 @@ intptr_t OwnerRead(void *, uint64_t object, void *bytes, size_t count,
                    result < 0 ? errno : 0, static_cast<long long>(elapsed_us));
     }
   }
-  if (SocketDebugEnabled()) {
+  if (SocketDebugEnabled() && ShouldLogSocketRead(socket, result, host_errno)) {
     uint32_t control = 0;
     if (result == sizeof(control))
       std::memcpy(&control, bytes, sizeof(control));
     std::fprintf(stderr,
-                 "DARWIN socket read pid=%d host_fd=%d count=%zu result=%zd "
-                 "control=%u host_errno=%d android_errno=%d\n",
-                 getpid(), socket->fd, count, result, control,
-                 result < 0 ? errno : 0,
-                 result < 0 ? AndroidErrno(errno) : 0);
+                 "DARWIN socket read op=read pid=%d host_fd=%d count=%zu "
+                 "result=%zd control=%u host_errno=%d android_errno=%d\n",
+                 getpid(), socket->fd, count, result, control, host_errno,
+                 result < 0 ? AndroidErrno(host_errno) : 0);
   }
   *android_errno = result < 0 ? AndroidErrno(errno) : 0;
   return result;
@@ -791,12 +854,11 @@ intptr_t OwnerWrite(void *, uint64_t object, const void *bytes, size_t count,
     uint32_t control = 0;
     if (count == sizeof(control))
       std::memcpy(&control, bytes, sizeof(control));
-    std::fprintf(
-        stderr,
-        "DARWIN socket write pid=%d host_fd=%d count=%zu result=%zd "
-        "control=%u host_errno=%d\n",
-        getpid(), socket->fd, count, result, control,
-        result < 0 ? errno : 0);
+    std::fprintf(stderr,
+                 "DARWIN socket write pid=%d host_fd=%d count=%zu result=%zd "
+                 "control=%u host_errno=%d\n",
+                 getpid(), socket->fd, count, result, control,
+                 result < 0 ? errno : 0);
   }
   *android_errno = result < 0 ? AndroidErrno(errno) : 0;
   return result;
@@ -813,7 +875,8 @@ int OwnerPoll(void *, uint64_t object, int16_t events, int16_t *revents,
     return -1;
   }
   *revents = descriptor.revents;
-  if (SocketDebugEnabled() && (result != 0 || descriptor.revents != 0)) {
+  if (SocketDebugEnabled() && (result != 0 || descriptor.revents != 0) &&
+      ShouldLogSocketPoll(socket)) {
     std::fprintf(
         stderr,
         "DARWIN socket poll host_fd=%d events=0x%x result=%d revents=0x%x\n",
@@ -848,7 +911,9 @@ int OwnerPollMany(void *, const uint64_t *objects, const int16_t *events,
   if (result >= 0) {
     for (size_t index = 0; index < count; ++index) {
       revents[index] = descriptors[index].revents;
-      if (SocketDebugEnabled() && descriptors[index].revents != 0) {
+      if (SocketDebugEnabled() && descriptors[index].revents != 0 &&
+          ShouldLogSocketPoll(
+              reinterpret_cast<HostFdObject *>(objects[index]))) {
         std::fprintf(
             stderr,
             "DARWIN socket poll_many host_fd=%d events=0x%x revents=0x%x "
@@ -994,9 +1059,10 @@ intptr_t PipeOwnerRead(void *, uint64_t object, void *bytes, size_t count,
   const int status_flags = fcntl(pipe->fd, F_GETFL);
   const ssize_t result = read(pipe->fd, bytes, count);
   if (std::getenv("DARWIN_ART_DEBUG_SLOW_FRAME") != nullptr) {
-    const auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                                std::chrono::steady_clock::now() - started)
-                                .count();
+    const auto elapsed_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - started)
+            .count();
     if (elapsed_us >= 100'000) {
       std::fprintf(stderr,
                    "DARWIN_ART slow-broker-pipe-read host_fd=%d count=%zu "
@@ -1059,8 +1125,7 @@ int OwnerIoctl(void *context, uint64_t object, uint64_t request, void *argument,
     // state without consuming the readiness used by libsync's sync_wait.
     if (fstat(descriptor->fd, &status) == 0 && S_ISFIFO(status.st_mode) &&
         ioctl(descriptor->fd, FIONREAD, &available) == 0 &&
-        (available == 0 ||
-         available == static_cast<int>(sizeof(uint64_t)))) {
+        (available == 0 || available == static_cast<int>(sizeof(uint64_t)))) {
       const int fence_status =
           available == static_cast<int>(sizeof(uint64_t)) ? 1 : 0;
       auto *info = static_cast<AndroidSyncFileInfo *>(argument);
@@ -1420,12 +1485,13 @@ intptr_t OwnerSocketOperation(void *context, uint64_t object,
   if (request->operation == DARWIN_ART_FD_SOCKET_RECV) {
     const ssize_t result =
         recv(socket->fd, request->output_bytes, request->byte_count, flags);
-    if (SocketDebugEnabled() && (result > 0 || errno != EAGAIN)) {
+    const int host_errno = result < 0 ? errno : 0;
+    if (SocketDebugEnabled() &&
+        ShouldLogSocketRead(socket, result, host_errno)) {
       std::fprintf(stderr,
-                   "DARWIN socket recv host_fd=%d count=%zu flags=0x%x "
-                   "result=%zd host_errno=%d\n",
-                   socket->fd, request->byte_count, flags, result,
-                   result < 0 ? errno : 0);
+                   "DARWIN socket recv op=recv host_fd=%d count=%zu "
+                   "flags=0x%x result=%zd host_errno=%d\n",
+                   socket->fd, request->byte_count, flags, result, host_errno);
     }
     *android_errno = result < 0 ? AndroidErrno(errno) : 0;
     return result;
@@ -1486,8 +1552,18 @@ intptr_t OwnerSocketOperation(void *context, uint64_t object,
                        flags, reinterpret_cast<sockaddr *>(&storage), &length)
             : recv(socket->fd, request->output_bytes, request->byte_count,
                    flags);
+    const int host_errno = result < 0 ? errno : 0;
+    if (SocketDebugEnabled() &&
+        ShouldLogSocketRead(socket, result, host_errno)) {
+      std::fprintf(stderr,
+                   "DARWIN socket recvfrom op=recvfrom host_fd=%d "
+                   "address=%d count=%zu flags=0x%x result=%zd "
+                   "host_errno=%d\n",
+                   socket->fd, wants_address ? 1 : 0, request->byte_count,
+                   flags, result, host_errno);
+    }
     if (result < 0) {
-      *android_errno = AndroidErrno(errno);
+      *android_errno = AndroidErrno(host_errno);
       return -1;
     }
     if (wants_address &&
@@ -1591,9 +1667,35 @@ intptr_t OwnerSocketOperation(void *context, uint64_t object,
       return -1;
     }
     if (request->operation == DARWIN_ART_FD_SOCKET_SETSOCKOPT) {
-      const int result =
-          setsockopt(socket->fd, host_level, host_option, request->option_input,
-                     request->option_input_length);
+      struct timeval host_timeval{};
+      const void *option_input = request->option_input;
+      uint32_t option_input_length = request->option_input_length;
+      if ((request->level == kAndroidSolSocket &&
+           (request->option == kAndroidSoRcvtimeo ||
+            request->option == kAndroidSoSndtimeo))) {
+        if (request->option_input == nullptr ||
+            request->option_input_length < sizeof(AndroidTimeval)) {
+          *android_errno = 22;
+          return -1;
+        }
+        AndroidTimeval android_timeval{};
+        std::memcpy(&android_timeval, request->option_input,
+                    sizeof(android_timeval));
+        if (android_timeval.seconds < 0 || android_timeval.microseconds < 0 ||
+            android_timeval.microseconds >= 1000000 ||
+            android_timeval.seconds >
+                static_cast<int64_t>(std::numeric_limits<time_t>::max())) {
+          *android_errno = 22;
+          return -1;
+        }
+        host_timeval.tv_sec = static_cast<time_t>(android_timeval.seconds);
+        host_timeval.tv_usec =
+            static_cast<suseconds_t>(android_timeval.microseconds);
+        option_input = &host_timeval;
+        option_input_length = sizeof(host_timeval);
+      }
+      const int result = setsockopt(socket->fd, host_level, host_option,
+                                    option_input, option_input_length);
       if (SocketDebugEnabled()) {
         std::fprintf(stderr,
                      "DARWIN socket setsockopt host_fd=%d android_level=%d "
@@ -1640,6 +1742,26 @@ intptr_t OwnerSocketOperation(void *context, uint64_t object,
         std::memcpy(request->option_output, &android_value,
                     sizeof(android_value));
         length = sizeof(android_value);
+      }
+    } else if (request->level == kAndroidSolSocket &&
+               (request->option == kAndroidSoRcvtimeo ||
+                request->option == kAndroidSoSndtimeo)) {
+      struct timeval host_timeval{};
+      length = sizeof(host_timeval);
+      result = getsockopt(socket->fd, host_level, host_option, &host_timeval,
+                          &length);
+      if (result == 0) {
+        if (request->option_output_capacity < sizeof(AndroidTimeval) ||
+            host_timeval.tv_usec < 0 || host_timeval.tv_usec >= 1000000) {
+          *android_errno = 22;
+          return -1;
+        }
+        AndroidTimeval android_timeval{
+            static_cast<int64_t>(host_timeval.tv_sec),
+            static_cast<int64_t>(host_timeval.tv_usec)};
+        std::memcpy(request->option_output, &android_timeval,
+                    sizeof(android_timeval));
+        length = sizeof(android_timeval);
       }
     } else {
       result = getsockopt(socket->fd, host_level, host_option,
@@ -1781,7 +1903,26 @@ extern "C" int darwin_art_bionic_socket_broker_deactivate() {
       return -1;
     }
   }
+  if (darwin_art_fd_broker_flush_deferred_closes(process->broker) !=
+      DARWIN_ART_FD_BROKER_OK) {
+    std::abort();
+  }
   darwin_art_bionic_dns_reset_for_test();
+  if (process->objects.load(std::memory_order_acquire) != 0 ||
+      process->dns_results.load(std::memory_order_acquire) != 0 ||
+      process->async_dns_queries.load(std::memory_order_acquire) != 0) {
+    std::lock_guard global(g_process_mutex);
+    std::lock_guard local(process->mutex);
+    process->draining = false;
+    g_process = process;
+    return -1;
+  }
+  if (darwin_art_fd_broker_wait_owner_quiescent(
+          process->broker, process->pipe_owner) != DARWIN_ART_FD_BROKER_OK ||
+      darwin_art_fd_broker_wait_owner_quiescent(
+          process->broker, process->socket_owner) != DARWIN_ART_FD_BROKER_OK) {
+    std::abort();
+  }
   if (darwin_art_fd_broker_uninstall_owner(
           process->broker, process->pipe_owner) != DARWIN_ART_FD_BROKER_OK ||
       darwin_art_fd_broker_uninstall_owner(
@@ -2211,6 +2352,23 @@ darwin_art_bionic_socket_broker_socketpair(int domain, int type, int protocol,
   int host[2] = {-1, -1};
   if (socketpair(AF_UNIX, host_type, 0, host) != 0)
     return Fail(AndroidErrno(errno), -1);
+#ifdef SO_NOSIGPIPE
+  // socket() applies this policy to every broker-owned socket. Keep
+  // socketpair endpoints identical: MSG_NOSIGNAL is translated by the
+  // broker, but callers are also allowed to use a plain send() on an
+  // InputChannel descriptor. A broken peer must report EPIPE, never deliver
+  // SIGPIPE to the ART process.
+  int no_sigpipe = 1;
+  for (int index = 0; index < 2; ++index) {
+    if (setsockopt(host[index], SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe,
+                   sizeof(no_sigpipe)) < 0) {
+      const int error = AndroidErrno(errno);
+      (void)close(host[0]);
+      (void)close(host[1]);
+      return Fail(error, -1);
+    }
+  }
+#endif
   for (int index = 0; index < 2; ++index) {
     if (fcntl(host[index], F_SETFD, FD_CLOEXEC) != 0 ||
         (nonblocking && fcntl(host[index], F_SETFL,
@@ -2294,6 +2452,30 @@ extern "C" int darwin_art_bionic_socket_broker_dup(int fd) {
                                            : Fail(BrokerFailure(status), -1);
 }
 
+extern "C" int darwin_art_bionic_socket_broker_dup2(int old_fd, int new_fd) {
+  PreserveErrno preserve;
+  if ((static_cast<uint32_t>(old_fd) & kCentralBrokerTokenTopMask) !=
+          kCentralBrokerTokenMarker ||
+      (static_cast<uint32_t>(new_fd) & kCentralBrokerTokenTopMask) !=
+          kCentralBrokerTokenMarker) {
+    // The libcore socket path only supplies central-broker descriptors. Do not
+    // pass a guest token to the host dup2 implementation or reinterpret a
+    // private filesystem descriptor as a host fd.
+    return Fail(9, -1);
+  }
+  ProcessLease lease;
+  Process *process = lease.get();
+  if (process == nullptr)
+    return Fail(38, -1);
+  DarwinArtFdIoResult result{};
+  const auto status =
+      darwin_art_fd_broker_dup2(process->broker, old_fd, new_fd, &result);
+  if (status != DARWIN_ART_FD_BROKER_OK)
+    return Fail(BrokerFailure(status), -1);
+  return result.value < 0 ? Fail(result.android_errno, -1)
+                          : static_cast<int>(result.value);
+}
+
 extern "C" int darwin_art_bionic_socket_broker_unsupported_int() {
   PreserveErrno preserve;
   return Fail(38, -1);
@@ -2344,6 +2526,12 @@ darwin_art_bionic_socket_broker_write(int fd, const void *bytes, size_t count) {
 extern "C" intptr_t
 darwin_art_bionic_socket_broker___read_chk(int fd, void *bytes, size_t count,
                                            size_t buffer_size) {
+  if (SocketDebugEnabled() && ShouldLogSocketReadChk()) {
+    std::fprintf(stderr,
+                 "DARWIN socket read_chk op=__read_chk fd=%d count=%zu "
+                 "buffer_size=%zu\n",
+                 fd, count, buffer_size);
+  }
   if (count > buffer_size)
     return Fail(34, intptr_t{-1});
   return darwin_art_bionic_socket_broker_read(fd, bytes, count);
@@ -2392,6 +2580,243 @@ darwin_art_bionic_socket_broker_poll(DarwinArtBionicPollFd *descriptors,
     return Fail(BrokerFailure(status), -1);
   return result.value < 0 ? Fail(result.android_errno, -1)
                           : static_cast<int>(result.value);
+}
+
+// Android arm64 uses a 1024-bit fd_set with 64-bit words.  The host Darwin
+// fd_set has a different word layout, so do not cast these guest buffers to
+// the host type.  Socket descriptors exposed by the central broker are
+// virtual and cannot be passed to host select; translate each selected guest
+// fd through the broker's poll contract instead.
+struct AndroidSelectTimeval {
+  int64_t seconds;
+  int64_t microseconds;
+};
+
+static_assert(sizeof(AndroidSelectTimeval) == 16);
+
+static uint64_t SelectFdSetWord(const void *set, size_t word) {
+  uint64_t value = 0;
+  std::memcpy(&value, static_cast<const uint8_t *>(set) + word * sizeof(value),
+              sizeof(value));
+  return value;
+}
+
+static void ClearSelectFdSet(void *set) {
+  if (set != nullptr)
+    std::memset(set, 0, kAndroidFdSetWords * sizeof(uint64_t));
+}
+
+static void SetSelectFd(void *set, int fd) {
+  if (set == nullptr || fd < 0 || fd >= kAndroidFdSetBits)
+    return;
+  const size_t word = static_cast<size_t>(fd) / kAndroidFdSetWordBits;
+  const uint64_t mask = UINT64_C(1)
+                        << (static_cast<unsigned>(fd) % kAndroidFdSetWordBits);
+  uint64_t value = SelectFdSetWord(set, word);
+  value |= mask;
+  std::memcpy(static_cast<uint8_t *>(set) + word * sizeof(value), &value,
+              sizeof(value));
+}
+
+extern "C" int
+darwin_art_bionic_socket_broker_select(int nfds, void *readfds, void *writefds,
+                                       void *exceptfds,
+                                       AndroidSelectTimeval *timeout) {
+  PreserveErrno preserve;
+  const bool trace = SocketDebugEnabled() && ShouldLogSocketSelect();
+  size_t trace_descriptors = 0;
+  auto trace_result = [&](const char *phase, int value, int error) {
+    if (trace) {
+      std::fprintf(stderr,
+                   "DARWIN socket select op=select phase=%s nfds=%d "
+                   "descriptors=%zu result=%d android_errno=%d\n",
+                   phase, nfds, trace_descriptors, value, error);
+    }
+  };
+
+  if (nfds < 0 || nfds > kAndroidFdSetBits) {
+    if (trace)
+      std::fprintf(stderr,
+                   "DARWIN socket select op=select phase=invalid "
+                   "nfds=%d result=-1 android_errno=22\n",
+                   nfds);
+    return Fail(22, -1);
+  }
+
+  uint64_t timeout_us = 0;
+  if (timeout != nullptr) {
+    AndroidSelectTimeval input{};
+    std::memcpy(&input, timeout, sizeof(input));
+    if (input.seconds < 0 || input.microseconds < 0 ||
+        input.microseconds >= 1'000'000 ||
+        input.seconds > (INT64_MAX - input.microseconds) / 1'000'000) {
+      if (trace)
+        std::fprintf(stderr,
+                     "DARWIN socket select op=select phase=invalid-timeout "
+                     "nfds=%d result=-1 android_errno=22\n",
+                     nfds);
+      return Fail(22, -1);
+    }
+    timeout_us = static_cast<uint64_t>(input.seconds) * 1'000'000u +
+                 static_cast<uint64_t>(input.microseconds);
+  }
+
+  std::vector<DarwinArtFdPollEntry> entries;
+  entries.reserve(static_cast<size_t>(nfds));
+  for (int fd = 0; fd < nfds; ++fd) {
+    const size_t word = static_cast<size_t>(fd) / kAndroidFdSetWordBits;
+    const uint64_t mask =
+        UINT64_C(1) << (static_cast<unsigned>(fd) % kAndroidFdSetWordBits);
+    const bool readable =
+        readfds != nullptr && (SelectFdSetWord(readfds, word) & mask) != 0;
+    const bool writable =
+        writefds != nullptr && (SelectFdSetWord(writefds, word) & mask) != 0;
+    const bool exceptional =
+        exceptfds != nullptr && (SelectFdSetWord(exceptfds, word) & mask) != 0;
+    int16_t events = 0;
+    if (readable)
+      events |= POLLIN;
+    if (writable)
+      events |= POLLOUT;
+    if (exceptional)
+      events |= POLLPRI;
+    if (events != 0)
+      entries.push_back(DarwinArtFdPollEntry{fd, events, 0});
+  }
+
+  trace_descriptors = entries.size();
+  if (trace) {
+    std::fprintf(stderr,
+                 "DARWIN socket select op=select phase=enter nfds=%d "
+                 "descriptors=%zu timeout_us=%llu\n",
+                 nfds, entries.size(),
+                 static_cast<unsigned long long>(timeout_us));
+  }
+
+  const auto started = std::chrono::steady_clock::now();
+  auto elapsed_us = [&]() -> uint64_t {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - started);
+    return elapsed.count() <= 0 ? 0 : static_cast<uint64_t>(elapsed.count());
+  };
+  auto update_timeout = [&](uint64_t elapsed) {
+    if (timeout == nullptr)
+      return;
+    const uint64_t remaining = elapsed >= timeout_us ? 0 : timeout_us - elapsed;
+    const AndroidSelectTimeval output{
+        static_cast<int64_t>(remaining / 1'000'000u),
+        static_cast<int64_t>(remaining % 1'000'000u)};
+    std::memcpy(timeout, &output, sizeof(output));
+  };
+
+  for (;;) {
+    uint64_t remaining_us = UINT64_MAX;
+    if (timeout != nullptr) {
+      const uint64_t elapsed = elapsed_us();
+      remaining_us = elapsed >= timeout_us ? 0 : timeout_us - elapsed;
+    }
+    const uint64_t rounded_ms = remaining_us == UINT64_MAX
+                                    ? UINT64_MAX
+                                    : (remaining_us + 999u) / 1'000u;
+    const int timeout_ms =
+        rounded_ms == UINT64_MAX
+            ? -1
+            : static_cast<int>(std::min<uint64_t>(rounded_ms, INT_MAX));
+
+    DarwinArtFdIoResult result{};
+    DarwinArtFdBrokerStatus status = DARWIN_ART_FD_BROKER_OK;
+    if (entries.empty()) {
+      const int value = ::poll(nullptr, 0, timeout_ms);
+      const int saved = errno;
+      result.value = value;
+      result.android_errno = value < 0 ? AndroidErrno(saved) : 0;
+    } else {
+      ProcessLease lease;
+      Process *process = lease.get();
+      if (process == nullptr)
+        return Fail(38, -1);
+      status = darwin_art_fd_broker_poll_wait(
+          process->broker, entries.data(), entries.size(), timeout_ms, &result);
+    }
+    if (status != DARWIN_ART_FD_BROKER_OK) {
+      const int error = BrokerFailure(status);
+      trace_result("broker-error", -1, error);
+      return Fail(error, -1);
+    }
+    if (result.value < 0) {
+      update_timeout(elapsed_us());
+      trace_result("poll-error", -1, result.android_errno);
+      return Fail(result.android_errno, -1);
+    }
+
+    bool invalid = false;
+    for (const auto &entry : entries) {
+      if ((entry.revents & POLLNVAL) != 0) {
+        invalid = true;
+        break;
+      }
+    }
+    if (invalid) {
+      trace_result("ebadf", -1, 9);
+      return Fail(9, -1);
+    }
+
+    if (result.value == 0) {
+      if (timeout == nullptr)
+        continue;
+      const uint64_t elapsed = elapsed_us();
+      if (elapsed < timeout_us)
+        continue;
+      ClearSelectFdSet(readfds);
+      ClearSelectFdSet(writefds);
+      ClearSelectFdSet(exceptfds);
+      update_timeout(elapsed);
+      if (trace)
+        std::fprintf(stderr,
+                     "DARWIN socket select op=select phase=timeout "
+                     "nfds=%d result=0 android_errno=0\n",
+                     nfds);
+      return 0;
+    }
+
+    ClearSelectFdSet(readfds);
+    ClearSelectFdSet(writefds);
+    ClearSelectFdSet(exceptfds);
+    int ready = 0;
+    for (const auto &entry : entries) {
+      const int16_t revents = entry.revents;
+      constexpr int16_t kPollInSet = POLLIN | POLLHUP | POLLERR |
+                                     0x0040 /* POLLRDNORM */ |
+                                     0x0080 /* POLLRDBAND */;
+      constexpr int16_t kPollOutSet =
+          POLLOUT | POLLERR | 0x0100 /* POLLWRNORM */ | 0x0200 /* POLLWRBAND */;
+      const bool readable =
+          (entry.events & POLLIN) != 0 && (revents & kPollInSet) != 0;
+      const bool writable =
+          (entry.events & POLLOUT) != 0 && (revents & kPollOutSet) != 0;
+      const bool exceptional =
+          (entry.events & POLLPRI) != 0 && (revents & POLLPRI) != 0;
+      if (readable) {
+        SetSelectFd(readfds, entry.fd);
+        ++ready;
+      }
+      if (writable) {
+        SetSelectFd(writefds, entry.fd);
+        ++ready;
+      }
+      if (exceptional) {
+        SetSelectFd(exceptfds, entry.fd);
+        ++ready;
+      }
+    }
+    update_timeout(elapsed_us());
+    if (trace)
+      std::fprintf(stderr,
+                   "DARWIN socket select op=select phase=ready nfds=%d "
+                   "descriptors=%zu result=%d android_errno=0\n",
+                   nfds, entries.size(), ready);
+    return ready;
+  }
 }
 
 extern "C" int darwin_art_bionic_socket_broker_connect(int fd,
@@ -2848,19 +3273,28 @@ extern "C" int darwin_art_bionic_fd_import_from_scm(int host_fd) {
   return guest_fd;
 }
 
-extern "C" intptr_t darwin_art_bionic_socket_broker_sendmsg(
-    int fd, const AndroidMsghdr *android_message, int android_flags) {
-  PreserveErrno preserve;
+static intptr_t SendMessageOnHostSocket(
+    int host_socket, int guest_fd, const AndroidMsghdr *android_message,
+    int android_flags) {
   if (android_message == nullptr ||
       (android_message->vector_count != 0 &&
        android_message->vectors == nullptr) ||
-      android_message->vector_count > static_cast<size_t>(INT_MAX) ||
-      android_message->name != nullptr) {
+      android_message->vector_count > static_cast<size_t>(INT_MAX)) {
     return Fail(android_message == nullptr ? 14 : 95, intptr_t{-1});
   }
   int host_flags = 0;
   if (!TranslateFlags(android_flags, &host_flags))
     return Fail(95, intptr_t{-1});
+  sockaddr_storage storage{};
+  socklen_t address_length = 0;
+  sockaddr* address = nullptr;
+  if (android_message->name != nullptr || android_message->name_length != 0) {
+    if (!ToHostAddress(android_message->name, android_message->name_length,
+                       &storage, &address_length)) {
+      return Fail(22, intptr_t{-1});
+    }
+    address = reinterpret_cast<sockaddr*>(&storage);
+  }
   std::vector<iovec> vectors(android_message->vector_count);
   for (size_t index = 0; index < vectors.size(); ++index) {
     vectors[index].iov_base = android_message->vectors[index].base;
@@ -2902,7 +3336,7 @@ extern "C" intptr_t darwin_art_bionic_socket_broker_sendmsg(
             std::fprintf(stderr,
                          "DARWIN socket: sendmsg fd=%d export guest_fd=%d "
                          "failed errno=%d\n",
-                         fd, guest_fds[index], errno);
+                         guest_fd, guest_fds[index], errno);
           }
           for (int exported_fd : exported)
             (void)close(exported_fd);
@@ -2912,7 +3346,7 @@ extern "C" intptr_t darwin_art_bionic_socket_broker_sendmsg(
           std::fprintf(stderr,
                        "DARWIN socket: sendmsg fd=%d export guest_fd=%d "
                        "host_fd=%d\n",
-                       fd, guest_fds[index], host_fd);
+                       guest_fd, guest_fds[index], host_fd);
         }
         exported.push_back(host_fd);
       }
@@ -2925,6 +3359,8 @@ extern "C" intptr_t darwin_art_bionic_socket_broker_sendmsg(
     control.resize(CMSG_SPACE(exported.size() * sizeof(int)));
   }
   msghdr message{};
+  message.msg_name = address;
+  message.msg_namelen = address_length;
   message.msg_iov = vectors.data();
   message.msg_iovlen = static_cast<int>(vectors.size());
   if (!control.empty()) {
@@ -2936,12 +3372,6 @@ extern "C" intptr_t darwin_art_bionic_socket_broker_sendmsg(
     header->cmsg_len = CMSG_LEN(exported.size() * sizeof(int));
     std::memcpy(CMSG_DATA(header), exported.data(),
                 exported.size() * sizeof(int));
-  }
-  const int host_socket = darwin_art_bionic_fd_export_for_scm(fd);
-  if (host_socket < 0) {
-    for (int host_fd : exported)
-      (void)close(host_fd);
-    return -1;
   }
   ssize_t result;
   do {
@@ -2955,16 +3385,100 @@ extern "C" intptr_t darwin_art_bionic_socket_broker_sendmsg(
     std::fprintf(stderr,
                  "DARWIN socket: sendmsg fd=%d host_fd=%d vectors=%zu "
                  "payload=%zu rights=%zu flags=%#x result=%zd errno=%d\n",
-                 fd, host_socket, vectors.size(), payload_bytes,
+                 guest_fd, host_socket, vectors.size(), payload_bytes,
                  exported.size(), android_flags, result,
                  result < 0 ? error : 0);
   }
-  (void)close(host_socket);
   for (int host_fd : exported)
     (void)close(host_fd);
   if (result < 0)
     return Fail(AndroidErrno(error), intptr_t{-1});
   return static_cast<intptr_t>(result);
+}
+
+extern "C" intptr_t darwin_art_bionic_socket_broker_sendmsg(
+    int fd, const AndroidMsghdr *android_message, int android_flags) {
+  PreserveErrno preserve;
+  const int host_socket = darwin_art_bionic_fd_export_for_scm(fd);
+  if (host_socket < 0) return -1;
+  const intptr_t result = SendMessageOnHostSocket(
+      host_socket, fd, android_message, android_flags);
+  (void)close(host_socket);
+  return result;
+}
+
+extern "C" int darwin_art_bionic_socket_broker_sendmmsg(
+  int fd, AndroidMmsghdr* messages, uint32_t count, int flags) {
+  PreserveErrno preserve;
+  // Linux validates the descriptor even for an empty batch, then treats a
+  // larger vlen as a bounded batch rather than returning EINVAL.
+  if (count == 0) {
+    const int host = darwin_art_bionic_fd_export_for_scm(fd);
+    if (host < 0) return -1;
+    int socket_type = 0;
+    socklen_t socket_type_length = sizeof(socket_type);
+    const int socket_result = getsockopt(
+        host, SOL_SOCKET, SO_TYPE, &socket_type, &socket_type_length);
+    const int socket_errno = errno;
+    (void)close(host);
+    if (socket_result < 0) return Fail(AndroidErrno(socket_errno), -1);
+    return 0;
+  }
+  if (messages == nullptr) return Fail(14, -1);
+  const uint32_t limit = std::min(count, kAndroidSendMmsgMax);
+  const int host_socket = darwin_art_bionic_fd_export_for_scm(fd);
+  if (host_socket < 0) return -1;
+
+  const int32_t prior_errno = darwin_art_bionic_errno_load();
+  uint32_t sent = 0;
+  while (sent < limit) {
+    uint64_t requested = 0;
+    bool requested_known = true;
+    const AndroidMsghdr& message = messages[sent].msg_hdr;
+    if (message.vector_count != 0 && message.vectors == nullptr) {
+      requested_known = false;
+    } else if (message.vector_count > static_cast<uint64_t>(INT_MAX)) {
+      requested_known = false;
+    } else {
+      for (uint64_t index = 0; index < message.vector_count; ++index) {
+        const uint64_t length = message.vectors[index].length;
+        if (UINT64_MAX - requested < length) {
+          requested_known = false;
+          break;
+        }
+        requested += length;
+      }
+    }
+    const intptr_t result = SendMessageOnHostSocket(
+        host_socket, fd, &messages[sent].msg_hdr, flags);
+    if (result < 0) {
+      if (sent != 0) {
+        // sendmmsg returns the number of completed messages after a partial
+        // batch; errno is not part of that successful return.
+        darwin_art_bionic_errno_store(prior_errno);
+        (void)close(host_socket);
+        return static_cast<int>(sent);
+      }
+      (void)close(host_socket);
+      return -1;
+    }
+    if (static_cast<uint64_t>(result) > UINT32_MAX) {
+      if (sent != 0) {
+        darwin_art_bionic_errno_store(prior_errno);
+        (void)close(host_socket);
+        return static_cast<int>(sent);
+      }
+      (void)close(host_socket);
+      return Fail(75, -1);
+    }
+    messages[sent].msg_len = static_cast<uint32_t>(result);
+    ++sent;
+    // A stream socket may send only part of one message. Linux stops the
+    // batch at that point and does not attempt later messages.
+    if (requested_known && static_cast<uint64_t>(result) < requested) break;
+  }
+  (void)close(host_socket);
+  return static_cast<int>(sent);
 }
 
 extern "C" intptr_t
@@ -3457,9 +3971,12 @@ darwin_art_bionic_socket_broker_resolve(const char *soname, const char *symbol,
   if (std::strcmp(symbol, "dup") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_dup);
-  if (std::strcmp(symbol, "dup2") == 0 || std::strcmp(symbol, "select") == 0)
+  if (std::strcmp(symbol, "dup2") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
-        &darwin_art_bionic_socket_broker_unsupported_int);
+        &darwin_art_bionic_socket_broker_dup2);
+  if (std::strcmp(symbol, "select") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_select);
   if (std::strcmp(symbol, "readv") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_readv);
@@ -3511,6 +4028,9 @@ darwin_art_bionic_socket_broker_resolve(const char *soname, const char *symbol,
   if (std::strcmp(symbol, "sendmsg") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_sendmsg);
+  if (std::strcmp(symbol, "sendmmsg") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_socket_broker_sendmmsg);
   if (std::strcmp(symbol, "recvmsg") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_recvmsg);
@@ -3570,9 +4090,18 @@ darwin_art_bionic_socket_broker_dns_resolve(const char *soname,
   if (std::strcmp(symbol, "getaddrinfo") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_getaddrinfo);
+  if (std::strcmp(symbol, "android_getaddrinfofornet") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_dns_android_getaddrinfofornet);
   if (std::strcmp(symbol, "gethostbyname") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_gethostbyname);
+  if (std::strcmp(symbol, "__get_h_errno") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_dns_get_h_errno);
+  if (std::strcmp(symbol, "getservbyname") == 0)
+    return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
+        &darwin_art_bionic_dns_getservbyname);
   if (std::strcmp(symbol, "gethostbyaddr") == 0)
     return reinterpret_cast<DarwinArtBionicSocketBrokerFunction>(
         &darwin_art_bionic_socket_broker_gethostbyaddr);

@@ -364,17 +364,25 @@ impl LoadedElfGraph {
     }
 
     pub fn lookup_root_exported(&self, name: &str) -> Result<usize, LoadError> {
+        self.lookup_root_exported_bytes(name.as_bytes())
+    }
+
+    pub fn lookup_root_exported_bytes(&self, name: &[u8]) -> Result<usize, LoadError> {
         self.inner.objects[self.inner.root_index]
             .as_ref()
             .expect("live graph object")
-            .lookup_exported(name)
+            .lookup_exported_bytes(name)
     }
 
     pub fn lookup_root_symbol(&self, name: &str) -> Result<usize, LoadError> {
+        self.lookup_root_symbol_bytes(name.as_bytes())
+    }
+
+    pub fn lookup_root_symbol_bytes(&self, name: &[u8]) -> Result<usize, LoadError> {
         self.inner.objects[self.inner.root_index]
             .as_ref()
             .expect("live graph object")
-            .lookup_any_exported(name)
+            .lookup_any_exported_bytes(name)
     }
 
     pub fn close(self) {}
@@ -542,7 +550,7 @@ impl GraphResolver<'_> {
         let mut weak = None;
         for index in candidate_objects {
             for export in &self.catalog[index] {
-                if export.name != symbol {
+                if export.name != symbol.as_bytes() {
                     continue;
                 }
                 let version_matches = match version {
@@ -566,7 +574,7 @@ impl GraphResolver<'_> {
                 self.object_sonames[index] == requirement.soname
                     && self.catalog[index]
                         .iter()
-                        .any(|export| export.name == symbol)
+                        .any(|export| export.name == symbol.as_bytes())
             });
             if provider_has_symbol {
                 return Err(ResolveError::VersionMismatch {

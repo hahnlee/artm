@@ -10,6 +10,7 @@ native_root="$source_root/libcore/ojluni/src/main/native"
 build_dir="$project_root/_build/system-natives-darwin"
 patch_file="$project_root/patches/libcore-openjdk/0004-darwin-system-boringssl-version-header.patch"
 library_name_patch="$project_root/patches/libcore-openjdk/0005-android-guest-jni-library-suffix.patch"
+boringssl_patch="$project_root/patches/boringssl/0001-darwin-cxx17.patch"
 
 # shellcheck disable=SC1090
 source "$lock_file"
@@ -46,11 +47,41 @@ materialize "$LIBCORE_PROJECT" "$LIBCORE_REVISION" \
 materialize "$LIBCORE_PROJECT" "$LIBCORE_REVISION" \
   ojluni/src/main/java/java/lang/System.java "$SYSTEM_JAVA_SHA256" \
   libcore/ojluni/src/main/java/java/lang/System.java
+materialize "$LIBCORE_PROJECT" "$LIBCORE_REVISION" \
+  ojluni/src/main/native/jdk_internal_misc_VM.cpp \
+  "$JDK_INTERNAL_MISC_VM_CPP_SHA256" \
+  libcore/ojluni/src/main/native/jdk_internal_misc_VM.cpp
+materialize "$LIBCORE_PROJECT" "$LIBCORE_REVISION" \
+  luni/src/main/native/java_lang_invoke_MethodHandle.cpp \
+  "$METHOD_HANDLE_CPP_SHA256" \
+  libcore/luni/src/main/native/java_lang_invoke_MethodHandle.cpp
+materialize "$LIBCORE_PROJECT" "$LIBCORE_REVISION" \
+  luni/src/main/native/java_lang_invoke_VarHandle.cpp \
+  "$VAR_HANDLE_CPP_SHA256" \
+  libcore/luni/src/main/native/java_lang_invoke_VarHandle.cpp
 materialize "$ART_PROJECT" "$ART_REVISION" runtime/native/java_lang_System.cc \
   "$ART_SYSTEM_CC_SHA256" art/runtime/native/java_lang_System.cc
 materialize "$BORINGSSL_PROJECT" "$BORINGSSL_REVISION" \
   src/include/openssl/crypto.h "$BORINGSSL_CRYPTO_H_SHA256" \
   boringssl/src/include/openssl/crypto.h
+materialize "$LIBCORE_PROJECT" "$LIBCORE_REVISION" \
+  luni/src/main/native/libcore_math_NativeBN.cpp "$NATIVE_BN_CPP_SHA256" \
+  libcore/luni/src/main/native/libcore_math_NativeBN.cpp
+materialize "$LIBCORE_PROJECT" "$LIBCORE_REVISION" \
+  luni/src/main/native/JniException.h "$JNI_EXCEPTION_H_SHA256" \
+  libcore/luni/src/main/native/JniException.h
+materialize "$LIBCORE_PROJECT" "$LIBCORE_REVISION" \
+  luni/src/main/native/JniException.cpp "$JNI_EXCEPTION_CPP_SHA256" \
+  libcore/luni/src/main/native/JniException.cpp
+materialize "$LIBCORE_PROJECT" "$LIBCORE_REVISION" \
+  luni/src/main/native/libcore_icu_ICU.cpp "$LIBCORE_ICU_CPP_SHA256" \
+  libcore/luni/src/main/native/libcore_icu_ICU.cpp
+materialize "$LIBCORE_PROJECT" "$LIBCORE_REVISION" \
+  luni/src/main/native/IcuUtilities.h "$ICU_UTILITIES_H_SHA256" \
+  libcore/luni/src/main/native/IcuUtilities.h
+materialize "$LIBCORE_PROJECT" "$LIBCORE_REVISION" \
+  luni/src/main/native/ScopedIcuULoc.h "$SCOPED_ICU_ULOC_H_SHA256" \
+  libcore/luni/src/main/native/ScopedIcuULoc.h
 for header_and_hash in \
   "jni_util.c:$JNI_UTIL_C_SHA256" \
   "jni_util_md.c:$JNI_UTIL_MD_C_SHA256" \
@@ -77,6 +108,33 @@ grep -F '#define OPENSSL_VERSION_TEXT "OpenSSL 1.1.1 (compatible; BoringSSL)"' \
   fail "Darwin BoringSSL header patch checksum mismatch"
 [[ "$(sha256 "$library_name_patch")" == "$ANDROID_LIBRARY_NAME_PATCH_SHA256" ]] ||
   fail "Android JNI library-name patch checksum mismatch"
+[[ "$(sha256 "$boringssl_patch")" == "$BORINGSSL_DARWIN_PATCH_SHA256" ]] ||
+  fail "Darwin BoringSSL C++ standard patch checksum mismatch"
+
+boringssl_source="$project_root/_aosp/boringssl-full"
+[[ -d "$boringssl_source/.git" ]] ||
+  fail "missing pinned BoringSSL checkout: $boringssl_source"
+[[ "$(git -C "$boringssl_source" rev-parse HEAD)" == "$BORINGSSL_REVISION" ]] ||
+  fail "BoringSSL checkout revision drift"
+boringssl_cmake_sha="$(git -C "$boringssl_source" show HEAD:CMakeLists.txt | shasum -a 256 | awk '{print $1}')"
+[[ "$boringssl_cmake_sha" == "$BORINGSSL_CMAKE_SHA256" ]] ||
+  fail "BoringSSL CMake source drift"
+boringssl_build="$project_root/_build/boringssl-android16-darwin-repro"
+boringssl_overlay="$boringssl_build/source"
+mkdir -p "$boringssl_overlay"
+git -C "$boringssl_source" show HEAD:CMakeLists.txt > "$boringssl_overlay/CMakeLists.txt"
+ln -sfn "$boringssl_source/src" "$boringssl_overlay/src"
+patch --batch --forward -p1 -d "$boringssl_overlay" < "$boringssl_patch" >/dev/null
+android_sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
+cmake_bin="$android_sdk/cmake/3.22.1/bin/cmake"
+[[ -x "$cmake_bin" ]] || fail "Android SDK CMake 3.22.1 is missing"
+"$cmake_bin" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 -S "$boringssl_overlay" \
+  -B "$boringssl_build/build" >/dev/null
+ninja -C "$boringssl_build/build" crypto >/dev/null
+boringssl_crypto="$boringssl_build/build/libcrypto.a"
+[[ -f "$boringssl_crypto" && "$(lipo -archs "$boringssl_crypto")" == arm64 ]] ||
+  fail "BoringSSL crypto archive is not Darwin arm64"
 
 stage="$(mktemp -d "${TMPDIR:-/tmp}/darwin-art-system.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
@@ -182,6 +240,38 @@ check_manifest "$art_methods" "$ART_SYSTEM_METHOD_COUNT" \
   "$ART_SYSTEM_METHOD_MANIFEST_SHA256" ART
 check_manifest "$java_methods" "$JAVA_SYSTEM_NATIVE_COUNT" \
   "$JAVA_SYSTEM_NATIVE_MANIFEST_SHA256" Java
+native_bn_methods="$stage/native-bn-methods.tsv"
+python3 - "$source_root/libcore/luni/src/main/native/libcore_math_NativeBN.cpp" \
+  > "$native_bn_methods" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text()
+start = text.index('static JNINativeMethod gMethods[]')
+body = text[start:text.index('void register_libcore_math_NativeBN', start)]
+for name, signature in re.findall(
+        r'NATIVE_METHOD\(NativeBN,\s*([^,]+),\s*"([^"]+)"\)', body):
+    print(f'{name}\t{signature}')
+PY
+check_manifest "$native_bn_methods" "$NATIVE_BN_METHOD_COUNT" \
+  "$NATIVE_BN_METHOD_MANIFEST_SHA256" NativeBN
+libcore_icu_methods="$stage/libcore-icu-methods.tsv"
+python3 - "$source_root/libcore/luni/src/main/native/libcore_icu_ICU.cpp" \
+  > "$libcore_icu_methods" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text()
+start = text.index('static JNINativeMethod gMethods[]')
+body = text[start:text.index('void register_libcore_icu_ICU', start)]
+for name, signature in re.findall(
+        r'NATIVE_METHOD\(ICU,\s*([^,]+),\s*"([^"]+)"\)', body):
+    print(f'{name}\t{signature}')
+PY
+check_manifest "$libcore_icu_methods" "$LIBCORE_ICU_METHOD_COUNT" \
+  "$LIBCORE_ICU_METHOD_MANIFEST_SHA256" libcore-ICU
 
 cut -f2- "$libcore_methods" | sort -u > "$stage/libcore-owner.tsv"
 cut -f2- "$art_methods" | sort -u > "$stage/art-owner.tsv"
@@ -240,8 +330,50 @@ source_object="$objects/System.o"
 "$cc" "${common_flags[@]}" -c "$patched_source" -o "$source_object"
 [[ "$(file "$source_object")" == *"Mach-O 64-bit object arm64"* ]] ||
   fail "System object is not Darwin arm64"
+native_bn_object="$objects/NativeBN.o"
+jni_exception_object="$objects/JniException.o"
+libcore_icu_object="$objects/libcore_icu_ICU.o"
+jdk_internal_misc_vm_object="$objects/jdk_internal_misc_VM.o"
+method_handle_object="$objects/java_lang_invoke_MethodHandle.o"
+var_handle_object="$objects/java_lang_invoke_VarHandle.o"
+native_bn_flags=(
+  -std=c++17 -arch arm64 -isysroot "$sdk_root" -fPIC
+  -ffunction-sections -fdata-sections -Wall -Wextra -Werror
+  -I"$source_root/libcore/luni/src/main/native"
+  -I"$boringssl_source/src/include"
+  -I"$nativehelper_source/include_jni"
+  -I"$nativehelper_source/include"
+  -I"$nativehelper_source/include_platform"
+  -I"$nativehelper_source/include_platform_header_only"
+  -I"$nativehelper_source/header_only_include"
+  -I"$liblog_include"
+)
+"$cxx" "${native_bn_flags[@]}" \
+  -c "$source_root/libcore/luni/src/main/native/libcore_math_NativeBN.cpp" \
+  -o "$native_bn_object"
+"$cxx" "${native_bn_flags[@]}" \
+  -c "$source_root/libcore/luni/src/main/native/JniException.cpp" \
+  -o "$jni_exception_object"
+"$cxx" "${native_bn_flags[@]}" -I"$native_root" \
+  -c "$native_root/jdk_internal_misc_VM.cpp" \
+  -o "$jdk_internal_misc_vm_object"
+"$cxx" "${native_bn_flags[@]}" \
+  -c "$source_root/libcore/luni/src/main/native/java_lang_invoke_MethodHandle.cpp" \
+  -o "$method_handle_object"
+"$cxx" "${native_bn_flags[@]}" \
+  -c "$source_root/libcore/luni/src/main/native/java_lang_invoke_VarHandle.cpp" \
+  -o "$var_handle_object"
+"$cxx" "${native_bn_flags[@]}" \
+  -I"$project_root/_aosp/external/icu-graphics/android_icu4c/include" \
+  -I"$project_root/_aosp/external/icu-graphics/icu4c/source/common" \
+  -I"$project_root/_aosp/external/icu-graphics/icu4c/source/i18n" \
+  -c "$source_root/libcore/luni/src/main/native/libcore_icu_ICU.cpp" \
+  -o "$libcore_icu_object"
 archive="$stage/libopenjdk-system-natives-darwin.a"
-"$libtool_bin" -static -o "$archive" "$source_object"
+"$libtool_bin" -static -o "$archive" "$source_object" \
+  "$native_bn_object" "$jni_exception_object" "$libcore_icu_object" \
+  "$jdk_internal_misc_vm_object" "$method_handle_object" \
+  "$var_handle_object"
 [[ "$(lipo -archs "$archive")" == arm64 ]] || fail "archive is not arm64"
 [[ "$({ ar -t "$archive" || true; } | grep -v '^__\.SYMDEF' | wc -l | tr -d ' ')" == \
    "$LIBCORE_SYSTEM_SOURCE_COUNT" ]] || fail "archive member count mismatch"
@@ -255,11 +387,24 @@ while IFS=$'\t' read -r kind method signature; do
   grep -E " [Tt] _System_${method}$" "$symbols" >/dev/null ||
     fail "libcore System definition missing: $method"
 done < "$libcore_methods"
+grep -E ' [Tt] register_libcore_math_NativeBN\(_JNIEnv\*\)$' "$symbols" >/dev/null ||
+  fail "NativeBN registrar missing"
+grep -E ' [Tt] register_libcore_icu_ICU\(_JNIEnv\*\)$' "$symbols" >/dev/null ||
+  fail "libcore ICU registrar missing"
+grep -E ' [Tt] register_jdk_internal_misc_VM\(_JNIEnv\*\)$' "$symbols" >/dev/null ||
+  fail "jdk.internal.misc.VM registrar missing"
+grep -E ' [Tt] register_java_lang_invoke_MethodHandle\(_JNIEnv\*\)$' "$symbols" >/dev/null ||
+  fail "libcore MethodHandle registrar missing"
+grep -E ' [Tt] register_java_lang_invoke_VarHandle\(_JNIEnv\*\)$' "$symbols" >/dev/null ||
+  fail "libcore VarHandle registrar missing"
 
 device_library="$stage/libsystem-natives-device-closure.dylib"
 "$cxx" -arch arm64 -isysroot "$sdk_root" -dynamiclib \
   -Wl,-force_load,"$archive" "$file_input_stream" "$openjdkjvm" \
-  "$device_nativehelper" "$liblog" \
+  "$device_nativehelper" "$liblog" "$boringssl_crypto" \
+  "$project_root/_build/icu-foundation/libicui18n-darwin.a" \
+  "$project_root/_build/icu-foundation/libicuuc-common-darwin.a" \
+  "$project_root/_build/icu-foundation/libicuuc-stubdata-darwin.a" \
   -Wl,-exported_symbol,_register_java_lang_System \
   -Wl,-dead_strip -framework CoreFoundation -o "$device_library"
 device_undefined="$stage/device-retained-undefined.txt"
@@ -321,6 +466,9 @@ undefined="$stage/archive-undefined.txt"
 nm -u "$archive" | sed 's/^[[:space:]]*//' | sort -u > "$undefined"
 mkdir -p "$build_dir"
 cp "$archive" "$build_dir/libopenjdk-system-natives-darwin.a"
+cp "$boringssl_crypto" "$build_dir/libcrypto-boringssl-darwin.a"
+cp "$native_bn_methods" "$build_dir/native-bn-methods.tsv"
+cp "$libcore_icu_methods" "$build_dir/libcore-icu-methods.tsv"
 cp "$libcore_methods" "$build_dir/libcore-system-methods.tsv"
 cp "$art_methods" "$build_dir/art-system-methods.tsv"
 cp "$java_methods" "$build_dir/java-system-natives.tsv"
@@ -333,4 +481,4 @@ cp "$duplicates" "$build_dir/duplicate-libcore-owners.txt"
 cp "$atomic" "$build_dir/atomic-registration.txt"
 cp "$patched_source" "$build_dir/System.darwin.c"
 
-echo "system-natives: libcore=8 art=9 java=17 union=17 overlap=0 log=pass managed=pass duplicate-libcore-owners=0 archive=Mach-O-arm64"
+echo "system-natives: libcore=8 art=9 java=17 NativeBN=7 ICU=10 union=17 overlap=0 log=pass managed=pass duplicate-libcore-owners=0 archive=Mach-O-arm64"

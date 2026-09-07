@@ -171,7 +171,20 @@ while IFS= read -r source; do
     input="$patched_root/ojluni/src/main/native/io_util_md.c"
   fi
   object="$objects/${source%.*}.o"
-  "$cc" "${common_flags[@]}" -c "$input" -o "$object"
+  if [[ "$source" == FileInputStream.c ]]; then
+    # FileDescriptor.fd is an Android guest descriptor. In particular,
+    # FileInputStream.skip0() uses IO_Lseek directly rather than io_util's
+    # read bridge, so route it through the production Bionic fd owner too.
+    "$cc" "${common_flags[@]}" \
+      -I"$project_root/tools/bionic-errno-tls/include" \
+      -I"$project_root/tools/bionic-fs-facade/include" \
+      -I"$project_root/tools/bionic-ioctl-facade/include" \
+      -I"$project_root/tools/bionic-socket-broker-adapter/include" \
+      -include "$project_root/compat/darwin_openjdk_nio_fs_redirect.h" \
+      -c "$input" -o "$object"
+  else
+    "$cc" "${common_flags[@]}" -c "$input" -o "$object"
+  fi
   [[ "$(file "$object")" == *"Mach-O 64-bit object arm64"* ]] ||
     fail "non-arm64 object: $source"
 done < "$closure_manifest"
@@ -192,22 +205,33 @@ for method in length0 position0 skip0 available0; do
     fail "native definition missing: $method"
 done
 
+# The managed smoke executes inside a host JVM and therefore passes genuine
+# Darwin descriptors. Keep a host-only object for that diagnostic; the archive
+# installed into Darwin ART remains the virtual-descriptor production variant.
+host_file_input_object="$objects/FileInputStream-host.o"
+"$cc" "${common_flags[@]}" -c "$native_root/FileInputStream.c" \
+  -o "$host_file_input_object"
+host_archive="$stage/libopenjdk-file-input-stream-host-smoke.a"
+"$libtool_bin" -static -o "$host_archive" \
+  "$host_file_input_object" "$objects/io_util_md.o" \
+  "$objects/jni_util.o" "$objects/jni_util_md.o"
+
 probe_object="$objects/android16_file_input_stream_jni.o"
 "$cc" "${common_flags[@]}" \
   -c "$project_root/probes/android16_file_input_stream_jni.c" \
   -o "$probe_object"
 
 link_variant() {
-  local nativehelper="$1" output="$2"
+  local nativehelper="$1" input_archive="$2" output="$3"
   "$cc" -arch arm64 -isysroot "$sdk_root" -dynamiclib \
-    "$probe_object" -Wl,-force_load,"$archive" \
+    "$probe_object" -Wl,-force_load,"$input_archive" \
     "$openjdkjvm" "$nativehelper" "$liblog" \
     -Wl,-exported_symbol,_JNI_OnLoad -Wl,-dead_strip \
     -Wl,-undefined,dynamic_lookup -framework CoreFoundation -o "$output"
 }
 
 device_library="$stage/libfile-input-stream-device-closure.dylib"
-link_variant "$device_nativehelper" "$device_library"
+link_variant "$device_nativehelper" "$archive" "$device_library"
 device_undefined="$stage/device-retained-undefined.txt"
 nm -u "$device_library" | sed 's/^[[:space:]]*//' | sort -u > "$device_undefined"
 for forbidden in _AFileDescriptor_getFd _jniRegisterNativeMethods \
@@ -218,7 +242,7 @@ for forbidden in _AFileDescriptor_getFd _jniRegisterNativeMethods \
 done
 
 host_library="$stage/libfile-input-stream-managed.dylib"
-link_variant "$host_nativehelper" "$host_library"
+link_variant "$host_nativehelper" "$host_archive" "$host_library"
 classes="$stage/classes"
 mkdir -p "$classes"
 javac --release 17 -encoding UTF-8 -d "$classes" \

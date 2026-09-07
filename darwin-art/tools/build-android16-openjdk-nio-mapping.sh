@@ -223,8 +223,16 @@ while IFS= read -r source; do
   if [[ "$source" == NativeThread.c ]]; then
     source_path="$patched_native_root/NativeThread.c"
   fi
+  nio_abi_flags=()
   if [[ "$source" == FileDispatcherImpl.c || "$source" == FileChannelImpl.c ]]; then
+    if [[ "$source" == FileDispatcherImpl.c ]]; then
+      # FileDispatcherImpl preClose0 opens a host /dev/null with Darwin
+      # constants. UnixNativeDispatcher_open0, built in its own gate, keeps
+      # the Android-flag open wrapper.
+      nio_abi_flags=(-DDARWIN_ART_OPENJDK_NIO_HOST_OPEN)
+    fi
     "$cc" "${common_flags[@]}" \
+      "${nio_abi_flags[@]-}" \
       -I"$project_root/tools/bionic-errno-tls/include" \
       -I"$project_root/tools/bionic-fs-facade/include" \
       -I"$project_root/tools/bionic-ioctl-facade/include" \
@@ -320,7 +328,7 @@ PY
 managed_library="$stage/libandroid16-openjdk-nio-mapping-smoke.dylib"
 "$cc" -arch arm64 -isysroot "$sdk_root" -dynamiclib \
   "$objects/android16_openjdk_nio_mapping_jni.o" \
-  -Wl,-force_load,"$host_probe_archive" \
+  -Wl,-force_load,"$target_archive" \
   "$objects/IOUtil-host-probe.o" "$objects/jni_util.o" \
   "$objects/jni_util_md.o" \
   -Wl,-force_load,"$nativehelper_archive" "$liblog_archive" \
@@ -335,13 +343,14 @@ mkdir -p "$classes"
 javac --release 17 -encoding UTF-8 -d "$classes" \
   "$project_root/probes/OpenJdkNioMappingSmoke.java"
 managed_output="$(java --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
+  --add-opens java.base/java.io=ALL-UNNAMED \
   -cp "$classes" dev.darwinart.probe.OpenJdkNioMappingSmoke \
   "$managed_library")"
-expected='managed-openjdk-nio: methods=5+14+2 size=pass map-ro=pass unmap=pass thread=pass signal-restore=pass'
+expected='managed-openjdk-nio: methods=5+14+2 size=pass map-ro=pass unmap=pass virtual-readv=pass thread=pass signal-restore=pass'
 [[ "$managed_output" == "$expected" ]] ||
   fail "managed acceptance failed: $managed_output"
 
 mkdir -p "$build_dir"
 cp "$target_archive" "$build_dir/libopenjdk-nio-mapping-darwin.a"
 cp "$support_archive" "$build_dir/libopenjdk-nio-support-darwin.a"
-echo "openjdk-nio-mapping: methods=5+14+2 sources=3 providers=IOUtil+jni_util size=pass map-ro=pass unmap=pass thread=pass signal-restore=pass archives=Mach-O-arm64"
+echo "openjdk-nio-mapping: methods=5+14+2 sources=3 providers=IOUtil+jni_util size=pass map-ro=pass unmap=pass virtual-readv=pass thread=pass signal-restore=pass archives=Mach-O-arm64"

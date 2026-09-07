@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sched.h>
 #include <time.h>
 
 #ifdef __cplusplus
@@ -37,6 +38,7 @@ typedef struct DarwinArtAndroidPthreadRwlock {
 
 typedef void (*DarwinArtAndroidTlsDestructor)(void* value);
 typedef void (*DarwinArtAndroidOnceRoutine)(void);
+typedef void (*DarwinArtAndroidForkRoutine)(void);
 typedef void* (*DarwinArtAndroidThreadRoutine)(void* argument);
 
 DarwinArtAndroidPthread darwin_art_bionic_pthread_self(void);
@@ -50,6 +52,12 @@ int darwin_art_bionic_pthread_create(
 int darwin_art_bionic_pthread_join(DarwinArtAndroidPthread thread,
                                    void** return_value);
 int darwin_art_bionic_pthread_detach(DarwinArtAndroidPthread thread);
+int darwin_art_bionic_pthread_getattr_np(
+    DarwinArtAndroidPthread thread, DarwinArtAndroidPthreadAttr* attr);
+int darwin_art_bionic_pthread_getschedparam(
+    DarwinArtAndroidPthread thread, int* policy, struct sched_param* param);
+int darwin_art_bionic_pthread_kill(DarwinArtAndroidPthread thread,
+                                   int signal_number);
 int darwin_art_bionic_pthread_attr_init(DarwinArtAndroidPthreadAttr* attr);
 int darwin_art_bionic_pthread_attr_destroy(DarwinArtAndroidPthreadAttr* attr);
 int darwin_art_bionic_pthread_key_create(
@@ -61,6 +69,9 @@ int darwin_art_bionic_pthread_setspecific(DarwinArtAndroidPthreadKey key,
                                           const void* value);
 int darwin_art_bionic_pthread_once(DarwinArtAndroidPthreadOnce* once,
                                    DarwinArtAndroidOnceRoutine routine);
+int darwin_art_bionic_pthread_atfork(DarwinArtAndroidForkRoutine prepare,
+                                     DarwinArtAndroidForkRoutine parent,
+                                     DarwinArtAndroidForkRoutine child);
 int darwin_art_bionic_pthread_mutexattr_init(
     DarwinArtAndroidPthreadMutexAttr* attributes);
 int darwin_art_bionic_pthread_mutexattr_destroy(
@@ -107,8 +118,8 @@ void* darwin_art_bionic_pthread_resolve(const char* soname,
                                         const char* version);
 
 // Test/process-shutdown boundary. It succeeds only when no owned thread,
-// TLS-key, or live synchronization object remains; once entries may be
-// discarded after all consumers stop.
+// no non-current foreign thread, TLS-key, or live synchronization object
+// remains; the current foreign identity may be retired at reset.
 int darwin_art_bionic_pthread_provider_reset(void);
 size_t darwin_art_bionic_pthread_provider_retired_cell_count(void);
 

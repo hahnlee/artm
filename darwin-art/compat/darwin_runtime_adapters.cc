@@ -12,7 +12,6 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -68,8 +67,6 @@ jint ElfJniOnLoadTrampoline(JavaVM*, void*) {
   // closed proxy VM and never ART's real JavaVM function table.
   const jint result =
       function(static_cast<JavaVM*>(darwin_art_jni_proxy_java_vm(library->proxy)), nullptr);
-  std::cerr << "DARWIN ELF JNI_OnLoad: result=0x" << std::hex << result << std::dec
-            << "\n";
   return result;
 }
 
@@ -87,16 +84,12 @@ void ElfJniOnUnloadTrampoline(JavaVM*, void*) {
 
 extern "C" {
 
-void* NativeBridgeGetTrampoline2(void* handle,
-                                 const char* name,
-                                 const char* shorty,
-                                 uint32_t,
-                                 JNICallType call_type) {
+void* DarwinNativeBridgeGetTrampoline2(void* handle,
+                                       const char* name,
+                                       const char* shorty,
+                                       uint32_t,
+                                       JNICallType call_type) {
   ElfLibrary* library = AsElfLibrary(handle);
-  std::cerr << "DARWIN NativeBridge trampoline: handle=" << handle
-            << " library=" << library << " name=" << (name == nullptr ? "(null)" : name)
-            << " shorty=" << (shorty == nullptr ? "(null)" : shorty)
-            << " call_type=" << static_cast<int>(call_type) << "\n";
   if (library == nullptr || name == nullptr) {
     return nullptr;
   }
@@ -159,7 +152,7 @@ void* NativeBridgeGetTrampoline2(void* handle,
   return entry;
 }
 
-bool NativeBridgeIsNativeBridgeFunctionPointer(const void* pointer) {
+bool DarwinNativeBridgeIsNativeBridgeFunctionPointer(const void* pointer) {
   // The trampoline allocator owns the process-wide exact-entry classifier.
   // The mask below is only fixture acceptance instrumentation; generic graph
   // entries are classified by the same registry without contributing to it.

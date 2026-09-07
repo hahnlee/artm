@@ -153,6 +153,23 @@ pub(super) fn parse_image_with_policy(
         }
     }
 
+    let direct_syscall_count = loads
+        .iter()
+        .filter(|load| load.flags & PF_X != 0)
+        .map(|load| {
+            let offset = to_usize(load.offset, "direct-syscall load offset")?;
+            let size = to_usize(load.file_size, "direct-syscall load size")?;
+            let code = checked_slice(bytes, offset, size, "direct-syscall load range")?;
+            Ok::<usize, LoadError>(super::direct_syscall::count_linux_svc(code))
+        })
+        .try_fold(0usize, |total, count| {
+            total
+                .checked_add(count?)
+                .ok_or(LoadError::Bounds("direct-syscall count overflow"))
+        })?;
+    let direct_syscall_pages =
+        super::direct_syscall::veneer_page_count(direct_syscall_count, page_size)?;
+
     let (image_offset, reservation_size, compat_boundary) = if protection_overlap {
         let boundary = rx_rw_compat_boundary(&loads, relro.as_ref(), page_size)?.ok_or(
             LoadError::Protection(
@@ -191,15 +208,28 @@ pub(super) fn parse_image_with_policy(
     let direct_syscall_shim_offset = reservation_size
         .checked_add(page_size)
         .ok_or(LoadError::Bounds("direct-syscall shim offset overflow"))?;
+    let direct_syscall_bytes =
+        page_size
+            .checked_mul(direct_syscall_pages.max(1))
+            .ok_or(LoadError::Bounds(
+                "direct-syscall page reservation overflow",
+            ))?;
     let reservation_size = reservation_size
-        .checked_add(page_size.checked_mul(2).ok_or(LoadError::Bounds(
-            "compatibility page reservation size overflow",
-        ))?)
+        .checked_add(
+            page_size
+                .checked_add(direct_syscall_bytes)
+                .ok_or(LoadError::Bounds(
+                    "compatibility page reservation size overflow",
+                ))?,
+        )
         .ok_or(LoadError::Bounds(
             "compatibility page reservation size overflow",
         ))?;
     protections.push(PROT_READ);
-    protections.push(PROT_READ | PROT_EXEC);
+    protections.extend(std::iter::repeat_n(
+        PROT_READ | PROT_EXEC,
+        direct_syscall_pages.max(1),
+    ));
 
     if let Some(relro) = relro {
         if relro.flags != PF_R || relro.memory_size == 0 || relro.file_size > relro.memory_size {
@@ -209,14 +239,18 @@ pub(super) fn parse_image_with_policy(
             .virtual_address
             .checked_add(relro.memory_size)
             .ok_or(LoadError::Bounds("PT_GNU_RELRO end overflow"))?;
-        let containing_load = loads.iter().any(|load| {
-            load.virtual_address <= relro.virtual_address
-                && load
-                    .virtual_address
-                    .checked_add(load.memory_size)
-                    .is_some_and(|load_end| relro_end <= load_end)
-        });
-        if !containing_load && compat_boundary.is_none() {
+        // Android's 16 KiB linker may emit a RELRO range that crosses the
+        // boundary between two adjacent RW PT_LOADs.  It is still fully
+        // backed by loadable memory and must be protected as one page range;
+        // requiring one containing segment rejects otherwise valid NDK DSOs
+        // such as Unity's Burst/sqlcipher libraries.
+        let covered_by_loads = relro_covered_by_load_pages(
+            &loads,
+            relro.virtual_address,
+            relro_end,
+            page_size as u64,
+        )?;
+        if !covered_by_loads && compat_boundary.is_none() {
             return Err(LoadError::Format("PT_GNU_RELRO outside PT_LOAD"));
         }
 
@@ -234,6 +268,7 @@ pub(super) fn parse_image_with_policy(
                 image_offset,
                 stack_guard_offset,
                 direct_syscall_shim_offset,
+                direct_syscall_shim_size: direct_syscall_bytes,
                 page_size,
                 page_protections: protections,
             });
@@ -272,9 +307,53 @@ pub(super) fn parse_image_with_policy(
         image_offset,
         stack_guard_offset,
         direct_syscall_shim_offset,
+        direct_syscall_shim_size: direct_syscall_bytes,
         page_size,
         page_protections: protections,
     })
+}
+
+fn relro_covered_by_load_pages(
+    loads: &[ProgramHeader],
+    relro_start: u64,
+    relro_end: u64,
+    page_size: u64,
+) -> Result<bool, LoadError> {
+    debug_assert!(page_size.is_power_of_two());
+    let page_mask = page_size - 1;
+    let required_start = relro_start & !page_mask;
+    let required_end = relro_end
+        .checked_add(page_mask)
+        .ok_or(LoadError::Bounds("PT_GNU_RELRO page rounding overflow"))?
+        & !page_mask;
+    let mut covered_end = required_start;
+    let mut ranges = loads
+        .iter()
+        .map(|load| {
+            let start = load.virtual_address & !page_mask;
+            let end = load
+                .virtual_address
+                .checked_add(load.memory_size)
+                .and_then(|value| value.checked_add(page_mask))
+                .ok_or(LoadError::Bounds("PT_LOAD page span overflow"))?
+                & !page_mask;
+            Ok((start, end))
+        })
+        .collect::<Result<Vec<_>, LoadError>>()?;
+    ranges.sort_unstable_by_key(|(start, _)| *start);
+    for (start, end) in ranges {
+        if end <= covered_end {
+            continue;
+        }
+        if start > covered_end {
+            break;
+        }
+        covered_end = covered_end.max(end);
+        if covered_end >= required_end {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 const ANDROID_COMPAT_PAGE_SIZE: usize = 4096;
@@ -784,6 +863,24 @@ mod tests {
             rx_rw_compat_boundary(&loads, None, 16 * 1024).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn relro_accepts_android_lld_page_padding_across_rw_loads() {
+        let loads = vec![
+            load(0x2c000, 0x988, PF_R | PF_W),
+            load(0x30000, 0x9268, PF_R | PF_W),
+        ];
+        assert!(relro_covered_by_load_pages(&loads, 0x2c000, 0x34000, 0x4000,).unwrap());
+    }
+
+    #[test]
+    fn relro_rejects_an_unmapped_page_gap() {
+        let loads = vec![
+            load(0x2c000, 0x988, PF_R | PF_W),
+            load(0x34000, 0x1000, PF_R | PF_W),
+        ];
+        assert!(!relro_covered_by_load_pages(&loads, 0x2c000, 0x38000, 0x4000,).unwrap());
     }
 
     fn load(virtual_address: u64, memory_size: u64, flags: u32) -> ProgramHeader {

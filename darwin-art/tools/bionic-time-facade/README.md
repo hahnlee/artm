@@ -35,9 +35,10 @@ and validates a normalized, positive remainder. Success leaves the remainder
 unspecified as POSIX requires.
 
 `sysconf` supports page size (both Android selector spellings), configured and
-online processor counts, and the physical/available page counts from the
-runtime's bounded eight-CPU/8-GiB device snapshot. Every other selector returns
-Android `EINVAL` instead of being sent to Darwin under a colliding numeric value.
+online processor counts read from the corresponding Darwin `sysconf` selectors,
+and the physical/available page counts from the runtime's fixed 8-GiB memory
+snapshot. Every other selector returns Android `EINVAL` instead of being sent
+to Darwin under a colliding numeric value.
 
 All facade calls save and restore Darwin pthread errno. Expected failures are
 published only in Bionic TLS. An unknown Darwin errno or Mach/sysconf invariant

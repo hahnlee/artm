@@ -5,7 +5,7 @@ pub(crate) fn build_interpreter_core(root: &Path) -> Result<()> {
     let patched_artbase = root.join("_build/foundation/patched-source/libartbase");
     let libdexfile = root.join("_aosp/art/libdexfile");
     let runtime = root.join("_aosp/art/runtime");
-    let runtime_abi = root.join("_build/runtime-core/patched-source/runtime");
+    let runtime_abi = root.join("_build/runtime-common/patched-source/runtime");
     let runtime_base = runtime.join("base");
     let runtime_arm64 = runtime.join("arch/arm64");
     let generator = root.join("_aosp/art/tools/cpp-define-generator");
@@ -43,14 +43,46 @@ pub(crate) fn build_interpreter_core(root: &Path) -> Result<()> {
     let build_dir = root.join("_build/interpreter-core");
     let object_dir = build_dir.join("objects");
     fs::create_dir_all(&object_dir)?;
+    let shadow_source = build_dir.join("patched-source/runtime/interpreter");
+    fs::create_dir_all(&shadow_source)?;
+    fs::copy(
+        runtime.join("interpreter/shadow_frame.h"),
+        shadow_source.join("shadow_frame.h"),
+    )?;
+    run_command(
+        Command::new("patch")
+            .args(["--batch", "--forward", "-p1", "-i"])
+            .arg(root.join("patches/art/0037-darwin-shadow-frame-single-initialization.patch"))
+            .current_dir(build_dir.join("patched-source")),
+    )?;
+    fs::copy(
+        runtime.join("interpreter/unstarted_runtime.cc"),
+        shadow_source.join("unstarted_runtime.cc"),
+    )?;
+    run_command(
+        Command::new("patch")
+            .args(["--batch", "--forward", "-p1", "-i"])
+            .arg(root.join("patches/art/0113-darwin-unstarted-reference-arguments.patch"))
+            .current_dir(build_dir.join("patched-source")),
+    )?;
+    fs::copy(
+        runtime.join("interpreter/interpreter_common.cc"),
+        shadow_source.join("interpreter_common.cc"),
+    )?;
+    run_command(
+        Command::new("patch")
+            .args(["--batch", "--forward", "-p1", "-i"])
+            .arg(root.join("patches/art/0074-darwin-interpreter-reference-copy.patch"))
+            .current_dir(build_dir.join("patched-source")),
+    )?;
     let sources = [
         runtime.join("interpreter/interpreter.cc"),
         runtime.join("interpreter/interpreter_cache.cc"),
-        runtime.join("interpreter/interpreter_common.cc"),
+        shadow_source.join("interpreter_common.cc"),
         runtime.join("interpreter/interpreter_switch_impl0.cc"),
         runtime.join("interpreter/lock_count_data.cc"),
         runtime.join("interpreter/shadow_frame.cc"),
-        runtime.join("interpreter/unstarted_runtime.cc"),
+        shadow_source.join("unstarted_runtime.cc"),
     ];
     let mut objects = Vec::new();
     for source in sources {
@@ -60,7 +92,12 @@ pub(crate) fn build_interpreter_core(root: &Path) -> Result<()> {
         let object = object_dir.join(format!("{}.o", file_name.to_string_lossy()));
         run_command(
             runtime_cpp_command(&includes)
+                .arg(format!("-I{}", runtime.join("interpreter").display()))
                 .args(["-include", "mirror/object_reference.h"])
+                // Original inl headers use relative includes; force the patched
+                // header first so their include guard selects this implementation.
+                .arg("-include")
+                .arg(shadow_source.join("shadow_frame.h"))
                 .arg("-c")
                 .arg(&source)
                 .arg("-o")

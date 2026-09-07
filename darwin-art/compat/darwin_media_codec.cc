@@ -1,10 +1,15 @@
 #include "darwin_media_codec.h"
 
 #include "darwin_angle_egl.h"
+#include "darwin_vp9_decoder.h"
 
 #include <CoreMedia/CoreMedia.h>
 #include <CoreVideo/CoreVideo.h>
 #include <VideoToolbox/VideoToolbox.h>
+#include <vpx/vp8dx.h>
+#include <vpx/vpx_decoder.h>
+
+#include <dlfcn.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -22,9 +27,11 @@ namespace {
 
 constexpr int32_t kInfoTryAgainLater = -1;
 constexpr int32_t kInfoOutputFormatChanged = -2;
+constexpr int32_t kInfoOutputBuffersChanged = -3;
 constexpr int32_t kBufferFlagEndOfStream = 4;
 constexpr int32_t kColorFormatSurface = 0x7f000789;
 constexpr int32_t kColorFormatYuv420Flexible = 0x7f420888;
+constexpr int32_t kColorFormatYuv420Planar = 0x13;
 
 struct CodecDescription {
   const char* name;
@@ -38,13 +45,7 @@ constexpr CodecDescription kCodecs[] = {
     {"c2.darwin.hevc.decoder", "video/hevc", 8},
 };
 
-struct DecodedFrame {
-  std::vector<uint8_t> bytes;
-  int32_t width = 0;
-  int32_t height = 0;
-  int64_t pts_us = 0;
-  int32_t flags = 0;
-};
+using DecodedFrame = darwin_art::DecodedVideoFrame;
 
 struct DarwinMediaCodec {
   std::mutex mutex;
@@ -54,13 +55,20 @@ struct DarwinMediaCodec {
   bool configured = false;
   bool started = false;
   bool eos = false;
+  bool output_format_pending = false;
+  bool output_buffers_pending = false;
+  bool input_owned = false;
+  bool output_owned = false;
   int32_t width = 0;
   int32_t height = 0;
   std::vector<uint8_t> input;
+  std::vector<uint8_t> output_scratch;
   std::deque<DecodedFrame> output;
   jobject surface = nullptr;
   CMVideoFormatDescriptionRef format = nullptr;
   VTDecompressionSessionRef session = nullptr;
+  darwin_art::Vp9Decoder vp9;
+  bool vp9_initialized = false;
 };
 
 std::mutex g_registry_mutex;
@@ -386,10 +394,19 @@ void MediaCodecNativeConfigure(JNIEnv* env, jobject self, jobjectArray keys,
     status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
         kCFAllocatorDefault, 3, parameter_sets, parameter_sizes, 4, nullptr,
         &codec->format);
-  } else {
-    status = CMVideoFormatDescriptionCreate(
-        kCFAllocatorDefault, kCMVideoCodecType_VP9, codec->width,
-        codec->height, nullptr, &codec->format);
+  } else if (is_vp9) {
+    if (!codec->vp9.Initialize(codec->width, codec->height)) {
+      Throw(env, "java/lang/UnsupportedOperationException", "VP9 decoder initialization failed");
+      return;
+    }
+    codec->vp9_initialized = true;
+    codec->input.resize(4 * 1024 * 1024);
+    codec->output_scratch.resize(static_cast<size_t>(codec->width) * codec->height * 3 / 2);
+    if (DebugMediaCodec()) std::cerr << "ART Android MediaCodec: VP9 output scratch="
+                                     << static_cast<const void*>(codec->output_scratch.data())
+                                     << " size=" << codec->output_scratch.size() << "\n";
+    codec->configured = true;
+    return;
   }
   if (status != noErr) {
     Throw(env, "java/lang/IllegalArgumentException", "invalid H.264 codec config");
@@ -408,6 +425,10 @@ void MediaCodecNativeConfigure(JNIEnv* env, jobject self, jobjectArray keys,
     return;
   }
   codec->input.resize(4 * 1024 * 1024);
+  codec->output_scratch.resize(static_cast<size_t>(codec->width) * codec->height * 3 / 2);
+  if (DebugMediaCodec()) std::cerr << "ART Android MediaCodec: output scratch="
+                                   << static_cast<const void*>(codec->output_scratch.data())
+                                   << " size=" << codec->output_scratch.size() << "\n";
   codec->configured = true;
 }
 
@@ -418,6 +439,8 @@ void MediaCodecNativeStart(JNIEnv* env, jobject self) {
     return;
   }
   codec->started = true;
+  codec->output_format_pending = true;
+  codec->output_buffers_pending = true;
 }
 
 void MediaCodecNativeStop(JNIEnv* env, jobject self) {
@@ -443,26 +466,54 @@ void MediaCodecNativeFinalize(JNIEnv* env, jobject self) {
 void MediaCodecNativeReset(JNIEnv* env, jobject self) {
   auto* codec = GetCodec(env, self);
   if (codec == nullptr) return;
+  if (codec->session != nullptr) {
+    VTDecompressionSessionFinishDelayedFrames(codec->session);
+    VTDecompressionSessionWaitForAsynchronousFrames(codec->session);
+  }
   std::lock_guard<std::mutex> lock(codec->mutex);
   codec->output.clear();
   codec->eos = false;
-  if (codec->session != nullptr) {
-    VTDecompressionSessionWaitForAsynchronousFrames(codec->session);
-    VTDecompressionSessionFinishDelayedFrames(codec->session);
-  }
+  codec->input_owned = false;
+  codec->output_owned = false;
 }
 
 jint MediaCodecNativeDequeueInput(JNIEnv* env, jobject self, jlong) {
   auto* codec = GetCodec(env, self);
-  return codec != nullptr && codec->started ? 0 : kInfoTryAgainLater;
+  if (codec == nullptr) return kInfoTryAgainLater;
+  std::lock_guard<std::mutex> lock(codec->mutex);
+  if (!codec->started || codec->eos || codec->input_owned || codec->output.size() >= 4) {
+    return kInfoTryAgainLater;
+  }
+  codec->input_owned = true;
+  return 0;
 }
 
 jint MediaCodecNativeDequeueOutput(JNIEnv* env, jobject self, jobject info, jlong) {
   auto* codec = GetCodec(env, self);
   if (codec == nullptr || info == nullptr) return kInfoTryAgainLater;
   std::lock_guard<std::mutex> lock(codec->mutex);
-  if (codec->output.empty()) return kInfoTryAgainLater;
+  if (!codec->started || codec->output_owned || codec->output.empty()) {
+    return kInfoTryAgainLater;
+  }
+  if (codec->output_buffers_pending) {
+    codec->output_buffers_pending = false;
+    if (DebugMediaCodec()) std::cerr << "ART Android MediaCodec: output buffers changed\n";
+    return kInfoOutputBuffersChanged;
+  }
+  if (codec->output_format_pending) {
+    codec->output_format_pending = false;
+    if (DebugMediaCodec()) std::cerr << "ART Android MediaCodec: output format changed\n";
+    return kInfoOutputFormatChanged;
+  }
   const auto& frame = codec->output.front();
+  if (frame.bytes.size() > codec->output_scratch.size()) {
+    Throw(env, "java/lang/IllegalStateException", "decoded frame exceeds output buffer");
+    return kInfoTryAgainLater;
+  }
+  if (!frame.bytes.empty()) {
+    std::memcpy(codec->output_scratch.data(), frame.bytes.data(), frame.bytes.size());
+  }
+  codec->output_owned = true;
   jclass klass = env->GetObjectClass(info);
   jfieldID offset = env->GetFieldID(klass, "offset", "I");
   jfieldID size = env->GetFieldID(klass, "size", "I");
@@ -484,10 +535,20 @@ jobject MediaCodecGetBuffer(JNIEnv* env, jobject self, jboolean input,
   if (input == JNI_TRUE) {
     return env->NewDirectByteBuffer(codec->input.data(), codec->input.size());
   }
-  if (codec->output.empty()) return nullptr;
-  return env->NewDirectByteBuffer(codec->output.front().bytes.data(),
-                                  codec->output.front().bytes.size());
+  if (codec->output.empty()) {
+    return codec->output_scratch.empty()
+               ? nullptr
+               : env->NewDirectByteBuffer(codec->output_scratch.data(),
+                                           codec->output_scratch.size());
+  }
+  // Android's Java wrapper may retain the array returned by getOutputBuffers
+  // across dequeues.  Expose one stable backing store rather than a deque
+  // element that can be popped/reallocated when the next frame arrives.
+  return env->NewDirectByteBuffer(codec->output_scratch.data(),
+                                  codec->output_scratch.size());
 }
+
+uint8_t g_empty_output_buffer = 0;
 
 jobject NewFormatMap(JNIEnv* env, DarwinMediaCodec* codec) {
   jclass map = env->FindClass("java/util/HashMap");
@@ -518,6 +579,35 @@ jobject NewFormatMap(JNIEnv* env, DarwinMediaCodec* codec) {
         env->DeleteLocalRef(value);
       }
       env->DeleteLocalRef(integer);
+      const char* keys[] = {"color-format", "stride", "slice-height", "crop-left",
+                            "crop-top", "crop-right", "crop-bottom", "color-range",
+                            "color-standard", "color-transfer", "rotation-degrees",
+                            "max-input-size", "max-width", "max-height"};
+      const jint values[] = {kColorFormatYuv420Planar, codec->width, codec->height,
+                             0, 0, codec->width - 1, codec->height - 1, 2, 1, 3, 0,
+                             static_cast<jint>(codec->input.size()), codec->width,
+                             codec->height};
+      for (size_t i = 0; i < std::size(keys); ++i) {
+        jclass integer_type = env->FindClass("java/lang/Integer");
+        jmethodID ctor = integer_type == nullptr ? nullptr
+            : env->GetMethodID(integer_type, "<init>", "(I)V");
+        jstring key = env->NewStringUTF(keys[i]);
+        jobject value = ctor == nullptr ? nullptr : env->NewObject(integer_type, ctor, values[i]);
+        env->CallObjectMethod(result, put, key, value);
+        env->DeleteLocalRef(key);
+        env->DeleteLocalRef(value);
+        env->DeleteLocalRef(integer_type);
+      }
+      jclass floating = env->FindClass("java/lang/Float");
+      jmethodID float_ctor = floating == nullptr ? nullptr
+          : env->GetMethodID(floating, "<init>", "(F)V");
+      jstring frame_rate_key = env->NewStringUTF("frame-rate");
+      jobject frame_rate = float_ctor == nullptr ? nullptr
+          : env->NewObject(floating, float_ctor, 30.0f);
+      env->CallObjectMethod(result, put, frame_rate_key, frame_rate);
+      env->DeleteLocalRef(frame_rate_key);
+      env->DeleteLocalRef(frame_rate);
+      env->DeleteLocalRef(floating);
     }
   }
   env->DeleteLocalRef(map);
@@ -539,6 +629,9 @@ jobjectArray MediaCodecGetBuffers(JNIEnv* env, jobject self, jboolean input) {
   if (buffer == nullptr) return nullptr;
   jobjectArray result = env->NewObjectArray(1, buffer, nullptr);
   jobject value = MediaCodecGetBuffer(env, self, input, 0);
+  if (value == nullptr && input == JNI_FALSE) {
+    value = env->NewDirectByteBuffer(&g_empty_output_buffer, 1);
+  }
   if (value != nullptr) env->SetObjectArrayElement(result, 0, value);
   env->DeleteLocalRef(value);
   env->DeleteLocalRef(buffer);
@@ -548,7 +641,8 @@ jobjectArray MediaCodecGetBuffers(JNIEnv* env, jobject self, jboolean input) {
 void MediaCodecQueueInput(JNIEnv* env, jobject self, jint index, jint offset,
                           jint size, jlong pts_us, jint flags) {
   auto* codec = GetCodec(env, self);
-  if (codec == nullptr || index != 0 || !codec->started || codec->session == nullptr) {
+  if (codec == nullptr || index != 0 || !codec->started ||
+      (codec->session == nullptr && !codec->vp9_initialized)) {
     Throw(env, "java/lang/IllegalStateException", "codec is not started");
     return;
   }
@@ -556,7 +650,39 @@ void MediaCodecQueueInput(JNIEnv* env, jobject self, jint index, jint offset,
     Throw(env, "java/lang/IllegalArgumentException", "input buffer range is invalid");
     return;
   }
-  if ((flags & kBufferFlagEndOfStream) != 0) codec->eos = true;
+  {
+    std::lock_guard<std::mutex> lock(codec->mutex);
+    codec->input_owned = false;
+    if ((flags & kBufferFlagEndOfStream) != 0) codec->eos = true;
+  }
+  if (size == 0) {
+    if ((flags & kBufferFlagEndOfStream) != 0) {
+      if (codec->session != nullptr) {
+        VTDecompressionSessionFinishDelayedFrames(codec->session);
+        VTDecompressionSessionWaitForAsynchronousFrames(codec->session);
+      }
+      std::lock_guard<std::mutex> lock(codec->mutex);
+      DecodedFrame eos;
+      eos.pts_us = pts_us;
+      eos.flags = kBufferFlagEndOfStream;
+      codec->output.emplace_back(std::move(eos));
+    }
+    return;
+  }
+  if (codec->vp9_initialized) {
+    if (DebugMediaCodec() && size > 0) {
+      std::cerr << "ART Android MediaCodec: VP9 input size=" << size << " first="
+                << std::hex << static_cast<int>(codec->input[offset]) << " "
+                << static_cast<int>(codec->input[offset + (size > 1 ? 1 : 0)])
+                << std::dec << " pts=" << pts_us << "\n";
+    }
+    std::lock_guard<std::mutex> lock(codec->mutex);
+    if (!codec->vp9.Decode(codec->input.data() + offset, size, pts_us, &codec->output)) {
+      Throw(env, "java/lang/IllegalStateException", "VP9 decode failed");
+      return;
+    }
+    return;
+  }
   CMBlockBufferRef block = nullptr;
   const std::vector<uint8_t> access_unit = NormalizeH264AccessUnit(
       codec->input.data() + offset, static_cast<size_t>(size));
@@ -591,12 +717,16 @@ void MediaCodecQueueInput(JNIEnv* env, jobject self, jint index, jint offset,
   }
 }
 
-void MediaCodecReleaseOutput(JNIEnv* env, jobject self, jint index, jboolean,
+void MediaCodecReleaseOutput(JNIEnv* env, jobject self, jint index, jboolean render,
                              jboolean, jlong) {
   auto* codec = GetCodec(env, self);
   if (codec == nullptr || index != 0) return;
   std::lock_guard<std::mutex> lock(codec->mutex);
-  if (!codec->output.empty()) codec->output.pop_front();
+  if (codec->output_owned && !codec->output.empty()) {
+    if (render == JNI_TRUE) PublishSurface(codec, codec->output.front());
+    codec->output.pop_front();
+    codec->output_owned = false;
+  }
 }
 
 void MediaCodecNativeConfigureNoop(JNIEnv*, jobject) {}
@@ -655,10 +785,10 @@ jobject MakeCapabilities(JNIEnv* env, const CodecDescription& codec,
   }
   env->DeleteLocalRef(format);
   env->DeleteLocalRef(format_class);
-  jintArray colors = env->NewIntArray(2);
-  const jint color_values[] = {kColorFormatSurface,
+  jintArray colors = env->NewIntArray(3);
+  const jint color_values[] = {kColorFormatSurface, kColorFormatYuv420Planar,
                                kColorFormatYuv420Flexible};
-  env->SetIntArrayRegion(colors, 0, 2, color_values);
+  env->SetIntArrayRegion(colors, 0, 3, color_values);
   env->SetObjectField(result, color_formats, colors);
   jclass profile = env->FindClass("android/media/MediaCodecInfo$CodecProfileLevel");
   jobjectArray levels = env->NewObjectArray(1, profile, nullptr);

@@ -24,8 +24,11 @@ The supported behavior is:
   exclusive RANDOM/INSECURE combination and unknown flags fail with Android
   `EINVAL`, while inaccessible output memory fails with Android `EFAULT`;
 - syscalls 122/123 (`sched_setaffinity`/`sched_getaffinity`) expose an
-  eight-CPU, thread-local virtual affinity mask. Set/get round-trips preserve
-  native engine affinity probes without applying Linux CPU ids to Darwin;
+  host-online CPU mask, validating provider-owned target thread IDs. Unknown
+  targets return ESRCH. An unrestricted set is a no-op; a nonempty restriction
+  returns ENOSYS because Darwin cannot enforce Linux CPU-index pinning. Empty
+  online intersections return EINVAL. No fictitious binding is stored. The raw
+  get syscall writes only its returned, word-rounded mask size;
 - syscall 98 accepts `FUTEX_WAIT`/`FUTEX_WAIT_PRIVATE` with a readable aligned
   word and optional relative timeout, and `FUTEX_WAKE`/`FUTEX_WAKE_PRIVATE`
   with any non-negative wake count;

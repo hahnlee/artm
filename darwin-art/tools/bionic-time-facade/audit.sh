@@ -77,6 +77,7 @@ nm -u "$temp_root/shims.o" | sed 's/^[[:space:]]*//' | sort \
   >"$temp_root/undefined"
 cat >"$temp_root/expected-undefined" <<'EOF'
 ___error
+___stderrp
 ___udivti3
 _asctime_r
 _clock
@@ -87,6 +88,9 @@ _darwin_art_bionic_errno_set_from_darwin
 _darwin_art_bionic_errno_store
 _daylight
 _difftime
+_fprintf
+_getenv
+_getpagesize
 _gettimeofday
 _gmtime
 _gmtime_r
@@ -150,7 +154,8 @@ sysconf
 EOF
 diff -u "$temp_root/expected-fixture-undefined" "$temp_root/fixture-undefined" ||
   fail 'Android time ELF import namespace drift'
-for symbol in bionic_time_fixture_basic bionic_time_fixture_interrupted; do
+for symbol in bionic_time_fixture_basic bionic_time_fixture_configured_processors \
+  bionic_time_fixture_online_processors bionic_time_fixture_interrupted; do
   grep -E "GLOBAL DEFAULT +[0-9]+ $symbol\$" "$temp_root/dynsyms" >/dev/null ||
     fail "fixture runner export missing: $symbol"
 done

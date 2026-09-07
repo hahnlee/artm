@@ -15,6 +15,7 @@ build="$root/_build/android-apk-app-runtime"
 classes="$build/classes"
 dex="$build/dex"
 apk="$build/simple-no-native.apk"
+debug_apk="$build/simple-debuggable.apk"
 jni_apk="$build/simple-jni.apk"
 
 [[ -x "$aapt2" && -x "$d8" && -x "$android_clang" && -f "$android_jar" ]] || {
@@ -58,6 +59,19 @@ resource_zip="$build/resources.zip"
   -o "$apk"
 (cd "$dex" && zip -q -j "$apk" classes.dex)
 
+# aapt2's --debug-mode sets android:debuggable=true in binary XML, matching
+# the package-manager input used for ART's Java-debuggable process policy.
+"$aapt2" link \
+  -I "$android_jar" \
+  --auto-add-overlay \
+  --debug-mode \
+  -R "$resource_zip" \
+  --manifest "$module/fixture/AndroidManifest.xml" \
+  --min-sdk-version 35 \
+  --target-sdk-version 35 \
+  -o "$debug_apk"
+(cd "$dex" && zip -q -j "$debug_apk" classes.dex)
+
 "$android_clang" -std=c17 -O2 -fPIC -fvisibility=hidden -Wall -Wextra -Werror \
   -shared -nostdlib -fuse-ld=lld -Wl,--build-id=none -Wl,--hash-style=sysv \
   -Wl,-z,now -Wl,-z,norelro -Wl,-soname,libdarwin-art-simple-zchild.so \
@@ -75,17 +89,22 @@ entries="$(unzip -Z1 "$apk")"
 ! grep -Eq '(^|/)classes[2-9][0-9]*\.dex$|\.so$' <<<"$entries"
 dex_summary="$($root/_build/dex-probe/dex-probe "$dex/classes.dex")"
 expected_dex='AOSP DEX: verified=yes version=35 classes=24 methods=275 class[0]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda0; class[1]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda1; class[2]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda2; class[3]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda3; class[4]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda4; class[5]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda5; class[6]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda6; class[7]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda7; class[8]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda8; class[9]=Ldev/darwinart/simple/DarwinServiceBridge$$ExternalSyntheticLambda9; class[10]=Ldev/darwinart/simple/DarwinServiceBridge$1; class[11]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityClientHandler$$ExternalSyntheticLambda0; class[12]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityClientHandler; class[13]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityManagerHandler; class[14]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityRecord; class[15]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler$$ExternalSyntheticLambda0; class[16]=Ldev/darwinart/simple/DarwinServiceBridge$ActivityTaskHandler; class[17]=Ldev/darwinart/simple/DarwinServiceBridge$DisplayHandler; class[18]=Ldev/darwinart/simple/DarwinServiceBridge$ManagerHandler; class[19]=Ldev/darwinart/simple/DarwinServiceBridge$WindowManagerHandler; class[20]=Ldev/darwinart/simple/DarwinServiceBridge; class[21]=Ldev/darwinart/simple/FontBootstrap; class[22]=Ldev/darwinart/simple/MainActivity$$ExternalSyntheticLambda0; class[23]=Ldev/darwinart/simple/MainActivity;'
-[[ "$dex_summary" == "AOSP DEX: verified=yes version=35 classes=44 methods=439 "* ]] &&
+[[ "$dex_summary" == "AOSP DEX: verified=yes version=35 classes=48 methods=481 "* ]] &&
   [[ "$dex_summary" == *'Ldev/darwinart/simple/DarwinServiceBridge;'* ]] &&
   [[ "$dex_summary" == *'Ldev/darwinart/simple/MainActivity;'* ]] || {
   printf 'unexpected DEX summary:\n%s\n' "$dex_summary" >&2
   exit 1
 }
 
-expected='apk-app-runtime: package=dev.darwinart.simple application=android.app.Application activity=dev.darwinart.simple.MainActivity launch_component=dev.darwinart.simple.MainActivity descriptor=Ldev/darwinart/simple/MainActivity; activities=dev.darwinart.simple.MainActivity=0x1030241 activity_aliases=none services=dev.darwinart.simple.ImageService>dev.darwinart.simple service_metadata=none application_metadata=none version_code=0 version_name= theme=0x1030241 target_sdk=35 label=Darwin ART APK label_res=0x0 icon=none dex=apk-1 native=0 native_root=none'
+expected='apk-app-runtime: package=dev.darwinart.simple application=android.app.Application activity=dev.darwinart.simple.MainActivity launch_component=dev.darwinart.simple.MainActivity screen_orientation=-1 descriptor=Ldev/darwinart/simple/MainActivity; activities=dev.darwinart.simple.MainActivity=0x1030241 activity_aliases=none services=dev.darwinart.simple.ImageService>dev.darwinart.simple service_metadata=none providers=none application_metadata=none version_code=0 version_name= theme=0x1030241 target_sdk=35 debuggable=0 label=Darwin ART APK label_res=0x0 icon=none dex=apk-1 native=0 native_root=none'
 actual="$(cargo run -q --manifest-path "$module/Cargo.toml" -- "$apk")"
 [[ "$actual" == "$expected" ]] || {
   printf 'unexpected inspector output:\n%s\n' "$actual" >&2
+  exit 1
+}
+debug_actual="$(cargo run -q --manifest-path "$module/Cargo.toml" -- "$debug_apk")"
+[[ "$debug_actual" == *' target_sdk=35 debuggable=1 label='* ]] || {
+  printf 'debuggable manifest state was not decoded:\n%s\n' "$debug_actual" >&2
   exit 1
 }
 "$aapt2" dump badging "$apk" | grep -F "launchable-activity: name='dev.darwinart.simple.MainActivity'" >/dev/null

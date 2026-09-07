@@ -2,6 +2,7 @@
 #include "darwin_binder_wire.h"
 #include "darwin_android_platform.h"
 #include "darwin_android_time.h"
+#include "../tools/bionic-socket-broker-adapter/include/darwin_art_bionic_socket_broker.h"
 
 #include <cstdint>
 #include <algorithm>
@@ -58,7 +59,7 @@ struct DarwinInputReceiver {
   bool focused = false;
   bool touch_mode = false;
   void* looper = nullptr;
-  bool transport_registered = false;
+  std::atomic<bool> transport_registered{false};
   std::atomic<bool> disposed{false};
   std::atomic<bool> dispose_requested{false};
   std::atomic<bool> refs_cleaned{false};
@@ -451,22 +452,29 @@ void BinderSetThreadStrictModePolicy(jint policy) {
   g_binder_thread_strict_mode_policy = policy;
 }
 
+// Android's socket flag values differ from Darwin's libc constants.
+constexpr int kAndroidMsgDontWait = 0x40;
+constexpr int kAndroidMsgNoSignal = 0x4000;
+
 struct DarwinInputChannelState {
   explicit DarwinInputChannelState(std::string channel_name)
       : name(std::move(channel_name)) {
     int fds[2] = {-1, -1};
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0) {
+    // These are guest descriptors consumed by the broker-backed ALooper.
+    // Host libc socketpair/fcntl would produce unrelated descriptor numbers
+    // and makes the transport look invalid to the poll namespace.
+    constexpr int kAndroidAfUnix = 1;
+    constexpr int kAndroidSockStreamNonblockCloexec = 0x80801;
+    if (darwin_art_bionic_socket_broker_socketpair(
+            kAndroidAfUnix, kAndroidSockStreamNonblockCloexec, 0, fds) == 0) {
       read_fd = fds[0];
       write_fd = fds[1];
-      (void)fcntl(read_fd, F_SETFL, fcntl(read_fd, F_GETFL, 0) | O_NONBLOCK);
-      (void)fcntl(write_fd, F_SETFL,
-                  fcntl(write_fd, F_GETFL, 0) | O_NONBLOCK);
     }
   }
 
   ~DarwinInputChannelState() {
-    if (read_fd >= 0) close(read_fd);
-    if (write_fd >= 0) close(write_fd);
+    if (read_fd >= 0) darwin_art_bionic_socket_broker_close(read_fd);
+    if (write_fd >= 0) darwin_art_bionic_socket_broker_close(write_fd);
   }
 
   std::string name;
@@ -531,19 +539,23 @@ void QueueFocusLossCancel(
     // owner loop remains the consumer for the queued CANCEL.
     const bool receiver_alive =
         channel->consumer != nullptr &&
-        channel->consumer->transport_registered &&
+        channel->consumer->transport_registered.load(std::memory_order_acquire) &&
         !channel->consumer->disposed.load(std::memory_order_acquire);
     channel->looper_consumer.store(receiver_alive, std::memory_order_release);
     if (channel->packets.empty() && channel->read_fd >= 0) {
       uint8_t buffer[64];
-      while (recv(channel->read_fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
+      while (darwin_art_bionic_socket_broker_recv(
+                 channel->read_fd, buffer, sizeof(buffer),
+                 kAndroidMsgDontWait) > 0) {
       }
     }
     channel->pending_input.store(wake, std::memory_order_release);
   }
   if (wake && channel->write_fd >= 0) {
     const uint8_t token = 1;
-    (void)send(channel->write_fd, &token, sizeof(token), MSG_DONTWAIT);
+    (void)darwin_art_bionic_socket_broker_send(
+        channel->write_fd, &token, sizeof(token),
+        kAndroidMsgDontWait | kAndroidMsgNoSignal);
   }
 }
 
@@ -583,7 +595,9 @@ void NotifyFocusedInputChannel() {
     channel->pending_input.store(true, std::memory_order_release);
     if (channel->write_fd >= 0) {
       const uint8_t token = 1;
-      (void)send(channel->write_fd, &token, sizeof(token), MSG_DONTWAIT);
+      (void)darwin_art_bionic_socket_broker_send(
+          channel->write_fd, &token, sizeof(token),
+          kAndroidMsgDontWait | kAndroidMsgNoSignal);
     }
   }
 }
@@ -630,7 +644,9 @@ darwin_art::DarwinArtInputEnqueueResult EnqueueFocusedPacket(
   channel->pending_input.store(true, std::memory_order_release);
   if (channel->write_fd >= 0) {
     const uint8_t token = 1;
-    (void)send(channel->write_fd, &token, sizeof(token), MSG_DONTWAIT);
+    (void)darwin_art_bionic_socket_broker_send(
+        channel->write_fd, &token, sizeof(token),
+        kAndroidMsgDontWait | kAndroidMsgNoSignal);
   }
   return darwin_art::DarwinArtInputEnqueueResult::kQueued;
 }
@@ -695,7 +711,9 @@ void ClearFocusedInputChannelPending() {
     }
     if (channel->read_fd >= 0) {
       uint8_t buffer[64];
-      while (recv(channel->read_fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
+      while (darwin_art_bionic_socket_broker_recv(
+                 channel->read_fd, buffer, sizeof(buffer),
+                 kAndroidMsgDontWait) > 0) {
       }
     }
     channel->pending_input.store(false, std::memory_order_release);
@@ -708,7 +726,9 @@ void ClearInputChannelPending(DarwinInputChannelState* channel) {
   if (!channel->packets.empty()) return;
   if (channel->read_fd >= 0) {
     uint8_t buffer[64];
-    while (recv(channel->read_fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
+    while (darwin_art_bionic_socket_broker_recv(
+               channel->read_fd, buffer, sizeof(buffer),
+               kAndroidMsgDontWait) > 0) {
     }
   }
   channel->pending_input.store(false, std::memory_order_release);
@@ -729,8 +749,10 @@ bool RearmInputChannelTransport(DarwinInputChannelState* channel) {
   }
   if (!pending || channel->write_fd < 0) return false;
   const uint8_t token = 1;
-  return send(channel->write_fd, &token, sizeof(token), MSG_DONTWAIT) ==
-         static_cast<ssize_t>(sizeof(token));
+  return darwin_art_bionic_socket_broker_send(
+             channel->write_fd, &token, sizeof(token),
+             kAndroidMsgDontWait | kAndroidMsgNoSignal) ==
+         static_cast<intptr_t>(sizeof(token));
 }
 
 struct DarwinInputChannel {
@@ -881,7 +903,9 @@ jobject CreateChannelMotionEvent(JNIEnv* env,
       motion, obtain, static_cast<jlong>(down_nanos / 1000000ULL),
       static_cast<jlong>(event_nanos / 1000000ULL),
       static_cast<jint>(packet.action), 1, pointer_array, coords_array, 0, 0,
-      1.0f, 1.0f, 0, 0x1002, 0, 0, 0);
+      // deviceId, edgeFlags, source, displayId, flags. SOURCE_TOUCHSCREEN
+      // belongs to source, not edgeFlags; source=0 bypasses touch dispatch.
+      1.0f, 1.0f, 0, 0, 0x1002, 0, 0);
   if (env->ExceptionCheck()) {
     env->ExceptionClear();
     env->DeleteLocalRef(event);
@@ -1001,11 +1025,20 @@ int InputChannelTransportCallback(int fd, int events, void* data) {
   constexpr int kLooperEventInvalid = 0x0010;
   if ((events & (kLooperEventError | kLooperEventHangup |
                 kLooperEventInvalid)) != 0) {
+    std::lock_guard<std::mutex> lock(channel->packet_mutex);
+    if (channel->consumer != nullptr) {
+      channel->consumer->transport_registered.store(
+          false, std::memory_order_release);
+    }
+    // Keep this state transition in the same critical section as the
+    // transport flag. QueueFocusLossCancel must not resurrect a registration
+    // after this callback has observed a terminal broker error.
     channel->looper_consumer.store(false, std::memory_order_release);
     return 0;
   }
   uint8_t buffer[64];
-  while (recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT) > 0) {
+  while (darwin_art_bionic_socket_broker_recv(
+             fd, buffer, sizeof(buffer), kAndroidMsgDontWait) > 0) {
   }
   std::shared_ptr<DarwinInputReceiver> receiver;
   {
@@ -1081,7 +1114,8 @@ void InputReceiverDispose(JNIEnv* env, jclass, jlong pointer) {
       if (channel->consumer.get() == receiver) channel->consumer.reset();
     }
   }
-  if (receiver->transport_registered && receiver->looper != nullptr &&
+  if (receiver->transport_registered.load(std::memory_order_acquire) &&
+      receiver->looper != nullptr &&
       receiver->channel != nullptr && receiver->channel->read_fd >= 0) {
     (void)darwin_art_android_platform_remove_fd(
         receiver->looper, receiver->channel->read_fd);
@@ -1242,11 +1276,12 @@ jlong InputReceiverInit(JNIEnv* env, jclass, jobject weak_receiver,
     // ALOOPER_EVENT_INPUT is the NDK value used by InputEventReceiver's
     // native transport. The callback drains only wake tokens; framework event
     // payloads remain owned by the channel queue and are dispatched in order.
-    receiver->transport_registered =
+    receiver->transport_registered.store(
         darwin_art_android_platform_add_fd(
             receiver->looper, receiver->channel->read_fd, 0, 0x0001,
-            &InputChannelTransportCallback, receiver->channel.get()) == 1;
-    if (receiver->transport_registered) {
+            &InputChannelTransportCallback, receiver->channel.get()) == 1,
+        std::memory_order_release);
+    if (receiver->transport_registered.load(std::memory_order_acquire)) {
       receiver->channel->looper_consumer.store(true, std::memory_order_release);
     }
   }
@@ -1468,6 +1503,14 @@ jobject CreateDarwinContextBinder(JNIEnv* env) {
 
 jobject BinderInternalGetContextObject(JNIEnv* env, jclass) {
   return CreateDarwinContextBinder(env);
+}
+
+void BinderInternalHandleGc(JNIEnv*, jclass) {
+  // AOSP forwards BinderInternal.handleGc() to
+  // IPCThreadState::flushCommands(). The process-local Darwin transport has no
+  // kernel binder command buffer, so the equivalent flush boundary is the
+  // same operation exposed by Binder.flushPendingCommands().
+  BinderFlushPendingCommands();
 }
 
 jobject ServiceManagerProxyGetNativeServiceManager(JNIEnv* env, jobject) {
@@ -2947,6 +2990,8 @@ bool RegisterFrameworkBinderNatives(JNIEnv* env) {
       {const_cast<char*>("getContextObject"),
        const_cast<char*>("()Landroid/os/IBinder;"),
        reinterpret_cast<void*>(&BinderInternalGetContextObject)},
+      {const_cast<char*>("handleGc"), const_cast<char*>("()V"),
+       reinterpret_cast<void*>(&BinderInternalHandleGc)},
   };
   if (!Register(env, "com/android/internal/os/BinderInternal",
                 binder_internal_methods,

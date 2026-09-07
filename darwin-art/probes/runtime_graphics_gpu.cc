@@ -547,7 +547,8 @@ int prepare_gpu_surface(GraphicsState* state, jint width, jint height) {
   if (state == nullptr) return 1;
   if (state->gpu_surface != nullptr) return 0;
   const bool run_apk_app = std::getenv("DARWIN_ART_APK_APP_PACKAGE") != nullptr;
-  const char* app_label = std::getenv("DARWIN_ART_APK_APP_LABEL");
+  const char* app_label = std::getenv("DARWIN_ART_APK_WINDOW_TITLE");
+  if (app_label == nullptr) app_label = std::getenv("DARWIN_ART_APK_APP_LABEL");
   DarwinArtSurfaceCreateInfo info{
       .width = static_cast<uint32_t>(width),
       .height = static_cast<uint32_t>(height),
@@ -579,7 +580,8 @@ int prepare_gpu_surface(GraphicsState* state, jint width, jint height) {
 
 int refresh_gpu_surface_identity(GraphicsState* state) {
   if (state == nullptr || state->gpu_surface == nullptr) return 1;
-  const char* app_label = std::getenv("DARWIN_ART_APK_APP_LABEL");
+  const char* app_label = std::getenv("DARWIN_ART_APK_WINDOW_TITLE");
+  if (app_label == nullptr) app_label = std::getenv("DARWIN_ART_APK_APP_LABEL");
   if (app_label == nullptr || app_label[0] == '\0') return 0;
   return static_cast<int>(
       darwin_art_surface_set_title(state->gpu_surface, app_label));

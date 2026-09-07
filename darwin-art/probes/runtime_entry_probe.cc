@@ -7,12 +7,15 @@
 #include <cstring>
 #include <cstdint>
 #include <iostream>
+#include <list>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <cstddef>
 #include <pthread.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -25,6 +28,7 @@
 #include "class_linker.h"
 #include "cmdline_types.h"
 #include "darwin_art/darwin_art.h"
+#include "debugger.h"
 #include "darwin_framework_natives.h"
 #include "darwin_binder_wire.h"
 #include "darwin_provider_owners.h"
@@ -43,6 +47,7 @@
 #include "runtime_graphics_phase.h"
 #include "runtime_jni_acceptance_probe.h"
 #include "runtime_registration_phase.h"
+#include "runtime_upstream_test.h"
 #include "surfaceflinger/service_darwin.h"
 #include "runtime_app_bootstrap.h"
 #include "runtime_app_presentation.h"
@@ -52,10 +57,13 @@
 #include "jvalue.h"
 #include "mirror/class-inl.h"
 #include "mirror/throwable.h"
+#include "plugin.h"
 #include "runtime.h"
+#include "parsed_options.h"
 #include "runtime_options.h"
 #include "scoped_thread_state_change-inl.h"
 #include "thread-current-inl.h"
+#include "ti/agent.h"
 #include "well_known_classes.h"
 
 #if defined(DARWIN_ART_DIRECT_APK_RUNTIME)
@@ -64,8 +72,46 @@
 
 extern "C" int darwin_art_install_context_loader(JNIEnv* env,
                                                    jobject app_loader);
+extern "C" bool darwin_art_register_upstream_arttest(JNIEnv* env,
+                                                       jclass harness);
 
 namespace {
+
+bool ConfigureAndroidLogTags() {
+  const char* tags = std::getenv("ANDROID_LOG_TAGS");
+  if (tags == nullptr) return true;
+  std::string value(tags);
+  size_t start = 0;
+  while (start < value.size()) {
+    while (start < value.size() && std::isspace(
+                                        static_cast<unsigned char>(value[start]))) {
+      ++start;
+    }
+    if (start == value.size()) break;
+    const size_t end = value.find_first_of(" \t\r\n", start);
+    const std::string spec = value.substr(start, end - start);
+    if (spec.size() == 3 && spec[0] == '*' && spec[1] == ':') {
+      using android::base::LogSeverity;
+      LogSeverity severity;
+      switch (spec[2]) {
+        case 'v': severity = android::base::VERBOSE; break;
+        case 'd': severity = android::base::DEBUG; break;
+        case 'i': severity = android::base::INFO; break;
+        case 'w': severity = android::base::WARNING; break;
+        case 'e': severity = android::base::ERROR; break;
+        case 'f':
+        case 's': severity = android::base::FATAL_WITHOUT_ABORT; break;
+        default:
+          std::cerr << "unsupported '" << spec
+                    << "' in ANDROID_LOG_TAGS (" << tags << ")\n";
+          return false;
+      }
+      android::base::SetMinimumLogSeverity(severity);
+    }
+    start = end == std::string::npos ? value.size() : end + 1;
+  }
+  return true;
+}
 
 bool WriteAll(int fd, const void* data, size_t size) {
   const auto* bytes = static_cast<const uint8_t*>(data);
@@ -414,6 +460,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   constexpr jint kApkFrameHeight = 640;
   const bool expect_apk_widgets = process_options.expect_apk_widgets;
 
+  // Android's native launchers initialize libbase logging before creating the
+  // VM. Honor the same global ANDROID_LOG_TAGS contract so ART DEBUG lifecycle
+  // diagnostics (including metrics reporter startup/shutdown) are observable.
+  if (!ConfigureAndroidLogTags()) return 54;
+
   // Darwin's malloc zones can claim the fixed compressed-reference window
   // while RuntimeArgumentMap is being assembled. Reserve ART's bounded arena
   // after the one-shot process gate, but before the launcher performs its first
@@ -431,31 +482,331 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   std::string boot_class_path =
       std::string(config->core_oj_jar) + ":" + config->core_libart_jar + ":" +
       config->framework_jar + ":" + config->core_icu4j_jar;
+  if (const char* configured_boot_class_path =
+          std::getenv("DARWIN_ART_BOOT_CLASSPATH");
+      configured_boot_class_path != nullptr && configured_boot_class_path[0] != '\0') {
+    boot_class_path = configured_boot_class_path;
+  }
   std::cerr << "Mach-O slide: 0x" << std::hex << _dyld_get_image_vmaddr_slide(0)
             << std::dec << "\n";
   art::Locks::Init();
+  if (std::getenv("DARWIN_ART_UPSTREAM_METRICS") != nullptr) {
+    // These are ART flags rather than RuntimeArgumentMap keys. Parse the same
+    // options dalvikvm receives so gFlags records their command-line origin;
+    // the detached launcher continues to assemble the remaining typed runtime
+    // arguments below.
+    const art::RuntimeOptions metrics_options{
+        {"-Xmetrics-force-enable:true", nullptr},
+        {"-Xmetrics-write-to-logcat:true", nullptr},
+        {"-Xmetrics-reporting-mods:100", nullptr},
+    };
+    art::RuntimeArgumentMap parsed_metrics;
+    if (!art::ParsedOptions::Parse(
+            metrics_options, /*ignore_unrecognized=*/false, &parsed_metrics)) {
+      return 53;
+    }
+  }
   art::RuntimeArgumentMap options;
+  if (const char* serialized_options =
+          std::getenv("DARWIN_ART_RUNTIME_OPTIONS");
+      serialized_options != nullptr && serialized_options[0] != '\0') {
+    std::vector<std::string> option_storage;
+    std::istringstream option_stream(serialized_options);
+    for (std::string option; std::getline(option_stream, option);) {
+      if (!option.empty()) option_storage.push_back(std::move(option));
+    }
+    art::RuntimeOptions parsed_options;
+    for (const std::string& option : option_storage) {
+      parsed_options.emplace_back(option, nullptr);
+    }
+    if (!art::ParsedOptions::Parse(
+            parsed_options, /*ignore_unrecognized=*/false, &options)) {
+      std::cerr << "ART runtime: invalid serialized runtime options\n";
+      return 55;
+    }
+  }
   options.Set(art::RuntimeArgumentMap::BootClassPath,
               art::ParseStringList<':'>::Split(boot_class_path));
+  std::string boot_class_path_locations = boot_class_path;
+  if (const char* configured_locations =
+          std::getenv("DARWIN_ART_BOOT_CLASSPATH_LOCATIONS");
+      configured_locations != nullptr && configured_locations[0] != '\0') {
+    boot_class_path_locations = configured_locations;
+  }
   options.Set(art::RuntimeArgumentMap::BootClassPathLocations,
-              art::ParseStringList<':'>::Split(boot_class_path));
-  options.Set(art::RuntimeArgumentMap::Interpret, true);
-  options.Set(art::RuntimeArgumentMap::UseJitCompilation, false);
-  options.Set(art::RuntimeArgumentMap::MemoryInitialSize,
-              art::MemoryKiB(heap_initial));
+              art::ParseStringList<':'>::Split(boot_class_path_locations));
+  // Android's zygote trusts boot oat files by their logical /system location,
+  // while this detached host stores the same components in a build directory.
+  // Keep those identities separate: pass exact backing files through ART's
+  // standard BCP FD contract and make only the image's symbolic location
+  // logical. The vector is indexed by the complete BCP, with -1 reserved for
+  // components that have no image artifact (for example the unsafe probe DEX).
+  if (const char* boot_image_root =
+          std::getenv("DARWIN_ART_BOOT_IMAGE_FD_ROOT");
+      boot_image_root != nullptr && boot_image_root[0] != '\0') {
+    const std::vector<std::string> bcp =
+        art::ParseStringList<':'>::Split(boot_class_path);
+    std::vector<int> image_fds(bcp.size(), -1);
+    std::vector<int> vdex_fds(bcp.size(), -1);
+    std::vector<int> oat_fds(bcp.size(), -1);
+    auto open_component = [&](size_t index, const char* suffix) {
+      std::string name = "boot";
+      if (index != 0u) {
+        const size_t slash = bcp[index].rfind('/');
+        std::string base = bcp[index].substr(slash == std::string::npos ? 0u : slash + 1u);
+        const size_t dot = base.rfind('.');
+        if (dot != std::string::npos) base.resize(dot);
+        name += "-" + base;
+      }
+      name += suffix;
+      const std::string path = std::string(boot_image_root) + "/" + name;
+      const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+      if (fd < 0) {
+        std::cerr << "ART runtime: missing boot image component " << path << "\n";
+      }
+      return fd;
+    };
+    // The final BCP entry is an unsafe test DEX and intentionally has no
+    // boot image component. Every generated Android 16 boot component before
+    // it must have all three files.
+    const size_t component_count = bcp.size() == 0u ? 0u : bcp.size() - 1u;
+    for (size_t i = 0; i < component_count; ++i) {
+      image_fds[i] = open_component(i, ".art");
+      vdex_fds[i] = open_component(i, ".vdex");
+      oat_fds[i] = open_component(i, ".oat");
+      if (image_fds[i] < 0 || vdex_fds[i] < 0 || oat_fds[i] < 0) return 56;
+    }
+    options.Set(art::RuntimeArgumentMap::Image,
+                art::ParseStringList<':'>::Split("/system/framework/boot.art"));
+    options.Set(art::RuntimeArgumentMap::BootClassPathImageFds,
+                art::ParseIntList<':'> (std::move(image_fds)));
+    options.Set(art::RuntimeArgumentMap::BootClassPathVdexFds,
+                art::ParseIntList<':'> (std::move(vdex_fds)));
+    options.Set(art::RuntimeArgumentMap::BootClassPathOatFds,
+                art::ParseIntList<':'> (std::move(oat_fds)));
+  }
+  std::string application_class_path = config->app_dex;
+  if (run_system_server) {
+    application_class_path = apk_app_support_dex;
+  } else if (run_apk_app && apk_app_support_dex[0] != '\0') {
+    application_class_path.insert(0, std::string(apk_app_support_dex) + ":");
+  }
+  options.Set(art::RuntimeArgumentMap::ClassPath,
+              application_class_path);
+  // ClassLoader.SystemClassLoader is initialized lazily from this property.
+  // Android's app_process/dalvikvm launcher supplies the process class path at
+  // VM creation; setting only the thread context loader later leaves custom
+  // ClassLoader parent delegation attached to the boot loader.
+  std::vector<std::string> runtime_properties{
+      std::string("java.class.path=") + application_class_path};
+  if (const char* java_tmpdir = std::getenv("DARWIN_ART_JAVA_IO_TMPDIR");
+      java_tmpdir != nullptr && java_tmpdir[0] == '/') {
+    runtime_properties.emplace_back(std::string("java.io.tmpdir=") +
+                                    java_tmpdir);
+  }
+  options.Set(art::RuntimeArgumentMap::PropertiesList,
+              std::move(runtime_properties));
+  // Android application processes use ART's JIT unless the launcher requests
+  // otherwise. `-Xusejit:false` disables JIT compilation but does not mean
+  // `-Xint`: AOSP's ordinary `--interpreter` run-test configuration still
+  // permits executable AOT code and otherwise enters Nterp. ParsedOptions owns
+  // the independent `-Xint`/Interpret setting, so do not overwrite it while
+  // selecting JIT policy here. The environment override exists only for
+  // differential tests and diagnostics; applications do not need a
+  // Darwin-specific hardware/JIT flag.
+  const char* jit_mode = std::getenv("DARWIN_ART_JIT");
+  bool enable_jit = true;
+  if (jit_mode != nullptr) {
+    if (std::strcmp(jit_mode, "1") == 0) {
+      enable_jit = true;
+    } else if (std::strcmp(jit_mode, "0") == 0) {
+      enable_jit = false;
+    } else {
+      std::cerr << "ART runtime: invalid JIT mode " << jit_mode << "\n";
+      return 55;
+    }
+  }
+  if (enable_jit && std::getenv("DARWIN_ART_JIT_TRACE") != nullptr) {
+    art::gLogVerbosity.jit = true;
+    art::gLogVerbosity.deopt = true;
+  }
+  options.Set(art::RuntimeArgumentMap::UseJitCompilation, enable_jit);
+  if (std::getenv("DARWIN_ART_UPSTREAM_ZYGOTE") != nullptr) {
+    options.Set(art::RuntimeArgumentMap::Zygote, art::Unit{});
+    options.Set(art::RuntimeArgumentMap::JITCodeCacheInitialCapacity,
+                art::MemoryKiB(64 * art::MB));
+  }
+  if (std::getenv("DARWIN_ART_UPSTREAM_MAIN") != nullptr) {
+    // AOSP test/default_run.py always supplies this option for run-tests so a
+    // SIGQUIT assertion tests ART callbacks rather than stressing libunwind.
+    options.Set(art::RuntimeArgumentMap::DumpNativeStackOnSigQuit, false);
+  }
+  // AOSP dalvikvm/run-test expresses startup instrumentation as an
+  // OpenJDK-JVMTI plugin plus -agentpath. Keep the option in ART's native
+  // RuntimeArgumentMap so the plugin enters ONLOAD/LIVE phases at the same
+  // lifecycle points as Android, rather than invoking agent callbacks from
+  // the host harness.
+  const char* startup_agent =
+      std::getenv("DARWIN_ART_UPSTREAM_JVMTI_AGENT");
+  const bool has_startup_agent =
+      startup_agent != nullptr && startup_agent[0] != '\0';
+  const bool has_deferred_agent =
+      std::getenv("DARWIN_ART_UPSTREAM_DEFERRED_JVMTI_AGENT") != nullptr;
+  // AOSP run-test can provide -agentpath directly from run.py without an
+  // extra Darwin environment variable. Preserve those parsed agent specs and
+  // still load the OpenJDK JVMTI plugin that owns their callbacks.
+  const bool has_parsed_agents = options.Exists(art::RuntimeArgumentMap::AgentPath);
+  if (has_startup_agent || has_deferred_agent || has_parsed_agents) {
+    // AOSP plugin tests pass their own libartagent path. The runner rewrites
+    // that Android alias to the staged test DSO, which must remain the sole
+    // plugin so its ArtPlugin lifecycle hooks run exactly once. Ordinary
+    // agent-only launches still need Darwin's generic OpenJDK JVMTI plugin.
+    if (!options.Exists(art::RuntimeArgumentMap::Plugins)) {
+      std::vector<art::Plugin> plugins;
+      plugins.push_back(art::Plugin::Create("libopenjdkjvmti.so"));
+      options.Set(art::RuntimeArgumentMap::Plugins, std::move(plugins));
+    }
+    // Android's debuggable run-test configuration supplies
+    // -Xopaque-jni-ids:true even when -agentpath is attached after zygote
+    // specialization. Structural JVMTI extensions and stable IDs must start
+    // in indexed mode before any class exposes a jmethodID.
+    options.Set(art::RuntimeArgumentMap::OpaqueJniIds,
+                art::JniIdType::kIndices);
+  }
+  if (has_startup_agent) {
+    std::list<art::ti::AgentSpec> agents;
+    agents.emplace_back(startup_agent);
+    options.Set(art::RuntimeArgumentMap::AgentPath, std::move(agents));
+  }
+  if (std::getenv("DARWIN_ART_UPSTREAM_SWAPPABLE_JNI_IDS") != nullptr) {
+    // AOSP's 1972/1973 launch contract replaces the ordinary debuggable
+    // indexed-ID option with -Xopaque-jni-ids:swapable and disables automatic
+    // promotion. The tests then exercise both legal runtime transitions.
+    options.Set(art::RuntimeArgumentMap::OpaqueJniIds,
+                art::JniIdType::kSwapablePointer);
+    options.Set(art::RuntimeArgumentMap::AutoPromoteOpaqueJniIds, false);
+  }
+  // ParsedOptions already collected every literal `-Xcompiler-option` pair
+  // supplied by app_process/run-test. Extend that Android-owned vector rather
+  // than replacing it with launcher defaults; otherwise options such as
+  // `--debuggable` silently disappear before JitCompiler reads them.
+  std::vector<std::string> compiler_options =
+      options.GetOrDefault(art::RuntimeArgumentMap::CompilerOptions);
+  // AOSP's run-test launcher always supplies --compile-art-test.  Besides
+  // checker assertions, this makes the optimizing compiler honor the
+  // $noinline$/$inline$ method-name contracts used by the unmodified test
+  // corpus.  Keep it scoped to that launcher contract; production APKs use
+  // normal Android inlining policy.
+  if (std::getenv("DARWIN_ART_UPSTREAM_MAIN") != nullptr) {
+    compiler_options.emplace_back("--compile-art-test");
+  }
+  // app_process passes the package's ApplicationInfo.FLAG_DEBUGGABLE state
+  // into ART as a compiler option before Runtime::Create().  This is not a
+  // test switch: debuggable JIT code retains the dex-register environments
+  // required by JDWP/JVMTI and asynchronous full-stack deoptimization, while
+  // release applications keep the normal optimizing compiler policy.
+  bool java_debuggable = false;
+  if (const char* debuggable =
+          std::getenv("DARWIN_ART_RUNTIME_JAVA_DEBUGGABLE");
+      debuggable != nullptr) {
+    if (std::strcmp(debuggable, "1") == 0) {
+      java_debuggable = true;
+      compiler_options.emplace_back("--debuggable");
+    } else if (std::strcmp(debuggable, "0") != 0) {
+      std::cerr << "ART runtime: invalid Java debuggable state "
+                << debuggable << "\n";
+      return 50;
+    }
+  }
+  if (!compiler_options.empty()) {
+    options.Set(art::RuntimeArgumentMap::CompilerOptions,
+                std::move(compiler_options));
+  }
+  // app_process passes -Xtarget-sdk-version before Runtime::Create so class
+  // verification observes the application's compatibility behavior. Keep the
+  // detached host contract equally early; setting VMRuntime after classes are
+  // loaded is too late for verifier policy.
+  if (const char* target_sdk =
+          std::getenv("DARWIN_ART_RUNTIME_TARGET_SDK_VERSION");
+      target_sdk != nullptr && target_sdk[0] != '\0') {
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(target_sdk, &end, 10);
+    if (end == target_sdk || *end != '\0' || parsed > UINT32_MAX) {
+      std::cerr << "ART runtime: invalid target SDK " << target_sdk << "\n";
+      return 49;
+    }
+    options.Set(art::RuntimeArgumentMap::TargetSdkVersion,
+                static_cast<unsigned int>(parsed));
+  }
+  if (const char* finalizer_timeout =
+          std::getenv("DARWIN_ART_RUNTIME_FINALIZER_TIMEOUT_MS");
+      finalizer_timeout != nullptr && finalizer_timeout[0] != '\0') {
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(finalizer_timeout, &end, 10);
+    if (end == finalizer_timeout || *end != '\0' || parsed > UINT32_MAX) {
+      std::cerr << "ART runtime: invalid finalizer timeout "
+                << finalizer_timeout << "\n";
+      return 52;
+    }
+    options.Set(art::RuntimeArgumentMap::FinalizerTimeoutMs,
+                static_cast<unsigned int>(parsed));
+  }
+  // app_process supplies device defaults, while dalvikvm/run-test may supply
+  // an explicit -Xms/-Xmx policy. Preserve ParsedOptions ownership whenever
+  // the Android command line selected a value; the host config is only the
+  // detached launcher's default.
+  if (!options.Exists(art::RuntimeArgumentMap::MemoryInitialSize)) {
+    options.Set(art::RuntimeArgumentMap::MemoryInitialSize,
+                art::MemoryKiB(heap_initial));
+  }
   // Android's normal launcher supplies Xms, HeapGrowthLimit, and Xmx as
   // separate values. The detached runtime previously used Xms as the growth
   // limit, permanently capping apps at 64 MiB even when Xmx was 256 MiB.
-  options.Set(art::RuntimeArgumentMap::HeapGrowthLimit,
-              art::MemoryKiB(heap_maximum));
-  options.Set(art::RuntimeArgumentMap::MemoryMaximumSize,
-              art::MemoryKiB(heap_maximum));
+  if (!options.Exists(art::RuntimeArgumentMap::HeapGrowthLimit)) {
+    options.Set(art::RuntimeArgumentMap::HeapGrowthLimit,
+                art::MemoryKiB(heap_maximum));
+  }
+  if (!options.Exists(art::RuntimeArgumentMap::MemoryMaximumSize)) {
+    options.Set(art::RuntimeArgumentMap::MemoryMaximumSize,
+                art::MemoryKiB(heap_maximum));
+  }
   art::LogVerbosity verbosity{};
   verbosity.heap = true;
   options.Set(art::RuntimeArgumentMap::Verbose, verbosity);
 
+  // Startup-agent output belongs to ART run-test's native process stream.
+  // Darwin otherwise block-buffers redirected stdout and reorders ONLOAD text
+  // behind later Java descriptor writes.
+  if (std::getenv("DARWIN_ART_UPSTREAM_JVMTI_AGENT") != nullptr &&
+      std::setvbuf(stdout, nullptr, _IONBF, 0) != 0) {
+    return 51;
+  }
+
   if (!art::Runtime::Create(std::move(options))) {
     return 1;
+  }
+  // Android's zygote specialization publishes DEBUG_ENABLE_JDWP separately
+  // from ApplicationInfo.FLAG_DEBUGGABLE. ART run-tests that attach a limited
+  // JVMTI environment use that process capability while deliberately keeping
+  // Java compilation non-debuggable. Preserve the same split contract in the
+  // detached launcher instead of weakening Runtime::AttachAgent().
+  if (std::getenv("DARWIN_ART_UPSTREAM_JVMTI") != nullptr) {
+    art::Dbg::SetJdwpAllowed(true);
+  }
+  // Zygote children normally publish this state while specializing the app
+  // process. This detached process has no zygote, so establish the equivalent
+  // Runtime state immediately after creation and before loading app classes.
+  // The compiler option above independently controls emitted CodeInfo.
+  if (java_debuggable) {
+    art::Runtime::Current()->SetRuntimeDebugState(
+        art::Runtime::RuntimeDebugState::kJavaDebuggableAtInit);
+  }
+  if (enable_jit && std::getenv("DARWIN_ART_JIT_TRACE") != nullptr) {
+    std::cerr << "ART runtime: java-debuggable="
+              << (art::Runtime::Current()->IsJavaDebuggable() ? 1 : 0)
+              << " at-init="
+              << (art::Runtime::Current()->IsJavaDebuggableAtInit() ? 1 : 0)
+              << "\n";
   }
 
   art::Thread* self = art::Thread::Current();
@@ -540,6 +891,46 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   jclass network_fixture_class = app_classes.network_fixture;
   art::Handle<art::mirror::Class> hello =
       hs.NewHandle(soa.Decode<art::mirror::Class>(hello_class));
+  if (std::getenv("DARWIN_ART_UPSTREAM_MAIN") != nullptr) {
+    // This harness is the Darwin equivalent of AOSP's dalvikvm command, not
+    // an Activity process. Its shutdown must follow AndroidRuntime exactly.
+    darwin_art_process::record_dalvikvm_process();
+    if (darwin_art_install_context_loader(env, app_loader_ref) != 0) {
+      std::cerr << "ART upstream test: context ClassLoader installation failed\n";
+      return 120;
+    }
+    if (!darwin_art_upstream_test::Prepare(
+            env, app_classes.upstream_test_harness)) {
+      std::cerr << "ART upstream test: output capture preparation failed\n";
+      return 121;
+    }
+    if (!darwin_art_register_upstream_arttest(
+            env, app_classes.upstream_test_harness)) {
+      std::cerr << "ART upstream test: libarttest registration failed\n";
+      return 125;
+    }
+    if (!darwin_art_upstream_test::ResolveMainDexStrings(
+            env, soa, hs, app_classes.upstream_test_harness)) {
+      std::cerr << "ART upstream test: application Dex string resolution failed\n";
+      return 124;
+    }
+    if (enable_jit && !darwin_art_upstream_test::CompileMain(
+            env, self, soa, hs, app_classes.upstream_test_harness)) {
+      std::cerr << "ART upstream test: optimized Main compilation failed\n";
+      return 123;
+    }
+    return darwin_art_upstream_test::Run(env, app_classes.upstream_test_harness);
+  }
+  // Run the compiler/JNI gate without depending on UI resource setup.
+  if (std::getenv("DARWIN_ART_JIT_ACCEPTANCE_ONLY") != nullptr) {
+    darwin_art_jni_acceptance_phase::Results acceptance{};
+    const int status = darwin_art_jni_acceptance_phase::run(
+        env, self, class_linker, hello, hello_class, &acceptance);
+    run_result->hello_answer = acceptance.hello_answer;
+    run_result->native_round_trip = acceptance.native_round_trip;
+    run_result->arraycopy_result = acceptance.arraycopy_result;
+    return status;
+  }
   art::Handle<art::mirror::Class> probe_activity =
       hs.NewHandle(soa.Decode<art::mirror::Class>(probe_activity_class));
   art::Handle<art::mirror::Class> probe_context_handle =
@@ -612,7 +1003,10 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   // JavaVMExt only after the app PathClassLoader and thread context loader
   // have been installed.  Loading earlier makes JNI_OnLoad observe the boot
   // loader and breaks RegisterNatives for app-owned classes.
-  if (run_apk_app && !process_options.apk_app_native_path.empty()) {
+  const bool managed_process_native_path =
+      run_apk_app || std::getenv("DARWIN_ART_UPSTREAM_MAIN") != nullptr;
+  if (managed_process_native_path &&
+      !process_options.apk_app_native_path.empty()) {
     if (darwin_art_app::install_native_library_path(
             env, app_loader_ref, apk_app_native_path) != 0) {
       std::cerr << "ART Android APK: PathClassLoader native path setup failed\n";
@@ -626,7 +1020,9 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     // gates, while the normal app path follows the platform ordering.
     const char* managed_native_load =
         std::getenv("DARWIN_ART_APK_MANAGED_NATIVE_LOAD");
-    if (managed_native_load == nullptr || std::strcmp(managed_native_load, "1") != 0) {
+    if (run_apk_app &&
+        (managed_native_load == nullptr ||
+         std::strcmp(managed_native_load, "1") != 0)) {
       const int native_status = darwin_art_app::load_native_library(
           env, self, app_loader_ref, apk_app_native_path);
       if (native_status != 0) {
@@ -782,9 +1178,22 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
         get_context_object == nullptr
             ? nullptr
             : env->CallStaticObjectMethod(binder_internal, get_context_object);
+    jmethodID handle_binder_gc =
+        binder_internal == nullptr
+            ? nullptr
+            : env->GetStaticMethodID(binder_internal, "handleGc", "()V");
+    if (handle_binder_gc != nullptr) {
+      env->CallStaticVoidMethod(binder_internal, handle_binder_gc);
+    }
     if (env->ExceptionCheck()) {
       env->ExceptionDescribe();
       env->ExceptionClear();
+    }
+    if (handle_binder_gc == nullptr) {
+      std::cerr << "ART Android owner: BinderInternal.handleGc is not registered\n";
+      env->DeleteLocalRef(context_binder);
+      env->DeleteLocalRef(binder_internal);
+      return 28;
     }
     uint64_t owner_thread_id = 0;
     (void)pthread_threadid_np(nullptr, &owner_thread_id);

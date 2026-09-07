@@ -171,7 +171,7 @@ pub(crate) fn build_runtime_graphics_state_probe(root: &Path) -> Result<()> {
         root.join("include"),
         root.join("compat"),
         root.join("_build/runtime-arm64/generated"),
-        root.join("_build/runtime-core/patched-source/runtime"),
+        root.join("_build/runtime-common/patched-source/runtime"),
         root.join("_build/foundation/patched-source/libartbase"),
         root.join("_aosp/art/runtime"),
         root.join("_aosp/art/runtime/base"),

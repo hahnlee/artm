@@ -32,6 +32,7 @@ struct ShutdownSnapshot {
   JavaVM* java_vm = nullptr;
   art::Thread* art_thread = nullptr;
   bool resource_runtime_installed = false;
+  bool dalvikvm_process = false;
   darwin_art_graphics::GraphicsState* graphics_state = nullptr;
 };
 
@@ -49,6 +50,7 @@ struct AcceptanceSnapshot {
 
 bool begin_run(const struct darwin_art_lifecycle_hooks* lifecycle_hooks = nullptr);
 void record_created_runtime(art::Thread* art_thread);
+void record_dalvikvm_process();
 void record_graphics_state(darwin_art_graphics::GraphicsState* state);
 bool record_host_services(const struct darwin_art_host_services* services);
 int32_t spawn_service_process(const char* component, const char* instance_name,

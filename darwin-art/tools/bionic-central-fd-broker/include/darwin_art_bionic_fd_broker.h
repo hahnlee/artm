@@ -161,6 +161,11 @@ DarwinArtFdBrokerStatus darwin_art_fd_broker_install_owner(
 DarwinArtFdBrokerStatus
 darwin_art_fd_broker_uninstall_owner(DarwinArtFdBroker *broker,
                                      DarwinArtFdOwnerHandle owner);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_wait_owner_quiescent(DarwinArtFdBroker *broker,
+                                          DarwinArtFdOwnerHandle owner);
+DarwinArtFdBrokerStatus
+darwin_art_fd_broker_flush_deferred_closes(DarwinArtFdBroker *broker);
 
 DarwinArtFdBrokerStatus
 darwin_art_fd_broker_publish(DarwinArtFdBroker *broker,
@@ -171,6 +176,9 @@ DarwinArtFdBrokerStatus darwin_art_fd_broker_publish_with_flags(
     int status_flags, int descriptor_flags, int *guest_fd);
 DarwinArtFdBrokerStatus darwin_art_fd_broker_dup(DarwinArtFdBroker *broker,
                                                  int old_fd, int *new_fd);
+DarwinArtFdBrokerStatus darwin_art_fd_broker_dup2(DarwinArtFdBroker *broker,
+                                                  int old_fd, int new_fd,
+                                                  DarwinArtFdIoResult *result);
 DarwinArtFdBrokerStatus
 darwin_art_fd_broker_duplicate_with_flags(DarwinArtFdBroker *broker, int old_fd,
                                           int flags, int *new_fd);

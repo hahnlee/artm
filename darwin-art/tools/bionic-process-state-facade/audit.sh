@@ -68,12 +68,20 @@ nm -u "$temp_root/shims.o" | sed 's/^[[:space:]]*//' | sort >"$temp_root/undefin
 cat >"$temp_root/expected-undefined" <<'EOF'
 ___chkstk_darwin
 ___error
+___memcpy_chk
 ___stack_chk_fail
 ___stack_chk_guard
+___stderrp
 __exit
 __tlv_bootstrap
+_arc4random
+_arc4random_buf
 _bzero
+_darwin_art_bionic_affinity_get
+_darwin_art_bionic_affinity_set
 _darwin_art_bionic_environ
+_darwin_art_bionic_errno_load
+_darwin_art_bionic_errno_set_from_darwin
 _darwin_art_bionic_errno_store
 _darwin_art_bionic_longjmp
 _darwin_art_bionic_process_getauxval_core
@@ -84,7 +92,10 @@ _darwin_art_bionic_process_property_read_callback_core
 _darwin_art_bionic_setjmp
 _exit
 _fork
+_fprintf
 _getegid
+_getentropy
+_getenv
 _geteuid
 _getgid
 _gethostname
@@ -109,9 +120,12 @@ _setuid
 _sigaction
 _sigaltstack
 _sigpending
+_sigsuspend
 _sigwait
 _snprintf
 _strcmp
+_strcpy
+_strlen
 _unsetenv
 _waitpid
 _write
@@ -127,8 +141,10 @@ if awk '$2 ~ /^[TDS]$/ {print $3}' <<<"$definitions" |
    grep -Ev '^_darwin_art_bionic_' >/dev/null; then
   fail 'unprefixed C ABI definition escaped facade'
 fi
-if rg -n 'getenv\(|getauxval\(|dlopen|dlsym|dyld|RTLD_|/Users' "$script_dir/src" | \
-   grep -v 'darwin_art_bionic_' >/dev/null; then
+host_passthrough="$(rg -n 'getenv\(|getauxval\(|dlopen|dlsym|dyld|RTLD_|/Users' \
+  "$script_dir/src" | grep -v 'darwin_art_bionic_' | \
+  grep -vE 'getenv\("DARWIN_ART_DEBUG_(PROPERTIES|MEDIA_CODEC)"\)' || true)"
+if [[ -n "$host_passthrough" ]]; then
   fail 'host global passthrough or dynamic fallback entered facade'
 fi
 
@@ -144,19 +160,26 @@ awk '$7=="UND" && $8!="" {print $8}' "$temp_root/dynsyms" | sort -u >"$temp_root
 cat >"$temp_root/expected-fixture-undefined" <<'EOF'
 __errno
 __system_property_get
+basename
 getauxval
+getentropy
 getenv
+raise
+sigaction
+signal
 EOF
 diff -u "$temp_root/expected-fixture-undefined" "$temp_root/fixture-undefined" || fail 'Android import drift'
 for symbol in bionic_process_fixture_basic bionic_process_fixture_concurrent \
-              bionic_process_fixture_verify_pointers bionic_process_fixture_after_teardown; do
+              bionic_process_fixture_verify_pointers bionic_process_fixture_after_teardown \
+              bionic_process_fixture_signal_legacy \
+              bionic_process_fixture_sigaction_query; do
   grep -E "GLOBAL DEFAULT +[0-9]+ $symbol\$" "$temp_root/dynsyms" >/dev/null ||
     fail "Android fixture export missing: $symbol"
 done
 
-CARGO_TARGET_DIR="$temp_root/target" cargo run --quiet --manifest-path "$script_dir/Cargo.toml" -- "$fixture"
-CARGO_TARGET_DIR="$temp_root/target" cargo clippy --quiet --manifest-path "$script_dir/Cargo.toml" -- -D warnings
+CARGO_TARGET_DIR="$temp_root/target" cargo run --quiet --features standalone-syscall --manifest-path "$script_dir/Cargo.toml" -- "$fixture"
+CARGO_TARGET_DIR="$temp_root/target" cargo clippy --quiet --features standalone-syscall --manifest-path "$script_dir/Cargo.toml" -- -D warnings
 cargo fmt --manifest-path "$script_dir/Cargo.toml" -- --check
 check_target_clean
 check_diff_clean
-echo 'bionic-process-state-facade: PASS AndroidELF imports=4 threads=8x1000 getrlimit-copyout-EFAULT stable-pointers teardown target-clean diff-clean'
+echo 'bionic-process-state-facade: PASS AndroidELF imports=9 threads=8x1000 basename-TLS+getentropy-CSPRNG getrlimit-copyout-EFAULT stable-pointers teardown signal-trampoline target-clean diff-clean'

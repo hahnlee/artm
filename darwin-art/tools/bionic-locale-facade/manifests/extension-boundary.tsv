@@ -15,7 +15,9 @@ iswupper	FUNC	LIBC	Android-ICU76-Unicode-property	public-bionic-non-locale-entry
 iswxdigit	FUNC	LIBC	Android-ICU76-Unicode-property	public-bionic-non-locale-entry
 towupper	FUNC	LIBC	Android-ICU76-Unicode-mapping	public-bionic-non-locale-entry
 tolower	FUNC	LIBC	C-byte-mapping	public-bionic-non-locale-entry
+tolower_l	FUNC	LIBC	C-byte-mapping	Android locale-owned byte mapping
 toupper	FUNC	LIBC	C-byte-mapping	public-bionic-non-locale-entry
+toupper_l	FUNC	LIBC	C-byte-mapping	Android locale-owned byte mapping
 wcscoll	FUNC	LIBC	C-collation	public-bionic-non-locale-entry
 wcsxfrm	FUNC	LIBC	C-collation	public-bionic-non-locale-entry
 strxfrm	FUNC	LIBC	C-collation	public-bionic-non-locale-entry
