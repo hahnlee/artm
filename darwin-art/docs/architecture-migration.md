@@ -8823,3 +8823,9 @@ or admission exception was added.
 - `2239-varhandle-perf-vh-cas` passes all three lanes, covering JIT VarHandle
   compare-and-set and managed-memory barrier behavior without a Darwin-only
   execution path.
+
+### Runtime checkpoint 69 — 2026-09-08
+
+- `2247-checker-write-barrier-elimination` and `2277-methodhandle-invokeexact`
+  pass all lanes, validating optimized write-barrier elimination and exact
+  MethodHandle dispatch on the standard ART pipeline.

@@ -3836,3 +3836,9 @@ added; the full corpus and multi-loader identity task remain open.
 - `2239-varhandle-perf-vh-cas` passes interpreter, JIT, and unmodified
   optimized lanes, exercising VarHandle compare-and-set lowering and its
   managed-memory barriers through the standard ART ABI.
+
+### Runtime checkpoint 69 — 2026-09-08
+
+- `2247-checker-write-barrier-elimination` and `2277-methodhandle-invokeexact`
+  both pass interpreter, JIT, and unmodified optimized lanes. This covers
+  write-barrier elimination and exact MethodHandle dispatch in optimized code.
