@@ -8100,3 +8100,9 @@ the original bytecode rather than translating it to Java.
   unchanged-source lanes. This covers app-image fields/methods/strings,
   read-barrier stress, resolution trampolines, locks, monitor ownership,
   initialization deadlocks, and JNI dispatch.
+
+### ART regression verification — 2026-09-09 (continued)
+
+- `180-native-default-method` through `183-rmw-stress-test` passed all 4 AOSP
+  tests in interpreter, JIT, and unchanged-source lanes, covering default
+  method dispatch/linking and read-modify-write stress.
