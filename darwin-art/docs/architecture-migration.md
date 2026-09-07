@@ -8912,3 +8912,10 @@ or admission exception was added.
 - `418-const-string` and `2256-checker-vector-replacement` pass interpreter,
   JIT, and optimized lanes, covering string constants and vector lowering in
   the shared optimizer.
+
+### Runtime checkpoint 84 — 2026-09-08
+
+- InputChannel now follows Android InputTransport token identity: one Binder
+  token is shared across each pair/dup wrapper, exposed via `nativeGetToken`,
+  with VM-safe global-ref teardown. Incremental native build and graphics-link
+  audit pass.

@@ -3927,3 +3927,11 @@ added; the full corpus and multi-loader identity task remain open.
 - `418-const-string` and `2256-checker-vector-replacement` pass all three
   lanes, validating string constant resolution and vector replacement in the
   optimizing compiler.
+
+### Runtime checkpoint 84 — 2026-09-08
+
+- Implemented Android InputTransport connection-token identity: each channel
+  pair owns one process-visible `android.os.Binder` token shared by client,
+  server, and dup wrappers; `nativeGetToken` returns a local reference and
+  teardown releases the global reference safely. Native compat incremental
+  build and graphics-link audit pass.

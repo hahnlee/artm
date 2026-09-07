@@ -457,8 +457,22 @@ constexpr int kAndroidMsgDontWait = 0x40;
 constexpr int kAndroidMsgNoSignal = 0x4000;
 
 struct DarwinInputChannelState {
-  explicit DarwinInputChannelState(std::string channel_name)
+  explicit DarwinInputChannelState(JNIEnv* env, std::string channel_name)
       : name(std::move(channel_name)) {
+    jclass binder_class = env->FindClass("android/os/Binder");
+    jmethodID binder_constructor =
+        binder_class == nullptr
+            ? nullptr
+            : env->GetMethodID(binder_class, "<init>", "()V");
+    jobject local_token = binder_constructor == nullptr
+                              ? nullptr
+                              : env->NewObject(binder_class,
+                                               binder_constructor);
+    if (local_token != nullptr) {
+      connection_token = env->NewGlobalRef(local_token);
+    }
+    env->DeleteLocalRef(local_token);
+    env->DeleteLocalRef(binder_class);
     int fds[2] = {-1, -1};
     // These are guest descriptors consumed by the broker-backed ALooper.
     // Host libc socketpair/fcntl would produce unrelated descriptor numbers
@@ -475,9 +489,28 @@ struct DarwinInputChannelState {
   ~DarwinInputChannelState() {
     if (read_fd >= 0) darwin_art_bionic_socket_broker_close(read_fd);
     if (write_fd >= 0) darwin_art_bionic_socket_broker_close(write_fd);
+    if (connection_token != nullptr && g_framework_vm != nullptr) {
+      JNIEnv* env = nullptr;
+      bool detach = false;
+      jint status = g_framework_vm->GetEnv(reinterpret_cast<void**>(&env),
+                                           JNI_VERSION_1_6);
+      if (status == JNI_EDETACHED &&
+          g_framework_vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+        detach = true;
+        status = JNI_OK;
+      }
+      if (status == JNI_OK && env != nullptr) {
+        env->DeleteGlobalRef(connection_token);
+      }
+      if (detach) g_framework_vm->DetachCurrentThread();
+    }
   }
 
   std::string name;
+  // Android's InputTransport creates one BBinder connection token for an
+  // input-channel pair. Client/server wrappers and dup() all expose the same
+  // object identity; a different pair receives a different token.
+  jobject connection_token = nullptr;
   // Pending input belongs to the channel, not to the process. AppKit only
   // publishes this release/acquire bit after queueing a packet; the focused
   // InputEventReceiver reads it from Chromium's owner Looper.
@@ -798,13 +831,22 @@ jstring InputChannelGetName(JNIEnv* env, jobject, jlong pointer) {
              : env->NewStringUTF(channel->state->name.c_str());
 }
 
-jobject InputChannelGetToken(JNIEnv*, jobject, jlong) { return nullptr; }
+jobject InputChannelGetToken(JNIEnv* env, jobject, jlong pointer) {
+  const auto* channel = InputChannel(pointer);
+  return channel == nullptr || channel->state == nullptr ||
+                 channel->state->connection_token == nullptr
+             ? nullptr
+             : env->NewLocalRef(channel->state->connection_token);
+}
 
 jlongArray InputChannelOpenPair(JNIEnv* env, jclass, jstring name) {
   const char* utf = name == nullptr ? nullptr : env->GetStringUTFChars(name, nullptr);
   auto state = std::make_shared<DarwinInputChannelState>(
-      utf == nullptr ? "darwin-art-input" : utf);
+      env, utf == nullptr ? "darwin-art-input" : utf);
   if (utf != nullptr) env->ReleaseStringUTFChars(name, utf);
+  if (state->connection_token == nullptr || env->ExceptionCheck()) {
+    return nullptr;
+  }
   auto* client = new (std::nothrow) DarwinInputChannel{state, false, false};
   auto* server = new (std::nothrow) DarwinInputChannel{state, true, false};
   if (client == nullptr || server == nullptr) {
