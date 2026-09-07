@@ -8488,3 +8488,8 @@ or admission exception was added.
 - Runner fix is pushed as `df07931`; focused structural-redefine tests pass.
   The existing ledger has historical rows from the brief pre-fix syntax
   window and should be refreshed or rechecked after the worker completes.
+
+### Handoff checkpoint 17 — 2026-09-08
+
+- Representative rows `420-const-class` and `2286-invokevirtual-invokeexact`
+  were rechecked; interpreter, JIT, and unmodified lanes pass.

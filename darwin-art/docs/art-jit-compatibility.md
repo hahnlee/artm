@@ -3461,3 +3461,9 @@ added; the full corpus and multi-loader identity task remain open.
 - Commit `df07931` is pushed; Python syntax validation passes. The background
   corpus started before the final edit and contains a transient syntax-error
   window in historical rows; newly scheduled tests use the fixed runner.
+
+### Handoff checkpoint 17 — 2026-09-08
+
+- Representative historical failures `420-const-class` and
+  `2286-invokevirtual-invokeexact` pass all three lanes under the fixed
+  runner, confirming the ledger failures were not ART/JIT semantics.
