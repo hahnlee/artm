@@ -3074,3 +3074,14 @@ any of these tests; Java rewrites are not acceptable evidence.
   `loadClassBinaryName`; this is a real multi-loader identity/lifecycle gap,
   not a runner or JIT-only failure. A general fix is still required; no test
   input or duplicate-registration rejection was weakened.
+
+### Replacement-host Nterp verification — 2026-09-09
+
+- On the replacement ARM64 Mac, `cargo fmt --all -- --check`, all 13
+  `art-bootstrap` unit tests, and `build-nterp-arm64ng` pass. The generated
+  object is Mach-O arm64 with clean DWARF audits and 256 handlers.
+- An experiment to retain upstream dynamic CFI was rejected because Apple's
+  assembler fails on macro-expanded `cfi_adjust_cfa_offset`/register rules at
+  the non-linear handler table. The previously verified metadata-lowering
+  boundary remains in place; dynamic Nterp unwind semantics are still an open
+  compatibility task.

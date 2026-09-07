@@ -8140,3 +8140,12 @@ the original bytecode rather than translating it to Java.
   `loadClassBinaryName`; this is a real multi-loader identity/lifecycle gap,
   not a runner or JIT-only failure. A general fix is still required; no test
   input or duplicate-registration rejection was weakened.
+
+### Replacement-host Nterp verification — 2026-09-09
+
+- On the replacement ARM64 Mac, formatting, the 13 bootstrap tests, and the
+  ARM64ng Nterp build all pass; Mach-O/DWARF verification reports no errors.
+- Preserving upstream dynamic CFI verbatim is not yet viable with Apple's
+  assembler at the `.org` handler layout, so the existing metadata lowering
+  remains explicit and fail-closed. A real dynamic unwind implementation is
+  still required before claiming full AOSP parity.
