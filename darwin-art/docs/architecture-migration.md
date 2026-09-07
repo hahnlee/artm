@@ -8972,6 +8972,14 @@ or admission exception was added.
 
 ### Runtime checkpoint 93 — 2026-09-08
 
+- InputChannel Parcel records now begin with Android's initialized marker.
+  Disposed channels write `0` rather than omitting bytes, preserving the cursor
+  of a containing Parcel; live channels write `1` before the versioned Darwin
+  payload. A managed disposed-channel-plus-sentinel smoke passes interpreter,
+  JIT, and optimized lanes.
+
+### Runtime checkpoint 93 — 2026-09-08
+
 - `9999-key-character-map-parcel-smoke` passes all execution lanes, validating
   device-id identity and FULL keyboard type; `2255-checker-branch-redirection`
   also passes interpreter, JIT, and optimized lanes.
@@ -8981,3 +8989,9 @@ or admission exception was added.
 - InputChannel Parcel now emits the Android initialized marker even for a
   disposed/uninitialized channel, keeping containing Parcel fields aligned.
   Native graph verification remains green.
+
+### Runtime checkpoint 95 — 2026-09-08
+
+- `2252-rem-optimization-dividend-divisor` and `2278-nested-loops` pass all
+  lanes, validating remainder optimization and nested-loop lowering on the
+  shared ART JIT pipeline.
