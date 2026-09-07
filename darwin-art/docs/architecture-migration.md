@@ -8026,3 +8026,23 @@ the original bytecode rather than translating it to Java.
 - On the replacement ARM64 macOS host, the Rust host test suite (10 tests),
   host `cargo check`, and D8 wrapper shell syntax check all pass. Full ART
   compatibility verification remains active.
+
+### Clean verification — 2026-09-09
+
+- A clean single-test ledger reproduced `156-register-dex-file-multi-loader`
+  failing only at the AOSP semantic `Unreachable` after BCP resource mapping.
+  The docs-referenced `0154` patch is absent as a standalone file; its
+  effective source changes are being located for generic restoration.
+
+### Continued work — 2026-09-09
+
+- A Luna-high agent is tracing the effective per-loader DexCache changes in
+  tracked sources and restoring AOSP duplicate-registration semantics for the
+  clean `156` failure.
+
+### Investigation checkpoint — 2026-09-09
+
+- AOSP `ClassLinker::RegisterDexFile` already contains the expected
+  cross-ClassLoader rejection. A comment-only candidate patch was discarded;
+  no semantic change is claimed until the actual Darwin execution path is
+  identified and the clean three-lane `156` contract passes.

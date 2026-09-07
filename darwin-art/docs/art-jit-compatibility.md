@@ -2959,3 +2959,24 @@ any of these tests; Java rewrites are not acceptable evidence.
 - On the replacement ARM64 macOS host, `cargo test -p darwin-art-host` passed
   all 10 unit/integration tests, `cargo check -p darwin-art-host` passed, and
   `bash -n tools/d8-jar-compat.sh` passed. The full ART goal remains active.
+
+### Clean verification — 2026-09-09
+
+- On the replacement host, a clean single-test ledger reproduced
+  `156-register-dex-file-multi-loader` failing at the AOSP semantic
+  `Unreachable` after BCP resource mapping. The referenced `0154` patch is not
+  present as a standalone file in the current tree; its effective source
+  changes are being located and restored generically.
+
+### Continued work — 2026-09-09
+
+- A Luna-high agent is tracing the effective per-loader DexCache changes in
+  tracked sources and restoring AOSP duplicate-registration semantics for the
+  clean `156` failure.
+
+### Investigation checkpoint — 2026-09-09
+
+- AOSP `ClassLinker::RegisterDexFile` already contains the expected
+  cross-ClassLoader rejection. A comment-only candidate patch was discarded;
+  no semantic change is claimed until the actual Darwin execution path is
+  identified and the clean three-lane `156` contract passes.
