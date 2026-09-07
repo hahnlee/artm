@@ -3192,3 +3192,10 @@ added; the full corpus and multi-loader identity task remain open.
   `CollectDexFilesFromJavaDexFile` path. Runtime-core staging applies it;
   logging is disabled unless `DARWIN_ART_TRACE_DEX_IDENTITY=1` and does not
   alter registration.
+
+### Cookie hook reachability — 2026-09-08
+
+- The hook-bearing graphics runtime rebuilt successfully, but 497 emitted no
+  `CollectDexFilesFromJavaDexFile` trace lines before failing. Its class
+  definition path is earlier than this OAT context helper; the next diagnostic
+  target is native `defineClassNative` registration.

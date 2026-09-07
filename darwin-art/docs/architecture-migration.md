@@ -8240,3 +8240,9 @@ or admission exception was added.
 - Added manifest patch `0156` at ART's native
   `CollectDexFilesFromJavaDexFile` path. Staging applies it successfully, and
   logging is disabled by default for normal runs.
+
+### Cookie hook reachability — 2026-09-08
+
+- 497 ran against the rebuilt hook-bearing runtime with zero collection-hook
+  events, so the failure occurs before that OAT class-loader-context path. The
+  next trace target is the native `defineClassNative` registration boundary.
