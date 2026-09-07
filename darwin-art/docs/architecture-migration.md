@@ -8975,3 +8975,9 @@ or admission exception was added.
 - `9999-key-character-map-parcel-smoke` passes all execution lanes, validating
   device-id identity and FULL keyboard type; `2255-checker-branch-redirection`
   also passes interpreter, JIT, and optimized lanes.
+
+### Runtime checkpoint 94 — 2026-09-08
+
+- InputChannel Parcel now emits the Android initialized marker even for a
+  disposed/uninitialized channel, keeping containing Parcel fields aligned.
+  Native graph verification remains green.

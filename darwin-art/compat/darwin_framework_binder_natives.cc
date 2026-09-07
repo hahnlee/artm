@@ -904,18 +904,20 @@ constexpr jint kDarwinInputChannelParcelVersion = 1;
 
 jlong InputChannelReadParcel(JNIEnv* env, jobject, jobject parcel_object) {
   DarwinParcel* parcel = JavaParcel(env, parcel_object);
-  if (parcel == nullptr ||
-      ParcelReadInt(reinterpret_cast<jlong>(parcel)) !=
+  if (parcel == nullptr) return 0;
+  const jlong parcel_pointer = reinterpret_cast<jlong>(parcel);
+  const jint initialized = ParcelReadInt(parcel_pointer);
+  if (initialized == 0) return 0;
+  if (initialized != 1 ||
+      ParcelReadInt(parcel_pointer) !=
           kDarwinInputChannelParcelMagic ||
-      ParcelReadInt(reinterpret_cast<jlong>(parcel)) !=
+      ParcelReadInt(parcel_pointer) !=
           kDarwinInputChannelParcelVersion) {
     return 0;
   }
-  jstring name = ParcelReadString(env, nullptr,
-                                  reinterpret_cast<jlong>(parcel));
-  const jint server = ParcelReadInt(reinterpret_cast<jlong>(parcel));
-  jobject token = ParcelReadStrongBinder(env, nullptr,
-                                         reinterpret_cast<jlong>(parcel));
+  jstring name = ParcelReadString(env, nullptr, parcel_pointer);
+  const jint server = ParcelReadInt(parcel_pointer);
+  jobject token = ParcelReadStrongBinder(env, nullptr, parcel_pointer);
   std::shared_ptr<DarwinInputChannelState> state =
       FindInputChannelState(env, token);
   if (state != nullptr && name != nullptr) {
@@ -938,13 +940,17 @@ jlong InputChannelReadParcel(JNIEnv* env, jobject, jobject parcel_object) {
 void InputChannelWriteParcel(JNIEnv* env, jobject, jobject parcel_object,
                              jlong pointer) {
   DarwinParcel* parcel = JavaParcel(env, parcel_object);
+  if (parcel == nullptr) return;
+  const jlong parcel_pointer = reinterpret_cast<jlong>(parcel);
   const auto* channel = InputChannel(pointer);
-  if (parcel == nullptr || channel == nullptr || channel->disposed ||
-      channel->state == nullptr ||
+  if (channel == nullptr || channel->disposed || channel->state == nullptr ||
       channel->state->connection_token == nullptr) {
+    // Android always writes the initialized marker, even for a disposed
+    // channel, so the next value in a containing Parcel remains aligned.
+    ParcelWriteInt(parcel_pointer, 0);
     return;
   }
-  const jlong parcel_pointer = reinterpret_cast<jlong>(parcel);
+  ParcelWriteInt(parcel_pointer, 1);
   ParcelWriteInt(parcel_pointer, kDarwinInputChannelParcelMagic);
   ParcelWriteInt(parcel_pointer, kDarwinInputChannelParcelVersion);
   jstring name = env->NewStringUTF(channel->state->name.c_str());

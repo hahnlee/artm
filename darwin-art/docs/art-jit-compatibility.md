@@ -3992,3 +3992,9 @@ added; the full corpus and multi-loader identity task remain open.
 - `9999-key-character-map-parcel-smoke` verifies device-id identity and FULL
   keyboard type across all lanes. `2255-checker-branch-redirection` also
   passes interpreter, JIT, and unmodified optimized lanes.
+
+### Runtime checkpoint 94 — 2026-09-08
+
+- InputChannel Parcel writes an Android-compatible initialized marker for
+  disposed/uninitialized channels, preserving composite Parcel cursor alignment
+  instead of silently emitting no bytes. Native graph check passes.
