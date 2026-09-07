@@ -8421,3 +8421,9 @@ or admission exception was added.
 - The fresh ledger has completed 208 tests with no failures, covering RMW
   stress, allocation tracking, bytecode inspection, and suspend paths. The
   worker pool remains active and the full verdict is pending.
+
+### Fresh corpus checkpoint 6 — 2026-09-08
+
+- The fresh four-worker ledger has completed 220 tests without failure,
+  including native suspend/resume, per-agent TLS, transform, and local
+  variable-table paths. The remaining corpus is still running.
