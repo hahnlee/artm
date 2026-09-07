@@ -8658,3 +8658,10 @@ or admission exception was added.
   did not restore boot-class transformation, preserving the Android-shaped
   architecture and narrowing the next change to profile-derived image class
   selection plus native boot-Dex loading.
+
+### Runtime checkpoint 44 — 2026-09-08
+
+- The boot-image builder now uses embedded AOSP `profman` output for
+  profile-driven class selection. This fixes `938-load-transform-bcp` in both
+  interpreter and JIT modes without an APK rewrite or host fallback; the
+  independent 936 generated-code crash remains open.

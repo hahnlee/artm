@@ -3653,3 +3653,11 @@ added; the full corpus and multi-loader identity task remain open.
   `938-load-transform-bcp` observe `OptionalLong`; it was not retained. This
   rules out a superficial preload-file switch and keeps the required fix in
   Android's profile-guided image-class selection and boot-Dex loading path.
+
+### Runtime checkpoint 44 — 2026-09-08
+
+- Boot-image generation now invokes the embedded AOSP `profman` to create a
+  boot-format profile and passes it to dex2oat with ART/class-loader bootstrap
+  seeds. The rebuilt image makes `938-load-transform-bcp` pass in interpreter
+  and ARM64 JIT lanes; `936-search-onload` remains a separate generated-code
+  fault.
