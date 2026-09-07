@@ -970,6 +970,7 @@ mod tests {
             "   // Note: if w1 is null, this will be handled by our SIGSEGV handler.\n",
             "   ldr w2, [x1, #MIRROR_OBJECT_CLASS_OFFSET]\n",
             "   UNPOISON_HEAP_REF w2\n",
+            "   add w2, w2, #MIRROR_CLASS_VTABLE_OFFSET_64\n",
         ));
         darwinize_invoke_template(&mut source).unwrap();
         assert_eq!(

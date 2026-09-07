@@ -8113,3 +8113,10 @@ the original bytecode rather than translating it to Java.
   assertion. The full bootstrap test suite still has one pre-existing nterp
   shadow-source drift assertion failure (12/13 pass); no runtime contract is
   being hidden behind that failure.
+
+### Tooling verification — 2026-09-09 (continued)
+
+- Updated the nterp invoke-dispatch audit fixture to include the AOSP
+  `arm64ng/invoke.S` interface-vtable `add w2` fragment. The audit now matches
+  the pinned source without weakening fail-closed checks; `cargo test
+  -p art-bootstrap` passes all 13 tests.
