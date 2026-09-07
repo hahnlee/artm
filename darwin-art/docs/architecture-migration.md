@@ -8947,3 +8947,10 @@ or admission exception was added.
 
 - `543-env-long-ref --gcstress` passes interpreter, JIT, and optimized lanes,
   covering JNI long-reference lifetime during concurrent-copying collection.
+
+### Runtime checkpoint 90 — 2026-09-08
+
+- InputChannel disposal now releases shared transport state immediately, while
+  the wrapper remains available for the registered finalizer, matching Android
+  lifecycle semantics and avoiding VM-shutdown global-ref leaks. Native checks
+  remain green.

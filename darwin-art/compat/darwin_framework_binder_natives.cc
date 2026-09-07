@@ -840,6 +840,11 @@ DarwinInputChannel* InputChannel(jlong pointer) {
 void InputChannelDispose(JNIEnv*, jclass, jlong pointer) {
   if (auto* channel = InputChannel(pointer); channel != nullptr) {
     channel->disposed = true;
+    // Match NativeInputChannel::dispose(): release the underlying transport
+    // immediately while retaining the tiny native wrapper for the registered
+    // finalizer.  Delaying the shared state until finalization can make its
+    // Binder global reference outlive the JavaVM during process shutdown.
+    channel->state.reset();
   }
 }
 

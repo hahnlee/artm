@@ -3964,3 +3964,10 @@ added; the full corpus and multi-loader identity task remain open.
 
 - `543-env-long-ref --gcstress` passes all three lanes, validating JNI long
   reference lifetime across concurrent-copying GC and compiled/native exits.
+
+### Runtime checkpoint 90 — 2026-09-08
+
+- Aligned `InputChannel.dispose()` with Android's native lifecycle by releasing
+  the shared transport state immediately while retaining only the finalizer
+  wrapper. This prevents Binder global references from outliving JavaVM
+  shutdown; native graph and managed-load/graphics-link checks pass.
