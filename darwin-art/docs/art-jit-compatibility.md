@@ -3151,6 +3151,14 @@ added; the full corpus and multi-loader identity task remain open.
   loader-registration path; no test-specific behavior or rejection bypass is
   acceptable.
 
+### System-loader override A/B — 2026-09-08
+
+- Temporarily removing the detached `SetSystemClassLoaderForAppProcess` and
+  thread override did not change 497: the test still failed before any JIT
+  distinction, while 156 remained passing. The late publication is therefore
+  not sufficient to explain the identity gap; the next trace must capture
+  DexFile/DexCache registration during the initial system-loader creation.
+
 ### System loader startup ordering — 2026-09-08
 
 - AOSP creates its system class loader from `Runtime::Start` before the

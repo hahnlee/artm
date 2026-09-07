@@ -8205,6 +8205,13 @@ or admission exception was added.
   The eventual fix belongs in generic runtime loader registration and must
   retain AOSP's duplicate-DexFile rejection.
 
+### System-loader override A/B — 2026-09-08
+
+- An A/B build with the detached system-loader and thread override removed
+  produced the same 497 failure. This rules out the late setter alone; the
+  remaining discrepancy is DexFile/DexCache registration during initial
+  system-loader construction and app-image startup.
+
 ### System loader startup ordering — 2026-09-08
 
 - AOSP constructs the system class loader during `Runtime::Start`; the
