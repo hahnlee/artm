@@ -3764,3 +3764,11 @@ added; the full corpus and multi-loader identity task remain open.
 - Darwin startup now defers `RunEarlyRootClinits` and `InitializeIntrinsics`
   until after libcore native registration under ART's scoped object access.
   AOSP 936 and 938 pass interpreter, JIT, and unmodified optimized lanes.
+
+### Runtime checkpoint 59 — 2026-09-08
+
+- Rebuilt the graphics runtime after the startup-order fix and re-ran the
+  end-to-end ART JIT audit. Intrinsic source contracts, JIT eligibility and
+  unwind, GC/JNI/exception/monitor stress, large field access, and inline/GC
+  acceptance all pass. The full APK-compatibility goal remains open pending
+  broader real-app and dynamic class-loader coverage.

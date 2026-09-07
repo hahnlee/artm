@@ -8758,3 +8758,10 @@ or admission exception was added.
   libcore natives before root class initialization and intrinsics setup under
   ART's scoped object access. Upstream 936 and 938 pass in interpreter and
   JIT modes.
+
+### Runtime checkpoint 59 — 2026-09-08
+
+- The post-registration startup ordering is validated by the graphics runtime
+  build and the ART JIT audit (intrinsics, ABI/unwind, GC, JNI, exceptions,
+  monitors, and inlining). This is a compatibility milestone, not completion:
+  real APK breadth and dynamic class-loader integration remain to be closed.
