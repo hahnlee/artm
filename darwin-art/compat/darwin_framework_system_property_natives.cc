@@ -131,10 +131,12 @@ jboolean ParseSystemPropertyBooleanValue(
   if (!value.has_value()) {
     return default_value;
   }
-  if (*value == "1" || *value == "true" || *value == "on" || *value == "yes") {
+  if (*value == "1" || *value == "y" || *value == "yes" || *value == "on" ||
+      *value == "true") {
     return JNI_TRUE;
   }
-  if (*value == "0" || *value == "false" || *value == "off" || *value == "no") {
+  if (*value == "0" || *value == "n" || *value == "no" || *value == "off" ||
+      *value == "false") {
     return JNI_FALSE;
   }
   return default_value;

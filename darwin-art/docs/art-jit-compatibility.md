@@ -3886,3 +3886,9 @@ added; the full corpus and multi-loader identity task remain open.
   rejection with focused native smoke. `cargo xtask check` for the native
   source passes; `2242-checker-lse-acquire-release-operations` also passes all
   interpreter, JIT, and unmodified optimized lanes.
+
+### Runtime checkpoint 77 — 2026-09-08
+
+- Matched Android boolean system-property parsing for `y`/`n` aliases and
+  reran the native compatibility check; the complete managed-native-load and
+  graphics-link audit remains green.

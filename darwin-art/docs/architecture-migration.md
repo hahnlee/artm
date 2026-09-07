@@ -8872,3 +8872,9 @@ or admission exception was added.
   safety with native smoke and an incremental compat check. LSE
   acquire/release regression `2242-checker-lse-acquire-release-operations`
   passes all execution lanes.
+
+### Runtime checkpoint 77 — 2026-09-08
+
+- System-property boolean parsing now accepts Android's `y`/`n` aliases; the
+  native compatibility and managed-native-load/graphics-link audits remain
+  green.
