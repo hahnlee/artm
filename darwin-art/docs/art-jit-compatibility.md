@@ -3040,3 +3040,10 @@ any of these tests; Java rewrites are not acceptable evidence.
 - `180-native-default-method` through `183-rmw-stress-test` passed all 4 AOSP
   tests in interpreter, JIT, and unchanged-source lanes, covering default
   method dispatch/linking and read-modify-write stress.
+
+### Tooling verification — 2026-09-09
+
+- `cargo fmt --all -- --check` now passes after normalizing the manifest test
+  assertion. The full bootstrap test suite still has one pre-existing nterp
+  shadow-source drift assertion failure (12/13 pass); no runtime contract is
+  being hidden behind that failure.

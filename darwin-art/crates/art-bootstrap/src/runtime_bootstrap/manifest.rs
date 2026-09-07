@@ -181,9 +181,8 @@ mod tests {
             PATCHED_RUNTIME_PATCHES
                 .contains(&"patches/art/0076-darwin-bytebuffer-native-address.patch")
         );
-        assert!(
-            PATCHED_RUNTIME_PATCHES
-                .contains(&"patches/art/0155-darwin-allocation-entrypoint-class-reference-boundary.patch")
-        );
+        assert!(PATCHED_RUNTIME_PATCHES.contains(
+            &"patches/art/0155-darwin-allocation-entrypoint-class-reference-boundary.patch"
+        ));
     }
 }
