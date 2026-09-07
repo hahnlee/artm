@@ -3971,3 +3971,11 @@ added; the full corpus and multi-loader identity task remain open.
   the shared transport state immediately while retaining only the finalizer
   wrapper. This prevents Binder global references from outliving JavaVM
   shutdown; native graph and managed-load/graphics-link checks pass.
+
+### Runtime checkpoint 91 — 2026-09-08
+
+- Managed InputChannel Parcel smoke (`Parcel.obtain` → write/read → CREATOR)
+  verifies restored name and Binder token identity across interpreter, JIT,
+  and optimized lanes. `2258-checker-valid-rti` and
+  `2283-checker-remove-null-check` also pass all lanes. Cross-process FD export
+  remains an explicit transport-layer gap.

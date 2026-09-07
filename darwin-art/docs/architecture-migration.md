@@ -8954,3 +8954,11 @@ or admission exception was added.
   the wrapper remains available for the registered finalizer, matching Android
   lifecycle semantics and avoiding VM-shutdown global-ref leaks. Native checks
   remain green.
+
+### Runtime checkpoint 91 — 2026-09-08
+
+- Real managed InputChannel Parcel round-trip confirms name and Binder token
+  identity across all execution lanes; `2258-checker-valid-rti` and
+  `2283-checker-remove-null-check` also pass. The remaining cross-process FD
+  transport mismatch is tracked separately rather than hidden by registry
+  fallback.
