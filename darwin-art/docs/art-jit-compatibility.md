@@ -3104,7 +3104,16 @@ any of these tests; Java rewrites are not acceptable evidence.
 - The run exercised compiled arithmetic, JNI reference returns, concurrent GC,
   exceptions, fields/arrays, inlining, virtual/interface calls, VarHandles,
   and native exit hooks. No JIT admission gate or interpreter-only fallback was
-  added; the full corpus and multi-loader identity task remain open.
+added; the full corpus and multi-loader identity task remain open.
+
+### Corpus stale-failure revalidation — 2026-09-09
+
+- A fresh current-runner shard rechecked historical failures 126, 149, 2031,
+  2271, and 304; all pass their configured AOSP three-lane contracts.
+- The only remaining reproducible corpus failure is
+  `497-inlining-and-class-loader`, narrowed to the first custom loader's
+  canonical duplicate-DexFile `InternalError`. It remains open pending
+  app-image/PathClassLoader identity parity.
 
 ### Replacement-host JIT audit — 2026-09-09 (continued)
 

@@ -8171,4 +8171,12 @@ the original bytecode rather than translating it to Java.
 - After rebuilding the changed runtime probe, `audit-art-jit.sh` exits 0 with
   the complete JIT acceptance path. The transient frame-clock timing assertion
   also passes on exact rerun and the full host test suite; no runtime fallback
-  or admission exception was added.
+or admission exception was added.
+
+### Corpus stale-failure revalidation — 2026-09-09
+
+- Current-runner reruns of historical failures 126, 149, 2031, 2271, and 304
+  all pass their AOSP lanes; those ledger failures were stale artifacts.
+- 497 remains the sole reproduced failure: duplicate DexFile registration at
+  the first custom ClassLoader. The runtime must preserve AOSP rejection while
+  separating the app-image and Java PathClassLoader ownership boundary.
