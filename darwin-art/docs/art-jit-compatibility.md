@@ -3233,3 +3233,13 @@ added; the full corpus and multi-loader identity task remain open.
   and unmodified lanes. This removes stale-corpus results as evidence for
   those five cases. `497` still fails before its custom loader returns a class;
   no behavior-changing workaround has been added.
+
+### 497 failure narrowing — 2026-09-08
+
+- The current 497 failure is a Java `NullPointerException` at `Main.java:96`:
+  the custom loader returns `null` for `LoadedByMyClassLoader` and the next
+  `getDeclaredMethod` call dereferences it. This is not a native crash. The
+  adjacent AOSP `156-register-dex-file-multi-loader` test still passes, so
+  duplicate-DexFile rejection is intact; investigation now targets the
+  app-image DexCache/class-table association that should allow 497's class
+  definition.

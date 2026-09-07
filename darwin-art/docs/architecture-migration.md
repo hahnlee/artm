@@ -8277,3 +8277,11 @@ or admission exception was added.
   497 boundary is specifically app-image/DexCache ownership during a custom
   `DexFile.loadClassBinaryName` call; the runtime still preserves AOSP's
   duplicate-DexFile rejection semantics.
+
+### 497 failure narrowing — 2026-09-08
+
+- The remaining 497 failure is observed as a Java NPE (`Main.java:96`) because
+  `MyClassLoader.loadClass("LoadedByMyClassLoader")` returns null. Native ART
+  remains alive and test 156 continues to validate the AOSP duplicate-loader
+  error contract. The next implementation comparison is app-image
+  DexCache/class-table publication, not a loader-specific fallback.
