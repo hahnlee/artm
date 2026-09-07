@@ -3498,3 +3498,9 @@ added; the full corpus and multi-loader identity task remain open.
 - The live worker reached 878 rows with no new post-repair failures. The
   remaining recorded failures are unchanged: the pre-fix runner syntax window
   and the upstream-known broken 497 class-loader fixture.
+
+### Fresh corpus checkpoint 23 — 2026-09-08
+
+- The worker reached 979 rows. All recorded failures match the pre-fix runner
+  SyntaxError window or the documented upstream 497 fixture; no post-fix
+  ART/JIT failure has appeared.

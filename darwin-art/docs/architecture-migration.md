@@ -8523,3 +8523,9 @@ or admission exception was added.
 - 878 rows are complete without a new post-repair failure. The failure set is
   unchanged and remains limited to historical runner syntax records plus the
   AOSP-known broken 497 class-loader fixture.
+
+### Fresh corpus checkpoint 23 — 2026-09-08
+
+- 979 rows are complete. Recorded failures remain attributable to the pre-fix
+  runner SyntaxError window or the upstream-known 497 fixture; no post-fix
+  ART/JIT failure is present.
