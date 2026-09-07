@@ -3854,3 +3854,8 @@ added; the full corpus and multi-loader identity task remain open.
 - `570-checker-osr` and `088-monitor-verification` pass interpreter, JIT, and
   unmodified optimized lanes. This exercises optimized OSR transfer plus
   monitor-verifier rejection/handling for malformed synchronization paths.
+
+### Runtime checkpoint 72 — 2026-09-08
+
+- `406-fields` and `407-arrays` pass all three lanes, covering primitive and
+  reference field access plus array loads/stores and their bounds/type checks.

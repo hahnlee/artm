@@ -8841,3 +8841,9 @@ or admission exception was added.
 - `570-checker-osr` and `088-monitor-verification` pass all lanes, covering
   optimized OSR transfer and monitor-verifier behavior on the standard ART
   execution pipeline.
+
+### Runtime checkpoint 72 — 2026-09-08
+
+- `406-fields` and `407-arrays` pass interpreter, JIT, and optimized lanes,
+  validating field/array access and bounds/type checks through the shared ART
+  ABI.
