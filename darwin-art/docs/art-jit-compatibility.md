@@ -2980,3 +2980,11 @@ any of these tests; Java rewrites are not acceptable evidence.
   cross-ClassLoader rejection. A comment-only candidate patch was discarded;
   no semantic change is claimed until the actual Darwin execution path is
   identified and the clean three-lane `156` contract passes.
+
+### Runtime evidence — 2026-09-09
+
+- The retained `156` artifacts show `VMClassLoader` logging a raw
+  `unsafe-boot-dex/classes.dex` ZIP warning, then `Main.main` reaches the
+  AOSP `Unreachable` branch. This proves the remaining failure is in the
+  Darwin DexFile/class-loader registration path, not a test or APK rewrite;
+  the exact loader/DexFile identity divergence still needs a runtime fix.
