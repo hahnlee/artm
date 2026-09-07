@@ -8269,3 +8269,11 @@ or admission exception was added.
   `2271-profile-inline-cache`, and `304-method-tracing` in interpreter, JIT,
   and unmodified lanes. The runner now recognizes branch predicates using the
   AOSP `javac_post` `$1` contract. Only 497 remains reproducibly failing.
+
+### Current-runtime confirmation — 2026-09-08
+
+- Repeated current-runtime execution confirms the five previously stale
+  failures pass across interpreter, JIT, and unmodified paths. The remaining
+  497 boundary is specifically app-image/DexCache ownership during a custom
+  `DexFile.loadClassBinaryName` call; the runtime still preserves AOSP's
+  duplicate-DexFile rejection semantics.

@@ -3225,3 +3225,11 @@ added; the full corpus and multi-loader identity task remain open.
   source/optimized lanes. The 126 result also validates the typed `javac_post`
   argument detection for AOSP's multidex branch. The only remaining reproduced
   runtime failure is `497-inlining-and-class-loader`.
+
+### Current-runtime confirmation — 2026-09-08
+
+- A fresh serial run against the rebuilt graphics runtime independently
+  confirms `126`, `149`, `2031`, `2271`, and `304` all pass interpreter, JIT,
+  and unmodified lanes. This removes stale-corpus results as evidence for
+  those five cases. `497` still fails before its custom loader returns a class;
+  no behavior-changing workaround has been added.
