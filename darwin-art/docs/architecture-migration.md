@@ -8751,3 +8751,10 @@ or admission exception was added.
 - The null is observed before JNI dispatch, so field-ID fallback alone cannot
   fix 936. The next change must correct compressed-reference or handle usage at
   the ART C++ boundary.
+
+### Runtime checkpoint 58 — 2026-09-08
+
+- Darwin minimal startup matches Android dependency order by registering
+  libcore natives before root class initialization and intrinsics setup under
+  ART's scoped object access. Upstream 936 and 938 pass in interpreter and
+  JIT modes.

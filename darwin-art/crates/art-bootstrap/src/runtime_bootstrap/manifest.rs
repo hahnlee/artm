@@ -136,6 +136,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0156-darwin-dex-cookie-identity-trace.patch",
     "patches/art/0157-darwin-define-class-dex-registration-trace.patch",
     "patches/art/0158-darwin-register-dex-trace.patch",
+    "patches/art/0160-darwin-libcore-before-early-clinits.patch",
 ];
 
 #[cfg(test)]

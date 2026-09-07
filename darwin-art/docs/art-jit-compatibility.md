@@ -3758,3 +3758,9 @@ added; the full corpus and multi-loader identity task remain open.
 - A JNI field-ID fallback is not sufficient because the null occurs during ART
   `System.props` resolution before JNI dispatch. The next implementation must
   use an ART-safe handle or correct compressed-reference representation.
+
+### Runtime checkpoint 58 — 2026-09-08
+
+- Darwin startup now defers `RunEarlyRootClinits` and `InitializeIntrinsics`
+  until after libcore native registration under ART's scoped object access.
+  AOSP 936 and 938 pass interpreter, JIT, and unmodified optimized lanes.
