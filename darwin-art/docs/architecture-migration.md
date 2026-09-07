@@ -8598,6 +8598,11 @@ or admission exception was added.
 - Remaining divergence is isolated to JVMTI boot-class search and
   transformation semantics; no interpreter fallback or test gate was added.
 
+### Runtime checkpoint 37 — 2026-09-08
+
+- The native boot/system class-loader path remains the active implementation
+  slice, with host behavior unchanged and Android lifecycle semantics intact.
+
 ### Runtime checkpoint 35 — 2026-09-08
 
 - A clean runtime/graphics closure rebuild does not alter the focused JVMTI

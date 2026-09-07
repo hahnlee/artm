@@ -3603,6 +3603,11 @@ added; the full corpus and multi-loader identity task remain open.
 - The Nterp logical-reference entry slice is closed; JVMTI boot-class loading
   and transformation remain open without a fallback.
 
+### Runtime checkpoint 37 — 2026-09-08
+
+- The active class-loader implementation review is still focused on the
+  Android-compatible boot-Dex path; no policy workaround was added this turn.
+
 ### Runtime checkpoint 36 — 2026-09-08
 
 - Boot-class JVMTI investigation remains active in the class-loader
