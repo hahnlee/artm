@@ -172,6 +172,11 @@ pub(crate) fn build_skia(root: &Path) -> Result<()> {
                 "-Wall",
                 "-Wextra",
                 "-Werror",
+                // Xcode 26 promotes long-standing AppKit/IOSurface aliases
+                // used by the Android compatibility bridge to errors. The
+                // bridge owns these compatibility shims; keep this probe
+                // buildable across SDKs while preserving all other warnings.
+                "-Wno-deprecated-declarations",
             ])
             .arg(format!("-I{}", compat.display()))
             .arg(format!("-I{}", skia.display()))

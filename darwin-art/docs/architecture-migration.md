@@ -8069,3 +8069,11 @@ the original bytecode rather than translating it to Java.
   reached. This shifts the investigation earlier: the custom loader likely
   has no usable app `dexElements` and falls through to its parent, so the next
   check is canonical `PathClassLoader` construction/publication.
+
+### Build portability checkpoint — 2026-09-09
+
+- A full incremental `art-bootstrap all` reached the Skia surface smoke on the
+  replacement host but failed at link time on pre-existing input-queue and
+  socket-broker symbols. The SDK deprecation errors were fixed narrowly with
+  `-Wno-deprecated-declarations`; the remaining link closure is still a build
+  graph issue and does not justify claiming runtime completion.
