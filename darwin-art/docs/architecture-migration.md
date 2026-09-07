@@ -9073,3 +9073,10 @@ or admission exception was added.
   and receive-side reassembly path, while local wake-pair behavior is retained
   for same-process channels. This closes the one-way input payload slice;
   finish acknowledgements and an end-to-end two-process smoke remain open.
+
+### Runtime checkpoint 108 — 2026-09-08
+
+- The remote endpoint path now has bounded, validated packet framing with
+  serialized writes and receive-side reassembly. This is the first real
+  one-way payload slice; ACK framing and a process-separated smoke are still
+  required for full InputTransport parity.

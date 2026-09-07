@@ -60,6 +60,7 @@ struct DarwinInputReceiver {
   bool touch_mode = false;
   void* looper = nullptr;
   std::atomic<bool> transport_registered{false};
+  std::atomic<bool> remote_transport_registered{false};
   std::atomic<bool> disposed{false};
   std::atomic<bool> dispose_requested{false};
   std::atomic<bool> refs_cleaned{false};
@@ -575,6 +576,7 @@ struct DarwinInputChannelState {
   // as a one-byte local wake pipe: framed payload/ACK decoding must own it.
   int remote_endpoint_fd = -1;
   std::vector<uint8_t> remote_rx;
+  std::mutex remote_tx_mutex;
 };
 
 constexpr uint32_t kInputFrameMagic = 0x44414950;  // DAIP
@@ -582,11 +584,103 @@ constexpr uint32_t kInputFrameVersion = 1;
 struct DarwinInputFrame {
   uint32_t magic = kInputFrameMagic;
   uint32_t version = kInputFrameVersion;
+  uint32_t kind = 0;
   uint32_t payload_size = sizeof(darwin_art::DarwinArtInputPacket);
-  uint32_t reserved = 0;
   darwin_art::DarwinArtInputPacket payload{};
 };
 static_assert(std::is_trivially_copyable_v<DarwinInputFrame>);
+
+bool IsValidInputPacket(const darwin_art::DarwinArtInputPacket& packet) {
+  switch (packet.kind) {
+    case darwin_art::DarwinArtInputPacketKind::kPointer:
+      return packet.pointer.version == 2 &&
+             packet.pointer.size >= sizeof(DarwinArtPointerEventV2) &&
+             packet.pointer.action <= DARWIN_ART_POINTER_CANCEL &&
+             packet.pointer.pointer_count > 0;
+    case darwin_art::DarwinArtInputPacketKind::kKey:
+      return packet.key.version == 1 &&
+             packet.key.size >= sizeof(DarwinArtKeyEventV1) &&
+             packet.key.action <= 1;
+  }
+  return false;
+}
+
+bool SendRemoteInputFrame(DarwinInputChannelState* channel,
+                          const darwin_art::DarwinArtInputPacket& packet) {
+  if (channel == nullptr || channel->remote_endpoint_fd < 0 ||
+      !IsValidInputPacket(packet)) {
+    return false;
+  }
+  DarwinInputFrame frame;
+  frame.kind = static_cast<uint32_t>(packet.kind);
+  frame.payload = packet;
+  const auto* bytes = reinterpret_cast<const uint8_t*>(&frame);
+  size_t offset = 0;
+  // The imported endpoint is SOCK_STREAM. Serialize writers and finish a
+  // frame before another producer may append one so partial writes cannot
+  // interleave two input packets.
+  std::lock_guard<std::mutex> lock(channel->remote_tx_mutex);
+  while (offset < sizeof(frame)) {
+    const intptr_t sent = darwin_art_bionic_socket_broker_send(
+        channel->remote_endpoint_fd, bytes + offset, sizeof(frame) - offset,
+        kAndroidMsgNoSignal);
+    if (sent <= 0) return false;
+    offset += static_cast<size_t>(sent);
+  }
+  return true;
+}
+
+size_t DecodeRemoteInputFramesLocked(DarwinInputChannelState* channel) {
+  if (channel == nullptr) return 0;
+  constexpr size_t kMaxPackets = 256;
+  size_t consumed_bytes = 0;
+  size_t decoded = 0;
+  while (channel->remote_rx.size() - consumed_bytes >=
+             sizeof(DarwinInputFrame) &&
+         channel->packets.size() < kMaxPackets) {
+    DarwinInputFrame frame{};
+    std::memcpy(&frame, channel->remote_rx.data() + consumed_bytes,
+                sizeof(frame));
+    if (frame.magic != kInputFrameMagic ||
+        frame.version != kInputFrameVersion ||
+        frame.payload_size != sizeof(frame.payload) ||
+        frame.kind != static_cast<uint32_t>(frame.payload.kind) ||
+        !IsValidInputPacket(frame.payload)) {
+      // A version or size mismatch cannot be skipped safely on a stream.
+      // Drop the buffered transport rather than interpreting arbitrary bytes
+      // as framework input.
+      channel->remote_rx.clear();
+      return decoded;
+    }
+    channel->packets.push_back(frame.payload);
+    if (frame.payload.kind ==
+        darwin_art::DarwinArtInputPacketKind::kPointer) {
+      channel->last_pointer = frame.payload.pointer;
+      if (frame.payload.pointer.action == DARWIN_ART_POINTER_DOWN) {
+        channel->pointer_active = true;
+      } else if (frame.payload.pointer.action == DARWIN_ART_POINTER_UP ||
+                 frame.payload.pointer.action == DARWIN_ART_POINTER_CANCEL) {
+        channel->pointer_active = false;
+      }
+    }
+    consumed_bytes += sizeof(frame);
+    ++decoded;
+  }
+  if (consumed_bytes > 0) {
+    channel->remote_rx.erase(channel->remote_rx.begin(),
+                             channel->remote_rx.begin() +
+                                 static_cast<ptrdiff_t>(consumed_bytes));
+    channel->pending_input.store(true, std::memory_order_release);
+  }
+  return decoded;
+}
+struct DarwinInputAckFrame {
+  uint32_t magic = kInputFrameMagic;
+  uint32_t version = kInputFrameVersion;
+  uint32_t sequence = 0;
+  uint32_t handled = 0;
+};
+static_assert(std::is_trivially_copyable_v<DarwinInputAckFrame>);
 
 std::mutex g_focused_input_channel_mutex;
 std::weak_ptr<DarwinInputChannelState> g_focused_input_channel;
@@ -690,16 +784,9 @@ darwin_art::DarwinArtInputEnqueueResult EnqueueFocusedPacket(
     return darwin_art::DarwinArtInputEnqueueResult::kNoFocusedChannel;
   }
   if (channel->remote_endpoint_fd >= 0) {
-    DarwinInputFrame frame;
-    frame.payload = packet;
-    const intptr_t sent = darwin_art_bionic_socket_broker_send(
-        channel->remote_endpoint_fd,
-        reinterpret_cast<const uint8_t*>(&frame), sizeof(frame), 0);
-    if (sent != static_cast<intptr_t>(sizeof(frame))) {
-      return darwin_art::DarwinArtInputEnqueueResult::kBackpressured;
-    }
-    channel->pending_input.store(true, std::memory_order_release);
-    return darwin_art::DarwinArtInputEnqueueResult::kQueued;
+    return SendRemoteInputFrame(channel.get(), packet)
+               ? darwin_art::DarwinArtInputEnqueueResult::kQueued
+               : darwin_art::DarwinArtInputEnqueueResult::kBackpressured;
   }
   {
     std::lock_guard<std::mutex> lock(channel->packet_mutex);

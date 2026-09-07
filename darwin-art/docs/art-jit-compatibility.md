@@ -4100,3 +4100,10 @@ added; the full corpus and multi-loader identity task remain open.
   remote endpoint callback reassembles and queues complete frames before
   normal ViewRoot dispatch. Native graph, graphics-link, and format checks
   pass; finish-ACK framing remains to be added.
+
+### Runtime checkpoint 108 — 2026-09-08
+
+- Remote InputChannel framing is now guarded by magic/version/size and packet
+  validation, serialized under a per-channel writer lock, and reassembled
+  before dispatch. Imported endpoints remain distinct from local wake pairs;
+  finish-ACK framing and two-process verification remain open.
