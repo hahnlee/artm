@@ -8512,3 +8512,8 @@ or admission exception was added.
 - The worker has completed 815 rows without a new post-repair failure. The
   ledger's failing rows remain classified as historical runner syntax records
   and the upstream-known 497 fixture.
+
+### Fresh corpus checkpoint 21 — 2026-09-08
+
+- The worker reached 860 rows without a new failure after the runner repair;
+  exception, JNI, and compiler lanes continue to pass.

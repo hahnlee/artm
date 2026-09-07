@@ -3487,3 +3487,8 @@ added; the full corpus and multi-loader identity task remain open.
 - The live worker has reached 815 rows with no post-repair failures. New
   checker, compiler, and JNI rows continue to pass; remaining ledger failures
   are the historical syntax window and the upstream-known 497 fixture.
+
+### Fresh corpus checkpoint 21 — 2026-09-08
+
+- The live worker reached 860 rows with no new post-repair failures. Exception,
+  JNI, and compiler coverage continues through the remaining corpus.
