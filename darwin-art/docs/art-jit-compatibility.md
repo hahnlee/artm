@@ -2988,3 +2988,10 @@ any of these tests; Java rewrites are not acceptable evidence.
   AOSP `Unreachable` branch. This proves the remaining failure is in the
   Darwin DexFile/class-loader registration path, not a test or APK rewrite;
   the exact loader/DexFile identity divergence still needs a runtime fix.
+
+### Design correction — 2026-09-09
+
+- A proposed location/checksum fallback for DexFile registry lookup was
+  rejected as too broad: independently opened files at the same path can be
+  legitimate AOSP objects. The fix must preserve pointer identity semantics
+  and correct the Darwin cookie/loader handoff at its actual boundary.
