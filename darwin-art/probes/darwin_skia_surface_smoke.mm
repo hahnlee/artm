@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "darwin_surface_bridge.h"
+#include "darwin_framework_input_hint.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkImageInfo.h"
@@ -14,6 +15,36 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkRect.h"
+
+// The smoke executable intentionally links only the surface bridge and Skia;
+// provide inert providers for the runtime-owned input/fence hooks that are
+// unreachable in headless mode. Production graphics targets link the real
+// implementations from the runtime provider closure.
+namespace darwin_art {
+void NotifyFrameworkInputPending() {}
+void ClearFrameworkInputPending() {}
+DarwinArtInputEnqueueResult EnqueueFrameworkPointerPacket(
+    const DarwinArtPointerEventV2&) {
+  return DarwinArtInputEnqueueResult::kNoFocusedChannel;
+}
+bool DequeueFrameworkPointerPacket(DarwinArtPointerEventV2*) { return false; }
+DarwinArtInputEnqueueResult EnqueueFrameworkKeyPacket(
+    const DarwinArtKeyEventV1&) {
+  return DarwinArtInputEnqueueResult::kNoFocusedChannel;
+}
+bool DequeueFrameworkKeyPacket(DarwinArtKeyEventV1*) { return false; }
+}  // namespace darwin_art
+
+struct DarwinArtBionicPollFd {
+  int32_t fd;
+  int16_t events;
+  int16_t revents;
+};
+extern "C" int darwin_art_bionic_socket_broker_poll(
+    DarwinArtBionicPollFd*, size_t, int) {
+  return 0;
+}
+extern "C" int darwin_art_bionic_socket_broker_close(int) { return 0; }
 
 namespace {
 

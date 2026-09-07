@@ -8077,3 +8077,10 @@ the original bytecode rather than translating it to Java.
   socket-broker symbols. The SDK deprecation errors were fixed narrowly with
   `-Wno-deprecated-declarations`; the remaining link closure is still a build
   graph issue and does not justify claiming runtime completion.
+
+### Build verification — 2026-09-09
+
+- Added inert providers only to the standalone headless Skia smoke executable;
+  production graphics targets still link the runtime-owned providers. The
+  replacement host now passes `build-skia` with 120 IOSurface frames,
+  `staging-copies=0`, and the expected final/sequence hashes.
