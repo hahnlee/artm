@@ -8457,3 +8457,9 @@ or admission exception was added.
 - The fresh ledger has completed 257 tests without failure, including obsolete
   method-handle, short-dex, monitor-enter, and pop-frame JIT paths. Workers
   remain active and the final classification is pending.
+
+### Fresh corpus checkpoint 12 — 2026-09-08
+
+- The fresh ledger has completed 266 tests without failure, including
+  exception-ext, transform/redefine instrumentation, obsolete-JIT multithread,
+  bounds-codegen, and loop-vectorizer paths. The corpus remains active.
