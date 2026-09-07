@@ -8415,3 +8415,9 @@ or admission exception was added.
 - The fresh ledger has completed 199 tests without failure, covering GC-loop,
   lock visitation, thread-group JNI, and app-image paths. The worker pool is
   still running, so the complete-corpus verdict remains pending.
+
+### Fresh corpus checkpoint 5 — 2026-09-08
+
+- The fresh ledger has completed 208 tests with no failures, covering RMW
+  stress, allocation tracking, bytecode inspection, and suspend paths. The
+  worker pool remains active and the full verdict is pending.
