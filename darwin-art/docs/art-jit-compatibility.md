@@ -4115,3 +4115,10 @@ added; the full corpus and multi-loader identity task remain open.
   bounded wait queue. Interleaved ACK/input frames are preserved by unified
   decoder ordering. Native graph and graphics-link checks pass; two-process
   end-to-end validation remains open.
+
+### Runtime checkpoint 110 — 2026-09-08
+
+- Added ACK-aware remote stream decoding with separate local/remote Looper
+  registrations. Input and finish-ACK frames can now interleave without being
+  dropped, and remote ACKs enter the same bounded finish wait queue. Native
+  graph check passes; process-separated end-to-end smoke remains pending.

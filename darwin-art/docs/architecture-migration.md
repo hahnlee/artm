@@ -9081,6 +9081,13 @@ or admission exception was added.
   one-way payload slice; ACK framing and a process-separated smoke are still
   required for full InputTransport parity.
 
+### Runtime checkpoint 110 — 2026-09-08
+
+- Remote InputChannel now registers both the local wake endpoint and imported
+  endpoint where present, with ACK-aware stream decoding and shared finish
+  wait semantics. A real two-process smoke is still required before claiming
+  complete InputTransport parity.
+
 ### Runtime checkpoint 109 — 2026-09-08
 
 - Finish acknowledgements now have a dedicated validated wire frame and share
