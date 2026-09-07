@@ -23,6 +23,8 @@ const BOOT_IMAGE_SEED_CLASSES: &[&str] = &[
     "Ljava/lang/Error;",
     "Ljava/lang/RuntimeException;",
     "Ljava/lang/System;",
+    "Ljava/util/Hashtable;",
+    "Ljava/util/Properties;",
     "Ljava/lang/Thread;",
     "Ljava/lang/ThreadGroup;",
     "Ljava/lang/Runnable;",

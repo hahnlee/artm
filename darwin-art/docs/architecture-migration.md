@@ -8701,3 +8701,11 @@ or admission exception was added.
   (`EnsureInitialized` with a stack handle). Rebuild and link audit pass, but
   936 still faults at `0x4`; the remaining work is generated-code/JNI quick
   invocation ABI parity.
+
+### Runtime checkpoint 50 — 2026-09-08
+
+- Mach-O symbol analysis confirms the 936 fault occurs while reading the null
+  `System.props` static field, before any JNI call. The boot profile now seeds
+  `Hashtable`/`Properties` and the boot image rebuild passes, but 936 remains
+  unchanged; static field initialization/state publication is the next ART
+  parity boundary.

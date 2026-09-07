@@ -3702,3 +3702,12 @@ added; the full corpus and multi-loader identity task remain open.
   `EnsureInitialized` contract. The JVMTI archive and full graphics link audit
   remain green; 936 still reproduces `SIGSEGV/SEGV_ACCERR` at `0x4`, so this
   ordering fix is insufficient and the quick-call ABI remains open.
+
+### Runtime checkpoint 50 — 2026-09-08
+
+- Symbol-level crash analysis places the fault before JNI invocation, in
+  `ArtField::GetObject(System.props)`: the static field value is null in the
+  detached boot image. Added `java.util.Hashtable` and
+  `java.util.Properties` to the profile-driven boot-image seed and rebuilt the
+  image successfully. The 936 repro still faults at `0x4`, so boot-image
+  seeding alone does not yet establish the static initialization contract.
