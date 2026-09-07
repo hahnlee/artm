@@ -3398,3 +3398,9 @@ added; the full corpus and multi-loader identity task remain open.
 - The live four-worker ledger has reached 220 completed tests with zero
   failures, including native suspend/resume, per-agent TLS, transform, and
   local-variable-table cases. The remaining corpus is still active.
+
+### Fresh corpus checkpoint 7 — 2026-09-08
+
+- The live ledger has reached 227 completed tests with zero failures,
+  including VM-init timing and native/recursive/owned monitor paths. Workers
+  remain active; the complete corpus verdict is still pending.

@@ -8427,3 +8427,9 @@ or admission exception was added.
 - The fresh four-worker ledger has completed 220 tests without failure,
   including native suspend/resume, per-agent TLS, transform, and local
   variable-table paths. The remaining corpus is still running.
+
+### Fresh corpus checkpoint 7 — 2026-09-08
+
+- The fresh ledger has completed 227 tests without failure, including VM-init
+  timing and native/recursive/owned monitor paths. Workers remain active and
+  final classification is pending.
