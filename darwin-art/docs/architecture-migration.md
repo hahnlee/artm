@@ -8906,3 +8906,9 @@ or admission exception was added.
 - `411-optimizing-arith` and `414-static-fields` pass all lanes, validating
   arithmetic lowering and static-field lifecycle/barrier behavior on the
   shared ART pipeline.
+
+### Runtime checkpoint 83 — 2026-09-08
+
+- `418-const-string` and `2256-checker-vector-replacement` pass interpreter,
+  JIT, and optimized lanes, covering string constants and vector lowering in
+  the shared optimizer.

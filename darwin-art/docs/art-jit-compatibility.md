@@ -3921,3 +3921,9 @@ added; the full corpus and multi-loader identity task remain open.
 - `411-optimizing-arith` and `414-static-fields` pass interpreter, JIT, and
   unmodified optimized lanes, covering optimizer arithmetic lowering and
   static-field initialization/read/write barriers.
+
+### Runtime checkpoint 83 — 2026-09-08
+
+- `418-const-string` and `2256-checker-vector-replacement` pass all three
+  lanes, validating string constant resolution and vector replacement in the
+  optimizing compiler.
