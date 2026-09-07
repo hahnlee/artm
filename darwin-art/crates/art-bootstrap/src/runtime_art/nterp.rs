@@ -815,12 +815,21 @@ fn audit_nterp_source(source: &str, preprocessed: &str) -> Result<()> {
     if handlers != 256 {
         return Err(format!("ARM64ng Nterp handler inventory drift: {handlers}/256").into());
     }
-    if source.matches("DARWIN_NORMALIZE_ART_METHOD").count() != 3 {
-        return Err(
-            "Darwin Nterp ArtMethod entry normalization inventory drift: expected macro plus two entry calls"
-                .into(),
-        );
+    if source.matches(".macro DARWIN_NORMALIZE_ART_METHOD").count() != 1 {
+        return Err("Darwin Nterp ArtMethod normalization macro inventory drift".into());
     }
+    audit_art_method_entry_normalization(
+        source,
+        "ExecuteNterpWithClinitImpl",
+        "_EndExecuteNterpWithClinitImpl:",
+        "ldr wip, [x0, #ART_METHOD_DECLARING_CLASS_OFFSET]",
+    )?;
+    audit_art_method_entry_normalization(
+        source,
+        "ExecuteNterpImpl",
+        "_EndExecuteNterpImpl:",
+        "ldr xPC, [x0, #ART_METHOD_DATA_OFFSET_64]",
+    )?;
     for symbol in [
         "_\\name:",
         "_EndExecuteNterpImpl:",
@@ -846,6 +855,43 @@ fn audit_nterp_source(source: &str, preprocessed: &str) -> Result<()> {
     Ok(())
 }
 
+fn audit_art_method_entry_normalization(
+    source: &str,
+    entry: &str,
+    end_marker: &str,
+    first_dereference: &str,
+) -> Result<()> {
+    let entry_marker = format!("OAT_ENTRY {entry}");
+    let start = source
+        .find(&entry_marker)
+        .ok_or_else(|| format!("Darwin Nterp entry missing: {entry}"))?;
+    let region = &source[start..];
+    let end = region
+        .find(end_marker)
+        .ok_or_else(|| format!("Darwin Nterp end marker missing for {entry}: {end_marker}"))?;
+    let region = &region[..end];
+    let normalization = region
+        .find("DARWIN_NORMALIZE_ART_METHOD")
+        .ok_or_else(|| format!("Darwin Nterp entry is not normalizing ArtMethod*: {entry}"))?;
+    if region[normalization + "DARWIN_NORMALIZE_ART_METHOD".len()..]
+        .contains("DARWIN_NORMALIZE_ART_METHOD")
+    {
+        return Err(
+            format!("Darwin Nterp entry normalizes ArtMethod* more than once: {entry}").into(),
+        );
+    }
+    let dereference = region.find(first_dereference).ok_or_else(|| {
+        format!("Darwin Nterp first ArtMethod* dereference drifted in {entry}: {first_dereference}")
+    })?;
+    if normalization > dereference {
+        return Err(format!(
+            "Darwin Nterp entry dereferences ArtMethod* before normalization: {entry}"
+        )
+        .into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -858,9 +904,20 @@ mod tests {
         for index in 0..handler_count {
             writeln!(source, "NAME_START nterp_op_{index}").unwrap();
         }
-        source.push_str(
-            ".macro DARWIN_NORMALIZE_ART_METHOD\n.endm\nDARWIN_NORMALIZE_ART_METHOD\nDARWIN_NORMALIZE_ART_METHOD\n_EndExecuteNterpImpl:\n_EndExecuteNterpWithClinitImpl:\n_artNterpAsmInstructionStart\n_artNterpAsmInstructionEnd:\n.cfi_startproc\n.cfi_endproc\n",
-        );
+        source.push_str(concat!(
+            ".macro DARWIN_NORMALIZE_ART_METHOD\n.endm\n",
+            "OAT_ENTRY ExecuteNterpWithClinitImpl\n",
+            "    DARWIN_NORMALIZE_ART_METHOD\n",
+            "    ldr wip, [x0, #ART_METHOD_DECLARING_CLASS_OFFSET]\n",
+            "_EndExecuteNterpWithClinitImpl:\n",
+            "OAT_ENTRY ExecuteNterpImpl\n",
+            "    DARWIN_NORMALIZE_ART_METHOD\n",
+            "    ldr xPC, [x0, #ART_METHOD_DATA_OFFSET_64]\n",
+            "_EndExecuteNterpImpl:\n",
+            "_artNterpAsmInstructionStart\n",
+            "_artNterpAsmInstructionEnd:\n",
+            ".cfi_startproc\n.cfi_endproc\n",
+        ));
         (
             source,
             String::from("_EndExecuteNterpImpl:\n.cfi_startproc\n.cfi_endproc\n"),
@@ -872,6 +929,16 @@ mod tests {
         let (source, preprocessed) = fixture(256);
         assert!(audit_nterp_source(&source, &preprocessed).is_ok());
         let (source, preprocessed) = fixture(255);
+        assert!(audit_nterp_source(&source, &preprocessed).is_err());
+    }
+
+    #[test]
+    fn nterp_source_audit_is_fail_closed_on_late_art_method_normalization() {
+        let (mut source, preprocessed) = fixture(256);
+        source = source.replace(
+            "    DARWIN_NORMALIZE_ART_METHOD\n    ldr xPC, [x0, #ART_METHOD_DATA_OFFSET_64]",
+            "    ldr xPC, [x0, #ART_METHOD_DATA_OFFSET_64]\n    DARWIN_NORMALIZE_ART_METHOD",
+        );
         assert!(audit_nterp_source(&source, &preprocessed).is_err());
     }
 
