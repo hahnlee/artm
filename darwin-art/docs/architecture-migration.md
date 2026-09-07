@@ -9157,3 +9157,11 @@ or admission exception was added.
   child has been reaped, matching Android's idempotent stop/unbind behavior.
   Host check/tests pass and a fresh Chrome startup/menu smoke returns status 0
   without the previous teardown or PID-registry errors.
+
+### Runtime checkpoint 118 — 2026-09-08
+
+- Two fresh Chrome lifecycle runs exercise the physical bottom-menu/new-tab
+  path and complete child-process teardown without native-window UAF, mutex
+  errors, generated-code faults, or service-PID registry failures. Startup and
+  menu lifecycle is now stable; tab content/renderer behavior remains to be
+  validated.

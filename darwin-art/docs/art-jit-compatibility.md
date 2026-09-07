@@ -4191,3 +4191,11 @@ added; the full corpus and multi-loader identity task remain open.
   an already-reaped PID no longer abort the host. Host check/tests pass, and a
   fresh Chrome startup/menu smoke exits with status 0 without the prior mutex,
   generated-code, broadcast-stub, or unknown-child-PID failures.
+
+### Runtime checkpoint 118 — 2026-09-08
+
+- Chrome process-lifecycle acceptance now completes two real startup/menu
+  iterations with physical `new_tab_menu_id` clicks. Both runs show clean
+  compositor teardown and service-child reaping: no mutex UAF, generated-code
+  fault, broadcast stub, or unknown-PID error. The next boundary is deeper tab
+  content/rendering behavior rather than process startup.
