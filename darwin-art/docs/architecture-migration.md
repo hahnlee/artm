@@ -8392,3 +8392,9 @@ or admission exception was added.
   pinned corpus with four parallel workers, avoiding stale result summaries.
 - The first 66 completed tests are all passing; the run remains active and
   will be classified only after every selected test reaches a terminal state.
+
+### Fresh corpus checkpoint — 2026-09-08
+
+- The fresh four-worker ledger has completed 105 tests with no failures so far.
+  Workers remain active; final compatibility classification awaits terminal
+  results for the entire corpus.

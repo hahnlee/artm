@@ -3362,3 +3362,9 @@ added; the full corpus and multi-loader identity task remain open.
 - While this turn ends, 66 tests have completed and all are `passed`; worker
   processes remain live for the rest of the pinned corpus. No result is being
   treated as final until the ledger reaches terminal completion.
+
+### Fresh corpus checkpoint — 2026-09-08
+
+- The same four-worker run has reached 105 completed tests; every terminal
+  result so far is `passed`. The corpus process remains live, so this remains
+  an interim checkpoint rather than a completion claim.
