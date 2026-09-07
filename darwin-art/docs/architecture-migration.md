@@ -8338,3 +8338,10 @@ or admission exception was added.
   still null. The ownership discrepancy is therefore real and deterministic;
   the remaining implementation work is app-image publication/definition
   ordering, not pointer validity or generic loader registration.
+
+### 497 startup-order diagnostic — 2026-09-08
+
+- Skipping `ResolveMainDexStrings` did not change 497, and the temporary
+  diagnostic was removed. The failure is not caused by that helper's eager
+  string resolution; focus remains on app dex open and class-definition
+  publication ordering.

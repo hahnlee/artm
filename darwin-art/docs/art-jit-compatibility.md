@@ -3301,3 +3301,11 @@ added; the full corpus and multi-loader identity task remain open.
   loader is `0x1000209f818` with no table yet. This rules out a null/invalid
   owner and leaves app-image publication/definition ordering as the remaining
   AOSP compatibility gap.
+
+### 497 startup-order diagnostic — 2026-09-08
+
+- Temporarily skipped the harness's `ResolveMainDexStrings` phase and reran
+  497; the same custom-loader null result remained. The experiment was
+  removed. Canonical DexCache creation in that helper is therefore not the
+  cause; the remaining ordering gap is during app dex open/class-definition
+  publication itself.
