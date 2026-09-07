@@ -3475,3 +3475,9 @@ added; the full corpus and multi-loader identity task remain open.
   loader` test; its `knownfailures.json` entry documents a deliberately broken
   loader that re-registers an already-registered DexFile under another loader.
   This is kept visible rather than hidden behind a Darwin gate.
+
+### Fresh corpus checkpoint 19 — 2026-09-08
+
+- The worker has reached 773 completed rows; no new failure has appeared after
+  the runner repair. The single current semantic failure remains the upstream
+  disabled 497 class-loader fixture, while later checker/compiler rows pass.

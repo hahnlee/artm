@@ -8500,3 +8500,9 @@ or admission exception was added.
   The only current semantic failure is the upstream-known broken
   `497-inlining-and-class-loader` fixture (AOSP bug b/34193123), not a
   platform-specific fallback or allowlist condition.
+
+### Fresh corpus checkpoint 19 — 2026-09-08
+
+- 773 rows are complete with no post-repair failures. Later checker and
+  compiler rows continue to pass; only the documented upstream-broken 497
+  class-loader fixture remains failed.
