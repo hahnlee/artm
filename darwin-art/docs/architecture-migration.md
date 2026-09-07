@@ -8878,3 +8878,8 @@ or admission exception was added.
 - System-property boolean parsing now accepts Android's `y`/`n` aliases; the
   native compatibility and managed-native-load/graphics-link audits remain
   green.
+
+### Runtime checkpoint 78 — 2026-09-08
+
+- `2275-integral-unsigned-arithmetic` passes all execution lanes, validating
+  unsigned integral operations through the shared ARM64 JIT lowering.

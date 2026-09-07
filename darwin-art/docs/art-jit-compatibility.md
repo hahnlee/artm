@@ -3892,3 +3892,9 @@ added; the full corpus and multi-loader identity task remain open.
 - Matched Android boolean system-property parsing for `y`/`n` aliases and
   reran the native compatibility check; the complete managed-native-load and
   graphics-link audit remains green.
+
+### Runtime checkpoint 78 — 2026-09-08
+
+- `2275-integral-unsigned-arithmetic` passes interpreter, JIT, and unmodified
+  optimized lanes, covering unsigned integral comparisons/division and the
+  corresponding ARM64 lowering paths.
