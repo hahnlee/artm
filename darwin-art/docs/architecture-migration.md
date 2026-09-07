@@ -8835,3 +8835,9 @@ or admission exception was added.
 - `2264-throwing-systemcleaner` and `2282-single-step-before-catch` pass
   interpreter, JIT, and optimized lanes, validating exception delivery and
   debugger single-step catch-boundary handling.
+
+### Runtime checkpoint 71 — 2026-09-08
+
+- `570-checker-osr` and `088-monitor-verification` pass all lanes, covering
+  optimized OSR transfer and monitor-verifier behavior on the standard ART
+  execution pipeline.

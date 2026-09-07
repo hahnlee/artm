@@ -3848,3 +3848,9 @@ added; the full corpus and multi-loader identity task remain open.
 - `2264-throwing-systemcleaner` and `2282-single-step-before-catch` pass all
   three lanes, covering exception delivery through cleaner callbacks and
   debugger single-step state immediately before a catch handler.
+
+### Runtime checkpoint 71 — 2026-09-08
+
+- `570-checker-osr` and `088-monitor-verification` pass interpreter, JIT, and
+  unmodified optimized lanes. This exercises optimized OSR transfer plus
+  monitor-verifier rejection/handling for malformed synchronization paths.
