@@ -8924,3 +8924,8 @@ or admission exception was added.
 
 - `370-dex-v37` passes all execution lanes, confirming DEX v37 parsing,
   verification, and execution remain on the shared ART pipeline.
+
+### Runtime checkpoint 86 — 2026-09-08
+
+- `412-new-array --gcstress` passes all lanes, covering array allocation and
+  reference barriers while the concurrent-copying collector is stressed.

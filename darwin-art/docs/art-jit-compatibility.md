@@ -3940,3 +3940,9 @@ added; the full corpus and multi-loader identity task remain open.
 
 - `370-dex-v37` passes interpreter, JIT, and unmodified optimized lanes,
   validating the current DEX v37 reader/verifier and execution path.
+
+### Runtime checkpoint 86 — 2026-09-08
+
+- `412-new-array --gcstress` passes interpreter, JIT, and unmodified optimized
+  lanes, validating array allocation and reference barriers under concurrent
+  copying GC stress.
