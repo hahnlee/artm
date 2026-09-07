@@ -3719,3 +3719,9 @@ added; the full corpus and multi-loader identity task remain open.
   than a JNI receiver fault. The persistent seed and initialization changes
   remain; a JNI field-ID replacement was not retained because the patch needs
   to preserve AOSP callback ordering and is the next isolated experiment.
+
+### Runtime checkpoint 52 — 2026-09-08
+
+- Repeated disassembly continues to show a null ART internal pointer before JNI,
+  even after boot seeding and initialization attempts. The next focused task is
+  compressed `ObjPtr` normalization at the Darwin C++/ART boundary.

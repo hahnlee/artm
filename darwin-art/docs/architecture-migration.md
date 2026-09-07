@@ -8716,3 +8716,9 @@ or admission exception was added.
   (`ldr w8, [x23,#4]`, `x23=0`) before JNI dispatch. This rules out the quick-call
   receiver as the immediate cause; the next experiment must isolate ART static
   field resolution/initialization without changing callback ordering.
+
+### Runtime checkpoint 52 — 2026-09-08
+
+- The null register survives boot-image changes and occurs before JNI dispatch;
+  investigation is narrowed to compressed `ObjPtr` normalization at the Darwin
+  C++/ART boundary.
