@@ -3842,3 +3842,9 @@ added; the full corpus and multi-loader identity task remain open.
 - `2247-checker-write-barrier-elimination` and `2277-methodhandle-invokeexact`
   both pass interpreter, JIT, and unmodified optimized lanes. This covers
   write-barrier elimination and exact MethodHandle dispatch in optimized code.
+
+### Runtime checkpoint 70 — 2026-09-08
+
+- `2264-throwing-systemcleaner` and `2282-single-step-before-catch` pass all
+  three lanes, covering exception delivery through cleaner callbacks and
+  debugger single-step state immediately before a catch handler.

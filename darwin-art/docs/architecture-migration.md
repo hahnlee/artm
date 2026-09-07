@@ -8829,3 +8829,9 @@ or admission exception was added.
 - `2247-checker-write-barrier-elimination` and `2277-methodhandle-invokeexact`
   pass all lanes, validating optimized write-barrier elimination and exact
   MethodHandle dispatch on the standard ART pipeline.
+
+### Runtime checkpoint 70 — 2026-09-08
+
+- `2264-throwing-systemcleaner` and `2282-single-step-before-catch` pass
+  interpreter, JIT, and optimized lanes, validating exception delivery and
+  debugger single-step catch-boundary handling.
