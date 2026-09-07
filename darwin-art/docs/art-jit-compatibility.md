@@ -3726,6 +3726,14 @@ added; the full corpus and multi-loader identity task remain open.
   even after boot seeding and initialization attempts. The next focused task is
   compressed `ObjPtr` normalization at the Darwin C++/ART boundary.
 
+### Runtime checkpoint 54 — 2026-09-08
+
+- Added the shared Darwin `ObjPtr` base-relative encode/decode boundary to the
+  runtime-core build (including both `obj_ptr.h` and `obj_ptr-inl.h`). The
+  independent `938-load-transform-bcp` interpreter and JIT lanes still pass.
+  `936-search-onload` now reaches a different dex2oat internal reference fault,
+  so the fix is productive but the full generated-code path remains open.
+
 ### Runtime checkpoint 53 — 2026-09-08
 
 - A JNI field-ID fallback is not sufficient because the null occurs during ART

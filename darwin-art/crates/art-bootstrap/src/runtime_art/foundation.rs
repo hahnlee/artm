@@ -99,6 +99,11 @@ pub(crate) fn build_runtime_core(root: &Path) -> Result<()> {
         runtime.join("mirror/object_reference.h"),
         patched_mirror.join("object_reference.h"),
     )?;
+    fs::copy(runtime.join("obj_ptr.h"), patched_runtime.join("obj_ptr.h"))?;
+    fs::copy(
+        runtime.join("obj_ptr-inl.h"),
+        patched_runtime.join("obj_ptr-inl.h"),
+    )?;
     fs::copy(
         runtime.join("lock_word.h"),
         patched_runtime.join("lock_word.h"),
@@ -113,6 +118,7 @@ pub(crate) fn build_runtime_core(root: &Path) -> Result<()> {
         "patches/art/0004-darwin-uncontended-monitor-lock.patch",
         "patches/art/0004b-darwin-cross-thread-monitor-lock.patch",
         "patches/art/0026-darwin-base-relative-object-references-only.patch",
+        "patches/art/0159-darwin-objptr-base-relative-boundary.patch",
         "patches/art/0033-darwin-base-relative-lockword-forwarding.patch",
         "patches/art/0042b-darwin-compressed32-monitor-boundary.patch",
         "patches/art/0078-darwin-pthread-empty-checkpoints.patch",

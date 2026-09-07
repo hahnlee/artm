@@ -8723,6 +8723,13 @@ or admission exception was added.
   investigation is narrowed to compressed `ObjPtr` normalization at the Darwin
   C++/ART boundary.
 
+### Runtime checkpoint 54 — 2026-09-08
+
+- Runtime-core now applies base-relative Darwin `ObjPtr` encoding/decoding
+  consistently. `938-load-transform-bcp` passes in interpreter and JIT modes;
+  936 advances past the prior static-field boundary but still fails in a
+  dex2oat internal reference path requiring another ABI audit.
+
 ### Runtime checkpoint 53 — 2026-09-08
 
 - The null is observed before JNI dispatch, so field-ID fallback alone cannot
