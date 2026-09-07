@@ -3810,3 +3810,12 @@ added; the full corpus and multi-loader identity task remain open.
   lanes on the production graphics runtime, covering a PathClassLoader
   subclass with secondary DEX/class resolution. Supported loader breadth
   remains under active verification.
+
+### Runtime checkpoint 65 — 2026-09-08
+
+- Extended dynamic-loader coverage: `692-vdex-secondary-loader`,
+  `693-vdex-inmem-loader-evict`, and `944-transform-classloaders` each pass
+  interpreter, JIT, and unmodified optimized lanes. Together with 142, 688,
+  and 949, this covers secondary-Dex VDEX ownership, in-memory verification
+  cache eviction, shared-library graphs, JVMTI transforms, and loader
+  subclasses without changing the original APK or weakening ClassLinker.

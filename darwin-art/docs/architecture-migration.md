@@ -8800,3 +8800,10 @@ or admission exception was added.
   supported PathClassLoader subclass and secondary-Dex resolution. Further
   InMemoryDexClassLoader, JVMTI transform, and shared-library loader coverage
   remains active.
+
+### Runtime checkpoint 65 — 2026-09-08
+
+- Loader parity expanded with three-lane passes for `692-vdex-secondary-loader`,
+  `693-vdex-inmem-loader-evict`, and `944-transform-classloaders`; the runtime
+  now exercises secondary VDEX ownership, in-memory cache eviction, and
+  transform/class-loader interactions through the normal AOSP contracts.
