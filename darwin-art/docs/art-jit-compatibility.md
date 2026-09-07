@@ -3209,3 +3209,11 @@ added; the full corpus and multi-loader identity task remain open.
   affected objects successfully. The cookie hook is present in the staged
   source. This fixes build-graph coverage only; 497 remains an unresolved
   AOSP app-image/DexCache ownership failure and is not claimed fixed.
+
+### Diagnostic patch validation — 2026-09-08
+
+- The cookie collection hook remains the only enabled diagnostic patch. A
+  malformed experimental `defineClassNative` patch was removed rather than
+  weakening the staging contract. The graphics bootstrap now rebuilds cleanly
+  with 256 cached objects and the staged cookie hook; 497 still fails before
+  the collection hook and remains open.

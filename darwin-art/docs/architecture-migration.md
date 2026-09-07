@@ -8254,3 +8254,10 @@ or admission exception was added.
   list. The shadow identity moved to v6 so existing caches cannot hide this
   change. A graphics bootstrap rebuild compiled the changed closure; no
   behavioral workaround or test-specific loader fallback was introduced.
+
+### Diagnostic patch validation — 2026-09-08
+
+- Kept only the valid `CollectDexFilesFromJavaDexFile` trace hook and removed
+  the malformed native registration experiment. A clean graphics bootstrap
+  confirms the source-shadow contract; no loader behavior was changed and the
+  497 ownership failure remains the next implementation target.
