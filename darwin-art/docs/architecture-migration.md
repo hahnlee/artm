@@ -8374,3 +8374,14 @@ or admission exception was added.
 - The unmodified AOSP 497 test still fails in both interpreter and optimized
   lanes when its custom loader receives a null class. No allowlist or fallback
   was added; ClassLinker/DexCache publication ordering remains open.
+
+### AOSP regression recheck after shutdown fix — 2026-09-08
+
+- Rechecked the prior failure candidates covering JNI, stack walking,
+  ThreadStress, OOM, fields, GC thrash/concurrent array copy, string append,
+  ParallelGC, native bridge, Miranda multidex, suspend-all, multi-loader 156,
+  compiled-frame deopt, profile inline cache, and method tracing.
+- All 16 tests passed interpreter/JIT/unmodified lanes. Only 497 still
+  reproduces, matching the pinned AOSP `knownfailures.json` description of a
+  deliberately broken loader that registers one DexFile with multiple
+  loaders; no workaround was introduced.

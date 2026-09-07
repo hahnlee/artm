@@ -3341,3 +3341,16 @@ added; the full corpus and multi-loader identity task remain open.
   1 because `MyClassLoader.loadClass("LoadedByMyClassLoader")` returns null.
   This is unchanged in interpreter and optimized lanes and remains an
   authentic ClassLinker/DexCache compatibility gap, not a test bypass.
+
+### AOSP regression recheck after shutdown fix — 2026-09-08
+
+- Re-ran the previously stale failure set on the replacement machine:
+  `004-JniTest`, `004-StackWalk`, `004-ThreadStress`, `061-out-of-memory`,
+  `064-field-access`, `074-gc-thrash`, `096-array-copy-concurrent-gc`,
+  `103-string-append`, `114-ParallelGC`, `115-native-bridge`,
+  `126-miranda-multidex`, `149-suspend-all-stress`,
+  `156-register-dex-file-multi-loader`, `2031-zygote-compiled-frame-deopt`,
+  `2271-profile-inline-cache`, and `304-method-tracing`.
+- Every test passed the interpreter, JIT, and unmodified-source lanes. The
+  only reproduced failure remains 497, whose own pinned AOSP manifest marks
+  it broken until its multi-loader test is rewritten.
