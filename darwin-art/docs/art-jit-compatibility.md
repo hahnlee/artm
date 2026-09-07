@@ -3909,3 +3909,9 @@ added; the full corpus and multi-loader identity task remain open.
 - `2239-varhandle-perf-vh-unsafe-cas` passes interpreter, JIT, and unmodified
   optimized lanes, covering Unsafe-backed atomic compare-and-set and its
   managed memory ordering/barrier path.
+
+### Runtime checkpoint 81 — 2026-09-08
+
+- `401-optimizing-compiler` and `304-method-tracing` pass all three lanes,
+  validating optimizing-compiler execution and instrumentation method-entry/
+  exit tracing on JIT code.

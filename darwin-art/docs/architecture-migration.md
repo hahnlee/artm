@@ -8894,3 +8894,9 @@ or admission exception was added.
 - `2239-varhandle-perf-vh-unsafe-cas` passes all lanes, validating
   Unsafe-backed atomic CAS and managed memory ordering through the standard
   ART JIT path.
+
+### Runtime checkpoint 81 — 2026-09-08
+
+- `401-optimizing-compiler` and `304-method-tracing` pass interpreter, JIT,
+  and optimized lanes, covering optimizer startup and instrumentation tracing
+  across compiled method entry/exit.
