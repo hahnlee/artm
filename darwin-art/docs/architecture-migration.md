@@ -8999,3 +8999,8 @@ or admission exception was added.
 
 - `2253-checker-devirtualize-always-throws` passes all execution lanes,
   covering devirtualized always-throwing calls and exception-edge lowering.
+
+### Runtime checkpoint 98 — 2026-09-08
+
+- `2248-checker-smali-remove-try-until-the-end` passes interpreter, JIT, and
+  optimized lanes, covering try-region elimination and exception-table bounds.

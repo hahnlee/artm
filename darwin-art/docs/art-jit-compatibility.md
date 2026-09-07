@@ -4018,3 +4018,8 @@ added; the full corpus and multi-loader identity task remain open.
 - `2253-checker-devirtualize-always-throws` passes interpreter, JIT, and
   unmodified optimized lanes, validating devirtualization of always-throwing
   calls and their exception edges.
+
+### Runtime checkpoint 98 — 2026-09-08
+
+- `2248-checker-smali-remove-try-until-the-end` passes all three lanes,
+  validating try-region elimination and exception-table boundary lowering.
