@@ -3026,3 +3026,11 @@ any of these tests; Java rewrites are not acceptable evidence.
   including interpreter, JIT, and unchanged-source lanes. The previously
   failing `156-register-dex-file-multi-loader` now passes with AOSP's real
   duplicate-registration rejection.
+
+### ART regression verification — 2026-09-09
+
+- The clean parallel run for `159-app-image-fields` through
+  `179-nonvirtual-jni` passed all 21 AOSP tests in interpreter, JIT, and
+  unchanged-source lanes. This covers app-image fields/methods/strings,
+  read-barrier stress, resolution trampolines, locks, monitor ownership,
+  initialization deadlocks, and JNI dispatch.
