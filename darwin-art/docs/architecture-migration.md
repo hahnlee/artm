@@ -8994,3 +8994,8 @@ or admission exception was added.
 - `2259-checker-code-sinking-infinite-try-catch` and
   `2284-regression-test-368984521-loop-opt` pass interpreter, JIT, and
   optimized lanes, validating exception-region sinking and loop optimization.
+
+### Runtime checkpoint 97 — 2026-09-08
+
+- `2253-checker-devirtualize-always-throws` passes all execution lanes,
+  covering devirtualized always-throwing calls and exception-edge lowering.

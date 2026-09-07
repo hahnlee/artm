@@ -4012,3 +4012,9 @@ added; the full corpus and multi-loader identity task remain open.
 - `2259-checker-code-sinking-infinite-try-catch` and
   `2284-regression-test-368984521-loop-opt` pass all three lanes, covering
   exception-region code sinking and loop optimization regression handling.
+
+### Runtime checkpoint 97 — 2026-09-08
+
+- `2253-checker-devirtualize-always-throws` passes interpreter, JIT, and
+  unmodified optimized lanes, validating devirtualization of always-throwing
+  calls and their exception edges.
