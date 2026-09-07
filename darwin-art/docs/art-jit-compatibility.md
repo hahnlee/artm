@@ -4146,3 +4146,13 @@ added; the full corpus and multi-loader identity task remain open.
   exposes a real gap: the popup ViewRoot remains at its pre-resize position
   (`at=320,8`) instead of being relaid out to `at=208,8`; keep this as a runtime
   WindowManager relayout task rather than weakening the assertion.
+
+### Runtime checkpoint 113 — 2026-09-08
+
+- Wired display resize into each live `ViewRootImpl` through the Android 16
+  `forceWmRelayout()` contract. A live popup now recomputes its frame from
+  `at=320,8` to `at=208,8` before its anchor update. The acceptance harness now
+  keeps that popup alive during resize and uses physical Calendar coordinates.
+  Calculator, Calendar, outside-dismiss, and resize lanes pass. Chrome reaches
+  startup but still aborts in the existing `MockContext.sendBroadcast()` stub,
+  so the full suite remains red until that framework broadcast path is added.

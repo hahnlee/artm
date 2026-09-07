@@ -9117,3 +9117,12 @@ or admission exception was added.
   tab, outside dismissal, and crash checks pass. Resizing the host surface does
   not yet trigger Android-style relayout of the existing popup ViewRoot; its
   stale position is recorded as the next WindowManager transaction task.
+
+### Runtime checkpoint 113 — 2026-09-08
+
+- WindowManager display changes now force a WMS relayout on every registered
+  ViewRoot, matching Android 16's `forceWmRelayout()` path. The popup resize
+  lane proves the frame transition `320,8 → 208,8`; the APK acceptance harness
+  also corrects scaled Calendar physical coordinates. Calculator, Calendar,
+  dismiss, and resize checks pass; the full suite still exposes Chrome's
+  pre-existing `MockContext.sendBroadcast()` stub abort during startup.

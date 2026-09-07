@@ -65,9 +65,11 @@ if grep -a -F 'app:id/digit_7' "$calculator_outside_log" >/dev/null; then
 fi
 
 calculator_resize_log="$output/calculator-resize.log"
+# Leave the popup ViewRoot alive after opening it. A third tap at 340,45
+# selects History and removes the popup before the delayed resize begins.
 env "${common_env[@]}" \
   DARWIN_ART_DEBUG_RESIZE=1 \
-  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;340,45,2500;340,45,300' \
+  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;340,45,2500' \
   DARWIN_ART_TEST_POINTER_SEQUENCE_POST_DELAY_MS=500 \
   DARWIN_ART_TEST_WINDOW_RESIZE='600x1000' \
   DARWIN_ART_TEST_WINDOW_RESIZE_AFTER_MS=500 \
@@ -83,12 +85,12 @@ grep -a -F 'window frame request=392x192 layout=392x192 output=392x192 at=208,8 
 
 calendar_log="$output/calendar.log"
 env "${common_env[@]}" \
-  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;100,60,800' \
+  DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;100,30,800;100,70,300' \
   "$root/tools/run-android-apk-app.sh" "$calendar" 5 \
   >"$calendar_log" 2>&1
 
 grep -a -F 'view=android.widget.Spinner' "$calendar_log" >/dev/null
-grep -a -F 'window frame request=456x336 layout=456x336 output=456x336 at=0,80 type=1002' \
+grep -a -F 'window frame request=419x336 layout=419x336 output=419x336 at=0,80 type=1002' \
   "$calendar_log" >/dev/null
 for label in Day Week Month; do
   grep -a -E "View text .* text=${label}$" "$calendar_log" >/dev/null

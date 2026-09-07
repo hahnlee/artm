@@ -176,13 +176,28 @@ public final class DarwinServiceBridge {
             getInstance.setAccessible(true);
             Object global = getInstance.invoke(null);
             Field viewsField = globalClass.getDeclaredField("mViews");
+            Field rootsField = globalClass.getDeclaredField("mRoots");
             viewsField.setAccessible(true);
+            rootsField.setAccessible(true);
             ArrayList<?> views = (ArrayList<?>) viewsField.get(global);
-            for (Object value : views) {
+            ArrayList<?> roots = (ArrayList<?>) rootsField.get(global);
+            Method forceWmRelayout = Class.forName("android.view.ViewRootImpl")
+                    .getDeclaredMethod("forceWmRelayout");
+            forceWmRelayout.setAccessible(true);
+            for (int index = 0; index < views.size(); index++) {
+                Object value = views.get(index);
                 if (value instanceof View) {
                     View view = (View) value;
                     view.requestLayout();
                     view.invalidate();
+                }
+                // A display change is a WMS frame update, not merely a
+                // content-layout request. Android's client resize path marks
+                // every existing ViewRoot for a new IWindowSession.relayout;
+                // without this, fixed-size attached windows such as popup
+                // menus retain their old gravity-resolved position forever.
+                if (index < roots.size() && roots.get(index) != null) {
+                    forceWmRelayout.invoke(roots.get(index));
                 }
             }
         } catch (Throwable error) {
