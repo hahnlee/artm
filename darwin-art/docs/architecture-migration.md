@@ -8642,3 +8642,11 @@ or admission exception was added.
 
 - Android-shaped boot/system class-loader semantics remain unchanged while the
   implementation review continues; completion is not claimed.
+
+### Runtime checkpoint 42 — 2026-09-08
+
+- Canonical boot-image generation and the ordinary JVMTI transform lane were
+  revalidated on the replacement Mac. No duplicate runtime-phase patch or
+  host fallback was retained; boot-image class-selection/profile semantics
+  remain the next native implementation boundary for 938, with 936 tracked
+  independently as a generated-code crash.

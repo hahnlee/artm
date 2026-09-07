@@ -3634,3 +3634,13 @@ added; the full corpus and multi-loader identity task remain open.
 
 - The native boot-class JVMTI review is still active; shared worktree inspection
   shows no runtime patch landed yet, so 936/938 remain open and unmasked.
+
+### Runtime checkpoint 42 — 2026-09-08
+
+- On the replacement Mac, the canonical Android 16 boot-image build and
+  `934-load-transform` both pass (interpreter and JIT lanes). An experiment
+  with an explicit empty `--preloaded-classes` list was reverted after
+  `938-load-transform-bcp` still failed; the artifact was rebuilt with the
+  canonical command. The remaining 938 gap is therefore a real boot-image
+  profile/class-selection issue, not a phase-order workaround, while 936
+  remains a separate generated-code fault.
