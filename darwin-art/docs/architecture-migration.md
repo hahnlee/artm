@@ -8793,3 +8793,10 @@ or admission exception was added.
   its failure is therefore not evidence for weakening ClassLinker registration.
   The valid 156 multi-loader rejection remains the compatibility contract, so
   investigation continues with supported dynamic-loader tests instead.
+
+### Runtime checkpoint 64 — 2026-09-08
+
+- `142-classloader2` passes interpreter, JIT, and optimized lanes, validating
+  supported PathClassLoader subclass and secondary-Dex resolution. Further
+  InMemoryDexClassLoader, JVMTI transform, and shared-library loader coverage
+  remains active.

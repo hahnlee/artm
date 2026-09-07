@@ -3803,3 +3803,10 @@ added; the full corpus and multi-loader identity task remain open.
   broken duplicate-DexFile loader contract, and relaxing `RegisterDexFile`
   would regress the valid 156 multi-loader rejection test. No ClassLinker
   weakening was added; valid dynamic-loader tests are the next coverage set.
+
+### Runtime checkpoint 64 — 2026-09-08
+
+- Valid `142-classloader2` passed interpreter, JIT, and unmodified optimized
+  lanes on the production graphics runtime, covering a PathClassLoader
+  subclass with secondary DEX/class resolution. Supported loader breadth
+  remains under active verification.
