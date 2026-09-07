@@ -8061,3 +8061,11 @@ the original bytecode rather than translating it to Java.
   rejected as too broad: independently opened files at the same path can be
   legitimate AOSP objects. The fix must preserve pointer identity semantics
   and correct the Darwin cookie/loader handoff at its actual boundary.
+
+### Trace checkpoint — 2026-09-09
+
+- A conditional registry trace was rebuilt and a clean `156` run was repeated,
+  but no `DexFile_defineClassNative`/registry trace appeared while `Main` was
+  reached. This shifts the investigation earlier: the custom loader likely
+  has no usable app `dexElements` and falls through to its parent, so the next
+  check is canonical `PathClassLoader` construction/publication.
