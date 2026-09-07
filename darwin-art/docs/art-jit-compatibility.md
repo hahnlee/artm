@@ -3435,3 +3435,9 @@ added; the full corpus and multi-loader identity task remain open.
   including exception-ext, transform/redefine instrumentation, obsolete-JIT
   multithread, bounds-codegen, and loop-vectorizer paths. The corpus remains
   active.
+
+### Fresh corpus checkpoint 13 — 2026-09-08
+
+- The live ledger has reached 273 completed tests with zero failures,
+  including add-to-dex ClassLoader, JVMTI local primitive/object/bad-slot, and
+  multi-force-early-return paths. The corpus remains active.
