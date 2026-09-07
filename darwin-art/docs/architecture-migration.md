@@ -8942,3 +8942,8 @@ or admission exception was added.
 
 - `543-env-long-ref` and `686-get-this` pass all lanes, validating JNI long
   references and instance receiver argument ABI through the shared ART JIT.
+
+### Runtime checkpoint 89 — 2026-09-08
+
+- `543-env-long-ref --gcstress` passes interpreter, JIT, and optimized lanes,
+  covering JNI long-reference lifetime during concurrent-copying collection.

@@ -3959,3 +3959,8 @@ added; the full corpus and multi-loader identity task remain open.
 - `543-env-long-ref` and `686-get-this` pass interpreter, JIT, and unmodified
   optimized lanes, covering JNI long-reference lifetime and instance receiver
   ABI handling.
+
+### Runtime checkpoint 89 — 2026-09-08
+
+- `543-env-long-ref --gcstress` passes all three lanes, validating JNI long
+  reference lifetime across concurrent-copying GC and compiled/native exits.
