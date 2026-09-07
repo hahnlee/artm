@@ -3085,3 +3085,13 @@ any of these tests; Java rewrites are not acceptable evidence.
   the non-linear handler table. The previously verified metadata-lowering
   boundary remains in place; dynamic Nterp unwind semantics are still an open
   compatibility task.
+
+### Multi-loader identity trace — 2026-09-09
+
+- A fresh unchanged-input reproduction (diagnostic prints removed immediately)
+  shows the first `MyClassLoader` call in `497-inlining-and-class-loader`
+  receives `InternalError: Attempt to register dex file ... with multiple
+  class loaders`; `foo` is therefore null. The process PathClassLoader has one
+  app `DexFile` element, so the test DEX is already registered for that loader
+  when `Main` is resolved. The remaining fix is app-image versus PathClassLoader
+  DexFile identity/lifecycle parity, not weakening AOSP's duplicate rejection.

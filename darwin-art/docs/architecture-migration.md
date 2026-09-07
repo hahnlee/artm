@@ -8149,3 +8149,11 @@ the original bytecode rather than translating it to Java.
   assembler at the `.org` handler layout, so the existing metadata lowering
   remains explicit and fail-closed. A real dynamic unwind implementation is
   still required before claiming full AOSP parity.
+
+### Multi-loader identity trace — 2026-09-09
+
+- Re-running the unmodified AOSP 497 test with temporary diagnostics confirms
+  the first custom-loader define fails at the canonical duplicate-DexFile
+  `InternalError`, leaving `foo` null. Diagnostics were reverted; the generic
+  runtime task is to model the distinct app-image/PathClassLoader DexFile
+  ownership seen by AOSP while retaining the rejection contract.
