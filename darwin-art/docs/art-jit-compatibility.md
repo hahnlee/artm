@@ -3612,3 +3612,9 @@ added; the full corpus and multi-loader identity task remain open.
 
 - Boot-class JVMTI investigation remains active in the class-loader
   implementation lane. No fallback, allowlist, or APK rewrite was introduced.
+
+### Runtime checkpoint 38 — 2026-09-08
+
+- The native boot-class loader review remains active; no additional policy
+  gates or harness substitutions were made while awaiting the focused runtime
+  implementation result.

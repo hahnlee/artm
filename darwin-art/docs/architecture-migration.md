@@ -8622,3 +8622,8 @@ or admission exception was added.
 - The compatibility layer preserves Android's boot/system class-loader
   contract; the remaining issue is a native implementation defect, not a host
   policy substitution.
+
+### Runtime checkpoint 38 — 2026-09-08
+
+- Android-shaped boot/system class-loader semantics remain the target. The
+  unresolved behavior is still confined to the native ART implementation path.
