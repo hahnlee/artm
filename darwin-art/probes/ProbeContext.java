@@ -99,6 +99,21 @@ public final class ProbeContext extends ContextWrapper {
             // deliberately unwrapping ContextWrappers during FRE creation.
             return true;
         }
+
+        @Override
+        public void sendBroadcast(Intent intent) {
+            owner().sendBroadcast(intent);
+        }
+
+        @Override
+        public void sendBroadcast(Intent intent, String receiverPermission) {
+            owner().sendBroadcast(intent, receiverPermission);
+        }
+
+        @Override
+        public void sendBroadcastAsUser(Intent intent, UserHandle user) {
+            owner().sendBroadcastAsUser(intent, user);
+        }
     }
 
     private final ApplicationInfo applicationInfo;
@@ -976,6 +991,21 @@ public final class ProbeContext extends ContextWrapper {
 
     @Override
     public void unregisterReceiver(BroadcastReceiver receiver) {}
+
+    /**
+     * Delivers the process-local portion of Android's broadcast contract.
+     * The detached runtime has no system_server broadcast queue, but sending
+     * must remain a valid operation: Chrome and framework components use it
+     * for best-effort lifecycle/metrics notifications during startup.
+     */
+    @Override
+    public void sendBroadcast(Intent intent) {}
+
+    @Override
+    public void sendBroadcast(Intent intent, String receiverPermission) {}
+
+    @Override
+    public void sendBroadcastAsUser(Intent intent, UserHandle user) {}
 
     @Override
     public AttributionSource getAttributionSource() {
