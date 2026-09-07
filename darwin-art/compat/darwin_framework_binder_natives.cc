@@ -970,9 +970,7 @@ jlong InputChannelReadParcel(JNIEnv* env, jobject, jobject parcel_object) {
           darwin_art_bionic_socket_broker_close(state->read_fd);
         if (state->write_fd >= 0 && state->write_fd != state->read_fd)
           darwin_art_bionic_socket_broker_close(state->write_fd);
-        state->read_fd = endpoint_fd;
-        state->write_fd = endpoint_fd;
-        state->shared_endpoint = true;
+        state->remote_endpoint_fd = endpoint_fd;
         RegisterInputChannelState(state);
       }
     }

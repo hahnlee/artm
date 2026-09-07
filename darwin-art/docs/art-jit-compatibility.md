@@ -4078,3 +4078,10 @@ added; the full corpus and multi-loader identity task remain open.
   descriptor with single-owner cleanup. Native graph and graphics-link checks
   pass. A two-process payload/finish-ACK smoke is still required before the
   transport gap can be closed.
+
+### Runtime checkpoint 105 — 2026-09-08
+
+- Revalidated imported endpoint ownership after separating the broker FD from
+  the local same-process wake pair. The native graph and graphics-link audit
+  pass; the endpoint is retained for the pending framed payload reader rather
+  than being incorrectly treated as a local queue.

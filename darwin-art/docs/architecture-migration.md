@@ -9052,3 +9052,10 @@ or admission exception was added.
   can adopt an imported broker endpoint. Same-process behavior remains intact;
   event payload framing and finish acknowledgements remain explicitly pending
   a two-process validation.
+
+### Runtime checkpoint 105 — 2026-09-08
+
+- Imported InputChannel descriptors now have an explicit remote-endpoint
+  owner, separate from the local pair state, with single-close cleanup. This
+  keeps the AOSP Parcel boundary honest while the framed payload/ACK reader is
+  still under implementation.
