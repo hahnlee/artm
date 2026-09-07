@@ -8847,3 +8847,8 @@ or admission exception was added.
 - `406-fields` and `407-arrays` pass interpreter, JIT, and optimized lanes,
   validating field/array access and bounds/type checks through the shared ART
   ABI.
+
+### Runtime checkpoint 73 — 2026-09-08
+
+- `412-new-array` and `420-const-class` pass all lanes, validating allocation
+  and class-constant resolution without a Darwin-specific execution path.

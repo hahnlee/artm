@@ -3859,3 +3859,8 @@ added; the full corpus and multi-loader identity task remain open.
 
 - `406-fields` and `407-arrays` pass all three lanes, covering primitive and
   reference field access plus array loads/stores and their bounds/type checks.
+
+### Runtime checkpoint 73 — 2026-09-08
+
+- `412-new-array` and `420-const-class` pass interpreter, JIT, and unmodified
+  optimized lanes, covering array allocation and class-constant resolution.
