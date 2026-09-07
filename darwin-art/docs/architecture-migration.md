@@ -8812,3 +8812,8 @@ or admission exception was added.
 
 - `2237-checker-inline-multidex` passes all three execution lanes, confirming
   multidex checker/inlining behavior remains on the standard ART pipeline.
+
+### Runtime checkpoint 67 — 2026-09-08
+
+- `1946-list-descriptors` passes interpreter, JIT, and optimized lanes, adding
+  JVMTI loader-specific DEX descriptor enumeration to the compatibility matrix.

@@ -3825,3 +3825,8 @@ added; the full corpus and multi-loader identity task remain open.
 - `2237-checker-inline-multidex` passes interpreter, JIT, and unmodified
   optimized lanes, extending verification to multidex checker/inlining
   behavior without a Darwin-specific code path.
+
+### Runtime checkpoint 67 — 2026-09-08
+
+- `1946-list-descriptors` passes all three lanes, validating JVMTI's
+  loader-specific DEX descriptor enumeration on the normal runtime path.
