@@ -8220,3 +8220,10 @@ or admission exception was added.
   156 confirms the rejection contract. The next implementation must move the
   app-image/DexCache split into generic runtime startup rather than altering
   test inputs or weakening duplicate registration.
+
+### DexFile identity instrumentation — 2026-09-08
+
+- A disabled-by-default trace records one system PathClassLoader element and a
+  distinct native `DexFile*` for `Main`, indicating an app-image/cache-side
+  mapping. The remaining work is to trace the Java cookie's native pointer and
+  its registration timing, while keeping AOSP duplicate rejection intact.

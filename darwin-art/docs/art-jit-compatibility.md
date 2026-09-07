@@ -3151,6 +3151,15 @@ added; the full corpus and multi-loader identity task remain open.
   loader-registration path; no test-specific behavior or rejection bypass is
   acceptable.
 
+### DexFile identity instrumentation — 2026-09-08
+
+- Environment-gated tracing shows one Java `PathClassLoader` dex element while
+  `Main` resolves through a distinct native `DexFile*` (the app-image/cache
+  side). This confirms the missing comparison is the cookie's native DexFile
+  mapping and registration timing, not Java loader object identity alone.
+- The trace is diagnostic-only and disabled by default. The next runtime fix
+  must preserve this distinct ownership without relaxing `RegisterDexFile`.
+
 ### System-loader override A/B — 2026-09-08
 
 - Temporarily removing the detached `SetSystemClassLoaderForAppProcess` and

@@ -68,6 +68,62 @@ int load_classes(JNIEnv* env,
   out->app_loader = managed_loader;
   std::cerr << "ART Darwin DEX: application ClassLoader="
             << static_cast<void*>(app_loader.Get()) << "\n";
+  if (std::getenv("DARWIN_ART_TRACE_DEX_IDENTITY") != nullptr) {
+    jclass base_loader = env->FindClass("dalvik/system/BaseDexClassLoader");
+    jclass dex_path_list = env->FindClass("dalvik/system/DexPathList");
+    jclass dex_element =
+        env->FindClass("dalvik/system/DexPathList$Element");
+    jclass dex_file = env->FindClass("dalvik/system/DexFile");
+    jfieldID path_list_field = base_loader == nullptr
+                                   ? nullptr
+                                   : env->GetFieldID(
+                                         base_loader, "pathList",
+                                         "Ldalvik/system/DexPathList;");
+    jfieldID elements_field = dex_path_list == nullptr
+                                  ? nullptr
+                                  : env->GetFieldID(
+                                        dex_path_list, "dexElements",
+                                        "[Ldalvik/system/DexPathList$Element;");
+    jfieldID dex_field = dex_element == nullptr
+                             ? nullptr
+                             : env->GetFieldID(dex_element, "dexFile",
+                                               "Ldalvik/system/DexFile;");
+    jfieldID cookie_field = dex_file == nullptr
+                                ? nullptr
+                                : env->GetFieldID(dex_file, "mCookie",
+                                                  "Ljava/lang/Object;");
+    jobject path_list = path_list_field == nullptr
+                            ? nullptr
+                            : env->GetObjectField(managed_loader, path_list_field);
+    jobjectArray elements = path_list == nullptr || elements_field == nullptr
+                                ? nullptr
+                                : static_cast<jobjectArray>(
+                                      env->GetObjectField(path_list, elements_field));
+    const jsize count = elements == nullptr ? 0 : env->GetArrayLength(elements);
+    std::cerr << "ART Darwin DEX identity: path_elements=" << count << "\n";
+    for (jsize index = 0; index < count; ++index) {
+      jobject element = env->GetObjectArrayElement(elements, index);
+      jobject dex = element == nullptr || dex_field == nullptr
+                        ? nullptr
+                        : env->GetObjectField(element, dex_field);
+      jobject cookie = dex == nullptr || cookie_field == nullptr
+                           ? nullptr
+                           : env->GetObjectField(dex, cookie_field);
+      std::cerr << "ART Darwin DEX identity: index=" << index
+                << " dex=" << static_cast<void*>(dex)
+                << " cookie=" << static_cast<void*>(cookie) << "\n";
+      env->DeleteLocalRef(cookie);
+      env->DeleteLocalRef(dex);
+      env->DeleteLocalRef(element);
+    }
+    env->DeleteLocalRef(elements);
+    env->DeleteLocalRef(path_list);
+    env->DeleteLocalRef(dex_file);
+    env->DeleteLocalRef(dex_element);
+    env->DeleteLocalRef(dex_path_list);
+    env->DeleteLocalRef(base_loader);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+  }
 
   auto find = [&](const char* descriptor) -> jclass {
     art::Handle<art::mirror::Class> klass = hs.NewHandle(

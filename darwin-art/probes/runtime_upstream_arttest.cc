@@ -636,6 +636,15 @@ extern "C" bool darwin_art_register_upstream_arttest(JNIEnv* env,
                          env->CallStaticObjectMethod(harness, load, name));
   env->DeleteLocalRef(name);
   if (klass == nullptr || env->ExceptionCheck()) return false;
+  if (std::getenv("DARWIN_ART_TRACE_DEX_IDENTITY") != nullptr) {
+    art::ScopedObjectAccess trace_soa(env);
+    art::mirror::Class* loaded =
+        trace_soa.Decode<art::mirror::Class>(klass).Ptr();
+    if (loaded != nullptr) {
+      std::cerr << "ART Darwin DEX identity: Main dex="
+                << static_cast<const void*>(&loaded->GetDexFile()) << "\n";
+    }
+  }
   struct Native {
     const char* name;
     const char* signature;
