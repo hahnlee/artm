@@ -8765,3 +8765,10 @@ or admission exception was added.
   build and the ART JIT audit (intrinsics, ABI/unwind, GC, JNI, exceptions,
   monitors, and inlining). This is a compatibility milestone, not completion:
   real APK breadth and dynamic class-loader integration remain to be closed.
+
+### Runtime checkpoint 60 — 2026-09-08
+
+- GC-stress is now the active compatibility gap: a reproducible arm64e PAC
+  trap occurs before managed output in the stress launcher, while ordinary
+  JIT/GC and 936/938 lanes pass. The next change is being constrained to the
+  shared Darwin ABI path rather than adding a test or interpreter bypass.

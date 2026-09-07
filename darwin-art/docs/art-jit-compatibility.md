@@ -3772,3 +3772,10 @@ added; the full corpus and multi-loader identity task remain open.
   unwind, GC/JNI/exception/monitor stress, large field access, and inline/GC
   acceptance all pass. The full APK-compatibility goal remains open pending
   broader real-app and dynamic class-loader coverage.
+
+### Runtime checkpoint 60 — 2026-09-08
+
+- Focus shifted to GC-stress coverage after the normal JIT audit. A Sol review
+  is reproducing an arm64e PAC trap seen in the gcstress launcher path; normal
+  JIT/GC acceptance and AOSP 936/938 remain green. No fallback or test-specific
+  suppression has been introduced while the shared ABI boundary is isolated.
