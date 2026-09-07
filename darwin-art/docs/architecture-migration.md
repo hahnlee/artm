@@ -8883,3 +8883,8 @@ or admission exception was added.
 
 - `2275-integral-unsigned-arithmetic` passes all execution lanes, validating
   unsigned integral operations through the shared ARM64 JIT lowering.
+
+### Runtime checkpoint 79 — 2026-09-08
+
+- `410-floats` and `419-long-parameter` pass interpreter, JIT, and optimized
+  lanes, covering floating-point code generation and long-argument ABI paths.

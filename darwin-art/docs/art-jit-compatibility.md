@@ -3898,3 +3898,8 @@ added; the full corpus and multi-loader identity task remain open.
 - `2275-integral-unsigned-arithmetic` passes interpreter, JIT, and unmodified
   optimized lanes, covering unsigned integral comparisons/division and the
   corresponding ARM64 lowering paths.
+
+### Runtime checkpoint 79 — 2026-09-08
+
+- `410-floats` and `419-long-parameter` pass all three lanes, validating
+  floating-point lowering and wide-argument register/stack ABI marshalling.
