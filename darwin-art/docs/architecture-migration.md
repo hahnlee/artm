@@ -8196,3 +8196,11 @@ or admission exception was added.
   duplicate registration error. Reopening fresh Java DexFile objects in the
   PathClassLoader did not resolve 497 and was reverted; the next fix must model
   app-image and path-list DexFile ownership at the ART loading boundary.
+
+### 497 loader-order isolation — 2026-09-08
+
+- 497 fails identically under interpreter and JIT, whereas 156 passes all
+  lanes. The issue is therefore launcher ordering around publication of the
+  system PathClassLoader versus app-image/DexCache ownership, not JIT code.
+  The eventual fix belongs in generic runtime loader registration and must
+  retain AOSP's duplicate-DexFile rejection.

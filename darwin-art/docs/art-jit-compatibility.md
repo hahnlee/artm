@@ -3140,3 +3140,13 @@ added; the full corpus and multi-loader identity task remain open.
   not fix `497-inlining-and-class-loader` and was removed; the remaining gap
   is the app-image-versus-path-list identity boundary, not a broad rejection
   bypass.
+
+### 497 loader-order isolation — 2026-09-08
+
+- The failed 497 reproduction is identical in interpreter and JIT lanes, while
+  156 still passes all lanes. This isolates the remaining defect to detached
+  launcher ordering: `ClassLoader.SystemClassLoader` is published before the
+  app-image/DexCache ownership split that AOSP establishes during application
+  startup. The next implementation must move that split into the runtime
+  loader-registration path; no test-specific behavior or rejection bypass is
+  acceptable.
