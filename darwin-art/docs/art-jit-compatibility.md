@@ -3505,6 +3505,15 @@ added; the full corpus and multi-loader identity task remain open.
   SyntaxError window or the documented upstream 497 fixture; no post-fix
   ART/JIT failure has appeared.
 
+### Final corpus checkpoint 27 — 2026-09-08
+
+- The pinned corpus completed all 1,075 discovered tests. Final ledger
+  classification: 109 historical rows captured while the runner had a
+  transient SyntaxError, one upstream-known broken 497 fixture, and two real
+  post-repair runtime gaps: `936-search-onload` and `938-load-transform-bcp`.
+  The latter exercise JVMTI agent loading and boot-class transformation and
+  remain open; no fallback or allowlist was added.
+
 ### Fresh corpus checkpoint 24 — 2026-09-08
 
 - The live worker reached 994 rows. The post-repair suffix remains entirely

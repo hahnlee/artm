@@ -8530,6 +8530,13 @@ or admission exception was added.
   runner SyntaxError window or the upstream-known 497 fixture; no post-fix
   ART/JIT failure is present.
 
+### Final corpus checkpoint 27 — 2026-09-08
+
+- All 1,075 pinned AOSP corpus entries completed. The final 112 failures are
+  classified as 109 historical runner SyntaxError records, the documented
+  broken 497 fixture, and two genuine post-repair gaps (`936-search-onload`,
+  `938-load-transform-bcp`) in JVMTI agent/boot-class transformation.
+
 ### Fresh corpus checkpoint 24 — 2026-09-08
 
 - 994 rows are complete. The post-repair suffix is fully green; the 110
