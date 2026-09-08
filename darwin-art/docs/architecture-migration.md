@@ -11060,3 +11060,10 @@ or admission exception was added.
   interpreter-versus-optimized lanes. The result exercises stack-map reference
   locations in optimized execution without a test-specific fallback; broader
   GC stress, JNI CFI, concurrency, and real-app work remains.
+
+### Runtime checkpoint 372 — 2026-09-09
+
+- `004-ReferenceMap --gcstress` passes in interpreter, JIT, and comparison
+  lanes using the unmodified AOSP input. Functional GC/reference-map behavior
+  is verified for this case; the roughly three-minute duration indicates a
+  host teardown/performance issue to profile next.

@@ -6327,3 +6327,10 @@ added; the full corpus and multi-loader identity task remain open.
   concrete coverage for the primitive/reference opcode and control-flow
   surface, while the full compatibility objective and Generic JNI CFI mapping
   remain open.
+
+### Runtime checkpoint 372 — 2026-09-09
+
+- Re-ran unmodified AOSP `004-ReferenceMap` with `--gcstress`. All three lanes
+  (interpreter expected, JIT expected, and interpreter-versus-optimized) pass.
+  This confirms reference maps survive forced-GC execution; the run also
+  exposed multi-minute host teardown latency to profile separately.
