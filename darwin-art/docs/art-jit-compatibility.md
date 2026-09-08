@@ -5230,6 +5230,13 @@ added; the full corpus and multi-loader identity task remain open.
   starts but cannot create its log because only about 139 MiB is free; no code
   failure was observed.
 
+### Runtime checkpoint 289 — 2026-09-08
+
+- Environment audit found the checkout intact and `cargo metadata` passing.
+  Re-running graphics acceptance is currently storage-blocked: `_build` is
+  26G and the DarwinART profile store is 126G while the volume has only about
+  136MiB free. No cleanup was performed without explicit authorization.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format
