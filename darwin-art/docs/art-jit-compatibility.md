@@ -4935,3 +4935,9 @@ added; the full corpus and multi-loader identity task remain open.
 - Worktree audit confirms no clone patch is tracked; the latest `497` NPE is
   baseline behavior, not evidence against the clone. The next run must retain
   the canonical patch through build and identity-traced execution.
+
+### Runtime checkpoint 209 — 2026-09-08
+
+- A canonical clone patch retry still failed parsing on a secondary hunk and
+  was removed before commit. Clean internal graphics bootstrap remains PASS;
+  the next attempt should publish a mechanically generated staged-source diff.

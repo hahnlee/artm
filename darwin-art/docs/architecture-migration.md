@@ -9821,3 +9821,9 @@ or admission exception was added.
 - Worktree audit confirms no clone patch is tracked; the latest `497` NPE is
   baseline behavior, not evidence against the clone. The next run must retain
   the canonical patch through build and identity-traced execution.
+
+### Runtime checkpoint 209 — 2026-09-08
+
+- The canonical clone retry still failed patch parsing on a secondary hunk and
+  was removed without runtime changes. Clean graphics bootstrap remains PASS;
+  the next attempt should publish a mechanically generated staged-source diff.
