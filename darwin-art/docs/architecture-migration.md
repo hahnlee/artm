@@ -11073,3 +11073,9 @@ or admission exception was added.
 - Unmodified AOSP `004-NativeAllocations` passes in interpreter, JIT, and
   comparison lanes. Native allocation/JNI and GC interaction are now covered
   by a real AOSP test; JNI CFI, concurrency, and real-app completion remain.
+
+### Runtime checkpoint 374 — 2026-09-09
+
+- Unmodified AOSP `844-exception` passes in interpreter, JIT, and comparison
+  lanes. Optimized exception delivery/deoptimization is verified without APK
+  changes or fallback gates; JNI CFI, concurrency, and real-app work remains.

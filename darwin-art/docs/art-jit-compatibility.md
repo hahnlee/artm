@@ -6341,3 +6341,10 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter-versus-optimized lanes all pass, adding JNI/native allocation
   and GC interaction coverage without changing the APK or adding a gate.
   The full JNI CFI producer mapping and real-app criteria remain open.
+
+### Runtime checkpoint 374 — 2026-09-09
+
+- Ran unmodified AOSP `844-exception`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes all pass, providing direct evidence for
+  optimized exception delivery and deoptimization behavior. JNI CFI address
+  publication, concurrency, and real-app completion remain open.
