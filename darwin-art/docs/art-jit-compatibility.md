@@ -6727,3 +6727,9 @@ incomplete and still requires managed caller unwind validation.
   failures; it currently stops earlier in the unrelated framework adapter on
   missing `android/graphics/canvas.h`. The shadow/JNI change is not yet a
   `137-cfi` pass.
+### Runtime checkpoint 422 — 2026-09-09
+
+- Added the HWUI apex Canvas and libcutils include paths; `build-runtime-bootstrap`
+  now completes successfully.
+- Added `runtime/oat/index_bss_mapping.h` to the shadow manifest. A fresh
+  graphics-link audit is still required after shadow promotion.

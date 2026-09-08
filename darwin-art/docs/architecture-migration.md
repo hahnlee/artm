@@ -11418,3 +11418,9 @@ or admission exception was added.
   cannot find its sibling `oat_file.h`. The next architectural change is to
   model staged sibling headers as explicit runtime-shadow inputs/producers;
   no `137-cfi` pass is claimed yet.
+### Runtime checkpoint 422 — 2026-09-09
+
+- Framework adapter compilation now receives pinned HWUI Canvas apex and
+  libcutils headers; `build-runtime-bootstrap` completes successfully.
+- `runtime/oat/index_bss_mapping.h` is now an explicit shadow input; the next
+  step is a fresh graphics-link audit after promotion.

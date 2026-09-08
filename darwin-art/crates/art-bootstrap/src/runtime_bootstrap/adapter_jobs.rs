@@ -58,6 +58,18 @@ pub(super) fn adapter_jobs(
                 .arg("-I")
                 .arg(&staged.libcutils_include);
         }
+        if adapter_source == "darwin_framework_natives.cc" {
+            // Surface.java's nativeLockCanvas contract includes the pinned
+            // NDK Canvas ABI from HWUI's apex export set in every flavor.
+            adapter_command.arg("-I").arg(
+                staged
+                    .root
+                    .join("_aosp/frameworks/base/libs/hwui/apex/include"),
+            );
+            adapter_command
+                .arg("-I")
+                .arg(staged.root.join("_aosp/system/core/libcutils/include"));
+        }
         if real_graphics && adapter_source == "darwin_icu_jni_bridge.cc" {
             adapter_command.arg("-I").arg(staged.root.join("include"));
         }
