@@ -9989,3 +9989,12 @@ or admission exception was added.
   cleaner/reference processing, stack traces, UFFD, checker comparisons and
   string lengths, and native registry errors. Remaining corpus and real-app
   validation remain pending.
+
+### Runtime checkpoint 230 — 2026-09-08
+
+- The `2230-profile-save-hotness`–`2249-checker-return-try-boundary-exit-in-loop`
+  slice passed all 40 discovered tests, covering profile/metrics, heap
+  poisoning, suspend-check removal, JdkUnsafe, recursive inlining, the full
+  VarHandle matrix, tracing/single-step, LSE operations, checker transforms,
+  write-barrier elimination, and smali boundary checks. Remaining corpus and
+  real-app validation remain pending.
