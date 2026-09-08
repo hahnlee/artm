@@ -9425,3 +9425,13 @@ or admission exception was added.
 - Rebuilt the pinned ARM64 JIT after removing the Darwin explicit-check-only
   setting and reran the full ART JIT audit. AOSP 551/479/034 implicit-null and
   null-call regressions pass in interpreter and optimized modes.
+
+### Runtime checkpoint 154 — 2026-09-08
+
+- Removed the Darwin-only compiled-JNI transition fallback that sent every
+  ordinary native call through `pJniMethodStart`/`pJniMethodEnd`. Darwin now
+  uses AOSP's inline ARM64 runnable/native CAS fast paths and enters those C++
+  helpers only when thread flags require the normal slow path.
+- A fail-closed compiler-shadow audit rejects reintroducing the Apple bypass.
+  The full JIT audit, incremental graphics link, untouched AOSP `004-JniTest`,
+  and all three `137-cfi` JIT/unwind runs pass with the inline path enabled.

@@ -4490,3 +4490,17 @@ added; the full corpus and multi-loader identity task remain open.
   empty-checkpoint contention fixture is not actually executed. Fresh audit
   execution reports `checkpoint_us=159` and `lock_us=500441` with RC=0,
   preventing stale or partial probes from appearing green.
+
+### Runtime checkpoint 154 — 2026-09-08
+
+- Retired `0144-darwin-compiled-jni-frame-contract.patch`, which forced all
+  ordinary compiled JNI transitions through the C++ start/end helpers on
+  Darwin. Generated stubs now retain AOSP's inline ARM64 CAS transition and
+  branch to `pJniMethodStart`/`pJniMethodEnd` only on the existing slow labels
+  when suspend/checkpoint state requires it.
+- The JIT staging audit requires both inline transitions and both slow labels
+  without an Apple-only bypass. `build-jit-compiler` rebuilt one of 106
+  objects; graphics incremental link and `audit-art-jit.sh` pass. Untouched
+  AOSP `004-JniTest` passes interpreter/JIT/unmodified optimized lanes, and
+  `137-cfi` passes its three JIT CFI runs, preserving JNI ABI and unwind
+  behavior while removing the hot-path fallback.

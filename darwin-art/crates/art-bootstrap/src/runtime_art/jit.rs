@@ -62,6 +62,56 @@ fn audit_implicit_null_checks(jit_compiler: &str, arm64_codegen: &str) -> Result
     Ok(())
 }
 
+fn audit_compiled_jni_transitions(jni_compiler: &str) -> Result<()> {
+    let native_start = jni_compiler
+        .find("std::unique_ptr<JNIMacroLabel> transition_to_native_slow_path;")
+        .ok_or("compiled JNI native-transition block is missing")?;
+    let native_end = jni_compiler[native_start..]
+        .find("// 3. Push local reference frame.")
+        .ok_or("compiled JNI native-transition block end is missing")?
+        + native_start;
+    let native_fast = &jni_compiler[native_start..native_end];
+    if !native_fast.contains("TryToTransitionFromRunnableToNative(")
+        || native_fast.contains("#if defined(__APPLE__)")
+        || native_fast.contains("pJniMethodStart")
+    {
+        return Err("Darwin compiled JNI no longer uses AOSP's inline native transition".into());
+    }
+
+    let runnable_start = jni_compiler
+        .find("std::unique_ptr<JNIMacroLabel> transition_to_runnable_slow_path;")
+        .ok_or("compiled JNI runnable-transition block is missing")?;
+    let runnable_end = jni_compiler[runnable_start..]
+        .find("// 5.2. For methods that return a reference")
+        .ok_or("compiled JNI runnable-transition block end is missing")?
+        + runnable_start;
+    let runnable_fast = &jni_compiler[runnable_start..runnable_end];
+    if !runnable_fast.contains("TryToTransitionFromNativeToRunnable(")
+        || runnable_fast.contains("#if defined(__APPLE__)")
+        || runnable_fast.contains("pJniMethodEnd")
+    {
+        return Err("Darwin compiled JNI no longer uses AOSP's inline runnable transition".into());
+    }
+
+    let slow_start = jni_compiler
+        .find("// 8.2. Slow path for transition to Native.")
+        .ok_or("compiled JNI transition slow paths are missing")?;
+    let slow_end = jni_compiler[slow_start..]
+        .find("// 8.4. Exception poll slow path(s).")
+        .ok_or("compiled JNI transition slow-path end is missing")?
+        + slow_start;
+    let slow_paths = &jni_compiler[slow_start..slow_end];
+    if !slow_paths.contains("__ Bind(transition_to_native_slow_path.get());")
+        || !slow_paths.contains("pJniMethodStart")
+        || !slow_paths.contains("__ Bind(transition_to_runnable_slow_path.get());")
+        || !slow_paths.contains("pJniMethodEnd")
+        || slow_paths.contains("#if !defined(__APPLE__)")
+    {
+        return Err("Darwin compiled JNI AOSP transition slow paths are incomplete".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn build_jit_compiler(root: &Path) -> Result<()> {
     build_jit_libelffile(root)?;
     let compiler = root.join("_aosp/art/compiler");
@@ -500,12 +550,6 @@ pub(crate) fn build_jit_compiler(root: &Path) -> Result<()> {
     run_command(
         Command::new("patch")
             .args(["--batch", "--forward", "-p1", "-i"])
-            .arg(root.join("patches/art/0144-darwin-compiled-jni-frame-contract.patch"))
-            .current_dir(build.join("patched-source")),
-    )?;
-    run_command(
-        Command::new("patch")
-            .args(["--batch", "--forward", "-p1", "-i"])
             .arg(root.join("patches/art/0145-darwin-arm64-jni-method-pointer.patch"))
             .current_dir(build.join("patched-source")),
     )?;
@@ -549,6 +593,9 @@ pub(crate) fn build_jit_compiler(root: &Path) -> Result<()> {
         &fs::read_to_string(staged_jit.join("jit_compiler.cc"))?,
         &fs::read_to_string(staged_codegen.join("code_generator_arm64.cc"))?,
     )?;
+    audit_compiled_jni_transitions(&fs::read_to_string(
+        staged_jni_quick.join("jni_compiler.cc"),
+    )?)?;
     generator
         .arg(root.join("_aosp/art/tools/generate_operator_out.py"))
         .arg(&compiler);
