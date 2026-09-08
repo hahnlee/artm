@@ -5,7 +5,9 @@
 // while ART's elf_utils.h intentionally reuses those generic names for the
 // selected ELF class. Make the class-specific forms self-contained, matching
 // the conventional glibc definitions, to avoid a macro recursion.
+#if !defined(DARWIN_ART_PREINCLUDED_ELF)
 #include_next <elf.h>
+#endif
 
 #undef ELF32_ST_BIND
 #undef ELF32_ST_TYPE

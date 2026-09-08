@@ -6068,3 +6068,14 @@ added; the full corpus and multi-loader identity task remain open.
   Provider smoke passes (frames=5, context=2, thread=5, remote=4) and the
   graphics-link closure audit is green (registrar=51, fake-symbols=0).
   Complete DexFile metadata ownership remains open.
+
+### Runtime checkpoint 340 — 2026-09-09
+
+- Split the full AOSP `DexFile.cpp` parser into a production-only
+  `libunwindstack-dex-darwin.a` owner archive while keeping the portable smoke
+  archive on the safe `CreateDexFiles` contract stub. The runtime/graphics
+  link graph now consumes the separated owner; its archive exports
+  `DexFile::Create`, `GetFunctionName`, and `art_api::dex::DexFile` symbols.
+  `audit-runtime-graphics-link-fast` passes with `registrar=51,
+  fake-symbols=0`. APK-level metadata and full MemMap/ZipArchive runtime
+  behavior remain to be exercised.

@@ -12,6 +12,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     // command can link a runtime with stale JNI codegen.
     build_jit_compiler(root)?;
     let unwindstack_core = build_runtime_unwindstack_core(root)?;
+    let unwindstack_dex = build_runtime_unwindstack_dex(root)?;
     let unwindstack_providers =
         root.join("_build/runtime-unwindstack/libunwindstack-mach-providers.a");
     let rust_demangle = root.join(
@@ -394,6 +395,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(root.join("_build/skia-metal-gpu/libskia.a"))
         .arg(&unwindstack_providers)
         .arg(&unwindstack_core)
+        .arg(&unwindstack_dex)
         .arg(&rust_demangle)
         .arg(format!(
             "-Wl,-force_load,{}",

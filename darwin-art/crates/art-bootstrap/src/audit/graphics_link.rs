@@ -40,6 +40,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
     // hidden behind an otherwise fresh-looking archive.
     build_foundation(root)?;
     let unwindstack_core = build_runtime_unwindstack_core(root)?;
+    let unwindstack_dex = build_runtime_unwindstack_dex(root)?;
     let unwindstack_providers =
         root.join("_build/runtime-unwindstack/libunwindstack-mach-providers.a");
     let rust_demangle = root.join(
@@ -732,6 +733,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg(&bootstrap)
         .arg(&unwindstack_providers)
         .arg(&unwindstack_core)
+        .arg(&unwindstack_dex)
         .arg(&rust_demangle)
         .arg(format!(
             "-Wl,-force_load,{}",

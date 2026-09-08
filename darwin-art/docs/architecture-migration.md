@@ -10826,3 +10826,13 @@ or admission exception was added.
   Provider smoke passes (frames=5, context=2, thread=5, remote=4) and the
   graphics-link closure audit is green (registrar=51, fake-symbols=0).
   Complete DexFile metadata ownership remains open.
+
+### Runtime checkpoint 340 — 2026-09-09
+
+- Separated the full AOSP `DexFile.cpp` parser into a production-only
+  `libunwindstack-dex-darwin.a` owner archive. The portable smoke archive
+  keeps the safe `CreateDexFiles` contract stub, while runtime/graphics links
+  consume the real owner and its `DexFile::Create`, `GetFunctionName`, and
+  `art_api::dex::DexFile` symbols. Fast graphics-link audit passes
+  (`registrar=51`, `fake-symbols=0`); APK metadata and complete
+  MemMap/ZipArchive execution still require validation.

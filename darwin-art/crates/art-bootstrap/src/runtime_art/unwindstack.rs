@@ -286,3 +286,64 @@ pub(crate) fn build_runtime_unwindstack_core(root: &Path) -> Result<PathBuf> {
     );
     Ok(archive)
 }
+
+/// Build the optional AOSP DexFile parser as a separate owner archive.  The
+/// portable unwindstack smoke binary intentionally links only the contract
+/// stub in `DexFiles.cpp`; production runtime links add this archive together
+/// with the real libdexfile/foundation owners.
+pub(crate) fn build_runtime_unwindstack_dex(root: &Path) -> Result<PathBuf> {
+    let source = root.join("_aosp/system/unwinding/libunwindstack");
+    let build = root.join("_build/runtime-unwindstack");
+    let object_dir = build.join("dex-objects");
+    fs::create_dir_all(&object_dir)?;
+    let (ndk_include, ndk_arch_include) = find_ndk_headers()?;
+    let includes = [
+        root.join("compat"),
+        source.join("include"),
+        source.clone(),
+        root.join("_aosp/art/libartbase"),
+        root.join("_aosp/art/libdexfile"),
+        root.join("_aosp/art/libdexfile/external/include"),
+        root.join("_aosp/system/libbase/include"),
+        root.join("_aosp/external/zlib"),
+        PathBuf::from("/opt/homebrew/include"),
+    ];
+    let include_refs: Vec<&Path> = includes.iter().map(PathBuf::as_path).collect();
+    let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
+    let sources = [
+        ("DexFile.cpp", source.join("DexFile.cpp")),
+        (
+            "dex_file_supp.cc",
+            root.join("_aosp/art/libdexfile/external/dex_file_supp.cc"),
+        ),
+    ];
+    let jobs = sources
+        .iter()
+        .map(|(name, path)| {
+            let object = object_dir.join(format!("{name}.o"));
+            let mut command = common_cpp_command(&include_refs);
+            command
+                .arg("-std=gnu++20")
+                .arg("-O2")
+                .arg("-DNDEBUG")
+                .arg("-DDEXFILE_SUPPORT")
+                .arg("-DSTATIC_LIB")
+                .arg("-DDARWIN_ART_PREINCLUDED_ELF")
+                .arg("-include")
+                .arg(ndk_include.join("elf.h"))
+                .arg("-idirafter")
+                .arg(&ndk_include)
+                .arg("-idirafter")
+                .arg(&ndk_arch_include)
+                .arg("-c")
+                .arg(path)
+                .arg("-o")
+                .arg(&object);
+            PendingNativeCompile { command, object }
+        })
+        .collect::<Vec<_>>();
+    let (objects, _, _) = compile_pending_native(jobs, &compiler_identity)?;
+    let archive = build.join("libunwindstack-dex-darwin.a");
+    create_archive(&archive, &objects)?;
+    Ok(archive)
+}
