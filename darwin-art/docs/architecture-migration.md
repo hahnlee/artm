@@ -9233,3 +9233,11 @@ or admission exception was added.
   transitions. Build/link audits pass, but the fresh 70-second Chrome run still
   has 2,558 unhandled generated-code faults (`jit_write_depth=0`); JIT lifetime,
   signal recovery, or generated-code correctness remains unresolved.
+
+### Runtime checkpoint 127 — 2026-09-08
+
+- After rebuilding with raw fault logging placed after registered ART handlers,
+  a live 70-second Chrome run reached 11,280 scanouts and 44 presents but still
+  emitted 2,558 unhandled generated-code faults with zero JIT write depth. The
+  ordering correction is committed (`3593f47`); next work targets code-cache
+  retirement/lifetime and generated-code correctness.

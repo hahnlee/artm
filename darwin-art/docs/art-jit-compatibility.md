@@ -4274,3 +4274,12 @@ added; the full corpus and multi-loader identity task remain open.
   Chrome run still reports 2,558 unhandled generated-code faults with
   `jit_write_depth=0`, confirming a real JIT/runtime fault remains rather than
   a write-scope diagnostic artifact.
+
+### Runtime checkpoint 127 — 2026-09-08
+
+- Rebuilt the patched runtime after moving raw Darwin fault logging behind
+  `HandleFaultByOtherHandlers` and completed another live 70-second Chrome
+  acceptance run. SurfaceFlinger reached 11,280 scanout requests and 44
+  presents; 2,558 generated-code faults remained unhandled, all with
+  `jit_write_depth=0`. The diagnostic ordering fix is pushed as `3593f47`;
+  code-cache retirement/lifetime and generated-code correctness remain open.
