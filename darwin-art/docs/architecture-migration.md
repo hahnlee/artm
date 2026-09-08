@@ -10723,3 +10723,10 @@ or admission exception was added.
 - Provisioned a clean, isolated `aosp-api29` profile and verified successful
   mounting with zero leases and no installed packages. Existing profiles
   remain untouched; this is the new-host baseline for subsequent APK tests.
+
+### Runtime checkpoint 327 — 2026-09-08
+
+- The complete ART JIT acceptance audit now passes on the replacement host
+  (exit 0), including GC-sensitive field/array access, VarHandle and invoke
+  polymorphic/custom paths, exception cases, and Android window/framework
+  smoke coverage. Full AOSP differential and real-app validation remain open.

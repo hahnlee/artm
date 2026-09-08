@@ -5958,3 +5958,11 @@ added; the full corpus and multi-loader identity task remain open.
 - Created and mounted a fresh isolated `aosp-api29` runtime profile on the
   replacement host. It reports zero active leases and an empty package set;
   the existing `recovery` profile was not modified.
+
+### Runtime checkpoint 327 — 2026-09-08
+
+- Re-ran the complete `audit-art-jit.sh` acceptance suite on the replacement
+  host. It exited 0 and exercised GC-sensitive fields/arrays, VarHandle,
+  invoke-polymorphic/custom, typed exceptions, and launcher/framework/window
+  smoke paths; all reported `PASS`. This strengthens runtime evidence but does
+  not close the required full AOSP differential or real Blue Archive criteria.
