@@ -5311,3 +5311,13 @@ added; the full corpus and multi-loader identity task remain open.
   extends validated ARM64 code generation, barriers, JNI, deoptimization,
   class loading, dex/vdex, SIMD, verifier, and bounds behavior. The remaining
   AOSP corpus and real-app validation are still pending.
+
+### Runtime checkpoint 246 — 2026-09-08
+
+- The `669-checker-break`–`692-vdex-inmem-loader` slice passed all 31 tests,
+  covering break/throw and NPE paths, hidden API, hotness and vdex
+  decompression, unverified methods, proxy JIT first use, field-type
+  resolution, FSI/quickening, locks, deopt PCs and catch phis, clinit inline
+  invokes, SIMD dot-product/select/shifts, shared libraries, multi-catch and
+  zygote JIT deopt, hidden-API proxies, and in-memory vdex loading. Remaining
+  corpus and real-app validation are pending.

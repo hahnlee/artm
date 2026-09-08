@@ -9349,6 +9349,14 @@ or admission exception was added.
   irreducible loops, and iteration handling. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 246 — 2026-09-08
+
+- The `669-checker-break`–`692-vdex-inmem-loader` slice passed all 31 tests,
+  covering throw/NPE, hidden API, hotness/vdex, proxy JIT, field resolution,
+  quickening/locks, deoptimization and clinit, SIMD/select/shifts, shared
+  libraries, multi-catch/zygote deopt, and in-memory vdex loading. Remaining
+  corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 245 — 2026-09-08
 
 - EOF progress record: the latest 44-test `642-fp-callees`–`668-aiobe` slice
