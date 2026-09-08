@@ -5022,6 +5022,15 @@ added; the full corpus and multi-loader identity task remain open.
   The preceding completed results (`097-duplicate-method`, `100-reflect2`,
   `1000-non-moving-space-stress`) also passed; the remaining range is queued.
 
+### Runtime checkpoint 222 — 2026-09-08
+
+- Rebuilt the generated unsafe boot support as a JAR container (Android
+  bootclasspath contract) and updated runner/audit paths. `149-suspend-all-stress`
+  passes all three lanes after regeneration, and `497-inlining-and-class-loader`
+  remains fully passing. `156-register-dex-file-multi-loader` still exposes a
+  semantic gap: clone registration intentionally permits a case where AOSP
+  expects InternalError; this requires a ClassLinker-level policy fix.
+
 ### Runtime checkpoint 220 — 2026-09-08
 
 - Resumed corpus execution from `1002-notify-startup` through

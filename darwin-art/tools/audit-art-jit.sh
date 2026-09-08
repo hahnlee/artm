@@ -12,7 +12,7 @@ jit_tail="$jit_tail:$jit_root/_build/bootclasspath/core-icu4j-api36.jar"
 # JitUnsafe is a compiler acceptance fixture, not application payload. Direct
 # references to the hidden JDK Unsafe API are only verifier-valid from a
 # trusted boot class, matching upstream ART compiler tests.
-jit_unsafe_boot="$jit_root/_build/dex-probe/unsafe-boot-dex/classes.dex"
+jit_unsafe_boot="$jit_root/_build/dex-probe/unsafe-boot-dex/unsafe-boot.jar"
 test -f "$jit_unsafe_boot"
 jit_tail="$jit_tail:$jit_unsafe_boot"
 # Do not force the production setting here: Android application processes must

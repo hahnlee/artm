@@ -260,6 +260,18 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(class_dir.join("java/lang/JitBoxingDirect.class")),
     )?;
 
+    // Boot class path entries are ZIP/JAR containers on Android. Keep the
+    // generated DEX payload unchanged, but publish a proper container so
+    // libcore's ClassPathURLStreamHandler can resolve resources/classes when
+    // a test exercises a custom class loader.
+    let unsafe_boot_jar = build_dir.join("unsafe-boot-dex/unsafe-boot.jar");
+    run_command(
+        Command::new("zip")
+            .args(["-q", "-j"])
+            .arg(&unsafe_boot_jar)
+            .arg(unsafe_boot_dex_dir.join("classes.dex")),
+    )?;
+
     run_command(
         Command::new(find_d8()?)
             .args(["--min-api", "26"])

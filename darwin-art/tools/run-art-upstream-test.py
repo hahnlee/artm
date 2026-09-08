@@ -1746,7 +1746,7 @@ def main() -> int:
         ]
         boot_tail = [
             *boot_image_class_path[3:],
-            root / "_build/dex-probe/unsafe-boot-dex/classes.dex",
+            root / "_build/dex-probe/unsafe-boot-dex/unsafe-boot.jar",
         ]
         # The detached host exposes the complete Android boot class path to
         # the runtime, including the support DEX appended to the fourth CLI
@@ -1755,7 +1755,7 @@ def main() -> int:
         # OAT as kOatBootImageOutOfDate and silently fall back to VDEX.
         dex2oat_boot_class_path = [
             *boot_image_class_path,
-            root / "_build/dex-probe/unsafe-boot-dex/classes.dex",
+            root / "_build/dex-probe/unsafe-boot-dex/unsafe-boot.jar",
         ]
         boot_image = (args.boot_image.resolve() if args.boot_image is not None
                       else root / "_build/android16-boot-image-darwin/boot.art")
@@ -3149,7 +3149,7 @@ def main() -> int:
                     # the absolute host paths needed by OpenBootDexFiles.
                     str(path.relative_to(root)) for path in [
                         *boot_image_class_path,
-                        root / "_build/dex-probe/unsafe-boot-dex/classes.dex",
+                        root / "_build/dex-probe/unsafe-boot-dex/unsafe-boot.jar",
                     ]
                 ),
                 # Zygote startup keeps ART's trusted-oat invariant keyed to
@@ -3160,7 +3160,7 @@ def main() -> int:
                 "DARWIN_ART_BOOT_CLASSPATH": ":".join(
                     str(path) for path in [
                         *boot_image_class_path,
-                        root / "_build/dex-probe/unsafe-boot-dex/classes.dex",
+                        root / "_build/dex-probe/unsafe-boot-dex/unsafe-boot.jar",
                     ]
                 ),
                 "DARWIN_ART_BOOT_IMAGE_FD_ROOT": str(boot_image.parent / "arm64"),

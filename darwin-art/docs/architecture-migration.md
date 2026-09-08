@@ -9902,6 +9902,14 @@ or admission exception was added.
   neighbors `097-duplicate-method`, `100-reflect2`, and
   `1000-non-moving-space-stress` also passed; the remaining range is queued.
 
+### Runtime checkpoint 222 — 2026-09-08
+
+- Generated unsafe boot support is now published as a JAR container and all
+  runner/audit references use it. `149-suspend-all-stress` passes all lanes
+  after regeneration and `497` remains green. `156-register-dex-file-multi-loader`
+  still reveals an AOSP semantic mismatch (clone allowed where InternalError
+  is expected); the next fix belongs in ClassLinker policy, not the harness.
+
 ### Runtime checkpoint 220 — 2026-09-08
 
 - Corpus execution resumed at `1002-notify-startup` and completed through
