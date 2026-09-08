@@ -9630,3 +9630,9 @@ or admission exception was added.
 - The post-fix `2230`–`2286` corpus rerun passes all 12 discovered contracts in
   every execution lane, including `2262-default-conflict-methods`, confirming
   that multi-member sibling JNI linking is regression-free.
+
+### Runtime checkpoint 183 — 2026-09-08
+
+- The fresh `2001`–`2007` structural-redefinition slice passes all seven
+  contracts across interpreter, JIT, and unchanged optimized lanes, validating
+  multithreaded dispatch, initialization/finalization, and pause-all behavior.

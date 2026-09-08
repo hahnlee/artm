@@ -4721,6 +4721,13 @@ added; the full corpus and multi-loader identity task remain open.
   owner fix. All 12 discovered contracts pass interpreter, JIT, and
   unchanged-source optimized lanes, including `2262-default-conflict-methods`.
 
+### Runtime checkpoint 183 — 2026-09-08
+
+- Fresh four-worker execution of the previously omitted structural-redefinition
+  contracts `2001`–`2007` passes all seven interpreter, JIT, and
+  unchanged-source optimized lanes, covering multithreaded virtual dispatch,
+  initialization/finalization, and pause-all coordination.
+
 ### Runtime checkpoint 173 — 2026-09-08
 
 - Fresh four-worker corpus reruns completed 25/25 executable contracts in
