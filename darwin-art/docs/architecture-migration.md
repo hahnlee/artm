@@ -9349,6 +9349,14 @@ or admission exception was added.
   irreducible loops, and iteration handling. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 245 — 2026-09-08
+
+- EOF progress record: the latest 44-test `642-fp-callees`–`668-aiobe` slice
+  passed across the available interpreter/JIT/optimized lanes, extending
+  ARM64 codegen, barriers, JNI, deoptimization, class loading, dex/vdex,
+  SIMD, verifier, and bounds coverage. Remaining corpus and real-app
+  validation remain pending.
+
 ### Runtime checkpoint 244 — 2026-09-08
 
 - The `642-fp-callees`–`668-aiobe` slice passed all 44 tests, covering FP/read
@@ -10122,3 +10130,11 @@ or admission exception was added.
   instanceof/checkcast, debug/deoptimization, array stores/copy, intrinsic
   and constant folding, access checks, and inline/unverified control flow.
   Remaining corpus and real-app validation remain pending.
+
+### Runtime checkpoint 245 — 2026-09-08
+
+- EOF progress record: the latest 44-test `642-fp-callees`–`668-aiobe` slice
+  passed across the available interpreter/JIT/optimized lanes, extending
+  ARM64 codegen, barriers, JNI, deoptimization, class loading, dex/vdex,
+  SIMD, verifier, and bounds coverage. Remaining corpus and real-app
+  validation remain pending.

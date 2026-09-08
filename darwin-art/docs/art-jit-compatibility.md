@@ -5303,3 +5303,11 @@ added; the full corpus and multi-loader identity task remain open.
   simplification, register allocation, SIMD array access, unresolved calls,
   loop and LSE setup, and long-register splitting. Remaining corpus and
   real-app validation are pending.
+
+### Runtime checkpoint 245 — 2026-09-08
+
+- EOF progress record: the latest 44-test `642-fp-callees`–`668-aiobe` slice
+  passed across interpreter/JIT/optimized lanes where applicable. This
+  extends validated ARM64 code generation, barriers, JNI, deoptimization,
+  class loading, dex/vdex, SIMD, verifier, and bounds behavior. The remaining
+  AOSP corpus and real-app validation are still pending.
