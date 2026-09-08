@@ -10854,6 +10854,15 @@ or admission exception was added.
   closure, so the next validation must invoke metadata lookup through that
   runtime rather than add ad-hoc replacement symbols.
 
+### Runtime checkpoint 344 — 2026-09-09
+
+- Tested enabling `DEXFILE_SUPPORT` directly in the portable core/provider.
+  The smoke link exposed the missing complete owners (`PaletteTrace`, fmt,
+  bionic filesystem, and related ART dependencies), so that experiment was
+  reverted. The production-only DexFile archive remains the correct boundary;
+  future work must extend its explicit owner graph without contaminating the
+  portable smoke target.
+
 ### Runtime checkpoint 343 — 2026-09-09
 
 - Ran the real AOSP `137-cfi` test through dex2oat and the normal JIT host.
@@ -10861,3 +10870,10 @@ or admission exception was added.
   expected structure. The unresolved issue is managed-frame publication and
   optimized JNI metadata lookup; APK loading and the runtime link itself are
   not the failure point.
+
+### Runtime checkpoint 345 — 2026-09-09
+
+- Reverted the direct full-DEX support experiment after the portable smoke
+  exposed its complete owner requirements (`PaletteTrace`, fmt, bionic
+  filesystem, and ART dependencies). The production-only owner boundary is
+  preserved while optimized JNI metadata lookup remains open.
