@@ -9850,6 +9850,12 @@ or admission exception was added.
   `ClassLinker::DefineClass`. Passing `defining_dex` fixes the association;
   fresh relink and all three `497` lanes now pass.
 
+### Runtime checkpoint 214 — 2026-09-08
+
+- The first ten deterministic AOSP corpus inputs after the class-loader fix
+  all passed (`000-nop` through `004-SignalTest`) using the normal runner.
+  Full corpus coverage and real application validation are still pending.
+
 ### Runtime checkpoint 212 — 2026-09-08
 
 - A one-shot callback trace showed `LLoadedByMyClassLoader` never reaches

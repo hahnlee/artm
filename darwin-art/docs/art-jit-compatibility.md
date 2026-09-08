@@ -4964,6 +4964,13 @@ added; the full corpus and multi-loader identity task remain open.
   canonical patch now passes `defining_dex`/clone, and fresh relink plus
   `497-inlining-and-class-loader` passes interpreter, JIT, and optimized lanes.
 
+### Runtime checkpoint 214 — 2026-09-08
+
+- After the child-loader fix, the first ten deterministic corpus inputs
+  (`000-nop` through `004-SignalTest`) all passed through the normal runner.
+  This provides a broader regression signal beyond the focused 497/501 tests;
+  the full corpus and real-app validation remain outstanding.
+
 ### Runtime checkpoint 212 — 2026-09-08
 
 - A one-shot callback trace confirmed that `LLoadedByMyClassLoader` never
