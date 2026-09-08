@@ -5281,6 +5281,12 @@ added; the full corpus and multi-loader identity task remain open.
   complete deferred repairs. No reformat or further destructive write was
   attempted; source/Git remain intact while profile recovery is pending.
 
+### Runtime checkpoint 298 — 2026-09-08
+
+- A non-destructive read-only mount attempt also failed (`mount_apfs` exit 65/66)
+  after `hdiutil attach -nomount`; the corrupt image was detached again. No
+  profile recreation or overwrite has been performed.
+
 ### Runtime checkpoint 294 — 2026-09-08
 
 - Storage accounting after cleanup: active DarwinART `default` profile is 123G,
