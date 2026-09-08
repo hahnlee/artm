@@ -57,6 +57,7 @@ pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "gc/collector/garbage_collector.cc",
     "gc/collector/mark_compact.cc",
     "oat/oat_file.cc",
+    "oat/oat_file.h",
     "oat/oat_file-inl.h",
     "oat/oat_quick_method_header.cc",
     "oat/image.h",

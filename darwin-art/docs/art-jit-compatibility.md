@@ -6715,3 +6715,15 @@ incomplete and still requires managed caller unwind validation.
   shadow tree is incomplete when rebuilt from scratch; the next fix is to make
   staged sibling headers a declared producer/input rather than copying them
   ad hoc. `137-cfi` remains unverified after this change.
+
+### Runtime checkpoint 421 — 2026-09-09
+
+- Added `runtime/oat/oat_file.h` to the canonical shadow manifest and restored
+  AOSP quote-include lookup for both staged and immutable upstream sibling
+  directories. A fresh staging run now contains the missing header and the
+  generated `quick_jni_entrypoints.cc` contains the Generic-JNI method-start
+  publication hook.
+- The full runtime-bootstrap command advanced past the shadow dependency
+  failures; it currently stops earlier in the unrelated framework adapter on
+  missing `android/graphics/canvas.h`. The shadow/JNI change is not yet a
+  `137-cfi` pass.

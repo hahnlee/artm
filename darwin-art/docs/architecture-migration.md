@@ -11399,6 +11399,16 @@ or admission exception was added.
   `runtime/jit/jit_memory_region.h` producer; `137-cfi` remains failing until
   that build edge is restored.
 
+### Runtime checkpoint 421 — 2026-09-09
+
+- The runtime shadow manifest now includes `oat/oat_file.h`, and compile jobs
+  provide staged plus upstream sibling-directory quote lookup. Fresh staging
+  confirms both the header and Generic-JNI method-start publication are
+  present.
+- Runtime bootstrap advanced beyond shadow-header failures but remains
+  blocked by the separate framework adapter include `android/graphics/canvas.h`;
+  no `137-cfi` pass is claimed yet.
+
 ### Runtime checkpoint 420 — 2026-09-09
 
 - The corrected Generic-JNI method-start publication patch passes an isolated

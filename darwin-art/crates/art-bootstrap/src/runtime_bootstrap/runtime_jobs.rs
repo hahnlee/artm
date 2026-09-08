@@ -224,14 +224,20 @@ pub(super) fn runtime_jobs(
             };
             let mut command = runtime_bootstrap_cpp_command(includes);
             command.arg("-I").arg(staged.runtime.join("jit"));
-            if PATCHED_RUNTIME_SOURCES.contains(&source)
-                && let Some(parent) = Path::new(source).parent()
+            command.arg("-iquote").arg(staged.runtime.join("oat"));
+            if let Some(parent) = Path::new(source).parent()
                 && !parent.as_os_str().is_empty()
             {
-                // A staged nested translation unit still owns its unchanged
-                // sibling headers. Preserve quote-include semantics without
-                // copying an entire upstream directory into the shadow.
-                command.arg("-iquote").arg(staged.runtime.join(parent));
+                // Preserve AOSP quote-include lookup for both staged files
+                // and unchanged sibling headers. The shadow intentionally
+                // copies only selected sources; upstream siblings remain a
+                // read-only fallback instead of becoming implicit missing
+                // generated inputs.
+                command
+                    .arg("-iquote")
+                    .arg(staged.patched_runtime.join(parent))
+                    .arg("-iquote")
+                    .arg(staged.runtime.join(parent));
             }
             if source == "mirror/var_handle.cc" {
                 command.arg("-iquote").arg(staged.runtime.join("mirror"));
