@@ -5153,6 +5153,12 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 268 — 2026-09-08
+
+- Repeated default Snapseed launch (5 seconds) exits 0 with no JNI or ART
+  exceptions; the edit activity remains reachable after managed native load.
+  Remaining diagnostics are non-fatal VDEX placement and EGL gamut probes.
+
 ### Runtime checkpoint 267 — 2026-09-08
 
 - Default (no environment override) Snapseed run exits 0 after managed native
