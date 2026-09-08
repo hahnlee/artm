@@ -4323,6 +4323,13 @@ added; the full corpus and multi-loader identity task remain open.
   x=640 hit the avatar. `TabSwitcherButtonView` is not instantiated, pointing
   to a tablet/window configuration mismatch rather than input delivery.
 
+### Runtime checkpoint 134 — 2026-09-08
+
+- Fixed `run-android-apk-app.sh` to preserve an explicit
+  `DARWIN_ART_WINDOW_SCALE` instead of forcing Retina scale 2. A scale-1
+  physical Chrome probe now uses 360x640 coordinates and hits the real
+  `BottomBarAppMenu`; JIT and input dispatch remain clean.
+
 ### Runtime checkpoint 133 — 2026-09-08
 
 - A clean physical-click probe confirmed the runtime publishes a 720x1280

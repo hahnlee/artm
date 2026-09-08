@@ -9279,6 +9279,12 @@ or admission exception was added.
   `avatar_button`. This is a Chrome tablet/window configuration issue, not a
   JIT or input dispatch fault.
 
+### Runtime checkpoint 134 — 2026-09-08
+
+- `run-android-apk-app.sh` now honors explicit `DARWIN_ART_WINDOW_SCALE` with
+  default 2. A scale-1 Chrome probe confirms 360x640 physical coordinates and
+  a real `BottomBarAppMenu` hit, removing the forced-scale mismatch.
+
 ### Runtime checkpoint 133 — 2026-09-08
 
 - Physical-click probing confirms the runtime display contract is 720x1280 at

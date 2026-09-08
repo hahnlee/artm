@@ -569,7 +569,9 @@ export DARWIN_ART_TEST_FONT="/system/fonts/Roboto-Regular.ttf"
 export DARWIN_ART_ANDROID_FILESYSTEM_ROOT="$system_root"
 export DARWIN_ART_ANDROID_SYSTEM_ROOT="$system_root/system"
 export DARWIN_ART_ANDROID_SYSTEM_NATIVE_DIR="$system_root/system/lib64"
-export DARWIN_ART_WINDOW_SCALE=2
+# Retina remains the default for the desktop host, but callers may select the
+# logical phone surface (scale 1) for Android configuration-sensitive tests.
+export DARWIN_ART_WINDOW_SCALE="${DARWIN_ART_WINDOW_SCALE:-2}"
 
 # A project-built ANGLE exposes Metal textures as EGLImages, which is required
 # for Android AHardwareBuffer storage identity. Prefer it over the older ANGLE
