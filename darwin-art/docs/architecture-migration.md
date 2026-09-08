@@ -9557,3 +9557,10 @@ or admission exception was added.
   contracts in interpreter, JIT, and unchanged optimized lanes, including
   optimizing compiler control flow, allocation/register handling, exceptions,
   monitors, inlining, and deoptimization.
+
+### Runtime checkpoint 172 — 2026-09-08
+
+- The fresh corpus slice spanning executable tests `501`–`700` passes all 40
+  contracts in interpreter, JIT, and unchanged optimized lanes, including
+  checker optimization, deopt/OSR, inline-cache, volatile/read-barrier,
+  class-loader, and JNI-stub behavior.

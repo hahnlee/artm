@@ -4648,3 +4648,11 @@ added; the full corpus and multi-loader identity task remain open.
   unchanged-source optimized lanes. Coverage includes optimizing compiler
   control flow/arithmetic, fields/arrays, exceptions/monitors, register
   allocation, inlining, and deoptimization.
+
+### Runtime checkpoint 172 — 2026-09-08
+
+- Fresh four-worker corpus execution over the executable contracts in the
+  `501`–`700` range completed 40/40 passes across interpreter, JIT, and
+  unchanged-source optimized lanes. Coverage includes checker optimizations,
+  deoptimization/OSR, inline caches, volatile/read barriers, class loading,
+  and JNI stubs.
