@@ -7022,3 +7022,9 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 473: kept headless graphics-independent with a C-ABI ACanvas no-op seam; runtime link now closes with undefined=0.
 - Checkpoint 474: completed the RTLD_LOCAL OpenJDK named-JNI owner closure with bionic/socket/JNIHelp support and exported the AOSP JVM service ABI. ELF-JNI reaches ART boot.
 - Checkpoint 475: added Float/Double and OsConstants named-JNI fallbacks. Remaining blocker is early-boot ordering: OsConstants runs before composed registration and NativeBridge cannot yet see the runtime-local handle.
+- Checkpoint 476: identified that the OsConstants registrar itself was absent
+  from both adapter source contracts; added `darwin_os_constants.cc` and made
+  its generated ABI include a persistent build output. The registration-order
+  experiment was reverted because registering before boot classes exist fails;
+  the remaining fix must install boot JNI owners after class availability but
+  before their first initialization.

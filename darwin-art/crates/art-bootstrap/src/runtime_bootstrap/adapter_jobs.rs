@@ -70,6 +70,11 @@ pub(super) fn adapter_jobs(
                 .arg("-I")
                 .arg(staged.root.join("_aosp/system/core/libcutils/include"));
         }
+        if adapter_source == "darwin_os_constants.cc" {
+            adapter_command
+                .arg("-I")
+                .arg(staged.root.join("_build/os-constants/generated"));
+        }
         if real_graphics && adapter_source == "darwin_icu_jni_bridge.cc" {
             adapter_command.arg("-I").arg(staged.root.join("include"));
         }

@@ -6,7 +6,6 @@
 
 #include <cstddef>
 
-#include <nativehelper/JNIHelp.h>
 
 namespace {
 
@@ -148,8 +147,11 @@ bool AndroidErrnoFromDarwin(int darwin_errno, int* android_errno) {
 }  // namespace darwin_art::os_constants
 
 void register_android_system_OsConstants(JNIEnv* env) {
-  jniRegisterNativeMethods(
-      env, "android/system/OsConstants", kOsConstantsMethods,
+  jclass klass = env->FindClass("android/system/OsConstants");
+  if (klass == nullptr || env->ExceptionCheck()) return;
+  env->RegisterNatives(
+      klass, kOsConstantsMethods,
       static_cast<jint>(sizeof(kOsConstantsMethods) /
                         sizeof(kOsConstantsMethods[0])));
+  env->DeleteLocalRef(klass);
 }

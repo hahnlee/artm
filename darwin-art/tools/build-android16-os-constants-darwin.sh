@@ -292,6 +292,13 @@ if len(sysconfs) != int(sys.argv[4]):
     for n, v in sysconfs))
 PY
 
+# Keep the generated C++ include available to the canonical ART adapter graph;
+# the temporary staging directory is removed after this script exits.
+mkdir -p "$build_dir/generated"
+cp "$stage/android16_os_constants_values.inc" \
+  "$stage/android16_os_constants_errno.inc" \
+  "$stage/android16_os_constants_sysconf.inc" "$build_dir/generated/"
+
 nativehelper_source="$project_root/_aosp/libnativehelper-full"
 nativehelper_archive="$project_root/_build/nativehelper-foundation/libnativehelper_jvm.a"
 liblog_include="$project_root/_aosp/system/logging/liblog/include"

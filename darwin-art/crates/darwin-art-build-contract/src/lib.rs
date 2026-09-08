@@ -7,7 +7,7 @@
 /// Bump when the common runtime/adapters include or command contract changes.
 /// A mismatch disables cache promotion until the canonical builder repopulates
 /// `_build/runtime-common`.
-pub const RUNTIME_CACHE_IDENTITY: &str = "darwin-art-runtime-core-cache-v21-osconstants-fallback";
+pub const RUNTIME_CACHE_IDENTITY: &str = "darwin-art-runtime-core-cache-v23-osconstants-owner";
 
 /// Identity of the generated native Ninja graph. Keeping this beside the
 /// runtime cache contract prevents the canonical builder and graph emitter
@@ -44,6 +44,7 @@ pub const HEADLESS_ADAPTER_SOURCES: &[&str] = &[
     "darwin_framework_binder_natives.cc",
     "darwin_framework_sqlite_natives.cc",
     "darwin_framework_system_property_natives.cc",
+    "darwin_os_constants.cc",
     "darwin_framework_asset_manager_natives.cc",
     "darwin_framework_render_node_natives.cc",
     "darwin_framework_graphics_runtime.cc",
@@ -92,6 +93,7 @@ pub const GRAPHICS_ADAPTER_SOURCES: &[&str] = &[
     "darwin_framework_binder_natives.cc",
     "darwin_framework_sqlite_natives.cc",
     "darwin_framework_system_property_natives.cc",
+    "darwin_os_constants.cc",
     "darwin_framework_asset_manager_natives.cc",
     "darwin_framework_render_node_natives.cc",
     "darwin_framework_graphics_runtime.cc",
