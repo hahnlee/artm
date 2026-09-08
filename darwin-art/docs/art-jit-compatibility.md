@@ -6188,3 +6188,10 @@ added; the full corpus and multi-loader identity task remain open.
   managed PCs are logical `0x210dxxx`; the CFI probe remains five FAILs. The
   next implementation must preserve each image/oat logical begin and compute
   its relocation delta for unwinding.
+### Runtime checkpoint 355 — 2026-09-09
+
+- Investigated extending the bridge with raw `ImageHeader` logical oat begin.
+  The existing image-loading call site does not yet provide a patch-safe,
+  verified per-oat identity path; the speculative alias change was reverted.
+  The previous host/logical mismatch remains the active blocker and no
+  unverified address translation was committed.

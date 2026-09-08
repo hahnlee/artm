@@ -10936,3 +10936,9 @@ or admission exception was added.
   ranges, but host ranges (`0x1007...`) still differ from managed logical PCs
   (`0x210dxxx`). The required next step is preserving per-image logical oat
   begin and applying its relocation delta in the unwinder.
+### Runtime checkpoint 355 — 2026-09-09
+
+- Reviewed raw `ImageHeader` logical oat begin integration. Because the current
+  image-loading call site lacks a verified patch-safe per-oat identity path,
+  the speculative alias was reverted. Host/logical PC translation remains the
+  next required architectural change.
