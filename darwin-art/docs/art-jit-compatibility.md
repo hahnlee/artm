@@ -6523,3 +6523,11 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter-versus-optimized lanes pass, covering JVMTI PopFrame stack
   mutation and continuation through optimized code. JNI CFI mapping and
   real-app criteria remain open.
+
+### Runtime checkpoint 399 — 2026-09-09
+
+- Added an executable-range-validated 1MiB logical-segment recovery candidate
+  for low OAT PCs. Runtime bootstrap succeeds, but `137-cfi` remains failing,
+  so the missing mapping is not recoverable from segment alignment alone. The
+  candidate is retained as a guarded host-boundary path while authoritative
+  OAT metadata publication remains the next target.

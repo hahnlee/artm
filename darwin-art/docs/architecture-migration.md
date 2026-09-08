@@ -11236,3 +11236,9 @@ or admission exception was added.
 - Unmodified AOSP `1953-pop-frame` passes in interpreter, JIT, and comparison
   lanes. JVMTI PopFrame stack mutation and optimized-code continuation are
   verified without APK changes; JNI CFI and real-app work remain.
+
+### Runtime checkpoint 399 — 2026-09-09
+
+- Added executable-range-validated 1MiB logical-segment recovery for low OAT
+  PCs. Bootstrap succeeds but `137-cfi` still fails, proving segment alignment
+  alone is insufficient; authoritative OAT metadata publication remains next.

@@ -81,6 +81,19 @@ uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc) {
         if (mapping != nullptr && (mapping->flags() & PROT_EXEC) != 0) return candidate;
       }
     }
+    // ART's app OAT code is allocated in a 1MiB-aligned logical segment. When
+    // the 32-bit pointer field has discarded the segment base, recover the
+    // intra-segment offset against each registered host OAT range and accept
+    // only a candidate that is actually executable and inside that range.
+    const uint64_t logical_segment = pc & ~((1ULL << 20) - 1);
+    const uint64_t segment_offset = pc - logical_segment;
+    for (const auto& range : g_aot_ranges) {
+      const uint64_t candidate = range.start + segment_offset;
+      if (candidate < range.end) {
+        const auto mapping = maps->Find(candidate);
+        if (mapping != nullptr && (mapping->flags() & PROT_EXEC) != 0) return candidate;
+      }
+    }
   }
   const uint64_t candidate = kDarwinArtCompressedReferenceBase + pc;
   const auto mapping = maps->Find(candidate);
