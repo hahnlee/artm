@@ -11045,3 +11045,11 @@ or admission exception was added.
   trace was not retained because the staging pipeline replays source patches
   across host/target passes; future tracing must be idempotent and isolated at
   an existing host boundary. The logical return-PC mapping remains open.
+
+### Runtime checkpoint 370 — 2026-09-09
+
+- The unmodified AOSP `003-omnibus-opcodes` corpus now passes in all three
+  runner lanes: interpreter expected output, JIT expected output, and
+  interpreter-versus-optimized output. This validates the existing JIT opcode
+  path without an APK/test allowlist, but does not close JNI CFI, GC,
+  concurrency, or real-app completion criteria.

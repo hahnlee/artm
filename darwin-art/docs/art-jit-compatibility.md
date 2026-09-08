@@ -6310,3 +6310,12 @@ added; the full corpus and multi-loader identity task remain open.
   diagnostic hunk unsafe. The next instrumentation must use an existing
   idempotent boundary or a dedicated host-side hook before changing runtime
   behavior.
+
+### Runtime checkpoint 370 — 2026-09-09
+
+- Ran the unmodified AOSP `003-omnibus-opcodes` test through the current
+  runner. Interpreter expected output, JIT expected output, and the
+  unmodified-source interpreter+optimized comparison all pass. This provides
+  concrete coverage for the primitive/reference opcode and control-flow
+  surface, while the full compatibility objective and Generic JNI CFI mapping
+  remain open.
