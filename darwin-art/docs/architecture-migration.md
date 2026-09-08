@@ -11105,3 +11105,9 @@ or admission exception was added.
   Loop on-stack replacement and optimized-to-interpreter transition are
   verified without APK changes or fallback gates; JNI CFI and broader OSR
   coverage remain.
+
+### Runtime checkpoint 379 — 2026-09-09
+
+- Unmodified AOSP `535-deopt-and-inlining` passes in interpreter, JIT, and
+  comparison lanes. Deoptimization from inlined frames is verified without
+  APK changes or fallback gates; JNI CFI and real-app work remain.

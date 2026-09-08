@@ -6370,6 +6370,13 @@ added; the full corpus and multi-loader identity task remain open.
   optimized-to-interpreter transition. JNI CFI publication, broader OSR
   stress, and real-app criteria remain open.
 
+### Runtime checkpoint 379 — 2026-09-09
+
+- Ran unmodified AOSP `535-deopt-and-inlining`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes pass, covering deoptimization from
+  inlined frames. JNI CFI publication, broader OSR stress, and real-app
+  criteria remain open.
+
 ### Runtime checkpoint 376 — 2026-09-09
 
 - Ran unmodified AOSP `2001-virtual-structural-multithread`. Interpreter, JIT,
