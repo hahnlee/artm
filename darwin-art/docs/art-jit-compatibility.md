@@ -6264,3 +6264,12 @@ added; the full corpus and multi-loader identity task remain open.
   graphics bootstrap and manifest test pass, but a fresh `137-cfi` run still
   reports the same five CFI failures; this producer is not the remaining
   source, so the goal remains open.
+
+### Runtime checkpoint 365 — 2026-09-09
+
+- Extended `0167` entrypoint reads to normalize low logical values for both
+  pointer sizes, covering the ARM64 invoke-stub read path. Patch application,
+  bootstrap, and formatting checks pass, but another `137-cfi` run remains at
+  five failures. The saved LR is therefore not fixed by ArtMethod read/store
+  representation alone; the native/JNI frame producer remains the next
+  boundary to instrument.

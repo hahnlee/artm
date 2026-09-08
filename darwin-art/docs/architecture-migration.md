@@ -11006,3 +11006,10 @@ or admission exception was added.
   representation before comparison and publication. Bootstrap and manifest
   tests pass; the fresh `137-cfi` run is unchanged, so the unresolved producer
   is downstream of this boundary.
+
+### Runtime checkpoint 365 — 2026-09-09
+
+- Broadened `0167` read normalization to both pointer sizes so ARM64's invoke
+  stub path is covered. Bootstrap and formatting checks pass, while `137-cfi`
+  still reports five failures; the remaining low LR is not explained by
+  ArtMethod pointer representation and needs native/JNI frame-producer tracing.

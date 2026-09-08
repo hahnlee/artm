@@ -1,7 +1,7 @@
 diff --git a/runtime/art_method.h b/runtime/art_method.h
 --- a/runtime/art_method.h
 +++ b/runtime/art_method.h
-@@ -790,5 +790,12 @@
+@@ -790,5 +790,10 @@
    ALWAYS_INLINE
    const void* GetEntryPointFromQuickCompiledCodePtrSize(PointerSize pointer_size) const {
 -    return GetNativePointer<const void*>(
@@ -9,10 +9,8 @@ diff --git a/runtime/art_method.h b/runtime/art_method.h
 +    const void* entry_point = GetNativePointer<const void*>(
 +        EntryPointFromQuickCompiledCodeOffset(pointer_size), pointer_size);
 +#if defined(__APPLE__)
-+    if (pointer_size == PointerSize::k32) {
-+      entry_point = reinterpret_cast<const void*>(ArtCompressedReferenceToHostAddress(
-+          reinterpret_cast<uintptr_t>(entry_point)));
-+    }
++    entry_point = reinterpret_cast<const void*>(ArtCompressedReferenceToHostAddress(
++        reinterpret_cast<uintptr_t>(entry_point)));
 +#endif
 +    return entry_point;
   }
