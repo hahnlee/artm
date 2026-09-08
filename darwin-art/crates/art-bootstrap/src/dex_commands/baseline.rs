@@ -122,7 +122,8 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(root.join("probes/ProbeContentRoot.java"))
             .arg(root.join("probes/compile-stubs/android/content/IContentProvider.java"))
             .arg(root.join("probes/compile-stubs/android/content/ContentCaptureOptions.java"))
-            .arg(root.join("probes/compile-stubs/android/view/autofill/AutofillManager.java")),
+            .arg(root.join("probes/compile-stubs/android/view/autofill/AutofillManager.java"))
+            .arg(root.join("probes/compile-stubs/android/view/InputChannel.java")),
     )?;
 
     let invoke_custom_generator_dir = build_dir.join("invoke-custom-generator");
@@ -257,7 +258,8 @@ pub(crate) fn build_dex_probe(root: &Path) -> Result<()> {
             .arg(class_dir.join("dev/darwinart/probe/JitMathDirect.class"))
             .arg(class_dir.join("libcore/io/JitMemoryDirect.class"))
             .arg(class_dir.join("java/lang/ref/JitReferenceDirect.class"))
-            .arg(class_dir.join("java/lang/JitBoxingDirect.class")),
+            .arg(class_dir.join("java/lang/JitBoxingDirect.class"))
+            .arg(class_dir.join("android/view/InputChannel.class")),
     )?;
 
     // Boot class path entries are ZIP/JAR containers on Android. Keep the

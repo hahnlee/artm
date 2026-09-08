@@ -9349,6 +9349,14 @@ or admission exception was added.
   irreducible loops, and iteration handling. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 258 — 2026-09-08
+
+- Added the hidden `android.view.InputChannel` framework stub with paired
+  ParcelFileDescriptor endpoints, Binder token identity, Parcelable round-trip,
+  and disposal. It is included in support DEX/compiler inputs, and the final
+  smoke test now passes interpreter/JIT/optimized lanes. The corpus ledger is
+  1,075/1,075 passed; real-app validation remains pending.
+
 ### Runtime checkpoint 257 — 2026-09-08
 
 - The lock-enabled rerun confirms the shared boot-artifact race is resolved:
@@ -9453,6 +9461,14 @@ or admission exception was added.
   ARM64 codegen, barriers, JNI, deoptimization, class loading, dex/vdex,
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
+
+### Runtime checkpoint 258 — 2026-09-08
+
+- Added the hidden `android.view.InputChannel` framework stub with paired
+  ParcelFileDescriptor endpoints, Binder token identity, Parcelable round-trip,
+  and disposal. It is included in support DEX/compiler inputs, and the final
+  endpoint/Parcel smoke passes interpreter/JIT/optimized lanes. The corpus
+  ledger is 1,075/1,075 passed; real-app validation remains pending.
 
 ### Runtime checkpoint 257 — 2026-09-08
 

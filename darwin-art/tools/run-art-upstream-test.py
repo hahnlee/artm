@@ -1352,6 +1352,9 @@ def main() -> int:
             root / "probes/compiler-stubs/dalvik/system/PathClassLoader.java",
             root / "probes/compiler-stubs/dalvik/system/DelegateLastClassLoader.java",
             root / "probes/compiler-stubs/dalvik/system/ZygoteHooks.java",
+            # InputChannel is a hidden framework API absent from the public
+            # SDK jar but required by the endpoint/Parcel compatibility smoke.
+            root / "probes/compile-stubs/android/view/InputChannel.java",
             root / "probes/compiler-stubs/libcore/util/EmptyArray.java",
             root / "probes/compiler-stubs/dalvik/annotation/optimization/DeadReferenceSafe.java",
             root / "probes/compiler-stubs/dalvik/annotation/optimization/NeverInline.java",

@@ -5103,6 +5103,16 @@ added; the full corpus and multi-loader identity task remain open.
   monitors, threads, and thread groups. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 258 — 2026-09-08
+
+- Added the hidden `android.view.InputChannel` framework stub with paired
+  ParcelFileDescriptor endpoints, shared Binder token identity, Parcelable
+  round-trip, and dispose semantics. It is compiled into the support DEX and
+  supplied as a hidden compiler input. The formerly failing
+  `9999-input-channel-endpoint-parcel-smoke` now passes interpreter, JIT, and
+  optimized lanes; the authoritative corpus ledger is 1,075/1,075 passed.
+  Real-app validation remains pending.
+
 ### Runtime checkpoint 249 — 2026-09-08
 
 - The `800-smali`–`837-deopt` slice passed all 40 tests, covering smali and
@@ -5123,6 +5133,15 @@ added; the full corpus and multi-loader identity task remain open.
   passed of 1,075 discovered tests; only the custom InputChannel smoke test
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
+
+### Runtime checkpoint 258 — 2026-09-08
+
+- Added the hidden `android.view.InputChannel` framework stub with paired
+  ParcelFileDescriptor endpoints, shared Binder token identity, Parcelable
+  round-trip, and dispose semantics. It is compiled into the support DEX and
+  supplied as a hidden compiler input. The formerly failing endpoint/Parcel
+  smoke now passes interpreter, JIT, and optimized lanes; the authoritative
+  corpus ledger is 1,075/1,075 passed. Real-app validation remains pending.
 
 ### Runtime checkpoint 256 — 2026-09-08
 
