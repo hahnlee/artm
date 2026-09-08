@@ -4208,3 +4208,13 @@ added; the full corpus and multi-loader identity task remain open.
   The run now reaches sustained SurfaceFlinger scanout and exposes a separate
   long-lived ART generated-code fault after compositor activity, so tab
   rendering remains open despite short lifecycle smoke passing.
+
+### Runtime checkpoint 120 — 2026-09-08
+
+- On the replacement Mac, rebuilt the native graphics bootstrap after wiring
+  Android `ImageReader` JNI to the Darwin ANativeWindow/AHardwareBuffer queue.
+  The build and graphics-link audit passed. A fresh 8-second Chrome APK smoke
+  exited with status 0 and no `ImageReader.nativeClassInit` linkage error,
+  fatal signal, or generated-code fault. Long-running tab graphics acceptance
+  remains the next boundary; image-plane and hardware-buffer API coverage is
+  still tracked as an AOSP compatibility gap.

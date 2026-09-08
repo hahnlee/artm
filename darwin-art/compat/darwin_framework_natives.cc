@@ -29,12 +29,14 @@
 #include <vector>
 
 #include <android/surface_control.h>
+#include <android/hardware_buffer.h>
 #include "../_aosp/system/libziparchive/include/ziparchive/zip_archive.h"
 
 #include <fcntl.h>
 #include <unistd.h>
 
 extern "C" intptr_t darwin_art_bionic_pread(int, void*, size_t, int64_t);
+extern "C" int darwin_art_bionic_socket_broker_close(int);
 
 namespace {
 
@@ -872,6 +874,429 @@ jlong BlastBufferQueueNativeCreate(JNIEnv* env, jclass, jstring, jboolean) {
 void BlastBufferQueueNativeNoop(JNIEnv*, jclass, jlong) {}
 void BlastBufferQueueNativeNoop2(JNIEnv*, jclass, jlong, jlong) {}
 void BlastBufferQueueNativeNoop3(JNIEnv*, jclass, jlong, jlong, jlong) {}
+
+struct ImageReaderFields {
+  jfieldID context = nullptr;
+  jfieldID image_buffer = nullptr;
+  jfieldID image_timestamp = nullptr;
+  jfieldID image_dataspace = nullptr;
+  jfieldID image_transform = nullptr;
+  jfieldID image_scaling_mode = nullptr;
+  jclass reader_class = nullptr;
+  jmethodID post_event = nullptr;
+};
+ImageReaderFields g_image_reader_fields;
+
+struct ImageReaderPendingBuffer {
+  AHardwareBuffer* buffer = nullptr;
+  int32_t slot = -1;
+  int fence = -1;
+  int32_t dataspace = 0;
+  int64_t timestamp_ns = 0;
+};
+
+struct DarwinImageReader {
+  std::atomic<uint32_t> references{1};
+  JavaVM* vm = nullptr;
+  std::mutex mutex;
+  void* producer = nullptr;
+  jobject weak_self = nullptr;
+  std::deque<ImageReaderPendingBuffer> pending;
+  uint32_t acquired = 0;
+  uint32_t max_images = 1;
+  bool closed = false;
+};
+
+struct DarwinSurfaceImage {
+  AHardwareBuffer* buffer = nullptr;
+  void* producer = nullptr;
+  int32_t slot = -1;
+  int fence = -1;
+  int32_t dataspace = 0;
+  int64_t timestamp_ns = 0;
+  DarwinImageReader* reader = nullptr;
+};
+
+void ReleaseImageReaderPending(void* producer,
+                               ImageReaderPendingBuffer* pending) {
+  if (pending == nullptr) return;
+  if (producer != nullptr && pending->slot >= 0) {
+    darwin_art_android_ANativeWindow_release_consumer_slot(
+        producer, pending->slot, -1);
+  }
+  if (pending->fence >= 0)
+    (void)darwin_art_bionic_socket_broker_close(pending->fence);
+  if (pending->buffer != nullptr) AHardwareBuffer_release(pending->buffer);
+  *pending = ImageReaderPendingBuffer{};
+}
+
+void ReleaseImageReader(DarwinImageReader* reader) {
+  if (reader == nullptr ||
+      reader->references.fetch_sub(1, std::memory_order_acq_rel) != 1) {
+    return;
+  }
+  for (auto& pending : reader->pending)
+    ReleaseImageReaderPending(reader->producer, &pending);
+  if (reader->weak_self != nullptr) {
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (reader->vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) !=
+        JNI_OK) {
+      attached = reader->vm->AttachCurrentThread(&env, nullptr) == JNI_OK;
+    }
+    if (env != nullptr) env->DeleteGlobalRef(reader->weak_self);
+    if (attached) reader->vm->DetachCurrentThread();
+  }
+  if (reader->producer != nullptr)
+    darwin_art_android_ANativeWindow_release(reader->producer);
+  delete reader;
+}
+
+void ReleaseImageReaderCallbackContext(void* context) {
+  ReleaseImageReader(static_cast<DarwinImageReader*>(context));
+}
+
+void ImageReaderQueueBuffer(void* context, AHardwareBuffer* buffer,
+                            int32_t slot, int fence, int32_t dataspace) {
+  auto* reader = static_cast<DarwinImageReader*>(context);
+  if (reader == nullptr || buffer == nullptr) {
+    if (fence >= 0) (void)darwin_art_bionic_socket_broker_close(fence);
+    return;
+  }
+  AHardwareBuffer_acquire(buffer);
+  ImageReaderPendingBuffer dropped;
+  bool notify = false;
+  {
+    std::lock_guard<std::mutex> lock(reader->mutex);
+    if (reader->closed) {
+      dropped = {.buffer = buffer, .slot = slot, .fence = fence};
+    } else {
+      if (reader->pending.size() >= reader->max_images) {
+        dropped = reader->pending.front();
+        reader->pending.pop_front();
+      }
+      reader->pending.push_back({
+          .buffer = buffer,
+          .slot = slot,
+          .fence = fence,
+          .dataspace = dataspace,
+          .timestamp_ns =
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::steady_clock::now().time_since_epoch())
+                  .count(),
+      });
+      notify = true;
+    }
+  }
+  ReleaseImageReaderPending(reader->producer, &dropped);
+  if (!notify || reader->weak_self == nullptr ||
+      g_image_reader_fields.reader_class == nullptr ||
+      g_image_reader_fields.post_event == nullptr) {
+    return;
+  }
+  JNIEnv* env = nullptr;
+  bool attached = false;
+  if (reader->vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) !=
+      JNI_OK) {
+    attached = reader->vm->AttachCurrentThread(&env, nullptr) == JNI_OK;
+  }
+  if (env != nullptr) {
+    env->CallStaticVoidMethod(g_image_reader_fields.reader_class,
+                              g_image_reader_fields.post_event,
+                              reader->weak_self);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+  }
+  if (attached) reader->vm->DetachCurrentThread();
+}
+
+DarwinImageReader* GetImageReader(JNIEnv* env, jobject object) {
+  return g_image_reader_fields.context == nullptr
+             ? nullptr
+             : reinterpret_cast<DarwinImageReader*>(static_cast<uintptr_t>(
+                   env->GetLongField(object, g_image_reader_fields.context)));
+}
+
+void ImageReaderNativeClassInit(JNIEnv* env, jclass reader_class) {
+  g_image_reader_fields.context =
+      env->GetFieldID(reader_class, "mNativeContext", "J");
+  g_image_reader_fields.reader_class =
+      static_cast<jclass>(env->NewGlobalRef(reader_class));
+  g_image_reader_fields.post_event = env->GetStaticMethodID(
+      reader_class, "postEventFromNative", "(Ljava/lang/Object;)V");
+  jclass image_class =
+      env->FindClass("android/media/ImageReader$SurfaceImage");
+  if (image_class == nullptr) return;
+  g_image_reader_fields.image_buffer =
+      env->GetFieldID(image_class, "mNativeBuffer", "J");
+  g_image_reader_fields.image_timestamp =
+      env->GetFieldID(image_class, "mTimestamp", "J");
+  g_image_reader_fields.image_dataspace =
+      env->GetFieldID(image_class, "mDataSpace", "I");
+  g_image_reader_fields.image_transform =
+      env->GetFieldID(image_class, "mTransform", "I");
+  g_image_reader_fields.image_scaling_mode =
+      env->GetFieldID(image_class, "mScalingMode", "I");
+  env->DeleteLocalRef(image_class);
+}
+
+void ImageReaderNativeInit(JNIEnv* env, jobject object, jobject weak_self,
+                           jint width, jint height, jint max_images, jlong,
+                           jint format, jint) {
+  auto* reader = new (std::nothrow) DarwinImageReader();
+  if (reader == nullptr) return;
+  env->GetJavaVM(&reader->vm);
+  reader->max_images = static_cast<uint32_t>(std::max(1, max_images));
+  reader->weak_self = env->NewGlobalRef(weak_self);
+  reader->producer =
+      darwin_art_android_ANativeWindow_create(width, height, format);
+  if (reader->producer == nullptr || reader->weak_self == nullptr) {
+    ReleaseImageReader(reader);
+    return;
+  }
+  reader->references.fetch_add(1, std::memory_order_relaxed);
+  if (!darwin_art_android_ANativeWindow_set_owned_queue_callback(
+          reader->producer, &ImageReaderQueueBuffer, reader,
+          &ReleaseImageReaderCallbackContext)) {
+    reader->references.fetch_sub(1, std::memory_order_relaxed);
+    ReleaseImageReader(reader);
+    return;
+  }
+  env->SetLongField(object, g_image_reader_fields.context,
+                    reinterpret_cast<jlong>(reader));
+}
+
+void ImageReaderNativeClose(JNIEnv* env, jobject object) {
+  DarwinImageReader* reader = GetImageReader(env, object);
+  if (reader == nullptr) return;
+  env->SetLongField(object, g_image_reader_fields.context, 0);
+  std::deque<ImageReaderPendingBuffer> pending;
+  {
+    std::lock_guard<std::mutex> lock(reader->mutex);
+    reader->closed = true;
+    pending.swap(reader->pending);
+  }
+  darwin_art_android_ANativeWindow_set_owned_queue_callback(
+      reader->producer, nullptr, nullptr, nullptr);
+  for (auto& item : pending)
+    ReleaseImageReaderPending(reader->producer, &item);
+  ReleaseImageReader(reader);
+}
+
+jobject ImageReaderNativeGetSurface(JNIEnv* env, jobject object) {
+  DarwinImageReader* reader = GetImageReader(env, object);
+  if (reader == nullptr) return nullptr;
+  jclass surface_class = env->FindClass("android/view/Surface");
+  jmethodID constructor = surface_class == nullptr
+                              ? nullptr
+                              : env->GetMethodID(surface_class, "<init>", "()V");
+  jobject surface = constructor == nullptr
+                        ? nullptr
+                        : env->NewObject(surface_class, constructor);
+  jfieldID native_object = surface_class == nullptr
+                               ? nullptr
+                               : env->GetFieldID(surface_class, "mNativeObject", "J");
+  if (surface != nullptr && native_object != nullptr) {
+    darwin_art_android_ANativeWindow_acquire(reader->producer);
+    env->SetLongField(surface, native_object,
+                      reinterpret_cast<jlong>(reader->producer));
+  }
+  if (surface_class != nullptr) env->DeleteLocalRef(surface_class);
+  return surface;
+}
+
+jint ImageReaderNativeImageSetup(JNIEnv* env, jobject object, jobject image) {
+  DarwinImageReader* reader = GetImageReader(env, object);
+  if (reader == nullptr) return 1;
+  ImageReaderPendingBuffer pending;
+  {
+    std::lock_guard<std::mutex> lock(reader->mutex);
+    if (reader->acquired >= reader->max_images) return 2;
+    if (reader->pending.empty()) return 1;
+    pending = reader->pending.front();
+    reader->pending.pop_front();
+    ++reader->acquired;
+  }
+  auto* native_image = new (std::nothrow) DarwinSurfaceImage{
+      .buffer = pending.buffer,
+      .producer = reader->producer,
+      .slot = pending.slot,
+      .fence = pending.fence,
+      .dataspace = pending.dataspace,
+      .timestamp_ns = pending.timestamp_ns,
+      .reader = reader,
+  };
+  if (native_image == nullptr) {
+    ReleaseImageReaderPending(reader->producer, &pending);
+    std::lock_guard<std::mutex> lock(reader->mutex);
+    --reader->acquired;
+    return 1;
+  }
+  reader->references.fetch_add(1, std::memory_order_relaxed);
+  darwin_art_android_ANativeWindow_acquire(reader->producer);
+  env->SetLongField(image, g_image_reader_fields.image_buffer,
+                    reinterpret_cast<jlong>(native_image));
+  env->SetLongField(image, g_image_reader_fields.image_timestamp,
+                    pending.timestamp_ns);
+  env->SetIntField(image, g_image_reader_fields.image_dataspace,
+                   pending.dataspace);
+  env->SetIntField(image, g_image_reader_fields.image_transform, 0);
+  env->SetIntField(image, g_image_reader_fields.image_scaling_mode, 0);
+  return 0;
+}
+
+DarwinSurfaceImage* GetSurfaceImage(JNIEnv* env, jobject image) {
+  return g_image_reader_fields.image_buffer == nullptr
+             ? nullptr
+             : reinterpret_cast<DarwinSurfaceImage*>(static_cast<uintptr_t>(
+                   env->GetLongField(image,
+                                     g_image_reader_fields.image_buffer)));
+}
+
+void ImageReaderNativeReleaseImage(JNIEnv* env, jobject, jobject image) {
+  DarwinSurfaceImage* native_image = GetSurfaceImage(env, image);
+  if (native_image == nullptr) return;
+  env->SetLongField(image, g_image_reader_fields.image_buffer, 0);
+  darwin_art_android_ANativeWindow_release_consumer_slot(
+      native_image->producer, native_image->slot, -1);
+  if (native_image->fence >= 0)
+    (void)darwin_art_bionic_socket_broker_close(native_image->fence);
+  AHardwareBuffer_release(native_image->buffer);
+  {
+    std::lock_guard<std::mutex> lock(native_image->reader->mutex);
+    if (native_image->reader->acquired > 0) --native_image->reader->acquired;
+  }
+  darwin_art_android_ANativeWindow_release(native_image->producer);
+  ReleaseImageReader(native_image->reader);
+  delete native_image;
+}
+
+void ImageReaderNativeDiscardFreeBuffers(JNIEnv*, jobject object) {
+  // The producer's fixed three-slot pool is reclaimed as each queued consumer
+  // slot is released. There is no separate gralloc cache to discard on Darwin.
+  (void)object;
+}
+
+jint ImageReaderNativeDetachImage(JNIEnv*, jobject, jobject, jboolean) {
+  // Detaching transfers GraphicBuffer ownership outside the reader. The Java
+  // HardwareBuffer path used by Chromium does not detach; report unsupported
+  // without corrupting the acquired slot's ownership.
+  return -1;
+}
+
+jobjectArray ImageReaderNativeCreateImagePlanes(JNIEnv* env, jclass,
+                                                 jint count, jobject, jint,
+                                                 jint, jint, jint, jint,
+                                                 jint) {
+  jclass plane = env->FindClass("android/media/ImageReader$ImagePlane");
+  jobjectArray result = plane == nullptr
+                            ? nullptr
+                            : env->NewObjectArray(std::max(0, count), plane,
+                                                  nullptr);
+  if (plane != nullptr) env->DeleteLocalRef(plane);
+  return result;
+}
+
+void ImageReaderNativeUnlockGraphicBuffer(JNIEnv*, jclass, jobject) {}
+
+jobjectArray SurfaceImageNativeCreatePlanes(JNIEnv* env, jobject, jint count,
+                                             jint, jlong) {
+  jclass plane = env->FindClass(
+      "android/media/ImageReader$SurfaceImage$SurfacePlane");
+  jobjectArray result = plane == nullptr
+                            ? nullptr
+                            : env->NewObjectArray(std::max(0, count), plane,
+                                                  nullptr);
+  if (plane != nullptr) env->DeleteLocalRef(plane);
+  return result;
+}
+
+jint SurfaceImageNativeGetWidth(JNIEnv* env, jobject image) {
+  DarwinSurfaceImage* native_image = GetSurfaceImage(env, image);
+  if (native_image == nullptr) return 0;
+  AHardwareBuffer_Desc desc{};
+  AHardwareBuffer_describe(native_image->buffer, &desc);
+  return static_cast<jint>(desc.width);
+}
+jint SurfaceImageNativeGetHeight(JNIEnv* env, jobject image) {
+  DarwinSurfaceImage* native_image = GetSurfaceImage(env, image);
+  if (native_image == nullptr) return 0;
+  AHardwareBuffer_Desc desc{};
+  AHardwareBuffer_describe(native_image->buffer, &desc);
+  return static_cast<jint>(desc.height);
+}
+jint SurfaceImageNativeGetFormat(JNIEnv* env, jobject image, jint reader_format) {
+  DarwinSurfaceImage* native_image = GetSurfaceImage(env, image);
+  if (native_image == nullptr) return reader_format;
+  AHardwareBuffer_Desc desc{};
+  AHardwareBuffer_describe(native_image->buffer, &desc);
+  return static_cast<jint>(desc.format);
+}
+jint SurfaceImageNativeGetFenceFd(JNIEnv* env, jobject image) {
+  DarwinSurfaceImage* native_image = GetSurfaceImage(env, image);
+  return native_image == nullptr ? -1 : native_image->fence;
+}
+jobject SurfaceImageNativeGetHardwareBuffer(JNIEnv*, jobject) {
+  // Java HardwareBuffer ownership is a separate core-jni boundary. The image
+  // remains valid and backed by AHardwareBuffer; expose it after that wrapper
+  // registrar is installed rather than constructing an invalid Java object.
+  return nullptr;
+}
+jint PublicFormatNativeGetHalFormat(JNIEnv*, jclass, jint format) {
+  // frameworks/native/libs/ui/PublicFormat.cpp maps the encoded formats to
+  // their transport formats. Most public/HAL enums are intentionally 1:1.
+  switch (format) {
+    case 0x100:       // JPEG
+    case 0x101:       // DEPTH_POINT_CLOUD
+    case 0x69656963:  // DEPTH_JPEG
+    case 0x48454946:  // HEIC
+    case 0x1005:      // JPEG_R
+    case 0x1006:      // HEIC_ULTRAHDR
+      return 0x21;    // HAL_PIXEL_FORMAT_BLOB
+    case 0x44363159:  // DEPTH16
+      return 0x20363159;  // HAL_PIXEL_FORMAT_Y16
+    case 0x20:        // RAW_SENSOR
+    case 0x1002:      // RAW_DEPTH
+      return 0x20;    // HAL_PIXEL_FORMAT_RAW16
+    case 0x1003:      // RAW_DEPTH10
+      return 0x25;    // HAL_PIXEL_FORMAT_RAW10
+    default:
+      return format;
+  }
+}
+jint PublicFormatNativeGetHalDataspace(JNIEnv*, jclass, jint format) {
+  // Exact Android dataspace constants from system/graphics.h. Chrome's RGBA
+  // snapshot path uses UNKNOWN; retain the complete non-default mappings so
+  // other framework ImageReader clients observe AOSP's contract as well.
+  switch (format) {
+    case 0x100:       // JPEG
+    case 0x23:        // YUV_420_888
+    case 0x11:        // NV21
+    case 0x32315659:  // YV12
+      return 0x101;   // HAL_DATASPACE_V0_JFIF
+    case 0x101:       // DEPTH_POINT_CLOUD
+    case 0x44363159:  // DEPTH16
+    case 0x1002:      // RAW_DEPTH
+    case 0x1003:      // RAW_DEPTH10
+      return 0x1000;  // HAL_DATASPACE_DEPTH
+    case 0x69656963:  // DEPTH_JPEG
+      return 0x1002;  // HAL_DATASPACE_DYNAMIC_DEPTH
+    default:
+      return 0;
+  }
+}
+jint PublicFormatNativeGetPublicFormat(JNIEnv*, jclass, jint format,
+                                       jint dataspace) {
+  if (format == 0x21) {  // HAL_PIXEL_FORMAT_BLOB
+    if (dataspace == 0x1000) return 0x101;
+    if (dataspace == 0x1002) return 0x69656963;
+    return 0x100;
+  }
+  if (format == 0x20) return dataspace == 0x1000 ? 0x1002 : 0x20;
+  if (format == 0x25) return dataspace == 0x1000 ? 0x1003 : 0x25;
+  if (format == 0x20363159)
+    return dataspace == 0x1000 ? 0x44363159 : 0x20363159;
+  return format;
+}
 void BlastBufferQueueNativeDestroy(JNIEnv* env, jclass, jlong handle) {
   auto* queue = reinterpret_cast<DarwinBlastBufferQueue*>(handle);
   if (queue == nullptr) return;
@@ -2443,6 +2868,77 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   if (!Register(env, "android/graphics/BLASTBufferQueue",
                 blast_buffer_queue_methods,
                 static_cast<jint>(std::size(blast_buffer_queue_methods)))) {
+    return false;
+  }
+
+  JNINativeMethod image_reader_methods[] = {
+      {const_cast<char*>("nativeClassInit"), const_cast<char*>("()V"),
+       reinterpret_cast<void*>(&ImageReaderNativeClassInit)},
+      {const_cast<char*>("nativeInit"),
+       const_cast<char*>("(Ljava/lang/Object;IIIJII)V"),
+       reinterpret_cast<void*>(&ImageReaderNativeInit)},
+      {const_cast<char*>("nativeClose"), const_cast<char*>("()V"),
+       reinterpret_cast<void*>(&ImageReaderNativeClose)},
+      {const_cast<char*>("nativeReleaseImage"),
+       const_cast<char*>("(Landroid/media/Image;)V"),
+       reinterpret_cast<void*>(&ImageReaderNativeReleaseImage)},
+      {const_cast<char*>("nativeImageSetup"),
+       const_cast<char*>("(Landroid/media/Image;)I"),
+       reinterpret_cast<void*>(&ImageReaderNativeImageSetup)},
+      {const_cast<char*>("nativeGetSurface"),
+       const_cast<char*>("()Landroid/view/Surface;"),
+       reinterpret_cast<void*>(&ImageReaderNativeGetSurface)},
+      {const_cast<char*>("nativeDetachImage"),
+       const_cast<char*>("(Landroid/media/Image;Z)I"),
+       reinterpret_cast<void*>(&ImageReaderNativeDetachImage)},
+      {const_cast<char*>("nativeCreateImagePlanes"),
+       const_cast<char*>(
+           "(ILandroid/graphics/GraphicBuffer;IIIIII)[Landroid/media/ImageReader$ImagePlane;"),
+       reinterpret_cast<void*>(&ImageReaderNativeCreateImagePlanes)},
+      {const_cast<char*>("nativeUnlockGraphicBuffer"),
+       const_cast<char*>("(Landroid/graphics/GraphicBuffer;)V"),
+       reinterpret_cast<void*>(&ImageReaderNativeUnlockGraphicBuffer)},
+      {const_cast<char*>("nativeDiscardFreeBuffers"),
+       const_cast<char*>("()V"),
+       reinterpret_cast<void*>(&ImageReaderNativeDiscardFreeBuffers)},
+  };
+  if (!Register(env, "android/media/ImageReader", image_reader_methods,
+                static_cast<jint>(std::size(image_reader_methods)))) {
+    return false;
+  }
+
+  JNINativeMethod surface_image_methods[] = {
+      {const_cast<char*>("nativeCreatePlanes"), const_cast<char*>("(IIJ)[Landroid/media/ImageReader$SurfaceImage$SurfacePlane;"),
+       reinterpret_cast<void*>(&SurfaceImageNativeCreatePlanes)},
+      {const_cast<char*>("nativeGetWidth"), const_cast<char*>("()I"),
+       reinterpret_cast<void*>(&SurfaceImageNativeGetWidth)},
+      {const_cast<char*>("nativeGetHeight"), const_cast<char*>("()I"),
+       reinterpret_cast<void*>(&SurfaceImageNativeGetHeight)},
+      {const_cast<char*>("nativeGetFormat"), const_cast<char*>("(I)I"),
+       reinterpret_cast<void*>(&SurfaceImageNativeGetFormat)},
+      {const_cast<char*>("nativeGetFenceFd"), const_cast<char*>("()I"),
+       reinterpret_cast<void*>(&SurfaceImageNativeGetFenceFd)},
+      {const_cast<char*>("nativeGetHardwareBuffer"),
+       const_cast<char*>("()Landroid/hardware/HardwareBuffer;"),
+       reinterpret_cast<void*>(&SurfaceImageNativeGetHardwareBuffer)},
+  };
+  if (!Register(env, "android/media/ImageReader$SurfaceImage",
+                surface_image_methods,
+                static_cast<jint>(std::size(surface_image_methods)))) {
+    return false;
+  }
+
+  JNINativeMethod public_format_methods[] = {
+      {const_cast<char*>("nativeGetHalFormat"), const_cast<char*>("(I)I"),
+       reinterpret_cast<void*>(&PublicFormatNativeGetHalFormat)},
+      {const_cast<char*>("nativeGetHalDataspace"), const_cast<char*>("(I)I"),
+       reinterpret_cast<void*>(&PublicFormatNativeGetHalDataspace)},
+      {const_cast<char*>("nativeGetPublicFormat"), const_cast<char*>("(II)I"),
+       reinterpret_cast<void*>(&PublicFormatNativeGetPublicFormat)},
+  };
+  if (!Register(env, "android/media/PublicFormatUtils",
+                public_format_methods,
+                static_cast<jint>(std::size(public_format_methods)))) {
     return false;
   }
 

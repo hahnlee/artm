@@ -9173,3 +9173,13 @@ or admission exception was added.
   tab/grid rendering reaches sustained Metal/SurfaceFlinger scanout but still
   ends in an ART generated-code fault, marking a distinct renderer/JIT lifetime
   boundary beyond the stable startup lifecycle.
+
+### Runtime checkpoint 120 — 2026-09-08
+
+- Rebuilt on the replacement Mac with the new ImageReader native path: Java
+  ImageReader now owns an ANativeWindow-backed queue and AHardwareBuffer
+  references, with callback-context lifetime protected across teardown. The
+  graphics bootstrap/link audit passed and an 8-second real Chrome APK smoke
+  exited cleanly (no ImageReader linkage error or fatal signal). Full tab-grid
+  graphics endurance and remaining ImageReader plane/HardwareBuffer contracts
+  are still open.

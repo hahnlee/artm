@@ -54,7 +54,7 @@ env \
   DARWIN_ART_DEBUG_GRAPHICS_DSO=1 \
   DARWIN_ART_DEBUG_SURFACE_TRANSACTIONS=1 \
   DARWIN_ART_DEBUG_SURFACECONTROL_PIXELS=1 \
-  "$root/tools/run-android-apk-app.sh" "$apk" 34 >"$app_log" 2>&1
+  "$root/tools/run-android-apk-app.sh" "$apk" 70 >"$app_log" 2>&1
 tail -n +"$start_line" "$central_log" >"$output/surfaceflinger.log"
 
 grep -a -F 'org.chromium.chrome.browser.ui.android.bars_common.TabSwitcherButtonView' \

@@ -43,6 +43,13 @@ using DarwinArtAndroidNativeWindowQueueCallback = void (*)(
 void darwin_art_android_ANativeWindow_set_queue_callback(
     void* window, DarwinArtAndroidNativeWindowQueueCallback callback,
     void* context);
+// Installs an owned consumer callback. Replacement/unregistration waits for
+// callbacks that already captured the observer, then invokes release_context.
+// This mirrors BufferQueue's strong listener ownership and prevents a producer
+// queue racing Java consumer teardown from dereferencing a freed context.
+bool darwin_art_android_ANativeWindow_set_owned_queue_callback(
+    void* window, DarwinArtAndroidNativeWindowQueueCallback callback,
+    void* context, void (*release_context)(void*));
 // BLAST receives the actual buffer transaction before it is applied. Returning
 // true transfers transaction ownership to the callback. Registration context
 // is owned only on success and released after replacement and in-flight calls.

@@ -76,6 +76,15 @@ struct NativeWindowTransactionObserver {
   }
 };
 
+struct NativeWindowQueueObserver {
+  DarwinArtAndroidNativeWindowQueueCallback callback = nullptr;
+  void* context = nullptr;
+  void (*release_context)(void*) = nullptr;
+  ~NativeWindowQueueObserver() {
+    if (release_context != nullptr) release_context(context);
+  }
+};
+
 struct DarwinAndroidNativeWindow {
   // Must remain first. HWUI receives this object as a real ANativeWindow and
   // uses its Android native-base refcount/query ABI before handing it to the
@@ -113,8 +122,7 @@ struct DarwinAndroidNativeWindow {
   // until SurfaceFlinger's completion callback releases its predecessor.
   int32_t last_queued_slot = -1;
   uint64_t queued_frame_number = 0;
-  DarwinArtAndroidNativeWindowQueueCallback queue_callback = nullptr;
-  void* queue_context = nullptr;
+  std::shared_ptr<NativeWindowQueueObserver> queue_observer;
   std::shared_ptr<NativeWindowTransactionObserver> transaction_observer;
 };
 
@@ -504,8 +512,7 @@ int NativeWindowQueue(AndroidNativeWindowAbi* abi, void* native_buffer,
     return -EINVAL;
   }
   AHardwareBuffer* buffer = nullptr;
-  DarwinArtAndroidNativeWindowQueueCallback callback = nullptr;
-  void* callback_context = nullptr;
+  std::shared_ptr<NativeWindowQueueObserver> queue_observer;
   ASurfaceControl* control = nullptr;
   int32_t slot_index = -1;
   int32_t previous_slot = -1;
@@ -522,14 +529,13 @@ int NativeWindowQueue(AndroidNativeWindowAbi* abi, void* native_buffer,
     slot->dequeued = false;
     buffer = slot->buffer;
     slot_index = static_cast<int32_t>(slot - window->gpu_slots.data());
-    callback = window->queue_callback;
-    callback_context = window->queue_context;
+    queue_observer = window->queue_observer;
     dataspace = window->dataspace.load(std::memory_order_acquire);
     slot->consumer_held = true;
     queued_frame = ++window->queued_frame_number;
     slot->queued_frame = queued_frame;
     transaction_observer = window->transaction_observer;
-    if (callback == nullptr) {
+    if (queue_observer == nullptr || queue_observer->callback == nullptr) {
       if (window->surface_control == nullptr) {
         window->surface_control = reinterpret_cast<ASurfaceControl*>(
             darwin_art_android_surface_control_create_root("HWUI ViewRoot"));
@@ -540,11 +546,12 @@ int NativeWindowQueue(AndroidNativeWindowAbi* abi, void* native_buffer,
       window->last_queued_slot = slot_index;
     }
   }
-  if (callback != nullptr) {
+  if (queue_observer != nullptr && queue_observer->callback != nullptr) {
     // The callback is arbitrary consumer code and may release the producer.
     // Keep this window alive across the unlocked callback invocation.
     window->references.fetch_add(1, std::memory_order_relaxed);
-    callback(callback_context, buffer, slot_index, fence, dataspace);
+    queue_observer->callback(queue_observer->context, buffer, slot_index,
+                             fence, dataspace);
     ReleaseNativeWindow(window);
     return 0;
   }
@@ -905,11 +912,29 @@ extern "C" void darwin_art_android_ANativeWindow_release(void* opaque) {
 extern "C" void darwin_art_android_ANativeWindow_set_queue_callback(
     void* opaque, DarwinArtAndroidNativeWindowQueueCallback callback,
     void* context) {
+  (void)darwin_art_android_ANativeWindow_set_owned_queue_callback(
+      opaque, callback, context, nullptr);
+}
+
+extern "C" bool darwin_art_android_ANativeWindow_set_owned_queue_callback(
+    void* opaque, DarwinArtAndroidNativeWindowQueueCallback callback,
+    void* context, void (*release_context)(void*)) {
   auto* window = static_cast<DarwinAndroidNativeWindow*>(opaque);
-  if (window == nullptr) return;
+  if (window == nullptr) return false;
+  std::shared_ptr<NativeWindowQueueObserver> observer;
+  if (callback != nullptr) {
+    try {
+      observer = std::make_shared<NativeWindowQueueObserver>();
+    } catch (const std::bad_alloc&) {
+      return false;
+    }
+    observer->callback = callback;
+    observer->context = context;
+    observer->release_context = release_context;
+  }
   std::lock_guard<std::mutex> lock(window->mutex);
-  window->queue_callback = callback;
-  window->queue_context = context;
+  window->queue_observer = std::move(observer);
+  return true;
 }
 
 extern "C" bool darwin_art_android_ANativeWindow_set_transaction_callback(
