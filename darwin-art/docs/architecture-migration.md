@@ -9590,3 +9590,10 @@ or admission exception was added.
 - The fresh `1336`–`1339` GC/reference slice passes all four contracts across
   interpreter, JIT, and unchanged optimized lanes, validating finalizer
   timing, coverage/no-LOS collection, and dead-reference handling.
+
+### Runtime checkpoint 177 — 2026-09-08
+
+- The fresh `1900`–`1919` JVMTI slice passes all eight executable contracts in
+  interpreter, JIT, and unchanged optimized lanes, covering allocation
+  tracking, bytecode/local-variable access, suspend/resume, and thread-start
+  timing.

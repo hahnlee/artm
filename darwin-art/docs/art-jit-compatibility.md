@@ -4679,6 +4679,13 @@ added; the full corpus and multi-loader identity task remain open.
   and unchanged-source optimized lanes, covering finalizer timing, GC
   coverage/no-LOS behavior, and dead-reference safety.
 
+### Runtime checkpoint 177 — 2026-09-08
+
+- Fresh four-worker execution of the eight discovered contracts in
+  `1900`–`1919` passes interpreter, JIT, and unchanged-source optimized lanes,
+  covering JVMTI allocation tracking, bytecode/local-variable access,
+  suspend/resume, and thread-start timing.
+
 ### Runtime checkpoint 173 — 2026-09-08
 
 - Fresh four-worker corpus reruns completed 25/25 executable contracts in
