@@ -6856,6 +6856,12 @@ incomplete and still requires managed caller unwind validation.
 
 ### Runtime checkpoint 440 — 2026-09-09
 
+### Runtime checkpoint 441 — 2026-09-09
+
+- The callback is proven live in the host log; it reports the Java wrapper
+  (`Main.unwindInProcess`) but not deeper AOT callers. `137-cfi` remains
+  `FAIL`; the next fix is transition-aware caller walking.
+
 - Resolver is dynamically exported from the graphics runtime and present in
   the linked dylib. End-to-end `137-cfi` still fails; callback execution or
   ART stack-walk frame ordering remains to be corrected.

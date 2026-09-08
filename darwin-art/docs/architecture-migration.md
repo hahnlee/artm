@@ -11531,6 +11531,12 @@ or admission exception was added.
 
 ### Runtime checkpoint 440 — 2026-09-09
 
+### Runtime checkpoint 441 — 2026-09-09
+
+- Runtime callback execution is confirmed. It currently sees only the Java
+  wrapper method, so the remaining gap is traversing the native-to-managed
+  transition to deeper AOT callers while preserving AOSP ordering.
+
 - Runtime-owner resolver export is present and strict graphics audit passes.
   `137-cfi` remains failing, leaving callback execution/ordering as the next
   diagnostic boundary.
