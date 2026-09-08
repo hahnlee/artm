@@ -10618,3 +10618,9 @@ or admission exception was added.
   the Android libc contract required by VLC/MediaLibrary. Resolver closure and
   facade tests pass; the remaining crash is unchanged and remains in the ART
   managed-call entry path.
+### Runtime checkpoint 312 — 2026-09-08
+
+- ELF disassembly maps the VLC crash LR to `vlc_stream_MemoryNew`; the null
+  target is a vtable slot inside libvlc, not a direct ART call PC. Native
+  relocation/constructor completeness for the VLC dependency graph is now the
+  active blocker, while ART signal handling remains unchanged.

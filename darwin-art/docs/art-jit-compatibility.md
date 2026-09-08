@@ -5840,3 +5840,12 @@ added; the full corpus and multi-loader identity task remain open.
   21 facade tests and the provider-namespace audit pass. VLC no longer stops
   at that resolver gap, but still reproduces the independent null quick-entry
   immediately after MediaCodec capability enumeration.
+### Runtime checkpoint 312 — 2026-09-08
+
+- Symbolicated the VLC `pc=0` fault against the loaded ELF: LR lands in
+  `libvlc.so`'s `vlc_stream_MemoryNew`, where an indirect vtable call loads a
+  null slot (`blr x8`). This corrects the earlier broad classification: the
+  immediate fault is an unresolved/ uninitialized native VLC interface after
+  MediaCodec capability enumeration, not proof of an ART JIT entry null. The
+  ART runtime remains unmasked; native ELF relocation/vtable ownership is the
+  next investigation.
