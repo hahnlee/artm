@@ -11643,3 +11643,6 @@ or admission exception was added.
   after `ClassLinker::RegisterNative`, covering direct host `JNIEnv::RegisterNatives`
   calls that bypass the guest proxy. Incremental graphics audit passes; 137-cfi
   still needs a fresh run against this new runtime object.
+- Checkpoint 461: full runtime bootstrap includes the direct JNI hook and passes;
+  a fresh 137-cfi run is still `stdout=630/630` mismatch. The hook is therefore
+  not sufficient to recover the expected stopped-thread native frame sequence.
