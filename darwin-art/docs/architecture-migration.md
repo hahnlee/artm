@@ -11349,3 +11349,11 @@ or admission exception was added.
   lanes remain failing, showing callback-time `ManagedStack` state is not a
   sufficient source of the trampoline's local `managed_sp`. An explicit
   managed-SP publication ABI is the next boundary.
+
+### Runtime checkpoint 414 — 2026-09-09
+
+- Removed duplicated local quick-frame ownership between runtime and unwind
+  Mach-O images by resolving the process-global exported registry with
+  `dlsym(RTLD_DEFAULT)`. Audits pass, but all five unmodified `137-cfi` lanes
+  still fail; the remaining issue is publication timing/identity of the
+  generic-JNI managed-SP itself.

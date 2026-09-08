@@ -47,6 +47,15 @@ extern "C" __attribute__((visibility("default"))) DarwinArtQuickFrameRegistry
     darwin_art_unwindstack_quick_frames = {
         kDarwinArtQuickFrameRegistryVersion, kDarwinArtQuickFrameRegistrySlots, 0, {}};
 
+DarwinArtQuickFrameRegistry* SharedQuickFrameRegistry() {
+  static DarwinArtQuickFrameRegistry* registry = [] {
+    void* address = dlsym(RTLD_DEFAULT, "darwin_art_unwindstack_quick_frames");
+    return address == nullptr ? &darwin_art_unwindstack_quick_frames
+                              : static_cast<DarwinArtQuickFrameRegistry*>(address);
+  }();
+  return registry;
+}
+
 namespace {
 
 // ART image/code references retain Android's low 32-bit logical address on
@@ -139,9 +148,9 @@ uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc) {
 
 DarwinArtQuickFrameSlot* FindLocalQuickFrameSlot(uint64_t thread_id, bool claim) {
   const size_t first = thread_id % kDarwinArtQuickFrameRegistrySlots;
+  DarwinArtQuickFrameRegistry* registry = SharedQuickFrameRegistry();
   for (size_t probe = 0; probe < kDarwinArtQuickFrameRegistrySlots; ++probe) {
-    auto* slot = &darwin_art_unwindstack_quick_frames
-                      .slots[(first + probe) % kDarwinArtQuickFrameRegistrySlots];
+    auto* slot = &registry->slots[(first + probe) % kDarwinArtQuickFrameRegistrySlots];
     uint64_t owner = __atomic_load_n(&slot->thread_id, __ATOMIC_ACQUIRE);
     if (owner == thread_id) return slot;
     if (claim && owner == 0 && __atomic_compare_exchange_n(&slot->thread_id, &owner, thread_id,
@@ -225,7 +234,7 @@ extern "C" __attribute__((visibility("default"))) void
 darwin_art_unwindstack_set_art_main_thread() {
   uint64_t thread_id = 0;
   if (pthread_threadid_np(nullptr, &thread_id) == 0 && thread_id != 0) {
-    __atomic_store_n(&darwin_art_unwindstack_quick_frames.art_main_thread_id, thread_id,
+    __atomic_store_n(&SharedQuickFrameRegistry()->art_main_thread_id, thread_id,
                      __ATOMIC_RELEASE);
   }
 }
@@ -239,7 +248,7 @@ darwin_art_unwindstack_push_quick_frame(void* managed_sp) {
   DarwinArtQuickFrameSlot* slot = FindLocalQuickFrameSlot(thread_id, true);
   if (slot == nullptr) return;
   const uint64_t art_main_thread_id = __atomic_load_n(
-      &darwin_art_unwindstack_quick_frames.art_main_thread_id, __ATOMIC_ACQUIRE);
+      &SharedQuickFrameRegistry()->art_main_thread_id, __ATOMIC_ACQUIRE);
   __atomic_store_n(&slot->is_main_thread, art_main_thread_id == thread_id ? uint64_t{1} : uint64_t{0},
                    __ATOMIC_RELAXED);
   const uint64_t depth = __atomic_load_n(&slot->depth, __ATOMIC_RELAXED);
@@ -261,7 +270,7 @@ darwin_art_unwindstack_push_compiled_quick_frame(void* managed_sp, uint64_t fram
   DarwinArtQuickFrameSlot* slot = FindLocalQuickFrameSlot(thread_id, true);
   if (slot == nullptr) return;
   const uint64_t art_main_thread_id = __atomic_load_n(
-      &darwin_art_unwindstack_quick_frames.art_main_thread_id, __ATOMIC_ACQUIRE);
+      &SharedQuickFrameRegistry()->art_main_thread_id, __ATOMIC_ACQUIRE);
   __atomic_store_n(&slot->is_main_thread, art_main_thread_id == thread_id ? uint64_t{1} : uint64_t{0},
                    __ATOMIC_RELAXED);
   const uint64_t depth = __atomic_load_n(&slot->depth, __ATOMIC_RELAXED);

@@ -6652,3 +6652,11 @@ incomplete and still requires managed caller unwind validation.
   `ManagedStack` state is not a reliable substitute for the trampoline's local
   `managed_sp`. The next implementation target is an explicit ABI publication
   of that AOSP `managed_sp` into the unwind provider.
+
+### Runtime checkpoint 414 — 2026-09-09
+
+- Unified quick-frame registry access across separately linked Mach-O images:
+  local publication and consumption now resolve the exported registry through
+  `dlsym(RTLD_DEFAULT)` and only use the provider-local object as a standalone
+  fallback. Provider and graphics-link audits pass; unmodified `137-cfi` still
+  fails in all five lanes, so managed-SP publication timing remains unresolved.
