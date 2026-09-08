@@ -11079,3 +11079,9 @@ or admission exception was added.
 - Unmodified AOSP `844-exception` passes in interpreter, JIT, and comparison
   lanes. Optimized exception delivery/deoptimization is verified without APK
   changes or fallback gates; JNI CFI, concurrency, and real-app work remains.
+
+### Runtime checkpoint 375 — 2026-09-09
+
+- Unmodified AOSP `596-monitor-inflation` passes in interpreter, JIT, and
+  comparison lanes. Monitor inflation/synchronization is verified without
+  test-specific gates; broader concurrency, JNI CFI, and real-app work remains.

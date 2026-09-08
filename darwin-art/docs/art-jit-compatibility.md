@@ -6348,3 +6348,10 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter-versus-optimized lanes all pass, providing direct evidence for
   optimized exception delivery and deoptimization behavior. JNI CFI address
   publication, concurrency, and real-app completion remain open.
+
+### Runtime checkpoint 375 — 2026-09-09
+
+- Ran unmodified AOSP `596-monitor-inflation`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes pass, covering monitor inflation and
+  synchronized execution under optimized ART. JNI CFI publication,
+  broader concurrency, and real-app criteria remain open.
