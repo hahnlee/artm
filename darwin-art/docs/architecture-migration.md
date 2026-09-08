@@ -9370,3 +9370,9 @@ or admission exception was added.
   explicit-check-only path. Build-time audits cover HNullCheck, field,
   interface, and virtual receiver nullable decoding; AOSP implicit-null and
   null-call regressions pass in interpreter and optimized modes.
+
+### Runtime checkpoint 146 — 2026-09-08
+
+- Rebuilt the pinned ARM64 JIT after removing the Darwin explicit-check-only
+  setting and reran the full ART JIT audit. AOSP 551/479/034 implicit-null and
+  null-call regressions pass in interpreter and optimized modes.

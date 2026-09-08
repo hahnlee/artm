@@ -4428,3 +4428,10 @@ added; the full corpus and multi-loader identity task remain open.
   disable or omission of any consumer. AOSP implicit-null and null-call
   interpreter/optimized regressions pass, and the full ART JIT audit remains
   green.
+
+### Runtime checkpoint 146 — 2026-09-08
+
+- Rebuilt the pinned ARM64 JIT with implicit checks enabled (106 objects, one
+  changed translation unit) and reran the complete ART JIT audit. The upstream
+  551/479/034 null-check regressions pass in interpreter and optimized modes;
+  no Darwin explicit-only gate or interpreter fallback was introduced.
