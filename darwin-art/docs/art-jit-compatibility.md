@@ -5013,6 +5013,16 @@ added; the full corpus and multi-loader identity task remain open.
   concurrent-GC array copies. Remaining corpus and real-app validation remain
   pending.
 
+### Runtime checkpoint 223 — 2026-09-08
+
+- Fixed the child-loader policy without weakening AOSP semantics: before
+  cloning, the runtime performs an exact parent `LookupClass`; classes already
+  defined by the parent recreate the required multiple-loader `InternalError`,
+  while genuinely new child classes use the zero-copy clone. After relink,
+  both `156-register-dex-file-multi-loader` and `497-inlining-and-class-loader`
+  pass interpreter, JIT, and optimized lanes. Unsafe boot support is published
+  as a JAR container to satisfy bootclasspath resource handling.
+
 ### Runtime checkpoint 219 — 2026-09-08
 
 - The next corpus run initially stopped because 1,834 retained temporary test

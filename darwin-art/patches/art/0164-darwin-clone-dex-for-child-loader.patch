@@ -31,12 +31,24 @@ index 0000000..0000000 100644
        ScopedObjectAccess soa(env);
        ClassLinker* class_linker = Runtime::Current()->GetClassLinker();
        StackHandleScope<1> hs(soa.Self());
-@@ -507,13 +515,36 @@
+@@ -507,13 +515,48 @@
            class_linker->RegisterDexFile(*dex_file, class_loader.Get());
        if (dex_cache == nullptr) {
          // OOME or InternalError (dexFile already registered with a different class loader).
 -        soa.Self()->AssertPendingException();
 -        return nullptr;
++        soa.Self()->ClearException();
++        ObjPtr<mirror::Class> parent_class = class_linker->LookupClass(
++            soa.Self(), descriptor, class_loader->GetParent());
++        if (parent_class != nullptr) {
++          // A class already defined by the parent must retain AOSP's
++          // multiple-loader rejection semantics.
++          soa.Self()->ThrowNewExceptionF(
++              "Ljava/lang/InternalError;",
++              "Attempt to register dex file %s with multiple class loaders",
++              dex_file->GetLocation().c_str());
++          return nullptr;
++        }
 +        std::string error_msg;
 +        ArtDexFileLoader loader(dex_file->Begin(), dex_file->Size(), dex_file->GetLocation());
 +        std::unique_ptr<const DexFile> clone = loader.Open(

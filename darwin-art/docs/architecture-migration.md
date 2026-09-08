@@ -9927,3 +9927,12 @@ or admission exception was added.
   native registration, DCE/field packing, unloading/classloaders, static-field
   SIGQUIT, and allocation tracking stress. Remaining corpus and real-app
   validation are pending.
+
+### Runtime checkpoint 223 — 2026-09-08
+
+- Child-loader semantics now match AOSP: an exact parent `LookupClass` keeps
+  the multiple-loader `InternalError`, and only new child classes take the
+  zero-copy clone path. Fresh relink verifies both
+  `156-register-dex-file-multi-loader` and `497-inlining-and-class-loader` in
+  interpreter/JIT/optimized lanes. Unsafe boot DEX is exposed in a JAR
+  container for correct bootclasspath handling.
