@@ -4634,3 +4634,9 @@ added; the full corpus and multi-loader identity task remain open.
   and unchanged-source optimized lanes. Coverage includes method linking,
   read-modify-write stress, exception detail messages, thread OOME, and
   checkpoint coordination.
+
+### Runtime checkpoint 170 — 2026-09-08
+
+- `300-package-override` passes interpreter, JIT expected-output, and
+  unchanged-source optimized lanes on the current runtime, extending
+  application package/class-loader override coverage.

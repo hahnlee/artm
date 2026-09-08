@@ -9545,3 +9545,8 @@ or admission exception was added.
   `203-multi-checkpoint` passes all seven executable contracts across
   interpreter, JIT, and unchanged optimized lanes, covering method linking,
   RMW stress, exception/OOME behavior, and checkpoint coordination.
+
+### Runtime checkpoint 170 — 2026-09-08
+
+- `300-package-override` passes all three execution lanes, validating package
+  override and application class-loader behavior without source changes.
