@@ -6137,3 +6137,11 @@ added; the full corpus and multi-loader identity task remain open.
   smoke unwind test and graphics-link audit pass. Re-running real `137-cfi`
   still returns five `FAIL`s, showing the remaining issue is boot/JIT debug-map
   frame naming rather than DexFile owner linkage.
+### Runtime checkpoint 348 — 2026-09-09
+
+- Production provider validation confirms both JIT and Dex providers are
+  instantiated, the exported JIT descriptor is readable, and all in-memory
+  JIT ELF entries load. Real `137-cfi` PCs at `0x210dxxx` do not fall in those
+  JIT ranges and remain `<unknown>`, isolating the next work to AOT/boot-image
+  PC-to-Dex metadata resolution rather than provider linkage. Diagnostic logs
+  were removed after establishing this boundary.

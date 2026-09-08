@@ -10894,3 +10894,10 @@ or admission exception was added.
   unwind and graphics-link audits pass. Real `137-cfi` still reports five
   `FAIL`s, isolating the remaining problem to boot/JIT debug-map frame naming,
   not DexFile owner linkage.
+### Runtime checkpoint 348 — 2026-09-09
+
+- Production provider validation confirms both JIT and Dex providers are
+  instantiated, the exported JIT descriptor is readable, and all in-memory
+  JIT ELF entries load. Real `137-cfi` PCs at `0x210dxxx` remain outside those
+  JIT ranges and format as `<unknown>`. The next architectural work is
+  AOT/boot-image PC-to-Dex metadata resolution.
