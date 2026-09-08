@@ -9624,3 +9624,9 @@ or admission exception was added.
   contributing a declared JNI entry point. This resolves the missing
   `GetMethodId` symbol in `2262-default-conflict-methods`; all interpreter,
   JIT, and unchanged optimized lanes now pass without a test-name exception.
+
+### Runtime checkpoint 182 — 2026-09-08
+
+- The post-fix `2230`–`2286` corpus rerun passes all 12 discovered contracts in
+  every execution lane, including `2262-default-conflict-methods`, confirming
+  that multi-member sibling JNI linking is regression-free.
