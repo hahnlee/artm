@@ -4814,3 +4814,12 @@ added; the full corpus and multi-loader identity task remain open.
   `DexFile.loadClassBinaryName` returns null for `LoadedByMyClassLoader`,
   producing the observed `foo.getDeclaredMethod` NPE. The failure is preserved
   as an actionable class-loader implementation item rather than masked.
+
+### Runtime checkpoint 194 — 2026-09-08
+
+- DEX identity tracing confirms `497-inlining-and-class-loader` reuses the
+  process PathClassLoader's dex object in a child loader, which
+  `RegisterDexFile` rejects before `loadClassBinaryName` can return a class.
+  A temporary existing-cache reuse experiment failed at the later
+  `DefineClass` registration and was reverted; this remains an explicit
+  class-loader implementation gap.

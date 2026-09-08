@@ -9708,3 +9708,12 @@ or admission exception was added.
   exposes a real class-loader gap: `DexFile.loadClassBinaryName` returns null
   for `LoadedByMyClassLoader`, leading to the `getDeclaredMethod` NPE. This is
   retained as an implementation task rather than hidden by a test exception.
+
+### Runtime checkpoint 194 — 2026-09-08
+
+- Investigated `497-inlining-and-class-loader` with DEX identity tracing. The
+  app dex is already registered to the process PathClassLoader; the test then
+  passes that same `DexFile` to a child loader, and `RegisterDexFile` rejects
+  the second identity, so `loadClassBinaryName` returns null. A temporary
+  DexCache-reuse experiment did not pass the subsequent `DefineClass`
+  registration and was reverted; the class-loader gap remains explicit.
