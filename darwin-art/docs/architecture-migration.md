@@ -11586,3 +11586,8 @@ or admission exception was added.
   patches were removed to restore the verified build. OAT range publication
   remains the next implementation and must be integrated through an existing
   staged ART hook rather than leaving a broken bootstrap.
+- Checkpoint 449: added a staged ART `art_method.cc` hook for JIT code-cache
+  headers, publishing host code ranges and `PrettyMethod` names to the Darwin
+  unwinder registry. The bootstrap build succeeds with this hook. An attempted
+  second OAT-return hunk did not match all shadow variants and was removed;
+  AOT range publication remains separate work.

@@ -9,6 +9,7 @@ pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v23";
 pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.cc",
     "art_method.h",
+    "art_method.cc",
     "runtime_image.cc",
     "backtrace_helper.cc",
     "plugin.cc",
@@ -151,6 +152,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0168-darwin-instrumentation-entrypoint-host-address.patch",
     "patches/art/0170-darwin-register-entrypoint-pairs.patch",
     "patches/art/0171-darwin-generic-jni-publish-caller-entry.patch",
+    "patches/art/0173-darwin-publish-jit-method-ranges.patch",
 ];
 
 #[cfg(test)]

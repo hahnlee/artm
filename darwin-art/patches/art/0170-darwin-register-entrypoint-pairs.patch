@@ -1,10 +1,12 @@
 diff --git a/runtime/art_method.h b/runtime/art_method.h
 --- a/runtime/art_method.h
 +++ b/runtime/art_method.h
-@@ -20,2 +20,5 @@
+@@ -20,2 +20,7 @@
  #include <limits>
 +#if defined(__APPLE__)
 +extern "C" void darwin_art_register_code_address(uintptr_t logical, uintptr_t host);
++extern "C" void darwin_art_register_compiled_method(uintptr_t start, size_t size,
++                                                      const char* name);
 +#endif
  
 @@ -790,10 +793,13 @@

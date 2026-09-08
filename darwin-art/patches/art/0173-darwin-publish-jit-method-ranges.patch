@@ -1,0 +1,16 @@
+diff --git a/runtime/art_method.cc b/runtime/art_method.cc
+--- a/runtime/art_method.cc
++++ b/runtime/art_method.cc
+@@ -630,8 +630,13 @@
+   jit::Jit* jit = runtime->GetJit();
+   if (jit != nullptr) {
+     jit::JitCodeCache* code_cache = jit->GetCodeCache();
+     OatQuickMethodHeader* method_header = code_cache->LookupMethodHeader(pc, this);
+     if (method_header != nullptr) {
+       DCHECK(method_header->Contains(pc));
++#if defined(__APPLE__)
++      darwin_art_register_compiled_method(
++          reinterpret_cast<uintptr_t>(method_header->GetCode()), method_header->GetCodeSize(),
++          PrettyMethod(/*with_signature=*/false).c_str());
++#endif
+       return method_header;
