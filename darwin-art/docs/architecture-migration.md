@@ -9700,3 +9700,11 @@ or admission exception was added.
   lowering, VarHandle/Unsafe, write-barrier elimination, exception/inlining,
   method handles, JVMTI, and sibling-JNI owner linking. The transient
   `2262-default-conflict-methods` failure is PASS in the completed ledger.
+
+### Runtime checkpoint 193 — 2026-09-08
+
+- The fresh `300-package-override` through `500-instanceof` slice passes 128
+  of 129 contracts in every execution lane. `497-inlining-and-class-loader`
+  exposes a real class-loader gap: `DexFile.loadClassBinaryName` returns null
+  for `LoadedByMyClassLoader`, leading to the `getDeclaredMethod` NPE. This is
+  retained as an implementation task rather than hidden by a test exception.

@@ -4805,3 +4805,12 @@ added; the full corpus and multi-loader identity task remain open.
   VarHandle/Unsafe, write-barrier elimination, exception/inlining,
   method-handle, JVMTI, and sibling-JNI owner paths are covered; the transient
   `2262-default-conflict-methods` ledger failure resolves to PASS on completion.
+
+### Runtime checkpoint 193 — 2026-09-08
+
+- Fresh four-worker execution of `300-package-override` through
+  `500-instanceof` passes 128 of 129 contracts across all three lanes.
+  `497-inlining-and-class-loader` remains a real gap: the custom loader's
+  `DexFile.loadClassBinaryName` returns null for `LoadedByMyClassLoader`,
+  producing the observed `foo.getDeclaredMethod` NPE. The failure is preserved
+  as an actionable class-loader implementation item rather than masked.
