@@ -10717,3 +10717,9 @@ or admission exception was added.
   five `requestNetwork` overloads are present, and launcher and boot-image
   paths point to the same regenerated artifact. No APK modification was used;
   native VLC playback still needs the original APK input.
+
+### Runtime checkpoint 326 — 2026-09-08
+
+- Provisioned a clean, isolated `aosp-api29` profile and verified successful
+  mounting with zero leases and no installed packages. Existing profiles
+  remain untouched; this is the new-host baseline for subsequent APK tests.

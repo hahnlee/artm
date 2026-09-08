@@ -5952,3 +5952,9 @@ added; the full corpus and multi-loader identity task remain open.
   `ConnectivityManager.requestNetwork` overloads are present in the runtime
   artifact, including the Executor form. Launcher and boot-image paths select
   this artifact; VLC playback still requires a locally available original APK.
+
+### Runtime checkpoint 326 — 2026-09-08
+
+- Created and mounted a fresh isolated `aosp-api29` runtime profile on the
+  replacement host. It reports zero active leases and an empty package set;
+  the existing `recovery` profile was not modified.
