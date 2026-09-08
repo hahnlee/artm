@@ -9637,6 +9637,13 @@ or admission exception was added.
   diagnostics. This is an app-compatibility increment, not full VLC playback
   validation yet.
 
+### Runtime checkpoint 304 — 2026-09-08
+
+- VLC surface acceptance passed on `recovery`: software Canvas lock/post path
+  produced 3 locks and 3 posts with no nativeLockCanvas or fatal-signal errors.
+  This validates the media app's Android window buffer bridge; an actual media
+  file playback assertion remains separate.
+
 ### Runtime checkpoint 301 — 2026-09-08
 
 - Recovery profile app coverage expanded without APK changes: Snapseed
