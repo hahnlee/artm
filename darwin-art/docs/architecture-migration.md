@@ -10768,3 +10768,11 @@ or admission exception was added.
   proxy/monitor, class loading, NIO, precise/reachability GC, OOM,
   verification, hot exceptions, and inline execution; full corpus and
   real-app checks remain open.
+
+### Runtime checkpoint 333 — 2026-09-08
+
+- The next 50 pinned AOSP inputs (`086-null-super` onward) pass 50/50 in a
+  fresh four-way run. Coverage now includes loop formation, serialization,
+  concurrent/parallel GC, multidex, suspend checks, native bridge,
+  compiler-regression, class-loading, and daemon-lock shutdown paths; full
+  corpus and real-app checks remain outstanding.

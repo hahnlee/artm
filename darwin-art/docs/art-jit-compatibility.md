@@ -6007,3 +6007,11 @@ added; the full corpus and multi-loader identity task remain open.
   proxies, monitors, class loading, NIO, precise/reachability GC, OOM,
   verification errors, hot exceptions, and inline execution. Remaining corpus
   and real-app validation are still required.
+
+### Runtime checkpoint 333 — 2026-09-08
+
+- Ran the subsequent 50 pinned AOSP tests (`086-null-super` onward) with a
+  fresh ledger and four-way parallelism. All 50 passed, extending coverage to
+  loop formation, serialization, switch extremes, concurrent/parallel GC,
+  multidex, suspend checks, native bridge, compiler regressions, class
+  loading, and monitor shutdown. Full corpus and real-app criteria remain open.
