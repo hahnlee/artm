@@ -9487,3 +9487,10 @@ or admission exception was added.
   format, Canvas dimensions, and dirty-clip normalization in addition to the
   complete lock/post lifecycle. The strict replacement-host run passes with
   Nterp and synchronization markers; broader application parity remains open.
+
+### Runtime checkpoint 162 — 2026-09-08
+
+- Repeated the default audit after the Surface contract hardening: producer,
+  Canvas, dirty-clip, Nterp, and empty-checkpoint markers all pass on the
+  current host. This confirms regression stability but does not close the
+  remaining real-application/AOSP matrix.

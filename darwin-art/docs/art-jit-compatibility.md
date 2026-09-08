@@ -4567,3 +4567,11 @@ added; the full corpus and multi-loader identity task remain open.
   clamped dirty rect `0,0,72,48`; the standard `audit-art-jit.sh` now runs
   this gate by default. Fresh run passes Surface, Nterp, and empty-checkpoint
   markers (`/tmp/audit-surface-strict.log`, RC=0).
+
+### Runtime checkpoint 162 — 2026-09-08
+
+- Fresh standard audit on the current host passes the required Surface
+  producer/Canvas contract (`360x640`, dirty `0,0,72,48`, RGBA_8888), native
+  Nterp execution (`result=42`), and empty-checkpoint contention
+  (`checkpoint_us=160`, `lock_us=500207`), RC=0. Remaining real-app and full
+  AOSP compatibility gates are still open.
