@@ -6860,6 +6860,12 @@ incomplete and still requires managed caller unwind validation.
 
 ### Runtime checkpoint 442 — 2026-09-09
 
+### Runtime checkpoint 443 — 2026-09-09
+
+- `StackVisitor::CountTransitions::kNo` plus suspended checking still returns
+  only the wrapper; `137-cfi` remains failing. Deeper caller recovery must use
+  published quick-frame/OAT metadata directly.
+
 - Tested the ART resolver with transitions excluded and included; `137-cfi`
   remains `FAIL`. The callback still needs a managed caller walk across JNI.
 

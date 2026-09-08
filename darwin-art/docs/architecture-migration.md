@@ -11535,6 +11535,12 @@ or admission exception was added.
 
 ### Runtime checkpoint 442 — 2026-09-09
 
+### Runtime checkpoint 443 — 2026-09-09
+
+- Transition-count suppression and suspended checking did not expose deeper
+  callers. The next implementation must walk published quick-frame/OAT
+  metadata rather than rely on StackVisitor across JNI.
+
 - Both `StackVisitor` transition modes were tested and `137-cfi` remains
   failing. The resolver sees the wrapper but not its managed AOT callers.
 

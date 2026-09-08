@@ -14,7 +14,7 @@ extern "C" void darwin_art_walk_managed_frames(void (*callback)(const char*, voi
     std::string name = current->PrettyMethod(/*with_signature=*/false);
     callback(name.c_str(), context);
   }
-  art::StackVisitor::WalkStack(
+  art::StackVisitor::WalkStack<art::StackVisitor::CountTransitions::kNo>(
       [callback, context](art::StackVisitor* visitor) {
         art::ArtMethod* method = visitor->GetMethod();
         if (method != nullptr) {
@@ -26,6 +26,6 @@ extern "C" void darwin_art_walk_managed_frames(void (*callback)(const char*, voi
       self,
       nullptr,
       art::StackVisitor::StackWalkKind::kIncludeInlinedFrames,
-      /*check_suspended=*/false,
+      /*check_suspended=*/true,
       /*include_transitions=*/false);
 }
