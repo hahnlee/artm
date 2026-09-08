@@ -11451,3 +11451,10 @@ or admission exception was added.
 - Graphics-link audit remains green; `137-cfi` remains `FAIL` across all lanes.
 - Publish-side probing was inconclusive and removed. Frame lifetime must next
   be made explicit at the ARM64 generic-JNI assembly boundary.
+### Runtime checkpoint 427 — 2026-09-09
+
+- Generic-JNI publication now snapshots the fixed AOSP 224-byte callee-save
+  frame in the shared registry and stores the original managed SP only as a
+  pop key. This makes unwinding independent of subsequent stack reuse.
+- Link audit remains green; `137-cfi` executes but still fails at
+  frame-symbol/code-range attribution, which is the next boundary to fix.

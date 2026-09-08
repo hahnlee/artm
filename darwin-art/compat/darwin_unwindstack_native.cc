@@ -259,12 +259,18 @@ darwin_art_unwindstack_push_quick_frame(void* managed_sp) {
   // same managed frame as idempotent so the matching method-end pop cannot
   // leave a stale registry entry behind.
   if (depth != 0 &&
-      __atomic_load_n(&slot->frames[depth - 1], __ATOMIC_RELAXED) ==
+      __atomic_load_n(&slot->frame_keys[depth - 1], __ATOMIC_RELAXED) ==
           reinterpret_cast<uint64_t>(managed_sp) &&
       __atomic_load_n(&slot->frame_kinds[depth - 1], __ATOMIC_RELAXED) == 0) {
     return;
   }
-  __atomic_store_n(&slot->frames[depth], reinterpret_cast<uint64_t>(managed_sp), __ATOMIC_RELAXED);
+  for (size_t i = 0; i < 28; ++i) {
+    __atomic_store_n(&slot->frame_copies[depth][i],
+                     reinterpret_cast<const uint64_t*>(managed_sp)[i], __ATOMIC_RELAXED);
+  }
+  __atomic_store_n(&slot->frame_keys[depth], reinterpret_cast<uint64_t>(managed_sp), __ATOMIC_RELAXED);
+  __atomic_store_n(&slot->frames[depth],
+                   reinterpret_cast<uint64_t>(&slot->frame_copies[depth][0]), __ATOMIC_RELAXED);
   __atomic_store_n(&slot->frame_kinds[depth], uint64_t{0}, __ATOMIC_RELAXED);
   __atomic_store_n(&slot->frame_sizes[depth], uint64_t{224}, __ATOMIC_RELAXED);
   __atomic_store_n(&slot->core_spill_masks[depth], uint64_t{0}, __ATOMIC_RELAXED);
@@ -317,7 +323,7 @@ darwin_art_unwindstack_pop_quick_frame_if(void* managed_sp, uint64_t frame_kind)
   const uint64_t depth = __atomic_load_n(&slot->depth, __ATOMIC_ACQUIRE);
   if (depth == 0) return false;
   const uint64_t index = depth - 1;
-  if (__atomic_load_n(&slot->frames[index], __ATOMIC_RELAXED) !=
+  if (__atomic_load_n(&slot->frame_keys[index], __ATOMIC_RELAXED) !=
           reinterpret_cast<uint64_t>(managed_sp) ||
       __atomic_load_n(&slot->frame_kinds[index], __ATOMIC_RELAXED) != frame_kind) {
     return false;

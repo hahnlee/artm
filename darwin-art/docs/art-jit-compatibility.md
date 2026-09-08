@@ -6766,3 +6766,12 @@ incomplete and still requires managed caller unwind validation.
 - A temporary publish-side memory probe produced no new authoritative signal
   and was removed. The next step is to instrument the ARM64 assembly stub or
   pass an explicit live-frame token, not infer lifetime from managed memory.
+### Runtime checkpoint 427 — 2026-09-09
+
+- Generic-JNI registry entries now retain a fixed 224-byte snapshot of the
+  AOSP SaveRefsAndArgs frame at publication time, with the original SP kept
+  separately for method-end matching. This removes dependence on later native
+  stack reuse and is ABI-versioned in the shared registry.
+- Graphics-link audit remains green. `137-cfi` still reaches execution but
+  returns `FAIL`; the remaining mismatch is now frame-symbol/code-range
+  attribution rather than a compile or missing-header failure.

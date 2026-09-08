@@ -8,7 +8,7 @@
 // Darwin has no /proc-based ART thread/TLS discovery equivalent. Keep the
 // active generic-JNI quick frames in a fixed, allocation-free process record
 // that a Mach task unwinder can read after stopping a thread.
-inline constexpr uint64_t kDarwinArtQuickFrameRegistryVersion = 4;
+inline constexpr uint64_t kDarwinArtQuickFrameRegistryVersion = 5;
 inline constexpr size_t kDarwinArtQuickFrameRegistrySlots = 128;
 inline constexpr size_t kDarwinArtQuickFrameRegistryDepth = 16;
 
@@ -17,6 +17,8 @@ struct DarwinArtQuickFrameSlot {
   uint64_t is_main_thread;
   uint64_t depth;
   uint64_t frames[kDarwinArtQuickFrameRegistryDepth];
+  uint64_t frame_keys[kDarwinArtQuickFrameRegistryDepth];
+  uint64_t frame_copies[kDarwinArtQuickFrameRegistryDepth][28];
   // 0 is the fixed SaveRefsAndArgs GenericJNI frame; 1 is a compiled-JNI
   // frame emitted by the ARM64 JNI compiler.  Keep this parallel array
   // fixed-size so a stopped remote task can read it without a heap object.
