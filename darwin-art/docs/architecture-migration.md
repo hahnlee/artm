@@ -10645,3 +10645,11 @@ or admission exception was added.
   unaffected `recovery` profile confirms APK contents and runtime code were
   intact. Profile maintenance must quiesce the daemon, unmount before
   compaction, and verify before remounting.
+
+### Runtime checkpoint 316 — 2026-09-08
+
+- The application PackageManager now models the AOSP-resident `android`
+  package explicitly. Framework identity resolves to the actual locked
+  `framework-res.apk`, carries system-package flags, and remains certificate
+  neutral. This prevents app startup code from mistaking the detached host's
+  registry boundary for a missing Android framework package.

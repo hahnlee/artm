@@ -5874,3 +5874,12 @@ added; the full corpus and multi-loader identity task remain open.
   profile container, not APK bytes or Git history; the fresh `recovery`
   profile runs the same unmodified APKs. Compaction must require daemon
   quiescence, an unmount, and post-operation verification.
+
+### Runtime checkpoint 316 — 2026-09-08
+
+- Added the always-present Android framework package identity to the package
+  manager facade. `getPackageInfo("android", ...)` now returns a system
+  `ApplicationInfo` backed by the revision-locked `framework-res.apk` instead
+  of querying the app registry and throwing `NameNotFoundException`. This
+  matches AOSP's framework-package invariant and removes VLC's startup
+  `AccessControl` exception without fabricating a signing certificate.

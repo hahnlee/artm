@@ -686,6 +686,30 @@ public final class ProbePackageManager extends MockPackageManager {
     @Override
     public PackageInfo getPackageInfo(String requestedPackage, int flags)
             throws PackageManager.NameNotFoundException {
+        // Android's framework package is always installed and is addressable
+        // through every application PackageManager.  The detached host does
+        // not have a registry record for it, so treating it as an ordinary
+        // third-party package incorrectly raises NameNotFoundException (VLC's
+        // AccessControl and many SDKs query this identity during startup).
+        // Keep the identity backed by the actual framework-res artifact when
+        // available; do not manufacture a signing certificate.
+        if ("android".equals(requestedPackage)) {
+            PackageInfo framework = new PackageInfo();
+            framework.packageName = "android";
+            ApplicationInfo application = new ApplicationInfo();
+            application.packageName = "android";
+            application.flags = ApplicationInfo.FLAG_SYSTEM;
+            String frameworkApk = System.getenv("DARWIN_ART_FRAMEWORK_RES_APK");
+            if (frameworkApk != null && !frameworkApk.isEmpty()) {
+                application.sourceDir = frameworkApk;
+                application.publicSourceDir = frameworkApk;
+            }
+            framework.applicationInfo = application;
+            framework.versionCode = 36;
+            framework.setLongVersionCode(36L);
+            framework.versionName = "16";
+            return framework;
+        }
         if (packageName == null || !packageName.equals(requestedPackage)) {
             String record = nativeResolveInstalledPackage(requestedPackage);
             ApplicationInfo installed = installedApplicationInfo(requestedPackage, record);
