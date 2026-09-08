@@ -9953,3 +9953,12 @@ or admission exception was added.
   suspend and native-resume variants, suspend-list ordering, agent TLS, JVMTI
   transforms, and local variable/object/frame inspection. Remaining corpus and
   real-app validation are pending.
+
+### Runtime checkpoint 226 — 2026-09-08
+
+- The `1949-short-dex-file`–`1965-get-set-local-primitive-no-tables` slice
+  passed all 18 tests, covering transforms/monitor suspension, pop-frame/JIT
+  frames, error and retry paths, bounds/loop compiler checks, obsolete
+  multithread JIT, event delivery, dex-classloader insertion, and primitive
+  frame access without tables. Remaining corpus and real-app validation remain
+  pending.

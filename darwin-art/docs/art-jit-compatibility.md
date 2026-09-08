@@ -5051,6 +5051,15 @@ added; the full corpus and multi-loader identity task remain open.
   multi-thread compiler regressions, missing classes, and class loading.
   Remaining corpus and real-app validation are pending.
 
+### Runtime checkpoint 226 — 2026-09-08
+
+- The `1949-short-dex-file`–`1965-get-set-local-primitive-no-tables` slice
+  passed all 18 tests, covering unprepared transforms, monitor-enter without
+  suspend, pop-frame/JIT frame variants, error and transform retry paths,
+  bounds/loop compiler checks, obsolete multithread JIT, event delivery,
+  dex-classloader insertion, and primitive frame access without tables.
+  Remaining corpus and real-app validation are pending.
+
 ### Runtime checkpoint 221 — 2026-09-08
 
 - The `126-miranda-multidex`–`145-alloc-tracking-stress` slice passed all 25
