@@ -10918,3 +10918,9 @@ or admission exception was added.
 - Fresh real `137-cfi` still reports five FAILs after the oat-range bridge.
   Registration timing or guest/host address identity remains unresolved; the
   next step is to trace those values directly without adding an allowlist.
+### Runtime checkpoint 352 — 2026-09-09
+
+- Forced runtime-shadow rebuild confirms ClassLinker now registers 12 oat code
+  ranges. Their host addresses (`0x1007...`/`0x11...`) differ from managed
+  logical return PCs (`0x210dxxx`), and `137-cfi` remains five FAILs. The next
+  change must define the logical-to-host AOT PC mapping explicitly.

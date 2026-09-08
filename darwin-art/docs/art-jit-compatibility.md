@@ -6166,3 +6166,10 @@ added; the full corpus and multi-loader identity task remain open.
   Therefore the bridge is compiled and linked but has not yet made the guest
   AOT PC resolvable in the active unwind maps; next inspect registration timing
   and guest-to-host address identity rather than broadening the fallback.
+### Runtime checkpoint 352 — 2026-09-09
+
+- After forcing runtime-shadow rebuild (`v21`), ClassLinker registration is
+  active and records 12 oat ranges. The ranges are host addresses around
+  `0x1007...`/`0x11...`, while failing managed return PCs remain logical
+  `0x210dxxx`; `137-cfi` still has five FAILs. This proves the remaining fix is
+  explicit logical-to-host AOT PC identity mapping, not registration timing.
