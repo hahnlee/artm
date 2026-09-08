@@ -11124,3 +11124,9 @@ or admission exception was added.
   lanes. Direct JNI calls with reference/array/exception interactions are
   verified without APK changes; CFI return-PC publication and real-app work
   remain.
+
+### Runtime checkpoint 382 — 2026-09-09
+
+- Unmodified AOSP `1920-suspend-native-monitor` passes in interpreter, JIT, and
+  comparison lanes. Native suspend transitions under monitor contention are
+  verified without APK changes; JNI CFI and real-app work remain.
