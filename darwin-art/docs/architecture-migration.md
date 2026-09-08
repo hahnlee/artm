@@ -9349,6 +9349,14 @@ or admission exception was added.
   irreducible loops, and iteration handling. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 257 — 2026-09-08
+
+- The lock-enabled rerun confirms the shared boot-artifact race is resolved:
+  both previously affected tests pass again. The authoritative ledger is
+  1,074/1,075 passed; only the custom InputChannel smoke test lacks its
+  compile-time framework stub. Remaining corpus and real-app validation
+  remain pending.
+
 ### Runtime checkpoint 255 — 2026-09-08
 
 - Reconciliation exposed a shared bootstrap race: parallel workers could
@@ -9445,6 +9453,22 @@ or admission exception was added.
   ARM64 codegen, barriers, JNI, deoptimization, class loading, dex/vdex,
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
+
+### Runtime checkpoint 257 — 2026-09-08
+
+- The lock-enabled rerun confirms the shared boot-artifact race is resolved:
+  both previously affected tests pass again. The authoritative ledger is
+  1,074/1,075 passed; only the custom InputChannel smoke test lacks its
+  compile-time framework stub. Remaining corpus and real-app validation
+  remain pending.
+
+### Runtime checkpoint 257 — 2026-09-08
+
+- The lock-enabled rerun confirms the shared boot-artifact race is resolved:
+  both previously affected tests pass again. The authoritative ledger is
+  1,074/1,075 passed; only the custom InputChannel smoke test lacks its
+  compile-time framework stub. Remaining corpus and real-app validation
+  remain pending.
 
 ### Runtime checkpoint 244 — 2026-09-08
 

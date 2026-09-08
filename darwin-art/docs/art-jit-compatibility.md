@@ -5115,6 +5115,15 @@ added; the full corpus and multi-loader identity task remain open.
   paths, background verification, large class counts, and deopt. Remaining
   corpus and real-app validation are pending.
 
+### Runtime checkpoint 257 — 2026-09-08
+
+- Lock-enabled rerun confirms the prior shared boot-artifact race is resolved:
+  `149-suspend-all-stress` and `156-register-dex-file-multi-loader` both pass
+  again under the corrected runner. Current authoritative ledger is 1,074
+  passed of 1,075 discovered tests; only the custom InputChannel smoke test
+  lacks its compile-time framework stub. Remaining corpus and real-app
+  validation are pending.
+
 ### Runtime checkpoint 256 — 2026-09-08
 
 - After terminating the stale pre-lock sweep, the race-sensitive
@@ -5422,3 +5431,12 @@ added; the full corpus and multi-loader identity task remain open.
   invokes, SIMD dot-product/select/shifts, shared libraries, multi-catch and
   zygote JIT deopt, hidden-API proxies, and in-memory vdex loading. Remaining
   corpus and real-app validation are pending.
+
+### Runtime checkpoint 257 — 2026-09-08
+
+- Lock-enabled rerun confirms the prior shared boot-artifact race is resolved:
+  `149-suspend-all-stress` and `156-register-dex-file-multi-loader` both pass
+  again under the corrected runner. Current authoritative ledger is 1,074
+  passed of 1,075 discovered tests; only the custom InputChannel smoke test
+  lacks its compile-time framework stub. Remaining corpus and real-app
+  validation are pending.
