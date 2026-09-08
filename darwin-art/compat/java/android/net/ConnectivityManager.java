@@ -4,6 +4,7 @@ import android.content.Context;
 import android.os.Handler;
 
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
 
 /** Process-local connectivity service for the Darwin Android framework port. */
 public class ConnectivityManager {
@@ -75,6 +76,44 @@ public class ConnectivityManager {
     }
 
     public void unregisterNetworkCallback(NetworkCallback callback) {}
+
+    /**
+     * Request the profile's default network using the Android API-29 callback
+     * contract. The Darwin profile has one always-available host network, so a
+     * request follows the same immediate callback path as registration.
+     */
+    public void requestNetwork(NetworkRequest request, NetworkCallback callback) {
+        registerNetworkCallback(request, callback);
+    }
+
+    public void requestNetwork(
+            NetworkRequest request, NetworkCallback callback, Handler handler) {
+        registerNetworkCallback(request, callback, handler);
+    }
+
+    public void requestNetwork(
+            NetworkRequest request, NetworkCallback callback, int timeoutMs) {
+        registerNetworkCallback(request, callback);
+    }
+
+    public void requestNetwork(
+            NetworkRequest request, NetworkCallback callback, int timeoutMs, Handler handler) {
+        registerNetworkCallback(request, callback, handler);
+    }
+
+    public void requestNetwork(
+            NetworkRequest request, NetworkCallback callback, int timeoutMs, Executor executor) {
+        if (executor == null) throw new NullPointerException("executor");
+        if (request == null) throw new NullPointerException("request");
+        if (callback == null) throw new NullPointerException("callback");
+        Network network = activeNetworkHandle();
+        NetworkCapabilities capabilities = getNetworkCapabilities(network);
+        if (!request.canBeSatisfiedBy(capabilities)) return;
+        executor.execute(() -> {
+            callback.onAvailable(network);
+            callback.onCapabilitiesChanged(network, capabilities);
+        });
+    }
 
     public boolean isDefaultNetworkActive() {
         return true;

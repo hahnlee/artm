@@ -5303,6 +5303,14 @@ added; the full corpus and multi-loader identity task remain open.
   services, and used the GPU IOSurface path. Only nonfatal cache/model warnings
   appeared.
 
+### Runtime checkpoint 302 — 2026-09-08
+
+- VLC follow-up after rebuilding framework-compat: the API-29
+  `ConnectivityManager.requestNetwork` overloads (Handler/timeout/Executor)
+  are now present. VLC's 8-second recovery-profile run exited 0, retained four
+  native ELF libraries, registered LibVLC JNI classes, and no longer emitted
+  the prior `NoSuchMethodError`.
+
 ### Runtime checkpoint 301 — 2026-09-08
 
 - Recovery profile app coverage expanded without APK changes: Snapseed
