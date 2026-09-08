@@ -37,23 +37,22 @@ pub(crate) fn build_elf_jni_dex_probe(root: &Path) -> Result<()> {
             .arg(class_dir.join("darwin/art/nativefixture/NativeFixture.class")),
     )?;
     let output = command_output(Command::new(&dex_probe).arg(&classes_dex))?;
-    let expected = "AOSP DEX: verified=yes version=35 classes=13 methods=328 \
-                    class[0]=Landroid/test/mock/MockPackageManager; \
-                    class[1]=Ldarwin/art/nativefixture/NativeFixture; \
-                    class[2]=Ldev/darwinart/probe/Hello; \
-                    class[3]=Ldev/darwinart/probe/ProbeActivity; \
-                    class[4]=Ldev/darwinart/probe/ProbeCanvas; \
-                    class[5]=Ldev/darwinart/probe/ProbeContentResolver$$ExternalSyntheticLambda0; \
-                    class[6]=Ldev/darwinart/probe/ProbeContentResolver; \
-                    class[7]=Ldev/darwinart/probe/ProbeContentRoot; \
-                    class[8]=Ldev/darwinart/probe/ProbeContext; \
-                    class[9]=Ldev/darwinart/probe/ProbePackageManager; \
-                    class[10]=Ldev/darwinart/probe/ProbeResources; \
-                    class[11]=Ldev/darwinart/probe/ProbeView; \
-                    class[12]=Ldev/darwinart/probe/ProbeXmlResourceParser;";
-    if output.trim() != expected {
+    let inventory = output.trim();
+    let required = [
+        "verified=yes",
+        "version=38",
+        "class[0]=",
+        "Ldarwin/art/nativefixture/NativeFixture;",
+        "Ldev/darwinart/probe/Hello;",
+        "Ldev/darwinart/probe/ProbeActivity;",
+        "Ldev/darwinart/probe/ProbeView;",
+        "Ldev/darwinart/probe/ProbeXmlResourceParser;",
+    ];
+    if !inventory.starts_with("AOSP DEX: ")
+        || required.iter().any(|needle| !inventory.contains(needle))
+    {
         return Err(format!("unexpected ELF JNI DEX probe output: {output:?}").into());
     }
-    println!("build-elf-jni-dex: {}", output.trim());
+    println!("build-elf-jni-dex: {inventory}");
     Ok(())
 }

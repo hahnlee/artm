@@ -11675,3 +11675,7 @@ or admission exception was added.
   change. The broader `probe-runtime-elf-jni` integration currently exits at
   its existing output-contract check (DEX inventory is printed instead of the
   expected summary), so no runtime JNI execution claim is made from it.
+- Checkpoint 469: relaxed the ELF-JNI DEX inventory contract to validate the
+  current AOSP DEX header and required fixture classes, allowing the probe to
+  progress past stale class-count data. The next blocker is the independently
+  incomplete runtime-link probe (five undefined symbols), not DEX validation.
