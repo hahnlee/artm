@@ -11053,3 +11053,10 @@ or admission exception was added.
   interpreter-versus-optimized output. This validates the existing JIT opcode
   path without an APK/test allowlist, but does not close JNI CFI, GC,
   concurrency, or real-app completion criteria.
+
+### Runtime checkpoint 371 — 2026-09-09
+
+- Unmodified AOSP `004-ReferenceMap` passes in interpreter, JIT, and
+  interpreter-versus-optimized lanes. The result exercises stack-map reference
+  locations in optimized execution without a test-specific fallback; broader
+  GC stress, JNI CFI, concurrency, and real-app work remains.

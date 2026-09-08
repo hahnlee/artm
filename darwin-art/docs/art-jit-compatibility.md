@@ -1687,6 +1687,14 @@ any of these tests; Java rewrites are not acceptable evidence.
   JIT, and unmodified-source lanes. Full matrix and Blue Archive validation
   remain open.
 
+### Runtime checkpoint 371 — 2026-09-09
+
+- Ran unmodified AOSP `004-ReferenceMap`. Interpreter expected output, JIT
+  expected output, and interpreter-versus-optimized output all pass. This
+  adds direct evidence for JIT stack maps and managed reference locations;
+  JNI CFI address publication, GC stress, concurrency, and real-app criteria
+  remain open.
+
 ### Progress — 2026-09-07 Nterp helper-CFI diagnosis
 
 - Reproducible generation reaches clang after relocation lowering. The
