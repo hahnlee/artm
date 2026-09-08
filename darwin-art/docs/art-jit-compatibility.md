@@ -5075,6 +5075,14 @@ added; the full corpus and multi-loader identity task remain open.
   paths, background verification, large class counts, and deopt. Remaining
   corpus and real-app validation are pending.
 
+### Runtime checkpoint 250 — 2026-09-08
+
+- The `838-override`–`860-vdex-failure` slice passed all 24 tests, covering
+  override/resolution, clinit/default interfaces, exceptions, data images,
+  verification and multidex, arrays/records, branch and inlining paths,
+  native/clone behavior, access checks, Unsafe/VarHandle intrinsics, and vdex
+  failure handling. Remaining corpus and real-app validation are pending.
+
 ### Runtime checkpoint 248 — 2026-09-08
 
 - The `719-varhandle-concurrency`–`736-interface-super-Object` slice passed

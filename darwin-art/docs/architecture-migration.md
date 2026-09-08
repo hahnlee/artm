@@ -9349,6 +9349,14 @@ or admission exception was added.
   irreducible loops, and iteration handling. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 250 — 2026-09-08
+
+- The `838-override`–`860-vdex-failure` slice passed all 24 tests, covering
+  override/resolution, clinit/default interfaces, exceptions, data images,
+  verification and multidex, arrays/records, branch/inlining, native/clone,
+  access checks, Unsafe/VarHandle intrinsics, and vdex failure handling.
+  Remaining corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 246 — 2026-09-08
 
 - The `669-checker-break`–`692-vdex-inmem-loader` slice passed all 31 tests,
