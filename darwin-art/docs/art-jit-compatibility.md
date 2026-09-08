@@ -5091,6 +5091,18 @@ added; the full corpus and multi-loader identity task remain open.
   busy-loop/invoke/new-string deoptimization. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 244 — 2026-09-08
+
+- The `642-fp-callees`–`668-aiobe` slice passed all 44 tests, covering FP
+  callees and read barriers, bogus/absolute SIMD and large arraycopy,
+  constant conversion, JNI field IDs, catch sinking, unresolved/many-direct
+  inline caches, vdex duplicate methods, access thunks, intrinsic deopt,
+  periodic and ARM SIMD optimization, JIT clinit/loop deopt, branches,
+  annotation lookup, array layouts/stores, SIMD loops/reductions/SAD/zero,
+  classloader allocation and oat layout, alias/select generation, odd dex
+  sizes, verifier/dex cache, JNI stubs, and bounds/AIOOBE. Remaining corpus
+  and real-app validation are pending.
+
 ### Runtime checkpoint 243 — 2026-09-08
 
 - The `626-checker-arm64-scratch-register`–`641-iterations` slice passed all

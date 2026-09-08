@@ -9349,6 +9349,14 @@ or admission exception was added.
   irreducible loops, and iteration handling. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 244 — 2026-09-08
+
+- The `642-fp-callees`–`668-aiobe` slice passed all 44 tests, covering FP/read
+  barriers, SIMD and arraycopy, JNI IDs, inline caches/thunks, deoptimization,
+  JIT clinit/loops, branches, array layouts and stores, classloader/oat paths,
+  dex/verifier behavior, JNI stubs, and bounds/AIOOBE. Remaining corpus and
+  real-app validation remain pending.
+
 ### Runtime checkpoint 237 — 2026-09-08
 
 - The `538-checker-embed-constants`–`561-shared-slowpaths` slice passed all 37
