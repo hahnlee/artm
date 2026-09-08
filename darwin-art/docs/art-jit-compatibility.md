@@ -5922,3 +5922,11 @@ added; the full corpus and multi-loader identity task remain open.
   entries are pinned AOSP ordinary-call classifications, not Darwin method
   gates; they remain tracked for eventual intrinsic parity and are not hidden
   behind an interpreter fallback or launch restriction.
+
+### Runtime checkpoint 322 — 2026-09-08
+
+- Workspace-wide Rust tests and doctests reached clean results across ART
+  bootstrap, ELF loading, APK extraction/runtime, profile, host, Binder, and
+  Bionic facade packages. Combined with the focused loader and JIT-memory
+  gates, this adds integration regression evidence; final end-to-end AOSP
+  differential and real-app criteria remain open.

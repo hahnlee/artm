@@ -10689,3 +10689,10 @@ or admission exception was added.
   distinguished from Darwin allowlists and are not used as an interpreter
   fallback or launch gate. Full intrinsic parity and real-app differential
   evidence remain open work.
+
+### Runtime checkpoint 322 — 2026-09-08
+
+- Workspace test/doctest coverage remains green across runtime, native loader,
+  APK, profile, host, Binder, and Bionic components. These are integration
+  regressions checks, not a substitute for the remaining full AOSP differential
+  corpus and real-app validation.
