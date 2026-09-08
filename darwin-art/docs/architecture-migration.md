@@ -10984,3 +10984,10 @@ or admission exception was added.
   clean application plus the manifest test. CFI output did not change, so the
   remaining low LR is produced outside this accessor, likely at method-entry
   publication or the invoke stub.
+
+### Runtime checkpoint 362 — 2026-09-09
+
+- Added the idempotent `ArtMethod` quick-entrypoint read boundary to the
+  runtime manifest and verified a clean graphics bootstrap. The attempted
+  store-side counterpart was removed after duplicate staging exposed a
+  non-idempotent patch application; producer tracing remains the next task.

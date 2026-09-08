@@ -6241,3 +6241,10 @@ added; the full corpus and multi-loader identity task remain open.
   native pointers unchanged. Patch application and the Rust manifest test
   pass, but fresh `137-cfi` output is unchanged; this accessor is not the sole
   return-PC producer and further entrypoint tracing is required.
+
+### Runtime checkpoint 362 — 2026-09-09
+
+- Runtime bootstrap now stages the `ArtMethod` quick-entrypoint read boundary
+  (`0167`) and builds cleanly. A separate store-side patch was removed after
+  duplicate staging exposed non-idempotent application; no store behavior is
+  claimed until that patch can be made idempotent.

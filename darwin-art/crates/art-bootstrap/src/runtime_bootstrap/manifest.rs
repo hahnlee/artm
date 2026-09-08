@@ -4,10 +4,11 @@
 //! compiler orchestration cannot silently change which upstream files are
 //! copied or patched.
 
-pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v22";
+pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v23";
 
 pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.cc",
+    "art_method.h",
     "runtime_image.cc",
     "backtrace_helper.cc",
     "plugin.cc",
@@ -143,6 +144,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0164-darwin-clone-dex-for-child-loader.patch",
     "patches/art/0165-darwin-publish-aot-unwind-maps.patch",
     "patches/art/0166-darwin-oat-quick-code-host-address.patch",
+    "patches/art/0167-darwin-art-method-entrypoint-window.patch",
 ];
 
 #[cfg(test)]
@@ -199,6 +201,10 @@ mod tests {
         assert!(
             PATCHED_RUNTIME_PATCHES
                 .contains(&"patches/art/0166-darwin-oat-quick-code-host-address.patch")
+        );
+        assert!(
+            PATCHED_RUNTIME_PATCHES
+                .contains(&"patches/art/0167-darwin-art-method-entrypoint-window.patch")
         );
     }
 }
