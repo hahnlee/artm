@@ -5082,6 +5082,18 @@ added; the full corpus and multi-loader identity task remain open.
   and allocation tracking stress. Remaining corpus and real-app validation
   are pending.
 
+### Runtime checkpoint 236 — 2026-09-08
+
+- The `515-dce-dominator`–`537-checker-jump-over-jump` slice passed all 45
+  tests. Coverage includes dominator/dead-move handling, builder fallthrough,
+  null-array and bound class loads, equivalent phi, array/field sets,
+  monitor-exit/throw regressions, boolean simplification, caller/callee and
+  long register allocation, SIMD/split array access, unresolved longs,
+  loop/try-catch variants, LSE fences/SIMD, peel-unroll, reference typing,
+  debug phi, BCE deoptimization, deopt/inlining, intrinsic/access checks,
+  arraycopy, debuggable and unverified inline paths, and jump elimination.
+  Remaining corpus and real-app validation are pending.
+
 ### Runtime checkpoint 235 — 2026-09-08
 
 - The `478-checker-inline-noreturn`–`514-shifts` slice passed all 38 tests.

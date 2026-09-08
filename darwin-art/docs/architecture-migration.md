@@ -9972,6 +9972,16 @@ or admission exception was added.
   shadow method/field resolution. Remaining corpus and real-app validation
   remain pending.
 
+### Runtime checkpoint 236 — 2026-09-08
+
+- The `515-dce-dominator`–`537-checker-jump-over-jump` slice passed all 45
+  tests, covering DCE/dominators, builder/null-array/bound loads, phis,
+  array/field and monitor/throw regressions, boolean simplification,
+  register allocation and SIMD/split arrays, loop/LSE/peel-unroll variants,
+  reference typing, debug phi, BCE deoptimization, deopt/inlining,
+  intrinsic/access checks, arraycopy, debuggable/unverified inline paths, and
+  jump elimination. Remaining corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 235 — 2026-09-08
 
 - The `478-checker-inline-noreturn`–`514-shifts` slice passed all 38 tests,
