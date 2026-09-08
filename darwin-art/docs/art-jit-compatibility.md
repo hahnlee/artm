@@ -4315,3 +4315,10 @@ added; the full corpus and multi-loader identity task remain open.
   after scale conversion: `(225,610)` becomes `(450,1220)` and misses, while
   `(90,320)` becomes `(180,640)` and hits a `SuggestionsTileView`. No JIT or
   graphics fault occurred; the next run will target the top-toolbar button.
+
+### Runtime checkpoint 132 — 2026-09-08
+
+- A clean physical-coordinate sweep on the active 720x1280 Chrome window found
+  only `avatar_button` in the top toolbar; x=440/500/560 hit `UrlBarApi26` and
+  x=640 hit the avatar. `TabSwitcherButtonView` is not instantiated, pointing
+  to a tablet/window configuration mismatch rather than input delivery.

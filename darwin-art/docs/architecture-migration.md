@@ -9271,3 +9271,10 @@ or admission exception was added.
   conversion: `(225,610)` becomes `(450,1220)` (miss) and `(90,320)` becomes
   `(180,640)` (a `SuggestionsTileView` hit). No JIT/graphics fault occurred;
   the harness must target the top-toolbar tab-switcher coordinate next.
+
+### Runtime checkpoint 132 — 2026-09-08
+
+- A clean physical-coordinate sweep confirms the 720x1280 Chrome hierarchy has
+  no `TabSwitcherButtonView`: toolbar hits resolve to `UrlBarApi26` or
+  `avatar_button`. This is a Chrome tablet/window configuration issue, not a
+  JIT or input dispatch fault.
