@@ -5115,6 +5115,16 @@ added; the full corpus and multi-loader identity task remain open.
   paths, background verification, large class counts, and deopt. Remaining
   corpus and real-app validation are pending.
 
+### Runtime checkpoint 255 — 2026-09-08
+
+- Full-corpus reconciliation exposed a parallel-build race: workers could
+  rebuild shared `unsafe-boot-dex` while another runtime resolved its boot
+  class path, yielding a raw `classes.dex` ZipException. The runner now
+  serializes the typed bootstrap default action with a cross-process lock
+  while retaining parallel test execution. Syntax and diff checks pass; the
+  in-flight sweep still uses the prior runner. Remaining corpus and real-app
+  validation are pending.
+
 ### Runtime checkpoint 250 — 2026-09-08
 
 - The `838-override`–`860-vdex-failure` slice passed all 24 tests, covering

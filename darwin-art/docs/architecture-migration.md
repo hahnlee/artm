@@ -9349,6 +9349,14 @@ or admission exception was added.
   irreducible loops, and iteration handling. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 255 — 2026-09-08
+
+- Reconciliation exposed a shared bootstrap race: parallel workers could
+  replace `unsafe-boot-dex` during boot-class-path resolution. The runner now
+  uses a cross-process lock around the typed bootstrap default action while
+  preserving parallel execution. Syntax and diff checks pass; remaining
+  corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 250 — 2026-09-08
 
 - The `838-override`–`860-vdex-failure` slice passed all 24 tests, covering
