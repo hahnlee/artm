@@ -9392,6 +9392,13 @@ or admission exception was added.
   remain green; a dedicated blocked-lock checkpoint-response measurement is
   still required before changing this host-specific synchronization layer.
 
+### Runtime checkpoint 152 — 2026-09-08
+
+- The linked ART Thread contention fixture confirms AOSP checkpoint semantics:
+  during a 500 ms mutex hold, `RunEmptyCheckpoint()` completes in 176 µs and
+  the blocked lock acquires at 500,738 µs. Full JIT audit, graphics incremental
+  link, xtask, and bootstrap tests pass.
+
 ### Runtime checkpoint 151 — 2026-09-08
 
 - Added fail-closed source checks for Darwin pthread checkpoint polling and

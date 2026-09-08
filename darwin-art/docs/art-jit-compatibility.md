@@ -4458,6 +4458,15 @@ added; the full corpus and multi-loader identity task remain open.
   release coverage remains green; no semantic change is committed until a
   dedicated checkpoint-response measurement can exercise the blocked-lock path.
 
+### Runtime checkpoint 152 — 2026-09-08
+
+- The dedicated ART Thread contention fixture now executes through the linked
+  acceptance runtime: with a 500 ms mutex hold, `RunEmptyCheckpoint()` completes
+  in 176 µs and the waiting lock acquires after 500,738 µs. This demonstrates
+  checkpoint servicing while blocked, not merely a free-lock fast path.
+  `audit-art-jit.sh`, graphics incremental link, xtask 18/18, and bootstrap
+  14/14 all pass.
+
 ### Runtime checkpoint 151 — 2026-09-08
 
 - Added fail-closed build validation for the Darwin pthread empty-checkpoint
