@@ -6922,3 +6922,7 @@ incomplete and still requires managed caller unwind validation.
   method-name/native-entry mapping. The JIT range producer builds correctly;
   137-cfi remains failing because its first JNI native frame is not represented
   by the Java `ArtMethod` name alone.
+- Checkpoint 451: verified the AOT `GetOatQuickMethodHeader` publish hook now
+  applies cleanly after staging `art_method.cc`; compiled Java frames resolve
+  to names in the unwinder. 137-cfi still fails only on the leading JNI native
+  symbol (`UpstreamCfi*`), so native-entry symbol attribution is the next gap.
