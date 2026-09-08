@@ -10607,3 +10607,8 @@ or admission exception was added.
   path. A null quick entry remains immediately after capability enumeration,
   including with JIT disabled, narrowing the next fix to the shared ART
   managed-call entry/resolution ABI.
+### Runtime checkpoint 310 — 2026-09-08
+
+- Rejected signal-handler stack dereferencing for fault diagnosis because it
+  would violate the runtime's async-signal safety boundary. The null target
+  remains fatal until an owner-thread-safe ART frame hook identifies it.

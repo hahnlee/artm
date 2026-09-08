@@ -5827,3 +5827,8 @@ added; the full corpus and multi-loader identity task remain open.
   `MediaCodec.native_setup`. The same fault occurs with `DARWIN_ART_JIT=0`,
   so it is an ART quick-entry/JNI method-resolution defect rather than the
   Darwin MediaCodec implementation itself. No fallback was added.
+### Runtime checkpoint 310 — 2026-09-08
+
+- Reviewed the generated-code fault recorder and rejected dereferencing the
+  interrupted stack from the signal handler as unsafe. The null call remains
+  intentionally fatal; diagnosis will use an owner-thread-safe ART frame hook.
