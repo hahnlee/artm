@@ -5287,6 +5287,14 @@ added; the full corpus and multi-loader identity task remain open.
   after `hdiutil attach -nomount`; the corrupt image was detached again. No
   profile recreation or overwrite has been performed.
 
+### Runtime checkpoint 299 — 2026-09-08
+
+- Root cause evidence: the sparsebundle compaction attempt failed with
+  `hdiutil: ... 메모리를 할당할 수 없음`; subsequent APFS verification found
+  zeroed fsroot/extent-ref blocks. A fresh `recovery` profile was created
+  without touching the corrupt image; Calculator was installed and launched
+  for 5 seconds with exit 0 and Nterp acceptance PASS.
+
 ### Runtime checkpoint 294 — 2026-09-08
 
 - Storage accounting after cleanup: active DarwinART `default` profile is 123G,
