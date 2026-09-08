@@ -9332,3 +9332,11 @@ or admission exception was added.
   `nativeLockCanvas(long, Canvas, Rect)` while lifecycle and BLAST methods are
   present. VLC reaches this AOSP software-surface contract without any JIT
   fault; the native Canvas implementation is the next compatibility task.
+
+### Runtime checkpoint 141 — 2026-09-08
+
+- The AOSP Surface JNI boundary is specified: lock an `ANativeWindow` buffer,
+  bind it to Java Canvas through the existing HWUI `ACanvas` bridge with dirty
+  clip, then detach and post using `ANativeWindow_unlockAndPost`, retaining the
+  IOSurface/Metal compositor. Implementation and regression tests remain
+  pending.

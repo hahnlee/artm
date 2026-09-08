@@ -4382,3 +4382,11 @@ added; the full corpus and multi-loader identity task remain open.
   existing table covers lifecycle/BLAST methods but lacks
   `nativeLockCanvas(long, Canvas, Rect)`. Implementing this AOSP contract is
   required for VLC's software-surface path; no JIT fault is involved.
+
+### Runtime checkpoint 141 — 2026-09-08
+
+- Confirmed the AOSP implementation boundary for VLC's missing
+  `Surface.nativeLockCanvas`: acquire an `ANativeWindow` buffer, bind it to the
+  Java Canvas through the existing HWUI `ACanvas` bridge with dirty-clip
+  semantics, then detach and post via `ANativeWindow_unlockAndPost` so the
+  IOSurface/Metal compositor remains the presentation path.
