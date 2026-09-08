@@ -9919,6 +9919,15 @@ or admission exception was added.
   inline execution, missing classes, and class loading. Remaining corpus and
   real-app validation are pending.
 
+### Runtime checkpoint 225 — 2026-09-08
+
+- The `1917-get-stack-frame`–`1948-obsolete-const-method-handle` slice passed
+  all 32 tests, covering JVMTI frames/locals, suspend and native monitors,
+  monitor/exception events, signal-thread and JIT frame handling, transforms,
+  proxy/DDMS/dispose paths, raw-monitor suspension, descriptors, breakpoint
+  redefine/deoptimization, and obsolete method handles. Remaining corpus and
+  real-app validation are pending.
+
 ### Runtime checkpoint 221 — 2026-09-08
 
 - The `126-miranda-multidex`–`145-alloc-tracking-stress` slice passed all 25

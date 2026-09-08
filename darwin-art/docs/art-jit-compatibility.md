@@ -5068,3 +5068,13 @@ added; the full corpus and multi-loader identity task remain open.
   suspend and native-resume variants, suspend-list ordering, agent TLS, JVMTI
   transforms, and local variable/object/frame inspection. Remaining corpus and
   real-app validation are pending.
+
+### Runtime checkpoint 225 — 2026-09-08
+
+- The `1917-get-stack-frame`–`1948-obsolete-const-method-handle` slice passed
+  all 32 tests. This validates JVMTI stack/frame access, thread-start timing,
+  suspend/native monitor interactions, owned-monitor and monitor events,
+  exception events, signal-thread handling, JIT frame inspection, transforms,
+  proxy frames/arguments, DDMS/dispose stress, raw monitor suspend, descriptor
+  listing, breakpoint redefine/deoptimization, and obsolete method handles.
+  Remaining corpus and real-app validation are pending.
