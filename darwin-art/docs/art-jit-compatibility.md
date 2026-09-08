@@ -4291,3 +4291,12 @@ added; the full corpus and multi-loader identity task remain open.
   are therefore recoverable W^X transitions logged too early; the run reports
   `unresolved=0` and `fatal=0`. The next fix is narrowly scoped pre-special W^X
   recovery, followed by a fresh 70-second acceptance run.
+
+### Runtime checkpoint 129 — 2026-09-08
+
+- Implemented reusable Darwin runtime-signal recovery in the bionic process
+  facade and invoke it before ART's special sigchain handlers. The rebuilt
+  70-second Chrome run produced zero `ART original generated-code fault` lines
+  while reaching 11,340 scanout requests and 42 presents. The wrapper still
+  failed its real-button discovery assertion, so end-to-end acceptance remains
+  open despite the JIT W^X fault boundary being fixed.

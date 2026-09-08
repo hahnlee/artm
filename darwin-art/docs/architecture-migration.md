@@ -9249,3 +9249,11 @@ or admission exception was added.
   are recoverable transitions logged too early; `unresolved=0` and `fatal=0`
   throughout the run. Next is pre-special W^X recovery and a fresh 70-second
   acceptance verification.
+
+### Runtime checkpoint 129 — 2026-09-08
+
+- Added a shared Darwin runtime-signal recovery helper and call it before ART's
+  special handlers. The fresh 70-second Chrome run had zero generated-code
+  fault diagnostics and sustained 11,340 scanouts/42 presents. The harness did
+  not detect its real tab-switcher button, so the full acceptance gate is still
+  pending even though the W^X fault logging boundary is resolved.
