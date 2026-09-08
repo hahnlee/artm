@@ -23,7 +23,11 @@ extern "C" void darwin_art_walk_managed_frames(void (*callback)(const char*, voi
       current != nullptr) {
     std::string name;
     if (current->IsNative()) {
-      darwin_art_lookup_native_method(
+      using NativeLookup = bool (*)(uintptr_t, void (*)(const char*, void*), void*);
+      auto lookup = reinterpret_cast<NativeLookup>(dlsym(RTLD_DEFAULT,
+                                                          "darwin_art_lookup_native_method"));
+      if (lookup == nullptr) lookup = darwin_art_lookup_native_method;
+      lookup(
           reinterpret_cast<uintptr_t>(current->GetEntryPointFromJni()),
           [](const char* registered, void* target) {
             if (registered != nullptr) *static_cast<std::string*>(target) = registered;

@@ -6935,3 +6935,9 @@ incomplete and still requires managed caller unwind validation.
   audits. 137-cfi remains failing because the resolver and registration path
   still observe distinct native-name storage across the linked runtime/provider;
   the next step is a single exported shared registry rather than TU-local state.
+- Checkpoint 454: resolver native-name lookup now resolves through the
+  exported `RTLD_DEFAULT` symbol to avoid static-link instance selection.
+  Graphics audit passes, but 137-cfi remains unchanged; registration timing or
+  native bridge substitution occurs before the observed `ArtMethod` entrypoint,
+  so the next diagnostic must trace pointer identity at `RegisterNative` and
+  resolver time.
