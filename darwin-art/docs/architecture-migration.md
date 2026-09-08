@@ -9835,3 +9835,10 @@ or admission exception was added.
   registered, and `501-null-constant-dce` passes interpreter/JIT/optimized
   lanes. `497` still fails after registration; class-definition association is
   the remaining gap.
+
+### Runtime checkpoint 211 — 2026-09-08
+
+- Fresh-machine verification reproduces successful distinct child-loader
+  DexFile registration but the same `497` null result after `DefineClass`.
+  Investigation remains focused on post-registration class association;
+  temporary diagnostic logging was discarded.

@@ -4949,3 +4949,10 @@ added; the full corpus and multi-loader identity task remain open.
   registered for the child loader; a representative `501-null-constant-dce`
   test passes in interpreter, JIT, and optimized lanes. `497` still fails
   after registration, so class-definition association remains open.
+
+### Runtime checkpoint 211 — 2026-09-08
+
+- Fresh-machine verification reproduces successful distinct child-loader
+  DexFile registration but the same `497` null result after `DefineClass`.
+  The remaining defect is narrowed to post-registration class association;
+  temporary diagnostic logging was discarded.
