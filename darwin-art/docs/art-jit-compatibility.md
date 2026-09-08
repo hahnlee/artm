@@ -5890,3 +5890,12 @@ added; the full corpus and multi-loader identity task remain open.
   AOSP DEX verification passed. The ARM64 intrinsic inventory audit also
   passes (`specialized-hir=36`, `hinvoke=217`, `handwritten=187`) with no
   contract drift. Full differential and real-app validation remain open.
+
+### Runtime checkpoint 318 — 2026-09-08
+
+- Stabilized the ARM64 ELF loader validation: TLS rewrite tests now derive the
+  synthetic guard page from the tested instruction, eliminating allocator/page
+  boundary flakiness under parallel execution. Tightened SHN_ABS handling to
+  accept only named linker markers (`__bss_start`, `_edata`, `_end`, etc.) and
+  reject arbitrary absolute definitions. Loader unit tests and the complete
+  constructor/namespace/FFI gate pass.

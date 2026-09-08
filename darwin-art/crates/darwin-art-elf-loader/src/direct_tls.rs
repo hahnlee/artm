@@ -210,6 +210,15 @@ mod tests {
             .collect()
     }
 
+    // A Vec<u8> may begin close enough to a page boundary that the tested MRS
+    // instruction lives on the following page. Derive the synthetic guard
+    // page from the instruction under test rather than the allocation base;
+    // otherwise the expected ADRP immediate depends on allocator placement
+    // and the test becomes intermittently flaky under parallel execution.
+    fn guard_for(code: &[u8], instruction_index: usize) -> usize {
+        (code.as_ptr() as usize + instruction_index * 4) & !0xfff | 0x28
+    }
+
     #[test]
     fn rewrites_only_the_validated_android_stack_guard_pair() {
         let mut code = instructions(&[
@@ -218,7 +227,7 @@ mod tests {
             LDR_X_UNSIGNED_IMMEDIATE | (5 << 10) | (19 << 5) | 8,
         ]);
 
-        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        let guard = guard_for(&code, 0);
         assert_eq!(
             rewrite_android_stack_guard_tls(&mut code, guard)
                 .unwrap()
@@ -239,7 +248,7 @@ mod tests {
             MRS_TPIDR_EL0 | 20,
             LDR_X_UNSIGNED_IMMEDIATE | (7 << 10) | (20 << 5),
         ]);
-        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        let guard = guard_for(&code, 0);
 
         assert!(matches!(
             rewrite_android_stack_guard_tls(&mut code, guard),
@@ -253,7 +262,7 @@ mod tests {
         values.extend(std::iter::repeat_n(0xd503_201f, 33));
         values.push(LDR_X_UNSIGNED_IMMEDIATE | (5 << 10) | (19 << 5) | 8);
         let mut code = instructions(&values);
-        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        let guard = guard_for(&code, 0);
 
         assert_eq!(
             rewrite_android_stack_guard_tls(&mut code, guard)
@@ -276,7 +285,7 @@ mod tests {
             0xd65f_03c0,
         ]);
 
-        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        let guard = guard_for(&code, 4);
         assert_eq!(
             rewrite_android_stack_guard_tls(&mut code, guard)
                 .unwrap()
@@ -298,7 +307,7 @@ mod tests {
             0xd65f_03c0,
         ]);
 
-        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        let guard = guard_for(&code, 0);
         assert_eq!(
             rewrite_android_stack_guard_tls(&mut code, guard)
                 .unwrap()
@@ -322,7 +331,7 @@ mod tests {
         values.push(0xf860_6800 | (8 << 5));
         let mut code = instructions(&values);
 
-        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        let guard = guard_for(&code, thread_pointer_index);
         assert_eq!(
             rewrite_android_stack_guard_tls(&mut code, guard)
                 .unwrap()
@@ -347,7 +356,7 @@ mod tests {
         values.push(0xf860_6800 | (13 << 5));
         let mut code = instructions(&values);
 
-        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        let guard = guard_for(&code, thread_pointer_index);
         assert_eq!(
             rewrite_android_stack_guard_tls(&mut code, guard)
                 .unwrap()
@@ -372,7 +381,7 @@ mod tests {
         values.push(0xf868_6968); // ldr x8, [x11, x8]
         let mut code = instructions(&values);
 
-        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        let guard = guard_for(&code, 4);
         assert_eq!(
             rewrite_android_stack_guard_tls(&mut code, guard)
                 .unwrap()
@@ -389,7 +398,7 @@ mod tests {
             MRS_TPIDR_EL0 | 8,
             ADD_X_SHIFTED_REGISTER | (8 << 5),
         ]);
-        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        let guard = guard_for(&code, 1);
 
         assert!(matches!(
             rewrite_android_stack_guard_tls(&mut code, guard),
@@ -416,7 +425,7 @@ mod tests {
             0xf860_6800 | (20 << 5),
         ]);
 
-        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        let guard = guard_for(&code, 6);
         assert_eq!(
             rewrite_android_stack_guard_tls(&mut code, guard)
                 .unwrap()
@@ -432,7 +441,7 @@ mod tests {
         let original = instructions(&[0xd503_201f, 0xd65f_03c0]);
         let mut code = original.clone();
 
-        let guard = (code.as_ptr() as usize & !0xfff) + 0x28;
+        let guard = guard_for(&code, 0);
         assert!(
             rewrite_android_stack_guard_tls(&mut code, guard)
                 .unwrap()

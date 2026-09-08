@@ -10660,3 +10660,11 @@ or admission exception was added.
   framework package. The ARM64 intrinsic source-contract audit passes with
   all classified entries accounted for; full AOSP differential and real-app
   validation remain open.
+
+### Runtime checkpoint 318 — 2026-09-08
+
+- Native loader correctness improved without widening compatibility fallbacks:
+  page-relative TLS tests are deterministic, and absolute ELF symbols are
+  fail-closed except for the AOSP/Bionic linker marker set. The full ELF
+  loader gate passes, including dependency-first constructors, TLS, IFUNC,
+  RELRO, namespace isolation, lifecycle teardown, and FFI smoke coverage.
