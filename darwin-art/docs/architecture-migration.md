@@ -10668,3 +10668,10 @@ or admission exception was added.
   fail-closed except for the AOSP/Bionic linker marker set. The full ELF
   loader gate passes, including dependency-first constructors, TLS, IFUNC,
   RELRO, namespace isolation, lifecycle teardown, and FFI smoke coverage.
+
+### Runtime checkpoint 319 — 2026-09-08
+
+- The strict pinned-AOSP ART contract manifest is clean: all 419 test
+  directories and 491 sources are owned and represented, with zero unsupported
+  or opaque actions. This is a build/contract invariant only; end-to-end JIT,
+  GC, concurrency, and real-app evidence is still required.

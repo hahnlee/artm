@@ -5899,3 +5899,11 @@ added; the full corpus and multi-loader identity task remain open.
   accept only named linker markers (`__bss_start`, `_edata`, `_end`, etc.) and
   reject arbitrary absolute definitions. Loader unit tests and the complete
   constructor/namespace/FFI gate pass.
+
+### Runtime checkpoint 319 — 2026-09-08
+
+- Strict custom-contract audit passes across the pinned AOSP ART test corpus:
+  419 directories and 491 sources, with `unsupported=0`, `opaque_shell=0`,
+  `unowned_source_bytes=0`, and `omitted_directories=0`. This validates the
+  source-level execution contract, while native runtime differential and
+  real-app completion criteria remain open.
