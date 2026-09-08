@@ -9479,6 +9479,13 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 270 — 2026-09-08
+
+- A 45-second Snapseed run reached edit activity and logged no ART fatal
+  signal before timeout. A stale macOS crash-report dialog appeared in the
+  desktop capture from an earlier host process; visual stability remains an
+  open verification item.
+
 ### Runtime checkpoint 269 — 2026-09-08
 
 - A 20-second default Snapseed run exits 0 after JNI registration and

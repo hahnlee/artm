@@ -5153,6 +5153,13 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 270 — 2026-09-08
+
+- A 45-second Snapseed host run reached edit activity with 309 JNI methods and
+  produced no ART fatal signal in its log before normal timeout. A stale macOS
+  crash-report dialog from an earlier host process was visible during screen
+  capture and must be separately reconciled before claiming visual stability.
+
 ### Runtime checkpoint 269 — 2026-09-08
 
 - A 20-second default Snapseed run completed with exit code 0 after 309 JNI
