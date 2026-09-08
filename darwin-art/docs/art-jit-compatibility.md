@@ -5819,3 +5819,11 @@ added; the full corpus and multi-loader identity task remain open.
   Android `MediaCodec` path. The next real-app blocker is a null generated
   ARM64 call target during MediaCodec initialization; this is a JIT/runtime
   ABI defect, not a missing APK asset.
+### Runtime checkpoint 309 — 2026-09-08
+
+- Reproduced the next VLC boundary with `DARWIN_ART_DEBUG_MEDIA_CODEC=1`:
+  `MediaCodecList` native registration and all three capability queries return
+  successfully, then a secondary VLC worker faults at `pc=0` before
+  `MediaCodec.native_setup`. The same fault occurs with `DARWIN_ART_JIT=0`,
+  so it is an ART quick-entry/JNI method-resolution defect rather than the
+  Darwin MediaCodec implementation itself. No fallback was added.

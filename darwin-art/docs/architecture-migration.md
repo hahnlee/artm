@@ -10601,3 +10601,9 @@ or admission exception was added.
   native VLC to open the requested URI. The subsequent MediaCodec crash is
   narrowed to an ART generated-code null target and is queued as the next JIT
   ABI investigation.
+### Runtime checkpoint 309 — 2026-09-08
+
+- VLC now reaches MediaCodecList through the real scoped-storage and native
+  path. A null quick entry remains immediately after capability enumeration,
+  including with JIT disabled, narrowing the next fix to the shared ART
+  managed-call entry/resolution ABI.
