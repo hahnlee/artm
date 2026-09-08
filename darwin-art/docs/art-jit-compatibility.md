@@ -5311,6 +5311,14 @@ added; the full corpus and multi-loader identity task remain open.
   native ELF libraries, registered LibVLC JNI classes, and no longer emitted
   the prior `NoSuchMethodError`.
 
+### Runtime checkpoint 303 — 2026-09-08
+
+- VLC recovery run after the API fix completed with exit 0 and native/JNI
+  initialization. The previous `ConnectivityManager.requestNetwork` linkage
+  error is absent; remaining output is limited to app-level/nonfatal startup
+  diagnostics. This is an app-compatibility increment, not full VLC playback
+  validation yet.
+
 ### Runtime checkpoint 301 — 2026-09-08
 
 - Recovery profile app coverage expanded without APK changes: Snapseed
