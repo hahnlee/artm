@@ -6751,3 +6751,11 @@ incomplete and still requires managed caller unwind validation.
 - AOSP trampoline publication and registry idempotence remain; temporary
   offset diagnostics were removed. The next fix must preserve the frame at
   the assembly trampoline boundary while native code is active.
+### Runtime checkpoint 425 — 2026-09-09
+
+- `137-cfi` now builds and executes all five lanes with registry publication
+  observed, but every lane remains `FAIL`: saved generic-frame memory is
+  reused before unwind inspection.
+- Temporary offset probes were removed. The next implementation must retain
+  the callee-save record at the assembly generic-JNI boundary until native
+  unwind inspection completes.

@@ -11440,3 +11440,9 @@ or admission exception was added.
   publication was removed as a false lifetime boundary.
 - Trampoline publication and duplicate protection remain. The next fix must
   preserve the frame at the assembly trampoline boundary.
+### Runtime checkpoint 425 — 2026-09-09
+
+- All five `137-cfi` lanes execute with registry publication observed, but
+  remain `FAIL` because generic-frame saved memory is reused during unwind.
+- Offset diagnostics are removed; the next fix is assembly-boundary frame
+  lifetime, retaining the callee-save record through native unwind.
