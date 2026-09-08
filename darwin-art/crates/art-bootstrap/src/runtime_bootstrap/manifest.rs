@@ -4,7 +4,7 @@
 //! compiler orchestration cannot silently change which upstream files are
 //! copied or patched.
 
-pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v21";
+pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v22";
 
 pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.cc",
@@ -56,6 +56,7 @@ pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "gc/collector/garbage_collector.cc",
     "gc/collector/mark_compact.cc",
     "oat/oat_file.cc",
+    "oat/oat_file-inl.h",
     "oat/oat_quick_method_header.cc",
     "oat/image.h",
     "oat/image-inl.h",
@@ -141,6 +142,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0160-darwin-libcore-before-early-clinits.patch",
     "patches/art/0164-darwin-clone-dex-for-child-loader.patch",
     "patches/art/0165-darwin-publish-aot-unwind-maps.patch",
+    "patches/art/0166-darwin-oat-quick-code-host-address.patch",
 ];
 
 #[cfg(test)]
@@ -194,5 +196,9 @@ mod tests {
         assert!(PATCHED_RUNTIME_PATCHES.contains(
             &"patches/art/0155-darwin-allocation-entrypoint-class-reference-boundary.patch"
         ));
+        assert!(
+            PATCHED_RUNTIME_PATCHES
+                .contains(&"patches/art/0166-darwin-oat-quick-code-host-address.patch")
+        );
     }
 }

@@ -10977,3 +10977,10 @@ or admission exception was added.
   anonymous heap region is insufficient evidence of code identity; this keeps
   unwinding conservative until the JIT debugger publishes the exact executable
   code-cache range.
+
+### Runtime checkpoint 361 — 2026-09-09
+
+- Added the precise OAT quick-code host-address boundary patch and verified
+  clean application plus the manifest test. CFI output did not change, so the
+  remaining low LR is produced outside this accessor, likely at method-entry
+  publication or the invoke stub.

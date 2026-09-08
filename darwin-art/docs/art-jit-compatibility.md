@@ -6233,3 +6233,11 @@ added; the full corpus and multi-loader identity task remain open.
   candidate can fall inside a non-executable anonymous region, so treating
   presence alone as code identity was too permissive. JIT identity publication
   remains required.
+
+### Runtime checkpoint 361 — 2026-09-09
+
+- Added and staged `0166-darwin-oat-quick-code-host-address.patch`, lifting
+  logical OAT quick-code pointers at `OatMethod::GetQuickCode()` while leaving
+  native pointers unchanged. Patch application and the Rust manifest test
+  pass, but fresh `137-cfi` output is unchanged; this accessor is not the sole
+  return-PC producer and further entrypoint tracing is required.
