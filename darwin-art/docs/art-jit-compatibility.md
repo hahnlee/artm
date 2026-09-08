@@ -6906,3 +6906,9 @@ incomplete and still requires managed caller unwind validation.
   but 137-cfi remains `stdout=630/630`; the active OAT maps do not expose usable
   method symbols for these frames, so ART-side range publication is still the
   required path.
+- Checkpoint 448: attempted ART `GetOatQuickMethodHeader` method-range
+  publication, but the shadow manifest does not stage `art_method.cc` in a
+  patch-compatible form; repeated patch application failed. The new producer
+  patches were removed to restore the verified build. OAT range publication
+  remains the next implementation and must be integrated through an existing
+  staged ART hook rather than leaving a broken bootstrap.

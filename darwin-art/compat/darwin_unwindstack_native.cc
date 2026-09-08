@@ -79,6 +79,12 @@ struct DarwinCodeAddressPair {
   uint64_t host;
 };
 std::vector<DarwinCodeAddressPair> g_code_address_pairs;
+struct DarwinCompiledMethodRange {
+  uint64_t start;
+  uint64_t end;
+  std::string name;
+};
+std::vector<DarwinCompiledMethodRange> g_compiled_method_ranges;
 
 uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc) {
   if (maps == nullptr || pc >= (1ULL << 32)) return pc;
@@ -195,6 +201,31 @@ extern "C" void darwin_art_register_code_address(uintptr_t logical, uintptr_t ho
     if (pair.logical == logical && pair.host == host) return;
   }
   g_code_address_pairs.push_back({logical, host});
+}
+
+extern "C" void darwin_art_register_compiled_method(uintptr_t start, size_t size,
+                                                      const char* name) {
+  if (start == 0 || size == 0 || name == nullptr || *name == '\0') return;
+  std::lock_guard<std::mutex> lock(g_aot_ranges_mutex);
+  const uint64_t end = start + size;
+  for (auto& range : g_compiled_method_ranges) {
+    if (range.start == start && range.end == end) {
+      range.name = name;
+      return;
+    }
+  }
+  g_compiled_method_ranges.push_back({start, end, name});
+}
+
+bool FindCompiledMethodName(uint64_t pc, std::string* name) {
+  std::lock_guard<std::mutex> lock(g_aot_ranges_mutex);
+  for (const auto& range : g_compiled_method_ranges) {
+    if (pc >= range.start && pc < range.end) {
+      *name = range.name;
+      return true;
+    }
+  }
+  return false;
 }
 
 namespace unwindstack {
@@ -488,7 +519,10 @@ _Unwind_Reason_Code CollectNativeFrame(_Unwind_Context* context, void* opaque) {
     // descriptor entry. Mirror AOSP Unwinder's normal MapInfo lookup before
     // trying the JIT list so DWARF/symtab method names are recovered directly
     // from the mapped OAT file.
-    bool found = frame.map_info != nullptr &&
+    std::string compiled_name;
+    bool found = FindCompiledMethodName(pc, &compiled_name);
+    if (found) frame.function_name = compiled_name;
+    if (!found) found = frame.map_info != nullptr &&
                  frame.map_info->GetFunctionName(pc, &frame.function_name,
                                                    &frame.function_offset);
     if (!found && walk->jit_debug != nullptr) {
