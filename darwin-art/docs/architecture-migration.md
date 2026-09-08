@@ -9357,6 +9357,15 @@ or admission exception was added.
   preserving parallel execution. Syntax and diff checks pass; remaining
   corpus and real-app validation remain pending.
 
+### Runtime checkpoint 256 — 2026-09-08
+
+- With the stale pre-lock sweep stopped, the race-sensitive
+  `149-suspend-all-stress`–`156-register-dex-file-multi-loader` range was
+  rerun using the locked runner and all 8 tests passed. The ledger now has
+  1,074 passed of 1,075 discovered tests; only the custom InputChannel smoke
+  test remains blocked by its missing compile stub. Remaining corpus and
+  real-app validation remain pending.
+
 ### Runtime checkpoint 250 — 2026-09-08
 
 - The `838-override`–`860-vdex-failure` slice passed all 24 tests, covering

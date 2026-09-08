@@ -5115,6 +5115,16 @@ added; the full corpus and multi-loader identity task remain open.
   paths, background verification, large class counts, and deopt. Remaining
   corpus and real-app validation are pending.
 
+### Runtime checkpoint 256 — 2026-09-08
+
+- After terminating the stale pre-lock sweep, the race-sensitive
+  `149-suspend-all-stress`–`156-register-dex-file-multi-loader` range was
+  rerun with the locked runner and all 8 tests passed (including the two
+  previously affected tests). The corpus ledger now reports 1,074 passed of
+  1,075 discovered tests; the sole remaining failure is the custom
+  `9999-input-channel-endpoint-parcel-smoke` compile-stub gap. Remaining
+  corpus and real-app validation are pending.
+
 ### Runtime checkpoint 255 — 2026-09-08
 
 - Full-corpus reconciliation exposed a parallel-build race: workers could
