@@ -28,6 +28,7 @@ pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "gc/space/space.cc",
     "gc/space/image_space.cc",
     "entrypoints/quick/quick_alloc_entrypoints.cc",
+    "entrypoints/quick/quick_entrypoints.h",
     "entrypoints/quick/callee_save_frame.h",
     "entrypoints/quick/quick_trampoline_entrypoints.cc",
     "entrypoints/entrypoint_utils.h",

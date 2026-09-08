@@ -4878,3 +4878,11 @@ added; the full corpus and multi-loader identity task remain open.
   graphics bootstrap remains intact; shadow publication must be made atomic
   together with generated-header materialization before retrying the loader
   clone implementation.
+
+### Runtime checkpoint 201 — 2026-09-08
+
+- Added the upstream `entrypoints/quick/quick_entrypoints.h` header to the
+  shared runtime shadow source manifest. A clean shadow regeneration now
+  materializes the header and `build-runtime-graphics-bootstrap-internal`
+  completes with 256 objects reused; this removes the previously observed
+  incomplete-shadow failure without changing ART execution semantics.

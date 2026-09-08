@@ -9766,3 +9766,11 @@ or admission exception was added.
   headers such as `quick_entrypoints.h`; no runtime semantics were changed.
   The next loader implementation must combine atomic shadow publication with
   complete generated-header staging.
+
+### Runtime checkpoint 201 — 2026-09-08
+
+- The shared shadow manifest now includes upstream
+  `entrypoints/quick/quick_entrypoints.h`. Clean regeneration confirms the
+  generated-header dependency is materialized and the graphics bootstrap
+  reuses all 256 runtime objects successfully; no runtime behavior was
+  relaxed.
