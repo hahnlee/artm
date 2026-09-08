@@ -5087,3 +5087,12 @@ added; the full corpus and multi-loader identity task remain open.
   proxy frames/arguments, DDMS/dispose stress, raw monitor suspend, descriptor
   listing, breakpoint redefine/deoptimization, and obsolete method handles.
   Remaining corpus and real-app validation are pending.
+
+### Runtime checkpoint 227 — 2026-09-08
+
+- The `1966-get-set-local-objects-no-table`–`1998-structural-shadow-field`
+  slice passed all 33 tests, covering local/object slots, force returns, JNI
+  ID swaps, array resizing, structural/obsolete redefinition across threads,
+  monitor and verification failures, retransformation, and final/virtual
+  shadow method/field resolution. Remaining corpus and real-app validation
+  are pending.

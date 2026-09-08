@@ -9962,3 +9962,12 @@ or admission exception was added.
   multithread JIT, event delivery, dex-classloader insertion, and primitive
   frame access without tables. Remaining corpus and real-app validation remain
   pending.
+
+### Runtime checkpoint 227 — 2026-09-08
+
+- The `1966-get-set-local-objects-no-table`–`1998-structural-shadow-field`
+  slice passed all 33 tests, including local/object slots, force returns, JNI
+  ID swaps, array resizing, structural/obsolete redefinition across threads,
+  monitor and verification failures, retransformation, and final/virtual
+  shadow method/field resolution. Remaining corpus and real-app validation
+  remain pending.
