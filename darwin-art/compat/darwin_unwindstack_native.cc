@@ -483,11 +483,20 @@ _Unwind_Reason_Code CollectNativeFrame(_Unwind_Context* context, void* opaque) {
   if (symbol.dli_sname != nullptr) {
     frame.function_name = symbol.dli_sname;
     frame.function_offset = pc - reinterpret_cast<uint64_t>(symbol.dli_saddr);
-  } else if (walk->jit_debug != nullptr) {
-    const bool found = walk->jit_debug->GetFunctionName(
-        walk->maps, pc, &frame.function_name, &frame.function_offset);
+  } else {
+    // AOT app code is an ELF/ODEX mapping, not a Mach-O image and not a JIT
+    // descriptor entry. Mirror AOSP Unwinder's normal MapInfo lookup before
+    // trying the JIT list so DWARF/symtab method names are recovered directly
+    // from the mapped OAT file.
+    bool found = frame.map_info != nullptr &&
+                 frame.map_info->GetFunctionName(pc, &frame.function_name,
+                                                   &frame.function_offset);
+    if (!found && walk->jit_debug != nullptr) {
+      found = walk->jit_debug->GetFunctionName(
+          walk->maps, pc, &frame.function_name, &frame.function_offset);
+    }
     if (!found && std::getenv("DARWIN_ART_DEBUG_CFI") != nullptr) {
-      std::fprintf(stderr, "darwin-cfi: jit-symbol-miss pc=%llx\\n",
+      std::fprintf(stderr, "darwin-cfi: symbol-miss pc=%llx\\n",
                    static_cast<unsigned long long>(pc));
     }
   }

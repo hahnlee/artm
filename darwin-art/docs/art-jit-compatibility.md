@@ -6901,3 +6901,8 @@ incomplete and still requires managed caller unwind validation.
   reports `stdout=630/630`; native unwinding does not expose ART dex PCs, so
   the next implementation must publish compiled method ranges from ART rather
   than infer them from `StackVisitor` called after the unwind.
+- Checkpoint 447: added the AOSP `MapInfo::GetFunctionName` fallback for
+  executable OAT/ODEX mappings before JIT-descriptor lookup. Link audit passes,
+  but 137-cfi remains `stdout=630/630`; the active OAT maps do not expose usable
+  method symbols for these frames, so ART-side range publication is still the
+  required path.
