@@ -4833,3 +4833,11 @@ added; the full corpus and multi-loader identity task remain open.
   was fully reverted, leaving the runtime behavior unchanged and the needed
   fix narrowed to per-(DexFile, ClassLoader) cache identity rather than a
   test-specific workaround.
+
+### Runtime checkpoint 196 — 2026-09-08
+
+- A second experiment allowing `RegisterDexFile` to share the existing cache
+  across loaders also failed to resolve `497-inlining-and-class-loader` and
+  was reverted. The failure confirms that a real per-loader DexFile/cache
+  clone with independent registration and lifetime is required; no global
+  registration relaxation or test-specific gate is retained.

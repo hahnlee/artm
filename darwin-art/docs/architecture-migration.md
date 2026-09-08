@@ -9726,3 +9726,11 @@ or admission exception was added.
   remains unresolved. The experiment was reverted; the required fix is now
   narrowed to per-(DexFile, ClassLoader) cache identity, with no test-specific
   exception added.
+
+### Runtime checkpoint 196 — 2026-09-08
+
+- A second generic experiment returning the existing DexCache from
+  `RegisterDexFile` for a different loader still failed `497` and was
+  reverted. The remaining fix is a genuine per-loader DexFile/cache clone
+  with independent registration and lifetime; global registration relaxation
+  and test-specific gates remain absent.
