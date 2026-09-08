@@ -4956,3 +4956,11 @@ added; the full corpus and multi-loader identity task remain open.
   DexFile registration but the same `497` null result after `DefineClass`.
   The remaining defect is narrowed to post-registration class association;
   temporary diagnostic logging was discarded.
+
+### Runtime checkpoint 212 — 2026-09-08
+
+- A one-shot callback trace confirmed that `LLoadedByMyClassLoader` never
+  reaches `ClassPreDefine`: the original DexFile registration fails, the clone
+  registers, and execution then returns to Java with status 122. This narrows
+  the defect further to an earlier `DefineClass` precondition/exception path,
+  rather than callback substitution. The temporary trace was removed.

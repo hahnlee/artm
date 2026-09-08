@@ -9842,3 +9842,11 @@ or admission exception was added.
   DexFile registration but the same `497` null result after `DefineClass`.
   Investigation remains focused on post-registration class association;
   temporary diagnostic logging was discarded.
+
+### Runtime checkpoint 212 — 2026-09-08
+
+- A one-shot callback trace showed `LLoadedByMyClassLoader` never reaches
+  `ClassPreDefine`; original registration fails, clone registration succeeds,
+  then Java receives status 122. The remaining path is an earlier
+  `DefineClass` precondition/exception failure, not callback substitution.
+  Temporary tracing was removed.
