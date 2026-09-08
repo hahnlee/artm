@@ -9349,6 +9349,13 @@ or admission exception was added.
   irreducible loops, and iteration handling. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 279 — 2026-09-08
+
+- Rebuilt HWUI/graphics on the new machine and validated the Darwin capability
+  boundary: wide-gamut FP16 is reported unsupported in AOSP EglManager for the
+  RGBA_8888 Metal path. Snapseed still launches normally; only the separate
+  optional 101010-2 format warning remains.
+
 ### Runtime checkpoint 262 — 2026-09-08
 
 - Baseline compatibility is 1,075/1,075 AOSP tests, with Calculator and

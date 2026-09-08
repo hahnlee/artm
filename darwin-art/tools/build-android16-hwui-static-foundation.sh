@@ -11,6 +11,7 @@ animation_patch="$project_root/patches/frameworks-base/0005-darwin-hwui-animatio
 darwin_gpu_patch="$project_root/patches/frameworks-base/0006-darwin-hwui-gpu.patch"
 darwin_renderthread_patch="$project_root/patches/frameworks-base/0007-darwin-hwui-renderthread.patch"
 darwin_angle_surface_patch="$project_root/patches/frameworks-base/0008-darwin-hwui-angle-rgba-surface.patch"
+darwin_wide_gamut_patch="$project_root/patches/frameworks-base/0009-darwin-hwui-unsupported-wide-gamut.patch"
 
 # shellcheck disable=SC1090
 source "$lock_file"
@@ -47,6 +48,7 @@ verify_sha "$animation_patch" "$ANIMATION_PULSE_PATCH_SHA256"
 verify_sha "$darwin_gpu_patch" "$DARWIN_GPU_PATCH_SHA256"
 verify_sha "$darwin_renderthread_patch" "$DARWIN_RENDERTHREAD_PATCH_SHA256"
 verify_sha "$darwin_angle_surface_patch" "$DARWIN_ANGLE_SURFACE_PATCH_SHA256"
+verify_sha "$darwin_wide_gamut_patch" "$DARWIN_WIDE_GAMUT_PATCH_SHA256"
 
 sources=(
   canvas/CanvasFrontend.cpp
@@ -245,9 +247,10 @@ mkdir -p "$cache_dir" "$generated_dir/include" "$generated_dir/source" "$generat
 # or pinned source identity changes.
 patched_hwui="$output_dir/patched-source"
 patched_marker="$patched_hwui/.darwin-art-patched-source"
-patch_identity="$(printf '%s\n%s\n%s\n%s\n%s\n' "$HWUI_SOURCE_MANIFEST_SHA256" \
+patch_identity="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$HWUI_SOURCE_MANIFEST_SHA256" \
   "$ANIMATION_PULSE_PATCH_SHA256" "$DARWIN_GPU_PATCH_SHA256" \
   "$DARWIN_RENDERTHREAD_PATCH_SHA256" "$DARWIN_ANGLE_SURFACE_PATCH_SHA256" \
+  "$DARWIN_WIDE_GAMUT_PATCH_SHA256" \
   | shasum -a 256 | awk '{print $1}')"
 if [[ ! -f "$patched_marker" || "$(<"$patched_marker")" != "$patch_identity" ]]; then
   fresh_shadow="$output_dir/patched-source.new.$$"
@@ -257,6 +260,7 @@ if [[ ! -f "$patched_marker" || "$(<"$patched_marker")" != "$patch_identity" ]];
   patch -d "$fresh_shadow" -p1 < "$darwin_gpu_patch"
   patch -d "$fresh_shadow" -p1 < "$darwin_renderthread_patch"
   patch -d "$fresh_shadow" -p1 < "$darwin_angle_surface_patch"
+  patch -d "$fresh_shadow" -p1 < "$darwin_wide_gamut_patch"
   printf '%s\n' "$patch_identity" > "$fresh_shadow/.darwin-art-patched-source"
   rm -rf "$patched_hwui"
   mv "$fresh_shadow" "$patched_hwui"

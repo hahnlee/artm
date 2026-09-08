@@ -5103,6 +5103,14 @@ added; the full corpus and multi-loader identity task remain open.
   monitors, threads, and thread groups. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 279 — 2026-09-08
+
+- On the replacement Mac, rebuilt the pinned Android 16 HWUI static foundation
+  and graphics bootstrap successfully. Darwin now explicitly clears HWUI's
+  `pixelFormatFloat` capability because the Metal/IOSurface backend is
+  RGBA_8888-only; a fresh Snapseed launch completed with the prior wide-gamut
+  error removed. The optional 101010-2 probe warning remains unsupported work.
+
 ### Runtime checkpoint 262 — 2026-09-08
 
 - Full AOSP corpus is green at 1,075/1,075 after the InputChannel framework
