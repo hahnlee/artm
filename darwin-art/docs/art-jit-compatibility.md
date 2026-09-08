@@ -7005,3 +7005,9 @@ incomplete and still requires managed caller unwind validation.
   current AOSP DEX header and required fixture classes, allowing the probe to
   progress past stale class-count data. The next blocker is the independently
   incomplete runtime-link probe (five undefined symbols), not DEX validation.
+- Checkpoint 470: reran the integration command after the contract fix. It now
+  reaches the runtime stage, but no runtime-link dylib is published because
+  the headless link closure remains intentionally incomplete for five symbols:
+  `ACanvas_clipRect`, `ACanvas_getNativeHandleFromJava`,
+  `ACanvas_isSupportedPixelFormat`, `ACanvas_setBuffer`, and
+  `Runtime_nativeLoad`.
