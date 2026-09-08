@@ -4860,3 +4860,11 @@ added; the full corpus and multi-loader identity task remain open.
   fail with `No file to patch`. The prototype and manifest entry were removed.
   The class-loader gap remains open until a variant-aware ownership design is
   implemented and validated without weakening AOSP registration checks.
+
+### Runtime checkpoint 199 — 2026-09-08
+
+- Fresh four-worker execution of the `501-null-constant-dce` through
+  `550-new-instance-clinit` corpus slice passes all 79 discovered contracts,
+  covering checker lowering, deoptimization, loops/try-catch, monitor exit,
+  array/field operations, inlining, tracing, and JIT regressions. The isolated
+  `497` multi-loader identity failure remains the next runtime gap.

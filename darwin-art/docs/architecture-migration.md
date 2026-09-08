@@ -9751,3 +9751,10 @@ or admission exception was added.
   `dalvik_system_DexFile.cc`, causing `No file to patch`; the prototype was
   removed. The next implementation must be variant-aware and preserve AOSP
   loader ownership/registration semantics.
+
+### Runtime checkpoint 199 — 2026-09-08
+
+- The fresh four-worker `501`–`550` AOSP slice passes all 79 discovered tests,
+  including deoptimization, monitor/exception paths, array/field lowering,
+  inlining, tracing, and JIT regressions. The isolated `497` multi-loader
+  identity case remains the next structural implementation item.
