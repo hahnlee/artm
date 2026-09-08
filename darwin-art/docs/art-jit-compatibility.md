@@ -5938,3 +5938,10 @@ added; the full corpus and multi-loader identity task remain open.
   `ConnectivityManager.requestNetwork(...)`. The compatibility source already
   implements all four overloads and the artifact now regenerates successfully;
   a fresh real VLC run is still required.
+
+### Runtime checkpoint 324 — 2026-09-08
+
+- Verified the launcher consumes the regenerated framework compatibility
+  artifact directly. No VLC APK is currently present in the local download or
+  workspace roots, so an unmodified post-refresh VLC run cannot yet be
+  executed; no substitute APK or APK rewrite was introduced.

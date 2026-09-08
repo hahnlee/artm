@@ -10703,3 +10703,10 @@ or admission exception was added.
   `ConnectivityManager.requestNetwork` API-29 overloads are present in runtime
   input. This is a framework-surface correction, not an app patch; a fresh
   unmodified-VLC execution remains required to validate native playback.
+
+### Runtime checkpoint 324 — 2026-09-08
+
+- Confirmed the normal launcher path resolves the refreshed framework artifact
+  rather than a copied manager bundle. The original VLC APK is not currently
+  available in local roots, so playback verification remains pending without
+  modifying or synthesizing an APK.
