@@ -4790,3 +4790,10 @@ added; the full corpus and multi-loader identity task remain open.
   unchanged-source optimized lanes. App-image strings/native methods,
   nonvirtual JNI, default-method linking, deadlock handling, and read-modify-
   write stress are covered.
+
+### Runtime checkpoint 191 — 2026-09-08
+
+- Fresh four-worker execution of `1900`–`1947` passes all 46 contracts in
+  interpreter, JIT, and unchanged-source optimized lanes. Suspend/resume and
+  raw monitors, frame-pop and exception events, JVMTI transforms, proxy frames,
+  and breakpoint/deoptimization paths all pass.

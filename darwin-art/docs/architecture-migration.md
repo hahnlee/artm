@@ -9685,3 +9685,10 @@ or admission exception was added.
   interpreter, JIT, and unchanged optimized lanes, covering app-image
   strings/native methods, nonvirtual JNI, default-method linking, deadlock
   handling, and read-modify-write stress.
+
+### Runtime checkpoint 191 — 2026-09-08
+
+- The fresh `1900`–`1947` slice passes all 46 execution contracts across
+  interpreter, JIT, and unchanged optimized lanes, validating suspend/resume
+  and raw monitors, frame-pop/exception events, JVMTI transforms, proxy
+  frames, and breakpoint/deoptimization behavior.
