@@ -11533,6 +11533,11 @@ or admission exception was added.
 
 ### Runtime checkpoint 441 — 2026-09-09
 
+### Runtime checkpoint 442 — 2026-09-09
+
+- Both `StackVisitor` transition modes were tested and `137-cfi` remains
+  failing. The resolver sees the wrapper but not its managed AOT callers.
+
 - Runtime callback execution is confirmed. It currently sees only the Java
   wrapper method, so the remaining gap is traversing the native-to-managed
   transition to deeper AOT callers while preserving AOSP ordering.

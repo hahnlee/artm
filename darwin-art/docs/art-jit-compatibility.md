@@ -6858,6 +6858,11 @@ incomplete and still requires managed caller unwind validation.
 
 ### Runtime checkpoint 441 — 2026-09-09
 
+### Runtime checkpoint 442 — 2026-09-09
+
+- Tested the ART resolver with transitions excluded and included; `137-cfi`
+  remains `FAIL`. The callback still needs a managed caller walk across JNI.
+
 - The callback is proven live in the host log; it reports the Java wrapper
   (`Main.unwindInProcess`) but not deeper AOT callers. `137-cfi` remains
   `FAIL`; the next fix is transition-aware caller walking.
