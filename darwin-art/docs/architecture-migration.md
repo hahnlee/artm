@@ -11424,3 +11424,12 @@ or admission exception was added.
   libcutils headers; `build-runtime-bootstrap` completes successfully.
 - `runtime/oat/index_bss_mapping.h` is now an explicit shadow input; the next
   step is a fresh graphics-link audit after promotion.
+
+### Runtime checkpoint 423 — 2026-09-09
+
+- JIT and OpenJDK/JVMTI compile edges now include runtime/oat siblings, and
+  `audit-runtime-graphics-link-fast` passes (`registrar=51`, no fake symbols).
+- `137-cfi` now compiles and executes all lanes but reports `FAIL` in each;
+  registry publication is observed, while the recovered generic frame's saved
+  return registers are invalid. The next task is to correct frame lifetime or
+  the managed-SP handoff at the selected JNI entrypoint.

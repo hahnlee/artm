@@ -6733,3 +6733,13 @@ incomplete and still requires managed caller unwind validation.
   now completes successfully.
 - Added `runtime/oat/index_bss_mapping.h` to the shadow manifest. A fresh
   graphics-link audit is still required after shadow promotion.
+
+### Runtime checkpoint 423 — 2026-09-09
+
+- `audit-runtime-graphics-link-fast` now completes successfully after adding
+  the runtime/oat fallback to the JIT and OpenJDK/JVMTI compile commands.
+- `137-cfi` reaches all five runtime lanes and the native unwind path (the
+  prior compile blocker is gone), but each lane still returns `FAIL` instead
+  of `PASS`. Debug output shows a published generic frame with invalid saved
+  return registers; frame-layout/entrypoint lifetime remains the next JIT ABI
+  fix. No completion claim is made.

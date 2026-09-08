@@ -700,6 +700,12 @@ pub(crate) fn build_jit_compiler(root: &Path) -> Result<()> {
             command.arg("-include").arg(
                 root.join("_build/runtime-common/patched-source/runtime/jit/jit_memory_region.h"),
             );
+            // oat_file.h includes index_bss_mapping.h with AOSP quote
+            // semantics; keep the immutable runtime/oat sibling directory in
+            // the compiler's fallback search path.
+            command
+                .arg("-iquote")
+                .arg(root.join("_aosp/art/runtime/oat"));
         }
         command
             .arg("-idirafter")

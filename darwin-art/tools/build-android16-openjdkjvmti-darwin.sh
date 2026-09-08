@@ -70,6 +70,8 @@ common_flags=(
   -I "$source_root"
   -I "$project_root/_build/runtime-arm64/generated"
   -I "$project_root/_build/runtime-common/patched-source/runtime"
+  -I "$project_root/_build/runtime-common/patched-source/runtime/oat"
+  -I "$project_root/_aosp/art/runtime/oat"
   -I "$project_root/_build/foundation/patched-source/libartbase"
   -I "$project_root/_aosp/art/libartbase"
   -I "$project_root/_aosp/art/runtime"
