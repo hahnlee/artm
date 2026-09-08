@@ -9863,6 +9863,14 @@ or admission exception was added.
   string, interface, unsafe, stack-overflow, and thread-stress behavior. Full
   corpus and real application validation remain pending.
 
+### Runtime checkpoint 216 — 2026-09-08
+
+- The `025-access-controller`–`054-uncaught` corpus slice passed completely
+  (30 tests), covering access control, class initialization, inheritance,
+  reflection/proxy, synchronization, thread lifecycle, verifier, finalizers,
+  and exception propagation. Remaining corpus and real-app validation remain
+  pending.
+
 ### Runtime checkpoint 212 — 2026-09-08
 
 - A one-shot callback trace showed `LLoadedByMyClassLoader` never reaches

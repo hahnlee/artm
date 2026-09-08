@@ -4971,6 +4971,15 @@ added; the full corpus and multi-loader identity task remain open.
   This provides a broader regression signal beyond the focused 497/501 tests;
   the full corpus and real-app validation remain outstanding.
 
+### Runtime checkpoint 216 — 2026-09-08
+
+- Corpus coverage now includes `025-access-controller` through `054-uncaught`;
+  all 30 tests passed. This exercises access checks, field/array writes,
+  class initialization deadlock, constructors/inheritance, reflection and
+  proxy, enum/finalizer behavior, monitor synchronization, threads/wait/join,
+  verifier behavior, and uncaught exceptions. Remaining corpus and real-app
+  validation are still pending.
+
 ### Runtime checkpoint 215 — 2026-09-08
 
 - Expanded the post-loader regression slice through `024-illegal-access`.
