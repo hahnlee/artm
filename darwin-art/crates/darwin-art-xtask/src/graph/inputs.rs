@@ -87,6 +87,10 @@ pub(crate) fn graph_inputs(root: &Path) -> Vec<PathBuf> {
         PathBuf::from("probes/runtime_graphics_cpu_stubs.cc"),
         PathBuf::from("probes/runtime_jni_acceptance_probe.cc"),
         PathBuf::from("probes/runtime_jni_acceptance_probe.h"),
+        // The JNI acceptance TU includes this transitive JIT checkpoint
+        // fixture; track it explicitly so header-only regression changes
+        // invalidate the native graph and cannot leave a stale probe object.
+        PathBuf::from("probes/runtime_jit_loop_checkpoint.h"),
         PathBuf::from("probes/runtime_graphics_probe_internal.h"),
         PathBuf::from("probes/runtime_apk_graph.cc"),
         PathBuf::from("probes/runtime_apk_graph.h"),

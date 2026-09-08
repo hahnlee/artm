@@ -3,11 +3,76 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include "base/mutex.h"
 #include "oat/oat_quick_method_header.h"
 #include "stack.h"
 #include "thread_pool.h"
+#include "thread_list.h"
 
 namespace darwin_art_jni_acceptance_phase {
+
+inline bool CheckEmptyCheckpointMutexContention(art::Thread* self) {
+  art::Mutex mutex("empty-checkpoint contention acceptance");
+  mutex.SetShouldRespondToEmptyCheckpointRequest(true);
+  std::atomic<bool> holder_ready{false};
+  std::atomic<bool> main_about_to_lock{false};
+  std::atomic<bool> checkpoint_done{false};
+  std::atomic<bool> requester_attached{false};
+  std::atomic<int64_t> checkpoint_us{-1};
+
+  // Keep the mutex unavailable long enough to distinguish Darwin's 100us
+  // checkpoint polling from merely returning after the native lock is free.
+  std::thread holder([&] {
+    mutex.ExclusiveLock(nullptr);
+    holder_ready.store(true, std::memory_order_release);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    mutex.ExclusiveUnlock(nullptr);
+  });
+  std::thread requester([&] {
+    auto* runtime = art::Runtime::Current();
+    if (!runtime->AttachCurrentThread("empty-checkpoint-requester", true, nullptr, false)) return;
+    requester_attached.store(true, std::memory_order_release);
+    while (!main_about_to_lock.load(std::memory_order_acquire)) std::this_thread::yield();
+    const auto start = std::chrono::steady_clock::now();
+    runtime->GetThreadList()->RunEmptyCheckpoint();
+    checkpoint_us.store(std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now() - start)
+                            .count(),
+                        std::memory_order_release);
+    checkpoint_done.store(true, std::memory_order_release);
+    runtime->DetachCurrentThread();
+  });
+
+  while (!holder_ready.load(std::memory_order_acquire) ||
+         !requester_attached.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+  const auto lock_start = std::chrono::steady_clock::now();
+  main_about_to_lock.store(true, std::memory_order_release);
+  mutex.ExclusiveLock(self);
+  const auto lock_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                           std::chrono::steady_clock::now() - lock_start)
+                           .count();
+  mutex.ExclusiveUnlock(self);
+  holder.join();
+  requester.join();
+
+  // The holder delay proves the mutex was genuinely contended. The checkpoint
+  // must complete well before release, while the normal lock still succeeds.
+  const int64_t observed_checkpoint_us = checkpoint_us.load(std::memory_order_acquire);
+  const bool ok = checkpoint_done.load(std::memory_order_acquire) &&
+                  observed_checkpoint_us >= 0 && observed_checkpoint_us < 250'000 &&
+                  lock_us >= 250'000 && lock_us < 2'000'000;
+  if (ok) {
+    std::cerr << "ART empty checkpoint mutex contention PASS checkpoint_us="
+              << observed_checkpoint_us << " lock_us=" << lock_us << "\n";
+  } else {
+    std::cerr << "ART empty checkpoint mutex contention failed checkpoint_done="
+              << checkpoint_done.load() << " checkpoint_us=" << observed_checkpoint_us
+              << " lock_us=" << lock_us << "\n";
+  }
+  return ok;
+}
 
 class LoopCheckpoint final : public art::Closure {
  public:
@@ -55,6 +120,7 @@ inline bool CheckJitLoopCheckpoint(JNIEnv* env, art::Thread* self, art::jit::Jit
                                   jclass owner, jmethodID factory_id,
                                   art::ArtMethod* constructor, art::ArtMethod* factory,
                                   jfieldID payload_field, jfieldID computed_field) {
+  if (!CheckEmptyCheckpointMutexContention(self)) return false;
   uint32_t loop_begin = art::dex::kDexNoIndex, loop_end = 0;
   art::CodeItemDataAccessor code(*constructor->GetDexFile(), constructor->GetCodeItem());
   for (auto pair : code) {

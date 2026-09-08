@@ -133,6 +133,7 @@ pub(crate) fn collect(root: &Path) -> io::Result<ProbeGraphInputs> {
             "probes/runtime_abi_probe.h",
             "probes/runtime_jni_scope.h",
             "probes/runtime_upstream_test.h",
+            "probes/runtime_jit_loop_checkpoint.h",
             "probes/runtime_jit_invoke_custom.h",
             "probes/runtime_jit_specialized_intrinsics.h",
             "probes/runtime_jit_string_intrinsics.h",

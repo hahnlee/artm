@@ -9392,6 +9392,14 @@ or admission exception was added.
   remain green; a dedicated blocked-lock checkpoint-response measurement is
   still required before changing this host-specific synchronization layer.
 
+### Runtime checkpoint 151 — 2026-09-08
+
+- Added fail-closed source checks for Darwin pthread checkpoint polling and
+  tracked the transitive JIT checkpoint header in the native build graph.
+  Bootstrap/xtask tests, runtime-core rebuild, and the full ART JIT audit pass;
+  final runtime invocation of the dedicated blocked-lock fixture remains to be
+  confirmed.
+
 ### Runtime checkpoint 150 — 2026-09-08
 
 - Preserved the AOSP empty-checkpoint semantics while retaining the narrow

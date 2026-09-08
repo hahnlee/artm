@@ -131,6 +131,28 @@ pub(crate) fn build_runtime_core(root: &Path) -> Result<()> {
         )?;
     }
 
+    // Keep the Darwin empty-checkpoint adaptation fail-closed.  A pthread
+    // waiter must periodically service the ART checkpoint before retrying the
+    // lock; silently dropping the callback would deadlock GC/checkpoint
+    // coordination even though ordinary monitor tests still pass.
+    let patched_mutex = fs::read_to_string(patched_base.join("mutex.cc"))?;
+    let patched_mutex_inline = fs::read_to_string(patched_base.join("mutex-inl.h"))?;
+    for source in [&patched_mutex, &patched_mutex_inline] {
+        if !source.contains("CheckEmptyCheckpointFromMutex()") {
+            return Err(
+                "Darwin pthread checkpoint waiter lost CheckEmptyCheckpointFromMutex".into(),
+            );
+        }
+        if !source.contains("tv_nsec = 100'000") {
+            return Err("Darwin pthread checkpoint waiter lost bounded retry delay".into());
+        }
+    }
+    if !patched_mutex.contains("Expected Darwin mutex waiters use an interruptible try-lock loop")
+        || !patched_mutex.contains("Expected Darwin rwlock waiters poll the checkpoint flag")
+    {
+        return Err("Darwin empty-checkpoint wakeup adaptation is missing".into());
+    }
+
     let includes = [
         patched_runtime.as_path(),
         patched_artbase.as_path(),

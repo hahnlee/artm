@@ -4458,6 +4458,15 @@ added; the full corpus and multi-loader identity task remain open.
   release coverage remains green; no semantic change is committed until a
   dedicated checkpoint-response measurement can exercise the blocked-lock path.
 
+### Runtime checkpoint 151 — 2026-09-08
+
+- Added fail-closed build validation for the Darwin pthread empty-checkpoint
+  adaptation and wired the transitive JIT checkpoint header into the native
+  graph, preventing stale acceptance objects. `cargo test -p art-bootstrap`,
+  `cargo test -p darwin-art-xtask`, runtime-core rebuild, and the full ART JIT
+  audit pass. The dedicated fixture is linked; its runtime emission still needs
+  a final invocation-path check before claiming latency coverage.
+
 ### Runtime checkpoint 150 — 2026-09-08
 
 - Kept the AOSP empty-checkpoint contract under review without weakening it or

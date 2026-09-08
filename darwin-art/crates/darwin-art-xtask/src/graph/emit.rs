@@ -740,6 +740,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         "patches/art/0144-darwin-compiled-jni-frame-contract.patch",
         "patches/art/0145-darwin-arm64-jni-method-pointer.patch",
         "patches/art/0146-darwin-arm64-managed-method-pointer.patch",
+        "patches/art/0147-darwin-enable-implicit-null-checks.patch",
     ] {
         jit_inputs.push(PathBuf::from(file));
     }
