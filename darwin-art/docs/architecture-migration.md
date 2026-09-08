@@ -9561,6 +9561,13 @@ or admission exception was added.
   all 1,075 entries have exit code 0 and empty errors. The corpus ledger is
   green; real-app coverage and storage recovery remain open.
 
+### Runtime checkpoint 291 — 2026-09-08
+
+- Storage triage identified generated `_build/android16-ps16k-r07/system.img`
+  as the only top-level file larger than 1G; `_build` totals 26G, `target`
+  2.5G, and the DarwinART profile store 126G. It was not deleted because it is
+  a runtime artifact and no cleanup authorization was provided.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - EGL capability filtering now declares FP16 pixel formats unsupported for the
