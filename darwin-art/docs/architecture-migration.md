@@ -9564,3 +9564,10 @@ or admission exception was added.
   contracts in interpreter, JIT, and unchanged optimized lanes, including
   checker optimization, deopt/OSR, inline-cache, volatile/read-barrier,
   class-loader, and JNI-stub behavior.
+
+### Runtime checkpoint 173 — 2026-09-08
+
+- Fresh four-worker runs pass all 48 executable contracts across the `701`–`736`
+  and `800`–`860` ranges in interpreter, JIT, and unchanged optimized lanes.
+  This validates VarHandle/concurrency, cache churn, OSR/deoptimization,
+  hidden API/VDEX, resolution, and plugin/JVMTI behavior.

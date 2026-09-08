@@ -4656,3 +4656,11 @@ added; the full corpus and multi-loader identity task remain open.
   unchanged-source optimized lanes. Coverage includes checker optimizations,
   deoptimization/OSR, inline caches, volatile/read barriers, class loading,
   and JNI stubs.
+
+### Runtime checkpoint 173 — 2026-09-08
+
+- Fresh four-worker corpus reruns completed 25/25 executable contracts in
+  `701`–`736` and 23/23 in `800`–`860`. All interpreter, JIT, and
+  unchanged-source optimized lanes pass, covering VarHandle creation and
+  concurrency, JIT cache churn, OSR/deopt, hidden API/VDEX, method resolution,
+  and plugin/JVMTI paths.
