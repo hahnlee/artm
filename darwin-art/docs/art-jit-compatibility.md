@@ -5063,6 +5063,16 @@ added; the full corpus and multi-loader identity task remain open.
   multi-thread compiler regressions, missing classes, and class loading.
   Remaining corpus and real-app validation are pending.
 
+### Runtime checkpoint 253 — 2026-09-08
+
+- The `952-invoke-custom`–`976-conflict-no-methods` slice passed all 25 tests,
+  covering invoke-custom/polymorphic compiler and verifier paths, MethodHandle
+  smali/transforms/stack frames/accessors, default-interface resolution and
+  initialization, static/range/default verification and conflicts, interface
+  super resolution, IMT collisions, multidex defaults, private interfaces,
+  and no-method conflicts. Remaining corpus and real-app validation are
+  pending.
+
 ### Runtime checkpoint 252 — 2026-09-08
 
 - The `926-multi-obsolescence`–`951-threaded-obsolete` slice passed all 26

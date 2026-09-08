@@ -9357,6 +9357,14 @@ or admission exception was added.
   access checks, Unsafe/VarHandle intrinsics, and vdex failure handling.
   Remaining corpus and real-app validation remain pending.
 
+### Runtime checkpoint 253 — 2026-09-08
+
+- The `952-invoke-custom`–`976-conflict-no-methods` slice passed all 25 tests,
+  covering invoke-custom/polymorphic and MethodHandle paths, default-interface
+  resolution/init/verification, conflict and IMT behavior, interface-super,
+  multidex, private interfaces, and no-method conflicts. Remaining corpus and
+  real-app validation remain pending.
+
 ### Runtime checkpoint 252 — 2026-09-08
 
 - The `926-multi-obsolescence`–`951-threaded-obsolete` slice passed all 26
