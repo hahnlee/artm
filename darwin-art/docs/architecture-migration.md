@@ -9717,3 +9717,12 @@ or admission exception was added.
   the second identity, so `loadClassBinaryName` returns null. A temporary
   DexCache-reuse experiment did not pass the subsequent `DefineClass`
   registration and was reverted; the class-loader gap remains explicit.
+
+### Runtime checkpoint 195 — 2026-09-08
+
+- Rebuilt the graphics runtime with a temporary generic DexCache-reuse path
+  and reran `497-inlining-and-class-loader`. `DefineClass` still performs a
+  second registration and rejects the shared DexFile identity, so the class
+  remains unresolved. The experiment was reverted; the required fix is now
+  narrowed to per-(DexFile, ClassLoader) cache identity, with no test-specific
+  exception added.

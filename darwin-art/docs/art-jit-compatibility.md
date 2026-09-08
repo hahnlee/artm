@@ -4823,3 +4823,13 @@ added; the full corpus and multi-loader identity task remain open.
   A temporary existing-cache reuse experiment failed at the later
   `DefineClass` registration and was reverted; this remains an explicit
   class-loader implementation gap.
+
+### Runtime checkpoint 195 — 2026-09-08
+
+- Rebuilt the graphics runtime with an experimental generic multi-loader
+  DexCache reuse path and reran `497-inlining-and-class-loader`; it still
+  returns null from `loadClassBinaryName` because `DefineClass` performs a
+  second registration that rejects the same DexFile identity. The experiment
+  was fully reverted, leaving the runtime behavior unchanged and the needed
+  fix narrowed to per-(DexFile, ClassLoader) cache identity rather than a
+  test-specific workaround.
