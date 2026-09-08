@@ -9349,6 +9349,14 @@ or admission exception was added.
   irreducible loops, and iteration handling. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 259 — 2026-09-08
+
+- After rebuilding the graphics runtime, unchanged AOSP Calculator and
+  DeskClock APKs pass end-to-end: physical clicks compute `2+3=5`, Timer-tab
+  navigation succeeds, and HWUI/SurfaceFlinger/Metal buffer publication is
+  observed without a fatal crash. Real Blue Archive validation remains
+  pending.
+
 ### Runtime checkpoint 258 — 2026-09-08
 
 - Added the hidden `android.view.InputChannel` framework stub with paired

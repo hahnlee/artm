@@ -5103,6 +5103,14 @@ added; the full corpus and multi-loader identity task remain open.
   monitors, threads, and thread groups. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 259 — 2026-09-08
+
+- Rebuilt the graphics runtime after the debuggable-APK Nterp policy fix and
+  validated unchanged AOSP APKs end-to-end. `aosp-core-apps-graphics-acceptance.sh`
+  passes Calculator physical-click `2+3=5` and DeskClock Timer-tab navigation,
+  with HWUI + SurfaceFlinger + Metal buffer publication and no fatal crash.
+  Real Blue Archive validation remains pending.
+
 ### Runtime checkpoint 258 — 2026-09-08
 
 - Added the hidden `android.view.InputChannel` framework stub with paired

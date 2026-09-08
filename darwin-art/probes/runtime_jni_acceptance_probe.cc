@@ -26,6 +26,7 @@
 #include "monitor.h"
 #include "interpreter/interpreter.h"
 #include "interpreter/mterp/nterp.h"
+#include "entrypoints/runtime_asm_entrypoints.h"
 #include <unwindstack/AndroidUnwinder.h>
 #include "runtime_jit_exit_hook_acceptance.h"
 #include "runtime_jit_fields_acceptance.h"
@@ -190,11 +191,17 @@ int run(JNIEnv* env, art::Thread* self, art::ClassLinker* class_linker,
 
   const void* nterp_entry = art::interpreter::GetNterpEntryPoint();
   const void* initial_entry = answer->GetEntryPointFromQuickCompiledCode();
+  const bool can_use_nterp = art::interpreter::CanRuntimeUseNterp();
+  // AOSP deliberately disables nterp for debuggable/instrumented runtimes
+  // and routes methods through the quick-to-interpreter bridge instead. The
+  // probe must validate that platform policy rather than treating it as an
+  // admission failure for a real debuggable APK.
+  const bool valid_entry = can_use_nterp
+      ? initial_entry == nterp_entry
+      : initial_entry == art::GetQuickToInterpreterBridge();
   if (!art::Runtime::Current()->IsStarted() ||
       !art::interpreter::IsNterpSupported() ||
-      !art::interpreter::CanRuntimeUseNterp() ||
-      nterp_entry == nullptr ||
-      initial_entry != nterp_entry) {
+      nterp_entry == nullptr || !valid_entry) {
     std::cerr << "ART Nterp acceptance: admission failed started="
               << art::Runtime::Current()->IsStarted()
               << " supported="
@@ -215,7 +222,8 @@ int run(JNIEnv* env, art::Thread* self, art::ClassLinker* class_linker,
     std::cerr << "ART Darwin DEX: expected 42, got " << result.GetI() << "\n";
     return 10;
   }
-  if (answer->GetEntryPointFromQuickCompiledCode() != nterp_entry) {
+  if (can_use_nterp &&
+      answer->GetEntryPointFromQuickCompiledCode() != nterp_entry) {
     std::cerr << "ART Nterp acceptance: cold invocation changed entrypoint expected="
               << nterp_entry << " actual="
               << answer->GetEntryPointFromQuickCompiledCode() << "\n";
