@@ -5075,6 +5075,15 @@ added; the full corpus and multi-loader identity task remain open.
   arithmetic, new-array, regalloc, and static fields. Remaining corpus and
   real-app validation are pending.
 
+### Runtime checkpoint 239 — 2026-09-08
+
+- The `530-checker-instance-of-simplifier`–`537-checker-jump-over-jump` slice
+  passed all 28 tests, covering loop/catch simplification, LSE fences and
+  SIMD, peel/unroll, instanceof/checkcast, debug phi, nonnull array stores,
+  BCE deoptimization, deopt/inlining, constant and intrinsic optimization,
+  access checks, arraycopy, debuggable mode, and inline/unverified control
+  flow. Remaining corpus and real-app validation are pending.
+
 ### Runtime checkpoint 226 — 2026-09-08
 
 - The `1949-short-dex-file`–`1965-get-set-local-primitive-no-tables` slice

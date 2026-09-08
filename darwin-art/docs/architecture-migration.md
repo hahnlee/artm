@@ -10073,3 +10073,11 @@ or admission exception was added.
   monitor/throw checks, SIMD and register allocation, loop/LSE setup,
   unresolved calls, and long-register splitting. Remaining corpus and
   real-app validation remain pending.
+
+### Runtime checkpoint 239 — 2026-09-08
+
+- The `530-checker-instance-of-simplifier`–`537-checker-jump-over-jump` slice
+  passed all 28 tests, covering loop/LSE optimization, SIMD and unrolling,
+  instanceof/checkcast, debug/deoptimization, array stores/copy, intrinsic
+  and constant folding, access checks, and inline/unverified control flow.
+  Remaining corpus and real-app validation remain pending.
