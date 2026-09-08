@@ -11446,3 +11446,8 @@ or admission exception was added.
   remain `FAIL` because generic-frame saved memory is reused during unwind.
 - Offset diagnostics are removed; the next fix is assembly-boundary frame
   lifetime, retaining the callee-save record through native unwind.
+### Runtime checkpoint 426 — 2026-09-09
+
+- Graphics-link audit remains green; `137-cfi` remains `FAIL` across all lanes.
+- Publish-side probing was inconclusive and removed. Frame lifetime must next
+  be made explicit at the ARM64 generic-JNI assembly boundary.

@@ -6759,3 +6759,10 @@ incomplete and still requires managed caller unwind validation.
 - Temporary offset probes were removed. The next implementation must retain
   the callee-save record at the assembly generic-JNI boundary until native
   unwind inspection completes.
+### Runtime checkpoint 426 — 2026-09-09
+
+- Revalidated the graphics-link closure after the frame-lifetime investigation:
+  audit remains green, but `137-cfi` still reports `FAIL` in all lanes.
+- A temporary publish-side memory probe produced no new authoritative signal
+  and was removed. The next step is to instrument the ARM64 assembly stub or
+  pass an explicit live-frame token, not infer lifetime from managed memory.
