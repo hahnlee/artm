@@ -11485,3 +11485,11 @@ or admission exception was added.
   registration alone cannot resolve app methods.
 - The next change will publish the descriptor from the ART DEX/OAT loader
   boundary, preserving normal metadata flow and avoiding synthetic names.
+### Runtime checkpoint 432 — 2026-09-09
+
+- The missing DEX-debug implementation was a build-graph omission, not a
+  loader semantic gap: `jit/debugger_interface.cc` was absent from the Darwin
+  runtime source manifest.
+- It is now compiled into the runtime and its AOSP descriptor symbol is
+  exported at the dynamic link boundary. Bootstrap and graphics-link audits
+  are green; the next gate is a fresh `137-cfi` attribution result.

@@ -6808,3 +6808,12 @@ incomplete and still requires managed caller unwind validation.
 - No method-name allowlist or synthetic test mapping was added. The next
   implementation is an ART-owned descriptor publication bridge at DEX/OAT
   load time, followed by a fresh `137-cfi` run.
+### Runtime checkpoint 432 — 2026-09-09
+
+- Root cause narrowed further: the runtime manifest omitted AOSP
+  `runtime/jit/debugger_interface.cc`, so `AddNativeDebugInfoForDex` had no
+  production implementation even though `ClassLinker` called it.
+- Added the source to the runtime archive and exported
+  `__dex_debug_descriptor` from runtime/probe link boundaries. Bootstrap and
+  graphics-link audits pass; `137-cfi` must be rerun against the newly linked
+  host to confirm method attribution.

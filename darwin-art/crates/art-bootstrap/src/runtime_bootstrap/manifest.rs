@@ -44,6 +44,7 @@ pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.h",
     "jit/jit.cc",
     "jit/jit_code_cache.cc",
+    "jit/debugger_interface.cc",
     "jit/jit_memory_region.cc",
     "jit/jit_memory_region.h",
     "jit/jit_scoped_code_cache_write.h",

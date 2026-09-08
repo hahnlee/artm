@@ -623,6 +623,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_lookup")
         .arg("-Wl,-exported_symbol,_darwin_art_runtime_native_owner_destroy")
         .arg("-Wl,-exported_symbol,___jit_debug_descriptor")
+        .arg("-Wl,-exported_symbol,___dex_debug_descriptor")
         .arg("-Wl,-exported_symbol,_ArtPlugin_Initialize")
         .arg("-Wl,-exported_symbol,_ArtPlugin_Deinitialize")
         // Runtime::AttachAgent is an AOSP EXPORT surface consumed by

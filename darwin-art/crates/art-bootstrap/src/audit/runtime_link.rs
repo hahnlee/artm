@@ -344,6 +344,7 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,__ZN3art8CodeInfoC1EPKNS_20OatQuickMethodHeaderE")
         .arg("-Wl,-exported_symbol,__ZNK3art3jit12JitCodeCache10ContainsPcEPKv")
         .arg("-Wl,-exported_symbol,___jit_debug_descriptor")
+        .arg("-Wl,-exported_symbol,___dex_debug_descriptor")
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&elf_probe_object)
