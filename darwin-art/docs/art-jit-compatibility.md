@@ -5075,6 +5075,16 @@ added; the full corpus and multi-loader identity task remain open.
   arithmetic, new-array, regalloc, and static fields. Remaining corpus and
   real-app validation are pending.
 
+### Runtime checkpoint 240 — 2026-09-08
+
+- The `562-bce-preheader`–`576-polymorphic-inlining` slice passed all 25
+  tests, covering BCE preheaders, intermediate-value elimination, fake-string
+  and invoke-super handling, bitcount/bitwise simplification, loop and
+  irreducible-loop analysis, condition liveness, select codegen, intrinsic
+  builders, one-bit and pattern replacement, OSR/locals, array-get and
+  checkcast regressions, string-init aliasing, and polymorphic inlining.
+  Remaining corpus and real-app validation are pending.
+
 ### Runtime checkpoint 239 — 2026-09-08
 
 - The `530-checker-instance-of-simplifier`–`537-checker-jump-over-jump` slice

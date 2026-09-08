@@ -10056,6 +10056,14 @@ or admission exception was added.
   write-barrier elimination, and smali boundary checks. Remaining corpus and
   real-app validation remain pending.
 
+### Runtime checkpoint 240 — 2026-09-08
+
+- The `562-bce-preheader`–`576-polymorphic-inlining` slice passed all 25
+  tests, covering BCE, loop/irreducible-loop analysis, bitwise and liveness
+  simplification, select/intrinsic codegen, OSR, array/checkcast regressions,
+  string aliasing, and polymorphic inlining. Remaining corpus and real-app
+  validation remain pending.
+
 ### Runtime checkpoint 233 — 2026-09-08
 
 - The `416-optimizing-arith-not`–`449-checker-bce-rem` slice passed all 38
