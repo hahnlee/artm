@@ -11398,3 +11398,13 @@ or admission exception was added.
 - Forced shadow regeneration exposed a missing generated
   `runtime/jit/jit_memory_region.h` producer; `137-cfi` remains failing until
   that build edge is restored.
+
+### Runtime checkpoint 420 — 2026-09-09
+
+- The corrected Generic-JNI method-start publication patch passes an isolated
+  pristine-AOSP dry run.
+- A forced graphics audit advanced past the restored JIT header but then
+  failed on another incomplete shadow dependency: `runtime/oat/oat_file-inl.h`
+  cannot find its sibling `oat_file.h`. The next architectural change is to
+  model staged sibling headers as explicit runtime-shadow inputs/producers;
+  no `137-cfi` pass is claimed yet.

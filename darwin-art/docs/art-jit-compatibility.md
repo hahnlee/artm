@@ -6705,3 +6705,13 @@ incomplete and still requires managed caller unwind validation.
 - Forced shadow regeneration reached native compilation but exposed a missing
   generated `runtime/jit/jit_memory_region.h` producer; no runtime pass is
   claimed and `137-cfi` remains open.
+
+### Runtime checkpoint 420 — 2026-09-09
+
+- The JNI patch now applies cleanly in an isolated pristine-AOSP dry run.
+- A forced graphics audit was not green: after restoring the generated JIT
+  header, compilation advanced to a second stale-shadow include failure
+  (`runtime/oat/oat_file-inl.h` cannot find `oat_file.h`). This confirms the
+  shadow tree is incomplete when rebuilt from scratch; the next fix is to make
+  staged sibling headers a declared producer/input rather than copying them
+  ad hoc. `137-cfi` remains unverified after this change.
