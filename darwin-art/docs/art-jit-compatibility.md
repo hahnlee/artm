@@ -5864,3 +5864,13 @@ added; the full corpus and multi-loader identity task remain open.
   resolves platform owners through the sealed provider namespace. The crash
   remains an internal null `vlc_stream_MemoryNew` vtable slot, so no missing
   APK sibling is being hidden by a permissive fallback.
+
+### Runtime checkpoint 315 — 2026-09-08
+
+- Root cause of the earlier `default` profile damage was isolated to the
+  APFS-backed `android-data.sparsebundle`: `hdiutil compact` ran while the
+  bundle/filesystem was mounted and actively changing. APFS extent-reference
+  and fsroot metadata then became inconsistent. The damage affected the
+  profile container, not APK bytes or Git history; the fresh `recovery`
+  profile runs the same unmodified APKs. Compaction must require daemon
+  quiescence, an unmount, and post-operation verification.

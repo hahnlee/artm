@@ -10636,3 +10636,12 @@ or admission exception was added.
   platform dependencies are routed through the sealed provider namespace.
   The remaining null vtable call is inside libvlc's own stream object and is
   not attributable to an omitted dependency fallback.
+
+### Runtime checkpoint 315 — 2026-09-08
+
+- Profile corruption was an APFS lifecycle error, not an Android runtime or
+  source-control error: compaction of the mounted live sparsebundle raced
+  filesystem writes and left extent-ref/fsroot metadata inconsistent. The
+  unaffected `recovery` profile confirms APK contents and runtime code were
+  intact. Profile maintenance must quiesce the daemon, unmount before
+  compaction, and verify before remounting.
