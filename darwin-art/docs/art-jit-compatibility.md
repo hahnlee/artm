@@ -5237,6 +5237,12 @@ added; the full corpus and multi-loader identity task remain open.
   26G and the DarwinART profile store is 126G while the volume has only about
   136MiB free. No cleanup was performed without explicit authorization.
 
+### Runtime checkpoint 290 — 2026-09-08
+
+- The authoritative `_build/art-upstream-corpus/summary.json` was re-read:
+  all 1,075 entries have exit code 0 and empty errors. The corpus ledger is
+  green; real-app coverage and storage recovery remain open.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format
