@@ -9643,3 +9643,10 @@ or admission exception was added.
   contracts) pass all execution lanes, validating structural local-ref/stack
   walk/JNI-ID behavior, inlining/loops, monitor/shutdown, and native
   allocation/transform handling.
+
+### Runtime checkpoint 185 — 2026-09-08
+
+- The fresh `2040`–`2048` slice passes all eight execution contracts across
+  interpreter, JIT, and unchanged optimized lanes, validating large native
+  allocation, cleaner/reference processing, stack traces, userfaultfd,
+  checker lowering, and native registry behavior.

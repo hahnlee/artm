@@ -4743,3 +4743,10 @@ added; the full corpus and multi-loader identity task remain open.
   unchanged-source optimized lanes pass, covering VarHandle creation and
   concurrency, JIT cache churn, OSR/deopt, hidden API/VDEX, method resolution,
   and plugin/JVMTI paths.
+
+### Runtime checkpoint 185 — 2026-09-08
+
+- Fresh four-worker execution of `2040`–`2048` passes all eight contracts in
+  interpreter, JIT, and unchanged-source optimized lanes. Coverage includes
+  huge native allocation, cleaner/reference processing, stack traces,
+  userfaultfd handling, checker lowering, and native-registry validation.
