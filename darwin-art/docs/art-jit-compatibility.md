@@ -6953,3 +6953,7 @@ incomplete and still requires managed caller unwind validation.
   removed. The remaining gap is identifying the actual JNI binding path (the
   test uses a registration route outside the patched callback) and publishing
   its native symbol without changing test expectations.
+- Checkpoint 457: tested suppressing native `ArtMethod` entries from the managed
+  callback, matching the AOSP separation between native and managed frames.
+  The 137-cfi result regressed (three failures instead of the prior one), so
+  the experiment was reverted. The native registration-path gap remains open.

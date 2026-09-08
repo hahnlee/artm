@@ -38,6 +38,7 @@ extern "C" void darwin_art_walk_managed_frames(void (*callback)(const char*, voi
         name = info.dli_sname[0] == '_' ? info.dli_sname + 1 : info.dli_sname;
       }
     }
+    }
     if (name.empty()) name = current->PrettyMethod(/*with_signature=*/false);
     callback(name.c_str(), context);
   }
