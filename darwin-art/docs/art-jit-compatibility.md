@@ -5811,3 +5811,11 @@ added; the full corpus and multi-loader identity task remain open.
   causing `Activity content presentation failed` and SIGABRT for
   `VideoPlayerActivity`. Recovery-profile replay now returns rc=0 with a
   valid ViewRoot/content pair and GPU presentation (`720x1280`).
+### Runtime checkpoint 308 — 2026-09-08
+
+- Fixed scoped-storage publication to preserve
+  `/storage/emulated/0/Android/data/<package>/files` instead of flattening
+  files at the storage root. VLC now resolves the fixture and reaches the
+  Android `MediaCodec` path. The next real-app blocker is a null generated
+  ARM64 call target during MediaCodec initialization; this is a JIT/runtime
+  ABI defect, not a missing APK asset.

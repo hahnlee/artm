@@ -558,7 +558,10 @@ chmod 0700 "$system_root"
 guest_external_app="$guest_external_root/Android/data/$package/files"
 mkdir -p "$external_storage_dir" "$guest_external_app"
 if [[ -n "$(find "$external_storage_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-  cp -R "$external_storage_dir/." "$guest_external_root/"
+  # Preserve the Android scoped-storage path.  Flattening this copy into
+  # /storage/emulated/0 makes an app-visible file unreachable through the
+  # canonical /Android/data/<package>/files contract used by MediaStore/VLC.
+  cp -R "$external_storage_dir/." "$guest_external_app/"
 fi
 chmod -R u=rX,go= "$system_root/storage"
 chmod 0500 "$system_root"

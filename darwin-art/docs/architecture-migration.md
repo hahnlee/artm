@@ -10595,3 +10595,9 @@ or admission exception was added.
   secondary Activities: resume publishes the ViewRoot/renderer before the
   Darwin native surface bridge observes it. This removes the VLC video
   Activity startup abort while preserving the existing persistent GPU path.
+### Runtime checkpoint 308 — 2026-09-08
+
+- Scoped-storage copy now retains Android's package-scoped path, allowing
+  native VLC to open the requested URI. The subsequent MediaCodec crash is
+  narrowed to an ART generated-code null target and is queued as the next JIT
+  ABI investigation.
