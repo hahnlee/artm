@@ -5142,6 +5142,15 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 261 — 2026-09-08
+
+- Snapseed's unchanged APK reaches JavaVMExt/NativeBridge and successful arm64
+  ELF loading through `System.loadLibrary("snapseed_native")`, but its
+  obfuscated `NativeCore.verifyLibraryHasBeenLoadedProperly()` method remains
+  unbound. The next fix is JNI_OnLoad/dynamic RegisterNatives or symbol-table
+  binding after load; APK extraction is not the failure. Blue Archive remains
+  pending.
+
 ### Runtime checkpoint 260 — 2026-09-08
 
 - AOSP Calculator/DeskClock pass end-to-end after the framework fixes. An
