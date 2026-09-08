@@ -9972,6 +9972,16 @@ or admission exception was added.
   shadow method/field resolution. Remaining corpus and real-app validation
   remain pending.
 
+### Runtime checkpoint 231 — 2026-09-08
+
+- The `2250-inline-throw-into-try`–`2275-pthread-name` slice passed all 31
+  discovered tests, covering try/throw and irreducible loops, devirtualization,
+  checker branch/vector/constant folding, RTI/code sinking, intrinsics,
+  cleaner/reference paths, method tracing/profile caches, write-barrier and
+  bitwise optimizations, empty/unsigned loops, method handles/hidden API,
+  class self-implementation, nested loops, and pthread naming. Remaining
+  corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 228 — 2026-09-08
 
 - The `1999-virtual-structural`–`2029-contended-monitors` slice passed all 26

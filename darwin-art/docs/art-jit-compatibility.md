@@ -5070,6 +5070,17 @@ added; the full corpus and multi-loader identity task remain open.
   and allocation tracking stress. Remaining corpus and real-app validation
   are pending.
 
+### Runtime checkpoint 231 — 2026-09-08
+
+- The `2250-inline-throw-into-try`–`2275-pthread-name` slice passed all 31
+  discovered tests. It covers throw/try and irreducible-loop handling, rem and
+  devirtualization optimizations, branch/vector/constant folding, RTI and
+  code sinking, intrinsic handling, system cleaner/reference paths,
+  method tracing and profile inline caches, write-barrier codegen, bitwise GVN,
+  empty loops/unsigned arithmetic, method-handle hidden API/caching, class
+  self-implementation, nested-loop behavior, and pthread naming. Remaining
+  corpus and real-app validation are pending.
+
 ### Runtime checkpoint 230 — 2026-09-08
 
 - The `2230-profile-save-hotness`–`2249-checker-return-try-boundary-exit-in-loop`
