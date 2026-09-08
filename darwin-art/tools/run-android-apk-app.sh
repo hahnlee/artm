@@ -401,7 +401,19 @@ done
 # no-native APKs the same immutable, minimal system root as the in-tree gate;
 # pointing the process at the host filesystem would bypass the guest path
 # policy and make results depend on the developer machine.
+prune_stale_system_roots() {
+  local run_root="$1"
+  [[ -d "$run_root" ]] || return 0
+  while IFS= read -r -d '' stale_root; do
+    # The system tree is sealed while the app runs. A killed host cannot run
+    # the EXIT trap, so reopen only roots older than a day before removing;
+    # current launches are never touched.
+    chmod -R u+w "$stale_root" 2>/dev/null || true
+    rm -r -- "$stale_root" 2>/dev/null || true
+  done < <(find "$run_root" -maxdepth 1 -type d -name 'app.*' -mmin +1440 -print0)
+}
 if [[ -n "$profile_mount" ]]; then
+  prune_stale_system_roots "$profile_mount/run"
   system_root="$(mktemp -d "$profile_mount/run/app.XXXXXX")"
 else
   system_root="$(mktemp -d "${TMPDIR:-/tmp}/darwin-art-apk-system-root.XXXXXX")"

@@ -9577,6 +9577,13 @@ or admission exception was added.
   installed Blue Archive record ran for 10 seconds with exit 0 and Unity/IL2CPP
   initialization (ARM64, 12 cores, 8GiB) and no bootstrap/vdex failure.
 
+### Runtime checkpoint 295 — 2026-09-08
+
+- Root-cause fix: `run-android-apk-app.sh` now prunes only `mnt/run/app.*`
+  directories older than 24 hours, reopening their sealed permissions before
+  removal. This prevents killed hosts from accumulating copied system roots;
+  `bash -n` and `git diff --check` pass.
+
 ### Runtime checkpoint 294 — 2026-09-08
 
 - Storage accounting after cleanup: active DarwinART `default` profile is 123G,
