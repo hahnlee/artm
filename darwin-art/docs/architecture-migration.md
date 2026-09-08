@@ -11111,3 +11111,9 @@ or admission exception was added.
 - Unmodified AOSP `535-deopt-and-inlining` passes in interpreter, JIT, and
   comparison lanes. Deoptimization from inlined frames is verified without
   APK changes or fallback gates; JNI CFI and real-app work remain.
+
+### Runtime checkpoint 380 — 2026-09-09
+
+- Unmodified AOSP `1945-proxy-method-arguments` passes in interpreter, JIT,
+  and comparison lanes. Proxy argument marshalling across primitive/reference
+  signatures is verified without APK changes; JNI CFI and real-app work remain.

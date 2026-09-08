@@ -6383,3 +6383,10 @@ added; the full corpus and multi-loader identity task remain open.
   and interpreter-versus-optimized lanes pass, covering concurrent virtual
   dispatch and structural calls in optimized execution. JNI CFI publication,
   broader stress, and real-app criteria remain open.
+
+### Runtime checkpoint 380 — 2026-09-09
+
+- Ran unmodified AOSP `1945-proxy-method-arguments`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes pass, covering proxy invocation argument
+  marshalling across primitive/reference signatures. JNI CFI return-PC mapping
+  and real-app criteria remain open.
