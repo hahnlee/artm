@@ -10760,3 +10760,11 @@ or admission exception was added.
   allocation, JNI, exceptions, arrays, class-init deadlock, finalization,
   stack overflow, and thread stress; full corpus and real-app validation are
   still outstanding.
+
+### Runtime checkpoint 332 — 2026-09-08
+
+- The following 50 pinned AOSP inputs (`040-miranda` onward) pass 50/50 with
+  four-way parallel execution. This extends evidence through reflection,
+  proxy/monitor, class loading, NIO, precise/reachability GC, OOM,
+  verification, hot exceptions, and inline execution; full corpus and
+  real-app checks remain open.

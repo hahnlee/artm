@@ -5999,3 +5999,11 @@ added; the full corpus and multi-loader identity task remain open.
   deadlock, finalizer, stack-overflow, and thread-stress cases. This is strong
   regression evidence, but the remaining corpus and real-app criteria stay
   open.
+
+### Runtime checkpoint 332 — 2026-09-08
+
+- Ran the next 50 pinned AOSP tests (`040-miranda` onward) with four-way
+  parallel execution and a fresh ledger. All 50 passed, covering reflection,
+  proxies, monitors, class loading, NIO, precise/reachability GC, OOM,
+  verification errors, hot exceptions, and inline execution. Remaining corpus
+  and real-app validation are still required.
