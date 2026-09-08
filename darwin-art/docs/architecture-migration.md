@@ -9516,3 +9516,11 @@ or admission exception was added.
   before ANativeWindow lock/post, and publish queued decoder frames only after
   releaseOutputBuffer unlocks. Combined strict audit is green (Surface,
   configure/setOutputSurface/release, Nterp, synchronization; RC=0).
+
+### Runtime checkpoint 166 — 2026-09-08
+
+- Fresh rebuild and strict audit against the current tree pass the Surface
+  Canvas contract, MediaCodec producer configure/rebind/release lifetime,
+  native Nterp, and empty-checkpoint contention (RC=0;
+  `/tmp/audit-fresh-final.log`). Decoded-frame pixel posting remains a later
+  compatibility gate.

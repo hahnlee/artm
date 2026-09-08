@@ -4603,3 +4603,11 @@ added; the full corpus and multi-loader identity task remain open.
   lifetime, native Nterp, and empty-checkpoint contention (RC=0;
   `/tmp/audit-fixed.log`). Decoded-frame pixel posting remains a separate
   follow-up gate.
+
+### Runtime checkpoint 166 — 2026-09-08
+
+- Rebuilt the graphics closure from the current source and reran a fresh
+  strict audit. Surface Canvas, MediaCodec configure/setOutputSurface/release
+  producer lifetime, native Nterp, and empty-checkpoint contention all pass
+  with RC=0 (`/tmp/audit-fresh-final.log`). Decoded-frame pixel posting is not
+  part of this accepted baseline yet.
