@@ -4442,3 +4442,11 @@ added; the full corpus and multi-loader identity task remain open.
   bootstrap, ELF/JNI, runtime ownership, filesystem, host graphics, and
   provider crates. The next bounded review is the Darwin pthread
   empty-checkpoint wait path, which still differs from AOSP futex wake semantics.
+
+### Runtime checkpoint 148 — 2026-09-08
+
+- Rebuilt the Darwin runtime core with the pthread monitor/empty-checkpoint
+  patches applied (monitor bootstrap archive produced successfully). The ART
+  audit's synchronized static/instance monitor, reentrancy, GC, exception
+  release, and contention cases remain passing. A dedicated bounded-latency
+  checkpoint test is still the next synchronization task.

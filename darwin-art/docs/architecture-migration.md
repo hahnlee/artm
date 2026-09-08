@@ -9378,6 +9378,13 @@ or admission exception was added.
   divergence under review is pthread polling for ART empty checkpoints versus
   AOSP futex wakeups.
 
+### Runtime checkpoint 148 — 2026-09-08
+
+- Runtime core rebuild succeeds with the Darwin pthread monitor and
+  empty-checkpoint patches. Existing synchronized/reentrancy/GC/exception and
+  contention acceptance cases remain green; a dedicated bounded-latency
+  checkpoint regression is still pending.
+
 ### Runtime checkpoint 146 — 2026-09-08
 
 - Rebuilt the pinned ARM64 JIT after removing the Darwin explicit-check-only
