@@ -10675,3 +10675,10 @@ or admission exception was added.
   directories and 491 sources are owned and represented, with zero unsupported
   or opaque actions. This is a build/contract invariant only; end-to-end JIT,
   GC, concurrency, and real-app evidence is still required.
+
+### Runtime checkpoint 320 — 2026-09-08
+
+- ART bootstrap tests and the signed Darwin JIT memory contract pass. Nterp
+  reference boundaries, write barriers, monitor/throw paths, and fail-closed
+  source checks are covered; concurrent MAP_JIT execution and W^X rejection
+  behave as required. This does not replace end-to-end AOSP/app validation.

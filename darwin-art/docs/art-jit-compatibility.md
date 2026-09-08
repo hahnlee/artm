@@ -5907,3 +5907,11 @@ added; the full corpus and multi-loader identity task remain open.
   `unowned_source_bytes=0`, and `omitted_directories=0`. This validates the
   source-level execution contract, while native runtime differential and
   real-app completion criteria remain open.
+
+### Runtime checkpoint 320 — 2026-09-08
+
+- Runtime bootstrap unit tests pass (14/14), including Nterp reference,
+  field/array, monitor/throw boundary decoding, and fail-closed source audits.
+  The signed MAP_JIT memory audit passes concurrent execution and expected W^X
+  negative cases; the ARM64 intrinsic inventory remains contract-clean. Full
+  AOSP differential and real-app validation remain open.
