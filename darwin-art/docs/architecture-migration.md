@@ -9692,3 +9692,11 @@ or admission exception was added.
   interpreter, JIT, and unchanged optimized lanes, validating suspend/resume
   and raw monitors, frame-pop/exception events, JVMTI transforms, proxy
   frames, and breakpoint/deoptimization behavior.
+
+### Runtime checkpoint 192 — 2026-09-08
+
+- The fresh `2230`–`2286` slice passes all 85 execution contracts across
+  interpreter, JIT, and unchanged optimized lanes, validating checker
+  lowering, VarHandle/Unsafe, write-barrier elimination, exception/inlining,
+  method handles, JVMTI, and sibling-JNI owner linking. The transient
+  `2262-default-conflict-methods` failure is PASS in the completed ledger.

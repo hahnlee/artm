@@ -4797,3 +4797,11 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter, JIT, and unchanged-source optimized lanes. Suspend/resume and
   raw monitors, frame-pop and exception events, JVMTI transforms, proxy frames,
   and breakpoint/deoptimization paths all pass.
+
+### Runtime checkpoint 192 — 2026-09-08
+
+- Fresh four-worker execution of `2230`–`2286` passes all 85 contracts in
+  interpreter, JIT, and unchanged-source optimized lanes. Checker lowering,
+  VarHandle/Unsafe, write-barrier elimination, exception/inlining,
+  method-handle, JVMTI, and sibling-JNI owner paths are covered; the transient
+  `2262-default-conflict-methods` ledger failure resolves to PASS on completion.
