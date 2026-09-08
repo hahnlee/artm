@@ -7011,3 +7011,7 @@ incomplete and still requires managed caller unwind validation.
   `ACanvas_clipRect`, `ACanvas_getNativeHandleFromJava`,
   `ACanvas_isSupportedPixelFormat`, `ACanvas_setBuffer`, and
   `Runtime_nativeLoad`.
+- Checkpoint 471: corrected the registration-phase reference to use the actual
+  exported JNI symbol `Java_java_lang_Runtime_nativeLoad`; the remaining link
+  closure still reports that symbol plus four ACanvas entrypoints, confirming
+  the issue is missing archive ownership rather than a stale declaration.

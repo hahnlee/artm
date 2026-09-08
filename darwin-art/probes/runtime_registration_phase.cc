@@ -22,9 +22,9 @@
 
 extern "C" int darwin_art_install_context_loader(JNIEnv* env,
                                                    jobject app_loader);
-extern "C" jstring Runtime_nativeLoad(JNIEnv* env, jclass ignored,
-                                        jstring filename, jobject loader,
-                                        jclass caller);
+extern "C" jstring Java_java_lang_Runtime_nativeLoad(JNIEnv* env, jclass ignored,
+                                                       jstring filename, jobject loader,
+                                                       jclass caller);
 
 namespace darwin_art_registration_phase {
 
@@ -276,7 +276,7 @@ int finish(const Inputs& inputs) {
   const JNINativeMethod runtime_load = {
       const_cast<char*>("nativeLoad"),
       const_cast<char*>("(Ljava/lang/String;Ljava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/String;"),
-      reinterpret_cast<void*>(&Runtime_nativeLoad),
+      reinterpret_cast<void*>(&Java_java_lang_Runtime_nativeLoad),
   };
   if (env->RegisterNatives(runtime_class, &runtime_load, 1) != JNI_OK ||
       env->ExceptionCheck()) {
