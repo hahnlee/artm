@@ -4352,3 +4352,10 @@ added; the full corpus and multi-loader identity task remain open.
   concurrent moving GC/read barriers, fields/arrays/type checks, exceptions,
   OSR/deoptimization, virtual dispatch, Android lifecycle/window smoke, and
   launcher execution with normal JIT enabled.
+
+### Runtime checkpoint 137 — 2026-09-08
+
+- Ran the unchanged AOSP core-app graphics acceptance. ExactCalculator
+  received physical clicks and produced `2+3=5`; DeskClock switched its real
+  Material tab to Timer and displayed `00h 00m 00s`. Both published visible
+  HWUI/SurfaceFlinger/Metal buffer transactions with no fatal signal.

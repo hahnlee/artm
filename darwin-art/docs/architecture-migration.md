@@ -9306,3 +9306,9 @@ or admission exception was added.
   barriers, field/array/type operations, exceptions, OSR, deoptimization,
   virtual dispatch, Android lifecycle/window, and launcher smoke with normal
   JIT enabled.
+
+### Runtime checkpoint 137 — 2026-09-08
+
+- Unmodified AOSP Calculator and DeskClock acceptance passes: physical input
+  computes `2+3=5`, the Material tab reaches Timer (`00h 00m 00s`), and both
+  apps publish visible HWUI/SurfaceFlinger/Metal buffers without crashes.
