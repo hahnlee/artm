@@ -4914,3 +4914,11 @@ added; the full corpus and multi-loader identity task remain open.
   a post-lock completeness recheck. Two concurrent clean
   `build-runtime-graphics-bootstrap-internal` invocations now both exit 0,
   eliminating partial-hunk races while preserving the fail-closed patch flow.
+
+### Runtime checkpoint 206 — 2026-09-08
+
+- Revalidated the committed shadow publication lock after a clean regeneration:
+  two simultaneous internal graphics bootstrap owners both completed with exit
+  0 and the complete generated-header set. This is now a stable prerequisite
+  for retrying loader-aware DexCache changes; `497` remains the only known
+  class-loader failure.

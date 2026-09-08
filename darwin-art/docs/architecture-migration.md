@@ -9801,3 +9801,10 @@ or admission exception was added.
   post-lock completeness check. A concurrent two-process clean graphics
   bootstrap test passed in both processes, making patch application
   deterministic for the upcoming loader-aware runtime change.
+
+### Runtime checkpoint 206 — 2026-09-08
+
+- Clean-shadow concurrency was revalidated with two simultaneous graphics
+  bootstrap owners; both exited successfully with generated headers intact.
+  The build publication layer is ready for the next loader-aware DexCache
+  implementation, while `497` remains unresolved.
