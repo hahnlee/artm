@@ -10785,3 +10785,11 @@ or admission exception was added.
   reaches the callback without an ART generic-JNI tag or quick-frame registry.
   This remains an isolated runtime-boundary blocker; no interpreter fallback or
   test-specific allowlist was added.
+
+### Runtime checkpoint 335 — 2026-09-08
+
+- Re-tested `137-cfi` without requiring the generic-JNI tag. `ManagedStack` is
+  now observed with the expected 224-byte frame shape, but its saved return PC
+  is not resolved by the JIT debug map; optimized local/remote CFI checks still
+  fail. The remaining work is the native-bridge saved-PC/stack-map contract,
+  with no interpreter fallback or test-specific allowlist.

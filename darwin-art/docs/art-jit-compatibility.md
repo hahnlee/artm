@@ -6024,3 +6024,13 @@ added; the full corpus and multi-loader identity task remain open.
   reaches the callback without an ART generic-JNI tag or quick-frame registry.
   This remains an isolated runtime-boundary blocker; no interpreter fallback or
   test-specific allowlist was added.
+
+### Runtime checkpoint 335 — 2026-09-08
+
+- Re-tested `137-cfi` after removing the generic-tag precondition. The ART
+  `ManagedStack` query now reaches a frame candidate (`kind=0`, 224-byte
+  SaveRefsAndArgs layout), proving the local bridge can observe the managed
+  boundary. The recovered return PC is still not resolved by the JIT debug
+  map, so local and remote optimized CFI checks remain failing. The next fix
+  is the native-bridge saved-return-PC/stack-map contract, not an interpreter
+  fallback or a test allowlist.

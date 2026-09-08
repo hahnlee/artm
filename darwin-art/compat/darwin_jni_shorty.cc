@@ -18,7 +18,11 @@ bool CurrentGenericJniFrame(uint64_t* managed_sp) {
   art::Thread* self = art::Thread::Current();
   if (self == nullptr) return false;
   const art::ManagedStack* stack = self->GetManagedStack();
-  if (stack == nullptr || !stack->GetTopQuickFrameGenericJniTag()) return false;
+  // The callback may be reached through a Darwin native-registration bridge
+  // that does not publish the usual quick-frame registry. The managed-stack
+  // node is still authoritative at this boundary; inspect its untagged frame
+  // pointer directly and let the unwind consumer validate the frame payload.
+  if (stack == nullptr) return false;
   *managed_sp = reinterpret_cast<uint64_t>(stack->GetTopQuickFrameKnownNotTagged());
   return *managed_sp != 0;
 }
