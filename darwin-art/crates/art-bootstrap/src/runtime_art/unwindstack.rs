@@ -6,7 +6,6 @@ use crate::native_build::{PendingNativeCompile, common_cpp_command, compile_pend
 // of this archive so platform work cannot silently fork the DWARF/ELF engine.
 const PORTABLE_SOURCES: &[&str] = &[
     "ArmExidx.cpp",
-    "DexFiles.cpp",
     "DwarfCfa.cpp",
     "DwarfEhFrameWithHdr.cpp",
     "DwarfMemory.cpp",
@@ -79,6 +78,7 @@ pub(crate) fn build_runtime_unwindstack_core(root: &Path) -> Result<PathBuf> {
         root.join("_aosp/system/logging/liblog/include"),
         root.join("_aosp/art/libartbase"),
         root.join("_aosp/art/libdexfile"),
+        root.join("_aosp/art/libdexfile/external/include"),
         root.join("_aosp/external/lzma/C"),
         root.join("_aosp/external/zlib"),
         PathBuf::from("/opt/homebrew/include"),
@@ -213,6 +213,11 @@ pub(crate) fn build_runtime_unwindstack_core(root: &Path) -> Result<PathBuf> {
                 .arg("-O2")
                 .arg("-DNDEBUG")
                 .arg("-D_XOPEN_SOURCE=700");
+            command
+                .arg("-DDEXFILE_SUPPORT")
+                .arg("-DDARWIN_ART_PREINCLUDED_ELF")
+                .arg("-include")
+                .arg(ndk_include.join("elf.h"));
             if matches!(*name, "Global.cpp" | "darwin_unwindstack_native.cc") {
                 command.arg("-D_DARWIN_C_SOURCE");
             }
@@ -234,6 +239,35 @@ pub(crate) fn build_runtime_unwindstack_core(root: &Path) -> Result<PathBuf> {
         compile_pending_native(provider_jobs, &compiler_identity)?;
     let provider_archive = build.join("libunwindstack-mach-providers.a");
     create_archive(&provider_archive, &provider_objects)?;
+
+    // The smoke executable must remain independent of the production
+    // libdexfile owner while still satisfying the DEX-enabled provider ABI.
+    // Build a tiny AOSP-contract stub only for that executable.
+    let smoke_stub_source = build.join("dex-files-smoke-stub.cc");
+    fs::write(
+        &smoke_stub_source,
+        "#include <unwindstack/DexFiles.h>\n#include \"DexFile.h\"\nnamespace unwindstack { template <> bool GlobalDebugInterface<DexFile>::Load(Maps*, std::shared_ptr<Memory>&, uint64_t, uint64_t, std::shared_ptr<DexFile>&) { return false; } std::unique_ptr<DexFiles> CreateDexFiles(ArchEnum, std::shared_ptr<Memory>&, std::vector<std::string>) { return nullptr; } }\n",
+    )?;
+    let smoke_stub_object = build.join("dex-files-smoke-stub.o");
+    let mut smoke_stub_command = common_cpp_command(&includes);
+    smoke_stub_command
+        .arg("-std=gnu++20")
+        .arg("-O2")
+        .arg("-DNDEBUG")
+        .arg("-DDARWIN_ART_PREINCLUDED_ELF")
+        .arg("-include")
+        .arg(ndk_include.join("elf.h"))
+        .arg("-idirafter")
+        .arg(&ndk_include)
+        .arg("-idirafter")
+        .arg(&ndk_arch_include)
+        .arg("-c")
+        .arg(&smoke_stub_source)
+        .arg("-o")
+        .arg(&smoke_stub_object);
+    run_command(&mut smoke_stub_command)?;
+    let smoke_stub_archive = build.join("libunwindstack-dex-smoke-stub.a");
+    create_archive(&smoke_stub_archive, &[smoke_stub_object])?;
 
     let lzma_archive = build_jit_libelffile(root)?;
     let android_base = root.join("_build/libbase-foundation/libandroid-base-darwin.a");
@@ -263,6 +297,7 @@ pub(crate) fn build_runtime_unwindstack_core(root: &Path) -> Result<PathBuf> {
         .arg(root.join("tools/unwindstack-mach-provider-smoke.cc"))
         .arg(&provider_archive)
         .arg(&archive)
+        .arg(&smoke_stub_archive)
         .arg(&rust_demangle_archive)
         .arg(&lzma_archive)
         .arg(&android_base)
@@ -311,6 +346,7 @@ pub(crate) fn build_runtime_unwindstack_dex(root: &Path) -> Result<PathBuf> {
     let include_refs: Vec<&Path> = includes.iter().map(PathBuf::as_path).collect();
     let compiler_identity = command_output(Command::new("clang++").arg("--version"))?;
     let sources = [
+        ("DexFiles.cpp", source.join("DexFiles.cpp")),
         ("DexFile.cpp", source.join("DexFile.cpp")),
         (
             "dex_file_supp.cc",

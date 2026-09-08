@@ -10885,3 +10885,12 @@ or admission exception was added.
   libdexfile owner closure (`PaletteTrace`, fmt, bionic filesystem, and
   related ART objects), so the experiment was reverted. The next fix needs
   separate production/smoke provider variants or a runtime-lazy owner.
+
+### Runtime checkpoint 347 — 2026-09-09
+
+- Added separate production/smoke provider variants. Production
+  AndroidUnwinder uses AOSP `DEXFILE_SUPPORT` with full `DexFiles.cpp` and
+  `DexFile.cpp` ownership; smoke uses a generated null-contract stub. Smoke
+  unwind and graphics-link audits pass. Real `137-cfi` still reports five
+  `FAIL`s, isolating the remaining problem to boot/JIT debug-map frame naming,
+  not DexFile owner linkage.

@@ -6128,3 +6128,12 @@ added; the full corpus and multi-loader identity task remain open.
   libdexfile owner closure (`PaletteTrace`, fmt, bionic filesystem, and
   related ART objects), so the experiment was reverted. The next fix needs
   separate production/smoke provider variants or a runtime-lazy owner.
+
+### Runtime checkpoint 347 — 2026-09-09
+
+- Implemented separate provider variants: production AndroidUnwinder is built
+  with AOSP `DEXFILE_SUPPORT` and full `DexFiles.cpp`/`DexFile.cpp` ownership,
+  while the smoke executable links a generated null-contract stub. Both the
+  smoke unwind test and graphics-link audit pass. Re-running real `137-cfi`
+  still returns five `FAIL`s, showing the remaining issue is boot/JIT debug-map
+  frame naming rather than DexFile owner linkage.
