@@ -20,6 +20,7 @@ jit_tail="$jit_tail:$jit_unsafe_boot"
 # as a regression gate for the no-override launcher contract.
 unset DARWIN_ART_JIT
 export DARWIN_ART_JIT_ACCEPTANCE_ONLY=1
+export DARWIN_ART_TEST_SURFACE_LOCK_CANVAS=1
 export ANDROID_I18N_ROOT="$jit_root/_build/icu-runtime-adapters/runtime/i18n"
 export ANDROID_DATA="$jit_root/_build/icu-runtime-adapters/runtime/data"
 export ANDROID_TZDATA_ROOT="$jit_root/_build/icu-runtime-adapters/runtime/tzdata"
@@ -46,5 +47,9 @@ if ! rg -a -q 'ART empty checkpoint mutex contention PASS checkpoint_us=' "$audi
 fi
 if ! rg -a -q 'ART Nterp acceptance: AOSP admission and native interpreter execution PASS' "$audit_log"; then
   echo "ART JIT audit: Nterp admission/execution fixture did not execute; log=$audit_log" >&2
+  exit 1
+fi
+if ! rg -a -q 'ART Android Surface: Java lockCanvas/unlockCanvasAndPost PASS' "$audit_log"; then
+  echo "ART JIT audit: Surface software-Canvas fixture did not execute; log=$audit_log" >&2
   exit 1
 fi

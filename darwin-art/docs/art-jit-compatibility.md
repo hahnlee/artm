@@ -4559,3 +4559,11 @@ added; the full corpus and multi-loader identity task remain open.
   dirty-clip → unlockCanvasAndPost → release acceptance passes (`RC=0`,
   `/tmp/audit-surface-lock.log`). The broader VLC/full-application matrix
   remains open.
+
+### Runtime checkpoint 161 — 2026-09-08
+
+- Strengthened Surface software-Canvas acceptance to require a managed
+  producer, normalized `RGBA_8888` format, producer/Canvas dimensions, and
+  clamped dirty rect `0,0,72,48`; the standard `audit-art-jit.sh` now runs
+  this gate by default. Fresh run passes Surface, Nterp, and empty-checkpoint
+  markers (`/tmp/audit-surface-strict.log`, RC=0).

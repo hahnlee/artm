@@ -366,6 +366,22 @@ bool VerifySoftwareSurfaceCanvas(JNIEnv* env) {
                         : env->NewObject(surface_class, surface_constructor);
   if (surface == nullptr || env->ExceptionCheck()) return false;
   EnsureJavaSurfaceValid(env, surface);
+  jfieldID native_object =
+      env->GetFieldID(surface_class, "mNativeObject", "J");
+  const jlong native_handle = native_object == nullptr
+                                  ? 0
+                                  : env->GetLongField(surface, native_object);
+  auto* producer = reinterpret_cast<void*>(
+      static_cast<uintptr_t>(native_handle));
+  const jint producer_width =
+      darwin_art_android_ANativeWindow_getWidth(producer);
+  const jint producer_height =
+      darwin_art_android_ANativeWindow_getHeight(producer);
+  bool passed = producer != nullptr &&
+                darwin_art_android_ANativeWindow_is_managed(producer) &&
+                producer_width >= 72 && producer_height >= 48 &&
+                darwin_art_android_ANativeWindow_setBuffersGeometry(
+                    producer, 0, 0, /*PixelFormat.OPAQUE=*/-1) == 0;
 
   jclass rect_class = env->FindClass("android/graphics/Rect");
   jmethodID rect_constructor =
@@ -382,16 +398,46 @@ bool VerifySoftwareSurfaceCanvas(JNIEnv* env) {
   jmethodID unlock_canvas = env->GetMethodID(
       surface_class, "unlockCanvasAndPost", "(Landroid/graphics/Canvas;)V");
   jmethodID release = env->GetMethodID(surface_class, "release", "()V");
-  jobject canvas = lock_canvas == nullptr || dirty == nullptr
+  jobject canvas = !passed || lock_canvas == nullptr || dirty == nullptr
                        ? nullptr
                        : env->CallObjectMethod(surface, lock_canvas, dirty);
-  bool passed = canvas != nullptr && !env->ExceptionCheck();
-  if (passed) {
-    env->CallVoidMethod(surface, unlock_canvas, canvas);
-    passed = !env->ExceptionCheck();
+  passed = passed && canvas != nullptr && !env->ExceptionCheck();
+  if (canvas != nullptr && !env->ExceptionCheck()) {
+    jfieldID left = env->GetFieldID(rect_class, "left", "I");
+    jfieldID top = env->GetFieldID(rect_class, "top", "I");
+    jfieldID right = env->GetFieldID(rect_class, "right", "I");
+    jfieldID bottom = env->GetFieldID(rect_class, "bottom", "I");
+    jclass canvas_class = env->GetObjectClass(canvas);
+    jmethodID get_width = canvas_class == nullptr
+                              ? nullptr
+                              : env->GetMethodID(canvas_class, "getWidth", "()I");
+    jmethodID get_height = canvas_class == nullptr
+                               ? nullptr
+                               : env->GetMethodID(canvas_class, "getHeight", "()I");
+    passed = passed && left != nullptr && top != nullptr && right != nullptr &&
+             bottom != nullptr && get_width != nullptr && get_height != nullptr &&
+             env->GetIntField(dirty, left) == 0 &&
+             env->GetIntField(dirty, top) == 0 &&
+             env->GetIntField(dirty, right) == 72 &&
+             env->GetIntField(dirty, bottom) == 48 &&
+             env->CallIntMethod(canvas, get_width) == producer_width &&
+             env->CallIntMethod(canvas, get_height) == producer_height &&
+             darwin_art_android_ANativeWindow_getFormat(producer) == 1 &&
+             !env->ExceptionCheck();
+    env->DeleteLocalRef(canvas_class);
   }
-  if (release != nullptr && !env->ExceptionCheck()) {
+  if (canvas != nullptr && unlock_canvas != nullptr && !env->ExceptionCheck()) {
+    env->CallVoidMethod(surface, unlock_canvas, canvas);
+    passed = passed && !env->ExceptionCheck();
+  }
+  if (env->ExceptionCheck()) {
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+    passed = false;
+  }
+  if (release != nullptr) {
     env->CallVoidMethod(surface, release);
+    passed = passed && !env->ExceptionCheck();
   }
   if (!passed && env->ExceptionCheck()) {
     env->ExceptionDescribe();
@@ -403,7 +449,9 @@ bool VerifySoftwareSurfaceCanvas(JNIEnv* env) {
   env->DeleteLocalRef(surface);
   env->DeleteLocalRef(surface_class);
   if (passed) {
-    std::cerr << "ART Android Surface: Java lockCanvas/unlockCanvasAndPost PASS\n";
+    std::cerr << "ART Android Surface: Java lockCanvas/unlockCanvasAndPost PASS "
+              << "size=" << producer_width << "x" << producer_height
+              << " dirty=0,0,72,48 format=RGBA_8888\n";
   }
   return passed;
 }

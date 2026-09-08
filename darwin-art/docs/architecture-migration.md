@@ -9480,3 +9480,10 @@ or admission exception was added.
   verified Android's public software Canvas lifecycle end to end. The
   lock/bind/dirty-clip/post/release focused acceptance passes on the current
   host; full VLC and application compatibility remain future work.
+
+### Runtime checkpoint 161 — 2026-09-08
+
+- The default runtime audit now verifies Surface producer identity, RGBA
+  format, Canvas dimensions, and dirty-clip normalization in addition to the
+  complete lock/post lifecycle. The strict replacement-host run passes with
+  Nterp and synchronization markers; broader application parity remains open.
