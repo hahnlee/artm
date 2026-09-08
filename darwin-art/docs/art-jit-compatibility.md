@@ -4515,3 +4515,11 @@ added; the full corpus and multi-loader identity task remain open.
   available. Remaining compatibility work is still tracked as unfinished;
   Nterp and other AOSP semantic/ABI gaps require separate implementation and
   acceptance coverage.
+
+### Runtime checkpoint 156 — 2026-09-08
+
+- Rebuilt the production ARM64ng Nterp object on the replacement host. The
+  generated Mach-O object passed DWARF validation and the fail-closed
+  256-handler/symbol/CFI audit (`build-nterp-arm64ng`); no legacy Apple Nterp
+  suppression was introduced. The broader AOSP compatibility objective
+  remains open.

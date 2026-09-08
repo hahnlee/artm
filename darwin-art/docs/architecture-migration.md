@@ -9442,3 +9442,10 @@ or admission exception was added.
   contract remain green after push. The compatibility objective remains open;
   the next work must address remaining AOSP semantic/ABI differences rather
   than treating the current probe suite as full completion.
+
+### Runtime checkpoint 156 — 2026-09-08
+
+- The replacement host rebuilt and validated the ARM64ng Nterp Mach-O
+  artifact (256 handlers, symbols, CFI, and DWARF checks). Nterp remains on
+  the normal AOSP admission path; this is artifact verification, not a
+  completion claim for remaining runtime parity work.
