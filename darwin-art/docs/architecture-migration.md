@@ -11021,3 +11021,10 @@ or admission exception was added.
   application OAT ranges are registered at host `0x11...` addresses. This
   rules out a simple frame-offset bug and points to missing logical-to-RX code
   identity publication.
+
+### Runtime checkpoint 367 — 2026-09-09
+
+- Rebuilt the graphics link with guarded AOT-range and generic-JNI frame-tail
+  diagnostics. A fresh `137-cfi` run reproduces the low LR while the frame
+  base is stable and OAT ranges are host RX mappings. The remaining work is a
+  metadata-backed logical-to-executable mapping, not a fixed-address alias.

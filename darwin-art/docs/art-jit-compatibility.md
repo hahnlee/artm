@@ -6281,3 +6281,12 @@ added; the full corpus and multi-loader identity task remain open.
   `0x210dxxx` values while the managed frame base and offsets are stable;
   application OAT ranges are host addresses near `0x11...`. The next fix must
   publish a logical-to-RX code-cache translation rather than use a fixed base.
+
+### Runtime checkpoint 367 — 2026-09-09
+
+- Rebuilt the graphics link with guarded range/frame-tail diagnostics and
+  reran `137-cfi`. The generic-JNI frame has a stable host stack base and the
+  LR slot still contains `0x210dxxx`; registered application OAT RX ranges are
+  `0x11...`. This confirms the producer is publishing a logical code identity
+  that is not currently connected to the executable mapping; the goal remains
+  open and no guessed alias was added.
