@@ -9241,3 +9241,11 @@ or admission exception was added.
   emitted 2,558 unhandled generated-code faults with zero JIT write depth. The
   ordering correction is committed (`3593f47`); next work targets code-cache
   retirement/lifetime and generated-code correctness.
+
+### Runtime checkpoint 128 — 2026-09-08
+
+- Sigchain correlation shows ART's special handler precedes the Darwin user
+  trampoline that restores Android V8 MAP_JIT permissions. The 2,558 records
+  are recoverable transitions logged too early; `unresolved=0` and `fatal=0`
+  throughout the run. Next is pre-special W^X recovery and a fresh 70-second
+  acceptance verification.

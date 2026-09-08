@@ -4283,3 +4283,11 @@ added; the full corpus and multi-loader identity task remain open.
   presents; 2,558 generated-code faults remained unhandled, all with
   `jit_write_depth=0`. The diagnostic ordering fix is pushed as `3593f47`;
   code-cache retirement/lifetime and generated-code correctness remain open.
+
+### Runtime checkpoint 128 — 2026-09-08
+
+- Sigchain correlation shows ART's special handler runs before the Darwin user
+  trampoline that restores Android V8 MAP_JIT permissions. The 2,558 records
+  are therefore recoverable W^X transitions logged too early; the run reports
+  `unresolved=0` and `fatal=0`. The next fix is narrowly scoped pre-special W^X
+  recovery, followed by a fresh 70-second acceptance run.
