@@ -11470,3 +11470,11 @@ or admission exception was added.
   already-normalized host-window PC.
 - Link audit remains green, while `137-cfi` still fails because the production
   DexFiles/OAT owner returns no app method names; that owner is next.
+### Runtime checkpoint 430 — 2026-09-09
+
+- AOSP DexFiles support is linked, but `CreateDexFiles` relies on
+  `__dex_debug_descriptor`; registering OAT ranges alone cannot resolve app
+  methods. The logical-PC retry remains valid but cannot solve this missing
+  descriptor publication.
+- Next boundary is the ART loader's DEX/OAT descriptor publication, preserving
+  normal metadata flow and avoiding method allowlists.

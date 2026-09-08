@@ -6789,3 +6789,13 @@ incomplete and still requires managed caller unwind validation.
   before querying DexFiles, closing a real attribution gap in the unwinder.
 - Graphics-link audit still passes, but `137-cfi` remains `FAIL`; the current
   runtime's DexFiles/OAT owner still does not resolve the app OAT method names.
+### Runtime checkpoint 430 — 2026-09-09
+
+- Audited the pinned AOSP `DexFiles.cpp`: production `CreateDexFiles` is
+  enabled and linked, but it discovers DEX mappings through
+  `__dex_debug_descriptor`; an OAT code-range publication alone does not
+  create that descriptor. The logical-PC retry is therefore correct but
+  insufficient for app OAT frames.
+- `137-cfi` remains the authoritative failing regression. Next is to publish
+  the app DEX/OAT descriptor through the ART-owned loader boundary, not to add
+  a method-name allowlist.
