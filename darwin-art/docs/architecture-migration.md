@@ -9508,3 +9508,11 @@ or admission exception was added.
   producer snapshots. The strict run reaches VP9 configure but stalls before
   completion, so the configure/fromSurface boundary is an active unresolved
   issue and the implementation is not yet accepted.
+
+### Runtime checkpoint 165 — 2026-09-08
+
+- MediaCodec producer publication follows an AOSP-like ownership boundary:
+  retain the output producer while holding codec state, release the codec lock
+  before ANativeWindow lock/post, and publish queued decoder frames only after
+  releaseOutputBuffer unlocks. Combined strict audit is green (Surface,
+  configure/setOutputSurface/release, Nterp, synchronization; RC=0).

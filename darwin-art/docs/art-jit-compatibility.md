@@ -4592,3 +4592,14 @@ added; the full corpus and multi-loader identity task remain open.
   Nterp execution (`result=42`), and empty-checkpoint contention
   (`checkpoint_us=160`, `lock_us=500207`), RC=0. Remaining real-app and full
   AOSP compatibility gates are still open.
+
+### Runtime checkpoint 165 — 2026-09-08
+
+- MediaCodec output publication now snapshots and retains the native producer
+  under the codec mutex, then performs potentially blocking ANativeWindow
+  lock/post outside that mutex. Decoder callbacks only queue frames, while
+  releaseOutputBuffer(render=true) publishes after unlocking. Combined strict
+  audit passes Surface Canvas, MediaCodec configure/rebind/release producer
+  lifetime, native Nterp, and empty-checkpoint contention (RC=0;
+  `/tmp/audit-fixed.log`). Decoded-frame pixel posting remains a separate
+  follow-up gate.

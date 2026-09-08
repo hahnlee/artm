@@ -22,7 +22,6 @@ unset DARWIN_ART_JIT
 export DARWIN_ART_JIT_ACCEPTANCE_ONLY=1
 export DARWIN_ART_TEST_SURFACE_LOCK_CANVAS=1
 export DARWIN_ART_TEST_MEDIA_CODEC_SURFACE=1
-export DARWIN_ART_TEST_MEDIA_CODEC_SURFACE=1
 export ANDROID_I18N_ROOT="$jit_root/_build/icu-runtime-adapters/runtime/i18n"
 export ANDROID_DATA="$jit_root/_build/icu-runtime-adapters/runtime/data"
 export ANDROID_TZDATA_ROOT="$jit_root/_build/icu-runtime-adapters/runtime/tzdata"
@@ -57,9 +56,5 @@ if ! rg -a -q 'ART Android Surface: Java lockCanvas/unlockCanvasAndPost PASS' "$
 fi
 if ! rg -a -q 'ART Android MediaCodec: setOutputSurface producer lifetime PASS' "$audit_log"; then
   echo "ART JIT audit: MediaCodec output-surface fixture did not execute; log=$audit_log" >&2
-  exit 1
-fi
-if ! rg -a -q 'ART Android MediaCodec: setOutputSurface producer lifetime PASS' "$audit_log"; then
-  echo "ART JIT audit: MediaCodec output-Surface fixture did not execute; log=$audit_log" >&2
   exit 1
 fi

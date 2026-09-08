@@ -120,16 +120,26 @@ void CopyPlane(const uint8_t* source, size_t source_stride, uint8_t* dest,
   }
 }
 
+// Take a strong producer snapshot while holding the codec lock, then perform
+// the potentially blocking ANativeWindow lock/post operation without it. This
+// matches the AOSP ownership boundary: setOutputSurface() may replace the
+// codec's producer concurrently, but cannot retire the producer used by an
+// in-flight render.
 void PublishSurface(DarwinMediaCodec* codec, const DecodedFrame& frame) {
   // Surface output is optional. The ByteBuffer path remains canonical, while
   // this bridge publishes a tightly packed RGBA frame through the existing
   // ANativeWindow lock/post contract when a Java Surface was supplied.
-  if (codec == nullptr || codec->output_window == nullptr || frame.width <= 0 ||
-      frame.height <= 0 || frame.bytes.size() <
+  if (codec == nullptr || frame.width <= 0 || frame.height <= 0 || frame.bytes.size() <
                                 static_cast<size_t>(frame.width) * frame.height * 3 / 2) {
     return;
   }
-  void* window = codec->output_window;
+  void* window = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(codec->mutex);
+    window = codec->output_window;
+    if (window != nullptr) darwin_art_android_ANativeWindow_acquire(window);
+  }
+  if (window == nullptr) return;
   struct NativeBuffer {
     int32_t width;
     int32_t height;
@@ -141,8 +151,13 @@ void PublishSurface(DarwinMediaCodec* codec, const DecodedFrame& frame) {
   if (darwin_art_android_ANativeWindow_setBuffersGeometry(
           window, frame.width, frame.height,
           /*AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM=*/1) != 0 ||
-      darwin_art_android_ANativeWindow_lock(window, &buffer, nullptr) != 0 ||
-      buffer.bits == nullptr) {
+      darwin_art_android_ANativeWindow_lock(window, &buffer, nullptr) != 0) {
+    darwin_art_android_ANativeWindow_release(window);
+    return;
+  }
+  if (buffer.bits == nullptr) {
+    (void)darwin_art_android_ANativeWindow_unlockAndPost(window);
+    darwin_art_android_ANativeWindow_release(window);
     return;
   }
   const uint8_t* y_plane = frame.bytes.data();
@@ -166,6 +181,7 @@ void PublishSurface(DarwinMediaCodec* codec, const DecodedFrame& frame) {
     }
   }
   darwin_art_android_ANativeWindow_unlockAndPost(window);
+  darwin_art_android_ANativeWindow_release(window);
 }
 
 void DecompressionCallback(void* refcon, void*, OSStatus status,
@@ -198,7 +214,6 @@ void DecompressionCallback(void* refcon, void*, OSStatus status,
   if (frame.bytes.empty()) return;
   std::lock_guard<std::mutex> lock(codec->mutex);
   codec->output.emplace_back(std::move(frame));
-  PublishSurface(codec, codec->output.back());
 }
 
 void DestroyCodec(DarwinMediaCodec* codec) {
@@ -736,12 +751,20 @@ void MediaCodecReleaseOutput(JNIEnv* env, jobject self, jint index, jboolean ren
                              jboolean, jlong) {
   auto* codec = GetCodec(env, self);
   if (codec == nullptr || index != 0) return;
-  std::lock_guard<std::mutex> lock(codec->mutex);
-  if (codec->output_owned && !codec->output.empty()) {
-    if (render == JNI_TRUE) PublishSurface(codec, codec->output.front());
-    codec->output.pop_front();
-    codec->output_owned = false;
+  DecodedFrame frame;
+  bool publish = false;
+  {
+    std::lock_guard<std::mutex> lock(codec->mutex);
+    if (codec->output_owned && !codec->output.empty()) {
+      if (render == JNI_TRUE) {
+        frame = std::move(codec->output.front());
+        publish = true;
+      }
+      codec->output.pop_front();
+      codec->output_owned = false;
+    }
   }
+  if (publish) PublishSurface(codec, frame);
 }
 
 void MediaCodecNativeConfigureNoop(JNIEnv*, jobject) {}
@@ -919,6 +942,12 @@ namespace darwin_art {
 
 bool VerifyDarwinMediaCodecSurfaceLifecycle(JNIEnv* env) {
   if (env == nullptr || env->ExceptionCheck()) return false;
+  auto trace_stage = [](const char* stage) {
+    if (DebugMediaCodec()) {
+      std::cerr << "ART Android MediaCodec fixture: " << stage << "\n";
+    }
+  };
+  trace_stage("begin");
   jclass surface_class = env->FindClass("android/view/Surface");
   jmethodID surface_constructor =
       surface_class == nullptr
@@ -950,6 +979,7 @@ bool VerifyDarwinMediaCodecSurfaceLifecycle(JNIEnv* env) {
     if (second_window != nullptr) darwin_art_android_ANativeWindow_release(second_window);
     return false;
   }
+  trace_stage("surfaces-created");
   env->SetLongField(first_surface, native_object,
                     reinterpret_cast<jlong>(first_window));
   env->SetLongField(second_surface, native_object,
@@ -998,31 +1028,42 @@ bool VerifyDarwinMediaCodecSurfaceLifecycle(JNIEnv* env) {
   bool passed = codec != nullptr && format != nullptr && configure != nullptr &&
                 set_output_surface != nullptr && codec_release != nullptr &&
                 !env->ExceptionCheck();
+  trace_stage("codec-and-format-created");
   if (passed) {
+    trace_stage("configure-enter");
     env->CallVoidMethod(codec, configure, format, first_surface, nullptr, 0);
+    trace_stage("configure-returned");
     auto* state = GetCodec(env, codec);
     passed = !env->ExceptionCheck() && state != nullptr && state->configured &&
              state->output_window == first_window;
   }
   if (passed) {
+    trace_stage("first-surface-release-enter");
     env->CallVoidMethod(first_surface, surface_release);
+    trace_stage("first-surface-release-returned");
     passed = !env->ExceptionCheck() &&
              darwin_art_android_ANativeWindow_is_managed(first_window);
   }
   if (passed) {
+    trace_stage("set-output-surface-enter");
     env->CallVoidMethod(codec, set_output_surface, second_surface);
+    trace_stage("set-output-surface-returned");
     auto* state = GetCodec(env, codec);
     passed = !env->ExceptionCheck() && state != nullptr &&
              state->output_window == second_window &&
              !darwin_art_android_ANativeWindow_is_managed(first_window);
   }
   if (passed) {
+    trace_stage("second-surface-release-enter");
     env->CallVoidMethod(second_surface, surface_release);
+    trace_stage("second-surface-release-returned");
     passed = !env->ExceptionCheck() &&
              darwin_art_android_ANativeWindow_is_managed(second_window);
   }
   if (codec != nullptr && codec_release != nullptr && !env->ExceptionCheck()) {
+    trace_stage("codec-release-enter");
     env->CallVoidMethod(codec, codec_release);
+    trace_stage("codec-release-returned");
     passed = passed && !env->ExceptionCheck() &&
              !darwin_art_android_ANativeWindow_is_managed(second_window);
   }
@@ -1040,6 +1081,7 @@ bool VerifyDarwinMediaCodecSurfaceLifecycle(JNIEnv* env) {
   env->DeleteLocalRef(first_surface);
   env->DeleteLocalRef(surface_class);
   if (passed) {
+    trace_stage("pass");
     std::cerr << "ART Android MediaCodec: setOutputSurface producer lifetime PASS\n";
   }
   return passed;
