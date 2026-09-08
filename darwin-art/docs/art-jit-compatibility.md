@@ -5169,6 +5169,13 @@ added; the full corpus and multi-loader identity task remain open.
   remain passing. The 101010-2 diagnostic is now explicitly gated in the
   pinned foundation; the separate JNI graphics path still requires follow-up.
 
+### Runtime checkpoint 281 — 2026-09-08
+
+- Forced the incremental graphics link to consume the updated HWUI archive.
+  Fresh Snapseed execution now shows no wide-gamut or 101010-2 EGL warnings;
+  the Activity still launches successfully. Core AOSP graphics acceptance
+  remains passing. Full JIT compatibility work is still in progress.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format

@@ -9493,6 +9493,12 @@ or admission exception was added.
   Snapseed launch pass; the remaining 101010-2 warning originates in the
   separate android-graphics-jni route and is not yet eliminated.
 
+### Runtime checkpoint 281 — 2026-09-08
+
+- Re-linked the graphics runtime after the capability patch. A fresh Snapseed
+  run now launches without the prior wide-gamut/101010-2 EGL diagnostics;
+  AOSP Calculator and DeskClock graphics acceptance remains PASS.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - EGL capability filtering now declares FP16 pixel formats unsupported for the
