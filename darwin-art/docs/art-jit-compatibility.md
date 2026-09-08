@@ -5142,6 +5142,17 @@ added; the full corpus and multi-loader identity task remain open.
   string deoptimization, error classes, and SSA phi dominance. Remaining
   corpus and real-app validation are pending.
 
+### Runtime checkpoint 247 — 2026-09-08
+
+- The `692-vdex-secondary-loader`–`718-zipfile-finalizer` slice passed all 26
+  tests, covering secondary/in-memory vdex eviction, clinit JIT, throw
+  simplification and loops, string append/selects, argument registers,
+  division/branch offsets and FP/MAC codegen, register conflicts and
+  scheduling, invalid profiles and cache churn, VarHandle creation and
+  invocation, invoke-custom lambda metafactory, annotation parameters, JLI
+  samples, Integer.valueOf, and zipfile finalization. Remaining corpus and
+  real-app validation are pending.
+
 ### Runtime checkpoint 240 — 2026-09-08
 
 - The `562-bce-preheader`–`576-polymorphic-inlining` slice passed all 25

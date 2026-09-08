@@ -9357,6 +9357,14 @@ or admission exception was added.
   libraries, multi-catch/zygote deopt, and in-memory vdex loading. Remaining
   corpus and real-app validation remain pending.
 
+### Runtime checkpoint 247 — 2026-09-08
+
+- The `692-vdex-secondary-loader`–`718-zipfile-finalizer` slice passed all 26
+  tests, covering vdex loaders/eviction, clinit/loop/throw handling, string
+  and select codegen, register/branch/FP/MAC paths, scheduling and cache
+  churn, VarHandle and invoke-custom behavior, JLI samples, and finalizers.
+  Remaining corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 245 — 2026-09-08
 
 - EOF progress record: the latest 44-test `642-fp-callees`–`668-aiobe` slice
