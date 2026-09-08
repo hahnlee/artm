@@ -6743,3 +6743,11 @@ incomplete and still requires managed caller unwind validation.
   of `PASS`. Debug output shows a published generic frame with invalid saved
   return registers; frame-layout/entrypoint lifetime remains the next JIT ABI
   fix. No completion claim is made.
+### Runtime checkpoint 424 — 2026-09-09
+
+- `137-cfi` diagnostics show the published Generic-JNI pointer is readable but
+  its saved x29/LR region contains reused or invalid values. The method-start
+  hook was not a valid frame-lifetime boundary and has been removed.
+- AOSP trampoline publication and registry idempotence remain; temporary
+  offset diagnostics were removed. The next fix must preserve the frame at
+  the assembly trampoline boundary while native code is active.

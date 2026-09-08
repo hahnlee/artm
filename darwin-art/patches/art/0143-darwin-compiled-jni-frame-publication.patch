@@ -17,9 +17,7 @@ diff --git a/runtime/entrypoints/quick/quick_jni_entrypoints.cc b/runtime/entryp
  
 +#if defined(__APPLE__)
 +  const ManagedStack* managed_stack = self->GetManagedStack();
-+  if (managed_stack->GetTopQuickFrameGenericJniTag()) {
-+    darwin_art_unwindstack_push_quick_frame(managed_stack->GetTopQuickFrame());
-+  } else {
++  if (!managed_stack->GetTopQuickFrameGenericJniTag()) {
 +    constexpr uint64_t kFramePayload = sizeof(ArtMethod*) + (12u + 8u) * sizeof(uint64_t);
 +    constexpr uint64_t kFrameSize = (kFramePayload + 15u) & ~uint64_t{15u};
 +    constexpr uint32_t kCoreSpillMask = 0x7ff80000u;  // X19-X30.

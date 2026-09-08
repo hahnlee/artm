@@ -11433,3 +11433,10 @@ or admission exception was added.
   registry publication is observed, while the recovered generic frame's saved
   return registers are invalid. The next task is to correct frame lifetime or
   the managed-SP handoff at the selected JNI entrypoint.
+### Runtime checkpoint 424 — 2026-09-09
+
+- CFI confirms the Generic-JNI slot is observed, but saved x29/LR values are
+  already invalid during native unwinding. The speculative method-start
+  publication was removed as a false lifetime boundary.
+- Trampoline publication and duplicate protection remain. The next fix must
+  preserve the frame at the assembly trampoline boundary.
