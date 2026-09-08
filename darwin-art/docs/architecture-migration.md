@@ -9341,6 +9341,14 @@ or admission exception was added.
   IOSurface/Metal compositor. Implementation and regression tests remain
   pending.
 
+### Runtime checkpoint 243 — 2026-09-08
+
+- The `626-checker-arm64-scratch-register`–`641-iterations` slice passed all
+  25 tests, covering ARM64 register/veneer paths, vdex/linking, casts and
+  bounds, volatile access, inlining and caches, SIMD/code sinking, arraycopy,
+  irreducible loops, and iteration handling. Remaining corpus and real-app
+  validation remain pending.
+
 ### Runtime checkpoint 237 — 2026-09-08
 
 - The `538-checker-embed-constants`–`561-shared-slowpaths` slice passed all 37

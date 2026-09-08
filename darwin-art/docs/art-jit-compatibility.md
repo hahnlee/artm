@@ -5091,6 +5091,16 @@ added; the full corpus and multi-loader identity task remain open.
   busy-loop/invoke/new-string deoptimization. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 243 — 2026-09-08
+
+- The `626-checker-arm64-scratch-register`–`641-iterations` slice passed all
+  25 tests, covering ARM64 scratch/veneer pools and volatile loads, const
+  class/string linking, unrolling, vdex and duplicate-vdex handling, safecast
+  arrays, get-class/char bounds, RTP, wrong static access, throw inlining,
+  intrinsic/inline caches, no-line-number codegen, boolean/integer/SIMD
+  optimizations, code sinking, arraycopy, irreducible inlining, and loop
+  iteration handling. Remaining corpus and real-app validation are pending.
+
 ### Runtime checkpoint 242 — 2026-09-08
 
 - The `600-verifier-fails`–`625-checker-licm-regressions` slice passed all 35
