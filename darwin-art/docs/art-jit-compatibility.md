@@ -4199,3 +4199,12 @@ added; the full corpus and multi-loader identity task remain open.
   compositor teardown and service-child reaping: no mutex UAF, generated-code
   fault, broadcast stub, or unknown-PID error. The next boundary is deeper tab
   content/rendering behavior rather than process startup.
+
+### Runtime checkpoint 119 — 2026-09-08
+
+- Began long-running Chrome tab-graphics acceptance with the real tab-switcher
+  and tab-grid physical click sequence. The harness had an inline shell
+  comment that accidentally terminated its `env` assignment; this was fixed.
+  The run now reaches sustained SurfaceFlinger scanout and exposes a separate
+  long-lived ART generated-code fault after compositor activity, so tab
+  rendering remains open despite short lifecycle smoke passing.

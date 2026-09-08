@@ -41,12 +41,12 @@ fi
 
 start_line=$(( $(wc -l < "$central_log") + 1 ))
 app_log="$output/chrome.log"
+# Cold Chromium startup can finish the tab-switcher transition after the
+# first click's callback has returned. Leave a full display interval window
+# for the real TabGridView tree to attach before selecting its first card.
 env \
   DARWIN_ART_APP_DATA_ROOT="$app_data" \
   DARWIN_ART_WINDOW_SCALE=2 \
-  # Cold Chromium startup can finish the tab-switcher transition after the
-  # first click's callback has returned. Leave a full display interval window
-  # for the real TabGridView tree to attach before selecting its first card.
   DARWIN_ART_TEST_POINTER_SEQUENCE='0,0,0;225,610,20000;90,320,10000' \
   DARWIN_ART_TEST_POINTER_HOLD_MS=18 \
   DARWIN_ART_DEBUG_INPUT_LATENCY=1 \

@@ -9165,3 +9165,11 @@ or admission exception was added.
   errors, generated-code faults, or service-PID registry failures. Startup and
   menu lifecycle is now stable; tab content/renderer behavior remains to be
   validated.
+
+### Runtime checkpoint 119 — 2026-09-08
+
+- The tab-graphics harness now executes correctly after moving an inline shell
+  comment out of the environment-assignment continuation. Long-running Chrome
+  tab/grid rendering reaches sustained Metal/SurfaceFlinger scanout but still
+  ends in an ART generated-code fault, marking a distinct renderer/JIT lifetime
+  boundary beyond the stable startup lifecycle.
