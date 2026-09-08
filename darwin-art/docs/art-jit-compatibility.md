@@ -5161,6 +5161,14 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 280 — 2026-09-08
+
+- Rebuilt the HWUI static foundation and graphics bootstrap on the replacement
+  Mac after adding the Darwin unsupported 10-bit/FP16 capability boundary.
+  AOSP Calculator/DeskClock graphics acceptance and a fresh Snapseed launch
+  remain passing. The 101010-2 diagnostic is now explicitly gated in the
+  pinned foundation; the separate JNI graphics path still requires follow-up.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format

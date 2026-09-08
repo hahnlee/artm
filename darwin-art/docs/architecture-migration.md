@@ -9486,6 +9486,13 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 280 — 2026-09-08
+
+- Rebuilt the HWUI/graphics path on the replacement Mac and recorded the
+  Darwin RGBA_8888 capability boundary. Core-app graphics acceptance and
+  Snapseed launch pass; the remaining 101010-2 warning originates in the
+  separate android-graphics-jni route and is not yet eliminated.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - EGL capability filtering now declares FP16 pixel formats unsupported for the
