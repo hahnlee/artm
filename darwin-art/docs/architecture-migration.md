@@ -9584,6 +9584,13 @@ or admission exception was added.
   removal. This prevents killed hosts from accumulating copied system roots;
   `bash -n` and `git diff --check` pass.
 
+### Runtime checkpoint 296 — 2026-09-08
+
+- Corrected storage interpretation: the earlier 123G profile figure double
+  counted the 61G sparsebundle and its mounted view. After stale-root cleanup,
+  the sparsebundle is 61G and `mnt/run` was reduced from 58G to 463M; Git
+  objects are only about 122MiB total (5.81MiB packed).
+
 ### Runtime checkpoint 294 — 2026-09-08
 
 - Storage accounting after cleanup: active DarwinART `default` profile is 123G,
