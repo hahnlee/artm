@@ -9479,6 +9479,13 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 267 — 2026-09-08
+
+- Snapseed now runs through the default managed native path (exit 0), reaches
+  JavaVMExt/NativeBridge, registers 309 JNI methods, and launches its edit
+  activity. Remaining warnings concern writable-vdex placement and EGL wide
+  gamut probing, not app bootstrap failure.
+
 ### Runtime checkpoint 266 — 2026-09-08
 
 - Rebuilt provider closure and graphics runtime now allow Snapseed's default

@@ -5153,6 +5153,13 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 267 — 2026-09-08
+
+- Default (no environment override) Snapseed run exits 0 after managed native
+  loading, with 309 JNI methods registered and the edit activity launched.
+  Remaining runtime warnings are non-fatal writable-vdex placement and a
+  wide-gamut EGL configuration probe.
+
 ### Runtime checkpoint 266 — 2026-09-08
 
 - After rebuilding the Rust bionic provider closure and graphics runtime,
