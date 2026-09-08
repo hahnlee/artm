@@ -11189,3 +11189,10 @@ or admission exception was added.
   metadata. The authoritative producer is the generic-JNI trampoline's saved
   LR, so publication must move to trampoline entry or include method identity
   in unwind metadata; no fallback or allowlist was introduced.
+
+### Runtime checkpoint 392 — 2026-09-09
+
+- Fixed the publisher's C linkage and rebuilt successfully, but `137-cfi`
+  remains failing. The getter callback is not sufficient to identify the
+  caller frame; instrumentation must move to the generic-JNI trampoline LR
+  producer, without adding fallback or allowlists.

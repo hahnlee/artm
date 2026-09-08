@@ -6471,3 +6471,10 @@ added; the full corpus and multi-loader identity task remain open.
   confirms the producer is the generic-JNI trampoline's saved LR rather than
   the Java-side entrypoint getter; the next change must publish the pair at
   trampoline entry (or carry the method identity into unwind metadata).
+
+### Runtime checkpoint 392 — 2026-09-09
+
+- Corrected the publisher linkage to `extern "C"` and rebuilt the runtime;
+  `137-cfi` still fails. This proves the getter-side callback is either not
+  reached for the caller frame or lacks the caller method identity. The next
+  implementation must instrument the generic-JNI trampoline's LR producer.
