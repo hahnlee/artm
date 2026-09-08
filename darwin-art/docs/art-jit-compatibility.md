@@ -6478,3 +6478,11 @@ added; the full corpus and multi-loader identity task remain open.
   `137-cfi` still fails. This proves the getter-side callback is either not
   reached for the caller frame or lacks the caller method identity. The next
   implementation must instrument the generic-JNI trampoline's LR producer.
+
+### Runtime checkpoint 393 — 2026-09-09
+
+- Instrumented generic-JNI trampoline entry to resolve the caller method and
+  trigger entrypoint metadata publication. Bootstrap succeeds, but `137-cfi`
+  remains failing, indicating the caller's saved LR can precede the resolved
+  entrypoint or comes from a different invocation path. The change remains a
+  diagnostic-compatible host boundary; no fallback or allowlist was added.

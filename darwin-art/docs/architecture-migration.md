@@ -11196,3 +11196,10 @@ or admission exception was added.
   remains failing. The getter callback is not sufficient to identify the
   caller frame; instrumentation must move to the generic-JNI trampoline LR
   producer, without adding fallback or allowlists.
+
+### Runtime checkpoint 393 — 2026-09-09
+
+- Generic-JNI trampoline entry now resolves the caller method and triggers
+  entrypoint metadata publication. The bootstrap succeeds, but `137-cfi`
+  remains failing, so the saved LR may precede the entrypoint or use another
+  invocation path. No fallback or allowlist was introduced.
