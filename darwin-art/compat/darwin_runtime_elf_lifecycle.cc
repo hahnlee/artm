@@ -133,13 +133,20 @@ void DestroyRuntimeElfTrampolines(ElfLibrary* library) {
 int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
   ElfLibrary* library = static_cast<ElfLibrary*>(context);
   if (library == nullptr || library->dso_lifecycle == nullptr ||
-      library->image_registry == nullptr ||
-      darwin_art_image_registry::Publish(library->image_registry, start, end) !=
-          0) {
+      library->image_registry == nullptr) {
+    std::fprintf(stderr, "DARWIN ELF loader: publish rejected missing owner range=[0x%llx,0x%llx)\n",
+                 static_cast<unsigned long long>(start), static_cast<unsigned long long>(end));
+    return -1;
+  }
+  if (darwin_art_image_registry::Publish(library->image_registry, start, end) != 0) {
+    std::fprintf(stderr, "DARWIN ELF loader: publish rejected image registry range=[0x%llx,0x%llx)\n",
+                 static_cast<unsigned long long>(start), static_cast<unsigned long long>(end));
     return -1;
   }
   if (darwin_art_bionic_vm_register_borrowed_range(
           reinterpret_cast<void*>(start), end - start) != 0) {
+    std::fprintf(stderr, "DARWIN ELF loader: publish rejected borrowed-range registry range=[0x%llx,0x%llx)\n",
+                 static_cast<unsigned long long>(start), static_cast<unsigned long long>(end));
     if (darwin_art_image_registry::RollbackPublish(library->image_registry,
                                                     start, end) != 0) {
       std::abort();
@@ -153,6 +160,8 @@ int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
                  static_cast<unsigned long long>(end));
     return 0;
   }
+  std::fprintf(stderr, "DARWIN ELF loader: publish rejected DSO lifecycle range=[0x%llx,0x%llx)\n",
+               static_cast<unsigned long long>(start), static_cast<unsigned long long>(end));
   if (darwin_art_bionic_vm_unregister_borrowed_range(
           reinterpret_cast<void*>(start), end - start) != 0) {
     std::abort();
