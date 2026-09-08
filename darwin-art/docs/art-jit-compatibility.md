@@ -4523,3 +4523,15 @@ added; the full corpus and multi-loader identity task remain open.
   256-handler/symbol/CFI audit (`build-nterp-arm64ng`); no legacy Apple Nterp
   suppression was introduced. The broader AOSP compatibility objective
   remains open.
+
+### Runtime checkpoint 157 — 2026-09-08
+
+- Runtime acceptance now completes ARM64's ordinary visibly-initialized
+  publication boundary, requires the cold `Hello.answer()` entrypoint to equal
+  AOSP `ExecuteNterpImpl`, invokes it, verifies result 42, and requires the
+  Nterp entry to remain installed. `audit-art-jit.sh` rejects runs missing this
+  executable marker, closing the prior link-only false-green gap.
+- Deleted the unused legacy Darwin Nterp-disable and catch-entry-disable patch
+  files. Incremental graphics/runtime linkage, the full JIT acceptance suite,
+  and unchanged AOSP `837-deopt` interpreter/JIT/unmodified optimized lanes
+  pass. This does not close other ART/JVMTI/application compatibility work.

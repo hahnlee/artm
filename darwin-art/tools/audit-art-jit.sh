@@ -44,3 +44,7 @@ if ! rg -a -q 'ART empty checkpoint mutex contention PASS checkpoint_us=' "$audi
   echo "ART JIT audit: empty-checkpoint contention fixture did not execute; log=$audit_log" >&2
   exit 1
 fi
+if ! rg -a -q 'ART Nterp acceptance: AOSP admission and native interpreter execution PASS' "$audit_log"; then
+  echo "ART JIT audit: Nterp admission/execution fixture did not execute; log=$audit_log" >&2
+  exit 1
+fi

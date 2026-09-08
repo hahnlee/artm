@@ -25,6 +25,7 @@
 #include "thread-current-inl.h"
 #include "monitor.h"
 #include "interpreter/interpreter.h"
+#include "interpreter/mterp/nterp.h"
 #include <unwindstack/AndroidUnwinder.h>
 #include "runtime_jit_exit_hook_acceptance.h"
 #include "runtime_jit_fields_acceptance.h"
@@ -173,10 +174,34 @@ int run(JNIEnv* env, art::Thread* self, art::ClassLinker* class_linker,
     std::cerr << "ART Darwin JNI: Hello initialization failed\n";
     return 7;
   }
+  {
+    // ARM64 publishes initialized classes in batches. Flush that ordinary
+    // AOSP boundary before inspecting the cold managed entrypoint so the
+    // class-linker has replaced its temporary resolution trampoline.
+    art::ScopedThreadStateChange native(self, art::ThreadState::kNative);
+    class_linker->MakeInitializedClassesVisiblyInitialized(self, true);
+  }
   art::ArtMethod* answer =
       hello->FindClassMethod("answer", "()I", art::kRuntimePointerSize);
   if (answer == nullptr) {
     std::cerr << "ART Darwin DEX: answer()I lookup failed\n";
+    return 8;
+  }
+
+  const void* nterp_entry = art::interpreter::GetNterpEntryPoint();
+  const void* initial_entry = answer->GetEntryPointFromQuickCompiledCode();
+  if (!art::Runtime::Current()->IsStarted() ||
+      !art::interpreter::IsNterpSupported() ||
+      !art::interpreter::CanRuntimeUseNterp() ||
+      nterp_entry == nullptr ||
+      initial_entry != nterp_entry) {
+    std::cerr << "ART Nterp acceptance: admission failed started="
+              << art::Runtime::Current()->IsStarted()
+              << " supported="
+              << art::interpreter::IsNterpSupported()
+              << " runtime=" << art::interpreter::CanRuntimeUseNterp()
+              << " expected=" << nterp_entry
+              << " actual=" << initial_entry << "\n";
     return 8;
   }
 
@@ -190,6 +215,14 @@ int run(JNIEnv* env, art::Thread* self, art::ClassLinker* class_linker,
     std::cerr << "ART Darwin DEX: expected 42, got " << result.GetI() << "\n";
     return 10;
   }
+  if (answer->GetEntryPointFromQuickCompiledCode() != nterp_entry) {
+    std::cerr << "ART Nterp acceptance: cold invocation changed entrypoint expected="
+              << nterp_entry << " actual="
+              << answer->GetEntryPointFromQuickCompiledCode() << "\n";
+    return 10;
+  }
+  std::cerr << "ART Nterp acceptance: AOSP admission and native interpreter execution PASS"
+            << " entry=" << nterp_entry << " result=" << result.GetI() << "\n";
 
   const char* jit_request = std::getenv("DARWIN_ART_JIT");
   if (jit_request != nullptr && std::strcmp(jit_request, "1") == 0 &&
@@ -200,10 +233,6 @@ int run(JNIEnv* env, art::Thread* self, art::ClassLinker* class_linker,
   if (auto* jit = art::Runtime::Current()->GetJit();
       std::getenv("DARWIN_ART_JIT_ACCEPTANCE_ONLY") != nullptr &&
       jit != nullptr && jit->UseJitCompilation()) {
-    {
-      art::ScopedThreadStateChange native(self, art::ThreadState::kNative);
-      class_linker->MakeInitializedClassesVisiblyInitialized(self, true);
-    }
     auto* arithmetic = hello->FindClassMethod("jitArithmetic", "(II)I", art::kRuntimePointerSize);
     if (arithmetic != nullptr) {
       std::cerr << "ART JIT eligibility: verified=" << hello->IsVerified()

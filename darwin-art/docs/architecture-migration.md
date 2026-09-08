@@ -9449,3 +9449,14 @@ or admission exception was added.
   artifact (256 handlers, symbols, CFI, and DWARF checks). Nterp remains on
   the normal AOSP admission path; this is artifact verification, not a
   completion claim for remaining runtime parity work.
+
+### Runtime checkpoint 157 — 2026-09-08
+
+- Added an executable Nterp admission gate to the runtime acceptance path.
+  After ARM64's normal visibly-initialized publication flush, a cold app
+  method must point at `ExecuteNterpImpl`, execute there, return 42, and retain
+  that entrypoint; the full JIT audit now fails closed if this marker is absent.
+- Removed the two obsolete, unreferenced Darwin patches that disabled Nterp
+  and its catch entry. The full JIT audit and unchanged AOSP `837-deopt`
+  interpreter/JIT/optimized lanes pass; this proves native-interpreter
+  execution rather than only a linked 256-handler artifact.
