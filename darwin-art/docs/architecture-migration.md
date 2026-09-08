@@ -9893,3 +9893,11 @@ or admission exception was added.
   OOM/finalizers, hot exceptions, inlining/compiler regressions,
   class-init/monitors, loop formation, serialization, and concurrent-GC array
   copies. Remaining corpus and real-app validation remain pending.
+
+### Runtime checkpoint 219 — 2026-09-08
+
+- A corpus run was interrupted by filesystem exhaustion from 1,834 generated
+  temporary test directories. After deleting only those temp directories,
+  `1001-app-image-regions` independently passed all three lanes. Completed
+  neighbors `097-duplicate-method`, `100-reflect2`, and
+  `1000-non-moving-space-stress` also passed; the remaining range is queued.

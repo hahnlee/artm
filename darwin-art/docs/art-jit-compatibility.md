@@ -5012,3 +5012,12 @@ added; the full corpus and multi-loader identity task remain open.
   class initialization/monitors, loop formation, serialization, and
   concurrent-GC array copies. Remaining corpus and real-app validation remain
   pending.
+
+### Runtime checkpoint 219 — 2026-09-08
+
+- The next corpus run initially stopped because 1,834 retained temporary test
+  directories exhausted the filesystem, not because of a runtime assertion.
+  After removing only those generated temp directories, `1001-app-image-regions`
+  was rerun independently and passed interpreter, JIT, and optimized lanes.
+  The preceding completed results (`097-duplicate-method`, `100-reflect2`,
+  `1000-non-moving-space-stress`) also passed; the remaining range is queued.
