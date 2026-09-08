@@ -9291,3 +9291,10 @@ or admission exception was added.
   320 dpi (360x640 dp), but Chromium chooses a URL-bar/avatar-only toolbar and
   does not instantiate `TabSwitcherButtonView`. Track this as a Chrome
   configuration/harness mismatch; sustained JIT execution remains fault-free.
+
+### Runtime checkpoint 135 — 2026-09-08
+
+- Host, bootstrap, and bionic facade regression suites pass after the display
+  scale fix. Scale-1 Chrome receives true 360x640 physical coordinates and hits
+  a real menu view; tab-switcher end-to-end acceptance remains pending on
+  Chrome's selected window configuration.
