@@ -6509,3 +6509,10 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter-versus-optimized lanes pass, covering VM initialization ordering
   against early thread start. JNI CFI mapping and real-app criteria remain
   open.
+
+### Runtime checkpoint 397 — 2026-09-09
+
+- Ran unmodified AOSP `088-monitor-verification`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes pass, covering balanced and unbalanced
+  monitor verification paths and their JIT admission behavior. JNI CFI mapping
+  and real-app criteria remain open.

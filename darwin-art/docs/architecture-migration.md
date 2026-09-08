@@ -11224,3 +11224,9 @@ or admission exception was added.
 - Unmodified AOSP `1919-vminit-thread-start-timing` passes in interpreter, JIT,
   and comparison lanes. VM initialization ordering against early thread start
   is verified without APK changes; JNI CFI and real-app work remain.
+
+### Runtime checkpoint 397 — 2026-09-09
+
+- Unmodified AOSP `088-monitor-verification` passes in interpreter, JIT, and
+  comparison lanes. Balanced/unbalanced monitor verification and JIT admission
+  behavior are verified without APK changes; JNI CFI and real-app work remain.
