@@ -9610,3 +9610,10 @@ or admission exception was added.
 - `004-JniTest` now passes all three execution lanes in a direct fresh run,
   validating the compiled JNI transition and native exit path independently of
   the earlier stale corpus ledger.
+
+### Runtime checkpoint 180 — 2026-09-08
+
+- The fresh `1920`–`1960` (6 contracts) and `1961`–`1999` (8 contracts) slices
+  pass all execution lanes, validating monitor/event JVMTI, frame-pop and
+  breakpoint/redefinition, checker bounds/vectorization, and structural
+  transformation paths.

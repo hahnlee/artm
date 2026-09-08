@@ -4700,6 +4700,13 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter, JIT, and unchanged-source optimized lanes. This confirms the
   compiled JNI transition and native exit path after runner isolation cleanup.
 
+### Runtime checkpoint 180 — 2026-09-08
+
+- Fresh four-worker corpus runs pass 6 contracts in `1920`–`1960` and 8 in
+  `1961`–`1999` across interpreter, JIT, and unchanged-source optimized lanes.
+  Coverage includes monitor/event JVMTI, frame-pop and breakpoint/redefine
+  behavior, checker bounds/loop vectorization, and structural transformation.
+
 ### Runtime checkpoint 173 — 2026-09-08
 
 - Fresh four-worker corpus reruns completed 25/25 executable contracts in
