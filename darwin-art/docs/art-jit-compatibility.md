@@ -4308,3 +4308,10 @@ added; the full corpus and multi-loader identity task remain open.
   generated-code diagnostics, zero unresolved signals, and no fatal abort. The
   remaining harness failure is limited to stale coordinate-based tab-switcher
   discovery.
+
+### Runtime checkpoint 131 — 2026-09-08
+
+- The failed acceptance log confirms the stale sequence misses the tab switcher
+  after scale conversion: `(225,610)` becomes `(450,1220)` and misses, while
+  `(90,320)` becomes `(180,640)` and hits a `SuggestionsTileView`. No JIT or
+  graphics fault occurred; the next run will target the top-toolbar button.

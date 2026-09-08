@@ -9264,3 +9264,10 @@ or admission exception was added.
   70-second Chrome runs show zero generated-code diagnostics, unresolved
   signals, or fatal aborts. Only the acceptance harness's stale tab-switcher
   coordinate assertion remains to be updated.
+
+### Runtime checkpoint 131 — 2026-09-08
+
+- Acceptance logs show the stale sequence misses the tab switcher after scale
+  conversion: `(225,610)` becomes `(450,1220)` (miss) and `(90,320)` becomes
+  `(180,640)` (a `SuggestionsTileView` hit). No JIT/graphics fault occurred;
+  the harness must target the top-toolbar tab-switcher coordinate next.
