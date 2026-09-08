@@ -6896,3 +6896,8 @@ incomplete and still requires managed caller unwind validation.
   `StackVisitor`. Graphics link audit remains green, but 137-cfi still fails;
   lock correctness alone does not expose the deeper compiled callers, so the
   direct quick-code/OAT PC attribution work remains required.
+- Checkpoint 446: verified the lock-scoped resolver in the full graphics link
+  and 137-cfi lane. The AOSP lock contract is now correct, but the test still
+  reports `stdout=630/630`; native unwinding does not expose ART dex PCs, so
+  the next implementation must publish compiled method ranges from ART rather
+  than infer them from `StackVisitor` called after the unwind.

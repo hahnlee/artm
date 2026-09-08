@@ -32,5 +32,5 @@ extern "C" void darwin_art_walk_managed_frames(void (*callback)(const char*, voi
       nullptr,
       art::StackVisitor::StackWalkKind::kIncludeInlinedFrames,
       /*check_suspended=*/true,
-      /*include_transitions=*/false);
+      /*include_transitions=*/true);
 }
