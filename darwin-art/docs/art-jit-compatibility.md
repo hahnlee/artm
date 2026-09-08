@@ -4344,3 +4344,11 @@ added; the full corpus and multi-loader identity task remain open.
   graphics tests), bootstrap (14), and bionic process-state all pass. Scale-1
   Chrome confirms corrected 360x640 physical input; tab-switcher acceptance
   still awaits a configuration that instantiates that view.
+
+### Runtime checkpoint 136 — 2026-09-08
+
+- The complete `tools/audit-art-jit.sh` gate exited successfully on the new
+  machine. It covers ARM64 intrinsics, compiled arithmetic/JNI exits,
+  concurrent moving GC/read barriers, fields/arrays/type checks, exceptions,
+  OSR/deoptimization, virtual dispatch, Android lifecycle/window smoke, and
+  launcher execution with normal JIT enabled.

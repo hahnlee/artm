@@ -9298,3 +9298,11 @@ or admission exception was added.
   scale fix. Scale-1 Chrome receives true 360x640 physical coordinates and hits
   a real menu view; tab-switcher end-to-end acceptance remains pending on
   Chrome's selected window configuration.
+
+### Runtime checkpoint 136 — 2026-09-08
+
+- `tools/audit-art-jit.sh` exits successfully on the replacement machine,
+  covering ARM64 intrinsics, compiled calls/JNI, concurrent moving GC and read
+  barriers, field/array/type operations, exceptions, OSR, deoptimization,
+  virtual dispatch, Android lifecycle/window, and launcher smoke with normal
+  JIT enabled.
