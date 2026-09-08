@@ -733,6 +733,10 @@ pub(crate) fn audit_runtime_graphics_link_mode(
             openjdkjvmti_archive.display()
         ))
         .arg(&bootstrap)
+        // DexFiles discovers this AOSP descriptor through dlsym; retain only
+        // the debugger-interface member instead of force-loading the runtime
+        // archive (which duplicates ICU/ART providers).
+        .arg(root.join("_build/runtime-common/objects/jit_debugger_interface.cc.o"))
         .arg(&unwindstack_providers)
         .arg(&unwindstack_core)
         .arg(&unwindstack_dex)

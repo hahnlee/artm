@@ -6825,3 +6825,11 @@ incomplete and still requires managed caller unwind validation.
   remains intentionally strict and was restored to its prior closure.
 - Next step is a link-safe retention mechanism for only the debugger-interface
   member, without admitting unrelated Canvas/Runtime unresolved symbols.
+### Runtime checkpoint 434 — 2026-09-09
+
+- Retained only `jit_debugger_interface.cc.o` in the production graphics link;
+  force-loading the complete runtime archive caused 167 duplicate ICU symbols.
+- Graphics-link audit is green and the linked dylib now exports all three DEX
+  debug globals, but `137-cfi` still reports the stdout mismatch. Descriptor
+  retention is therefore fixed at the link level; runtime method attribution
+  remains the next investigation.

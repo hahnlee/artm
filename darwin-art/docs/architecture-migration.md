@@ -11501,3 +11501,11 @@ or admission exception was added.
 - The next implementation must retain just the AOSP debugger-interface
   descriptor through a narrow link-safe boundary, preserving the existing
   closure audit.
+### Runtime checkpoint 434 — 2026-09-09
+
+- The narrow graphics link now retains only the debugger-interface object and
+  passes the strict closure audit; whole-archive retention was rejected due to
+  duplicate ICU ownership.
+- The resulting dylib exports `__dex_debug_descriptor`, yet `137-cfi` remains
+  failing, so the remaining gap is descriptor consumption/DEX symfile parsing,
+  not symbol retention.
