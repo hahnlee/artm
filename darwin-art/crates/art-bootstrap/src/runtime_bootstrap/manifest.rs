@@ -29,6 +29,7 @@ pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "gc/space/image_space.cc",
     "entrypoints/quick/quick_alloc_entrypoints.cc",
     "entrypoints/quick/quick_entrypoints.h",
+    "entrypoints/quick/quick_entrypoints_list.h",
     "entrypoints/quick/callee_save_frame.h",
     "entrypoints/quick/quick_trampoline_entrypoints.cc",
     "entrypoints/entrypoint_utils.h",
@@ -138,6 +139,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0157-darwin-define-class-dex-registration-trace.patch",
     "patches/art/0158-darwin-register-dex-trace.patch",
     "patches/art/0160-darwin-libcore-before-early-clinits.patch",
+    "patches/art/0164-darwin-clone-dex-for-child-loader.patch",
 ];
 
 #[cfg(test)]

@@ -9827,3 +9827,11 @@ or admission exception was added.
 - The canonical clone retry still failed patch parsing on a secondary hunk and
   was removed without runtime changes. Clean graphics bootstrap remains PASS;
   the next attempt should publish a mechanically generated staged-source diff.
+
+### Runtime checkpoint 210 — 2026-09-08
+
+- The mechanically generated clone patch applies and links in the graphics
+  runtime. Identity tracing confirms a distinct child-loader DexFile is
+  registered, and `501-null-constant-dce` passes interpreter/JIT/optimized
+  lanes. `497` still fails after registration; class-definition association is
+  the remaining gap.

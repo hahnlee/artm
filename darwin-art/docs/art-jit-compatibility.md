@@ -4941,3 +4941,11 @@ added; the full corpus and multi-loader identity task remain open.
 - A canonical clone patch retry still failed parsing on a secondary hunk and
   was removed before commit. Clean internal graphics bootstrap remains PASS;
   the next attempt should publish a mechanically generated staged-source diff.
+
+### Runtime checkpoint 210 — 2026-09-08
+
+- The mechanically generated child-loader clone patch now applies and links in
+  the graphics runtime. Identity tracing shows a distinct clone DexFile being
+  registered for the child loader; a representative `501-null-constant-dce`
+  test passes in interpreter, JIT, and optimized lanes. `497` still fails
+  after registration, so class-definition association remains open.
