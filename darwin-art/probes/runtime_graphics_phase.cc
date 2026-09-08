@@ -108,6 +108,11 @@ int present_and_retain(darwin_art_graphics::GraphicsState* state,
           ? JNI_FALSE
           : darwin_art_graphics::present_content(
                 state, env, nullptr, render_root, width, height);
+  std::cerr << "ART Android graphics: present root=" << render_root
+            << " apk=" << (run_apk_app ? 1 : 0)
+            << " result=" << (decor_presented == JNI_TRUE ? 1 : 0)
+            << " exception=" << (env->ExceptionCheck() ? 1 : 0)
+            << " size=" << width << "x" << height << "\n";
   jmethodID was_presented =
       run_apk_app || probe_view_class == nullptr
           ? nullptr

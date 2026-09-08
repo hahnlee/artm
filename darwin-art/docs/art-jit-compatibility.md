@@ -5802,3 +5802,12 @@ added; the full corpus and multi-loader identity task remain open.
   passed of 1,075 discovered tests; only the custom InputChannel smoke test
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
+### Runtime checkpoint 307 — 2026-09-08
+
+- Fixed real VLC `ACTION_VIEW` Activity transitions by matching Android's
+  lifecycle ordering: `WindowManagerGlobal.addView()` and normal
+  `performResume()` now complete before the native graphics install hook.
+  Previously `nativeInstallActivity()` raced ViewRootImpl/SurfaceView setup,
+  causing `Activity content presentation failed` and SIGABRT for
+  `VideoPlayerActivity`. Recovery-profile replay now returns rc=0 with a
+  valid ViewRoot/content pair and GPU presentation (`720x1280`).

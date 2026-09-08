@@ -10589,3 +10589,9 @@ or admission exception was added.
   ARM64 codegen, barriers, JNI, deoptimization, class loading, dex/vdex,
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
+### Runtime checkpoint 307 — 2026-09-08
+
+- Activity/window ownership now follows the AOSP transaction boundary for
+  secondary Activities: resume publishes the ViewRoot/renderer before the
+  Darwin native surface bridge observes it. This removes the VLC video
+  Activity startup abort while preserving the existing persistent GPU path.

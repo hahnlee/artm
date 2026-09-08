@@ -1883,12 +1883,16 @@ public final class DarwinServiceBridge {
             addView.invoke(global, decor, window.getAttributes(), next.getDisplay(),
                     window, Integer.valueOf(0));
             completeActivityWindowVisibility(next, decor);
-            if (!nativeInstallActivity(next, decor)) {
-                throw new IllegalStateException("native graphics Activity install failed");
-            }
             currentActivity = next;
             ACTIVITY_STACK.add(new ActivityRecord(next, token, requestCode));
             performResume.invoke(next, Boolean.FALSE, "darwin-art activity launch");
+            // ViewRootImpl/ThreadedRenderer becomes authoritative only after
+            // the normal RESUME transaction.  Installing the native surface
+            // before RESUME races SurfaceView.updateSurface() and can reject
+            // a valid Activity whose content tree is still being attached.
+            if (!nativeInstallActivity(next, decor)) {
+                throw new IllegalStateException("native graphics Activity install failed");
+            }
             scheduleViewTreeDump(next, decor);
             // ActivityThread does not dispatch onStop() when an Activity calls
             // finish() from onCreate() before it ever reaches STARTED. Once the

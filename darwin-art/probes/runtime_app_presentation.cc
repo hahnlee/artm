@@ -129,6 +129,9 @@ jboolean InstallTransitionedActivity(JNIEnv* env, jclass, jobject activity,
       darwin_art_graphics::retain_hardware_context(state, env, activity) &&
       darwin_art_graphics::retain_interactive_root(state, env, decor_view,
                                                    width, height);
+  std::cerr << "ART Android graphics: install activity view_root=" << view_root
+            << " content=" << content_root << " installed=" << (installed ? 1 : 0)
+            << " exception=" << (env->ExceptionCheck() ? 1 : 0) << "\n";
   env->DeleteLocalRef(content_root);
   env->DeleteLocalRef(view_class);
   env->DeleteLocalRef(view_root);
