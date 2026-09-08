@@ -5259,6 +5259,13 @@ added; the full corpus and multi-loader identity task remain open.
   installed Blue Archive record ran for 10 seconds with exit 0 and Unity/IL2CPP
   initialization (ARM64, 12 cores, 8GiB) and no bootstrap/vdex failure.
 
+### Runtime checkpoint 294 — 2026-09-08
+
+- Storage accounting after cleanup: active DarwinART `default` profile is 123G,
+  repository `_build` is 26G, and Cargo `target` is 2.5G. These project assets
+  explain roughly 151.5G of usage; APFS reports no snapshots, so the remaining
+  volume usage belongs to other host data outside this checkout.
+
 ### Runtime checkpoint 292 — 2026-09-08
 
 - Profile storage inspection shows `default` is the only profile modified on
