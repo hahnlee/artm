@@ -648,6 +648,22 @@ void AppendManagedFrames(NativeWalk* walk) {
         }
       }
     }
+    // Unwindstack may already contain a host-window PC, in which case the
+    // legacy low-PC branch above is skipped. Recover Android's logical PC and
+    // give DexFiles the same lookup opportunity regardless of normalization.
+    if (walk->dex_files != nullptr &&
+        static_cast<std::string_view>(frame.function_name).empty() &&
+        frame.pc >= kDarwinArtCompressedReferenceBase &&
+        frame.pc - kDarwinArtCompressedReferenceBase < (1ULL << 32)) {
+      const uint64_t logical_pc = frame.pc - kDarwinArtCompressedReferenceBase;
+      SharedString resolved_name;
+      uint64_t resolved_offset = 0;
+      if (walk->dex_files->GetFunctionName(walk->maps, logical_pc, &resolved_name,
+                                           &resolved_offset)) {
+        frame.function_name = resolved_name;
+        frame.function_offset = resolved_offset;
+      }
+    }
     frame.num = walk->data->frames.size();
     walk->data->frames.emplace_back(std::move(frame));
   }

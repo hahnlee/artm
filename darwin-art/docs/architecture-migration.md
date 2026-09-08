@@ -11464,3 +11464,9 @@ or admission exception was added.
   the valid app-OAT return PC is not resolved by either JITDebug or DexFiles.
 - Next boundary: connect OAT/Dex method metadata (or walk ManagedStack) to
   unwindstack so the AOSP method-name sequence is reconstructed.
+### Runtime checkpoint 429 — 2026-09-09
+
+- Unwind attribution now retries DexFiles with a logical PC derived from an
+  already-normalized host-window PC.
+- Link audit remains green, while `137-cfi` still fails because the production
+  DexFiles/OAT owner returns no app method names; that owner is next.

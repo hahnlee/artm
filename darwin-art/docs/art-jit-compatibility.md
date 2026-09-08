@@ -6783,3 +6783,9 @@ incomplete and still requires managed caller unwind validation.
 - The next implementation target is the AOT/OAT method attribution bridge
   (or a managed-stack frame walker) so valid ART return PCs produce the same
   method sequence as AOSP.
+### Runtime checkpoint 429 — 2026-09-09
+
+- Added a normalized-host-PC fallback that derives the Android logical PC
+  before querying DexFiles, closing a real attribution gap in the unwinder.
+- Graphics-link audit still passes, but `137-cfi` remains `FAIL`; the current
+  runtime's DexFiles/OAT owner still does not resolve the app OAT method names.
