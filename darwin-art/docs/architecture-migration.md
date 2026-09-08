@@ -11154,3 +11154,9 @@ or admission exception was added.
 - Unmodified AOSP `656-loop-deopt` passes in interpreter, JIT, and comparison
   lanes. Loop-triggered deoptimization and continuation are verified without
   APK changes; JNI CFI and real-app work remain.
+
+### Runtime checkpoint 387 — 2026-09-09
+
+- Unmodified AOSP `1972-jni-id-swap-indices` passes in interpreter, JIT, and
+  comparison lanes. JNI method-ID swap/index stability is verified without APK
+  changes; JNI CFI and real-app work remain.
