@@ -9217,3 +9217,11 @@ or admission exception was added.
   isolates the next investigation to generated-code lifetime/GC or
   signal-unwind behavior under sustained renderer activity; the end-to-end
   graphics acceptance gate is still failing.
+
+### Runtime checkpoint 125 — 2026-09-08
+
+- Replacement-machine verification passes host/bootstrap tests, incremental
+  native build, graphics-link closure audit, and MAP_JIT W^X audit. Fault
+  context records signal-safe Darwin JIT write depth; reproduced Chrome faults
+  all had depth zero, so code-cache range lifetime/GC reclaim or signal-unwind,
+  rather than a leaked write scope, remains the active blocker.

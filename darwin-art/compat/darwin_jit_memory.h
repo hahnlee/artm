@@ -7,6 +7,9 @@ void* DarwinArtMapJitCode(size_t size);
 void DarwinArtFlushJitCode(void* code, size_t size);
 void DarwinArtJitWriteBegin();
 void DarwinArtJitWriteEnd();
+// Signal-safe diagnostic for the current thread. A non-zero value means
+// MAP_JIT is writable and therefore intentionally non-executable here.
+unsigned DarwinArtJitWriteDepth();
 
 // Thread-affine and nestable. Never execute JIT code inside a write scope.
 class DarwinArtJitWriteScope {

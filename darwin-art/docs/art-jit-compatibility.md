@@ -4256,3 +4256,12 @@ added; the full corpus and multi-loader identity task remain open.
   `pc=0x50e774c9c` and `pc=0x3043d1f38`), so the remaining boundary is now
   narrowed to generated-code lifetime/GC or signal-unwind handling under
   sustained renderer activity. The full acceptance gate remains failing.
+
+### Runtime checkpoint 125 — 2026-09-08
+
+- Replacement-machine verification passes host/bootstrap tests, incremental
+  native build, graphics-link closure audit, and MAP_JIT W^X audit. Fault
+  context now records signal-safe Darwin JIT write depth; every reproduced
+  Chrome generated-code fault had depth zero, ruling out a leaked write scope.
+  Generated-code range lifetime/GC reclaim or signal-unwind remains the active
+  blocker for the sustained acceptance gate.

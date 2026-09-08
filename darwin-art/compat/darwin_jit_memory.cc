@@ -26,6 +26,10 @@ void DarwinArtJitWriteEnd() {
   if (--write_depth == 0) pthread_jit_write_protect_np(1);
 }
 
+unsigned DarwinArtJitWriteDepth() {
+  return write_depth;
+}
+
 DarwinArtJitWriteScope::DarwinArtJitWriteScope() {
   DarwinArtJitWriteBegin();
 }

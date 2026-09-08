@@ -1,19 +1,21 @@
 diff --git a/runtime/fault_handler.cc b/runtime/fault_handler.cc
 --- a/runtime/fault_handler.cc
 +++ b/runtime/fault_handler.cc
-@@ -17,6 +17,11 @@
+@@ -17,6 +17,13 @@
  
  #include "fault_handler.h"
  
 +#if defined(__APPLE__) && defined(__aarch64__)
 +#include <mach/arm/thread_status.h>
 +#include <unistd.h>
++
++#include "darwin_jit_memory.h"
 +#endif
 +
  #include <string.h>
  #include <sys/mman.h>
  #include <sys/ucontext.h>
-@@ -37,6 +42,49 @@ namespace art HIDDEN {
+@@ -37,6 +44,50 @@ namespace art HIDDEN {
  // Static fault manger object accessed by signal handler.
  FaultManager fault_manager;
  
@@ -54,6 +56,7 @@ diff --git a/runtime/fault_handler.cc b/runtime/fault_handler.cc
 +    append_hex(label, state.__x[index]);
 +  }
 +  append_hex(" x28=0x", state.__x[28]);
++  append_hex(" jit_write_depth=0x", DarwinArtJitWriteDepth());
 +  line[used++] = '\n';
 +  const ssize_t ignored = write(STDERR_FILENO, line, used);
 +  (void)ignored;
@@ -63,7 +66,7 @@ diff --git a/runtime/fault_handler.cc b/runtime/fault_handler.cc
  // These need to be NO_INLINE since some debuggers do not read the inline-info to set a breakpoint
  // if they aren't.
  extern "C" NO_INLINE __attribute__((visibility("default"))) void art_sigsegv_fault() {
-@@ -302,6 +350,10 @@ bool FaultManager::HandleSigsegvFault(int sig, siginfo_t* info, void* context) {
+@@ -302,6 +353,10 @@ bool FaultManager::HandleSigsegvFault(int sig, siginfo_t* info, void* context) {
      CheckForUnrecognizedImplicitSuspendCheckInBootImage(info, context);
    }
  
@@ -74,7 +77,7 @@ diff --git a/runtime/fault_handler.cc b/runtime/fault_handler.cc
    // We hit a signal we didn't handle.  This might be something for which
    // we can give more information about so call all registered handlers to
    // see if it is.
-@@ -626,6 +678,14 @@ JavaStackTraceHandler::JavaStackTraceHandler(FaultManager* manager) : FaultHand
+@@ -626,6 +681,14 @@ JavaStackTraceHandler::JavaStackTraceHandler(FaultManager* manager) : FaultHand
  }
  
  bool JavaStackTraceHandler::Action([[maybe_unused]] int sig, siginfo_t* siginfo, void* context) {
