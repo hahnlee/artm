@@ -4390,3 +4390,12 @@ added; the full corpus and multi-loader identity task remain open.
   Java Canvas through the existing HWUI `ACanvas` bridge with dirty-clip
   semantics, then detach and post via `ANativeWindow_unlockAndPost` so the
   IOSurface/Metal compositor remains the presentation path.
+
+### Runtime checkpoint 142 — 2026-09-08
+
+- Added and linked `Surface.nativeLockCanvas`/`nativeUnlockCanvasAndPost` using
+  the ANativeWindow lock, HWUI ACanvas buffer binding, dirty clipping, and
+  unlock/post path. Graphics-link audit passes and VLC now resolves the native
+  symbols, but the first real lock still returns `IllegalArgumentException`;
+  the failing subcondition (surface ownership, buffer lock, or Canvas binding)
+  is being isolated before claiming VLC support.

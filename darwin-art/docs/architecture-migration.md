@@ -9340,3 +9340,11 @@ or admission exception was added.
   clip, then detach and post using `ANativeWindow_unlockAndPost`, retaining the
   IOSurface/Metal compositor. Implementation and regression tests remain
   pending.
+
+### Runtime checkpoint 142 — 2026-09-08
+
+- Registered and linked AOSP-shaped `Surface.nativeLockCanvas` and
+  `nativeUnlockCanvasAndPost` with ANativeWindow/ACanvas dirty-buffer handling.
+  VLC resolves the methods and graphics audit passes, but real lock calls still
+  return `IllegalArgumentException`; ownership, buffer dequeue, or Canvas bind
+  diagnostics remain before completion.
