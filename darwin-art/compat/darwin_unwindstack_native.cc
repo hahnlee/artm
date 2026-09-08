@@ -16,7 +16,6 @@
 #include <cstdlib>
 #include <cxxabi.h>
 #include <cstdint>
-#include <cstdio>
 #include <fstream>
 #include <mutex>
 #include <string>

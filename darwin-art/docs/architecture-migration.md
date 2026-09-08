@@ -11620,3 +11620,10 @@ or admission exception was added.
   reverted. Runtime bootstrap is green again. Native registration metadata
   remains in place, but the shared registry has not yet produced the expected
   `UpstreamCfi*` symbol, so the goal remains open.
+- Checkpoint 456: a one-shot pointer trace confirmed the resolver sees native
+  entries for `Main.unwindInProcess`/`Main.unwindOtherProcess`, but no
+  `ClassLinker::RegisterNative` publication callback fires in this test path.
+  The runtime/link audit remains green and the temporary stderr tracing was
+  removed. The remaining gap is identifying the actual JNI binding path (the
+  test uses a registration route outside the patched callback) and publishing
+  its native symbol without changing test expectations.
