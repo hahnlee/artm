@@ -6590,3 +6590,10 @@ added; the full corpus and multi-loader identity task remain open.
   frames now reach the application OAT mapping, but `Main.main` still lacks a
   resolved mini-debug/Dex symbol. The next target is supplying DexFiles/JIT
   symfiles for that frame.
+
+### Runtime checkpoint 407 — 2026-09-09
+
+- Added a DexFiles symbol-resolution fallback for normalized managed frames,
+  then rebuilt the graphics link and reran unmodified `137-cfi`. The test
+  remains JIT-failing, so the remaining boundary is whether DexFiles is
+  populated and whether its lookup expects a DEX PC rather than a host PC.

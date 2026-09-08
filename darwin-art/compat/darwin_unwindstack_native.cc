@@ -598,6 +598,11 @@ void AppendManagedFrames(NativeWalk* walk) {
                                               &resolved_name, &resolved_offset)) {
           frame.function_name = resolved_name;
           frame.function_offset = resolved_offset;
+        } else if (walk->dex_files != nullptr &&
+                   walk->dex_files->GetFunctionName(walk->maps, normalized_pc,
+                                                    &resolved_name, &resolved_offset)) {
+          frame.function_name = resolved_name;
+          frame.function_offset = resolved_offset;
         }
       }
     }

@@ -11294,3 +11294,9 @@ or admission exception was added.
   unwinder. `137-cfi` now identifies upper frames in the app OAT mapping, but
   `Main.main` remains unnamed because its mini-debug/Dex symbol source is not
   being supplied. DexFiles/JIT symfile integration is the next boundary.
+
+### Runtime checkpoint 407 — 2026-09-09
+
+- Added DexFiles lookup as a fallback after low-PC normalization and reran the
+  graphics link plus unmodified `137-cfi`. No pass yet; the remaining issue is
+  DexFiles population or the DEX-PC versus host-PC contract at this boundary.
