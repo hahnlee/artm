@@ -10817,3 +10817,12 @@ or admission exception was added.
   incomplete libdexfile owner graph crashed the standalone unwind smoke
   process, so the partial change was not accepted. A complete ART-owned
   DexFiles provider, including MemMap/ZipArchive owners, remains required.
+
+### Runtime checkpoint 339 — 2026-09-09
+
+- Restored AOSP `DexFiles.cpp` without forcing the incomplete `DexFile.cpp`
+  owner, restoring the `CreateDexFiles` runtime contract. Darwin local unwind
+  now branches on `tid` presence instead of unresolved Android `GetThreadId`.
+  Provider smoke passes (frames=5, context=2, thread=5, remote=4) and the
+  graphics-link closure audit is green (registrar=51, fake-symbols=0).
+  Complete DexFile metadata ownership remains open.

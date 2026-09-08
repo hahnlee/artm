@@ -6,6 +6,7 @@ use crate::native_build::{PendingNativeCompile, common_cpp_command, compile_pend
 // of this archive so platform work cannot silently fork the DWARF/ELF engine.
 const PORTABLE_SOURCES: &[&str] = &[
     "ArmExidx.cpp",
+    "DexFiles.cpp",
     "DwarfCfa.cpp",
     "DwarfEhFrameWithHdr.cpp",
     "DwarfMemory.cpp",
@@ -149,7 +150,7 @@ pub(crate) fn build_runtime_unwindstack_core(root: &Path) -> Result<PathBuf> {
                     );
                     let signature = "bool AndroidLocalUnwinder::InternalUnwind(std::optional<pid_t> tid, AndroidUnwinderData& data) {";
                     let replacement = format!(
-                        "{signature}\n#if defined(__APPLE__)\n  if (!tid || static_cast<uint64_t>(*tid) == android::base::GetThreadId()) {{\n    return DarwinNativeUnwind(maps_.get(), jit_debug_.get(), dex_files_.get(), max_frames_, data);\n  }}\n  return DarwinNativeUnwindThread(maps_.get(), jit_debug_.get(), dex_files_.get(), max_frames_, static_cast<uint64_t>(*tid), data);\n#endif"
+                        "{signature}\n#if defined(__APPLE__)\n  if (!tid) {{\n    return DarwinNativeUnwind(maps_.get(), jit_debug_.get(), dex_files_.get(), max_frames_, data);\n  }}\n  return DarwinNativeUnwindThread(maps_.get(), jit_debug_.get(), dex_files_.get(), max_frames_, static_cast<uint64_t>(*tid), data);\n#endif"
                     );
                     let remote_signature = "bool AndroidRemoteUnwinder::InternalUnwind(std::optional<pid_t> tid, AndroidUnwinderData& data) {";
                     let remote_replacement = format!(

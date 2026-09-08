@@ -6059,3 +6059,12 @@ added; the full corpus and multi-loader identity task remain open.
   incomplete owner graph made the standalone smoke process crash, so no
   partial implementation was retained. A real ART-owned DexFiles provider
   with complete MemMap/ZipArchive dependencies is still required.
+
+### Runtime checkpoint 339 — 2026-09-09
+
+- Restored AOSP `DexFiles.cpp` without forcing the incomplete `DexFile.cpp`
+  owner, restoring the `CreateDexFiles` runtime contract. Darwin local unwind
+  now branches on `tid` presence instead of unresolved Android `GetThreadId`.
+  Provider smoke passes (frames=5, context=2, thread=5, remote=4) and the
+  graphics-link closure audit is green (registrar=51, fake-symbols=0).
+  Complete DexFile metadata ownership remains open.
