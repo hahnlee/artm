@@ -4300,3 +4300,11 @@ added; the full corpus and multi-loader identity task remain open.
   while reaching 11,340 scanout requests and 42 presents. The wrapper still
   failed its real-button discovery assertion, so end-to-end acceptance remains
   open despite the JIT W^X fault boundary being fixed.
+
+### Runtime checkpoint 130 — 2026-09-08
+
+- Revalidated the bionic process-state facade after the signal-ordering change;
+  its test targets pass. Two independent 70-second Chrome runs report zero
+  generated-code diagnostics, zero unresolved signals, and no fatal abort. The
+  remaining harness failure is limited to stale coordinate-based tab-switcher
+  discovery.

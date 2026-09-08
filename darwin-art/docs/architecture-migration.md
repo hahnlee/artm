@@ -9257,3 +9257,10 @@ or admission exception was added.
   fault diagnostics and sustained 11,340 scanouts/42 presents. The harness did
   not detect its real tab-switcher button, so the full acceptance gate is still
   pending even though the W^X fault logging boundary is resolved.
+
+### Runtime checkpoint 130 — 2026-09-08
+
+- The bionic process-state facade tests pass after pre-chain recovery. Two
+  70-second Chrome runs show zero generated-code diagnostics, unresolved
+  signals, or fatal aborts. Only the acceptance harness's stale tab-switcher
+  coordinate assertion remains to be updated.
