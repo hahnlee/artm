@@ -4672,6 +4672,13 @@ added; the full corpus and multi-loader identity task remain open.
   app-image regions, startup notification, metadata strings, and volatile
   reference loads.
 
+### Runtime checkpoint 176 — 2026-09-08
+
+- Fresh four-worker execution of `1336-short-finalizer-timeout` through
+  `1339-dead-reference-safe` passes all four contracts in interpreter, JIT,
+  and unchanged-source optimized lanes, covering finalizer timing, GC
+  coverage/no-LOS behavior, and dead-reference safety.
+
 ### Runtime checkpoint 173 — 2026-09-08
 
 - Fresh four-worker corpus reruns completed 25/25 executable contracts in

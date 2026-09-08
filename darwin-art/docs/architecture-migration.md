@@ -9584,3 +9584,9 @@ or admission exception was added.
   interpreter, JIT, and unchanged optimized lanes, covering non-moving GC,
   app-image regions, startup notification, metadata sections, and volatile
   reference-load lowering.
+
+### Runtime checkpoint 176 — 2026-09-08
+
+- The fresh `1336`–`1339` GC/reference slice passes all four contracts across
+  interpreter, JIT, and unchanged optimized lanes, validating finalizer
+  timing, coverage/no-LOS collection, and dead-reference handling.
