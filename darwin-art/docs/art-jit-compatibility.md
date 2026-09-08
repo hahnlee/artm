@@ -5973,3 +5973,11 @@ added; the full corpus and multi-loader identity task remain open.
   include the required `expected-stdout.txt` execution contract. The focused
   runner suite passes 7/7, and discovery sees 1,076 pinned AOSP test inputs;
   this repairs validation infrastructure without adding a test-name allowlist.
+
+### Runtime checkpoint 329 — 2026-09-08
+
+- Rebuilt the AOSP speed boot image after the framework-compat artifact
+  changed; this removed the stale oat/dex checksum rejection that masked every
+  corpus test. A fresh first-10 corpus run now passes all 10 tests, including
+  omnibus opcodes, interfaces, allocations, JNI, reference maps, and signals,
+  using the regenerated boot image and normal ART runner path.

@@ -10737,3 +10737,10 @@ or admission exception was added.
   `expected-stdout.txt` contract. Its 7 focused tests now pass, and the
   production discovery boundary enumerates 1,076 pinned AOSP tests without a
   name allowlist; end-to-end execution is still separate work.
+
+### Runtime checkpoint 329 — 2026-09-08
+
+- Regenerated the AOSP speed boot image to match the refreshed framework DEX;
+  the prior stale oat checksum failure is gone. The first 10 pinned corpus
+  tests pass on a fresh ledger, covering opcode, interface, allocation, JNI,
+  reference-map, sleep, and signal paths through the normal ART runner.
