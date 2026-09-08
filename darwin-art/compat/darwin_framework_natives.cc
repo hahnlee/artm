@@ -30,6 +30,7 @@
 
 #include <android/surface_control.h>
 #include <android/hardware_buffer.h>
+#include <android/graphics/canvas.h>
 #include "../_aosp/system/libziparchive/include/ziparchive/zip_archive.h"
 
 #include <fcntl.h>
@@ -1693,6 +1694,138 @@ DarwinAudioTrack* GetAudioTrack(JNIEnv* env, jobject track) {
 jboolean SurfaceNativeIsValid(JNIEnv*, jclass, jlong handle) {
   return handle != 0 ? JNI_TRUE : JNI_FALSE;
 }
+
+void ThrowSurfaceException(JNIEnv* env, const char* class_name) {
+  if (env == nullptr || env->ExceptionCheck()) return;
+  jclass exception_class = env->FindClass(class_name);
+  if (exception_class == nullptr) return;
+  env->ThrowNew(exception_class, nullptr);
+  env->DeleteLocalRef(exception_class);
+}
+
+jlong SurfaceNativeLockCanvas(JNIEnv* env, jclass, jlong handle,
+                              jobject canvas_object, jobject dirty_object) {
+  auto* window = reinterpret_cast<void*>(static_cast<uintptr_t>(handle));
+  const bool managed = window != nullptr &&
+      darwin_art_android_ANativeWindow_is_managed(window);
+  if (window == nullptr || canvas_object == nullptr || !managed) {
+    if (std::getenv("DARWIN_ART_DEBUG_ANATIVEWINDOW") != nullptr) {
+      std::cerr << "ART Android Surface: lock rejected handle=" << window
+                << " canvas=" << canvas_object << " managed=" << managed
+                << "\n";
+    }
+    ThrowSurfaceException(env, "java/lang/IllegalArgumentException");
+    return 0;
+  }
+
+  ARect dirty{};
+  ARect* dirty_pointer = nullptr;
+  jclass rect_class = nullptr;
+  jfieldID left_field = nullptr;
+  jfieldID top_field = nullptr;
+  jfieldID right_field = nullptr;
+  jfieldID bottom_field = nullptr;
+  if (dirty_object != nullptr) {
+    rect_class = env->GetObjectClass(dirty_object);
+    if (rect_class != nullptr) {
+      left_field = env->GetFieldID(rect_class, "left", "I");
+      top_field = env->GetFieldID(rect_class, "top", "I");
+      right_field = env->GetFieldID(rect_class, "right", "I");
+      bottom_field = env->GetFieldID(rect_class, "bottom", "I");
+    }
+    if (env->ExceptionCheck() || left_field == nullptr || top_field == nullptr ||
+        right_field == nullptr || bottom_field == nullptr) {
+      env->DeleteLocalRef(rect_class);
+      return 0;
+    }
+    dirty.left = env->GetIntField(dirty_object, left_field);
+    dirty.top = env->GetIntField(dirty_object, top_field);
+    dirty.right = env->GetIntField(dirty_object, right_field);
+    dirty.bottom = env->GetIntField(dirty_object, bottom_field);
+    dirty_pointer = &dirty;
+  }
+
+  // WindowManager can construct the Surface with a logical PixelFormat value
+  // such as OPAQUE (-1). It is not a renderable buffer format. AOSP's Surface
+  // JNI performs this same fallback before locking a software Canvas.
+  const int32_t window_format =
+      darwin_art_android_ANativeWindow_getFormat(window);
+  if (!ACanvas_isSupportedPixelFormat(window_format) &&
+      darwin_art_android_ANativeWindow_setBuffersGeometry(window, 0, 0, 1) !=
+          0) {
+    env->DeleteLocalRef(rect_class);
+    ThrowSurfaceException(env, "java/lang/IllegalArgumentException");
+    return 0;
+  }
+
+  ANativeWindow_Buffer buffer{};
+  const int32_t lock_status =
+      darwin_art_android_ANativeWindow_lock(window, &buffer, dirty_pointer);
+  if (lock_status != 0) {
+    if (std::getenv("DARWIN_ART_DEBUG_ANATIVEWINDOW") != nullptr) {
+      std::cerr << "ART Android Surface: ANativeWindow_lock failed handle="
+                << window << " status=" << lock_status << "\n";
+    }
+    env->DeleteLocalRef(rect_class);
+    ThrowSurfaceException(env, lock_status == -12
+                                   ? "android/view/Surface$OutOfResourcesException"
+                                   : "java/lang/IllegalArgumentException");
+    return 0;
+  }
+
+  ACanvas* canvas = ACanvas_getNativeHandleFromJava(env, canvas_object);
+  if (canvas == nullptr || !ACanvas_setBuffer(canvas, &buffer, 0)) {
+    if (std::getenv("DARWIN_ART_DEBUG_ANATIVEWINDOW") != nullptr) {
+      std::cerr << "ART Android Surface: Canvas buffer bind failed handle="
+                << window << " canvas=" << canvas << "\n";
+    }
+    (void)darwin_art_android_ANativeWindow_unlockAndPost(window);
+    env->DeleteLocalRef(rect_class);
+    ThrowSurfaceException(env, "java/lang/IllegalArgumentException");
+    return 0;
+  }
+
+  if (dirty_pointer != nullptr) {
+    dirty.left = std::clamp(dirty.left, 0, buffer.width);
+    dirty.top = std::clamp(dirty.top, 0, buffer.height);
+    dirty.right = std::clamp(dirty.right, dirty.left, buffer.width);
+    dirty.bottom = std::clamp(dirty.bottom, dirty.top, buffer.height);
+    ACanvas_clipRect(canvas, &dirty, false);
+    env->SetIntField(dirty_object, left_field, dirty.left);
+    env->SetIntField(dirty_object, top_field, dirty.top);
+    env->SetIntField(dirty_object, right_field, dirty.right);
+    env->SetIntField(dirty_object, bottom_field, dirty.bottom);
+  }
+  env->DeleteLocalRef(rect_class);
+
+  // Surface.java stores this independent locked reference in mLockedObject.
+  // It remains valid if mNativeObject is replaced before unlock and is
+  // released by Surface.java's finally block after nativeUnlockCanvasAndPost.
+  darwin_art_android_ANativeWindow_acquire(window);
+  return handle;
+}
+
+void SurfaceNativeUnlockCanvasAndPost(JNIEnv* env, jclass, jlong handle,
+                                      jobject canvas_object) {
+  auto* window = reinterpret_cast<void*>(static_cast<uintptr_t>(handle));
+  if (window == nullptr || canvas_object == nullptr ||
+      !darwin_art_android_ANativeWindow_is_managed(window)) {
+    ThrowSurfaceException(env, "java/lang/IllegalArgumentException");
+    return;
+  }
+  ACanvas* canvas = ACanvas_getNativeHandleFromJava(env, canvas_object);
+  if (canvas == nullptr) {
+    ThrowSurfaceException(env, "java/lang/IllegalArgumentException");
+    return;
+  }
+  // Detach before queueing: the Java Canvas must not retain pixels after the
+  // producer transfers this buffer to the compositor.
+  (void)ACanvas_setBuffer(canvas, nullptr, 0);
+  if (darwin_art_android_ANativeWindow_unlockAndPost(window) != 0) {
+    ThrowSurfaceException(env, "java/lang/IllegalArgumentException");
+  }
+}
+
 void SurfaceNativeRelease(JNIEnv*, jclass, jlong handle) {
   (void)darwin_art_android_ANativeWindow_release_if_managed(
       reinterpret_cast<void*>(static_cast<uintptr_t>(handle)));
@@ -3160,6 +3293,12 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
        reinterpret_cast<void*>(&SurfaceNativeGetFromBlastBufferQueue)},
       {const_cast<char*>("nativeIsValid"), const_cast<char*>("(J)Z"),
        reinterpret_cast<void*>(&SurfaceNativeIsValid)},
+      {const_cast<char*>("nativeLockCanvas"),
+       const_cast<char*>("(JLandroid/graphics/Canvas;Landroid/graphics/Rect;)J"),
+       reinterpret_cast<void*>(&SurfaceNativeLockCanvas)},
+      {const_cast<char*>("nativeUnlockCanvasAndPost"),
+       const_cast<char*>("(JLandroid/graphics/Canvas;)V"),
+       reinterpret_cast<void*>(&SurfaceNativeUnlockCanvasAndPost)},
       {const_cast<char*>("nativeRelease"), const_cast<char*>("(J)V"),
        reinterpret_cast<void*>(&SurfaceNativeRelease)},
       {const_cast<char*>("nativeDestroy"), const_cast<char*>("(J)V"),
