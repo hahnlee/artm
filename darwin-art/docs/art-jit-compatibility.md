@@ -6997,3 +6997,7 @@ incomplete and still requires managed caller unwind validation.
   callbacks (actual fixed instruction count is 19 plus stack moves). The
   standalone JNI thunk audit now passes with scalar/reference returns and W^X
   checks, and the graphics link audit also passes.
+- Checkpoint 468: the NativeBridge thunk audit passes after the frame publish
+  change. The broader `probe-runtime-elf-jni` integration currently exits at
+  its existing output-contract check (DEX inventory is printed instead of the
+  expected summary), so no runtime JNI execution claim is made from it.
