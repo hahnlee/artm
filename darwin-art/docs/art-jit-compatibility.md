@@ -5295,6 +5295,14 @@ added; the full corpus and multi-loader identity task remain open.
   without touching the corrupt image; Calculator was installed and launched
   for 5 seconds with exit 0 and Nterp acceptance PASS.
 
+### Runtime checkpoint 300 — 2026-09-08
+
+- Recovery profile validation: `recovery` mounted with one lease; Calculator and
+  Chromium were installed from immutable APK sources. Chromium launched for 8
+  seconds with exit 0, created its initial tab, spawned sandbox/privileged
+  services, and used the GPU IOSurface path. Only nonfatal cache/model warnings
+  appeared.
+
 ### Runtime checkpoint 294 — 2026-09-08
 
 - Storage accounting after cleanup: active DarwinART `default` profile is 123G,
