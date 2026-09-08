@@ -5176,6 +5176,14 @@ added; the full corpus and multi-loader identity task remain open.
   the Activity still launches successfully. Core AOSP graphics acceptance
   remains passing. Full JIT compatibility work is still in progress.
 
+### Runtime checkpoint 282 — 2026-09-08
+
+- Full `tools/audit-art-jit.sh` completed with exit code 0 on the replacement
+  Mac. The run exercised JIT arithmetic, typed fields/arrays, VarHandle memory
+  ordering, invoke-polymorphic/custom, GC/deoptimization, native exit hooks,
+  and concurrency fixtures; all reported PASS. This is validation progress,
+  not completion of the full AOSP/Blue Archive objective.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format

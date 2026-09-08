@@ -9499,6 +9499,13 @@ or admission exception was added.
   run now launches without the prior wide-gamut/101010-2 EGL diagnostics;
   AOSP Calculator and DeskClock graphics acceptance remains PASS.
 
+### Runtime checkpoint 282 — 2026-09-08
+
+- The complete ART JIT acceptance runner passed on the replacement Mac
+  (`rc=0`), including GC, deoptimization, field/array, VarHandle, invoke
+  polymorphic/custom, native-exit, and concurrency coverage. Real-app and
+  remaining AOSP corpus work remain active.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - EGL capability filtering now declares FP16 pixel formats unsupported for the
