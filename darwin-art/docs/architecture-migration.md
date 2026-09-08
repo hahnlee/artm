@@ -11509,3 +11509,9 @@ or admission exception was added.
 - The resulting dylib exports `__dex_debug_descriptor`, yet `137-cfi` remains
   failing, so the remaining gap is descriptor consumption/DEX symfile parsing,
   not symbol retention.
+### Runtime checkpoint 435 — 2026-09-09
+
+- A fresh end-to-end `137-cfi` run confirms the runtime launches the AOT app,
+  but every unwind assertion still fails. The descriptor is present in the
+  linked image; the unresolved boundary is now DEX symfile consumption or PC
+  normalization inside unwindstack.

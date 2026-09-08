@@ -6833,3 +6833,10 @@ incomplete and still requires managed caller unwind validation.
   debug globals, but `137-cfi` still reports the stdout mismatch. Descriptor
   retention is therefore fixed at the link level; runtime method attribution
   remains the next investigation.
+### Runtime checkpoint 435 — 2026-09-09
+
+- Re-ran `137-cfi` with the retained graphics dylib; all five lanes still emit
+  `FAIL` instead of `PASS`, while the normal `Main.main` AOT launch succeeds.
+- The remaining defect is specifically the unwindstack frame-to-DEX method
+  attribution path. No allowlist, synthetic mapping, or interpreter fallback
+  was introduced.
