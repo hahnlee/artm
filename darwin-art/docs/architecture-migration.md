@@ -9341,6 +9341,13 @@ or admission exception was added.
   IOSurface/Metal compositor. Implementation and regression tests remain
   pending.
 
+### Runtime checkpoint 217 — 2026-09-08
+
+- The `055-enum-performance`–`073-mismatched-field` slice passed all 21 tests,
+  including OOM/finalizers, encodings, process and classloader behavior,
+  fields/types, NIO/DexFile mapping, precise GC, reachability fences, and
+  intrinsics. Remaining corpus and real-app validation are pending.
+
 ### Runtime checkpoint 142 — 2026-09-08
 
 - Registered and linked AOSP-shaped `Surface.nativeLockCanvas` and

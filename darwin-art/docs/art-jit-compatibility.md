@@ -4980,6 +4980,14 @@ added; the full corpus and multi-loader identity task remain open.
   verifier behavior, and uncaught exceptions. Remaining corpus and real-app
   validation are still pending.
 
+### Runtime checkpoint 217 — 2026-09-08
+
+- The `055-enum-performance`–`073-mismatched-field` slice passed completely
+  (21 tests). It covers enum/string-jumbo/math intrinsics, OOM and finalizer
+  paths, character encodings, process management, field/type checks,
+  classloaders, NIO/DexFile mapping, precise GC/reachability fences, and
+  unpark behavior. Remaining corpus and real-app validation are pending.
+
 ### Runtime checkpoint 215 — 2026-09-08
 
 - Expanded the post-loader regression slice through `024-illegal-access`.
