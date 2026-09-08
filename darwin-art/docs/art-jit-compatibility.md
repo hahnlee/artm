@@ -6404,3 +6404,10 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter-versus-optimized lanes pass, covering native suspend transitions
   while contending on a monitor. JNI CFI return-PC publication and real-app
   criteria remain open.
+
+### Runtime checkpoint 383 — 2026-09-09
+
+- Ran unmodified AOSP `1921-suspend-native-recursive-monitor`. Interpreter, JIT,
+  and interpreter-versus-optimized lanes pass, covering recursive monitor
+  ownership across native suspend transitions. JNI CFI return-PC publication
+  and real-app criteria remain open.
