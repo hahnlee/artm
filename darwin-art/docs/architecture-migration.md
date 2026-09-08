@@ -11317,3 +11317,11 @@ or admission exception was added.
   invalidating the fixed return-slot assumption; candidate selection is limited
   to executable OAT/ODEX mappings. Audits pass, but `137-cfi` is still failing;
   caller-SP and register-window validation against AOSP SaveRefsAndArgs remains.
+
+### Runtime checkpoint 410 — 2026-09-09
+
+- Verified against AOSP ARM64 assembly that generic-JNI `SaveRefsAndArgs` stores
+  `x27/x28` at +192 and `x29/LR` at +208, so LR is the fixed +216 slot. The
+  speculative first-executable candidate scan was removed to avoid selecting
+  argument values as return PCs. Exact AOSP offsets are restored; `137-cfi`
+  still needs successful managed caller unwinding.

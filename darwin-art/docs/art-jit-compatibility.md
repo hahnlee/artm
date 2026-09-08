@@ -6616,3 +6616,12 @@ added; the full corpus and multi-loader identity task remain open.
   constrained to executable OAT/ODEX mappings. Provider and graphics-link
   audits pass, but `137-cfi` remains failing, so the next step is validating
   the selected caller-SP/register window against AOSP SaveRefsAndArgs layout.
+
+### Runtime checkpoint 410 — 2026-09-09
+
+- Compared the frame bytes with the AOSP ARM64 `SETUP_SAVE_REFS_AND_ARGS_FRAME`
+  layout: `x27/x28` are at +192 and `x29/LR` at +208, making LR (+216) the
+  only valid generic-JNI return slot. Removed the experimental first-executable
+  word scan that could mistake argument or callee-save values for a return PC;
+  the ucontext path now uses the exact AOSP offsets again. `137-cfi` remains
+  incomplete and still requires managed caller unwind validation.
