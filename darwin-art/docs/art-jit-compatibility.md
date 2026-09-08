@@ -4971,6 +4971,14 @@ added; the full corpus and multi-loader identity task remain open.
   This provides a broader regression signal beyond the focused 497/501 tests;
   the full corpus and real-app validation remain outstanding.
 
+### Runtime checkpoint 215 — 2026-09-08
+
+- Expanded the post-loader regression slice through `024-illegal-access`.
+  All 25 selected tests passed, covering exceptions, instanceof/arrays,
+  arithmetic and floating point, strings/interning, interfaces, unsafe
+  operations, stack overflow, and thread stress. Full corpus and real-app
+  validation remain outstanding.
+
 ### Runtime checkpoint 212 — 2026-09-08
 
 - A one-shot callback trace confirmed that `LLoadedByMyClassLoader` never

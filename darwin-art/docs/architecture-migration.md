@@ -9856,6 +9856,13 @@ or admission exception was added.
   all passed (`000-nop` through `004-SignalTest`) using the normal runner.
   Full corpus coverage and real application validation are still pending.
 
+### Runtime checkpoint 215 — 2026-09-08
+
+- The next deterministic corpus slice through `024-illegal-access` passed in
+  full (25 tests), including exception, array/type, arithmetic/floating-point,
+  string, interface, unsafe, stack-overflow, and thread-stress behavior. Full
+  corpus and real application validation remain pending.
+
 ### Runtime checkpoint 212 — 2026-09-08
 
 - A one-shot callback trace showed `LLoadedByMyClassLoader` never reaches
