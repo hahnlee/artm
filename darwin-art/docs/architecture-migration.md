@@ -9208,3 +9208,12 @@ or admission exception was added.
   -p art-bootstrap` passes all 14 Nterp/build-contract tests. This confirms
   no regression from the SyncFence bridge while the full AOSP corpus,
   long-running Chrome graphics, and parcel stress gates remain open.
+
+### Runtime checkpoint 124 — 2026-09-08
+
+- A fresh 70-second Chrome tab-grid run reached 11,280 SurfaceFlinger scanout
+  requests and 43 presents with ImageReader/SyncFence linkage intact, but
+  reproduced repeated generated-code faults in the JIT address range. This
+  isolates the next investigation to generated-code lifetime/GC or
+  signal-unwind behavior under sustained renderer activity; the end-to-end
+  graphics acceptance gate is still failing.

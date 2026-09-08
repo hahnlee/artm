@@ -4245,3 +4245,14 @@ added; the full corpus and multi-loader identity task remain open.
   `cargo test -p art-bootstrap` passes all 14 Nterp/build-contract tests.
   These are regression evidence only; they do not close the remaining
   long-running Chrome, parcel, or full AOSP corpus gates.
+
+### Runtime checkpoint 124 — 2026-09-08
+
+- Re-ran the real 70-second Chrome tab-grid graphics acceptance with the
+  ImageReader and SyncFence bridges. The renderer reached 11,280
+  SurfaceFlinger scanout requests and 43 presents, and no ImageReader/SyncFence
+  linkage error appeared. The run still reproduced a burst of ART
+  generated-code faults in the JIT address range (for example
+  `pc=0x50e774c9c` and `pc=0x3043d1f38`), so the remaining boundary is now
+  narrowed to generated-code lifetime/GC or signal-unwind handling under
+  sustained renderer activity. The full acceptance gate remains failing.
