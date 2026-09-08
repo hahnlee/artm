@@ -5003,3 +5003,12 @@ added; the full corpus and multi-loader identity task remain open.
   registers, and execution then returns to Java with status 122. This narrows
   the defect further to an earlier `DefineClass` precondition/exception path,
   rather than callback substitution. The temporary trace was removed.
+
+### Runtime checkpoint 218 — 2026-09-08
+
+- The `074-gc-thrash`–`096-array-copy-concurrent-gc` slice passed all 24 tests,
+  covering verification/type behavior, polymorphic calls, phantom references,
+  OOM fragmentation/finalizers, hot exceptions, inlining/compiler regressions,
+  class initialization/monitors, loop formation, serialization, and
+  concurrent-GC array copies. Remaining corpus and real-app validation remain
+  pending.

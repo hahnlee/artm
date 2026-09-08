@@ -9885,3 +9885,11 @@ or admission exception was added.
   then Java receives status 122. The remaining path is an earlier
   `DefineClass` precondition/exception failure, not callback substitution.
   Temporary tracing was removed.
+
+### Runtime checkpoint 218 — 2026-09-08
+
+- The `074-gc-thrash`–`096-array-copy-concurrent-gc` slice passed all 24 tests,
+  including verification/type behavior, polymorphic calls, phantom refs,
+  OOM/finalizers, hot exceptions, inlining/compiler regressions,
+  class-init/monitors, loop formation, serialization, and concurrent-GC array
+  copies. Remaining corpus and real-app validation remain pending.
