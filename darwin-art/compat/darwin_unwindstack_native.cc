@@ -739,6 +739,8 @@ thread_t FindThread(mach_port_t task, uint64_t thread_id) {
 uint64_t DarwinFindGlobalVariable(Maps* maps, const char* variable) {
   if (maps == nullptr || variable == nullptr) return 0;
   const std::string mach_symbol = std::string("_") + variable;
+  const bool require_nonempty_jit_descriptor =
+      std::string_view(variable) == "__jit_debug_descriptor";
   std::unordered_set<std::string> visited;
   uint64_t result = 0;
   maps->ForEachMapInfo([&](MapInfo* map) {
@@ -789,6 +791,21 @@ uint64_t DarwinFindGlobalVariable(Maps* maps, const char* variable) {
       const size_t remaining = strings.size() - symbol.n_un.n_strx;
       if (strnlen(name, remaining) == remaining) continue;
       if (mach_symbol == name) {
+        if (require_nonempty_jit_descriptor) {
+          // This provider may be linked into more than one Mach-O image. A
+          // probe image can therefore expose an empty descriptor before the
+          // ART runtime's live JIT descriptor. The first-entry field is the
+          // stable v1/v2 discriminator; keep searching until it is populated.
+          uint64_t first_entry = 0;
+          mach_vm_size_t copied = 0;
+          if (mach_vm_read_overwrite(mach_task_self(), symbol.n_value + slide + 24,
+                                     sizeof(first_entry),
+                                     reinterpret_cast<mach_vm_address_t>(&first_entry),
+                                     &copied) != KERN_SUCCESS ||
+              copied != sizeof(first_entry) || first_entry == 0) {
+            continue;
+          }
+        }
         result = symbol.n_value + slide;
         return false;
       }

@@ -6549,3 +6549,12 @@ added; the full corpus and multi-loader identity task remain open.
   still fails because the caller (`Main.main`) remains an anonymous JIT-cache
   frame. The next target is publishing/consuming Darwin JIT code-cache debug
   entries across the runtime/provider boundary.
+
+### Runtime checkpoint 402 — 2026-09-09
+
+- Added non-empty `__jit_debug_descriptor` selection when multiple provider
+  Mach-O images expose the same symbol, then rebuilt the graphics link and
+  reran unmodified `137-cfi`. The test remains JIT-failing; descriptor
+  selection alone did not resolve the anonymous `Main.main` JIT frame. The
+  OAT map recovery remains useful for the first managed frame, while shared
+  JIT code-cache debug entries are still required.

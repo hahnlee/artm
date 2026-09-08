@@ -11258,3 +11258,11 @@ or admission exception was added.
   covers the range. This resolves `Hello.jitPolymorphicVirtual` in `137-cfi`,
   while `Main.main` is still an anonymous JIT code-cache frame; the remaining
   architectural work is shared JIT debug-entry publication across images.
+
+### Runtime checkpoint 402 — 2026-09-09
+
+- Filtered duplicate Mach-O global lookups to prefer a live, non-empty
+  `__jit_debug_descriptor` and reran the graphics link plus unmodified
+  `137-cfi`. There was no behavioral improvement: the managed OAT frame can be
+  identified, but the `Main.main` JIT code-cache frame remains anonymous.
+  Cross-image JIT debug-entry ownership/publication is still the next target.
