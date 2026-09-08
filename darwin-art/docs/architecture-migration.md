@@ -9972,6 +9972,15 @@ or admission exception was added.
   shadow method/field resolution. Remaining corpus and real-app validation
   remain pending.
 
+### Runtime checkpoint 234 — 2026-09-08
+
+- The `450-checker-types`–`478-checker-clinit-check-pruning` slice passed all
+  40 tests, covering vreg/reg allocation, type propagation/SSA/GVN, array and
+  instruction simplification, long/float conversion, dead phis, dex/nested
+  inlining, boolean/condition materialization, huge methods, deopt and locals,
+  constructor barriers, clinit inlining, bound types, and dead/unreachable
+  block pruning. Remaining corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 231 — 2026-09-08
 
 - The `2250-inline-throw-into-try`–`2275-pthread-name` slice passed all 31

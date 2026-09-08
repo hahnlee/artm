@@ -5082,6 +5082,17 @@ added; the full corpus and multi-loader identity task remain open.
   and allocation tracking stress. Remaining corpus and real-app validation
   are pending.
 
+### Runtime checkpoint 234 — 2026-09-08
+
+- The `450-checker-types`–`478-checker-clinit-check-pruning` slice passed all
+  40 tests. It covers register/vreg allocation, type propagation, SSA/GVN,
+  array sets, instruction simplification, long/float conversions, dead phis,
+  inlining across dex files and nested loops, boolean simplification,
+  condition materialization, huge methods, deopt environments/uninitialized
+  locals, constructor fences/barriers, clinit inlining, bound types, and
+  unreachable/dead-block pruning. Remaining corpus and real-app validation are
+  pending.
+
 ### Runtime checkpoint 233 — 2026-09-08
 
 - The `416-optimizing-arith-not`–`449-checker-bce-rem` slice passed all 38
