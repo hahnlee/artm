@@ -4450,3 +4450,10 @@ added; the full corpus and multi-loader identity task remain open.
   audit's synchronized static/instance monitor, reentrancy, GC, exception
   release, and contention cases remain passing. A dedicated bounded-latency
   checkpoint test is still the next synchronization task.
+
+### Runtime checkpoint 149 — 2026-09-08
+
+- Re-inspected the AOSP `Mutex`/`ReaderWriterMutex` checkpoint contract and the
+  Darwin pthread adaptation. Existing monitor contention plus GC/exception
+  release coverage remains green; no semantic change is committed until a
+  dedicated checkpoint-response measurement can exercise the blocked-lock path.

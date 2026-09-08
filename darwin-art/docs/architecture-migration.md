@@ -9385,6 +9385,13 @@ or admission exception was added.
   contention acceptance cases remain green; a dedicated bounded-latency
   checkpoint regression is still pending.
 
+### Runtime checkpoint 149 — 2026-09-08
+
+- Compared the AOSP futex checkpoint wake contract with the Darwin pthread
+  polling adaptation. Existing contention, GC, and exception-release tests
+  remain green; a dedicated blocked-lock checkpoint-response measurement is
+  still required before changing this host-specific synchronization layer.
+
 ### Runtime checkpoint 146 — 2026-09-08
 
 - Rebuilt the pinned ARM64 JIT after removing the Darwin explicit-check-only
