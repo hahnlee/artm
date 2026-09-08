@@ -9571,3 +9571,9 @@ or admission exception was added.
   and `800`–`860` ranges in interpreter, JIT, and unchanged optimized lanes.
   This validates VarHandle/concurrency, cache churn, OSR/deoptimization,
   hidden API/VDEX, resolution, and plugin/JVMTI behavior.
+
+### Runtime checkpoint 174 — 2026-09-08
+
+- Stale parallel corpus runners were terminated to restore deterministic test
+  isolation. Direct fresh execution of `904-object-allocation` passes all
+  interpreter, JIT, and unchanged optimized lanes.

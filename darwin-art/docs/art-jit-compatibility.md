@@ -4657,6 +4657,13 @@ added; the full corpus and multi-loader identity task remain open.
   deoptimization/OSR, inline caches, volatile/read barriers, class loading,
   and JNI stubs.
 
+### Runtime checkpoint 174 — 2026-09-08
+
+- Removed stale parallel corpus runners that were contaminating later ledgers.
+  A direct fresh run of `904-object-allocation` now passes interpreter, JIT,
+  and unchanged-source optimized lanes, confirming the runner can produce
+  authoritative results after cleanup.
+
 ### Runtime checkpoint 173 — 2026-09-08
 
 - Fresh four-worker corpus reruns completed 25/25 executable contracts in
