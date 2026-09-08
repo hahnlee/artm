@@ -4775,3 +4775,10 @@ added; the full corpus and multi-loader identity task remain open.
   optimized lanes. Access-check resolution, class-loader on-load search, and
   boot-classpath transformation now have fresh evidence and no persistent
   failure.
+
+### Runtime checkpoint 189 — 2026-09-08
+
+- Fresh four-worker execution of the `061`–`103` slice passes all 51
+  contracts in interpreter, JIT, and unchanged-source optimized lanes.
+  OOM/GC, fields and arrays, class loading, verifier/monitor behavior, loops,
+  reflection, and string concatenation paths all pass.
