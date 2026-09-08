@@ -10853,3 +10853,11 @@ or admission exception was added.
   `DexFile::Create` executable requires the complete production foundation
   closure, so the next validation must invoke metadata lookup through that
   runtime rather than add ad-hoc replacement symbols.
+
+### Runtime checkpoint 343 — 2026-09-09
+
+- Ran the real AOSP `137-cfi` test through dex2oat and the normal JIT host.
+  All five native unwind assertions returned `FAIL` while stdout matched the
+  expected structure. The unresolved issue is managed-frame publication and
+  optimized JNI metadata lookup; APK loading and the runtime link itself are
+  not the failure point.

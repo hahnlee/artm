@@ -6096,3 +6096,11 @@ added; the full corpus and multi-loader identity task remain open.
   `DexFile::Create` executable requires the complete production foundation
   closure, so the next validation must invoke metadata lookup through that
   runtime rather than add ad-hoc replacement symbols.
+
+### Runtime checkpoint 343 — 2026-09-09
+
+- Executed the real AOSP `137-cfi` test through dex2oat and the normal JIT
+  host. All five invocations reached the native unwind checks, but each
+  returned `FAIL` instead of `PASS` (stdout otherwise matched exactly). This
+  confirms the remaining blocker is managed-frame publication/metadata
+  resolution in the optimized JNI unwind path, not APK loading or linking.
