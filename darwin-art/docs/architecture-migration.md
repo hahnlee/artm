@@ -9435,3 +9435,10 @@ or admission exception was added.
 - A fail-closed compiler-shadow audit rejects reintroducing the Apple bypass.
   The full JIT audit, incremental graphics link, untouched AOSP `004-JniTest`,
   and all three `137-cfi` JIT/unwind runs pass with the inline path enabled.
+
+### Runtime checkpoint 155 — 2026-09-08
+
+- Replacement-host validation confirms the JNI fast path and empty-checkpoint
+  contract remain green after push. The compatibility objective remains open;
+  the next work must address remaining AOSP semantic/ABI differences rather
+  than treating the current probe suite as full completion.

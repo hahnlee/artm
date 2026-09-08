@@ -4504,3 +4504,14 @@ added; the full corpus and multi-loader identity task remain open.
   AOSP `004-JniTest` passes interpreter/JIT/unmodified optimized lanes, and
   `137-cfi` passes its three JIT CFI runs, preserving JNI ABI and unwind
   behavior while removing the hot-path fallback.
+
+### Runtime checkpoint 155 — 2026-09-08
+
+- Revalidated the pushed JNI transition restoration on the replacement Darwin
+  host. `audit-art-jit.sh` completed with the required empty-checkpoint marker;
+  AOSP `004-JniTest` interpreter/JIT/optimized lanes and `137-cfi` JIT CFI
+  runs remain green. The ordinary compiled-JNI path now uses AOSP's inline
+  ARM64 transition protocol, while suspend/checkpoint slow labels remain
+  available. Remaining compatibility work is still tracked as unfinished;
+  Nterp and other AOSP semantic/ABI gaps require separate implementation and
+  acceptance coverage.
