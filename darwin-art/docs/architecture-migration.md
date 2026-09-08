@@ -10930,3 +10930,9 @@ or admission exception was added.
   ranges, but host addresses still differ from logical `0x210dxxx` managed PCs;
   `137-cfi` remains five FAILs. The required next step is explicit per-oat
   logical code-base identity propagation, not a generic alias.
+### Runtime checkpoint 354 — 2026-09-09
+
+- Shadow rebuild confirms the ClassLinker bridge runs and registers 12 oat
+  ranges, but host ranges (`0x1007...`) still differ from managed logical PCs
+  (`0x210dxxx`). The required next step is preserving per-image logical oat
+  begin and applying its relocation delta in the unwinder.

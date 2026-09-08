@@ -6181,3 +6181,10 @@ added; the full corpus and multi-loader identity task remain open.
   confirms the next implementation must carry an explicit logical code-base
   identity from oat loading into the unwinder; a generic low-address alias
   would be incorrect for multiple oat files.
+### Runtime checkpoint 354 — 2026-09-09
+
+- Forced shadow rebuild proved the ClassLinker bridge executes: 12 oat ranges
+  are registered. Boot host ranges begin near `0x1007...`, while the failing
+  managed PCs are logical `0x210dxxx`; the CFI probe remains five FAILs. The
+  next implementation must preserve each image/oat logical begin and compute
+  its relocation delta for unwinding.
