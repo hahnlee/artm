@@ -9325,3 +9325,10 @@ or admission exception was added.
   rendering path calls the unimplemented Android
   `Surface.nativeLockCanvas(long, Canvas, Rect)`. This is now the concrete next
   framework-native compatibility gap; no ART JIT fault was seen.
+
+### Runtime checkpoint 140 — 2026-09-08
+
+- Confirmed the Surface JNI registration table lacks
+  `nativeLockCanvas(long, Canvas, Rect)` while lifecycle and BLAST methods are
+  present. VLC reaches this AOSP software-surface contract without any JIT
+  fault; the native Canvas implementation is the next compatibility task.

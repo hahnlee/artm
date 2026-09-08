@@ -4375,3 +4375,10 @@ added; the full corpus and multi-loader identity task remain open.
   contract in the software draw path. This is a concrete framework-native gap;
   no JIT fault was observed. AOSP Surface JNI parity is the next implementation
   target.
+
+### Runtime checkpoint 140 — 2026-09-08
+
+- Isolated VLC's failure to the framework `Surface` native registration: the
+  existing table covers lifecycle/BLAST methods but lacks
+  `nativeLockCanvas(long, Canvas, Rect)`. Implementing this AOSP contract is
+  required for VLC's software-surface path; no JIT fault is involved.
