@@ -6034,3 +6034,12 @@ added; the full corpus and multi-loader identity task remain open.
   map, so local and remote optimized CFI checks remain failing. The next fix
   is the native-bridge saved-return-PC/stack-map contract, not an interpreter
   fallback or a test allowlist.
+
+### Runtime checkpoint 336 — 2026-09-08
+
+- Threaded `DexFiles` through the Darwin libunwindstack provider and preserved
+  the existing four-argument backtrace ABI via an inline compatibility wrapper.
+  The graphics-link audit passes. Enabling the full DexFile implementation in
+  the standalone provider is not yet link-safe (the smoke binary lacks the
+  libdexfile owner), so the AOT name-resolution gap remains open rather than
+  being papered over.

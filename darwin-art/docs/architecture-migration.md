@@ -10793,3 +10793,11 @@ or admission exception was added.
   is not resolved by the JIT debug map; optimized local/remote CFI checks still
   fail. The remaining work is the native-bridge saved-PC/stack-map contract,
   with no interpreter fallback or test-specific allowlist.
+
+### Runtime checkpoint 336 — 2026-09-08
+
+- Threaded `DexFiles` through Darwin libunwindstack while keeping the existing
+  backtrace call ABI source-compatible. Graphics-link audit passes. The
+  standalone provider still cannot enable the full DexFile implementation
+  because its smoke link lacks the libdexfile owner; AOT frame-name resolution
+  therefore remains an explicit open item.

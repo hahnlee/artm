@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <unwindstack/DexFiles.h>
+
 // Darwin has no /proc-based ART thread/TLS discovery equivalent. Keep the
 // active generic-JNI quick frames in a fixed, allocation-free process record
 // that a Mach task unwinder can read after stopping a thread.
@@ -48,14 +50,18 @@ using JitDebug = GlobalDebugInterface<Elf>;
 class Maps;
 struct AndroidUnwinderData;
 uint64_t DarwinFindGlobalVariable(Maps* maps, const char* variable);
-bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, size_t max_frames,
+bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames,
                         AndroidUnwinderData& data);
-bool DarwinNativeUnwindUcontext(Maps* maps, JitDebug* jit_debug, size_t max_frames, void* ucontext,
+inline bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, size_t max_frames,
+                               AndroidUnwinderData& data) {
+  return DarwinNativeUnwind(maps, jit_debug, nullptr, max_frames, data);
+}
+bool DarwinNativeUnwindUcontext(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames, void* ucontext,
                                 AndroidUnwinderData& data);
-bool DarwinNativeUnwindThread(Maps* maps, JitDebug* jit_debug, size_t max_frames,
+bool DarwinNativeUnwindThread(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames,
                               uint64_t thread_id,
                               AndroidUnwinderData& data);
-bool DarwinNativeUnwindRemote(Maps* maps, JitDebug* jit_debug, size_t max_frames, int process_id,
+bool DarwinNativeUnwindRemote(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames, int process_id,
                               uint64_t thread_id,
                               AndroidUnwinderData& data);
 }  // namespace unwindstack

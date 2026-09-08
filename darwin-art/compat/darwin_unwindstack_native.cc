@@ -177,6 +177,7 @@ namespace {
 struct NativeWalk {
   Maps* maps;
   JitDebug* jit_debug;
+  DexFiles* dex_files;
   AndroidUnwinderData* data;
   size_t limit;
   mach_port_t task;
@@ -395,6 +396,16 @@ void AppendManagedFrames(NativeWalk* walk) {
                  static_cast<unsigned long long>(frame_size),
                  static_cast<unsigned long long>(walk->registered_core_spill_mask),
                  static_cast<unsigned long long>(return_pc));
+    uint64_t words[4]{};
+    mach_vm_size_t word_bytes = 0;
+    if (mach_vm_read_overwrite(walk->task, walk->last_x28, sizeof(words),
+                               reinterpret_cast<mach_vm_address_t>(words), &word_bytes) == KERN_SUCCESS) {
+      std::fprintf(stderr, "darwin-cfi: frame words=%llx,%llx,%llx,%llx\\n",
+                   static_cast<unsigned long long>(words[0]),
+                   static_cast<unsigned long long>(words[1]),
+                   static_cast<unsigned long long>(words[2]),
+                   static_cast<unsigned long long>(words[3]));
+    }
   }
 
   RegsArm64 regs;
@@ -416,6 +427,7 @@ void AppendManagedFrames(NativeWalk* walk) {
 
   Unwinder managed(walk->limit - walk->data->frames.size(), walk->maps, &regs, walk->memory);
   managed.SetJitDebug(walk->jit_debug);
+  managed.SetDexFiles(walk->dex_files);
   managed.Unwind();
   auto frames = managed.ConsumeFrames();
   for (auto& frame : frames) {
@@ -636,11 +648,11 @@ uint64_t DarwinFindGlobalVariable(Maps* maps, const char* variable) {
   return result;
 }
 
-bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, size_t max_frames,
+bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames,
                         AndroidUnwinderData& data) {
   data.frames.clear();
   data.error = {ERROR_NONE, 0};
-  NativeWalk walk{maps, jit_debug, &data, data.max_frames.value_or(max_frames), mach_task_self(),
+  NativeWalk walk{maps, jit_debug, dex_files, &data, data.max_frames.value_or(max_frames), mach_task_self(),
                   Memory::CreateProcessMemoryThreadCached(getpid())};
   // The generic-JNI trampoline deliberately leaves no unwindable native frame
   // between the JNI entry and the managed caller.  It publishes the managed
@@ -694,7 +706,7 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, size_t max_frames,
   return collected;
 }
 
-bool DarwinNativeUnwindUcontext(Maps* maps, JitDebug* jit_debug, size_t max_frames, void* ucontext,
+bool DarwinNativeUnwindUcontext(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames, void* ucontext,
                                 AndroidUnwinderData& data) {
   data.frames.clear();
   if (ucontext == nullptr) {
@@ -708,12 +720,12 @@ bool DarwinNativeUnwindUcontext(Maps* maps, JitDebug* jit_debug, size_t max_fram
     return false;
   }
   const auto& state = context->uc_mcontext->__ss;
-  NativeWalk walk{maps, jit_debug, &data, data.max_frames.value_or(max_frames), mach_task_self(),
+  NativeWalk walk{maps, jit_debug, dex_files, &data, data.max_frames.value_or(max_frames), mach_task_self(),
                   Memory::CreateProcessMemoryThreadCached(getpid())};
   return CollectFrameRecords(mach_task_self(), state.__pc, state.__sp, state.__fp, &walk);
 }
 
-bool DarwinNativeUnwindThread(Maps* maps, JitDebug* jit_debug, size_t max_frames,
+bool DarwinNativeUnwindThread(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames,
                               uint64_t thread_id,
                               AndroidUnwinderData& data) {
   data.frames.clear();
@@ -761,7 +773,7 @@ bool DarwinNativeUnwindThread(Maps* maps, JitDebug* jit_debug, size_t max_frames
   unw_set_reg(&cursor, UNW_ARM64_LR, state.__lr);
   unw_set_reg(&cursor, UNW_REG_SP, state.__sp);
   unw_set_reg(&cursor, UNW_REG_IP, state.__pc);
-  NativeWalk walk{maps, jit_debug, &data, data.max_frames.value_or(max_frames), mach_task_self(),
+  NativeWalk walk{maps, jit_debug, dex_files, &data, data.max_frames.value_or(max_frames), mach_task_self(),
                   Memory::CreateProcessMemoryThreadCached(getpid())};
   walk.registered_managed_sp = registered_managed_sp;
   walk.registered_frame_kind = registered_frame_kind;
@@ -779,7 +791,7 @@ bool DarwinNativeUnwindThread(Maps* maps, JitDebug* jit_debug, size_t max_frames
   return collected;
 }
 
-bool DarwinNativeUnwindRemote(Maps* maps, JitDebug* jit_debug, size_t max_frames, int process_id,
+bool DarwinNativeUnwindRemote(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames, int process_id,
                               uint64_t thread_id,
                               AndroidUnwinderData& data) {
   data.frames.clear();
@@ -800,7 +812,7 @@ bool DarwinNativeUnwindRemote(Maps* maps, JitDebug* jit_debug, size_t max_frames
         thread, ARM_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count);
     thread_resume(thread);
     if (state_status != KERN_SUCCESS) return false;
-    NativeWalk walk{maps, jit_debug, output, output->max_frames.value_or(max_frames), task, memory};
+    NativeWalk walk{maps, jit_debug, dex_files, output, output->max_frames.value_or(max_frames), task, memory};
     for (size_t reg = 0; reg < 29; ++reg) walk.last_registers[reg] = state.__x[reg];
     walk.last_registers[ARM64_REG_R29] = state.__fp;
     walk.last_registers[ARM64_REG_R30] = state.__lr;

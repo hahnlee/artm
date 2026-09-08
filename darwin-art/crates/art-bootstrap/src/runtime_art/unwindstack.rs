@@ -78,6 +78,8 @@ pub(crate) fn build_runtime_unwindstack_core(root: &Path) -> Result<PathBuf> {
         root.join("_aosp/system/libbase/include"),
         root.join("_aosp/system/logging/liblog/include"),
         root.join("_aosp/art/libartbase"),
+        root.join("_aosp/art/libdexfile"),
+        root.join("_aosp/art/libdexfile/external/include"),
         root.join("_aosp/external/lzma/C"),
         root.join("_aosp/external/zlib"),
         PathBuf::from("/opt/homebrew/include"),
@@ -145,15 +147,15 @@ pub(crate) fn build_runtime_unwindstack_core(root: &Path) -> Result<PathBuf> {
                     let ucontext_signature =
                         "bool AndroidUnwinder::Unwind(void* ucontext, AndroidUnwinderData& data) {";
                     let ucontext_replacement = format!(
-                        "{ucontext_signature}\n#if defined(__APPLE__)\n  if (!Initialize(data.error)) return false;\n  return DarwinNativeUnwindUcontext(maps_.get(), jit_debug_.get(), max_frames_, ucontext, data);\n#endif"
+                        "{ucontext_signature}\n#if defined(__APPLE__)\n  if (!Initialize(data.error)) return false;\n  return DarwinNativeUnwindUcontext(maps_.get(), jit_debug_.get(), dex_files_.get(), max_frames_, ucontext, data);\n#endif"
                     );
                     let signature = "bool AndroidLocalUnwinder::InternalUnwind(std::optional<pid_t> tid, AndroidUnwinderData& data) {";
                     let replacement = format!(
-                        "{signature}\n#if defined(__APPLE__)\n  if (!tid || static_cast<uint64_t>(*tid) == android::base::GetThreadId()) {{\n    return DarwinNativeUnwind(maps_.get(), jit_debug_.get(), max_frames_, data);\n  }}\n  return DarwinNativeUnwindThread(maps_.get(), jit_debug_.get(), max_frames_, static_cast<uint64_t>(*tid), data);\n#endif"
+                        "{signature}\n#if defined(__APPLE__)\n  if (!tid || static_cast<uint64_t>(*tid) == android::base::GetThreadId()) {{\n    return DarwinNativeUnwind(maps_.get(), jit_debug_.get(), dex_files_.get(), max_frames_, data);\n  }}\n  return DarwinNativeUnwindThread(maps_.get(), jit_debug_.get(), dex_files_.get(), max_frames_, static_cast<uint64_t>(*tid), data);\n#endif"
                     );
                     let remote_signature = "bool AndroidRemoteUnwinder::InternalUnwind(std::optional<pid_t> tid, AndroidUnwinderData& data) {";
                     let remote_replacement = format!(
-                        "{remote_signature}\n#if defined(__APPLE__)\n  return DarwinNativeUnwindRemote(maps_.get(), jit_debug_.get(), max_frames_, pid_,\n                                  tid ? static_cast<uint64_t>(*tid) : 0, data);\n#endif"
+                        "{remote_signature}\n#if defined(__APPLE__)\n  return DarwinNativeUnwindRemote(maps_.get(), jit_debug_.get(), dex_files_.get(), max_frames_, pid_,\n                                  tid ? static_cast<uint64_t>(*tid) : 0, data);\n#endif"
                     );
                     let lowered = contents
                         .replace(ucontext_signature, &ucontext_replacement)
