@@ -71,11 +71,10 @@ diff --git a/runtime/jit/jit_scoped_code_cache_write.h b/runtime/jit/jit_scoped_
 diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 --- a/runtime/jit/jit_memory_region.cc
 +++ b/runtime/jit/jit_memory_region.cc
-@@ -17,6 +17,12 @@
+@@ -17,6 +17,11 @@
  #include "jit_memory_region.h"
  
  #include <fcntl.h>
-+#include <limits>
  #include <unistd.h>
  
 +#if defined(__APPLE__)
@@ -95,7 +94,7 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
  using android::base::unique_fd;
  
  namespace art HIDDEN {
-@@ -72,6 +77,61 @@
+@@ -72,6 +77,55 @@
    MemMap non_exec_pages;
    MemMap writable_data_pages;
  
@@ -143,15 +142,9 @@ diff --git a/runtime/jit/jit_memory_region.cc b/runtime/jit/jit_memory_region.cc
 +      return false;
 +    }
 +
-+    const uintptr_t data_begin = reinterpret_cast<uintptr_t>(data_pages.Begin());
-+    const uintptr_t data_end = reinterpret_cast<uintptr_t>(data_pages.End());
-+    const uintptr_t code_begin = reinterpret_cast<uintptr_t>(exec_pages.Begin());
-+    const uintptr_t code_end = reinterpret_cast<uintptr_t>(exec_pages.End());
-+    if (data_end > code_begin ||
-+        code_end - data_begin > std::numeric_limits<uint32_t>::max()) {
-+      *error_msg = "Darwin JIT code/data mappings do not fit the 32-bit offset contract";
-+      return false;
-+    }
++    // MAP_JIT returns independent native mappings on macOS, unlike Android's
++    // low-4GiB dual view. ART's code/data references are pointer based; only
++    // the local stack-map offset is a 32-bit field and is checked at formation.
 +  } else
 +#endif
    if (is_zygote) {

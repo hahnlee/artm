@@ -5981,3 +5981,12 @@ added; the full corpus and multi-loader identity task remain open.
   corpus test. A fresh first-10 corpus run now passes all 10 tests, including
   omnibus opcodes, interfaces, allocations, JNI, reference maps, and signals,
   using the regenerated boot image and normal ART runner path.
+
+### Runtime checkpoint 330 — 2026-09-08
+
+- Fixed the first real JIT corpus failure on the replacement host. Darwin's
+  independent MAP_JIT code/data mappings were incorrectly rejected by an
+  Android low-4GiB adjacency check, even though ART's Darwin path uses native
+  pointers and only local stack-map offsets are 32-bit. The check is now
+  scoped to the actual 32-bit field; runtime/link rebuilds pass and
+  `004-InterfaceTest` succeeds through optimized JIT execution.

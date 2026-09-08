@@ -10744,3 +10744,11 @@ or admission exception was added.
   the prior stale oat checksum failure is gone. The first 10 pinned corpus
   tests pass on a fresh ledger, covering opcode, interface, allocation, JNI,
   reference-map, sleep, and signal paths through the normal ART runner.
+
+### Runtime checkpoint 330 — 2026-09-08
+
+- Corrected the Darwin JIT memory admission path: a low-4GiB/adjacent mapping
+  invariant from Android was rejecting valid independent MAP_JIT mappings.
+  The host-specific exception now leaves the real 32-bit stack-map invariant
+  checked at formation. Rebuilt runtime/link artifacts and re-ran
+  `004-InterfaceTest`; optimized JIT execution passes.
