@@ -5205,3 +5205,15 @@ added; the full corpus and multi-loader identity task remain open.
   monitor and verification failures, retransformation, and final/virtual
   shadow method/field resolution. Remaining corpus and real-app validation
   are pending.
+
+### Runtime checkpoint 238 — 2026-09-08
+
+- The `498-type-propagation`–`529-long-split` slice passed all 38 tests,
+  covering type propagation, BCE/phi and array length, instanceof/checkcast,
+  null-constant DCE, packed switches, dead instructions, baseline entry,
+  verifier/referrer/disassembly paths, try/catch and interface clinit,
+  array deopt and shifts, dominator DCE, builder fallthrough, class loading,
+  equivalent phis, array/field/monitor and can-throw checks, boolean
+  simplification, register allocation, SIMD array access, unresolved calls,
+  loop and LSE setup, and long-register splitting. Remaining corpus and
+  real-app validation are pending.

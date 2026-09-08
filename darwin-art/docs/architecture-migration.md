@@ -10064,3 +10064,12 @@ or admission exception was added.
   invoke/shifter operands, allocation/finally, volatile/NPE, checker
   inlining/folding/NCE/LICM, multiple returns, and BCE. Remaining corpus and
   real-app validation remain pending.
+
+### Runtime checkpoint 238 — 2026-09-08
+
+- The `498-type-propagation`–`529-long-split` slice passed all 38 tests,
+  covering type propagation/BCE, instanceof and verifier paths, DCE and
+  switch handling, try/catch and clinit, array deopt/access, class loading,
+  monitor/throw checks, SIMD and register allocation, loop/LSE setup,
+  unresolved calls, and long-register splitting. Remaining corpus and
+  real-app validation remain pending.
