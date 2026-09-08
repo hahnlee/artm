@@ -6219,6 +6219,13 @@ added; the full corpus and multi-loader identity task remain open.
   rejects it; the low PC needs an exact producer-side identity fix rather than
   further unwinder aliasing.
 
+### Runtime checkpoint 360 — 2026-09-09
+
+- Re-ran `137-cfi` after the executable-map guard. The failing low PCs remain
+  `0x210dxxx`; their compressed-window candidates are confirmed `RW` and are
+  rejected. This rules out a safe unwinder-side address lift and keeps the
+  investigation focused on the ART producer that stores the JNI caller LR.
+
 ### Runtime checkpoint 358 — 2026-09-09
 
 - Tightened the promotion predicate to require an executable `MapInfo`, not

@@ -10964,6 +10964,13 @@ or admission exception was added.
   producer-side JIT/AOT return-PC identity must be fixed before another map is
   published.
 
+### Runtime checkpoint 360 — 2026-09-09
+
+- Revalidated the guard with a fresh CFI run: `base + 0x210dxxx` is a
+  non-executable anonymous mapping, so no alias is applied. The remaining
+  defect is at the managed/JNI return-PC producer boundary, not in Mach map
+  enumeration.
+
 ### Runtime checkpoint 358 — 2026-09-09
 
 - Restricted compressed-window PC lifting to executable mappings. A mapped
