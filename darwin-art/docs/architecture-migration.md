@@ -9971,3 +9971,12 @@ or admission exception was added.
   monitor and verification failures, retransformation, and final/virtual
   shadow method/field resolution. Remaining corpus and real-app validation
   remain pending.
+
+### Runtime checkpoint 228 — 2026-09-08
+
+- The `1999-virtual-structural`–`2029-contended-monitors` slice passed all 26
+  tests, covering virtual structural dispatch/redefinition, multithread
+  pause-all, reflective/structural locals, exception details, concurrent stack
+  walks, constant sinking, thread OOME, invoke inlining, invariant loops,
+  memory-couple optimizations, backward loops, and contended monitors.
+  Remaining corpus and real-app validation remain pending.

@@ -5070,6 +5070,17 @@ added; the full corpus and multi-loader identity task remain open.
   and allocation tracking stress. Remaining corpus and real-app validation
   are pending.
 
+### Runtime checkpoint 228 — 2026-09-08
+
+- The `1999-virtual-structural`–`2029-contended-monitors` slice passed all 26
+  tests. Coverage includes virtual dispatch/redefinition (abstract,
+  initializing, finalizing, multithread), pause-all redefine, old reflective
+  fields, structural local refs, built-in exception details, concurrent stack
+  walks, constant calculation sinking, thread OOME, invoke-virtual/static
+  inlining, invariant-loop variants, memory-couple optimizations,
+  multi-backward loops, and contended monitors. Remaining corpus and real-app
+  validation are pending.
+
 ### Runtime checkpoint 224 — 2026-09-08
 
 - The `182-method-linking`–`1916-get-set-current-frame` slice passed all 19
