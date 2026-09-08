@@ -6566,3 +6566,11 @@ added; the full corpus and multi-loader identity task remain open.
   explicit JIT-symbol-miss diagnostics and rebuilt the provider successfully;
   `137-cfi` still fails, so the remaining issue is resolving the live JIT
   code-cache entry for the upper managed caller frame.
+
+### Runtime checkpoint 404 — 2026-09-09
+
+- Rebuilt the final graphics dylib with descriptor diagnostics and reran
+  unmodified `137-cfi`. Live `__jit_debug_descriptor` candidates show a real
+  nonzero `first_entry`, proving descriptor discovery works. JIT symbol
+  resolution still misses the anonymous `Main.main` frame; the remaining
+  defect is JIT entry symfile/address consumption, not descriptor lookup.

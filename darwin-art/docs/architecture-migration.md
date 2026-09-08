@@ -11273,3 +11273,10 @@ or admission exception was added.
   `JITDescriptor::first_entry` offset (16 bytes), and added diagnostics for
   unresolved JIT symbols. Provider rebuild passes, but `137-cfi` remains
   failing; shared live JIT code-cache entry resolution is still incomplete.
+
+### Runtime checkpoint 404 — 2026-09-09
+
+- Final graphics-link validation and unmodified `137-cfi` confirmed live JIT
+  descriptors with populated `first_entry` pointers. The upper managed
+  `Main.main` frame remains anonymous, narrowing the issue to JIT symfile and
+  address consumption rather than global lookup or OAT range recovery.
