@@ -10913,3 +10913,8 @@ or admission exception was added.
   Darwin retains the oat path, file offset, and code range and publishes them
   into unwindstack `Maps` lazily. Graphics-link audit passes; a fresh real CFI
   run is still required to validate AOT frame naming.
+### Runtime checkpoint 351 — 2026-09-09
+
+- Fresh real `137-cfi` still reports five FAILs after the oat-range bridge.
+  Registration timing or guest/host address identity remains unresolved; the
+  next step is to trace those values directly without adding an allowlist.

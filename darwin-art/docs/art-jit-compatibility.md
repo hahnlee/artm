@@ -6160,3 +6160,9 @@ added; the full corpus and multi-loader identity task remain open.
   executable range, then synchronizes those ranges into unwindstack `Maps` on
   demand. Graphics-link audit passes after the change; the real CFI probe still
   needs a fresh run to prove that boot/AOT names resolve.
+### Runtime checkpoint 351 — 2026-09-09
+
+- Fresh real `137-cfi` after the oat-range bridge still reports five FAILs.
+  Therefore the bridge is compiled and linked but has not yet made the guest
+  AOT PC resolvable in the active unwind maps; next inspect registration timing
+  and guest-to-host address identity rather than broadening the fallback.
