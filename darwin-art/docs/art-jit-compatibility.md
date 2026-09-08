@@ -6120,3 +6120,11 @@ added; the full corpus and multi-loader identity task remain open.
   exposed its complete owner requirements (`PaletteTrace`, fmt, bionic
   filesystem, and ART dependencies). The production-only owner boundary is
   preserved while the optimized JNI metadata blocker remains open.
+
+### Runtime checkpoint 346 — 2026-09-09
+
+- Attempted to enable `DEXFILE_SUPPORT` in the shared AndroidUnwinder provider
+  for managed metadata resolution. Portable smoke then required the complete
+  libdexfile owner closure (`PaletteTrace`, fmt, bionic filesystem, and
+  related ART objects), so the experiment was reverted. The next fix needs
+  separate production/smoke provider variants or a runtime-lazy owner.
