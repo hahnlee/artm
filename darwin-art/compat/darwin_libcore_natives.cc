@@ -916,6 +916,10 @@ void OsConstantsInitConstants(JNIEnv* env, jclass klass) {
     env->SetStaticIntField(klass, processors, _SC_NPROCESSORS_CONF);
   }
 }
+extern "C" JNIEXPORT void Java_android_system_OsConstants_initConstants(
+    JNIEnv* env, jclass klass) {
+  OsConstantsInitConstants(env, klass);
+}
 #endif
 
 jlong LinuxSysconf(JNIEnv*, jobject, jint name) {

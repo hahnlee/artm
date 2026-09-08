@@ -345,6 +345,13 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg("-Wl,-exported_symbol,__ZNK3art3jit12JitCodeCache10ContainsPcEPKv")
         .arg("-Wl,-exported_symbol,___jit_debug_descriptor")
         .arg("-Wl,-exported_symbol,___dex_debug_descriptor")
+        .arg("-Wl,-exported_symbol,_JVM_GetLastErrorString")
+        .arg("-Wl,-exported_symbol,_JVM_Sync")
+        .arg("-Wl,-exported_symbol,_Java_java_lang_Float_floatToRawIntBits")
+        .arg("-Wl,-exported_symbol,_Java_java_lang_Float_intBitsToFloat")
+        .arg("-Wl,-exported_symbol,_Java_java_lang_Double_doubleToRawLongBits")
+        .arg("-Wl,-exported_symbol,_Java_java_lang_Double_longBitsToDouble")
+        .arg("-Wl,-exported_symbol,_Java_android_system_OsConstants_initConstants")
         .arg("-Wl,-dead_strip")
         .arg(&object)
         .arg(&elf_probe_object)
@@ -376,6 +383,14 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         // module archives on the CPU closure rather than manufacturing local
         // substitutes for their entrypoints.
         .arg(root.join("_build/system-natives-darwin/libopenjdk-system-natives-darwin.a"))
+        // libopenjdk's JNI owner imports the AOSP JVM service ABI. Keep that
+        // provider in the process runtime so RTLD_LOCAL named-JNI modules can
+        // resolve it without relying on flat-namespace host symbols.
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            root.join("_build/openjdkjvm-darwin/libopenjdkjvm-darwin.a")
+                .display()
+        ))
         .arg(root.join("_build/system-natives-darwin/libcrypto-boringssl-darwin.a"))
         .arg(root.join("_build/unix-native-dispatcher-darwin/libopenjdk-unix-native-dispatcher-darwin.a"))
         .arg(root.join("_build/unix-native-dispatcher-darwin/libfdlibm-darwin.a"))

@@ -11693,3 +11693,6 @@ or admission exception was added.
   headless runtime. It introduced 43 additional PNG/JPEG/Skia dependencies,
   so the experiment was reverted; ACanvas must be supplied through the full
   graphics closure rather than appended to the CPU link piecemeal.
+- Checkpoint 473: kept headless graphics-independent with a C-ABI ACanvas no-op seam; runtime link now closes with undefined=0.
+- Checkpoint 474: completed the RTLD_LOCAL OpenJDK named-JNI owner closure with bionic/socket/JNIHelp support and exported the AOSP JVM service ABI. ELF-JNI reaches ART boot.
+- Checkpoint 475: added Float/Double and OsConstants named-JNI fallbacks. Remaining blocker is early-boot ordering: OsConstants runs before composed registration and NativeBridge cannot yet see the runtime-local handle.

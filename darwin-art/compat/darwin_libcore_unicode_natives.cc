@@ -29,6 +29,30 @@ jdouble LongBitsToDouble(JNIEnv*, jclass, jlong bits) {
   return std::bit_cast<double>(static_cast<std::int64_t>(bits));
 }
 
+// Keep the conventional named-JNI entrypoints available as a resolver
+// fallback for core-oj images that arrive before the composed registration
+// table is visible to ART.
+extern "C" JNIEXPORT jint Java_java_lang_Float_floatToRawIntBits(JNIEnv* env,
+                                                                  jclass cls,
+                                                                  jfloat value) {
+  return FloatToRawIntBits(env, cls, value);
+}
+extern "C" JNIEXPORT jfloat Java_java_lang_Float_intBitsToFloat(JNIEnv* env,
+                                                                  jclass cls,
+                                                                  jint bits) {
+  return IntBitsToFloat(env, cls, bits);
+}
+extern "C" JNIEXPORT jlong Java_java_lang_Double_doubleToRawLongBits(JNIEnv* env,
+                                                                       jclass cls,
+                                                                       jdouble value) {
+  return DoubleToRawLongBits(env, cls, value);
+}
+extern "C" JNIEXPORT jdouble Java_java_lang_Double_longBitsToDouble(JNIEnv* env,
+                                                                       jclass cls,
+                                                                       jlong bits) {
+  return LongBitsToDouble(env, cls, bits);
+}
+
 jint CharacterDigit(JNIEnv*, jclass, jint code_point, jint radix) {
   return u_digit(code_point, radix);
 }

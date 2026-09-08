@@ -17,8 +17,11 @@ fd_archive="$project_root/_build/file-descriptor-darwin/libopenjdk-file-descript
 errno_archive="$project_root/_build/bionic-runtime-provider-closure/libdarwin-art-bionic-float-conversion.a"
 nativehelper_archive="$project_root/_build/nativehelper-device-foundation/libnativehelper-device-darwin.a"
 liblog_archive="$project_root/_build/graphics-foundations/liblog-darwin.a"
+bionic_archive="$project_root/_build/bionic-runtime-provider-closure/libdarwin-art-bionic-rust-providers.a"
+bionic_socket_archive="$project_root/_build/bionic-runtime-provider-closure/libdarwin-art-bionic-native-providers.a"
 for archive in "$fis_archive" "$ufs_archive" "$und_archive" "$fd_archive" \
-    "$errno_archive" "$nativehelper_archive" "$liblog_archive"; do
+    "$errno_archive" "$nativehelper_archive" "$liblog_archive" "$bionic_archive" \
+    "$bionic_socket_archive"; do
   [[ -f "$archive" ]] || fail "missing AOSP OpenJDK archive: $archive"
 done
 
@@ -95,8 +98,9 @@ mkdir -p "$stage/fis" "$stage/ufs" "$stage/und" "$stage/fd" "$stage/errno" "$sta
 # than leaving IO_fd_fdID as a flat-namespace lookup.
 (cd "$stage/fd" && ar -x "$fd_archive" FileDescriptor_md.o)
 (cd "$stage/errno" && ar -x "$errno_archive" errno_tls_c.o)
-(cd "$stage/support" && ar -x "$nativehelper_archive" JniConstants.o file_descriptor_jni.o)
+(cd "$stage/support" && ar -x "$nativehelper_archive" JniConstants.o JNIHelp.o ExpandableString.o file_descriptor_jni.o)
 (cd "$stage/support" && ar -x "$liblog_archive" logger_write.o properties.o)
+(cd "$stage/support" && ar -x "$bionic_socket_archive" socket-broker-adapter.o)
 "$cc" -arch arm64 -isysroot "$sdk_root" -dynamiclib \
   -Wl,-exported_symbols_list,"$export_manifest" \
   -Wl,-undefined,dynamic_lookup \
@@ -107,8 +111,12 @@ mkdir -p "$stage/fis" "$stage/ufs" "$stage/und" "$stage/fd" "$stage/errno" "$sta
   "$stage/und/UnixNativeDispatcher.o" "$stage/und/darwin_openjdk_nio_copy.o" \
   "$stage/fd/FileDescriptor_md.o" \
   "$stage/errno/errno_tls_c.o" \
-  "$stage/support/JniConstants.o" "$stage/support/file_descriptor_jni.o" \
+  "$stage/support/JniConstants.o" "$stage/support/JNIHelp.o" \
+  "$stage/support/ExpandableString.o" "$stage/support/file_descriptor_jni.o" \
   "$stage/support/logger_write.o" "$stage/support/properties.o" \
+  "$stage/support/socket-broker-adapter.o" \
+  "$bionic_archive" \
+  "$bionic_socket_archive" \
   -Wl,-u,___android_log_is_loggable \
   -o "$output"
 [[ "$(file "$output")" == *"Mach-O 64-bit dynamically linked shared library arm64"* ]] ||

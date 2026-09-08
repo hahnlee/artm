@@ -22,9 +22,9 @@
 
 extern "C" int darwin_art_install_context_loader(JNIEnv* env,
                                                    jobject app_loader);
-extern "C" jstring Java_java_lang_Runtime_nativeLoad(JNIEnv* env, jclass ignored,
-                                                       jstring filename, jobject loader,
-                                                       jclass caller);
+extern "C" __attribute__((weak)) jstring
+Java_java_lang_Runtime_nativeLoad(JNIEnv* env, jclass ignored, jstring filename,
+                                  jobject loader, jclass caller);
 
 namespace darwin_art_registration_phase {
 
@@ -273,6 +273,12 @@ int finish(const Inputs& inputs) {
   // reach JavaVMExt/NativeBridge through the installed PathClassLoader.
   jclass runtime_class = env->FindClass("java/lang/Runtime");
   if (runtime_class == nullptr || env->ExceptionCheck()) return 4;
+  if (Java_java_lang_Runtime_nativeLoad == nullptr) {
+    // The headless flavor intentionally excludes the OpenJDK libcore native
+    // table; graphics/full-libcore builds provide the strong implementation.
+    env->DeleteLocalRef(runtime_class);
+    return 0;
+  }
   const JNINativeMethod runtime_load = {
       const_cast<char*>("nativeLoad"),
       const_cast<char*>("(Ljava/lang/String;Ljava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/String;"),
