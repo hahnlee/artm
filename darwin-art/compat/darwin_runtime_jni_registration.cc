@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "darwin_jni_shorty.h"
+#include "darwin_unwindstack_native.h"
 #include "darwin_runtime_adapters_internal.h"
 #include "jni/jni_env_ext.h"
 
@@ -303,6 +304,16 @@ int32_t ProxyRegisterNatives(void* context,
     }
     art_env->DeleteLocalRef(rollback_failure);
     return DARWIN_ART_JNI_ERR;
+  }
+  // RegisterNatives above is the point where ART has installed each host
+  // trampoline into the ArtMethod. Preserve both sides of that binding for
+  // unwindstack: the trampoline is what appears in a stopped ART thread,
+  // while the target remains the guest ELF address used for symbol lookup.
+  for (size_t index = 0; index < requests.size(); ++index) {
+    darwin_art_register_native_entry_pair(
+        reinterpret_cast<uintptr_t>(darwin_art::android_jni::TrampolineEntry(
+            trampolines, index)),
+        reinterpret_cast<uintptr_t>(methods[index].function), methods[index].name);
   }
   {
     std::lock_guard<std::mutex> lock(library->trampoline_mutex);

@@ -37,6 +37,12 @@ struct DarwinArtQuickFrameRegistry {
 extern "C" DarwinArtQuickFrameRegistry darwin_art_unwindstack_quick_frames;
 extern "C" void darwin_art_register_code_address(uintptr_t logical, uintptr_t host);
 extern "C" void darwin_art_register_native_method(uintptr_t entrypoint, const char* name);
+// Publishes the actual JNI trampoline installed in an ArtMethod together with
+// its guest ELF target.  NativeLoader registration bypasses ClassLinker in the
+// host bridge, so this is the authoritative registration boundary there.
+extern "C" void darwin_art_register_native_entry_pair(uintptr_t entrypoint,
+                                                        uintptr_t target,
+                                                        const char* name);
 extern "C" bool darwin_art_lookup_native_method(uintptr_t entrypoint,
                                                    void (*callback)(const char*, void*),
                                                    void* context);

@@ -11631,3 +11631,7 @@ or admission exception was added.
   callback, matching the AOSP separation between native and managed frames.
   The 137-cfi result regressed (three failures instead of the prior one), so
   the experiment was reverted. The native registration-path gap remains open.
+- Checkpoint 458: the real `ProxyRegisterNatives` path now publishes each
+  installed trampoline together with its guest ELF target and method name into
+  the shared unwind registry. Graphics link audit passes; the next 137-cfi run
+  must verify that the pair is consumed during stopped-thread symbolization.

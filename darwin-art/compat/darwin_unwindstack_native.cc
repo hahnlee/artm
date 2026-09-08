@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cxxabi.h>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -85,6 +86,11 @@ struct DarwinCompiledMethodRange {
 };
 std::vector<DarwinCompiledMethodRange> g_compiled_method_ranges;
 std::vector<std::pair<uint64_t, std::string>> g_native_method_names;
+struct DarwinNativeEntryPair {
+  uint64_t entrypoint;
+  uint64_t target;
+};
+std::vector<DarwinNativeEntryPair> g_native_entry_pairs;
 
 uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc) {
   if (maps == nullptr || pc >= (1ULL << 32)) return pc;
@@ -241,6 +247,29 @@ extern "C" bool darwin_art_lookup_native_method(uintptr_t entrypoint,
     }
   }
   return false;
+}
+
+extern "C" void darwin_art_register_native_entry_pair(uintptr_t entrypoint,
+                                                        uintptr_t target,
+                                                        const char* name) {
+  if (entrypoint == 0 || target == 0 || name == nullptr || *name == '\0') return;
+  std::lock_guard<std::mutex> lock(g_aot_ranges_mutex);
+  bool found = false;
+  for (auto& pair : g_native_entry_pairs) {
+    if (pair.entrypoint == entrypoint) {
+      pair.target = target;
+      found = true;
+      break;
+    }
+  }
+  if (!found) g_native_entry_pairs.push_back({entrypoint, target});
+  for (auto& item : g_native_method_names) {
+    if (item.first == entrypoint) {
+      item.second = name;
+      return;
+    }
+  }
+  g_native_method_names.emplace_back(entrypoint, name);
 }
 
 bool FindCompiledMethodName(uint64_t pc, std::string* name) {
