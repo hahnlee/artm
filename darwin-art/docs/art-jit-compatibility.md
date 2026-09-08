@@ -5856,3 +5856,11 @@ added; the full corpus and multi-loader identity task remain open.
   `vlc_stream_MemoryNew`. The loader publishes `libvlc.so`, `libvlcjni.so`,
   and `libc++_shared.so`; the next native-loader check must validate constructor
   execution and C++ vtable relocation state rather than changing ART JIT gates.
+### Runtime checkpoint 314 — 2026-09-08
+
+- Compared VLC's `DT_NEEDED` set with the published graph. `libvlc.so` needs
+  Android `libEGL.so`, `libGLESv2.so`, `libm.so`, `liblog.so`, `libc.so`,
+  `libdl.so`, and `libc++_shared.so`; the loader publishes the app images and
+  resolves platform owners through the sealed provider namespace. The crash
+  remains an internal null `vlc_stream_MemoryNew` vtable slot, so no missing
+  APK sibling is being hidden by a permissive fallback.

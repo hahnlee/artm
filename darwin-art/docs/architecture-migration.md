@@ -10630,3 +10630,9 @@ or admission exception was added.
   indirect call in `vlc_stream_MemoryNew`. This is a dependency relocation or
   initialization boundary after MediaCodec enumeration, not a graphics or
   Activity lifecycle failure.
+### Runtime checkpoint 314 — 2026-09-08
+
+- Native dependency comparison confirms the VLC graph's declared Android
+  platform dependencies are routed through the sealed provider namespace.
+  The remaining null vtable call is inside libvlc's own stream object and is
+  not attributable to an omitted dependency fallback.
