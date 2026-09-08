@@ -9657,3 +9657,10 @@ or admission exception was added.
   known-flaky `149-suspend-all-stress` attempt; an isolated rerun then passed
   all three lanes. This validates GC/class loading, native bridge, unloading,
   multi-loader registration, lock ownership, and allocation stress behavior.
+
+### Runtime checkpoint 187 — 2026-09-08
+
+- The fresh `1948`–`2039` slice passes all 90 contracts in interpreter, JIT,
+  and unchanged optimized lanes. Structural redefinition/obsolescence, JVMTI
+  transforms, inlining/loops, monitor and deoptimization, hidden API, and JNI
+  file-channel behavior are all validated without reproducing stale failures.

@@ -4759,3 +4759,11 @@ added; the full corpus and multi-loader identity task remain open.
   validates GC/class loading, native bridge, class unloading, multi-loader
   registration, lock ownership, and allocation stress without a persistent
   failure.
+
+### Runtime checkpoint 187 — 2026-09-08
+
+- Fresh four-worker execution of the `1948`–`2039` slice passes all 90
+  contracts across interpreter, JIT, and unchanged-source optimized lanes.
+  Structural redefinition/obsolescence, JVMTI transforms, inlining and loop
+  optimization, monitor/deoptimization, hidden API, and JNI file-channel
+  paths all pass; stale audit failures in this slice do not reproduce.
