@@ -5051,6 +5051,18 @@ added; the full corpus and multi-loader identity task remain open.
   multi-thread compiler regressions, missing classes, and class loading.
   Remaining corpus and real-app validation are pending.
 
+### Runtime checkpoint 232 — 2026-09-08
+
+- The `2276-const-method-type-gc-cleanup`–`414-static-fields` range passed all
+  38 tests. Coverage includes method-handle GC/invokeexact/validation,
+  nested and inner-loop optimization, AConfig flags, class unload, checker
+  throw/null-check/loop regressions, static-field initialization and tracing,
+  package/access/float conversion, verification stress, dex v37, and the
+  optimizing compiler's control flow, long arithmetic, allocators, fields,
+  arrays, move/materialized conditions, floating point, div/rem simplifiers,
+  arithmetic, new-array, regalloc, and static fields. Remaining corpus and
+  real-app validation are pending.
+
 ### Runtime checkpoint 226 — 2026-09-08
 
 - The `1949-short-dex-file`–`1965-get-set-local-primitive-no-tables` slice

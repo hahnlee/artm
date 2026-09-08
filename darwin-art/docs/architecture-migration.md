@@ -9991,6 +9991,15 @@ or admission exception was added.
   memory-couple optimizations, backward loops, and contended monitors.
   Remaining corpus and real-app validation remain pending.
 
+### Runtime checkpoint 232 — 2026-09-08
+
+- The `2276-const-method-type-gc-cleanup`–`414-static-fields` range passed all
+  38 tests, covering method-handle GC/invokeexact, loop/class-init/checker
+  regressions, static-field tracing, access/float conversion, verification,
+  dex v37, and optimizing compiler control-flow, long/float arithmetic,
+  allocators, fields/arrays, div/rem simplification, new-array, regalloc, and
+  static fields. Remaining corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 229 — 2026-09-08
 
 - The `2030-long-running-child`–`2048-bad-native-registry` slice passed all 21
