@@ -9901,3 +9901,12 @@ or admission exception was added.
   `1001-app-image-regions` independently passed all three lanes. Completed
   neighbors `097-duplicate-method`, `100-reflect2`, and
   `1000-non-moving-space-stress` also passed; the remaining range is queued.
+
+### Runtime checkpoint 220 — 2026-09-08
+
+- Corpus execution resumed at `1002-notify-startup` and completed through
+  `125-gc-and-classloading` with all 28 tests passing. This covers startup and
+  metadata, volatile references, concurrent/parallel GC, invoke/exception and
+  suspend checks, multidex/native bridge, dex2oat/no-image, compiler MT and
+  inline execution, missing classes, and class loading. Remaining corpus and
+  real-app validation are pending.

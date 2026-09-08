@@ -5021,3 +5021,13 @@ added; the full corpus and multi-loader identity task remain open.
   was rerun independently and passed interpreter, JIT, and optimized lanes.
   The preceding completed results (`097-duplicate-method`, `100-reflect2`,
   `1000-non-moving-space-stress`) also passed; the remaining range is queued.
+
+### Runtime checkpoint 220 — 2026-09-08
+
+- Resumed corpus execution from `1002-notify-startup` through
+  `125-gc-and-classloading`; all 28 tests passed. Coverage includes startup
+  metadata/volatile loads, Fibonacci and concurrent GC, string append/growth,
+  invoke/exception/check-cast/suspend-check, fields, multidex, ParallelGC,
+  native bridge, dex2oat/no-image flows, hash/modifier/NPE behavior,
+  multi-thread compiler regressions, missing classes, and class loading.
+  Remaining corpus and real-app validation are pending.
