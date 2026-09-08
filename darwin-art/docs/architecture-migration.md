@@ -9365,6 +9365,14 @@ or admission exception was added.
   multidex, private interfaces, and no-method conflicts. Remaining corpus and
   real-app validation remain pending.
 
+### Runtime checkpoint 254 — 2026-09-08
+
+- A full `--resume` corpus reconciliation is active because the ledger lacks
+  terminal records for some earlier tests. It is re-executing the 030–075
+  range instead of assuming prior evidence; the separate `9999` smoke test is
+  blocked at compilation by the missing `android.view.InputChannel` stub.
+  Remaining corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 252 — 2026-09-08
 
 - The `926-multi-obsolescence`–`951-threaded-obsolete` slice passed all 26

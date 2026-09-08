@@ -5083,6 +5083,16 @@ added; the full corpus and multi-loader identity task remain open.
   intrinsic redefinition, and threaded obsolete handling. Remaining corpus and
   real-app validation are pending.
 
+### Runtime checkpoint 254 — 2026-09-08
+
+- A full `--resume` corpus reconciliation was started after the targeted
+  slices. The ledger lacked terminal records for some earlier tests, so the
+  runner is re-executing them rather than assuming prior evidence; the live
+  sweep has reached the 030–075 range and remains active. The `9999` smoke
+  test is separately classified as a compile-stub gap (`android.view.InputChannel`
+  absent), not a runtime result. Remaining corpus and real-app validation are
+  pending.
+
 ### Runtime checkpoint 251 — 2026-09-08
 
 - The `900-hello-plugin`–`925-threadgroups` slice passed all 26 tests,
