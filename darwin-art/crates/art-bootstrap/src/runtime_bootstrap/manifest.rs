@@ -153,6 +153,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0170-darwin-register-entrypoint-pairs.patch",
     "patches/art/0171-darwin-generic-jni-publish-caller-entry.patch",
     "patches/art/0173-darwin-publish-jit-method-ranges.patch",
+    "patches/art/0174-darwin-publish-oat-method-ranges.patch",
 ];
 
 #[cfg(test)]

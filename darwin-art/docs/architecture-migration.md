@@ -11591,3 +11591,8 @@ or admission exception was added.
   unwinder registry. The bootstrap build succeeds with this hook. An attempted
   second OAT-return hunk did not match all shadow variants and was removed;
   AOT range publication remains separate work.
+- Checkpoint 450: attempted the AOT-side staged hook after verifying the exact
+  shadow source location, but the all-variant patch still requires a stable
+  method-name/native-entry mapping. The JIT range producer builds correctly;
+  137-cfi remains failing because its first JNI native frame is not represented
+  by the Java `ArtMethod` name alone.
