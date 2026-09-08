@@ -11136,3 +11136,9 @@ or admission exception was added.
 - Unmodified AOSP `1921-suspend-native-recursive-monitor` passes in interpreter,
   JIT, and comparison lanes. Recursive monitor ownership across native suspend
   transitions is verified without APK changes; JNI CFI and real-app work remain.
+
+### Runtime checkpoint 384 — 2026-09-09
+
+- Unmodified AOSP `136-daemon-jni-shutdown` passes in interpreter, JIT, and
+  comparison lanes. Daemon-thread JNI cleanup and VM shutdown ordering are
+  verified without APK changes; JNI CFI and real-app work remain.

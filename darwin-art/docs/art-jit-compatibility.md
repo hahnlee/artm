@@ -6411,3 +6411,10 @@ added; the full corpus and multi-loader identity task remain open.
   and interpreter-versus-optimized lanes pass, covering recursive monitor
   ownership across native suspend transitions. JNI CFI return-PC publication
   and real-app criteria remain open.
+
+### Runtime checkpoint 384 — 2026-09-09
+
+- Ran unmodified AOSP `136-daemon-jni-shutdown`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes pass, covering daemon-thread JNI cleanup
+  and VM shutdown ordering. JNI CFI return-PC publication and real-app
+  criteria remain open.
