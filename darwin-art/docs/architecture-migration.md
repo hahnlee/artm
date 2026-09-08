@@ -9597,3 +9597,10 @@ or admission exception was added.
   interpreter, JIT, and unchanged optimized lanes, covering allocation
   tracking, bytecode/local-variable access, suspend/resume, and thread-start
   timing.
+
+### Runtime checkpoint 178 — 2026-09-08
+
+- The fresh corpus slices `2000`–`2048` (13 contracts) and `2230`–`2286`
+  (14 contracts) pass all execution lanes, validating structural
+  redefinition/stack scope, inlining and loop optimization, reference
+  processing, checker lowering, and native registry behavior.

@@ -4686,6 +4686,14 @@ added; the full corpus and multi-loader identity task remain open.
   covering JVMTI allocation tracking, bytecode/local-variable access,
   suspend/resume, and thread-start timing.
 
+### Runtime checkpoint 178 — 2026-09-08
+
+- Fresh four-worker corpus runs pass 13 contracts in `2000`–`2048` and 14 in
+  `2230`–`2286`, across interpreter, JIT, and unchanged-source optimized
+  lanes. Coverage includes structural redefinition and multithreaded stack
+  scope, inlining/loop optimization, reference processing, checker lowering,
+  and native-registry validation.
+
 ### Runtime checkpoint 173 — 2026-09-08
 
 - Fresh four-worker corpus reruns completed 25/25 executable contracts in
