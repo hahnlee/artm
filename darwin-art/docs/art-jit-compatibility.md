@@ -4535,3 +4535,11 @@ added; the full corpus and multi-loader identity task remain open.
   files. Incremental graphics/runtime linkage, the full JIT acceptance suite,
   and unchanged AOSP `837-deopt` interpreter/JIT/unmodified optimized lanes
   pass. This does not close other ART/JVMTI/application compatibility work.
+
+### Runtime checkpoint 158 — 2026-09-08
+
+- Re-ran the strict Nterp acceptance after push on the current host. Runtime
+  startup, AOSP Nterp admission, pre/post `ExecuteNterpImpl` entrypoint
+  identity, and the returned value `42` all pass (`/tmp/nterp-run4.log`);
+  the full JIT audit and focused `837-deopt` lanes remain green. The overall
+  normal-app compatibility objective remains open.

@@ -9460,3 +9460,10 @@ or admission exception was added.
   and its catch entry. The full JIT audit and unchanged AOSP `837-deopt`
   interpreter/JIT/optimized lanes pass; this proves native-interpreter
   execution rather than only a linked 256-handler artifact.
+
+### Runtime checkpoint 158 — 2026-09-08
+
+- Strict post-push Nterp validation passed on the current host: startup and
+  AOSP admission selected `ExecuteNterpImpl`, the cold method executed there,
+  and returned `42`; full JIT and `837-deopt` regression lanes remain green.
+  This is evidence for the Nterp slice only, not completion of app parity.
