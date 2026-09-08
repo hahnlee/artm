@@ -2109,9 +2109,13 @@ const char* EglQueryStringAndroid(EGLDisplay display, EGLint name) {
   // a fresh buffer and leaves its preserved region black. Hide those
   // capabilities so clients submit complete frames, which is the EGL-defined
   // fallback when buffer age is unavailable.
-  constexpr std::array<std::string_view, 2> unsupported{
+  constexpr std::array<std::string_view, 3> unsupported{
       "EGL_EXT_buffer_age",
       "EGL_KHR_partial_update",
+      // The Metal IOSurface path exposes only RGBA_8888; advertising the
+      // float pixel-format extension makes HWUI probe an unavailable FP16
+      // config and emit a misleading wide-gamut error on every surface.
+      "EGL_EXT_pixel_format_float",
   };
   std::string_view remaining(result);
   while (!remaining.empty()) {

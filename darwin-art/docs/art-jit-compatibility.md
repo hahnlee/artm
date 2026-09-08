@@ -5153,6 +5153,13 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 277 — 2026-09-08
+
+- ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format
+  support unavailable for the RGBA_8888-only IOSurface path. Snapseed still
+  launches successfully; the remaining wide-gamut log indicates another
+  extension source is advertising the capability and needs follow-up tracing.
+
 ### Runtime checkpoint 276 — 2026-09-08
 
 - Existing sealed installations are migrated lazily: the installer temporarily

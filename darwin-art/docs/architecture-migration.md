@@ -9479,6 +9479,12 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 277 — 2026-09-08
+
+- EGL capability filtering now declares FP16 pixel formats unsupported for the
+  RGBA_8888 IOSurface backend. Snapseed remains functional; another extension
+  source still advertises wide gamut and is the next tracing target.
+
 ### Runtime checkpoint 276 — 2026-09-08
 
 - Existing sealed package installations now lazily provision `oat/arm64`
