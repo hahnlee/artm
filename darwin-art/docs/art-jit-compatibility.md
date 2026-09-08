@@ -4664,6 +4664,14 @@ added; the full corpus and multi-loader identity task remain open.
   and unchanged-source optimized lanes, confirming the runner can produce
   authoritative results after cleanup.
 
+### Runtime checkpoint 175 — 2026-09-08
+
+- Fresh four-worker execution of `1000-non-moving-space-stress` through
+  `1004-checker-volatile-ref-load` passes all five contracts in interpreter,
+  JIT, and unchanged-source optimized lanes. This verifies non-moving GC,
+  app-image regions, startup notification, metadata strings, and volatile
+  reference loads.
+
 ### Runtime checkpoint 173 — 2026-09-08
 
 - Fresh four-worker corpus reruns completed 25/25 executable contracts in

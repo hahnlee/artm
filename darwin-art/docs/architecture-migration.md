@@ -9577,3 +9577,10 @@ or admission exception was added.
 - Stale parallel corpus runners were terminated to restore deterministic test
   isolation. Direct fresh execution of `904-object-allocation` passes all
   interpreter, JIT, and unchanged optimized lanes.
+
+### Runtime checkpoint 175 — 2026-09-08
+
+- The fresh `1000`–`1004` corpus slice passes all five contracts across
+  interpreter, JIT, and unchanged optimized lanes, covering non-moving GC,
+  app-image regions, startup notification, metadata sections, and volatile
+  reference-load lowering.
