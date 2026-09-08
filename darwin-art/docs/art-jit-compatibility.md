@@ -4435,3 +4435,10 @@ added; the full corpus and multi-loader identity task remain open.
   changed translation unit) and reran the complete ART JIT audit. The upstream
   551/479/034 null-check regressions pass in interpreter and optimized modes;
   no Darwin explicit-only gate or interpreter fallback was introduced.
+
+### Runtime checkpoint 147 — 2026-09-08
+
+- Full Rust workspace regression (`cargo test --workspace`) passes across ART
+  bootstrap, ELF/JNI, runtime ownership, filesystem, host graphics, and
+  provider crates. The next bounded review is the Darwin pthread
+  empty-checkpoint wait path, which still differs from AOSP futex wake semantics.

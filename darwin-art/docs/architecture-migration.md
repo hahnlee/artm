@@ -9371,6 +9371,13 @@ or admission exception was added.
   interface, and virtual receiver nullable decoding; AOSP implicit-null and
   null-call regressions pass in interpreter and optimized modes.
 
+### Runtime checkpoint 147 — 2026-09-08
+
+- `cargo test --workspace` passes for all Rust crates and doc tests after the
+  implicit-null-check JIT change. The remaining Darwin synchronization
+  divergence under review is pthread polling for ART empty checkpoints versus
+  AOSP futex wakeups.
+
 ### Runtime checkpoint 146 — 2026-09-08
 
 - Rebuilt the pinned ARM64 JIT after removing the Darwin explicit-check-only
