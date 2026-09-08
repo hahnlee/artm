@@ -9794,3 +9794,10 @@ or admission exception was added.
   patch publication races; it was removed without runtime changes. Clean
   graphics bootstrap passes, leaving atomic source publication and the
   loader-aware DexCache implementation as the next structural work.
+
+### Runtime checkpoint 205 — 2026-09-08
+
+- Shared patched-source publication now uses an atomic directory lock with a
+  post-lock completeness check. A concurrent two-process clean graphics
+  bootstrap test passed in both processes, making patch application
+  deterministic for the upcoming loader-aware runtime change.

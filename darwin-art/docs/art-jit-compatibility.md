@@ -4907,3 +4907,10 @@ added; the full corpus and multi-loader identity task remain open.
   when one owner observes a partially applied hunk; the experiment was removed
   again. Clean internal graphics bootstrap passes, and the loader gap remains
   isolated for a future atomic-source publication change.
+
+### Runtime checkpoint 205 — 2026-09-08
+
+- Added an atomic directory lock around shared patched-source publication and
+  a post-lock completeness recheck. Two concurrent clean
+  `build-runtime-graphics-bootstrap-internal` invocations now both exit 0,
+  eliminating partial-hunk races while preserving the fail-closed patch flow.

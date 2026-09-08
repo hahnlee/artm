@@ -123,12 +123,22 @@ pub(crate) fn prepare(root: &Path, flavor: RuntimeFlavor) -> Result<RuntimeBoots
             .iter()
             .all(|source| patched_runtime.join(source).is_file());
     if !shadow_current {
-        fs::create_dir_all(&patched_runtime)?;
-        copy_runtime_sources(&runtime, &patched_runtime)?;
-        for patch in PATCHED_RUNTIME_PATCHES {
-            apply_patch_if_needed(&root.join(patch), &patched_source_dir)?;
+        let _shadow_lock = acquire_shadow_lock(&patched_source_dir)?;
+        let shadow_current = fs::read_to_string(&shadow_identity_path)
+            .is_ok_and(|cached| cached.trim() == shadow_identity)
+            && PATCHED_RUNTIME_SOURCES
+                .iter()
+                .all(|source| patched_runtime.join(source).is_file());
+        if shadow_current {
+            // Another bootstrap completed publication while we waited.
+        } else {
+            fs::create_dir_all(&patched_runtime)?;
+            copy_runtime_sources(&runtime, &patched_runtime)?;
+            for patch in PATCHED_RUNTIME_PATCHES {
+                apply_patch_if_needed(&root.join(patch), &patched_source_dir)?;
+            }
+            fs::write(shadow_identity_path, format!("{shadow_identity}\n"))?;
         }
-        fs::write(shadow_identity_path, format!("{shadow_identity}\n"))?;
     }
     audit_nterp_admission(&patched_runtime)?;
 
@@ -262,6 +272,28 @@ pub(crate) fn prepare(root: &Path, flavor: RuntimeFlavor) -> Result<RuntimeBoots
         runtime_includes,
         operator_source,
     })
+}
+
+struct ShadowLock(PathBuf);
+
+impl Drop for ShadowLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir(&self.0);
+    }
+}
+
+fn acquire_shadow_lock(shadow_dir: &Path) -> Result<ShadowLock> {
+    let lock = shadow_dir.with_extension("lock");
+    fs::create_dir_all(shadow_dir)?;
+    loop {
+        match fs::create_dir(&lock) {
+            Ok(()) => return Ok(ShadowLock(lock)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
 }
 
 fn copy_runtime_sources(runtime: &Path, patched_runtime: &Path) -> Result<()> {
