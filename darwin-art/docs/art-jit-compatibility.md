@@ -6195,3 +6195,19 @@ added; the full corpus and multi-loader identity task remain open.
   verified per-oat identity path; the speculative alias change was reverted.
   The previous host/logical mismatch remains the active blocker and no
   unverified address translation was committed.
+### Runtime checkpoint 356 — 2026-09-09
+
+- Registration tracing shows the bridge publishes boot/app oat ranges, but the
+  failing `0x210dxxx` PCs match neither oat logical begins nor host ranges and
+  remain outside loaded JIT ELF symbol ranges. The next target is the JIT
+  code-cache logical-to-host identity (including any compressed code pointer
+  representation); no speculative alias was retained.
+
+### Runtime checkpoint 357 — 2026-09-09
+
+- Added map-validated managed-PC lifting: low 32-bit return PCs are promoted
+  into Darwin's compressed-reference window only when `Maps::Find(base + pc)`
+  confirms a real host mapping. Fresh CFI logs now show `0x210dxxx` as
+  `0x1000210dxxx` in the managed anonymous window. Method/Dex attribution still
+  fails, so the next step is publishing the JIT code-cache debugger identity;
+  no unconditional alias was added.

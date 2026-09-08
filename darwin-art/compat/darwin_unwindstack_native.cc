@@ -49,6 +49,17 @@ extern "C" __attribute__((visibility("default"))) DarwinArtQuickFrameRegistry
 
 namespace {
 
+// ART image/code references retain Android's low 32-bit logical address on
+// Darwin.  Only lift a managed PC when the corresponding host-window address
+// is actually mapped; this avoids inventing aliases for unrelated low PCs.
+constexpr uint64_t kDarwinArtCompressedReferenceBase = 0x0000010000000000ULL;
+
+uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc) {
+  if (maps == nullptr || pc >= (1ULL << 32)) return pc;
+  const uint64_t candidate = kDarwinArtCompressedReferenceBase + pc;
+  return maps->Find(candidate) != nullptr ? candidate : pc;
+}
+
 struct DarwinAotCodeRange {
   uint64_t start;
   uint64_t end;
@@ -425,6 +436,7 @@ void AppendManagedFrames(NativeWalk* walk) {
   }
   uint64_t return_pc = saved_registers.back();
   return_pc = StripReturnAddress(return_pc);
+  return_pc = NormalizeManagedPc(walk->maps, return_pc);
   if (return_pc == 0) {
     cfi_debug("managed return pc is zero");
     return;

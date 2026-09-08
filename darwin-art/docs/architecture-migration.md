@@ -10942,3 +10942,17 @@ or admission exception was added.
   image-loading call site lacks a verified patch-safe per-oat identity path,
   the speculative alias was reverted. Host/logical PC translation remains the
   next required architectural change.
+### Runtime checkpoint 356 — 2026-09-09
+
+- Boot/app oat registration is active, yet `0x210dxxx` remains outside both
+  oat identities and loaded JIT ELF ranges. Evidence now points to JIT
+  code-cache logical/host pointer translation, which must be traced explicitly
+  before adding another map source.
+
+### Runtime checkpoint 357 — 2026-09-09
+
+- Implemented map-validated compressed-window PC lifting for managed return
+  addresses. The CFI probe now sees host-window PCs (`0x1000210dxxx`) and a
+  real anonymous mapping, while method-name/Dex attribution remains unresolved.
+  The next change must connect that mapping to the JIT code-cache debugger
+  identity rather than widening aliases.
