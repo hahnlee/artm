@@ -6043,3 +6043,12 @@ added; the full corpus and multi-loader identity task remain open.
   the standalone provider is not yet link-safe (the smoke binary lacks the
   libdexfile owner), so the AOT name-resolution gap remains open rather than
   being papered over.
+
+### Runtime checkpoint 337 — 2026-09-09
+
+- Audited the full libunwindstack DexFile path. The standalone
+  `libdexfile-darwin.a` does not own the APEX `ADexFile_*` API and also pulls
+  ART MemMap/ZipArchive dependencies, so enabling `DEXFILE_SUPPORT` in the
+  smoke provider was rejected and reverted. The provider graph is back to a
+  passing link audit; the next implementation needs a real runtime owner for
+  DexFile support rather than unresolved static dependencies.

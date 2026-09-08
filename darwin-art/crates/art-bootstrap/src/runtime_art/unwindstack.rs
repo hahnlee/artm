@@ -79,7 +79,6 @@ pub(crate) fn build_runtime_unwindstack_core(root: &Path) -> Result<PathBuf> {
         root.join("_aosp/system/logging/liblog/include"),
         root.join("_aosp/art/libartbase"),
         root.join("_aosp/art/libdexfile"),
-        root.join("_aosp/art/libdexfile/external/include"),
         root.join("_aosp/external/lzma/C"),
         root.join("_aosp/external/zlib"),
         PathBuf::from("/opt/homebrew/include"),

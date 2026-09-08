@@ -10794,6 +10794,15 @@ or admission exception was added.
   fail. The remaining work is the native-bridge saved-PC/stack-map contract,
   with no interpreter fallback or test-specific allowlist.
 
+### Runtime checkpoint 337 — 2026-09-09
+
+- Audited the complete libunwindstack DexFile path. Enabling
+  `DEXFILE_SUPPORT` in the standalone smoke provider exposes missing
+  `ADexFile_*`, ART MemMap, and ZipArchive owners, so that partial link was
+  reverted. The provider graph and graphics-link audit are green again; the
+  remaining work is a real runtime owner for DexFile support, not unresolved
+  static symbols.
+
 ### Runtime checkpoint 336 — 2026-09-08
 
 - Threaded `DexFiles` through Darwin libunwindstack while keeping the existing
