@@ -4543,3 +4543,10 @@ added; the full corpus and multi-loader identity task remain open.
   identity, and the returned value `42` all pass (`/tmp/nterp-run4.log`);
   the full JIT audit and focused `837-deopt` lanes remain green. The overall
   normal-app compatibility objective remains open.
+
+### Runtime checkpoint 159 — 2026-09-08
+
+- Re-ran `cargo test --workspace` on the replacement host after the native
+  Nterp work; all workspace unit and doc tests completed successfully. This
+  is regression evidence only and does not replace the remaining AOSP corpus
+  and real-application compatibility gates.

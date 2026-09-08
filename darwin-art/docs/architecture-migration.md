@@ -9467,3 +9467,9 @@ or admission exception was added.
   AOSP admission selected `ExecuteNterpImpl`, the cold method executed there,
   and returned `42`; full JIT and `837-deopt` regression lanes remain green.
   This is evidence for the Nterp slice only, not completion of app parity.
+
+### Runtime checkpoint 159 — 2026-09-08
+
+- Full Rust workspace tests (unit and doc tests) pass on the replacement host
+  after Nterp enablement. The broader AOSP feature matrix and real-app gates
+  remain open and are not waived by this regression run.
