@@ -6930,3 +6930,8 @@ incomplete and still requires managed caller unwind validation.
   plus `dladdr` before Java fallback. Link audit passes, but 137-cfi output is
   unchanged because the registered test JNI symbol is local/hidden; the next
   fix must preserve native registration names at the ART JNI binding boundary.
+- Checkpoint 453: wired `ClassLinker::RegisterNative` to publish the resolved
+  JNI entry pointer and method name, and verified bootstrap plus graphics link
+  audits. 137-cfi remains failing because the resolver and registration path
+  still observe distinct native-name storage across the linked runtime/provider;
+  the next step is a single exported shared registry rather than TU-local state.

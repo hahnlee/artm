@@ -5,6 +5,10 @@
 #include <dlfcn.h>
 #include <string>
 
+extern "C" bool darwin_art_lookup_native_method(uintptr_t entrypoint,
+                                                   void (*callback)(const char*, void*),
+                                                   void* context);
+
 extern "C" void darwin_art_walk_managed_frames(void (*callback)(const char*, void*),
                                                  void* context) {
   if (callback == nullptr) return;
@@ -19,6 +23,12 @@ extern "C" void darwin_art_walk_managed_frames(void (*callback)(const char*, voi
       current != nullptr) {
     std::string name;
     if (current->IsNative()) {
+      darwin_art_lookup_native_method(
+          reinterpret_cast<uintptr_t>(current->GetEntryPointFromJni()),
+          [](const char* registered, void* target) {
+            if (registered != nullptr) *static_cast<std::string*>(target) = registered;
+          },
+          &name);
       Dl_info info{};
       if (dladdr(current->GetEntryPointFromJni(), &info) != 0 && info.dli_sname != nullptr) {
         name = info.dli_sname[0] == '_' ? info.dli_sname + 1 : info.dli_sname;

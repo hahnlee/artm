@@ -85,6 +85,7 @@ struct DarwinCompiledMethodRange {
   std::string name;
 };
 std::vector<DarwinCompiledMethodRange> g_compiled_method_ranges;
+std::vector<std::pair<uint64_t, std::string>> g_native_method_names;
 
 uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc) {
   if (maps == nullptr || pc >= (1ULL << 32)) return pc;
@@ -215,6 +216,32 @@ extern "C" void darwin_art_register_compiled_method(uintptr_t start, size_t size
     }
   }
   g_compiled_method_ranges.push_back({start, end, name});
+}
+
+extern "C" void darwin_art_register_native_method(uintptr_t entrypoint, const char* name) {
+  if (entrypoint == 0 || name == nullptr || *name == '\0') return;
+  std::lock_guard<std::mutex> lock(g_aot_ranges_mutex);
+  for (auto& item : g_native_method_names) {
+    if (item.first == entrypoint) {
+      item.second = name;
+      return;
+    }
+  }
+  g_native_method_names.emplace_back(entrypoint, name);
+}
+
+extern "C" bool darwin_art_lookup_native_method(uintptr_t entrypoint,
+                                                   void (*callback)(const char*, void*),
+                                                   void* context) {
+  if (entrypoint == 0 || callback == nullptr) return false;
+  std::lock_guard<std::mutex> lock(g_aot_ranges_mutex);
+  for (const auto& item : g_native_method_names) {
+    if (item.first == entrypoint) {
+      callback(item.second.c_str(), context);
+      return true;
+    }
+  }
+  return false;
 }
 
 bool FindCompiledMethodName(uint64_t pc, std::string* name) {
@@ -515,6 +542,17 @@ _Unwind_Reason_Code CollectNativeFrame(_Unwind_Context* context, void* opaque) {
     frame.function_name = symbol.dli_sname;
     frame.function_offset = pc - reinterpret_cast<uint64_t>(symbol.dli_saddr);
   } else {
+    // JNI test and application entrypoints may be local (non-exported)
+    // Mach-O symbols, for which dladdr returns no name. Use the provider's
+    // nlist lookup before treating the frame as managed/OAT code.
+    std::string macho_name;
+    uint64_t macho_offset = 0;
+    if (LookupMachOSymbol(walk->maps, pc, &macho_name, &macho_offset)) {
+      frame.function_name = std::move(macho_name);
+      frame.function_offset = macho_offset;
+      walk->data->frames.emplace_back(std::move(frame));
+      return _URC_NO_REASON;
+    }
     // AOT app code is an ELF/ODEX mapping, not a Mach-O image and not a JIT
     // descriptor entry. Mirror AOSP Unwinder's normal MapInfo lookup before
     // trying the JIT list so DWARF/symtab method names are recovered directly
