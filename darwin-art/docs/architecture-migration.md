@@ -11250,3 +11250,11 @@ or admission exception was added.
   published pairs, so the change was reverted. The architecture still needs
   caller-frame metadata at the generic-JNI transition rather than a broader
   OAT lookup hook.
+
+### Runtime checkpoint 401 — 2026-09-09
+
+- Added provider-local recovery of low managed PCs from executable OAT/ODEX
+  maps, including OAT metadata insertion when an anonymous mapping already
+  covers the range. This resolves `Hello.jitPolymorphicVirtual` in `137-cfi`,
+  while `Main.main` is still an anonymous JIT code-cache frame; the remaining
+  architectural work is shared JIT debug-entry publication across images.

@@ -6539,3 +6539,13 @@ added; the full corpus and multi-loader identity task remain open.
   unmodified AOSP `137-cfi` still produced JIT `FAIL` output and no
   `entry-pair` observations. The experiment was reverted; the remaining CFI
   gap is specifically the generic-JNI caller frame publication path.
+
+### Runtime checkpoint 401 — 2026-09-09
+
+- Fixed the provider-side split-image issue by recovering low managed PCs from
+  executable OAT/ODEX map ranges and adding the OAT file metadata when an
+  existing anonymous map masks it. `137-cfi` now resolves the first managed
+  frame (`Hello.jitPolymorphicVirtual`) through the OAT symbol, but JIT output
+  still fails because the caller (`Main.main`) remains an anonymous JIT-cache
+  frame. The next target is publishing/consuming Darwin JIT code-cache debug
+  entries across the runtime/provider boundary.

@@ -88,12 +88,50 @@ uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc) {
     const uint64_t logical_segment = pc & ~((1ULL << 20) - 1);
     const uint64_t segment_offset = pc - logical_segment;
     for (const auto& range : g_aot_ranges) {
+      // A low app PC can share the same 1MiB segment offset as boot-image
+      // code. Prefer the application OAT range; boot-image candidates would
+      // make the managed unwinder resolve a valid but unrelated method.
+      if (range.oat_location.find("boot-image") != std::string::npos) continue;
       const uint64_t candidate = range.start + segment_offset;
       if (candidate < range.end) {
         const auto mapping = maps->Find(candidate);
-        if (mapping != nullptr && (mapping->flags() & PROT_EXEC) != 0) return candidate;
+        if (mapping != nullptr && (mapping->flags() & PROT_EXEC) != 0) {
+          if (mapping->name().empty()) {
+            maps->Add(range.start, range.end, range.file_offset,
+                      PROT_READ | PROT_EXEC, range.oat_location);
+            maps->Sort();
+          }
+          return candidate;
+        }
       }
     }
+    // The runtime and the standalone CFI probe can load this provider archive
+    // into separate images, so their in-process AOT registries are not always
+    // shared. Recover the same segment offset directly from the process maps
+    // when an executable OAT/ODEX mapping is visible to this unwinder.
+    uint64_t mapped_candidate = 0;
+    maps->ForEachMapInfo([&](unwindstack::MapInfo* map) {
+      if (mapped_candidate != 0 || map == nullptr ||
+          (map->flags() & PROT_EXEC) == 0 || map->end() <= map->start() ||
+          static_cast<std::string_view>(map->name()).find(".oat") == std::string::npos &&
+              static_cast<std::string_view>(map->name()).find(".odex") == std::string::npos) {
+        return true;
+      }
+      const uint64_t candidate = map->start() + segment_offset;
+      if (candidate < map->end()) {
+        mapped_candidate = candidate;
+        if (std::getenv("DARWIN_ART_DEBUG_CFI") != nullptr) {
+          std::fprintf(stderr,
+                       "darwin-cfi: map-candidate pc=%llx start=%llx end=%llx candidate=%llx name=%s\\n",
+                       static_cast<unsigned long long>(pc),
+                       static_cast<unsigned long long>(map->start()),
+                       static_cast<unsigned long long>(map->end()),
+                       static_cast<unsigned long long>(candidate), map->name().c_str());
+        }
+      }
+      return true;
+    });
+    if (mapped_candidate != 0) return mapped_candidate;
   }
   const uint64_t candidate = kDarwinArtCompressedReferenceBase + pc;
   const auto mapping = maps->Find(candidate);
