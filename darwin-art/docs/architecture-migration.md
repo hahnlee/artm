@@ -11654,3 +11654,7 @@ or admission exception was added.
   both hunks apply cleanly. Bootstrap still reuses the existing 256-object
   archive, so direct hook execution remains unproven until the cache identity
   is invalidated by the build graph.
+- Checkpoint 464: bumped runtime shadow identity to v24; bootstrap recompiled
+  exactly one object and `nm` confirms `jni_internal.cc` now references the
+  native publication hook. A fresh 137-cfi run remains mismatched, proving the
+  hook is present but not the missing unwind-frame fix.
