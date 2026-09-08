@@ -6558,3 +6558,11 @@ added; the full corpus and multi-loader identity task remain open.
   selection alone did not resolve the anonymous `Main.main` JIT frame. The
   OAT map recovery remains useful for the first managed frame, while shared
   JIT code-cache debug entries are still required.
+
+### Runtime checkpoint 403 — 2026-09-09
+
+- Corrected the duplicate-descriptor probe to read AOSP `first_entry` at its
+  actual 16-byte offset (the prior 24-byte read inspected magic bytes). Added
+  explicit JIT-symbol-miss diagnostics and rebuilt the provider successfully;
+  `137-cfi` still fails, so the remaining issue is resolving the live JIT
+  code-cache entry for the upper managed caller frame.

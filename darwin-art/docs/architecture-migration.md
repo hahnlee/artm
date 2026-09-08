@@ -11266,3 +11266,10 @@ or admission exception was added.
   `137-cfi`. There was no behavioral improvement: the managed OAT frame can be
   identified, but the `Main.main` JIT code-cache frame remains anonymous.
   Cross-image JIT debug-entry ownership/publication is still the next target.
+
+### Runtime checkpoint 403 — 2026-09-09
+
+- Fixed the descriptor ownership filter to use the actual AOSP
+  `JITDescriptor::first_entry` offset (16 bytes), and added diagnostics for
+  unresolved JIT symbols. Provider rebuild passes, but `137-cfi` remains
+  failing; shared live JIT code-cache entry resolution is still incomplete.

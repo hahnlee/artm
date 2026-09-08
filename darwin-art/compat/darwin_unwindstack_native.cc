@@ -459,8 +459,12 @@ _Unwind_Reason_Code CollectNativeFrame(_Unwind_Context* context, void* opaque) {
     frame.function_name = symbol.dli_sname;
     frame.function_offset = pc - reinterpret_cast<uint64_t>(symbol.dli_saddr);
   } else if (walk->jit_debug != nullptr) {
-    walk->jit_debug->GetFunctionName(walk->maps, pc, &frame.function_name,
-                                     &frame.function_offset);
+    const bool found = walk->jit_debug->GetFunctionName(
+        walk->maps, pc, &frame.function_name, &frame.function_offset);
+    if (!found && std::getenv("DARWIN_ART_DEBUG_CFI") != nullptr) {
+      std::fprintf(stderr, "darwin-cfi: jit-symbol-miss pc=%llx\\n",
+                   static_cast<unsigned long long>(pc));
+    }
   }
   walk->data->frames.emplace_back(std::move(frame));
   return _URC_NO_REASON;
@@ -798,12 +802,24 @@ uint64_t DarwinFindGlobalVariable(Maps* maps, const char* variable) {
           // stable v1/v2 discriminator; keep searching until it is populated.
           uint64_t first_entry = 0;
           mach_vm_size_t copied = 0;
-          if (mach_vm_read_overwrite(mach_task_self(), symbol.n_value + slide + 24,
+          if (mach_vm_read_overwrite(mach_task_self(), symbol.n_value + slide + 16,
                                      sizeof(first_entry),
                                      reinterpret_cast<mach_vm_address_t>(&first_entry),
                                      &copied) != KERN_SUCCESS ||
               copied != sizeof(first_entry) || first_entry == 0) {
+            if (std::getenv("DARWIN_ART_DEBUG_CFI") != nullptr) {
+              std::fprintf(stderr,
+                           "darwin-cfi: jit-descriptor candidate=%llx first=%llx empty=1\\n",
+                           static_cast<unsigned long long>(symbol.n_value + slide),
+                           static_cast<unsigned long long>(first_entry));
+            }
             continue;
+          }
+          if (std::getenv("DARWIN_ART_DEBUG_CFI") != nullptr) {
+            std::fprintf(stderr,
+                         "darwin-cfi: jit-descriptor candidate=%llx first=%llx empty=0\\n",
+                         static_cast<unsigned long long>(symbol.n_value + slide),
+                         static_cast<unsigned long long>(first_entry));
           }
         }
         result = symbol.n_value + slide;
