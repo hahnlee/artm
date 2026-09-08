@@ -11309,3 +11309,11 @@ or admission exception was added.
   five lanes. Several traces stop after generic-JNI discovery without entering
   managed-frame post-processing, identifying generic-JNI frame publication and
   ownership as the next architectural boundary.
+
+### Runtime checkpoint 409 — 2026-09-09
+
+- The in-process ucontext unwinder now consumes the ART `ManagedStack` generic
+  JNI frame. Runtime evidence shows managed OAT PCs at variable frame slots,
+  invalidating the fixed return-slot assumption; candidate selection is limited
+  to executable OAT/ODEX mappings. Audits pass, but `137-cfi` is still failing;
+  caller-SP and register-window validation against AOSP SaveRefsAndArgs remains.

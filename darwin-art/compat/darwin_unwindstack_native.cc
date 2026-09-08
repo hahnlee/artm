@@ -510,12 +510,44 @@ void AppendManagedFrames(NativeWalk* walk) {
   if (walk->last_x28 == 0) return;
   std::array<uint64_t, ARM64_REG_R30 - ARM64_REG_R20 + 1> saved_registers{};
   mach_vm_size_t copied = 0;
-  const uint64_t managed_return_slot = walk->last_x28 + frame_size - sizeof(uint64_t);
-  const uint64_t managed_saved_registers = walk->registered_frame_kind == 1
+  uint64_t managed_return_slot = walk->last_x28 + frame_size - sizeof(uint64_t);
+  uint64_t managed_saved_registers = walk->registered_frame_kind == 1
       ? walk->last_x28 + frame_size -
           static_cast<uint64_t>(__builtin_popcountll(walk->registered_core_spill_mask)) *
               sizeof(uint64_t) + sizeof(uint64_t)
       : managed_return_slot - (saved_registers.size() - 1) * sizeof(uint64_t);
+  if (walk->registered_frame_kind == 0) {
+    // SaveRefsAndArgs is not laid out as a simple fixed register array on all
+    // ARM64 generic-JNI entry paths. Find the first stack word that resolves
+    // to an executable managed mapping and use the following word as the
+    // caller SP. This remains entirely within the published AOSP frame.
+    std::array<uint64_t, kSaveRefsAndArgsFrameSize / sizeof(uint64_t)> words{};
+    mach_vm_size_t word_bytes = 0;
+    if (mach_vm_read_overwrite(walk->task, walk->last_x28, sizeof(words),
+                               reinterpret_cast<mach_vm_address_t>(words.data()),
+                               &word_bytes) == KERN_SUCCESS &&
+        word_bytes == sizeof(words)) {
+      for (size_t index = 0; index < words.size(); ++index) {
+        const uint64_t raw_pc = StripReturnAddress(words[index]);
+        const uint64_t candidate = NormalizeManagedPc(walk->maps, raw_pc);
+        if (candidate == raw_pc && raw_pc < (1ULL << 32)) continue;
+        const auto mapping = walk->maps->Find(candidate);
+        if (mapping == nullptr || (mapping->flags() & PROT_EXEC) == 0) continue;
+        const std::string_view map_name = mapping->name();
+        if (map_name.find(".oat") == std::string_view::npos &&
+            map_name.find(".odex") == std::string_view::npos) {
+          continue;
+        }
+        managed_return_slot = walk->last_x28 + index * sizeof(uint64_t);
+        managed_saved_registers = managed_return_slot >=
+                                          (saved_registers.size() - 1) * sizeof(uint64_t)
+                                      ? managed_return_slot -
+                                            (saved_registers.size() - 1) * sizeof(uint64_t)
+                                      : managed_return_slot;
+        break;
+      }
+    }
+  }
   if (mach_vm_read_overwrite(walk->task, managed_saved_registers,
                              sizeof(saved_registers),
                              reinterpret_cast<mach_vm_address_t>(saved_registers.data()),
@@ -958,6 +990,20 @@ bool DarwinNativeUnwindUcontext(Maps* maps, JitDebug* jit_debug, DexFiles* dex_f
   const auto& state = context->uc_mcontext->__ss;
   NativeWalk walk{maps, jit_debug, dex_files, &data, data.max_frames.value_or(max_frames), mach_task_self(),
                   Memory::CreateProcessMemoryThreadCached(getpid())};
+  // Ucontext unwinds are used by the in-process CFI probe and arrive on the
+  // ART thread itself.  The generic-JNI transition may not publish the
+  // auxiliary quick-frame registry, so recover the authoritative AOSP
+  // ManagedStack top before collecting native frames.
+  uint64_t generic_jni_sp = 0;
+  if (android::CurrentGenericJniFrame != nullptr &&
+      android::CurrentGenericJniFrame(&generic_jni_sp)) {
+    walk.registered_managed_sp = generic_jni_sp;
+    walk.registered_frame_kind = 0;
+    walk.registered_frame_size = 224;
+    walk.registered_core_spill_mask = 0;
+    walk.last_x28 = generic_jni_sp;
+    walk.has_registered_quick_frame = true;
+  }
   return CollectFrameRecords(mach_task_self(), state.__pc, state.__sp, state.__fp, &walk);
 }
 

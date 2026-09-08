@@ -6606,3 +6606,13 @@ added; the full corpus and multi-loader identity task remain open.
   lanes. Several traces stop after generic-JNI discovery without entering
   managed-frame post-processing, so generic-JNI frame publication/ownership is
   the next boundary before further DexFiles work.
+
+### Runtime checkpoint 409 — 2026-09-09
+
+- Extended the in-process ucontext path to consume the current ART
+  `ManagedStack` generic-JNI frame, and instrumented the frame layout. The
+  published frame contains managed OAT PCs at variable slots rather than the
+  previously assumed fixed `+192` return slot; candidate selection is now
+  constrained to executable OAT/ODEX mappings. Provider and graphics-link
+  audits pass, but `137-cfi` remains failing, so the next step is validating
+  the selected caller-SP/register window against AOSP SaveRefsAndArgs layout.
