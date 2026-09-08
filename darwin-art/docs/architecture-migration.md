@@ -10924,3 +10924,9 @@ or admission exception was added.
   ranges. Their host addresses (`0x1007...`/`0x11...`) differ from managed
   logical return PCs (`0x210dxxx`), and `137-cfi` remains five FAILs. The next
   change must define the logical-to-host AOT PC mapping explicitly.
+### Runtime checkpoint 353 — 2026-09-09
+
+- Corrected patch application and rebuilt runtime now show 12 registered oat
+  ranges, but host addresses still differ from logical `0x210dxxx` managed PCs;
+  `137-cfi` remains five FAILs. The required next step is explicit per-oat
+  logical code-base identity propagation, not a generic alias.

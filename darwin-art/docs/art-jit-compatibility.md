@@ -6173,3 +6173,11 @@ added; the full corpus and multi-loader identity task remain open.
   `0x1007...`/`0x11...`, while failing managed return PCs remain logical
   `0x210dxxx`; `137-cfi` still has five FAILs. This proves the remaining fix is
   explicit logical-to-host AOT PC identity mapping, not registration timing.
+### Runtime checkpoint 353 — 2026-09-09
+
+- With the corrected patch applied and runtime rebuilt, ClassLinker publishes
+  12 oat ranges, but their host addresses remain distinct from the logical
+  `0x210dxxx` managed PCs. The real `137-cfi` probe still has five FAILs. This
+  confirms the next implementation must carry an explicit logical code-base
+  identity from oat loading into the unwinder; a generic low-address alias
+  would be incorrect for multiple oat files.
