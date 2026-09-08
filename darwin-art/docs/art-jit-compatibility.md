@@ -6425,3 +6425,10 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter-versus-optimized lanes pass, covering deoptimization from a
   hot busy loop in a debuggable runtime. JNI CFI return-PC publication and
   real-app criteria remain open.
+
+### Runtime checkpoint 386 — 2026-09-09
+
+- Ran unmodified AOSP `656-loop-deopt`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes pass, covering loop-triggered
+  deoptimization and continuation. JNI CFI return-PC publication and real-app
+  criteria remain open.

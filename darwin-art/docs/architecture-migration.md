@@ -11148,3 +11148,9 @@ or admission exception was added.
 - Unmodified AOSP `597-deopt-busy-loop` passes in interpreter, JIT, and
   comparison lanes. Hot-loop deoptimization in a debuggable runtime is
   verified without APK changes; JNI CFI and real-app work remain.
+
+### Runtime checkpoint 386 — 2026-09-09
+
+- Unmodified AOSP `656-loop-deopt` passes in interpreter, JIT, and comparison
+  lanes. Loop-triggered deoptimization and continuation are verified without
+  APK changes; JNI CFI and real-app work remain.
