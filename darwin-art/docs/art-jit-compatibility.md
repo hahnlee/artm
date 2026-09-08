@@ -5013,6 +5013,18 @@ added; the full corpus and multi-loader identity task remain open.
   concurrent-GC array copies. Remaining corpus and real-app validation remain
   pending.
 
+### Runtime checkpoint 237 — 2026-09-08
+
+- The `538-checker-embed-constants`–`561-shared-slowpaths` slice passed all
+  37 tests. Coverage includes embedded constants, inlined deopt, bitfield
+  rotates, try/catch and catch simplification, unresolved access checks,
+  tracing/JIT, DCE/env-long references, inlining/type merges, multiply-
+  accumulate and wide stores, new-instance/clinit, shifter/implicit-null and
+  invoke-super variants, primitive type propagation/sharpening, AVX2 bit
+  manipulation, checkcast, UnsafeGetLong, rotate simplification, equivalent
+  refs, switch/packed switch, BCE SSA/irreducible loops, divrem, and shared
+  slow paths. Remaining corpus and real-app validation are pending.
+
 ### Runtime checkpoint 223 — 2026-09-08
 
 - Fixed the child-loader policy without weakening AOSP semantics: before

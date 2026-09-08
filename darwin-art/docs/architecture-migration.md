@@ -9341,6 +9341,15 @@ or admission exception was added.
   IOSurface/Metal compositor. Implementation and regression tests remain
   pending.
 
+### Runtime checkpoint 237 — 2026-09-08
+
+- The `538-checker-embed-constants`–`561-shared-slowpaths` slice passed all 37
+  tests, covering constants/deopt, bitfield rotates, try/catch/DCE, access
+  checks, tracing/JIT, type merges and MAC/wide stores, clinit/new-instance,
+  invoke-super/null checks, primitive propagation/sharpening, bit manipulation,
+  checkcast/UnsafeGetLong, switches/BCE/irreducible loops, divrem, and shared
+  slow paths. Remaining corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 217 — 2026-09-08
 
 - The `055-enum-performance`–`073-mismatched-field` slice passed all 21 tests,
