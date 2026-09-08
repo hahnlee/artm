@@ -9936,3 +9936,11 @@ or admission exception was added.
   `156-register-dex-file-multi-loader` and `497-inlining-and-class-loader` in
   interpreter/JIT/optimized lanes. Unsafe boot DEX is exposed in a JAR
   container for correct bootclasspath handling.
+
+### Runtime checkpoint 224 — 2026-09-08
+
+- The `182-method-linking`–`1916-get-set-current-frame` slice passed all 19
+  tests, including method/RMW stress, allocation tracking, bytecode access,
+  suspend and native-resume variants, suspend-list ordering, agent TLS, JVMTI
+  transforms, and local variable/object/frame inspection. Remaining corpus and
+  real-app validation are pending.

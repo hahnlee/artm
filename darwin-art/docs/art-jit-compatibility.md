@@ -5060,3 +5060,11 @@ added; the full corpus and multi-loader identity task remain open.
   packing, class unloading/classloaders, string values, static-field SIGQUIT,
   and allocation tracking stress. Remaining corpus and real-app validation
   are pending.
+
+### Runtime checkpoint 224 — 2026-09-08
+
+- The `182-method-linking`–`1916-get-set-current-frame` slice passed all 19
+  tests, covering method/RMW stress, allocation tracking, bytecode access,
+  suspend and native-resume variants, suspend-list ordering, agent TLS, JVMTI
+  transforms, and local variable/object/frame inspection. Remaining corpus and
+  real-app validation are pending.
