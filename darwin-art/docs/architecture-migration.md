@@ -11325,3 +11325,11 @@ or admission exception was added.
   speculative first-executable candidate scan was removed to avoid selecting
   argument values as return PCs. Exact AOSP offsets are restored; `137-cfi`
   still needs successful managed caller unwinding.
+
+### Runtime checkpoint 411 — 2026-09-09
+
+- With the AOSP +216 LR slot restored, graphics-link audit passes and managed
+  OAT PCs are recovered, but all five `137-cfi` lanes still fail. Frame-byte
+  diagnostics show the pointer returned by `GetTopQuickFrameKnownNotTagged()`
+  does not line up with valid SaveRefsAndArgs callee-save values; resolving the
+  trampoline's published `top_quick_frame` base is now the active boundary.

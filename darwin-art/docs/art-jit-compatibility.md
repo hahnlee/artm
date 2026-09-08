@@ -6617,6 +6617,15 @@ added; the full corpus and multi-loader identity task remain open.
   audits pass, but `137-cfi` remains failing, so the next step is validating
   the selected caller-SP/register window against AOSP SaveRefsAndArgs layout.
 
+### Runtime checkpoint 411 — 2026-09-09
+
+- Rebuilt the graphics link and reran unmodified `137-cfi` with the exact AOSP
+  +216 generic-JNI LR slot. Managed OAT PCs are recovered and one lane enters
+  managed unwind, but all five lanes still fail. The captured frame bytes show
+  the `ManagedStack` pointer and the expected SaveRefsAndArgs callee-save area
+  do not agree (`x29`/callee-save values are not valid), so the next target is
+  the exact `top_quick_frame` pointer published by the generic-JNI trampoline.
+
 ### Runtime checkpoint 410 — 2026-09-09
 
 - Compared the frame bytes with the AOSP ARM64 `SETUP_SAVE_REFS_AND_ARGS_FRAME`
