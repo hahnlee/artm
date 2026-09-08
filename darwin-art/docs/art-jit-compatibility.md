@@ -6300,3 +6300,13 @@ added; the full corpus and multi-loader identity task remain open.
   frame offsets or adding a guessed compressed-reference alias. The remaining
   task is to identify the producer that supplies this logical return PC and
   connect it to the registered executable mapping with explicit metadata.
+
+### Runtime checkpoint 369 — 2026-09-09
+
+- Rebuilt the graphics bootstrap after validating the patch manifest and
+  AOSP-derived ARM64 sources; the runtime archive and JNI fixture both pass.
+  A temporary producer trace was rejected because the patching pipeline applies
+  the same source family in multiple staging passes, making a non-idempotent
+  diagnostic hunk unsafe. The next instrumentation must use an existing
+  idempotent boundary or a dedicated host-side hook before changing runtime
+  behavior.

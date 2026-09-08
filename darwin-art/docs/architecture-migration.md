@@ -11037,3 +11037,11 @@ or admission exception was added.
   LR must be traced to its actual producer and mapped through explicit
   executable-range metadata; no fixed-base alias or frame-layout workaround
   is justified.
+
+### Runtime checkpoint 369 — 2026-09-09
+
+- Graphics bootstrap and the Android ELF/JNI fixture pass after restoring the
+  manifest to the stable 443-input graph. A temporary Generic JNI producer
+  trace was not retained because the staging pipeline replays source patches
+  across host/target passes; future tracing must be idempotent and isolated at
+  an existing host boundary. The logical return-PC mapping remains open.
