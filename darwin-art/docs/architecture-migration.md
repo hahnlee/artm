@@ -9479,6 +9479,12 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 269 — 2026-09-08
+
+- A 20-second default Snapseed run exits 0 after JNI registration and
+  edit-activity launch. No ART fatal signal or missing-JNI error appears;
+  remaining messages are optional GMS/FeatureFlags and EGL/VDEX warnings.
+
 ### Runtime checkpoint 268 — 2026-09-08
 
 - Repeated default Snapseed launch exits 0 after managed JavaVMExt/NativeBridge

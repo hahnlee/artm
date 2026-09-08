@@ -5153,6 +5153,13 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 269 — 2026-09-08
+
+- A 20-second default Snapseed run completed with exit code 0 after 309 JNI
+  registrations and edit-activity launch. No ART fatal signal or JNI missing
+  implementation occurred; only optional GMS/FeatureFlags and EGL/VDEX
+  warnings remain.
+
 ### Runtime checkpoint 268 — 2026-09-08
 
 - Repeated default Snapseed launch (5 seconds) exits 0 with no JNI or ART
