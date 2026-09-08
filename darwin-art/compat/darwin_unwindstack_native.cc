@@ -585,7 +585,8 @@ void AppendManagedFrames(NativeWalk* walk) {
   auto frames = managed.ConsumeFrames();
   for (auto& frame : frames) {
     if (frame.pc < (1ULL << 32)) {
-      const uint64_t normalized_pc = NormalizeManagedPc(walk->maps, frame.pc);
+      const uint64_t logical_pc = frame.pc;
+      const uint64_t normalized_pc = NormalizeManagedPc(walk->maps, logical_pc);
       if (normalized_pc != frame.pc) {
         frame.pc = normalized_pc;
         frame.map_info = walk->maps->Find(normalized_pc);
@@ -594,15 +595,30 @@ void AppendManagedFrames(NativeWalk* walk) {
         }
         SharedString resolved_name;
         uint64_t resolved_offset = 0;
-        if (walk->jit_debug->GetFunctionName(walk->maps, normalized_pc,
-                                              &resolved_name, &resolved_offset)) {
+        const bool jit_found = walk->jit_debug->GetFunctionName(
+            walk->maps, normalized_pc, &resolved_name, &resolved_offset);
+        if (jit_found) {
           frame.function_name = resolved_name;
           frame.function_offset = resolved_offset;
-        } else if (walk->dex_files != nullptr &&
-                   walk->dex_files->GetFunctionName(walk->maps, normalized_pc,
-                                                    &resolved_name, &resolved_offset)) {
-          frame.function_name = resolved_name;
-          frame.function_offset = resolved_offset;
+        } else {
+          bool dex_found = walk->dex_files != nullptr &&
+                           walk->dex_files->GetFunctionName(
+                               walk->maps, normalized_pc, &resolved_name, &resolved_offset);
+          // DexFiles is keyed by the logical DEX PC.  The normalized host PC
+          // is useful for map lookup but is not a valid DEX lookup key.
+          if (!dex_found && walk->dex_files != nullptr) {
+            dex_found = walk->dex_files->GetFunctionName(
+                walk->maps, logical_pc, &resolved_name, &resolved_offset);
+          }
+          if (std::getenv("DARWIN_ART_DEBUG_CFI") != nullptr) {
+            std::fprintf(stderr, "darwin-cfi: frame-symbol pc=%llx jit=%d dex=%d dex_obj=%p\\n",
+                         static_cast<unsigned long long>(normalized_pc), jit_found, dex_found,
+                         static_cast<const void*>(walk->dex_files));
+          }
+          if (dex_found) {
+            frame.function_name = resolved_name;
+            frame.function_offset = resolved_offset;
+          }
         }
       }
     }

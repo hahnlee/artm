@@ -6597,3 +6597,12 @@ added; the full corpus and multi-loader identity task remain open.
   then rebuilt the graphics link and reran unmodified `137-cfi`. The test
   remains JIT-failing, so the remaining boundary is whether DexFiles is
   populated and whether its lookup expects a DEX PC rather than a host PC.
+
+### Runtime checkpoint 408 — 2026-09-09
+
+- Preserved unresolved managed frames while trying both normalized host PCs and
+  logical DEX PCs through `DexFiles::GetFunctionName`. Provider and graphics
+  link audits pass, but unmodified `137-cfi` still reports `FAIL` in all five
+  lanes. Several traces stop after generic-JNI discovery without entering
+  managed-frame post-processing, so generic-JNI frame publication/ownership is
+  the next boundary before further DexFiles work.

@@ -11300,3 +11300,12 @@ or admission exception was added.
 - Added DexFiles lookup as a fallback after low-PC normalization and reran the
   graphics link plus unmodified `137-cfi`. No pass yet; the remaining issue is
   DexFiles population or the DEX-PC versus host-PC contract at this boundary.
+
+### Runtime checkpoint 408 — 2026-09-09
+
+- Kept unresolved managed frames in the unwind result and attempted DexFiles
+  lookup with both normalized host and logical DEX PCs. Provider and
+  graphics-link audits pass, while unmodified `137-cfi` remains failing in all
+  five lanes. Several traces stop after generic-JNI discovery without entering
+  managed-frame post-processing, identifying generic-JNI frame publication and
+  ownership as the next architectural boundary.
