@@ -9365,6 +9365,14 @@ or admission exception was added.
   churn, VarHandle and invoke-custom behavior, JLI samples, and finalizers.
   Remaining corpus and real-app validation remain pending.
 
+### Runtime checkpoint 248 — 2026-09-08
+
+- The `719-varhandle-concurrency`–`736-interface-super-Object` slice passed
+  all 19 tests, covering VarHandle/thread scheduling, OSR, invoke-super/IMT,
+  array and class resolution, polymorphic/CHA deoptimization, bounds and
+  app-image paths, ICCE/field validation, condition merging, and interface
+  cloning. Remaining corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 245 — 2026-09-08
 
 - EOF progress record: the latest 44-test `642-fp-callees`–`668-aiobe` slice

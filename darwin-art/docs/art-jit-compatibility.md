@@ -5063,6 +5063,16 @@ added; the full corpus and multi-loader identity task remain open.
   multi-thread compiler regressions, missing classes, and class loading.
   Remaining corpus and real-app validation are pending.
 
+### Runtime checkpoint 248 — 2026-09-08
+
+- The `719-varhandle-concurrency`–`736-interface-super-Object` slice passed
+  all 19 tests, covering VarHandle concurrency, thread priority, OSR, string
+  initialization ranges, invoke-super NPE, IMT object/zygote conflicts, array
+  stores, unresolved classes, polymorphic intrinsics, CHA deoptimization,
+  super inlining and bounds slow paths, app images, ICCE and duplicate fields,
+  condition merging, interface cloning, and interface-super Object behavior.
+  Remaining corpus and real-app validation are pending.
+
 ### Runtime checkpoint 232 — 2026-09-08
 
 - The `2276-const-method-type-gc-cleanup`–`414-static-fields` range passed all
