@@ -11085,3 +11085,10 @@ or admission exception was added.
 - Unmodified AOSP `596-monitor-inflation` passes in interpreter, JIT, and
   comparison lanes. Monitor inflation/synchronization is verified without
   test-specific gates; broader concurrency, JNI CFI, and real-app work remains.
+
+### Runtime checkpoint 376 — 2026-09-09
+
+- Unmodified AOSP `2001-virtual-structural-multithread` passes in interpreter,
+  JIT, and comparison lanes. Concurrent virtual dispatch/structural calls are
+  verified without APK changes or fallback gates; JNI CFI and real-app work
+  remains.

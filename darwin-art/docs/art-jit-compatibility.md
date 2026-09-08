@@ -6355,3 +6355,10 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter-versus-optimized lanes pass, covering monitor inflation and
   synchronized execution under optimized ART. JNI CFI publication,
   broader concurrency, and real-app criteria remain open.
+
+### Runtime checkpoint 376 — 2026-09-09
+
+- Ran unmodified AOSP `2001-virtual-structural-multithread`. Interpreter, JIT,
+  and interpreter-versus-optimized lanes pass, covering concurrent virtual
+  dispatch and structural calls in optimized execution. JNI CFI publication,
+  broader stress, and real-app criteria remain open.
