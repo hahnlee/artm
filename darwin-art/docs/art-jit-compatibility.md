@@ -6840,3 +6840,9 @@ incomplete and still requires managed caller unwind validation.
 - The remaining defect is specifically the unwindstack frame-to-DEX method
   attribution path. No allowlist, synthetic mapping, or interpreter fallback
   was introduced.
+### Runtime checkpoint 436 — 2026-09-09
+
+- Inspected AOSP `DexFile::GetFunctionName`: its key is the DEX file-relative
+  PC, while the failing callback supplies an app OAT executable PC. Therefore
+  descriptor registration alone cannot translate AOT PCs; the next bridge must
+  use ART OAT/ArtMethod metadata rather than mis-keying the DEX parser.

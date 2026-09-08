@@ -11515,3 +11515,9 @@ or admission exception was added.
   but every unwind assertion still fails. The descriptor is present in the
   linked image; the unresolved boundary is now DEX symfile consumption or PC
   normalization inside unwindstack.
+### Runtime checkpoint 436 — 2026-09-09
+
+- AOSP source inspection confirms `DexFile::GetFunctionName` accepts DEX file
+  offsets, not OAT executable addresses. The remaining fix must add an
+  ART-owned OAT-PC-to-`ArtMethod` metadata bridge; feeding OAT PCs directly to
+  the DEX descriptor would be semantically incorrect.
