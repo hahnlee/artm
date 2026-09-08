@@ -9348,3 +9348,11 @@ or admission exception was added.
   VLC resolves the methods and graphics audit passes, but real lock calls still
   return `IllegalArgumentException`; ownership, buffer dequeue, or Canvas bind
   diagnostics remain before completion.
+
+### Runtime checkpoint 143 — 2026-09-08
+
+- Replacement-Mac validation passes for host compilation/tests and the
+  graphics-link closure. The VLC fixture APK must be reinstalled before the
+  physical lock/unlock regression can run; diagnostics identified the previous
+  `-EINVAL` as an unsupported logical format and added AOSP-shaped RGBA_8888
+  normalization before `ANativeWindow_lock`.

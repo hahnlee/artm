@@ -4399,3 +4399,13 @@ added; the full corpus and multi-loader identity task remain open.
   symbols, but the first real lock still returns `IllegalArgumentException`;
   the failing subcondition (surface ownership, buffer lock, or Canvas binding)
   is being isolated before claiming VLC support.
+
+### Runtime checkpoint 143 — 2026-09-08
+
+- Revalidated on the replacement Mac: `cargo check -p darwin-art-host`, all
+  host tests (8 unit + 2 graphics acceptance), and the incremental graphics
+  link audit pass. The VLC APK is not present on this machine, so a physical
+  `nativeLockCanvas` run is pending after reinstalling the fixture. Diagnostics
+  isolated the prior failure to `ANativeWindow_lock` returning `-EINVAL` for
+  an unsupported logical surface format; the native path now normalizes that
+  format to RGBA_8888 before locking.
