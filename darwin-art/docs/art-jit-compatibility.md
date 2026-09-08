@@ -6846,3 +6846,8 @@ incomplete and still requires managed caller unwind validation.
   PC, while the failing callback supplies an app OAT executable PC. Therefore
   descriptor registration alone cannot translate AOT PCs; the next bridge must
   use ART OAT/ArtMethod metadata rather than mis-keying the DEX parser.
+### Runtime checkpoint 437 — 2026-09-09
+
+- Direct provider-to-ART `StackVisitor` coupling is invalid for the ART-free
+  smoke target. The remaining design is an optional exported ART callback with
+  a weak provider stub.

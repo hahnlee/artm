@@ -11521,3 +11521,8 @@ or admission exception was added.
   offsets, not OAT executable addresses. The remaining fix must add an
   ART-owned OAT-PC-to-`ArtMethod` metadata bridge; feeding OAT PCs directly to
   the DEX descriptor would be semantically incorrect.
+### Runtime checkpoint 437 — 2026-09-09
+
+- Direct provider-to-ART `StackVisitor` coupling is invalid for the ART-free
+  smoke target. The remaining design is an optional exported ART callback with
+  a weak provider stub.
