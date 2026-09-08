@@ -6687,3 +6687,11 @@ incomplete and still requires managed caller unwind validation.
   remains unchanged. The export/registry audit still passes, while `137-cfi`
   remains failing. Further movement requires tracing the actual selected JNI
   entrypoint rather than changing patch offsets speculatively.
+
+### Runtime checkpoint 418 — 2026-09-09
+
+- Temporary publish/read tracing produced no quick-frame event in `137-cfi`,
+  while the generated generic-JNI trampoline and registry export are present.
+  The immediate issue is therefore an entrypoint bypass (direct/fast JNI), not
+  registry address resolution. Tracing was removed; the next target is the
+  managed-SP publication contract for that selected entrypoint.

@@ -11381,3 +11381,11 @@ or admission exception was added.
   apply the hunk cleanly, leaving tracked source unchanged. Export and link
   audits pass; `137-cfi` remains failing and the next work must trace the
   selected JNI entrypoint directly.
+
+### Runtime checkpoint 418 — 2026-09-09
+
+- Temporary publish/read tracing produced no quick-frame event in `137-cfi`,
+  while the generated generic-JNI trampoline and registry export are present.
+  The immediate issue is therefore an entrypoint bypass (direct/fast JNI), not
+  registry address resolution. Tracing was removed; the next boundary is the
+  managed-SP publication contract for the selected native entrypoint.
