@@ -6439,3 +6439,12 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter-versus-optimized lanes pass, covering JNI method-ID swap/index
   stability under execution. JNI CFI return-PC publication and real-app
   criteria remain open.
+
+### Runtime checkpoint 388 — 2026-09-09
+
+- Ran unmodified AOSP `137-cfi`. Interpreter passes, but the JIT lane fails
+  only the unwind assertions (`PASS` becomes `FAIL`): the managed return PC is
+  published as low logical `0x210d168` while the corresponding application OAT
+  executable range is host-mapped near `0x11c1d4000`. This isolates the remaining
+  blocker to logical-PC-to-host-RX mapping in the Darwin unwind boundary; no
+  fallback or test-specific allowlist was added.

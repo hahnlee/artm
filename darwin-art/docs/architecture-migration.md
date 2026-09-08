@@ -11160,3 +11160,11 @@ or admission exception was added.
 - Unmodified AOSP `1972-jni-id-swap-indices` passes in interpreter, JIT, and
   comparison lanes. JNI method-ID swap/index stability is verified without APK
   changes; JNI CFI and real-app work remain.
+
+### Runtime checkpoint 388 — 2026-09-09
+
+- `137-cfi` passes in interpreter but fails in JIT unwind assertions: the
+  managed LR is low logical `0x210d168` while the application OAT executable
+  range is host-mapped near `0x11c1d4000`. The unresolved issue is now isolated
+  to logical-PC-to-host-RX mapping at the Darwin unwind boundary; no fallback
+  or test-specific allowlist was introduced.
