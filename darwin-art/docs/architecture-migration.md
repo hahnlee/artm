@@ -9910,3 +9910,12 @@ or admission exception was added.
   suspend checks, multidex/native bridge, dex2oat/no-image, compiler MT and
   inline execution, missing classes, and class loading. Remaining corpus and
   real-app validation are pending.
+
+### Runtime checkpoint 221 — 2026-09-08
+
+- The `126-miranda-multidex`–`145-alloc-tracking-stress` slice passed all 25
+  tests, covering secondary dex, register spills, thread/daemon/JNI shutdown,
+  hprof/CFI, invoke-super, GC coverage and reference safety, duplicate classes,
+  native registration, DCE/field packing, unloading/classloaders, static-field
+  SIGQUIT, and allocation tracking stress. Remaining corpus and real-app
+  validation are pending.

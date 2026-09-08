@@ -5031,3 +5031,13 @@ added; the full corpus and multi-loader identity task remain open.
   native bridge, dex2oat/no-image flows, hash/modifier/NPE behavior,
   multi-thread compiler regressions, missing classes, and class loading.
   Remaining corpus and real-app validation are pending.
+
+### Runtime checkpoint 221 — 2026-09-08
+
+- The `126-miranda-multidex`–`145-alloc-tracking-stress` slice passed all 25
+  tests. Coverage includes secondary dex and register-spill paths, thread and
+  daemon/JNI shutdown, hprof/CFI, static invoke-super, GC coverage/no-LOS and
+  dead-reference safety, duplicate-class checks, register natives, DCE/field
+  packing, class unloading/classloaders, string values, static-field SIGQUIT,
+  and allocation tracking stress. Remaining corpus and real-app validation
+  are pending.
