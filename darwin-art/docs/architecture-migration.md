@@ -11280,3 +11280,10 @@ or admission exception was added.
   descriptors with populated `first_entry` pointers. The upper managed
   `Main.main` frame remains anonymous, narrowing the issue to JIT symfile and
   address consumption rather than global lookup or OAT range recovery.
+
+### Runtime checkpoint 405 — 2026-09-09
+
+- Inspected the live JIT descriptor chain during unmodified `137-cfi`; several
+  valid entries with nonzero symfile addresses/sizes are present. The upper
+  managed frame remains anonymous, narrowing the issue to code-address versus
+  in-memory ELF symfile matching at the JIT boundary.

@@ -820,6 +820,20 @@ uint64_t DarwinFindGlobalVariable(Maps* maps, const char* variable) {
                          "darwin-cfi: jit-descriptor candidate=%llx first=%llx empty=0\\n",
                          static_cast<unsigned long long>(symbol.n_value + slide),
                          static_cast<unsigned long long>(first_entry));
+            uint64_t entry_words[4]{};
+            mach_vm_size_t entry_bytes = 0;
+            if (mach_vm_read_overwrite(mach_task_self(), first_entry,
+                                       sizeof(entry_words),
+                                       reinterpret_cast<mach_vm_address_t>(entry_words),
+                                       &entry_bytes) == KERN_SUCCESS &&
+                entry_bytes == sizeof(entry_words)) {
+              std::fprintf(stderr,
+                           "darwin-cfi: jit-entry next=%llx prev=%llx symfile=%llx size=%llx\\n",
+                           static_cast<unsigned long long>(entry_words[0]),
+                           static_cast<unsigned long long>(entry_words[1]),
+                           static_cast<unsigned long long>(entry_words[2]),
+                           static_cast<unsigned long long>(entry_words[3]));
+            }
           }
         }
         result = symbol.n_value + slide;

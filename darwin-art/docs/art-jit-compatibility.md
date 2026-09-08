@@ -6574,3 +6574,11 @@ added; the full corpus and multi-loader identity task remain open.
   nonzero `first_entry`, proving descriptor discovery works. JIT symbol
   resolution still misses the anonymous `Main.main` frame; the remaining
   defect is JIT entry symfile/address consumption, not descriptor lookup.
+
+### Runtime checkpoint 405 — 2026-09-09
+
+- Dumped the live JIT descriptor chain during unmodified `137-cfi`: multiple
+  non-empty entries and symfiles are present. The failing upper frame still
+  resolves anonymously, proving the remaining gap is matching JIT entry code
+  addresses to their in-memory ELF symfiles, not missing compilation or an
+  empty descriptor.
