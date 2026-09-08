@@ -11667,3 +11667,7 @@ or admission exception was added.
   slots and keeping a minimum 16-byte ABI tail. Graphics audit and host tests
   pass; 137-cfi is unchanged because it intentionally binds host JNI methods
   directly and does not execute this NativeBridge thunk.
+- Checkpoint 467: fixed the generated thunk layout after adding the two frame
+  callbacks (actual fixed instruction count is 19 plus stack moves). The
+  standalone JNI thunk audit now passes with scalar/reference returns and W^X
+  checks, and the graphics link audit also passes.

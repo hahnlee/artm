@@ -1,5 +1,10 @@
 #include "darwin_android_jni_trampoline.h"
-#include "darwin_unwindstack_native.h"
+
+extern "C" __attribute__((weak)) void darwin_art_unwindstack_push_quick_frame(
+    void* managed_sp) {
+  (void)managed_sp;
+}
+extern "C" __attribute__((weak)) void darwin_art_unwindstack_pop_quick_frame() {}
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -317,7 +322,7 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
       generated[position->second].mask |= requests[index].entry_mask;
       continue;
     }
-    const size_t instruction_count = 20u + plans[index].moves.size() * 2u;
+    const size_t instruction_count = 19u + plans[index].moves.size() * 2u;
     const size_t thunk_size = instruction_count * kInstructionSize +
                               4u * kLiteralSize;
     generated_size = RoundUp(generated_size, 16);
@@ -416,7 +421,7 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
     cursor += 4;
     Write32(bytes, cursor, 0xd503201fu);  // nop / literal alignment
     cursor += 4;
-    if (cursor != proxy_literal) {
+    if (cursor != push_literal) {
       if (error != nullptr) {
         *error = "internal regular JNI thunk layout mismatch";
       }
