@@ -11092,3 +11092,9 @@ or admission exception was added.
   JIT, and comparison lanes. Concurrent virtual dispatch/structural calls are
   verified without APK changes or fallback gates; JNI CFI and real-app work
   remains.
+
+### Runtime checkpoint 377 — 2026-09-09
+
+- Unmodified AOSP `823-cha-inlining` passes in interpreter, JIT, and comparison
+  lanes. CHA virtual dispatch and inlining are verified without test-specific
+  gates; JNI CFI, OSR breadth, and real-app work remain.

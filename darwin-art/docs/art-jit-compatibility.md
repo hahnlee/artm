@@ -6356,6 +6356,13 @@ added; the full corpus and multi-loader identity task remain open.
   synchronized execution under optimized ART. JNI CFI publication,
   broader concurrency, and real-app criteria remain open.
 
+### Runtime checkpoint 377 — 2026-09-09
+
+- Ran unmodified AOSP `823-cha-inlining`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes pass, covering CHA-driven virtual
+  dispatch and inlining in optimized execution. JNI CFI publication, OSR
+  breadth, and real-app criteria remain open.
+
 ### Runtime checkpoint 376 — 2026-09-09
 
 - Ran unmodified AOSP `2001-virtual-structural-multithread`. Interpreter, JIT,
