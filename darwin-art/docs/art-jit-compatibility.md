@@ -6891,3 +6891,8 @@ incomplete and still requires managed caller unwind validation.
   the experiment was reverted. The remaining AOSP-compatible path is direct
   quick-code/OAT metadata attribution for each unwound PC, while preserving
   the optional runtime-owner callback boundary.
+- Checkpoint 445: the runtime-owned resolver now establishes AOSP's
+  `ScopedObjectAccess`/shared mutator-lock contract before invoking
+  `StackVisitor`. Graphics link audit remains green, but 137-cfi still fails;
+  lock correctness alone does not expose the deeper compiled callers, so the
+  direct quick-code/OAT PC attribution work remains required.

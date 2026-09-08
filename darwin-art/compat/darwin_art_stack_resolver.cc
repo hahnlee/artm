@@ -1,4 +1,5 @@
 #include "stack.h"
+#include "scoped_thread_state_change-inl.h"
 #include "thread.h"
 
 #include <string>
@@ -8,6 +9,10 @@ extern "C" void darwin_art_walk_managed_frames(void (*callback)(const char*, voi
   if (callback == nullptr) return;
   art::Thread* self = art::Thread::Current();
   if (self == nullptr) return;
+  // StackVisitor's AOSP contract requires a shared mutator-lock section. The
+  // unwinder reaches this callback from a JNI/native frame, so establish the
+  // ART runnable state explicitly before inspecting managed frames.
+  art::ScopedObjectAccess soa(self);
   if (art::ArtMethod* current = self->GetCurrentMethod(
           nullptr, /*check_suspended=*/false, /*abort_on_error=*/false);
       current != nullptr) {
