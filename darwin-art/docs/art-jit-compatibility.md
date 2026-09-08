@@ -5063,6 +5063,16 @@ added; the full corpus and multi-loader identity task remain open.
   multi-thread compiler regressions, missing classes, and class loading.
   Remaining corpus and real-app validation are pending.
 
+### Runtime checkpoint 252 — 2026-09-08
+
+- The `926-multi-obsolescence`–`951-threaded-obsolete` slice passed all 26
+  tests, covering multi-obsolescence and timers, JNI tables/search,
+  retransformation and agent threads, transform-save/load/onload and BCP
+  variants, recursive obsolete/JIT methods, classloader transforms, obsolete
+  native/throw paths, reflection and annotation changes, in-memory transforms,
+  intrinsic redefinition, and threaded obsolete handling. Remaining corpus and
+  real-app validation are pending.
+
 ### Runtime checkpoint 251 — 2026-09-08
 
 - The `900-hello-plugin`–`925-threadgroups` slice passed all 26 tests,

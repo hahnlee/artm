@@ -9357,6 +9357,14 @@ or admission exception was added.
   access checks, Unsafe/VarHandle intrinsics, and vdex failure handling.
   Remaining corpus and real-app validation remain pending.
 
+### Runtime checkpoint 252 — 2026-09-08
+
+- The `926-multi-obsolescence`–`951-threaded-obsolete` slice passed all 26
+  tests, covering JVMTI JNI/search, retransformation and agents, BCP/classloader
+  transforms, recursive obsolete/JIT, native/throw obsolete paths, reflection,
+  annotations, in-memory transforms, intrinsic redefine, and threaded obsolete
+  behavior. Remaining corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 251 — 2026-09-08
 
 - The `900-hello-plugin`–`925-threadgroups` slice passed all 26 tests,
