@@ -5153,6 +5153,13 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 266 — 2026-09-08
+
+- After rebuilding the Rust bionic provider closure and graphics runtime,
+  Snapseed runs with the default managed-loading path (no override variable).
+  Its `System.loadLibrary` reaches JavaVMExt/NativeBridge and JNI registers
+  309 native methods; the edit activity launches successfully.
+
 ### Runtime checkpoint 265 — 2026-09-08
 
 - Fixed Apple Silicon page-size mismatch in borrowed ELF image registration:

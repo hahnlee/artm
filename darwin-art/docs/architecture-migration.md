@@ -9479,6 +9479,12 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 266 — 2026-09-08
+
+- Rebuilt provider closure and graphics runtime now allow Snapseed's default
+  managed `System.loadLibrary` path to reach JavaVMExt/NativeBridge. JNI
+  registers 309 methods and the edit activity launches without overrides.
+
 ### Runtime checkpoint 265 — 2026-09-08
 
 - Borrowed ELF registration now honors the Android 4 KiB guest page contract
