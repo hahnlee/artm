@@ -9349,6 +9349,15 @@ or admission exception was added.
   irreducible loops, and iteration handling. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 262 — 2026-09-08
+
+- Baseline compatibility is 1,075/1,075 AOSP tests, with Calculator and
+  DeskClock real APK input/rendering validated through HWUI/SurfaceFlinger/Metal.
+- Snapseed installation and arm64 ELF resolution pass, but unchanged managed
+  loading still stops before JNI registration. Next architecture task is to
+  trace Runtime.nativeLoad through the app ClassLoader and JavaVMExt, then
+  validate the complete native lifecycle.
+
 ### Runtime checkpoint 259 — 2026-09-08
 
 - After rebuilding the graphics runtime, unchanged AOSP Calculator and

@@ -22,6 +22,9 @@
 
 extern "C" int darwin_art_install_context_loader(JNIEnv* env,
                                                    jobject app_loader);
+extern "C" jstring Runtime_nativeLoad(JNIEnv* env, jclass ignored,
+                                        jstring filename, jobject loader,
+                                        jclass caller);
 
 namespace darwin_art_registration_phase {
 
@@ -263,6 +266,23 @@ int finish(const Inputs& inputs) {
     return 4;
   }
   JNIEnv* env = inputs.env;
+
+  // Some core-oj images resolve Runtime.nativeLoad after the normal
+  // libopenjdk registrar has completed. Rebind the exact Android 16
+  // three-argument entry point here so app System.loadLibrary calls always
+  // reach JavaVMExt/NativeBridge through the installed PathClassLoader.
+  jclass runtime_class = env->FindClass("java/lang/Runtime");
+  if (runtime_class == nullptr || env->ExceptionCheck()) return 4;
+  const JNINativeMethod runtime_load = {
+      const_cast<char*>("nativeLoad"),
+      const_cast<char*>("(Ljava/lang/String;Ljava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/String;"),
+      reinterpret_cast<void*>(&Runtime_nativeLoad),
+  };
+  if (env->RegisterNatives(runtime_class, &runtime_load, 1) != JNI_OK ||
+      env->ExceptionCheck()) {
+    return 4;
+  }
+  env->DeleteLocalRef(runtime_class);
 
   // ActivityThread performs this after minimal runtime startup. Keep this
   // JNI-only bridge independent from the process/activity entry TU.

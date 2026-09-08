@@ -5103,6 +5103,17 @@ added; the full corpus and multi-loader identity task remain open.
   monitors, threads, and thread groups. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 262 — 2026-09-08
+
+- Full AOSP corpus is green at 1,075/1,075 after the InputChannel framework
+  stub and serialized boot-artifact build lock. Calculator and DeskClock
+  real-APK graphics/input acceptance pass through HWUI, SurfaceFlinger, and
+  Metal publication.
+- Snapseed installs and resolves its arm64 ELF library, but its unchanged
+  managed `System.loadLibrary`/JNI path still fails to bind
+  `NativeCore.verifyLibraryHasBeenLoadedProperly`. Runtime.nativeLoad resolver
+  coverage was added; tracing why this call does not reach JavaVMExt is next.
+
 ### Runtime checkpoint 259 — 2026-09-08
 
 - Rebuilt the graphics runtime after the debuggable-APK Nterp policy fix and
