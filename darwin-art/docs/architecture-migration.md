@@ -9742,3 +9742,12 @@ or admission exception was added.
   through single-loader registration. The correct next step is a loader-aware
   DexFile clone/cache with explicit ownership and GC cleanup; relaxing global
   registration is insufficient and was not retained.
+
+### Runtime checkpoint 198 — 2026-09-08
+
+- A zero-copy child-loader `DexFile` clone prototype was attempted in
+  `DexFile_defineClassNative`. It patched the full runtime tree but failed the
+  graphics bootstrap because one reduced source variant has no
+  `dalvik_system_DexFile.cc`, causing `No file to patch`; the prototype was
+  removed. The next implementation must be variant-aware and preserve AOSP
+  loader ownership/registration semantics.

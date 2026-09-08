@@ -4850,3 +4850,13 @@ added; the full corpus and multi-loader identity task remain open.
   that correctness requires a loader-aware DexFile clone/cache with explicit
   ownership and GC cleanup, not a relaxed global registration check. No unsafe
   lifetime change was merged in this checkpoint.
+
+### Runtime checkpoint 198 — 2026-09-08
+
+- Prototyped a zero-copy `DexFile` clone in `DexFile_defineClassNative` for
+  child-loader registration. The clone path applied to the full runtime source,
+  but graphics bootstrap also patches a reduced source variant that does not
+  contain `dalvik_system_DexFile.cc`; the patch therefore made the bootstrap
+  fail with `No file to patch`. The prototype and manifest entry were removed.
+  The class-loader gap remains open until a variant-aware ownership design is
+  implemented and validated without weakening AOSP registration checks.
