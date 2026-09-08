@@ -1235,11 +1235,95 @@ jint SurfaceImageNativeGetFenceFd(JNIEnv* env, jobject image) {
   DarwinSurfaceImage* native_image = GetSurfaceImage(env, image);
   return native_image == nullptr ? -1 : native_image->fence;
 }
-jobject SurfaceImageNativeGetHardwareBuffer(JNIEnv*, jobject) {
-  // Java HardwareBuffer ownership is a separate core-jni boundary. The image
-  // remains valid and backed by AHardwareBuffer; expose it after that wrapper
-  // registrar is installed rather than constructing an invalid Java object.
-  return nullptr;
+void HardwareBufferFinalizer(void* opaque) {
+  AHardwareBuffer_release(static_cast<AHardwareBuffer*>(opaque));
+}
+jlong HardwareBufferNativeCreate(JNIEnv*, jclass, jint width, jint height,
+                                 jint format, jint layers, jlong usage) {
+  AHardwareBuffer_Desc desc{
+      .width = static_cast<uint32_t>(width),
+      .height = static_cast<uint32_t>(height),
+      .layers = static_cast<uint32_t>(layers),
+      .format = static_cast<uint32_t>(format),
+      .usage = static_cast<uint64_t>(usage),
+      .stride = 0,
+      .rfu0 = 0,
+      .rfu1 = 0,
+  };
+  AHardwareBuffer* buffer = nullptr;
+  return AHardwareBuffer_allocate(&desc, &buffer) == 0
+             ? reinterpret_cast<jlong>(buffer)
+             : 0;
+}
+jlong HardwareBufferNativeCreateFromGraphicBuffer(JNIEnv*, jclass, jobject) {
+  return 0;
+}
+jlong HardwareBufferNativeGetFinalizer(JNIEnv*, jclass) {
+  return reinterpret_cast<jlong>(&HardwareBufferFinalizer);
+}
+void HardwareBufferNativeWriteToParcel(JNIEnv*, jclass, jlong, jobject) {}
+jlong HardwareBufferNativeReadFromParcel(JNIEnv*, jclass, jobject) { return 0; }
+jboolean HardwareBufferNativeIsSupported(JNIEnv*, jclass, jint width,
+                                         jint height, jint format,
+                                         jint layers, jlong usage) {
+  AHardwareBuffer_Desc desc{
+      .width = static_cast<uint32_t>(width),
+      .height = static_cast<uint32_t>(height),
+      .layers = static_cast<uint32_t>(layers),
+      .format = static_cast<uint32_t>(format),
+      .usage = static_cast<uint64_t>(usage),
+  };
+  return AHardwareBuffer_isSupported(&desc) ? JNI_TRUE : JNI_FALSE;
+}
+AHardwareBuffer_Desc DescribeHardwareBuffer(jlong handle) {
+  AHardwareBuffer_Desc desc{};
+  if (handle != 0) AHardwareBuffer_describe(
+      reinterpret_cast<AHardwareBuffer*>(static_cast<uintptr_t>(handle)),
+      &desc);
+  return desc;
+}
+jint HardwareBufferNativeGetWidth(JNIEnv*, jclass, jlong handle) {
+  return static_cast<jint>(DescribeHardwareBuffer(handle).width);
+}
+jint HardwareBufferNativeGetHeight(JNIEnv*, jclass, jlong handle) {
+  return static_cast<jint>(DescribeHardwareBuffer(handle).height);
+}
+jint HardwareBufferNativeGetFormat(JNIEnv*, jclass, jlong handle) {
+  return static_cast<jint>(DescribeHardwareBuffer(handle).format);
+}
+jint HardwareBufferNativeGetLayers(JNIEnv*, jclass, jlong handle) {
+  return static_cast<jint>(DescribeHardwareBuffer(handle).layers);
+}
+jlong HardwareBufferNativeGetUsage(JNIEnv*, jclass, jlong handle) {
+  return static_cast<jlong>(DescribeHardwareBuffer(handle).usage);
+}
+jlong HardwareBufferNativeEstimateSize(jlong handle) {
+  const AHardwareBuffer_Desc desc = DescribeHardwareBuffer(handle);
+  uint32_t bytes_per_pixel = 4;
+  if (desc.format == AHARDWAREBUFFER_FORMAT_R5G6B5_UNORM) bytes_per_pixel = 2;
+  return static_cast<jlong>(desc.height) *
+         static_cast<jlong>(desc.stride == 0 ? desc.width : desc.stride) *
+         bytes_per_pixel * std::max<uint32_t>(1, desc.layers);
+}
+jlong HardwareBufferNativeGetId(jlong handle) { return handle; }
+
+jobject SurfaceImageNativeGetHardwareBuffer(JNIEnv* env, jobject image) {
+  DarwinSurfaceImage* native_image = GetSurfaceImage(env, image);
+  if (native_image == nullptr || native_image->buffer == nullptr) return nullptr;
+  jclass clazz = env->FindClass("android/hardware/HardwareBuffer");
+  jmethodID constructor = clazz == nullptr
+                              ? nullptr
+                              : env->GetMethodID(clazz, "<init>", "(J)V");
+  if (constructor == nullptr) {
+    if (clazz != nullptr) env->DeleteLocalRef(clazz);
+    return nullptr;
+  }
+  AHardwareBuffer_acquire(native_image->buffer);
+  jobject result = env->NewObject(
+      clazz, constructor, reinterpret_cast<jlong>(native_image->buffer));
+  if (result == nullptr) AHardwareBuffer_release(native_image->buffer);
+  env->DeleteLocalRef(clazz);
+  return result;
 }
 jint PublicFormatNativeGetHalFormat(JNIEnv*, jclass, jint format) {
   // frameworks/native/libs/ui/PublicFormat.cpp maps the encoded formats to
@@ -2925,6 +3009,44 @@ bool RegisterFrameworkNatives(JNIEnv* env) {
   if (!Register(env, "android/media/ImageReader$SurfaceImage",
                 surface_image_methods,
                 static_cast<jint>(std::size(surface_image_methods)))) {
+    return false;
+  }
+
+  JNINativeMethod hardware_buffer_methods[] = {
+      {const_cast<char*>("nCreateHardwareBuffer"),
+       const_cast<char*>("(IIIIJ)J"),
+       reinterpret_cast<void*>(&HardwareBufferNativeCreate)},
+      {const_cast<char*>("nCreateFromGraphicBuffer"),
+       const_cast<char*>("(Landroid/graphics/GraphicBuffer;)J"),
+       reinterpret_cast<void*>(&HardwareBufferNativeCreateFromGraphicBuffer)},
+      {const_cast<char*>("nGetNativeFinalizer"), const_cast<char*>("()J"),
+       reinterpret_cast<void*>(&HardwareBufferNativeGetFinalizer)},
+      {const_cast<char*>("nWriteHardwareBufferToParcel"),
+       const_cast<char*>("(JLandroid/os/Parcel;)V"),
+       reinterpret_cast<void*>(&HardwareBufferNativeWriteToParcel)},
+      {const_cast<char*>("nReadHardwareBufferFromParcel"),
+       const_cast<char*>("(Landroid/os/Parcel;)J"),
+       reinterpret_cast<void*>(&HardwareBufferNativeReadFromParcel)},
+      {const_cast<char*>("nIsSupported"), const_cast<char*>("(IIIIJ)Z"),
+       reinterpret_cast<void*>(&HardwareBufferNativeIsSupported)},
+      {const_cast<char*>("nGetWidth"), const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&HardwareBufferNativeGetWidth)},
+      {const_cast<char*>("nGetHeight"), const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&HardwareBufferNativeGetHeight)},
+      {const_cast<char*>("nGetFormat"), const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&HardwareBufferNativeGetFormat)},
+      {const_cast<char*>("nGetLayers"), const_cast<char*>("(J)I"),
+       reinterpret_cast<void*>(&HardwareBufferNativeGetLayers)},
+      {const_cast<char*>("nGetUsage"), const_cast<char*>("(J)J"),
+       reinterpret_cast<void*>(&HardwareBufferNativeGetUsage)},
+      {const_cast<char*>("nEstimateSize"), const_cast<char*>("(J)J"),
+       reinterpret_cast<void*>(&HardwareBufferNativeEstimateSize)},
+      {const_cast<char*>("nGetId"), const_cast<char*>("(J)J"),
+       reinterpret_cast<void*>(&HardwareBufferNativeGetId)},
+  };
+  if (!Register(env, "android/hardware/HardwareBuffer",
+                hardware_buffer_methods,
+                static_cast<jint>(std::size(hardware_buffer_methods)))) {
     return false;
   }
 

@@ -9183,3 +9183,12 @@ or admission exception was added.
   exited cleanly (no ImageReader linkage error or fatal signal). Full tab-grid
   graphics endurance and remaining ImageReader plane/HardwareBuffer contracts
   are still open.
+
+### Runtime checkpoint 121 — 2026-09-08
+
+- Added the Java `HardwareBuffer` native bridge used by ImageReader, retaining
+  AHardwareBuffer ownership across SurfaceImage access and registering the
+  basic allocate/describe/finalizer ABI. The rebuilt graphics link audit and a
+  fresh Chrome APK smoke pass on the replacement Mac; logs confirm
+  IOSurface-backed buffer allocation. Parcel/GraphicBuffer conversion and
+  complete CPU plane behavior remain explicit compatibility work.

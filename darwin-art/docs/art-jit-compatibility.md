@@ -4218,3 +4218,13 @@ added; the full corpus and multi-loader identity task remain open.
   fatal signal, or generated-code fault. Long-running tab graphics acceptance
   remains the next boundary; image-plane and hardware-buffer API coverage is
   still tracked as an AOSP compatibility gap.
+
+### Runtime checkpoint 121 — 2026-09-08
+
+- Completed the Java `HardwareBuffer` bridge for ImageReader surfaces: native
+  AHardwareBuffer handles now cross the SurfaceImage boundary with a retained
+  native lifetime, and the basic allocation/describe/finalizer registrations
+  are present. Rebuilt graphics bootstrap/link audit and a fresh Chrome APK
+  smoke both pass (`RC=0`); the log shows IOSurface-backed AHardwareBuffer
+  allocation. Parcel/GraphicBuffer conversion and full CPU plane semantics
+  remain open for broader AOSP ImageReader compatibility.
