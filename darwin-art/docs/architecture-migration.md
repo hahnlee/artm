@@ -9479,6 +9479,12 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 265 — 2026-09-08
+
+- Borrowed ELF registration now honors the Android 4 KiB guest page contract
+  independently of the host's 16 KiB Mach VM pages. Snapseed eager
+  JavaVMExt/NativeBridge loading reaches JNI initialization successfully.
+
 ### Runtime checkpoint 263 — 2026-09-08
 
 - Current authoritative state: AOSP corpus 1,075/1,075; Calculator and

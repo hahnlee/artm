@@ -13,10 +13,12 @@
 
 #include "darwin_provider_owners.h"
 #include "darwin_runtime_adapters_internal.h"
+#include <cstdint>
 #include "darwin_art_bionic_vm.h"
 
 namespace android {
 namespace {
+extern "C" int32_t darwin_art_bionic_errno_load(void);
 
 std::mutex& CachedElfMutex() {
   static auto* mutex = new std::mutex();
@@ -145,7 +147,8 @@ int PublishRuntimeElfImage(void* context, uintptr_t start, uintptr_t end) {
   }
   if (darwin_art_bionic_vm_register_borrowed_range(
           reinterpret_cast<void*>(start), end - start) != 0) {
-    std::fprintf(stderr, "DARWIN ELF loader: publish rejected borrowed-range registry range=[0x%llx,0x%llx)\n",
+    std::fprintf(stderr, "DARWIN ELF loader: publish rejected borrowed-range registry errno=%d range=[0x%llx,0x%llx)\n",
+                 static_cast<int>(darwin_art_bionic_errno_load()),
                  static_cast<unsigned long long>(start), static_cast<unsigned long long>(end));
     if (darwin_art_image_registry::RollbackPublish(library->image_registry,
                                                     start, end) != 0) {

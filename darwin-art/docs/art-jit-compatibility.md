@@ -5153,6 +5153,13 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 265 — 2026-09-08
+
+- Fixed Apple Silicon page-size mismatch in borrowed ELF image registration:
+  Android guest PT_LOAD ranges use 4 KiB alignment while the host VM reports
+  16 KiB pages. Snapseed eager JavaVMExt/NativeBridge loading now passes and
+  reaches JNI initialization (`JavaVMExt+NativeBridge load ok`).
+
 ### Runtime checkpoint 263 — 2026-09-08
 
 - Current authoritative state: AOSP corpus 1,075/1,075; Calculator and

@@ -326,10 +326,15 @@ pub extern "C" fn darwin_art_bionic_vm_register_borrowed_range(
     let Some(provider) = provider() else {
         return -1;
     };
+    // Android ELF PT_LOAD envelopes use the guest 4 KiB page contract even
+    // on Apple Silicon hosts whose Mach VM page size is 16 KiB. Borrowed
+    // ranges are metadata only; requiring the host page size here rejects
+    // valid guest images before JNI_OnLoad can run.
+    const GUEST_PAGE_SIZE: usize = 4096;
     if address.is_null()
         || length == 0
-        || address as usize % provider.page_size != 0
-        || length % provider.page_size != 0
+        || address as usize % GUEST_PAGE_SIZE != 0
+        || length % GUEST_PAGE_SIZE != 0
     {
         set_errno(ANDROID_EINVAL);
         return -1;
