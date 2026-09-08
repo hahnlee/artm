@@ -763,6 +763,10 @@ int darwin_art_bionic_ftruncate(int fd, int64_t length) {
   return result;
 }
 
+int darwin_art_bionic_posix_fallocate(int fd, int64_t offset, int64_t length) {
+  return darwin_art_bionic_fs_posix_fallocate_core(fd, offset, length);
+}
+
 int darwin_art_bionic_isatty(int fd) {
   const int saved_host_errno = errno;
   const int result = darwin_art_bionic_fs_isatty_core(fd);
@@ -1040,6 +1044,7 @@ static const Binding kBindings[] = {
     {"opendir", (DarwinArtBionicFsFunction)darwin_art_bionic_opendir},
     {"pathconf", (DarwinArtBionicFsFunction)darwin_art_bionic_pathconf},
     {"posix_fadvise", (DarwinArtBionicFsFunction)darwin_art_bionic_posix_fadvise},
+    {"posix_fallocate", (DarwinArtBionicFsFunction)darwin_art_bionic_posix_fallocate},
     {"pread", (DarwinArtBionicFsFunction)darwin_art_bionic_pread},
     {"pwrite", (DarwinArtBionicFsFunction)darwin_art_bionic_pwrite},
     {"read", (DarwinArtBionicFsFunction)darwin_art_bionic_read},

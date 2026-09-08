@@ -396,6 +396,7 @@ libc.so	pipe2	LIBC	central-fd-broker
 libc.so	poll	LIBC	central-fd-broker
 libc.so	popen	LIBC	stdio
 libc.so	posix_fadvise	LIBC	filesystem
+libc.so	posix_fallocate	LIBC	filesystem
 libc.so	posix_madvise	LIBC	vm
 libc.so	posix_memalign	LIBC	allocator
 libc.so	posix_spawn	LIBC_P	process-state

@@ -395,6 +395,7 @@
     {"libc.so", "poll", "LIBC", DARWIN_ART_BIONIC_PROVIDER_CENTRAL_FD_BROKER},
     {"libc.so", "popen", "LIBC", DARWIN_ART_BIONIC_PROVIDER_STDIO},
     {"libc.so", "posix_fadvise", "LIBC", DARWIN_ART_BIONIC_PROVIDER_FILESYSTEM},
+    {"libc.so", "posix_fallocate", "LIBC", DARWIN_ART_BIONIC_PROVIDER_FILESYSTEM},
     {"libc.so", "posix_madvise", "LIBC", DARWIN_ART_BIONIC_PROVIDER_VM},
     {"libc.so", "posix_memalign", "LIBC", DARWIN_ART_BIONIC_PROVIDER_ALLOCATOR},
     {"libc.so", "posix_spawn", "LIBC_P", DARWIN_ART_BIONIC_PROVIDER_PROCESS_STATE},

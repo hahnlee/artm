@@ -815,6 +815,28 @@ pub extern "C" fn darwin_art_bionic_fs_ftruncate_core(fd: c_int, _length: i64) -
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn darwin_art_bionic_fs_posix_fallocate_core(
+    fd: c_int,
+    offset: i64,
+    length: i64,
+) -> c_int {
+    if offset < 0 || length < 0 || offset.checked_add(length).is_none() {
+        return 22;
+    }
+    with_active(9, |facade| {
+        let end = offset + length;
+        let mut status = AndroidStat::default();
+        if unsafe { facade.fstat(fd, &mut status) } != 0 {
+            return 9;
+        }
+        if status.st_size >= end {
+            return 0;
+        }
+        if facade.ftruncate(fd, end) == 0 { 0 } else { 9 }
+    })
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn darwin_art_bionic_fs_isatty_core(fd: c_int) -> c_int {
     with_active(0, |facade| facade.isatty(fd))
 }

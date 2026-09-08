@@ -10612,3 +10612,9 @@ or admission exception was added.
 - Rejected signal-handler stack dereferencing for fault diagnosis because it
   would violate the runtime's async-signal safety boundary. The null target
   remains fatal until an owner-thread-safe ART frame hook identifies it.
+### Runtime checkpoint 311 — 2026-09-08
+
+- Scoped native filesystem ownership now includes `posix_fallocate`, matching
+  the Android libc contract required by VLC/MediaLibrary. Resolver closure and
+  facade tests pass; the remaining crash is unchanged and remains in the ART
+  managed-call entry path.

@@ -5832,3 +5832,11 @@ added; the full corpus and multi-loader identity task remain open.
 - Reviewed the generated-code fault recorder and rejected dereferencing the
   interrupted stack from the signal handler as unsafe. The null call remains
   intentionally fatal; diagnosis will use an owner-thread-safe ART frame hook.
+### Runtime checkpoint 311 — 2026-09-08
+
+- Added the missing capability-owned `libc.so!posix_fallocate` provider used
+  by VLC's native media-library dependency. The Rust filesystem facade now
+  validates ranges and extends virtual descriptors without shrinking them;
+  21 facade tests and the provider-namespace audit pass. VLC no longer stops
+  at that resolver gap, but still reproduces the independent null quick-entry
+  immediately after MediaCodec capability enumeration.

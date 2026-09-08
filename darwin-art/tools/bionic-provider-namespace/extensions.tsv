@@ -85,6 +85,7 @@ libc.so	fstat64	LIBC	filesystem	Android arm64 large-file fstat alias over the ca
 libc.so	lseek64	LIBC	filesystem	Android arm64 large-file seek alias over the capability descriptor table
 libc.so	lstat64	LIBC	filesystem	Android arm64 large-file lstat alias over capability-rooted paths
 libc.so	posix_fadvise	LIBC	filesystem	Advisory access-pattern hint accepted for virtual files
+libc.so	posix_fallocate	LIBC	filesystem	Preallocate capacity through the capability-owned virtual descriptor table
 libc.so	pread	LIBC	filesystem	Positioned read without mutating the virtual descriptor offset
 libc.so	pwrite	LIBC	filesystem	Positioned write through the capability-owned virtual descriptor table
 libc.so	chmod	LIBC	filesystem	Mode update within the calling application's private capability overlay

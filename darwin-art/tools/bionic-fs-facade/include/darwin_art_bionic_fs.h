@@ -143,6 +143,7 @@ int darwin_art_bionic_fchown(int fd, uint32_t owner, uint32_t group);
 int darwin_art_bionic_fchmodat(int directory_fd, const char* path,
                                uint32_t mode, int flags);
 int darwin_art_bionic_ftruncate(int fd, int64_t length);
+int darwin_art_bionic_posix_fallocate(int fd, int64_t offset, int64_t length);
 int darwin_art_bionic_isatty(int fd);
 int darwin_art_bionic_link(const char* old_path, const char* new_path);
 int darwin_art_bionic_mkdir(const char* path, uint32_t mode);
@@ -223,6 +224,8 @@ int darwin_art_bionic_fs_fchown_core(int fd, uint32_t owner, uint32_t group);
 int darwin_art_bionic_fs_fchmodat_core(int directory_fd, const char* path,
                                       uint32_t mode, int flags);
 int darwin_art_bionic_fs_ftruncate_core(int fd, int64_t length);
+int darwin_art_bionic_fs_posix_fallocate_core(int fd, int64_t offset,
+                                              int64_t length);
 int darwin_art_bionic_fs_isatty_core(int fd);
 int darwin_art_bionic_fs_link_core(const char* old_path,
                                    const char* new_path);
