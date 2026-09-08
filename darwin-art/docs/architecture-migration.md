@@ -11333,3 +11333,11 @@ or admission exception was added.
   diagnostics show the pointer returned by `GetTopQuickFrameKnownNotTagged()`
   does not line up with valid SaveRefsAndArgs callee-save values; resolving the
   trampoline's published `top_quick_frame` base is now the active boundary.
+
+### Runtime checkpoint 412 — 2026-09-09
+
+- Updated the Darwin helper to follow AOSP tagged-pointer semantics by using
+  `HasTopQuickFrame()` and `GetTopQuickFrame()`. The rebuilt provider and
+  graphics link pass audit, but all five `137-cfi` lanes still fail and frame
+  bytes remain unchanged. The remaining boundary is publication/restoration
+  timing of `top_quick_frame` across the generic-JNI native callback.

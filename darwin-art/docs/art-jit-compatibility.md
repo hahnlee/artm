@@ -6633,4 +6633,13 @@ added; the full corpus and multi-loader identity task remain open.
   only valid generic-JNI return slot. Removed the experimental first-executable
   word scan that could mistake argument or callee-save values for a return PC;
   the ucontext path now uses the exact AOSP offsets again. `137-cfi` remains
-  incomplete and still requires managed caller unwind validation.
+incomplete and still requires managed caller unwind validation.
+
+### Runtime checkpoint 412 — 2026-09-09
+
+- Matched the helper to AOSP `ManagedStack`: generic-JNI pointers are tagged,
+  so `GetTopQuickFrame()` is now used with `HasTopQuickFrame()` instead of the
+  DCHECK-only `GetTopQuickFrameKnownNotTagged()`. Rebuilt and reran unmodified
+  `137-cfi`; all five lanes still fail and the observed pointer bytes are
+  unchanged. Tag stripping is not the remaining defect; the next target is
+  generic-JNI `top_quick_frame` publication/restoration timing.
