@@ -5273,6 +5273,14 @@ added; the full corpus and multi-loader identity task remain open.
   the sparsebundle is 61G and `mnt/run` was reduced from 58G to 463M; Git
   objects are only about 122MiB total (5.81MiB packed).
 
+### Runtime checkpoint 297 — 2026-09-08
+
+- After stale-root cleanup, an attempted sparsebundle compaction left the
+  `default` APFS image unmountable. `diskutil verifyVolume` reports corrupted
+  fsroot and extent-ref trees (exit 8), and `diskutil repairVolume` could not
+  complete deferred repairs. No reformat or further destructive write was
+  attempted; source/Git remain intact while profile recovery is pending.
+
 ### Runtime checkpoint 294 — 2026-09-08
 
 - Storage accounting after cleanup: active DarwinART `default` profile is 123G,
