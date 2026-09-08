@@ -5883,3 +5883,10 @@ added; the full corpus and multi-loader identity task remain open.
   of querying the app registry and throwing `NameNotFoundException`. This
   matches AOSP's framework-package invariant and removes VLC's startup
   `AccessControl` exception without fabricating a signing certificate.
+
+### Runtime checkpoint 317 — 2026-09-08
+
+- Rebuilt the complete application DEX after the framework-package change;
+  AOSP DEX verification passed. The ARM64 intrinsic inventory audit also
+  passes (`specialized-hir=36`, `hinvoke=217`, `handwritten=187`) with no
+  contract drift. Full differential and real-app validation remain open.

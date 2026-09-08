@@ -10653,3 +10653,10 @@ or admission exception was added.
   `framework-res.apk`, carries system-package flags, and remains certificate
   neutral. This prevents app startup code from mistaking the detached host's
   registry boundary for a missing Android framework package.
+
+### Runtime checkpoint 317 — 2026-09-08
+
+- Application DEX regeneration and verification pass after exposing the
+  framework package. The ARM64 intrinsic source-contract audit passes with
+  all classified entries accounted for; full AOSP differential and real-app
+  validation remain open.
