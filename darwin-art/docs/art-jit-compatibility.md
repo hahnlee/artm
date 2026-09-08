@@ -6211,3 +6211,11 @@ added; the full corpus and multi-loader identity task remain open.
   `0x1000210dxxx` in the managed anonymous window. Method/Dex attribution still
   fails, so the next step is publishing the JIT code-cache debugger identity;
   no unconditional alias was added.
+
+### Runtime checkpoint 358 — 2026-09-09
+
+- Tightened the promotion predicate to require an executable `MapInfo`, not
+  merely any mapped heap address. The prior run demonstrated that the window
+  candidate can fall inside a non-executable anonymous region, so treating
+  presence alone as code identity was too permissive. JIT identity publication
+  remains required.

@@ -57,7 +57,8 @@ constexpr uint64_t kDarwinArtCompressedReferenceBase = 0x0000010000000000ULL;
 uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc) {
   if (maps == nullptr || pc >= (1ULL << 32)) return pc;
   const uint64_t candidate = kDarwinArtCompressedReferenceBase + pc;
-  return maps->Find(candidate) != nullptr ? candidate : pc;
+  const auto mapping = maps->Find(candidate);
+  return mapping != nullptr && (mapping->flags() & PROT_EXEC) != 0 ? candidate : pc;
 }
 
 struct DarwinAotCodeRange {

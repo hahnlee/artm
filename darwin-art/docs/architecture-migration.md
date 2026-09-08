@@ -10956,3 +10956,10 @@ or admission exception was added.
   real anonymous mapping, while method-name/Dex attribution remains unresolved.
   The next change must connect that mapping to the JIT code-cache debugger
   identity rather than widening aliases.
+
+### Runtime checkpoint 358 — 2026-09-09
+
+- Restricted compressed-window PC lifting to executable mappings. A mapped
+  anonymous heap region is insufficient evidence of code identity; this keeps
+  unwinding conservative until the JIT debugger publishes the exact executable
+  code-cache range.
