@@ -9734,3 +9734,11 @@ or admission exception was added.
   reverted. The remaining fix is a genuine per-loader DexFile/cache clone
   with independent registration and lifetime; global registration relaxation
   and test-specific gates remain absent.
+
+### Runtime checkpoint 197 — 2026-09-08
+
+- A source audit confirms `ClassLinker::dex_caches_` is keyed solely by
+  `DexFile*`, forcing both native `loadClassBinaryName` and `DefineClass` back
+  through single-loader registration. The correct next step is a loader-aware
+  DexFile clone/cache with explicit ownership and GC cleanup; relaxing global
+  registration is insufficient and was not retained.

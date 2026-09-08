@@ -4841,3 +4841,12 @@ added; the full corpus and multi-loader identity task remain open.
   was reverted. The failure confirms that a real per-loader DexFile/cache
   clone with independent registration and lifetime is required; no global
   registration relaxation or test-specific gate is retained.
+
+### Runtime checkpoint 197 — 2026-09-08
+
+- Source audit confirms `ClassLinker::dex_caches_` is keyed only by
+  `DexFile*`; both `DexFile_defineClassNative` and `DefineClass` therefore
+  re-enter the single-loader registration path. The failed experiments show
+  that correctness requires a loader-aware DexFile clone/cache with explicit
+  ownership and GC cleanup, not a relaxed global registration check. No unsafe
+  lifetime change was merged in this checkpoint.
