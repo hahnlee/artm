@@ -5223,6 +5223,13 @@ added; the full corpus and multi-loader identity task remain open.
   unchanged APK run exited 0, initialized Unity/IL2CPP, and emitted no
   anonymous-vdex directory error. APK/native payload permissions remain sealed.
 
+### Runtime checkpoint 288 — 2026-09-08
+
+- Replacement-computer smoke check: repository is at `810e0d2`, release binaries
+  are present, and `git diff --check` passes. The graphics acceptance runner
+  starts but cannot create its log because only about 139 MiB is free; no code
+  failure was observed.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format

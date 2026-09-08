@@ -9541,6 +9541,13 @@ or admission exception was added.
   `oat/arm64/base.vdex` and the prior anonymous-vdex directory warning did not
   recur; the APK and native payload stayed sealed.
 
+### Runtime checkpoint 288 — 2026-09-08
+
+- Replacement-computer smoke check: repository is at `810e0d2`, release binaries
+  are present, and `git diff --check` passes. The graphics acceptance runner
+  starts but cannot create its log because only about 139 MiB is free; no code
+  failure was observed.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - EGL capability filtering now declares FP16 pixel formats unsupported for the
