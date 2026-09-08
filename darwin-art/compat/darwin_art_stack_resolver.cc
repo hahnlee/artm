@@ -2,6 +2,7 @@
 #include "scoped_thread_state_change-inl.h"
 #include "thread.h"
 
+#include <dlfcn.h>
 #include <string>
 
 extern "C" void darwin_art_walk_managed_frames(void (*callback)(const char*, void*),
@@ -16,7 +17,14 @@ extern "C" void darwin_art_walk_managed_frames(void (*callback)(const char*, voi
   if (art::ArtMethod* current = self->GetCurrentMethod(
           nullptr, /*check_suspended=*/false, /*abort_on_error=*/false);
       current != nullptr) {
-    std::string name = current->PrettyMethod(/*with_signature=*/false);
+    std::string name;
+    if (current->IsNative()) {
+      Dl_info info{};
+      if (dladdr(current->GetEntryPointFromJni(), &info) != 0 && info.dli_sname != nullptr) {
+        name = info.dli_sname[0] == '_' ? info.dli_sname + 1 : info.dli_sname;
+      }
+    }
+    if (name.empty()) name = current->PrettyMethod(/*with_signature=*/false);
     callback(name.c_str(), context);
   }
   art::StackVisitor::WalkStack<art::StackVisitor::CountTransitions::kNo>(

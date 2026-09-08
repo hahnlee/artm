@@ -11600,3 +11600,7 @@ or admission exception was added.
   applies cleanly after staging `art_method.cc`; compiled Java frames resolve
   to names in the unwinder. 137-cfi still fails only on the leading JNI native
   symbol (`UpstreamCfi*`), so native-entry symbol attribution is the next gap.
+- Checkpoint 452: native JNI resolver now attempts `GetEntryPointFromJni()`
+  plus `dladdr` before Java fallback. Link audit passes, but 137-cfi output is
+  unchanged because the registered test JNI symbol is local/hidden; the next
+  fix must preserve native registration names at the ART JNI binding boundary.
