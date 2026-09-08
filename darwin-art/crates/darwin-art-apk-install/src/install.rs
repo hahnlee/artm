@@ -392,7 +392,7 @@ fn validate_existing(
     )
 }
 
-fn ensure_oat_cache(destination: &Path) -> Result<(), String> {
+pub fn ensure_oat_cache(destination: &Path) -> Result<(), String> {
     let metadata = fs::metadata(destination)
         .map_err(|error| format!("could not inspect installed APK directory: {error}"))?;
     let original_mode = metadata.permissions().mode();

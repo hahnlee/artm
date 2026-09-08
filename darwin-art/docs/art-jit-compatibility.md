@@ -5208,6 +5208,14 @@ added; the full corpus and multi-loader identity task remain open.
   producing an anonymous-vdex directory warning. This is the next packaging
   lifecycle fix; it did not prevent startup or rendering initialization.
 
+### Runtime checkpoint 286 — 2026-09-08
+
+- Added an installer-owned `--ensure-oat` preflight for installed-record
+  launches. It reuses the permission-safe migration routine without modifying
+  APK/native payloads, closing the legacy record path that skipped writable
+  `oat/arm64`. Formatting and diff checks pass; a clean end-to-end rerun is
+  pending recovery from stale host processes.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format

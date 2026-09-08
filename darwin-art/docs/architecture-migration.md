@@ -9527,6 +9527,13 @@ or admission exception was added.
   anonymous-vdex directory warning. Packaging lifecycle repair is the next
   task; application startup remained successful.
 
+### Runtime checkpoint 286 — 2026-09-08
+
+- Installed-record launches now invoke the APK installer's dedicated
+  `--ensure-oat` migration helper, preserving sealed APK/native files while
+  creating the writable `oat/arm64` leaf. Source formatting and diff checks
+  pass; end-to-end rerun awaits recovery from stale host processes.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - EGL capability filtering now declares FP16 pixel formats unsupported for the

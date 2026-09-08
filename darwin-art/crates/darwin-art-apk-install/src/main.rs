@@ -4,13 +4,29 @@ mod publish;
 use darwin_art_native_artifact::{
     ConversionOutcome, ConversionRequest, Publication, prepare_complete_darwin_graph,
 };
-use install::{InstallRequest, install};
+use install::{InstallRequest, ensure_oat_cache, install};
 use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn run() -> Result<(), String> {
     let arguments = env::args_os().collect::<Vec<_>>();
+    if arguments
+        .get(1)
+        .is_some_and(|value| value == "--ensure-oat")
+    {
+        if arguments.len() != 3 {
+            return Err(
+                "usage: darwin-art-apk-install --ensure-oat INSTALLED_DIRECTORY".to_owned(),
+            );
+        }
+        ensure_oat_cache(&PathBuf::from(&arguments[2]))?;
+        println!(
+            "apk-install: oat-cache-ready directory={}",
+            arguments[2].to_string_lossy()
+        );
+        return Ok(());
+    }
     if arguments.len() < 10 {
         return Err(
             "usage: darwin-art-apk-install APK INSTALL_ROOT PACKAGE VERSION_CODE NATIVE_ROOT|none EXTRACTOR|none RUNTIME_ABI NATIVE_CACHE_ROOT CONVERTER|none [SPLIT_APK ...]"

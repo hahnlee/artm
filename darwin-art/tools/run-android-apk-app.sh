@@ -255,6 +255,13 @@ if [[ -z "$installed_record" ]]; then
   apk="$installed_directory/base.apk"
 else
   installed_directory="$(dirname "$apk")"
+  # Launch records may predate the installer migration that provisions the
+  # writable Android oat cache. Reuse the installer's permission-safe helper
+  # so ART can publish anonymous vdex without opening the APK payload.
+  if [[ ! -x "$installer" ]]; then
+    cargo build -q --release -p darwin-art-apk-install
+  fi
+  "$installer" --ensure-oat "$installed_directory" >/dev/null
 fi
 installed_split_apks=()
 if [[ -z "$installed_record" ]]; then
