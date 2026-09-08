@@ -9604,3 +9604,9 @@ or admission exception was added.
   (14 contracts) pass all execution lanes, validating structural
   redefinition/stack scope, inlining and loop optimization, reference
   processing, checker lowering, and native registry behavior.
+
+### Runtime checkpoint 179 — 2026-09-08
+
+- `004-JniTest` now passes all three execution lanes in a direct fresh run,
+  validating the compiled JNI transition and native exit path independently of
+  the earlier stale corpus ledger.

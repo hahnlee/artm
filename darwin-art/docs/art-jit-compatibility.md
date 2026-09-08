@@ -4694,6 +4694,12 @@ added; the full corpus and multi-loader identity task remain open.
   scope, inlining/loop optimization, reference processing, checker lowering,
   and native-registry validation.
 
+### Runtime checkpoint 179 — 2026-09-08
+
+- Direct fresh execution of the previously stale `004-JniTest` contract passes
+  interpreter, JIT, and unchanged-source optimized lanes. This confirms the
+  compiled JNI transition and native exit path after runner isolation cleanup.
+
 ### Runtime checkpoint 173 — 2026-09-08
 
 - Fresh four-worker corpus reruns completed 25/25 executable contracts in
