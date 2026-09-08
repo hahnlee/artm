@@ -9501,3 +9501,10 @@ or admission exception was added.
   configure, release, `setOutputSurface`, and final codec release all pass on
   managed producers. The focused replacement-host run is green; full VLC and
   application media playback remain open.
+
+### Runtime checkpoint 164 — 2026-09-08
+
+- MediaCodec output testing was extended to decoded-frame posting and retained
+  producer snapshots. The strict run reaches VP9 configure but stalls before
+  completion, so the configure/fromSurface boundary is an active unresolved
+  issue and the implementation is not yet accepted.

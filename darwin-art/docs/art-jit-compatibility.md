@@ -4577,6 +4577,14 @@ added; the full corpus and multi-loader identity task remain open.
   replacement pass together with Surface/Nterp/synchronization markers
   (`/tmp/audit-mediacodec-surface.log`, RC=0).
 
+### Runtime checkpoint 164 — 2026-09-08
+
+- Extended MediaCodec acceptance toward decoded-frame posting and retained
+  producer snapshots for asynchronous callbacks. The strict run currently
+  reaches Java VP9 `configure` but stalls before its completion marker,
+  exposing an unresolved configure/fromSurface boundary. The implementation
+  remains uncommitted until that hang is fixed.
+
 ### Runtime checkpoint 162 — 2026-09-08
 
 - Fresh standard audit on the current host passes the required Surface
