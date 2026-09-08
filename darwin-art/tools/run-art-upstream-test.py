@@ -1697,18 +1697,29 @@ def main() -> int:
             )
 
         def backend_default_build(kwargs: dict[str, object]) -> None:
-            restore_raw_dex()
-            if kwargs.get("use_hiddenapi", False):
-                hiddenapi_flags = source_test_root / "hiddenapi-flags.csv"
-                if not hiddenapi_flags.is_file():
-                    raise RuntimeError(
-                        f"hidden-api build is missing flags: {hiddenapi_flags}")
-                command([
-                    "python3", str(root / "tools/encode-hiddenapi-dex.py"),
-                    "--api-flags", str(hiddenapi_flags),
-                    *map(str, dex_payloads),
-                ])
-            write_test_jars()
+            # The typed build contract can invoke the default action in
+            # multiple corpus workers at once. That action rebuilds shared
+            # boot-support artifacts (notably unsafe-boot-dex); without a
+            # cross-process lock one worker can remove/replace the artifact
+            # while another ART instance is resolving its boot class path.
+            # Keep per-test DEX restoration/jar writes inside the same short
+            # critical section, preserving deterministic AOSP build ordering.
+            bootstrap_lock = root / "_build/art-upstream-test/bootstrap.lock"
+            bootstrap_lock.parent.mkdir(parents=True, exist_ok=True)
+            with bootstrap_lock.open("a+b") as lock_file:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                restore_raw_dex()
+                if kwargs.get("use_hiddenapi", False):
+                    hiddenapi_flags = source_test_root / "hiddenapi-flags.csv"
+                    if not hiddenapi_flags.is_file():
+                        raise RuntimeError(
+                            f"hidden-api build is missing flags: {hiddenapi_flags}")
+                    command([
+                        "python3", str(root / "tools/encode-hiddenapi-dex.py"),
+                        "--api-flags", str(hiddenapi_flags),
+                        *map(str, dex_payloads),
+                    ])
+                write_test_jars()
 
         if prebuilt_test_jar is not None:
             # ``build.py`` is intentionally a no-op for these fixtures; the
