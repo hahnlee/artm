@@ -2589,7 +2589,12 @@ def main() -> int:
                     owner_candidates.append((overlap, -len(encoded), str(source), source))
             if owner_candidates:
                 owner_candidates.sort(reverse=True)
-                native_sources.append(owner_candidates[0][3])
+                # A target may consume JNI entry points from multiple sibling
+                # members of AOSP's shared libarttest archive. Select every
+                # owner that contributes a declared Main method instead of
+                # arbitrarily keeping only the highest-overlap source.
+                for _, _, _, owner in owner_candidates:
+                    native_sources.append(owner)
 
         # AOSP native test targets may list helper implementations separately
         # from a selected source (for example classes_art.cc includes the

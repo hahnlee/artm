@@ -4707,6 +4707,14 @@ added; the full corpus and multi-loader identity task remain open.
   Coverage includes monitor/event JVMTI, frame-pop and breakpoint/redefine
   behavior, checker bounds/loop vectorization, and structural transformation.
 
+### Runtime checkpoint 181 — 2026-09-08
+
+- Fixed generic native-owner discovery in `run-art-upstream-test.py`: when an
+  AOSP test declares JNI methods implemented by multiple sibling
+  `libarttest` members, all matching owners are linked instead of selecting
+  one arbitrarily. `2262-default-conflict-methods` now passes interpreter,
+  JIT, and unchanged-source optimized lanes.
+
 ### Runtime checkpoint 173 — 2026-09-08
 
 - Fresh four-worker corpus reruns completed 25/25 executable contracts in

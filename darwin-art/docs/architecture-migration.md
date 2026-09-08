@@ -9617,3 +9617,10 @@ or admission exception was added.
   pass all execution lanes, validating monitor/event JVMTI, frame-pop and
   breakpoint/redefinition, checker bounds/vectorization, and structural
   transformation paths.
+
+### Runtime checkpoint 181 — 2026-09-08
+
+- Generalized native-owner discovery to link every sibling libarttest source
+  contributing a declared JNI entry point. This resolves the missing
+  `GetMethodId` symbol in `2262-default-conflict-methods`; all interpreter,
+  JIT, and unchanged optimized lanes now pass without a test-name exception.
