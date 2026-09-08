@@ -6961,3 +6961,7 @@ incomplete and still requires managed caller unwind validation.
   installed trampoline together with its guest ELF target and method name into
   the shared unwind registry. Graphics link audit passes; the next 137-cfi run
   must verify that the pair is consumed during stopped-thread symbolization.
+- Checkpoint 459: proxy trampoline publication compiles and links, but the
+  137-cfi run remains `stdout=630/630` mismatch. No observable improvement is
+  claimed yet; the test's native registration is still outside the provider
+  callback instance used by this runtime.
