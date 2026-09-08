@@ -4922,3 +4922,10 @@ added; the full corpus and multi-loader identity task remain open.
   0 and the complete generated-header set. This is now a stable prerequisite
   for retrying loader-aware DexCache changes; `497` remains the only known
   class-loader failure.
+
+### Runtime checkpoint 207 — 2026-09-08
+
+- The mapped-byte clone prototype compiled with serialized shadow publication,
+  but `497` still produced the same NPE. The unverified global clone lifetime
+  path was removed; clean graphics bootstrap passes. The remaining gap is the
+  ClassLinker class-definition/cache association.

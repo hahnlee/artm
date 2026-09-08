@@ -9808,3 +9808,10 @@ or admission exception was added.
   bootstrap owners; both exited successfully with generated headers intact.
   The build publication layer is ready for the next loader-aware DexCache
   implementation, while `497` remains unresolved.
+
+### Runtime checkpoint 207 — 2026-09-08
+
+- The mapped-byte clone prototype compiled with serialized shadow publication,
+  but `497` still produced the same NPE. The unverified global clone lifetime
+  path was removed; clean graphics bootstrap passes. The remaining gap is the
+  ClassLinker class-definition/cache association.
