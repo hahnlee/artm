@@ -6052,3 +6052,10 @@ added; the full corpus and multi-loader identity task remain open.
   smoke provider was rejected and reverted. The provider graph is back to a
   passing link audit; the next implementation needs a real runtime owner for
   DexFile support rather than unresolved static dependencies.
+
+### Runtime checkpoint 338 — 2026-09-09
+
+- Removed the stale `DexFiles.cpp` portable-object experiment. Forcing an
+  incomplete owner graph made the standalone smoke process crash, so no
+  partial implementation was retained. A real ART-owned DexFiles provider
+  with complete MemMap/ZipArchive dependencies is still required.

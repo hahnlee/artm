@@ -10810,3 +10810,10 @@ or admission exception was added.
   standalone provider still cannot enable the full DexFile implementation
   because its smoke link lacks the libdexfile owner; AOT frame-name resolution
   therefore remains an explicit open item.
+
+### Runtime checkpoint 338 — 2026-09-09
+
+- Reverted the stale `DexFiles.cpp` portable-object experiment. Forcing the
+  incomplete libdexfile owner graph crashed the standalone unwind smoke
+  process, so the partial change was not accepted. A complete ART-owned
+  DexFiles provider, including MemMap/ZipArchive owners, remains required.

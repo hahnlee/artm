@@ -6,7 +6,6 @@ use crate::native_build::{PendingNativeCompile, common_cpp_command, compile_pend
 // of this archive so platform work cannot silently fork the DWARF/ELF engine.
 const PORTABLE_SOURCES: &[&str] = &[
     "ArmExidx.cpp",
-    "DexFiles.cpp",
     "DwarfCfa.cpp",
     "DwarfEhFrameWithHdr.cpp",
     "DwarfMemory.cpp",
