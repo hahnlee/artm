@@ -10017,3 +10017,12 @@ or admission exception was added.
   VarHandle matrix, tracing/single-step, LSE operations, checker transforms,
   write-barrier elimination, and smali boundary checks. Remaining corpus and
   real-app validation remain pending.
+
+### Runtime checkpoint 233 — 2026-09-08
+
+- The `416-optimizing-arith-not`–`449-checker-bce-rem` slice passed all 38
+  tests, covering optimizing arithmetic/constants, large frames, type/call/
+  monitor/bitwise/bounds paths, SSA/register slow paths, type propagation,
+  invoke/shifter operands, allocation/finally, volatile/NPE, checker
+  inlining/folding/NCE/LICM, multiple returns, and BCE. Remaining corpus and
+  real-app validation remain pending.

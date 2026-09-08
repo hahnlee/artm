@@ -5082,6 +5082,17 @@ added; the full corpus and multi-loader identity task remain open.
   and allocation tracking stress. Remaining corpus and real-app validation
   are pending.
 
+### Runtime checkpoint 233 — 2026-09-08
+
+- The `416-optimizing-arith-not`–`449-checker-bce-rem` slice passed all 38
+  tests, covering const-string/class, long parameters, exceptions/large
+  frames, instanceof/conversion/call forms, monitor/bitwise/bounds, SSA and
+  register slow paths, type propagation/CMP/GVN, invoke-direct and shifter
+  operands, allocation/try-finally, float remainder/shifts, volatile/NPE and
+  double swaps, checker inlining/folding/NCE/LICM, multiple returns, and
+  bounds-check elimination. Remaining corpus and real-app validation remain
+  pending.
+
 ### Runtime checkpoint 231 — 2026-09-08
 
 - The `2250-inline-throw-into-try`–`2275-pthread-name` slice passed all 31
