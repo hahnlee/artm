@@ -4750,3 +4750,12 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter, JIT, and unchanged-source optimized lanes. Coverage includes
   huge native allocation, cleaner/reference processing, stack traces,
   userfaultfd handling, checker lowering, and native-registry validation.
+
+### Runtime checkpoint 186 — 2026-09-08
+
+- Fresh reruns of the `114`–`175` slice pass every contract except one
+  known-flaky `149-suspend-all-stress` attempt; a subsequent isolated rerun
+  passes interpreter, JIT, and unchanged-source optimized lanes. The slice
+  validates GC/class loading, native bridge, class unloading, multi-loader
+  registration, lock ownership, and allocation stress without a persistent
+  failure.

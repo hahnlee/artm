@@ -9650,3 +9650,10 @@ or admission exception was added.
   interpreter, JIT, and unchanged optimized lanes, validating large native
   allocation, cleaner/reference processing, stack traces, userfaultfd,
   checker lowering, and native registry behavior.
+
+### Runtime checkpoint 186 — 2026-09-08
+
+- The fresh `114`–`175` execution slice passed every contract apart from one
+  known-flaky `149-suspend-all-stress` attempt; an isolated rerun then passed
+  all three lanes. This validates GC/class loading, native bridge, unloading,
+  multi-loader registration, lock ownership, and allocation stress behavior.
