@@ -6965,3 +6965,7 @@ incomplete and still requires managed caller unwind validation.
   137-cfi run remains `stdout=630/630` mismatch. No observable improvement is
   claimed yet; the test's native registration is still outside the provider
   callback instance used by this runtime.
+- Checkpoint 460: added an AOSP `jni_internal.cc` publication hook immediately
+  after `ClassLinker::RegisterNative`, covering direct host `JNIEnv::RegisterNatives`
+  calls that bypass the guest proxy. Incremental graphics audit passes; 137-cfi
+  still needs a fresh run against this new runtime object.
