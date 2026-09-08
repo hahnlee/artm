@@ -9479,6 +9479,11 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 273 — 2026-09-08
+
+- Post-ELF-lifecycle regression: corpus ledger is 1,075/1,075 passed, and
+  Calculator/DeskClock real APK graphics/input acceptance remains green.
+
 ### Runtime checkpoint 272 — 2026-09-08
 
 - SurfaceControl capture confirms Snapseed's default managed path publishes an

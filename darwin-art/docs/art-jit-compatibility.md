@@ -5153,6 +5153,13 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 273 — 2026-09-08
+
+- Regression sweep after ELF page/lifecycle changes: the authoritative corpus
+  ledger contains 1,075 results, all `passed`. Real Calculator and DeskClock
+  graphics acceptance remains green (`2+3=5`, Timer interaction, HWUI +
+  SurfaceFlinger + Metal).
+
 ### Runtime checkpoint 272 — 2026-09-08
 
 - SurfaceControl pixel-capture run confirms the default Snapseed path creates
