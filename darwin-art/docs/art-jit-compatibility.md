@@ -5075,6 +5075,25 @@ added; the full corpus and multi-loader identity task remain open.
   arithmetic, new-array, regalloc, and static fields. Remaining corpus and
   real-app validation are pending.
 
+### Runtime checkpoint 239 — 2026-09-08
+
+- The `530-checker-instance-of-simplifier`–`537-checker-jump-over-jump` slice
+  passed all 28 tests, covering loop/LSE optimization, SIMD and unrolling,
+  instanceof/checkcast, debug/deoptimization, array stores/copy, intrinsic
+  and constant folding, access checks, and inline/unverified control flow.
+  Remaining corpus and real-app validation are pending.
+
+### Runtime checkpoint 241 — 2026-09-08
+
+- The `577-checker-fp2int`–`599-checker-irreducible-loop` slice passed all 39
+  tests, covering floating-point conversion/rounding, BCE, polymorphic and
+  unresolved inlining, CRC32, RTP and null-array checks, class errors,
+  super/IMT dispatch, infinite/dead loops, primitive conversions and shifts,
+  alias and irreducible-loop analysis, string loading, profile saving,
+  app-images/class-loader identity, monitor inflation, busy-loop/invoke/new-
+  string deoptimization, error classes, and SSA phi dominance. Remaining
+  corpus and real-app validation are pending.
+
 ### Runtime checkpoint 240 — 2026-09-08
 
 - The `562-bce-preheader`–`576-polymorphic-inlining` slice passed all 25

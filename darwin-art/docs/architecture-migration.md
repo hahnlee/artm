@@ -10029,6 +10029,14 @@ or admission exception was added.
   memory-couple optimizations, backward loops, and contended monitors.
   Remaining corpus and real-app validation remain pending.
 
+### Runtime checkpoint 241 — 2026-09-08
+
+- The `577-checker-fp2int`–`599-checker-irreducible-loop` slice passed all 39
+  tests, covering FP conversion, BCE and inlining, CRC32/RTP, dispatch and
+  loop handling, primitive/alias analysis, profiles and app images, class
+  loaders, monitor inflation, and deoptimization. Remaining corpus and
+  real-app validation remain pending.
+
 ### Runtime checkpoint 232 — 2026-09-08
 
 - The `2276-const-method-type-gc-cleanup`–`414-static-fields` range passed all
