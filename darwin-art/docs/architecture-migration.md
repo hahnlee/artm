@@ -9651,6 +9651,14 @@ or admission exception was added.
   assertion is intentionally not claimed until a media file is supplied or
   generated through the test harness.
 
+### Runtime checkpoint 306 — 2026-09-08
+
+- Generated a small H.264/AAC fixture and placed it in VLC's recovery-profile
+  external directory. VLC launched with exit 0, but the headless launcher did
+  not emit a playback/decoder event; only startup and surface assertions remain
+  proven. The fixture is retained for a future physical-file-picker/intent
+  test, and no APK was modified.
+
 ### Runtime checkpoint 301 — 2026-09-08
 
 - Recovery profile app coverage expanded without APK changes: Snapseed
