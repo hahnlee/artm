@@ -6972,3 +6972,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 461: full runtime bootstrap includes the direct JNI hook and passes;
   a fresh 137-cfi run is still `stdout=630/630` mismatch. The hook is therefore
   not sufficient to recover the expected stopped-thread native frame sequence.
+- Checkpoint 462: corrected the 0176 patch hunk format and verified it with
+  `patch --dry-run`; the staged bootstrap remains green. The generated archive
+  was cache-reused, so symbol presence still requires an invalidated clean
+  object build before claiming runtime behavior changed.

@@ -1,18 +1,16 @@
 diff --git a/runtime/jni/jni_internal.cc b/runtime/jni/jni_internal.cc
 --- a/runtime/jni/jni_internal.cc
 +++ b/runtime/jni/jni_internal.cc
-@@ -70,6 +70,10 @@
+@@ -70,5 +70,8 @@
  #include "well_known_classes.h"
  
  namespace art HIDDEN {
 +#if defined(__APPLE__)
-+extern "C" void darwin_art_register_native_method(uintptr_t entrypoint,
-+                                                   const char* name);
++extern "C" void darwin_art_register_native_method(uintptr_t entrypoint, const char* name);
 +#endif
  
  static constexpr size_t kMonitorsInitialSize = 256;
-@@ -2715,6 +2719,11 @@
-       }
+@@ -2714,3 +2714,8 @@
        const void* final_function_ptr = class_linker->RegisterNative(soa.Self(), m, fnPtr);
        UNUSED(final_function_ptr);
 +#if defined(__APPLE__)
@@ -21,13 +19,3 @@ diff --git a/runtime/jni/jni_internal.cc b/runtime/jni/jni_internal.cc
 +          m->PrettyMethod(/*with_signature=*/false).c_str());
 +#endif
      }
-*** Update File: /Users/hahnlee/Work/android-vm-poc/darwin-art/crates/art-bootstrap/src/runtime_bootstrap/manifest.rs
-@@
-     "class_linker.cc",
-     "class_linker.h",
-     "class_loader_context.cc",
-+    "jni/jni_internal.cc",
-@@
-     "patches/art/0175-darwin-publish-native-registration.patch",
-+    "patches/art/0176-darwin-publish-jni-internal-registration.patch",
- ];
