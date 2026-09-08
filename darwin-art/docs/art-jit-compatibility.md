@@ -6212,6 +6212,13 @@ added; the full corpus and multi-loader identity task remain open.
   fails, so the next step is publishing the JIT code-cache debugger identity;
   no unconditional alias was added.
 
+### Runtime checkpoint 359 — 2026-09-09
+
+- Candidate tracing confirmed `base + 0x210dxxx` lands in an anonymous RW
+  mapping (`flags=3`), not executable code. The executable-map guard correctly
+  rejects it; the low PC needs an exact producer-side identity fix rather than
+  further unwinder aliasing.
+
 ### Runtime checkpoint 358 — 2026-09-09
 
 - Tightened the promotion predicate to require an executable `MapInfo`, not
