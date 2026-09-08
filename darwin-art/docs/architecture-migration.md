@@ -10037,6 +10037,15 @@ or admission exception was added.
   loaders, monitor inflation, and deoptimization. Remaining corpus and
   real-app validation remain pending.
 
+### Runtime checkpoint 242 — 2026-09-08
+
+- The `600-verifier-fails`–`625-checker-licm-regressions` slice passed all 35
+  tests, covering verifier/access failures, deoptimization, class/string
+  handling, daemon stress, interface and bounds inlining, dex caches, CHA
+  dispatch/unloading, clinit OOME, induction/BCE/loop regressions, string
+  operations, and LICM. Remaining corpus and real-app validation remain
+  pending.
+
 ### Runtime checkpoint 232 — 2026-09-08
 
 - The `2276-const-method-type-gc-cleanup`–`414-static-fields` range passed all

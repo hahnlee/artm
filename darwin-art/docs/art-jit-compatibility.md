@@ -5086,6 +5086,32 @@ added; the full corpus and multi-loader identity task remain open.
 ### Runtime checkpoint 241 — 2026-09-08
 
 - The `577-checker-fp2int`–`599-checker-irreducible-loop` slice passed all 39
+  tests, covering FP conversion, BCE/inlining, CRC32/RTP, dispatch and loops,
+  profile/app-image handling, class-loader identity, monitor inflation, and
+  busy-loop/invoke/new-string deoptimization. Remaining corpus and real-app
+  validation are pending.
+
+### Runtime checkpoint 242 — 2026-09-08
+
+- The `600-verifier-fails`–`625-checker-licm-regressions` slice passed all 35
+  tests, covering verifier and method access failures, deoptimizeable methods,
+  instanceof/new-string/error classes, daemon stress, unresolved/interface
+  inlining, bounds and arraycopy, JIT/inlining dex caches, CHA dispatch and
+  unloading, clinit OOME, induction/current-method checks, BCE and loop
+  regressions, string operations, and LICM. Remaining corpus and real-app
+  validation are pending.
+
+### Runtime checkpoint 239 — 2026-09-08
+
+- The `530-checker-instance-of-simplifier`–`537-checker-jump-over-jump` slice
+  passed all 28 tests, covering loop/LSE optimization, SIMD and unrolling,
+  instanceof/checkcast, debug/deoptimization, array stores/copy, intrinsic
+  and constant folding, access checks, and inline/unverified control flow.
+  Remaining corpus and real-app validation are pending.
+
+### Runtime checkpoint 241 — 2026-09-08
+
+- The `577-checker-fp2int`–`599-checker-irreducible-loop` slice passed all 39
   tests, covering floating-point conversion/rounding, BCE, polymorphic and
   unresolved inlining, CRC32, RTP and null-array checks, class errors,
   super/IMT dispatch, infinite/dead loops, primitive conversions and shifts,
