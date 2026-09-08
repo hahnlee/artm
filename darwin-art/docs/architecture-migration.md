@@ -11650,3 +11650,7 @@ or admission exception was added.
   `patch --dry-run`; the staged bootstrap remains green. The generated archive
   was cache-reused, so symbol presence still requires an invalidated clean
   object build before claiming runtime behavior changed.
+- Checkpoint 463: revalidated the corrected patch against the pinned AOSP tree;
+  both hunks apply cleanly. Bootstrap still reuses the existing 256-object
+  archive, so direct hook execution remains unproven until the cache identity
+  is invalidated by the build graph.
