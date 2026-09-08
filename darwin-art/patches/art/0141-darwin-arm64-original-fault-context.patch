@@ -66,17 +66,17 @@ diff --git a/runtime/fault_handler.cc b/runtime/fault_handler.cc
  // These need to be NO_INLINE since some debuggers do not read the inline-info to set a breakpoint
  // if they aren't.
  extern "C" NO_INLINE __attribute__((visibility("default"))) void art_sigsegv_fault() {
-@@ -302,6 +353,10 @@ bool FaultManager::HandleSigsegvFault(int sig, siginfo_t* info, void* context) {
-     CheckForUnrecognizedImplicitSuspendCheckInBootImage(info, context);
+@@ -311,6 +362,10 @@ bool FaultManager::HandleSigsegvFault(int sig, siginfo_t* info, void* context) {
+     return true;
    }
  
 +#if defined(__APPLE__) && defined(__aarch64__)
 +  DumpDarwinOriginalFaultContext(info, context);
 +#endif
 +
-   // We hit a signal we didn't handle.  This might be something for which
-   // we can give more information about so call all registered handlers to
-   // see if it is.
+   // Set a breakpoint in this function to catch unhandled signals.
+   art_sigsegv_fault();
+   return false;
 @@ -626,6 +681,14 @@ JavaStackTraceHandler::JavaStackTraceHandler(FaultManager* manager) : FaultHand
  }
  
