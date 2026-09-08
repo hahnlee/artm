@@ -54,12 +54,7 @@ namespace {
 // is actually mapped; this avoids inventing aliases for unrelated low PCs.
 constexpr uint64_t kDarwinArtCompressedReferenceBase = 0x0000010000000000ULL;
 
-uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc) {
-  if (maps == nullptr || pc >= (1ULL << 32)) return pc;
-  const uint64_t candidate = kDarwinArtCompressedReferenceBase + pc;
-  const auto mapping = maps->Find(candidate);
-  return mapping != nullptr && (mapping->flags() & PROT_EXEC) != 0 ? candidate : pc;
-}
+uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc);
 
 struct DarwinAotCodeRange {
   uint64_t start;
@@ -69,6 +64,28 @@ struct DarwinAotCodeRange {
 };
 std::mutex g_aot_ranges_mutex;
 std::vector<DarwinAotCodeRange> g_aot_ranges;
+struct DarwinCodeAddressPair {
+  uint64_t logical;
+  uint64_t host;
+};
+std::vector<DarwinCodeAddressPair> g_code_address_pairs;
+
+uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc) {
+  if (maps == nullptr || pc >= (1ULL << 32)) return pc;
+  {
+    std::lock_guard<std::mutex> lock(g_aot_ranges_mutex);
+    for (const auto& pair : g_code_address_pairs) {
+      if (pc >= pair.logical && pc - pair.logical < (1ULL << 20)) {
+        const uint64_t candidate = pair.host + (pc - pair.logical);
+        const auto mapping = maps->Find(candidate);
+        if (mapping != nullptr && (mapping->flags() & PROT_EXEC) != 0) return candidate;
+      }
+    }
+  }
+  const uint64_t candidate = kDarwinArtCompressedReferenceBase + pc;
+  const auto mapping = maps->Find(candidate);
+  return mapping != nullptr && (mapping->flags() & PROT_EXEC) != 0 ? candidate : pc;
+}
 
 DarwinArtQuickFrameSlot* FindLocalQuickFrameSlot(uint64_t thread_id, bool claim) {
   const size_t first = thread_id % kDarwinArtQuickFrameRegistrySlots;
@@ -105,6 +122,15 @@ bool ReadLocalQuickFrame(uint64_t thread_id, uint64_t* managed_sp, uint64_t* fra
 }
 
 }  // namespace
+
+extern "C" void darwin_art_register_code_address(uintptr_t logical, uintptr_t host) {
+  if (logical == 0 || host == 0 || logical >= (1ULL << 32)) return;
+  std::lock_guard<std::mutex> lock(g_aot_ranges_mutex);
+  for (const auto& pair : g_code_address_pairs) {
+    if (pair.logical == logical && pair.host == host) return;
+  }
+  g_code_address_pairs.push_back({logical, host});
+}
 
 namespace unwindstack {
 

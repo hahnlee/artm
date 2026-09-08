@@ -146,6 +146,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0166-darwin-oat-quick-code-host-address.patch",
     "patches/art/0167-darwin-art-method-entrypoint-window.patch",
     "patches/art/0168-darwin-instrumentation-entrypoint-host-address.patch",
+    "patches/art/0170-darwin-register-entrypoint-pairs.patch",
 ];
 
 #[cfg(test)]

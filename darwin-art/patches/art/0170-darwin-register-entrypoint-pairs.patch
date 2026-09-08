@@ -1,0 +1,18 @@
+diff --git a/runtime/art_method.h b/runtime/art_method.h
+--- a/runtime/art_method.h
++++ b/runtime/art_method.h
+@@ -790,10 +790,14 @@
+   ALWAYS_INLINE
+   const void* GetEntryPointFromQuickCompiledCodePtrSize(PointerSize pointer_size) const {
+     const void* entry_point = GetNativePointer<const void*>(
+         EntryPointFromQuickCompiledCodeOffset(pointer_size), pointer_size);
+ #if defined(__APPLE__)
++    extern void darwin_art_register_code_address(uintptr_t logical, uintptr_t host);
++    darwin_art_register_code_address(reinterpret_cast<uintptr_t>(entry_point),
++                                     ArtCompressedReferenceToHostAddress(
++                                         reinterpret_cast<uintptr_t>(entry_point)));
+     entry_point = reinterpret_cast<const void*>(ArtCompressedReferenceToHostAddress(
+         reinterpret_cast<uintptr_t>(entry_point)));
+ #endif
+     return entry_point;
+   }

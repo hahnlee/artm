@@ -6455,3 +6455,11 @@ added; the full corpus and multi-loader identity task remain open.
   not change `137-cfi`: the failing frames are app-OAT logical PCs, not missing
   JIT-cache map entries. The experiment was removed; the next fix must publish
   the OAT method logical/host pair at the entrypoint boundary.
+
+### Runtime checkpoint 390 — 2026-09-09
+
+- Added metadata-driven entrypoint-pair publication from the Darwin
+  `ArtMethod` quick-entry getter and host unwind normalization. The runtime
+  bootstrap succeeds, but `137-cfi` still fails, so the pair is not yet the
+  authoritative address observed in the generic-JNI saved LR. This remains an
+  active ABI investigation; no fallback or allowlist was added.

@@ -33,6 +33,7 @@ struct DarwinArtQuickFrameRegistry {
 };
 
 extern "C" DarwinArtQuickFrameRegistry darwin_art_unwindstack_quick_frames;
+extern "C" void darwin_art_register_code_address(uintptr_t logical, uintptr_t host);
 extern "C" void darwin_art_unwindstack_set_art_main_thread();
 extern "C" void darwin_art_unwindstack_push_quick_frame(void* managed_sp);
 extern "C" void darwin_art_unwindstack_push_compiled_quick_frame(void* managed_sp,

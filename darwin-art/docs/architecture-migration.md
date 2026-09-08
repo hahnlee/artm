@@ -11175,3 +11175,10 @@ or admission exception was added.
   the failing frames are app-OAT logical PCs rather than absent JIT-cache maps.
   The experiment was removed; OAT method logical/host publication at the
   entrypoint boundary is the next implementation target.
+
+### Runtime checkpoint 390 — 2026-09-09
+
+- Added metadata-driven quick-entry logical/host pair publication and unwind
+  normalization. Runtime bootstrap succeeds, but `137-cfi` still fails because
+  the generic-JNI saved LR is not yet matched to the published pair. ABI
+  investigation remains active; no fallback or allowlist was added.
