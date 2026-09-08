@@ -10752,3 +10752,11 @@ or admission exception was added.
   The host-specific exception now leaves the real 32-bit stack-map invariant
   checked at formation. Rebuilt runtime/link artifacts and re-ran
   `004-InterfaceTest`; optimized JIT execution passes.
+
+### Runtime checkpoint 331 — 2026-09-08
+
+- A fresh four-way run of the first 50 pinned AOSP tests passes 50/50 after
+  the MAP_JIT placement fix. Coverage includes control flow, interfaces,
+  allocation, JNI, exceptions, arrays, class-init deadlock, finalization,
+  stack overflow, and thread stress; full corpus and real-app validation are
+  still outstanding.

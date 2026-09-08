@@ -5990,3 +5990,12 @@ added; the full corpus and multi-loader identity task remain open.
   pointers and only local stack-map offsets are 32-bit. The check is now
   scoped to the actual 32-bit field; runtime/link rebuilds pass and
   `004-InterfaceTest` succeeds through optimized JIT execution.
+
+### Runtime checkpoint 331 — 2026-09-08
+
+- Re-ran the first 50 pinned AOSP corpus inputs on the repaired runtime with a
+  fresh ledger and four-way parallelism. All 50 passed, including opcode,
+  control-flow, interfaces, allocation, JNI, exception, array, class-init
+  deadlock, finalizer, stack-overflow, and thread-stress cases. This is strong
+  regression evidence, but the remaining corpus and real-app criteria stay
+  open.
