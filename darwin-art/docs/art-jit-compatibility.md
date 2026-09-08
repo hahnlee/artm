@@ -6088,3 +6088,11 @@ added; the full corpus and multi-loader identity task remain open.
   `fake-symbols=0`. The standalone smoke remains intentionally contract-only;
   a direct ad-hoc DexFile executable requires the complete runtime foundation
   closure, so APK-level metadata lookup is still an explicit next test.
+
+### Runtime checkpoint 342 — 2026-09-09
+
+- Confirmed the separated production owner is consumed by the real graphics
+  runtime link and existing AOSP app-Dex/native-load checks pass. A direct
+  `DexFile::Create` executable requires the complete production foundation
+  closure, so the next validation must invoke metadata lookup through that
+  runtime rather than add ad-hoc replacement symbols.

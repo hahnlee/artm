@@ -10845,3 +10845,11 @@ or admission exception was added.
   smoke remains contract-only by design; direct DexFile execution needs the
   complete runtime foundation closure, so APK metadata lookup remains the next
   validation target.
+
+### Runtime checkpoint 342 — 2026-09-09
+
+- Confirmed the separated production owner is consumed by the real graphics
+  runtime link and existing AOSP app-Dex/native-load checks pass. A direct
+  `DexFile::Create` executable requires the complete production foundation
+  closure, so the next validation must invoke metadata lookup through that
+  runtime rather than add ad-hoc replacement symbols.
