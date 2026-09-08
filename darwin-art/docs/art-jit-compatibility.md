@@ -5153,6 +5153,12 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 275 — 2026-09-08
+
+- Post-install-cache regression passes: `cargo fmt --all -- --check` and the
+  Calculator/DeskClock real-APK acceptance both pass after provisioning the
+  writable `oat/arm64` directory.
+
 ### Runtime checkpoint 274 — 2026-09-08
 
 - Installer now provisions a writable Android-style `oat/arm64` code-cache
