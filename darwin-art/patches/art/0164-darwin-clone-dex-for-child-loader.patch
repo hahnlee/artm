@@ -68,5 +68,6 @@ index 0000000..0000000 100644
                                                                 descriptor.length(),
                                                                 hash,
                                                                 class_loader,
-                                                               *defining_dex,
+-                                                               *dex_file,
++                                                               *defining_dex,
                                                                 *dex_class_def);

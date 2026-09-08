@@ -9843,6 +9843,13 @@ or admission exception was added.
   Investigation remains focused on post-registration class association;
   temporary diagnostic logging was discarded.
 
+### Runtime checkpoint 213 — 2026-09-08
+
+- Root cause fixed: clone registration previously succeeded but
+  `DexFile_defineClassNative` still supplied the original DexFile to
+  `ClassLinker::DefineClass`. Passing `defining_dex` fixes the association;
+  fresh relink and all three `497` lanes now pass.
+
 ### Runtime checkpoint 212 — 2026-09-08
 
 - A one-shot callback trace showed `LLoadedByMyClassLoader` never reaches

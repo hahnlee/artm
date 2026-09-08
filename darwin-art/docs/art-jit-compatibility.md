@@ -4957,6 +4957,13 @@ added; the full corpus and multi-loader identity task remain open.
   The remaining defect is narrowed to post-registration class association;
   temporary diagnostic logging was discarded.
 
+### Runtime checkpoint 213 — 2026-09-08
+
+- Root cause fixed: the clone was registered but `DexFile_defineClassNative`
+  still passed the original DexFile into `ClassLinker::DefineClass`. The
+  canonical patch now passes `defining_dex`/clone, and fresh relink plus
+  `497-inlining-and-class-loader` passes interpreter, JIT, and optimized lanes.
+
 ### Runtime checkpoint 212 — 2026-09-08
 
 - A one-shot callback trace confirmed that `LLoadedByMyClassLoader` never
