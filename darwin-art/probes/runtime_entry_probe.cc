@@ -891,6 +891,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
   jclass network_fixture_class = app_classes.network_fixture;
   art::Handle<art::mirror::Class> hello =
       hs.NewHandle(soa.Decode<art::mirror::Class>(hello_class));
+  if (std::getenv("DARWIN_ART_TEST_SURFACE_LOCK_CANVAS") != nullptr &&
+      !darwin_art_presentation::verify_software_surface_canvas(env)) {
+    std::cerr << "ART Android Surface: Java software Canvas acceptance failed\n";
+    return 39;
+  }
   if (std::getenv("DARWIN_ART_UPSTREAM_MAIN") != nullptr) {
     // This harness is the Darwin equivalent of AOSP's dalvikvm command, not
     // an Activity process. Its shutdown must follow AndroidRuntime exactly.

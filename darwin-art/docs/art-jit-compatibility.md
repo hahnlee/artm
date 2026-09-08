@@ -4550,3 +4550,12 @@ added; the full corpus and multi-loader identity task remain open.
   Nterp work; all workspace unit and doc tests completed successfully. This
   is regression evidence only and does not replace the remaining AOSP corpus
   and real-application compatibility gates.
+
+### Runtime checkpoint 160 — 2026-09-08
+
+- Closed the framework Surface software-Canvas producer gap. Detached Java
+  `Surface` instances now receive a distinct managed ANativeWindow producer
+  pointer (not a synthetic token), and the focused lockCanvas → Canvas bind →
+  dirty-clip → unlockCanvasAndPost → release acceptance passes (`RC=0`,
+  `/tmp/audit-surface-lock.log`). The broader VLC/full-application matrix
+  remains open.

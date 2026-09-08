@@ -30,12 +30,6 @@ namespace darwin_art_presentation {
 
 namespace {
 
-std::atomic<jlong> g_next_java_surface_identity{0x1000};
-
-jlong NextJavaSurfaceIdentity() {
-  return g_next_java_surface_identity.fetch_add(1, std::memory_order_relaxed);
-}
-
 jobject find_view_root_for_decor(JNIEnv* env, jobject decor_view) {
   if (env == nullptr || decor_view == nullptr) return nullptr;
   jclass global_class = env->FindClass("android/view/WindowManagerGlobal");
@@ -340,13 +334,78 @@ void EnsureJavaSurfaceValid(JNIEnv* env, jobject surface) {
           : env->GetFieldID(surface_class, "mNativeObject", "J");
   if (native_object != nullptr &&
       env->GetLongField(surface, native_object) == 0) {
-    // Android assigns every BufferQueue producer its own native identity.
-    // Chromium keeps two SurfaceViews with different pixel formats and swaps
-    // between them; collapsing both to token 1 makes a later detach/switch
-    // invalidate the active producer.
-    env->SetLongField(surface, native_object, NextJavaSurfaceIdentity());
+    // AOSP stores a strong native Surface producer in mNativeObject, not an
+    // arbitrary identity token. Keep the same ownership shape: each Java
+    // Surface owns one distinct managed producer reference, which native
+    // lockCanvas and ANativeWindow_fromSurface can consume directly.
+    const jint host_width = darwin_art::DarwinAngleHostSurfaceWidth();
+    const jint host_height = darwin_art::DarwinAngleHostSurfaceHeight();
+    void* producer = darwin_art_android_ANativeWindow_create(
+        host_width > 0 ? host_width : 360,
+        host_height > 0 ? host_height : 640,
+        /*AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM=*/1);
+    if (producer != nullptr) {
+      env->SetLongField(surface, native_object,
+                        reinterpret_cast<jlong>(producer));
+      if (env->ExceptionCheck()) {
+        darwin_art_android_ANativeWindow_release(producer);
+      }
+    }
   }
   if (surface_class != nullptr) env->DeleteLocalRef(surface_class);
+}
+
+bool VerifySoftwareSurfaceCanvas(JNIEnv* env) {
+  jclass surface_class = env->FindClass("android/view/Surface");
+  jmethodID surface_constructor =
+      surface_class == nullptr
+          ? nullptr
+          : env->GetMethodID(surface_class, "<init>", "()V");
+  jobject surface = surface_constructor == nullptr
+                        ? nullptr
+                        : env->NewObject(surface_class, surface_constructor);
+  if (surface == nullptr || env->ExceptionCheck()) return false;
+  EnsureJavaSurfaceValid(env, surface);
+
+  jclass rect_class = env->FindClass("android/graphics/Rect");
+  jmethodID rect_constructor =
+      rect_class == nullptr
+          ? nullptr
+          : env->GetMethodID(rect_class, "<init>", "(IIII)V");
+  jobject dirty = rect_constructor == nullptr
+                      ? nullptr
+                      : env->NewObject(rect_class, rect_constructor, -8, -4,
+                                       72, 48);
+  jmethodID lock_canvas = env->GetMethodID(
+      surface_class, "lockCanvas",
+      "(Landroid/graphics/Rect;)Landroid/graphics/Canvas;");
+  jmethodID unlock_canvas = env->GetMethodID(
+      surface_class, "unlockCanvasAndPost", "(Landroid/graphics/Canvas;)V");
+  jmethodID release = env->GetMethodID(surface_class, "release", "()V");
+  jobject canvas = lock_canvas == nullptr || dirty == nullptr
+                       ? nullptr
+                       : env->CallObjectMethod(surface, lock_canvas, dirty);
+  bool passed = canvas != nullptr && !env->ExceptionCheck();
+  if (passed) {
+    env->CallVoidMethod(surface, unlock_canvas, canvas);
+    passed = !env->ExceptionCheck();
+  }
+  if (release != nullptr && !env->ExceptionCheck()) {
+    env->CallVoidMethod(surface, release);
+  }
+  if (!passed && env->ExceptionCheck()) {
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+  }
+  env->DeleteLocalRef(canvas);
+  env->DeleteLocalRef(dirty);
+  env->DeleteLocalRef(rect_class);
+  env->DeleteLocalRef(surface);
+  env->DeleteLocalRef(surface_class);
+  if (passed) {
+    std::cerr << "ART Android Surface: Java lockCanvas/unlockCanvasAndPost PASS\n";
+  }
+  return passed;
 }
 
 void EnsureViewRootSurfaceValid(JNIEnv* env, jobject view) {
@@ -709,6 +768,10 @@ bool attach_android_window(JNIEnv* env, jobject activity, jobject window,
 }
 
 }  // namespace
+
+bool verify_software_surface_canvas(JNIEnv* env) {
+  return VerifySoftwareSurfaceCanvas(env);
+}
 
 int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
          jclass probe_activity_class, jclass probe_context_class,

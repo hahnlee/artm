@@ -9473,3 +9473,10 @@ or admission exception was added.
 - Full Rust workspace tests (unit and doc tests) pass on the replacement host
   after Nterp enablement. The broader AOSP feature matrix and real-app gates
   remain open and are not waived by this regression run.
+
+### Runtime checkpoint 160 — 2026-09-08
+
+- Replaced synthetic Surface identities with managed producer pointers and
+  verified Android's public software Canvas lifecycle end to end. The
+  lock/bind/dirty-clip/post/release focused acceptance passes on the current
+  host; full VLC and application compatibility remain future work.

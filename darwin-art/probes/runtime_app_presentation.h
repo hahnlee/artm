@@ -10,6 +10,10 @@ class Thread;
 
 namespace darwin_art_presentation {
 
+// Exercises Android's public Surface software-Canvas contract against a real
+// managed producer, including native lock, Canvas binding, post, and release.
+bool verify_software_surface_canvas(JNIEnv* env);
+
 // Builds the detached Activity/PhoneWindow/DecorView hierarchy and presents its
 // Android-owned frame. All references created by this operation are released
 // before returning; the caller retains only the app bootstrap classes it owns.
