@@ -9972,6 +9972,16 @@ or admission exception was added.
   shadow method/field resolution. Remaining corpus and real-app validation
   remain pending.
 
+### Runtime checkpoint 235 — 2026-09-08
+
+- The `478-checker-inline-noreturn`–`514-shifts` slice passed all 38 tests,
+  covering inlining/calls/interfaces, current-method paths, instanceof and
+  checkcast, class-loader inlining, type propagation/BCE/phi, switches and
+  dead instructions, baseline/verifier/referrer behavior, checker disassembly,
+  pre-header/try-catch, interface clinit, array deopt, shifts, null-checks,
+  register hints, loop DCE, and implicit-null-check regressions. Remaining
+  corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 234 — 2026-09-08
 
 - The `450-checker-types`–`478-checker-clinit-check-pruning` slice passed all

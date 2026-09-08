@@ -5082,6 +5082,17 @@ added; the full corpus and multi-loader identity task remain open.
   and allocation tracking stress. Remaining corpus and real-app validation
   are pending.
 
+### Runtime checkpoint 235 — 2026-09-08
+
+- The `478-checker-inline-noreturn`–`514-shifts` slice passed all 38 tests.
+  Coverage includes inliner/recursive calls/interface calls, current-method
+  regressions, instance-of/checkcast, class-loader inlining, type propagation,
+  BCE/phi array length, packed switches, dead instructions, baseline entry,
+  verifier aput, boolean/referrer behavior, checker disassembly, pre-header
+  and try/catch, interface clinit, array deopt, shifts, null-check contracts,
+  register hints, loop DCE, and implicit-null-check regressions. Remaining
+  corpus and real-app validation are pending.
+
 ### Runtime checkpoint 234 — 2026-09-08
 
 - The `450-checker-types`–`478-checker-clinit-check-pruning` slice passed all
