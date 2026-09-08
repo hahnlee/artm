@@ -9278,3 +9278,10 @@ or admission exception was added.
   no `TabSwitcherButtonView`: toolbar hits resolve to `UrlBarApi26` or
   `avatar_button`. This is a Chrome tablet/window configuration issue, not a
   JIT or input dispatch fault.
+
+### Runtime checkpoint 133 — 2026-09-08
+
+- Physical-click probing confirms the runtime display contract is 720x1280 at
+  320 dpi (360x640 dp), but Chromium chooses a URL-bar/avatar-only toolbar and
+  does not instantiate `TabSwitcherButtonView`. Track this as a Chrome
+  configuration/harness mismatch; sustained JIT execution remains fault-free.

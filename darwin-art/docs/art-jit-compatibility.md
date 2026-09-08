@@ -4322,3 +4322,11 @@ added; the full corpus and multi-loader identity task remain open.
   only `avatar_button` in the top toolbar; x=440/500/560 hit `UrlBarApi26` and
   x=640 hit the avatar. `TabSwitcherButtonView` is not instantiated, pointing
   to a tablet/window configuration mismatch rather than input delivery.
+
+### Runtime checkpoint 133 — 2026-09-08
+
+- A clean physical-click probe confirmed the runtime publishes a 720x1280
+  display at 320 dpi (360x640 dp), while Chromium selects a toolbar containing
+  only URL-bar and avatar controls; `TabSwitcherButtonView` is absent. This is
+  now tracked as a Chrome configuration/harness issue separate from ART JIT;
+  the pre-special MAP_JIT recovery remains fault-free in sustained runs.
