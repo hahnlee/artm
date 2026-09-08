@@ -9678,3 +9678,10 @@ or admission exception was added.
   interpreter, JIT, and unchanged optimized lanes, covering OOM/GC, fields and
   arrays, class loading, verifier/monitor behavior, loops, reflection, and
   string concatenation.
+
+### Runtime checkpoint 190 — 2026-09-08
+
+- The fresh `176`–`183` slice passes all eight execution contracts across
+  interpreter, JIT, and unchanged optimized lanes, covering app-image
+  strings/native methods, nonvirtual JNI, default-method linking, deadlock
+  handling, and read-modify-write stress.

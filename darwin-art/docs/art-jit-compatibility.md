@@ -4782,3 +4782,11 @@ added; the full corpus and multi-loader identity task remain open.
   contracts in interpreter, JIT, and unchanged-source optimized lanes.
   OOM/GC, fields and arrays, class loading, verifier/monitor behavior, loops,
   reflection, and string concatenation paths all pass.
+
+### Runtime checkpoint 190 — 2026-09-08
+
+- Fresh four-worker execution of `176-app-image-string` through
+  `183-rmw-stress-test` passes all eight contracts in interpreter, JIT, and
+  unchanged-source optimized lanes. App-image strings/native methods,
+  nonvirtual JNI, default-method linking, deadlock handling, and read-modify-
+  write stress are covered.
