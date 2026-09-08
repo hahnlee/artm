@@ -4767,3 +4767,11 @@ added; the full corpus and multi-loader identity task remain open.
   Structural redefinition/obsolescence, JVMTI transforms, inlining and loop
   optimization, monitor/deoptimization, hidden API, and JNI file-channel
   paths all pass; stale audit failures in this slice do not reproduce.
+
+### Runtime checkpoint 188 — 2026-09-08
+
+- Isolated reruns of `542-unresolved-access-check`, `936-search-onload`, and
+  `938-load-transform-bcp` pass interpreter, JIT, and unchanged-source
+  optimized lanes. Access-check resolution, class-loader on-load search, and
+  boot-classpath transformation now have fresh evidence and no persistent
+  failure.

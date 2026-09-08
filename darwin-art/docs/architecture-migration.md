@@ -9664,3 +9664,10 @@ or admission exception was added.
   and unchanged optimized lanes. Structural redefinition/obsolescence, JVMTI
   transforms, inlining/loops, monitor and deoptimization, hidden API, and JNI
   file-channel behavior are all validated without reproducing stale failures.
+
+### Runtime checkpoint 188 — 2026-09-08
+
+- Isolated reruns of `542-unresolved-access-check`, `936-search-onload`, and
+  `938-load-transform-bcp` pass all three execution lanes, validating
+  access-check resolution, class-loader on-load search, and boot-classpath
+  transformation without a persistent failure.
