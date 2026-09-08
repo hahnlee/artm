@@ -9479,6 +9479,12 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 272 — 2026-09-08
+
+- SurfaceControl capture confirms Snapseed's default managed path publishes an
+  app surface and launches EditActivity with 309 JNI registrations, exit 0,
+  and no new diagnostic report.
+
 ### Runtime checkpoint 271 — 2026-09-08
 
 - Desktop capture retained an old macOS crash-report dialog after the host was

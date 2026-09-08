@@ -5153,6 +5153,12 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 272 — 2026-09-08
+
+- SurfaceControl pixel-capture run confirms the default Snapseed path creates
+  and publishes its app surface, reaches EditActivity, registers 309 JNI
+  methods, and exits 0. No new diagnostic report was produced.
+
 ### Runtime checkpoint 271 — 2026-09-08
 
 - Physical desktop capture after terminating the stale host shows the prior
