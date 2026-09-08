@@ -10901,3 +10901,9 @@ or admission exception was added.
   JIT ELF entries load. Real `137-cfi` PCs at `0x210dxxx` remain outside those
   JIT ranges and format as `<unknown>`. The next architectural work is
   AOT/boot-image PC-to-Dex metadata resolution.
+### Runtime checkpoint 349 — 2026-09-09
+
+- Unwinder diagnostics show AOT return PCs (`0x210d168`, `0x210d788`) are not
+  present in `Maps::Find`; JIT/Dex providers themselves are live. The next
+  architectural change is publishing ART guest/AOT code ranges to Darwin
+  `Maps` (or an equivalent oat-map source) so Dex metadata lookup can run.

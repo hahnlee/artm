@@ -6145,3 +6145,11 @@ added; the full corpus and multi-loader identity task remain open.
   JIT ranges and remain `<unknown>`, isolating the next work to AOT/boot-image
   PC-to-Dex metadata resolution rather than provider linkage. Diagnostic logs
   were removed after establishing this boundary.
+### Runtime checkpoint 349 — 2026-09-09
+
+- Targeted unwinder instrumentation established that the AOT return PCs
+  (`0x210d168`, `0x210d788`) are absent from `Maps::Find`, even though JIT and
+  Dex providers are live. The next fix must publish the ART guest/AOT code
+  ranges into the Darwin `Maps` provider (or provide an equivalent oat map
+  source) before Dex PC metadata can be resolved. No fallback or allowlist was
+  added.
