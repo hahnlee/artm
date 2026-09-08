@@ -11067,3 +11067,9 @@ or admission exception was added.
   lanes using the unmodified AOSP input. Functional GC/reference-map behavior
   is verified for this case; the roughly three-minute duration indicates a
   host teardown/performance issue to profile next.
+
+### Runtime checkpoint 373 — 2026-09-09
+
+- Unmodified AOSP `004-NativeAllocations` passes in interpreter, JIT, and
+  comparison lanes. Native allocation/JNI and GC interaction are now covered
+  by a real AOSP test; JNI CFI, concurrency, and real-app completion remain.

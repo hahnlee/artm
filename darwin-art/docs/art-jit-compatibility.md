@@ -6334,3 +6334,10 @@ added; the full corpus and multi-loader identity task remain open.
   (interpreter expected, JIT expected, and interpreter-versus-optimized) pass.
   This confirms reference maps survive forced-GC execution; the run also
   exposed multi-minute host teardown latency to profile separately.
+
+### Runtime checkpoint 373 — 2026-09-09
+
+- Ran unmodified AOSP `004-NativeAllocations`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes all pass, adding JNI/native allocation
+  and GC interaction coverage without changing the APK or adding a gate.
+  The full JNI CFI producer mapping and real-app criteria remain open.
