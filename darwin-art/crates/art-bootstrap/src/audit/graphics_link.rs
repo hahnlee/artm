@@ -587,6 +587,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         .arg("-Wl,-exported_symbol,_Java_Main_b189235039CallThrough")
         .arg("-Wl,-exported_symbol,_Java_Main_b189235039CheckLocks")
         .arg("-Wl,-exported_symbol,_darwin_art_dispatch_pointer")
+        .arg("-Wl,-exported_symbol,_darwin_art_unwindstack_quick_frames")
         .arg("-Wl,-exported_symbol,_darwin_art_pump_framework_frame")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_create")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_close")

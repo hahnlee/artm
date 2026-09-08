@@ -6660,3 +6660,12 @@ incomplete and still requires managed caller unwind validation.
   `dlsym(RTLD_DEFAULT)` and only use the provider-local object as a standalone
   fallback. Provider and graphics-link audits pass; unmodified `137-cfi` still
   fails in all five lanes, so managed-SP publication timing remains unresolved.
+
+### Runtime checkpoint 415 — 2026-09-09
+
+- Exported `darwin_art_unwindstack_quick_frames` from both graphics and direct
+  APK link paths and verified `dlsym(RTLD_DEFAULT)` resolves a process-global
+  registry. Despite this, CFI logs show no `quick-push` event in the failing
+  lanes, indicating those calls are entering through another runtime image or
+  JNI entrypoint. The next target is tracing the actual native entrypoint
+  selected by `ArtMethod` and ensuring the publication hook is linked there.

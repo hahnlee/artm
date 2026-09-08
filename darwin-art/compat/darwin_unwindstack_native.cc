@@ -50,8 +50,9 @@ extern "C" __attribute__((visibility("default"))) DarwinArtQuickFrameRegistry
 DarwinArtQuickFrameRegistry* SharedQuickFrameRegistry() {
   static DarwinArtQuickFrameRegistry* registry = [] {
     void* address = dlsym(RTLD_DEFAULT, "darwin_art_unwindstack_quick_frames");
-    return address == nullptr ? &darwin_art_unwindstack_quick_frames
-                              : static_cast<DarwinArtQuickFrameRegistry*>(address);
+    auto* selected = address == nullptr ? &darwin_art_unwindstack_quick_frames
+                                        : static_cast<DarwinArtQuickFrameRegistry*>(address);
+    return selected;
   }();
   return registry;
 }

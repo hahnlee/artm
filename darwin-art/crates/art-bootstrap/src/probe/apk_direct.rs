@@ -460,6 +460,7 @@ pub(crate) fn build_runtime_direct_apk_link(root: &Path) -> Result<PathBuf> {
         .arg("-Wl,-exported_symbol,_darwin_art_run_process")
         .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")
         .arg("-Wl,-exported_symbol,_darwin_art_dispatch_pointer")
+        .arg("-Wl,-exported_symbol,_darwin_art_unwindstack_quick_frames")
         .arg("-Wl,-exported_symbol,_darwin_art_pump_framework_frame")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_create")
         .arg("-Wl,-exported_symbol,_darwin_art_graphics_session_close")

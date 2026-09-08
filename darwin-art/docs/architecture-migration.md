@@ -11357,3 +11357,11 @@ or admission exception was added.
   `dlsym(RTLD_DEFAULT)`. Audits pass, but all five unmodified `137-cfi` lanes
   still fail; the remaining issue is publication timing/identity of the
   generic-JNI managed-SP itself.
+
+### Runtime checkpoint 415 — 2026-09-09
+
+- Added the quick-frame registry to the exported-symbol lists for graphics and
+  direct APK links; `dlsym(RTLD_DEFAULT)` now resolves it. The failing CFI lanes
+  still emit no quick-frame publication event, so the active boundary is the
+  actual `ArtMethod` native entrypoint/image selected at runtime, not registry
+  address resolution.
