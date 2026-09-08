@@ -6799,3 +6799,12 @@ incomplete and still requires managed caller unwind validation.
 - `137-cfi` remains the authoritative failing regression. Next is to publish
   the app DEX/OAT descriptor through the ART-owned loader boundary, not to add
   a method-name allowlist.
+### Runtime checkpoint 431 — 2026-09-09
+
+- Audited AOSP's DexFiles owner and confirmed its descriptor is populated by
+  ART's `runtime/jit/debugger_interface.cc`, not by OAT map registration. The
+  current app path publishes OAT ranges but does not publish a DEX debug entry,
+  explaining the persistent `dex=0` attribution.
+- No method-name allowlist or synthetic test mapping was added. The next
+  implementation is an ART-owned descriptor publication bridge at DEX/OAT
+  load time, followed by a fresh `137-cfi` run.

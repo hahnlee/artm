@@ -11478,3 +11478,10 @@ or admission exception was added.
   descriptor publication.
 - Next boundary is the ART loader's DEX/OAT descriptor publication, preserving
   normal metadata flow and avoiding method allowlists.
+### Runtime checkpoint 431 — 2026-09-09
+
+- AOSP source audit shows DexFiles discovery depends on
+  `runtime/jit/debugger_interface.cc`'s `__dex_debug_descriptor`; OAT range
+  registration alone cannot resolve app methods.
+- The next change will publish the descriptor from the ART DEX/OAT loader
+  boundary, preserving normal metadata flow and avoiding synthetic names.
