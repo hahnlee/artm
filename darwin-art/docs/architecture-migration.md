@@ -9531,3 +9531,10 @@ or admission exception was added.
   passes all 42 contracts across interpreter, JIT, and unchanged optimized
   lanes. This confirms the allocation/GC and core reflection fixes on the
   current runtime rather than relying on the stale full-audit ledger.
+
+### Runtime checkpoint 168 — 2026-09-08
+
+- The next 40 AOSP contracts (`101-fibonacci` through
+  `180-native-default-method`) pass all interpreter, JIT, and unchanged
+  optimized lanes on a fresh four-worker run, covering GC/JNI, class loading,
+  app-image, and default-method behavior.

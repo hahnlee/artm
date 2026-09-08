@@ -4619,3 +4619,10 @@ added; the full corpus and multi-loader identity task remain open.
   pass interpreter, JIT expected-output, and unchanged-source optimized lanes;
   this refreshes the stale full-audit failures for allocation/GC, fields,
   monitors, concurrency, and reflection.
+
+### Runtime checkpoint 168 — 2026-09-08
+
+- Fresh four-worker corpus rerun of `101-fibonacci` through
+  `180-native-default-method` passes all 40 contracts in interpreter, JIT,
+  and unchanged-source optimized lanes, covering concurrent GC, JNI/native
+  bridges, class loading, app-image metadata, and default-method dispatch.
