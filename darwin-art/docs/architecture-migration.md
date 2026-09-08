@@ -9774,3 +9774,10 @@ or admission exception was added.
   generated-header dependency is materialized and the graphics bootstrap
   reuses all 256 runtime objects successfully; no runtime behavior was
   relaxed.
+
+### Runtime checkpoint 202 — 2026-09-08
+
+- The loader clone retry confirmed the AOSP API shape: construct
+  `ArtDexFileLoader` over mapped bytes and call `Open` with its container
+  argument. The experimental diff was removed after validation remained
+  unsafe; clean graphics bootstrap was restored and `497` remains the gap.

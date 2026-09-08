@@ -4886,3 +4886,10 @@ added; the full corpus and multi-loader identity task remain open.
   materializes the header and `build-runtime-graphics-bootstrap-internal`
   completes with 256 objects reused; this removes the previously observed
   incomplete-shadow failure without changing ART execution semantics.
+
+### Runtime checkpoint 202 — 2026-09-08
+
+- The loader clone retry confirmed that `ArtDexFileLoader::Open` is an
+  instance API over mapped bytes with an explicit container argument. The
+  experimental diff remained unsafe and was removed; clean graphics bootstrap
+  passes again while `497-inlining-and-class-loader` remains open.
