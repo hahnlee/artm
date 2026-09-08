@@ -9312,3 +9312,9 @@ or admission exception was added.
 - Unmodified AOSP Calculator and DeskClock acceptance passes: physical input
   computes `2+3=5`, the Material tab reaches Timer (`00h 00m 00s`), and both
   apps publish visible HWUI/SurfaceFlinger/Metal buffers without crashes.
+
+### Runtime checkpoint 138 — 2026-09-08
+
+- The unmodified `SolitaireCG` game APK passes physical drag acceptance:
+  `SolitaireView` receives and consumes MotionEvents over the input channel,
+  and an 8-second native-free run finishes without crash or activity error.

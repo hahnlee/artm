@@ -4359,3 +4359,10 @@ added; the full corpus and multi-loader identity task remain open.
   received physical clicks and produced `2+3=5`; DeskClock switched its real
   Material tab to Timer and displayed `00h 00m 00s`. Both published visible
   HWUI/SurfaceFlinger/Metal buffer transactions with no fatal signal.
+
+### Runtime checkpoint 138 — 2026-09-08
+
+- Ran the unchanged `SolitaireCG` game APK through physical-input acceptance.
+  `net.sourceforge.solitaire_cg.SolitaireView` was created, drag MotionEvents
+  were consumed through the input channel, and the 8-second native-free run
+  completed without fatal signal or activity exception.
