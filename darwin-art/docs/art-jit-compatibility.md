@@ -5250,6 +5250,15 @@ added; the full corpus and multi-loader identity task remain open.
   2.5G, and the DarwinART profile store 126G. It was not deleted because it is
   a runtime artifact and no cleanup authorization was provided.
 
+### Runtime checkpoint 293 — 2026-09-08
+
+- User-authorized stale-profile cleanup reclaimed about 3.5GiB while preserving
+  the active `default` profile and runtime images. On the replacement computer,
+  `aosp-core-apps-graphics-acceptance.sh` passed (Calculator `2+3=5`, DeskClock
+  timer, HWUI/SurfaceFlinger/Metal), `audit-art-jit.sh` exited 0, and the
+  installed Blue Archive record ran for 10 seconds with exit 0 and Unity/IL2CPP
+  initialization (ARM64, 12 cores, 8GiB) and no bootstrap/vdex failure.
+
 ### Runtime checkpoint 292 — 2026-09-08
 
 - Profile storage inspection shows `default` is the only profile modified on
