@@ -4483,3 +4483,10 @@ added; the full corpus and multi-loader identity task remain open.
   green, and the existing contention/GC/exception tests pass. A dedicated
   blocked-lock response measurement is still required before changing the
   pthread polling implementation.
+
+### Runtime checkpoint 153 — 2026-09-08
+
+- Hardened `audit-art-jit.sh` to capture runtime output and fail if the
+  empty-checkpoint contention fixture is not actually executed. Fresh audit
+  execution reports `checkpoint_us=159` and `lock_us=500441` with RC=0,
+  preventing stale or partial probes from appearing green.

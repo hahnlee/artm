@@ -28,9 +28,19 @@ export DARWIN_ART_TEST_FONT="$jit_root/_aosp/external/skia/resources/fonts/Robot
 export DARWIN_ART_FRAMEWORK_RES_APK="$jit_root/_prebuilt/android-16/resources/framework-res.apk"
 export DARWIN_ART_APK_APP_RESOURCE_APK="$DARWIN_ART_FRAMEWORK_RES_APK"
 export DARWIN_ART_RUNTIME_HOST_FILES="$jit_root/_build/android16-core-oj-compat/core-oj-compat.jar:$jit_root/_prebuilt/android-16/bootclasspath/core-libart.jar:$jit_root/_build/android16-framework-compat/framework-compat.jar:$jit_tail:$jit_root/_build/button-dex/dex/classes.dex"
-exec target/debug/darwin-art-host --window-seconds 3 \
+audit_log="$(mktemp "${TMPDIR:-/tmp}/darwin-art-jit-audit.XXXXXX.log")"
+trap 'rm -f "$audit_log"' EXIT
+if ! target/debug/darwin-art-host --window-seconds 3 \
   "$jit_root/_build/runtime-graphics-link-probe/libdarwin_art_runtime_graphics.dylib" \
   "$jit_root/_build/android16-core-oj-compat/core-oj-compat.jar" \
   "$jit_root/_prebuilt/android-16/bootclasspath/core-libart.jar" \
   "$jit_root/_build/android16-framework-compat/framework-compat.jar" \
-  "$jit_tail" "$jit_root/_build/button-dex/dex/classes.dex"
+  "$jit_tail" "$jit_root/_build/button-dex/dex/classes.dex" 2>&1 | tee "$audit_log"
+then
+  echo "ART JIT audit: runtime failed; log=$audit_log" >&2
+  exit 1
+fi
+if ! rg -a -q 'ART empty checkpoint mutex contention PASS checkpoint_us=' "$audit_log"; then
+  echo "ART JIT audit: empty-checkpoint contention fixture did not execute; log=$audit_log" >&2
+  exit 1
+fi

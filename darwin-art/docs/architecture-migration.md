@@ -9371,6 +9371,12 @@ or admission exception was added.
   interface, and virtual receiver nullable decoding; AOSP implicit-null and
   null-call regressions pass in interpreter and optimized modes.
 
+### Runtime checkpoint 153 — 2026-09-08
+
+- `audit-art-jit.sh` now captures output and requires the real empty-checkpoint
+  contention marker. Fresh execution passes with checkpoint latency 159 µs and
+  lock wait 500,441 µs (RC=0), closing the stale-object/false-green gap.
+
 ### Runtime checkpoint 147 — 2026-09-08
 
 - `cargo test --workspace` passes for all Rust crates and doc tests after the
