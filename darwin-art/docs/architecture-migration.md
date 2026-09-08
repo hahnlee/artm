@@ -9479,6 +9479,14 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 263 — 2026-09-08
+
+- Current authoritative state: AOSP corpus 1,075/1,075; Calculator and
+  DeskClock real APK graphics/input acceptance pass.
+- Snapseed installs and resolves arm64 ELF but still fails before JNI
+  registration in managed loading. The next architecture step is tracing
+  `Runtime.nativeLoad` through ClassLoader, JavaVMExt, and NativeBridge.
+
 ### Runtime checkpoint 261 — 2026-09-08
 
 - Snapseed's unchanged APK reaches JavaVMExt/NativeBridge and successful arm64

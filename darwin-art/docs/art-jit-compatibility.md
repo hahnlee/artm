@@ -5153,6 +5153,15 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 263 — 2026-09-08
+
+- Current authoritative state: AOSP corpus 1,075/1,075; Calculator and
+  DeskClock real APK graphics/input acceptance pass.
+- Snapseed remains blocked on managed native loading: installation and ELF
+  resolution pass, but `NativeCore.verifyLibraryHasBeenLoadedProperly` is not
+  registered. `Runtime.nativeLoad` registration/resolver coverage is present;
+  JavaVMExt/NativeBridge lifecycle tracing is the next implementation step.
+
 ### Runtime checkpoint 261 — 2026-09-08
 
 - Snapseed's unchanged APK reaches JavaVMExt/NativeBridge and successful arm64
