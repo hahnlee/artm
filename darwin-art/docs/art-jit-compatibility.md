@@ -6079,3 +6079,12 @@ added; the full corpus and multi-loader identity task remain open.
   `audit-runtime-graphics-link-fast` passes with `registrar=51,
   fake-symbols=0`. APK-level metadata and full MemMap/ZipArchive runtime
   behavior remain to be exercised.
+
+### Runtime checkpoint 341 — 2026-09-09
+
+- Re-ran the production owner path after the split: `DexFile.cpp` and
+  `dex_file_supp.cc` compile into `libunwindstack-dex-darwin.a`, and
+  `audit-runtime-graphics-link-fast` passes with `registrar=51` and
+  `fake-symbols=0`. The standalone smoke remains intentionally contract-only;
+  a direct ad-hoc DexFile executable requires the complete runtime foundation
+  closure, so APK-level metadata lookup is still an explicit next test.

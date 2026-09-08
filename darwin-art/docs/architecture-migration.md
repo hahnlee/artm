@@ -10836,3 +10836,12 @@ or admission exception was added.
   `art_api::dex::DexFile` symbols. Fast graphics-link audit passes
   (`registrar=51`, `fake-symbols=0`); APK metadata and complete
   MemMap/ZipArchive execution still require validation.
+
+### Runtime checkpoint 341 — 2026-09-09
+
+- Revalidated the separated production owner: `DexFile.cpp` plus
+  `dex_file_supp.cc` compile into `libunwindstack-dex-darwin.a`, and the fast
+  graphics-link audit passes (`registrar=51`, `fake-symbols=0`). The portable
+  smoke remains contract-only by design; direct DexFile execution needs the
+  complete runtime foundation closure, so APK metadata lookup remains the next
+  validation target.
