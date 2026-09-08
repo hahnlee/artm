@@ -6885,3 +6885,9 @@ incomplete and still requires managed caller unwind validation.
 - Direct provider-to-ART `StackVisitor` coupling is invalid for the ART-free
   smoke target. The remaining design is an optional exported ART callback with
   a weak provider stub.
+- Checkpoint 444: tested ART `StackVisitor::GetNextMethodAndDexPc` and the
+  ucontext callback insertion. The helper repeats the current managed wrapper
+  in this native-to-managed bridge, producing duplicate `Main.unwind` frames;
+  the experiment was reverted. The remaining AOSP-compatible path is direct
+  quick-code/OAT metadata attribution for each unwound PC, while preserving
+  the optional runtime-owner callback boundary.
