@@ -6448,3 +6448,10 @@ added; the full corpus and multi-loader identity task remain open.
   executable range is host-mapped near `0x11c1d4000`. This isolates the remaining
   blocker to logical-PC-to-host-RX mapping in the Darwin unwind boundary; no
   fallback or test-specific allowlist was added.
+
+### Runtime checkpoint 389 — 2026-09-09
+
+- An experiment registering the anonymous JIT RX range in unwindstack `Maps` did
+  not change `137-cfi`: the failing frames are app-OAT logical PCs, not missing
+  JIT-cache map entries. The experiment was removed; the next fix must publish
+  the OAT method logical/host pair at the entrypoint boundary.

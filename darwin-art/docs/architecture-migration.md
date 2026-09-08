@@ -11168,3 +11168,10 @@ or admission exception was added.
   range is host-mapped near `0x11c1d4000`. The unresolved issue is now isolated
   to logical-PC-to-host-RX mapping at the Darwin unwind boundary; no fallback
   or test-specific allowlist was introduced.
+
+### Runtime checkpoint 389 — 2026-09-09
+
+- Registering the anonymous JIT RX range did not change `137-cfi`, confirming
+  the failing frames are app-OAT logical PCs rather than absent JIT-cache maps.
+  The experiment was removed; OAT method logical/host publication at the
+  entrypoint boundary is the next implementation target.
