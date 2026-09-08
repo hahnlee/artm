@@ -6678,3 +6678,12 @@ incomplete and still requires managed caller unwind validation.
   native-code return boundary; moving it earlier was rejected because the
   patch hunk did not preserve the generated source safely. `137-cfi` remains
   failing and the next change must be made in a validated AOSP source hunk.
+
+### Runtime checkpoint 417 — 2026-09-09
+
+- Audited the generated source and confirmed the existing publication hook is
+  present in the final generic-JNI trampoline. An attempted relocation hunk did
+  not apply cleanly in the patch pipeline and was discarded; the tracked patch
+  remains unchanged. The export/registry audit still passes, while `137-cfi`
+  remains failing. Further movement requires tracing the actual selected JNI
+  entrypoint rather than changing patch offsets speculatively.

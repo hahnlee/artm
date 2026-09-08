@@ -11373,3 +11373,11 @@ or admission exception was added.
   the AOSP native-code return boundary; an attempted earlier move was not
   retained because its patch hunk was not safely formed. `137-cfi` remains
   failing, and the next change will target a validated AOSP source hunk.
+
+### Runtime checkpoint 417 — 2026-09-09
+
+- Confirmed the final generated generic-JNI trampoline contains the publication
+  hook. A relocation attempt was discarded because the patch pipeline did not
+  apply the hunk cleanly, leaving tracked source unchanged. Export and link
+  audits pass; `137-cfi` remains failing and the next work must trace the
+  selected JNI entrypoint directly.
