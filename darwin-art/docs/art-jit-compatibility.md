@@ -6153,3 +6153,10 @@ added; the full corpus and multi-loader identity task remain open.
   ranges into the Darwin `Maps` provider (or provide an equivalent oat map
   source) before Dex PC metadata can be resolved. No fallback or allowlist was
   added.
+### Runtime checkpoint 350 — 2026-09-09
+
+- Added an AOSP-aligned registration bridge at `ClassLinker` oat executable
+  range publication. Darwin records the real oat location, file offset, and
+  executable range, then synchronizes those ranges into unwindstack `Maps` on
+  demand. Graphics-link audit passes after the change; the real CFI probe still
+  needs a fresh run to prove that boot/AOT names resolve.

@@ -9,6 +9,7 @@
 #include <mach-o/nlist.h>
 #include <ptrauth.h>
 #include <pthread.h>
+#include <sys/mman.h>
 #include <unwind.h>
 
 #include <array>
@@ -17,6 +18,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -46,6 +48,15 @@ extern "C" __attribute__((visibility("default"))) DarwinArtQuickFrameRegistry
         kDarwinArtQuickFrameRegistryVersion, kDarwinArtQuickFrameRegistrySlots, 0, {}};
 
 namespace {
+
+struct DarwinAotCodeRange {
+  uint64_t start;
+  uint64_t end;
+  uint64_t file_offset;
+  std::string oat_location;
+};
+std::mutex g_aot_ranges_mutex;
+std::vector<DarwinAotCodeRange> g_aot_ranges;
 
 DarwinArtQuickFrameSlot* FindLocalQuickFrameSlot(uint64_t thread_id, bool claim) {
   const size_t first = thread_id % kDarwinArtQuickFrameRegistrySlots;
@@ -82,6 +93,35 @@ bool ReadLocalQuickFrame(uint64_t thread_id, uint64_t* managed_sp, uint64_t* fra
 }
 
 }  // namespace
+
+namespace unwindstack {
+
+void DarwinRegisterAotCodeRange(const void* start, size_t size, uint64_t file_offset,
+                                const char* oat_location) {
+  if (start == nullptr || size == 0 || oat_location == nullptr || *oat_location == '\0') return;
+  std::lock_guard<std::mutex> lock(g_aot_ranges_mutex);
+  const uint64_t begin = reinterpret_cast<uint64_t>(start);
+  const uint64_t end = begin + size;
+  for (const auto& range : g_aot_ranges) {
+    if (range.start == begin && range.end == end && range.file_offset == file_offset &&
+        range.oat_location == oat_location) return;
+  }
+  g_aot_ranges.push_back({begin, end, file_offset, oat_location});
+}
+
+void DarwinPublishAotCodeMaps(Maps* maps) {
+  if (maps == nullptr) return;
+  std::lock_guard<std::mutex> lock(g_aot_ranges_mutex);
+  for (const auto& range : g_aot_ranges) {
+    if (maps->Find(range.start) == nullptr) {
+      maps->Add(range.start, range.end, range.file_offset, PROT_READ | PROT_EXEC,
+                range.oat_location);
+    }
+  }
+  maps->Sort();
+}
+
+}  // namespace unwindstack
 
 extern "C" __attribute__((visibility("default"))) void
 darwin_art_unwindstack_set_art_main_thread() {
@@ -650,6 +690,7 @@ uint64_t DarwinFindGlobalVariable(Maps* maps, const char* variable) {
 
 bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames,
                         AndroidUnwinderData& data) {
+  DarwinPublishAotCodeMaps(maps);
   data.frames.clear();
   data.error = {ERROR_NONE, 0};
   NativeWalk walk{maps, jit_debug, dex_files, &data, data.max_frames.value_or(max_frames), mach_task_self(),
@@ -708,6 +749,7 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, si
 
 bool DarwinNativeUnwindUcontext(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames, void* ucontext,
                                 AndroidUnwinderData& data) {
+  DarwinPublishAotCodeMaps(maps);
   data.frames.clear();
   if (ucontext == nullptr) {
     data.error = {ERROR_INVALID_PARAMETER, 0};
@@ -728,6 +770,7 @@ bool DarwinNativeUnwindUcontext(Maps* maps, JitDebug* jit_debug, DexFiles* dex_f
 bool DarwinNativeUnwindThread(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames,
                               uint64_t thread_id,
                               AndroidUnwinderData& data) {
+  DarwinPublishAotCodeMaps(maps);
   data.frames.clear();
   data.error = {ERROR_NONE, 0};
   thread_t thread = FindThread(mach_task_self(), thread_id);
@@ -794,6 +837,7 @@ bool DarwinNativeUnwindThread(Maps* maps, JitDebug* jit_debug, DexFiles* dex_fil
 bool DarwinNativeUnwindRemote(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames, int process_id,
                               uint64_t thread_id,
                               AndroidUnwinderData& data) {
+  DarwinPublishAotCodeMaps(maps);
   data.frames.clear();
   data.error = {ERROR_NONE, 0};
   mach_port_t task = MACH_PORT_NULL;

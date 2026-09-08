@@ -140,6 +140,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0158-darwin-register-dex-trace.patch",
     "patches/art/0160-darwin-libcore-before-early-clinits.patch",
     "patches/art/0164-darwin-clone-dex-for-child-loader.patch",
+    "patches/art/0165-darwin-publish-aot-unwind-maps.patch",
 ];
 
 #[cfg(test)]

@@ -10907,3 +10907,9 @@ or admission exception was added.
   present in `Maps::Find`; JIT/Dex providers themselves are live. The next
   architectural change is publishing ART guest/AOT code ranges to Darwin
   `Maps` (or an equivalent oat-map source) so Dex metadata lookup can run.
+### Runtime checkpoint 350 — 2026-09-09
+
+- Added an AOSP-aligned `ClassLinker` oat executable-range registration bridge.
+  Darwin retains the oat path, file offset, and code range and publishes them
+  into unwindstack `Maps` lazily. Graphics-link audit passes; a fresh real CFI
+  run is still required to validate AOT frame naming.

@@ -49,6 +49,9 @@ class GlobalDebugInterface;
 using JitDebug = GlobalDebugInterface<Elf>;
 class Maps;
 struct AndroidUnwinderData;
+void DarwinRegisterAotCodeRange(const void* start, size_t size, uint64_t file_offset,
+                                const char* oat_location);
+void DarwinPublishAotCodeMaps(Maps* maps);
 uint64_t DarwinFindGlobalVariable(Maps* maps, const char* variable);
 bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, size_t max_frames,
                         AndroidUnwinderData& data);
