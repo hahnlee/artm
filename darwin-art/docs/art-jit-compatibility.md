@@ -6531,3 +6531,11 @@ added; the full corpus and multi-loader identity task remain open.
   so the missing mapping is not recoverable from segment alignment alone. The
   candidate is retained as a guarded host-boundary path while authoritative
   OAT metadata publication remains the next target.
+
+### Runtime checkpoint 400 — 2026-09-09
+
+- Tested publishing logical/host code-address pairs from
+  `OatFile::OatMethod::GetQuickCode()`. The graphics bootstrap compiled, but
+  unmodified AOSP `137-cfi` still produced JIT `FAIL` output and no
+  `entry-pair` observations. The experiment was reverted; the remaining CFI
+  gap is specifically the generic-JNI caller frame publication path.

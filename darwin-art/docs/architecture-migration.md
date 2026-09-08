@@ -11242,3 +11242,11 @@ or admission exception was added.
 - Added executable-range-validated 1MiB logical-segment recovery for low OAT
   PCs. Bootstrap succeeds but `137-cfi` still fails, proving segment alignment
   alone is insufficient; authoritative OAT metadata publication remains next.
+
+### Runtime checkpoint 400 — 2026-09-09
+
+- Evaluated OAT `GetQuickCode()` logical/host pair publication as a CFI bridge.
+  The bootstrap build succeeded, but `137-cfi` remained JIT-failing with no
+  published pairs, so the change was reverted. The architecture still needs
+  caller-frame metadata at the generic-JNI transition rather than a broader
+  OAT lookup hook.
