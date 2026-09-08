@@ -5142,6 +5142,14 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 260 — 2026-09-08
+
+- AOSP Calculator/DeskClock pass end-to-end after the framework fixes. An
+  unchanged Snapseed arm64 APK installs and resolves its ELF native library,
+  but bootstrap stops at obfuscated `NativeCore.verifyLibraryHasBeenLoadedProperly()`
+  JNI registration. Native-library/JNI registration is the next compatibility
+  gap; Blue Archive validation remains pending.
+
 ### Runtime checkpoint 258 — 2026-09-08
 
 - Added the hidden `android.view.InputChannel` framework stub with paired

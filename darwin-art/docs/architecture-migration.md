@@ -9470,6 +9470,14 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 260 — 2026-09-08
+
+- AOSP Calculator/DeskClock remain green end-to-end. Snapseed's unchanged
+  arm64 APK installs and its ELF native library resolves, but bootstrap fails
+  registering obfuscated `NativeCore.verifyLibraryHasBeenLoadedProperly()`.
+  Native-library/JNI registration is the next compatibility gap; Blue Archive
+  validation remains pending.
+
 ### Runtime checkpoint 258 — 2026-09-08
 
 - Added the hidden `android.view.InputChannel` framework stub with paired
