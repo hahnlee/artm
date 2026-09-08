@@ -4868,3 +4868,13 @@ added; the full corpus and multi-loader identity task remain open.
   covering checker lowering, deoptimization, loops/try-catch, monitor exit,
   array/field operations, inlining, tracing, and JIT regressions. The isolated
   `497` multi-loader identity failure remains the next runtime gap.
+
+### Runtime checkpoint 200 — 2026-09-08
+
+- Investigated concurrent bootstrap failures around the shared patched-source
+  shadow. A staging-lock prototype exposed a pre-existing incomplete-shadow
+  recovery issue (`quick_entrypoints.h` is generated outside the copied source
+  list), so it was reverted without changing runtime behavior. The normal
+  graphics bootstrap remains intact; shadow publication must be made atomic
+  together with generated-header materialization before retrying the loader
+  clone implementation.

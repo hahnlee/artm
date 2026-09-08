@@ -9758,3 +9758,11 @@ or admission exception was added.
   including deoptimization, monitor/exception paths, array/field lowering,
   inlining, tracing, and JIT regressions. The isolated `497` multi-loader
   identity case remains the next structural implementation item.
+
+### Runtime checkpoint 200 — 2026-09-08
+
+- Shared patched-source concurrency was investigated. A lock prototype was
+  reverted after revealing that incomplete-shadow recovery also needs generated
+  headers such as `quick_entrypoints.h`; no runtime semantics were changed.
+  The next loader implementation must combine atomic shadow publication with
+  complete generated-header staging.
