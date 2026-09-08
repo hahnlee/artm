@@ -5070,6 +5070,15 @@ added; the full corpus and multi-loader identity task remain open.
   and allocation tracking stress. Remaining corpus and real-app validation
   are pending.
 
+### Runtime checkpoint 229 — 2026-09-08
+
+- The `2030-long-running-child`–`2048-bad-native-registry` slice passed all 21
+  tests, covering child/deopt frames, default/private methods, shutdown,
+  native/JNI file channels, hidden API, large transforms/allocations,
+  cleaner/reference processing, stack traces, UFFD, checker comparisons and
+  string lengths, and native registry errors. Remaining corpus and real-app
+  validation are pending.
+
 ### Runtime checkpoint 228 — 2026-09-08
 
 - The `1999-virtual-structural`–`2029-contended-monitors` slice passed all 26

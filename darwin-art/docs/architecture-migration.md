@@ -9980,3 +9980,12 @@ or admission exception was added.
   walks, constant sinking, thread OOME, invoke inlining, invariant loops,
   memory-couple optimizations, backward loops, and contended monitors.
   Remaining corpus and real-app validation remain pending.
+
+### Runtime checkpoint 229 — 2026-09-08
+
+- The `2030-long-running-child`–`2048-bad-native-registry` slice passed all 21
+  tests, including child/deopt frames, default/private methods, shutdown,
+  native/JNI file channels, hidden API, large transforms/allocations,
+  cleaner/reference processing, stack traces, UFFD, checker comparisons and
+  string lengths, and native registry errors. Remaining corpus and real-app
+  validation remain pending.
