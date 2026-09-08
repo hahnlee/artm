@@ -5199,6 +5199,15 @@ added; the full corpus and multi-loader identity task remain open.
   memory, and application version `1.93.454564`. Sustained gameplay/input and
   service validation remain active.
 
+### Runtime checkpoint 285 — 2026-09-08
+
+- Unmodified Blue Archive ran through the normal installed-record launcher for
+  a 30-second soak with exit code 0. Unity/IL2CPP remained alive and reported
+  ARM64/12-core runtime state. The run exposed a non-fatal existing-install
+  issue: a legacy package record can bypass installer `oat/arm64` migration,
+  producing an anonymous-vdex directory warning. This is the next packaging
+  lifecycle fix; it did not prevent startup or rendering initialization.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format

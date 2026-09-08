@@ -9519,6 +9519,14 @@ or admission exception was added.
   8192 MB memory, and version `1.93.454564`; sustained gameplay/input and
   service coverage remain active follow-up work.
 
+### Runtime checkpoint 285 — 2026-09-08
+
+- A 30-second unchanged Blue Archive installed-record soak exited 0 with
+  Unity/IL2CPP alive on ARM64/12 cores. It revealed that legacy launch records
+  can bypass existing-install `oat/arm64` cache migration, causing a non-fatal
+  anonymous-vdex directory warning. Packaging lifecycle repair is the next
+  task; application startup remained successful.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - EGL capability filtering now declares FP16 pixel formats unsupported for the
