@@ -6695,3 +6695,13 @@ incomplete and still requires managed caller unwind validation.
   The immediate issue is therefore an entrypoint bypass (direct/fast JNI), not
   registry address resolution. Tracing was removed; the next target is the
   managed-SP publication contract for that selected entrypoint.
+### Runtime checkpoint 419 — 2026-09-09
+
+- Reworked the JNI publication patch so the common `artJniMethodStart` hook
+  publishes tagged Generic-JNI managed SPs as well as compiled JNI frames.
+  The corrected patch passes a clean dry-run against pristine pinned AOSP.
+- Added idempotence to the shared quick-frame registry so duplicate
+  Generic-JNI publication cannot leave a stale slot.
+- Forced shadow regeneration reached native compilation but exposed a missing
+  generated `runtime/jit/jit_memory_region.h` producer; no runtime pass is
+  claimed and `137-cfi` remains open.

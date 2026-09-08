@@ -11389,3 +11389,12 @@ or admission exception was added.
   The immediate issue is therefore an entrypoint bypass (direct/fast JNI), not
   registry address resolution. Tracing was removed; the next boundary is the
   managed-SP publication contract for the selected native entrypoint.
+### Runtime checkpoint 419 — 2026-09-09
+
+- JNI publication now uses the shared AOSP `artJniMethodStart` boundary for
+  Generic-JNI managed SPs, alongside compiled-JNI publication. The corrected
+  patch applies cleanly to pristine pinned AOSP.
+- Duplicate Generic-JNI publications are idempotent in the shared registry.
+- Forced shadow regeneration exposed a missing generated
+  `runtime/jit/jit_memory_region.h` producer; `137-cfi` remains failing until
+  that build edge is restored.

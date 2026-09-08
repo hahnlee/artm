@@ -254,6 +254,16 @@ darwin_art_unwindstack_push_quick_frame(void* managed_sp) {
                    __ATOMIC_RELAXED);
   const uint64_t depth = __atomic_load_n(&slot->depth, __ATOMIC_RELAXED);
   if (depth >= kDarwinArtQuickFrameRegistryDepth) return;
+  // Generic-JNI publication can be reached through both the trampoline and
+  // the common JNI method-start hook. Treat a repeated publication of the
+  // same managed frame as idempotent so the matching method-end pop cannot
+  // leave a stale registry entry behind.
+  if (depth != 0 &&
+      __atomic_load_n(&slot->frames[depth - 1], __ATOMIC_RELAXED) ==
+          reinterpret_cast<uint64_t>(managed_sp) &&
+      __atomic_load_n(&slot->frame_kinds[depth - 1], __ATOMIC_RELAXED) == 0) {
+    return;
+  }
   __atomic_store_n(&slot->frames[depth], reinterpret_cast<uint64_t>(managed_sp), __ATOMIC_RELAXED);
   __atomic_store_n(&slot->frame_kinds[depth], uint64_t{0}, __ATOMIC_RELAXED);
   __atomic_store_n(&slot->frame_sizes[depth], uint64_t{224}, __ATOMIC_RELAXED);
