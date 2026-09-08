@@ -383,12 +383,30 @@ fn validate_existing(
     if identity_sha256(&existing_apk, &existing_splits) != apk_sha256 {
         return Err("existing installed APK hash is corrupt".to_owned());
     }
+    ensure_oat_cache(destination)?;
     installed(
         request,
         apk_sha256.to_owned(),
         destination.to_path_buf(),
         true,
     )
+}
+
+fn ensure_oat_cache(destination: &Path) -> Result<(), String> {
+    let metadata = fs::metadata(destination)
+        .map_err(|error| format!("could not inspect installed APK directory: {error}"))?;
+    let original_mode = metadata.permissions().mode();
+    if original_mode & 0o200 == 0 {
+        fs::set_permissions(destination, fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("could not open installed APK directory: {error}"))?;
+    }
+    let result = DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(destination.join("oat").join("arm64"))
+        .map_err(|error| format!("could not create writable oat directory: {error}"));
+    let _ = fs::set_permissions(destination, fs::Permissions::from_mode(original_mode));
+    result
 }
 
 fn installed(

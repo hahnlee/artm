@@ -5153,6 +5153,13 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 276 — 2026-09-08
+
+- Existing sealed installations are migrated lazily: the installer temporarily
+  opens only the package directory, creates writable `oat/arm64`, and restores
+  its sealed mode. A normal Snapseed relaunch now has no VDEX directory error,
+  while EditActivity and JNI initialization remain successful.
+
 ### Runtime checkpoint 275 — 2026-09-08
 
 - Post-install-cache regression passes: `cargo fmt --all -- --check` and the

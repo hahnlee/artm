@@ -9479,6 +9479,12 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 276 — 2026-09-08
+
+- Existing sealed package installations now lazily provision `oat/arm64`
+  without weakening their final permissions. Snapseed relaunch shows no VDEX
+  directory error and still reaches EditActivity/JNI initialization.
+
 ### Runtime checkpoint 275 — 2026-09-08
 
 - Post-install-cache regression passes formatting and the Calculator/DeskClock
