@@ -5184,6 +5184,13 @@ added; the full corpus and multi-loader identity task remain open.
   and concurrency fixtures; all reported PASS. This is validation progress,
   not completion of the full AOSP/Blue Archive objective.
 
+### Runtime checkpoint 283 — 2026-09-08
+
+- Reconciled the authoritative `_build/art-upstream-corpus/summary.json`:
+  1,075 results, with `passed=1,075` and no non-passed records. This closes
+  the prior InputChannel ledger discrepancy; real Blue Archive execution and
+  broader production-app validation remain outstanding.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format

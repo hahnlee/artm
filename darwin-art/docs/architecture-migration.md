@@ -9506,6 +9506,12 @@ or admission exception was added.
   polymorphic/custom, native-exit, and concurrency coverage. Real-app and
   remaining AOSP corpus work remain active.
 
+### Runtime checkpoint 283 — 2026-09-08
+
+- The authoritative corpus summary now contains 1,075 results and all 1,075
+  are `passed`; no non-passed entries remain. InputChannel is no longer a
+  corpus gap. Blue Archive and broader real-app validation remain active.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - EGL capability filtering now declares FP16 pixel formats unsupported for the
