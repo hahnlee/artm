@@ -11365,3 +11365,11 @@ or admission exception was added.
   still emit no quick-frame publication event, so the active boundary is the
   actual `ArtMethod` native entrypoint/image selected at runtime, not registry
   address resolution.
+
+### Runtime checkpoint 416 — 2026-09-09
+
+- Verified the final graphics dylib contains the generic-JNI trampoline,
+  publication hook, and exported quick-frame registry. The hook is still at
+  the AOSP native-code return boundary; an attempted earlier move was not
+  retained because its patch hunk was not safely formed. `137-cfi` remains
+  failing, and the next change will target a validated AOSP source hunk.

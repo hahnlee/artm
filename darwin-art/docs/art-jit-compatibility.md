@@ -6669,3 +6669,12 @@ incomplete and still requires managed caller unwind validation.
   lanes, indicating those calls are entering through another runtime image or
   JNI entrypoint. The next target is tracing the actual native entrypoint
   selected by `ArtMethod` and ensuring the publication hook is linked there.
+
+### Runtime checkpoint 416 — 2026-09-09
+
+- Confirmed the final graphics dylib contains both the generic-JNI trampoline
+  and `darwin_art_unwindstack_push_quick_frame`, while the registry export is
+  visible through `dlsym`. The current hook remains at the AOSP trampoline's
+  native-code return boundary; moving it earlier was rejected because the
+  patch hunk did not preserve the generated source safely. `137-cfi` remains
+  failing and the next change must be made in a validated AOSP source hunk.
