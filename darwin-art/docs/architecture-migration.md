@@ -9781,3 +9781,9 @@ or admission exception was added.
   `ArtDexFileLoader` over mapped bytes and call `Open` with its container
   argument. The experimental diff was removed after validation remained
   unsafe; clean graphics bootstrap was restored and `497` remains the gap.
+
+### Runtime checkpoint 203 — 2026-09-08
+
+- Canonical diff generation confirmed the mapped-byte `ArtDexFileLoader`
+  instance API for the child-loader clone. It remains unmerged pending safe
+  patch publication; no partial runtime semantics are retained.

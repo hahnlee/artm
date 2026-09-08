@@ -4893,3 +4893,9 @@ added; the full corpus and multi-loader identity task remain open.
   instance API over mapped bytes with an explicit container argument. The
   experimental diff remained unsafe and was removed; clean graphics bootstrap
   passes again while `497-inlining-and-class-loader` remains open.
+
+### Runtime checkpoint 203 — 2026-09-08
+
+- Canonical diff generation confirmed the mapped-byte `ArtDexFileLoader`
+  instance API for the child-loader clone. It remains unmerged pending safe
+  patch publication; no partial runtime semantics are retained.
