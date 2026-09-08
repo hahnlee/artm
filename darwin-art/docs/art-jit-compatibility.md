@@ -5191,6 +5191,14 @@ added; the full corpus and multi-loader identity task remain open.
   the prior InputChannel ledger discrepancy; real Blue Archive execution and
   broader production-app validation remain outstanding.
 
+### Runtime checkpoint 284 — 2026-09-08
+
+- Launched the installed, unmodified Blue Archive package through the normal
+  APK runner for 10 seconds with the default JIT path. Exit code was 0; Unity
+  reached the IL2CPP application stage and reported ARM64, 12 cores, 8192 MB
+  memory, and application version `1.93.454564`. Sustained gameplay/input and
+  service validation remain active.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format

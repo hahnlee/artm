@@ -9512,6 +9512,13 @@ or admission exception was added.
   are `passed`; no non-passed entries remain. InputChannel is no longer a
   corpus gap. Blue Archive and broader real-app validation remain active.
 
+### Runtime checkpoint 284 — 2026-09-08
+
+- The normal runner launched the unchanged Blue Archive APK for 10 seconds
+  with exit code 0. Unity/IL2CPP initialized and reported ARM64, 12 cores,
+  8192 MB memory, and version `1.93.454564`; sustained gameplay/input and
+  service coverage remain active follow-up work.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - EGL capability filtering now declares FP16 pixel formats unsupported for the
