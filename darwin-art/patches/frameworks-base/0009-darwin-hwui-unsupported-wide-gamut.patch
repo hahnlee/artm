@@ -12,3 +12,13 @@ diff --git a/renderthread/EglManager.cpp b/renderthread/EglManager.cpp
 +    EglExtensions.pixelFormatFloat = false;
 +#endif
      EglExtensions.scRGB = extensions.has("EGL_EXT_gl_colorspace_scrgb");
+@@ -353,7 +353,9 @@ void EglManager::loadConfigs() {
+     }
++#if !defined(__APPLE__)
+     mEglConfig1010102 = load1010102Config(mEglDisplay, mSwapBehavior);
+     if (mEglConfig1010102 == EGL_NO_CONFIG_KHR) {
+         ALOGW("Failed to initialize 101010-2 format, error = %s",
+               eglErrorString());
+     }
++#endif
+ }
