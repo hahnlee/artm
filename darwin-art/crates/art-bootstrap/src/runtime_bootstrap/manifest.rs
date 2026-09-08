@@ -145,6 +145,7 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0165-darwin-publish-aot-unwind-maps.patch",
     "patches/art/0166-darwin-oat-quick-code-host-address.patch",
     "patches/art/0167-darwin-art-method-entrypoint-window.patch",
+    "patches/art/0168-darwin-instrumentation-entrypoint-host-address.patch",
 ];
 
 #[cfg(test)]
@@ -205,6 +206,10 @@ mod tests {
         assert!(
             PATCHED_RUNTIME_PATCHES
                 .contains(&"patches/art/0167-darwin-art-method-entrypoint-window.patch")
+        );
+        assert!(
+            PATCHED_RUNTIME_PATCHES
+                .contains(&"patches/art/0168-darwin-instrumentation-entrypoint-host-address.patch")
         );
     }
 }

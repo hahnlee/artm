@@ -6256,3 +6256,11 @@ added; the full corpus and multi-loader identity task remain open.
   repeated staging pass and was reverted. A clean graphics bootstrap succeeds
   with the read normalization, while `137-cfi` producer-side failures remain
   unchanged; no store-side conversion is claimed.
+
+### Runtime checkpoint 364 — 2026-09-09
+
+- Added `0168` at `Instrumentation::UpdateEntryPoints`, normalizing low Apple
+  logical code pointers before equality checks and atomic publication. The
+  graphics bootstrap and manifest test pass, but a fresh `137-cfi` run still
+  reports the same five CFI failures; this producer is not the remaining
+  source, so the goal remains open.

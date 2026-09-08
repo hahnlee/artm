@@ -10998,3 +10998,11 @@ or admission exception was added.
   read/write experiment because bootstrap applies patches repeatedly and the
   combined hunk failed on the second staging pass. Graphics bootstrap passes;
   the low CFI return-PC producer remains unresolved.
+
+### Runtime checkpoint 364 — 2026-09-09
+
+- Added the Apple-only `0168` normalization at
+  `Instrumentation::UpdateEntryPoints` so producer values use one host/logical
+  representation before comparison and publication. Bootstrap and manifest
+  tests pass; the fresh `137-cfi` run is unchanged, so the unresolved producer
+  is downstream of this boundary.
