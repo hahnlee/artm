@@ -10710,3 +10710,10 @@ or admission exception was added.
   rather than a copied manager bundle. The original VLC APK is not currently
   available in local roots, so playback verification remains pending without
   modifying or synthesizing an APK.
+
+### Runtime checkpoint 325 — 2026-09-08
+
+- Inspected the generated framework DEX rather than only Java sources: all
+  five `requestNetwork` overloads are present, and launcher and boot-image
+  paths point to the same regenerated artifact. No APK modification was used;
+  native VLC playback still needs the original APK input.

@@ -5945,3 +5945,10 @@ added; the full corpus and multi-loader identity task remain open.
   artifact directly. No VLC APK is currently present in the local download or
   workspace roots, so an unmodified post-refresh VLC run cannot yet be
   executed; no substitute APK or APK rewrite was introduced.
+
+### Runtime checkpoint 325 — 2026-09-08
+
+- Decompilation of the regenerated framework DEX confirms all five
+  `ConnectivityManager.requestNetwork` overloads are present in the runtime
+  artifact, including the Executor form. Launcher and boot-image paths select
+  this artifact; VLC playback still requires a locally available original APK.
