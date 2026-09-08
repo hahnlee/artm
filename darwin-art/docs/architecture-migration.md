@@ -11211,3 +11211,10 @@ or admission exception was added.
   AOT-to-generic-JNI path. The next implementation target is assembly-level
   trampoline instrumentation or frame-based caller recovery; no fallback or
   allowlist was added.
+
+### Runtime checkpoint 395 — 2026-09-09
+
+- Rebuilt with the caller publication patch; `137-cfi` still fails with no
+  pair publication. The authoritative producer is therefore the assembly
+  `SETUP_SAVE_REFS_AND_ARGS_FRAME_WITH_METHOD_IN_X0` LR store, which must be
+  instrumented next without fallback or allowlists.

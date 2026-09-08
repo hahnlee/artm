@@ -6494,3 +6494,11 @@ added; the full corpus and multi-loader identity task remain open.
   returns null) on this AOT-to-generic-JNI path. The saved LR remains
   `0x210d168`; next work must instrument the assembly trampoline or recover the
   caller from its frame before entering C++.
+
+### Runtime checkpoint 395 — 2026-09-09
+
+- Rebuilt after adding the generic-JNI caller publication patch; `137-cfi`
+  still fails and emits no pair publication. This rules out the C++ trampoline
+  callback as the producer path and leaves the assembly
+  `SETUP_SAVE_REFS_AND_ARGS_FRAME_WITH_METHOD_IN_X0` LR store as the next
+  authoritative instrumentation point.
