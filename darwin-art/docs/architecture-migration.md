@@ -11658,3 +11658,7 @@ or admission exception was added.
   exactly one object and `nm` confirms `jni_internal.cc` now references the
   native publication hook. A fresh 137-cfi run remains mismatched, proving the
   hook is present but not the missing unwind-frame fix.
+- Checkpoint 465: instrumented both quick-frame publication functions under
+  `DARWIN_ART_DEBUG_CFI`; a complete 137-cfi run emitted no publication events
+  and still reported `no generic jni frame and no registry`. The native call
+  therefore bypasses these ART entrypoints entirely; temporary logs were removed.
