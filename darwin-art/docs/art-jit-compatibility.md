@@ -4457,3 +4457,11 @@ added; the full corpus and multi-loader identity task remain open.
   Darwin pthread adaptation. Existing monitor contention plus GC/exception
   release coverage remains green; no semantic change is committed until a
   dedicated checkpoint-response measurement can exercise the blocked-lock path.
+
+### Runtime checkpoint 150 — 2026-09-08
+
+- Kept the AOSP empty-checkpoint contract under review without weakening it or
+  adding an interpreter fallback. The Darwin runtime core rebuild remains
+  green, and the existing contention/GC/exception tests pass. A dedicated
+  blocked-lock response measurement is still required before changing the
+  pthread polling implementation.

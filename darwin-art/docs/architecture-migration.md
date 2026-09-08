@@ -9392,6 +9392,13 @@ or admission exception was added.
   remain green; a dedicated blocked-lock checkpoint-response measurement is
   still required before changing this host-specific synchronization layer.
 
+### Runtime checkpoint 150 — 2026-09-08
+
+- Preserved the AOSP empty-checkpoint semantics while retaining the narrow
+  Darwin pthread polling adaptation. Runtime-core compilation and existing
+  contention/GC/exception coverage remain green; the blocked-lock response
+  measurement is still the next required synchronization test.
+
 ### Runtime checkpoint 146 — 2026-09-08
 
 - Rebuilt the pinned ARM64 JIT after removing the Darwin explicit-check-only
