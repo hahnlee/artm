@@ -11230,3 +11230,9 @@ or admission exception was added.
 - Unmodified AOSP `088-monitor-verification` passes in interpreter, JIT, and
   comparison lanes. Balanced/unbalanced monitor verification and JIT admission
   behavior are verified without APK changes; JNI CFI and real-app work remain.
+
+### Runtime checkpoint 398 — 2026-09-09
+
+- Unmodified AOSP `1953-pop-frame` passes in interpreter, JIT, and comparison
+  lanes. JVMTI PopFrame stack mutation and optimized-code continuation are
+  verified without APK changes; JNI CFI and real-app work remain.

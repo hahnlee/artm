@@ -6516,3 +6516,10 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter-versus-optimized lanes pass, covering balanced and unbalanced
   monitor verification paths and their JIT admission behavior. JNI CFI mapping
   and real-app criteria remain open.
+
+### Runtime checkpoint 398 — 2026-09-09
+
+- Ran unmodified AOSP `1953-pop-frame`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes pass, covering JVMTI PopFrame stack
+  mutation and continuation through optimized code. JNI CFI mapping and
+  real-app criteria remain open.
