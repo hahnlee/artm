@@ -9363,3 +9363,10 @@ or admission exception was added.
   calls/JNI, moving GC/read barriers, fields/arrays, exceptions, OSR/deopt,
   dispatch, and mixed root locations. Remaining sentinel-page and membarrier
   messages are Darwin host-boundary warnings observed during the audit.
+
+### Runtime checkpoint 145 — 2026-09-08
+
+- Re-enabled AOSP implicit null checks in the Darwin JIT instead of forcing an
+  explicit-check-only path. Build-time audits cover HNullCheck, field,
+  interface, and virtual receiver nullable decoding; AOSP implicit-null and
+  null-call regressions pass in interpreter and optimized modes.

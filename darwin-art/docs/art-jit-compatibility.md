@@ -4418,3 +4418,13 @@ added; the full corpus and multi-loader identity task remain open.
   OSR/deopt, virtual dispatch, and mixed register/stack roots all pass. The
   audit still reports the expected Darwin sentinel-page and Linux membarrier
   warnings; these are host-boundary diagnostics, not interpreter fallback.
+
+### Runtime checkpoint 145 — 2026-09-08
+
+- Removed the Darwin-only forced `implicit_null_checks_=false` compiler setting.
+  The JIT now inherits ART's runtime setting, while ARM64 HNullCheck, field,
+  interface-invoke, and virtual-call consumers all use nullable compressed-
+  reference decoding. The staging audit rejects reintroduction of the forced
+  disable or omission of any consumer. AOSP implicit-null and null-call
+  interpreter/optimized regressions pass, and the full ART JIT audit remains
+  green.
