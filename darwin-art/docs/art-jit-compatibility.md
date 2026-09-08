@@ -4409,3 +4409,12 @@ added; the full corpus and multi-loader identity task remain open.
   isolated the prior failure to `ANativeWindow_lock` returning `-EINVAL` for
   an unsupported logical surface format; the native path now normalizes that
   format to RGBA_8888 before locking.
+
+### Runtime checkpoint 144 — 2026-09-08
+
+- Re-ran the JIT memory and ART ARM64 acceptance audits on the replacement Mac.
+  Signed `MAP_JIT` nested/concurrent W^X checks, intrinsic inventory, compiled
+  arithmetic/JNI, moving-GC/read-barrier calls, fields/arrays, exceptions,
+  OSR/deopt, virtual dispatch, and mixed register/stack roots all pass. The
+  audit still reports the expected Darwin sentinel-page and Linux membarrier
+  warnings; these are host-boundary diagnostics, not interpreter fallback.

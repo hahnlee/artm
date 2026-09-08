@@ -9356,3 +9356,10 @@ or admission exception was added.
   physical lock/unlock regression can run; diagnostics identified the previous
   `-EINVAL` as an unsupported logical format and added AOSP-shaped RGBA_8888
   normalization before `ANativeWindow_lock`.
+
+### Runtime checkpoint 144 — 2026-09-08
+
+- Replacement-Mac JIT memory and ARM64 acceptance audits pass across compiled
+  calls/JNI, moving GC/read barriers, fields/arrays, exceptions, OSR/deopt,
+  dispatch, and mixed root locations. Remaining sentinel-page and membarrier
+  messages are Darwin host-boundary warnings observed during the audit.
