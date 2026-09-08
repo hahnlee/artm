@@ -6988,3 +6988,8 @@ incomplete and still requires managed caller unwind validation.
   `DARWIN_ART_DEBUG_CFI`; a complete 137-cfi run emitted no publication events
   and still reported `no generic jni frame and no registry`. The native call
   therefore bypasses these ART entrypoints entirely; temporary logs were removed.
+- Checkpoint 466: updated the Darwin NativeBridge thunk itself to publish the
+  managed frame around guest JNI calls, preserving return values in scratch
+  slots and keeping a minimum 16-byte ABI tail. Graphics audit and host tests
+  pass; 137-cfi is unchanged because it intentionally binds host JNI methods
+  directly and does not execute this NativeBridge thunk.

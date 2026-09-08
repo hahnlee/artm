@@ -1,4 +1,5 @@
 #include "darwin_android_jni_trampoline.h"
+#include "darwin_unwindstack_native.h"
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -14,6 +15,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <algorithm>
 
 namespace darwin_art::android_jni {
 namespace {
@@ -134,7 +136,10 @@ bool PlanShorty(const char* shorty, ShortyPlan* plan, std::string* error) {
     darwin_offset += size;
     android_offset += 8;
   }
-  plan->android_stack_size = RoundUp(android_offset, 16);
+  // The generated thunk uses the first two stack slots as scratch while it
+  // publishes the managed frame around the guest call. Keep the Android ABI
+  // tail at least one 16-byte pair even when the method has no stack args.
+  plan->android_stack_size = RoundUp(std::max(android_offset, size_t{16}), 16);
   return true;
 }
 
@@ -312,9 +317,9 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
       generated[position->second].mask |= requests[index].entry_mask;
       continue;
     }
-    const size_t instruction_count = 10u + plans[index].moves.size() * 2u;
+    const size_t instruction_count = 20u + plans[index].moves.size() * 2u;
     const size_t thunk_size = instruction_count * kInstructionSize +
-                              2u * kLiteralSize;
+                              4u * kLiteralSize;
     generated_size = RoundUp(generated_size, 16);
     request_to_generated[index] = generated.size();
     generated.push_back(
@@ -371,13 +376,37 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
               EncodeStore(kX9, kSp, move.android_offset, move.size));
       cursor += 4;
     }
+    const size_t push_literal = thunk.offset + thunk.size - 32u;
+    const size_t pop_literal = thunk.offset + thunk.size - 24u;
     const size_t proxy_literal = thunk.offset + thunk.size - 16u;
     const size_t target_literal = thunk.offset + thunk.size - 8u;
+    // NativeBridge thunks are the actual JNI entrypoint on Darwin and do not
+    // pass through ART's quick JNI entrypoints. Publish the same managed frame
+    // contract around the guest call so a concurrent remote unwind can cross
+    // this host-only ABI boundary.
+    Write32(bytes, cursor, EncodeStore(0, kSp, 0, 8));  // str x0, [sp]
+    cursor += 4;
+    Write32(bytes, cursor, 0xaa1c03e0u);  // mov x0, x28
+    cursor += 4;
+    Write32(bytes, cursor, EncodeLdrLiteralX(16, cursor, push_literal));
+    cursor += 4;
+    Write32(bytes, cursor, 0xd63f0200u);  // blr x16
+    cursor += 4;
+    Write32(bytes, cursor, EncodeLoad(0, kSp, 0, 8));  // ldr x0, [sp]
+    cursor += 4;
     Write32(bytes, cursor, EncodeLdrLiteralX(0, cursor, proxy_literal));
     cursor += 4;
     Write32(bytes, cursor, EncodeLdrLiteralX(16, cursor, target_literal));
     cursor += 4;
     Write32(bytes, cursor, 0xd63f0200u);  // blr x16
+    cursor += 4;
+    Write32(bytes, cursor, EncodeStore(0, kSp, 8, 8));  // str x0, [sp, #8]
+    cursor += 4;
+    Write32(bytes, cursor, EncodeLdrLiteralX(16, cursor, pop_literal));
+    cursor += 4;
+    Write32(bytes, cursor, 0xd63f0200u);  // blr x16
+    cursor += 4;
+    Write32(bytes, cursor, EncodeLoad(0, kSp, 8, 8));  // ldr x0, [sp, #8]
     cursor += 4;
     Write32(bytes, cursor, 0x910003bfu);  // mov sp, x29
     cursor += 4;
@@ -394,6 +423,10 @@ TrampolineSet* CreateRegularTrampolines(void* proxy_jni_env,
       munmap(mapping, mapping_size);
       return nullptr;
     }
+    Write64(bytes, push_literal,
+            reinterpret_cast<uintptr_t>(&darwin_art_unwindstack_push_quick_frame));
+    Write64(bytes, pop_literal,
+            reinterpret_cast<uintptr_t>(&darwin_art_unwindstack_pop_quick_frame));
     Write64(bytes, proxy_literal, reinterpret_cast<uintptr_t>(proxy_jni_env));
     Write64(bytes, target_literal,
             reinterpret_cast<uintptr_t>(
