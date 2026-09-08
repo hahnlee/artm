@@ -6582,3 +6582,11 @@ added; the full corpus and multi-loader identity task remain open.
   resolves anonymously, proving the remaining gap is matching JIT entry code
   addresses to their in-memory ELF symfiles, not missing compilation or an
   empty descriptor.
+
+### Runtime checkpoint 406 — 2026-09-09
+
+- Normalized every low-PC frame emitted by the managed `Unwinder`, not only
+  the initial generic-JNI return PC, and retried unmodified `137-cfi`. Upper
+  frames now reach the application OAT mapping, but `Main.main` still lacks a
+  resolved mini-debug/Dex symbol. The next target is supplying DexFiles/JIT
+  symfiles for that frame.

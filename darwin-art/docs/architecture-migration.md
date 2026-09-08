@@ -11287,3 +11287,10 @@ or admission exception was added.
   valid entries with nonzero symfile addresses/sizes are present. The upper
   managed frame remains anonymous, narrowing the issue to code-address versus
   in-memory ELF symfile matching at the JIT boundary.
+
+### Runtime checkpoint 406 — 2026-09-09
+
+- Applied low logical-PC normalization to every frame returned by the managed
+  unwinder. `137-cfi` now identifies upper frames in the app OAT mapping, but
+  `Main.main` remains unnamed because its mini-debug/Dex symbol source is not
+  being supplied. DexFiles/JIT symfile integration is the next boundary.

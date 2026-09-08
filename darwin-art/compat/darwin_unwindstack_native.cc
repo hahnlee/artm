@@ -97,9 +97,8 @@ uint64_t NormalizeManagedPc(unwindstack::Maps* maps, uint64_t pc) {
         const auto mapping = maps->Find(candidate);
         if (mapping != nullptr && (mapping->flags() & PROT_EXEC) != 0) {
           if (mapping->name().empty()) {
-            maps->Add(range.start, range.end, range.file_offset,
-                      PROT_READ | PROT_EXEC, range.oat_location);
-            maps->Sort();
+            mapping->set_name(range.oat_location.c_str());
+            mapping->set_offset(range.file_offset);
           }
           return candidate;
         }
@@ -585,6 +584,23 @@ void AppendManagedFrames(NativeWalk* walk) {
   managed.Unwind();
   auto frames = managed.ConsumeFrames();
   for (auto& frame : frames) {
+    if (frame.pc < (1ULL << 32)) {
+      const uint64_t normalized_pc = NormalizeManagedPc(walk->maps, frame.pc);
+      if (normalized_pc != frame.pc) {
+        frame.pc = normalized_pc;
+        frame.map_info = walk->maps->Find(normalized_pc);
+        if (frame.map_info != nullptr) {
+          frame.rel_pc = normalized_pc - frame.map_info->start() + frame.map_info->offset();
+        }
+        SharedString resolved_name;
+        uint64_t resolved_offset = 0;
+        if (walk->jit_debug->GetFunctionName(walk->maps, normalized_pc,
+                                              &resolved_name, &resolved_offset)) {
+          frame.function_name = resolved_name;
+          frame.function_offset = resolved_offset;
+        }
+      }
+    }
     frame.num = walk->data->frames.size();
     walk->data->frames.emplace_back(std::move(frame));
   }
