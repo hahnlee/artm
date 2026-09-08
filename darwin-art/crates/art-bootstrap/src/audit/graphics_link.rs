@@ -737,6 +737,7 @@ pub(crate) fn audit_runtime_graphics_link_mode(
         // the debugger-interface member instead of force-loading the runtime
         // archive (which duplicates ICU/ART providers).
         .arg(root.join("_build/runtime-common/objects/jit_debugger_interface.cc.o"))
+        .arg(root.join("_build/runtime-common/objects/darwin_art_stack_resolver.cc.o"))
         .arg(&unwindstack_providers)
         .arg(&unwindstack_core)
         .arg(&unwindstack_dex)

@@ -31,6 +31,20 @@ pub(super) fn bootstrap_jobs(
             command: jit_memory_command,
             object: jit_memory_object,
         });
+
+        let resolver_object = staged
+            .runtime_core_object_dir
+            .join("darwin_art_stack_resolver.cc.o");
+        let mut resolver_command = runtime_bootstrap_cpp_command(runtime_includes);
+        resolver_command
+            .arg("-c")
+            .arg(staged.root.join("compat/darwin_art_stack_resolver.cc"))
+            .arg("-o")
+            .arg(&resolver_object);
+        jobs.push(PendingNativeCompile {
+            command: resolver_command,
+            object: resolver_object,
+        });
     }
 
     let operator_object = staged.object_dir.join("generated_operator_out.cc.o");

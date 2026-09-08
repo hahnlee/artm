@@ -6852,6 +6852,12 @@ incomplete and still requires managed caller unwind validation.
 
 - Provider smoke and graphics-link audits remain green after removing direct
   ART coupling; managed-stack resolution stays a runtime-owner callback.
+### Runtime checkpoint 439 — 2026-09-09
+
+- Added an ART-owned `StackVisitor` resolver TU and a provider-side dynamic
+  callback path, preserving ART-free smoke linkage. The fast graphics audit
+  remains green; full graphics rebuild is currently blocked by an unrelated
+  NDK requirement in the libcore build lane.
 
 - Direct provider-to-ART `StackVisitor` coupling is invalid for the ART-free
   smoke target. The remaining design is an optional exported ART callback with

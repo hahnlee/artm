@@ -667,6 +667,21 @@ void AppendManagedFrames(NativeWalk* walk) {
     frame.num = walk->data->frames.size();
     walk->data->frames.emplace_back(std::move(frame));
   }
+  using ManagedFrameWalker = void (*)(void (*)(const char*, void*), void*);
+  auto walker = reinterpret_cast<ManagedFrameWalker>(
+      dlsym(RTLD_DEFAULT, "darwin_art_walk_managed_frames"));
+  if (walker != nullptr && walk->data->frames.size() < walk->limit) {
+    walker(
+        [](const char* name, void* context) {
+          auto* target = static_cast<NativeWalk*>(context);
+          if (name == nullptr || *name == '\0' || target->data->frames.size() >= target->limit) return;
+          FrameData frame{};
+          frame.num = target->data->frames.size();
+          frame.function_name = name;
+          target->data->frames.emplace_back(std::move(frame));
+        },
+        walk);
+  }
 }
 
 void AppendFrame(NativeWalk* walk, uint64_t pc, uint64_t sp) {

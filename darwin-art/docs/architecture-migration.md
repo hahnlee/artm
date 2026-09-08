@@ -11527,6 +11527,11 @@ or admission exception was added.
 
 - Provider smoke and graphics-link audits remain green after removing direct
   ART coupling; managed-stack resolution stays a runtime-owner callback.
+### Runtime checkpoint 439 — 2026-09-09
+
+- The resolver is now an explicit runtime-owner TU with dynamic lookup from the
+  provider. Fast link validation passes; the full rebuild hit the existing
+  Android NDK prerequisite in the libcore lane, not a resolver compile error.
 
 - Direct provider-to-ART `StackVisitor` coupling is invalid for the ART-free
   smoke target. The remaining design is an optional exported ART callback with
