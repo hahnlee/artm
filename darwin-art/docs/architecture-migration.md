@@ -11493,3 +11493,11 @@ or admission exception was added.
 - It is now compiled into the runtime and its AOSP descriptor symbol is
   exported at the dynamic link boundary. Bootstrap and graphics-link audits
   are green; the next gate is a fresh `137-cfi` attribution result.
+### Runtime checkpoint 433 — 2026-09-09
+
+- `137-cfi` remains failing after the first relink because a plain static
+  archive does not retain the descriptor-only object; the strict runtime link
+  also rejects five unrelated symbols if that whole object is force-loaded.
+- The next implementation must retain just the AOSP debugger-interface
+  descriptor through a narrow link-safe boundary, preserving the existing
+  closure audit.

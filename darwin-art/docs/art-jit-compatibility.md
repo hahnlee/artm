@@ -6817,3 +6817,11 @@ incomplete and still requires managed caller unwind validation.
   `__dex_debug_descriptor` from runtime/probe link boundaries. Bootstrap and
   graphics-link audits pass; `137-cfi` must be rerun against the newly linked
   host to confirm method attribution.
+### Runtime checkpoint 433 — 2026-09-09
+
+- The fresh `137-cfi` run still returns `FAIL`; exporting the descriptor alone
+  does not retain an unreferenced static-archive member in the generic runtime
+  link. The direct APK link uses force-load, while the narrow runtime audit
+  remains intentionally strict and was restored to its prior closure.
+- Next step is a link-safe retention mechanism for only the debugger-interface
+  member, without admitting unrelated Canvas/Runtime unresolved symbols.
