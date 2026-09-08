@@ -11098,3 +11098,10 @@ or admission exception was added.
 - Unmodified AOSP `823-cha-inlining` passes in interpreter, JIT, and comparison
   lanes. CHA virtual dispatch and inlining are verified without test-specific
   gates; JNI CFI, OSR breadth, and real-app work remain.
+
+### Runtime checkpoint 378 — 2026-09-09
+
+- Unmodified AOSP `721-osr` passes in interpreter, JIT, and comparison lanes.
+  Loop on-stack replacement and optimized-to-interpreter transition are
+  verified without APK changes or fallback gates; JNI CFI and broader OSR
+  coverage remain.
