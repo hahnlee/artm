@@ -11218,3 +11218,9 @@ or admission exception was added.
   pair publication. The authoritative producer is therefore the assembly
   `SETUP_SAVE_REFS_AND_ARGS_FRAME_WITH_METHOD_IN_X0` LR store, which must be
   instrumented next without fallback or allowlists.
+
+### Runtime checkpoint 396 — 2026-09-09
+
+- Unmodified AOSP `1919-vminit-thread-start-timing` passes in interpreter, JIT,
+  and comparison lanes. VM initialization ordering against early thread start
+  is verified without APK changes; JNI CFI and real-app work remain.

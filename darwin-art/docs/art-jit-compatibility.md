@@ -6502,3 +6502,10 @@ added; the full corpus and multi-loader identity task remain open.
   callback as the producer path and leaves the assembly
   `SETUP_SAVE_REFS_AND_ARGS_FRAME_WITH_METHOD_IN_X0` LR store as the next
   authoritative instrumentation point.
+
+### Runtime checkpoint 396 — 2026-09-09
+
+- Ran unmodified AOSP `1919-vminit-thread-start-timing`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes pass, covering VM initialization ordering
+  against early thread start. JNI CFI mapping and real-app criteria remain
+  open.
