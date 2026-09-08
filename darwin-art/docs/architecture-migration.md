@@ -9568,6 +9568,14 @@ or admission exception was added.
   2.5G, and the DarwinART profile store 126G. It was not deleted because it is
   a runtime artifact and no cleanup authorization was provided.
 
+### Runtime checkpoint 292 — 2026-09-08
+
+- Profile storage inspection shows `default` is the only profile modified on
+  2026-09-08 (about 126G, including `mnt`); `productcompare*`, `bundle*`,
+  `goaltest`, `producttest`, and `managerui` are dated 2026-08-29/30. These
+  stale profiles are candidate cleanup targets, but remain untouched pending
+  authorization.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - EGL capability filtering now declares FP16 pixel formats unsupported for the
