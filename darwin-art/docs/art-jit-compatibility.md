@@ -5930,3 +5930,11 @@ added; the full corpus and multi-loader identity task remain open.
   Bionic facade packages. Combined with the focused loader and JIT-memory
   gates, this adds integration regression evidence; final end-to-end AOSP
   differential and real-app criteria remain open.
+
+### Runtime checkpoint 323 — 2026-09-08
+
+- Rebuilt the pinned `framework-compat.jar` after confirming historical VLC
+  logs contained `NoSuchMethodError` for Android API-29
+  `ConnectivityManager.requestNetwork(...)`. The compatibility source already
+  implements all four overloads and the artifact now regenerates successfully;
+  a fresh real VLC run is still required.

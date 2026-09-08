@@ -10696,3 +10696,10 @@ or admission exception was added.
   APK, profile, host, Binder, and Bionic components. These are integration
   regressions checks, not a substitute for the remaining full AOSP differential
   corpus and real-app validation.
+
+### Runtime checkpoint 323 — 2026-09-08
+
+- Refreshed the framework compatibility artifact so VLC's Android
+  `ConnectivityManager.requestNetwork` API-29 overloads are present in runtime
+  input. This is a framework-surface correction, not an app patch; a fresh
+  unmodified-VLC execution remains required to validate native playback.
