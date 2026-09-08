@@ -9636,3 +9636,10 @@ or admission exception was added.
 - The fresh `2001`–`2007` structural-redefinition slice passes all seven
   contracts across interpreter, JIT, and unchanged optimized lanes, validating
   multithreaded dispatch, initialization/finalization, and pause-all behavior.
+
+### Runtime checkpoint 184 — 2026-09-08
+
+- The fresh slices `2008`–`2012` (5 contracts) and `2019`–`2039` (22
+  contracts) pass all execution lanes, validating structural local-ref/stack
+  walk/JNI-ID behavior, inlining/loops, monitor/shutdown, and native
+  allocation/transform handling.

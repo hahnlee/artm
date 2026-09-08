@@ -4728,6 +4728,14 @@ added; the full corpus and multi-loader identity task remain open.
   unchanged-source optimized lanes, covering multithreaded virtual dispatch,
   initialization/finalization, and pause-all coordination.
 
+### Runtime checkpoint 184 — 2026-09-08
+
+- Fresh corpus runs pass 5 contracts in `2008`–`2012` and 22 in
+  `2019`–`2039` across interpreter, JIT, and unchanged-source optimized
+  lanes. Coverage includes structural local references/stack walking/JNI-ID
+  failures, inlining and loop optimization, monitor/shutdown behavior, and
+  large native allocation/transform paths.
+
 ### Runtime checkpoint 173 — 2026-09-08
 
 - Fresh four-worker corpus reruns completed 25/25 executable contracts in
