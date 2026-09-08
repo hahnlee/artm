@@ -119,6 +119,11 @@ void DarwinRegisterAotCodeRange(const void* start, size_t size, uint64_t file_of
         range.oat_location == oat_location) return;
   }
   g_aot_ranges.push_back({begin, end, file_offset, oat_location});
+  if (std::getenv("DARWIN_ART_DEBUG_CFI") != nullptr) {
+    std::fprintf(stderr, "darwin-cfi: aot-range start=%llx end=%llx file=%llx path=%s\\n",
+                 static_cast<unsigned long long>(begin), static_cast<unsigned long long>(end),
+                 static_cast<unsigned long long>(file_offset), oat_location);
+  }
 }
 
 void DarwinPublishAotCodeMaps(Maps* maps) {
@@ -458,6 +463,16 @@ void AppendManagedFrames(NativeWalk* walk) {
                    static_cast<unsigned long long>(words[1]),
                    static_cast<unsigned long long>(words[2]),
                    static_cast<unsigned long long>(words[3]));
+    }
+    uint64_t frame_tail[4]{};
+    mach_vm_size_t tail_bytes = 0;
+    if (mach_vm_read_overwrite(walk->task, walk->last_x28 + 192, sizeof(frame_tail),
+                               reinterpret_cast<mach_vm_address_t>(frame_tail), &tail_bytes) == KERN_SUCCESS) {
+      std::fprintf(stderr, "darwin-cfi: frame tail x27=%llx x28=%llx x29=%llx lr=%llx\\n",
+                   static_cast<unsigned long long>(frame_tail[0]),
+                   static_cast<unsigned long long>(frame_tail[1]),
+                   static_cast<unsigned long long>(frame_tail[2]),
+                   static_cast<unsigned long long>(frame_tail[3]));
     }
   }
 

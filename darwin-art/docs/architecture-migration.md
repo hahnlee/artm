@@ -11013,3 +11013,11 @@ or admission exception was added.
   stub path is covered. Bootstrap and formatting checks pass, while `137-cfi`
   still reports five failures; the remaining low LR is not explained by
   ArtMethod pointer representation and needs native/JNI frame-producer tracing.
+
+### Runtime checkpoint 366 — 2026-09-09
+
+- Added guarded CFI diagnostics for the generic-JNI frame tail and AOT range
+  publication. The LR slot itself contains stable low `0x210dxxx` values, but
+  application OAT ranges are registered at host `0x11...` addresses. This
+  rules out a simple frame-offset bug and points to missing logical-to-RX code
+  identity publication.

@@ -6273,3 +6273,11 @@ added; the full corpus and multi-loader identity task remain open.
   five failures. The saved LR is therefore not fixed by ArtMethod read/store
   representation alone; the native/JNI frame producer remains the next
   boundary to instrument.
+
+### Runtime checkpoint 366 — 2026-09-09
+
+- Instrumented the Apple CFI boundary to dump the generic-JNI SaveRefsAndArgs
+  tail and registered AOT ranges. The LR slot consistently holds low
+  `0x210dxxx` values while the managed frame base and offsets are stable;
+  application OAT ranges are host addresses near `0x11...`. The next fix must
+  publish a logical-to-RX code-cache translation rather than use a fixed base.
