@@ -11689,3 +11689,7 @@ or admission exception was added.
   exported JNI symbol `Java_java_lang_Runtime_nativeLoad`; the remaining link
   closure still reports that symbol plus four ACanvas entrypoints, confirming
   the issue is missing archive ownership rather than a stale declaration.
+- Checkpoint 472: tested linking the existing HWUI ACanvas archive into the
+  headless runtime. It introduced 43 additional PNG/JPEG/Skia dependencies,
+  so the experiment was reverted; ACanvas must be supplied through the full
+  graphics closure rather than appended to the CPU link piecemeal.
