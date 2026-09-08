@@ -6463,3 +6463,11 @@ added; the full corpus and multi-loader identity task remain open.
   bootstrap succeeds, but `137-cfi` still fails, so the pair is not yet the
   authoritative address observed in the generic-JNI saved LR. This remains an
   active ABI investigation; no fallback or allowlist was added.
+
+### Runtime checkpoint 391 — 2026-09-09
+
+- The entrypoint-pair implementation is compiled into the graphics bootstrap,
+  but a fresh `137-cfi` run still reports the same JIT unwind mismatch. This
+  confirms the producer is the generic-JNI trampoline's saved LR rather than
+  the Java-side entrypoint getter; the next change must publish the pair at
+  trampoline entry (or carry the method identity into unwind metadata).

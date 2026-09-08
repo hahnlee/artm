@@ -11182,3 +11182,10 @@ or admission exception was added.
   normalization. Runtime bootstrap succeeds, but `137-cfi` still fails because
   the generic-JNI saved LR is not yet matched to the published pair. ABI
   investigation remains active; no fallback or allowlist was added.
+
+### Runtime checkpoint 391 — 2026-09-09
+
+- A fresh CFI run confirms the mismatch remains after compiling entrypoint-pair
+  metadata. The authoritative producer is the generic-JNI trampoline's saved
+  LR, so publication must move to trampoline entry or include method identity
+  in unwind metadata; no fallback or allowlist was introduced.
