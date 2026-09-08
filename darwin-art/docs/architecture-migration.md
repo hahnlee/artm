@@ -9538,3 +9538,10 @@ or admission exception was added.
   `180-native-default-method`) pass all interpreter, JIT, and unchanged
   optimized lanes on a fresh four-worker run, covering GC/JNI, class loading,
   app-image, and default-method behavior.
+
+### Runtime checkpoint 169 — 2026-09-08
+
+- The fresh corpus slice `181-default-methods` through
+  `203-multi-checkpoint` passes all seven executable contracts across
+  interpreter, JIT, and unchanged optimized lanes, covering method linking,
+  RMW stress, exception/OOME behavior, and checkpoint coordination.

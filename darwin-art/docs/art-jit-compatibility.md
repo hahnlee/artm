@@ -4626,3 +4626,11 @@ added; the full corpus and multi-loader identity task remain open.
   `180-native-default-method` passes all 40 contracts in interpreter, JIT,
   and unchanged-source optimized lanes, covering concurrent GC, JNI/native
   bridges, class loading, app-image metadata, and default-method dispatch.
+
+### Runtime checkpoint 169 — 2026-09-08
+
+- Fresh four-worker rerun of the seven executable contracts from
+  `181-default-methods` through `203-multi-checkpoint` passes interpreter, JIT,
+  and unchanged-source optimized lanes. Coverage includes method linking,
+  read-modify-write stress, exception detail messages, thread OOME, and
+  checkpoint coordination.
