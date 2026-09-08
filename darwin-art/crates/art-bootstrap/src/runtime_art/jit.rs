@@ -26,6 +26,42 @@ fn source_list(block: &str) -> Result<Vec<String>> {
     Ok(sources)
 }
 
+fn audit_implicit_null_checks(jit_compiler: &str, arm64_codegen: &str) -> Result<()> {
+    const RUNTIME_SETTING: &str =
+        "compiler_options_->implicit_null_checks_ = runtime->GetImplicitNullChecks();";
+    if !jit_compiler.contains(RUNTIME_SETTING) {
+        return Err(
+            "patched JIT compiler no longer inherits ART's implicit-null-check setting".into(),
+        );
+    }
+    if jit_compiler.contains("compiler_options_->implicit_null_checks_ = false;") {
+        return Err(
+            "patched JIT compiler still disables AOSP implicit null checks on Darwin".into(),
+        );
+    }
+
+    // Darwin compressed references need a nullable decode before the faulting ARM64 load.
+    // Keep the three consumers that can observe a null receiver covered together: an
+    // explicit HNullCheck, instance fields, and interface/virtual invokes.
+    for marker in [
+        "void CodeGeneratorARM64::GenerateImplicitNullCheck(HNullCheck* instruction)",
+        "void InstructionCodeGeneratorARM64::HandleFieldGet(HInstruction* instruction",
+        "void InstructionCodeGeneratorARM64::VisitInvokeInterface(HInvokeInterface* invoke)",
+        "void CodeGeneratorARM64::GenerateVirtualCall(",
+    ] {
+        let start = arm64_codegen
+            .find(marker)
+            .ok_or_else(|| format!("missing ARM64 implicit-null consumer: {marker}"))?;
+        let body = &arm64_codegen[start..arm64_codegen.len().min(start + 4_096)];
+        if !body.contains("DecodeNullable") {
+            return Err(
+                format!("ARM64 implicit-null consumer lacks nullable decode: {marker}").into(),
+            );
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn build_jit_compiler(root: &Path) -> Result<()> {
     build_jit_libelffile(root)?;
     let compiler = root.join("_aosp/art/compiler");
@@ -452,6 +488,12 @@ pub(crate) fn build_jit_compiler(root: &Path) -> Result<()> {
     run_command(
         Command::new("patch")
             .args(["--batch", "--forward", "-p1", "-i"])
+            .arg(root.join("patches/art/0147-darwin-enable-implicit-null-checks.patch"))
+            .current_dir(build.join("patched-source")),
+    )?;
+    run_command(
+        Command::new("patch")
+            .args(["--batch", "--forward", "-p1", "-i"])
             .arg(root.join("patches/art/0135-darwin-arm64-jni-stack-abi.patch"))
             .current_dir(build.join("patched-source")),
     )?;
@@ -502,6 +544,10 @@ pub(crate) fn build_jit_compiler(root: &Path) -> Result<()> {
             .args(["--batch", "--forward", "-p1", "-i"])
             .arg(root.join("patches/art/0140-darwin-arm64-reference-intrinsic-class.patch"))
             .current_dir(build.join("patched-source")),
+    )?;
+    audit_implicit_null_checks(
+        &fs::read_to_string(staged_jit.join("jit_compiler.cc"))?,
+        &fs::read_to_string(staged_codegen.join("code_generator_arm64.cc"))?,
     )?;
     generator
         .arg(root.join("_aosp/art/tools/generate_operator_out.py"))
