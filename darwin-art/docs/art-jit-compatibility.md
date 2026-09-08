@@ -6848,6 +6848,11 @@ incomplete and still requires managed caller unwind validation.
   use ART OAT/ArtMethod metadata rather than mis-keying the DEX parser.
 ### Runtime checkpoint 437 — 2026-09-09
 
+### Runtime checkpoint 438 — 2026-09-09
+
+- Provider smoke and graphics-link audits remain green after removing direct
+  ART coupling; managed-stack resolution stays a runtime-owner callback.
+
 - Direct provider-to-ART `StackVisitor` coupling is invalid for the ART-free
   smoke target. The remaining design is an optional exported ART callback with
   a weak provider stub.
