@@ -4366,3 +4366,12 @@ added; the full corpus and multi-loader identity task remain open.
   `net.sourceforge.solitaire_cg.SolitaireView` was created, drag MotionEvents
   were consumed through the input channel, and the 8-second native-free run
   completed without fatal signal or activity exception.
+
+### Runtime checkpoint 139 — 2026-09-08
+
+- Probed the unchanged VLC Android APK with native/JNI diagnostics. VLC loads
+  its native graph and reaches framework rendering, but the process currently
+  fails on the missing Android `Surface.nativeLockCanvas(long, Canvas, Rect)`
+  contract in the software draw path. This is a concrete framework-native gap;
+  no JIT fault was observed. AOSP Surface JNI parity is the next implementation
+  target.

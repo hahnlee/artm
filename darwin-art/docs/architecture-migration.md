@@ -9318,3 +9318,10 @@ or admission exception was added.
 - The unmodified `SolitaireCG` game APK passes physical drag acceptance:
   `SolitaireView` receives and consumes MotionEvents over the input channel,
   and an 8-second native-free run finishes without crash or activity error.
+
+### Runtime checkpoint 139 — 2026-09-08
+
+- An unchanged VLC APK probe reaches native/JNI loading but fails when its
+  rendering path calls the unimplemented Android
+  `Surface.nativeLockCanvas(long, Canvas, Rect)`. This is now the concrete next
+  framework-native compatibility gap; no ART JIT fault was seen.
