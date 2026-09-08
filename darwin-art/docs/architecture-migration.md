@@ -9524,3 +9524,10 @@ or admission exception was added.
   native Nterp, and empty-checkpoint contention (RC=0;
   `/tmp/audit-fresh-final.log`). Decoded-frame pixel posting remains a later
   compatibility gate.
+
+### Runtime checkpoint 167 — 2026-09-08
+
+- Fresh four-worker corpus rerun of `061-out-of-memory` through `100-reflect2`
+  passes all 42 contracts across interpreter, JIT, and unchanged optimized
+  lanes. This confirms the allocation/GC and core reflection fixes on the
+  current runtime rather than relying on the stale full-audit ledger.

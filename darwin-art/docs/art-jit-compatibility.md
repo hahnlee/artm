@@ -4611,3 +4611,11 @@ added; the full corpus and multi-loader identity task remain open.
   producer lifetime, native Nterp, and empty-checkpoint contention all pass
   with RC=0 (`/tmp/audit-fresh-final.log`). Decoded-frame pixel posting is not
   part of this accepted baseline yet.
+
+### Runtime checkpoint 167 — 2026-09-08
+
+- Re-ran the AOSP corpus range `061-out-of-memory` through `100-reflect2`
+  against the current runtime with four workers. All 42 discovered contracts
+  pass interpreter, JIT expected-output, and unchanged-source optimized lanes;
+  this refreshes the stale full-audit failures for allocation/GC, fields,
+  monitors, concurrency, and reflection.
