@@ -9644,6 +9644,13 @@ or admission exception was added.
   This validates the media app's Android window buffer bridge; an actual media
   file playback assertion remains separate.
 
+### Runtime checkpoint 305 — 2026-09-08
+
+- Recovery profile inventory contains no existing media fixture. The VLC
+  surface/canvas acceptance remains green, but an actual decode/playback
+  assertion is intentionally not claimed until a media file is supplied or
+  generated through the test harness.
+
 ### Runtime checkpoint 301 — 2026-09-08
 
 - Recovery profile app coverage expanded without APK changes: Snapseed
