@@ -6941,3 +6941,8 @@ incomplete and still requires managed caller unwind validation.
   native bridge substitution occurs before the observed `ArtMethod` entrypoint,
   so the next diagnostic must trace pointer identity at `RegisterNative` and
   resolver time.
+- Checkpoint 455: pointer-identity tracing was attempted but was not retained;
+  the diagnostic build exposed an existing graphics-variant patch race and was
+  reverted. Runtime bootstrap is green again. Native registration metadata
+  remains in place, but the shared registry has not yet produced the expected
+  `UpstreamCfi*` symbol, so the goal remains open.
