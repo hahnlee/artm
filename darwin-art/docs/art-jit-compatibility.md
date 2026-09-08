@@ -4640,3 +4640,11 @@ added; the full corpus and multi-loader identity task remain open.
 - `300-package-override` passes interpreter, JIT expected-output, and
   unchanged-source optimized lanes on the current runtime, extending
   application package/class-loader override coverage.
+
+### Runtime checkpoint 171 — 2026-09-08
+
+- Fresh four-worker corpus execution over the executable contracts in the
+  `301`–`500` range completed 54/54 passes across interpreter, JIT, and
+  unchanged-source optimized lanes. Coverage includes optimizing compiler
+  control flow/arithmetic, fields/arrays, exceptions/monitors, register
+  allocation, inlining, and deoptimization.

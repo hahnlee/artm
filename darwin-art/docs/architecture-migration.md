@@ -9550,3 +9550,10 @@ or admission exception was added.
 
 - `300-package-override` passes all three execution lanes, validating package
   override and application class-loader behavior without source changes.
+
+### Runtime checkpoint 171 — 2026-09-08
+
+- The fresh corpus slice spanning executable tests `301`–`500` passes all 54
+  contracts in interpreter, JIT, and unchanged optimized lanes, including
+  optimizing compiler control flow, allocation/register handling, exceptions,
+  monitors, inlining, and deoptimization.
