@@ -4237,3 +4237,11 @@ added; the full corpus and multi-loader identity task remain open.
   broker/sync primitive. Native graphics bootstrap/link audit and a fresh
   Chrome APK smoke pass with `RC=0`; no SyncFence linkage or fatal-signal error
   appeared. Full fence/parcel stress remains open.
+
+### Runtime checkpoint 123 — 2026-09-08
+
+- Revalidated the replacement-machine toolchain after the SyncFence bridge:
+  `cargo test -p darwin-art-host` passes all 10 host/graphics tests and
+  `cargo test -p art-bootstrap` passes all 14 Nterp/build-contract tests.
+  These are regression evidence only; they do not close the remaining
+  long-running Chrome, parcel, or full AOSP corpus gates.

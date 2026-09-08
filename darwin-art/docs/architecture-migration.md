@@ -9200,3 +9200,11 @@ or admission exception was added.
   refcount increments backed by the Darwin broker. The graphics bootstrap/link
   audit and a fresh Chrome APK smoke pass cleanly (`RC=0`), with no SyncFence
   linkage or fatal-signal error. Fence and parcel stress coverage remains.
+
+### Runtime checkpoint 123 — 2026-09-08
+
+- Revalidated the replacement-machine toolchain: `cargo test
+  -p darwin-art-host` passes all 10 host/graphics tests and `cargo test
+  -p art-bootstrap` passes all 14 Nterp/build-contract tests. This confirms
+  no regression from the SyncFence bridge while the full AOSP corpus,
+  long-running Chrome graphics, and parcel stress gates remain open.
