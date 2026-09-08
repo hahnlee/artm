@@ -5063,6 +5063,18 @@ added; the full corpus and multi-loader identity task remain open.
   multi-thread compiler regressions, missing classes, and class loading.
   Remaining corpus and real-app validation are pending.
 
+### Runtime checkpoint 249 — 2026-09-08
+
+- The `800-smali`–`837-deopt` slice passed all 40 tests, covering smali and
+  MethodHandle/method-resolution paths, deoptimization, malformed and deep
+  class hierarchies, invoke-super variants, recursive defaults, FP arguments,
+  large field offsets, invokeinterface defaults, illegal arrays, clinit
+  nterp, runtime verification/rethrow, vdex multidex, madvise, many args,
+  future hidden API, CHA inlining/recursion, unbalanced locks, infinite loops,
+  partial/full LSE, unresolved enclosing/field access, unverified boot class
+  paths, background verification, large class counts, and deopt. Remaining
+  corpus and real-app validation are pending.
+
 ### Runtime checkpoint 248 — 2026-09-08
 
 - The `719-varhandle-concurrency`–`736-interface-super-Object` slice passed

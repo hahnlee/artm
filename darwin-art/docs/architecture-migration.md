@@ -9365,6 +9365,14 @@ or admission exception was added.
   churn, VarHandle and invoke-custom behavior, JLI samples, and finalizers.
   Remaining corpus and real-app validation remain pending.
 
+### Runtime checkpoint 249 — 2026-09-08
+
+- The `800-smali`–`837-deopt` slice passed all 40 tests, covering smali,
+  MethodHandle/resolution, deoptimization, class hierarchy and invoke-super,
+  FP/field/interface calls, verification/rethrow, vdex multidex, hidden API,
+  CHA, locks/loops/LSE, unresolved access, background verification, and large
+  class counts. Remaining corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 248 — 2026-09-08
 
 - The `719-varhandle-concurrency`–`736-interface-super-Object` slice passed
