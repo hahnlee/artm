@@ -23,7 +23,7 @@ bool CurrentGenericJniFrame(uint64_t* managed_sp) {
   // the ManagedStack pointer with the AOSP JNI tag, so use GetTopQuickFrame()
   // to strip that tag rather than the DCHECK-only KnownNotTagged accessor.
   if (stack == nullptr) return false;
-  if (!stack->HasTopQuickFrame()) return false;
+  if (!stack->HasTopQuickFrame() || !stack->GetTopQuickFrameGenericJniTag()) return false;
   *managed_sp = reinterpret_cast<uint64_t>(stack->GetTopQuickFrame());
   return *managed_sp != 0;
 }

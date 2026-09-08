@@ -6643,3 +6643,12 @@ incomplete and still requires managed caller unwind validation.
   `137-cfi`; all five lanes still fail and the observed pointer bytes are
   unchanged. Tag stripping is not the remaining defect; the next target is
   generic-JNI `top_quick_frame` publication/restoration timing.
+
+### Runtime checkpoint 413 — 2026-09-09
+
+- Required the Darwin `ManagedStack` helper to observe an actual generic-JNI
+  tag before returning a frame pointer. Rebuilt and reran unmodified
+  `137-cfi`; all five lanes still fail, confirming that callback-time
+  `ManagedStack` state is not a reliable substitute for the trampoline's local
+  `managed_sp`. The next implementation target is an explicit ABI publication
+  of that AOSP `managed_sp` into the unwind provider.

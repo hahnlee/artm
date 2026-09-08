@@ -11341,3 +11341,11 @@ or admission exception was added.
   graphics link pass audit, but all five `137-cfi` lanes still fail and frame
   bytes remain unchanged. The remaining boundary is publication/restoration
   timing of `top_quick_frame` across the generic-JNI native callback.
+
+### Runtime checkpoint 413 — 2026-09-09
+
+- Generic-JNI frame recovery now requires the AOSP generic tag, avoiding use of
+  an unrelated top frame. The provider audit passes but all five `137-cfi`
+  lanes remain failing, showing callback-time `ManagedStack` state is not a
+  sufficient source of the trampoline's local `managed_sp`. An explicit
+  managed-SP publication ABI is the next boundary.
