@@ -4929,3 +4929,9 @@ added; the full corpus and multi-loader identity task remain open.
   but `497` still produced the same NPE. The unverified global clone lifetime
   path was removed; clean graphics bootstrap passes. The remaining gap is the
   ClassLinker class-definition/cache association.
+
+### Runtime checkpoint 208 — 2026-09-08
+
+- Worktree audit confirms no clone patch is tracked; the latest `497` NPE is
+  baseline behavior, not evidence against the clone. The next run must retain
+  the canonical patch through build and identity-traced execution.
