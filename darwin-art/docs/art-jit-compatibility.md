@@ -5849,3 +5849,10 @@ added; the full corpus and multi-loader identity task remain open.
   MediaCodec capability enumeration, not proof of an ART JIT entry null. The
   ART runtime remains unmasked; native ELF relocation/vtable ownership is the
   next investigation.
+### Runtime checkpoint 313 — 2026-09-08
+
+- Disassembly of the latest crash maps LR to `libvlc.so` and identifies the
+  exact failing instruction as an indirect call through a null vtable slot in
+  `vlc_stream_MemoryNew`. The loader publishes `libvlc.so`, `libvlcjni.so`,
+  and `libc++_shared.so`; the next native-loader check must validate constructor
+  execution and C++ vtable relocation state rather than changing ART JIT gates.

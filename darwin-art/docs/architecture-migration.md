@@ -10624,3 +10624,9 @@ or admission exception was added.
   target is a vtable slot inside libvlc, not a direct ART call PC. Native
   relocation/constructor completeness for the VLC dependency graph is now the
   active blocker, while ART signal handling remains unchanged.
+### Runtime checkpoint 313 — 2026-09-08
+
+- Native crash ownership is now concrete: `libvlc.so` executes a null vtable
+  indirect call in `vlc_stream_MemoryNew`. This is a dependency relocation or
+  initialization boundary after MediaCodec enumeration, not a graphics or
+  Activity lifecycle failure.
