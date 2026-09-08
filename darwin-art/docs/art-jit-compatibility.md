@@ -5063,6 +5063,16 @@ added; the full corpus and multi-loader identity task remain open.
   multi-thread compiler regressions, missing classes, and class loading.
   Remaining corpus and real-app validation are pending.
 
+### Runtime checkpoint 251 — 2026-09-08
+
+- The `900-hello-plugin`–`925-threadgroups` slice passed all 26 tests,
+  covering JVMTI plugins/agents, transformation and tagging, object
+  allocation/free, heap iteration and GC start/finish, loaded classes,
+  attach-agent and method/stack/class/heap inspection, obsolete methods and
+  obsolete JIT, field/object access and transformations, properties/failure,
+  monitors, threads, and thread groups. Remaining corpus and real-app
+  validation are pending.
+
 ### Runtime checkpoint 249 — 2026-09-08
 
 - The `800-smali`–`837-deopt` slice passed all 40 tests, covering smali and

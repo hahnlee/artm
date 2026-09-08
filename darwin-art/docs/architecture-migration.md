@@ -9357,6 +9357,14 @@ or admission exception was added.
   access checks, Unsafe/VarHandle intrinsics, and vdex failure handling.
   Remaining corpus and real-app validation remain pending.
 
+### Runtime checkpoint 251 — 2026-09-08
+
+- The `900-hello-plugin`–`925-threadgroups` slice passed all 26 tests,
+  covering JVMTI agents and transforms, tagging, allocation/free, heap/GC
+  lifecycle, class/method/stack inspection, obsolete JIT, field/object
+  operations, properties/failure, monitors, threads, and thread groups.
+  Remaining corpus and real-app validation remain pending.
+
 ### Runtime checkpoint 246 — 2026-09-08
 
 - The `669-checker-break`–`692-vdex-inmem-loader` slice passed all 31 tests,
