@@ -9479,6 +9479,12 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 271 — 2026-09-08
+
+- Desktop capture retained an old macOS crash-report dialog after the host was
+  terminated; no new diagnostic report appeared, and a fresh 8-second
+  Snapseed run exited 0 with edit Activity launch. This is stale UI state.
+
 ### Runtime checkpoint 270 — 2026-09-08
 
 - A 45-second Snapseed run reached edit activity and logged no ART fatal

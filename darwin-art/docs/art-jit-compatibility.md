@@ -5153,6 +5153,13 @@ added; the full corpus and multi-loader identity task remain open.
   lacks its compile-time framework stub. Remaining corpus and real-app
   validation are pending.
 
+### Runtime checkpoint 271 — 2026-09-08
+
+- Physical desktop capture after terminating the stale host shows the prior
+  macOS crash-report dialog still present, but no new diagnostic report was
+  created and a fresh 8-second Snapseed run exits 0 with its edit Activity.
+  The dialog is stale UI state, not a current ART crash.
+
 ### Runtime checkpoint 270 — 2026-09-08
 
 - A 45-second Snapseed host run reached edit activity with 309 JNI methods and
