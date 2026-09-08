@@ -10,6 +10,9 @@
 
 #include "sigchain.h"
 
+extern "C" int darwin_art_bionic_process_state_recover_runtime_signal(
+    int host_signal, void* host_info, void* host_context);
+
 namespace art {
 namespace {
 
@@ -125,6 +128,16 @@ bool DispatchUserHandler(int signal_number, siginfo_t* info, void* context) {
 }
 
 void DarwinSignalDispatcher(int signal_number, siginfo_t* info, void* context) {
+  // Resolve compatibility-internal Android RWX JIT page transitions before
+  // ART examines the signal. On Android these mappings are genuinely RWX and
+  // never enter sigchain; Darwin's W^X implementation deliberately produces
+  // a protection fault to select the page's next mode. Letting ART inspect it
+  // first both adds avoidable work and misclassifies a recovered V8 transition
+  // as an unhandled ART generated-code fault.
+  if (darwin_art_bionic_process_state_recover_runtime_signal(
+          signal_number, info, context) != 0) {
+    return;
+  }
   SignalSlot& slot = g_signal_slots[signal_number];
   if (g_handling_signal[signal_number] == 0) {
     for (const SigchainAction& special : slot.specials) {

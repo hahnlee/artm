@@ -19,6 +19,8 @@ int darwin_art_bionic_process_state_process_install(void);
 int darwin_art_bionic_process_state_process_uninstall(void);
 void darwin_art_bionic_process_state_bind_jit_fault_recovery(
     DarwinArtBionicJitFaultRecovery recovery);
+int darwin_art_bionic_process_state_recover_runtime_signal(
+    int host_signal, void* host_info, void* host_context);
 void darwin_art_bionic_process_state_bind_sigchain(
     DarwinArtBionicSigchainOwnsSignal owns_signal,
     DarwinArtBionicEnsureFrontOfChain ensure_front);

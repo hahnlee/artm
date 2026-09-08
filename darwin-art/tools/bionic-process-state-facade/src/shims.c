@@ -514,6 +514,67 @@ void darwin_art_bionic_process_state_bind_sigchain(
                         memory_order_release);
 }
 
+static int TryRecoverJitExecutionFault(int host_signal,
+                                       siginfo_t* host_info,
+                                       void* host_context,
+                                       uint32_t* syndrome_out,
+                                       uintptr_t* pc_out) {
+#if defined(__aarch64__)
+  const int android_signal = AndroidSignal(host_signal);
+  if ((android_signal != 7 && android_signal != 11) || host_info == NULL ||
+      host_context == NULL) {
+    return 0;
+  }
+  const ucontext_t* recovery_context = (const ucontext_t*)host_context;
+  if (recovery_context->uc_mcontext == NULL) return 0;
+
+  const uint32_t syndrome = recovery_context->uc_mcontext->__es.__esr;
+  const uint32_t exception_class = syndrome >> 26;
+  const uintptr_t program_counter = (uintptr_t)arm_thread_state64_get_pc(
+      recovery_context->uc_mcontext->__ss);
+  if (syndrome_out != NULL) *syndrome_out = syndrome;
+  if (pc_out != NULL) *pc_out = program_counter;
+  const uintptr_t fault_address =
+      DarwinFaultAddress(host_info, recovery_context);
+  const uintptr_t recovery = atomic_load_explicit(
+      &gJitFaultRecovery, memory_order_acquire);
+  const bool instruction_abort =
+      exception_class == 0x20 || exception_class == 0x21;
+  const bool write_abort =
+      (exception_class == 0x24 || exception_class == 0x25) &&
+      (syndrome & (UINT32_C(1) << 6)) != 0;
+  // Linux permits an RWX JIT mapping to alternate writes and execution.
+  // The VM facade emulates that contract one host page at a time, so
+  // translate both architectural transitions: write faults select writable
+  // mode; instruction aborts synchronize code and select executable mode.
+  // Read faults remain genuine application faults. arm64e can expose a
+  // signed/raw PC, so try the architectural fault address first and the PC
+  // only as an instruction-abort fallback. The recovery callback accepts only
+  // a permission-matching published guest range.
+  if ((instruction_abort || write_abort) && recovery != 0 &&
+      (((DarwinArtBionicJitFaultRecovery)recovery)(
+           fault_address, instruction_abort ? 1 : 0) == 1 ||
+       (instruction_abort && fault_address != program_counter &&
+        ((DarwinArtBionicJitFaultRecovery)recovery)(program_counter, 1) ==
+            1))) {
+    return 1;
+  }
+#else
+  (void)host_signal;
+  (void)host_info;
+  (void)host_context;
+  (void)syndrome_out;
+  (void)pc_out;
+#endif
+  return 0;
+}
+
+int darwin_art_bionic_process_state_recover_runtime_signal(
+    int host_signal, void* host_info, void* host_context) {
+  return TryRecoverJitExecutionFault(
+      host_signal, (siginfo_t*)host_info, host_context, NULL, NULL);
+}
+
 static void DarwinArtAndroidSignalTrampoline(int host_signal,
                                               siginfo_t* host_info,
                                               void* host_context) {
@@ -525,45 +586,9 @@ static void DarwinArtAndroidSignalTrampoline(int host_signal,
   // Guest RWX translation is runtime-internal and must precede Android's
   // guest disposition: V8 does not need to install an app SIGBUS/SIGSEGV
   // handler for an otherwise recoverable per-thread permission transition.
-  if ((android_signal == 7 || android_signal == 11) && host_info != NULL &&
-      host_context != NULL) {
-    const ucontext_t* recovery_context = (const ucontext_t*)host_context;
-    if (recovery_context->uc_mcontext != NULL) {
-      const uint32_t syndrome = recovery_context->uc_mcontext->__es.__esr;
-      unresolved_syndrome = syndrome;
-      const uint32_t exception_class = syndrome >> 26;
-      const uintptr_t program_counter =
-          (uintptr_t)arm_thread_state64_get_pc(
-              recovery_context->uc_mcontext->__ss);
-      unresolved_pc = program_counter;
-      const uintptr_t fault_address =
-          DarwinFaultAddress(host_info, recovery_context);
-      const uintptr_t recovery = atomic_load_explicit(
-          &gJitFaultRecovery, memory_order_acquire);
-      const bool instruction_abort =
-          exception_class == 0x20 || exception_class == 0x21;
-      const bool write_abort =
-          (exception_class == 0x24 || exception_class == 0x25) &&
-          (syndrome & (UINT32_C(1) << 6)) != 0;
-      // Linux permits an RWX JIT mapping to alternate writes and execution.
-      // The VM facade emulates that contract one host page at a time, so
-      // translate both architectural transitions: write faults select writable
-      // mode; instruction aborts synchronize code and select executable mode.
-      // Read faults remain genuine application faults.
-      // arm64e can expose a signed/raw PC which does not compare byte-for-byte
-      // with si_addr. The recovery callback itself accepts only a
-      // permission-matching published guest range, so prefer the kernel
-      // fault address and keep the normalized PC as a fallback.
-      if ((instruction_abort || write_abort) && recovery != 0 &&
-          (((DarwinArtBionicJitFaultRecovery)recovery)(
-               fault_address, instruction_abort ? 1 : 0) == 1 ||
-           (instruction_abort && fault_address != program_counter &&
-            ((DarwinArtBionicJitFaultRecovery)recovery)(program_counter, 1) ==
-                1))) {
-        return;
-      }
-    }
-  }
+  if (TryRecoverJitExecutionFault(host_signal, host_info, host_context,
+                                  &unresolved_syndrome,
+                                  &unresolved_pc)) return;
   if ((android_signal == 7 || android_signal == 11) && host_info != NULL &&
       unresolved_pc != 0) {
     char message[256];
