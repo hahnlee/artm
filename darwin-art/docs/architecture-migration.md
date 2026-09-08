@@ -9225,3 +9225,11 @@ or admission exception was added.
   context records signal-safe Darwin JIT write depth; reproduced Chrome faults
   all had depth zero, so code-cache range lifetime/GC reclaim or signal-unwind,
   rather than a leaked write scope, remains the active blocker.
+
+### Runtime checkpoint 126 — 2026-09-08
+
+- Raw Darwin fault logging now runs only after ART's registered fault handlers
+  decline the signal, eliminating false positives from recoverable MAP_JIT
+  transitions. Build/link audits pass, but the fresh 70-second Chrome run still
+  has 2,558 unhandled generated-code faults (`jit_write_depth=0`); JIT lifetime,
+  signal recovery, or generated-code correctness remains unresolved.

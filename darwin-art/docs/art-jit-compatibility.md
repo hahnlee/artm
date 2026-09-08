@@ -4265,3 +4265,12 @@ added; the full corpus and multi-loader identity task remain open.
   Chrome generated-code fault had depth zero, ruling out a leaked write scope.
   Generated-code range lifetime/GC reclaim or signal-unwind remains the active
   blocker for the sustained acceptance gate.
+
+### Runtime checkpoint 126 — 2026-09-08
+
+- Moved the Darwin raw fault dump after ART's other fault handlers. The prior
+  placement mislabeled recoverable page-level W^X transitions as generated-code
+  faults; the rebuilt runtime and graphics-link audit pass. A fresh 70-second
+  Chrome run still reports 2,558 unhandled generated-code faults with
+  `jit_write_depth=0`, confirming a real JIT/runtime fault remains rather than
+  a write-scope diagnostic artifact.
