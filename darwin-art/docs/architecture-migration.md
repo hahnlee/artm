@@ -11458,3 +11458,9 @@ or admission exception was added.
   pop key. This makes unwinding independent of subsequent stack reuse.
 - Link audit remains green; `137-cfi` executes but still fails at
   frame-symbol/code-range attribution, which is the next boundary to fix.
+### Runtime checkpoint 428 — 2026-09-09
+
+- Generic-frame snapshots are stable, but `137-cfi` remains failing because
+  the valid app-OAT return PC is not resolved by either JITDebug or DexFiles.
+- Next boundary: connect OAT/Dex method metadata (or walk ManagedStack) to
+  unwindstack so the AOSP method-name sequence is reconstructed.

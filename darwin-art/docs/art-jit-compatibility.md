@@ -6775,3 +6775,11 @@ incomplete and still requires managed caller unwind validation.
 - Graphics-link audit remains green. `137-cfi` still reaches execution but
   returns `FAIL`; the remaining mismatch is now frame-symbol/code-range
   attribution rather than a compile or missing-header failure.
+### Runtime checkpoint 428 — 2026-09-09
+
+- Snapshotting the generic frame removes stack-reuse dependence but does not
+  make `137-cfi` pass: the recovered return PC is in the app OAT range, while
+  unwindstack still cannot resolve it to Dex/JIT method names (`jit=0`, `dex=0`).
+- The next implementation target is the AOT/OAT method attribution bridge
+  (or a managed-stack frame walker) so valid ART return PCs produce the same
+  method sequence as AOSP.
