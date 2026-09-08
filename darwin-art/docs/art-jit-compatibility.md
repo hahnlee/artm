@@ -4899,3 +4899,11 @@ added; the full corpus and multi-loader identity task remain open.
 - Canonical diff generation confirmed the mapped-byte `ArtDexFileLoader`
   instance API for the child-loader clone. It remains unmerged pending safe
   patch publication; no partial runtime semantics are retained.
+
+### Runtime checkpoint 204 — 2026-09-08
+
+- Retried the canonical clone patch with the corrected loader API. The shared
+  shadow is prepared by multiple bootstrap owners, and the patch still fails
+  when one owner observes a partially applied hunk; the experiment was removed
+  again. Clean internal graphics bootstrap passes, and the loader gap remains
+  isolated for a future atomic-source publication change.

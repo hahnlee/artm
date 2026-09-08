@@ -9787,3 +9787,10 @@ or admission exception was added.
 - Canonical diff generation confirmed the mapped-byte `ArtDexFileLoader`
   instance API for the child-loader clone. It remains unmerged pending safe
   patch publication; no partial runtime semantics are retained.
+
+### Runtime checkpoint 204 — 2026-09-08
+
+- The corrected loader clone retry still exposed shared-shadow multi-owner
+  patch publication races; it was removed without runtime changes. Clean
+  graphics bootstrap passes, leaving atomic source publication and the
+  loader-aware DexCache implementation as the next structural work.
