@@ -6486,3 +6486,11 @@ added; the full corpus and multi-loader identity task remain open.
   remains failing, indicating the caller's saved LR can precede the resolved
   entrypoint or comes from a different invocation path. The change remains a
   diagnostic-compatible host boundary; no fallback or allowlist was added.
+
+### Runtime checkpoint 394 — 2026-09-09
+
+- A debug-enabled rerun produced no entrypoint-pair publications before the
+  failing unwind, confirming the caller-resolution branch is not reached (or
+  returns null) on this AOT-to-generic-JNI path. The saved LR remains
+  `0x210d168`; next work must instrument the assembly trampoline or recover the
+  caller from its frame before entering C++.

@@ -11203,3 +11203,11 @@ or admission exception was added.
   entrypoint metadata publication. The bootstrap succeeds, but `137-cfi`
   remains failing, so the saved LR may precede the entrypoint or use another
   invocation path. No fallback or allowlist was introduced.
+
+### Runtime checkpoint 394 — 2026-09-09
+
+- Debug rerun emitted no entrypoint-pair publications before unwind failure,
+  proving caller resolution is not reached or returns null for this
+  AOT-to-generic-JNI path. The next implementation target is assembly-level
+  trampoline instrumentation or frame-based caller recovery; no fallback or
+  allowlist was added.

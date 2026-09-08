@@ -125,6 +125,11 @@ bool ReadLocalQuickFrame(uint64_t thread_id, uint64_t* managed_sp, uint64_t* fra
 
 extern "C" void darwin_art_register_code_address(uintptr_t logical, uintptr_t host) {
   if (logical == 0 || host == 0 || logical >= (1ULL << 32)) return;
+  if (std::getenv("DARWIN_ART_DEBUG_CFI") != nullptr) {
+    std::fprintf(stderr, "darwin-cfi: entry-pair logical=%llx host=%llx\\n",
+                 static_cast<unsigned long long>(logical),
+                 static_cast<unsigned long long>(host));
+  }
   std::lock_guard<std::mutex> lock(g_aot_ranges_mutex);
   for (const auto& pair : g_code_address_pairs) {
     if (pair.logical == logical && pair.host == host) return;
