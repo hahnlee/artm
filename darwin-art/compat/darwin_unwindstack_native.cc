@@ -31,6 +31,16 @@
 #include <unwindstack/RegsArm64.h>
 #include <unwindstack/Unwinder.h>
 
+namespace android {
+// The standalone unwindstack provider smoke binary does not link the ART
+// thread owner. Keep a weak no-op there; the runtime's strong implementation
+// in darwin_jni_shorty.cc supplies the real ManagedStack query.
+__attribute__((weak)) bool CurrentGenericJniFrame(uint64_t* managed_sp) {
+  (void)managed_sp;
+  return false;
+}
+}  // namespace android
+
 extern "C" __attribute__((visibility("default"))) DarwinArtQuickFrameRegistry
     darwin_art_unwindstack_quick_frames = {
         kDarwinArtQuickFrameRegistryVersion, kDarwinArtQuickFrameRegistrySlots, 0, {}};
@@ -317,14 +327,20 @@ _Unwind_Reason_Code CollectNativeFrame(_Unwind_Context* context, void* opaque) {
 }
 
 void AppendManagedFrames(NativeWalk* walk) {
+  const bool debug_cfi = std::getenv("DARWIN_ART_DEBUG_CFI") != nullptr;
+  auto cfi_debug = [&](const char* message) {
+    if (debug_cfi) std::fprintf(stderr, "darwin-cfi: %s\\n", message);
+  };
   if (walk->jit_debug == nullptr || walk->data->frames.empty() ||
       walk->data->frames.size() >= walk->limit) {
+    cfi_debug("jit debug/frames/limit rejected");
     return;
   }
   if (!walk->has_registered_quick_frame) {
     const auto& native_caller = walk->data->frames.back();
     if (static_cast<std::string_view>(native_caller.function_name)
             .find("art_quick_generic_jni_trampoline") == std::string_view::npos) {
+      cfi_debug("no generic jni frame and no registry");
       return;
     }
   }
@@ -339,6 +355,7 @@ void AppendManagedFrames(NativeWalk* walk) {
   if (walk->registered_frame_kind == 1 &&
       (frame_size == 0 || (frame_size & 15u) != 0 || frame_size > 4096 ||
        walk->registered_core_spill_mask == 0)) {
+    cfi_debug("compiled frame metadata rejected");
     return;
   }
   if (walk->registered_managed_sp != 0) {
@@ -362,11 +379,23 @@ void AppendManagedFrames(NativeWalk* walk) {
                              &copied) !=
           KERN_SUCCESS ||
       copied != sizeof(saved_registers)) {
+    cfi_debug("managed register read failed");
     return;
   }
   uint64_t return_pc = saved_registers.back();
   return_pc = StripReturnAddress(return_pc);
-  if (return_pc == 0) return;
+  if (return_pc == 0) {
+    cfi_debug("managed return pc is zero");
+    return;
+  }
+  if (debug_cfi) {
+    std::fprintf(stderr, "darwin-cfi: kind=%llu sp=%p size=%llu mask=%llx return=%llx\\n",
+                 static_cast<unsigned long long>(walk->registered_frame_kind),
+                 reinterpret_cast<void*>(walk->last_x28),
+                 static_cast<unsigned long long>(frame_size),
+                 static_cast<unsigned long long>(walk->registered_core_spill_mask),
+                 static_cast<unsigned long long>(return_pc));
+  }
 
   RegsArm64 regs;
   auto* raw = static_cast<uint64_t*>(regs.RawData());
@@ -623,6 +652,22 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, size_t max_frames,
   if (pthread_threadid_np(nullptr, &thread_id) == 0 && thread_id != 0) {
     if (ReadLocalQuickFrame(thread_id, &walk.registered_managed_sp, &walk.registered_frame_kind,
                             &walk.registered_frame_size, &walk.registered_core_spill_mask)) {
+      walk.last_x28 = walk.registered_managed_sp;
+      walk.has_registered_quick_frame = true;
+    }
+  }
+  // Generic-JNI transitions intentionally do not publish the compiled-frame
+  // registry: the ManagedStack top is tagged instead. Recover that AOSP
+  // SaveRefsAndArgs frame directly for local unwinds so a native callback can
+  // continue through the managed caller without relying on a host trampoline.
+  if (!walk.has_registered_quick_frame) {
+    uint64_t generic_jni_sp = 0;
+    if (android::CurrentGenericJniFrame != nullptr &&
+        android::CurrentGenericJniFrame(&generic_jni_sp)) {
+      walk.registered_managed_sp = generic_jni_sp;
+      walk.registered_frame_kind = 0;
+      walk.registered_frame_size = 224;
+      walk.registered_core_spill_mask = 0;
       walk.last_x28 = walk.registered_managed_sp;
       walk.has_registered_quick_frame = true;
     }

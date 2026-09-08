@@ -1,4 +1,5 @@
 #include <cstring>
+#include <cstdint>
 #include <string>
 
 #include "darwin_jni_shorty.h"
@@ -10,6 +11,16 @@ namespace android {
 JNIEnv* CurrentArtEnv() {
   art::Thread* self = art::Thread::Current();
   return self == nullptr ? nullptr : static_cast<JNIEnv*>(self->GetJniEnv());
+}
+
+bool CurrentGenericJniFrame(uint64_t* managed_sp) {
+  if (managed_sp == nullptr) return false;
+  art::Thread* self = art::Thread::Current();
+  if (self == nullptr) return false;
+  const art::ManagedStack* stack = self->GetManagedStack();
+  if (stack == nullptr || !stack->GetTopQuickFrameGenericJniTag()) return false;
+  *managed_sp = reinterpret_cast<uint64_t>(stack->GetTopQuickFrameKnownNotTagged());
+  return *managed_sp != 0;
 }
 
 namespace {

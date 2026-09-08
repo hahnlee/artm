@@ -10776,3 +10776,12 @@ or admission exception was added.
   concurrent/parallel GC, multidex, suspend checks, native bridge,
   compiler-regression, class-loading, and daemon-lock shutdown paths; full
   corpus and real-app checks remain outstanding.
+
+### Runtime checkpoint 334 — 2026-09-08
+
+- Added an ART-side `ManagedStack` query plus a weak provider fallback for
+  generic-JNI unwind recovery; the graphics-link audit passes. Focused AOSP
+  `137-cfi` still fails in optimized mode because Darwin native registration
+  reaches the callback without an ART generic-JNI tag or quick-frame registry.
+  This remains an isolated runtime-boundary blocker; no interpreter fallback or
+  test-specific allowlist was added.
