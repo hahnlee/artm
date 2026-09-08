@@ -6390,3 +6390,10 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter-versus-optimized lanes pass, covering proxy invocation argument
   marshalling across primitive/reference signatures. JNI CFI return-PC mapping
   and real-app criteria remain open.
+
+### Runtime checkpoint 381 — 2026-09-09
+
+- Ran unmodified AOSP `004-JniTest`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes pass, covering direct JNI calls and
+  reference/array/exception interactions. JNI CFI return-PC publication and
+  real-app criteria remain open.
