@@ -11142,3 +11142,9 @@ or admission exception was added.
 - Unmodified AOSP `136-daemon-jni-shutdown` passes in interpreter, JIT, and
   comparison lanes. Daemon-thread JNI cleanup and VM shutdown ordering are
   verified without APK changes; JNI CFI and real-app work remain.
+
+### Runtime checkpoint 385 — 2026-09-09
+
+- Unmodified AOSP `597-deopt-busy-loop` passes in interpreter, JIT, and
+  comparison lanes. Hot-loop deoptimization in a debuggable runtime is
+  verified without APK changes; JNI CFI and real-app work remain.

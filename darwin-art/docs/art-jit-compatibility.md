@@ -6418,3 +6418,10 @@ added; the full corpus and multi-loader identity task remain open.
   interpreter-versus-optimized lanes pass, covering daemon-thread JNI cleanup
   and VM shutdown ordering. JNI CFI return-PC publication and real-app
   criteria remain open.
+
+### Runtime checkpoint 385 — 2026-09-09
+
+- Ran unmodified AOSP `597-deopt-busy-loop`. Interpreter, JIT, and
+  interpreter-versus-optimized lanes pass, covering deoptimization from a
+  hot busy loop in a debuggable runtime. JNI CFI return-PC publication and
+  real-app criteria remain open.
