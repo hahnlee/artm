@@ -11028,3 +11028,12 @@ or admission exception was added.
   diagnostics. A fresh `137-cfi` run reproduces the low LR while the frame
   base is stable and OAT ranges are host RX mappings. The remaining work is a
   metadata-backed logical-to-executable mapping, not a fixed-address alias.
+
+### Runtime checkpoint 368 — 2026-09-09
+
+- Compared the ARM64 generic-JNI assembly and JIT dual-view implementation
+  with the CFI trace. AOSP's 224-byte SaveRefsAndArgs offsets are correct, and
+  JIT allocation already publishes the RX view. The unresolved `0x210dxxx`
+  LR must be traced to its actual producer and mapped through explicit
+  executable-range metadata; no fixed-base alias or frame-layout workaround
+  is justified.

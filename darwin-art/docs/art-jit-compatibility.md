@@ -6290,3 +6290,13 @@ added; the full corpus and multi-loader identity task remain open.
   `0x11...`. This confirms the producer is publishing a logical code identity
   that is not currently connected to the executable mapping; the goal remains
   open and no guessed alias was added.
+
+### Runtime checkpoint 368 — 2026-09-09
+
+- Inspected the ARM64 generic-JNI and JIT dual-mapping producers against the
+  saved-frame evidence. The 224-byte frame layout and LR slot match AOSP, and
+  `JitMemoryRegion::AllocateCode()` already returns the executable view for
+  JIT code. The failing `0x210dxxx` LR is therefore not fixed by changing the
+  frame offsets or adding a guessed compressed-reference alias. The remaining
+  task is to identify the producer that supplies this logical return PC and
+  connect it to the registered executable mapping with explicit metadata.
