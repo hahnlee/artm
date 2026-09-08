@@ -68,6 +68,15 @@ pub fn install(request: &InstallRequest) -> Result<InstalledApk, String> {
     let mut stage = StageGuard::new(&version_parent)?;
     let base_apk = stage.path().join("base.apk");
     write_sealed_file(&base_apk, &apk)?;
+    // ART's OatFileManager writes anonymous app vdex/oat artifacts beside the
+    // installed APK. Keep the APK and native payload sealed while providing
+    // the Android-style writable code-cache leaf that the runtime owns.
+    let oat_directory = stage.path().join("oat").join("arm64");
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&oat_directory)
+        .map_err(|error| format!("could not create writable oat directory: {error}"))?;
     let mut installed_splits = Vec::with_capacity(split_bytes.len());
     for (index, bytes) in split_bytes.iter().enumerate() {
         let destination = stage.path().join(format!("split-{index}.apk"));

@@ -9479,6 +9479,12 @@ or admission exception was added.
   SIMD, verifier, and bounds coverage. Remaining corpus and real-app
   validation remain pending.
 
+### Runtime checkpoint 274 — 2026-09-08
+
+- APK installation now creates a writable `oat/arm64` code-cache directory
+  without weakening APK/native read-only payloads. Fresh Snapseed execution
+  writes `base.vdex` successfully and launches EditActivity with exit code 0.
+
 ### Runtime checkpoint 273 — 2026-09-08
 
 - Post-ELF-lifecycle regression: corpus ledger is 1,075/1,075 passed, and
