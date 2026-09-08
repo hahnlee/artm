@@ -5966,3 +5966,10 @@ added; the full corpus and multi-loader identity task remain open.
   invoke-polymorphic/custom, typed exceptions, and launcher/framework/window
   smoke paths; all reported `PASS`. This strengthens runtime evidence but does
   not close the required full AOSP differential or real Blue Archive criteria.
+
+### Runtime checkpoint 328 — 2026-09-08
+
+- Fixed the upstream ART corpus runner regression: its unit-test fixtures now
+  include the required `expected-stdout.txt` execution contract. The focused
+  runner suite passes 7/7, and discovery sees 1,076 pinned AOSP test inputs;
+  this repairs validation infrastructure without adding a test-name allowlist.

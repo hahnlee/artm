@@ -10730,3 +10730,10 @@ or admission exception was added.
   (exit 0), including GC-sensitive field/array access, VarHandle and invoke
   polymorphic/custom paths, exception cases, and Android window/framework
   smoke coverage. Full AOSP differential and real-app validation remain open.
+
+### Runtime checkpoint 328 — 2026-09-08
+
+- Repaired the ART corpus runner's own fixtures to include the AOSP
+  `expected-stdout.txt` contract. Its 7 focused tests now pass, and the
+  production discovery boundary enumerates 1,076 pinned AOSP tests without a
+  name allowlist; end-to-end execution is still separate work.

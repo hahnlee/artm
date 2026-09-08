@@ -30,6 +30,10 @@ class CorpusRunnerTest(unittest.TestCase):
             test = self.archive / name
             test.mkdir()
             (test / "input.txt").write_text(name, encoding="utf-8")
+            # A runnable AOSP ART test is identified by the harness contract,
+            # not merely by its directory name. Keep the fixture aligned with
+            # discover_tests() so these tests exercise production discovery.
+            (test / "expected-stdout.txt").write_text("", encoding="utf-8")
         self.runner = self.root / "fake-runner.py"
         self.runner.write_text(textwrap.dedent("""
             import argparse
