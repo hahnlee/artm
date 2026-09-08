@@ -4568,6 +4568,15 @@ added; the full corpus and multi-loader identity task remain open.
   this gate by default. Fresh run passes Surface, Nterp, and empty-checkpoint
   markers (`/tmp/audit-surface-strict.log`, RC=0).
 
+### Runtime checkpoint 163 — 2026-09-08
+
+- Added a MediaCodec output-surface lifetime acceptance to the standard audit.
+  It exercises Java `configure` with a real managed producer, releases the
+  first Surface, switches via `setOutputSurface`, and verifies reference
+  retirement only when the codec is released. VP9 setup and producer
+  replacement pass together with Surface/Nterp/synchronization markers
+  (`/tmp/audit-mediacodec-surface.log`, RC=0).
+
 ### Runtime checkpoint 162 — 2026-09-08
 
 - Fresh standard audit on the current host passes the required Surface

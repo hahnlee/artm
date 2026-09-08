@@ -9494,3 +9494,10 @@ or admission exception was added.
   Canvas, dirty-clip, Nterp, and empty-checkpoint markers all pass on the
   current host. This confirms regression stability but does not close the
   remaining real-application/AOSP matrix.
+
+### Runtime checkpoint 163 — 2026-09-08
+
+- The default audit now includes MediaCodec output-surface producer lifetime:
+  configure, release, `setOutputSurface`, and final codec release all pass on
+  managed producers. The focused replacement-host run is green; full VLC and
+  application media playback remain open.

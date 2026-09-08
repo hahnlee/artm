@@ -64,7 +64,10 @@ struct DarwinMediaCodec {
   std::vector<uint8_t> input;
   std::vector<uint8_t> output_scratch;
   std::deque<DecodedFrame> output;
-  jobject surface = nullptr;
+  // Strong native producer reference. VideoToolbox callbacks run without a
+  // JNIEnv, so retaining a Java Surface global and resolving it from that
+  // thread cannot implement Android's output-surface contract.
+  void* output_window = nullptr;
   CMVideoFormatDescriptionRef format = nullptr;
   VTDecompressionSessionRef session = nullptr;
   darwin_art::Vp9Decoder vp9;
@@ -121,14 +124,12 @@ void PublishSurface(DarwinMediaCodec* codec, const DecodedFrame& frame) {
   // Surface output is optional. The ByteBuffer path remains canonical, while
   // this bridge publishes a tightly packed RGBA frame through the existing
   // ANativeWindow lock/post contract when a Java Surface was supplied.
-  if (codec == nullptr || codec->surface == nullptr || frame.width <= 0 ||
+  if (codec == nullptr || codec->output_window == nullptr || frame.width <= 0 ||
       frame.height <= 0 || frame.bytes.size() <
                                 static_cast<size_t>(frame.width) * frame.height * 3 / 2) {
     return;
   }
-  void* window = darwin_art_android_ANativeWindow_fromSurface(
-      nullptr, static_cast<void*>(codec->surface));
-  if (window == nullptr) return;
+  void* window = codec->output_window;
   struct NativeBuffer {
     int32_t width;
     int32_t height;
@@ -137,9 +138,11 @@ void PublishSurface(DarwinMediaCodec* codec, const DecodedFrame& frame) {
     void* bits;
     uint32_t reserved[6];
   } buffer{};
-  if (darwin_art_android_ANativeWindow_lock(window, &buffer, nullptr) != 0 ||
+  if (darwin_art_android_ANativeWindow_setBuffersGeometry(
+          window, frame.width, frame.height,
+          /*AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM=*/1) != 0 ||
+      darwin_art_android_ANativeWindow_lock(window, &buffer, nullptr) != 0 ||
       buffer.bits == nullptr) {
-    darwin_art_android_ANativeWindow_release(window);
     return;
   }
   const uint8_t* y_plane = frame.bytes.data();
@@ -163,7 +166,6 @@ void PublishSurface(DarwinMediaCodec* codec, const DecodedFrame& frame) {
     }
   }
   darwin_art_android_ANativeWindow_unlockAndPost(window);
-  darwin_art_android_ANativeWindow_release(window);
 }
 
 void DecompressionCallback(void* refcon, void*, OSStatus status,
@@ -207,6 +209,10 @@ void DestroyCodec(DarwinMediaCodec* codec) {
     CFRelease(codec->session);
   }
   if (codec->format != nullptr) CFRelease(codec->format);
+  if (codec->output_window != nullptr) {
+    darwin_art_android_ANativeWindow_release(codec->output_window);
+    codec->output_window = nullptr;
+  }
   delete codec;
 }
 
@@ -324,6 +330,15 @@ void MediaCodecNativeConfigure(JNIEnv* env, jobject self, jobjectArray keys,
     Throw(env, "java/lang/IllegalStateException", "codec is not initialized");
     return;
   }
+  void* requested_window =
+      surface == nullptr
+          ? nullptr
+          : darwin_art_android_ANativeWindow_fromSurface(env, surface);
+  if (surface != nullptr && requested_window == nullptr) {
+    Throw(env, "java/lang/IllegalArgumentException",
+          "output Surface has no native producer");
+    return;
+  }
   std::lock_guard<std::mutex> lock(codec->mutex);
   const jsize count = keys == nullptr ? 0 : env->GetArrayLength(keys);
   std::vector<uint8_t> sps;
@@ -364,7 +379,11 @@ void MediaCodecNativeConfigure(JNIEnv* env, jobject self, jobjectArray keys,
     env->DeleteLocalRef(key);
     env->DeleteLocalRef(value);
   }
-  if (surface != nullptr) codec->surface = env->NewGlobalRef(surface);
+  void* previous_window = codec->output_window;
+  codec->output_window = requested_window;
+  if (previous_window != nullptr) {
+    darwin_art_android_ANativeWindow_release(previous_window);
+  }
   if (DebugMediaCodec()) {
     std::cerr << "ART Android MediaCodec: configure codec="
               << codec->codec_name << " mime=" << codec->mime << " size="
@@ -452,10 +471,6 @@ void MediaCodecNativeRelease(JNIEnv* env, jobject self) {
   auto* codec = GetCodec(env, self);
   if (codec == nullptr) return;
   SetCodec(env, self, nullptr);
-  if (codec->surface != nullptr) {
-    env->DeleteGlobalRef(codec->surface);
-    codec->surface = nullptr;
-  }
   DestroyCodec(codec);
 }
 
@@ -730,7 +745,34 @@ void MediaCodecReleaseOutput(JNIEnv* env, jobject self, jint index, jboolean ren
 }
 
 void MediaCodecNativeConfigureNoop(JNIEnv*, jobject) {}
-void MediaCodecNativeSetSurface(JNIEnv*, jobject, jobject) {}
+void MediaCodecNativeSetSurface(JNIEnv* env, jobject self, jobject surface) {
+  auto* codec = GetCodec(env, self);
+  if (codec == nullptr || surface == nullptr) {
+    Throw(env, "java/lang/IllegalArgumentException",
+          "codec and output Surface are required");
+    return;
+  }
+  void* replacement =
+      darwin_art_android_ANativeWindow_fromSurface(env, surface);
+  if (replacement == nullptr) {
+    Throw(env, "java/lang/IllegalArgumentException",
+          "output Surface has no native producer");
+    return;
+  }
+  void* previous = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(codec->mutex);
+    if (!codec->configured || codec->output_window == nullptr) {
+      darwin_art_android_ANativeWindow_release(replacement);
+      Throw(env, "java/lang/IllegalStateException",
+            "codec is not configured for surface output");
+      return;
+    }
+    previous = codec->output_window;
+    codec->output_window = replacement;
+  }
+  darwin_art_android_ANativeWindow_release(previous);
+}
 void MediaCodecNativeSetCallback(JNIEnv*, jobject, jobject) {}
 void MediaCodecNativeSetParameters(JNIEnv*, jobject, jobjectArray, jobjectArray) {}
 void MediaCodecNativeSetAudioPresentation(JNIEnv*, jobject, jint, jint) {}
@@ -874,6 +916,134 @@ jobject MediaCodecListGlobalSettings(JNIEnv* env, jclass) {
 }  // namespace
 
 namespace darwin_art {
+
+bool VerifyDarwinMediaCodecSurfaceLifecycle(JNIEnv* env) {
+  if (env == nullptr || env->ExceptionCheck()) return false;
+  jclass surface_class = env->FindClass("android/view/Surface");
+  jmethodID surface_constructor =
+      surface_class == nullptr
+          ? nullptr
+          : env->GetMethodID(surface_class, "<init>", "()V");
+  jfieldID native_object =
+      surface_class == nullptr
+          ? nullptr
+          : env->GetFieldID(surface_class, "mNativeObject", "J");
+  jmethodID surface_release =
+      surface_class == nullptr
+          ? nullptr
+          : env->GetMethodID(surface_class, "release", "()V");
+  jobject first_surface = surface_constructor == nullptr
+                              ? nullptr
+                              : env->NewObject(surface_class,
+                                               surface_constructor);
+  jobject second_surface = surface_constructor == nullptr
+                               ? nullptr
+                               : env->NewObject(surface_class,
+                                                surface_constructor);
+  void* first_window = darwin_art_android_ANativeWindow_create(32, 24, 1);
+  void* second_window = darwin_art_android_ANativeWindow_create(32, 24, 1);
+  if (first_surface == nullptr || second_surface == nullptr ||
+      native_object == nullptr || surface_release == nullptr ||
+      first_window == nullptr || second_window == nullptr ||
+      env->ExceptionCheck()) {
+    if (first_window != nullptr) darwin_art_android_ANativeWindow_release(first_window);
+    if (second_window != nullptr) darwin_art_android_ANativeWindow_release(second_window);
+    return false;
+  }
+  env->SetLongField(first_surface, native_object,
+                    reinterpret_cast<jlong>(first_window));
+  env->SetLongField(second_surface, native_object,
+                    reinterpret_cast<jlong>(second_window));
+
+  jclass codec_class = env->FindClass("android/media/MediaCodec");
+  jmethodID create_decoder =
+      codec_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(
+                codec_class, "createDecoderByType",
+                "(Ljava/lang/String;)Landroid/media/MediaCodec;");
+  jmethodID configure =
+      codec_class == nullptr
+          ? nullptr
+          : env->GetMethodID(
+                codec_class, "configure",
+                "(Landroid/media/MediaFormat;Landroid/view/Surface;"
+                "Landroid/media/MediaCrypto;I)V");
+  jmethodID set_output_surface =
+      codec_class == nullptr
+          ? nullptr
+          : env->GetMethodID(codec_class, "setOutputSurface",
+                             "(Landroid/view/Surface;)V");
+  jmethodID codec_release =
+      codec_class == nullptr
+          ? nullptr
+          : env->GetMethodID(codec_class, "release", "()V");
+  jclass format_class = env->FindClass("android/media/MediaFormat");
+  jmethodID create_video_format =
+      format_class == nullptr
+          ? nullptr
+          : env->GetStaticMethodID(
+                format_class, "createVideoFormat",
+                "(Ljava/lang/String;II)Landroid/media/MediaFormat;");
+  jstring mime = env->NewStringUTF("video/x-vnd.on2.vp9");
+  jobject codec = create_decoder == nullptr || mime == nullptr
+                      ? nullptr
+                      : env->CallStaticObjectMethod(codec_class,
+                                                    create_decoder, mime);
+  jobject format = create_video_format == nullptr || mime == nullptr
+                       ? nullptr
+                       : env->CallStaticObjectMethod(format_class,
+                                                     create_video_format, mime,
+                                                     32, 24);
+  bool passed = codec != nullptr && format != nullptr && configure != nullptr &&
+                set_output_surface != nullptr && codec_release != nullptr &&
+                !env->ExceptionCheck();
+  if (passed) {
+    env->CallVoidMethod(codec, configure, format, first_surface, nullptr, 0);
+    auto* state = GetCodec(env, codec);
+    passed = !env->ExceptionCheck() && state != nullptr && state->configured &&
+             state->output_window == first_window;
+  }
+  if (passed) {
+    env->CallVoidMethod(first_surface, surface_release);
+    passed = !env->ExceptionCheck() &&
+             darwin_art_android_ANativeWindow_is_managed(first_window);
+  }
+  if (passed) {
+    env->CallVoidMethod(codec, set_output_surface, second_surface);
+    auto* state = GetCodec(env, codec);
+    passed = !env->ExceptionCheck() && state != nullptr &&
+             state->output_window == second_window &&
+             !darwin_art_android_ANativeWindow_is_managed(first_window);
+  }
+  if (passed) {
+    env->CallVoidMethod(second_surface, surface_release);
+    passed = !env->ExceptionCheck() &&
+             darwin_art_android_ANativeWindow_is_managed(second_window);
+  }
+  if (codec != nullptr && codec_release != nullptr && !env->ExceptionCheck()) {
+    env->CallVoidMethod(codec, codec_release);
+    passed = passed && !env->ExceptionCheck() &&
+             !darwin_art_android_ANativeWindow_is_managed(second_window);
+  }
+  if (env->ExceptionCheck()) {
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+    passed = false;
+  }
+  env->DeleteLocalRef(format);
+  env->DeleteLocalRef(codec);
+  env->DeleteLocalRef(mime);
+  env->DeleteLocalRef(format_class);
+  env->DeleteLocalRef(codec_class);
+  env->DeleteLocalRef(second_surface);
+  env->DeleteLocalRef(first_surface);
+  env->DeleteLocalRef(surface_class);
+  if (passed) {
+    std::cerr << "ART Android MediaCodec: setOutputSurface producer lifetime PASS\n";
+  }
+  return passed;
+}
 
 bool RegisterDarwinMediaCodecNatives(JNIEnv* env) {
   JNINativeMethod codec_methods[] = {

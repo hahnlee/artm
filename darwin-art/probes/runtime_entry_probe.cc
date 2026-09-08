@@ -51,6 +51,7 @@
 #include "surfaceflinger/service_darwin.h"
 #include "runtime_app_bootstrap.h"
 #include "runtime_app_presentation.h"
+#include "darwin_media_codec.h"
 #include "handle_scope-inl.h"
 #include "interpreter/unstarted_runtime.h"
 #include "jni/java_vm_ext.h"
@@ -895,6 +896,11 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
       !darwin_art_presentation::verify_software_surface_canvas(env)) {
     std::cerr << "ART Android Surface: Java software Canvas acceptance failed\n";
     return 39;
+  }
+  if (std::getenv("DARWIN_ART_TEST_MEDIA_CODEC_SURFACE") != nullptr &&
+      !darwin_art::VerifyDarwinMediaCodecSurfaceLifecycle(env)) {
+    std::cerr << "ART Android MediaCodec: output Surface acceptance failed\n";
+    return 40;
   }
   if (std::getenv("DARWIN_ART_UPSTREAM_MAIN") != nullptr) {
     // This harness is the Darwin equivalent of AOSP's dalvikvm command, not
