@@ -9621,6 +9621,13 @@ or admission exception was added.
   services, and used the GPU IOSurface path. Only nonfatal cache/model warnings
   appeared.
 
+### Runtime checkpoint 301 — 2026-09-08
+
+- Recovery profile app coverage expanded without APK changes: Snapseed
+  (native `libsnapseed_native.so`) installed atomically and launched for 8
+  seconds with exit 0; ELF namespace retention, PathClassLoader native path,
+  JNI registration, and Activity transition all succeeded.
+
 ### Runtime checkpoint 294 — 2026-09-08
 
 - Storage accounting after cleanup: active DarwinART `default` profile is 123G,
