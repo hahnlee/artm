@@ -10682,3 +10682,10 @@ or admission exception was added.
   reference boundaries, write barriers, monitor/throw paths, and fail-closed
   source checks are covered; concurrent MAP_JIT execution and W^X rejection
   behave as required. This does not replace end-to-end AOSP/app validation.
+
+### Runtime checkpoint 321 — 2026-09-08
+
+- The remaining 28 upstream intrinsic ordinary-call fallbacks are explicitly
+  distinguished from Darwin allowlists and are not used as an interpreter
+  fallback or launch gate. Full intrinsic parity and real-app differential
+  evidence remain open work.

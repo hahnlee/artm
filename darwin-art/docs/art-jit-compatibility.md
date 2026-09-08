@@ -5915,3 +5915,10 @@ added; the full corpus and multi-loader identity task remain open.
   The signed MAP_JIT memory audit passes concurrent execution and expected W^X
   negative cases; the ARM64 intrinsic inventory remains contract-clean. Full
   AOSP differential and real-app validation remain open.
+
+### Runtime checkpoint 321 — 2026-09-08
+
+- Post-fix audits remain green. The 28 `upstream-call-fallback` intrinsic
+  entries are pinned AOSP ordinary-call classifications, not Darwin method
+  gates; they remain tracked for eventual intrinsic parity and are not hidden
+  behind an interpreter fallback or launch restriction.
