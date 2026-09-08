@@ -6854,6 +6854,12 @@ incomplete and still requires managed caller unwind validation.
   ART coupling; managed-stack resolution stays a runtime-owner callback.
 ### Runtime checkpoint 439 — 2026-09-09
 
+### Runtime checkpoint 440 — 2026-09-09
+
+- Resolver is dynamically exported from the graphics runtime and present in
+  the linked dylib. End-to-end `137-cfi` still fails; callback execution or
+  ART stack-walk frame ordering remains to be corrected.
+
 - Added an ART-owned `StackVisitor` resolver TU and a provider-side dynamic
   callback path, preserving ART-free smoke linkage. The fast graphics audit
   remains green; full graphics rebuild is currently blocked by an unrelated

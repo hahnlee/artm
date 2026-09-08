@@ -166,7 +166,7 @@ pub(crate) fn build_runtime_unwindstack_core(root: &Path) -> Result<PathBuf> {
                     {
                         return Err("AOSP Darwin AndroidLocalUnwinder lowering contract drift".into());
                     }
-                    format!("#include \"darwin_unwindstack_native.h\"\n{lowered}")
+                    format!("#include \"darwin_unwindstack_native.h\"\n// Darwin ART managed-frame callback bridge.\n{lowered}")
                 } else if *name == "Global.cpp" {
                     let signature =
                         "void Global::FindAndReadVariable(Maps* maps, const char* var_str) {";

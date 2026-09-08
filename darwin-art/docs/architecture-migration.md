@@ -11529,6 +11529,12 @@ or admission exception was added.
   ART coupling; managed-stack resolution stays a runtime-owner callback.
 ### Runtime checkpoint 439 — 2026-09-09
 
+### Runtime checkpoint 440 — 2026-09-09
+
+- Runtime-owner resolver export is present and strict graphics audit passes.
+  `137-cfi` remains failing, leaving callback execution/ordering as the next
+  diagnostic boundary.
+
 - The resolver is now an explicit runtime-owner TU with dynamic lookup from the
   provider. Fast link validation passes; the full rebuild hit the existing
   Android NDK prerequisite in the libcore lane, not a resolver compile error.
