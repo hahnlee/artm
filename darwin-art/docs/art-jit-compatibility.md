@@ -4228,3 +4228,12 @@ added; the full corpus and multi-loader identity task remain open.
   smoke both pass (`RC=0`); the log shows IOSurface-backed AHardwareBuffer
   allocation. Parcel/GraphicBuffer conversion and full CPU plane semantics
   remain open for broader AOSP ImageReader compatibility.
+
+### Runtime checkpoint 122 — 2026-09-08
+
+- Added the Android `SyncFence` JNI contract used by compositor/ImageReader
+  paths: owned fence handles, finalization, validity/fd queries, bounded waits,
+  signal-time reporting, and reference increments now route through the Darwin
+  broker/sync primitive. Native graphics bootstrap/link audit and a fresh
+  Chrome APK smoke pass with `RC=0`; no SyncFence linkage or fatal-signal error
+  appeared. Full fence/parcel stress remains open.

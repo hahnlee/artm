@@ -9192,3 +9192,11 @@ or admission exception was added.
   fresh Chrome APK smoke pass on the replacement Mac; logs confirm
   IOSurface-backed buffer allocation. Parcel/GraphicBuffer conversion and
   complete CPU plane behavior remain explicit compatibility work.
+
+### Runtime checkpoint 122 — 2026-09-08
+
+- Registered the Android `SyncFence` native ABI with owned fd lifetime,
+  finalizer, validity/fd accessors, bounded waits, signal-time queries, and
+  refcount increments backed by the Darwin broker. The graphics bootstrap/link
+  audit and a fresh Chrome APK smoke pass cleanly (`RC=0`), with no SyncFence
+  linkage or fatal-signal error. Fence and parcel stress coverage remains.
