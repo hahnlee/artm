@@ -15,4 +15,4 @@ diff --git a/runtime/art_method.h b/runtime/art_method.h
 +    }
 +#endif
 +    return entry_point;
-   }
+  }

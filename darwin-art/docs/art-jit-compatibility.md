@@ -6248,3 +6248,11 @@ added; the full corpus and multi-loader identity task remain open.
   (`0167`) and builds cleanly. A separate store-side patch was removed after
   duplicate staging exposed non-idempotent application; no store behavior is
   claimed until that patch can be made idempotent.
+
+### Runtime checkpoint 363 — 2026-09-09
+
+- Revalidated `0167` as a read-side-only boundary after testing a combined
+  read/write hunk. The combined patch is not safe under the bootstrap's
+  repeated staging pass and was reverted. A clean graphics bootstrap succeeds
+  with the read normalization, while `137-cfi` producer-side failures remain
+  unchanged; no store-side conversion is claimed.

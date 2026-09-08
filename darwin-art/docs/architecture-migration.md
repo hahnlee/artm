@@ -10991,3 +10991,10 @@ or admission exception was added.
   runtime manifest and verified a clean graphics bootstrap. The attempted
   store-side counterpart was removed after duplicate staging exposed a
   non-idempotent patch application; producer tracing remains the next task.
+
+### Runtime checkpoint 363 — 2026-09-09
+
+- Revalidated the read-only `0167` boundary and removed the combined
+  read/write experiment because bootstrap applies patches repeatedly and the
+  combined hunk failed on the second staging pass. Graphics bootstrap passes;
+  the low CFI return-PC producer remains unresolved.
