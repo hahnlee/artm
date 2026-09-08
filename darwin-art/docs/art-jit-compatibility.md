@@ -5216,6 +5216,13 @@ added; the full corpus and multi-loader identity task remain open.
   `oat/arm64`. Formatting and diff checks pass; a clean end-to-end rerun is
   pending recovery from stale host processes.
 
+### Runtime checkpoint 287 — 2026-09-08
+
+- Re-ran the installed-record Blue Archive path after system-server recovery.
+  The new `--ensure-oat` preflight created `oat/arm64/base.vdex`; the 10-second
+  unchanged APK run exited 0, initialized Unity/IL2CPP, and emitted no
+  anonymous-vdex directory error. APK/native payload permissions remain sealed.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - ANGLE EGL capability advertisement now explicitly marks FP16 pixel-format

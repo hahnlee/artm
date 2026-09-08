@@ -9534,6 +9534,13 @@ or admission exception was added.
   creating the writable `oat/arm64` leaf. Source formatting and diff checks
   pass; end-to-end rerun awaits recovery from stale host processes.
 
+### Runtime checkpoint 287 — 2026-09-08
+
+- After system-server recovery, the installed-record Blue Archive launch was
+  re-tested for 10 seconds with exit code 0. `--ensure-oat` provisioned
+  `oat/arm64/base.vdex` and the prior anonymous-vdex directory warning did not
+  recur; the APK and native payload stayed sealed.
+
 ### Runtime checkpoint 277 — 2026-09-08
 
 - EGL capability filtering now declares FP16 pixel formats unsupported for the
