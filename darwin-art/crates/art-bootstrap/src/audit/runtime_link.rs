@@ -306,6 +306,10 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
     linker
         .arg("-dynamiclib")
         .arg("-Wl,-install_name,@rpath/libdarwin_art_runtime.dylib")
+        // RuntimeSession resolves this lifecycle hook through the dylib ABI;
+        // force it through dead-strip and publish it for the host engine.
+        .arg("-Wl,-u,_darwin_art_prepare_process_exit")
+        .arg("-Wl,-exported_symbol,_darwin_art_prepare_process_exit")
         .arg("-Wl,-exported_symbol,_darwin_art_run_process")
         .arg("-Wl,-exported_symbol,_Java_Main_makeVisiblyInitialized")
         .arg("-Wl,-exported_symbol,_darwin_art_shutdown_process")

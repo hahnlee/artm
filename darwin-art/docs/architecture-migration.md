@@ -13017,3 +13017,9 @@ or admission exception was added.
   all zero). The old dex probe artifact lacks the exported process-exit symbol,
   so its failure is tracked as probe ABI cleanup while runtime/JIT work
   continues.
+- Checkpoint 707: The runtime-link probe now exports the host lifecycle symbol
+  `darwin_art_prepare_process_exit`, so the engine can load and enter ART. A
+  real dex probe reaches `ResourcesManager` and then returns status 27 because
+  the headless process has no `android.system` Binder service. The next
+  architectural boundary is system-service bootstrap, not another compiler
+  fallback or gate.

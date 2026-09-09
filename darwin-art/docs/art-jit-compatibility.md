@@ -8482,3 +8482,9 @@ incomplete and still requires managed caller unwind validation.
   generic dex probe still cannot run because its legacy runtime-link artifact
   does not export `darwin_art_prepare_process_exit`; this is a probe ABI
   mismatch, not evidence of JIT completion.
+- Checkpoint 707: Exported and dead-strip-protected `darwin_art_prepare_process_exit`
+  in the headless runtime-link probe, fixing its loader ABI mismatch. The dex
+  probe now reaches ART initialization and class loading; it fails later with
+  status 27 when `ResourcesManager` asks for an unavailable `android.system`
+  Binder service. This exposes the next real compatibility task: bootstrap the
+  system-service provider for headless app execution.
