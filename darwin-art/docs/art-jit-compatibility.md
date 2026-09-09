@@ -7431,3 +7431,8 @@ incomplete and still requires managed caller unwind validation.
   4.6 GB of framework/platform images. Android SDK, Gradle, and Xcode caches
   add about 24 GB outside the repository. Compilation remains paused until
   storage is reclaimed.
+
+- Checkpoint 552: resumed audit confirms only about 149 MB is available; the
+  424 MB Rust incremental cache is disposable but cannot reclaim space until
+  its containing volume is cleaned. No native/AOSP rebuild was started under
+  this condition, preserving the existing runtime artifacts.

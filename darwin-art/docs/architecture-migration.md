@@ -12063,3 +12063,7 @@ or admission exception was added.
   26 GB, with ANGLE sources at 15 GB and framework/platform images at about
   4.6 GB; Android SDK, Gradle, and Xcode caches add about 24 GB externally.
   Native rebuilds remain paused until space is reclaimed.
+
+- Checkpoint 552: a fresh audit still reports about 149 MB free. Rust's 424 MB
+  incremental cache is rebuildable, but native/AOSP validation remains paused
+  until storage is actually reclaimed.
