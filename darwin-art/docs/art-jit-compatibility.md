@@ -8319,3 +8319,8 @@ incomplete and still requires managed caller unwind validation.
   suspend-all pauses. This proves the bounded timeout is in the worker/GC
   stress workload, not the Java main dispatch. The macOS profiler remains
   unavailable, so no unsupported optimization is claimed.
+- Checkpoint 679: Revalidated 149-suspend-all-stress without GC stress; all
+  three lanes pass. A fresh 096 GC-stress run with the no-identity local-frame
+  cache key still exceeded 30 seconds; its host log shows main completion and
+  continuing worker GC cycles. The remaining gap is performance/cadence, not
+  an observed bytecode or JIT correctness failure.

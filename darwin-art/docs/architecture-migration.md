@@ -12875,3 +12875,8 @@ or admission exception was added.
   8--15 ms suspend-all pauses and 100+ ms total GC cycles. The remaining issue
   is worker/collector cadence rather than launcher teardown; macOS `sample`
   still cannot provide a stack, so further changes require in-runtime evidence.
+- Checkpoint 679: 149-suspend-all-stress passes all ordinary interpreter/JIT/
+  optimized lanes. The latest 096 stress run still exceeds a 30-second bound
+  after the local-frame cache fallback, with logs confirming worker GC cycles
+  after main returns. No correctness regression is present; cadence remains
+  the open performance task.
