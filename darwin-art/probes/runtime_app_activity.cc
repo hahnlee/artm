@@ -1019,6 +1019,9 @@ int prepare(JNIEnv* env, art::Thread* self, jobject* activity_instance_out,
             // the entire Android process during zygote-equivalent bootstrap.
             std::cerr << "ART Android framework: system font bootstrap unavailable;"
                       << " continuing with host font fallback\n";
+            if (self->GetException() != nullptr) {
+              std::cerr << self->GetException()->Dump() << "\n";
+            }
             env->ExceptionDescribe();
             env->ExceptionClear();
           }

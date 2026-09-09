@@ -1215,6 +1215,9 @@ int run(JNIEnv* env, art::Thread* self, jobject activity_instance,
         if (env->ExceptionCheck()) {
           std::cerr << "ART Android framework: system font bootstrap unavailable;"
                     << " continuing with host font fallback\n";
+          if (self->GetException() != nullptr) {
+            std::cerr << self->GetException()->Dump() << "\n";
+          }
           env->ExceptionDescribe();
           env->ExceptionClear();
         }
