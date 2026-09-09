@@ -6,6 +6,9 @@
 namespace darwin_art {
 
 bool RegisterLibcoreNatives(JNIEnv* env);
+// Installs the bootstrap-only System.log entry before VMClassLoader can
+// initialize java.nio and report diagnostics through that native method.
+bool RegisterEarlySystemLog(JNIEnv* env);
 // Complete Android java.lang.Runtime + sun.nio.fs.UnixNativeDispatcher tables.
 // The real-graphics owner installs these after Math and before app code.
 bool RegisterManagedLoadNatives(JNIEnv* env);

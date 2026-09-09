@@ -217,6 +217,10 @@ int start(JNIEnv* env, art::Thread* self) {
       std::cerr << "ART Android filesystem: test system root install failed\n";
       return 40;
     }
+    if (!darwin_art::RegisterEarlySystemLog(env)) {
+      std::cerr << "ART Darwin libcore: early System.log registration failed\n";
+      return 16;
+    }
     if (!darwin_art::RegisterLibcoreNatives(env)) {
       std::cerr << "ART Darwin libcore: native registration failed\n";
       return 17;

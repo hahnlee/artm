@@ -11798,3 +11798,8 @@ or admission exception was added.
   the normal libcore registration table is visible. The runtime carries the
   minimal ABI/export, but the probe still fails; registration must move into
   ART's pre-class-initialization native phase.
+- Checkpoint 496: added an explicit ART registration-phase `System.log` hook
+  before the regular libcore table. The generic probe now passes VMClassLoader
+  and reaches JNI_OnLoad/RegisterNatives; the next failure is the JNI ABI
+  narrow-stack argument test (`nativeNarrowStack` returns -4), exposing a
+  separate ARM64 trampoline argument-packing defect.

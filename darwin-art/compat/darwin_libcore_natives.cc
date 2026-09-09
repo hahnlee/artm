@@ -1330,6 +1330,24 @@ void register_libcore_icu_ICU(JNIEnv* env);
 
 namespace darwin_art {
 
+bool RegisterEarlySystemLog(JNIEnv* env) {
+  if (env == nullptr) return false;
+  jclass klass = env->FindClass("java/lang/System");
+  if (klass == nullptr) return false;
+  const JNINativeMethod method = {
+      const_cast<char*>("log"),
+      const_cast<char*>("(CLjava/lang/String;Ljava/lang/Throwable;)V"),
+      reinterpret_cast<void*>(&SystemLog),
+  };
+  const bool ok = env->RegisterNatives(klass, &method, 1) == JNI_OK;
+  env->DeleteLocalRef(klass);
+  return ok && !env->ExceptionCheck();
+}
+
+}  // namespace darwin_art
+
+namespace darwin_art {
+
 extern "C" void register_java_lang_UNIXProcess(JNIEnv* env);
 extern "C" void register_java_lang_StrictMath(JNIEnv* env);
 
