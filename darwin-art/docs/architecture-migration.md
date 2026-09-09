@@ -12812,3 +12812,7 @@ or admission exception was added.
   while checking interpreter identity delivery. The clean runtime was
   relinked successfully with no debug logging retained. The bounded probe did
   not finish a managed stress lane, so performance remains unclaimed.
+- Checkpoint 665: Re-ran unmodified AOSP `497-inlining-and-class-loader` on the
+  clean shadow-frame runtime; interpreter, JIT, and unmodified-source lanes all
+  pass. The bridge therefore has no normal reflection/inlining regression, and
+  only forced-GC completion remains open.

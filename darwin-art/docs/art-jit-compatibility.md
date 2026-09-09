@@ -8242,3 +8242,8 @@ incomplete and still requires managed caller unwind validation.
   runtime. Incremental graphics relink passes with the shadow-frame bridge;
   no debug behavior remains in production artifacts. The short probe yielded
   no managed completion, so no performance claim is made from this attempt.
+- Checkpoint 665: The clean shadow-frame runtime passes the unmodified
+  `497-inlining-and-class-loader` interpreter, JIT, and interpreter+optimized
+  lanes without GC stress. This confirms the new interpreter ABI symbol and
+  cache path introduce no ordinary reflection/inlining regression; the forced
+  GC timeout remains isolated and uncredited.
