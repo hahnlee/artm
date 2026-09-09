@@ -8287,3 +8287,9 @@ incomplete and still requires managed caller unwind validation.
   provider passes 096 normally and 497 across interpreter/JIT/optimized lanes;
   096 GC-stress still exceeds a bounded 45-second run, so no completion or
   speedup claim is made yet.
+- Checkpoint 673: Fixed the complementary cache-population gap: interpreter
+  walks now store entries keyed by their shadow frame even when no quick-frame
+  registry entry exists. The provider and graphics audit rebuild cleanly, and
+  normal 096/497 lanes remain green. A bounded 60-second 096 GC-stress run
+  still did not complete, so the cache activation is not credited as a measured
+  end-to-end speedup; GC cadence remains open.

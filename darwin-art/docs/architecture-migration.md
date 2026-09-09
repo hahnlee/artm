@@ -12848,3 +12848,7 @@ or admission exception was added.
   AOT maps. This is the first hot-path reduction aimed at the allocation-heavy
   GC-stress cadence; ordinary 096 and 497 three-lane regressions remain green,
   while bounded 096 GC-stress still times out at 45 seconds.
+- Checkpoint 673: Enabled cache population for interpreter-only shadow-frame
+  walks, matching the early cache-hit key path. Rebuild and ordinary regression
+  checks pass, but a fresh 60-second 096 GC-stress observation still times out;
+  further profiling must separate unwind cadence from collector/suspend work.

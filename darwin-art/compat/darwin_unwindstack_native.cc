@@ -1175,7 +1175,7 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, si
       caller_record[0], &walk);
   if (collected) {
     AppendManagedFrames(&walk);
-    if (walk.has_registered_quick_frame && caller_pc != 0) {
+    if ((walk.has_registered_quick_frame || has_shadow_frame) && caller_pc != 0) {
       g_local_managed_backtrace_cache.caller_pc = caller_pc;
       g_local_managed_backtrace_cache.managed_sp = walk.registered_managed_sp;
       g_local_managed_backtrace_cache.shadow_frame = has_shadow_frame ? shadow_frame : 0;
