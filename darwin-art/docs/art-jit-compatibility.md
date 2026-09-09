@@ -8500,3 +8500,8 @@ incomplete and still requires managed caller unwind validation.
   calls `ServiceManager` again before the bridge can be created. This is not a
   missing-symbol or DEX issue; the next fix must bootstrap Binder before Java
   class loading or start the profile system-server first.
+- Checkpoint 710: Rebuilt the retained Binder registrar with debug tracing and
+  confirmed the failure ordering: the class-loader lookup throws
+  `ExceptionInInitializerError` from `FileSystems`/`VMClassLoader` before
+  `DarwinServiceBridge.createContextBinder()` is entered. The probe therefore
+  still exits status 27; no Java-side fallback was added.

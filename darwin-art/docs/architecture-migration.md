@@ -13035,3 +13035,8 @@ or admission exception was added.
   `ServiceManager` → bridge lookup). The architecture therefore needs an
   early Binder endpoint or profile system-server lifecycle, rather than more
   Java-side service lookup.
+- Checkpoint 710: Instrumented the early Binder path and reproduced the exact
+  bootstrap cycle (`DarwinServiceBridge` lookup → `VMClassLoader`/`FileSystems`
+  → `ServiceManager` → lookup). This validates the need for an early native
+  endpoint or pre-started profile system-server; the runtime still has no
+  artificial mock fallback.
