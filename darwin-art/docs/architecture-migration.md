@@ -11860,3 +11860,6 @@ or admission exception was added.
 - Checkpoint 513: weak-linked `task_inspect_for_pid` was tested but did not
   release the remote smoke stall and was reverted. Read-port caching remains;
   a non-blocking or alternate remote interrogation path is still required.
+- Checkpoint 514: remote `task_for_pid` now uses a bounded worker wait and
+  releases late Mach rights, preventing host deadlock. Syntax validation
+  passes; smoke/relink confirmation remains pending.

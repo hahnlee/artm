@@ -5,6 +5,10 @@
 #include <mach/mach.h>
 
 #include <mutex>
+#include <condition_variable>
+#include <chrono>
+#include <thread>
+#include <memory>
 #include <unordered_map>
 #include <unistd.h>
 namespace darwin_art::remote_task {
@@ -20,11 +24,34 @@ inline mach_port_t Acquire(pid_t pid) {
   std::lock_guard<std::mutex> lock(mutex);
   auto found = cache.find(pid);
   if (found == cache.end()) {
-    mach_port_t task = MACH_PORT_NULL;
-    if (task_for_pid(mach_task_self(), pid, &task) != KERN_SUCCESS ||
-        task == MACH_PORT_NULL) {
+    struct Result {
+      std::mutex mutex;
+      std::condition_variable ready;
+      bool done = false;
+      mach_port_t task = MACH_PORT_NULL;
+      kern_return_t status = KERN_FAILURE;
+    };
+    auto result = std::make_shared<Result>();
+    std::thread([pid, result] {
+      mach_port_t task = MACH_PORT_NULL;
+      const kern_return_t status = task_for_pid(mach_task_self(), pid, &task);
+      {
+        std::lock_guard<std::mutex> lock(result->mutex);
+        result->status = status;
+        result->task = task;
+        result->done = true;
+      }
+      result->ready.notify_one();
+    }).detach();
+    std::unique_lock<std::mutex> lock(result->mutex);
+    if (!result->ready.wait_for(lock, std::chrono::milliseconds(250),
+                                [&] { return result->done; })) {
       return MACH_PORT_NULL;
     }
+    if (result->status != KERN_SUCCESS || result->task == MACH_PORT_NULL) {
+      return MACH_PORT_NULL;
+    }
+    mach_port_t task = result->task;
     cache.emplace(pid, task);
     found = cache.find(pid);
   }

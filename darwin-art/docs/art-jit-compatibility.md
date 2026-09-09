@@ -7203,3 +7203,6 @@ incomplete and still requires managed caller unwind validation.
   the remote smoke still stalled, so it was reverted. The known-good shared
   read-port cache remains; inspect-right acquisition alone is not sufficient
   and the remote API must be made asynchronous or replaced.
+- Checkpoint 514: wrapped remote `task_for_pid` in a bounded worker wait with
+  late-result Mach-right cleanup, preventing a host deadlock. C++ syntax
+  validation passes; smoke/relink still must confirm timeout and success paths.
