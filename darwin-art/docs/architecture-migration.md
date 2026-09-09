@@ -13270,3 +13270,7 @@ or admission exception was added.
   independent of instrumentation bridges. After rebuilding and relinking,
   `031-class-attributes` and `004-SignalTest` pass all three runner lanes.
   Broader corpus and production APK acceptance remain open.
+- Checkpoint 771: Started a fresh four-worker corpus run after the boot-image
+  AOT registry fix; workers are alive and have advanced through the early
+  corpus (latest completed artifact observed around `203-multi-checkpoint`).
+  The final pass/fail matrix and production APK acceptance remain unverified.

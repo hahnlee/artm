@@ -8781,3 +8781,8 @@ incomplete and still requires managed caller unwind validation.
   `031-class-attributes` and `004-SignalTest` pass interpreter, optimized/JIT,
   and unmodified-source lanes. Broader corpus and production APK acceptance
   remain open.
+- Checkpoint 771: Started a fresh four-worker corpus run after the boot-image
+  AOT registry fix; workers are alive and have advanced through the early
+  corpus (latest completed artifact observed around `203-multi-checkpoint`).
+  The run is intentionally still in progress, so its final pass/fail matrix
+  and production APK acceptance remain unverified.
