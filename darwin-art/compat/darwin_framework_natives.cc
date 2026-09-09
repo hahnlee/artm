@@ -2712,10 +2712,23 @@ bool RegisterFrameworkSupportNatives(JNIEnv* env) {
       {const_cast<char*>("applyFreeFunction"), const_cast<char*>("(JJ)V"),
        reinterpret_cast<void*>(&NativeAllocationRegistryApplyFreeFunction)},
   };
-  return Register(env, "libcore/util/NativeAllocationRegistry",
-                  native_allocation_methods,
-                  static_cast<jint>(std::size(native_allocation_methods))) &&
-         RegisterDarwinSecurityTrustNatives(env);
+  if (!Register(env, "libcore/util/NativeAllocationRegistry",
+                native_allocation_methods,
+                static_cast<jint>(std::size(native_allocation_methods)))) {
+    return false;
+  }
+  // DarwinTrustManagerFactory is an optional app-side compatibility class,
+  // not part of core-oj/core-libart. Do not poison boot registration when the
+  // app support DEX has not been loaded yet; finish-phase registration will
+  // install it once the class loader can resolve the class.
+  jclass trust = env->FindClass(
+      "dev/darwinart/security/DarwinTrustManagerFactory$DarwinTrustManager");
+  if (trust == nullptr) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    return true;
+  }
+  env->DeleteLocalRef(trust);
+  return RegisterDarwinSecurityTrustNatives(env);
 }
 
 bool RegisterFrameworkNatives(JNIEnv* env) {

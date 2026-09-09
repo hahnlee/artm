@@ -11702,3 +11702,8 @@ or admission exception was added.
   experiment was reverted because registering before boot classes exist fails;
   the remaining fix must install boot JNI owners after class availability but
   before their first initialization.
+- Checkpoint 477: registered the OpenJDK named-JNI owner through `JavaVMExt`
+  before boot class initialization, eliminating the early OsConstants/Float
+  resolver failures. The ELF-JNI probe now reaches NIO/FileSystems and the
+  Android service-manager path; its next boundary is the missing default
+  `IServiceManager` implementation, not JNI symbol loading.

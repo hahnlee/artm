@@ -60,6 +60,7 @@
 #include "mirror/throwable.h"
 #include "plugin.h"
 #include "runtime.h"
+#include "jni/java_vm_ext.h"
 #include "parsed_options.h"
 #include "runtime_options.h"
 #include "scoped_thread_state_change-inl.h"
@@ -825,6 +826,20 @@ extern "C" DARWIN_ART_EXPORT int32_t darwin_art_run_process(
     return 33;
   }
   JNIEnv* env = self->GetJniEnv();
+
+  // Android loads libopenjdk's boot JNI owner before boot classes execute.
+  // Do the same for the composed Darwin owner so core-oj named methods are
+  // discoverable during the first class initializers, not only after app load.
+  if (const char* owner = std::getenv("DARWIN_ART_OPENJDK_NAMED_JNI_OWNER");
+      owner != nullptr && *owner != '\0') {
+    std::string load_error;
+    if (!art::Runtime::Current()->GetJavaVM()->LoadNativeLibrary(
+            env, owner, nullptr, nullptr, &load_error)) {
+      std::cerr << "ART OpenJDK boot JNI owner load failed: " << load_error
+                << "\n";
+      return 18;
+    }
+  }
 
   process_boundary.set_art_thread(self);
   if (config->provider_acquire != nullptr) {
