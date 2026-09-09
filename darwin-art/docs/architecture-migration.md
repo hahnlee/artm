@@ -12926,3 +12926,8 @@ or admission exception was added.
   `0x110` crash. The one-time registration predicate is therefore not the
   root cause and the experiment was removed. Investigation now moves to the
   faulting managed entrypoint and its call ABI.
+- Checkpoint 689: Republished the inherited zygote shared JIT mapping after
+  fork and reran Chrome through the complete graphics closure; the same
+  low-window `0x110` fault remained. The change was removed. Focus now shifts
+  from range lifetime to the executable mapping and entrypoint/ABI metadata
+  used by the faulting managed code.

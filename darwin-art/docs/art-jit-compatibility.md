@@ -8379,3 +8379,8 @@ incomplete and still requires managed caller unwind validation.
   reproduced the same `0x110` fault, so the one-time `RegisterDexFile` range
   predicate is not sufficient to explain the failure. The patch was reverted;
   the next target is the faulting managed entrypoint/call ABI itself.
+- Checkpoint 689: Republished the inherited zygote shared JIT mapping from
+  `JitCodeCache::PostForkChildAction` and reran Chrome through the complete
+  graphics closure; the same low-window `0x110` fault remained. The change was
+  reverted. The remaining discrepancy is the executable mapping and
+  entrypoint/ABI metadata used by the faulting managed code.
