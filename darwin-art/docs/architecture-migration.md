@@ -12127,3 +12127,10 @@ or admission exception was added.
 - Checkpoint 564: after reclaiming 61 GiB, reran AOSP `985-re-obsolete`; the
   interpreter, JIT, and unmodified source differential lanes all PASS. The
   profile-storage fix therefore preserves the validated runtime behavior.
+
+- Checkpoint 565: host-wide audit after profile recreation shows DarwinART
+  profiles at only about 1.6 GB. Capsule occupies about 90 GB (roughly 58 GB
+  of populated VM disks plus 34 GB restore IPSWs); Android SDK, Xcode data, and
+  Gradle add about 12 GB, 8.5 GB, and 3.8 GB respectively. The previous
+  61 GiB ART profile issue is fixed; remaining shortage is host tooling/VM
+  storage.

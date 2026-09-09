@@ -7509,3 +7509,10 @@ incomplete and still requires managed caller unwind validation.
   authoritative AOSP harness. Interpreter expected-output, JIT expected-output,
   and unmodified source interpreter+optimized differential lanes all PASS;
   storage remediation did not regress JIT behavior.
+
+- Checkpoint 565: broadened the host storage audit after profile recreation.
+  DarwinART profiles now total only about 1.6 GB (recovery image 1.5 GB,
+  default image 56 MB). The dominant runtime-adjacent allocation is Capsule at
+  about 90 GB: two populated VM disk images consume roughly 58 GB and restore
+  IPSW images add about 34 GB. Android SDK (12 GB), Xcode data (8.5 GB), and
+  Gradle (3.8 GB) are additional caches outside ART.
