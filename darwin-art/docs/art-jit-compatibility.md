@@ -7250,3 +7250,10 @@ incomplete and still requires managed caller unwind validation.
   `probe-runtime-dex` run now reaches the Android resource bootstrap and
   returns status 27 (no abort); this is an independent framework service/
   resource fixture gap, not a JIT or JNI teardown failure.
+
+- Checkpoint 522: tested exposing `DarwinServiceBridge` through a secondary
+  support DEX for the baseline probe. ART's application `PathClassLoader` is
+  fixed during `Runtime::Create` and duplicated path entries resolved to the
+  original DEX, so the experiment was reverted. The correct next change is an
+  AOSP-shaped classloader `addDexPath` operation before ResourcesManager
+  initialization; no probe-only classpath bypass remains.

@@ -11901,3 +11901,10 @@ or admission exception was added.
   The non-graphics baseline DEX probe still fails at resource bootstrap with
   status 27 and no process abort, isolating the next work to framework
   resource/service initialization rather than ART JIT or native loading.
+
+- Checkpoint 522: a support-DEX classpath experiment did not solve baseline
+  resource bootstrap because the process `PathClassLoader` is constructed at
+  `Runtime::Create`; later RuntimeArgumentMap path edits reuse the original
+  DEX. The experiment was removed. Implement the proper pre-bootstrap
+  `addDexPath`/classloader contract next, preserving the unchanged primary
+  DEX and APK.
