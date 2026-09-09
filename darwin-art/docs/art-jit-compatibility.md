@@ -8461,3 +8461,9 @@ incomplete and still requires managed caller unwind validation.
   graphics-link audit passes again. No runtime behavior claim is made from the
   rejected nterp experiment; the next step remains tracing the low-window
   producer with a stable build.
+- Checkpoint 704: A temporary compiled-range print was removed without source
+  changes. Rebuilding after deleting the shadow exposed a pre-existing staging
+  failure in `0066-darwin-arm64-class-load-boundary.patch` (two rejected
+  `optimizing_compiler.cc` hunks), so the current successful binary still relies
+  on cached shadow state. Next repair the patch-closure reproducibility before
+  collecting further low-window PC evidence.

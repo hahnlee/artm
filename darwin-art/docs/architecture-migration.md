@@ -12998,3 +12998,8 @@ or admission exception was added.
   `StartMinimalForDarwinProbe`/`FinishMinimalForDarwinProbe` are present in the
   staged AOSP sources and the graphics-link audit is green again. Continue with
   stable low-window producer identification instead of widening fault handling.
+- Checkpoint 704: The temporary JIT range diagnostic was discarded. A clean
+  shadow regeneration now reproducibly stops at patch `0066` with two rejected
+  `optimizing_compiler.cc` hunks, proving that the graph is still cache-state
+  dependent. Fix this patch-closure failure before the next runtime fault
+  experiment; no additional runtime behavior was claimed.
