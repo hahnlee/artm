@@ -7866,3 +7866,11 @@ incomplete and still requires managed caller unwind validation.
   test passed in the interpreter and optimized JIT lanes through the existing
   differential runner. The lifecycle failures remain isolated to
   `136-daemon-jni-shutdown` and Darwin remote `137-cfi`.
+
+- Checkpoint 608: Ran the pinned corpus in parallel from `100-reflect2` through
+  `135-MirandaDispatch` (42 discovered tests, including concurrent GC,
+  exceptions, suspend checks, multidex, native bridge, and compiler
+  regressions). All selected interpreter and optimized JIT lanes passed with
+  the differential runner. The remaining known failures are the owner-thread
+  shutdown contract in `136-daemon-jni-shutdown` and Darwin remote unwind in
+  `137-cfi`.
