@@ -8389,3 +8389,9 @@ incomplete and still requires managed caller unwind validation.
   fault-handler source and was removed; no diagnostic instrumentation remains.
   The next target is direct ownership and ABI resolution of the low-window
   executable mapping.
+- Checkpoint 691: Temporary fault-context words decoded Chrome's repeated
+  crash as `ldr x11, [x8,#0x110]` with `x8=0`, while the frame contained an
+  aligned non-null `ArtMethod*`. This proves a real implicit-null check, not
+  an arbitrary PC or native loader fault. A Darwin-only bypass of
+  `IsValidReturnPc` was build-tested only as a temporary experiment and was
+  discarded; the required fix is accurate OAT/JIT stack-map/header lookup.

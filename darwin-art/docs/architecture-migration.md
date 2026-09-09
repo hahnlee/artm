@@ -12936,3 +12936,8 @@ or admission exception was added.
   the layered fault-handler source and was discarded. The tree retains no
   speculative signal instrumentation; focus remains exact executable mapping
   ownership and managed entrypoint/ABI compatibility.
+- Checkpoint 691: ARM64 instruction capture identified Chrome's fault as the
+  expected null-object field load (`ldr x11, [x8,#0x110]`, `x8=0`) with a
+  valid-looking frame method pointer. The temporary Darwin stack-map bypass
+  was not retained; implementation must repair exact OAT/JIT header matching
+  so AOSP's normal NPE signal path can run.
