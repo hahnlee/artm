@@ -7802,3 +7802,11 @@ incomplete and still requires managed caller unwind validation.
   thread because the test's owner-thread contract is not yet preserved by the
   Java `TestMainThread` bridge. `150-loadlibrary` remains green with the
   NativeLoader unload ordering; the owner-thread execution model is next.
+
+- Checkpoint 600: Rebuilt the graphics runtime and reran `136-daemon-jni-shutdown`.
+  The failure is reproducible as an ART-internal shutdown-thread attach abort,
+  confirming that the Java bridge leaves the original native ART peer attached
+  while the test detaches its JNI caller. The `IsShuttingDownUnsafe()` guard is
+  therefore only a host-side race guard; it cannot repair the owner-thread
+  contract after shutdown has begun. Next work must move upstream-main dispatch
+  to an owner-aware launcher boundary rather than adding a test-specific branch.
