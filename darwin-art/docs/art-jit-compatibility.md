@@ -8676,3 +8676,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 746: `2239-varhandle-perf-vh-cas-weak` passes all three lanes,
   validating weak-CAS spurious-failure/retry semantics and atomic reference
   handling. Remaining modes and real APK acceptance remain outstanding.
+- Checkpoint 747: `2239-varhandle-perf-vh-get-a` passes interpreter,
+  optimized/JIT, and unmodified-source lanes, covering acquire/opaque VarHandle
+  reads and their ordering semantics. Remaining modes and real APK acceptance
+  remain open.
