@@ -13260,3 +13260,8 @@ or admission exception was added.
   `0x100704a738c`. A visitor experiment was rejected because runtime shadow
   patch offsets differ across generated copies; no unverified boot-image code
   was retained. `031-class-attributes` remains open.
+- Checkpoint 769: A boot-image visitor prototype was rejected after generated
+  runtime shadow copies applied different `class_linker.cc` hunks, leaving one
+  copy without the visitor declaration and breaking compilation. The prototype
+  was removed; the next fix must use a shared compat API. `031-class-attributes`
+  remains open.

@@ -8769,3 +8769,9 @@ incomplete and still requires managed caller unwind validation.
   `0x100704a738c`. A visitor experiment was rejected because runtime shadow
   patch offsets differ across generated copies; no unverified boot-image code
   was retained. `031-class-attributes` remains open.
+- Checkpoint 769: A boot-image visitor prototype was rejected after the
+  generated runtime shadow copies applied different `class_linker.cc` hunks,
+  leaving one copy without the visitor declaration and breaking compilation.
+  The prototype was fully removed; the next fix must use a shared compat API
+  rather than copy-sensitive class-linker insertion. `031-class-attributes`
+  remains open.
