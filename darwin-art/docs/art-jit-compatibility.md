@@ -7834,3 +7834,11 @@ incomplete and still requires managed caller unwind validation.
   no stale native ART peer, while ordinary tests regain an owner for result
   publication. No test-name dispatch is acceptable; implementation remains
   open.
+
+- Checkpoint 604: Tested the first detached-worker prototype and rejected it
+  before merge. `039-join-main` reached its expected Java output, but the
+  subsequent runtime acceptance phase crashed because `runtime_entry_probe`
+  retained the pre-detach `art::Thread* self`. Owner replacement must therefore
+  be represented by one coordinator updating process state,
+  `ScopedRunBoundary`, and every post-launch ART callback together; ad-hoc
+  reattachment inside `Run()` is unsafe. Worktree was restored clean.
