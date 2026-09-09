@@ -11829,3 +11829,6 @@ or admission exception was added.
   hang occurs inside remote-child unwind. Remote sampling now uses one
   suspend/resume pair again; temporary smoke instrumentation was removed.
   Remote frame collection remains to be decomposed.
+- Checkpoint 504: a fresh smoke run reaches worker join and then hangs inside
+  remote-child unwind. The remaining issue is therefore in remote
+  register/maps/frame collection, not local thread resumption.

@@ -7163,3 +7163,7 @@ incomplete and still requires managed caller unwind validation.
   restored to a single suspend/resume pair (nested draining is local-thread
   only), and diagnostic smoke edits were removed. Remote frame collection is
   the active build-pipeline defect.
+- Checkpoint 504: fresh smoke markers confirm worker unwind and join complete;
+  the process stalls inside `AndroidRemoteUnwinder::Unwind` before returning
+  from remote-child sampling. This isolates the next defect to the remote
+  register/maps/record collection path rather than thread resume cleanup.
