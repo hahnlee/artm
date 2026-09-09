@@ -7449,3 +7449,8 @@ incomplete and still requires managed caller unwind validation.
   JNI, JVMTI, verifier, monitors, MethodHandle, interface dispatch, and
   deoptimization, but it is not a completion claim because the remaining
   corpus and real-app validation still require a writable build volume.
+
+- Checkpoint 555: current continuation rechecked the volume and repository;
+  only about 156 MB is free and the worktree is clean. No test process was
+  started because it would recreate the known storage failure; preserved
+  corpus evidence remains available for the next writable-volume run.

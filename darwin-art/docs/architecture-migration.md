@@ -12077,3 +12077,7 @@ or admission exception was added.
   with 1,010 explicit interpreter/JIT differential PASS records. Coverage is
   broad, but remaining corpus lanes and real-app validation are still open
   until native rebuilds can run on a writable volume.
+
+- Checkpoint 555: the current state still has only about 156 MB free and a
+  clean worktree. Validation was not launched into a full volume; existing
+  AOSP result artifacts remain intact for resumption after reclamation.
