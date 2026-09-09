@@ -13134,3 +13134,7 @@ or admission exception was added.
 - Checkpoint 731: `911-get-stack-trace` passes interpreter, optimized/JIT, and
   unmodified-source lanes, validating JNI stack-trace collection from compiled
   frames. Broader JNI/exception coverage and real-app acceptance remain open.
+- Checkpoint 732: `004-JniTest` remains green in all three lanes after the
+  referent receiver hardening, including verifier coverage for invalid native
+  declarations. The complete JNI/exception matrix and real-app acceptance
+  remain outstanding.

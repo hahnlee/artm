@@ -8619,3 +8619,7 @@ incomplete and still requires managed caller unwind validation.
   stack-trace collection through compiled frames after the reference-boundary
   changes. The broader JNI/exception matrix and real APK acceptance remain
   open.
+- Checkpoint 732: Re-ran `004-JniTest` after patch 0184; interpreter,
+  optimized/JIT, and unmodified-source lanes all pass, including the AOSP
+  verifier's invalid fast/critical-native cases. JNI ABI and exception checks
+  remain broader than this focused test, and real APK acceptance is still open.
