@@ -11720,3 +11720,9 @@ or admission exception was added.
   native fixture transition; the remaining failure is a SIGABRT during the
   later shared-library acceptance, requiring a focused ART/native boundary
   trace rather than another framework-service workaround.
+- Checkpoint 480: instrumented and isolated the failure to the first
+  `libc++` self-test immediately after NativeBridge `JNI_OnLoad` returns
+  `JNI_VERSION_1_6`; it occurs before the close result is observable. The
+  attempted thread-state variation did not change the abort and was reverted.
+  This points at the NativeBridge trampoline/return ABI or post-load owner
+  transition, which is the next implementation boundary to fix.
