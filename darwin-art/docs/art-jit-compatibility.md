@@ -8054,3 +8054,10 @@ incomplete and still requires managed caller unwind validation.
   workers are turning over normally, and no orphaned ART hosts are present.
   Ledger counts continue to fluctuate while hash-invalidated rows are replaced;
   terminal replay plus serial failure reproduction remains required.
+
+- Checkpoint 634: Replay remains active near the later `720–736` coverage. Two
+  interim failures have useful signatures for post-replay triage: `714` shows
+  stderr-only output mismatch, while `844` exits 122 after the Darwin
+  `membarrier` unsupported warning. These are provisional under parallel load;
+  serial reproduction is required before changing exception or synchronization
+  paths.

@@ -12653,3 +12653,9 @@ or admission exception was added.
   thread/interface and checker coverage. Parent/worker lifecycle remains
   healthy without orphaned ART hosts. Interim ledger counts are unstable while
   invalidated rows are re-run, so no failure is treated as final yet.
+
+- Checkpoint 634: The active replay remains in the later `720–736` coverage.
+  Provisional diagnostics show `714` as an stderr-only mismatch and `844` as
+  status 122 following the Darwin unsupported-`membarrier` warning. Both await
+  serial reproduction after terminal replay; no synchronization or exception
+  implementation change is inferred from parallel results alone.
