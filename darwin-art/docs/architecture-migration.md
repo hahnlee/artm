@@ -12958,3 +12958,6 @@ or admission exception was added.
   on Darwin did not change Chrome's `addr=0x110` crash and was discarded. The
   remaining issue is a producer/identity mismatch between low-window code and
   method metadata, not an empty `sp[0]` slot alone.
+- Checkpoint 696: Both k64 and k32 entrypoint reads from the fault-frame
+  `sp[0]` returned zero. Pointer-size selection is not the cause; inspect the
+  actual quick-frame boundary and tagged managed-stack state used by signals.
