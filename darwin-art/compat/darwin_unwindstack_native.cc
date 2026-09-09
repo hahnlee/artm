@@ -17,6 +17,7 @@
 #include <cxxabi.h>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -888,6 +889,16 @@ bool ReadFrameRecord(mach_port_t task, uint64_t address, uint64_t (&record)[2]) 
          copied == sizeof(record);
 }
 
+// DarwinNativeUnwind runs on the target thread itself. Its frame pointer is
+// therefore an address in the current, already mapped stack; avoid a Mach
+// VM round-trip on every GC-stress allocation. Remote/thread-targeted walks
+// continue to use ReadFrameRecord above, which retains the fault-safe read.
+bool ReadLocalFrameRecord(uint64_t address, uint64_t (&record)[2]) {
+  if (address == 0 || (address & (alignof(uint64_t) - 1)) != 0) return false;
+  std::memcpy(record, reinterpret_cast<const void*>(address), sizeof(record));
+  return true;
+}
+
 struct RegisteredQuickFrame {
   uint64_t managed_sp = 0;
   uint64_t frame_kind = 0;
@@ -1094,7 +1105,7 @@ bool DarwinNativeUnwind(Maps* maps, JitDebug* jit_debug, DexFiles* dex_files, si
   // map publication, and Mach-backed memory initialization entirely.
   const uint64_t frame_pointer = reinterpret_cast<uint64_t>(__builtin_frame_address(0));
   uint64_t caller_record[2]{};
-  if (!ReadFrameRecord(mach_task_self(), frame_pointer, caller_record)) {
+  if (!ReadLocalFrameRecord(frame_pointer, caller_record)) {
     data.error.code = ERROR_MEMORY_INVALID;
     return false;
   }

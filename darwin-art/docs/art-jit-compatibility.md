@@ -8293,3 +8293,9 @@ incomplete and still requires managed caller unwind validation.
   normal 096/497 lanes remain green. A bounded 60-second 096 GC-stress run
   still did not complete, so the cache activation is not credited as a measured
   end-to-end speedup; GC cadence remains open.
+- Checkpoint 674: Removed the local-unwind cache-hit Mach VM round-trip by
+  reading the current thread's already-mapped frame record directly; remote
+  walks retain the fault-safe Mach reader. Graphics-link audit and rebuilt
+  provider pass, and 497's interpreter/JIT/optimized lanes remain green. This
+  is a targeted hot-path optimization only; 096 GC-stress completion is still
+  unproven and remains the next measurement target.

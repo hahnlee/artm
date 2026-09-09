@@ -12852,3 +12852,8 @@ or admission exception was added.
   walks, matching the early cache-hit key path. Rebuild and ordinary regression
   checks pass, but a fresh 60-second 096 GC-stress observation still times out;
   further profiling must separate unwind cadence from collector/suspend work.
+- Checkpoint 674: Local Darwin unwind now reads its own current stack frame
+  record directly instead of issuing `mach_vm_read_overwrite`; remote/thread
+  targets keep the checked Mach path. The graphics audit and 497 three-lane
+  regression pass after rebuild, with no claim yet that forced-GC stress has
+  completed.
