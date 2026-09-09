@@ -472,6 +472,28 @@ void UnregisterElfLibrary(ElfLibrary* library) {
                   libraries.end());
 }
 
+bool ShutdownElfLibraries() {
+  // DropRuntimeElfLibrary unregisters each image as it is destroyed, so take
+  // a snapshot and never hold the registry mutex across callbacks.
+  std::vector<void*> handles;
+  {
+    std::lock_guard<std::mutex> lock(ElfLibraryRegistryMutex());
+    for (ElfLibrary* library : ElfLibraries()) {
+      if (library != nullptr && library->graph_handle != nullptr) {
+        handles.push_back(library->graph_handle);
+      }
+    }
+  }
+  for (void* handle : handles) {
+    char* error = nullptr;
+    if (!CloseNativeLibrary(handle, true, &error)) {
+      if (error != nullptr) NativeLoaderFreeErrorMessage(error);
+      return false;
+    }
+  }
+  return true;
+}
+
 ElfLibrary* FindElfLibraryForAddress(uintptr_t address) {
   if (address == 0) return nullptr;
   std::lock_guard<std::mutex> lock(ElfLibraryRegistryMutex());

@@ -21,6 +21,10 @@ extern "C" int darwin_art_elf_jni_fixture_registration_status();
 extern "C" int darwin_art_elf_jni_fixture_lifecycle_status();
 extern "C" int darwin_art_elf_jni_fixture_namespace_lifecycle_status();
 
+namespace android {
+bool ShutdownElfLibraries();
+}
+
 namespace darwin_art_process {
 
 namespace {
@@ -323,6 +327,14 @@ int32_t run_shutdown(const ShutdownState& state) {
       }
       if (!darwin_art::ShutdownLibcoreNatives()) {
         std::cerr << "ART Darwin shutdown: libcore host state restore failed\n";
+        darwin_art_process::mark_shutdown_failed();
+        return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
+      }
+      // JavaVMExt unloads NativeLoader-owned DSOs before tearing down the VM;
+      // invoke the same lifecycle boundary so guest JNI_OnUnload runs while
+      // its proxy VM and ART thread are still valid.
+      if (!android::ShutdownElfLibraries()) {
+        std::cerr << "ART Darwin shutdown: NativeLoader DSO unload failed\n";
         darwin_art_process::mark_shutdown_failed();
         return DARWIN_ART_STATUS_SHUTDOWN_FAILED;
       }

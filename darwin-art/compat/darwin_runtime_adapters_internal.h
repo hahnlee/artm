@@ -152,6 +152,9 @@ ElfLibrary* AsElfLibrary(void* handle);
 // original context.
 void RegisterElfLibrary(ElfLibrary* library);
 void UnregisterElfLibrary(ElfLibrary* library);
+// Unload all guest NativeLoader libraries while ART/JNI is still alive. This
+// is the VM-shutdown equivalent of Android's JavaVMExt::UnloadNativeLibraries.
+bool ShutdownElfLibraries();
 ElfLibrary* FindElfLibraryForAddress(uintptr_t address);
 ElfLibrary* FindElfLibraryByPath(JNIEnv* env, const char* path, jobject loader);
 int32_t ProxyRegisterNatives(void* context,

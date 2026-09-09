@@ -12400,3 +12400,12 @@ or admission exception was added.
   unload during host VM shutdown); 27/30 tests pass in this fresh window.
   These are runtime lifecycle/native boundaries, not APK or test-source
   mutations, and remain open.
+
+- Checkpoint 598: NativeLoader shutdown now snapshots and unloads all guest ELF
+  libraries before `DestroyJavaVM`, matching Android `JavaVMExt` ordering.
+  `150-loadlibrary` passes interpreter, JIT, and unmodified optimized lanes,
+  including `JNI_OnUnload called`. Upstream tests now use normal VM shutdown;
+  `136-daemon-jni-shutdown` exposes the remaining race where the test itself
+  calls `DestroyJavaVM` while the host shutdown actor starts a second teardown.
+  The required follow-up is generic VM-lifecycle state handoff (no test-name
+  special case); full corpus and real-app criteria remain open.
