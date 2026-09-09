@@ -7188,3 +7188,7 @@ incomplete and still requires managed caller unwind validation.
   `task_threads` stall, ruling out fork inheritance. The harness change was
   reverted; general Darwin remote task/thread acquisition remains the active
   host-layer defect.
+- Checkpoint 510: finer boundary logging places the stall in
+  `TaskForPid(child)` during remote register acquisition, before thread
+  enumeration. Diagnostics were removed; the next host-layer change must
+  avoid repeated task-port acquisition and reuse one validated handle.

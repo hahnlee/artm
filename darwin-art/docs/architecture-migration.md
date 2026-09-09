@@ -11848,3 +11848,6 @@ or admission exception was added.
 - Checkpoint 509: an independent `posix_spawn` helper reproduced the same
   `task_threads` stall, excluding fork inheritance. The diagnostic harness
   change was reverted; remote task/thread acquisition remains unresolved.
+- Checkpoint 510: boundary logs place the stall in `TaskForPid(child)` before
+  thread enumeration. Diagnostics were removed; remote task-port reuse is the
+  next implementation target.
