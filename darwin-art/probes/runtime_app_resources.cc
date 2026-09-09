@@ -136,16 +136,20 @@ int prepare(JNIEnv* env, jclass probe_resources_class,
             ? nullptr
             : env->CallStaticObjectMethod(out->apk_assets_class, load_from_path,
                                           out->framework_res_path);
-    out->app_apk_path =
-        app_apk_path == nullptr ? nullptr : env->NewStringUTF(app_apk_path);
-    jmethodID load_app = env->GetStaticMethodID(
-        out->apk_assets_class, "loadFromPath",
-        "(Ljava/lang/String;)Landroid/content/res/ApkAssets;");
-    out->app_apk_assets =
-        load_app == nullptr || out->app_apk_path == nullptr
-            ? nullptr
-            : env->CallStaticObjectMethod(out->apk_assets_class, load_app,
-                                          out->app_apk_path);
+    // Framework-only probes have no application APK.  Do not call
+    // ApkAssets.loadFromPath("") in that mode: AOSP treats the empty path as
+    // an actual asset request and throws IOException before the first frame.
+    if (app_apk_path != nullptr && app_apk_path[0] != '\0') {
+      out->app_apk_path = env->NewStringUTF(app_apk_path);
+      jmethodID load_app = env->GetStaticMethodID(
+          out->apk_assets_class, "loadFromPath",
+          "(Ljava/lang/String;)Landroid/content/res/ApkAssets;");
+      out->app_apk_assets =
+          load_app == nullptr || out->app_apk_path == nullptr
+              ? nullptr
+              : env->CallStaticObjectMethod(out->apk_assets_class, load_app,
+                                            out->app_apk_path);
+    }
     const jint asset_count = out->framework_apk_assets == nullptr
                                  ? 0
                                  : (out->app_apk_assets == nullptr ? 1 : 2);

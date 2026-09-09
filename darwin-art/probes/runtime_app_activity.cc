@@ -1302,13 +1302,10 @@ int prepare(JNIEnv* env, art::Thread* self, jobject* activity_instance_out,
           : env->GetMethodID(out->context_theme_wrapper_class,
                              "attachBaseContext",
                              "(Landroid/content/Context;)V");
-  if (!run_apk_app && attach_base_context != nullptr) {
-    env->CallNonvirtualVoidMethod(activity_instance,
-                                  out->context_theme_wrapper_class,
-                                  attach_base_context, out->probe_context);
-  }
-  if ((!run_apk_app && attach_base_context == nullptr) ||
-      env->ExceptionCheck()) {
+  // Activity.attach() invokes the virtual attachBaseContext hook itself.  A
+  // pre-call here leaves ContextWrapper.mBase initialized twice and AOSP
+  // correctly throws "Base context already set" on the second call.
+  if (attach_base_context == nullptr || env->ExceptionCheck()) {
     std::cerr << "ART Android window: base Context preparation failed\n";
     if (self->IsExceptionPending()) {
       std::cerr << self->GetException()->Dump() << "\n";

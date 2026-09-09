@@ -166,6 +166,14 @@ pub(crate) fn probe_runtime_dex_flavor_impl(
             }
             let guest_root = prepare_probe_android_system_root(root)?;
             command.env("DARWIN_ART_ANDROID_SYSTEM_ROOT", &guest_root);
+            if button {
+                // The framework Button probe uses a raw host-backed DEX rather
+                // than an APK identity, but DexPathList still performs the
+                // normal authorized-host `File.isFile()` check. Publish the
+                // exact immutable DEX as a capability-scoped support path;
+                // this does not opt the process into APK mode.
+                command.env("DARWIN_ART_APK_APP_SUPPORT_DEX", &classes_dex);
+            }
             system_root = Some(guest_root);
         }
     }

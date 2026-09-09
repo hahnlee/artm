@@ -756,13 +756,21 @@ public final class DarwinServiceBridge {
             attach(usageStatsBinder, usageStatsService,
                     "android.app.usage.IUsageStatsManager");
 
-            Binder roleBinder = new Binder();
-            Class<?> roleInterface = Class.forName("android.app.role.IRoleManager");
-            Object roleService = Proxy.newProxyInstance(
-                    roleInterface.getClassLoader(), new Class<?>[] {roleInterface},
-                    (proxy, method, args) -> {
+            // Some production framework.jar distributions omit the hidden
+            // role-controller AIDL interface while retaining RoleManager. On
+            // Android this service is optional for an app process, so do not
+            // make display/resource bootstrap fail when that interface is
+            // absent from the pinned boot class path.
+            Binder roleBinder = null;
+            try {
+                final Binder roleServiceBinder = new Binder();
+                roleBinder = roleServiceBinder;
+                Class<?> roleInterface = Class.forName("android.app.role.IRoleManager");
+                Object roleService = Proxy.newProxyInstance(
+                        roleInterface.getClassLoader(), new Class<?>[] {roleInterface},
+                        (proxy, method, args) -> {
                         String name = method.getName();
-                        if ("asBinder".equals(name)) return roleBinder;
+                        if ("asBinder".equals(name)) return roleServiceBinder;
                         if ("isRoleAvailableAsUser".equals(name)
                                 || "isRoleVisibleAsUser".equals(name)
                                 || "isApplicationVisibleForRoleAsUser".equals(name)) {
@@ -783,8 +791,11 @@ public final class DarwinServiceBridge {
                             return Boolean.TRUE;
                         }
                         return defaultValue(method.getReturnType());
-                    });
-            attach(roleBinder, roleService, "android.app.role.IRoleManager");
+                        });
+                attach(roleBinder, roleService, "android.app.role.IRoleManager");
+            } catch (ClassNotFoundException ignored) {
+                Log.i("DarwinServiceBridge", "role service interface unavailable");
+            }
 
             // ViewRootImpl construction also obtains InputMethodManager.  A
             // real app window receives this binder from system_server; the
@@ -918,31 +929,38 @@ public final class DarwinServiceBridge {
             // ordinary SystemServiceRegistry. Publish an adapter in the OFF
             // state: callers receive a real BluetoothAdapter object while no
             // host radio capability is fabricated.
-            Binder bluetoothManagerBinder = new Binder();
-            Class<?> bluetoothManagerInterface =
-                    Class.forName("android.bluetooth.IBluetoothManager");
-            Object bluetoothManagerService = Proxy.newProxyInstance(
-                    bluetoothManagerInterface.getClassLoader(),
-                    new Class<?>[] {bluetoothManagerInterface},
-                    (proxy, method, args) -> {
-                        String name = method.getName();
-                        if ("asBinder".equals(name)) return bluetoothManagerBinder;
-                        if ("getState".equals(name)) return Integer.valueOf(10);
-                        return defaultValue(method.getReturnType());
-                    });
-            attach(bluetoothManagerBinder, bluetoothManagerService,
-                    "android.bluetooth.IBluetoothManager");
-            Class<?> serviceManagerType = Class.forName(
-                    "android.os.BluetoothServiceManager");
-            Object bluetoothServiceManager =
-                    serviceManagerType.getDeclaredConstructor().newInstance();
-            Class<?> initializer = Class.forName(
-                    "android.bluetooth.BluetoothFrameworkInitializer");
-            Method getBluetoothServiceManager = initializer.getMethod(
-                    "getBluetoothServiceManager");
-            if (getBluetoothServiceManager.invoke(null) == null) {
-                initializer.getMethod("setBluetoothServiceManager", serviceManagerType)
-                        .invoke(null, bluetoothServiceManager);
+            Binder bluetoothManagerBinder = null;
+            try {
+                bluetoothManagerBinder = new Binder();
+                Class<?> bluetoothManagerInterface =
+                        Class.forName("android.bluetooth.IBluetoothManager");
+                final Binder bluetoothBinder = bluetoothManagerBinder;
+                Object bluetoothManagerService = Proxy.newProxyInstance(
+                        bluetoothManagerInterface.getClassLoader(),
+                        new Class<?>[] {bluetoothManagerInterface},
+                        (proxy, method, args) -> {
+                            String name = method.getName();
+                            if ("asBinder".equals(name)) return bluetoothBinder;
+                            if ("getState".equals(name)) return Integer.valueOf(10);
+                            return defaultValue(method.getReturnType());
+                        });
+                attach(bluetoothManagerBinder, bluetoothManagerService,
+                        "android.bluetooth.IBluetoothManager");
+                Class<?> serviceManagerType = Class.forName(
+                        "android.os.BluetoothServiceManager");
+                Object bluetoothServiceManager =
+                        serviceManagerType.getDeclaredConstructor().newInstance();
+                Class<?> initializer = Class.forName(
+                        "android.bluetooth.BluetoothFrameworkInitializer");
+                Method getBluetoothServiceManager = initializer.getMethod(
+                        "getBluetoothServiceManager");
+                if (getBluetoothServiceManager.invoke(null) == null) {
+                    initializer.getMethod("setBluetoothServiceManager", serviceManagerType)
+                            .invoke(null, bluetoothServiceManager);
+                }
+            } catch (ClassNotFoundException ignored) {
+                bluetoothManagerBinder = null;
+                Log.i("DarwinServiceBridge", "bluetooth service interface unavailable");
             }
 
             Binder windowBinder = new Binder();
@@ -1179,7 +1197,7 @@ public final class DarwinServiceBridge {
                     metadataClass, serviceClass, devicePolicyBinder);
             Object usageStatsServiceValue = serviceValue(
                     metadataClass, serviceClass, usageStatsBinder);
-            Object roleServiceValue = serviceValue(
+            Object roleServiceValue = roleBinder == null ? null : serviceValue(
                     metadataClass, serviceClass, roleBinder);
             Object inputMethodServiceValue = serviceValue(
                     metadataClass, serviceClass, inputMethodBinder);
@@ -1188,8 +1206,8 @@ public final class DarwinServiceBridge {
             Object inputServiceValue = serviceValue(metadataClass, serviceClass, inputBinder);
             Object uiModeServiceValue = serviceValue(
                     metadataClass, serviceClass, uiModeBinder);
-            Object bluetoothManagerServiceValue = serviceValue(
-                    metadataClass, serviceClass, bluetoothManagerBinder);
+            Object bluetoothManagerServiceValue = bluetoothManagerBinder == null ? null
+                    : serviceValue(metadataClass, serviceClass, bluetoothManagerBinder);
             Object windowServiceValue = serviceValue(
                     metadataClass, serviceClass, windowBinder);
             Object accessibilityServiceValue = serviceValue(
@@ -1297,8 +1315,11 @@ public final class DarwinServiceBridge {
         String externalDirectory =
                 System.getenv("DARWIN_ART_APK_APP_EXTERNAL_DIR");
         if (externalDirectory == null || externalDirectory.isEmpty()) {
-            throw new IllegalStateException(
-                    "app external-storage directory is unavailable");
+            // Framework-only probes do not have an installed app data mount.
+            // Keep the platform-facing path contract without manufacturing a
+            // host directory; real APK launches always provide the scoped
+            // backing directory through the launcher.
+            externalDirectory = "/data/media/0";
         }
         // Java File operations are Android guest operations once libcore is
         // attached to the filesystem facade.  Publishing the Darwin backing
@@ -1306,7 +1327,8 @@ public final class DarwinServiceBridge {
         // host path into Environment.  The launcher creates this exact guest
         // directory before sealing the immutable storage mount.
         File root = new File(externalDirectory);
-        if (!root.isDirectory() && !root.mkdirs()) {
+        if (!root.isDirectory() && !externalDirectory.equals("/data/media/0")
+                && !root.mkdirs()) {
             throw new IllegalStateException(
                     "could not create app-scoped external storage");
         }

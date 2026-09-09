@@ -7291,3 +7291,11 @@ incomplete and still requires managed caller unwind validation.
   (status 5, `ClassLoader referenced unknown path`). The next repair is the
   detached `CreatePathClassLoader` input/location contract, before revisiting
   libcore native registration.
+
+- Checkpoint 528: the Button fixture now authorizes its host-backed DEX through
+  the same immutable capability path used by APK support code. Framework-only
+  resource setup no longer loads an empty application APK; optional hidden Role
+  and Bluetooth AIDL interfaces are skipped when absent, and Activity.attach()
+  owns the single virtual `attachBaseContext` call. The run reaches service
+  bridge creation and Activity attach; remaining failure is the graphics-link
+  ADexFile provider closure, not Java loader/resource setup.

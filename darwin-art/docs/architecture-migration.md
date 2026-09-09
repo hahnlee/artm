@@ -11938,3 +11938,10 @@ or admission exception was added.
   process reaches loader construction but fails with AOSP's unknown-path warning
   for the button DEX (status 5). This isolates the next change to the detached
   PathClassLoader location/input contract; current-source linking is verified.
+
+- Checkpoint 528: aligned the framework probe with Android lifecycle and
+  capability rules: host DEX is explicitly authorized, empty app APK paths are
+  omitted, optional Role/Bluetooth services tolerate absent hidden AIDL classes,
+  and Activity.attach performs the only base-context attachment. Execution now
+  reaches Activity attach; the remaining blocker is missing ADexFile symbols in
+  the graphics link closure.
