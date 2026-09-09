@@ -13287,3 +13287,7 @@ or admission exception was added.
   `608-checker-unresolved-lse` in the sorted test set. The intermediate
   ledger remains 1,059 passed and 17 failed; no failure is treated as final
   until all workers finish and targeted reproduction is complete.
+- Checkpoint 775: The refreshed four-worker corpus run advanced through
+  `660-clinit`; its intermediate ledger is now 1,060 passed and 16 failed.
+  Workers remain active, so the reduced failure count is still provisional
+  until the complete sorted corpus and targeted reruns finish.
