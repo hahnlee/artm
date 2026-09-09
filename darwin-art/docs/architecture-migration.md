@@ -11835,3 +11835,6 @@ or admission exception was added.
 - Checkpoint 505: Darwin remote map traversal now rejects zero-size and
   non-progressing submap records. The smoke hang persists, indicating a deeper
   kernel region-query or remote-register issue still requires isolation.
+- Checkpoint 506: confirmed the remote AOSP call chain is architecture probe,
+  map parse, register fetch, then frame unwind. The current hang precedes
+  frame records; targeted boundary instrumentation is the next step.

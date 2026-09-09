@@ -7171,3 +7171,8 @@ incomplete and still requires managed caller unwind validation.
   `/proc/<pid>/maps` submap traversal. A fresh smoke still stalls in remote
   unwind, so the kernel region query or remote register acquisition remains
   unresolved; no successful relink/probe is claimed.
+- Checkpoint 506: traced the AOSP remote unwind call chain to
+  `RemoteGetArch → RemoteMaps::Parse → Regs::RemoteGet → Unwind`. The hang is
+  before frame records are returned, so next instrumentation will distinguish
+  remote register acquisition from map parsing rather than changing the frame
+  walker blindly.
