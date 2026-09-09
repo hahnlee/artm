@@ -12072,3 +12072,8 @@ or admission exception was added.
   Interpreter, JIT, and unmodified source interpreter+optimized differential
   lanes all report PASS. The separate rebuild attempt remains storage-blocked;
   the completed regression artifact is still valid evidence.
+
+- Checkpoint 554: indexed the preserved final corpus: 1,048 result directories,
+  with 1,010 explicit interpreter/JIT differential PASS records. Coverage is
+  broad, but remaining corpus lanes and real-app validation are still open
+  until native rebuilds can run on a writable volume.

@@ -7442,3 +7442,10 @@ incomplete and still requires managed caller unwind validation.
   JIT expected-output PASS, and source interpreter+optimized differential PASS.
   A later attempted rebuild hit the storage ceiling, but this authoritative
   completed artifact confirms the re-obsolete regression itself is green.
+
+- Checkpoint 554: indexed the preserved final AOSP corpus without rebuilding;
+  it contains 1,048 test result directories and 1,010 explicit
+  interpreter/JIT differential PASS records. This is broad evidence across
+  JNI, JVMTI, verifier, monitors, MethodHandle, interface dispatch, and
+  deoptimization, but it is not a completion claim because the remaining
+  corpus and real-app validation still require a writable build volume.
