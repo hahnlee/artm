@@ -13197,3 +13197,6 @@ or admission exception was added.
 - Checkpoint 751: `2239-varhandle-perf-vh-unsafe-put` passes all three runner
   lanes, validating Unsafe-backed VarHandle writes and their native memory
   access path. Remaining modes and real-app acceptance remain open.
+- Checkpoint 752: `2239-varhandle-perf-vh-set-a` passes all three runner lanes,
+  validating acquire/opaque VarHandle stores and ordering semantics. Remaining
+  modes and real-app acceptance remain open.
