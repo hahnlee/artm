@@ -8829,3 +8829,9 @@ incomplete and still requires managed caller unwind validation.
   `083-compiler-regressions`, `115-native-bridge`, `128-reg-spill-on-implicit-nullcheck`,
   `140-dce-regression`, and `064-field-access`; remaining faults are isolated
   to malformed/implicit-null cases and require a dedicated fault-frame fix.
+- Checkpoint 782 (2026-09-10): Rebuilt-link rechecks confirm the registry
+  path fixes `064-field-access`; the remaining generated-code crashes are
+  `1004-checker-volatile-ref-load`, `800-smali`, and `2045-uffd-kernelfault`.
+  Their PCs fall inside quick-code pages but outside the compact ranges
+  published from `OatQuickMethodHeader`, so the next implementation step is
+  per-method code-page/range publication rather than an interpreter fallback.
