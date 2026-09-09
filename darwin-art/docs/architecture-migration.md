@@ -11991,3 +11991,8 @@ or admission exception was added.
   bridge, then reverted it after confirming the remaining blocker is process
   wait/task-port ownership rather than argv reconstruction. Keep the upstream
   CFI failure visible until that lifetime boundary is implemented correctly.
+
+- Checkpoint 536: added bounded retries and liveness checks around Darwin
+  `task_for_pid` acquisition to cover the fork/exec/SIGSTOP race. `cargo check
+  -p darwin-art-host` passes; graphics-closure identity drift is still
+  reported by its audit and was not normalized.

@@ -34,7 +34,16 @@ inline mach_port_t Acquire(pid_t pid) {
     auto result = std::make_shared<Result>();
     std::thread([pid, result] {
       mach_port_t task = MACH_PORT_NULL;
-      const kern_return_t status = task_for_pid(mach_task_self(), pid, &task);
+      kern_return_t status = KERN_FAILURE;
+      // A stopped child can briefly remain in the fork/exec transition from
+      // task_for_pid's perspective. Retry while it is still alive instead of
+      // turning that transient lookup race into a permanent ESRCH result.
+      for (int attempt = 0; attempt != 8; ++attempt) {
+        status = task_for_pid(mach_task_self(), pid, &task);
+        if (status == KERN_SUCCESS && task != MACH_PORT_NULL) break;
+        if (kill(pid, 0) != 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
       {
         std::lock_guard<std::mutex> lock(result->mutex);
         result->status = status;
@@ -44,7 +53,7 @@ inline mach_port_t Acquire(pid_t pid) {
       result->ready.notify_one();
     }).detach();
     std::unique_lock<std::mutex> lock(result->mutex);
-    if (!result->ready.wait_for(lock, std::chrono::milliseconds(250),
+    if (!result->ready.wait_for(lock, std::chrono::milliseconds(1000),
                                 [&] { return result->done; })) {
       return MACH_PORT_NULL;
     }

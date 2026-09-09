@@ -7351,3 +7351,9 @@ incomplete and still requires managed caller unwind validation.
   observed through the current host process model (wait/task ownership), so
   the experiment was reverted; the authoritative gate remains the original
   unmodified AOSP source with remote `ESRCH`.
+
+- Checkpoint 536: hardened the Darwin remote task cache to retry
+  `task_for_pid` during the fork/exec-to-SIGSTOP transition (8 attempts,
+  1-second bounded wait) while checking child liveness. Host crate checks pass;
+  the graphics-closure audit reports an existing provider-definition hash drift
+  and remains a separate gate.
