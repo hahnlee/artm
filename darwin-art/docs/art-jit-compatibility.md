@@ -8263,3 +8263,8 @@ incomplete and still requires managed caller unwind validation.
   fast-exit attempt is not retained in source; any future one-shot path must
   finalize the Java/native output files before invoking `_exit`, then preserve
   the AOSP result contract.
+- Checkpoint 669: Inspected the failed fast-exit path end to end: it unloads
+  NativeLoader DSOs and the Darwin ELF registry before `_exit`, while the
+  harness writes output through synchronous native file operations. The exact
+  output-loss ordering is not yet proven, so the safe DestroyJavaVM path stays
+  active; no speculative lifecycle shortcut was retained.

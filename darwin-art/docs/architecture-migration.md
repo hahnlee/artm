@@ -12829,3 +12829,7 @@ or admission exception was added.
   lifecycle restored; no `_exit` experiment remains in source. The output
   finalization requirement is retained as a future design constraint rather
   than weakening the AOSP result contract.
+- Checkpoint 669: Traced the fast-exit implementation through DSO unload,
+  registry drain, and `_exit`; output writes are synchronous but their exact
+  loss ordering is still unproven. The safe DestroyJavaVM lifecycle therefore
+  remains authoritative and no speculative shortcut was kept.
