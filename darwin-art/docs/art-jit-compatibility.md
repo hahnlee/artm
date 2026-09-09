@@ -8430,3 +8430,8 @@ incomplete and still requires managed caller unwind validation.
   not pointer-size selection or a null `ArtMethod` entrypoint. The temporary
   logging was removed; next repair the host/JNI invocation transition so the
   AOSP managed-stack contract is published before entering generated code.
+- Checkpoint 699: A temporary fault-stack slot dump was rejected as evidence:
+  the signal handler's local async-safe buffer shares the faulting stack and
+  can overwrite nearby words. It was removed without changing runtime
+  behavior; the next frame-boundary capture must use a preallocated buffer or
+  debugger-safe snapshot.

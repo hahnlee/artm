@@ -12970,3 +12970,7 @@ or admission exception was added.
   tag at the moment generated code faults. The boundary is therefore the
   Darwin host/JNI invocation transition; the temporary diagnostic was removed
   and the next implementation must publish/pop the AOSP frame contract there.
+- Checkpoint 699: A stack-slot dump around the fault SP was rejected as
+  evidence because the signal handler's stack-local logging buffer can alias
+  and contaminate adjacent words. The probe was removed; no runtime behavior
+  changed. Capture frame identity without using the faulting stack next.
