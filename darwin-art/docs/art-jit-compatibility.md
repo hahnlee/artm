@@ -7941,3 +7941,11 @@ incomplete and still requires managed caller unwind validation.
   rebuilt runtime is used. Darwin remote `137-cfi` still reaches the custom
   Mach unwinder but host task-port access is denied; its fallback remains the
   only active remote-unwind gap.
+
+- Checkpoint 617: Rebuilt and reran the lifecycle and JVMTI blockers after the
+  direct process-main dispatch. `136-daemon-jni-shutdown` now passes
+  interpreter, live-JIT, and unmodified-source lanes. `1919-vminit-thread-start-timing`
+  remains passing in all lanes. The only failing pinned AOSP case is now
+  `137-cfi` remote unwinding: local CFI passes, while macOS denies the host
+  task/debug port even with the test entitlement, so remote register/memory
+  collection cannot yet be proven.
