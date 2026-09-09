@@ -382,7 +382,15 @@ pub(crate) fn audit_runtime_link(root: &Path) -> Result<()> {
         .arg(&filesystem_object)
         .arg(&network_object)
         .arg(&surface_object)
-        .arg(root.join("_build/runtime-bootstrap/libart-runtime-bootstrap-darwin.a"))
+        // Native registration is rooted from ART startup rather than a direct
+        // C reference. Force-load the archive so Binder/graphics/system
+        // registrars remain present in the headless runtime dylib as they are
+        // in the graphics runtime.
+        .arg(format!(
+            "-Wl,-force_load,{}",
+            root.join("_build/runtime-bootstrap/libart-runtime-bootstrap-darwin.a")
+                .display()
+        ))
         // RegisterLibcoreNatives owns these AOSP OpenJDK tables; keep the
         // module archives on the CPU closure rather than manufacturing local
         // substitutes for their entrypoints.

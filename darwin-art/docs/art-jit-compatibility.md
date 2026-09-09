@@ -8493,3 +8493,10 @@ incomplete and still requires managed caller unwind validation.
   as installed apps. The rebuilt DEX contains the bridge, but the probe still
   returns status 27 before service creation completes; the remaining issue is
   bridge class initialization/registration timing, not missing DEX packaging.
+- Checkpoint 709: Forced the headless runtime to retain framework Binder
+  registrars and instrumented context-binder creation. The exact cycle is now
+  proven: resolving `DarwinServiceBridge` through the context class loader
+  triggers `VMClassLoader`/`FileSystems` initialization, which immediately
+  calls `ServiceManager` again before the bridge can be created. This is not a
+  missing-symbol or DEX issue; the next fix must bootstrap Binder before Java
+  class loading or start the profile system-server first.

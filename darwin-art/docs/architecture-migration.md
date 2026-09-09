@@ -13029,3 +13029,9 @@ or admission exception was added.
   `ResourcesManager` still receives a null service manager (status 27), so the
   next boundary is class initialization/registration timing rather than a
   second mock service implementation.
+- Checkpoint 709: Headless runtime-link now force-loads the framework native
+  registrar archive, and debug tracing proves the remaining failure is a
+  bootstrap recursion (`DarwinServiceBridge` lookup → `VMClassLoader` →
+  `ServiceManager` → bridge lookup). The architecture therefore needs an
+  early Binder endpoint or profile system-server lifecycle, rather than more
+  Java-side service lookup.

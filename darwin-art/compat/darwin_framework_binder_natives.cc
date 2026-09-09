@@ -2005,6 +2005,7 @@ jstring KeyEventCodeToString(JNIEnv* env, jclass, jint key_code) {
 }
 
 jobject CreateDarwinContextBinder(JNIEnv* env) {
+  const bool debug_binder = std::getenv("DARWIN_ART_DEBUG_BINDER") != nullptr;
   {
     std::lock_guard<std::mutex> lock(g_context_binder_mutex);
     if (g_context_binder != nullptr) {
@@ -2014,8 +2015,10 @@ jobject CreateDarwinContextBinder(JNIEnv* env) {
   // There is no system_server on the Darwin host. The fixture installs a
   // process-local IServiceManager/IDisplayManager pair whose only real answer
   // is a 360x640, 60 Hz display; all unrelated services return null/defaults.
+  if (debug_binder) std::fprintf(stderr, "DARWIN binder: resolving DarwinServiceBridge\n");
   jclass bridge = env->FindClass("dev/darwinart/simple/DarwinServiceBridge");
   if (bridge == nullptr) {
+    if (debug_binder) std::fprintf(stderr, "DARWIN binder: FindClass miss, trying context loader\n");
     env->ExceptionClear();
     jclass thread_class = env->FindClass("java/lang/Thread");
     jmethodID current_thread = thread_class == nullptr
@@ -2049,7 +2052,10 @@ jobject CreateDarwinContextBinder(JNIEnv* env) {
                          : env->CallObjectMethod(loader, load_class, name);
     if (!env->ExceptionCheck()) {
       bridge = static_cast<jclass>(loaded);
+      if (debug_binder) std::fprintf(stderr, "DARWIN binder: context loader resolved bridge=%p\n", (void*)bridge);
     } else {
+      if (debug_binder) std::fprintf(stderr, "DARWIN binder: context loader threw while resolving bridge\n");
+      if (debug_binder) env->ExceptionDescribe();
       env->ExceptionClear();
       env->DeleteLocalRef(loaded);
     }
@@ -2063,12 +2069,18 @@ jobject CreateDarwinContextBinder(JNIEnv* env) {
                          ? nullptr
                          : env->GetStaticMethodID(bridge, "createContextBinder",
                                                   "()Landroid/os/Binder;");
+  if (debug_binder) std::fprintf(stderr, "DARWIN binder: bridge=%p create=%p\n", (void*)bridge, (void*)create);
   jobject result = create == nullptr
                        ? nullptr
                        : env->CallStaticObjectMethod(bridge, create);
   if (env->ExceptionCheck()) {
+    if (debug_binder) {
+      std::fprintf(stderr, "DARWIN binder: createContextBinder threw\n");
+      env->ExceptionDescribe();
+    }
     env->ExceptionClear();
   }
+  if (debug_binder) std::fprintf(stderr, "DARWIN binder: result=%p\n", (void*)result);
   if (result != nullptr) {
     jobject candidate = env->NewGlobalRef(result);
     if (candidate != nullptr) {
