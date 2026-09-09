@@ -13099,3 +13099,7 @@ or admission exception was added.
   reference boundary outside optimizing codegen. Rebuild/audit and the
   omnibus opcode differential lanes passed; broader matrix and real APK work
   remain open.
+- Checkpoint 723: The fast compiler now has native scratch-base decoding for
+  all audited invoke and instance field receiver accesses. A clean closure
+  rebuild/audit and the omnibus differential test passed in all runner lanes;
+  this is a boundary hardening step, not completion of the overall matrix.

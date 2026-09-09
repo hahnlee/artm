@@ -8578,3 +8578,9 @@ incomplete and still requires managed caller unwind validation.
   into scratch native registers before field memory access. Full graphics/JIT
   and interpreter closure audit passed; `003-omnibus-opcodes` passed in
   interpreter, optimized/JIT, and unmodified-source lanes.
+- Checkpoint 723: Completed the fast-compiler ARM64 audit: no executable
+  `HeapOperand` remains on an un-decoded managed holder in its invoke or
+  instance field paths. Rebuilt and audited the full runtime closure, then
+  reran `003-omnibus-opcodes`; interpreter, optimized/JIT, and unmodified
+  source lanes all passed. The full feature matrix and real APK acceptance
+  are still open.
