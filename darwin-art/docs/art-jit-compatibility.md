@@ -8112,3 +8112,8 @@ incomplete and still requires managed caller unwind validation.
   only by the fast-native `java.lang.reflect.Method.invoke` frame; this points
   to Darwin stack walking/publication for fast JNI frames rather than class
   loading or JIT semantics. No completion claim is made.
+- Checkpoint 643: Re-linked the headless runtime dylib from the current ART
+  objects and reran `497` with temporary frame diagnostics; the mismatch is
+  unchanged and no Darwin unwind callback is involved in this Throwable trace.
+  The remaining gap is therefore in the managed ART stack-trace/native-frame
+  contract for `@FastNative Method.invoke`, not stale linking or class loading.

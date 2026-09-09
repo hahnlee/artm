@@ -12704,3 +12704,8 @@ or admission exception was added.
   fast-native `java.lang.reflect.Method.invoke` frame; all managed frames and
   runtime behavior match AOSP. The remaining investigation is Darwin fast-JNI
   stack publication/walking, not class loading or JIT execution.
+- Checkpoint 643: Re-linked the headless runtime from current ART objects and
+  repeated `497` with temporary frame diagnostics. The output remains missing
+  only `Method.invoke (Native Method)`, and the Darwin unwind callback is not
+  on this Throwable path; the next fix must restore the AOSP managed
+  fast-native frame contract rather than adjust class loading or relinking.
