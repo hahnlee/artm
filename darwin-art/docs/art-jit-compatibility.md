@@ -8602,3 +8602,7 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 727: `570-checker-osr` passes in all three lanes, extending the
   regression set to checker-generated OSR loop transitions. No new fault or
   interpreter fallback was observed; broader OSR/deopt and APK coverage remain.
+- Checkpoint 728: `596-monitor-inflation` passes in interpreter, optimized/JIT,
+  and unmodified-source lanes after the `Reference.getReferent()` boundary
+  hardening. Monitor inflation and contended-lock paths remain green; the
+  complete AOSP matrix and real APK acceptance are still open.

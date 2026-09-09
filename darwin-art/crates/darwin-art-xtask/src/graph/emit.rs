@@ -744,6 +744,7 @@ pub(crate) fn emit_graph(out: &Path) -> io::Result<()> {
         "patches/art/0181-darwin-fast-reference-codegen-include.patch",
         "patches/art/0182-darwin-arm64-fast-field-reference-boundaries.patch",
         "patches/art/0183-darwin-arm64-fast-checkcast-reference-boundary.patch",
+        "patches/art/0184-darwin-arm64-reference-referent-boundary.patch",
     ] {
         jit_inputs.push(PathBuf::from(file));
     }

@@ -13119,3 +13119,6 @@ or admission exception was added.
   unmodified-source lanes, validating checker-generated OSR transitions after
   the compressed-reference fixes. Broader OSR/deopt and real-app coverage is
   still required.
+- Checkpoint 728: `596-monitor-inflation` passes in all three runner lanes,
+  extending monitor validation to inflated/contended locks after the referent
+  boundary change. Full compatibility and real-app coverage remain open.
