@@ -12097,3 +12097,7 @@ or admission exception was added.
   native rebuild was started. The existing integration audit is green; the
   next step remains a fresh build followed by remaining AOSP and real-app
   lanes once storage is reclaimed.
+
+- Checkpoint 559: `lsof +L1` found no large deleted project/build file held open.
+  The space exhaustion is persistent cache/Trash allocation rather than a
+  live runtime process; validation remains ready to resume after reclamation.

@@ -7472,3 +7472,8 @@ incomplete and still requires managed caller unwind validation.
   remains at roughly 151 MB free. The binary-only integration audit already
   exits 0, so the next authoritative step is a fresh source build plus the
   remaining AOSP/real-app lanes after storage reclamation.
+
+- Checkpoint 559: checked for deleted-but-open files with `lsof +L1`; no
+  project or build artifact is holding significant reclaimed space. The
+  storage blocker is therefore persistent allocation (build caches/Trash),
+  not a live runtime process.
