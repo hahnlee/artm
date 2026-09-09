@@ -8258,3 +8258,8 @@ incomplete and still requires managed caller unwind validation.
   `stdout=0` and a false mismatch. The experiment was reverted; corpus tests
   retain the existing destroy path until a flush-safe process-exit contract is
   implemented.
+- Checkpoint 668: Rebuilt the host after reverting the process-exit experiment
+  and confirmed the ordinary upstream lifecycle remains intact. The failed
+  fast-exit attempt is not retained in source; any future one-shot path must
+  finalize the Java/native output files before invoking `_exit`, then preserve
+  the AOSP result contract.

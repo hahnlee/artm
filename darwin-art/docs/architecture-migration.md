@@ -12825,3 +12825,7 @@ or admission exception was added.
   output stream to be lost (`stdout=0`), so the lifecycle change was reverted.
   A future exit fast path must explicitly finalize the harness output before
   process termination.
+- Checkpoint 668: The host was rebuilt with the original upstream destroy
+  lifecycle restored; no `_exit` experiment remains in source. The output
+  finalization requirement is retained as a future design constraint rather
+  than weakening the AOSP result contract.
