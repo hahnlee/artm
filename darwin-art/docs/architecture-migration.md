@@ -12857,3 +12857,7 @@ or admission exception was added.
   targets keep the checked Mach path. The graphics audit and 497 three-lane
   regression pass after rebuild, with no claim yet that forced-GC stress has
   completed.
+- Checkpoint 675: The rebuilt local-unwind provider keeps 096's ordinary
+  interpreter/JIT/optimized lanes green. Forced-GC 096 remains incomplete after
+  a fresh 60-second bounded run, leaving collector/suspend cadence as the next
+  investigation target rather than a correctness regression.

@@ -8299,3 +8299,8 @@ incomplete and still requires managed caller unwind validation.
   provider pass, and 497's interpreter/JIT/optimized lanes remain green. This
   is a targeted hot-path optimization only; 096 GC-stress completion is still
   unproven and remains the next measurement target.
+- Checkpoint 675: Rebuilt after the local direct-read change and re-ran
+  unmodified 096; interpreter, JIT, and interpreter+optimized lanes all pass.
+  A fresh bounded 60-second GC-stress run still times out without a managed
+  failure, so the optimization is correctness-safe but its end-to-end impact
+  remains unmeasured.
