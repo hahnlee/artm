@@ -4,7 +4,7 @@
 //! compiler orchestration cannot silently change which upstream files are
 //! copied or patched.
 
-pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v25";
+pub(super) const RUNTIME_SHADOW_IDENTITY_VERSION: &str = "runtime-shadow-v26";
 
 pub(super) const PATCHED_RUNTIME_SOURCES: &[&str] = &[
     "runtime.cc",
@@ -92,6 +92,8 @@ pub(super) const PATCHED_RUNTIME_PATCHES: &[&str] = &[
     "patches/art/0128-darwin-arm64-early-fault-pc.patch",
     "patches/art/0130-darwin-arm64-async-fault-pc.patch",
     "patches/art/0141-darwin-arm64-original-fault-context.patch",
+    "patches/art/0177-darwin-jit-fault-method-registry.patch",
+    "patches/art/0178-darwin-aot-fault-method-registry.patch",
     "patches/art/0025-darwin-morecore-diagnostics.patch",
     "patches/art/0027-darwin-string-abi-overlay.patch",
     "patches/art/0028-darwin-minimal-runtime-start.patch",

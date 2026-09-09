@@ -7,6 +7,7 @@
 #include "art_method.h"
 #include "base/logging.h"
 #include "base/pointer_size.h"
+#include "darwin_jit_memory.h"
 #include "runtime_globals.h"
 #include "thread-current-inl.h"
 
@@ -78,7 +79,16 @@ bool NullPointerHandler::Action(int, siginfo_t* info, void* context) {
   uintptr_t stack_pointer = GetSp(machine_context);
   ArtMethod** stack = reinterpret_cast<ArtMethod**>(stack_pointer);
   uintptr_t return_pc = GetPc(machine_context) + 4u;
-  if (!IsValidMethod(*stack) || !IsValidReturnPc(stack, return_pc)) {
+  ArtMethod* method = IsValidMethod(*stack) ? *stack : nullptr;
+  if (method == nullptr) {
+    method = reinterpret_cast<ArtMethod*>(DarwinArtLookupJitMethod(GetPc(machine_context)));
+    if (method != nullptr) {
+      // The signal throw stub walks the interrupted quick frame through this
+      // slot. Publish the recovered method in-place before changing SP.
+      *stack = method;
+    }
+  }
+  if (!IsValidMethod(method) || !IsValidReturnPc(stack, return_pc)) {
     return false;
   }
 

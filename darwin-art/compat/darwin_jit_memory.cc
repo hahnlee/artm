@@ -1,11 +1,52 @@
 #include "darwin_jit_memory.h"
 #include <cassert>
+#include <atomic>
 #include <cerrno>
 #include <libkern/OSCacheControl.h>
 #include <pthread.h>
 #include <sys/mman.h>
 
 namespace { thread_local unsigned write_depth = 0; }
+
+namespace {
+struct JitMethodEntry {
+  std::atomic<uintptr_t> start{0};
+  std::atomic<uintptr_t> end{0};
+  std::atomic<uintptr_t> method{0};
+};
+constexpr size_t kJitMethodEntries = 1024;
+JitMethodEntry g_jit_method_entries[kJitMethodEntries];
+}
+
+void DarwinArtRegisterJitMethod(uintptr_t code, size_t size, uintptr_t method) {
+  if (code == 0 || size == 0 || method == 0) return;
+  const uintptr_t end = code > UINTPTR_MAX - size ? UINTPTR_MAX : code + size;
+  for (auto& entry : g_jit_method_entries) {
+    uintptr_t current = entry.start.load(std::memory_order_acquire);
+    if (current == code || current == 0) {
+      if (current == 0 &&
+          !entry.start.compare_exchange_strong(current, code, std::memory_order_acq_rel,
+                                               std::memory_order_acquire)) {
+        continue;
+      }
+      entry.end.store(end, std::memory_order_relaxed);
+      entry.method.store(method, std::memory_order_release);
+      return;
+    }
+  }
+}
+
+uintptr_t DarwinArtLookupJitMethod(uintptr_t pc) {
+  if (pc == 0) return 0;
+  for (const auto& entry : g_jit_method_entries) {
+    const uintptr_t start = entry.start.load(std::memory_order_acquire);
+    const uintptr_t end = entry.end.load(std::memory_order_acquire);
+    if (start != 0 && pc >= start && pc < end) {
+      return entry.method.load(std::memory_order_acquire);
+    }
+  }
+  return 0;
+}
 
 void* DarwinArtMapJitCode(size_t size) {
   if (size == 0 || !pthread_jit_write_protect_supported_np()) {

@@ -8435,3 +8435,10 @@ incomplete and still requires managed caller unwind validation.
   can overwrite nearby words. It was removed without changing runtime
   behavior; the next frame-boundary capture must use a preallocated buffer or
   debugger-safe snapshot.
+- Checkpoint 700: Added a signal-safe PC-to-`ArtMethod` registry fed from JIT
+  code commits and AOT class linking, then rebuilt and ran Chrome. The registry
+  remained empty for the failing PCs because they resolve inside `libchrome.so`,
+  and Chrome still faults at `addr=0x110`; this does not repair the crash. The
+  temporary `jit_method` signal print was removed. Next target is the native
+  JNI/ELF invocation boundary and its managed-stack publication, not broader
+  implicit-null recovery.

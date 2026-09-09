@@ -12974,3 +12974,10 @@ or admission exception was added.
   evidence because the signal handler's stack-local logging buffer can alias
   and contaminate adjacent words. The probe was removed; no runtime behavior
   changed. Capture frame identity without using the faulting stack next.
+- Checkpoint 700: A lock-free Darwin PC-to-`ArtMethod` registry was wired into
+  JIT commits and AOT class linking and exercised with Chrome. It did not match
+  the failing PCs, which are in the native `libchrome.so` image, and the same
+  `addr=0x110` fault remains. The experiment is retained as infrastructure but
+  is not a fix; the next architectural change must publish the AOSP managed
+  stack across the JNI/native invocation transition and distinguish native
+  faults from ART generated-code faults.
