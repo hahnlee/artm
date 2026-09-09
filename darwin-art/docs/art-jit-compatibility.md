@@ -8324,3 +8324,8 @@ incomplete and still requires managed caller unwind validation.
   cache key still exceeded 30 seconds; its host log shows main completion and
   continuing worker GC cycles. The remaining gap is performance/cadence, not
   an observed bytecode or JIT correctness failure.
+- Checkpoint 680: The latest 096 logs quantify the worker path: three
+  allocation threads remain active after main returns, with repeated
+  suspend-all pauses of 8--15 ms and explicit GC totals around 100--200 ms.
+  The remaining cost is Darwin collector/thread synchronization, not launcher
+  dispatch or JIT correctness.

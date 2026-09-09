@@ -12880,3 +12880,7 @@ or admission exception was added.
   after the local-frame cache fallback, with logs confirming worker GC cycles
   after main returns. No correctness regression is present; cadence remains
   the open performance task.
+- Checkpoint 680: Current 096 logs show three allocation workers continuing
+  after main returns, with 8--15 ms suspend-all pauses and explicit GC totals
+  around 100--200 ms. The next implementation target is Darwin collector/thread
+  synchronization rather than launcher or JIT admission.
