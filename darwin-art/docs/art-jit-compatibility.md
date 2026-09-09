@@ -7357,3 +7357,7 @@ incomplete and still requires managed caller unwind validation.
   1-second bounded wait) while checking child liveness. Host crate checks pass;
   the graphics-closure audit reports an existing provider-definition hash drift
   and remains a separate gate.
+
+- Checkpoint 537: reran the authoritative `137-cfi --keep` after the task-port
+  retry change. The result is unchanged: local unwind passes, while all three
+  remote cases still report `PTRACE_GETREGSET ... ESRCH`.

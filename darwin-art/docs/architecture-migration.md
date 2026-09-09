@@ -11987,6 +11987,9 @@ or admission exception was added.
   AOSP SIGSTOP child lifetime and task-port permission boundary until register
   capture completes, without changing the upstream test source.
 
+- Checkpoint 537: the post-patch `137-cfi --keep` rerun still fails only in
+  remote child register capture with `ESRCH`; local CFI remains passing.
+
 - Checkpoint 535: attempted a host-only Darwin procfs/child compatibility
   bridge, then reverted it after confirming the remaining blocker is process
   wait/task-port ownership rather than argv reconstruction. Keep the upstream
