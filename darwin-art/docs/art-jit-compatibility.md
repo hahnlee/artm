@@ -8654,3 +8654,7 @@ incomplete and still requires managed caller unwind validation.
   covering VarHandle atomic CAS/set operations and their memory-ordering paths.
   Broader VarHandle modes, JNI/exception matrix, and real APK acceptance remain
   outstanding.
+- Checkpoint 741: `2239-varhandle-perf-vh-set-bav` passes interpreter,
+  optimized/JIT, and unmodified-source lanes, covering byte-array-view stores,
+  type checks, and write-barrier paths. Remaining VarHandle modes and real APK
+  acceptance remain open.
