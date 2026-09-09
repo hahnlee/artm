@@ -12945,3 +12945,8 @@ or admission exception was added.
   Chrome, but reproduced the same implicit-null crash. It was removed after
   verification; the remaining issue is method-header/code-cache ownership,
   not the ARM64 signal PC offset convention.
+- Checkpoint 693: The fault frame contains an aligned `ArtMethod*`, but that
+  method reports a null quick compiled entrypoint while the CPU executes
+  compiled low-window code. This identifies a frame-method/entrypoint
+  publication mismatch. Temporary tracing was discarded; the next change must
+  repair method-frame publication instead of broadening signal handling.

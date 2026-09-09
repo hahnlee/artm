@@ -8400,3 +8400,8 @@ incomplete and still requires managed caller unwind validation.
   graphics closure passed, but Chrome still faulted identically with `addr=0x110`.
   The experiment was reverted; stack-map failure is not a one-instruction PC
   offset issue.
+- Checkpoint 693: Fault-context tracing showed `sp[0]` is aligned, but its
+  `ArtMethod::GetEntryPointFromQuickCompiledCode()` is zero while execution is
+  in low-window compiled code. The remaining bug is method-frame/entrypoint
+  metadata publication, not signal-PC arithmetic. Temporary tracing was
+  removed; next work targets method-frame publication and entrypoint storage.
