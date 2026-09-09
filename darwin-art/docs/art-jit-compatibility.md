@@ -7424,3 +7424,10 @@ incomplete and still requires managed caller unwind validation.
   moving generated test artifacts to Trash. The large tracked/ignored Android
   build closure remains intact; further upstream compilation is intentionally
   paused until macOS Trash is emptied or equivalent storage is reclaimed.
+
+- Checkpoint 551: re-audited storage before the next AOSP test. The repository
+  `.git` history is not the cause (about 6 MB packed plus 219 MB loose); ignored
+  `_build` consumes about 26 GB, including 15 GB of ANGLE sources and roughly
+  4.6 GB of framework/platform images. Android SDK, Gradle, and Xcode caches
+  add about 24 GB outside the repository. Compilation remains paused until
+  storage is reclaimed.

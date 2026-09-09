@@ -12057,3 +12057,9 @@ or admission exception was added.
 - Checkpoint 550: host storage remains at roughly 150 MB free after generated
   test artifacts were moved to Trash. The Android build closure was preserved;
   upstream compilation must wait for Trash emptying or equivalent reclamation.
+
+- Checkpoint 551: storage audit confirms `.git` is not responsible for the
+  exhaustion (about 6 MB packed plus 219 MB loose). Ignored `_build` is about
+  26 GB, with ANGLE sources at 15 GB and framework/platform images at about
+  4.6 GB; Android SDK, Gradle, and Xcode caches add about 24 GB externally.
+  Native rebuilds remain paused until space is reclaimed.
