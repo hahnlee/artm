@@ -12123,3 +12123,7 @@ or admission exception was added.
   its 64 GiB logical capacity now occupies 38 MiB physically, including after
   daemon shutdown. Profile unit tests pass 8/8, confirming the former 61 GiB
   footprint was caused by image formatting/allocation behavior.
+
+- Checkpoint 564: after reclaiming 61 GiB, reran AOSP `985-re-obsolete`; the
+  interpreter, JIT, and unmodified source differential lanes all PASS. The
+  profile-storage fix therefore preserves the validated runtime behavior.

@@ -7504,3 +7504,8 @@ incomplete and still requires managed caller unwind validation.
   occupies only 38 MiB physically. `darwin-art-profile` tests pass 8/8 and the
   image remains compact after daemon shutdown; the prior 61 GiB allocation was
   confirmed as an image-creation artifact, not Android app data.
+
+- Checkpoint 564: with 61 GiB reclaimed, reran `985-re-obsolete` from the
+  authoritative AOSP harness. Interpreter expected-output, JIT expected-output,
+  and unmodified source interpreter+optimized differential lanes all PASS;
+  storage remediation did not regress JIT behavior.
