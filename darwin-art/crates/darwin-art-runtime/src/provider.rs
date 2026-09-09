@@ -206,6 +206,25 @@ impl ProviderLeaseTable {
             .map(|_| ())
             .map_err(|_| ProviderLeaseError::CallbackPanicked)
     }
+
+    /// Synchronize accounting after native ART has already released direct
+    /// process-owner resources during DestroyJavaVM. Rust still clears the
+    /// callback table, but must not invoke release callbacks a second time.
+    pub fn adopt_native_shutdown(&self) -> Result<(), ProviderLeaseError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| ProviderLeaseError::Poisoned)?;
+        if state.clearing
+            || state.in_flight != 0
+            || state.transitioning.iter().any(|active| *active)
+        {
+            return Err(ProviderLeaseError::ActiveLeases);
+        }
+        state.counts = [0; 8];
+        self.quiescent.notify_all();
+        Ok(())
+    }
 }
 
 #[cfg(test)]

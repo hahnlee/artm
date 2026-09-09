@@ -29,6 +29,12 @@ pub trait NativeResource {
     fn clear(&mut self) -> i32 {
         0
     }
+
+    /// Reconcile Rust lease bookkeeping after native process teardown has
+    /// already released the corresponding owner resources.
+    fn adopt_native_shutdown(&mut self) -> i32 {
+        0
+    }
 }
 
 /// Owns one runtime's lifecycle and its concrete native resources.

@@ -81,6 +81,14 @@ impl ProviderBridge {
         self.leases.clear()
     }
 
+    pub fn adopt_native_shutdown(&self) -> Result<(), ProviderLeaseError> {
+        self.process_leases
+            .lock()
+            .map_err(|_| ProviderLeaseError::Poisoned)?
+            .clear();
+        self.leases.adopt_native_shutdown()
+    }
+
     /// Acquire a provider for the lifetime of the Android process.
     ///
     /// Unlike a temporary `ProviderLease`, this ownership is retained by the
@@ -129,6 +137,10 @@ impl crate::NativeResource for ProviderBridge {
     fn clear(&mut self) -> i32 {
         ProviderBridge::clear(self).map_or(-1, |_| 0)
     }
+
+    fn adopt_native_shutdown(&mut self) -> i32 {
+        ProviderBridge::adopt_native_shutdown(self).map_or(-1, |_| 0)
+    }
 }
 
 impl crate::NativeResource for Box<ProviderBridge> {
@@ -138,6 +150,10 @@ impl crate::NativeResource for Box<ProviderBridge> {
 
     fn clear(&mut self) -> i32 {
         ProviderBridge::clear(self).map_or(-1, |_| 0)
+    }
+
+    fn adopt_native_shutdown(&mut self) -> i32 {
+        ProviderBridge::adopt_native_shutdown(self).map_or(-1, |_| 0)
     }
 }
 

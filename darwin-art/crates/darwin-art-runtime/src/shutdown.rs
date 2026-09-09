@@ -133,14 +133,18 @@ where
     if let Err(error) = session.release_graphics() {
         remember(error.status() as i32);
     }
-    if let Err(error) = session.release_engine() {
-        remember(error.status() as i32);
-    }
 
+    // ProviderBridge's clear callback belongs to the engine dylib. Clear all
+    // provider hooks while that image is still owned; releasing the engine
+    // first would turn this callback into a use-after-unload.
     if let Some(provider) = session.provider_mut() {
+        remember(provider.adopt_native_shutdown());
         remember(provider.clear());
     }
     if let Err(error) = session.release_provider() {
+        remember(error.status() as i32);
+    }
+    if let Err(error) = session.release_engine() {
         remember(error.status() as i32);
     }
     if first_status.is_none()
@@ -286,9 +290,9 @@ mod tests {
                 "engine",
                 "finalize-graphics",
                 "drop-graphics",
-                "drop-engine",
                 "provider-clear",
                 "drop-provider",
+                "drop-engine",
             ]
         );
     }

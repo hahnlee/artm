@@ -7237,3 +7237,10 @@ incomplete and still requires managed caller unwind validation.
   shutdown sequence. The abort still occurs after process-state completion;
   temporary host/native logging was removed. The next diagnostic must inspect
   post-callback Rust owner destruction or process-level static teardown.
+
+- Checkpoint 520: fixed the teardown abort by preserving engine-image
+  lifetime while provider hooks are cleared. Rust now adopts native process
+  lease teardown after `DestroyJavaVM`, clears callbacks before releasing the
+  engine dylib, and applies the same order to boxed provider owners.
+  `cargo test -p darwin-art-runtime` passes all 27 tests and the full
+  `probe-runtime-elf-jni` command passes without SIGABRT.

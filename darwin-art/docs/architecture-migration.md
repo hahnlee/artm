@@ -11890,3 +11890,9 @@ or admission exception was added.
   native shutdown callback, while stale fixture binaries had previously
   hidden host-side instrumentation. No shutdown bypass was added; the next
   implementation target is post-callback Rust owner/static destruction.
+
+- Checkpoint 520: provider lease ownership is now synchronized with native
+  ART shutdown. The Rust bridge adopts already-released native process owners,
+  clears its callback table while the engine image remains mapped, then drops
+  provider and engine owners. Runtime unit tests (27/27) and the real ELF/JNI
+  probe pass; the previous post-`DestroyJavaVM` abort is gone.

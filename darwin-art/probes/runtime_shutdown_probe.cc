@@ -399,9 +399,9 @@ int32_t run_shutdown(const ShutdownState& state) {
 
   darwin_art::ShutdownIcuCharsetNatives();
   darwin_art::ShutdownFrameworkGraphicsRuntime();
-  if (state.provider_hooks_installed) {
-    darwin_art::providers::darwin_art_provider_clear_hooks();
-  }
+  // Provider hooks remain installed until the Rust ProviderBridge releases
+  // its process leases and clears the callback table after this function
+  // returns. Clearing here would make those lease releases call dead state.
   darwin_art_process::clear_app_dex_files();
   darwin_art_process::mark_shutdown_complete();
   return 0;
