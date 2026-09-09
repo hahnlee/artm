@@ -7206,3 +7206,8 @@ incomplete and still requires managed caller unwind validation.
 - Checkpoint 514: wrapped remote `task_for_pid` in a bounded worker wait with
   late-result Mach-right cleanup, preventing a host deadlock. C++ syntax
   validation passes; smoke/relink still must confirm timeout and success paths.
+- Checkpoint 515: forced unwind rebuild confirms the bounded wrapper returns
+  in 250ms with `ERROR_PTRACE_CALL` instead of hanging; the smoke reports
+  `frames=0` and exits 11 because remote task access is unavailable. This is
+  an explicit host capability failure, not an ART frame-walk success; runtime
+  relink must keep remote diagnostics separate from in-process execution.

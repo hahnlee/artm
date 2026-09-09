@@ -11863,3 +11863,7 @@ or admission exception was added.
 - Checkpoint 514: remote `task_for_pid` now uses a bounded worker wait and
   releases late Mach rights, preventing host deadlock. Syntax validation
   passes; smoke/relink confirmation remains pending.
+- Checkpoint 515: forced rebuild verifies remote acquisition now times out
+  with `ERROR_PTRACE_CALL` rather than deadlocking. The smoke still fails its
+  remote assertion, so this capability must be separated from the in-process
+  ART runtime link gate.
