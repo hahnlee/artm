@@ -12362,3 +12362,11 @@ or admission exception was added.
   than a Darwin ART runtime component. Its stopped VM images and restore IPSW
   data (about 90 GB) were removed after confirming no Capsule process was
   active; no source or runtime dependency remains.
+
+- Checkpoint 593: fixed the upstream launcher lifecycle boundary. The native
+  harness now dispatches `Main.main` through a real Java `TestMainThread` and
+  forwards the configured argument array, so ART performs normal Java thread
+  teardown before non-daemon joins. Rebuilt baseline/button DEX contracts
+  (2669/3080 methods) and boot image; fresh `039-join-main` interpreter, JIT,
+  and unmodified-source lanes all pass. Full JIT/GC/native-app completion is
+  still open.

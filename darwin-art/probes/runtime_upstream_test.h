@@ -269,20 +269,16 @@ inline bool Prepare(JNIEnv* env, jclass harness) {
 inline int Run(JNIEnv* env, jclass harness) {
   const char* target = std::getenv("DARWIN_ART_UPSTREAM_MAIN");
   if (target == nullptr || target[0] == '\0' || harness == nullptr) return 120;
-  jmethodID load = env->GetStaticMethodID(
-      harness, "load", "(Ljava/lang/String;)Ljava/lang/Class;");
-  jmethodID begin = env->GetStaticMethodID(
-      harness, "beginRun", "()Ljava/util/Set;");
-  jmethodID finish = env->GetStaticMethodID(
-      harness, "finishRun",
-      "(Ljava/util/Set;Ljava/lang/Throwable;)Ljava/lang/Throwable;");
-  jmethodID dispatch_uncaught = env->GetStaticMethodID(
-      harness, "dispatchExplicitUncaughtException", "(Ljava/lang/Throwable;)Z");
+  // Run the application entry point on a real Java Thread. Calling Main.main
+  // directly on the attached native launcher leaves that peer alive forever;
+  // an application thread joining it then correctly waits forever because
+  // the launcher never traverses ART's normal Thread::Destroy transition.
+  // This helper preserves Android's process-main lifecycle while keeping the
+  // native host responsible only for process status and output plumbing.
+  jmethodID run_main = env->GetStaticMethodID(
+      harness, "run", "(Ljava/lang/String;[Ljava/lang/String;)Ljava/lang/Throwable;");
+  if (run_main == nullptr || env->ExceptionCheck()) return 120;
   jstring class_name = env->NewStringUTF(target);
-  jobject baseline = begin == nullptr ? nullptr : env->CallStaticObjectMethod(harness, begin);
-  jclass target_class = load == nullptr || class_name == nullptr
-      ? nullptr
-      : static_cast<jclass>(env->CallStaticObjectMethod(harness, load, class_name));
   jclass string_class = env->FindClass("java/lang/String");
   std::vector<const char*> upstream_arguments;
   for (size_t index = 0; index != 64; ++index) {
@@ -301,48 +297,16 @@ inline int Run(JNIEnv* env, jclass harness) {
     if (value != nullptr) env->SetObjectArrayElement(arguments, index, value);
     env->DeleteLocalRef(value);
   }
-  jmethodID main = target_class == nullptr
-      ? nullptr
-      : env->GetStaticMethodID(target_class, "main", "([Ljava/lang/String;)V");
-  if (begin == nullptr || finish == nullptr || baseline == nullptr || main == nullptr ||
-      arguments == nullptr || env->ExceptionCheck()) return 120;
+  if (class_name == nullptr || arguments == nullptr || env->ExceptionCheck()) return 120;
+  jobject failure = nullptr;
   {
-    // Android run-test observes Java System.err, native std::cerr and ART's
-    // process stderr as one application stream. The Darwin launcher keeps its
-    // own diagnostic fd separate, so bridge C++ iostream writes made while
-    // Main runs into the same captured file as Java System.err. android-base
-    // logging uses the host stderr FILE directly and therefore remains in the
-    // diagnostic log, matching Android's logd-versus-process-stream split.
     ScopedNativeStderrCapture native_stderr(OutputPath(1));
     if (!native_stderr.IsValid()) return 120;
-    env->CallStaticVoidMethod(target_class, main, arguments);
+    failure = env->CallStaticObjectMethod(harness, run_main, class_name, arguments);
   }
-  jobject failure = env->ExceptionOccurred();
-  bool failure_output_dispatched = false;
-  if (failure != nullptr) env->ExceptionClear();
-  if (failure != nullptr && dispatch_uncaught != nullptr) {
-    jboolean handled = env->CallStaticBooleanMethod(
-        harness, dispatch_uncaught, failure);
-    if (env->ExceptionCheck()) {
-      jobject handler_failure = env->ExceptionOccurred();
-      env->ExceptionClear();
-      env->DeleteLocalRef(failure);
-      failure = handler_failure;
-    } else if (handled == JNI_TRUE) {
-      // Android still terminates the process after invoking an uncaught
-      // handler. Record only that the handler owns presentation; retain the
-      // Throwable so the native launcher returns the failing exit status.
-      failure_output_dispatched = true;
-    }
-  }
-  jobject finished_failure = env->CallStaticObjectMethod(
-      harness, finish, baseline,
-      failure_output_dispatched ? nullptr : failure);
-  if (!failure_output_dispatched) {
-    env->DeleteLocalRef(failure);
-    failure = finished_failure;
-  } else {
-    env->DeleteLocalRef(finished_failure);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    return 122;
   }
   bool wrote = !env->ExceptionCheck() &&
       OutputExists(std::getenv("DARWIN_ART_UPSTREAM_STDOUT")) &&
@@ -352,8 +316,6 @@ inline int Run(JNIEnv* env, jclass harness) {
   }
   env->DeleteLocalRef(arguments);
   env->DeleteLocalRef(string_class);
-  env->DeleteLocalRef(target_class);
-  env->DeleteLocalRef(baseline);
   env->DeleteLocalRef(failure);
   env->DeleteLocalRef(class_name);
   if (!wrote) return 121;

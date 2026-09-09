@@ -63,11 +63,13 @@ public final class UpstreamTestHarness {
 
     private static final class TestMainThread extends Thread {
         private final String className;
+        private final String[] arguments;
         private volatile Throwable failure;
 
-        TestMainThread(String className) {
+        TestMainThread(String className, String[] arguments) {
             super("ART run-test main");
             this.className = className;
+            this.arguments = arguments;
         }
 
         @Override public void run() {
@@ -75,7 +77,7 @@ public final class UpstreamTestHarness {
                 Class<?> mainClass = load(className);
                 Method main = mainClass.getDeclaredMethod("main", String[].class);
                 main.setAccessible(true);
-                main.invoke(null, (Object) new String[0]);
+                main.invoke(null, (Object) arguments);
             } catch (InvocationTargetException exception) {
                 failure = exception.getCause();
             } catch (Throwable throwable) {
@@ -145,11 +147,15 @@ public final class UpstreamTestHarness {
     }
 
     public static Throwable run(String className) {
+        return run(className, new String[0]);
+    }
+
+    public static Throwable run(String className, String[] arguments) {
         Throwable failure = null;
         try {
             prepareOutput();
             Set<Thread> baseline = new HashSet<>(Thread.getAllStackTraces().keySet());
-            TestMainThread mainThread = new TestMainThread(className);
+            TestMainThread mainThread = new TestMainThread(className, arguments);
             mainThread.start();
             mainThread.join();
             awaitNewNonDaemonThreads(baseline);
