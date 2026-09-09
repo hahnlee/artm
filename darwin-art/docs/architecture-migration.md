@@ -13185,3 +13185,6 @@ or admission exception was added.
 - Checkpoint 747: `2239-varhandle-perf-vh-get-a` passes all three runner lanes,
   validating acquire/opaque VarHandle reads and ordering semantics. Remaining
   modes and real-app acceptance remain open.
+- Checkpoint 748: `2239-varhandle-perf-vh-reflect-set` passes all three runner
+  lanes, validating reflection-created VarHandle stores and runtime type
+  resolution. Remaining modes and real-app acceptance remain open.
