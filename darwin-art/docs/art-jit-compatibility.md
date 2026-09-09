@@ -7224,3 +7224,10 @@ incomplete and still requires managed caller unwind validation.
   from ELF loading/JNI ABI execution: the next fix must instrument and repair
   the `DetachCurrentThread`/`DestroyJavaVM` shutdown contract, not weaken the
   native acceptance gate.
+
+- Checkpoint 518: rebuilt the runtime-link image with phase instrumentation;
+  `DetachCurrentThread`, `DestroyJavaVM`, trampoline cleanup, provider cleanup,
+  app-Dex cleanup, and process-state completion all return. The SIGABRT occurs
+  after those phases, during host-side final teardown/static-owner handling;
+  temporary instrumentation was removed. This narrows the repair to the
+  Rust/AppKit owner lifetime after the native shutdown callback.

@@ -11880,3 +11880,8 @@ or admission exception was added.
   (`DetachCurrentThread`/`DestroyJavaVM` or a late native owner), not APK
   loading or JNI argument marshalling. Keep this as the next runtime repair
   target instead of adding a probe-only bypass.
+
+- Checkpoint 518: phase logging confirms every native ART shutdown step
+  completes, including VM destruction and process-state uninstall. SIGABRT is
+  raised only after the callback returns, so the remaining lifecycle defect is
+  host-side owner/static teardown after native shutdown, not JNI execution.
